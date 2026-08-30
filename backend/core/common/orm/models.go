@@ -159,6 +159,7 @@ type Conversation struct {
 	SourceDatasetID    string     `gorm:"column:source_dataset_id;type:varchar(255);not null;default:''"`
 	SourceDocumentID   string     `gorm:"column:source_document_id;type:varchar(255);not null;default:''"`
 	SourceDisplayName  string     `gorm:"column:source_display_name;type:varchar(255);not null;default:''"`
+	PinnedAt           *time.Time `gorm:"column:pinned_at"`
 	ArchivedAt         *time.Time `gorm:"column:archived_at"`
 	ArchiveFolderID    *string    `gorm:"column:archive_folder_id;type:varchar(36)"`
 	TrashExpiresAt     *time.Time `gorm:"column:trash_expires_at"`

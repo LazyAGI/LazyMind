@@ -704,6 +704,21 @@ export function ChatServiceApi() {
         },
       );
     },
+    conversationServiceSetPinned(
+      conversationId: string,
+      pinned: boolean,
+      options?: RawAxiosRequestConfig,
+    ) {
+      return axiosInstance.post<{
+        conversation_id: string;
+        is_pinned: boolean;
+        pinned_at?: string | null;
+      }>(
+        `${coreApiBaseUrl}/conversations/${encodeURIComponent(conversationId)}:${pinned ? "pin" : "unpin"}`,
+        undefined,
+        options,
+      );
+    },
     conversationServiceDeleteConversation(
       requestParameters: ConversationServiceApiConversationServiceDeleteConversationRequest,
       options?: RawAxiosRequestConfig,

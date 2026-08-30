@@ -799,11 +799,17 @@ components:
                     type: string
                 display_name:
                     type: string
+                is_pinned:
+                    type: boolean
                 models:
                     items:
                         type: string
                     type: array
                 name:
+                    type: string
+                pinned_at:
+                    format: date-time
+                    nullable: true
                     type: string
                 project_key:
                     type: string
@@ -841,6 +847,20 @@ components:
                 total_size:
                     format: int64
                     type: integer
+            type: object
+        ConversationPinResponse:
+            properties:
+                conversation_id:
+                    type: string
+                is_pinned:
+                    type: boolean
+                pinned_at:
+                    format: date-time
+                    nullable: true
+                    type: string
+            required:
+                - conversation_id
+                - is_pinned
             type: object
         ConversationRecoveryItem:
             properties:
@@ -8678,6 +8698,22 @@ paths:
                                 $ref: '#/components/schemas/EmptyObject'
                     description: Conversation archived
             summary: Archive or move a conversation
+    /api/core/conversations/{conversation_id}:pin:
+        post:
+            parameters:
+                - in: path
+                  name: conversation_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ConversationPinResponse'
+                    description: Conversation pinned
+            summary: Pin a conversation
     /api/core/conversations/{conversation_id}:purge:
         delete:
             parameters:
@@ -8770,6 +8806,22 @@ paths:
                                 $ref: '#/components/schemas/EmptyObject'
                     description: Conversation unarchived
             summary: Unarchive a conversation
+    /api/core/conversations/{conversation_id}:unpin:
+        post:
+            parameters:
+                - in: path
+                  name: conversation_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ConversationPinResponse'
+                    description: Conversation unpinned
+            summary: Unpin a conversation
     /api/core/conversations/{name}:
         delete:
             parameters:

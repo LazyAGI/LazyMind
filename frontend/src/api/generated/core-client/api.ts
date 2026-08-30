@@ -744,8 +744,10 @@ export interface ConversationItem {
     'conversation_id'?: string;
     'create_time'?: string;
     'display_name'?: string;
+    'is_pinned'?: boolean;
     'models'?: Array<string>;
     'name'?: string;
+    'pinned_at'?: string | null;
     'project_key'?: string;
     'project_name'?: string;
     'search_config'?: object;
@@ -785,6 +787,11 @@ export interface ConversationListResponse {
     'conversations'?: Array<ConversationItem>;
     'next_page_token'?: string;
     'total_size'?: number;
+}
+export interface ConversationPinResponse {
+    'conversation_id': string;
+    'is_pinned': boolean;
+    'pinned_at'?: string | null;
 }
 export interface ConversationRecoveryItem {
     'archive_folder_name'?: string;
@@ -8277,6 +8284,40 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
+         * @summary Pin a conversation
+         * @param {string} conversationId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsConversationIdPinPost: async (conversationId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'conversationId' is not null or undefined
+            assertParamExists('apiCoreConversationsConversationIdPinPost', 'conversationId', conversationId)
+            const localVarPath = `/api/core/conversations/{conversation_id}:pin`
+                .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary Permanently delete a trashed conversation
          * @param {string} conversationId
          * @param {*} [options] Override http request option.
@@ -8521,6 +8562,40 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'conversationId' is not null or undefined
             assertParamExists('apiCoreConversationsConversationIdUnarchivePost', 'conversationId', conversationId)
             const localVarPath = `/api/core/conversations/{conversation_id}:unarchive`
+                .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Unpin a conversation
+         * @param {string} conversationId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsConversationIdUnpinPost: async (conversationId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'conversationId' is not null or undefined
+            assertParamExists('apiCoreConversationsConversationIdUnpinPost', 'conversationId', conversationId)
+            const localVarPath = `/api/core/conversations/{conversation_id}:unpin`
                 .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -15796,6 +15871,19 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary Pin a conversation
+         * @param {string} conversationId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreConversationsConversationIdPinPost(conversationId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationPinResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsConversationIdPinPost(conversationId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsConversationIdPinPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary Permanently delete a trashed conversation
          * @param {string} conversationId
          * @param {*} [options] Override http request option.
@@ -15896,6 +15984,19 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsConversationIdUnarchivePost(conversationId, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsConversationIdUnarchivePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Unpin a conversation
+         * @param {string} conversationId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreConversationsConversationIdUnpinPost(conversationId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationPinResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsConversationIdUnpinPost(conversationId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsConversationIdUnpinPost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -18795,6 +18896,16 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
+         * @summary Pin a conversation
+         * @param {DefaultApiApiCoreConversationsConversationIdPinPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsConversationIdPinPost(requestParameters: DefaultApiApiCoreConversationsConversationIdPinPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ConversationPinResponse> {
+            return localVarFp.apiCoreConversationsConversationIdPinPost(requestParameters.conversationId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary Permanently delete a trashed conversation
          * @param {DefaultApiApiCoreConversationsConversationIdPurgeDeleteRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -18872,6 +18983,16 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          */
         apiCoreConversationsConversationIdUnarchivePost(requestParameters: DefaultApiApiCoreConversationsConversationIdUnarchivePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<object> {
             return localVarFp.apiCoreConversationsConversationIdUnarchivePost(requestParameters.conversationId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Unpin a conversation
+         * @param {DefaultApiApiCoreConversationsConversationIdUnpinPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsConversationIdUnpinPost(requestParameters: DefaultApiApiCoreConversationsConversationIdUnpinPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ConversationPinResponse> {
+            return localVarFp.apiCoreConversationsConversationIdUnpinPost(requestParameters.conversationId, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -20941,6 +21062,13 @@ export interface DefaultApiApiCoreConversationsConversationIdEventsGetRequest {
 }
 
 /**
+ * Request parameters for apiCoreConversationsConversationIdPinPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreConversationsConversationIdPinPostRequest {
+    readonly conversationId: string
+}
+
+/**
  * Request parameters for apiCoreConversationsConversationIdPurgeDelete operation in DefaultApi.
  */
 export interface DefaultApiApiCoreConversationsConversationIdPurgeDeleteRequest {
@@ -20993,6 +21121,13 @@ export interface DefaultApiApiCoreConversationsConversationIdToolLimitDecisionPo
  * Request parameters for apiCoreConversationsConversationIdUnarchivePost operation in DefaultApi.
  */
 export interface DefaultApiApiCoreConversationsConversationIdUnarchivePostRequest {
+    readonly conversationId: string
+}
+
+/**
+ * Request parameters for apiCoreConversationsConversationIdUnpinPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreConversationsConversationIdUnpinPostRequest {
     readonly conversationId: string
 }
 
@@ -22512,6 +22647,17 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
+     * @summary Pin a conversation
+     * @param {DefaultApiApiCoreConversationsConversationIdPinPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreConversationsConversationIdPinPost(requestParameters: DefaultApiApiCoreConversationsConversationIdPinPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreConversationsConversationIdPinPost(requestParameters.conversationId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
      * @summary Permanently delete a trashed conversation
      * @param {DefaultApiApiCoreConversationsConversationIdPurgeDeleteRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -22596,6 +22742,17 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreConversationsConversationIdUnarchivePost(requestParameters: DefaultApiApiCoreConversationsConversationIdUnarchivePostRequest, options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreConversationsConversationIdUnarchivePost(requestParameters.conversationId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Unpin a conversation
+     * @param {DefaultApiApiCoreConversationsConversationIdUnpinPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreConversationsConversationIdUnpinPost(requestParameters: DefaultApiApiCoreConversationsConversationIdUnpinPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreConversationsConversationIdUnpinPost(requestParameters.conversationId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

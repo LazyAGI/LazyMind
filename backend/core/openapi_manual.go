@@ -512,7 +512,11 @@ func manualSchemas() map[string]any {
 		"ConversationSwitchStatusResponse": obj(prop("status", intSchema())),
 		"ConversationChatStatusResponse":   obj(prop("is_generating", boolSchema())),
 		"ConversationItem": obj(
-			prop("name", strSchema()), prop("conversation_id", strSchema()), prop("display_name", strSchema()), prop("search_config", obj()), prop("user", strSchema()), prop("chat_times", int64Schema()), prop("total_feedback_like", int64Schema()), prop("total_feedback_unlike", int64Schema()), prop("create_time", strSchema()), prop("update_time", strSchema()), prop("models", array(strSchema())), prop("chat_executor", enumStringSchema("lazymind", "codex", "cursor", "workbuddy")), prop("thinking_depth", enumStringSchema("low", "medium", "high", "max")), prop("assistant", enumStringSchema("lazymind", "codex", "cursor", "workbuddy")), prop("project_key", strSchema()), prop("project_name", strSchema()),
+			prop("name", strSchema()), prop("conversation_id", strSchema()), prop("display_name", strSchema()), prop("search_config", obj()), prop("user", strSchema()), prop("chat_times", int64Schema()), prop("total_feedback_like", int64Schema()), prop("total_feedback_unlike", int64Schema()), prop("create_time", strSchema()), prop("update_time", strSchema()), prop("pinned_at", nullableSchema(dateTimeSchema())), prop("is_pinned", boolSchema()), prop("models", array(strSchema())), prop("chat_executor", enumStringSchema("lazymind", "codex", "cursor", "workbuddy")), prop("thinking_depth", enumStringSchema("low", "medium", "high", "max")), prop("assistant", enumStringSchema("lazymind", "codex", "cursor", "workbuddy")), prop("project_key", strSchema()), prop("project_name", strSchema()),
+		),
+		"ConversationPinResponse": objReq(
+			[]string{"conversation_id", "is_pinned"},
+			prop("conversation_id", strSchema()), prop("is_pinned", boolSchema()), prop("pinned_at", nullableSchema(dateTimeSchema())),
 		),
 		"ExternalExecutionInvocation": obj(
 			prop("total", intSchema()), prop("running", intSchema()), prop("succeeded", intSchema()),
@@ -775,6 +779,12 @@ func manualPaths() map[string]any {
 		)},
 		"/conversations/{conversation_id}:unarchive": map[string]any{"post": op(
 			"Unarchive a conversation", queryParams(param("path", "conversation_id", true, strSchema())), nil, response(200, "Conversation unarchived", refSchema("EmptyObject")),
+		)},
+		"/conversations/{conversation_id}:pin": map[string]any{"post": op(
+			"Pin a conversation", queryParams(param("path", "conversation_id", true, strSchema())), nil, response(200, "Conversation pinned", refSchema("ConversationPinResponse")),
+		)},
+		"/conversations/{conversation_id}:unpin": map[string]any{"post": op(
+			"Unpin a conversation", queryParams(param("path", "conversation_id", true, strSchema())), nil, response(200, "Conversation unpinned", refSchema("ConversationPinResponse")),
 		)},
 		"/conversations/{conversation_id}:restore": map[string]any{"post": op(
 			"Restore a trashed conversation", queryParams(param("path", "conversation_id", true, strSchema())), nil, response(200, "Conversation restored", refSchema("EmptyObject")),
