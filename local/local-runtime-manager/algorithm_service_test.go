@@ -12,15 +12,15 @@ import (
 func TestLazyLLMVersionUsesRepositoryPin(t *testing.T) {
 	t.Setenv("LAZYMIND_LAZYLLM_VERSION", "")
 	repo := t.TempDir()
-	if err := os.WriteFile(filepath.Join(repo, "LAZYLLM_VERSION"), []byte("1.3.1v2\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(repo, "LAZYLLM_VERSION"), []byte("1.3.0a2\n"), 0o644); err != nil {
 		t.Fatalf("write LazyLLM version: %v", err)
 	}
 	version, err := lazyLLMVersion(repo)
 	if err != nil {
 		t.Fatalf("read LazyLLM version: %v", err)
 	}
-	if version != "1.3.1v2" {
-		t.Fatalf("LazyLLM version = %q, want %q", version, "1.3.1v2")
+	if version != "1.3.0a2" {
+		t.Fatalf("LazyLLM version = %q, want %q", version, "1.3.0a2")
 	}
 }
 
@@ -28,7 +28,7 @@ func TestAlgorithmPreparePythonPinsSetuptoolsForLocalVenv(t *testing.T) {
 	installFakeUVOnPath(t)
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)
-	if err := os.WriteFile(filepath.Join(repo, "LAZYLLM_VERSION"), []byte("1.3.1v2\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(repo, "LAZYLLM_VERSION"), []byte("1.3.0a2\n"), 0o644); err != nil {
 		t.Fatalf("write LazyLLM version: %v", err)
 	}
 	if err := os.MkdirAll(filepath.Join(repo, "algorithm", "lazyllm", "lazyllm"), 0o755); err != nil {
@@ -81,7 +81,7 @@ func TestAlgorithmPreparePythonPinsSetuptoolsForLocalVenv(t *testing.T) {
 			return CommandResult{}, nil
 		},
 		func(cmd Command) (CommandResult, error) {
-			assertCommand(t, cmd, "uv", "pip", "install", "--python", paths.AlgorithmPython, "--link-mode", "copy", "--strict", "lazyllm==1.3.1v2")
+			assertCommand(t, cmd, "uv", "pip", "install", "--python", paths.AlgorithmPython, "--link-mode", "copy", "--strict", "lazyllm==1.3.0a2")
 			return CommandResult{}, nil
 		},
 		func(cmd Command) (CommandResult, error) {
