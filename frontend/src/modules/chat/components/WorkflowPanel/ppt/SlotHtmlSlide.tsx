@@ -88,6 +88,52 @@ function scaleFromViewport(): number {
   ));
 }
 
+function canConsumeVerticalWheel(element: Element, deltaY: number): boolean {
+  const scrollElement = element as HTMLElement;
+  const maxScrollTop = scrollElement.scrollHeight - scrollElement.clientHeight;
+  if (maxScrollTop <= 1) return false;
+  const overflowY = element.ownerDocument.defaultView?.getComputedStyle(element).overflowY;
+  if (!overflowY || !['auto', 'scroll', 'overlay'].includes(overflowY)) return false;
+  return deltaY < 0
+    ? scrollElement.scrollTop > 1
+    : scrollElement.scrollTop < maxScrollTop - 1;
+}
+
+/** Forward wheel input from the slide iframe to the nearest usable panel scroller. */
+export function forwardSlideFrameWheel(frame: HTMLIFrameElement, event: WheelEvent): boolean {
+  if (
+    event.defaultPrevented
+    || event.ctrlKey
+    || event.deltaY === 0
+    || frame.classList.contains('slot-html-slide__frame--zoomed')
+  ) return false;
+
+  const frameDocument = frame.contentDocument;
+  const visited = new Set<Element>();
+  let current = event.target as Element | null;
+  while (current?.ownerDocument === frameDocument) {
+    visited.add(current);
+    if (canConsumeVerticalWheel(current, event.deltaY)) return false;
+    current = current.parentElement;
+  }
+  const frameScrollRoot = frameDocument?.scrollingElement;
+  if (
+    frameScrollRoot
+    && !visited.has(frameScrollRoot)
+    && canConsumeVerticalWheel(frameScrollRoot, event.deltaY)
+  ) return false;
+
+  let scrollOwner = frame.parentElement;
+  while (scrollOwner && !canConsumeVerticalWheel(scrollOwner, event.deltaY)) {
+    scrollOwner = scrollOwner.parentElement;
+  }
+  if (!scrollOwner) return false;
+
+  event.preventDefault();
+  scrollOwner.scrollBy({ top: event.deltaY, behavior: 'auto' });
+  return true;
+}
+
 const EDITOR_STYLE = `
   [data-el], [data-group] { cursor: crosshair !important; }
   .lazymind-ppt-edit-hover {
@@ -292,11 +338,15 @@ export function SlotHtmlSlide({
     };
     const onMouseEnter = () => setHovered(true);
     const onMouseLeave = () => setHovered(false);
+    const onWheel = (event: WheelEvent) => {
+      forwardSlideFrameWheel(frame, event);
+    };
     doc.addEventListener('mouseover', onMouseOver);
     doc.addEventListener('mouseout', onMouseOut);
     doc.addEventListener('click', onClick);
     doc.addEventListener('mouseenter', onMouseEnter);
     doc.addEventListener('mouseleave', onMouseLeave);
+    doc.addEventListener('wheel', onWheel, { passive: false });
     const cleanup = () => {
       hoverTarget?.classList.remove('lazymind-ppt-edit-hover');
       doc.removeEventListener('mouseover', onMouseOver);
@@ -304,6 +354,7 @@ export function SlotHtmlSlide({
       doc.removeEventListener('click', onClick);
       doc.removeEventListener('mouseenter', onMouseEnter);
       doc.removeEventListener('mouseleave', onMouseLeave);
+      doc.removeEventListener('wheel', onWheel);
       style.remove();
     };
     frameCleanupRef.current.set(frame, cleanup);
