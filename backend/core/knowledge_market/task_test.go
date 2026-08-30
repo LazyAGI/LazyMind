@@ -318,7 +318,7 @@ func TestMarketGetInstallTask(t *testing.T) {
 	}
 }
 
-func TestMarketGetInstallTaskParseProgress(t *testing.T) {
+func TestMarketGetInstallTaskKeepsProcessingWhileTasksRemain(t *testing.T) {
 	router := newTaskTestRouter(t)
 	db := store.DB()
 	base := time.Now().UTC().Add(-time.Hour)
@@ -338,15 +338,18 @@ func TestMarketGetInstallTaskParseProgress(t *testing.T) {
 
 	data := mustTaskData(t, performGetWithUser(t, router, "/knowledge-market/tasks/job_p1", "user-a"))
 	parse := data["parse"].(map[string]any)
-	if parse["state"] != "failed" || parse["total"] != float64(4) {
-		t.Fatalf("parse=%v, want failed/4", parse)
+	if parse["state"] != "parsing" || parse["total"] != float64(4) {
+		t.Fatalf("parse=%v, want parsing/4", parse)
 	}
 	if parse["pending"] != float64(1) || parse["parsing"] != float64(1) ||
 		parse["done"] != float64(1) || parse["failed"] != float64(1) {
 		t.Fatalf("parse counts=%v", parse)
 	}
-	if data["stage"] != "failed" {
-		t.Fatalf("stage=%v, want failed", data["stage"])
+	if data["stage"] != "parsing" {
+		t.Fatalf("stage=%v, want parsing", data["stage"])
+	}
+	if data["install_state"] != "vectorizing" {
+		t.Fatalf("install_state=%v, want vectorizing", data["install_state"])
 	}
 	if data["overall_percent"] != float64(70) {
 		t.Fatalf("overall_percent=%v, want 70", data["overall_percent"])
@@ -394,6 +397,7 @@ func TestMarketGetInstallTaskStageAndPercent(t *testing.T) {
 		{name: "importing", jobStatus: "running", progressCur: 1, installState: "importing", wantStage: "importing", wantPercent: 40},
 		{name: "parsing", jobStatus: "succeeded", progressCur: 2, installState: "done", taskStates: []string{"RUNNING", "SUCCEEDED"}, wantStage: "parsing", wantPercent: 80},
 		{name: "done", jobStatus: "succeeded", progressCur: 2, installState: "done", taskStates: []string{"SUCCEEDED", "SUCCEEDED"}, wantStage: "done", wantPercent: 100},
+		{name: "partial-failed", jobStatus: "succeeded", progressCur: 2, installState: "done", taskStates: []string{"FAILED", "SUCCEEDED"}, wantStage: "partial_failed", wantPercent: 80},
 		{name: "parse-failed", jobStatus: "succeeded", progressCur: 2, installState: "done", taskStates: []string{"FAILED"}, wantStage: "failed", wantPercent: 60},
 		{name: "job-failed-download", jobStatus: "failed", progressCur: 0, installState: "downloading", wantStage: "failed", wantPercent: 0},
 		{name: "job-failed-import", jobStatus: "failed", progressCur: 1, installState: "importing", wantStage: "failed", wantPercent: 40},
@@ -471,6 +475,46 @@ func TestMarketListInstalls(t *testing.T) {
 
 	if rec := performGetWithUser(t, router, "/knowledge-market/installs", ""); rec.Code != http.StatusBadRequest {
 		t.Fatalf("missing user -> %d, want 400", rec.Code)
+	}
+}
+
+func TestMarketListInstallsDerivesParseState(t *testing.T) {
+	router := newTaskTestRouter(t)
+	db := store.DB()
+	base := time.Now().UTC().Add(-time.Hour)
+
+	insertInstallWithConfig(t, db, "law-cn", "user-a", "done", "ds_law",
+		`{"task_ids":["law_done","law_failed","law_running"]}`, base)
+	insertTask(t, db, "law_done", "ds_law", "SUCCEEDED")
+	insertTask(t, db, "law_failed", "ds_law", "FAILED")
+	insertTask(t, db, "law_running", "ds_law", "RUNNING")
+
+	insertInstallWithConfig(t, db, "finance", "user-a", "done", "ds_finance",
+		`{"task_ids":["finance_done","finance_failed"]}`, base.Add(time.Minute))
+	insertTask(t, db, "finance_done", "ds_finance", "SUCCEEDED")
+	insertTask(t, db, "finance_failed", "ds_finance", "FAILED")
+
+	insertInstallWithConfig(t, db, "gov", "user-a", "done", "ds_gov",
+		`{"task_ids":["gov_failed_1","gov_failed_2"]}`, base.Add(2*time.Minute))
+	insertTask(t, db, "gov_failed_1", "ds_gov", "FAILED")
+	insertTask(t, db, "gov_failed_2", "ds_gov", "FAILED")
+
+	data := mustTaskData(t, performGetWithUser(t, router, "/knowledge-market/installs", "user-a"))
+	items := data["items"].([]any)
+	byID := make(map[string]map[string]any, len(items))
+	for _, raw := range items {
+		item := raw.(map[string]any)
+		byID[item["market_item_id"].(string)] = item
+	}
+
+	if got := byID["law-cn"]; got["install_state"] != "vectorizing" || got["active"] != true {
+		t.Fatalf("processing install=%v, want vectorizing/active", got)
+	}
+	if got := byID["finance"]; got["install_state"] != "partial_failed" || got["active"] != false {
+		t.Fatalf("partial install=%v, want partial_failed/inactive", got)
+	}
+	if got := byID["gov"]; got["install_state"] != "failed" || got["active"] != false {
+		t.Fatalf("failed install=%v, want failed/inactive", got)
 	}
 }
 

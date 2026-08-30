@@ -135,12 +135,13 @@ func MarketGetInstallTask(w http.ResponseWriter, r *http.Request) {
 		replyServiceError(w, err)
 		return
 	}
-	// Self-heal the split-brain case where the install already failed but the
-	// async job is still stuck in "running" (the two writes are not atomic).
-	healStuckMarketJob(r.Context(), db, &job, install)
 	parse := parseProgress(r, db, install)
-	stage, overall := installStageAndPercent(job, install, parse)
-	data := taskItemDTO(job, item, install)
+	effectiveInstall := installWithEffectiveState(install, parse)
+	// Self-heal the split-brain case where parsing reached a terminal failure
+	// but the submission job is still stuck in "running".
+	healStuckMarketJob(r.Context(), db, &job, effectiveInstall)
+	stage, overall := installStageAndPercent(job, effectiveInstall, parse)
+	data := taskItemDTO(job, item, effectiveInstall)
 	data["attempt_count"] = job.AttemptCount
 	data["max_attempts"] = job.MaxAttempts
 	data["started_at"] = job.StartedAt
@@ -197,8 +198,12 @@ func MarketListInstalls(w http.ResponseWriter, r *http.Request) {
 	// async job is still stuck in "running" (a crash between the two writes).
 	// Marking the job failed un-sticks the card and unblocks reinstall.
 	installByItem := make(map[string]*orm.KnowledgeMarketInstall, len(rows))
+	parseActiveByItem := make(map[string]bool, len(rows))
 	for i := range rows {
-		installByItem[rows[i].MarketItemID] = &rows[i]
+		parse := parseProgress(r, db, &rows[i])
+		effective := installWithEffectiveState(&rows[i], parse)
+		installByItem[rows[i].MarketItemID] = effective
+		parseActiveByItem[rows[i].MarketItemID] = effective != nil && effective.InstallState == string(orm.InstallStateVectorizing)
 	}
 	activeByItem := make(map[string]bool, len(activeJobs))
 	for i := range activeJobs {
@@ -207,12 +212,18 @@ func MarketListInstalls(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		healStuckMarketJob(r.Context(), db, &activeJobs[i], installByItem[job.ResourceID])
-		if activeJobs[i].Status == string(asyncjob.StatusRunning) {
+		if activeJobs[i].Status == string(asyncjob.StatusPending) || activeJobs[i].Status == string(asyncjob.StatusRunning) {
 			activeByItem[job.ResourceID] = true
 		}
 	}
 	items := make([]map[string]any, 0, len(rows))
-	for _, row := range rows {
+	for i := range rows {
+		row := rows[i]
+		effective := installByItem[row.MarketItemID]
+		installState := row.InstallState
+		if effective != nil {
+			installState = effective.InstallState
+		}
 		name, icon, domain := "", "", ""
 		if item := itemByID[row.MarketItemID]; item != nil {
 			name = item.Name
@@ -224,12 +235,12 @@ func MarketListInstalls(w http.ResponseWriter, r *http.Request) {
 			"name":              name,
 			"icon":              icon,
 			"domain":            domain,
-			"install_state":     row.InstallState,
+			"install_state":     installState,
 			"installed_version": row.InstalledVersion,
 			"dataset_id":        row.DatasetID,
 			"installed_at":      row.InstalledAt,
 			"updated_at":        row.UpdatedAt,
-			"active":            activeByItem[row.MarketItemID] || batchRunning,
+			"active":            parseActiveByItem[row.MarketItemID] || activeByItem[row.MarketItemID] || batchRunning,
 		})
 	}
 	common.ReplyOK(w, map[string]any{"items": items, "total": len(items)})
@@ -286,8 +297,10 @@ func buildTaskListItems(r *http.Request, db *gorm.DB, userID string, jobs []orm.
 	}
 	for i := range jobs {
 		install := installByItem[jobs[i].ResourceID]
-		healStuckMarketJob(r.Context(), db, &jobs[i], install)
-		items = append(items, taskItemDTO(jobs[i], itemByID[jobs[i].ResourceID], install))
+		parse := parseProgress(r, db, install)
+		effectiveInstall := installWithEffectiveState(install, parse)
+		healStuckMarketJob(r.Context(), db, &jobs[i], effectiveInstall)
+		items = append(items, taskItemDTO(jobs[i], itemByID[jobs[i].ResourceID], effectiveInstall))
 	}
 	return items, nil
 }
@@ -453,7 +466,7 @@ func marketResultDTO(raw json.RawMessage) map[string]any {
 // parseProgressInfo is the aggregated parsing state of the install-submitted
 // tasks.
 type parseProgressInfo struct {
-	State   string `json:"state"` // pending | parsing | done | failed
+	State   string `json:"state"` // pending | parsing | done | partial_failed | failed
 	Total   int    `json:"total"`
 	Pending int    `json:"pending"`
 	Parsing int    `json:"parsing"`
@@ -515,8 +528,12 @@ func parseProgress(r *http.Request, db *gorm.DB, install *orm.KnowledgeMarketIns
 	}
 	p.Total = len(cfg.TaskIDs)
 	switch {
-	case p.Failed > 0:
+	case p.Total > 0 && p.Pending+p.Parsing > 0:
+		p.State = "parsing"
+	case p.Total > 0 && p.Failed == p.Total:
 		p.State = "failed"
+	case p.Failed > 0:
+		p.State = "partial_failed"
 	case p.Total > 0 && p.Done == p.Total:
 		p.State = "done"
 	case p.Total > 0:
@@ -525,6 +542,34 @@ func parseProgress(r *http.Request, db *gorm.DB, install *orm.KnowledgeMarketIns
 		p.State = "pending"
 	}
 	return p
+}
+
+// installWithEffectiveState returns a copy whose state reflects the parse
+// tasks submitted by the install/update job. Persisted "done" means the files
+// were submitted successfully; the API only exposes "done" after every parse
+// task has actually succeeded.
+func installWithEffectiveState(install *orm.KnowledgeMarketInstall, parse parseProgressInfo) *orm.KnowledgeMarketInstall {
+	if install == nil {
+		return nil
+	}
+	copy := *install
+	if copy.InstallState != string(orm.InstallStateDone) && copy.InstallState != string(orm.InstallStateVectorizing) {
+		return &copy
+	}
+	if parse.Total == 0 {
+		return &copy
+	}
+	switch parse.State {
+	case "parsing", "pending":
+		copy.InstallState = string(orm.InstallStateVectorizing)
+	case "partial_failed":
+		copy.InstallState = string(orm.InstallStatePartialFailed)
+	case "failed":
+		copy.InstallState = string(orm.InstallStateFailed)
+	case "done":
+		copy.InstallState = string(orm.InstallStateDone)
+	}
+	return &copy
 }
 
 // loadDocServiceTaskStatuses reads the authoritative parse statuses from the
@@ -631,15 +676,19 @@ func phaseStage(install *orm.KnowledgeMarketInstall, job orm.AsyncJob, parse par
 		return "downloading"
 	case string(orm.InstallStateImporting):
 		return "importing"
-	case string(orm.InstallStateDone):
+	case string(orm.InstallStateDone), string(orm.InstallStateVectorizing):
 		switch parse.State {
 		case "done":
 			return "done"
+		case "partial_failed":
+			return "partial_failed"
 		case "failed":
 			return "failed"
 		default:
 			return "parsing"
 		}
+	case string(orm.InstallStatePartialFailed):
+		return "partial_failed"
 	case string(orm.InstallStateFailed):
 		// Freeze the bar at the phase where the install failed. High-resolution
 		// download progress uses total=100; a failed download in that state must
@@ -673,7 +722,7 @@ func overallPercent(phase string, job orm.AsyncJob, parse parseProgressInfo) int
 		}
 	case "importing":
 		p = 40 + 20*(job.ProgressCurrent-1)
-	case "parsing", "failed":
+	case "parsing", "partial_failed", "failed":
 		if parse.Total > 0 {
 			p = 60 + int64(float64(parse.Done)/float64(parse.Total)*40)
 		} else {

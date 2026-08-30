@@ -1,6 +1,17 @@
 const fs = require("node:fs");
 const path = require("node:path");
 
+const INSTALLER_WARMUP_PARTITION = "lazymind-installer-warmup";
+
+function installerWarmupWebPreferences() {
+  return {
+    contextIsolation: true,
+    nodeIntegration: false,
+    sandbox: true,
+    partition: INSTALLER_WARMUP_PARTITION,
+  };
+}
+
 function serializeWarmupError(error) {
   if (error instanceof Error) {
     return error.stack || error.message;
@@ -103,6 +114,7 @@ function markMacWarmupCompleted(markerPath, version) {
 module.exports = {
   assertMaintenanceRuntimeReady,
   assertMaintenanceRuntimeStopped,
+  installerWarmupWebPreferences,
   macWarmupCompleted,
   macWarmupMarkerPath,
   markMacWarmupCompleted,

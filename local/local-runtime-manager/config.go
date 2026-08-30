@@ -218,6 +218,9 @@ type RuntimePaths struct {
 	AlgorithmHome            string
 	FrontendNodeModules      string
 	AlgorithmPIDDir          string
+	HistoryInjectionRoot     string
+	HistoryInjectionArchive  string
+	HistoryInjectionSHA256   string
 	TrustedLocalMode         bool
 }
 
@@ -904,6 +907,7 @@ func NewRuntimeConfigWithOptions(opts RuntimeConfigOptions) (RuntimeConfig, Runt
 		AlgorithmHome:            filepath.Join(dataRoot, "homes", "lazymind"),
 		FrontendNodeModules:      frontendNodeModules,
 		AlgorithmPIDDir:          filepath.Join(runtimeRoot, "run", "algorithm"),
+		HistoryInjectionRoot:     filepath.Join(root, "history-injection"),
 	}
 	if profile == "desktop" {
 		if err := applyDesktopManifestPaths(&p); err != nil {
@@ -1091,6 +1095,11 @@ func applyDesktopManifestPaths(paths *RuntimePaths) error {
 	if value := joinResource(manifest.Paths.AlgorithmVenv); value != "" {
 		paths.AlgorithmVenv = value
 		paths.AlgorithmPython = venvExecutable(value, "python")
+	}
+	if relativeArchive := strings.TrimSpace(manifest.Paths.HistoryInjectionArchive); relativeArchive != "" {
+		paths.HistoryInjectionArchive = joinResource(relativeArchive)
+		paths.HistoryInjectionSHA256 = strings.ToLower(strings.TrimSpace(manifest.Checksums[filepath.ToSlash(relativeArchive)]))
+		paths.HistoryInjectionRoot = filepath.Join(paths.DataDir, "history-injection")
 	}
 	return nil
 }

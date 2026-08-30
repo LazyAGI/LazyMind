@@ -25,3 +25,24 @@ func TestLazyLLMBaseURLNormalizesOpenAIAndOfficialOpenRouter(t *testing.T) {
 		})
 	}
 }
+
+func TestHasOpenAIRequestPath(t *testing.T) {
+	tests := []struct {
+		name, provider, baseURL string
+		want                    bool
+	}{
+		{"official chat completions endpoint", "OpenAI", "https://api.openai.com/v1/chat/completions", true},
+		{"proxy responses endpoint", "OpenAI", "https://proxy.example.com/openai/v1/responses", true},
+		{"prefixed API root", "OpenAI", "https://proxy.example.com/openai/v1/", false},
+		{"host without version", "OpenAI", "http://127.0.0.1:8000", false},
+		{"other provider", "SenseNova", "https://token.sensenova.cn/v1/chat/completions/", false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := hasOpenAIRequestPath(tc.provider, tc.baseURL); got != tc.want {
+				t.Fatalf("hasOpenAIRequestPath(%q, %q) = %v, want %v", tc.provider, tc.baseURL, got, tc.want)
+			}
+		})
+	}
+}

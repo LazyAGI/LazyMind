@@ -17,6 +17,7 @@ const {
   writeStartupMetrics,
 } = require("./startup-metrics");
 const {
+  installerWarmupWebPreferences,
   macWarmupCompleted,
   macWarmupMarkerPath,
   markMacWarmupCompleted,
@@ -87,7 +88,7 @@ const maxStartupLogEntries = 1200;
 const maxSidecarFailureBytes = 32 * 1024;
 const desktopShutdownTimeout = process.env.LAZYMIND_DESKTOP_SHUTDOWN_TIMEOUT || "20s";
 const forceExitDelayMs = 1500;
-const rendererReadyTimeoutMs = 30 * 1000;
+const rendererReadyTimeoutMs = 120 * 1000;
 const runtimeOwnershipHandoffTimeoutMs = 30 * 1000;
 const agentHostRestartMaxDelayMs = 30 * 1000;
 const agentHostStableAfterMs = 60 * 1000;
@@ -427,6 +428,22 @@ function captureSidecarChunk(source, chunk) {
       if (["phase.completed", "phase.failed"].includes(event?.event) && event?.phase === "python-payload") {
         updateStartupState({ progress: null });
       }
+      if (event?.phase === "history-injection-payload" && event?.event === "phase.started") {
+        updateStartupState({
+          status: "starting",
+          phase: "Preparing sample conversations",
+          message: "Verifying and unpacking the bundled sample conversations...",
+          progress: null,
+        });
+      }
+      if (event?.phase === "history-injection-payload" && event?.event === "phase.completed") {
+        updateStartupState({
+          status: "starting",
+          phase: "Sample conversations ready",
+          message: "Starting the local services and importing sample conversations...",
+          progress: null,
+        });
+      }
       if (["phase.failed", "startup.failed"].includes(event?.event) && event?.error) {
         sidecarStructuredFailure = String(event.error);
       }
@@ -702,11 +719,7 @@ async function runInstallerWarmup() {
     readStatus,
     createRenderer: () => new BrowserWindow({
       show: false,
-      webPreferences: {
-        contextIsolation: true,
-        nodeIntegration: false,
-        sandbox: true,
-      },
+      webPreferences: installerWarmupWebPreferences(),
     }),
     loadRenderer: async (warmupWindow, status) => {
       warmupWindow.webContents.session.webRequest.onBeforeRequest((details, callback) => {
@@ -728,6 +741,7 @@ async function runInstallerWarmup() {
     }),
     disposeRenderer: (warmupWindow) => {
       if (!warmupWindow.isDestroyed()) {
+        warmupWindow.webContents.session.webRequest.onBeforeRequest(null);
         warmupWindow.destroy();
       }
     },
@@ -1803,7 +1817,9 @@ function createRendererReadyWait(window) {
   const timer = setTimeout(() => {
     if (settled) return;
     settled = true;
-    rejectPromise(new Error("LazyMind Chat did not render within 30 seconds"));
+    rejectPromise(
+      new Error(`LazyMind Chat did not render within ${rendererReadyTimeoutMs / 1000} seconds`),
+    );
   }, rendererReadyTimeoutMs);
   return {
     window,

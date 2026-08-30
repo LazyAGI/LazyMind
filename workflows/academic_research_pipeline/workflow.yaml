@@ -223,6 +223,7 @@ ui:
       step_id: write_paper_draft
       label: 全文生成
       layout: list
+      composite_behavior: {hide_empty_columns: true, empty_column_scope: tab}
       slots: [{id: draft_document}, {id: chapter_drafts}, {id: effective_outline_check_report}]
     - id: pre_integrity
       step_id: pre_review_integrity

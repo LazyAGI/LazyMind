@@ -39,7 +39,7 @@
   "2000225": { "en-US": "Invalid role", "zh-CN": "角色无效" },
   "2000226": { "en-US": "user_id_list and group_id_list cannot both be empty", "zh-CN": "user_id_list 和 group_id_list 不能同时为空" },
   "2000227": { "en-US": "No valid user_id_list or group_id_list provided", "zh-CN": "未提供有效的 user_id_list 或 group_id_list" },
-  "2000228": { "en-US": "Configure the evo_llm model before creating a task", "zh-CN": "请先配置 evo_llm 模型后再创建任务" },
+  "2000228": { "en-US": "The self-evolution model is not configured", "zh-CN": "未配置自进化模型" },
   "2000301": { "en-US": "Signature is required", "zh-CN": "缺少签名" },
   "2000302": { "en-US": "Signed URL has expired", "zh-CN": "签名 URL 已过期" },
   "2000303": { "en-US": "Invalid signature", "zh-CN": "签名无效" },
@@ -386,6 +386,7 @@
   "2001224": { "en-US": "unmarshal response", "zh-CN": "解析上游响应失败" },
   "2001225": { "en-US": "upstream returned empty error body", "zh-CN": "上游返回了空错误响应体" },
   "2001226": { "en-US": "upstream returned error payload without message", "zh-CN": "上游错误响应中缺少 message" },
+  "2001300": { "en-US": "Required task models are not configured", "zh-CN": "未配置任务所需模型" },
   "2001301": { "en-US": "model_key is required", "zh-CN": "缺少 model_key" },
   "2001302": { "en-US": "invalid model_key", "zh-CN": "model_key 无效" },
   "2001303": { "en-US": "user_instruct required", "zh-CN": "缺少 user_instruct" },
@@ -1452,5 +1453,8 @@
   "2002314": { "en-US": "Free-model endpoint scope cannot contain an empty URL", "zh-CN": "免费模型端点范围不能包含空 URL" },
   "2002315": { "en-US": "Failed to encode free-model endpoint scope", "zh-CN": "编码免费模型端点范围失败" },
   "2002316": { "en-US": "The selected range no longer matches the editable content", "zh-CN": "所选范围与可编辑内容不一致" },
-  "2002317": { "en-US": "The AI returned invalid editable content", "zh-CN": "AI 返回的可编辑内容无效" }
+  "2002317": { "en-US": "The AI returned invalid editable content", "zh-CN": "AI 返回的可编辑内容无效" },
+  "2002318": { "en-US": "History injection failed", "zh-CN": "历史记录注入失败" },
+  "2002319": { "en-US": "Base URL must be an API root without a request path", "zh-CN": "Base URL 必须为不包含请求路径的 API 根地址" },
+  "2002320": { "en-US": "Failed to restore the model", "zh-CN": "恢复模型失败" }
 }

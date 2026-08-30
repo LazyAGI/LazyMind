@@ -49,6 +49,10 @@ x-core-env: &core-env
   LAZYMIND_REDIS_URL: redis://test:123456@redis:6379/0
   LAZYMIND_UPLOAD_ROOT: /var/lib/lazymind/uploads
   LAZYMIND_UPLOAD_TEXT_UTF8_CONVERT_ENABLED: ${LAZYMIND_UPLOAD_TEXT_UTF8_CONVERT_ENABLED:-true}
+  LAZYMIND_HISTORY_INJECTION_ENABLED: ${LAZYMIND_HISTORY_INJECTION_ENABLED:-true}
+  LAZYMIND_HISTORY_INJECTION_ROOT: /var/lib/lazymind/uploads/.history-injection/bundles
+  LAZYMIND_BOOTSTRAP_ADMIN_USERNAME: ${LAZYMIND_BOOTSTRAP_ADMIN_USERNAME:-admin}
+  LAZYMIND_BOOTSTRAP_ADMIN_PASSWORD: ${LAZYMIND_BOOTSTRAP_ADMIN_PASSWORD:-admin}
   LAZYMIND_PUBLIC_BASE_URL: http://localhost:8000/api/core
   LAZYMIND_FILE_URL_SIGN_SECRET: changeme-in-production
   LAZYMIND_FILE_URL_EXPIRE_SECONDS: "3600"
@@ -364,6 +368,30 @@ services:
       timeout: 5s
       retries: 3
 
+  # Reuse the Chat/algorithm runtime as a one-shot initializer. It checks the
+  # persisted Core PostgreSQL database first and only downloads the release
+  # package when at least one configured sample conversation is missing.
+  history-injection-init:
+    image: ${LAZYMIND_IMAGE_MIRROR:-registry.cn-hangzhou.aliyuncs.com}/lazyllm/lazymind-algorithm:${LAZYMIND_IMAGE_TAG:-latest}
+    restart: "no"
+    command: ["python", "/opt/lazymind-bootstrap/prepare_history_injection.py"]
+    environment:
+      <<: *proxy-env
+      ACL_DB_DSN: "host=db user=root password=123456 dbname=core port=5432 sslmode=disable"
+      LAZYMIND_HISTORY_INJECTION_ENABLED: ${LAZYMIND_HISTORY_INJECTION_ENABLED:-true}
+      LAZYMIND_HISTORY_INJECTION_CONFIG: /opt/lazymind-bootstrap/history-injection-package.json
+      LAZYMIND_HISTORY_INJECTION_CACHE_ROOT: /var/lib/lazymind/uploads/.history-injection
+      LAZYMIND_HISTORY_INJECTION_ROOT: /var/lib/lazymind/uploads/.history-injection/bundles
+    volumes:
+      - ./data/core/uploads:/var/lib/lazymind/uploads
+      - ./scripts/prepare_history_injection.py:/opt/lazymind-bootstrap/prepare_history_injection.py:ro
+      - ./desktop/history-injection-package.json:/opt/lazymind-bootstrap/history-injection-package.json:ro
+    depends_on:
+      db:
+        condition: service_healthy
+      db-bootstrap:
+        condition: service_completed_successfully
+
   core:
     image: ${LAZYMIND_IMAGE_MIRROR:-registry.cn-hangzhou.aliyuncs.com}/lazyllm/lazymind-core:${LAZYMIND_IMAGE_TAG:-latest}
     build:
@@ -406,10 +434,16 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
+      # A first install may import several large portable history bundles
+      # before Core starts listening. Failures during this window are startup
+      # progress, not an unhealthy steady-state service.
+      start_period: 180s
     depends_on:
       db:
         condition: service_healthy
       db-bootstrap:
+        condition: service_completed_successfully
+      history-injection-init:
         condition: service_completed_successfully
       auth-service:
         condition: service_healthy

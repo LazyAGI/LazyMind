@@ -144,10 +144,16 @@ func CreateThread(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if issues := threadModelConfigIssues(requestPayload); len(issues) > 0 {
+		code := threadModelNotConfiguredCode
+		message := "请先完成任务所需模型配置"
+		if len(issues) == 1 && issues[0].ModelRole == "evo_llm" {
+			code = evoModelNotConfiguredCode
+			message = "未配置自进化模型"
+		}
 		common.ReplyAppErr(w, common.NewAppError(
 			http.StatusUnprocessableEntity,
-			threadModelNotConfiguredCode,
-			"请先完成任务所需模型配置",
+			code,
+			message,
 		).WithDetail(map[string]any{
 			"reason": "model_not_configured",
 			"issues": issues,

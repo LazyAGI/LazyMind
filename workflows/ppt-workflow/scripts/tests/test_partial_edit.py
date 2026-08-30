@@ -473,6 +473,51 @@ class PartialEditTests(unittest.TestCase):
             self.assertEqual(applied['representation'], 'ppt_html')
             self.assertIn('New title', page.read_text(encoding='utf-8'))
 
+    def test_injected_portable_source_accepts_matching_content_with_stale_hash(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            upload_root = Path(tmp) / 'uploads'
+            deck, page = make_deck(upload_root / 'workflow-workspaces' / 'ppt-workflow')
+            public, _ = TOOLS._inline_preview_images(
+                TOOLS._sanitize_page_html(PAGE_HTML), deck, page,
+            )
+            with mock.patch.dict(
+                TOOLS.os.environ, {'LAZYMIND_UPLOAD_ROOT': str(upload_root)}, clear=False,
+            ):
+                artifact = TOOLS._with_ppt_source_meta(public, page, '0' * 64)
+                metadata = TOOLS._read_ppt_source_meta(artifact)
+                self.assertTrue(metadata['path'].startswith('/var/lib/lazymind/uploads/'))
+                preview = TOOLS.ppt_preview_selection_edit(
+                    artifact=artifact,
+                    instruction='修改标题成 New title',
+                    selection={'type': 'ppt_html', 'page': 1, 'el': 'title'},
+                    artifact_store=str(Path(tmp) / 'artifacts'),
+                    slot='preview_html',
+                )
+
+            self.assertIn('New title', preview['candidate_html'])
+
+    def test_injected_portable_source_rejects_stale_different_content(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            upload_root = Path(tmp) / 'uploads'
+            deck, page = make_deck(upload_root / 'workflow-workspaces' / 'ppt-workflow')
+            public, _ = TOOLS._inline_preview_images(
+                TOOLS._sanitize_page_html(PAGE_HTML), deck, page,
+            )
+            with mock.patch.dict(
+                TOOLS.os.environ, {'LAZYMIND_UPLOAD_ROOT': str(upload_root)}, clear=False,
+            ):
+                artifact = TOOLS._with_ppt_source_meta(
+                    public.replace('Old title', 'Different title'), page, '0' * 64,
+                )
+                with self.assertRaisesRegex(ValueError, 'slide changed'):
+                    TOOLS.ppt_preview_selection_edit(
+                        artifact=artifact,
+                        instruction='修改标题成 New title',
+                        selection={'type': 'ppt_html', 'page': 1, 'el': 'title'},
+                        artifact_store=str(Path(tmp) / 'artifacts'),
+                        slot='preview_html',
+                    )
+
     def test_read_hash_guards_against_stale_edit(self):
         with tempfile.TemporaryDirectory() as tmp:
             deck, page = make_deck(Path(tmp))

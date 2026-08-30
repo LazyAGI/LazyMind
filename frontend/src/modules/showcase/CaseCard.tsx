@@ -1,5 +1,5 @@
 import type { MouseEvent } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
   ArrowRightOutlined,
@@ -39,6 +39,7 @@ export default function CaseCard({
   showWorkflowHot = false,
 }: CaseCardProps) {
   const { t } = useTranslation();
+  const location = useLocation();
   const coverClass = COVER_CLASS_BY_OUTPUT_TYPE[item.output_type] || "report";
   const entryType = showcaseEntryType(item.type);
   const technologyType = showcaseTechnologyType(item.type);
@@ -49,6 +50,9 @@ export default function CaseCard({
   const isDetailPrimary = primaryAction === "details";
   const primaryPath = isDetailPrimary ? detailPath : launchPath;
   const secondaryPath = isDetailPrimary ? launchPath : detailPath;
+  const detailState = {
+    showcaseReturnTo: `${location.pathname}${location.search}${location.hash}`,
+  };
   const handleTry = (event: MouseEvent<HTMLAnchorElement>) => {
     if (!onTry) return;
     event.preventDefault();
@@ -61,6 +65,7 @@ export default function CaseCard({
         className="showcase-card-image-link"
         aria-label={t(isDetailPrimary ? "showcase.viewDetail" : "showcase.try")}
         to={primaryPath}
+        state={isDetailPrimary ? detailState : undefined}
         onClick={isDetailPrimary ? undefined : handleTry}
       >
         <div className={`showcase-card-image-wrap showcase-card-cover-${coverClass}`}>
@@ -93,6 +98,7 @@ export default function CaseCard({
           <Link
             className="showcase-card-title-link"
             to={primaryPath}
+            state={isDetailPrimary ? detailState : undefined}
             onClick={isDetailPrimary ? undefined : handleTry}
           >
             <h3>{item.title}</h3>
@@ -109,6 +115,7 @@ export default function CaseCard({
           <Link
             className="showcase-detail-link"
             to={secondaryPath}
+            state={isDetailPrimary ? undefined : detailState}
             onClick={isDetailPrimary ? handleTry : undefined}
           >
             {t(isDetailPrimary ? "showcase.experienceNow" : "showcase.viewDetail")}

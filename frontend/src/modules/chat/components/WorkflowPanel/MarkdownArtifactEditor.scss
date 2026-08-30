@@ -281,7 +281,7 @@
 }
 
 .writer-markdown-editor__surface .mdxeditor-toolbar {
-  position: fixed;
+  position: absolute;
   top: var(--writer-markdown-selection-toolbar-top, -9999px);
   left: var(--writer-markdown-selection-toolbar-left, -9999px);
   z-index: 1200;

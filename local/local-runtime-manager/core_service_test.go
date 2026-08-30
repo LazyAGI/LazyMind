@@ -54,6 +54,10 @@ func TestCoreServiceEnvUsesLocalEndpoints(t *testing.T) {
 	assertEnvContains(t, env, "LAZYMIND_OFFICE_CONVERT_URL=http://127.0.0.1:18082/v1/office/to-pdf")
 	assertEnvContains(t, env, "LAZYMIND_READONLY_DB_DRIVER=sqlite")
 	assertEnvContains(t, env, "LAZYMIND_READONLY_DB_DSN="+paths.LazyLLMDBPath)
+	assertEnvContains(t, env, "LAZYMIND_HISTORY_INJECTION_ENABLED=true")
+	assertEnvContains(t, env, "LAZYMIND_HISTORY_INJECTION_ROOT="+paths.HistoryInjectionRoot)
+	assertEnvContains(t, env, "LAZYMIND_BOOTSTRAP_ADMIN_USERNAME=admin")
+	assertEnvContains(t, env, "LAZYMIND_BOOTSTRAP_ADMIN_PASSWORD=admin")
 	assertEnvNotContains(t, env, "LAZYMIND_CAPABILITY_MCP_ENABLED=")
 }
 

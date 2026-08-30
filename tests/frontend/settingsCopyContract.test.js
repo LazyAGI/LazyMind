@@ -65,7 +65,14 @@ describe('settings copy contract', () => {
     expect(settingsSource).toMatch(
       /developerActive\s*\?\s*"settingsPage\.developer\.disableTitle"\s*:\s*"settingsPage\.developer\.enableTitle"/,
     );
+    expect(settingsSource).toMatch(
+      /enabled\s*\?\s*"settingsPage\.confirm\.developerEnableContent"\s*:\s*"settingsPage\.confirm\.developerDisableContent"/,
+    );
     expect(zhCN).toContain('disableTitle: "关闭开发者模式"');
+    expect(zhCN).toContain('developerEnableContent: "开启后将启用开发者模式相关功能');
+    expect(zhCN).toContain('developerDisableContent: "关闭后将停用开发者模式相关功能');
     expect(enUS).toContain('disableTitle: "Disable developer mode"');
+    expect(enUS).toContain('developerEnableContent: "Turning this on enables developer-mode features');
+    expect(enUS).toContain('developerDisableContent: "Turning this off disables developer-mode features');
   });
 });

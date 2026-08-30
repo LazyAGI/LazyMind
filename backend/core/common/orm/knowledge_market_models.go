@@ -51,12 +51,13 @@ func (KnowledgeMarketItem) TableName() string { return "knowledge_market_items" 
 type InstallState string
 
 const (
-	InstallStatePending     InstallState = "pending"
-	InstallStateDownloading InstallState = "downloading"
-	InstallStateImporting   InstallState = "importing"
-	InstallStateVectorizing InstallState = "vectorizing"
-	InstallStateDone        InstallState = "done"
-	InstallStateFailed      InstallState = "failed"
+	InstallStatePending       InstallState = "pending"
+	InstallStateDownloading   InstallState = "downloading"
+	InstallStateImporting     InstallState = "importing"
+	InstallStateVectorizing   InstallState = "vectorizing"
+	InstallStateDone          InstallState = "done"
+	InstallStatePartialFailed InstallState = "partial_failed"
+	InstallStateFailed        InstallState = "failed"
 )
 
 // KnowledgeMarketInstall records one user's installation of an official

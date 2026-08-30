@@ -465,8 +465,8 @@ $shadow: 0 1px 2px rgb(31 35 41 / 3%), 0 6px 20px rgb(31 35 41 / 3%);
   border-radius: 12px;
   box-shadow: $shadow;
 }
-.task-table .ant-table-thead > tr > th { height: 42px; padding: 0 18px; background: #fafbfc; color: #8490a1; font-size: 11px; font-weight: 560; }
-.task-table .ant-table-tbody > tr > td { height: 70px; padding: 10px 18px; border-right: 1px solid #f2f4f7; }
+.task-table .ant-table-thead > tr > th { height: 42px; overflow: hidden; padding: 0 18px; background: #fafbfc; color: #8490a1; font-size: 11px; font-weight: 560; text-overflow: ellipsis; white-space: nowrap; }
+.task-table .ant-table-tbody > tr > td { height: 70px; overflow: hidden; padding: 10px 18px; border-right: 1px solid #f2f4f7; }
 .task-table .ant-table-tbody > tr > td:last-child { border-right: 0; }
 .task-table .ant-table-tbody > tr { cursor: pointer; }
 .task-table .ant-table-tbody > tr:hover > td { background: #fafcff !important; }
@@ -480,8 +480,8 @@ $shadow: 0 1px 2px rgb(31 35 41 / 3%), 0 6px 20px rgb(31 35 41 / 3%);
   align-items: center;
   gap: 14px;
 
-  > div { display: flex; min-width: 0; flex-direction: column; gap: 4px; }
-  strong, span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  > div { display: flex; min-width: 0; flex: 1; overflow: hidden; flex-direction: column; gap: 4px; }
+  strong, span { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   strong { font-size: 13px; line-height: 18px; font-weight: 610; }
   > div > span { color: $muted; font-size: 11px; line-height: 15px; }
 }
@@ -508,21 +508,22 @@ $shadow: 0 1px 2px rgb(31 35 41 / 3%), 0 6px 20px rgb(31 35 41 / 3%);
   gap: 5px;
 
   > div { display: flex; width: 100%; min-width: 0; align-items: center; gap: 8px; }
-  > div > span {
+  .task-list-state-copy {
     min-width: 0;
     flex: 1;
-    display: -webkit-box;
+    display: block;
     overflow: hidden;
     color: #687385;
     font-size: 11px;
     line-height: 16px;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .ant-progress { width: 96px; margin: 0; line-height: 1; }
 }
 
-.task-time-cell { display: flex; flex-direction: column; gap: 4px; }
+.task-time-cell { display: flex; min-width: 0; overflow: hidden; flex-direction: column; gap: 4px; }
+.task-time-cell span, .task-time-cell small { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .task-time-cell span { color: #465164; font-size: 12px; }
 .task-time-cell small { color: $muted; font-size: 10px; }
 .clickable-status { cursor: pointer; }

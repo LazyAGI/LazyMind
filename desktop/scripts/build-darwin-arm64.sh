@@ -207,6 +207,8 @@ rsync -a --delete \
   --exclude "/data" \
   --exclude "/volumes" \
   --exclude "/local/config.env" \
+  --exclude "/history-injection" \
+  --exclude "lazymind-history-injection*.zip" \
   --exclude "local/build" \
   --exclude "local/runtime" \
   --exclude "desktop/build" \
@@ -247,6 +249,9 @@ if [[ "${RELEASE_BUILD}" == "true" ]]; then
   BUILTIN_SKILL_BUNDLE_ARGS+=(--frozen-lockfile)
 fi
 (cd "${ROOT}/backend/core" && "${GO_BIN}" "${BUILTIN_SKILL_BUNDLE_ARGS[@]}")
+
+echo "==> Downloading verified history injection package"
+node "${ROOT}/desktop/scripts/stage-history-injection-package.mjs" "${RUNTIME_ROOT}"
 
 TRUSTED_LOCAL_MODE=false
 if [[ "${LAZYMIND_TRUSTED_LOCAL_MODE:-}" == "true" ]]; then

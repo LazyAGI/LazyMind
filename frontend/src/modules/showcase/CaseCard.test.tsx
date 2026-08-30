@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 
 import CaseCard from "./CaseCard";
@@ -62,6 +62,12 @@ const item: ShowcaseCase = {
   type: "chat",
 };
 
+function LocationStateProbe() {
+  const location = useLocation();
+  const state = location.state as { showcaseReturnTo?: string } | null;
+  return <output>{state?.showcaseReturnTo || "no-return-route"}</output>;
+}
+
 describe("CaseCard", () => {
   it("uses the card body for try and keeps the corner action for details", () => {
     const onTry = vi.fn();
@@ -121,6 +127,19 @@ describe("CaseCard", () => {
       "href",
       "/agent/chat/home?showcase_case=aiProduct&showcase_entry=chat",
     );
+  });
+
+  it("passes the current capability entry route to the detail page", () => {
+    render(
+      <MemoryRouter initialEntries={["/agent/chat/home?section=featured"]}>
+        <CaseCard item={item} />
+        <LocationStateProbe />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: /查看详情/ }));
+
+    expect(screen.getByText("/agent/chat/home?section=featured")).toBeInTheDocument();
   });
 
   it("shows HOT only for Workflow cards in the Featured section", () => {

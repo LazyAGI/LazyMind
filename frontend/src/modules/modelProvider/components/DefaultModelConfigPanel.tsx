@@ -24,8 +24,7 @@ import {
   unwrapModelProviderData,
   withModelProviderJsonOptions,
 } from "../api";
-
-const SENSENOVA_LOGO_URL = "https://www.sensenova.ai/images/logo.png";
+import { getProviderLogoUrl } from "../providerBranding";
 
 export type SetupAvailabilityState = "loading" | "ready" | "empty" | "error";
 
@@ -259,6 +258,7 @@ const moduleConfigs: ModuleConfig[] = [
     key: "evo_llm",
     titleKey: "modelProvider.module.selfEvolutionTitle",
     subtitleKey: "modelProvider.module.selfEvolutionSubtitle",
+    required: true,
   },
 ];
 
@@ -318,26 +318,6 @@ function getProviderBrand(name: string) {
     .join("")
     .slice(0, 2)
     .toUpperCase();
-}
-
-function getProviderLogoUrl(name: string) {
-  const normalized = name.trim().toLowerCase();
-  if (/sensenova|sensecore|商汤|日日新/.test(normalized)) return SENSENOVA_LOGO_URL;
-  const domainMap: Array<[RegExp, string]> = [
-    [/claude|anthropic/, "anthropic.com"],
-    [/deepseek/, "deepseek.com"],
-    [/doubao|volc|ark/, "volcengine.com"],
-    [/glm|bigmodel|zhipu/, "zhipuai.cn"],
-    [/kimi|moonshot/, "moonshot.cn"],
-    [/minimax/, "minimaxi.com"],
-    [/openrouter/, "openrouter.ai"],
-    [/openai/, "openai.com"],
-    [/qwen|tongyi|通义/, "qwen.ai"],
-    [/siliconflow/, "siliconflow.cn"],
-  ];
-  const match = domainMap.find(([pattern]) => pattern.test(normalized));
-  if (!match) return undefined;
-  return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(match[1])}&sz=96`;
 }
 
 function createConnectionGroup(

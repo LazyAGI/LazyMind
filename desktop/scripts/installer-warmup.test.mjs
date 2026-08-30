@@ -8,11 +8,22 @@ import test from "node:test";
 const require = createRequire(import.meta.url);
 const {
   assertMaintenanceRuntimeStopped,
+  installerWarmupWebPreferences,
   macWarmupCompleted,
   macWarmupMarkerPath,
   markMacWarmupCompleted,
   runInstallerWarmupLifecycle,
 } = require("../electron/src/installer-warmup.js");
+
+test("installer warmup uses an isolated in-memory Electron session", () => {
+  const preferences = installerWarmupWebPreferences();
+
+  assert.equal(preferences.partition, "lazymind-installer-warmup");
+  assert.equal(preferences.partition.startsWith("persist:"), false);
+  assert.equal(preferences.contextIsolation, true);
+  assert.equal(preferences.nodeIntegration, false);
+  assert.equal(preferences.sandbox, true);
+});
 
 function readyStatus() {
   return {

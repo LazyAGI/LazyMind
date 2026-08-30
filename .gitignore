@@ -122,3 +122,8 @@ backend/core/openapi.json
 backend/core/swagger.json
 backend/core/docs/swagger.json
 openapi-export/
+
+# History samples live next to the repository and are release assets hosted on
+# ModelScope. Ignore an accidentally copied in-repository workspace wholesale.
+/history-injection/
+lazymind-history-injection*.zip

@@ -201,6 +201,7 @@ export default function KnowledgeSquare({
         <div className="knowledge-square-grid">
           {visibleItems.map((item) => {
             const active = item.active || progressByItem[item.id] !== undefined;
+            const partiallyFailed = item.installState === "partial_failed";
             const progress = progressByItem[item.id];
             const installedVersion =
               item.installedVersion || t("knowledge.versionUnknown");
@@ -258,7 +259,9 @@ export default function KnowledgeSquare({
                 <div className="knowledge-square-card-actions">
                   <span
                     className={
-                      active || item.updateAvailable ? "is-update" : "is-ready"
+                      active || partiallyFailed || item.updateAvailable
+                        ? "is-update"
+                        : "is-ready"
                     }
                   >
                     <i />
@@ -269,7 +272,9 @@ export default function KnowledgeSquare({
                             progress,
                           })
                       : item.installed
-                        ? item.updateAvailable
+                        ? partiallyFailed
+                          ? t("knowledge.partialFailed")
+                          : item.updateAvailable
                           ? t("knowledge.updateAvailable")
                           : t("knowledge.upToDate")
                         : t("knowledge.uninstalled")}
@@ -388,9 +393,11 @@ export default function KnowledgeSquare({
                   <div>
                     <dt>{t("knowledge.updateStatus")}</dt>
                     <dd>
-                      {detailItem.updateAvailable
-                        ? t("knowledge.updateAvailable")
-                        : t("knowledge.upToDate")}
+                      {detailItem.installState === "partial_failed"
+                        ? t("knowledge.partialFailed")
+                        : detailItem.updateAvailable
+                          ? t("knowledge.updateAvailable")
+                          : t("knowledge.upToDate")}
                     </dd>
                   </div>
                 ) : null}

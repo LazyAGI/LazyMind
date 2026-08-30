@@ -59,6 +59,8 @@ func compatibleDBModelTypes(modelType string) []string {
 		return []string{"embed", "embedding", "embed_main"}
 	case "cross_modal_embed", "multimodal_embedding", "embed_image":
 		return []string{"cross_modal_embed", "multimodal_embedding", "embed_image"}
+	case "vlm", "VLM":
+		return []string{"vlm", "VLM"}
 	}
 	return []string{modelType}
 }
@@ -67,6 +69,8 @@ func normalizeGroupModelType(modelType string) string {
 	switch modelType {
 	case "embedding", "embed_main":
 		return "embed"
+	case "VLM":
+		return "vlm"
 	default:
 		return modelType
 	}
@@ -136,40 +140,69 @@ func AddGroupModel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var dupUser int64
-	if err := db.WithContext(r.Context()).Model(&orm.UserModelProviderGroupModel{}).
+	var row orm.UserModelProviderGroupModel
+	err = db.WithContext(r.Context()).
 		Where(
-			"user_model_provider_group_id = ? AND create_user_id = ? AND deleted_at IS NULL AND name = ?",
+			"user_model_provider_group_id = ? AND create_user_id = ? AND name = ?",
 			group.ID, userID, name,
-		).Count(&dupUser).Error; err != nil {
+		).
+		Take(&row).Error
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		common.ReplyErr(w, "check existing model failed", http.StatusInternalServerError)
 		return
 	}
-	if dupUser > 0 {
+	if err == nil && row.DeletedAt == nil {
 		common.ReplyErr(w, "model name already exists in this group", http.StatusConflict)
 		return
 	}
 
 	now := time.Now()
-	row := orm.UserModelProviderGroupModel{
-		ID:                       common.GenerateID(),
-		UserModelProviderID:      parent.ID,
-		UserModelProviderGroupID: group.ID,
-		ProviderName:             parent.Name,
-		Name:                     name,
-		ModelType:                modelType,
-		IsDefault:                false,
-		BaseModel: orm.BaseModel{
-			CreateUserID:   userID,
-			CreateUserName: userName,
-			CreatedAt:      now,
-			UpdatedAt:      now,
-			DeletedAt:      nil,
-		},
-	}
-	if err := db.WithContext(r.Context()).Create(&row).Error; err != nil {
-		common.ReplyErr(w, "create model failed", http.StatusInternalServerError)
-		return
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		row = orm.UserModelProviderGroupModel{
+			ID:                       common.GenerateID(),
+			UserModelProviderID:      parent.ID,
+			UserModelProviderGroupID: group.ID,
+			ProviderName:             parent.Name,
+			Name:                     name,
+			ModelType:                modelType,
+			IsDefault:                false,
+			BaseModel: orm.BaseModel{
+				CreateUserID:   userID,
+				CreateUserName: userName,
+				CreatedAt:      now,
+				UpdatedAt:      now,
+				DeletedAt:      nil,
+			},
+		}
+		if err := db.WithContext(r.Context()).Create(&row).Error; err != nil {
+			common.ReplyErr(w, "create model failed", http.StatusInternalServerError)
+			return
+		}
+	} else {
+		result := db.WithContext(r.Context()).Model(&orm.UserModelProviderGroupModel{}).
+			Where("id = ? AND create_user_id = ? AND deleted_at IS NOT NULL", row.ID, userID).
+			Updates(map[string]interface{}{
+				"user_model_provider_id": parent.ID,
+				"provider_name":          parent.Name,
+				"model_type":             modelType,
+				"is_default":             false,
+				"updated_at":             now,
+				"deleted_at":             nil,
+			})
+		if result.Error != nil {
+			common.ReplyErr(w, "restore model failed", http.StatusInternalServerError)
+			return
+		}
+		if result.RowsAffected != 1 {
+			common.ReplyErr(w, "model name already exists in this group", http.StatusConflict)
+			return
+		}
+		row.UserModelProviderID = parent.ID
+		row.ProviderName = parent.Name
+		row.ModelType = modelType
+		row.IsDefault = false
+		row.UpdatedAt = now
+		row.DeletedAt = nil
 	}
 
 	common.ReplyOK(w, addGroupModelResponse{

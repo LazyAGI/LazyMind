@@ -436,6 +436,13 @@
     overflow-x: hidden;
     overflow-y: auto;
   }
+  .settings-integrated-surface.is-models > .model-provider-service-page {
+    height: 100%;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
   .settings-integrated-surface.is-models .model-provider-side-panel { height: auto; }
 }
 .settings-schedule-panel { margin-top: 24px; }
