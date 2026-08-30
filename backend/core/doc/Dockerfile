@@ -28,7 +28,9 @@ RUN set -eu; \
     && rm -rf /var/lib/apt/lists/*
 
 COPY algorithm/requirements.txt /app/algorithm/requirements.txt
-RUN pip install --no-cache-dir 'lazyllm[rag]==1.3.0a1' \
+COPY LAZYLLM_VERSION /tmp/LAZYLLM_VERSION
+RUN LAZYLLM_VERSION="$(tr -d '[:space:]' < /tmp/LAZYLLM_VERSION)" \
+    && pip install --no-cache-dir "lazyllm[rag]==${LAZYLLM_VERSION}" \
     && pip install --no-cache-dir -r /app/algorithm/requirements.txt
 
 COPY algorithm /app/algorithm

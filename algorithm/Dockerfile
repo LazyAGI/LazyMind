@@ -4,15 +4,12 @@
 ARG DOCKER_MIRROR=docker.m.daocloud.io/library/
 ARG BASE_LAZYLLM_IMAGE=base_env
 ARG BASE_LAZYMIND_IMAGE=base_code
-ARG LAZYLLM_VERSION=1.3.0a1
 ARG LAZYLLM_BUNDLE_SOURCE=1
 
 # Stage: base_env - pure environment, NO business code copied.
 # Rebuilt only when upgrading lazyllm version or changing requirements.txt.
 FROM ${DOCKER_MIRROR}python:3.11-slim AS base_env
 WORKDIR /app
-ARG LAZYLLM_VERSION
-
 ARG APT_MIRROR=http://mirrors.aliyun.com/debian
 ARG APT_SECURITY_MIRROR=http://mirrors.aliyun.com/debian-security
 ARG PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple
@@ -41,7 +38,9 @@ RUN set -eu; \
 
 # Release images always use the pinned PyPI package. Keeping LazyLLM out of
 # PYTHONPATH avoids scanning its source checkout and docs during each import.
-RUN pip install --no-cache-dir "lazyllm==${LAZYLLM_VERSION}" \
+COPY LAZYLLM_VERSION /tmp/LAZYLLM_VERSION
+RUN LAZYLLM_VERSION="$(tr -d '[:space:]' < /tmp/LAZYLLM_VERSION)" \
+    && pip install --no-cache-dir "lazyllm==${LAZYLLM_VERSION}" \
     && python -c "import importlib.metadata as m; assert m.version('lazyllm') == '${LAZYLLM_VERSION}'" \
     && lazyllm install rag
 
