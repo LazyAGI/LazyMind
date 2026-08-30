@@ -493,11 +493,13 @@ export function WorkflowSessionApi() {
       baseRevision: number,
       document: RenderedWriterDocument,
       slot: WriterDocumentSlot,
+      mode: SlotSaveMode,
       options?: RawAxiosRequestConfig,
     ) {
       const payload: Record<string, unknown> = {
         base_revision: baseRevision,
         document,
+        mode,
       };
       if (slot !== 'draft_document') payload.slot = slot;
       return axiosInstance.post<{

@@ -98,8 +98,10 @@ type slotDTO struct {
 	Provider           string `json:"provider,omitempty"`
 	ProviderDocumentID string `json:"provider_document_id,omitempty"`
 	LastSyncedRevision *int   `json:"last_synced_revision,omitempty"`
+	LastSyncedVersion  *int   `json:"last_synced_version,omitempty"`
 	StepID             string `json:"step_id,omitempty"`
 	RevisionCount      int    `json:"revision_count,omitempty"`
+	VersionNumber      int    `json:"version_number,omitempty"`
 	OrderVersion       *int   `json:"order_version,omitempty"`
 
 	// Internal fields — used by enrichSlots, never serialised to the client.
@@ -212,29 +214,33 @@ func enrichSlots(ctx context.Context, db *gorm.DB, sessionID string, slots []slo
 		}
 	}
 
-	// Step 3: load revision counts per (session_id, slot_id, list_index).
-	type revKey struct {
-		slotID    string
-		listIndex *int
-	}
+	// Step 3: load user-visible version counts per (session_id, slot_id,
+	// list_index). Writer human revisions are mutable working drafts: keep them
+	// for persistence/concurrency, but do not expose them as formal versions.
 	revCounts := map[string]int{}
-	type revCountRow struct {
-		SlotID    string `gorm:"column:slot_id"`
-		ListIndex *int   `gorm:"column:list_index"`
-		Count     int    `gorm:"column:cnt"`
+	versionNumbers := map[string]map[int]int{}
+	type revisionNumberRow struct {
+		SlotID       string `gorm:"column:slot_id"`
+		ListIndex    *int   `gorm:"column:list_index"`
+		Revision     int    `gorm:"column:revision"`
+		ChangeSource string `gorm:"column:change_source"`
 	}
-	var rcRows []revCountRow
-	db.WithContext(ctx).Raw(
-		`SELECT slot_id, list_index, COUNT(*) AS cnt FROM plugin_slot_revisions
-		 WHERE session_id = ? GROUP BY slot_id, list_index`,
-		sessionID,
-	).Scan(&rcRows)
-	for _, rc := range rcRows {
-		key := rc.SlotID + "|"
-		if rc.ListIndex != nil {
-			key += fmt.Sprintf("%d", *rc.ListIndex)
+	var revisionRows []revisionNumberRow
+	db.WithContext(ctx).
+		Model(&orm.WorkflowSlotRevision{}).
+		Select("slot_id, list_index, revision, change_source").
+		Where("session_id = ?", sessionID).
+		Order("slot_id ASC, list_index ASC, revision ASC").
+		Scan(&revisionRows)
+	for _, revision := range revisionRows {
+		key := slotRevisionVersionKey(revision.SlotID, revision.ListIndex)
+		if !isWriterWorkingDraftRevision(revision.SlotID, revision.ChangeSource) {
+			revCounts[key]++
 		}
-		revCounts[key] = rc.Count
+		if versionNumbers[key] == nil {
+			versionNumbers[key] = map[int]int{}
+		}
+		versionNumbers[key][revision.Revision] = revCounts[key]
 	}
 
 	// Step 4: load slot order info for order_version and sort_order lookup.
@@ -313,11 +319,9 @@ func enrichSlots(ctx context.Context, db *gorm.DB, sessionID string, slots []slo
 		}
 
 		// Revision count.
-		rcKey := slot.SlotID + "|"
-		if slot.ListIndex != nil {
-			rcKey += fmt.Sprintf("%d", *slot.ListIndex)
-		}
+		rcKey := slotRevisionVersionKey(slot.SlotID, slot.ListIndex)
 		slot.RevisionCount = revCounts[rcKey]
+		slot.VersionNumber = versionNumbers[rcKey][slot.Revision]
 
 		// sort_order and order_version from plugin_slot_order.  // workflow-naming: persistence
 		// single slots (list_index IS NULL) get sort_order=0 as a stable sentinel.
@@ -340,6 +344,28 @@ func enrichSlots(ctx context.Context, db *gorm.DB, sessionID string, slots []slo
 	}
 
 	enrichWriterWriteBackSlots(ctx, db, sessionID, slots)
+	for i := range slots {
+		slot := &slots[i]
+		if slot.LastSyncedRevision == nil {
+			continue
+		}
+		key := slotRevisionVersionKey(slot.SlotID, slot.ListIndex)
+		if version := versionNumbers[key][*slot.LastSyncedRevision]; version > 0 {
+			slot.LastSyncedVersion = &version
+		}
+	}
+}
+
+func slotRevisionVersionKey(slotID string, listIndex *int) string {
+	key := slotID + "|"
+	if listIndex != nil {
+		key += fmt.Sprintf("%d", *listIndex)
+	}
+	return key
+}
+
+func isWriterWorkingDraftRevision(slotID, changeSource string) bool {
+	return (slotID == "draft_document" || slotID == "flat_draft_document") && changeSource == "human"
 }
 
 // ListConversationSessions handles GET /conversations/{conversation_id}/workflow-sessions.

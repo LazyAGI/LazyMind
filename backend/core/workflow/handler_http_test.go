@@ -436,3 +436,38 @@ func TestEnrichSlotsExecutesRevisionCountQuery(t *testing.T) {
 		t.Fatalf("revision count: got %d, want 1", slots[0].RevisionCount)
 	}
 }
+
+func TestEnrichSlotsWriterDraftExcludesMutableHumanRevisionFromVersionCount(t *testing.T) {
+	db := newTestDB(t)
+	rows := []orm.WorkflowSlotRevision{
+		{
+			ID:        "writer-ai-1",
+			SessionID: "session-1", SlotID: "draft_document", Revision: 1,
+			Selected: false, Slot: "draft_document", ChangeSource: "ai",
+			ContentSnapshot: json.RawMessage(`{"data":"# AI draft"}`),
+		},
+		{
+			ID:        "writer-human-2",
+			SessionID: "session-1", SlotID: "draft_document", Revision: 2,
+			Selected: true, Slot: "draft_document", ChangeSource: "human",
+			ContentSnapshot: json.RawMessage(`{"data":"# Working draft"}`),
+		},
+	}
+	if err := db.Create(&rows).Error; err != nil {
+		t.Fatalf("create writer revisions: %v", err)
+	}
+	slots := []slotDTO{{
+		SlotID: "draft_document", Slot: "draft_document", Revision: 2,
+		Selected: true, ChangeSource: "human",
+		ContentSnapshot: json.RawMessage(`{"data":"# Working draft"}`),
+	}}
+
+	enrichSlots(t.Context(), db.DB, "session-1", slots)
+
+	if slots[0].RevisionCount != 1 {
+		t.Fatalf("writer version count: got %d, want 1", slots[0].RevisionCount)
+	}
+	if slots[0].VersionNumber != 1 {
+		t.Fatalf("writer draft base version: got %d, want 1", slots[0].VersionNumber)
+	}
+}

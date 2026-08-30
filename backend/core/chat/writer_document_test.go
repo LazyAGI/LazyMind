@@ -96,6 +96,145 @@ func TestWriteBackWriterDocumentRequiresFeishuConfiguration(t *testing.T) {
 	}
 }
 
+func TestSaveWriterDocumentDraftUpdatesInPlaceAndCheckpointCreatesRevision(t *testing.T) {
+	chatService := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/workflow/actions:invoke" {
+			t.Errorf("path = %q, want workflow action invoke", r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		var request struct {
+			Artifact json.RawMessage `json:"artifact"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Errorf("decode workflow action request: %v", err)
+			http.Error(w, "invalid request", http.StatusBadRequest)
+			return
+		}
+		var edited struct {
+			Data string `json:"data"`
+		}
+		if err := json.Unmarshal(request.Artifact, &edited); err != nil {
+			t.Errorf("decode edited artifact: %v", err)
+			http.Error(w, "invalid artifact", http.StatusBadRequest)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"result": map[string]any{
+				"source_document": edited.Data,
+				"representation":  "markdown",
+				"document":        edited.Data,
+				"title":           "Draft",
+			},
+		})
+	}))
+	t.Cleanup(chatService.Close)
+	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", chatService.URL)
+
+	db := orm.MigrateTestDB(t,
+		&orm.WorkflowSession{},
+		&orm.WorkflowSlotRevision{},
+		&orm.WorkflowHumanArtifact{},
+	)
+	store.Init(db.DB, db.DB, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+
+	now := time.Now().UTC()
+	if err := db.Create(&orm.WorkflowSession{
+		ID: "session", ConversationID: "conversation", WorkflowID: "writer-workflow",
+		Status: "completed", CreateUserID: "user-1", CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("seed writer session: %v", err)
+	}
+	if err := db.Create(&orm.WorkflowHumanArtifact{
+		ID: "human-3", SessionID: "session", Slot: "draft_document", ContentType: "json",
+		Value: json.RawMessage(`{"schema":"text/markdown","data":"# Initial"}`), CreatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("seed human artifact: %v", err)
+	}
+	humanID := "human-3"
+	if err := db.Create(&orm.WorkflowSlotRevision{
+		ID: "revision-3", SessionID: "session", SlotID: "draft_document",
+		Revision: 3, Selected: true, ChangeSource: "human", HumanArtifactID: &humanID,
+		Slot: "draft_document", StepID: "write_document", Attempt: 1, CreatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("seed writer revision: %v", err)
+	}
+
+	save := func(mode, document string, baseRevision int) int {
+		body, err := json.Marshal(map[string]any{
+			"base_revision": baseRevision,
+			"document":      document,
+			"mode":          mode,
+		})
+		if err != nil {
+			t.Fatalf("marshal save body: %v", err)
+		}
+		req := httptest.NewRequest(
+			http.MethodPost,
+			"/api/core/workflow-sessions/session/writer-document:save",
+			strings.NewReader(string(body)),
+		)
+		req.Header.Set("X-User-Id", "user-1")
+		req = mux.SetURLVars(req, map[string]string{"session_id": "session"})
+		recorder := httptest.NewRecorder()
+		SaveWriterDocument(recorder, req)
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("save %s status = %d, body=%s", mode, recorder.Code, recorder.Body.String())
+		}
+		var response struct {
+			Data struct {
+				Revision int `json:"revision"`
+			} `json:"data"`
+		}
+		if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+			t.Fatalf("decode save response: %v", err)
+		}
+		return response.Data.Revision
+	}
+
+	if revision := save("draft", "# First edit", 3); revision != 3 {
+		t.Fatalf("first draft revision = %d, want 3", revision)
+	}
+	if revision := save("draft", "# Second edit", 3); revision != 3 {
+		t.Fatalf("second draft revision = %d, want 3", revision)
+	}
+	var revisionCount int64
+	if err := db.Model(&orm.WorkflowSlotRevision{}).
+		Where("session_id = ? AND slot_id = ?", "session", "draft_document").
+		Count(&revisionCount).Error; err != nil {
+		t.Fatalf("count draft revisions: %v", err)
+	}
+	if revisionCount != 1 {
+		t.Fatalf("draft revision count = %d, want 1", revisionCount)
+	}
+	var updatedArtifact orm.WorkflowHumanArtifact
+	if err := db.First(&updatedArtifact, "id = ?", humanID).Error; err != nil {
+		t.Fatalf("load updated human artifact: %v", err)
+	}
+	var updatedValue struct {
+		Data string `json:"data"`
+	}
+	if err := json.Unmarshal(updatedArtifact.Value, &updatedValue); err != nil {
+		t.Fatalf("decode updated human artifact: %v", err)
+	}
+	if updatedValue.Data != "# Second edit" {
+		t.Fatalf("updated draft = %q, want second edit", updatedValue.Data)
+	}
+
+	if revision := save("checkpoint", "# Final edit", 3); revision != 4 {
+		t.Fatalf("checkpoint revision = %d, want 4", revision)
+	}
+	if err := db.Model(&orm.WorkflowSlotRevision{}).
+		Where("session_id = ? AND slot_id = ?", "session", "draft_document").
+		Count(&revisionCount).Error; err != nil {
+		t.Fatalf("count checkpoint revisions: %v", err)
+	}
+	if revisionCount != 2 {
+		t.Fatalf("checkpoint revision count = %d, want 2", revisionCount)
+	}
+}
+
 func TestNormalizeWriterDocumentForSync_StripsLegacyImagePlaceholderNewline(t *testing.T) {
 	normalized, err := normalizeWriterDocumentForSync(json.RawMessage(`{
 		"blocks":[

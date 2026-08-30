@@ -26,7 +26,7 @@ import {
   writerDownloadFilename,
   writerMarkdownTitle,
 } from './WriterDownloadFormat';
-import { MarkdownArtifactEditor } from './MarkdownArtifactEditor';
+import { MarkdownArtifactEditor, type MarkdownSaveMode } from './MarkdownArtifactEditor';
 import {
   ArtifactRewriteDialog,
   type ArtifactRewriteSelection,
@@ -869,6 +869,8 @@ interface SlotVersionPopoverProps {
   revisionCount: number;
   /** The revision number of the currently selected version — shown on the badge. */
   currentRevision?: number;
+  /** User-visible version number; unlike revision, this excludes mutable Writer drafts. */
+  currentVersionNumber?: number;
   currentValue?: any;
   currentChangeSource?: 'ai' | 'human' | 'provider_sync';
   contentType?: string;
@@ -888,7 +890,9 @@ export function SlotVersionPopover({
   draftListIndex,
   revisionCount,
   currentRevision,
+  currentVersionNumber,
   currentValue,
+  currentChangeSource,
   contentType,
   onRollbackDone,
   draftText,
@@ -911,9 +915,12 @@ export function SlotVersionPopover({
   const versionUploadRef = useRef<HTMLInputElement>(null);
   const { getSlotVersions, rollbackSlotItem, patchSlotItemValue } = useWorkflowStore();
   const isWriterDraft = slotId === 'draft_document' || slotId === 'flat_draft_document';
-  const versionLabel = (revision: number) => isWriterDraft
-    ? tr('chat.writerIR.localVersion', { version: revision })
+  const hasPersistedWriterDraft = isWriterDraft && currentChangeSource === 'human';
+  const hasDraftEntry = draftText !== undefined || hasPersistedWriterDraft;
+  const versionLabel = (revision: number, version?: number) => isWriterDraft
+    ? tr('chat.writerIR.localVersion', { version: version ?? revision })
     : `v${revision}`;
+  const entryVersionLabel = (entry: SlotVersionEntry) => versionLabel(entry.revision, entry.version);
   const historyTitle = isWriterDraft
     ? tr('chat.writerIR.localHistory')
     : tr('chat.slots.versionHistory');
@@ -932,17 +939,26 @@ export function SlotVersionPopover({
     setLoading(true);
     try {
       const vs = await getSlotVersions(sessionId, slotId, listIndex);
-      const sorted = [...vs].sort((a, b) => b.revision - a.revision);
+      const formalVersions = isWriterDraft
+        ? vs.filter((version) => version.change_source !== 'human')
+        : vs;
+      const numberedVersions = [...formalVersions]
+        .sort((a, b) => a.revision - b.revision)
+        .map((version, index) => ({
+          ...version,
+          version: isWriterDraft ? (version.version ?? index + 1) : version.version,
+        }));
+      const sorted = numberedVersions.sort((a, b) => b.revision - a.revision);
       setVersions(sorted);
       const currentIdx = sorted.findIndex((v) => v.selected);
       setPreviewIndex(currentIdx >= 0 ? currentIdx : 0);
       // Default selection: draft entry when draft exists, otherwise current version.
-      setSelectedRevision(draftText !== undefined ? DRAFT_REVISION : null);
+      setSelectedRevision(hasDraftEntry ? DRAFT_REVISION : null);
       setOpen(true);
     } finally {
       setLoading(false);
     }
-  }, [open, sessionId, slotId, listIndex, getSlotVersions, draftText, setOpen]);
+  }, [getSlotVersions, hasDraftEntry, isWriterDraft, listIndex, open, sessionId, setOpen, slotId]);
 
   const handleClose = useCallback(() => setOpen(false), [setOpen]);
 
@@ -1219,7 +1235,7 @@ export function SlotVersionPopover({
                       <span className={`workflow-slot__version-source-badge workflow-slot__version-source-badge--${v.change_source}`}>
                         {changeSourceLabel(v)}
                       </span>
-                      {versionLabel(v.revision)}
+                      {entryVersionLabel(v)}
                       {v.selected && <span className='workflow-slot__version-current-tag'>{tr('chat.slots.current')}</span>}
                       {isWriterDraft && v.provider_synced && (
                         <span className='workflow-slot__version-current-tag'>{tr('chat.writerIR.syncedClean')}</span>
@@ -1241,7 +1257,7 @@ export function SlotVersionPopover({
                 <FileRevisionPreview
                   info={extractFileInfo(effectiveSelectedVersion.content_snapshot)}
                   label={tr('chat.slots.versionSourceLabel', {
-                    version: versionLabel(effectiveSelectedVersion.revision),
+                    version: entryVersionLabel(effectiveSelectedVersion),
                     source: changeSourceLabel(effectiveSelectedVersion),
                   })}
                 />
@@ -1249,9 +1265,9 @@ export function SlotVersionPopover({
                   className='workflow-slot__version-apply-btn'
                   disabled={rolling}
                   onClick={() => handleRollback(effectiveSelectedVersion.revision)}
-                  aria-label={tr('chat.slots.applyVersionAria', { version: versionLabel(effectiveSelectedVersion.revision) })}
+                  aria-label={tr('chat.slots.applyVersionAria', { version: entryVersionLabel(effectiveSelectedVersion) })}
                 >
-                  {rolling ? tr('chat.slots.rollingBack') : tr('chat.slots.applyVersion', { version: versionLabel(effectiveSelectedVersion.revision) })}
+                  {rolling ? tr('chat.slots.rollingBack') : tr('chat.slots.applyVersion', { version: entryVersionLabel(effectiveSelectedVersion) })}
                 </button>
               </div>
             ) : (
@@ -1272,7 +1288,7 @@ export function SlotVersionPopover({
           <div className='workflow-slot__version-popover-body'>
             <ul className='workflow-slot__version-list' role='listbox' aria-label={tr('chat.slots.versionList')}>
               {/* Draft entry — only shown when there is a pending local draft */}
-              {draftText !== undefined && (
+              {hasDraftEntry && (
                 <li
                   role='option'
                   aria-selected={isDraftSelected}
@@ -1308,7 +1324,7 @@ export function SlotVersionPopover({
                     <span className={`workflow-slot__version-source-badge workflow-slot__version-source-badge--${v.change_source}`}>
                       {changeSourceLabel(v)}
                     </span>
-                    {versionLabel(v.revision)}
+                    {entryVersionLabel(v)}
                     {v.selected && <span className='workflow-slot__version-current-tag'>{tr('chat.slots.current')}</span>}
                     {isWriterDraft && v.provider_synced && (
                       <span className='workflow-slot__version-current-tag'>{tr('chat.writerIR.syncedClean')}</span>
@@ -1321,16 +1337,18 @@ export function SlotVersionPopover({
               ))}
             </ul>
 
-            {isDraftSelected && draftText !== undefined ? (
+            {isDraftSelected && hasDraftEntry ? (
               /* Draft selected: show draft vs current diff with discard + flush actions */
               <div className='workflow-slot__version-compare'>
                 <SnapshotTextDiffView
                   currentSnapshot={activeCurrentValue}
+                  otherSnapshot={hasPersistedWriterDraft ? currentValue : undefined}
                   otherText={draftText}
                   otherLabel={tr('chat.slots.draft')}
                   reversed={true}
                 />
-                <div className='workflow-slot__version-draft-actions'>
+                {draftText !== undefined && (
+                  <div className='workflow-slot__version-draft-actions'>
                   <button
                     className='workflow-slot__version-discard-btn'
                     onClick={() => { onDiscardDraft?.(); handleClose(); }}
@@ -1346,7 +1364,8 @@ export function SlotVersionPopover({
                   >
                     {flushing ? tr('chat.slots.submitting') : tr('chat.slots.confirmChanges')}
                   </button>
-                </div>
+                  </div>
+                )}
               </div>
             ) : effectiveSelectedVersion ? (
               <div className='workflow-slot__version-compare'>
@@ -1355,11 +1374,11 @@ export function SlotVersionPopover({
                     currentSnapshot={effectiveSelectedSnapshot}
                     otherSnapshot={previousSelectedVersion.content_snapshot}
                     otherLabel={tr('chat.slots.versionSourceLabel', {
-                      version: versionLabel(previousSelectedVersion.revision),
+                      version: entryVersionLabel(previousSelectedVersion),
                       source: changeSourceLabel(previousSelectedVersion),
                     })}
                     currentLabel={tr('chat.slots.versionSourceLabel', {
-                      version: versionLabel(effectiveSelectedVersion.revision),
+                      version: entryVersionLabel(effectiveSelectedVersion),
                       source: changeSourceLabel(effectiveSelectedVersion),
                     })}
                   />
@@ -1371,9 +1390,9 @@ export function SlotVersionPopover({
                     className='workflow-slot__version-apply-btn'
                     disabled={rolling}
                     onClick={() => handleRollback(effectiveSelectedVersion.revision)}
-                    aria-label={tr('chat.slots.applyVersionAria', { version: versionLabel(effectiveSelectedVersion.revision) })}
+                    aria-label={tr('chat.slots.applyVersionAria', { version: entryVersionLabel(effectiveSelectedVersion) })}
                   >
-                    {rolling ? tr('chat.slots.rollingBack') : tr('chat.slots.applyVersion', { version: versionLabel(effectiveSelectedVersion.revision) })}
+                    {rolling ? tr('chat.slots.rollingBack') : tr('chat.slots.applyVersion', { version: entryVersionLabel(effectiveSelectedVersion) })}
                   </button>
                 )}
               </div>
@@ -1392,14 +1411,16 @@ export function SlotVersionPopover({
   return (
     <div className='workflow-slot__version-wrap'>
       <button
-        className={`workflow-slot__version-btn${draftText !== undefined ? ' workflow-slot__version-btn--draft' : ''}`}
+        className={`workflow-slot__version-btn${hasDraftEntry ? ' workflow-slot__version-btn--draft' : ''}`}
         onClick={handleOpen}
-        title={draftText !== undefined ? tr('chat.slots.draftCompareHint') : isWriterDraft ? historyTitle : tr('chat.slots.versionHistoryCount', { count: revisionCount })}
-        aria-label={draftText !== undefined ? tr('chat.slots.draft') : isWriterDraft ? historyTitle : tr('chat.slots.versionHistoryCount', { count: revisionCount })}
+        title={hasDraftEntry ? tr('chat.slots.draftCompareHint') : isWriterDraft ? historyTitle : tr('chat.slots.versionHistoryCount', { count: revisionCount })}
+        aria-label={hasDraftEntry ? tr('chat.slots.draft') : isWriterDraft ? historyTitle : tr('chat.slots.versionHistoryCount', { count: revisionCount })}
         disabled={loading}
       >
         <span className='workflow-slot__version-count'>
-          {draftText !== undefined ? 'draft' : versionLabel(currentRevision ?? (revisionCount > 1 ? revisionCount : 1))}
+          {hasDraftEntry
+            ? tr('chat.slots.draft')
+            : versionLabel(currentRevision ?? (revisionCount > 1 ? revisionCount : 1), currentVersionNumber)}
         </span>
       </button>
       {popoverContent}
@@ -1590,6 +1611,7 @@ export function SlotImage({
             listIndex={slot.list_index!}
             revisionCount={revisionCount}
             currentRevision={slot.revision}
+            currentVersionNumber={slot.version_number}
             currentValue={slot.artifact_value}
             currentChangeSource={slot.change_source}
             contentType='image'
@@ -1984,6 +2006,7 @@ export function SlotText({ slot, widget, sessionId, slotId, revisionCount, onRef
                 draftListIndex={effectiveListIndex}
                 revisionCount={revisionCount}
                 currentRevision={slot.revision}
+                currentVersionNumber={slot.version_number}
                 currentValue={slot.artifact_value}
                 currentChangeSource={slot.change_source}
                 contentType='text'
@@ -2280,15 +2303,21 @@ function isWriterWriteBackSlot(
 function WriterWriteBackSummary({
   slot,
   revision,
+  currentChangeSource = slot.change_source,
 }: {
   slot: SlotRevision;
   revision: number;
+  currentChangeSource?: SlotRevision['change_source'];
 }) {
   if (!isWriterWriteBackSlot(slot.slot_id) || !Number.isFinite(revision) || revision <= 0) {
     return null;
   }
 
-  const state = slot.write_back_state ?? 'blocked';
+  const isWorkingDraft = currentChangeSource === 'human';
+  const state = isWorkingDraft && slot.write_back_state === 'synced_clean'
+    ? (typeof slot.last_synced_version === 'number' ? 'synced_dirty' : 'initial_delivery')
+    : (slot.write_back_state ?? 'blocked');
+  const visibleVersion = slot.version_number ?? revision;
   const stateKey = {
     blocked: 'chat.writerIR.writeBackBlocked',
     initial_delivery: 'chat.writerIR.initialDelivery',
@@ -2298,9 +2327,11 @@ function WriterWriteBackSummary({
 
   return (
     <div className={`workflow-slot__writer-writeback-summary workflow-slot__writer-writeback-summary--${state}`} role='status' aria-live='polite'>
-      <span>{tr('chat.writerIR.localVersion', { version: revision })}</span>
-      {typeof slot.last_synced_revision === 'number' && (
-        <span>{tr('chat.writerIR.syncedToVersion', { version: slot.last_synced_revision })}</span>
+      <span>{isWorkingDraft
+        ? tr('chat.slots.draft')
+        : tr('chat.writerIR.localVersion', { version: visibleVersion })}</span>
+      {typeof slot.last_synced_version === 'number' && (
+        <span>{tr('chat.writerIR.syncedToVersion', { version: slot.last_synced_version })}</span>
       )}
       <span>{tr(stateKey)}</span>
       {slot.write_back_url && (
@@ -2531,6 +2562,7 @@ function SlotWriterDocument({
   const [reloadToken, setReloadToken] = useState(0);
   const [localRevision, setLocalRevision] = useState(slot.revision);
   const [localRevisionCount, setLocalRevisionCount] = useState<number | undefined>(revisionCount);
+  const [localChangeSource, setLocalChangeSource] = useState(slot.change_source);
   const [writerEditing, setWriterEditing] = useState(false);
   const [downloadFormatOpen, setDownloadFormatOpen] = useState(false);
   const [downloadMarkdownContent, setDownloadMarkdownContent] = useState('');
@@ -2545,16 +2577,23 @@ function SlotWriterDocument({
   const apiListIndex = -1;
   const editingKey = `${sessionId}:${slotId}:${apiListIndex}:writer-document`;
 
-  const applySavedRevision = useCallback((revision?: number) => {
+  const applySavedRevision = useCallback((
+    revision?: number,
+    changeSource: SlotRevision['change_source'] = 'human',
+  ) => {
     if (typeof revision !== 'number' || revision <= 0) return;
     latestRevisionRef.current = Math.max(latestRevisionRef.current, revision);
     setLocalRevision((current) => Math.max(current, revision));
-    setLocalRevisionCount((current) => Math.max(current ?? 0, revisionCount ?? 0, revision));
-  }, [revisionCount]);
+    setLocalChangeSource(changeSource);
+    if (!isWriterWriteBackSlot(slotId)) {
+      setLocalRevisionCount((current) => Math.max(current ?? 0, revisionCount ?? 0, revision));
+    }
+  }, [revisionCount, slotId]);
 
   useEffect(() => {
     latestRevisionRef.current = Math.max(latestRevisionRef.current, slot.revision);
     setLocalRevision((current) => Math.max(current, slot.revision));
+    setLocalChangeSource(slot.change_source);
   }, [slot.revision]);
 
   useEffect(() => {
@@ -2609,6 +2648,7 @@ function SlotWriterDocument({
   const markdown = rendered?.representation === 'markdown' && typeof rendered.document === 'string'
     ? rendered.document
     : '';
+  const currentDraftSnapshot = rendered?.document ?? slot.artifact_value;
   const displayRevision = localRevision;
   const displayRevisionCount = localRevisionCount ?? revisionCount;
   const showVersionBadge = Boolean(displayRevisionCount && displayRevisionCount > 0);
@@ -2636,6 +2676,7 @@ function SlotWriterDocument({
     _sourceDocument: WriterDocument,
     document: WriterDocument,
     sourceRevision?: string | number,
+    mode: WriterIRSaveMode = 'checkpoint',
   ): Promise<WriterIRSaveResult> => {
     if (readOnly || typeof sourceRevision !== 'number' || sourceRevision <= 0) {
       throw new Error(tr('chat.writerIR.saveFailed'));
@@ -2646,6 +2687,7 @@ function SlotWriterDocument({
         sourceRevision,
         normalizeWriterDocumentForSync(document),
         slotId,
+        ['draft_document', 'flat_draft_document'].includes(slotId) ? 'draft' : mode,
         { silentError: true } as never,
       );
       const result = response?.data?.data;
@@ -2672,7 +2714,11 @@ function SlotWriterDocument({
     }
   }, [applySavedRevision, mediaLibrary, onRefresh, readOnly, sessionId, slotId]);
 
-  const saveMarkdown = useCallback(async (document: string, baseRevision: number) => {
+  const saveMarkdown = useCallback(async (
+    document: string,
+    baseRevision: number,
+    mode: MarkdownSaveMode = 'checkpoint',
+  ) => {
     if (readOnly || baseRevision <= 0) {
       throw new Error(tr('chat.writerMarkdown.saveFailed'));
     }
@@ -2682,6 +2728,7 @@ function SlotWriterDocument({
         baseRevision,
         document,
         slotId,
+        ['draft_document', 'flat_draft_document'].includes(slotId) ? 'draft' : mode,
         { silentError: true } as never,
       );
       const result = response?.data?.data;
@@ -2739,7 +2786,7 @@ function SlotWriterDocument({
   }, [canRewrite]);
 
   const handleRewriteApplied = useCallback((revision?: number) => {
-    applySavedRevision(revision);
+    applySavedRevision(revision, 'human');
     setRewriteSelection(null);
     setRewritePreview(null);
     setRenderedSelection(null);
@@ -2753,7 +2800,7 @@ function SlotWriterDocument({
   }, [rewriteSelection]);
 
   const handleWriteBackSuccess = useCallback((revision: number) => {
-    applySavedRevision(revision);
+    applySavedRevision(revision, 'provider_sync');
     refreshDocument();
   }, [applySavedRevision, refreshDocument]);
 
@@ -2833,6 +2880,7 @@ function SlotWriterDocument({
             sourceRevision={displayRevision}
             readOnly={!canEditWriterIR}
             editingKey={editingKey}
+            feishuVersionOnly={slotId === 'draft_document'}
             onSave={canEditWriterIR ? saveIRDocument : undefined}
             onEditingChange={handleWriterEditingChange}
             onRewriteSelection={canRewrite ? openIRRewrite : undefined}
@@ -2896,7 +2944,11 @@ function SlotWriterDocument({
           onDismiss={() => setRenderedSelection(null)}
         />
       )}
-      <WriterWriteBackSummary slot={slot} revision={displayRevision} />
+      <WriterWriteBackSummary
+        slot={slot}
+        revision={displayRevision}
+        currentChangeSource={localChangeSource}
+      />
       <div className='workflow-slot__artifact-footer'>
         <div className='workflow-slot__artifact-footer-left'>
           {showVersionBadge && !writerEditing && (
@@ -2906,8 +2958,9 @@ function SlotWriterDocument({
               listIndex={apiListIndex}
               revisionCount={displayRevisionCount!}
               currentRevision={displayRevision}
-              currentValue={slot.artifact_value}
-              currentChangeSource={slot.change_source}
+              currentVersionNumber={slot.version_number}
+              currentValue={currentDraftSnapshot}
+              currentChangeSource={localChangeSource}
               contentType='json'
               onRollbackDone={refreshDocument}
             />
@@ -3376,6 +3429,7 @@ function SlotJsonFile({
               listIndex={apiListIndex}
               revisionCount={displayRevisionCount!}
               currentRevision={displayRevision}
+              currentVersionNumber={slot.version_number}
               currentValue={slot.artifact_value}
               currentChangeSource={slot.change_source}
               contentType='json'
@@ -3679,6 +3733,7 @@ function SlotInlineStructured({
               listIndex={apiListIndex}
               revisionCount={displayRevisionCount!}
               currentRevision={displayRevision}
+              currentVersionNumber={slot.version_number}
               currentValue={slot.artifact_value}
               currentChangeSource={slot.change_source}
               contentType='json'
@@ -4290,6 +4345,7 @@ export function SlotFile({ slot, sessionId, slotId, revisionCount, onRefresh, re
               listIndex={apiListIndex}
               revisionCount={revisionCount!}
               currentRevision={slot.revision}
+              currentVersionNumber={slot.version_number}
               currentValue={slot.artifact_value}
               currentChangeSource={slot.change_source}
               contentType='file'
@@ -4456,6 +4512,7 @@ function SlotHtmlFilePreview({
               listIndex={slot.list_index ?? -1}
               revisionCount={revisionCount!}
               currentRevision={slot.revision}
+              currentVersionNumber={slot.version_number}
               currentValue={slot.artifact_value}
               currentChangeSource={slot.change_source}
               contentType='file'
