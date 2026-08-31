@@ -124,7 +124,7 @@ export function applyThreadStreamTerminalToState(
   }
 
   const nextStatus: StepStatus =
-    flowStatus === "paused" || flowStatus === "completed"
+    flowStatus === "completed"
       ? "done"
       : resolveTerminalStepStatusFromFlowStatus(flowStatus);
 

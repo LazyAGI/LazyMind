@@ -5787,6 +5787,7 @@ const enUS = {
     repairTraceEventOpencodeToolSearch: "Search tool",
     repairTraceEventOpencodeToolReadFile: "Read file",
     repairTraceEventOpencodeToolEditFile: "Edit file",
+    repairTraceEventOpencodeToolWriteFile: "Write auxiliary file",
     repairTraceEventOpencodeToolRunCommand: "Run command",
     repairTraceEventOpencodeToolNamed: "Tool {{tool}}",
     repairTraceEventVerifyPreValidationStarted: "Pre-validation started",

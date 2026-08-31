@@ -8,13 +8,17 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"lazymind/agentconnector/internal/agentcatalog"
 	"lazymind/agentconnector/internal/agentexec"
 	"lazymind/agentconnector/internal/chatagent"
 )
 
-const maxEventBytes = 4 << 20
+const (
+	maxEventBytes     = 4 << 20
+	loginPollInterval = 500 * time.Millisecond
+)
 
 var openInteractiveCommand = agentexec.OpenInteractiveCommand
 
@@ -54,6 +58,10 @@ func Probe(binary string) (bool, bool, string) {
 }
 
 func Login(ctx context.Context, binary string) error {
+	return login(ctx, binary, authFile())
+}
+
+func login(ctx context.Context, binary, authenticationFile string) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -63,7 +71,21 @@ func Login(ctx context.Context, binary string) error {
 	if err != nil {
 		return err
 	}
-	return openInteractiveCommand(resolved)
+	if err := openInteractiveCommand(resolved); err != nil {
+		return err
+	}
+	ticker := time.NewTicker(loginPollInterval)
+	defer ticker.Stop()
+	for {
+		if ready, _ := availability(authenticationFile); ready {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
 }
 
 func availability(auth string) (bool, string) {

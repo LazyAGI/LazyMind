@@ -84,6 +84,7 @@ const REPAIR_TRACE_EVENT_TITLE_KEYS: Record<string, string> = {
   "opencode.tool_use.search": "repairTraceEventOpencodeToolSearch",
   "opencode.tool_use.read_file": "repairTraceEventOpencodeToolReadFile",
   "opencode.tool_use.edit_file": "repairTraceEventOpencodeToolEditFile",
+  "opencode.tool_use.write_file": "repairTraceEventOpencodeToolWriteFile",
   "opencode.tool_use.run_command": "repairTraceEventOpencodeToolRunCommand",
   "verify.pre_validation_started": "repairTraceEventVerifyPreValidationStarted",
   "verify.pre_validation_completed": "repairTraceEventVerifyPreValidationCompleted",
@@ -431,8 +432,14 @@ function compareRepairTraceEventsForBuild(
 function resolveStreamDoneStatus(events: NormalizedThreadEvent[]): StepStatus | undefined {
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index];
+    if (!isRepairTraceStageEvent(event)) {
+      continue;
+    }
     const eventType = getRepairTracePayloadEventType(event);
     if (eventType !== "done" && event.type !== "done") {
+      if (getRepairTraceEventType(event)) {
+        return undefined;
+      }
       continue;
     }
     const status = getStringField(event.payload, ["status"])?.toLowerCase();
@@ -453,7 +460,11 @@ function resolveStreamDoneStatus(events: NormalizedThreadEvent[]): StepStatus | 
 function applyStreamDoneClosure(
   rows: RepairTraceRow[],
   events: NormalizedThreadEvent[],
+  repairStepStatus?: StepStatus,
 ): RepairTraceRow[] {
+  if (repairStepStatus === "running" || repairStepStatus === "pending") {
+    return rows;
+  }
   const doneStatus = resolveStreamDoneStatus(events);
   if (!doneStatus) {
     return rows;
@@ -926,7 +937,11 @@ export function buildRepairTraceRows(
 
   const rows = Array.from(rowMap.values()).sort((left, right) => left.order - right.order);
   const attemptClosedRows = applyAttemptScopedClosure(rows, sortedEvents);
-  const streamClosedRows = applyStreamDoneClosure(attemptClosedRows, sortedEvents);
+  const streamClosedRows = applyStreamDoneClosure(
+    attemptClosedRows,
+    sortedEvents,
+    options?.repairStepStatus,
+  );
   return applyRepairStepTerminalClosure(
     streamClosedRows,
     options?.repairStepStatus,
