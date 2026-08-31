@@ -204,6 +204,10 @@ rsync -a --delete \
   --exclude "/.claude" \
   --exclude "/.cursor" \
   --exclude "/.vscode" \
+  --exclude "/.github" \
+  --exclude "/.coverage" \
+  --exclude "/docs" \
+  --exclude "/tests" \
   --exclude "/data" \
   --exclude "/volumes" \
   --exclude "/local/config.env" \
@@ -217,7 +221,18 @@ rsync -a --delete \
   --exclude "skills/research" \
   --exclude "skills/review" \
   --exclude "skills/search" \
+  --exclude "skills/featured" \
   --exclude "node_modules" \
+  --exclude "test" \
+  --exclude "tests" \
+  --exclude "testdata" \
+  --exclude "__snapshots__" \
+  --exclude "*_test.go" \
+  --exclude "test_*.py" \
+  --exclude "*.test.js" \
+  --exclude "*.test.mjs" \
+  --exclude "*.test.ts" \
+  --exclude "*.test.tsx" \
   --exclude "__pycache__" \
   --exclude ".pytest_cache" \
   --exclude ".ruff_cache" \
@@ -230,6 +245,9 @@ rsync -a --delete \
   --exclude "/frontend/public" \
   --exclude "/frontend/scripts" \
   --exclude "/backend/core/core" \
+  --exclude "/README.md" \
+  --exclude "/README.CN.md" \
+  --exclude "/Makefile" \
   "${ROOT}/" "${RUNTIME_ROOT}/app/"
 
 prune_runtime_app "${RUNTIME_ROOT}/app"
