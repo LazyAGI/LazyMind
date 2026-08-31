@@ -1394,7 +1394,7 @@ export default function DefaultModelConfigPanel({
                     </span>
                   </Tooltip>
                 ) : null}
-                {isAdmin ? (
+                {isAdmin && !runtimeFeatures.hideUserGroupSurfaces ? (
                   <Tooltip
                     title={
                       shareStatus[module.key]

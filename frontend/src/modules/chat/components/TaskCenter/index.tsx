@@ -928,9 +928,6 @@ function OrdinaryTaskCard({
         aria-controls={panelId}
         disabled={disabled}
       >
-        <span className="ordinary-task-marker" aria-hidden="true">
-          <StateMarker state={item.state} ordinal={item.ordinal} />
-        </span>
         <span className="ordinary-task-main">
           <span className="ordinary-task-title-row">
             <b>{t("taskCenter.ordinaryTaskLabel", { index: item.ordinal })}</b>

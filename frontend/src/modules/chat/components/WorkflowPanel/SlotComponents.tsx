@@ -1736,6 +1736,59 @@ interface SlotTextProps {
   readOnly?: boolean;
 }
 
+interface SlotTextEditViewport {
+  height: number;
+  selectionStart: number;
+  scrollContainer: HTMLElement | null;
+  scrollTop: number;
+}
+
+function nearestRawTextOffset(
+  rawText: string,
+  renderedText: string,
+  renderedOffset: number,
+  fallbackRatio: number,
+): number {
+  const fallbackOffset = Math.round(rawText.length * fallbackRatio);
+  if (!renderedText) return fallbackOffset;
+
+  const boundedOffset = Math.max(0, Math.min(renderedOffset, renderedText.length));
+  let bestOffset = -1;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  let matchIndex = rawText.indexOf(renderedText);
+  while (matchIndex >= 0) {
+    const candidate = matchIndex + boundedOffset;
+    const distance = Math.abs(candidate - fallbackOffset);
+    if (distance < bestDistance) {
+      bestOffset = candidate;
+      bestDistance = distance;
+    }
+    matchIndex = rawText.indexOf(renderedText, matchIndex + 1);
+  }
+  return bestOffset >= 0 ? bestOffset : fallbackOffset;
+}
+
+function rawTextOffsetAtPoint(
+  root: HTMLElement,
+  rawText: string,
+  clientX: number,
+  clientY: number,
+  fallbackRatio: number,
+): number {
+  const ownerDocument = root.ownerDocument as Document & {
+    caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
+    caretRangeFromPoint?: (x: number, y: number) => Range | null;
+  };
+  const caretPosition = ownerDocument.caretPositionFromPoint?.(clientX, clientY);
+  const caretRange = caretPosition ? null : ownerDocument.caretRangeFromPoint?.(clientX, clientY);
+  const offsetNode = caretPosition?.offsetNode ?? caretRange?.startContainer;
+  const offset = caretPosition?.offset ?? caretRange?.startOffset ?? 0;
+  if (!offsetNode || offsetNode.nodeType !== Node.TEXT_NODE || !root.contains(offsetNode)) {
+    return Math.round(rawText.length * fallbackRatio);
+  }
+  return nearestRawTextOffset(rawText, offsetNode.textContent ?? '', offset, fallbackRatio);
+}
+
 export function SlotText({ slot, widget, sessionId, slotId, revisionCount, onRefresh, readOnly }: SlotTextProps) {
   const raw = slot.artifact_value;
   const { patchSlotCaption } = useWorkflowStore();
@@ -1756,6 +1809,8 @@ export function SlotText({ slot, widget, sessionId, slotId, revisionCount, onRef
   const [captionDraft, setCaptionDraft] = useState('');
   // Flag to skip onBlur save when user presses Escape.
   const cancelledRef = useRef(false);
+  const textEditorRef = useRef<HTMLTextAreaElement>(null);
+  const editViewportRef = useRef<SlotTextEditViewport | null>(null);
 
   useEffect(
     () => () => notifyEditing(editingKey, false),
@@ -1846,12 +1901,41 @@ export function SlotText({ slot, widget, sessionId, slotId, revisionCount, onRef
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleEdit = () => {
+  const handleEdit = (
+    source?: HTMLElement,
+    pointer?: { clientX: number; clientY: number },
+  ) => {
     const saved = (sessionId && slotId)
       ? draftStore.getLocalDraft(sessionId, slotId, effectiveListIndex)
       : null;
     const savedText = saved?.text !== undefined ? String(saved.text) : undefined;
-    setDraft(savedText !== undefined && savedText !== text ? savedText : text);
+    const nextDraft = savedText !== undefined && savedText !== text ? savedText : text;
+    if (source) {
+      const rect = source.getBoundingClientRect();
+      const pointerRatio = pointer && rect.height > 0
+        ? Math.max(0, Math.min(1, (pointer.clientY - rect.top) / rect.height))
+        : 0;
+      const scrollContainer = source.closest<HTMLElement>(
+        '.workflow-panel__tab-content, .workflow-panel__auto-grid, .composite-grid',
+      );
+      editViewportRef.current = {
+        height: rect.height,
+        selectionStart: pointer
+          ? rawTextOffsetAtPoint(
+            source,
+            nextDraft,
+            pointer.clientX,
+            pointer.clientY,
+            pointerRatio,
+          )
+          : 0,
+        scrollContainer,
+        scrollTop: scrollContainer?.scrollTop ?? 0,
+      };
+    } else {
+      editViewportRef.current = null;
+    }
+    setDraft(nextDraft);
     setEditing(true);
     notifyEditing(editingKey, true);
   };
@@ -1953,16 +2037,42 @@ export function SlotText({ slot, widget, sessionId, slotId, revisionCount, onRef
     return undefined;
   })();
 
+  useLayoutEffect(() => {
+    if (!editing) return;
+    const editor = textEditorRef.current;
+    if (!editor) return;
+
+    const viewport = editViewportRef.current;
+    const selectionStart = Math.min(viewport?.selectionStart ?? 0, editor.value.length);
+    editor.focus({ preventScroll: true });
+    editor.setSelectionRange(selectionStart, selectionStart);
+    if (viewport) {
+      const selectionRatio = selectionStart / Math.max(editor.value.length, 1);
+      editor.scrollTop = Math.max(
+        0,
+        selectionRatio * editor.scrollHeight - editor.clientHeight / 2,
+      );
+      if (viewport.scrollContainer) {
+        viewport.scrollContainer.scrollTop = viewport.scrollTop;
+      }
+    }
+  }, [editing]);
+
   if (showPending) {
     return <SlotPending type='text' />;
   }
 
   const textDisplayProps = {
-    onClick: canEdit ? handleEdit : undefined,
+    onClick: canEdit ? (e: React.MouseEvent<HTMLElement>) => handleEdit(
+      e.currentTarget,
+      { clientX: e.clientX, clientY: e.clientY },
+    ) : undefined,
     title: canEdit ? tr('chat.slots.clickToEdit') : undefined,
     role: canEdit ? 'button' as const : undefined,
     tabIndex: canEdit ? 0 : undefined,
-    onKeyDown: canEdit ? (e: React.KeyboardEvent<HTMLElement>) => e.key === 'Enter' && handleEdit() : undefined,
+    onKeyDown: canEdit ? (e: React.KeyboardEvent<HTMLElement>) => {
+      if (e.key === 'Enter') handleEdit(e.currentTarget);
+    } : undefined,
     style: typeof widget?.maxHeight === 'number'
       ? { maxHeight: widget.maxHeight, overflowY: 'auto' as const }
       : undefined,
@@ -1972,13 +2082,16 @@ export function SlotText({ slot, widget, sessionId, slotId, revisionCount, onRef
     <div className='workflow-slot workflow-slot--text'>
       {editing ? (
         <textarea
+          ref={textEditorRef}
           className='workflow-slot__text-editor'
           value={draft}
           onChange={handleChange}
           onKeyDown={handleKeyDown}
           onBlur={handleSave}
-          autoFocus
           rows={6}
+          style={editViewportRef.current?.height
+            ? { height: editViewportRef.current.height }
+            : undefined}
           aria-label={tr('chat.slots.editText')}
         />
       ) : (

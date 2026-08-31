@@ -70,12 +70,12 @@
 
     // A single-document tab can use the complete expanded workspace.
     .workflow-panel__tab-content--list
-      > .workflow-panel__named-slot:only-of-type {
+      > .workflow-panel__named-slot--writer-document:only-of-type {
       flex: 1 1 0;
     }
 
     .workflow-panel__tab-content--list
-      > .workflow-panel__named-slot:only-of-type
+      > .workflow-panel__named-slot--writer-document:only-of-type
       > [role='button'] {
       display: flex;
       flex: 1 1 0;
@@ -83,7 +83,7 @@
     }
 
     .workflow-panel__tab-content--list
-      > .workflow-panel__named-slot:only-of-type
+      > .workflow-panel__named-slot--writer-document:only-of-type
       > [role='button']
       > .workflow-slot--artifact:not(.workflow-slot--pending):not(.workflow-slot--error) {
       flex: 1 1 0;
@@ -94,14 +94,14 @@
     // through SlotRenderer's clickable wrapper, so they need the same height
     // contract as a persisted artifact.
     .workflow-panel__tab-content--list
-      > .workflow-panel__named-slot:only-of-type
+      > .workflow-panel__named-slot--writer-document:only-of-type
       > .workflow-slot--artifact-stream {
       flex: 1 1 0;
       min-height: 0;
     }
 
     .workflow-panel__tab-content--list
-      > .workflow-panel__named-slot:only-of-type
+      > .workflow-panel__named-slot--writer-document:only-of-type
       .workflow-slot__artifact-body {
       flex: 1 1 0;
       min-height: 0;
@@ -112,7 +112,7 @@
     }
 
     .workflow-panel__tab-content--list
-      > .workflow-panel__named-slot:only-of-type
+      > .workflow-panel__named-slot--writer-document:only-of-type
       .writer-markdown-editor {
       flex: 1 1 0;
       min-height: 0;
@@ -120,7 +120,7 @@
     }
 
     .workflow-panel__tab-content--list
-      > .workflow-panel__named-slot:only-of-type
+      > .workflow-panel__named-slot--writer-document:only-of-type
       .writer-markdown-editor__document-layout {
       flex: 1 1 0;
       min-height: 0;
@@ -129,7 +129,7 @@
     }
 
     .workflow-panel__tab-content--list
-      > .workflow-panel__named-slot:only-of-type
+      > .workflow-panel__named-slot--writer-document:only-of-type
       .writer-markdown-editor__main {
       display: flex;
       flex-direction: column;
@@ -138,7 +138,7 @@
     }
 
     .workflow-panel__tab-content--list
-      > .workflow-panel__named-slot:only-of-type
+      > .workflow-panel__named-slot--writer-document:only-of-type
       .writer-markdown-editor__surface {
       flex: 1 1 0;
       min-height: 0;
@@ -147,10 +147,10 @@
     }
 
     .workflow-panel__tab-content--list
-      > .workflow-panel__named-slot:only-of-type
+      > .workflow-panel__named-slot--writer-document:only-of-type
       .writer-markdown-editor__outline-rail,
     .workflow-panel__tab-content--list
-      > .workflow-panel__named-slot:only-of-type
+      > .workflow-panel__named-slot--writer-document:only-of-type
       .writer-markdown-editor__outline {
       max-height: 100%;
     }
@@ -667,10 +667,12 @@
     .workflow-panel__body > [role='tabpanel']:not([hidden]) .workflow-panel__tab-content--list {
       flex: 1 1 auto;
       min-height: 0;
-      overflow: hidden;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      scrollbar-gutter: stable;
     }
 
-    .workflow-panel__tab-content--list > .workflow-panel__named-slot:only-of-type {
+    .workflow-panel__tab-content--list > .workflow-panel__named-slot--writer-document:only-of-type {
       flex: 1 1 auto;
       min-height: 0;
       overflow: hidden;
