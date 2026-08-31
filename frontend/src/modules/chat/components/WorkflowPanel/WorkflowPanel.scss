@@ -1070,10 +1070,13 @@
   overflow: hidden;
 
   &--text {
+    width: 100%;
+    min-width: 0;
     padding: 8px 12px;
     background: #f9fafb;
     border: 1px solid #e5e7eb;
     border-radius: 6px;
+    box-sizing: border-box;
   }
 
   &__text {

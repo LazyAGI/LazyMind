@@ -280,6 +280,7 @@ describe('SlotText editing', () => {
       </div>,
     );
     const scrollContainer = container.querySelector<HTMLElement>('.workflow-panel__tab-content')!;
+    const slotElement = container.querySelector<HTMLElement>('.workflow-slot--text')!;
     const preview = container.querySelector<HTMLElement>('.workflow-slot__text--editable')!;
     const renderedTextNode = preview.querySelector('div')!.firstChild!;
     renderedTextNode.textContent = 'middle target';
@@ -295,6 +296,17 @@ describe('SlotText editing', () => {
       height: 320,
       toJSON: () => ({}),
     });
+    vi.spyOn(slotElement, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 90,
+      top: 90,
+      left: 0,
+      right: 600,
+      bottom: 450,
+      width: 600,
+      height: 360,
+      toJSON: () => ({}),
+    });
     Object.defineProperty(document, 'caretPositionFromPoint', {
       configurable: true,
       value: () => ({ offsetNode: renderedTextNode, offset: 7 }),
@@ -303,7 +315,7 @@ describe('SlotText editing', () => {
     fireEvent.click(preview, { clientX: 120, clientY: 240 });
 
     const editor = container.querySelector<HTMLTextAreaElement>('.workflow-slot__text-editor')!;
-    expect(editor).toHaveStyle({ height: '320px' });
+    expect(editor).toHaveStyle({ height: '360px', minHeight: '360px' });
     expect(editor.selectionStart).toBe(targetOffset);
     expect(document.activeElement).toBe(editor);
     expect(scrollContainer.scrollTop).toBe(84);

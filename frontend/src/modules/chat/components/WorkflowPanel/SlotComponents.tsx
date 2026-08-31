@@ -1911,15 +1911,18 @@ export function SlotText({ slot, widget, sessionId, slotId, revisionCount, onRef
     const savedText = saved?.text !== undefined ? String(saved.text) : undefined;
     const nextDraft = savedText !== undefined && savedText !== text ? savedText : text;
     if (source) {
-      const rect = source.getBoundingClientRect();
-      const pointerRatio = pointer && rect.height > 0
-        ? Math.max(0, Math.min(1, (pointer.clientY - rect.top) / rect.height))
+      const contentRect = source.getBoundingClientRect();
+      const slotElement = source.closest<HTMLElement>('.workflow-slot--text');
+      const slotRect = slotElement?.getBoundingClientRect();
+      const layoutRect = slotRect && slotRect.height > 0 ? slotRect : contentRect;
+      const pointerRatio = pointer && contentRect.height > 0
+        ? Math.max(0, Math.min(1, (pointer.clientY - contentRect.top) / contentRect.height))
         : 0;
       const scrollContainer = source.closest<HTMLElement>(
         '.workflow-panel__tab-content, .workflow-panel__auto-grid, .composite-grid',
       );
       editViewportRef.current = {
-        height: rect.height,
+        height: layoutRect.height,
         selectionStart: pointer
           ? rawTextOffsetAtPoint(
             source,
@@ -1942,6 +1945,9 @@ export function SlotText({ slot, widget, sessionId, slotId, revisionCount, onRef
 
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value;
+    const minimumHeight = editViewportRef.current?.height ?? 0;
+    e.target.style.height = 'auto';
+    e.target.style.height = `${Math.max(minimumHeight, e.target.scrollHeight)}px`;
     setDraft(val);
     if (sessionId && slotId) {
       const draftPayload: Record<string, unknown> = { text: val };
@@ -2043,6 +2049,10 @@ export function SlotText({ slot, widget, sessionId, slotId, revisionCount, onRef
     if (!editor) return;
 
     const viewport = editViewportRef.current;
+    if (viewport) {
+      editor.style.height = 'auto';
+      editor.style.height = `${Math.max(viewport.height, editor.scrollHeight)}px`;
+    }
     const selectionStart = Math.min(viewport?.selectionStart ?? 0, editor.value.length);
     editor.focus({ preventScroll: true });
     editor.setSelectionRange(selectionStart, selectionStart);
@@ -2090,7 +2100,7 @@ export function SlotText({ slot, widget, sessionId, slotId, revisionCount, onRef
           onBlur={handleSave}
           rows={6}
           style={editViewportRef.current?.height
-            ? { height: editViewportRef.current.height }
+            ? { minHeight: editViewportRef.current.height, height: editViewportRef.current.height }
             : undefined}
           aria-label={tr('chat.slots.editText')}
         />
