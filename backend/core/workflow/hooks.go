@@ -284,7 +284,7 @@ func NotifyChatCancel(ctx context.Context, convID string) error {
 	}
 	_ = resp.Body.Close()
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return fmt.Errorf("chat cancel returned HTTP %d", resp.StatusCode)
+		return fmt.Errorf("chat service returned status %d", resp.StatusCode)
 	}
 	return nil
 }
