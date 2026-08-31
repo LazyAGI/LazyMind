@@ -6,11 +6,7 @@ from asyncio import CancelledError
 from unittest.mock import MagicMock
 
 import pytest
-from lazyllm.tools.agent import (
-    PreparedToolCall,
-    ToolExecutionBatch,
-    ToolExecutionRecord,
-)
+from lazyllm.tools.agent import ToolManager
 from lazymind.chat.engine.agent_runtime import (
     AgentExecutionOptions,
     AgentExecutor,
@@ -75,7 +71,7 @@ def test_tool_guard_checks_cancellation_before_dispatch(monkeypatch) -> None:
     middleware = executor_mod.ToolExecutionMiddleware(manager, cancel_check=cancel_check)
 
     with pytest.raises(CancelledError, match='stopped by user'):
-        middleware.execute_prepared_calls([])
+        middleware.execute_with_records([])
 
     manager.execute_prepared_calls.assert_not_called()
 
@@ -114,23 +110,12 @@ def test_executor_enables_builtin_tools_in_trusted_local_mode(monkeypatch) -> No
 
 def test_executor_auto_expands_after_plugin_or_subagent_tool(monkeypatch) -> None:
     agent = MagicMock()
-    manager = MagicMock()
-    prepared = PreparedToolCall(
-        tool_call={
-            'id': 'create',
-            'function': {'name': 'create_subagent', 'arguments': '{}'},
-        },
-        call_id='create',
-        tool_name='create_subagent',
-        arguments={},
-        validated_arguments={},
-    )
-    result = {'ok': True, 'value': 'created'}
-    manager.prepare_tool_calls.return_value = [prepared]
-    manager.execute_prepared_calls.return_value = ToolExecutionBatch(
-        results=[result],
-        records=(ToolExecutionRecord(prepared, result),),
-    )
+
+    def create_subagent():
+        '''Create a subagent.'''
+        return 'created'
+
+    manager = ToolManager([create_subagent])
     agent._tools_manager = manager
     constructor = MagicMock(return_value=agent)
     monkeypatch.setattr(executor_mod._agent_mod, 'ReactAgent', constructor)

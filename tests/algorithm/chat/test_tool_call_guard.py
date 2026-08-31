@@ -1,10 +1,12 @@
+import copy
 import json
 
+import lazyllm
 import pytest
 from lazyllm.tools.agent import (
     PreparedToolCall,
     ResolvedToolAccess,
-    ToolExecutionBatch,
+    ToolExecutionDisposition,
     ToolExecutionRecord,
 )
 from lazymind.chat.engine.agent_runtime.tool_call_guard import (
@@ -29,11 +31,11 @@ def _prepared(name='search', arguments=None, call_id='call-1', access=None):
     )
 
 
-def _record(*, result=None, executed=True, **kwargs):
+def _record(*, result=None, disposition=ToolExecutionDisposition.EXECUTED, **kwargs):
     return ToolExecutionRecord(
         _prepared(**kwargs),
         result if result is not None else {'ok': True, 'value': {'items': ['same']}},
-        executed=executed,
+        disposition=disposition,
     )
 
 
@@ -122,7 +124,7 @@ def test_polling_records_are_excluded_and_hard_blocked_records_are_ignored():
     polling = ResolvedToolAccess(polling=True)
     assert not _notice(monitor.after_tool_batch([
         _record(access=polling),
-        _record(name='blocked', executed=False),
+        _record(name='blocked', disposition=ToolExecutionDisposition.POLICY_BLOCKED),
     ]))
 
     for index in range(3):
@@ -133,64 +135,126 @@ def test_polling_records_are_excluded_and_hard_blocked_records_are_ignored():
     assert _notice(delta)
 
 
-class _PreparedManager:
-    def __init__(self, results):
-        self.results = list(results)
-        self.executed = []
+def _failing_manager(calls):
+    from lazyllm.tools import ToolManager
 
-    def execute_prepared_calls(self, prepared):
-        prepared = list(prepared)
-        self.executed.extend(prepared)
-        results = self.results[:len(prepared)]
-        return ToolExecutionBatch(
-            results=results,
-            records=tuple(
-                ToolExecutionRecord(item, result)
-                for item, result in zip(prepared, results)
-            ),
-        )
+    def search(query: str):
+        '''Fail a search.
+
+        Args:
+            query: Search query.
+        '''
+        calls.append(query)
+        raise RuntimeError('failed')
+
+    return ToolManager([search])
+
+
+def _call(query, call_id):
+    return {
+        'id': call_id,
+        'function': {'name': 'search', 'arguments': {'query': query}},
+    }
 
 
 def test_failure_policy_blocks_same_failed_signature_without_monitoring_block():
-    failure = {'ok': False, 'msg': 'failed'}
-    manager = _PreparedManager([failure])
+    calls = []
+    manager = _failing_manager(calls)
     middleware = ToolExecutionMiddleware(
         manager,
         failure_policy=FailureRetryPolicy({'search': 2}),
     )
-    prepared = _prepared()
 
-    first = middleware.execute_prepared_calls([prepared])
-    second = middleware.execute_prepared_calls([prepared])
+    first = middleware.execute_with_records(_call('same', 'first'))
+    second = middleware.execute_with_records(_call('same', 'second'))
 
     assert first.records[0].executed is True
     assert second.records[0].executed is False
+    assert second.records[0].disposition is ToolExecutionDisposition.POLICY_BLOCKED
     assert second.results[0]['ok'] is False
-    assert len(manager.executed) == 1
+    assert calls == ['same']
     assert not _notice(ExactRepeatMonitor().after_tool_batch(second.records))
 
 
 def test_failure_policy_preserves_consecutive_budget_and_batch_merge():
-    failure = {'ok': False, 'msg': 'failed'}
-    manager = _PreparedManager([failure, failure])
+    calls = []
+    manager = _failing_manager(calls)
     middleware = ToolExecutionMiddleware(
         manager,
         failure_policy=FailureRetryPolicy({'search': 2}),
     )
 
-    first = middleware.execute_prepared_calls([
-        _prepared(arguments={'query': 'one'}, call_id='one'),
-        _prepared(arguments={'query': 'one'}, call_id='duplicate'),
+    first = middleware.execute_with_records([
+        _call('one', 'one'),
+        _call('one', 'duplicate'),
     ])
-    second = middleware.execute_prepared_calls([
-        _prepared(arguments={'query': 'two'}, call_id='two'),
+    second = middleware.execute_with_records([
+        _call('two', 'two'),
     ])
-    third = middleware.execute_prepared_calls([
-        _prepared(arguments={'query': 'three'}, call_id='three'),
+    third = middleware.execute_with_records([
+        _call('three', 'three'),
     ])
 
     assert [record.executed for record in first.records] == [True, False]
+    assert first.records[1].disposition is ToolExecutionDisposition.DEDUPLICATED
     assert first.results[0] == first.results[1]
     assert second.records[0].executed is True
     assert third.records[0].executed is False
-    assert len(manager.executed) == 2
+    assert calls == ['one', 'two']
+
+
+@pytest.mark.parametrize(('function', 'allowed_names'), [
+    ({'name': 'search', 'arguments': {}}, None),
+    ({'name': 'search', 'arguments': '{"query":'}, None),
+    ({'name': 'missing', 'arguments': {}}, None),
+    ({'name': 'search', 'arguments': {'query': 'hidden'}}, set()),
+])
+def test_identical_preparation_failures_trigger_repeat_notice(function, allowed_names):
+    calls = []
+    middleware = ToolExecutionMiddleware(_failing_manager(calls))
+    monitor = ExactRepeatMonitor()
+    notices = []
+
+    for index in range(4):
+        batch = middleware.execute_with_records({
+            'id': f'bad-{index}',
+            'function': copy.deepcopy(function),
+        }, allowed_tool_names=allowed_names)
+        assert batch.records[0].disposition is ToolExecutionDisposition.PREPARATION_FAILED
+        notices.append(_notice(monitor.after_tool_batch(batch.records)))
+
+    assert notices[:2] == [[], []]
+    assert len(notices[2]) == len(notices[3]) == 1
+    assert calls == []
+
+
+def test_round_expansion_only_applies_to_ready_scheduled_calls(monkeypatch):
+    from lazyllm.tools import ToolManager
+
+    def create_subagent(task: str):
+        '''Create a subagent.
+
+        Args:
+            task: Task description.
+        '''
+        return task
+
+    workspace = {}
+    monkeypatch.setitem(lazyllm.locals, '_lazyllm_agent', {'workspace': workspace})
+    middleware = ToolExecutionMiddleware(
+        ToolManager([create_subagent]),
+        expanded_round_limit=200,
+    )
+
+    invalid = middleware.execute_with_records({
+        'id': 'invalid',
+        'function': {'name': 'create_subagent', 'arguments': {}},
+    })
+    assert invalid.records[0].disposition is ToolExecutionDisposition.PREPARATION_FAILED
+    assert '_react_round_limit' not in workspace
+
+    middleware.execute_with_records({
+        'id': 'ready',
+        'function': {'name': 'create_subagent', 'arguments': {'task': 'inspect'}},
+    })
+    assert workspace['_react_round_limit'] == 200

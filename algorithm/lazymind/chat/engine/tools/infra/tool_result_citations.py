@@ -7,7 +7,7 @@ from dataclasses import replace
 from typing import Any
 
 import lazyllm
-from lazyllm.tools.agent import ToolExecutionBatch
+from lazyllm.tools.agent import PreparedToolBatch, ToolExecutionBatch
 from lazyllm.tools.tools.search import SearchBase
 
 from lazymind.chat.engine.tools.lazy_kb import KBToolkit
@@ -138,10 +138,19 @@ class CitationResultMiddleware:
         )
         return ToolExecutionBatch(results=processed, records=records)
 
-    def execute_prepared_calls(self, prepared_calls):
-        prepared_calls = list(prepared_calls or [])
-        batch = self._manager.execute_prepared_calls(prepared_calls)
-        return self._process_batch(batch, [item.tool_call for item in prepared_calls])
+    def execute_prepared_calls(
+        self,
+        prepared_batch: PreparedToolBatch,
+        selected_indices=None,
+    ):
+        batch = self._manager.execute_prepared_calls(
+            prepared_batch,
+            selected_indices=selected_indices,
+        )
+        return self._process_batch(
+            batch,
+            [record.prepared.tool_call for record in batch.records],
+        )
 
     def execute_with_records(self, tools: Any, verbose: bool = False,
                              allowed_tool_names: set[str] | None = None):

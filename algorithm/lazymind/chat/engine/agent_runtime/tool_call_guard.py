@@ -9,10 +9,12 @@ from typing import Any
 
 import lazyllm
 from lazyllm.tools.agent import (
+    PreparedToolBatch,
     PreparedToolCall,
     RuntimeContext,
     RuntimeDelta,
     ToolExecutionBatch,
+    ToolExecutionDisposition,
     ToolExecutionRecord,
 )
 from lazyllm.tools.agent.toolError import tool_failure
@@ -195,7 +197,10 @@ class FailureRetryPolicy:
     def observe(self, records: list[ToolExecutionRecord]) -> None:
         for record in records:
             name = record.tool_name
-            if name not in self._failure_limits or not record.executed:
+            if (
+                name not in self._failure_limits
+                or record.disposition is not ToolExecutionDisposition.EXECUTED
+            ):
                 continue
             signature = self._signature(record.prepared)
             if self._failed(record.result):
@@ -251,7 +256,11 @@ class ExactRepeatMonitor:
         self._pending_notice = False
         eligible = [
             record for record in records
-            if record.executed and not record.access.polling
+            if record.disposition in {
+                ToolExecutionDisposition.EXECUTED,
+                ToolExecutionDisposition.PREPARATION_FAILED,
+                ToolExecutionDisposition.DISPATCH_FAILED,
+            } and not record.access.polling
         ]
         if not eligible:
             self._reset()
@@ -319,16 +328,18 @@ class ToolExecutionMiddleware:
                 f'tool round limit to {self._expanded_round_limit}.'
             )
 
-    def execute_prepared_calls(self, prepared_calls):
+    def execute_prepared_calls(self, prepared_batch: PreparedToolBatch):
         if self._cancel_check is not None:
             self._cancel_check(None)
-        prepared_calls = list(prepared_calls or [])
+        if not isinstance(prepared_batch, PreparedToolBatch):
+            raise TypeError('execute_prepared_calls requires a PreparedToolBatch')
+        prepared_calls = list(prepared_batch.calls)
         if not prepared_calls:
-            return ToolExecutionBatch(results=[], records=())
+            return self._manager.execute_prepared_calls(prepared_batch)
         decision = self._failure_policy.decide(prepared_calls)
-        pending = [prepared_calls[index] for index in decision.pending_indices]
         for index, prepared in enumerate(prepared_calls):
-            self._expand_round_limit(prepared.tool_name)
+            if index in decision.pending_indices and prepared.ready:
+                self._expand_round_limit(prepared.tool_name)
             arguments = redact_session_env_arguments(prepared.tool_name, prepared.arguments)
             if index in decision.blocked_results:
                 emit_tool_call(prepared.tool_call, blocked=True, reason='failure_retry_policy')
@@ -341,7 +352,10 @@ class ToolExecutionMiddleware:
                 emit_tool_call(prepared.tool_call)
                 _log_tool_call('start', prepared.tool_name, args=arguments)
         started_at = time.perf_counter()
-        executed_batch = self._manager.execute_prepared_calls(pending)
+        executed_batch = self._manager.execute_prepared_calls(
+            prepared_batch,
+            selected_indices=decision.pending_indices,
+        )
         elapsed = time.perf_counter() - started_at
         results: list[Any] = [None] * len(prepared_calls)
         records: list[ToolExecutionRecord | None] = [None] * len(prepared_calls)
@@ -359,12 +373,20 @@ class ToolExecutionMiddleware:
             )
         for index, result in decision.blocked_results.items():
             results[index] = result
-            records[index] = ToolExecutionRecord(prepared_calls[index], result, executed=False)
+            records[index] = ToolExecutionRecord(
+                prepared_calls[index],
+                result,
+                disposition=ToolExecutionDisposition.POLICY_BLOCKED,
+            )
             emit_tool_result(prepared_calls[index].tool_call, result)
         for index, source_index in decision.duplicate_sources.items():
             result = results[source_index]
             results[index] = result
-            records[index] = ToolExecutionRecord(prepared_calls[index], result, executed=False)
+            records[index] = ToolExecutionRecord(
+                prepared_calls[index],
+                result,
+                disposition=ToolExecutionDisposition.DEDUPLICATED,
+            )
             emit_tool_result(prepared_calls[index].tool_call, result)
         completed_records = [record for record in records if record is not None]
         self._failure_policy.observe(completed_records)
@@ -376,8 +398,8 @@ class ToolExecutionMiddleware:
     def execute_with_records(self, tools: Any, verbose: bool = False,
                              allowed_tool_names: set[str] | None = None):
         del verbose
-        prepared = self._manager.prepare_tool_calls(tools, allowed_tool_names)
-        return self.execute_prepared_calls(prepared)
+        prepared_batch = self._manager.prepare_tool_calls(tools, allowed_tool_names)
+        return self.execute_prepared_calls(prepared_batch)
 
     def __call__(self, tools: Any, verbose: bool = False,
                  allowed_tool_names: set[str] | None = None) -> Any:
