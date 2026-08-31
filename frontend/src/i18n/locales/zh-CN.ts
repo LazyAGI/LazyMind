@@ -832,6 +832,11 @@ const zhCN = {
     executorConnecting: "正在连接",
     executorLoginRequired: "{{agent}} 未登录",
     executorStatusCheckFailed: "登录状态检测失败，请重新检测；如仍失败，可在终端运行对应 CLI 的状态命令确认。",
+    compactDetectionStatus: "检测情况",
+    compactCLIInstalled: "CLI 已安装",
+    compactCLIMissing: "CLI 未安装",
+    compactCLILoggedIn: "CLI 已登录",
+    compactCLINotLoggedIn: "CLI 未登录",
     mcpClients: {
       codex: "Codex Desktop",
       cursor: "Cursor 桌面版",

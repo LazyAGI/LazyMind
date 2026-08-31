@@ -78,6 +78,11 @@ vi.mock("react-i18next", () => ({
         "agentIntegration.executorConnecting": "正在连接",
         "agentIntegration.executorLoginRequired": "需要登录",
         "agentIntegration.executorStatusCheckFailed": "登录状态检测失败",
+        "agentIntegration.compactDetectionStatus": "检测情况",
+        "agentIntegration.compactCLIInstalled": "CLI 已安装",
+        "agentIntegration.compactCLIMissing": "CLI 未安装",
+        "agentIntegration.compactCLILoggedIn": "CLI 已登录",
+        "agentIntegration.compactCLINotLoggedIn": "CLI 未登录",
         "agentIntegration.mcpClients.codex": "Codex Desktop",
         "agentIntegration.mcpClients.cursor": "Cursor 桌面版",
         "agentIntegration.mcpClients.workbuddy": "WorkBuddy 桌面版",
@@ -138,9 +143,9 @@ const readyCodexExecutor = {
 
 function expandAgent(id: string) {
   const panel = screen.getByTestId(`agent-panel-${id}`);
-  const header = panel.querySelector<HTMLButtonElement>(".agent-integration-card-header");
-  expect(header).not.toBeNull();
-  if (header?.getAttribute("aria-expanded") === "false") fireEvent.click(header);
+  const toggle = panel.querySelector<HTMLButtonElement>(".agent-integration-card-toggle");
+  expect(toggle).not.toBeNull();
+  if (toggle?.getAttribute("aria-expanded") === "false") fireEvent.click(toggle);
   return panel;
 }
 
@@ -161,18 +166,51 @@ describe("AgentIntegrationPage", () => {
     mocks.bindings.mockResolvedValue({ ok: true, data: {} });
   });
 
-  it("keeps Agent rows compact and expands one three-stage configuration flow at a time", async () => {
+  it("keeps Agent rows compact and allows multiple configuration flows to stay expanded", async () => {
     render(<AgentIntegrationPage />);
 
     expect(await screen.findByText("外部 Agent 集成")).toBeInTheDocument();
     expect(screen.getAllByTestId(/^agent-panel-/)).toHaveLength(6);
+    const columns = document.querySelectorAll(".agent-integration-column");
+    expect(columns).toHaveLength(2);
+    expect(columns[0]?.querySelectorAll(".agent-integration-card")).toHaveLength(3);
+    expect(columns[1]?.querySelectorAll(".agent-integration-card")).toHaveLength(3);
     const codex = screen.getByTestId("agent-panel-codex");
     expect(codex.querySelectorAll(".agent-integration-stage")).toHaveLength(3);
     expect(codex.querySelector(".agent-integration-capability")).toBeNull();
 
     const cursor = expandAgent("cursor");
     expect(cursor.querySelectorAll(".agent-integration-stage")).toHaveLength(3);
-    expect(codex.querySelector(".agent-integration-card-detail")).toBeNull();
+    expect(codex.querySelector(".agent-integration-card-detail")).not.toBeNull();
+
+    fireEvent.click(cursor.querySelector<HTMLButtonElement>(".agent-integration-card-toggle")!);
+    expect(cursor.querySelector(".agent-integration-card-detail")).toBeNull();
+    expect(codex.querySelector(".agent-integration-card-detail")).not.toBeNull();
+  });
+
+  it("shows detection details while a collapsed Agent is not fully ready", async () => {
+    render(<AgentIntegrationPage />);
+
+    await screen.findByText("外部 Agent 集成");
+    const cursor = screen.getByTestId("agent-panel-cursor");
+    expect(within(cursor).getByLabelText("检测情况")).toBeInTheDocument();
+    expect(within(cursor).getByText("CLI 未安装")).toBeInTheDocument();
+    expect(within(cursor).queryByRole("switch")).not.toBeInTheDocument();
+  });
+
+  it("shows both connection switches after detection passes and hides a missing version", async () => {
+    render(<AgentIntegrationPage />);
+
+    const codex = await screen.findByTestId("agent-panel-codex");
+    fireEvent.click(codex.querySelector<HTMLButtonElement>(".agent-integration-card-toggle")!);
+
+    const mcpSwitch = within(codex).getByRole("switch", { name: "Codex Desktop 使用 LazyMind MCP" });
+    expect(mcpSwitch).toBeInTheDocument();
+    expect(within(codex).getByRole("switch", { name: "LazyMind 调用 Codex CLI" })).toBeInTheDocument();
+    expect(codex.querySelector(".agent-integration-card-version")).toBeNull();
+
+    fireEvent.mouseOver(mcpSwitch.closest(".agent-integration-compact-control")!);
+    expect(await screen.findByText("调用 LazyMind 能力")).toBeInTheDocument();
   });
 
   it("renders two integration switches and unlocks each only after its prerequisites are ready", async () => {
@@ -328,7 +366,6 @@ describe("AgentIntegrationPage", () => {
 
     await screen.findByText("外部 Agent 集成");
     const raccoon = expandAgent("raccoon");
-    expect(within(raccoon).getByText("商汤小浣熊桌面版 已检测，仅支持接入 LazyMind MCP")).toBeInTheDocument();
     expect(raccoon.querySelectorAll(".agent-integration-stage")).toHaveLength(2);
     expect(within(raccoon).getByRole("switch", { name: "商汤小浣熊桌面版 使用 LazyMind MCP" })).toBeEnabled();
     expect(within(raccoon).queryByRole("switch", { name: /LazyMind 调用/ })).not.toBeInTheDocument();

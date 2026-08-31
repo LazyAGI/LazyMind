@@ -37,6 +37,15 @@
 
   .agent-integration-grid {
     display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+    gap: 10px;
+  }
+
+  .agent-integration-column {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
     gap: 10px;
   }
 
@@ -59,11 +68,21 @@
 
   .agent-integration-card-header {
     display: grid;
-    grid-template-columns: minmax(220px, 1fr) auto 18px;
+    grid-template-columns: minmax(150px, 0.8fr) minmax(0, 1.7fr) auto 28px;
     align-items: center;
     width: 100%;
-    min-height: 78px;
-    padding: 12px 20px;
+    min-height: 72px;
+    gap: 10px;
+    padding: 10px 14px;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    text-align: left;
+  }
+
+  .agent-integration-card-toggle {
+    min-width: 0;
+    padding: 0;
     border: 0;
     background: transparent;
     color: inherit;
@@ -78,9 +97,9 @@
     gap: 12px;
 
     h4.ant-typography {
-      margin: 0 0 2px;
+      margin: 0;
       color: #1f2d46;
-      font-size: 18px;
+      font-size: 16px;
     }
   }
 
@@ -103,17 +122,16 @@
     }
   }
 
-  .agent-integration-card-summary {
+  .agent-integration-card-version {
     display: block;
-    overflow: hidden;
+    margin-top: 2px;
     color: #8592a9;
-    font-size: 13px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    font-size: 11px;
+    line-height: 1.25;
   }
 
   .agent-integration-install-tag.ant-tag {
-    margin: 0 16px;
+    margin: 0;
     padding: 2px 11px;
     border: 0;
     border-radius: 999px;
@@ -135,8 +153,98 @@
     transition: transform 160ms ease;
   }
 
+  .agent-integration-expand-button {
+    display: grid;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    place-items: center;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    cursor: pointer;
+
+    &:hover {
+      background: #f1f5fa;
+    }
+  }
+
   .agent-integration-card.is-expanded .agent-integration-chevron {
     transform: rotate(180deg);
+  }
+
+  .agent-integration-card.is-expanded .agent-integration-card-header {
+    grid-template-columns: minmax(0, 1fr) auto 28px;
+  }
+
+  .agent-integration-compact-detection {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    flex-wrap: wrap;
+    gap: 5px 14px;
+
+    > span {
+      display: flex;
+      align-items: center;
+      min-width: 0;
+      gap: 5px;
+      color: #75839a;
+      font-size: 11px;
+      line-height: 1.35;
+
+      > .anticon {
+        flex: 0 0 auto;
+        color: #e44f48;
+      }
+
+      > span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      &.is-ready > .anticon {
+        color: #16a05d;
+      }
+    }
+  }
+
+  .agent-integration-compact-controls {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    min-width: 0;
+    gap: 7px;
+  }
+
+  .agent-integration-compact-control {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-width: 0;
+    height: 34px;
+    gap: 8px;
+    padding: 0 9px;
+    border: 1px solid #e0e7f1;
+    border-radius: 9px;
+    background: #f9fbfe;
+
+    > span:first-child {
+      overflow: hidden;
+      color: #4c5b71;
+      font-size: 11px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .ant-switch {
+      flex: 0 0 auto;
+    }
+
+    &.is-enabled {
+      border-color: #c8e5d5;
+      background: #f5fbf7;
+    }
   }
 
   .agent-integration-card-detail {
@@ -147,22 +255,24 @@
 
   .agent-integration-flow {
     display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 10px;
+
+    > .agent-integration-stage:last-child {
+      grid-column: 1 / -1;
+    }
   }
 
   .agent-integration-stage {
     display: grid;
-    grid-template-columns: 44px minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
     border: 1px solid #e1e8f2;
     border-radius: 12px;
     background: #fff;
   }
 
   .agent-integration-stage-rail {
-    display: flex;
-    justify-content: center;
-    padding-top: 16px;
-    border-right: 1px dashed #d8e0eb;
+    display: none;
 
     span {
       display: grid;
@@ -376,8 +486,12 @@
   }
 }
 
-@media (max-width: 900px) {
+@media (max-width: 1100px) {
   .agent-integration-page {
+    .agent-integration-grid {
+      grid-template-columns: 1fr;
+    }
+
     .agent-integration-header {
       align-items: stretch;
       flex-direction: column;
@@ -385,6 +499,14 @@
 
     .agent-integration-methods {
       grid-template-columns: 1fr;
+    }
+
+    .agent-integration-flow {
+      grid-template-columns: 1fr;
+
+      > .agent-integration-stage:last-child {
+        grid-column: auto;
+      }
     }
   }
 }
@@ -397,25 +519,17 @@
     }
 
     .agent-integration-card-header {
-      grid-template-columns: minmax(0, 1fr) auto 16px;
+      grid-template-columns: minmax(130px, 0.7fr) minmax(0, 1.3fr) auto 28px;
       min-height: 70px;
       padding: 10px 12px;
     }
 
-    .agent-integration-card-summary {
-      display: none;
-    }
-
     .agent-integration-install-tag.ant-tag {
-      margin: 0 6px;
+      margin: 0;
     }
 
     .agent-integration-card-detail {
       padding: 10px 8px;
-    }
-
-    .agent-integration-stage {
-      grid-template-columns: 36px minmax(0, 1fr);
     }
 
     .agent-integration-stage-copy {
@@ -431,6 +545,35 @@
     .agent-integration-card-footer {
       align-items: flex-start;
       flex-direction: column;
+    }
+  }
+}
+
+@media (max-width: 520px) {
+  .agent-integration-page {
+    .agent-integration-card-header,
+    .agent-integration-card.is-expanded .agent-integration-card-header {
+      grid-template-columns: minmax(0, 1fr) auto 28px;
+    }
+
+    .agent-integration-compact-detection,
+    .agent-integration-compact-controls {
+      grid-column: 1 / -1;
+      grid-row: 2;
+    }
+
+    .agent-integration-compact-controls {
+      display: grid;
+    }
+
+    .agent-integration-install-tag.ant-tag {
+      grid-column: 2;
+      grid-row: 1;
+    }
+
+    .agent-integration-expand-button {
+      grid-column: 3;
+      grid-row: 1;
     }
   }
 }

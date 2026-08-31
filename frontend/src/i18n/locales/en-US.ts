@@ -859,6 +859,11 @@ const enUS = {
     executorConnecting: "Connecting",
     executorLoginRequired: "{{agent}} is not signed in",
     executorStatusCheckFailed: "Sign-in status could not be checked. Check again; if it still fails, run the CLI status command in a terminal.",
+    compactDetectionStatus: "Detection status",
+    compactCLIInstalled: "CLI installed",
+    compactCLIMissing: "CLI not installed",
+    compactCLILoggedIn: "CLI signed in",
+    compactCLINotLoggedIn: "CLI not signed in",
     mcpClients: {
       codex: "Codex Desktop",
       cursor: "Cursor Desktop",
