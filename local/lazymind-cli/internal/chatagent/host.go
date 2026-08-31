@@ -72,11 +72,17 @@ type NativeSession struct {
 }
 
 type NativeTurn struct {
-	ID        string    `json:"turn_id"`
-	User      string    `json:"user"`
-	Assistant string    `json:"assistant"`
-	CreatedAt time.Time `json:"created_at"`
-	Managed   bool      `json:"managed,omitempty"`
+	ID        string        `json:"turn_id"`
+	User      string        `json:"user"`
+	Assistant string        `json:"assistant"`
+	CreatedAt time.Time     `json:"created_at"`
+	Managed   bool          `json:"managed,omitempty"`
+	Images    []NativeImage `json:"images,omitempty"`
+}
+
+type NativeImage struct {
+	Name   string `json:"name"`
+	Base64 string `json:"base64"`
 }
 
 type syncSessionCatalogResponse struct {

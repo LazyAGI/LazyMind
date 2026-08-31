@@ -47,7 +47,11 @@ import { useChatNewMessageStore } from "@/modules/chat/store/chatNewMessage";
 
 import dayjs from "dayjs";
 
-import { ChatServiceApi } from "@/modules/chat/utils/request";
+import {
+  ChatServiceApi,
+  ConversationSettingsApi,
+  type ChatExecutorDescriptor,
+} from "@/modules/chat/utils/request";
 import {
   bumpConversationToTop,
 } from "@/modules/chat/utils/conversationActivity";
@@ -189,13 +193,17 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
     // Values: 'normal' = non-task, 'task' = task. Multiple values allowed.
     const [convTypeFilter, setConvTypeFilter] = useState<string[]>(() => {
       try {
-        return sessionStorage.getItem(CHAT_CONVERSATION_FILTER_KEY) === "task"
-          ? ["task"]
-          : ["normal"];
+        const stored = sessionStorage.getItem(CHAT_CONVERSATION_FILTER_KEY);
+        if (stored?.startsWith("[")) {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+        return stored === "task" ? ["task"] : ["normal"];
       } catch {
         return ["normal"];
       }
     });
+    const [connectedAgents, setConnectedAgents] = useState<ChatExecutorDescriptor[]>([]);
     const [filterPopoverOpen, setFilterPopoverOpen] = useState(false);
     const scrollableTargetId = compact
       ? "sidebarConversationScrollableDiv"
@@ -206,6 +214,21 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
     const pinningConversationRef = useRef(false);
     const { setThink } = useChatThinkStore();
     const { setNewMessage } = useChatNewMessageStore();
+
+    useEffect(() => {
+      let active = true;
+      ConversationSettingsApi().listChatExecutors().then((response) => {
+        if (!active) return;
+        setConnectedAgents(
+          response.data.data.executors.filter(
+            (executor) => executor.kind === "external" && executor.connected,
+          ),
+        );
+      }).catch(() => {
+        // The regular/task filters remain usable if host discovery is unavailable.
+      });
+      return () => { active = false; };
+    }, []);
 
     useEffect(() => {
       const handleFilterChange = (event: Event) => {
@@ -353,6 +376,8 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
       // 'normal' only → is_task_conv=false, 'task' only → is_task_conv=true, both → no filter.
       const hasNormal = activeFilter.includes('normal');
       const hasTask = activeFilter.includes('task');
+      const selectedAgents = activeFilter.filter((value) => value.startsWith('agent:'))
+        .map((value) => value.slice('agent:'.length));
       let isTaskConvParam: string | undefined;
       if (hasNormal && !hasTask) {
         isTaskConvParam = 'false';
@@ -367,9 +392,13 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
             pageToken: isFirst ? "" : pageToken,
             pageSize: 50,
           },
-          isTaskConvParam !== undefined
-            ? { params: { is_task_conv: isTaskConvParam } }
-            : undefined,
+          { params: {
+            ...(isTaskConvParam !== undefined ? { is_task_conv: isTaskConvParam } : {}),
+            assistants: [
+              ...(hasNormal || hasTask ? ['lazymind'] : []),
+              ...selectedAgents,
+            ].join(','),
+          } },
         )
         .then((res) => {
           const conversations: SidebarConversation[] =
@@ -809,7 +838,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
                                   try {
                                     sessionStorage.setItem(
                                       CHAT_CONVERSATION_FILTER_KEY,
-                                      next.length === 1 ? next[0] : "all",
+                                      JSON.stringify(next),
                                     );
                                   } catch {
                                     // Ignore storage errors.
@@ -820,6 +849,11 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
                               >
                                 <Checkbox value="normal">{t("chat.normalConversation")}</Checkbox>
                                 <Checkbox value="task">{t("chat.taskConversation")}</Checkbox>
+                                {connectedAgents.map((agent) => (
+                                  <Checkbox key={agent.id} value={`agent:${agent.id}`}>
+                                    {agent.display_name}
+                                  </Checkbox>
+                                ))}
                               </Checkbox.Group>
                             </div>
                           }

@@ -84,9 +84,14 @@ prune_python_runtime() {
 assert_desktop_runtime_app() {
   local app_root="$1"
   local frontend_dist="${app_root}/frontend/dist/index.html"
+  local repo_marker="${app_root}/Makefile"
   local lazyllm_source="${app_root}/algorithm/lazyllm/lazyllm"
   if [[ ! -f "${frontend_dist}" ]]; then
     echo "desktop frontend dist is required: ${frontend_dist}" >&2
+    exit 1
+  fi
+  if [[ ! -f "${repo_marker}" ]]; then
+    echo "desktop runtime repo marker is required: ${repo_marker}" >&2
     exit 1
   fi
   if [[ "${RELEASE_BUILD}" != "true" && ! -d "${lazyllm_source}" ]]; then
@@ -247,7 +252,6 @@ rsync -a --delete \
   --exclude "/backend/core/core" \
   --exclude "/README.md" \
   --exclude "/README.CN.md" \
-  --exclude "/Makefile" \
   "${ROOT}/" "${RUNTIME_ROOT}/app/"
 
 prune_runtime_app "${RUNTIME_ROOT}/app"

@@ -4,10 +4,16 @@
 package externalcontext
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"io"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 	"unicode"
@@ -17,8 +23,85 @@ import (
 	"gorm.io/gorm/clause"
 
 	"lazymind/core/common/orm"
+	"lazymind/core/doc"
 	"lazymind/core/settings"
 )
+
+var (
+	codexRequestMarker = regexp.MustCompile(`(?im)^#+\s*My request for Codex:\s*$`)
+	codexImageTag      = regexp.MustCompile(`(?i)<image\b[^>]*\bpath="([^"]+)"[^>]*>`)
+	codexAnyImageTag   = regexp.MustCompile(`(?i)</?image\b[^>]*>`)
+)
+
+func normalizeCodexUserMessage(owner, historyID, raw string, transferred []NativeImage) (string, []map[string]any) {
+	const maxImportedImageBytes = 25 << 20
+	marker := codexRequestMarker.FindStringIndex(raw)
+	if marker == nil {
+		return raw, nil
+	}
+	request := strings.TrimSpace(raw[marker[1]:])
+	inputs := []map[string]any{{"input_type": "text", "text": strings.TrimSpace(codexAnyImageTag.ReplaceAllString(request, ""))}}
+	attachmentRoot := filepath.Join(doc.UploadRoot(), "external-agent-attachments", deterministicID("owner", owner), historyID)
+	transferredByName := make(map[string]string, len(transferred))
+	for _, image := range transferred {
+		if name := filepath.Base(strings.TrimSpace(image.Name)); name != "." && name != "" {
+			transferredByName[name] = image.Base64
+		}
+	}
+	for _, match := range codexImageTag.FindAllStringSubmatch(request, -1) {
+		if len(match) < 2 {
+			continue
+		}
+		sourcePath := filepath.Clean(strings.TrimSpace(match[1]))
+		switch strings.ToLower(filepath.Ext(sourcePath)) {
+		case ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp":
+		default:
+			continue
+		}
+		filename := filepath.Base(sourcePath)
+		var source io.Reader
+		closeSource := func() {}
+		if encoded := transferredByName[filename]; encoded != "" {
+			content, decodeErr := base64.StdEncoding.DecodeString(encoded)
+			if decodeErr != nil || len(content) > maxImportedImageBytes {
+				continue
+			}
+			source = bytes.NewReader(content)
+		} else {
+			local, openErr := os.Open(sourcePath)
+			if openErr != nil {
+				continue
+			}
+			info, statErr := local.Stat()
+			if statErr != nil || !info.Mode().IsRegular() || info.Size() > maxImportedImageBytes {
+				local.Close()
+				continue
+			}
+			source = local
+			closeSource = func() { _ = local.Close() }
+		}
+		if mkdirErr := os.MkdirAll(attachmentRoot, 0o700); mkdirErr != nil {
+			closeSource()
+			continue
+		}
+		targetPath := filepath.Join(attachmentRoot, filename)
+		target, createErr := os.OpenFile(targetPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+		if createErr == nil {
+			_, createErr = io.Copy(target, source)
+			target.Close()
+		}
+		closeSource()
+		if createErr != nil {
+			continue
+		}
+		if reference := doc.StaticFileReferenceFromAnyStoragePath(targetPath); reference != "" {
+			inputs = append(inputs, map[string]any{
+				"input_type": "image", "uri": reference, "file_id": filename,
+			})
+		}
+	}
+	return inputs[0]["text"].(string), inputs
+}
 
 var (
 	ErrInvalidSource = errors.New("invalid external Agent source")
@@ -51,11 +134,17 @@ type NativeSession struct {
 }
 
 type NativeTurn struct {
-	ID        string    `json:"turn_id"`
-	User      string    `json:"user"`
-	Assistant string    `json:"assistant"`
-	CreatedAt time.Time `json:"created_at"`
-	Managed   bool      `json:"managed,omitempty"`
+	ID        string        `json:"turn_id"`
+	User      string        `json:"user"`
+	Assistant string        `json:"assistant"`
+	CreatedAt time.Time     `json:"created_at"`
+	Managed   bool          `json:"managed,omitempty"`
+	Images    []NativeImage `json:"images,omitempty"`
+}
+
+type NativeImage struct {
+	Name   string `json:"name"`
+	Base64 string `json:"base64"`
 }
 
 // Link is the resolved LazyMind authority for one provider-native turn.
@@ -357,6 +446,17 @@ func (s *Service) SyncSessionCatalog(
 				len([]rune(turn.User)) > 1<<20 || len([]rune(turn.Assistant)) > 1<<20 {
 				continue
 			}
+			if len(turn.Images) > 4 {
+				turn.Images = turn.Images[:4]
+			}
+			validImages := make([]NativeImage, 0, len(turn.Images))
+			for _, image := range turn.Images {
+				image.Name = filepath.Base(strings.TrimSpace(image.Name))
+				if validIdentity(image.Name, 255) && len(image.Base64) <= 7<<20 {
+					validImages = append(validImages, image)
+				}
+			}
+			turn.Images = validImages
 			validTurns = append(validTurns, turn)
 		}
 		session.Turns = validTurns
@@ -516,6 +616,11 @@ func (s *Service) importNativeSession(
 		}
 		identity := owner + "\x00" + provider + "\x00" + hostID + "\x00" + session.ThreadID + "\x00" + turn.ID
 		historyID := deterministicID("mcp-history", identity)
+		userContent := turn.User
+		var importedInputs []map[string]any
+		if provider == "codex" {
+			userContent, importedInputs = normalizeCodexUserMessage(owner, historyID, turn.User, turn.Images)
+		}
 		managedHistoryID, err := s.managedHistoryID(ctx, owner, provider, session.ThreadID, binding.ConversationID, turn, createdAt)
 		if err != nil {
 			return err
@@ -524,7 +629,7 @@ func (s *Service) importNativeSession(
 			if err := s.db.WithContext(ctx).Model(&orm.ChatHistory{}).
 				Where("id = ? AND conversation_id = ?", managedHistoryID, binding.ConversationID).
 				Updates(map[string]any{
-					"raw_content": turn.User, "content": turn.User, "result": turn.Assistant,
+					"raw_content": userContent, "content": userContent, "result": turn.Assistant,
 					"update_time": createdAt,
 				}).Error; err != nil {
 				return err
@@ -548,26 +653,43 @@ func (s *Service) importNativeSession(
 		}
 		if existing == 0 {
 			maxSequence++
-			ext, _ := json.Marshal(map[string]any{"external_agent_activity": map[string]any{
+			extPayload := map[string]any{"external_agent_activity": map[string]any{
 				"provider": provider, "host_id": hostID,
 				"thread_id": session.ThreadID, "turn_id": turn.ID,
 				"source": "native_transcript",
-			}})
+			}}
+			if len(importedInputs) > 0 {
+				extPayload["input"] = importedInputs
+			}
+			ext, _ := json.Marshal(extPayload)
 			history := orm.ChatHistory{
 				ID: historyID, Seq: maxSequence, ConversationID: binding.ConversationID,
-				AlgorithmID: "external:" + provider, RawContent: turn.User, Content: turn.User,
+				AlgorithmID: "external:" + provider, RawContent: userContent, Content: userContent,
 				Result: turn.Assistant, Ext: ext,
 				TimeMixin: orm.TimeMixin{CreateTime: createdAt, UpdateTime: createdAt},
 			}
 			if err := s.db.WithContext(ctx).Create(&history).Error; err != nil {
 				return err
 			}
-		} else if err := s.db.WithContext(ctx).Model(&orm.ChatHistory{}).Where("id = ?", historyID).
-			Updates(map[string]any{
-				"raw_content": turn.User, "content": turn.User, "result": turn.Assistant,
+		} else {
+			updates := map[string]any{
+				"raw_content": userContent, "content": userContent, "result": turn.Assistant,
 				"update_time": createdAt,
-			}).Error; err != nil {
-			return err
+			}
+			if len(importedInputs) > 0 {
+				ext, _ := json.Marshal(map[string]any{
+					"external_agent_activity": map[string]any{
+						"provider": provider, "host_id": hostID, "thread_id": session.ThreadID,
+						"turn_id": turn.ID, "source": "native_transcript",
+					},
+					"input": importedInputs,
+				})
+				updates["ext"] = ext
+			}
+			if err := s.db.WithContext(ctx).Model(&orm.ChatHistory{}).Where("id = ?", historyID).
+				Updates(updates).Error; err != nil {
+				return err
+			}
 		}
 	}
 	var historyCount int64

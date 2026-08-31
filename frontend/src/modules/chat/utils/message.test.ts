@@ -10,9 +10,22 @@ import {
   mergeChatMessageLists,
   mergeConversationTrailIntoMessageList,
   normalizeMessageInputs,
+  normalizeImportedUserText,
   stripAskUserReceipt,
   stripCitationFromText,
 } from "./message";
+
+describe("normalizeImportedUserText", () => {
+  it("shows only the request body from an existing Codex transport envelope", () => {
+    expect(normalizeImportedUserText(`# Files mentioned by the user:
+
+## image.png: /tmp/image.png
+
+## My request for Codex:
+修复界面
+<image name="Image #1" path="/tmp/image.png"></image>`)).toBe("修复界面");
+  });
+});
 
 describe("isAskPendingReadOnly", () => {
   it("keeps the latest unanswered Ask interactive after history reload", () => {
@@ -125,6 +138,22 @@ describe("citation helpers", () => {
 });
 
 describe("buildChatMessageListFromHistory", () => {
+  it("uses a persisted image URI when imported history has no base64 payload", () => {
+    const list = buildChatMessageListFromHistory([
+      {
+        id: "history-1",
+        query: "hello",
+        input: [
+          { input_type: "text", text: "hello" },
+          { input_type: "image", uri: "/static-files/imported/image.png", file_id: "image.png" },
+        ],
+      },
+    ], { reverseHistory: false });
+
+    expect(list[0].images).toEqual([
+      { base64: "/static-files/imported/image.png", uid: "image.png" },
+    ]);
+  });
   it("returns an empty list for null/undefined history", () => {
     expect(buildChatMessageListFromHistory(null)).toEqual([]);
     expect(buildChatMessageListFromHistory(undefined)).toEqual([]);
