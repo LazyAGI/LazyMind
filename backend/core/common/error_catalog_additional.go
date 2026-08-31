@@ -323,6 +323,7 @@ func init() {
 	registerAdditionalError("task is terminal", http.StatusConflict, 2002049)
 	registerAdditionalError("chat_executor must be 'lazymind', 'codex', 'cursor', or 'workbuddy'", http.StatusBadRequest, 2002050)
 	registerAdditionalErrorAlias("assistant must be 'lazymind', 'codex', 'cursor', or 'workbuddy'", "chat_executor must be 'lazymind', 'codex', 'cursor', or 'workbuddy'", http.StatusBadRequest, 2002050)
+	registerAdditionalErrorAlias("assistants contains an unsupported chat executor", "chat_executor must be 'lazymind', 'codex', 'cursor', or 'workbuddy'", http.StatusBadRequest, 2002050)
 	registerAdditionalError("conversation has an unsupported chat executor", http.StatusConflict, 2002051)
 	registerAdditionalError("external chat executors require streaming", http.StatusConflict, 2002052)
 	registerAdditionalError("unsupported external chat provider", http.StatusBadRequest, 2002053)
