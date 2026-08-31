@@ -131,7 +131,7 @@ func TestWindowsCommandDiscoveryFindsPackagedCLIWithoutProductPathRules(t *testi
 	t.Setenv("PATH", "")
 
 	candidates := platformExecutableCandidates([]string{"custom-agent"})
-	if len(candidates) == 0 || !strings.EqualFold(candidates[0], command) {
+	if len(candidates) == 0 || !SameExecutable(candidates[0], command) {
 		t.Fatalf("candidates=%#v want=%q", candidates, command)
 	}
 }
@@ -157,7 +157,7 @@ func TestWindowsCommandDiscoveryFindsCLIAlongsideBoundDesktopApplication(t *test
 	}
 
 	candidates := platformExecutableCandidates([]string{"custom-agent"})
-	if len(candidates) == 0 || !strings.EqualFold(candidates[0], command) {
+	if len(candidates) == 0 || !SameExecutable(candidates[0], command) {
 		t.Fatalf("candidates=%#v want=%q", candidates, command)
 	}
 }
