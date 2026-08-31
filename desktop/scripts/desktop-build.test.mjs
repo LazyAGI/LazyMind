@@ -721,6 +721,11 @@ test("Desktop supervises the external Agent host until the application quits", (
     /function beginFastQuit[\s\S]*clearTimeout\(agentHostRestartTimer\)[\s\S]*agentHostProcess\?\.kill\(\)/,
     "application shutdown must disable supervision before stopping the Agent host",
   );
+  assert.match(
+    source,
+    /"agent", "host", "run", "--provider", "all", "--owner-pid", String\(process\.pid\)/,
+    "the Agent host must self-terminate if Desktop exits without running cleanup",
+  );
 });
 
 test("Desktop Agent login returns immediately and refreshes the Host when login exits", () => {

@@ -28,6 +28,7 @@ import (
 )
 
 const agentDiscoveryRetryDelay = 2 * time.Second
+const ownerProcessPollInterval = time.Second
 
 const maxInternalSessionBytes = 1 << 20
 
@@ -397,6 +398,7 @@ func runAgent(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 		flags.SetOutput(stderr)
 		provider := flags.String("provider", "codex", "Chat Agent provider: codex, cursor, workbuddy, or all")
 		agentBinary := flags.String("agent-bin", "", "selected external Agent CLI executable")
+		ownerPID := flags.Int("owner-pid", 0, "exit when this direct parent process exits")
 		if err := flags.Parse(args[2:]); err != nil {
 			return err
 		}
@@ -419,6 +421,9 @@ func runAgent(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 			return errors.New("--agent-bin requires one explicit --provider")
 		}
 		if action == "status" {
+			if *ownerPID != 0 {
+				return errors.New("--owner-pid is only supported by agent host run")
+			}
 			statuses := make(map[string]any, len(providers))
 			for _, name := range providers {
 				var status map[string]any
@@ -436,9 +441,50 @@ func runAgent(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 		if err != nil {
 			return err
 		}
-		return runAgentHosts(ctx, api, policy, providers, *agentBinary, stderr)
+		hostCtx, stopOwnerWatch, err := contextWithOwnerProcess(
+			ctx, *ownerPID, os.Getppid, ownerProcessPollInterval,
+		)
+		if err != nil {
+			return err
+		}
+		defer stopOwnerWatch()
+		return runAgentHosts(hostCtx, api, policy, providers, *agentBinary, stderr)
 	}
 	return errors.New("usage: lazymind agent host <run|status>")
+}
+
+func contextWithOwnerProcess(
+	ctx context.Context,
+	ownerPID int,
+	parentPID func() int,
+	pollInterval time.Duration,
+) (context.Context, context.CancelFunc, error) {
+	if ownerPID == 0 {
+		return ctx, func() {}, nil
+	}
+	if ownerPID < 0 {
+		return nil, nil, errors.New("--owner-pid must be a positive process ID")
+	}
+	if parentPID() != ownerPID {
+		return nil, nil, fmt.Errorf("owner pid %d is not the current parent process", ownerPID)
+	}
+	ownerCtx, cancel := context.WithCancel(ctx)
+	go func() {
+		ticker := time.NewTicker(pollInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ownerCtx.Done():
+				return
+			case <-ticker.C:
+				if parentPID() != ownerPID {
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+	return ownerCtx, cancel, nil
 }
 
 func hostProviders(value string) ([]string, error) {

@@ -680,7 +680,9 @@ function startAgentHost() {
   }
   clearTimeout(agentHostRestartTimer);
   agentHostRestartTimer = undefined;
-  const child = spawn(agentConnectorPath, ["agent", "host", "run", "--provider", "all"], {
+  const child = spawn(agentConnectorPath, [
+    "agent", "host", "run", "--provider", "all", "--owner-pid", String(process.pid),
+  ], {
     env: sidecarEnv(),
     stdio: ["ignore", "ignore", "pipe"],
     detached: false,
