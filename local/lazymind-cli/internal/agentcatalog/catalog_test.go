@@ -37,6 +37,22 @@ func TestTranscriptTurnsKeepsCodexCommentaryAndCollapsesRollbackDuplicate(t *tes
 	}
 }
 
+func TestTranscriptTurnsDoesNotMarkOrdinaryCodexUserMessageAsManaged(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "rollout.jsonl")
+	content := strings.Join([]string{
+		`{"timestamp":"2026-08-31T01:00:00Z","type":"response_item","payload":{"type":"message","id":"response-user","role":"user","content":[{"type":"input_text","text":"检查这个 PR"}]}}`,
+		`{"timestamp":"2026-08-31T01:00:01Z","type":"event_msg","payload":{"type":"user_message","client_id":"desktop-user","message":"检查这个 PR"}}`,
+		`{"timestamp":"2026-08-31T01:00:02Z","type":"response_item","payload":{"type":"message","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"发现一个问题"}]}}`,
+	}, "\n")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	turns := transcriptTurns(path, "codex")
+	if len(turns) != 1 || turns[0].ID != "desktop-user" || turns[0].Managed {
+		t.Fatalf("turns = %#v", turns)
+	}
+}
+
 func TestCodexUserImagesTransfersReferencedClipboardImage(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "clipboard.png")
 	content := []byte("png-test-content")

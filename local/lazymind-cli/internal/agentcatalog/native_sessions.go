@@ -380,7 +380,10 @@ func transcriptTurns(path, provider string) []chatagent.NativeTurn {
 			current = &chatagent.NativeTurn{ID: turnID, User: text, CreatedAt: message.timestamp, Managed: managed}
 		case "identity":
 			if current != nil && message.id != "" && cleanUserText(message.text) == current.User {
-				current.ID, current.Managed = message.id, true
+				// Codex emits user_message for ordinary Desktop turns too.  It is
+				// useful as the stable turn identity, but it does not mean that the
+				// turn was launched and persisted by LazyMind.
+				current.ID = message.id
 			}
 		case "assistant":
 			if current != nil && message.text != "" {
