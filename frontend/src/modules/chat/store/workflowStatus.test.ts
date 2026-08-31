@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { reconcileWorkflowSessionStatus } from './workflowStatus';
+import { isWorkflowReadyToStart, reconcileWorkflowSessionStatus } from './workflowStatus';
 
 describe('reconcileWorkflowSessionStatus', () => {
   it('changes a stale active session to waiting when the next step is ready', () => {
@@ -46,5 +46,38 @@ describe('reconcileWorkflowSessionStatus', () => {
       ready: [],
       blocked: [],
     })).toBe('active');
+  });
+});
+
+describe('isWorkflowReadyToStart', () => {
+  it('distinguishes an undispatched ready step from an approval wait', () => {
+    expect(isWorkflowReadyToStart('waiting', {
+      current: [],
+      ready: ['prepare'],
+      nodes: { prepare: { requires_approval: false } },
+    })).toBe(true);
+  });
+
+  it('keeps a ready step that requires approval labeled as waiting', () => {
+    expect(isWorkflowReadyToStart('waiting', {
+      current: [],
+      ready: ['prepare'],
+      nodes: { prepare: { requires_approval: true } },
+    })).toBe(false);
+  });
+
+  it('does not guess when approval metadata is missing', () => {
+    expect(isWorkflowReadyToStart('waiting', {
+      current: [],
+      ready: ['prepare'],
+    })).toBe(false);
+  });
+
+  it('does not relabel a wait after a step has executed', () => {
+    expect(isWorkflowReadyToStart('waiting', {
+      current: [],
+      ready: ['outline'],
+      nodes: { outline: { requires_approval: false } },
+    }, 1)).toBe(false);
   });
 });

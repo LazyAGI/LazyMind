@@ -66,6 +66,20 @@ describe("useCiteMessagesInput", () => {
     expect(result.current.citeHistoryIds).toEqual([undefined]);
   });
 
+  it("does not add the same cite message twice", () => {
+    const { result } = setup();
+
+    act(() => {
+      result.current.handleAddCiteMessage("same text", "h1");
+    });
+    act(() => {
+      result.current.handleAddCiteMessage(" same text ", "h2");
+    });
+
+    expect(result.current.citeMessages).toEqual(["same text"]);
+    expect(result.current.citeHistoryIds).toEqual(["h1"]);
+  });
+
   it("warns and stops adding once MAX_CITE_MESSAGE_COUNT is reached", () => {
     const { result } = setup();
 

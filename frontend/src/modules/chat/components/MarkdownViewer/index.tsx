@@ -1,10 +1,11 @@
-import Markdown from "react-markdown";
+import Markdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import classnames from "classnames";
 import "katex/dist/katex.min.css";
-import { Image, Popover } from "antd";
+import { Dropdown, Image, Popover, message } from "antd";
+import type { MenuProps } from "antd";
 import rehypeSanitize from "rehype-sanitize";
 import { useTranslation } from "react-i18next";
 import "../../../../components/MarkdownViewer/markdown.scss";
@@ -13,20 +14,46 @@ import {
   createContext,
   isValidElement,
   memo,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
   useState,
+  type MouseEvent,
+  type ReactNode,
 } from "react";
 import { customSchema } from "./config";
 import rehypeRaw from "rehype-raw";
 import {
-	basenameFromPath,
+  basenameFromPath,
   resolveCoreAssetUrl,
   resolveMarkdownImageUrlAsync,
 } from "@/modules/knowledge/utils/imageUrl";
+import {
+  useTaskCenterStore,
+  type ConversationArtifact,
+} from "@/modules/chat/store/taskCenter";
+import {
+  conversationHasFileIdLink,
+  findArtifactByFileId,
+  getArtifactFilename,
+  getArtifactSignSource,
+  getArtifactTextContent,
+  getFileIdFromHref,
+  isBrowserDownloadHref,
+  isInlineDownloadableArtifact,
+  normalizeArtifactFileLinks,
+} from "@/modules/chat/utils/artifactLinks";
+import {
+  downloadArtifactFile,
+  isAppleDesktopPlatform,
+  revealArtifactFile,
+  saveArtifactFileAs,
+} from "@/modules/chat/utils/artifactFileActions";
+import { hasDesktopFileBridge } from "@/runtime/desktopBridge";
 import HtmlBlock from "./HtmlBlock";
 import MermaidBlock from "./MermaidBlock";
+import EditableBlock from "./EditableBlock";
 import {
   getLanguageFromClassName,
   getRawLanguageFromClassName,
@@ -46,12 +73,15 @@ import {
 } from "@/modules/chat/utils/sourceAdapter";
 
 const SOURCE_PREFIXES = ["#source-", "#user-content-source-"];
+const EMPTY_CONVERSATION_ARTIFACTS: ConversationArtifact[] = [];
 const BOLD_BARE_URL_PATTERN = /\*\*((?:https?:\/\/|www\.)[^\s*<>()]+)\*\*/g;
 // Matches bare URLs that are NOT already inside Markdown link syntax [...](...)
 // Captures trailing fullwidth/CJK punctuation so it can be excluded from the URL.
 const BARE_URL_PATTERN = /(?<!\(|\[)(https?:\/\/[^\s<>[\]"'`（）。，、；：！？…—]+)/g;
 // Fullwidth and CJK punctuation that should never be treated as part of a URL.
 const TRAILING_FULLWIDTH_PUNCT = /[（）。，、；：！？…—\u3000-\u303F\uFF00-\uFFEF]+$/;
+const SAFE_INLINE_IMAGE_DATA = /^data:image\/(?:png|jpe?g|gif|webp|bmp);base64,/i;
+const EDITABLE_FENCE_PATTERN = /```editable[ \t]*\r?\n[\s\S]*?\r?\n```/g;
 
 const markdownRemarkWorkflows = [[remarkGfm, { singleTilde: false }], remarkMath];
 const markdownRehypeWorkflows = [
@@ -60,12 +90,21 @@ const markdownRehypeWorkflows = [
   [rehypeSanitize, customSchema],
 ];
 
+export function markdownUrlTransform(value: string): string {
+  return SAFE_INLINE_IMAGE_DATA.test(value) ? value : defaultUrlTransform(value);
+}
+
 const MarkdownRenderContext = createContext<{
   isStreaming: boolean;
   markSources: ChatSource[];
+  artifacts: ConversationArtifact[];
+  conversationId?: string;
+  historyId?: string;
+  onCiteMessage?: (text: string) => void;
 }>({
   isStreaming: false,
   markSources: [],
+  artifacts: EMPTY_CONVERSATION_ARTIFACTS,
 });
 
 const SOURCE_PREVIEW_TEXT_LIMIT = 280;
@@ -156,6 +195,28 @@ function normalizeBareUrls(content: string) {
   });
 }
 
+function normalizeMarkdownForDisplay(content: string) {
+  const normalizeFragment = (fragment: string) =>
+    normalizeBoldBareUrls(
+      normalizeBareUrls(
+        normalizeArtifactFileLinks(
+          stripRedundantSourceUrls(normalizeSourceMarkers(fragment)),
+        ),
+      ),
+    );
+  let result = "";
+  let cursor = 0;
+
+  for (const match of content.matchAll(EDITABLE_FENCE_PATTERN)) {
+    const index = match.index ?? 0;
+    result += normalizeFragment(content.slice(cursor, index));
+    result += match[0];
+    cursor = index + match[0].length;
+  }
+
+  return result + normalizeFragment(content.slice(cursor));
+}
+
 const ImageComponent = (props: any) => {
   const { t } = useTranslation();
   const [imageLoadError, setImageLoadError] = useState(false);
@@ -244,7 +305,13 @@ const CodeComponent = (props: any) => {
 };
 
 const PreComponent = (props: any) => {
-  const { isStreaming } = useContext(MarkdownRenderContext);
+  const {
+    isStreaming,
+    markSources,
+    conversationId,
+    historyId,
+    onCiteMessage,
+  } = useContext(MarkdownRenderContext);
   const child = Array.isArray(props.children) ? props.children[0] : props.children;
 
   if (isValidElement(child)) {
@@ -255,6 +322,19 @@ const PreComponent = (props: any) => {
     const rawLanguage = getRawLanguageFromClassName(childProps.className);
     const language = getLanguageFromClassName(childProps.className);
     const code = String(childProps.children ?? "").replace(/\n$/, "");
+
+    if (rawLanguage === "editable" && !isStreaming && conversationId && historyId) {
+      return (
+        <EditableBlock
+          key={`${conversationId}:${historyId}`}
+          value={code}
+          conversationId={conversationId}
+          historyId={historyId}
+          sources={markSources}
+          onCiteSelection={onCiteMessage}
+        />
+      );
+    }
 
     if (rawLanguage === "html" || rawLanguage === "htm") {
       return <HtmlBlock code={code} isStreaming={isStreaming} />;
@@ -268,18 +348,184 @@ const PreComponent = (props: any) => {
   return <pre {...props} />;
 };
 
+function inlineArtifactBlobType(artifact: ConversationArtifact): string {
+  return artifact.content_type === "json"
+    ? "application/json"
+    : "text/plain;charset=utf-8";
+}
+
+function ArtifactFileLink({
+  children,
+  href,
+  filename,
+  pending,
+}: {
+  children: ReactNode;
+  href: string;
+  filename: string;
+  pending?: boolean;
+}) {
+  const { t } = useTranslation();
+  const desktop = hasDesktopFileBridge();
+  const ready = Boolean(href) && !pending;
+
+  const runAction = useCallback(
+    async (action: () => Promise<unknown>, failedKey: string) => {
+      try {
+        await action();
+      } catch (error) {
+        console.error(error);
+        message.error(t(failedKey));
+      }
+    },
+    [t],
+  );
+
+  const items = useMemo<MenuProps["items"]>(() => {
+    const fileActions: MenuProps["items"] = [
+      {
+        key: "saveAs",
+        disabled: !ready,
+        label: t("chat.fileSaveAs"),
+        onClick: () => {
+          void runAction(
+            () => saveArtifactFileAs(href, filename),
+            "chat.fileSaveFailed",
+          );
+        },
+      },
+      {
+        key: "download",
+        disabled: !ready,
+        label: t("chat.fileDownload"),
+        onClick: () => {
+          void runAction(
+            () => downloadArtifactFile(href, filename),
+            "chat.fileDownloadFailed",
+          );
+        },
+      },
+    ];
+    if (!desktop) {
+      return fileActions;
+    }
+    return [
+      {
+        key: "reveal",
+        disabled: !ready,
+        label: isAppleDesktopPlatform()
+          ? t("chat.fileShowInFinder")
+          : t("chat.fileShowInFolder"),
+        onClick: () => {
+          void runAction(
+            () => revealArtifactFile(href, filename),
+            "chat.fileRevealFailed",
+          );
+        },
+      },
+      { type: "divider" },
+      ...(fileActions ?? []),
+    ];
+  }, [desktop, filename, href, ready, runAction, t]);
+
+  const content = pending || !href ? (
+    <span className="md-file-link md-file-link--pending">{children}</span>
+  ) : (
+    <a
+      className="md-file-link"
+      href={href}
+      download={filename || undefined}
+      rel="noreferrer"
+      onClick={(event: MouseEvent<HTMLAnchorElement>) => {
+        event.preventDefault();
+        void runAction(
+          () => downloadArtifactFile(href, filename),
+          "chat.fileDownloadFailed",
+        );
+      }}
+    >
+      {children}
+    </a>
+  );
+
+  return (
+    <Dropdown
+      trigger={["contextMenu"]}
+      menu={{ items }}
+      overlayClassName="md-file-link-dropdown"
+    >
+      {content}
+    </Dropdown>
+  );
+}
+
 const LinkComponent = (props: any) => {
-  const { isStreaming, markSources } = useContext(MarkdownRenderContext);
+  const { isStreaming, markSources, artifacts } = useContext(
+    MarkdownRenderContext,
+  );
   const href = typeof props.href === "string" ? props.href : "";
   const managedFile = href.includes("/static-files/");
+  const artifactFileId = getFileIdFromHref(href);
+  const linkedArtifact = artifactFileId
+    ? findArtifactByFileId(artifacts, artifactFileId)
+    : undefined;
+  const artifactFilename = linkedArtifact
+    ? getArtifactFilename(linkedArtifact)
+    : "";
+  const artifactSignSource = linkedArtifact
+    ? getArtifactSignSource(linkedArtifact)
+    : "";
+  const inlineArtifact = Boolean(
+    linkedArtifact && isInlineDownloadableArtifact(linkedArtifact),
+  );
+  const inlineText =
+    inlineArtifact && linkedArtifact
+      ? getArtifactTextContent(linkedArtifact)
+      : "";
+  const inlineBlobType =
+    inlineArtifact && linkedArtifact
+      ? inlineArtifactBlobType(linkedArtifact)
+      : "";
   const [resolvedHref, setResolvedHref] = useState(() =>
-    managedFile ? "" : href,
+    managedFile || artifactFileId ? "" : href,
   );
   useEffect(() => {
     let cancelled = false;
+    if (artifactFileId) {
+      if (inlineArtifact) {
+        const blob = new Blob([inlineText], { type: inlineBlobType });
+        const objectUrl = URL.createObjectURL(blob);
+        setResolvedHref(objectUrl);
+        return () => {
+          cancelled = true;
+          URL.revokeObjectURL(objectUrl);
+        };
+      }
+      if (!artifactSignSource) {
+        setResolvedHref("");
+        return () => {
+          cancelled = true;
+        };
+      }
+      setResolvedHref("");
+      const applySignedUrl = (url: string) => {
+        if (cancelled) return;
+        setResolvedHref(isBrowserDownloadHref(url) ? url : "");
+      };
+      resolveMarkdownImageUrlAsync(artifactSignSource)
+        .then(applySignedUrl)
+        .catch(() => {
+          applySignedUrl(resolveCoreAssetUrl(artifactSignSource));
+        });
+      return () => {
+        cancelled = true;
+      };
+    }
     if (!managedFile) {
       setResolvedHref(href);
-      return () => { cancelled = true; };
+      return () => {
+        cancelled = true;
+      };
     }
     setResolvedHref("");
     resolveMarkdownImageUrlAsync(href).then((url) => {
@@ -287,8 +533,18 @@ const LinkComponent = (props: any) => {
     }).catch(() => {
       if (!cancelled) setResolvedHref("");
     });
-    return () => { cancelled = true; };
-  }, [href, managedFile]);
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    href,
+    managedFile,
+    artifactFileId,
+    artifactSignSource,
+    inlineArtifact,
+    inlineText,
+    inlineBlobType,
+  ]);
   const sourceIndex = getSourceIndex(href);
 
   if (sourceIndex) {
@@ -343,15 +599,35 @@ const LinkComponent = (props: any) => {
     );
   }
 
+  if (artifactFileId) {
+    return (
+      <ArtifactFileLink
+        href={resolvedHref}
+        filename={artifactFilename}
+        pending={!resolvedHref}
+      >
+        {props.children}
+      </ArtifactFileLink>
+    );
+  }
+
+  if (managedFile) {
+    return (
+      <ArtifactFileLink
+        href={resolvedHref}
+        filename={basenameFromPath(href)}
+        pending={!resolvedHref}
+      >
+        {props.children}
+      </ArtifactFileLink>
+    );
+  }
+
   return (
     <a
-      href={managedFile && resolvedHref
-        ? `${resolvedHref}${resolvedHref.includes("?") ? "&" : "?"}download=1`
-        : resolvedHref || undefined}
+      href={resolvedHref || undefined}
       target="_blank"
       rel="noreferrer"
-      download={managedFile ? basenameFromPath(href) : undefined}
-      aria-disabled={managedFile && !resolvedHref}
     >
       {props.children}
     </a>
@@ -407,16 +683,39 @@ const MarkdownViewer = memo((props: any) => {
     components: customComponents,
     sources = [],
     IS_STREAMING,
+    conversationId: conversationIdProp,
+    historyId,
+    onCiteMessage,
     ...markdownProps
   } = props;
   const normalizedChildren =
     typeof children === "string"
-      ? normalizeBoldBareUrls(
-          normalizeBareUrls(
-            stripRedundantSourceUrls(normalizeSourceMarkers(children)),
-          ),
-        )
+      ? normalizeMarkdownForDisplay(children)
       : children;
+
+  const activeConversationId = useTaskCenterStore(
+    (state) => state.activeConversationId,
+  );
+  const conversationId = conversationIdProp ?? activeConversationId;
+  const artifacts = useTaskCenterStore((state) =>
+    conversationId
+      ? (state.artifactsByConversation[conversationId] ??
+        EMPTY_CONVERSATION_ARTIFACTS)
+      : EMPTY_CONVERSATION_ARTIFACTS,
+  );
+  const loadConversationArtifacts = useTaskCenterStore(
+    (state) => state.loadConversationArtifacts,
+  );
+  const hasFileIdLink =
+    typeof children === "string" && conversationHasFileIdLink(children);
+
+  useEffect(() => {
+    if (!conversationId || !hasFileIdLink) return;
+    const existing =
+      useTaskCenterStore.getState().artifactsByConversation[conversationId];
+    if (existing && existing.length > 0) return;
+    void loadConversationArtifacts(conversationId);
+  }, [conversationId, hasFileIdLink, loadConversationArtifacts]);
 
   const [markSources, setMarkSources] = useState<ChatSource[]>([]);
 
@@ -430,8 +729,12 @@ const MarkdownViewer = memo((props: any) => {
     () => ({
       isStreaming: Boolean(IS_STREAMING),
       markSources,
+      artifacts,
+      conversationId,
+      historyId,
+      onCiteMessage,
     }),
-    [IS_STREAMING, markSources],
+    [IS_STREAMING, markSources, artifacts, conversationId, historyId, onCiteMessage],
   );
 
   const markdownComponents = useMemo(
@@ -451,6 +754,7 @@ const MarkdownViewer = memo((props: any) => {
       <MarkdownRenderContext.Provider value={renderContextValue}>
         <Markdown
           {...markdownProps}
+          urlTransform={markdownProps.urlTransform ?? markdownUrlTransform}
           remarkPlugins={markdownRemarkWorkflows}
           rehypePlugins={markdownRehypeWorkflows}
           components={markdownComponents}

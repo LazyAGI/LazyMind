@@ -16,9 +16,10 @@ import (
 )
 
 type HTTPCoreClient struct {
-	baseURL      *url.URL
-	httpClient   *http.Client
-	contentStore ContentStore
+	baseURL       *url.URL
+	httpClient    *http.Client
+	contentStore  ContentStore
+	internalToken string
 }
 
 type ContentStore interface {
@@ -41,6 +42,50 @@ func NewHTTPCoreClient(baseURL string, client *http.Client) (*HTTPCoreClient, er
 
 func (c *HTTPCoreClient) UseContentStore(store ContentStore) {
 	c.contentStore = store
+}
+
+func (c *HTTPCoreClient) SetInternalToken(token string) {
+	c.internalToken = strings.TrimSpace(token)
+}
+
+type datasetUsageBatchRequest struct {
+	UserID     string   `json:"user_id"`
+	DatasetIDs []string `json:"dataset_ids"`
+}
+
+type datasetUsageBatchResponse struct {
+	UsageMap map[string]DatasetUsage `json:"usage_map"`
+}
+
+const datasetUsageBatchSize = 500
+
+func (c *HTTPCoreClient) BatchGetDatasetUsage(ctx context.Context, userID string, datasetIDs []string) (map[string]DatasetUsage, error) {
+	if strings.TrimSpace(userID) == "" {
+		return nil, fmt.Errorf("user_id is required")
+	}
+	if c.internalToken == "" {
+		return nil, fmt.Errorf("core internal token is not configured")
+	}
+	userID = strings.TrimSpace(userID)
+	usage := make(map[string]DatasetUsage)
+	for start := 0; start < len(datasetIDs); start += datasetUsageBatchSize {
+		end := start + datasetUsageBatchSize
+		if end > len(datasetIDs) {
+			end = len(datasetIDs)
+		}
+		req := datasetUsageBatchRequest{
+			UserID:     userID,
+			DatasetIDs: datasetIDs[start:end],
+		}
+		var out datasetUsageBatchResponse
+		if err := c.doInternalJSON(ctx, http.MethodPost, "/internal/datasets/usage:batch", req, &out); err != nil {
+			return nil, err
+		}
+		for id, item := range out.UsageMap {
+			usage[id] = item
+		}
+	}
+	return usage, nil
 }
 
 func (c *HTTPCoreClient) CreateDataset(ctx context.Context, req CreateDatasetRequest) (CreateDatasetResponse, error) {
@@ -442,6 +487,35 @@ func (c *HTTPCoreClient) doJSON(ctx context.Context, method, endpoint string, in
 	if resp.StatusCode == http.StatusNotFound && method == http.MethodDelete {
 		return nil
 	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return decodeCoreError(resp)
+	}
+	if out == nil {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		return nil
+	}
+	return json.NewDecoder(resp.Body).Decode(out)
+}
+
+func (c *HTTPCoreClient) doInternalJSON(ctx context.Context, method, endpoint string, in any, out any) error {
+	body, err := encodeBody(in)
+	if err != nil {
+		return err
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, method, c.endpoint(endpoint), body)
+	if err != nil {
+		return err
+	}
+	if in != nil {
+		httpReq.Header.Set("Content-Type", "application/json")
+	}
+	httpReq.Header.Set("Accept", "application/json")
+	httpReq.Header.Set("X-LazyMind-Internal-Token", c.internalToken)
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return decodeCoreError(resp)
 	}

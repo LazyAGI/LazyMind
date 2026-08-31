@@ -36,6 +36,7 @@ export interface LocalPathRecommendation {
   value: string;
   title: string;
   path: string;
+  source?: "server" | "desktop_discovery";
 }
 
 export function normalizeFeishuTargetType(

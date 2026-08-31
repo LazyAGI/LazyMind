@@ -9,6 +9,77 @@ const ORPHAN_TAG_RE = /<\/?(?:tp|trp)\b[^>]*>/g;
 const ORPHAN_TOOL_PAYLOAD_TAG_RE = /<\/?(?:tool_call|tool_result)>/g;
 const MULTIPLE_BLANK_LINES_RE = /\n{3,}/g;
 const THINKING_BLOCK_BREAK_RE = /<\/(?:tp|trp)>\s*<(?:tp|trp)\b[^>]*>/g;
+const TOOL_CALL_JSON_RE = /<tool_call>([\s\S]*?)<\/tool_call>/g;
+
+const SEARCH_QUERY_KEYS = [
+  "semantic_query",
+  "grep_patterns",
+  "query",
+  "keyword",
+  "keywords",
+  "pattern",
+] as const;
+
+function isSearchToolName(name: string): boolean {
+  const lower = name.toLowerCase();
+  if (!lower) {
+    return false;
+  }
+  if (lower === "grep" || lower.endsWith("_grep")) {
+    return true;
+  }
+  return lower.includes("search") && !lower.includes("read");
+}
+
+function searchQueryFromArgs(args: Record<string, unknown>): string {
+  for (const key of SEARCH_QUERY_KEYS) {
+    const value = args[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+    if (Array.isArray(value)) {
+      const parts = value.map((item) => String(item).trim()).filter(Boolean);
+      if (parts.length) {
+        return parts.join(", ");
+      }
+    }
+  }
+  return "";
+}
+
+export function summarizeSearchToolsFromText(rawText?: string): string {
+  if (!rawText) {
+    return "";
+  }
+  const parts: string[] = [];
+  const seen = new Set<string>();
+  for (const match of rawText.matchAll(TOOL_CALL_JSON_RE)) {
+    try {
+      const payload = JSON.parse(match[1] || "{}") as {
+        name?: string;
+        arguments?: Record<string, unknown>;
+      };
+      const name = String(payload.name || "").trim();
+      if (!isSearchToolName(name)) {
+        continue;
+      }
+      const args =
+        payload.arguments && typeof payload.arguments === "object"
+          ? payload.arguments
+          : {};
+      const query = searchQueryFromArgs(args);
+      const item = query ? `${name}「${query}」` : name;
+      if (seen.has(item)) {
+        continue;
+      }
+      seen.add(item);
+      parts.push(item);
+    } catch {
+      continue;
+    }
+  }
+  return parts.join(" · ");
+}
 
 export interface ThinkingSplitResult {
   content: string;

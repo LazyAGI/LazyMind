@@ -116,6 +116,31 @@ func TestProjectionIncludesStepApprovalDefaults(t *testing.T) {
 	}
 }
 
+func TestCompletedProjectionExposesDeclaredContinuation(t *testing.T) {
+	graph := &CompiledStateGraph{
+		Nodes: map[string]CompiledNode{
+			"outline": {ID: "outline"},
+			"draft": {
+				ID:    "draft",
+				Input: &Expression{Material: "outline_document"},
+			},
+		},
+		ControlEdges: []CompiledEdge{
+			{From: "__start__", To: "outline"},
+			{From: "outline", To: "__end__"},
+		},
+		Runtime: RuntimePolicy{CompletedContinueSteps: []string{"draft"}},
+	}
+	projection := Project(graph, RuntimeSnapshot{
+		Attempts:  []AttemptFact{{StepID: "outline", Status: "succeeded", Validity: "effective"}},
+		Materials: []MaterialValue{{MaterialID: "outline_document", RevisionID: "outline-r1", Valid: true}},
+	})
+
+	if !projection.Completed || len(projection.Continue) != 1 || projection.Continue[0] != "draft" {
+		t.Fatalf("completed projection must expose its declared continuation: %#v", projection)
+	}
+}
+
 // TestDecideRoute_StartNode returns start-route activated nodes.
 func TestDecideRoute_StartNode(t *testing.T) {
 	graph := &CompiledStateGraph{

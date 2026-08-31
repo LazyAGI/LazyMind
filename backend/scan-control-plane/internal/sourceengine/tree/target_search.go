@@ -25,6 +25,9 @@ func (e *DefaultTargetTreeEngine) Search(ctx context.Context, req TargetTreeSear
 		}
 		return e.fallback.Search(ctx, req)
 	}
+	if req.Direct {
+		return e.searchConnectorTargets(ctx, conn, req)
+	}
 	if isLocalFSTargetSearch(req) {
 		if targetSearchHasCurrentLevel(req) {
 			return e.buildAndSearchCachedTargets(ctx, conn, req)
@@ -58,13 +61,14 @@ func (e *DefaultTargetTreeEngine) searchCurrentLevelTargets(ctx context.Context,
 
 func (e *DefaultTargetTreeEngine) searchConnectorTargets(ctx context.Context, conn connector.SourceConnector, req TargetTreeSearchRequest) (TreeNodePage, error) {
 	pageSize := normalizePageSize(req.PageSize, e.limitForConnector(conn.Spec()))
-	rawPage, err := conn.ListChildren(ctx, connector.ListChildrenRequest{
+	rawPage, err := conn.Search(ctx, connector.SearchRequest{
 		TargetType:       req.TargetType,
 		TargetRef:        req.TargetRef,
 		NodeRef:          req.NodeRef,
-		ListMode:         connector.ListModePage,
+		Keyword:          req.Keyword,
 		Cursor:           req.Cursor,
 		PageSize:         pageSize,
+		Recursive:        req.Direct,
 		AgentID:          req.AgentID,
 		AuthConnectionID: req.AuthConnectionID,
 		ProviderOptions:  connector.ProviderOptions(req.ProviderOptions),
@@ -86,6 +90,7 @@ func (e *DefaultTargetTreeEngine) searchLocalFSRootCaches(ctx context.Context, c
 	cacheComplete := true
 	cacheBuilding := false
 	truncated := false
+	cacheError := ""
 	seen := map[string]struct{}{}
 	for _, root := range roots {
 		normalized, err := conn.MapObject(ctx, root)
@@ -95,8 +100,19 @@ func (e *DefaultTargetTreeEngine) searchLocalFSRootCaches(ctx context.Context, c
 		rootNode := targetNode(req.ConnectorType, root, normalized)
 		appendUniqueTargetNode(&nodes, seen, rootNode)
 		rootReq := localFSRootSearchRequest(req, root)
-		snapshot := e.cache.buildIfUnlocked(ctx, conn, rootReq, e.buildTargetSearchCache)
+		snapshot := e.cache.snapshot(ctx, rootReq)
+		if snapshot.status != targetSearchCacheStatusFailed ||
+			!isSkippableLocalFSRootCacheError(snapshot.lastError) {
+			snapshot = e.cache.buildIfUnlocked(ctx, conn, rootReq, e.buildTargetSearchCache)
+		}
 		if snapshot.status == targetSearchCacheStatusFailed && strings.TrimSpace(snapshot.lastError) != "" {
+			if isSkippableLocalFSRootCacheError(snapshot.lastError) {
+				cacheComplete = false
+				if cacheError == "" {
+					cacheError = snapshot.lastError
+				}
+				continue
+			}
 			return TreeNodePage{}, NewError(ErrCodeInternal, "target search cache build failed: "+snapshot.lastError)
 		}
 		if snapshot.building || snapshot.status == targetSearchCacheStatusBuilding {
@@ -122,6 +138,7 @@ func (e *DefaultTargetTreeEngine) searchLocalFSRootCaches(ctx context.Context, c
 	page.CacheBuilding = cacheBuilding
 	page.CacheComplete = cacheComplete
 	page.Truncated = truncated
+	page.CacheError = cacheError
 	return page, nil
 }
 

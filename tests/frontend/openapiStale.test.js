@@ -50,6 +50,20 @@ describe("OpenAPI generated output staleness", () => {
     });
   });
 
+  it("treats LF and CRLF as equivalent text content", () => {
+    const { api, cacheEntry } = createFixture();
+    fs.writeFileSync(api.input, "openapi: 3.0.0\r\n");
+    for (const filename of GENERATED_TYPESCRIPT_FILES) {
+      fs.writeFileSync(path.join(api.output, filename), `// ${filename}\r\n`);
+    }
+
+    expect(getOpenApiStatus(api, cacheEntry)).toMatchObject({
+      stale: false,
+      reasons: [],
+      strictOutput: true,
+    });
+  });
+
   it("reports spec_changed when the authoritative spec changes", () => {
     const { api, cacheEntry } = createFixture();
     fs.appendFileSync(api.input, "info: {}\n");

@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>中国具身智能机器人行业机会速览</title>
+  <style>
+    :root{--canvas:#f4f6f8;--paper:#fff;--ink:#17202f;--muted:#667085;--line:#e3e8ef;--blue:#315fca;--blue-soft:#eef3ff;--green:#1f7a58;--green-soft:#eaf7f1;--amber:#a96b13;--amber-soft:#fff5e5;--red:#a44a55;--red-soft:#fff0f2;--nav:#202938;--shadow:0 18px 48px rgba(22,31,48,.08)}
+    *{box-sizing:border-box}html,body{min-height:100%;margin:0}body{background:var(--canvas);color:var(--ink);font:14px/1.65 Inter,"PingFang SC","Microsoft YaHei",sans-serif}button{font:inherit}.app{min-height:100vh;display:grid;grid-template-columns:224px minmax(0,1fr)}
+    .sidebar{background:var(--nav);color:#dbe3ef;padding:24px 17px;display:flex;flex-direction:column}.brand{display:flex;align-items:center;gap:11px;padding:0 8px 24px;border-bottom:1px solid #344052}.mark{width:35px;height:35px;display:grid;place-items:center;border-radius:10px;background:#fff;color:#244fae;font-weight:800}.brand strong{display:block;color:#fff}.brand span{display:block;color:#8f9bae;font-size:10px;letter-spacing:.08em}.nav-label{margin:22px 9px 9px;color:#748196;font-size:10px;letter-spacing:.14em}.nav{display:grid;gap:5px}.nav button{display:flex;align-items:center;gap:10px;width:100%;padding:10px 11px;border:0;border-radius:8px;background:transparent;color:#aeb9ca;text-align:left;cursor:pointer}.nav button:before{content:"";width:7px;height:7px;border-radius:50%;background:#5d697b}.nav button.active{background:#303b4e;color:#fff}.nav button.active:before{background:#8eaeff;box-shadow:0 0 0 4px rgba(142,174,255,.12)}.scope{margin-top:auto;padding:15px;border:1px solid #3b4658;border-radius:11px;color:#aab5c5;font-size:11px}.scope b{display:block;margin-bottom:5px;color:#fff;font-size:12px}.scope span{display:block;margin-top:7px;color:#79869a}
+    .main{min-width:0}.topbar{height:66px;display:flex;align-items:center;padding:0 28px;border-bottom:1px solid var(--line);background:rgba(255,255,255,.94);position:sticky;top:0;z-index:4;backdrop-filter:blur(10px)}.topbar strong{font-size:15px}.snapshot{margin-left:10px;padding:3px 9px;border-radius:999px;background:var(--green-soft);color:var(--green);font-size:11px}.verified{margin-left:auto;display:flex;align-items:center;gap:7px;color:#5b6574;font-size:12px}.verified:before{content:"✓";width:20px;height:20px;display:grid;place-items:center;border-radius:50%;background:var(--green-soft);color:var(--green);font-weight:800}
+    .workspace{max-width:1420px;margin:auto;padding:28px;display:grid;grid-template-columns:minmax(0,1fr) 294px;gap:22px}.report{min-width:0;border:1px solid var(--line);border-radius:18px;background:var(--paper);box-shadow:var(--shadow);overflow:hidden}.hero{padding:31px 36px 26px;border-bottom:1px solid var(--line);background:linear-gradient(135deg,#fff 55%,#f2f6ff)}.eyebrow{color:var(--blue);font-size:11px;font-weight:800;letter-spacing:.14em}.hero h1{margin:7px 0 9px;font-size:30px;line-height:1.32}.hero>p{max-width:820px;margin:0;color:#596373}.thesis{margin-top:20px;padding:15px 17px;border-left:4px solid var(--blue);border-radius:0 11px 11px 0;background:#f7f9fd;font-size:15px;font-weight:650}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:9px;margin-top:19px}.stat{padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:#fff}.stat b{display:block;font-size:18px}.stat span{color:var(--muted);font-size:11px}
+    .tabs{display:flex;gap:4px;padding:13px 24px 0;border-bottom:1px solid var(--line);background:#fbfcfd}.tab{padding:11px 14px 13px;border:0;border-bottom:2px solid transparent;background:transparent;color:#727b89;cursor:pointer}.tab.active{border-color:var(--blue);color:var(--blue);font-weight:750}.panel{display:none;padding:28px 32px 36px}.panel.active{display:block}.section-head{display:flex;align-items:end;justify-content:space-between;gap:12px;margin-bottom:15px}.section-head h2{margin:0;font-size:18px}.section-head p{margin:0;color:var(--muted);font-size:11px}.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px}.card{padding:16px;border:1px solid var(--line);border-radius:13px;background:#fff}.card h3{margin:0 0 10px;font-size:14px}.card p{margin:0;color:#5f6876;font-size:12px}.signal-list{display:grid;gap:9px}.signal{display:grid;grid-template-columns:72px 1fr;gap:10px;padding:11px 12px;border-radius:10px;background:#f7f9fc}.signal b{color:var(--blue);font-size:11px}.signal span{color:#4e5867;font-size:12px}.split{margin-top:18px;display:grid;grid-template-columns:1fr 1fr;gap:14px}.list-card{padding:16px;border:1px solid var(--line);border-radius:13px}.list-card.good{background:linear-gradient(145deg,#fff,#f1faf6)}.list-card.risk{background:linear-gradient(145deg,#fff,#fff5f6)}.list-card h3{margin:0 0 10px;font-size:14px}.list-card ol{margin:0;padding-left:20px}.list-card li{margin:7px 0;color:#515c6b;font-size:12px}.watch{margin-top:18px;display:grid;grid-template-columns:repeat(4,1fr);gap:9px}.watch-item{padding:13px;border:1px solid var(--line);border-radius:11px;background:#fafbfc}.watch-item b{display:block;margin-bottom:4px;color:var(--blue);font-size:11px}.watch-item span{font-size:12px;color:#555f6e}
+    .chain{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.chain-col{position:relative;min-height:300px;padding:17px;border:1px solid var(--line);border-radius:14px;background:#fff}.chain-col:not(:last-child):after{content:"→";position:absolute;right:-19px;top:43px;z-index:2;width:26px;height:26px;display:grid;place-items:center;border:1px solid var(--line);border-radius:50%;background:#fff;color:var(--blue);font-weight:800}.chain-label{display:flex;align-items:center;gap:8px;margin-bottom:12px}.chain-label i{width:26px;height:26px;display:grid;place-items:center;border-radius:8px;background:var(--blue-soft);color:var(--blue);font-style:normal;font-size:11px;font-weight:800}.chain-label b{font-size:14px}.cluster{padding:10px 0;border-top:1px solid var(--line)}.cluster:first-of-type{border-top:0}.cluster strong{display:block;margin-bottom:6px;font-size:12px}.chips{display:flex;flex-wrap:wrap;gap:5px}.chip{padding:3px 7px;border-radius:999px;background:#f1f3f6;color:#5d6674;font-size:10px}.boundary{margin-top:18px;padding:14px 16px;border:1px solid #ead7b5;border-radius:12px;background:var(--amber-soft);color:#70501e;font-size:12px}.boundary b{display:block;margin-bottom:4px}
+    .evidence-note{padding:14px 16px;border-radius:12px;background:#f7f9fc;color:#556071;font-size:12px}.source-list{display:grid;gap:9px;margin-top:15px}.source{display:grid;grid-template-columns:31px minmax(0,1fr) auto;gap:10px;align-items:center;padding:11px 12px;border:1px solid var(--line);border-radius:10px}.source-index{width:27px;height:27px;display:grid;place-items:center;border-radius:8px;background:var(--blue-soft);color:var(--blue);font-size:10px;font-weight:800}.source a{color:#304866;text-decoration:none;font-size:12px;font-weight:650}.source p{margin:2px 0 0;color:var(--muted);font-size:10px}.source time{color:#8791a0;font-size:10px;white-space:nowrap}.questions{margin-top:20px;padding:17px;border:1px solid var(--line);border-radius:13px}.questions h3{margin:0 0 9px;font-size:14px}.questions li{margin:6px 0;color:#586271;font-size:12px}
+    .rail{display:grid;align-content:start;gap:14px}.side-card{padding:18px;border:1px solid var(--line);border-radius:14px;background:#fff;box-shadow:0 10px 26px rgba(25,36,55,.05)}.side-card h3{margin:0 0 12px;font-size:14px}.fact{padding:9px 0;border-top:1px solid var(--line)}.fact:first-of-type{padding-top:0;border-top:0}.fact span{display:block;color:var(--muted);font-size:10px}.fact b{display:block;margin-top:2px;font-size:12px}.decision{background:#25334a;color:#fff;border-color:#25334a}.decision h3{color:#fff}.decision p{margin:0;color:#c5cfdd;font-size:12px}.decision em{display:block;margin-top:11px;padding:10px;border-radius:9px;background:#33425a;color:#fff;font-style:normal;font-size:11px}.legend{display:grid;gap:8px}.legend div{display:flex;gap:8px;color:#5b6675;font-size:11px}.dot{width:8px;height:8px;flex:0 0 8px;margin-top:5px;border-radius:50%;background:var(--green)}.dot.amber{background:var(--amber)}.dot.gray{background:#98a2b3}
+    @media(max-width:1080px){.app{grid-template-columns:72px minmax(0,1fr)}.sidebar{padding:20px 10px}.brand>div:last-child,.nav-label,.nav button span,.scope{display:none}.brand{justify-content:center;padding:0 0 18px}.nav button{justify-content:center}.workspace{grid-template-columns:1fr}.rail{grid-template-columns:repeat(3,1fr)}}
+    @media(max-width:760px){.app{display:block}.sidebar{display:none}.topbar{padding:0 15px}.workspace{padding:12px}.hero,.panel{padding:24px 18px}.hero h1{font-size:24px}.stats,.watch{grid-template-columns:repeat(2,1fr)}.grid-2,.split,.chain{grid-template-columns:1fr}.chain-col:not(:last-child):after{display:none}.rail{grid-template-columns:1fr}.source{grid-template-columns:31px 1fr}.source time{grid-column:2}}
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand"><div class="mark">研</div><div><strong>市场研究台</strong><span>MARKET INTELLIGENCE</span></div></div>
+      <div class="nav-label">结果目录</div>
+      <nav class="nav"><button class="active" data-target="summary"><span>决策摘要</span></button><button data-target="chain"><span>产业地图</span></button><button data-target="evidence"><span>证据与边界</span></button></nav>
+      <div class="scope"><b>研究口径</b>中国大陆 · 2023—2026<br>具身智能机器人，不以传统工业/服务机器人总口径替代。<span>历史实测结果，仅用于能力展示</span></div>
+    </aside>
+    <main class="main">
+      <header class="topbar"><strong>行业全景研究</strong><span class="snapshot">LazyMind 实测快照</span><div class="verified">6 个直接页面已核验</div></header>
+      <div class="workspace">
+        <article class="report">
+          <section class="hero">
+            <div class="eyebrow">行业机会速览 · 2026-08-28</div>
+            <h1>中国具身智能机器人</h1>
+            <p>从产业边界、政策与定量信号出发，连接上游核心件、中游本体与集成、下游真实场景，形成可继续取证的机会判断。</p>
+            <div class="thesis">已进入“量产爬坡 + 商业化验证”过渡期；更清晰的近期机会在核心部件国产替代与能证明 ROI 的垂直场景，而非泛化的通用整机叙事。</div>
+            <div class="stats"><div class="stat"><b>4</b><span>受控检索主题</span></div><div class="stat"><b>6</b><span>打开并核验页面</span></div><div class="stat"><b>3</b><span>主要产业细分</span></div><div class="stat"><b>4</b><span>未来跟踪信号</span></div></div>
+          </section>
+          <div class="tabs"><button class="tab active" data-target="summary">决策摘要</button><button class="tab" data-target="chain">产业地图</button><button class="tab" data-target="evidence">证据与边界</button></div>
+
+          <section class="panel active" id="summary">
+            <div class="section-head"><h2>关键判断</h2><p>将事实、推断与待取证项分开</p></div>
+            <div class="grid-2">
+              <article class="card"><h3>发展阶段</h3><div class="signal-list"><div class="signal"><b>政策</b><span>2023 年工信部提出 2025 年建立创新体系、2027 年实现综合实力世界先进；后续国家层面持续释放战略信号。</span></div><div class="signal"><b>量产</b><span>头部厂商进入千台级交付与产能扩张，但“产量”仍不能直接等同“有效商业落地”。</span></div><div class="signal"><b>口径</b><span>公开规模数字混合“具身智能、人形整机、工业具身”等口径，尚缺单一权威的全赛道统计。</span></div></div></article>
+              <article class="card"><h3>机会优先级</h3><div class="signal-list"><div class="signal"><b>优先</b><span>减速器、执行器、传感器、灵巧手等关键部件的国产化与降本。</span></div><div class="signal"><b>验证</b><span>汽车、电子制造、物流等可度量效率与回本周期的垂直场景。</span></div><div class="signal"><b>谨慎</b><span>仅依赖通用整机出货叙事、缺少真实付费订单与单位经济性的项目。</span></div></div></article>
+            </div>
+            <div class="split"><article class="list-card good"><h3>三个增长驱动</h3><ol><li>政策与标准体系持续推进，带动研发、示范与产业协同。</li><li>头部厂商产能爬坡，整机价格下探并开始形成批量交付。</li><li>核心部件国产化与模型能力进步，为特定场景降本增效。</li></ol></article><article class="list-card risk"><h3>三个关键瓶颈</h3><ol><li>高质量真实数据不足，跨本体泛化与长期任务能力仍待验证。</li><li>工业渗透、可靠性、续航与真实 ROI 尚未形成普遍闭环。</li><li>软件接口碎片化，部分精密部件和制造流程仍有依赖项。</li></ol></article></div>
+            <div class="section-head" style="margin-top:22px"><h2>未来 12—24 个月</h2><p>值得持续监控的四个信号</p></div>
+            <div class="watch"><div class="watch-item"><b>01 量产兑现</b><span>产量目标与工业场景真实渗透率是否同步提高</span></div><div class="watch-item"><b>02 模型与数据</b><span>VLA、世界模型及数据基础设施是否越过可用临界点</span></div><div class="watch-item"><b>03 资本与洗牌</b><span>IPO、Pre-IPO 与订单兑现如何改变头部格局</span></div><div class="watch-item"><b>04 标准与服务</b><span>标准、实训场及机器人即服务能否形成商业闭环</span></div></div>
+          </section>
+
+          <section class="panel" id="chain">
+            <div class="section-head"><h2>产业链与代表性参与者</h2><p>名称来自本次已打开来源；不等于完整市场名单</p></div>
+            <div class="chain">
+              <article class="chain-col"><div class="chain-label"><i>上</i><b>核心部件与模型</b></div><div class="cluster"><strong>执行器 / 减速器 / 电机</strong><div class="chips"><span class="chip">绿的谐波</span><span class="chip">中大力德</span><span class="chip">鸣志电器</span><span class="chip">三花智控</span><span class="chip">拓普集团</span></div></div><div class="cluster"><strong>传感与灵巧手</strong><div class="chips"><span class="chip">柯力传感</span><span class="chip">汉威科技</span><span class="chip">奥比中光</span><span class="chip">兆威机电</span></div></div><div class="cluster"><strong>具身模型与数据</strong><div class="chips"><span class="chip">银河通用</span><span class="chip">自变量</span><span class="chip">千寻智能</span></div></div></article>
+              <article class="chain-col"><div class="chain-label"><i>中</i><b>本体与系统集成</b></div><div class="cluster"><strong>人形 / 具身本体</strong><div class="chips"><span class="chip">宇树科技</span><span class="chip">智元机器人</span><span class="chip">优必选</span><span class="chip">乐聚</span><span class="chip">傅利叶</span><span class="chip">魔法原子</span></div></div><div class="cluster"><strong>集成与 ODM</strong><div class="chips"><span class="chip">均普智能 × 智元</span><span class="chip">天奇股份 × 优必选</span><span class="chip">半醒具身</span></div></div></article>
+              <article class="chain-col"><div class="chain-label"><i>下</i><b>真实应用场景</b></div><div class="cluster"><strong>汽车与电子制造</strong><div class="chips"><span class="chip">质检</span><span class="chip">搬运</span><span class="chip">PACK 产线</span><span class="chip">消费电子</span></div></div><div class="cluster"><strong>物流与商业服务</strong><div class="chips"><span class="chip">仓储物流</span><span class="chip">商场实训</span><span class="chip">交通执勤</span></div></div><div class="cluster"><strong>研究判断</strong><div class="chips"><span class="chip">先看付费订单</span><span class="chip">再看单位经济性</span><span class="chip">最后看复制性</span></div></div></article>
+            </div>
+            <div class="boundary"><b>统计边界</b>52.95 亿元、人形整机出货和工业具身市场等公开数字并非同一口径。本案例不将相邻市场数字相加，也不据此推算全赛道规模。</div>
+          </section>
+
+          <section class="panel" id="evidence">
+            <div class="section-head"><h2>证据与可追溯来源</h2><p>页面访问日期均为 2026-08-28</p></div>
+            <div class="evidence-note">本案例来自 LazyMind 历史实测会话：完成 4 组受控网页检索并打开 6 个直接页面。由于未取得部分付费研究机构原文，定量信号按“报道引用”呈现；市场份额、厂商单位经济性和付费订单仍属于待取证项。</div>
+            <div class="source-list">
+              <article class="source"><span class="source-index">S1</span><div><a href="http://www.news.cn/fortune/2023-11/03/c_1129955246.htm" target="_blank" rel="noreferrer">新华网：我国力争到 2025 年初步建立人形机器人创新体系</a><p>官方政策信号</p></div><time>2023-11-03</time></article>
+              <article class="source"><span class="source-index">S2</span><div><a href="http://www.news.cn/tech/20251230/c2ee815983c340a8a0268e90d5d5916d/c.html" target="_blank" rel="noreferrer">新华网《瞭望》：具身智能向纵深加速</a><p>定量市场信号与产业进展</p></div><time>2025-12-30</time></article>
+              <article class="source"><span class="source-index">S3</span><div><a href="https://eu.36kr.com/zh/p/3921839985454470" target="_blank" rel="noreferrer">36氪：人形机器人的 2026，产量狂欢与落地迷思</a><p>量产与商业化边界</p></div><time>2026-08-03</time></article>
+              <article class="source"><span class="source-index">S4</span><div><a href="https://m.bjnews.com.cn/detail/1769161331129034.html" target="_blank" rel="noreferrer">新京报：量产元年之后，中国人形机器人走向“价值战”</a><p>行业阶段与价值验证</p></div><time>2026-01-23</time></article>
+              <article class="source"><span class="source-index">S5</span><div><a href="http://www.robotsci.com.cn/detail/1971015393912950784" target="_blank" rel="noreferrer">机器人科学网：人形机器人供应链全景解析</a><p>价值链和代表性参与者</p></div><time>2025-09-25</time></article>
+              <article class="source"><span class="source-index">S6</span><div><a href="https://static.weeklyonstock.com/26/0623/qdy205823.html" target="_blank" rel="noreferrer">证券市场周刊：灵巧手赛道业绩分化</a><p>核心部件机会与兑现差异</p></div><time>2026-06-23</time></article>
+            </div>
+            <article class="questions"><h3>下一轮应补证的三个问题</h3><ol><li>是否存在能严格区分相邻机器人市场的官方全赛道收入与出货统计？</li><li>头部厂商工业场景的真实付费订单、整机成本和客户回本周期如何？</li><li>高质量真实数据与 VLA 跨本体泛化何时形成规模化供给？</li></ol></article>
+          </section>
+        </article>
+        <aside class="rail">
+          <section class="side-card"><h3>研究对象</h3><div class="fact"><span>地区</span><b>中国大陆</b></div><div class="fact"><span>观察期</span><b>近三年，展望未来两年</b></div><div class="fact"><span>决策用户</span><b>企业战略与赛道判断团队</b></div></section>
+          <section class="side-card decision"><h3>可行动判断</h3><p>先验证“场景付费 + 单位经济性”，再判断整机或部件机会，避免用出货量替代商业闭环。</p><em>建议下一步：围绕汽车制造、电子装配各选 2 个项目做订单与 ROI 深挖。</em></section>
+          <section class="side-card"><h3>证据图例</h3><div class="legend"><div><span class="dot"></span><span>已打开直接页面支持</span></div><div><span class="dot amber"></span><span>报道引用，原始报告待取证</span></div><div><span class="dot gray"></span><span>研究推断或后续监控项</span></div></div></section>
+        </aside>
+      </div>
+    </main>
+  </div>
+  <script>
+    const controls=[...document.querySelectorAll('[data-target]')],panels=[...document.querySelectorAll('.panel')];
+    controls.forEach(control=>control.addEventListener('click',()=>{const id=control.dataset.target;panels.forEach(panel=>panel.classList.toggle('active',panel.id===id));controls.forEach(item=>item.classList.toggle('active',item.dataset.target===id));window.scrollTo({top:0,behavior:'smooth'});}));
+  </script>
+</body>
+</html>

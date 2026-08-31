@@ -1,144 +1,153 @@
 package mcpclient
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+
+	"lazymind/agentconnector/internal/agentexec"
+	"lazymind/agentconnector/internal/agentintegration"
 )
 
-func TestCursorGuideUsesOfficialInstallLinkAndMCPFileFallback(t *testing.T) {
-	t.Setenv("LAZYMIND_HOME", filepath.Join(t.TempDir(), "LazyMind Home"))
+func TestCursorStatusUsesFilesystemRequirementWithoutRunningDesktop(t *testing.T) {
+	home := t.TempDir()
+	setTestHome(t, home)
+	t.Setenv("LAZYMIND_HOME", filepath.Join(home, "lazymind"))
 	adapter := testAdapter(Cursor)
-	guide, err := adapter.setupGuide()
+
+	status := adapter.Status(context.Background())
+	if status.State != agentintegration.RequirementsMissing {
+		t.Fatalf("state=%q, want requirements_missing", status.State)
+	}
+
+	if err := os.MkdirAll(filepath.Join(home, ".cursor"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	bindDesktopForTest(t, agentexec.CursorDesktop)
+	status = adapter.Status(context.Background())
+	if status.State != agentintegration.Ready {
+		t.Fatalf("state=%q, want ready", status.State)
+	}
+}
+
+func TestCursorInstallURLCarriesOneManagedStdioDefinition(t *testing.T) {
+	adapter := testAdapter(Cursor)
+	value, err := adapter.cursorInstallURL()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if guide.Method != SetupCursorInstall || guide.URL == "" {
-		t.Fatalf("Cursor setup guide = %#v", guide)
-	}
-	installURL, err := url.Parse(guide.URL)
+	installURL, err := url.Parse(value)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if installURL.Scheme != "https" || installURL.Host != "cursor.com" || installURL.Path != "/en/install-mcp" {
-		t.Fatalf("Cursor install URL = %s", guide.URL)
-	}
-	if installURL.Query().Get("name") != serverName {
-		t.Fatalf("Cursor install name = %q", installURL.Query().Get("name"))
+	if installURL.Scheme != "cursor" || installURL.Host != "anysphere.cursor-deeplink" || installURL.Path != "/mcp/install" {
+		t.Fatalf("install URL=%q", value)
 	}
 	encoded, err := base64.StdEncoding.DecodeString(installURL.Query().Get("config"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertStdioDefinition(t, encoded, adapter.self, adapter.home)
-	assertMCPFile(t, guide.Configuration, adapter.self, adapter.home)
-	if !strings.HasSuffix(guide.ConfigPath, filepath.Join(".cursor", "mcp.json")) {
-		t.Fatalf("Cursor fallback path = %q", guide.ConfigPath)
+	assertStdioDefinition(t, encoded, adapter.self, adapter.home, Cursor)
+}
+
+func TestWorkBuddyUsesWorkBuddyConfiguration(t *testing.T) {
+	home := t.TempDir()
+	setTestHome(t, home)
+	t.Setenv("LAZYMIND_HOME", filepath.Join(home, "lazymind"))
+	path := configPath(WorkBuddy)
+	if path != filepath.Join(home, ".workbuddy", "mcp.json") {
+		t.Fatalf("path=%q", path)
+	}
+	if strings.Contains(path, ".codebuddy") {
+		t.Fatalf("WorkBuddy path must not target CodeBuddy: %q", path)
 	}
 }
 
-func TestWorkBuddyGuideUsesMCPFileConfiguration(t *testing.T) {
-	t.Setenv("LAZYMIND_HOME", filepath.Join(t.TempDir(), "LazyMind Home"))
-	adapter := testAdapter(WorkBuddy)
-	guide, err := adapter.setupGuide()
-	if err != nil {
+func TestRaccoonUsesDesktopConfiguration(t *testing.T) {
+	home := t.TempDir()
+	setTestHome(t, home)
+	path := configPath(Raccoon)
+	if path != filepath.Join(home, ".box-agent", "config", "mcp.json") {
+		t.Fatalf("path=%q", path)
+	}
+	adapter := testAdapter(Raccoon)
+	status := adapter.Status(context.Background())
+	if status.State != agentintegration.RequirementsMissing {
+		t.Fatalf("status=%#v", status)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if guide.Method != SetupConfigFile || guide.URL != "" {
-		t.Fatalf("WorkBuddy setup guide = %#v", guide)
-	}
-	assertMCPFile(t, guide.Configuration, adapter.self, adapter.home)
-	if !strings.HasSuffix(guide.ConfigPath, filepath.Join(".codebuddy", "mcp.json")) {
-		t.Fatalf("WorkBuddy config path = %q", guide.ConfigPath)
+	bindDesktopForTest(t, agentexec.RaccoonDesktop)
+	status = adapter.Status(context.Background())
+	if status.State != agentintegration.Ready {
+		t.Fatalf("status=%#v", status)
 	}
 }
 
-func TestTRAEWorkGuideUsesAgentMCPFile(t *testing.T) {
-	t.Setenv("LAZYMIND_HOME", filepath.Join(t.TempDir(), "LazyMind Home"))
-	adapter := testAdapter(TRAEWork)
-	guide, err := adapter.setupGuide()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if guide.Method != SetupTRAEConfigFile || !strings.HasSuffix(guide.ConfigPath, filepath.Join("TRAE SOLO CN", "User", "mcp.json")) {
-		t.Fatalf("TRAE Work setup guide = %#v", guide)
-	}
-	assertMCPFile(t, guide.Configuration, adapter.self, adapter.home)
-}
-
-func TestDeepSeekHarnessGuideUsesWebProfilePatch(t *testing.T) {
-	t.Setenv("DSH_HOME", filepath.Join(t.TempDir(), "DeepSeek Harness Home"))
-	t.Setenv("LAZYMIND_HOME", filepath.Join(t.TempDir(), "LazyMind Home"))
-	adapter := testAdapter(DeepSeekHarness)
-	guide, err := adapter.setupGuide()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if guide.Method != SetupDSHProfilePatch || guide.ConfigPath != filepath.Join(os.Getenv("DSH_HOME"), "profiles", "web", "cordis.patch.yml") {
-		t.Fatalf("DeepSeek Harness setup guide = %#v", guide)
-	}
-	for _, required := range []string{
-		"- insert:", "id: mcp-lazymind", "name: '@deepseek-ai/dsh-mcp-client'",
-		"serverName: lazymind", "transport: stdio", "command: " + jsonQuote(adapter.self),
-		"args: ['mcp', 'proxy']", "LAZYMIND_HOME: " + jsonQuote(adapter.home),
-		"failOnStartupError: true",
-	} {
-		if !strings.Contains(guide.Configuration, required) {
-			t.Fatalf("DeepSeek Harness patch lacks %q:\n%s", required, guide.Configuration)
-		}
-	}
-}
-
-func TestDiscoverDeepSeekHarnessFromNpxWebProfile(t *testing.T) {
+func TestDeepSeekRequirementsCheckProfileAndMCPClient(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("DSH_HOME", root)
+	adapter := testAdapter(DeepSeekHarness)
+
+	status := adapter.Status(context.Background())
+	if status.State != agentintegration.RequirementsMissing || len(status.Requirements) != 2 {
+		t.Fatalf("status=%#v", status)
+	}
 	writeTestFile(t, filepath.Join(root, "profiles", "web", "package.json"), `{}`)
 	writeTestFile(t, filepath.Join(root, "profiles", "node_modules", "@deepseek-ai", "dsh-mcp-client", "package.json"), `{}`)
-	writeTestFile(t, filepath.Join(root, "profiles", "node_modules", "@deepseek-ai", "dsh", "package.json"), `{"version":"0.1.0-rc.6"}`)
-	profile, version, err := discoverDSHProfile()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if profile != filepath.Join(root, "profiles", "web", "package.json") || version != "0.1.0-rc.6" {
-		t.Fatalf("DeepSeek Harness discovery = %q, %q", profile, version)
+	status = adapter.Status(context.Background())
+	if status.State != agentintegration.Ready {
+		t.Fatalf("status=%#v", status)
 	}
 }
 
 func TestManagedJSONConfigPreservesOtherServersAndRemovesOnlyLazyMind(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "mcp.json")
-	self := filepath.Join(root, "bin", "lazymind")
+	selfName := "lazymind"
+	if runtime.GOOS == "windows" {
+		selfName += ".exe"
+	}
+	self := filepath.Join(root, "bin", selfName)
 	home := filepath.Join(root, "home")
 	writeTestFile(t, self, "test connector")
-	writeTestFile(t, path, `{"theme":"dark","mcpServers":{"existing":{"command":"other","args":["serve"]}}}`)
+	writeTestFile(t, path, `{"theme":"dark","mcpServers":{"existing":{"description":"keep","url":"https://example.com/mcp","type":"streamable_http","alwaysLoad":true,"disabled":false,"connect_timeout":15}}}`)
 
-	if err := writeManagedConfig(Cursor, path, self, home); err != nil {
+	if err := writeManagedConfig(Cursor, path, self, home, "host-1"); err != nil {
 		t.Fatal(err)
 	}
-	state, err := readManagedConfig(Cursor, path, self, home)
+	state, err := readManagedConfig(Cursor, path, self, home, "host-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !state.configured || !state.owned {
-		t.Fatalf("managed state = %#v", state)
+	if !state.configured || !state.owned || !state.current {
+		t.Fatalf("managed state=%#v", state)
 	}
 	var configured struct {
-		Theme      string                        `json:"theme"`
-		MCPServers map[string]stdioMCPDefinition `json:"mcpServers"`
+		Theme      string                     `json:"theme"`
+		MCPServers map[string]json.RawMessage `json:"mcpServers"`
 	}
 	body, _ := os.ReadFile(path)
 	if err := json.Unmarshal(body, &configured); err != nil {
 		t.Fatal(err)
 	}
-	if configured.Theme != "dark" || configured.MCPServers["existing"].Command != "other" {
+	var existing map[string]any
+	if err := json.Unmarshal(configured.MCPServers["existing"], &existing); err != nil {
+		t.Fatal(err)
+	}
+	if configured.Theme != "dark" || len(existing) != 6 || existing["description"] != "keep" ||
+		existing["url"] != "https://example.com/mcp" || existing["connect_timeout"] != float64(15) {
 		t.Fatalf("unrelated configuration changed: %#v", configured)
 	}
 	if _, err := os.Stat(path + ".lazymind-backup"); err != nil {
-		t.Fatalf("configuration backup missing: %v", err)
+		t.Fatalf("backup missing: %v", err)
 	}
 
 	if err := removeManagedConfig(Cursor, path); err != nil {
@@ -149,20 +158,26 @@ func TestManagedJSONConfigPreservesOtherServersAndRemovesOnlyLazyMind(t *testing
 	if err := json.Unmarshal(body, &configured); err != nil {
 		t.Fatal(err)
 	}
-	if _, exists := configured.MCPServers[serverName]; exists || configured.MCPServers["existing"].Command != "other" {
-		t.Fatalf("disconnect changed unrelated configuration: %#v", configured.MCPServers)
+	existing = nil
+	if err := json.Unmarshal(configured.MCPServers["existing"], &existing); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := configured.MCPServers[serverName]; exists || len(existing) != 6 ||
+		existing["description"] != "keep" || existing["url"] != "https://example.com/mcp" ||
+		existing["connect_timeout"] != float64(15) {
+		t.Fatalf("unexpected servers after disconnect: %#v", configured.MCPServers)
 	}
 }
 
-func TestManagedJSONConfigRejectsForeignLazyMindEntry(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "mcp.json")
+func TestForeignLazyMindEntryBecomesConflict(t *testing.T) {
+	home := t.TempDir()
+	setTestHome(t, home)
+	path := filepath.Join(home, ".workbuddy", "mcp.json")
 	writeTestFile(t, path, `{"mcpServers":{"lazymind":{"command":"foreign","args":["run"]}}}`)
-	state, err := readManagedConfig(WorkBuddy, path, "/owned/lazymind", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !state.configured || state.owned {
-		t.Fatalf("foreign state = %#v", state)
+	adapter := testAdapter(WorkBuddy)
+	status := adapter.Status(context.Background())
+	if status.State != agentintegration.Conflict {
+		t.Fatalf("status=%#v", status)
 	}
 }
 
@@ -174,71 +189,41 @@ func TestManagedDSHConfigPreservesOtherPatchEntries(t *testing.T) {
 	writeTestFile(t, self, "test connector")
 	writeTestFile(t, path, "- insert:\n    - id: existing\n      name: existing-plugin\n      config:\n        value: keep\n")
 
-	if err := writeManagedConfig(DeepSeekHarness, path, self, home); err != nil {
+	if err := writeManagedConfig(DeepSeekHarness, path, self, home, "host-1"); err != nil {
 		t.Fatal(err)
-	}
-	state, err := readManagedConfig(DeepSeekHarness, path, self, home)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !state.configured || !state.owned {
-		t.Fatalf("managed DSH state = %#v", state)
 	}
 	if err := removeManagedConfig(DeepSeekHarness, path); err != nil {
 		t.Fatal(err)
 	}
 	body, _ := os.ReadFile(path)
 	if !strings.Contains(string(body), "id: existing") || strings.Contains(string(body), "mcp-lazymind") {
-		t.Fatalf("unexpected DSH patch after disconnect:\n%s", body)
+		t.Fatalf("unexpected DSH patch:\n%s", body)
 	}
 }
 
 func testAdapter(kind Kind) *Adapter {
 	return &Adapter{
-		kind: kind, definition: definition{agent: string(kind)},
-		binary: "/Applications/Agent.app/Contents/MacOS/agent",
-		self:   "/Applications/LazyMind.app/Contents/Resources/runtime/bin/lazymind",
-		home:   os.Getenv("LAZYMIND_HOME"),
+		kind:   kind,
+		self:   filepath.Join(string(filepath.Separator), "opt", "lazymind"),
+		home:   filepath.Join(string(filepath.Separator), "tmp", "lazymind-home"),
+		hostID: "host-1",
 	}
 }
 
-func assertMCPFile(t *testing.T, value, command, home string) {
-	t.Helper()
-	var configuration mcpFile
-	if err := json.Unmarshal([]byte(value), &configuration); err != nil {
-		t.Fatal(err)
-	}
-	definition, exists := configuration.MCPServers[serverName]
-	if !exists {
-		t.Fatalf("MCP file has no %q server", serverName)
-	}
-	body, err := json.Marshal(definition)
-	if err != nil {
-		t.Fatal(err)
-	}
-	assertStdioDefinition(t, body, command, home)
-}
-
-func assertStdioDefinition(t *testing.T, body []byte, command, home string) {
+func assertStdioDefinition(t *testing.T, body []byte, command, home string, kind Kind) {
 	t.Helper()
 	var definition stdioMCPDefinition
 	if err := json.Unmarshal(body, &definition); err != nil {
 		t.Fatal(err)
 	}
 	if definition.Command != command || len(definition.Args) != 2 || definition.Args[0] != "mcp" || definition.Args[1] != "proxy" {
-		t.Fatalf("stdio MCP definition = %#v", definition)
+		t.Fatalf("definition=%#v", definition)
 	}
-	if definition.Env["LAZYMIND_HOME"] != home || len(definition.Env) != 1 {
-		t.Fatalf("stdio MCP env = %#v", definition.Env)
+	if definition.Env["LAZYMIND_HOME"] != home ||
+		definition.Env["LAZYMIND_AGENT_PROVIDER"] != string(kind) ||
+		definition.Env["LAZYMIND_AGENT_HOST_ID"] != "host-1" || len(definition.Env) != 3 {
+		t.Fatalf("env=%#v", definition.Env)
 	}
-	if _, exists := definition.Env["LAZYMIND_ACCESS_TOKEN"]; exists {
-		t.Fatal("setup must never expose a LazyMind access token")
-	}
-}
-
-func jsonQuote(value string) string {
-	body, _ := json.Marshal(value)
-	return string(body)
 }
 
 func writeTestFile(t *testing.T, path, value string) {
@@ -249,4 +234,21 @@ func writeTestFile(t *testing.T, path, value string) {
 	if err := os.WriteFile(path, []byte(value), 0o600); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func bindDesktopForTest(t *testing.T, target agentexec.BindingTarget) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), string(target)+".exe")
+	if err := os.WriteFile(path, []byte("test"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := agentexec.SetExecutableBinding(target, path); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func setTestHome(t *testing.T, home string) {
+	t.Helper()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 }

@@ -57,6 +57,13 @@ func resolveArtifactPaths(raw json.RawMessage, workspacePath string) json.RawMes
 			strings.HasPrefix(path, "data:") {
 			return path
 		}
+		// Imported history bundles store durable Workflow outputs with the
+		// canonical Docker upload root. The document layer safely rewrites that
+		// root for Desktop/local runtimes, so preserve paths it already recognizes
+		// instead of rejecting them as outside the task workspace.
+		if doc.StaticFileReferenceFromAnyStoragePath(path) != "" {
+			return path
+		}
 		resolved := filepath.Clean(filepath.FromSlash(path))
 		if !filepath.IsAbs(resolved) {
 			resolved = filepath.Clean(filepath.Join(workspaceRoot, resolved))

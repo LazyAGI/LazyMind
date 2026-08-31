@@ -1,11 +1,13 @@
 import jsYaml from 'js-yaml';
-import type { WorkflowModel, WorkflowSlotDef, WorkflowToolScript, WorkflowUiTab, WidgetConfig, CompositePanelNode, CompositeTab, CompositeBehavior } from './workflowModel';
+import type { WorkflowModel, WorkflowSlotDef, WorkflowToolScript, WorkflowUiTab, WidgetConfig, CompositePanelNode, CompositeTab, CompositeBehavior, WorkflowRuntimePolicy, WorkflowTabAction } from './workflowModel';
 
 interface RawWorkflowYaml {
   id?: unknown;
   name?: unknown;
   description?: unknown;
   when_to_use?: unknown;
+  runtime?: unknown;
+  artifact_actions?: unknown;
   tool_scripts?: unknown;
   steps?: unknown;
   slots?: unknown;
@@ -214,8 +216,39 @@ function parseUiTabs(raw: unknown): { tabs: WorkflowUiTab[]; slots?: Record<stri
       };
     }
 
+    const actions = Array.isArray(t.actions)
+      ? t.actions.flatMap((item): WorkflowTabAction[] => {
+        if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
+        const action = item as Record<string, unknown>;
+        const actionId = String(action.id ?? '').trim();
+        const provider = String(action.provider ?? '').trim();
+        if (!actionId || action.type !== 'export' || !provider) return [];
+        const rawInputs = action.inputs;
+        const inputs: Record<string, string> = {};
+        if (rawInputs && typeof rawInputs === 'object' && !Array.isArray(rawInputs)) {
+          for (const [name, value] of Object.entries(rawInputs)) {
+            const slotId = String(value ?? '').trim();
+            if (slotId) inputs[name] = slotId;
+          }
+        }
+        const formats = Array.isArray(action.formats)
+          ? action.formats.map((value) => String(value ?? '').trim()).filter(Boolean)
+          : undefined;
+        return [{
+          id: actionId,
+          type: 'export',
+          provider,
+          label: action.label !== undefined ? String(action.label) : undefined,
+          inputs,
+          formats,
+          alignment: action.alignment === 'sort_order' ? 'sort_order' : undefined,
+        }];
+      })
+      : undefined;
+
     return [{
       id,
+      step_id: t.step_id !== undefined ? String(t.step_id) : undefined,
       label: t.label !== undefined ? String(t.label) : undefined,
       layout,
       gridCols: typeof t.grid_cols === 'number' ? t.grid_cols : undefined,
@@ -223,6 +256,7 @@ function parseUiTabs(raw: unknown): { tabs: WorkflowUiTab[]; slots?: Record<stri
       composite_layout: compositeLayout,
       composite_tab_position: compositeTabPosition,
       composite_behavior: compositeBehavior,
+      actions: actions?.length ? actions : undefined,
     }];
   });
 
@@ -259,6 +293,12 @@ export function parseWorkflowYaml(yamlText: string): WorkflowModel | null {
     name: String(raw.name ?? ''),
     description: raw.description !== undefined ? String(raw.description) : undefined,
     when_to_use: raw.when_to_use !== undefined ? String(raw.when_to_use) : undefined,
+    runtime: raw.runtime && typeof raw.runtime === 'object' && !Array.isArray(raw.runtime)
+      ? raw.runtime as WorkflowRuntimePolicy
+      : undefined,
+    artifact_actions: raw.artifact_actions && typeof raw.artifact_actions === 'object' && !Array.isArray(raw.artifact_actions)
+      ? raw.artifact_actions as Record<string, unknown>
+      : undefined,
     tool_scripts: parseToolScripts(raw.tool_scripts),
     steps: parseSteps(raw.steps),
     slots: parseSlots(raw.slots),

@@ -3,7 +3,7 @@ package common
 import "strings"
 
 var textFileExtensions = map[string]struct{}{
-	"txt": {}, "md": {}, "markdown": {}, "csv": {}, "tsv": {},
+	"txt": {}, "md": {}, "markdown": {}, "lmd": {}, "csv": {}, "tsv": {},
 	"json": {}, "jsonl": {}, "ndjson": {}, "xml": {},
 	"yaml": {}, "yml": {}, "toml": {}, "ini": {}, "cfg": {}, "conf": {},
 	"log": {}, "sql": {}, "html": {}, "htm": {},

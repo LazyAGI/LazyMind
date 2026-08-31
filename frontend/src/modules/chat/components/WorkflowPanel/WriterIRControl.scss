@@ -2,9 +2,27 @@
   --writer-ir-accent: #2563eb;
   --writer-ir-border: #dbe3ee;
   --writer-ir-muted: #64748b;
+  --writer-ir-page-max-width: 780px;
+  --writer-ir-page-padding: 18px;
+  container: writer-ir / inline-size;
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  column-gap: 8px;
+  align-items: start;
+  min-width: 0;
   color: #1e293b;
   font-size: 14px;
   line-height: 1.75;
+}
+
+.writer-ir--width-wide {
+  --writer-ir-page-max-width: 1080px;
+  --writer-ir-page-padding: 6px;
+}
+
+.writer-ir--outline-open {
+  grid-template-columns: minmax(132px, 176px) minmax(0, 1fr);
+  column-gap: 12px;
 }
 
 .writer-ir__toolbar {
@@ -102,9 +120,184 @@
   opacity: 0.45;
 }
 
+.writer-ir__display-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-height: 34px;
+  margin-bottom: 12px;
+  padding: 2px 2px 8px;
+  border-bottom: 1px solid #edf1f5;
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(8px);
+}
+
+.writer-ir__width-control,
+.writer-ir__width-options {
+  display: inline-flex;
+  align-items: center;
+}
+
+.writer-ir__width-control {
+  gap: 7px;
+}
+
+.writer-ir__width-label {
+  color: #64748b;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.writer-ir__width-options {
+  padding: 2px;
+  border: 1px solid #dbe3ee;
+  border-radius: 7px;
+  background: #f8fafc;
+}
+
+.writer-ir .writer-ir__width-option {
+  min-height: 24px;
+  padding: 2px 9px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #64748b;
+  line-height: 1;
+}
+
+.writer-ir .writer-ir__width-option:hover:not(:disabled) {
+  border-color: transparent;
+  background: #eef2f7;
+}
+
+.writer-ir .writer-ir__width-option[aria-pressed='true'] {
+  background: #fff;
+  color: #1e40af;
+  box-shadow: 0 1px 3px rgb(15 23 42 / 10%);
+  font-weight: 600;
+}
+
+.writer-ir__main {
+  min-width: 0;
+  grid-column: 2;
+}
+
+.writer-ir__outline-rail {
+  position: sticky;
+  top: 0;
+  min-width: 0;
+  min-height: 34px;
+  max-height: calc(100vh - 100px);
+  grid-column: 1;
+}
+
+.writer-ir__outline {
+  position: relative;
+  min-height: 120px;
+  max-height: calc(100vh - 100px);
+  padding: 3px 14px 14px 0;
+  border-right: 1px solid #e5eaf0;
+  overflow: auto;
+}
+
+.writer-ir .writer-ir__outline-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  min-height: 28px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #64748b;
+  font-size: 16px;
+}
+
+.writer-ir .writer-ir__outline-toggle:hover:not(:disabled) {
+  border-color: transparent;
+  background: #f1f5f9;
+  color: #2563eb;
+}
+
+.writer-ir .writer-ir__outline-toggle--collapsed {
+  margin-top: 4px;
+  color: #2563eb;
+}
+
+.writer-ir .writer-ir__outline-document-link {
+  display: block;
+  width: 100%;
+  min-height: 30px;
+  margin: 5px 0 4px;
+  padding: 4px 6px;
+  border: 0;
+  background: transparent;
+  color: #2563eb;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.writer-ir .writer-ir__outline-document-link:hover:not(:disabled) {
+  border-color: transparent;
+  background: #f1f5f9;
+  color: #1d4ed8;
+}
+
+.writer-ir__outline-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.writer-ir__outline-list li {
+  margin: 0;
+}
+
+.writer-ir .writer-ir__outline-link {
+  display: block;
+  width: 100%;
+  min-height: 28px;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #475569;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.writer-ir .writer-ir__outline-link:hover {
+  border-color: transparent;
+  background: #f1f5f9;
+  color: #1d4ed8;
+}
+
+.writer-ir .writer-ir__outline-link--level-2 { padding-left: 16px; }
+.writer-ir .writer-ir__outline-link--level-3 { padding-left: 26px; }
+.writer-ir .writer-ir__outline-link--level-4 { padding-left: 36px; }
+.writer-ir .writer-ir__outline-link--level-5 { padding-left: 46px; }
+.writer-ir .writer-ir__outline-link--level-6 { padding-left: 56px; }
+
+.writer-ir__outline-empty {
+  padding: 6px;
+  color: #94a3b8;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .writer-ir__editor-shell {
   position: relative;
-  width: min(100%, 780px);
+  width: min(100%, var(--writer-ir-page-max-width));
   margin: 0 auto;
 }
 
@@ -184,6 +377,164 @@
 .writer-ir__format-select:disabled {
   cursor: not-allowed;
   opacity: 0.55;
+}
+
+.writer-ir__reference-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 112px;
+  min-height: 30px;
+  padding: 0 8px 0 9px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+  color: #475569;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.writer-ir__reference-trigger:hover:not(:disabled) {
+  border-color: #cbd5e1;
+  background: #f8fafc;
+  color: #334155;
+}
+
+.writer-ir__reference-trigger--open,
+.writer-ir__reference-trigger--open:hover:not(:disabled) {
+  border-color: #93c5fd;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.writer-ir__reference-trigger:focus-visible {
+  outline: 2px solid var(--writer-ir-accent);
+  outline-offset: 1px;
+}
+
+.writer-ir__reference-trigger:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.writer-ir__reference-trigger > svg {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  color: #64748b;
+}
+
+.writer-ir__reference-trigger--open > svg {
+  color: #1d4ed8;
+}
+
+.writer-ir__reference-caret {
+  width: 10px !important;
+  height: 10px !important;
+  margin-left: 2px;
+  color: #94a3b8 !important;
+  transition: transform 120ms ease;
+}
+
+.writer-ir__reference-trigger--open .writer-ir__reference-caret {
+  color: #60a5fa !important;
+  transform: rotate(180deg);
+}
+
+.writer-ir__reference-dropdown {
+  z-index: 1300 !important;
+  width: min(320px, calc(100vw - 24px));
+}
+
+.writer-ir__reference-dropdown .ant-dropdown-menu {
+  width: 100%;
+  max-height: 320px;
+  padding: 6px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.99);
+  box-shadow:
+    0 2px 6px rgba(15, 23, 42, 0.06),
+    0 16px 36px rgba(15, 23, 42, 0.14);
+  scrollbar-color: #cbd5e1 transparent;
+  scrollbar-width: thin;
+}
+
+.writer-ir__reference-dropdown .ant-dropdown-menu-item {
+  min-height: 40px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  color: #334155;
+  font-size: 12px;
+  line-height: 20px;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.writer-ir__reference-dropdown .ant-dropdown-menu-item:hover,
+.writer-ir__reference-dropdown .ant-dropdown-menu-item-active {
+  background: #f1f5f9 !important;
+  color: #0f172a !important;
+}
+
+.writer-ir__reference-dropdown .ant-dropdown-menu-item:active {
+  background: #e8f0ff !important;
+  color: #245bdb !important;
+}
+
+.writer-ir__reference-dropdown .ant-dropdown-menu-title-content {
+  min-width: 0;
+}
+
+.writer-ir__reference-option {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.writer-ir__reference-option-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: #f8fafc;
+  color: #64748b;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.writer-ir__reference-option-icon > svg {
+  width: 13px;
+  height: 13px;
+}
+
+.writer-ir__reference-option-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.writer-ir__reference-dropdown .ant-dropdown-menu-item:hover .writer-ir__reference-option-icon,
+.writer-ir__reference-dropdown .ant-dropdown-menu-item-active .writer-ir__reference-option-icon {
+  background: #e8f0ff;
+  color: #245bdb;
 }
 
 .writer-ir__format-toolbar .writer-ir__format-button {
@@ -376,15 +727,21 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .writer-ir__format-toolbar--floating {
+  .writer-ir__format-toolbar--floating,
+  .writer-ir__reference-trigger,
+  .writer-ir__reference-caret,
+  .writer-ir__reference-dropdown .ant-dropdown-menu-item,
+  .writer-ir__reference-option-icon {
     animation: none;
+    transition: none;
   }
 }
 
 .writer-ir__document {
-  width: min(100%, 780px);
+  box-sizing: border-box;
+  width: min(100%, var(--writer-ir-page-max-width));
   margin: 0 auto;
-  padding: 6px 18px 28px;
+  padding: 6px var(--writer-ir-page-padding) 28px;
 }
 
 .writer-ir__document--editable {
@@ -411,6 +768,7 @@
   font-size: 24px;
   font-weight: 700;
   line-height: 1.35;
+  text-align: center;
 }
 
 .writer-ir__title-editor {
@@ -441,12 +799,46 @@
   margin: 8px 0 0 20px;
 }
 
+// Section body text follows the document margin. Structural nesting is kept
+// in the IR without adding a visual indent after pressing Enter on a heading.
+.writer-ir__block--heading > .writer-ir__children {
+  // Each nested editable block reserves a 22px control gutter while the base
+  // block already pulls 7px left. Offset the remaining 15px so its text aligns
+  // with the heading without moving the drag handle over the content.
+  margin-left: -15px;
+}
+
 .writer-ir__block {
   position: relative;
   min-width: 0;
   margin: 3px -7px;
   padding: 3px 7px;
   border-radius: 6px;
+}
+
+.writer-ir__block[data-node-type='heading'],
+.writer-ir__block--heading {
+  scroll-margin-top: 54px;
+}
+
+@container writer-ir (max-width: 680px) {
+  .writer-ir__outline-rail,
+  .writer-ir__main {
+    grid-column: 1 / -1;
+  }
+
+  .writer-ir__outline-rail {
+    position: static;
+    max-height: none;
+    margin-bottom: 10px;
+  }
+
+  .writer-ir__outline {
+    max-height: 180px;
+    padding: 3px 4px 10px;
+    border-right: 0;
+    border-bottom: 1px solid #e5eaf0;
+  }
 }
 
 .writer-ir__document--editable .writer-ir__block {
@@ -467,7 +859,7 @@
 }
 
 .writer-ir__document--editable .writer-ir__block--foldable.writer-ir__block--draggable {
-  padding-left: 40px;
+  padding-left: 22px;
 }
 
 .writer-ir__fold-toggle {
@@ -513,8 +905,12 @@
   transition: opacity 120ms ease, background 120ms ease, color 120ms ease;
 }
 
-.writer-ir__block--foldable > .writer-ir__drag-handle {
-  left: 18px;
+.writer-ir__document--editable .writer-ir__block--foldable > .writer-ir__fold-toggle {
+  left: -18px;
+}
+
+.writer-ir__document--editable .writer-ir__block--foldable > .writer-ir__drag-handle {
+  left: 0;
 }
 
 .writer-ir__block--list_item > .writer-ir__drag-handle {
@@ -627,6 +1023,46 @@
 .writer-ir__document--editable .writer-ir__drag-handle[contenteditable='false'] {
   background: transparent !important;
   color: #8f959e !important;
+}
+
+.writer-ir .writer-ir__internal-ref,
+.writer-ir__document--editable .writer-ir__internal-ref[contenteditable='false'] {
+  padding: 0 2px;
+  border-radius: 3px;
+  background: transparent;
+  color: #245bdb;
+  font-weight: 600;
+  text-decoration: underline;
+  text-decoration-color: rgba(36, 91, 219, 0.45);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.writer-ir .writer-ir__internal-ref:hover,
+.writer-ir .writer-ir__internal-ref:focus-visible,
+.writer-ir__document--editable .writer-ir__internal-ref[contenteditable='false']:hover,
+.writer-ir__document--editable .writer-ir__internal-ref[contenteditable='false']:focus-visible {
+  background: rgba(36, 91, 219, 0.1);
+  color: #1d4ed8;
+  outline: none;
+  text-decoration-color: currentColor;
+}
+
+.writer-ir__block--reference-target {
+  border-radius: 6px;
+  animation: writer-ir-reference-target 1.6s ease-out;
+}
+
+@keyframes writer-ir-reference-target {
+  0%, 35% {
+    background: rgba(51, 112, 255, 0.14);
+    box-shadow: 0 0 0 3px rgba(51, 112, 255, 0.12);
+  }
+  100% {
+    background: transparent;
+    box-shadow: none;
+  }
 }
 
 .writer-ir__document--editable .writer-ir__block--paragraph,
@@ -1149,6 +1585,7 @@
 
 .writer-ir__notice {
   display: flex;
+  grid-column: 1 / -1;
   align-items: center;
   justify-content: space-between;
   gap: 12px;

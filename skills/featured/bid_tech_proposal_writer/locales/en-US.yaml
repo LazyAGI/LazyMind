@@ -1,0 +1,52 @@
+locale: en-US
+
+classification:
+  category: Content creation
+  tags:
+    - Tender document
+    - Technical proposal
+    - Compliance checks
+    - Word export
+
+presentation:
+  card:
+    title: Technical bid proposal writer
+    description: See tender parsing, requirement tracing, drafting, visuals, and Word delivery through a smart-campus O&M example
+    output_type: document
+    output_label: Interactive bid case
+    cover_asset: cover
+    result_summary: Explore nine stages, 11 embedded visuals, the final proposal, and itemized PASS validation
+  detail:
+    title: From a minimal tender to a complete proposal
+    description: Follow 17 technical requirements, 12 disqualification constraints, two outline and draft versions, 11 visuals, DOCX delivery, and final validation. The preview opens on stage 8.
+    attachment_hint: Chinese tender document (DOCX or PDF recommended; TXT, Markdown, HTML, and RTF also supported)
+
+tasks:
+  - id: write-technical-bid
+    selector:
+      title: Smart-campus O&M proposal
+      description: Complete a traceable nine-stage proposal from a minimal tender
+      output_label: Interactive proposal
+    launch:
+      prompt_short: Use the Technical Bid Proposal workflow and bid_minimal_smoke_test.docx to generate a 1,000-Chinese-character DOCX with the default style.
+      prompt: Use the Technical Bid Proposal workflow and bid_minimal_smoke_test.docx to generate a 1,000-Chinese-character DOCX with the default style.
+    replay:
+      steps:
+        - title: Parse the tender
+          description: Preserve headings, numbering, tables, and source metadata while normalizing parameters
+        - title: Extract requirements and risks
+          description: Build 17 technical requirement IDs and 12 material-response constraints
+        - title: Retrieve reference material
+          description: Add sourced evidence from the selected knowledge base by requirement topic
+        - title: Approve outline and draft
+          description: Produce an eight-chapter outline and draft while preserving V1 and V2
+        - title: Generate proposal visuals
+          description: Generate one architecture diagram and ten differentiated functional visuals
+        - title: Export and validate
+          description: Produce Markdown or Word and verify coverage, length, images, and file integrity
+    result:
+      template: html_preview_v1
+      eyebrow: Technical bid case
+      title: Smart-campus O&M technical proposal
+      summary: Open stage 8 to inspect the complete proposal, DOCX, nine-stage artifacts, and 11 embedded visuals.
+      html_asset: bid_demo

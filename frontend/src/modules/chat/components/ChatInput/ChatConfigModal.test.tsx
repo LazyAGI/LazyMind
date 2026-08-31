@@ -53,4 +53,8 @@ describe('resolveWorkflowExecutionMode', () => {
   it('keeps the persisted disabled mode when no workflow session is active', () => {
     expect(resolveWorkflowExecutionMode({ enable_workflow: false }, false)).toBe('disabled');
   });
+
+  it('uses the disabled effective mode when the workflow master control is unavailable', () => {
+    expect(resolveWorkflowExecutionMode({ enable_workflow: true }, false, false)).toBe('disabled');
+  });
 });

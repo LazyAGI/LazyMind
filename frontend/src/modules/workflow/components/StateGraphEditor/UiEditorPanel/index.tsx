@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button } from 'antd';
 import { ExpandOutlined, CompressOutlined, CloseOutlined, FileTextOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import type { WorkflowModel, WorkflowUiTab, WidgetConfig, CompositePanelNode, WidgetType } from '../core/workflowModel';
-import { SLOT_DEFAULT_WIDGET } from '../core/workflowModel';
+import { collectCompositeSlotIds, SLOT_DEFAULT_WIDGET } from '../core/workflowModel';
 import type { GraphModel } from '../core/model';
 import ArtifactPanel from '../ArtifactPanel';
 import UiWysiwygPreview from './UiWysiwygPreview';
@@ -40,9 +40,21 @@ export default function UiEditorPanel({
   const [selectedSlotId, setSelectedSlotId] = useState<string | null>(null);
   const [autoEditTabId, setAutoEditTabId] = useState<string | undefined>(undefined);
   const tabs: WorkflowUiTab[] = workflowModel.ui?.tabs ?? [];
-  const activeTab = tabs.find((t) => t.id === activeTabId);
+  const effectiveActiveTabId = tabs.some((t) => t.id === activeTabId)
+    ? activeTabId
+    : tabs[0]?.id;
+  const activeTab = tabs.find((t) => t.id === effectiveActiveTabId);
   const slotMap = Object.fromEntries(Object.values(graphModel.slots).map((s) => [s.id, s]));
   const uiSlots: Record<string, WidgetConfig> = (workflowModel.ui?.slots ?? {}) as Record<string, WidgetConfig>;
+
+  // The UI editor may mount before a tab has been selected. Its preview already
+  // falls back to the first persisted tab, so keep the lifted selection in sync
+  // with that same tab instead of letting controls fall back to Vertical.
+  useEffect(() => {
+    if (effectiveActiveTabId !== activeTabId) {
+      onActiveTabChange(effectiveActiveTabId);
+    }
+  }, [activeTabId, effectiveActiveTabId, onActiveTabChange]);
 
   const updateTabs = (newTabs: WorkflowUiTab[]) => {
     onWorkflowModelChange({
@@ -70,12 +82,12 @@ export default function UiEditorPanel({
   const handleDeleteTab = (tabId: string) => {
     const newTabs = tabs.filter((t) => t.id !== tabId);
     updateTabs(newTabs);
-    if (activeTabId === tabId) onActiveTabChange(newTabs[0]?.id);
+    if (effectiveActiveTabId === tabId) onActiveTabChange(newTabs[0]?.id);
   };
 
   const handleSlotsChange = (slots: Array<{ id: string }>) => {
-    if (!activeTabId) return;
-    updateTabs(tabs.map((t) => t.id === activeTabId ? { ...t, slots } : t));
+    if (!effectiveActiveTabId) return;
+    updateTabs(tabs.map((t) => t.id === effectiveActiveTabId ? { ...t, slots } : t));
   };
 
   const handleUiSlotsChange = (slotId: string, widget: WidgetConfig | undefined) => {
@@ -93,23 +105,26 @@ export default function UiEditorPanel({
   };
 
   const handleCompositeLayoutChange = (value: CompositePanelNode) => {
-    if (!activeTabId) return;
-    updateTabs(tabs.map((t) => t.id === activeTabId ? { ...t, composite_layout: value } : t));
+    if (!effectiveActiveTabId) return;
+    const layoutSlots = collectCompositeSlotIds(value).map((id) => ({ id }));
+    updateTabs(tabs.map((t) => t.id === effectiveActiveTabId
+      ? { ...t, slots: layoutSlots, composite_layout: value }
+      : t));
   };
 
   const handleCompositeTabPositionChange = (pos: WorkflowUiTab['composite_tab_position']) => {
-    if (!activeTabId) return;
-    updateTabs(tabs.map((t) => t.id === activeTabId ? { ...t, composite_tab_position: pos } : t));
+    if (!effectiveActiveTabId) return;
+    updateTabs(tabs.map((t) => t.id === effectiveActiveTabId ? { ...t, composite_tab_position: pos } : t));
   };
 
   const handleLayoutChange = (layout: WorkflowUiTab['layout']) => {
-    if (!activeTabId) return;
-    updateTabs(tabs.map((t) => (t.id === activeTabId ? { ...t, layout } : t)));
+    if (!effectiveActiveTabId) return;
+    updateTabs(tabs.map((t) => (t.id === effectiveActiveTabId ? { ...t, layout } : t)));
   };
 
   const handleGridColsChange = (gridCols: number | null) => {
-    if (!activeTabId) return;
-    updateTabs(tabs.map((t) => t.id === activeTabId ? { ...t, gridCols: gridCols ?? undefined } : t));
+    if (!effectiveActiveTabId) return;
+    updateTabs(tabs.map((t) => t.id === effectiveActiveTabId ? { ...t, gridCols: gridCols ?? undefined } : t));
   };
 
   // Selected slot info for the properties panel
@@ -133,7 +148,7 @@ export default function UiEditorPanel({
             uiMode
             inline
             workflowModel={workflowModel}
-            activeTabId={activeTabId}
+            activeTabId={effectiveActiveTabId}
             onUiModelChange={handleUiChange}
             onTabNavigate={onActiveTabChange}
             readonly={readonly}
@@ -151,8 +166,8 @@ export default function UiEditorPanel({
           onDrop={(e) => {
             e.preventDefault();
             const slotId = e.dataTransfer.getData('application/x-slot-id');
-            if (slotId && activeTabId) {
-              const currentTab = tabs.find((t) => t.id === activeTabId);
+            if (slotId && effectiveActiveTabId) {
+              const currentTab = tabs.find((t) => t.id === effectiveActiveTabId);
               if (!currentTab || currentTab.slots.some((s) => s.id === slotId)) return;
               handleSlotsChange([...(currentTab.slots ?? []), { id: slotId }]);
             }
@@ -160,7 +175,7 @@ export default function UiEditorPanel({
         >
           <UiWysiwygPreview
             workflowModel={workflowModel}
-            activeTabId={activeTabId}
+            activeTabId={effectiveActiveTabId}
             activeLayout={activeTab?.layout ?? 'vertical'}
             activeGridCols={activeTab?.gridCols}
             slotMap={slotMap}

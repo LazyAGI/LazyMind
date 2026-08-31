@@ -24,6 +24,17 @@ else
 fi
 
 echo ""
+echo "=== channel-gateway ==="
+if command -v python3 &>/dev/null; then
+  PYTHONPATH=backend/channel-gateway \
+    python3 -m unittest discover \
+      -s backend/channel-gateway/tests -p 'test_*.py' -v 2>&1 \
+    || FAILED=1
+else
+  echo "Skip (python3 not found)"
+fi
+
+echo ""
 echo "=== backend/core ==="
 if command -v go &>/dev/null; then
   (cd tests/backend/core && go test ./... -v 2>&1) || FAILED=1
@@ -43,6 +54,14 @@ echo ""
 echo "=== local/local-runtime-manager ==="
 if command -v go &>/dev/null; then
   (cd local/local-runtime-manager && GOCACHE=/tmp/local-runtime-manager-gocache go test ./... -v 2>&1) || FAILED=1
+else
+  echo "Skip (go not found)"
+fi
+
+echo ""
+echo "=== local/lazymind-cli ==="
+if command -v go &>/dev/null; then
+  (cd local/lazymind-cli && GOCACHE=/tmp/lazymind-cli-gocache go test ./... -v 2>&1) || FAILED=1
 else
   echo "Skip (go not found)"
 fi

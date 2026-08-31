@@ -39,4 +39,5 @@ export const mapMarketSkillRecordToAsset = (
   sourceSkillId: item.sourceSkillId,
   installed: item.installed,
   installedSkillId: item.installedSkillId,
+  provider: item.provider,
 });

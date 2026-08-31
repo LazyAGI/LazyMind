@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Button,
   Checkbox,
@@ -52,6 +52,7 @@ interface ToolManagementSectionProps {
   description?: string;
   initialQuery?: string;
   layout?: "default" | "settings";
+  onChanged?: () => void | Promise<void>;
   refreshToken?: number;
   title?: string;
   view: ToolView;
@@ -59,6 +60,14 @@ interface ToolManagementSectionProps {
 
 const DEFAULT_TOOL_PAGE_SIZE = 6;
 const TOOL_PAGE_SIZE_OPTIONS = [6, 12, 20, 50];
+const BUILT_IN_TOOL_DESCRIPTION_KEYS: Record<string, string> = {
+  kb: "settingsPage.systemTools.toolDescriptions.kb",
+  data_sources: "settingsPage.systemTools.toolDescriptions.dataSources",
+  external_db: "settingsPage.systemTools.toolDescriptions.externalDb",
+  writer_create: "settingsPage.systemTools.toolDescriptions.aiWriting",
+  writer_revision: "settingsPage.systemTools.toolDescriptions.aiRevision",
+  calculator: "settingsPage.systemTools.toolDescriptions.calculator",
+};
 
 const paginateRecords = <T,>(records: T[], page: number, pageSize: number) => {
   const start = (page - 1) * pageSize;
@@ -66,7 +75,8 @@ const paginateRecords = <T,>(records: T[], page: number, pageSize: number) => {
 };
 
 const getMcpActionKey = (action: string, id: string) => `${action}:${id}`;
-const getMcpToolId = (tool: McpToolAsset) => tool.id || tool.name;
+const getMcpToolKey = (tool: McpToolAsset) => tool.id || tool.name;
+const getMcpToolPermissionName = (tool: McpToolAsset) => tool.name || tool.id;
 const normalizeMcpTransportValue = (value?: string) =>
   value === "streamable_http" ? "http" : value || "sse";
 
@@ -75,17 +85,76 @@ const getMcpTransportLabel = (value?: string) => {
   return normalizedValue === "http" ? "Streamable HTTP" : "SSE";
 };
 
-const resolveAllowedMcpToolIds = (server: McpServerAsset, tools: McpToolAsset[]) => {
-  const toolIds = tools.map(getMcpToolId).filter(Boolean);
+const resolveAllowedMcpToolNames = (server: McpServerAsset, tools: McpToolAsset[]) => {
+  const toolNames = tools.map(getMcpToolPermissionName).filter(Boolean);
   if (!server.allowedTools) {
-    return toolIds;
+    return toolNames;
   }
 
   const allowedToolSet = new Set(server.allowedTools);
-  return toolIds.filter((toolId) => allowedToolSet.has(toolId));
+  return tools
+    .filter((tool) =>
+      allowedToolSet.has(getMcpToolPermissionName(tool))
+      || allowedToolSet.has(getMcpToolKey(tool)),
+    )
+    .map(getMcpToolPermissionName)
+    .filter(Boolean);
 };
 
-export default function ToolManagementSection({ description, initialQuery = "", layout = "default", refreshToken = 0, title, view }: ToolManagementSectionProps) {
+interface ManagedToolSummaryProps {
+  fallback: string;
+  primary?: string;
+  secondary?: string;
+}
+
+export function ManagedToolSummary({ fallback, primary, secondary }: ManagedToolSummaryProps) {
+  const summaryRef = useRef<HTMLParagraphElement>(null);
+  const [overflowing, setOverflowing] = useState(false);
+  const visibleText = primary || secondary || fallback;
+  const tooltipText = [primary, secondary].filter(Boolean).join("\n") || fallback;
+
+  useLayoutEffect(() => {
+    const summary = summaryRef.current;
+    if (!summary) return;
+
+    const measure = () => {
+      setOverflowing(
+        summary.scrollHeight > summary.clientHeight + 1
+        || summary.scrollWidth > summary.clientWidth + 1,
+      );
+    };
+    measure();
+
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(summary);
+    return () => observer.disconnect();
+  }, [visibleText]);
+
+  const summary = (
+    <span
+      className="model-provider-service-summary-wrap"
+      tabIndex={overflowing ? 0 : undefined}
+    >
+      <p ref={summaryRef} className="model-provider-service-summary">
+        {visibleText}
+      </p>
+    </span>
+  );
+
+  if (!overflowing) return summary;
+  return (
+    <Tooltip
+      title={<div className="model-provider-tool-popover-content">{tooltipText}</div>}
+      classNames={{ root: "model-provider-tool-popover" }}
+      placement="bottomLeft"
+    >
+      {summary}
+    </Tooltip>
+  );
+}
+
+export default function ToolManagementSection({ description, initialQuery = "", layout = "default", onChanged, refreshToken = 0, title, view }: ToolManagementSectionProps) {
   const { t, i18n } = useTranslation();
   const currentLanguage = i18n.resolvedLanguage || i18n.language || "zh-CN";
   const [searchInput, setSearchInput] = useState(initialQuery);
@@ -106,7 +175,7 @@ export default function ToolManagementSection({ description, initialQuery = "", 
   const [mcpSaving, setMcpSaving] = useState(false);
   const [mcpToolsDrawerOpen, setMcpToolsDrawerOpen] = useState(false);
   const [mcpToolTarget, setMcpToolTarget] = useState<McpServerAsset | null>(null);
-  const [mcpToolDraftIds, setMcpToolDraftIds] = useState<string[]>([]);
+  const [mcpToolDraftNames, setMcpToolDraftNames] = useState<string[]>([]);
   const [mcpToolSaving, setMcpToolSaving] = useState(false);
   const [mcpForm] = Form.useForm<McpServerDraft>();
 
@@ -175,6 +244,13 @@ export default function ToolManagementSection({ description, initialQuery = "", 
     }
   }, [listOptions, t]);
 
+  const refreshMcpState = useCallback(async () => {
+    await Promise.all([
+      refreshMcpServers(),
+      onChanged?.(),
+    ]);
+  }, [onChanged, refreshMcpServers]);
+
   useEffect(() => {
     if (view === "builtin") {
       void refreshToolAssets();
@@ -233,7 +309,7 @@ export default function ToolManagementSection({ description, initialQuery = "", 
   const openMcpToolsDrawer = useCallback((server: McpServerAsset) => {
     const tools = server.tools || [];
     setMcpToolTarget(server);
-    setMcpToolDraftIds(resolveAllowedMcpToolIds(server, tools));
+    setMcpToolDraftNames(resolveAllowedMcpToolNames(server, tools));
     setMcpToolsDrawerOpen(true);
   }, []);
 
@@ -300,7 +376,7 @@ export default function ToolManagementSection({ description, initialQuery = "", 
         message.success(t("admin.memoryMcpCreateSuccess"));
       }
       setMcpModalOpen(false);
-      await refreshMcpServers();
+      await refreshMcpState();
     } catch (error) {
       if (error && typeof error === "object" && "errorFields" in error) {
         return;
@@ -308,7 +384,7 @@ export default function ToolManagementSection({ description, initialQuery = "", 
     } finally {
       setMcpSaving(false);
     }
-  }, [mcpEditingServer, mcpForm, mcpModalMode, refreshMcpServers, t]);
+  }, [mcpEditingServer, mcpForm, mcpModalMode, refreshMcpState, t]);
 
   const handleToggleMcpServer = useCallback(
     async (server: McpServerAsset, checked: boolean) => {
@@ -323,7 +399,7 @@ export default function ToolManagementSection({ description, initialQuery = "", 
           timeout: server.timeout,
           enabled: checked,
         });
-        await refreshMcpServers();
+        await refreshMcpState();
         message.success(
           checked
             ? t("admin.memoryMcpEnableSuccess")
@@ -334,7 +410,7 @@ export default function ToolManagementSection({ description, initialQuery = "", 
         markMcpActionLoading(actionKey, false);
       }
     },
-    [markMcpActionLoading, refreshMcpServers, t],
+    [markMcpActionLoading, refreshMcpState, t],
   );
 
   const handleCheckMcpServer = useCallback(
@@ -348,13 +424,13 @@ export default function ToolManagementSection({ description, initialQuery = "", 
         } else {
           message.warning(localizeErrorCode("2000509"));
         }
-        await refreshMcpServers();
+        await refreshMcpState();
       } catch {
       } finally {
         markMcpActionLoading(actionKey, false);
       }
     },
-    [markMcpActionLoading, refreshMcpServers, t],
+    [markMcpActionLoading, refreshMcpState, t],
   );
 
   const handleDiscoverMcpTools = useCallback(
@@ -365,6 +441,7 @@ export default function ToolManagementSection({ description, initialQuery = "", 
         const result = await discoverMcpServerTools(server.id);
         const nextServer = {
           ...server,
+          isVerified: true,
           toolCount: result.tools.length,
           tools: result.tools,
         };
@@ -372,13 +449,14 @@ export default function ToolManagementSection({ description, initialQuery = "", 
           previous.map((item) => (item.id === server.id ? nextServer : item)),
         );
         openMcpToolsDrawer(nextServer);
+        await refreshMcpState();
         message.success(t("admin.memoryMcpDiscoverSuccess", { count: result.tools.length }));
       } catch {
       } finally {
         markMcpActionLoading(actionKey, false);
       }
     },
-    [markMcpActionLoading, openMcpToolsDrawer, t],
+    [markMcpActionLoading, openMcpToolsDrawer, refreshMcpState, t],
   );
 
   const handleDeleteMcpServer = useCallback(
@@ -387,14 +465,14 @@ export default function ToolManagementSection({ description, initialQuery = "", 
       markMcpActionLoading(actionKey, true);
       try {
         await deleteMcpServer(server.id);
-        await refreshMcpServers();
+        await refreshMcpState();
         message.success(t("admin.memoryMcpDeleteSuccess"));
       } catch {
       } finally {
         markMcpActionLoading(actionKey, false);
       }
     },
-    [markMcpActionLoading, refreshMcpServers, t],
+    [markMcpActionLoading, refreshMcpState, t],
   );
 
   const closeMcpToolsDrawer = useCallback(() => {
@@ -410,60 +488,57 @@ export default function ToolManagementSection({ description, initialQuery = "", 
 
     setMcpToolSaving(true);
     try {
-      await updateMcpServerTools(mcpToolTarget.id, mcpToolDraftIds);
+      await updateMcpServerTools(mcpToolTarget.id, mcpToolDraftNames);
       setMcpToolsDrawerOpen(false);
-      await refreshMcpServers();
+      await refreshMcpState();
       message.success(t("admin.memoryMcpToolsSaveSuccess"));
     } catch {
     } finally {
       setMcpToolSaving(false);
     }
-  }, [mcpToolDraftIds, mcpToolTarget, refreshMcpServers, t]);
+  }, [mcpToolDraftNames, mcpToolTarget, refreshMcpState, t]);
 
   const renderManagedToolSummary = (primary?: string, secondary?: string) => {
-    const text = [primary, secondary].filter(Boolean).join("\n");
     return (
-      <Tooltip
-        title={text ? <div className="model-provider-tool-popover-content">{text}</div> : undefined}
-        overlayClassName="model-provider-tool-popover"
-        placement="topLeft"
-      >
-        <span className="model-provider-service-summary-wrap">
-          <p className="model-provider-service-summary">
-            {primary || secondary || t("common.noData")}
-          </p>
-        </span>
-      </Tooltip>
+      <ManagedToolSummary
+        fallback={t("common.noData")}
+        primary={primary}
+        secondary={secondary}
+      />
     );
   };
 
-  const renderBuiltInToolCard = (tool: StructuredAsset) => (
-    <article className="model-provider-service-card model-provider-managed-tool-card" key={tool.id}>
-      <span className="model-provider-service-logo model-provider-service-logo-green">
-        <span className="model-provider-service-logo-icon"><ToolOutlined /></span>
-      </span>
-      <div className="model-provider-service-card-copy">
-        <div className="model-provider-service-title-row">
-          <h4>{tool.name || tool.id}</h4>
-          <Tag className="model-provider-service-status" color={tool.isEnabled ? "success" : "default"}>
-            {tool.isEnabled ? t("common.enabled") : t("common.disabled")}
-          </Tag>
+  const renderBuiltInToolCard = (tool: StructuredAsset) => {
+    const descriptionKey = BUILT_IN_TOOL_DESCRIPTION_KEYS[tool.id.trim().toLowerCase()];
+    const localizedDescription = descriptionKey ? t(descriptionKey) : tool.description;
+    return (
+      <article className="model-provider-service-card model-provider-managed-tool-card" key={tool.id}>
+        <span className="model-provider-service-logo model-provider-service-logo-green">
+          <span className="model-provider-service-logo-icon"><ToolOutlined /></span>
+        </span>
+        <div className="model-provider-service-card-copy">
+          <div className="model-provider-service-title-row">
+            <h4>{tool.name || tool.id}</h4>
+            <Tag className="model-provider-service-status" color={tool.isEnabled ? "success" : "default"}>
+              {tool.isEnabled ? t("common.enabled") : t("common.disabled")}
+            </Tag>
+          </div>
+          {renderManagedToolSummary(localizedDescription, tool.content)}
         </div>
-        {renderManagedToolSummary(tool.description, tool.content)}
-      </div>
-      <div className="model-provider-managed-tool-actions">
-        <Switch
-          aria-label={tool.name || tool.id}
-          checked={Boolean(tool.isEnabled)}
-          disabled={Boolean(tool.readonly)}
-          loading={toolActionLoading.has(tool.id)}
-          onChange={(checked) => {
-            void handleToggleTool(tool, checked);
-          }}
-        />
-      </div>
-    </article>
-  );
+        <div className="model-provider-managed-tool-actions">
+          <Switch
+            aria-label={tool.name || tool.id}
+            checked={Boolean(tool.isEnabled)}
+            disabled={Boolean(tool.readonly)}
+            loading={toolActionLoading.has(tool.id)}
+            onChange={(checked) => {
+              void handleToggleTool(tool, checked);
+            }}
+          />
+        </div>
+      </article>
+    );
+  };
 
   const renderMcpServerCard = (server: McpServerAsset) => {
     const isSettingsLayout = layout === "settings";
@@ -569,12 +644,12 @@ export default function ToolManagementSection({ description, initialQuery = "", 
     );
   };
 
-  const mcpToolIds = (mcpToolTarget?.tools || []).map(getMcpToolId).filter(Boolean);
-  const selectedMcpToolSet = new Set(mcpToolDraftIds);
+  const mcpToolNames = (mcpToolTarget?.tools || []).map(getMcpToolPermissionName).filter(Boolean);
+  const selectedMcpToolSet = new Set(mcpToolDraftNames);
   const allMcpToolsSelected =
-    mcpToolIds.length > 0 && mcpToolIds.every((toolId) => selectedMcpToolSet.has(toolId));
+    mcpToolNames.length > 0 && mcpToolNames.every((toolName) => selectedMcpToolSet.has(toolName));
   const hasPartialMcpToolsSelected =
-    mcpToolIds.some((toolId) => selectedMcpToolSet.has(toolId)) && !allMcpToolsSelected;
+    mcpToolNames.some((toolName) => selectedMcpToolSet.has(toolName)) && !allMcpToolsSelected;
 
   return (
     <section className={`model-provider-service-category model-provider-tool-management-section${layout === "settings" ? " is-settings-layout" : ""}`}>
@@ -855,23 +930,24 @@ export default function ToolManagementSection({ description, initialQuery = "", 
                   checked={allMcpToolsSelected}
                   indeterminate={hasPartialMcpToolsSelected}
                   onChange={(event) =>
-                    setMcpToolDraftIds(event.target.checked ? mcpToolIds : [])
+                    setMcpToolDraftNames(event.target.checked ? mcpToolNames : [])
                   }
                 >
                   {t("admin.memoryMcpSelectAllTools")}
                 </Checkbox>
                 <Checkbox.Group
                   className="model-provider-mcp-tool-group"
-                  value={mcpToolDraftIds}
-                  onChange={(values) => setMcpToolDraftIds(values.map(String))}
+                  value={mcpToolDraftNames}
+                  onChange={(values) => setMcpToolDraftNames(values.map(String))}
                 >
                   {mcpToolTarget.tools.map((toolItem) => {
-                    const toolId = getMcpToolId(toolItem);
+                    const toolKey = getMcpToolKey(toolItem);
+                    const toolName = getMcpToolPermissionName(toolItem);
                     return (
-                      <div className="model-provider-mcp-tool-option" key={toolId}>
-                        <Checkbox value={toolId} />
+                      <div className="model-provider-mcp-tool-option" key={toolKey}>
+                        <Checkbox value={toolName} />
                         <div className="model-provider-mcp-tool-option-copy">
-                          <strong>{toolItem.name || toolId}</strong>
+                          <strong>{toolItem.name || toolKey}</strong>
                           <span>{toolItem.description || "-"}</span>
                         </div>
                       </div>

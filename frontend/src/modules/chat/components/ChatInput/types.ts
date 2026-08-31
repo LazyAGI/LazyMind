@@ -3,6 +3,7 @@ import type { RcFile } from "antd/es/upload";
 import type { ImageUploadImperativeProps } from "../ImageUpload";
 import type { ThinkingDepth } from "@/modules/chat/store/chatThink";
 import type { ChatMention } from "./MentionEditor";
+import type { ChatConfig } from "../ChatConfigs";
 
 export interface ChatFileList {
   uid: string;
@@ -15,6 +16,8 @@ export interface ChatFileList {
 
 export interface SendMessageParams {
   text: string;
+  /** Preserve the resource selection when the welcome composer unmounts. */
+  chatConfigSnapshot?: ChatConfig;
   mentions?: ChatMention[];
   citeMessage?: string;
   citeMessages?: string[];

@@ -12,47 +12,52 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"lazymind/agentconnector/internal/agentexec"
+	"lazymind/agentconnector/internal/localfile"
 )
 
 type managedConfigState struct {
 	configured bool
 	owned      bool
+	current    bool
 	command    string
 	arguments  []string
 }
 
 type rawMCPFile map[string]json.RawMessage
 
-func readManagedConfig(kind Kind, path, self, home string) (managedConfigState, error) {
+func readManagedConfig(kind Kind, path, self, home, hostID string) (managedConfigState, error) {
 	if kind == DeepSeekHarness {
-		return readDSHConfig(path, self, home)
+		return readDSHConfig(path, self, home, hostID)
 	}
 	root, servers, err := readJSONConfig(path)
 	if err != nil {
 		return managedConfigState{}, err
 	}
 	_ = root
-	entry, exists := servers[serverName]
+	rawEntry, exists := servers[serverName]
 	if !exists {
 		return managedConfigState{}, nil
 	}
-	return managedConfigState{
-		configured: true,
-		owned:      ownedStdio(entry, self, home),
-		command:    entry.Command,
-		arguments:  append([]string(nil), entry.Args...),
-	}, nil
+	var entry stdioMCPDefinition
+	if err := json.Unmarshal(rawEntry, &entry); err != nil {
+		return managedConfigState{}, fmt.Errorf("decode %s in %s: %w", serverName, path, err)
+	}
+	return stateForStdio(entry, self, home, hostID, kind), nil
 }
 
-func writeManagedConfig(kind Kind, path, self, home string) error {
+func writeManagedConfig(kind Kind, path, self, home, hostID string) error {
 	if kind == DeepSeekHarness {
-		return writeDSHConfig(path, self, home)
+		return writeDSHConfig(path, self, home, hostID)
 	}
 	root, servers, err := readJSONConfig(path)
 	if err != nil {
 		return err
 	}
-	servers[serverName] = managedStdio(self, home)
+	entry, err := json.Marshal(managedStdio(self, home, hostID, kind))
+	if err != nil {
+		return err
+	}
+	servers[serverName] = entry
 	encodedServers, err := json.Marshal(servers)
 	if err != nil {
 		return err
@@ -86,9 +91,9 @@ func removeManagedConfig(kind Kind, path string) error {
 	return writeConfigFile(path, append(body, '\n'))
 }
 
-func readJSONConfig(path string) (rawMCPFile, map[string]stdioMCPDefinition, error) {
+func readJSONConfig(path string) (rawMCPFile, map[string]json.RawMessage, error) {
 	root := rawMCPFile{}
-	servers := map[string]stdioMCPDefinition{}
+	servers := map[string]json.RawMessage{}
 	body, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return root, servers, nil
@@ -110,23 +115,55 @@ func readJSONConfig(path string) (rawMCPFile, map[string]stdioMCPDefinition, err
 	return root, servers, nil
 }
 
-func managedStdio(self, home string) stdioMCPDefinition {
-	environment := map[string]string(nil)
+func managedStdio(self, home, hostID string, kind Kind) stdioMCPDefinition {
+	environment := map[string]string{
+		"LAZYMIND_AGENT_PROVIDER": string(kind), "LAZYMIND_AGENT_HOST_ID": hostID,
+	}
 	if home != "" {
-		environment = map[string]string{"LAZYMIND_HOME": home}
+		environment["LAZYMIND_HOME"] = home
 	}
 	return stdioMCPDefinition{Type: "stdio", Command: self, Args: []string{"mcp", "proxy"}, Env: environment}
 }
 
 func ownedStdio(entry stdioMCPDefinition, self, home string) bool {
-	if !agentexec.SameExecutable(entry.Command, self) || len(entry.Args) != 2 || entry.Args[0] != "mcp" || entry.Args[1] != "proxy" {
+	if entry.Type != "" && entry.Type != "stdio" ||
+		!agentexec.SameExecutable(entry.Command, self) || len(entry.Args) != 2 ||
+		entry.Args[0] != "mcp" || entry.Args[1] != "proxy" {
 		return false
 	}
-	configuredHome := filepath.Clean(strings.TrimSpace(entry.Env["LAZYMIND_HOME"]))
-	if configuredHome == "." {
-		configuredHome = ""
+	configuredHome := normalizedManagedHome(entry.Env["LAZYMIND_HOME"])
+	if configuredHome == home {
+		return true
 	}
-	return configuredHome == home
+	if configuredHome != "" || home == "" {
+		return false
+	}
+	userHome, err := os.UserHomeDir()
+	return err == nil && filepath.Clean(home) == filepath.Join(userHome, ".lazymind")
+}
+
+func currentStdio(entry stdioMCPDefinition, self, home, hostID string, kind Kind) bool {
+	return ownedStdio(entry, self, home) &&
+		entry.Env["LAZYMIND_AGENT_PROVIDER"] == string(kind) &&
+		entry.Env["LAZYMIND_AGENT_HOST_ID"] == hostID &&
+		normalizedManagedHome(entry.Env["LAZYMIND_HOME"]) == home
+}
+
+func stateForStdio(entry stdioMCPDefinition, self, home, hostID string, kind Kind) managedConfigState {
+	owned := ownedStdio(entry, self, home)
+	return managedConfigState{
+		configured: true, owned: owned,
+		current: currentStdio(entry, self, home, hostID, kind),
+		command: entry.Command, arguments: append([]string(nil), entry.Args...),
+	}
+}
+
+func normalizedManagedHome(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	return filepath.Clean(value)
 }
 
 func writeConfigFile(path string, body []byte) error {
@@ -168,13 +205,13 @@ func writeConfigFile(path string, body []byte) error {
 	if err := temporary.Close(); err != nil {
 		return err
 	}
-	if err := replaceConfigFile(temporaryPath, path); err != nil {
+	if err := localfile.Replace(temporaryPath, path); err != nil {
 		return err
 	}
 	return os.Chmod(path, 0o600)
 }
 
-func readDSHConfig(path, self, home string) (managedConfigState, error) {
+func readDSHConfig(path, self, home, hostID string) (managedConfigState, error) {
 	document, err := readYAMLDocument(path)
 	if err != nil {
 		return managedConfigState{}, err
@@ -184,28 +221,30 @@ func readDSHConfig(path, self, home string) (managedConfigState, error) {
 		return managedConfigState{}, nil
 	}
 	stdio := decodeDSHStdio(entry)
-	return managedConfigState{
-		configured: true,
-		owned:      ownedStdio(stdio, self, home),
-		command:    stdio.Command,
-		arguments:  append([]string(nil), stdio.Args...),
-	}, nil
+	return stateForStdio(stdio, self, home, hostID, DeepSeekHarness), nil
 }
 
-func writeDSHConfig(path, self, home string) error {
+func writeDSHConfig(path, self, home, hostID string) error {
 	document, err := readYAMLDocument(path)
 	if err != nil {
 		return err
 	}
-	if findDSHEntry(document) != nil {
-		return nil
-	}
-	entry, err := newDSHEntry(self, home)
+	entry, err := newDSHEntry(self, home, hostID)
 	if err != nil {
 		return err
 	}
 	sequence := yamlSequence(document)
-	sequence.Content = append([]*yaml.Node{entry}, sequence.Content...)
+	replaced := false
+	for index, existing := range sequence.Content {
+		if dshEntryID(existing) == "mcp-lazymind" {
+			sequence.Content[index] = entry
+			replaced = true
+			break
+		}
+	}
+	if !replaced {
+		sequence.Content = append([]*yaml.Node{entry}, sequence.Content...)
+	}
 	body, err := encodeYAML(document)
 	if err != nil {
 		return err
@@ -293,9 +332,15 @@ func decodeDSHStdio(item *yaml.Node) stdioMCPDefinition {
 	return result
 }
 
-func newDSHEntry(self, home string) (*yaml.Node, error) {
+func newDSHEntry(self, home, hostID string) (*yaml.Node, error) {
 	var document yaml.Node
-	if err := yaml.Unmarshal([]byte(dshProfilePatch(self, map[string]string{"LAZYMIND_HOME": home})), &document); err != nil {
+	environment := map[string]string{
+		"LAZYMIND_AGENT_PROVIDER": string(DeepSeekHarness), "LAZYMIND_AGENT_HOST_ID": hostID,
+	}
+	if home != "" {
+		environment["LAZYMIND_HOME"] = home
+	}
+	if err := yaml.Unmarshal([]byte(dshProfilePatch(self, environment)), &document); err != nil {
 		return nil, err
 	}
 	return document.Content[0].Content[0], nil

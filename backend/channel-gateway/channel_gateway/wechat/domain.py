@@ -14,6 +14,8 @@ class WeChatConfig:
     poll_timeout_seconds: int
     max_consecutive_errors: int
     text_chunk_size: int
+    upload_root: str
+    max_inbound_media_bytes: int
 
 
 class WeChatAddressFactory:

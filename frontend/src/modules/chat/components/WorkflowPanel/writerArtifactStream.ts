@@ -1,7 +1,11 @@
 import type { WorkflowSession } from '@/modules/chat/store/workflowPanel';
 import type { SubAgentTask, TaskArtifactStream } from '@/modules/chat/store/taskCenter';
 
-const WRITER_STREAM_SLOT_IDS = new Set(['outline_document', 'draft_document']);
+const WRITER_STREAM_SLOT_IDS = new Set([
+  'outline_document',
+  'flat_draft_document',
+  'draft_document',
+]);
 
 export function findWriterArtifactStream(
   session: WorkflowSession,

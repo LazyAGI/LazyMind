@@ -1,5 +1,8 @@
 import importlib
 
+import pytest
+from lazyllm.tools.agent import ToolExecutionError
+
 skill_editor_mod = importlib.import_module('lazymind.chat.engine.tools.skill_editor')
 
 
@@ -56,6 +59,7 @@ class FakeSkillStore:
         self.packages.pop((category, name), None)
         return {'action': 'remove'}
 
+
 def test_skill_editor_create_file_tools_remove_core_paths():
     existing_content = (
         '---\n'
@@ -105,32 +109,22 @@ def test_skill_editor_create_file_tools_remove_core_paths():
     )
     remove_result = tool_group.remove_skill('internal/existing')
 
-    assert create_result['success'] is True
-    assert create_result['tool'] == 'create_skill'
-    assert patch_result['success'] is True
-    assert patch_result['tool'] == 'patch_file'
-    assert file_create_result['success'] is True
-    assert file_create_result['tool'] == 'create_file'
-    assert delete_result['success'] is True
-    assert delete_result['tool'] == 'delete_file'
-    assert remove_result['success'] is True
-    assert remove_result['tool'] == 'remove_skill'
-    assert create_result['result'] == {
+    assert create_result == {
         'status': 'created',
         'message': 'Skill package change was written.',
     }
-    assert patch_result['result']['status'] == 'patched'
-    assert patch_result['result']['touched_files'] == ['SKILL.md']
-    assert patch_result['result']['written_files'] == ['SKILL.md']
-    assert patch_result['result']['deleted_files'] == []
-    assert patch_result['result']['summary'] == 'patch skill body'
-    assert file_create_result['result']['status'] == 'created'
-    assert file_create_result['result']['written_files'] == ['scripts/check.py']
-    assert file_create_result['result']['deleted_files'] == []
-    assert delete_result['result']['status'] == 'deleted'
-    assert delete_result['result']['written_files'] == []
-    assert delete_result['result']['deleted_files'] == ['references/old.md']
-    assert remove_result['result'] == {
+    assert patch_result['status'] == 'patched'
+    assert patch_result['touched_files'] == ['SKILL.md']
+    assert patch_result['written_files'] == ['SKILL.md']
+    assert patch_result['deleted_files'] == []
+    assert patch_result['summary'] == 'patch skill body'
+    assert file_create_result['status'] == 'created'
+    assert file_create_result['written_files'] == ['scripts/check.py']
+    assert file_create_result['deleted_files'] == []
+    assert delete_result['status'] == 'deleted'
+    assert delete_result['written_files'] == []
+    assert delete_result['deleted_files'] == ['references/old.md']
+    assert remove_result == {
         'status': 'removed',
         'message': 'Skill package change was written.',
     }
@@ -190,8 +184,7 @@ def test_skill_editor_removes_full_key_from_any_safe_category():
 
     result = tool_group.remove_skill('research3/web-research')
 
-    assert result['success'] is True
-    assert result['tool'] == 'remove_skill'
+    assert result['status'] == 'removed'
     assert store.calls == [('remove', 'research3', 'web-research')]
 
 
@@ -213,10 +206,9 @@ def test_skill_editor_renames_package():
         new_name='renamed',
     )
 
-    assert result['success'] is True
-    assert result['result']['status'] == 'renamed'
-    assert result['result']['old'] == {'category': 'internal', 'name': 'existing'}
-    assert result['result']['new'] == {'category': 'internal', 'name': 'renamed'}
+    assert result['status'] == 'renamed'
+    assert result['old'] == {'category': 'internal', 'name': 'existing'}
+    assert result['new'] == {'category': 'internal', 'name': 'renamed'}
     rename_calls = [call for call in store.calls if call[0] == 'rename']
     assert rename_calls[0][1:5] == ('internal', 'existing', 'internal', 'renamed')
     assert 'name: renamed' in rename_calls[0][5]
@@ -235,13 +227,13 @@ def test_skill_editor_create_accepts_missing_category_and_rejects_multilevel_nam
     toolkit = skill_editor_mod.SkillManagementToolkit(store=store)
 
     created = toolkit.create_skill('category-free', content=content)
-    slash = toolkit.create_skill('internal/category-free', content=content)
-    backslash = toolkit.create_skill(r'internal\category-free', content=content)
+    with pytest.raises(ToolExecutionError):
+        toolkit.create_skill('internal/category-free', content=content)
+    with pytest.raises(ToolExecutionError):
+        toolkit.create_skill(r'internal\category-free', content=content)
 
-    assert created['success'] is True
+    assert created['status'] == 'created'
     assert ('create', 'internal', 'category-free', content) in store.calls
-    assert slash['success'] is False
-    assert backslash['success'] is False
 
 
 def test_skill_editor_patch_allows_frontmatter_category_changes_without_moving_package():
@@ -264,7 +256,7 @@ def test_skill_editor_patch_allows_frontmatter_category_changes_without_moving_p
         new_text='category: arbitrary-upstream-value',
     )
 
-    assert result['success'] is True
+    assert result['status'] == 'patched'
     assert ('internal', 'existing') in store.packages
     assert 'category: arbitrary-upstream-value' in store.packages[('internal', 'existing')]['SKILL.md']
 
@@ -297,12 +289,13 @@ def test_skill_editor_patch_resolves_unique_name_and_requires_full_key_when_ambi
         old_text='Before unique.',
         new_text='After unique.',
     )
-    ambiguous_result = toolkit.patch_file(
-        'shared',
-        path='SKILL.md',
-        old_text='Before shared.',
-        new_text='Wrong target.',
-    )
+    with pytest.raises(ToolExecutionError, match="Ambiguous skill name 'shared'"):
+        toolkit.patch_file(
+            'shared',
+            path='SKILL.md',
+            old_text='Before shared.',
+            new_text='Wrong target.',
+        )
     exact_result = toolkit.patch_file(
         'external/shared',
         path='SKILL.md',
@@ -310,12 +303,10 @@ def test_skill_editor_patch_resolves_unique_name_and_requires_full_key_when_ambi
         new_text='After external.',
     )
 
-    assert unique_result['success'] is True
+    assert unique_result['status'] == 'patched'
     assert 'After unique.' in store.packages[('internal', 'unique')]['SKILL.md']
-    assert ambiguous_result['success'] is False
-    assert "Ambiguous skill name 'shared'" in ambiguous_result['error']['reason']
     assert 'Wrong target.' not in store.packages[('internal', 'shared')]['SKILL.md']
     assert 'Wrong target.' not in store.packages[('external', 'shared')]['SKILL.md']
-    assert exact_result['success'] is True
+    assert exact_result['status'] == 'patched'
     assert 'Before shared.' in store.packages[('internal', 'shared')]['SKILL.md']
     assert 'After external.' in store.packages[('external', 'shared')]['SKILL.md']

@@ -18,6 +18,30 @@ export type GlossarySource = "user" | "ai";
 export const GLOSSARY_TERM_MAX_LENGTH = 50;
 export const GLOSSARY_ALIAS_MAX_LENGTH = 50;
 export const GLOSSARY_CONTENT_MAX_LENGTH = 300;
+export const SKILL_NAME_MAX_LENGTH = 80;
+export const SKILL_DESCRIPTION_MAX_LENGTH = 1024;
+
+export function countSkillCharacters(value: unknown): number {
+  return Array.from(typeof value === "string" ? value.trim() : "").length;
+}
+
+export function skillCharCountConfig(maxLength: number, visible = true) {
+  if (!visible) {
+    return undefined;
+  }
+  return {
+    strategy: (value: string) => countSkillCharacters(value),
+    show: ({ count }: { count: number }) => `${count}/${maxLength}`,
+  };
+}
+
+export const SKILL_CHAR_COUNT_STYLE = {
+  fontSize: 12,
+  fontWeight: 400,
+  color: '#98a2b3',
+  lineHeight: '12px',
+  fontVariantNumeric: 'tabular-nums',
+} as const;
 
 export interface BaseAsset {
   id: string;
@@ -34,6 +58,7 @@ export interface StructuredAsset extends BaseAsset {
   description: string;
   category: string;
   tags: string[];
+  provider?: string;
   headRevisionId?: string;
   draft?: SkillDraftSummary;
   isEnabled?: boolean;
@@ -50,7 +75,7 @@ export interface StructuredAsset extends BaseAsset {
   deletedBy?: string;
 }
 
-export type SkillViewMode = "installed" | "market" | "cloud" | "trash";
+export type SkillViewMode = "installed" | "market" | "cloud";
 export type SkillSourceFilter = "all" | "builtin" | "admin" | "personal";
 export type SkillMarketSourceFilter = "all" | "builtin" | "admin";
 
@@ -478,7 +503,17 @@ export const serializeStructuredAsset = (
 };
 
 export const buildDiffLines = (beforeText: string, afterText: string): DiffLine[] => {
-  const segments = diffLines(beforeText, afterText);
+  // diffLines treats a missing final newline as part of the last line. When a
+  // later paragraph is deleted, that can make an unchanged final paragraph
+  // appear as a full remove/add pair. Normalize non-empty snapshots to the
+  // same EOF convention so only the actual content change is highlighted.
+  const stableBeforeText = beforeText && !beforeText.endsWith("\n")
+    ? `${beforeText}\n`
+    : beforeText;
+  const stableAfterText = afterText && !afterText.endsWith("\n")
+    ? `${afterText}\n`
+    : afterText;
+  const segments = diffLines(stableBeforeText, stableAfterText);
   const lines: DiffLine[] = [];
 
   segments.forEach((segment) => {

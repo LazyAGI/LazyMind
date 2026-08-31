@@ -1,0 +1,1107 @@
+package showcase
+
+import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
+	"io"
+	"mime"
+	"net/http"
+	"net/url"
+	"os"
+	"path"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strings"
+
+	_ "golang.org/x/image/webp"
+	"gopkg.in/yaml.v3"
+
+	skillbuiltin "lazymind/core/skillv2/builtin"
+	skillpackage "lazymind/core/skillv2/skillpackage"
+)
+
+const (
+	CatalogSchemaVersion  = 2
+	orderingSchemaVersion = 1
+
+	StatusDraft     = "draft"
+	StatusPublished = "published"
+	StatusDisabled  = "disabled"
+	TypeChat        = "chat"
+	TypeWork        = "work"
+	TypeWorkflow    = "workflow"
+
+	ResultTemplateGeneric = "generic_report_v1"
+	ResultTemplateProduct = "product_report_v1"
+	ResultTemplateHTML    = "html_preview_v1"
+
+	maxImageAssetBytes = 10 << 20
+	maxHTMLAssetBytes  = 20 << 20
+	maxExperienceBytes = 64 << 20
+	htmlAssetMIME      = "text/html"
+	orderingFilename   = "ordering.yaml"
+)
+
+var (
+	slugPattern               = regexp.MustCompile(`^[a-z0-9]+(?:[a-z0-9_-]*[a-z0-9])?$`)
+	localePattern             = regexp.MustCompile(`^[a-z]{2}-[A-Z]{2}$`)
+	versionPattern            = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$`)
+	htmlAssetReferencePattern = regexp.MustCompile(`\{\{asset_url:([a-z0-9]+(?:[a-z0-9_-]*[a-z0-9])?)\}\}`)
+
+	allowedAssetRoles      = map[string]struct{}{"cover": {}, "result": {}}
+	allowedFeaturedTypes   = map[string]struct{}{TypeChat: {}, TypeWork: {}, TypeWorkflow: {}}
+	allowedImageAssetMIMEs = map[string]struct{}{"image/gif": {}, "image/jpeg": {}, "image/png": {}, "image/webp": {}}
+	allowedAssetMIMEs      = map[string]struct{}{"image/gif": {}, "image/jpeg": {}, "image/png": {}, "image/webp": {}, htmlAssetMIME: {}}
+	assetMIMEByExtension   = map[string]string{".gif": "image/gif", ".jpeg": "image/jpeg", ".jpg": "image/jpeg", ".png": "image/png", ".webp": "image/webp", ".html": htmlAssetMIME}
+	allowedOutputTypes     = map[string]struct{}{
+		"dashboard": {}, "document": {}, "images": {}, "meeting": {},
+		"report": {}, "slides": {}, "table": {}, "web": {},
+	}
+)
+
+type Catalog struct {
+	SchemaVersion int                  `json:"schema_version"`
+	Cases         []FeaturedDefinition `json:"cases"`
+}
+
+type definitionError string
+
+func (err definitionError) Error() string { return string(err) }
+
+func definitionFailure(format string, args ...any) error {
+	return definitionError(fmt.Sprintf(format, args...))
+}
+
+type FeaturedDefinition struct {
+	SchemaVersion  int                       `yaml:"schema_version,omitempty" json:"-"`
+	ID             string                    `yaml:"id" json:"id"`
+	Type           string                    `yaml:"type" json:"type"`
+	Version        string                    `yaml:"version" json:"version"`
+	Status         string                    `yaml:"status" json:"status"`
+	DefaultLocale  string                    `yaml:"default_locale" json:"default_locale"`
+	Provider       string                    `yaml:"provider" json:"provider"`
+	Skill          *FeaturedSkillBinding     `yaml:"skill,omitempty" json:"skill,omitempty"`
+	Workflow       *FeaturedWorkflowBinding  `yaml:"workflow,omitempty" json:"workflow,omitempty"`
+	Placement      FeaturedPlacement         `yaml:"placement" json:"placement"`
+	Classification FeaturedClassification    `yaml:"classification" json:"classification"`
+	Assets         map[string]FeaturedAsset  `yaml:"assets" json:"assets"`
+	Presentation   FeaturedPresentation      `yaml:"presentation" json:"presentation"`
+	Tasks          []FeaturedTask            `yaml:"tasks" json:"tasks"`
+	Locales        map[string]FeaturedLocale `yaml:"-" json:"locales,omitempty"`
+	sourceDir      string
+}
+
+type FeaturedSkillBinding struct {
+	SourceURL       string `yaml:"source_url" json:"source_url"`
+	RequiredVersion string `yaml:"required_version,omitempty" json:"required_version,omitempty"`
+	Category        string `yaml:"category,omitempty" json:"-"`
+	BuiltinSkillUID string `yaml:"-" json:"builtin_skill_uid"`
+	Version         string `yaml:"-" json:"version"`
+	ArchiveSHA256   string `yaml:"-" json:"archive_sha256"`
+}
+
+type FeaturedWorkflowBinding struct {
+	WorkflowRef string `yaml:"workflow_ref" json:"workflow_ref"`
+}
+
+type FeaturedPlacement struct {
+	Home    bool `yaml:"home" json:"home"`
+	Gallery bool `yaml:"gallery" json:"gallery"`
+	Order   int  `yaml:"order" json:"order"`
+}
+
+type featuredOrdering struct {
+	SchemaVersion int                  `yaml:"schema_version"`
+	Home          featuredHomeOrdering `yaml:"home"`
+}
+
+type featuredHomeOrdering struct {
+	Chat []string `yaml:"chat"`
+	Work []string `yaml:"work"`
+}
+
+type FeaturedClassification struct {
+	Category string   `yaml:"category" json:"category"`
+	Tags     []string `yaml:"tags,omitempty" json:"tags,omitempty"`
+}
+
+type FeaturedAsset struct {
+	File         string   `yaml:"file,omitempty" json:"-"`
+	Role         string   `yaml:"role" json:"role"`
+	URL          string   `yaml:"-" json:"url"`
+	SHA256       string   `yaml:"-" json:"sha256"`
+	MIME         string   `yaml:"-" json:"mime"`
+	Size         int64    `yaml:"-" json:"size"`
+	Width        int      `yaml:"-" json:"width"`
+	Height       int      `yaml:"-" json:"height"`
+	Dependencies []string `yaml:"-" json:"dependencies,omitempty"`
+	sourcePath   string
+}
+
+type FeaturedPresentation struct {
+	Card   FeaturedCardPresentation   `yaml:"card" json:"card"`
+	Detail FeaturedDetailPresentation `yaml:"detail" json:"detail"`
+}
+
+type FeaturedCardPresentation struct {
+	Title         string `yaml:"title" json:"title"`
+	Description   string `yaml:"description" json:"description"`
+	OutputType    string `yaml:"output_type" json:"output_type"`
+	OutputLabel   string `yaml:"output_label" json:"output_label"`
+	CoverAsset    string `yaml:"cover_asset" json:"cover_asset"`
+	ImageURL      string `yaml:"-" json:"image_url"`
+	ResultSummary string `yaml:"result_summary" json:"result_summary"`
+}
+
+type FeaturedDetailPresentation struct {
+	Title          string `yaml:"title" json:"title"`
+	Description    string `yaml:"description" json:"description"`
+	AttachmentHint string `yaml:"attachment_hint,omitempty" json:"attachment_hint,omitempty"`
+}
+
+type FeaturedTask struct {
+	ID       string               `yaml:"id" json:"id"`
+	Selector FeaturedTaskSelector `yaml:"selector" json:"selector"`
+	Launch   FeaturedTaskLaunch   `yaml:"launch" json:"launch"`
+	Replay   FeaturedTaskReplay   `yaml:"replay" json:"replay"`
+	Result   ShowcaseCaseResult   `yaml:"result" json:"result"`
+}
+
+type FeaturedTaskSelector struct {
+	Title       string `yaml:"title" json:"title"`
+	Description string `yaml:"description" json:"description"`
+	OutputLabel string `yaml:"output_label" json:"output_label"`
+}
+
+type FeaturedTaskLaunch struct {
+	PromptShort string `yaml:"prompt_short" json:"prompt_short"`
+	Prompt      string `yaml:"prompt" json:"prompt"`
+}
+
+type FeaturedTaskReplay struct {
+	Steps []ShowcaseCaseStep `yaml:"steps" json:"steps"`
+}
+
+type FeaturedLocale struct {
+	Locale         string                 `yaml:"locale" json:"-"`
+	Classification FeaturedClassification `yaml:"classification" json:"classification"`
+	Presentation   FeaturedPresentation   `yaml:"presentation" json:"presentation"`
+	Tasks          []FeaturedTask         `yaml:"tasks" json:"tasks"`
+}
+
+func CatalogPath() string {
+	workingDirectory, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	return firstFeaturedCatalogPath(featuredCatalogPathCandidates(workingDirectory))
+}
+
+func featuredCatalogPathCandidates(workingDirectory string) []string {
+	return []string{
+		filepath.Join(string(filepath.Separator), "skills", ".runtime", "featured-skills", "catalog.json"),
+		filepath.Join(workingDirectory, "..", "..", "skills", ".runtime", "featured-skills", "catalog.json"),
+		filepath.Join(workingDirectory, "..", "..", "..", "featured-skills", "catalog.json"),
+	}
+}
+
+func firstFeaturedCatalogPath(candidates []string) string {
+	for _, candidate := range candidates {
+		info, err := os.Stat(candidate)
+		if err == nil && !info.IsDir() {
+			absolute, absErr := filepath.Abs(candidate)
+			if absErr == nil {
+				return filepath.Clean(absolute)
+			}
+		}
+	}
+	return ""
+}
+
+func LoadSourceDirectory(root string) ([]FeaturedDefinition, error) {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil, err
+	}
+	definitions := make([]FeaturedDefinition, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		directory := filepath.Join(root, entry.Name())
+		filePath := filepath.Join(directory, "featured.yaml")
+		var definition FeaturedDefinition
+		if err := decodeYAMLFile(filePath, &definition); err != nil {
+			return nil, err
+		}
+		if definition.SchemaVersion != CatalogSchemaVersion {
+			return nil, definitionFailure("%s has unsupported schema %d", filePath, definition.SchemaVersion)
+		}
+		if definition.ID != entry.Name() {
+			return nil, definitionFailure("%s id %q must match directory %q", filePath, definition.ID, entry.Name())
+		}
+		provider, err := skillbuiltin.NormalizeProvider(definition.Provider)
+		if err != nil {
+			return nil, definitionFailure("%s: %v", filePath, err)
+		}
+		definition.Provider = provider
+		definition.sourceDir = directory
+		if err := inspectAssets(&definition); err != nil {
+			return nil, definitionFailure("%s: %v", filePath, err)
+		}
+		locales, err := loadLocales(directory)
+		if err != nil {
+			return nil, err
+		}
+		definition.Locales = locales
+		if err := validateDefinition(definition, false); err != nil {
+			return nil, definitionFailure("%s: %v", filePath, err)
+		}
+		definitions = append(definitions, definition)
+	}
+	sort.Slice(definitions, func(i, j int) bool { return definitions[i].ID < definitions[j].ID })
+	ordering, err := loadFeaturedOrdering(root)
+	if err != nil {
+		return nil, err
+	}
+	applyFeaturedOrdering(definitions, ordering)
+	return definitions, nil
+}
+
+func loadFeaturedOrdering(root string) (featuredOrdering, error) {
+	filePath := filepath.Join(root, orderingFilename)
+	var ordering featuredOrdering
+	if _, err := os.Stat(filePath); err != nil {
+		if os.IsNotExist(err) {
+			return featuredOrdering{}, nil
+		}
+		return featuredOrdering{}, definitionFailure("stat %s: %v", filePath, err)
+	}
+	if err := decodeYAMLFile(filePath, &ordering); err != nil {
+		return featuredOrdering{}, err
+	}
+	if ordering.SchemaVersion != orderingSchemaVersion {
+		return featuredOrdering{}, definitionFailure("%s has unsupported schema %d", filePath, ordering.SchemaVersion)
+	}
+	return ordering, nil
+}
+
+func applyFeaturedOrdering(definitions []FeaturedDefinition, ordering featuredOrdering) {
+	applyFeaturedOrderLane(definitions, ordering.Home.Chat, func(definition FeaturedDefinition) bool {
+		return definition.Type == TypeChat
+	})
+	applyFeaturedOrderLane(definitions, ordering.Home.Work, func(definition FeaturedDefinition) bool {
+		return definition.Type == TypeWork || definition.Type == TypeWorkflow
+	})
+}
+
+func applyFeaturedOrderLane(
+	definitions []FeaturedDefinition,
+	preferred []string,
+	matchesLane func(FeaturedDefinition) bool,
+) {
+	if len(preferred) == 0 {
+		return
+	}
+	byID := make(map[string]int, len(definitions))
+	for index := range definitions {
+		byID[definitions[index].ID] = index
+	}
+	assigned := make(map[string]struct{}, len(preferred))
+	nextOrder := 1
+	for _, id := range preferred {
+		index, ok := byID[id]
+		if !ok || definitions[index].Status != StatusPublished || !definitions[index].Placement.Home || !matchesLane(definitions[index]) {
+			continue
+		}
+		if _, duplicate := assigned[id]; duplicate {
+			continue
+		}
+		definitions[index].Placement.Order = nextOrder
+		assigned[id] = struct{}{}
+		nextOrder++
+	}
+	fallback := make([]int, 0, len(definitions)-len(assigned))
+	for index := range definitions {
+		definition := definitions[index]
+		if definition.Status != StatusPublished || !definition.Placement.Home || !matchesLane(definition) {
+			continue
+		}
+		if _, configured := assigned[definition.ID]; !configured {
+			fallback = append(fallback, index)
+		}
+	}
+	sort.SliceStable(fallback, func(i, j int) bool {
+		left, right := definitions[fallback[i]], definitions[fallback[j]]
+		if left.Placement.Order == right.Placement.Order {
+			return left.ID < right.ID
+		}
+		return left.Placement.Order < right.Placement.Order
+	})
+	for _, index := range fallback {
+		definitions[index].Placement.Order = nextOrder
+		nextOrder++
+	}
+}
+
+func CompileCatalog(definitions []FeaturedDefinition, outputRoot string) (Catalog, error) {
+	catalog := Catalog{SchemaVersion: CatalogSchemaVersion}
+	for _, definition := range definitions {
+		assetIDs := sortedAssetIDs(definition.Assets)
+		for _, assetID := range assetIDs {
+			asset := definition.Assets[assetID]
+			if asset.MIME == htmlAssetMIME {
+				continue
+			}
+			filename := asset.SHA256[:12] + "-" + filepath.Base(asset.File)
+			relative := path.Join("assets", definition.ID, definition.Version, filename)
+			destination := filepath.Join(outputRoot, filepath.FromSlash(relative))
+			if err := copyAsset(asset.sourcePath, destination); err != nil {
+				return Catalog{}, definitionFailure("copy featured asset %s/%s: %v", definition.ID, assetID, err)
+			}
+			asset.File = ""
+			asset.sourcePath = ""
+			asset.URL = "/showcase-assets/" + strings.TrimPrefix(relative, "assets/")
+			definition.Assets[assetID] = asset
+		}
+		for _, assetID := range assetIDs {
+			asset := definition.Assets[assetID]
+			if asset.MIME != htmlAssetMIME {
+				continue
+			}
+			body, err := materializeHTMLAsset(asset, definition.Assets)
+			if err != nil {
+				return Catalog{}, definitionFailure("compile featured HTML asset %s/%s: %v", definition.ID, assetID, err)
+			}
+			hash := sha256.Sum256(body)
+			asset.SHA256 = hex.EncodeToString(hash[:])
+			asset.Size = int64(len(body))
+			filename := asset.SHA256[:12] + "-" + filepath.Base(asset.File)
+			relative := path.Join("assets", definition.ID, definition.Version, filename)
+			destination := filepath.Join(outputRoot, filepath.FromSlash(relative))
+			if err := writeAsset(body, destination); err != nil {
+				return Catalog{}, definitionFailure("write featured HTML asset %s/%s: %v", definition.ID, assetID, err)
+			}
+			asset.File = ""
+			asset.sourcePath = ""
+			asset.URL = "/showcase-assets/" + strings.TrimPrefix(relative, "assets/")
+			definition.Assets[assetID] = asset
+		}
+		if err := resolveExperienceAssets(&definition); err != nil {
+			return Catalog{}, err
+		}
+		if err := validateDefinition(definition, true); err != nil {
+			return Catalog{}, definitionFailure("compiled featured Skill %s: %v", definition.ID, err)
+		}
+		catalog.Cases = append(catalog.Cases, definition)
+	}
+	return catalog, nil
+}
+
+func LoadCatalog(catalogPath string) (Catalog, error) {
+	body, err := os.ReadFile(catalogPath)
+	if err != nil {
+		return Catalog{}, err
+	}
+	var catalog Catalog
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&catalog); err != nil {
+		return Catalog{}, definitionFailure("parse featured Skill catalog %s: %v", catalogPath, err)
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		return Catalog{}, definitionFailure("parse featured Skill catalog %s: trailing JSON content", catalogPath)
+	}
+	if catalog.SchemaVersion != CatalogSchemaVersion {
+		return Catalog{}, definitionFailure("unsupported featured Skill catalog schema %d", catalog.SchemaVersion)
+	}
+	seen := make(map[string]struct{}, len(catalog.Cases))
+	for _, definition := range catalog.Cases {
+		if _, exists := seen[definition.ID]; exists {
+			return Catalog{}, definitionFailure("duplicate featured Skill id %q", definition.ID)
+		}
+		seen[definition.ID] = struct{}{}
+		if err := validateDefinition(definition, true); err != nil {
+			return Catalog{}, definitionFailure("featured Skill %s: %v", definition.ID, err)
+		}
+	}
+	return catalog, nil
+}
+
+func (c Catalog) ShowcaseCases(locale string) []ShowcaseCase {
+	cases := make([]ShowcaseCase, 0, len(c.Cases))
+	for _, definition := range c.Cases {
+		if definition.Status != StatusPublished || !definition.Placement.Home && !definition.Placement.Gallery {
+			continue
+		}
+		presentation := definition.Presentation
+		tasks := definition.Tasks
+		classification := definition.Classification
+		if translated, ok := definition.Locales[locale]; ok {
+			classification = translated.Classification
+			presentation = translated.Presentation
+			tasks = translated.Tasks
+		}
+		caseTasks := make([]ShowcaseCaseTask, 0, len(tasks))
+		for _, task := range tasks {
+			caseTasks = append(caseTasks, ShowcaseCaseTask{
+				ID:          task.ID,
+				Title:       task.Selector.Title,
+				Description: task.Selector.Description,
+				OutputLabel: task.Selector.OutputLabel,
+				PromptShort: task.Launch.PromptShort,
+				Prompt:      task.Launch.Prompt,
+				Steps:       append([]ShowcaseCaseStep(nil), task.Replay.Steps...),
+				Result:      task.Result,
+			})
+		}
+		sourceURL, builtinSkillUID, workflowRef := "", "", ""
+		if definition.Skill != nil {
+			sourceURL = definition.Skill.SourceURL
+			builtinSkillUID = definition.Skill.BuiltinSkillUID
+		}
+		if definition.Workflow != nil {
+			workflowRef = definition.Workflow.WorkflowRef
+		}
+		cases = append(cases, ShowcaseCase{
+			ID:                definition.ID,
+			Type:              definition.Type,
+			Provider:          definition.Provider,
+			SourceURL:         sourceURL,
+			Title:             presentation.Card.Title,
+			Description:       presentation.Card.Description,
+			DetailTitle:       presentation.Detail.Title,
+			DetailDescription: presentation.Detail.Description,
+			Category:          classification.Category,
+			Tags:              append([]string(nil), classification.Tags...),
+			OutputType:        presentation.Card.OutputType,
+			OutputLabel:       presentation.Card.OutputLabel,
+			ImageURL:          presentation.Card.ImageURL,
+			AttachmentHint:    presentation.Detail.AttachmentHint,
+			ResultSummary:     presentation.Card.ResultSummary,
+			Tasks:             caseTasks,
+			BuiltinSkillUID:   builtinSkillUID,
+			WorkflowRef:       workflowRef,
+			Featured:          definition.Placement.Home,
+			FeaturedOrder:     definition.Placement.Order,
+			Gallery:           definition.Placement.Gallery,
+			SearchAliases:     defaultSearchAliases(definition),
+		})
+	}
+	sort.SliceStable(cases, func(i, j int) bool {
+		return cases[i].FeaturedOrder < cases[j].FeaturedOrder
+	})
+	return cases
+}
+
+func decodeYAMLFile(filePath string, target any) error {
+	body, err := os.ReadFile(filePath)
+	if err != nil {
+		return definitionFailure("read %s: %v", filePath, err)
+	}
+	decoder := yaml.NewDecoder(bytes.NewReader(body))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(target); err != nil {
+		return definitionFailure("parse %s: %v", filePath, err)
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return definitionFailure("parse %s: multiple YAML documents are not supported", filePath)
+		}
+		return definitionFailure("parse %s: %v", filePath, err)
+	}
+	return nil
+}
+
+func loadLocales(directory string) (map[string]FeaturedLocale, error) {
+	localesDir := filepath.Join(directory, "locales")
+	entries, err := os.ReadDir(localesDir)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	locales := make(map[string]FeaturedLocale, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		if filepath.Ext(entry.Name()) != ".yaml" {
+			return nil, definitionFailure("unsupported locale file %s", filepath.Join(localesDir, entry.Name()))
+		}
+		filePath := filepath.Join(localesDir, entry.Name())
+		var locale FeaturedLocale
+		if err := decodeYAMLFile(filePath, &locale); err != nil {
+			return nil, err
+		}
+		if strings.TrimSuffix(entry.Name(), ".yaml") != locale.Locale {
+			return nil, definitionFailure("%s locale %q must match filename", filePath, locale.Locale)
+		}
+		if _, exists := locales[locale.Locale]; exists {
+			return nil, definitionFailure("duplicate featured locale %q", locale.Locale)
+		}
+		locales[locale.Locale] = locale
+	}
+	return locales, nil
+}
+
+func inspectAssets(definition *FeaturedDefinition) error {
+	var total int64
+	for assetID, asset := range definition.Assets {
+		if !slugPattern.MatchString(assetID) {
+			return definitionFailure("invalid asset id %q", assetID)
+		}
+		if _, ok := allowedAssetRoles[asset.Role]; !ok {
+			return definitionFailure("asset %s has invalid role %q", assetID, asset.Role)
+		}
+		relative, err := safeAssetPath(asset.File)
+		if err != nil {
+			return definitionFailure("asset %s: %v", assetID, err)
+		}
+		sourcePath := filepath.Join(definition.sourceDir, filepath.FromSlash(relative))
+		if err := rejectSymlinkPath(definition.sourceDir, relative); err != nil {
+			return definitionFailure("asset %s: %v", assetID, err)
+		}
+		body, err := os.ReadFile(sourcePath)
+		if err != nil {
+			return definitionFailure("asset %s: %v", assetID, err)
+		}
+		mimeType, _, err := mime.ParseMediaType(http.DetectContentType(body[:min(len(body), 512)]))
+		if err != nil {
+			return definitionFailure("asset %s has invalid MIME: %v", assetID, err)
+		}
+		if _, ok := allowedAssetMIMEs[mimeType]; !ok {
+			return definitionFailure("asset %s has unsupported MIME %q", assetID, mimeType)
+		}
+		limit := assetSizeLimit(mimeType)
+		if len(body) == 0 || int64(len(body)) > limit {
+			return definitionFailure("asset %s size must be between 1 and %d bytes", assetID, limit)
+		}
+		total += int64(len(body))
+		if total > maxExperienceBytes {
+			return definitionFailure("featured assets exceed %d bytes", maxExperienceBytes)
+		}
+		if assetMIMEByExtension[strings.ToLower(filepath.Ext(relative))] != mimeType {
+			return definitionFailure("asset %s file extension does not match MIME %q", assetID, mimeType)
+		}
+		if isImageAssetMIME(mimeType) {
+			config, _, err := image.DecodeConfig(bytes.NewReader(body))
+			if err != nil || config.Width < 64 || config.Height < 64 || config.Width > 8192 || config.Height > 8192 {
+				return definitionFailure("asset %s has invalid image dimensions", assetID)
+			}
+			asset.Width = config.Width
+			asset.Height = config.Height
+		}
+		hash := sha256.Sum256(body)
+		asset.File = relative
+		asset.sourcePath = sourcePath
+		asset.SHA256 = hex.EncodeToString(hash[:])
+		asset.MIME = mimeType
+		asset.Size = int64(len(body))
+		definition.Assets[assetID] = asset
+	}
+	for assetID, asset := range definition.Assets {
+		if asset.MIME != htmlAssetMIME {
+			continue
+		}
+		body, err := os.ReadFile(asset.sourcePath)
+		if err != nil {
+			return definitionFailure("asset %s: %v", assetID, err)
+		}
+		seen := make(map[string]struct{})
+		for _, match := range htmlAssetReferencePattern.FindAllSubmatch(body, -1) {
+			dependencyID := string(match[1])
+			dependency, ok := definition.Assets[dependencyID]
+			if !ok {
+				return definitionFailure("HTML asset %s references missing asset %q", assetID, dependencyID)
+			}
+			if dependency.MIME == htmlAssetMIME || dependency.Role != "result" {
+				return definitionFailure("HTML asset %s dependency %q must be a non-HTML result asset", assetID, dependencyID)
+			}
+			if _, exists := seen[dependencyID]; !exists {
+				asset.Dependencies = append(asset.Dependencies, dependencyID)
+				seen[dependencyID] = struct{}{}
+			}
+		}
+		withoutValidReferences := htmlAssetReferencePattern.ReplaceAll(body, nil)
+		if bytes.Contains(withoutValidReferences, []byte("{{asset_url:")) {
+			return definitionFailure("HTML asset %s contains a malformed asset reference", assetID)
+		}
+		sort.Strings(asset.Dependencies)
+		definition.Assets[assetID] = asset
+	}
+	return nil
+}
+
+func sortedAssetIDs(assets map[string]FeaturedAsset) []string {
+	ids := make([]string, 0, len(assets))
+	for assetID := range assets {
+		ids = append(ids, assetID)
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+func materializeHTMLAsset(asset FeaturedAsset, assets map[string]FeaturedAsset) ([]byte, error) {
+	body, err := os.ReadFile(asset.sourcePath)
+	if err != nil {
+		return nil, err
+	}
+	for _, dependencyID := range asset.Dependencies {
+		dependency, ok := assets[dependencyID]
+		if !ok || dependency.URL == "" {
+			return nil, definitionFailure("dependency %q has no compiled URL", dependencyID)
+		}
+		body = bytes.ReplaceAll(body, []byte("{{asset_url:"+dependencyID+"}}"), []byte(dependency.URL))
+	}
+	if match := htmlAssetReferencePattern.FindSubmatch(body); match != nil {
+		return nil, definitionFailure("unresolved asset reference %q", string(match[1]))
+	}
+	if int64(len(body)) > maxHTMLAssetBytes {
+		return nil, definitionFailure("compiled HTML exceeds %d bytes", maxHTMLAssetBytes)
+	}
+	return body, nil
+}
+
+func assetSizeLimit(mimeType string) int64 {
+	if mimeType == htmlAssetMIME {
+		return maxHTMLAssetBytes
+	}
+	return maxImageAssetBytes
+}
+
+func isImageAssetMIME(mimeType string) bool {
+	_, ok := allowedImageAssetMIMEs[mimeType]
+	return ok
+}
+
+func safeAssetPath(value string) (string, error) {
+	value = filepath.ToSlash(strings.TrimSpace(value))
+	if value == "" || strings.HasPrefix(value, "/") || strings.Contains(value, `\`) || strings.ContainsRune(value, 0) {
+		return "", definitionFailure("unsafe asset file %q", value)
+	}
+	cleaned := path.Clean(value)
+	if cleaned != value || !strings.HasPrefix(cleaned, "assets/") || cleaned == "assets" {
+		return "", definitionFailure("asset file must be a normalized path under assets/")
+	}
+	return cleaned, nil
+}
+
+func rejectSymlinkPath(root, relative string) error {
+	current := root
+	for _, segment := range strings.Split(filepath.FromSlash(relative), string(filepath.Separator)) {
+		current = filepath.Join(current, segment)
+		info, err := os.Lstat(current)
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return definitionFailure("symlink is not allowed: %s", relative)
+		}
+	}
+	return nil
+}
+
+func resolveExperienceAssets(definition *FeaturedDefinition) error {
+	resolve := func(presentation *FeaturedPresentation, tasks []FeaturedTask) ([]FeaturedTask, error) {
+		cover, ok := definition.Assets[presentation.Card.CoverAsset]
+		if !ok {
+			return nil, definitionFailure("featured Skill %s references missing cover asset %q", definition.ID, presentation.Card.CoverAsset)
+		}
+		presentation.Card.ImageURL = cover.URL
+		for index := range tasks {
+			result := &tasks[index].Result
+			if result.ImageAsset != "" {
+				asset, ok := definition.Assets[result.ImageAsset]
+				if !ok {
+					return nil, definitionFailure("featured Skill %s task %s references missing result asset %q", definition.ID, tasks[index].ID, result.ImageAsset)
+				}
+				result.ImageURL = asset.URL
+			}
+			if result.HTMLAsset != "" {
+				asset, ok := definition.Assets[result.HTMLAsset]
+				if !ok {
+					return nil, definitionFailure("featured Skill %s task %s references missing HTML asset %q", definition.ID, tasks[index].ID, result.HTMLAsset)
+				}
+				result.HTMLURL = asset.URL
+			}
+		}
+		return tasks, nil
+	}
+	var err error
+	definition.Tasks, err = resolve(&definition.Presentation, definition.Tasks)
+	if err != nil {
+		return err
+	}
+	for locale, content := range definition.Locales {
+		content.Tasks, err = resolve(&content.Presentation, content.Tasks)
+		if err != nil {
+			return err
+		}
+		definition.Locales[locale] = content
+	}
+	return nil
+}
+
+func validateDefinition(definition FeaturedDefinition, compiled bool) error {
+	if !slugPattern.MatchString(definition.ID) || !versionPattern.MatchString(definition.Version) || !localePattern.MatchString(definition.DefaultLocale) {
+		return definitionFailure("id, semantic version, and default_locale are required and must use canonical formats")
+	}
+	if definition.Status != StatusDraft && definition.Status != StatusPublished && definition.Status != StatusDisabled {
+		return definitionFailure("invalid status %q", definition.Status)
+	}
+	provider, err := skillbuiltin.NormalizeProvider(definition.Provider)
+	if err != nil {
+		return definitionFailure("invalid provider: %v", err)
+	}
+	if definition.Status == StatusPublished && provider == "" {
+		return definitionFailure("provider is required for published definitions")
+	}
+	if _, ok := allowedFeaturedTypes[definition.Type]; !ok {
+		return definitionFailure("type must be chat, work, or workflow")
+	}
+	if definition.Status == StatusPublished && !definition.Placement.Home && !definition.Placement.Gallery {
+		return definitionFailure("published definition must have a placement")
+	}
+	if (definition.Placement.Home || definition.Placement.Gallery) && definition.Placement.Order <= 0 {
+		return definitionFailure("placement.order must be positive")
+	}
+	if definition.Type == TypeWorkflow {
+		if definition.Skill != nil || definition.Workflow == nil {
+			return definitionFailure("type workflow requires workflow and forbids skill")
+		}
+		if err := validateWorkflowRef(definition.Workflow.WorkflowRef); err != nil {
+			return err
+		}
+	} else {
+		if definition.Skill == nil || definition.Workflow != nil {
+			return definitionFailure("type chat or work requires skill and forbids workflow")
+		}
+		if err := validateSkillSource(definition.Skill.SourceURL, compiled); err != nil {
+			return err
+		}
+		if compiled {
+			if definition.Skill.BuiltinSkillUID == "" || definition.Skill.Version == "" || len(definition.Skill.ArchiveSHA256) != sha256.Size*2 {
+				return definitionFailure("compiled skill binding is incomplete")
+			}
+			if _, err := hex.DecodeString(definition.Skill.ArchiveSHA256); err != nil {
+				return definitionFailure("invalid skill archive_sha256: %v", err)
+			}
+		}
+	}
+	if strings.TrimSpace(definition.Classification.Category) == "" {
+		return definitionFailure("classification.category is required")
+	}
+	if len(definition.Assets) == 0 {
+		return definitionFailure("at least one asset is required")
+	}
+	var compiledAssetBytes int64
+	for assetID, asset := range definition.Assets {
+		if !slugPattern.MatchString(assetID) {
+			return definitionFailure("invalid asset id %q", assetID)
+		}
+		if _, ok := allowedAssetRoles[asset.Role]; !ok {
+			return definitionFailure("asset %s has invalid role %q", assetID, asset.Role)
+		}
+		if asset.MIME != htmlAssetMIME && len(asset.Dependencies) != 0 {
+			return definitionFailure("non-HTML asset %s must not define dependencies", assetID)
+		}
+		seenDependencies := make(map[string]struct{}, len(asset.Dependencies))
+		for _, dependencyID := range asset.Dependencies {
+			dependency, ok := definition.Assets[dependencyID]
+			if !ok || dependency.Role != "result" || dependency.MIME == htmlAssetMIME {
+				return definitionFailure("HTML asset %s has invalid dependency %q", assetID, dependencyID)
+			}
+			if _, duplicate := seenDependencies[dependencyID]; duplicate {
+				return definitionFailure("HTML asset %s has duplicate dependency %q", assetID, dependencyID)
+			}
+			seenDependencies[dependencyID] = struct{}{}
+		}
+		if compiled {
+			expectedURLPrefix := "/showcase-assets/" + definition.ID + "/" + definition.Version + "/"
+			if asset.File != "" || !strings.HasPrefix(asset.URL, expectedURLPrefix) || path.Clean(asset.URL) != asset.URL || strings.Contains(asset.URL, `\`) || len(asset.SHA256) != sha256.Size*2 || asset.Size <= 0 {
+				return definitionFailure("compiled asset %s is incomplete", assetID)
+			}
+			if _, err := hex.DecodeString(asset.SHA256); err != nil {
+				return definitionFailure("compiled asset %s has invalid sha256", assetID)
+			}
+			if _, ok := allowedAssetMIMEs[asset.MIME]; !ok {
+				return definitionFailure("compiled asset %s has invalid MIME %q", assetID, asset.MIME)
+			}
+			if asset.Size > assetSizeLimit(asset.MIME) {
+				return definitionFailure("compiled asset %s exceeds its size limit", assetID)
+			}
+			if assetMIMEByExtension[strings.ToLower(path.Ext(asset.URL))] != asset.MIME {
+				return definitionFailure("compiled asset %s URL extension does not match MIME %q", assetID, asset.MIME)
+			}
+			if isImageAssetMIME(asset.MIME) {
+				if asset.Width < 64 || asset.Height < 64 || asset.Width > 8192 || asset.Height > 8192 {
+					return definitionFailure("compiled asset %s has invalid image dimensions", assetID)
+				}
+			} else if asset.Width != 0 || asset.Height != 0 {
+				return definitionFailure("compiled non-image asset %s has image dimensions", assetID)
+			}
+			compiledAssetBytes += asset.Size
+			if compiledAssetBytes > maxExperienceBytes {
+				return definitionFailure("compiled featured assets exceed %d bytes", maxExperienceBytes)
+			}
+		} else if asset.File == "" || asset.sourcePath == "" {
+			return definitionFailure("source asset %s is incomplete", assetID)
+		}
+	}
+	if err := validateExperience(definition.Presentation, definition.Tasks, definition.Assets, compiled); err != nil {
+		return definitionFailure("default locale %s: %v", definition.DefaultLocale, err)
+	}
+	for locale, content := range definition.Locales {
+		if locale == definition.DefaultLocale || !localePattern.MatchString(locale) || !compiled && content.Locale != locale {
+			return definitionFailure("invalid translation locale %q", locale)
+		}
+		if err := validateExperience(content.Presentation, content.Tasks, definition.Assets, compiled); err != nil {
+			return definitionFailure("translation %s: %v", locale, err)
+		}
+		if strings.TrimSpace(content.Classification.Category) == "" {
+			return definitionFailure("translation %s: classification.category is required", locale)
+		}
+		if err := validateTaskShape(definition.Presentation, definition.Tasks, content.Presentation, content.Tasks); err != nil {
+			return definitionFailure("translation %s: %v", locale, err)
+		}
+	}
+	if err := validateAssetUsage(definition); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateSkillSource(raw string, compiled bool) error {
+	source := strings.TrimSpace(raw)
+	parsed, err := url.Parse(source)
+	if err == nil && parsed.Host != "" && (parsed.Scheme == "https" || parsed.Scheme == "http") {
+		return nil
+	}
+	if compiled && strings.HasPrefix(source, "builtin://") {
+		if _, err := skillpackage.CleanPath(strings.TrimPrefix(source, "builtin://")); err == nil {
+			return nil
+		}
+	}
+	if parsed != nil && (parsed.Scheme != "" || parsed.Host != "") {
+		return definitionFailure("skill.source_url must be an HTTP(S) URL or a relative path under skills")
+	}
+	if _, err := skillpackage.CleanPath(source); err != nil {
+		return definitionFailure("skill.source_url must be an HTTP(S) URL or a relative path under skills")
+	}
+	return nil
+}
+
+func validateWorkflowRef(raw string) error {
+	const prefix = "builtin:"
+	workflowRef := strings.TrimSpace(raw)
+	if !strings.HasPrefix(workflowRef, prefix) || !slugPattern.MatchString(strings.TrimPrefix(workflowRef, prefix)) {
+		return definitionFailure("workflow.workflow_ref must use builtin:<workflow-id>")
+	}
+	return nil
+}
+
+func validateAssetUsage(definition FeaturedDefinition) error {
+	used := map[string]struct{}{definition.Presentation.Card.CoverAsset: {}}
+	for _, task := range definition.Tasks {
+		if task.Result.ImageAsset != "" {
+			used[task.Result.ImageAsset] = struct{}{}
+		}
+		if task.Result.HTMLAsset != "" {
+			used[task.Result.HTMLAsset] = struct{}{}
+		}
+	}
+	for _, content := range definition.Locales {
+		used[content.Presentation.Card.CoverAsset] = struct{}{}
+		for _, task := range content.Tasks {
+			if task.Result.ImageAsset != "" {
+				used[task.Result.ImageAsset] = struct{}{}
+			}
+			if task.Result.HTMLAsset != "" {
+				used[task.Result.HTMLAsset] = struct{}{}
+			}
+		}
+	}
+	for assetID := range used {
+		asset, ok := definition.Assets[assetID]
+		if !ok {
+			continue
+		}
+		for _, dependencyID := range asset.Dependencies {
+			used[dependencyID] = struct{}{}
+		}
+	}
+	for assetID := range definition.Assets {
+		if _, ok := used[assetID]; !ok {
+			return definitionFailure("asset %s is not referenced by any presentation or result", assetID)
+		}
+	}
+	return nil
+}
+
+func validateExperience(presentation FeaturedPresentation, tasks []FeaturedTask, assets map[string]FeaturedAsset, compiled bool) error {
+	card := presentation.Card
+	if card.Title == "" || card.Description == "" || card.OutputLabel == "" || card.ResultSummary == "" {
+		return definitionFailure("presentation.card text fields are required")
+	}
+	if _, ok := allowedOutputTypes[card.OutputType]; !ok {
+		return definitionFailure("unsupported output_type %q", card.OutputType)
+	}
+	if asset, ok := assets[card.CoverAsset]; !ok || asset.Role != "cover" || !isImageAssetMIME(asset.MIME) {
+		return definitionFailure("cover_asset %q must reference a cover asset", card.CoverAsset)
+	}
+	if compiled && card.ImageURL != assets[card.CoverAsset].URL {
+		return definitionFailure("compiled cover URL does not match asset registry")
+	}
+	if presentation.Detail.Title == "" || presentation.Detail.Description == "" {
+		return definitionFailure("presentation.detail title and description are required")
+	}
+	if len(tasks) == 0 {
+		return definitionFailure("at least one task is required")
+	}
+	seen := make(map[string]struct{}, len(tasks))
+	for index, task := range tasks {
+		if !slugPattern.MatchString(task.ID) {
+			return definitionFailure("task %d has invalid id %q", index, task.ID)
+		}
+		if _, exists := seen[task.ID]; exists {
+			return definitionFailure("duplicate task id %q", task.ID)
+		}
+		seen[task.ID] = struct{}{}
+		if task.Selector.Title == "" || task.Selector.Description == "" || task.Selector.OutputLabel == "" || task.Launch.PromptShort == "" || task.Launch.Prompt == "" {
+			return definitionFailure("task %s selector and launch fields are required", task.ID)
+		}
+		if len(task.Replay.Steps) == 0 {
+			return definitionFailure("task %s must contain at least one replay step", task.ID)
+		}
+		for _, step := range task.Replay.Steps {
+			if step.Title == "" || step.Description == "" {
+				return definitionFailure("task %s contains an incomplete replay step", task.ID)
+			}
+		}
+		if err := validateResult(task.ID, task.Result, assets, compiled); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateResult(taskID string, result ShowcaseCaseResult, assets map[string]FeaturedAsset, compiled bool) error {
+	if result.Template != ResultTemplateGeneric && result.Template != ResultTemplateProduct && result.Template != ResultTemplateHTML {
+		return definitionFailure("task %s has unsupported result template %q", taskID, result.Template)
+	}
+	if result.Eyebrow == "" || result.Title == "" || result.Summary == "" {
+		return definitionFailure("task %s result text fields are required", taskID)
+	}
+	if result.ImageAsset != "" {
+		asset, ok := assets[result.ImageAsset]
+		if !ok || asset.Role != "result" || !isImageAssetMIME(asset.MIME) {
+			return definitionFailure("task %s image_asset %q must reference a result asset", taskID, result.ImageAsset)
+		}
+		if compiled && result.ImageURL != asset.URL {
+			return definitionFailure("task %s compiled result image URL does not match asset registry", taskID)
+		}
+	}
+	if result.HTMLAsset != "" {
+		asset, ok := assets[result.HTMLAsset]
+		if !ok || asset.Role != "result" || asset.MIME != htmlAssetMIME {
+			return definitionFailure("task %s html_asset %q must reference an HTML result asset", taskID, result.HTMLAsset)
+		}
+		if compiled && result.HTMLURL != asset.URL {
+			return definitionFailure("task %s compiled HTML URL does not match asset registry", taskID)
+		}
+	}
+	if result.Template == ResultTemplateGeneric {
+		if len(result.Highlights) == 0 || result.ProductReport != nil || result.HTMLAsset != "" {
+			return definitionFailure("task %s generic result requires highlights and no product_report or html_asset", taskID)
+		}
+		return nil
+	}
+	if result.Template == ResultTemplateHTML {
+		if result.HTMLAsset == "" || result.ImageAsset != "" || len(result.Highlights) != 0 || result.ProductReport != nil {
+			return definitionFailure("task %s HTML result requires html_asset without generic or product fields", taskID)
+		}
+		return nil
+	}
+	if result.HTMLAsset != "" {
+		return definitionFailure("task %s product result must not define html_asset", taskID)
+	}
+	if result.ProductReport == nil || len(result.ProductReport.Metrics) == 0 || len(result.ProductReport.Sections) == 0 || result.ProductReport.Deliverables == "" {
+		return definitionFailure("task %s product result is incomplete", taskID)
+	}
+	for _, metric := range result.ProductReport.Metrics {
+		if metric.Label == "" || metric.Value == "" || metric.Hint == "" {
+			return definitionFailure("task %s product result contains an incomplete metric", taskID)
+		}
+	}
+	for _, section := range result.ProductReport.Sections {
+		if section.Title == "" || section.Marker != "number" && section.Marker != "letter" || len(section.Items) == 0 {
+			return definitionFailure("task %s product result contains an invalid section", taskID)
+		}
+		for _, item := range section.Items {
+			if item.Description == "" {
+				return definitionFailure("task %s product result contains an incomplete section item", taskID)
+			}
+		}
+	}
+	return nil
+}
+
+func validateTaskShape(defaultPresentation FeaturedPresentation, defaults []FeaturedTask, translatedPresentation FeaturedPresentation, translated []FeaturedTask) error {
+	if defaultPresentation.Card.OutputType != translatedPresentation.Card.OutputType {
+		return definitionFailure("output_type must match the default locale")
+	}
+	if len(defaults) != len(translated) {
+		return definitionFailure("task ids must match the default locale")
+	}
+	for index := range defaults {
+		if defaults[index].ID != translated[index].ID || defaults[index].Result.Template != translated[index].Result.Template {
+			return definitionFailure("task ids and result templates must match the default locale")
+		}
+	}
+	return nil
+}
+
+func defaultSearchAliases(definition FeaturedDefinition) []string {
+	values := []string{
+		definition.Presentation.Card.Title,
+		definition.Presentation.Card.Description,
+		definition.Presentation.Detail.Title,
+		definition.Presentation.Detail.Description,
+		definition.Classification.Category,
+	}
+	for _, task := range definition.Tasks {
+		values = append(values, task.Selector.Title, task.Selector.Description, task.Launch.PromptShort, task.Result.Title, task.Result.Summary)
+		values = append(values, task.Result.Highlights...)
+	}
+	return values
+}
+
+func copyAsset(source, destination string) error {
+	if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
+		return err
+	}
+	body, err := os.ReadFile(source)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(destination, body, 0o644)
+}
+
+func writeAsset(body []byte, destination string) error {
+	if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(destination, body, 0o644)
+}

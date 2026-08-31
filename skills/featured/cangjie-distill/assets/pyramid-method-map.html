@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>金字塔原理方法 Skill 地图</title>
+  <style>
+    *{box-sizing:border-box}html,body{margin:0;min-height:100%;font-family:"Noto Serif SC","Songti SC",serif;background:#f2f2f0;color:#181817}body{padding:24px}
+    .folio{max-width:1120px;margin:auto;background:#fff;border:1px solid #cfcfc9;display:grid;grid-template-columns:360px 1fr;min-height:680px;box-shadow:0 18px 44px rgba(20,20,18,.12)}
+    aside{padding:34px;border-right:1px solid #d8d8d2;background:#f8f8f5}.issue{font-family:Arial,sans-serif;font-size:11px;color:#9b2d24;font-weight:700}.title{font-size:30px;line-height:1.25;margin:14px 0 10px}.intro{font-size:14px;line-height:1.8;color:#5d5d58}.map{margin-top:28px;display:grid;gap:10px}
+    button{font:inherit;text-align:left;border:1px solid #d5d5cf;background:#fff;padding:13px 14px;cursor:pointer;display:flex;gap:12px;align-items:center}.num{font-family:Arial,sans-serif;font-size:11px;color:#9b2d24}.map button.active{background:#181817;color:#fff;border-color:#181817}.map button.active .num{color:#f0a096}
+    main{padding:42px 46px 34px}.kicker{font-family:Arial,sans-serif;color:#9b2d24;font-size:12px;font-weight:700}.method-title{font-size:34px;margin:10px 0 8px}.scenario{font-size:16px;color:#5c5c57;margin-bottom:28px}
+    .pyramid{display:grid;gap:10px;max-width:580px;margin:10px auto 30px}.level{margin:auto;border:1px solid #222;padding:14px 18px;text-align:center;background:#fff}.l1{width:42%;background:#9b2d24;color:#fff;border-color:#9b2d24}.l2{width:68%}.l3{width:92%}.level small{display:block;margin-top:4px;color:inherit;opacity:.72}
+    .execution{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.card{border-top:3px solid #181817;background:#f4f4f1;padding:16px;min-height:128px}.card b{display:block;font-size:14px}.card p{font-family:"PingFang SC",sans-serif;color:#62625e;font-size:12px;line-height:1.65;margin:8px 0 0}.deliverable{margin-top:18px;padding:14px 16px;border:1px solid #d5d5cf;font-family:"PingFang SC",sans-serif;font-size:13px}.deliverable b{color:#9b2d24}
+    @media(max-width:760px){body{padding:0}.folio{grid-template-columns:1fr}.folio aside{border-right:0;border-bottom:1px solid #ddd}.execution{grid-template-columns:1fr}main{padding:28px 24px}}
+  </style>
+</head>
+<body>
+  <section class="folio">
+    <aside><div class="issue">CANGJIE DISTILL · CASE 01</div><h1 class="title">把《金字塔原理》拆成可执行 Skill</h1><p class="intro">不是摘要，而是一套可触发、可组合、可验收的方法能力。点击方法卡查看不同 Skill 的执行边界。</p><div class="map">
+      <button class="active" data-key="conclusion"><span class="num">01</span>结论先行表达</button><button data-key="mece"><span class="num">02</span>MECE 分组</button><button data-key="evidence"><span class="num">03</span>证据金字塔</button><button data-key="review"><span class="num">04</span>逻辑复核</button>
+    </div></aside>
+    <main><div class="kicker" id="kicker">SKILL 01 · WRITING</div><h2 class="method-title" id="methodTitle">结论先行表达</h2><p class="scenario" id="scenario">用于周报、汇报和决策建议：先给答案，再组织支撑理由与事实。</p>
+      <div class="pyramid"><div class="level l1" id="level1">核心结论<small>一句话回答“所以呢？”</small></div><div class="level l2" id="level2">三组关键理由<small>相互独立，共同支撑结论</small></div><div class="level l3" id="level3">事实与数据<small>每条理由都有可验证依据</small></div></div>
+      <div class="execution"><div class="card"><b>触发条件</b><p id="trigger">用户要写汇报、建议或需要把复杂材料讲清楚。</p></div><div class="card"><b>执行步骤</b><p id="steps">确认问题 → 写结论 → 分组理由 → 补充证据 → 检查上下对应。</p></div><div class="card"><b>质量检查</b><p id="check">标题能否单独传达观点？每个事实是否只服务于一个理由？</p></div></div>
+      <div class="deliverable"><b>交付物</b> <span id="deliverable">一页结论先行汇报卡 + 可复用检查清单</span></div>
+    </main>
+  </section>
+  <script>
+    const data={conclusion:['SKILL 01 · WRITING','结论先行表达','用于周报、汇报和决策建议：先给答案，再组织支撑理由与事实。','核心结论','三组关键理由','事实与数据','用户要写汇报、建议或需要把复杂材料讲清楚。','确认问题 → 写结论 → 分组理由 → 补充证据 → 检查上下对应。','标题能否单独传达观点？每个事实是否只服务于一个理由？','一页结论先行汇报卡 + 可复用检查清单'],mece:['SKILL 02 · ANALYSIS','MECE 分组','用于拆解复杂问题：建立不重不漏的分类框架，再逐项分析。','待解决问题','互斥分类维度','完整问题清单','用户面对信息混乱、分类重叠或遗漏风险。','确定分析目标 → 选择划分维度 → 检查重叠 → 检查遗漏 → 命名分组。','同一层是否使用同一划分标准？所有重要项是否都有归属？','MECE 问题树 + 分组定义表'],evidence:['SKILL 03 · RESEARCH','证据金字塔','用于把主张变成可信论证：从判断追溯到证据与来源。','关键主张','论据与解释','数据和来源','用户需要论证方案、研究观点或关键业务判断。','写出主张 → 列出论据 → 绑定证据 → 标注来源 → 评估反例。','证据是否真的支持论据？是否混淆相关性与因果性？','主张—论据—证据矩阵'],review:['SKILL 04 · QUALITY','逻辑复核','用于交付前检查：沿纵向疑问与横向归纳两条路径找逻辑断点。','结论回答问题','理由逻辑一致','证据充分可信','用户完成报告、提案或演讲稿，准备最终交付。','逆向提问 → 横向归纳 → 检查跳步 → 寻找反例 → 修订标题。','上层是否概括下层？同组内容是否同类？读者还会追问什么？','逻辑复核报告 + 修改优先级']};
+    const ids=['kicker','methodTitle','scenario','level1','level2','level3','trigger','steps','check','deliverable'];document.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('button').forEach(x=>x.classList.remove('active'));b.classList.add('active');data[b.dataset.key].forEach((v,i)=>document.getElementById(ids[i]).textContent=v)}));
+  </script>
+</body>
+</html>

@@ -9,7 +9,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def test_save_chat_artifact_declares_exact_content_type_choices():
-    from lazymind.chat.engine.tools.chat_artifact import save_chat_artifact
+    from lazymind.chat.engine.tools.local_file.workspace import save_chat_artifact
 
     annotation = get_type_hints(save_chat_artifact)['content_type']
 

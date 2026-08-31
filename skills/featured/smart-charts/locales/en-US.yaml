@@ -1,0 +1,100 @@
+locale: en-US
+
+classification:
+  category: Information & analysis
+  tags:
+    - Smart charts
+    - Data visualization
+    - Excel analysis
+    - CSV analysis
+
+presentation:
+  card:
+    title: Smart charts
+    description: Turn six months of operating data into an interactive revenue and profit trend chart
+    output_type: dashboard
+    output_label: Interactive chart
+    cover_asset: cover
+    result_summary: Demonstrate metric detection, trend insights, and a self-contained HTML deliverable with a concrete example
+  detail:
+    title: Smart charts
+    description: Sourced from SkillHub. Read CSV, Excel, or JSON data, recommend an appropriate chart, and generate an interactive downloadable HTML visualization.
+    attachment_hint: A CSV, Excel, or JSON data file
+
+tasks:
+  - id: trend-chart
+    selector:
+      title: Six-month retail trend
+      description: Explore January-June revenue and profit in a dual-metric chart
+      output_label: Trend analysis chart
+    launch:
+      prompt_short: Create a January-June 2026 revenue and profit trend chart from the sample data.
+      prompt: Use the Smart Charts Skill to analyze this retail example. Revenue from January through June 2026 is 0.82, 0.90, 1.02, 1.12, 1.29, and 1.45 million CNY; profit is 0.23, 0.26, 0.30, 0.35, 0.41, and 0.50 million CNY. Produce a self-contained interactive HTML file with no external CDN, dual trend lines, metric switches, hover tooltips, cumulative revenue and profit, overall margin, the fastest-growth month, and three evidence-based insights.
+    replay:
+      steps:
+        - title: Validate six months of data
+          description: Align revenue, profit, units, and month order
+        - title: Calculate operating metrics
+          description: Summarize totals, margin, growth, and key changes
+        - title: Build the dual-metric trend
+          description: Create switchable revenue and profit lines with hover details
+        - title: Deliver business insights
+          description: Verify values and explain the revenue and profit pattern
+    result:
+      template: html_preview_v1
+      eyebrow: Trend analysis chart
+      title: H1 2026 revenue and profit trend
+      summary: Explore six months of performance, cumulative metrics, and the fastest-growth month
+      html_asset: revenue_demo
+
+  - id: comparison-chart
+    selector:
+      title: Comparison chart
+      description: Compare revenue and orders across East, South, and North China
+      output_label: Comparison analysis chart
+    launch:
+      prompt_short: 'Example: compare revenue and orders across East, South, and North China.'
+      prompt: >-
+        Generate a category comparison chart from this sample data. Regions: East China, South China, North China. Revenue (CNY 10k): 320, 280, 210. Orders: 8400, 7600, 5900. Identify the categorical dimension and numeric metrics, choose a suitable bar or combination chart, highlight rankings, gaps, and key conclusions, and deliver an interactive downloadable HTML visualization.
+    replay:
+      steps:
+        - title: Identify comparison dimensions
+          description: Confirm categories, groups, and metrics to compare
+        - title: Aggregate and sort
+          description: Group values, establish ordering, and normalize units
+        - title: Generate the comparison chart
+          description: Use clear visual encoding to emphasize differences
+        - title: Summarize findings
+          description: Explain rankings, gaps, and the most useful observations
+    result:
+      template: html_preview_v1
+      eyebrow: Comparison analysis chart
+      title: Category metrics and rankings
+      summary: Present group differences, rankings, and key findings in an interactive chart
+      html_asset: comparison_output
+
+  - id: distribution-chart
+    selector:
+      title: Distribution and composition
+      description: Analyze 12 order amounts and four channels' composition shares
+      output_label: Distribution analysis chart
+    launch:
+      prompt_short: 'Example: analyze the distribution of 12 order amounts and channel composition.'
+      prompt: >-
+        Analyze distribution and composition from this sample data. Order amounts (CNY): 89, 95, 102, 110, 118, 125, 130, 142, 155, 168, 420, 560. Orders by channel: organic search 42, livestream 28, community 18, paid ads 12. Choose a suitable histogram and composition chart, explain concentration ranges, shares, and anomalies, and deliver an interactive downloadable HTML visualization.
+    replay:
+      steps:
+        - title: Inspect data characteristics
+          description: Identify continuous and categorical variables and their value ranges
+        - title: Select visual encodings
+          description: Match the distribution or composition to suitable charts
+        - title: Mark key findings
+          description: Emphasize concentration ranges, major shares, and anomalies
+        - title: Generate the deliverable
+          description: Produce a self-contained interactive HTML chart
+    result:
+      template: html_preview_v1
+      eyebrow: Distribution analysis chart
+      title: Data distribution and structure
+      summary: Show concentration ranges, category composition, and anomalous points
+      html_asset: distribution_output

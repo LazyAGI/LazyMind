@@ -1,5 +1,5 @@
 import jsYaml from 'js-yaml';
-import type { WorkflowModel } from './workflowModel';
+import { collectCompositeSlotIds, type WorkflowModel } from './workflowModel';
 import type { GraphModel } from './model';
 
 /**
@@ -15,6 +15,8 @@ export function serializeWorkflowModel(model: WorkflowModel, graphModel?: GraphM
   doc.name = model.name;
   if (model.description) doc.description = model.description;
   if (model.when_to_use) doc.when_to_use = model.when_to_use;
+  if (model.runtime) doc.runtime = model.runtime;
+  if (model.artifact_actions) doc.artifact_actions = model.artifact_actions;
 
   if (model.tool_scripts && model.tool_scripts.length > 0) {
     doc.tool_scripts = model.tool_scripts.map((ts) => ({
@@ -64,14 +66,21 @@ export function serializeWorkflowModel(model: WorkflowModel, graphModel?: GraphM
 
     uiDoc.tabs = model.ui.tabs.map((tab) => {
       const t: Record<string, unknown> = { id: tab.id };
+      if (tab.step_id) t.step_id = tab.step_id;
       if (tab.label) t.label = tab.label;
       if (tab.layout) t.layout = tab.layout;
       if (tab.gridCols != null) t.grid_cols = tab.gridCols;
-      // slots: only output id list
-      t.slots = tab.slots.map((s) => ({ id: s.id }));
+      // In composite mode the tree is authoritative. Derive the flat list on
+      // every save so drag/drop layout edits cannot create an unpublished,
+      // invalid draft whose tree references an unknown tab material.
+      const slotIds = tab.layout === 'composite' && tab.composite_layout
+        ? collectCompositeSlotIds(tab.composite_layout)
+        : tab.slots.map((slot) => slot.id);
+      t.slots = slotIds.map((id) => ({ id }));
       if (tab.composite_tab_position) t.composite_tab_position = tab.composite_tab_position;
       if (tab.composite_layout != null) t.composite_layout = tab.composite_layout;
       if (tab.composite_behavior != null) t.composite_behavior = tab.composite_behavior;
+      if (tab.actions?.length) t.actions = tab.actions;
       return t;
     });
 

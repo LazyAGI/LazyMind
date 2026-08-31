@@ -307,6 +307,16 @@ func commandResultDetail(res CommandResult) string {
 
 func writeCaddyfile(paths RuntimePaths, cfg RuntimeConfig) error {
 	distRoot := filepath.ToSlash(filepath.Join(paths.RepoRoot, "frontend", "dist"))
+	featuredAssetsRoot := filepath.Join(paths.RepoRoot, "skills", ".runtime", "featured-skills", "assets")
+	if cfg.Profile == "desktop" {
+		featuredAssetsRoot = filepath.Join(paths.ResourcesRoot, "featured-skills", "assets")
+	}
+	featuredAssetsHandle := fmt.Sprintf(`
+	handle_path /showcase-assets/* {
+		root * %s
+		file_server
+	}
+`, strconv.Quote(filepath.ToSlash(featuredAssetsRoot)))
 	proxy := "http://127.0.0.1:" + strconv.Itoa(cfg.LocalProxy.Port)
 	siteAddress := fmt.Sprintf("http://localhost:%d, http://127.0.0.1:%d", cfg.FrontendPort, cfg.FrontendPort)
 	bindAddress := "127.0.0.1"
@@ -323,6 +333,7 @@ func writeCaddyfile(paths RuntimePaths, cfg RuntimeConfig) error {
 	bind %s
 	root * %s
 	encode gzip
+%s
 
 	handle /api/* {
 		reverse_proxy %s {
@@ -347,7 +358,7 @@ func writeCaddyfile(paths RuntimePaths, cfg RuntimeConfig) error {
 		file_server
 	}
 }
-`, siteAddress, bindAddress, strconv.Quote(distRoot), proxy, proxy, proxy)
+`, siteAddress, bindAddress, strconv.Quote(distRoot), featuredAssetsHandle, proxy, proxy, proxy)
 	return os.WriteFile(paths.CaddyConfig, []byte(content), 0o644)
 }
 

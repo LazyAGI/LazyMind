@@ -1,12 +1,9 @@
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, NoReturn, Optional
 
 import lazyllm
+from lazyllm.tools.agent import ToolExecutionError
 
-from lazymind.chat.engine.tools.infra import (
-    GitHubSkillInstaller,
-    tool_error,
-    tool_success,
-)
+from lazymind.chat.engine.tools.infra import GitHubSkillInstaller
 from lazymind.chat.engine.tools.infra.skill_operations import (
     create_skill_file,
     delete_skill_file,
@@ -33,11 +30,11 @@ _PENDING_SKILL_CHANGE_MESSAGE = (
 )
 
 
-def _skill_editor_error(tool_name: str, prefix: str, exc: Exception) -> Dict[str, Any]:
+def _skill_editor_error(prefix: str, exc: Exception) -> NoReturn:
     message = str(exc)
     if _DRAFT_BELONGS_TO_ANOTHER_TASK_ERROR in message:
-        return tool_error(tool_name, _PENDING_SKILL_CHANGE_MESSAGE)
-    return tool_error(tool_name, f'{prefix}: {message}')
+        raise ToolExecutionError(_PENDING_SKILL_CHANGE_MESSAGE) from exc
+    raise ToolExecutionError(f'{prefix}: {message}') from exc
 
 
 class SkillManagementToolkit:
@@ -78,24 +75,23 @@ class SkillManagementToolkit:
         try:
             package = self.installer.prepare(github_url)
         except Exception as exc:
-            return tool_error('install_skill', str(exc))
+            raise ToolExecutionError(str(exc)) from exc
 
         category = EXTERNAL_SKILL_CATEGORY
         skill_key = f'{category}/{package.name}'
         try:
             if self.store.package_exists(category, package.name):
-                return tool_error('install_skill', f'Skill {skill_key!r} already exists.')
+                raise ToolExecutionError(f'Skill {skill_key!r} already exists.')
             duplicate_key = self._find_installed_github_source(package.source.identity)
             if duplicate_key:
-                return tool_error(
-                    'install_skill',
+                raise ToolExecutionError(
                     f'GitHub source is already installed as {duplicate_key!r}.',
                 )
             self.store.install_package(category, package.name, package.files)
         except Exception as exc:
-            return _skill_editor_error('install_skill', 'Failed to install skill package', exc)
+            _skill_editor_error('Failed to install skill package', exc)
 
-        return tool_success('install_skill', {
+        return {
             'status': 'installed',
             'skill_key': skill_key,
             'github_url': package.source.canonical_url,
@@ -103,7 +99,7 @@ class SkillManagementToolkit:
             'message': (
                 'Skill installed. Go to Skill Management > My Skills to review and enable it.'
             ),
-        })
+        }
 
     def _find_installed_github_source(self, source_identity: tuple[str, str]) -> Optional[str]:
         for package in self.store.list_packages():
@@ -147,11 +143,8 @@ class SkillManagementToolkit:
             name = require_skill_name(name)
             document = require_valid_skill_document(content, expected_name=name)
         except SkillDocumentError as exc:
-            return tool_error(
-                'create_skill',
-                str(exc),
-                log_message=f'[create_skill] fail reason={str(exc)!r}',
-            )
+            lazyllm.LOG.warning(f'[create_skill] fail reason={str(exc)!r}')
+            raise ToolExecutionError(str(exc)) from exc
         lazyllm.LOG.info(
             f'[create_skill] lookup category={INTERNAL_SKILL_CATEGORY} name={name!r}'
         )
@@ -162,11 +155,11 @@ class SkillManagementToolkit:
                 content,
             )
         except Exception as exc:
-            return _skill_editor_error('create_skill', 'Failed to create skill package', exc)
-        return tool_success('create_skill', {
+            _skill_editor_error('Failed to create skill package', exc)
+        return {
             'status': 'created',
             'message': 'Skill package change was written.',
-        })
+        }
 
     def _run_file_operation(
         self,
@@ -178,7 +171,7 @@ class SkillManagementToolkit:
     ) -> Dict[str, Any]:
         resolved = self.store.resolve_existing_identity(name)
         if resolved.get('error'):
-            return tool_error(tool_name, resolved['error'])
+            raise ToolExecutionError(resolved['error'])
         normalized_category = resolved['category']
         name = resolved['name']
         try:
@@ -188,16 +181,16 @@ class SkillManagementToolkit:
             change_set = self.store.replace_files(normalized_category, name, current_files, edited_files)
         except ValueError as exc:
             if _DRAFT_BELONGS_TO_ANOTHER_TASK_ERROR in str(exc):
-                return tool_error(tool_name, _PENDING_SKILL_CHANGE_MESSAGE)
-            return tool_error(tool_name, str(exc))
+                raise ToolExecutionError(_PENDING_SKILL_CHANGE_MESSAGE) from exc
+            raise ToolExecutionError(str(exc)) from exc
         except Exception as exc:
-            return _skill_editor_error(tool_name, 'Failed to load or edit skill package', exc)
+            _skill_editor_error('Failed to load or edit skill package', exc)
         result['written_files'] = change_set['written']
         result['deleted_files'] = change_set['deleted']
         if 'summary' not in result:
             touched = ', '.join(result.get('touched_files') or [])
             result['summary'] = reason or f'skill_editor {tool_name}: {touched}'
-        return tool_success(tool_name, result)
+        return result
 
     def edit_file(
         self,
@@ -346,7 +339,7 @@ class SkillManagementToolkit:
         )
         resolved = self.store.resolve_existing_identity(name)
         if resolved.get('error'):
-            return tool_error('rename_skill', resolved['error'])
+            raise ToolExecutionError(resolved['error'])
         normalized_category = resolved['category']
         name = resolved['name']
         lazyllm.LOG.info(f'[rename_skill] lookup category={normalized_category!r} name={name!r}')
@@ -354,9 +347,9 @@ class SkillManagementToolkit:
         try:
             target_name = require_skill_name(new_name)
         except SkillDocumentError as exc:
-            return tool_error('rename_skill', f'new_name is invalid: {exc}')
+            raise ToolExecutionError(f'new_name is invalid: {exc}') from exc
         if target_name == name:
-            return tool_error('rename_skill', 'rename_skill requires a different new_name.')
+            raise ToolExecutionError('rename_skill requires a different new_name.')
 
         try:
             current_files = self.store.list_files(normalized_category, name)
@@ -365,7 +358,7 @@ class SkillManagementToolkit:
             renamed_content = document.with_metadata(name=target_name).render()
             require_valid_skill_document(renamed_content, expected_name=target_name)
         except Exception as exc:
-            return _skill_editor_error('rename_skill', 'Failed to prepare skill rename', exc)
+            _skill_editor_error('Failed to prepare skill rename', exc)
 
         try:
             self.store.rename(
@@ -376,7 +369,7 @@ class SkillManagementToolkit:
                 skill_content=renamed_content,
             )
         except Exception as exc:
-            return _skill_editor_error('rename_skill', 'Failed to rename skill package', exc)
+            _skill_editor_error('Failed to rename skill package', exc)
 
         payload = {
             'old': {'category': normalized_category, 'name': name},
@@ -387,7 +380,7 @@ class SkillManagementToolkit:
             'message': 'Skill package change was written.',
         }
         result.update(payload)
-        return tool_success('rename_skill', result)
+        return result
 
     def remove_skill(
         self,
@@ -406,14 +399,14 @@ class SkillManagementToolkit:
         try:
             normalized_category, name = parse_skill_key(name)
         except ValueError as exc:
-            return tool_error('remove_skill', str(exc))
+            raise ToolExecutionError(str(exc)) from exc
         lazyllm.LOG.info(f'[remove_skill] lookup category={normalized_category!r} name={name!r}')
 
         try:
             self.store.remove(normalized_category, name)
         except Exception as exc:
-            return _skill_editor_error('remove_skill', 'Failed to remove skill package', exc)
-        return tool_success('remove_skill', {
+            _skill_editor_error('Failed to remove skill package', exc)
+        return {
             'status': 'removed',
             'message': 'Skill package change was written.',
-        })
+        }

@@ -1555,6 +1555,104 @@ func TestMemoryWorkerDoesNotRetryUnprocessableRequest(t *testing.T) {
 	}
 }
 
+func TestMemoryWorkerDoesNotRetryNonRetryableReviewFailures(t *testing.T) {
+	testCases := []struct {
+		name          string
+		outcome       string
+		responseCode  string
+		persistedCode string
+		message       string
+	}{
+		{
+			name:          "capacity exceeded",
+			outcome:       "failed",
+			responseCode:  "capacity_exceeded",
+			persistedCode: "capacity_exceeded",
+			message:       "Preference capacity is full; the new preference was not saved.",
+		},
+		{
+			name:          "partial failure",
+			outcome:       "partial",
+			responseCode:  "partial_failure",
+			persistedCode: "memory_review_partial",
+			message:       "A memory operation was only partially applied and requires reconciliation.",
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			db := newResourceUpdateTestDB(t)
+			ctx := context.Background()
+			now := time.Date(2026, 8, 27, 10, 0, 0, 0, time.UTC)
+			task := insertTask(t, db, orm.ResourceUpdateTask{
+				ID:           "task-memory-" + strings.ReplaceAll(testCase.responseCode, "_", "-"),
+				TaskType:     orm.ResourceUpdateTaskTypeGenerateReview,
+				ResourceType: orm.ResourceUpdateResourceTypeMemory,
+				UserID:       "user-1",
+				ResourceID:   "memory",
+				TriggerType:  orm.ResourceUpdateTriggerTypeConversationIdle,
+				TriggerID:    "idle-" + testCase.responseCode,
+				Status:       orm.ResourceUpdateTaskStatusPending,
+				RequestJSON: marshalJSON(t, memoryReviewRequestJSON{
+					ConversationID:             "conversation-" + testCase.responseCode,
+					ConversationLastActiveAtMS: now.UnixMilli(),
+					History:                    json.RawMessage(`[{"role":"user","content":"remember this"}]`),
+				}),
+				NextRunAt: now,
+				CreatedAt: now,
+				UpdatedAt: now,
+			})
+
+			worker := NewWorker(db, Config{
+				WorkerBatchSize:  1,
+				WorkerLockTTL:    time.Minute,
+				MaxAttempts:      3,
+				RetryBackoffBase: time.Minute,
+				RetryBackoffMax:  time.Minute,
+			}, "worker-non-retryable-"+testCase.responseCode)
+			worker.clock = func() time.Time { return now }
+			worker.loadLLMConfig = func(context.Context, *gorm.DB, string) (map[string]any, error) {
+				return map[string]any{}, nil
+			}
+			worker.callers.Memory = func(_ context.Context, req algo.MemoryReviewRequest) (*algo.MemoryReviewResponse, int, error) {
+				return &algo.MemoryReviewResponse{
+					Status:    "failed",
+					TaskID:    req.TaskID,
+					Outcome:   testCase.outcome,
+					Retryable: false,
+					Error: &algo.MemoryReviewError{
+						Code:    testCase.responseCode,
+						Message: testCase.message,
+					},
+				}, http.StatusOK, nil
+			}
+
+			result, err := worker.RunOnce(ctx)
+			if err != nil {
+				t.Fatalf("worker run: %v", err)
+			}
+			if result.Failed != 1 || result.Retried != 0 {
+				t.Fatalf("unexpected worker result: %#v", result)
+			}
+
+			var got orm.ResourceUpdateTask
+			if err := db.First(&got, "id = ?", task.ID).Error; err != nil {
+				t.Fatalf("read failed task: %v", err)
+			}
+			if got.Status != orm.ResourceUpdateTaskStatusFailed || got.AttemptCount != 1 {
+				t.Fatalf("unexpected failed task: %#v", got)
+			}
+			if got.ErrorCode != testCase.persistedCode || got.ErrorMessage != testCase.message {
+				t.Fatalf(
+					"unexpected persisted error: code=%q message=%q",
+					got.ErrorCode,
+					got.ErrorMessage,
+				)
+			}
+		})
+	}
+}
+
 func TestMemoryWorkerMarksSuccessfulReviewDone(t *testing.T) {
 	db := newResourceUpdateTestDB(t)
 	ctx := context.Background()

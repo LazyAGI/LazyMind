@@ -8,6 +8,7 @@ interface ApiEnvelope<T> {
 
 export interface SettingsControls {
   task_center_enabled: boolean;
+  schedules_enabled: boolean;
   skills_enabled: boolean;
   workflows_enabled: boolean;
   mcp_enabled: boolean;

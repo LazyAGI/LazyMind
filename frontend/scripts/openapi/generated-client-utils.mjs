@@ -10,9 +10,13 @@ export const GENERATED_TYPESCRIPT_FILES = Object.freeze([
   "index.ts",
 ]);
 
+function readNormalizedText(filePath) {
+  return fs.readFileSync(filePath, "utf-8").replace(/\r\n?/g, "\n");
+}
+
 export function hashFile(filePath) {
   if (!fs.existsSync(filePath)) return "";
-  return createHash("sha256").update(fs.readFileSync(filePath)).digest("hex");
+  return createHash("sha256").update(readNormalizedText(filePath)).digest("hex");
 }
 
 export function inspectGeneratedClientOutput(outputDir) {
@@ -28,7 +32,7 @@ export function inspectGeneratedClientOutput(outputDir) {
   for (const filename of GENERATED_TYPESCRIPT_FILES) {
     hash.update(filename);
     hash.update("\0");
-    hash.update(fs.readFileSync(path.resolve(outputDir, filename)));
+    hash.update(readNormalizedText(path.resolve(outputDir, filename)));
     hash.update("\0");
   }
 

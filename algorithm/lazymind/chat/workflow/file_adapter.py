@@ -26,9 +26,16 @@ class LazyMindHostFileAdapter:
     def import_attachment(self, path: str) -> InputResource:
         source = Path(path)
         content = source.read_bytes()
+        return self._import(source.name, mimetypes.guess_type(source.name)[0] or 'application/octet-stream', content)
+
+    def import_text(self, name: str, value: str) -> InputResource:
+        """Import a scalar Workflow binding without pretending it is a Host file."""
+        return self._import(name, 'text/plain; charset=utf-8', value.encode('utf-8'))
+
+    def _import(self, name: str, mime_type: str, content: bytes) -> InputResource:
         result = self.client.import_input_resource(
-            source.name,
-            mimetypes.guess_type(source.name)[0] or 'application/octet-stream',
+            name,
+            mime_type,
             content,
         ).result
         # The Host-private path and transport capability are deliberately discarded here.

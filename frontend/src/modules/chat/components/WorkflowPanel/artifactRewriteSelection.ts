@@ -74,6 +74,27 @@ function closestElement(node: Node | null): HTMLElement | null {
   return node instanceof HTMLElement ? node : node?.parentElement ?? null;
 }
 
+function closestParagraph(container: HTMLElement, node: Node): HTMLElement | null {
+  const paragraph = closestElement(node)?.closest<HTMLElement>('p') ?? null;
+  return paragraph && container.contains(paragraph) ? paragraph : null;
+}
+
+function adjacentBoundaryParagraph(
+  container: HTMLElement,
+  node: Node,
+  offset: number,
+  edge: 'start' | 'end',
+): HTMLElement | null {
+  if (!(node instanceof Element) || !container.contains(node)) return null;
+  const childIndex = edge === 'start' ? offset : offset - 1;
+  const child = node.childNodes.item(childIndex);
+  if (!(child instanceof Element)) return null;
+  const paragraphs = child.matches('p')
+    ? [child as HTMLElement]
+    : Array.from(child.querySelectorAll<HTMLElement>('p'));
+  return (edge === 'start' ? paragraphs[0] : paragraphs.at(-1)) ?? null;
+}
+
 export function selectionActionAnchor(range: Range): SelectionActionAnchor | null {
   const rect = range.getBoundingClientRect();
   if (rect.width === 0 && rect.height === 0) return null;
@@ -102,14 +123,26 @@ export function selectedMarkdownParagraph(container: HTMLElement): MarkdownSelec
     return null;
   }
 
-  const startParagraph = closestElement(range.startContainer)?.closest('p');
-  const endParagraph = closestElement(range.endContainer)?.closest('p');
+  const directStartParagraph = closestParagraph(container, range.startContainer);
+  const directEndParagraph = closestParagraph(container, range.endContainer);
+  const startParagraph = directStartParagraph ?? adjacentBoundaryParagraph(
+    container,
+    range.startContainer,
+    range.startOffset,
+    'start',
+  );
+  const endParagraph = directEndParagraph ?? adjacentBoundaryParagraph(
+    container,
+    range.endContainer,
+    range.endOffset,
+    'end',
+  );
   const selectedText = selection.toString();
   const text = selectedText.trim();
   const anchor = selectionActionAnchor(range);
   if (!text || !anchor) return null;
 
-  const supported = Boolean(
+  let supported = Boolean(
     startParagraph
       && startParagraph === endParagraph
       && container.contains(startParagraph)
@@ -117,10 +150,23 @@ export function selectedMarkdownParagraph(container: HTMLElement): MarkdownSelec
   );
   let startOffset: number | undefined;
   if (supported && startParagraph) {
-    const prefixRange = range.cloneRange();
-    prefixRange.selectNodeContents(startParagraph);
-    prefixRange.setEnd(range.startContainer, range.startOffset);
-    startOffset = prefixRange.toString().length + selectedText.length - selectedText.trimStart().length;
+    if (directStartParagraph) {
+      const prefixRange = range.cloneRange();
+      prefixRange.selectNodeContents(startParagraph);
+      prefixRange.setEnd(range.startContainer, range.startOffset);
+      startOffset = prefixRange.toString().length
+        + selectedText.length
+        - selectedText.trimStart().length;
+    } else {
+      startOffset = selectedText.length - selectedText.trimStart().length;
+    }
+    if (
+      (!directStartParagraph || !directEndParagraph)
+      && (startParagraph.textContent ?? '').slice(startOffset, startOffset + text.length) !== text
+    ) {
+      supported = false;
+      startOffset = undefined;
+    }
   }
   return { text, anchor, supported, paragraph: startParagraph ?? undefined, startOffset };
 }

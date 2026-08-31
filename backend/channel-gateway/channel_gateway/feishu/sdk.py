@@ -51,6 +51,7 @@ from lark_channel.channel.errors import (
     FeishuChannelError,
     FeishuChannelErrorCode,
 )
+from lark_channel.channel.normalize import flatten, parse_message_content
 from lark_channel.event.callback.model.p2_card_action_trigger import (
     P2CardActionTriggerResponse,
 )
@@ -168,21 +169,15 @@ def _cardkit_response_error(
 
 
 def _message_text(message_type: str, raw_content: str) -> str:
+    if message_type not in {'text', 'post'}:
+        return ''
     try:
-        content = json.loads(raw_content or '{}')
+        text, _resources = flatten(
+            parse_message_content(message_type, raw_content)
+        )
     except (TypeError, ValueError):
         return ''
-    if not isinstance(content, dict):
-        return ''
-    if message_type == 'text':
-        return str(content.get('text') or '').strip()
-    if message_type != 'post':
-        return ''
-    for field in ('content_v2', 'content'):
-        text = _post_text(content.get(field))
-        if text:
-            return text
-    return ''
+    return str(text or '').strip()
 
 
 def _message_image_key(message_type: str, raw_content: str) -> str:
@@ -197,28 +192,6 @@ def _message_image_key(message_type: str, raw_content: str) -> str:
         if isinstance(content, dict)
         else ''
     )
-
-
-def _post_text(paragraphs: Any) -> str:
-    if not isinstance(paragraphs, list):
-        return ''
-    lines: list[str] = []
-    for paragraph in paragraphs:
-        if not isinstance(paragraph, list):
-            continue
-        parts: list[str] = []
-        for element in paragraph:
-            if not isinstance(element, dict):
-                continue
-            tag = str(element.get('tag') or '')
-            if tag in {'text', 'a', 'md'}:
-                parts.append(str(element.get('text') or ''))
-            elif tag == 'at':
-                parts.append(str(element.get('user_name') or ''))
-        line = ''.join(parts).strip()
-        if line:
-            lines.append(line)
-    return '\n'.join(lines)
 
 
 class _WorkspaceFeishuChannel(FeishuChannel):
@@ -439,6 +412,7 @@ class _DurableFeishuChannel(_WorkspaceFeishuChannel):
                     message_type,
                     str(getattr(message, 'content', '') or ''),
                 ),
+                message_type=message_type,
             )
         )
 
@@ -690,6 +664,14 @@ class _LarkCardReplyStream(ReplyStream):
                             card_id,
                             sequence + 1,
                         )
+                        await self._replace_message_card(
+                            result.message_id,
+                            self._message_snapshot_card(
+                                snapshot,
+                                finished=True,
+                                aborted=True,
+                            ),
+                        )
                         return result
                     sequence = await self._update_element(
                         card_id,
@@ -722,6 +704,14 @@ class _LarkCardReplyStream(ReplyStream):
                         await self._finish_streaming_card(
                             card_id,
                             sequence + 1,
+                        )
+                        await self._replace_message_card(
+                            result.message_id,
+                            self._message_snapshot_card(
+                                snapshot,
+                                finished=True,
+                                aborted=True,
+                            ),
                         )
                         return result
                     final_text = str(value or snapshot.answer)
@@ -887,7 +877,18 @@ class _LarkCardReplyStream(ReplyStream):
                         self.message_id,
                         self._message_update_card(card),
                     )
-                    await self._finish_message_stream()
+                else:
+                    await self._replace_message_card(
+                        self.message_id,
+                        self._message_update_card(
+                            self._message_snapshot_card(
+                                snapshot,
+                                finished=True,
+                                aborted=True,
+                            )
+                        ),
+                    )
+                await self._finish_message_stream()
                 return result
             if kind is _STREAM_FINISH:
                 final_snapshot = CoreStreamUpdate(
@@ -905,7 +906,18 @@ class _LarkCardReplyStream(ReplyStream):
                         self.message_id,
                         self._message_update_card(card),
                     )
-                    await self._finish_message_stream()
+                else:
+                    await self._replace_message_card(
+                        self.message_id,
+                        self._message_update_card(
+                            self._message_snapshot_card(
+                                final_snapshot,
+                                finished=True,
+                                aborted=True,
+                            )
+                        ),
+                    )
+                await self._finish_message_stream()
                 return result
             if pause_for_interaction:
                 await self._finish_message_stream()
@@ -1231,7 +1243,7 @@ class LarkChannelClient:
             ),
             policy=PolicyConfig(
                 dm_policy='open',
-                group_policy='open',
+                group_policy='disabled',
                 require_mention=False,
             ),
             safety=SafetyConfig(
@@ -1256,7 +1268,13 @@ class LarkChannelClient:
                 chunk_mode='none',
                 retry=RetryConfig(max_attempts=1),
             ),
-            security=SecurityConfig(mode='audit'),
+            security=SecurityConfig(
+                mode='strict',
+                max_ws_fragment_parts=64,
+                max_ws_fragment_bytes=16 * 1024 * 1024,
+                max_concurrent_ws_handlers=32,
+                resource_overflow_policy='drop',
+            ),
         )
         if on_message is not None:
             channel_kwargs['on_durable_message'] = on_message

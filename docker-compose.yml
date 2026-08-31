@@ -41,10 +41,18 @@ x-proxy-env: &proxy-env
 x-core-env: &core-env
   ACL_DB_DRIVER: postgres
   ACL_DB_DSN: "host=db user=root password=123456 dbname=core port=5432 sslmode=disable TimeZone=UTC"
+  # Local development may execute a dev migration that is later removed from
+  # its branch. Reconcile only unknown history in the latest open dev release;
+  # production deployments should leave this unset/false.
+  MIGRATION_RECONCILE_UNKNOWN_DEV_HISTORY: ${MIGRATION_RECONCILE_UNKNOWN_DEV_HISTORY:-true}
   LAZYMIND_PREFERENCE_INDEX_MAX_ITEMS: ${LAZYMIND_PREFERENCE_INDEX_MAX_ITEMS:-100}
   LAZYMIND_REDIS_URL: redis://test:123456@redis:6379/0
   LAZYMIND_UPLOAD_ROOT: /var/lib/lazymind/uploads
   LAZYMIND_UPLOAD_TEXT_UTF8_CONVERT_ENABLED: ${LAZYMIND_UPLOAD_TEXT_UTF8_CONVERT_ENABLED:-true}
+  LAZYMIND_HISTORY_INJECTION_ENABLED: ${LAZYMIND_HISTORY_INJECTION_ENABLED:-true}
+  LAZYMIND_HISTORY_INJECTION_ROOT: /var/lib/lazymind/uploads/.history-injection/bundles
+  LAZYMIND_BOOTSTRAP_ADMIN_USERNAME: ${LAZYMIND_BOOTSTRAP_ADMIN_USERNAME:-admin}
+  LAZYMIND_BOOTSTRAP_ADMIN_PASSWORD: ${LAZYMIND_BOOTSTRAP_ADMIN_PASSWORD:-admin}
   LAZYMIND_PUBLIC_BASE_URL: http://localhost:8000/api/core
   LAZYMIND_FILE_URL_SIGN_SECRET: changeme-in-production
   LAZYMIND_FILE_URL_EXPIRE_SECONDS: "3600"
@@ -88,6 +96,7 @@ x-core-db-conn: &core-db-conn
   LAZYMIND_CORE_DATABASE_URL: ${LAZYMIND_CORE_DATABASE_URL:-postgresql+psycopg://root:123456@db:5432/core}
 
 x-ocr-env: &ocr-env
+  # Local MinerU used by DynamicPDFReader only when frontend OCR is unset.
   LAZYMIND_OCR_SERVER_URL: http://mineru:8000
   LAZYMIND_MINERU_BACKEND: ${LAZYMIND_MINERU_BACKEND:-pipeline}
   LAZYLLM_MINERU_BACKEND: ${LAZYMIND_MINERU_BACKEND:-pipeline}
@@ -110,6 +119,19 @@ x-cache-env: &cache-env
 
 services:
 
+  skill-bundler:
+    profiles: ["tools"]
+    build:
+      network: host
+      context: .
+      dockerfile: backend/core/Dockerfile
+      target: skill-bundler
+      args:
+        <<: *mirror-args
+    volumes:
+      - ./skills:/workspace/skills
+      - ./workflows:/workspace/workflows:ro
+
   kong:
     image: ${LAZYMIND_IMAGE_MIRROR:-registry.cn-hangzhou.aliyuncs.com}/lazyllm/lazymind-kong:${LAZYMIND_IMAGE_TAG:-latest}
     build:
@@ -124,6 +146,7 @@ services:
       KONG_PROXY_ACCESS_LOG: /dev/stdout
       KONG_PROXY_ERROR_LOG: /dev/stderr
       KONG_PLUGINS: bundled,rbac-auth
+      KONG_NGINX_WORKER_PROCESSES: "${KONG_NGINX_WORKER_PROCESSES:-4}"
     volumes:
       - ./kong.yml:/kong/kong.yml
       - ./kong/plugins/rbac-auth:/usr/local/share/lua/5.1/kong/plugins/rbac-auth
@@ -308,6 +331,7 @@ services:
       <<: *proxy-env
     volumes:
       - channel-gateway-data:/var/lib/lazymind/channel-gateway
+      - ./data/core/uploads:/var/lib/lazymind/uploads
     healthcheck:
       test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8085/readyz')\" || exit 1"]
       interval: 10s
@@ -344,6 +368,30 @@ services:
       timeout: 5s
       retries: 3
 
+  # Reuse the Chat/algorithm runtime as a one-shot initializer. It checks the
+  # persisted Core PostgreSQL database first and only downloads the release
+  # package when at least one configured sample conversation is missing.
+  history-injection-init:
+    image: ${LAZYMIND_IMAGE_MIRROR:-registry.cn-hangzhou.aliyuncs.com}/lazyllm/lazymind-algorithm:${LAZYMIND_IMAGE_TAG:-latest}
+    restart: "no"
+    command: ["python", "/opt/lazymind-bootstrap/prepare_history_injection.py"]
+    environment:
+      <<: *proxy-env
+      ACL_DB_DSN: "host=db user=root password=123456 dbname=core port=5432 sslmode=disable"
+      LAZYMIND_HISTORY_INJECTION_ENABLED: ${LAZYMIND_HISTORY_INJECTION_ENABLED:-true}
+      LAZYMIND_HISTORY_INJECTION_CONFIG: /opt/lazymind-bootstrap/history-injection-package.json
+      LAZYMIND_HISTORY_INJECTION_CACHE_ROOT: /var/lib/lazymind/uploads/.history-injection
+      LAZYMIND_HISTORY_INJECTION_ROOT: /var/lib/lazymind/uploads/.history-injection/bundles
+    volumes:
+      - ./data/core/uploads:/var/lib/lazymind/uploads
+      - ./scripts/prepare_history_injection.py:/opt/lazymind-bootstrap/prepare_history_injection.py:ro
+      - ./desktop/history-injection-package.json:/opt/lazymind-bootstrap/history-injection-package.json:ro
+    depends_on:
+      db:
+        condition: service_healthy
+      db-bootstrap:
+        condition: service_completed_successfully
+
   core:
     image: ${LAZYMIND_IMAGE_MIRROR:-registry.cn-hangzhou.aliyuncs.com}/lazyllm/lazymind-core:${LAZYMIND_IMAGE_TAG:-latest}
     build:
@@ -357,7 +405,7 @@ services:
       - ./data/evo:/var/lib/lazymind/evo
       - ./data/core/uploads:/var/lib/lazymind/uploads
       - ./data/subagent:/data/subagent
-      - ./skills:/skills:ro
+      - ./skills/.runtime:/skills/.runtime:ro
     expose:
       - "8000"
     extra_hosts:
@@ -386,10 +434,16 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
+      # A first install may import several large portable history bundles
+      # before Core starts listening. Failures during this window are startup
+      # progress, not an unhealthy steady-state service.
+      start_period: 180s
     depends_on:
       db:
         condition: service_healthy
       db-bootstrap:
+        condition: service_completed_successfully
+      history-injection-init:
         condition: service_completed_successfully
       auth-service:
         condition: service_healthy
@@ -403,7 +457,7 @@ services:
     volumes:
       - ./backend/core:/app
       - ./data/core/uploads:/var/lib/lazymind/uploads
-      - ./skills:/skills:ro
+      - ./skills/.runtime:/skills/.runtime:ro
     environment:
       <<: *core-env
     depends_on:
@@ -430,6 +484,7 @@ services:
       - "80"
     volumes:
       - ./workflows:/usr/share/nginx/html/workflows:ro
+      - ./skills/.runtime:/skills/.runtime:ro
     depends_on:
       kong:
         condition: service_started
@@ -486,7 +541,7 @@ services:
           - doc-server
 
   # ---------- Algorithm stack: MinerU/PaddleOCR -> Processor (server + worker) <-> Parsing (Document) <- Chat ----------
-  # Base image (lazyllm[rag]==1.2.2) is shared; mineru extra/backend are configured by env.
+  # The shared base image uses the LazyLLM version pinned in LAZYLLM_VERSION.
   mineru:
     profiles:
       - mineru
@@ -574,13 +629,6 @@ services:
 
   lazyllm-parse-server:
     image: ${LAZYMIND_IMAGE_MIRROR:-registry.cn-hangzhou.aliyuncs.com}/lazyllm/lazymind-algorithm:${LAZYMIND_IMAGE_TAG:-latest}
-    build:
-      network: host
-      context: .
-      dockerfile: algorithm/Dockerfile
-      target: algorithm
-      args:
-        <<: *mirror-args
     extra_hosts:
       - "host.docker.internal:host-gateway"
     expose:
@@ -615,13 +663,6 @@ services:
 
   lazyllm-parse-worker:
     image: ${LAZYMIND_IMAGE_MIRROR:-registry.cn-hangzhou.aliyuncs.com}/lazyllm/lazymind-algorithm:${LAZYMIND_IMAGE_TAG:-latest}
-    build:
-      network: host
-      context: .
-      dockerfile: algorithm/Dockerfile
-      target: algorithm
-      args:
-        <<: *mirror-args
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
@@ -708,16 +749,43 @@ services:
         aliases:
           - parsing
 
+  # Editable HTML→PPTX export. Opt in with LAZYMIND_OUTPUT_EDITABLE_PPT=true.
+  ppt-export:
+    profiles:
+      - editable-ppt
+    image: ${PPT_PLAYWRIGHT_IMAGE:-mcr.microsoft.com/playwright:v1.58.2-noble}
+    restart: unless-stopped
+    working_dir: /export
+    volumes:
+      - ./workflows/ppt-workflow/runtime/scripts/export_pptx:/export
+      - ppt-export-node-modules:/export/node_modules
+      - ./data/subagent:/data/subagent
+    environment:
+      PORT: "8099"
+    command:
+      - bash
+      - -lc
+      - |
+        set -euo pipefail
+        if [[ ! -d node_modules/pptxgenjs || ! -d node_modules/playwright ]] \
+          || ! node -e "const v=require('./node_modules/playwright/package.json').version; process.exit(v==='1.58.2'?0:1)"; then
+          npm install --omit=dev
+        fi
+        exec node ppt_export_http_server.mjs
+    expose:
+      - "8099"
+    ports:
+      - "${PPT_EXPORT_HOST_PORT:-8099}:8099"
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:8099/health']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
   chat:
     image: ${LAZYMIND_IMAGE_MIRROR:-registry.cn-hangzhou.aliyuncs.com}/lazyllm/lazymind-algorithm:${LAZYMIND_IMAGE_TAG:-latest}
     restart: unless-stopped
-    build:
-      network: host
-      context: .
-      dockerfile: algorithm/Dockerfile
-      target: algorithm
-      args:
-        <<: *mirror-args
     expose:
       - "8046"
     volumes:
@@ -751,7 +819,9 @@ services:
       LAZYMIND_SEGMENT_STORE_PASSWORD: ${LAZYMIND_SEGMENT_STORE_PASSWORD:-LazyRAG_OpenSearch123!}
       LAZYMIND_SHARED_UPLOAD_DIR: /var/lib/lazymind/uploads
       LAZYMIND_MOUNT_BASE_DIR: /var/lib/lazymind/uploads
-      LAZYMIND_AGENTIC_WORKSPACE: /tmp/.lazyllm_rag/agent_workspace
+      # Same root as SUBAGENT_WORKSPACE. chat_agent_workspace() adds chat-artifacts/<user>/<conv>/,
+      # so unpublished working files and tool_spills persist next to published artifacts.
+      LAZYMIND_AGENTIC_WORKSPACE: /data/subagent
       LAZYMIND_SUBAGENT_WORKSPACE: /data/subagent
       LAZYMIND_USE_INNER_MODEL: "true"
       LAZYMIND_MAX_CONCURRENCY: ${LAZYMIND_MAX_CONCURRENCY:-10}
@@ -777,6 +847,18 @@ services:
       LAZYMIND_MODEL_CONFIG_PATH: ${LAZYMIND_MODEL_CONFIG_PATH:-dynamic}
       LAZYMIND_CORE_SERVICE_URL: http://core:8000
       LAZYMIND_WORD_GROUP_APPLY_URL: ""
+      # Context compression (code default ON). Local .env may set false.
+      # Override in .env: LAZYMIND_CONTEXT_COMPRESSION_ENABLED=false
+      LAZYMIND_CONTEXT_COMPRESSION_ENABLED: ${LAZYMIND_CONTEXT_COMPRESSION_ENABLED:-true}
+      # LLM summary compression after deterministic prune (code default ON).
+      LAZYMIND_CONTEXT_SUMMARY_COMPRESSION_ENABLED: ${LAZYMIND_CONTEXT_SUMMARY_COMPRESSION_ENABLED:-true}
+      LAZYMIND_CONTEXT_SUMMARY_KEEP_RECENT_RATIO: ${LAZYMIND_CONTEXT_SUMMARY_KEEP_RECENT_RATIO:-0.10}
+      LAZYMIND_CONTEXT_SUMMARY_MIN_RECENT_USER_TURNS: ${LAZYMIND_CONTEXT_SUMMARY_MIN_RECENT_USER_TURNS:-1}
+      # Optional agent-lab runtime JSONL (turns/tools/file_read/harness/prune/summary). Empty = disabled.
+      # Example: LAZYMIND_AGENT_LAB_EVENT_PATH=/var/lib/lazymind/agent-lab/runtime/events.jsonl
+      LAZYMIND_AGENT_LAB_EVENT_PATH: ${LAZYMIND_AGENT_LAB_EVENT_PATH:-}
+      # Deprecated alias; prefer LAZYMIND_AGENT_LAB_EVENT_PATH.
+      LAZYMIND_CONTEXT_COMPRESSION_EVENT_PATH: ${LAZYMIND_CONTEXT_COMPRESSION_EVENT_PATH:-}
       LAZYMIND_ENABLE_ROUTER: ${LAZYMIND_ENABLE_ROUTER:-true}
       LAZYMIND_ROUTER_PORT_POOL_START: 18000
       LAZYMIND_ROUTER_PORT_POOL_END: 18999
@@ -784,6 +866,8 @@ services:
       LAZYMIND_ROUTER_DEFAULT_ALGO_PATH: /opt/lazymind/chat
       LAZYMIND_ROUTER_DEFAULT_INSTANCE_COUNT: 1
       LAZYMIND_WORKFLOWS_DIR: /app/workflows
+      LAZYMIND_OUTPUT_EDITABLE_PPT: ${LAZYMIND_OUTPUT_EDITABLE_PPT:-false}
+      LAZYMIND_PPT_EXPORT_URL: ${LAZYMIND_PPT_EXPORT_URL:-http://ppt-export:8099}
       <<: [*runtime-home, *trace-config, *proxy-env, *db-conn, *core-db-conn, *llm-api-keys, *upload-paths, *ocr-env, *cache-env]
     command: ["python", "-m", "lazymind.router.app", "--port", "8046"]
     depends_on:
@@ -795,6 +879,9 @@ services:
         condition: service_healthy
       lazyllm-parse-worker:
         condition: service_healthy
+      ppt-export:
+        condition: service_started
+        required: false
 
   evo-api:
     init: true
@@ -971,4 +1058,5 @@ volumes:
   opensearch-data:
   sqlite-data:
   evo-data:
+  ppt-export-node-modules:
   channel-gateway-data:

@@ -58,6 +58,7 @@ func (c *FeishuConnector) currentLevelSearch(ctx context.Context, token, keyword
 	roots := searchRoots(req)
 	matches := make([]Object, 0, req.PageSize)
 	seenObjects := map[string]struct{}{}
+	seenScopes := map[string]struct{}{}
 	seenMatchCount := 0
 	for len(roots) > 0 {
 		if err := ctx.Err(); err != nil {
@@ -65,6 +66,11 @@ func (c *FeishuConnector) currentLevelSearch(ctx context.Context, token, keyword
 		}
 		root := roots[0]
 		roots = roots[1:]
+		scopeKey := string(root.targetType) + "\x00" + root.targetRef + "\x00" + root.nodeRef
+		if _, ok := seenScopes[scopeKey]; ok {
+			continue
+		}
+		seenScopes[scopeKey] = struct{}{}
 		cursor := ""
 		for {
 			page, err := c.listProviderPageForSearch(ctx, token, root, cursor, providerPageSize(root.targetType, root.nodeRef, c.Spec().MaxPageSize))
@@ -86,6 +92,11 @@ func (c *FeishuConnector) currentLevelSearch(ctx context.Context, token, keyword
 						}
 					}
 				}
+				if req.Recursive && item.HasChildren {
+					if child, ok := recursiveSearchRoot(item); ok {
+						roots = append(roots, child)
+					}
+				}
 			}
 			if !page.HasMore {
 				break
@@ -97,6 +108,18 @@ func (c *FeishuConnector) currentLevelSearch(ctx context.Context, token, keyword
 		}
 	}
 	return ObjectPage{Items: matches}, nil
+}
+
+func recursiveSearchRoot(item Object) (searchRoot, bool) {
+	ref := targetRefFor(item)
+	switch item.Kind {
+	case ObjectKindDriveFolder:
+		return searchRoot{targetType: TargetTypeDriveFolder, targetRef: ref, nodeRef: ref}, true
+	case ObjectKindWikiSpace, ObjectKindWikiNode:
+		return searchRoot{targetType: TargetTypeWikiNode, targetRef: ref, nodeRef: ref}, true
+	default:
+		return searchRoot{}, false
+	}
 }
 
 func searchRoots(req connector.SearchRequest) []searchRoot {

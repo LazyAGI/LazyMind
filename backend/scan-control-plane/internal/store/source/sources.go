@@ -2,6 +2,7 @@ package source
 
 import (
 	"context"
+	"database/sql/driver"
 	"errors"
 	"strings"
 	"time"
@@ -43,39 +44,119 @@ func (r *SQLRepository) ListSources(ctx context.Context, req SourceListRequest) 
 	}
 
 	var rows []sourceListORMRow
-	err := applySourceListFilters(db.Table("sources AS s").Where("s.deleted_at IS NULL"), req).
+	listQuery := applySourceListFilters(db.Table("sources AS s").Where("s.deleted_at IS NULL"), req).
 		Select(sourceListSelectSQL()).
 		Joins("LEFT JOIN source_bindings b ON b.source_id = s.source_id AND b.status <> ?", "DELETING").
 		Group("s.source_id").
-		Order("s.updated_at DESC, s.source_id").
-		Limit(pageSize).
-		Offset(offset).
-		Scan(&rows).Error
+		Order(sourceListOrderClause(req.OrderBy))
+	if !isDatasetUsageOrder(req.OrderBy) {
+		listQuery = listQuery.Limit(pageSize).Offset(offset)
+	}
+	err := listQuery.Scan(&rows).Error
 	if err != nil {
 		return nil, 0, mapSQLConstraint(err)
 	}
 	records := make([]SourceListRecord, 0, len(rows))
 	for _, row := range rows {
-		records = append(records, SourceListRecord{Source: sourceFromORM(row.source()), BindingCount: row.BindingCount})
+		records = append(records, SourceListRecord{
+			Source:        sourceFromORM(row.source()),
+			BindingCount:  row.BindingCount,
+			LastSuccessAt: row.LastSuccessAt.pointer(),
+		})
 	}
 	return records, int(total), nil
 }
 
+func isDatasetUsageOrder(orderBy string) bool {
+	return orderBy == "most_used" || orderBy == "recent_used"
+}
+
+func sourceListOrderClause(orderBy string) string {
+	switch strings.TrimSpace(orderBy) {
+	case "latest_updated":
+		return "COALESCE((SELECT MAX(csc.last_success_at) FROM source_sync_checkpoints csc WHERE csc.source_id = s.source_id), s.updated_at) DESC, s.source_id"
+	case "most_used", "recent_used":
+		return "COALESCE((SELECT MAX(csc.last_success_at) FROM source_sync_checkpoints csc WHERE csc.source_id = s.source_id), s.updated_at) DESC, s.source_id"
+	default:
+		return "s.updated_at DESC, s.source_id"
+	}
+}
+
 type sourceListORMRow struct {
-	SourceID          string     `gorm:"column:source_id"`
-	TenantID          string     `gorm:"column:tenant_id"`
-	CreatedBy         string     `gorm:"column:created_by"`
-	Name              string     `gorm:"column:name"`
-	DatasetID         string     `gorm:"column:dataset_id"`
-	Status            string     `gorm:"column:status"`
-	SourceOptions     JSON       `gorm:"column:source_options_json;type:jsonb"`
-	IncludeExtensions JSON       `gorm:"column:include_extensions_json;type:jsonb"`
-	ExcludeExtensions JSON       `gorm:"column:exclude_extensions_json;type:jsonb"`
-	ConfigVersion     int64      `gorm:"column:config_version"`
-	DeletedAt         *time.Time `gorm:"column:deleted_at"`
-	CreatedAt         time.Time  `gorm:"column:created_at"`
-	UpdatedAt         time.Time  `gorm:"column:updated_at"`
-	BindingCount      int        `gorm:"column:binding_count"`
+	SourceID          string         `gorm:"column:source_id"`
+	TenantID          string         `gorm:"column:tenant_id"`
+	CreatedBy         string         `gorm:"column:created_by"`
+	Name              string         `gorm:"column:name"`
+	DatasetID         string         `gorm:"column:dataset_id"`
+	Status            string         `gorm:"column:status"`
+	SourceOptions     JSON           `gorm:"column:source_options_json;type:jsonb"`
+	IncludeExtensions JSON           `gorm:"column:include_extensions_json;type:jsonb"`
+	ExcludeExtensions JSON           `gorm:"column:exclude_extensions_json;type:jsonb"`
+	ConfigVersion     int64          `gorm:"column:config_version"`
+	DeletedAt         *time.Time     `gorm:"column:deleted_at"`
+	CreatedAt         time.Time      `gorm:"column:created_at"`
+	UpdatedAt         time.Time      `gorm:"column:updated_at"`
+	BindingCount      int            `gorm:"column:binding_count"`
+	LastSuccessAt     sourceListTime `gorm:"column:last_success_at"`
+}
+
+type sourceListTime struct {
+	Time  time.Time
+	Valid bool
+}
+
+func (value sourceListTime) Value() (driver.Value, error) {
+	if !value.Valid {
+		return nil, nil
+	}
+	return value.Time, nil
+}
+
+func (value *sourceListTime) Scan(raw any) error {
+	value.Time = time.Time{}
+	value.Valid = false
+	switch typed := raw.(type) {
+	case nil:
+		return nil
+	case time.Time:
+		value.Time = typed
+		value.Valid = true
+		return nil
+	case string:
+		return value.scanText(typed)
+	case []byte:
+		return value.scanText(string(typed))
+	default:
+		return errors.New("invalid time token")
+	}
+}
+
+func (value *sourceListTime) scanText(raw string) error {
+	text := strings.TrimSpace(raw)
+	if text == "" {
+		return nil
+	}
+	for _, layout := range []string{
+		time.RFC3339Nano,
+		"2006-01-02 15:04:05.999999999Z07:00",
+		"2006-01-02 15:04:05.999999999",
+	} {
+		parsed, err := time.Parse(layout, text)
+		if err == nil {
+			value.Time = parsed
+			value.Valid = true
+			return nil
+		}
+	}
+	return errors.New("invalid time token")
+}
+
+func (value sourceListTime) pointer() *time.Time {
+	if !value.Valid {
+		return nil
+	}
+	parsed := value.Time
+	return &parsed
 }
 
 func (row sourceListORMRow) source() ormSource {
@@ -111,6 +192,7 @@ func sourceListSelectSQL() string {
 		"s.deleted_at AS deleted_at",
 		"s.created_at AS created_at",
 		"s.updated_at AS updated_at",
+		"(SELECT MAX(csc.last_success_at) FROM source_sync_checkpoints csc WHERE csc.source_id = s.source_id) AS last_success_at",
 		"COUNT(b.binding_id) AS binding_count",
 	}, ", ")
 }

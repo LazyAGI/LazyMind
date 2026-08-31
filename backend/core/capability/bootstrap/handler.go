@@ -7,6 +7,7 @@ import (
 
 	"lazymind/core/capability"
 	"lazymind/core/capability/internal/coreadapter"
+	"lazymind/core/capability/internal/scanadapter"
 	mcpadapter "lazymind/core/capability/mcp"
 )
 
@@ -18,9 +19,22 @@ type Config struct {
 	KnowledgeSearchBaseURL    string
 	InternalServiceToken      string
 	KnowledgeSearchHTTPClient *http.Client
+	ScanBaseURL               string
+}
+
+type Runtime struct {
+	MCP http.Handler
 }
 
 func NewHandler(config Config) (http.Handler, error) {
+	runtime, err := NewRuntime(config)
+	if err != nil {
+		return nil, err
+	}
+	return runtime.MCP, nil
+}
+
+func NewRuntime(config Config) (*Runtime, error) {
 	if config.DB == nil {
 		return nil, capability.NewError(capability.Internal, "capability.bootstrap", "database is required", false, nil)
 	}
@@ -46,8 +60,17 @@ func NewHandler(config Config) (http.Handler, error) {
 	if err != nil {
 		return nil, err
 	}
+	cloud, err := scanadapter.NewCloudDocumentReader(
+		config.ScanBaseURL,
+		config.AuthServiceBaseURL,
+		config.InternalServiceToken,
+		0,
+	)
+	if err != nil {
+		return nil, err
+	}
 	service, err := capability.NewService(capability.Dependencies{
-		Skills: skills, Knowledge: knowledge, Documents: documents, Search: search,
+		Skills: skills, Knowledge: knowledge, Documents: documents, Search: search, Cloud: cloud,
 	})
 	if err != nil {
 		return nil, err
@@ -58,5 +81,9 @@ func NewHandler(config Config) (http.Handler, error) {
 	if err != nil {
 		return nil, err
 	}
-	return mcpadapter.NewHandler(service, mcpadapter.HandlerConfig{Verifier: verifier})
+	handler, err := mcpadapter.NewHandler(service, mcpadapter.HandlerConfig{Verifier: verifier})
+	if err != nil {
+		return nil, err
+	}
+	return &Runtime{MCP: handler}, nil
 }

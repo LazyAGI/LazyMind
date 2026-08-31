@@ -59,6 +59,7 @@ slots:                               # artifact 数据槽完整定义（list 格
     type: text                       # artifact 类型：text | image | file | json
     cardinality: single              # single（单值，重写覆盖）| list（追加或按 index 更新）
     external: true                   # 由用户/session 提供；否则必须有且仅有一个 step producer
+    required: false                  # external 输入是否在创建 Session 前必填；默认 true
 
   - id: my_image_list
     label: Image Collection
@@ -210,6 +211,7 @@ steps:
 | `steps[step_id].prompt` | 是 | SubAgent 执行指令，支持 `{{...}}` 占位符 |
 | `steps[step_id].tools` | 否 | 自定义工具名列表（框架工具自动注入，无需写）|
 | `steps[step_id].inputs` | 否 | 有序输入列表；每项通过 `required` 区分必须/可选，必须输入可声明一层 `alternatives` |
+| `steps[step_id].inputs[].transport` | 否 | `auto`（默认）/ `value` / `path` / `reference`，控制该步骤收到素材时的物理传输形态 |
 | `steps[step_id].outputs[].material` | 条件 | 产出的素材 id |
 | `steps[step_id].acceptance_criteria` | 否 | 步骤质量标准，供 DriverAgent 评判参考 |
 | `steps[step_id].route` | 否 | `all`（默认）/ `choice`（条件路由）|
@@ -233,6 +235,15 @@ steps:
 **约束**：`{{<slot_id>}}` 只能引用该步骤 `inputs` 中声明的主素材或替代素材。
 
 输入固定为有序列表。`required: true` 的各项之间是 AND；该项的主素材与 `alternatives` 之间是 OR；`required: false` 不参与 Ready 判断且不能配置替代素材。素材 ID 全局唯一，因此不提供 `bind_as`。步骤声明的所有 outputs 均视为必产，前端不提供可选产出配置。
+
+`transport` 与 slot 的逻辑 `type` 相互独立，并且只作用于当前消费步骤：
+
+- `auto` 保持宿主默认行为：`text/json` 传值，公共图片保留引用，二进制图片和 `file` 物化为路径；
+- `value` 将标量素材解包为文本或 JSON 值；
+- `path` 将素材物化到当前 Attempt 的隔离输入目录并传递本地路径；
+- `reference` 保留图片的 durable reference 对象。
+
+同一输入声明了 `alternatives` 时，主素材与所有替代素材使用相同的 `transport`。
 
 ---
 
@@ -419,6 +430,34 @@ ui:
 **兼容性**
 
 旧格式（数组 `[{slot, weight}]` 或 `[[{slot, weight}]]`）在解析时自动迁移为格式 C，无需手动转换。
+
+**声明式 HTML 页面与导出 action**
+
+通用渲染器不会根据 slot id 或素材内容猜测控件类型。完整 HTML 页面必须声明
+`ui.slots.<slot>.widgetType: html-slide`。导出能力声明在对应 tab 上：
+
+```yaml
+ui:
+  slots:
+    deck_pages:
+      widgetType: html-slide
+  tabs:
+    - id: deck
+      layout: composite
+      composite_tab_position: left
+      slots: [{id: deck_pages}, {id: speaker_notes}]
+      actions:
+        - id: export_deck
+          type: export
+          provider: html-presentation
+          inputs: {pages: deck_pages, notes: speaker_notes}
+          formats: [raster-pptx, pdf, editable-pptx]
+          alignment: sort_order
+```
+
+`alignment: sort_order` 表示所有映射的素材必须是 `ordered: true` 的 list slot，
+并按相同 `sort_order` 对齐。通用 composite 只负责布局、分页和联动重排；格式选择、
+依赖检测、文件命名和转换由 exporter provider 负责。
 
 
 ```yaml

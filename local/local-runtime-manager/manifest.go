@@ -23,17 +23,20 @@ type RuntimeManifest struct {
 }
 
 type RuntimeManifestFeatures struct {
-	TrustedLocalMode bool `json:"trustedLocalMode,omitempty"`
+	TrustedLocalMode      bool `json:"trustedLocalMode,omitempty"`
+	OfflineBuiltinSkills  bool `json:"offlineBuiltinSkills,omitempty"`
+	OfflineFeaturedSkills bool `json:"offlineFeaturedSkills,omitempty"`
 }
 
 type RuntimeManifestPaths struct {
-	AppRoot            string `json:"appRoot"`
-	FrontendDist       string `json:"frontendDist"`
-	PythonRuntime      string `json:"pythonRuntime"`
-	AuthServiceVenv    string `json:"authServiceVenv"`
-	ChannelGatewayVenv string `json:"channelGatewayVenv"`
-	AlgorithmVenv      string `json:"algorithmVenv"`
-	LocalProxyConfig   string `json:"localProxyConfig"`
+	AppRoot                 string `json:"appRoot"`
+	FrontendDist            string `json:"frontendDist"`
+	PythonRuntime           string `json:"pythonRuntime"`
+	AuthServiceVenv         string `json:"authServiceVenv"`
+	ChannelGatewayVenv      string `json:"channelGatewayVenv"`
+	AlgorithmVenv           string `json:"algorithmVenv"`
+	LocalProxyConfig        string `json:"localProxyConfig"`
+	HistoryInjectionArchive string `json:"historyInjectionArchive,omitempty"`
 }
 
 type ManifestService struct {

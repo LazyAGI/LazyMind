@@ -2,6 +2,8 @@ package migrate
 
 import (
 	"database/sql"
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -56,6 +58,150 @@ VALUES ('legacy-model','provider','Provider','Legacy','VLM','',CURRENT_TIMESTAMP
 		if err := db.QueryRow(`SELECT COUNT(*) FROM eval_set_shards WHERE id='eval_shard_0001'`).Scan(&shards); err != nil || shards != 1 {
 			t.Fatalf("%s eval shard seed count=%d err=%v", label, shards, err)
 		}
+	}
+}
+
+func TestFixTaskCenterWorkflowRunsMigrationBackfillsLifecycle(t *testing.T) {
+	db := openRawSQLite(t, t.TempDir()+"/task-center-workflow-runs.db")
+	if _, err := db.Exec(`
+CREATE TABLE conversations (
+  id text PRIMARY KEY,
+  display_name text,
+  create_user_id text,
+  archived_at datetime,
+  deleted_at datetime
+);
+CREATE TABLE plugin_sessions (
+  id text PRIMARY KEY,
+  conversation_id text NOT NULL,
+  plugin_id text,
+  status text NOT NULL,
+  dismissed numeric NOT NULL DEFAULT false,
+  create_user_id text,
+  created_at datetime NOT NULL,
+  updated_at datetime NOT NULL
+);
+CREATE TABLE task_center_tasks (
+  id text PRIMARY KEY,
+  user_id text NOT NULL,
+  conversation_id text NOT NULL,
+  plugin_session_id text,
+  task_type text NOT NULL,
+  title text,
+  status text NOT NULL,
+  progress_json text,
+  created_at datetime NOT NULL,
+  updated_at datetime NOT NULL,
+  finished_at datetime,
+  archived_at datetime,
+  archived_reason text NOT NULL DEFAULT ''
+);
+INSERT INTO conversations (id, display_name, create_user_id, archived_at, deleted_at) VALUES
+  ('conv-active', 'Active workflow', 'user-from-conversation', NULL, NULL),
+  ('conv-archived', 'Archived workflow', 'user-archived', '2026-08-25 12:00:00', NULL),
+  ('conv-trashed', 'Trashed workflow', 'user-trashed', '2026-08-25 11:00:00', '2026-08-25 13:00:00');
+INSERT INTO plugin_sessions
+  (id, conversation_id, plugin_id, status, dismissed, create_user_id, created_at, updated_at) VALUES
+  ('ps-active', 'conv-active', 'ppt-workflow', 'active', false, '', '2026-08-25 10:00:00', '2026-08-25 10:01:00'),
+  ('ps-archived', 'conv-archived', 'ppt-workflow', 'completed', false, 'user-session', '2026-08-25 10:00:00', '2026-08-25 10:02:00'),
+  ('ps-trashed', 'conv-trashed', 'ppt-workflow', 'waiting', false, 'user-session', '2026-08-25 10:00:00', '2026-08-25 10:03:00'),
+  ('ps-dismissed', 'conv-active', 'ppt-workflow', 'stopped', true, 'user-session', '2026-08-25 10:00:00', '2026-08-25 10:04:00'),
+  ('ps-missing', 'conv-purged', 'missing-plugin', 'failed', false, 'user-missing', '2026-08-25 10:00:00', '2026-08-25 10:05:00'),
+  ('ps-existing', 'conv-active', 'ppt-workflow', 'completed', false, 'user-session', '2026-08-25 10:00:00', '2026-08-25 10:06:00');
+INSERT INTO task_center_tasks
+  (id, user_id, conversation_id, plugin_session_id, task_type, title, status,
+   progress_json, created_at, updated_at, finished_at, archived_at, archived_reason) VALUES
+  ('existing-task', 'user-session', 'conv-active', 'ps-existing', 'plugin_run',
+   'Existing task', 'succeeded', '{}', '2026-08-25 10:00:00', '2026-08-25 10:06:00',
+   '2026-08-25 10:06:00', NULL, ''),
+  ('background-task', 'user-session', 'conv-active', NULL, 'background_chat',
+   'Background chat', 'succeeded', '{}', '2026-08-25 10:00:00', '2026-08-25 10:06:00',
+   '2026-08-25 10:06:00', NULL, '');
+`); err != nil {
+		t.Fatalf("seed task-center migration data: %v", err)
+	}
+
+	migrationDir := filepath.Join("..", "migrations", "dev_mode", "v0_3")
+	upPath := filepath.Join(migrationDir, "20260826065814_fix_task_center_workflow_runs.up.sql")
+	for attempt := 1; attempt <= 2; attempt++ {
+		execMigrationFileForDriver(t, db, upPath, "sqlite")
+	}
+
+	var workflowCount, totalCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM task_center_tasks WHERE task_type = 'workflow_run'`).Scan(&workflowCount); err != nil {
+		t.Fatalf("count workflow task rows: %v", err)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM task_center_tasks`).Scan(&totalCount); err != nil {
+		t.Fatalf("count all task rows: %v", err)
+	}
+	if workflowCount != 6 || totalCount != 7 {
+		t.Fatalf("unexpected backfill counts: workflow=%d total=%d", workflowCount, totalCount)
+	}
+
+	type taskState struct {
+		status, title, userID, archivedReason string
+		finished, archived                    bool
+	}
+	readTaskState := func(sessionID string) taskState {
+		t.Helper()
+		var state taskState
+		if err := db.QueryRow(`
+SELECT status, title, user_id, archived_reason,
+       finished_at IS NOT NULL, archived_at IS NOT NULL
+FROM task_center_tasks WHERE plugin_session_id = ?`, sessionID).Scan(
+			&state.status, &state.title, &state.userID, &state.archivedReason,
+			&state.finished, &state.archived,
+		); err != nil {
+			t.Fatalf("read task state for %s: %v", sessionID, err)
+		}
+		return state
+	}
+
+	if got := readTaskState("ps-active"); got != (taskState{
+		status: "running", title: "Active workflow", userID: "user-from-conversation",
+	}) {
+		t.Fatalf("active workflow state=%#v", got)
+	}
+	if got := readTaskState("ps-archived"); got != (taskState{
+		status: "succeeded", title: "Archived workflow", userID: "user-session",
+		archivedReason: "conversation_archive", finished: true, archived: true,
+	}) {
+		t.Fatalf("archived workflow state=%#v", got)
+	}
+	if got := readTaskState("ps-trashed"); got != (taskState{
+		status: "waiting", title: "Trashed workflow", userID: "user-session",
+		archivedReason: "conversation_trash", archived: true,
+	}) {
+		t.Fatalf("trashed workflow state=%#v", got)
+	}
+	if got := readTaskState("ps-dismissed"); got.status != "canceled" || !got.finished {
+		t.Fatalf("dismissed workflow was not backfilled: %#v", got)
+	}
+	if got := readTaskState("ps-missing"); got != (taskState{
+		status: "failed", title: "missing-plugin", userID: "user-missing",
+		archivedReason: "conversation_purged", finished: true, archived: true,
+	}) {
+		t.Fatalf("purged workflow state=%#v", got)
+	}
+	var existingID string
+	if err := db.QueryRow(`SELECT id FROM task_center_tasks WHERE plugin_session_id = 'ps-existing'`).Scan(&existingID); err != nil {
+		t.Fatalf("read existing task id: %v", err)
+	}
+	if existingID != "existing-task" {
+		t.Fatalf("existing task was duplicated or replaced: %q", existingID)
+	}
+
+	downPath := filepath.Join(migrationDir, "20260826065814_fix_task_center_workflow_runs.down.sql")
+	execMigrationFileForDriver(t, db, downPath, "sqlite")
+	var legacyWorkflowCount, backgroundCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM task_center_tasks WHERE task_type = 'plugin_run'`).Scan(&legacyWorkflowCount); err != nil {
+		t.Fatalf("count reverted plugin rows: %v", err)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM task_center_tasks WHERE task_type = 'background_chat'`).Scan(&backgroundCount); err != nil {
+		t.Fatalf("count preserved background rows: %v", err)
+	}
+	if legacyWorkflowCount != 6 || backgroundCount != 1 {
+		t.Fatalf("unexpected down migration counts: plugin=%d background=%d", legacyWorkflowCount, backgroundCount)
 	}
 }
 
@@ -157,6 +303,15 @@ func openRawSQLite(t *testing.T, dsn string) *sql.DB {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	return db
+}
+
+func sqliteIndexSQL(t *testing.T, db *sql.DB, name string) string {
+	t.Helper()
+	var ddl string
+	if err := db.QueryRow(`SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?`, name).Scan(&ddl); err != nil {
+		t.Fatalf("read SQLite index %s: %v", name, err)
+	}
+	return ddl
 }
 
 func sqliteSchemaFingerprint(t *testing.T, db *sql.DB) string {
@@ -273,6 +428,330 @@ SELECT name FROM pragma_table_info('user_ui_preferences')
 WHERE name = 'accepted_user_agreement_version'
 `).Scan(&column); err != nil {
 		t.Fatalf("existing aggregate did not apply uncovered agreement column: %v", err)
+	}
+}
+
+func TestSchedulesFeatureControlMigrationPreservesLegacyPauseState(t *testing.T) {
+	db := openRawSQLite(t, t.TempDir()+"/schedules-control.db")
+	if _, err := db.Exec(`
+CREATE TABLE user_ui_preferences (
+  user_id varchar(255) PRIMARY KEY,
+  task_center_enabled boolean NOT NULL DEFAULT true
+);
+INSERT INTO user_ui_preferences (user_id, task_center_enabled)
+VALUES ('enabled-user', true), ('paused-user', false);
+`); err != nil {
+		t.Fatalf("seed legacy preferences: %v", err)
+	}
+	migrationDir := filepath.Join("..", "migrations", "dev_mode", "v0_3")
+	execMigrationFileForDriver(t, db, filepath.Join(migrationDir, "20260825022749_add_schedules_feature_control.up.sql"), "sqlite")
+
+	for _, tc := range []struct {
+		userID string
+		want   bool
+	}{{"enabled-user", true}, {"paused-user", false}} {
+		var got bool
+		if err := db.QueryRow(`SELECT schedules_enabled FROM user_ui_preferences WHERE user_id = ?`, tc.userID).Scan(&got); err != nil {
+			t.Fatalf("read schedules control for %s: %v", tc.userID, err)
+		}
+		if got != tc.want {
+			t.Fatalf("schedules_enabled for %s=%v, want %v", tc.userID, got, tc.want)
+		}
+	}
+
+	execMigrationFileForDriver(t, db, filepath.Join(migrationDir, "20260825022749_add_schedules_feature_control.down.sql"), "sqlite")
+	var columnCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('user_ui_preferences') WHERE name = 'schedules_enabled'`).Scan(&columnCount); err != nil {
+		t.Fatalf("inspect schedules control rollback: %v", err)
+	}
+	if columnCount != 0 {
+		t.Fatal("schedules_enabled should be removed by the down migration")
+	}
+}
+
+func TestChatEntryDefaultsMigrationPreservesLegacySettings(t *testing.T) {
+	db := openRawSQLite(t, t.TempDir()+"/chat-entry-defaults.db")
+	if _, err := db.Exec(`
+CREATE TABLE user_chat_settings (
+  user_id varchar(255) PRIMARY KEY,
+  enable_workflow boolean NOT NULL DEFAULT true,
+  plugin_mode varchar(16) NOT NULL DEFAULT 'dynamic',
+  enable_subagent boolean NOT NULL DEFAULT true,
+  updated_at datetime NOT NULL
+);
+INSERT INTO user_chat_settings (user_id, enable_workflow, plugin_mode, enable_subagent, updated_at)
+VALUES ('custom-user', false, 'auto', false, CURRENT_TIMESTAMP);
+INSERT INTO user_chat_settings (user_id, enable_workflow, plugin_mode, enable_subagent, updated_at)
+VALUES ('invalid-mode-user', true, 'legacy', true, CURRENT_TIMESTAMP);
+CREATE TABLE conversations (
+  id varchar(36) PRIMARY KEY,
+  create_user_id varchar(255) NOT NULL,
+  enable_plugin boolean,
+  plugin_mode varchar(16),
+  enable_subagent boolean
+);
+INSERT INTO conversations (id, create_user_id)
+VALUES ('legacy-conversation', 'custom-user');
+INSERT INTO conversations (id, create_user_id)
+VALUES ('no-settings-conversation', 'missing-user');
+INSERT INTO conversations (id, create_user_id)
+VALUES ('invalid-mode-conversation', 'invalid-mode-user');
+INSERT INTO conversations (
+  id, create_user_id, enable_plugin, plugin_mode, enable_subagent
+) VALUES ('partial-conversation', 'custom-user', true, 'dynamic', NULL);
+`); err != nil {
+		t.Fatalf("seed legacy chat settings: %v", err)
+	}
+	migrationDir := filepath.Join("..", "migrations", "dev_mode", "v0_3")
+	migrationPath := filepath.Join(migrationDir, "20260825031307_add_chat_entry_defaults.up.sql")
+	migrationBody, err := os.ReadFile(migrationPath)
+	if err != nil {
+		t.Fatalf("read chat entry defaults migration: %v", err)
+	}
+	sqliteMigration, err := migrationSQLForDriver(string(migrationBody), "sqlite")
+	if err != nil {
+		t.Fatalf("select SQLite chat entry defaults migration: %v", err)
+	}
+	backfillMarker := "UPDATE conversations\nSET enable_plugin"
+	backfillOffset := strings.Index(sqliteMigration, backfillMarker)
+	if backfillOffset < 0 {
+		t.Fatalf("conversation policy backfill statement missing from migration")
+	}
+	if _, err := db.Exec(sqliteMigration[:backfillOffset]); err != nil {
+		t.Fatalf("run chat defaults migration through backup capture: %v", err)
+	}
+	if _, err := db.Exec(`
+INSERT INTO conversations (id, create_user_id)
+VALUES ('migration-window-conversation', 'custom-user')
+`); err != nil {
+		t.Fatalf("create migration-window conversation: %v", err)
+	}
+	if _, err := db.Exec(sqliteMigration[backfillOffset:]); err != nil {
+		t.Fatalf("finish chat defaults migration after concurrent insert: %v", err)
+	}
+
+	var quickRaw, taskRaw string
+	if err := db.QueryRow(`
+SELECT quick_question_defaults, new_task_defaults
+FROM user_chat_settings WHERE user_id = 'custom-user'
+`).Scan(&quickRaw, &taskRaw); err != nil {
+		t.Fatalf("read migrated chat defaults: %v", err)
+	}
+	var quick, task struct {
+		ThinkingDepth        string `json:"thinking_depth"`
+		ConversationSettings struct {
+			ChatExecutor   string `json:"chat_executor"`
+			EnableWorkflow bool   `json:"enable_workflow"`
+			WorkflowMode   string `json:"workflow_mode"`
+			EnableSubagent bool   `json:"enable_subagent"`
+		} `json:"conversation_settings"`
+	}
+	if err := json.Unmarshal([]byte(quickRaw), &quick); err != nil {
+		t.Fatalf("decode quick-question defaults: %v, raw=%s", err, quickRaw)
+	}
+	if err := json.Unmarshal([]byte(taskRaw), &task); err != nil {
+		t.Fatalf("decode new-task defaults: %v, raw=%s", err, taskRaw)
+	}
+	if quick.ThinkingDepth != "medium" || quick.ConversationSettings.EnableWorkflow ||
+		quick.ConversationSettings.WorkflowMode != "auto" || quick.ConversationSettings.EnableSubagent ||
+		quick.ConversationSettings.ChatExecutor != "lazymind" {
+		t.Fatalf("unexpected migrated quick-question defaults: %#v", quick)
+	}
+	if task.ThinkingDepth != "high" || task.ConversationSettings.EnableWorkflow ||
+		task.ConversationSettings.WorkflowMode != "auto" || task.ConversationSettings.EnableSubagent ||
+		task.ConversationSettings.ChatExecutor != "lazymind" {
+		t.Fatalf("unexpected migrated new-task defaults: %#v", task)
+	}
+	var conversationDepth string
+	if err := db.QueryRow(`SELECT thinking_depth FROM conversations WHERE id = 'legacy-conversation'`).Scan(&conversationDepth); err != nil {
+		t.Fatalf("read migrated conversation thinking depth: %v", err)
+	}
+	if conversationDepth != "medium" {
+		t.Fatalf("legacy conversation thinking depth=%q, want medium", conversationDepth)
+	}
+	for _, tc := range []struct {
+		id             string
+		enableWorkflow bool
+		workflowMode   string
+		enableSubagent bool
+	}{
+		{id: "legacy-conversation", enableWorkflow: false, workflowMode: "auto", enableSubagent: false},
+		{id: "no-settings-conversation", enableWorkflow: true, workflowMode: "dynamic", enableSubagent: true},
+		{id: "invalid-mode-conversation", enableWorkflow: true, workflowMode: "dynamic", enableSubagent: true},
+		{id: "partial-conversation", enableWorkflow: true, workflowMode: "dynamic", enableSubagent: false},
+	} {
+		var enableWorkflow, enableSubagent bool
+		var workflowMode string
+		if err := db.QueryRow(`
+SELECT enable_plugin, plugin_mode, enable_subagent
+FROM conversations WHERE id = ?
+`, tc.id).Scan(&enableWorkflow, &workflowMode, &enableSubagent); err != nil {
+			t.Fatalf("read migrated conversation policy for %s: %v", tc.id, err)
+		}
+		if enableWorkflow != tc.enableWorkflow || workflowMode != tc.workflowMode || enableSubagent != tc.enableSubagent {
+			t.Fatalf(
+				"conversation %s policy=(%v,%q,%v), want (%v,%q,%v)",
+				tc.id, enableWorkflow, workflowMode, enableSubagent,
+				tc.enableWorkflow, tc.workflowMode, tc.enableSubagent,
+			)
+		}
+	}
+	var backupCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM conversation_policy_snapshot_backups`).Scan(&backupCount); err != nil {
+		t.Fatalf("count conversation policy rollback masks: %v", err)
+	}
+	if backupCount != 4 {
+		t.Fatalf("conversation policy rollback mask count=%d, want 4", backupCount)
+	}
+	var windowEnableWorkflow, windowEnableSubagent sql.NullBool
+	var windowWorkflowMode sql.NullString
+	if err := db.QueryRow(`
+SELECT enable_plugin, plugin_mode, enable_subagent
+FROM conversations WHERE id = 'migration-window-conversation'
+`).Scan(&windowEnableWorkflow, &windowWorkflowMode, &windowEnableSubagent); err != nil {
+		t.Fatalf("read migration-window conversation policy: %v", err)
+	}
+	if windowEnableWorkflow.Valid || windowWorkflowMode.Valid || windowEnableSubagent.Valid {
+		t.Fatalf("unbacked migration-window conversation was backfilled: (%#v,%#v,%#v)",
+			windowEnableWorkflow, windowWorkflowMode, windowEnableSubagent)
+	}
+	if _, err := db.Exec(`
+INSERT INTO conversations (
+  id, create_user_id, enable_plugin, plugin_mode, enable_subagent
+) VALUES ('post-migration-conversation', 'custom-user', false, 'auto', false)
+`); err != nil {
+		t.Fatalf("create post-migration conversation: %v", err)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM conversation_policy_snapshot_backups`).Scan(&backupCount); err != nil {
+		t.Fatalf("recount conversation policy rollback masks: %v", err)
+	}
+	if backupCount != 4 {
+		t.Fatalf("post-migration conversation was added to rollback masks: count=%d", backupCount)
+	}
+
+	execMigrationFileForDriver(t, db, filepath.Join(migrationDir, "20260825031307_add_chat_entry_defaults.down.sql"), "sqlite")
+	for _, column := range []string{"quick_question_defaults", "new_task_defaults"} {
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('user_chat_settings') WHERE name = ?`, column).Scan(&count); err != nil {
+			t.Fatalf("inspect %s rollback: %v", column, err)
+		}
+		if count != 0 {
+			t.Fatalf("%s should be removed by the down migration", column)
+		}
+	}
+	var conversationColumnCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('conversations') WHERE name = 'thinking_depth'`).Scan(&conversationColumnCount); err != nil {
+		t.Fatalf("inspect conversation thinking depth rollback: %v", err)
+	}
+	if conversationColumnCount != 0 {
+		t.Fatal("conversations.thinking_depth should be removed by the down migration")
+	}
+	for _, tc := range []struct {
+		id                               string
+		enableValid, modeValid, subValid bool
+		enableValue, subValue            bool
+		modeValue                        string
+	}{
+		{id: "legacy-conversation"},
+		{id: "no-settings-conversation"},
+		{id: "invalid-mode-conversation"},
+		{id: "migration-window-conversation"},
+		{id: "partial-conversation", enableValid: true, modeValid: true, enableValue: true, modeValue: "dynamic"},
+		{id: "post-migration-conversation", enableValid: true, modeValid: true, subValid: true, modeValue: "auto"},
+	} {
+		var enableWorkflow, enableSubagent sql.NullBool
+		var workflowMode sql.NullString
+		if err := db.QueryRow(`
+SELECT enable_plugin, plugin_mode, enable_subagent
+FROM conversations WHERE id = ?
+`, tc.id).Scan(&enableWorkflow, &workflowMode, &enableSubagent); err != nil {
+			t.Fatalf("read rolled-back conversation policy for %s: %v", tc.id, err)
+		}
+		if enableWorkflow.Valid != tc.enableValid || workflowMode.Valid != tc.modeValid || enableSubagent.Valid != tc.subValid ||
+			(enableWorkflow.Valid && enableWorkflow.Bool != tc.enableValue) ||
+			(workflowMode.Valid && workflowMode.String != tc.modeValue) ||
+			(enableSubagent.Valid && enableSubagent.Bool != tc.subValue) {
+			t.Fatalf("rolled-back conversation %s policy=(%#v,%#v,%#v), want valid=(%v,%v,%v)",
+				tc.id, enableWorkflow, workflowMode, enableSubagent, tc.enableValid, tc.modeValid, tc.subValid)
+		}
+	}
+	var backupTableCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'conversation_policy_snapshot_backups'`).Scan(&backupTableCount); err != nil {
+		t.Fatalf("inspect conversation policy rollback table: %v", err)
+	}
+	if backupTableCount != 0 {
+		t.Fatal("conversation policy rollback table should be removed by down migration")
+	}
+}
+
+func TestSkillUniqueIndexSQLiteDownRemovesTrashedDuplicates(t *testing.T) {
+	db := openRawSQLite(t, t.TempDir()+"/skill-unique-down.db")
+	if _, err := db.Exec(`
+CREATE TABLE skills (
+  id text PRIMARY KEY,
+  owner_user_id text NOT NULL,
+  category text NOT NULL,
+  skill_name text NOT NULL,
+  relative_root text NOT NULL,
+  deleted_at datetime
+);
+CREATE UNIQUE INDEX uk_skills_owner_identity
+  ON skills(owner_user_id, category, skill_name);
+CREATE UNIQUE INDEX uk_skills_owner_relative_root
+  ON skills(owner_user_id, relative_root);
+INSERT INTO skills (id, owner_user_id, category, skill_name, relative_root, deleted_at)
+VALUES
+  ('identity-original', 'user-a', 'research', 'demo', 'research/demo-old', NULL),
+  ('root-original', 'user-b', 'research', 'alpha', 'shared/root', NULL),
+  ('keep-trashed', 'user-c', 'personal', 'archived', 'personal/archived', CURRENT_TIMESTAMP);
+`); err != nil {
+		t.Fatalf("seed pre-migration skills: %v", err)
+	}
+
+	migrationDir := filepath.Join("..", "migrations", "dev_mode", "v0_3")
+	execMigrationFileForDriver(t, db, filepath.Join(migrationDir, "20260827120000_unique_skill_name_per_owner.up.sql"), "sqlite")
+	for _, name := range []string{"uk_skills_owner_identity", "uk_skills_owner_relative_root"} {
+		if sql := sqliteIndexSQL(t, db, name); !strings.Contains(strings.ToLower(sql), "deleted_at is null") {
+			t.Fatalf("up migration did not create a partial unique index for %s: %s", name, sql)
+		}
+	}
+
+	if _, err := db.Exec(`
+UPDATE skills SET deleted_at = CURRENT_TIMESTAMP WHERE id IN ('identity-original', 'root-original');
+INSERT INTO skills (id, owner_user_id, category, skill_name, relative_root, deleted_at)
+VALUES
+  ('identity-recreated', 'user-a', 'research', 'demo', 'research/demo', NULL),
+  ('root-recreated', 'user-b', 'personal', 'beta', 'shared/root', NULL);
+`); err != nil {
+		t.Fatalf("soft-delete and recreate same-name skills: %v", err)
+	}
+
+	execMigrationFileForDriver(t, db, filepath.Join(migrationDir, "20260827120000_unique_skill_name_per_owner.down.sql"), "sqlite")
+	for _, name := range []string{"uk_skills_owner_identity", "uk_skills_owner_relative_root"} {
+		if sql := sqliteIndexSQL(t, db, name); strings.Contains(strings.ToLower(sql), "deleted_at is null") {
+			t.Fatalf("down migration did not restore a full unique index for %s: %s", name, sql)
+		}
+	}
+
+	rows, err := db.Query(`SELECT id FROM skills ORDER BY id`)
+	if err != nil {
+		t.Fatalf("list skills after down: %v", err)
+	}
+	defer rows.Close()
+	var got []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			t.Fatalf("scan skill id: %v", err)
+		}
+		got = append(got, id)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate skills after down: %v", err)
+	}
+	want := []string{"identity-recreated", "keep-trashed", "root-recreated"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("skills after down=%v, want %v", got, want)
 	}
 }
 

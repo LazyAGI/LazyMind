@@ -44,6 +44,8 @@
       }
 
       .chat-box {
+        --chat-content-column-width: 100%;
+
         width: 100%;
         min-width: 0;
       }
@@ -278,6 +280,17 @@
       font-style: normal;
       font-weight: 600;
       line-height: 22px;
+    }
+  }
+
+  .right-box.right-box--ordinary {
+    background-color: #fff;
+  }
+
+  @media (min-width: 961px) {
+    .right-box.right-box--ordinary {
+      width: clamp(380px, 28vw, 440px);
+      min-width: 380px;
     }
   }
 

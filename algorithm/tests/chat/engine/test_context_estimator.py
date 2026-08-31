@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 
+from lazyllm.tools.agent.base import TOOL_OBSERVATION_KEY
+
 from lazymind.chat.engine.agent_runtime import (
     AgentRole,
     AgentRunPlan,
@@ -11,6 +13,7 @@ from lazymind.chat.engine.agent_runtime import (
     report_to_dict,
     render_context_markdown,
 )
+from lazymind.chat.engine.agent_runtime.context_estimator import attach_window_budget
 
 
 def test_estimate_tokens_handles_language_families_without_tokenizer() -> None:
@@ -54,6 +57,40 @@ def test_context_report_groups_plan_and_exposes_model_facing_content() -> None:
     assert 'secret system text' in rendered
     assert 'secret history text' in rendered
     assert 'secret user text' in rendered
+
+
+def test_context_report_ignores_structured_observation_sidecar() -> None:
+    prompt = PromptBuilder.for_role(AgentRole.CHAT).input('hello', source='user').build()
+    message = {'role': 'tool', 'name': 'read_file', 'content': 'visible result'}
+    with_observation = {
+        **message,
+        TOOL_OBSERVATION_KEY: {
+            'version': 1,
+            'ok': True,
+            'value': {'secret': 'large observation' * 1_000},
+            'error': '',
+        },
+    }
+    prefix = {'system_prompt': '', 'tool_definitions': [], 'skills_prompt': ''}
+
+    plain = asyncio.run(estimate_context_usage(
+        AgentRunPlan(role=AgentRole.CHAT, prompt=prompt, history=[message]),
+        prefix,
+    ))
+    observed = asyncio.run(estimate_context_usage(
+        AgentRunPlan(role=AgentRole.CHAT, prompt=prompt, history=[with_observation]),
+        prefix,
+    ))
+    plain_conversation = next(
+        category for category in plain.categories if category.category_id == 'conversation'
+    )
+    observed_conversation = next(
+        category for category in observed.categories if category.category_id == 'conversation'
+    )
+
+    assert observed_conversation.estimated_tokens == plain_conversation.estimated_tokens
+    assert TOOL_OBSERVATION_KEY not in observed_conversation.items[0].content
+    assert 'large observation' not in observed_conversation.items[0].content
 
 
 def test_context_estimation_runs_in_worker_thread(monkeypatch) -> None:
@@ -165,3 +202,9 @@ def test_context_report_uses_final_agent_history_description() -> None:
     assert 'compacted result' in conversation.items[0].content
     assert 'uncompacted result' not in conversation.items[0].content
     assert conversation.items[0].title == 'Tool result · search'
+
+
+def test_attach_window_budget_uses_resolved_max_input_tokens() -> None:
+    payload = attach_window_budget({'estimated_tokens': 6_400}, llm_config={'llm': {'max_input_tokens': '128K'}})
+    assert payload['max_input_tokens'] == 128_000
+    assert abs(payload['estimated_ratio'] - 0.05) < 1e-9

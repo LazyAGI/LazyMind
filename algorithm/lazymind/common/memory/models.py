@@ -5,7 +5,7 @@ import json
 import unicodedata
 
 from enum import Enum
-from typing import Literal
+from typing import Any, Literal, Optional
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
@@ -86,6 +86,20 @@ class EpisodeSearchResult(BaseModel):
     lexical_score: float
     score: float
     rendered: str
+
+
+class MemoryOperationRecord(BaseModel):
+    """Internal Memory Review ledger entry, independent of Agent ToolResult."""
+
+    model_config = ConfigDict(extra='forbid')
+
+    operation: str
+    status: Literal['succeeded', 'failed']
+    mutation: Literal['none', 'applied', 'unknown']
+    error_code: Optional[str] = None
+    retryable: bool = False
+    retry_fingerprint: Optional[str] = None
+    result: Optional[dict[str, Any]] = None
 
 
 def normalize_episode_summary(summary: str) -> str:

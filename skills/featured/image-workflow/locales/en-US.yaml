@@ -1,0 +1,104 @@
+locale: en-US
+
+classification:
+  category: Creative design
+  tags: [Image generation, Image editing, Animated GIF, Memes]
+
+presentation:
+  card:
+    title: Creative images and meme generation
+    description: Generate images, make local edits, and create meme packs across common visual tasks
+    output_type: images
+    output_label: Image candidates
+    cover_asset: cover
+    result_summary: Preview AI image candidates, before-and-after edits, and an animated meme pack
+  detail:
+    title: AI image generation, editing, and memes
+    description: Combine AI image generation, local editing, and meme creation from concept through visual delivery.
+    attachment_hint: Visual brief, references, an image to edit, or a character reference (optional by task)
+
+tasks:
+  - id: generate
+    selector:
+      title: AI image generation
+      description: Generate high-quality images in different styles, sizes, and contexts from text or references.
+      output_label: Image candidates
+    launch:
+      prompt_short: Generate a consistent set of high-quality images from the visual brief and references.
+      prompt: Generate a set of high-quality images from my visual brief and references. Accurately capture the subject, setting, composition, lighting, color, and style, and provide candidates for different use cases.
+    replay:
+      steps:
+        - title: Understand the creative brief
+          description: Define purpose, subject, style, aspect ratio, and quantity
+        - title: Organize prompts and references
+          description: Structure visual requirements and identify reference traits to preserve
+        - title: Configure generation
+          description: Set size, quality, and quantity for the task and model
+        - title: Generate images
+          description: Submit prompts and references to the image model
+        - title: Save and deliver
+          description: Save the files and present previews with actual specifications
+    result:
+      template: html_preview_v1
+      eyebrow: AI image generation
+      title: Visual concept candidates
+      summary: Generate images in several styles and use cases from one theme for further refinement.
+      html_asset: generate_preview
+
+  - id: local-edit
+    selector:
+      title: Local image editing
+      description: Replace a physical component, change material, or adjust a local area from an original image.
+      output_label: Before-and-after edit
+    launch:
+      prompt_short: Replace the smartwatch's silicone strap with a stainless-steel link bracelet while preserving the face, angle, and background.
+      prompt: Edit my smartwatch product image by replacing the dark silicone strap with a silver stainless-steel link bracelet. Show distinct links, case connectors, a folding clasp, and brushed-metal texture. Preserve the case, watch face, camera angle, subject position, background, and lighting, and deliver a before-and-after comparison.
+    replay:
+      steps:
+        - title: Read the original image
+          description: Confirm the subject and current composition
+        - title: Define the edit area
+          description: Specify the object, property, and intended result
+        - title: Set preservation constraints
+          description: Preserve identity, composition, background, and all specified content
+        - title: Apply the image edit
+          description: Submit the original image and edit instruction to the model
+        - title: Present the result
+          description: Save the edited image and show it beside the original
+    result:
+      template: html_preview_v1
+      eyebrow: Local image edit
+      title: Smartwatch bracelet replacement
+      summary: Replace the silicone strap with a stainless-steel link bracelet and preserve the original scene.
+      html_asset: edit_preview
+
+  - id: sticker
+    selector:
+      title: Meme pack generation
+      description: Generate a consistent character across a series of common chat reactions.
+      output_label: Meme pack
+    launch:
+      prompt_short: Create a consistent chat meme pack from the character reference.
+      prompt: Use my character reference to create a consistent chat meme pack covering received, working on it, thanks for your hard work, reply later, cheering, shocked, speechless, and off work. Preserve character design, art style, color, and camera angle.
+    replay:
+      steps:
+        - title: Confirm meme themes
+          description: Define chat scenarios, communication states, and final captions
+        - title: Establish the character baseline
+          description: Identify character traits and confirm four foundational eye and mouth shapes
+        - title: Design each performance
+          description: Map intent to expressions, full-body action, props, and environmental feedback
+        - title: Generate action keyframes
+          description: Create three to five keyframes for start, action peak, and result
+        - title: Produce static and animated versions
+          description: Reuse representative frames and animate the same performance
+        - title: Add captions and export
+          description: Place text in suitable negative space and output stills and GIFs
+        - title: Review the complete pack
+          description: Confirm recognition, distinct states, readable text, and usable animation
+    result:
+      template: html_preview_v1
+      eyebrow: Animated meme pack
+      title: Lazy cat animated memes
+      summary: Eight everyday chat reactions shown as looping GIFs from the reference Demo.
+      html_asset: sticker_preview

@@ -18,6 +18,8 @@ import (
 	"lazymind/core/store"
 	"lazymind/core/subagent"
 	"lazymind/core/workflow"
+
+	"gorm.io/gorm"
 )
 
 const (
@@ -50,15 +52,17 @@ type ContextUsageCategory struct {
 }
 
 type ContextUsageResponse struct {
-	Scope             string                 `json:"scope"`
-	EstimatedTokens   int64                  `json:"estimated_tokens"`
-	MaxInputTokens    *int64                 `json:"max_input_tokens,omitempty"`
-	EstimatedRatio    *float64               `json:"estimated_ratio,omitempty"`
-	Categories        []ContextUsageCategory `json:"categories"`
-	EstimationVersion string                 `json:"estimation_version"`
-	PreviewAccuracy   string                 `json:"preview_accuracy,omitempty"`
-	RequiresLLM       bool                   `json:"requires_llm,omitempty"`
-	LLMReason         string                 `json:"llm_reason,omitempty"`
+	Scope                        string                 `json:"scope"`
+	EstimatedTokens              int64                  `json:"estimated_tokens"`
+	MaxInputTokens               *int64                 `json:"max_input_tokens,omitempty"`
+	EstimatedRatio               *float64               `json:"estimated_ratio,omitempty"`
+	CompressionApplied           bool                   `json:"compression_applied,omitempty"`
+	CompressionCoveredThroughSeq int                    `json:"compression_covered_through_seq,omitempty"`
+	Categories                   []ContextUsageCategory `json:"categories"`
+	EstimationVersion            string                 `json:"estimation_version"`
+	PreviewAccuracy              string                 `json:"preview_accuracy,omitempty"`
+	RequiresLLM                  bool                   `json:"requires_llm,omitempty"`
+	LLMReason                    string                 `json:"llm_reason,omitempty"`
 }
 
 type ContextPromptResponse struct {
@@ -154,6 +158,21 @@ func parseMaxInputTokens(raw string) *int64 {
 	}
 	parsed := int64(number * multiplier)
 	return &parsed
+}
+
+func applyCatalogWindowIfMissing(ctx context.Context, db *gorm.DB, userID string, report *ContextUsageResponse) {
+	if report == nil {
+		return
+	}
+	if report.MaxInputTokens == nil || *report.MaxInputTokens <= 0 {
+		if configured, err := modelconfig.LoadMaxInputTokens(ctx, db, userID, "llm"); err == nil && configured != nil {
+			report.MaxInputTokens = parseMaxInputTokens(*configured)
+		}
+	}
+	if report.MaxInputTokens != nil && *report.MaxInputTokens > 0 {
+		ratio := float64(report.EstimatedTokens) / float64(*report.MaxInputTokens)
+		report.EstimatedRatio = &ratio
+	}
 }
 
 // EstimateContextUsage builds the same algorithm request shape as chat without
@@ -280,6 +299,10 @@ func estimateContext(w http.ResponseWriter, r *http.Request, exportPrompt bool) 
 			reqBody[key] = value
 		}
 	}
+	if err := applyChatFeatureControls(r.Context(), db, userID, reqBody); err != nil {
+		common.ReplyErr(w, "load chat feature controls failed", http.StatusInternalServerError)
+		return
+	}
 	if value, ok := raw["context_preview_allow_llm_routing"].(bool); ok {
 		reqBody["context_preview_allow_llm_routing"] = value
 	}
@@ -305,6 +328,14 @@ func estimateContext(w http.ResponseWriter, r *http.Request, exportPrompt bool) 
 			workflowContext["revision_no"] = active.WorkflowRevisionNo
 			workflowContext["tree_hash"] = active.WorkflowTreeHash
 			workflowContext["remote_root"] = active.WorkflowRemoteRoot
+			refOrID := active.WorkflowRef
+			if refOrID == "" {
+				refOrID = active.WorkflowID
+			}
+			delete(workflowContext, "runtime")
+			if runtimePolicy, ok := workflow.RuntimePolicyForRevision(r.Context(), db, userID, refOrID, active.WorkflowRevisionID); ok {
+				workflowContext["runtime"] = runtimePolicy
+			}
 		}
 	}
 	reqBody["workflow_context"] = workflowContext
@@ -353,12 +384,6 @@ func estimateContext(w http.ResponseWriter, r *http.Request, exportPrompt bool) 
 		common.ReplyErr(w, fmt.Sprintf("estimate context usage failed: %v", err), http.StatusBadGateway)
 		return
 	}
-	if configured, configErr := modelconfig.LoadMaxInputTokens(r.Context(), db, userID, "llm"); configErr == nil && configured != nil {
-		report.MaxInputTokens = parseMaxInputTokens(*configured)
-		if report.MaxInputTokens != nil && *report.MaxInputTokens > 0 {
-			ratio := float64(report.EstimatedTokens) / float64(*report.MaxInputTokens)
-			report.EstimatedRatio = &ratio
-		}
-	}
+	applyCatalogWindowIfMissing(r.Context(), db, userID, report)
 	common.ReplyOK(w, report)
 }

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"net"
 	"os"
@@ -25,6 +26,8 @@ type Config struct {
 	AgentToken                        string
 	LocalFSDefaultAgentID             string
 	LocalFSPublicRoot                 string
+	LocalFSAllowedRoots               []string
+	LocalFSDynamicRoots               bool
 	FeishuBaseURL                     string
 	AuthServiceBaseURL                string
 	AuthServiceInternalToken          string
@@ -122,6 +125,13 @@ func (c *Config) applyEnv() {
 	if publicRoot := strings.TrimSpace(os.Getenv("LAZYMIND_SCAN_CONTROL_PLANE_LOCAL_FS_PUBLIC_ROOT")); publicRoot != "" {
 		c.LocalFSPublicRoot = publicRoot
 	}
+	if raw := strings.TrimSpace(os.Getenv("LAZYMIND_SCAN_CONTROL_PLANE_LOCAL_FS_ALLOWED_ROOTS_JSON")); raw != "" {
+		var roots []string
+		if json.Unmarshal([]byte(raw), &roots) == nil {
+			c.LocalFSAllowedRoots = roots
+		}
+	}
+	c.LocalFSDynamicRoots = boolEnv("LAZYMIND_SCAN_CONTROL_PLANE_DYNAMIC_LOCAL_ROOTS", false)
 	if baseURL := strings.TrimSpace(os.Getenv("LAZYMIND_SCAN_CONTROL_PLANE_FEISHU_BASE_URL")); baseURL != "" {
 		c.FeishuBaseURL = baseURL
 	}

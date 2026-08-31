@@ -48,6 +48,76 @@ class AgentExecutionOptions:
     extra_stop_condition: Optional[Callable[..., Any]] = None
     max_retries: Optional[int] = None
     tool_failure_limits: Optional[dict[str, int]] = None
+    llm_config: Optional[dict[str, Any]] = None
+    max_input_tokens: Optional[Any] = None
+    history_compactor: Optional[Callable[..., list[dict[str, Any]]]] = None
+
+
+CompressionTrigger = Literal['pre_turn', 'mid_turn']
+
+
+@dataclass(frozen=True)
+class ContextBudget:
+    max_input_tokens: int
+    reserved_output_tokens: int
+    effective_input_budget: int
+    trigger_tokens: int
+    target_tokens: int
+    trigger_ratio: float
+    target_ratio: float
+    source: str = 'fallback'
+
+
+@dataclass(frozen=True)
+class ToolPruneDetail:
+    tool_name: str
+    message_index: int
+    before_tokens: int
+    after_tokens: int
+    compactor: str
+    spill_path: str = ''
+    spill_bytes: int = 0
+
+
+@dataclass(frozen=True)
+class PruneEvent:
+    trigger: CompressionTrigger
+    decision: Literal['pruned', 'skipped', 'abandoned', 'spilled']
+    reason: str
+    estimated_before: int
+    estimated_after: int
+    reclaimed_tokens: int
+    budget: ContextBudget
+    usage_ratio_before: float = 0.0
+    usage_ratio_after: float = 0.0
+    details: Tuple[ToolPruneDetail, ...] = ()
+    first_changed_projection_index: Optional[int] = None
+    cache_disruption_tokens: int = 0
+    changed_messages: int = 0
+    changed_model_visible: Tuple[bool, ...] = ()
+
+
+SummaryDecision = Literal['summarized', 'skipped', 'abandoned']
+
+
+@dataclass(frozen=True)
+class SummaryEvent:
+    trigger: CompressionTrigger
+    decision: SummaryDecision
+    reason: str
+    estimated_before: int
+    estimated_after: int
+    reclaimed_tokens: int
+    budget: ContextBudget
+    replaced_message_count: int = 0
+    tail_tokens: int = 0
+    summary_tokens: int = 0
+    usage_ratio_before: float = 0.0
+    usage_ratio_after: float = 0.0
+    first_changed_projection_index: Optional[int] = None
+    cache_disruption_tokens: int = 0
+    changed_messages: int = 0
+    changed_model_visible: Tuple[bool, ...] = ()
 
 
 @dataclass

@@ -13,6 +13,7 @@ import {
   PlusOutlined,
   UploadOutlined,
 } from "@ant-design/icons";
+import { isDesktopRuntime } from "@/runtime/mode";
 import type { SkillCreateSource } from "../MemoryDraftModal";
 import type { SkillViewMode } from "../../shared";
 
@@ -23,7 +24,6 @@ interface SkillManagementToolbarProps {
   skillView: SkillViewMode | "workflows";
   onSkillViewChange: (view: SkillViewMode | "workflows") => void;
   installedCount: number;
-  trashCount?: number;
   onCreateSkill: (source: SkillCreateSource) => void;
   organizeMode: boolean;
   organizeDisabled: boolean;
@@ -55,7 +55,6 @@ export default function SkillManagementToolbar({
   skillView,
   onSkillViewChange,
   installedCount,
-  trashCount = 0,
   onCreateSkill,
   organizeMode,
   organizeDisabled,
@@ -224,7 +223,7 @@ export default function SkillManagementToolbar({
       return renderInstalledActions();
     }
 
-    if (skillView === "market" && isAdmin) {
+    if (skillView === "market" && isAdmin && !isDesktopRuntime()) {
       return (
         <>
           {marketFilters}

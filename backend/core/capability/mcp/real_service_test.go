@@ -64,7 +64,7 @@ func TestRealLazyMindMCP(t *testing.T) {
 		}
 	}
 	sort.Strings(names)
-	if got, want := strings.Join(names, ","), "knowledge.document.get,knowledge.document.list,knowledge.list,knowledge.search,skill.get,skill.list"; got != want {
+	if got, want := strings.Join(names, ","), "cloud_document.get,cloud_document.list,cloud_document.search,knowledge.document.get,knowledge.document.list,knowledge.list,knowledge.search,skill.get,skill.list"; got != want {
 		t.Fatalf("real tool names = %q, want %q", got, want)
 	}
 
@@ -122,6 +122,73 @@ func TestRealLazyMindMCP(t *testing.T) {
 	})
 	if document.Document.ID != selectedHit.DocumentID || document.Document.KnowledgeID != selectedKnowledge.ID {
 		t.Fatalf("knowledge.document.get returned the wrong real document: %#v", document)
+	}
+
+	cloudSources := callRealTool[capability.ListCloudDocumentsResult](t, session, "cloud_document.list", map[string]any{
+		"page": map[string]any{"page_size": 100},
+	})
+	if len(cloudSources.Items) == 0 {
+		t.Fatal("cloud_document.list returned no real chat-enabled Feishu accounts")
+	}
+	cloudVerified := false
+	for _, source := range cloudSources.Items {
+		page := callRealTool[capability.GetCloudDocumentResult](t, session, "cloud_document.get", map[string]any{
+			"source_id": source.ID, "include_documents": true,
+			"documents_page": map[string]any{"page_size": 20},
+		})
+		query := ""
+		seenDocuments := map[string]struct{}{}
+		for depth := 0; depth < 3; depth++ {
+			var nextContainer *capability.CloudDocumentMetadata
+			for index := range page.Documents {
+				item := page.Documents[index]
+				seenDocuments[item.ID] = struct{}{}
+				if item.IsDocument && item.DisplayName != "" {
+					query = item.DisplayName
+					break
+				}
+				if nextContainer == nil && item.HasChildren {
+					nextContainer = &item
+				}
+			}
+			if query != "" || nextContainer == nil {
+				break
+			}
+			page = callRealTool[capability.GetCloudDocumentResult](t, session, "cloud_document.get", map[string]any{
+				"source_id": source.ID, "include_documents": true,
+				"node_ref": nextContainer.NodeRef, "target_type": nextContainer.TargetType,
+				"target_ref":     nextContainer.TargetRef,
+				"documents_page": map[string]any{"page_size": 20},
+			})
+		}
+		if page.DocumentsPage != nil && page.DocumentsPage.NextPageToken != "" {
+			next := callRealTool[capability.GetCloudDocumentResult](t, session, "cloud_document.get", map[string]any{
+				"source_id": source.ID, "include_documents": true,
+				"documents_page": map[string]any{
+					"page_size": 20, "page_token": page.DocumentsPage.NextPageToken,
+				},
+			})
+			for _, item := range next.Documents {
+				if _, duplicate := seenDocuments[item.ID]; duplicate {
+					t.Fatalf("cloud document pagination repeated %q", item.ID)
+				}
+			}
+		}
+		if query == "" {
+			continue
+		}
+		search := callRealTool[capability.SearchCloudDocumentsResult](t, session, "cloud_document.search", map[string]any{
+			"source_id": source.ID, "query": query,
+			"include_documents": true, "include_containers": true,
+			"page": map[string]any{"page_size": 20},
+		})
+		if len(search.Hits) > 0 {
+			cloudVerified = true
+			break
+		}
+	}
+	if !cloudVerified {
+		t.Fatal("cloud_document.search returned no real metadata hits")
 	}
 
 	if agent := strings.TrimSpace(os.Getenv("LAZYMIND_REAL_EXTERNAL_AGENT")); agent != "" {

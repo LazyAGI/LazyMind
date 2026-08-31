@@ -1,0 +1,100 @@
+locale: en-US
+
+classification:
+  category: Education & growth
+  tags:
+    - Mock interviews
+    - Interview feedback
+    - Job preparation
+    - Answer improvement
+
+presentation:
+  card:
+    title: AI interview simulator
+    description: Run a senior AI product manager interview for a candidate with three years of B2B SaaS experience
+    output_type: report
+    output_label: Interview feedback report
+    cover_asset: cover
+    result_summary: Explore three role questions, four-dimension scores, answer diagnostics, and a focused practice plan
+  detail:
+    title: AI interview simulator
+    description: Sourced from SkillHub and adapted for LazyMind. Run a turn-by-turn mock interview based on the target role, experience, and interview type, with scoring, feedback, and improved examples after every answer.
+    attachment_hint: A resume, job description, target-company notes, or practice priorities
+
+tasks:
+  - id: role-interview
+    selector:
+      title: AI product manager interview
+      description: Practice three progressive questions tailored to a B2B SaaS background
+      output_label: Role interview feedback
+    launch:
+      prompt_short: Start a senior AI product manager interview for a candidate with three years of B2B SaaS experience.
+      prompt: Use the AI Interview Simulator Skill to run a three-question interview for a candidate with three years of B2B SaaS product experience targeting a senior AI product manager role. Ask one question at a time and wait for the answer. Score relevance, structure, evidence, and delivery out of 10 after each answer; identify one strength and two specific improvements; give a stronger answer framework before continuing. Cover AI use-case judgment, B2B metric design, and cross-functional delivery, then provide a seven-day practice plan.
+    replay:
+      steps:
+        - title: Align the candidate profile
+          description: Confirm three years of B2B SaaS experience and the senior AI PM target
+        - title: Run three progressive questions
+          description: Cover use-case judgment, metric design, and cross-functional delivery
+        - title: Score four dimensions
+          description: Quantify relevance, structure, evidence, and delivery
+        - title: Generate a seven-day plan
+          description: Summarize strengths, gaps, answer frameworks, and daily practice
+    result:
+      template: html_preview_v1
+      eyebrow: Role interview feedback
+      title: Senior AI product manager mock interview
+      summary: Explore role questions, four-dimension scores, feedback, and follow-up practice priorities
+      html_asset: pm_interview
+
+  - id: behavioral-interview
+    selector:
+      title: Behavioral interview practice
+      description: Practice a STAR answer about disagreeing with the engineering team
+      output_label: Behavioral interview feedback
+    launch:
+      prompt_short: 'Example: practice a STAR answer about disagreeing with the engineering team.'
+      prompt: >-
+        Start a behavioral interview from this sample story: "Before a release, I disagreed with the engineering team about delivery scope; we split the phase-one scope, shipped on time, and conversion improved by 8%." The target role is senior product manager. Ask one question at a time; after each answer, check the situation, task, action, and result, assess whether the example is concrete and credible, and suggest a stronger structure and follow-up questions. Finish by summarizing the stories still missing from my story bank.
+    replay:
+      steps:
+        - title: Inventory experience stories
+          description: Identify projects, challenges, collaboration, conflict, and failures
+        - title: Ask behavioral questions
+          description: Probe concrete examples against the role's competency model
+        - title: Check STAR structure
+          description: Assess context, task, action, result, and personal contribution
+        - title: Complete the story bank
+          description: Produce reusable story themes and recommendations for missing examples
+    result:
+      template: html_preview_v1
+      eyebrow: Behavioral interview feedback
+      title: STAR answer diagnosis and story bank
+      summary: Improve the structure, evidence, and role relevance of experience-based answers
+      html_asset: behavioral_output
+
+  - id: resume-interview
+    selector:
+      title: Resume deep dive
+      description: Probe the enterprise knowledge-base QA project's ownership and results
+      output_label: Resume deep-dive feedback
+    launch:
+      prompt_short: 'Example: deep-dive the "enterprise knowledge-base QA" project on my resume.'
+      prompt: >-
+        Start a resume deep-dive from this sample project: "Owned an enterprise knowledge-base QA product, led a team of four, and raised first-answer hit rate from 62% to 78% in three months." Probe scope of responsibility, key decisions, technical or business challenges, and measurable outcomes one question at a time; after every answer, identify vague statements, weak evidence, or likely follow-ups, and help me form more precise responses.
+    replay:
+      steps:
+        - title: Identify priority experience
+          description: Find projects most relevant to the target role and likely to draw questions
+        - title: Probe projects layer by layer
+          description: Ask about ownership, decisions, challenges, collaboration, and outcomes
+        - title: Check evidence consistency
+          description: Identify vague claims, logic gaps, and missing metrics
+        - title: Organize answer points
+          description: Produce accurate, concrete, and verifiable project responses
+    result:
+      template: html_preview_v1
+      eyebrow: Resume deep-dive feedback
+      title: Project questions and risk areas
+      summary: Organize evidence, likely follow-ups, and improvements for priority projects
+      html_asset: resume_output

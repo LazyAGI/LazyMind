@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -48,12 +49,16 @@ func TestHostRegistryStoresCapabilitiesWithoutExecutors(t *testing.T) {
 
 func TestDBContextLoaderBuildsNeutralPinnedAttempt(t *testing.T) {
 	db := executorComponentDB(t, &orm.WorkflowSession{}, &orm.WorkflowSessionStep{}, &orm.WorkflowOutbox{},
-		&orm.WorkflowRevision{}, &orm.WorkflowRevisionEntry{}, &orm.WorkflowBlob{}, &orm.WorkflowAttemptInputBinding{})
+		&orm.WorkflowRevision{}, &orm.WorkflowRevisionEntry{}, &orm.WorkflowBlob{},
+		&orm.WorkflowAttemptInputBinding{}, &orm.WorkflowSlotRevision{})
 	now := time.Now().UTC()
 	graph := graphengine.CompiledStateGraph{SchemaVersion: graphengine.SchemaVersion,
 		Nodes: map[string]graphengine.CompiledNode{"write": {ID: "write", Prompt: "write report",
 			Acceptance: []string{"clear"}, Outputs: []string{"report", "notes"},
-			RequiredOutputs: []string{"report"}, Capabilities: []string{"web"}}}}
+			RequiredOutputs: []string{"report"}, Capabilities: []string{"web"},
+			InputTransports: map[string]string{"brief": "path", "images": "reference"}}},
+		MaterialTypes:         map[string]string{"brief": "text", "images": "image"},
+		MaterialCardinalities: map[string]string{"report": "single", "notes": "list", "images": "list"}}
 	if err := db.Create(&orm.WorkflowRevision{ID: "revision-1", WorkflowResourceID: "resource-1", RevisionNo: 1,
 		CompiledGraph: graph.JSON(), GraphSchemaVersion: graph.SchemaVersion, CreatedAt: now}).Error; err != nil {
 		t.Fatal(err)
@@ -77,7 +82,8 @@ func TestDBContextLoaderBuildsNeutralPinnedAttempt(t *testing.T) {
 		Attempt: 2, TaskID: "task-1", Status: "queued", Validity: "effective", CreatedAt: now, UpdatedAt: now}).Error; err != nil {
 		t.Fatal(err)
 	}
-	payload, _ := json.Marshal(AttemptContext{Operation: "retry", Objective: "updated objective"})
+	payload, _ := json.Marshal(AttemptContext{Operation: "retry", Objective: "updated objective",
+		Inputs: map[string]any{"images": map[string]any{"source_revision_id": "stale-provisional"}}})
 	if err := db.Create(&orm.WorkflowOutbox{ID: "outbox-1", AttemptID: "attempt-1", SessionID: "session-1",
 		PayloadJSON: payload, Status: "pending", CreatedAt: now, UpdatedAt: now}).Error; err != nil {
 		t.Fatal(err)
@@ -87,6 +93,27 @@ func TestDBContextLoaderBuildsNeutralPinnedAttempt(t *testing.T) {
 		SourceRevision: "3", ContentHash: "sha256:value", CreatedAt: now}).Error; err != nil {
 		t.Fatal(err)
 	}
+	if err := db.Create(&orm.WorkflowAttemptInputBinding{ID: "binding-1-duplicate", SessionID: "session-1", AttemptID: "attempt-1",
+		MaterialID: "brief", MaterialRevisionID: "resource-binding-1", SourceType: "input_resource", SourceID: "input-1",
+		SourceRevision: "3", ContentHash: "sha256:value", CreatedAt: now.Add(time.Millisecond)}).Error; err != nil {
+		t.Fatal(err)
+	}
+	for index, revisionID := range []string{"image-revision-1", "image-revision-2"} {
+		listIndex := index
+		if err := db.Create(&orm.WorkflowSlotRevision{ID: revisionID, SessionID: "session-1",
+			SlotID: "images", Revision: index + 1, ListIndex: &listIndex, Selected: true,
+			Slot: "images", StepID: "source", Attempt: 1, Validity: "effective",
+			CreatedAt: now}).Error; err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Create(&orm.WorkflowAttemptInputBinding{ID: "image-binding-" + revisionID,
+			SessionID: "session-1", AttemptID: "attempt-1", MaterialID: "images",
+			MaterialRevisionID: revisionID, SourceType: "artifact",
+			// Reverse timestamps: list_index, not insertion time or UUID, must win.
+			CreatedAt: now.Add(time.Duration(2-index) * time.Second)}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
 	value, err := (DBContextLoader{DB: db}).LoadAttemptContext(context.Background(), "attempt-1")
 	if err != nil {
 		t.Fatal(err)
@@ -94,7 +121,9 @@ func TestDBContextLoaderBuildsNeutralPinnedAttempt(t *testing.T) {
 	if value.AttemptID != "attempt-1" || value.AttemptNo != 2 || value.Operation != "retry" ||
 		value.Prompt != "write report" || !reflect.DeepEqual(value.DeclaredOutputs, []string{"report", "notes"}) ||
 		!reflect.DeepEqual(value.RequiredOutputs, []string{"report"}) || value.OutputCardinality["report"] != "single" ||
-		value.OutputCardinality["notes"] != "list" {
+		value.OutputCardinality["notes"] != "list" || value.DeclaredInputTypes["brief"] != "text" ||
+		value.DeclaredInputTypes["images"] != "image" || value.DeclaredInputTransports["brief"] != "path" ||
+		value.DeclaredInputTransports["images"] != "reference" {
 		t.Fatalf("context=%#v", value)
 	}
 	if value.Metadata["task_id"] != "task-1" || value.Metadata["controller_host"] != "lazymind" {
@@ -104,11 +133,25 @@ func TestDBContextLoaderBuildsNeutralPinnedAttempt(t *testing.T) {
 	if input["source_id"] != "input-1" || input["source_revision_id"] != "resource-binding-1" {
 		t.Fatalf("input=%v", input)
 	}
+	images := value.Inputs["images"].([]map[string]any)
+	if len(images) != 2 || images[0]["source_revision_id"] != "image-revision-1" ||
+		images[1]["source_revision_id"] != "image-revision-2" {
+		t.Fatalf("list input=%v", images)
+	}
 	raw, _ := json.Marshal(value)
 	for _, forbidden := range []string{"api_key", "db_dsn", "workspace_path"} {
 		if bytes.Contains(raw, []byte(forbidden)) {
 			t.Fatalf("private field leaked: %s", raw)
 		}
+	}
+	if err := db.Create(&orm.WorkflowAttemptInputBinding{ID: "binding-1-conflict", SessionID: "session-1", AttemptID: "attempt-1",
+		MaterialID: "brief", MaterialRevisionID: "resource-binding-2", SourceType: "input_resource", SourceID: "input-2",
+		SourceRevision: "4", ContentHash: "sha256:other", CreatedAt: now.Add(2 * time.Millisecond)}).Error; err != nil {
+		t.Fatal(err)
+	}
+	_, err = (DBContextLoader{DB: db}).LoadAttemptContext(context.Background(), "attempt-1")
+	if err == nil || !strings.Contains(err.Error(), "single-cardinality material \"brief\"") {
+		t.Fatalf("distinct single-cardinality bindings must fail clearly, got %v", err)
 	}
 }
 
@@ -188,3 +231,144 @@ func TestDBArtifactSinkIsIdempotentAndEmitsRevisionEvents(t *testing.T) {
 		t.Fatalf("state version=%d", session.StateVersion)
 	}
 }
+
+func TestDBArtifactSinkRejectsDeclaredTypeMismatch(t *testing.T) {
+	db := executorComponentDB(t)
+	sink := DBArtifactSink{DB: db}
+	ctx := AttemptContext{AttemptID: "attempt-image", SessionID: "session-image", StepID: "enhance",
+		DeclaredOutputTypes: map[string]string{"enhanced_image_output": "image"}}
+	err := sink.Save(context.Background(), ctx, Artifact{Slot: "enhanced_image_output",
+		ContentType: "text", Seq: 1, Value: json.RawMessage(`{"text":"BLOCKED"}`)})
+	if err == nil || !strings.Contains(err.Error(), `requires content type "image"`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestDeclaredTypeAcceptsTypedOffloadedTextCarrier(t *testing.T) {
+	ctx := AttemptContext{DeclaredOutputTypes: map[string]string{"preview_html": "text"}}
+	artifact := Artifact{Slot: "preview_html", ContentType: "file", Seq: 1,
+		Value: json.RawMessage(`{"type":"text","path":"/tmp/preview.html"}`)}
+	if err := validateDeclaredArtifactType(ctx, artifact); err != nil {
+		t.Fatalf("typed text carrier rejected: %v", err)
+	}
+}
+
+func TestDeclaredTypeRejectsUntypedOffloadedFile(t *testing.T) {
+	ctx := AttemptContext{DeclaredOutputTypes: map[string]string{"preview_html": "text"}}
+	for _, value := range []json.RawMessage{
+		json.RawMessage(`{"path":"/tmp/preview.html"}`),
+		json.RawMessage(`{"type":"image","path":"/tmp/preview.html"}`),
+	} {
+		err := validateDeclaredArtifactType(ctx, Artifact{Slot: "preview_html", ContentType: "file", Value: value})
+		if err == nil || !strings.Contains(err.Error(), `requires content type "text"`) {
+			t.Fatalf("unexpected error for carrier %s: %v", value, err)
+		}
+	}
+}
+
+func TestDBArtifactSinkLegacyAttemptWithoutManifestDefaultsSingle(t *testing.T) {
+	db := executorComponentDB(t, &orm.WorkflowSession{}, &orm.WorkflowSlotRevision{},
+		&orm.WorkflowHumanArtifact{}, &orm.WorkflowSlotOrder{}, &orm.WorkflowEvent{},
+		&orm.WorkflowRevisionEntry{}, &orm.WorkflowBlob{})
+	now := time.Now().UTC()
+	if err := db.Create(&orm.WorkflowSession{ID: "session-legacy", WorkflowRevisionID: "revision-legacy",
+		CreateUserID: "user-1", Status: "active", CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	sink := DBArtifactSink{DB: db}
+	ctx := AttemptContext{AttemptID: "attempt-legacy", SessionID: "session-legacy", StepID: "write", AttemptNo: 1}
+	if err := sink.Save(context.Background(), ctx, Artifact{Slot: "report", Seq: 1,
+		ContentType: "text/plain", Value: json.RawMessage(`{"text":"result"}`)}); err != nil {
+		t.Fatal(err)
+	}
+
+	var revision orm.WorkflowSlotRevision
+	if err := db.First(&revision, "session_id = ? AND slot_id = ?", "session-legacy", "report").Error; err != nil {
+		t.Fatal(err)
+	}
+	if revision.ListIndex != nil || revision.Revision != 1 || !revision.Selected {
+		t.Fatalf("legacy revision=%#v", revision)
+	}
+}
+
+func TestDBArtifactSinkAppendsListSlotsAndReplacesOnlyExplicitIndex(t *testing.T) {
+	db := executorComponentDB(t, &orm.WorkflowSession{}, &orm.WorkflowSlotRevision{},
+		&orm.WorkflowHumanArtifact{}, &orm.WorkflowEvent{}, &orm.WorkflowRevision{},
+		&orm.WorkflowRevisionEntry{}, &orm.WorkflowBlob{}, &orm.WorkflowSlotOrder{})
+	now := time.Now().UTC()
+	manifest := []byte("slots:\n  - id: slide_outline\n    type: text\n    cardinality: list\n")
+	if err := db.Create(&orm.WorkflowBlob{Hash: "manifest-hash", Size: int64(len(manifest)),
+		FileType: "yaml", Content: manifest, CreatedAt: now}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.WorkflowRevision{ID: "revision-list", WorkflowResourceID: "resource-list",
+		RevisionNo: 1, CreatedAt: now}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.WorkflowRevisionEntry{RevisionID: "revision-list", Path: "workflow.yaml",
+		EntryType: "file", BlobHash: ptr("manifest-hash"), Size: int64(len(manifest)), FileType: "yaml"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.WorkflowSession{ID: "session-list", ConversationID: "conversation-list",
+		WorkflowID: "workflow-list", WorkflowRevisionID: "revision-list", CreateUserID: "user-1",
+		Status: "active", CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	sink := DBArtifactSink{DB: db}
+	ctx := AttemptContext{AttemptID: "attempt-list", SessionID: "session-list", StepID: "outline", AttemptNo: 1}
+	for seq, text := range []string{"one", "two", "three"} {
+		artifact := Artifact{Slot: "slide_outline", ContentType: "text", Seq: seq + 1,
+			Value: json.RawMessage(`{"text":"` + text + `"}`)}
+		if err := sink.Save(context.Background(), ctx, artifact); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var selected []orm.WorkflowSlotRevision
+	if err := db.Where("selected = ?", true).Order("list_index").Find(&selected).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(selected) != 3 || selected[0].ListIndex == nil || *selected[0].ListIndex != 0 ||
+		selected[2].ListIndex == nil || *selected[2].ListIndex != 2 {
+		t.Fatalf("selected appends=%#v", selected)
+	}
+
+	replacement := Artifact{Slot: "slide_outline", ContentType: "text", Seq: 4,
+		Value: json.RawMessage(`{"text":"two updated","list_index":1}`)}
+	if err := sink.Save(context.Background(), ctx, replacement); err != nil {
+		t.Fatal(err)
+	}
+	selected = nil
+	if err := db.Where("selected = ?", true).Order("list_index").Find(&selected).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(selected) != 3 || selected[1].ListIndex == nil || *selected[1].ListIndex != 1 || selected[1].Revision != 2 {
+		t.Fatalf("selected after replacement=%#v", selected)
+	}
+	var order orm.WorkflowSlotOrder
+	if err := db.First(&order, "session_id = ? AND slot_id = ?", "session-list", "slide_outline").Error; err != nil {
+		t.Fatal(err)
+	}
+	if string(order.OrderList) != "[0,1,2]" {
+		t.Fatalf("order=%s", order.OrderList)
+	}
+
+	// Package publishers resolve stable indices before emitting artifacts. A
+	// first-time explicit index must still join the durable display order;
+	// otherwise the revision exists but composite widgets receive no sort_order.
+	explicit := Artifact{Slot: "slide_outline", ContentType: "text", Seq: 5,
+		Value: json.RawMessage(`{"text":"four","list_index":3}`)}
+	if err := sink.Save(context.Background(), ctx, explicit); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.First(&order, "session_id = ? AND slot_id = ?", "session-list", "slide_outline").Error; err != nil {
+		t.Fatal(err)
+	}
+	if string(order.OrderList) != "[0,1,2,3]" {
+		t.Fatalf("order after explicit append=%s", order.OrderList)
+	}
+}
+
+func ptr(value string) *string { return &value }

@@ -69,8 +69,8 @@ func (m *mockStateStore) LRange(_ context.Context, key string, start, stop int64
 	return m.lrangeResult, m.lrangeErr
 }
 func (m *mockStateStore) LTrim(_ context.Context, key string, start, stop int64) error { return nil }
-func (m *mockStateStore) BLPop(_ context.Context, key string, timeout time.Duration) error {
-	return nil
+func (m *mockStateStore) LPop(_ context.Context, key string) (bool, error) {
+	return false, nil
 }
 func (m *mockStateStore) ZAdd(_ context.Context, key, member string, score float64, ttl time.Duration) error {
 	return nil

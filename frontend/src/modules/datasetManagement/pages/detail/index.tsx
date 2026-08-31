@@ -1335,11 +1335,11 @@ export default function DatasetDetailPage() {
   const handleAutoSaveItem = useCallback(
     async (item: DatasetItem) => {
       const pendingNewItemCellActivation = pendingNewItemCellActivationRef.current;
-      if (
-        item.id === NEW_ITEM_ID &&
-        pendingNewItemCellActivation?.itemId === NEW_ITEM_ID
-      ) {
-        pendingNewItemCellActivationRef.current = null;
+      if (item.id === NEW_ITEM_ID) {
+        if (pendingNewItemCellActivation?.itemId === NEW_ITEM_ID) {
+          pendingNewItemCellActivationRef.current = null;
+        }
+        setActiveCell(null);
         return;
       }
 
@@ -1353,13 +1353,9 @@ export default function DatasetDetailPage() {
         setActiveCell(null);
         return;
       }
-      if (item.id === NEW_ITEM_ID && validateRequiredDatasetItem(draft, requiredItemMessages).length > 0) {
-        setActiveCell(null);
-        return;
-      }
       await handleSaveItem(item.id, draft);
     },
-    [buildItemDraftForSave, dirtyItemIds, handleSaveItem, requiredItemMessages],
+    [buildItemDraftForSave, dirtyItemIds, handleSaveItem],
   );
 
   const activateEditableCell = useCallback(
@@ -1895,6 +1891,21 @@ export default function DatasetDetailPage() {
     setDirtyItemIds((current) => current.filter((id) => id !== item.id));
   };
 
+  const handleSaveNewItem = async () => {
+    const newItem = findDatasetItemForSave(NEW_ITEM_ID);
+    if (!newItem) {
+      return;
+    }
+    await handleSaveItem(NEW_ITEM_ID, buildItemDraftForSave(newItem));
+  };
+
+  const handleCancelNewItem = () => {
+    const newItem = findDatasetItemForSave(NEW_ITEM_ID);
+    if (newItem) {
+      handleCancelItem(newItem);
+    }
+  };
+
   const handleClearInvalidReferenceDoc = async (item: DatasetItem) => {
     const currentDraft = drafts[item.id] || createItemDraft(item);
     const referenceContext =
@@ -2383,6 +2394,7 @@ export default function DatasetDetailPage() {
     }
     return (
       <QuestionTypeSelect
+        autoFocus
         value={drafts[record.id]?.question_type || undefined}
         placeholder={t("datasetManagement.detail.questionTypePlaceholder")}
         onChange={(value) => handleDraftChange(record, "question_type", value)}
@@ -2593,7 +2605,12 @@ export default function DatasetDetailPage() {
       <Card className="dataset-detail-card">
         <div className="dataset-detail-actions">
           <Space wrap>
-            <Button type="primary" icon={<PlusOutlined />} onClick={handleAddItem}>
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              disabled={newItemVisible || saving}
+              onClick={handleAddItem}
+            >
               {t("datasetManagement.detail.addSample")}
             </Button>
             <Button icon={<ImportOutlined />} onClick={() => setImportModalOpen(true)}>
@@ -2611,6 +2628,30 @@ export default function DatasetDetailPage() {
             </Popover>
           </Space>
         </div>
+
+        {newItemVisible ? (
+          <div
+            className="dataset-new-item-action-bar"
+            aria-label={t("datasetManagement.detail.addSample")}
+          >
+            <div className="dataset-new-item-action-title" aria-live="polite">
+              <span aria-hidden="true" />
+              <strong>{t("datasetManagement.detail.addSample")}</strong>
+            </div>
+            <Space className="dataset-new-item-action-buttons">
+              <Button disabled={saving} onClick={handleCancelNewItem}>
+                {t("common.cancel")}
+              </Button>
+              <Button
+                type="primary"
+                loading={saving}
+                onClick={() => void handleSaveNewItem()}
+              >
+                {t("common.save")}
+              </Button>
+            </Space>
+          </div>
+        ) : null}
 
         <div className="dataset-detail-filters">
           <Input

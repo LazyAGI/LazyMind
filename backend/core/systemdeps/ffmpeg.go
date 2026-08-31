@@ -365,6 +365,8 @@ const (
 	windowsX64FFmpegSHA     = "99785441c93840109a84967aa9d226c566523ed79d9865570afdac7a12398731"
 	darwinX64FFmpegSHA      = "e91df72a1ee7c26606f90dd2dd4dcccc6a75140ff9ea6fdd50faae828b82ba69"
 	darwinX64FFprobeSHA     = "399b93f0b9862f69767afa343e90c2f48d7e7958cadbb6deb76a012d0e3b7ce3"
+	darwinArm64FFmpegSHA    = "8287a1b2229e05eb41859f073e18e6c52c60a778f2f5e6881070fe51b79407fe"
+	darwinArm64FFprobeSHA   = "102a26b8940a053298d9929bfaae71e4b6ef65ba5f19a99a88c433108560741a"
 	linuxX64FFmpegSHA       = "baad8e0c2864a7b4045bf44a596376f889e7454988a4e689d2c0f766646c2c22"
 )
 
@@ -393,7 +395,8 @@ func ffmpegDownloadsFor(goos, goarch string) ([]ffmpegDownload, error) {
 			}}, nil
 		}
 	case "darwin":
-		if goarch == "amd64" || goarch == "arm64" {
+		switch goarch {
+		case "amd64":
 			return []ffmpegDownload{
 				{
 					url:         modelScopeFFmpegBaseURL + "lazymind-ffmpeg-darwin-x64-8.1.2.zip",
@@ -406,6 +409,23 @@ func ffmpegDownloadsFor(goos, goarch string) ([]ffmpegDownload, error) {
 					url:         modelScopeFFmpegBaseURL + "lazymind-ffprobe-darwin-x64-8.1.2.zip",
 					sha256:      darwinX64FFprobeSHA,
 					fallbackURL: "https://evermeet.cx/ffmpeg/getrelease/ffprobe/zip",
+					format:      ffmpegArchiveZip,
+					extension:   ".zip",
+				},
+			}, nil
+		case "arm64":
+			return []ffmpegDownload{
+				{
+					url:         modelScopeFFmpegBaseURL + "lazymind-ffmpeg-darwin-arm64-9.0.1.zip",
+					sha256:      darwinArm64FFmpegSHA,
+					fallbackURL: "https://ffmpeg.martin-riedl.de/download/macos/arm64/1787073674_9.0.1/ffmpeg.zip",
+					format:      ffmpegArchiveZip,
+					extension:   ".zip",
+				},
+				{
+					url:         modelScopeFFmpegBaseURL + "lazymind-ffprobe-darwin-arm64-9.0.1.zip",
+					sha256:      darwinArm64FFprobeSHA,
+					fallbackURL: "https://ffmpeg.martin-riedl.de/download/macos/arm64/1787073674_9.0.1/ffprobe.zip",
 					format:      ffmpegArchiveZip,
 					extension:   ".zip",
 				},

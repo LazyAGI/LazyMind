@@ -19,6 +19,7 @@ from .context_estimator import (
     estimate_tokens,
     render_context_markdown,
     report_to_dict,
+    attach_window_budget,
 )
 
 __all__ = [
@@ -36,6 +37,7 @@ __all__ = [
     'estimate_tokens',
     'render_context_markdown',
     'report_to_dict',
+    'attach_window_budget',
     'AttachmentRef',
     'normalize_attachments',
     'render_attachment_content',

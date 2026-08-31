@@ -41,13 +41,15 @@ type RuntimeConfigSnapshot struct {
 	Algorithm          AlgorithmConfig           `json:"algorithm,omitempty"`
 	FileWatcher        FileWatcherConfigSnapshot `json:"fileWatcher,omitempty"`
 	ProcessComposePort int                       `json:"processComposePort,omitempty"`
+	PortResolutions    []PortResolution          `json:"portResolutions,omitempty"`
 }
 
 type FileWatcherConfigSnapshot struct {
-	Port          int    `json:"port,omitempty"`
-	AgentID       string `json:"agentId,omitempty"`
-	WatchHostDir  string `json:"watchHostDir,omitempty"`
-	HostPathStyle string `json:"hostPathStyle,omitempty"`
+	Port          int      `json:"port,omitempty"`
+	AgentID       string   `json:"agentId,omitempty"`
+	WatchHostDir  string   `json:"watchHostDir,omitempty"`
+	AllowedRoots  []string `json:"allowedRoots,omitempty"`
+	HostPathStyle string   `json:"hostPathStyle,omitempty"`
 }
 
 type RuntimeServiceState struct {
@@ -130,9 +132,11 @@ func snapshotRuntimeConfig(cfg RuntimeConfig) RuntimeConfigSnapshot {
 			Port:          cfg.FileWatcher.Port,
 			AgentID:       cfg.FileWatcher.AgentID,
 			WatchHostDir:  cfg.FileWatcher.WatchHostDir,
+			AllowedRoots:  append([]string(nil), cfg.FileWatcher.AllowedRoots...),
 			HostPathStyle: cfg.FileWatcher.HostPathStyle,
 		},
 		ProcessComposePort: cfg.ProcessComposePort,
+		PortResolutions:    append([]PortResolution(nil), cfg.PortResolutions...),
 	}
 }
 
@@ -170,9 +174,13 @@ func applyStateConfig(cfg RuntimeConfig, state RuntimeState) RuntimeConfig {
 	if state.Config.FileWatcher.WatchHostDir != "" {
 		cfg.FileWatcher.WatchHostDir = state.Config.FileWatcher.WatchHostDir
 	}
+	if len(state.Config.FileWatcher.AllowedRoots) > 0 {
+		cfg.FileWatcher.AllowedRoots = append([]string(nil), state.Config.FileWatcher.AllowedRoots...)
+	}
 	if state.Config.FileWatcher.HostPathStyle != "" {
 		cfg.FileWatcher.HostPathStyle = state.Config.FileWatcher.HostPathStyle
 	}
+	cfg.PortResolutions = append([]PortResolution(nil), state.Config.PortResolutions...)
 	return cfg
 }
 

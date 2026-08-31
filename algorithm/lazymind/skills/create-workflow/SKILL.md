@@ -187,6 +187,15 @@ Do not use `key`, `contents`, `content`, `slot`, `material`, or other aliases
 inside UI tabs. Every exposed slot must appear exactly once under
 `ui.tabs[].slots[].id`.
 
+For a multi-page composite, declare each page-aligned output as an ordered list and
+publish matching `sort_order` positions. Keep `layout: composite`, reference all
+participating slots from `composite_layout`, and set `composite_tab_position` when
+page navigation is needed. Full-page HTML requires an explicit
+`ui.slots.<slot>.widgetType: html-slide`; never rely on a slot name or content sniffing.
+Declare export as `ui.tabs[].actions[]` with `type: export`, a provider, an `inputs`
+mapping, supported `formats`, and `alignment: sort_order`. Do not collapse multiple
+pages into one artifact during generation or repair.
+
 ### Exact Transition Schema
 
 Use this exact `scenario/state.yml.transitions` shape:

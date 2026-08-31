@@ -1,0 +1,49 @@
+locale: en-US
+
+classification:
+  category: Information & analysis
+  tags:
+    - Daily hot topics
+    - Hot-list digest
+    - News analysis
+    - Topic insights
+
+presentation:
+  card:
+    title: Daily topic assistant
+    description: Find the topics worth your attention across hot lists and explain what happened, why it matters, and what to watch next
+    output_type: report
+    output_label: Daily hot-topic digest
+    cover_asset: cover
+    result_summary: Explore the full path from hot-list aggregation and filtering to three-layer insights and source notes
+  detail:
+    title: Daily topic assistant
+    description: Bring together hot-list signals from Weibo, Zhihu, Bilibili, Douyin, Baidu, 36Kr, SSPAI, and Tieba, filter the topics worth reading, and explain what happened, why it matters, and what to watch next with source notes.
+    attachment_hint: Optionally provide preferred or excluded topics, commentary style, or output format
+
+tasks:
+  - id: daily-hot-topics
+    selector:
+      title: Generate today's hot-topic digest
+      description: Select topics from multi-platform hot lists, analyze their impact, and identify what to watch next
+      output_label: Today's hot-topic digest
+    launch:
+      prompt_short: Help me see which topics are worth following today.
+      prompt: >-
+        Based on what can be found right now, please prepare a digest of today's hot topics. If a source is unavailable, the information is insufficient, or only a hot-list title is visible, tell me directly and do not present guesses as facts.
+    replay:
+      steps:
+        - title: Aggregate multi-platform hot lists
+          description: Fetch live hot lists from eight platforms and record platform status
+        - title: Score, select, and deduplicate
+          description: Select about ten topics using heat, cross-platform resonance, and diversity
+        - title: Generate three-layer insights
+          description: Explain what happened, why it matters, and what to watch next
+        - title: Assemble sources and report
+          description: Add source links, excerpts, search notes, and the structured digest
+    result:
+      template: html_preview_v1
+      eyebrow: Daily hot-topic digest
+      title: Today's hot topics and insights report
+      summary: Explore hot-list aggregation, filtering, What / So What / Now What insights, source notes, and follow-up questions; sample content is not a real-time news conclusion.
+      html_asset: hot_news_demo

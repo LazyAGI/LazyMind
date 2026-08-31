@@ -23,9 +23,13 @@ import { useTranslation } from "react-i18next";
 import { useLocation } from "react-router-dom";
 import {
   checkFFmpegDependency,
+  checkEditablePPTDependency,
   getFFmpegDependencyStatus,
+  getEditablePPTDependencyStatus,
   installFFmpegDependency,
+  installEditablePPTDependency,
   updateFFmpegDependency,
+  type EditablePPTDependencyStatus,
   type FFmpegDependencyStatus,
 } from "../api/systemDependencies";
 import { getLocalizedErrorMessage } from "@/components/request";
@@ -42,20 +46,28 @@ export default function DependencyInstallSection() {
   const showSection = isLocalRuntime() || isDesktopRuntime();
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<FFmpegDependencyStatus | null>(null);
+  const [pptStatus, setPptStatus] = useState<EditablePPTDependencyStatus | null>(null);
   const [loadError, setLoadError] = useState("");
   const [modalOpen, setModalOpen] = useState(false);
+  const [pptModalOpen, setPptModalOpen] = useState(false);
   const [customPath, setCustomPath] = useState("");
   const [saving, setSaving] = useState(false);
   const [installing, setInstalling] = useState(false);
   const [checking, setChecking] = useState(false);
+  const [pptInstalling, setPptInstalling] = useState(false);
+  const [pptChecking, setPptChecking] = useState(false);
   const [searchValue, setSearchValue] = useState("");
 
   const refresh = useCallback(async () => {
     setLoading(true);
     setLoadError("");
     try {
-      const next = await getFFmpegDependencyStatus();
+      const [next, nextPpt] = await Promise.all([
+        getFFmpegDependencyStatus(),
+        getEditablePPTDependencyStatus(),
+      ]);
       setStatus(next);
+      setPptStatus(nextPpt);
       setCustomPath(next.customPath || "");
     } catch (error) {
       setLoadError(getLocalizedErrorMessage(error) || t("modelProvider.external.dependencyLoadFailed"));
@@ -71,13 +83,20 @@ export default function DependencyInstallSection() {
   }, [refresh, showSection]);
 
   useEffect(() => {
-    if (!showSection || location.hash !== "#ffmpeg-dependency") {
+    if (!showSection) {
       return;
     }
-    setModalOpen(true);
+    const dependencyId = location.hash === "#editable-ppt-dependency"
+      ? "editable-ppt-dependency"
+      : location.hash === "#ffmpeg-dependency"
+        ? "ffmpeg-dependency"
+        : "";
+    if (!dependencyId) return;
+    if (dependencyId === "editable-ppt-dependency") setPptModalOpen(true);
+    else setModalOpen(true);
     requestAnimationFrame(() => {
       document
-        .getElementById("ffmpeg-dependency")
+        .getElementById(dependencyId)
         ?.scrollIntoView({ behavior: "smooth", block: "center" });
     });
   }, [location.hash, showSection]);
@@ -89,13 +108,18 @@ export default function DependencyInstallSection() {
     return status.installed ? ("configured" as const) : ("missing" as const);
   }, [status]);
   const normalizedSearchValue = searchValue.trim().toLowerCase();
-  const shouldShowCard = useMemo(() => {
+  const shouldShowFFmpegCard = useMemo(() => {
     if (!normalizedSearchValue) {
       return true;
     }
     const title = t("modelProvider.external.dependencyFfmpegTitle").toLowerCase();
     const summary = t("modelProvider.external.dependencyFfmpegSummary").toLowerCase();
     return title.includes(normalizedSearchValue) || summary.includes(normalizedSearchValue);
+  }, [normalizedSearchValue, t]);
+  const shouldShowPptCard = useMemo(() => {
+    if (!normalizedSearchValue) return true;
+    return t("modelProvider.external.dependencyEditablePptTitle").toLowerCase().includes(normalizedSearchValue)
+      || t("modelProvider.external.dependencyEditablePptSummary").toLowerCase().includes(normalizedSearchValue);
   }, [normalizedSearchValue, t]);
 
   const handleSaveCustomPath = async () => {
@@ -154,6 +178,34 @@ export default function DependencyInstallSection() {
     }
   };
 
+  const handleInstallEditablePPT = async () => {
+    setPptInstalling(true);
+    try {
+      const next = await installEditablePPTDependency();
+      setPptStatus(next);
+      message.success(t("modelProvider.external.dependencyEditablePptInstallSuccess"));
+    } catch (error) {
+      message.error(getLocalizedErrorMessage(error) || t("modelProvider.external.dependencyEditablePptInstallFailed"));
+    } finally {
+      setPptInstalling(false);
+    }
+  };
+
+  const handleRecheckEditablePPT = async () => {
+    setPptChecking(true);
+    try {
+      const next = await checkEditablePPTDependency();
+      setPptStatus(next);
+      message.success(next.installed
+        ? t("modelProvider.external.dependencyCheckReady")
+        : t("modelProvider.external.dependencyCheckMissing"));
+    } catch (error) {
+      message.error(getLocalizedErrorMessage(error) || t("modelProvider.external.dependencyLoadFailed"));
+    } finally {
+      setPptChecking(false);
+    }
+  };
+
   if (!showSection) {
     return null;
   }
@@ -199,7 +251,7 @@ export default function DependencyInstallSection() {
 
         <Spin spinning={loading && !status}>
           <div className="model-provider-service-grid">
-            {shouldShowCard ? (
+            {shouldShowFFmpegCard ? (
               <button
                 className="model-provider-service-card tone-violet"
                 onClick={() => setModalOpen(true)}
@@ -233,8 +285,34 @@ export default function DependencyInstallSection() {
                 </span>
               </button>
             ) : null}
+            {shouldShowPptCard ? (
+              <button
+                className="model-provider-service-card tone-blue"
+                id="editable-ppt-dependency"
+                onClick={() => setPptModalOpen(true)}
+                type="button"
+              >
+                <span className="model-provider-service-logo" aria-hidden="true">
+                  <SettingOutlined />
+                </span>
+                <div className="model-provider-service-card-copy">
+                  <div className="model-provider-service-title-row">
+                    <h4>{t("modelProvider.external.dependencyEditablePptTitle")}</h4>
+                    <Tag className="model-provider-service-status" color={pptStatus?.installed ? "success" : "default"}>
+                      {t(`modelProvider.external.status.${pptStatus?.installed ? "configured" : "missing"}`)}
+                    </Tag>
+                  </div>
+                  <Tooltip placement="topLeft" title={t("modelProvider.external.dependencyEditablePptSummary")}>
+                    <span className="model-provider-service-summary-wrap">
+                      <p className="model-provider-service-summary">{t("modelProvider.external.dependencyEditablePptSummary")}</p>
+                    </span>
+                  </Tooltip>
+                </div>
+                <span className="model-provider-service-card-arrow" aria-hidden="true"><RightOutlined /></span>
+              </button>
+            ) : null}
           </div>
-          {!loading && !loadError && !shouldShowCard ? (
+          {!loading && !loadError && !shouldShowFFmpegCard && !shouldShowPptCard ? (
             <div className="model-provider-category-empty">
               <Empty description={t("modelProvider.external.noMatchedServices")} image={Empty.PRESENTED_IMAGE_SIMPLE} />
             </div>
@@ -317,6 +395,50 @@ export default function DependencyInstallSection() {
             <Button icon={<SyncOutlined />} loading={checking} onClick={() => void handleRecheck()}>
               {t("modelProvider.external.dependencyRecheckAction")}
             </Button>
+          </div>
+        </Space>
+      </Modal>
+
+      <Modal
+        className="model-provider-service-config-modal"
+        destroyOnClose
+        footer={null}
+        onCancel={() => setPptModalOpen(false)}
+        open={pptModalOpen}
+        title={t("modelProvider.external.dependencyEditablePptModalTitle")}
+        width={640}
+      >
+        <Space direction="vertical" size={16} style={{ width: "100%" }}>
+          <Alert message={t("modelProvider.external.dependencyEditablePptImpact")} showIcon type="info" />
+          {pptStatus?.message && !pptStatus.installed ? <Alert message={pptStatus.message} showIcon type="warning" /> : null}
+          {pptStatus?.installed ? (
+            <Alert
+              message={t("modelProvider.external.dependencyEditablePptDetected", {
+                chromium: pptStatus.chromiumPath || "-",
+              })}
+              showIcon
+              type="success"
+            />
+          ) : null}
+          <div>
+            <h4>{t("modelProvider.external.dependencyInstallBundledTitle")}</h4>
+            <p>{t("modelProvider.external.dependencyEditablePptInstallDesc")}</p>
+            <Space>
+              <Button
+                disabled={!pptStatus?.installSupported || Boolean(pptStatus?.installed)}
+                icon={<DownloadOutlined />}
+                loading={pptInstalling}
+                onClick={() => void handleInstallEditablePPT()}
+                type="primary"
+              >
+                {pptStatus?.installed
+                  ? t("modelProvider.external.dependencyInstalledAction")
+                  : t("modelProvider.external.dependencyInstallAction")}
+              </Button>
+              <Button icon={<SyncOutlined />} loading={pptChecking} onClick={() => void handleRecheckEditablePPT()}>
+                {t("modelProvider.external.dependencyRecheckAction")}
+              </Button>
+            </Space>
           </div>
         </Space>
       </Modal>

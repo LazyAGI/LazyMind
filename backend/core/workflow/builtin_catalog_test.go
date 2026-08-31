@@ -2,6 +2,9 @@ package workflow
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -81,6 +84,14 @@ func TestDisabledBuiltinWorkflowIDsIgnoresArchivedCatalogEntries(t *testing.T) {
 }
 
 func TestBuiltinPackageIgnoresPythonRuntimeCacheFiles(t *testing.T) {
+	for _, name := range []string{"__pycache__", "node_modules", ".cache"} {
+		if !ignoredBuiltinPackageDir(name) {
+			t.Fatalf("runtime dependency directory %q was not ignored", name)
+		}
+	}
+	if ignoredBuiltinPackageDir("scripts") {
+		t.Fatal("source directory scripts must remain in the immutable package")
+	}
 	for _, name := range []string{"tools.pyc", "tools.pyo", ".DS_Store"} {
 		if !ignoredBuiltinPackageFile(name) {
 			t.Fatalf("runtime cache file %q was not ignored", name)
@@ -88,5 +99,266 @@ func TestBuiltinPackageIgnoresPythonRuntimeCacheFiles(t *testing.T) {
 	}
 	if ignoredBuiltinPackageFile("tools.py") {
 		t.Fatal("source file tools.py must remain in the immutable package")
+	}
+}
+
+func TestReadBuiltinPackageFilesIgnoresDirectorySymlink(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "workflow.yaml"), []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	exporterDir := filepath.Join(root, "runtime", "scripts", "export_pptx")
+	if err := os.MkdirAll(exporterDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dependencyDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dependencyDir, "package.json"), []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(dependencyDir, filepath.Join(exporterDir, "runtime_dependencies")); err != nil {
+		t.Skipf("directory symlinks are unavailable: %v", err)
+	}
+
+	files, err := readBuiltinPackageFiles(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 || string(files["workflow.yaml"]) != "keep" {
+		t.Fatalf("directory symlink leaked into built-in package: %#v", files)
+	}
+}
+
+func TestReadBuiltinPackageFilesIgnoresNodeModulesEntries(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "workflow.yaml"), []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Windows directory junctions can be surfaced to WalkDir as non-directory
+	// entries, so exercise both representations.
+	if err := os.WriteFile(filepath.Join(root, "node_modules"), []byte("junction placeholder"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	nested := filepath.Join(root, "runtime", "node_modules")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nested, "dependency.js"), []byte("ignore"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	files, err := readBuiltinPackageFiles(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(files["workflow.yaml"]) != "keep" {
+		t.Fatalf("source file missing: %#v", files)
+	}
+	for path := range files {
+		if strings.Contains(path, "node_modules") {
+			t.Fatalf("runtime dependency leaked into built-in package: %s", path)
+		}
+	}
+}
+
+func TestBuiltinSeedPublishesNewRevisionWhenCompilerGraphChanges(t *testing.T) {
+	db := newHandlerTestDB(t)
+	root := t.TempDir()
+	workflowYAML := `id: compiler-refresh
+name: Compiler Refresh
+slots:
+  - {id: topic, type: text, external: true}
+  - {id: result, type: text}
+steps:
+  - {id: run, label: Run}
+`
+	stateYAML := `transitions:
+  __start__: [{to: run}]
+  run: [{to: __end__}]
+steps:
+  run:
+    inputs: [{material: topic, required: true}]
+    outputs: [result]
+`
+	if err := os.MkdirAll(filepath.Join(root, "scenario"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "workflow.yaml"), []byte(workflowYAML), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "scenario", "state.yml"), []byte(stateYAML), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := seedBuiltinWorkflow(context.Background(), db.DB, root); err != nil {
+		t.Fatal(err)
+	}
+	var first orm.WorkflowRevision
+	if err := db.DB.First(&first).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.DB.Model(&first).Update("graph_hash", "legacy-compiler-graph").Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := seedBuiltinWorkflow(context.Background(), db.DB, root); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := seedBuiltinWorkflow(context.Background(), db.DB, root); err != nil {
+		t.Fatal(err)
+	}
+	var count int64
+	if err := db.DB.Model(&orm.WorkflowRevision{}).Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 2 {
+		t.Fatalf("revision count=%d, want exactly one compiler refresh", count)
+	}
+	var resource orm.WorkflowResource
+	if err := db.DB.Where("plugin_ref = ?", "builtin:compiler-refresh").First(&resource).Error; err != nil {
+		t.Fatal(err)
+	}
+	var head orm.WorkflowRevision
+	if err := db.DB.Where("id = ?", resource.HeadRevisionID).First(&head).Error; err != nil {
+		t.Fatal(err)
+	}
+	if head.GraphHash == "" || head.GraphHash == "legacy-compiler-graph" || head.RevisionNo != 2 {
+		t.Fatalf("head=%#v", head)
+	}
+}
+
+func TestBuiltinSeedAllocatesAfterDetachedHistoryRevision(t *testing.T) {
+	db := newHandlerTestDB(t)
+	root := t.TempDir()
+	workflowYAML := `id: detached-history
+name: Detached History
+slots:
+  - {id: topic, type: text, external: true}
+  - {id: result, type: text}
+steps:
+  - {id: run, label: Run}
+`
+	stateYAML := `transitions:
+  __start__: [{to: run}]
+  run: [{to: __end__}]
+steps:
+  run:
+    inputs: [{material: topic, required: true}]
+    outputs: [result]
+`
+	if err := os.MkdirAll(filepath.Join(root, "scenario"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "workflow.yaml"), []byte(workflowYAML), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "scenario", "state.yml"), []byte(stateYAML), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := seedBuiltinWorkflow(context.Background(), db.DB, root); err != nil {
+		t.Fatal(err)
+	}
+	var resource orm.WorkflowResource
+	if err := db.DB.Where("plugin_ref = ?", "builtin:detached-history").First(&resource).Error; err != nil {
+		t.Fatal(err)
+	}
+	detached := orm.WorkflowRevision{
+		ID: "injected-history-revision", WorkflowResourceID: resource.ID,
+		RevisionNo: 5, TreeHash: "history-tree", CompiledGraph: []byte(`{}`),
+		GraphHash: "history-graph", GraphSchemaVersion: "3", Message: "history injection",
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := db.DB.Create(&detached).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "scripts.py"), []byte("# package changed\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := seedBuiltinWorkflow(context.Background(), db.DB, root); err != nil {
+		t.Fatal(err)
+	}
+	var head orm.WorkflowRevision
+	if err := db.DB.Where("plugin_ref = ?", "builtin:detached-history").First(&resource).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.DB.Where("id = ?", resource.HeadRevisionID).First(&head).Error; err != nil {
+		t.Fatal(err)
+	}
+	if head.RevisionNo != 6 || resource.Version != 6 {
+		t.Fatalf("head revision=%d resource version=%d, want 6", head.RevisionNo, resource.Version)
+	}
+}
+
+func TestBuiltinSeedDoesNotPromoteMatchingDetachedHistoryRevision(t *testing.T) {
+	db := newHandlerTestDB(t)
+	root := t.TempDir()
+	workflowYAML := `id: detached-matching-history
+name: Detached Matching History
+slots:
+  - {id: topic, type: text, external: true}
+  - {id: result, type: text}
+steps:
+  - {id: run, label: Run}
+`
+	stateYAML := `transitions:
+  __start__: [{to: run}]
+  run: [{to: __end__}]
+steps:
+  run:
+    inputs: [{material: topic, required: true}]
+    outputs: [result]
+`
+	if err := os.MkdirAll(filepath.Join(root, "scenario"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "workflow.yaml"), []byte(workflowYAML), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "scenario", "state.yml"), []byte(stateYAML), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := seedBuiltinWorkflow(context.Background(), db.DB, root); err != nil {
+		t.Fatal(err)
+	}
+	var resource orm.WorkflowResource
+	if err := db.DB.Where("plugin_ref = ?", "builtin:detached-matching-history").First(&resource).Error; err != nil {
+		t.Fatal(err)
+	}
+	completeRevisionID := resource.HeadRevisionID
+	var complete orm.WorkflowRevision
+	if err := db.DB.Where("id = ?", completeRevisionID).First(&complete).Error; err != nil {
+		t.Fatal(err)
+	}
+	detached := orm.WorkflowRevision{
+		ID: "00000000-0000-0000-0000-000000000000", WorkflowResourceID: resource.ID,
+		RevisionNo: 2, TreeHash: complete.TreeHash, CompiledGraph: complete.CompiledGraph,
+		GraphHash: complete.GraphHash, GraphSchemaVersion: complete.GraphSchemaVersion,
+		Message: "history injection", CreatedAt: time.Now().UTC(),
+	}
+	if err := db.DB.Create(&detached).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.DB.Model(&resource).Updates(map[string]any{
+		"head_revision_id": detached.ID,
+		"version":          detached.RevisionNo,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := seedBuiltinWorkflow(context.Background(), db.DB, root); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.DB.Where("plugin_ref = ?", "builtin:detached-matching-history").First(&resource).Error; err != nil {
+		t.Fatal(err)
+	}
+	if resource.HeadRevisionID != completeRevisionID || resource.Version != complete.RevisionNo {
+		t.Fatalf("head=%s version=%d, want intact revision %s version %d",
+			resource.HeadRevisionID, resource.Version, completeRevisionID, complete.RevisionNo)
+	}
+	var detachedEntries int64
+	if err := db.DB.Model(&orm.WorkflowRevisionEntry{}).
+		Where("revision_id = ?", detached.ID).Count(&detachedEntries).Error; err != nil {
+		t.Fatal(err)
+	}
+	if detachedEntries != 0 {
+		t.Fatalf("detached history revision unexpectedly gained %d package entries", detachedEntries)
 	}
 }

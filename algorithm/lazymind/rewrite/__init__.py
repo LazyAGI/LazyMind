@@ -12,10 +12,12 @@ from .base import (
 # Import business modules to register their prompt builders and edit dispatch.
 from . import skill  # noqa: F401
 from . import polish  # noqa: F401
+from .polish import rewrite_editable_selection
 
 __all__ = [
     'BadRequestError',
     'RewriteTaskType',
     'UnprocessableContentError',
     'rewrite_content',
+    'rewrite_editable_selection',
 ]

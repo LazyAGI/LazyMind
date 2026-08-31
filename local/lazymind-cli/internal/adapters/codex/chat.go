@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"lazymind/agentconnector/internal/agentcatalog"
 	"lazymind/agentconnector/internal/agentexec"
 	"lazymind/agentconnector/internal/chatagent"
 )
@@ -15,8 +16,6 @@ const maxCodexEventBytes = 4 << 20
 
 const codexRecoveryPrompt = `The previous process for this same LazyMind turn was interrupted. Continue the existing user request from this Codex thread; do not start the task again. Before any LazyMind write, inspect the current Workflow/session/artifact state through the lazymind MCP server and reuse completed work. Do not create a duplicate Workflow session or repeat a completed step. Finish with one final user-facing answer.`
 
-// ChatRunner is the Codex anti-corruption adapter. It translates only the
-// documented `codex exec --json` event stream into the host-neutral protocol.
 type ChatRunner struct {
 	binary string
 	self   string
@@ -24,6 +23,9 @@ type ChatRunner struct {
 }
 
 func NewChatRunner(binary string) (*ChatRunner, error) {
+	if err := CleanupLegacyControl(); err != nil {
+		return nil, fmt.Errorf("clean up legacy Codex control configuration: %w", err)
+	}
 	resolved, err := FindBinary(binary)
 	if err != nil {
 		return nil, err
@@ -35,6 +37,32 @@ func NewChatRunner(binary string) (*ChatRunner, error) {
 	return &ChatRunner{binary: resolved, self: self, home: home}, nil
 }
 
+func (r *ChatRunner) Availability() (bool, string) {
+	return availability(r.binary)
+}
+
+func Probe(binary string) (bool, bool, string) {
+	resolved, err := FindBinary(binary)
+	if err != nil {
+		return false, false, err.Error()
+	}
+	ready, reason := availability(resolved)
+	return true, ready, reason
+}
+
+func availability(binary string) (bool, string) {
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+	if _, err := agentexec.Run(ctx, binary, "login", "status"); err != nil {
+		return false, "Codex CLI is not signed in; run `codex login`"
+	}
+	return true, ""
+}
+
+func (r *ChatRunner) Sessions(ctx context.Context) ([]chatagent.NativeSession, error) {
+	return agentcatalog.CodexSessions(ctx)
+}
+
 func (r *ChatRunner) Run(ctx context.Context, run chatagent.Run, emit func(chatagent.Event) error) error {
 	if r == nil || strings.TrimSpace(r.binary) == "" {
 		return errors.New("Codex CLI is unavailable")
@@ -44,6 +72,11 @@ func (r *ChatRunner) Run(ctx context.Context, run chatagent.Run, emit func(chata
 		return err
 	}
 	arguments := []string{"exec"}
+	policy := []string{
+		"--config", `sandbox_mode="workspace-write"`,
+		"--config", `approval_policy="on-request"`,
+		"--config", `approvals_reviewer="auto_review"`,
+	}
 	mcpConfig := []string{
 		"--config", fmt.Sprintf("mcp_servers.%s.command=%q", serverName, r.self),
 		"--config", fmt.Sprintf(`mcp_servers.%s.args=["mcp","proxy"]`, serverName),
@@ -53,12 +86,7 @@ func (r *ChatRunner) Run(ctx context.Context, run chatagent.Run, emit func(chata
 		"--config", fmt.Sprintf("mcp_servers.%s.env.LAZYMIND_EXTERNAL_LEASE=%q", serverName, run.LeaseToken),
 		"--config", fmt.Sprintf("mcp_servers.%s.env.LAZYMIND_EXTERNAL_HOST=%q", serverName, run.HostID),
 	}
-	policy := []string{
-		"--config", `sandbox_mode="workspace-write"`,
-		"--config", `approval_policy="on-request"`,
-		"--config", `approvals_reviewer="auto_review"`,
-	}
-	resume := (run.Action == "resume" || run.Action == "recover") && strings.TrimSpace(run.ProviderThreadID) != ""
+	resume := (run.Action == "resume" || run.Action == "recover" || run.Action == "regenerate") && strings.TrimSpace(run.ProviderThreadID) != ""
 	if resume {
 		arguments = append(arguments, "resume")
 		arguments = append(arguments, policy...)
@@ -71,7 +99,7 @@ func (r *ChatRunner) Run(ctx context.Context, run chatagent.Run, emit func(chata
 	}
 	prompt := run.Prompt
 	if run.Action == "recover" {
-		prompt = codexRecoveryPrompt
+		prompt = strings.TrimSpace(run.Prompt + "\n\n" + codexRecoveryPrompt)
 	}
 	sawTurnCompleted, sawMessage := false, false
 	err = (agentexec.StreamCommand{
@@ -106,9 +134,7 @@ func (r *ChatRunner) Run(ctx context.Context, run chatagent.Run, emit func(chata
 		case "turn.completed":
 			if !sawTurnCompleted {
 				sawTurnCompleted = true
-				if sawMessage {
-					return emit(chatagent.Event{Type: "turn_completed"})
-				}
+				return emit(chatagent.Event{Type: "turn_completed"})
 			}
 		}
 		return nil

@@ -23,7 +23,7 @@ type Store interface {
 	LPush(ctx context.Context, key string, value []byte, ttl time.Duration) error
 	LRange(ctx context.Context, key string, start, stop int64) ([]string, error)
 	LTrim(ctx context.Context, key string, start, stop int64) error
-	BLPop(ctx context.Context, key string, timeout time.Duration) error
+	LPop(ctx context.Context, key string) (bool, error)
 
 	ZAdd(ctx context.Context, key, member string, score float64, ttl time.Duration) error
 	ZRemRangeByScore(ctx context.Context, key string, min, max float64) error

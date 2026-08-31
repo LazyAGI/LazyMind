@@ -16,12 +16,19 @@ import (
 	"lazymind/core/store"
 )
 
-func TestCheckGroupRequiresRequestAPIKey(t *testing.T) {
+func TestCheckGroupRequiresAPIKeyOnlyForDefaultBaseURL(t *testing.T) {
 	tests := []struct {
-		name        string
-		requestBody string
-		wantStatus  int
-		wantAPIKey  string
+		name           string
+		providerName   string
+		defaultBaseURL string
+		storedBaseURL  string
+		requestBody    string
+		wantStatus     int
+		wantAPIKey     string
+		wantSource     string
+		wantURL        string
+		wantStoredURL  string
+		wantSkipAuth   bool
 	}{
 		{
 			name:        "omitted key is rejected",
@@ -34,10 +41,60 @@ func TestCheckGroupRequiresRequestAPIKey(t *testing.T) {
 			wantStatus:  http.StatusBadRequest,
 		},
 		{
+			name:          "omitted key is accepted for custom base url",
+			storedBaseURL: "https://models.example.com/v1",
+			requestBody:   `{"provider_name":"Qwen","base_url":"https://models.example.com/v1","dry_run":false}`,
+			wantStatus:    http.StatusOK,
+			wantSource:    "qwen",
+			wantURL:       "https://models.example.com/v1",
+			wantSkipAuth:  true,
+		},
+		{
+			name:          "empty key is accepted for custom base url",
+			storedBaseURL: "http://172.24.176.1:43435/v1/",
+			requestBody:   `{"provider_name":"Qwen","base_url":"http://172.24.176.1:43435/v1/","api_key":"","dry_run":false}`,
+			wantStatus:    http.StatusOK,
+			wantSource:    "qwen",
+			wantURL:       "http://172.24.176.1:43435/v1/",
+			wantSkipAuth:  true,
+		},
+		{
 			name:        "provided key takes precedence",
 			requestBody: `{"provider_name":"Qwen","base_url":"https://dashscope.aliyuncs.com/","api_key":"request-key","dry_run":false}`,
 			wantStatus:  http.StatusOK,
 			wantAPIKey:  "request-key",
+			wantSource:  "qwen",
+			wantURL:     "https://dashscope.aliyuncs.com/",
+		},
+		{
+			name:         "official provider proxy keeps official source",
+			providerName: "Qwen",
+			requestBody:  `{"provider_name":"OpenAI","base_url":"http://12.34.56.78:8000/v1","api_key":"proxy-request-key","dry_run":false}`,
+			wantStatus:   http.StatusOK,
+			wantAPIKey:   "proxy-request-key",
+			wantSource:   "qwen",
+			wantURL:      "http://12.34.56.78:8000/v1",
+		},
+		{
+			name:         "request provider fragment is replaced by canonical parent",
+			providerName: "OpenRouter",
+			requestBody:  `{"provider_name":"port!!!garbage","base_url":"https://proxy.example.com/v1/","api_key":"fragment-key","dry_run":false}`,
+			wantStatus:   http.StatusOK,
+			wantAPIKey:   "fragment-key",
+			wantSource:   "openrouter",
+			wantURL:      "https://proxy.example.com/v1/",
+		},
+		{
+			name:           "official openrouter suffix is removed after verification",
+			providerName:   "OpenRouter",
+			defaultBaseURL: "https://openrouter.ai/api/v1/",
+			storedBaseURL:  "https://openrouter.ai/api/v1/invalid_suffix",
+			requestBody:    `{"provider_name":"OpenRouter","base_url":"https://openrouter.ai/api/v1/invalid_suffix","api_key":"openrouter-key","dry_run":false}`,
+			wantStatus:     http.StatusOK,
+			wantAPIKey:     "openrouter-key",
+			wantSource:     "openrouter",
+			wantURL:        "https://openrouter.ai/api/v1/",
+			wantStoredURL:  "https://openrouter.ai/api/v1/",
 		},
 	}
 
@@ -59,11 +116,19 @@ func TestCheckGroupRequiresRequestAPIKey(t *testing.T) {
 			}
 
 			now := time.Now()
+			providerName := tc.providerName
+			if providerName == "" {
+				providerName = "Qwen"
+			}
+			defaultBaseURL := tc.defaultBaseURL
+			if defaultBaseURL == "" {
+				defaultBaseURL = "https://dashscope.aliyuncs.com/"
+			}
 			defaultProvider := orm.DefaultModelProvider{
 				ID:          "default-qwen",
-				Name:        "Qwen",
+				Name:        providerName,
 				Description: "Qwen provider",
-				BaseURL:     "https://dashscope.aliyuncs.com/",
+				BaseURL:     defaultBaseURL,
 				Category:    defaultProviderCategory,
 				CreatedAt:   now,
 				UpdatedAt:   now,
@@ -86,11 +151,15 @@ func TestCheckGroupRequiresRequestAPIKey(t *testing.T) {
 			if err != nil {
 				t.Fatalf("encrypt stored key: %v", err)
 			}
+			storedBaseURL := tc.storedBaseURL
+			if storedBaseURL == "" {
+				storedBaseURL = defaultProvider.BaseURL
+			}
 			group := orm.UserModelProviderGroup{
 				ID:                  "qwen-group",
 				UserModelProviderID: userProvider.ID,
 				Name:                "Qwen",
-				BaseURL:             defaultProvider.BaseURL,
+				BaseURL:             storedBaseURL,
 				APIKeyCiphertext:    ciphertext,
 				CredentialVersion:   modelProviderCredentialVersion,
 				CredentialRevision:  1,
@@ -147,12 +216,24 @@ func TestCheckGroupRequiresRequestAPIKey(t *testing.T) {
 			if received.APIKey != tc.wantAPIKey {
 				t.Fatalf("upstream api key = %q, want %q", received.APIKey, tc.wantAPIKey)
 			}
+			if received.Source != tc.wantSource {
+				t.Fatalf("upstream source = %q, want canonical provider source %q", received.Source, tc.wantSource)
+			}
+			if received.URL != tc.wantURL {
+				t.Fatalf("upstream URL = %q, want proxy URL %q", received.URL, tc.wantURL)
+			}
+			if received.SkipAuth != tc.wantSkipAuth {
+				t.Fatalf("upstream skip_auth = %t, want %t", received.SkipAuth, tc.wantSkipAuth)
+			}
 			var stored orm.UserModelProviderGroup
 			if err := db.Take(&stored, "id = ?", group.ID).Error; err != nil {
 				t.Fatalf("reload group: %v", err)
 			}
 			if !stored.IsVerified {
 				t.Fatal("expected group to be marked verified")
+			}
+			if tc.wantStoredURL != "" && stored.BaseURL != tc.wantStoredURL {
+				t.Fatalf("stored base URL = %q, want %q", stored.BaseURL, tc.wantStoredURL)
 			}
 		})
 	}
@@ -169,6 +250,7 @@ func TestCreateGroupVerifiesSubmittedAPIKeyBeforeSaving(t *testing.T) {
 		&orm.DefaultModelProvider{},
 		&orm.UserModelProvider{},
 		&orm.UserModelProviderGroup{},
+		&orm.UserSelectedModel{},
 	); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
@@ -239,6 +321,17 @@ func TestCreateGroupVerifiesSubmittedAPIKeyBeforeSaving(t *testing.T) {
 	if received.APIKey != "submitted-key" {
 		t.Fatalf("upstream api key = %q, want submitted key", received.APIKey)
 	}
+	var createResponse struct {
+		Data struct {
+			IsVerified *bool `json:"is_verified"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&createResponse); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+	if createResponse.Data.IsVerified == nil || !*createResponse.Data.IsVerified {
+		t.Fatalf("expected create response is_verified=true, got %v", createResponse.Data.IsVerified)
+	}
 	var group orm.UserModelProviderGroup
 	if err := db.Where("user_model_provider_id = ?", userProvider.ID).Take(&group).Error; err != nil {
 		t.Fatalf("load created group: %v", err)
@@ -269,7 +362,8 @@ func TestCreateGroupVerifiesSubmittedAPIKeyBeforeSaving(t *testing.T) {
 	}
 	var updateResponse struct {
 		Data struct {
-			Check *CheckModelProviderData `json:"check"`
+			Check      *CheckModelProviderData `json:"check"`
+			IsVerified *bool                   `json:"is_verified"`
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(updateRec.Body).Decode(&updateResponse); err != nil {
@@ -277,6 +371,9 @@ func TestCreateGroupVerifiesSubmittedAPIKeyBeforeSaving(t *testing.T) {
 	}
 	if updateResponse.Data.Check == nil || !updateResponse.Data.Check.Success {
 		t.Fatalf("expected successful verification data, got %+v", updateResponse.Data.Check)
+	}
+	if updateResponse.Data.IsVerified == nil || !*updateResponse.Data.IsVerified {
+		t.Fatalf("expected update response is_verified=true, got %v", updateResponse.Data.IsVerified)
 	}
 
 	failedReq := httptest.NewRequest(
@@ -299,5 +396,262 @@ func TestCreateGroupVerifiesSubmittedAPIKeyBeforeSaving(t *testing.T) {
 	}
 	if count != 1 {
 		t.Fatalf("expected failed verification to create no group, got %d groups", count)
+	}
+}
+
+func TestCustomBaseURLWithoutKeyVerificationStateTransitions(t *testing.T) {
+	t.Setenv("LAZYMIND_MODEL_PROVIDER_SECRET_KEY", "create-custom-group-test-key")
+	db := setupListProviderTestDB(t)
+	if err := db.AutoMigrate(&orm.UserSelectedModel{}); err != nil {
+		t.Fatalf("migrate selected models: %v", err)
+	}
+	store.Init(db, db, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+
+	now := time.Now()
+	defaultProvider := orm.DefaultModelProvider{
+		ID:          "default-openai-custom",
+		Name:        "OpenAI",
+		Description: "OpenAI provider",
+		BaseURL:     "https://api.openai.com/v1/",
+		Category:    defaultProviderCategory,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	userProvider := orm.UserModelProvider{
+		ID:                     "user-openai-custom",
+		DefaultModelProviderID: defaultProvider.ID,
+		Name:                   defaultProvider.Name,
+		Description:            defaultProvider.Description,
+		BaseURL:                defaultProvider.BaseURL,
+		Category:               defaultProvider.Category,
+		Capabilities:           "multi_group,custom_base_url",
+		BaseModel: orm.BaseModel{
+			CreateUserID:   "user-1",
+			CreateUserName: "User 1",
+			CreatedAt:      now,
+			UpdatedAt:      now,
+		},
+	}
+	if err := db.Create(&defaultProvider).Error; err != nil {
+		t.Fatalf("create default provider: %v", err)
+	}
+	if err := db.Create(&userProvider).Error; err != nil {
+		t.Fatalf("create user provider: %v", err)
+	}
+
+	createReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/core/model_providers/"+userProvider.ID+"/groups",
+		strings.NewReader(`{"name":"Local OpenAI","base_url":"http://host.docker.internal:23/v1/","verify":false}`),
+	)
+	createReq.Header.Set("X-User-Id", "user-1")
+	createReq = mux.SetURLVars(createReq, map[string]string{"model_provider_id": userProvider.ID})
+	createRec := httptest.NewRecorder()
+
+	CreateGroup(createRec, createReq)
+
+	if createRec.Code != http.StatusOK {
+		t.Fatalf("create status = %d, want %d: %s", createRec.Code, http.StatusOK, createRec.Body.String())
+	}
+	var createResponse struct {
+		Data struct {
+			ID         string `json:"id"`
+			IsVerified *bool  `json:"is_verified"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(createRec.Body).Decode(&createResponse); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+	if createResponse.Data.IsVerified == nil || *createResponse.Data.IsVerified {
+		t.Fatalf("expected create response is_verified=false, got %v", createResponse.Data.IsVerified)
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/api/core/model_providers/"+userProvider.ID+"/groups", nil)
+	listReq.Header.Set("X-User-Id", "user-1")
+	listReq = mux.SetURLVars(listReq, map[string]string{"model_provider_id": userProvider.ID})
+	listRec := httptest.NewRecorder()
+
+	ListGroups(listRec, listReq)
+
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("list status = %d, want %d: %s", listRec.Code, http.StatusOK, listRec.Body.String())
+	}
+	var listResponse struct {
+		Data struct {
+			Groups []struct {
+				ID         string `json:"id"`
+				IsVerified bool   `json:"is_verified"`
+			} `json:"groups"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(listRec.Body).Decode(&listResponse); err != nil {
+		t.Fatalf("decode list response: %v", err)
+	}
+	if len(listResponse.Data.Groups) != 1 {
+		t.Fatalf("listed groups = %d, want 1", len(listResponse.Data.Groups))
+	}
+	listed := listResponse.Data.Groups[0]
+	if listed.ID != createResponse.Data.ID {
+		t.Fatalf("listed group id = %q, want created id %q", listed.ID, createResponse.Data.ID)
+	}
+	if listed.IsVerified {
+		t.Fatal("expected reloaded group to remain unverified")
+	}
+
+	var checkCalls int
+	var received algoModelCheckBody
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		checkCalls++
+		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"success":true,"message":"accepted"}`))
+	}))
+	defer server.Close()
+	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", server.URL)
+
+	type updateResponse struct {
+		Data struct {
+			IsVerified *bool `json:"is_verified"`
+		} `json:"data"`
+	}
+	updateGroup := func(body string) updateResponse {
+		t.Helper()
+		req := httptest.NewRequest(
+			http.MethodPatch,
+			"/api/core/model_providers/"+userProvider.ID+"/groups/"+createResponse.Data.ID,
+			strings.NewReader(body),
+		)
+		req.Header.Set("X-User-Id", "user-1")
+		req = mux.SetURLVars(req, map[string]string{
+			"model_provider_id": userProvider.ID,
+			"group_id":          createResponse.Data.ID,
+		})
+		rec := httptest.NewRecorder()
+		UpdateGroup(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("update status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+		}
+		var response updateResponse
+		if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+			t.Fatalf("decode update response: %v", err)
+		}
+		if response.Data.IsVerified == nil {
+			t.Fatal("update response omitted is_verified")
+		}
+		return response
+	}
+
+	renameResponse := updateGroup(
+		`{"name":"Renamed Local OpenAI","base_url":"http://host.docker.internal:23/v1/","verify":false}`,
+	)
+	if *renameResponse.Data.IsVerified {
+		t.Fatal("expected rename without verification to preserve pending status")
+	}
+	if checkCalls != 0 {
+		t.Fatalf("rename triggered %d verification calls, want 0", checkCalls)
+	}
+
+	baseURLChangeResponse := updateGroup(
+		`{"name":"Renamed Local OpenAI","base_url":"http://host.docker.internal:24/v1/","verify":false}`,
+	)
+	if *baseURLChangeResponse.Data.IsVerified {
+		t.Fatal("expected base URL change without verification to remain unverified")
+	}
+	if checkCalls != 0 {
+		t.Fatalf("base URL change triggered %d verification calls, want 0", checkCalls)
+	}
+
+	verifyResponse := updateGroup(
+		`{"name":"Renamed Local OpenAI","base_url":"http://host.docker.internal:24/v1/","verify":true}`,
+	)
+	if !*verifyResponse.Data.IsVerified {
+		t.Fatal("expected successful keyless custom endpoint check to mark group verified")
+	}
+	if checkCalls != 1 {
+		t.Fatalf("explicit verification calls = %d, want 1", checkCalls)
+	}
+	if received.APIKey != "" || !received.SkipAuth {
+		t.Fatalf("keyless verification body = %+v, want empty api_key and skip_auth=true", received)
+	}
+
+	var verifiedGroup orm.UserModelProviderGroup
+	if err := db.Take(&verifiedGroup, "id = ?", createResponse.Data.ID).Error; err != nil {
+		t.Fatalf("reload verified group: %v", err)
+	}
+	if !verifiedGroup.IsVerified {
+		t.Fatal("expected successful keyless verification to persist is_verified=true")
+	}
+}
+
+func TestUpdateGroupRejectsOpenAIRequestPathWithoutChangingStoredBaseURL(t *testing.T) {
+	db := setupListProviderTestDB(t)
+	store.Init(db, db, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+
+	now := time.Now()
+	provider := orm.UserModelProvider{
+		ID:                     "user-openai-request-path",
+		DefaultModelProviderID: "default-openai-request-path",
+		Name:                   "OpenAI",
+		Description:            "OpenAI provider",
+		BaseURL:                "https://api.openai.com/v1/",
+		Category:               defaultProviderCategory,
+		Capabilities:           "multi_group,custom_base_url,has_models",
+		BaseModel: orm.BaseModel{
+			CreateUserID:   "user-1",
+			CreateUserName: "User 1",
+			CreatedAt:      now,
+			UpdatedAt:      now,
+		},
+	}
+	group := orm.UserModelProviderGroup{
+		ID:                  "group-openai-request-path",
+		UserModelProviderID: provider.ID,
+		Name:                "OpenAI",
+		BaseURL:             provider.BaseURL,
+		APIKey:              "",
+		APIKeyCiphertext:    "",
+		IsVerified:          false,
+		BaseModel: orm.BaseModel{
+			CreateUserID:   "user-1",
+			CreateUserName: "User 1",
+			CreatedAt:      now,
+			UpdatedAt:      now,
+		},
+	}
+	if err := db.Create(&provider).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&group).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(
+		http.MethodPatch,
+		"/api/core/model_providers/"+provider.ID+"/groups/"+group.ID,
+		strings.NewReader(`{"name":"OpenAI","base_url":"https://api.openai.com/v1/chat/completions","verify":false}`),
+	)
+	req.Header.Set("X-User-Id", "user-1")
+	req = mux.SetURLVars(req, map[string]string{
+		"model_provider_id": provider.ID,
+		"group_id":          group.ID,
+	})
+	rec := httptest.NewRecorder()
+
+	UpdateGroup(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+	var stored orm.UserModelProviderGroup
+	if err := db.Take(&stored, "id = ?", group.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if stored.BaseURL != group.BaseURL {
+		t.Fatalf("stored base URL = %q, want unchanged %q", stored.BaseURL, group.BaseURL)
 	}
 }

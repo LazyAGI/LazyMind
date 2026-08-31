@@ -12,6 +12,21 @@ import (
 
 var ErrInvalidSessionQuery = repositoryError("INVALID_SESSION_QUERY")
 
+type conversationScopeKey struct{}
+
+func WithConversationScope(ctx context.Context, conversationID string) context.Context {
+	conversationID = strings.TrimSpace(conversationID)
+	if conversationID == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, conversationScopeKey{}, conversationID)
+}
+
+func ConversationScope(ctx context.Context) string {
+	conversationID, _ := ctx.Value(conversationScopeKey{}).(string)
+	return strings.TrimSpace(conversationID)
+}
+
 func (r *Repository) AuthorizeConversation(ctx context.Context, conversationID, owner string) error {
 	if r == nil || r.db == nil || strings.TrimSpace(conversationID) == "" || strings.TrimSpace(owner) == "" {
 		return ErrPermissionDenied
@@ -36,6 +51,7 @@ type SessionListQuery struct {
 
 type SessionSummary struct {
 	SessionID          string    `json:"session_id"`
+	ConversationID     string    `json:"conversation_id,omitempty"`
 	WorkflowID         string    `json:"workflow_id"`
 	WorkflowRef        string    `json:"workflow_ref,omitempty"`
 	WorkflowRevisionID string    `json:"workflow_revision_id,omitempty"`
@@ -53,13 +69,16 @@ type SessionPage struct {
 }
 
 type sessionCursor struct {
-	UpdatedAt time.Time `json:"updated_at"`
-	ID        string    `json:"id"`
-	Status    string    `json:"status,omitempty"`
+	UpdatedAt      time.Time `json:"updated_at"`
+	ID             string    `json:"id"`
+	ConversationID string    `json:"conversation_id,omitempty"`
+	Status         string    `json:"status,omitempty"`
 }
 
 func (r *Repository) ListExternalSessions(ctx context.Context, owner string, query SessionListQuery) (SessionPage, error) {
-	owner, query.Status = strings.TrimSpace(owner), strings.ToLower(strings.TrimSpace(query.Status))
+	owner = strings.TrimSpace(owner)
+	conversationID := ConversationScope(ctx)
+	query.Status = strings.ToLower(strings.TrimSpace(query.Status))
 	if r == nil || r.db == nil || owner == "" || !validSessionStatus(query.Status) {
 		return SessionPage{}, ErrInvalidSessionQuery
 	}
@@ -72,12 +91,15 @@ func (r *Repository) ListExternalSessions(ctx context.Context, owner string, que
 	}
 	db := r.db.WithContext(ctx).Model(&orm.WorkflowSession{}).
 		Where("create_user_id = ? AND origin_host = ? AND controller_host = ? AND dismissed = ?", owner, "external-agent", "external-agent", false)
+	if conversationID != "" {
+		db = db.Where("conversation_id = ?", conversationID)
+	}
 	if query.Status != "" {
 		db = db.Where("status = ?", query.Status)
 	}
 	if strings.TrimSpace(query.PageToken) != "" {
 		cursor, err := decodeSessionCursor(query.PageToken)
-		if err != nil || cursor.Status != query.Status {
+		if err != nil || cursor.Status != query.Status || cursor.ConversationID != conversationID {
 			return SessionPage{}, ErrInvalidSessionQuery
 		}
 		db = db.Where("updated_at < ? OR (updated_at = ? AND id < ?)", cursor.UpdatedAt, cursor.UpdatedAt, cursor.ID)
@@ -89,7 +111,8 @@ func (r *Repository) ListExternalSessions(ctx context.Context, owner string, que
 	page := SessionPage{Sessions: make([]SessionSummary, 0, min(len(sessions), limit))}
 	for _, session := range sessions[:min(len(sessions), limit)] {
 		page.Sessions = append(page.Sessions, SessionSummary{
-			SessionID: session.ID, WorkflowID: session.WorkflowID, WorkflowRef: session.WorkflowRef,
+			SessionID: session.ID, ConversationID: session.ConversationID,
+			WorkflowID: session.WorkflowID, WorkflowRef: session.WorkflowRef,
 			WorkflowRevisionID: session.WorkflowRevisionID, WorkflowRevisionNo: session.WorkflowRevisionNo,
 			Status: session.Status, CurrentStepID: session.CurrentStepID, StateVersion: session.StateVersion,
 			CreatedAt: session.CreatedAt, UpdatedAt: session.UpdatedAt,
@@ -97,7 +120,8 @@ func (r *Repository) ListExternalSessions(ctx context.Context, owner string, que
 	}
 	if len(sessions) > limit {
 		last := sessions[limit-1]
-		page.NextPageToken = encodeSessionCursor(sessionCursor{UpdatedAt: last.UpdatedAt, ID: last.ID, Status: query.Status})
+		page.NextPageToken = encodeSessionCursor(sessionCursor{UpdatedAt: last.UpdatedAt, ID: last.ID,
+			ConversationID: conversationID, Status: query.Status})
 	}
 	return page, nil
 }

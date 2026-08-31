@@ -5,6 +5,7 @@ import time
 from dataclasses import replace
 from typing import Any
 
+from channel_gateway.common.application.task_artifacts import find_task
 from channel_gateway.common.domain.channel import (
     ClaimedInbound,
     ClaimedOutbound,
@@ -35,10 +36,8 @@ from channel_gateway.feishu.presentation import (
     streaming_reply_card,
     task_progress_text,
 )
-from channel_gateway.feishu.task_monitor import find_task
 from channel_gateway.feishu.workspace import (
     FeishuWorkspaceState,
-    stale_workspace_card,
 )
 
 
@@ -49,17 +48,6 @@ _LIVE_TASK_POLL_SECONDS = 1.5
 
 
 _logger = logging.getLogger(__name__)
-
-
-def _expire_workspace_card(
-    sender: Any,
-    *,
-    message_id: str,
-    workspace: dict[str, Any],
-) -> None:
-    # Stale CardKit actions are fenced by message/revision/operation.  Do not
-    # create a second user-visible replacement card for an already stale card.
-    del sender, message_id, workspace
 
 
 class _ManagedReplyStream:
@@ -304,7 +292,6 @@ class FeishuDeliveryProvider:
                     (
                         lambda message_id: self._adopt_stream_message(
                             message,
-                            sender,
                             message_id,
                         )
                     )
@@ -329,7 +316,6 @@ class FeishuDeliveryProvider:
     def _adopt_stream_message(
         self,
         message: ClaimedInbound,
-        sender: Any,
         message_id: str,
     ) -> None:
         context = message.provider_context
@@ -346,12 +332,6 @@ class FeishuDeliveryProvider:
         )
         if str(saved.get('message_id') or '') != message_id:
             context['_workspace_stream_suppress_final'] = True
-            sender.update_card(
-                message_id=message_id,
-                card=stale_workspace_card(
-                    str(saved.get('output_language') or 'zh')
-                ),
-            )
             return
         context['workspace_state'] = saved
         context['workspace_message_id'] = message_id
@@ -360,9 +340,7 @@ class FeishuDeliveryProvider:
     def _workspace_chat_is_visible(
         self,
         message: ClaimedInbound,
-        stream: ReplyStream | None = None,
     ) -> bool:
-        del stream
         context = message.provider_context
         if context.get('_workspace_stream_suppress_final'):
             return False
@@ -709,11 +687,6 @@ class FeishuDeliveryProvider:
                             )
                         else:
                             workspace_stale = True
-                            _expire_workspace_card(
-                                sender,
-                                message_id=message_id,
-                                workspace=saved_workspace,
-                            )
                             message_id = adopted_message_id
                         message.provider_context['workspace_state'] = (
                             saved_workspace

@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
-import type { ReactNode, WheelEvent as ReactWheelEvent } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { Button, Form, Input, Layout, Modal, Popover, Spin, message } from "antd";
 import {
   CodeOutlined,
@@ -20,8 +20,10 @@ import {
   BookOutlined,
   CloudOutlined,
   LinkOutlined,
+  LoginOutlined,
+  LogoutOutlined,
 } from "@ant-design/icons";
-import { Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { matchPath, Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
 import type { UserDetailResponse } from "@/api/generated/auth-client";
 import type { Conversation } from "@/api/generated/chatbot-client";
 import { AUTH_USER_CHANGE_EVENT, AgentAppsAuth } from "@/components/auth";
@@ -38,14 +40,20 @@ import LanguageSwitcher from "@/components/LanguageSwitcher";
 import {
 	DEVELOPER_ACTIVE_EVENT,
   isDeveloperModeActive,
-  persistDeveloperModeActive,
   syncDeveloperModeFromServer,
 } from "@/utils/developerMode";
-import RecordList from "@/modules/chat/components/RecordList";
+import RecordList, {
+  type RecordListImperativeProps,
+} from "@/modules/chat/components/RecordList";
 import {
+  CHAT_CONVERSATION_FILTER_EVENT,
+  CHAT_CONVERSATION_FILTER_KEY,
+  CHAT_CONVERSATION_LIST_REFRESH_EVENT,
+  type ChatConversationFilter,
+  CHAT_HOME_PATH,
   CHAT_NEW_RUN_IN_BACKGROUND_KEY,
-  CHAT_RESUME_CONVERSATION_KEY,
   CHAT_SELECT_CONVERSATION_EVENT,
+  getChatConversationPath,
   selectChatConversationFilter,
 } from "@/modules/chat/constants/chat";
 import { runtimeFeatures } from "@/runtime/features";
@@ -87,20 +95,15 @@ function isAdminRole(role?: string) {
   );
 }
 
-function canScrollVertically(element: HTMLElement, deltaY: number) {
-  const style = window.getComputedStyle(element);
-  if (style.overflowY !== "auto" && style.overflowY !== "scroll") {
-    return false;
+function readChatConversationMode(): ChatConversationFilter {
+  try {
+    return sessionStorage.getItem(CHAT_CONVERSATION_FILTER_KEY) === "task"
+      ? "task"
+      : "normal";
+  } catch {
+    return "normal";
   }
-
-  const maxScrollTop = element.scrollHeight - element.clientHeight;
-  if (maxScrollTop <= 1) {
-    return false;
-  }
-
-  return deltaY < 0 ? element.scrollTop > 0 : element.scrollTop < maxScrollTop;
 }
-
 interface ProfileFormValues {
   username: string;
   displayName?: string;
@@ -123,6 +126,11 @@ export default function MainLayout() {
   const navigate = useNavigate();
   const { t } = useTranslation();
   const [profileForm] = Form.useForm<ProfileFormValues>();
+  const pathname = location.pathname || "/agent/chat";
+  // The detail URL is the source of truth for sidebar selection across reloads.
+  const routeConversationId =
+    matchPath(`${CHAT_HOME_PATH}/:conversationId`, pathname)?.params
+      .conversationId || "";
 
   const [userInfo, setUserInfo] = useState(() => AgentAppsAuth.getUserInfo());
   const isLoggedIn = Boolean(userInfo?.token);
@@ -135,19 +143,20 @@ export default function MainLayout() {
     : t("layout.normalUser");
 
   const [currentSidebarConversationId, setCurrentSidebarConversationId] =
-    useState(() => {
-      try {
-        return sessionStorage.getItem(CHAT_RESUME_CONVERSATION_KEY) || "";
-      } catch {
-        return "";
-      }
-    });
+    useState(routeConversationId);
+  const currentSidebarConversationIdRef = useRef(
+    currentSidebarConversationId,
+  );
+  const recordListRef = useRef<RecordListImperativeProps>(null);
+  currentSidebarConversationIdRef.current = currentSidebarConversationId;
   const [profileModalOpen, setProfileModalOpen] = useState(false);
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileSubmitting, setProfileSubmitting] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [terminalConnectionOpen, setTerminalConnectionOpen] = useState(false);
   const [sidebarSearchText, setSidebarSearchText] = useState("");
+  const [chatConversationMode, setChatConversationMode] =
+    useState<ChatConversationFilter>(readChatConversationMode);
   const [isMenuCollapsed, setIsMenuCollapsed] = useState(readStoredMainMenuCollapsed);
   const [shouldRenderMenuContent, setShouldRenderMenuContent] = useState(
     () => !readStoredMainMenuCollapsed(),
@@ -163,25 +172,32 @@ export default function MainLayout() {
   const [cloudLoginLoading, setCloudLoginLoading] = useState(false);
   const [profileDetail, setProfileDetail] = useState<UserDetailResponse | null>(null);
 
-  const pathname = location.pathname || "/agent/chat";
-
   const settingsMenuItems = [
     {
       key: "/settings?section=overview",
       label: t("layout.settings"),
-      icon: <SettingOutlined className="settings-popover-icon" />,
+      icon: (
+        <SettingOutlined className="settings-popover-icon" aria-hidden="true" />
+      ),
     },
     {
       key: "/settings?section=models",
       label: t("layout.modelProviderManagement"),
-      icon: <ApiOutlined className="settings-popover-icon" />,
+      icon: (
+        <ApiOutlined className="settings-popover-icon" aria-hidden="true" />
+      ),
     },
-    ...(isAdminUser && !runtimeFeatures.hideEvo
+    ...(!runtimeFeatures.hideEvo
       ? [
           {
             key: "/settings?section=developer",
             label: t("layout.developer"),
-            icon: <CodeOutlined className="settings-popover-icon" />,
+            icon: (
+              <CodeOutlined
+                className="settings-popover-icon"
+                aria-hidden="true"
+              />
+            ),
           },
         ]
       : []),
@@ -216,7 +232,6 @@ export default function MainLayout() {
     (import.meta.env as ImportMetaEnv & { VITE_APP_LOGO?: string })
       .VITE_APP_LOGO || "";
   const needsRestoreButtonSafeArea =
-    pathname.startsWith("/model-providers") ||
     pathname.startsWith("/cloud-documents") ||
     pathname.startsWith("/channels") ||
     pathname.startsWith("/settings") ||
@@ -234,45 +249,6 @@ export default function MainLayout() {
   ]
     .filter(Boolean)
     .join(" ");
-
-  const handleChatWheel = useCallback(
-    (event: ReactWheelEvent<HTMLDivElement>) => {
-      if (!isChatPage || event.deltaY === 0) {
-        return;
-      }
-
-      const target = event.target instanceof HTMLElement ? event.target : null;
-      const messageContainer = event.currentTarget.querySelector<HTMLElement>(
-        ".message-container",
-      );
-      if (!target || !messageContainer) {
-        return;
-      }
-
-      // The Markdown document editor owns wheel input, including when it has
-      // reached the top or bottom of its own scroll area.
-      if (target.closest(".writer-markdown-editor")) {
-        return;
-      }
-
-      let ancestor: HTMLElement | null = target;
-      while (ancestor && ancestor !== event.currentTarget) {
-        if (canScrollVertically(ancestor, event.deltaY)) {
-          return;
-        }
-        ancestor = ancestor.parentElement;
-      }
-
-      // The message list already handles its own wheel events, including
-      // nested scrollable blocks such as long thinking text.
-      if (messageContainer.contains(target)) {
-        return;
-      }
-
-      messageContainer.scrollBy({ top: event.deltaY, behavior: "auto" });
-    },
-    [isChatPage],
-  );
 
   const refreshLayoutUser = useCallback(async () => {
     if (!AgentAppsAuth.isLoggedIn()) {
@@ -357,13 +333,6 @@ export default function MainLayout() {
   }, [localSessionGate.enabled, refreshCloudSession, refreshLayoutUser]);
 
   useEffect(() => {
-    if (!isAdminUser && developerActive) {
-      setDeveloperActive(false);
-      void persistDeveloperModeActive(false);
-    }
-  }, [developerActive, isAdminUser]);
-
-  useEffect(() => {
     if (pathname.startsWith("/self-evolution") && !canAccessSelfEvolution) {
       navigate("/agent/chat", { replace: true });
     }
@@ -403,11 +372,65 @@ export default function MainLayout() {
   }, [isMenuCollapsed]);
 
   useEffect(() => {
+    const handleFilterChange = (event: Event) => {
+      const filter = (
+        event as CustomEvent<{ filter?: ChatConversationFilter }>
+      ).detail?.filter;
+      if (filter !== "normal" && filter !== "task") {
+        return;
+      }
+      setChatConversationMode(filter);
+    };
+
+    window.addEventListener(
+      CHAT_CONVERSATION_FILTER_EVENT,
+      handleFilterChange,
+    );
+    return () => {
+      window.removeEventListener(
+        CHAT_CONVERSATION_FILTER_EVENT,
+        handleFilterChange,
+      );
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleConversationListRefresh = () => {
+      recordListRef.current?.refresh();
+    };
+
+    window.addEventListener(
+      CHAT_CONVERSATION_LIST_REFRESH_EVENT,
+      handleConversationListRefresh,
+    );
+    return () => {
+      window.removeEventListener(
+        CHAT_CONVERSATION_LIST_REFRESH_EVENT,
+        handleConversationListRefresh,
+      );
+    };
+  }, []);
+
+  useEffect(() => {
     const handleConversationSelect = (event: Event) => {
-      const conversationId =
-        (event as CustomEvent<{ conversationId?: string }>).detail
-          ?.conversationId || "";
+      const detail = (
+        event as CustomEvent<{ conversationId?: string; source?: string }>
+      ).detail;
+      const conversationId = detail?.conversationId || "";
       setCurrentSidebarConversationId(conversationId);
+
+      if (
+        !pathname.startsWith(CHAT_HOME_PATH) ||
+        (detail?.source !== "chat" && detail?.source !== "mention")
+      ) {
+        return;
+      }
+      const targetPath = conversationId
+        ? getChatConversationPath(conversationId)
+        : CHAT_HOME_PATH;
+      if (pathname !== targetPath) {
+        navigate(targetPath, { replace: detail.source === "chat" });
+      }
     };
 
     window.addEventListener(
@@ -420,7 +443,12 @@ export default function MainLayout() {
         handleConversationSelect,
       );
     };
-  }, []);
+  }, [navigate, pathname]);
+
+  useEffect(() => {
+    currentSidebarConversationIdRef.current = routeConversationId;
+    setCurrentSidebarConversationId(routeConversationId);
+  }, [routeConversationId]);
 
   const toggleMenu = () => {
     setIsMenuCollapsed((prev) => !prev);
@@ -440,7 +468,6 @@ export default function MainLayout() {
   const handleNewChat = (runInBackground = false) => {
     selectChatConversationFilter(runInBackground ? "task" : "normal");
     try {
-      sessionStorage.removeItem(CHAT_RESUME_CONVERSATION_KEY);
       sessionStorage.setItem(
         CHAT_NEW_RUN_IN_BACKGROUND_KEY,
         runInBackground ? "1" : "0",
@@ -450,7 +477,7 @@ export default function MainLayout() {
     }
     setCurrentSidebarConversationId("");
     emitConversationSelection("", runInBackground);
-    navigate("/agent/chat/home");
+    navigate(CHAT_HOME_PATH);
   };
 
   const handleSidebarConversationSelected = (conversation: Conversation) => {
@@ -458,34 +485,30 @@ export default function MainLayout() {
     if (!conversationId) {
       return;
     }
-    try {
-      sessionStorage.setItem(CHAT_RESUME_CONVERSATION_KEY, conversationId);
-    } catch {
-      // ignore storage errors
-    }
     setCurrentSidebarConversationId(conversationId);
-    emitConversationSelection(conversationId);
-    navigate("/agent/chat/home");
+    navigate(getChatConversationPath(conversationId));
   };
 
   const handleSidebarConversationRemoved = (conversation: Conversation) => {
     const conversationId = conversation.conversation_id || "";
-    if (!conversationId || conversationId !== currentSidebarConversationId) {
+    if (
+      !conversationId ||
+      conversationId !== currentSidebarConversationIdRef.current
+    ) {
       return;
     }
-    try {
-      sessionStorage.removeItem(CHAT_RESUME_CONVERSATION_KEY);
-    } catch {
-      // ignore storage errors
-    }
+    currentSidebarConversationIdRef.current = "";
     setCurrentSidebarConversationId("");
     emitConversationSelection("");
+    navigate(CHAT_HOME_PATH, { replace: true });
   };
 
   const handleModuleNavigate = (targetPath: string) => {
     setCurrentSidebarConversationId("");
     navigate(targetPath);
   };
+
+  const isTaskMode = chatConversationMode === "task";
 
   const renderModulePopover = (
     items: Array<{ key: string; label: string; icon: ReactNode }>,
@@ -832,7 +855,7 @@ export default function MainLayout() {
   }
 
   return (
-    <Layout hasSider className="main-layout" onWheelCapture={handleChatWheel}>
+    <Layout hasSider className="main-layout">
       <Sider
         width={252}
         collapsedWidth={0}
@@ -871,17 +894,19 @@ export default function MainLayout() {
               <div className="sider-primary-action">
                 <Button
                   type="text"
-                  className="sider-new-chat-button"
+                  className={`sider-new-chat-button${!isTaskMode ? " is-active" : ""}`}
                   icon={<PlusOutlined />}
                   onClick={() => handleNewChat(false)}
+                  aria-pressed={!isTaskMode}
                 >
                   {t("layout.newChat")}
                 </Button>
                 <Button
-                  type="primary"
-                  className="sider-new-chat-button sider-new-task-button"
+                  type="text"
+                  className={`sider-new-chat-button${isTaskMode ? " is-active" : ""}`}
                   icon={<PlusOutlined />}
                   onClick={() => handleNewChat(true)}
+                  aria-pressed={isTaskMode}
                 >
                   {t("layout.newTask")}
                 </Button>
@@ -949,6 +974,7 @@ export default function MainLayout() {
           {shouldRenderMenuContent && (
             <div className="sider-history">
               <RecordList
+                ref={recordListRef}
                 compact
                 hideSearch
                 showBatchActions
@@ -1030,34 +1056,58 @@ export default function MainLayout() {
                             "/settings?section=models",
                             "/settings?section=developer",
                           ].includes(item.key) && (
-                            <RightOutlined className="settings-popover-accessory" />
+                            <RightOutlined
+                              className="settings-popover-accessory"
+                              aria-hidden="true"
+                            />
                           )}
                         </Button>
                       );
                       return btn;
                     })}
                     <div className="settings-popover-language">
-                      <GlobalOutlined className="settings-popover-icon" />
+                      <GlobalOutlined
+                        className="settings-popover-icon"
+                        aria-hidden="true"
+                      />
                       <LanguageSwitcher />
                     </div>
+                    {!hideLocalUserControls && (
+                      <div
+                        className="settings-popover-separator"
+                        role="separator"
+                      />
+                    )}
                     {!hideLocalUserControls && (
                       isLoggedIn ? (
                         <Button
                           type="text"
                           role="menuitem"
-                          className="settings-popover-button"
+                          className="settings-popover-button settings-popover-button--session"
                           onClick={handleLogout}
                         >
-                          <span>{t("layout.logout")}</span>
+                          <LogoutOutlined
+                            className="settings-popover-icon"
+                            aria-hidden="true"
+                          />
+                          <span className="settings-popover-label">
+                            {t("layout.logout")}
+                          </span>
                         </Button>
                       ) : (
                         <Button
                           type="text"
                           role="menuitem"
-                          className="settings-popover-button"
+                          className="settings-popover-button settings-popover-button--session"
                           onClick={handleGoLogin}
                         >
-                          <span>{t("layout.goLogin")}</span>
+                          <LoginOutlined
+                            className="settings-popover-icon"
+                            aria-hidden="true"
+                          />
+                          <span className="settings-popover-label">
+                            {t("layout.goLogin")}
+                          </span>
                         </Button>
                       )
                     )}

@@ -27,6 +27,12 @@ test("recognizes same-origin LazyMind links", () => {
 test("only sends supported external protocols to the operating system", () => {
   assert.equal(canOpenExternally("https://open.feishu.cn/app"), true);
   assert.equal(canOpenExternally("mailto:support@example.com"), true);
+  assert.equal(
+    canOpenExternally("cursor://anysphere.cursor-deeplink/mcp/install?name=lazymind&config=e30%3D"),
+    true,
+  );
+  assert.equal(canOpenExternally("cursor://anysphere.cursor-deeplink/settings"), false);
+  assert.equal(canOpenExternally("cursor://untrusted.example/mcp/install"), false);
   assert.equal(canOpenExternally("javascript:alert(1)"), false);
   assert.equal(canOpenExternally("not a URL"), false);
 });

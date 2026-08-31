@@ -81,6 +81,12 @@ type QueueRequest struct {
 }
 
 func appendEvent(tx *gorm.DB, row orm.WorkflowSessionStep, owner, eventType string, payload json.RawMessage, now time.Time) error {
+	if owner == "" {
+		var session orm.WorkflowSession
+		if err := tx.Select("create_user_id").Where("id = ?", row.SessionID).First(&session).Error; err == nil {
+			owner = session.CreateUserID
+		}
+	}
 	return tx.Create(&orm.WorkflowEvent{SessionID: row.SessionID, OwnerUserID: owner,
 		ContractVersion: ContractVersion, EventType: eventType, EntityID: row.ID,
 		PayloadJSON: payload, CreatedAt: now}).Error

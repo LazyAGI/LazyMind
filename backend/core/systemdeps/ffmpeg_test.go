@@ -173,9 +173,9 @@ func TestFFmpegDownloadsUseModelScopeMirrors(t *testing.T) {
 			fallbacks: []string{"https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"},
 		},
 		{
-			name:   "macOS Apple Silicon via Rosetta",
+			name:   "macOS Intel",
 			goos:   "darwin",
-			goarch: "arm64",
+			goarch: "amd64",
 			urls: []string{
 				modelScopeFFmpegBaseURL + "lazymind-ffmpeg-darwin-x64-8.1.2.zip",
 				modelScopeFFmpegBaseURL + "lazymind-ffprobe-darwin-x64-8.1.2.zip",
@@ -184,6 +184,20 @@ func TestFFmpegDownloadsUseModelScopeMirrors(t *testing.T) {
 			fallbacks: []string{
 				"https://evermeet.cx/ffmpeg/getrelease/ffmpeg/zip",
 				"https://evermeet.cx/ffmpeg/getrelease/ffprobe/zip",
+			},
+		},
+		{
+			name:   "macOS Apple Silicon native",
+			goos:   "darwin",
+			goarch: "arm64",
+			urls: []string{
+				modelScopeFFmpegBaseURL + "lazymind-ffmpeg-darwin-arm64-9.0.1.zip",
+				modelScopeFFmpegBaseURL + "lazymind-ffprobe-darwin-arm64-9.0.1.zip",
+			},
+			checksums: []string{darwinArm64FFmpegSHA, darwinArm64FFprobeSHA},
+			fallbacks: []string{
+				"https://ffmpeg.martin-riedl.de/download/macos/arm64/1787073674_9.0.1/ffmpeg.zip",
+				"https://ffmpeg.martin-riedl.de/download/macos/arm64/1787073674_9.0.1/ffprobe.zip",
 			},
 		},
 		{

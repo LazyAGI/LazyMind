@@ -12,7 +12,7 @@ import {
   RightOutlined,
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
-import { useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import {
   disableTool,
   enableTool,
@@ -20,6 +20,7 @@ import {
   notifyToolAvailabilityChanged,
 } from "@/modules/memory/toolApi";
 import type { StructuredAsset } from "@/modules/memory/shared";
+import ExternalServicesPage from "@/modules/modelProvider/pages/ExternalServicesPage";
 
 interface KnowledgeDataSettingsProps {
   documentParsingEnabled: boolean;
@@ -53,7 +54,6 @@ export default function KnowledgeDataSettings({
   onDocumentParsingChange,
 }: KnowledgeDataSettingsProps) {
   const { t } = useTranslation();
-  const navigate = useNavigate();
   const [tools, setTools] = useState<StructuredAsset[]>([]);
   const [toolsLoading, setToolsLoading] = useState(true);
   const [toolsError, setToolsError] = useState(false);
@@ -66,10 +66,9 @@ export default function KnowledgeDataSettings({
       title: t("settingsPage.knowledge.groups.retrieval.title"),
       description: t("settingsPage.knowledge.groups.retrieval.description"),
       icon: <ReadOutlined />,
-      destination: "/lib/knowledge/list",
+      destination: "/lib/knowledge/list?from=settings-knowledge",
       tools: [
         { id: "kb", name: t("settingsPage.knowledge.groups.retrieval.kb.name"), description: t("settingsPage.knowledge.groups.retrieval.kb.description") },
-        { id: "temp_kb", name: t("settingsPage.knowledge.groups.retrieval.tempKb.name"), description: t("settingsPage.knowledge.groups.retrieval.tempKb.description") },
       ],
     },
     {
@@ -111,7 +110,7 @@ export default function KnowledgeDataSettings({
       title: t("settingsPage.knowledge.groups.recognition.title"),
       description: t("settingsPage.knowledge.groups.recognition.description"),
       icon: <FileSearchOutlined />,
-      destination: "/model-providers/default-services",
+      destination: "/settings?section=models",
       tools: [
         { id: "multimodal", name: t("settingsPage.knowledge.groups.recognition.multimodal.name"), description: t("settingsPage.knowledge.groups.recognition.multimodal.description") },
       ],
@@ -185,11 +184,21 @@ export default function KnowledgeDataSettings({
           ? { label: t("settingsPage.enabled"), className: "is-enabled" }
           : { label: t("settingsPage.disabled"), className: "is-disabled" };
 
-    return <div className="settings-knowledge-tool-row" key={definition.id}>
+    return <div
+      className={`settings-knowledge-tool-row${destination ? " is-navigable" : ""}`}
+      key={definition.id}
+    >
+      {destination ? (
+        <Link
+          aria-label={t("settingsPage.knowledge.openConfigAria", { name: displayName })}
+          className="settings-knowledge-row-link"
+          to={destination}
+        />
+      ) : null}
       <span className="settings-knowledge-tool-icon" aria-hidden="true">{group.icon}</span>
       <div className="settings-knowledge-tool-copy">
         <strong>{displayName}</strong>
-        <p>{tool?.description || definition.description}</p>
+        <p>{definition.description}</p>
       </div>
       <Tag className={`settings-knowledge-state ${status.className}`}>{status.label}</Tag>
       <Switch
@@ -200,13 +209,7 @@ export default function KnowledgeDataSettings({
         loading={pending}
         onChange={(enabled: boolean) => { if (tool) void toggleTool(tool, enabled); }}
       />
-      {destination ? <Button
-        aria-label={t("settingsPage.knowledge.openConfigAria", { name: displayName })}
-        className="settings-knowledge-detail-button"
-        icon={<RightOutlined />}
-        onClick={() => navigate(destination)}
-        type="text"
-      /> : null}
+      {destination ? <RightOutlined aria-hidden="true" className="settings-knowledge-detail-icon" /> : null}
     </div>;
   };
 
@@ -222,18 +225,20 @@ export default function KnowledgeDataSettings({
     />
   ) : (
     <div className="settings-knowledge-groups">
-      {toolGroups.map((group) => {
-        const registered = group.tools.filter((tool) => toolsByID.has(tool.id)).length;
-        const enabled = group.tools.filter((tool) => toolsByID.get(tool.id)?.isEnabled).length;
-        return <section className={`settings-knowledge-group is-${group.id}`} key={group.id}>
-          <header className="settings-knowledge-group-head">
-            <span>{group.icon}</span>
-            <div><h2>{group.title}</h2><p>{group.description}</p></div>
-            <Tag>{t("settingsPage.knowledge.enabledCount", { enabled, registered })}</Tag>
-          </header>
-          <div className="settings-knowledge-tool-list">{group.tools.map((tool) => renderTool(tool, group))}</div>
-        </section>;
-      })}
+      <div className="settings-knowledge-capability-flow">
+        {toolGroups.map((group) => {
+          const registered = group.tools.filter((tool) => toolsByID.has(tool.id)).length;
+          const enabled = group.tools.filter((tool) => toolsByID.get(tool.id)?.isEnabled).length;
+          return <section className={`settings-knowledge-group is-${group.id}`} key={group.id}>
+            <header className="settings-knowledge-group-head">
+              <span>{group.icon}</span>
+              <div><h2>{group.title}</h2><p>{group.description}</p></div>
+              <Tag>{t("settingsPage.knowledge.enabledCount", { enabled, registered })}</Tag>
+            </header>
+            <div className="settings-knowledge-tool-list">{group.tools.map((tool) => renderTool(tool, group))}</div>
+          </section>;
+        })}
+      </div>
       <section className="settings-knowledge-group is-parser">
         <header className="settings-knowledge-group-head">
           <span><ApiOutlined /></span>
@@ -241,17 +246,9 @@ export default function KnowledgeDataSettings({
             <h2>{t("settingsPage.knowledge.documentParsing")}</h2>
             <p>{t("settingsPage.knowledge.documentParsingGroupDesc")}</p>
           </div>
-          <Tag>{documentParsingEnabled ? t("settingsPage.knowledge.parsingEnabledCount") : t("settingsPage.knowledge.parsingDisabledCount")}</Tag>
-        </header>
-        <div className="settings-knowledge-tool-list">
-          <div className="settings-knowledge-tool-row">
-            <span className="settings-knowledge-tool-icon" aria-hidden="true"><ApiOutlined /></span>
-            <div className="settings-knowledge-tool-copy">
-              <strong>{t("settingsPage.knowledge.documentParsing")}</strong>
-              <p>{t("settingsPage.knowledge.documentParsingDesc")}</p>
-            </div>
+          <div className="settings-knowledge-parser-controls">
             <Tag className={`settings-knowledge-state ${documentParsingEnabled ? "is-enabled" : "is-disabled"}`}>
-              {documentParsingEnabled ? t("settingsPage.enabled") : t("settingsPage.paused")}
+              {documentParsingEnabled ? t("settingsPage.enabled") : t("settingsPage.disabled")}
             </Tag>
             <Switch
               aria-label={t("settingsPage.knowledge.documentParsingAria")}
@@ -261,14 +258,15 @@ export default function KnowledgeDataSettings({
               loading={documentParsingSaving}
               onChange={onDocumentParsingChange}
             />
-            <Button
-              aria-label={t("settingsPage.knowledge.openParsingAria")}
-              className="settings-knowledge-detail-button"
-              icon={<RightOutlined />}
-              onClick={() => navigate("/settings?section=knowledge&tool=document-parsing")}
-              type="text"
-            />
           </div>
+        </header>
+        <div className="settings-knowledge-parser-services">
+          <ExternalServicesPage
+            includeBuiltinTools={false}
+            includeDependencies={false}
+            includeMcp={false}
+            visibleCategories={["parsing"]}
+          />
         </div>
       </section>
     </div>

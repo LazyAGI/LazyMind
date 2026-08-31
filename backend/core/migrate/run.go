@@ -20,12 +20,13 @@ import (
 )
 
 const (
-	defaultSQLiteDSN     = "./acl.db"
-	defaultMigrationsDir = "./migrations"
-	stateTableName       = "schema_migrations"
-	historyTableName     = "schema_migration_history"
-	lockTableName        = "schema_migration_lock"
-	lockKey              = "core"
+	defaultSQLiteDSN              = "./acl.db"
+	defaultMigrationsDir          = "./migrations"
+	reconcileUnknownDevHistoryEnv = "MIGRATION_RECONCILE_UNKNOWN_DEV_HISTORY"
+	stateTableName                = "schema_migrations"
+	historyTableName              = "schema_migration_history"
+	lockTableName                 = "schema_migration_lock"
+	lockKey                       = "core"
 )
 
 var migrationFilePattern = regexp.MustCompile(`^(\d+)_(.+)\.(up|down)\.sql$`)
@@ -162,6 +163,10 @@ func (r *Runner) Up(limit int) error {
 	}
 
 	applied, err := r.readHistory()
+	if err != nil {
+		return err
+	}
+	applied, err = r.reconcileUnknownOpenDevHistory(catalog, applied)
 	if err != nil {
 		return err
 	}

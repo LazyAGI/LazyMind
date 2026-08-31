@@ -19,9 +19,24 @@ import (
 
 const (
 	algorithmHealthTimeout = 15 * time.Minute
-	defaultLazyLLMVersion  = "1.2.2"
 	tiktokenReadyFileName  = "tiktoken-gpt2.ready"
 )
+
+func lazyLLMVersion(repoRoot string) (string, error) {
+	if version := strings.TrimSpace(os.Getenv("LAZYMIND_LAZYLLM_VERSION")); version != "" {
+		return version, nil
+	}
+	path := filepath.Join(repoRoot, "LAZYLLM_VERSION")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read LazyLLM version from %s: %w", path, err)
+	}
+	version := strings.TrimSpace(string(data))
+	if version == "" {
+		return "", fmt.Errorf("LazyLLM version file %s is empty", path)
+	}
+	return version, nil
+}
 
 type AlgorithmServiceSpec struct {
 	Name       string
@@ -333,6 +348,10 @@ func (m *AlgorithmServiceManager) ensureTiktokenCache(ctx context.Context, paths
 }
 
 func (m *AlgorithmServiceManager) installAlgorithmPythonDeps(ctx context.Context, paths RuntimePaths, includeEvo bool) error {
+	version, err := lazyLLMVersion(paths.RepoRoot)
+	if err != nil {
+		return err
+	}
 	lazyllm := venvExecutable(paths.AlgorithmVenv, "lazyllm")
 	uv, ok := uvCommand()
 	if !ok {
@@ -340,7 +359,7 @@ func (m *AlgorithmServiceManager) installAlgorithmPythonDeps(ctx context.Context
 	}
 	installSteps := []Command{
 		{Name: uv, Args: localPythonPipInstallArgs(paths.AlgorithmPython, "setuptools<81"), Dir: paths.RepoRoot, Env: pythonRuntimeEnv(paths)},
-		{Name: uv, Args: localPythonPipInstallArgs(paths.AlgorithmPython, "lazyllm=="+envText("LAZYMIND_LAZYLLM_VERSION", defaultLazyLLMVersion)), Dir: paths.RepoRoot, Env: pythonRuntimeEnv(paths)},
+		{Name: uv, Args: localPythonPipInstallArgs(paths.AlgorithmPython, "lazyllm=="+version), Dir: paths.RepoRoot, Env: pythonRuntimeEnv(paths)},
 		{Name: lazyllm, Args: []string{"install", "rag"}, Dir: paths.RepoRoot, Env: pythonDependencyCacheEnv(paths)},
 		{Name: uv, Args: localPythonPipInstallArgs(paths.AlgorithmPython, "-r", filepath.Join(paths.RepoRoot, "algorithm", "requirements.txt")), Dir: paths.RepoRoot, Env: pythonRuntimeEnv(paths)},
 		{Name: uv, Args: localPythonPipInstallArgs(paths.AlgorithmPython, "-r", filepath.Join(paths.RepoRoot, "algorithm", "requirements-local.txt")), Dir: paths.RepoRoot, Env: pythonRuntimeEnv(paths)},
@@ -358,8 +377,12 @@ func (m *AlgorithmServiceManager) installAlgorithmPythonDeps(ctx context.Context
 }
 
 func algorithmReadyStamp(paths RuntimePaths, includeEvo bool) (string, error) {
+	version, err := lazyLLMVersion(paths.RepoRoot)
+	if err != nil {
+		return "", err
+	}
 	hash := sha256.New()
-	_, _ = hash.Write([]byte("lazyllm==" + envText("LAZYMIND_LAZYLLM_VERSION", defaultLazyLLMVersion)))
+	_, _ = hash.Write([]byte("lazyllm==" + version))
 	_, _ = hash.Write([]byte{0})
 	files := []string{
 		filepath.Join(paths.RepoRoot, "algorithm", "requirements.txt"),
@@ -458,26 +481,33 @@ func (m *AlgorithmServiceManager) waitForDependencies(ctx context.Context, cfg R
 }
 
 func waitForRAGReadiness(ctx context.Context, cfg RuntimeConfig, timeout time.Duration) error {
-	checks := []struct {
-		port  int
-		path  string
-		label string
-	}{
-		{cfg.Algorithm.ProcessorPort, "/ready", "processor-server"},
-		{cfg.Algorithm.DocPort, "/v1/ready", "doc-server"},
-		{cfg.Algorithm.AlgoPort, "/docs", "algo"},
-	}
-	checks = append(checks, struct {
-		port  int
-		path  string
-		label string
-	}{cfg.Algorithm.WorkerPort, "/ready", "processor-worker"})
-	for _, check := range checks {
+	for _, check := range ragReadinessChecks(cfg) {
 		if err := waitForHTTPOnly(ctx, check.port, check.path, check.label, timeout); err != nil {
 			return err
 		}
 	}
 	return waitForAlgorithmRegistration(ctx, cfg.Algorithm.ProcessorPort, timeout)
+}
+
+type ragReadinessCheck struct {
+	port  int
+	path  string
+	label string
+}
+
+func ragReadinessChecks(cfg RuntimeConfig) []ragReadinessCheck {
+	checks := []ragReadinessCheck{
+		{cfg.Algorithm.ProcessorPort, "/ready", "processor-server"},
+		{cfg.Algorithm.DocPort, "/v1/ready", "doc-server"},
+		{cfg.Algorithm.AlgoPort, "/docs", "algo"},
+	}
+	if cfg.MaintenanceMode != installerWarmupMaintenanceMode &&
+		!envBool(installerWarmupSkipProcessorWorkerEnvVar, false) {
+		checks = append(checks, ragReadinessCheck{
+			port: cfg.Algorithm.WorkerPort, path: "/ready", label: "processor-worker",
+		})
+	}
+	return checks
 }
 
 func localSegmentStorePath(paths RuntimePaths) string {
@@ -543,6 +573,11 @@ func ensureLazyLLMSource(ctx context.Context, runner CommandRunner, repoRoot str
 }
 
 func algorithmServiceEnv(cfg RuntimeConfig, paths RuntimePaths, service string) []string {
+	exportSrc := filepath.Join(paths.RepoRoot, "workflows", "ppt-workflow", "runtime", "scripts", "export_pptx")
+	exportDeps := filepath.Join(paths.RuntimeRoot, "deps", "editable-ppt")
+	if err := ensureEditablePPTNodeModulesLink(exportSrc, exportDeps); err != nil {
+		fmt.Fprintf(os.Stderr, "editable-ppt node_modules link skipped: %v\n", err)
+	}
 	pythonPaths := []string{filepath.Join(paths.RepoRoot, "algorithm"), paths.RepoRoot}
 	lazyLLMSource := filepath.Join(paths.RepoRoot, "algorithm", "lazyllm")
 	if info, err := os.Stat(filepath.Join(lazyLLMSource, "lazyllm")); err == nil && info.IsDir() {
@@ -659,6 +694,11 @@ func algorithmServiceEnv(cfg RuntimeConfig, paths RuntimePaths, service string) 
 		"LAZYMIND_ROUTER_DEFAULT_ALGO_PATH=" + filepath.Join(paths.RepoRoot, "algorithm", "lazymind", "chat"),
 		"LAZYMIND_ROUTER_DEFAULT_INSTANCE_COUNT=1",
 		"LAZYMIND_WORKFLOWS_DIR=" + filepath.Join(paths.RepoRoot, "workflows"),
+		"LAZYMIND_PPT_EXPORT_CLI=" + filepath.Join(paths.RepoRoot, "workflows", "ppt-workflow", "runtime", "scripts", "export_pptx", "html_to_pptx.mjs"),
+		"LAZYMIND_PPT_EXPORT_DEPS=" + filepath.Join(paths.RuntimeRoot, "deps", "editable-ppt"),
+		"LAZYMIND_PPT_EXPORT_NODE=" + envText("LAZYMIND_NODE_EXECUTABLE", "node"),
+		"LAZYMIND_NODE_RUN_AS_NODE=" + envText("LAZYMIND_NODE_RUN_AS_NODE", "false"),
+		"PLAYWRIGHT_BROWSERS_PATH=" + filepath.Join(paths.RuntimeRoot, "deps", "editable-ppt", "browsers"),
 		"LAZYMIND_AGENTIC_WORKSPACE=" + filepath.Join(paths.AlgorithmHome, "agent_workspace"),
 		"LAZYMIND_SUBAGENT_WORKSPACE=" + paths.SubagentDataDir,
 		"LAZYMIND_EVO_API_PORT=" + strconv.Itoa(cfg.Algorithm.EvoPort),
@@ -680,7 +720,57 @@ func algorithmServiceEnv(cfg RuntimeConfig, paths RuntimePaths, service string) 
 	if service == docServerProcessName {
 		env = append(env, "LAZYMIND_DOCUMENT_SERVICE_CALLBACK_URL=http://127.0.0.1:"+strconv.Itoa(cfg.Algorithm.DocPort)+"/v1/internal/callbacks/tasks")
 	}
+	if libPath := editablePPTLibraryPath(exportDeps); libPath != "" {
+		env = append(env, "LD_LIBRARY_PATH="+joinPathList(libPath, os.Getenv("LD_LIBRARY_PATH")))
+	}
 	return env
+}
+
+func ensureEditablePPTNodeModulesLink(exportSrc, exportDeps string) error {
+	target := filepath.Join(exportDeps, "node_modules")
+	link := filepath.Join(exportSrc, "node_modules")
+	if _, err := os.Stat(target); err != nil {
+		return err
+	}
+	if current, ok := directoryLinkTarget(link); ok {
+		if filepath.Clean(current) == filepath.Clean(target) {
+			return nil
+		}
+		_ = os.Remove(link)
+	} else if info, err := os.Lstat(link); err == nil {
+		if info.IsDir() {
+			return nil
+		}
+		_ = os.Remove(link)
+	}
+	return createDirectoryLink(target, link)
+}
+
+func editablePPTLibraryPath(exportDeps string) string {
+	if runtime.GOOS != "linux" {
+		return ""
+	}
+	candidates := []string{
+		filepath.Join(exportDeps, "linux-sysroot", "usr", "lib", "x86_64-linux-gnu"),
+		filepath.Join(exportDeps, "linux-sysroot", "lib", "x86_64-linux-gnu"),
+	}
+	existing := make([]string, 0, len(candidates))
+	for _, path := range candidates {
+		if info, err := os.Stat(path); err == nil && info.IsDir() {
+			existing = append(existing, path)
+		}
+	}
+	return strings.Join(existing, string(os.PathListSeparator))
+}
+
+func joinPathList(parts ...string) string {
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part = strings.TrimSpace(part); part != "" {
+			out = append(out, part)
+		}
+	}
+	return strings.Join(out, string(os.PathListSeparator))
 }
 
 func algorithmRegisterPolicy(cfg RuntimeConfig, paths RuntimePaths) string {

@@ -52,13 +52,19 @@ func TestDependencyCollectionSnapshotsActualOutputsPerRun(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ready, contextText, count := collectDependencyInputs(ctx, db, target, "downstream-1", start, end, false)
-	if !ready || count != 1 || !strings.Contains(contextText, "daily result") {
-		t.Fatalf("expected actual output to be collected, ready=%v count=%d context=%q", ready, count, contextText)
+	ready, collection, err := collectDependencyInputs(ctx, db, target, "downstream-1", start, end, false)
+	if err != nil {
+		t.Fatal(err)
 	}
-	ready, _, count = collectDependencyInputs(ctx, db, target, "downstream-2", start, end, false)
-	if !ready || count != 1 {
-		t.Fatalf("expected each downstream run to snapshot matching output, ready=%v count=%d", ready, count)
+	if !ready || len(collection.inputs) != 1 || !strings.Contains(collection.contextText, "daily result") {
+		t.Fatalf("expected actual output to be collected, ready=%v count=%d context=%q", ready, len(collection.inputs), collection.contextText)
+	}
+	ready, collection, err = collectDependencyInputs(ctx, db, target, "downstream-2", start, end, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ready || len(collection.inputs) != 1 {
+		t.Fatalf("expected each downstream run to snapshot matching output, ready=%v count=%d", ready, len(collection.inputs))
 	}
 }
 
@@ -83,17 +89,23 @@ func TestDependencyCollectionWaitsForSameTickActualTask(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ready, _, count := collectDependencyInputs(ctx, db, target, "same-tick-downstream", start, end, false)
-	if ready || count != 0 {
-		t.Fatalf("expected downstream to wait for same-tick running source, ready=%v count=%d", ready, count)
+	ready, collection, err := collectDependencyInputs(ctx, db, target, "same-tick-downstream", start, end, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ready || len(collection.inputs) != 0 {
+		t.Fatalf("expected downstream to wait for same-tick running source, ready=%v count=%d", ready, len(collection.inputs))
 	}
 	output := orm.TaskRunOutput{ID: "same-tick-output", TaskID: upstream.ID, ConversationID: upstream.ConversationID, FinalAnswerText: "same tick result", SummaryText: "same tick result", ArtifactManifestJSON: []byte("[]"), OutputStatus: "ready", ContentHash: "same-tick-hash", CreatedAt: end, UpdatedAt: end}
 	if err := db.Create(&output).Error; err != nil {
 		t.Fatal(err)
 	}
-	ready, contextText, count := collectDependencyInputs(ctx, db, target, "same-tick-downstream", start, end, false)
-	if !ready || count != 1 || !strings.Contains(contextText, "same tick result") {
-		t.Fatalf("expected downstream to collect completed same-tick source, ready=%v count=%d context=%q", ready, count, contextText)
+	ready, collection, err = collectDependencyInputs(ctx, db, target, "same-tick-downstream", start, end, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ready || len(collection.inputs) != 1 || !strings.Contains(collection.contextText, "same tick result") {
+		t.Fatalf("expected downstream to collect completed same-tick source, ready=%v count=%d context=%q", ready, len(collection.inputs), collection.contextText)
 	}
 }
 
@@ -157,13 +169,16 @@ func TestDependencyCollectionMaterializesHistoricalChatOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ready, contextText, count := collectDependencyInputs(ctx, db, target, "historical-downstream", start, end, false)
-	if !ready || count != 1 || !strings.Contains(contextText, "old daily answer") {
-		t.Fatalf("expected historical chat to be standardized and collected, ready=%v count=%d context=%q", ready, count, contextText)
+	ready, collection, err := collectDependencyInputs(ctx, db, target, "historical-downstream", start, end, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ready || len(collection.inputs) != 1 || !strings.Contains(collection.contextText, "old daily answer") {
+		t.Fatalf("expected historical chat to be standardized and collected, ready=%v count=%d context=%q", ready, len(collection.inputs), collection.contextText)
 	}
 	for _, expected := range []string{"已完成历史执行", "@历史日报（历史执行 1/1）", `conversation_id="historical-conv"`, "不是待执行任务"} {
-		if !strings.Contains(contextText, expected) {
-			t.Fatalf("expected context to explain historical conversation references; missing %q in %q", expected, contextText)
+		if !strings.Contains(collection.contextText, expected) {
+			t.Fatalf("expected context to explain historical conversation references; missing %q in %q", expected, collection.contextText)
 		}
 	}
 }

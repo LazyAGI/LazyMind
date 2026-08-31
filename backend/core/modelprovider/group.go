@@ -29,7 +29,20 @@ type createGroupResponse struct {
 	UserModelProviderID string                  `json:"user_model_provider_id"`
 	Name                string                  `json:"name"`
 	BaseURL             string                  `json:"base_url"`
+	IsVerified          bool                    `json:"is_verified"`
 	Check               *CheckModelProviderData `json:"check,omitempty"`
+	AutoSelection       *autoModelSelection     `json:"auto_selection,omitempty"`
+}
+
+type autoSelectedModel struct {
+	ModelKey string `json:"model_key"`
+	Name     string `json:"name"`
+}
+
+type autoModelSelection struct {
+	ProviderName string              `json:"provider_name"`
+	Configured   []autoSelectedModel `json:"configured"`
+	Missing      []string            `json:"missing"`
 }
 
 type groupListItem struct {
@@ -153,6 +166,11 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "query model provider failed", http.StatusInternalServerError)
 		return
 	}
+	if hasOpenAIRequestPath(parent.Name, baseURL) {
+		common.ReplyErr(w, "base_url must be an API root without a request path", http.StatusBadRequest)
+		return
+	}
+	baseURL = LazyLLMBaseURL(parent.Name, baseURL)
 
 	// Capability: single-group providers only allow one group per user.
 	if !parent.HasCapability("multi_group") {
@@ -169,7 +187,6 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	apiKeyRequired := isAPIKeyRequiredForBaseURL(r.Context(), db, parent.DefaultModelProviderID, baseURL)
 	groupID := common.GenerateID()
 	credentialRevision := int64(1)
 	apiKeyCiphertext, err := encryptModelProviderAPIKeyForGroup(userID, groupID, credentialRevision, apiKey)
@@ -228,7 +245,7 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 		APIKeyCiphertext:    apiKeyCiphertext,
 		CredentialVersion:   modelProviderCredentialVersion,
 		CredentialRevision:  credentialRevision,
-		IsVerified:          checkData != nil || !apiKeyRequired,
+		IsVerified:          checkData != nil,
 		BaseModel: orm.BaseModel{
 			CreateUserID:   userID,
 			CreateUserName: userName,
@@ -237,12 +254,22 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 			DeletedAt:      nil,
 		},
 	}
+	var autoSelection *autoModelSelection
 	err = db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(&row).Error; err != nil {
 			return err
 		}
-		if err := seedGroupModelsFromDefaults(tx, r.Context(), &row, &parent, baseURL, userID, userName, now); err != nil {
+		seededModels, err := seedGroupModelsFromDefaults(tx, r.Context(), &row, &parent, baseURL, userID, userName, now)
+		if err != nil {
 			return err
+		}
+		if strings.EqualFold(strings.TrimSpace(parent.Category), defaultProviderCategory) {
+			autoSelection, err = autoSelectUnconfiguredProviderModels(
+				tx, userID, userName, parent.Name, baseURL, seededModels, now,
+			)
+			if err != nil {
+				return err
+			}
 		}
 		return enqueueCredentialBackup(tx, row.ID, row.CredentialRevision, credentialvault.BackupUpsert, now)
 	})
@@ -255,8 +282,65 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 		UserModelProviderID: row.UserModelProviderID,
 		Name:                row.Name,
 		BaseURL:             row.BaseURL,
+		IsVerified:          row.IsVerified,
 		Check:               checkData,
+		AutoSelection:       autoSelection,
 	})
+}
+
+func autoSelectUnconfiguredProviderModels(
+	tx *gorm.DB,
+	userID, userName, providerName, baseURL string,
+	models []orm.UserModelProviderGroupModel,
+	now time.Time,
+) (*autoModelSelection, error) {
+	result := &autoModelSelection{
+		ProviderName: providerName,
+		Configured:   make([]autoSelectedModel, 0, len(autoModelSlots)),
+		Missing:      make([]string, 0, len(autoModelSlots)),
+	}
+
+	for _, slot := range autoModelSlots {
+		selectionKeys := []string{slot.ModelKey}
+		if slot.ModelKey == "image_generator" {
+			selectionKeys = []string{"text2image", "image_editing", "image_generator"}
+		}
+		var selected orm.UserSelectedModel
+		err := tx.Where("user_id = ? AND model_type IN ?", userID, selectionKeys).Take(&selected).Error
+		if err == nil {
+			continue
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
+		}
+		model, ok := preferredAutoModel(
+			baseURL, slot.CatalogTypes, models,
+		)
+		if !ok {
+			result.Missing = append(result.Missing, slot.ModelKey)
+			continue
+		}
+		selectionKey := slot.ModelKey
+		if slot.ModelKey == "image_generator" {
+			selectionKey = "text2image"
+			if strings.EqualFold(strings.TrimSpace(model.ModelType), "image_editing") {
+				selectionKey = "image_editing"
+			}
+		}
+		selected = orm.UserSelectedModel{
+			UserID:                        userID,
+			UserName:                      userName,
+			ModelKey:                      selectionKey,
+			UserModelProviderGroupModelID: model.ID,
+			CreatedAt:                     now,
+			UpdatedAt:                     now,
+		}
+		if err := tx.Create(&selected).Error; err != nil {
+			return nil, err
+		}
+		result.Configured = append(result.Configured, autoSelectedModel{ModelKey: slot.ModelKey, Name: model.Name})
+	}
+	return result, nil
 }
 
 // UpdateGroup updates a connection group (name, base_url, optional api_key). The target group is path group_id.
@@ -305,6 +389,11 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "query model provider failed", http.StatusInternalServerError)
 		return
 	}
+	if hasOpenAIRequestPath(parent.Name, baseURL) {
+		common.ReplyErr(w, "base_url must be an API root without a request path", http.StatusBadRequest)
+		return
+	}
+	baseURL = LazyLLMBaseURL(parent.Name, baseURL)
 
 	var row orm.UserModelProviderGroup
 	err = db.WithContext(r.Context()).
@@ -379,9 +468,6 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 	if effectiveAPIKey == "" && !baseURLChanged {
 		effectiveAPIKey = storedAPIKey
 	}
-	if effectiveAPIKey == "" {
-		updates["is_verified"] = true
-	}
 	if !skipVerify && effectiveAPIKey != "" && shouldVerifyCloudServiceOnSave(parent.Category, parent.Name) {
 		checkResult, checkErr := doProviderGroupCheck(r.Context(), parent.Category, parent.Name, baseURL, effectiveAPIKey, "")
 		if checkErr != nil || checkResult == nil || !checkResult.Success {
@@ -405,30 +491,30 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 
 	// verify=true: run connectivity check before persisting; on success mark is_verified=true atomically.
 	if req.Verify && checkData == nil {
-		if effectiveAPIKey == "" {
-			updates["is_verified"] = true
-		} else {
-			checkResult, checkErr := doProviderGroupCheck(r.Context(), parent.Category, parent.Name, baseURL, effectiveAPIKey, "")
-			if checkErr != nil || checkResult == nil || !checkResult.Success {
-				msg := "verification failed"
-				checkMsg := msg
-				if checkResult != nil {
-					checkMsg = strings.TrimSpace(checkResult.Message)
-					if checkMsg != "" {
-						msg = "verification failed: " + checkMsg
-					}
-				}
-				common.ReplyErrWithData(
-					w,
-					msg,
-					CheckModelProviderData{Success: false, Message: checkMsg},
-					http.StatusBadGateway,
-				)
-				return
-			}
-			checkData = &CheckModelProviderData{Success: true, Message: checkResult.Message}
-			updates["is_verified"] = true
+		if effectiveAPIKey == "" && isAPIKeyRequiredForBaseURL(r.Context(), db, parent.DefaultModelProviderID, baseURL) {
+			common.ReplyErr(w, "api_key is required", http.StatusBadRequest)
+			return
 		}
+		checkResult, checkErr := doProviderGroupCheck(r.Context(), parent.Category, parent.Name, baseURL, effectiveAPIKey, "")
+		if checkErr != nil || checkResult == nil || !checkResult.Success {
+			msg := "verification failed"
+			checkMsg := msg
+			if checkResult != nil {
+				checkMsg = strings.TrimSpace(checkResult.Message)
+				if checkMsg != "" {
+					msg = "verification failed: " + checkMsg
+				}
+			}
+			common.ReplyErrWithData(
+				w,
+				msg,
+				CheckModelProviderData{Success: false, Message: checkMsg},
+				http.StatusBadGateway,
+			)
+			return
+		}
+		checkData = &CheckModelProviderData{Success: true, Message: checkResult.Message}
+		updates["is_verified"] = true
 	}
 	if err := db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(&row).Updates(updates).Error; err != nil {
@@ -442,6 +528,9 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "update group failed", http.StatusInternalServerError)
 		return
 	}
+	if isVerified, ok := updates["is_verified"].(bool); ok {
+		row.IsVerified = isVerified
+	}
 	row.Name = name
 	row.BaseURL = baseURL
 	if apiKey != "" {
@@ -453,6 +542,7 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 		UserModelProviderID: row.UserModelProviderID,
 		Name:                row.Name,
 		BaseURL:             row.BaseURL,
+		IsVerified:          row.IsVerified,
 		Check:               checkData,
 	})
 }
@@ -604,6 +694,11 @@ var sensenovaNewPlatformModelNames = map[string]bool{
 	"glm-5.2":                  true,
 	"sensenova-6.7-flash-lite": true,
 	"sensenova-u1-fast":        true,
+	"sensenova-u1.5-lite":      true,
+}
+
+func shouldSeedSenseNovaModel(modelName string, useNewPlatform bool) bool {
+	return sensenovaNewPlatformModelNames[modelName] == useNewPlatform
 }
 
 // seedGroupModelsFromDefaults inserts user_model_provider_group_models from default_models when the group's
@@ -616,10 +711,10 @@ func seedGroupModelsFromDefaults(
 	parent *orm.UserModelProvider,
 	requestBaseURL, userID, userName string,
 	now time.Time,
-) error {
+) ([]orm.UserModelProviderGroupModel, error) {
 	// Providers without has_models capability (e.g. OCR, search) have no model list.
 	if !parent.HasCapability("has_models") {
-		return nil
+		return nil, nil
 	}
 
 	// Determine whether we use the new-platform subset or the full catalog.
@@ -632,9 +727,9 @@ func seedGroupModelsFromDefaults(
 		Take(&catalog).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil
+			return nil, nil
 		}
-		return err
+		return nil, err
 	}
 
 	// For the new SenseNova platform, seed only the Token Plan model subset (loaded from DB).
@@ -642,22 +737,23 @@ func seedGroupModelsFromDefaults(
 	if useNewPlatform {
 		// seed only the new-platform-specific models from default_models
 	} else if normalizeBaseURLForCompare(requestBaseURL) != normalizeBaseURLForCompare(catalog.BaseURL) {
-		return nil
+		return nil, nil
 	}
 
 	var defs []orm.DefaultModel
 	if err := tx.WithContext(ctx).
 		Where("default_model_provider_id = ? AND deleted_at IS NULL", parent.DefaultModelProviderID).
 		Find(&defs).Error; err != nil {
-		return err
+		return nil, err
 	}
 	if len(defs) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	batch := make([]orm.UserModelProviderGroupModel, 0, len(defs))
 	for _, d := range defs {
-		if useNewPlatform && !sensenovaNewPlatformModelNames[d.Name] {
+		if strings.EqualFold(parent.Name, "SenseNova") &&
+			!shouldSeedSenseNovaModel(d.Name, useNewPlatform) {
 			continue
 		}
 		batch = append(batch, orm.UserModelProviderGroupModel{
@@ -668,6 +764,8 @@ func seedGroupModelsFromDefaults(
 			Name:                     d.Name,
 			ModelType:                d.ModelType,
 			MaxInputTokens:           d.MaxInputTokens,
+			FreeAutoSelectPriority:   d.FreeAutoSelectPriority,
+			FreeAutoSelectBaseURLs:   d.FreeAutoSelectBaseURLs,
 			IsDefault:                true,
 			BaseModel: orm.BaseModel{
 				CreateUserID:   userID,
@@ -679,9 +777,12 @@ func seedGroupModelsFromDefaults(
 		})
 	}
 	if len(batch) == 0 {
-		return nil
+		return nil, nil
 	}
-	return tx.WithContext(ctx).CreateInBatches(&batch, 100).Error
+	if err := tx.WithContext(ctx).CreateInBatches(&batch, 100).Error; err != nil {
+		return nil, err
+	}
+	return batch, nil
 }
 
 // isDefaultBaseURL reports whether the given base_url matches the catalog default for the provider.

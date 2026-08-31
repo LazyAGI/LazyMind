@@ -1,0 +1,143 @@
+schema_version: 2
+id: novel-generator
+type: chat
+version: 1.2.1
+status: published
+default_locale: zh-CN
+provider: WorkBuddy
+
+skill:
+  source_url: featured/novel-generator/skill
+  required_version: 1.0.0
+
+placement:
+  home: true
+  gallery: true
+  order: 12
+
+classification:
+  category: 内容创作
+  tags:
+    - 爽文生成
+    - 网文连载
+    - 大纲与章节
+
+assets:
+  cover:
+    file: assets/cover.png
+    role: cover
+  idea_demo:
+    file: assets/novel-idea-demo.html
+    role: result
+  outline_demo:
+    file: assets/novel-outline-demo.html
+    role: result
+  chapter_demo:
+    file: assets/novel-chapter-demo.html
+    role: result
+
+presentation:
+  card:
+    title: 爽文小说生成
+    description: 一句话开书、规划整书或直接创作章节，让脑洞快速变成能继续连载的正文
+    output_type: document
+    output_label: 小说创作工作台
+    cover_asset: cover
+    result_summary: 在统一作者工作台中查看真实开篇、全书大纲和章节正文
+  detail:
+    title: 一句话开书，随时继续写爽文
+    description: 面向网文与爽文创作者，从一句话脑洞出发，完成核心卖点、人物设定、全书大纲和章节正文，维护人物状态与伏笔。来源：WorkBuddy，经 LazyMind 适配。
+    attachment_hint: 无需上传即可运行预置案例；也可替换为自己的脑洞、人物设定或已有前文
+
+tasks:
+  - id: idea-development
+    selector:
+      title: 一句话开书
+      description: 从一个脑洞生成书名、核心卖点、黄金三章和可直接阅读的开篇
+      output_label: 开书方案与正文
+    launch:
+      prompt_short: 体验案例：把“能看见项目失败倒计时的实习生”发展成一部可直接开读的爽文。
+      prompt: |
+        请把下面的创意发展成一部具有持续追读感的爽文，并写出可直接阅读的开篇。
+
+        创意：刚入职的产品实习生程野，能看见每个项目彻底失败前的红色倒计时。公司即将发布的 AI 助手只剩 24 小时，所有测试却显示正常；他每判断错一次，倒计时就会加速。
+
+        给出书名、一句话卖点、主角与核心规则、黄金三章安排，并创作约 1500 字的第一章。让爽点来自发现信息、做出判断和承担代价，其他角色保持合理动机。正文后附一张简短状态卡，方便在当前会话继续创作。
+    replay:
+      steps:
+        - title: 提炼爽文卖点
+          description: 识别目标读者、核心期待和区别于同类作品的记忆点
+        - title: 建立主角与规则
+          description: 明确主角欲望、初始困境、能力边界和必须承担的代价
+        - title: 设计黄金三章
+          description: 用危机、兑现和新悬念形成连续阅读动力
+        - title: 写出真实开篇
+          description: 直接交付有行动、有变化、有章末钩子的小说正文
+    result:
+      template: html_preview_v1
+      eyebrow: 爽文开书案例
+      title: 《午夜十分钟》创作起点
+      summary: 查看一个脑洞如何变成书名、能力规则、黄金三章和真实开篇正文。
+      html_asset: idea_demo
+
+  - id: outline-planning
+    selector:
+      title: 规划整书
+      description: 规划全书主线、分卷升级、人物成长、高潮节奏和伏笔回收
+      output_label: 全书连载大纲
+    launch:
+      prompt_short: 体验案例：为“项目失败倒计时”的创意规划一套四卷连载路线。
+      prompt: |
+        请根据下面的创意，规划一部适合持续连载的四卷爽文。
+
+        创意：刚入职的产品实习生程野，能看见每个项目彻底失败前的红色倒计时。公司即将发布的 AI 助手只剩 24 小时，所有测试却显示正常；他每判断错一次，倒计时就会加速。
+
+        梳理全书主线、主角成长、四卷的核心冲突与卷末钩子，并安排主要伏笔的埋设和回收。故事应逐步揭开倒计时的来源，让每次胜利带来新的代价或更大的问题。最后附一张全书状态卡，供后续章节创作沿用。
+    replay:
+      steps:
+        - title: 锁定作品承诺
+          description: 确认核心卖点、主角目标、目标篇幅和不可违反的规则
+        - title: 搭建全书主线
+          description: 设计开局、中点变化、终局抉择和人物成长方向
+        - title: 拆解分卷节奏
+          description: 安排卷级目标、冲突升级、阶段高潮、回报与代价
+        - title: 校验伏笔因果
+          description: 标记伏笔首次出现、推进节点和预计回收窗口
+    result:
+      template: html_preview_v1
+      eyebrow: 全书规划案例
+      title: 《午夜十分钟》连载路线图
+      summary: 在统一创作工作台中查看全书主线、四卷节奏、人物成长与伏笔回收。
+      html_asset: outline_demo
+
+  - id: chapter-writing
+    selector:
+      title: 创作一章
+      description: 给出人物、场景和本章目标，直接生成节奏完整、可阅读的章节正文
+      output_label: 小说章节正文
+    launch:
+      prompt_short: 体验案例：创作倒计时首次出现的 AI 助手上线评审会章节。
+      prompt: |
+        请根据下面的作品设定和本章场景，创作一章可直接阅读的爽文正文。
+
+        作品设定：产品实习生程野能看见项目彻底失败前的红色倒计时；倒计时不提示原因，他每判断错一次，剩余时间就会加速减少。
+
+        本章场景：AI 助手上线评审会上，所有测试报告都显示通过，程野却看见大屏上出现“23:59:59”。他没有决策权限，只能从用户反馈和异常记录中寻找证据。第一次修复看似成功，倒计时却突然减少六小时。
+
+        创作约 1500 字，写清本章目标、现实阻力、可信的小胜利、判断错误的代价和自然的章末钩子。人物不要为了衬托主角而降智。正文后附简短状态卡，记录人物状态、能力规则和开放悬念。
+    replay:
+      steps:
+        - title: 明确本章任务
+          description: 锁定视角人物、场景目标、主要阻力、回报与代价
+        - title: 核对创作上下文
+          description: 有前文时检查人物状态、规则、时间线和信息边界
+        - title: 完成场景链写作
+          description: 用行动、对话和因果变化推进一章完整正文
+        - title: 收束章末钩子
+          description: 检查连续性并留下具体、自然的下一章动力
+    result:
+      template: html_preview_v1
+      eyebrow: 章节正文案例
+      title: 第001章《倒塌前十分钟》
+      summary: 阅读 LazyMind 实测生成的完整都市异能开篇，并查看本章任务与连续性状态。
+      html_asset: chapter_demo

@@ -86,13 +86,15 @@ func LoadCloudProviderTokens(ctx context.Context, provider, userID string) ([]st
 }
 
 type SelectedRuntimeModel struct {
-	ModelType        string
-	ProviderName     string
-	ModelName        string
-	BaseURL          string
-	APIKey           string
-	APIKeyCiphertext string
-	MaxInputTokens   *string
+	ModelType          string
+	TechnicalModelType string
+	IsDefault          bool
+	ProviderName       string
+	ModelName          string
+	BaseURL            string
+	APIKey             string
+	APIKeyCiphertext   string
+	MaxInputTokens     *string
 }
 
 // LoadMaxInputTokens returns the configured context window for a runtime model role.
@@ -131,6 +133,8 @@ func LoadLLMConfig(ctx context.Context, db *gorm.DB, userID string) (map[string]
 		Table("user_selected_models usm").
 		Select(
 			"usm.model_type, "+
+				"m.model_type AS technical_model_type, "+
+				"m.is_default, "+
 				"m.provider_name, "+
 				"m.name AS model_name, "+
 				"g.base_url, "+
@@ -147,13 +151,15 @@ func LoadLLMConfig(ctx context.Context, db *gorm.DB, userID string) (map[string]
 			"JOIN user_model_provider_groups g ON "+
 				"g.id = m.user_model_provider_group_id AND "+
 				"g.create_user_id = usm.user_id AND "+
-				"g.deleted_at IS NULL",
+				"g.deleted_at IS NULL AND g.is_verified = ?",
+			true,
 		).
 		Where("usm.user_id = ?", strings.TrimSpace(userID)).
 		Scan(&ownRows).Error
 	if err != nil {
 		return nil, err
 	}
+	ownRows = eligibleRuntimeModels(ownRows)
 	if err := decryptRuntimeModels(ownRows); err != nil {
 		return nil, err
 	}
@@ -170,6 +176,8 @@ func LoadLLMConfig(ctx context.Context, db *gorm.DB, userID string) (map[string]
 		Table("user_selected_models usm").
 		Select(
 			"usm.model_type, "+
+				"m.model_type AS technical_model_type, "+
+				"m.is_default, "+
 				"m.provider_name, "+
 				"m.name AS model_name, "+
 				"g.base_url, "+
@@ -184,13 +192,15 @@ func LoadLLMConfig(ctx context.Context, db *gorm.DB, userID string) (map[string]
 		Joins(
 			"JOIN user_model_provider_groups g ON "+
 				"g.id = m.user_model_provider_group_id AND "+
-				"g.deleted_at IS NULL",
+				"g.deleted_at IS NULL AND g.is_verified = ?",
+			true,
 		).
 		Where("usm.share = ?", true).
 		Scan(&sharedRows).Error
 	if err != nil {
 		return nil, err
 	}
+	sharedRows = eligibleRuntimeModels(sharedRows)
 	if err := decryptRuntimeModels(sharedRows); err != nil {
 		return nil, err
 	}
@@ -271,6 +281,143 @@ func LoadSearchToolConfig(ctx context.Context, db *gorm.DB, userID string) (map[
 	return map[string]any{toolName: value}, nil
 }
 
+// LoadAcademicSearchToolConfig returns the selected academic-search
+// credential in the dynamic tool-auth shape consumed by the algorithm
+// service. Sciverse is configured as a datasource rather than a generic web
+// search provider, so it must be resolved independently from
+// LoadSearchToolConfig.
+func LoadAcademicSearchToolConfig(ctx context.Context, db *gorm.DB, userID string) (map[string]any, error) {
+	userID = strings.TrimSpace(userID)
+	row, err := loadSelectedProviderConfig(ctx, db, userID, "datasource", false)
+	if err != nil {
+		return nil, err
+	}
+	if row == nil {
+		row, err = loadConfiguredSciverseDatasource(ctx, db, userID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if row == nil {
+		row, err = loadSelectedProviderConfig(ctx, db, "", "datasource", true)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if row == nil || normalizeSearchToolName(row.ProviderName) != "sciverse" {
+		return nil, nil
+	}
+	value := normalizeOCRAuthValue(row.APIKey)
+	if value == nil {
+		return nil, nil
+	}
+	return map[string]any{"sciverse": value}, nil
+}
+
+// LoadToolConfigForCapabilities loads Host-private credentials only for tools
+// declared by the current Workflow node. The declaration is the SubAgent tool
+// allowlist; a local-only step therefore receives no search or cloud secrets.
+func LoadToolConfigForCapabilities(
+	ctx context.Context,
+	db *gorm.DB,
+	userID string,
+	capabilities []string,
+) (map[string]any, error) {
+	allowed := make(map[string]struct{}, len(capabilities))
+	for _, capability := range capabilities {
+		name := strings.ToLower(strings.TrimSpace(capability))
+		if name != "" {
+			allowed[name] = struct{}{}
+		}
+	}
+	merge := func(target map[string]any, source map[string]any) map[string]any {
+		if target == nil && len(source) > 0 {
+			target = map[string]any{}
+		}
+		for key, value := range source {
+			target[key] = value
+		}
+		return target
+	}
+	has := func(name string) bool {
+		_, ok := allowed[name]
+		return ok
+	}
+
+	var config map[string]any
+	if has("web_search") {
+		entry, err := LoadSearchToolConfig(ctx, db, userID)
+		if err != nil {
+			return nil, err
+		}
+		config = merge(config, entry)
+	}
+	if has("academic_search") {
+		entry, err := LoadAcademicSearchToolConfig(ctx, db, userID)
+		if err != nil {
+			return nil, err
+		}
+		config = merge(config, entry)
+	}
+	for _, provider := range cloudToolProviders {
+		if !has("cloud_files") && !has(provider) {
+			continue
+		}
+		tokens, err := LoadCloudProviderTokens(ctx, provider, userID)
+		if err != nil {
+			return nil, err
+		}
+		if len(tokens) == 1 {
+			config = merge(config, map[string]any{provider: tokens[0]})
+		} else if len(tokens) > 1 {
+			config = merge(config, map[string]any{provider: tokens})
+		}
+	}
+	return config, nil
+}
+
+func loadConfiguredSciverseDatasource(
+	ctx context.Context,
+	db *gorm.DB,
+	userID string,
+) (*selectedProviderConfig, error) {
+	if db == nil || userID == "" {
+		return nil, nil
+	}
+	var row selectedProviderConfig
+	err := db.WithContext(ctx).Table("user_model_provider_groups g").
+		Select("p.name AS provider_name, g.base_url, g.api_key, g.api_key_ciphertext").
+		Joins(
+			"JOIN user_model_providers p ON "+
+				"p.id = g.user_model_provider_id AND "+
+				"p.create_user_id = g.create_user_id AND "+
+				"p.deleted_at IS NULL",
+		).
+		Where(
+			"g.create_user_id = ? AND g.deleted_at IS NULL AND g.is_verified = ? "+
+				"AND (TRIM(g.api_key) <> '' OR TRIM(g.api_key_ciphertext) <> '') "+
+				"AND p.category = ? AND p.name IN ?",
+			userID,
+			true,
+			"datasource",
+			[]string{"Sciverse", "Sciverse Search"},
+		).
+		Order("g.updated_at DESC").
+		Limit(1).
+		Scan(&row).Error
+	if err != nil {
+		return nil, err
+	}
+	if row.ProviderName == "" && row.BaseURL == "" {
+		return nil, nil
+	}
+	row.APIKey, err = modelprovider.ResolveAPIKey(row.APIKey, row.APIKeyCiphertext)
+	if err != nil {
+		return nil, err
+	}
+	return &row, nil
+}
+
 func normalizeSearchToolName(providerName string) string {
 	normalized := strings.Map(func(r rune) rune {
 		if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' {
@@ -290,6 +437,8 @@ func normalizeSearchToolName(providerName string) string {
 		return "bing"
 	case "tavily":
 		return "tavily"
+	case "sciverse", "sciversesearch":
+		return "sciverse"
 	default:
 		return ""
 	}
@@ -406,9 +555,9 @@ func LoadAdminEmbedConfig(ctx context.Context, db *gorm.DB) (map[string]any, err
 		return nil, err
 	}
 	cfg := map[string]any{
-		"source":   strings.ToLower(strings.TrimSpace(row.ProviderName)),
+		"source":   modelprovider.LazyLLMSource(row.ProviderName),
 		"model":    row.ModelName,
-		"base_url": row.BaseURL,
+		"base_url": modelprovider.LazyLLMBaseURL(row.ProviderName, row.BaseURL),
 		"api_key":  row.APIKey,
 	}
 	return cfg, nil
@@ -425,24 +574,51 @@ func decryptRuntimeModels(rows []SelectedRuntimeModel) error {
 	return nil
 }
 
+func eligibleRuntimeModels(rows []SelectedRuntimeModel) []SelectedRuntimeModel {
+	eligible := rows[:0]
+	for _, row := range rows {
+		if strings.EqualFold(strings.TrimSpace(row.ModelType), modelprovider.EvoModelKey) {
+			if _, ok := openCodeDescriptor(row); !ok {
+				continue
+			}
+		}
+		eligible = append(eligible, row)
+	}
+	return eligible
+}
+
 func BuildLLMConfig(rows []SelectedRuntimeModel) map[string]any {
 	out := map[string]any{}
 	for _, row := range rows {
+		role := strings.ToLower(strings.TrimSpace(row.ModelType))
 		cfg := map[string]any{
-			"source":   strings.ToLower(strings.TrimSpace(row.ProviderName)),
+			"source":   modelprovider.LazyLLMSource(row.ProviderName),
 			"model":    row.ModelName,
-			"base_url": row.BaseURL,
+			"base_url": modelprovider.LazyLLMBaseURL(row.ProviderName, row.BaseURL),
 			"api_key":  row.APIKey,
 		}
 		if row.MaxInputTokens != nil {
 			cfg["max_input_tokens"] = *row.MaxInputTokens
 		}
-		out[strings.ToLower(strings.TrimSpace(row.ModelType))] = cfg
+		if role == modelprovider.EvoModelKey {
+			descriptor, ok := openCodeDescriptor(row)
+			if !ok {
+				continue
+			}
+			cfg["opencode"] = descriptor
+		}
+		out[role] = cfg
 	}
 	if len(out) == 0 {
 		return nil
 	}
 	return out
+}
+
+func openCodeDescriptor(row SelectedRuntimeModel) (modelprovider.OpenCodeModelDescriptor, bool) {
+	return modelprovider.ResolveOpenCodeModel(
+		row.ProviderName, row.ModelName, row.BaseURL, row.TechnicalModelType, row.IsDefault,
+	)
 }
 
 func SummarizeLLMConfigForLog(config map[string]any) string {

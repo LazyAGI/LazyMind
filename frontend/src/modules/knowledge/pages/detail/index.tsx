@@ -7,7 +7,6 @@ import {
   Dropdown,
   Tooltip,
   Input,
-  Space,
 } from "antd";
 import { axiosInstance, BASE_URL } from "@/components/request";
 import { AgentAppsAuth } from "@/components/auth";
@@ -370,7 +369,7 @@ const Detail = () => {
           content: t("knowledge.ffmpegRequiredDesc"),
           okText: t("knowledge.configureFfmpeg"),
           cancelText: t("common.close"),
-          onOk: () => navigate("/model-providers/tools#ffmpeg-dependency"),
+          onOk: () => navigate("/settings?section=system_tools#ffmpeg-dependency"),
         });
       } catch (error) {
         console.error("Failed to inspect completed task:", error);
@@ -630,49 +629,40 @@ const Detail = () => {
               </Button>
             )}
             <Badge count={runningTotal} size="small" style={{ zIndex: 2 }}>
-              <Space.Compact>
-                <Tooltip
-                  title={
-                    importDisabledReason ||
-                    (embeddingReady === false || multimodalEmbeddingReady === false ? (
-                      isAdmin ? (
-                        <span>
-                          {embeddingReady === false
-                            ? t("knowledge.embeddingNotReadyBannerAdmin")
-                            : t(
-                                "knowledge.multimodalEmbeddingNotReadyBannerAdmin",
-                              )}
-                          <a
-                            href="/model-providers"
-                            style={{
-                              marginLeft: 8,
-                              color: "#fff",
-                              textDecoration: "underline",
-                            }}
-                            onClick={(e: MouseEvent<HTMLAnchorElement>) => {
-                              e.preventDefault();
-                              navigate("/model-providers");
-                            }}
-                          >
-                            {t("knowledge.goToConfig")}
-                          </a>
-                        </span>
-                      ) : embeddingReady === false ? (
-                        t("knowledge.embeddingNotReadyBanner")
-                      ) : (
-                        t("knowledge.multimodalEmbeddingNotReadyBanner")
-                      )
-                    ) : undefined)
-                  }
-                >
-                  <Button
-                    type="primary"
-                    disabled={importDisabled}
-                    onClick={() => openImportModal({ importMode: "file" })}
-                  >
-                    {t("knowledge.importFile")}
-                  </Button>
-                </Tooltip>
+              <Tooltip
+                title={
+                  importDisabledReason ||
+                  (embeddingReady === false || multimodalEmbeddingReady === false ? (
+                    isAdmin ? (
+                      <span>
+                        {embeddingReady === false
+                          ? t("knowledge.embeddingNotReadyBannerAdmin")
+                          : t(
+                              "knowledge.multimodalEmbeddingNotReadyBannerAdmin",
+                            )}
+                        <a
+                          href="/settings?section=models"
+                          style={{
+                            marginLeft: 8,
+                            color: "#fff",
+                            textDecoration: "underline",
+                          }}
+                          onClick={(e: MouseEvent<HTMLAnchorElement>) => {
+                            e.preventDefault();
+                            navigate("/settings?section=models");
+                          }}
+                        >
+                          {t("knowledge.goToConfig")}
+                        </a>
+                      </span>
+                    ) : embeddingReady === false ? (
+                      t("knowledge.embeddingNotReadyBanner")
+                    ) : (
+                      t("knowledge.multimodalEmbeddingNotReadyBanner")
+                    )
+                  ) : undefined)
+                }
+              >
                 <Dropdown
                   menu={{
                     items: [
@@ -740,14 +730,17 @@ const Detail = () => {
                       }
                     },
                   }}
+                  trigger={["click"]}
                 >
-                  <span style={{ display: "inline-flex" }}>
-                    <Button type="primary">
-                      <DownOutlined />
-                    </Button>
-                  </span>
+                  <Button
+                    className="knowledge-toolbar-dropdown-button"
+                    type="primary"
+                  >
+                    {t("knowledge.importFile")}
+                    <DownOutlined />
+                  </Button>
                 </Dropdown>
-              </Space.Compact>
+              </Tooltip>
             </Badge>
             {hasWritePermission && (
               <Dropdown
@@ -787,14 +780,15 @@ const Detail = () => {
                 trigger={["click"]}
               >
                 <span style={{ display: "inline-flex" }}>
-                  <Space.Compact>
-                    <Button variant="outlined" color="primary" ghost>
-                      {t("knowledge.batchActions")}
-                    </Button>
-                    <Button variant="outlined" color="primary" ghost>
-                      <DownOutlined />
-                    </Button>
-                  </Space.Compact>
+                  <Button
+                    className="knowledge-toolbar-dropdown-button"
+                    variant="outlined"
+                    color="primary"
+                    ghost
+                  >
+                    {t("knowledge.batchActions")}
+                    <DownOutlined />
+                  </Button>
                 </span>
               </Dropdown>
             )}

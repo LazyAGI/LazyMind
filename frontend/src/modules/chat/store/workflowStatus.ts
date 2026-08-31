@@ -6,6 +6,9 @@ interface RuntimeProjectionStatus {
   current?: string[];
   ready?: string[];
   blocked?: string[];
+  nodes?: Record<string, {
+    requires_approval?: boolean;
+  }>;
 }
 
 /**
@@ -42,4 +45,18 @@ export function reconcileWorkflowSessionStatus(
     return 'waiting';
   }
   return effectiveStatus;
+}
+
+/** A prepared session can be waiting for its first dispatch without awaiting approval. */
+export function isWorkflowReadyToStart(
+  status: WorkflowSessionStatus,
+  projection?: RuntimeProjectionStatus,
+  recordedStepCount = 0,
+): boolean {
+  const ready = projection?.ready ?? [];
+  return status === 'waiting'
+    && recordedStepCount === 0
+    && (projection?.current?.length ?? 0) === 0
+    && ready.length > 0
+    && ready.every((stepId) => projection?.nodes?.[stepId]?.requires_approval === false);
 }

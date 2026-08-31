@@ -63,31 +63,7 @@ func SeedBuiltinWorkflows(ctx context.Context, db *gorm.DB) error {
 }
 
 func seedBuiltinWorkflow(ctx context.Context, db *gorm.DB, root string) (string, error) {
-	files := map[string][]byte{}
-	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if entry.IsDir() {
-			if entry.Name() == "__pycache__" || strings.HasPrefix(entry.Name(), ".") && path != root {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if ignoredBuiltinPackageFile(entry.Name()) {
-			return nil
-		}
-		relative, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		body, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		files[filepath.ToSlash(relative)] = body
-		return nil
-	})
+	files, err := readBuiltinPackageFiles(root)
 	if err != nil {
 		return "", err
 	}
@@ -141,8 +117,19 @@ func seedBuiltinWorkflow(ctx context.Context, db *gorm.DB, root string) (string,
 				return err
 			}
 		}
-		var existing orm.WorkflowRevision
-		if tx.Where("plugin_resource_id = ? AND tree_hash = ?", resource.ID, treeHash).First(&existing).Error == nil {
+		existing, reusable, err := findReusableBuiltinRevision(
+			ctx, tx, resource.ID, treeHash, compiled.GraphHash, files, paths,
+		)
+		if err != nil {
+			return err
+		}
+		// Package bytes alone do not identify an executable revision: compiler
+		// upgrades can change the typed graph without changing workflow.yaml. Reuse
+		// only an intact exact package + compiled graph pair, otherwise publish one
+		// new immutable built-in revision. History-injection revisions deliberately
+		// contain compiled runtime state without package entries, so they must stay
+		// detached instead of becoming the catalog head.
+		if reusable {
 			return tx.Model(&resource).Updates(map[string]any{"head_revision_id": existing.ID,
 				"version": existing.RevisionNo, "plugin_id": metadata.ID, "owner_user_id": "", // workflow-naming: persistence
 				"owner_scope": "builtin", "source_type": "builtin",
@@ -151,8 +138,14 @@ func seedBuiltinWorkflow(ctx context.Context, db *gorm.DB, root string) (string,
 				"contains_scripts": hasScriptPath(paths), "status": "active", "updated_at": now}).Error
 		}
 		revisionID := uuid.NewString()
+		var maximumRevisionNo int64
+		if err := tx.Model(&orm.WorkflowRevision{}).
+			Where("plugin_resource_id = ?", resource.ID). // workflow-naming: persistence
+			Select("COALESCE(MAX(revision_no), 0)").Scan(&maximumRevisionNo).Error; err != nil {
+			return err
+		}
 		revision := orm.WorkflowRevision{ID: revisionID, WorkflowResourceID: resource.ID,
-			ParentRevisionID: resource.HeadRevisionID, RevisionNo: resource.Version + 1,
+			ParentRevisionID: resource.HeadRevisionID, RevisionNo: maximumRevisionNo + 1,
 			TreeHash: treeHash, CompiledGraph: compiled.Graph.JSON(), GraphHash: compiled.GraphHash,
 			GraphSchemaVersion: compiled.SchemaVersion, Message: "built-in package import",
 			CreatedBy: "system", CreatedAt: now}
@@ -185,6 +178,101 @@ func seedBuiltinWorkflow(ctx context.Context, db *gorm.DB, root string) (string,
 			"status": "active", "updated_at": now}).Error
 	})
 	return ref, err
+}
+
+func findReusableBuiltinRevision(ctx context.Context, tx *gorm.DB, resourceID, treeHash, graphHash string,
+	files map[string][]byte, paths []string) (orm.WorkflowRevision, bool, error) {
+	var candidates []orm.WorkflowRevision
+	if err := tx.WithContext(ctx).
+		Where("plugin_resource_id = ? AND tree_hash = ? AND graph_hash = ?", // workflow-naming: persistence
+			resourceID, treeHash, graphHash).
+		Order("revision_no DESC").Find(&candidates).Error; err != nil {
+		return orm.WorkflowRevision{}, false, err
+	}
+	expected := make(map[string]string, len(paths))
+	for _, path := range paths {
+		sum := sha256.Sum256(files[path])
+		expected[path] = hex.EncodeToString(sum[:])
+	}
+	for _, candidate := range candidates {
+		var entries []orm.WorkflowRevisionEntry
+		if err := tx.WithContext(ctx).Where("revision_id = ?", candidate.ID).Find(&entries).Error; err != nil {
+			return orm.WorkflowRevision{}, false, err
+		}
+		if len(entries) != len(expected) {
+			continue
+		}
+		blobHashes := make(map[string]struct{}, len(entries))
+		intact := true
+		for _, entry := range entries {
+			expectedHash, ok := expected[entry.Path]
+			if !ok || entry.EntryType != "file" || entry.BlobHash == nil || *entry.BlobHash != expectedHash {
+				intact = false
+				break
+			}
+			blobHashes[expectedHash] = struct{}{}
+		}
+		if !intact {
+			continue
+		}
+		hashes := make([]string, 0, len(blobHashes))
+		for hash := range blobHashes {
+			hashes = append(hashes, hash)
+		}
+		var blobCount int64
+		if err := tx.WithContext(ctx).Model(&orm.WorkflowBlob{}).Where("hash IN ?", hashes).
+			Count(&blobCount).Error; err != nil {
+			return orm.WorkflowRevision{}, false, err
+		}
+		if blobCount == int64(len(hashes)) {
+			return candidate, true, nil
+		}
+	}
+	return orm.WorkflowRevision{}, false, nil
+}
+
+func readBuiltinPackageFiles(root string) (map[string][]byte, error) {
+	files := map[string][]byte{}
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.Type()&fs.ModeSymlink != 0 {
+			return nil
+		}
+		if path != root && ignoredBuiltinPackageDir(entry.Name()) {
+			if entry.IsDir() {
+				return filepath.SkipDir
+			}
+			// Windows directory junctions can be reported as non-directories by
+			// WalkDir. Ignore the entry before attempting to read it as a file.
+			return nil
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		if ignoredBuiltinPackageFile(entry.Name()) {
+			return nil
+		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		files[filepath.ToSlash(relative)] = body
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return files, nil
+}
+
+func ignoredBuiltinPackageDir(name string) bool {
+	return name == "__pycache__" || name == "node_modules" || strings.HasPrefix(name, ".")
 }
 
 func ignoredBuiltinPackageFile(name string) bool {

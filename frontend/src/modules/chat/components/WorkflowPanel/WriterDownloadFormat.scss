@@ -1,0 +1,142 @@
+.writer-download-format-modal {
+  .ant-modal-content {
+    padding: 0;
+    overflow: hidden;
+    border: 1px solid #d9e2ec;
+    border-radius: 12px;
+  }
+
+  .ant-modal-header {
+    margin-bottom: 0;
+    padding: 20px 22px 14px;
+    border-bottom: 0;
+  }
+
+  .ant-modal-title {
+    color: #1f2937;
+    font-size: 16px;
+    font-weight: 600;
+  }
+
+  .ant-modal-close {
+    top: 17px;
+    right: 17px;
+  }
+
+  .ant-modal-body {
+    padding: 0 22px 20px;
+  }
+
+  .ant-modal-footer {
+    margin-top: 0;
+    padding: 14px 22px 18px;
+    border-top: 1px solid #eef2f7;
+  }
+}
+
+.writer-download-format__description {
+  margin: 0 0 15px;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.writer-download-format__options {
+  display: grid;
+  gap: 9px;
+}
+
+.writer-download-format__option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 13px 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+  color: #1f2937;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s, background-color 0.15s;
+
+  &:hover:not(:disabled) {
+    border-color: #8db2f3;
+    background: #f8fbff;
+  }
+
+  &:focus-visible {
+    outline: 2px solid #2563eb;
+    outline-offset: 2px;
+  }
+
+  &:disabled {
+    cursor: wait;
+    opacity: 0.7;
+  }
+
+  &--selected {
+    border-color: #8db2f3;
+    background: #eff6ff;
+  }
+}
+
+.writer-download-format__option-icon {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 7px;
+  background: #dbeafe;
+  color: #2563eb;
+  font-size: 18px;
+}
+
+.writer-download-format__option-copy {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 3px;
+
+  strong {
+    color: #1f2937;
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  small {
+    color: #64748b;
+    font-size: 11px;
+    line-height: 1.4;
+  }
+}
+
+.writer-download-format__footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.writer-download-format__error {
+  margin-right: auto;
+  color: #b42318;
+  font-size: 12px;
+}
+
+@media (max-width: 520px) {
+  .writer-download-format-modal {
+    .ant-modal-header {
+      padding-inline: 18px;
+    }
+
+    .ant-modal-body {
+      padding-inline: 18px;
+    }
+
+    .ant-modal-footer {
+      padding-inline: 18px;
+    }
+  }
+}

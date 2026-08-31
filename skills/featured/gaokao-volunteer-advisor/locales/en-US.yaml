@@ -1,0 +1,126 @@
+locale: en-US
+
+classification:
+  category: Education & growth
+  tags:
+    - Gaokao
+    - University applications
+    - Major selection
+
+presentation:
+  card:
+    title: Gaokao application advisor
+    description: Explore a complete application case from rank analysis and major comparison to reach, match, and safety ordering
+    output_type: report
+    output_label: Interactive application case
+    cover_asset: cover
+    result_summary: Follow rank analysis, application tiers, major fit, and admission-rule checks through an adjustable sample case
+  detail:
+    title: Gaokao application advisor
+    description: Use scores, rank, subjects, and preferences to shortlist universities and majors, plan application tiers, and assess admission risks. Browse four interactive sample cases from inputs to decisions; sample data is for presentation only and does not replace official admission information.
+    attachment_hint: Score, rank, subject selection, and university or major preference sheet
+
+tasks:
+  - id: volunteer-plan
+    selector:
+      title: Application plan
+      description: Build reach, match, and safety choices from rank, subjects, and preferences
+      output_label: Application plan
+    launch:
+      prompt_short: "I am in Jiangsu, with a 2025 Physics-Chemistry-Geography profile, score 612, rank 18,420, and a Jiangsu-Zhejiang-Shanghai engineering preference. Build a reach, match, and safety plan."
+      prompt: >-
+        Directly generate a complete reach, match, and safety application plan from my information without asking follow-up questions: I am in Jiangsu, applying for 2025 with Physics/Chemistry/Geography subjects, score 612, and overall rank 18,420; I prefer Jiangsu-Zhejiang-Shanghai, engineering, computer science, electronic information, automation, and software engineering, and accept major reassignment. My candidate reference ranks are Donglan University · Computer Science 15,800, Jiangnan Institute of Technology · Electronic Information 16,900, Haizhou University of Technology · Automation 19,100, Ningchuan University of Science and Technology · Software Engineering 20,300, Nanpu University · Information Management 26,800, and Lingnan Applied University · Digital Media 31,500. Organize them as two reach, two match, and two safety choices in order, explain rank fit, major and city fit, reassignment and rejection risks, and official items to verify. These university and rank references have no attached official sources, so mark them for verification and do not present them as official admission probabilities or application advice.
+    replay:
+      steps:
+        - title: Verify exam information
+          description: Confirm province, year, subjects, score, rank, and other basic conditions
+        - title: Organize personal preferences
+          description: Clarify cities, university level, major direction, and acceptable constraints
+        - title: Build application tiers
+          description: Use historical admission ranks to form a layered candidate list
+        - title: Deliver the application plan
+          description: Provide ordering, decision rationale, risks, and adjustment advice
+    result:
+      template: html_preview_v1
+      eyebrow: Application planning case
+      title: From rank to a reach, match, and safety list
+      summary: Explore sample score inputs, application tiers, university-major rationale, and risk checks; sample data is not an official admission result.
+      html_asset: volunteer_plan_demo
+
+  - id: rank-analysis
+    selector:
+      title: Rank and admission analysis
+      description: Estimate admission ranges for target universities and majors from score and rank
+      output_label: Rank analysis report
+    launch:
+      prompt_short: "Use my 2025 Jiangsu Physics-Chemistry-Geography profile, score 612, and rank 18,420 to analyze reach, match, and safety boundaries for five target universities."
+      prompt: >-
+        Directly analyze my information without asking follow-up questions: I am in Jiangsu, applying for 2025 with Physics/Chemistry/Geography subjects, score 612, overall rank 18,420, and a Jiangsu-Zhejiang-Shanghai engineering preference. Compare these target programs and reference ranks: Donglan University · Computer Science 15,800, Haizhou University of Technology · Automation 19,100, Ningchuan University of Science and Technology · Software Engineering 20,300, Nanpu University · Information Management 26,800, and Lingnan Applied University · Digital Media 31,500. Divide them into reference reach, match, and safety boundaries, explain how to read rank ranges and volatility, and list the data definitions, enrollment plans, program groups, and official sources that still need verification. These schools, ranks, and judgments are not yet officially verified; do not present the illustrative ranges as real admission probabilities.
+    replay:
+      steps:
+        - title: Confirm the rank basis
+          description: Verify province, year, subject category, and score-to-rank table
+        - title: Align historical data
+          description: Compare recent minimum ranks and volatility for target universities and majors
+        - title: Estimate admission ranges
+          description: Define reference boundaries for reach, match, and safety choices
+        - title: Summarize the analysis
+          description: Explain opportunities, risks, and data that still need verification
+    result:
+      template: html_preview_v1
+      eyebrow: Rank-analysis case
+      title: University-major admission ranges and risks
+      summary: Explore rank bands, historical volatility, and reach, match, and safety boundaries with explicit data caveats.
+      html_asset: rank_analysis_demo
+
+  - id: major-selection
+    selector:
+      title: Major selection advice
+      description: Shortlist majors using interests, academic strengths, and development goals
+      output_label: Major selection advice
+    launch:
+      prompt_short: Compare three university majors for my Physics/Chemistry/Geography profile, strong math foundation, problem-solving interest, and Yangtze River Delta preference.
+      prompt: >-
+        Directly compare university majors from my information without asking follow-up questions: I take Physics/Chemistry/Geography, enjoy breaking down problems, have a strong math foundation, hope to stay in the Yangtze River Delta, and value internship access and employment flexibility. Compare Computer Science and Technology, Clinical Medicine, and Industrial Design. For each, cover courses, capabilities, training length, development paths, subject or physical-condition restrictions, and official information to verify; then rank the fit and explain its limits. Treat fit scores as an explanatory tool, not an admission or employment promise, and mark information that cannot be verified.
+    replay:
+      steps:
+        - title: Identify personal characteristics
+          description: Organize interests, strongest subjects, personality, and career direction
+        - title: Check subject restrictions
+          description: Exclude majors that conflict with subject or physical requirements
+        - title: Compare major directions
+          description: Compare study content, training paths, employment, and postgraduate options
+        - title: Build the recommendation list
+          description: Provide priorities, rationale, and ways to validate the choices
+    result:
+      template: html_preview_v1
+      eyebrow: Major-selection case
+      title: Comparing major fit, courses, and development paths
+      summary: Compare sample major-fit scores, course directions, development paths, and constraints that still need verification.
+      html_asset: major_selection_demo
+
+  - id: admission-rules
+    selector:
+      title: Admission rule explanation
+      description: Explain parallel applications, filing, reassignment, and rejection rules
+      output_label: Admission rule guide
+    launch:
+      prompt_short: Check filing, major reassignment, and rejection risks for my 2025 Jiangsu Physics-track parallel-application case.
+      prompt: >-
+        Directly produce an admission-rule and risk checklist from my information without asking follow-up questions: I am in Jiangsu, exam year 2025, regular undergraduate batch, Physics track, parallel applications, university-program-group as the application unit, and major reassignment tentatively accepted. Walk through scope, rank-based search and filing, program-group admission and reassignment, rejection risks, and special restrictions; then provide a pre-submission verification checklist. Separate the general process from Jiangsu's admission rules and the university regulations that must be checked, and do not make a definite claim where the source cannot be verified.
+    replay:
+      steps:
+        - title: Confirm province and year
+          description: Identify the applicable policy, batches, and application model
+        - title: Break down the filing process
+          description: Explain the sequence of ranking, matching, filing, and university admission
+        - title: Analyze key risks
+          description: Identify reassignment, rejection, major restriction, and batch transition risks
+        - title: Produce a rule checklist
+          description: List rules to confirm and official verification channels before submission
+    result:
+      template: html_preview_v1
+      eyebrow: Admission-rules case
+      title: Filing, reassignment, and rejection-risk checklist
+      summary: Walk through the filing flow, key restrictions, and verification checklist; local official rules remain authoritative.
+      html_asset: admission_rules_demo

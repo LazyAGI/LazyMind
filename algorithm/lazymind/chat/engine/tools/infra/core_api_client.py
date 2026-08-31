@@ -8,6 +8,34 @@ import requests
 from lazymind.config import config as _cfg
 
 
+class CoreAPIError(RuntimeError):
+    """Core request failure that preserves transport metadata for tool recovery."""
+
+    def __init__(self, method: str, url: str, status_code: int, message: Any):
+        super().__init__(method, url, status_code, message)
+        self.method = method
+        self.url = url
+        self.status_code = status_code
+        self.message = message
+        self.details = {
+            'method': method,
+            'url': url,
+            'status_code': status_code,
+        }
+
+    def __str__(self) -> str:
+        return f'{self.method} {self.url} failed with HTTP {self.status_code}: {self.message}'
+
+
+def _raise_core_api_error(method: str, url: str, status_code: int, body: Any) -> None:
+    message = (
+        body.get('msg') or body.get('message') or body.get('text') or body
+        if isinstance(body, dict)
+        else body
+    )
+    raise CoreAPIError(method, url, status_code, message)
+
+
 def _current_user_headers() -> Dict[str, str]:
     agentic_config = lazyllm.globals.get('agentic_config') or {}
     user_id = str(agentic_config.get('user_id') or '').strip()
@@ -40,12 +68,7 @@ def post_core_api(
         body = {'text': response.text}
 
     if not response.ok:
-        msg = (
-            body.get('msg') or body.get('message')
-            if isinstance(body, dict)
-            else response.text
-        )
-        raise RuntimeError(f'POST {url} failed with HTTP {response.status_code}: {msg}')
+        _raise_core_api_error('POST', url, response.status_code, body)
 
     if isinstance(body, dict) and body.get('code') not in (None, 0):
         msg = body.get('msg') or body.get('message') or body
@@ -75,12 +98,7 @@ def get_core_api(path: str, params: Dict[str, Any] | None = None) -> Dict[str, A
         body = {'text': response.text}
 
     if not response.ok:
-        msg = (
-            body.get('msg') or body.get('message')
-            if isinstance(body, dict)
-            else response.text
-        )
-        raise RuntimeError(f'GET {url} failed with HTTP {response.status_code}: {msg}')
+        _raise_core_api_error('GET', url, response.status_code, body)
 
     if isinstance(body, dict) and 'data' in body:
         return body.get('data') or {}

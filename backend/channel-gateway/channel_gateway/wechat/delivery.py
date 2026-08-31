@@ -3,14 +3,17 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from channel_gateway.common.domain.channel import ClaimedOutbound
+from channel_gateway.common.domain.channel import ClaimedInbound, ClaimedOutbound
 from channel_gateway.common.domain.outbound import (
-    OutboundRenderer,
     inline_artifact_bytes,
 )
 from channel_gateway.common.ports.core import StaticAssetClient
 from channel_gateway.wechat.credentials import WeChatCredentialStore
 from channel_gateway.wechat.domain import WeChatError
+from channel_gateway.wechat.interaction import (
+    WeChatPresentationRenderer,
+    WeChatReplyStream,
+)
 from channel_gateway.wechat.ports import WeChatDeliveryClient
 
 
@@ -20,13 +23,21 @@ class WeChatDeliveryProvider:
         *,
         client: WeChatDeliveryClient,
         credentials: WeChatCredentialStore,
-        renderer: OutboundRenderer,
+        renderer: WeChatPresentationRenderer,
         lazymind: StaticAssetClient,
     ):
         self._client = client
         self._credentials = credentials
         self._renderer = renderer
         self._lazymind = lazymind
+
+    def open_stream(self, message: ClaimedInbound) -> WeChatReplyStream:
+        account = self._credentials.load_runtime_account(message.account_id)
+        return WeChatReplyStream(
+            message=message,
+            client=self._client,
+            credentials=dict(account['credentials']),
+        )
 
     def render(self, message: ClaimedOutbound) -> list[dict[str, Any]]:
         return self._renderer.render(message)
@@ -60,7 +71,6 @@ class WeChatDeliveryProvider:
                 token=credentials['token'],
                 to_user_id=message.recipient_id,
                 image=content,
-                idempotency_key=f'{message.outbox_id}:{part_index}',
             )
         else:
             if artifact_index:
@@ -85,7 +95,6 @@ class WeChatDeliveryProvider:
                 filename=str(
                     part.get('filename') or 'lazymind-output'
                 ),
-                idempotency_key=f'{message.outbox_id}:{part_index}',
             )
         return {
             'source': state_key,
@@ -132,7 +141,7 @@ class WeChatDeliveryProvider:
             raise WeChatError('Unsupported WeChat outbound part')
         ciphertext = str(saved_state.get('ciphertext') or '')
         if not ciphertext:
-            raise WeChatError('Prepared WeChat image state is missing')
+            raise WeChatError('Prepared WeChat media state is missing')
         state = self._credentials.decrypt_delivery_state(
             message.account_id,
             ciphertext,
@@ -140,23 +149,12 @@ class WeChatDeliveryProvider:
         item = state.get('item')
         if not isinstance(item, dict):
             raise WeChatError('Prepared WeChat media is invalid')
-        if part.get('kind') == 'image':
-            self._client.send_image(
-                base_url=credentials['base_url'],
-                token=credentials['token'],
-                to_user_id=message.recipient_id,
-                context_token=context_token,
-                image_item=item,
-                client_id=idempotency_key,
-                run_id=run_id,
-            )
-        else:
-            self._client.send_file(
-                base_url=credentials['base_url'],
-                token=credentials['token'],
-                to_user_id=message.recipient_id,
-                context_token=context_token,
-                file_item=item,
-                client_id=idempotency_key,
-                run_id=run_id,
-            )
+        self._client.send_media(
+            base_url=credentials['base_url'],
+            token=credentials['token'],
+            to_user_id=message.recipient_id,
+            context_token=context_token,
+            item=item,
+            client_id=idempotency_key,
+            run_id=run_id,
+        )

@@ -183,6 +183,28 @@ export default function ContextUsageButton({
             <span>{report.max_input_tokens ? `/ ${formatTokens(report.max_input_tokens)} Tokens` : "Tokens"}</span>
             {ratio != null ? <b>{t("chat.contextUsageFull", { percent: ratio })}</b> : null}
           </div>
+          {report.compression_applied ? (
+            <div className="context-usage-routing-state is-success">
+              <CheckCircleFilled className="context-usage-routing-icon" />
+              <div className="context-usage-routing-copy">
+                <strong>{t("chat.contextUsageCompressedTitle", "Earlier history compressed")}</strong>
+                <span>
+                  {t(
+                    "chat.contextUsageCompressedHint",
+                    "This preview includes a runtime summary for older conversation turns.",
+                  )}
+                </span>
+                {report.compression_covered_through_seq ? (
+                  <small>
+                    {t(
+                      "chat.contextUsageCompressedSeq",
+                      { seq: report.compression_covered_through_seq, defaultValue: "Covered through turn {{seq}}." },
+                    )}
+                  </small>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
           <div className="context-usage-segments" aria-hidden="true">
             {report.categories.map((category, index) => (
               <i

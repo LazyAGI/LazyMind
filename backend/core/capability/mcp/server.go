@@ -88,6 +88,27 @@ func newServer(service *capability.Service) *mcp.Server {
 		result, err := service.SearchKnowledge(ctx, invocation(request), input)
 		return nil, result, err
 	})
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "cloud_document.list", Title: "List connected cloud accounts",
+		Description: "List the authenticated user's Feishu accounts enabled for LazyMind conversations.", Annotations: annotations,
+	}, func(ctx context.Context, request *mcp.CallToolRequest, input capability.ListCloudDocumentsInput) (*mcp.CallToolResult, capability.ListCloudDocumentsResult, error) {
+		result, err := service.ListCloudDocuments(ctx, invocation(request), input)
+		return nil, result, err
+	})
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "cloud_document.get", Title: "Browse connected cloud documents",
+		Description: "Browse one online page of files or folders through an authorized LazyMind cloud account. This never creates a scan source or starts synchronization.", Annotations: annotations,
+	}, func(ctx context.Context, request *mcp.CallToolRequest, input capability.GetCloudDocumentInput) (*mcp.CallToolResult, capability.GetCloudDocumentResult, error) {
+		result, err := service.GetCloudDocument(ctx, invocation(request), input)
+		return nil, result, err
+	})
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "cloud_document.search", Title: "Search connected cloud documents",
+		Description: "Search file and folder titles online through an authorized LazyMind cloud account; it does not use or refresh a scan index.", Annotations: annotations,
+	}, func(ctx context.Context, request *mcp.CallToolRequest, input capability.SearchCloudDocumentsInput) (*mcp.CallToolResult, capability.SearchCloudDocumentsResult, error) {
+		result, err := service.SearchCloudDocuments(ctx, invocation(request), input)
+		return nil, result, err
+	})
 	return server
 }
 

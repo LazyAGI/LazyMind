@@ -8,19 +8,7 @@ from channel_gateway.common.domain.chat import (
 )
 
 
-class IntentClient(Protocol):
-    def classify_intent(
-        self,
-        *,
-        owner_user_id: str,
-        request_id: str,
-        provider: str,
-        message: str,
-        state: dict[str, Any],
-        command_registry: dict[str, Any],
-    ) -> dict[str, Any]:
-        ...
-
+class CapabilityCatalogClient(Protocol):
     def get_capability_catalog(
         self,
         *,
@@ -51,6 +39,29 @@ class ConversationClient(Protocol):
         request_id: str,
         page_size: int = 100,
         page_token: str = '',
+        assistant: str = '',
+    ) -> dict[str, Any]:
+        ...
+
+    def list_external_agent_sessions(
+        self,
+        *,
+        owner_user_id: str,
+        request_id: str,
+        provider: str,
+        page_size: int = 100,
+        page_token: str = '',
+    ) -> dict[str, Any]:
+        ...
+
+    def bind_external_agent_session(
+        self,
+        *,
+        owner_user_id: str,
+        request_id: str,
+        provider: str,
+        host_id: str,
+        provider_thread_id: str,
     ) -> dict[str, Any]:
         ...
 
@@ -72,6 +83,15 @@ class ConversationClient(Protocol):
         page_size: int = 3,
         page_token: str = '',
     ) -> dict[str, Any]:
+        ...
+
+    def stop_chat_generation(
+        self,
+        *,
+        owner_user_id: str,
+        conversation_id: str,
+        request_id: str,
+    ) -> None:
         ...
 
 
@@ -210,7 +230,7 @@ class StaticAssetClient(Protocol):
 
 
 class LazyMindCore(
-    IntentClient,
+    CapabilityCatalogClient,
     ConversationClient,
     CapabilityClient,
     StaticAssetClient,

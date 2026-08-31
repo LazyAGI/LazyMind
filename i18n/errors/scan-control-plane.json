@@ -1234,5 +1234,13 @@
   "WORKER_POLL_INTERVAL_MUST_BE_POSITIVE": {
     "en-US": "Worker poll interval must be positive",
     "zh-CN": "Worker 轮询间隔必须为正数"
+  },
+  "CORE_INTERNAL_TOKEN_NOT_CONFIGURED": {
+    "en-US": "Core internal token is not configured",
+    "zh-CN": "未配置 Core 内部令牌"
+  },
+  "DATASET_USAGE_BATCH_FAILED": {
+    "en-US": "Failed to query dataset usage",
+    "zh-CN": "查询知识库使用统计失败"
   }
 }

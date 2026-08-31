@@ -120,6 +120,19 @@ func TestPolishPromptCallsRewrite(t *testing.T) {
 	}
 }
 
+func TestEditablePolishAllowsDeletingTheSelection(t *testing.T) {
+	instruction := editablePolishInstruction("remove the thanks", true)
+	if !strings.Contains(instruction, emptySelectionPolishToken) {
+		t.Fatalf("expected deletion token instruction, got %q", instruction)
+	}
+	if got := normalizeEditablePolishResult(emptySelectionPolishToken, true); got != "" {
+		t.Fatalf("expected deletion token to become empty selection, got %q", got)
+	}
+	if got := normalizeEditablePolishResult(emptySelectionPolishToken, false); got == "" {
+		t.Fatal("ordinary prompt polish must preserve its non-empty contract")
+	}
+}
+
 func TestListPromptsFiltersByKeyword(t *testing.T) {
 	db := newPromptTestDB(t)
 	corestore.Init(db.DB, nil, nil)

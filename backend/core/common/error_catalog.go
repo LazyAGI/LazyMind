@@ -110,7 +110,7 @@ var errorCatalog = map[string]*AppError{
 	"part_size must be >= 0":                                 NewAppError(http.StatusBadRequest, 2000217, "part_size must be >= 0"),
 	"items is required":                                      NewAppError(http.StatusBadRequest, 2000218, "Items are required"),
 	"task can only be resumed from failed or canceled state": NewAppError(http.StatusBadRequest, 2000219, "Task can only be resumed from FAILED or CANCELED state"),
-	"请先配置 evo_llm 模型后再创建任务":                                  NewAppError(http.StatusUnprocessableEntity, 2000228, "请先配置 evo_llm 模型后再创建任务"),
+	"未配置自进化模型":                                               NewAppError(http.StatusUnprocessableEntity, 2000228, "未配置自进化模型"),
 	"save upload file failed":                                NewAppError(http.StatusInternalServerError, 2000513, "Failed to save upload file"),
 	"create temp dir failed":                                 NewAppError(http.StatusInternalServerError, 2000514, "Failed to create temp dir"),
 	"open upload file failed":                                NewAppError(http.StatusBadRequest, 2000220, "Failed to open upload file"),
@@ -398,6 +398,10 @@ var errorCatalog = map[string]*AppError{
 	"unmarshal response":                              NewAppError(http.StatusBadGateway, 2001224, "unmarshal response"),
 	"upstream returned empty error body":              NewAppError(http.StatusBadGateway, 2001225, "upstream returned empty error body"),
 	"upstream returned error payload without message": NewAppError(http.StatusBadGateway, 2001226, "upstream returned error payload without message"),
+	"invalid external agent source":                   NewAppError(http.StatusBadRequest, 2002292, "Invalid external Agent source"),
+	"external agent thread belongs to another user or conversation": NewAppError(
+		http.StatusConflict, 2002293, "External Agent thread belongs to another user or conversation",
+	),
 }
 
 func ResolveAppError(message string, statusCode int) *AppError {

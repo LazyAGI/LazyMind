@@ -469,6 +469,15 @@ func TestChatConversationsMergesPersistedDisabledTools(t *testing.T) {
 				"sources": []any{},
 			},
 		})
+		conversation, _ := upstreamBody["conversation"].(map[string]any)
+		runID, _ := conversation["run_id"].(string)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"code": 200,
+			"msg":  "success",
+			"data": map[string]any{
+				"runtime_event": completedRunEvent(runID, true),
+			},
+		})
 	}))
 	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", baseURL)
 	t.Setenv("LAZYMIND_AUTH_SERVICE_URL", baseURL)

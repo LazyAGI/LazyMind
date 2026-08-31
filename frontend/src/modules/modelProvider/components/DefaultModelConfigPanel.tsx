@@ -25,8 +25,8 @@ import {
   unwrapModelProviderData,
   withModelProviderJsonOptions,
 } from "../api";
+import { getProviderLogoUrl } from "../providerBranding";
 
-const SENSENOVA_LOGO_URL = "https://www.sensenova.ai/images/logo.png";
 const LAZYMIND_CLOUD_PROVIDER_KEY = "lazymind_cloud";
 
 export type SetupAvailabilityState = "loading" | "ready" | "empty" | "error";
@@ -36,6 +36,7 @@ interface DefaultModelConfigPanelProps {
   modelProviderSetupState: SetupAvailabilityState;
   onConfigureCloudService: (service: CloudServiceSlotKey) => void;
   onConfigureProviders: () => void;
+  onModelSelectionChanged: () => void | Promise<void>;
   onRetrySetup: () => void;
 }
 
@@ -260,6 +261,7 @@ const moduleConfigs: ModuleConfig[] = [
     key: "evo_llm",
     titleKey: "modelProvider.module.selfEvolutionTitle",
     subtitleKey: "modelProvider.module.selfEvolutionSubtitle",
+    required: true,
   },
 ];
 
@@ -319,25 +321,6 @@ function getProviderBrand(name: string) {
     .join("")
     .slice(0, 2)
     .toUpperCase();
-}
-
-function getProviderLogoUrl(name: string) {
-  const normalized = name.trim().toLowerCase();
-  if (/sensenova|sensecore|商汤|日日新/.test(normalized)) return SENSENOVA_LOGO_URL;
-  const domainMap: Array<[RegExp, string]> = [
-    [/claude|anthropic/, "anthropic.com"],
-    [/deepseek/, "deepseek.com"],
-    [/doubao|volc|ark/, "volcengine.com"],
-    [/glm|bigmodel|zhipu/, "zhipuai.cn"],
-    [/kimi|moonshot/, "moonshot.cn"],
-    [/minimax/, "minimaxi.com"],
-    [/openai/, "openai.com"],
-    [/qwen|tongyi|通义/, "qwen.ai"],
-    [/siliconflow/, "siliconflow.cn"],
-  ];
-  const match = domainMap.find(([pattern]) => pattern.test(normalized));
-  if (!match) return undefined;
-  return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(match[1])}&sz=96`;
 }
 
 function createConnectionGroup(
@@ -426,6 +409,9 @@ const createModelProviderFallbacks = (
       defaultValue: "",
     }),
     openai: t("modelProvider.providerDescriptions.openai", {
+      defaultValue: "",
+    }),
+    openrouter: t("modelProvider.providerDescriptions.openrouter", {
       defaultValue: "",
     }),
     qwen: t("modelProvider.providerDescriptions.qwen", { defaultValue: "" }),
@@ -606,6 +592,7 @@ export default function DefaultModelConfigPanel({
   modelProviderSetupState,
   onConfigureCloudService,
   onConfigureProviders,
+  onModelSelectionChanged,
   onRetrySetup,
 }: DefaultModelConfigPanelProps) {
   const { t, i18n } = useTranslation();
@@ -1134,6 +1121,7 @@ export default function DefaultModelConfigPanel({
                 : undefined,
           }));
         });
+        void onModelSelectionChanged();
       })
       .catch(() => {});
   };
@@ -1436,7 +1424,7 @@ export default function DefaultModelConfigPanel({
                     </span>
                   </Tooltip>
                 ) : null}
-                {isAdmin && !runtimeFeatures.hideUserGroupSurfaces ? (
+                {isAdmin ? (
                   <Tooltip
                     title={
                       shareStatus[module.key]

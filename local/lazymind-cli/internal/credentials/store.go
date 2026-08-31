@@ -8,13 +8,17 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
 	"time"
+
+	"lazymind/agentconnector/internal/localfile"
 )
 
 const (
@@ -24,7 +28,15 @@ const (
 	maxAuthBody      = 1 << 20
 )
 
-var errNotLoggedIn = errors.New("not logged in to LazyMind; run `lazymind login` for a server, or keep LazyMind Desktop running and signed in")
+var ErrAuthenticationRequired = errors.New("not logged in to LazyMind; sign in to the local LazyMind page and try again")
+
+func IsAuthenticationRequired(err error) bool {
+	if errors.Is(err, ErrAuthenticationRequired) {
+		return true
+	}
+	var responseErr *apiError
+	return errors.As(err, &responseErr) && responseErr.StatusCode == http.StatusUnauthorized
+}
 
 type Credentials struct {
 	ServerURL    string  `json:"server_url"`
@@ -84,18 +96,40 @@ func NewStore(home, server string) (*Store, error) {
 
 func (s *Store) path() string { return filepath.Join(s.home, credentialFile) }
 
+func (s *Store) Save(value Credentials) error {
+	server := normalizeServerURL(value.ServerURL)
+	parsed, err := url.Parse(server)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil {
+		return errors.New("LazyMind server URL must be an HTTP(S) origin without embedded credentials")
+	}
+	if strings.TrimSpace(value.AccessToken) == "" || strings.TrimSpace(value.RefreshToken) == "" {
+		return errors.New("LazyMind access and refresh tokens are required")
+	}
+	value.ServerURL = server
+	return s.withLock(func() error { return s.saveUnlocked(value) })
+}
+
+func (s *Store) Clear() error {
+	return s.withLock(func() error {
+		if err := os.Remove(s.path()); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		return nil
+	})
+}
+
 func (s *Store) AccessToken(ctx context.Context) (string, error) {
 	var token string
 	err := s.withLock(func() error {
 		value, err := s.loadUnlocked()
-		if errors.Is(err, errNotLoggedIn) {
+		if errors.Is(err, ErrAuthenticationRequired) {
 			value, err = s.bootstrapLocalSessionUnlocked(ctx)
 		}
 		if err != nil {
 			return err
 		}
 		if tokenExpiredSoon(value, time.Now(), 90*time.Second) {
-			value, err = s.refreshUnlocked(ctx, value)
+			value, err = s.refreshOrBootstrapUnlocked(ctx, value)
 			if err != nil {
 				return err
 			}
@@ -107,7 +141,21 @@ func (s *Store) AccessToken(ctx context.Context) (string, error) {
 }
 
 func (s *Store) bootstrapLocalSessionUnlocked(ctx context.Context) (Credentials, error) {
-	for _, server := range runtimeServerCandidates() {
+	return s.bootstrapLocalSessionForServerUnlocked(ctx, "", false)
+}
+
+func (s *Store) bootstrapLocalSessionForServerUnlocked(ctx context.Context, preferredServer string, force bool) (Credentials, error) {
+	servers := runtimeServerCandidates()
+	if preferredServer = normalizeServerURL(preferredServer); preferredServer != "" {
+		servers = append([]string{preferredServer}, servers...)
+	}
+	seen := make(map[string]struct{}, len(servers))
+	for _, server := range servers {
+		server = normalizeServerURL(server)
+		if _, ok := seen[server]; server == "" || ok {
+			continue
+		}
+		seen[server] = struct{}{}
 		requestCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 		var session struct {
 			Token        string `json:"token"`
@@ -116,7 +164,11 @@ func (s *Store) bootstrapLocalSessionUnlocked(ctx context.Context) (Credentials,
 			Role         string `json:"role"`
 			TenantID     string `json:"tenantId"`
 		}
-		err := s.requestJSON(requestCtx, http.MethodPost, server+localSessionPath, "", map[string]any{}, &session)
+		endpoint := server + localSessionPath
+		if force {
+			endpoint += "?force=true"
+		}
+		err := s.requestJSON(requestCtx, http.MethodPost, endpoint, "", map[string]any{}, &session)
 		cancel()
 		if err != nil || strings.TrimSpace(session.Token) == "" || strings.TrimSpace(session.RefreshToken) == "" {
 			continue
@@ -134,7 +186,7 @@ func (s *Store) bootstrapLocalSessionUnlocked(ctx context.Context) (Credentials,
 		}
 		return value, nil
 	}
-	return Credentials{}, errNotLoggedIn
+	return Credentials{}, ErrAuthenticationRequired
 }
 
 func (s *Store) ForceRefresh(ctx context.Context, rejectedAccessToken string) (string, error) {
@@ -148,7 +200,7 @@ func (s *Store) ForceRefresh(ctx context.Context, rejectedAccessToken string) (s
 			token = value.AccessToken
 			return nil
 		}
-		value, err = s.refreshUnlocked(ctx, value)
+		value, err = s.refreshOrBootstrapUnlocked(ctx, value)
 		if err != nil {
 			return err
 		}
@@ -189,7 +241,7 @@ func (s *Store) ServerURL(ctx context.Context) (string, error) {
 
 func (s *Store) refreshUnlocked(ctx context.Context, current Credentials) (Credentials, error) {
 	if strings.TrimSpace(current.RefreshToken) == "" {
-		return Credentials{}, errNotLoggedIn
+		return Credentials{}, ErrAuthenticationRequired
 	}
 	var response struct {
 		AccessToken  string `json:"access_token"`
@@ -226,10 +278,39 @@ func (s *Store) refreshUnlocked(ctx context.Context, current Credentials) (Crede
 	return current, nil
 }
 
+func (s *Store) refreshOrBootstrapUnlocked(ctx context.Context, current Credentials) (Credentials, error) {
+	refreshed, err := s.refreshUnlocked(ctx, current)
+	if err == nil || !localSessionCanRecover(current.ServerURL, err) {
+		return refreshed, err
+	}
+	bootstrapped, bootstrapErr := s.bootstrapLocalSessionForServerUnlocked(ctx, current.ServerURL, true)
+	if bootstrapErr != nil {
+		return Credentials{}, fmt.Errorf("%w; restore local LazyMind session: %w", err, bootstrapErr)
+	}
+	return bootstrapped, nil
+}
+
+func localSessionCanRecover(serverURL string, err error) bool {
+	var responseErr *apiError
+	if !errors.As(err, &responseErr) || responseErr.StatusCode != http.StatusUnauthorized {
+		return false
+	}
+	parsed, parseErr := url.Parse(normalizeServerURL(serverURL))
+	if parseErr != nil {
+		return false
+	}
+	host := strings.ToLower(parsed.Hostname())
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
 func (s *Store) loadUnlocked() (Credentials, error) {
 	body, err := os.ReadFile(s.path())
 	if errors.Is(err, os.ErrNotExist) {
-		return Credentials{}, errNotLoggedIn
+		return Credentials{}, ErrAuthenticationRequired
 	}
 	if err != nil {
 		return Credentials{}, fmt.Errorf("read credentials: %w", err)
@@ -240,7 +321,7 @@ func (s *Store) loadUnlocked() (Credentials, error) {
 	}
 	value.ServerURL = normalizeServerURL(value.ServerURL)
 	if value.ServerURL == "" || value.AccessToken == "" || value.RefreshToken == "" {
-		return Credentials{}, errors.New("credentials file is incomplete; run `lazymind login` again")
+		return Credentials{}, ErrAuthenticationRequired
 	}
 	return value, nil
 }
@@ -277,7 +358,7 @@ func (s *Store) saveUnlocked(value Credentials) error {
 	if err := temporary.Close(); err != nil {
 		return err
 	}
-	if err := replaceFile(temporaryPath, s.path()); err != nil {
+	if err := localfile.Replace(temporaryPath, s.path()); err != nil {
 		return err
 	}
 	return os.Chmod(s.path(), 0o600)
@@ -287,7 +368,7 @@ func (s *Store) withLock(fn func() error) error {
 	if err := os.MkdirAll(s.home, 0o700); err != nil {
 		return err
 	}
-	unlock, err := lockFile(filepath.Join(s.home, credentialFile+".lock"))
+	unlock, err := localfile.Lock(filepath.Join(s.home, credentialFile+".lock"))
 	if err != nil {
 		return fmt.Errorf("lock credentials: %w", err)
 	}
@@ -385,6 +466,7 @@ func runtimeServerCandidates() []string {
 		seen[value] = struct{}{}
 		result = append(result, value)
 	}
+	appendURL(os.Getenv("LAZYMIND_SERVER_URL"))
 	for _, path := range runtimeStatePaths() {
 		body, err := os.ReadFile(path)
 		if err != nil {

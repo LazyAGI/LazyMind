@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>分布分析图</title>
+<style>*{box-sizing:border-box}html,body{margin:0;font-family:Inter,"PingFang SC",sans-serif;background:#f6f8fb;color:#212733}body{padding:20px}.doc{max-width:960px;margin:auto;background:#fff;border-radius:10px;padding:24px 28px;box-shadow:0 14px 38px rgba(24,32,48,.09)}
+h1{font-size:18px;margin:0 0 4px}.sub{color:#7a8496;font-size:13px;margin:0 0 16px}.cols{display:grid;grid-template-columns:1.4fr 1fr;gap:22px}.panel{border:1px solid #e6eaf1;border-radius:8px;padding:14px 16px}.panel h2{font-size:14px;margin:0 0 8px}
+.leg{font-size:12px;color:#5b6473;margin-top:8px}.leg i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:middle}.note{margin-top:14px;font-size:12px;color:#8a93a3;line-height:1.7}</style></head>
+<body><div class="doc"><h1>订单金额分布与渠道构成</h1><p class="sub">12 笔订单金额（元）+ 四渠道订单数</p>
+<div class="cols"><div class="panel"><h2>金额分布直方图</h2>
+<svg viewBox="0 0 460 240" width="100%" height="240"><g stroke="#eef1f6"><line x1="30" y1="40" x2="450" y2="40"/><line x1="30" y1="110" x2="450" y2="110"/><line x1="30" y1="180" x2="450" y2="180"/></g>
+<g fill="#2f6fed"><rect x="50" y="120" width="46" height="120"/><rect x="106" y="90" width="46" height="150"/><rect x="162" y="150" width="46" height="90"/><rect x="218" y="180" width="46" height="60"/><rect x="274" y="200" width="46" height="40"/></g>
+<g fill="#e5484d"><rect x="330" y="210" width="46" height="30"/></g>
+<g fill="#7a8496" font-size="11" text-anchor="middle"><text x="73" y="232">89-118</text><text x="129" y="232">119-142</text><text x="185" y="232">143-168</text><text x="241" y="232">169-300</text><text x="297" y="232">300-500</text><text x="353" y="232">500+</text></g></svg>
+<p class="note">集中区间 89–142 元（占 8/12）；420、560 元为右尾异常值。</p></div>
+<div class="panel"><h2>渠道构成</h2>
+<svg viewBox="0 0 200 200" width="70%" height="70%" style="display:block;margin:auto"><g transform="rotate(-90 100 100)">
+<circle cx="100" cy="100" r="60" fill="none" stroke="#2f6fed" stroke-width="34" stroke-dasharray="113.1 263.9" stroke-dashoffset="0"><title>自然搜索 42</title></circle>
+<circle cx="100" cy="100" r="60" fill="none" stroke="#12a45c" stroke-width="34" stroke-dasharray="75.4 301.6" stroke-dashoffset="-113.1"><title>直播 28</title></circle>
+<circle cx="100" cy="100" r="60" fill="none" stroke="#f1c75b" stroke-width="34" stroke-dasharray="48.4 328.6" stroke-dashoffset="-188.5"><title>社群 18</title></circle>
+<circle cx="100" cy="100" r="60" fill="none" stroke="#e5484d" stroke-width="34" stroke-dasharray="32.3 344.7" stroke-dashoffset="-236.9"><title>广告 12</title></circle></g></svg>
+<div class="leg"><div><i style="background:#2f6fed"></i>自然搜索 42（42%）</div><div><i style="background:#12a45c"></i>直播 28（28%）</div><div><i style="background:#f1c75b"></i>社群 18（18%）</div><div><i style="background:#e5484d"></i>广告 12（12%）</div></div></div></div></div></body></html>

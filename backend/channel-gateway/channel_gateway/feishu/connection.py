@@ -796,7 +796,7 @@ class FeishuConnectionService:
                 raise FeishuRuntimeError(
                     'Provisioned Feishu account disappeared'
                 )
-            if account.get('runtime_status') == 'running':
+            if account.get('runtime_status') in {'running', 'degraded'}:
                 return
             if account.get('runtime_status') == 'failed':
                 last_error = str(

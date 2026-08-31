@@ -190,11 +190,13 @@ class RepairTraceStore:
 
 
 class RepairTraceSink:
-    def __init__(self, store: RepairTraceStore, thread_id: str, trace_id: str, materialization_key: str) -> None:
+    def __init__(self, store: RepairTraceStore, thread_id: str, trace_id: str,
+                 materialization_key: str, execution_id: str = '') -> None:
         self.store = store
         self.thread_id = thread_id
         self.trace_id = trace_id
         self.materialization_key = materialization_key
+        self.execution_id = execution_id
         self.seq_start = 0
         self.seq_end = 0
         self.failures = 0
@@ -216,6 +218,7 @@ class RepairTraceSink:
             'thread_id': self.thread_id,
             'trace_id': self.trace_id,
             'materialization_key': self.materialization_key,
+            'execution_id': self.execution_id,
             'step': 'repair',
             'attempt': attempt,
             'source': source,
@@ -235,17 +238,21 @@ class RepairTraceSink:
     def cursor(self) -> dict[str, Any]:
         return {
             'trace_id': self.trace_id,
+            'execution_id': self.execution_id,
             'seq_start': self.seq_start,
             'seq_end': self.seq_end,
             'status': 'partial' if self.failures else 'ok',
         }
 
 
-def create_trace_sink(thread_id: str, materialization_key: str) -> RepairTraceSink | None:
+def create_trace_sink(thread_id: str, materialization_key: str,
+                      execution_id: str = '') -> RepairTraceSink | None:
     try:
         root = Path(os.getenv('LAZYMIND_EVO_BASE_DIR') or '/var/lib/lazymind/evo')
         trace_id = f'{thread_id}:{materialization_key}:{uuid.uuid4().hex}'
-        return RepairTraceSink(RepairTraceStore(root), thread_id, trace_id, materialization_key)
+        return RepairTraceSink(
+            RepairTraceStore(root), thread_id, trace_id, materialization_key, execution_id,
+        )
     except (OSError, ValueError):
         return None
 

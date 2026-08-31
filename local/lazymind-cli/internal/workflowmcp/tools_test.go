@@ -1,6 +1,7 @@
 package workflowmcp
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -8,9 +9,41 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-func TestRegisterBuildsEveryWorkflowToolSchema(t *testing.T) {
+func TestWorkflowListPublishesObjectInputSchema(t *testing.T) {
+	ctx := context.Background()
+	clientTransport, serverTransport := mcp.NewInMemoryTransports()
 	server := mcp.NewServer(&mcp.Implementation{Name: "schema-test", Version: "1"}, nil)
 	Register(server, &Client{})
+	serverSession, err := server.Connect(ctx, serverTransport, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer serverSession.Close()
+	client := mcp.NewClient(&mcp.Implementation{Name: "schema-test-client", Version: "1"}, nil)
+	clientSession, err := client.Connect(ctx, clientTransport, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer clientSession.Close()
+	listed, err := clientSession.ListTools(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tool := range listed.Tools {
+		if tool.Name != "workflow.list" {
+			continue
+		}
+		schema, ok := tool.InputSchema.(map[string]any)
+		if !ok {
+			t.Fatalf("workflow.list input schema=%#v", tool.InputSchema)
+		}
+		properties, ok := schema["properties"].(map[string]any)
+		if schema["type"] != "object" || !ok || len(properties) != 0 {
+			t.Fatalf("workflow.list input schema=%#v", schema)
+		}
+		return
+	}
+	t.Fatal("workflow.list tool is missing")
 }
 
 func TestReadOnlyClassificationCoversEveryWorkflowTool(t *testing.T) {

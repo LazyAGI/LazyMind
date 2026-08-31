@@ -237,6 +237,44 @@ func TestPersistConversationFileArtifactValidatesSharedWorkspace(t *testing.T) {
 	}
 }
 
+func TestRemoveConversationArtifactFilesAlsoRemovesAgentWorkspace(t *testing.T) {
+	publishedRoot := t.TempDir()
+	agentRoot := t.TempDir()
+	t.Setenv("LAZYMIND_SUBAGENT_WORKSPACE", publishedRoot)
+	t.Setenv("LAZYMIND_AGENTIC_WORKSPACE", agentRoot)
+
+	userID := "user-1"
+	conversationID := "conversation-1"
+	roots := []string{
+		conversationArtifactConversationRoot(userID, conversationID),
+		conversationAgentWorkspaceRoots(userID, conversationID)[0],
+	}
+	for _, root := range roots {
+		if err := os.MkdirAll(root, 0o755); err != nil {
+			t.Fatalf("create conversation workspace: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "marker"), []byte("x"), 0o644); err != nil {
+			t.Fatalf("write conversation workspace marker: %v", err)
+		}
+	}
+	unrelated := filepath.Join(agentRoot, conversationArtifactFileDirectory, "unrelated")
+	if err := os.MkdirAll(unrelated, 0o755); err != nil {
+		t.Fatalf("create unrelated workspace: %v", err)
+	}
+
+	if err := removeConversationArtifactFiles(userID, conversationID); err != nil {
+		t.Fatalf("remove conversation files: %v", err)
+	}
+	for _, root := range roots {
+		if _, err := os.Stat(root); !os.IsNotExist(err) {
+			t.Fatalf("conversation workspace still exists: %s", root)
+		}
+	}
+	if _, err := os.Stat(unrelated); err != nil {
+		t.Fatalf("unrelated workspace was removed: %v", err)
+	}
+}
+
 func TestArtifactScopeHashMatchesAlgorithmContract(t *testing.T) {
 	got := artifactScopeHash("user-1")
 	const want = "c6c289e49e9c05b2145860387b73bcb1"

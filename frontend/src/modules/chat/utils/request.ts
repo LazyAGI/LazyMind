@@ -50,6 +50,7 @@ import {
 } from "@/api/generated/knowledge-client";
 import { FileServiceApiFactory } from "@/api/generated/file-client";
 import { axiosInstance, BASE_URL } from "@/components/request";
+import type { ThinkingDepth } from "@/modules/chat/store/chatThink";
 import type { AxiosResponse, RawAxiosRequestConfig } from "axios";
 
 const coreApiBaseUrl = `${BASE_URL}/api/core`;
@@ -110,6 +111,8 @@ export interface ContextUsageReport {
   estimated_tokens: number;
   max_input_tokens?: number;
   estimated_ratio?: number;
+  compression_applied?: boolean;
+  compression_covered_through_seq?: number;
   categories: ContextUsageCategory[];
   estimation_version: string;
   preview_accuracy?: "deterministic" | "rule_only" | "llm_enhanced";
@@ -133,6 +136,11 @@ export function exportContextPrompt(payload: Record<string, unknown>) {
     })
     .then((response) => response.data as Blob);
 }
+
+// SubAgent task SSE endpoint. Granular execution events are streamed here so
+// they cannot crowd lifecycle events out of the conversation event channel.
+export const taskStreamUrl = (taskId: string) =>
+  `${coreApiBaseUrl}/tasks/${encodeURIComponent(taskId)}:stream`;
 
 // Conversation-level events SSE endpoint.
 export const convEventsUrl = (conversationId: string) =>
@@ -232,13 +240,46 @@ export interface WriteBackWriterDocumentResult {
 
 export interface WriteBackWriterDocumentRequest {
   base_revision: number;
+  slot?: WriterDocumentSlot;
   source_document: Record<string, unknown>;
   revised_document: Record<string, unknown>;
 }
 
+export type WriterDocumentSlot = 'outline_document' | 'flat_draft_document' | 'draft_document';
+export type WriterDocumentRepresentation = 'markdown' | 'ir';
+export type RenderedWriterDocument = string | Record<string, unknown>;
+
+export interface RenderWriterDocumentResult {
+  title: string;
+  representation: WriterDocumentRepresentation;
+  document: RenderedWriterDocument;
+}
+
+export interface SaveWriterDocumentResult extends RenderWriterDocumentResult {
+  revision: number;
+}
+
 export type RewriteSelection =
   | { type: 'ir'; node_id: string }
-  | { type: 'markdown'; selected_text: string };
+  | { type: 'markdown'; selected_text: string }
+  | {
+    type: 'ppt_html';
+    page: number;
+    el: string;
+    /** 1-based occurrence among elements carrying the same data-el. */
+    index?: number;
+    group?: string;
+    selected_text?: string;
+    computed_style?: {
+      font_size?: string;
+      width?: string;
+      height?: string;
+      line_height?: string;
+      letter_spacing?: string;
+      text_align?: string;
+      font_weight?: string;
+    };
+  };
 
 export interface RewriteSelectionPreviewRequest {
   action: 'rewrite_selection';
@@ -253,24 +294,47 @@ export interface RewriteSelectionPreview {
   status: 'ready';
   action: 'rewrite_selection';
   base_revision: number;
-  representation: 'ir' | 'markdown';
+  representation: 'ir' | 'markdown' | 'ppt_html';
   target: {
     type: 'block';
     block_type: string;
     node_id?: string;
+    el?: string;
+    index?: number;
+    group?: string;
+    page?: number;
   };
   preview: {
     old_text: string;
     new_text: string;
   };
   patch: {
-    type: 'writer_ir_patch' | 'string_replace_set';
+    type: 'writer_ir_patch' | 'string_replace_set' | 'ppt_html_ops';
     payload: Record<string, unknown>;
   };
   artifact: {
     content_type: string;
-    value: Record<string, unknown>;
+    value: Record<string, unknown> | string;
+    caption?: string;
   };
+  candidate_html?: string;
+  commit?: { token: string };
+  layout_notes?: string[];
+}
+
+export interface ExecuteArtifactActionRequest {
+  action: 'rewrite_selection';
+  base_revision: number;
+  input: { commit_token: string };
+}
+
+export interface ExecuteArtifactActionResult {
+  status: 'applied';
+  action: 'rewrite_selection';
+  base_revision: number;
+  revision: number;
+  representation: 'ppt_html';
+  artifact: RewriteSelectionPreview['artifact'];
 }
 
 // Workflow Session API.
@@ -375,6 +439,23 @@ export function WorkflowSessionApi() {
         options,
       );
     },
+    executeArtifactAction(
+      sessionId: string,
+      slotId: string,
+      listIndex: number,
+      payload: ExecuteArtifactActionRequest,
+      options?: RawAxiosRequestConfig,
+    ) {
+      return axiosInstance.post<{
+        code: number;
+        message: string;
+        data: ExecuteArtifactActionResult;
+      }>(
+        `${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/items/idx/${listIndex}:action-execute`,
+        payload,
+        options,
+      );
+    },
     syncWriterDocument(
       sessionId: string,
       slotId: string,
@@ -392,11 +473,51 @@ export function WorkflowSessionApi() {
         options,
       );
     },
+    renderWriterDocument(
+      sessionId: string,
+      slot: WriterDocumentSlot,
+      options?: RawAxiosRequestConfig,
+    ) {
+      return axiosInstance.post<{
+        code: number;
+        message: string;
+        data: RenderWriterDocumentResult;
+      }>(
+        `${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}/writer-document:render`,
+        { slot },
+        options,
+      );
+    },
+    saveWriterDocument(
+      sessionId: string,
+      baseRevision: number,
+      document: RenderedWriterDocument,
+      slot: WriterDocumentSlot,
+      mode: SlotSaveMode,
+      options?: RawAxiosRequestConfig,
+    ) {
+      const payload: Record<string, unknown> = {
+        base_revision: baseRevision,
+        document,
+        mode,
+      };
+      if (slot !== 'draft_document') payload.slot = slot;
+      return axiosInstance.post<{
+        code: number;
+        message: string;
+        data: SaveWriterDocumentResult;
+      }>(
+        `${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}/writer-document:save`,
+        payload,
+        options,
+      );
+    },
     writeBackWriterDocument(
       sessionId: string,
       baseRevision: number,
       sourceDocument?: Record<string, unknown>,
       revisedDocument?: Record<string, unknown>,
+      slot?: WriterDocumentSlot,
       options?: RawAxiosRequestConfig,
     ) {
       const payload: Record<string, unknown> = { base_revision: baseRevision };
@@ -404,6 +525,7 @@ export function WorkflowSessionApi() {
       // selected revision as the authoritative write-back input.
       if (sourceDocument !== undefined) payload.source_document = sourceDocument;
       if (revisedDocument !== undefined) payload.revised_document = revisedDocument;
+      if (slot !== undefined && slot !== 'draft_document') payload.slot = slot;
       return axiosInstance.post<{
         code: number;
         message: string;
@@ -491,6 +613,21 @@ function withJsonOptions(
 
 export function ChatServiceApi() {
   return {
+    patchEditableBlock(
+      payload: {
+        conversation_id: string;
+        history_id: string;
+        base_content: string;
+        content: string;
+      },
+      options?: RawAxiosRequestConfig,
+    ) {
+      return axiosInstance.patch<{ content: string; result: string }>(
+        `${coreApiBaseUrl}/conversations:editable-block`,
+        payload,
+        withJsonOptions(options),
+      );
+    },
     conversationServiceGetMultiAnswersSwitchStatus(options?: RawAxiosRequestConfig) {
       return axiosInstance.get<GetMultiAnswersSwitchStatusResponse>(
         `${coreApiBaseUrl}/conversation:switchStatus`,
@@ -565,6 +702,21 @@ export function ChatServiceApi() {
             keyword: requestParameters.keyword,
           },
         },
+      );
+    },
+    conversationServiceSetPinned(
+      conversationId: string,
+      pinned: boolean,
+      options?: RawAxiosRequestConfig,
+    ) {
+      return axiosInstance.post<{
+        conversation_id: string;
+        is_pinned: boolean;
+        pinned_at?: string | null;
+      }>(
+        `${coreApiBaseUrl}/conversations/${encodeURIComponent(conversationId)}:${pinned ? "pin" : "unpin"}`,
+        undefined,
+        options,
       );
     },
     conversationServiceDeleteConversation(
@@ -748,6 +900,26 @@ export function PromptServiceApi() {
         silentOptions,
       );
     },
+    polishEditableSelection(
+      payload: {
+        content: string;
+        user_instruct: string;
+        allow_empty: true;
+        full_content?: string;
+        selection_start?: number;
+        selection_end?: number;
+      },
+      options?: RawAxiosRequestConfig,
+    ) {
+      return axiosInstance.post<PromptPolishOpenAPIResponse & {
+        target_start?: number;
+        target_end?: number;
+      }>(
+        `${coreApiBaseUrl}/prompts:polish`,
+        payload,
+        withJsonOptions(options),
+      );
+    },
     promptServicePolishPrompt(
       requestParameters: PromptsApiApiCorePromptsPolishPostRequest,
       options?: RawAxiosRequestConfig,
@@ -914,11 +1086,159 @@ export interface ChatExecutorDescriptor {
   unavailable_reason?: string;
 }
 
+interface ChatExecutorsResponse {
+  code: number;
+  message: string;
+  data: { executors: ChatExecutorDescriptor[] };
+}
+
 export interface ConversationRuntimeSettings {
   workflow_mode?: 'dynamic' | 'auto';
   enable_subagent?: boolean;
   enable_workflow?: boolean;
   chat_executor?: ChatExecutor;
+}
+
+export interface ChatEntryConversationSettings {
+  workflow_mode: 'dynamic' | 'auto';
+  enable_subagent: boolean;
+  enable_workflow: boolean;
+  chat_executor: ChatExecutor;
+}
+
+export interface ChatEntryDefault {
+  thinking_depth: ThinkingDepth;
+  conversation_settings: ChatEntryConversationSettings;
+}
+
+export interface ChatEntryDefaults {
+  quick_question: ChatEntryDefault;
+  new_task: ChatEntryDefault;
+}
+
+export interface ChatSettingsResponse extends ConversationRuntimeSettings, ChatEntryDefaults {
+  updated_at?: string;
+}
+
+export type ChatEntryKind = keyof ChatEntryDefaults;
+
+export const FALLBACK_CHAT_ENTRY_DEFAULTS: ChatEntryDefaults = {
+  quick_question: {
+    thinking_depth: 'medium',
+    conversation_settings: {
+      chat_executor: 'lazymind',
+      enable_workflow: false,
+      workflow_mode: 'dynamic',
+      enable_subagent: true,
+    },
+  },
+  new_task: {
+    thinking_depth: 'high',
+    conversation_settings: {
+      chat_executor: 'lazymind',
+      enable_workflow: true,
+      workflow_mode: 'dynamic',
+      enable_subagent: true,
+    },
+  },
+};
+
+const thinkingDepthValues = new Set<ThinkingDepth>(['low', 'medium', 'high', 'max']);
+
+export function parseThinkingDepth(value: unknown): ThinkingDepth | undefined {
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.trim().toLowerCase() as ThinkingDepth;
+  return thinkingDepthValues.has(normalized) ? normalized : undefined;
+}
+
+export function resolveConversationThinkingDepth(conversation: unknown): ThinkingDepth {
+  const value = conversation && typeof conversation === 'object'
+    ? (conversation as { thinking_depth?: unknown }).thinking_depth
+    : undefined;
+  return parseThinkingDepth(value) ?? 'medium';
+}
+
+function normalizeChatEntryDefault(
+  value: unknown,
+  fallback: ChatEntryDefault,
+): ChatEntryDefault {
+  if (!value || typeof value !== 'object') return fallback;
+  const raw = value as Partial<ChatEntryDefault>;
+  const settings = raw.conversation_settings;
+  if (!settings || typeof settings !== 'object') return fallback;
+  const executor = typeof settings.chat_executor === 'string'
+    ? settings.chat_executor.trim()
+    : '';
+  const workflowMode = settings.workflow_mode;
+  const thinkingDepth = parseThinkingDepth(raw.thinking_depth);
+  if (
+    !thinkingDepth
+    || !executor
+    || (workflowMode !== 'dynamic' && workflowMode !== 'auto')
+    || typeof settings.enable_workflow !== 'boolean'
+    || typeof settings.enable_subagent !== 'boolean'
+  ) {
+    return fallback;
+  }
+  return {
+    thinking_depth: thinkingDepth,
+    conversation_settings: {
+      chat_executor: executor,
+      enable_workflow: settings.enable_workflow,
+      workflow_mode: workflowMode,
+      enable_subagent: settings.enable_subagent,
+    },
+  };
+}
+
+function unwrapChatSettings(payload: unknown): unknown {
+  if (payload && typeof payload === 'object' && 'data' in payload) {
+    return (payload as { data?: unknown }).data;
+  }
+  return payload;
+}
+
+export function parseChatEntryDefaults(payload: unknown): ChatEntryDefaults {
+  const raw = unwrapChatSettings(payload) as Partial<ChatSettingsResponse> | undefined;
+  const legacyWorkflowMode = raw?.workflow_mode === 'auto' || raw?.workflow_mode === 'dynamic'
+    ? raw.workflow_mode
+    : 'dynamic';
+  const legacySubagent = typeof raw?.enable_subagent === 'boolean'
+    ? raw.enable_subagent
+    : true;
+  const legacyWorkflow = typeof raw?.enable_workflow === 'boolean'
+    ? raw.enable_workflow
+    : true;
+  const legacyFallbacks: ChatEntryDefaults = {
+    quick_question: {
+      thinking_depth: 'medium',
+      conversation_settings: {
+        chat_executor: 'lazymind',
+        enable_workflow: false,
+        workflow_mode: legacyWorkflowMode,
+        enable_subagent: legacySubagent,
+      },
+    },
+    new_task: {
+      thinking_depth: 'high',
+      conversation_settings: {
+        chat_executor: 'lazymind',
+        enable_workflow: legacyWorkflow,
+        workflow_mode: legacyWorkflowMode,
+        enable_subagent: legacySubagent,
+      },
+    },
+  };
+  return {
+    quick_question: normalizeChatEntryDefault(
+      raw?.quick_question,
+      legacyFallbacks.quick_question,
+    ),
+    new_task: normalizeChatEntryDefault(
+      raw?.new_task,
+      legacyFallbacks.new_task,
+    ),
+  };
 }
 
 export function parseConversationRuntimeSettings(
@@ -952,8 +1272,19 @@ export function parseConversationRuntimeSettings(
 export function ConversationSettingsApi() {
   return {
     getChatSettings(options?: RawAxiosRequestConfig) {
-      return axiosInstance.get<ConversationRuntimeSettings>(
+      return axiosInstance.get<ChatSettingsResponse>(
         `${coreApiBaseUrl}/user/chat-settings`,
+        options,
+      );
+    },
+    patchChatEntryDefault(
+      kind: ChatEntryKind,
+      settings: ChatEntryDefault,
+      options?: RawAxiosRequestConfig,
+    ) {
+      return axiosInstance.patch<ChatSettingsResponse>(
+        `${coreApiBaseUrl}/user/chat-settings`,
+        { [kind]: settings },
         options,
       );
     },
@@ -969,7 +1300,7 @@ export function ConversationSettingsApi() {
       );
     },
     listChatExecutors(options?: RawAxiosRequestConfig) {
-      return axiosInstance.get<{ executors: ChatExecutorDescriptor[] }>(
+      return axiosInstance.get<ChatExecutorsResponse>(
         `${coreApiBaseUrl}/chat/executors`,
         options,
       );

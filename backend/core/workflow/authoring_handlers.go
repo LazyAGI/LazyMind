@@ -198,7 +198,7 @@ func UpdateAuthoringWorkflowDraftFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var draft orm.WorkflowDraft
-	if store.DB().Where("id=? AND created_by=?", draftID, userID).First(&draft).Error != nil {
+	if store.DB().Where("id=? AND created_by=? AND deleted_at IS NULL", draftID, userID).First(&draft).Error != nil {
 		common.ReplyErr(w, "not found", http.StatusNotFound)
 		return
 	}
@@ -211,7 +211,7 @@ func UpdateAuthoringWorkflowDraftFile(w http.ResponseWriter, r *http.Request) {
 	// Map updates use physical persistence columns; keep legacy names centralized.
 	updates := map[string]any{"state_yaml_content": draft.StateYAMLContent, "scenario_content": draft.ScenarioContent, "driver_content": draft.DriverContent, "state_layout_content": draft.StateLayoutContent, "scripts_content": draft.ScriptsContent, "version": gorm.Expr("version + 1"), "updated_at": time.Now().UTC()}
 	setWorkflowYAMLUpdate(updates, draft.WorkflowYAMLContent)
-	result := store.DB().Model(&orm.WorkflowDraft{}).Where("id=? AND created_by=? AND version=?", draftID, userID, body.ExpectedVersion).Updates(updates)
+	result := store.DB().Model(&orm.WorkflowDraft{}).Where("id=? AND created_by=? AND deleted_at IS NULL AND version=?", draftID, userID, body.ExpectedVersion).Updates(updates)
 	if result.Error != nil {
 		common.ReplyErr(w, "save failed", http.StatusInternalServerError)
 		return
@@ -226,7 +226,7 @@ func UpdateAuthoringWorkflowDraftFile(w http.ResponseWriter, r *http.Request) {
 
 func GetAuthoringWorkflowDiagnostics(w http.ResponseWriter, r *http.Request) {
 	var draft orm.WorkflowDraft
-	if store.DB().Where("id=? AND created_by=?", common.PathVar(r, "draft_id"), common.UserID(r)).First(&draft).Error != nil {
+	if store.DB().Where("id=? AND created_by=? AND deleted_at IS NULL", common.PathVar(r, "draft_id"), common.UserID(r)).First(&draft).Error != nil {
 		common.ReplyErr(w, "not found", 404)
 		return
 	}
@@ -235,7 +235,7 @@ func GetAuthoringWorkflowDiagnostics(w http.ResponseWriter, r *http.Request) {
 
 func PublishAuthoringWorkflow(w http.ResponseWriter, r *http.Request) {
 	var draft orm.WorkflowDraft
-	if store.DB().Where("id=? AND created_by=?", common.PathVar(r, "draft_id"), common.UserID(r)).First(&draft).Error != nil {
+	if store.DB().Where("id=? AND created_by=? AND deleted_at IS NULL", common.PathVar(r, "draft_id"), common.UserID(r)).First(&draft).Error != nil {
 		common.ReplyErr(w, "not found", 404)
 		return
 	}

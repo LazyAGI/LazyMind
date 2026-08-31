@@ -195,6 +195,7 @@ export default function WidgetConfigPanel({ config, onChange }: Props) {
   switch (config.widgetType) {
     case 'text-single':
     case 'text-markdown':
+    case 'html-slide':
     case 'file-card':
       return (
         <div className="wcp-root">

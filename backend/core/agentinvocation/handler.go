@@ -26,12 +26,13 @@ func (h Handler) Start(w http.ResponseWriter, r *http.Request) {
 	}
 	input.ID = mux.Vars(r)["invocation_id"]
 	input.ExternalRef = r.Header.Get("X-LazyMind-External-Ref")
-	record, created, err := h.Service.Start(r.Context(), owner, input)
+	input.ConversationID = r.Header.Get("X-LazyMind-Conversation-Id")
+	result, err := h.Service.StartLinked(r.Context(), owner, input)
 	if err != nil {
 		writeError(w, err)
 		return
 	}
-	common.ReplyOK(w, map[string]any{"invocation": record, "created": created})
+	common.ReplyOK(w, result)
 }
 
 func (h Handler) Finish(w http.ResponseWriter, r *http.Request) {

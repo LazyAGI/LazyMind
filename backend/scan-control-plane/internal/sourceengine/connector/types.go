@@ -167,6 +167,7 @@ type SearchRequest struct {
 	Keyword          string
 	Cursor           string
 	PageSize         int
+	Recursive        bool
 	AgentID          string
 	AuthConnectionID string
 	ProviderOptions  ProviderOptions

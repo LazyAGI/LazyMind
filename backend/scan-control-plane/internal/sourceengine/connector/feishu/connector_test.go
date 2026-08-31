@@ -709,6 +709,16 @@ func TestCurrentLevelSearchByNameAndDeltaUnsupported(t *testing.T) {
 	if page.Items[0].ProviderMeta["auth_connection_id"] != "auth-1" {
 		t.Fatalf("search results should preserve auth connection metadata: %+v", page.Items[0].ProviderMeta)
 	}
+	recursivePage, err := conn.Search(context.Background(), connector.SearchRequest{
+		Keyword: "test-plan", PageSize: 50, AuthConnectionID: "auth-1",
+		ProviderOptions: connector.ProviderOptions{"user_id": "user-1"}, Recursive: true,
+	})
+	if err != nil {
+		t.Fatalf("recursive online search: %v", err)
+	}
+	if got := feishuObjectKeys(recursivePage.Items); !sameStrings(got, []string{"feishu:drive:file-test"}) {
+		t.Fatalf("recursive search did not reach nested documents: %v", got)
+	}
 
 	wikiChild := api.wikiObjects["space-1:node-child"]
 	wikiChild.Name = "Test Wiki Child"

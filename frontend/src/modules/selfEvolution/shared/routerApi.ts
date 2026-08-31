@@ -98,12 +98,12 @@ function asIntMap(value: unknown): Record<string, number> {
   return result;
 }
 
-function normalizeOwner(value: unknown): RouterOwner {
+function normalizeOwner(value: unknown, fallbackThreadId = ""): RouterOwner {
   if (!isRecord(value)) {
-    return { thread_id: "" };
+    return { thread_id: fallbackThreadId };
   }
   return {
-    thread_id: asString(value.thread_id),
+    thread_id: asString(value.thread_id) || fallbackThreadId,
     run_id: asString(value.run_id) || undefined,
     candidate_ref: asString(value.candidate_ref) || undefined,
   };
@@ -123,7 +123,7 @@ export function normalizeRouterAlgorithm(value: unknown): RouterAlgorithm | unde
     expected_state: asString(value.expected_state),
     healthy_instances: asNumber(value.healthy_instances),
     instance_count: asNumber(value.instance_count),
-    owner: normalizeOwner(value.owner),
+    owner: normalizeOwner(value.owner, asString(value.thread_id)),
     router_chat_url: asString(value.router_chat_url),
     router_admin_url: asString(value.router_admin_url),
   };

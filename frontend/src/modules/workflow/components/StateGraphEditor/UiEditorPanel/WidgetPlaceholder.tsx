@@ -29,7 +29,11 @@ function TextSinglePlaceholder({ config, label }: { config: Extract<WidgetConfig
 
 function TextListPlaceholder({ config, label }: { config: Extract<WidgetConfig, { widgetType: 'text-list' }>; label?: string }) {
   const { t } = useTranslation();
-  const items = 3;
+  const items = [
+    t('selfEvolutionRun.widgetPlaceholderBulletOne'),
+    t('selfEvolutionRun.widgetPlaceholderBulletTwo'),
+    t('selfEvolutionRun.widgetPlaceholderBulletThree'),
+  ];
   const gridCols = config.gridMaxCols ?? 2;
   const containerClass = [
     'wp-text-list',
@@ -44,10 +48,10 @@ function TextListPlaceholder({ config, label }: { config: Extract<WidgetConfig, 
     <div className="wp-root">
       {label && <div className="wp-label">{label}</div>}
       <div className={containerClass} style={containerStyle}>
-        {Array.from({ length: items }).map((_, i) => (
+        {items.map((item, i) => (
           <div key={i} className="wp-text-list-item">
             <span className="wp-text-list-badge">{i + 1}</span>
-            {t('selfEvolutionRun.widgetPlaceholderLoremShort')}
+            {item}
           </div>
         ))}
         {config.showAddButton !== false && (
@@ -68,6 +72,20 @@ function TextMarkdownPlaceholder({ config, label }: { config: Extract<WidgetConf
       <div className="wp-text-markdown" style={style}>
         <p><strong>{t('selfEvolutionRun.widgetPlaceholderMarkdownTitle')}</strong></p>
         <p>{t('selfEvolutionRun.widgetPlaceholderMarkdownBody')}</p>
+      </div>
+    </div>
+  );
+}
+
+function HtmlSlidePlaceholder({ config, label }: { config: Extract<WidgetConfig, { widgetType: 'html-slide' }>; label?: string }) {
+  const { t } = useTranslation();
+  const style: React.CSSProperties = {};
+  if (config.maxHeight) style.maxHeight = config.maxHeight;
+  return (
+    <div className="wp-root">
+      {label && <div className="wp-label">{label}</div>}
+      <div className="wp-text-single" style={{ ...style, aspectRatio: '16 / 9' }}>
+        {t('selfEvolutionRun.widgetHtmlSlide')}
       </div>
     </div>
   );
@@ -170,6 +188,8 @@ export default function WidgetPlaceholder({ widgetConfig, label }: Props) {
       return <TextListPlaceholder config={widgetConfig} label={label} />;
     case 'text-markdown':
       return <TextMarkdownPlaceholder config={widgetConfig} label={label} />;
+    case 'html-slide':
+      return <HtmlSlidePlaceholder config={widgetConfig} label={label} />;
     case 'image-single':
       return <ImageSinglePlaceholder config={widgetConfig} label={label} />;
     case 'image-gallery':

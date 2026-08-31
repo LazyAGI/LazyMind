@@ -1,0 +1,48 @@
+locale: en-US
+
+classification:
+  category: Content creation
+  tags:
+    - Presentations
+    - HTML slides
+    - Material research
+    - Speaker notes
+
+presentation:
+  card:
+    title: AI presentation planner
+    description: Follow a four-slide cyberpunk League of Legends case from requirements and materials to an editable outline and final slides
+    output_type: slides
+    output_label: Interactive PPT case
+    cover_asset: cover
+    result_summary: Explore four cyberpunk League of Legends slides with paging, element edits, slide ordering, and speaker notes
+  detail:
+    title: From presentation goal to complete slides
+    description: Follow a four-slide cyberpunk League of Legends case through requirement analysis, material collection, page outlines, and interactive slides. The preview opens directly on the final slides and keeps paging, editing, ordering, and speaker-note interactions available.
+    attachment_hint: Presentation topic, page count, target audience, and visual style (optional)
+
+tasks:
+  - id: cyberpunk-lol-deck
+    selector:
+      title: Cyberpunk League of Legends PPT
+      description: Generate four cyberpunk slides introducing League of Legends
+      output_label: Interactive slides
+    launch:
+      prompt_short: Create four cyberpunk-style PPT slides introducing League of Legends.
+      prompt: Create four cyberpunk-style PPT slides introducing League of Legends.
+    replay:
+      steps:
+        - title: Analyze the presentation brief
+          description: Define the four-slide scope, gamer audience, content emphasis, and cyberpunk visual language
+        - title: Collect game visuals
+          description: Organize League of Legends hero, Rift, and esports imagery into a reusable material library
+        - title: Build the page outline
+          description: Structure game overview, champion roster, Summoner's Rift, and global esports across four slides
+        - title: Generate interactive slides
+          description: Render four neon cyberpunk pages with paging, editing, ordering, and speaker notes
+    result:
+      template: html_preview_v1
+      eyebrow: AI PPT case
+      title: Four-slide cyberpunk League of Legends deck
+      summary: Move from requirement analysis, materials, and a page outline into the final slides, opening on step four with the complete interaction model intact.
+      html_asset: lol_ppt_preview

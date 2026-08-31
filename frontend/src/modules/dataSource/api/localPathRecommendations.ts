@@ -3,6 +3,7 @@ import { axiosInstance } from "@/components/request";
 
 interface LocalPathRecommendationRequest {
   agent_id?: string;
+  force_refresh?: boolean;
 }
 
 export async function listLocalPathRecommendations(

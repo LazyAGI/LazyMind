@@ -4,8 +4,9 @@ from pathlib import Path
 
 import pytest
 
+from lazyllm.tools.agent import ToolExecutionError
 from lazyllm.tools.fs import client as fs_client
-from lazymind.chat.engine.tools import chat_artifact
+from lazymind.chat.engine.tools.local_file import workspace as chat_artifact
 
 
 def test_file_uri_with_windows_drive_becomes_native_path(monkeypatch):
@@ -35,9 +36,8 @@ def test_chat_file_publish_supports_long_filename(tmp_path, monkeypatch):
 
     result = chat_artifact.save_chat_artifact(filename, filename, content_type='file')
 
-    assert result['success'] is True
     published_dir = chat_artifact._published_file_directory(
-        'windows-user', 'windows-conversation', result['result']['artifact_id'],
+        'windows-user', 'windows-conversation', result['artifact_id'],
     )
     assert (Path(published_dir) / filename).read_text(encoding='utf-8') == 'requirements'
     assert not [name for name in os.listdir(published_dir) if name.endswith('.tmp')]
@@ -92,7 +92,7 @@ def test_chat_write_file_append_does_not_require_overwrite_approval(tmp_path, mo
 
     assert first['status'] == 'ok'
     assert appended['status'] == 'ok'
-    assert chat_artifact.read_file('document.md')['content'] == 'first second'
+    assert 'first second' in chat_artifact.read_file('document.md')['text']
 
 
 def test_chat_file_tools_reject_outside_workspace_by_default(tmp_path, monkeypatch):
@@ -103,7 +103,7 @@ def test_chat_file_tools_reject_outside_workspace_by_default(tmp_path, monkeypat
         chat_artifact, '_current_artifact_scope', lambda: ('windows-user', 'windows-conversation'),
     )
 
-    with pytest.raises(ValueError, match='inside the current main-Agent workspace'):
+    with pytest.raises(ToolExecutionError, match='inside the current main-Agent workspace'):
         chat_artifact.write_file(str(outside), 'blocked')
 
 
@@ -122,5 +122,5 @@ def test_chat_file_tools_allow_absolute_host_paths_in_trusted_local_mode(tmp_pat
         listed = chat_artifact.list_dir(str(outside_dir))
 
     assert written['status'] == 'ok'
-    assert loaded['content'] == 'trusted'
+    assert 'trusted' in loaded['text']
     assert listed['entries'] == ['document.md']

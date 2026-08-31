@@ -3,15 +3,14 @@ import {
   BulbOutlined,
   CommentOutlined,
   DownOutlined,
+  LoadingOutlined,
   UpOutlined,
 } from "@ant-design/icons";
 import { ChatConversationsResponseFinishReasonEnum } from "@/api/generated/chatbot-client";
 import MarkdownViewer from "@/modules/chat/components/MarkdownViewer";
 import { getCitationSources } from "@/modules/chat/utils/sourceAdapter";
 import { RoleTypes } from "@/modules/chat/constants/common";
-import {
-  formatThinkingForDisplay,
-} from "@/modules/chat/utils/thinking";
+import { formatThinkingForDisplay, summarizeSearchToolsFromText } from "@/modules/chat/utils/thinking";
 import { useTranslation } from "react-i18next";
 import ChatImages from "../../ChatImages";
 import ChatFiles from "../../ChatFiles";
@@ -19,6 +18,18 @@ import { getCiteMessages } from "../utils/citeMessage";
 
 const ThinkIcon = new URL("../../../assets/images/think.png", import.meta.url)
   .href;
+
+function formatThinkingDuration(value: number | string | undefined): string {
+  const seconds = Math.floor(Number(value));
+  if (!Number.isFinite(seconds) || seconds <= 0) return "";
+
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  if (minutes === 0) return `${seconds}s`;
+  return remainingSeconds > 0
+    ? `${minutes}m${remainingSeconds}s`
+    : `${minutes}m`;
+}
 
 const INTENT_FIELD_LABELS: Record<string, string> = {
   goal: "chat.intentGoal",
@@ -31,13 +42,38 @@ const INTENT_FIELD_LABELS: Record<string, string> = {
 
 interface ChatMessageContentProps {
   item: any;
+  conversationId?: string;
+  onCiteMessage?: (text: string, historyId?: string) => void;
   uniqueKey?: string;
   isThinkingCollapsed: (key: string, defaultCollapsed?: boolean) => boolean;
   onToggleThinkingCollapse: (key: string, currentCollapsed?: boolean) => void;
 }
 
+function ModelRetryStatus({
+  retry,
+}: {
+  retry: {
+    retry_index: number;
+    max_attempts: number;
+  };
+}) {
+  const { t } = useTranslation();
+
+  return (
+    <div className="chat-model-retry-status" role="status" aria-live="polite">
+      <LoadingOutlined spin />
+      {t("chat.modelRetrying", {
+        attempt: retry.retry_index + 1,
+        max: retry.max_attempts,
+      })}
+    </div>
+  );
+}
+
 export default function ChatMessageContent({
   item,
+  conversationId,
+  onCiteMessage,
   uniqueKey,
   isThinkingCollapsed,
   onToggleThinkingCollapse,
@@ -48,13 +84,20 @@ export default function ChatMessageContent({
   const citeMessageList =
     item.role === RoleTypes.USER ? getCiteMessages(item) : [];
   const isStreaming =
+    !item.run_status &&
     item.finish_reason !==
-    ChatConversationsResponseFinishReasonEnum.FinishReasonStop;
+      ChatConversationsResponseFinishReasonEnum.FinishReasonStop;
   const isCollapsed = isThinkingCollapsed(thinkingKey, !isStreaming);
+  const searchSummary = summarizeSearchToolsFromText(
+    item.raw_delta || item.reasoning_content,
+  );
   const conversationIntent =
     item.intent_updated?.scope === "conversation"
       ? item.intent_updated.intent_context
       : null;
+  const thinkingDuration = formatThinkingDuration(
+    item.thinking_duration_s || item.thinking_time_s,
+  );
   const intentTooltip = conversationIntent ? (
     <div className="chat-intent-tooltip">
       {Object.entries(INTENT_FIELD_LABELS).map(([field, labelKey]) => {
@@ -73,6 +116,7 @@ export default function ChatMessageContent({
 
   return (
     <Flex vertical>
+      {item.model_retry ? <ModelRetryStatus retry={item.model_retry} /> : null}
       {conversationIntent ? (
         <Tooltip title={intentTooltip} placement="topLeft">
           <span className="chat-intent-updated">
@@ -114,10 +158,8 @@ export default function ChatMessageContent({
             <img src={ThinkIcon} className="chat-think-icon" alt="" />
             <span className="chat-think-title">
               {item.delta ? t("chat.thinkingDone") : t("chat.thinking")}
-              {(item.thinking_duration_s || item.thinking_time_s) &&
-                item.thinking_duration_s !== "0" &&
-                item.thinking_time_s !== "0" &&
-                ` (${item.thinking_duration_s || item.thinking_time_s}s)`}
+              {searchSummary ? ` · ${searchSummary}` : ""}
+              {thinkingDuration ? ` (${thinkingDuration})` : ""}
             </span>
             {isCollapsed ? (
               <UpOutlined className="chat-arrow-icon" />
@@ -136,7 +178,15 @@ export default function ChatMessageContent({
         </>
       )}
       <div className="chat-text">
-        <MarkdownViewer sources={sources} IS_STREAMING={isStreaming}>
+        <MarkdownViewer
+          sources={sources}
+          IS_STREAMING={isStreaming}
+          conversationId={conversationId}
+          historyId={item.history_id || item.id}
+          onCiteMessage={(text: string) =>
+            onCiteMessage?.(text, item.history_id || item.id)
+          }
+        >
           {item.display_delta || item.delta}
         </MarkdownViewer>
       </div>

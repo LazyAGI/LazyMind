@@ -1,5 +1,7 @@
-import { Switch } from "antd";
-import { DeleteOutlined } from "@ant-design/icons";
+import { Button, Switch } from "antd";
+import { CommentOutlined, DeleteOutlined } from "@ant-design/icons";
+import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Segment } from "@/api/generated/knowledge-client";
 import { SegmentServiceApi } from "@/modules/knowledge/utils/request";
 
@@ -20,6 +22,7 @@ interface IProps {
   ) => void;
   contentReadOnly: boolean;
   showNumber?: boolean;
+  onAskSegment?: (segment: Segment, selectedText?: string, group?: string) => void;
 }
 
 const SegmentCard = (props: IProps) => {
@@ -33,7 +36,29 @@ const SegmentCard = (props: IProps) => {
     onUpdateStatus,
     contentReadOnly = false,
     showNumber = true,
+    onAskSegment,
   } = props;
+  const { t } = useTranslation();
+  const [selectedText, setSelectedText] = useState("");
+
+  function captureSelection(event: React.MouseEvent<HTMLDivElement>) {
+    const selection = window.getSelection();
+    const text = selection?.toString().trim() || "";
+    if (!selection || selection.rangeCount === 0 || !text) {
+      setSelectedText("");
+      return;
+    }
+    const range = selection.getRangeAt(0);
+    if (event.currentTarget.contains(range.commonAncestorContainer)) {
+      setSelectedText(text);
+    }
+  }
+
+  function openDetailUnlessSelecting() {
+    if (!window.getSelection()?.toString().trim()) {
+      onOpenDetail();
+    }
+  }
 
   function onChange(checked: boolean) {
     if (onUpdateStatus) {
@@ -73,7 +98,11 @@ const SegmentCard = (props: IProps) => {
           #{segment.number}
         </div>
       )}
-      <div className="content" onClick={onOpenDetail}>
+      <div
+        className="content"
+        onClick={openDetailUnlessSelecting}
+        onMouseUp={captureSelection}
+      >
         <div
           className={`contentInner ${contentReadOnly ? "contentReadOnly" : ""} ${showNumber ? "contentWithNumber" : ""}`}
         >
@@ -85,7 +114,20 @@ const SegmentCard = (props: IProps) => {
         </div>
       </div>
       <div className="footer">
-        <span style={{ flex: 1 }} />
+        {onAskSegment ? (
+          <Button
+            type="link"
+            size="small"
+            className="segment-chat-action"
+            icon={<CommentOutlined />}
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => onAskSegment(segment, selectedText || undefined, group)}
+          >
+            {t(selectedText
+              ? "knowledge.askSelectedSegmentText"
+              : "knowledge.askWholeSegment")}
+          </Button>
+        ) : <span style={{ flex: 1 }} />}
         {editable ? (
           <>
             <Switch

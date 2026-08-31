@@ -1,33 +1,41 @@
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
+from channel_gateway.common.application.ask_text import parse_text_ask_answer
 from channel_gateway.common.application.intents import (
-    ChannelIntentClassifier,
     ExactShortcutParser,
     canonicalize_command,
     resolve_pending_selection,
     validate_command,
 )
 from channel_gateway.common.domain.chat import (
-    BASIC_CHAT_FEATURES,
     ChannelExecutionContext,
-    ChannelFeatureProfile,
 )
 from channel_gateway.common.domain.commands import (
     COMMAND_ADAPTER,
     SCHEMA_VERSION,
     CapabilityListCommand,
+    CapabilityListParameters,
     ChatCommand,
     ChatParameters,
     CommandEnvelope,
+    ConversationCurrentCommand,
+    ConversationCurrentParameters,
+    ConversationListCommand,
+    ConversationListParameters,
     ConversationNewCommand,
+    ConversationNewParameters,
     ConversationSettingsCommand,
+    ConversationSettingsParameters,
     ConversationSettingsUpdateCommand,
-    SelectionContinuation,
+    ConversationStopCommand,
+    ConversationStopParameters,
+    HistoryMoreCommand,
+    HistoryMoreParameters,
 )
+from channel_gateway.common.ports.core import CapabilityCatalogClient
 from channel_gateway.common.ports.repository import NavigationRepository
 
 
@@ -47,39 +55,63 @@ class ChannelCommandRouter:
         *,
         store: NavigationRepository,
         shortcuts: ExactShortcutParser,
-        classifier: ChannelIntentClassifier,
-        feature_resolver: (
-            Callable[[str], ChannelFeatureProfile] | None
-        ) = None,
+        catalog: CapabilityCatalogClient,
     ):
         self._store = store
         self._shortcuts = shortcuts
-        self._classifier = classifier
-        self._feature_resolver = (
-            feature_resolver
-            or (lambda _provider: BASIC_CHAT_FEATURES)
-        )
+        self._catalog = catalog
 
     def route(
         self,
         *,
-        provider: str,
         account_id: str,
         external_address_hash: str,
         owner_user_id: str,
         text: str,
         request_id: str,
-        surface: str,
         provider_context: dict[str, Any],
     ) -> RoutedCommand | str:
         continuation_catalog: dict[str, Any] = {}
         execution = ChannelExecutionContext.from_provider_context(
             provider_context
         )
+        plain_text_interactions = execution.interaction_mode == 'plain_text'
+        text_selection = (
+            self._store.get_selection_context(
+                account_id,
+                external_address_hash,
+            )
+            if plain_text_interactions
+            else None
+        )
+        text_ask = (
+            parse_text_ask_answer(text, text_selection)
+            if plain_text_interactions
+            else None
+        )
+        if (
+            isinstance(text_selection, dict)
+            and text_selection.get('kind') == 'ask'
+            and text_ask is None
+        ):
+            return '回答格式不正确。请按问题提示回复选项编号或“题号: 答案”。'
         command_action = provider_context.get('command_action')
         selection_action = provider_context.get('selection_action')
         structured_ask = execution.ask_answers_structured
-        if isinstance(command_action, dict):
+        if text_ask is not None:
+            execution = replace(
+                execution,
+                ask_answers_structured=text_ask,
+            )
+            provider_context['channel_execution'] = execution.to_dict()
+            command = ChatCommand(
+                schema_version=SCHEMA_VERSION,
+                command='chat',
+                parameters=ChatParameters(message=text),
+            )
+            grounding_messages = (text,)
+            routing_source = 'text_ask'
+        elif isinstance(command_action, dict):
             command = COMMAND_ADAPTER.validate_python(command_action)
             grounding_messages = (text,)
             routing_source = 'provider_action'
@@ -105,13 +137,9 @@ class ChannelCommandRouter:
             routing_source = 'provider_action'
         else:
             command, grounding_messages, routing_source = self._route_text(
-                provider=provider,
                 account_id=account_id,
                 external_address_hash=external_address_hash,
-                owner_user_id=owner_user_id,
                 text=text,
-                request_id=request_id,
-                surface=surface,
                 continuation_catalog=continuation_catalog,
             )
 
@@ -125,10 +153,7 @@ class ChannelCommandRouter:
                 ),
                 text,
             )
-            if (
-                routing_source == 'llm'
-                or command.command.value == 'selection.choose'
-            )
+            if command.command.value == 'selection.choose'
             else None
         )
         if resumed is not None:
@@ -144,9 +169,9 @@ class ChannelCommandRouter:
         )
         if required_kinds:
             continuation_catalog.update(
-                self._classifier.catalog(
+                self._catalog.get_capability_catalog(
                     owner_user_id=owner_user_id,
-                    request_id=request_id,
+                    request_id=f'{request_id}_catalog',
                     kinds=required_kinds,
                 )
             )
@@ -193,13 +218,9 @@ class ChannelCommandRouter:
     def _route_text(
         self,
         *,
-        provider: str,
         account_id: str,
         external_address_hash: str,
-        owner_user_id: str,
         text: str,
-        request_id: str,
-        surface: str,
         continuation_catalog: dict[str, Any],
     ) -> tuple[CommandEnvelope, tuple[str, ...], str]:
         shortcut = (
@@ -219,21 +240,15 @@ class ChannelCommandRouter:
                 'selection',
             )
 
-        classifier_state = self._classifier_state(
-            account_id,
-            external_address_hash,
-            surface,
-        )
+        command = _control_command(text)
         return (
-            self._classifier.classify(
-                provider=provider,
-                owner_user_id=owner_user_id,
-                message=text,
-                request_id=f'{request_id}_intent',
-                state=classifier_state,
+            command or ChatCommand(
+                schema_version=SCHEMA_VERSION,
+                command='chat',
+                parameters=ChatParameters(message=text),
             ),
             (text,),
-            'llm',
+            'text_control' if command is not None else 'chat',
         )
 
     def _required_catalog_kinds(
@@ -281,63 +296,63 @@ class ChannelCommandRouter:
             kinds.add('knowledge_base')
         return kinds
 
-    def _classifier_state(
-        self,
-        account_id: str,
-        external_address_hash: str,
-        surface: str,
-    ) -> dict[str, Any]:
-        navigation = (
-            self._store.get_navigation_state(
-                account_id,
-                external_address_hash,
-            )
-            or {}
+
+def _control_command(text: str) -> CommandEnvelope | None:
+    normalized = ''.join(text.lower().split())
+    if normalized in {'新建会话', '创建会话', '新会话', 'newchat'}:
+        return ConversationNewCommand(
+            schema_version=SCHEMA_VERSION,
+            command='conversation.new',
+            parameters=ConversationNewParameters(evidence=[text]),
         )
-        state: dict[str, Any] = {
-            'surface': surface,
-            'has_current_conversation': bool(
-                self._store.get_route(
-                    account_id,
-                    external_address_hash,
-                )
+    assistants = {
+        '查看会话': 'lazymind', '历史会话': 'lazymind',
+        '切换会话': 'lazymind', '查看lazymind会话': 'lazymind',
+        '查看codex会话': 'codex', '查看cursor会话': 'cursor',
+        '查看workbuddy会话': 'workbuddy', '查看codebuddy会话': 'workbuddy',
+    }
+    if normalized in assistants:
+        return ConversationListCommand(
+            schema_version=SCHEMA_VERSION,
+            command='conversation.list',
+            parameters=ConversationListParameters(
+                assistant=assistants[normalized], evidence=[text],
             ),
-            'new_conversation_pending': (
-                navigation.get('mode') == 'new_pending'
-            ),
-        }
-        selection = self._store.get_selection_context(
-            account_id,
-            external_address_hash,
         )
-        if not isinstance(selection, dict):
-            return state
-        items = selection.get('items')
-        latest_selection: dict[str, Any] = {
-            'kind': str(selection.get('kind') or ''),
-            'items': [
-                {
-                    'index': index,
-                    'name': str(
-                        item.get('display_name')
-                        or item.get('name')
-                        or ''
-                    )[:200],
-                }
-                for index, item in enumerate(
-                    items if isinstance(items, list) else [],
-                    start=1,
-                )
-                if isinstance(item, dict)
-            ][:20],
-        }
-        continuation = selection.get('continuation')
-        if isinstance(continuation, dict):
-            try:
-                SelectionContinuation.model_validate(continuation)
-            except ValueError:
-                pass
-            else:
-                latest_selection['has_continuation'] = True
-        state['latest_selection'] = latest_selection
-        return state
+    if normalized in {'当前会话', '查看当前会话'}:
+        return ConversationCurrentCommand(
+            schema_version=SCHEMA_VERSION,
+            command='conversation.current',
+            parameters=ConversationCurrentParameters(evidence=[text]),
+        )
+    if normalized in {'更多历史', '查看更多历史', '更早历史'}:
+        return HistoryMoreCommand(
+            schema_version=SCHEMA_VERSION,
+            command='history.more',
+            parameters=HistoryMoreParameters(evidence=[text]),
+        )
+    if normalized in {'停止', '停止生成', '停止任务'}:
+        return ConversationStopCommand(
+            schema_version=SCHEMA_VERSION,
+            command='conversation.stop',
+            parameters=ConversationStopParameters(evidence=[text]),
+        )
+    if normalized in {'能力', '查看能力'}:
+        return CapabilityListCommand(
+            schema_version=SCHEMA_VERSION,
+            command='capability.list',
+            parameters=CapabilityListParameters(
+                capabilities=[
+                    'knowledge_base', 'skill', 'workflow', 'tool',
+                    'personalization',
+                ],
+                evidence=[text],
+            ),
+        )
+    if normalized in {'设置', '查看设置', '会话设置'}:
+        return ConversationSettingsCommand(
+            schema_version=SCHEMA_VERSION,
+            command='conversation.settings',
+            parameters=ConversationSettingsParameters(evidence=[text]),
+        )
+    return None

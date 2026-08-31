@@ -11,25 +11,23 @@ import {
 import {
   Alert,
   Button,
-  Form,
+  Modal,
   Tooltip,
   Flex,
   message,
   Input,
   TablePaginationConfig,
-  Select,
-  Spin,
   Tag,
   Space,
   Typography,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import moment from "moment";
 import {
   AppstoreOutlined,
+  ArrowLeftOutlined,
   DatabaseOutlined,
-  DownOutlined,
   HistoryOutlined,
   PlusOutlined,
   SearchOutlined,
@@ -64,7 +62,6 @@ import { ListPageTable } from "@/components/ui";
 import { useTranslation } from "react-i18next";
 import { axiosInstance, BASE_URL } from "@/components/request";
 import { AgentAppsAuth } from "@/components/auth";
-import { getCloudSession } from "@/runtime/cloud/session";
 import {
   fetchModelFeatures,
   isImageEmbedRequired,
@@ -77,6 +74,7 @@ import { mapScanSourceToDataSource } from "@/modules/dataSource/mappers/scanSour
 import {
   getFirstScanBinding,
   getScanSourceId,
+  inferSourceKind,
   type ScanV2Binding,
   type ScanV2Source,
 } from "@/modules/dataSource/utils/scanAccessors";
@@ -88,13 +86,40 @@ import {
   normalizeDataSourceStatus,
 } from "@/modules/dataSource/utils/status";
 import KnowledgeSquare from "./KnowledgeSquare";
-import { getCloudKnowledgeSquare } from "./cloudKnowledgeSquare";
 import {
-  createInitialKnowledgeSquareStatus,
-  OFFICIAL_KNOWLEDGE_BASES,
-  type KnowledgeSquareStatusMap,
+  mergeKnowledgeMarketDetail,
+  mergeKnowledgeMarketItems,
+  type KnowledgeSquareType,
   type OfficialKnowledgeBase,
 } from "./knowledgeSquareData";
+import KnowledgeMarketTaskModal from "./KnowledgeMarketTaskModal";
+import KnowledgeMineFilterPopover from "./KnowledgeMineFilterPopover";
+import {
+  getKnowledgeMineOrderBy,
+  sortByDatasetOrder,
+  type KnowledgeMineCloudSource,
+  type KnowledgeMineSort,
+} from "./knowledgeMineFilters";
+import {
+  isKnowledgeMarketTaskFailed,
+  isKnowledgeMarketTaskPartiallyFailed,
+  isKnowledgeMarketTaskTerminal,
+} from "./knowledgeMarketTaskState";
+import {
+  getKnowledgeMarketItem,
+  getKnowledgeMarketTask,
+  installKnowledgeMarketItem,
+  listKnowledgeMarket,
+  listKnowledgeMarketDomains,
+  listKnowledgeMarketInstalls,
+  updateAllKnowledgeMarketItems,
+  updateKnowledgeMarketItem,
+} from "@/modules/knowledge/api/knowledgeMarket";
+import {
+  clearCloudKnowledgeCreateParams,
+  getCloudKnowledgeCreateProvider,
+  isCloudKnowledgeCreateRequest,
+} from "@/modules/modelProvider/utils/cloudDocumentKnowledge";
 
 import "./index.scss";
 import "@/modules/dataSource/index.scss";
@@ -104,17 +129,22 @@ const { Text } = Typography;
 type SourceCategory = "local" | "cloudArchive" | "official";
 type KnowledgePageView = "mine" | "square";
 
+interface TrackedKnowledgeMarketJob {
+  jobId: string;
+  itemId: string;
+  jobType: "install" | "update" | "updateAll";
+  name: string;
+}
+
 interface KnowledgePageProps {
   modelSettingsPath?: string;
-  taskCenterPath?: string;
 }
 
 const KnowledgePage: FC<KnowledgePageProps> = ({
-  modelSettingsPath = "/model-providers",
-  taskCenterPath = "/task-center",
+  modelSettingsPath = "/settings?section=models",
 }) => {
-  const [form] = Form.useForm();
   const navigate = useNavigate();
+  const location = useLocation();
   const { t } = useTranslation();
   const confirmRef = useRef<TypedConfirmModalRef>(null);
   const createUpdateRef = useRef<UpdateImperativeProps>(null);
@@ -127,23 +157,31 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
     total: 0,
   });
   const [dataSource, setDataSource] = useState<Dataset[] | undefined>([]);
-  // Keep a local default option to avoid label flicker while tags are loading.
-  const [tags, setTags] = useState<string[]>([ALL_TAGS]);
+  const [localTags, setLocalTags] = useState<string[]>([]);
   const [sourceCategory, setSourceCategory] = useState<SourceCategory>("local");
   const [activeView, setActiveView] = useState<KnowledgePageView>("mine");
-  const [officialStatus, setOfficialStatus] = useState<KnowledgeSquareStatusMap>(
-    createInitialKnowledgeSquareStatus,
-  );
-  const [knowledgeSquareItems, setKnowledgeSquareItems] = useState<OfficialKnowledgeBase[]>(
-    OFFICIAL_KNOWLEDGE_BASES,
-  );
-  const [cloudKnowledgeStatus, setCloudKnowledgeStatus] = useState<KnowledgeSquareStatusMap>({});
-  const [isCloudKnowledgeSquare, setIsCloudKnowledgeSquare] = useState(false);
-  const [knowledgeSquareLoading, setKnowledgeSquareLoading] = useState(false);
-  const [knowledgeSquareError, setKnowledgeSquareError] = useState(false);
-  const [mineSort, setMineSort] = useState("updated");
-  const [officialSearch, setOfficialSearch] = useState("");
+  const [officialItems, setOfficialItems] = useState<OfficialKnowledgeBase[]>([]);
+  const [officialDomains, setOfficialDomains] = useState<
+    Record<KnowledgeSquareType, string[]>
+  >({ industry: [], evaluation: [] });
+  const [officialLoading, setOfficialLoading] = useState(false);
+  const [marketTaskModalOpen, setMarketTaskModalOpen] = useState(false);
+  const [trackedMarketJobs, setTrackedMarketJobs] = useState<
+    Record<string, TrackedKnowledgeMarketJob>
+  >({});
+  const [marketProgress, setMarketProgress] = useState<Record<string, number>>({});
+  const [mineSearch, setMineSearch] = useState("");
+  const [mineLocalTag, setMineLocalTag] = useState(ALL_TAGS);
+  const [mineOfficialTag, setMineOfficialTag] = useState(ALL_TAGS);
+  const [mineSort, setMineSort] = useState<KnowledgeMineSort>("all");
+  const [mineCloudSource, setMineCloudSource] =
+    useState<KnowledgeMineCloudSource>("all");
+  const [mineFilterOpen, setMineFilterOpen] = useState(false);
   const [cloudSources, setCloudSources] = useState<DataSourceItem[]>([]);
+  const [officialDatasetOrder, setOfficialDatasetOrder] = useState<
+    string[] | null
+  >(null);
+  const [officialSortLoading, setOfficialSortLoading] = useState(false);
   const [embeddingReady, setEmbeddingReady] = useState<boolean | null>(null);
   const [multimodalEmbeddingReady, setMultimodalEmbeddingReady] = useState<
     boolean | null
@@ -155,8 +193,11 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
       createKnowledgeRef.current?.onClose();
     },
   });
-  const cloudSourceRequestSeqRef = useRef(0);
-  const knowledgeSquareRequestSeqRef = useRef(0);
+  const cloudCreateRequestRef = useRef<string | null>(null);
+  const localTagsRequestSeqRef = useRef(0);
+  const mineTableRequestSeqRef = useRef(0);
+  const officialSortRequestSeqRef = useRef(0);
+  const marketRequestSeqRef = useRef(0);
   const isCloudArchiveView = sourceCategory === "cloudArchive";
   const isOfficialView = sourceCategory === "official";
   const createActionDisabled =
@@ -167,7 +208,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
         ? t("knowledge.embeddingNotReadyBannerAdmin")
         : t("knowledge.multimodalEmbeddingNotReadyBannerAdmin")}
       <a
-        href="/model-providers"
+        href={modelSettingsPath}
         style={{ marginLeft: 8, color: "#fff", textDecoration: "underline" }}
         onClick={(e: MouseEvent<HTMLAnchorElement>) => {
           e.preventDefault();
@@ -183,56 +224,72 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
     t("knowledge.multimodalEmbeddingNotReadyBanner")
   );
 
-  const refreshKnowledgeSquareSource = useCallback(async () => {
-    const requestSeq = ++knowledgeSquareRequestSeqRef.current;
-    let session;
-    try {
-      session = await getCloudSession();
-    } catch {
-      if (requestSeq !== knowledgeSquareRequestSeqRef.current) return;
-      setIsCloudKnowledgeSquare(false);
-      setKnowledgeSquareItems(OFFICIAL_KNOWLEDGE_BASES);
-      setKnowledgeSquareError(false);
-      setKnowledgeSquareLoading(false);
-      return;
-    }
-    if (requestSeq !== knowledgeSquareRequestSeqRef.current) return;
-    if (session.state !== "signed_in") {
-      setIsCloudKnowledgeSquare(false);
-      setKnowledgeSquareItems(OFFICIAL_KNOWLEDGE_BASES);
-      setKnowledgeSquareError(false);
-      setKnowledgeSquareLoading(false);
+  useEffect(() => {
+    if (
+      syncCreateVm.cloudConnectionLoading ||
+      !isCloudKnowledgeCreateRequest(location.search) ||
+      cloudCreateRequestRef.current === location.search
+    ) {
       return;
     }
 
-    setIsCloudKnowledgeSquare(true);
-    setKnowledgeSquareItems([]);
-    setCloudKnowledgeStatus({});
-    setKnowledgeSquareError(false);
-    setKnowledgeSquareLoading(true);
+    cloudCreateRequestRef.current = location.search;
+    const provider = getCloudKnowledgeCreateProvider(location.search);
+    setActiveView("mine");
+    setSourceCategory("cloudArchive");
+    if (provider) {
+      syncCreateVm.handleCreateFromCloudDocuments(provider);
+    } else {
+      createKnowledgeRef.current?.onOpen();
+    }
+    navigate(
+      {
+        pathname: location.pathname,
+        search: clearCloudKnowledgeCreateParams(location.search),
+      },
+      { replace: true },
+    );
+  }, [
+    location.pathname,
+    location.search,
+    navigate,
+    syncCreateVm.cloudConnectionLoading,
+    syncCreateVm.handleCreateFromCloudDocuments,
+  ]);
+
+  const loadKnowledgeMarket = useCallback(async (showLoading = false) => {
+    const requestId = ++marketRequestSeqRef.current;
+    if (showLoading) setOfficialLoading(true);
     try {
-      const items = await getCloudKnowledgeSquare();
-      if (requestSeq !== knowledgeSquareRequestSeqRef.current) return;
-      setKnowledgeSquareItems(items);
-      setCloudKnowledgeStatus(Object.fromEntries(items.map((item) => [
-        item.id,
-        { installed: item.installed, updateAvailable: Boolean(item.updateAvailable) },
-      ])));
+      const [catalog, domainsResponse, installsResponse] = await Promise.all([
+        listKnowledgeMarket(),
+        listKnowledgeMarketDomains(),
+        listKnowledgeMarketInstalls(),
+      ]);
+      if (requestId !== marketRequestSeqRef.current) return;
+      setOfficialItems(
+        mergeKnowledgeMarketItems(catalog, installsResponse.items || []),
+      );
+      setOfficialDomains({
+        industry: domainsResponse.domains?.industry || [],
+        evaluation: domainsResponse.domains?.evaluation || [],
+      });
     } catch {
-      if (requestSeq !== knowledgeSquareRequestSeqRef.current) return;
-      setKnowledgeSquareItems([]);
-      setKnowledgeSquareError(true);
+      // The shared request interceptor displays the localized error.
     } finally {
-      if (requestSeq === knowledgeSquareRequestSeqRef.current) {
-        setKnowledgeSquareLoading(false);
+      if (showLoading && requestId === marketRequestSeqRef.current) {
+        setOfficialLoading(false);
       }
     }
   }, []);
 
   useEffect(() => {
-    getTags();
+    void loadKnowledgeMarket(true);
+  }, [loadKnowledgeMarket]);
+
+  useEffect(() => {
+    void getLocalTags();
     void checkEmbeddingReady();
-    void refreshKnowledgeSquareSource();
 
     const onFeaturesChanged = () => {
       void checkEmbeddingReady();
@@ -241,18 +298,18 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
     const onVisibilityChange = () => {
       if (document.visibilityState === "visible") {
         void checkEmbeddingReady();
-        void refreshKnowledgeSquareSource();
       }
     };
     document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
+      localTagsRequestSeqRef.current += 1;
       window.removeEventListener(
         MODEL_FEATURES_CHANGED_EVENT,
         onFeaturesChanged,
       );
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [refreshKnowledgeSquareSource]);
+  }, []);
 
   async function checkEmbeddingReady() {
     try {
@@ -295,25 +352,98 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
   useEffect(() => {
     if (activeView === "mine" && sourceCategory !== "official") {
       getTableData(1, pagination.pageSize);
+    } else {
+      mineTableRequestSeqRef.current += 1;
+      setLoading(false);
     }
-  }, [activeView, sourceCategory]);
+    return () => {
+      mineTableRequestSeqRef.current += 1;
+    };
+  }, [
+    activeView,
+    sourceCategory,
+    mineSearch,
+    mineLocalTag,
+    mineSort,
+    mineCloudSource,
+  ]);
 
   const loadCloudSources = useCallback(
-    async (page = 1, pageSize = 10, keyword = "") => {
-      const requestSeq = cloudSourceRequestSeqRef.current + 1;
-      cloudSourceRequestSeqRef.current = requestSeq;
+    async (
+      page = 1,
+      pageSize = 10,
+      keyword = "",
+      selectedSort: KnowledgeMineSort = "all",
+      selectedCloudSource: KnowledgeMineCloudSource = "all",
+    ) => {
+      const requestSeq = mineTableRequestSeqRef.current + 1;
+      mineTableRequestSeqRef.current = requestSeq;
       setLoading(true);
 
       try {
-        const sourcesResponse = await dataSourceScanApi.listSources({
-          page,
-          pageSize,
-          keyword: keyword.trim() || undefined,
-        });
-        const sourceList = (sourcesResponse.data.items || []) as ScanV2Source[];
-        const visibleSourceList = sourceList.filter(
-          (source) => normalizeDataSourceStatus(source.status) !== "deleted",
+        const orderBy = getKnowledgeMineOrderBy(selectedSort);
+        const scanOptions = orderBy
+          ? { params: { order_by: orderBy } }
+          : undefined;
+        const needsClientFilter = selectedCloudSource !== "all";
+
+        const sourceListPromise = (async () => {
+          let sourceList: ScanV2Source[] = [];
+          let sourceTotal = 0;
+          if (needsClientFilter) {
+            const scanPageSize = 200;
+            let scanPage = 1;
+            do {
+              const response = await dataSourceScanApi.listSources(
+                {
+                  page: scanPage,
+                  pageSize: scanPageSize,
+                  keyword: keyword.trim() || undefined,
+                },
+                scanOptions,
+              );
+              const pageItems = (response.data.items || []) as ScanV2Source[];
+              sourceList.push(...pageItems);
+              sourceTotal = Number(response.data.total || 0);
+              if (
+                pageItems.length === 0 ||
+                sourceList.length >= sourceTotal
+              ) {
+                break;
+              }
+              scanPage += 1;
+            } while (true);
+          } else {
+            const response = await dataSourceScanApi.listSources(
+              {
+                page,
+                pageSize,
+                keyword: keyword.trim() || undefined,
+              },
+              scanOptions,
+            );
+            sourceList = (response.data.items || []) as ScanV2Source[];
+            sourceTotal = Number(response.data.total || 0);
+          }
+          return { sourceList, sourceTotal };
+        })();
+
+        const { sourceList, sourceTotal } = await sourceListPromise;
+        if (mineTableRequestSeqRef.current !== requestSeq) return;
+        const filteredSourceList = sourceList.filter(
+          (source) =>
+            normalizeDataSourceStatus(source.status) !== "deleted" &&
+            (selectedCloudSource === "all" ||
+              inferSourceKind(source) === selectedCloudSource),
         );
+        const visibleSourceList = needsClientFilter
+          ? filteredSourceList.slice((page - 1) * pageSize, page * pageSize)
+          : filteredSourceList;
+        const filteredTotal = needsClientFilter
+          ? filteredSourceList.length
+          : sourceTotal;
+
+        if (mineTableRequestSeqRef.current !== requestSeq) return;
         const nextSources = await Promise.all(
           visibleSourceList.map(async (source) => {
             const sourceId = getScanSourceId(source);
@@ -341,20 +471,15 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
           }),
         );
 
-        if (cloudSourceRequestSeqRef.current !== requestSeq) {
-          return;
-        }
-
+        if (mineTableRequestSeqRef.current !== requestSeq) return;
         setCloudSources(nextSources);
         setPagination({
           current: page,
           pageSize,
-          total: Number(sourcesResponse.data.total || 0),
+          total: filteredTotal,
         });
-      } catch (error) {
-        if (cloudSourceRequestSeqRef.current !== requestSeq) {
-          return;
-        }
+      } catch {
+        if (mineTableRequestSeqRef.current !== requestSeq) return;
         setCloudSources([]);
         setPagination({
           current: page,
@@ -362,7 +487,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
           total: 0,
         });
       } finally {
-        if (cloudSourceRequestSeqRef.current === requestSeq) {
+        if (mineTableRequestSeqRef.current === requestSeq) {
           setLoading(false);
         }
       }
@@ -550,93 +675,352 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
     [handleCloudArchiveDelete, handleCloudArchiveEdit, navigateToKnowledgeDetail, t],
   );
 
-  const setOfficialItemStatus = useCallback(
-    (item: OfficialKnowledgeBase, next: Partial<KnowledgeSquareStatusMap[string]>) => {
-      const setStatus = item.id.startsWith("cloud:")
-        ? setCloudKnowledgeStatus
-        : setOfficialStatus;
-      setStatus((current) => ({
-        ...current,
-        [item.id]: {
-          installed: current[item.id]?.installed ?? item.installed,
-          updateAvailable:
-            current[item.id]?.updateAvailable ?? Boolean(item.updateAvailable),
-          ...next,
-        },
-      }));
-    },
-    [],
-  );
+  const trackMarketJob = useCallback((job: TrackedKnowledgeMarketJob) => {
+    setTrackedMarketJobs((current) => ({ ...current, [job.jobId]: job }));
+    if (job.itemId) {
+      setMarketProgress((current) => ({ ...current, [job.itemId]: 0 }));
+    }
+  }, []);
 
   const handleOfficialInstall = useCallback(
-    (item: OfficialKnowledgeBase) => {
-      setOfficialItemStatus(item, { installed: true, updateAvailable: false });
-      message.success(t("knowledge.installSuccess", { name: item.name }));
+    async (item: OfficialKnowledgeBase) => {
+      try {
+        const task = await installKnowledgeMarketItem(item.id);
+        trackMarketJob({
+          jobId: task.job_id,
+          itemId: item.id,
+          jobType: "install",
+          name: item.name,
+        });
+        message.info(t("knowledge.installSubmitted", { name: item.name }));
+        void loadKnowledgeMarket();
+      } catch {
+        // The shared request interceptor displays the localized error.
+      }
     },
-    [setOfficialItemStatus, t],
+    [loadKnowledgeMarket, t, trackMarketJob],
   );
 
   const handleOfficialUpdate = useCallback(
-    (item: OfficialKnowledgeBase) => {
-      setOfficialItemStatus(item, { installed: true, updateAvailable: false });
-      message.success(t("knowledge.updateSuccess", { name: item.name }));
+    async (item: OfficialKnowledgeBase) => {
+      try {
+        const task = await updateKnowledgeMarketItem(item.id);
+        trackMarketJob({
+          jobId: task.job_id,
+          itemId: item.id,
+          jobType: "update",
+          name: item.name,
+        });
+        message.info(t("knowledge.updateSubmitted", { name: item.name }));
+        void loadKnowledgeMarket();
+      } catch {
+        // The shared request interceptor displays the localized error.
+      }
     },
-    [setOfficialItemStatus, t],
+    [loadKnowledgeMarket, t, trackMarketJob],
   );
 
-  const handleOfficialOpen = useCallback(() => {
-    setActiveView("mine");
-    setSourceCategory("official");
-  }, []);
+  const handleOfficialOpen = useCallback(
+    (item?: OfficialKnowledgeBase) => {
+      if (item?.datasetId) {
+        navigate(`/lib/knowledge/detail/${item.datasetId}`);
+        return;
+      }
+      setActiveView("mine");
+      setSourceCategory("official");
+    },
+    [navigate],
+  );
 
   const handleOfficialQuery = useCallback(
     (item: OfficialKnowledgeBase) => {
+      if (!item.onlineAccessUrl) {
+        message.info(t("knowledge.onlineQueryUnavailable"));
+        return;
+      }
       navigate({
         pathname: "/agent/chat/home",
         search: `?officialKnowledge=${encodeURIComponent(item.id)}`,
       });
     },
-    [navigate],
+    [navigate, t],
   );
 
+  const handleOfficialLoadDetail = useCallback(
+    async (item: OfficialKnowledgeBase) => {
+      try {
+        const detail = await getKnowledgeMarketItem(item.id);
+        return mergeKnowledgeMarketDetail(item, detail);
+      } catch {
+        return item;
+      }
+    },
+    [],
+  );
+
+  const handleOfficialUninstall = useCallback(
+    (item: OfficialKnowledgeBase) => {
+      if (!item.datasetId) return;
+      Modal.confirm({
+        title: t("knowledge.uninstallConfirmTitle", { name: item.name }),
+        content: t("knowledge.uninstallConfirmContent"),
+        okText: t("knowledge.uninstall"),
+        okButtonProps: { danger: true },
+        cancelText: t("common.cancel"),
+        onOk: async () => {
+          await KnowledgeBaseServiceApi().datasetServiceDeleteDataset({
+            dataset: item.datasetId,
+          });
+          message.success(t("knowledge.uninstallSuccess", { name: item.name }));
+          await loadKnowledgeMarket();
+        },
+      });
+    },
+    [loadKnowledgeMarket, t],
+  );
+
+  const loadOfficialDatasetOrder = useCallback(
+    async (selectedSort: KnowledgeMineSort) => {
+      const requestSeq = officialSortRequestSeqRef.current + 1;
+      officialSortRequestSeqRef.current = requestSeq;
+      const orderBy = getKnowledgeMineOrderBy(selectedSort);
+      if (!orderBy) {
+        setOfficialDatasetOrder(null);
+        setOfficialSortLoading(false);
+        return;
+      }
+
+      setOfficialSortLoading(true);
+      try {
+        const datasetIds: string[] = [];
+        const seenPageTokens = new Set<string>();
+        let pageToken: string | undefined;
+        do {
+          const response = await KnowledgeBaseServiceApi().datasetServiceListDatasets(
+            {
+              pageToken,
+              pageSize: 100,
+              orderBy,
+            },
+            { params: { source: "official_installed" } },
+          );
+          (response.data.datasets || []).forEach((dataset) => {
+            if (dataset.dataset_id) datasetIds.push(dataset.dataset_id);
+          });
+          const nextPageToken = response.data.next_page_token || undefined;
+          if (!nextPageToken || seenPageTokens.has(nextPageToken)) break;
+          seenPageTokens.add(nextPageToken);
+          pageToken = nextPageToken;
+        } while (pageToken);
+
+        if (officialSortRequestSeqRef.current === requestSeq) {
+          setOfficialDatasetOrder(datasetIds);
+        }
+      } catch {
+        if (officialSortRequestSeqRef.current === requestSeq) {
+          setOfficialDatasetOrder(null);
+        }
+      } finally {
+        if (officialSortRequestSeqRef.current === requestSeq) {
+          setOfficialSortLoading(false);
+        }
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (activeView !== "mine" || sourceCategory !== "official") {
+      officialSortRequestSeqRef.current += 1;
+      setOfficialSortLoading(false);
+      return;
+    }
+    void loadOfficialDatasetOrder(mineSort);
+  }, [activeView, loadOfficialDatasetOrder, mineSort, sourceCategory]);
+
   const installedOfficialItems = useMemo(() => {
-    const items = OFFICIAL_KNOWLEDGE_BASES.filter(
+    const items = officialItems.filter(
       (item) => {
-        if (!officialStatus[item.id]?.installed) return false;
-        const keyword = officialSearch.trim().toLocaleLowerCase();
-        if (!keyword) return true;
-        return [item.name, item.desc, item.domain, ...item.tags]
+        if (!item.installed) return false;
+        if (
+          mineOfficialTag !== ALL_TAGS &&
+          !item.tags.includes(mineOfficialTag)
+        ) {
+          return false;
+        }
+        const keyword = mineSearch.trim().toLocaleLowerCase();
+        return !keyword || [item.name, item.desc, item.domain, ...item.tags]
           .join(" ")
           .toLocaleLowerCase()
           .includes(keyword);
       },
     );
-    if (mineSort === "name") {
-      return [...items].sort((a, b) => a.name.localeCompare(b.name, "zh-CN"));
-    }
-    if (mineSort === "docs") {
-      return [...items].sort((a, b) => b.docs - a.docs);
-    }
-    return [...items].sort((a, b) => b.updated.localeCompare(a.updated));
-  }, [mineSort, officialSearch, officialStatus]);
+    return sortByDatasetOrder(items, officialDatasetOrder, (item) => item.datasetId);
+  }, [mineOfficialTag, mineSearch, officialDatasetOrder, officialItems]);
 
-  const handleUpdateAllOfficial = useCallback(() => {
-    const updateItems = OFFICIAL_KNOWLEDGE_BASES.filter(
-      (item) => officialStatus[item.id]?.installed && officialStatus[item.id]?.updateAvailable,
-    );
-    if (updateItems.length === 0) {
-      message.info(t("knowledge.noUpdates"));
-      return;
+  const officialFilterTags = useMemo(
+    () =>
+      Array.from(
+        new Set([
+          ...officialItems
+            .filter((item) => item.installed)
+            .flatMap((item) => item.tags),
+        ]),
+      ).sort((left, right) => left.localeCompare(right, "zh-CN")),
+    [officialItems],
+  );
+
+  useEffect(() => {
+    if (mineLocalTag !== ALL_TAGS && !localTags.includes(mineLocalTag)) {
+      setMineLocalTag(ALL_TAGS);
     }
-    setOfficialStatus((current) => {
-      const next = { ...current };
-      updateItems.forEach((item) => {
-        next[item.id] = { installed: true, updateAvailable: false };
+  }, [localTags, mineLocalTag]);
+
+  useEffect(() => {
+    if (
+      mineOfficialTag !== ALL_TAGS &&
+      !officialFilterTags.includes(mineOfficialTag)
+    ) {
+      setMineOfficialTag(ALL_TAGS);
+    }
+  }, [mineOfficialTag, officialFilterTags]);
+
+  const handleUpdateAllOfficial = useCallback(async () => {
+    try {
+      const task = await updateAllKnowledgeMarketItems();
+      trackMarketJob({
+        jobId: task.job_id,
+        itemId: "",
+        jobType: "updateAll",
+        name: t("knowledge.taskTypeUpdateAll"),
       });
-      return next;
-    });
-    message.success(t("knowledge.updateAllSuccess", { count: updateItems.length }));
-  }, [officialStatus, t]);
+      message.info(t("knowledge.updateAllSubmitted"));
+    } catch {
+      // The shared request interceptor displays the localized error.
+    }
+  }, [t, trackMarketJob]);
+
+  useEffect(() => {
+    const jobs = Object.values(trackedMarketJobs);
+    if (jobs.length === 0) return;
+
+    let stopped = false;
+    let timer: number | undefined;
+    const poll = async () => {
+      const taskResults = await Promise.all(
+        jobs.map(async (job) => {
+          try {
+            const detail = await getKnowledgeMarketTask(job.jobId, {
+              silentError: true,
+            });
+            return { job, detail };
+          } catch {
+            return null;
+          }
+        }),
+      );
+      if (stopped) return;
+
+      const terminalJobIds = taskResults
+        .filter((result) => {
+          if (!result) return false;
+          return isKnowledgeMarketTaskTerminal(
+            {
+              jobType: result.job.jobType,
+              jobStatus: result.detail.job_status,
+              stage: result.detail.stage,
+              overallPercent: result.detail.overall_percent,
+              progress: result.detail.progress,
+            },
+          );
+        })
+        .map((result) => result!.job.jobId);
+      setMarketProgress((current) => {
+        const next = { ...current };
+        taskResults.forEach((result) => {
+          if (!result) return;
+          const { job, detail } = result;
+          const terminal = isKnowledgeMarketTaskTerminal(
+            {
+              jobType: job.jobType,
+              jobStatus: detail.job_status,
+              stage: detail.stage,
+              overallPercent: detail.overall_percent,
+              progress: detail.progress,
+            },
+          );
+          if (job.itemId) {
+            if (terminal) delete next[job.itemId];
+            else next[job.itemId] = detail.overall_percent;
+          }
+        });
+        return next;
+      });
+
+      taskResults.forEach((result) => {
+        if (!result || !terminalJobIds.includes(result.job.jobId)) return;
+        const failed = isKnowledgeMarketTaskFailed({
+          jobType: result.job.jobType,
+          jobStatus: result.detail.job_status,
+          stage: result.detail.stage,
+          overallPercent: result.detail.overall_percent,
+          progress: result.detail.progress,
+        });
+        const partiallyFailed = isKnowledgeMarketTaskPartiallyFailed({
+          jobType: result.job.jobType,
+          jobStatus: result.detail.job_status,
+          stage: result.detail.stage,
+          overallPercent: result.detail.overall_percent,
+          progress: result.detail.progress,
+        });
+        if (partiallyFailed) {
+          message.warning(
+            t("knowledge.marketTaskPartiallyFailed", { name: result.job.name }),
+          );
+        } else if (failed) {
+          message.error(
+            t("knowledge.marketTaskFailed", { name: result.job.name }),
+          );
+        } else if (result.job.jobType === "install") {
+          message.success(
+            t("knowledge.installSuccess", { name: result.job.name }),
+          );
+        } else if (result.job.jobType === "update") {
+          message.success(
+            t("knowledge.updateCheckComplete", { name: result.job.name }),
+          );
+        } else {
+          message.success(t("knowledge.updateAllChecked"));
+        }
+      });
+
+      if (terminalJobIds.length > 0) {
+        setTrackedMarketJobs((current) => {
+          const next = { ...current };
+          terminalJobIds.forEach((jobId) => delete next[jobId]);
+          return next;
+        });
+        void loadKnowledgeMarket();
+      }
+      if (terminalJobIds.length < jobs.length) {
+        timer = window.setTimeout(poll, 2000);
+      }
+    };
+
+    void poll();
+    return () => {
+      stopped = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [loadKnowledgeMarket, t, trackedMarketJobs]);
+
+  useEffect(() => {
+    if (!officialItems.some((item) => item.active)) return;
+    const timer = window.setTimeout(() => {
+      void loadKnowledgeMarket();
+    }, 2500);
+    return () => window.clearTimeout(timer);
+  }, [loadKnowledgeMarket, officialItems]);
 
   const columns: ColumnsType<Dataset> = [
     {
@@ -788,7 +1172,10 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
               <Button
                 className="knowledge-list-name-button"
                 type="link"
-                onClick={() => handleOfficialOpen()}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  handleOfficialOpen(item);
+                }}
               >
                 <Tooltip title={name}><span>{name}</span></Tooltip>
               </Button>
@@ -801,9 +1188,18 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
       },
       {
         title: t("knowledge.source"),
-        key: "source",
+        dataIndex: "source",
         width: 132,
-        render: () => <span className="knowledge-list-source is-official">{t("knowledge.officialKnowledge")}</span>,
+        render: (source: string) => {
+          const sourceLabel = source || t("knowledge.officialKnowledge");
+          return (
+            <Tooltip title={sourceLabel} placement="topLeft">
+              <span className="knowledge-list-source is-official">
+                <span className="knowledge-list-source-text">{sourceLabel}</span>
+              </span>
+            </Tooltip>
+          );
+        },
       },
       {
         title: t("knowledge.tags"),
@@ -816,15 +1212,9 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
         ),
       },
       {
-        title: t("knowledge.parseSize"),
-        dataIndex: "size",
-        width: 100,
-      },
-      {
-        title: t("knowledge.documentCountLabel"),
-        dataIndex: "docs",
-        width: 88,
-        render: (count: number) => t("knowledge.documentCount", { count }),
+        title: t("knowledge.domainFilter"),
+        dataIndex: "domain",
+        width: 110,
       },
       {
         title: t("knowledge.updateDate"),
@@ -835,14 +1225,17 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
         title: t("knowledge.status"),
         key: "status",
         width: 116,
-        render: (_, item) => (
-          <span className={`knowledge-list-status ${officialStatus[item.id]?.updateAvailable ? "is-update" : "is-ready"}`}>
-            <i />
-            {officialStatus[item.id]?.updateAvailable
-              ? t("knowledge.updateAvailable")
-              : t("knowledge.available")}
-          </span>
-        ),
+        render: (_, item) => {
+          const active = item.active || marketProgress[item.id] !== undefined;
+          return (
+            <span
+              className={`knowledge-list-status ${active ? "is-update" : "is-ready"}`}
+            >
+              <i />
+              {active ? t("knowledge.processing") : t("knowledge.available")}
+            </span>
+          );
+        },
       },
       {
         title: t("common.actions"),
@@ -851,27 +1244,38 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
         fixed: "right",
         render: (_, item) => (
           <Flex gap={10} align="center">
-            <Button className="link-btn" type="link" onClick={() => handleOfficialQuery(item)}>
-              {t("knowledge.onlineQuery")}
-            </Button>
+            {item.onlineAccessUrl ? (
+              <Button
+                className="link-btn"
+                type="link"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  handleOfficialQuery(item);
+                }}
+              >
+                {t("knowledge.onlineQuery")}
+              </Button>
+            ) : null}
             <Button
               className="link-btn"
               type="link"
-              onClick={() =>
-                officialStatus[item.id]?.updateAvailable
-                  ? handleOfficialUpdate(item)
-                  : handleOfficialOpen()
-              }
+              loading={item.active || marketProgress[item.id] !== undefined}
+              disabled={item.active || marketProgress[item.id] !== undefined}
+              onClick={(event) => {
+                event.stopPropagation();
+                handleOfficialUpdate(item);
+              }}
             >
-              {officialStatus[item.id]?.updateAvailable ? t("common.update") : t("common.open")}
+              {t("knowledge.checkForUpdates")}
             </Button>
             <Button
               className="link-btn"
               type="link"
               danger
-              onClick={() => {
-                setOfficialItemStatus(item, { installed: false, updateAvailable: false });
-                message.success(t("knowledge.uninstallSuccess", { name: item.name }));
+              disabled={item.active || marketProgress[item.id] !== undefined}
+              onClick={(event) => {
+                event.stopPropagation();
+                handleOfficialUninstall(item);
               }}
             >
               {t("knowledge.uninstall")}
@@ -883,25 +1287,50 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
     [
       handleOfficialOpen,
       handleOfficialQuery,
+      handleOfficialUninstall,
       handleOfficialUpdate,
-      officialStatus,
-      setOfficialItemStatus,
+      marketProgress,
       t,
     ],
   );
 
-  function getTags() {
-    KnowledgeBaseServiceApi()
-      .datasetServiceAllDatasetTags()
-      .then((res) => {
-        const uniqueTags = Array.from(
-          new Set((res.data.tags || []).filter(Boolean)),
+  async function getLocalTags() {
+    const requestSeq = localTagsRequestSeqRef.current + 1;
+    localTagsRequestSeqRef.current = requestSeq;
+    const nextTags = new Set<string>();
+    const seenPageTokens = new Set<string>();
+    let pageToken: string | undefined;
+
+    try {
+      do {
+        const response = await KnowledgeBaseServiceApi().datasetServiceListDatasets(
+          { pageToken, pageSize: 100 },
+          { params: { source: "manual" } },
         );
-        setTags([ALL_TAGS, ...uniqueTags.filter((tag) => tag !== ALL_TAGS)]);
-      })
-      .catch(() => {
-        setTags([ALL_TAGS]);
-      });
+        if (localTagsRequestSeqRef.current !== requestSeq) return;
+        (response.data.datasets || []).forEach((dataset) => {
+          (dataset.tags || []).forEach((tag) => {
+            if (tag && tag !== ALL_TAGS) nextTags.add(tag);
+          });
+        });
+        const nextPageToken = response.data.next_page_token || undefined;
+        if (!nextPageToken || seenPageTokens.has(nextPageToken)) break;
+        seenPageTokens.add(nextPageToken);
+        pageToken = nextPageToken;
+      } while (pageToken);
+
+      if (localTagsRequestSeqRef.current === requestSeq) {
+        setLocalTags(
+          Array.from(nextTags).sort((left, right) =>
+            left.localeCompare(right, "zh-CN"),
+          ),
+        );
+      }
+    } catch {
+      if (localTagsRequestSeqRef.current === requestSeq) {
+        setLocalTags([]);
+      }
+    }
   }
 
   const handleSuccess = (
@@ -927,18 +1356,24 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
   };
 
   function getTableData(page = 1, pageSize = pagination.pageSize) {
-    const values = form.getFieldsValue();
-
     if (sourceCategory === "official") {
       setLoading(false);
       return;
     }
 
     if (sourceCategory === "cloudArchive") {
-      void loadCloudSources(page, pageSize || 10, values.keyword || "");
+      void loadCloudSources(
+        page,
+        pageSize || 10,
+        mineSearch,
+        mineSort,
+        mineCloudSource,
+      );
       return;
     }
 
+    const requestSeq = mineTableRequestSeqRef.current + 1;
+    mineTableRequestSeqRef.current = requestSeq;
     const newPagination = {
       ...pagination,
       current: page,
@@ -958,12 +1393,14 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
       .datasetServiceListDatasets({
         pageToken,
         pageSize: pageSize,
-        keyword: values.keyword,
-        tags: values?.tags && values.tags !== ALL_TAGS ? [values.tags] : [],
+        orderBy: getKnowledgeMineOrderBy(mineSort),
+        keyword: mineSearch.trim() || undefined,
+        tags: mineLocalTag !== ALL_TAGS ? [mineLocalTag] : [],
       }, {
         params: { source: "manual" },
       })
       .then((res) => {
+        if (mineTableRequestSeqRef.current !== requestSeq) return;
         handleSuccess(
           (res.data.datasets as unknown as Dataset[]) || [],
           res.data.total_size || 0,
@@ -971,10 +1408,14 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
         );
       })
       .catch(() => {
-        initData();
+        if (mineTableRequestSeqRef.current !== requestSeq) return;
+        setDataSource([]);
+        setPagination({ ...newPagination, total: 0 });
       })
       .finally(() => {
-        setLoading(false);
+        if (mineTableRequestSeqRef.current === requestSeq) {
+          setLoading(false);
+        }
       });
   }
 
@@ -983,7 +1424,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
       .datasetServiceDeleteDataset({ dataset: id })
       .then(() => {
         message.success(t("knowledge.deleteSuccess"));
-        getTags();
+        void getLocalTags();
         getTableData();
       });
   }
@@ -999,7 +1440,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
           })
           .then(() => {
             message.success(t("knowledge.editSuccess"));
-            getTags();
+            void getLocalTags();
             getTableData();
           });
       }
@@ -1013,7 +1454,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
               ? t("knowledge.editSuccess")
               : t("knowledge.createSuccess"),
           );
-          getTags();
+          void getLocalTags();
           getTableData();
         });
     } finally {
@@ -1029,14 +1470,20 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
     getTableData(newPagination.current, newPagination.pageSize);
   }
 
-  const officialUpdateCount = OFFICIAL_KNOWLEDGE_BASES.filter(
-    (item) => officialStatus[item.id]?.installed && officialStatus[item.id]?.updateAvailable,
-  ).length;
-
   return (
     <div className="knowledge-list-page">
       <div className="knowledge-page-header">
         <div>
+          {new URLSearchParams(location.search).get("from") === "settings-knowledge" ? (
+            <Button
+              className="knowledge-settings-return"
+              icon={<ArrowLeftOutlined />}
+              onClick={() => navigate("/settings?section=knowledge")}
+              type="text"
+            >
+              {t("knowledge.backToKnowledgeSettings")}
+            </Button>
+          ) : null}
           <h1>{t("layout.knowledgeBase")}</h1>
           <p>{t("knowledge.pageDescription")}</p>
         </div>
@@ -1055,7 +1502,10 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
               </span>
             </Tooltip>
           ) : null}
-          <Button icon={<HistoryOutlined />} onClick={() => navigate(taskCenterPath)}>
+          <Button
+            icon={<HistoryOutlined />}
+            onClick={() => setMarketTaskModalOpen(true)}
+          >
             {t("knowledge.backgroundTasks")}
           </Button>
         </div>
@@ -1122,7 +1572,10 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
           role="tab"
           className={activeView === "mine" ? "is-active" : ""}
           aria-selected={activeView === "mine"}
-          onClick={() => setActiveView("mine")}
+          onClick={() => {
+            setMineFilterOpen(false);
+            setActiveView("mine");
+          }}
         >
           <span className="knowledge-view-tab-icon"><DatabaseOutlined /></span>
           <span><strong>{t("knowledge.myKnowledge")}</strong><small>{t("knowledge.myKnowledgeDescription")}</small></span>
@@ -1132,7 +1585,10 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
           role="tab"
           className={activeView === "square" ? "is-active" : ""}
           aria-selected={activeView === "square"}
-          onClick={() => setActiveView("square")}
+          onClick={() => {
+            setMineFilterOpen(false);
+            setActiveView("square");
+          }}
         >
           <span className="knowledge-view-tab-icon"><AppstoreOutlined /></span>
           <span><strong>{t("knowledge.knowledgeSquare")}</strong><small>{t("knowledge.knowledgeSquareDescription")}</small></span>
@@ -1140,24 +1596,17 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
       </div>
 
       {activeView === "square" ? (
-        <Spin spinning={knowledgeSquareLoading}>
-          {knowledgeSquareError ? (
-            <Alert
-              showIcon
-              type="error"
-              message={t("common.requestFailed")}
-              action={<Button onClick={() => void refreshKnowledgeSquareSource()}>{t("common.retry")}</Button>}
-            />
-          ) : null}
-          <KnowledgeSquare
-            items={knowledgeSquareItems}
-            statusMap={isCloudKnowledgeSquare ? cloudKnowledgeStatus : officialStatus}
-            onInstall={handleOfficialInstall}
-            onUpdate={handleOfficialUpdate}
-            onOpen={handleOfficialOpen}
-            onQuery={handleOfficialQuery}
-          />
-        </Spin>
+        <KnowledgeSquare
+          items={officialItems}
+          domains={officialDomains}
+          loading={officialLoading}
+          progressByItem={marketProgress}
+          onInstall={handleOfficialInstall}
+          onUpdate={handleOfficialUpdate}
+          onOpen={handleOfficialOpen}
+          onQuery={handleOfficialQuery}
+          onLoadDetail={handleOfficialLoadDetail}
+        />
       ) : (
         <div className="knowledge-mine-view">
           <div className="knowledge-source-tabs" role="tablist" aria-label={t("knowledge.sourceCategory")}>
@@ -1173,11 +1622,9 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
                 className={sourceCategory === value ? "is-active" : ""}
                 aria-selected={sourceCategory === value}
                 onClick={() => {
-                  form.resetFields(["keyword", "tags"]);
-                  form.setFieldsValue({ tags: ALL_TAGS });
-                  setOfficialSearch("");
+                  setMineFilterOpen(false);
+                  if (value !== sourceCategory && value !== "official") initData();
                   setSourceCategory(value);
-                  if (value !== "official") initData();
                 }}
               >
                 {label}
@@ -1185,70 +1632,70 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
             ))}
           </div>
 
-          <Form
+          <div
             className={`knowledge-mine-toolbar ${isOfficialView ? "has-update-all" : ""}`}
-            form={form}
           >
-            <Form.Item name="keyword" noStyle>
-              <Input.Search
-                allowClear
-                prefix={<SearchOutlined />}
-                placeholder={
-                  isCloudArchiveView
-                    ? t("admin.dataSourceAssetSearchPlaceholder")
-                    : t("knowledge.squareSearchPlaceholder")
-                }
-                onChange={(event: ChangeEvent<HTMLInputElement>) => {
-                  if (isOfficialView) setOfficialSearch(event.target.value);
-                }}
-                onSearch={(value: string) => {
-                  form.setFieldsValue({ keyword: value ?? "" });
-                  if (isOfficialView) setOfficialSearch(value || "");
-                  else getTableData();
-                }}
-              />
-            </Form.Item>
+            <Input.Search
+              allowClear
+              prefix={<SearchOutlined />}
+              value={mineSearch}
+              placeholder={
+                isCloudArchiveView
+                  ? t("admin.dataSourceAssetSearchPlaceholder")
+                  : t("knowledge.squareSearchPlaceholder")
+              }
+              onFocus={() => setMineFilterOpen(false)}
+              onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                setMineSearch(event.target.value)
+              }
+            />
             {isOfficialView ? (
-              <Button type="primary" onClick={handleUpdateAllOfficial}>
+              <Button
+                type="primary"
+                disabled={
+                  !officialItems.some((item) => item.installed) ||
+                  Object.values(trackedMarketJobs).some(
+                    (job) => job.jobType === "updateAll",
+                  )
+                }
+                onClick={handleUpdateAllOfficial}
+              >
                 {t("knowledge.updateAll")}
-                {officialUpdateCount > 0 ? ` (${officialUpdateCount})` : ""}
               </Button>
             ) : null}
-            {sourceCategory === "local" ? (
-              <Form.Item name="tags" noStyle initialValue={ALL_TAGS}>
-                <Select
-                  suffixIcon={<DownOutlined />}
-                  options={tags.map((tag) => ({
-                    label: tag === ALL_TAGS ? t("knowledge.filterAndSort") : tag,
-                    value: tag,
-                  }))}
-                  onChange={() => getTableData()}
-                />
-              </Form.Item>
-            ) : (
-              <Select
-                value={mineSort}
-                suffixIcon={<DownOutlined />}
-                options={[
-                  { value: "updated", label: t("knowledge.sortByUpdated") },
-                  { value: "name", label: t("knowledge.sortByName") },
-                  { value: "docs", label: t("knowledge.sortByDocumentCount") },
-                ]}
-                onChange={setMineSort}
-              />
-            )}
+            <KnowledgeMineFilterPopover
+              t={t}
+              tags={isOfficialView ? officialFilterTags : localTags}
+              primaryFilter={isCloudArchiveView ? "cloudSource" : "tags"}
+              open={mineFilterOpen}
+              selectedTag={
+                isOfficialView ? mineOfficialTag : mineLocalTag
+              }
+              selectedSort={mineSort}
+              selectedCloudSource={mineCloudSource}
+              onOpenChange={setMineFilterOpen}
+              onTagChange={(tag) => {
+                if (isOfficialView) setMineOfficialTag(tag);
+                else setMineLocalTag(tag);
+              }}
+              onSortChange={setMineSort}
+              onCloudSourceChange={setMineCloudSource}
+            />
             <Button
               onClick={() => {
-                form.resetFields(["keyword", "tags"]);
-                form.setFieldsValue({ tags: ALL_TAGS });
-                setOfficialSearch("");
-                setMineSort("updated");
-                if (!isOfficialView) getTableData(1, pagination.pageSize);
+                if (sourceCategory !== "local") initData();
+                setMineSearch("");
+                setMineLocalTag(ALL_TAGS);
+                setMineOfficialTag(ALL_TAGS);
+                setMineSort("all");
+                setMineCloudSource("all");
+                setSourceCategory("local");
+                setMineFilterOpen(false);
               }}
             >
               {t("common.reset")}
             </Button>
-          </Form>
+          </div>
 
           <ListPageTable
             rootClassName={`knowledge-mine-table ${isCloudArchiveView ? "data-source-asset-table" : ""}`}
@@ -1260,7 +1707,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
                   ? officialColumns
                   : columns) as ColumnsType<any>
             }
-            loading={isOfficialView ? false : loading}
+            loading={isOfficialView ? officialLoading || officialSortLoading : loading}
             dataSource={
               isCloudArchiveView
                 ? cloudSources
@@ -1282,7 +1729,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
             onRow={(record: any) => ({
               onClick: () => {
                 if (isOfficialView) {
-                  handleOfficialOpen();
+                  handleOfficialOpen(record as OfficialKnowledgeBase);
                   return;
                 }
                 if (!isCloudArchiveView && "dataset_id" in record && record.dataset_id) {
@@ -1304,6 +1751,11 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
         onCreate={onUpdate}
       />
       <SyncKnowledgeBaseCreationFlow vm={syncCreateVm} hideProviderModal />
+      <KnowledgeMarketTaskModal
+        open={marketTaskModalOpen}
+        refreshKey={Object.keys(trackedMarketJobs).sort().join(",")}
+        onClose={() => setMarketTaskModalOpen(false)}
+      />
     </div>
   );
 };

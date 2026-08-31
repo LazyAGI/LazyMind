@@ -4,18 +4,7 @@ import "./index.scss";
 
 function Home() {
   useEffect(() => {
-    let secondFrame: number | undefined;
-    const firstFrame = window.requestAnimationFrame(() => {
-      secondFrame = window.requestAnimationFrame(() => {
-        window.lazymindDesktop?.notifyAppReady?.();
-      });
-    });
-    return () => {
-      window.cancelAnimationFrame(firstFrame);
-      if (secondFrame !== undefined) {
-        window.cancelAnimationFrame(secondFrame);
-      }
-    };
+    window.lazymindDesktop?.notifyAppReady?.();
   }, []);
 
   return (

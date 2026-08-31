@@ -18,18 +18,18 @@ func (d *FakeZipDownloader) Fail(url string) {
 	d.fails[url] = true
 }
 
-func (d *FakeZipDownloader) Download(ctx context.Context, url string) (string, error) {
+func (d *FakeZipDownloader) Download(ctx context.Context, url string) (DownloadedZip, error) {
 	select {
 	case <-ctx.Done():
-		return "", ctx.Err()
+		return DownloadedZip{}, ctx.Err()
 	default:
 	}
 	if d.fails[url] {
-		return "", fmt.Errorf("download failed: %s", url)
+		return DownloadedZip{}, fmt.Errorf("download failed: %s", url)
 	}
 	path, ok := d.paths[url]
 	if !ok {
-		return "", fmt.Errorf("download not found: %s", url)
+		return DownloadedZip{}, fmt.Errorf("download not found: %s", url)
 	}
-	return path, nil
+	return DownloadedZip{Path: path}, nil
 }

@@ -9,10 +9,30 @@ import (
 	"testing"
 )
 
+func TestLazyLLMVersionUsesRepositoryPin(t *testing.T) {
+	t.Setenv("LAZYMIND_LAZYLLM_VERSION", "")
+	repo := t.TempDir()
+	const pinnedVersion = "9.8.7a6"
+	if err := os.WriteFile(filepath.Join(repo, "LAZYLLM_VERSION"), []byte(pinnedVersion+"\n"), 0o644); err != nil {
+		t.Fatalf("write LazyLLM version: %v", err)
+	}
+	version, err := lazyLLMVersion(repo)
+	if err != nil {
+		t.Fatalf("read LazyLLM version: %v", err)
+	}
+	if version != pinnedVersion {
+		t.Fatalf("LazyLLM version = %q, want %q", version, pinnedVersion)
+	}
+}
+
 func TestAlgorithmPreparePythonPinsSetuptoolsForLocalVenv(t *testing.T) {
 	installFakeUVOnPath(t)
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)
+	const pinnedVersion = "9.8.7a6"
+	if err := os.WriteFile(filepath.Join(repo, "LAZYLLM_VERSION"), []byte(pinnedVersion+"\n"), 0o644); err != nil {
+		t.Fatalf("write LazyLLM version: %v", err)
+	}
 	if err := os.MkdirAll(filepath.Join(repo, "algorithm", "lazyllm", "lazyllm"), 0o755); err != nil {
 		t.Fatalf("mkdir lazyllm submodule fixture: %v", err)
 	}
@@ -63,7 +83,7 @@ func TestAlgorithmPreparePythonPinsSetuptoolsForLocalVenv(t *testing.T) {
 			return CommandResult{}, nil
 		},
 		func(cmd Command) (CommandResult, error) {
-			assertCommand(t, cmd, "uv", "pip", "install", "--python", paths.AlgorithmPython, "--link-mode", "copy", "--strict", "lazyllm==1.2.2")
+			assertCommand(t, cmd, "uv", "pip", "install", "--python", paths.AlgorithmPython, "--link-mode", "copy", "--strict", "lazyllm=="+pinnedVersion)
 			return CommandResult{}, nil
 		},
 		func(cmd Command) (CommandResult, error) {
@@ -164,6 +184,22 @@ func TestAlgorithmServiceEnvTrustedLocalMode(t *testing.T) {
 			assertEnvContains(t, env, tc.want)
 		})
 	}
+}
+
+func TestAlgorithmServiceEnvDoesNotForceEditablePPT(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+
+	env := algorithmServiceEnv(cfg, paths, chatProcessName)
+
+	assertEnvNotContains(t, env, "LAZYMIND_OUTPUT_EDITABLE_PPT=")
+	assertEnvContains(t, env, "LAZYMIND_PPT_EXPORT_CLI="+filepath.Join(paths.RepoRoot, "workflows", "ppt-workflow", "runtime", "scripts", "export_pptx", "html_to_pptx.mjs"))
+	assertEnvContains(t, env, "LAZYMIND_PPT_EXPORT_DEPS="+filepath.Join(paths.RuntimeRoot, "deps", "editable-ppt"))
+	assertEnvContains(t, env, "PLAYWRIGHT_BROWSERS_PATH="+filepath.Join(paths.RuntimeRoot, "deps", "editable-ppt", "browsers"))
 }
 
 func TestDesktopAlgorithmRegisterPolicyForInstallVersion(t *testing.T) {
@@ -272,6 +308,35 @@ func TestRAGServicesDoNotWaitBeforeStarting(t *testing.T) {
 			t.Fatalf("%s dependencies: %v", service, err)
 		}
 	}
+}
+
+func TestInstallerWarmupDoesNotWaitForExcludedProcessorWorker(t *testing.T) {
+	normal := ragReadinessChecks(RuntimeConfig{})
+	warmup := ragReadinessChecks(RuntimeConfig{MaintenanceMode: installerWarmupMaintenanceMode})
+
+	if !hasRAGReadinessLabel(normal, "processor-worker") {
+		t.Fatal("normal runtime must wait for processor-worker")
+	}
+	if hasRAGReadinessLabel(warmup, "processor-worker") {
+		t.Fatal("installer warmup must not wait for excluded processor-worker")
+	}
+}
+
+func TestWarmupChatCapabilityDoesNotWaitForProcessorWorker(t *testing.T) {
+	t.Setenv(installerWarmupSkipProcessorWorkerEnvVar, "true")
+	checks := ragReadinessChecks(RuntimeConfig{})
+	if hasRAGReadinessLabel(checks, "processor-worker") {
+		t.Fatal("warmup Chat capability must skip processor-worker readiness")
+	}
+}
+
+func hasRAGReadinessLabel(checks []ragReadinessCheck, label string) bool {
+	for _, check := range checks {
+		if check.label == label {
+			return true
+		}
+	}
+	return false
 }
 
 func TestAlgorithmServiceEnvUsesRuntimeDataPaths(t *testing.T) {

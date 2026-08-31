@@ -1,4 +1,4 @@
-import { Button, Input, Popover, Tooltip } from "antd";
+import { Button, Input, message, Popover, Tooltip } from "antd";
 import {
   SearchOutlined,
   CheckOutlined,
@@ -68,9 +68,9 @@ const ChatSelector = forwardRef<ChatSelectorImperativeProps, ChatSelectorProps>(
   const buildKnowledgeDisabledReason = (): ReactNode => {
     const goConfig = (
       <a
-        href="/model-providers"
+        href="/settings?section=models"
         style={{ marginLeft: 6, color: '#fff', textDecoration: 'underline' }}
-        onClick={(e: MouseEvent<HTMLAnchorElement>) => { e.preventDefault(); navigate('/model-providers'); }}
+        onClick={(e: MouseEvent<HTMLAnchorElement>) => { e.preventDefault(); navigate('/settings?section=models'); }}
       >
         {t("knowledge.goToConfig")}
       </a>
@@ -150,11 +150,14 @@ const ChatSelector = forwardRef<ChatSelectorImperativeProps, ChatSelectorProps>(
 
     useImperativeHandle(ref, () => ({
       open: () => {
-        if (isSelectorDisabled) return;
+        if (isSelectorDisabled) {
+          message.warning(selectorDisabledReason ?? t("chat.knowledgeBase"));
+          return;
+        }
         setOpen(true);
       },
       close: () => setOpen(false),
-    }), [isSelectorDisabled]);
+    }), [isSelectorDisabled, selectorDisabledReason, t]);
 
     useEffect(() => {
       getKnowledgeBaseList();

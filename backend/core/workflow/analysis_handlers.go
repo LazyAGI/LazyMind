@@ -42,7 +42,7 @@ func GetWorkflowRepairRun(w http.ResponseWriter, r *http.Request) {
 
 func PreviewWorkflowRepair(w http.ResponseWriter, r *http.Request) {
 	var draft orm.WorkflowDraft
-	if store.DB().Where("id=? AND created_by=?", common.PathVar(r, "draft_id"), common.UserID(r)).First(&draft).Error != nil {
+	if store.DB().Where("id=? AND created_by=? AND deleted_at IS NULL", common.PathVar(r, "draft_id"), common.UserID(r)).First(&draft).Error != nil {
 		common.ReplyErr(w, "not found", http.StatusNotFound)
 		return
 	}
@@ -88,7 +88,7 @@ func ConfirmWorkflowWorkflow(w http.ResponseWriter, r *http.Request) {
 	}
 	db := store.DB()
 	var draft orm.WorkflowDraft
-	if db.Where("id=? AND created_by=?", draftID, userID).First(&draft).Error != nil {
+	if db.Where("id=? AND created_by=? AND deleted_at IS NULL", draftID, userID).First(&draft).Error != nil {
 		common.ReplyErr(w, "not found", http.StatusNotFound)
 		return
 	}

@@ -51,10 +51,29 @@ type groupModelListResponse struct {
 }
 
 func compatibleDBModelTypes(modelType string) []string {
-	if modelType == "cross_modal_embed" {
+	if modelType == EvoModelKey {
+		return []string{"llm", "vlm"}
+	}
+	switch modelType {
+	case "embed", "embedding", "embed_main":
+		return []string{"embed", "embedding", "embed_main"}
+	case "cross_modal_embed", "multimodal_embedding", "embed_image":
 		return []string{"cross_modal_embed", "multimodal_embedding", "embed_image"}
+	case "vlm", "VLM":
+		return []string{"vlm", "VLM"}
 	}
 	return []string{modelType}
+}
+
+func normalizeGroupModelType(modelType string) string {
+	switch modelType {
+	case "embedding", "embed_main":
+		return "embed"
+	case "VLM":
+		return "vlm"
+	default:
+		return modelType
+	}
 }
 
 // AddGroupModel inserts a user-defined model row under a connection group (custom model name and model_type).
@@ -84,7 +103,7 @@ func AddGroupModel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := strings.TrimSpace(req.Name)
-	modelType := strings.TrimSpace(req.ModelType)
+	modelType := normalizeGroupModelType(strings.TrimSpace(req.ModelType))
 	if name == "" || modelType == "" {
 		common.ReplyErr(w, "name and model_type are required", http.StatusBadRequest)
 		return
@@ -121,40 +140,69 @@ func AddGroupModel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var dupUser int64
-	if err := db.WithContext(r.Context()).Model(&orm.UserModelProviderGroupModel{}).
+	var row orm.UserModelProviderGroupModel
+	err = db.WithContext(r.Context()).
 		Where(
-			"user_model_provider_group_id = ? AND create_user_id = ? AND deleted_at IS NULL AND name = ?",
+			"user_model_provider_group_id = ? AND create_user_id = ? AND name = ?",
 			group.ID, userID, name,
-		).Count(&dupUser).Error; err != nil {
+		).
+		Take(&row).Error
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		common.ReplyErr(w, "check existing model failed", http.StatusInternalServerError)
 		return
 	}
-	if dupUser > 0 {
+	if err == nil && row.DeletedAt == nil {
 		common.ReplyErr(w, "model name already exists in this group", http.StatusConflict)
 		return
 	}
 
 	now := time.Now()
-	row := orm.UserModelProviderGroupModel{
-		ID:                       common.GenerateID(),
-		UserModelProviderID:      parent.ID,
-		UserModelProviderGroupID: group.ID,
-		ProviderName:             parent.Name,
-		Name:                     name,
-		ModelType:                modelType,
-		IsDefault:                false,
-		BaseModel: orm.BaseModel{
-			CreateUserID:   userID,
-			CreateUserName: userName,
-			CreatedAt:      now,
-			UpdatedAt:      now,
-			DeletedAt:      nil,
-		},
-	}
-	if err := db.WithContext(r.Context()).Create(&row).Error; err != nil {
-		common.ReplyErr(w, "create model failed", http.StatusInternalServerError)
-		return
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		row = orm.UserModelProviderGroupModel{
+			ID:                       common.GenerateID(),
+			UserModelProviderID:      parent.ID,
+			UserModelProviderGroupID: group.ID,
+			ProviderName:             parent.Name,
+			Name:                     name,
+			ModelType:                modelType,
+			IsDefault:                false,
+			BaseModel: orm.BaseModel{
+				CreateUserID:   userID,
+				CreateUserName: userName,
+				CreatedAt:      now,
+				UpdatedAt:      now,
+				DeletedAt:      nil,
+			},
+		}
+		if err := db.WithContext(r.Context()).Create(&row).Error; err != nil {
+			common.ReplyErr(w, "create model failed", http.StatusInternalServerError)
+			return
+		}
+	} else {
+		result := db.WithContext(r.Context()).Model(&orm.UserModelProviderGroupModel{}).
+			Where("id = ? AND create_user_id = ? AND deleted_at IS NOT NULL", row.ID, userID).
+			Updates(map[string]interface{}{
+				"user_model_provider_id": parent.ID,
+				"provider_name":          parent.Name,
+				"model_type":             modelType,
+				"is_default":             false,
+				"updated_at":             now,
+				"deleted_at":             nil,
+			})
+		if result.Error != nil {
+			common.ReplyErr(w, "restore model failed", http.StatusInternalServerError)
+			return
+		}
+		if result.RowsAffected != 1 {
+			common.ReplyErr(w, "model name already exists in this group", http.StatusConflict)
+			return
+		}
+		row.UserModelProviderID = parent.ID
+		row.ProviderName = parent.Name
+		row.ModelType = modelType
+		row.IsDefault = false
+		row.UpdatedAt = now
+		row.DeletedAt = nil
 	}
 
 	common.ReplyOK(w, addGroupModelResponse{
@@ -254,8 +302,8 @@ func ListGroupModels(w http.ResponseWriter, r *http.Request) {
 	common.ReplyOK(w, groupModelListResponse{Models: out})
 }
 
-// ListUserModelsByModelType lists the current user's models across all user_model_providers,
-// filtered by required query model_type. Response shape matches ListGroupModels.
+// ListUserModelsByModelType lists the current user's models across all user_model_providers.
+// When model_type is provided, results are filtered to that type. Response shape matches ListGroupModels.
 func ListUserModelsByModelType(w http.ResponseWriter, r *http.Request) {
 	db := store.DB()
 	if db == nil {
@@ -269,21 +317,20 @@ func ListUserModelsByModelType(w http.ResponseWriter, r *http.Request) {
 	}
 
 	modelType := strings.TrimSpace(r.URL.Query().Get("model_type"))
-	if modelType == "" {
-		common.ReplyErr(w, "model_type is required", http.StatusBadRequest)
-		return
-	}
 	keyword := strings.TrimSpace(r.URL.Query().Get("keyword"))
-
-	// Translate runtime_models.yaml role key (e.g. "evo_llm") to the lazyllm
-	// technical type (e.g. "llm") stored in user_model_provider_group_models.
-	dbModelType := resolveModelType(r.Context(), modelType)
-	dbModelTypes := compatibleDBModelTypes(dbModelType)
-
 	q := db.WithContext(r.Context()).
 		Joins("JOIN user_model_providers ON user_model_providers.id = user_model_provider_group_models.user_model_provider_id AND user_model_providers.deleted_at IS NULL AND user_model_providers.capabilities LIKE '%has_models%'").
 		Joins("JOIN user_model_provider_groups ON user_model_provider_groups.id = user_model_provider_group_models.user_model_provider_group_id AND user_model_provider_groups.create_user_id = user_model_provider_group_models.create_user_id AND user_model_provider_groups.deleted_at IS NULL AND user_model_provider_groups.is_verified = ?", true).
-		Where("user_model_provider_group_models.create_user_id = ? AND user_model_provider_group_models.deleted_at IS NULL AND user_model_provider_group_models.model_type IN ?", userID, dbModelTypes)
+		Where("user_model_provider_group_models.create_user_id = ? AND user_model_provider_group_models.deleted_at IS NULL", userID)
+	if modelType != "" {
+		// Translate runtime_models.yaml role key (e.g. "evo_llm") to the lazyllm
+		// technical type (e.g. "llm") stored in user_model_provider_group_models.
+		dbModelType := modelType
+		if modelType != EvoModelKey {
+			dbModelType = resolveModelType(r.Context(), modelType)
+		}
+		q = q.Where("user_model_provider_group_models.model_type IN ?", compatibleDBModelTypes(dbModelType))
+	}
 	if keyword != "" {
 		like := "%" + keyword + "%"
 		q = q.Where(
@@ -337,6 +384,11 @@ func ListUserModelsByModelType(w http.ResponseWriter, r *http.Request) {
 		if !ok || !grp.isVerified {
 			continue
 		}
+		if modelType == EvoModelKey {
+			if _, eligible := ResolveOpenCodeModel(m.ProviderName, m.Name, grp.baseURL, m.ModelType, m.IsDefault); !eligible {
+				continue
+			}
+		}
 		out = append(out, groupModelListItem{
 			ID:                       m.ID,
 			UserModelProviderID:      m.UserModelProviderID,
@@ -347,7 +399,7 @@ func ListUserModelsByModelType(w http.ResponseWriter, r *http.Request) {
 			GroupName:                grp.name,
 			BaseURL:                  grp.baseURL,
 			IsDefault:                m.IsDefault,
-			IsEditable:               strings.EqualFold(modelType, "image_editing"),
+			IsEditable:               strings.EqualFold(m.ModelType, "image_editing"),
 			MaxInputTokens:           m.MaxInputTokens,
 		})
 	}

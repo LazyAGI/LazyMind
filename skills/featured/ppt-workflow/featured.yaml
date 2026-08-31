@@ -1,0 +1,70 @@
+schema_version: 2
+id: ppt-workflow
+type: workflow
+version: 1.1.0
+status: published
+default_locale: zh-CN
+provider: LazyMind
+
+workflow:
+  workflow_ref: builtin:ppt-workflow
+
+placement:
+  home: true
+  gallery: true
+  order: 23
+
+classification:
+  category: 内容创作
+  tags:
+    - 演示文稿
+    - HTML 幻灯片
+    - 资料检索
+    - 演讲备注
+
+assets:
+  cover:
+    file: assets/cover.png
+    role: cover
+  lol_ppt_preview:
+    file: assets/AI-PPT-demo.html
+    role: result
+
+presentation:
+  card:
+    title: AI PPT 规划与生成
+    description: 以四页赛博朋克风格《英雄联盟》介绍为例，展示需求分析、素材收集、大纲编辑与幻灯片生成
+    output_type: slides
+    output_label: 交互式 PPT 案例
+    cover_asset: cover
+    result_summary: 查看四页《英雄联盟》赛博朋克幻灯片，体验翻页、元素修改、页面排序和演讲备注
+  detail:
+    title: 从演示目标到完整幻灯片
+    description: 以四页赛博朋克风格《英雄联盟》介绍为例，完整展示需求分析、素材收集、逐页大纲和可交互幻灯片；默认直接打开最终幻灯片，可继续翻页、编辑、排序并查看演讲备注。
+    attachment_hint: 演示主题、页数、目标受众和视觉风格（可选）
+
+tasks:
+  - id: cyberpunk-lol-deck
+    selector:
+      title: 英雄联盟赛博朋克 PPT
+      description: 生成四页介绍《英雄联盟》的赛博朋克风格幻灯片
+      output_label: 交互式幻灯片
+    launch:
+      prompt_short: "生成四页 赛博朋克风格的 ppt 介绍英雄联盟这款游戏"
+      prompt: "生成四页 赛博朋克风格的 ppt 介绍英雄联盟这款游戏"
+    replay:
+      steps:
+        - title: 分析演示需求
+          description: 明确四页篇幅、游戏玩家受众、内容重点和赛博朋克视觉语言
+        - title: 收集游戏视觉素材
+          description: 整理《英雄联盟》英雄、峡谷与电竞相关图片，建立可复用素材库
+        - title: 编排逐页大纲
+          description: 组织游戏概览、英雄阵容、召唤师峡谷和全球电竞四页叙事
+        - title: 生成交互式幻灯片
+          description: 绘制四页霓虹赛博朋克页面，并加入翻页、编辑、排序和演讲备注
+    result:
+      template: html_preview_v1
+      eyebrow: AI PPT 案例
+      title: 英雄联盟赛博朋克四页幻灯片
+      summary: 从需求分析、素材收集和逐页大纲进入最终幻灯片，默认展示第 4 步并保留完整交互。
+      html_asset: lol_ppt_preview

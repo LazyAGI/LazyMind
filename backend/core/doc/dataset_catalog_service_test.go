@@ -64,6 +64,74 @@ func TestDatasetCatalogServiceListFiltersStatsAndPaginates(t *testing.T) {
 	}
 }
 
+func TestDatasetCatalogServiceListDatasetUsageOrders(t *testing.T) {
+	db := newDocumentTestDB(t)
+	if err := db.AutoMigrate(&orm.DatasetUserState{}); err != nil {
+		t.Fatalf("auto migrate dataset_user_states: %v", err)
+	}
+	installDatasetCatalogScanTransport(t)
+	service := mustDatasetCatalogService(t, db.DB)
+
+	base := time.Date(2026, 8, 21, 10, 0, 0, 0, time.UTC)
+	seedDatasetCatalogDataset(t, db, "ds-a", "user-1", "A", "", nil, base)
+	seedDatasetCatalogDataset(t, db, "ds-b", "user-1", "B", "", nil, base.Add(-time.Hour))
+	seedDatasetCatalogDataset(t, db, "ds-c", "user-1", "C", "", nil, base.Add(-2*time.Hour))
+
+	now := base.Add(-5 * time.Minute)
+	createDatasetUserState(t, db, "ds-a", "user-1", 1, now)
+	createDatasetUserState(t, db, "ds-b", "user-1", 5, base.Add(-30*time.Minute))
+	createDatasetUserState(t, db, "ds-c", "user-1", 10, base.Add(-10*time.Minute))
+
+	latest, err := service.ListDatasets(context.Background(), DatasetListRequest{UserID: "user-1", OrderBy: "latest_updated", Limit: 10})
+	if err != nil {
+		t.Fatalf("latest_updated returned error: %v", err)
+	}
+	if got := datasetIDs(latest.Datasets); fmt.Sprint(got) != fmt.Sprint([]string{"ds-a", "ds-b", "ds-c"}) {
+		t.Fatalf("latest_updated order = %v, want [ds-a ds-b ds-c]", got)
+	}
+
+	most, err := service.ListDatasets(context.Background(), DatasetListRequest{UserID: "user-1", OrderBy: "most_used", Limit: 10})
+	if err != nil {
+		t.Fatalf("most_used returned error: %v", err)
+	}
+	if got := datasetIDs(most.Datasets); fmt.Sprint(got) != fmt.Sprint([]string{"ds-c", "ds-b", "ds-a"}) {
+		t.Fatalf("most_used order = %v, want [ds-c ds-b ds-a]", got)
+	}
+
+	recent, err := service.ListDatasets(context.Background(), DatasetListRequest{UserID: "user-1", OrderBy: "recent_used", Limit: 10})
+	if err != nil {
+		t.Fatalf("recent_used returned error: %v", err)
+	}
+	if got := datasetIDs(recent.Datasets); fmt.Sprint(got) != fmt.Sprint([]string{"ds-a", "ds-c", "ds-b"}) {
+		t.Fatalf("recent_used order = %v, want [ds-a ds-c ds-b]", got)
+	}
+}
+
+func datasetIDs(datasets []Dataset) []string {
+	out := make([]string, 0, len(datasets))
+	for _, ds := range datasets {
+		out = append(out, ds.DatasetID)
+	}
+	return out
+}
+
+func createDatasetUserState(t *testing.T, db *orm.DB, datasetID, userID string, usageCount int64, lastUsedAt time.Time) {
+	t.Helper()
+	state := orm.DatasetUserState{
+		ID:             "dus-" + datasetID,
+		DatasetID:      datasetID,
+		UsageCount:     usageCount,
+		LastUsedAt:     &lastUsedAt,
+		CreateUserID:   userID,
+		CreateUserName: userID,
+		CreatedAt:      lastUsedAt,
+		UpdatedAt:      lastUsedAt,
+	}
+	if err := db.Create(&state).Error; err != nil {
+		t.Fatalf("create dataset user state: %v", err)
+	}
+}
+
 func TestDatasetCatalogServiceListScansPastInvisibleFirstBatch(t *testing.T) {
 	db := newDocumentTestDB(t)
 	installDatasetCatalogScanTransport(t)

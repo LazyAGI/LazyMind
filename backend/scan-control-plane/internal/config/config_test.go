@@ -31,6 +31,8 @@ func TestLoadConfigFromEnv(t *testing.T) {
 	t.Setenv("LAZYMIND_SCAN_CONTROL_PLANE_AGENT_BASE_URL", "http://agent.test")
 	t.Setenv("LAZYMIND_SCAN_CONTROL_PLANE_LOCAL_FS_DEFAULT_AGENT_ID", "agent-default")
 	t.Setenv("LAZYMIND_SCAN_CONTROL_PLANE_LOCAL_FS_PUBLIC_ROOT", "/host/root")
+	t.Setenv("LAZYMIND_SCAN_CONTROL_PLANE_LOCAL_FS_ALLOWED_ROOTS_JSON", `["/host/root","/host/skills"]`)
+	t.Setenv("LAZYMIND_SCAN_CONTROL_PLANE_DYNAMIC_LOCAL_ROOTS", "true")
 	t.Setenv("LAZYMIND_SCAN_CONTROL_PLANE_FEISHU_BASE_URL", "http://feishu.test")
 	t.Setenv("LAZYMIND_SCAN_CONTROL_PLANE_AUTH_SERVICE_BASE_URL", "http://auth.test")
 	t.Setenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN", "internal-token")
@@ -67,6 +69,12 @@ func TestLoadConfigFromEnv(t *testing.T) {
 	}
 	if cfg.LocalFSPublicRoot != "/host/root" {
 		t.Fatalf("config did not read local_fs public root: %+v", cfg)
+	}
+	if len(cfg.LocalFSAllowedRoots) != 2 || cfg.LocalFSAllowedRoots[1] != "/host/skills" {
+		t.Fatalf("config did not read local_fs allowed roots: %+v", cfg)
+	}
+	if !cfg.LocalFSDynamicRoots {
+		t.Fatalf("config did not enable dynamic local roots: %+v", cfg)
 	}
 	if cfg.GenerateTasksMaxObjectsPerRequest != 7 || cfg.ParseWorkerGlobalConcurrency != 9 || cfg.ParseWorkerSourceConcurrency != 3 {
 		t.Fatalf("config did not read limits: %+v", cfg)

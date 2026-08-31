@@ -139,7 +139,8 @@ jobs:
             ~/.pnpm-store
             ~/Library/Caches/electron
             ~/Library/Caches/electron-builder
-          key: macos-arm64-desktop-${{ hashFiles('frontend/pnpm-lock.yaml', 'desktop/electron/pnpm-lock.yaml') }}
+            desktop/cache/history-injection
+          key: macos-arm64-desktop-${{ hashFiles('frontend/pnpm-lock.yaml', 'desktop/electron/pnpm-lock.yaml', 'desktop/history-injection-package.json') }}
           restore-keys: |
             macos-arm64-desktop-
 

@@ -22,6 +22,8 @@ func (m *LocalProxyManager) Run(ctx context.Context, cfg RuntimeConfig, paths Ru
 	if err := paths.EnsureAllDirs(); err != nil {
 		return err
 	}
+	registerLocalProcess(paths, localProxyProcessName, os.Getpid(), []int{cfg.LocalProxy.Port}, []string{paths.LocalProxyBin})
+	defer unregisterLocalProcess(paths, localProxyProcessName, os.Getpid())
 	if err := os.MkdirAll(filepath.Dir(paths.LocalProxyBin), 0o755); err != nil {
 		return err
 	}

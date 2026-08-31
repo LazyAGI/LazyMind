@@ -18,24 +18,30 @@ DEFAULT_CASE_DEADLINE_SECONDS = 300.0
 DEFAULT_FIRST_FRAME_TIMEOUT_SECONDS = 60.0
 
 
-def answer_case(case: Mapping[str, Any], target_config: Mapping[str, Any]) -> dict[str, Any]:
-    failure, kb_id = _preflight(case, target_config)
-    return failure if failure is not None else call_chat_answer(case, target_config, kb_id)
+def answer_case(case: Mapping[str, Any], target_config: Mapping[str, Any],
+                llm_config: Mapping[str, Any]) -> dict[str, Any]:
+    failure, kb_id = _preflight(case, target_config, llm_config)
+    return failure if failure is not None else call_chat_answer(
+        case, target_config, llm_config, kb_id,
+    )
 
 
 async def async_answer_case(case: Mapping[str, Any],
-                            target_config: Mapping[str, Any]
+                            target_config: Mapping[str, Any],
+                            llm_config: Mapping[str, Any],
                             ) -> dict[str, Any]:
-    failure, kb_id = _preflight(case, target_config)
+    failure, kb_id = _preflight(case, target_config, llm_config)
     return failure if failure is not None else await async_call_chat_answer(
         case,
         target_config,
+        llm_config,
         kb_id,
     )
 
 
 def _preflight(case: Mapping[str, Any],
-               target_config: Mapping[str, Any]
+               target_config: Mapping[str, Any],
+               llm_config: Mapping[str, Any],
                ) -> tuple[dict[str, Any] | None, str]:
     kb_id = case_kb_id(case, target_config)
     target = {
@@ -52,13 +58,13 @@ def _preflight(case: Mapping[str, Any],
             'dataset_contract_error',
             'case routing metadata missing kb_id',
         ), kb_id
-    if not _has_role(target_config.get('llm_config'), 'llm'):
+    if not _has_role(llm_config, 'llm'):
         return failed_rag_answer(
             case,
             {},
             target,
             'chat_config_error',
-            'eval.target_config.llm_config.llm missing; '
+            'run_config.llm_config.llm missing; '
             'eval must be launched through core model-config injection',
         ), kb_id
     if not target['router_admin_url']:
@@ -93,9 +99,10 @@ def case_kb_id(case: Mapping[str, Any], target_config: Mapping[str, Any]) -> str
     return str(metadata.get('kb_id') or case_source.get('kb_id') or target_config.get('kb_id') or '').strip()
 
 
-def call_chat_answer(case: Mapping[str, Any], target_config: Mapping[str, Any], kb_id: str) -> dict[str, Any]:
+def call_chat_answer(case: Mapping[str, Any], target_config: Mapping[str, Any],
+                     llm_config: Mapping[str, Any], kb_id: str) -> dict[str, Any]:
     try:
-        result = call_router_chat(_chat_request(case, target_config, kb_id))
+        result = call_router_chat(_chat_request(case, target_config, llm_config, kb_id))
     except (TypeError, ValueError) as exc:
         target = _raw_target(target_config, kb_id)
         return failed_rag_answer(case, {}, target, 'chat_config_error', str(exc))
@@ -104,11 +111,12 @@ def call_chat_answer(case: Mapping[str, Any], target_config: Mapping[str, Any], 
 
 async def async_call_chat_answer(case: Mapping[str, Any],
                                  target_config: Mapping[str, Any],
+                                 llm_config: Mapping[str, Any],
                                  kb_id: str
                                  ) -> dict[str, Any]:
     try:
         result = await async_call_router_chat(
-            _chat_request(case, target_config, kb_id)
+            _chat_request(case, target_config, llm_config, kb_id)
         )
     except (TypeError, ValueError) as exc:
         target = _raw_target(target_config, kb_id)
@@ -117,7 +125,7 @@ async def async_call_chat_answer(case: Mapping[str, Any],
 
 
 def _chat_request(case: Mapping[str, Any], target_config: Mapping[str, Any],
-                  kb_id: str) -> RouterChatRequest:
+                  llm_config: Mapping[str, Any], kb_id: str) -> RouterChatRequest:
     kb_ids = tuple(dict.fromkeys(
         item.strip()
         for item in str(kb_id or '').split(';')
@@ -128,7 +136,6 @@ def _chat_request(case: Mapping[str, Any], target_config: Mapping[str, Any],
     target = _target(target_config, kb_ids, session_id)
     if not kb_ids:
         raise ValueError('case routing metadata missing kb_id')
-    llm_config = target_config.get('llm_config')
     return RouterChatRequest(
         router_chat_url=target['router_chat_url'],
         router_admin_url=target['router_admin_url'],
@@ -138,7 +145,7 @@ def _chat_request(case: Mapping[str, Any], target_config: Mapping[str, Any],
         trace_id=session_id,
         conversation_id=target['conversation_id'],
         user_id=target['user_id'],
-        llm_config=llm_config if isinstance(llm_config, Mapping) else None,
+        llm_config=llm_config,
         connect_timeout_seconds=_number(target_config.get('connect_timeout_seconds'), 5.0),
         write_timeout_seconds=_number(target_config.get('write_timeout_seconds'), 60.0),
         pool_timeout_seconds=_number(target_config.get('pool_timeout_seconds'), 5.0),

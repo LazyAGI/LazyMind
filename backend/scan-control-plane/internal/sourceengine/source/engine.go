@@ -13,6 +13,7 @@ type DefaultEngine struct {
 	repo               SourceRepository
 	registry           connector.ConnectorRegistry
 	core               coreclient.ResourceClient
+	datasetUsage       coreclient.DatasetUsageClient
 	schedule           ScheduleEngine
 	authStatus         AuthConnectionStatusClient
 	clock              func() time.Time
@@ -65,6 +66,12 @@ func WithDefaultDatasetAlgo(algo coreclient.DatasetAlgo) Option {
 func WithAuthConnectionStatusClient(client AuthConnectionStatusClient) Option {
 	return func(e *DefaultEngine) {
 		e.authStatus = client
+	}
+}
+
+func WithDatasetUsageClient(client coreclient.DatasetUsageClient) Option {
+	return func(e *DefaultEngine) {
+		e.datasetUsage = client
 	}
 }
 

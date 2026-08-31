@@ -41,6 +41,11 @@ const FeedbackModal = ({
   }));
   const [selectedReasons, setSelectedReasons] = useState<string[]>([]);
   const [comment, setComment] = useState("");
+  const otherReason = t("chatFeedback.other");
+  const effectiveSelectedReasons =
+    comment.trim() && !selectedReasons.includes(otherReason)
+      ? [...selectedReasons, otherReason]
+      : selectedReasons;
 
   useEffect(() => {
     if (visible) {
@@ -63,14 +68,14 @@ const FeedbackModal = ({
   };
 
   const handleSubmit = () => {
-    if (selectedReasons.length === 0) {
+    if (effectiveSelectedReasons.length === 0) {
       message.error(t("chat.atLeastOneUnsatisfiedReason"));
       return;
     }
     if (submitLoading) {
       return;
     }
-    onSubmit(selectedReasons, comment);
+    onSubmit(effectiveSelectedReasons, comment);
   };
 
   const handleCancel = () => {
@@ -95,7 +100,7 @@ const FeedbackModal = ({
           {feedbackOptions.map(({ id, label }) => (
             <Button
               key={id}
-              type={selectedReasons.includes(label) ? "primary" : "default"}
+              type={effectiveSelectedReasons.includes(label) ? "primary" : "default"}
               onClick={() => handleReasonClick(label)}
               className="feedback-option-btn"
             >

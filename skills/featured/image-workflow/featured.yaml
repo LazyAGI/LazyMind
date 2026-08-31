@@ -1,0 +1,174 @@
+schema_version: 2
+id: image-workflow
+type: workflow
+version: 1.0.0
+status: published
+default_locale: zh-CN
+provider: LazyMind
+
+workflow:
+  workflow_ref: builtin:image-workflow
+
+placement:
+  home: true
+  gallery: true
+  order: 22
+
+classification:
+  category: 设计创意
+  tags: [图片生成, 图片编辑, 动态 GIF, 表情包]
+
+assets:
+  cover:
+    file: assets/cover.png
+    role: cover
+  generate_preview:
+    file: assets/ai-generate.html
+    role: result
+  generate_lifestyle:
+    file: assets/generate-lifestyle.png
+    role: result
+  generate_product:
+    file: assets/generate-product.png
+    role: result
+  generate_cinematic:
+    file: assets/generate-cinematic.png
+    role: result
+  generate_information:
+    file: assets/generate-information.png
+    role: result
+  edit_preview:
+    file: assets/image-edit.html
+    role: result
+  watch_before:
+    file: assets/watch-before.png
+    role: result
+  watch_after:
+    file: assets/watch-after.png
+    role: result
+  sticker_preview:
+    file: assets/sticker-pack.html
+    role: result
+  sticker_good:
+    file: assets/stickers/good.gif
+    role: result
+  sticker_there:
+    file: assets/stickers/there.gif
+    role: result
+  sticker_hard_work:
+    file: assets/stickers/hard-work.gif
+    role: result
+  sticker_thanks_boss:
+    file: assets/stickers/thanks-boss.gif
+    role: result
+  sticker_no_work:
+    file: assets/stickers/no-work.gif
+    role: result
+  sticker_reply:
+    file: assets/stickers/reply.gif
+    role: result
+  sticker_good_night:
+    file: assets/stickers/good-night.gif
+    role: result
+  sticker_eat:
+    file: assets/stickers/eat.gif
+    role: result
+
+presentation:
+  card:
+    title: 创意图片与表情包生成
+    description: 覆盖图片生成、局部编辑与表情包制作，快速完成多种视觉任务
+    output_type: images
+    output_label: 图片候选方案
+    cover_asset: cover
+    result_summary: 分别展示 AI 生图候选、图片编辑前后对比和系列动态表情包
+  detail:
+    title: AI 图片生成、编辑与表情包
+    description: 组合使用 AI 生图、图片局部编辑和表情包生成，完成从创意构思到系列视觉交付的完整流程。
+    attachment_hint: 视觉需求、参考图片、待编辑图片或角色参考图（按任务可选）
+
+tasks:
+  - id: generate
+    selector:
+      title: AI 生图
+      description: 通过文字描述或参考图生成不同风格、尺寸和用途的高质量图片。
+      output_label: 图片候选方案
+    launch:
+      prompt_short: 根据视觉需求和参考图，生成一组主题一致、风格明确的高质量图片。
+      prompt: 请根据我上传的视觉需求和参考图生成一组高质量图片，准确呈现主体、场景、构图、光线、色彩和风格要求，并提供适合不同使用场景的候选方案。
+    replay:
+      steps:
+        - title: 理解创作需求
+          description: 明确图片用途、主体、风格、画幅和生成数量
+        - title: 整理提示词与参考图
+          description: 组织画面要求；有参考图时，明确需要沿用的主体或视觉特征
+        - title: 配置生成参数
+          description: 根据任务要求和模型能力设置尺寸、清晰度及数量
+        - title: 生成图片
+          description: 将提示词和参考图提交给图片模型，获取生成结果
+        - title: 保存并交付
+          description: 保存图片文件，展示预览与实际规格
+    result:
+      template: html_preview_v1
+      eyebrow: AI 图片生成
+      title: 视觉创意候选方案
+      summary: 根据同一主题生成不同风格和用途的图片，可继续选择单张进行调整。
+      html_asset: generate_preview
+
+  - id: local-edit
+    selector:
+      title: 图片局部编辑
+      description: 根据原图和编辑要求，替换实物部件、修改材质或调整局部画面内容。
+      output_label: 编辑前后对比
+    launch:
+      prompt_short: 将智能手表的硅胶表带替换为不锈钢链节表链，保留表盘、拍摄角度与背景。
+      prompt: 请对我上传的智能手表产品图进行局部编辑，将深色硅胶表带替换为银色不锈钢链节表链，呈现清晰的独立链节、与表壳衔接的连接件、折叠表扣及金属拉丝纹理。沿用原图的表壳、表盘内容、镜头角度、主体位置、背景和光线，重点修改表带的结构与材质，并输出编辑前后对比。
+    replay:
+      steps:
+        - title: 读取原始图片
+          description: 确认待编辑主体及当前画面
+        - title: 明确修改范围
+          description: 说明需要修改的对象、属性和目标效果
+        - title: 设置保留约束
+          description: 保留主体身份、构图、背景及其他指定内容
+        - title: 执行图片编辑
+          description: 将原图与编辑指令提交给图片模型
+        - title: 展示编辑结果
+          description: 保存编辑图片，与原图并排展示
+    result:
+      template: html_preview_v1
+      eyebrow: 图片局部编辑
+      title: 智能手表表带结构替换
+      summary: 将硅胶表带替换为不锈钢链节表链，呈现连接件、折叠表扣与金属拉丝细节。
+      html_asset: edit_preview
+
+  - id: sticker
+    selector:
+      title: 表情包生成
+      description: 根据角色参考图批量生成形象一致、适合聊天使用的系列表情包。
+      output_label: 系列表情包
+    launch:
+      prompt_short: 根据角色参考图制作一套形象一致、适合聊天使用的系列表情包。
+      prompt: 请参考我上传的角色图片制作一套适合聊天使用的系列表情包，覆盖收到、马上处理、辛苦了、稍后回复、加油、震惊、无语和下班等高频场景，并保持角色造型、画风、色彩和镜头角度一致。
+    replay:
+      steps:
+        - title: 确认表情主题
+          description: 确定使用场景、沟通状态与最终文案
+        - title: 建立角色基准
+          description: 识别角色特征，建立并确认四种基础眼嘴形态
+        - title: 设计状态表演
+          description: 根据沟通意图设计角色表情、全身动作与道具或环境反馈
+        - title: 生成动作关键帧
+          description: 生成 3–5 张主关键帧，固定起始、动作峰值与结果
+        - title: 制作静态与动态版本
+          description: 复用代表关键帧作为静图底图，按同一表演生成动画
+        - title: 添加文案并导出
+          description: 在画面合适空白处排字，输出静图与 GIF
+        - title: 检查整套效果
+          description: 确认角色可识别、状态易区分、文字清楚、动画可用
+    result:
+      template: html_preview_v1
+      eyebrow: 系列表情包
+      title: 懒懒猫动态表情包
+      summary: 8 个日常聊天表情，以原始 GIF 自动循环播放。
+      html_asset: sticker_preview

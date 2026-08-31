@@ -1,0 +1,70 @@
+schema_version: 2
+id: writer-workflow
+type: workflow
+version: 1.1.0
+status: published
+default_locale: zh-CN
+provider: LazyMind
+
+workflow:
+  workflow_ref: builtin:writer-workflow
+
+placement:
+  home: true
+  gallery: true
+  order: 25
+
+classification:
+  category: 内容创作
+  tags:
+    - 长文写作
+    - 资料整合
+    - 可编辑大纲
+    - 文档修订
+
+assets:
+  cover:
+    file: assets/cover.jpg
+    role: cover
+  writer_demo:
+    file: assets/writer-interaction-demo.html
+    role: result
+
+presentation:
+  card:
+    title: AI Writer 长文写作
+    description: 以克苏鲁风格恐怖短篇为例，展示写作准备、大纲生成、长文成稿、AI 润色与版本对比
+    output_type: document
+    output_label: 交互式长文案例
+    cover_asset: cover
+    result_summary: 查看约 3000 字小说全文，体验选区润色、接受或拒绝修改及 V1/V2 对比
+  detail:
+    title: 从故事设定到可交互长文
+    description: 以《迷雾中的低语》为案例，完整展示写作准备、四幕大纲、分节写作和长文组装；可在正文中选取文字模拟 AI 润色，并接受、拒绝修改或查看 V1/V2 差异。
+    attachment_hint: 题材、篇幅、氛围、人物设定和结局方向（可选）
+
+tasks:
+  - id: cthulhu-short-story
+    selector:
+      title: 克苏鲁恐怖短篇写作
+      description: 生成约 3000 字、氛围压抑且保留未知感的完整恐怖短篇
+      output_label: 可交互小说
+    launch:
+      prompt_short: "写一篇 3000 字左右的克苏鲁风格恐怖短篇小说，氛围压抑，结局保留未知感。"
+      prompt: "写一篇 3000 字左右的克苏鲁风格恐怖短篇小说，氛围压抑，结局保留未知感。"
+    replay:
+      steps:
+        - title: 规范化写作任务
+          description: 确认约 3000 字、克苏鲁恐怖题材、压抑氛围和开放式结局
+        - title: 生成四幕故事大纲
+          description: 编排抵达与异象、调查与疯狂、深渊回响和未知终章
+        - title: 分节生成完整小说
+          description: 按大纲完成《迷雾中的低语》并组装为可编辑文档
+        - title: 交互式 AI 润色
+          description: 对选区生成修改建议，支持接受、拒绝及 V1/V2 差异对比
+    result:
+      template: html_preview_v1
+      eyebrow: AI Writer 小说案例
+      title: 迷雾中的低语
+      summary: 查看完整克苏鲁恐怖短篇，并体验正文选区润色、修改确认和版本 Diff。
+      html_asset: writer_demo

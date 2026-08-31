@@ -18,7 +18,12 @@ from evo.artifact_runtime import (
     scalar,
 )
 
-from .abtest.candidate import async_candidate_rag_answer, candidate_service, finalize_candidate
+from .abtest.candidate import (
+    BASELINE_NO_CHANGE,
+    async_candidate_rag_answer,
+    candidate_service,
+    finalize_candidate,
+)
 from .abtest.comparison import compare_abtest
 from .analysis.classify import classify_case
 from .analysis.cluster import cluster_traces
@@ -160,19 +165,21 @@ async def assemble_dataset_operation(ctx: OperationContext,
         'case': each(A.EVAL_CASE, over=A.EVAL_CASE_REQUESTS),
         'dataset': one(A.EVAL_DATASET),
         'target_config': one(A.EVAL_TARGET_CONFIG),
+        'config': one(A.RUN_CONFIG),
         'approval': one(A.APPROVAL_DATASET),
     },
     outputs={'answer': partitioned(A.EVAL_RAG_ANSWER)},
     max_concurrency=4,
 )
 async def eval_answer_operation(ctx: OperationContext, case: object,
-                                dataset: object, target_config: object,
+                                dataset: object, target_config: object, config: object,
                                 approval: object
                                 ) -> OperationResult:
     return OperationResult({
         'answer': await async_answer_case(
             _mapping(case, 'case'),
             _mapping(target_config, 'target_config'),
+            _runtime_llm_config(config),
         ),
     })
 
@@ -183,18 +190,20 @@ async def eval_answer_operation(ctx: OperationContext, case: object,
         'case': each(A.EVAL_CASE, over=A.EVAL_CASE_REQUESTS),
         'answer': keyed(A.EVAL_RAG_ANSWER),
         'policy': one(A.EVAL_POLICY),
+        'config': one(A.RUN_CONFIG),
     },
     outputs={'judge': partitioned(A.EVAL_JUDGE_RESULT)},
     max_concurrency=4,
 )
 async def eval_judge_operation(ctx: OperationContext, case: object,
-                               answer: object, policy: object
+                               answer: object, policy: object, config: object
                                ) -> OperationResult:
     return OperationResult({
         'judge': judge_case(
             _mapping(case, 'case'),
             _mapping(answer, 'answer'),
             _mapping(policy, 'policy'),
+            _runtime_llm_config(config),
         ),
     })
 
@@ -358,6 +367,7 @@ async def candidate_workspace_operation(ctx: OperationContext, plan: object,
         ),
         'eval_policy': one(A.EVAL_POLICY),
         'candidate_config': one(A.ABTEST_CANDIDATE_CONFIG),
+        'config': one(A.RUN_CONFIG),
         'policy': one(A.REPAIR_POLICY),
     },
     outputs={'result': scalar(A.REPAIR_LOOP_RESULT)},
@@ -365,9 +375,10 @@ async def candidate_workspace_operation(ctx: OperationContext, plan: object,
 async def repair_loop_operation(ctx: OperationContext, plan: object,
                                 workspace: object, cases: object,
                                 baseline_judges: object, eval_policy: object,
-                                candidate_config: object, policy: object
+                                candidate_config: object, config: object,
+                                policy: object
                                 ) -> OperationResult:
-    trace = create_trace_sink(ctx.run_id, 'repair.loop_result')
+    trace = create_trace_sink(ctx.run_id, 'repair.loop_result', ctx.invocation_id)
     return OperationResult({
         'result': await run_repair_loop(
             _mapping(workspace, 'workspace'),
@@ -375,6 +386,7 @@ async def repair_loop_operation(ctx: OperationContext, plan: object,
             _partition_values(baseline_judges, 'baseline_judges'),
             _mapping(eval_policy, 'eval_policy'),
             _mapping(candidate_config, 'candidate_config'),
+            _runtime_llm_config(config),
             _mapping(policy, 'policy'),
             ctx,
             _mapping(plan, 'plan'),
@@ -392,7 +404,7 @@ async def verified_patch_operation(ctx: OperationContext,
                                    loop: object
                                    ) -> OperationResult:
     patch = build_verified_patch(ctx.run_id, _mapping(loop, 'loop'))
-    trace = create_trace_sink(ctx.run_id, 'repair.verified_patch')
+    trace = create_trace_sink(ctx.run_id, 'repair.verified_patch', ctx.invocation_id)
     safe_emit(
         trace,
         'repair.patch_verified',
@@ -435,17 +447,22 @@ async def candidate_service_operation(ctx: OperationContext, config: object,
     inputs={
         'case': each(A.EVAL_CASE, over=A.EVAL_CASE_REQUESTS),
         'service': one(A.ABTEST_CANDIDATE_SERVICE),
+        'baseline_answer': keyed(A.EVAL_RAG_ANSWER),
+        'config': one(A.RUN_CONFIG),
     },
     outputs={'answer': partitioned(A.ABTEST_CANDIDATE_RAG_ANSWER)},
     max_concurrency=4,
 )
 async def candidate_answer_operation(ctx: OperationContext, case: object,
-                                     service: object
+                                     service: object, baseline_answer: object,
+                                     config: object
                                      ) -> OperationResult:
+    service_value = _mapping(service, 'service')
     return OperationResult({
-        'answer': await async_candidate_rag_answer(
-            _mapping(case, 'case'),
-            _mapping(service, 'service'),
+        'answer': _mapping(baseline_answer, 'baseline_answer')
+        if service_value.get('service_kind') == BASELINE_NO_CHANGE
+        else await async_candidate_rag_answer(
+            _mapping(case, 'case'), service_value, _runtime_llm_config(config),
         ),
     })
 
@@ -456,18 +473,27 @@ async def candidate_answer_operation(ctx: OperationContext, case: object,
         'case': each(A.EVAL_CASE, over=A.EVAL_CASE_REQUESTS),
         'answer': keyed(A.ABTEST_CANDIDATE_RAG_ANSWER),
         'policy': one(A.EVAL_POLICY),
+        'service': one(A.ABTEST_CANDIDATE_SERVICE),
+        'baseline_judge': keyed(A.EVAL_JUDGE_RESULT),
+        'config': one(A.RUN_CONFIG),
     },
     outputs={'judge': partitioned(A.ABTEST_CANDIDATE_JUDGE_RESULT)},
     max_concurrency=4,
 )
 async def candidate_judge_operation(ctx: OperationContext, case: object,
-                                    answer: object, policy: object
+                                    answer: object, policy: object,
+                                    service: object, baseline_judge: object,
+                                    config: object
                                     ) -> OperationResult:
+    service_value = _mapping(service, 'service')
     return OperationResult({
-        'judge': judge_case(
+        'judge': _mapping(baseline_judge, 'baseline_judge')
+        if service_value.get('service_kind') == BASELINE_NO_CHANGE
+        else judge_case(
             _mapping(case, 'case'),
             _mapping(answer, 'answer'),
             _mapping(policy, 'policy'),
+            _runtime_llm_config(config),
         ),
     })
 
@@ -560,6 +586,11 @@ def _partition_values(value: object, name: str) -> tuple[Mapping[str, Any], ...]
     return values
 
 
+def _runtime_llm_config(config: object) -> Mapping[str, Any]:
+    run_config = _mapping(config, 'config')
+    return _mapping(run_config.get('llm_config'), 'config.llm_config')
+
+
 __all__ = [
     'analysis_summary_operation', 'assemble_dataset_operation', 'build_corpus_snapshot_operation',
     'candidate_answer_operation', 'candidate_judge_operation', 'candidate_service_operation',
@@ -567,6 +598,5 @@ __all__ = [
     'classify_case_operation', 'compare_abtest_operation', 'eval_answer_operation',
     'eval_judge_operation', 'eval_summary_operation', 'evo_operations', 'generate_case_operation',
     'load_corpus_operation', 'prepare_case_operation', 'repair_loop_operation',
-    'repair_plan_operation', 'trace_clusters_operation', 'trace_summary_operation',
     'verified_patch_operation',
 ]

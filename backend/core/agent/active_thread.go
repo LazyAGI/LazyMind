@@ -390,6 +390,41 @@ func markUserActiveThreadFinished(db *gorm.DB, threadID string) error {
 		}).Error
 }
 
+func reconcileThreadFlowStatus(db *gorm.DB, threadID string,
+	flowStatus *threadFlowStatusResponse) error {
+	threadID = strings.TrimSpace(threadID)
+	if db == nil || threadID == "" || flowStatus == nil {
+		return nil
+	}
+	status := strings.TrimSpace(flowStatus.Status)
+	currentStep := strings.TrimSpace(flowStatus.CurrentStep)
+	if status == "" && currentStep == "" {
+		return nil
+	}
+	terminal := isTerminalThreadFlowStatus(flowStatus)
+	now := time.Now().UTC()
+	return db.Transaction(func(tx *gorm.DB) error {
+		updates := map[string]any{"updated_at": now}
+		if status != "" {
+			updates["status"] = status
+		}
+		if terminal {
+			updates["current_task_id"] = ""
+		} else if currentStep != "" {
+			updates["current_task_id"] = currentStep
+		}
+		if err := tx.Model(&orm.AgentThread{}).
+			Where("thread_id = ?", threadID).
+			Updates(updates).Error; err != nil {
+			return err
+		}
+		if terminal {
+			return markUserActiveThreadFinished(tx, threadID)
+		}
+		return nil
+	})
+}
+
 func isTerminalUserActiveThreadStatus(status string) bool {
 	return strings.EqualFold(status, userActiveThreadStatusFinished) ||
 		strings.EqualFold(status, "failed") ||

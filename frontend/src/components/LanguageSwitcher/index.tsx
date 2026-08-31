@@ -4,7 +4,7 @@ import { LANGUAGES } from "@/i18n";
 import "./index.scss";
 
 const LanguageSwitcher = () => {
-  const { i18n } = useTranslation();
+  const { i18n, t } = useTranslation();
 
   const handleChange = (value: string) => {
     i18n.changeLanguage(value);
@@ -19,6 +19,7 @@ const LanguageSwitcher = () => {
       size="small"
       className="language-switcher"
       popupMatchSelectWidth={false}
+      aria-label={t("layout.language")}
     />
   );
 };

@@ -7,20 +7,29 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
-	"sort"
 	"strings"
+	"time"
 
+	"lazymind/agentconnector/internal/agentcatalog"
 	"lazymind/agentconnector/internal/agentexec"
 	"lazymind/agentconnector/internal/chatagent"
 )
 
 const maxEventBytes = 4 << 20
 
+const (
+	statusTimeout = 5 * time.Second
+	loginTimeout  = 2 * time.Minute
+)
+
 type ChatRunner struct {
 	binary string
 	self   string
 	home   string
+}
+
+func (r *ChatRunner) Sessions(ctx context.Context) ([]chatagent.NativeSession, error) {
+	return agentcatalog.CursorSessions(ctx)
 }
 
 func NewChatRunner(binary string) (*ChatRunner, error) {
@@ -36,19 +45,9 @@ func NewChatRunner(binary string) (*ChatRunner, error) {
 }
 
 func findBinary(configured string) (string, error) {
-	name := "cursor-agent"
-	if runtime.GOOS == "windows" {
-		name += ".exe"
-	}
-	home, _ := os.UserHomeDir()
-	var candidates []string
-	if home != "" {
-		candidates = append(candidates, filepath.Join(home, ".local", "bin", name))
-		versions, _ := filepath.Glob(filepath.Join(home, ".local", "share", "cursor-agent", "versions", "*", name))
-		sort.Sort(sort.Reverse(sort.StringSlice(versions)))
-		candidates = append(candidates, versions...)
-	}
-	resolved, err := agentexec.Find(configured, "LAZYMIND_CURSOR_AGENT_BIN", []string{name}, candidates)
+	resolved, err := agentexec.FindBound(
+		configured, "LAZYMIND_CURSOR_AGENT_BIN", agentexec.CursorCLI, []string{"cursor-agent"},
+	)
 	if err != nil {
 		if strings.TrimSpace(configured) != "" || strings.TrimSpace(os.Getenv("LAZYMIND_CURSOR_AGENT_BIN")) != "" {
 			return "", fmt.Errorf("resolve configured Cursor Agent CLI: %w", err)
@@ -58,22 +57,78 @@ func findBinary(configured string) (string, error) {
 	return resolved, nil
 }
 
+func Login(ctx context.Context, binary string) error {
+	resolved, err := findBinary(binary)
+	if err != nil {
+		return err
+	}
+	loginCtx, cancel := context.WithTimeout(ctx, loginTimeout)
+	defer cancel()
+	_, err = agentexec.Run(loginCtx, resolved, "login")
+	return err
+}
+
+func (r *ChatRunner) Availability() (bool, string) {
+	return availability(r.binary)
+}
+
+func Probe(binary string) (bool, bool, string) {
+	resolved, err := findBinary(binary)
+	if err != nil {
+		return false, false, err.Error()
+	}
+	ready, reason := availability(resolved)
+	return true, ready, reason
+}
+
+func availability(binary string) (bool, string) {
+	ctx, cancel := context.WithTimeout(context.Background(), statusTimeout)
+	defer cancel()
+	status, err := agentexec.Run(ctx, binary, "status")
+	detail := strings.ToLower(strings.TrimSpace(status))
+	if err != nil {
+		detail += " " + strings.ToLower(err.Error())
+	}
+	if strings.Contains(detail, "not logged in") || strings.Contains(detail, "not authenticated") ||
+		strings.Contains(detail, "login required") || strings.Contains(detail, "authentication required") {
+		return false, "Cursor Agent CLI is not signed in; run `cursor-agent login`"
+	}
+	if err != nil {
+		return false, "Cursor Agent CLI status check failed; retry or run `cursor-agent status`"
+	}
+	return true, ""
+}
+
 func (r *ChatRunner) Run(ctx context.Context, run chatagent.Run, emit func(chatagent.Event) error) error {
 	if r == nil || strings.TrimSpace(r.binary) == "" {
 		return errors.New("Cursor Agent CLI is unavailable")
 	}
-	workspace, err := agentexec.EnsureConversationWorkspace(run.ConversationID)
-	if err != nil {
-		return err
-	}
-	if err := r.writeInvocationMCPConfig(workspace, run); err != nil {
-		return err
+	resume := (run.Action == "resume" || run.Action == "regenerate") && strings.TrimSpace(run.ProviderThreadID) != ""
+	workspace := ""
+	var err error
+	if resume {
+		var found bool
+		workspace, found, err = agentcatalog.Workspace(ctx, "cursor", run.ProviderThreadID)
+		if err != nil {
+			return err
+		}
+		if !found {
+			return errors.New("Cursor CLI session workspace is unavailable")
+		}
+	} else {
+		workspace, err = agentexec.EnsureConversationWorkspace(run.ConversationID)
+		if err != nil {
+			return err
+		}
+		if err := r.writeInvocationMCPConfig(workspace, run); err != nil {
+			return err
+		}
 	}
 	arguments := []string{
 		"-p", "--output-format", "stream-json", "--stream-partial-output",
-		"--approve-mcps", "--trust", "--auto-review", "--sandbox", "enabled", "--workspace", workspace,
+		"--approve-mcps", "--trust", "--force", "--sandbox", "enabled", "--workspace", workspace,
 	}
-	if run.Action == "resume" && strings.TrimSpace(run.ProviderThreadID) != "" {
+	if resume {
 		arguments = append(arguments, "--resume", run.ProviderThreadID)
 	}
 	arguments = append(arguments, run.Prompt)

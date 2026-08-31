@@ -7,7 +7,6 @@ from typing import Any
 import yaml
 
 from ..paths import reference_filename, split_reference_ref
-from ..result import memory_err, memory_ok
 from ..validation.preference import (
     PreferenceItem,
     append_preference_item,
@@ -21,27 +20,22 @@ _PREFERENCE_NAME_RE = re.compile(r'^pref\.[A-Za-z0-9][A-Za-z0-9_.-]{0,126}$')
 _REFERENCE_SLUG_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$')
 
 
-def validate_preference_name(name: str) -> dict[str, Any]:
+def validate_preference_name(name: str) -> str:
     normalized = str(name or '').strip()
     if not _PREFERENCE_NAME_RE.fullmatch(normalized):
-        return memory_err(
+        raise ValueError(
             "preference name must match 'pref.<slug>' using letters, numbers, '.', '_', or '-'.",
-            type='validation',
         )
     slug = normalized[len('pref.'):].replace('.', '-').replace('_', '-')
     if not _REFERENCE_SLUG_RE.fullmatch(slug):
-        return memory_err(
+        raise ValueError(
             f'preference name {normalized!r} cannot be mapped to a valid reference file.',
-            type='validation',
         )
-    return memory_ok(name=normalized)
+    return normalized
 
 
 def preference_name_to_reference_name(name: str) -> str:
-    result = validate_preference_name(name)
-    if not result.get('ok'):
-        raise ValueError(result.get('error') or 'invalid preference name')
-    normalized = str(result['name'])
+    normalized = validate_preference_name(name)
     return normalized[len('pref.'):].replace('.', '-').replace('_', '-')
 
 
@@ -56,21 +50,21 @@ def build_preference_reference_content(
     updated_at: str,
     source_kind: str,
     conversation_id: str,
-) -> dict[str, Any]:
+) -> str:
     scenario_text = str(scenario or '').strip()
     details_text = str(details or '').strip()
     reason_text = str(reason or '').strip()
     summary_text = str(summary or '').strip()
     if not scenario_text:
-        return memory_err('scenario is required.', type='validation')
+        raise ValueError('scenario is required.')
     if not details_text:
-        return memory_err('details is required.', type='validation')
+        raise ValueError('details is required.')
     if not reason_text:
-        return memory_err('reason is required.', type='validation')
+        raise ValueError('reason is required.')
     if not summary_text:
-        return memory_err('summary is required.', type='validation')
+        raise ValueError('summary is required.')
     if len(summary_text) > 100:
-        return memory_err('summary must be 100 characters or less.', type='validation')
+        raise ValueError('summary must be 100 characters or less.')
 
     body = (
         '## Application Scenarios\n'
@@ -98,8 +92,8 @@ def build_preference_reference_content(
     content = f'---\n{frontmatter}---\n{body}'
     error = validate_reference_content(content)
     if error:
-        return memory_err(error, type='validation')
-    return memory_ok(content=content)
+        raise ValueError(error)
+    return content
 
 
 def build_add_preference_item(
@@ -113,13 +107,10 @@ def build_add_preference_item(
     conversation_id: str,
     timestamp: str | None = None,
 ) -> dict[str, Any]:
-    name_result = validate_preference_name(name)
-    if not name_result.get('ok'):
-        return name_result
-    normalized_name = str(name_result['name'])
+    normalized_name = validate_preference_name(name)
     reference_name = normalized_name[len('pref.'):].replace('.', '-').replace('_', '-')
     created_at = str(timestamp or _utc_now()).strip()
-    reference_result = build_preference_reference_content(
+    reference_content = build_preference_reference_content(
         preference_name=normalized_name,
         summary=summary,
         scenario=scenario,
@@ -130,8 +121,6 @@ def build_add_preference_item(
         source_kind=source_kind,
         conversation_id=conversation_id,
     )
-    if not reference_result.get('ok'):
-        return reference_result
     item = PreferenceItem(
         name=normalized_name,
         summary=str(summary).strip(),
@@ -139,11 +128,11 @@ def build_add_preference_item(
         created_at=created_at,
         updated_at=created_at,
     )
-    return memory_ok(
-        item=item,
-        reference_name=reference_name,
-        reference_content=reference_result['content'],
-    )
+    return {
+        'item': item,
+        'reference_name': reference_name,
+        'reference_content': reference_content,
+    }
 
 
 def add_preference_entry(
@@ -168,41 +157,30 @@ def add_preference_entry(
         conversation_id=conversation_id,
         timestamp=timestamp,
     )
-    if not built.get('ok'):
-        return built
     item = built['item']
-    try:
-        updated = append_preference_item(preference_content, item)
-    except ValueError as exc:
-        return memory_err(str(exc), type='validation')
+    updated = append_preference_item(preference_content, item)
     error = validate_preference_index(updated)
     if error:
-        return memory_err(error, type='validation')
-    return memory_ok(
-        content=updated,
-        item=item,
-        reference_content=built['reference_content'],
-        reference_name=built['reference_name'],
-    )
+        raise ValueError(error)
+    return {
+        'content': updated,
+        'item': item,
+        'reference_content': built['reference_content'],
+        'reference_name': built['reference_name'],
+    }
 
 
 def delete_preference_entry(preference_content: str, *, name: str) -> dict[str, Any]:
-    name_result = validate_preference_name(name)
-    if not name_result.get('ok'):
-        return name_result
-    normalized_name = str(name_result['name'])
+    normalized_name = validate_preference_name(name)
     items = parse_preference_items(preference_content)
     target = next((item for item in items if item.name == normalized_name), None)
     if target is None:
-        return memory_err(f'preference item {normalized_name!r} not found.', type='not_found')
-    try:
-        updated = remove_preference_item(preference_content, normalized_name)
-    except ValueError as exc:
-        return memory_err(str(exc), type='validation')
+        raise FileNotFoundError(f'preference item {normalized_name!r} not found.')
+    updated = remove_preference_item(preference_content, normalized_name)
     error = validate_preference_index(updated)
     if error:
-        return memory_err(error, type='validation')
-    return memory_ok(content=updated, item=target)
+        raise ValueError(error)
+    return {'content': updated, 'item': target}
 
 
 def reference_name_from_item(item: PreferenceItem) -> str:

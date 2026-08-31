@@ -118,7 +118,7 @@ func handleWorkflowDraftGenerateJob(ctx context.Context, job asyncjob.Job, _ asy
 		return asyncjob.Result{ErrorCode: generateErrDraftNotFound}, fmt.Errorf("store not initialised")
 	}
 	var draft orm.WorkflowDraft
-	if err := db.WithContext(ctx).Where("id = ? AND created_by = ?", payload.DraftID, payload.UserID).First(&draft).Error; err != nil {
+	if err := db.WithContext(ctx).Where("id = ? AND created_by = ? AND deleted_at IS NULL", payload.DraftID, payload.UserID).First(&draft).Error; err != nil {
 		return asyncjob.Result{ErrorCode: generateErrDraftNotFound}, fmt.Errorf("draft not found: %w", err)
 	}
 	startPhase := normalizeGenerateStartPhase(payload.StartPhase)
@@ -169,7 +169,7 @@ func handleWorkflowDraftGenerateJob(ctx context.Context, job asyncjob.Job, _ asy
 		if warning := ignoredScriptWarning(analysisResp.Scripts); warning != "" {
 			analysisUpdates["generate_warning"] = warning
 		}
-		if err := db.WithContext(ctx).Model(&draft).Updates(analysisUpdates).Error; err != nil {
+		if err := db.WithContext(ctx).Model(&orm.WorkflowDraft{}).Where("id = ? AND deleted_at IS NULL", draft.ID).Updates(analysisUpdates).Error; err != nil {
 			return asyncjob.Result{ErrorCode: generateErrSaveFailed}, err
 		}
 		if status == generateStatusNeedsConfirm || status == generateStatusRejected {
@@ -194,13 +194,13 @@ func handleWorkflowDraftGenerateJob(ctx context.Context, job asyncjob.Job, _ asy
 		})
 		if briefErr != nil {
 			// Non-fatal: log and continue without a brief.
-			_ = db.WithContext(ctx).Model(&orm.WorkflowDraft{}).Where("id = ?", payload.DraftID).Updates(map[string]any{
+			_ = db.WithContext(ctx).Model(&orm.WorkflowDraft{}).Where("id = ? AND deleted_at IS NULL", payload.DraftID).Updates(map[string]any{
 				"generate_warning": fmt.Sprintf("phase0 design_brief: %s", briefErr),
 				"updated_at":       time.Now().UTC(),
 			}).Error
 		} else {
 			designBrief = briefResp.DesignBrief
-			if err := db.WithContext(ctx).Model(&orm.WorkflowDraft{}).Where("id = ?", payload.DraftID).Updates(map[string]any{
+			if err := db.WithContext(ctx).Model(&orm.WorkflowDraft{}).Where("id = ? AND deleted_at IS NULL", payload.DraftID).Updates(map[string]any{
 				"design_brief_content": designBrief,
 				"generate_status":      generateStatusBriefDone,
 				"updated_at":           time.Now().UTC(),
@@ -235,7 +235,7 @@ func handleWorkflowDraftGenerateJob(ctx context.Context, job asyncjob.Job, _ asy
 			"updated_at":      time.Now().UTC(),
 		}
 		setWorkflowYAMLUpdate(skeletonUpdates, skeletonResp.WorkflowYAML)
-		if err := db.WithContext(ctx).Model(&orm.WorkflowDraft{}).Where("id = ?", payload.DraftID).Updates(skeletonUpdates).Error; err != nil {
+		if err := db.WithContext(ctx).Model(&orm.WorkflowDraft{}).Where("id = ? AND deleted_at IS NULL", payload.DraftID).Updates(skeletonUpdates).Error; err != nil {
 			return asyncjob.Result{ErrorCode: generateErrSaveFailed}, fmt.Errorf("save skeleton: %w", err)
 		}
 	}
@@ -301,7 +301,7 @@ func handleWorkflowDraftGenerateJob(ctx context.Context, job asyncjob.Job, _ asy
 		if len(stateResp.Warnings) > 0 {
 			stateUpdates["generate_warning"] = strings.Join(stateResp.Warnings, "; ")
 		}
-		if err := db.WithContext(ctx).Model(&orm.WorkflowDraft{}).Where("id = ?", payload.DraftID).Updates(stateUpdates).Error; err != nil {
+		if err := db.WithContext(ctx).Model(&orm.WorkflowDraft{}).Where("id = ? AND deleted_at IS NULL", payload.DraftID).Updates(stateUpdates).Error; err != nil {
 			return asyncjob.Result{ErrorCode: generateErrSaveFailed}, fmt.Errorf("save state_machine: %w", err)
 		}
 	}
@@ -398,7 +398,7 @@ func handleWorkflowDraftGenerateJob(ctx context.Context, job asyncjob.Job, _ asy
 		"updated_at":         time.Now().UTC(),
 	}
 	setWorkflowYAMLUpdate(finalUpdates, finalWorkflowYAML)
-	if err := db.WithContext(ctx).Model(&orm.WorkflowDraft{}).Where("id = ?", payload.DraftID).Updates(finalUpdates).Error; err != nil {
+	if err := db.WithContext(ctx).Model(&orm.WorkflowDraft{}).Where("id = ? AND deleted_at IS NULL", payload.DraftID).Updates(finalUpdates).Error; err != nil {
 		return asyncjob.Result{ErrorCode: generateErrSaveFailed}, fmt.Errorf("save scenario_scripts: %w", err)
 	}
 
@@ -613,14 +613,14 @@ func validateGenerateResumePoint(draft orm.WorkflowDraft, startPhase string) err
 
 func currentGenerateWarning(db *gorm.DB, draftID string) string {
 	var draft orm.WorkflowDraft
-	if db.Select("generate_warning").Where("id=?", draftID).First(&draft).Error != nil {
+	if db.Select("generate_warning").Where("id = ? AND deleted_at IS NULL", draftID).First(&draft).Error != nil {
 		return ""
 	}
 	return draft.GenerateWarning
 }
 
 func markGenerateFailed(db *gorm.DB, draftID string, errMsg string) error {
-	return db.Model(&orm.WorkflowDraft{}).Where("id = ?", draftID).Updates(map[string]any{
+	return db.Model(&orm.WorkflowDraft{}).Where("id = ? AND deleted_at IS NULL", draftID).Updates(map[string]any{
 		"generate_status": generateStatusFailed,
 		"generate_error":  errMsg,
 		"updated_at":      time.Now().UTC(),
@@ -646,7 +646,7 @@ func handleWorkflowDraftRepairJob(ctx context.Context, job asyncjob.Job, _ async
 	}
 
 	var draft orm.WorkflowDraft
-	if err := db.Where("id = ?", payload.DraftID).First(&draft).Error; err != nil {
+	if err := db.Where("id = ? AND deleted_at IS NULL", payload.DraftID).First(&draft).Error; err != nil {
 		log.Printf("[repair_job] draft not found draft_id=%s err=%v", payload.DraftID, err)
 		return asyncjob.Result{ErrorCode: generateErrDraftNotFound}, fmt.Errorf("draft not found: %w", err)
 	}
@@ -682,7 +682,7 @@ func handleWorkflowDraftRepairJob(ctx context.Context, job asyncjob.Job, _ async
 		}
 		log.Printf("[repair_job] RESTORE draft_id=%s status=%q warning=%q",
 			payload.DraftID, payload.PrevStatus, updates["generate_warning"])
-		_ = db.Model(&orm.WorkflowDraft{}).Where("id = ?", payload.DraftID).Updates(updates)
+		_ = db.Model(&orm.WorkflowDraft{}).Where("id = ? AND deleted_at IS NULL", payload.DraftID).Updates(updates)
 		if payload.RepairRunID != "" {
 			// diagnostics_after_json is written by the validation path with the
 			// structured report. Do not replace it with a generic error string.
@@ -746,7 +746,7 @@ func handleWorkflowDraftRepairJob(ctx context.Context, job asyncjob.Job, _ async
 		}
 		updates := map[string]any{"state_yaml_content": stateYAML, "scenario_content": scenarioMD, "scripts_content": scriptsJSON, "generate_status": payload.PrevStatus, "generate_warning": mergeWarnings(currentGenerateWarning(db, draft.ID), strings.Join(allWarnings, "; ")), "version": draft.Version + 1, "updated_at": time.Now().UTC()}
 		setWorkflowYAMLUpdate(updates, workflowYAML)
-		result := db.Model(&orm.WorkflowDraft{}).Where("id=? AND version=?", draft.ID, payload.DraftVersion).Updates(updates)
+		result := db.Model(&orm.WorkflowDraft{}).Where("id = ? AND version = ? AND deleted_at IS NULL", draft.ID, payload.DraftVersion).Updates(updates)
 		if result.Error != nil || result.RowsAffected != 1 {
 			if payload.RepairRunID != "" {
 				_ = db.Model(&orm.WorkflowRepairRun{}).Where("id=?", payload.RepairRunID).Update("status", "stale").Error
@@ -804,7 +804,7 @@ func handleWorkflowDraftRepairJob(ctx context.Context, job asyncjob.Job, _ async
 			"version":          draft.Version + 1,
 			"updated_at":       time.Now().UTC(),
 		}
-		result := db.Model(&orm.WorkflowDraft{}).Where("id=? AND version=?", draft.ID, payload.DraftVersion).Updates(updates)
+		result := db.Model(&orm.WorkflowDraft{}).Where("id = ? AND version = ? AND deleted_at IS NULL", draft.ID, payload.DraftVersion).Updates(updates)
 		if result.Error != nil || result.RowsAffected != 1 {
 			if payload.RepairRunID != "" {
 				_ = db.Model(&orm.WorkflowRepairRun{}).Where("id=?", payload.RepairRunID).Updates(map[string]any{"status": "stale", "updated_at": time.Now().UTC()}).Error
@@ -866,7 +866,7 @@ func handleWorkflowDraftRepairJob(ctx context.Context, job asyncjob.Job, _ async
 	if resp.WorkflowYAML != "" {
 		setWorkflowYAMLUpdate(updates, resp.WorkflowYAML)
 	}
-	result := db.Model(&orm.WorkflowDraft{}).Where("id=? AND version=?", draft.ID, payload.DraftVersion).Updates(updates)
+	result := db.Model(&orm.WorkflowDraft{}).Where("id = ? AND version = ? AND deleted_at IS NULL", draft.ID, payload.DraftVersion).Updates(updates)
 	if result.Error != nil || result.RowsAffected != 1 {
 		if payload.RepairRunID != "" {
 			_ = db.Model(&orm.WorkflowRepairRun{}).Where("id=?", payload.RepairRunID).Updates(map[string]any{"status": "stale", "updated_at": time.Now().UTC()}).Error

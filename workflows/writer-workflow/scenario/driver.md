@@ -30,7 +30,7 @@ value is merely a local path string does not satisfy an output and must be RETRY
 - PASS when draft_document and writing_context_after_draft exist.
 - draft_document must be Markdown, or non-outline WriterDocument IR with ui_editable=true.
 - An outline-stage artifact saved under draft_document is invalid and must be RETRY.
-- For generation/rewrite mode, section_instructions and draft_blocks must exist in the
+- Sectioned generation/rewrite mode requires section_instructions and draft_blocks in the
   selected representation.
 - IR generation also requires visual_plan and resolved_media_assets. IR generation must
   not create a second Markdown draft artifact.
@@ -46,6 +46,15 @@ value is merely a local path string does not satisfy an output and must be RETRY
   must remain local in this step.
 - If the initial provider write contains images, resolved_media_assets must be passed to
   the provider write; a skipped image must be reported as partial delivery rather than success.
+- Missing mode-specific outputs → RETRY.
+
+## write_flat_document
+
+- PASS when flat_draft_document, flat_writing_context_after_draft, short_writing_plan, and
+  flat_visual_plan exist.
+- flat_draft_document must be Markdown, or a non-outline WriterDocument IR with ui_editable=true.
+- outline_document, section_instructions, and draft_blocks must not be produced.
+- When flat_visual_plan is non-empty, flat_resolved_media_assets must also exist.
 - Missing mode-specific outputs → RETRY.
 
 Use exactly:

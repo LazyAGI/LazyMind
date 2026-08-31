@@ -13,19 +13,23 @@ import (
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	skilldistribution "lazymind/core/skillv2/distribution"
 )
 
 type Scanner struct {
-	db       *gorm.DB
-	cfg      Config
-	clock    clockFunc
-	workerID string
+	db                      *gorm.DB
+	cfg                     Config
+	clock                   clockFunc
+	workerID                string
+	distributionAutoUpdater *skillDistributionAutoUpdater
 }
 
 type ScannerRunResult struct {
-	SkillResultsExpired    int
-	SkillTasksCreated      int
-	SkillDraftTasksCreated int
+	SkillResultsExpired        int
+	SkillTasksCreated          int
+	SkillDraftTasksCreated     int
+	SkillDistributionsApplied  int
+	SkillDistributionConflicts int
 }
 
 type autoApplyTrigger struct {
@@ -60,11 +64,19 @@ func (s *Scanner) RunOnce(ctx context.Context) (ScannerRunResult, error) {
 		result.SkillDraftTasksCreated = created
 		return nil
 	})
-	if err == nil && (result.SkillResultsExpired > 0 || result.SkillTasksCreated > 0 || result.SkillDraftTasksCreated > 0) {
+	if err == nil && s.distributionAutoUpdater != nil {
+		autoUpdates, updateErr := s.distributionAutoUpdater.RunOnce(ctx, s.cfg.WorkerBatchSize)
+		result.SkillDistributionsApplied = autoUpdates.Applied
+		result.SkillDistributionConflicts = autoUpdates.PendingReview
+		err = updateErr
+	}
+	if err == nil && (result.SkillResultsExpired > 0 || result.SkillTasksCreated > 0 || result.SkillDraftTasksCreated > 0 || result.SkillDistributionsApplied > 0 || result.SkillDistributionConflicts > 0) {
 		resourceUpdateInfo(logEventResultScanDone).
 			Int("skill_results_expired", result.SkillResultsExpired).
 			Int("skill_tasks_created", result.SkillTasksCreated).
 			Int("skill_draft_tasks_created", result.SkillDraftTasksCreated).
+			Int("skill_distributions_applied", result.SkillDistributionsApplied).
+			Int("skill_distribution_conflicts", result.SkillDistributionConflicts).
 			Msg(logEventResultScanDone)
 	}
 	return result, err
@@ -288,6 +300,9 @@ func scanAutoEvoSkillDrafts(ctx context.Context, tx *gorm.DB, now time.Time) (in
 	}
 	created := 0
 	for _, row := range rows {
+		if skilldistribution.IsUpgradeTaskID(row.TaskID) {
+			continue
+		}
 		var count int64
 		if err := tx.WithContext(ctx).Model(&orm.ResourceUpdateTask{}).
 			Where("task_type = ? AND resource_type = ? AND resource_id = ? AND status IN ?",

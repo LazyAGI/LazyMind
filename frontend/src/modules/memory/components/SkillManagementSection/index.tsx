@@ -4,24 +4,20 @@ import { AppstoreOutlined, SearchOutlined } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
 import WorkflowInstalledView from "./WorkflowInstalledView";
 import { AgentAppsAuth } from "@/components/auth";
-import { localizeErrorCode } from "@/components/request";
 import { isAdminRole } from "@/modules/dataSource/utils/role";
 import { useMemoryManagementOutletContext } from "../../context";
 import type { SkillViewMode, StructuredAsset } from "../../shared";
 import type { MarketSkillAsset } from "./skillMarketMockData";
 import {
   deleteSkillMarketItem,
+  getRunningSkillOrganizeTask,
   getSkillMarketItem,
   installSkillFromMarket,
   listBuiltinSkills,
   listSkillMarketPage,
   listSkillMarketTags,
-  listTrashedSkillAssetsPage,
   organizeSkills,
   waitForSkillOrganize,
-  emptySkillTrash,
-  purgeSkillAsset,
-  restoreSkillAsset,
 } from "../../skillApi";
 import SkillAdminPublishModal from "./SkillAdminPublishModal";
 import SkillInstalledView from "./SkillInstalledView";
@@ -29,21 +25,23 @@ import SkillManagementToolbar, {
   type SkillOrganizeStatus,
 } from "./SkillManagementToolbar";
 import SkillMarketView from "./SkillMarketView";
-import SkillTrashedView from "./SkillTrashedView";
 import CloudResourceTable from "./CloudResourceTable";
 import {
   collectMarketTags,
   filterMarketSkills,
-  mapSkillAssetRecordToStructuredAsset,
 } from "./skillHelpers";
 import { mapMarketSkillRecordToAsset } from "./skillMarketMockData";
 import NewWorkflowModal from "@/modules/workflow/components/NewWorkflowModal";
 import { shouldShowSkillMessageCenter } from "./collaborationVisibility";
 import { renderSkillCategoryIcon } from "./skillCategoryIcon";
+import {
+  canSubmitSkillOrganize,
+  isSkillOrganizeEligible,
+  MAX_SKILL_ORGANIZE_SELECTION,
+} from "./skillOrganizeRules";
 import "./index.scss";
 
 const DEFAULT_MARKET_PAGE_SIZE = 8;
-const MAX_SKILL_ORGANIZE_SELECTION = 20;
 export default function SkillManagementSection() {
   const listContentRef = useRef<HTMLDivElement>(null);
   const marketRequestIdRef = useRef(0);
@@ -69,22 +67,11 @@ export default function SkillManagementSection() {
   // Keep a state copy only for rendering (installedSkills comparison in SkillMarketView).
   const [marketBuiltinAssets, setMarketBuiltinAssets] = useState<MarketSkillAsset[]>([]);
   const [marketCatalogLoading, setMarketCatalogLoading] = useState(false);
-  const [marketTagsLoading, setMarketTagsLoading] = useState(false);
   const [marketListPage, setMarketListPage] = useState(1);
   const [marketListPageSize, setMarketListPageSize] = useState(DEFAULT_MARKET_PAGE_SIZE);
   const [marketListTotal, setMarketListTotal] = useState(0);
   const [marketInstallingId, setMarketInstallingId] = useState<string>();
   const [marketDeletingId, setMarketDeletingId] = useState<string>();
-  const [trashAssets, setTrashAssets] = useState<StructuredAsset[]>([]);
-  const [trashLoading, setTrashLoading] = useState(false);
-  const [trashListPage, setTrashListPage] = useState(1);
-  const [trashListPageSize, setTrashListPageSize] = useState(12);
-  const [trashListTotal, setTrashListTotal] = useState(0);
-  const [trashSearchInput, setTrashSearchInput] = useState("");
-  const [trashKeyword, setTrashKeyword] = useState("");
-  const [trashCategory, setTrashCategory] = useState<string>();
-  const [trashActionLoading, setTrashActionLoading] = useState<Set<string>>(new Set());
-  const [emptyTrashLoading, setEmptyTrashLoading] = useState(false);
 
   const {
     t,
@@ -127,7 +114,18 @@ export default function SkillManagementSection() {
     handleRunManualSkillReview,
   } = useMemoryManagementOutletContext();
 
+  const refreshSkillAssetsRef = useRef(refreshSkillAssets);
+  const skillListPageRef = useRef(skillListPage);
+
   const isAdmin = isAdminRole(AgentAppsAuth.getUserInfo()?.role);
+
+  useEffect(() => {
+    refreshSkillAssetsRef.current = refreshSkillAssets;
+  }, [refreshSkillAssets]);
+
+  useEffect(() => {
+    skillListPageRef.current = skillListPage;
+  }, [skillListPage]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -266,42 +264,13 @@ export default function SkillManagementSection() {
   ]);
 
   const loadMarketTags = useCallback(async () => {
-    setMarketTagsLoading(true);
     try {
       setMarketTags(await listSkillMarketTags());
     } catch (error) {
       console.error("Load skill plaza tags failed:", error);
       setMarketTags([]);
-    } finally {
-      setMarketTagsLoading(false);
     }
   }, []);
-
-  const loadTrashAssets = useCallback(async () => {
-    setTrashLoading(true);
-    try {
-      const result = await listTrashedSkillAssetsPage({
-        keyword: trashKeyword,
-        category: trashCategory,
-        page: trashListPage,
-        pageSize: trashListPageSize,
-      });
-      setTrashAssets(result.records.map(mapSkillAssetRecordToStructuredAsset));
-      setTrashListTotal(result.total);
-    } catch (error) {
-      console.error("Load trashed skills failed:", error);
-      setTrashAssets([]);
-      setTrashListTotal(0);
-    } finally {
-      setTrashLoading(false);
-    }
-  }, [
-    t,
-    trashCategory,
-    trashKeyword,
-    trashListPage,
-    trashListPageSize,
-  ]);
 
   useEffect(() => {
     if (skillView !== "market") {
@@ -312,29 +281,7 @@ export default function SkillManagementSection() {
   }, [loadMarketCatalog, loadMarketTags, skillView]);
 
   useEffect(() => {
-    if (skillView !== "trash") {
-      return;
-    }
-    void loadTrashAssets();
-  }, [loadTrashAssets, skillView]);
-
-  useEffect(() => {
-    void (async () => {
-      try {
-        const result = await listTrashedSkillAssetsPage({ page: 1, pageSize: 1 });
-        setTrashListTotal(result.total);
-      } catch {
-        // Ignore badge refresh errors; trash tab load will surface them.
-      }
-    })();
-  }, [skillAssets.length, skillListTotal]);
-
-  useEffect(() => {
-    if (
-      skillView !== "installed" &&
-      skillView !== "workflows" &&
-      skillView !== "trash"
-    ) {
+    if (skillView !== "installed" && skillView !== "workflows") {
       return undefined;
     }
 
@@ -379,9 +326,6 @@ export default function SkillManagementSection() {
     skillListPageSize,
     skillAssets.length,
     filteredInstalledSkillTree.length,
-    trashListPage,
-    trashListPageSize,
-    trashAssets.length,
   ]);
 
   const marketSkillAssets = marketCatalogAssets;
@@ -430,93 +374,6 @@ export default function SkillManagementSection() {
     resetFilters();
   };
 
-  const handleTrashReset = () => {
-    setTrashSearchInput("");
-    setTrashKeyword("");
-    setTrashCategory(undefined);
-    setTrashListPage(1);
-  };
-
-  const runTrashAction = async (
-    actionKey: string,
-    action: () => Promise<void>,
-    successMessage: string,
-  ) => {
-    setTrashActionLoading((previous) => new Set(previous).add(actionKey));
-    try {
-      await action();
-      await Promise.all([
-        loadTrashAssets(),
-        refreshSkillAssets({ page: skillListPage }),
-      ]);
-      message.success(successMessage);
-    } catch (error) {
-      console.error("Skill trash action failed:", error);
-      if (!(error as { isAxiosError?: boolean })?.isAxiosError) {
-        message.error(localizeErrorCode("2000509"));
-      }
-    } finally {
-      setTrashActionLoading((previous) => {
-        const next = new Set(previous);
-        next.delete(actionKey);
-        return next;
-      });
-    }
-  };
-
-  const handleRestoreTrashedSkill = (item: StructuredAsset) => {
-    void runTrashAction(
-      `restore:${item.id}`,
-      async () => {
-        const restored = await restoreSkillAsset(item.id);
-        if (!restored) {
-          throw new Error("restore failed");
-        }
-      },
-      t("admin.memorySkillTrashRestoreSuccess"),
-    );
-  };
-
-  const handlePurgeTrashedSkill = (item: StructuredAsset) => {
-    Modal.confirm({
-      title: t("admin.memorySkillTrashPurgeConfirmTitle"),
-      content: t("admin.memorySkillTrashPurgeConfirmContent", { name: item.name }),
-      okText: t("common.confirm"),
-      cancelText: t("common.cancel"),
-      okButtonProps: { danger: true },
-      onOk: async () => {
-        await runTrashAction(
-          `purge:${item.id}`,
-          async () => {
-            const purged = await purgeSkillAsset(item.id);
-            if (!purged) {
-              throw new Error("purge failed");
-            }
-          },
-          t("admin.memorySkillTrashPurgeSuccess"),
-        );
-      },
-    });
-  };
-
-  const handleEmptyTrash = async () => {
-    setEmptyTrashLoading(true);
-    try {
-      const purged = await emptySkillTrash();
-      await Promise.all([
-        loadTrashAssets(),
-        refreshSkillAssets({ page: skillListPage }),
-      ]);
-      message.success(
-        t("admin.memorySkillTrashEmptySuccess", { count: purged }),
-      );
-    } catch (error) {
-      console.error("Empty skill trash failed:", error);
-    } finally {
-      setEmptyTrashLoading(false);
-    }
-  };
-
   const handleMarketReset = () => {
     setMarketKeyword("");
     setDebouncedMarketKeyword("");
@@ -554,7 +411,9 @@ export default function SkillManagementSection() {
       return;
     }
 
-    const additions = records.filter((record) => !next.has(record.id));
+    const additions = records.filter(
+      (record) => isSkillOrganizeEligible(record) && !next.has(record.id),
+    );
     const availableSlots = Math.max(
       0,
       MAX_SKILL_ORGANIZE_SELECTION - next.size,
@@ -569,9 +428,82 @@ export default function SkillManagementSection() {
     }
   };
 
+  const followSkillOrganize = useCallback(
+    async (requestId: string, pollingController: AbortController) => {
+      setOrganizeSubmitting(true);
+      setOrganizeStatus("running");
+
+      try {
+        const task = await waitForSkillOrganize(
+          requestId,
+          pollingController.signal,
+        );
+        if (task.status === "failed") {
+          throw new Error("Skill organize task failed");
+        }
+        if (task.status === "skipped") {
+          setOrganizeStatus("skipped");
+          return;
+        }
+        await refreshSkillAssetsRef.current({ page: skillListPageRef.current });
+        setOrganizeStatus("success");
+      } catch (error) {
+        if (pollingController.signal.aborted) {
+          return;
+        }
+        console.error("Skill organize task failed:", error);
+        setOrganizeStatus("error");
+      } finally {
+        if (organizePollingControllerRef.current === pollingController) {
+          organizePollingControllerRef.current = null;
+        }
+        if (!pollingController.signal.aborted) {
+          setOrganizeSubmitting(false);
+        }
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    const pollingController = new AbortController();
+    organizePollingControllerRef.current = pollingController;
+
+    void (async () => {
+      try {
+        const task = await getRunningSkillOrganizeTask(
+          pollingController.signal,
+        );
+        if (!task || pollingController.signal.aborted) {
+          if (organizePollingControllerRef.current === pollingController) {
+            organizePollingControllerRef.current = null;
+          }
+          return;
+        }
+        await followSkillOrganize(task.requestId, pollingController);
+      } catch (error) {
+        if (pollingController.signal.aborted) {
+          return;
+        }
+        if (organizePollingControllerRef.current === pollingController) {
+          organizePollingControllerRef.current = null;
+        }
+        console.error("Load running skill organize task failed:", error);
+      }
+    })();
+
+    return () => pollingController.abort();
+  }, [followSkillOrganize]);
+
   const handleOrganizeSubmit = async () => {
-    const skills = [...selectedOrganizeSkills.values()];
-    if (skills.length === 0 || organizeSubmitting) {
+    const skills = [...selectedOrganizeSkills.values()].filter(
+      isSkillOrganizeEligible,
+    );
+    if (!canSubmitSkillOrganize(skills.length)) {
+      message.warning(t("admin.memorySkillOrganizeMinimumWarning"));
+      return;
+    }
+    if (organizeSubmitting) {
       return;
     }
 
@@ -591,33 +523,20 @@ export default function SkillManagementSection() {
       if (!result.requestId || !result.taskId) {
         throw new Error("Skill organize task was not accepted");
       }
-
-      const task = await waitForSkillOrganize(
-        result.requestId,
-        pollingController.signal,
-      );
-      if (task.status === "failed") {
-        throw new Error("Skill organize task failed");
-      }
-      if (task.status === "skipped") {
-        setOrganizeStatus("skipped");
+      if (pollingController.signal.aborted) {
         return;
       }
-      await refreshSkillAssets({ page: skillListPage });
-      setOrganizeStatus("success");
+      await followSkillOrganize(result.requestId, pollingController);
     } catch (error) {
       if (pollingController.signal.aborted) {
         return;
       }
-      console.error("Skill organize task failed:", error);
-      setOrganizeStatus("error");
-    } finally {
       if (organizePollingControllerRef.current === pollingController) {
         organizePollingControllerRef.current = null;
       }
-      if (!pollingController.signal.aborted) {
-        setOrganizeSubmitting(false);
-      }
+      console.error("Skill organize task failed:", error);
+      setOrganizeStatus("error");
+      setOrganizeSubmitting(false);
     }
   };
 
@@ -840,7 +759,6 @@ export default function SkillManagementSection() {
         skillView={skillView}
         onSkillViewChange={handleSkillViewChange}
         installedCount={skillListTotal}
-        trashCount={trashListTotal}
         onCreateSkill={openSkillCreateModal}
         organizeMode={organizeMode}
         organizeStatus={organizeStatus}
@@ -940,43 +858,6 @@ export default function SkillManagementSection() {
           }}
         />
       ) : null}
-
-      {skillView === "trash" ? (
-        <SkillTrashedView
-          t={t}
-          loading={trashLoading}
-          dataSource={trashAssets}
-          searchInput={trashSearchInput}
-          onSearchInputChange={setTrashSearchInput}
-          onSearch={(value) => {
-            setTrashKeyword(value.trim());
-            setTrashListPage(1);
-          }}
-          category={trashCategory}
-          onCategoryChange={(value) => {
-            setTrashCategory(value);
-            setTrashListPage(1);
-          }}
-          categories={availableCategories}
-          categoriesLoading={skillCategoriesLoading}
-          onReset={handleTrashReset}
-          page={trashListPage}
-          pageSize={trashListPageSize}
-          total={trashListTotal}
-          onPageChange={(nextPage, nextPageSize) => {
-            setTrashListPage(nextPage);
-            setTrashListPageSize(nextPageSize);
-          }}
-          actionLoading={trashActionLoading}
-          emptyTrashLoading={emptyTrashLoading}
-          onRestore={handleRestoreTrashedSkill}
-          onPurge={handlePurgeTrashedSkill}
-          onEmptyTrash={handleEmptyTrash}
-          tableScroll={tableScroll}
-          listContentRef={listContentRef}
-        />
-      ) : null}
-
       <SkillAdminPublishModal
         open={adminPublishOpen}
         t={t}
@@ -985,8 +866,6 @@ export default function SkillManagementSection() {
           await refreshSkillAssets({ page: skillListPage });
           await Promise.all([loadMarketCatalog(), loadMarketTags()]);
         }}
-        tagOptions={marketTags}
-        tagsLoading={marketTagsLoading}
       />
 
       {skillView === "workflows" ? (

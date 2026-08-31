@@ -7,6 +7,7 @@ import type {
   SyncMode,
 } from "../constants/types";
 import type { LocalPathRecommendation } from "../utils/feishuTarget";
+import type { DesktopLocalFolderAccessState } from "@/runtime/desktopBridge";
 import WizardTypeStep from "./wizard/WizardTypeStep";
 import WizardConnectionStep from "./wizard/WizardConnectionStep";
 import type { LocalPathSelectOption } from "./wizard/treeSelectUtils";
@@ -30,6 +31,8 @@ interface DataSourceWizardModalProps {
   localPathRecommendations?: LocalPathRecommendation[];
   localPathRecommendationsLoading?: boolean;
   localPathRecommendationsError?: string;
+  localDiscoveryAccess?: DesktopLocalFolderAccessState | null;
+  localDiscoveryChoosing?: boolean;
   feishuTargetLoading?: boolean;
   feishuTargetTreeData?: DataNode[];
   allowTypeSelection?: boolean;
@@ -45,6 +48,7 @@ interface DataSourceWizardModalProps {
   onLoadLocalPathChildren?: TreeSelectProps["loadData"];
   onResetLocalPathBrowseOptions?: () => void;
   onLoadLocalPathRecommendations?: () => void;
+  onChooseLocalDiscoveryLocations?: () => void;
   onLoadFeishuTargetOptions?: () => void;
   onSearchFeishuTargetOptions?: (keyword: string) => void;
   onLoadFeishuTargetChildren?: TreeSelectProps["loadData"];
@@ -67,6 +71,8 @@ export default function DataSourceWizardModal({
   localPathRecommendations = [],
   localPathRecommendationsLoading = false,
   localPathRecommendationsError = "",
+  localDiscoveryAccess = null,
+  localDiscoveryChoosing = false,
   feishuTargetLoading = false,
   feishuTargetTreeData = [],
   allowTypeSelection = true,
@@ -82,6 +88,7 @@ export default function DataSourceWizardModal({
   onLoadLocalPathChildren,
   onResetLocalPathBrowseOptions,
   onLoadLocalPathRecommendations,
+  onChooseLocalDiscoveryLocations,
   onLoadFeishuTargetOptions,
   onSearchFeishuTargetOptions,
   onLoadFeishuTargetChildren,
@@ -183,6 +190,8 @@ export default function DataSourceWizardModal({
               localPathRecommendations={localPathRecommendations}
               localPathRecommendationsLoading={localPathRecommendationsLoading}
               localPathRecommendationsError={localPathRecommendationsError}
+              localDiscoveryAccess={localDiscoveryAccess}
+              localDiscoveryChoosing={localDiscoveryChoosing}
               feishuTargetLoading={feishuTargetLoading}
               feishuTargetTreeData={feishuTargetTreeData}
               onLoadLocalPathOptions={onLoadLocalPathOptions}
@@ -190,6 +199,7 @@ export default function DataSourceWizardModal({
               onLoadLocalPathChildren={onLoadLocalPathChildren}
               onResetLocalPathBrowseOptions={onResetLocalPathBrowseOptions}
               onLoadLocalPathRecommendations={onLoadLocalPathRecommendations}
+              onChooseLocalDiscoveryLocations={onChooseLocalDiscoveryLocations}
               onLoadFeishuTargetOptions={onLoadFeishuTargetOptions}
               onSearchFeishuTargetOptions={onSearchFeishuTargetOptions}
               onLoadFeishuTargetChildren={onLoadFeishuTargetChildren}

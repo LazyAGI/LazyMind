@@ -61,3 +61,21 @@ def test_tool_limit_decision_validates_action() -> None:
     })
 
     assert response.status_code == 400
+
+
+def test_clear_session_env_drops_stored_conversation_vars(monkeypatch) -> None:
+    from lazymind.chat.service import chat_service
+
+    previous = dict(chat_service._conversation_env_vars)
+    chat_service._conversation_env_vars.clear()
+    chat_service._conversation_env_vars['conversation-1'] = {'REDFOX_API_KEY': 'secret'}
+    try:
+        response = _client().post('/api/chat/session-env:clear', json={
+            'conversation_ids': ['conversation-1', 'missing'],
+        })
+    finally:
+        chat_service._conversation_env_vars.clear()
+        chat_service._conversation_env_vars.update(previous)
+
+    assert response.status_code == 200
+    assert response.json() == {'ok': True, 'cleared': ['conversation-1']}

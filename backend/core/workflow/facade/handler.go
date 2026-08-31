@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -16,8 +17,11 @@ import (
 	"github.com/gorilla/mux"
 	"gorm.io/gorm"
 	"lazymind/core/common"
+	corestore "lazymind/core/store"
+	"lazymind/core/subagent"
 	"lazymind/core/workflow/artifactfile"
 	workflowexecutor "lazymind/core/workflow/executor"
+	"lazymind/core/workflow/graphengine"
 	workflowstore "lazymind/core/workflow/store"
 )
 
@@ -184,6 +188,60 @@ type prepareRequest struct {
 	ConversationID string         `json:"conversation_id"`
 	ControllerHost string         `json:"controller_host"`
 	RequestContext string         `json:"request_context"`
+}
+
+type preparationGraph struct {
+	Nodes map[string]struct {
+		Capabilities []string `json:"capabilities"`
+		LegacyTools  []string `json:"legacy_tools"`
+	} `json:"nodes"`
+	MaterialProducers map[string]struct {
+		Kind     string `json:"kind"`
+		Optional bool   `json:"optional"`
+	} `json:"material_producers"`
+	InputExpressions map[string]graphengine.Expression `json:"input_expressions"`
+}
+
+func collectRequiredInputMaterials(expression graphengine.Expression, materials map[string]struct{}) {
+	if expression.Material != "" {
+		materials[expression.Material] = struct{}{}
+	}
+	for _, nested := range expression.All {
+		collectRequiredInputMaterials(nested, materials)
+	}
+	for _, nested := range expression.Any {
+		// Keep the existing conservative preparation contract for alternatives:
+		// every candidate branch input must be available before the Session starts.
+		collectRequiredInputMaterials(nested, materials)
+	}
+}
+
+func missingExternalInputs(graph preparationGraph, inputBindings map[string]any) []string {
+	required := map[string]struct{}{}
+	if graph.InputExpressions == nil {
+		// Backward compatibility for compiled graphs without expression metadata.
+		for materialID, producer := range graph.MaterialProducers {
+			if producer.Kind == "external" && !producer.Optional {
+				required[materialID] = struct{}{}
+			}
+		}
+	} else {
+		for _, expression := range graph.InputExpressions {
+			collectRequiredInputMaterials(expression, required)
+		}
+	}
+	missing := make([]string, 0)
+	for materialID := range required {
+		producer, exists := graph.MaterialProducers[materialID]
+		if !exists || producer.Kind != "external" || producer.Optional {
+			continue
+		}
+		if _, exists := inputBindings[materialID]; !exists {
+			missing = append(missing, materialID)
+		}
+	}
+	sort.Strings(missing)
+	return missing
 }
 
 type toolCommandRequest struct {
@@ -611,15 +669,7 @@ func (h Handler) Prepare(w http.ResponseWriter, r *http.Request) {
 			controllerHost = "lazymind"
 		}
 		if h.Hosts != nil {
-			var graph struct {
-				Nodes map[string]struct {
-					Capabilities []string `json:"capabilities"`
-					LegacyTools  []string `json:"legacy_tools"`
-				} `json:"nodes"`
-				MaterialProducers map[string]struct {
-					Kind string `json:"kind"`
-				} `json:"material_producers"`
-			}
+			var graph preparationGraph
 			_ = json.Unmarshal(workflow.CompiledGraph, &graph)
 			capabilities, legacyTools := []string{}, []string{}
 			for _, node := range graph.Nodes {
@@ -635,14 +685,7 @@ func (h Handler) Prepare(w http.ResponseWriter, r *http.Request) {
 					strings.Join(missing, ", "), false)
 				return
 			}
-			missingInputs := []string{}
-			for materialID, producer := range graph.MaterialProducers {
-				if producer.Kind == "external" {
-					if _, exists := req.InputBindings[materialID]; !exists {
-						missingInputs = append(missingInputs, materialID)
-					}
-				}
-			}
+			missingInputs := missingExternalInputs(graph, req.InputBindings)
 			if len(missingInputs) > 0 {
 				plan, _ = json.Marshal(map[string]any{"status": "needs_input", "workflow_ref": workflow.WorkflowRef,
 					"workflow_id": workflow.WorkflowID, "workflow_revision": workflow.RevisionID,
@@ -704,6 +747,10 @@ func (h Handler) Consume(w http.ResponseWriter, r *http.Request) {
 		fail(w, 503, "PREPARATION_CONSUME_FAILED", err.Error(), true)
 		return
 	}
+	sessionID := strings.TrimSpace(prepared.SessionID)
+	if sessionID == "" {
+		sessionID = req.SessionID
+	}
 	var preparedResult map[string]any
 	_ = json.Unmarshal(prepared.ResponseJSON, &preparedResult)
 	if status, _ := preparedResult["status"].(string); status != "" && status != "ready" {
@@ -727,26 +774,12 @@ func (h Handler) Consume(w http.ResponseWriter, r *http.Request) {
 		} else if original.OriginHost == "lazymind" {
 			conversationID = original.OriginRef
 		}
-		session, _, createErr := h.Store.CreateHostSession(r.Context(), owner, req.SessionID, conversationID,
-			original.OriginHost, original.OriginRef, original.ControllerHost, workflowPackage)
-		if createErr != nil {
-			code := "SESSION_CREATE_FAILED"
-			if errors.Is(createErr, workflowstore.ErrSessionConflict) {
-				code = "WORKFLOW_SESSION_CONFLICT"
-			}
-			fail(w, http.StatusConflict, code, createErr.Error(), false)
-			return
-		}
+		intentContext := ""
 		if strings.TrimSpace(original.RequestContext) != "" {
 			intentJSON, _ := json.Marshal(map[string]string{"text": original.RequestContext})
-			if intentErr := h.Store.UpdateSessionIntent(
-				r.Context(), session.ID, string(intentJSON),
-			); intentErr != nil {
-				fail(w, http.StatusServiceUnavailable, "SESSION_INTENT_STORE_FAILED", intentErr.Error(), true)
-				return
-			}
-			session.IntentContext = string(intentJSON)
+			intentContext = string(intentJSON)
 		}
+		bindings := make([]workflowstore.InputBinding, 0, len(original.InputBindings))
 		for materialID, raw := range original.InputBindings {
 			value, _ := raw.(map[string]any)
 			resourceID, _ := value["resource_id"].(string)
@@ -755,11 +788,35 @@ func (h Handler) Consume(w http.ResponseWriter, r *http.Request) {
 			if resourceID == "" {
 				continue
 			}
-			binding := workflowstore.InputBinding{WorkflowSessionID: session.ID, MaterialID: materialID,
-				ResourceType: "input_resource", ResourceID: resourceID, ResourceRevision: int64(revision),
-				ContentHash: hash, CreatedByCommandID: "prepare:" + prepared.ID}
-			if bindErr := h.Store.BindInput(r.Context(), owner, binding); bindErr != nil {
-				fail(w, http.StatusConflict, "INPUT_BINDING_CONFLICT", bindErr.Error(), false)
+			bindings = append(bindings, workflowstore.InputBinding{
+				MaterialID: materialID, ResourceType: "input_resource", ResourceID: resourceID,
+				ResourceRevision: int64(revision), ContentHash: hash,
+				CreatedByCommandID: "prepare:" + prepared.ID,
+			})
+		}
+		session, _, createErr := h.Store.CreateInitializedHostSession(
+			r.Context(), owner, sessionID, conversationID, original.OriginHost, original.OriginRef,
+			original.ControllerHost, workflowPackage, intentContext, bindings,
+		)
+		if createErr != nil {
+			code := "SESSION_CREATE_FAILED"
+			if errors.Is(createErr, workflowstore.ErrSessionConflict) {
+				code = "WORKFLOW_SESSION_CONFLICT"
+			}
+			fail(w, http.StatusConflict, code, createErr.Error(), false)
+			return
+		}
+		if session.ConversationID != "" && subagent.EventHooks != nil {
+			if eventErr := subagent.EventHooks.CallConversationEventChecked(
+				r.Context(), corestore.State(), session.ConversationID, "", "workflow_session_created", map[string]any{
+					"conversation_id": session.ConversationID,
+					"session_id":      session.ID,
+					"workflow_id":     session.WorkflowID,
+					"status":          session.Status,
+					"state_version":   session.StateVersion,
+				},
+			); eventErr != nil {
+				fail(w, http.StatusServiceUnavailable, "WORKFLOW_SESSION_EVENT_FAILED", eventErr.Error(), true)
 				return
 			}
 		}
@@ -896,6 +953,7 @@ func (h Handler) Command(delegate http.Handler) http.HandlerFunc {
 							value["ready_steps"] = projection["ready"]
 							value["retryable_steps"] = projection["retryable"]
 							value["rewindable_steps"] = projection["rewindable"]
+							value["continue_steps"] = projection["continue"]
 						}
 					}
 				}

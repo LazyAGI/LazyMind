@@ -1,9 +1,22 @@
-const { app, BrowserWindow, ipcMain, shell, dialog, clipboard, Menu, Tray, session, powerMonitor } = require("electron");
+const {
+  app,
+  BrowserWindow,
+  ipcMain,
+  shell,
+  dialog,
+  clipboard,
+  Menu,
+  Tray,
+  session,
+  powerMonitor,
+  net,
+} = require("electron");
 const { spawn, execFile } = require("node:child_process");
 const { createHmac, randomBytes, randomUUID } = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 const { resolveWindowsDesktopPaths } = require("./desktop-paths");
+const { resolveRuntimeLocalFile } = require("./runtime-local-file");
 const {
   desktopRuntimeReady,
   isRuntimeOwnershipConflict,
@@ -16,6 +29,7 @@ const {
   writeStartupMetrics,
 } = require("./startup-metrics");
 const {
+  installerWarmupWebPreferences,
   macWarmupCompleted,
   macWarmupMarkerPath,
   markMacWarmupCompleted,
@@ -23,6 +37,15 @@ const {
 } = require("./installer-warmup");
 const { clearFrontendCaches } = require("./frontend-cache");
 const { installExternalNavigationHandler, isTrustedCloudNavigation } = require("./external-navigation");
+const {
+  collapseRoots,
+  containsPath,
+  discoverRecommendedFolders,
+  loadAccessState,
+  recommendationsForExactFolders,
+  resolveExistingDirectories,
+  saveAccessState,
+} = require("./local-folder-access");
 
 const isWindows = process.platform === "win32";
 const isMac = process.platform === "darwin";
@@ -58,19 +81,33 @@ const repoRoot = process.env.LAZYMIND_DESKTOP_REPO_ROOT ||
 const explicitRuntimeRoot = process.env.LAZYMIND_DESKTOP_RUNTIME_ROOT || "";
 const desktopLogsDir = app.getPath("logs");
 const desktopCredentialIdentityPath = path.join(app.getPath("userData"), "credential-device.json");
+const localFolderAccessStatePath = path.join(app.getPath("userData"), "local-folder-access.json");
+const cursorWorkspaceStorageRoot = path.join(
+  app.getPath("appData"),
+  "Cursor",
+  "User",
+  "workspaceStorage",
+);
 const startupLogPath = path.join(desktopLogsDir, "desktop-startup.log");
 const sidecarPath = process.env.LAZYMIND_DESKTOP_SIDECAR ||
   path.join(runtimeResourcesRoot, "bin", `local-runtime-manager${isWindows ? ".exe" : ""}`);
+const editablePptDependencyConfigPath = path.join(
+  runtimeResourcesRoot,
+  "config",
+  "editable-ppt-dependencies.json",
+);
 const agentConnectorPath = process.env.LAZYMIND_DESKTOP_AGENT_CONNECTOR ||
   path.join(runtimeResourcesRoot, "bin", `lazymind${isWindows ? ".exe" : ""}`);
 const maxStartupLogEntries = 1200;
 const maxSidecarFailureBytes = 32 * 1024;
 const desktopShutdownTimeout = process.env.LAZYMIND_DESKTOP_SHUTDOWN_TIMEOUT || "20s";
 const forceExitDelayMs = 1500;
-const rendererReadyTimeoutMs = 30 * 1000;
+const rendererReadyTimeoutMs = 120 * 1000;
 const runtimeOwnershipHandoffTimeoutMs = 30 * 1000;
 const agentHostRestartMaxDelayMs = 30 * 1000;
 const agentHostStableAfterMs = 60 * 1000;
+const agentConnectorActionTimeoutMs = 15 * 1000;
+const agentConnectorBindingTimeoutMs = 30 * 1000;
 const macInstallationWarmupMarker = macWarmupMarkerPath(app.getPath("userData"));
 const startupMetricsHistoryPath = path.join(desktopLogsDir, "startup-metrics.jsonl");
 const startupMetricsRecorder = createStartupMetricsRecorder({
@@ -101,6 +138,7 @@ let agentHostProcess;
 let agentHostRestartTimer;
 let agentHostStableTimer;
 let agentHostRestartAttempts = 0;
+const agentLoginProcesses = new Map();
 let runtimeProcessExit = null;
 let sidecarStderrTail = "";
 let sidecarStructuredFailure = "";
@@ -118,13 +156,32 @@ let windowHiddenByUser = false;
 let startupLogEntries = [];
 let startupLogWriteFailed = false;
 let lastStartupError = null;
+let loggedPortResolutions = new Set();
 let startupState = {
   status: "starting",
   phase: "Initializing",
   message: "Starting local desktop runtime...",
+  progress: null,
   startedAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),
 };
+
+function loadEditablePptDependencyConfig() {
+  try {
+    const config = JSON.parse(fs.readFileSync(editablePptDependencyConfigPath, "utf8"));
+    return {
+      windowsX64: config?.windowsX64 || {},
+      darwinArm64: config?.darwinArm64 || {},
+    };
+  } catch (error) {
+    if (error?.code !== "ENOENT") {
+      appendStartupLog("desktop", `editable PPT dependency config unavailable: ${error.message}`);
+    }
+    return { windowsX64: {}, darwinArm64: {} };
+  }
+}
+
+const editablePptDependencyConfig = loadEditablePptDependencyConfig();
 
 function loadOrCreateDesktopCredentialIdentity() {
   fs.mkdirSync(path.dirname(desktopCredentialIdentityPath), { recursive: true });
@@ -170,6 +227,7 @@ function sidecarArgs(command, extra = []) {
 }
 
 function sidecarEnv() {
+  const localFolderAccess = loadAccessState(localFolderAccessStatePath);
   const env = {
     ...process.env,
     LAZYMIND_RUNTIME_PROFILE: "desktop",
@@ -178,15 +236,23 @@ function sidecarEnv() {
     LAZYMIND_DESKTOP_OWNER_PID: String(process.pid),
     LAZYMIND_RUNTIME_RESOURCES_ROOT: runtimeResourcesRoot,
     LAZYMIND_LOCAL_NETWORK_PROFILE: "localhost",
+    LAZYMIND_LOCAL_PORTS_PINNED: "false",
     LAZYMIND_LOCAL_PROXY_ADDRESS: "127.0.0.1",
     LAZYMIND_LOCAL_AUTO_LOGIN_ALLOW_LAN: "false",
     LAZYMIND_OPENAPI_ARTIFACT_EXPORT_ENABLED: "false",
+    LAZYMIND_NODE_EXECUTABLE: process.execPath,
+    LAZYMIND_NODE_RUN_AS_NODE: "true",
     VITE_LAZYMIND_MODE: "desktop",
     PYTHONDONTWRITEBYTECODE: "1",
+    LAZYMIND_FILE_WATCHER_EXTRA_ALLOWED_ROOTS_JSON: JSON.stringify(localFolderAccess.allowedRoots),
   };
   env.LAZYMIND_MODEL_PROVIDER_SECRET_KEY ||= deriveDesktopCredentialKey(desktopCredentialIdentity, "model-provider");
   env.LAZYMIND_MCP_SECRET_KEY ||= deriveDesktopCredentialKey(desktopCredentialIdentity, "mcp");
   env.LAZYMIND_AUTH_CLOUD_SECRET_KEY ||= deriveDesktopCredentialKey(desktopCredentialIdentity, "cloud-oauth");
+  env.LAZYMIND_EDITABLE_PPT_WINDOWS_X64_URL ||= editablePptDependencyConfig.windowsX64.url || "";
+  env.LAZYMIND_EDITABLE_PPT_WINDOWS_X64_SHA256 ||= editablePptDependencyConfig.windowsX64.sha256 || "";
+  env.LAZYMIND_EDITABLE_PPT_DARWIN_ARM64_URL ||= editablePptDependencyConfig.darwinArm64.url || "";
+  env.LAZYMIND_EDITABLE_PPT_DARWIN_ARM64_SHA256 ||= editablePptDependencyConfig.darwinArm64.sha256 || "";
   if (explicitRuntimeRoot) {
     env.LAZYMIND_RUNTIME_ROOT = explicitRuntimeRoot;
   } else {
@@ -205,10 +271,10 @@ function sidecarShutdownEnv() {
 function installerWarmupTimeoutSeconds(argv = process.argv) {
   const index = argv.indexOf("--timeout-seconds");
   if (index < 0 || index + 1 >= argv.length) {
-    return 900;
+    return 1800;
   }
   const value = Number.parseInt(argv[index + 1], 10);
-  return Number.isFinite(value) && value > 0 ? value : 900;
+  return Number.isFinite(value) && value > 0 ? value : 1800;
 }
 
 function currentRuntimeRoot() {
@@ -243,6 +309,7 @@ function resetStartupLogsForRun() {
   startupLogEntries = [];
   startupLogWriteFailed = false;
   lastStartupError = null;
+  loggedPortResolutions = new Set();
   try {
     ensureDesktopLogDirs();
     fs.writeFileSync(startupLogPath, "");
@@ -340,6 +407,57 @@ function captureSidecarChunk(source, chunk) {
       if (event?.event === "capability.ready" && event?.capability === "home") {
         publishHomeReady(Number(event.frontendPort));
       }
+      if (event?.event === "phase.progress" && event?.phase === "python-payload") {
+        const progress = {
+          stage: String(event.stage || "extracting"),
+          completedFiles: Number(event.completedFiles || 0),
+          totalFiles: Number(event.totalFiles || 0),
+          completedBytes: Number(event.completedBytes || 0),
+          totalBytes: Number(event.totalBytes || 0),
+          completedRoots: Number(event.completedRoots || 0),
+          totalRoots: Number(event.totalRoots || 0),
+          retryAttempt: Number(event.retryAttempt || 0),
+          retryElapsedMs: Number(event.retryElapsedMs || 0),
+        };
+        const waiting = progress.stage === "waiting";
+        const finalizing = progress.stage === "installing";
+        const opening = progress.stage === "opening";
+        updateStartupState({
+          status: "starting",
+          phase: waiting
+            ? "Waiting for Windows"
+            : (finalizing
+              ? "Finalizing Python"
+              : (opening ? "Reading Python archive" : "Preparing Python")),
+          message: waiting
+            ? "Python files are ready. Waiting for Windows to release them..."
+            : (finalizing
+              ? "Installing the bundled Python runtime..."
+              : (opening
+                ? "Reading the bundled Python archive..."
+                : "Preparing the bundled Python runtime for first use...")),
+          progress,
+        });
+      }
+      if (["phase.completed", "phase.failed"].includes(event?.event) && event?.phase === "python-payload") {
+        updateStartupState({ progress: null });
+      }
+      if (event?.phase === "history-injection-payload" && event?.event === "phase.started") {
+        updateStartupState({
+          status: "starting",
+          phase: "Preparing sample conversations",
+          message: "Verifying and unpacking the bundled sample conversations...",
+          progress: null,
+        });
+      }
+      if (event?.phase === "history-injection-payload" && event?.event === "phase.completed") {
+        updateStartupState({
+          status: "starting",
+          phase: "Sample conversations ready",
+          message: "Starting the local services and importing sample conversations...",
+          progress: null,
+        });
+      }
       if (["phase.failed", "startup.failed"].includes(event?.event) && event?.error) {
         sidecarStructuredFailure = String(event.error);
       }
@@ -370,6 +488,7 @@ function setStartupFailure(error, message = "Desktop runtime failed to start") {
     status: "failed",
     phase: "Failed",
     message,
+    progress: null,
     error: lastStartupError,
   });
   finishStartupMetrics("failed", "runtime-startup");
@@ -428,20 +547,113 @@ function runSidecar(command, extra = [], options = {}) {
 
 function runAgentConnector(agent, action) {
   const allowedActions = {
-    codex: new Set(["connect", "status", "disconnect"]),
-    cursor: new Set(["connect", "status", "disconnect"]),
-    workbuddy: new Set(["connect", "status", "disconnect"]),
+    all: new Set(["status"]),
+    codex: new Set(["connect", "status", "disconnect", "login"]),
+    cursor: new Set(["connect", "status", "disconnect", "login"]),
+    workbuddy: new Set(["connect", "status", "disconnect", "login"]),
+    raccoon: new Set(["connect", "status", "disconnect"]),
     traework: new Set(["connect", "status", "disconnect"]),
     "deepseek-harness": new Set(["connect", "status", "disconnect"]),
   };
   if (!allowedActions[agent]?.has(action)) {
     return Promise.reject(new Error(`Unsupported external Agent action: ${agent}/${action}`));
   }
-  const args = ["internal", "agent", agent, action];
+  if (action === "login") {
+    return startAgentLogin(agent);
+  }
+  return runConnectorJSON(
+    ["internal", "agent", agent, action],
+    agentConnectorActionTimeoutMs,
+  );
+}
+
+function startAgentLogin(agent) {
+  agentLoginProcesses.get(agent)?.kill();
+  const child = spawn(agentConnectorPath, ["internal", "agent", agent, "login"], {
+    env: sidecarEnv(),
+    stdio: ["ignore", "ignore", "pipe"],
+    detached: false,
+    windowsHide: isWindows,
+  });
+  agentLoginProcesses.set(agent, child);
+  child.stderr?.on("data", (chunk) => appendStartupLog(`agent-login:${agent}`, chunk));
+  child.once("error", (error) => {
+    appendStartupLog(`agent-login:${agent}`, serializeError(error));
+  });
+  child.once("close", (code, signal) => {
+    if (agentLoginProcesses.get(agent) === child) {
+      agentLoginProcesses.delete(agent);
+    }
+    appendStartupLog(`agent-login:${agent}`, `exited with code ${code ?? "null"} signal ${signal ?? "null"}`);
+    if (!isQuitting) {
+      restartAgentHost();
+    }
+  });
+  return runConnectorJSON(
+    ["internal", "agent", agent, "status"],
+    agentConnectorActionTimeoutMs,
+  );
+}
+
+async function runExecutorConnector(provider, action) {
+  const allowedActions = {
+    all: new Set(["status"]),
+    codex: new Set(["status", "enable", "disable"]),
+    cursor: new Set(["status", "enable", "disable"]),
+    workbuddy: new Set(["status", "enable", "disable"]),
+  };
+  if (!allowedActions[provider]?.has(action)) {
+    throw new Error(`Unsupported external executor action: ${provider}/${action}`);
+  }
+  const result = await runConnectorJSON(
+    ["internal", "executor", provider, action],
+    agentConnectorActionTimeoutMs,
+  );
+  if (action !== "status") {
+    restartAgentHost();
+  }
+  return result;
+}
+
+const agentBindingTargets = new Set([
+  "codex-cli", "codex-desktop", "cursor-cli", "codebuddy-cli", "cursor-desktop",
+  "workbuddy-desktop", "raccoon-desktop", "traework-desktop",
+]);
+const agentBindingActions = new Set(["status", "set", "clear"]);
+
+async function runAgentBinding(target, action, executablePath = "") {
+  if (!agentBindingTargets.has(target) || !agentBindingActions.has(action)) {
+    throw new Error(`Unsupported external Agent binding action: ${target}/${action}`);
+  }
+  const args = ["internal", "binding", target, action];
+  if (action === "set") {
+    args.push("--path", executablePath);
+  }
+  const result = await runConnectorJSON(args, agentConnectorBindingTimeoutMs);
+  if (action !== "status" && target.endsWith("-cli")) {
+    restartAgentHost();
+  }
+  return result;
+}
+
+function readAgentBindings() {
+  return runConnectorJSON(["internal", "binding", "all", "status"], agentConnectorActionTimeoutMs);
+}
+
+function restartAgentHost() {
+  agentHostRestartAttempts = 0;
+  if (agentHostProcess) {
+    agentHostProcess.kill();
+  } else {
+    startAgentHost();
+  }
+}
+
+function runConnectorJSON(args, timeout, input) {
   return new Promise((resolve, reject) => {
-    execFile(agentConnectorPath, args, {
+    const child = execFile(agentConnectorPath, args, {
       env: sidecarEnv(),
-      timeout: 60_000,
+      timeout,
       windowsHide: isWindows,
     }, (error, stdout, stderr) => {
       if (error) {
@@ -455,6 +667,9 @@ function runAgentConnector(agent, action) {
         reject(new Error(`LazyMind connector returned invalid JSON: ${parseError.message}`));
       }
     });
+    if (input !== undefined) {
+      child.stdin?.end(`${JSON.stringify(input)}\n`);
+    }
   });
 }
 
@@ -521,11 +736,7 @@ async function runInstallerWarmup() {
     readStatus,
     createRenderer: () => new BrowserWindow({
       show: false,
-      webPreferences: {
-        contextIsolation: true,
-        nodeIntegration: false,
-        sandbox: true,
-      },
+      webPreferences: installerWarmupWebPreferences(),
     }),
     loadRenderer: async (warmupWindow, status) => {
       warmupWindow.webContents.session.webRequest.onBeforeRequest((details, callback) => {
@@ -547,6 +758,7 @@ async function runInstallerWarmup() {
     }),
     disposeRenderer: (warmupWindow) => {
       if (!warmupWindow.isDestroyed()) {
+        warmupWindow.webContents.session.webRequest.onBeforeRequest(null);
         warmupWindow.destroy();
       }
     },
@@ -555,15 +767,53 @@ async function runInstallerWarmup() {
   });
 }
 
+async function createInstallationWarmupWindow() {
+  const isChinese = app.getLocale().toLowerCase().startsWith("zh");
+  updateStartupState({
+    status: "starting",
+    phase: isChinese ? "首次启动准备" : "First-launch preparation",
+    message: isChinese
+      ? "正在准备本地运行环境，完成后将自动打开 LazyMind…"
+      : "Preparing the local runtime. LazyMind will open automatically when it is ready…",
+    error: null,
+  });
+  appendStartupLog("desktop", "showing first-launch preparation window");
+  const window = new BrowserWindow(browserWindowOptions(true));
+  startupWindow = window;
+  window.once("closed", () => {
+    if (startupWindow === window) {
+      startupWindow = undefined;
+    }
+  });
+  attachManagedClose(window);
+  await window.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(loadingHTML())}`);
+  broadcastStartupDiagnostics();
+  return window;
+}
+
+function disposeInstallationWarmupWindow(window) {
+  if (window && !window.isDestroyed()) {
+    window.destroy();
+  }
+  if (startupWindow === window) {
+    startupWindow = undefined;
+  }
+}
+
 async function runMacInstallationWarmupIfNeeded() {
   const version = app.getVersion();
   if (!isMac || !isPackaged || macWarmupCompleted(macInstallationWarmupMarker, version)) {
     return;
   }
   startupMetricsRecorder.mark("macWarmupStarted");
-  await runInstallerWarmup();
-  markMacWarmupCompleted(macInstallationWarmupMarker, version);
-  startupMetricsRecorder.mark("macWarmupCompleted");
+  const warmupWindow = await createInstallationWarmupWindow();
+  try {
+    await runInstallerWarmup();
+    markMacWarmupCompleted(macInstallationWarmupMarker, version);
+    startupMetricsRecorder.mark("macWarmupCompleted");
+  } finally {
+    disposeInstallationWarmupWindow(warmupWindow);
+  }
 }
 
 function startGuard() {
@@ -746,6 +996,98 @@ async function readStatus() {
   return currentStatus;
 }
 
+function localFolderAccessSnapshot() {
+  const state = loadAccessState(localFolderAccessStatePath);
+  return {
+    ...state,
+    available: true,
+    items: recommendationsForExactFolders(state.allowedRoots),
+  };
+}
+
+function localFolderDiscoveryExcludedRoots() {
+  const roots = [];
+  for (const name of ["desktop", "documents", "downloads", "music", "pictures", "videos"]) {
+    try {
+      roots.push(app.getPath(name));
+    } catch {
+      // Older Electron/platform combinations may not expose every known path.
+    }
+  }
+  return collapseRoots(roots);
+}
+
+function runtimeAllowedRoots(status) {
+  const watcher = status?.config?.fileWatcher || {};
+  return collapseRoots([
+    ...(Array.isArray(watcher.allowedRoots) ? watcher.allowedRoots : []),
+    watcher.watchHostDir,
+  ]);
+}
+
+function fileWatcherAgentToken() {
+  return process.env.LAZYMIND_FILE_WATCHER_AGENT_TOKEN ||
+    process.env.LAZYMIND_SCAN_CONTROL_PLANE_AGENT_TOKEN ||
+    "my-secret-token";
+}
+
+async function replaceFileWatcherAllowedRoots(status, roots) {
+  const port = Number(status?.config?.fileWatcher?.port || 0);
+  if (!Number.isInteger(port) || port <= 0) {
+    throw new Error("LazyMind file-watcher port is unavailable");
+  }
+  const response = await fetch(`http://127.0.0.1:${port}/api/v1/desktop/fs/allowed-roots`, {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${fileWatcherAgentToken()}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ roots }),
+    signal: AbortSignal.timeout(10_000),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload?.message || `Could not update local folder access (HTTP ${response.status})`);
+  }
+  return collapseRoots(payload?.roots || roots);
+}
+
+function resolveRequestedLocalFolder(folderPath, status, accessState) {
+  const requested = String(folderPath || "").trim();
+  if (!requested) {
+    throw new Error("Folder path is required");
+  }
+
+  const discoveryRoots = accessState.discoveryRoots || [];
+  const allowedRoots = runtimeAllowedRoots(status);
+  const requestedExists = fs.existsSync(requested);
+  if (requestedExists && [...discoveryRoots, ...allowedRoots].some((root) => containsPath(root, requested))) {
+    return resolveExistingDirectories([requested])[0];
+  }
+
+  const watchHostDir = status?.config?.fileWatcher?.watchHostDir;
+  if (watchHostDir) {
+    const virtualSuffix = requested.replace(/^[/\\]+/u, "");
+    const mapped = virtualSuffix ? path.join(watchHostDir, virtualSuffix) : watchHostDir;
+    if (fs.existsSync(mapped) && allowedRoots.some((root) => containsPath(root, mapped))) {
+      return resolveExistingDirectories([mapped])[0];
+    }
+  }
+
+  const resolved = resolveExistingDirectories([requested])[0];
+  if (![...discoveryRoots, ...allowedRoots].some((root) => containsPath(root, resolved))) {
+    throw new Error(`Folder is outside the authorized discovery locations: ${resolved}`);
+  }
+  return resolved;
+}
+
+async function restartRuntimeAfterFolderAccessChange() {
+  await runSidecar("down");
+  detachRuntimeMonitor();
+  startRuntime();
+  return waitForRuntimeReady();
+}
+
 function logStartupContext() {
   appendStartupLog("desktop", `sidecar: ${sidecarPath}`);
   appendStartupLog("desktop", `resources: ${runtimeResourcesRoot}`);
@@ -771,6 +1113,7 @@ function startRuntime() {
     status: "starting",
     phase: "Starting sidecar",
     message: "Starting local desktop runtime...",
+    progress: null,
     error: null,
   });
   logStartupContext();
@@ -819,6 +1162,10 @@ function beginFastQuit(reason = "quit") {
   agentHostStableTimer = undefined;
   agentHostProcess?.kill();
   agentHostProcess = undefined;
+  for (const child of agentLoginProcesses.values()) {
+    child.kill();
+  }
+  agentLoginProcesses.clear();
   const guardWillCleanUp = Boolean(guardPID || (!isWindows && guardProcess));
   if (!guardWillCleanUp) {
     spawnDetachedShutdownHelper(reason);
@@ -920,24 +1267,42 @@ async function waitForRuntimeReady(options = {}) {
           runtimeCapabilityReady(status, targetCapability)
         )
         : desktopRuntimeReady(status, belongsToDesktop);
+      const observedStatus = runtimeProcess && !status.ownerMatched &&
+        ["failed", "stale", "stopped"].includes(status.overallStatus)
+        ? "starting"
+        : (status.overallStatus || "starting");
+      const activeProgress = startupState.progress;
       const phase = ownedReady
         ? (targetCapability ? "Interface ready" : "Ready")
-        : `Waiting (${status.overallStatus || "unknown"})`;
+        : (activeProgress ? startupState.phase : `Waiting (${observedStatus})`);
       updateStartupState({
         status: ownedReady && !targetCapability
           ? "ready"
-          : (status.overallStatus || "starting"),
+          : observedStatus,
         phase,
-        message: ownedReady
+        message: activeProgress
+          ? startupState.message
+          : (ownedReady
           ? (
             targetCapability
               ? "Opening LazyMind while AI services continue to initialize..."
               : "Desktop runtime is ready."
           )
-          : "Starting local desktop runtime...",
+          : "Starting local desktop runtime..."),
       });
       if (status.config?.portResolutions?.length) {
         for (const resolution of status.config.portResolutions) {
+          const key = [
+            resolution.name,
+            resolution.envName,
+            resolution.requestedPort,
+            resolution.resolvedPort,
+            resolution.reason,
+          ].join(":");
+          if (loggedPortResolutions.has(key)) {
+            continue;
+          }
+          loggedPortResolutions.add(key);
           appendStartupLog(
             "status",
             `port moved: ${resolution.name} ${resolution.requestedPort} -> ${resolution.resolvedPort} (${resolution.reason})`,
@@ -1016,29 +1381,48 @@ function loadingHTML() {
       color: #1f2937;
       overflow: hidden;
     }
+    ::selection { background: #bfdbfe; color: #172554; }
     main {
       height: 100vh;
       display: grid;
       place-items: center;
       padding-bottom: 76px;
-      transition: padding-bottom 180ms ease;
     }
     body.drawer-open main { padding-bottom: 450px; }
     section { width: min(500px, calc(100vw - 64px)); }
     h1 { font-size: 24px; font-weight: 650; margin: 0 0 12px; letter-spacing: 0; }
     p { font-size: 14px; line-height: 1.6; color: #4b5563; margin: 0; }
     .bar { height: 4px; background: #dbeafe; overflow: hidden; margin-top: 22px; border-radius: 2px; }
-    .bar::before {
-      content: "";
-      display: block;
-      width: 42%;
+    .bar-fill {
+      width: 100%;
       height: 100%;
       background: #2563eb;
+      border-radius: inherit;
+      transform-origin: left center;
+    }
+    .bar.indeterminate .bar-fill {
+      width: 42%;
       animation: move 1.2s infinite ease-in-out;
     }
+    .bar.determinate .bar-fill {
+      transform: scaleX(0);
+      transition: transform 180ms cubic-bezier(0.16, 1, 0.3, 1);
+    }
     body.failed .bar { background: #fee2e2; }
-    body.failed .bar::before { background: #dc2626; animation: none; width: 100%; }
+    body.failed .bar-fill { background: #dc2626; animation: none; transform: scaleX(1) !important; width: 100%; }
     @keyframes move { 0% { transform: translateX(-100%); } 100% { transform: translateX(240%); } }
+    .progress-meta {
+      display: flex;
+      justify-content: space-between;
+      gap: 20px;
+      margin-top: 9px;
+      color: #64748b;
+      font-size: 12px;
+      line-height: 1.4;
+      font-variant-numeric: tabular-nums;
+    }
+    .progress-meta[hidden] { display: none; }
+    .progress-value { flex: 0 0 auto; color: #475569; }
     .details-button {
       margin-top: 16px;
       border: 0;
@@ -1123,6 +1507,11 @@ function loadingHTML() {
       font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     }
     .empty { color: #64748b; }
+    @media (prefers-reduced-motion: reduce) {
+      .bar.indeterminate .bar-fill { animation-duration: 2.4s; }
+      .bar.determinate .bar-fill { transition: none; }
+      .drawer { transition: none; }
+    }
   </style>
 </head>
 <body>
@@ -1130,7 +1519,13 @@ function loadingHTML() {
     <section>
       <h1>LazyMind</h1>
       <p id="message">Starting local desktop runtime...</p>
-      <div class="bar"></div>
+      <div id="progressBar" class="bar indeterminate" role="progressbar" aria-label="Startup progress">
+        <div id="progressFill" class="bar-fill"></div>
+      </div>
+      <div id="progressMeta" class="progress-meta" aria-live="polite" hidden>
+        <span id="progressLabel">Preparing Python</span>
+        <span id="progressValue" class="progress-value"></span>
+      </div>
       <button id="toggleDetails" class="details-button" type="button">Show startup log</button>
     </section>
   </main>
@@ -1159,6 +1554,11 @@ function loadingHTML() {
       toggle: document.getElementById("toggleDetails"),
       collapse: document.getElementById("collapse"),
       message: document.getElementById("message"),
+      progressBar: document.getElementById("progressBar"),
+      progressFill: document.getElementById("progressFill"),
+      progressMeta: document.getElementById("progressMeta"),
+      progressLabel: document.getElementById("progressLabel"),
+      progressValue: document.getElementById("progressValue"),
       phase: document.getElementById("phase"),
       log: document.getElementById("log"),
       steps: document.getElementById("steps"),
@@ -1168,6 +1568,7 @@ function loadingHTML() {
     };
     let expanded = false;
     let snapshot = null;
+    const numberFormat = new Intl.NumberFormat();
     const stepNames = [
       ["process-supervisor", "Process supervisor"],
       ["local-proxy", "Local gateway"],
@@ -1196,6 +1597,54 @@ function loadingHTML() {
       if (status === "starting") return "running";
       return "";
     }
+    function renderProgress(progress) {
+      if (!progress) {
+        els.progressBar.classList.remove("determinate");
+        els.progressBar.classList.add("indeterminate");
+        els.progressBar.removeAttribute("aria-valuenow");
+        els.progressBar.removeAttribute("aria-valuemin");
+        els.progressBar.removeAttribute("aria-valuemax");
+        els.progressFill.style.transform = "";
+        els.progressMeta.hidden = true;
+        return;
+      }
+      const totalFiles = Math.max(0, Number(progress.totalFiles || 0));
+      const completedFiles = Math.max(0, Number(progress.completedFiles || 0));
+      const ratio = totalFiles > 0 ? completedFiles / totalFiles : 0;
+      const complete = totalFiles > 0 && completedFiles >= totalFiles;
+      const percent = complete
+        ? 100
+        : Math.max(0, Math.min(99, Math.floor(ratio * 100)));
+      els.progressBar.classList.remove("indeterminate");
+      els.progressBar.classList.add("determinate");
+      els.progressBar.setAttribute("aria-valuemin", "0");
+      els.progressBar.setAttribute("aria-valuemax", "100");
+      els.progressBar.setAttribute("aria-valuenow", String(percent));
+      els.progressFill.style.transform = "scaleX(" + (percent / 100) + ")";
+      els.progressMeta.hidden = false;
+      if (progress.stage === "waiting") {
+        els.progressLabel.textContent = "Waiting for Windows to release Python files";
+        els.progressValue.textContent = percent + "% · " + (progress.retryAttempt > 0
+          ? "Retry " + numberFormat.format(progress.retryAttempt)
+          : "Finalizing");
+        return;
+      }
+      if (progress.stage === "installing") {
+        els.progressLabel.textContent = "Finalizing Python runtime";
+        els.progressValue.textContent = percent + "% · " + (progress.totalRoots > 0
+          ? numberFormat.format(progress.completedRoots) + " / " + numberFormat.format(progress.totalRoots) + " steps"
+          : "Finalizing");
+        return;
+      }
+      if (progress.stage === "opening") {
+        els.progressLabel.textContent = "Reading bundled Python archive";
+        els.progressValue.textContent = "0%";
+        return;
+      }
+      els.progressLabel.textContent = "Extracting bundled Python";
+      els.progressValue.textContent = percent + "% · " +
+        numberFormat.format(completedFiles) + " / " + numberFormat.format(totalFiles) + " files";
+    }
     function render(next) {
       snapshot = next || snapshot;
       if (!snapshot) return;
@@ -1207,6 +1656,7 @@ function loadingHTML() {
       }
       els.message.textContent = startup.message || "Starting local desktop runtime...";
       els.phase.textContent = startup.phase || startup.status || "Starting";
+      renderProgress(startup.progress);
       const services = status.services || {};
       els.steps.innerHTML = stepNames.map(([key, label]) => {
         const serviceStatus = services[key]?.status || "pending";
@@ -1252,6 +1702,7 @@ function browserWindowOptions(show = true) {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      backgroundThrottling: false,
     },
   };
 }
@@ -1431,7 +1882,9 @@ function createRendererReadyWait(window) {
   const timer = setTimeout(() => {
     if (settled) return;
     settled = true;
-    rejectPromise(new Error("LazyMind Chat did not render within 30 seconds"));
+    rejectPromise(
+      new Error(`LazyMind Chat did not render within ${rendererReadyTimeoutMs / 1000} seconds`),
+    );
   }, rendererReadyTimeoutMs);
   return {
     window,
@@ -1548,13 +2001,19 @@ ipcMain.on("lazymind:renderer-ready", (event) => {
 });
 
 ipcMain.handle("lazymind:runtimeStatus", () => readStatus());
-ipcMain.handle("lazymind:agentIntegrationStatus", (_event, agent) => runAgentConnector(agent, "status"));
+ipcMain.handle("lazymind:agentIntegrationStatuses", () => runAgentConnector("all", "status"));
 ipcMain.handle("lazymind:agentIntegrationAction", (_event, agent, action) => runAgentConnector(agent, action));
-ipcMain.handle("lazymind:codexIntegrationAction", (_event, action) => runAgentConnector("codex", action));
+ipcMain.handle("lazymind:executorIntegrationPolicies", () => runExecutorConnector("all", "status"));
+ipcMain.handle("lazymind:executorIntegrationAction", (_event, provider, action) => runExecutorConnector(provider, action));
+ipcMain.handle("lazymind:agentExecutableBindings", () => readAgentBindings());
+ipcMain.handle("lazymind:agentExecutableBind", (_event, target, executablePath) => runAgentBinding(target, "set", executablePath));
+ipcMain.handle("lazymind:agentExecutableClear", (_event, target) => runAgentBinding(target, "clear"));
+ipcMain.handle("lazymind:assistantSessionSet", (_event, value) =>
+  runConnectorJSON(["internal", "session", "set"], agentConnectorActionTimeoutMs, value));
+ipcMain.handle("lazymind:assistantSessionClear", () =>
+  runConnectorJSON(["internal", "session", "clear"], agentConnectorActionTimeoutMs));
 ipcMain.handle("lazymind:restartRuntime", async () => {
-  await runSidecar("down");
-  startRuntime();
-  return waitForRuntimeReady();
+  return restartRuntimeAfterFolderAccessChange();
 });
 ipcMain.handle("lazymind:resetRuntime", async (_event, scope = "kb") => {
   await runSidecar("reset", ["--scope", scope]);
@@ -1579,15 +2038,139 @@ ipcMain.handle("lazymind:openDataDir", async () => {
   fs.mkdirSync(target, { recursive: true });
   await shell.openPath(target);
 });
+ipcMain.handle("lazymind:localFolderAccessStatus", () => localFolderAccessSnapshot());
+ipcMain.handle("lazymind:chooseLocalDiscoveryRoots", async () => {
+  const isChinese = app.getLocale().toLowerCase().startsWith("zh");
+  const previous = loadAccessState(localFolderAccessStatePath);
+  const consent = await dialog.showMessageBox(activeWindow(), {
+    type: "question",
+    title: isChinese ? "允许查找推荐目录" : "Allow recommended folder discovery",
+    message: isChinese
+      ? "是否允许 LazyMind 在你随后选择的位置中查找可接入目录？"
+      : "Allow LazyMind to look for folders you can connect inside the locations you choose next?",
+    detail: isChinese
+      ? "查找会限制递归深度和耗时，只识别 Cursor、Codex 等已知目录；所选父目录不会加入 allowed_roots，也不会读取或同步文件内容。桌面、文档、下载及媒体目录会被跳过。"
+      : "Discovery is bounded by depth and time and only recognizes known locations such as Cursor and Codex folders. Parent locations are not added to allowed_roots, and file contents are not read or synced. Desktop, Documents, Downloads, and media folders are skipped.",
+    buttons: [isChinese ? "继续选择" : "Choose locations", isChinese ? "取消" : "Cancel"],
+    defaultId: 0,
+    cancelId: 1,
+    noLink: true,
+  });
+  if (consent.response !== 0) {
+    const saved = saveAccessState(localFolderAccessStatePath, {
+      ...previous,
+      discoveryConsentGranted: false,
+    });
+    return { ...saved, available: true, canceled: true };
+  }
+  const result = await dialog.showOpenDialog(activeWindow(), {
+    title: isChinese ? "选择用于查找推荐目录的位置" : "Choose locations to search",
+    message: isChinese
+      ? "可一次选择多个位置。LazyMind 只会在这些位置查找可接入目录。"
+      : "You can choose multiple locations. LazyMind only searches them for folders you can connect.",
+    defaultPath: app.getPath("home"),
+    buttonLabel: isChinese ? "允许查找" : "Allow search",
+    properties: ["openDirectory", "multiSelections"],
+  });
+  if (result.canceled || result.filePaths.length === 0) {
+    const saved = saveAccessState(localFolderAccessStatePath, {
+      ...previous,
+      discoveryConsentGranted: false,
+    });
+    return { ...saved, available: true, canceled: true };
+  }
+  const excludedRoots = localFolderDiscoveryExcludedRoots();
+  const discoveryRoots = resolveExistingDirectories(
+    collapseRoots([
+      ...previous.discoveryRoots,
+      ...result.filePaths,
+    ]).filter((candidate) =>
+      !excludedRoots.some((excludedRoot) => containsPath(excludedRoot, candidate))),
+  );
+  const saved = saveAccessState(localFolderAccessStatePath, {
+    ...previous,
+    discoveryConsentGranted: true,
+    discoveryRoots,
+  });
+  return { ...saved, available: true, canceled: false };
+});
+ipcMain.handle("lazymind:discoverLocalFolders", async () => {
+  const access = loadAccessState(localFolderAccessStatePath);
+  if (!access.discoveryConsentGranted || access.discoveryRoots.length === 0) {
+    return {
+      ...access,
+      available: true,
+      items: [],
+      scannedEntries: 0,
+      truncated: false,
+      stoppedReason: "not_authorized",
+      durationMs: 0,
+    };
+  }
+  const result = await discoverRecommendedFolders({
+    roots: access.discoveryRoots,
+    cursorWorkspaceStorageRoots: [cursorWorkspaceStorageRoot],
+    excludedRoots: localFolderDiscoveryExcludedRoots(),
+  });
+  return { ...access, available: true, ...result };
+});
+ipcMain.handle("lazymind:authorizeLocalFolders", async (_event, requestedPaths) => {
+  const pathsToAuthorize = Array.isArray(requestedPaths) ? requestedPaths : [];
+  if (pathsToAuthorize.length === 0) {
+    return { granted: true, addedRoots: [], ...localFolderAccessSnapshot() };
+  }
+
+  const status = await readStatus();
+  const previous = loadAccessState(localFolderAccessStatePath);
+  const resolved = collapseRoots(
+    pathsToAuthorize.map((folderPath) =>
+      resolveRequestedLocalFolder(folderPath, status, previous)),
+  );
+  const existing = collapseRoots([
+    ...runtimeAllowedRoots(status),
+    ...previous.allowedRoots,
+  ]);
+  const addedRoots = resolved.filter((candidate) =>
+    !existing.some((root) => containsPath(root, candidate)));
+  if (addedRoots.length === 0) {
+    return { granted: true, addedRoots: [], ...localFolderAccessSnapshot() };
+  }
+
+  const allowedRoots = await replaceFileWatcherAllowedRoots(status, [
+    ...runtimeAllowedRoots(status),
+    ...previous.allowedRoots,
+    ...addedRoots,
+  ]);
+  try {
+    const saved = saveAccessState(localFolderAccessStatePath, {
+      ...previous,
+      allowedRoots,
+    });
+    return { granted: true, canceled: false, addedRoots, ...saved, available: true };
+  } catch (error) {
+    try {
+      await replaceFileWatcherAllowedRoots(status, [
+        ...runtimeAllowedRoots(status),
+        ...previous.allowedRoots,
+      ]);
+    } catch (rollbackError) {
+      appendStartupLog("error", `failed to restore local folder access after persistence failure: ${serializeError(rollbackError)}`);
+    }
+    throw error;
+  }
+});
 ipcMain.handle("lazymind:selectFolder", async () => {
   const result = await dialog.showOpenDialog(activeWindow(), { properties: ["openDirectory"] });
   return result.canceled ? null : result.filePaths[0];
 });
-ipcMain.handle("lazymind:selectExecutable", async () => {
+ipcMain.handle("lazymind:selectExecutable", async (_event, target = "") => {
+  const agentExecutable = agentBindingTargets.has(target);
   const result = await dialog.showOpenDialog(activeWindow(), {
     properties: ["openFile"],
     filters: process.platform === "win32"
-      ? [{ name: "FFmpeg", extensions: ["exe"] }]
+      ? [agentExecutable
+        ? { name: "Agent executable", extensions: ["exe", "cmd", "bat"] }
+        : { name: "FFmpeg", extensions: ["exe"] }]
       : [{ name: "Executable", extensions: ["*"] }],
   });
   return result.canceled ? null : result.filePaths[0];
@@ -1610,6 +2193,141 @@ ipcMain.handle("lazymind:openCloudRegister", async () => {
 ipcMain.handle("lazymind:openCloudTokenPlan", async (_event, url) => {
   return openTrustedCloudNavigation(String(url || ""), "token-plan");
 });
+function safeArtifactFilename(name) {
+  const base = path.basename(String(name || "").replace(/[\\/]/g, "_").trim());
+  return base || "download";
+}
+
+function uniqueFilePath(dir, filename) {
+  const safe = safeArtifactFilename(filename);
+  const ext = path.extname(safe);
+  const stem = path.basename(safe, ext);
+  let dest = path.join(dir, safe);
+  let index = 1;
+  while (fs.existsSync(dest)) {
+    dest = path.join(dir, `${stem} (${index})${ext}`);
+    index += 1;
+  }
+  return dest;
+}
+
+function toNodeBuffer(data) {
+  if (data == null) {
+    return null;
+  }
+  if (Buffer.isBuffer(data)) {
+    return data;
+  }
+  if (data instanceof Uint8Array) {
+    return Buffer.from(data);
+  }
+  if (data instanceof ArrayBuffer) {
+    return Buffer.from(data);
+  }
+  return null;
+}
+
+function artifactSearchRoots() {
+  const roots = [];
+  const dataDir = currentDataDir();
+  if (dataDir) {
+    roots.push(dataDir);
+  }
+  const composeDataDir = repoRoot ? path.join(repoRoot, "data") : "";
+  if (composeDataDir && composeDataDir !== dataDir) {
+    roots.push(composeDataDir);
+  }
+  return roots;
+}
+
+async function resolveExistingArtifactPath(source) {
+  try {
+    await readStatus();
+  } catch {
+    // Keep local-file actions usable even when status refresh fails.
+  }
+  for (const root of artifactSearchRoots()) {
+    const localPath = resolveRuntimeLocalFile(root, source);
+    if (!localPath) {
+      continue;
+    }
+    try {
+      const info = await fs.promises.stat(localPath);
+      if (info.isFile()) {
+        return localPath;
+      }
+    } catch {
+      // Try the next known data root.
+    }
+  }
+  return "";
+}
+
+async function materializeArtifactFile(payload, destPath) {
+  const buffer = toNodeBuffer(payload?.data);
+  if (buffer) {
+    await fs.promises.mkdir(path.dirname(destPath), { recursive: true });
+    await fs.promises.writeFile(destPath, buffer);
+    return destPath;
+  }
+  const source = String(payload?.source || "").trim();
+  const localPath = await resolveExistingArtifactPath(source);
+  if (localPath) {
+    if (path.resolve(localPath) === path.resolve(destPath)) {
+      return destPath;
+    }
+    await fs.promises.mkdir(path.dirname(destPath), { recursive: true });
+    await fs.promises.copyFile(localPath, destPath);
+    return destPath;
+  }
+  if (!/^https?:\/\//i.test(source)) {
+    throw new Error("Artifact file is not available locally");
+  }
+  const response = await net.fetch(source);
+  if (!response.ok) {
+    throw new Error(`Failed to download artifact file (${response.status})`);
+  }
+  const bytes = Buffer.from(await response.arrayBuffer());
+  await fs.promises.mkdir(path.dirname(destPath), { recursive: true });
+  await fs.promises.writeFile(destPath, bytes);
+  return destPath;
+}
+
+ipcMain.handle("lazymind:showItemInFolder", async (_event, payload) => {
+  const source = typeof payload === "string" ? payload : String(payload?.source || "");
+  const localPath = await resolveExistingArtifactPath(source);
+  if (localPath) {
+    shell.showItemInFolder(localPath);
+    return { ok: true, path: localPath };
+  }
+  const dest = path.join(
+    app.getPath("temp"),
+    "lazymind-artifacts",
+    safeArtifactFilename(typeof payload === "object" ? payload?.filename : ""),
+  );
+  await materializeArtifactFile(payload, dest);
+  shell.showItemInFolder(dest);
+  return { ok: true, path: dest };
+});
+
+ipcMain.handle("lazymind:saveFileAs", async (_event, payload) => {
+  const filename = safeArtifactFilename(payload?.filename);
+  const result = await dialog.showSaveDialog(activeWindow(), {
+    defaultPath: filename,
+  });
+  if (result.canceled || !result.filePath) {
+    return { canceled: true };
+  }
+  await materializeArtifactFile(payload, result.filePath);
+  return { ok: true, path: result.filePath };
+});
+
+ipcMain.handle("lazymind:downloadFile", async (_event, payload) => {
+  const dest = uniqueFilePath(app.getPath("downloads"), payload?.filename);
+  await materializeArtifactFile(payload, dest);
+  return { ok: true, path: dest };
+});
+
 ipcMain.handle("lazymind:exportDiagnostics", async () => {
   const status = currentStatus || await readStatus();
   const out = path.join(desktopLogsDir, "desktop-diagnostics.json");

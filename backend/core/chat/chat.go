@@ -39,26 +39,30 @@ func upstreamTotalTimeout() time.Duration {
 }
 
 type ChatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role       string `json:"role"`
+	Content    string `json:"content"`
+	HistorySeq int    `json:"history_seq,omitempty"`
 }
 
 type DatasetFilters struct {
-	Subject    []string `json:"subject,omitempty"`
-	DatasetIDs []string `json:"kb_id,omitempty"`
-	Tags       []string `json:"tags,omitempty"`
-	Creators   []string `json:"creator,omitempty"`
+	Subject     []string `json:"subject,omitempty"`
+	DatasetIDs  []string `json:"kb_id,omitempty"`
+	DocumentIDs []string `json:"doc_id,omitempty"`
+	Tags        []string `json:"tags,omitempty"`
+	Creators    []string `json:"creator,omitempty"`
 }
 
 type LazyChatRequest struct {
-	Message           ChatMessageOptions         `json:"message"`
-	Conversation      ChatConversationOptions    `json:"conversation"`
-	Retrieval         ChatRetrievalOptions       `json:"retrieval,omitempty"`
-	Runtime           ChatRuntimeOptions         `json:"runtime,omitempty"`
-	Personalization   ChatPersonalizationOptions `json:"personalization,omitempty"`
-	Agent             ChatAgentOptions           `json:"agent,omitempty"`
-	Workflow          ChatWorkflowOptions        `json:"workflow,omitempty"`
-	ExplicitResources ExplicitResourceBindings   `json:"explicit_resource_bindings,omitempty"`
+	Message         ChatMessageOptions         `json:"message"`
+	Conversation    ChatConversationOptions    `json:"conversation"`
+	Retrieval       ChatRetrievalOptions       `json:"retrieval,omitempty"`
+	Runtime         ChatRuntimeOptions         `json:"runtime,omitempty"`
+	Personalization ChatPersonalizationOptions `json:"personalization,omitempty"`
+	Agent           ChatAgentOptions           `json:"agent,omitempty"`
+	Workflow        ChatWorkflowOptions        `json:"workflow,omitempty"`
+	ModelContext    map[string]any             `json:"model_context,omitempty"`
+
+	ExplicitResources ExplicitResourceBindings `json:"explicit_resource_bindings,omitempty"`
 }
 
 type ExplicitResourceBindings struct {
@@ -78,6 +82,7 @@ type ChatMessageOptions struct {
 
 type ChatConversationOptions struct {
 	SessionID      string         `json:"session_id"`
+	RunID          string         `json:"run_id"`
 	ConversationID string         `json:"conversation_id,omitempty"`
 	UserID         string         `json:"user_id"`
 	Mode           string         `json:"mode,omitempty"`
@@ -140,8 +145,10 @@ type LazyChatData struct {
 	ToolLimitPending         *ToolLimitPendingEvent         `json:"tool_limit_pending,omitempty"`
 	IntentUpdated            *IntentUpdatedEvent            `json:"intent_updated,omitempty"`
 	WorkflowPreflightUpdated *WorkflowPreflightUpdatedEvent `json:"workflow_preflight_updated,omitempty"`
+	ModelContextUpdated      *ModelContextUpdatedEvent      `json:"model_context_updated,omitempty"`
 	Heartbeat                bool                           `json:"heartbeat,omitempty"`
 	ToolCallTurns            int64                          `json:"tool_call_turns"`
+	RuntimeEvent             *ChatRuntimeEvent              `json:"runtime_event,omitempty"`
 }
 
 // TaskCreatedEvent is emitted by create_subagent (via translator) on the main SSE.
@@ -219,7 +226,16 @@ type WorkflowPreflightUpdatedEvent struct {
 	Snapshot map[string]any `json:"snapshot,omitempty"`
 }
 
+// ModelContextUpdatedEvent persists dual-track compression state on the conversation.
+// summary_text and covered_through_seq must be applied together (atomic ext write).
+type ModelContextUpdatedEvent struct {
+	SummaryText       string `json:"summary_text"`
+	CoveredThroughSeq int    `json:"covered_through_seq"`
+	Version           int    `json:"version,omitempty"`
+}
+
 // LazyChatResponse is one line emitted by the algorithm chat stream.
+
 type LazyChatResponse struct {
 	Code int          `json:"code"`
 	Msg  string       `json:"msg"`
@@ -229,9 +245,17 @@ type LazyChatResponse struct {
 
 // LazyStreamData text /api/chat_stream text。
 type LazyStreamData struct {
-	RawText string
 	Resp    *LazyChatResponse
+	Err     error
+	ErrKind lazyStreamErrorKind
 }
+
+type lazyStreamErrorKind uint8
+
+const (
+	lazyStreamErrorProtocol lazyStreamErrorKind = iota + 1
+	lazyStreamErrorTransport
+)
 
 // ChatService owns the algorithm chat-stream connection.
 type ChatService struct {
@@ -322,7 +346,8 @@ func lazyStreamHandler(ctx context.Context, resp *http.Response) <-chan *LazyStr
 			data := &LazyStreamData{}
 			var streamResp LazyChatResponse
 			if err := json.Unmarshal([]byte(text), &streamResp); err != nil {
-				data.RawText = text
+				data.Err = fmt.Errorf("invalid algorithm stream frame: %w", err)
+				data.ErrKind = lazyStreamErrorProtocol
 			} else {
 				data.Resp = &streamResp
 			}
@@ -330,6 +355,12 @@ func lazyStreamHandler(ctx context.Context, resp *http.Response) <-chan *LazyStr
 			case dataChan <- data:
 			case <-ctx.Done():
 				return
+			}
+		}
+		if err := scanner.Err(); err != nil && ctx.Err() == nil {
+			select {
+			case dataChan <- &LazyStreamData{Err: fmt.Errorf("read algorithm stream: %w", err), ErrKind: lazyStreamErrorTransport}:
+			case <-ctx.Done():
 			}
 		}
 	}()
@@ -349,10 +380,12 @@ type UpstreamStreamChunk struct {
 	ToolLimitPending         *ToolLimitPendingEvent         `json:"tool_limit_pending,omitempty"`
 	IntentUpdated            *IntentUpdatedEvent            `json:"intent_updated,omitempty"`
 	WorkflowPreflightUpdated *WorkflowPreflightUpdatedEvent `json:"workflow_preflight_updated,omitempty"`
+	ModelContextUpdated      *ModelContextUpdatedEvent      `json:"model_context_updated,omitempty"`
 	Heartbeat                bool                           `json:"heartbeat,omitempty"`
 	ToolCallTurns            int64                          `json:"tool_call_turns"`
 	ExternalEventSequence    int64                          `json:"external_event_sequence,omitempty"`
 	Execution                *externalExecutionProjection   `json:"execution,omitempty"`
+	RuntimeEvent             *ChatRuntimeEvent              `json:"runtime_event,omitempty"`
 	Err                      error                          `json:"-"`
 }
 
@@ -380,6 +413,9 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 	if s, ok := body["session_id"].(string); ok {
 		req.Conversation.SessionID = s
 	}
+	if runID, ok := body["run_id"].(string); ok {
+		req.Conversation.RunID = strings.TrimSpace(runID)
+	}
 	req.Message.History = chatMessagesFromAny(body["history"])
 	req.Message.Files = filesMapFromAny(body["files"])
 	req.Retrieval.Filters = datasetFiltersFromAny(body["filters"])
@@ -388,7 +424,7 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 	}
 	if depth, ok := body["thinking_depth"].(string); ok {
 		depth = strings.ToLower(strings.TrimSpace(depth))
-		if depth == "low" || depth == "medium" || depth == "high" {
+		if depth == "low" || depth == "medium" || depth == "high" || depth == "max" {
 			req.Runtime.ThinkingDepth = depth
 		}
 	}
@@ -511,6 +547,9 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 			Mentions:         stringMapSlice(bindings["mentions"]),
 		}
 	}
+	if modelContext, ok := body["model_context"].(map[string]any); ok && len(modelContext) > 0 {
+		req.ModelContext = modelContext
+	}
 	// current_turn_seq is an int in the body map. JSON numbers decode as float64.
 	switch v := body["current_turn_seq"].(type) {
 	case int:
@@ -556,6 +595,17 @@ func chatMessagesFromAny(v any) []ChatMessage {
 
 	rawAny, ok := v.([]any)
 	if !ok {
+		// Also accept []map[string]any from buildChatRequestBody.
+		if typed, ok := v.([]map[string]any); ok {
+			messages := make([]ChatMessage, 0, len(typed))
+			for _, m := range typed {
+				messages = append(messages, chatMessageFromMap(m))
+			}
+			if len(messages) == 0 {
+				return nil
+			}
+			return messages
+		}
 		return nil
 	}
 	messages := make([]ChatMessage, 0, len(rawAny))
@@ -564,14 +614,29 @@ func chatMessagesFromAny(v any) []ChatMessage {
 		if m == nil {
 			continue
 		}
-		role, _ := m["role"].(string)
-		content, _ := m["content"].(string)
-		messages = append(messages, ChatMessage{Role: role, Content: content})
+		messages = append(messages, chatMessageFromMap(m))
 	}
 	if len(messages) == 0 {
 		return nil
 	}
 	return messages
+}
+
+func chatMessageFromMap(m map[string]any) ChatMessage {
+	role, _ := m["role"].(string)
+	content, _ := m["content"].(string)
+	msg := ChatMessage{Role: role, Content: content}
+	switch seq := m["history_seq"].(type) {
+	case int:
+		msg.HistorySeq = seq
+	case int32:
+		msg.HistorySeq = int(seq)
+	case int64:
+		msg.HistorySeq = int(seq)
+	case float64:
+		msg.HistorySeq = int(seq)
+	}
+	return msg
 }
 
 func datasetFiltersFromAny(v any) *DatasetFilters {
@@ -580,12 +645,13 @@ func datasetFiltersFromAny(v any) *DatasetFilters {
 		return nil
 	}
 	filters := &DatasetFilters{
-		Subject:    stringSlice(m["subject"]),
-		DatasetIDs: stringSlice(m["kb_id"]),
-		Tags:       stringSlice(m["tags"]),
-		Creators:   stringSlice(m["creator"]),
+		Subject:     stringSlice(m["subject"]),
+		DatasetIDs:  stringSlice(m["kb_id"]),
+		DocumentIDs: stringSlice(m["doc_id"]),
+		Tags:        stringSlice(m["tags"]),
+		Creators:    stringSlice(m["creator"]),
 	}
-	if len(filters.Subject) == 0 && len(filters.DatasetIDs) == 0 && len(filters.Tags) == 0 && len(filters.Creators) == 0 {
+	if len(filters.Subject) == 0 && len(filters.DatasetIDs) == 0 && len(filters.DocumentIDs) == 0 && len(filters.Tags) == 0 && len(filters.Creators) == 0 {
 		return nil
 	}
 	return filters
@@ -779,15 +845,50 @@ func StreamChatUpstream(ctx context.Context, baseURL string, body map[string]any
 	out := make(chan UpstreamStreamChunk, 1)
 	go func() {
 		defer close(out)
+		terminalSeen := false
+		var terminalChunk *UpstreamStreamChunk
 		for d := range streamChan {
 			if d == nil {
 				continue
 			}
+			if d.Err != nil {
+				if terminalSeen && d.ErrKind == lazyStreamErrorTransport && terminalChunk != nil {
+					select {
+					case out <- *terminalChunk:
+					case <-ctx.Done():
+					}
+					return
+				}
+				select {
+				case out <- UpstreamStreamChunk{Err: d.Err}:
+				case <-ctx.Done():
+				}
+				return
+			}
 			if d.Resp == nil {
-				// textFailedtext RawText：text，text，text
 				continue
 			}
 			chunk := upstreamStreamChunkFromData(d.Resp.Data)
+			isTerminalFrame := false
+			if terminalSeen && (hasBusinessStreamPayload(chunk) || chunk.RuntimeEvent != nil) {
+				chunk.Err = errors.New("algorithm emitted payload after run_finished")
+			}
+			if chunk.RuntimeEvent != nil {
+				if err := chunk.RuntimeEvent.Validate(req.Conversation.RunID); err != nil {
+					chunk.Err = err
+				} else if chunk.RuntimeEvent.Type == RuntimeEventRunFinished {
+					if hasBusinessStreamPayload(chunk) {
+						chunk.Err = errors.New("algorithm combined run_finished with business payload")
+					} else if terminalSeen {
+						chunk.Err = errors.New("algorithm emitted duplicate run_finished")
+					} else {
+						terminalSeen = true
+						isTerminalFrame = true
+						copyOfChunk := chunk
+						terminalChunk = &copyOfChunk
+					}
+				}
+			}
 			if d.Resp.Code != http.StatusOK {
 				message := strings.TrimSpace(d.Resp.Msg)
 				if message == "" {
@@ -795,10 +896,31 @@ func StreamChatUpstream(ctx context.Context, baseURL string, body map[string]any
 				}
 				chunk.Err = fmt.Errorf("algorithm chat stream failed: %s", message)
 			}
+			if chunk.Err != nil {
+				select {
+				case out <- UpstreamStreamChunk{Err: chunk.Err}:
+				case <-ctx.Done():
+				}
+				return
+			}
+			if isTerminalFrame && chunk.Err == nil {
+				continue
+			}
 			select {
 			case out <- chunk:
 			case <-ctx.Done():
 				return
+			}
+		}
+		if !terminalSeen && ctx.Err() == nil {
+			select {
+			case out <- UpstreamStreamChunk{Err: errors.New("algorithm stream ended without run_finished")}:
+			case <-ctx.Done():
+			}
+		} else if terminalChunk != nil && ctx.Err() == nil {
+			select {
+			case out <- *terminalChunk:
+			case <-ctx.Done():
 			}
 		}
 	}()
@@ -818,7 +940,9 @@ func upstreamStreamChunkFromData(data LazyChatData) UpstreamStreamChunk {
 		ToolLimitPending:         data.ToolLimitPending,
 		IntentUpdated:            data.IntentUpdated,
 		WorkflowPreflightUpdated: data.WorkflowPreflightUpdated,
+		ModelContextUpdated:      data.ModelContextUpdated,
 		Heartbeat:                data.Heartbeat,
 		ToolCallTurns:            data.ToolCallTurns,
+		RuntimeEvent:             data.RuntimeEvent,
 	}
 }

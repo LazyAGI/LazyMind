@@ -109,8 +109,25 @@ func TestListUserProvidersReturnsCatalogDescriptionForRequestedLanguage(t *testi
 	if err := db.Model(&orm.DefaultModelProvider{}).Count(&providerCount).Error; err != nil {
 		t.Fatalf("count default providers: %v", err)
 	}
-	if providerCount != 18 {
-		t.Fatalf("expected 18 catalog providers, got %d", providerCount)
+	if providerCount != 19 {
+		t.Fatalf("expected 19 catalog providers, got %d", providerCount)
+	}
+	var freeModel orm.DefaultModel
+	if err := db.Where("provider_name = ? AND name = ?", "SiliconFlow", "deepseek-ai/DeepSeek-V4-Flash").
+		Take(&freeModel).Error; err != nil {
+		t.Fatalf("load catalog free model: %v", err)
+	}
+	if freeModel.FreeAutoSelectPriority != 1 || freeModel.FreeAutoSelectBaseURLs != "" {
+		t.Fatalf("unexpected catalog free auto-selection metadata: %#v", freeModel)
+	}
+	var scopedFreeModel orm.DefaultModel
+	if err := db.Where("provider_name = ? AND name = ?", "SenseNova", "sensenova-6.7-flash-lite").
+		Take(&scopedFreeModel).Error; err != nil {
+		t.Fatalf("load scoped catalog free model: %v", err)
+	}
+	if scopedFreeModel.FreeAutoSelectPriority != 1 ||
+		!strings.Contains(scopedFreeModel.FreeAutoSelectBaseURLs, "token.sensenova.cn") {
+		t.Fatalf("unexpected scoped free auto-selection metadata: %#v", scopedFreeModel)
 	}
 
 	var defaultProvider orm.DefaultModelProvider

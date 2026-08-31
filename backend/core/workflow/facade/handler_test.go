@@ -2,12 +2,15 @@ package facade
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -17,6 +20,9 @@ import (
 	"gorm.io/gorm"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/state"
+	"lazymind/core/subagent"
+	"lazymind/core/workflow/graphengine"
 	workflowstore "lazymind/core/workflow/store"
 )
 
@@ -67,7 +73,7 @@ func TestInputResourceImportAndBindingPinsStableRevision(t *testing.T) {
 
 func TestGetProjectionAuthorizesBeforeCallingRuntimeProjection(t *testing.T) {
 	h, db := testHandler(t)
-	if err := db.Exec(`INSERT INTO plugin_sessions(id, create_user_id) VALUES ('s1','owner')`).Error; err != nil {
+	if err := db.Exec(`INSERT INTO plugin_sessions(id, create_user_id, conversation_id) VALUES ('s1','owner','conversation-1')`).Error; err != nil {
 		t.Fatal(err)
 	}
 	var calls atomic.Int32
@@ -98,6 +104,14 @@ func TestGetProjectionAuthorizesBeforeCallingRuntimeProjection(t *testing.T) {
 	if calls.Load() != 1 {
 		t.Fatalf("projection calls=%d", calls.Load())
 	}
+	scoped := mux.SetURLVars(request(http.MethodGet, "/workflow-sessions/s1/projection", "owner", nil),
+		map[string]string{"session_id": "s1"})
+	scoped = scoped.WithContext(workflowstore.WithConversationScope(scoped.Context(), "conversation-2"))
+	denied := httptest.NewRecorder()
+	h.GetProjection(denied, scoped)
+	if denied.Code != http.StatusForbidden || decodeEnvelope(t, denied).Error.Code != "PERMISSION_DENIED" || calls.Load() != 1 {
+		t.Fatalf("cross-conversation projection=%d %s calls=%d", denied.Code, denied.Body.String(), calls.Load())
+	}
 }
 
 func TestListSessionsReturnsOnlyExternalAgentSessions(t *testing.T) {
@@ -114,18 +128,23 @@ func TestListSessionsReturnsOnlyExternalAgentSessions(t *testing.T) {
 	}
 	now := time.Now().UTC()
 	if err := db.Create(&[]orm.WorkflowSession{
-		{ID: "external", OriginHost: "external-agent", ControllerHost: "external-agent", WorkflowID: "writer", Status: "active", CreateUserID: "owner", CreatedAt: now, UpdatedAt: now},
+		{ID: "external", ConversationID: "conversation-1", OriginHost: "external-agent", ControllerHost: "external-agent", WorkflowID: "writer", Status: "active", CreateUserID: "owner", CreatedAt: now, UpdatedAt: now},
+		{ID: "other-conversation", ConversationID: "conversation-2", OriginHost: "external-agent", ControllerHost: "external-agent", WorkflowID: "image", Status: "active", CreateUserID: "owner", CreatedAt: now, UpdatedAt: now},
 		{ID: "internal", OriginHost: "lazymind", ControllerHost: "lazymind", WorkflowID: "writer", Status: "active", CreateUserID: "owner", CreatedAt: now, UpdatedAt: now},
 	}).Error; err != nil {
 		t.Fatal(err)
 	}
 	w := httptest.NewRecorder()
-	Handler{Store: repo}.ListSessions(w, request(http.MethodGet, "/workflow-sessions?status=active&page_size=10", "owner", nil))
+	r := request(http.MethodGet, "/workflow-sessions?status=active&page_size=10", "owner", nil)
+	r = r.WithContext(workflowstore.WithConversationScope(r.Context(), "conversation-1"))
+	Handler{Store: repo}.ListSessions(w, r)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 	}
 	encoded, _ := json.Marshal(decodeEnvelope(t, w).Data)
-	if !bytes.Contains(encoded, []byte(`"session_id":"external"`)) || bytes.Contains(encoded, []byte(`"session_id":"internal"`)) {
+	if !bytes.Contains(encoded, []byte(`"session_id":"external"`)) ||
+		bytes.Contains(encoded, []byte(`"session_id":"internal"`)) ||
+		bytes.Contains(encoded, []byte(`"session_id":"other-conversation"`)) {
 		t.Fatalf("session scope leaked: %s", encoded)
 	}
 }
@@ -181,7 +200,7 @@ func testHandler(t *testing.T) (Handler, *gorm.DB) {
 	if err := repo.AutoMigrate(); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Exec(`CREATE TABLE plugin_sessions (id TEXT PRIMARY KEY, create_user_id TEXT NOT NULL)`).Error; err != nil {
+	if err := db.Exec(`CREATE TABLE plugin_sessions (id TEXT PRIMARY KEY, create_user_id TEXT NOT NULL, conversation_id TEXT NOT NULL DEFAULT '')`).Error; err != nil {
 		t.Fatal(err)
 	}
 	return Handler{Store: repo}, db
@@ -210,6 +229,43 @@ func TestPrepareHTTPRejectsUnknownPublicWorkflow(t *testing.T) {
 	h.Prepare(recorder, request(http.MethodPost, "/workflow-preparations", "owner", body))
 	if recorder.Code != http.StatusNotFound || decodeEnvelope(t, recorder).Error.Code != "WORKFLOW_NOT_FOUND" {
 		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestMissingExternalInputsSkipsOptionalExternalMaterials(t *testing.T) {
+	graph := preparationGraph{MaterialProducers: map[string]struct {
+		Kind     string `json:"kind"`
+		Optional bool   `json:"optional"`
+	}{
+		"required_source":    {Kind: "external"},
+		"uploaded_materials": {Kind: "external", Optional: true},
+		"generated":          {Kind: "step"},
+	}}
+	missing := missingExternalInputs(graph, map[string]any{})
+	if len(missing) != 1 || missing[0] != "required_source" {
+		t.Fatalf("missing inputs = %#v", missing)
+	}
+}
+
+func TestMissingExternalInputsUsesRequiredExpressions(t *testing.T) {
+	graph := preparationGraph{
+		MaterialProducers: map[string]struct {
+			Kind     string `json:"kind"`
+			Optional bool   `json:"optional"`
+		}{
+			"research_topic": {Kind: "external"},
+			"word_target":    {Kind: "external"},
+			"reference_file": {Kind: "external"},
+		},
+		InputExpressions: map[string]graphengine.Expression{
+			"generate_outline": {All: []graphengine.Expression{
+				{Material: "research_topic"}, {Material: "word_target"},
+			}},
+		},
+	}
+	missing := missingExternalInputs(graph, map[string]any{"research_topic": "bound"})
+	if len(missing) != 1 || missing[0] != "word_target" {
+		t.Fatalf("optional-only reference_file must not block preparation: %#v", missing)
 	}
 }
 
@@ -275,6 +331,156 @@ func TestConsumeHTTPRejectsOversizedSessionIDBeforePersistence(t *testing.T) {
 	}
 	if got := decodeEnvelope(t, w).Error; got == nil || got.Code != "INVALID_REQUEST" {
 		t.Fatalf("unexpected error: %#v", got)
+	}
+}
+
+func TestConsumeRetriesSessionEventWithPreparedSessionAndIdempotentBindings(t *testing.T) {
+	h, db := testHandler(t)
+	if err := db.AutoMigrate(
+		&orm.Conversation{},
+		&orm.WorkflowSession{},
+		&orm.WorkflowResource{},
+		&orm.WorkflowRevision{},
+		&orm.WorkflowRevisionEntry{},
+		&orm.WorkflowBlob{},
+	); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	if err := db.Create(&orm.Conversation{ID: "conversation-1", BaseModel: orm.BaseModel{
+		CreateUserID: "owner", CreatedAt: now, UpdatedAt: now,
+	}}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.WorkflowResource{
+		ID: "workflow-resource-1", WorkflowRef: "builtin:writer", WorkflowID: "writer",
+		OwnerUserID: "owner", OwnerScope: "owner", RelativeRoot: "writer", HeadRevisionID: "revision-1",
+		Version: 1, Status: "active", CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.WorkflowRevision{
+		ID: "revision-1", WorkflowResourceID: "workflow-resource-1", RevisionNo: 1,
+		TreeHash: "tree-1", GraphHash: "graph-1", GraphSchemaVersion: "3",
+		CompiledGraph: json.RawMessage(`{"nodes":{}}`), CreatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	inputContent := []byte("source material")
+	inputHashBytes := sha256.Sum256(inputContent)
+	inputHash := "sha256:" + hex.EncodeToString(inputHashBytes[:])
+	inputResource, _, err := h.Store.ImportInputResource(
+		t.Context(), "owner", "source.txt", "text/plain", inputHash, inputContent,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requestJSON, err := json.Marshal(map[string]any{
+		"workflow_id":     "writer",
+		"conversation_id": "conversation-1",
+		"origin_host":     "lazymind",
+		"origin_ref":      "conversation-1",
+		"controller_host": "lazymind",
+		"request_context": "draft carefully",
+		"input_bindings": map[string]any{
+			"source": map[string]any{
+				"resource_id":  inputResource.ID,
+				"content_hash": inputResource.ContentHash,
+				"revision":     inputResource.Revision,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared, _, err := h.Store.Prepare(
+		t.Context(), "owner", "prepare-writer", "writer", ContractVersion, requestJSON,
+		json.RawMessage(`{"status":"ready","workflow_revision":"revision-1"}`),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	type publishedEvent struct {
+		conversationID string
+		eventType      string
+		payload        map[string]any
+	}
+	var events []publishedEvent
+	deliveryAttempts := 0
+	subagent.EventHooks.RegisterConversationEventHook(func(
+		_ context.Context, _ state.Store, conversationID, _ string, eventType string, payload map[string]any,
+	) error {
+		var session orm.WorkflowSession
+		if err := db.First(&session, "id = ?", "session-1").Error; err != nil {
+			t.Fatal(err)
+		}
+		if session.IntentContext != `{"text":"draft carefully"}` {
+			t.Fatalf("event published before intent initialization: %q", session.IntentContext)
+		}
+		var bindingCount int64
+		if err := db.Table("workflow_input_bindings").
+			Where("workflow_session_id = ? AND resource_id = ?", "session-1", inputResource.ID).
+			Count(&bindingCount).Error; err != nil {
+			t.Fatal(err)
+		}
+		if bindingCount != 1 {
+			t.Fatalf("event published before input binding initialization: count=%d", bindingCount)
+		}
+		events = append(events, publishedEvent{conversationID: conversationID, eventType: eventType, payload: payload})
+		deliveryAttempts++
+		if deliveryAttempts == 1 {
+			return errors.New("conversation event store unavailable")
+		}
+		return nil
+	})
+	t.Cleanup(func() { subagent.EventHooks.RegisterConversationEventHook(nil) })
+
+	consume := func(sessionID string) *httptest.ResponseRecorder {
+		r := request(http.MethodPost, "/workflow-preparations/"+prepared.ID+"/consume", "owner",
+			[]byte(`{"session_id":"`+sessionID+`"}`))
+		r = mux.SetURLVars(r, map[string]string{"preparation_id": prepared.ID})
+		w := httptest.NewRecorder()
+		h.Consume(w, r)
+		return w
+	}
+	first := consume("session-1")
+	if first.Code != http.StatusServiceUnavailable || decodeEnvelope(t, first).Error.Code != "WORKFLOW_SESSION_EVENT_FAILED" {
+		t.Fatalf("first consume: status=%d body=%s", first.Code, first.Body.String())
+	}
+	second := consume("different-session-id")
+	if second.Code != http.StatusOK {
+		t.Fatalf("retry consume: status=%d body=%s", second.Code, second.Body.String())
+	}
+	encodedResponse, _ := json.Marshal(decodeEnvelope(t, second).Data)
+	if !bytes.Contains(encodedResponse, []byte(`"session_id":"session-1"`)) {
+		t.Fatalf("retry did not reuse prepared session: %s", encodedResponse)
+	}
+	if len(events) != 2 {
+		t.Fatalf("workflow_session_created attempts=%d, want 2: %#v", len(events), events)
+	}
+	wantPayload := map[string]any{
+		"conversation_id": "conversation-1",
+		"session_id":      "session-1",
+		"workflow_id":     "writer",
+		"status":          "active",
+		"state_version":   int64(1),
+	}
+	for _, event := range events {
+		if event.conversationID != "conversation-1" || event.eventType != "workflow_session_created" {
+			t.Fatalf("unexpected event routing: %#v", event)
+		}
+		if !reflect.DeepEqual(event.payload, wantPayload) {
+			t.Fatalf("payload=%#v, want %#v", event.payload, wantPayload)
+		}
+	}
+	var sessionCount, bindingCount int64
+	if err := db.Model(&orm.WorkflowSession{}).Count(&sessionCount).Error; err != nil || sessionCount != 1 {
+		t.Fatalf("session count=%d err=%v", sessionCount, err)
+	}
+	if err := db.Table("workflow_input_bindings").
+		Where("workflow_session_id = ?", "session-1").Count(&bindingCount).Error; err != nil || bindingCount != 1 {
+		t.Fatalf("binding count after retry=%d err=%v", bindingCount, err)
 	}
 }
 

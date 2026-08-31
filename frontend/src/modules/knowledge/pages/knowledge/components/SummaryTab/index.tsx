@@ -7,11 +7,13 @@ interface SummaryTabProps {
   detail: Doc;
   type: string;
   onGetItemInfo?: (data: Segment) => void;
+  onAskSegment?: (segment: Segment, selectedText?: string, group?: string) => void;
+  showSequence?: boolean;
 }
 
 /** Document summary tab; delegates to SegmentTab for parity with split tabs. */
 const SummaryTab = (props: SummaryTabProps) => {
-  const { detail, type, onGetItemInfo } = props;
+  const { detail, type, onGetItemInfo, onAskSegment, showSequence } = props;
 
   return (
     <SegmentTab
@@ -20,6 +22,8 @@ const SummaryTab = (props: SummaryTabProps) => {
       names={[type]}
       editable={false}
       onGetItemInfo={onGetItemInfo}
+      onAskSegment={onAskSegment}
+      showSequence={showSequence}
     />
   );
 };

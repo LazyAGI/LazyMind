@@ -23,6 +23,7 @@ import (
 	"lazymind/core/store"
 	"lazymind/core/subagent"
 	"lazymind/core/taskcenter"
+	"lazymind/core/workflow/graphengine"
 )
 
 type chatStatusCacheEntry struct {
@@ -86,7 +87,14 @@ type WorkflowStepParams struct {
 	// LegacyTools are immutable script-tool names compiled from the selected
 	// Workflow revision. They are resolved by the LazyMind Host when building
 	// the isolated Workflow SubAgent tool set; the model never supplies them.
-	LegacyTools []string `json:"legacy_tools,omitempty"`
+	LegacyTools     []string `json:"legacy_tools,omitempty"`
+	TerminalTools   []string `json:"terminal_tools,omitempty"`
+	ToolsOnly       bool     `json:"tools_only,omitempty"`
+	StreamHeartbeat bool     `json:"stream_heartbeat,omitempty"`
+
+	// Runtime is the package-declared host behavior for this immutable revision.
+	// It replaces workflow-id conditionals in the LazyMind executor.
+	Runtime graphengine.RuntimePolicy `json:"workflow_runtime,omitempty"`
 }
 
 // asMap serialises the params into the generic map expected by subagent.RunRequest.Params.
@@ -140,6 +148,18 @@ func (p WorkflowStepParams) asMap() map[string]any {
 	}
 	if len(p.LegacyTools) > 0 {
 		m["legacy_tools"] = p.LegacyTools
+	}
+	if len(p.TerminalTools) > 0 {
+		m["terminal_tools"] = p.TerminalTools
+	}
+	if p.ToolsOnly {
+		m["tools_only"] = true
+	}
+	if p.StreamHeartbeat {
+		m["stream_heartbeat"] = true
+	}
+	if !p.Runtime.IsZero() {
+		m["workflow_runtime"] = p.Runtime
 	}
 	return m
 }
@@ -398,6 +418,10 @@ func launchWorkflowAttempt(
 		if legacyEvent {
 			currentStepID = stepID
 		}
+		tcTitle := workflowID
+		if title != "" {
+			tcTitle = title
+		}
 		coldErr := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 			existing, gErr := GetActiveSession(ctx, tx, convID)
 			if gErr != nil {
@@ -431,6 +455,23 @@ func launchWorkflowAttempt(
 					return fmt.Errorf("plugin: persist launch intent: %w", err)
 				}
 			}
+			var conv orm.Conversation
+			if err := tx.WithContext(ctx).
+				Select("display_name").
+				Where("id = ?", convID).
+				First(&conv).Error; err == nil && conv.DisplayName != "" {
+				tcTitle = conv.DisplayName
+			}
+			if createErr := taskcenter.CreateTask(ctx, tx, &orm.TaskCenterTask{
+				UserID:            userID,
+				ConversationID:    convID,
+				WorkflowSessionID: &psID,
+				TaskType:          "workflow_run",
+				Title:             &tcTitle,
+				Status:            "running",
+			}); createErr != nil {
+				return fmt.Errorf("plugin: create task-center workflow run: %w", createErr)
+			}
 			return consumeConversationPreflight(ctx, tx, convID, params.PreflightID)
 		})
 		if coldErr != nil {
@@ -439,30 +480,6 @@ func launchWorkflowAttempt(
 		sessionID = psID
 		fmt.Printf("[plugin] plugin session created conv=%s session=%s plugin=%s legacy_current_step=%s\n",
 			convID, sessionID, workflowID, currentStepID)
-		// Register a TaskCenter record for this plugin run so the user can track it.
-		// Prefer conversation display_name as the task title so the task center shows
-		// a human-readable conversation title instead of a raw plugin/step identifier.
-		tcTitle := workflowID
-		if title != "" {
-			tcTitle = title
-		}
-		if db != nil {
-			var conv orm.Conversation
-			if err := db.WithContext(ctx).
-				Select("display_name").
-				Where("id = ?", convID).
-				First(&conv).Error; err == nil && conv.DisplayName != "" {
-				tcTitle = conv.DisplayName
-			}
-		}
-		_ = taskcenter.CreateTask(ctx, db, &orm.TaskCenterTask{
-			UserID:            userID,
-			ConversationID:    convID,
-			WorkflowSessionID: &sessionID,
-			TaskType:          "workflow_run",
-			Title:             &tcTitle,
-			Status:            "running",
-		})
 		fmt.Printf("[plugin] taskcenter workflow_run ensured conv=%s session=%s plugin=%s\n",
 			convID, sessionID, workflowID)
 	} else {
@@ -544,6 +561,15 @@ func launchWorkflowAttempt(
 	}
 	if len(params.LegacyTools) > 0 {
 		rawParamsMap["legacy_tools"] = params.LegacyTools
+	}
+	if len(params.TerminalTools) > 0 {
+		rawParamsMap["terminal_tools"] = params.TerminalTools
+	}
+	if params.ToolsOnly {
+		rawParamsMap["tools_only"] = true
+	}
+	if !params.Runtime.IsZero() {
+		rawParamsMap["workflow_runtime"] = params.Runtime
 	}
 	if params.HandOff != nil {
 		rawParamsMap["hand_off"] = *params.HandOff
@@ -676,6 +702,8 @@ func OnSubAgentDone(
 	if status == subagent.StatusSucceeded && pctx != nil && pctx.SessionID != "" {
 		if err := freezeRouteDecision(ctx, db, pctx.SessionID, pctx.StepID, taskID); err != nil {
 			fmt.Printf("[plugin] freeze route decision failed session=%s step=%s err=%v\n", pctx.SessionID, pctx.StepID, err)
+			stepFailed = true
+			summary = "workflow route decision failed: " + err.Error()
 		} else {
 			var session orm.WorkflowSession
 			if db.WithContext(ctx).Select("status").Where("id = ?", pctx.SessionID).First(&session).Error == nil {

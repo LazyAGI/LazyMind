@@ -4,15 +4,12 @@
 ARG DOCKER_MIRROR=docker.m.daocloud.io/library/
 ARG BASE_LAZYLLM_IMAGE=base_env
 ARG BASE_LAZYMIND_IMAGE=base_code
-ARG LAZYLLM_VERSION=1.2.2
 ARG LAZYLLM_BUNDLE_SOURCE=1
 
 # Stage: base_env - pure environment, NO business code copied.
 # Rebuilt only when upgrading lazyllm version or changing requirements.txt.
 FROM ${DOCKER_MIRROR}python:3.11-slim AS base_env
 WORKDIR /app
-ARG LAZYLLM_VERSION
-
 ARG APT_MIRROR=http://mirrors.aliyun.com/debian
 ARG APT_SECURITY_MIRROR=http://mirrors.aliyun.com/debian-security
 ARG PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple
@@ -23,6 +20,9 @@ ENV PIP_INDEX_URL=${PIP_INDEX_URL} \
     PIP_RETRIES=${PIP_RETRIES} \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
+# Keep this layer limited to packages required to build/install LazyLLM.
+# Do not add optional runtime tools, fonts, or other extensions here: changing
+# this layer invalidates the expensive LazyLLM dependency cache below.
 RUN set -eu; \
     for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.sources; do \
       [ -f "$f" ] || continue; \
@@ -32,17 +32,24 @@ RUN set -eu; \
         "$f"; \
     done; \
     apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates curl git ffmpeg build-essential gcc \
-        libgl1 libglib2.0-0 libsm6 libxext6 libxrender1 libxcb1 \
-        python3-dev ripgrep \
+        ca-certificates git build-essential gcc python3-dev \
     && update-ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 # Release images always use the pinned PyPI package. Keeping LazyLLM out of
 # PYTHONPATH avoids scanning its source checkout and docs during each import.
-RUN pip install --no-cache-dir "lazyllm==${LAZYLLM_VERSION}" \
+COPY LAZYLLM_VERSION /tmp/LAZYLLM_VERSION
+RUN LAZYLLM_VERSION="$(tr -d '[:space:]' < /tmp/LAZYLLM_VERSION)" \
+    && pip install --no-cache-dir "lazyllm==${LAZYLLM_VERSION}" \
     && python -c "import importlib.metadata as m; assert m.version('lazyllm') == '${LAZYLLM_VERSION}'" \
     && lazyllm install rag
+
+# Optional runtime tools and extensions belong after LazyLLM so changes here do
+# not invalidate its large dependency layer.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl ffmpeg fonts-noto-cjk fonts-wqy-zenhei \
+        libgl1 libglib2.0-0 libsm6 libxext6 libxrender1 libxcb1 ripgrep \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy only the dependency manifest so this layer is invalidated only when
 # requirements change, not when LazyMind source code changes.

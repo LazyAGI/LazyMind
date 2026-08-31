@@ -450,31 +450,6 @@ type conversationPathParams struct {
 	Name string `path:"name"`
 }
 
-type channelCommandOpenAPI struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-}
-
-type channelCommandRegistryOpenAPI struct {
-	SchemaVersion  string                  `json:"schema_version"`
-	Commands       []channelCommandOpenAPI `json:"commands"`
-	SelectionRules []string                `json:"selection_rules"`
-	OutputSchema   map[string]any          `json:"output_schema"`
-}
-
-type channelIntentOpenAPIRequest struct {
-	Provider        string                        `json:"provider"`
-	Message         string                        `json:"message"`
-	State           map[string]any                `json:"state"`
-	CommandRegistry channelCommandRegistryOpenAPI `json:"command_registry"`
-}
-
-type channelIntentOpenAPIResponse struct {
-	SchemaVersion string         `json:"schema_version"`
-	Command       string         `json:"command"`
-	Parameters    map[string]any `json:"parameters"`
-}
-
 type conversationSearchConfigOpenAPIRequest struct {
 	DatasetIDs []string `json:"dataset_ids"`
 }
@@ -851,10 +826,10 @@ type skillPathParams struct {
 type datasetQueryParams struct {
 	PageToken string   `query:"page_token"`
 	PageSize  int32    `query:"page_size"`
-	OrderBy   string   `query:"order_by"`
+	OrderBy   string   `query:"order_by" enum:"latest_updated,most_used,recent_used" desc:"Sort datasets by latest_updated (default), most_used (per current user usage), or recent_used (latest of last used and content update)."`
 	Keyword   string   `query:"keyword"`
 	Tags      []string `query:"tags"`
-	Source    string   `query:"source" enum:"manual,cloud" desc:"Filter datasets by creation source."`
+	Source    string   `query:"source" enum:"manual,cloud,official_installed" desc:"Filter datasets by creation source: manual (local upload), cloud (cloud document sync) or official_installed (installed from the knowledge plaza)."`
 }
 
 type createDatasetQueryParams struct {
@@ -912,6 +887,7 @@ type createModelProviderGroupOpenAPIResponse struct {
 	UserModelProviderID string                                `json:"user_model_provider_id"`
 	Name                string                                `json:"name"`
 	BaseURL             string                                `json:"base_url"`
+	IsVerified          bool                                  `json:"is_verified"`
 	Check               *modelprovider.CheckModelProviderData `json:"check,omitempty"`
 }
 
@@ -1069,6 +1045,7 @@ type listModelProviderGroupsOpenAPIItem struct {
 	Name                string `json:"name"`
 	BaseURL             string `json:"base_url"`
 	APIKey              string `json:"api_key"`
+	IsVerified          bool   `json:"is_verified"`
 }
 
 type listModelProviderGroupsOpenAPIResponse struct {
@@ -1412,6 +1389,7 @@ type builtinSkillOpenAPIResponse struct {
 	Name             string `json:"name"`
 	Description      string `json:"description"`
 	Category         string `json:"category"`
+	Provider         string `json:"provider,omitempty"`
 	Content          string `json:"content"`
 	Installed        bool   `json:"installed"`
 	InstalledSkillID string `json:"installed_skill_id,omitempty"`
@@ -1420,6 +1398,31 @@ type builtinSkillOpenAPIResponse struct {
 type builtinSkillListOpenAPIResponse struct {
 	Items []builtinSkillOpenAPIResponse `json:"items"`
 	Total int                           `json:"total"`
+}
+
+type skillDistributionConflictOpenAPIResponse struct {
+	Path string `json:"path"`
+	Kind string `json:"kind"`
+}
+
+type skillDistributionUpgradeStatusOpenAPIResponse struct {
+	Managed              bool                                       `json:"managed"`
+	UpdateAvailable      bool                                       `json:"update_available"`
+	Pending              bool                                       `json:"pending"`
+	CurrentVersion       string                                     `json:"current_version,omitempty"`
+	CurrentArchiveSHA256 string                                     `json:"current_archive_sha256,omitempty"`
+	PendingVersion       string                                     `json:"pending_version,omitempty"`
+	PendingArchiveSHA256 string                                     `json:"pending_archive_sha256,omitempty"`
+	LatestVersion        string                                     `json:"latest_version,omitempty"`
+	LatestArchiveSHA256  string                                     `json:"latest_archive_sha256,omitempty"`
+	Conflicts            []skillDistributionConflictOpenAPIResponse `json:"conflicts"`
+}
+
+type skillDistributionUpgradePrepareOpenAPIResponse struct {
+	DraftVersion int64                                         `json:"draft_version"`
+	AutoMerged   bool                                          `json:"auto_merged"`
+	Conflicts    []skillDistributionConflictOpenAPIResponse    `json:"conflicts"`
+	Status       skillDistributionUpgradeStatusOpenAPIResponse `json:"status"`
 }
 
 type skillTreeNodeOpenAPIResponse struct {
@@ -1705,7 +1708,7 @@ type marketInstallOpenAPIResponse struct {
 }
 
 type marketPublishOpenAPIRequest struct {
-	Name     string                    `json:"name"`
+	Name     string                    `json:"name,omitempty" desc:"Deprecated and ignored; the skill name is read from SKILL.md."`
 	Tags     []string                  `json:"tags" desc:"Marketplace discovery tags."`
 	Category string                    `json:"category,omitempty" desc:"Deprecated compatibility field; converted to one marketplace tag when tags is empty."`
 	Source   skillSourceOpenAPIRequest `json:"source"`
@@ -1753,6 +1756,184 @@ type marketDeleteOpenAPIResponse struct {
 	Deleted       bool   `json:"deleted"`
 	MarketItemID  string `json:"market_item_id"`
 	SourceSkillID string `json:"source_skill_id"`
+}
+
+type knowledgeMarketItemPathParams struct {
+	MarketItemID string `path:"market_item_id"`
+}
+
+type knowledgeMarketListQueryParams struct {
+	Category string `query:"category" desc:"Filter by category: industry or evaluation." enum:"industry,evaluation"`
+	Domain   string `query:"domain" desc:"Filter by exact domain."`
+	Keyword  string `query:"keyword" desc:"Case-insensitive match on name, description or domain; tags are not searched."`
+	Page     int32  `query:"page"`
+	PageSize int32  `query:"page_size"`
+}
+
+type knowledgeMarketListItemOpenAPIResponse struct {
+	ID              string   `json:"id"`
+	Category        string   `json:"category"`
+	Name            string   `json:"name"`
+	Description     string   `json:"description"`
+	Icon            string   `json:"icon"`
+	Domain          string   `json:"domain"`
+	Tags            []string `json:"tags"`
+	Version         string   `json:"version"`
+	OnlineAccessURL string   `json:"online_access_url"`
+	DataSource      string   `json:"data_source"`
+	SortOrder       int      `json:"sort_order"`
+	CreatedAt       string   `json:"created_at"`
+	UpdatedAt       string   `json:"updated_at"`
+}
+
+type knowledgeMarketListOpenAPIResponse struct {
+	Items    []knowledgeMarketListItemOpenAPIResponse `json:"items"`
+	Page     int32                                    `json:"page"`
+	PageSize int32                                    `json:"page_size"`
+	Total    int32                                    `json:"total"`
+}
+
+type knowledgeMarketDetailOpenAPIResponse struct {
+	ID              string   `json:"id"`
+	Category        string   `json:"category"`
+	Name            string   `json:"name"`
+	Description     string   `json:"description"`
+	Icon            string   `json:"icon"`
+	Domain          string   `json:"domain"`
+	Tags            []string `json:"tags"`
+	Version         string   `json:"version"`
+	VersionDate     string   `json:"version_date"`
+	VersionNote     string   `json:"version_note"`
+	PackageURL      string   `json:"package_url"`
+	PackageRevision string   `json:"package_revision"`
+	DataSource      string   `json:"data_source"`
+	SampleQuestions []string `json:"sample_questions"`
+	SortOrder       int      `json:"sort_order"`
+	CreatedAt       string   `json:"created_at"`
+	UpdatedAt       string   `json:"updated_at"`
+}
+
+type knowledgeMarketDomainsGroupOpenAPIResponse struct {
+	Industry   []string `json:"industry"`
+	Evaluation []string `json:"evaluation"`
+}
+
+type knowledgeMarketDomainsOpenAPIResponse struct {
+	Domains knowledgeMarketDomainsGroupOpenAPIResponse `json:"domains"`
+}
+
+type knowledgeMarketInstallOpenAPIResponse struct {
+	JobID string `json:"job_id"`
+	State string `json:"state"`
+}
+
+type knowledgeMarketTaskPathParams struct {
+	JobID string `path:"job_id"`
+}
+
+type knowledgeMarketTaskListQueryParams struct {
+	Page     int32  `query:"page"`
+	PageSize int32  `query:"page_size"`
+	Status   string `query:"status" enum:"pending,running,succeeded,failed,canceled" desc:"Filter background tasks by async job status."`
+	JobType  string `query:"job_type" desc:"Async job type; defaults to knowledge_market_install."`
+}
+
+type knowledgeMarketTaskProgressOpenAPIResponse struct {
+	Current int64 `json:"current"`
+	Total   int64 `json:"total"`
+}
+
+type knowledgeMarketTaskListItemOpenAPIResponse struct {
+	JobID        string                                     `json:"job_id"`
+	JobType      string                                     `json:"job_type"`
+	JobStatus    string                                     `json:"job_status"`
+	InstallState string                                     `json:"install_state"`
+	MarketItemID string                                     `json:"market_item_id"`
+	Name         string                                     `json:"name"`
+	Icon         string                                     `json:"icon"`
+	Progress     knowledgeMarketTaskProgressOpenAPIResponse `json:"progress"`
+	DatasetID    string                                     `json:"dataset_id"`
+	ErrorMessage string                                     `json:"error_message"`
+	CreatedAt    string                                     `json:"created_at"`
+	FinishedAt   string                                     `json:"finished_at,omitempty"`
+}
+
+type knowledgeMarketTaskListOpenAPIResponse struct {
+	Items    []knowledgeMarketTaskListItemOpenAPIResponse `json:"items"`
+	Page     int32                                        `json:"page"`
+	PageSize int32                                        `json:"page_size"`
+	Total    int32                                        `json:"total"`
+}
+
+type knowledgeMarketTaskPayloadOpenAPIResponse struct {
+	MarketItemID string `json:"market_item_id"`
+	Revision     string `json:"revision,omitempty"`
+	Force        bool   `json:"force,omitempty"`
+}
+
+// knowledgeMarketTaskResultOpenAPIResponse describes the structured success
+// result. Install: {dataset_id, submitted}; single update additionally carries
+// updated/skipped/reason/removed; update-all carries checked plus the spawned
+// item id lists.
+type knowledgeMarketTaskResultOpenAPIResponse struct {
+	DatasetID    string   `json:"dataset_id"`
+	Submitted    int      `json:"submitted"`
+	Reason       string   `json:"reason,omitempty"`
+	Removed      int      `json:"removed,omitempty"`
+	Checked      int      `json:"checked,omitempty"`
+	UpdatedItems []string `json:"updated_items,omitempty"`
+	SkippedItems []string `json:"skipped_items,omitempty"`
+}
+
+type knowledgeMarketTaskParseOpenAPIResponse struct {
+	State   string `json:"state"`
+	Total   int    `json:"total"`
+	Pending int    `json:"pending"`
+	Parsing int    `json:"parsing"`
+	Done    int    `json:"done"`
+	Failed  int    `json:"failed"`
+}
+
+type knowledgeMarketTaskDetailOpenAPIResponse struct {
+	JobID          string                                     `json:"job_id"`
+	JobType        string                                     `json:"job_type"`
+	JobStatus      string                                     `json:"job_status"`
+	InstallState   string                                     `json:"install_state"`
+	MarketItemID   string                                     `json:"market_item_id"`
+	Name           string                                     `json:"name"`
+	Icon           string                                     `json:"icon"`
+	Progress       knowledgeMarketTaskProgressOpenAPIResponse `json:"progress"`
+	DatasetID      string                                     `json:"dataset_id"`
+	ErrorMessage   string                                     `json:"error_message"`
+	CreatedAt      string                                     `json:"created_at"`
+	FinishedAt     string                                     `json:"finished_at,omitempty"`
+	StartedAt      string                                     `json:"started_at,omitempty"`
+	UpdatedAt      string                                     `json:"updated_at,omitempty"`
+	AttemptCount   int                                        `json:"attempt_count"`
+	MaxAttempts    int                                        `json:"max_attempts"`
+	Payload        knowledgeMarketTaskPayloadOpenAPIResponse  `json:"payload"`
+	Result         *knowledgeMarketTaskResultOpenAPIResponse  `json:"result"`
+	Stage          string                                     `json:"stage"`
+	OverallPercent int64                                      `json:"overall_percent"`
+	Parse          knowledgeMarketTaskParseOpenAPIResponse    `json:"parse"`
+}
+
+type knowledgeMarketInstallsOpenAPIResponseItem struct {
+	MarketItemID     string `json:"market_item_id"`
+	Name             string `json:"name"`
+	Icon             string `json:"icon"`
+	Domain           string `json:"domain"`
+	InstallState     string `json:"install_state"`
+	InstalledVersion string `json:"installed_version"`
+	DatasetID        string `json:"dataset_id"`
+	InstalledAt      string `json:"installed_at,omitempty"`
+	UpdatedAt        string `json:"updated_at"`
+	Active           bool   `json:"active"`
+}
+
+type knowledgeMarketInstallsOpenAPIResponse struct {
+	Items []knowledgeMarketInstallsOpenAPIResponseItem `json:"items"`
+	Total int                                          `json:"total"`
 }
 
 type skillDeleteOpenAPIResponse struct {
@@ -1884,11 +2065,53 @@ type personalizationSettingOpenAPIResponse struct {
 	Enabled bool `json:"enabled"`
 }
 
+type chatConversationDefaultsOpenAPI struct {
+	ChatExecutor   string `json:"chat_executor" enum:"lazymind,codex,cursor,workbuddy"`
+	EnableWorkflow bool   `json:"enable_workflow"`
+	WorkflowMode   string `json:"workflow_mode" enum:"auto,dynamic"`
+	EnableSubagent bool   `json:"enable_subagent"`
+}
+
+type chatEntryDefaultsOpenAPI struct {
+	ThinkingDepth        string                          `json:"thinking_depth" enum:"low,medium,high,max"`
+	ConversationSettings chatConversationDefaultsOpenAPI `json:"conversation_settings"`
+}
+
+type chatConversationDefaultsPatchOpenAPIRequest struct {
+	ChatExecutor   *string `json:"chat_executor,omitempty" enum:"lazymind,codex,cursor,workbuddy"`
+	EnableWorkflow *bool   `json:"enable_workflow,omitempty"`
+	WorkflowMode   *string `json:"workflow_mode,omitempty" enum:"auto,dynamic"`
+	EnableSubagent *bool   `json:"enable_subagent,omitempty"`
+}
+
+type chatEntryDefaultsPatchOpenAPIRequest struct {
+	ThinkingDepth        *string                                      `json:"thinking_depth,omitempty" enum:"low,medium,high,max"`
+	ConversationSettings *chatConversationDefaultsPatchOpenAPIRequest `json:"conversation_settings,omitempty"`
+}
+
+type userChatSettingsPatchOpenAPIRequest struct {
+	EnableWorkflow *bool                                 `json:"enable_workflow,omitempty"`
+	WorkflowMode   *string                               `json:"workflow_mode,omitempty"`
+	EnableSubagent *bool                                 `json:"enable_subagent,omitempty"`
+	QuickQuestion  *chatEntryDefaultsPatchOpenAPIRequest `json:"quick_question,omitempty"`
+	NewTask        *chatEntryDefaultsPatchOpenAPIRequest `json:"new_task,omitempty"`
+}
+
+type userChatSettingsOpenAPIResponse struct {
+	EnableWorkflow bool                     `json:"enable_workflow"`
+	WorkflowMode   string                   `json:"workflow_mode"`
+	EnableSubagent bool                     `json:"enable_subagent"`
+	QuickQuestion  chatEntryDefaultsOpenAPI `json:"quick_question"`
+	NewTask        chatEntryDefaultsOpenAPI `json:"new_task"`
+	UpdatedAt      string                   `json:"updated_at"`
+}
+
 type userUIPreferencesPatchOpenAPIRequest struct {
 	ChatPreferenceNoticeDismissed *bool   `json:"chat_preference_notice_dismissed,omitempty"`
 	DeveloperModeActive           *bool   `json:"developer_mode_active,omitempty"`
 	AcceptedUserAgreementVersion  *string `json:"accepted_user_agreement_version,omitempty"`
 	TaskCenterEnabled             *bool   `json:"task_center_enabled,omitempty"`
+	SchedulesEnabled              *bool   `json:"schedules_enabled,omitempty"`
 	SkillsEnabled                 *bool   `json:"skills_enabled,omitempty"`
 	WorkflowsEnabled              *bool   `json:"workflows_enabled,omitempty"`
 	MCPEnabled                    *bool   `json:"mcp_enabled,omitempty"`
@@ -1900,6 +2123,7 @@ type userUIPreferencesOpenAPIResponse struct {
 	DeveloperModeActive           bool   `json:"developer_mode_active"`
 	AcceptedUserAgreementVersion  string `json:"accepted_user_agreement_version"`
 	TaskCenterEnabled             bool   `json:"task_center_enabled"`
+	SchedulesEnabled              bool   `json:"schedules_enabled"`
 	SkillsEnabled                 bool   `json:"skills_enabled"`
 	WorkflowsEnabled              bool   `json:"workflows_enabled"`
 	MCPEnabled                    bool   `json:"mcp_enabled"`
@@ -1910,6 +2134,7 @@ type userUIPreferencesOpenAPIResponse struct {
 
 type settingsFeatureControlsOpenAPIResponse struct {
 	TaskCenterEnabled      bool `json:"task_center_enabled"`
+	SchedulesEnabled       bool `json:"schedules_enabled"`
 	SkillsEnabled          bool `json:"skills_enabled"`
 	WorkflowsEnabled       bool `json:"workflows_enabled"`
 	MCPEnabled             bool `json:"mcp_enabled"`
@@ -2693,7 +2918,7 @@ func registeredCoreOperations() []openAPIOperation {
 			Method:      "POST",
 			Path:        "/skill_organize",
 			Summary:     "Submit skill organize task",
-			Description: "Submits a skill organize task for current user's SkillV2 files. The task runs asynchronously in the algorithm service.",
+			Description: "Submits 2 to 20 internal SkillV2 files for organization. The task runs asynchronously in the algorithm service.",
 			Tags:        []string{"skills"},
 			RequestBody: jsonBodyOf(skillOrganizeOpenAPIRequest{}, true),
 			Responses:   map[int]openAPIResponse{200: resp("Skill organize task accepted", skillOrganizeOpenAPIResponse{})},
@@ -2722,6 +2947,23 @@ func registeredCoreOperations() []openAPIOperation {
 			Tags:       []string{"skills"},
 			PathParams: builtinSkillPathParams{},
 			Responses:  map[int]openAPIResponse{200: resp("Enabled builtin skill", skillDetailOpenAPIResponse{})},
+		},
+		{
+			Method:     "GET",
+			Path:       "/skills/{skill_id}/distribution-upgrade",
+			Summary:    "Get builtin Skill distribution upgrade status",
+			Tags:       []string{"skills"},
+			PathParams: skillPathParams{},
+			Responses:  map[int]openAPIResponse{200: resp("Distribution upgrade status", skillDistributionUpgradeStatusOpenAPIResponse{})},
+		},
+		{
+			Method:      "POST",
+			Path:        "/skills/{skill_id}/distribution-upgrade:prepare",
+			Summary:     "Prepare a three-way builtin Skill distribution upgrade draft",
+			Description: "Merges the installed distribution base, current user Head, and latest builtin package. The candidate is staged in the existing Skill draft/review workflow.",
+			Tags:        []string{"skills"},
+			PathParams:  skillPathParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Prepared distribution upgrade", skillDistributionUpgradePrepareOpenAPIResponse{})},
 		},
 		{
 			Method:     "GET",
@@ -3196,6 +3438,83 @@ func registeredCoreOperations() []openAPIOperation {
 			Responses:  map[int]openAPIResponse{200: resp("Unpublished market skill", marketItemOpenAPIResponse{})},
 		},
 		{
+			Method:      "GET",
+			Path:        "/knowledge-market",
+			Summary:     "List published knowledge market items",
+			Description: "Read-only catalog browsing. Filters combine with AND semantics; only published items are returned.",
+			Tags:        []string{"knowledge-market"},
+			QueryParams: knowledgeMarketListQueryParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Knowledge market item list", knowledgeMarketListOpenAPIResponse{})},
+		},
+		{
+			Method:    "GET",
+			Path:      "/knowledge-market/domains",
+			Summary:   "List knowledge market domains grouped by category",
+			Tags:      []string{"knowledge-market"},
+			Responses: map[int]openAPIResponse{200: resp("Knowledge market domains", knowledgeMarketDomainsOpenAPIResponse{})},
+		},
+		{
+			Method:      "GET",
+			Path:        "/knowledge-market/items/{market_item_id}",
+			Summary:     "Get knowledge market item details",
+			Description: "Returns the full catalog entry including its latest version, download package URL/revision and sample questions. 404 when the item does not exist or is not published.",
+			Tags:        []string{"knowledge-market"},
+			PathParams:  knowledgeMarketItemPathParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Knowledge market item", knowledgeMarketDetailOpenAPIResponse{})},
+		},
+		{
+			Method:      "POST",
+			Path:        "/knowledge-market/items/{market_item_id}:install",
+			Summary:     "Install an official knowledge base",
+			Description: "Enqueues a background install job that downloads the package, creates a personal dataset and submits every file to the parsing/vectorizing pipeline. Returns the job id; progress is polled via GET /knowledge-market/tasks/{job_id}. Conflicts with an in-flight install/update of the same item return 409.",
+			Tags:        []string{"knowledge-market"},
+			PathParams:  knowledgeMarketItemPathParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Install job enqueued", knowledgeMarketInstallOpenAPIResponse{})},
+		},
+		{
+			Method:      "POST",
+			Path:        "/knowledge-market/items/{market_item_id}:update",
+			Summary:     "Update one installed official knowledge base",
+			Description: "Enqueues a background update job (strategy A: clear old documents then import the new package). No-change updates finish with updated=false and write nothing. Conflicts with an in-flight install/update of the same item return 409; not-installed items return 404.",
+			Tags:        []string{"knowledge-market"},
+			PathParams:  knowledgeMarketItemPathParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Update job enqueued", knowledgeMarketInstallOpenAPIResponse{})},
+		},
+		{
+			Method:      "POST",
+			Path:        "/knowledge-market:update-all",
+			Summary:     "One-click update of all installed official knowledge bases",
+			Description: "Enqueues a check-only batch job that compares every installed item and spawns an independent update job per changed item. A second batch for the same user returns 409.",
+			Tags:        []string{"knowledge-market"},
+			Responses:   map[int]openAPIResponse{200: resp("Update-all job enqueued", knowledgeMarketInstallOpenAPIResponse{})},
+		},
+		{
+			Method:      "GET",
+			Path:        "/knowledge-market/tasks",
+			Summary:     "List background knowledge market tasks",
+			Description: "Returns the current user's knowledge market tasks (default job type knowledge_market_install; pass job_type for update/update-all) with market item info and install-state enrichment.",
+			Tags:        []string{"knowledge-market"},
+			QueryParams: knowledgeMarketTaskListQueryParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Background install task list", knowledgeMarketTaskListOpenAPIResponse{})},
+		},
+		{
+			Method:      "GET",
+			Path:        "/knowledge-market/tasks/{job_id}",
+			Summary:     "Get background knowledge market task detail",
+			Description: "Returns one knowledge market task (install/update/update-all) with payload, result and the derived stage/overall progress. 404 when the job does not exist or belongs to another user.",
+			Tags:        []string{"knowledge-market"},
+			PathParams:  knowledgeMarketTaskPathParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Background install task detail", knowledgeMarketTaskDetailOpenAPIResponse{})},
+		},
+		{
+			Method:      "GET",
+			Path:        "/knowledge-market/installs",
+			Summary:     "List my knowledge market installs",
+			Description: "Returns the current user's install records (all states, no pagination) so plaza cards and the \"my knowledge bases\" tab can map each item to its install state.",
+			Tags:        []string{"knowledge-market"},
+			Responses:   map[int]openAPIResponse{200: resp("My knowledge market installs", knowledgeMarketInstallsOpenAPIResponse{})},
+		},
+		{
 			Method:      "POST",
 			Path:        "/skill/create",
 			Summary:     "Create skill directly from internal request",
@@ -3332,8 +3651,8 @@ func registeredCoreOperations() []openAPIOperation {
 		{
 			Method:      "GET",
 			Path:        "/model_providers/models",
-			Summary:     "List current user's models by model_type",
-			Description: "Requires query model_type (e.g. llm, vlm, or embed). Returns all non-deleted user_model_provider_group_models for the current user with that model_type across all providers and groups. Each item includes nullable max_input_tokens, the catalog model's maximum input context window expressed as a string such as 512, 128K, or 1M; custom or unknown models return null. Ordered by user_model_provider_id, group id, then name. Same items as GET .../groups/{group_id}/models.",
+			Summary:     "List current user's available models",
+			Description: "Optionally filters by query model_type (e.g. llm, vlm, or embed). When omitted, returns every non-deleted model in the current user's verified provider groups. Each item includes nullable max_input_tokens, the catalog model's maximum input context window expressed as a string such as 512, 128K, or 1M; custom or unknown models return null. Ordered by user_model_provider_id, group id, then name. Same items as GET .../groups/{group_id}/models.",
 			Tags:        []string{"model_providers"},
 			QueryParams: listUserModelsByModelTypeQueryParams{},
 			Responses:   map[int]openAPIResponse{200: resp("Models list", listModelProviderGroupModelsOpenAPIResponse{})},
@@ -3437,6 +3756,23 @@ func registeredCoreOperations() []openAPIOperation {
 			Responses:   map[int]openAPIResponse{200: resp("Updated personalization setting", personalizationSettingOpenAPIResponse{})},
 		},
 		{
+			Method:      "GET",
+			Path:        "/user/chat-settings",
+			Summary:     "Get quick-question and new-task defaults",
+			Description: "Returns independent thinking-depth and conversation defaults for the quick-question and new-task entry points. Legacy flat fields remain available and mirror the new-task conversation defaults.",
+			Tags:        []string{"user"},
+			Responses:   map[int]openAPIResponse{200: resp("Current user's chat entry defaults", userChatSettingsOpenAPIResponse{})},
+		},
+		{
+			Method:      "PATCH",
+			Path:        "/user/chat-settings",
+			Summary:     "Partially update quick-question and new-task defaults",
+			Description: "Every field is optional. Send quick_question or new_task to update one entry profile without replacing the other. Legacy flat fields remain accepted for installed clients.",
+			Tags:        []string{"user"},
+			RequestBody: jsonBodyOf(userChatSettingsPatchOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Updated chat entry defaults", userChatSettingsOpenAPIResponse{})},
+		},
+		{
 			Method:    "GET",
 			Path:      "/user/ui-preferences",
 			Summary:   "Get current user's UI preferences",
@@ -3447,7 +3783,7 @@ func registeredCoreOperations() []openAPIOperation {
 			Method:      "PATCH",
 			Path:        "/user/ui-preferences",
 			Summary:     "Partially update current user's UI preferences",
-			Description: "Partial update. Every field inside the request body is optional; send only fields that should change. Updating skills_enabled sets all current user skills to the same state; updating workflows_enabled independently sets all available workflows in one transaction.",
+			Description: "Partial update. Every field inside the request body is optional; send only fields that should change. Updating schedules_enabled pauses or resumes scheduled execution; updating skills_enabled sets all current user skills to the same state; updating workflows_enabled independently sets all available workflows in one transaction.",
 			Tags:        []string{"user"},
 			RequestBody: jsonBodyOf(userUIPreferencesPatchOpenAPIRequest{}, true),
 			Responses:   map[int]openAPIResponse{200: resp("Updated current user's UI preferences", userUIPreferencesOpenAPIResponse{})},
@@ -3679,15 +4015,6 @@ func registeredCoreOperations() []openAPIOperation {
 			PathParams:  mcpServerPathParams{},
 			RequestBody: jsonBodyOf(mcp.UpdateToolsRequest{}, true),
 			Responses:   map[int]openAPIResponse{200: resp("Updated MCP server tools", mcp.ServerResponse{})},
-		},
-		{
-			Method:      "POST",
-			Path:        "/channel-intents:classify",
-			Summary:     "Classify a channel message",
-			Description: "Classifies an external-channel message against the caller-provided command registry and parameter schemas.",
-			Tags:        []string{"channels"},
-			RequestBody: jsonBodyOf(channelIntentOpenAPIRequest{}, true),
-			Responses:   map[int]openAPIResponse{200: resp("Classified channel command", channelIntentOpenAPIResponse{})},
 		},
 		{
 			Method:      "PATCH",

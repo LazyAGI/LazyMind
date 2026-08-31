@@ -52,3 +52,36 @@ func TestEnsureAllowedAcceptsDirectChild(t *testing.T) {
 		t.Fatalf("expected allowed child path, got error: %v", err)
 	}
 }
+
+func TestReplaceAllowedRootsAppliesAtomicallyAndCollapsesChildren(t *testing.T) {
+	base := t.TempDir()
+	first := filepath.Join(base, "first")
+	second := filepath.Join(base, "second")
+	child := filepath.Join(second, "child")
+	for _, root := range []string{first, child} {
+		if err := os.MkdirAll(root, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", root, err)
+		}
+	}
+	validator := NewPathValidator([]string{first})
+
+	roots, err := validator.ReplaceAllowedRoots([]string{first, second, child})
+	if err != nil {
+		t.Fatalf("replace roots: %v", err)
+	}
+	wantFirst, _ := filepath.EvalSymlinks(first)
+	wantSecond, _ := filepath.EvalSymlinks(second)
+	if len(roots) != 2 || roots[0] != wantFirst || roots[1] != wantSecond {
+		t.Fatalf("roots = %#v", roots)
+	}
+	if err := validator.EnsureAllowed(filepath.Join(child, "a.md")); err != nil {
+		t.Fatalf("new child should be allowed: %v", err)
+	}
+
+	if _, err := validator.ReplaceAllowedRoots([]string{filepath.Join(base, "missing")}); err == nil {
+		t.Fatal("missing replacement root should fail")
+	}
+	if got := validator.AllowedRoots(); len(got) != 2 || got[1] != wantSecond {
+		t.Fatalf("failed replacement changed roots: %#v", got)
+	}
+}

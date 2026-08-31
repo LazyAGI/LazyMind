@@ -837,6 +837,48 @@ class CloudOAuthOwnerTest(unittest.TestCase):
         self.assertEqual(len(revoked['items']), 1)
         self.assertEqual(revoked['items'][0]['connection_id'], second['connection_id'])
 
+    def test_oauth_callback_refreshes_created_at_when_restoring_deleted_account(self) -> None:
+        first_connection_id = self._authorize_oauth_connection()
+        with cloud_oauth_module.SessionLocal() as db:
+            row = db.query(CloudAuthConnection).filter_by(
+                connection_id=first_connection_id
+            ).one()
+            row.created_at = datetime(2020, 1, 1, tzinfo=timezone.utc)
+            db.commit()
+
+        self.service.delete_connection(first_connection_id, user_id='user-1')
+        second = self.service.create_authorize_url(
+            provider='feishu',
+            tenant_id='',
+            owner_user_id='user-1',
+            auth_mode='oauth_user',
+            client_id='client',
+            client_secret='secret',
+            redirect_uri='https://example.test/callback',
+            state='state-2',
+        )
+        with cloud_oauth_module.SessionLocal() as db:
+            new_created_at = db.query(CloudAuthConnection).filter_by(
+                connection_id=second['connection_id']
+            ).one().created_at
+
+        restored = self.service.oauth_callback(
+            provider='feishu',
+            tenant_id='',
+            owner_user_id='user-1',
+            connection_id=second['connection_id'],
+            code='code-2',
+            state='state-2',
+        )
+
+        self.assertEqual(restored['connection_id'], first_connection_id)
+        with cloud_oauth_module.SessionLocal() as db:
+            row = db.query(CloudAuthConnection).filter_by(
+                connection_id=first_connection_id
+            ).one()
+            self.assertEqual(row.status, 'ACTIVE')
+            self.assertEqual(row.created_at, new_created_at)
+
     def test_reauthorize_connection_locks_existing_provider_account(self) -> None:
         first = self.service.create_authorize_url(
             provider='feishu',

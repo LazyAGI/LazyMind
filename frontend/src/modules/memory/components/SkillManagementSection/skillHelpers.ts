@@ -1,6 +1,7 @@
 import type { StructuredAsset } from "../../shared";
 import type { SkillAssetRecord } from "../../skillApi";
 import type { SkillMarketSourceFilter, SkillSourceFilter } from "../../shared";
+import i18n from "@/i18n";
 import type { MarketSkillAsset } from "./skillMarketMockData";
 import { getMarketSource } from "./skillMarketMockData";
 
@@ -104,7 +105,7 @@ export const isMarketSkillInstalled = (
 
 export const collectMarketTags = (items: StructuredAsset[]) =>
   [...new Set(items.flatMap((item) => item.tags).filter(Boolean))].sort((left, right) =>
-    left.localeCompare(right, "zh-CN"),
+    left.localeCompare(right, i18n.resolvedLanguage || i18n.language),
   );
 
 const resolveSkillSourceType = (

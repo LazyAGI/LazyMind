@@ -2,20 +2,26 @@ package codex
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strings"
+	"time"
+
+	"github.com/pelletier/go-toml/v2"
 
 	"lazymind/agentconnector/internal/agentexec"
+	"lazymind/agentconnector/internal/agentintegration"
 	"lazymind/agentconnector/internal/mcpbridge"
 )
 
-const serverName = "lazymind"
+const (
+	serverName         = "lazymind"
+	commandTimeout     = 5 * time.Second
+	interactiveTimeout = 2 * time.Minute
+)
 
 type Adapter struct {
 	binary         string
@@ -23,34 +29,25 @@ type Adapter struct {
 	self           string
 	bridge         *mcpbridge.Bridge
 	home           string
-}
-
-type Status struct {
-	Agent          string   `json:"agent"`
-	Installed      bool     `json:"installed"`
-	Version        string   `json:"version,omitempty"`
-	Configured     bool     `json:"configured"`
-	Owned          bool     `json:"owned"`
-	ServiceReady   bool     `json:"service_ready"`
-	Ready          bool     `json:"ready"`
-	Command        string   `json:"command,omitempty"`
-	Arguments      []string `json:"arguments,omitempty"`
-	Endpoint       string   `json:"endpoint,omitempty"`
-	Tools          []string `json:"tools,omitempty"`
-	ReadinessError string   `json:"readiness_error,omitempty"`
+	hostID         string
 }
 
 type mcpConfig struct {
-	Name      string    `json:"name"`
-	Enabled   bool      `json:"enabled"`
-	Transport transport `json:"transport"`
+	Enabled   bool
+	Transport transport
 }
 
 type transport struct {
-	Type    string            `json:"type"`
-	Command string            `json:"command"`
-	Args    []string          `json:"args"`
-	Env     map[string]string `json:"env"`
+	Command string
+	Args    []string
+	Env     map[string]string
+}
+
+type tomlMCPConfig struct {
+	Command string            `toml:"command"`
+	Args    []string          `toml:"args"`
+	Env     map[string]string `toml:"env"`
+	Enabled *bool             `toml:"enabled"`
 }
 
 func New(binary, self string, bridge *mcpbridge.Bridge) (*Adapter, error) {
@@ -58,8 +55,8 @@ func New(binary, self string, bridge *mcpbridge.Bridge) (*Adapter, error) {
 		return nil, errors.New("MCP bridge is required")
 	}
 	resolvedBinary, discoveryError := findBinary(binary)
-	var err error
 	if strings.TrimSpace(self) == "" {
+		var err error
 		self, err = os.Executable()
 		if err != nil {
 			return nil, fmt.Errorf("resolve LazyMind executable: %w", err)
@@ -69,230 +66,176 @@ func New(binary, self string, bridge *mcpbridge.Bridge) (*Adapter, error) {
 	if err != nil {
 		return nil, fmt.Errorf("resolve LazyMind executable: %w", err)
 	}
-	connectorHome := strings.TrimSpace(os.Getenv("LAZYMIND_HOME"))
-	if connectorHome != "" {
-		connectorHome, err = filepath.Abs(connectorHome)
-		if err != nil {
-			return nil, fmt.Errorf("resolve LAZYMIND_HOME: %w", err)
-		}
-		connectorHome = filepath.Clean(connectorHome)
+	home, err := agentexec.LazyMindHome()
+	if err != nil {
+		return nil, err
+	}
+	hostID, err := agentexec.PersistentHostID()
+	if err != nil {
+		return nil, fmt.Errorf("resolve LazyMind Agent Host identity: %w", err)
 	}
 	return &Adapter{
 		binary: resolvedBinary, discoveryError: discoveryError,
-		self: resolvedSelf, bridge: bridge, home: connectorHome,
+		self: resolvedSelf, bridge: bridge, home: home, hostID: hostID,
 	}, nil
 }
 
-func findBinary(configured string) (string, error) {
-	name := "codex"
-	if runtime.GOOS == "windows" {
-		name = "codex.exe"
-	}
-	home, _ := os.UserHomeDir()
-	var candidates []string
-	if home != "" {
-		candidates = append(candidates,
-			filepath.Join(home, ".codex", "packages", "standalone", "current", "bin", name),
-		)
-		releases, _ := filepath.Glob(filepath.Join(home, ".codex", "packages", "standalone", "releases", "*", "bin", name))
-		sort.Sort(sort.Reverse(sort.StringSlice(releases)))
-		candidates = append(candidates, releases...)
-		candidates = append(candidates, filepath.Join(home, ".local", "bin", name))
-	}
-	switch runtime.GOOS {
-	case "darwin":
-		candidates = append(candidates,
-			"/opt/homebrew/bin/codex",
-			"/usr/local/bin/codex",
-			"/Applications/Codex.app/Contents/Resources/codex",
-			"/Applications/ChatGPT.app/Contents/Resources/codex",
-		)
-		if home != "" {
-			candidates = append(candidates, filepath.Join(home, "Applications", "ChatGPT.app", "Contents", "Resources", "codex"))
-		}
-	case "windows":
-		if root := strings.TrimSpace(os.Getenv("LOCALAPPDATA")); root != "" {
-			candidates = append(candidates,
-				filepath.Join(root, "Programs", "Codex", "resources", name),
-				filepath.Join(root, "Programs", "ChatGPT", "resources", name),
-			)
-			matches, _ := filepath.Glob(filepath.Join(root, "Programs", "ChatGPT", "app-*", "resources", name))
-			candidates = append(candidates, matches...)
-		}
-		if root := strings.TrimSpace(os.Getenv("ProgramFiles")); root != "" {
-			candidates = append(candidates, filepath.Join(root, "ChatGPT", "resources", name))
-		}
-	}
-	resolved, err := agentexec.Find(configured, "LAZYMIND_CODEX_BIN", []string{name}, candidates)
+func (a *Adapter) Status(context.Context) agentintegration.Status {
+	desktop, err := codexDesktopState()
 	if err != nil {
-		if strings.TrimSpace(configured) != "" || strings.TrimSpace(os.Getenv("LAZYMIND_CODEX_BIN")) != "" {
-			return "", fmt.Errorf("resolve configured Codex CLI: %w", err)
-		}
-		return "", errors.New("Codex CLI is not installed; install Codex CLI before connecting LazyMind")
+		return agentintegration.Fail(agentintegration.Status{Agent: "codex", DisplayName: "Codex"}, err.Error())
 	}
-	return resolved, nil
-}
-
-// FindBinary is shared by the MCP installation adapter and the hosted Chat
-// adapter so Codex discovery has one authoritative implementation.
-func FindBinary(configured string) (string, error) { return findBinary(configured) }
-
-func (a *Adapter) Connect(ctx context.Context) (Status, error) {
-	if a.discoveryError != nil {
-		return Status{}, a.discoveryError
+	installed := desktop.Installed && a.discoveryError == nil
+	requirements := []agentintegration.Requirement{
+		{ID: "codex_desktop", Description: "Install the ChatGPT desktop app with Codex.", Satisfied: installed},
+		{ID: "codex_desktop_initialized", Description: "Open Codex in the ChatGPT desktop app at least once.", Satisfied: installed && desktop.Initialized},
 	}
-	config, exists, err := a.getConfig(ctx)
+	status := agentintegration.Status{
+		Agent: "codex", DisplayName: "Codex", Requirements: requirements,
+	}
+	config, exists, err := a.getConfig()
 	if err != nil {
-		return Status{}, err
+		return agentintegration.Fail(status, err.Error())
 	}
-	if exists && !a.isOwned(config) {
-		return Status{}, errors.New("Codex already has an MCP server named `lazymind` that is not managed by this LazyMind installation; remove or rename that entry in Codex before connecting")
-	}
-	probe, err := a.bridge.Probe(ctx)
-	if err != nil {
-		return Status{}, fmt.Errorf("LazyMind MCP preflight failed: %w", err)
-	}
-	if exists && config.Enabled && a.hasCurrentEnvironment(config) {
-		return a.populateStatus(ctx, Status{
-			Agent: "codex", Installed: true, ServiceReady: true,
-			Endpoint: probe.Endpoint, Tools: probe.Tools,
-		})
-	}
-
-	if exists {
-		if _, err := agentexec.Run(ctx, a.binary, "mcp", "remove", serverName); err != nil {
-			return Status{}, fmt.Errorf("remove stale Codex MCP configuration: %w", err)
-		}
-	}
-	if err := a.addConfig(ctx, a.self, []string{"mcp", "proxy"}, currentEnvironment(a.home)); err != nil {
+	switch {
+	case exists && !a.isOwned(config):
+		status.State = agentintegration.Conflict
+		status.Message = "Codex already has an MCP server named `lazymind` that is not managed by this LazyMind installation."
+	case exists && config.Enabled && a.hasCurrentEnvironment(config):
+		status.State = agentintegration.Enabled
+	case agentintegration.MissingRequirement(requirements):
+		status.State = agentintegration.RequirementsMissing
+	default:
+		status.State = agentintegration.Ready
 		if exists {
-			_ = a.addConfig(context.Background(), config.Transport.Command, config.Transport.Args, config.Transport.Env)
+			status.Message = "The existing LazyMind MCP entry needs to be enabled again."
 		}
-		return Status{}, fmt.Errorf("add Codex MCP configuration: %w", err)
 	}
-	configured, configuredExists, verifyErr := a.getConfig(ctx)
-	if verifyErr != nil || !configuredExists || !configured.Enabled || !a.isOwned(configured) || !a.hasCurrentEnvironment(configured) {
-		_, _ = agentexec.Run(context.Background(), a.binary, "mcp", "remove", serverName)
-		if exists {
-			_ = a.addConfig(context.Background(), config.Transport.Command, config.Transport.Args, config.Transport.Env)
-		}
-		if verifyErr != nil {
-			return Status{}, fmt.Errorf("verify Codex MCP configuration: %w", verifyErr)
-		}
-		return Status{}, errors.New("Codex did not persist the expected LazyMind MCP configuration")
-	}
-	return a.populateStatus(ctx, Status{
-		Agent: "codex", Installed: true, ServiceReady: true,
-		Endpoint: probe.Endpoint, Tools: probe.Tools,
-	})
+	return status
 }
 
-func (a *Adapter) Status(ctx context.Context) (Status, error) {
-	probe, probeErr := a.bridge.Probe(ctx)
-	return a.StatusWithProbe(ctx, probe, probeErr)
+func (a *Adapter) Connect(ctx context.Context) agentintegration.Status {
+	if err := CleanupLegacyControl(); err != nil {
+		return agentintegration.Fail(a.Status(ctx), "clean up legacy Codex control configuration: "+err.Error())
+	}
+	status := a.Status(ctx)
+	if status.State != agentintegration.Ready {
+		return status
+	}
+	if _, err := a.bridge.Probe(ctx); err != nil {
+		return agentintegration.Fail(status, "LazyMind MCP is unavailable: "+err.Error())
+	}
+	if _, exists, err := a.getConfig(); err != nil {
+		return agentintegration.Fail(status, err.Error())
+	} else if exists {
+		if _, err := a.run(ctx, "mcp", "remove", serverName); err != nil {
+			return agentintegration.Fail(status, "remove stale Codex MCP configuration: "+err.Error())
+		}
+	}
+	if err := a.addConfig(ctx); err != nil {
+		return agentintegration.Fail(status, "configure Codex MCP: "+err.Error())
+	}
+	return a.Status(ctx)
 }
 
-func (a *Adapter) StatusWithProbe(ctx context.Context, probe mcpbridge.ProbeResult, probeErr error) (Status, error) {
-	if a.discoveryError != nil {
-		return Status{
-			Agent: "codex", Installed: false, Ready: false,
-			ReadinessError: a.discoveryError.Error(),
-		}, nil
+func (a *Adapter) Disconnect(ctx context.Context) agentintegration.Status {
+	if err := CleanupLegacyControl(); err != nil {
+		return agentintegration.Fail(a.Status(ctx), "clean up legacy Codex control configuration: "+err.Error())
 	}
-	status := Status{Agent: "codex", Installed: true, ServiceReady: probeErr == nil}
-	if probeErr == nil {
-		status.Endpoint = probe.Endpoint
-		status.Tools = probe.Tools
-	} else {
-		status.ReadinessError = probeErr.Error()
+	status := a.Status(ctx)
+	if status.State == agentintegration.Conflict || status.State == agentintegration.Failed {
+		return status
 	}
-	return a.populateStatus(ctx, status)
-}
-
-func (a *Adapter) Disconnect(ctx context.Context) (Status, error) {
-	if a.discoveryError != nil {
-		return a.Status(ctx)
-	}
-	config, exists, err := a.getConfig(ctx)
-	if err != nil {
-		return Status{}, err
-	}
-	if exists && !a.isOwned(config) {
-		return Status{}, errors.New("the Codex MCP server named `lazymind` is not managed by this LazyMind installation and will not be removed")
-	}
-	if exists {
-		if _, err := agentexec.Run(ctx, a.binary, "mcp", "remove", serverName); err != nil {
-			return Status{}, fmt.Errorf("remove Codex MCP configuration: %w", err)
+	if _, exists, err := a.getConfig(); err != nil {
+		return agentintegration.Fail(status, err.Error())
+	} else if exists {
+		if _, err := a.run(ctx, "mcp", "remove", serverName); err != nil {
+			return agentintegration.Fail(status, "remove Codex MCP configuration: "+err.Error())
 		}
 	}
 	return a.Status(ctx)
 }
 
-func (a *Adapter) populateStatus(ctx context.Context, status Status) (Status, error) {
-	config, exists, err := a.getConfig(ctx)
-	if err != nil {
-		return Status{}, err
+func (a *Adapter) Login(ctx context.Context) agentintegration.Status {
+	status := a.Status(ctx)
+	if a.discoveryError != nil {
+		return status
 	}
-	status.Configured = exists
-	if !exists {
-		status.Ready = false
-		return status, nil
+	loginCtx, cancel := context.WithTimeout(ctx, interactiveTimeout)
+	defer cancel()
+	if _, err := agentexec.Run(loginCtx, a.binary, "login"); err != nil {
+		return agentintegration.Fail(status, "Codex login failed: "+err.Error())
 	}
-	status.Owned = a.isOwned(config)
-	status.Command = config.Transport.Command
-	status.Arguments = append([]string(nil), config.Transport.Args...)
-	switch {
-	case !status.Owned:
-		status.Ready = false
-		status.ReadinessError = "Codex already has an MCP server named `lazymind` that is not managed by this LazyMind installation"
-	case !config.Enabled:
-		status.Ready = false
-		status.ReadinessError = "Codex MCP configuration is disabled; reconnect from LazyMind Desktop settings"
-	case !a.hasCurrentEnvironment(config):
-		status.Ready = false
-		status.ReadinessError = "Codex MCP configuration uses a different LazyMind credential directory; reconnect from LazyMind Desktop settings"
-	default:
-		status.Ready = status.ServiceReady
-	}
-	return status, nil
+	return a.Status(ctx)
 }
 
-func (a *Adapter) getConfig(ctx context.Context) (mcpConfig, bool, error) {
-	output, err := agentexec.Run(ctx, a.binary, "mcp", "list", "--json")
+func codexDesktopState() (agentexec.DesktopApplicationState, error) {
+	home, err := codexHome()
 	if err != nil {
-		return mcpConfig{}, false, fmt.Errorf("list Codex MCP configuration: %w", err)
+		return agentexec.DesktopApplicationState{}, err
 	}
-	var configs []mcpConfig
-	if err := json.Unmarshal([]byte(output), &configs); err != nil {
+	return agentexec.InspectDesktopApplication(agentexec.DesktopApplication{
+		BindingTarget:   agentexec.CodexDesktop,
+		ExecutableNames: []string{"ChatGPT.exe", "Codex.exe"},
+		Protocols:       []string{"chatgpt"},
+		DisplayNames:    []string{"ChatGPT", "Codex"},
+		StatePaths:      []string{home},
+	})
+}
+
+func (a *Adapter) getConfig() (mcpConfig, bool, error) {
+	home, err := codexHome()
+	if err != nil {
+		return mcpConfig{}, false, err
+	}
+	body, err := os.ReadFile(filepath.Join(home, "config.toml"))
+	if errors.Is(err, os.ErrNotExist) {
+		return mcpConfig{}, false, nil
+	}
+	if err != nil {
+		return mcpConfig{}, false, fmt.Errorf("read Codex MCP configuration: %w", err)
+	}
+	var document struct {
+		MCPServers map[string]tomlMCPConfig `toml:"mcp_servers"`
+	}
+	if err := toml.Unmarshal(body, &document); err != nil {
 		return mcpConfig{}, false, fmt.Errorf("decode Codex MCP configuration: %w", err)
 	}
-	for _, config := range configs {
-		if config.Name == serverName {
-			return config, true, nil
-		}
+	configured, exists := document.MCPServers[serverName]
+	if !exists {
+		return mcpConfig{}, false, nil
 	}
-	return mcpConfig{}, false, nil
+	enabled := configured.Enabled == nil || *configured.Enabled
+	return mcpConfig{
+		Enabled:   enabled,
+		Transport: transport{Command: configured.Command, Args: configured.Args, Env: configured.Env},
+	}, true, nil
 }
 
-func (a *Adapter) addConfig(ctx context.Context, command string, args []string, environment map[string]string) error {
-	arguments := []string{"mcp", "add", serverName}
+func (a *Adapter) addConfig(ctx context.Context) error {
+	environment := currentEnvironment(a.home, a.hostID)
 	keys := make([]string, 0, len(environment))
 	for key := range environment {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
+	arguments := []string{"mcp", "add", serverName}
 	for _, key := range keys {
 		arguments = append(arguments, "--env", key+"="+environment[key])
 	}
-	arguments = append(arguments, "--", command)
-	arguments = append(arguments, args...)
-	_, err := agentexec.Run(ctx, a.binary, arguments...)
+	arguments = append(arguments, "--", a.self, "mcp", "proxy")
+	_, err := a.run(ctx, arguments...)
 	return err
 }
 
+func (a *Adapter) run(ctx context.Context, arguments ...string) (string, error) {
+	runCtx, cancel := context.WithTimeout(ctx, commandTimeout)
+	defer cancel()
+	return agentexec.Run(runCtx, a.binary, arguments...)
+}
+
 func (a *Adapter) isOwned(config mcpConfig) bool {
-	return config.Transport.Type == "stdio" &&
-		agentexec.SameExecutable(config.Transport.Command, a.self) &&
+	return agentexec.SameExecutable(config.Transport.Command, a.self) &&
 		len(config.Transport.Args) == 2 &&
 		config.Transport.Args[0] == "mcp" && config.Transport.Args[1] == "proxy"
 }
@@ -302,12 +245,39 @@ func (a *Adapter) hasCurrentEnvironment(config mcpConfig) bool {
 	if configuredHome == "." {
 		configuredHome = ""
 	}
-	return configuredHome == a.home
+	return configuredHome == a.home && config.Transport.Env["LAZYMIND_AGENT_PROVIDER"] == "codex" &&
+		config.Transport.Env["LAZYMIND_AGENT_HOST_ID"] == a.hostID
 }
 
-func currentEnvironment(home string) map[string]string {
-	if home == "" {
-		return nil
+func currentEnvironment(home, hostID string) map[string]string {
+	environment := map[string]string{
+		"LAZYMIND_AGENT_PROVIDER": "codex", "LAZYMIND_AGENT_HOST_ID": hostID,
 	}
-	return map[string]string{"LAZYMIND_HOME": home}
+	if home != "" {
+		environment["LAZYMIND_HOME"] = home
+	}
+	return environment
 }
+
+func findBinary(configured string) (string, error) {
+	resolved, err := agentexec.FindBoundExecutable(
+		configured, "LAZYMIND_CODEX_BIN", agentexec.CodexCLI, []string{"codex"},
+	)
+	if err != nil {
+		return "", errors.New("Codex CLI is not installed")
+	}
+	return resolved, nil
+}
+
+func codexHome() (string, error) {
+	if configured := strings.TrimSpace(os.Getenv("CODEX_HOME")); configured != "" {
+		return filepath.Abs(configured)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".codex"), nil
+}
+
+func FindBinary(configured string) (string, error) { return findBinary(configured) }

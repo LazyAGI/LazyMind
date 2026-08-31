@@ -1,6 +1,7 @@
 import type { Conversation } from "@/api/generated/chatbot-client";
 import {
   CHAT_CONVERSATION_ACTIVITY_EVENT,
+  CHAT_CONVERSATION_LIST_REFRESH_EVENT,
   type ChatConversationActivityDetail,
 } from "@/modules/chat/constants/chat";
 
@@ -17,6 +18,10 @@ export function emitConversationActivity(
       detail: { ...detail, conversationId },
     }),
   );
+}
+
+export function emitConversationListRefresh() {
+  window.dispatchEvent(new Event(CHAT_CONVERSATION_LIST_REFRESH_EVENT));
 }
 
 export function bumpConversationToTop(

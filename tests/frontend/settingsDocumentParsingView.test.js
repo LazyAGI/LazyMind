@@ -7,10 +7,14 @@ const readFrontendSource = (relativePath) => readFileSync(
 );
 
 describe('settings document parsing view', () => {
-  it('keeps document parsing configuration inside Settings', () => {
+  it('embeds document parsing configuration in the knowledge settings page', () => {
     const knowledgeSettings = readFrontendSource('modules/settings/KnowledgeDataSettings.tsx');
 
-    expect(knowledgeSettings).toContain(
+    expect(knowledgeSettings).toContain('className="settings-knowledge-parser-controls"');
+    expect(knowledgeSettings).toContain('className="settings-knowledge-parser-services"');
+    expect(knowledgeSettings).toContain('<ExternalServicesPage');
+    expect(knowledgeSettings).toContain('visibleCategories={["parsing"]}');
+    expect(knowledgeSettings).not.toContain(
       'navigate("/settings?section=knowledge&tool=document-parsing")',
     );
     expect(knowledgeSettings).not.toContain('navigate("/model-providers/tools")');

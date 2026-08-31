@@ -76,7 +76,7 @@ func (e *DefaultTargetTreeEngine) mapTargetPage(ctx context.Context, conn connec
 		if err != nil {
 			return TreeNodePage{}, mapConnectorError(err)
 		}
-		if !isTargetDirectoryNode(raw, normalized) {
+		if !req.IncludeFiles && !isTargetDirectoryNode(raw, normalized) {
 			continue
 		}
 		if !targetAllowsNormalized(policy, normalized) {

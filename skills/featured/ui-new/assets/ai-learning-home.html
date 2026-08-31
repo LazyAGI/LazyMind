@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>知芽 — AI 学习助手 · 首页</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+SC:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    /* ===== Design Tokens ===== */
+    :root {
+      /* Brand — 清爽薄荷蓝绿 */
+      --color-primary: #0E9F8A;
+      --color-primary-deep: #0B7C6B;
+      --color-primary-bg: #E6F7F3;
+      --color-secondary: #4F9CF9;
+      --color-secondary-bg: #EAF2FE;
+      --color-accent: #FF9F43;
+      --color-accent-bg: #FFF3E6;
+
+      /* Neutral */
+      --color-bg: #F5F9F8;
+      --color-surface: #FFFFFF;
+      --color-surface-alt: #F8FBFA;
+      --color-border: #E4EFEC;
+
+      /* Text */
+      --color-text: #123B36;
+      --color-text-secondary: #5B7A75;
+      --color-text-tertiary: #9BB5B0;
+      --color-text-inverse: #FFFFFF;
+
+      /* Spacing (8pt) */
+      --sp-1: 4px;
+      --sp-2: 8px;
+      --sp-3: 12px;
+      --sp-4: 16px;
+      --sp-5: 20px;
+      --sp-6: 24px;
+      --sp-8: 32px;
+      --sp-10: 40px;
+      --sp-12: 48px;
+
+      /* Radius */
+      --r-sm: 10px;
+      --r-md: 14px;
+      --r-lg: 20px;
+      --r-xl: 28px;
+      --r-full: 999px;
+
+      /* Shadow */
+      --shadow-sm: 0 1px 2px rgba(18,59,54,0.05);
+      --shadow-md: 0 2px 6px rgba(18,59,54,0.06), 0 8px 20px rgba(18,59,54,0.05);
+      --shadow-lg: 0 8px 16px rgba(18,59,54,0.08), 0 16px 40px rgba(18,59,54,0.07);
+
+      /* Font */
+      --font-display: 'Inter', 'Noto Sans SC', sans-serif;
+      --font-body: 'Noto Sans SC', 'Inter', system-ui, sans-serif;
+
+      /* Motion */
+      --ease-out: cubic-bezier(0, 0, 0.2, 1);
+      --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { -webkit-tap-highlight-color: transparent; }
+    body {
+      font-family: var(--font-body);
+      background: #E9F0ED;
+      color: var(--color-text);
+      line-height: 1.55;
+      display: flex;
+      justify-content: center;
+      min-height: 100vh;
+    }
+
+    /* ===== Phone Frame ===== */
+    .phone {
+      width: 100%;
+      max-width: 420px;
+      min-height: 100vh;
+      background: var(--color-bg);
+      position: relative;
+      overflow-x: hidden;
+      box-shadow: 0 0 0 1px rgba(18,59,54,0.08);
+    }
+    @media (min-width: 480px) {
+      body { padding: 24px 0; }
+      .phone {
+        min-height: 860px;
+        border-radius: 44px;
+        box-shadow: var(--shadow-lg), 0 0 0 10px #123B36;
+      }
+    }
+
+    .screen { padding: 0 var(--sp-5) var(--sp-10); }
+
+    /* ===== Status Bar ===== */
+    .statusbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: var(--sp-3) var(--sp-5) var(--sp-2);
+      font-family: var(--font-display);
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--color-text);
+    }
+    .statusbar__icons { display: flex; gap: 6px; align-items: center; }
+    .statusbar__icons span { font-size: 11px; opacity: 0.9; }
+
+    /* ===== Header / Greeting ===== */
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: var(--sp-4) 0 var(--sp-5);
+    }
+    .header__greeting { display: flex; align-items: center; gap: var(--sp-3); }
+    .header__avatar {
+      width: 46px;
+      height: 46px;
+      border-radius: var(--r-full);
+      background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-size: 18px;
+      font-weight: 700;
+      box-shadow: var(--shadow-sm);
+    }
+    .header__hello { font-size: 13px; color: var(--color-text-tertiary); }
+    .header__name { font-size: 18px; font-weight: 700; color: var(--color-text); }
+    .header__actions { display: flex; gap: var(--sp-3); }
+    .icon-btn {
+      width: 40px;
+      height: 40px;
+      border-radius: var(--r-full);
+      background: var(--color-surface);
+      border: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: var(--shadow-sm);
+      cursor: pointer;
+      transition: transform 120ms var(--ease-out);
+      position: relative;
+    }
+    .icon-btn:active { transform: scale(0.92); }
+    .icon-btn svg { width: 20px; height: 20px; color: var(--color-text); }
+    .icon-btn__dot {
+      position: absolute;
+      top: 8px;
+      right: 9px;
+      width: 7px;
+      height: 7px;
+      background: #FF5A5F;
+      border-radius: 50%;
+      border: 1.5px solid white;
+    }
+
+    /* ===== Streak Banner ===== */
+    .streak {
+      background: linear-gradient(135deg, #123B36, #1E5A52);
+      border-radius: var(--r-lg);
+      padding: var(--sp-5);
+      color: white;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      box-shadow: var(--shadow-md);
+      margin-bottom: var(--sp-5);
+    }
+    .streak__label { font-size: 12px; opacity: 0.7; }
+    .streak__value {
+      font-family: var(--font-display);
+      font-size: 26px;
+      font-weight: 800;
+      line-height: 1.2;
+    }
+    .streak__value small { font-size: 14px; font-weight: 600; opacity: 0.85; }
+    .streak__flame {
+      width: 46px;
+      height: 46px;
+      background: rgba(255,255,255,0.12);
+      border-radius: var(--r-full);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+    }
+
+    /* ===== Section Header ===== */
+    .sec-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: var(--sp-3);
+    }
+    .sec-head__title { font-size: 17px; font-weight: 700; color: var(--color-text); }
+    .sec-head__more { font-size: 13px; color: var(--color-primary); font-weight: 500; text-decoration: none; }
+
+    /* ===== Progress Card ===== */
+    .progress-card {
+      background: var(--color-surface);
+      border-radius: var(--r-lg);
+      padding: var(--sp-5);
+      box-shadow: var(--shadow-sm);
+      display: flex;
+      gap: var(--sp-5);
+      align-items: center;
+      margin-bottom: var(--sp-6);
+    }
+    .ring { position: relative; width: 84px; height: 84px; flex-shrink: 0; }
+    .ring__svg { width: 84px; height: 84px; transform: rotate(-90deg); }
+    .ring__bg { fill: none; stroke: var(--color-border); stroke-width: 8; }
+    .ring__fg {
+      fill: none;
+      stroke: url(#ringGrad);
+      stroke-width: 8;
+      stroke-linecap: round;
+      stroke-dasharray: 226;
+      stroke-dashoffset: 56;
+      transition: stroke-dashoffset 600ms var(--ease-out);
+    }
+    .ring__center {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+    .ring__pct { font-family: var(--font-display); font-size: 18px; font-weight: 800; color: var(--color-text); }
+    .ring__pct-label { font-size: 10px; color: var(--color-text-tertiary); }
+    .progress-card__info { flex: 1; }
+    .progress-card__row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: var(--sp-2) 0;
+      font-size: 13px;
+    }
+    .progress-card__row + .progress-card__row { border-top: 1px dashed var(--color-border); }
+    .progress-card__row-label { color: var(--color-text-secondary); }
+    .progress-card__row-value { font-weight: 600; color: var(--color-text); }
+
+    /* ===== Daily Tasks ===== */
+    .task-list { margin-bottom: var(--sp-6); }
+    .task {
+      background: var(--color-surface);
+      border-radius: var(--r-md);
+      padding: var(--sp-4);
+      display: flex;
+      align-items: center;
+      gap: var(--sp-3);
+      margin-bottom: var(--sp-3);
+      box-shadow: var(--shadow-sm);
+      transition: transform 150ms var(--ease-out);
+    }
+    .task:active { transform: scale(0.985); }
+    .task__check {
+      width: 24px;
+      height: 24px;
+      border-radius: var(--r-full);
+      border: 2px solid var(--color-border);
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: all 150ms var(--ease-out);
+      background: transparent;
+    }
+    .task.done .task__check {
+      background: var(--color-primary);
+      border-color: var(--color-primary);
+    }
+    .task__check svg { width: 12px; height: 12px; color: white; opacity: 0; transition: opacity 150ms; }
+    .task.done .task__check svg { opacity: 1; }
+    .task__body { flex: 1; }
+    .task__title { font-size: 14px; font-weight: 600; color: var(--color-text); transition: color 150ms; }
+    .task.done .task__title { color: var(--color-text-tertiary); text-decoration: line-through; }
+    .task__meta { font-size: 12px; color: var(--color-text-tertiary); margin-top: 1px; }
+    .task__chip {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--color-primary);
+      background: var(--color-primary-bg);
+      padding: 3px 10px;
+      border-radius: var(--r-full);
+      flex-shrink: 0;
+    }
+
+    /* ===== AI Q&A Entry ===== */
+    .ai-entry {
+      background: linear-gradient(135deg, #4F9CF9, #0E9F8A);
+      border-radius: var(--r-lg);
+      padding: var(--sp-5);
+      color: white;
+      display: flex;
+      align-items: center;
+      gap: var(--sp-4);
+      box-shadow: var(--shadow-md);
+      margin-bottom: var(--sp-6);
+      position: relative;
+      overflow: hidden;
+      cursor: pointer;
+      transition: transform 150ms var(--ease-out);
+    }
+    .ai-entry:active { transform: scale(0.99); }
+    .ai-entry::after {
+      content: '';
+      position: absolute;
+      right: -30px;
+      top: -30px;
+      width: 120px;
+      height: 120px;
+      background: rgba(255,255,255,0.08);
+      border-radius: 50%;
+    }
+    .ai-entry__icon {
+      width: 52px;
+      height: 52px;
+      border-radius: var(--r-full);
+      background: rgba(255,255,255,0.18);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      backdrop-filter: blur(4px);
+    }
+    .ai-entry__icon svg { width: 26px; height: 26px; color: white; }
+    .ai-entry__body { flex: 1; }
+    .ai-entry__title { font-size: 16px; font-weight: 700; }
+    .ai-entry__sub { font-size: 12px; opacity: 0.85; margin-top: 2px; }
+    .ai-entry__go { color: white; opacity: 0.8; }
+    .ai-entry__go svg { width: 18px; height: 18px; }
+
+    /* ===== Wrong Answers Entry ===== */
+    .wrong-card {
+      background: var(--color-surface);
+      border-radius: var(--r-lg);
+      padding: var(--sp-5);
+      box-shadow: var(--shadow-sm);
+      display: flex;
+      align-items: center;
+      gap: var(--sp-4);
+      margin-bottom: var(--sp-6);
+      cursor: pointer;
+      transition: transform 150ms var(--ease-out);
+    }
+    .wrong-card:active { transform: scale(0.99); }
+    .wrong-card__icon {
+      width: 48px;
+      height: 48px;
+      background: var(--color-accent-bg);
+      border-radius: var(--r-md);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .wrong-card__icon svg { width: 24px; height: 24px; color: var(--color-accent); }
+    .wrong-card__body { flex: 1; }
+    .wrong-card__title { font-size: 15px; font-weight: 700; }
+    .wrong-card__sub { font-size: 12px; color: var(--color-text-tertiary); margin-top: 2px; }
+    .wrong-card__badge {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--color-accent);
+      background: var(--color-accent-bg);
+      padding: 5px 12px;
+      border-radius: var(--r-full);
+      flex-shrink: 0;
+    }
+
+    /* ===== Recommended Courses (horizontal scroll) ===== */
+    .course-scroll {
+      display: flex;
+      gap: var(--sp-3);
+      overflow-x: auto;
+      scroll-snap-type: x mandatory;
+      padding-bottom: var(--sp-3);
+      margin: 0 calc(-1 * var(--sp-5));
+      padding-left: var(--sp-5);
+      padding-right: var(--sp-5);
+      scrollbar-width: none;
+    }
+    .course-scroll::-webkit-scrollbar { display: none; }
+    .course-card {
+      flex: 0 0 176px;
+      scroll-snap-align: start;
+      background: var(--color-surface);
+      border-radius: var(--r-md);
+      overflow: hidden;
+      box-shadow: var(--shadow-sm);
+      cursor: pointer;
+      transition: transform 150ms var(--ease-out);
+    }
+    .course-card:active { transform: scale(0.98); }
+    .course-card__cover {
+      height: 96px;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-size: 30px;
+    }
+    .course-card__cover--1 { background: linear-gradient(135deg, #4F9CF9, #7B61FF); }
+    .course-card__cover--2 { background: linear-gradient(135deg, #0E9F8A, #34C88A); }
+    .course-card__cover--3 { background: linear-gradient(135deg, #FF9F43, #FF6B6B); }
+    .course-card__tag {
+      position: absolute;
+      top: 8px;
+      left: 8px;
+      font-size: 10px;
+      font-weight: 600;
+      background: rgba(255,255,255,0.85);
+      color: var(--color-text);
+      padding: 2px 8px;
+      border-radius: var(--r-full);
+    }
+    .course-card__body { padding: var(--sp-3); }
+    .course-card__title {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--color-text);
+      line-height: 1.4;
+      min-height: 36px;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .course-card__meta {
+      display: flex;
+      justify-content: space-between;
+      margin-top: var(--sp-2);
+      font-size: 11px;
+      color: var(--color-text-tertiary);
+    }
+    .course-card__meta b { color: var(--color-primary); font-weight: 600; }
+
+    /* ===== Bottom Tab Bar ===== */
+    .tabbar {
+      position: fixed;
+      bottom: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 100%;
+      max-width: 420px;
+      background: rgba(255,255,255,0.92);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border-top: 1px solid var(--color-border);
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      padding: var(--sp-2) 0 calc(var(--sp-2) + env(safe-area-inset-bottom));
+    }
+    .tab {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+      font-size: 10px;
+      color: var(--color-text-tertiary);
+      text-decoration: none;
+      padding: 4px 0;
+      transition: color 150ms;
+    }
+    .tab svg { width: 22px; height: 22px; }
+    .tab--active { color: var(--color-primary); font-weight: 600; }
+    .tab--active svg { fill: var(--color-primary-bg); }
+
+    .spacer { height: 84px; }
+  </style>
+</head>
+<body>
+  <div class="phone">
+
+    <!-- Status Bar -->
+    <div class="statusbar">
+      <span>9:41</span>
+      <div class="statusbar__icons">
+        <span>📶</span>
+        <span>🔋</span>
+      </div>
+    </div>
+
+    <div class="screen">
+
+      <!-- Header / Greeting -->
+      <header class="header">
+        <div class="header__greeting">
+          <div class="header__avatar">林</div>
+          <div>
+            <div class="header__hello">下午好 ☀️</div>
+            <div class="header__name">林同学</div>
+          </div>
+        </div>
+        <div class="header__actions">
+          <button class="icon-btn" aria-label="通知">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/>
+            </svg>
+            <span class="icon-btn__dot"></span>
+          </button>
+          <button class="icon-btn" aria-label="搜索">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+            </svg>
+          </button>
+        </div>
+      </header>
+
+      <!-- Streak Banner -->
+      <div class="streak">
+        <div>
+          <div class="streak__label">连续学习</div>
+          <div class="streak__value">12 <small>天</small></div>
+        </div>
+        <div class="streak__flame">🔥</div>
+      </div>
+
+      <!-- Learning Progress -->
+      <div class="sec-head">
+        <span class="sec-head__title">今日学习进度</span>
+        <a href="#" class="sec-head__more">查看详情 ›</a>
+      </div>
+      <div class="progress-card">
+        <div class="ring">
+          <svg class="ring__svg" viewBox="0 0 84 84">
+            <defs>
+              <linearGradient id="ringGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#0E9F8A"/>
+                <stop offset="100%" stop-color="#4F9CF9"/>
+              </linearGradient>
+            </defs>
+            <circle class="ring__bg" cx="42" cy="42" r="36"></circle>
+            <circle class="ring__fg" cx="42" cy="42" r="36"></circle>
+          </svg>
+          <div class="ring__center">
+            <span class="ring__pct">75%</span>
+            <span class="ring__pct-label">完成度</span>
+          </div>
+        </div>
+        <div class="progress-card__info">
+          <div class="progress-card__row">
+            <span class="progress-card__row-label">今日已学</span>
+            <span class="progress-card__row-value">45 分钟</span>
+          </div>
+          <div class="progress-card__row">
+            <span class="progress-card__row-label">目标时长</span>
+            <span class="progress-card__row-value">60 分钟</span>
+          </div>
+          <div class="progress-card__row">
+            <span class="progress-card__row-label">学习积分</span>
+            <span class="progress-card__row-value">+128 分</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Daily Tasks -->
+      <div class="sec-head">
+        <span class="sec-head__title">今日学习任务</span>
+        <a href="#" class="sec-head__more">全部任务 ›</a>
+      </div>
+      <div class="task-list">
+
+        <div class="task">
+          <button class="task__check" aria-label="完成">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+          </button>
+          <div class="task__body">
+            <div class="task__title">高等数学 · 微分中值定理</div>
+            <div class="task__meta">课程回看 · 约 20 分钟</div>
+          </div>
+          <span class="task__chip">复习</span>
+        </div>
+
+        <div class="task done">
+          <button class="task__check" aria-label="已完成">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+          </button>
+          <div class="task__body">
+            <div class="task__title">职场沟通 · 高效汇报技巧</div>
+            <div class="task__meta">视频课 · 约 15 分钟</div>
+          </div>
+          <span class="task__chip">完成</span>
+        </div>
+
+        <div class="task">
+          <button class="task__check" aria-label="完成">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+          </button>
+          <div class="task__body">
+            <div class="task__title">Python 数据分析 · 实战练习</div>
+            <div class="task__meta">练习题 · 10 道</div>
+          </div>
+          <span class="task__chip">练习</span>
+        </div>
+
+      </div>
+
+      <!-- AI Q&A Entry -->
+      <div class="ai-entry">
+        <div class="ai-entry__icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2a4 4 0 014 4c0 .7-.2 1.4-.5 2A8 8 0 0116 22H8a8 8 0 01.5-16A4 4 0 0112 2z"/><path d="M9 14h6"/><path d="M9 18h4"/>
+          </svg>
+        </div>
+        <div class="ai-entry__body">
+          <div class="ai-entry__title">有问题？问知芽 AI</div>
+          <div class="ai-entry__sub">拍照 / 语音 / 文字，随时答疑 · 24h 在线</div>
+        </div>
+        <span class="ai-entry__go">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+        </span>
+      </div>
+
+      <!-- Wrong Answers Entry -->
+      <div class="wrong-card">
+        <div class="wrong-card__icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>
+          </svg>
+        </div>
+        <div class="wrong-card__body">
+          <div class="wrong-card__title">错题复习</div>
+          <div class="wrong-card__sub">按知识点智能推送，帮你真正搞懂</div>
+        </div>
+        <span class="wrong-card__badge">8 题待复习</span>
+      </div>
+
+      <!-- Recommended Courses -->
+      <div class="sec-head">
+        <span class="sec-head__title">推荐课程</span>
+        <a href="#" class="sec-head__more">全部 ›</a>
+      </div>
+      <div class="course-scroll">
+
+        <div class="course-card">
+          <div class="course-card__cover course-card__cover--1">
+            <span class="course-card__tag">热门</span>
+            📊
+          </div>
+          <div class="course-card__body">
+            <div class="course-card__title">Python 数据分析实战：从入门到进阶</div>
+            <div class="course-card__meta">
+              <span>32 课时</span>
+              <b>¥ 99</b>
+            </div>
+          </div>
+        </div>
+
+        <div class="course-card">
+          <div class="course-card__cover course-card__cover--2">
+            <span class="course-card__tag">新课</span>
+            🧠
+          </div>
+          <div class="course-card__body">
+            <div class="course-card__title">认知科学学习法：高效记忆与专注</div>
+            <div class="course-card__meta">
+              <span>18 课时</span>
+              <b>免费</b>
+            </div>
+          </div>
+        </div>
+
+        <div class="course-card">
+          <div class="course-card__cover course-card__cover--3">
+            <span class="course-card__tag">职场</span>
+            💼
+          </div>
+          <div class="course-card__body">
+            <div class="course-card__title">高效职场沟通：汇报、谈判与协作</div>
+            <div class="course-card__meta">
+              <span>24 课时</span>
+              <b>¥ 129</b>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="spacer"></div>
+    </div>
+
+    <!-- Bottom Tab Bar -->
+    <nav class="tabbar">
+      <a href="#" class="tab tab--active">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+        首页
+      </a>
+      <a href="#" class="tab">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+        课程
+      </a>
+      <a href="#" class="tab">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
+        错题本
+      </a>
+      <a href="#" class="tab">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a4 4 0 014 4c0 .7-.2 1.4-.5 2A8 8 0 0116 22H8a8 8 0 01.5-16A4 4 0 0112 2z"/></svg>
+        AI 问答
+      </a>
+      <a href="#" class="tab">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        我的
+      </a>
+    </nav>
+  </div>
+
+  <script>
+    // 任务勾选交互
+    document.querySelectorAll('.task__check').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        btn.closest('.task').classList.toggle('done');
+      });
+    });
+  </script>
+</body>
+</html>

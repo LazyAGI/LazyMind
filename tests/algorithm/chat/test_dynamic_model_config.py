@@ -149,7 +149,13 @@ class TestAutoModelDynamic:
 
         class FakeResponse:
             status_code = 200
-            text = json.dumps({'choices': [{'message': {'content': 'ok'}}], 'usage': {}})
+            text = json.dumps({
+                'choices': [{
+                    'message': {'content': 'ok'},
+                    'finish_reason': 'stop',
+                }],
+                'usage': {},
+            })
 
             def __enter__(self):
                 return self

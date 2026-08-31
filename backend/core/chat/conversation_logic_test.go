@@ -36,6 +36,315 @@ func TestBuildChatRequestBodyUsesConversationIDDerivedSessionID(t *testing.T) {
 	}
 }
 
+func TestEphemeralConversationIsHiddenUntilPromoted(t *testing.T) {
+	database := newPromptTestDB(t)
+	db := database.DB
+	store.Init(db, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+
+	conversation, _, err := ensureConversation(
+		context.Background(), db, "preview-chat", "Preview chat", nil, nil,
+		"u1", "User 1", false, "", map[string]any{
+			"ephemeral": true, "source_type": "pdf_preview", "source_document_id": "doc-1",
+		},
+	)
+	if err != nil || !conversation.IsEphemeral || conversation.EphemeralExpiresAt == nil ||
+		conversation.SourceType != "pdf_preview" || conversation.SourceDocumentID != "doc-1" {
+		t.Fatalf("create ephemeral conversation: conversation=%#v err=%v", conversation, err)
+	}
+
+	list := func() []map[string]any {
+		req := httptest.NewRequest(http.MethodGet, "/api/core/conversations", nil)
+		req.Header.Set("X-User-Id", "u1")
+		rec := httptest.NewRecorder()
+		ListConversations(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("list status=%d body=%s", rec.Code, rec.Body.String())
+		}
+		var response struct {
+			Conversations []map[string]any `json:"conversations"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+			t.Fatal(err)
+		}
+		return response.Conversations
+	}
+	if got := list(); len(got) != 0 {
+		t.Fatalf("ephemeral conversation leaked into history: %#v", got)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/core/conversations/preview-chat:promote", nil)
+	req = mux.SetURLVars(req, map[string]string{"conversation_id": "preview-chat"})
+	req.Header.Set("X-User-Id", "u1")
+	rec := httptest.NewRecorder()
+	PromoteConversation(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("promote status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := list(); len(got) != 1 || got[0]["conversation_id"] != "preview-chat" ||
+		got[0]["source_type"] != "pdf_preview" || got[0]["source_document_id"] != "doc-1" {
+		t.Fatalf("promoted conversation missing from history: %#v", got)
+	}
+}
+
+func TestConversationPinningOrdersHistoryWithoutChangingUpdatedAt(t *testing.T) {
+	database := newPromptTestDB(t)
+	db := database.DB
+	store.Init(db, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+
+	baseTime := time.Date(2026, time.August, 30, 8, 0, 0, 0, time.UTC)
+	for _, conversation := range []orm.Conversation{
+		{
+			ID: "older", DisplayName: "Older conversation",
+			BaseModel: orm.BaseModel{CreateUserID: "u1", CreateUserName: "User 1", CreatedAt: baseTime, UpdatedAt: baseTime},
+		},
+		{
+			ID: "newer", DisplayName: "Newer conversation",
+			BaseModel: orm.BaseModel{CreateUserID: "u1", CreateUserName: "User 1", CreatedAt: baseTime.Add(time.Hour), UpdatedAt: baseTime.Add(time.Hour)},
+		},
+		{
+			ID: "other-user", DisplayName: "Other user's conversation",
+			BaseModel: orm.BaseModel{CreateUserID: "u2", CreateUserName: "User 2", CreatedAt: baseTime, UpdatedAt: baseTime},
+		},
+	} {
+		if err := db.Create(&conversation).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	callPin := func(conversationID string, pinned bool) *httptest.ResponseRecorder {
+		action := PinConversation
+		if !pinned {
+			action = UnpinConversation
+		}
+		req := httptest.NewRequest(http.MethodPost, "/api/core/conversations/"+conversationID, nil)
+		req = mux.SetURLVars(req, map[string]string{"conversation_id": conversationID})
+		req.Header.Set("X-User-Id", "u1")
+		rec := httptest.NewRecorder()
+		action(rec, req)
+		return rec
+	}
+	list := func() []struct {
+		ID       string     `json:"conversation_id"`
+		IsPinned bool       `json:"is_pinned"`
+		PinnedAt *time.Time `json:"pinned_at"`
+	} {
+		req := httptest.NewRequest(http.MethodGet, "/api/core/conversations?is_task_conv=false", nil)
+		req.Header.Set("X-User-Id", "u1")
+		rec := httptest.NewRecorder()
+		ListConversations(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("list status=%d body=%s", rec.Code, rec.Body.String())
+		}
+		var response struct {
+			Conversations []struct {
+				ID       string     `json:"conversation_id"`
+				IsPinned bool       `json:"is_pinned"`
+				PinnedAt *time.Time `json:"pinned_at"`
+			} `json:"conversations"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+			t.Fatal(err)
+		}
+		return response.Conversations
+	}
+
+	if rec := callPin("older", true); rec.Code != http.StatusOK {
+		t.Fatalf("pin status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var older orm.Conversation
+	if err := db.First(&older, "id = ?", "older").Error; err != nil {
+		t.Fatal(err)
+	}
+	if older.PinnedAt == nil {
+		t.Fatal("expected pinned_at to be set")
+	}
+	if !older.UpdatedAt.Equal(baseTime) {
+		t.Fatalf("pin changed updated_at: got %v want %v", older.UpdatedAt, baseTime)
+	}
+	if got := list(); len(got) != 2 || got[0].ID != "older" || !got[0].IsPinned || got[0].PinnedAt == nil {
+		t.Fatalf("pinned conversation was not first: %#v", got)
+	}
+
+	if rec := callPin("other-user", true); rec.Code != http.StatusNotFound {
+		t.Fatalf("pin other user's conversation status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if rec := callPin("older", false); rec.Code != http.StatusOK {
+		t.Fatalf("unpin status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := list(); len(got) != 2 || got[0].ID != "newer" || got[1].ID != "older" || got[1].IsPinned || got[1].PinnedAt != nil {
+		t.Fatalf("unpinned conversation did not return to chronological order: %#v", got)
+	}
+}
+
+func TestPersistentEphemeralConversationHasNoExpiry(t *testing.T) {
+	database := newPromptTestDB(t)
+	db := database.DB
+	store.Init(db, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+
+	conversation, _, err := ensureConversation(
+		context.Background(), db, "persistent-preview", "Preview chat", nil, nil,
+		"u1", "User 1", false, "", map[string]any{
+			"ephemeral": true, "persistent_ephemeral": true,
+			"source_type": "pdf_preview", "source_document_id": "doc-1",
+		},
+	)
+	if err != nil {
+		t.Fatalf("create persistent ephemeral conversation: %v", err)
+	}
+	if !conversation.IsEphemeral || conversation.EphemeralExpiresAt != nil {
+		t.Fatalf("persistent ephemeral conversation should not expire: %#v", conversation)
+	}
+}
+
+func TestConversationListSeparatesAssistantOwnershipFromExecutionEngine(t *testing.T) {
+	database := newPromptTestDB(t)
+	db := database.DB
+	store.Init(db, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+	now := time.Now().UTC()
+	for _, conversation := range []orm.Conversation{
+		{ID: "native", DisplayName: "LazyMind native", ChatExecutor: ChatExecutorLazyMind,
+			BaseModel: orm.BaseModel{CreateUserID: "u1", CreatedAt: now, UpdatedAt: now}},
+		{ID: "managed", DisplayName: "LazyMind managed Codex", ChatExecutor: ChatExecutorCodex,
+			BaseModel: orm.BaseModel{CreateUserID: "u1", CreatedAt: now.Add(time.Second), UpdatedAt: now.Add(time.Second)}},
+		{ID: "external", DisplayName: "Codex native", ChatExecutor: ChatExecutorCodex,
+			BaseModel: orm.BaseModel{CreateUserID: "u1", CreatedAt: now.Add(2 * time.Second), UpdatedAt: now.Add(2 * time.Second)}},
+		{ID: "archived-external", DisplayName: "Archived Codex native", ChatExecutor: ChatExecutorCodex,
+			ArchivedAt: &now, BaseModel: orm.BaseModel{CreateUserID: "u1", CreatedAt: now.Add(3 * time.Second), UpdatedAt: now.Add(3 * time.Second)}},
+	} {
+		if err := db.Create(&conversation).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, binding := range []orm.ExternalAgentBinding{
+		{ID: "managed-binding", ConversationID: "managed", Provider: ChatExecutorCodex,
+			HostID: "host-1", ProviderThreadID: "managed-thread", CreatedByUserID: "u1", CreatedAt: now, UpdatedAt: now},
+		{ID: "external-binding", ConversationID: "external", Provider: ChatExecutorCodex,
+			HostID: "host-1", ProviderThreadID: "external-thread",
+			CreatedByUserID: "u1", CreatedAt: now, UpdatedAt: now},
+		{ID: "archived-external-binding", ConversationID: "archived-external", Provider: ChatExecutorCodex,
+			HostID: "host-1", ProviderThreadID: "archived-external-thread", CreatedByUserID: "u1", CreatedAt: now, UpdatedAt: now},
+	} {
+		if err := db.Create(&binding).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, session := range []orm.ExternalAgentSession{
+		{ID: "managed-session", OwnerUserID: "u1", Provider: ChatExecutorCodex, HostID: "host-1",
+			ProviderThreadID: "managed-thread", ProjectKey: "codex-project-1", ProjectName: "DataAnnotation",
+			DisplayName: "Managed Codex", Active: true, LastSeenAt: now, CreatedAt: now, UpdatedAt: now},
+		{ID: "external-session", OwnerUserID: "u1", Provider: ChatExecutorCodex, HostID: "host-1",
+			ProviderThreadID: "external-thread", ProjectKey: "codex-project-1", ProjectName: "DataAnnotation",
+			DisplayName: "Codex native", TurnCount: 1,
+			Active: true, LastSeenAt: now, CreatedAt: now, UpdatedAt: now},
+	} {
+		if err := db.Create(&session).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	list := func(assistant string) []struct {
+		ID           string `json:"conversation_id"`
+		Assistant    string `json:"assistant"`
+		ChatExecutor string `json:"chat_executor"`
+		ProjectKey   string `json:"project_key"`
+		ProjectName  string `json:"project_name"`
+	} {
+		req := httptest.NewRequest(http.MethodGet, "/api/core/conversations?assistant="+assistant, nil)
+		req.Header.Set("X-User-Id", "u1")
+		rec := httptest.NewRecorder()
+		ListConversations(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("assistant=%s status=%d body=%s", assistant, rec.Code, rec.Body.String())
+		}
+		var response struct {
+			Conversations []struct {
+				ID           string `json:"conversation_id"`
+				Assistant    string `json:"assistant"`
+				ChatExecutor string `json:"chat_executor"`
+				ProjectKey   string `json:"project_key"`
+				ProjectName  string `json:"project_name"`
+			} `json:"conversations"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+			t.Fatal(err)
+		}
+		return response.Conversations
+	}
+
+	lazyMind := list(ChatExecutorLazyMind)
+	if len(lazyMind) != 1 || lazyMind[0].ID != "native" || lazyMind[0].Assistant != ChatExecutorLazyMind {
+		t.Fatalf("LazyMind assistant conversations=%#v", lazyMind)
+	}
+	codex := list(ChatExecutorCodex)
+	if len(codex) != 2 || codex[0].ID != "external" || codex[0].Assistant != ChatExecutorCodex ||
+		codex[0].ChatExecutor != ChatExecutorCodex || codex[0].ProjectKey != "codex-project-1" ||
+		codex[0].ProjectName != "DataAnnotation" || codex[1].ID != "managed" {
+		t.Fatalf("Codex assistant conversations=%#v", codex)
+	}
+}
+
+func TestWorkflowSessionAvailableForRequest(t *testing.T) {
+	tests := []struct {
+		name    string
+		session *orm.WorkflowSession
+		raw     map[string]any
+		want    bool
+	}{
+		{
+			name:    "active session is injected without frontend context",
+			session: &orm.WorkflowSession{ID: "session-1", Status: "active"},
+			raw:     map[string]any{},
+			want:    true,
+		},
+		{
+			name:    "failed session remains available for recovery",
+			session: &orm.WorkflowSession{ID: "session-1", Status: "failed"},
+			raw:     map[string]any{},
+			want:    true,
+		},
+		{
+			name:    "completed session is available when explicitly focused",
+			session: &orm.WorkflowSession{ID: "session-1", Status: "completed"},
+			raw: map[string]any{
+				"workflow_context": map[string]any{"session_id": "session-1"},
+			},
+			want: true,
+		},
+		{
+			name:    "completed session is not sticky without explicit context",
+			session: &orm.WorkflowSession{ID: "session-1", Status: "completed"},
+			raw:     map[string]any{},
+			want:    false,
+		},
+		{
+			name:    "completed session rejects a stale frontend id",
+			session: &orm.WorkflowSession{ID: "session-1", Status: "completed"},
+			raw: map[string]any{
+				"workflow_context": map[string]any{"session_id": "session-old"},
+			},
+			want: false,
+		},
+		{
+			name:    "dismissed failed session is unavailable",
+			session: &orm.WorkflowSession{ID: "session-1", Status: "failed", Dismissed: true},
+			raw:     map[string]any{},
+			want:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := workflowSessionAvailableForRequest(tt.session, tt.raw); got != tt.want {
+				t.Fatalf("workflowSessionAvailableForRequest() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestPromoteAgentRuntimeFlagsPrefersExplicitRequest(t *testing.T) {
 	body := map[string]any{
 		"agentic_config": map[string]any{
@@ -51,6 +360,74 @@ func TestPromoteAgentRuntimeFlagsPrefersExplicitRequest(t *testing.T) {
 	}
 	if enabled, _ := body["enable_subagent"].(bool); enabled {
 		t.Fatalf("expected persisted enable_subagent=false: %#v", body)
+	}
+}
+
+func TestApplyChatFeatureControlsKeepsWorkflowsIndependentFromTaskCenter(t *testing.T) {
+	db := newPromptTestDB(t)
+	now := time.Now().UTC()
+	if err := db.Model(&orm.UserUIPreferences{}).Create(map[string]any{
+		"user_id": "user-1", "task_center_enabled": false, "skills_enabled": true,
+		"workflows_enabled": true, "mcp_enabled": true, "document_parsing_enabled": true,
+		"created_at": now, "updated_at": now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	body := map[string]any{
+		"enable_workflow": true,
+		"enable_subagent": true,
+		"agentic_config": map[string]any{
+			"enable_workflow": true,
+			"enable_subagent": true,
+		},
+	}
+
+	if err := applyChatFeatureControls(t.Context(), db.DB, "user-1", body); err != nil {
+		t.Fatal(err)
+	}
+	if enabled, _ := body["enable_workflow"].(bool); !enabled {
+		t.Fatalf("workflow must remain enabled when only the task center is off: %#v", body)
+	}
+	if enabled, _ := body["enable_subagent"].(bool); enabled {
+		t.Fatalf("subagents must be disabled by the task center master control: %#v", body)
+	}
+	agentConfig := body["agentic_config"].(map[string]any)
+	if agentConfig["enable_workflow"] != true || agentConfig["enable_subagent"] != false {
+		t.Fatalf("agentic config must keep workflow and subagent controls independent: %#v", agentConfig)
+	}
+}
+
+func TestApplyChatFeatureControlsKeepsSubagentsIndependentFromWorkflows(t *testing.T) {
+	db := newPromptTestDB(t)
+	now := time.Now().UTC()
+	if err := db.Model(&orm.UserUIPreferences{}).Create(map[string]any{
+		"user_id": "user-1", "task_center_enabled": true, "skills_enabled": true,
+		"workflows_enabled": false, "mcp_enabled": true, "document_parsing_enabled": true,
+		"created_at": now, "updated_at": now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	body := map[string]any{
+		"enable_workflow": true,
+		"enable_subagent": true,
+		"agentic_config": map[string]any{
+			"enable_workflow": true,
+			"enable_subagent": true,
+		},
+	}
+
+	if err := applyChatFeatureControls(t.Context(), db.DB, "user-1", body); err != nil {
+		t.Fatal(err)
+	}
+	if enabled, _ := body["enable_workflow"].(bool); enabled {
+		t.Fatalf("workflow must be disabled by its own control: %#v", body)
+	}
+	if enabled, _ := body["enable_subagent"].(bool); !enabled {
+		t.Fatalf("subagents must remain enabled when only workflows are off: %#v", body)
+	}
+	agentConfig := body["agentic_config"].(map[string]any)
+	if agentConfig["enable_workflow"] != false || agentConfig["enable_subagent"] != true {
+		t.Fatalf("agentic config must keep workflow and subagent controls independent: %#v", agentConfig)
 	}
 }
 
@@ -122,7 +499,7 @@ func TestMergeChunksRetainsConversationIntentUpdate(t *testing.T) {
 	intent := &IntentUpdatedEvent{Scope: "conversation", IntentContext: map[string]any{"goal": "新目标"}}
 	merged := mergeChunksToFirstChunk([]*ChatChunkResponse{
 		{Delta: "前", IntentUpdated: intent},
-		{Delta: "后", FinishReason: "FINISH_REASON_STOP"},
+		{Delta: "后"},
 	})
 	if merged.Delta != "前后" || merged.IntentUpdated != intent {
 		t.Fatalf("intent update was not retained: %#v", merged)
@@ -233,6 +610,31 @@ func TestBuildLazyChatRequestPreservesDatasetListFilters(t *testing.T) {
 
 	if req.Retrieval.Filters == nil || len(req.Retrieval.Filters.DatasetIDs) != 1 || req.Retrieval.Filters.DatasetIDs[0] != "ds_1" {
 		t.Fatalf("unexpected retrieval filters: %#v", req.Retrieval.Filters)
+	}
+}
+
+func TestBuildChatRequestBodyScopesDocumentPreviewRetrieval(t *testing.T) {
+	body := buildChatRequestBody(context.TODO(), nil, "conv-1", "", "explain", nil, map[string]any{
+		"conversation": map[string]any{
+			"search_config": map[string]any{
+				"dataset_list": []any{map[string]any{"id": "kb-1"}},
+			},
+		},
+		"document_context": map[string]any{"document_id": "doc-1"},
+	}, nil, "", 1)
+
+	filters, ok := body["filters"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected filters map, got %T", body["filters"])
+	}
+	docIDs, ok := filters["doc_id"].([]string)
+	if !ok || len(docIDs) != 1 || docIDs[0] != "doc-1" {
+		t.Fatalf("unexpected doc_id filter: %#v", filters["doc_id"])
+	}
+
+	req := buildLazyChatRequest(body)
+	if req.Retrieval.Filters == nil || len(req.Retrieval.Filters.DocumentIDs) != 1 || req.Retrieval.Filters.DocumentIDs[0] != "doc-1" {
+		t.Fatalf("unexpected document retrieval filters: %#v", req.Retrieval.Filters)
 	}
 }
 
@@ -411,6 +813,9 @@ func TestBuildChatRequestBodyAcceptsMaxThinkingDepth(t *testing.T) {
 	if got := body["thinking_depth"]; got != "max" {
 		t.Fatalf("expected max thinking depth, got %#v", got)
 	}
+	if got := buildLazyChatRequest(body).Runtime.ThinkingDepth; got != "max" {
+		t.Fatalf("expected upstream max thinking depth, got %q", got)
+	}
 }
 
 func TestBuildChatHistoryExtPreservesMultimodalInput(t *testing.T) {
@@ -439,6 +844,25 @@ func TestBuildChatHistoryExtPreservesMultimodalInput(t *testing.T) {
 	}
 	if got := payload.Input[1]["input_base64"]; got != "data:image/jpeg;base64,/9j/abc" {
 		t.Fatalf("expected image base64 to be preserved, got %#v", got)
+	}
+}
+
+func TestBuildChatHistoryExtPreservesDocumentSelectionContext(t *testing.T) {
+	ext := buildChatHistoryExt(map[string]any{
+		"input": []any{map[string]any{"input_type": "text", "text": "explain"}},
+		"document_context": map[string]any{
+			"document_id": "doc-1", "segment_id": "seg-2", "page": float64(3),
+		},
+	}, "explain")
+	var payload struct {
+		DocumentContext map[string]any `json:"document_context"`
+	}
+	if err := json.Unmarshal(ext, &payload); err != nil {
+		t.Fatalf("unmarshal ext: %v", err)
+	}
+	if payload.DocumentContext["document_id"] != "doc-1" ||
+		payload.DocumentContext["segment_id"] != "seg-2" {
+		t.Fatalf("document context was not preserved: %#v", payload.DocumentContext)
 	}
 }
 
@@ -490,7 +914,7 @@ func TestCollectedInputsForConversationReturnsSnapshotAndSummary(t *testing.T) {
 }
 
 func TestGetConversationDetailReturnsStoredMultimodalInput(t *testing.T) {
-	db := orm.MigrateTestDB(t, &orm.Conversation{}, &orm.ChatHistory{})
+	db := orm.MigrateTestDB(t, &orm.Conversation{}, &orm.ChatHistory{}, &orm.ExternalAgentBinding{})
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 
@@ -506,10 +930,11 @@ func TestGetConversationDetailReturnsStoredMultimodalInput(t *testing.T) {
 		},
 	}, "记住这个是王牌超")
 	if err := db.Create(&orm.Conversation{
-		ID:           "conv-1",
-		DisplayName:  "记住这个是王牌超",
-		ChannelID:    "default",
-		SearchConfig: json.RawMessage(`{}`),
+		ID:            "conv-1",
+		DisplayName:   "记住这个是王牌超",
+		ChannelID:     "default",
+		ThinkingDepth: "high",
+		SearchConfig:  json.RawMessage(`{}`),
 		BaseModel: orm.BaseModel{
 			CreateUserID:   "u1",
 			CreateUserName: "User 1",
@@ -546,6 +971,7 @@ func TestGetConversationDetailReturnsStoredMultimodalInput(t *testing.T) {
 		Conversation struct {
 			ConversationID string `json:"conversation_id"`
 			DisplayName    string `json:"display_name"`
+			ThinkingDepth  string `json:"thinking_depth"`
 		} `json:"conversation"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
@@ -556,6 +982,9 @@ func TestGetConversationDetailReturnsStoredMultimodalInput(t *testing.T) {
 	}
 	if resp.Conversation.DisplayName != "记住这个是王牌超" {
 		t.Fatalf("expected display_name preserved, got %q", resp.Conversation.DisplayName)
+	}
+	if resp.Conversation.ThinkingDepth != "high" {
+		t.Fatalf("expected thinking_depth high, got %q", resp.Conversation.ThinkingDepth)
 	}
 }
 
@@ -618,7 +1047,7 @@ func TestElapsedThinkingSecondsRoundsUp(t *testing.T) {
 }
 
 func TestGetConversationDetailFiltersMissingDatasets(t *testing.T) {
-	db := orm.MigrateTestDB(t, &orm.Conversation{}, &orm.ChatHistory{}, &orm.Dataset{})
+	db := orm.MigrateTestDB(t, &orm.Conversation{}, &orm.ChatHistory{}, &orm.Dataset{}, &orm.ExternalAgentBinding{})
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 
@@ -1072,7 +1501,7 @@ func TestBuildLazyChatRequestMapsAllFields(t *testing.T) {
 func TestBuildLLMConfigFromSelectedModels(t *testing.T) {
 	llmConfig := buildLLMConfig([]selectedRuntimeModel{
 		{ModelType: "llm", ProviderName: "OpenAI", ModelName: "gpt-4o", BaseURL: "https://api.openai.com/v1/", APIKey: "sk-from-db"},
-		{ModelType: "evo_llm", ProviderName: "OpenAI", ModelName: "gpt-4o-mini", BaseURL: "https://api.openai.com/v1/", APIKey: "sk-from-db"},
+		{ModelType: "evo_llm", TechnicalModelType: "vlm", ProviderName: "OpenAI", ModelName: "gpt-4o-mini", BaseURL: "https://api.openai.com/v1/", APIKey: "sk-from-db"},
 		{ModelType: "embed_main", ProviderName: "OpenAI", ModelName: "text-embedding-3-small", BaseURL: "https://api.openai.com/v1/", APIKey: "sk-from-db"},
 		{ModelType: "reranker", ProviderName: "OpenAI", ModelName: "rerank-multilingual-v3.0", BaseURL: "https://api.openai.com/v1/", APIKey: "sk-from-db"},
 	})

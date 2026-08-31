@@ -13,6 +13,7 @@ import (
 
 	"lazymind/core/common/orm"
 	"lazymind/core/subagent"
+	"lazymind/core/workflow/graphengine"
 )
 
 // ──────────────────────────────────────────────
@@ -25,6 +26,89 @@ func makeSubAgentTask(t *testing.T, db interface {
 	CreateTask(in subagent.CreateTaskInput) error
 }, taskID, convID, sessionID, stepID string) {
 	t.Helper()
+}
+
+func TestLaunchWorkflowAttemptCreatesTaskCenterRowAtomically(t *testing.T) {
+	db := newTestDB(t)
+	if err := db.AutoMigrate(&orm.Conversation{}); err != nil {
+		t.Fatalf("migrate conversation: %v", err)
+	}
+	if err := db.Create(&orm.Conversation{
+		ID: "conv-task-center", DisplayName: "赛博朋克 PPT",
+		BaseModel: orm.BaseModel{CreateUserID: "user-1", CreateUserName: "User 1"},
+	}).Error; err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+
+	sessionID, taskID, completed, err := launchWorkflowAttempt(
+		context.Background(), db.DB, nil,
+		"conv-task-center", "history-1", "user-1", "workflow-task-1",
+		"fallback title", "analyze requirements",
+		WorkflowStepParams{
+			WorkflowID: "ppt-workflow", StepID: "analyze_requirements",
+			IsColdStart: true, WorkflowMode: "dynamic",
+		},
+		nil, nil, nil, nil, false, false,
+	)
+	if err != nil {
+		t.Fatalf("launch workflow attempt: %v", err)
+	}
+	if sessionID == "" || taskID != "workflow-task-1" || completed {
+		t.Fatalf("unexpected launch result session=%q task=%q completed=%v", sessionID, taskID, completed)
+	}
+
+	var task orm.TaskCenterTask
+	if err := db.Where("plugin_session_id = ?", sessionID).First(&task).Error; err != nil {
+		t.Fatalf("load task-center workflow run: %v", err)
+	}
+	if task.TaskType != "workflow_run" || task.Status != "running" || task.Title == nil || *task.Title != "赛博朋克 PPT" {
+		t.Fatalf("unexpected task-center workflow run: %#v", task)
+	}
+}
+
+func TestLaunchWorkflowAttemptRollsBackSessionWhenTaskCenterCreateFails(t *testing.T) {
+	db := newTestDB(t)
+	if err := db.AutoMigrate(&orm.Conversation{}); err != nil {
+		t.Fatalf("migrate conversation: %v", err)
+	}
+	if err := db.Create(&orm.Conversation{
+		ID: "conv-task-center-failure", DisplayName: "Failed workflow",
+		BaseModel: orm.BaseModel{CreateUserID: "user-1", CreateUserName: "User 1"},
+	}).Error; err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+	if err := db.Migrator().DropTable(&orm.TaskCenterTask{}); err != nil {
+		t.Fatalf("drop task-center table: %v", err)
+	}
+
+	_, _, _, err := launchWorkflowAttempt(
+		context.Background(), db.DB, nil,
+		"conv-task-center-failure", "history-1", "user-1", "workflow-task-failure",
+		"workflow", "analyze requirements",
+		WorkflowStepParams{
+			WorkflowID: "ppt-workflow", StepID: "analyze_requirements",
+			IsColdStart: true, WorkflowMode: "dynamic",
+		},
+		nil, nil, nil, nil, false, false,
+	)
+	if err == nil || !strings.Contains(err.Error(), "create task-center workflow run") {
+		t.Fatalf("expected task-center creation failure, got %v", err)
+	}
+
+	var sessionCount, subAgentCount int64
+	if err := db.Model(&orm.WorkflowSession{}).
+		Where("conversation_id = ?", "conv-task-center-failure").
+		Count(&sessionCount).Error; err != nil {
+		t.Fatalf("count workflow sessions: %v", err)
+	}
+	if err := db.Model(&orm.SubAgentTask{}).
+		Where("conversation_id = ?", "conv-task-center-failure").
+		Count(&subAgentCount).Error; err != nil {
+		t.Fatalf("count sub-agent tasks: %v", err)
+	}
+	if sessionCount != 0 || subAgentCount != 0 {
+		t.Fatalf("failed cold start left orphan rows: sessions=%d subagents=%d", sessionCount, subAgentCount)
+	}
 }
 
 func TestBuildWorkflowArtifactsSummaryExecutesJoinQuery(t *testing.T) {
@@ -53,6 +137,39 @@ func seedSessionAndTask(t *testing.T, ctx context.Context, gdb interface {
 	CreateSession(context.Context, CreateSessionInput) error
 }, sessionID, convID, workflowID, stepID, taskID string) {
 	t.Helper()
+}
+
+func seedEventLoopRevision(t *testing.T, db *orm.DB, revisionID string) (string, string) {
+	t.Helper()
+	if err := db.AutoMigrate(
+		&orm.WorkflowRevision{},
+		&orm.WorkflowRouteDecision{},
+		&orm.WorkflowInputBinding{},
+		&orm.WorkflowAttemptInputBinding{},
+	); err != nil {
+		t.Fatalf("migrate workflow runtime tables: %v", err)
+	}
+	graph := graphengine.CompiledStateGraph{
+		SchemaVersion: graphengine.SchemaVersion,
+		GraphHash:     revisionID + "-graph",
+		StartRoute:    "analyze_subject",
+		Nodes: map[string]graphengine.CompiledNode{
+			"analyze_subject": {ID: "analyze_subject"},
+			"generate_image":  {ID: "generate_image"},
+		},
+		ControlEdges: []graphengine.CompiledEdge{
+			{From: "__start__", To: "analyze_subject"},
+			{From: "analyze_subject", To: "generate_image"},
+		},
+	}
+	if err := db.Create(&orm.WorkflowRevision{
+		ID: revisionID, WorkflowResourceID: revisionID + "-resource", RevisionNo: 1,
+		CompiledGraph: graph.JSON(), GraphHash: graph.GraphHash,
+		GraphSchemaVersion: graph.SchemaVersion, CreatedAt: time.Now().UTC(),
+	}).Error; err != nil {
+		t.Fatalf("create workflow revision: %v", err)
+	}
+	return graph.GraphHash, graph.SchemaVersion
 }
 
 // ──────────────────────────────────────────────
@@ -106,9 +223,11 @@ func TestConversationPreflightMustBeReadyAndIsConsumed(t *testing.T) {
 func TestOnSubAgentDone_SucceededManualMode(t *testing.T) {
 	db := newTestDB(t)
 	ctx := context.Background()
+	graphHash, graphSchemaVersion := seedEventLoopRevision(t, db, "revision-manual")
 
 	if _, err := CreateSession(ctx, db.DB, CreateSessionInput{
 		SessionID: "ps-1", ConversationID: "conv-1", WorkflowID: "image-workflow",
+		WorkflowRevisionID: "revision-manual", GraphHash: graphHash, GraphSchemaVersion: graphSchemaVersion,
 	}); err != nil {
 		t.Fatalf("session: %v", err)
 	}
@@ -291,8 +410,10 @@ func TestAppendHandoffHistorySummary_SkipsInlineExecution(t *testing.T) {
 func TestOnSubAgentDone_ExplicitNoHandOffWaitsForChatAgent(t *testing.T) {
 	db := newTestDB(t)
 	ctx := context.Background()
+	graphHash, graphSchemaVersion := seedEventLoopRevision(t, db, "revision-inline")
 	if _, err := CreateSession(ctx, db.DB, CreateSessionInput{
 		SessionID: "ps-inline", ConversationID: "conv-inline", WorkflowID: "image-workflow",
+		WorkflowRevisionID: "revision-inline", GraphHash: graphHash, GraphSchemaVersion: graphSchemaVersion,
 	}); err != nil {
 		t.Fatalf("session: %v", err)
 	}

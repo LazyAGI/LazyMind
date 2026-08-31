@@ -306,12 +306,20 @@ func GetSlotItemVersionsByIndex(w http.ResponseWriter, r *http.Request) {
 	}
 
 	out := make([]map[string]any, 0, len(revisions))
+	formalVersion := 0
 	for _, rev := range revisions {
+		if isWriterWorkingDraftRevision(slotID, rev.ChangeSource) {
+			continue
+		}
+		formalVersion++
 		item := map[string]any{
 			"revision":      rev.Revision,
 			"change_source": rev.ChangeSource,
 			"created_at":    rev.CreatedAt,
 			"selected":      rev.Selected,
+		}
+		if slotID == "draft_document" || slotID == "flat_draft_document" {
+			item["version"] = formalVersion
 		}
 		var artifactValue json.RawMessage
 		if rev.HumanArtifactID != nil {
@@ -339,7 +347,8 @@ func GetSlotItemVersionsByIndex(w http.ResponseWriter, r *http.Request) {
 			item["content_snapshot"] = enrichArtifactValue(rev.ContentSnapshot, "")
 			artifactValue = rev.ContentSnapshot
 		}
-		if slotID == "draft_document" && writerSlotRevisionSynced(rev.ChangeSource, artifactValue) {
+		if (slotID == "draft_document" || slotID == "flat_draft_document") &&
+			writerSlotRevisionSynced(rev.ChangeSource, artifactValue) {
 			item["provider_synced"] = true
 		}
 		out = append(out, item)

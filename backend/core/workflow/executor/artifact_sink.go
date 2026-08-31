@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"gopkg.in/yaml.v3"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
@@ -20,9 +22,41 @@ import (
 // report values through callbacks and never write Host-private Artifact tables.
 type DBArtifactSink struct{ DB *gorm.DB }
 
+func validateDeclaredArtifactType(attempt AttemptContext, artifact Artifact) error {
+	declared := strings.ToLower(strings.TrimSpace(attempt.DeclaredOutputTypes[artifact.Slot]))
+	actual := strings.ToLower(strings.TrimSpace(artifact.ContentType))
+	if declared == "" {
+		return nil
+	}
+	valid := actual == declared
+	if declared == "file" {
+		valid = actual == "file" || actual == "file_list"
+	} else if actual == "file" && (declared == "text" || declared == "json") {
+		// Large logical text/JSON values are intentionally offloaded by the Host.
+		// The outer artifact is then a file carrier while its metadata preserves
+		// the declared logical type. Accept only that explicit, typed carrier so a
+		// plain file cannot silently satisfy an unrelated output contract.
+		var carrier struct {
+			Type string `json:"type"`
+			Path string `json:"path"`
+		}
+		if json.Unmarshal(artifact.Value, &carrier) == nil {
+			valid = strings.EqualFold(strings.TrimSpace(carrier.Type), declared) &&
+				strings.TrimSpace(carrier.Path) != ""
+		}
+	}
+	if !valid {
+		return fmt.Errorf("artifact slot %q requires content type %q, got %q", artifact.Slot, declared, actual)
+	}
+	return nil
+}
+
 func (sink DBArtifactSink) Save(ctx context.Context, attempt AttemptContext, artifact Artifact) error {
 	if sink.DB == nil || attempt.AttemptID == "" || artifact.Slot == "" {
 		return errors.New("artifact sink requires a database, attempt and slot")
+	}
+	if err := validateDeclaredArtifactType(attempt, artifact); err != nil {
+		return err
 	}
 	now := time.Now().UTC()
 	valueID := uuid.NewString()
@@ -51,11 +85,18 @@ func (sink DBArtifactSink) Save(ctx context.Context, attempt AttemptContext, art
 		if err := tx.Where("id = ?", attempt.SessionID).First(&session).Error; err != nil {
 			return err
 		}
-		cardinality := attempt.OutputCardinality[artifact.Slot]
+		cardinality := strings.TrimSpace(attempt.OutputCardinality[artifact.Slot])
+		if cardinality == "" {
+			var loadErr error
+			cardinality, loadErr = loadSlotCardinality(tx, session.WorkflowRevisionID, artifact.Slot)
+			if loadErr != nil {
+				return loadErr
+			}
+		}
 		if cardinality != "list" {
 			cardinality = "single"
 		}
-		listIndex, appendList, err := artifactListIndex(tx, attempt, artifact, cardinality)
+		listIndex, _, err := artifactListIndex(tx, attempt, artifact, cardinality)
 		if err != nil {
 			return err
 		}
@@ -85,7 +126,11 @@ func (sink DBArtifactSink) Save(ctx context.Context, attempt AttemptContext, art
 		if err := tx.Create(&row).Error; err != nil {
 			return err
 		}
-		if appendList {
+		// Keep list membership durable even when a package publisher supplies an
+		// explicit list_index. appendArtifactListOrder is idempotent, so ordinary
+		// replacements remain in place while first-time explicit indices become
+		// visible to clients that derive sort_order from the durable slot order.
+		if cardinality == "list" {
 			if err := appendArtifactListOrder(tx, attempt.SessionID, artifact.Slot, *listIndex, now); err != nil {
 				return err
 			}
@@ -176,6 +221,49 @@ func appendArtifactListOrder(tx *gorm.DB, sessionID, slot string, listIndex int,
 	encoded, _ := json.Marshal(append(current, listIndex))
 	return tx.Model(&orm.WorkflowSlotOrder{}).Where("session_id = ? AND slot_id = ?", sessionID, slot).
 		Updates(map[string]any{"order_list": encoded, "order_version": order.OrderVersion + 1, "updated_at": now}).Error
+}
+
+type workflowSlotManifest struct {
+	Slots []struct {
+		ID          string `yaml:"id"`
+		Cardinality string `yaml:"cardinality"`
+	} `yaml:"slots"`
+}
+
+// loadSlotCardinality keeps compatibility with attempt payloads produced before
+// OutputCardinality was embedded in the neutral executor contract.
+func loadSlotCardinality(tx *gorm.DB, revisionID, slot string) (string, error) {
+	if strings.TrimSpace(revisionID) == "" {
+		return "single", nil
+	}
+	var blob orm.WorkflowBlob
+	err := tx.Table("plugin_blobs b").
+		Select("b.*").
+		Joins("JOIN plugin_revision_entries e ON e.blob_hash = b.hash").
+		Where("e.revision_id = ? AND e.path = ?", revisionID, "workflow.yaml").
+		First(&blob).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		// Older hosted attempts can reference revisions whose compiled graph was
+		// persisted without the source manifest. They predate OutputCardinality,
+		// so retain the historical single-value default when no manifest exists.
+		return "single", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("load workflow slot manifest: %w", err)
+	}
+	var manifest workflowSlotManifest
+	if err := yaml.Unmarshal(blob.Content, &manifest); err != nil {
+		return "", fmt.Errorf("parse workflow slot manifest: %w", err)
+	}
+	for _, item := range manifest.Slots {
+		if item.ID == slot {
+			if strings.EqualFold(strings.TrimSpace(item.Cardinality), "list") {
+				return "list", nil
+			}
+			return "single", nil
+		}
+	}
+	return "", fmt.Errorf("artifact slot %q is not declared in workflow revision %s", slot, revisionID)
 }
 
 func metadataListIndex(metadata map[string]any) *int {

@@ -15,6 +15,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"lazymind/agentconnector/internal/agentcatalog"
 	"lazymind/agentconnector/internal/coreapi"
 )
 
@@ -25,11 +26,15 @@ const (
 )
 
 type invocationRecorder interface {
-	StartInvocation(context.Context, string, coreapi.InvocationStart) error
+	StartInvocation(context.Context, string, coreapi.InvocationStart) (coreapi.InvocationStartResult, error)
 	FinishInvocation(context.Context, string, coreapi.InvocationFinish) error
 }
 
-func invocationMiddleware(recorder invocationRecorder, connectorInstanceID string, readOnlyTools map[string]bool) mcp.Middleware {
+func invocationMiddleware(
+	recorder invocationRecorder,
+	connectorInstanceID, sourceProvider string,
+	readOnlyTools map[string]bool,
+) mcp.Middleware {
 	return func(next mcp.MethodHandler) mcp.MethodHandler {
 		return func(ctx context.Context, method string, request mcp.Request) (mcp.Result, error) {
 			if method != "tools/call" {
@@ -58,16 +63,32 @@ func invocationMiddleware(recorder invocationRecorder, connectorInstanceID strin
 				Transport: "stdio", ToolName: call.Params.Name, ReadOnly: readOnlyTools[call.Params.Name],
 				RequestHash: requestHash, RequestSummary: requestSummary,
 			}
-			if err := recorder.StartInvocation(ctx, invocationID, start); err != nil {
+			if strings.TrimSpace(os.Getenv("LAZYMIND_CONVERSATION_ID")) == "" &&
+				strings.TrimSpace(os.Getenv("LAZYMIND_EXTERNAL_REF")) == "" {
+				start.Source = invocationSource(
+					sourceProvider, call.Params.Meta, call.Params.Name,
+					call.Params.Arguments,
+				)
+			}
+			started, err := recorder.StartInvocation(ctx, invocationID, start)
+			if err != nil {
 				return nil, fmt.Errorf("record LazyMind invocation before %s: %w", call.Params.Name, err)
+			}
+			conversationID, externalRef := "", ""
+			if started.Source != nil {
+				conversationID, externalRef = started.Source.ConversationID, started.Source.ExternalRef
 			}
 			callCtx := coreapi.WithInvocation(ctx, coreapi.InvocationMetadata{
 				ID: invocationID, ClientName: clientName, ConnectorInstanceID: connectorInstanceID,
+				ConversationID: conversationID, ExternalRef: externalRef,
 			})
 			result, callErr := next(callCtx, method, request)
 			finish := finishEvidence(callErr, result, requestSummary)
 			if finish.ExternalRef == "" {
 				finish.ExternalRef = strings.TrimSpace(os.Getenv("LAZYMIND_EXTERNAL_REF"))
+			}
+			if finish.ExternalRef == "" {
+				finish.ExternalRef = externalRef
 			}
 			finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), finishTimeout)
 			finishErr := recorder.FinishInvocation(finishCtx, invocationID, finish)
@@ -78,6 +99,103 @@ func invocationMiddleware(recorder invocationRecorder, connectorInstanceID strin
 			return result, callErr
 		}
 	}
+}
+
+func invocationSource(
+	provider string,
+	metadata mcp.Meta,
+	toolName string,
+	arguments json.RawMessage,
+) *coreapi.InvocationSource {
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	if provider == "cursor" || provider == "workbuddy" {
+		if source, ok := agentcatalog.ResolveInvocation(provider, toolName, time.Now().UTC()); ok {
+			return &coreapi.InvocationSource{
+				Provider: source.Provider, HostID: strings.TrimSpace(os.Getenv("LAZYMIND_AGENT_HOST_ID")),
+				ThreadID: source.ThreadID, TurnID: source.TurnID,
+				ProjectKey: source.ProjectKey, ProjectName: source.ProjectName, Message: source.Message,
+			}
+		}
+	}
+	if provider == "" || len(metadata) == 0 {
+		return nil
+	}
+	nested, _ := metadata["x-codex-turn-metadata"].(map[string]any)
+	threadID := firstMetadataString(metadata, nested,
+		"threadId", "thread_id", "conversationId", "conversation_id", "sessionId", "session_id")
+	if threadID == "" {
+		return nil
+	}
+	turnID := firstMetadataString(metadata, nested, "turnId", "turn_id", "callId", "call_id")
+	threadSource := firstMetadataString(metadata, nested, "threadSource", "thread_source")
+	projectReference := firstMetadataString(metadata, nested, "projectId", "project_id")
+	projectName := firstMetadataString(metadata, nested, "projectName", "project_name")
+	projectPath := firstMetadataString(metadata, nested, "cwd", "workspace", "workspaceRoot", "workspace_root")
+	if projectName == "" && projectPath != "" {
+		projectName = filepath.Base(filepath.Clean(projectPath))
+	}
+	projectKey := ""
+	if projectReference != "" {
+		projectKey, projectName = agentcatalog.Project(
+			provider, projectReference, projectName,
+		)
+	} else if projectPath != "" {
+		projectKey, projectName = agentcatalog.ProjectPath(
+			provider, projectPath, projectName,
+		)
+	}
+	if provider == "codex" && projectKey == "" {
+		projectKey, projectName = agentcatalog.CodexProject(threadID)
+	}
+	message := ""
+	if provider == "codex" {
+		if messageID, userMessage := agentcatalog.CodexTurnSource(threadID, turnID); messageID != "" {
+			turnID, message = messageID, userMessage
+		}
+	}
+	if message == "" {
+		message = invocationSourceMessage(toolName, arguments)
+	}
+	return &coreapi.InvocationSource{
+		Provider: provider, HostID: strings.TrimSpace(os.Getenv("LAZYMIND_AGENT_HOST_ID")),
+		ThreadID: threadID, TurnID: turnID, ThreadSource: threadSource,
+		ProjectKey: projectKey, ProjectName: projectName, Message: message,
+	}
+}
+
+func invocationSourceMessage(toolName string, arguments json.RawMessage) string {
+	var values map[string]any
+	if json.Unmarshal(arguments, &values) != nil {
+		return ""
+	}
+	keys := []string{}
+	switch toolName {
+	case "workflow.start":
+		keys = []string{"request_context"}
+	case "knowledge.search", "cloud_document.search":
+		keys = []string{"query"}
+	}
+	for _, key := range keys {
+		if value, ok := values[key].(string); ok {
+			value = strings.TrimSpace(value)
+			if len([]rune(value)) > 8192 {
+				value = string([]rune(value)[:8192])
+			}
+			return value
+		}
+	}
+	return ""
+}
+
+func firstMetadataString(primary, secondary map[string]any, keys ...string) string {
+	for _, key := range keys {
+		for _, values := range []map[string]any{primary, secondary} {
+			if value, ok := values[key].(string); ok && strings.TrimSpace(value) != "" {
+				return strings.TrimSpace(value)
+			}
+		}
+	}
+	return ""
 }
 
 func newInvocationID(prefix string) (string, error) {

@@ -1,0 +1,74 @@
+locale: en-US
+
+classification:
+  category: Design & creativity
+  tags:
+    - Poster design
+    - Visual systems
+    - Typography
+    - Design philosophy
+
+presentation:
+  card:
+    title: Poster design methods
+    description: Build a visual philosophy and a black-and-white modernist poster for an AI developer conference
+    output_type: images
+    output_label: Poster design
+    cover_asset: cover
+    result_summary: Develop BUILD BEYOND through a grid and type hierarchy into a 1200×1600 final poster
+  detail:
+    title: Poster design methods
+    description: "Build a coherent design philosophy for a theme, then plan hierarchy, typography, color, negative space, and visual rhythm as an executable poster direction. Source: https://skillhub.cn/skills/user_865e3592/poster; adapted for LazyMind."
+    attachment_hint: Theme, copy, dimensions, brand assets, or reference posters
+
+tasks:
+  - id: poster-concept
+    selector:
+      title: AI conference poster
+      description: Present BUILD BEYOND through a black-and-white modernist system
+      output_label: Poster design direction
+    launch:
+      prompt_short: Design a BUILD BEYOND poster for AI Developer Conference 2026.
+      prompt: Use the Poster Design Methods Skill to create a 1200×1600 portrait poster for AI Developer Conference 2026. The main theme is BUILD BEYOND and required details are “08.28 / SHANGHAI.” Use a black-and-white modernist style. First state a one-sentence design philosophy, then establish hierarchy, a modular grid, type scale, negative space, and visual rhythm, and finally deliver a renderable SVG or PNG. Do not add unprovided logos, speakers, or sponsors.
+    replay:
+      steps:
+        - title: Extract thematic tension
+          description: Translate BUILD BEYOND into a visual proposition about crossing boundaries
+        - title: Establish a monochrome system
+          description: Use scale, negative space, and direction to create modernist contrast
+        - title: Build the modular grid
+          description: Relate the theme, date, city, and conference name through type scale
+        - title: Render the portrait poster
+          description: Verify dimensions, information completeness, and distance readability
+    result:
+      template: html_preview_v1
+      eyebrow: Poster design direction
+      title: BUILD BEYOND conference poster
+      summary: Present an AI developer conference through monochrome, modular grid, and strong type hierarchy
+      html_asset: poster_concept_output
+
+  - id: poster-critique
+    selector:
+      title: Poster critique and optimization
+      description: Diagnose a "Weekend Market" mobile poster's hierarchy and layout
+      output_label: Poster improvement plan
+    launch:
+      prompt_short: 'Example: diagnose a "Weekend Market 10:00-18:00" mobile poster.'
+      prompt: >-
+        Diagnose this sample poster: title "Weekend Market", subtitle "10:00-18:00", location "Shanghai Jing'an Kerry Centre", canvas 1080x1440, aiming to attract young office workers in a mobile feed. Review theme expression, information hierarchy, alignment, typography, color, negative space, rhythm, and readability; explain the highest-impact issues and provide a prioritized optimization plan that keeps the copy unchanged.
+    replay:
+      steps:
+        - title: Identify the communication goal
+          description: Confirm audience, context, viewing distance, and primary message
+        - title: Check visual hierarchy
+          description: Evaluate the relationship among title, body, supporting details, and focal point
+        - title: Diagnose system consistency
+          description: Review grid, typography, color, negative space, and rhythm
+        - title: Prioritize improvements
+          description: Organize concrete changes by their expected impact
+    result:
+      template: html_preview_v1
+      eyebrow: Poster improvement plan
+      title: Visual diagnosis and prioritized changes
+      summary: Improve hierarchy, readability, and consistency while preserving the core content
+      html_asset: poster_critique_output

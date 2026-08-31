@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"time"
 )
 
 const (
@@ -56,6 +57,15 @@ type Client interface {
 	SubmitParseTask(ctx context.Context, req SubmitParseTaskRequest) (SubmitParseTaskResponse, error)
 	ResumeParseTask(ctx context.Context, req ResumeParseTaskRequest) (SubmitParseTaskResponse, error)
 	GetCoreTaskResult(ctx context.Context, req GetCoreTaskResultRequest) (CoreTaskResult, error)
+}
+
+type DatasetUsage struct {
+	UsageCount int64      `json:"usage_count"`
+	LastUsedAt *time.Time `json:"last_used_at"`
+}
+
+type DatasetUsageClient interface {
+	BatchGetDatasetUsage(ctx context.Context, userID string, datasetIDs []string) (map[string]DatasetUsage, error)
 }
 
 type ResourceClient interface {

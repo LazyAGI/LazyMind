@@ -56,3 +56,11 @@ def test_attachment_names_are_deduplicated_only_within_each_turn(tmp_path) -> No
     }, current_turn_seq=2)
 
     assert [item.display_name for item in attachments] == ['design.png', 'design.png']
+
+
+def test_subagent_attachment_renderer_forbids_lookup_when_none_available() -> None:
+    rendered = render_attachment_content([], role=AgentRole.SUBAGENT)
+
+    assert 'No user attachments are available' in rendered
+    assert 'Do not call attachment lookup tools' in rendered
+    assert 'optional unless' in rendered

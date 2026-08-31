@@ -44,10 +44,10 @@ func (c *LocalFSConnector) validateProbedPath(info PathInfo) (PathInfo, error) {
 	if !filepath.IsAbs(info.NormalizedPath) {
 		return PathInfo{}, connector.NewError(connector.ErrorCodeInvalidTarget, "target path must be absolute after agent normalization")
 	}
-	if c.publicRoot != "" && !c.isPublicRootPath(info.NormalizedPath) {
+	if !c.dynamicRoots && c.publicRoot != "" && !c.isPublicRootPath(info.NormalizedPath) && !c.matchesAllowedPrefix(info.NormalizedPath) {
 		return PathInfo{}, connector.NewError(connector.ErrorCodePermissionDenied, "target path is outside local_fs public root")
 	}
-	if !c.pathAllowed(info.NormalizedPath) {
+	if !c.dynamicRoots && !c.pathAllowed(info.NormalizedPath) {
 		return PathInfo{}, connector.NewError(connector.ErrorCodePermissionDenied, "target path is outside allowed prefixes")
 	}
 	return info, nil

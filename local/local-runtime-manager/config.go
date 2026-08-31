@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net"
 	"os"
@@ -127,6 +128,7 @@ const (
 )
 
 const installerWarmupMaintenanceMode = "installer-warmup"
+const installerWarmupSkipProcessorWorkerEnvVar = "LAZYMIND_SKIP_PROCESSOR_WORKER_READINESS"
 
 type RuntimePaths struct {
 	RepoRoot                 string
@@ -216,6 +218,9 @@ type RuntimePaths struct {
 	AlgorithmHome            string
 	FrontendNodeModules      string
 	AlgorithmPIDDir          string
+	HistoryInjectionRoot     string
+	HistoryInjectionArchive  string
+	HistoryInjectionSHA256   string
 	TrustedLocalMode         bool
 }
 
@@ -286,6 +291,7 @@ type FileWatcherConfig struct {
 	AgentID       string
 	AgentToken    string
 	WatchHostDir  string
+	AllowedRoots  []string
 	HostPathStyle string
 }
 
@@ -317,11 +323,11 @@ type AlgorithmConfig struct {
 }
 
 type PortResolution struct {
-	Name          string
-	EnvName       string
-	RequestedPort int
-	ResolvedPort  int
-	Reason        string
+	Name          string `json:"name"`
+	EnvName       string `json:"envName,omitempty"`
+	RequestedPort int    `json:"requestedPort"`
+	ResolvedPort  int    `json:"resolvedPort"`
+	Reason        string `json:"reason"`
 }
 
 type ServiceEndpoints struct {
@@ -366,10 +372,31 @@ func firstAvailableLocalPort(start int, attempts int) int {
 type localPortAllocator struct {
 	used        map[int]struct{}
 	resolutions []PortResolution
+	err         error
+	errContext  bool
+	available   func(address string, port int) bool
 }
 
 func newLocalPortAllocator() *localPortAllocator {
-	return &localPortAllocator{used: map[int]struct{}{}}
+	return &localPortAllocator{
+		used:      map[int]struct{}{},
+		available: localPortAvailableOn,
+	}
+}
+
+func (a *localPortAllocator) Err() error {
+	return a.err
+}
+
+func (a *localPortAllocator) addErrorContext(name string) {
+	if a.err == nil || a.errContext {
+		return
+	}
+	if strings.TrimSpace(name) == "" {
+		name = "local service"
+	}
+	a.err = fmt.Errorf("allocate %s port: %w", name, a.err)
+	a.errContext = true
 }
 
 func (a *localPortAllocator) reserve(port int) int {
@@ -406,6 +433,10 @@ func (a *localPortAllocator) firstEnvOrAvailableOn(name string, envNames []strin
 				return a.reserve(requested)
 			}
 			resolved := a.availableFromOn(requested, 500, address)
+			if resolved == 0 {
+				a.addErrorContext(name)
+				return 0
+			}
 			a.resolutions = append(a.resolutions, PortResolution{
 				Name:          name,
 				EnvName:       envName,
@@ -417,6 +448,10 @@ func (a *localPortAllocator) firstEnvOrAvailableOn(name string, envNames []strin
 		}
 	}
 	resolved := a.availableFromOn(fallback, 500, address)
+	if resolved == 0 {
+		a.addErrorContext(name)
+		return 0
+	}
 	if resolved != fallback {
 		a.resolutions = append(a.resolutions, PortResolution{
 			Name:          name,
@@ -433,15 +468,26 @@ func (a *localPortAllocator) availableFrom(start int, attempts int) int {
 }
 
 func (a *localPortAllocator) availableFromOn(start int, attempts int, address string) int {
+	if a.err != nil {
+		return 0
+	}
 	for port := start; port < start+attempts && port < 65536; port++ {
 		if a.portAvailableOn(address, port) {
 			return a.reserve(port)
 		}
 	}
-	return a.reserve(start)
+	end := start + attempts - 1
+	if end > 65535 {
+		end = 65535
+	}
+	a.err = fmt.Errorf("no available local port in range %d-%d on %s", start, end, address)
+	return 0
 }
 
 func (a *localPortAllocator) availableBlockFromOn(start int, size int, attempts int, address string) int {
+	if a.err != nil {
+		return 0
+	}
 	if size <= 0 {
 		return a.availableFromOn(start, attempts, address)
 	}
@@ -460,10 +506,12 @@ func (a *localPortAllocator) availableBlockFromOn(start int, size int, attempts 
 			return port
 		}
 	}
-	for candidate := start; candidate < start+size && candidate < 65536; candidate++ {
-		a.reserve(candidate)
+	end := start + attempts + size - 2
+	if end > 65535 {
+		end = 65535
 	}
-	return start
+	a.err = fmt.Errorf("no available block of %d local ports starting in range %d-%d on %s", size, start, end, address)
+	return 0
 }
 
 func (a *localPortAllocator) portAvailable(port int) bool {
@@ -477,7 +525,7 @@ func (a *localPortAllocator) portAvailableOn(address string, port int) bool {
 	if _, ok := a.used[port]; ok {
 		return false
 	}
-	return localPortAvailableOn(address, port)
+	return a.available(address, port)
 }
 
 func (a *localPortAllocator) resolvedPort(name string, envNames []string, fallback int) int {
@@ -577,6 +625,41 @@ func defaultFileWatcherWatchHostDir(defaultRoot string) string {
 		return filepath.Clean(abs)
 	}
 	return filepath.Clean(raw)
+}
+
+func fileWatcherAllowedRoots(watchHostDir string) []string {
+	roots := []string{watchHostDir}
+	raw := strings.TrimSpace(os.Getenv("LAZYMIND_FILE_WATCHER_EXTRA_ALLOWED_ROOTS_JSON"))
+	if raw != "" {
+		var extra []string
+		if json.Unmarshal([]byte(raw), &extra) == nil {
+			roots = append(roots, extra...)
+		}
+	}
+	seen := map[string]struct{}{}
+	result := make([]string, 0, len(roots))
+	for _, root := range roots {
+		cleaned := strings.TrimSpace(root)
+		if cleaned == "" {
+			continue
+		}
+		if !filepath.IsAbs(cleaned) {
+			if absolute, err := filepath.Abs(cleaned); err == nil {
+				cleaned = absolute
+			}
+		}
+		cleaned = filepath.Clean(cleaned)
+		key := cleaned
+		if runtime.GOOS == "windows" {
+			key = strings.ToLower(key)
+		}
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, cleaned)
+	}
+	return result
 }
 
 func defaultFileWatcherBaseRoot(runtimeRoot string) string {
@@ -824,6 +907,7 @@ func NewRuntimeConfigWithOptions(opts RuntimeConfigOptions) (RuntimeConfig, Runt
 		AlgorithmHome:            filepath.Join(dataRoot, "homes", "lazymind"),
 		FrontendNodeModules:      frontendNodeModules,
 		AlgorithmPIDDir:          filepath.Join(runtimeRoot, "run", "algorithm"),
+		HistoryInjectionRoot:     filepath.Join(root, "history-injection"),
 	}
 	if profile == "desktop" {
 		if err := applyDesktopManifestPaths(&p); err != nil {
@@ -856,11 +940,17 @@ func NewRuntimeConfigWithOptions(opts RuntimeConfigOptions) (RuntimeConfig, Runt
 	openSearchPort := ports.resolvedPort("opensearch", []string{localOpenSearchPortEnvVar}, defaultLocalOpenSearchPort)
 	chatPort := ports.resolvedPort("chat", []string{localChatPortEnvVar, localProxyChatHostPortEnvVar}, defaultLocalProxyChatHostPort)
 	evoPort := ports.resolvedPort("evo-api", []string{localEvoPortEnvVar, localProxyEvoHostPortEnvVar}, defaultLocalProxyEvoHostPort)
+	if err := ports.Err(); err != nil {
+		return RuntimeConfig{}, RuntimePaths{}, err
+	}
 	routerPoolFallback := defaultRouterPortPoolStart + (processComposePort-defaultProcessComposePort)*defaultRouterPortsPerInstance
 	if routerPoolFallback < 1024 || routerPoolFallback+defaultRouterPortsPerInstance-1 >= 65536 {
 		routerPoolFallback = defaultRouterPortPoolStart
 	}
 	routerPoolStart := ports.resolvedPort("router-port-pool", []string{routerPortPoolStartEnvVar}, routerPoolFallback)
+	if err := ports.Err(); err != nil {
+		return RuntimeConfig{}, RuntimePaths{}, err
+	}
 	if !envBool(localPortsPinnedEnvVar, false) {
 		for {
 			conflict := false
@@ -875,6 +965,9 @@ func NewRuntimeConfigWithOptions(opts RuntimeConfigOptions) (RuntimeConfig, Runt
 				break
 			}
 			routerPoolStart = ports.availableBlockFromOn(routerPoolStart+defaultRouterPortsPerInstance, defaultRouterPortsPerInstance, 500, "127.0.0.1")
+			if err := ports.Err(); err != nil {
+				return RuntimeConfig{}, RuntimePaths{}, err
+			}
 			ports.resolutions = append(ports.resolutions, PortResolution{
 				Name:          "router-port-pool",
 				RequestedPort: routerPoolFallback,
@@ -891,6 +984,7 @@ func NewRuntimeConfigWithOptions(opts RuntimeConfigOptions) (RuntimeConfig, Runt
 	}
 	milvusLiteDBPath := filepath.Clean(milvusDataDir)
 	watchHostDir := defaultFileWatcherWatchHostDir(pathLayout.LocalImportRoot)
+	allowedRoots := fileWatcherAllowedRoots(watchHostDir)
 	return RuntimeConfig{
 		Profile:            profile,
 		MaintenanceMode:    maintenanceMode,
@@ -943,6 +1037,7 @@ func NewRuntimeConfigWithOptions(opts RuntimeConfigOptions) (RuntimeConfig, Runt
 			AgentID:       envText("LAZYMIND_FILE_WATCHER_AGENT_ID", envText("LAZYMIND_SCAN_CONTROL_PLANE_LOCAL_FS_DEFAULT_AGENT_ID", "file-watcher-local-001")),
 			AgentToken:    envText("LAZYMIND_FILE_WATCHER_AGENT_TOKEN", envText("LAZYMIND_SCAN_CONTROL_PLANE_AGENT_TOKEN", "my-secret-token")),
 			WatchHostDir:  watchHostDir,
+			AllowedRoots:  allowedRoots,
 			HostPathStyle: envText("LAZYMIND_FILE_WATCHER_HOST_PATH_STYLE", defaultFileWatcherHostPathStyle()),
 		},
 		PortResolutions: ports.resolutions,
@@ -1000,6 +1095,11 @@ func applyDesktopManifestPaths(paths *RuntimePaths) error {
 	if value := joinResource(manifest.Paths.AlgorithmVenv); value != "" {
 		paths.AlgorithmVenv = value
 		paths.AlgorithmPython = venvExecutable(value, "python")
+	}
+	if relativeArchive := strings.TrimSpace(manifest.Paths.HistoryInjectionArchive); relativeArchive != "" {
+		paths.HistoryInjectionArchive = joinResource(relativeArchive)
+		paths.HistoryInjectionSHA256 = strings.ToLower(strings.TrimSpace(manifest.Checksums[filepath.ToSlash(relativeArchive)]))
+		paths.HistoryInjectionRoot = filepath.Join(paths.DataDir, "history-injection")
 	}
 	return nil
 }

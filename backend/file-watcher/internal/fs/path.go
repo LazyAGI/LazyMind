@@ -4,7 +4,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"sort"
 	"strings"
+	"sync"
 
 	internal "github.com/lazymind/file_watcher/internal"
 )
@@ -13,9 +16,11 @@ import (
 type PathValidator interface {
 	EnsureAllowed(path string) error
 	AllowedRoots() []string
+	ReplaceAllowedRoots(roots []string) ([]string, error)
 }
 
 type pathValidator struct {
+	mu           sync.RWMutex
 	allowedRoots []string
 }
 
@@ -36,23 +41,77 @@ func (v *pathValidator) EnsureAllowed(path string) error {
 	if err != nil {
 		return fmt.Errorf("%s: %w", internal.ErrInvalidPath, err)
 	}
-	if !v.isAllowed(clean) {
+	v.mu.RLock()
+	allowed := v.isAllowed(clean)
+	v.mu.RUnlock()
+	if !allowed {
 		return fmt.Errorf("%s: %s", internal.ErrPathNotAllowed, clean)
 	}
 	return nil
 }
 
 func (v *pathValidator) AllowedRoots() []string {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
 	return append([]string(nil), v.allowedRoots...)
+}
+
+func (v *pathValidator) ReplaceAllowedRoots(roots []string) ([]string, error) {
+	candidates := make([]string, 0, len(roots))
+	for _, root := range roots {
+		canonical, err := canonicalize(strings.TrimSpace(root))
+		if err != nil {
+			return nil, fmt.Errorf("canonicalize allowed root %q: %w", root, err)
+		}
+		info, err := os.Stat(canonical)
+		if err != nil {
+			return nil, fmt.Errorf("stat allowed root %q: %w", canonical, err)
+		}
+		if !info.IsDir() {
+			return nil, fmt.Errorf("allowed root is not a directory: %s", canonical)
+		}
+		candidates = append(candidates, canonical)
+	}
+	sort.SliceStable(candidates, func(i, j int) bool {
+		return len(candidates[i]) < len(candidates[j])
+	})
+	cleaned := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		covered := false
+		for _, existing := range cleaned {
+			if pathWithin(existing, candidate) {
+				covered = true
+				break
+			}
+		}
+		if !covered {
+			cleaned = append(cleaned, candidate)
+		}
+	}
+	if len(cleaned) == 0 {
+		return nil, fmt.Errorf("at least one allowed root is required")
+	}
+	v.mu.Lock()
+	v.allowedRoots = cleaned
+	v.mu.Unlock()
+	return append([]string(nil), cleaned...), nil
 }
 
 func (v *pathValidator) isAllowed(clean string) bool {
 	for _, root := range v.allowedRoots {
-		if strings.HasPrefix(clean, root+string(filepath.Separator)) || clean == root {
+		if pathWithin(root, clean) {
 			return true
 		}
 	}
 	return false
+}
+
+func pathWithin(root, candidate string) bool {
+	if runtime.GOOS == "windows" {
+		root = strings.ToLower(root)
+		candidate = strings.ToLower(candidate)
+	}
+	return candidate == root || strings.HasPrefix(candidate, root+string(filepath.Separator))
 }
 
 // canonicalize applies Clean and Abs, and resolves symlinks where the path exists.

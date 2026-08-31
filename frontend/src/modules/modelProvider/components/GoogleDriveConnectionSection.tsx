@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Alert, Button, Form, Input, Modal, Space, Tag, message } from "antd";
 import { DeleteOutlined, FileTextOutlined, GoogleOutlined, LinkOutlined, SettingOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
 
 import { dataSourceCloudOauthApi } from "@/modules/dataSource/api/clients";
 import { unwrapApiData } from "@/modules/dataSource/api/unwrap";
@@ -17,7 +18,11 @@ import {
   requestCloudDataSourceAuthorizeUrl,
   type CloudDataSourceOAuthMessage,
 } from "@/modules/dataSource/common/feishuOAuth";
-import { CLOUD_DOCUMENTS_GOOGLE_DRIVE_SETUP_PATH } from "@/modules/modelProvider/utils/cloudDocumentUrls";
+import {
+  CLOUD_DOCUMENTS_GOOGLE_DRIVE_SETUP_PATH,
+  CLOUD_DOCUMENTS_PATH,
+} from "@/modules/modelProvider/utils/cloudDocumentUrls";
+import { markCloudDocumentConnectionSuccess } from "@/modules/modelProvider/utils/cloudDocumentOnboarding";
 
 
 interface GoogleDriveAppForm {
@@ -34,6 +39,7 @@ interface GoogleDriveConnection {
 
 export default function GoogleDriveConnectionSection() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const [form] = Form.useForm<GoogleDriveAppForm>();
   const [connection, setConnection] = useState<GoogleDriveConnection | null>(null);
   const [loading, setLoading] = useState(false);
@@ -69,8 +75,10 @@ export default function GoogleDriveConnectionSection() {
       await enableCloudConnectionForChat(payload.connection.connectionId);
       await refreshConnection();
       message.success(t("modelProvider.external.googleDriveConnected"));
+      markCloudDocumentConnectionSuccess("googledrive");
+      navigate(CLOUD_DOCUMENTS_PATH);
     },
-    [refreshConnection, t],
+    [navigate, refreshConnection, t],
   );
 
   useEffect(() => {

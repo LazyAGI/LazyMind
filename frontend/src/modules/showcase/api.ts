@@ -3,9 +3,18 @@ import {
   ShowcaseApiFactory,
   type ShowcaseCase,
   type ShowcaseCaseListResponse,
+  type ShowcaseCaseResult,
+  type ShowcaseCaseTask,
 } from "@/api/generated/core-client";
 import { axiosInstance, BASE_URL } from "@/components/request";
 import type { RawAxiosRequestConfig } from "axios";
+export {
+  matchesShowcaseEntryType,
+  showcaseEntryType,
+  showcaseTechnologyType,
+  type ShowcaseEntryType,
+  type ShowcaseTechnologyType,
+} from "./classification";
 
 const showcaseApi = ShowcaseApiFactory(
   new Configuration({ basePath: BASE_URL }),
@@ -13,7 +22,12 @@ const showcaseApi = ShowcaseApiFactory(
   axiosInstance,
 );
 
-export type { ShowcaseCase, ShowcaseCaseListResponse };
+export type {
+  ShowcaseCase,
+  ShowcaseCaseListResponse,
+  ShowcaseCaseResult,
+  ShowcaseCaseTask,
+};
 
 export async function listShowcaseCases(
   params: { keyword?: string; category?: string } = {},

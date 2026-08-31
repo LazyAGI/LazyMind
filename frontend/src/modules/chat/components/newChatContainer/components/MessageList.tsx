@@ -17,7 +17,10 @@ import "../index.scss";
 import dayjs from "dayjs";
 import { useTranslation } from "react-i18next";
 import type { ChatMention } from "../../ChatInput/MentionEditor";
-import { CHAT_SELECT_CONVERSATION_EVENT } from "@/modules/chat/constants/chat";
+import {
+  CHAT_SELECT_CONVERSATION_EVENT,
+  getChatConversationPath,
+} from "@/modules/chat/constants/chat";
 import { IdentityAvatar } from "@/modules/identityAvatar";
 import type { ChatSource } from "@/modules/chat/utils/sourceAdapter";
 
@@ -41,9 +44,9 @@ function mentionHref(mention: ChatMention) {
         ? `/memory-management/workflows/builtin/${encodeURIComponent(mention.resource_id.slice(8))}`
         : `/memory-management/workflows/${id}`;
     case "tool":
-      return "/model-providers/tools";
+      return "/settings?section=system_tools";
     case "conversation":
-      return `/agent/chat?conversation_id=${id}`;
+      return getChatConversationPath(mention.resource_id);
     default:
       return undefined;
   }
@@ -99,6 +102,7 @@ interface MessageListProps {
   initialCard?: React.ReactNode;
   sendMessage: (text: string, clearInput?: boolean, extras?: Record<string, unknown>) => void;
   regenerate: () => void;
+  regenerateDisabled?: boolean;
   stopGeneration: () => void;
   renderText: (item: any) => React.ReactNode;
   updateAssistantMessage: (data: any, id?: string, index?: number) => void;
@@ -248,6 +252,7 @@ const MessageList: React.FC<MessageListProps> = ({
   initialCard,
   sendMessage,
   regenerate,
+  regenerateDisabled = false,
   stopGeneration,
   renderText,
   updateAssistantMessage,
@@ -326,7 +331,7 @@ const MessageList: React.FC<MessageListProps> = ({
 					<div className="chat-collected-input-title">
 					  {source.conversation_id ? (
 						<a
-						  href={`/agent/chat/home?conversation_id=${encodeURIComponent(source.conversation_id)}`}
+						  href={getChatConversationPath(source.conversation_id)}
 						  onClick={(event) => {
 							event.preventDefault();
 							window.dispatchEvent(new CustomEvent(CHAT_SELECT_CONVERSATION_EVENT, {
@@ -489,6 +494,7 @@ const MessageList: React.FC<MessageListProps> = ({
                   length={messageList.length}
                   sendMessage={sendMessage}
                   regenerate={regenerate}
+                  regenerateDisabled={regenerateDisabled}
                   stopGeneration={stopGeneration}
                   renderText={renderText}
                   updateMessage={(msg: any) =>

@@ -51,6 +51,54 @@ Rules:
 - Every non-external material has exactly one producing step.
 - Optional UI tabs may reference declared slot ids; UI never changes graph state.
 
+### Declarative widgets and export actions
+
+Framework renderers must not infer a widget from a slot id or artifact content. Declare
+specialized rendering under `ui.slots`, and declare tab actions independently of the
+composite layout:
+
+```yaml
+slots:
+  - id: deck_pages
+    type: text
+    cardinality: list
+    ordered: true
+  - id: speaker_notes
+    type: text
+    cardinality: list
+    ordered: true
+ui:
+  slots:
+    deck_pages:
+      widgetType: html-slide
+  tabs:
+    - id: deck
+      layout: composite
+      composite_tab_position: left
+      slots:
+        - id: deck_pages
+        - id: speaker_notes
+      composite_layout:
+        direction: column
+        children:
+          - {slot: deck_pages, weight: 3}
+          - {slot: speaker_notes, weight: 1}
+      actions:
+        - id: export_deck
+          type: export
+          provider: html-presentation
+          inputs:
+            pages: deck_pages
+            notes: speaker_notes
+          formats: [raster-pptx, pdf, editable-pptx]
+          alignment: sort_order
+```
+
+`html-slide` is compatible with text materials. With `alignment: sort_order`, every
+mapped input must be an ordered list slot and producers must publish the same page
+positions. The exporter provider owns capability checks, dependency resolution, file
+naming, and conversion; the generic composite owns only layout, pagination, and reorder.
+
 ## `scenario/state.yml`
 
 ```yaml

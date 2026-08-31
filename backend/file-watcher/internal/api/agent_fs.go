@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/lazymind/file_watcher/internal/fs"
+	"go.uber.org/zap"
 )
 
 const (
@@ -79,6 +80,14 @@ type agentFSRootsResponse struct {
 	Items []agentFSPathInfo `json:"items"`
 }
 
+type replaceAllowedRootsRequest struct {
+	Roots []string `json:"roots"`
+}
+
+type replaceAllowedRootsResponse struct {
+	Roots []string `json:"roots"`
+}
+
 type agentFSExportResponse struct {
 	ContentURI    string `json:"content_uri"`
 	SizeBytes     int64  `json:"size_bytes"`
@@ -86,6 +95,31 @@ type agentFSExportResponse struct {
 	MimeType      string `json:"mime_type,omitempty"`
 	FileExtension string `json:"file_extension,omitempty"`
 	CleanupToken  string `json:"cleanup_token,omitempty"`
+}
+
+// ReplaceAllowedRoots PUT /api/v1/desktop/fs/allowed-roots
+func (h *Handler) ReplaceAllowedRoots(w http.ResponseWriter, r *http.Request) {
+	if !h.dynamicRootUpdates {
+		writeError(w, http.StatusNotFound, agentErrUnsupported, "dynamic root updates are disabled")
+		return
+	}
+	if r.Method != http.MethodPut {
+		writeError(w, http.StatusMethodNotAllowed, agentErrUnsupported, "method must be PUT")
+		return
+	}
+	var req replaceAllowedRootsRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	roots, err := h.validator.ReplaceAllowedRoots(req.Roots)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, agentErrInvalidArgument, err.Error())
+		return
+	}
+	if h.log != nil {
+		h.log.Info("desktop allowed roots updated", zap.Int("root_count", len(roots)))
+	}
+	writeJSON(w, http.StatusOK, replaceAllowedRootsResponse{Roots: roots})
 }
 
 // AgentListRoots POST /api/v1/agents/fs/roots

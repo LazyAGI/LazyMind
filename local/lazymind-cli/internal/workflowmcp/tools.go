@@ -46,8 +46,6 @@ func IsReadOnlyTool(name string) bool {
 	}
 }
 
-type ListInput struct{}
-
 type GetInput struct {
 	WorkflowID string `json:"workflow_id" jsonschema:"required,LazyMind Workflow identifier"`
 	RevisionID string `json:"revision_id,omitempty" jsonschema:"Optional immutable revision identifier"`
@@ -101,8 +99,9 @@ type ArtifactGetResult struct {
 func Register(server *mcp.Server, client *Client) {
 	readOnly, write := annotations(true), annotations(false)
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.list", Title: "List LazyMind Workflows",
-		Description: "List published LazyMind Workflows available to this user.", Annotations: readOnly},
-		func(ctx context.Context, _ *mcp.CallToolRequest, _ ListInput) (*mcp.CallToolResult, map[string]any, error) {
+		Description: "List published LazyMind Workflows available to this user.", Annotations: readOnly,
+		InputSchema: map[string]any{"type": "object", "properties": map[string]any{}}},
+		func(ctx context.Context, _ *mcp.CallToolRequest, _ map[string]any) (*mcp.CallToolResult, map[string]any, error) {
 			value, err := client.List(ctx)
 			return nil, value, err
 		})
@@ -137,7 +136,7 @@ func Register(server *mcp.Server, client *Client) {
 			return nil, InputGetResult{Resource: resource}, nil
 		})
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.start", Title: "Start a LazyMind Workflow",
-		Description: "Create a durable external-Agent Workflow session. LazyMind pins the revision and owns all subsequent state and versions.", Annotations: write},
+		Description: "Create a durable Workflow session in the current external-Agent conversation. A prior completed, failed, or stopped session is archived atomically; if one is active or waiting, list and stop that current session before retrying. LazyMind pins the revision and owns all subsequent state and versions.", Annotations: write},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input StartInput) (*mcp.CallToolResult, StartResult, error) {
 			value, err := client.Start(ctx, input)
 			return nil, value, err
@@ -149,7 +148,7 @@ func Register(server *mcp.Server, client *Client) {
 			return nil, value, err
 		})
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.session.list", Title: "List external-Agent Workflow sessions",
-		Description: "List durable Workflow sessions created through external Agents. Use after an Agent restart to recover a session ID, then call workflow.state.", Annotations: readOnly},
+		Description: "List durable Workflow sessions for the current external-Agent conversation. Use after an Agent restart to recover that conversation's session ID, then call workflow.state.", Annotations: readOnly},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input SessionListInput) (*mcp.CallToolResult, SessionPage, error) {
 			value, err := client.ListSessions(ctx, input.Status, input.PageSize, input.PageToken)
 			return nil, value, err

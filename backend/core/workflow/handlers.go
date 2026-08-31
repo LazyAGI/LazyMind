@@ -53,18 +53,16 @@ type sessionDTO struct {
 	SessionID      string `json:"session_id"`
 	ConversationID string `json:"conversation_id"`
 	WorkflowID     string `json:"workflow_id"`
-	// Pinned revision identifies the immutable workflow package this session runs.
-	PinnedRevisionID string `json:"pinned_revision_id,omitempty"`
-	PinnedRevisionNo int64  `json:"pinned_revision_no,omitempty"`
-	// HeadRevisionNo is the latest published package for the same plugin, when available.
-	HeadRevisionNo *int64    `json:"head_revision_no,omitempty"`
-	Status         string    `json:"status"`
-	CurrentStepID  string    `json:"current_step_id"`
-	IntentContext  string    `json:"intent_context,omitempty"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
-	Slots          []slotDTO `json:"slots,omitempty"`
-	Steps          []stepDTO `json:"steps,omitempty"`
+	// PinnedRevisionID is retained for immutable runtime identity; version numbers
+	// are intentionally not exposed because they are not a reliable UI run label.
+	PinnedRevisionID string    `json:"pinned_revision_id,omitempty"`
+	Status           string    `json:"status"`
+	CurrentStepID    string    `json:"current_step_id"`
+	IntentContext    string    `json:"intent_context,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
+	Slots            []slotDTO `json:"slots,omitempty"`
+	Steps            []stepDTO `json:"steps,omitempty"`
 }
 
 // stepDTO summarises one plugin_session_steps attempt for UI history.  // workflow-naming: persistence
@@ -100,8 +98,10 @@ type slotDTO struct {
 	Provider           string `json:"provider,omitempty"`
 	ProviderDocumentID string `json:"provider_document_id,omitempty"`
 	LastSyncedRevision *int   `json:"last_synced_revision,omitempty"`
+	LastSyncedVersion  *int   `json:"last_synced_version,omitempty"`
 	StepID             string `json:"step_id,omitempty"`
 	RevisionCount      int    `json:"revision_count,omitempty"`
+	VersionNumber      int    `json:"version_number,omitempty"`
 	OrderVersion       *int   `json:"order_version,omitempty"`
 
 	// Internal fields — used by enrichSlots, never serialised to the client.
@@ -117,59 +117,12 @@ func toSessionDTO(s *orm.WorkflowSession) sessionDTO {
 		ConversationID:   s.ConversationID,
 		WorkflowID:       s.WorkflowID,
 		PinnedRevisionID: s.WorkflowRevisionID,
-		PinnedRevisionNo: s.WorkflowRevisionNo,
 		Status:           s.Status,
 		CurrentStepID:    s.CurrentStepID,
 		IntentContext:    s.IntentContext,
 		CreatedAt:        s.CreatedAt,
 		UpdatedAt:        s.UpdatedAt,
 	}
-}
-
-func enrichSessionHeadRevisionNos(ctx context.Context, db *gorm.DB, sessions []sessionDTO) []sessionDTO {
-	revisionIDs := make(map[string]struct{}, len(sessions))
-	for _, session := range sessions {
-		if session.PinnedRevisionID != "" {
-			revisionIDs[session.PinnedRevisionID] = struct{}{}
-		}
-	}
-	if len(revisionIDs) == 0 {
-		return sessions
-	}
-
-	ids := make([]string, 0, len(revisionIDs))
-	for id := range revisionIDs {
-		ids = append(ids, id)
-	}
-	var revisions []orm.WorkflowRevision
-	if db.WithContext(ctx).Where("id IN ?", ids).Find(&revisions).Error != nil {
-		return sessions
-	}
-	resourceIDs := make([]string, 0, len(revisions))
-	resourceIDByRevision := make(map[string]string, len(revisions))
-	for _, revision := range revisions {
-		resourceIDByRevision[revision.ID] = revision.WorkflowResourceID
-		resourceIDs = append(resourceIDs, revision.WorkflowResourceID)
-	}
-	if len(resourceIDs) == 0 {
-		return sessions
-	}
-	var resources []orm.WorkflowResource
-	if db.WithContext(ctx).Where("id IN ?", resourceIDs).Find(&resources).Error != nil {
-		return sessions
-	}
-	headByResourceID := make(map[string]int64, len(resources))
-	for _, resource := range resources {
-		headByResourceID[resource.ID] = resource.Version
-	}
-	for i := range sessions {
-		resourceID := resourceIDByRevision[sessions[i].PinnedRevisionID]
-		if head, ok := headByResourceID[resourceID]; ok {
-			head := head
-			sessions[i].HeadRevisionNo = &head
-		}
-	}
-	return sessions
 }
 
 func toStepDTO(r *orm.WorkflowSessionStep) stepDTO {
@@ -261,29 +214,33 @@ func enrichSlots(ctx context.Context, db *gorm.DB, sessionID string, slots []slo
 		}
 	}
 
-	// Step 3: load revision counts per (session_id, slot_id, list_index).
-	type revKey struct {
-		slotID    string
-		listIndex *int
-	}
+	// Step 3: load user-visible version counts per (session_id, slot_id,
+	// list_index). Writer human revisions are mutable working drafts: keep them
+	// for persistence/concurrency, but do not expose them as formal versions.
 	revCounts := map[string]int{}
-	type revCountRow struct {
-		SlotID    string `gorm:"column:slot_id"`
-		ListIndex *int   `gorm:"column:list_index"`
-		Count     int    `gorm:"column:cnt"`
+	versionNumbers := map[string]map[int]int{}
+	type revisionNumberRow struct {
+		SlotID       string `gorm:"column:slot_id"`
+		ListIndex    *int   `gorm:"column:list_index"`
+		Revision     int    `gorm:"column:revision"`
+		ChangeSource string `gorm:"column:change_source"`
 	}
-	var rcRows []revCountRow
-	db.WithContext(ctx).Raw(
-		`SELECT slot_id, list_index, COUNT(*) AS cnt FROM plugin_slot_revisions
-		 WHERE session_id = ? GROUP BY slot_id, list_index`,
-		sessionID,
-	).Scan(&rcRows)
-	for _, rc := range rcRows {
-		key := rc.SlotID + "|"
-		if rc.ListIndex != nil {
-			key += fmt.Sprintf("%d", *rc.ListIndex)
+	var revisionRows []revisionNumberRow
+	db.WithContext(ctx).
+		Model(&orm.WorkflowSlotRevision{}).
+		Select("slot_id, list_index, revision, change_source").
+		Where("session_id = ?", sessionID).
+		Order("slot_id ASC, list_index ASC, revision ASC").
+		Scan(&revisionRows)
+	for _, revision := range revisionRows {
+		key := slotRevisionVersionKey(revision.SlotID, revision.ListIndex)
+		if !isWriterWorkingDraftRevision(revision.SlotID, revision.ChangeSource) {
+			revCounts[key]++
 		}
-		revCounts[key] = rc.Count
+		if versionNumbers[key] == nil {
+			versionNumbers[key] = map[int]int{}
+		}
+		versionNumbers[key][revision.Revision] = revCounts[key]
 	}
 
 	// Step 4: load slot order info for order_version and sort_order lookup.
@@ -362,11 +319,9 @@ func enrichSlots(ctx context.Context, db *gorm.DB, sessionID string, slots []slo
 		}
 
 		// Revision count.
-		rcKey := slot.SlotID + "|"
-		if slot.ListIndex != nil {
-			rcKey += fmt.Sprintf("%d", *slot.ListIndex)
-		}
+		rcKey := slotRevisionVersionKey(slot.SlotID, slot.ListIndex)
 		slot.RevisionCount = revCounts[rcKey]
+		slot.VersionNumber = versionNumbers[rcKey][slot.Revision]
 
 		// sort_order and order_version from plugin_slot_order.  // workflow-naming: persistence
 		// single slots (list_index IS NULL) get sort_order=0 as a stable sentinel.
@@ -389,6 +344,28 @@ func enrichSlots(ctx context.Context, db *gorm.DB, sessionID string, slots []slo
 	}
 
 	enrichWriterWriteBackSlots(ctx, db, sessionID, slots)
+	for i := range slots {
+		slot := &slots[i]
+		if slot.LastSyncedRevision == nil {
+			continue
+		}
+		key := slotRevisionVersionKey(slot.SlotID, slot.ListIndex)
+		if version := versionNumbers[key][*slot.LastSyncedRevision]; version > 0 {
+			slot.LastSyncedVersion = &version
+		}
+	}
+}
+
+func slotRevisionVersionKey(slotID string, listIndex *int) string {
+	key := slotID + "|"
+	if listIndex != nil {
+		key += fmt.Sprintf("%d", *listIndex)
+	}
+	return key
+}
+
+func isWriterWorkingDraftRevision(slotID, changeSource string) bool {
+	return (slotID == "draft_document" || slotID == "flat_draft_document") && changeSource == "human"
 }
 
 // ListConversationSessions handles GET /conversations/{conversation_id}/workflow-sessions.
@@ -412,7 +389,6 @@ func ListConversationSessions(w http.ResponseWriter, r *http.Request) {
 	for i := range sessions {
 		out = append(out, toSessionDTO(&sessions[i]))
 	}
-	out = enrichSessionHeadRevisionNos(r.Context(), db, out)
 	common.ReplyOK(w, map[string]any{"sessions": out})
 }
 
@@ -443,7 +419,6 @@ func GetSessionDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	dto := toSessionDTO(s)
-	dto = enrichSessionHeadRevisionNos(ctx, db, []sessionDTO{dto})[0]
 	// Load slots inline.
 	revisions, _ := LoadDisplaySlots(ctx, db, sessionID)
 	for i := range revisions {

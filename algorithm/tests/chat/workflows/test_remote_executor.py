@@ -1,6 +1,8 @@
+import base64
 import json
 import os
 import threading
+from pathlib import Path
 
 import httpx
 import pytest
@@ -93,11 +95,355 @@ async def test_remote_executor_materializes_fenced_inputs_in_host_workspace(tmp_
 
     runtime = Runtime()
     worker.runtime = runtime
-    values = await worker._materialize_inputs(
+    values = await worker._resolve_inputs(
         object(), 'attempt-1', 'lease-1', {'inputs': {'brief': {}}}, str(tmp_path))
     assert runtime.calls == [('attempt-1', 'lease-1', 'brief')]
     assert values['brief'] == str(tmp_path / 'inputs' / 'brief.txt')
     assert (tmp_path / 'inputs' / 'brief.txt').read_text() == 'hello'
+
+
+@pytest.mark.asyncio
+async def test_remote_executor_passes_external_scalar_inputs_as_values(tmp_path):
+    worker = RemoteWorkflowExecutor()
+
+    class Runtime:
+        async def input(self, _client, _attempt, _lease, material):
+            values = {
+                'topic': ('topic.txt', '5Lq65bel5pm66IO96L6F5Yqp6L2v5Lu25rWL6K+V'),
+                'word_target': ('word_target.txt', 'NDAw'),
+                'options': ('options.txt', 'eyJmb3JtYXQiOiAiZG9jeCJ9'),
+            }
+            name, encoded = values[material]
+            return {'name': name, 'mime_type': 'text/plain', 'content_base64': encoded}
+
+    worker.runtime = Runtime()
+    context = {
+        'declared_input_types': {
+            'topic': 'text', 'word_target': 'text', 'options': 'json',
+        },
+        'inputs': {
+            key: {'source_type': 'input_resource'}
+            for key in ('topic', 'word_target', 'options')
+        },
+    }
+    values = await worker._resolve_inputs(
+        object(), 'attempt-1', 'lease-1', context, str(tmp_path),
+    )
+
+    assert values == {
+        'topic': '人工智能辅助软件测试',
+        'word_target': '400',
+        'options': {'format': 'docx'},
+    }
+    assert not (tmp_path / 'inputs').exists()
+
+
+@pytest.mark.asyncio
+async def test_remote_executor_unwraps_upstream_artifacts_by_declared_type(tmp_path):
+    worker = RemoteWorkflowExecutor()
+
+    class Runtime:
+        async def input(self, _client, _attempt, _lease, material):
+            values = {
+                'workflow_routing': {
+                    'text': 'WORKFLOW: FIND_AND_EDIT\nNEXT_STEPS: collect_materials',
+                },
+                'source_image': {
+                    'path': 'https://images.example.test/haaland.png',
+                    'caption': 'validated source',
+                },
+            }
+            raw = json.dumps(values[material]).encode('utf-8')
+            return {
+                'name': material + '.json',
+                'mime_type': 'application/json',
+                'content_base64': base64.b64encode(raw).decode('ascii'),
+            }
+
+    worker.runtime = Runtime()
+    context = {
+        'declared_input_types': {
+            'workflow_routing': 'text', 'source_image': 'image',
+        },
+        'declared_input_transports': {
+            'workflow_routing': 'value', 'source_image': 'reference',
+        },
+        'inputs': {
+            'workflow_routing': {'source_type': 'artifact'},
+            'source_image': {'source_type': 'artifact'},
+        },
+    }
+    values = await worker._resolve_inputs(
+        object(), 'attempt-1', 'lease-1', context, str(tmp_path),
+    )
+
+    assert values['workflow_routing'].startswith('WORKFLOW: FIND_AND_EDIT')
+    assert values['source_image'] == {
+        'path': 'https://images.example.test/haaland.png',
+        'caption': 'validated source',
+    }
+    assert worker._direct_input_value_slots(context) == {
+        'workflow_routing', 'source_image',
+    }
+    assert worker._resolved_input_transports(context, values) == {
+        'workflow_routing': 'value', 'source_image': 'reference',
+    }
+    assert not (tmp_path / 'inputs').exists()
+
+
+@pytest.mark.asyncio
+async def test_remote_executor_infers_artifact_types_when_core_omits_them(tmp_path):
+    worker = RemoteWorkflowExecutor()
+
+    class Runtime:
+        async def input(self, _client, _attempt, _lease, material):
+            values = {
+                'workflow_routing': {'text': 'WORKFLOW: FIND_AND_EDIT'},
+                'material_images': {
+                    'path': 'https://images.example.test/haaland.jpg',
+                    'caption': 'validated source',
+                },
+            }
+            raw = json.dumps(values[material]).encode('utf-8')
+            item = {
+                'name': material + '.json',
+                'mime_type': 'application/json',
+                'content_base64': base64.b64encode(raw).decode('ascii'),
+            }
+            return {'items': [item]} if material == 'material_images' else item
+
+    worker.runtime = Runtime()
+    context = {
+        'inputs': {
+            'workflow_routing': {'source_type': 'artifact'},
+            'material_images': [{'source_type': 'artifact'}],
+        },
+    }
+    values = await worker._resolve_inputs(
+        object(), 'attempt-1', 'lease-1', context, str(tmp_path),
+    )
+
+    assert values == {
+        'workflow_routing': 'WORKFLOW: FIND_AND_EDIT',
+        'material_images': [{
+            'path': 'https://images.example.test/haaland.jpg',
+            'caption': 'validated source',
+        }],
+    }
+    assert context['declared_input_types'] == {
+        'workflow_routing': 'text',
+        'material_images': 'image',
+    }
+    assert not (tmp_path / 'inputs').exists()
+
+
+@pytest.mark.asyncio
+async def test_remote_executor_materializes_scalar_artifacts_when_transport_is_path(tmp_path):
+    worker = RemoteWorkflowExecutor()
+
+    class Runtime:
+        async def input(self, _client, _attempt, _lease, material):
+            payloads = {
+                'brief': {'text': 'approved brief'},
+                'parameters': {'data': {'output_format': 'docx'}},
+            }
+            raw = json.dumps(payloads[material]).encode('utf-8')
+            return {
+                'name': material + '.json',
+                'mime_type': 'application/json',
+                'content_base64': base64.b64encode(raw).decode('ascii'),
+            }
+
+    worker.runtime = Runtime()
+    context = {
+        'declared_input_types': {'brief': 'text', 'parameters': 'json'},
+        'declared_input_transports': {'brief': 'path', 'parameters': 'path'},
+        'inputs': {
+            'brief': {'source_type': 'artifact'},
+            'parameters': {'source_type': 'artifact'},
+        },
+    }
+    values = await worker._resolve_inputs(
+        object(), 'attempt-1', 'lease-1', context, str(tmp_path),
+    )
+
+    assert json.loads(Path(values['brief']).read_text(encoding='utf-8')) == {
+        'text': 'approved brief',
+    }
+    assert json.loads(Path(values['parameters']).read_text(encoding='utf-8')) == {
+        'data': {'output_format': 'docx'},
+    }
+    assert worker._direct_input_value_slots(context) == set()
+    assert worker._resolved_input_transports(context, values) == {
+        'brief': 'path', 'parameters': 'path',
+    }
+
+
+@pytest.mark.asyncio
+async def test_remote_executor_materializes_binary_image_inputs(tmp_path):
+    worker = RemoteWorkflowExecutor()
+
+    class Runtime:
+        async def input(self, _client, _attempt, _lease, _material):
+            return {
+                'name': 'upload.png',
+                'mime_type': 'image/png',
+                'content_base64': base64.b64encode(b'\x89PNG\r\n').decode('ascii'),
+            }
+
+    worker.runtime = Runtime()
+    context = {
+        'declared_input_types': {'source_image': 'image'},
+        'inputs': {'source_image': {'source_type': 'input_resource'}},
+    }
+    values = await worker._resolve_inputs(
+        object(), 'attempt-1', 'lease-1', context, str(tmp_path),
+    )
+
+    path = tmp_path / 'inputs' / 'upload.png'
+    assert values['source_image'] == str(path)
+    assert path.read_bytes() == b'\x89PNG\r\n'
+    assert worker._resolved_input_transports(context, values) == {'source_image': 'path'}
+
+
+@pytest.mark.asyncio
+async def test_remote_executor_materializes_every_list_input_in_order(tmp_path):
+    worker = RemoteWorkflowExecutor()
+
+    class Runtime:
+        async def input(self, _client, _attempt, _lease, _material):
+            return {'items': [
+                {'name': '../effect.png', 'content_base64': 'Zmlyc3Q='},
+                {'name': '../effect.png', 'content_base64': 'c2Vjb25k'},
+            ]}
+
+    worker.runtime = Runtime()
+    values = await worker._resolve_inputs(
+        object(), 'attempt-1', 'lease-1', {'inputs': {'effect_images': [{}, {}]}}, str(tmp_path))
+    expected = [
+        tmp_path / 'inputs' / 'effect_images' / '0001_effect.png',
+        tmp_path / 'inputs' / 'effect_images' / '0002_effect.png',
+    ]
+    assert values['effect_images'] == [str(path) for path in expected]
+    assert [path.read_text() for path in expected] == ['first', 'second']
+
+
+@pytest.mark.asyncio
+async def test_remote_executor_preserves_single_item_list_cardinality(tmp_path):
+    worker = RemoteWorkflowExecutor()
+
+    class Runtime:
+        async def input(self, _client, _attempt, _lease, _material):
+            return {'items': [{'name': 'only.png', 'content_base64': 'b25seQ=='}]}
+
+    worker.runtime = Runtime()
+    values = await worker._resolve_inputs(
+        object(), 'attempt-1', 'lease-1', {'inputs': {'images': [{}]}}, str(tmp_path))
+    assert values['images'] == [str(tmp_path / 'inputs' / 'images' / '0001_only.png')]
+
+
+@pytest.mark.asyncio
+async def test_remote_executor_keeps_workflow_inputs_out_of_user_attachments(
+    monkeypatch, tmp_path,
+):
+    worker = RemoteWorkflowExecutor()
+    captured = {}
+
+    class Runtime:
+        async def context(self, *_):
+            return {
+                'metadata': {'task_id': 'task-1'},
+                'declared_input_types': {'brief': 'text'},
+                'inputs': {'brief': {'source_type': 'input_resource'}},
+            }
+
+        async def input(self, *_):
+            return {'name': 'brief.txt', 'content_base64': 'aGVsbG8='}
+
+        async def execution_spec(self, *_):
+            return {
+                'task': {'input_slots': ['brief'], 'output_slots': []},
+                'workspace_path': str(tmp_path / 'task-1'),
+                'params': {
+                    'history_files_per_turn': {'1': ['/uploads/real-user-file.txt']},
+                },
+                'steps': [],
+                'llm_config': {},
+            }
+
+        async def complete(self, *_):
+            return None
+
+        async def fail(self, *_):
+            pytest.fail('the attempt should not fail')
+
+        async def task_event(self, *_):
+            return None
+
+    async def stream(**kwargs):
+        captured.update(kwargs['task_spec']['params'])
+        yield 'data: {"type":"done","status":"succeeded","summary":"done"}\n\n'
+
+    from lazymind.chat.engine.subagent import runner
+    worker.runtime = Runtime()
+    monkeypatch.setattr(runner, 'run_subagent_stream', stream)
+
+    await worker._run_claim(object(), {'attempt_id': 'attempt-1', 'lease_token': 'lease-1'})
+
+    assert captured['remote_inputs']['brief'] == 'hello'
+    assert captured['remote_input_types'] == {'brief': 'text'}
+    assert captured['remote_input_transports'] == {'brief': 'value'}
+    assert captured['remote_input_value_slots'] == ['brief']
+    assert '_attachment_context' not in captured
+    agentic = runner._build_agentic_config(
+        {
+            'conversation_id': 'conversation-1',
+            'objective': 'test',
+            'workspace_path': str(tmp_path / 'task-1'),
+        },
+        captured,
+        'workflow_step',
+    )
+    assert agentic['files'] == ['/uploads/real-user-file.txt']
+    assert agentic['workflow_workspace_path'] == str(tmp_path / 'task-1')
+    assert captured['remote_inputs']['brief'] not in agentic['files']
+
+
+def test_workflow_material_prompt_forbids_attachment_tools():
+    from lazymind.chat.engine.subagent.runner import (
+        _resolve_attachment_configs,
+        _workflow_material_bindings_section,
+    )
+
+    params = {
+        'remote_inputs': {
+            'topic': '人工智能辅助软件测试',
+            'outline_document': '/workspace/inputs/outline_document.md',
+            'source_image': {'path': 'https://images.example.test/source.png'},
+        },
+        'remote_input_types': {
+            'topic': 'text', 'outline_document': 'file', 'source_image': 'image',
+        },
+        'remote_input_transports': {
+            'topic': 'value', 'outline_document': 'path', 'source_image': 'reference',
+        },
+        'remote_input_value_slots': ['source_image', 'topic'],
+    }
+    prompt = _workflow_material_bindings_section(params)
+
+    assert 'not user-uploaded attachments' in prompt
+    assert 'kind=value' in prompt
+    assert '"value": "人工智能辅助软件测试"' in prompt
+    assert '"path": "/workspace/inputs/outline_document.md"' in prompt
+    assert '"kind": "reference"' in prompt
+    assert '"reference": {"path": "https://images.example.test/source.png"}' in prompt
+    assert 'read_user_attachment' in prompt
+    assert _resolve_attachment_configs({}, 'workflow_step', params) == []
+    assert _resolve_attachment_configs(
+        {'history_files_per_turn': {'1': ['/uploads/real-user-file.txt']}},
+        'ordinary_subagent',
+        {},
+    )
 
 
 @pytest.mark.asyncio
@@ -106,6 +452,7 @@ async def test_execution_spec_failure_marks_claimed_attempt_failed():
 
     class Runtime:
         failure = ''
+        terminal = None
 
         async def context(self, *_):
             return {'metadata': {'task_id': 'missing-task'}, 'inputs': {}}
@@ -118,10 +465,16 @@ async def test_execution_spec_failure_marks_claimed_attempt_failed():
         async def fail(self, _client, _attempt, _lease, message):
             self.failure = message
 
+        async def task_event(self, _client, task, _lease, event):
+            self.terminal = (task, event)
+
     runtime = Runtime()
     worker.runtime = runtime
     await worker._run_claim(object(), {'attempt_id': 'attempt-1', 'lease_token': 'lease-1'})
     assert runtime.failure.startswith('executor setup failed:')
+    assert runtime.terminal == ('missing-task', {
+        'type': 'error', 'status': 'failed', 'message': runtime.failure,
+    })
 
 
 @pytest.mark.asyncio

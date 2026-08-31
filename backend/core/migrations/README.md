@@ -76,6 +76,17 @@ aggregate history row while `v0_2` still has full dev history rows.
 is not the structured release's dev migration inventory.
 `MIGRATION_FAKE_VERSIONS` is not used.
 
+### Reconciling removed development migrations
+
+Local development may temporarily execute a migration that is removed before
+the branch is merged. Set `MIGRATION_RECONCILE_UNKNOWN_DEV_HISTORY=true` to
+remove such unknown history records during `up`. Reconciliation is deliberately
+limited to the latest open `dev_mode/v0_N` release and requires existing known
+dev history for that same release. Unknown records from closed releases or
+unstructured migrations remain fatal. This only repairs migration bookkeeping;
+authors remain responsible for reverting any incompatible schema or data change
+made by the removed SQL. Production deployments must leave the option disabled.
+
 ## Deleting dev SQL
 
 Do not modify, rename, or individually delete a committed dev migration. An old

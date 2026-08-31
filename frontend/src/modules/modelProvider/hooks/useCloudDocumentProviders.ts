@@ -36,6 +36,7 @@ import {
   CLOUD_DOCUMENTS_PATH,
 } from "../utils/cloudDocumentUrls";
 import { useLocalDataSourceSettings } from "./useLocalDataSourceSettings";
+import { markCloudDocumentConnectionSuccess } from "../utils/cloudDocumentOnboarding";
 
 export function useCloudDocumentProviders() {
   const { t } = useTranslation();
@@ -350,6 +351,9 @@ export function useCloudDocumentProviders() {
     const storedResult = consumeFeishuDataSourceOAuthResult();
     if (storedResult) {
       window.setTimeout(() => {
+        if (storedResult.status === "success") {
+          markCloudDocumentConnectionSuccess(storedResult.connection.provider);
+        }
         ctx.applyOauthResult(storedResult);
       }, 0);
     }
@@ -357,6 +361,9 @@ export function useCloudDocumentProviders() {
     const storedNotionResult = consumeCloudDataSourceOAuthResult("notion");
     if (storedNotionResult) {
       window.setTimeout(() => {
+        if (storedNotionResult.status === "success") {
+          markCloudDocumentConnectionSuccess(storedNotionResult.connection.provider);
+        }
         ctx.applyOauthResult(storedNotionResult);
       }, 0);
     }
@@ -367,6 +374,9 @@ export function useCloudDocumentProviders() {
       }
       if (!event.data || event.data.channel !== FEISHU_DATA_SOURCE_OAUTH_CHANNEL) {
         return;
+      }
+      if (event.data.status === "success") {
+        markCloudDocumentConnectionSuccess(event.data.connection.provider);
       }
       ctx.applyOauthResult(event.data);
     };

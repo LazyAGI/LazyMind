@@ -13,6 +13,7 @@ type LocalFSConnector struct {
 	defaultAgentID   string
 	publicRoot       string
 	allowedPrefixes  []string
+	dynamicRoots     bool
 	recommendedRoots []string
 	temp             TempObjectStore
 	clock            func() time.Time
@@ -57,6 +58,12 @@ func WithPublicRoot(publicRoot string) Option {
 	}
 }
 
+func WithDynamicRoots(enabled bool) Option {
+	return func(c *LocalFSConnector) {
+		c.dynamicRoots = enabled
+	}
+}
+
 func WithTempObjectStore(temp TempObjectStore) Option {
 	return func(c *LocalFSConnector) {
 		c.temp = temp
@@ -85,6 +92,15 @@ func (c *LocalFSConnector) ValidateTarget(ctx context.Context, req connector.Val
 		return connector.NormalizedTarget{}, err
 	}
 	req.AgentID = c.resolveAgentID(req.AgentID)
+	if c.dynamicRoots {
+		exactReq := req
+		exactReq.TargetRef = cleanPath(req.TargetRef)
+		if err := c.validateTargetRequest(exactReq); err == nil {
+			if info, exactErr := c.probeTarget(ctx, exactReq); exactErr == nil && info.Exists {
+				return c.buildNormalizedTarget(req.AgentID, info)
+			}
+		}
+	}
 	req.TargetRef = c.publicPath(req.TargetRef)
 	if err := c.validateTargetRequest(req); err != nil {
 		return connector.NormalizedTarget{}, err
@@ -192,8 +208,9 @@ func (c *LocalFSConnector) resolveAgentID(agentID string) string {
 	}
 	return c.defaultAgentID
 }
-// CheckPathExists returns true if the given path still exists on the agent'''s
-// filesystem. It delegates to the agent'''s StatPath HTTP endpoint. Used as a
+
+// CheckPathExists returns true if the given path still exists on the agent”'s
+// filesystem. It delegates to the agent”'s StatPath HTTP endpoint. Used as a
 // lightweight safety-net in GET chat-settings to filter out bindings whose
 // root directories have been removed without the real-time watcher detecting it
 // (e.g. directory deleted while the agent was offline).

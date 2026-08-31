@@ -539,6 +539,9 @@ func newZipFS(zipPath string) (*zipFS, error) {
 	files := map[string][]byte{}
 	dirs := map[string]bool{}
 	for _, entry := range reader.File {
+		if isIgnoredSkillZipMetadata(entry.Name) {
+			continue
+		}
 		name := strings.TrimSuffix(entry.Name, "/")
 		if entry.FileInfo().IsDir() {
 			cleaned, err := cleanSkillPath(name)
@@ -588,6 +591,20 @@ func newZipFS(zipPath string) (*zipFS, error) {
 	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Path < entries[j].Path })
 	return &zipFS{entries: entries, files: files}, nil
+}
+
+func isIgnoredSkillZipMetadata(name string) bool {
+	name = strings.TrimSuffix(name, "/")
+	if name == "" {
+		return false
+	}
+	for _, part := range strings.Split(name, "/") {
+		lower := strings.ToLower(part)
+		if lower == "__macosx" || lower == ".ds_store" || lower == "thumbs.db" || lower == "desktop.ini" || strings.HasPrefix(part, "._") {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeZipSkillRoot(files map[string][]byte, dirs map[string]bool) (map[string][]byte, map[string]bool) {

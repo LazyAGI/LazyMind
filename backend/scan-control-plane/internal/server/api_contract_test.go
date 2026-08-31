@@ -264,11 +264,11 @@ func TestHandlersExposeConnectorsTargetTreeAndSourceTree(t *testing.T) {
 		t.Fatalf("target recommendation handler did not pass actor to connector provider options: %+v", targetTree.lastRecommendation.ProviderOptions)
 	}
 
-	recommendListReq := httptest.NewRequest(http.MethodPost, "/api/scan/binding-targets/tree/recommendations-list", strings.NewReader(`{"agent_id":"agent-1"}`))
+	recommendListReq := httptest.NewRequest(http.MethodPost, "/api/scan/binding-targets/tree/recommendations-list", strings.NewReader(`{"agent_id":"agent-1","force_refresh":true}`))
 	setAPIContractActor(recommendListReq)
 	recommendListResp := httptest.NewRecorder()
 	handler.ServeHTTP(recommendListResp, recommendListReq)
-	if recommendListResp.Code != http.StatusOK || targetTree.recommendListCalls != 1 || targetTree.lastRecommendationList.AgentID != "agent-1" {
+	if recommendListResp.Code != http.StatusOK || targetTree.recommendListCalls != 1 || targetTree.lastRecommendationList.AgentID != "agent-1" || !targetTree.lastRecommendationList.ForceRefresh {
 		t.Fatalf("target recommendation list handler did not call engine: code=%d calls=%d req=%+v body=%s", recommendListResp.Code, targetTree.recommendListCalls, targetTree.lastRecommendationList, recommendListResp.Body.String())
 	}
 	if targetTree.lastRecommendationList.ProviderOptions["user_id"] != "user-1" || targetTree.lastRecommendationList.ProviderOptions["tenant_id"] != "tenant-1" {

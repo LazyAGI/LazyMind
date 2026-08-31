@@ -40,24 +40,18 @@ func TestArtifactDedupKey(t *testing.T) {
 	}
 }
 
-func TestIsWriterDraftStreamTaskUsesWorkflowIdentity(t *testing.T) {
+func TestTaskStreamHeartbeatsUseDeclaredRuntimeMetadata(t *testing.T) {
 	task := &orm.SubAgentTask{
 		AgentType: "workflow_step",
-		Params:    []byte(`{"workflow_id":"writer-workflow","step_id":"write_document"}`),
+		Params:    []byte(`{"stream_heartbeat":true}`),
 	}
-	if !isWriterDraftStreamTask(task) {
-		t.Fatal("expected Writer workflow write_document task to enable stream heartbeats")
-	}
-
-	task.Params = []byte(`{"workflow_id":"writer-workflow","step_id":"outline"}`)
-	if isWriterDraftStreamTask(task) {
-		t.Fatal("outline step must not enable Draft stream heartbeats")
+	if !taskStreamHeartbeatsEnabled(task) {
+		t.Fatal("expected declared stream heartbeat metadata to enable heartbeats")
 	}
 
-	task.AgentType = "plugin_step"                                                   // workflow-naming: persistence
-	task.Params = []byte(`{"plugin_id":"writer-plugin","step_id":"write_document"}`) // workflow-naming: persistence
-	if isWriterDraftStreamTask(task) {
-		t.Fatal("legacy plugin identity must not match the Workflow runtime")
+	task.Params = []byte(`{"workflow_id":"renamed-workflow","step_id":"renamed-step"}`)
+	if taskStreamHeartbeatsEnabled(task) {
+		t.Fatal("workflow identity alone must not enable stream heartbeats")
 	}
 }
 

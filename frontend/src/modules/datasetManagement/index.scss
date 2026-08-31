@@ -84,6 +84,60 @@
   align-items: flex-start;
 }
 
+.dataset-new-item-action-bar {
+  display: flex;
+  min-width: 0;
+  min-height: 52px;
+  padding: 8px 10px 8px 14px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border: 1px solid #dbe7f8;
+  border-radius: 8px;
+  background: #f8fbff;
+}
+
+.dataset-new-item-action-title {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+  color: #1f2937;
+
+  > span {
+    width: 8px;
+    height: 8px;
+    flex: 0 0 8px;
+    border-radius: 50%;
+    background: #1677ff;
+  }
+
+  > strong {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.dataset-new-item-action-buttons {
+  flex: 0 0 auto;
+}
+
+@media (max-width: 640px) {
+  .dataset-new-item-action-bar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .dataset-new-item-action-buttons {
+    display: flex;
+
+    .ant-btn {
+      flex: 1;
+    }
+  }
+}
+
 .dataset-detail-filters {
   justify-content: flex-start;
 }

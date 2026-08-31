@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 from lazyllm import LOG
 
 from fastapi.responses import StreamingResponse
+from lazymind.chat.runtime_events import runtime_event
 
 
 def response_payload(code: int, msg: str, data: Any, cost: float) -> Dict[str, Any]:
@@ -26,14 +27,24 @@ def log_and_emit_frame(frame: Any, cost: float, query: str, session_id: str, tag
 
 def single_event_stream_response(
     payload: Dict[str, Any],
-    final_data: Optional[Dict[str, Any]] = None,
+    *,
+    run_id: str,
 ) -> StreamingResponse:
     async def _stream():
         yield sse_line(payload)
         yield sse_line(response_payload(
             200,
             'success',
-            {'status': 'FINISHED', **(final_data or {})},
+            {
+                'think': None,
+                'text': None,
+                'sources': [],
+                'runtime_event': runtime_event('run_finished', run_id, {
+                    'status': 'completed',
+                    'reason': 'normal',
+                    'partial_output': True,
+                }),
+            },
             0.0,
         ))
 

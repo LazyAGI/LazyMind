@@ -4,12 +4,16 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
+
+	"lazymind/agentconnector/internal/agentexec"
 )
 
 const (
@@ -20,6 +24,8 @@ const (
 	leaseLossGrace          = 20 * time.Second
 	eventRetryDelay         = 200 * time.Millisecond
 	terminalTimeout         = 10 * time.Second
+	sessionCatalogInterval  = time.Minute
+	executionDisabledReason = "Disabled in LazyMind settings"
 )
 
 type Run struct {
@@ -30,6 +36,7 @@ type Run struct {
 	ProviderThreadID string `json:"provider_thread_id,omitempty"`
 	Action           string `json:"action"`
 	Prompt           string `json:"prompt"`
+	Query            string `json:"query"`
 	LeaseToken       string `json:"lease_token"`
 	HostID           string `json:"host_id"`
 }
@@ -45,6 +52,42 @@ type Runner interface {
 	Run(context.Context, Run, func(Event) error) error
 }
 
+type availabilityReporter interface {
+	Availability() (bool, string)
+}
+
+type ExecutionPolicy interface {
+	Enabled(provider string) (bool, error)
+	Changes() <-chan struct{}
+}
+
+type NativeSession struct {
+	ThreadID      string       `json:"thread_id"`
+	ProjectKey    string       `json:"project_key"`
+	ProjectName   string       `json:"project_name"`
+	DisplayName   string       `json:"display_name"`
+	NativeUpdated time.Time    `json:"native_updated_at"`
+	TurnCount     int          `json:"turn_count"`
+	Turns         []NativeTurn `json:"turns,omitempty"`
+}
+
+type NativeTurn struct {
+	ID        string    `json:"turn_id"`
+	User      string    `json:"user"`
+	Assistant string    `json:"assistant"`
+	CreatedAt time.Time `json:"created_at"`
+	Managed   bool      `json:"managed,omitempty"`
+}
+
+type syncSessionCatalogResponse struct {
+	Updated  int `json:"updated"`
+	Rejected int `json:"rejected"`
+}
+
+type SessionCatalog interface {
+	Sessions(context.Context) ([]NativeSession, error)
+}
+
 type coreClient interface {
 	DoJSON(context.Context, string, string, any, any) error
 }
@@ -57,59 +100,74 @@ type Host struct {
 	installed         bool
 	ready             bool
 	unavailableReason string
+	policy            ExecutionPolicy
+	catalogMu         sync.Mutex
 }
 
-func NewHost(api coreClient, runner Runner, provider string) (*Host, error) {
-	if api == nil || runner == nil {
-		return nil, errors.New("Core client and Agent runner are required")
+func NewHost(api coreClient, runner Runner, policy ExecutionPolicy, provider string) (*Host, error) {
+	if api == nil || runner == nil || policy == nil {
+		return nil, errors.New("Core client, Agent runner, and execution policy are required")
 	}
 	id, provider, err := newHostIdentity(provider)
 	if err != nil {
 		return nil, err
 	}
 	return &Host{
-		api: api, runner: runner, provider: provider, id: id,
+		api: api, runner: runner, policy: policy, provider: provider, id: id,
 		installed: true, ready: true,
 	}, nil
 }
 
 func newHostIdentity(provider string) (string, string, error) {
-	idBytes := make([]byte, 16)
-	if _, err := rand.Read(idBytes); err != nil {
-		return "", "", err
-	}
 	provider = strings.ToLower(strings.TrimSpace(provider))
 	if provider == "" {
 		return "", "", errors.New("Agent provider is required")
 	}
-	return "host-" + hex.EncodeToString(idBytes), provider, nil
+	id, err := agentexec.PersistentHostID()
+	return id, provider, err
 }
 
 // NewUnavailableHost reports process discovery failures to Core without ever
 // claiming a Chat run. This keeps installation knowledge in the local ACL.
-func NewUnavailableHost(api coreClient, provider string, reason error) (*Host, error) {
-	if api == nil || reason == nil {
-		return nil, errors.New("Core client and unavailability reason are required")
+func NewUnavailableHost(api coreClient, policy ExecutionPolicy, provider string, reason error) (*Host, error) {
+	if api == nil || policy == nil || reason == nil {
+		return nil, errors.New("Core client, execution policy, and unavailability reason are required")
 	}
 	id, provider, err := newHostIdentity(provider)
 	if err != nil {
 		return nil, err
 	}
 	return &Host{
-		api: api, provider: provider, id: id, unavailableReason: reason.Error(),
+		api: api, policy: policy, provider: provider, id: id, unavailableReason: reason.Error(),
 	}, nil
 }
 
 func (h *Host) Run(ctx context.Context) error {
+	catalogCtx, cancelCatalog := context.WithCancel(ctx)
+	catalogDone := make(chan struct{})
+	go func() {
+		defer close(catalogDone)
+		h.runSessionCatalog(catalogCtx)
+	}()
+	defer func() {
+		cancelCatalog()
+		<-catalogDone
+	}()
 	for ctx.Err() == nil {
+		policyChanges := h.policy.Changes()
+		h.refreshAvailability()
 		var response struct {
 			Run *Run `json:"run"`
 		}
-		path := "/external-chat/hosts/" + url.PathEscape(h.provider) + ":claim"
-		if err := h.doJSON(ctx, claimRequestTimeout, http.MethodPost, path, map[string]any{
+		path := "/external-chat/hosts/" + url.PathEscape(h.provider) + "/claim"
+		err, policyChanged := h.claim(ctx, policyChanges, path, map[string]any{
 			"host_id": h.id, "installed": h.installed, "ready": h.ready,
 			"unavailable_reason": h.unavailableReason,
-		}, &response); err != nil {
+		}, &response)
+		if err != nil {
+			if policyChanged {
+				continue
+			}
 			if !waitRetry(ctx) {
 				return ctx.Err()
 			}
@@ -126,9 +184,204 @@ func (h *Host) Run(ctx context.Context) error {
 		if h.runner == nil {
 			continue
 		}
+		if response.Run.Action != "finalize" {
+			enabled, policyErr := h.policy.Enabled(h.provider)
+			if policyErr != nil || !enabled {
+				message := executionDisabledReason
+				if policyErr != nil {
+					message = "Read LazyMind execution policy: " + policyErr.Error()
+				}
+				_ = h.sendTerminalEvent(ctx, *response.Run, Event{Type: "failed", Error: message})
+				continue
+			}
+		}
 		h.execute(ctx, *response.Run)
+		h.syncSessionCatalog(ctx)
 	}
 	return ctx.Err()
+}
+
+func (h *Host) refreshAvailability() {
+	if h.runner == nil {
+		h.ready = false
+		return
+	}
+	enabled, err := h.policy.Enabled(h.provider)
+	if err != nil {
+		h.ready = false
+		h.unavailableReason = "Read LazyMind execution policy: " + err.Error()
+		return
+	}
+	if !enabled {
+		h.ready = false
+		h.unavailableReason = executionDisabledReason
+		return
+	}
+	h.ready = true
+	h.unavailableReason = ""
+	if status, ok := h.runner.(availabilityReporter); ok {
+		h.ready, h.unavailableReason = status.Availability()
+	}
+}
+
+func (h *Host) claim(ctx context.Context, policyChanges <-chan struct{}, path string, input, output any) (error, bool) {
+	requestCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	changed := make(chan struct{}, 1)
+	go func(policyChanges <-chan struct{}) {
+		select {
+		case <-policyChanges:
+			changed <- struct{}{}
+			cancel()
+		case <-done:
+		case <-ctx.Done():
+		}
+	}(policyChanges)
+	err := h.doJSON(requestCtx, claimRequestTimeout, http.MethodPost, path, input, output)
+	close(done)
+	cancel()
+	select {
+	case <-changed:
+		return err, true
+	default:
+		return err, false
+	}
+}
+
+func (h *Host) runSessionCatalog(ctx context.Context) {
+	if _, ok := h.runner.(SessionCatalog); !ok {
+		return
+	}
+	h.runFullSessionCatalog(ctx)
+}
+
+func (h *Host) runFullSessionCatalog(ctx context.Context) {
+	delay := time.Duration(0)
+	for ctx.Err() == nil {
+		if delay > 0 {
+			timer := time.NewTimer(delay)
+			var policyChanges <-chan struct{}
+			if h.policy != nil {
+				policyChanges = h.policy.Changes()
+			}
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return
+			case <-policyChanges:
+				timer.Stop()
+			case <-timer.C:
+			}
+		}
+		if h.syncSessionCatalog(ctx) {
+			delay = sessionCatalogInterval
+		} else {
+			delay = 10 * time.Second
+		}
+	}
+}
+
+func (h *Host) syncSessionCatalog(ctx context.Context) bool {
+	h.catalogMu.Lock()
+	defer h.catalogMu.Unlock()
+	catalog, ok := h.runner.(SessionCatalog)
+	if !ok {
+		return true
+	}
+	enabled, err := h.sessionCatalogEnabled()
+	if err != nil {
+		return false
+	}
+	if !enabled {
+		return h.syncSessionBatches(ctx, nil, false)
+	}
+	sessions, err := catalog.Sessions(ctx)
+	if err != nil {
+		return false
+	}
+	enabled, err = h.sessionCatalogEnabled()
+	if err != nil {
+		return false
+	}
+	if !enabled {
+		return h.syncSessionBatches(ctx, nil, false)
+	}
+	return h.syncSessionBatches(ctx, sessions, true)
+}
+
+func (h *Host) sessionCatalogEnabled() (bool, error) {
+	if h.policy == nil {
+		return true, nil
+	}
+	return h.policy.Enabled(h.provider)
+}
+
+func (h *Host) syncSessionBatches(ctx context.Context, sessions []NativeSession, sessionAccessEnabled bool) bool {
+	batches := sessionCatalogBatches(sessions)
+	for index, batch := range batches {
+		requestCtx, cancel := context.WithTimeout(ctx, claimRequestTimeout)
+		var response syncSessionCatalogResponse
+		err := h.api.DoJSON(requestCtx, http.MethodPost, "/external-chat/providers/"+url.PathEscape(h.provider)+"/sessions:sync", map[string]any{
+			"host_id": h.id, "sessions": batch, "reset": index == 0,
+			"session_access_enabled": sessionAccessEnabled,
+		}, &response)
+		cancel()
+		if err != nil || response.Updated != len(batch) || response.Rejected != 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func sessionCatalogBatches(sessions []NativeSession) [][]NativeSession {
+	const maxBatchBytes = 8 << 20
+	if len(sessions) == 0 {
+		return [][]NativeSession{{}}
+	}
+	expanded := make([]NativeSession, 0, len(sessions))
+	for _, session := range sessions {
+		if session.TurnCount == 0 {
+			session.TurnCount = len(session.Turns)
+		}
+		encoded, _ := json.Marshal(session)
+		if len(encoded) <= maxBatchBytes || len(session.Turns) < 2 {
+			expanded = append(expanded, session)
+			continue
+		}
+		base := session
+		base.Turns = nil
+		chunk := base
+		for _, turn := range session.Turns {
+			candidate := chunk
+			candidate.Turns = append(append([]NativeTurn(nil), chunk.Turns...), turn)
+			body, _ := json.Marshal(candidate)
+			if len(chunk.Turns) > 0 && len(body) > maxBatchBytes {
+				expanded = append(expanded, chunk)
+				chunk = base
+			}
+			chunk.Turns = append(chunk.Turns, turn)
+		}
+		if len(chunk.Turns) > 0 {
+			expanded = append(expanded, chunk)
+		}
+	}
+	batches := make([][]NativeSession, 0, len(expanded)/100+1)
+	batch := make([]NativeSession, 0, 100)
+	batchBytes := 0
+	for _, session := range expanded {
+		encoded, _ := json.Marshal(session)
+		if len(batch) > 0 && (len(batch) >= 250 || batchBytes+len(encoded) > maxBatchBytes) {
+			batches = append(batches, batch)
+			batch = make([]NativeSession, 0, 100)
+			batchBytes = 0
+		}
+		batch = append(batch, session)
+		batchBytes += len(encoded)
+	}
+	if len(batch) > 0 {
+		batches = append(batches, batch)
+	}
+	return batches
 }
 
 func (h *Host) execute(parent context.Context, run Run) {

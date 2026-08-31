@@ -6,12 +6,14 @@ import json
 import math
 from typing import Any
 
+from .budget import resolve_max_input_tokens
 from .models import (
     AgentRunPlan,
     ContextUsageCategory,
     ContextUsageItem,
     ContextUsageReport,
 )
+from .message_fields import model_facing_message
 
 
 _CATEGORY_TITLES = {
@@ -43,6 +45,24 @@ def estimate_tokens(text: str) -> int:
         else:
             weight += 1.5
     return math.ceil(weight) if weight else 0
+
+
+def estimate_non_history_tokens(
+    prefix: dict[str, Any],
+    current_input: Any = None,
+) -> int:
+    total = estimate_tokens(str(prefix.get('system_prompt') or ''))
+    for tool in prefix.get('tool_definitions') or []:
+        rendered = json.dumps(tool, ensure_ascii=False, separators=(',', ':'), default=str)
+        total += estimate_tokens(rendered) + 2
+    skill_parts = prefix.get('skill_prompt_parts') or []
+    if skill_parts:
+        total += sum(estimate_tokens(str(part.get('content') or '')) for part in skill_parts)
+    else:
+        total += estimate_tokens(str(prefix.get('skills_prompt') or ''))
+    if current_input is not None:
+        total += estimate_tokens(str(current_input)) + 4
+    return total
 
 
 def _item(
@@ -113,8 +133,9 @@ def _estimate(plan: AgentRunPlan, agent_context: dict[str, Any]) -> ContextUsage
 
     model_history = agent_context.get('history', plan.history)
     for index, message in enumerate(model_history):
-        compact = json.dumps(message, ensure_ascii=False, separators=(',', ':'), default=str)
-        rendered = json.dumps(message, ensure_ascii=False, indent=2, default=str)
+        model_message = model_facing_message(message)
+        compact = json.dumps(model_message, ensure_ascii=False, separators=(',', ':'), default=str)
+        rendered = json.dumps(model_message, ensure_ascii=False, indent=2, default=str)
         grouped['conversation'].append(_item(
             f'history_{index}', 'conversation', _history_title(message, index),
             f"history.{message.get('role', 'unknown')}", compact,
@@ -199,6 +220,17 @@ async def estimate_context_usage(
 
 def report_to_dict(report: ContextUsageReport) -> dict[str, Any]:
     return asdict(report)
+
+
+def attach_window_budget(
+    report_data: dict[str, Any],
+    llm_config: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    max_tokens = resolve_max_input_tokens(llm_config=llm_config)
+    estimated = int(report_data.get('estimated_tokens') or 0)
+    report_data['max_input_tokens'] = max_tokens
+    report_data['estimated_ratio'] = (float(estimated) / float(max_tokens)) if max_tokens else 0.0
+    return report_data
 
 
 def render_context_markdown(plan: AgentRunPlan, agent_context: dict[str, Any]) -> str:

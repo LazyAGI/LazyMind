@@ -66,6 +66,13 @@ interface ArtifactRewriteDialogProps {
   onClose: () => void;
   onApplied: (revision?: number) => void;
   onPreviewReady?: (preview: RewriteSelectionPreview) => void;
+  terminology?: 'polish' | 'edit';
+  /** Optional layer override for selections opened inside a full-screen modal. */
+  portalZIndex?: number;
+  requestPreview?: (
+    instruction: string,
+    selection: ArtifactRewriteSelection,
+  ) => Promise<RewriteSelectionPreview>;
 }
 
 type FormPhase = 'form' | 'previewing';
@@ -87,11 +94,11 @@ function errorCode(error: unknown): string | undefined {
 }
 
 function errorMessage(code: string | undefined, fallback: string): string {
-  if (code === 'REVISION_CONFLICT') return 'chat.artifactRewrite.errors.revisionConflict';
-  if (code === 'SELECTION_AMBIGUOUS') return 'chat.artifactRewrite.errors.ambiguous';
-  if (code === 'SELECTION_STALE') return 'chat.artifactRewrite.errors.stale';
-  if (code === 'SELECTION_UNSUPPORTED') return 'chat.artifactRewrite.errors.unsupported';
-  if (code === 'WORKFLOW_ACTION_FAILED') return 'chat.artifactRewrite.errors.workflowFailed';
+  if (code === 'REVISION_CONFLICT') return 'errors.revisionConflict';
+  if (code === 'SELECTION_AMBIGUOUS') return 'errors.ambiguous';
+  if (code === 'SELECTION_STALE') return 'errors.stale';
+  if (code === 'SELECTION_UNSUPPORTED') return 'errors.unsupported';
+  if (code === 'WORKFLOW_ACTION_FAILED') return 'errors.workflowFailed';
   return fallback;
 }
 
@@ -104,7 +111,7 @@ function isReadyPreview(value: unknown): value is RewriteSelectionPreview {
     && typeof data.preview?.old_text === 'string'
     && typeof data.preview?.new_text === 'string'
     && typeof data.artifact?.content_type === 'string'
-    && Boolean(data.artifact.value && typeof data.artifact.value === 'object');
+    && Boolean(data.artifact.value && ['object', 'string'].includes(typeof data.artifact.value));
 }
 
 export function ArtifactRewriteDialog({
@@ -116,8 +123,18 @@ export function ArtifactRewriteDialog({
   selection,
   onClose,
   onPreviewReady,
+  terminology = 'polish',
+  portalZIndex,
+  requestPreview: requestPreviewOverride,
 }: ArtifactRewriteDialogProps) {
   const { t } = useTranslation();
+  const translationPrefix = terminology === 'edit'
+    ? 'chat.artifactEdit'
+    : 'chat.artifactRewrite';
+  const tr = useCallback(
+    (key: string) => t(`${translationPrefix}.${key}`),
+    [t, translationPrefix],
+  );
   const [instruction, setInstruction] = useState('');
   const [phase, setPhase] = useState<FormPhase>('form');
   const [error, setError] = useState<string>();
@@ -145,7 +162,7 @@ export function ArtifactRewriteDialog({
     setPhase('form');
     const timer = window.setTimeout(() => inputRef.current?.focus(), 0);
     return () => window.clearTimeout(timer);
-  }, [open, selection, t]);
+  }, [open, selection, tr]);
 
   const updateFormPosition = useCallback(() => {
     const form = formRef.current;
@@ -194,14 +211,16 @@ export function ArtifactRewriteDialog({
   }, [close, open]);
 
   const requestPreview = useCallback(async () => {
-    const trimmedInstruction = instruction.trim() || t('chat.artifactRewrite.defaultInstruction');
-    if (!selection || phase !== 'form') return;
+    const trimmedInstruction = instruction.trim();
+    if (!trimmedInstruction || !selection || phase !== 'form') return;
 
     const requestId = ++requestIdRef.current;
     setPhase('previewing');
     setError(undefined);
     try {
-      const response = await WorkflowSessionApi().previewRewriteSelection(
+      const result = requestPreviewOverride
+        ? await requestPreviewOverride(trimmedInstruction, selection)
+        : (await WorkflowSessionApi().previewRewriteSelection(
         sessionId,
         slotId,
         listIndex,
@@ -212,13 +231,26 @@ export function ArtifactRewriteDialog({
             instruction: trimmedInstruction,
             selection: selection.type === 'ir'
               ? { type: 'ir', node_id: selection.node_id }
-              : { type: 'markdown', selected_text: selection.selected_text },
+              : selection.type === 'ppt_html'
+                ? {
+                  type: 'ppt_html',
+                  page: selection.page,
+                  el: selection.el,
+                  ...(selection.index ? { index: selection.index } : {}),
+                  ...(selection.group ? { group: selection.group } : {}),
+                  ...(selection.selectedText
+                    ? { selected_text: selection.selectedText }
+                    : {}),
+                  ...(selection.computed_style
+                    ? { computed_style: selection.computed_style }
+                    : {}),
+                }
+                : { type: 'markdown', selected_text: selection.selected_text },
           },
         },
         { silentError: true } as never,
-      );
-      const result = response?.data?.data;
-      if (response?.data?.code !== 0 || !isReadyPreview(result)) {
+      )).data?.data;
+      if (!isReadyPreview(result)) {
         throw new Error('invalid preview response');
       }
       if (!mountedRef.current || requestId !== requestIdRef.current) return;
@@ -228,10 +260,10 @@ export function ArtifactRewriteDialog({
       onClose();
     } catch (requestError) {
       if (!mountedRef.current || requestId !== requestIdRef.current) return;
-      setError(t(errorMessage(errorCode(requestError), 'chat.artifactRewrite.errors.previewFailed')));
+      setError(tr(errorMessage(errorCode(requestError), 'errors.previewFailed')));
       setPhase('form');
     }
-  }, [baseRevision, instruction, listIndex, onClose, onPreviewReady, phase, selection, sessionId, slotId, t]);
+  }, [baseRevision, instruction, listIndex, onClose, onPreviewReady, phase, requestPreviewOverride, selection, sessionId, slotId, tr]);
 
   const handleKeyDown = useCallback((event: ReactKeyboardEvent<HTMLDivElement>) => {
     if (event.key === 'Escape') {
@@ -247,13 +279,13 @@ export function ArtifactRewriteDialog({
 
   if (!open || !selection) return null;
   const busy = phase === 'previewing';
-  const canPreview = phase === 'form';
+  const canPreview = phase === 'form' && instruction.trim().length > 0;
 
   return ReactDOM.createPortal(
     <div
       ref={formRef}
       className={`artifact-rewrite-form artifact-rewrite-form--${formPlacement}`}
-      style={formStyle}
+      style={portalZIndex === undefined ? formStyle : { ...formStyle, zIndex: portalZIndex }}
       onKeyDown={handleKeyDown}
     >
       <div className='artifact-rewrite-form__input-shell'>
@@ -263,9 +295,9 @@ export function ArtifactRewriteDialog({
           className='artifact-rewrite-form__input'
           value={instruction}
           onChange={(event) => setInstruction(event.target.value)}
-          placeholder={t('chat.artifactRewrite.defaultInstruction')}
+          placeholder={tr('defaultInstruction')}
           disabled={busy}
-          aria-label={t('chat.artifactRewrite.instruction')}
+          aria-label={tr('instruction')}
           aria-describedby={error ? 'artifact-rewrite-form-error' : undefined}
         />
         <button
@@ -273,8 +305,8 @@ export function ArtifactRewriteDialog({
           className={`artifact-rewrite-form__submit${busy ? ' artifact-rewrite-form__submit--busy' : ''}`}
           onClick={() => void requestPreview()}
           disabled={!canPreview || busy}
-          aria-label={busy ? t('chat.artifactRewrite.previewing') : t('chat.artifactRewrite.preview')}
-          title={busy ? t('chat.artifactRewrite.previewing') : t('chat.artifactRewrite.preview')}
+          aria-label={busy ? tr('previewing') : tr('preview')}
+          title={busy ? tr('previewing') : tr('preview')}
         >
           <SendIcon aria-hidden='true' />
         </button>
@@ -299,6 +331,7 @@ interface ArtifactRewriteInlineDiffProps {
   preview: RewriteSelectionPreview;
   onApplied: (revision?: number) => void;
   onReject: () => void;
+  applyPreview?: () => Promise<number | undefined>;
 }
 
 function renderInlineDiff(oldText: string, newText: string) {
@@ -327,6 +360,7 @@ export function ArtifactRewriteInlineDiff({
   preview,
   onApplied,
   onReject,
+  applyPreview,
 }: ArtifactRewriteInlineDiffProps) {
   const { t } = useTranslation();
   const [overlay, setOverlay] = useState<HTMLDivElement | null>(null);
@@ -417,13 +451,18 @@ export function ArtifactRewriteInlineDiff({
     setApplying(true);
     setError(undefined);
     try {
+      if (applyPreview) {
+        const revision = await applyPreview();
+        onApplied(revision);
+        return;
+      }
       const response = await WorkflowSessionApi().patchSlotItem(
         sessionId,
         slotId,
         listIndex,
         preview.artifact.value,
         preview.artifact.content_type,
-        slotId === 'draft_document' ? 'draft' : 'checkpoint',
+        ['draft_document', 'flat_draft_document'].includes(slotId) ? 'draft' : 'checkpoint',
         preview.base_revision,
         { silentError: true } as never,
       );
@@ -436,7 +475,7 @@ export function ArtifactRewriteInlineDiff({
       setError(t(errorMessage(errorCode(applyError), 'chat.artifactRewrite.errors.applyFailed')));
       setApplying(false);
     }
-  }, [applying, listIndex, onApplied, preview, sessionId, slotId, t]);
+  }, [applyPreview, applying, listIndex, onApplied, preview, sessionId, slotId, t]);
 
   if (!layer) return null;
   return ReactDOM.createPortal(

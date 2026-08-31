@@ -128,6 +128,33 @@ func TestSignArtifactValueAllowsSharedWorkflowArtifact(t *testing.T) {
 	}
 }
 
+func TestSignArtifactValueAllowsCanonicalDockerUploadPathOnDesktop(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("LAZYMIND_UPLOAD_ROOT", root)
+	relativePath := filepath.Join("workflow-artifacts", "session-1", "attempt-1", "result.gif")
+	localPath := filepath.Join(root, relativePath)
+	if err := os.MkdirAll(filepath.Dir(localPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(localPath, []byte("gif"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	canonicalPath := "/var/lib/lazymind/uploads/" + filepath.ToSlash(relativePath)
+	raw, _ := json.Marshal(map[string]any{"path": canonicalPath, "caption": "好的!"})
+	signed := SignArtifactValue("image", raw, filepath.Join(t.TempDir(), "task-workspace"))
+	var got map[string]any
+	if err := json.Unmarshal(signed, &got); err != nil {
+		t.Fatal(err)
+	}
+	if _, exposed := got["path"]; exposed {
+		t.Fatalf("canonical server path must not be exposed: %#v", got)
+	}
+	url, _ := got["url"].(string)
+	if !strings.HasPrefix(url, "/static-files/workflow-artifacts/session-1/attempt-1/result.gif?") {
+		t.Fatalf("expected signed canonical upload URL, got %q", url)
+	}
+}
+
 func TestSignArtifactFileListOmitsUnsignableServerPaths(t *testing.T) {
 	raw := json.RawMessage(`{"paths":["/private/server/secret.txt","https://example.com/public.txt"]}`)
 	signed := SignArtifactValue("file_list", raw, "")

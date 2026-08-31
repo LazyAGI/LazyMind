@@ -1,0 +1,100 @@
+schema_version: 2
+id: market-researcher
+type: work
+version: 1.0.2
+status: published
+default_locale: zh-CN
+provider: WorkBuddy / 千问办公
+
+skill:
+  source_url: featured/market-researcher/skill
+  required_version: 1.0.2
+
+placement:
+  home: true
+  gallery: true
+  order: 13
+
+classification:
+  category: 信息分析
+  tags:
+    - 行业研究
+    - 竞争分析
+    - 来源核验
+
+assets:
+  cover:
+    file: assets/cover.png
+    role: cover
+  sector_demo:
+    file: assets/sector-research-demo.html
+    role: result
+  competition_demo:
+    file: assets/competitive-landscape-demo.html
+    role: result
+
+presentation:
+  card:
+    title: 市场与行业研究专家
+    description: 通过联网检索与来源核验，完成行业全景和竞争格局研究
+    output_type: report
+    output_label: 行业与竞争研究报告
+    cover_asset: cover
+    result_summary: 以直接来源、数据日期和证据边界支撑可追溯的研究结论
+  detail:
+    title: 市场与行业研究专家
+    description: 面向行业研究与竞争监测，完成范围界定、联网检索、来源核验、参与者比较和结构化报告交付。来源：WorkBuddy 与千问办公，经 LazyMind 融合适配。
+    attachment_hint: 行业说明、研究报告、公司名单或来源链接（可选）
+
+tasks:
+  - id: sector-research
+    selector:
+      title: 行业全景研究
+      description: 联网研究目标行业的发展阶段、产业链、主要玩家、机会与风险
+      output_label: 行业机会速览
+    launch:
+      prompt_short: 调研中国具身智能机器人行业，梳理产业格局、机会、风险与关键证据。
+      prompt: |
+        请调研【中国具身智能机器人】行业，范围为【中国大陆】，重点关注【近三年及未来两年】。我想了解这个行业目前处于什么发展阶段，产业链和主要玩家有哪些，接下来存在哪些机会与风险。请基于最新公开资料形成一份来源可追溯的行业研究报告。
+    replay:
+      steps:
+        - title: 锁定产业边界
+          description: 区分具身智能与相邻机器人市场，明确地区、期间和统计口径
+        - title: 四组证据检索
+          description: 先完成四组核心检索，再按证据缺口补证，记录原始来源、口径和日期
+        - title: 搭建机会地图
+          description: 串联细分、价值链、参与者、增长驱动和关键瓶颈
+        - title: 形成决策速览
+          description: 完整输出判断、证据链、边界和未来 12—24 个月跟踪信号
+    result:
+      template: html_preview_v1
+      eyebrow: 行业全景案例
+      title: 中国具身智能机器人行业机会速览
+      summary: 从产业边界和原始来源口径出发，系统梳理市场信号、价值链、机会与关键风险
+      html_asset: sector_demo
+
+  - id: competitive-landscape
+    selector:
+      title: 竞争格局分析
+      description: 联网比较目标产品或企业的定位、能力、适用场景与选择风险
+      output_label: 平台选型速览
+    launch:
+      prompt_short: 对比百炼、千帆与腾讯云智能体开发平台，给出有证据的选型建议。
+      prompt: |
+        请对比【阿里云百炼、百度智能云千帆、腾讯云智能体开发平台】，帮助【正在进行平台选型的企业产品与技术团队】判断它们分别适合什么场景、存在哪些限制，以及应该如何选择。请基于最新官方资料形成一份来源可追溯的对比报告。
+    replay:
+      steps:
+        - title: 定义可比边界
+          description: 明确企业级 Agent 开发平台的竞争单元、目标客户和比较期间
+        - title: 定额核验官方资料
+          description: 核验三家产品页与官方文档，并按比较缺口补证，记录日期、未披露项和口径差异
+        - title: 建立能力矩阵
+          description: 从五个维度比较定位、产品能力、适配场景与选择限制
+        - title: 形成选型速览
+          description: 输出三条判断、证据边界和后续监控指标
+    result:
+      template: html_preview_v1
+      eyebrow: 竞争格局案例
+      title: 中国企业级 AI Agent 开发平台选型速览
+      summary: 基于官方产品与文档页面，系统比较三家平台的定位、能力、适配场景与证据边界
+      html_asset: competition_demo

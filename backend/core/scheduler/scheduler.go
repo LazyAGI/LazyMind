@@ -261,11 +261,24 @@ func truncateRunes(s string, maxRunes int, suffix string) string {
 // ── Scheduler loop ────────────────────────────────────────────────────────────
 
 // RunScheduler starts a goroutine that fires due schedules every 30 seconds.
-// Call once at application startup. The goroutine stops when ctx is cancelled.
-// Task status is now derived on read via resolveTaskStatus (chat_histories presence),
-// so no periodic reconciler is needed here.
-func RunScheduler(ctx context.Context, db *gorm.DB, chatBaseURL string) {
+// Call once at application startup. The goroutine stops when ctx is cancelled,
+// at which point the returned channel is closed so callers can wait for the
+// ticker loop to fully exit. Task status is now derived on read via
+// resolveTaskStatus (chat_histories presence), so no periodic reconciler is
+// needed here.
+//
+// The returned channel only tracks the ticker goroutine. fireOne may launch
+// detached task-execution goroutines (sendScheduledChatRequest) that run with
+// context.Background and outlive this loop — they are deliberately not waited
+// on, because scheduled tasks are user business work that should complete even
+// when the process is stopping. Callers that close shared resources (e.g. the
+// DB pool) on Done() must account for those detached writes still being in
+// flight; in core, the DB/Redis pools are intentionally not closed on shutdown
+// for this reason.
+func RunScheduler(ctx context.Context, db *gorm.DB, chatBaseURL string) <-chan struct{} {
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		repairFutureScheduleNextRunsAt(ctx, db, time.Now().UTC())
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
@@ -279,6 +292,7 @@ func RunScheduler(ctx context.Context, db *gorm.DB, chatBaseURL string) {
 			}
 		}
 	}()
+	return done
 }
 
 // repairFutureScheduleNextRunsAt corrects future timestamps produced when a
@@ -356,7 +370,7 @@ func fireSchedules(ctx context.Context, db *gorm.DB, _ string) {
 		if err != nil {
 			continue
 		}
-		if !controls.TaskCenterEnabled {
+		if !controls.SchedulesEnabled {
 			_ = RecomputeEnabledSchedules(ctx, db, s.UserID, now)
 			continue
 		}
@@ -373,6 +387,10 @@ func fireSchedules(ctx context.Context, db *gorm.DB, _ string) {
 }
 
 func fireOne(ctx context.Context, db *gorm.DB, s orm.UserSchedule, firedAt time.Time) {
+	controls, err := settings.LoadFeatureControls(ctx, db, s.UserID)
+	if err != nil || !controls.SchedulesEnabled {
+		return
+	}
 	scheduledAt := s.NextRunAt.UTC()
 	// Compute next run time first so we can CAS before creating any records.
 	next, err := nextCronTime(s.CronExpr, s.Timezone)
@@ -478,6 +496,7 @@ func createTaskConversation(ctx context.Context, db *gorm.DB, userID, promptTemp
 		EnableWorkflow: &enableWorkflow,
 		WorkflowMode:   &workflowMode,
 		EnableSubagent: &enableSubagent,
+		ThinkingDepth:  "high",
 		BaseModel: orm.BaseModel{
 			CreateUserID: userID,
 			CreatedAt:    now,
@@ -757,8 +776,8 @@ func EnableScheduleHandler(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "query task center settings failed", http.StatusInternalServerError)
 		return
 	}
-	if !controls.TaskCenterEnabled {
-		common.ReplyErr(w, "task center is paused in settings", http.StatusConflict)
+	if !controls.SchedulesEnabled {
+		common.ReplyErr(w, "scheduled tasks are paused in settings", http.StatusConflict)
 		return
 	}
 	// Recompute next_run_at from now so the schedule fires at the correct future time.
@@ -892,8 +911,8 @@ func RunNowHandler(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "query task center settings failed", http.StatusInternalServerError)
 		return
 	}
-	if !controls.TaskCenterEnabled {
-		common.ReplyErr(w, "task center is paused in settings", http.StatusConflict)
+	if !controls.SchedulesEnabled {
+		common.ReplyErr(w, "scheduled tasks are paused in settings", http.StatusConflict)
 		return
 	}
 	var s orm.UserSchedule

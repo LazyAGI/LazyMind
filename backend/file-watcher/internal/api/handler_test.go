@@ -19,7 +19,7 @@ func TestLegacyFSHandlersAreDisabled(t *testing.T) {
 
 	root := filepath.Join(t.TempDir(), "release-root")
 	mustMkdir(t, root)
-	handler := NewHandler(nil, fs.NewPathValidator([]string{root}), nil, fs.NewPathMapper("", nil), nil)
+	handler := NewHandler(nil, fs.NewPathValidator([]string{root}), nil, fs.NewPathMapper("", nil), false, nil)
 
 	cases := []struct {
 		name   string
@@ -62,7 +62,7 @@ func TestAgentFSProtocolValidateListStatExport(t *testing.T) {
 	mustWriteFile(t, filepath.Join(root, "docs", ".hidden.swp"), "ignored")
 
 	staging := &apiStagingStub{}
-	handler := NewHandler(nil, fs.NewPathValidator([]string{root}), staging, fs.NewPathMapper("", nil), nil)
+	handler := NewHandler(nil, fs.NewPathValidator([]string{root}), staging, fs.NewPathMapper("", nil), false, nil)
 
 	rootsReq := httptest.NewRequest(http.MethodPost, "/api/v1/agents/fs/roots", strings.NewReader(`{"agent_id":"agent-1","user_id":"user-1"}`))
 	rootsW := httptest.NewRecorder()
@@ -144,7 +144,7 @@ func TestAgentFSProtocolRequiresAgentID(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	handler := NewHandler(nil, fs.NewPathValidator([]string{root}), &apiStagingStub{}, fs.NewPathMapper("", nil), nil)
+	handler := NewHandler(nil, fs.NewPathValidator([]string{root}), &apiStagingStub{}, fs.NewPathMapper("", nil), false, nil)
 
 	cases := []struct {
 		name   string
@@ -174,6 +174,34 @@ func TestAgentFSProtocolRequiresAgentID(t *testing.T) {
 				t.Fatalf("expected INVALID_ARGUMENT, got %+v", resp)
 			}
 		})
+	}
+}
+
+func TestDesktopDynamicAllowedRootsAreDisabledByDefaultAndReplaceAtomically(t *testing.T) {
+	base := t.TempDir()
+	first := filepath.Join(base, "first")
+	second := filepath.Join(base, "second")
+	for _, root := range []string{first, second} {
+		mustMkdir(t, root)
+	}
+	validator := fs.NewPathValidator([]string{first})
+	disabled := NewHandler(nil, validator, nil, fs.NewPathMapper("", nil), false, nil)
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/desktop/fs/allowed-roots", strings.NewReader(`{"roots":[`+quoteJSON(first)+`,`+quoteJSON(second)+`]}`))
+	w := httptest.NewRecorder()
+	disabled.ReplaceAllowedRoots(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("disabled status = %d body = %s", w.Code, w.Body.String())
+	}
+
+	enabled := NewHandler(nil, validator, nil, fs.NewPathMapper("", nil), true, nil)
+	req = httptest.NewRequest(http.MethodPut, "/api/v1/desktop/fs/allowed-roots", strings.NewReader(`{"roots":[`+quoteJSON(first)+`,`+quoteJSON(second)+`]}`))
+	w = httptest.NewRecorder()
+	enabled.ReplaceAllowedRoots(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("enabled status = %d body = %s", w.Code, w.Body.String())
+	}
+	if err := validator.EnsureAllowed(filepath.Join(second, "rules", "a.md")); err != nil {
+		t.Fatalf("dynamic root was not applied: %v", err)
 	}
 }
 

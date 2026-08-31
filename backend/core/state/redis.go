@@ -150,9 +150,15 @@ func (s *RedisStore) LTrim(ctx context.Context, key string, start, stop int64) e
 	return s.client.LTrim(ctx, key, start, stop).Err()
 }
 
-func (s *RedisStore) BLPop(ctx context.Context, key string, timeout time.Duration) error {
-	_, err := s.client.BLPop(ctx, timeout, key).Result()
-	return err
+func (s *RedisStore) LPop(ctx context.Context, key string) (bool, error) {
+	_, err := s.client.LPop(ctx, key).Result()
+	if err == nil {
+		return true, nil
+	}
+	if IsMissing(err) {
+		return false, nil
+	}
+	return false, err
 }
 
 func (s *RedisStore) ZAdd(ctx context.Context, key, member string, score float64, ttl time.Duration) error {

@@ -267,7 +267,7 @@ export function useUserMessageEdit({
   }
 
   async function handleCopyUserMessage(item: any) {
-    const text = (item?.delta || "").trim();
+    const text = (item?.display_delta || item?.delta || "").trim();
     if (!text) {
       return;
     }

@@ -12,6 +12,8 @@ export interface SlotFooterAction {
   disabled?: boolean;
   /** Persist any pending editor changes before running this action. */
   flushBeforeAction?: boolean;
+  /** Restrict persistence to the editor that owns this document action. */
+  flushKey?: string;
   /** Lower values render further left within the document action group. */
   order?: number;
   tone?: 'primary' | 'secondary';

@@ -108,11 +108,32 @@ func TestWaitForAuthServiceHealthyToleratesStalePIDDuringRestart(t *testing.T) {
 	probeCount := 0
 	manager.probeAuth = func(_ int, _ time.Duration) bool {
 		probeCount++
-		return probeCount >= 2
+		// The old implementation failed after three 500ms checks of the stale
+		// PID, before the replacement service had time to become healthy.
+		return probeCount >= 4
 	}
 
-	if err := manager.waitForAuthServiceHealthy(context.Background(), 18000, 2*time.Second, pidFile); err != nil {
+	if err := manager.waitForAuthServiceHealthy(context.Background(), 18000, 3*time.Second, pidFile); err != nil {
 		t.Fatalf("wait for restarted auth-service: %v", err)
+	}
+}
+
+func TestWaitForAuthServiceHealthyReportsObservedProcessExit(t *testing.T) {
+	pidFile := filepath.Join(t.TempDir(), "auth-service.pid")
+	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(os.Getpid())+"\n"), 0o600); err != nil {
+		t.Fatalf("write live auth-service pid: %v", err)
+	}
+
+	manager := NewRuntimeManager(&fakeRunner{t: t}, filepath.Join(t.TempDir(), "local-runtime-manager"))
+	manager.probeAuth = func(_ int, _ time.Duration) bool { return false }
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		_ = os.Remove(pidFile)
+	}()
+
+	err := manager.waitForAuthServiceHealthy(context.Background(), 18000, 3*time.Second, pidFile)
+	if err == nil || !strings.Contains(err.Error(), "auth-service process exited before becoming healthy") {
+		t.Fatalf("wait error = %v, want observed process exit", err)
 	}
 }
 
@@ -180,6 +201,28 @@ func TestRuntimeConfigHonorsLegacyExplicitRuntimeRoot(t *testing.T) {
 	}
 	if paths.FileWatcherBaseRoot != filepath.Join(runtimeRoot, "data", "stores", "scan", "file-watcher") {
 		t.Fatalf("file watcher base root = %q", paths.FileWatcherBaseRoot)
+	}
+}
+
+func TestRuntimeConfigMergesDesktopExtraAllowedRoots(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	extra := filepath.Join(t.TempDir(), ".codex", "skills")
+	extraJSON, err := json.Marshal([]string{extra})
+	if err != nil {
+		t.Fatalf("marshal extra allowed roots: %v", err)
+	}
+	t.Setenv("LAZYMIND_FILE_WATCHER_EXTRA_ALLOWED_ROOTS_JSON", string(extraJSON))
+
+	cfg, _, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	if len(cfg.FileWatcher.AllowedRoots) != 2 {
+		t.Fatalf("allowed roots = %#v", cfg.FileWatcher.AllowedRoots)
+	}
+	if cfg.FileWatcher.AllowedRoots[0] != cfg.FileWatcher.WatchHostDir || cfg.FileWatcher.AllowedRoots[1] != extra {
+		t.Fatalf("allowed roots = %#v", cfg.FileWatcher.AllowedRoots)
 	}
 }
 
@@ -568,7 +611,7 @@ func TestProcessComposeGeneratedConfigContainsOnlyHostProcesses(t *testing.T) {
 	}
 }
 
-func TestInstallerWarmupGeneratesCompleteProcessGraph(t *testing.T) {
+func TestInstallerWarmupGeneratesReducedProcessGraph(t *testing.T) {
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)
 	cfg, paths, err := NewRuntimeConfigWithOptions(RuntimeConfigOptions{
@@ -594,17 +637,19 @@ func TestInstallerWarmupGeneratesCompleteProcessGraph(t *testing.T) {
 		channelGatewayProcessName,
 		coreProcessName,
 		frontendProcessName,
-		scanControlPlaneProcessName,
-		fileWatcherProcessName,
 		milvusLiteProcessName,
 		processorServerProcessName,
-		processorWorkerProcessName,
 		algoProcessName,
 		docServerProcessName,
 		chatProcessName,
 	} {
 		if _, ok := parsed.Processes[name]; !ok {
 			t.Fatalf("warmup graph missing process %s", name)
+		}
+	}
+	for _, name := range []string{fileWatcherProcessName, scanControlPlaneProcessName, processorWorkerProcessName} {
+		if _, ok := parsed.Processes[name]; ok {
+			t.Fatalf("warmup graph unexpectedly contains process %s", name)
 		}
 	}
 	for name, process := range parsed.Processes {
@@ -614,9 +659,24 @@ func TestInstallerWarmupGeneratesCompleteProcessGraph(t *testing.T) {
 			}
 		}
 	}
+	if !environmentContains(
+		parsed.Processes[chatProcessName].Environment,
+		installerWarmupSkipProcessorWorkerEnvVar+"=true",
+	) {
+		t.Fatalf("warmup Chat environment missing %s", installerWarmupSkipProcessorWorkerEnvVar)
+	}
 }
 
-func TestInstallerWarmupCreatesFileWatcherImportDirectory(t *testing.T) {
+func environmentContains(environment []string, want string) bool {
+	for _, item := range environment {
+		if item == want {
+			return true
+		}
+	}
+	return false
+}
+
+func TestInstallerWarmupDoesNotCreateFileWatcherImportDirectory(t *testing.T) {
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)
 	cfg, paths, err := NewRuntimeConfigWithOptions(RuntimeConfigOptions{
@@ -631,8 +691,8 @@ func TestInstallerWarmupCreatesFileWatcherImportDirectory(t *testing.T) {
 	if err := ensureRuntimeDirs(cfg, paths); err != nil {
 		t.Fatalf("ensure runtime dirs: %v", err)
 	}
-	if info, err := os.Stat(cfg.FileWatcher.WatchHostDir); err != nil || !info.IsDir() {
-		t.Fatalf("warmup did not create file watcher import directory %q: %v", cfg.FileWatcher.WatchHostDir, err)
+	if _, err := os.Stat(cfg.FileWatcher.WatchHostDir); !os.IsNotExist(err) {
+		t.Fatalf("warmup touched file watcher import directory %q: %v", cfg.FileWatcher.WatchHostDir, err)
 	}
 }
 
@@ -928,6 +988,18 @@ func TestKillStaleRuntimeProcessesStopsScannerOrphan(t *testing.T) {
 	}
 }
 
+func TestSelectLANIPv4SkipsLoopbackAndContainerBridges(t *testing.T) {
+	candidates := []lanIPv4Candidate{
+		{name: "lo", flags: net.FlagUp | net.FlagLoopback, ip: net.ParseIP("10.255.255.254")},
+		{name: "docker0", flags: net.FlagUp, ip: net.ParseIP("172.17.0.1")},
+		{name: "br-f16ec9f3bf18", flags: net.FlagUp, ip: net.ParseIP("172.20.0.1")},
+		{name: "eth0", flags: net.FlagUp, ip: net.ParseIP("172.24.189.31")},
+	}
+	if got := selectLANIPv4(candidates); got != "172.24.189.31" {
+		t.Fatalf("selectLANIPv4() = %q, want WSL eth0 address", got)
+	}
+}
+
 func TestDesktopProfileDoesNotRequireBundledLazyLLMSource(t *testing.T) {
 	repo := t.TempDir()
 	runner := &fakeRunner{t: t}
@@ -1006,6 +1078,36 @@ func TestStartupCapabilityReadyIncludesFrontendPort(t *testing.T) {
 	}
 	if payload["frontendPort"] != float64(8090) {
 		t.Fatalf("frontendPort = %#v, want 8090", payload["frontendPort"])
+	}
+}
+
+func TestStartupProgressEventIncludesPythonPayloadProgress(t *testing.T) {
+	manager := NewRuntimeManager(&fakeRunner{t: t}, filepath.Join(t.TempDir(), "local-runtime-manager"))
+	var output strings.Builder
+	manager.SetOutput(&output, &output)
+
+	manager.startupEventWithDetails("phase.progress", "python-payload", time.Now(), nil, map[string]any{
+		"stage":          "extracting",
+		"completedFiles": 7,
+		"totalFiles":     10,
+		"completedBytes": 700,
+		"totalBytes":     1000,
+	})
+
+	const marker = "[startup-event] "
+	line := strings.TrimSpace(output.String())
+	if !strings.HasPrefix(line, marker) {
+		t.Fatalf("startup progress output = %q", line)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimPrefix(line, marker)), &payload); err != nil {
+		t.Fatalf("unmarshal startup progress event: %v", err)
+	}
+	if payload["event"] != "phase.progress" || payload["phase"] != "python-payload" || payload["stage"] != "extracting" {
+		t.Fatalf("unexpected startup progress event: %#v", payload)
+	}
+	if payload["completedFiles"] != float64(7) || payload["totalBytes"] != float64(1000) {
+		t.Fatalf("unexpected startup progress values: %#v", payload)
 	}
 }
 

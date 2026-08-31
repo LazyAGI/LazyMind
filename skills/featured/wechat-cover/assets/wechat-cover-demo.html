@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="referrer" content="no-referrer">
+    <title>爆款封面分析报告</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; background: #f5f5f5; padding: 20px; }
+        .container { max-width: 1200px; margin: 0 auto; background: #fff; border-radius: 12px; padding: 30px; box-shadow: 0 2px 12px rgba(0,0,0,0.08); }
+        h1.report-title { color: #1a1a1a; margin-bottom: 30px; font-size: 28px; border-bottom: 3px solid #1890ff; padding-bottom: 15px; }
+        .info-bar { background: #e6f7ff; padding: 12px 16px; border-radius: 8px; margin-bottom: 20px; }
+        .info-bar strong { color: #1a1a1a; }
+        .style-card { background: #fafafa; border-radius: 12px; padding: 24px; margin: 20px 0; border: 1px solid #e8e8e8; }
+        .style-name { font-size: 20px; font-weight: 600; color: #1890ff; margin-bottom: 8px; }
+        .style-freq { display: inline-block; background: #e6f7ff; padding: 4px 12px; border-radius: 4px; font-size: 14px; color: #1890ff; margin-bottom: 12px; }
+        .style-core { color: #52c41a; font-weight: 500; margin: 12px 0; }
+        .style-features { color: #666; font-size: 15px; line-height: 1.8; margin-bottom: 16px; }
+        .cover-grid { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 16px; }
+        .cover-grid a { width: 180px; height: 77px; border-radius: 6px; overflow: hidden; display: block; }
+        .cover-grid img { width: 100%; height: 100%; object-fit: cover; object-position: center; }
+        .divider { border: none; border-top: 2px dashed #e8e8e8; margin: 40px 0; }
+        .plan-card { background: #fafafa; border-radius: 12px; padding: 24px; margin: 25px 0; border: 2px solid #1890ff; }
+        .plan-card h2 { font-size: 20px; font-weight: 600; color: #1890ff; margin-bottom: 12px; }
+        .plan-core { color: #52c41a; font-weight: 500; margin: 10px 0; font-size: 16px; }
+        .plan-card h3 { color: #333; margin: 20px 0 15px; font-size: 18px; }
+        .case-ref { background: #fff; border: 1px solid #e8e8e8; border-radius: 8px; padding: 20px; margin: 15px 0; display: flex; gap: 20px; align-items: flex-start; }
+        .case-ref .cover-wrap { width: 300px; height: 128px; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1); display: block; flex-shrink: 0; }
+        .case-ref .cover-wrap img { width: 100%; height: 100%; object-fit: cover; object-position: center; display: block; }
+        .case-ref .info { flex: 1; }
+        .case-ref .info .title a { color: #1890ff; text-decoration: none; font-weight: 500; font-size: 18px; }
+        .case-ref .info .author { color: #666; font-size: 14px; margin: 8px 0; }
+        .case-ref .info .reads { display: inline-block; background: #fff7e6; color: #fa8c16; padding: 4px 12px; border-radius: 4px; font-size: 13px; font-weight: 500; }
+        .prompt-box { background: #f6ffed; border: 1px solid #b7eb8f; border-radius: 8px; padding: 16px; margin: 20px 0; }
+        .prompt-box .label { color: #52c41a; font-weight: 600; margin-bottom: 8px; }
+        .prompt-box .content { color: #333; font-size: 14px; line-height: 1.8; background: #fff; padding: 12px; border-radius: 4px; word-break: break-all; }
+        .select-area { background: #fafafa; border-radius: 12px; padding: 24px; margin: 20px 0; border: 1px solid #e8e8e8; }
+        .select-area h2 { margin: 0 0 16px; font-size: 20px; color: #1890ff; }
+        .select-area .options { font-size: 15px; line-height: 2; color: #333; }
+        .select-area .options .option { margin-bottom: 8px; }
+        .select-area .options .hint { color: #666; margin-top: 8px; }
+    </style>
+</head>
+<body>
+<div class="container" id="app"></div>
+
+<script>
+// ====== 数据注入区域（Agent 只需替换此处的 JSON） ======
+var __REPORT_DATA__ = {
+    "keyword": "职场成长、升职加薪、打工人",
+    "analysisCount": 18,
+    "styles": [
+        {
+            "name": "🎬 电影叙事·情感剧照风",
+            "count": 6,
+            "coreVisual": "框式构图、冷暖对比光影、人物背影或双人疏离感，营造强烈故事悬念",
+            "features": "利用门框、窗框、楼梯扶手等做天然画框引导视线；人物多不露正脸或表情含蓄，制造悬念和窥视欲；冷暖色调对比（深蓝vs暖黄）增强戏剧张力；构图讲究纵深层次（前景/中景/远景分明），画面如电影截图般充满叙事感。适合情感共鸣类、人生感悟类文章。",
+            "covers": [
+                "https://mmbiz.qpic.cn/mmbiz_jpg/g5ibFtPpgAuK3crLCTV6nu1TsVpcOwkXM23jdyBFe7Vg4fORaS2z5rF86u4lxXLw7g7j0ibFQHiaBNZvMGNwTzSafE75u1AiaRBg7NqLQnDQiaCk/0?wx_fmt=jpeg",
+                "https://mmbiz.qpic.cn/mmbiz_jpg/J2NHSE3ibygmleibVKrJHjBm0Hkic8ianalRIQhdYHjKfUk1J8SQ3oLC5BMpmz1xYnPzDmW0SPfdMJVDqibXncGgRbw/0?wx_fmt=jpeg",
+                "https://mmbiz.qpic.cn/sz_mmbiz_jpg/VToK8ByghCh8hyI2xpuEH2lGEVVMiaYM9aYx7KVxHFpzibf9iaLWClGzepop4AJaCj7J4iangjYpjZ999zoqZmpiaJA/0?wx_fmt=jpeg",
+                "https://mmbiz.qpic.cn/mmbiz_jpg/fR4gM3bMm4rHWRUBtdQOqqRmN1XSZhZJUdl38mCGQCfiacqx8P8eLuypNR8mltpVBPn7nB5bPgtWQibxODfWyOBrXLQn9BkflHR4heTs7so48/0?wx_fmt=jpeg",
+                "https://mmbiz.qpic.cn/mmbiz_jpg/usuMOXJniaJIGKmrmibx1ZmJd7FqdPjmYObKMXvWNQpCiaiaUfCYhWvv0MZC8dQ7H0H7eXBuhwIrUwic3nsLQzLJmTxnlutVsAF8LsZ5p4TlgAibg/0?wx_fmt=jpeg"
+            ]
+        },
+        {
+            "name": "😂 夸张卡通·表情包风",
+            "count": 5,
+            "coreVisual": "扁平Q版卡通人物+大字报文案+高饱和互补撞色背景，视觉冲击力强",
+            "features": "人物表情夸张变形（痛苦吞咽、自信比耶、开心喝饮料），配合粗犷黑色大字文案或热梗（如'没福硬享''DAU日活十个亿'）；背景多用放射状速度线增强动感；色彩上大量使用互补色对比（黄vs紫、蓝vs橙）让小屏幕上极其抢眼；线条简洁平涂，典型的条漫/新媒体插画风格。适合自嘲型、吐槽型、轻松幽默的打工人内容。",
+            "covers": [
+                "https://mmbiz.qpic.cn/mmbiz_jpg/EwZI82u0uvHhOavicLicIia436llrzOlVoWJSFkb6RhkrnPmdLuH3Xm0r9q2QrM3elXTbXpfBsYibbWmWlOsy12xEg/0?wx_fmt=jpeg",
+                "https://mmbiz.qpic.cn/sz_mmbiz_jpg/9tnuyS3leDtaFg1OSnzEBRFn8BbpXErxVhyTDIfgFtl41gYwQvkQ8qMcoW8TWAKK9JER9ACBGFdWmwSNDX0lWQ/0?wx_fmt=jpeg",
+                "https://mmbiz.qpic.cn/mmbiz_jpg/XvpojIRrhdtfkx17FPDh4UUE6FImianYrteQXIibnOibCw0jpzDVNe7dgib1W8tj6LJ7H9OSXicrDWlufJ6K6R1uCbB9xsTKwygjDr3e1FOrzgSM/0?wx_fmt=jpeg",
+                "https://mmbiz.qpic.cn/sz_mmbiz_jpg/GsuL1FRLKd0tTYsicav9ff9RibOhicEvKt7DnWgoY59TMHjEVIxEqQFeibNQdX75J9xk5KBYup2QhDvbHyfIyqFNtg/0?wx_fmt=jpeg"
+            ]
+        },
+        {
+            "name": "💼 商务专业·大字极简风",
+            "count": 4,
+            "coreVisual": "核心关键词或3D图标居中，蓝色系商务配色，极简留白，一眼看清主题",
+            "features": "文字（如「国企」「升职加薪」）以巨大立体字占据画面中心，认知成本极低；配色以蓝色系（深蓝背景+白/浅蓝文字）为主，传递专业可信赖感；辅以微立体窗口框、几何点阵等装饰增加层次；部分使用系统UI截图（如职级界面）制造'内部揭秘'的真实感。适合职场干货、行业分析、政策解读类内容。",
+            "covers": [
+                "https://mmbiz.qpic.cn/sz_mmbiz_jpg/Ssn7iaB9At5CJfhXicAGy65m7I0pTBBfvsHQPHk2roWuibknvq4XhlWmcMoOdMpia6GmGQo5xQLbFkaTOCGb4ALWdQ/0?wx_fmt=jpeg",
+                "https://mmbiz.qpic.cn/sz_mmbiz_jpg/DOnMbfpHic9uTkCmN9eHpkXPUjZRbicWbsCaARafLIDhqcybaSTGNicaYWe16zh0ZH5aFZYPW4x8cAj0XdjZPUbzkyVZ6E4aibs58RNZf16m24g/0?wx_fmt=jpeg",
+                "https://mmbiz.qpic.cn/mmbiz_jpg/eStS46OsvuvsFFFeJv096GVic1e0Nv7cbjXg70W07lDPxYDvAciaYVXQwJEJd265D1KbCW5YzC1aO3ib28Sr0YVibQ/0?wx_fmt=jpeg",
+                "https://mmbiz.qpic.cn/mmbiz_jpg/Xr0l7Pz377hVOhDWhXOj1w6KB3jmMXEDtonc6xCS0veAejyHKNZJxS43aKeAamzRVgCd5b2v1xQSN1gESW0ZDw/0?wx_fmt=jpeg"
+            ]
+        },
+        {
+            "name": "🎨 艺术手绘·高级审美风",
+            "count": 3,
+            "coreVisual": "野兽派/抽象/自然极简手绘风格，高饱和互补配色，艺术格调突出",
+            "features": "笔触粗犷自由或极简几何图形，色彩大胆（蓝橙互补、粉紫渐变、满铺绿色）；传递文艺高级感或自然治愈感；在信息流中因独特的美学质感而脱颖而出，吸引注重审美的读者群体。适合职场心态、人生思考、品牌故事类内容。",
+            "covers": [
+                "https://mmbiz.qpic.cn/mmbiz_jpg/UwwOXFGRzCmSB0wUkpckcX20aAY8udaZIeOQsyqmMARxWoETOZQ5RnIbCtOH6p4xtbhAIw48WibtmxNI71h6BrQ/0?wx_fmt=jpeg",
+                "https://mmbiz.qpic.cn/mmbiz_jpg/osickG6kM9H1xdIMDIozt13PiaLp9n3Ly8RZNWxhTAEweroJr8qym2H5Ay9A8MUzibKCp7SkHkZbcIhnQhlflDeFw/0?wx_fmt=jpeg",
+                "https://mmbiz.qpic.cn/mmbiz_jpg/hE8U2X43icVhMPa3dTAEwk5BjHrtoIS4vjYziaTQ2zvS2WTr1tS71kQT516MH3YtjpelkZ1cPhvnVu8kwzxNicc2W1qOUlCcaB77Lw8F2UjUQ8/0?wx_fmt=jpeg"
+            ]
+        }
+    ],
+    "plans": [
+        {
+            "name": "电影叙事·打工人深夜觉醒",
+            "coreVisual": "框式构图+冷暖光影对比，职场人物背影或侧面剪影，营造'从暗处走向光明'的叙事悬念",
+            "case": {
+                "imageUrl": "https://mmbiz.qpic.cn/mmbiz_jpg/g5ibFtPpgAuK3crLCTV6nu1TsVpcOwkXM23jdyBFe7Vg4fORaS2z5rF86u4lxXLw7g7j0ibFQHiaBNZvMGNwTzSafE75u1AiaRBg7NqLQnDQiaCk/0?wx_fmt=jpeg",
+                "url": "https://mp.weixin.qq.com/s?__biz=MjM5NTAyODc2MA==&mid=2654956139&idx=1&sn=44ae834967dd631eb330831c2bf30551#rd",
+                "title": "越来越多90后，拒绝升职加薪",
+                "author": "视觉志",
+                "reads": "10.0w"
+            },
+            "prompt": "2.35:1横版比例，900x383像素。参考封面：https://mmbiz.qpic.cn/mmbiz_jpg/g5ibFtPpgAuK3crLCTV6nu1TsVpcOwkXM23jdyBFe7Vg4fORaS2z5rF86u4lxXLw7g7j0ibFQHiaBNZvMGNwTzSafE75u1AiaRBg7NqLQnDQiaCk/0?wx_fmt=jpeg 。电影剧照风格。画面采用框式构图：两侧是打开的办公室玻璃门作为天然画框，前景光线较暗（深灰蓝色调），透过门缝看到中景一位穿着深色职业装的年轻女性背影，正走向远处明亮的开放式办公空间，背景是温暖的金色晨光洒落在整齐排列的工位上。画面冷暖对比强烈，前景暗冷、远景暖亮，营造'从迷茫走向觉醒'的叙事张力。纵深感强，前景/中景/远景层次分明。整体风格偏纪实电影感，略带胶片颗粒质感。"
+        },
+        {
+            "name": "夸张卡通·打工人发疯日记",
+            "coreVisual": "扁平Q版卡通人物居中+大字报热梗文案+互补撞色背景，夸张表情制造情绪共鸣",
+            "case": {
+                "imageUrl": "https://mmbiz.qpic.cn/mmbiz_jpg/EwZI82u0uvHhOavicLicIia436llrzOlVoWJSFkb6RhkrnPmdLuH3Xm0r9q2QrM3elXTbXpfBsYibbWmWlOsy12xEg/0?wx_fmt=jpeg",
+                "url": "http://mp.weixin.qq.com/s?__biz=MzI3MzM2ODMzOQ==&mid=2247502660&idx=1&sn=d4a92191ba51ecdafafd9340b40cf32c#rd",
+                "title": "00后打工人：笑一下蒜了",
+                "author": "西二旗生活指北",
+                "reads": "10.0w"
+            },
+            "prompt": "2.35:1横版比例，900x383像素。参考封面：https://mmbiz.qpic.cn/mmbiz_jpg/EwZI82u0uvHhOavicLicIia436llrzOlVoWJSFkb6RhkrnPmdLuH3Xm0r9q2QrM3elXTbXpfBsYibbWmWlOsy12xEg/0?wx_fmt=jpeg 。扁平卡通插画风格。画面中心是一个穿着浅蓝色衬衫、戴着工牌的Q版打工人，表情极度夸张——嘴巴张到最大、眼睛瞪圆、额头冒汗，双手各拿着一叠文件和一个冒烟的咖啡杯。背景是明亮的暖黄色，四周有放射状黑色速度线从中心向四周扩散，增强动感和紧张感。画面上方和下方各有巨大的黑色粗体文字（白色描边），内容为打工人热梗语录。整体色彩高饱和、线条粗犷简洁，典型的网络条漫/表情包风格，在手机小屏幕上极其醒目。"
+        },
+        {
+            "name": "大字极简·升职加薪信号弹",
+            "coreVisual": "核心关键词3D立体大字居中+蓝色商务底色+微立体图标装饰，极简留白一眼锁定主题",
+            "case": {
+                "imageUrl": "https://mmbiz.qpic.cn/sz_mmbiz_jpg/Ssn7iaB9At5CJfhXicAGy65m7I0pTBBfvsHQPHk2roWuibknvq4XhlWmcMoOdMpia6GmGQo5xQLbFkaTOCGb4ALWdQ/0?wx_fmt=jpeg",
+                "url": "http://mp.weixin.qq.com/s?__biz=MzI4NzY2NDA5Ng==&mid=2247490123&idx=1&sn=60c1c0c10b93575c98e3bf5bdce7d0da&chksm=ea92a4184101d7955872789166e0a24bd1f2c6cbed6229677e6a6a80860ae9948503e858710b#rd",
+                "title": "国央企：「顺我者升职加薪，逆我者绩效考核」",
+                "author": "身在国企心在江湖",
+                "reads": "6.0w"
+            },
+            "prompt": "2.35:1横版比例，900x383像素。参考封面：https://mmbiz.qpic.cn/sz_mmbiz_jpg/Ssn7iaB9At5CJfhXicAGy65m7I0pTBBfvsHQPHk2roWuibknvq4XhlWmcMoOdMpia6GmGQo5xQLbFkaTOCGb4ALWdQ/0?wx_fmt=jpeg 。扁平微立体商务风格。画面中央放置巨大的3D立体汉字'升职加薪'（或核心关键词），字体圆润饱满，采用白色到浅蓝色的渐变色并带有轻微投影，占据画面约40%的面积。背景为纯净的中蓝色（从中心向四周微微加深），四周点缀几何点阵、细线条和小型扁平图标（如上升箭头、公文包、星星等装饰元素）。左上角有模拟窗口控制按钮的小圆点（- □ x）增加科技感。整体配色以蓝色系为主，干净专业，视觉冲击力强且认知成本极低。"
+        }
+    ]
+};
+// ====== 数据注入区域结束 ======
+
+(function() {
+    var d = __REPORT_DATA__;
+    if (!d.keyword) { document.getElementById('app').innerHTML = '<p style="text-align:center;padding:60px;color:#999">等待数据注入...</p>'; return; }
+
+    var html = '';
+
+    // 标题
+    html += '<h1 class="report-title">📊 爆款封面分析报告</h1>';
+
+    // 信息栏
+    html += '<div class="info-bar"><strong>关键词：</strong>' + esc(d.keyword) + ' | <strong>数据来源：</strong>公众号爆款雷达接口 | <strong>分析数量：</strong>' + d.analysisCount + '张封面</div>';
+
+    // 风格类型
+    for (var i = 0; i < d.styles.length; i++) {
+        var s = d.styles[i];
+        html += '<div class="style-card">';
+        html += '<div class="style-name">' + esc(s.name) + '</div>';
+        html += '<span class="style-freq">出现频次：' + s.count + '/' + d.analysisCount + '</span>';
+        html += '<div class="style-core">核心视觉：' + esc(s.coreVisual) + '</div>';
+        html += '<div class="style-features">关键特征：' + esc(s.features) + '</div>';
+        if (s.covers && s.covers.length > 0) {
+            html += '<div class="cover-grid">';
+            var maxCovers = Math.min(s.covers.length, 5);
+            for (var j = 0; j < maxCovers; j++) {
+                var url = esc(s.covers[j]);
+                html += '<a href="' + url + '" target="_blank"><img src="' + url + '" alt="封面示例"></a>';
+            }
+            html += '</div>';
+        }
+        html += '</div>';
+    }
+
+    // 分隔线
+    html += '<hr class="divider">';
+    html += '<h1 class="report-title">🎯 爆款封面设计方案</h1>';
+
+    // 设计方案
+    for (var i = 0; i < d.plans.length; i++) {
+        var p = d.plans[i];
+        var n = i + 1;
+        html += '<div class="plan-card">';
+        html += '<h2>方案' + n + '：' + esc(p.name) + '</h2>';
+        html += '<div class="plan-core">核心视觉：' + esc(p.coreVisual) + '</div>';
+
+        // 案例参考
+        html += '<h3>案例参考</h3>';
+        html += '<div class="case-ref">';
+        html += '<a href="' + esc(p.case.imageUrl) + '" target="_blank" class="cover-wrap"><img src="' + esc(p.case.imageUrl) + '" alt="封面图"></a>';
+        html += '<div class="info">';
+        html += '<div class="title"><a href="' + esc(p.case.url) + '" target="_blank">' + esc(p.case.title) + '</a></div>';
+        html += '<div class="author">作者：' + esc(p.case.author) + '</div>';
+        html += '<span class="reads">阅读：' + esc(p.case.reads) + '</span>';
+        html += '</div></div>';
+
+        // 生图提示词
+        html += '<h3>生图提示词</h3>';
+        html += '<div class="prompt-box">';
+        html += '<div class="label">公众号封面图</div>';
+        html += '<div class="content">' + esc(p.prompt) + '</div>';
+        html += '</div>';
+
+        html += '</div>';
+    }
+
+    // 方案选择区域
+    html += '<hr class="divider">';
+    html += '<div class="select-area">';
+    html += '<h2>🎯 请选择您想要的封面设计方案</h2>';
+    html += '<div class="options">';
+    var labels = ['一', '二', '三'];
+    for (var i = 0; i < d.plans.length; i++) {
+        html += '<div class="option"><strong>方案' + labels[i] + '：</strong>' + esc(d.plans[i].name) + ' - ' + esc(d.plans[i].coreVisual) + '</div>';
+    }
+    html += '<div class="hint">';
+    html += '<strong>💡 请选择：</strong><br>';
+    html += 'A. 回复"方案1"、"方案2"或"方案3"直接选择方案<br>';
+    html += 'B. 如果您有产品图、人物图或场景图想作为参考，可以和方案编号一起发送<br>';
+    html += '<span style="margin-left:24px">例如：直接发送图片 + "方案1"</span>';
+    html += '</div></div></div>';
+
+    // 实际生成封面结果
+    html += '<hr class="divider">';
+    html += '<div class="style-card">';
+    html += '<div class="style-name">实际生成封面结果</div>';
+    html += '<p class="summary">基于「职场成长、升职加薪、打工人」赛道的爆款规律，按方案顺序输出了三张适合公众号横版封面的视觉成品。</p>';
+    html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:18px;margin-top:18px;">';
+    html += '<figure style="margin:0;background:#fff;border:1px solid #e8e8e8;border-radius:12px;overflow:hidden;box-shadow:0 8px 24px rgba(0,0,0,0.08);"><img src="{{asset_url:workplace_cover_1}}" alt="职场成长方案一封面" style="display:block;width:100%;height:auto;"><figcaption style="padding:12px 14px;font-size:14px;color:#555;">方案一：电影感职场独白</figcaption></figure>';
+    html += '<figure style="margin:0;background:#fff;border:1px solid #e8e8e8;border-radius:12px;overflow:hidden;box-shadow:0 8px 24px rgba(0,0,0,0.08);"><img src="{{asset_url:worker_meme}}" alt="职场成长方案二封面" style="display:block;width:100%;height:auto;"><figcaption style="padding:12px 14px;font-size:14px;color:#555;">方案二：卡通热梗打工人</figcaption></figure>';
+    html += '<figure style="margin:0;background:#fff;border:1px solid #e8e8e8;border-radius:12px;overflow:hidden;box-shadow:0 8px 24px rgba(0,0,0,0.08);"><img src="{{asset_url:worker_3d}}" alt="职场成长方案三封面" style="display:block;width:100%;height:auto;"><figcaption style="padding:12px 14px;font-size:14px;color:#555;">方案三：观点大字视觉冲击</figcaption></figure>';
+    html += '</div></div>';
+
+    document.title = '爆款封面分析报告 - ' + d.keyword + '主题';
+    document.getElementById('app').innerHTML = html;
+
+    function esc(s) { if (!s) return ''; return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+})();
+</script>
+</body>
+</html>

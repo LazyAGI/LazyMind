@@ -2,6 +2,7 @@ package capability
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -16,6 +17,29 @@ type fakePorts struct {
 	content           SkillContent
 	document          GetKnowledgeDocumentResult
 	searchResult      SearchKnowledgeResult
+	cloudGetInput     GetCloudDocumentInput
+}
+
+func (f *fakePorts) ListCloudDocuments(_ context.Context, call InvocationContext, _ CloudDocumentListQuery) (CloudDocumentListPage, error) {
+	f.call = call
+	return CloudDocumentListPage{}, nil
+}
+func (f *fakePorts) GetCloudDocument(_ context.Context, call InvocationContext, input GetCloudDocumentInput) (GetCloudDocumentResult, error) {
+	f.call, f.cloudGetInput = call, input
+	documents := []CloudDocumentMetadata{{ID: "online-1"}, {ID: "online-2"}}
+	next := "provider-next"
+	if input.ProviderCursor != "" {
+		documents = []CloudDocumentMetadata{{ID: "online-3"}}
+		next = ""
+	}
+	return GetCloudDocumentResult{
+		Documents:     documents,
+		DocumentsPage: &CursorPageInfo{ProviderCursor: next},
+	}, nil
+}
+func (f *fakePorts) SearchCloudDocuments(_ context.Context, call InvocationContext, _ SearchCloudDocumentsInput) (SearchCloudDocumentsResult, error) {
+	f.call = call
+	return SearchCloudDocumentsResult{}, nil
 }
 
 func (f *fakePorts) ListSkills(_ context.Context, call InvocationContext, query SkillListQuery) (SkillListPage, error) {
@@ -64,10 +88,11 @@ func (f *fakePorts) SearchKnowledge(_ context.Context, call InvocationContext, i
 func TestServiceRequiresEveryPublishedCapability(t *testing.T) {
 	ports := &fakePorts{}
 	for name, deps := range map[string]Dependencies{
-		"skills":    {Knowledge: ports, Documents: ports, Search: ports},
-		"knowledge": {Skills: ports, Documents: ports, Search: ports},
-		"documents": {Skills: ports, Knowledge: ports, Search: ports},
-		"search":    {Skills: ports, Knowledge: ports, Documents: ports},
+		"skills":    {Knowledge: ports, Documents: ports, Search: ports, Cloud: ports},
+		"knowledge": {Skills: ports, Documents: ports, Search: ports, Cloud: ports},
+		"documents": {Skills: ports, Knowledge: ports, Search: ports, Cloud: ports},
+		"search":    {Skills: ports, Knowledge: ports, Documents: ports, Cloud: ports},
+		"cloud":     {Skills: ports, Knowledge: ports, Documents: ports, Search: ports},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := NewService(deps); err == nil {
@@ -109,6 +134,55 @@ func TestListSkillsUsesBoundCursorAndPublishedFilter(t *testing.T) {
 		Keyword: "different", Tags: []string{"a", "z"}, Page: PageRequest{PageSize: 2, PageToken: first.Page.NextPageToken},
 	})
 	assertCode(t, err, InvalidArgument)
+}
+
+func TestGetCloudDocumentUsesOpaqueBoundDocumentCursor(t *testing.T) {
+	ports := &fakePorts{}
+	service := mustService(t, ports)
+	call := authorizedCall()
+
+	first, err := service.GetCloudDocument(context.Background(), call, GetCloudDocumentInput{
+		SourceID: "source-1", IncludeDocuments: true,
+		DocumentsPage: PageRequest{PageSize: 2},
+	})
+	if err != nil || first.DocumentsPage == nil || first.DocumentsPage.NextPageToken == "" {
+		t.Fatalf("first cloud document page=%#v err=%v", first, err)
+	}
+	second, err := service.GetCloudDocument(context.Background(), call, GetCloudDocumentInput{
+		SourceID: "source-1", IncludeDocuments: true,
+		DocumentsPage: PageRequest{PageSize: 2, PageToken: first.DocumentsPage.NextPageToken},
+	})
+	if err != nil || ports.cloudGetInput.ProviderCursor != "provider-next" || len(second.Documents) != 1 || second.DocumentsPage.NextPageToken != "" {
+		t.Fatalf("second cloud document page=%#v input=%#v err=%v", second, ports.cloudGetInput, err)
+	}
+	_, err = service.GetCloudDocument(context.Background(), call, GetCloudDocumentInput{
+		SourceID: "different", IncludeDocuments: true,
+		DocumentsPage: PageRequest{PageSize: 2, PageToken: first.DocumentsPage.NextPageToken},
+	})
+	assertCode(t, err, InvalidArgument)
+	_, err = service.GetCloudDocument(context.Background(), call, GetCloudDocumentInput{
+		SourceID: "source-1", IncludeDocuments: true,
+		DocumentsPage: PageRequest{PageSize: 2, PageToken: strings.Repeat("x", maxPageTokenBytes+1)},
+	})
+	assertCode(t, err, InvalidArgument)
+}
+
+func TestCloudCursorPageOmitsUnknownTotalAndZeroTimes(t *testing.T) {
+	value := struct {
+		Source CloudDocumentSource        `json:"source"`
+		Search SearchCloudDocumentsResult `json:"search"`
+	}{
+		Source: CloudDocumentSource{ID: "source-1"},
+		Search: SearchCloudDocumentsResult{Page: CursorPageInfo{NextPageToken: "next"}},
+	}
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(raw)
+	if strings.Contains(text, `"total":0`) || strings.Contains(text, "0001-01-01") {
+		t.Fatalf("unknown total or zero time leaked: %s", text)
+	}
 }
 
 func TestGetSkillReturnsOnlyPublishedMatchingRevisionContent(t *testing.T) {
@@ -186,7 +260,7 @@ func TestServiceRejectsUntrustedOrUnderprivilegedCaller(t *testing.T) {
 
 func mustService(t *testing.T, ports *fakePorts) *Service {
 	t.Helper()
-	service, err := NewService(Dependencies{Skills: ports, Knowledge: ports, Documents: ports, Search: ports})
+	service, err := NewService(Dependencies{Skills: ports, Knowledge: ports, Documents: ports, Search: ports, Cloud: ports})
 	if err != nil {
 		t.Fatal(err)
 	}

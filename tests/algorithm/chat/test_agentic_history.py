@@ -1,3 +1,5 @@
+from lazyllm.tools.agent.base import TOOL_OBSERVATION_KEY
+
 from lazymind.chat.service.component import normalize_history_for_agent
 
 
@@ -74,9 +76,31 @@ def test_normalize_history_keeps_kb_tool_calls_and_sanitizes_results():
             'tool_call_id': 'call-1',
             'name': 'kb_search',
             'content': '{"items":[{"text":"old "}]}',
+            TOOL_OBSERVATION_KEY: {
+                'version': 1,
+                'ok': None,
+                'value': {'items': [{'text': 'old '}]},
+                'error': '',
+            },
         },
         {'role': 'assistant', 'content': '最终答案。', 'reasoning_content': ''},
     ]
+
+
+def test_normalize_history_skips_observation_for_string_tool_results():
+    history = [{
+        'role': 'assistant',
+        'content': (
+            '<tool_call>{"id":"call-1","name":"shell","arguments":{"command":"ls"}}</tool_call>'
+            '<tool_result>{"id":"call-1","name":"shell","result":"file.txt"}</tool_result>'
+        ),
+    }]
+
+    normalized = normalize_history_for_agent(history)
+
+    assert normalized[1]['role'] == 'tool'
+    assert normalized[1]['content'] == 'file.txt'
+    assert TOOL_OBSERVATION_KEY not in normalized[1]
 
 
 def test_normalize_history_drops_ephemeral_intentwrite_trace():

@@ -68,6 +68,24 @@ Never weaken required outputs, acceptance criteria, safety boundaries, or source
 revision linkage merely to silence a diagnostic. On version conflict, reread the
 latest draft/diagnostics and reconcile deliberately.
 
+When the source Skill explicitly requires a multi-page composite output, keep the
+page contract in the Workflow package rather than in framework prompts:
+
+- represent every page-aligned material as an ordered list slot;
+- require producers to publish matching `sort_order` positions across those slots;
+- retain `layout: composite`, a `composite_layout` that references every participating
+  slot, and `composite_tab_position` when page navigation is required;
+- declare full-page HTML with `ui.slots.<slot>.widgetType: html-slide`; never infer the
+  widget from a conventional slot name or by inspecting artifact content;
+- declare export behavior through `ui.tabs[].actions`, including the provider, input
+  slot mapping, formats, and `alignment: sort_order`;
+- keep non-HTML composites on their ordinary numbered thumbnail behavior.
+
+During repair, preserve one artifact per page and preserve alignment. Do not collapse
+multiple pages into one artifact or model page-aligned materials as unrelated columns.
+Compiler diagnostics for widget compatibility, action mappings, and ordered alignment
+are authoritative.
+
 ## 4. Publish
 
 Call `publish_workflow()` only when strict diagnostics return `valid: true`.

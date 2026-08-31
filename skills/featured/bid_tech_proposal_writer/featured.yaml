@@ -1,0 +1,74 @@
+schema_version: 2
+id: bid_tech_proposal_writer
+type: workflow
+version: 1.1.0
+status: published
+default_locale: zh-CN
+provider: LazyMind
+
+workflow:
+  workflow_ref: builtin:bid_tech_proposal_writer
+
+placement:
+  home: true
+  gallery: true
+  order: 21
+
+classification:
+  category: 内容创作
+  tags:
+    - 投标文件
+    - 技术方案
+    - 合规检查
+    - Word 导出
+
+assets:
+  cover:
+    file: assets/cover.png
+    role: cover
+  bid_demo:
+    file: assets/bid-proposal-demo.html
+    role: result
+
+presentation:
+  card:
+    title: 投标技术方案编写
+    description: 以园区智能运维平台为例，展示招标解析、要求追溯、大纲正文、方案配图与 Word 交付
+    output_type: document
+    output_label: 交互式投标案例
+    cover_asset: cover
+    result_summary: 查看九阶段真实产物、11 张内嵌配图、最终技术方案和逐项 PASS 校验
+  detail:
+    title: 从最小招标文件到完整技术方案
+    description: 以园区智能运维平台低成本案例完整呈现九阶段链路：17 项技术要求、12 项废标约束、两版大纲与正文、1 张架构图、10 张效果图、DOCX 交付和最终校验；默认打开第 8 步方案交付。
+    attachment_hint: 中文招标文件（推荐 DOCX 或 PDF，也支持 TXT、Markdown、HTML、RTF）
+
+tasks:
+  - id: write-technical-bid
+    selector:
+      title: 园区智能运维技术方案
+      description: 根据最小招标文件完成约千字、全要求覆盖的九阶段投标方案
+      output_label: 交互式技术方案
+    launch:
+      prompt_short: "请使用工作流：投标技术方案编写。请使用附件 bid_minimal_smoke_test.docx 生成投标技术方案，输出 DOCX，目标总字数为 1000 个中文字符，使用默认 DOCX 样式模板。"
+      prompt: "请使用工作流：投标技术方案编写。请使用附件 bid_minimal_smoke_test.docx 生成投标技术方案，输出 DOCX，目标总字数为 1000 个中文字符，使用默认 DOCX 样式模板。"
+    replay:
+      steps:
+        - title: 解析招标文件
+          description: 保留标题、编号、表格和来源元数据并规范化生成参数
+        - title: 提取要求与废标项
+          description: 建立 17 项技术要求 ID 池和 12 项实质性响应约束
+        - title: 检索参考资料
+          description: 围绕招标要求从已选知识库补充带来源证据
+        - title: 审批大纲与正文
+          description: 形成八章大纲和正文，两次审批均保留 V1/V2 产物
+        - title: 生成方案配图
+          description: 生成一张总体架构图和十张差异化功能效果图
+        - title: 导出并校验
+          description: 生成 Markdown 或 Word 正稿并检查覆盖、篇幅和文件完整性
+    result:
+      template: html_preview_v1
+      eyebrow: 投标技术方案案例
+      title: 园区智能运维平台投标技术方案
+      summary: 默认进入第 8 步方案交付，查看完整正文、DOCX、九阶段过程产物和 11 张内嵌配图。
+      html_asset: bid_demo

@@ -23,6 +23,7 @@ import (
 const (
 	defaultThreadPageSize        = 20
 	maxThreadPageSize            = 100
+	evoModelNotConfiguredCode    = 2000228
 	threadModelNotConfiguredCode = 2001300
 	evoModelNotAllowedCode       = 2001301
 )

@@ -2,7 +2,10 @@
 
 package main
 
-import "testing"
+import (
+	"os"
+	"testing"
+)
 
 func TestSplitProcCmdlinePreservesArgumentBoundaries(t *testing.T) {
 	got := splitProcCmdline([]byte("python\x00-m\x00module with spaces\x00--url\x00http://127.0.0.1:18000/a//b\x00"))
@@ -14,5 +17,19 @@ func TestSplitProcCmdlinePreservesArgumentBoundaries(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("arg %d = %q, want %q: %#v", i, got[i], want[i], got)
 		}
+	}
+}
+
+func TestDedupeProcessRecordsExcludesCurrentProcessGroup(t *testing.T) {
+	paths := RuntimePaths{RepoRoot: "/repo", RuntimeRoot: "/runtime"}
+	records := dedupeProcessRecords([]LocalProcessRecord{{
+		Service:     "local-runtime-orphan",
+		PID:         os.Getppid(),
+		PGID:        processGroupID(os.Getpid()),
+		RepoRoot:    paths.RepoRoot,
+		RuntimeRoot: paths.RuntimeRoot,
+	}}, paths)
+	if len(records) != 0 {
+		t.Fatalf("current process group was retained: %#v", records)
 	}
 }

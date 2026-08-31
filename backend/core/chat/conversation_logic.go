@@ -22,6 +22,7 @@ import (
 	"lazymind/core/state"
 	"lazymind/core/store"
 	"lazymind/core/subagent"
+	"lazymind/core/taskcenter"
 	"lazymind/core/workflow"
 )
 
@@ -207,15 +208,27 @@ func conversationIDFromName(name string) string {
 }
 
 // ensureConversation textCreatetextUsertextConversation，textConversation、text history text seq、error
-func ensureConversation(ctx context.Context, db *gorm.DB, convID, displayName string, searchConfig json.RawMessage, models json.RawMessage, userID, userName string, conversationSettings map[string]any) (*orm.Conversation, int, error) {
+func ensureConversation(ctx context.Context, db *gorm.DB, convID, displayName string, searchConfig json.RawMessage, models json.RawMessage, userID, userName string, runInBackground bool, requestedThinkingDepth string, conversationSettings map[string]any) (*orm.Conversation, int, error) {
 	now := time.Now()
 	var c orm.Conversation
 	err := db.Where("id = ? AND create_user_id = ?", convID, userID).First(&c).Error
 	if err == nil {
+		if c.DeletedAt != nil {
+			return nil, 0, errConversationInTrash
+		}
 		var count int64
 		db.Model(&orm.ChatHistory{}).Where("conversation_id = ?", convID).Count(&count)
 
 		updates := map[string]any{}
+		if c.ArchivedAt != nil {
+			updates["archived_at"] = nil
+			updates["archive_folder_id"] = nil
+			c.ArchivedAt = nil
+			c.ArchiveFolderID = nil
+			if err := taskcenter.RestoreTasksForConversations(ctx, db, userID, []string{convID}, taskcenter.ArchivedReasonConversationArchive, now.UTC()); err != nil {
+				return nil, 0, err
+			}
+		}
 		if len(searchConfig) > 0 && (len(c.SearchConfig) == 0 || string(c.SearchConfig) == "{}") {
 			updates["search_config"] = searchConfig
 		}
@@ -248,15 +261,27 @@ func ensureConversation(ctx context.Context, db *gorm.DB, convID, displayName st
 			UpdatedAt:      now,
 		},
 	}
+	if ephemeral, _ := conversationSettings["ephemeral"].(bool); ephemeral {
+		c.IsEphemeral = true
+		if persistent, _ := conversationSettings["persistent_ephemeral"].(bool); !persistent {
+			expiresAt := now.Add(24 * time.Hour)
+			c.EphemeralExpiresAt = &expiresAt
+		}
+		c.SourceType, _ = conversationSettings["source_type"].(string)
+		c.SourceDatasetID, _ = conversationSettings["source_dataset_id"].(string)
+		c.SourceDocumentID, _ = conversationSettings["source_document_id"].(string)
+		c.SourceDisplayName, _ = conversationSettings["source_display_name"].(string)
+	}
 	// Resolve plugin settings for the new conversation.
 	// Priority: caller-supplied conversation settings > user_chat_settings defaults.
 	// All fields are written once so the conversation owns a stable execution
 	// policy without per-request fallback queries.
-	settings := resolveInitialConversationSettings(ctx, db, userID, conversationSettings)
+	settings := resolveInitialConversationSettings(ctx, db, userID, runInBackground, requestedThinkingDepth, conversationSettings)
 	c.EnableWorkflow = &settings.enableWorkflow
 	c.WorkflowMode = &settings.workflowMode
 	c.EnableSubagent = &settings.enableSubagent
 	c.ChatExecutor = settings.chatExecutor
+	c.ThinkingDepth = settings.thinkingDepth
 	if err := db.Create(&c).Error; err != nil {
 		return nil, 0, err
 	}
@@ -268,28 +293,33 @@ type resolvedConversationSettings struct {
 	workflowMode   string
 	enableSubagent bool
 	chatExecutor   string
+	thinkingDepth  string
 }
 
 // resolveInitialConversationSettings merges caller-supplied overrides with the user's
 // global defaults from user_chat_settings. Fields present in conversationSettings take
 // priority; missing fields fall back to the DB defaults (or hardcoded values if
 // the user has no row yet).
-func resolveInitialConversationSettings(ctx context.Context, db *gorm.DB, userID string, conversationSettings map[string]any) resolvedConversationSettings {
-	// Start from hardcoded fallbacks (matches user_chat_settings DB defaults).
-	out := resolvedConversationSettings{
-		enableWorkflow: true,
-		workflowMode:   "dynamic",
-		enableSubagent: true,
-		chatExecutor:   ChatExecutorLazyMind,
+func resolveInitialConversationSettings(ctx context.Context, db *gorm.DB, userID string, runInBackground bool, requestedThinkingDepth string, conversationSettings map[string]any) resolvedConversationSettings {
+	legacy := defaultUserChatSettings(userID)
+	entry := quickQuestionDefaultsFromLegacy(legacy)
+	if runInBackground {
+		entry = newTaskDefaultsFromLegacy(legacy)
 	}
-	// Load user-level defaults.
 	if db != nil {
-		var s orm.UserChatSettings
-		if err := db.WithContext(ctx).Where("user_id = ?", userID).First(&s).Error; err == nil {
-			out.enableWorkflow = s.EnableWorkflow
-			out.workflowMode = s.WorkflowMode
-			out.enableSubagent = s.EnableSubagent
+		if stored, err := entryDefaultsForRequest(ctx, db, userID, runInBackground); err == nil {
+			entry = stored
 		}
+	}
+	out := resolvedConversationSettings{
+		enableWorkflow: entry.ConversationSettings.EnableWorkflow,
+		workflowMode:   entry.ConversationSettings.WorkflowMode,
+		enableSubagent: entry.ConversationSettings.EnableSubagent,
+		chatExecutor:   entry.ConversationSettings.ChatExecutor,
+		thinkingDepth:  entry.ThinkingDepth,
+	}
+	if depth, valid := normalizeThinkingDepth(requestedThinkingDepth); valid {
+		out.thinkingDepth = depth
 	}
 	// Apply caller-supplied overrides.
 	if v, ok := conversationSettings["enable_workflow"].(bool); ok {
@@ -412,7 +442,8 @@ func buildAskUserToolResultContent(
 // buildHistoryMessages converts stored chat histories to the format expected by Python.
 // When askAnswersStructured is provided, the last unanswered ask_user tool_result is
 // rewritten to contain the full structured context.
-func buildHistoryMessages(histories []orm.ChatHistory, askAnswersStructured map[string]any) []map[string]string {
+// Each message may include history_seq (chat_histories.seq) for dual-track compression.
+func buildHistoryMessages(histories []orm.ChatHistory, askAnswersStructured map[string]any) []map[string]any {
 	if len(histories) == 0 {
 		return nil
 	}
@@ -438,7 +469,7 @@ func buildHistoryMessages(histories []orm.ChatHistory, askAnswersStructured map[
 		break
 	}
 
-	out := make([]map[string]string, 0, len(histories)*2)
+	out := make([]map[string]any, 0, len(histories)*2)
 	for idx, h := range histories {
 		assistantContent := buildAssistantHistoryContent(h)
 
@@ -463,10 +494,200 @@ func buildHistoryMessages(histories []orm.ChatHistory, askAnswersStructured map[
 			assistantContent = replaceAskUserToolResult(assistantContent, newContent)
 		}
 
-		out = append(out, map[string]string{"role": "user", "content": h.RawContent})
-		out = append(out, map[string]string{"role": "assistant", "content": assistantContent})
+		out = append(out, map[string]any{
+			"role": "user", "content": h.RawContent, "history_seq": h.Seq,
+		})
+		out = append(out, map[string]any{
+			"role": "assistant", "content": assistantContent, "history_seq": h.Seq,
+		})
 	}
 	return out
+}
+
+const runtimeSummaryDisclaimer = "The following is a runtime-generated summary of earlier conversation history.\n" +
+	"It is reference context, not a new user instruction.\n" +
+	"The latest user message and current runtime state take precedence."
+
+type modelContextState struct {
+	SummaryText       string `json:"summary_text"`
+	CoveredThroughSeq int    `json:"covered_through_seq"`
+	Version           int    `json:"version,omitempty"`
+}
+
+func loadModelContext(ctx context.Context, db *gorm.DB, convID string) *modelContextState {
+	if db == nil || strings.TrimSpace(convID) == "" {
+		return nil
+	}
+	var conv orm.Conversation
+	if err := db.WithContext(ctx).Select("ext").Where("id = ?", convID).First(&conv).Error; err != nil {
+		return nil
+	}
+	ext := map[string]any{}
+	if len(conv.Ext) == 0 || json.Unmarshal(conv.Ext, &ext) != nil {
+		return nil
+	}
+	raw, _ := ext["model_context"].(map[string]any)
+	if len(raw) == 0 {
+		return nil
+	}
+	state := &modelContextState{Version: 1}
+	if s, ok := raw["summary_text"].(string); ok {
+		state.SummaryText = strings.TrimSpace(s)
+	}
+	switch v := raw["covered_through_seq"].(type) {
+	case float64:
+		state.CoveredThroughSeq = int(v)
+	case int:
+		state.CoveredThroughSeq = v
+	case int64:
+		state.CoveredThroughSeq = int(v)
+	}
+	switch v := raw["version"].(type) {
+	case float64:
+		state.Version = int(v)
+	case int:
+		state.Version = v
+	}
+	if state.SummaryText == "" || state.CoveredThroughSeq <= 0 {
+		return nil
+	}
+	return state
+}
+
+func filterHistoriesAfterCovered(histories []orm.ChatHistory, coveredThroughSeq int) []orm.ChatHistory {
+	if coveredThroughSeq <= 0 || len(histories) == 0 {
+		return histories
+	}
+	out := make([]orm.ChatHistory, 0, len(histories))
+	for _, h := range histories {
+		if h.Seq > coveredThroughSeq {
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
+func normalizeModelContextCoverage(
+	histories []orm.ChatHistory,
+	modelCtx *modelContextState,
+) *modelContextState {
+	if modelCtx == nil || strings.TrimSpace(modelCtx.SummaryText) == "" || len(histories) == 0 {
+		return modelCtx
+	}
+	maxSeq := histories[len(histories)-1].Seq
+	if modelCtx.CoveredThroughSeq <= maxSeq {
+		return modelCtx
+	}
+	return nil
+}
+
+func buildModelHistoryMessages(
+	histories []orm.ChatHistory,
+	askAnswersStructured map[string]any,
+	modelCtx *modelContextState,
+) []map[string]any {
+	modelCtx = normalizeModelContextCoverage(histories, modelCtx)
+	tail := histories
+	if modelCtx != nil {
+		tail = filterHistoriesAfterCovered(histories, modelCtx.CoveredThroughSeq)
+	}
+	msgs := buildHistoryMessages(tail, askAnswersStructured)
+	if modelCtx == nil || strings.TrimSpace(modelCtx.SummaryText) == "" {
+		return msgs
+	}
+	summaryMsg := map[string]any{
+		"role":    "user",
+		"content": runtimeSummaryDisclaimer + "\n\n" + strings.TrimSpace(modelCtx.SummaryText),
+	}
+	out := make([]map[string]any, 0, len(msgs)+1)
+	out = append(out, summaryMsg)
+	out = append(out, msgs...)
+	return out
+}
+
+func clearModelContext(ctx context.Context, db *gorm.DB, convID string) error {
+	if db == nil || strings.TrimSpace(convID) == "" {
+		return nil
+	}
+	var conv orm.Conversation
+	if err := db.WithContext(ctx).Select("id", "ext").Where("id = ?", convID).First(&conv).Error; err != nil {
+		return err
+	}
+	ext := map[string]any{}
+	if len(conv.Ext) == 0 {
+		return nil
+	}
+	if err := json.Unmarshal(conv.Ext, &ext); err != nil {
+		return err
+	}
+	if _, ok := ext["model_context"]; !ok {
+		return nil
+	}
+	delete(ext, "model_context")
+	raw, err := json.Marshal(ext)
+	if err != nil {
+		return err
+	}
+	return db.WithContext(ctx).Model(&orm.Conversation{}).Where("id = ?", convID).Update("ext", raw).Error
+}
+
+// handleModelContextUpdated atomically writes summary_text + covered_through_seq.
+// Rejects empty summary, non-positive covered, stale/equal covered watermarks,
+// or regressions below the current covered seq.
+func handleModelContextUpdated(
+	ctx context.Context,
+	db *gorm.DB,
+	convID string,
+	ev *ModelContextUpdatedEvent,
+) {
+	if db == nil || ev == nil || strings.TrimSpace(convID) == "" {
+		return
+	}
+	summary := strings.TrimSpace(ev.SummaryText)
+	if summary == "" || ev.CoveredThroughSeq <= 0 {
+		return
+	}
+	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var conv orm.Conversation
+		if err := tx.Select("id", "ext").Where("id = ?", convID).First(&conv).Error; err != nil {
+			return err
+		}
+		ext := map[string]any{}
+		if len(conv.Ext) > 0 {
+			_ = json.Unmarshal(conv.Ext, &ext)
+		}
+		prevCovered := 0
+		if prev, ok := ext["model_context"].(map[string]any); ok {
+			switch v := prev["covered_through_seq"].(type) {
+			case float64:
+				prevCovered = int(v)
+			case int:
+				prevCovered = v
+			case int64:
+				prevCovered = int(v)
+			}
+		}
+		if ev.CoveredThroughSeq <= prevCovered {
+			return nil
+		}
+		version := ev.Version
+		if version <= 0 {
+			version = 1
+		}
+		ext["model_context"] = map[string]any{
+			"summary_text":        summary,
+			"covered_through_seq": ev.CoveredThroughSeq,
+			"version":             version,
+		}
+		raw, err := json.Marshal(ext)
+		if err != nil {
+			return err
+		}
+		return tx.Model(&orm.Conversation{}).Where("id = ?", convID).Update("ext", raw).Error
+	})
+	if err != nil {
+		fmt.Printf("[Core] [MODEL_CONTEXT_UPDATE_FAILED] conv=%s err=%v\n", convID, err)
+	}
 }
 
 var askUserToolResultPattern = regexp.MustCompile(`(?s)(<tool_result\b[^>]*>)Question sent to user \(ask_id=[^)]+\)\.(</tool_result>)`)
@@ -584,6 +805,9 @@ func buildChatHistoryExt(raw map[string]any, query string) json.RawMessage {
 	ext := map[string]any{"input": input}
 	if mentions, ok := raw["mentions"].([]any); ok && len(mentions) > 0 {
 		ext["mentions"] = mentions
+	}
+	if documentContext, ok := raw["document_context"].(map[string]any); ok && len(documentContext) > 0 {
+		ext["document_context"] = documentContext
 	}
 	b, err := json.Marshal(ext)
 	if err != nil {
@@ -964,24 +1188,32 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 	}
 	currentFilePaths := filePathsForUpstreamChat(raw)
 	filesMap := filesPerTurnMap(histories, currentFilePaths, currentSeq)
+	modelCtx := loadModelContext(ctx, db, convID)
 	body := map[string]any{
 		"query":            query,
 		"user_query":       query,
 		"session_id":       sessionID,
 		"conversation_id":  convID,
-		"history":          buildHistoryMessages(histories, askAnswersStructuredFromRaw(raw)),
+		"history":          buildModelHistoryMessages(histories, askAnswersStructuredFromRaw(raw), modelCtx),
 		"filters":          raw["filters"],
 		"files":            filesMap,
 		"current_turn_seq": currentSeq,
 		"databases":        raw["databases"],
 		"debug":            raw["debug"],
 		"reasoning":        resolveReasoning(raw),
-		"thinking_depth":   resolveThinkingDepth(raw),
+		"thinking_depth":   resolveThinkingDepth(ctx, db, convID, userID, raw),
 		"priority":         raw["priority"],
 		"use_memory":       useMemory,
 		"user_id":          strings.TrimSpace(userID),
 		"mode":             mode,
 		"intent_context":   loadConversationIntentContext(ctx, db, convID),
+	}
+	if modelCtx != nil {
+		body["model_context"] = map[string]any{
+			"summary_text":        modelCtx.SummaryText,
+			"covered_through_seq": modelCtx.CoveredThroughSeq,
+			"version":             modelCtx.Version,
+		}
 	}
 	requestDisabledTools := stringSliceFromAny(raw["disabled_tools"])
 	if len(requestDisabledTools) > 0 {
@@ -1039,7 +1271,29 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 			}
 		}
 	}
+	applyDocumentContextFilter(body, raw)
 	return body
+}
+
+// applyDocumentContextFilter scopes preview chat retrieval to the document the
+// user is viewing. The context remains hidden from the visible user message,
+// while doc_id is forwarded as a normal retrieval filter.
+func applyDocumentContextFilter(body, raw map[string]any) {
+	context, _ := raw["document_context"].(map[string]any)
+	documentID, _ := context["document_id"].(string)
+	documentID = strings.TrimSpace(documentID)
+	if documentID == "" {
+		return
+	}
+
+	filters, _ := body["filters"].(map[string]any)
+	if filters == nil {
+		filters = map[string]any{}
+		body["filters"] = filters
+	}
+	if len(stringSlice(filters["doc_id"])) == 0 {
+		filters["doc_id"] = []string{documentID}
+	}
 }
 
 func promoteAgentRuntimeFlags(raw, body map[string]any) {
@@ -1147,12 +1401,35 @@ func resolveReasoning(raw map[string]any) bool {
 	return true
 }
 
-func resolveThinkingDepth(raw map[string]any) string {
+func resolveThinkingDepth(ctx context.Context, db *gorm.DB, convID, userID string, raw map[string]any) string {
 	if value, ok := raw["thinking_depth"].(string); ok {
-		switch strings.ToLower(strings.TrimSpace(value)) {
-		case "low", "medium", "high", "max":
-			return strings.ToLower(strings.TrimSpace(value))
+		if depth, valid := normalizeThinkingDepth(value); valid {
+			return depth
 		}
+	}
+	if db != nil && strings.TrimSpace(convID) != "" {
+		var snapshot struct {
+			ThinkingDepth string `gorm:"column:thinking_depth"`
+		}
+		query := db.WithContext(ctx).Model(&orm.Conversation{}).
+			Select("thinking_depth").Where("id = ?", strings.TrimSpace(convID))
+		if strings.TrimSpace(userID) != "" {
+			query = query.Where("create_user_id = ?", strings.TrimSpace(userID))
+		}
+		if err := query.Take(&snapshot).Error; err == nil {
+			if depth, valid := normalizeThinkingDepth(snapshot.ThinkingDepth); valid {
+				return depth
+			}
+		}
+	}
+	runInBackground, _ := raw["run_in_background"].(bool)
+	if db != nil {
+		if entry, err := entryDefaultsForRequest(ctx, db, userID, runInBackground); err == nil {
+			return entry.ThinkingDepth
+		}
+	}
+	if runInBackground {
+		return "high"
 	}
 	return "medium"
 }
@@ -1215,6 +1492,8 @@ func handleNonStreamChat(
 	historyExt json.RawMessage,
 ) {
 	historyExt = archiveRegeneratedTrafficAttempt(historyExt, target)
+	runID := newID("run_")
+	reqBody["run_id"] = runID
 	chunks, _, err := StreamChatUpstream(reqCtx, baseURL, reqBody)
 	if err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "chat service unavailable", err), http.StatusBadGateway)
@@ -1223,10 +1502,19 @@ func handleNonStreamChat(
 	var fullText, pendingThink, rawAnswer string
 	var toolCallTurns int
 	var sources []any
+	var runEvent *ChatRuntimeEvent
+	var runTerminal *RunTerminal
 	for chunk := range chunks {
 		if chunk.Err != nil {
 			common.ReplyErr(w, fmt.Sprintf("%s: %v", "chat service unavailable", chunk.Err), http.StatusBadGateway)
 			return
+		}
+		if chunk.RuntimeEvent != nil {
+			if chunk.RuntimeEvent.Type == RuntimeEventRunFinished {
+				runEvent = chunk.RuntimeEvent
+				runTerminal, _ = runEvent.Terminal()
+			}
+			continue
 		}
 		if next := nonNegativeToolCallTurns(chunk.ToolCallTurns); next > toolCallTurns {
 			toolCallTurns = next
@@ -1248,6 +1536,10 @@ func handleNonStreamChat(
 	if pendingThink != "" {
 		rawAnswer += "<think>" + pendingThink + "</think>"
 	}
+	if runTerminal == nil {
+		common.ReplyErr(w, "chat service returned no run terminal", http.StatusBadGateway)
+		return
+	}
 	rawAnswer = strings.TrimSpace(rawAnswer)
 	answer := strings.TrimSpace(stripToolTags(fullText))
 	if answer == "" {
@@ -1268,6 +1560,9 @@ func handleNonStreamChat(
 		RetrievalResult: retrievalResult,
 		Content:         query,
 		Result:          rawAnswer,
+		RunID:           runID,
+		RunStatus:       runTerminal.Status,
+		RunTerminal:     terminalJSON(runTerminal),
 		ToolCallTurns:   toolCallTurns,
 		FeedBack:        0,
 		Reason:          "",
@@ -1281,6 +1576,9 @@ func handleNonStreamChat(
 			"raw_content":      query,
 			"content":          query,
 			"result":           rawAnswer,
+			"run_id":           runID,
+			"run_status":       runTerminal.Status,
+			"run_terminal":     terminalJSON(runTerminal),
 			"tool_call_turns":  toolCallTurns,
 			"retrieval_result": retrievalResult,
 			"feed_back":        0,
@@ -1300,7 +1598,7 @@ func handleNonStreamChat(
 		}
 	}
 	if stateStore != nil {
-		_ = setChatStatus(reqCtx, stateStore, convID, historyID, "completed", answer)
+		_ = setChatRuntimeStatus(reqCtx, stateStore, convID, historyID, runTerminal.Status, answer, runID, runTerminal)
 	}
 	db.Model(&orm.Conversation{}).Where("id = ?", convID).Update("updated_at", now)
 	if !target.IsRegeneration {
@@ -1312,9 +1610,9 @@ func handleNonStreamChat(
 		"seq":             target.Seq,
 		"message":         answer,
 		"delta":           "",
-		"finish_reason":   "FINISH_REASON_STOP",
 		"history_id":      historyID,
 		"sources":         sources,
+		"runtime_event":   runEvent,
 	})
 }
 
@@ -1346,8 +1644,21 @@ func handleStreamChat(
 		historyID = newID("h_")
 	}
 	secondaryHistoryID := ""
+	primaryRunID, _ := reqBody["_external_run_id"].(string)
+	if primaryRunID == "" {
+		if requestKey, _ := reqBody["_external_request_key"].(string); requestKey != "" {
+			primaryRunID, _ = externalChatIdentity(requestKey)
+		}
+	}
+	if primaryRunID == "" {
+		primaryRunID = newID("run_")
+	}
+	reqBody["run_id"] = primaryRunID
+	secondaryRunID := ""
 	if dualReply {
 		secondaryHistoryID = newID("h_")
+		secondaryRunID = newID("run_")
+		reqBody["secondary_run_id"] = secondaryRunID
 	}
 	chatCtx, chatCancel := context.WithCancel(context.Background())
 	defer chatCancel()
@@ -1356,16 +1667,13 @@ func handleStreamChat(
 			_ = clearChatData(chatCtx, stateStore, convID, historyID)
 		}
 		_ = setChatInput(chatCtx, stateStore, convID, historyID, query, target.Seq, historyExt)
-		_ = setChatStatus(chatCtx, stateStore, convID, historyID, "generating", "")
+		_ = setChatRuntimeStatus(chatCtx, stateStore, convID, historyID, "generating", "", primaryRunID, nil)
 		if dualReply {
 			_ = setChatInput(chatCtx, stateStore, convID, secondaryHistoryID, query, target.Seq, historyExt)
-			_ = setChatStatus(chatCtx, stateStore, convID, secondaryHistoryID, "generating", "")
+			_ = setChatRuntimeStatus(chatCtx, stateStore, convID, secondaryHistoryID, "generating", "", secondaryRunID, nil)
 			_ = setMultiAnswerInfo(chatCtx, stateStore, convID, historyID, secondaryHistoryID, target.Seq)
 		}
-		go func() {
-			_ = watchChatCancelSignal(chatCtx, stateStore, convID, historyID)
-			chatCancel()
-		}()
+		go cancelChatOnStop(chatCtx, stateStore, convID, historyID, chatCancel)
 	}
 
 	if !dualReply {
@@ -1382,6 +1690,61 @@ func elapsedThinkingSeconds(elapsed time.Duration) int64 {
 	return int64((elapsed + time.Second - 1) / time.Second)
 }
 
+type runtimeChunkDecision struct {
+	Event    *ChatRuntimeEvent
+	Terminal *RunTerminal
+	Stop     bool
+}
+
+// consumeRuntimeChunk centralizes the ordering contract shared by single,
+// dual, and disconnected drain consumers: an error always wins over any
+// runtime event carried by the same chunk.
+func consumeRuntimeChunk(chunk UpstreamStreamChunk, runID string, partialOutput bool) (runtimeChunkDecision, bool) {
+	if chunk.Err != nil {
+		event := failedRunEvent(runID, "upstream_stream_failed", partialOutput)
+		terminal, _ := event.Terminal()
+		return runtimeChunkDecision{Event: event, Terminal: terminal, Stop: true}, true
+	}
+	if chunk.RuntimeEvent == nil {
+		return runtimeChunkDecision{}, false
+	}
+	decision := runtimeChunkDecision{Event: chunk.RuntimeEvent}
+	if chunk.RuntimeEvent.Type == RuntimeEventRunFinished {
+		terminal, err := chunk.RuntimeEvent.Terminal()
+		if err != nil {
+			event := failedRunEvent(runID, "invalid_run_terminal", partialOutput)
+			terminal, _ = event.Terminal()
+			return runtimeChunkDecision{Event: event, Terminal: terminal, Stop: true}, true
+		}
+		decision.Terminal = terminal
+	}
+	return decision, true
+}
+
+func publishRuntimeChunk(
+	reqCtx, storeCtx context.Context,
+	w http.ResponseWriter,
+	flusher http.Flusher,
+	stateStore state.Store,
+	convID, historyID string,
+	seq int,
+	event *ChatRuntimeEvent,
+	writeClient bool,
+) {
+	chunk := &ChatChunkResponse{
+		ConversationID: convID,
+		Seq:            int32(seq),
+		HistoryID:      historyID,
+		RuntimeEvent:   event,
+	}
+	if writeClient && reqCtx.Err() == nil {
+		writeSSEChunk(w, flusher, chunk)
+	}
+	if stateStore != nil {
+		_ = appendChatChunk(storeCtx, stateStore, convID, historyID, chunk)
+	}
+}
+
 func streamSingleAnswer(
 	chatCtx, reqCtx context.Context,
 	w http.ResponseWriter,
@@ -1396,25 +1759,23 @@ func streamSingleAnswer(
 ) {
 	historyExt = archiveRegeneratedTrafficAttempt(historyExt, target)
 	seq := target.Seq
+	runID, _ := reqBody["run_id"].(string)
 	ch, algorithmID, err := streamChatOutput(
 		chatCtx, db, baseURL, reqBody, convID, historyID, query,
 		target.Seq, historyExt, target.IsRegeneration,
 	)
 	if err != nil {
+		runEvent := failedRunEvent(runID, "upstream_request_failed", false)
+		terminal, _ := runEvent.Terminal()
+		persistImmediateRunTerminal(db, convID, historyID, query, runID, target, historyExt, terminal)
 		if stateStore != nil {
-			_ = setChatStatus(chatCtx, stateStore, convID, historyID, "failed", "")
+			_ = setChatRuntimeStatus(chatCtx, stateStore, convID, historyID, terminal.Status, "", runID, terminal)
 		}
 		writeSSEChunk(w, flusher, &ChatChunkResponse{
-			ConversationID:    convID,
-			Seq:               int32(seq),
-			Message:           "",
-			Delta:             "",
-			FinishReason:      "FINISH_REASON_UNKNOWN",
-			HistoryID:         historyID,
-			Sources:           nil,
-			PromptQuestions:   []string{},
-			ReasoningContent:  "",
-			ThinkingDurationS: 0,
+			ConversationID: convID,
+			Seq:            int32(seq),
+			HistoryID:      historyID,
+			RuntimeEvent:   runEvent,
 		})
 		return
 	}
@@ -1429,7 +1790,7 @@ func streamSingleAnswer(
 	var thinkingDurationS int64
 	var thinkingActive bool
 	var sawToolResultPreview bool
-	var streamErr error
+	var runTerminal *RunTerminal
 	progressRowCreated := target.IsRegeneration && target.Existing != nil
 	persistThinkingProgress := func() {
 		partialResult := fullResult
@@ -1444,6 +1805,7 @@ func streamSingleAnswer(
 			"result":              partialResult,
 			"thinking_duration_s": thinkingDurationS,
 			"ext":                 historyExt,
+			"run_id":              runID,
 			"update_time":         time.Now(),
 		}
 		if progressRowCreated {
@@ -1455,7 +1817,7 @@ func streamSingleAnswer(
 		now := time.Now()
 		if err := db.Create(&orm.ChatHistory{
 			ID: historyID, Seq: seq, ConversationID: convID, RawContent: query, Content: query, AlgorithmID: algorithmID,
-			Result: partialResult, ThinkingDurationS: thinkingDurationS, Ext: historyExt,
+			Result: partialResult, ThinkingDurationS: thinkingDurationS, RunID: runID, Ext: historyExt,
 			TimeMixin: orm.TimeMixin{CreateTime: now, UpdateTime: now},
 		}).Error; err != nil {
 			log.Logger.Warn().Err(err).Str("history_id", historyID).Msg("failed to create thinking progress")
@@ -1463,13 +1825,11 @@ func streamSingleAnswer(
 		}
 		progressRowCreated = true
 	}
-	// text：textConversation/text，finish_reason text UNSPECIFIED
 	writeSSEChunk(w, flusher, &ChatChunkResponse{
 		ConversationID:    convID,
 		Seq:               int32(seq),
 		Message:           "",
 		Delta:             "",
-		FinishReason:      "FINISH_REASON_UNSPECIFIED",
 		HistoryID:         historyID,
 		Sources:           nil,
 		PromptQuestions:   []string{},
@@ -1477,20 +1837,16 @@ func streamSingleAnswer(
 		ThinkingDurationS: 0,
 	})
 	for d := range ch {
-		if d.Err != nil {
-			streamErr = d.Err
-			if d.Text != "" {
-				fullText += d.Text
-				fullResult += d.Text
-				chunk := &ChatChunkResponse{ConversationID: convID, Seq: int32(seq), HistoryID: historyID, Delta: d.Text, FinishReason: "FINISH_REASON_UNSPECIFIED", ExternalEventSequence: d.ExternalEventSequence, Execution: d.Execution}
-				if reqCtx.Err() == nil {
-					writeSSEChunk(w, flusher, chunk)
-				}
-				if stateStore != nil {
-					_ = appendChatChunk(chatCtx, stateStore, convID, historyID, chunk)
-				}
+		decision, handled := consumeRuntimeChunk(d, runID, fullResult != "" || pendingThink != "")
+		if handled {
+			if decision.Terminal != nil {
+				runTerminal = decision.Terminal
 			}
-			break
+			publishRuntimeChunk(reqCtx, chatCtx, w, flusher, stateStore, convID, historyID, seq, decision.Event, true)
+			if decision.Stop {
+				break
+			}
+			continue
 		}
 		if d.ArtifactCreated != nil {
 			persistAndPublishConversationArtifact(
@@ -1517,7 +1873,6 @@ func streamSingleAnswer(
 						Seq:            int32(seq),
 						HistoryID:      historyID,
 						Delta:          failure,
-						FinishReason:   "FINISH_REASON_UNSPECIFIED",
 					})
 				}
 				continue
@@ -1527,7 +1882,6 @@ func streamSingleAnswer(
 					ConversationID: convID,
 					Seq:            int32(seq),
 					HistoryID:      historyID,
-					FinishReason:   "FINISH_REASON_UNSPECIFIED",
 					TaskCreated:    notice,
 				}
 				if reqCtx.Err() == nil {
@@ -1552,7 +1906,6 @@ func streamSingleAnswer(
 				ConversationID: convID,
 				Seq:            int32(seq),
 				HistoryID:      historyID,
-				FinishReason:   "FINISH_REASON_UNSPECIFIED",
 				AskPending:     d.AskPending,
 			}
 			if reqCtx.Err() == nil {
@@ -1572,7 +1925,6 @@ func streamSingleAnswer(
 				ConversationID:   convID,
 				Seq:              int32(seq),
 				HistoryID:        historyID,
-				FinishReason:     "FINISH_REASON_UNSPECIFIED",
 				ToolLimitPending: d.ToolLimitPending,
 			}
 			if reqCtx.Err() == nil {
@@ -1587,7 +1939,7 @@ func streamSingleAnswer(
 			updated := handleIntentUpdated(chatCtx, db, stateStore, convID, d.IntentUpdated)
 			if updated != nil {
 				pendingConversationIntent = updated
-				intentChunk := &ChatChunkResponse{ConversationID: convID, Seq: int32(seq), HistoryID: historyID, FinishReason: "FINISH_REASON_UNSPECIFIED", IntentUpdated: updated}
+				intentChunk := &ChatChunkResponse{ConversationID: convID, Seq: int32(seq), HistoryID: historyID, IntentUpdated: updated}
 				if reqCtx.Err() == nil {
 					writeSSEChunk(w, flusher, intentChunk)
 				}
@@ -1601,6 +1953,10 @@ func streamSingleAnswer(
 			handleWorkflowPreflightUpdated(chatCtx, db, convID, d.WorkflowPreflightUpdated)
 			continue
 		}
+		if d.ModelContextUpdated != nil {
+			handleModelContextUpdated(chatCtx, db, convID, d.ModelContextUpdated)
+			continue
+		}
 		if d.Heartbeat {
 			if thinkingActive || d.Execution != nil {
 				nextDuration := elapsedThinkingSeconds(time.Since(thinkStart))
@@ -1611,8 +1967,8 @@ func streamSingleAnswer(
 					}
 					thinkingChunk := &ChatChunkResponse{
 						ConversationID: convID, Seq: int32(seq), HistoryID: historyID,
-						FinishReason: "FINISH_REASON_UNSPECIFIED", ThinkingDurationS: thinkingDurationS,
-						Execution: d.Execution,
+						ThinkingDurationS: thinkingDurationS,
+						Execution:         d.Execution,
 					}
 					if reqCtx.Err() == nil {
 						writeSSEChunk(w, flusher, thinkingChunk)
@@ -1634,7 +1990,7 @@ func streamSingleAnswer(
 			persistThinkingProgress()
 			thinkingChunk := &ChatChunkResponse{
 				ConversationID: convID, Seq: int32(seq), HistoryID: historyID,
-				FinishReason: "FINISH_REASON_UNSPECIFIED", ThinkingDurationS: thinkingDurationS,
+				ThinkingDurationS: thinkingDurationS,
 			}
 			if reqCtx.Err() == nil {
 				writeSSEChunk(w, flusher, thinkingChunk)
@@ -1673,7 +2029,6 @@ func streamSingleAnswer(
 			Seq:                   int32(seq),
 			Message:               "",
 			Delta:                 deltaToSend,
-			FinishReason:          "FINISH_REASON_UNSPECIFIED",
 			HistoryID:             historyID,
 			Sources:               sources,
 			PromptQuestions:       []string{},
@@ -1687,6 +2042,22 @@ func streamSingleAnswer(
 		}
 		if stateStore != nil {
 			_ = appendChatChunk(chatCtx, stateStore, convID, historyID, chunk)
+		}
+	}
+	if runTerminal == nil {
+		var runEvent *ChatRuntimeEvent
+		if chatCtx.Err() != nil {
+			runEvent = cancelledRunEvent(runID, fullResult != "" || pendingThink != "")
+		} else {
+			runEvent = failedRunEvent(runID, "missing_run_terminal", fullResult != "" || pendingThink != "")
+		}
+		runTerminal, _ = runEvent.Terminal()
+		runtimeChunk := &ChatChunkResponse{ConversationID: convID, Seq: int32(seq), HistoryID: historyID, RuntimeEvent: runEvent}
+		if reqCtx.Err() == nil {
+			writeSSEChunk(w, flusher, runtimeChunk)
+		}
+		if stateStore != nil {
+			_ = appendChatChunk(context.Background(), stateStore, convID, historyID, runtimeChunk)
 		}
 	}
 	now := time.Now()
@@ -1722,6 +2093,9 @@ func streamSingleAnswer(
 			"reason":              "",
 			"expected_answer":     "",
 			"ext":                 historyExt,
+			"run_id":              runID,
+			"run_status":          runTerminal.Status,
+			"run_terminal":        terminalJSON(runTerminal),
 			"create_time":         now,
 			"update_time":         now,
 		}).Error; err != nil {
@@ -1734,6 +2108,7 @@ func streamSingleAnswer(
 			"algorithm_id": algorithmID, "seq": seq, "raw_content": query, "content": query, "result": fullResult,
 			"tool_call_turns": toolCallTurns, "thinking_duration_s": thinkingDurationS,
 			"retrieval_result": retrievalResult, "ext": historyExt, "update_time": now,
+			"run_id": runID, "run_status": runTerminal.Status, "run_terminal": terminalJSON(runTerminal),
 		}).Error; err != nil {
 			log.Logger.Warn().Err(err).Str("conversation_id", convID).Str("history_id", historyID).Msg("failed to finalize stream chat history")
 		} else {
@@ -1751,6 +2126,9 @@ func streamSingleAnswer(
 			Result:            fullResult,
 			ToolCallTurns:     toolCallTurns,
 			ThinkingDurationS: thinkingDurationS,
+			RunID:             runID,
+			RunStatus:         runTerminal.Status,
+			RunTerminal:       terminalJSON(runTerminal),
 			Ext:               historyExt,
 			TimeMixin:         orm.TimeMixin{CreateTime: now, UpdateTime: now},
 		}).Error; err != nil {
@@ -1759,14 +2137,9 @@ func streamSingleAnswer(
 			persisted = true
 		}
 	}
-	finalStatus := "completed"
-	if chatCtx.Err() != nil {
-		finalStatus = "stopped"
-	} else if streamErr != nil {
-		finalStatus = "failed"
-	}
+	finalStatus := runTerminal.Status
 	if stateStore != nil {
-		_ = setChatStatus(context.Background(), stateStore, convID, historyID, finalStatus, stripToolTags(fullText))
+		_ = setChatRuntimeStatus(context.Background(), stateStore, convID, historyID, finalStatus, stripToolTags(fullText), runID, runTerminal)
 	}
 	if persisted && !externalFinalized {
 		db.Model(&orm.Conversation{}).Where("id = ?", convID).Update("updated_at", now)
@@ -1774,9 +2147,9 @@ func streamSingleAnswer(
 		// final history payload was persisted. Intermediate thinking persistence
 		// never reaches this update.
 		taskStatus := "succeeded"
-		if finalStatus == "failed" {
+		if finalStatus == "failed" || finalStatus == "interrupted" {
 			taskStatus = "failed"
-		} else if finalStatus == "stopped" {
+		} else if finalStatus == "cancelled" {
 			taskStatus = "canceled"
 		}
 		if err := db.Model(&orm.TaskCenterTask{}).
@@ -1791,40 +2164,38 @@ func streamSingleAnswer(
 	if persisted && !externalFinalized {
 		recordConversationIdleActivity(context.Background(), db, stateStore, convID, userIDFromChatRequestBody(reqBody), historyID, query, stripToolTags(fullText), now)
 	}
-	if reqCtx.Err() == nil {
-		// text：message text，finish_reason text STOP
-		finishReason := "FINISH_REASON_STOP"
-		if finalStatus == "failed" {
-			finishReason = "FINISH_REASON_UNKNOWN"
+}
+
+func persistImmediateRunTerminal(
+	db *gorm.DB,
+	convID, historyID, query, runID string,
+	target chatPersistTarget,
+	historyExt json.RawMessage,
+	terminal *RunTerminal,
+) {
+	if db == nil || terminal == nil {
+		return
+	}
+	now := time.Now()
+	values := map[string]any{
+		"seq": target.Seq, "raw_content": query, "content": query, "result": "",
+		"run_id": runID, "run_status": terminal.Status, "run_terminal": terminalJSON(terminal),
+		"ext": historyExt, "update_time": now,
+	}
+	if target.IsRegeneration && target.Existing != nil {
+		values["create_time"] = now
+		if err := db.Model(&orm.ChatHistory{}).Where("id = ?", historyID).Updates(values).Error; err != nil {
+			log.Logger.Warn().Err(err).Str("history_id", historyID).Msg("failed to persist immediate run terminal")
 		}
-		var execution *externalExecutionProjection
-		if externalFinalized {
-			owner := userIDFromChatRequestBody(reqBody)
-			if projections, err := newExternalChatApplication(db).executionProjections(
-				chatCtx, owner, []string{historyID},
-			); err == nil {
-				if projection, ok := projections[historyID]; ok {
-					execution = &projection
-				}
-			}
-		}
-		writeSSEChunk(w, flusher, &ChatChunkResponse{
-			ConversationID:  convID,
-			Seq:             int32(seq),
-			Message:         stripToolTags(fullText),
-			Delta:           "",
-			FinishReason:    finishReason,
-			HistoryID:       historyID,
-			Sources:         sources,
-			PromptQuestions: []string{},
-			// Do not replay reasoning on final message frame.
-			ReasoningContent:  "",
-			ThinkingDurationS: thinkingDurationS,
-			ToolCallTurns:     toolCallTurns,
-			Execution:         execution,
-		})
-		_, _ = w.Write([]byte("data: [DONE]\n\n"))
-		flusher.Flush()
+		return
+	}
+	history := orm.ChatHistory{
+		ID: historyID, Seq: target.Seq, ConversationID: convID, RawContent: query, Content: query,
+		RunID: runID, RunStatus: terminal.Status, RunTerminal: terminalJSON(terminal), Ext: historyExt,
+		TimeMixin: orm.TimeMixin{CreateTime: now, UpdateTime: now},
+	}
+	if err := db.Create(&history).Error; err != nil {
+		log.Logger.Warn().Err(err).Str("history_id", historyID).Msg("failed to persist immediate run terminal")
 	}
 }
 
@@ -1858,7 +2229,6 @@ func persistAndPublishConversationArtifact(
 		ConversationID:  convID,
 		Seq:             int32(seq),
 		HistoryID:       historyID,
-		FinishReason:    "FINISH_REASON_UNSPECIFIED",
 		ArtifactCreated: notice,
 	}
 	if reqCtx.Err() == nil {
@@ -1885,23 +2255,19 @@ func streamDualAnswer(
 	historyExt json.RawMessage,
 ) {
 	seq := target.Seq
+	primaryRunID, _ := reqBody["run_id"].(string)
+	secondaryRunID, _ := reqBody["secondary_run_id"].(string)
 	primaryCh, _, err1 := StreamChatUpstream(chatCtx, baseURL, reqBody)
 	secondaryReq := make(map[string]any)
 	for k, v := range reqBody {
 		secondaryReq[k] = v
 	}
+	secondaryReq["run_id"] = secondaryRunID
+	delete(secondaryReq, "secondary_run_id")
 	if sc, ok := secondaryReq["filters"].(map[string]any); ok {
 		sc["kb_id"] = nil
 	}
 	secondaryCh, _, err2 := StreamChatUpstream(chatCtx, baseURL, secondaryReq)
-	if err1 != nil && err2 != nil {
-		if stateStore != nil {
-			_ = setChatStatus(chatCtx, stateStore, convID, historyID, "failed", "")
-			_ = setChatStatus(chatCtx, stateStore, convID, secondaryHistoryID, "failed", "")
-		}
-		writeSSEChunk(w, flusher, map[string]any{"finish_reason": "FINISH_REASON_UNKNOWN"})
-		return
-	}
 	if err1 != nil {
 		primaryCh = nil
 	}
@@ -1916,6 +2282,7 @@ func streamDualAnswer(
 	var primarySources, secondarySources []any
 	var primaryPendingThink, secondaryPendingThink string
 	var primaryToolCallTurns, secondaryToolCallTurns int
+	var primaryTerminal, secondaryTerminal *RunTerminal
 	thinkStart := time.Now()
 	var primaryThinkingDurationS, secondaryThinkingDurationS int64
 	primaryProgressCreated, secondaryProgressCreated := false, false
@@ -2018,6 +2385,18 @@ func streamDualAnswer(
 		case d, ok := <-primaryCh:
 			if !ok {
 				primaryDone = true
+				primaryCh = nil
+				continue
+			}
+			if decision, handled := consumeRuntimeChunk(d, primaryRunID, primaryResult != "" || primaryPendingThink != ""); handled {
+				if decision.Terminal != nil {
+					primaryTerminal = decision.Terminal
+				}
+				publishRuntimeChunk(reqCtx, chatCtx, w, flusher, stateStore, convID, historyID, seq, decision.Event, true)
+				if decision.Stop {
+					primaryDone = true
+					primaryCh = nil
+				}
 				continue
 			}
 			if d.ArtifactCreated != nil {
@@ -2034,6 +2413,18 @@ func streamDualAnswer(
 		case d, ok := <-secondaryCh:
 			if !ok {
 				secondaryDone = true
+				secondaryCh = nil
+				continue
+			}
+			if decision, handled := consumeRuntimeChunk(d, secondaryRunID, secondaryResult != "" || secondaryPendingThink != ""); handled {
+				if decision.Terminal != nil {
+					secondaryTerminal = decision.Terminal
+				}
+				publishRuntimeChunk(reqCtx, chatCtx, w, flusher, stateStore, convID, secondaryHistoryID, seq, decision.Event, true)
+				if decision.Stop {
+					secondaryDone = true
+					secondaryCh = nil
+				}
 				continue
 			}
 			if d.ArtifactCreated != nil {
@@ -2056,6 +2447,17 @@ func streamDualAnswer(
 						primaryDone = true
 						primaryCh = nil
 					} else {
+						if decision, handled := consumeRuntimeChunk(d, primaryRunID, primaryResult != "" || primaryPendingThink != ""); handled {
+							if decision.Terminal != nil {
+								primaryTerminal = decision.Terminal
+							}
+							publishRuntimeChunk(reqCtx, bg, w, flusher, stateStore, convID, historyID, seq, decision.Event, false)
+							if decision.Stop {
+								primaryDone = true
+								primaryCh = nil
+							}
+							continue
+						}
 						if len(d.Sources) > 0 {
 							primarySources = d.Sources
 						}
@@ -2097,6 +2499,17 @@ func streamDualAnswer(
 						secondaryDone = true
 						secondaryCh = nil
 					} else {
+						if decision, handled := consumeRuntimeChunk(d, secondaryRunID, secondaryResult != "" || secondaryPendingThink != ""); handled {
+							if decision.Terminal != nil {
+								secondaryTerminal = decision.Terminal
+							}
+							publishRuntimeChunk(reqCtx, bg, w, flusher, stateStore, convID, secondaryHistoryID, seq, decision.Event, false)
+							if decision.Stop {
+								secondaryDone = true
+								secondaryCh = nil
+							}
+							continue
+						}
 						if len(d.Sources) > 0 {
 							secondarySources = d.Sources
 						}
@@ -2146,10 +2559,33 @@ dualPersist:
 	if secondaryPendingThink != "" {
 		secondaryResult += "<think>" + secondaryPendingThink + "</think>"
 	}
+	if primaryTerminal == nil {
+		event := failedRunEvent(primaryRunID, "missing_run_terminal", primaryResult != "")
+		primaryTerminal, _ = event.Terminal()
+		chunk := &ChatChunkResponse{ConversationID: convID, Seq: int32(seq), HistoryID: historyID, RuntimeEvent: event}
+		if reqCtx.Err() == nil {
+			writeSSEChunk(w, flusher, chunk)
+		}
+		if stateStore != nil {
+			_ = appendChatChunk(context.Background(), stateStore, convID, historyID, chunk)
+		}
+	}
+	if secondaryTerminal == nil {
+		event := failedRunEvent(secondaryRunID, "missing_run_terminal", secondaryResult != "")
+		secondaryTerminal, _ = event.Terminal()
+		chunk := &ChatChunkResponse{ConversationID: convID, Seq: int32(seq), HistoryID: secondaryHistoryID, RuntimeEvent: event}
+		if reqCtx.Err() == nil {
+			writeSSEChunk(w, flusher, chunk)
+		}
+		if stateStore != nil {
+			_ = appendChatChunk(context.Background(), stateStore, convID, secondaryHistoryID, chunk)
+		}
+	}
 	primaryHistory := &orm.MultiAnswersChatHistory{
 		ID: historyID, Seq: seq, ConversationID: convID, RawContent: query, Content: query, Result: primaryResult,
 		ToolCallTurns: primaryToolCallTurns, ThinkingDurationS: primaryThinkingDurationS,
 		RetrievalResult: marshalRetrievalResult(primarySources), Ext: historyExt,
+		RunID: primaryRunID, RunStatus: primaryTerminal.Status, RunTerminal: terminalJSON(primaryTerminal),
 		TimeMixin: orm.TimeMixin{CreateTime: now, UpdateTime: now},
 	}
 	if primaryProgressCreated {
@@ -2161,6 +2597,7 @@ dualPersist:
 		ID: secondaryHistoryID, Seq: seq, ConversationID: convID, RawContent: query, Content: query, Result: secondaryResult,
 		ToolCallTurns: secondaryToolCallTurns, ThinkingDurationS: secondaryThinkingDurationS,
 		RetrievalResult: marshalRetrievalResult(secondarySources), Ext: historyExt,
+		RunID: secondaryRunID, RunStatus: secondaryTerminal.Status, RunTerminal: terminalJSON(secondaryTerminal),
 		TimeMixin: orm.TimeMixin{CreateTime: now, UpdateTime: now},
 	}
 	if secondaryProgressCreated {
@@ -2169,30 +2606,14 @@ dualPersist:
 		_ = db.Create(secondaryHistory).Error
 	}
 	if stateStore != nil {
-		_ = setChatStatus(context.Background(), stateStore, convID, historyID, "completed", stripToolTags(primaryText))
-		_ = setChatStatus(context.Background(), stateStore, convID, secondaryHistoryID, "completed", stripToolTags(secondaryText))
+		_ = setChatRuntimeStatus(context.Background(), stateStore, convID, historyID, primaryTerminal.Status, stripToolTags(primaryText), primaryRunID, primaryTerminal)
+		_ = setChatRuntimeStatus(context.Background(), stateStore, convID, secondaryHistoryID, secondaryTerminal.Status, stripToolTags(secondaryText), secondaryRunID, secondaryTerminal)
 	}
 	db.Model(&orm.Conversation{}).Where("id = ?", convID).Update("updated_at", now)
 	if !target.IsRegeneration {
 		db.Model(&orm.Conversation{}).Where("id = ?", convID).UpdateColumn("chat_times", gorm.Expr("chat_times + ?", 1))
 	}
 	recordConversationIdleActivity(context.Background(), db, stateStore, convID, userIDFromChatRequestBody(reqBody), historyID, query, stripToolTags(primaryText), now)
-	if reqCtx.Err() == nil {
-		writeSSEChunk(w, flusher, map[string]any{
-			"finish_reason":       "FINISH_REASON_STOP",
-			"history_id":          historyID,
-			"tool_call_turns":     primaryToolCallTurns,
-			"thinking_duration_s": primaryThinkingDurationS,
-		})
-		writeSSEChunk(w, flusher, map[string]any{
-			"finish_reason":       "FINISH_REASON_STOP",
-			"history_id":          secondaryHistoryID,
-			"tool_call_turns":     secondaryToolCallTurns,
-			"thinking_duration_s": secondaryThinkingDurationS,
-		})
-		_, _ = w.Write([]byte("data: [DONE]\n\n"))
-		flusher.Flush()
-	}
 }
 
 func recordConversationIdleActivity(ctx context.Context, db *gorm.DB, stateStore state.Store, conversationID, userID, historyID, userContent, assistantText string, now time.Time) {
@@ -2800,7 +3221,7 @@ func SaveAskAnswers(w http.ResponseWriter, r *http.Request) {
 	}
 	// Verify the conversation owning this history belongs to the requesting user.
 	if err := db.WithContext(r.Context()).
-		Where("id = ? AND create_user_id = ?", h.ConversationID, userID).
+		Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", h.ConversationID, userID).
 		First(&orm.Conversation{}).Error; err != nil {
 		common.ReplyErr(w, "history not found", http.StatusNotFound)
 		return

@@ -52,6 +52,7 @@ class InboxWorkRepository(Protocol):
         inbox_id: str,
         claim_owner: str,
         outbound: list[OutboundMessage],
+        retained_provider_context: dict[str, Any],
     ) -> bool:
         ...
 
@@ -63,6 +64,7 @@ class InboxWorkRepository(Protocol):
         error: str,
         fallback: OutboundMessage,
         max_attempts: int,
+        retained_provider_context: dict[str, Any],
     ) -> bool:
         """Return True when the message reached its terminal fallback."""
         ...
@@ -135,6 +137,58 @@ class OutboxWorkRepository(Protocol):
         max_attempts: int,
     ) -> None:
         ...
+
+
+class TaskArtifactOutboxRepository(Protocol):
+    def list_sent_task_artifact_outbounds(
+        self,
+        *,
+        provider: str,
+        limit: int,
+        after_sequence: int = 0,
+        monitor_version: int,
+    ) -> list[ClaimedOutbound]:
+        ...
+
+    def sync_task_artifact_outbounds(
+        self,
+        *,
+        parent: ClaimedOutbound,
+        part_index: int,
+        artifacts: list[dict[str, str]],
+        provider_context: dict[str, Any] | None = None,
+    ) -> dict[str, int]:
+        ...
+
+    def compare_and_save_sent_task_monitor_state(
+        self,
+        *,
+        outbox_id: str,
+        part_index: int,
+        expected_revision: int,
+        state: dict[str, Any],
+        complete: bool,
+    ) -> dict[str, Any] | None:
+        ...
+
+
+class TaskStatusOutboxRepository(Protocol):
+    def sync_task_status_outbound(
+        self,
+        *,
+        parent: ClaimedOutbound,
+        part_index: int,
+        text: str,
+    ) -> str:
+        ...
+
+
+class TaskFollowupOutboxRepository(
+    TaskArtifactOutboxRepository,
+    TaskStatusOutboxRepository,
+    Protocol,
+):
+    pass
 
 
 class DeliveryProvider(Protocol):

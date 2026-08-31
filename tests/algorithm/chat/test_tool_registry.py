@@ -11,6 +11,7 @@ from lazymind.chat.service.component.tool_registry import (
     collect_system_prompt_appendices,
     filter_tools,
     get_all_tool_groups,
+    tool_is_active,
 )
 
 
@@ -80,7 +81,7 @@ def test_wikipedia_remains_available_without_web_provider():
     assert 'wikipedia' in _active_tool_names()
 
 
-def test_registry_key_source_activates_function_tool():
+def test_temp_kb_activates_when_files_are_present():
     from lazyllm.tools.agent.toolsManager import ToolManager
 
     assert 'temp_kb' not in _active_tool_names()
@@ -101,9 +102,29 @@ def test_registry_key_source_activates_function_tool():
     assert group['methods'] == [
         {
             'name': 'kb_tmp_search',
-            'summary': 'Search attached temporary uploaded files with the temporary document retriever.',
+            'summary': 'Locate passages in this conversation\'s uploaded documents.',
         }
     ]
+
+
+def test_registry_key_source_activates_function_tool():
+    def gated_tool() -> None:
+        return None
+
+    cfg = ToolConfig(
+        name='gated',
+        label='gated',
+        description='gated',
+        tool=(
+            gated_tool,
+            lambda: (lazyllm.globals.get('agentic_config') or {}).get('files'),
+        ),
+        module='retrieval',
+    )
+
+    assert tool_is_active(cfg) is False
+    lazyllm.globals['agentic_config'] = {'files': ['tmp-a.md']}
+    assert tool_is_active(cfg) is True
 
 
 def test_catalog_exposes_modules_without_registering_module_gateways():
@@ -150,6 +171,21 @@ def test_memory_tools_are_registered_as_one_eager_group():
     assert 'Never claim that information was saved unless' in memory_policy
     assert 'MemoryTools_episode_create' in memory_policy
     assert 'preference_editor' in memory_policy
+    assert 'new preference was not saved' in memory_policy
+    assert 'no existing preference was deleted, overwritten, or reordered' in memory_policy
+    assert 'Never claim or imply automatic eviction' in memory_policy
+
+
+def test_writer_tools_publish_stable_capability_ids():
+    capabilities = {
+        config.name: config.capability_id
+        for config in DEFAULT_TOOLS
+        if config.name in {'writer_create', 'writer_revision'}
+    }
+    assert capabilities == {
+        'writer_create': 'writer.create',
+        'writer_revision': 'writer.revise',
+    }
 
 
 def test_shared_prompt_appendix_is_reused_and_deduplicated():

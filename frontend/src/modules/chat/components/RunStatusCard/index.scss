@@ -1,0 +1,58 @@
+.chat-run-status-card--cancelled.ant-alert-with-description {
+  align-items: center;
+  margin-bottom: 10px;
+  border-color: #dfe5ec;
+  border-radius: 8px;
+  padding: 9px 12px;
+  background: #f7f9fc;
+  box-shadow: none;
+
+  .ant-alert-icon {
+    align-self: center;
+    margin-inline-end: 10px;
+    color: #667085;
+    font-size: 15px;
+  }
+
+  .ant-alert-content {
+    display: flex;
+    align-items: baseline;
+    min-width: 0;
+    gap: 8px;
+  }
+
+  .ant-alert-message {
+    margin-bottom: 0;
+    flex-shrink: 0;
+    color: #344054;
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 20px;
+  }
+
+  .ant-alert-description {
+    min-width: 0;
+    color: #667085;
+    font-size: 12px;
+    line-height: 20px;
+  }
+}
+
+@media (max-width: 520px) {
+  .chat-run-status-card--cancelled.ant-alert-with-description {
+    align-items: flex-start;
+
+    .ant-alert-icon {
+      align-self: flex-start;
+      margin-top: 2px;
+    }
+
+    .ant-alert-content {
+      display: block;
+    }
+
+    .ant-alert-message {
+      margin-bottom: 2px;
+    }
+  }
+}

@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>IMA · AI 办公自动化笔记检索摘要</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif;
+      background: #f3f7ff;
+      color: #1f2937;
+    }
+    .page { min-height: 100vh; padding: 34px; display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 22px; }
+    .sidebar, .panel, .hero, .note-card {
+      background: #fff;
+      border: 1px solid #dfe8f7;
+      border-radius: 18px;
+      box-shadow: 0 18px 48px rgba(30, 64, 175, .08);
+    }
+    .sidebar { padding: 22px; align-self: start; position: sticky; top: 24px; }
+    .brand { font-size: 22px; font-weight: 900; color: #1d4ed8; margin-bottom: 18px; }
+    .search {
+      padding: 14px;
+      border-radius: 14px;
+      background: #eff6ff;
+      color: #1e40af;
+      line-height: 1.6;
+      margin-bottom: 16px;
+    }
+    .facet { display: grid; gap: 10px; }
+    .facet span { display: flex; justify-content: space-between; padding: 10px 12px; border-radius: 12px; background: #f8fafc; color: #52657f; }
+    .facet strong { color: #1d4ed8; }
+    .main { display: grid; gap: 18px; }
+    .hero { padding: 26px; display: grid; grid-template-columns: 1fr 260px; gap: 20px; align-items: center; }
+    .eyebrow { display: inline-flex; padding: 7px 12px; border-radius: 999px; background: #dbeafe; color: #1d4ed8; font-weight: 900; font-size: 13px; }
+    h1 { margin: 16px 0 10px; font-size: 34px; line-height: 1.18; letter-spacing: 0; }
+    .lead { margin: 0; color: #5f6f86; line-height: 1.8; }
+    .score { padding: 18px; border-radius: 16px; background: linear-gradient(135deg, #1d4ed8, #0f766e); color: #fff; }
+    .score div { font-size: 42px; font-weight: 900; line-height: 1; }
+    .score p { margin: 8px 0 0; line-height: 1.55; color: rgba(255,255,255,.86); }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+    .panel { padding: 22px; }
+    .panel h2 { margin: 0 0 16px; font-size: 21px; }
+    .timeline { display: grid; gap: 12px; }
+    .step { display: grid; grid-template-columns: 30px 1fr; gap: 12px; align-items: start; }
+    .dot { width: 30px; height: 30px; border-radius: 10px; background: #eff6ff; color: #1d4ed8; display: grid; place-items: center; font-weight: 900; }
+    .step p { margin: 0; color: #52657f; line-height: 1.65; }
+    .note-card { padding: 20px; border-left: 5px solid #2563eb; }
+    .note-card h3 { margin: 0 0 8px; font-size: 20px; }
+    .note-meta { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+    .note-meta span { padding: 6px 10px; border-radius: 999px; background: #eff6ff; color: #1d4ed8; font-size: 12px; font-weight: 800; }
+    ul { margin: 0; padding-left: 20px; line-height: 1.9; color: #4b5f78; }
+    .action-list { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+    .action { padding: 16px; border-radius: 14px; background: #f8fafc; border: 1px solid #e4ebf7; }
+    .action strong { display: block; color: #0f766e; margin-bottom: 7px; }
+    .action p { margin: 0; color: #52657f; line-height: 1.6; font-size: 14px; }
+    @media (max-width: 960px) {
+      .page, .hero, .grid, .action-list { grid-template-columns: 1fr; }
+      .sidebar { position: static; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <aside class="sidebar">
+      <div class="brand">IMA 笔记检索</div>
+      <div class="search"><strong>搜索词</strong><br>AI 办公自动化</div>
+      <div class="facet">
+        <span>笔记命中 <strong>1</strong></span>
+        <span>知识库补充 <strong>0</strong></span>
+        <span>扩展关键词 <strong>5</strong></span>
+        <span>相关结论 <strong>3</strong></span>
+      </div>
+    </aside>
+
+    <section class="main">
+      <header class="hero">
+        <div>
+          <span class="eyebrow">IMA 知识管理案例</span>
+          <h1>从“搜一下笔记”到“可行动摘要”</h1>
+          <p class="lead">模拟用户在 IMA 中检索 AI 办公自动化内容：先扩展关键词，再核对真实命中，最后把唯一相关笔记整理成关键结论、相关笔记和下一步行动。</p>
+        </div>
+        <div class="score"><div>1/5</div><p>请求希望找到 5 条相关笔记；实际只命中 1 条，因此页面明确保留真实检索结果，不补造内容。</p></div>
+      </header>
+
+      <div class="grid">
+        <section class="panel">
+          <h2>检索过程</h2>
+          <div class="timeline">
+            <div class="step"><div class="dot">1</div><p>读取 IMA 笔记检索流程，确认按标题和正文搜索。</p></div>
+            <div class="step"><div class="dot">2</div><p>从“AI 办公自动化”扩展到 AI、自动化、办公、工作流、提效。</p></div>
+            <div class="step"><div class="dot">3</div><p>拉取笔记列表并回读完整正文，确认只有 1 篇高相关笔记。</p></div>
+            <div class="step"><div class="dot">4</div><p>同步检索知识库，同源网页仍在索引中，暂未提供额外命中。</p></div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>关键结论</h2>
+          <ul>
+            <li>个人 AI 工作流应先做安全审计，再按高频场景组合技能。</li>
+            <li>知识库、记忆和结构化检索是长期复用的基础能力。</li>
+            <li>官方认证技能与平台深度集成，更适合稳定工作流沉淀。</li>
+          </ul>
+        </section>
+      </div>
+
+      <article class="note-card">
+        <div class="note-meta"><span>note_id: 7493190542173644</span><span>AI 工具</span><span>SkillHub</span><span>知识管理</span></div>
+        <h3>《2026年最值得安装的10个SkillHub提效技能推荐》摘要笔记</h3>
+        <ul>
+          <li>反复出现的观点：用 SkillHub 把 AI 能力拆成可复用工作模块。</li>
+          <li>反复出现的工具：SkillHub、AI Skills、ima-skills、安全审计类 skill。</li>
+          <li>适用场景：办公提效、知识沉淀、资料检索、工具安装前评估。</li>
+        </ul>
+      </article>
+
+      <section class="panel">
+        <h2>可行动建议</h2>
+        <div class="action-list">
+          <div class="action"><strong>今天</strong><p>对照已安装技能，检查安全审计、知识管理和办公提效能力缺口。</p></div>
+          <div class="action"><strong>本周</strong><p>继续导入 AI 办公自动化相关文章，让主题笔记达到可聚合规模。</p></div>
+          <div class="action"><strong>长期</strong><p>用固定分类和检索关键词沉淀“可复用工作流”知识库。</p></div>
+        </div>
+      </section>
+    </section>
+  </main>
+</body>
+</html>

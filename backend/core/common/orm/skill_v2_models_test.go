@@ -32,6 +32,9 @@ func TestSkillV2ModelsAutoMigrate(t *testing.T) {
 	if !db.Migrator().HasIndex(&SkillV2Skill{}, "uk_skills_owner_identity") {
 		t.Fatal("expected uk_skills_owner_identity index")
 	}
+	if !db.Migrator().HasIndex(&SkillV2Skill{}, "uk_skills_owner_relative_root") {
+		t.Fatal("expected uk_skills_owner_relative_root index")
+	}
 
 	if !db.Migrator().HasColumn(&SkillV2Blob{}, "hash") {
 		t.Fatal("expected skill_blobs.hash column")

@@ -21,15 +21,25 @@ var terminalImportJobStatuses = []string{
 	string(asyncjob.StatusCanceled),
 }
 
-func StartImportPreviewCleanup(ctx context.Context, db *gorm.DB, interval time.Duration) {
+// StartImportPreviewCleanup launches a background loop that periodically
+// expires, consumes, and reaps import preview/job rows. The loop stops when
+// ctx is cancelled, at which point the returned channel is closed so callers
+// can wait for full shutdown.
+func StartImportPreviewCleanup(ctx context.Context, db *gorm.DB, interval time.Duration) <-chan struct{} {
+	done := make(chan struct{})
 	if db == nil {
 		log.Logger.Warn().Msg("evalset import cleanup skipped: db is nil")
-		return
+		close(done)
+		return done
 	}
 	if interval <= 0 {
 		interval = defaultImportCleanupInterval
 	}
-	go importPreviewCleanupLoop(ctx, db, interval)
+	go func() {
+		defer close(done)
+		importPreviewCleanupLoop(ctx, db, interval)
+	}()
+	return done
 }
 
 func importPreviewCleanupLoop(ctx context.Context, db *gorm.DB, interval time.Duration) {

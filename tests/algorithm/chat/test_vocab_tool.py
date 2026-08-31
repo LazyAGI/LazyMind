@@ -107,8 +107,7 @@ def test_vocab_learn_creates_group_for_new_pair(monkeypatch):
         {'word': '苹果', 'synonym': 'apple', 'reason': 'user explicitly asked to remember it'},
     ])
 
-    assert result['success'] is True
-    assert result['tool'] == 'vocab_learn'
+    assert result['persisted'] == 'core_api'
     assert captured['path'] == '/inner/word_group:apply'
     assert captured['payload']['action_list'] == [{
         'reason': 'user explicitly asked to remember it',
@@ -152,8 +151,7 @@ def test_vocab_learn_adds_to_group(monkeypatch):
         {'word': '民法', 'synonym': '民事法律', 'reason': 'user used the terms as the same concept'},
     ])
 
-    assert result['success'] is True
-    assert result['tool'] == 'vocab_learn'
+    assert result['persisted'] == 'core_api'
     assert captured['payload']['action_list'] == [{
         'reason': 'user used the terms as the same concept',
         'words': ['民事法律'],
@@ -199,8 +197,7 @@ def test_vocab_learn_creates_new_group_when_domain_description_changes(monkeypat
         {'word': '变白质', 'synonym': '铅球垫子', 'description': '体育领域术语', 'reason': '用户指定体育领域术语映射'},
     ])
 
-    assert result['success'] is True
-    assert result['tool'] == 'vocab_learn'
+    assert result['persisted'] == 'core_api'
     assert captured['payload']['action_list'] == [{
         'reason': '用户指定体育领域术语映射',
         'words': ['变白质', '铅球垫子'],

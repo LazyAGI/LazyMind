@@ -115,6 +115,13 @@
 
     cursor: pointer;
 
+    .record-source-icon {
+      flex: 0 0 auto;
+      margin-left: 5px;
+      color: var(--color-primary);
+      font-size: 13px;
+    }
+
     &::before {
       position: absolute;
       left: 4px;
@@ -144,8 +151,10 @@
     }
 
     .close {
-      display: none;
+      display: inline-flex;
       margin-left: 8px;
+      opacity: 0;
+      pointer-events: none;
 
       font-size: 12px;
 
@@ -164,12 +173,14 @@
       }
     }
 
-    &:hover {
+    &:hover,
+    &:focus-within {
       background: var(--color-primary-bg);
       border-radius: 4px;
 
       .close {
-        display: block;
+        opacity: 1;
+        pointer-events: auto;
       }
     }
   }

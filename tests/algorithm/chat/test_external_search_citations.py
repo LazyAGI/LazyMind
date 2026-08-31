@@ -197,3 +197,15 @@ def test_parallel_tools_register_citations_in_original_tool_call_order():
     assert results[1]['value'][0]['ref'] == '[[2.1]]'
     assert state[CITATION_REFS_KEY]['1.1']['url'] == 'https://example.test/slow'
     assert state[CITATION_REFS_KEY]['2.1']['url'] == 'https://example.test/fast'
+
+
+def test_allowed_tool_names_are_forwarded_to_tool_manager():
+    _, _, manager = _setup_manager()
+
+    result = manager(
+        {'function': {'name': 'FakeSearch_search', 'arguments': {'query': 'agents'}}},
+        allowed_tool_names=set(),
+    )[0]
+
+    assert result['ok'] is False
+    assert 'FakeSearch_search' in result['value']

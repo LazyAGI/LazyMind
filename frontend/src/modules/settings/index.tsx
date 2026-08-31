@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, ReactNode } from "react";
-import { Alert, Button, Empty, Input, Modal, Skeleton, Switch, Tag, message } from "antd";
+import { Alert, Button, Empty, Input, Modal, Skeleton, Switch, Tabs, Tag, message } from "antd";
 import {
   ApiOutlined,
   ArrowLeftOutlined,
   CheckCircleFilled,
+  ClockCircleOutlined,
   CodeOutlined,
   DatabaseOutlined,
+  DeleteOutlined,
   ExperimentOutlined,
   InfoCircleOutlined,
   LinkOutlined,
@@ -34,6 +36,7 @@ import ToolManagementSection from "@/modules/modelProvider/components/ToolManage
 import DefaultServicesPage from "@/modules/modelProvider/pages/DefaultServicesPage";
 import ModelProvidersPage from "@/modules/modelProvider/pages/ModelProvidersPage";
 import SettingsScheduleList from "@/modules/taskCenter/SettingsScheduleList";
+import TaskEntryDefaults from "@/modules/taskCenter/TaskEntryDefaults";
 import { fetchUserUiPreferences, patchUserUiPreferences } from "@/modules/user/uiPreferencesApi";
 import { isDesktopRuntime, isLocalRuntime } from "@/runtime/mode";
 import { setDeveloperModeActive } from "@/utils/developerMode";
@@ -41,7 +44,10 @@ import MemoryCapabilitySettings from "./MemoryCapabilitySettings";
 import KnowledgeDataSettings from "./KnowledgeDataSettings";
 import KnowledgeToolSettings, { isKnowledgeToolView } from "./KnowledgeToolSettings";
 import QuickModelSettings from "./QuickModelSettings";
+import RecoverySettings from "./RecoverySettings";
 import UserSkillWorkflowSettings, { type ResourceTab } from "./UserSkillWorkflowSettings";
+import { resolveMcpReadinessStatus } from "./mcpReadinessStatus";
+import { resolveModelNavigationStatus } from "./modelNavigationStatus";
 import {
   fetchSettingsOverview,
   runSettingsChecks,
@@ -67,8 +73,9 @@ type SectionID =
   | "channels"
   | "diagnostics"
   | "organization"
+  | "recovery"
   | "developer";
-type MasterSetting = "task_center_enabled" | "skills_enabled" | "workflows_enabled" | "mcp_enabled" | "document_parsing_enabled";
+type MasterSetting = "task_center_enabled" | "schedules_enabled" | "skills_enabled" | "workflows_enabled" | "mcp_enabled" | "document_parsing_enabled";
 type Translate = (key: string, options?: Record<string, unknown>) => string;
 
 interface NavigationItem {
@@ -94,6 +101,7 @@ interface DiagnosticConnectionState {
 function controlCopy(t: Translate): Record<MasterSetting, { title: string; summary: string; section: SectionID }> {
   return {
     task_center_enabled: { title: t("settingsPage.controls.taskCenter.title"), summary: t("settingsPage.controls.taskCenter.summary"), section: "tasks" },
+    schedules_enabled: { title: t("settingsPage.controls.schedules.title"), summary: t("settingsPage.controls.schedules.summary"), section: "tasks" },
     skills_enabled: { title: t("settingsPage.controls.skills.title"), summary: t("settingsPage.controls.skills.summary"), section: "skills" },
     workflows_enabled: { title: t("settingsPage.controls.workflows.title"), summary: t("settingsPage.controls.workflows.summary"), section: "skills" },
     mcp_enabled: { title: t("settingsPage.controls.mcp.title"), summary: t("settingsPage.controls.mcp.summary"), section: "mcp" },
@@ -111,7 +119,7 @@ function baseNavigation(isAdmin: boolean, t: Translate): NavigationGroup[] {
     {
       title: t("settingsPage.navGroups.gettingStarted"),
       items: [
-        { id: "models", label: t("settingsPage.sections.models"), keywords: t("settingsPage.sectionKeywords.models"), icon: <ApiOutlined />, status: t("settingsPage.sectionStatus.ready") },
+        { id: "models", label: t("settingsPage.sections.models"), keywords: t("settingsPage.sectionKeywords.models"), icon: <ApiOutlined /> },
         { id: "overview", label: t("settingsPage.sections.overview"), keywords: t("settingsPage.sectionKeywords.overview"), icon: <SettingOutlined />, status: t("settingsPage.sectionStatus.synced") },
       ],
     },
@@ -137,8 +145,9 @@ function baseNavigation(isAdmin: boolean, t: Translate): NavigationGroup[] {
       title: t("settingsPage.navGroups.management"),
       items: [
         ...(isAdmin ? [{ id: "organization" as const, label: t("settingsPage.sections.organization"), keywords: t("settingsPage.sectionKeywords.organization"), icon: <TeamOutlined /> }] : []),
+        { id: "recovery", label: t("settingsPage.sections.recovery"), keywords: t("settingsPage.sectionKeywords.recovery"), icon: <DeleteOutlined /> },
         { id: "diagnostics", label: t("settingsPage.sections.diagnostics"), keywords: t("settingsPage.sectionKeywords.diagnostics"), icon: <CheckCircleFilled /> },
-        ...(isAdmin ? [{ id: "developer" as const, label: t("settingsPage.sections.developer"), keywords: t("settingsPage.sectionKeywords.developer"), icon: <CodeOutlined />, status: t("settingsPage.sectionStatus.activated") }] : []),
+        { id: "developer", label: t("settingsPage.sections.developer"), keywords: t("settingsPage.sectionKeywords.developer"), icon: <CodeOutlined />, status: t("settingsPage.sectionStatus.activated") },
       ],
     },
   ];
@@ -178,8 +187,12 @@ export default function SettingsPage() {
   const navigationGroups = useMemo(() => baseNavigation(isAdmin, t), [isAdmin, t, i18n.language]);
   const navigationItems = useMemo(() => navigationGroups.flatMap((group) => group.items), [navigationGroups]);
   const controls = useMemo(() => controlCopy(t), [t, i18n.language]);
-  const candidate = searchParams.get("section") as SectionID | null;
-  const section = navigationItems.some((item) => item.id === candidate) ? candidate! : "overview";
+  const candidate = searchParams.get("section");
+  const section: SectionID = candidate === "defaults"
+    ? "tasks"
+    : navigationItems.some((item) => item.id === candidate)
+      ? candidate as SectionID
+      : "overview";
   const knowledgeToolCandidate = searchParams.get("tool");
   const knowledgeToolView = section === "knowledge" && isKnowledgeToolView(knowledgeToolCandidate)
     ? knowledgeToolCandidate
@@ -203,9 +216,28 @@ export default function SettingsPage() {
     dependencyMessage: hasLocalDependencies ? t("settingsPage.diagnostics.readingDeps") : t("settingsPage.diagnostics.cloudDeps"),
   });
   const [keyword, setKeyword] = useState("");
-  const [modelView, setModelView] = useState<"defaults" | "providers">("defaults");
+  const modelView = searchParams.get("view") === "providers" ? "providers" : "defaults";
+  const taskView = candidate !== "defaults" && searchParams.get("view") === "tasks" ? "tasks" : "conversation";
   const [organizationView, setOrganizationView] = useState<"users" | "groups">("users");
   const [mcpRefreshToken, setMcpRefreshToken] = useState(0);
+
+  const modelSection = overview?.sections.find((item) => item.id === "models");
+  const modelNavigationStatus = resolveModelNavigationStatus(
+    loading || loadError ? undefined : modelSection?.effective_enabled,
+  );
+  const navigationGroupsWithStatus = useMemo(() => navigationGroups.map((group) => ({
+    ...group,
+    items: group.items.map((item) => item.id === "models"
+      ? {
+          ...item,
+          status: modelNavigationStatus === "ready"
+            ? t("settingsPage.sectionStatus.ready")
+            : modelNavigationStatus === "pending"
+              ? t("settingsPage.counts.pendingConfig")
+              : undefined,
+        }
+      : item),
+  })), [modelNavigationStatus, navigationGroups, t]);
 
   const refresh = useCallback(async () => {
     const requestID = ++latestRequest.current;
@@ -229,14 +261,24 @@ export default function SettingsPage() {
 
   const filteredGroups = useMemo(() => {
     const query = keyword.trim().toLowerCase();
-    if (!query) return navigationGroups;
-    return navigationGroups.map((group) => ({
+    if (!query) return navigationGroupsWithStatus;
+    return navigationGroupsWithStatus.map((group) => ({
       ...group,
       items: group.items.filter((item) => `${item.label} ${item.keywords}`.toLowerCase().includes(query)),
     })).filter((group) => group.items.length > 0);
-  }, [keyword, navigationGroups]);
+  }, [keyword, navigationGroupsWithStatus]);
 
   const selectSection = (next: SectionID) => setSearchParams({ section: next });
+  const selectModelView = (next: "defaults" | "providers") => {
+    setSearchParams(next === "providers"
+      ? { section: "models", view: "providers" }
+      : { section: "models" });
+  };
+  const selectTaskView = (next: "conversation" | "tasks") => {
+    setSearchParams(next === "tasks"
+      ? { section: "tasks", view: "tasks" }
+      : { section: "tasks" });
+  };
   const selectedSection = overview?.sections.find((item) => item.id === section) || sectionFallback(section, t);
 
   const syncOverview = useCallback(async () => {
@@ -289,14 +331,18 @@ export default function SettingsPage() {
     const target = controls[key];
     const sectionInfo = overview?.sections.find((item) => item.id === target.section);
     const enabledCount = enabledCountOverride ?? sectionInfo?.counts.enabled ?? 0;
-    const resourceLabel = key === "task_center_enabled"
+    const resourceLabel = key === "schedules_enabled"
       ? t("settingsPage.confirm.enabledSchedules", { count: enabledCount })
+      : key === "task_center_enabled"
+        ? t("settingsPage.confirm.subtaskSettingsKept")
       : key === "document_parsing_enabled"
         ? t("settingsPage.confirm.parsingKept")
       : key === "skills_enabled"
         ? t("settingsPage.confirm.enabledSkills", { count: enabledCount })
         : key === "workflows_enabled"
-          ? t("settingsPage.confirm.enabledWorkflows", { count: enabledCount })
+          ? enabledCountOverride == null
+            ? t("settingsPage.confirm.availableWorkflows")
+            : t("settingsPage.confirm.enabledWorkflows", { count: enabledCountOverride })
           : t("settingsPage.confirm.enabledServices", { count: enabledCount });
     const isResourceBulkChange = key === "skills_enabled" || key === "workflows_enabled" || key === "mcp_enabled";
     const stateLabel = enabled ? t("settingsPage.confirm.enableState") : t("settingsPage.confirm.disableState");
@@ -310,9 +356,15 @@ export default function SettingsPage() {
       }),
       content: <div className="settings-ref-confirm">
         <p>{t("settingsPage.confirm.effectiveNow", { summary: target.summary })}</p>
-        <p>{isResourceBulkChange ? resourceChangeText : key === "document_parsing_enabled" ? resourceLabel : t("settingsPage.confirm.keepChildState", { resource: resourceLabel })}</p>
+        <p>{isResourceBulkChange
+          ? resourceChangeText
+          : key === "document_parsing_enabled" || key === "task_center_enabled"
+            ? resourceLabel
+            : t("settingsPage.confirm.keepChildState", { resource: resourceLabel })}</p>
         <p>{key === "task_center_enabled"
-          ? t("settingsPage.confirm.taskConsequence")
+          ? t("settingsPage.confirm.subtaskConsequence")
+          : key === "schedules_enabled"
+            ? t("settingsPage.confirm.scheduleConsequence")
           : key === "document_parsing_enabled"
             ? t("settingsPage.confirm.parsingConsequence")
             : key === "mcp_enabled"
@@ -365,7 +417,9 @@ export default function SettingsPage() {
       title: t("settingsPage.confirm.developerTitle", {
         action: enabled ? t("settingsPage.enable") : t("settingsPage.disable"),
       }),
-      content: t("settingsPage.confirm.developerContent"),
+      content: t(enabled
+        ? "settingsPage.confirm.developerEnableContent"
+        : "settingsPage.confirm.developerDisableContent"),
       okText: enabled ? t("settingsPage.confirmEnable") : t("settingsPage.confirmDisable"),
       cancelText: t("settingsPage.cancel"),
       okButtonProps: enabled ? undefined : { danger: true },
@@ -399,16 +453,21 @@ export default function SettingsPage() {
     }
   };
 
-  const switchControl = (key: MasterSetting) => (
-    <Switch
-      className="settings-ref-switch"
-      checked={Boolean(overview?.controls[key])}
-      loading={saving === key}
-      disabled={saving !== null}
-      onChange={(checked: boolean) => requestMasterChange(key, checked)}
-      aria-label={controls[key].title}
-    />
-  );
+  const switchControl = (key: MasterSetting, ariaLabel = controls[key].title, descriptionID?: string) => {
+    return (
+      <span>
+        <Switch
+          className="settings-ref-switch"
+          checked={Boolean(overview?.controls[key])}
+          loading={saving === key}
+          disabled={saving !== null}
+          onChange={(checked: boolean) => requestMasterChange(key, checked)}
+          aria-label={ariaLabel}
+          aria-describedby={descriptionID}
+        />
+      </span>
+    );
+  };
 
   const dashboardRow = (module: string, title: string, description: string, control: ReactNode) => (
     <div className="settings-dashboard-config-row" key={`${module}-${title}`}>
@@ -473,16 +532,17 @@ export default function SettingsPage() {
           dashboardRow(t("settingsPage.sections.skills"), t("settingsPage.overview.enabledResources"), t("settingsPage.overview.enabledResourcesDesc", { count: skills.counts.enabled }), <Tag className="settings-status-tag">{t("settingsPage.separatelyControlled")}</Tag>),
         ])}
         {dashboardCard("tasks", <UnorderedListOutlined />, t("settingsPage.sections.tasks"), t("settingsPage.overview.tasksDesc"), [
-          dashboardRow(t("settingsPage.sections.tasks"), t("settingsPage.master.enableTaskCenter"), t("settingsPage.overview.enableTaskCenterDesc"), switchControl("task_center_enabled")),
-          dashboardRow(t("settingsPage.sections.tasks"), t("settingsPage.overview.schedules"), t("settingsPage.counts.automationPlans", { count: tasks.counts.enabled }), <Tag className="settings-status-tag">{overview?.controls.task_center_enabled ? t("settingsPage.running") : t("settingsPage.paused")}</Tag>),
+          dashboardRow(t("settingsPage.sections.tasks"), t("settingsPage.tasks.enableSubtasks"), t("settingsPage.tasks.enableSubtasksDesc"), switchControl("task_center_enabled", t("settingsPage.tasks.enableSubtasks"))),
+          dashboardRow(t("settingsPage.sections.tasks"), t("settingsPage.tasks.enableWorkflows"), t("settingsPage.tasks.enableWorkflowsDesc"), switchControl("workflows_enabled", t("settingsPage.tasks.enableWorkflows"))),
+          dashboardRow(t("settingsPage.sections.tasks"), t("settingsPage.tasks.enableSchedules"), t("settingsPage.tasks.enableSchedulesDesc", { count: tasks.counts.enabled }), switchControl("schedules_enabled", t("settingsPage.tasks.enableSchedules"))),
         ])}
         {dashboardCard("diagnostics", <CheckCircleFilled />, t("settingsPage.sections.diagnostics"), t("settingsPage.overview.diagnosticsDesc"), [
           dashboardRow(t("settingsPage.sections.diagnostics"), t("settingsPage.checkAll"), t("settingsPage.overview.checkAllDesc"), <Button size="small" loading={checking} onClick={handleCheckAll}>{t("settingsPage.check")}</Button>),
           dashboardRow(t("settingsPage.sections.diagnostics"), t("settingsPage.overview.recentResults"), checks ? t("settingsPage.overview.recentResultsReady", { count: checks.length }) : t("settingsPage.overview.recentResultsEmpty"), <Tag className="settings-status-tag">{t("settingsPage.viewable")}</Tag>),
         ])}
-        {isAdmin && dashboardCard("developer", <CodeOutlined />, t("settingsPage.sections.developer"), t("settingsPage.overview.developerDesc"), [
+        {dashboardCard("developer", <CodeOutlined />, t("settingsPage.sections.developer"), t("settingsPage.overview.developerDesc"), [
           dashboardRow(t("settingsPage.sections.developer"), t("settingsPage.overview.enableDeveloper"), t("settingsPage.overview.enableDeveloperDesc"), <Switch className="settings-ref-switch" checked={developerActive} loading={saving === "developer"} disabled={saving !== null} onChange={requestDeveloperChange} aria-label={t("settingsPage.overview.enableDeveloper")} />),
-          dashboardRow(t("settingsPage.sections.developer"), t("settingsPage.overview.internalDebug"), t("settingsPage.overview.internalDebugDesc"), <Tag className="settings-status-tag">{t("settingsPage.admin")}</Tag>),
+          dashboardRow(t("settingsPage.sections.developer"), t("settingsPage.overview.internalDebug"), t("settingsPage.overview.internalDebugDesc"), <Tag className="settings-status-tag">{developerActive ? t("settingsPage.sectionStatus.activated") : t("settingsPage.sectionStatus.notActivated")}</Tag>),
         ])}
       </div>
       {checks ? <CheckResults checks={checks} onLocate={selectSection} /> : null}
@@ -496,22 +556,37 @@ export default function SettingsPage() {
     </header>
   );
 
-  const masterControl = (key: MasterSetting, title = t("settingsPage.masterSwitch", { title: controls[key].title })) => {
+  const masterControl = (key: "mcp_enabled", title = t("settingsPage.masterSwitch", { title: controls[key].title })) => {
     const sectionInfo = overview?.sections.find((item) => item.id === controls[key].section);
+    const readinessStatus = resolveMcpReadinessStatus(sectionInfo, overview?.issues);
     const statusText = !overview?.controls[key]
       ? t("settingsPage.master.paused")
-      : sectionInfo?.effective_enabled
+      : readinessStatus === "available"
         ? t("settingsPage.master.available")
-        : key === "mcp_enabled"
-          ? t("settingsPage.master.waitVerify")
-          : t("settingsPage.master.waitChild");
-    const consequence = key === "mcp_enabled"
-      ? t("settingsPage.master.mcpConsequence")
-      : t("settingsPage.master.keepChildConsequence");
+        : readinessStatus === "needs_authorization"
+          ? t("settingsPage.master.waitAuthorize")
+          : t("settingsPage.master.waitVerify");
     return <section className="settings-integrated-master" aria-label={title}>
-      <div><strong>{title}</strong><p>{t("settingsPage.master.summaryWithConsequence", { summary: controls[key].summary, consequence })}</p></div>
+      <div><strong>{title}</strong><p>{controls[key].summary}</p></div>
       <div className="settings-integrated-master-action"><Tag className="settings-status-tag">{statusText}</Tag>{switchControl(key)}</div>
     </section>;
+  };
+
+  const taskControl = (
+    key: "task_center_enabled" | "workflows_enabled" | "schedules_enabled",
+    icon: ReactNode,
+    title: string,
+    description: string,
+  ) => {
+    const descriptionID = `settings-task-control-${key}-description`;
+    return <div className="settings-task-control" key={key}>
+      <span className="settings-task-control-icon" aria-hidden="true">{icon}</span>
+      <div className="settings-task-control-copy">
+        <strong>{title}</strong>
+        <p id={descriptionID}>{description}</p>
+      </div>
+      <div className="settings-task-control-action">{switchControl(key, title, descriptionID)}</div>
+    </div>;
   };
 
   const integratedSurface = (content: ReactNode, className = "") => (
@@ -534,6 +609,7 @@ export default function SettingsPage() {
       : diagnosticConnections.dependencyInstalled
         ? hasLocalDependencies ? t("settingsPage.diagnostics.configured") : t("settingsPage.cloudHosted")
         : t("settingsPage.diagnostics.pendingConfig");
+    const mcpReadinessStatus = resolveMcpReadinessStatus(mcp, overview?.issues);
     const rows = [
       {
         id: "models",
@@ -556,12 +632,14 @@ export default function SettingsPage() {
         }),
         status: mcp.counts.total === 0
           ? t("settingsPage.diagnostics.notConnected")
-          : mcp.counts.verified < mcp.counts.total
+          : mcpReadinessStatus === "needs_verification"
             ? t("settingsPage.diagnostics.pendingVerify")
-            : mcp.counts.runnable > 0
-              ? t("settingsPage.diagnostics.runnable")
-              : t("settingsPage.diagnostics.verified"),
-        tone: mcp.counts.total > mcp.counts.verified ? "warning" : mcp.counts.runnable > 0 ? "success" : "neutral",
+            : mcpReadinessStatus === "needs_authorization"
+              ? t("settingsPage.diagnostics.pendingAuthorize")
+              : t("settingsPage.diagnostics.runnable"),
+        tone: mcp.counts.total === 0
+          ? "neutral"
+          : mcpReadinessStatus === "available" ? "success" : "warning",
         action: t("settingsPage.diagnostics.viewServices"),
         onClick: () => selectSection("mcp"),
       },
@@ -647,29 +725,65 @@ export default function SettingsPage() {
       content = <>
         {integratedHeader(t("settingsPage.models.title"), selectedSection.detail)}
         <nav className="settings-model-tabs" aria-label={t("settingsPage.models.tabsAria")} role="tablist">
-          <button className={modelView === "defaults" ? "is-active" : ""} type="button" role="tab" aria-selected={modelView === "defaults"} onClick={() => setModelView("defaults")}>{t("settingsPage.models.defaultSettings")}</button>
-          <button ref={modelProviderTabRef} className={modelView === "providers" ? "is-active" : ""} type="button" role="tab" aria-selected={modelView === "providers"} onClick={() => setModelView("providers")}>{t("settingsPage.models.providers")}</button>
+          <button className={modelView === "defaults" ? "is-active" : ""} type="button" role="tab" aria-selected={modelView === "defaults"} onClick={() => selectModelView("defaults")}>{t("settingsPage.models.defaultSettings")}</button>
+          <button ref={modelProviderTabRef} className={modelView === "providers" ? "is-active" : ""} type="button" role="tab" aria-selected={modelView === "providers"} onClick={() => selectModelView("providers")}>{t("settingsPage.models.providers")}</button>
         </nav>
         {integratedSurface(modelView === "defaults" ? (
           <DefaultServicesPage
+            onModelSelectionChanged={syncOverview}
             onConfigureCloudService={(service) => navigate(
               service === "cloudParsing"
                 ? "/settings?section=knowledge&tool=document-parsing"
                 : "/settings?section=knowledge&tool=web-search",
             )}
             onConfigureProviders={() => {
-              setModelView("providers");
+              selectModelView("providers");
               requestAnimationFrame(() => modelProviderTabRef.current?.focus());
             }}
           />
-        ) : <ModelProvidersPage />, "is-models")}
+        ) : <ModelProvidersPage onConfigurationChanged={syncOverview} />, "is-models")}
       </>;
     } else if (section === "tasks") {
-      const taskCenterEnabled = Boolean(overview?.controls.task_center_enabled);
+      const schedulesEnabled = Boolean(overview?.controls.schedules_enabled);
       content = <>
-        {integratedHeader(t("settingsPage.tasks.title"), t("settingsPage.tasks.description"), <Tag className="settings-sync-tag">{taskCenterEnabled ? t("settingsPage.open") : t("settingsPage.paused")}</Tag>)}
-        {masterControl("task_center_enabled", t("settingsPage.master.enableTaskCenter"))}
-        {integratedSurface(<SettingsScheduleList masterEnabled={taskCenterEnabled} onChanged={syncOverview} />, "is-tasks")}
+        <header className="settings-detail-header settings-task-page-heading">
+          <div>
+            <h1 ref={headingRef} tabIndex={-1}>{t("settingsPage.tasks.title")}</h1>
+            <div className="settings-task-view-description">
+              <p>{t(taskView === "conversation"
+                ? "settingsPage.tasks.defaultsDescription"
+                : "settingsPage.tasks.taskDescription")}</p>
+            </div>
+          </div>
+        </header>
+        <Tabs
+          className="settings-task-section-tabs"
+          activeKey={taskView}
+          onChange={(key: string) => selectTaskView(key as "conversation" | "tasks")}
+          items={[
+            {
+              key: "conversation",
+              label: t("settingsPage.tasks.conversationView"),
+              children: <>
+                <TaskEntryDefaults
+                  subtasksEnabled={Boolean(overview?.controls.task_center_enabled)}
+                  workflowsEnabled={Boolean(overview?.controls.workflows_enabled)}
+                  onConnectExecutors={() => selectSection("assistants")}
+                />
+              </>,
+            },
+            {
+              key: "tasks",
+              label: t("settingsPage.tasks.taskView"),
+              children: <>
+                <section className="settings-task-controls is-schedules" aria-label={t("settingsPage.tasks.scheduleControlsAria")}>
+                  {taskControl("schedules_enabled", <ClockCircleOutlined />, t("settingsPage.tasks.enableSchedules"), t("settingsPage.tasks.enableSchedulesDesc", { count: selectedSection.counts.enabled }))}
+                </section>
+                {integratedSurface(<SettingsScheduleList schedulesEnabled={schedulesEnabled} onChanged={syncOverview} />, "is-tasks")}
+              </>,
+            },
+          ]}
+        />
       </>;
     } else if (section === "knowledge") {
       content = knowledgeToolView ? (
@@ -716,12 +830,13 @@ export default function SettingsPage() {
       </>;
     } else if (section === "mcp") {
       content = <>
-        {integratedHeader(t("settingsPage.sections.mcp"), selectedSection.detail)}
+        {integratedHeader(t("settingsPage.sections.mcp"), t("settingsPage.overview.mcpDesc"))}
         {masterControl("mcp_enabled")}
         {integratedSurface(
           <ToolManagementSection
             description={t("settingsPage.systemTools.mcpDesc")}
             layout="settings"
+            onChanged={syncOverview}
             refreshToken={mcpRefreshToken}
             title={t("settingsPage.systemTools.mcpTitle")}
             view="mcp"
@@ -733,15 +848,17 @@ export default function SettingsPage() {
       content = integratedSurface(<AgentIntegrationPage />, "is-assistants");
     } else if (section === "channels") {
       content = integratedSurface(<TerminalConnectionPage />, "is-channels");
+    } else if (section === "recovery") {
+      content = <RecoverySettings headingRef={headingRef} />;
     } else if (section === "diagnostics") {
       content = renderDiagnostics();
     } else {
       content = <>
-        {integratedHeader(t("settingsPage.sections.developer"), selectedSection.detail, <Tag className="settings-admin-tag">{t("settingsPage.adminOnly")}</Tag>)}
+        {integratedHeader(t("settingsPage.sections.developer"), selectedSection.detail)}
         <div className="settings-detail-group">
           <div className="settings-detail-row">
             <div>
-              <strong>{t("settingsPage.developer.enableTitle")}</strong>
+              <strong>{t(developerActive ? "settingsPage.developer.disableTitle" : "settingsPage.developer.enableTitle")}</strong>
               <p>{t("settingsPage.developer.enableDesc")}</p>
             </div>
             <Switch
@@ -757,7 +874,7 @@ export default function SettingsPage() {
       </>;
     }
 
-    return <section className={`settings-detail-page settings-integrated-page${section === "system_tools" ? " is-system-tools-page" : section === "mcp" ? " is-mcp-page" : ""}`}>
+    return <section className={`settings-detail-page settings-integrated-page${section === "models" ? " is-models-page" : section === "system_tools" ? " is-system-tools-page" : section === "mcp" ? " is-mcp-page" : ""}`}>
       {content}
       <div className="settings-screenreader-status" role="status" aria-live="polite">
         {saving ? t("settingsPage.savingStatus") : checking ? t("settingsPage.checkingStatus") : ""}

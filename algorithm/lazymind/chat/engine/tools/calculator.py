@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import math
-from typing import Any, Dict
+
+from lazyllm.tools.agent import ToolExecutionError
 
 from lazymind.chat.engine.tools.infra import (
-    handle_tool_errors,
     safe_evaluate_expression,
-    tool_success,
 )
 
 
@@ -21,8 +20,7 @@ def format_calculation_result(value: int | float) -> str:
     return text
 
 
-@handle_tool_errors
-def calculator(expression: str) -> Dict[str, Any]:
+def calculator(expression: str) -> str:
     """Evaluate a mathematical expression safely.
 
     Use this tool for numeric calculations, unit conversions, percentages, and
@@ -39,21 +37,16 @@ def calculator(expression: str) -> Dict[str, Any]:
             pi, e, and tau are available.
 
     Returns:
-        A unified tool payload whose result contains the evaluated value.
+        The formatted calculation result.
     """
     normalized = str(expression or '').strip()
-    value = safe_evaluate_expression(normalized)
-    if isinstance(value, bool):
-        raise ValueError('expression did not evaluate to a number')
-    if not isinstance(value, (int, float)):
-        raise ValueError('expression did not evaluate to a number')
-    if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
-        raise ValueError('expression result is not a finite number')
+    try:
+        value = safe_evaluate_expression(normalized)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError('expression did not evaluate to a number')
+        if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
+            raise ValueError('expression result is not a finite number')
+    except ValueError as exc:
+        raise ToolExecutionError(str(exc)) from exc
 
-    formatted = format_calculation_result(value)
-    return tool_success('calculator', {
-        'status': 'ok',
-        'expression': normalized,
-        'result': formatted,
-        'value': value,
-    })
+    return format_calculation_result(value)

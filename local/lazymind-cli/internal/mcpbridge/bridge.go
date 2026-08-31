@@ -19,6 +19,9 @@ import (
 )
 
 var requiredTools = []string{
+	"cloud_document.get",
+	"cloud_document.list",
+	"cloud_document.search",
 	"knowledge.document.get",
 	"knowledge.document.list",
 	"knowledge.list",
@@ -30,6 +33,7 @@ var requiredTools = []string{
 type Bridge struct {
 	api                 *coreapi.Client
 	connectorInstanceID string
+	sourceProvider      string
 }
 
 type ProbeResult struct {
@@ -46,7 +50,10 @@ func New(store *credentials.Store) (*Bridge, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Bridge{api: api, connectorInstanceID: instanceID}, nil
+	return &Bridge{
+		api: api, connectorInstanceID: instanceID,
+		sourceProvider: strings.ToLower(strings.TrimSpace(os.Getenv("LAZYMIND_AGENT_PROVIDER"))),
+	}, nil
 }
 
 func (b *Bridge) Endpoint(ctx context.Context) (string, error) {
@@ -141,7 +148,9 @@ func (b *Bridge) RunStdio(ctx context.Context) error {
 	for _, name := range workflowmcp.ToolNames {
 		readOnlyTools[name] = workflowmcp.IsReadOnlyTool(name)
 	}
-	server.AddReceivingMiddleware(invocationMiddleware(b.api, b.connectorInstanceID, readOnlyTools))
+	server.AddReceivingMiddleware(invocationMiddleware(
+		b.api, b.connectorInstanceID, b.sourceProvider, readOnlyTools,
+	))
 	err = server.Run(ctx, &mcp.StdioTransport{})
 	if errors.Is(err, context.Canceled) {
 		return nil

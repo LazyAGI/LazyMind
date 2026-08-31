@@ -27,6 +27,112 @@ func TestRealExternalAgentChat(t *testing.T) {
 	}
 }
 
+func TestRealExternalExecutorPolicy(t *testing.T) {
+	if os.Getenv("LAZYMIND_REAL_EXECUTOR_POLICY_E2E") != "1" {
+		t.Skip("set LAZYMIND_REAL_EXECUTOR_POLICY_E2E=1 with the Assistant Bridge active")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	serverURL, token := realCredentials(t)
+	bridgeURL := "http://127.0.0.1:19091/v1"
+
+	beforeLogin, err := exec.CommandContext(ctx, "codex", "login", "status").CombinedOutput()
+	if err != nil {
+		t.Fatalf("Codex must be logged in before the executor policy test: %v: %s", err, strings.TrimSpace(string(beforeLogin)))
+	}
+
+	realSetExecutorPolicy(t, ctx, bridgeURL, "codex", false)
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cleanupCancel()
+		realSetExecutorPolicy(t, cleanupCtx, bridgeURL, "codex", true)
+	})
+	realWaitExecutorAvailability(t, ctx, serverURL, token, "codex", false)
+
+	payload, err := json.Marshal(map[string]any{
+		"conversation_id": fmt.Sprintf("ext-policy-disabled-%x", time.Now().UnixNano()),
+		"conversation":    map[string]any{"display_name": "Disabled executor policy E2E"},
+		"stream":          true,
+		"input":           []map[string]any{{"input_type": "text", "text": "This must not reach Codex."}},
+		"initial_conversation_settings": map[string]any{
+			"chat_executor": "codex", "enable_workflow": false,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = externalChatStream(ctx, serverURL+"/api/core/conversations:chat", token, payload)
+	if err == nil || !strings.Contains(err.Error(), "HTTP 503") || !strings.Contains(err.Error(), "Disabled in LazyMind settings") {
+		t.Fatalf("disabled executor request was not rejected by Core: %v", err)
+	}
+
+	afterLogin, err := exec.CommandContext(ctx, "codex", "login", "status").CombinedOutput()
+	if err != nil || strings.TrimSpace(string(afterLogin)) != strings.TrimSpace(string(beforeLogin)) {
+		t.Fatalf("executor policy changed Codex login: before=%q after=%q err=%v", beforeLogin, afterLogin, err)
+	}
+
+	realSetExecutorPolicy(t, ctx, bridgeURL, "codex", true)
+	realWaitExecutorAvailability(t, ctx, serverURL, token, "codex", true)
+	conversationID := fmt.Sprintf("ext-policy-enabled-%x", time.Now().UnixNano())
+	turn := runExternalChatTurn(t, ctx, serverURL, token, "codex", conversationID,
+		"只回复标记 LM-EXECUTOR-POLICY-REENABLED。", true)
+	if !strings.Contains(turn.Message, "LM-EXECUTOR-POLICY-REENABLED") {
+		t.Fatalf("re-enabled Codex executor missed marker: %q", turn.Message)
+	}
+}
+
+func realSetExecutorPolicy(t *testing.T, ctx context.Context, bridgeURL, provider string, enabled bool) {
+	t.Helper()
+	action := "disable"
+	if enabled {
+		action = "enable"
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		bridgeURL+"/executors/"+url.PathEscape(provider)+"/"+action, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+		t.Fatalf("set executor policy: HTTP %d: %s", response.StatusCode, strings.TrimSpace(string(body)))
+	}
+}
+
+func realWaitExecutorAvailability(
+	t *testing.T,
+	ctx context.Context,
+	serverURL, token, provider string,
+	want bool,
+) {
+	t.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		var status struct {
+			Available         bool   `json:"available"`
+			UnavailableReason string `json:"unavailable_reason"`
+		}
+		realAPI(t, ctx, http.MethodGet,
+			serverURL+"/api/core/external-chat/hosts/"+url.PathEscape(provider)+"/status",
+			token, nil, &status)
+		if status.Available == want && (want || strings.Contains(status.UnavailableReason, "Disabled in LazyMind settings")) {
+			return
+		}
+		timer := time.NewTimer(250 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			t.Fatal(ctx.Err())
+		case <-timer.C:
+		}
+	}
+	t.Fatalf("%s executor availability did not become %v", provider, want)
+}
+
 func TestRealExternalAgentImageWorkflowArtifactDelivery(t *testing.T) {
 	if os.Getenv("LAZYMIND_REAL_EXTERNAL_IMAGE_WORKFLOW_E2E") != "1" {
 		t.Skip("set LAZYMIND_REAL_EXTERNAL_IMAGE_WORKFLOW_E2E=1 with the Codex Host active")
@@ -184,7 +290,7 @@ func testRealExternalAgentChat(t *testing.T, provider string) {
 		HostOnline bool   `json:"host_online"`
 		Available  bool   `json:"available"`
 	}
-	realAPI(t, ctx, http.MethodGet, serverURL+"/api/core/external-chat/hosts/"+url.PathEscape(provider)+":status", token, nil, &hostStatus)
+	realAPI(t, ctx, http.MethodGet, serverURL+"/api/core/external-chat/hosts/"+url.PathEscape(provider)+"/status", token, nil, &hostStatus)
 	if !hostStatus.Installed || !hostStatus.HostOnline || !hostStatus.Available {
 		t.Fatalf("real %s Agent host is not ready: %#v", provider, hostStatus)
 	}
@@ -312,6 +418,63 @@ func testRealExternalAgentChat(t *testing.T, provider string) {
 	t.Logf("real external Chat passed: conversation=%s histories=%s,%s,%s workflow=%s thread=%s",
 		conversationID, first.HistoryID, second.HistoryID, third.HistoryID,
 		latestWorkflow.Session.ID, runPage.Runs[0].ProviderThreadID)
+}
+
+func TestRealCodexHostUsesCompleteDistribution(t *testing.T) {
+	if os.Getenv("LAZYMIND_REAL_CODEX_HOST_E2E") != "1" {
+		t.Skip("set LAZYMIND_REAL_CODEX_HOST_E2E=1 with the Assistant Bridge active")
+	}
+	testRealExternalHostUsesCompleteDistribution(t, "codex", "CODEX_HOST_DISTRIBUTION_OK")
+}
+
+func TestRealCursorHostUsesCompleteDistribution(t *testing.T) {
+	if os.Getenv("LAZYMIND_REAL_CURSOR_HOST_E2E") != "1" {
+		t.Skip("set LAZYMIND_REAL_CURSOR_HOST_E2E=1 with the Assistant Bridge active")
+	}
+	testRealExternalHostUsesCompleteDistribution(t, "cursor", "CURSOR_HOST_DISTRIBUTION_OK")
+}
+
+func testRealExternalHostUsesCompleteDistribution(t *testing.T, provider, marker string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	serverURL, token := realCredentials(t)
+	conversationID := fmt.Sprintf("%s-host-%x", provider, time.Now().UnixNano())
+	result := runExternalChatTurn(t, ctx, serverURL, token, provider, conversationID,
+		"必须调用 lazymind MCP 的 workflow.list 一次；真实返回后只回复 "+marker+"。", true)
+	if !strings.Contains(result.Message, marker) || strings.Count(result.Message, marker) != 1 {
+		t.Fatalf("%s Host result=%q", provider, result.Message)
+	}
+	projection := realHistoryExecutionProjection(
+		t, ctx, serverURL, token, conversationID, result.HistoryID,
+	)
+	if projection.Provider != provider || projection.Status != "completed" ||
+		projection.Invocation.Total == 0 {
+		t.Fatalf("%s Host execution=%#v", provider, projection)
+	}
+}
+
+func TestRealLazyBoundExternalSessionResume(t *testing.T) {
+	if os.Getenv("LAZYMIND_REAL_BOUND_SESSION_E2E") != "1" {
+		t.Skip("set LAZYMIND_REAL_BOUND_SESSION_E2E=1 with a bound provider session")
+	}
+	provider := strings.TrimSpace(os.Getenv("LAZYMIND_REAL_BOUND_SESSION_PROVIDER"))
+	conversationID := strings.TrimSpace(os.Getenv("LAZYMIND_REAL_BOUND_SESSION_CONVERSATION"))
+	if provider == "" || conversationID == "" {
+		t.Fatal("LAZYMIND_REAL_BOUND_SESSION_PROVIDER and LAZYMIND_REAL_BOUND_SESSION_CONVERSATION are required")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	serverURL, token := realCredentials(t)
+	result := runExternalChatTurn(t, ctx, serverURL, token, provider, conversationID,
+		"调用 lazymind MCP 的 workflow.list 一次；真实返回后回复 LAZY_BOUND_RESUME_OK。", false)
+	if !strings.Contains(result.Message, "LAZY_BOUND_RESUME_OK") {
+		t.Fatalf("lazy-bound %s result=%q", provider, result.Message)
+	}
+	projection := realHistoryExecutionProjection(t, ctx, serverURL, token, conversationID, result.HistoryID)
+	if projection.Provider != provider || projection.Status != "completed" || projection.Invocation.Total == 0 {
+		t.Fatalf("lazy-bound execution=%#v", projection)
+	}
 }
 
 func TestRealExternalAgentChatStop(t *testing.T) {
@@ -683,7 +846,7 @@ func waitForRealCore(t *testing.T, ctx context.Context, serverURL, token string)
 	deadline := time.Now().Add(60 * time.Second)
 	for time.Now().Before(deadline) {
 		request, err := http.NewRequestWithContext(ctx, http.MethodGet,
-			serverURL+"/api/core/external-chat/hosts/codex:status", nil)
+			serverURL+"/api/core/external-chat/hosts/codex/status", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -960,6 +1123,10 @@ func externalChatStream(ctx context.Context, endpoint, token string, encoded []b
 				FinishReason          string                       `json:"finish_reason"`
 				ExternalEventSequence int64                        `json:"external_event_sequence"`
 				Execution             *externalExecutionProjection `json:"execution"`
+				RuntimeEvent          *struct {
+					Type string          `json:"type"`
+					Data json.RawMessage `json:"data"`
+				} `json:"runtime_event"`
 			} `json:"result"`
 		}
 		if json.Unmarshal([]byte(data), &envelope) != nil {
@@ -975,6 +1142,18 @@ func externalChatStream(ctx context.Context, endpoint, token string, encoded []b
 		}
 		if envelope.Result.FinishReason != "" {
 			finishReason = envelope.Result.FinishReason
+		}
+		if event := envelope.Result.RuntimeEvent; event != nil && event.Type == "run_finished" {
+			var terminal struct {
+				Status string `json:"status"`
+			}
+			if json.Unmarshal(event.Data, &terminal) == nil {
+				if terminal.Status == "completed" || terminal.Status == "cancelled" {
+					finishReason = "FINISH_REASON_STOP"
+				} else {
+					finishReason = "FINISH_REASON_UNKNOWN"
+				}
+			}
 		}
 		if envelope.Result.ExternalEventSequence > result.EventSequence {
 			result.EventSequence = envelope.Result.ExternalEventSequence

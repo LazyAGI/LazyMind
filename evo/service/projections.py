@@ -960,7 +960,7 @@ def _repair_trace_event(thread_id: str, step_id: str,
     return {
         'thread_id': thread_id,
         'step_id': step_id,
-        'execution_id': execution_id,
+        'execution_id': str(row.get('execution_id') or execution_id),
         'stage': 'repair',
         'event_id': _repair_trace_event_id(thread_id, sequence),
         'event_type': str(row.get('type') or 'repair.trace'),

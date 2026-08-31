@@ -1,0 +1,176 @@
+{
+  "version": 1,
+  "ask_options": [
+    {"style_id": 10, "label": "赛博朋克｜霓虹暗底、电影式非对称大图、HUD 信息轨道"},
+    {"style_id": 1, "label": "科技感｜深色数据界面、蓝青信号线、专业克制"},
+    {"style_id": 60, "label": "未来主义｜银白蓝紫、流线造型、产品发布感留白"},
+    {"style_id": 68, "label": "科幻/HUD｜全息视窗、遥测标签、精密信息框架"},
+    {"style_id": 19, "label": "商务经典｜深蓝灰、稳重结构、可信数据表达"},
+    {"style_id": 67, "label": "轻商务/现代商务｜年轻简洁、互联网感、清晰模块"},
+    {"style_id": 3, "label": "杂志感｜大图裁切、栏目排版、编辑设计层次"},
+    {"style_id": 2, "label": "极简主义｜大留白、少色块、强字体层级"},
+    {"style_id": 61, "label": "简约大气｜大标题、宽间距、克制但有冲击力"},
+    {"style_id": 17, "label": "渐变流体｜大面积单层渐变、流动曲线、现代视觉"},
+    {"style_id": 18, "label": "国潮｜现代色块、云纹窗格、印章式文化元素"},
+    {"style_id": 37, "label": "胶片/摄影｜主视觉大图、编辑裁切、克制文字"},
+    {"style_id": 49, "label": "节日/庆典｜动势构图、醒目标题、边缘庆典装饰"},
+    {"style_id": 41, "label": "自然生态｜有机曲线、大地色、舒展图文关系"},
+    {"style_id": 52, "label": "医疗/健康｜浅蓝绿、可信留白、专业信息层级"},
+    {"style_id": 16, "label": "卡通可爱｜圆润造型、活泼色彩、友好叙事"}
+  ],
+  "common": {
+    "quality_bar": [
+      "Create a deliberate presentation composition, not a generic web dashboard or a stack of equal cards.",
+      "Use two or three dominant visual zones with one clear focal point and strong alignment.",
+      "Vary composition by page purpose while preserving the same palette, type personality, surface language, and decoration system across the deck."
+    ],
+    "hierarchy": [
+      "Cover titles should normally be 72-104px; content-page titles 48-68px; body text 18-26px.",
+      "Use contrast in scale and whitespace before adding decoration. Keep supporting copy visibly subordinate.",
+      "Avoid long centered paragraphs and avoid shrinking body text below 16px to fit content."
+    ],
+    "image_rules": [
+      "When a material image is supplied, make it a real compositional anchor occupying roughly 38-56% of the usable canvas unless the page is data-led.",
+      "Preserve the image aspect ratio with object-fit: cover or contain, use a deliberate frame, and never make it a small floating thumbnail.",
+      "Keep inherited images unobscured: text and dark overlays must not cover them."
+    ],
+    "export_safe_effects": [
+      "Use explicit div layers, solid fills, one gradient per element, borders, border-radius, opacity, box-shadow, text-shadow, and small SVG or CSS line decorations.",
+      "Build grids, rails, corner marks, bands, and geometric accents as explicit elements so editable PPTX export can reconstruct them.",
+      "Prefer a few large visual gestures over many tiny ornaments."
+    ],
+    "forbidden_effects": [
+      "Do not rely on blur or backdrop-filter, clip-path, masks, animation, multi-layer CSS backgrounds, large pseudo-elements, or image overlays.",
+      "Do not create empty image placeholders, giant empty rectangles, or repeated card grids merely to fill space."
+    ]
+  },
+  "families": {
+    "technology_cinematic": {
+      "style_ids": [1, 10, 21, 24, 33, 40, 43, 44, 48, 50, 56, 60, 64, 68],
+      "description": "Cinematic technology language with controlled contrast, luminous accents, precise geometry, and visible depth.",
+      "composition": [
+        "Prefer an asymmetric split, framed hero visual, dashboard rail, or one large information field instead of a centered poster plus equal cards.",
+        "Use a strong title block counterbalanced by one large image or data region; align secondary items to a visible grid."
+      ],
+      "background": [
+        "Use one dark or cool single-gradient base and add sparse explicit grid lines, horizon lines, coordinate ticks, or orbital geometry.",
+        "Keep the center readable and push atmospheric decoration toward edges and corners."
+      ],
+      "surfaces": [
+        "Use thin luminous borders, restrained solid or rgba panels, sharp corner cuts simulated with explicit line elements, and limited glow.",
+        "Avoid making every bullet an identical rounded card; use rails, numbered modules, timelines, or annotated callouts when appropriate."
+      ],
+      "typography": "Use condensed or geometric headings with wide tracking and high scale contrast; keep body text simple and highly legible.",
+      "decoration": "Use no more than two accent colors for luminous rails, corner marks, scan lines, small status labels, and numeric coordinates."
+    },
+    "editorial_business": {
+      "style_ids": [2, 3, 14, 15, 19, 31, 32, 35, 61, 67],
+      "description": "Editorial clarity, disciplined hierarchy, credible data presentation, and intentional whitespace.",
+      "composition": [
+        "Use editorial columns, a dominant statement with evidence, a data-led split, or a restrained report grid.",
+        "Align text to a strong baseline and avoid decorative symmetry when the content has a natural reading order."
+      ],
+      "background": [
+        "Use a calm solid or subtle single-gradient field with one structural band, rule, or margin system.",
+        "Reserve the strongest color for conclusions, key numbers, and navigation cues."
+      ],
+      "surfaces": [
+        "Prefer open sections, rules, and tonal grouping over boxed cards; use cards only when the content represents discrete comparable units."
+      ],
+      "typography": "Use assertive but restrained headings, readable body copy, compact labels, and tabular alignment for metrics.",
+      "decoration": "Use thin rules, folios, captions, section numbers, and restrained geometric accents."
+    },
+    "modern_geometric": {
+      "style_ids": [5, 7, 8, 17, 22, 23, 30, 34, 46],
+      "description": "Bold geometric organization, confident color fields, and clean contemporary rhythm.",
+      "composition": [
+        "Build the page from two or three large geometric regions with one intentional overlap-free focal block.",
+        "Use asymmetry, stepped alignment, or a strong modular grid rather than a generic centered stack."
+      ],
+      "background": "Use one color field or single gradient with explicit circles, bars, lines, or polygons made from normal elements.",
+      "surfaces": "Use crisp blocks, clear edges, selective radius, and controlled shadow depth; do not wrap every text fragment in a card.",
+      "typography": "Use bold scale changes, short lines, and strong left edges; labels may use uppercase tracking.",
+      "decoration": "Repeat one geometric motif at two or three scales to create a coherent system."
+    },
+    "illustrative_playful": {
+      "style_ids": [9, 11, 12, 13, 16, 29, 39, 45, 59, 62],
+      "description": "Expressive, approachable layouts with character, varied rhythm, and friendly visual storytelling.",
+      "composition": [
+        "Use a story-led scene, scrapbook arrangement, comic sequence, or playful staggered modules while keeping a clear reading path.",
+        "Let one illustration or headline dominate; supporting items should vary in size instead of forming a rigid equal-card row."
+      ],
+      "background": "Use a clean light or saturated single-color base with explicit stickers, dots, tape strips, speech shapes, or pixel blocks.",
+      "surfaces": "Use friendly radius and simple shadows, but keep shapes large and intentional.",
+      "typography": "Use expressive headings with compact, highly readable supporting text.",
+      "decoration": "Choose one signature motif and repeat it sparingly; avoid noisy confetti across the full canvas."
+    },
+    "cultural_heritage": {
+      "style_ids": [4, 18, 25, 36, 38, 49, 51, 63],
+      "description": "Culturally specific structure and ornament expressed with modern presentation discipline.",
+      "composition": [
+        "Use ceremonial symmetry, an editorial scroll, framed heritage imagery, or a modern reinterpretation of traditional spatial hierarchy.",
+        "Keep one dominant cultural motif and give content generous breathing room."
+      ],
+      "background": "Use one restrained base tone or single gradient with explicit borders, seals, window lines, clouds, rays, banners, or archival rules.",
+      "surfaces": "Use framed panels and layered solid-color bands; avoid generic SaaS-style rounded cards.",
+      "typography": "Pair a culturally appropriate display heading with a clean body font; use measured spacing and formal hierarchy.",
+      "decoration": "Use recognizable motifs at edges and dividers, never as a dense wallpaper behind body text."
+    },
+    "photographic_material": {
+      "style_ids": [6, 20, 26, 27, 28, 37, 47, 54, 57, 65, 66],
+      "description": "Image-led presentation with tactile surfaces, strong cropping, and material-specific detail.",
+      "composition": [
+        "Give photography or a material texture the dominant region and place copy in a clean adjacent field.",
+        "Use editorial cropping, a full-height image column, or a large framed image rather than a thumbnail above text."
+      ],
+      "background": "Use a solid or single-gradient field that complements the image; express texture with explicit small accents rather than unsupported filters.",
+      "surfaces": "Use a small number of substantial panels with clear material cues, borders, and controlled shadows.",
+      "typography": "Use display type that matches the subject while keeping captions and body copy neutral and readable.",
+      "decoration": "Use labels, frames, stitching lines, industrial rules, speed marks, or fine ornamental borders appropriate to the selected style."
+    },
+    "nature_wellbeing": {
+      "style_ids": [41, 42, 52, 53, 55, 58],
+      "description": "Calm organic composition, trustworthy spacing, soft color relationships, and human-centered imagery.",
+      "composition": [
+        "Use flowing but clearly aligned sections, a generous image-and-copy split, or a calm evidence-led layout.",
+        "Keep the page open and avoid dense dashboards or excessive micro-cards."
+      ],
+      "background": "Use one light, natural, aquatic, or clinical single-gradient base with explicit soft curves or botanical line motifs.",
+      "surfaces": "Use broad clean panels, light borders, and subtle shadows with comfortable internal spacing.",
+      "typography": "Use warm or clinical clarity according to the style, with generous line height and restrained emphasis.",
+      "decoration": "Use organic curves, waves, leaves, droplets, petals, or health symbols as sparse edge accents."
+    }
+  },
+  "overrides": {
+    "1": {
+      "style_signature": "Clean technology: deep data field, cyan or blue signal rails, large metrics, precise grid, and minimal glow.",
+      "avoid": "Do not turn every technology page into neon cyberpunk; retain clarity and professional restraint."
+    },
+    "10": {
+      "style_signature": "Cyberpunk: cinematic asymmetry, deep navy-black space, magenta/cyan signal rails, sparse glitch offsets, coordinate labels, and one dominant urban or character visual.",
+      "composition": [
+        "For a cover, prefer a 44-56% hero image beside or below an oversized offset title block; do not use a small centered banner above the title.",
+        "For content pages, use a large image or diagram on one side and a vertical mission-log, dossier, or HUD information rail on the other.",
+        "Replace generic equal rounded cards with numbered system modules, thin framed rows, or staggered callouts unless comparison explicitly requires equal cards."
+      ],
+      "decoration": "Use explicit neon corner brackets, thin scan rails, tiny status labels, numeric coordinates, and restrained text-shadow; keep glow tight enough that Chinese titles remain sharp.",
+      "avoid": "Avoid a centered poster template, excessive pink glow, tiny low-resolution hero images, and large empty dark regions."
+    },
+    "18": {
+      "style_signature": "Chinese neo-traditional: contemporary asymmetric blocks combined with seals, cloud lines, lattice geometry, and one disciplined heritage palette.",
+      "avoid": "Do not default to red-and-gold celebration unless the user explicitly requests it."
+    },
+    "49": {
+      "style_signature": "Celebration: one energetic diagonal or radial movement, bold event title, varied-size highlights, and explicit ribbons or fireworks at the edges.",
+      "avoid": "Do not use a uniform four-card dashboard for an emotional event page."
+    },
+    "60": {
+      "style_signature": "Clean futurism: silver-white or cool deep field, aerodynamic curves, sparse blue-violet light, large calm typography, and premium product-launch spacing.",
+      "avoid": "Do not substitute dark neon cyberpunk aesthetics for clean futurism."
+    },
+    "68": {
+      "style_signature": "Sci-fi HUD: one dominant viewport, calibrated frame lines, telemetry labels, precise numeric modules, and disciplined cyan/blue signal color.",
+      "avoid": "Do not fill the entire page with tiny unreadable interface widgets."
+    }
+  }
+}

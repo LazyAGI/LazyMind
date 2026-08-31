@@ -25,6 +25,7 @@ def test_kb_style_accepts_text_only_materials_and_passes_them_to_prompt():
     assert '{{material_summary}}' in optimize['prompt']
     assert {
         'material': 'material_summary',
-        'required': True,
+        'required': False,
     } in optimize['inputs']
+    assert 'skipped collect_materials for a self-contained request' in optimize['prompt']
     assert 'Do not require material_images when the KB text is sufficient' in optimize['prompt']

@@ -29,6 +29,10 @@ func NewTestDB(t *testing.T) *TestDB {
 		&SkillBlobRow{},
 		&SkillRevisionRow{},
 		&SkillRevisionEntryRow{},
+		&orm.SkillDistributionArtifact{},
+		&orm.SkillDistributionEntry{},
+		&orm.SkillDistributionBinding{},
+		&orm.SkillRevisionDistribution{},
 		&SkillDraftRow{},
 		&SkillDraftEntryRow{},
 		&SkillDraftReviewSessionRow{},
@@ -68,6 +72,10 @@ func ResetSkillTables(t *testing.T, db *TestDB) {
 	t.Helper()
 
 	for _, table := range []string{
+		"skill_revision_distributions",
+		"skill_distribution_bindings",
+		"skill_distribution_entries",
+		"skill_distribution_artifacts",
 		"skill_draft_entries",
 		"skill_draft_review_action_items",
 		"skill_draft_review_action_batches",
@@ -115,16 +123,16 @@ func TimeFixture() time.Time {
 
 type SkillRow struct {
 	ID                    string     `gorm:"column:id;type:varchar(36);primaryKey"`
-	OwnerUserID           string     `gorm:"column:owner_user_id;type:text;not null;uniqueIndex:uk_skills_owner_identity,priority:1;uniqueIndex:uk_skills_owner_relative_root,priority:1"`
+	OwnerUserID           string     `gorm:"column:owner_user_id;type:text;not null;uniqueIndex:uk_skills_owner_identity,priority:1,where:deleted_at IS NULL;uniqueIndex:uk_skills_owner_relative_root,priority:1,where:deleted_at IS NULL"`
 	OwnerUserName         string     `gorm:"column:owner_user_name;type:text;not null;default:''"`
 	CreateUserID          string     `gorm:"column:create_user_id;type:text;not null"`
 	CreateUserName        string     `gorm:"column:create_user_name;type:text;not null;default:''"`
-	Category              string     `gorm:"column:category;type:text;not null;uniqueIndex:uk_skills_owner_identity,priority:2"`
-	SkillName             string     `gorm:"column:skill_name;type:text;not null;uniqueIndex:uk_skills_owner_identity,priority:3"`
+	Category              string     `gorm:"column:category;type:text;not null;uniqueIndex:uk_skills_owner_identity,priority:2,where:deleted_at IS NULL"`
+	SkillName             string     `gorm:"column:skill_name;type:text;not null;uniqueIndex:uk_skills_owner_identity,priority:3,where:deleted_at IS NULL"`
 	OriginBuiltinSkillUID string     `gorm:"column:origin_builtin_skill_uid;type:text;not null;default:''"`
 	Description           string     `gorm:"column:description;type:text"`
 	Tags                  []byte     `gorm:"column:tags;type:json"`
-	RelativeRoot          string     `gorm:"column:relative_root;type:text;not null;uniqueIndex:uk_skills_owner_relative_root,priority:2"`
+	RelativeRoot          string     `gorm:"column:relative_root;type:text;not null;uniqueIndex:uk_skills_owner_relative_root,priority:2,where:deleted_at IS NULL"`
 	SkillMDPath           string     `gorm:"column:skill_md_path;type:text;not null;default:'SKILL.md'"`
 	HeadRevisionID        *string    `gorm:"column:head_revision_id;type:varchar(36)"`
 	Version               int64      `gorm:"column:version;not null;default:1"`
@@ -138,6 +146,7 @@ type SkillRow struct {
 	UpdateStatus          string     `gorm:"column:update_status;type:text;not null;default:'up_to_date'"`
 	Ext                   []byte     `gorm:"column:ext;type:json"`
 	DeletedAt             *time.Time `gorm:"column:deleted_at"`
+	TrashExpiresAt        *time.Time `gorm:"column:trash_expires_at"`
 	DeletedBy             *string    `gorm:"column:deleted_by;type:text"`
 	CreatedAt             time.Time  `gorm:"column:created_at;not null"`
 	UpdatedAt             time.Time  `gorm:"column:updated_at;not null"`

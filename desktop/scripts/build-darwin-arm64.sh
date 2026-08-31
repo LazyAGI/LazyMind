@@ -8,7 +8,7 @@ DIST_ROOT="${ROOT}/desktop/dist"
 APP_ICON="${ROOT}/desktop/electron/assets/LazyMind.icns"
 PACKAGE_KIND="${LAZYMIND_DESKTOP_PACKAGE_KIND:-zip}"
 SIGNING_MODE="${LAZYMIND_DESKTOP_SIGNING_MODE:-adhoc}"
-LAZYLLM_VERSION="${LAZYMIND_LAZYLLM_VERSION:-1.2.2}"
+LAZYLLM_VERSION="${LAZYMIND_LAZYLLM_VERSION:-$(tr -d '[:space:]' < "${ROOT}/LAZYLLM_VERSION")}"
 RELEASE_BUILD="${LAZYMIND_RELEASE_BUILD:-false}"
 
 GO_BIN="${GO:-go}"
@@ -134,6 +134,10 @@ prune_runtime_app() {
   else
     remove_generated_path "${app_root}/algorithm/lazyllm/docs"
   fi
+  remove_generated_path "${app_root}/skills/.runtime"
+  remove_generated_path "${app_root}/skills/research"
+  remove_generated_path "${app_root}/skills/review"
+  remove_generated_path "${app_root}/skills/search"
   remove_generated_path "${app_root}/backend/core/core"
 }
 
@@ -200,14 +204,35 @@ rsync -a --delete \
   --exclude "/.claude" \
   --exclude "/.cursor" \
   --exclude "/.vscode" \
+  --exclude "/.github" \
+  --exclude "/.coverage" \
+  --exclude "/docs" \
+  --exclude "/tests" \
   --exclude "/data" \
   --exclude "/volumes" \
   --exclude "/local/config.env" \
+  --exclude "/history-injection" \
+  --exclude "lazymind-history-injection*.zip" \
   --exclude "local/build" \
   --exclude "local/runtime" \
   --exclude "desktop/build" \
   --exclude "desktop/cache" \
+  --exclude "skills/.runtime" \
+  --exclude "skills/research" \
+  --exclude "skills/review" \
+  --exclude "skills/search" \
+  --exclude "skills/featured" \
   --exclude "node_modules" \
+  --exclude "test" \
+  --exclude "tests" \
+  --exclude "testdata" \
+  --exclude "__snapshots__" \
+  --exclude "*_test.go" \
+  --exclude "test_*.py" \
+  --exclude "*.test.js" \
+  --exclude "*.test.mjs" \
+  --exclude "*.test.ts" \
+  --exclude "*.test.tsx" \
   --exclude "__pycache__" \
   --exclude ".pytest_cache" \
   --exclude ".ruff_cache" \
@@ -220,10 +245,32 @@ rsync -a --delete \
   --exclude "/frontend/public" \
   --exclude "/frontend/scripts" \
   --exclude "/backend/core/core" \
+  --exclude "/README.md" \
+  --exclude "/README.CN.md" \
+  --exclude "/Makefile" \
   "${ROOT}/" "${RUNTIME_ROOT}/app/"
 
 prune_runtime_app "${RUNTIME_ROOT}/app"
 assert_desktop_runtime_app "${RUNTIME_ROOT}/app"
+
+echo "==> Materializing offline Skill packages and featured catalog"
+BUILTIN_SKILL_BUNDLE_ARGS=(
+  run ./cmd/builtin-skill-bundle
+  --sources "${ROOT}/skills/builtin-sources.yaml"
+  --lock "${ROOT}/skills/builtin-skills.lock.json"
+  --cache "${ROOT}/desktop/cache/builtin-skills"
+  --output "${RUNTIME_ROOT}/builtin-skills"
+  --featured-sources "${ROOT}/skills/featured"
+  --featured-output "${RUNTIME_ROOT}/featured-skills"
+)
+if [[ "${RELEASE_BUILD}" == "true" ]]; then
+  BUILTIN_SKILL_BUNDLE_ARGS+=(--frozen-lockfile)
+fi
+(cd "${ROOT}/backend/core" && "${GO_BIN}" "${BUILTIN_SKILL_BUNDLE_ARGS[@]}")
+
+echo "==> Downloading verified history injection package"
+node "${ROOT}/desktop/scripts/stage-history-injection-package.mjs" "${RUNTIME_ROOT}"
+
 TRUSTED_LOCAL_MODE=false
 if [[ "${LAZYMIND_TRUSTED_LOCAL_MODE:-}" == "true" ]]; then
   TRUSTED_LOCAL_MODE=true
@@ -232,6 +279,7 @@ fi
 node "${ROOT}/desktop/scripts/write-runtime-manifest.mjs" \
   "${RUNTIME_ROOT}" --platform darwin --arch arm64 \
   --trusted-local-mode "${TRUSTED_LOCAL_MODE}"
+node "${ROOT}/desktop/scripts/write-editable-ppt-dependency-config.mjs" "${RUNTIME_ROOT}"
 
 echo "==> Packaging Electron app"
 if [[ ! -f "${APP_ICON}" ]]; then

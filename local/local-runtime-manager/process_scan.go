@@ -46,6 +46,7 @@ func localProcessBelongsToRuntime(record LocalProcessRecord, paths RuntimePaths)
 
 func dedupeProcessRecords(records []LocalProcessRecord, paths RuntimePaths) []LocalProcessRecord {
 	byPID := map[int]LocalProcessRecord{}
+	currentProcessGroup := processGroupID(os.Getpid())
 	for _, record := range records {
 		if record.PID <= 0 || !processAlive(record.PID) || record.PID == os.Getpid() {
 			continue
@@ -60,6 +61,13 @@ func dedupeProcessRecords(records []LocalProcessRecord, paths RuntimePaths) []Lo
 		}
 		if record.PGID == 0 {
 			record.PGID = processGroupID(record.PID)
+		}
+		// A stale-process scan can see the shell/make process that launched the
+		// current manager because its command line contains the repository path.
+		// Never target our own process group: Unix stop helpers signal the whole
+		// group and would otherwise kill the active local-up/local-down command.
+		if currentProcessGroup > 0 && record.PGID == currentProcessGroup {
+			continue
 		}
 		existing, ok := byPID[record.PID]
 		if !ok || existing.Service == "" {

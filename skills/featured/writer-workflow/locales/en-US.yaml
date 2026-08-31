@@ -1,0 +1,48 @@
+locale: en-US
+
+classification:
+  category: Content creation
+  tags:
+    - Long-form writing
+    - Source synthesis
+    - Editable outlines
+    - Document revision
+
+presentation:
+  card:
+    title: AI Writer for long-form documents
+    description: Follow planning, outlining, long-form drafting, AI polishing, and version comparison through a cosmic-horror story
+    output_type: document
+    output_label: Interactive writing case
+    cover_asset: cover
+    result_summary: Read the full 3,000-character story and try selection polishing, accept or reject, and V1/V2 diff
+  detail:
+    title: From story premise to interactive long-form writing
+    description: The Mist's Whisper case shows task setup, a four-act outline, section drafting, and document assembly, plus simulated AI polishing and V1/V2 comparison.
+    attachment_hint: Genre, length, mood, character setup, and ending direction (optional)
+
+tasks:
+  - id: cthulhu-short-story
+    selector:
+      title: Write a cosmic-horror short story
+      description: Generate a complete, oppressive story with an unresolved ending
+      output_label: Interactive story
+    launch:
+      prompt_short: Write an approximately 3,000-character cosmic-horror short story with an oppressive mood and an unresolved ending.
+      prompt: Write an approximately 3,000-character cosmic-horror short story with an oppressive mood and an unresolved ending.
+    replay:
+      steps:
+        - title: Normalize the writing task
+          description: Confirm length, cosmic-horror genre, oppressive mood, and unresolved ending
+        - title: Build a four-act outline
+          description: Plan arrival, investigation, abyssal echoes, and the unknown finale
+        - title: Draft the complete story
+          description: Write The Mist's Whisper by section and assemble one editable document
+        - title: Polish interactively
+          description: Generate selection edits with accept, reject, and V1/V2 diff
+    result:
+      template: html_preview_v1
+      eyebrow: AI Writer fiction case
+      title: The Mist's Whisper
+      summary: Read the complete cosmic-horror story and try selection polishing, change confirmation, and version diff.
+      html_asset: writer_demo

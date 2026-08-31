@@ -1,0 +1,74 @@
+locale: en-US
+
+classification:
+  category: Information & analysis
+  tags:
+    - Industry research
+    - Competitive analysis
+    - Source verification
+
+presentation:
+  card:
+    title: Market and industry research expert
+    description: Use web research and source verification to analyze industry landscapes and competitive dynamics
+    output_type: report
+    output_label: Industry and competition report
+    cover_asset: cover
+    result_summary: Support traceable findings with direct sources, data dates, and explicit evidence boundaries
+  detail:
+    title: Market and industry research expert
+    description: "Conduct industry research and competitive monitoring through scope definition, web research, source verification, participant comparison, and structured reports. Sources: WorkBuddy and Qwen Work; adapted and integrated for LazyMind."
+    attachment_hint: Industry brief, research reports, company list, or source links (optional)
+
+tasks:
+  - id: sector-research
+    selector:
+      title: Industry landscape research
+      description: Research an industry's stage, value chain, major participants, opportunities, and risks on the web
+      output_label: Industry opportunity brief
+    launch:
+      prompt_short: Research China's embodied-intelligence robotics industry, including its landscape, opportunities, risks, and supporting evidence.
+      prompt: |
+        Research [China's embodied-intelligence robotics industry] within [mainland China], focusing on [the past three years and the next two years]. I want to understand the industry's current stage, its value chain and major participants, and the opportunities and risks ahead. Use current public information to produce a source-traceable industry report.
+    replay:
+      steps:
+        - title: Lock the industry boundary
+          description: Separate embodied intelligence from adjacent robotics markets and define geography, period, and metrics
+        - title: Run four bounded evidence searches
+          description: Run four core evidence tracks, then fill material evidence gaps and record original sources, definitions, and dates
+        - title: Build the opportunity map
+          description: Connect segments, value chain, participants, growth drivers, and bottlenecks
+        - title: Form the decision brief
+          description: Present complete findings, evidence chains, boundaries, and 12–24-month monitoring signals
+    result:
+      template: html_preview_v1
+      eyebrow: Industry landscape case
+      title: China's embodied-intelligence robotics opportunity brief
+      summary: Use explicit boundaries and original-source definitions to explain market signals, value chains, opportunities, and risks
+      html_asset: sector_demo
+
+  - id: competitive-landscape
+    selector:
+      title: Competitive landscape
+      description: Compare target products or companies by positioning, capabilities, suitable scenarios, and selection risks using web research
+      output_label: Platform selection brief
+    launch:
+      prompt_short: Compare Alibaba Cloud Model Studio, Baidu AI Cloud Qianfan, and Tencent Cloud's agent-development platform and provide evidence-backed selection guidance.
+      prompt: |
+        Compare [Alibaba Cloud Model Studio, Baidu AI Cloud Qianfan, and Tencent Cloud's agent-development platform] for [enterprise product and technology teams choosing a platform]. Explain which scenarios each platform fits best, what limitations it has, and how the team should choose. Use current official materials to produce a source-traceable comparison report.
+    replay:
+      steps:
+        - title: Define the comparison boundary
+          description: Specify the competitive unit, target customers, comparison period, and Agent-platform scope
+        - title: Verify official materials within budget
+          description: Verify product pages and official documentation, fill comparison gaps, and record dates, undisclosed fields, and definition differences
+        - title: Build the capability matrix
+          description: Compare positioning, capabilities, best-fit scenarios, and selection limitations across five dimensions
+        - title: Form the selection brief
+          description: Present three judgments, evidence boundaries, and monitoring indicators
+    result:
+      template: html_preview_v1
+      eyebrow: Competitive landscape case
+      title: China's enterprise AI Agent platform selection brief
+      summary: Systematically compare three platforms' positioning, capabilities, suitable scenarios, and evidence boundaries using official sources
+      html_asset: competition_demo

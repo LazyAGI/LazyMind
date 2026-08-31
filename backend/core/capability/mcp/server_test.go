@@ -17,6 +17,19 @@ import (
 
 type mcpFakePorts struct{ call capability.InvocationContext }
 
+func (f *mcpFakePorts) ListCloudDocuments(_ context.Context, call capability.InvocationContext, _ capability.CloudDocumentListQuery) (capability.CloudDocumentListPage, error) {
+	f.call = call
+	return capability.CloudDocumentListPage{}, nil
+}
+func (f *mcpFakePorts) GetCloudDocument(_ context.Context, call capability.InvocationContext, _ capability.GetCloudDocumentInput) (capability.GetCloudDocumentResult, error) {
+	f.call = call
+	return capability.GetCloudDocumentResult{}, nil
+}
+func (f *mcpFakePorts) SearchCloudDocuments(_ context.Context, call capability.InvocationContext, _ capability.SearchCloudDocumentsInput) (capability.SearchCloudDocumentsResult, error) {
+	f.call = call
+	return capability.SearchCloudDocumentsResult{}, nil
+}
+
 func (f *mcpFakePorts) ListSkills(context.Context, capability.InvocationContext, capability.SkillListQuery) (capability.SkillListPage, error) {
 	return capability.SkillListPage{Items: []capability.SkillSummary{}, Total: 0}, nil
 }
@@ -40,9 +53,9 @@ func (f *mcpFakePorts) SearchKnowledge(_ context.Context, call capability.Invoca
 	return capability.SearchKnowledgeResult{Hits: []capability.KnowledgeSearchHit{{KnowledgeID: "kb", DocumentID: "doc", Text: "source"}}}, nil
 }
 
-func TestStreamableHTTPPublishesExactlySixAuthenticatedReadOnlyTools(t *testing.T) {
+func TestStreamableHTTPPublishesAuthenticatedReadOnlyTools(t *testing.T) {
 	ports := &mcpFakePorts{}
-	service, err := capability.NewService(capability.Dependencies{Skills: ports, Knowledge: ports, Documents: ports, Search: ports})
+	service, err := capability.NewService(capability.Dependencies{Skills: ports, Knowledge: ports, Documents: ports, Search: ports, Cloud: ports})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +100,7 @@ func TestStreamableHTTPPublishesExactlySixAuthenticatedReadOnlyTools(t *testing.
 		}
 	}
 	sort.Strings(names)
-	if got, want := strings.Join(names, ","), "knowledge.document.get,knowledge.document.list,knowledge.list,knowledge.search,skill.get,skill.list"; got != want {
+	if got, want := strings.Join(names, ","), "cloud_document.get,cloud_document.list,cloud_document.search,knowledge.document.get,knowledge.document.list,knowledge.list,knowledge.search,skill.get,skill.list"; got != want {
 		t.Fatalf("tool names = %q, want %q", got, want)
 	}
 

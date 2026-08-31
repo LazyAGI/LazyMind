@@ -15,10 +15,14 @@ export const readRepoFile = (...parts) =>
 export const frontendDockerfileSource = readFrontendFile('Dockerfile');
 export const indexHtml = readFrontendFile('index.html');
 export const localRuntimeFrontendSource = readRepoFile('local/local-runtime-manager/frontend.go');
+export const appSource = readFrontendFile('src/App.tsx');
 export const mainEntry = readFrontendFile('src/main.tsx');
 export const routerSource = readFrontendFile('src/router/index.tsx');
 export const mainLayoutSource = readFrontendFile('src/layouts/MainLayout.tsx');
 export const loginSource = readFrontendFile('src/modules/signin/pages/login/index.tsx');
+export const defaultModelConfigPanelSource = readFrontendFile(
+  'src/modules/modelProvider/components/DefaultModelConfigPanel.tsx',
+);
 export const formRulesSource = readFrontendFile('src/modules/signin/utils/formRules.ts');
 export const runtimeModeSource = readFrontendFile('src/runtime/mode.ts');
 export const runtimeFeaturesSource = readFrontendFile('src/runtime/features.ts');

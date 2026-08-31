@@ -1,11 +1,24 @@
-import { Link, useNavigate } from "react-router-dom";
+import type { MouseEvent } from "react";
+import { Link, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { ArrowRightOutlined } from "@ant-design/icons";
+import {
+  ArrowRightOutlined,
+  FireTwoTone,
+  MessageOutlined,
+  ScheduleOutlined,
+} from "@ant-design/icons";
+import {
+  buildShowcaseLaunchPath,
+  showcaseEntryType,
+  showcaseTechnologyType,
+} from "./classification";
 import type { ShowcaseCase } from "./api";
-import { translateShowcaseCategory } from "./i18n";
 
 interface CaseCardProps {
   item: ShowcaseCase;
+  onTry?: (item: ShowcaseCase) => void;
+  primaryAction?: "try" | "details";
+  showWorkflowHot?: boolean;
 }
 
 const COVER_CLASS_BY_OUTPUT_TYPE: Record<string, string> = {
@@ -19,48 +32,102 @@ const COVER_CLASS_BY_OUTPUT_TYPE: Record<string, string> = {
   table: "table",
 };
 
-export default function CaseCard({ item }: CaseCardProps) {
+export default function CaseCard({
+  item,
+  onTry,
+  primaryAction = "try",
+  showWorkflowHot = false,
+}: CaseCardProps) {
   const { t } = useTranslation();
-  const navigate = useNavigate();
+  const location = useLocation();
   const coverClass = COVER_CLASS_BY_OUTPUT_TYPE[item.output_type] || "report";
+  const entryType = showcaseEntryType(item.type);
+  const technologyType = showcaseTechnologyType(item.type);
+  const entryTypeLabel = t(`showcase.filters.capability.${entryType}`);
+  const technologyTypeLabel = t(`showcase.filters.technology.${technologyType}`);
+  const detailPath = `/agent/chat/cases/${encodeURIComponent(item.id)}`;
+  const launchPath = buildShowcaseLaunchPath(item.id, item.type);
+  const isDetailPrimary = primaryAction === "details";
+  const primaryPath = isDetailPrimary ? detailPath : launchPath;
+  const secondaryPath = isDetailPrimary ? launchPath : detailPath;
+  const detailState = {
+    showcaseReturnTo: `${location.pathname}${location.search}${location.hash}`,
+  };
+  const handleTry = (event: MouseEvent<HTMLAnchorElement>) => {
+    if (!onTry) return;
+    event.preventDefault();
+    onTry(item);
+  };
 
   return (
     <article className="showcase-card">
       <Link
-        className="showcase-card-link"
-        to={`/agent/chat/cases/${encodeURIComponent(item.id)}`}
+        className="showcase-card-image-link"
+        aria-label={t(isDetailPrimary ? "showcase.viewDetail" : "showcase.try")}
+        to={primaryPath}
+        state={isDetailPrimary ? detailState : undefined}
+        onClick={isDetailPrimary ? undefined : handleTry}
       >
         <div className={`showcase-card-image-wrap showcase-card-cover-${coverClass}`}>
           <div className="showcase-card-image-stage">
             <img
               className="showcase-card-image"
               src={item.image_url}
-              alt={t("showcase.resultPreviewAlt", { title: item.title })}
+              alt=""
               loading="lazy"
             />
+            {showWorkflowHot && technologyType === "workflow" ? (
+              <span
+                className="showcase-workflow-hot"
+                role="img"
+                aria-label={t("showcase.workflowHotBadge")}
+              >
+                <FireTwoTone
+                  aria-hidden="true"
+                  twoToneColor={["#f97316", "#ffedd5"]}
+                />
+              </span>
+            ) : null}
           </div>
         </div>
-        <div className="showcase-card-body">
-          <div className="showcase-card-category">{translateShowcaseCategory(t, item.category)}</div>
-          <div className="showcase-card-output">{item.output_label}</div>
-          <h3>{item.title}</h3>
-          <p>{item.description}</p>
-        </div>
       </Link>
-      <div className="showcase-card-footer">
-        <span className="showcase-card-result">{item.result_summary}</span>
-        <button
-          type="button"
-          className="showcase-try-button"
-          onClick={() =>
-            navigate(
-              `/agent/chat/home?showcase_case=${encodeURIComponent(item.id)}`,
-            )
-          }
-        >
-          {t("showcase.try")}
-          <ArrowRightOutlined aria-hidden="true" />
-        </button>
+      <div className="showcase-card-body">
+        <div className="showcase-card-category">{item.category}</div>
+        <div className="showcase-card-output">{item.output_label}</div>
+        <div className="showcase-card-title-row">
+          <Link
+            className="showcase-card-title-link"
+            to={primaryPath}
+            state={isDetailPrimary ? detailState : undefined}
+            onClick={isDetailPrimary ? undefined : handleTry}
+          >
+            <h3>{item.title}</h3>
+            <span
+              className={`showcase-capability-icon is-${entryType}`}
+              role="img"
+              aria-label={entryTypeLabel}
+            >
+              {entryType === "chat"
+                ? <MessageOutlined aria-hidden="true" />
+                : <ScheduleOutlined aria-hidden="true" />}
+            </span>
+          </Link>
+          <Link
+            className="showcase-detail-link"
+            to={secondaryPath}
+            state={isDetailPrimary ? undefined : detailState}
+            onClick={isDetailPrimary ? handleTry : undefined}
+          >
+            {t(isDetailPrimary ? "showcase.experienceNow" : "showcase.viewDetail")}
+            <ArrowRightOutlined aria-hidden="true" />
+          </Link>
+        </div>
+        <div className="showcase-card-tags" aria-label={t("showcase.cardTagsLabel")}>
+          <span>{item.category}</span>
+          <span>{entryTypeLabel}</span>
+          <span>{technologyTypeLabel}</span>
+        </div>
+        <p>{item.description}</p>
       </div>
     </article>
   );

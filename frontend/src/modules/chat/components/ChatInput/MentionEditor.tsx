@@ -69,6 +69,9 @@ export interface MentionEditorRef {
   getMentions: () => ChatMention[];
 }
 
+const isImeComposingEvent = (event: React.KeyboardEvent<HTMLElement>) =>
+  event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229;
+
 const groups: Array<{
   type: CandidateType;
   shortcut: string;
@@ -93,6 +96,9 @@ const MENU_VIEWPORT_OFFSET = 16;
 
 const cacheKey = (type: CandidateType, keyword: string) =>
   `${type}:${keyword.trim().toLocaleLowerCase()}`;
+
+const bypassCandidateCache = (type: CandidateType) =>
+  type === "skill" || type === "tool";
 
 function escapeHtml(value: string) {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -210,7 +216,7 @@ async function loadCandidates(type: CandidateType, keyword: string): Promise<Can
 }
 
 function loadAndCacheCandidates(type: CandidateType, keyword: string) {
-  if (type === "tool") return loadCandidates(type, keyword);
+  if (bypassCandidateCache(type)) return loadCandidates(type, keyword);
   const key = cacheKey(type, keyword);
   const cached = candidateCache.get(key);
   if (cached) return Promise.resolve(cached);
@@ -238,7 +244,7 @@ function loadAndCacheCandidates(type: CandidateType, keyword: string) {
 }
 
 function cachedCandidates(type: CandidateType, keyword: string) {
-  if (type === "tool") return [];
+  if (bypassCandidateCache(type)) return [];
   const exact = candidateCache.get(cacheKey(type, keyword));
   if (exact) return exact;
   const base = candidateCache.get(cacheKey(type, ""));
@@ -352,7 +358,7 @@ const MentionEditor = forwardRef<MentionEditorRef, {
       setLoading(false);
     }
     const hasExactCache = targetGroups.every((item) =>
-      item.type !== "tool" && candidateCache.has(cacheKey(item.type, query.keyword)),
+      !bypassCandidateCache(item.type) && candidateCache.has(cacheKey(item.type, query.keyword)),
     );
     if (hasExactCache) {
       setCandidates(targetGroups.flatMap((item) => cachedCandidates(item.type, query.keyword)));
@@ -497,6 +503,9 @@ const MentionEditor = forwardRef<MentionEditorRef, {
         onCompositionEnd={() => { onCompositionChange(false); refreshQuery(); }}
         onPaste={onPaste}
         onKeyDown={(event) => {
+          if (isImeComposingEvent(event)) {
+            return;
+          }
           if (query) {
             if (event.key === "ArrowDown" || event.key === "ArrowUp") {
               event.preventDefault();

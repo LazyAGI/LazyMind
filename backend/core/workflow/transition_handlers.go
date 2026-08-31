@@ -113,6 +113,24 @@ func normalizedTransitionTargets(req *transitionCommandRequest) ([]transitionTar
 	return targets, nil
 }
 
+func declaredCompletedContinueStep(graph *graphengine.CompiledStateGraph, target string) bool {
+	for _, stepID := range graph.Runtime.CompletedContinueSteps {
+		if stepID == target {
+			return true
+		}
+	}
+	return false
+}
+
+func containsProjectionStep(steps []string, target string) bool {
+	for _, stepID := range steps {
+		if stepID == target {
+			return true
+		}
+	}
+	return false
+}
+
 // selectLLMChoiceRoutes freezes an N-select-1 route only when ChatAgent starts
 // one of its Reachable candidates. The update shares the transition transaction,
 // so a batch either selects every compatible route and starts every task or does
@@ -302,7 +320,7 @@ func StartWorkflowSession(w http.ResponseWriter, r *http.Request) {
 		req.TaskID = uuid.NewString()
 	}
 	handOff := req.HandOff
-	params := WorkflowStepParams{WorkflowID: req.WorkflowID, WorkflowRef: req.WorkflowRef, RevisionID: req.WorkflowRevisionID, RevisionNo: req.WorkflowRevisionNo, TreeHash: req.WorkflowTreeHash, RemoteRoot: req.WorkflowRemoteRoot, StepID: req.TargetStepID, UserInput: req.UserInput, IsColdStart: true, HandOff: &handOff, PreflightID: req.PreflightID, ChatSessionID: req.ChatSessionID, TraceID: req.TraceID, ParentSpanID: req.ParentSpanID, WorkflowMode: req.WorkflowMode, UserID: req.UserID, HistoryFilesPerTurn: req.HistoryFilesPerTurn, Filters: req.Filters, ParentAgenticConfig: req.ParentAgenticConfig, RequiredOutputs: graph.Nodes[req.TargetStepID].RequiredOutputs, LegacyTools: graph.Nodes[req.TargetStepID].LegacyTools}
+	params := WorkflowStepParams{WorkflowID: req.WorkflowID, WorkflowRef: req.WorkflowRef, RevisionID: req.WorkflowRevisionID, RevisionNo: req.WorkflowRevisionNo, TreeHash: req.WorkflowTreeHash, RemoteRoot: req.WorkflowRemoteRoot, StepID: req.TargetStepID, UserInput: req.UserInput, IsColdStart: true, HandOff: &handOff, PreflightID: req.PreflightID, ChatSessionID: req.ChatSessionID, TraceID: req.TraceID, ParentSpanID: req.ParentSpanID, WorkflowMode: req.WorkflowMode, UserID: req.UserID, HistoryFilesPerTurn: req.HistoryFilesPerTurn, Filters: req.Filters, ParentAgenticConfig: req.ParentAgenticConfig, RequiredOutputs: graph.Nodes[req.TargetStepID].RequiredOutputs, LegacyTools: graph.Nodes[req.TargetStepID].LegacyTools, TerminalTools: graph.Nodes[req.TargetStepID].TerminalTools, ToolsOnly: graph.Nodes[req.TargetStepID].ToolsOnly, StreamHeartbeat: graph.Nodes[req.TargetStepID].StreamHeartbeat, Runtime: graph.Runtime}
 	nodeDef := graph.Nodes[req.TargetStepID]
 	inputKeys := graphengine.Materials(nodeDef.Input)
 	for _, optional := range nodeDef.OptionalInputs {
@@ -343,8 +361,10 @@ func StartWorkflowSession(w http.ResponseWriter, r *http.Request) {
 		if err := tx.Where("task_id = ?", taskID).First(&attempt).Error; err != nil {
 			return err
 		}
-		witnesses := append([]graphengine.Witness{}, node.Evaluation.Witnesses...)
-		witnesses = append(witnesses, graphengine.EvaluateOptional(nodeDef.OptionalInputs, materialFacts).Witnesses...)
+		witnesses := mergeAttemptWitnesses(
+			node.Evaluation.Witnesses,
+			graphengine.EvaluateOptional(nodeDef.OptionalInputs, materialFacts).Witnesses,
+		)
 		for _, witness := range witnesses {
 			revisionID := revisionIDs[witness.MaterialID]
 			if revisionID == "" {
@@ -550,6 +570,9 @@ func TransitionWorkflowSession(w http.ResponseWriter, r *http.Request) {
 			}
 			req.Operation = resolved
 		}
+		if req.Operation == "retry" || req.Operation == "rewind" {
+			applyRecoveryIntent(session.IntentContext, &targets[0])
+		}
 		if req.Operation == "retry" {
 			var latest orm.WorkflowSessionStep
 			if err := tx.Where("session_id = ? AND step_id = ? AND validity = ?", session.ID,
@@ -571,7 +594,10 @@ func TransitionWorkflowSession(w http.ResponseWriter, r *http.Request) {
 						"user_retry_available":   true})
 			}
 		}
-		if session.Status == SessionStatusCompleted && req.Operation != "retry" && req.Operation != "rewind" {
+		completedContinue := session.Status == SessionStatusCompleted && len(targets) == 1 &&
+			req.Operation == "execute" && declaredCompletedContinueStep(graph, targets[0].TargetStepID) &&
+			containsProjectionStep(projection.Continue, targets[0].TargetStepID)
+		if session.Status == SessionStatusCompleted && req.Operation != "retry" && req.Operation != "rewind" && !completedContinue {
 			return rejectTransition(req.CommandID, &session, projection, http.StatusConflict, "SESSION_TERMINAL", "plugin session is already completed", false, nil)
 		}
 		if req.Operation == "retry" || req.Operation == "rewind" {
@@ -594,16 +620,26 @@ func TransitionWorkflowSession(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			node := projection.Nodes[target.TargetStepID]
-			if node.Reachability != "reachable" {
+			if node.Reachability != "reachable" && !(completedContinue && declaredCompletedContinueStep(graph, target.TargetStepID)) {
 				invalidTargets = append(invalidTargets, map[string]any{"step_id": target.TargetStepID, "code": "STEP_NOT_REACHABLE"})
 				continue
 			}
-			if node.Readiness != "ready" {
+			if node.Readiness != "ready" && !completedContinue {
 				invalidTargets = append(invalidTargets, map[string]any{"step_id": target.TargetStepID, "code": "STEP_NOT_READY", "missing_groups": node.Evaluation.MissingGroups})
 				continue
 			}
 			evaluation := node.Evaluation
-			evaluation.Witnesses = append(evaluation.Witnesses, graphengine.EvaluateOptional(nodeDef.OptionalInputs, snapshot.Materials).Witnesses...)
+			if completedContinue {
+				evaluation = graphengine.Evaluate(nodeDef.Input, snapshot.Materials)
+				if !evaluation.Satisfied {
+					invalidTargets = append(invalidTargets, map[string]any{"step_id": target.TargetStepID, "code": "STEP_NOT_READY", "missing_groups": evaluation.MissingGroups})
+					continue
+				}
+			}
+			evaluation.Witnesses = mergeAttemptWitnesses(
+				evaluation.Witnesses,
+				graphengine.EvaluateOptional(nodeDef.OptionalInputs, snapshot.Materials).Witnesses,
+			)
 			evaluations[target.TargetStepID] = evaluation
 		}
 		if len(invalidTargets) > 0 {
@@ -653,7 +689,7 @@ func TransitionWorkflowSession(w http.ResponseWriter, r *http.Request) {
 				for _, optional := range nodeDef.OptionalInputs {
 					inputKeys = append(inputKeys, optional.Material)
 				}
-				params := WorkflowStepParams{WorkflowID: session.WorkflowID, WorkflowRef: session.WorkflowRef, RevisionID: session.WorkflowRevisionID, RevisionNo: session.WorkflowRevisionNo, TreeHash: session.WorkflowTreeHash, RemoteRoot: session.WorkflowRemoteRoot, StepID: target.TargetStepID, SessionID: session.ID, UserInput: target.UserInput, HandOff: &handOff, ChatSessionID: req.ChatSessionID, TraceID: req.TraceID, ParentSpanID: req.ParentSpanID, WorkflowMode: req.WorkflowMode, RetryHint: target.RuntimeInstruction, PartialIndices: target.PartialIndices, HistoryFilesPerTurn: req.HistoryFilesPerTurn, Filters: req.Filters, ParentAgenticConfig: req.ParentAgenticConfig, UserID: session.CreateUserID, RequiredOutputs: nodeDef.RequiredOutputs, LegacyTools: nodeDef.LegacyTools}
+				params := WorkflowStepParams{WorkflowID: session.WorkflowID, WorkflowRef: session.WorkflowRef, RevisionID: session.WorkflowRevisionID, RevisionNo: session.WorkflowRevisionNo, TreeHash: session.WorkflowTreeHash, RemoteRoot: session.WorkflowRemoteRoot, StepID: target.TargetStepID, SessionID: session.ID, UserInput: target.UserInput, HandOff: &handOff, ChatSessionID: req.ChatSessionID, TraceID: req.TraceID, ParentSpanID: req.ParentSpanID, WorkflowMode: req.WorkflowMode, RetryHint: target.RuntimeInstruction, PartialIndices: target.PartialIndices, HistoryFilesPerTurn: req.HistoryFilesPerTurn, Filters: req.Filters, ParentAgenticConfig: req.ParentAgenticConfig, UserID: session.CreateUserID, RequiredOutputs: nodeDef.RequiredOutputs, LegacyTools: nodeDef.LegacyTools, TerminalTools: nodeDef.TerminalTools, ToolsOnly: nodeDef.ToolsOnly, StreamHeartbeat: nodeDef.StreamHeartbeat, Runtime: graph.Runtime}
 				var launchErr error
 				stepObjective := workflowStepObjective(nodeDef.Prompt, target.Objective, target.UserInput)
 				_, taskID, _, launchErr = launchWorkflowAttempt(r.Context(), tx, store.State(), session.ConversationID, session.TriggerHistoryID, session.CreateUserID, target.TaskID, session.WorkflowID+":"+target.TargetStepID, stepObjective, params, inputKeys, nodeDef.Outputs, req.LLMConfig, req.ToolConfig, false, false)
@@ -713,6 +749,30 @@ func sessionIntentText(value string) string {
 	return ""
 }
 
+// applyRecoveryIntent keeps the workflow launch request authoritative when a
+// user retries or rewinds a step. The recovery command is useful execution
+// context, but it must not replace {{user_input}} and silently change the task.
+func applyRecoveryIntent(intentContext string, target *transitionTarget) {
+	if target == nil {
+		return
+	}
+	original := sessionIntentText(intentContext)
+	recovery := strings.TrimSpace(target.UserInput)
+	if original == "" {
+		return
+	}
+	target.UserInput = original
+	if recovery == "" || recovery == original {
+		return
+	}
+	instruction := "Recovery request for this rerun only: " + recovery
+	if existing := strings.TrimSpace(target.RuntimeInstruction); existing != "" {
+		target.RuntimeInstruction = existing + "\n\n" + instruction
+	} else {
+		target.RuntimeInstruction = instruction
+	}
+}
+
 func queueHostAttempt(ctx context.Context, tx *gorm.DB, session orm.WorkflowSession, target transitionTarget,
 	node graphengine.CompiledNode, now time.Time) error {
 	objective := workflowStepObjective(node.Prompt, target.Objective, target.UserInput)
@@ -730,7 +790,8 @@ func queueHostAttempt(ctx context.Context, tx *gorm.DB, session orm.WorkflowSess
 		Objective: objective, Prompt: node.Prompt, Acceptance: node.Acceptance,
 		Instruction: target.RuntimeInstruction, PartialSelector: target.PartialIndices,
 		WorkflowRevision: session.WorkflowRevisionID, DeclaredOutputs: node.Outputs, DeclaredOutputTypes: outputTypes, RequiredOutputs: node.RequiredOutputs,
-		Capabilities: node.Capabilities, LegacyTools: node.LegacyTools}
+		Capabilities: node.Capabilities, LegacyTools: node.LegacyTools, TerminalTools: node.TerminalTools,
+		ToolsOnly: node.ToolsOnly}
 	payload, err := json.Marshal(value)
 	if err != nil {
 		return err
@@ -773,6 +834,30 @@ func attemptInputBindingFromWitness(tx *gorm.DB, sessionID, attemptID string,
 		value.ContentHash = input.ContentHash
 	}
 	return value
+}
+
+// mergeAttemptWitnesses preserves distinct revisions and aliases while ensuring
+// one Attempt never persists the same frozen input binding twice. A material may
+// legitimately be both a readiness alternative and an optional input.
+func mergeAttemptWitnesses(groups ...[]graphengine.Witness) []graphengine.Witness {
+	type witnessKey struct {
+		materialID string
+		revisionID string
+		bindAs     string
+	}
+	seen := map[witnessKey]struct{}{}
+	merged := make([]graphengine.Witness, 0)
+	for _, group := range groups {
+		for _, witness := range group {
+			key := witnessKey{materialID: witness.MaterialID, revisionID: witness.RevisionID, bindAs: witness.BindAs}
+			if _, exists := seen[key]; exists {
+				continue
+			}
+			seen[key] = struct{}{}
+			merged = append(merged, witness)
+		}
+	}
+	return merged
 }
 
 // resolveAdvanceOperation keeps lifecycle vocabulary out of the model-facing

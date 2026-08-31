@@ -12,6 +12,7 @@ from .editors import (
     preference_name_to_reference_name,
     validate_preference_name,
 )
+from .exceptions import MemoryPartialApplyError, PreferenceCapacityExceededError
 from .models import (
     EpisodeCreateInput,
     EpisodeCreateResult,
@@ -20,6 +21,7 @@ from .models import (
     EpisodeSearchResult,
     EpisodeSource,
     EpisodeType,
+    MemoryOperationRecord,
     normalize_episode_summary,
 )
 from .paths import (
@@ -34,7 +36,6 @@ from .paths import (
     normalize_memory_path,
     split_reference_ref,
 )
-from .result import memory_err, memory_ok
 from .validation import (
     PreferenceItem,
     append_preference_item,
@@ -82,10 +83,13 @@ def __getattr__(name: str):
 __all__ = [
     'AGENTS_ROOT',
     'MemoryContext',
+    'MemoryPartialApplyError',
     'MemoryStore',
+    'MemoryOperationRecord',
     'PREFERENCE_PATH',
     'PROFILE_PATH',
     'PreferenceItem',
+    'PreferenceCapacityExceededError',
     'REFERENCE_ROOT',
     'SOUL_PATH',
     'USERS_ROOT',
@@ -108,8 +112,6 @@ __all__ = [
     'informative_query_terms',
     'is_reference_path',
     'load_memory_context',
-    'memory_err',
-    'memory_ok',
     'normalize_episode_summary',
     'normalize_memory_path',
     'parse_preference_items',

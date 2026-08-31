@@ -41,6 +41,12 @@ type PageInfo struct {
 	Total         int64  `json:"total"`
 }
 
+type CursorPageInfo struct {
+	NextPageToken  string `json:"next_page_token,omitempty"`
+	Total          *int64 `json:"total,omitempty"`
+	ProviderCursor string `json:"-"`
+}
+
 type ListSkillsInput struct {
 	Keyword  string      `json:"keyword,omitempty" jsonschema:"optional keyword matched against published skill metadata and content"`
 	Category string      `json:"category,omitempty" jsonschema:"optional exact skill category"`
@@ -176,4 +182,86 @@ type KnowledgeSearchHit struct {
 
 type SearchKnowledgeResult struct {
 	Hits []KnowledgeSearchHit `json:"hits"`
+}
+
+// CloudDocumentSource is an authorized cloud account available to LazyMind
+// conversations. Provider credentials never cross the capability boundary.
+type CloudDocumentSource struct {
+	ID        string     `json:"id"`
+	Name      string     `json:"name"`
+	Provider  string     `json:"provider"`
+	Status    string     `json:"status,omitempty"`
+	CreatedAt *time.Time `json:"created_at,omitempty"`
+	UpdatedAt *time.Time `json:"updated_at,omitempty"`
+}
+
+type ListCloudDocumentsInput struct {
+	Keyword string      `json:"keyword,omitempty" jsonschema:"optional connected cloud account name keyword"`
+	Status  string      `json:"status,omitempty" jsonschema:"optional cloud account authorization status"`
+	Page    PageRequest `json:"page,omitempty"`
+}
+type ListCloudDocumentsResult struct {
+	Items []CloudDocumentSource `json:"items"`
+	Page  PageInfo              `json:"page"`
+}
+
+type CloudDocumentMetadata struct {
+	ID          string `json:"id"`
+	SourceID    string `json:"source_id"`
+	NodeRef     string `json:"node_ref,omitempty"`
+	TargetType  string `json:"target_type,omitempty"`
+	TargetRef   string `json:"target_ref,omitempty"`
+	ObjectKey   string `json:"object_key,omitempty"`
+	ParentKey   string `json:"parent_key,omitempty"`
+	DisplayName string `json:"display_name,omitempty"`
+	FileType    string `json:"file_type,omitempty"`
+	IsDocument  bool   `json:"is_document"`
+	IsContainer bool   `json:"is_container"`
+	HasChildren bool   `json:"has_children"`
+	Selectable  bool   `json:"selectable"`
+}
+type GetCloudDocumentInput struct {
+	SourceID         string      `json:"source_id" jsonschema:"stable LazyMind cloud account ID"`
+	NodeRef          string      `json:"node_ref,omitempty" jsonschema:"opaque provider node reference returned by a previous list or search"`
+	TargetType       string      `json:"target_type,omitempty" jsonschema:"provider target type returned with node_ref"`
+	TargetRef        string      `json:"target_ref,omitempty" jsonschema:"provider target reference returned with node_ref"`
+	IncludeDocuments bool        `json:"include_documents,omitempty" jsonschema:"include one online page of documents and folders"`
+	DocumentsPage    PageRequest `json:"documents_page,omitempty"`
+	ProviderCursor   string      `json:"-"`
+}
+type GetCloudDocumentResult struct {
+	Source        CloudDocumentSource     `json:"source"`
+	Documents     []CloudDocumentMetadata `json:"documents,omitempty"`
+	DocumentsPage *CursorPageInfo         `json:"documents_page,omitempty"`
+}
+
+type SearchCloudDocumentsInput struct {
+	SourceID          string      `json:"source_id" jsonschema:"stable LazyMind cloud account ID"`
+	Query             string      `json:"query" jsonschema:"online cloud document title query"`
+	NodeRef           string      `json:"node_ref,omitempty" jsonschema:"optional provider node scope returned by a previous call"`
+	TargetType        string      `json:"target_type,omitempty"`
+	TargetRef         string      `json:"target_ref,omitempty"`
+	Page              PageRequest `json:"page,omitempty"`
+	IncludeDocuments  bool        `json:"include_documents,omitempty"`
+	IncludeContainers bool        `json:"include_containers,omitempty"`
+	ProviderCursor    string      `json:"-"`
+}
+type CloudDocumentSearchHit struct {
+	Key         string `json:"key"`
+	DisplayName string `json:"display_name,omitempty"`
+	SearchName  string `json:"search_name,omitempty"`
+	SourceID    string `json:"source_id"`
+	NodeRef     string `json:"node_ref,omitempty"`
+	TargetType  string `json:"target_type,omitempty"`
+	TargetRef   string `json:"target_ref,omitempty"`
+	ObjectKey   string `json:"object_key,omitempty"`
+	ParentKey   string `json:"parent_key,omitempty"`
+	IsDocument  bool   `json:"is_document"`
+	IsContainer bool   `json:"is_container"`
+	HasChildren bool   `json:"has_children"`
+	Selectable  bool   `json:"selectable"`
+}
+type SearchCloudDocumentsResult struct {
+	Hits []CloudDocumentSearchHit `json:"hits"`
+	Page CursorPageInfo           `json:"page"`
 }

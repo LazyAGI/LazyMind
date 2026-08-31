@@ -72,7 +72,7 @@ func ReplyJSON(w http.ResponseWriter, v any) {
 // ErrorCodeFromHTTPStatus maps HTTP non-200 codes to core business error codes.
 func ErrorCodeFromHTTPStatus(statusCode int) int {
 	switch statusCode {
-	case http.StatusBadRequest, http.StatusMethodNotAllowed:
+	case http.StatusBadRequest, http.StatusMethodNotAllowed, http.StatusUnprocessableEntity:
 		return ErrCodeInvalidParams
 	case http.StatusUnauthorized:
 		return ErrCodeUnauthorized

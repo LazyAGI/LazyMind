@@ -25,12 +25,20 @@ class LazyMindHTTPError(LazyMindError):
         self.status_code = status_code
         self.message = message
 
+    @property
+    def retryable(self) -> bool:
+        return self.status_code in {408, 425, 429, 500, 502, 503, 504}
+
     def __str__(self) -> str:
         return self.message
 
 
 class InvalidStaticAssetError(LazyMindError):
     """A Core static-file reference cannot be safely refreshed or read."""
+
+
+class RetryableLazyMindError(LazyMindError):
+    """A Core transport failed before returning an application response."""
 
 
 class RuntimeLeaseLostError(RuntimeError):

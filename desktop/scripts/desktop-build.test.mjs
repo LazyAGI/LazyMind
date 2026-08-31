@@ -15,6 +15,7 @@ const electronMainScript = path.join(scriptsDir, "..", "electron", "src", "main.
 const electronBuilderConfig = path.join(scriptsDir, "..", "electron", "electron-builder.config.cjs");
 const electronPackage = path.join(scriptsDir, "..", "electron", "package.json");
 const darwinBuildScript = path.join(scriptsDir, "build-darwin-arm64.sh");
+const windowsBuildScript = path.join(scriptsDir, "build-windows-x64.ps1");
 const installerScript = path.join(scriptsDir, "..", "installer", "installer.nsh");
 const macosWorkflow = path.join(scriptsDir, "..", "..", ".github", "workflows", "macos-installer.yml");
 const macosFinalizeWorkflow = path.join(
@@ -33,11 +34,26 @@ const windowsWorkflow = path.join(
   "workflows",
   "windows-installer.yml",
 );
+const coreDockerfile = path.join(scriptsDir, "..", "..", "backend", "core", "Dockerfile");
+const dockerCompose = path.join(scriptsDir, "..", "..", "docker-compose.yml");
+const rootMakefile = path.join(scriptsDir, "..", "..", "Makefile");
 
 function nsisMacro(source, name) {
   const match = source.match(new RegExp(`!macro ${name}\\b([\\s\\S]*?)!macroend`));
   assert.ok(match, `missing NSIS macro ${name}`);
   return match[1];
+}
+
+function writeOfflineSkillFixtures(root) {
+  const packages = path.join(root, "builtin-skills", "packages");
+  mkdirSync(packages, { recursive: true });
+  writeFileSync(path.join(root, "builtin-skills", "catalog.json"), '{"schema_version":1,"skills":[]}\n');
+  writeFileSync(path.join(packages, "fixture.zip"), "fixture");
+  const featured = path.join(root, "featured-skills");
+  mkdirSync(featured, { recursive: true });
+  mkdirSync(path.join(featured, "assets"), { recursive: true });
+  writeFileSync(path.join(featured, "catalog.json"), '{"schema_version":1,"cases":[]}\n');
+  writeFileSync(path.join(root, "history-injection.zip"), "history-injection-fixture");
 }
 
 for (const target of [
@@ -52,6 +68,7 @@ for (const target of [
       for (const name of ["process-compose", "local-proxy", "core", "scan-control-plane", "file-watcher", "caddy"]) {
         writeFileSync(path.join(bin, `${name}${target.suffix}`), name);
       }
+      writeOfflineSkillFixtures(root);
       execFileSync(process.execPath, [
         manifestScript,
         root,
@@ -61,9 +78,17 @@ for (const target of [
       const manifest = JSON.parse(readFileSync(path.join(root, "manifest.json"), "utf8"));
       assert.equal(manifest.platform, target.platform);
       assert.equal(manifest.arch, target.arch);
-      assert.deepEqual(manifest.features, { trustedLocalMode: false });
+      assert.deepEqual(manifest.features, {
+        trustedLocalMode: false,
+        offlineBuiltinSkills: true,
+        offlineFeaturedSkills: true,
+      });
       assert.equal(manifest.binaries.core, `bin/core${target.suffix}`);
       assert.ok(manifest.checksums[`bin/core${target.suffix}`]);
+      assert.ok(manifest.checksums["builtin-skills/catalog.json"]);
+      assert.ok(manifest.checksums["featured-skills/catalog.json"]);
+      assert.equal(manifest.paths.historyInjectionArchive, "history-injection.zip");
+      assert.ok(manifest.checksums["history-injection.zip"]);
       assert.equal(Object.keys(manifest.checksums).some((key) => key.includes("\\")), false);
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -74,6 +99,7 @@ for (const target of [
 test("writes trusted local mode into the desktop runtime manifest", () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "lazymind-manifest-trusted-"));
   try {
+    writeOfflineSkillFixtures(root);
     execFileSync(process.execPath, [
       manifestScript,
       root,
@@ -82,10 +108,91 @@ test("writes trusted local mode into the desktop runtime manifest", () => {
       "--trusted-local-mode", "true",
     ]);
     const manifest = JSON.parse(readFileSync(path.join(root, "manifest.json"), "utf8"));
-    assert.deepEqual(manifest.features, { trustedLocalMode: true });
+    assert.deepEqual(manifest.features, {
+      trustedLocalMode: true,
+      offlineBuiltinSkills: true,
+      offlineFeaturedSkills: true,
+    });
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("macOS and Windows builds materialize offline assets before writing the runtime manifest", () => {
+  const darwin = readFileSync(darwinBuildScript, "utf8");
+  const windows = readFileSync(windowsBuildScript, "utf8");
+  for (const source of [darwin, windows]) {
+    const bundle = source.indexOf("builtin-skill-bundle");
+    const historyPackage = source.indexOf("stage-history-injection-package.mjs");
+    const manifest = source.indexOf("write-runtime-manifest.mjs");
+    assert.ok(bundle >= 0, "build script must invoke the shared builtin Skill bundler");
+    assert.ok(historyPackage >= 0, "build script must stage the ModelScope history package");
+    assert.ok(manifest > bundle, "builtin Skills must be materialized before the runtime manifest is written");
+    assert.ok(manifest > historyPackage, "history samples must be downloaded before the runtime manifest is written");
+    assert.match(source, /builtin-sources\.yaml/);
+    assert.match(source, /builtin-skills\.lock\.json/);
+    assert.match(source, /featured-sources/);
+    assert.match(source, /featured-output/);
+  }
+  assert.match(darwin, /--exclude "skills\/\.runtime"/);
+  assert.match(darwin, /remove_generated_path "\$\{app_root\}\/skills\/\.runtime"/);
+  for (const category of ["research", "review", "search"]) {
+    assert.match(darwin, new RegExp(`--exclude "skills/${category}"`));
+    assert.match(windows, new RegExp(`skills\\\\${category}`));
+  }
+  for (const directory of ["docs", "tests", ".github"]) {
+    assert.match(darwin, new RegExp(`--exclude "/${directory.replace(".", "\\.")}"`));
+    assert.match(windows, new RegExp(`Join-Path \\$repoRoot '${directory.replace(".", "\\.")}'`));
+  }
+  assert.match(darwin, /--exclude "skills\/featured"/);
+  assert.match(windows, /skills\\featured/);
+  for (const testDirectory of ["test", "tests", "testdata", "__snapshots__"]) {
+    assert.match(darwin, new RegExp(`--exclude "${testDirectory}"`));
+    assert.match(windows, new RegExp(`'${testDirectory}'`));
+  }
+  for (const testFile of ["*_test.go", "test_*.py", "*.test.mjs", "*.test.tsx"]) {
+    const escaped = testFile.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    assert.match(darwin, new RegExp(`--exclude "${escaped}"`));
+    assert.match(windows, new RegExp(`'${escaped}'`));
+  }
+  for (const developmentFile of [".coverage", "README.md", "README.CN.md", "Makefile"]) {
+    assert.match(darwin, new RegExp(developmentFile.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.match(windows, new RegExp(developmentFile.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
+  assert.match(windows, /skills\\\.runtime/);
+  assert.match(darwin, /"\$\{ROOT\}\/" "\$\{RUNTIME_ROOT\}\/app\/"/);
+  assert.match(windows, /robocopy\.exe \$repoRoot \$appRoot \/MIR/);
+  assert.match(darwin, /--exclude "\/history-injection"/);
+  assert.match(darwin, /--exclude "lazymind-history-injection\*\.zip"/);
+  assert.match(windows, /\$excludedDirs = @\(\s*'node_modules',/);
+  assert.match(windows, /Join-Path \$repoRoot 'history-injection'/);
+  assert.match(windows, /lazymind-history-injection\*\.zip/);
+});
+
+test("Docker prepares history samples at runtime without coupling the Core image build to ModelScope", () => {
+  const dockerfile = readFileSync(coreDockerfile, "utf8");
+  const compose = readFileSync(dockerCompose, "utf8");
+  const completedInitDependency = /history-injection-init:\r?\n\s+condition: service_completed_successfully/;
+  assert.doesNotMatch(dockerfile, /history-injection-package/);
+  assert.doesNotMatch(dockerfile, /COPY history-injection \/app\/history-injection/);
+  assert.match(compose, /history-injection-init:/);
+  assert.match(compose, /lazymind-algorithm:/);
+  assert.match(compose, /\.\/scripts\/prepare_history_injection\.py:.*:ro/);
+  assert.match(compose, /\.\/desktop\/history-injection-package\.json:.*:ro/);
+  assert.match(compose, /LAZYMIND_HISTORY_INJECTION_ROOT: \/var\/lib\/lazymind\/uploads\/\.history-injection\/bundles/);
+  assert.match(compose, completedInitDependency);
+  assert.match(compose.replace(/\r?\n/g, "\r\n"), completedInitDependency);
+});
+
+test("Docker startup builds a native Windows Assistant Bridge", () => {
+  const source = readFileSync(rootMakefile, "utf8");
+
+  assert.match(source, /ifeq \(\$\(OS\),Windows_NT\)[\s\S]*LAZYMIND_CLI_FILENAME := lazymind\.exe/);
+  assert.match(source, /HOST_GOOS := windows/);
+  assert.match(source, /PROCESSOR_ARCHITEW6432[\s\S]*PROCESSOR_ARCHITECTURE/);
+  assert.match(source, /_HOST_DOCKER_PREFIX := MSYS_NO_PATHCONV=1/);
+  assert.match(source, /\$\(_HOST_DOCKER_USER_FLAG\)[\s\S]*GOOS="\$\(HOST_GOOS\)"/);
+  assert.match(source, /local\/build\/bin\/\$\(LAZYMIND_CLI_FILENAME\)/);
 });
 
 test("generates a multi-resolution Windows ICO from the macOS icon", () => {
@@ -120,9 +227,33 @@ test("normalizes shared desktop release tags to standard SemVer", async () => {
   assert.throws(() => normalizeReleaseTag("release-1.2"), /Unsupported release tag/);
 });
 
+test("Windows installer accepts development and release package versions", () => {
+  const source = readFileSync(path.join(scriptsDir, "build-windows-x64.ps1"), "utf8");
+  const packageJson = JSON.parse(readFileSync(electronPackage, "utf8"));
+  const match = source.match(/\[string\]\$package\.version -notmatch '([^']+)'/);
+  assert.ok(match, "missing Windows installer package version validation");
+
+  const versionPattern = new RegExp(match[1]);
+  for (const version of [
+    packageJson.version,
+    "1.2.3",
+    "1.2.3-alpha.2",
+    "1.2.3-beta.4",
+    "1.2.3-rc.1",
+    "1.2.3-preview",
+    "1.2.3-preview.1+build.7",
+  ]) {
+    assert.match(version, versionPattern);
+  }
+  assert.doesNotMatch("v1.2.3", versionPattern);
+  assert.doesNotMatch("1.2", versionPattern);
+});
+
 test("Windows installer force-stops LazyMind before invoking an old uninstaller", () => {
   const source = readFileSync(installerScript, "utf8");
   const check = nsisMacro(source, "customCheckAppRunning");
+  const install = nsisMacro(source, "customInstall");
+  const uninstall = nsisMacro(source, "customUnInstall");
 
   assert.match(
     check,
@@ -132,6 +263,8 @@ test("Windows installer force-stops LazyMind before invoking an old uninstaller"
   assert.match(check, /\$0 == 10[\s\S]*force-stop --install-dir "\$INSTDIR"[\s\S]*Goto LMCheckStopped/);
   assert.doesNotMatch(check, /MB_RETRYCANCEL|LMCloseApp/);
   assert.match(source, /LangString LMProcessScanFailed[\s\S]*LangString LMForceStopFailed/);
+  assert.match(install, /purge-local-data --install-dir "\$INSTDIR"/);
+  assert.match(uninstall, /purge-local-data --install-dir "\$INSTDIR"/);
 });
 
 test("Windows installer replaces legacy uninstallers with the fixed embedded uninstaller", () => {
@@ -169,9 +302,9 @@ test("Windows installer diagnoses paths and does not roll back when warmup fails
   );
   assert.match(
     install,
-    /ExecWait[^\n]+--installer-warmup --timeout-seconds 240[^\n]+\$3[\s\S]*LMWarmupCheckStopped:[\s\S]*check-stopped --install-dir "\$INSTDIR"/,
+    /\$InstallTypeChoice == "full"[\s\S]*ExecWait[^\n]+--installer-warmup --timeout-seconds 1800[^\n]+\$3[\s\S]*LMWarmupCheckStopped:[\s\S]*check-stopped --install-dir "\$INSTDIR"/,
   );
-  assert.match(install, /Starting Electron installer warmup \(timeout=240s\)/);
+  assert.match(install, /Starting Electron installer warmup \(timeout=1800s\)/);
   assert.match(install, /installer-nsis\.log[\s\S]*Starting Electron installer warmup/);
   assert.match(install, /Electron installer warmup returned exit code \$3/);
   assert.match(
@@ -181,6 +314,24 @@ test("Windows installer diagnoses paths and does not roll back when warmup fails
   assert.match(install, /\$4 == 1[\s\S]*StrCpy \$3 4[\s\S]*\$3 != 0/);
   assert.doesNotMatch(install, /MB_ABORTRETRYIGNORE|SetErrorLevel 4/);
   assert.match(install, /installation will continue/);
+});
+
+test("Windows installer offers simple and full installation modes", () => {
+  const source = readFileSync(installerScript, "utf8");
+  const init = nsisMacro(source, "customInit");
+  const pages = nsisMacro(source, "customPageAfterChangeDir");
+  const install = nsisMacro(source, "customInstall");
+
+  assert.match(source, /LangString LMSimpleInstall[^\n]+"Simple installation \(recommended\)"/);
+  assert.match(source, /LangString LMSimpleInstall[^\n]+"简易安装（推荐）"/);
+  assert.match(source, /LangString LMFullInstall[^\n]+"Full installation"/);
+  assert.match(source, /LangString LMFullInstall[^\n]+"完整安装"/);
+  assert.match(init, /StrCpy \$InstallTypeChoice "simple"/);
+  assert.match(init, /--full-install[\s\S]*StrCpy \$InstallTypeChoice "full"/);
+  assert.match(init, /--simple-install[\s\S]*StrCpy \$InstallTypeChoice "simple"/);
+  assert.match(pages, /PageCallbacks LMInstallTypePageCreate LMInstallTypePageLeave/);
+  assert.match(install, /\$InstallTypeChoice == "full"[\s\S]*--installer-warmup/);
+  assert.match(install, /Simple installation selected; bundled Python will be prepared on first launch/);
 });
 
 test("Windows CI treats branches as non-tags without leaking git probe failures", () => {
@@ -204,7 +355,7 @@ test("Windows CI treats branches as non-tags without leaking git probe failures"
     source,
     /test-windows-installer:[\s\S]*name: Checkout smoke test scripts[\s\S]*ref: \$\{\{ inputs\.git_ref \|\| github\.ref \}\}[\s\S]*name: Download the exact installer built above/,
   );
-  assert.match(source, /Start-Process -FilePath \$env:INSTALLER_PATH -ArgumentList "\/S" -Wait/);
+  assert.match(source, /Start-Process -FilePath \$env:INSTALLER_PATH -ArgumentList "\/S --full-install" -Wait/);
   assert.match(source, /DisplayVersion -ne \$env:EXPECTED_VERSION/);
   assert.match(source, /expectedProductVersion = "\$\(\$Matches\[1\]\)\.\$\(\$Matches\[2\]\)\.\$\(\$Matches\[3\]\)\.0"/);
   assert.match(source, /Start-Process -FilePath \$uninstaller -ArgumentList "\/S" -Wait/);
@@ -226,13 +377,22 @@ test("Windows NSIS installer uses electron-builder's default LZMA payload", () =
   assert.match(packageJson.scripts["pack:win:x64"], /--publish never$/);
   assert.match(packageJson.scripts["pack:win:x64:installer"], /--publish never$/);
   assert.match(buildScript, /function Invoke-WindowsPackagingWithRetry/);
+  assert.match(buildScript, /\[0-9A-Za-z-\]\+/, "development SemVer identifiers such as 0.3.0-dev must be accepted");
   assert.match(buildScript, /function Invoke-NativeWithRetry/);
   assert.match(buildScript, /maximumAttempts = 3/);
   assert.match(buildScript, /ELECTRON_CACHE/);
   assert.match(buildScript, /ELECTRON_BUILDER_CACHE/);
   assert.match(buildScript, /LAZYMIND_TRUSTED_LOCAL_MODE/);
   assert.match(buildScript, /--trusted-local-mode', \$trustedLocalMode/);
+  assert.match(buildScript, /function New-DeferredPythonRuntimeStage/);
+  assert.match(buildScript, /python-runtime\.zip/);
+  assert.match(buildScript, /Add-Type -AssemblyName System\.IO\.Compression\s/);
+  assert.match(buildScript, /robocopy\.exe \$runtimeRoot \$packagedRuntimeRoot[^\n]+\| Out-Null/);
+  assert.match(buildScript, /CompressionLevel\]::NoCompression/);
+  assert.match(buildScript, /LAZYMIND_DESKTOP_RUNTIME_STAGE = New-DeferredPythonRuntimeStage/);
+  assert.match(buildScript, /'resume-installer' \{ Invoke-Doctor; Finalize-Desktop 'installer' \}/);
   assert.match(workflow, /Cache Electron and electron-builder downloads/);
+  assert.match(workflow, /ArgumentList "\/S --full-install"/);
   assert.match(workflow, /Submodule checkout attempt \$attempt\/3 failed/);
   assert.match(workflow, /pnpm activation attempt \$attempt\/3 failed/);
 });
@@ -379,6 +539,86 @@ test("packaged macOS app runs installation warmup once before its normal window"
   );
 });
 
+test("macOS first-launch warmup shows preparation UI instead of only a Dock icon", () => {
+  const source = readFileSync(electronMainScript, "utf8");
+  assert.match(
+    source,
+    /function createInstallationWarmupWindow\(\)[\s\S]*new BrowserWindow\(browserWindowOptions\(true\)\)[\s\S]*loadURL\(`data:text\/html/,
+  );
+  assert.match(
+    source,
+    /runMacInstallationWarmupIfNeeded\(\)[\s\S]*createInstallationWarmupWindow\(\)[\s\S]*runInstallerWarmup\(\)[\s\S]*disposeInstallationWarmupWindow/,
+  );
+});
+
+test("Desktop startup shows real bundled Python progress and transient Windows lock retries", () => {
+  const source = readFileSync(electronMainScript, "utf8");
+  assert.match(
+    source,
+    /event\?\.event === "phase\.progress" && event\?\.phase === "python-payload"[\s\S]*completedFiles[\s\S]*totalBytes/,
+  );
+  assert.match(source, /role="progressbar"[\s\S]*aria-label="Startup progress"/);
+  assert.match(source, /function renderProgress\(progress\)[\s\S]*Extracting bundled Python/);
+  assert.match(source, /Waiting for Windows to release Python files/);
+  assert.match(source, /Reading bundled Python archive/);
+  assert.match(source, /percent \+ "% · " \+ \(progress\.totalRoots/);
+  assert.match(source, /const ratio = totalFiles > 0 \? completedFiles \/ totalFiles : 0/);
+  assert.match(source, /const complete = totalFiles > 0 && completedFiles >= totalFiles/);
+  assert.match(source, /Math\.min\(99, Math\.floor\(ratio \* 100\)\)/);
+  assert.match(source, /style\.transform = "scaleX\("/);
+  assert.doesNotMatch(source, /transition:\s*width/);
+});
+
+test("Desktop allows slow first-launch Chat rendering", () => {
+  const source = readFileSync(electronMainScript, "utf8");
+  assert.match(source, /const rendererReadyTimeoutMs = 120 \* 1000;/);
+  assert.match(source, /rendererReadyTimeoutMs \/ 1000/);
+  assert.doesNotMatch(source, /did not render within 30 seconds/);
+});
+
+test("Desktop warmup reports bundled history extraction before Core starts", () => {
+  const source = readFileSync(electronMainScript, "utf8");
+  assert.match(source, /history-injection-payload/);
+  assert.match(source, /Preparing sample conversations/);
+  assert.match(source, /Verifying and unpacking the bundled sample conversations/);
+});
+
+test("selected Desktop folders become dynamic allowed roots without confirmation or restart", () => {
+  const source = readFileSync(electronMainScript, "utf8");
+  const start = source.indexOf('ipcMain.handle("lazymind:authorizeLocalFolders"');
+  const end = source.indexOf('ipcMain.handle("lazymind:selectFolder"', start);
+  const handler = source.slice(start, end);
+  assert.ok(start >= 0 && end > start);
+  assert.match(handler, /replaceFileWatcherAllowedRoots\([\s\S]*saveAccessState\([\s\S]*allowedRoots/);
+  assert.doesNotMatch(handler, /showMessageBox/);
+  assert.doesNotMatch(handler, /restartRuntimeAfterFolderAccessChange/);
+});
+
+test("Desktop discovery asks for consent before choosing roots and skips protected content folders", () => {
+  const source = readFileSync(electronMainScript, "utf8");
+  const start = source.indexOf('ipcMain.handle("lazymind:chooseLocalDiscoveryRoots"');
+  const end = source.indexOf('ipcMain.handle("lazymind:discoverLocalFolders"', start);
+  const handler = source.slice(start, end);
+  assert.ok(start >= 0 && end > start);
+  assert.ok(
+    handler.indexOf("showMessageBox") < handler.indexOf("showOpenDialog"),
+    "discovery consent must be shown before the native directory picker",
+  );
+  assert.match(handler, /discoveryConsentGranted:\s*false/);
+  assert.match(
+    handler,
+    /localFolderDiscoveryExcludedRoots\(\)[\s\S]*resolveExistingDirectories\(\s*collapseRoots\([\s\S]*containsPath\(excludedRoot, candidate\)/,
+    "protected selections must be filtered before filesystem validation",
+  );
+
+  const excludedStart = source.indexOf("function localFolderDiscoveryExcludedRoots()");
+  const excludedEnd = source.indexOf("function runtimeAllowedRoots", excludedStart);
+  const excluded = source.slice(excludedStart, excludedEnd);
+  for (const name of ["desktop", "documents", "downloads", "music", "pictures", "videos"]) {
+    assert.match(excluded, new RegExp(`"${name}"`));
+  }
+});
+
 test("Desktop does not create the Chat window after quitting or moving to background", () => {
   const source = readFileSync(electronMainScript, "utf8");
   const start = source.indexOf("async function createWindow()");
@@ -398,6 +638,11 @@ test("Desktop renderer keeps Node disabled behind an isolated preload bridge", (
   assert.match(source, /contextIsolation:\s*true/);
   assert.match(source, /nodeIntegration:\s*false/);
   assert.match(source, /preload:\s*path\.join\(__dirname, "preload\.js"\)/);
+  assert.match(
+    source,
+    /backgroundThrottling:\s*false/,
+    "hidden Chat windows must keep running until they report renderer readiness",
+  );
 });
 
 test("Desktop clears stale frontend caches before opening a renderer", () => {
@@ -422,6 +667,20 @@ test("Desktop opens the home page from the sidecar readiness event with status p
   );
 });
 
+test("Desktop always starts its local runtime with automatic port allocation", () => {
+  const source = readFileSync(electronMainScript, "utf8");
+  assert.match(
+    source,
+    /LAZYMIND_LOCAL_PORTS_PINNED:\s*"false"/,
+    "packaged Desktop must treat configured ports as preferences",
+  );
+  assert.match(
+    source,
+    /status\.config\?\.portResolutions[\s\S]*loggedPortResolutions\.has\(key\)[\s\S]*port moved:/,
+    "resolved ports must be reported once in startup diagnostics",
+  );
+});
+
 test("Desktop supervises the external Agent host until the application quits", () => {
   const source = readFileSync(electronMainScript, "utf8");
   assert.match(
@@ -438,6 +697,27 @@ test("Desktop supervises the external Agent host until the application quits", (
     source,
     /function beginFastQuit[\s\S]*clearTimeout\(agentHostRestartTimer\)[\s\S]*agentHostProcess\?\.kill\(\)/,
     "application shutdown must disable supervision before stopping the Agent host",
+  );
+});
+
+test("Desktop Agent login returns immediately and refreshes the Host when login exits", () => {
+  const source = readFileSync(electronMainScript, "utf8");
+  assert.match(source, /workbuddy: new Set\(\["connect", "status", "disconnect", "login"\]\)/);
+  assert.match(
+    source,
+    /function runAgentConnector[\s\S]*action === "login"[\s\S]*return startAgentLogin\(agent\)/,
+  );
+  assert.match(
+    source,
+    /function startAgentLogin[\s\S]*spawn\(agentConnectorPath, \["internal", "agent", agent, "login"\][\s\S]*return runConnectorJSON\([\s\S]*\["internal", "agent", agent, "status"\]/,
+  );
+  assert.match(
+    source,
+    /function startAgentLogin[\s\S]*child\.once\("close"[\s\S]*restartAgentHost\(\)/,
+  );
+  assert.match(
+    source,
+    /function beginFastQuit[\s\S]*agentLoginProcesses\.values\(\)[\s\S]*child\.kill\(\)[\s\S]*agentLoginProcesses\.clear\(\)/,
   );
 });
 

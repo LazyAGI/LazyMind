@@ -1,0 +1,128 @@
+schema_version: 2
+id: smart-charts
+type: work
+version: 7.0.1
+status: published
+default_locale: zh-CN
+provider: SkillHub
+
+skill:
+  source_url: https://skillhub.cn/skills/user_5b28ea14/smart-charts
+  category: data
+  required_version: 7.0.0
+
+placement:
+  home: true
+  gallery: true
+  order: 12
+
+classification:
+  category: 信息分析
+  tags:
+    - 智能图表
+    - 数据可视化
+    - Excel 分析
+    - CSV 分析
+
+assets:
+  cover:
+    file: assets/cover.png
+    role: cover
+  revenue_demo:
+    file: assets/revenue-trend-demo.html
+    role: result
+  comparison_output:
+    file: assets/comparison-chart.html
+    role: result
+  distribution_output:
+    file: assets/distribution-chart.html
+    role: result
+
+presentation:
+  card:
+    title: 智能图表
+    description: 从半年经营数据生成双指标趋势图，交互查看增长与利润变化
+    output_type: dashboard
+    output_label: 可视化图表
+    cover_asset: cover
+    result_summary: 用收入与利润的具体案例演示指标识别、趋势洞察和交互式 HTML 交付
+  detail:
+    title: 智能图表
+    description: 源自 SkillHub。读取 CSV、Excel 或 JSON 数据，自动推荐图表并生成可交互、可下载的 HTML 可视化。
+    attachment_hint: CSV、Excel 或 JSON 数据文件
+
+tasks:
+  - id: trend-chart
+    selector:
+      title: 新零售半年趋势
+      description: 用 1-6 月收入与利润演示双指标趋势分析
+      output_label: 趋势分析图
+    launch:
+      prompt_short: 用示例数据生成 2026 年 1-6 月收入与利润趋势图。
+      prompt: 请使用智能图表 Skill 分析以下新零售示例数据：2026 年 1-6 月收入分别为 82、90、102、112、129、145 万元，利润分别为 23、26、30、35、41、50 万元。生成一个自包含、无需外部 CDN 的交互式 HTML：用双折线展示收入与利润，提供指标切换和悬停提示，计算累计收入、累计利润、整体利润率与增长最快月份，并给出 3 条有数据依据的经营洞察。
+    replay:
+      steps:
+        - title: 校验半年数据
+          description: 对齐 1-6 月收入、利润、单位与时间顺序
+        - title: 计算经营指标
+          description: 汇总累计值、利润率、增速和关键拐点
+        - title: 构建双指标趋势
+          description: 生成可切换、可悬停查看的收入与利润折线图
+        - title: 输出经营洞察
+          description: 核验数值映射并说明增长与利润变化
+    result:
+      template: html_preview_v1
+      eyebrow: 趋势分析图
+      title: 2026 上半年收入与利润趋势
+      summary: 交互查看六个月双指标变化、累计表现和增长最快月份
+      html_asset: revenue_demo
+
+  - id: comparison-chart
+    selector:
+      title: 对比图表
+      description: 比较华东、华南、华北三地区的收入与订单量
+      output_label: 对比分析图
+    launch:
+      prompt_short: 示例：比较华东、华南、华北三地区的收入和订单量。
+      prompt: 请用这组示例数据生成分类对比图表：地区=华东、华南、华北；收入（万元）=320、280、210；订单量=8400、7600、5900。识别分类维度和数值指标，选择合适的柱状图或组合图，突出排名、差距和关键结论，并生成可交互、可下载的 HTML 图表。
+    replay:
+      steps:
+        - title: 识别比较维度
+          description: 确认类别、分组和需要比较的指标
+        - title: 处理排序与聚合
+          description: 按分析目标完成分组汇总、排序和单位统一
+        - title: 生成对比图表
+          description: 使用清晰的视觉编码突出差异和重点
+        - title: 输出结论
+          description: 总结排名、差距和业务上值得关注的发现
+    result:
+      template: html_preview_v1
+      eyebrow: 对比分析图
+      title: 分类指标对比与排名
+      summary: 用交互图表呈现各分组的指标差异、排名和重点发现
+      html_asset: comparison_output
+
+  - id: distribution-chart
+    selector:
+      title: 分布与构成
+      description: 分析 12 笔订单金额分布与四个渠道的构成占比
+      output_label: 分布分析图
+    launch:
+      prompt_short: 示例：分析 12 笔订单金额的分布和渠道构成。
+      prompt: 请用这组示例数据分析分布和构成：订单金额（元）=89、95、102、110、118、125、130、142、155、168、420、560；渠道订单数=自然搜索 42、直播 28、社群 18、广告 12。判断适合的直方图和构成图，说明集中区间、占比和异常点，并生成可交互、可下载的 HTML 图表。
+    replay:
+      steps:
+        - title: 检查数据特征
+          description: 判断连续变量、分类变量及其取值分布
+        - title: 选择视觉编码
+          description: 根据分布或构成关系匹配合适图表
+        - title: 标注关键发现
+          description: 突出集中区间、主要占比和异常点
+        - title: 生成交付文件
+          description: 输出自包含的交互式 HTML 图表
+    result:
+      template: html_preview_v1
+      eyebrow: 分布分析图
+      title: 数据分布与结构洞察
+      summary: 展示主要分布区间、类别构成和异常数据点
+      html_asset: distribution_output

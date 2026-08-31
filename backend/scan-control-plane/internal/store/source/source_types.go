@@ -31,6 +31,7 @@ type SourceListRequest struct {
 	SourceIDs []string
 	Keyword   string
 	Status    string
+	OrderBy   string
 	Page      int
 	PageSize  int
 }
@@ -39,6 +40,8 @@ type SourceListRecord struct {
 	Source       Source
 	BindingCount int
 	Summary      map[string]any
+
+	LastSuccessAt *time.Time
 }
 
 type SourceUpdateMutation struct {

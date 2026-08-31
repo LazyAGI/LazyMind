@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -25,6 +26,25 @@ func TestUpstreamStreamChunkPreservesToolLimitPending(t *testing.T) {
 
 	if chunk.ToolLimitPending != pending {
 		t.Fatalf("tool-limit event was dropped during upstream conversion: %#v", chunk)
+	}
+}
+
+func TestConsumeRuntimeChunkPrefersError(t *testing.T) {
+	terminal := runFinishedEvent("run-1", RunTerminal{
+		Status:        "completed",
+		Reason:        "normal",
+		PartialOutput: false,
+	})
+	decision, handled := consumeRuntimeChunk(UpstreamStreamChunk{
+		RuntimeEvent: terminal,
+		Err:          fmt.Errorf("stream failed"),
+	}, "run-1", true)
+
+	if !handled || !decision.Stop || decision.Terminal == nil {
+		t.Fatalf("unexpected decision: %#v", decision)
+	}
+	if decision.Terminal.Status != "failed" || decision.Terminal.Reason != "runtime_failure" || decision.Terminal.Code != "upstream_stream_failed" {
+		t.Fatalf("error did not win over terminal: %#v", decision.Terminal)
 	}
 }
 
@@ -119,6 +139,54 @@ func TestStreamSingleAnswerPersistsFinalAlgorithmID(t *testing.T) {
 	}
 	if ext.Attempts[1].AlgorithmID != "algorithm-b" || ext.Attempts[1].FeedBack != 2 || ext.Attempts[1].Reason != "slow" {
 		t.Fatalf("unexpected second attempt: %#v", ext.Attempts[1])
+	}
+}
+
+func TestStreamSingleAnswerPersistsFailureForInvalidTerminal(t *testing.T) {
+	db, err := orm.Connect(orm.DriverSQLite, t.TempDir()+"/invalid-terminal.db")
+	if err != nil {
+		t.Fatalf("connect db: %v", err)
+	}
+	if err := db.AutoMigrate(&orm.Conversation{}, &orm.ChatHistory{}); err != nil {
+		t.Fatalf("auto migrate: %v", err)
+	}
+	now := time.Now().UTC()
+	if err := db.Create(&orm.Conversation{
+		ID: "conv-invalid", DisplayName: "test",
+		BaseModel: orm.BaseModel{CreateUserID: "u1", CreateUserName: "u1", CreatedAt: now, UpdatedAt: now},
+	}).Error; err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-Algorithm-Id", "algorithm-invalid")
+		_, _ = fmt.Fprintln(w, runFinishedFrame(t, "wrong-run"))
+	}))
+	defer server.Close()
+
+	recorder := httptest.NewRecorder()
+	streamSingleAnswer(
+		context.Background(), context.Background(), recorder, recorder, db.DB, nil,
+		server.URL, map[string]any{"query": "question", "run_id": "expected-run"},
+		"conv-invalid", "question", "history-invalid", chatPersistTarget{HistoryID: "history-invalid", Seq: 1}, json.RawMessage(`{}`),
+	)
+
+	var history orm.ChatHistory
+	if err := db.Where("id = ?", "history-invalid").First(&history).Error; err != nil {
+		t.Fatalf("load history: %v", err)
+	}
+	if history.RunStatus != "failed" {
+		t.Fatalf("invalid terminal persisted status %q", history.RunStatus)
+	}
+	terminal, err := parseRunTerminal(history.RunTerminal)
+	if err != nil {
+		t.Fatalf("parse persisted terminal: %v", err)
+	}
+	if terminal.Reason != "runtime_failure" || terminal.Code != "upstream_stream_failed" {
+		t.Fatalf("unexpected persisted terminal: %#v", terminal)
+	}
+	if strings.Contains(recorder.Body.String(), `"status":"completed"`) {
+		t.Fatalf("invalid completed terminal leaked to client: %s", recorder.Body.String())
 	}
 }
 
