@@ -29,7 +29,11 @@ vi.mock('./MarkdownArtifactEditor', () => ({
     onSave: (markdown: string, revision: number, mode: 'draft') => Promise<unknown>;
     sourceRevision: number;
   }) => (
-    <button type='button' onClick={() => void onSave('# Edited draft', sourceRevision, 'draft')}>
+    <button
+      type='button'
+      data-source-revision={sourceRevision}
+      onClick={() => void onSave('# Edited draft', sourceRevision, 'draft')}
+    >
       save markdown draft
     </button>
   ),
@@ -130,6 +134,77 @@ describe('SlotWriterDocument render refresh', () => {
     await waitFor(() => {
       expect(document.querySelector('.workflow-slot__writer-writeback-summary')).toHaveTextContent('草稿');
       expect(document.querySelector('.workflow-slot__writer-writeback-summary')).not.toHaveTextContent('v3');
+    });
+  });
+
+  it('saves against the selected older revision after rollback', async () => {
+    workflowApi.renderWriterDocument.mockResolvedValue(renderedMarkdown('# Selected document'));
+    workflowApi.saveWriterDocument.mockResolvedValue({
+      data: {
+        code: 0,
+        message: 'ok',
+        data: {
+          title: 'Writer document',
+          representation: 'markdown',
+          document: '# Edited draft',
+          revision: 3,
+        },
+      },
+    });
+    const getSlotVersions = vi.fn().mockResolvedValue([
+      {
+        revision: 1,
+        version: 1,
+        change_source: 'ai',
+        created_at: '2026-08-30T03:12:00Z',
+        selected: false,
+        content_snapshot: '# Initial document',
+      },
+      {
+        revision: 2,
+        version: 2,
+        change_source: 'ai',
+        created_at: '2026-08-30T03:14:03Z',
+        selected: true,
+        content_snapshot: '# Current document',
+      },
+    ]);
+    const rollbackSlotItem = vi.fn().mockResolvedValue(undefined);
+    useWorkflowStore.setState({ getSlotVersions, rollbackSlotItem });
+
+    const { container } = render(
+      <SlotRenderer
+        slot={writerSlot(2)}
+        widget={{ widgetType: 'writer-document' }}
+        sessionId='writer-session'
+        slotId='draft_document'
+        revisionCount={2}
+      />,
+    );
+
+    const saveButton = await screen.findByRole('button', { name: 'save markdown draft' });
+    expect(saveButton).toHaveAttribute('data-source-revision', '2');
+
+    fireEvent.click(container.querySelector<HTMLButtonElement>('.workflow-slot__version-btn')!);
+    await waitFor(() => expect(document.querySelectorAll('.workflow-slot__version-item')).toHaveLength(2));
+    fireEvent.click(document.querySelectorAll<HTMLElement>('.workflow-slot__version-item')[1]);
+    fireEvent.click(document.querySelector<HTMLButtonElement>('.workflow-slot__version-apply-btn')!);
+
+    await waitFor(() => {
+      expect(rollbackSlotItem).toHaveBeenCalledWith('writer-session', 'draft_document', -1, 1);
+      expect(saveButton).toHaveAttribute('data-source-revision', '1');
+    });
+
+    fireEvent.click(saveButton);
+    await waitFor(() => {
+      expect(workflowApi.saveWriterDocument).toHaveBeenCalledWith(
+        'writer-session',
+        1,
+        '# Edited draft',
+        'draft_document',
+        'draft',
+        { silentError: true },
+      );
     });
   });
 

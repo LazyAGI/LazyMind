@@ -874,7 +874,7 @@ interface SlotVersionPopoverProps {
   currentValue?: any;
   currentChangeSource?: 'ai' | 'human' | 'provider_sync';
   contentType?: string;
-  onRollbackDone?: () => void;
+  onRollbackDone?: (revision?: number) => void;
   draftText?: string;
   /** Called when the user clicks "Discard draft" in draft mode. */
   onDiscardDraft?: () => void;
@@ -971,7 +971,7 @@ export function SlotVersionPopover({
     try {
       await rollbackSlotItem(sessionId, slotId, listIndex, revision);
       setOpen(false);
-      onRollbackDone?.();
+      onRollbackDone?.(revision);
     } finally {
       setRolling(false);
     }
@@ -2638,6 +2638,14 @@ function SlotWriterDocument({
     onRefresh?.();
   }, [onRefresh]);
 
+  const handleRollbackDone = useCallback((revision?: number) => {
+    if (typeof revision === 'number' && revision > 0) {
+      latestRevisionRef.current = revision;
+      setLocalRevision(revision);
+    }
+    refreshDocument();
+  }, [refreshDocument]);
+
   const writerDocument = useMemo(() => (
     rendered?.representation === 'ir' && isWriterDocument(rendered.document)
       ? restoreWriterInternalReferenceDisplayText(
@@ -2962,7 +2970,7 @@ function SlotWriterDocument({
               currentValue={currentDraftSnapshot}
               currentChangeSource={localChangeSource}
               contentType='json'
-              onRollbackDone={refreshDocument}
+              onRollbackDone={handleRollbackDone}
             />
           )}
         </div>
