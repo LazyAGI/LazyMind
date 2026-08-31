@@ -1,174 +1,106 @@
+from dataclasses import dataclass
+
+import pytest
+
 from lazymind.chat.engine.agent_runtime.executor import ToolCallGuard
+from lazymind.chat.engine.agent_runtime.tool_call_guard import ToolCallGuard as ExtractedToolCallGuard
 
 
-def _call(name, arguments):
-    return {'function': {'name': name, 'arguments': arguments}}
+@dataclass(frozen=True)
+class _Access:
+    counts_as_progress: bool = False
+    polling: bool = False
 
 
-def _failure(tool='search'):
-    return {'ok': False, 'value': f'{tool} failed'}
+def _call(name='search', arguments=None, call_id='call-1'):
+    return {
+        'id': call_id,
+        'function': {'name': name, 'arguments': arguments or {'query': 'same'}},
+    }
 
 
 class _RecordingToolManager:
-    def __init__(self, result_factory=None):
+    def __init__(self, result=None, accesses=None):
         self.calls = []
-        self.allowed_tool_names = []
-        self.result_factory = result_factory or (
-            lambda call: {'ok': True, 'value': call['function']['arguments']}
-        )
+        self.result = result if result is not None else {'ok': True, 'value': {'items': ['same']}}
+        self.accesses = accesses
+
+    def normalize_tool_calls(self, calls):
+        return calls
+
+    def resolve_tool_accesses(self, calls, allowed_tool_names=None):
+        if self.accesses is not None:
+            return self.accesses[:len(calls)]
+        return [_Access() for _ in calls]
 
     def __call__(self, calls, verbose=False, allowed_tool_names=None):
         self.calls.extend(calls)
-        self.allowed_tool_names.append(allowed_tool_names)
-        return [self.result_factory(call) for call in calls]
+        return [self.result for _ in calls]
 
 
-def test_successful_calls_are_never_limited_or_cached():
-    manager = _RecordingToolManager()
-    guard = ToolCallGuard(manager, {'url_fetch': 2})
+@pytest.mark.parametrize('result', [
+    {'ok': True, 'value': {'items': ['same']}},
+    {'ok': False, 'msg': 'same failure'},
+])
+def test_third_identical_result_queues_soft_notice_without_changing_results(result):
+    assert ToolCallGuard is ExtractedToolCallGuard
+    manager = _RecordingToolManager(result=result)
+    guard = ToolCallGuard(manager)
+    call = _call()
 
-    for index in range(20):
-        guard([_call('url_fetch', {'url': f'https://example.com/{index}'})])
-    guard([_call('url_fetch', {'url': 'https://example.com/0'})])
+    returned = [guard([call]) for _ in range(3)]
 
-    assert len(manager.calls) == 21
-
-
-def test_exact_duplicate_tool_calls_in_one_batch_are_merged():
-    manager = _RecordingToolManager()
-    guard = ToolCallGuard(manager, {'url_fetch': 2})
-
-    results = guard([
-        _call('url_fetch', {'url': 'https://example.com'}),
-        _call('url_fetch', {'url': 'https://example.com'}),
-    ])
-
-    assert results[0] == results[1]
-    assert len(manager.calls) == 1
+    assert returned == [[result], [result], [result]]
+    assert len(manager.calls) == 3
+    notice = guard.consume_internal_runtime_notices(['call-1'])
+    assert len(notice) == 1
+    assert '3 consecutive times' in notice[0]
 
 
-def test_same_batch_duplicates_do_not_consume_repeated_call_budget():
-    manager = _RecordingToolManager()
-    guard = ToolCallGuard(manager, {'url_fetch': 2}, repeated_call_limit=2)
-    call = _call('url_fetch', {'url': 'https://example.com'})
-
-    first = guard([call, call, call])
-    second = guard([call])
-
-    assert first[0] == first[1] == first[2]
-    assert second[0]['ok'] is True
-    assert len(manager.calls) == 2
-
-
-def test_allowed_tool_names_are_forwarded_to_pending_calls():
+def test_all_batch_duplicates_execute_and_notice_binds_to_ordered_batch_ids():
     manager = _RecordingToolManager()
     guard = ToolCallGuard(manager)
-    allowed = {'url_fetch'}
+    calls = [
+        _call(call_id='first'),
+        _call(call_id='second'),
+        _call(call_id='third'),
+    ]
 
-    guard([_call('url_fetch', {'url': 'https://example.com'})], allowed_tool_names=allowed)
-
-    assert manager.allowed_tool_names == [allowed]
-
-
-def test_repeated_exact_failure_respects_consecutive_failure_limit():
-    manager = _RecordingToolManager(
-        lambda _: _failure('url_fetch'),
-    )
-    guard = ToolCallGuard(manager, {'url_fetch': 2})
-
-    guard([_call('url_fetch', {'url': 'https://one.example'})])
-    blocked = guard([_call('url_fetch', {'url': 'https://one.example'})])
-
-    assert len(manager.calls) == 1
-    assert blocked[0]['ok'] is False
-    assert '[Repeated Tool Failure]' in blocked[0]['value']
-    assert 'already failed' in blocked[0]['value']
-
-
-def test_different_parameter_guesses_are_blocked_after_consecutive_failures():
-    manager = _RecordingToolManager(
-        lambda _: _failure('url_fetch'),
-    )
-    guard = ToolCallGuard(manager, {'url_fetch': 2})
-
-    guard([_call('url_fetch', {'url': 'https://one.example'})])
-    guard([_call('url_fetch', {'url': 'https://two.example'})])
-    blocked = guard([_call('url_fetch', {'url': 'https://three.example'})])
-
-    assert len(manager.calls) == 2
-    assert '[Repeated Tool Failure]' in blocked[0]['value']
-
-
-def test_success_resets_consecutive_failure_count():
-    outcomes = iter([False, True, False, False])
-    manager = _RecordingToolManager(
-        lambda _: {'ok': next(outcomes), 'value': None},
-    )
-    guard = ToolCallGuard(manager, {'url_fetch': 2})
-
-    for index in range(4):
-        guard([_call('url_fetch', {'url': f'https://example.com/{index}'})])
-
-    assert len(manager.calls) == 4
-
-
-def test_success_for_other_arguments_resets_consecutive_failure_count():
-    def result(call):
-        if call['function']['arguments']['url'].endswith('/failed'):
-            return _failure('url_fetch')
-        return {'ok': True, 'value': 'loaded'}
-
-    manager = _RecordingToolManager(result)
-    guard = ToolCallGuard(manager, {'url_fetch': 3})
-    failed_call = _call('url_fetch', {'url': 'https://example.com/failed'})
-
-    guard([failed_call])
-    guard([_call('url_fetch', {'url': 'https://example.com/success'})])
-    result = guard([failed_call])
+    results = guard(calls)
 
     assert len(manager.calls) == 3
-    assert result == [_failure('url_fetch')]
+    assert len(results) == 3
+    assert guard.consume_internal_runtime_notices(['first', 'second', 'third'])
 
 
-def test_failure_can_be_retried_by_agent_until_failure_limit():
-    failure = _failure('url_fetch')
-    manager = _RecordingToolManager(lambda _: failure)
-    guard = ToolCallGuard(manager, {'url_fetch': 2})
-    call = _call('url_fetch', {'url': 'https://example.com'})
-
-    first = guard([call])
-
-    assert first == [failure]
-    assert len(manager.calls) == 1
-
-    blocked = guard([call])
-
-    assert '[Repeated Tool Failure]' in blocked[0]['value']
-    assert 'already failed' in blocked[0]['value']
-    assert len(manager.calls) == 1
-
-
-def test_guard_preserves_failure_message():
-    cases = (
-        (_call('search', {'limit': 'many'}), _call('search', {'limit': []})),
-        (_call('seach', {}), _call('serch', {})),
-    )
-    for first_call, second_call in cases:
-        manager = _RecordingToolManager(lambda _: _failure())
-        guard = ToolCallGuard(manager)
-
-        first = guard([first_call])[0]
-        second = guard([second_call])[0]
-
-        assert first == _failure()
-        assert second == _failure()
-
-
-def test_unconfigured_stateful_tool_is_not_deduplicated():
+@pytest.mark.parametrize('change_result', [False, True])
+def test_result_or_arguments_change_resets_consecutive_state(change_result):
     manager = _RecordingToolManager()
-    guard = ToolCallGuard(manager, {'url_fetch': 2})
+    guard = ToolCallGuard(manager)
 
-    guard([_call('get_task_status', {'task_id': 'task-1'})])
-    guard([_call('get_task_status', {'task_id': 'task-1'})])
+    guard([_call(call_id='one')])
+    guard([_call(call_id='two')])
+    arguments = {'query': 'same'}
+    if change_result:
+        manager.result = {'ok': True, 'value': {'items': ['changed']}}
+    else:
+        arguments = {'query': 'changed'}
+    guard([_call(arguments=arguments, call_id='changed-1')])
+    guard([_call(arguments=arguments, call_id='changed-2')])
 
-    assert len(manager.calls) == 2
+    assert guard.consume_internal_runtime_notices(['changed-2']) == []
+
+
+@pytest.mark.parametrize('access', [
+    _Access(counts_as_progress=True),
+    _Access(polling=True),
+])
+def test_progress_and_polling_calls_are_exempt(access):
+    manager = _RecordingToolManager(accesses=[access])
+    guard = ToolCallGuard(manager)
+
+    for index in range(4):
+        guard([_call(call_id=f'call-{index}')])
+
+    assert len(manager.calls) == 4
+    assert guard.consume_internal_runtime_notices(['call-3']) == []

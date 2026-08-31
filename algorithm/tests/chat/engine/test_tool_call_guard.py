@@ -1,33 +1,38 @@
-from unittest.mock import MagicMock
+from dataclasses import dataclass
 
-from lazymind.chat.engine.agent_runtime.executor import ToolCallGuard
-
-
-def _call(name: str = 'search', query: str = 'same'):
-    return {'function': {'name': name, 'arguments': {'query': query}}}
+from lazymind.chat.engine.agent_runtime.tool_call_guard import ToolCallGuard
 
 
-def test_exact_successful_call_is_blocked_after_limit_even_when_interleaved():
-    manager = MagicMock(side_effect=lambda calls, verbose=False: [
-        {'ok': True, 'value': {'results': ['grounded']}} for _ in calls
-    ])
-    guard = ToolCallGuard(manager, repeated_call_limit=3)
-
-    for _ in range(3):
-        assert guard([_call()])[0]['ok'] is True
-        assert guard([_call(query='different')])[0]['ok'] is True
-
-    blocked = guard([_call()])[0]
-    assert blocked['ok'] is False
-    assert 'exact same call was already made 3 times' in blocked['msg']
-    assert manager.call_count == 6
+@dataclass(frozen=True)
+class _Access:
+    counts_as_progress: bool = False
+    polling: bool = False
 
 
-def test_distinct_arguments_remain_allowed():
-    manager = MagicMock(side_effect=lambda calls, verbose=False: [
-        {'ok': True, 'value': {}} for _ in calls
-    ])
-    guard = ToolCallGuard(manager, repeated_call_limit=3)
+class _Manager:
+    def __init__(self):
+        self.call_count = 0
 
-    for index in range(10):
-        assert guard([_call(query=f'query-{index}')])[0]['ok'] is True
+    def resolve_tool_accesses(self, calls, allowed_tool_names=None):
+        return [_Access() for _ in calls]
+
+    def __call__(self, calls, verbose=False, allowed_tool_names=None):
+        self.call_count += len(calls)
+        return [{'ok': True, 'value': {'results': ['grounded']}} for _ in calls]
+
+
+def _call(call_id: str):
+    return {'id': call_id, 'function': {'name': 'search', 'arguments': {'query': 'same'}}}
+
+
+def test_identical_calls_are_executed_and_notice_is_consumed_once():
+    manager = _Manager()
+    guard = ToolCallGuard(manager)
+
+    for index in range(3):
+        result = guard([_call(f'call-{index}')])
+        assert result[0]['ok'] is True
+
+    assert manager.call_count == 3
+    assert guard.consume_internal_runtime_notices(['call-2'])
+    assert guard.consume_internal_runtime_notices(['call-2']) == []

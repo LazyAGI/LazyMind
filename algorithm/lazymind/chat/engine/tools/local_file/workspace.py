@@ -9,6 +9,7 @@ import uuid
 from typing import Any, Dict, Literal, Optional
 
 import lazyllm
+from lazyllm.tools import fc_register
 from lazyllm.tools.agent import (
     ToolExecutionError,
 )
@@ -19,6 +20,7 @@ from lazyllm.tools.agent.file_tool import (
 )
 
 from lazymind.config import config as _cfg
+
 from .resolver import resolve_text_target
 from .window import (
     RESULT_BYTE_BUDGET,
@@ -265,6 +267,7 @@ def save_chat_file(
     }
 
 
+@fc_register(write_keys=lambda args: ('file', args['path']))
 def write_file(
     path: str,
     content: str,

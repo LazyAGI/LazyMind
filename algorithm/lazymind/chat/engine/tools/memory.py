@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Literal, Union
 import lazyllm
 import requests
 from lazyllm.tools.agent import ToolExecutionError
-from lazyllm.tools import tool_concurrency
+from lazyllm.tools import fc_register
 from pydantic import ValidationError
 
 from lazymind.common.memory import (
@@ -272,7 +272,7 @@ class MemoryTools:
     def __lazy_source__(self) -> bool:
         return False
 
-    @tool_concurrency(read_keys=_read_memory_keys)
+    @fc_register(read_keys=_read_memory_keys)
     def read_memory(
         self,
         target: Literal['soul', 'profile', 'preference'],
@@ -350,7 +350,7 @@ class MemoryTools:
             },
         )
 
-    @tool_concurrency(read_keys=_read_memory_reference_keys)
+    @fc_register(read_keys=_read_memory_reference_keys)
     def read_memory_reference(self, refs: Union[str, List[str]]) -> Dict[str, Any]:
         """Read detailed user-preference reference files on demand.
 
@@ -440,7 +440,7 @@ class MemoryTools:
             },
         )
 
-    @tool_concurrency(write_keys=('memory', SOUL_PATH))
+    @fc_register(write_keys=('memory', SOUL_PATH))
     def soul_editor(self, operations: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Apply one atomic batch of operations to the agent Soul.
 
@@ -484,7 +484,7 @@ class MemoryTools:
             ledger_result={'status': 'applied'},
         )
 
-    @tool_concurrency(write_keys=('memory', PROFILE_PATH))
+    @fc_register(write_keys=('memory', PROFILE_PATH))
     def profile_editor(self, operations: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Apply one atomic batch of operations to the user Profile.
 
@@ -531,7 +531,7 @@ class MemoryTools:
             ledger_result={'status': 'applied'},
         )
 
-    @tool_concurrency(write_keys=[
+    @fc_register(write_keys=[
         ('memory', PREFERENCE_PATH),
         _REFERENCE_COLLECTION_KEY,
     ])
