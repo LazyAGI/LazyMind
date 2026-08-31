@@ -433,6 +433,16 @@ interface CheckModelProviderResult {
   message?: string;
 }
 
+export function resolveSavedProviderGroupVerified(group: {
+  is_verified?: boolean;
+  check?: CheckModelProviderResult;
+}): boolean {
+  if (typeof group.is_verified === "boolean") {
+    return group.is_verified;
+  }
+  return group.check?.success === true;
+}
+
 interface ApiModel {
   id: string;
   name: string;
@@ -853,7 +863,7 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
           ...savedGroup,
           api_key_configured: Boolean(apiKey || existingGroup?.apiKeyConfigured || savedGroup.api_key_configured || savedGroup.api_key),
           api_key_preview: apiKey ? maskApiKey(apiKey) : existingGroup?.apiKeyPreview || savedGroup.api_key_preview,
-          is_verified: apiKey ? savedGroup.check?.success === true : savedGroup.is_verified,
+          is_verified: resolveSavedProviderGroupVerified(savedGroup),
         },
         existingGroup?.models || []
       );

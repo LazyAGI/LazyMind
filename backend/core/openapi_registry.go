@@ -887,6 +887,7 @@ type createModelProviderGroupOpenAPIResponse struct {
 	UserModelProviderID string                                `json:"user_model_provider_id"`
 	Name                string                                `json:"name"`
 	BaseURL             string                                `json:"base_url"`
+	IsVerified          bool                                  `json:"is_verified"`
 	Check               *modelprovider.CheckModelProviderData `json:"check,omitempty"`
 }
 
@@ -1044,6 +1045,7 @@ type listModelProviderGroupsOpenAPIItem struct {
 	Name                string `json:"name"`
 	BaseURL             string `json:"base_url"`
 	APIKey              string `json:"api_key"`
+	IsVerified          bool   `json:"is_verified"`
 }
 
 type listModelProviderGroupsOpenAPIResponse struct {
