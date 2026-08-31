@@ -127,6 +127,8 @@ describe("TaskCenter display modes", () => {
     );
 
     expect(document.querySelectorAll(".ordinary-task-card")).toHaveLength(2);
+    expect(document.querySelectorAll(".ordinary-step-node")).toHaveLength(2);
+    expect(document.querySelector(".ordinary-task-marker")).not.toBeInTheDocument();
     expect(screen.getByText("2 retries")).toBeInTheDocument();
     expect(screen.queryByText("raw trace analyze")).not.toBeInTheDocument();
     expect(screen.queryByText("taskCenter.filterAll")).not.toBeInTheDocument();

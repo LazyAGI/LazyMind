@@ -4,21 +4,19 @@ import { isSettingsSectionVisible } from "./settingsSectionVisibility";
 
 describe("isSettingsSectionVisible", () => {
   const desktopFeatures = {
-    hideEvo: true,
     hideUserGroupSurfaces: true,
   };
   const cloudFeatures = {
-    hideEvo: false,
     hideUserGroupSurfaces: false,
   };
 
-  it("hides organization and developer settings in desktop mode", () => {
+  it("hides organization but keeps developer settings in desktop mode", () => {
     expect(
       isSettingsSectionVisible("organization", true, desktopFeatures),
     ).toBe(false);
     expect(
       isSettingsSectionVisible("developer", true, desktopFeatures),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it("keeps cloud organization settings admin-only", () => {
@@ -30,7 +28,7 @@ describe("isSettingsSectionVisible", () => {
     ).toBe(false);
   });
 
-  it("keeps developer settings available when self-evolution is enabled", () => {
+  it("keeps developer settings available independently of administrator access", () => {
     expect(
       isSettingsSectionVisible("developer", false, cloudFeatures),
     ).toBe(true);

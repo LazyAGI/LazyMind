@@ -2,7 +2,7 @@ import { runtimeFeatures, type RuntimeFeatures } from "@/runtime/features";
 
 type SettingsVisibilityFeatures = Pick<
   RuntimeFeatures,
-  "hideEvo" | "hideUserGroupSurfaces"
+  "hideUserGroupSurfaces"
 >;
 
 export function isSettingsSectionVisible(
@@ -14,5 +14,5 @@ export function isSettingsSectionVisible(
     return isAdmin && !features.hideUserGroupSurfaces;
   }
 
-  return !features.hideEvo;
+  return true;
 }

@@ -414,13 +414,18 @@ export default function SettingsPage() {
   };
 
   const requestDeveloperChange = (enabled: boolean) => {
+    const confirmationKey = runtimeFeatures.hideEvo
+      ? enabled
+        ? "settingsPage.confirm.developerEnableContentWithoutEvo"
+        : "settingsPage.confirm.developerDisableContentWithoutEvo"
+      : enabled
+        ? "settingsPage.confirm.developerEnableContent"
+        : "settingsPage.confirm.developerDisableContent";
     Modal.confirm({
       title: t("settingsPage.confirm.developerTitle", {
         action: enabled ? t("settingsPage.enable") : t("settingsPage.disable"),
       }),
-      content: t(enabled
-        ? "settingsPage.confirm.developerEnableContent"
-        : "settingsPage.confirm.developerDisableContent"),
+      content: t(confirmationKey),
       okText: enabled ? t("settingsPage.confirmEnable") : t("settingsPage.confirmDisable"),
       cancelText: t("settingsPage.cancel"),
       okButtonProps: enabled ? undefined : { danger: true },
@@ -860,7 +865,9 @@ export default function SettingsPage() {
           <div className="settings-detail-row">
             <div>
               <strong>{t(developerActive ? "settingsPage.developer.disableTitle" : "settingsPage.developer.enableTitle")}</strong>
-              <p>{t("settingsPage.developer.enableDesc")}</p>
+              <p>{t(runtimeFeatures.hideEvo
+                ? "settingsPage.developer.enableDescWithoutEvo"
+                : "settingsPage.developer.enableDesc")}</p>
             </div>
             <Switch
               className="settings-ref-switch"

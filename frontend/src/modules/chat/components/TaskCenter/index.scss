@@ -883,7 +883,7 @@
   width: 100%;
   min-height: 78px;
   display: grid;
-  grid-template-columns: 28px minmax(0, 1fr) 16px;
+  grid-template-columns: minmax(0, 1fr) 16px;
   align-items: center;
   gap: 9px;
   padding: 10px 11px;
@@ -906,42 +906,6 @@
   &:disabled {
     cursor: not-allowed;
   }
-}
-
-.ordinary-task-marker {
-  width: 28px;
-  height: 28px;
-  display: grid;
-  place-items: center;
-  border: 1px solid #dce4ee;
-  border-radius: 50%;
-  color: #657286;
-  background: #fff;
-  font-size: 9px;
-  font-weight: 700;
-
-  .ordinary-task-spinner {
-    width: 12px;
-    height: 12px;
-  }
-}
-
-.ordinary-task-card.is-complete .ordinary-task-marker {
-  color: #118454;
-  border-color: #d9f1e5;
-  background: #eaf8f1;
-}
-
-.ordinary-task-card.is-running .ordinary-task-marker {
-  color: #2f6bff;
-  border-color: #c8d8fb;
-  background: #edf4ff;
-}
-
-.ordinary-task-card.is-failed .ordinary-task-marker {
-  color: #b42318;
-  border-color: #f0caca;
-  background: #fff1f0;
 }
 
 .ordinary-task-main {
@@ -1023,10 +987,6 @@
   padding: 13px 12px 12px;
   border-top: 1px solid #e4ebf5;
   background: rgba(255, 255, 255, 0.8);
-}
-
-.ordinary-task-panel {
-  padding-left: 48px;
 }
 
 .ordinary-task-details {
