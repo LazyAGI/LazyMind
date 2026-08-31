@@ -38,6 +38,7 @@ import ModelProvidersPage from "@/modules/modelProvider/pages/ModelProvidersPage
 import SettingsScheduleList from "@/modules/taskCenter/SettingsScheduleList";
 import TaskEntryDefaults from "@/modules/taskCenter/TaskEntryDefaults";
 import { fetchUserUiPreferences, patchUserUiPreferences } from "@/modules/user/uiPreferencesApi";
+import { runtimeFeatures } from "@/runtime/features";
 import { isDesktopRuntime, isLocalRuntime } from "@/runtime/mode";
 import { setDeveloperModeActive } from "@/utils/developerMode";
 import MemoryCapabilitySettings from "./MemoryCapabilitySettings";
