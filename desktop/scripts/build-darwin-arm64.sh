@@ -247,7 +247,6 @@ rsync -a --delete \
   --exclude "/backend/core/core" \
   --exclude "/README.md" \
   --exclude "/README.CN.md" \
-  --exclude "/Makefile" \
   "${ROOT}/" "${RUNTIME_ROOT}/app/"
 
 prune_runtime_app "${RUNTIME_ROOT}/app"
