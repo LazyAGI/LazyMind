@@ -142,7 +142,7 @@ func TestRedisCancelWatcherReleasesConnections(t *testing.T) {
 		}
 		cancelled := resolveRunTerminal(
 			decisionCtx, stateStore, conversationID, historyID, "cancel-first",
-			failure, false, "redis_integration_terminal",
+			failure, "redis_integration_terminal",
 		)
 		if cancelled.Status != "cancelled" || cancelled.Reason != "user_cancelled" {
 			t.Fatalf("cancel-first terminal=%#v", cancelled)
@@ -150,7 +150,7 @@ func TestRedisCancelWatcherReleasesConnections(t *testing.T) {
 
 		acceptedFailure := resolveRunTerminal(
 			decisionCtx, stateStore, conversationID, historyID, "failure-first",
-			failure, false, "redis_integration_terminal",
+			failure, "redis_integration_terminal",
 		)
 		if won, err := claimUserCancelDecision(decisionCtx, stateStore, conversationID, historyID, "failure-first"); err != nil || won {
 			t.Fatalf("late cancellation: won=%v err=%v", won, err)
@@ -161,11 +161,12 @@ func TestRedisCancelWatcherReleasesConnections(t *testing.T) {
 
 		nextRun := resolveRunTerminal(
 			decisionCtx, stateStore, conversationID, historyID, "next-run",
-			failure, false, "redis_integration_terminal",
+			failure, "redis_integration_terminal",
 		)
 		if nextRun.Status != "failed" || nextRun.Reason != "model_failure" {
 			t.Fatalf("previous run decision leaked into next run: %#v", nextRun)
 		}
+		assertConcurrentRunDecisionWinner(t, stateStore, prefix+":redis-concurrent")
 	})
 
 	assertRedisPoolIdle(t, client)

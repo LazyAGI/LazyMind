@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -113,6 +114,15 @@ func setChatStatus(ctx context.Context, stateStore state.Store, conversationID, 
 }
 
 func setChatRuntimeStatus(ctx context.Context, stateStore state.Store, conversationID, historyID, status, currentResult, runID string, terminal *RunTerminal) error {
+	if status != "generating" && runID != "" {
+		if current, err := getChatStatus(ctx, stateStore, conversationID, historyID); err == nil &&
+			current.RunID != "" && current.RunID != runID {
+			log.Logger.Info().Str("conversation_id", conversationID).Str("history_id", historyID).
+				Str("run_id", runID).Str("current_run_id", current.RunID).
+				Msg("ignored stale chat status terminal")
+			return nil
+		}
+	}
 	key := chatStatusKey(conversationID)
 	totalChunks := int32(0)
 	chunks, _ := getChatChunks(ctx, stateStore, conversationID, historyID)
@@ -177,28 +187,18 @@ func reconcileGeneratingExternalChatStatuses(
 			remaining = append(remaining, historyID)
 			continue
 		}
-		result := ""
-		var history orm.ChatHistory
-		if err := db.WithContext(ctx).Select("result").Where("id = ?", historyID).Take(&history).Error; err == nil {
-			result = history.Result
-		}
-		terminalEvent := externalRunTerminalEvent(run.ID, run.Status, result != "")
-		terminal, _ := terminalEvent.Terminal()
-		terminal = resolveRunTerminal(
-			ctx, stateStore, run.ConversationID, run.HistoryID, run.ID,
-			terminal, result != "", "external_durable_terminal",
-		)
-		if err := persistResolvedExternalRunTerminal(ctx, db, run.HistoryID, terminal); err != nil {
+		projected, err := projectExternalChatRunCacheRecord(ctx, db, stateStore, run)
+		if err != nil {
 			return ids, err
 		}
-		if err := setChatRuntimeStatus(ctx, stateStore, conversationID, historyID, terminal.Status, result, run.ID, terminal); err != nil {
-			return ids, err
+		if !projected {
+			remaining = append(remaining, historyID)
 		}
 	}
 	return remaining, nil
 }
 
-func projectExternalChatRunStatus(
+func projectExternalChatRunCache(
 	ctx context.Context,
 	db *gorm.DB,
 	stateStore state.Store,
@@ -215,30 +215,30 @@ func projectExternalChatRunStatus(
 	if !externalRunTerminal(run.Status) {
 		return nil
 	}
-	result := ""
-	var history orm.ChatHistory
-	if err := db.WithContext(ctx).Select("result").Where("id = ?", run.HistoryID).Take(&history).Error; err == nil {
-		result = history.Result
-	}
-	terminalEvent := externalRunTerminalEvent(run.ID, run.Status, result != "")
-	terminal, _ := terminalEvent.Terminal()
-	terminal = resolveRunTerminal(
-		ctx, stateStore, run.ConversationID, run.HistoryID, run.ID,
-		terminal, result != "", "external_durable_terminal",
-	)
-	if err := persistResolvedExternalRunTerminal(ctx, db, run.HistoryID, terminal); err != nil {
-		return err
-	}
-	return setChatRuntimeStatus(ctx, stateStore, run.ConversationID, run.HistoryID, terminal.Status, result, run.ID, terminal)
+	_, err := projectExternalChatRunCacheRecord(ctx, db, stateStore, run)
+	return err
 }
 
-func persistResolvedExternalRunTerminal(ctx context.Context, db *gorm.DB, historyID string, terminal *RunTerminal) error {
-	if db == nil || terminal == nil {
-		return nil
+func projectExternalChatRunCacheRecord(
+	ctx context.Context,
+	db *gorm.DB,
+	stateStore state.Store,
+	run orm.ExternalChatRun,
+) (bool, error) {
+	var history orm.ChatHistory
+	if err := db.WithContext(ctx).Select("result", "run_id").
+		Where("id = ? AND run_id = ?", run.HistoryID, run.ID).Take(&history).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return false, nil
+		}
+		return false, err
 	}
-	return db.WithContext(ctx).Model(&orm.ChatHistory{}).Where("id = ?", historyID).Updates(map[string]any{
-		"run_status": terminal.Status, "run_terminal": terminalJSON(terminal), "update_time": time.Now(),
-	}).Error
+	terminalEvent := externalRunTerminalEvent(run.ID, run.Status, history.Result != "")
+	terminal, _ := terminalEvent.Terminal()
+	if err := setChatRuntimeStatus(ctx, stateStore, run.ConversationID, run.HistoryID, terminal.Status, history.Result, run.ID, terminal); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func getChatStatus(ctx context.Context, stateStore state.Store, conversationID, historyID string) (*ChatStatus, error) {

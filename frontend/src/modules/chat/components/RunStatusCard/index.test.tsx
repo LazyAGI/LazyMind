@@ -24,7 +24,7 @@ describe("RunStatusCard", () => {
     expect(screen.getByText("chat.runStatus.partialOutput")).toBeInTheDocument();
   });
 
-  it("uses the cancellation reason as the presentation authority", () => {
+  it("does not let an invalid cancellation reason override failed status", () => {
     render(<RunStatusCard terminal={{
       status: "failed",
       reason: "user_cancelled",
@@ -32,9 +32,9 @@ describe("RunStatusCard", () => {
     }} />);
 
     const alert = screen.getByRole("alert");
-    expect(alert).toHaveClass("chat-run-status-card--cancelled");
-    expect(screen.getByText("chat.runStatus.cancelled")).toBeInTheDocument();
-    expect(screen.queryByText(/chat\.runStatus\.providerError/)).not.toBeInTheDocument();
+    expect(alert).not.toHaveClass("chat-run-status-card--cancelled");
+    expect(screen.getByText("chat.runStatus.failed")).toBeInTheDocument();
+    expect(screen.getByText(/chat\.runStatus\.providerError/)).toBeInTheDocument();
   });
 
   it.each([
@@ -49,7 +49,7 @@ describe("RunStatusCard", () => {
       partial_output: false,
     }} />);
 
-    expect(screen.getByText("chat.runStatus.modelFailed")).toBeInTheDocument();
+    expect(screen.getByText("chat.runStatus.failed")).toBeInTheDocument();
     expect(screen.getByText(new RegExp(`chat\\.runStatus\\.codes\\.${code}`))).toBeInTheDocument();
     expect(screen.getByText(/chat\.runStatus\.noOutput/)).toBeInTheDocument();
   });
@@ -87,7 +87,7 @@ describe("RunStatusCard", () => {
       partial_output: true,
     }} />);
 
-    expect(screen.getByText("chat.runStatus.modelFailed")).toBeInTheDocument();
+    expect(screen.getByText("chat.runStatus.failed")).toBeInTheDocument();
     expect(screen.getByText(/chat\.runStatus\.codes\.organization_spend_limit_exceeded/)).toBeInTheDocument();
     expect(screen.getByText(/chat\.runStatus\.partialOutput/)).toBeInTheDocument();
     expect(screen.queryByText(/HTTP/)).not.toBeInTheDocument();

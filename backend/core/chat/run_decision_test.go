@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"sync"
 	"testing"
+	"time"
 
 	"lazymind/core/common/orm"
 	"lazymind/core/state"
@@ -31,7 +33,7 @@ func TestRunDecisionUserCancelWinsWhileRunIsActive(t *testing.T) {
 	terminal := resolveRunTerminal(ctx, store, "conv", "history", "run-1", &RunTerminal{
 		Status: "failed", Reason: "runtime_failure", Code: "upstream_stream_failed",
 		PartialOutput: true,
-	}, true, "upstream_terminal")
+	}, "upstream_terminal")
 
 	if terminal.Status != "cancelled" || terminal.Reason != "user_cancelled" || !terminal.PartialOutput || terminal.Code != "" {
 		t.Fatalf("unexpected cancellation terminal: %#v", terminal)
@@ -46,7 +48,7 @@ func TestRunDecisionAcceptedFailureIsNotOverwrittenByStop(t *testing.T) {
 		PartialOutput: false,
 	}
 	accepted := resolveRunTerminal(
-		ctx, store, "conv", "history", "run-1", failure, false, "upstream_terminal",
+		ctx, store, "conv", "history", "run-1", failure, "upstream_terminal",
 	)
 	if accepted.Status != "failed" || accepted.Reason != "model_failure" {
 		t.Fatalf("unexpected accepted terminal: %#v", accepted)
@@ -62,7 +64,7 @@ func TestRunDecisionAcceptedFailureIsNotOverwrittenByStop(t *testing.T) {
 
 	resolved := resolveRunTerminal(ctx, store, "conv", "history", "run-1", &RunTerminal{
 		Status: "cancelled", Reason: "user_cancelled", PartialOutput: true,
-	}, true, "late_terminal")
+	}, "late_terminal")
 	if *resolved != *failure {
 		t.Fatalf("accepted failure changed: got %#v want %#v", resolved, failure)
 	}
@@ -80,7 +82,7 @@ func TestRunDecisionRepeatedUserCancelIsIdempotent(t *testing.T) {
 
 	terminal := resolveRunTerminal(ctx, store, "conv", "history", "run-1", &RunTerminal{
 		Status: "completed", Reason: "normal", PartialOutput: true,
-	}, true, "late_terminal")
+	}, "late_terminal")
 	if terminal.Status != "cancelled" || terminal.Reason != "user_cancelled" {
 		t.Fatalf("repeated cancellation changed the winning decision: %#v", terminal)
 	}
@@ -96,7 +98,7 @@ func TestRunDecisionIsIsolatedByRunID(t *testing.T) {
 	second := resolveRunTerminal(ctx, store, "conv", "history", "run-2", &RunTerminal{
 		Status: "failed", Reason: "runtime_failure", Code: "upstream_stream_failed",
 		PartialOutput: false,
-	}, false, "upstream_terminal")
+	}, "upstream_terminal")
 	if second.Status != "failed" || second.Reason != "runtime_failure" {
 		t.Fatalf("first run cancellation leaked into second run: %#v", second)
 	}
@@ -113,7 +115,7 @@ func TestResolveRuntimeChunkDecisionRewritesEventToWinningCancellation(t *testin
 
 	decision := resolveRuntimeChunkDecision(
 		ctx, store, "conv", "history", "run-1",
-		runtimeChunkDecision{Event: candidateEvent, Terminal: candidate, Stop: true}, true,
+		runtimeChunkDecision{Event: candidateEvent, Terminal: candidate, Stop: true}, true, true,
 	)
 	terminal, err := decision.Event.Terminal()
 	if err != nil {
@@ -124,7 +126,24 @@ func TestResolveRuntimeChunkDecisionRewritesEventToWinningCancellation(t *testin
 	}
 }
 
-func TestExternalTerminalProjectionPersistsCoreDecision(t *testing.T) {
+func TestExternalRuntimeChunkUsesDurableTerminalWithoutSharedDecision(t *testing.T) {
+	ctx := context.Background()
+	stateStore := newRunDecisionTestStore(t)
+	if cancelIsWinner, err := claimUserCancelDecision(ctx, stateStore, "conv", "history", "external-run"); err != nil || !cancelIsWinner {
+		t.Fatalf("seed unrelated shared cancellation: winner=%v err=%v", cancelIsWinner, err)
+	}
+	event := failedRunEvent("external-run", "external_agent_failed", false)
+	terminal, _ := event.Terminal()
+	decision := resolveRuntimeChunkDecision(
+		ctx, stateStore, "conv", "history", "external-run",
+		runtimeChunkDecision{Event: event, Terminal: terminal, Stop: true}, false, false,
+	)
+	if decision.Terminal.Status != "failed" || decision.Terminal.Reason != "runtime_failure" {
+		t.Fatalf("shared decision changed external terminal: %#v", decision.Terminal)
+	}
+}
+
+func TestExternalTerminalProjectionIgnoresSharedRunDecision(t *testing.T) {
 	ctx := context.Background()
 	app, db := newExternalChatTestApplication(t)
 	createExternalChatTestRun(t, app, "run-external-decision")
@@ -145,7 +164,7 @@ func TestExternalTerminalProjectionPersistsCoreDecision(t *testing.T) {
 	); err != nil || !won {
 		t.Fatalf("claim cancellation: won=%v err=%v", won, err)
 	}
-	if err := projectExternalChatRunStatus(ctx, db, store, "user-1", job.RunID); err != nil {
+	if err := projectExternalChatRunCache(ctx, db, store, "user-1", job.RunID); err != nil {
 		t.Fatalf("project external terminal: %v", err)
 	}
 
@@ -157,7 +176,84 @@ func TestExternalTerminalProjectionPersistsCoreDecision(t *testing.T) {
 	if err := json.Unmarshal(history.RunTerminal, &terminal); err != nil {
 		t.Fatalf("decode projected terminal: %v", err)
 	}
-	if history.RunStatus != "cancelled" || terminal.Status != "cancelled" || terminal.Reason != "user_cancelled" {
-		t.Fatalf("external history did not persist Core decision: history=%#v terminal=%#v", history, terminal)
+	if history.RunStatus != "failed" || terminal.Status != "failed" || terminal.Reason != "runtime_failure" {
+		t.Fatalf("external history did not preserve durable terminal: history=%#v terminal=%#v", history, terminal)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("close cache store: %v", err)
+	}
+	if err := projectExternalChatRunCache(ctx, db, store, "user-1", job.RunID); err == nil {
+		t.Fatal("expected closed cache projection to fail")
+	}
+	var durable orm.ChatHistory
+	if err := db.Where("id = ?", history.ID).Take(&durable).Error; err != nil {
+		t.Fatalf("reload durable history: %v", err)
+	}
+	if durable.RunStatus != "failed" || string(durable.RunTerminal) != string(history.RunTerminal) {
+		t.Fatalf("cache failure changed durable terminal: before=%#v after=%#v", history, durable)
+	}
+}
+
+func TestRunDecisionConcurrentCandidatesHaveOneWinner(t *testing.T) {
+	assertConcurrentRunDecisionWinner(t, newRunDecisionTestStore(t), "sqlite-concurrent")
+}
+
+func assertConcurrentRunDecisionWinner(t *testing.T, store state.Store, runID string) {
+	t.Helper()
+	ctx := context.Background()
+	candidates := []runDecision{
+		{Kind: runDecisionUserCancel, Source: "user_stop"},
+		{Kind: runDecisionTerminal, Source: "model", Terminal: &RunTerminal{Status: "failed", Reason: "model_failure", Code: "rate_limited"}},
+		{Kind: runDecisionTerminal, Source: "runtime", Terminal: &RunTerminal{Status: "failed", Reason: "runtime_failure", Code: "transport_error"}},
+	}
+	start := make(chan struct{})
+	accepted := make(chan bool, len(candidates))
+	errs := make(chan error, len(candidates))
+	var wait sync.WaitGroup
+	for _, candidate := range candidates {
+		candidate := candidate
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			<-start
+			_, won, err := claimRunDecision(ctx, store, "conv", "history", runID, candidate)
+			accepted <- won
+			errs <- err
+		}()
+	}
+	close(start)
+	wait.Wait()
+	close(accepted)
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent decision: %v", err)
+		}
+	}
+	winners := 0
+	for won := range accepted {
+		if won {
+			winners++
+		}
+	}
+	if winners != 1 {
+		t.Fatalf("accepted winners=%d, want 1", winners)
+	}
+	payload, err := store.Get(ctx, runDecisionKey("conv", "history", runID))
+	if err != nil {
+		t.Fatalf("load winner: %v", err)
+	}
+	var winner runDecision
+	if err := json.Unmarshal(payload, &winner); err != nil {
+		t.Fatalf("decode winner: %v", err)
+	}
+	if winner.Kind != runDecisionUserCancel && winner.Kind != runDecisionTerminal {
+		t.Fatalf("invalid winner: %#v", winner)
+	}
+}
+
+func TestRunDecisionTTLRejectsLateCandidatesForOneDay(t *testing.T) {
+	if runDecisionTTL != 24*time.Hour {
+		t.Fatalf("runDecisionTTL=%v, want 24h", runDecisionTTL)
 	}
 }

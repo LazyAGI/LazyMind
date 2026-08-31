@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -16,6 +17,8 @@ import (
 	"lazymind/core/subagent"
 	"lazymind/core/taskcenter"
 )
+
+var chatCancelHTTPClient = &http.Client{Timeout: 5 * time.Second}
 
 // RegisterSubAgentHooks wires plugin lifecycle hooks into the subagent EventHooks.
 // Must be called once at application startup (after store is initialized).
@@ -30,7 +33,13 @@ func RegisterSubAgentHooks() {
 		if db != nil {
 			StopActiveWorkflowSession(ctx, db, stateStore, convID)
 		}
-		go NotifyChatCancel(convID)
+		go func() {
+			cancelCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+			if err := NotifyChatCancel(cancelCtx, convID); err != nil {
+				fmt.Printf("[plugin] NotifyChatCancel: %v\n", err)
+			}
+		}()
 	}
 }
 
@@ -258,16 +267,24 @@ func notifyTaskCancel(taskID string) {
 
 // NotifyChatCancel posts a cancel signal to the Python chat service so that
 // the active ChatAgent session for the given conversation terminates.
-// Called by StopChatGeneration in a goroutine; errors are logged and suppressed.
-func NotifyChatCancel(convID string) {
+// Callers own retry/logging policy; the request itself is always bounded.
+func NotifyChatCancel(ctx context.Context, convID string) error {
 	body, _ := json.Marshal(map[string]string{
 		"conversation_id": convID,
 	})
 	url := common.JoinURL(common.ChatServiceEndpoint(), "/api/workflow/task-cancel")
-	resp, err := http.Post(url, "application/json", bytes.NewReader(body)) //nolint:noctx
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
-		fmt.Printf("[plugin] NotifyChatCancel: %v\n", err)
-		return
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := chatCancelHTTPClient.Do(req)
+	if err != nil {
+		return err
 	}
 	_ = resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("chat cancel returned HTTP %d", resp.StatusCode)
+	}
+	return nil
 }

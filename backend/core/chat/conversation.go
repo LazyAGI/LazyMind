@@ -1039,23 +1039,58 @@ func StopChatGeneration(w http.ResponseWriter, r *http.Request) {
 	}
 
 	stateStore := store.State()
+	var stopSignalErr error
 	if stateStore != nil {
-		ids, _ := getGeneratingHistoryIDs(r.Context(), stateStore, convID)
+		ids, err := getGeneratingHistoryIDs(r.Context(), stateStore, convID)
+		if err != nil {
+			log.Logger.Warn().Err(err).Str("conversation_id", convID).
+				Msg("failed to load active chat runs before cancellation")
+			stopSignalErr = err
+		}
 		if len(ids) == 0 && historyID != "" {
 			ids = append(ids, historyID)
 		}
+		externalHistories := make(map[string]struct{})
+		if len(ids) > 0 {
+			var err error
+			externalHistories, err = activeExternalChatHistoryIDs(r.Context(), store.DB(), userID, convID, ids)
+			if err != nil {
+				log.Logger.Warn().Err(err).Str("conversation_id", convID).
+					Msg("failed to identify external chat runs before cancellation")
+				if stopSignalErr == nil {
+					stopSignalErr = err
+				}
+				ids = nil
+			}
+		}
 		for _, hid := range ids {
+			if _, external := externalHistories[hid]; external {
+				continue
+			}
 			if status, err := getChatStatus(r.Context(), stateStore, convID, hid); err == nil &&
 				status.Status == "generating" && strings.TrimSpace(status.RunID) != "" {
-				if _, err := claimUserCancelDecision(r.Context(), stateStore, convID, hid, status.RunID); err != nil {
+				cancelIsWinner, err := claimUserCancelDecision(r.Context(), stateStore, convID, hid, status.RunID)
+				if err != nil {
 					log.Logger.Warn().Err(err).
 						Str("conversation_id", convID).
 						Str("history_id", hid).
 						Str("run_id", status.RunID).
 						Msg("failed to record user cancellation decision")
+					if stopSignalErr == nil {
+						stopSignalErr = err
+					}
+				} else if !cancelIsWinner {
+					log.Logger.Info().Str("conversation_id", convID).Str("history_id", hid).
+						Str("run_id", status.RunID).Msg("user stop arrived after authoritative terminal")
 				}
 			}
-			_ = setChatCancelSignal(r.Context(), stateStore, convID, hid)
+			if err := setChatCancelSignal(r.Context(), stateStore, convID, hid); err != nil {
+				log.Logger.Warn().Err(err).Str("conversation_id", convID).Str("history_id", hid).
+					Msg("failed to publish chat cancellation wakeup")
+				if stopSignalErr == nil {
+					stopSignalErr = err
+				}
+			}
 		}
 	}
 
@@ -1084,7 +1119,19 @@ func StopChatGeneration(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Notify Python ChatAgent to cancel any active chat session for this conversation.
-	go workflow.NotifyChatCancel(convID)
+	notifyCtx, cancelNotify := terminalWriteContext(r.Context())
+	go func() {
+		defer cancelNotify()
+		if err := workflow.NotifyChatCancel(notifyCtx, convID); err != nil {
+			log.Logger.Warn().Err(err).Str("conversation_id", convID).
+				Msg("failed to notify Python chat cancellation")
+		}
+	}()
+
+	if stopSignalErr != nil {
+		common.ReplyErr(w, fmt.Sprintf("record chat cancellation failed: %v", stopSignalErr), http.StatusServiceUnavailable)
+		return
+	}
 
 	common.ReplyOK(w, nil)
 }

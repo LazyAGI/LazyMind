@@ -13,7 +13,8 @@ import (
 
 const (
 	runDecisionKeyPrefix = "rag/chat/run-decision:%s:%s:%s"
-	runDecisionTTL       = 15 * time.Minute
+	runDecisionTTL       = 24 * time.Hour
+	terminalWriteTimeout = 5 * time.Second
 
 	runDecisionUserCancel = "user_cancel"
 	runDecisionTerminal   = "terminal"
@@ -85,6 +86,9 @@ func logRunDecision(message, conversationID, historyID, runID string, winner run
 	event.Msg(message)
 }
 
+// claimUserCancelDecision records the stop intent when possible and returns
+// whether user cancellation is the authoritative winner, including retries
+// after an earlier user-cancel claim.
 func claimUserCancelDecision(
 	ctx context.Context,
 	stateStore state.Store,
@@ -97,18 +101,26 @@ func claimUserCancelDecision(
 	return err == nil && winner.Kind == runDecisionUserCancel, err
 }
 
+// terminalWriteContext lets terminal state survive a disconnected request while
+// keeping every detached write bounded. Callers must always invoke cancel.
+func terminalWriteContext(parent context.Context) (context.Context, context.CancelFunc) {
+	if parent == nil {
+		parent = context.Background()
+	}
+	return context.WithTimeout(context.WithoutCancel(parent), terminalWriteTimeout)
+}
+
 func resolveRunTerminal(
 	ctx context.Context,
 	stateStore state.Store,
 	conversationID, historyID, runID string,
 	candidate *RunTerminal,
-	partialOutput bool,
 	source string,
 ) *RunTerminal {
 	if candidate == nil {
 		fallback := RunTerminal{
 			Status: "failed", Reason: "runtime_failure", Code: "missing_run_terminal",
-			PartialOutput: partialOutput,
+			PartialOutput: false,
 		}
 		candidate = &fallback
 	}
@@ -128,7 +140,7 @@ func resolveRunTerminal(
 	}
 	if winner.Kind == runDecisionUserCancel {
 		return &RunTerminal{
-			Status: "cancelled", Reason: "user_cancelled", PartialOutput: partialOutput,
+			Status: "cancelled", Reason: "user_cancelled", PartialOutput: candidate.PartialOutput,
 		}
 	}
 	if winner.Kind == runDecisionTerminal && winner.Terminal != nil {

@@ -43,7 +43,7 @@ export interface RunTerminalView {
 }
 
 function isUserCancelledTerminal(terminal: RunTerminalView): boolean {
-  return terminal.status === "cancelled" || terminal.reason === "user_cancelled";
+  return terminal.status === "cancelled";
 }
 
 export function runStatusDescription(
@@ -74,7 +74,7 @@ export function runStatusTitleKey(terminal: RunTerminalView): string {
     return "chat.runStatus.cancelled";
   }
   if (terminal.reason === "model_failure") {
-    return "chat.runStatus.modelFailed";
+    return "chat.runStatus.failed";
   }
   if (terminal.reason === "model_incomplete") {
     return "chat.runStatus.interrupted";
