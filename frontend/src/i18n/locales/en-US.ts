@@ -1905,6 +1905,7 @@ const enUS = {
     },
     writerMarkdown: {
       documentRegion: "Markdown document",
+      readOnly: "Read-only",
       blockTypes: {
         paragraph: "Paragraph",
         quote: "Quote",

@@ -118,56 +118,56 @@ slots:
 
   - {id: direction_task, label: 方向 Writer 任务, type: file, cardinality: single, exposed: false}
   - {id: direction_context, label: 方向写作上下文, type: file, cardinality: single, exposed: false}
-  - {id: direction_outline, label: 可编辑产品方向大纲, type: file, cardinality: single, exposed: true}
+  - {id: direction_outline, label: 产品方向大纲, type: file, cardinality: single, exposed: true}
   - {id: direction_outline_report, label: 产品方向大纲检查, type: text, cardinality: single, exposed: true}
   - {id: direction_context_approved, label: 批准后方向上下文, type: file, cardinality: single, exposed: false}
   - {id: direction_section_plan, label: 产品方向章节规划, type: file, cardinality: single, exposed: false}
   - {id: direction_chapters, label: 产品方向分章稿, type: file, cardinality: list, ordered: true, allow_manual_add: false, exposed: true}
-  - {id: direction_document, label: 可编辑产品方向文档, type: file, cardinality: single, exposed: true}
+  - {id: direction_document, label: 产品方向文档, type: file, cardinality: single, exposed: true}
   - {id: direction_context_final, label: 产品方向最终上下文, type: file, cardinality: single, exposed: false}
 
   - {id: competitive_analysis, label: 竞品与生态位报告, type: file, cardinality: single, exposed: true}
 
   - {id: design_task, label: 方案 Writer 任务, type: file, cardinality: single, exposed: false}
   - {id: design_context, label: 方案写作上下文, type: file, cardinality: single, exposed: false}
-  - {id: design_outline, label: 可编辑产品方案大纲, type: file, cardinality: single, exposed: true}
+  - {id: design_outline, label: 产品方案大纲, type: file, cardinality: single, exposed: true}
   - {id: design_outline_report, label: 产品方案大纲检查, type: text, cardinality: single, exposed: true}
   - {id: design_context_approved, label: 批准后方案上下文, type: file, cardinality: single, exposed: false}
   - {id: design_section_plan, label: 产品方案章节规划, type: file, cardinality: single, exposed: false}
   - {id: design_chapters, label: 产品方案分章稿, type: file, cardinality: list, ordered: true, allow_manual_add: false, exposed: true}
-  - {id: design_document, label: 可编辑产品方案文档, type: file, cardinality: single, exposed: true}
+  - {id: design_document, label: 产品方案文档, type: file, cardinality: single, exposed: true}
   - {id: design_context_final, label: 产品方案最终上下文, type: file, cardinality: single, exposed: false}
 
   - {id: prd_task, label: PRD Writer 任务, type: file, cardinality: single, exposed: false}
   - {id: prd_context, label: PRD 写作上下文, type: file, cardinality: single, exposed: false}
-  - {id: prd_outline, label: 可编辑 PRD 大纲, type: file, cardinality: single, exposed: true}
+  - {id: prd_outline, label: PRD 大纲, type: file, cardinality: single, exposed: true}
   - {id: prd_outline_report, label: PRD 大纲检查, type: text, cardinality: single, exposed: true}
   - {id: prd_context_approved, label: 批准后 PRD 上下文, type: file, cardinality: single, exposed: false}
   - {id: prd_section_plan, label: PRD 章节规划, type: file, cardinality: single, exposed: false}
   - {id: prd_chapters, label: PRD 分章稿, type: file, cardinality: list, ordered: true, allow_manual_add: false, exposed: true}
-  - {id: prd_document, label: 可编辑 PRD 文档, type: file, cardinality: single, exposed: true}
+  - {id: prd_document, label: PRD 文档, type: file, cardinality: single, exposed: true}
   - {id: prd_context_final, label: PRD 最终上下文, type: file, cardinality: single, exposed: false}
 
   - {id: prototype, label: 可交互产品原型, type: file, cardinality: single, exposed: true}
 
   - {id: review_task, label: 评审 Writer 任务, type: file, cardinality: single, exposed: false}
   - {id: review_context, label: 评审写作上下文, type: file, cardinality: single, exposed: false}
-  - {id: review_outline, label: 可编辑评审大纲, type: file, cardinality: single, exposed: true}
+  - {id: review_outline, label: 评审大纲, type: file, cardinality: single, exposed: true}
   - {id: review_outline_report, label: 评审大纲检查, type: text, cardinality: single, exposed: true}
   - {id: review_context_approved, label: 批准后评审上下文, type: file, cardinality: single, exposed: false}
   - {id: review_section_plan, label: 评审章节规划, type: file, cardinality: single, exposed: false}
   - {id: review_chapters, label: 评审分章稿, type: file, cardinality: list, ordered: true, allow_manual_add: false, exposed: true}
-  - {id: review_document, label: 可编辑方案评审报告, type: file, cardinality: single, exposed: true}
+  - {id: review_document, label: 方案评审报告, type: file, cardinality: single, exposed: true}
   - {id: review_context_final, label: 评审最终上下文, type: file, cardinality: single, exposed: false}
 
   - {id: handoff_task, label: 交付 Writer 任务, type: file, cardinality: single, exposed: false}
   - {id: handoff_context, label: 交付写作上下文, type: file, cardinality: single, exposed: false}
-  - {id: handoff_outline, label: 可编辑研发交付大纲, type: file, cardinality: single, exposed: true}
+  - {id: handoff_outline, label: 研发交付大纲, type: file, cardinality: single, exposed: true}
   - {id: handoff_outline_report, label: 研发交付大纲检查, type: text, cardinality: single, exposed: true}
   - {id: handoff_context_approved, label: 批准后交付上下文, type: file, cardinality: single, exposed: false}
   - {id: handoff_section_plan, label: 研发交付章节规划, type: file, cardinality: single, exposed: false}
   - {id: handoff_chapters, label: 研发交付分章稿, type: file, cardinality: list, ordered: true, allow_manual_add: false, exposed: true}
-  - {id: handoff_document, label: 可编辑研发交付文档, type: file, cardinality: single, exposed: true}
+  - {id: handoff_document, label: 研发交付文档, type: file, cardinality: single, exposed: true}
   - {id: handoff_context_final, label: 研发交付最终上下文, type: file, cardinality: single, exposed: false}
 
   - {id: delivery_summary, label: 产品交付摘要, type: text, cardinality: single, exposed: true}

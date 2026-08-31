@@ -356,8 +356,9 @@ function getTabStepId(tab: TabDef): string | undefined {
 
 /**
  * Lock slot editing only while the plugin session is actively running.
- * When idle (waiting / failed / completed), ui_editable artifacts stay editable
- * so the user can revise and re-run a later step from the updated content.
+ * When idle (waiting / failed / completed), editable artifact formats stay editable
+ * according to their workflow readOnly setting, so the user can revise and re-run
+ * a later step from the updated content.
  */
 function isWorkflowSessionReadOnly(
   session: WorkflowSession,

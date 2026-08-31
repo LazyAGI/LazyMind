@@ -1857,6 +1857,7 @@ const zhCN = {
     },
     writerMarkdown: {
       documentRegion: "Markdown 文档",
+      readOnly: "只读",
       blockTypes: {
         paragraph: "正文",
         quote: "引用",

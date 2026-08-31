@@ -15,7 +15,6 @@ import {
 import { FilePreviewDrawer } from "./FilePreviewDrawer";
 import {
   WriterArtifactContent,
-  WRITER_ARTIFACT_SLOT_IDS,
   unwrapArtifactPayload,
 } from './writerArtifactViews';
 import { WriterIRControl, type WriterIRSaveMode, type WriterIRSaveResult } from './WriterIRControl';
@@ -2251,17 +2250,13 @@ function writerLmdFilename(name: string, title = ''): string {
 function shouldRenderInlineStructuredContent(
   slot: SlotRevision,
   expectedType?: 'image' | 'file' | 'text',
-  slotId?: string,
 ): boolean {
   const payload = getInlineStructuredArtifactPayload(slot);
   if (payload === null) return false;
   if (isWriterDocument(payload)) {
     return expectedType !== 'image';
   }
-  if (expectedType !== 'text') return false;
-  if (slot.content_type === 'json') return true;
-  const resolvedSlotId = slotId ?? slot.slot;
-  return WRITER_ARTIFACT_SLOT_IDS.has(resolvedSlotId);
+  return expectedType === 'text';
 }
 
 function shouldRenderJsonFileAsContent(
@@ -2661,7 +2656,7 @@ function SlotWriterDocument({
   const displayRevisionCount = localRevisionCount ?? revisionCount;
   const showVersionBadge = Boolean(displayRevisionCount && displayRevisionCount > 0);
   const canEdit = !readOnly;
-  const canEditWriterIR = canEdit && writerDocument?.ui_editable === true;
+  const canEditWriterIR = canEdit && writerDocument !== null;
   const canRewrite = canEdit
     && displayRevision > 0
     && rewriteSelection === null
@@ -3162,7 +3157,7 @@ function SlotJsonFile({
   );
   const canEditWriterIR = Boolean(sessionId && slotId)
     && !readOnly
-    && writerDocument?.ui_editable === true
+    && writerDocument !== null
     && (loadedSourceKey === sourceKey || writerEditing);
   const editingKey = `${sessionId}:${slotId}:${apiListIndex}:writer-ir`;
   const showVersionBadge =
@@ -3542,7 +3537,7 @@ function SlotInlineStructured({
   );
   const canEditWriterIR = Boolean(sessionId && slotId)
     && !readOnly
-    && writerDocument?.ui_editable === true;
+    && writerDocument !== null;
   const editingKey = `${sessionId}:${slotId}:${apiListIndex}:writer-ir`;
   const showVersionBadge =
     displayRevisionCount !== undefined && displayRevisionCount > 0 && Boolean(sessionId && slotId);
@@ -3965,8 +3960,7 @@ function SlotMarkdownFile({
     && rewriteSelection === null
     && rewritePreview === null;
   const canEditMarkdown = Boolean(sessionId && slotId)
-    && !readOnly
-    && WRITER_ARTIFACT_SLOT_IDS.has(resolvedSlotId);
+    && !readOnly;
 
   useEffect(() => {
     if (!canEditMarkdown) setDownloadMarkdownContent(content);
@@ -4143,7 +4137,13 @@ function SlotMarkdownFile({
 
   return (
     <div className='workflow-slot workflow-slot--artifact'>
-      <div className='writer-artifact__output-toolbar' hidden={!allowDownload}>
+      <div className='writer-artifact__output-toolbar' hidden={!allowDownload && !readOnly}>
+        {readOnly && (
+          <span className='writer-artifact__readonly-badge' role='status'>
+            <span aria-hidden='true'>🔒</span>
+            {tr('chat.writerMarkdown.readOnly')}
+          </span>
+        )}
         {!canEditMarkdown && (
           <WriterDownloadFormatButton
             markdown={{
@@ -4661,7 +4661,7 @@ export function SlotRenderer({
       />
     );
   }
-  if (shouldRenderInlineStructuredContent(slot, expectedType, slotId)) {
+  if (shouldRenderInlineStructuredContent(slot, expectedType)) {
     return (
       <SlotInlineStructured
         slot={slot}
