@@ -49,6 +49,8 @@ test("maps bridge methods to their exact IPC channels and arguments", async () =
     ["agentExecutableBindings", [], "lazymind:agentExecutableBindings", []],
     ["agentExecutableBind", ["codex-cli", "D:\\Agents\\codex.exe"], "lazymind:agentExecutableBind", ["codex-cli", "D:\\Agents\\codex.exe"]],
     ["agentExecutableClear", ["codex-cli"], "lazymind:agentExecutableClear", ["codex-cli"]],
+    ["assistantSessionSet", [{ access_token: "access" }], "lazymind:assistantSessionSet", [{ access_token: "access" }]],
+    ["assistantSessionClear", [], "lazymind:assistantSessionClear", []],
     ["restartRuntime", [], "lazymind:restartRuntime", []],
     ["resetRuntime", ["all"], "lazymind:resetRuntime", ["all"]],
     ["localFolderAccessStatus", [], "lazymind:localFolderAccessStatus", []],

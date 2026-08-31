@@ -42,8 +42,9 @@ interface AgentDefinition {
   name: string;
   icon: string;
   installURL: string;
+  executorInstallURL?: string;
   executorName?: string;
-  executorLogin?: boolean;
+  executorLoginMode?: "automatic" | "interactive";
   mcpBindingTarget?: DesktopAgentBindingTarget;
   executorBindingTarget?: DesktopAgentBindingTarget;
 }
@@ -52,19 +53,21 @@ const AGENTS: AgentDefinition[] = [
   {
     id: "codex", name: "Codex", icon: "/assistant-icons/codex.png",
     installURL: "https://learn.chatgpt.com/docs/app",
-    executorName: "Codex CLI", executorLogin: true,
+    executorName: "Codex CLI", executorLoginMode: "automatic",
     mcpBindingTarget: "codex-desktop", executorBindingTarget: "codex-cli",
   },
   {
     id: "cursor", name: "Cursor", icon: "/assistant-icons/cursor.png",
     installURL: "https://cursor.com/downloads",
-    executorName: "Cursor Agent CLI", executorLogin: true,
+    executorInstallURL: "https://cursor.com/docs/cli/installation",
+    executorName: "Cursor Agent CLI", executorLoginMode: "automatic",
     mcpBindingTarget: "cursor-desktop", executorBindingTarget: "cursor-cli",
   },
   {
     id: "workbuddy", name: "WorkBuddy", icon: "/assistant-icons/workbuddy.png",
     installURL: "https://www.workbuddy.cn",
-    executorName: "CodeBuddy Code CLI",
+    executorInstallURL: "https://www.codebuddy.ai/docs/cli/quickstart",
+    executorName: "CodeBuddy Code CLI", executorLoginMode: "interactive",
     mcpBindingTarget: "workbuddy-desktop", executorBindingTarget: "codebuddy-cli",
   },
   {
@@ -90,6 +93,23 @@ const EXTERNAL_CONFIGURATION_RECHECK_DELAYS_MS = [1_500, 4_000, 10_000];
 type StatusMap = Partial<Record<DesktopAgent, DesktopAgentIntegrationStatus>>;
 type ExecutorPolicyMap = Partial<Record<DesktopExecutorProvider, DesktopExecutorPolicy>>;
 type BindingMap = Partial<Record<DesktopAgentBindingTarget, string>>;
+
+function executorRuntimeState(
+  status?: ChatExecutorDescriptor,
+  policy?: DesktopExecutorPolicy,
+) {
+  const enabled = policy?.enabled ?? false;
+  const installed = policy?.installed ?? Boolean(status?.installed);
+  const ready = policy?.ready ?? Boolean(status?.available);
+  const hostOnline = Boolean(status?.host_online);
+  const hostInstalled = Boolean(status?.installed);
+  const hostAvailable = Boolean(status?.available);
+  const hostSynchronized = hostOnline && hostInstalled && (!enabled || hostAvailable);
+  return {
+    enabled, installed, ready, hostOnline, hostSynchronized,
+    prepared: installed && ready && hostSynchronized,
+  };
+}
 
 export default function AgentIntegrationPage() {
   const { t } = useTranslation();
@@ -146,7 +166,7 @@ export default function AgentIntegrationPage() {
           const waitingForEnabledExecutor = values.some((executor) =>
             executor.kind === "external" &&
             currentPolicies[executor.id as DesktopExecutorProvider]?.enabled &&
-            executor.installed && !executor.available);
+            (!executor.installed || !executor.available));
           if (!waitingForHost && !waitingForEnabledExecutor) break;
           if (attempt + 1 < EXECUTOR_SYNC_ATTEMPTS) {
             await new Promise((resolve) => window.setTimeout(resolve, EXECUTOR_SYNC_DELAY_MS));
@@ -210,8 +230,11 @@ export default function AgentIntegrationPage() {
     } else if (result.data.state === "enabled") {
       message.success(t("agentIntegration.enableSuccess", { agent: result.data.display_name }));
     } else if (nextAction === "login") {
-      const executorName = AGENTS.find((item) => item.id === agent)?.executorName || result.data.display_name;
-      message.info(t("agentIntegration.loginStarted", { agent: executorName }));
+      const definition = AGENTS.find((item) => item.id === agent);
+      const executorName = definition?.executorName || result.data.display_name;
+      message.info(t(definition?.executorLoginMode === "interactive"
+        ? "agentIntegration.interactiveLoginStarted"
+        : "agentIntegration.loginStarted", { agent: executorName }));
     }
   };
 
@@ -420,11 +443,9 @@ function AgentCard({
   const mcpPrepared = requirements.length > 0 && requirements.every((item) => item.satisfied) &&
     !["action_required", "conflict", "error"].includes(mcpState);
   const executorSupported = Boolean(agent.executorName);
-  const executorEnabled = executorPolicy?.enabled ?? false;
-  const executorInstalled = executorPolicy?.installed ?? Boolean(executorStatus?.installed);
-  const executorReady = executorPolicy?.ready ?? Boolean(executorStatus?.available);
-  const executorPrepared = executorSupported && executorInstalled && executorReady &&
-    Boolean(executorStatus?.host_online);
+  const executorRuntime = executorRuntimeState(executorStatus, executorPolicy);
+  const executorEnabled = executorRuntime.enabled;
+  const executorPrepared = executorSupported && executorRuntime.prepared;
   const detectionComplete = mcpPrepared && (!executorSupported || executorPrepared);
   const mcpEnabled = mcpState === "enabled";
   const mcpCanToggle = mcpState === "ready" || mcpEnabled;
@@ -537,8 +558,8 @@ function CollapsedDetectionSummary({
     ready: requirement.satisfied,
   }));
   if (agent.executorName) {
-    const installed = executorPolicy?.installed ?? Boolean(executorStatus?.installed);
-    const ready = executorPolicy?.ready ?? Boolean(executorStatus?.available);
+    const runtime = executorRuntimeState(executorStatus, executorPolicy);
+    const { installed, ready } = runtime;
     items.push({
       id: "executor-installed",
       label: t(installed ? "agentIntegration.compactCLIInstalled" : "agentIntegration.compactCLIMissing"),
@@ -549,6 +570,15 @@ function CollapsedDetectionSummary({
         id: "executor-login",
         label: t(ready ? "agentIntegration.compactCLILoggedIn" : "agentIntegration.compactCLINotLoggedIn"),
         ready,
+      });
+    }
+    if (installed && ready) {
+      items.push({
+        id: "executor-host-sync",
+        label: t(runtime.hostSynchronized
+          ? "agentIntegration.compactHostSynchronized"
+          : "agentIntegration.compactHostStale"),
+        ready: runtime.hostSynchronized,
       });
     }
   }
@@ -675,16 +705,18 @@ function AgentConfigurationFlow({
   const mcpInstallationMissing = mcpRequirements.length > 0 && !mcpRequirements[0].satisfied;
 
   const executorSupported = Boolean(agent.executorName);
-  const executorEnabled = executorPolicy?.enabled ?? false;
-  const executorInstalled = executorPolicy?.installed ?? Boolean(executorStatus?.installed);
-  const executorReady = executorPolicy?.ready ?? Boolean(executorStatus?.available);
-  const executorHostReady = Boolean(executorStatus?.host_online);
+  const executorRuntime = executorRuntimeState(executorStatus, executorPolicy);
+  const executorEnabled = executorRuntime.enabled;
+  const executorInstalled = executorRuntime.installed;
+  const executorReady = executorRuntime.ready;
+  const executorHostReady = executorRuntime.hostSynchronized;
+  const executorBridgeState = executorPolicy?.bridge_state;
   const executorPrepared = executorSupported && executorInstalled && executorReady && executorHostReady;
   const executorBindingConfigured = Boolean(
     agent.executorBindingTarget && bindings[agent.executorBindingTarget],
   );
   const executorNeedsLogin = executorSupported && executorInstalled && !executorReady &&
-    agent.executorLogin && executorAuthenticationRequired(executorPolicy?.unavailable_reason);
+    Boolean(agent.executorLoginMode) && executorAuthenticationRequired(executorPolicy?.unavailable_reason);
   const manualExecutableBinding = !getDesktopPlatform();
   const mcpClientName = t(`agentIntegration.mcpClients.${agent.id}`);
   const mcpGuideSteps = ["install", "connect", "verify"].map((step) =>
@@ -768,7 +800,7 @@ function AgentConfigurationFlow({
   const executorActions = executorSupported ? (
     <Space wrap size={8}>
       {!executorInstalled && (
-        <Button size="small" icon={<LinkOutlined />} href={agent.installURL} target="_blank">
+        <Button size="small" icon={<LinkOutlined />} href={agent.executorInstallURL || agent.installURL} target="_blank">
           {t("agentIntegration.viewExecutorGuide")}
         </Button>
       )}
@@ -781,7 +813,9 @@ function AgentConfigurationFlow({
           disabled={busyAction !== ""}
           onClick={() => void onMCPAction(agent.id, "login")}
         >
-          {t("agentIntegration.login")}
+          {t(agent.executorLoginMode === "interactive"
+            ? "agentIntegration.openLoginTerminal"
+            : "agentIntegration.login")}
         </Button>
       )}
       {bindingActions(agent.executorBindingTarget, !executorInstalled, executorBindingConfigured)}
@@ -839,7 +873,13 @@ function AgentConfigurationFlow({
                 id: "host",
                 label: executorHostReady
                   ? t("agentIntegration.executorDetectionReady")
-                  : t("agentIntegration.executorConnecting"),
+                  : executorBridgeState === "authentication_required"
+                    ? t("agentIntegration.executorSessionExpired")
+                    : executorBridgeState === "unavailable"
+                      ? t("agentIntegration.executorBridgeUnavailable")
+                      : executorRuntime.hostOnline
+                        ? t("agentIntegration.executorHostStateStale")
+                        : t("agentIntegration.executorConnecting"),
                 ready: executorHostReady,
               },
               {
@@ -851,16 +891,24 @@ function AgentConfigurationFlow({
               },
               {
                 id: "login",
-                label: executorReady
-                  ? t("agentIntegration.executorAccountReady", { agent: agent.executorName })
-                  : executorAuthenticationRequired(executorPolicy?.unavailable_reason)
-                    ? t("agentIntegration.executorLoginRequired", { agent: agent.executorName })
-                    : t("agentIntegration.executorStatusCheckFailed"),
+                label: !executorInstalled
+                  ? t("agentIntegration.executorWaitingForInstall", { agent: agent.executorName })
+                  : executorReady
+                    ? t("agentIntegration.executorAccountReady", { agent: agent.executorName })
+                    : executorAuthenticationRequired(executorPolicy?.unavailable_reason)
+                      ? t("agentIntegration.executorLoginRequired", { agent: agent.executorName })
+                      : t("agentIntegration.executorStatusCheckFailed"),
                 ready: executorReady,
               },
             ]}
           />
           {executorActions}
+          {executorNeedsLogin && agent.executorLoginMode === "interactive" && (
+            <div className="agent-integration-stage-hint">
+              <InfoCircleFilled />
+              <GuideText text={t("agentIntegration.interactiveLoginHint", { agent: agent.executorName })} />
+            </div>
+          )}
         </ConfigurationStage>
       )}
 

@@ -152,3 +152,17 @@ func TestLocalSessionRecoveryRequiresLoopbackUnauthorized(t *testing.T) {
 		}
 	}
 }
+
+func TestAuthenticationRequiredRecognizesMissingAndRejectedSessions(t *testing.T) {
+	for _, err := range []error{
+		ErrAuthenticationRequired,
+		&apiError{StatusCode: http.StatusUnauthorized, Message: "refresh token expired"},
+	} {
+		if !IsAuthenticationRequired(err) {
+			t.Errorf("IsAuthenticationRequired(%v)=false", err)
+		}
+	}
+	if IsAuthenticationRequired(&apiError{StatusCode: http.StatusServiceUnavailable}) {
+		t.Fatal("service unavailability was classified as an authentication failure")
+	}
+}

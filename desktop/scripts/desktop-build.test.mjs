@@ -155,12 +155,10 @@ test("macOS and Windows builds materialize offline assets before writing the run
     assert.match(darwin, new RegExp(`--exclude "${escaped}"`));
     assert.match(windows, new RegExp(`'${escaped}'`));
   }
-  for (const developmentFile of [".coverage", "README.md", "README.CN.md"]) {
+  for (const developmentFile of [".coverage", "README.md", "README.CN.md", "Makefile"]) {
     assert.match(darwin, new RegExp(developmentFile.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
     assert.match(windows, new RegExp(developmentFile.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   }
-  assert.doesNotMatch(darwin, /--exclude "\/Makefile"/);
-  assert.doesNotMatch(windows, /'Makefile'/);
   assert.match(windows, /skills\\\.runtime/);
   assert.match(darwin, /"\$\{ROOT\}\/" "\$\{RUNTIME_ROOT\}\/app\/"/);
   assert.match(windows, /robocopy\.exe \$repoRoot \$appRoot \/MIR/);
@@ -704,6 +702,7 @@ test("Desktop supervises the external Agent host until the application quits", (
 
 test("Desktop Agent login returns immediately and refreshes the Host when login exits", () => {
   const source = readFileSync(electronMainScript, "utf8");
+  assert.match(source, /workbuddy: new Set\(\["connect", "status", "disconnect", "login"\]\)/);
   assert.match(
     source,
     /function runAgentConnector[\s\S]*action === "login"[\s\S]*return startAgentLogin\(agent\)/,

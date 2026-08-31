@@ -11,6 +11,8 @@ function createDesktopBridge(ipcRenderer) {
     agentExecutableBindings: () => ipcRenderer.invoke("lazymind:agentExecutableBindings"),
     agentExecutableBind: (target, executablePath) => ipcRenderer.invoke("lazymind:agentExecutableBind", target, executablePath),
     agentExecutableClear: (target) => ipcRenderer.invoke("lazymind:agentExecutableClear", target),
+    assistantSessionSet: (session) => ipcRenderer.invoke("lazymind:assistantSessionSet", session),
+    assistantSessionClear: () => ipcRenderer.invoke("lazymind:assistantSessionClear"),
     restartRuntime: () => ipcRenderer.invoke("lazymind:restartRuntime"),
     resetRuntime: (scope) => ipcRenderer.invoke("lazymind:resetRuntime", scope),
     localFolderAccessStatus: () => ipcRenderer.invoke("lazymind:localFolderAccessStatus"),

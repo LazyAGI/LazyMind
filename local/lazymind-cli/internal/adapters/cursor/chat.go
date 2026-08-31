@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -46,17 +45,8 @@ func NewChatRunner(binary string) (*ChatRunner, error) {
 }
 
 func findBinary(configured string) (string, error) {
-	name := "cursor-agent"
-	home, _ := os.UserHomeDir()
-	var candidates []string
-	if home != "" {
-		candidates = append(candidates, filepath.Join(home, ".local", "bin", name))
-		versions, _ := filepath.Glob(filepath.Join(home, ".local", "share", "cursor-agent", "versions", "*", name))
-		sort.Sort(sort.Reverse(sort.StringSlice(versions)))
-		candidates = append(candidates, versions...)
-	}
 	resolved, err := agentexec.FindBound(
-		configured, "LAZYMIND_CURSOR_AGENT_BIN", agentexec.CursorCLI, []string{name}, candidates,
+		configured, "LAZYMIND_CURSOR_AGENT_BIN", agentexec.CursorCLI, []string{"cursor-agent"},
 	)
 	if err != nil {
 		if strings.TrimSpace(configured) != "" || strings.TrimSpace(os.Getenv("LAZYMIND_CURSOR_AGENT_BIN")) != "" {

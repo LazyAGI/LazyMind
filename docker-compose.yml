@@ -629,13 +629,6 @@ services:
 
   lazyllm-parse-server:
     image: ${LAZYMIND_IMAGE_MIRROR:-registry.cn-hangzhou.aliyuncs.com}/lazyllm/lazymind-algorithm:${LAZYMIND_IMAGE_TAG:-latest}
-    build:
-      network: host
-      context: .
-      dockerfile: algorithm/Dockerfile
-      target: algorithm
-      args:
-        <<: *mirror-args
     extra_hosts:
       - "host.docker.internal:host-gateway"
     expose:
@@ -670,13 +663,6 @@ services:
 
   lazyllm-parse-worker:
     image: ${LAZYMIND_IMAGE_MIRROR:-registry.cn-hangzhou.aliyuncs.com}/lazyllm/lazymind-algorithm:${LAZYMIND_IMAGE_TAG:-latest}
-    build:
-      network: host
-      context: .
-      dockerfile: algorithm/Dockerfile
-      target: algorithm
-      args:
-        <<: *mirror-args
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
@@ -800,13 +786,6 @@ services:
   chat:
     image: ${LAZYMIND_IMAGE_MIRROR:-registry.cn-hangzhou.aliyuncs.com}/lazyllm/lazymind-algorithm:${LAZYMIND_IMAGE_TAG:-latest}
     restart: unless-stopped
-    build:
-      network: host
-      context: .
-      dockerfile: algorithm/Dockerfile
-      target: algorithm
-      args:
-        <<: *mirror-args
     expose:
       - "8046"
     volumes:

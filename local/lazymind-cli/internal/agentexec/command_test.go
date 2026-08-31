@@ -32,6 +32,29 @@ func TestEnsureConversationWorkspaceStaysInsideAgentRoot(t *testing.T) {
 	}
 }
 
+func TestPersistentHostIDIsStableForCurrentRuntime(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("LAZYMIND_HOME", home)
+	first, err := PersistentHostID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := PersistentHostID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first != second {
+		t.Fatalf("Host ID changed between calls: %q != %q", first, second)
+	}
+	body, err := os.ReadFile(filepath.Join(home, "connector-host-id"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if baseID := strings.TrimSpace(string(body)); first != baseID {
+		t.Fatalf("stored Host ID %q differs from returned identity %q", baseID, first)
+	}
+}
+
 func TestLazyMindMCPConfigCarriesInvocationContext(t *testing.T) {
 	body, err := LazyMindMCPConfig("/opt/lazymind", "/tmp/lazymind-home", "run-1", "conversation-1", "lease-1", "host-1")
 	if err != nil {
@@ -144,16 +167,16 @@ func TestFindBoundPrefersExplicitThenEnvironmentThenSavedPath(t *testing.T) {
 	}
 	t.Setenv("TEST_CURSOR_BIN", environment)
 
-	resolved, err := FindBoundExecutable(explicit, "TEST_CURSOR_BIN", CursorCLI, nil, nil)
+	resolved, err := FindBoundExecutable(explicit, "TEST_CURSOR_BIN", CursorCLI, nil)
 	if err != nil || !SameExecutable(resolved, explicit) {
 		t.Fatalf("explicit resolved=%q err=%v", resolved, err)
 	}
-	resolved, err = FindBoundExecutable("", "TEST_CURSOR_BIN", CursorCLI, nil, nil)
+	resolved, err = FindBoundExecutable("", "TEST_CURSOR_BIN", CursorCLI, nil)
 	if err != nil || !SameExecutable(resolved, environment) {
 		t.Fatalf("environment resolved=%q err=%v", resolved, err)
 	}
 	t.Setenv("TEST_CURSOR_BIN", "")
-	resolved, err = FindBoundExecutable("", "TEST_CURSOR_BIN", CursorCLI, nil, nil)
+	resolved, err = FindBoundExecutable("", "TEST_CURSOR_BIN", CursorCLI, nil)
 	if err != nil || !SameExecutable(resolved, saved) {
 		t.Fatalf("saved resolved=%q err=%v", resolved, err)
 	}

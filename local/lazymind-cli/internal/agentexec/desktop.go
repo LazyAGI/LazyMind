@@ -1,7 +1,10 @@
 package agentexec
 
 import (
+	"fmt"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -27,7 +30,7 @@ func InspectDesktopApplication(spec DesktopApplication) (DesktopApplicationState
 			return state, err
 		}
 		if found {
-			if _, err := ResolveExecutable(path); err == nil {
+			if _, err := ResolveDesktopApplication(path); err == nil {
 				state.Installed = true
 			}
 		}
@@ -37,6 +40,31 @@ func InspectDesktopApplication(spec DesktopApplication) (DesktopApplicationState
 	}
 	state.Initialized = state.Installed && initialized
 	return state, nil
+}
+
+func ResolveDesktopApplication(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", fmt.Errorf("desktop application path is empty")
+	}
+	abs, err := filepath.Abs(value)
+	if err != nil {
+		return "", err
+	}
+	if resolved, resolveErr := filepath.EvalSymlinks(abs); resolveErr == nil {
+		abs = resolved
+	}
+	info, err := os.Stat(abs)
+	if err != nil {
+		return "", err
+	}
+	if info.IsDir() {
+		if runtime.GOOS == "darwin" && strings.EqualFold(filepath.Ext(abs), ".app") {
+			return filepath.Clean(abs), nil
+		}
+		return "", fmt.Errorf("%s is not a desktop application", abs)
+	}
+	return ResolveExecutable(abs)
 }
 
 func anyPathExists(paths []string) bool {

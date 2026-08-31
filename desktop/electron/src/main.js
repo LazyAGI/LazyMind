@@ -536,7 +536,7 @@ function runAgentConnector(agent, action) {
     all: new Set(["status"]),
     codex: new Set(["connect", "status", "disconnect", "login"]),
     cursor: new Set(["connect", "status", "disconnect", "login"]),
-    workbuddy: new Set(["connect", "status", "disconnect"]),
+    workbuddy: new Set(["connect", "status", "disconnect", "login"]),
     raccoon: new Set(["connect", "status", "disconnect"]),
     traework: new Set(["connect", "status", "disconnect"]),
     "deepseek-harness": new Set(["connect", "status", "disconnect"]),
@@ -635,9 +635,9 @@ function restartAgentHost() {
   }
 }
 
-function runConnectorJSON(args, timeout) {
+function runConnectorJSON(args, timeout, input) {
   return new Promise((resolve, reject) => {
-    execFile(agentConnectorPath, args, {
+    const child = execFile(agentConnectorPath, args, {
       env: sidecarEnv(),
       timeout,
       windowsHide: isWindows,
@@ -653,6 +653,9 @@ function runConnectorJSON(args, timeout) {
         reject(new Error(`LazyMind connector returned invalid JSON: ${parseError.message}`));
       }
     });
+    if (input !== undefined) {
+      child.stdin?.end(`${JSON.stringify(input)}\n`);
+    }
   });
 }
 
@@ -1944,6 +1947,10 @@ ipcMain.handle("lazymind:executorIntegrationAction", (_event, provider, action) 
 ipcMain.handle("lazymind:agentExecutableBindings", () => readAgentBindings());
 ipcMain.handle("lazymind:agentExecutableBind", (_event, target, executablePath) => runAgentBinding(target, "set", executablePath));
 ipcMain.handle("lazymind:agentExecutableClear", (_event, target) => runAgentBinding(target, "clear"));
+ipcMain.handle("lazymind:assistantSessionSet", (_event, value) =>
+  runConnectorJSON(["internal", "session", "set"], agentConnectorActionTimeoutMs, value));
+ipcMain.handle("lazymind:assistantSessionClear", () =>
+  runConnectorJSON(["internal", "session", "clear"], agentConnectorActionTimeoutMs));
 ipcMain.handle("lazymind:restartRuntime", async () => {
   return restartRuntimeAfterFolderAccessChange();
 });

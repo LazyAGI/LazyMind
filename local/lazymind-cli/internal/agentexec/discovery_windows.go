@@ -11,6 +11,11 @@ import (
 	"golang.org/x/sys/windows/registry"
 )
 
+const (
+	windowsExecutableScanDepth = 2
+	windowsExecutableScanLimit = 2048
+)
+
 func platformExecutableCandidates(names []string) []string {
 	candidates := make([]string, 0, len(names)*2)
 	pathValue := effectiveWindowsPath()
@@ -23,12 +28,87 @@ func platformExecutableCandidates(names []string) []string {
 			candidates = append(candidates, path)
 		}
 	}
+	candidates = append(candidates, installedWindowsExecutables(names, pathExt)...)
 	return uniqueWindowsPaths(candidates)
 }
 
+func installedWindowsExecutables(names, extensions []string) []string {
+	var roots []string
+	for _, application := range desktopApplicationBindings() {
+		info, err := os.Stat(application)
+		if err == nil {
+			if info.IsDir() {
+				roots = append(roots, application)
+			} else {
+				roots = append(roots, filepath.Dir(application))
+			}
+		}
+	}
+	if localAppData := strings.TrimSpace(os.Getenv("LOCALAPPDATA")); localAppData != "" {
+		roots = append(roots, filepath.Join(localAppData, "Programs"))
+	}
+	for _, application := range windowsInstalledApplications() {
+		if directoryExists(application.location) {
+			roots = append(roots, application.location)
+		}
+	}
+	roots = uniqueWindowsPaths(roots)
+	var candidates []string
+	remaining := windowsExecutableScanLimit
+	for _, root := range roots {
+		candidates = append(candidates, findWindowsExecutables(
+			root, names, extensions, windowsExecutableScanDepth, &remaining,
+		)...)
+		if remaining == 0 {
+			break
+		}
+	}
+	return uniqueWindowsPaths(candidates)
+}
+
+func findWindowsExecutables(
+	root string,
+	names, extensions []string,
+	depth int,
+	remaining *int,
+) []string {
+	if depth < 0 || *remaining == 0 || !directoryExists(root) {
+		return nil
+	}
+	(*remaining)--
+	var candidates []string
+	for _, name := range names {
+		if candidate := firstExecutablePath(filepath.Join(root, name), extensions); candidate != "" {
+			candidates = append(candidates, candidate)
+		}
+	}
+	if depth == 0 {
+		return candidates
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return candidates
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		candidates = append(candidates, findWindowsExecutables(
+			filepath.Join(root, entry.Name()), names, extensions, depth-1, remaining,
+		)...)
+		if *remaining == 0 {
+			break
+		}
+	}
+	return candidates
+}
+
 func resolvePlatformExecutable(value string) (string, bool, error) {
-	resolved, err := exec.LookPath(value)
-	return resolved, true, err
+	resolved := lookPathIn(value, effectiveWindowsPath(), windowsPathExtensions())
+	if resolved == "" {
+		return "", true, exec.ErrNotFound
+	}
+	return resolved, true, nil
 }
 
 func effectiveWindowsPath() string {

@@ -150,34 +150,31 @@ func SafeEnvironment(additional ...string) []string {
 	return platformSafeEnvironment(append(environment, additional...))
 }
 
-func Find(configured, environment string, names, candidates []string) (string, error) {
-	resolved, err := FindExecutable(configured, environment, names, candidates)
+func Find(configured string, names []string) (string, error) {
+	resolved, err := FindExecutable(configured, names)
 	if err != nil {
 		return "", err
 	}
 	return ResolveRunnable(resolved)
 }
 
-func FindBound(configured, environment string, target BindingTarget, names, candidates []string) (string, error) {
+func FindBound(configured, environment string, target BindingTarget, names []string) (string, error) {
 	configured, err := configuredExecutable(configured, environment, target)
 	if err != nil {
 		return "", err
 	}
-	return Find(configured, "", names, candidates)
+	return Find(configured, names)
 }
 
-func FindBoundExecutable(configured, environment string, target BindingTarget, names, candidates []string) (string, error) {
+func FindBoundExecutable(configured, environment string, target BindingTarget, names []string) (string, error) {
 	configured, err := configuredExecutable(configured, environment, target)
 	if err != nil {
 		return "", err
 	}
-	return FindExecutable(configured, "", names, candidates)
+	return FindExecutable(configured, names)
 }
 
-func FindExecutable(configured, environment string, names, candidates []string) (string, error) {
-	if strings.TrimSpace(configured) == "" && environment != "" {
-		configured = strings.TrimSpace(os.Getenv(environment))
-	}
+func FindExecutable(configured string, names []string) (string, error) {
 	if strings.TrimSpace(configured) != "" {
 		return ResolveExecutable(configured)
 	}
@@ -187,11 +184,6 @@ func FindExecutable(configured, environment string, names, candidates []string) 
 		}
 	}
 	for _, candidate := range platformExecutableCandidates(names) {
-		if resolved, err := ResolveExecutable(candidate); err == nil {
-			return resolved, nil
-		}
-	}
-	for _, candidate := range candidates {
 		if resolved, err := ResolveExecutable(candidate); err == nil {
 			return resolved, nil
 		}
@@ -301,6 +293,10 @@ func ConnectorRuntime() (string, string, error) {
 func LazyMindHome() (string, error) { return lazyMindHome() }
 
 func PersistentHostID() (string, error) {
+	return persistentMachineHostID()
+}
+
+func persistentMachineHostID() (string, error) {
 	home, err := lazyMindHome()
 	if err != nil {
 		return "", err
@@ -324,7 +320,14 @@ func PersistentHostID() (string, error) {
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if errors.Is(err, os.ErrExist) {
 		body, readErr := os.ReadFile(path)
-		return strings.TrimSpace(string(body)), readErr
+		if readErr != nil {
+			return "", readErr
+		}
+		value := strings.TrimSpace(string(body))
+		if !strings.HasPrefix(value, "host-") || len(value) != 37 {
+			return "", errors.New("stored Agent Host identity is invalid")
+		}
+		return value, nil
 	}
 	if err != nil {
 		return "", err

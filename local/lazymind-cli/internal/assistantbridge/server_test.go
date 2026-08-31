@@ -3,6 +3,7 @@ package assistantbridge
 import (
 	"bytes"
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -19,6 +20,12 @@ import (
 	"lazymind/agentconnector/internal/executorpolicy"
 	"lazymind/agentconnector/internal/mcpbridge"
 )
+
+type stubBridgeProber struct{ err error }
+
+func (p stubBridgeProber) Probe(context.Context) (mcpbridge.ProbeResult, error) {
+	return mcpbridge.ProbeResult{}, p.err
+}
 
 func newTestServer(t *testing.T, home string) *Server {
 	t.Helper()
@@ -39,6 +46,7 @@ func newTestServer(t *testing.T, home string) *Server {
 	if err != nil {
 		t.Fatal(err)
 	}
+	server.executorProbe = stubBridgeProber{}
 	return server
 }
 
@@ -136,38 +144,42 @@ func TestStatusesDoNotLaunchDesktopAgentCandidates(t *testing.T) {
 	}
 }
 
-func TestCursorLoginActionReturnsBeforeExternalLoginCompletes(t *testing.T) {
-	server := newTestServer(t, t.TempDir())
-	changes := server.policy.Changes()
-	started := make(chan struct{})
-	release := make(chan struct{})
-	server.loginOverride = func(context.Context, string) error {
-		close(started)
-		<-release
-		return nil
-	}
+func TestInteractiveLoginActionsReturnBeforeExternalLoginCompletes(t *testing.T) {
+	for _, agent := range []string{"cursor", "workbuddy"} {
+		t.Run(agent, func(t *testing.T) {
+			server := newTestServer(t, t.TempDir())
+			changes := server.policy.Changes()
+			started := make(chan struct{})
+			release := make(chan struct{})
+			server.loginOverride = func(context.Context, string) error {
+				close(started)
+				<-release
+				return nil
+			}
 
-	start := time.Now()
-	status, err := server.agentAction(context.Background(), "cursor", "login")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if elapsed := time.Since(start); elapsed > time.Second {
-		t.Fatalf("login action blocked for %s", elapsed)
-	}
-	if !strings.Contains(status.Message, "return to LazyMind and check again") {
-		t.Fatalf("status=%#v", status)
-	}
-	select {
-	case <-started:
-	case <-time.After(time.Second):
-		t.Fatal("background login did not start")
-	}
-	close(release)
-	select {
-	case <-changes:
-	case <-time.After(time.Second):
-		t.Fatal("completed login did not trigger an executor recheck")
+			start := time.Now()
+			status, err := server.agentAction(context.Background(), agent, "login")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if elapsed := time.Since(start); elapsed > time.Second {
+				t.Fatalf("login action blocked for %s", elapsed)
+			}
+			if !strings.Contains(status.Message, "return to LazyMind and check again") {
+				t.Fatalf("status=%#v", status)
+			}
+			select {
+			case <-started:
+			case <-time.After(time.Second):
+				t.Fatal("background login did not start")
+			}
+			close(release)
+			select {
+			case <-changes:
+			case <-time.After(time.Second):
+				t.Fatal("completed login did not trigger an executor recheck")
+			}
+		})
 	}
 }
 
@@ -262,5 +274,32 @@ exit 1
 		if status.Enabled || !status.Installed || !status.Ready || status.UnavailableReason != "" {
 			t.Fatalf("%s status=%#v", provider, status)
 		}
+	}
+}
+
+func TestExecutorStatusesExposeAssistantBridgeState(t *testing.T) {
+	server := newTestServer(t, t.TempDir())
+	for _, test := range []struct {
+		name  string
+		err   error
+		state executorpolicy.BridgeState
+	}{
+		{name: "ready", state: executorpolicy.BridgeReady},
+		{name: "authentication", err: credentials.ErrAuthenticationRequired, state: executorpolicy.BridgeAuthenticationRequired},
+		{name: "unavailable", err: errors.New("connection failed"), state: executorpolicy.BridgeUnavailable},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			statuses, err := ExecutorStatusesWithBridge(
+				context.Background(), server.policy, stubBridgeProber{err: test.err},
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for provider, status := range statuses {
+				if status.BridgeState != test.state {
+					t.Errorf("%s bridge state=%q want %q", provider, status.BridgeState, test.state)
+				}
+			}
+		})
 	}
 }

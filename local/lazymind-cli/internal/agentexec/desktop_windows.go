@@ -10,6 +10,11 @@ import (
 	"golang.org/x/sys/windows/registry"
 )
 
+type windowsInstalledApplication struct {
+	displayName string
+	location    string
+}
+
 func platformDesktopInstalled(spec DesktopApplication, _ bool) bool {
 	for _, name := range spec.ExecutableNames {
 		if appPath(name) != "" {
@@ -50,7 +55,20 @@ func hasInstalledApplication(displayNames []string) bool {
 			wanted = append(wanted, name)
 		}
 	}
+	for _, application := range windowsInstalledApplications() {
+		if !matchesInstalledDisplayName(application.displayName, wanted) {
+			continue
+		}
+		if directoryExists(application.location) || fileExists(application.location) {
+			return true
+		}
+	}
+	return false
+}
+
+func windowsInstalledApplications() []windowsInstalledApplication {
 	const uninstallPath = `SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall`
+	var applications []windowsInstalledApplication
 	for _, root := range []registry.Key{registry.CURRENT_USER, registry.LOCAL_MACHINE} {
 		for _, view := range []uint32{registry.WOW64_64KEY, registry.WOW64_32KEY} {
 			key, err := registry.OpenKey(root, uninstallPath, registry.ENUMERATE_SUB_KEYS|view)
@@ -65,18 +83,24 @@ func hasInstalledApplication(displayNames []string) bool {
 			for _, name := range names {
 				entry := uninstallPath + `\` + name
 				displayName := strings.ToLower(strings.TrimSpace(registryString(root, entry, "DisplayName", view)))
-				if !matchesInstalledDisplayName(displayName, wanted) {
+				if displayName == "" {
 					continue
 				}
-				if directoryExists(registryString(root, entry, "InstallLocation", view)) ||
-					fileExists(commandExecutable(registryString(root, entry, "DisplayIcon", view))) ||
-					fileExists(commandExecutable(registryString(root, entry, "UninstallString", view))) {
-					return true
+				location := strings.TrimSpace(registryString(root, entry, "InstallLocation", view))
+				if location == "" {
+					if executable := commandExecutable(registryString(root, entry, "DisplayIcon", view)); executable != "" {
+						location = filepath.Dir(executable)
+					} else if executable := commandExecutable(registryString(root, entry, "UninstallString", view)); executable != "" {
+						location = executable
+					}
 				}
+				applications = append(applications, windowsInstalledApplication{
+					displayName: displayName, location: location,
+				})
 			}
 		}
 	}
-	return false
+	return applications
 }
 
 func matchesInstalledDisplayName(displayName string, wanted []string) bool {

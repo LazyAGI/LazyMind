@@ -67,3 +67,20 @@ func TestInspectDesktopApplicationDoesNotTreatStaleStateAsFirstLaunch(t *testing
 		t.Fatalf("stale state must not satisfy installation or first launch: %#v", state)
 	}
 }
+
+func TestInspectDesktopApplicationAcceptsBoundMacApplicationBundle(t *testing.T) {
+	applications := t.TempDir()
+	bundle := filepath.Join(applications, "Custom Codex.app")
+	if err := os.Mkdir(bundle, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("LAZYMIND_HOME", t.TempDir())
+	if _, err := SetExecutableBinding(CodexDesktop, bundle); err != nil {
+		t.Fatal(err)
+	}
+
+	state, err := InspectDesktopApplication(DesktopApplication{BindingTarget: CodexDesktop})
+	if err != nil || !state.Installed {
+		t.Fatalf("state=%#v err=%v", state, err)
+	}
+}

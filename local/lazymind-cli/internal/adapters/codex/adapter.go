@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -82,12 +81,17 @@ func New(binary, self string, bridge *mcpbridge.Bridge) (*Adapter, error) {
 }
 
 func (a *Adapter) Status(context.Context) agentintegration.Status {
-	requirements, err := desktopRequirements()
+	desktop, err := codexDesktopState()
+	if err != nil {
+		return agentintegration.Fail(agentintegration.Status{Agent: "codex", DisplayName: "Codex"}, err.Error())
+	}
+	installed := desktop.Installed && a.discoveryError == nil
+	requirements := []agentintegration.Requirement{
+		{ID: "codex_desktop", Description: "Install the ChatGPT desktop app with Codex.", Satisfied: installed},
+		{ID: "codex_desktop_initialized", Description: "Open Codex in the ChatGPT desktop app at least once.", Satisfied: installed && desktop.Initialized},
+	}
 	status := agentintegration.Status{
 		Agent: "codex", DisplayName: "Codex", Requirements: requirements,
-	}
-	if err != nil {
-		return agentintegration.Fail(status, err.Error())
 	}
 	config, exists, err := a.getConfig()
 	if err != nil {
@@ -118,9 +122,6 @@ func (a *Adapter) Connect(ctx context.Context) agentintegration.Status {
 	if status.State != agentintegration.Ready {
 		return status
 	}
-	if a.discoveryError != nil {
-		return agentintegration.Fail(status, "Codex Desktop runtime is unavailable: "+a.discoveryError.Error())
-	}
 	if _, err := a.bridge.Probe(ctx); err != nil {
 		return agentintegration.Fail(status, "LazyMind MCP is unavailable: "+err.Error())
 	}
@@ -142,7 +143,7 @@ func (a *Adapter) Disconnect(ctx context.Context) agentintegration.Status {
 		return agentintegration.Fail(a.Status(ctx), "clean up legacy Codex control configuration: "+err.Error())
 	}
 	status := a.Status(ctx)
-	if status.State == agentintegration.Conflict || status.State == agentintegration.Failed || a.discoveryError != nil {
+	if status.State == agentintegration.Conflict || status.State == agentintegration.Failed {
 		return status
 	}
 	if _, exists, err := a.getConfig(); err != nil {
@@ -168,18 +169,18 @@ func (a *Adapter) Login(ctx context.Context) agentintegration.Status {
 	return a.Status(ctx)
 }
 
-func desktopRequirements() ([]agentintegration.Requirement, error) {
-	state, err := agentexec.InspectDesktopApplication(agentexec.DesktopApplication{
+func codexDesktopState() (agentexec.DesktopApplicationState, error) {
+	home, err := codexHome()
+	if err != nil {
+		return agentexec.DesktopApplicationState{}, err
+	}
+	return agentexec.InspectDesktopApplication(agentexec.DesktopApplication{
 		BindingTarget:   agentexec.CodexDesktop,
 		ExecutableNames: []string{"ChatGPT.exe", "Codex.exe"},
+		Protocols:       []string{"chatgpt"},
 		DisplayNames:    []string{"ChatGPT", "Codex"},
+		StatePaths:      []string{home},
 	})
-	if err != nil {
-		return nil, err
-	}
-	return []agentintegration.Requirement{{
-		ID: "codex_desktop", Description: "Install the Codex desktop app.", Satisfied: state.Installed,
-	}}, nil
 }
 
 func (a *Adapter) getConfig() (mcpConfig, bool, error) {
@@ -259,42 +260,13 @@ func currentEnvironment(home, hostID string) map[string]string {
 }
 
 func findBinary(configured string) (string, error) {
-	name := "codex"
-	home, _ := os.UserHomeDir()
-	candidates := codexCandidates(home, name)
 	resolved, err := agentexec.FindBoundExecutable(
-		configured, "LAZYMIND_CODEX_BIN", agentexec.CodexCLI, []string{name}, candidates,
+		configured, "LAZYMIND_CODEX_BIN", agentexec.CodexCLI, []string{"codex"},
 	)
 	if err != nil {
 		return "", errors.New("Codex CLI is not installed")
 	}
 	return resolved, nil
-}
-
-func codexCandidates(home, name string) []string {
-	candidates := []string{}
-	if home != "" {
-		candidates = append(candidates, filepath.Join(home, ".codex", "packages", "standalone", "current", "bin", name))
-		releases, _ := filepath.Glob(filepath.Join(home, ".codex", "packages", "standalone", "releases", "*", "bin", name))
-		sort.Sort(sort.Reverse(sort.StringSlice(releases)))
-		candidates = append(candidates, releases...)
-	}
-	switch runtime.GOOS {
-	case "darwin":
-		candidates = append(candidates,
-			"/opt/homebrew/bin/codex", "/usr/local/bin/codex",
-			"/Applications/ChatGPT.app/Contents/Resources/codex",
-			"/Applications/Codex.app/Contents/Resources/codex",
-		)
-	case "windows":
-		if root := strings.TrimSpace(os.Getenv("LOCALAPPDATA")); root != "" {
-			candidates = append(candidates,
-				filepath.Join(root, "Programs", "ChatGPT", "resources", name),
-				filepath.Join(root, "Programs", "Codex", "resources", name),
-			)
-		}
-	}
-	return candidates
 }
 
 func codexHome() (string, error) {

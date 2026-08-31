@@ -21,6 +21,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"lazymind/agentconnector/internal/agentcatalog"
+	"lazymind/agentconnector/internal/agentintegration"
 	"lazymind/agentconnector/internal/chatagent"
 )
 
@@ -153,6 +154,62 @@ func TestRealConnectorCloudDocuments(t *testing.T) {
 	}
 	defer session.Close()
 	verifyRealCloudDocuments(t, ctx, session)
+}
+
+func TestRealAssistantIntegrationLifecycle(t *testing.T) {
+	if os.Getenv("LAZYMIND_REAL_ASSISTANT_INTEGRATION_E2E") != "1" {
+		t.Skip("set LAZYMIND_REAL_ASSISTANT_INTEGRATION_E2E=1 to validate installed Assistant integrations")
+	}
+	binary := strings.TrimSpace(os.Getenv("LAZYMIND_REAL_CONNECTOR_BIN"))
+	if binary == "" {
+		t.Fatal("LAZYMIND_REAL_CONNECTOR_BIN is required")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	agents := []string{"codex", "cursor", "workbuddy", "raccoon", "traework", "deepseek-harness"}
+	for _, agent := range agents {
+		t.Run(agent, func(t *testing.T) {
+			run := func(action string) agentintegration.Status {
+				t.Helper()
+				command := exec.CommandContext(ctx, binary, "internal", "agent", agent, action)
+				command.Env = os.Environ()
+				output, err := command.CombinedOutput()
+				if err != nil {
+					t.Fatalf("%s %s: %v\n%s", agent, action, err, output)
+				}
+				var status agentintegration.Status
+				if err := json.Unmarshal(output, &status); err != nil {
+					t.Fatalf("decode %s %s: %v\n%s", agent, action, err, output)
+				}
+				return status
+			}
+
+			disconnected := run("disconnect")
+			if disconnected.State != agentintegration.Ready {
+				t.Fatalf("%s did not reach ready before connect: %#v", agent, disconnected)
+			}
+			for _, requirement := range disconnected.Requirements {
+				if !requirement.Satisfied {
+					t.Fatalf("%s real requirement is not satisfied: %#v", agent, requirement)
+				}
+			}
+			t.Cleanup(func() { _ = run("disconnect") })
+
+			connected := run("connect")
+			if agent == "cursor" {
+				if connected.State != agentintegration.ActionRequired || connected.Action == nil ||
+					connected.Action.Kind != "open_url" || !strings.HasPrefix(connected.Action.URL, "cursor://") {
+					t.Fatalf("Cursor did not return its native MCP confirmation link: %#v", connected)
+				}
+			} else if connected.State != agentintegration.Enabled {
+				t.Fatalf("%s real connect state=%q message=%q", agent, connected.State, connected.Message)
+			}
+
+			if final := run("disconnect"); final.State != agentintegration.Ready {
+				t.Fatalf("%s did not cleanly disconnect: %#v", agent, final)
+			}
+		})
+	}
 }
 
 func verifyRealCloudDocuments(t *testing.T, ctx context.Context, session *mcp.ClientSession) {
@@ -845,17 +902,16 @@ func configureCodex(t *testing.T, ctx context.Context, mode, connectorBinary, co
 				t.Fatalf("real Codex Adapter %s failed: %v\n%s", action, err, output)
 			}
 			var status struct {
-				Installed    bool `json:"installed"`
-				Configured   bool `json:"configured"`
-				Owned        bool `json:"owned"`
-				ServiceReady bool `json:"service_ready"`
-				Ready        bool `json:"ready"`
+				State string `json:"state"`
 			}
 			if err := json.Unmarshal(output, &status); err != nil {
 				t.Fatalf("decode real Codex Adapter %s status: %v\n%s", action, err, output)
 			}
-			wantConfigured := action != "disconnect"
-			if !status.Installed || status.Configured != wantConfigured || (wantConfigured && (!status.Owned || !status.ServiceReady || !status.Ready)) {
+			wantState := "enabled"
+			if action == "disconnect" {
+				wantState = "ready"
+			}
+			if status.State != wantState {
 				t.Fatalf("unexpected real Codex Adapter %s status: %s", action, output)
 			}
 		}
