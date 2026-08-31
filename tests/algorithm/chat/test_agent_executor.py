@@ -6,7 +6,11 @@ from asyncio import CancelledError
 from unittest.mock import MagicMock
 
 import pytest
-
+from lazyllm.tools.agent import (
+    PreparedToolCall,
+    ToolExecutionBatch,
+    ToolExecutionRecord,
+)
 from lazymind.chat.engine.agent_runtime import (
     AgentExecutionOptions,
     AgentExecutor,
@@ -31,6 +35,7 @@ def _plan(**options) -> AgentRunPlan:
 
 def test_executor_creates_agent_with_shared_defaults(monkeypatch) -> None:
     agent = MagicMock()
+    original_manager = agent._tools_manager
     constructor = MagicMock(return_value=agent)
     monkeypatch.setattr(executor_mod._agent_mod, 'ReactAgent', constructor)
 
@@ -43,6 +48,10 @@ def test_executor_creates_agent_with_shared_defaults(monkeypatch) -> None:
     assert kwargs['enable_builtin_tools'] is False
     assert callable(kwargs['on_max_retries'])
     assert kwargs['workspace'] == '/tmp/work'
+    assert len(kwargs['runtime_extensions']) == 1
+    assert isinstance(kwargs['runtime_extensions'][0], executor_mod.ExactRepeatMonitor)
+    assert isinstance(agent._tools_manager, executor_mod.ToolExecutionMiddleware)
+    assert agent._tools_manager._manager._manager is original_manager
     agent._prepare_tool_context.assert_called_once_with(
         '### User Instruction\n\nhello', [],
     )
@@ -61,14 +70,14 @@ def test_executor_passes_cancel_condition_to_chat_agent(monkeypatch) -> None:
 
 
 def test_tool_guard_checks_cancellation_before_dispatch(monkeypatch) -> None:
-    manager = MagicMock(return_value=[{'ok': True}])
+    manager = MagicMock()
     cancel_check = MagicMock(side_effect=CancelledError('stopped by user'))
-    guard = executor_mod.ToolCallGuard(manager, cancel_check=cancel_check)
+    middleware = executor_mod.ToolExecutionMiddleware(manager, cancel_check=cancel_check)
 
     with pytest.raises(CancelledError, match='stopped by user'):
-        guard([{'function': {'name': 'prepare_workflow', 'arguments': '{}'}}])
+        middleware.execute_prepared_calls([])
 
-    manager.assert_not_called()
+    manager.execute_prepared_calls.assert_not_called()
 
 
 def test_cancel_condition_stops_the_sid_scoped_agent(monkeypatch) -> None:
@@ -105,7 +114,24 @@ def test_executor_enables_builtin_tools_in_trusted_local_mode(monkeypatch) -> No
 
 def test_executor_auto_expands_after_plugin_or_subagent_tool(monkeypatch) -> None:
     agent = MagicMock()
-    agent._tools_manager = MagicMock(return_value=[{'ok': True}])
+    manager = MagicMock()
+    prepared = PreparedToolCall(
+        tool_call={
+            'id': 'create',
+            'function': {'name': 'create_subagent', 'arguments': '{}'},
+        },
+        call_id='create',
+        tool_name='create_subagent',
+        arguments={},
+        validated_arguments={},
+    )
+    result = {'ok': True, 'value': 'created'}
+    manager.prepare_tool_calls.return_value = [prepared]
+    manager.execute_prepared_calls.return_value = ToolExecutionBatch(
+        results=[result],
+        records=(ToolExecutionRecord(prepared, result),),
+    )
+    agent._tools_manager = manager
     constructor = MagicMock(return_value=agent)
     monkeypatch.setattr(executor_mod._agent_mod, 'ReactAgent', constructor)
     workspace = {}

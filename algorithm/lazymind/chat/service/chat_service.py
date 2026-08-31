@@ -1567,6 +1567,16 @@ async def _handle_chat_impl(
                 'high': _cfg['agentic_max_rounds_high'],
                 'max': max(1, int(_cfg['agentic_expanded_max_rounds']) - 1),
             }.get(thinking_depth, _cfg['agentic_max_rounds_medium']),
+            tool_failure_limits={
+                'url_fetch': 2,
+                'grep': 2,
+                'read_file': 2,
+                'kb_tmp_search': 2,
+                'kb_search': 2,
+                'list_knowledge_bases': 2,
+                'list_knowledge_base_documents': 2,
+                'aggregate_knowledge_base_documents': 2,
+            },
             extra_stop_condition=make_cancel_stop_condition(),
         ),
     )

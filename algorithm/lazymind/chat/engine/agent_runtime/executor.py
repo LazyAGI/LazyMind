@@ -20,7 +20,11 @@ from .telemetry import (
     sid,
     telemetry_enabled,
 )
-from .tool_call_guard import ToolCallGuard
+from .tool_call_guard import (
+    ExactRepeatMonitor,
+    FailureRetryPolicy,
+    ToolExecutionMiddleware,
+)
 from .tool_limit_control import tool_limit_decision_coordinator
 
 
@@ -102,6 +106,7 @@ class AgentExecutor:
             )
             if telemetry_enabled() else None
         )
+        repeat_monitor = ExactRepeatMonitor()
         kwargs = {
             'stream': True,
             'max_retries': options.max_retries or _cfg['max_retries'],
@@ -122,6 +127,7 @@ class AgentExecutor:
             'skills_dir': options.skills_dir,
             'extra_stop_condition': options.extra_stop_condition,
             'runtime_observer': observer,
+            'runtime_extensions': [repeat_monitor],
         }
         kwargs.update({key: value for key, value in optional.items() if value is not None})
         tools = _sanitize_tools(_deduplicate_tools(plan.tools))
@@ -132,8 +138,9 @@ class AgentExecutor:
             prompt=plan.prompt.system_prompt,
             **kwargs,
         )
-        agent._tools_manager = ToolCallGuard(
+        agent._tools_manager = ToolExecutionMiddleware(
             CitationResultMiddleware(agent._tools_manager),
+            failure_policy=FailureRetryPolicy(options.tool_failure_limits),
             expanded_round_limit=max(2, int(_cfg['agentic_expanded_max_rounds'])),
             cancel_check=options.extra_stop_condition,
         )

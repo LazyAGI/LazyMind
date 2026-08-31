@@ -1,106 +1,196 @@
-from dataclasses import dataclass
+import json
 
 import pytest
-
-from lazymind.chat.engine.agent_runtime.executor import ToolCallGuard
-from lazymind.chat.engine.agent_runtime.tool_call_guard import ToolCallGuard as ExtractedToolCallGuard
-
-
-@dataclass(frozen=True)
-class _Access:
-    counts_as_progress: bool = False
-    polling: bool = False
-
-
-def _call(name='search', arguments=None, call_id='call-1'):
-    return {
-        'id': call_id,
-        'function': {'name': name, 'arguments': arguments or {'query': 'same'}},
-    }
+from lazyllm.tools.agent import (
+    PreparedToolCall,
+    ResolvedToolAccess,
+    ToolExecutionBatch,
+    ToolExecutionRecord,
+)
+from lazymind.chat.engine.agent_runtime.tool_call_guard import (
+    ExactRepeatMonitor,
+    FailureRetryPolicy,
+    ToolExecutionMiddleware,
+)
 
 
-class _RecordingToolManager:
-    def __init__(self, result=None, accesses=None):
-        self.calls = []
-        self.result = result if result is not None else {'ok': True, 'value': {'items': ['same']}}
-        self.accesses = accesses
+def _prepared(name='search', arguments=None, call_id='call-1', access=None):
+    arguments = {'query': 'same'} if arguments is None else arguments
+    return PreparedToolCall(
+        tool_call={
+            'id': call_id,
+            'function': {'name': name, 'arguments': json.dumps(arguments)},
+        },
+        call_id=call_id,
+        tool_name=name,
+        arguments=arguments,
+        validated_arguments=arguments,
+        access=access or ResolvedToolAccess(),
+    )
 
-    def normalize_tool_calls(self, calls):
-        return calls
 
-    def resolve_tool_accesses(self, calls, allowed_tool_names=None):
-        if self.accesses is not None:
-            return self.accesses[:len(calls)]
-        return [_Access() for _ in calls]
+def _record(*, result=None, executed=True, **kwargs):
+    return ToolExecutionRecord(
+        _prepared(**kwargs),
+        result if result is not None else {'ok': True, 'value': {'items': ['same']}},
+        executed=executed,
+    )
 
-    def __call__(self, calls, verbose=False, allowed_tool_names=None):
-        self.calls.extend(calls)
-        return [self.result for _ in calls]
+
+def _notice(delta):
+    return [item.content for item in delta.model_context]
 
 
 @pytest.mark.parametrize('result', [
     {'ok': True, 'value': {'items': ['same']}},
     {'ok': False, 'msg': 'same failure'},
 ])
-def test_third_identical_result_queues_soft_notice_without_changing_results(result):
-    assert ToolCallGuard is ExtractedToolCallGuard
-    manager = _RecordingToolManager(result=result)
-    guard = ToolCallGuard(manager)
-    call = _call()
+def test_third_identical_observation_emits_soft_notice_without_mutating_result(result):
+    monitor = ExactRepeatMonitor()
+    monitor.begin_run({})
+    notices = []
+    for index in range(5):
+        record = _record(call_id=f'call-{index}', result=result)
+        assert record.result is result
+        notices.append(_notice(monitor.after_tool_batch([record])))
 
-    returned = [guard([call]) for _ in range(3)]
-
-    assert returned == [[result], [result], [result]]
-    assert len(manager.calls) == 3
-    notice = guard.consume_internal_runtime_notices(['call-1'])
-    assert len(notice) == 1
-    assert '3 consecutive times' in notice[0]
+    assert notices[:2] == [[], []]
+    assert all(
+        f'{count} consecutive times' in notices[count - 1][0]
+        for count in (3, 4, 5)
+    )
 
 
-def test_all_batch_duplicates_execute_and_notice_binds_to_ordered_batch_ids():
-    manager = _RecordingToolManager()
-    guard = ToolCallGuard(manager)
-    calls = [
-        _call(call_id='first'),
-        _call(call_id='second'),
-        _call(call_id='third'),
+def test_ordered_multi_tool_batch_repeats_and_order_change_resets_streak():
+    monitor = ExactRepeatMonitor()
+    batch = [
+        _record(name='a', arguments={'value': 1}, call_id='a'),
+        _record(name='b', arguments={'value': 2}, call_id='b'),
     ]
 
-    results = guard(calls)
+    assert not _notice(monitor.after_tool_batch(batch))
+    assert not _notice(monitor.after_tool_batch(batch))
+    assert _notice(monitor.after_tool_batch(batch))
+    assert not _notice(monitor.after_tool_batch(list(reversed(batch))))
 
-    assert len(manager.calls) == 3
-    assert len(results) == 3
-    assert guard.consume_internal_runtime_notices(['first', 'second', 'third'])
+
+def test_three_identical_calls_in_one_batch_emit_one_notice():
+    monitor = ExactRepeatMonitor()
+    records = [_record(call_id=f'call-{index}') for index in range(3)]
+
+    notices = _notice(monitor.after_tool_batch(records))
+
+    assert len(notices) == 1
+    assert '3 consecutive times' in notices[0]
 
 
-@pytest.mark.parametrize('change_result', [False, True])
-def test_result_or_arguments_change_resets_consecutive_state(change_result):
-    manager = _RecordingToolManager()
-    guard = ToolCallGuard(manager)
+@pytest.mark.parametrize('change', ['arguments', 'result'])
+def test_arguments_or_result_change_resets_streak(change):
+    monitor = ExactRepeatMonitor()
+    base = _record(call_id='one')
+    monitor.after_tool_batch([base])
+    monitor.after_tool_batch([base])
+    changed = _record(
+        call_id='changed',
+        arguments={'query': 'changed'} if change == 'arguments' else None,
+        result={'ok': True, 'value': {'items': ['changed']}} if change == 'result' else None,
+    )
 
-    guard([_call(call_id='one')])
-    guard([_call(call_id='two')])
-    arguments = {'query': 'same'}
-    if change_result:
-        manager.result = {'ok': True, 'value': {'items': ['changed']}}
-    else:
-        arguments = {'query': 'changed'}
-    guard([_call(arguments=arguments, call_id='changed-1')])
-    guard([_call(arguments=arguments, call_id='changed-2')])
-
-    assert guard.consume_internal_runtime_notices(['changed-2']) == []
+    assert not _notice(monitor.after_tool_batch([changed]))
+    assert not _notice(monitor.after_tool_batch([changed]))
 
 
 @pytest.mark.parametrize('access', [
-    _Access(counts_as_progress=True),
-    _Access(polling=True),
+    ResolvedToolAccess(write_keys=frozenset({('exact', 'shared')})),
+    ResolvedToolAccess(exclusive=True),
 ])
-def test_progress_and_polling_calls_are_exempt(access):
-    manager = _RecordingToolManager(accesses=[access])
-    guard = ToolCallGuard(manager)
+def test_write_and_exclusive_failures_are_not_exempt(access):
+    monitor = ExactRepeatMonitor()
+    failure = {'ok': False, 'msg': 'approval_required'}
 
-    for index in range(4):
-        guard([_call(call_id=f'call-{index}')])
+    for index in range(2):
+        assert not _notice(monitor.after_tool_batch([
+            _record(call_id=f'call-{index}', access=access, result=failure),
+        ]))
+    assert _notice(monitor.after_tool_batch([
+        _record(call_id='call-3', access=access, result=failure),
+    ]))
 
-    assert len(manager.calls) == 4
-    assert guard.consume_internal_runtime_notices(['call-3']) == []
+
+def test_polling_records_are_excluded_and_hard_blocked_records_are_ignored():
+    monitor = ExactRepeatMonitor()
+    polling = ResolvedToolAccess(polling=True)
+    assert not _notice(monitor.after_tool_batch([
+        _record(access=polling),
+        _record(name='blocked', executed=False),
+    ]))
+
+    for index in range(3):
+        delta = monitor.after_tool_batch([
+            _record(name='stable', call_id=f'stable-{index}'),
+            _record(name='poll', call_id=f'poll-{index}', access=polling),
+        ])
+    assert _notice(delta)
+
+
+class _PreparedManager:
+    def __init__(self, results):
+        self.results = list(results)
+        self.executed = []
+
+    def execute_prepared_calls(self, prepared):
+        prepared = list(prepared)
+        self.executed.extend(prepared)
+        results = self.results[:len(prepared)]
+        return ToolExecutionBatch(
+            results=results,
+            records=tuple(
+                ToolExecutionRecord(item, result)
+                for item, result in zip(prepared, results)
+            ),
+        )
+
+
+def test_failure_policy_blocks_same_failed_signature_without_monitoring_block():
+    failure = {'ok': False, 'msg': 'failed'}
+    manager = _PreparedManager([failure])
+    middleware = ToolExecutionMiddleware(
+        manager,
+        failure_policy=FailureRetryPolicy({'search': 2}),
+    )
+    prepared = _prepared()
+
+    first = middleware.execute_prepared_calls([prepared])
+    second = middleware.execute_prepared_calls([prepared])
+
+    assert first.records[0].executed is True
+    assert second.records[0].executed is False
+    assert second.results[0]['ok'] is False
+    assert len(manager.executed) == 1
+    assert not _notice(ExactRepeatMonitor().after_tool_batch(second.records))
+
+
+def test_failure_policy_preserves_consecutive_budget_and_batch_merge():
+    failure = {'ok': False, 'msg': 'failed'}
+    manager = _PreparedManager([failure, failure])
+    middleware = ToolExecutionMiddleware(
+        manager,
+        failure_policy=FailureRetryPolicy({'search': 2}),
+    )
+
+    first = middleware.execute_prepared_calls([
+        _prepared(arguments={'query': 'one'}, call_id='one'),
+        _prepared(arguments={'query': 'one'}, call_id='duplicate'),
+    ])
+    second = middleware.execute_prepared_calls([
+        _prepared(arguments={'query': 'two'}, call_id='two'),
+    ])
+    third = middleware.execute_prepared_calls([
+        _prepared(arguments={'query': 'three'}, call_id='three'),
+    ])
+
+    assert [record.executed for record in first.records] == [True, False]
+    assert first.results[0] == first.results[1]
+    assert second.records[0].executed is True
+    assert third.records[0].executed is False
+    assert len(manager.executed) == 2
