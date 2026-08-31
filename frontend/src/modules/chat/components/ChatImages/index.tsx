@@ -1,5 +1,7 @@
 import { Image } from "antd";
+import { useEffect, useState } from "react";
 import { CloseCircleFilled } from "@ant-design/icons";
+import { resolveMarkdownImageUrlAsync } from "@/modules/knowledge/utils/imageUrl";
 
 import "./index.scss";
 
@@ -21,7 +23,7 @@ const ChatImages = (props: Props) => {
       {images.map((item, index) => {
         return (
           <div className="chat-images-item" key={`img-${index}`}>
-            <Image src={item.base64} height={52} />
+            <ResolvedChatImage src={item.base64} />
             {onRemove && (
               <div
                 className="chat-images-remove"
@@ -36,5 +38,17 @@ const ChatImages = (props: Props) => {
     </div>
   );
 };
+
+function ResolvedChatImage({ src }: { src: string }) {
+  const [resolvedSrc, setResolvedSrc] = useState(src);
+  useEffect(() => {
+    let active = true;
+    void resolveMarkdownImageUrlAsync(src).then((value) => {
+      if (active) setResolvedSrc(value);
+    });
+    return () => { active = false; };
+  }, [src]);
+  return <Image src={resolvedSrc} height={52} />;
+}
 
 export default ChatImages;

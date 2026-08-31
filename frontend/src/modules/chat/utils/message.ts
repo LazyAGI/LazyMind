@@ -17,6 +17,18 @@ const CITE_MESSAGE_GLOBAL_PATTERN =
   /<cite_message>([\s\S]*?)<\/cite_message>\s*/gi;
 const ASK_USER_RECEIPT_PATTERN =
   /^Question sent to user \(ask_id=[^)]+\)\.\s*Waiting for answer on next turn\.?$/i;
+const CODEX_REQUEST_MARKER_PATTERN = /^#+\s*My request for Codex:\s*$/im;
+const CODEX_IMAGE_TAG_PATTERN = /<\/?image\b[^>]*>/gi;
+
+export function normalizeImportedUserText(text: string | undefined) {
+  const value = text || "";
+  const marker = CODEX_REQUEST_MARKER_PATTERN.exec(value);
+  if (!marker) return value;
+  return value
+    .slice(marker.index + marker[0].length)
+    .replace(CODEX_IMAGE_TAG_PATTERN, "")
+    .trim();
+}
 
 export function stripAskUserReceipt(
   text: string | undefined,
@@ -197,7 +209,7 @@ export function buildChatMessageListFromHistory(
       const inputType = input.input_type || "text";
       return inputType === "text" && !!input.text;
     });
-    const rawQuery = record.query || textInput?.text || "";
+    const rawQuery = normalizeImportedUserText(record.query || textInput?.text || "");
     const citeMessages = getCitationsFromText(rawQuery);
     const displayQuery = stripCitations
       ? stripCitationFromText(rawQuery)
@@ -214,7 +226,7 @@ export function buildChatMessageListFromHistory(
       images: normalizedInputs
         ?.filter((input) => input.input_type === "image")
         .map((image) => ({
-          base64: image?.input_base64,
+          base64: image?.input_base64 || image?.uri,
           uid: image.file_id,
         })),
       files: normalizedInputs

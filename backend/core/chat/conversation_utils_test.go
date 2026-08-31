@@ -179,6 +179,13 @@ func TestDisplayChatHistoryContent_Passthrough(t *testing.T) {
 	}
 }
 
+func TestDisplayChatHistoryContent_NormalizesImportedCodexEnvelope(t *testing.T) {
+	raw := "# Files mentioned by the user:\n\n## image.png: /tmp/image.png\n\n## My request for Codex:\n修复界面\n<image path=\"/tmp/image.png\"></image>"
+	if got, want := displayChatHistoryContent(raw), "修复界面"; got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
 // TestDisplayChatHistoryContent_ExtractsTaskRequestContent extracts text between tags.
 func TestDisplayChatHistoryContent_ExtractsTaskRequestContent(t *testing.T) {
 	raw := "prefix <current-task-request>do this</current-task-request> suffix"

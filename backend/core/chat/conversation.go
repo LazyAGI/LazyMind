@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -26,6 +27,11 @@ import (
 	"lazymind/core/subagent"
 	"lazymind/core/taskcenter"
 	"lazymind/core/workflow"
+)
+
+var (
+	codexRequestMarkerPattern = regexp.MustCompile(`(?im)^#+\s*My request for Codex:\s*$`)
+	codexImageTagPattern      = regexp.MustCompile(`(?i)</?image\b[^>]*>`)
 )
 
 func writeConversationJSON(w http.ResponseWriter, status int, v any) {
@@ -1389,6 +1395,9 @@ func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
 }
 
 func displayChatHistoryContent(raw string) string {
+	if marker := codexRequestMarkerPattern.FindStringIndex(raw); marker != nil {
+		return strings.TrimSpace(codexImageTagPattern.ReplaceAllString(raw[marker[1]:], ""))
+	}
 	const openTag = "<current-task-request>"
 	const closeTag = "</current-task-request>"
 	start := strings.LastIndex(raw, openTag)
@@ -1884,6 +1893,34 @@ func ListConversations(w http.ResponseWriter, r *http.Request) {
 			q = q.Where("NOT EXISTS (?)", externalBinding)
 		} else {
 			q = q.Where("EXISTS (?)", validatedExternalBinding.Where("validated_bindings.provider = ?", assistantFilter))
+		}
+	}
+	assistantsFilter := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("assistants")))
+	if assistantsFilter != "" {
+		requested := strings.Split(assistantsFilter, ",")
+		providers := make([]string, 0, len(requested))
+		includeLazyMind := false
+		for _, candidate := range requested {
+			candidate = strings.TrimSpace(candidate)
+			normalized, valid := normalizeChatExecutor(candidate)
+			if !valid || normalized != candidate {
+				common.ReplyErr(w, "assistants contains an unsupported chat executor", http.StatusBadRequest)
+				return
+			}
+			if normalized == ChatExecutorLazyMind {
+				includeLazyMind = true
+			} else {
+				providers = append(providers, normalized)
+			}
+		}
+		switch {
+		case includeLazyMind && len(providers) > 0:
+			q = q.Where("NOT EXISTS (?) OR EXISTS (?)", externalBinding,
+				validatedExternalBinding.Where("validated_bindings.provider IN ?", providers))
+		case includeLazyMind:
+			q = q.Where("NOT EXISTS (?)", externalBinding)
+		case len(providers) > 0:
+			q = q.Where("EXISTS (?)", validatedExternalBinding.Where("validated_bindings.provider IN ?", providers))
 		}
 	}
 	if keyword != "" {

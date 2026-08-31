@@ -20,6 +20,38 @@ func TestProjectPathNormalizesEquivalentNativePaths(t *testing.T) {
 	}
 }
 
+func TestTranscriptTurnsKeepsCodexCommentaryAndCollapsesRollbackDuplicate(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "rollout.jsonl")
+	content := strings.Join([]string{
+		`{"timestamp":"2026-08-31T01:00:00Z","type":"response_item","payload":{"type":"message","id":"first","role":"user","content":[{"type":"input_text","text":"# Files mentioned by the user:\n\n## image.png: /tmp/image.png\n\n## My request for Codex:\n修复界面\n<image path=\"/tmp/image.png\"></image>"}]}}`,
+		`{"timestamp":"2026-08-31T01:00:01Z","type":"response_item","payload":{"type":"message","id":"retry","role":"user","content":[{"type":"input_text","text":"# Files mentioned by the user:\n## image.png: /tmp/image.png\n## My request for Codex:\n修复界面"}]}}`,
+		`{"timestamp":"2026-08-31T01:00:02Z","type":"response_item","payload":{"type":"message","role":"assistant","phase":"commentary","content":[{"type":"output_text","text":"正在处理"}]}}`,
+		`{"timestamp":"2026-08-31T01:00:03Z","type":"response_item","payload":{"type":"message","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"处理完成"}]}}`,
+	}, "\n")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	turns := transcriptTurns(path, "codex")
+	if len(turns) != 1 || turns[0].ID != "first" || turns[0].Assistant != "正在处理\n处理完成" {
+		t.Fatalf("turns = %#v", turns)
+	}
+}
+
+func TestCodexUserImagesTransfersReferencedClipboardImage(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "clipboard.png")
+	content := []byte("png-test-content")
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	images := codexUserImages(`<image name="Image #1" path="` + path + `"></image>`)
+	if len(images) != 1 || images[0].Name != "clipboard.png" {
+		t.Fatalf("images = %#v", images)
+	}
+	if images[0].Base64 == "" {
+		t.Fatal("expected encoded image content")
+	}
+}
+
 func TestCodexSessionsUseRolloutProjectAuthority(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("CODEX_HOME", home)

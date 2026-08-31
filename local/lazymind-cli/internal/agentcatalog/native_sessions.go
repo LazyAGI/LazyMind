@@ -5,11 +5,13 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -22,6 +24,8 @@ const (
 	maxTranscriptLine = 16 << 20
 	maxTurnRunes      = 1 << 20
 )
+
+var codexImagePathPattern = regexp.MustCompile(`(?i)<image\b[^>]*\bpath="([^"]+)"[^>]*>`)
 
 type cachedSession struct {
 	modTime time.Time
@@ -345,6 +349,9 @@ func transcriptTurns(path, provider string) []chatagent.NativeTurn {
 		}
 		current.User = compactText(current.User, maxTurnRunes)
 		current.Assistant = compactText(current.Assistant, maxTurnRunes)
+		if provider == "codex" {
+			current.Images = codexUserImages(current.User)
+		}
 		turns = append(turns, *current)
 		current = nil
 	}
@@ -356,6 +363,13 @@ func transcriptTurns(path, provider string) []chatagent.NativeTurn {
 			managed := managedUserText(message.text) || strings.HasPrefix(message.id, "h_")
 			text := cleanUserText(message.text)
 			if text == "" {
+				continue
+			}
+			if current != nil && current.Assistant == "" && equivalentCodexUserText(current.User, text) {
+				current.User = text
+				if !message.timestamp.IsZero() {
+					current.CreatedAt = message.timestamp
+				}
 				continue
 			}
 			flush()
@@ -383,6 +397,34 @@ func transcriptTurns(path, provider string) []chatagent.NativeTurn {
 	}
 	flush()
 	return turns
+}
+
+func codexUserImages(text string) []chatagent.NativeImage {
+	const maxImageBytes = 5 << 20
+	images := make([]chatagent.NativeImage, 0)
+	for _, match := range codexImagePathPattern.FindAllStringSubmatch(text, 4) {
+		if len(match) < 2 {
+			continue
+		}
+		path := filepath.Clean(strings.TrimSpace(match[1]))
+		switch strings.ToLower(filepath.Ext(path)) {
+		case ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp":
+		default:
+			continue
+		}
+		info, err := os.Stat(path)
+		if err != nil || !info.Mode().IsRegular() || info.Size() > maxImageBytes {
+			continue
+		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		images = append(images, chatagent.NativeImage{
+			Name: filepath.Base(path), Base64: base64.StdEncoding.EncodeToString(content),
+		})
+	}
+	return images
 }
 
 func transcriptTitle(path, provider string) string {
@@ -432,9 +474,6 @@ func decodeTranscriptMessage(line []byte, provider string) transcriptMessage {
 			return transcriptMessage{}
 		}
 		role := stringValue(payload["role"])
-		if phase := stringValue(payload["phase"]); role == "assistant" && phase != "" && phase != "final_answer" {
-			return transcriptMessage{}
-		}
 		id := stringValue(payload["clientId"])
 		if id == "" {
 			id = stringValue(payload["id"])
@@ -468,6 +507,19 @@ func decodeTranscriptMessage(line []byte, provider string) transcriptMessage {
 		}
 	}
 	return transcriptMessage{}
+}
+
+func equivalentCodexUserText(left, right string) bool {
+	canonical := func(value string) string {
+		if marker := strings.LastIndex(strings.ToLower(value), "my request for codex:"); marker >= 0 {
+			value = value[marker+len("my request for codex:"):]
+		}
+		if image := strings.Index(strings.ToLower(value), "<image"); image >= 0 {
+			value = value[:image]
+		}
+		return strings.Join(strings.Fields(value), " ")
+	}
+	return canonical(left) != "" && canonical(left) == canonical(right)
 }
 
 func contentText(value any) string {
