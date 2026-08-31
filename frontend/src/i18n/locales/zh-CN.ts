@@ -1715,6 +1715,8 @@ const zhCN = {
       completed: "回答已完成",
       interrupted: "回答未完整生成",
       failed: "模型调用失败",
+      modelFailed: "模型调用失败",
+      runtimeFailed: "运行失败",
       cancelled: "已取消生成",
       partialOutput: "已生成的部分内容已保留。",
       noOutput: "本次未生成可用内容。",

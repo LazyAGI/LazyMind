@@ -127,6 +127,47 @@ func TestRedisCancelWatcherReleasesConnections(t *testing.T) {
 		}
 	})
 
+	t.Run("run decisions are atomic and run scoped", func(t *testing.T) {
+		decisionCtx := context.Background()
+		conversationID := prefix + ":decision"
+		historyID := "history"
+		failure := &RunTerminal{Status: "failed", Reason: "model_failure", Code: "rate_limited"}
+		for _, runID := range []string{"cancel-first", "failure-first", "next-run"} {
+			key := runDecisionKey(conversationID, historyID, runID)
+			t.Cleanup(func() { _ = client.Del(context.Background(), key).Err() })
+		}
+
+		if won, err := claimUserCancelDecision(decisionCtx, stateStore, conversationID, historyID, "cancel-first"); err != nil || !won {
+			t.Fatalf("claim cancellation: won=%v err=%v", won, err)
+		}
+		cancelled := resolveRunTerminal(
+			decisionCtx, stateStore, conversationID, historyID, "cancel-first",
+			failure, false, "redis_integration_terminal",
+		)
+		if cancelled.Status != "cancelled" || cancelled.Reason != "user_cancelled" {
+			t.Fatalf("cancel-first terminal=%#v", cancelled)
+		}
+
+		acceptedFailure := resolveRunTerminal(
+			decisionCtx, stateStore, conversationID, historyID, "failure-first",
+			failure, false, "redis_integration_terminal",
+		)
+		if won, err := claimUserCancelDecision(decisionCtx, stateStore, conversationID, historyID, "failure-first"); err != nil || won {
+			t.Fatalf("late cancellation: won=%v err=%v", won, err)
+		}
+		if acceptedFailure.Status != "failed" || acceptedFailure.Reason != "model_failure" {
+			t.Fatalf("failure-first terminal=%#v", acceptedFailure)
+		}
+
+		nextRun := resolveRunTerminal(
+			decisionCtx, stateStore, conversationID, historyID, "next-run",
+			failure, false, "redis_integration_terminal",
+		)
+		if nextRun.Status != "failed" || nextRun.Reason != "model_failure" {
+			t.Fatalf("previous run decision leaked into next run: %#v", nextRun)
+		}
+	})
+
 	assertRedisPoolIdle(t, client)
 	requestCtx, requestCancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer requestCancel()

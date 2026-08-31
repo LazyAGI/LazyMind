@@ -55,6 +55,7 @@ from lazymind.chat.engine.agent_runtime import (
     AgentExecutor,
     AgentRole,
     AgentRunPlan,
+    UserCancelledError,
     make_cancel_stop_condition,
     PromptBuilder,
     normalize_attachments,
@@ -1614,7 +1615,9 @@ async def _handle_chat_impl(
 
     async def event_stream() -> Any:
         final_result: Any = None
-        succeeded = False
+        from lazymind.chat.runtime_events import RunOutcome
+
+        outcome = RunOutcome.FAILED
 
         try:
             async with rag_sem:
@@ -1644,7 +1647,7 @@ async def _handle_chat_impl(
                 cost = round(time.time() - start_time, 3)
                 yield log_and_emit_frame(frame, cost, query, conversation.session_id, tag='FINISH')
 
-            succeeded = True
+            outcome = RunOutcome.SUCCEEDED
 
             if episode_results:
                 try:
@@ -1665,6 +1668,12 @@ async def _handle_chat_impl(
                         f'error_type={type(exc).__name__} error={exc}'
                     )
 
+        except UserCancelledError:
+            outcome = RunOutcome.CANCELLED
+            LOG.info(
+                f'[ChatServer] agent cancelled by user '
+                f'[conversation_id={conversation_id}] [run_id={translator.run.run_id}]'
+            )
         except Exception:
             LOG.exception('[ChatServer] agent failed')
         finally:
@@ -1673,7 +1682,7 @@ async def _handle_chat_impl(
                 _unregister_active_session(_conv_id_key, conversation.session_id)
 
         cost = round(time.time() - start_time, 3)
-        terminal_frame = translator.finish_run(succeeded=succeeded)
+        terminal_frame = translator.finish_run(outcome=outcome)
         terminal_frame['tool_call_turns'] = translator.tool_call_turns
         yield log_and_emit_frame(terminal_frame, cost, query, conversation.session_id, tag='RUN_FINISH')
 

@@ -1721,6 +1721,24 @@ func consumeRuntimeChunk(chunk UpstreamStreamChunk, runID string, partialOutput 
 	return decision, true
 }
 
+func resolveRuntimeChunkDecision(
+	ctx context.Context,
+	stateStore state.Store,
+	convID, historyID, runID string,
+	decision runtimeChunkDecision,
+	partialOutput bool,
+) runtimeChunkDecision {
+	if decision.Terminal == nil {
+		return decision
+	}
+	decision.Terminal = resolveRunTerminal(
+		ctx, stateStore, convID, historyID, runID,
+		decision.Terminal, partialOutput, "upstream_terminal",
+	)
+	decision.Event = runFinishedEvent(runID, *decision.Terminal)
+	return decision
+}
+
 func publishRuntimeChunk(
 	reqCtx, storeCtx context.Context,
 	w http.ResponseWriter,
@@ -1767,9 +1785,14 @@ func streamSingleAnswer(
 	if err != nil {
 		runEvent := failedRunEvent(runID, "upstream_request_failed", false)
 		terminal, _ := runEvent.Terminal()
+		terminal = resolveRunTerminal(
+			context.Background(), stateStore, convID, historyID, runID,
+			terminal, false, "upstream_request",
+		)
+		runEvent = runFinishedEvent(runID, *terminal)
 		persistImmediateRunTerminal(db, convID, historyID, query, runID, target, historyExt, terminal)
 		if stateStore != nil {
-			_ = setChatRuntimeStatus(chatCtx, stateStore, convID, historyID, terminal.Status, "", runID, terminal)
+			_ = setChatRuntimeStatus(context.Background(), stateStore, convID, historyID, terminal.Status, "", runID, terminal)
 		}
 		writeSSEChunk(w, flusher, &ChatChunkResponse{
 			ConversationID: convID,
@@ -1837,8 +1860,13 @@ func streamSingleAnswer(
 		ThinkingDurationS: 0,
 	})
 	for d := range ch {
-		decision, handled := consumeRuntimeChunk(d, runID, fullResult != "" || pendingThink != "")
+		partialOutput := fullResult != "" || pendingThink != ""
+		decision, handled := consumeRuntimeChunk(d, runID, partialOutput)
 		if handled {
+			decision = resolveRuntimeChunkDecision(
+				context.Background(), stateStore, convID, historyID, runID,
+				decision, partialOutput,
+			)
 			if decision.Terminal != nil {
 				runTerminal = decision.Terminal
 			}
@@ -2052,6 +2080,11 @@ func streamSingleAnswer(
 			runEvent = failedRunEvent(runID, "missing_run_terminal", fullResult != "" || pendingThink != "")
 		}
 		runTerminal, _ = runEvent.Terminal()
+		runTerminal = resolveRunTerminal(
+			context.Background(), stateStore, convID, historyID, runID,
+			runTerminal, fullResult != "" || pendingThink != "", "core_fallback",
+		)
+		runEvent = runFinishedEvent(runID, *runTerminal)
 		runtimeChunk := &ChatChunkResponse{ConversationID: convID, Seq: int32(seq), HistoryID: historyID, RuntimeEvent: runEvent}
 		if reqCtx.Err() == nil {
 			writeSSEChunk(w, flusher, runtimeChunk)
@@ -2078,6 +2111,12 @@ func streamSingleAnswer(
 	if externalFinalized {
 		var persistedHistory orm.ChatHistory
 		persisted = db.Where("id = ? AND conversation_id = ?", historyID, convID).Take(&persistedHistory).Error == nil
+		if persisted {
+			if err := persistResolvedExternalRunTerminal(context.Background(), db, historyID, runTerminal); err != nil {
+				log.Logger.Warn().Err(err).Str("conversation_id", convID).Str("history_id", historyID).
+					Msg("failed to persist resolved external run terminal")
+			}
+		}
 	}
 	if !externalFinalized && target.IsRegeneration && target.Existing != nil {
 		if err := db.Model(&orm.ChatHistory{}).Where("id = ?", historyID).Updates(map[string]any{
@@ -2388,7 +2427,12 @@ func streamDualAnswer(
 				primaryCh = nil
 				continue
 			}
-			if decision, handled := consumeRuntimeChunk(d, primaryRunID, primaryResult != "" || primaryPendingThink != ""); handled {
+			partialOutput := primaryResult != "" || primaryPendingThink != ""
+			if decision, handled := consumeRuntimeChunk(d, primaryRunID, partialOutput); handled {
+				decision = resolveRuntimeChunkDecision(
+					context.Background(), stateStore, convID, historyID, primaryRunID,
+					decision, partialOutput,
+				)
 				if decision.Terminal != nil {
 					primaryTerminal = decision.Terminal
 				}
@@ -2416,7 +2460,12 @@ func streamDualAnswer(
 				secondaryCh = nil
 				continue
 			}
-			if decision, handled := consumeRuntimeChunk(d, secondaryRunID, secondaryResult != "" || secondaryPendingThink != ""); handled {
+			partialOutput := secondaryResult != "" || secondaryPendingThink != ""
+			if decision, handled := consumeRuntimeChunk(d, secondaryRunID, partialOutput); handled {
+				decision = resolveRuntimeChunkDecision(
+					context.Background(), stateStore, convID, secondaryHistoryID, secondaryRunID,
+					decision, partialOutput,
+				)
 				if decision.Terminal != nil {
 					secondaryTerminal = decision.Terminal
 				}
@@ -2447,7 +2496,12 @@ func streamDualAnswer(
 						primaryDone = true
 						primaryCh = nil
 					} else {
-						if decision, handled := consumeRuntimeChunk(d, primaryRunID, primaryResult != "" || primaryPendingThink != ""); handled {
+						partialOutput := primaryResult != "" || primaryPendingThink != ""
+						if decision, handled := consumeRuntimeChunk(d, primaryRunID, partialOutput); handled {
+							decision = resolveRuntimeChunkDecision(
+								context.Background(), stateStore, convID, historyID, primaryRunID,
+								decision, partialOutput,
+							)
 							if decision.Terminal != nil {
 								primaryTerminal = decision.Terminal
 							}
@@ -2499,7 +2553,12 @@ func streamDualAnswer(
 						secondaryDone = true
 						secondaryCh = nil
 					} else {
-						if decision, handled := consumeRuntimeChunk(d, secondaryRunID, secondaryResult != "" || secondaryPendingThink != ""); handled {
+						partialOutput := secondaryResult != "" || secondaryPendingThink != ""
+						if decision, handled := consumeRuntimeChunk(d, secondaryRunID, partialOutput); handled {
+							decision = resolveRuntimeChunkDecision(
+								context.Background(), stateStore, convID, secondaryHistoryID, secondaryRunID,
+								decision, partialOutput,
+							)
 							if decision.Terminal != nil {
 								secondaryTerminal = decision.Terminal
 							}
@@ -2560,8 +2619,19 @@ dualPersist:
 		secondaryResult += "<think>" + secondaryPendingThink + "</think>"
 	}
 	if primaryTerminal == nil {
-		event := failedRunEvent(primaryRunID, "missing_run_terminal", primaryResult != "")
+		partialOutput := primaryResult != ""
+		var event *ChatRuntimeEvent
+		if chatCtx.Err() != nil {
+			event = cancelledRunEvent(primaryRunID, partialOutput)
+		} else {
+			event = failedRunEvent(primaryRunID, "missing_run_terminal", partialOutput)
+		}
 		primaryTerminal, _ = event.Terminal()
+		primaryTerminal = resolveRunTerminal(
+			context.Background(), stateStore, convID, historyID, primaryRunID,
+			primaryTerminal, partialOutput, "core_fallback",
+		)
+		event = runFinishedEvent(primaryRunID, *primaryTerminal)
 		chunk := &ChatChunkResponse{ConversationID: convID, Seq: int32(seq), HistoryID: historyID, RuntimeEvent: event}
 		if reqCtx.Err() == nil {
 			writeSSEChunk(w, flusher, chunk)
@@ -2571,8 +2641,19 @@ dualPersist:
 		}
 	}
 	if secondaryTerminal == nil {
-		event := failedRunEvent(secondaryRunID, "missing_run_terminal", secondaryResult != "")
+		partialOutput := secondaryResult != ""
+		var event *ChatRuntimeEvent
+		if chatCtx.Err() != nil {
+			event = cancelledRunEvent(secondaryRunID, partialOutput)
+		} else {
+			event = failedRunEvent(secondaryRunID, "missing_run_terminal", partialOutput)
+		}
 		secondaryTerminal, _ = event.Terminal()
+		secondaryTerminal = resolveRunTerminal(
+			context.Background(), stateStore, convID, secondaryHistoryID, secondaryRunID,
+			secondaryTerminal, partialOutput, "core_fallback",
+		)
+		event = runFinishedEvent(secondaryRunID, *secondaryTerminal)
 		chunk := &ChatChunkResponse{ConversationID: convID, Seq: int32(seq), HistoryID: secondaryHistoryID, RuntimeEvent: event}
 		if reqCtx.Err() == nil {
 			writeSSEChunk(w, flusher, chunk)

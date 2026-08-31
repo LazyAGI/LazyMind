@@ -42,12 +42,16 @@ export interface RunTerminalView {
   partial_output: boolean;
 }
 
+function isUserCancelledTerminal(terminal: RunTerminalView): boolean {
+  return terminal.status === "cancelled" || terminal.reason === "user_cancelled";
+}
+
 export function runStatusDescription(
   terminal: RunTerminalView,
   t: TFunction,
 ): string {
   const parts: string[] = [];
-  if (terminal.status !== "cancelled") {
+  if (!isUserCancelledTerminal(terminal)) {
     const reasonKey = terminal.code && KNOWN_CODES.has(terminal.code)
       ? `chat.runStatus.codes.${terminal.code}`
       : terminal.reason === "model_incomplete"
@@ -65,6 +69,22 @@ export function runStatusDescription(
   return parts.join(" ");
 }
 
+export function runStatusTitleKey(terminal: RunTerminalView): string {
+  if (isUserCancelledTerminal(terminal)) {
+    return "chat.runStatus.cancelled";
+  }
+  if (terminal.reason === "model_failure") {
+    return "chat.runStatus.modelFailed";
+  }
+  if (terminal.reason === "model_incomplete") {
+    return "chat.runStatus.interrupted";
+  }
+  if (terminal.reason === "runtime_failure") {
+    return "chat.runStatus.runtimeFailed";
+  }
+  return `chat.runStatus.${terminal.status}`;
+}
+
 export default function RunStatusCard({
   terminal,
 }: {
@@ -75,7 +95,7 @@ export default function RunStatusCard({
     return null;
   }
   const description = runStatusDescription(terminal, t);
-  const isCancelled = terminal.status === "cancelled";
+  const isCancelled = isUserCancelledTerminal(terminal);
   const className = isCancelled
     ? "chat-run-status-card chat-run-status-card--cancelled"
     : "chat-run-status-card";
@@ -85,7 +105,7 @@ export default function RunStatusCard({
       type={isCancelled ? "warning" : "error"}
       showIcon
       icon={isCancelled ? <StopOutlined aria-hidden="true" /> : undefined}
-      message={t(`chat.runStatus.${terminal.status}`)}
+      message={t(runStatusTitleKey(terminal))}
       description={description}
     />
   );

@@ -20,6 +20,7 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/evolution"
+	"lazymind/core/log"
 	"lazymind/core/modelconfig"
 	"lazymind/core/state"
 	"lazymind/core/store"
@@ -1044,6 +1045,16 @@ func StopChatGeneration(w http.ResponseWriter, r *http.Request) {
 			ids = append(ids, historyID)
 		}
 		for _, hid := range ids {
+			if status, err := getChatStatus(r.Context(), stateStore, convID, hid); err == nil &&
+				status.Status == "generating" && strings.TrimSpace(status.RunID) != "" {
+				if _, err := claimUserCancelDecision(r.Context(), stateStore, convID, hid, status.RunID); err != nil {
+					log.Logger.Warn().Err(err).
+						Str("conversation_id", convID).
+						Str("history_id", hid).
+						Str("run_id", status.RunID).
+						Msg("failed to record user cancellation decision")
+				}
+			}
 			_ = setChatCancelSignal(r.Context(), stateStore, convID, hid)
 		}
 	}

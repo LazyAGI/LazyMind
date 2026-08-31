@@ -184,6 +184,13 @@ func reconcileGeneratingExternalChatStatuses(
 		}
 		terminalEvent := externalRunTerminalEvent(run.ID, run.Status, result != "")
 		terminal, _ := terminalEvent.Terminal()
+		terminal = resolveRunTerminal(
+			ctx, stateStore, run.ConversationID, run.HistoryID, run.ID,
+			terminal, result != "", "external_durable_terminal",
+		)
+		if err := persistResolvedExternalRunTerminal(ctx, db, run.HistoryID, terminal); err != nil {
+			return ids, err
+		}
 		if err := setChatRuntimeStatus(ctx, stateStore, conversationID, historyID, terminal.Status, result, run.ID, terminal); err != nil {
 			return ids, err
 		}
@@ -215,7 +222,23 @@ func projectExternalChatRunStatus(
 	}
 	terminalEvent := externalRunTerminalEvent(run.ID, run.Status, result != "")
 	terminal, _ := terminalEvent.Terminal()
+	terminal = resolveRunTerminal(
+		ctx, stateStore, run.ConversationID, run.HistoryID, run.ID,
+		terminal, result != "", "external_durable_terminal",
+	)
+	if err := persistResolvedExternalRunTerminal(ctx, db, run.HistoryID, terminal); err != nil {
+		return err
+	}
 	return setChatRuntimeStatus(ctx, stateStore, run.ConversationID, run.HistoryID, terminal.Status, result, run.ID, terminal)
+}
+
+func persistResolvedExternalRunTerminal(ctx context.Context, db *gorm.DB, historyID string, terminal *RunTerminal) error {
+	if db == nil || terminal == nil {
+		return nil
+	}
+	return db.WithContext(ctx).Model(&orm.ChatHistory{}).Where("id = ?", historyID).Updates(map[string]any{
+		"run_status": terminal.Status, "run_terminal": terminalJSON(terminal), "update_time": time.Now(),
+	}).Error
 }
 
 func getChatStatus(ctx context.Context, stateStore state.Store, conversationID, historyID string) (*ChatStatus, error) {

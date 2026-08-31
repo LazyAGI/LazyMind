@@ -24,6 +24,19 @@ describe("RunStatusCard", () => {
     expect(screen.getByText("chat.runStatus.partialOutput")).toBeInTheDocument();
   });
 
+  it("uses the cancellation reason as the presentation authority", () => {
+    render(<RunStatusCard terminal={{
+      status: "failed",
+      reason: "user_cancelled",
+      partial_output: false,
+    }} />);
+
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveClass("chat-run-status-card--cancelled");
+    expect(screen.getByText("chat.runStatus.cancelled")).toBeInTheDocument();
+    expect(screen.queryByText(/chat\.runStatus\.providerError/)).not.toBeInTheDocument();
+  });
+
   it.each([
     "usage_limit_exceeded",
     "concurrency_limited",
@@ -36,8 +49,34 @@ describe("RunStatusCard", () => {
       partial_output: false,
     }} />);
 
+    expect(screen.getByText("chat.runStatus.modelFailed")).toBeInTheDocument();
     expect(screen.getByText(new RegExp(`chat\\.runStatus\\.codes\\.${code}`))).toBeInTheDocument();
     expect(screen.getByText(/chat\.runStatus\.noOutput/)).toBeInTheDocument();
+  });
+
+  it("renders runtime failures with a runtime title and red alert", () => {
+    render(<RunStatusCard terminal={{
+      status: "failed",
+      reason: "runtime_failure",
+      code: "upstream_stream_failed",
+      partial_output: true,
+    }} />);
+
+    const alert = screen.getByRole("alert");
+    expect(alert).not.toHaveClass("chat-run-status-card--cancelled");
+    expect(screen.getByText("chat.runStatus.runtimeFailed")).toBeInTheDocument();
+    expect(screen.getByText(/chat\.runStatus\.runtimeError/)).toBeInTheDocument();
+  });
+
+  it("renders incomplete model output with the interrupted title", () => {
+    render(<RunStatusCard terminal={{
+      status: "interrupted",
+      reason: "model_incomplete",
+      code: "length",
+      partial_output: true,
+    }} />);
+
+    expect(screen.getByText("chat.runStatus.interrupted")).toBeInTheDocument();
   });
 
   it("renders a safe provider reason and partial-output state", () => {
@@ -48,7 +87,7 @@ describe("RunStatusCard", () => {
       partial_output: true,
     }} />);
 
-    expect(screen.getByText("chat.runStatus.interrupted")).toBeInTheDocument();
+    expect(screen.getByText("chat.runStatus.modelFailed")).toBeInTheDocument();
     expect(screen.getByText(/chat\.runStatus\.codes\.organization_spend_limit_exceeded/)).toBeInTheDocument();
     expect(screen.getByText(/chat\.runStatus\.partialOutput/)).toBeInTheDocument();
     expect(screen.queryByText(/HTTP/)).not.toBeInTheDocument();
