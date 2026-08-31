@@ -96,6 +96,61 @@ class DeckInitializationTests(unittest.TestCase):
             )
             self.assertEqual(task_pack['params']['page_count'], 25)
 
+    def test_attach_material_images_is_successful_noop_for_empty_pool(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            deck = Path(tmp)
+            with (
+                mock.patch.object(TOOLS, '_resolve_deck_dir', return_value=deck),
+                mock.patch.object(
+                    TOOLS,
+                    '_attach_material_images_to_deck',
+                    return_value={
+                        'attached': 0,
+                        'reference_images': [],
+                        'captions': {},
+                    },
+                ),
+            ):
+                result = TOOLS.ppt_attach_material_images(str(deck))
+
+        self.assertEqual(result['attached'], 0)
+        self.assertEqual(result['reference_image_count'], 0)
+        self.assertIn('continuing', result['note'])
+
+    def test_build_outline_continues_when_no_material_images_exist(self):
+        stages: list[str] = []
+
+        def run_stage(_deck_dir, *, stage):
+            stages.append(stage)
+            return {'status': 'ok', 'pages': 4}
+
+        with mock.patch.object(TOOLS, 'ppt_init_deck', return_value={
+            'deck_dir': '/tmp/deck-without-images',
+            'deck_id': 'deck-without-images',
+            'page_count': 4,
+            'ppt_mode': 'fast',
+            'material_images_attached': 0,
+        }), mock.patch.object(TOOLS, 'ppt_attach_material_images', return_value={
+            'deck_dir': '/tmp/deck-without-images',
+            'attached': 0,
+            'reference_image_count': 0,
+            'reference_images': [],
+        }) as attach, mock.patch.object(
+            TOOLS, 'ppt_run_stage', side_effect=run_stage,
+        ), mock.patch.object(TOOLS, 'ppt_publish_outline', return_value={
+            'published_count': 4,
+            'published': [1, 2, 3, 4],
+        }):
+            result = TOOLS.ppt_build_outline(
+                user_query='生成四页无图汇报',
+                page_count=4,
+            )
+
+        attach.assert_not_called()
+        self.assertEqual(stages, ['preflight', 'style', 'outline'])
+        self.assertEqual(result['material_images_attached'], 0)
+        self.assertEqual(result['published_count'], 4)
+
 
 class PartialEditTests(unittest.TestCase):
     def test_agent_llm_call_propagates_default_and_explicit_timeout(self):
@@ -111,7 +166,7 @@ class PartialEditTests(unittest.TestCase):
             'sys.modules',
             {'lazyllm': lazyllm_module, 'lazyllm.components': components_module},
         ), mock.patch.dict(
-            TOOLS.os.environ, {'LAZYMIND_PPT_LLM_TIMEOUT': '300'}, clear=False,
+            TOOLS.os.environ, {'LAZYMIND_PPT_LLM_TIMEOUT': '90'}, clear=False,
         ):
             self.assertEqual(TOOLS._agent_llm_call('system', 'user'), 'generated')
             self.assertEqual(
@@ -121,12 +176,16 @@ class PartialEditTests(unittest.TestCase):
 
         self.assertEqual(
             shared.call_args_list[0],
-            mock.call('user', timeout=300.0, max_retries=1),
+            mock.call('user', timeout=90.0, max_retries=1),
         )
         self.assertEqual(
             shared.call_args_list[1],
             mock.call('user', timeout=75.0, max_retries=1),
         )
+        self.assertEqual(model.share.call_count, 2)
+        self.assertTrue(all(
+            call.kwargs['stream'] is True for call in model.share.call_args_list
+        ))
 
     def test_add_item_below_clones_structure_and_assigns_fresh_ids(self):
         selection = {
@@ -695,6 +754,43 @@ class PartialEditTests(unittest.TestCase):
             self.assertEqual(result['retry_count'], 1)
             self.assertEqual(result['retries'][0]['page'], 1)
             self.assertTrue(result['retries'][0]['ok'])
+
+    def test_batch_page_html_does_not_retry_timed_out_page(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            deck, _page = make_deck(Path(tmp))
+            attempts = 0
+
+            def capture(*_args, **_kwargs):
+                nonlocal attempts
+                attempts += 1
+                raise TOOLS._PPTModelTimeoutError(
+                    'LLM timed out after 90s without receiving progress [page-html:1]'
+                )
+
+            fake_model_client = mock.Mock()
+            fake_runtime = mock.Mock()
+            fake_runtime._capture_cmd.side_effect = capture
+            fake_runtime.cmd_page_html = mock.Mock()
+            with mock.patch.object(
+                TOOLS, '_load_sn_ppt_modules',
+                return_value=(fake_model_client, fake_runtime),
+            ), mock.patch.object(
+                TOOLS, '_load_slide_outline_briefs', return_value={},
+            ), mock.patch.object(
+                TOOLS, '_ui_slot_order_list', return_value=[],
+            ), mock.patch.object(
+                TOOLS.time, 'sleep', return_value=None,
+            ), mock.patch.dict(
+                TOOLS.os.environ, {'LAZYMIND_PPT_PAGE_RETRIES': '1'}, clear=False,
+            ):
+                result = TOOLS._batch_page_html_publish_progressive(
+                    deck, concurrency=1,
+                )
+
+            self.assertEqual(attempts, 1)
+            self.assertEqual(result['status'], 'failed')
+            self.assertEqual(result['retry_count'], 0)
+            self.assertIn('timed out after 90s', result['failed_detail'][0]['error'])
 
 
 if __name__ == '__main__':

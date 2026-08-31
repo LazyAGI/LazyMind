@@ -93,6 +93,41 @@ _model_client_mod: Any = None
 _LOG = logging.getLogger(__name__)
 
 
+class _PPTModelTimeoutError(RuntimeError):
+    """A page model call made no progress before its inactivity timeout."""
+
+
+def _is_model_timeout_exception(exc: BaseException) -> bool:
+    """Recognize provider timeout wrappers without coupling to LazyLLM internals."""
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, (TimeoutError, requests.exceptions.Timeout)):
+            return True
+        if type(current).__name__ in {
+            'ConnectTimeout', 'ReadTimeout', 'TimeoutException',
+        }:
+            return True
+        terminal = getattr(current, 'terminal', None)
+        failure = getattr(terminal, 'failure', None)
+        code = getattr(getattr(failure, 'code', None), 'value', None)
+        if code == 'request_timeout':
+            return True
+        current = current.__cause__ or current.__context__
+    return False
+
+
+def _page_result_timed_out(result: dict[str, Any] | None) -> bool:
+    payload = (result or {}).get('payload') or {}
+    if payload.get('failure_kind') == 'timeout':
+        return True
+    error = str(payload.get('error') or '').lower()
+    return any(marker in error for marker in (
+        'timed out', 'timeout', 'readtimeout', 'connecttimeout',
+    ))
+
+
 def _tool_success(_tool_name: str, result: Any, meta: dict[str, Any] | None = None) -> Any:
     """Return a successful tool value using the canonical LazyLLM contract.
 
@@ -2421,7 +2456,13 @@ def _batch_page_html_publish_progressive(
                 try:
                     code, payload = fut.result()
                 except Exception as exc:
-                    code, payload = 1, {'status': 'failed', 'error': str(exc)}
+                    code, payload = 1, {
+                        'status': 'failed',
+                        'error': str(exc),
+                        'failure_kind': (
+                            'timeout' if _is_model_timeout_exception(exc) else 'error'
+                        ),
+                    }
                 if not isinstance(payload, dict):
                     payload = {'status': 'failed', 'error': 'empty page payload'}
                 ok = code == 0 and payload.get('status', 'ok' if code == 0 else 'failed') == 'ok'
@@ -2443,7 +2484,14 @@ def _batch_page_html_publish_progressive(
             os.environ.get('LAZYMIND_PPT_PAGE_RETRIES'), 1, lo=0, hi=3,
         )
         for retry_no in range(1, retry_limit + 1):
-            pending = [pno for pno in page_nos if not ready_ok.get(pno, False)]
+            # A timed-out page has already spent the full inactivity window in
+            # the provider call. Retrying it serially can block the workflow
+            # for several more minutes without adding useful information.
+            pending = [
+                pno for pno in page_nos
+                if not ready_ok.get(pno, False)
+                and not _page_result_timed_out(results.get(pno))
+            ]
             if not pending:
                 break
             time.sleep(min(2 ** (retry_no - 1), 4))
@@ -2453,7 +2501,13 @@ def _batch_page_html_publish_progressive(
                 try:
                     code, payload = _run_one(pno)
                 except Exception as exc:
-                    code, payload = 1, {'status': 'failed', 'error': str(exc)}
+                    code, payload = 1, {
+                        'status': 'failed',
+                        'error': str(exc),
+                        'failure_kind': (
+                            'timeout' if _is_model_timeout_exception(exc) else 'error'
+                        ),
+                    }
                 if not isinstance(payload, dict):
                     payload = {'status': 'failed', 'error': 'empty page payload'}
                 ok = code == 0 and payload.get(
@@ -2531,21 +2585,32 @@ def _agent_llm_call(
     effective_timeout = float(
         timeout
         if timeout is not None
-        else os.environ.get('LAZYMIND_PPT_LLM_TIMEOUT', '300')
+        else os.environ.get('LAZYMIND_PPT_LLM_TIMEOUT', '90')
     )
     llm = AutoModel(model='llm').share(
         prompt=ChatPrompter(instruction=instruction),
-        stream=False,
+        # Keep consuming provider chunks so timeout measures inactivity rather
+        # than the total time needed to generate a complete HTML document.
+        # AutoModel still merges the chunks and returns one final string here.
+        stream=True,
     )
     # model_client deliberately forwards its per-request timeout to this
     # adapter. The adapter previously discarded it, so AutoModel fell back to
     # the provider configuration's 120-second timeout. Page HTML commonly
     # needs longer than that; pass the effective timeout into the actual call.
-    out = llm(
-        prompt_input,
-        timeout=effective_timeout,
-        max_retries=max(1, int(retries) + 1),
-    )
+    try:
+        out = llm(
+            prompt_input,
+            timeout=effective_timeout,
+            max_retries=max(1, int(retries) + 1),
+        )
+    except Exception as exc:
+        if _is_model_timeout_exception(exc):
+            raise _PPTModelTimeoutError(
+                f'LLM timed out after {effective_timeout:g}s without receiving progress '
+                f'[{request_name}]'
+            ) from exc
+        raise
     text = str(out).strip() if out is not None else ''
     if not text:
         raise RuntimeError(f'AutoModel llm returned empty text [{request_name}]')
@@ -3276,23 +3341,24 @@ def ppt_attach_material_images(deck_dir: str) -> dict:
         deck_dir (str): Absolute deck directory from ppt_init_deck / ppt_find_deck.
 
     Returns:
-        On success: attached count and reference_images paths.
+        Attached count and reference_images paths. Zero attached images is a
+        successful no-op because material_images is optional for PPT decks.
     """
     try:
         deck = _resolve_deck_dir(deck_dir)
     except FileNotFoundError as exc:
         return _tool_error('ppt_attach_material_images', str(exc))
     result = _attach_material_images_to_deck(deck)
-    if result['attached'] <= 0:
-        return _tool_error(
-            'ppt_attach_material_images',
-            'no material images registered — call ppt_register_material_images in collect_materials first',
-        )
     return _tool_success('ppt_attach_material_images', {
         'deck_dir': str(deck.resolve()),
         'attached': result['attached'],
         'reference_image_count': len(result['reference_images']),
         'reference_images': result['reference_images'],
+        'note': (
+            'No material images were registered; continuing with CSS/SVG/ECharts visuals.'
+            if result['attached'] <= 0 else
+            'Material images attached as Pool B reference images.'
+        ),
     })
 
 
@@ -3550,17 +3616,6 @@ def ppt_build_outline(
     stages: list[dict[str, Any]] = [
         {'step': 'init', 'ok': True, 'deck_id': init_payload.get('deck_id')},
     ]
-
-    # Late register recovery: init attaches automatically, but retry once if empty.
-    if int(init_payload.get('material_images_attached') or 0) <= 0:
-        attach_res = ppt_attach_material_images(deck_dir)
-        if not _tool_failed(attach_res):
-            stages.append({
-                'step': 'attach_material_images',
-                'ok': True,
-                **{k: v for k, v in _tool_payload(attach_res).items()
-                   if k in ('attached', 'reference_image_count')},
-            })
 
     for stage_name in ('preflight', 'style', 'outline'):
         stage_res = ppt_run_stage(deck_dir, stage=stage_name)

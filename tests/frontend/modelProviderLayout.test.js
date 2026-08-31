@@ -38,4 +38,20 @@ describe('model provider settings layout', () => {
     expect(rule).toContain('overflow-y: auto;');
     expect(rule).toContain('overscroll-behavior: contain;');
   });
+
+  it('keeps local dependency controls reachable at the desktop minimum height', () => {
+    const styles = readFileSync(
+      new URL('../../frontend/src/modules/settings/index.scss', import.meta.url),
+      'utf8',
+    );
+    const selector = '.settings-system-tools-stack.has-local-dependencies {';
+    const ruleStart = styles.indexOf(selector);
+    const ruleEnd = styles.indexOf('}', ruleStart);
+    const rule = styles.slice(ruleStart, ruleEnd);
+
+    expect(ruleStart).toBeGreaterThan(-1);
+    expect(rule).toContain(
+      'grid-template-rows: minmax(0, 2fr) minmax(220px, 1fr);',
+    );
+  });
 });

@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"testing"
 
+	"lazymind/agentconnector/internal/agentexec"
 	"lazymind/agentconnector/internal/agentintegration"
 	"lazymind/agentconnector/internal/mcpbridge"
 )
@@ -35,7 +36,39 @@ func TestConfiguredCodexDiscoveryDoesNotExecuteBinary(t *testing.T) {
 	}
 }
 
-func TestCodexStatusSeparatesLoginAndMCPConfiguration(t *testing.T) {
+func TestCodexDesktopRecognizesChatGPTAppOnMacOS(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("macOS application bundle discovery")
+	}
+	applications := t.TempDir()
+	t.Setenv("LAZYMIND_DESKTOP_APPLICATION_DIRS", applications)
+	if err := os.Mkdir(filepath.Join(applications, "ChatGPT.app"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	requirements, err := desktopRequirements()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !agentintegration.RequirementSatisfied(requirements, "codex_desktop") {
+		t.Fatalf("ChatGPT.app was not recognized as Codex Desktop: %#v", requirements)
+	}
+}
+
+func TestCodexCandidatesIncludeChatGPTDesktopRuntime(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("macOS Codex Desktop runtime path")
+	}
+	want := "/Applications/ChatGPT.app/Contents/Resources/codex"
+	for _, candidate := range codexCandidates("", "codex") {
+		if candidate == want {
+			return
+		}
+	}
+	t.Fatalf("Codex candidates do not include %q", want)
+}
+
+func TestCodexStatusUsesDesktopInstallationWithoutRequiringCLILogin(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("fixture uses a POSIX script")
 	}
@@ -43,10 +76,12 @@ func TestCodexStatusSeparatesLoginAndMCPConfiguration(t *testing.T) {
 	t.Setenv("LAZYMIND_HOME", filepath.Join(root, "state"))
 	t.Setenv("CODEX_HOME", filepath.Join(root, "codex-home"))
 	binary := writeExecutable(t, root, "codex", `#!/bin/sh
-if [ "$1" = "login" ] && [ "$2" = "status" ]; then exit 0; fi
-if [ "$1" = "mcp" ] && [ "$2" = "list" ]; then printf '[]\n'; exit 0; fi
 exit 1
 `)
+	desktop := writeExecutable(t, root, filepath.Join("Codex.app", "Contents", "MacOS", "Codex"), "#!/bin/sh\nexit 0\n")
+	if _, err := agentexec.SetExecutableBinding(agentexec.CodexDesktop, desktop); err != nil {
+		t.Fatal(err)
+	}
 	self := writeExecutable(t, root, filepath.Join("bin", "lazymind"), "#!/bin/sh\nexit 0\n")
 	adapter, err := New(binary, self, &mcpbridge.Bridge{})
 	if err != nil {
@@ -56,16 +91,20 @@ exit 1
 	if status.State != agentintegration.Ready {
 		t.Fatalf("status=%#v", status)
 	}
-	if !agentintegration.RequirementSatisfied(status.Requirements, "codex_login") {
-		t.Fatalf("login requirement=%#v", status.Requirements)
+	if !agentintegration.RequirementSatisfied(status.Requirements, "codex_desktop") {
+		t.Fatalf("desktop requirement=%#v", status.Requirements)
+	}
+	if agentintegration.RequirementSatisfied(status.Requirements, "codex_login") {
+		t.Fatalf("desktop status unexpectedly includes CLI login: %#v", status.Requirements)
 	}
 }
 
-func TestCodexStatusReturnsLoginActionWhenSignedOut(t *testing.T) {
+func TestCodexStatusDoesNotTreatStandaloneCLIAsDesktop(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("fixture uses a POSIX script")
 	}
 	root := t.TempDir()
+	t.Setenv("LAZYMIND_DESKTOP_APPLICATION_DIRS", filepath.Join(root, "applications"))
 	t.Setenv("LAZYMIND_HOME", filepath.Join(root, "state"))
 	t.Setenv("CODEX_HOME", filepath.Join(root, "codex-home"))
 	binary := writeExecutable(t, root, "codex", `#!/bin/sh
@@ -78,7 +117,7 @@ exit 1
 		t.Fatal(err)
 	}
 	status := adapter.Status(context.Background())
-	if status.State != agentintegration.RequirementsMissing || status.Action == nil || status.Action.Kind != "login" {
+	if status.State != agentintegration.RequirementsMissing || status.Action != nil {
 		t.Fatalf("status=%#v", status)
 	}
 }
@@ -98,6 +137,10 @@ if [ "$1" = "mcp" ] && [ "$2" = "list" ]; then touch "$CODEX_HOME/list-command-r
 exit 1
 `)
 	self := writeExecutable(t, root, filepath.Join("bin", "lazymind"), "#!/bin/sh\nexit 0\n")
+	desktop := writeExecutable(t, root, filepath.Join("Codex.app", "Contents", "MacOS", "Codex"), "#!/bin/sh\nexit 0\n")
+	if _, err := agentexec.SetExecutableBinding(agentexec.CodexDesktop, desktop); err != nil {
+		t.Fatal(err)
+	}
 	adapter, err := New(binary, self, &mcpbridge.Bridge{})
 	if err != nil {
 		t.Fatal(err)

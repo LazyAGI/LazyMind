@@ -79,8 +79,8 @@ func TestAutoSelectUnconfiguredProviderModelsPrefersVerifiedFreeModels(t *testin
 	}
 
 	models := []orm.UserModelProviderGroupModel{
-		{ID: "paid-llm", Name: "deepseek-ai/DeepSeek-V4-Flash", ModelType: "llm"},
-		{ID: "free-llm", Name: "deepseek-ai/DeepSeek-V3", ModelType: "llm", FreeAutoSelectPriority: 1},
+		{ID: "free-llm", Name: "deepseek-ai/DeepSeek-V4-Flash", ModelType: "llm", FreeAutoSelectPriority: 1},
+		{ID: "paid-llm", Name: "deepseek-ai/DeepSeek-V3", ModelType: "llm"},
 		{ID: "paid-vlm", Name: "Pro/moonshotai/Kimi-K2.6", ModelType: "vlm"},
 		{ID: "free-vlm", Name: "Qwen/Qwen3.5-4B", ModelType: "vlm", FreeAutoSelectPriority: 1},
 		{ID: "paid-embed", Name: "Qwen/Qwen3-Embedding-8B", ModelType: "embed"},
@@ -95,7 +95,7 @@ func TestAutoSelectUnconfiguredProviderModelsPrefersVerifiedFreeModels(t *testin
 		t.Fatalf("auto select: %v", err)
 	}
 	wantConfigured := []autoSelectedModel{
-		{ModelKey: "llm", Name: "deepseek-ai/DeepSeek-V3"},
+		{ModelKey: "llm", Name: "deepseek-ai/DeepSeek-V4-Flash"},
 		{ModelKey: "vlm", Name: "Qwen/Qwen3.5-4B"},
 		{ModelKey: "embed_main", Name: "BAAI/bge-m3"},
 		{ModelKey: "image_generator", Name: "Kwai-Kolors/Kolors"},

@@ -80,6 +80,17 @@ class StyleRenderingRecipeTest(unittest.TestCase):
 
 
 class OutlineReferenceImageRepairTest(unittest.TestCase):
+    def test_empty_image_pool_clears_hallucinated_binding_without_failing(self) -> None:
+        pages = [
+            {"page_no": 1, "use_image": {"reference_image_index": 0}},
+            {"page_no": 2, "use_image": None},
+        ]
+
+        repaired = run_stage._ensure_outline_reference_images(pages, [])
+
+        self.assertEqual(repaired, 1)
+        self.assertEqual([page["use_image"] for page in pages], [None, None])
+
     def test_repairs_prose_only_material_reference_and_fills_other_pages(self) -> None:
         pages = [
             {"page_no": 1, "visual_hints": "封面", "use_image": None},

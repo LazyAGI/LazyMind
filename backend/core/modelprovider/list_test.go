@@ -113,7 +113,7 @@ func TestListUserProvidersReturnsCatalogDescriptionForRequestedLanguage(t *testi
 		t.Fatalf("expected 19 catalog providers, got %d", providerCount)
 	}
 	var freeModel orm.DefaultModel
-	if err := db.Where("provider_name = ? AND name = ?", "SiliconFlow", "deepseek-ai/DeepSeek-V3").
+	if err := db.Where("provider_name = ? AND name = ?", "SiliconFlow", "deepseek-ai/DeepSeek-V4-Flash").
 		Take(&freeModel).Error; err != nil {
 		t.Fatalf("load catalog free model: %v", err)
 	}

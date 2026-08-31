@@ -70,6 +70,7 @@ export interface DesktopAgentAction {
 export interface DesktopAgentIntegrationStatus {
   agent: DesktopAgent;
   display_name: string;
+  version?: string;
   state: DesktopAgentIntegrationState;
   requirements?: DesktopAgentRequirement[];
   action?: DesktopAgentAction;
@@ -82,6 +83,7 @@ export type DesktopExecutorProvider = "codex" | "cursor" | "workbuddy";
 export type DesktopExecutorPolicyAction = "enable" | "disable";
 export type DesktopAgentBindingTarget =
   | "codex-cli"
+  | "codex-desktop"
   | "cursor-cli"
   | "codebuddy-cli"
   | "cursor-desktop"

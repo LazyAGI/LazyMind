@@ -602,7 +602,7 @@ async function runExecutorConnector(provider, action) {
 }
 
 const agentBindingTargets = new Set([
-  "codex-cli", "cursor-cli", "codebuddy-cli", "cursor-desktop",
+  "codex-cli", "codex-desktop", "cursor-cli", "codebuddy-cli", "cursor-desktop",
   "workbuddy-desktop", "raccoon-desktop", "traework-desktop",
 ]);
 const agentBindingActions = new Set(["status", "set", "clear"]);
@@ -1669,6 +1669,7 @@ function browserWindowOptions(show = true) {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      backgroundThrottling: false,
     },
   };
 }

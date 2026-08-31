@@ -45,6 +45,14 @@
       overflow: hidden;
     }
 
+    .workflow-panel__body > .workflow-panel__auto-grid {
+      flex: 1 1 0;
+      min-height: 0;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      scrollbar-gutter: stable;
+    }
+
     // Multi-artifact tabs scroll as a whole. Giving every named slot
     // flex-basis: 0 squeezes persisted Markdown documents and file lists down
     // to a single line.
@@ -638,12 +646,22 @@
   // A compact single-document preview keeps controls visible and delegates
   // scrolling to the document surface instead of the whole workflow body.
   &:not(.workflow-panel--expanded) {
+    .workflow-panel__body > .workflow-panel__auto-grid,
     .workflow-panel__body > [role='tabpanel']:not([hidden]) > .composite-grid:not(.composite-grid--paged) {
       flex: 1 1 auto;
       min-height: 0;
       overflow-y: auto;
       overscroll-behavior: contain;
       scrollbar-gutter: stable;
+    }
+
+    .workflow-panel__body > [role='tabpanel']:not([hidden]) > .composite-shell--paged {
+      min-height: 0;
+    }
+
+    .workflow-panel__body > [role='tabpanel']:not([hidden]) > .composite-shell--paged
+      .composite-grid--paged > .composite-grid__row--stack {
+      flex-shrink: 0;
     }
 
     .workflow-panel__body > [role='tabpanel']:not([hidden]) .workflow-panel__tab-content--list {

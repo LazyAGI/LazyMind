@@ -78,7 +78,12 @@ vi.mock("react-i18next", () => ({
         "agentIntegration.executorConnecting": "正在连接",
         "agentIntegration.executorLoginRequired": "需要登录",
         "agentIntegration.executorStatusCheckFailed": "登录状态检测失败",
-        "agentIntegration.mcpClients.codex": "Codex CLI",
+        "agentIntegration.compactDetectionStatus": "检测情况",
+        "agentIntegration.compactCLIInstalled": "CLI 已安装",
+        "agentIntegration.compactCLIMissing": "CLI 未安装",
+        "agentIntegration.compactCLILoggedIn": "CLI 已登录",
+        "agentIntegration.compactCLINotLoggedIn": "CLI 未登录",
+        "agentIntegration.mcpClients.codex": "Codex Desktop",
         "agentIntegration.mcpClients.cursor": "Cursor 桌面版",
         "agentIntegration.mcpClients.workbuddy": "WorkBuddy 桌面版",
         "agentIntegration.mcpClients.raccoon": "商汤小浣熊桌面版",
@@ -91,7 +96,11 @@ vi.mock("react-i18next", () => ({
         "agentIntegration.enterExecutablePath": "输入本机路径",
         "agentIntegration.executablePathTitle": "配置本机程序路径",
         "agentIntegration.executablePathDescription": "输入运行 Docker 的主机上的完整可执行文件路径",
-        "agentIntegration.executablePathPlaceholder": "例如 C:\\Program Files\\Cursor\\Cursor.exe",
+        "agentIntegration.executablePathPlaceholderMacCodexDesktop": "例如 /Applications/ChatGPT.app/Contents/MacOS/ChatGPT",
+        "agentIntegration.executablePathPlaceholderMacCLI": "例如 /opt/homebrew/bin/codex",
+        "agentIntegration.executablePathPlaceholderMacDesktop": "例如 /Applications/Cursor.app/Contents/MacOS/Cursor",
+        "agentIntegration.executablePathPlaceholderWindowsCLI": "例如 C:\\Agents\\codex.exe",
+        "agentIntegration.executablePathPlaceholderWindowsDesktop": "例如 C:\\Program Files\\ChatGPT\\ChatGPT.exe",
         "agentIntegration.restoreAutoDetection": "恢复自动检测",
         "agentIntegration.operationFailed": "操作未完成",
         "agentIntegration.loginStarted": `已打开 ${agent} 登录流程`,
@@ -101,7 +110,7 @@ vi.mock("react-i18next", () => ({
         "agentIntegration.executorDisableSuccess": `已停止 LazyMind 使用 ${agent}`,
         "agentIntegration.executableBindingSaved": "已保存本机程序路径",
         "agentIntegration.executableBindingCleared": "已恢复自动检测",
-        "agentIntegration.guides.codex.mcp.install": "执行 `codex --version`",
+        "agentIntegration.guides.codex.mcp.install": "安装 Codex Desktop",
         "agentIntegration.guides.codex.mcp.connect": "开启 MCP 开关",
         "agentIntegration.guides.codex.mcp.verify": "在 Codex 中验证工具",
         "agentIntegration.guides.codex.executor.install": "安装 Codex CLI",
@@ -118,8 +127,7 @@ const readyCodexStatus = {
   display_name: "Codex",
   state: "ready",
   requirements: [
-    { id: "codex_cli", description: "Codex CLI installed", satisfied: true },
-    { id: "codex_login", description: "Codex signed in", satisfied: true },
+    { id: "codex_desktop", description: "Codex Desktop installed", satisfied: true },
   ],
 };
 
@@ -135,9 +143,9 @@ const readyCodexExecutor = {
 
 function expandAgent(id: string) {
   const panel = screen.getByTestId(`agent-panel-${id}`);
-  const header = panel.querySelector<HTMLButtonElement>(".agent-integration-card-header");
-  expect(header).not.toBeNull();
-  if (header?.getAttribute("aria-expanded") === "false") fireEvent.click(header);
+  const toggle = panel.querySelector<HTMLButtonElement>(".agent-integration-card-toggle");
+  expect(toggle).not.toBeNull();
+  if (toggle?.getAttribute("aria-expanded") === "false") fireEvent.click(toggle);
   return panel;
 }
 
@@ -158,18 +166,51 @@ describe("AgentIntegrationPage", () => {
     mocks.bindings.mockResolvedValue({ ok: true, data: {} });
   });
 
-  it("keeps Agent rows compact and expands one three-stage configuration flow at a time", async () => {
+  it("keeps Agent rows compact and allows multiple configuration flows to stay expanded", async () => {
     render(<AgentIntegrationPage />);
 
     expect(await screen.findByText("外部 Agent 集成")).toBeInTheDocument();
     expect(screen.getAllByTestId(/^agent-panel-/)).toHaveLength(6);
+    const columns = document.querySelectorAll(".agent-integration-column");
+    expect(columns).toHaveLength(2);
+    expect(columns[0]?.querySelectorAll(".agent-integration-card")).toHaveLength(3);
+    expect(columns[1]?.querySelectorAll(".agent-integration-card")).toHaveLength(3);
     const codex = screen.getByTestId("agent-panel-codex");
     expect(codex.querySelectorAll(".agent-integration-stage")).toHaveLength(3);
     expect(codex.querySelector(".agent-integration-capability")).toBeNull();
 
     const cursor = expandAgent("cursor");
     expect(cursor.querySelectorAll(".agent-integration-stage")).toHaveLength(3);
-    expect(codex.querySelector(".agent-integration-card-detail")).toBeNull();
+    expect(codex.querySelector(".agent-integration-card-detail")).not.toBeNull();
+
+    fireEvent.click(cursor.querySelector<HTMLButtonElement>(".agent-integration-card-toggle")!);
+    expect(cursor.querySelector(".agent-integration-card-detail")).toBeNull();
+    expect(codex.querySelector(".agent-integration-card-detail")).not.toBeNull();
+  });
+
+  it("shows detection details while a collapsed Agent is not fully ready", async () => {
+    render(<AgentIntegrationPage />);
+
+    await screen.findByText("外部 Agent 集成");
+    const cursor = screen.getByTestId("agent-panel-cursor");
+    expect(within(cursor).getByLabelText("检测情况")).toBeInTheDocument();
+    expect(within(cursor).getByText("CLI 未安装")).toBeInTheDocument();
+    expect(within(cursor).queryByRole("switch")).not.toBeInTheDocument();
+  });
+
+  it("shows both connection switches after detection passes and hides a missing version", async () => {
+    render(<AgentIntegrationPage />);
+
+    const codex = await screen.findByTestId("agent-panel-codex");
+    fireEvent.click(codex.querySelector<HTMLButtonElement>(".agent-integration-card-toggle")!);
+
+    const mcpSwitch = within(codex).getByRole("switch", { name: "Codex Desktop 使用 LazyMind MCP" });
+    expect(mcpSwitch).toBeInTheDocument();
+    expect(within(codex).getByRole("switch", { name: "LazyMind 调用 Codex CLI" })).toBeInTheDocument();
+    expect(codex.querySelector(".agent-integration-card-version")).toBeNull();
+
+    fireEvent.mouseOver(mcpSwitch.closest(".agent-integration-compact-control")!);
+    expect(await screen.findByText("调用 LazyMind 能力")).toBeInTheDocument();
   });
 
   it("renders two integration switches and unlocks each only after its prerequisites are ready", async () => {
@@ -233,6 +274,22 @@ describe("AgentIntegrationPage", () => {
     expect(within(cursor).queryByRole("button", { name: /登录/ })).not.toBeInTheDocument();
   });
 
+  it("shows the backend reason when Codex MCP configuration fails", async () => {
+    mocks.statuses.mockResolvedValue({
+      ok: true,
+      data: { codex: {
+        ...readyCodexStatus,
+        state: "error",
+        message: "Codex Desktop runtime is unavailable",
+      } },
+    });
+
+    render(<AgentIntegrationPage />);
+
+    const codex = await screen.findByTestId("agent-panel-codex");
+    expect(within(codex).getByRole("alert")).toHaveTextContent("Codex Desktop runtime is unavailable");
+  });
+
   it("renders stale WorkBuddy state as unmet when the app is not installed", async () => {
     mocks.statuses.mockResolvedValue({
       ok: true,
@@ -259,13 +316,13 @@ describe("AgentIntegrationPage", () => {
     render(<AgentIntegrationPage />);
 
     const codex = await screen.findByTestId("agent-panel-codex");
-    expect(screen.queryByText("codex --version")).not.toBeInTheDocument();
+    expect(screen.queryByText("安装 Codex Desktop")).not.toBeInTheDocument();
 
     const helpButtons = within(codex).getAllByRole("button", {
-      name: "配置教程：让 Codex CLI 使用 LazyMind help",
+      name: "配置教程：让 Codex Desktop 使用 LazyMind help",
     });
     fireEvent.click(helpButtons[0]);
-    expect(await screen.findByText("codex --version")).toBeInTheDocument();
+    expect(await screen.findByText("安装 Codex Desktop")).toBeInTheDocument();
     expect(document.querySelector(".agent-integration-help-content")?.textContent).not.toContain("`");
 
     const executorHelp = within(codex).getAllByRole("button", {
@@ -288,7 +345,7 @@ describe("AgentIntegrationPage", () => {
     render(<AgentIntegrationPage />);
 
     const codex = await screen.findByTestId("agent-panel-codex");
-    fireEvent.click(within(codex).getByRole("switch", { name: "Codex CLI 使用 LazyMind MCP" }));
+    fireEvent.click(within(codex).getByRole("switch", { name: "Codex Desktop 使用 LazyMind MCP" }));
     await waitFor(() => expect(mocks.action).toHaveBeenCalledWith("codex", "connect"));
 
     fireEvent.click(within(codex).getByRole("switch", { name: "LazyMind 调用 Codex CLI" }));
@@ -309,7 +366,6 @@ describe("AgentIntegrationPage", () => {
 
     await screen.findByText("外部 Agent 集成");
     const raccoon = expandAgent("raccoon");
-    expect(within(raccoon).getByText("商汤小浣熊桌面版 已检测，仅支持接入 LazyMind MCP")).toBeInTheDocument();
     expect(raccoon.querySelectorAll(".agent-integration-stage")).toHaveLength(2);
     expect(within(raccoon).getByRole("switch", { name: "商汤小浣熊桌面版 使用 LazyMind MCP" })).toBeEnabled();
     expect(within(raccoon).queryByRole("switch", { name: /LazyMind 调用/ })).not.toBeInTheDocument();
@@ -408,8 +464,44 @@ describe("AgentIntegrationPage", () => {
     await waitFor(() => expect(mocks.bind).toHaveBeenCalledWith("codex-cli", "D:\\Agents\\codex.cmd"));
   });
 
-  it("accepts a validated host path from the Docker browser on Windows", async () => {
+  it("binds a missing Codex Desktop separately from the Codex CLI executor", async () => {
     mocks.platform.mockReturnValue(null);
+    Object.defineProperty(navigator, "platform", { configurable: true, value: "MacIntel" });
+    mocks.statuses.mockResolvedValue({
+      ok: true,
+      data: { codex: {
+        ...readyCodexStatus,
+        state: "requirements_missing",
+        requirements: [{ id: "codex_desktop", description: "Codex Desktop installed", satisfied: false }],
+      } },
+    });
+    mocks.bind.mockResolvedValue({
+      ok: true,
+      data: {
+        target: "codex-desktop",
+        configured: true,
+        path: "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT",
+      },
+    });
+
+    render(<AgentIntegrationPage />);
+
+    const codex = await screen.findByTestId("agent-panel-codex");
+    fireEvent.click(within(codex).getAllByRole("button", { name: /输入本机路径/ })[0]);
+    const dialog = screen.getByRole("dialog");
+    const input = within(dialog).getByPlaceholderText("例如 /Applications/ChatGPT.app/Contents/MacOS/ChatGPT");
+    fireEvent.change(input, { target: { value: "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT" } });
+    fireEvent.click(screen.getByRole("button", { name: /保\s*存/ }));
+    await waitFor(() => expect(mocks.bind).toHaveBeenCalledWith(
+      "codex-desktop",
+      "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT",
+    ));
+    expect(mocks.bind).not.toHaveBeenCalledWith("codex-cli", expect.anything());
+  });
+
+  it("shows a macOS path example and accepts a validated host path from the Docker browser", async () => {
+    mocks.platform.mockReturnValue(null);
+    Object.defineProperty(navigator, "platform", { configurable: true, value: "MacIntel" });
     mocks.executors.mockResolvedValue({ data: { data: { executors: [{
       ...readyCodexExecutor,
       installed: false,
@@ -421,19 +513,20 @@ describe("AgentIntegrationPage", () => {
     });
     mocks.bind.mockResolvedValue({
       ok: true,
-      data: { target: "codex-cli", configured: true, path: "D:\\Agents\\codex.cmd" },
+      data: { target: "codex-cli", configured: true, path: "/opt/homebrew/bin/codex" },
     });
 
     render(<AgentIntegrationPage />);
 
     const codex = await screen.findByTestId("agent-panel-codex");
     fireEvent.click(await within(codex).findByRole("button", { name: /输入本机路径/ }));
+    expect(within(screen.getByRole("dialog")).getByPlaceholderText("例如 /opt/homebrew/bin/codex")).toBeInTheDocument();
     fireEvent.change(within(screen.getByRole("dialog")).getByRole("textbox"), {
-      target: { value: "D:\\Agents\\codex.cmd" },
+      target: { value: "/opt/homebrew/bin/codex" },
     });
     fireEvent.click(screen.getByRole("button", { name: /保\s*存/ }));
 
-    await waitFor(() => expect(mocks.bind).toHaveBeenCalledWith("codex-cli", "D:\\Agents\\codex.cmd"));
+    await waitFor(() => expect(mocks.bind).toHaveBeenCalledWith("codex-cli", "/opt/homebrew/bin/codex"));
   });
 
   it("polls a stale local Host result until the ready report arrives", async () => {

@@ -117,13 +117,19 @@ func seedBuiltinWorkflow(ctx context.Context, db *gorm.DB, root string) (string,
 				return err
 			}
 		}
-		var existing orm.WorkflowRevision
+		existing, reusable, err := findReusableBuiltinRevision(
+			ctx, tx, resource.ID, treeHash, compiled.GraphHash, files, paths,
+		)
+		if err != nil {
+			return err
+		}
 		// Package bytes alone do not identify an executable revision: compiler
 		// upgrades can change the typed graph without changing workflow.yaml. Reuse
-		// only the exact package + compiled graph pair, otherwise publish one new
-		// immutable built-in revision.
-		if tx.Where("plugin_resource_id = ? AND tree_hash = ? AND graph_hash = ?",
-			resource.ID, treeHash, compiled.GraphHash).First(&existing).Error == nil {
+		// only an intact exact package + compiled graph pair, otherwise publish one
+		// new immutable built-in revision. History-injection revisions deliberately
+		// contain compiled runtime state without package entries, so they must stay
+		// detached instead of becoming the catalog head.
+		if reusable {
 			return tx.Model(&resource).Updates(map[string]any{"head_revision_id": existing.ID,
 				"version": existing.RevisionNo, "plugin_id": metadata.ID, "owner_user_id": "", // workflow-naming: persistence
 				"owner_scope": "builtin", "source_type": "builtin",
@@ -172,6 +178,57 @@ func seedBuiltinWorkflow(ctx context.Context, db *gorm.DB, root string) (string,
 			"status": "active", "updated_at": now}).Error
 	})
 	return ref, err
+}
+
+func findReusableBuiltinRevision(ctx context.Context, tx *gorm.DB, resourceID, treeHash, graphHash string,
+	files map[string][]byte, paths []string) (orm.WorkflowRevision, bool, error) {
+	var candidates []orm.WorkflowRevision
+	if err := tx.WithContext(ctx).
+		Where("plugin_resource_id = ? AND tree_hash = ? AND graph_hash = ?", // workflow-naming: persistence
+			resourceID, treeHash, graphHash).
+		Order("revision_no DESC").Find(&candidates).Error; err != nil {
+		return orm.WorkflowRevision{}, false, err
+	}
+	expected := make(map[string]string, len(paths))
+	for _, path := range paths {
+		sum := sha256.Sum256(files[path])
+		expected[path] = hex.EncodeToString(sum[:])
+	}
+	for _, candidate := range candidates {
+		var entries []orm.WorkflowRevisionEntry
+		if err := tx.WithContext(ctx).Where("revision_id = ?", candidate.ID).Find(&entries).Error; err != nil {
+			return orm.WorkflowRevision{}, false, err
+		}
+		if len(entries) != len(expected) {
+			continue
+		}
+		blobHashes := make(map[string]struct{}, len(entries))
+		intact := true
+		for _, entry := range entries {
+			expectedHash, ok := expected[entry.Path]
+			if !ok || entry.EntryType != "file" || entry.BlobHash == nil || *entry.BlobHash != expectedHash {
+				intact = false
+				break
+			}
+			blobHashes[expectedHash] = struct{}{}
+		}
+		if !intact {
+			continue
+		}
+		hashes := make([]string, 0, len(blobHashes))
+		for hash := range blobHashes {
+			hashes = append(hashes, hash)
+		}
+		var blobCount int64
+		if err := tx.WithContext(ctx).Model(&orm.WorkflowBlob{}).Where("hash IN ?", hashes).
+			Count(&blobCount).Error; err != nil {
+			return orm.WorkflowRevision{}, false, err
+		}
+		if blobCount == int64(len(hashes)) {
+			return candidate, true, nil
+		}
+	}
+	return orm.WorkflowRevision{}, false, nil
 }
 
 func readBuiltinPackageFiles(root string) (map[string][]byte, error) {

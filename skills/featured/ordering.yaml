@@ -7,9 +7,7 @@ home:
   chat:
     - novel-generator
     - chat-eq-reply
-    - interview-simulator
     - xiaohongshu-copywriter
-    - poster-design
   work:
     - ppt-workflow
     - image-workflow

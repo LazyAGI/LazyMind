@@ -16,6 +16,7 @@ type BindingTarget string
 
 const (
 	CodexCLI         BindingTarget = "codex-cli"
+	CodexDesktop     BindingTarget = "codex-desktop"
 	CursorCLI        BindingTarget = "cursor-cli"
 	CodeBuddyCLI     BindingTarget = "codebuddy-cli"
 	CursorDesktop    BindingTarget = "cursor-desktop"
@@ -27,7 +28,7 @@ const (
 
 var (
 	bindingTargets = map[BindingTarget]bool{
-		CodexCLI: true, CursorCLI: true, CodeBuddyCLI: true,
+		CodexCLI: true, CursorCLI: true, CodeBuddyCLI: true, CodexDesktop: true,
 		CursorDesktop: true, WorkBuddyDesktop: true, RaccoonDesktop: true,
 		TRAEWorkDesktop: true,
 	}

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { Alert, Button, Card, Input, Modal, Popover, Space, Spin, Switch, Tag, Typography, message } from "antd";
+import { Alert, Button, Card, Input, Modal, Popover, Space, Spin, Switch, Tag, Tooltip, Typography, message } from "antd";
 import {
   CheckCircleOutlined,
   DownOutlined,
@@ -51,9 +51,9 @@ interface AgentDefinition {
 const AGENTS: AgentDefinition[] = [
   {
     id: "codex", name: "Codex", icon: "/assistant-icons/codex.png",
-    installURL: "https://developers.openai.com/codex/cli",
+    installURL: "https://learn.chatgpt.com/docs/app",
     executorName: "Codex CLI", executorLogin: true,
-    mcpBindingTarget: "codex-cli", executorBindingTarget: "codex-cli",
+    mcpBindingTarget: "codex-desktop", executorBindingTarget: "codex-cli",
   },
   {
     id: "cursor", name: "Cursor", icon: "/assistant-icons/cursor.png",
@@ -97,7 +97,7 @@ export default function AgentIntegrationPage() {
   const [executors, setExecutors] = useState<ChatExecutorDescriptor[]>([]);
   const [executorPolicies, setExecutorPolicies] = useState<ExecutorPolicyMap>({});
   const [bindings, setBindings] = useState<BindingMap>({});
-  const [expandedAgent, setExpandedAgent] = useState<DesktopAgent | null>("codex");
+  const [expandedAgents, setExpandedAgents] = useState<Set<DesktopAgent>>(() => new Set(["codex"]));
   const [loading, setLoading] = useState(true);
   const [action, setAction] = useState("");
   const [error, setError] = useState("");
@@ -299,24 +299,33 @@ export default function AgentIntegrationPage() {
       <Spin spinning={loading}>
         <section className="agent-integration-section">
           <div className="agent-integration-grid">
-            {AGENTS.map((agent) => (
-              <AgentCard
-                key={agent.id}
-                agent={agent}
-                mcpStatus={statuses[agent.id]}
-                executorStatus={executors.find((item) => item.id === agent.id)}
-                executorPolicy={executorPolicies[agent.id as DesktopExecutorProvider]}
-                expanded={expandedAgent === agent.id}
-                busyAction={action}
-                bindings={bindings}
-                onToggle={() => setExpandedAgent((current) => current === agent.id ? null : agent.id)}
-                onMCPAction={runAction}
-                onExecutorAction={runExecutorAction}
-                onBindingAction={runBindingAction}
-                onExternalConfigurationStarted={setExternalConfigurationAgent}
-                onRefresh={refresh}
-                t={t}
-              />
+            {[0, 1].map((column) => (
+              <div className="agent-integration-column" key={column}>
+                {AGENTS.filter((_, index) => index % 2 === column).map((agent) => (
+                  <AgentCard
+                    key={agent.id}
+                    agent={agent}
+                    mcpStatus={statuses[agent.id]}
+                    executorStatus={executors.find((item) => item.id === agent.id)}
+                    executorPolicy={executorPolicies[agent.id as DesktopExecutorProvider]}
+                    expanded={expandedAgents.has(agent.id)}
+                    busyAction={action}
+                    bindings={bindings}
+                    onToggle={() => setExpandedAgents((current) => {
+                      const next = new Set(current);
+                      if (next.has(agent.id)) next.delete(agent.id);
+                      else next.add(agent.id);
+                      return next;
+                    })}
+                    onMCPAction={runAction}
+                    onExecutorAction={runExecutorAction}
+                    onBindingAction={runBindingAction}
+                    onExternalConfigurationStarted={setExternalConfigurationAgent}
+                    onRefresh={refresh}
+                    t={t}
+                  />
+                ))}
+              </div>
             ))}
           </div>
         </section>
@@ -344,12 +353,30 @@ export default function AgentIntegrationPage() {
         <Input
           autoFocus
           value={manualBindingPath}
-          placeholder={t("agentIntegration.executablePathPlaceholder")}
+          placeholder={t(executablePathPlaceholderKey(manualBindingTarget))}
           onChange={(event) => setManualBindingPath(event.target.value)}
         />
       </Modal>
     </div>
   );
+}
+
+function executablePathPlaceholderKey(target: DesktopAgentBindingTarget | null): string {
+  const desktopPlatform = getDesktopPlatform();
+  const browserPlatform = typeof navigator === "undefined"
+    ? ""
+    : `${navigator.platform || ""} ${navigator.userAgent || ""}`.toLowerCase();
+  const isMac = desktopPlatform === "darwin" || (!desktopPlatform && browserPlatform.includes("mac"));
+  if (isMac) {
+    return target === "codex-desktop"
+      ? "agentIntegration.executablePathPlaceholderMacCodexDesktop"
+      : target?.endsWith("-cli")
+        ? "agentIntegration.executablePathPlaceholderMacCLI"
+        : "agentIntegration.executablePathPlaceholderMacDesktop";
+  }
+  return target?.endsWith("-cli")
+    ? "agentIntegration.executablePathPlaceholderWindowsCLI"
+    : "agentIntegration.executablePathPlaceholderWindowsDesktop";
 }
 
 function AgentCard({
@@ -389,38 +416,78 @@ function AgentCard({
     : Boolean(mcpStatus && !["requirements_missing", "error"].includes(mcpStatus.state));
   const detected = mcpInstalled;
   const mcpClientName = t(`agentIntegration.mcpClients.${agent.id}`);
+  const mcpState = mcpStatus?.state || "requirements_missing";
+  const mcpPrepared = requirements.length > 0 && requirements.every((item) => item.satisfied) &&
+    !["action_required", "conflict", "error"].includes(mcpState);
+  const executorSupported = Boolean(agent.executorName);
+  const executorEnabled = executorPolicy?.enabled ?? false;
+  const executorInstalled = executorPolicy?.installed ?? Boolean(executorStatus?.installed);
+  const executorReady = executorPolicy?.ready ?? Boolean(executorStatus?.available);
+  const executorPrepared = executorSupported && executorInstalled && executorReady &&
+    Boolean(executorStatus?.host_online);
+  const detectionComplete = mcpPrepared && (!executorSupported || executorPrepared);
+  const mcpEnabled = mcpState === "enabled";
+  const mcpCanToggle = mcpState === "ready" || mcpEnabled;
 
   return (
     <Card
       className={`agent-integration-card${expanded ? " is-expanded" : ""}`}
       data-testid={`agent-panel-${agent.id}`}
     >
-      <button
-        type="button"
-        className="agent-integration-card-header"
-        aria-expanded={expanded}
-        onClick={onToggle}
-      >
-        <span className="agent-integration-identity">
-          <span className="agent-integration-logo" aria-hidden="true"><img alt="" src={agent.icon} /></span>
-          <span>
-            <Typography.Title level={4}>{agent.name}</Typography.Title>
-            <span className="agent-integration-card-summary">
-              {detected
-                ? t(agent.executorName
-                  ? "agentIntegration.detectedSummary"
-                  : "agentIntegration.singleDirectionSummary", {
-                  agent: agent.executorName ? agent.name : mcpClientName,
-                })
-                : t("agentIntegration.missingSummary", { agent: agent.name })}
+      <div className="agent-integration-card-header">
+        <button
+          type="button"
+          className="agent-integration-card-toggle"
+          aria-expanded={expanded}
+          onClick={onToggle}
+        >
+          <span className="agent-integration-identity">
+            <span className="agent-integration-logo" aria-hidden="true"><img alt="" src={agent.icon} /></span>
+            <span>
+              <Typography.Title level={4}>{agent.name}</Typography.Title>
+              {mcpStatus?.version && (
+                <span className="agent-integration-card-version">{mcpStatus.version}</span>
+              )}
             </span>
           </span>
-        </span>
+        </button>
+        {!expanded && (
+          detectionComplete ? (
+            <CompactIntegrationControls
+              agent={agent}
+              mcpClientName={mcpClientName}
+              mcpEnabled={mcpEnabled}
+              mcpCanToggle={mcpCanToggle}
+              executorEnabled={executorEnabled}
+              executorPrepared={executorPrepared}
+              busyAction={busyAction}
+              onMCPAction={onMCPAction}
+              onExecutorAction={onExecutorAction}
+              t={t}
+            />
+          ) : (
+            <CollapsedDetectionSummary
+              agent={agent}
+              mcpStatus={mcpStatus}
+              executorStatus={executorStatus}
+              executorPolicy={executorPolicy}
+              t={t}
+            />
+          )
+        )}
         <Tag className={`agent-integration-install-tag ${detected ? "is-installed" : "is-missing"}`}>
           {t(detected ? "agentIntegration.installed" : "agentIntegration.notInstalled")}
         </Tag>
-        <DownOutlined className="agent-integration-chevron" aria-hidden="true" />
-      </button>
+        <button
+          type="button"
+          className="agent-integration-expand-button"
+          aria-label={expanded ? t("common.collapse") : t("common.expand")}
+          aria-expanded={expanded}
+          onClick={onToggle}
+        >
+          <DownOutlined className="agent-integration-chevron" aria-hidden="true" />
+        </button>
+      </div>
 
       {expanded && (
         <div className="agent-integration-card-detail">
@@ -446,6 +513,131 @@ function AgentCard({
         </div>
       )}
     </Card>
+  );
+}
+
+function CollapsedDetectionSummary({
+  agent,
+  mcpStatus,
+  executorStatus,
+  executorPolicy,
+  t,
+}: {
+  agent: AgentDefinition;
+  mcpStatus?: DesktopAgentIntegrationStatus;
+  executorStatus?: ChatExecutorDescriptor;
+  executorPolicy?: DesktopExecutorPolicy;
+  t: TFunction;
+}) {
+  const items = (mcpStatus?.requirements || []).map((requirement) => ({
+    id: requirement.id,
+    label: t(`agentIntegration.requirements.${requirement.id}.${requirement.satisfied ? "ready" : "missing"}`, {
+      defaultValue: requirement.description,
+    }),
+    ready: requirement.satisfied,
+  }));
+  if (agent.executorName) {
+    const installed = executorPolicy?.installed ?? Boolean(executorStatus?.installed);
+    const ready = executorPolicy?.ready ?? Boolean(executorStatus?.available);
+    items.push({
+      id: "executor-installed",
+      label: t(installed ? "agentIntegration.compactCLIInstalled" : "agentIntegration.compactCLIMissing"),
+      ready: installed,
+    });
+    if (installed) {
+      items.push({
+        id: "executor-login",
+        label: t(ready ? "agentIntegration.compactCLILoggedIn" : "agentIntegration.compactCLINotLoggedIn"),
+        ready,
+      });
+    }
+  }
+  if (mcpStatus?.message && ["error", "conflict"].includes(mcpStatus.state)) {
+    items.push({ id: "mcp-error", label: mcpStatus.message, ready: false });
+  }
+  if (!items.length) {
+    items.push({ id: "pending", label: t("agentIntegration.waitingForDetection"), ready: false });
+  }
+  return (
+    <div className="agent-integration-compact-detection" aria-label={t("agentIntegration.compactDetectionStatus")}>
+      {items.map((item) => (
+        <span key={item.id} className={item.ready ? "is-ready" : "is-missing"}>
+          {item.ready ? <CheckCircleOutlined /> : <WarningOutlined />}
+          <span>{item.label}</span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function CompactIntegrationControls({
+  agent,
+  mcpClientName,
+  mcpEnabled,
+  mcpCanToggle,
+  executorEnabled,
+  executorPrepared,
+  busyAction,
+  onMCPAction,
+  onExecutorAction,
+  t,
+}: {
+  agent: AgentDefinition;
+  mcpClientName: string;
+  mcpEnabled: boolean;
+  mcpCanToggle: boolean;
+  executorEnabled: boolean;
+  executorPrepared: boolean;
+  busyAction: string;
+  onMCPAction: (agent: DesktopAgent, action: DesktopAgentIntegrationAction) => Promise<void>;
+  onExecutorAction: (provider: DesktopExecutorProvider, action: DesktopExecutorPolicyAction) => Promise<void>;
+  t: TFunction;
+}) {
+  const methods = [{
+    id: "mcp",
+    title: t("agentIntegration.mcpModeTitle", { agent: mcpClientName }),
+    description: t("agentIntegration.mcpModeDescription", { agent: mcpClientName }),
+    checked: mcpEnabled,
+    disabled: !mcpEnabled && !mcpCanToggle,
+    loading: busyAction === `${agent.id}:${mcpEnabled ? "disconnect" : "connect"}`,
+    onChange: (checked: boolean) => void onMCPAction(agent.id, checked ? "connect" : "disconnect"),
+  }];
+  if (agent.executorName) {
+    methods.push({
+      id: "executor",
+      title: t("agentIntegration.executorModeTitle", { agent: agent.executorName }),
+      description: t("agentIntegration.executorModeDescription", { agent: agent.executorName }),
+      checked: executorEnabled,
+      disabled: !executorEnabled && !executorPrepared,
+      loading: busyAction === `executor:${agent.id}:${executorEnabled ? "disable" : "enable"}`,
+      onChange: (checked: boolean) => void onExecutorAction(
+        agent.id as DesktopExecutorProvider,
+        checked ? "enable" : "disable",
+      ),
+    });
+  }
+  return (
+    <div className="agent-integration-compact-controls">
+      {methods.map((method) => (
+        <Tooltip
+          key={method.id}
+          title={<><strong>{method.title}</strong><br />{method.description}</>}
+          placement="bottom"
+        >
+          <div className={`agent-integration-compact-control${method.checked ? " is-enabled" : ""}`}>
+            <span>{method.title}</span>
+            <Switch
+              size="small"
+              aria-label={method.title}
+              checked={method.checked}
+              disabled={method.disabled || method.loading}
+              loading={method.loading}
+              onChange={method.onChange}
+            />
+          </div>
+        </Tooltip>
+      ))}
+    </div>
   );
 }
 
@@ -709,6 +901,12 @@ function AgentConfigurationFlow({
             />
           )}
         </div>
+        {mcpStatus?.message && ["error", "conflict"].includes(mcpState) && (
+          <div className="agent-integration-stage-hint is-error" role="alert">
+            <WarningOutlined />
+            {mcpStatus.message}
+          </div>
+        )}
         {!mcpCanToggle && !executorPrepared && (
           <div className="agent-integration-stage-hint">
             <InfoCircleFilled />

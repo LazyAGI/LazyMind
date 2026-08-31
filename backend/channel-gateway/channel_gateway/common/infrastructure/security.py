@@ -2,6 +2,7 @@ import base64
 import hashlib
 import json
 import os
+import tempfile
 import time
 from pathlib import Path
 
@@ -79,8 +80,13 @@ class JsonCipher:
     def _load_or_create_master_key(value: str) -> bytes:
         path = Path(value)
         path.parent.mkdir(parents=True, exist_ok=True)
+        binary_flag = getattr(os, 'O_BINARY', 0)
         try:
-            descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            descriptor = os.open(
+                path,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | binary_flag,
+                0o600,
+            )
         except FileExistsError:
             pass
         else:
@@ -97,6 +103,37 @@ class JsonCipher:
             if len(key) == 32 or attempt == 19:
                 break
             time.sleep(0.05)
+        recovered_key = JsonCipher._recover_windows_text_mode_key(key)
+        if recovered_key is not None:
+            JsonCipher._replace_master_key(path, recovered_key)
+            key = recovered_key
         if len(key) != 32:
             raise RuntimeError('channel gateway credential master key is invalid')
         return key
+
+    @staticmethod
+    def _recover_windows_text_mode_key(key: bytes) -> bytes | None:
+        """Undo the CRLF expansion produced by a legacy Windows text-mode write."""
+        if len(key) <= 32 or b'\r\n' not in key:
+            return None
+        recovered = key.replace(b'\r\n', b'\n')
+        return recovered if len(recovered) == 32 else None
+
+    @staticmethod
+    def _replace_master_key(path: Path, key: bytes) -> None:
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=f'.{path.name}.',
+            dir=path.parent,
+        )
+        try:
+            with os.fdopen(descriptor, 'wb') as temporary_file:
+                temporary_file.write(key)
+                temporary_file.flush()
+                os.fsync(temporary_file.fileno())
+            os.replace(temporary_name, path)
+        except BaseException:
+            try:
+                os.unlink(temporary_name)
+            except FileNotFoundError:
+                pass
+            raise

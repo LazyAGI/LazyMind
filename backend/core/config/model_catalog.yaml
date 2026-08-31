@@ -1212,6 +1212,7 @@ model_providers:
         - name: deepseek-ai/DeepSeek-V4-Flash
           type: llm
           max_input_tokens: "1M"
+          free_auto_select_priority: 1
         - name: THUDM/GLM-Z1-9B-0414
           type: llm
         - name: Pro/moonshotai/Kimi-K2.6
@@ -1281,7 +1282,6 @@ model_providers:
         - name: deepseek-ai/DeepSeek-V3
           type: llm
           max_input_tokens: "128K"
-          free_auto_select_priority: 1
         - name: Pro/deepseek-ai/DeepSeek-V3
           type: llm
           max_input_tokens: "128K"

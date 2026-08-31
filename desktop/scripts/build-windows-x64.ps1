@@ -236,7 +236,14 @@ function Copy-RuntimeApp {
     New-Item -ItemType Directory -Force -Path $appRoot | Out-Null
     $excludedDirs = @(
         'node_modules',
+        'test',
+        'tests',
+        'testdata',
+        '__snapshots__',
         (Join-Path $repoRoot '.git'),
+        (Join-Path $repoRoot '.github'),
+        (Join-Path $repoRoot 'docs'),
+        (Join-Path $repoRoot 'tests'),
         (Join-Path $repoRoot 'local\build'),
         (Join-Path $repoRoot 'local\runtime'),
         (Join-Path $repoRoot 'desktop\build'),
@@ -247,6 +254,7 @@ function Copy-RuntimeApp {
         (Join-Path $repoRoot 'skills\research'),
         (Join-Path $repoRoot 'skills\review'),
         (Join-Path $repoRoot 'skills\search'),
+        (Join-Path $repoRoot 'skills\featured'),
         (Join-Path $repoRoot 'desktop\electron\node_modules'),
         (Join-Path $repoRoot 'frontend\node_modules'),
         (Join-Path $repoRoot 'frontend\src'),
@@ -258,7 +266,7 @@ function Copy-RuntimeApp {
     )
     $releaseBuild = $env:LAZYMIND_RELEASE_BUILD -eq 'true'
     if ($releaseBuild) { $excludedDirs += (Join-Path $repoRoot 'algorithm\lazyllm') }
-    & robocopy.exe $repoRoot $appRoot /MIR /R:2 /W:1 /NFL /NDL /NJH /NJS /NP /XD @excludedDirs /XF '*.pyc' '*.pyo' '.DS_Store' '.env' 'config.env' 'config.win.env' 'lazymind-history-injection*.zip'
+    & robocopy.exe $repoRoot $appRoot /MIR /R:2 /W:1 /NFL /NDL /NJH /NJS /NP /XD @excludedDirs /XF '*.pyc' '*.pyo' '*_test.go' 'test_*.py' '*.test.js' '*.test.mjs' '*.test.ts' '*.test.tsx' '.DS_Store' '.env' '.coverage' 'config.env' 'config.win.env' 'lazymind-history-injection*.zip' 'README.md' 'README.CN.md'
     if ($LASTEXITCODE -gt 7) { throw "robocopy runtime app staging failed with code $LASTEXITCODE" }
     foreach ($relativePath in @('skills\research', 'skills\review', 'skills\search')) {
         Remove-GeneratedPath (Join-Path $appRoot $relativePath)
