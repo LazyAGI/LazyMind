@@ -1368,6 +1368,7 @@ function NamedTabSlot({
   const prefersFullGridRow = slotDef.widget?.itemLayout === 'grid'
     || (slotDef.widget?.itemWidth ?? 0) >= 600
     || slotDef.widget?.collapsed === true;
+  const isWriterDocument = slotDef.widget?.widgetType === 'writer-document';
   const showStream = Boolean(artifactStream && (
     revisions.length === 0 || artifactStream.state === 'streaming'
   ));
@@ -1423,7 +1424,7 @@ function NamedTabSlot({
   );
 
   return (
-    <div className={`workflow-panel__named-slot${prefersFullGridRow ? ' workflow-panel__named-slot--full-grid-row' : ''}`}>
+    <div className={`workflow-panel__named-slot${prefersFullGridRow ? ' workflow-panel__named-slot--full-grid-row' : ''}${isWriterDocument ? ' workflow-panel__named-slot--writer-document' : ''}`}>
       <div className='workflow-panel__slot-heading'>
         {(slotDef.label || slotDef.id) && (
           <span className='workflow-panel__slot-label'>{slotLabel}</span>

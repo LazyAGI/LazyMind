@@ -48,6 +48,7 @@ import RecoverySettings from "./RecoverySettings";
 import UserSkillWorkflowSettings, { type ResourceTab } from "./UserSkillWorkflowSettings";
 import { resolveMcpReadinessStatus } from "./mcpReadinessStatus";
 import { resolveModelNavigationStatus } from "./modelNavigationStatus";
+import { isSettingsSectionVisible } from "./settingsSectionVisibility";
 import {
   fetchSettingsOverview,
   runSettingsChecks,
@@ -144,10 +145,10 @@ function baseNavigation(isAdmin: boolean, t: Translate): NavigationGroup[] {
     {
       title: t("settingsPage.navGroups.management"),
       items: [
-        ...(isAdmin ? [{ id: "organization" as const, label: t("settingsPage.sections.organization"), keywords: t("settingsPage.sectionKeywords.organization"), icon: <TeamOutlined /> }] : []),
+        ...(isSettingsSectionVisible("organization", isAdmin) ? [{ id: "organization" as const, label: t("settingsPage.sections.organization"), keywords: t("settingsPage.sectionKeywords.organization"), icon: <TeamOutlined /> }] : []),
         { id: "recovery", label: t("settingsPage.sections.recovery"), keywords: t("settingsPage.sectionKeywords.recovery"), icon: <DeleteOutlined /> },
         { id: "diagnostics", label: t("settingsPage.sections.diagnostics"), keywords: t("settingsPage.sectionKeywords.diagnostics"), icon: <CheckCircleFilled /> },
-        { id: "developer", label: t("settingsPage.sections.developer"), keywords: t("settingsPage.sectionKeywords.developer"), icon: <CodeOutlined />, status: t("settingsPage.sectionStatus.activated") },
+        ...(isSettingsSectionVisible("developer", isAdmin) ? [{ id: "developer" as const, label: t("settingsPage.sections.developer"), keywords: t("settingsPage.sectionKeywords.developer"), icon: <CodeOutlined />, status: t("settingsPage.sectionStatus.activated") }] : []),
       ],
     },
   ];
@@ -540,10 +541,10 @@ export default function SettingsPage() {
           dashboardRow(t("settingsPage.sections.diagnostics"), t("settingsPage.checkAll"), t("settingsPage.overview.checkAllDesc"), <Button size="small" loading={checking} onClick={handleCheckAll}>{t("settingsPage.check")}</Button>),
           dashboardRow(t("settingsPage.sections.diagnostics"), t("settingsPage.overview.recentResults"), checks ? t("settingsPage.overview.recentResultsReady", { count: checks.length }) : t("settingsPage.overview.recentResultsEmpty"), <Tag className="settings-status-tag">{t("settingsPage.viewable")}</Tag>),
         ])}
-        {dashboardCard("developer", <CodeOutlined />, t("settingsPage.sections.developer"), t("settingsPage.overview.developerDesc"), [
+        {isSettingsSectionVisible("developer", isAdmin) ? dashboardCard("developer", <CodeOutlined />, t("settingsPage.sections.developer"), t("settingsPage.overview.developerDesc"), [
           dashboardRow(t("settingsPage.sections.developer"), t("settingsPage.overview.enableDeveloper"), t("settingsPage.overview.enableDeveloperDesc"), <Switch className="settings-ref-switch" checked={developerActive} loading={saving === "developer"} disabled={saving !== null} onChange={requestDeveloperChange} aria-label={t("settingsPage.overview.enableDeveloper")} />),
           dashboardRow(t("settingsPage.sections.developer"), t("settingsPage.overview.internalDebug"), t("settingsPage.overview.internalDebugDesc"), <Tag className="settings-status-tag">{developerActive ? t("settingsPage.sectionStatus.activated") : t("settingsPage.sectionStatus.notActivated")}</Tag>),
-        ])}
+        ]) : null}
       </div>
       {checks ? <CheckResults checks={checks} onLocate={selectSection} /> : null}
     </section>;

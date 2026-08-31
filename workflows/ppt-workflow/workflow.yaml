@@ -164,6 +164,10 @@ slots:
 
 ui:
   slots:
+    requirement_analysis:
+      widgetType: text-markdown
+    material_summary:
+      widgetType: text-markdown
     slide_outline:
       widgetType: text-markdown
       maxHeight: 420
