@@ -359,63 +359,44 @@ export function getStreamingAnalysisProgress(events: NormalizedThreadEvent[]) {
   let current = 0;
   let total = 0;
   const completedCases = new Set<string>();
+  const seenCases = new Set<string>();
   events.forEach((event) => {
     if (event.stage !== "analysis") {
       return;
     }
     const eventType = getStreamingAnalysisEventType(event);
-    if (eventType !== "analysis.classify_case") {
+    if (!ANALYSIS_STREAMING_EVENT_TYPES.has(eventType)) {
       return;
     }
-    if (getStreamingDatasetCaseEventStatus(event) === "done") {
-      const caseId = getEventCaseId(event.payload);
-      if (caseId) {
+    const caseId = getEventCaseId(event.payload);
+    if (caseId) {
+      seenCases.add(caseId);
+      if (
+        eventType === "analysis.classify_case" &&
+        getStreamingDatasetCaseEventStatus(event) === "done"
+      ) {
         completedCases.add(caseId);
       }
     }
     const progress = getNestedRecordField(event.payload, ["progress"]);
     const eventData = getEventPayloadData(event.payload);
-    const nextCurrent =
-      getNumberField(progress, ["current"]) ??
-      getNumberField(eventData, ["current"]);
     const nextTotal =
       getNumberField(progress, ["total"]) ??
       getNumberField(eventData, ["total", "case_num"]);
-    if (typeof nextCurrent === "number") {
-      current = Math.max(current, nextCurrent);
+    if (eventType === "analysis.classify_case") {
+      const nextCurrent =
+        getNumberField(progress, ["current"]) ??
+        getNumberField(eventData, ["current"]);
+      if (typeof nextCurrent === "number") {
+        current = Math.max(current, nextCurrent);
+      }
     }
     if (typeof nextTotal === "number") {
       total = Math.max(total, nextTotal);
     }
   });
   current = Math.max(current, completedCases.size);
-  if (total > 0) {
-    return { current, total };
-  }
-
-  events.forEach((event) => {
-    if (event.stage !== "analysis") {
-      return;
-    }
-    const eventType = getStreamingAnalysisEventType(event);
-    if (eventType !== "analysis.trace_summary") {
-      return;
-    }
-    const progress = getNestedRecordField(event.payload, ["progress"]);
-    const eventData = getEventPayloadData(event.payload);
-    const nextCurrent =
-      getNumberField(progress, ["current"]) ??
-      getNumberField(eventData, ["current"]);
-    const nextTotal =
-      getNumberField(progress, ["total"]) ??
-      getNumberField(eventData, ["total", "case_num"]);
-    if (typeof nextCurrent === "number") {
-      current = Math.max(current, nextCurrent);
-    }
-    if (typeof nextTotal === "number") {
-      total = Math.max(total, nextTotal);
-    }
-  });
+  total = Math.max(total, seenCases.size, current);
   return { current, total };
 }
 
@@ -515,21 +496,23 @@ function collectStreamingEvalProgressFromEvents(
   });
   // Prefer counting completed cases when progress.current is missing/stale.
   current = Math.max(current, completedCases.size);
-  if (total <= 0 && seenCases.size > 0) {
-    total = seenCases.size;
-  }
+  total = Math.max(total, seenCases.size, current);
   return { current, total };
 }
 
 export function getStreamingEvalProgress(events: NormalizedThreadEvent[]) {
-  const judgeProgress = collectStreamingEvalProgressFromEvents(
+  const finalProgress = collectStreamingEvalProgressFromEvents(
     events,
     new Set(["eval.judge", "eval.answer_and_judge"]),
   );
-  if (judgeProgress.total > 0 || judgeProgress.current > 0) {
-    return judgeProgress;
-  }
-  return collectStreamingEvalProgressFromEvents(events, new Set(["eval.answer"]));
+  const allProgress = collectStreamingEvalProgressFromEvents(
+    events,
+    EVAL_STREAMING_EVENT_TYPES,
+  );
+  return {
+    current: finalProgress.current,
+    total: Math.max(finalProgress.total, allProgress.total, finalProgress.current),
+  };
 }
 
 const ABTEST_STREAMING_EVENT_TYPES = new Set([
@@ -807,6 +790,24 @@ export function isThreadStepRunning(step: ThreadStepSummary) {
 
 export function isThreadFlowRunning(status?: string) {
   return normalizeThreadStepStatus(status) === "running";
+}
+
+export function mergeThreadStepStatuses(
+  stepStatuses: Partial<Record<ThreadEventStage, StepStatus>>,
+  terminalStatuses: Partial<Record<ThreadEventStage, StepStatus>>,
+  flowStatus?: string,
+) {
+  const merged = { ...stepStatuses, ...terminalStatuses };
+  if (!isThreadFlowRunning(flowStatus)) {
+    return merged;
+  }
+
+  Object.entries(stepStatuses).forEach(([stage, status]) => {
+    if (status === "running") {
+      merged[stage as ThreadEventStage] = status;
+    }
+  });
+  return merged;
 }
 
 export function getSilentRestoreRequestConfig(signal?: AbortSignal) {

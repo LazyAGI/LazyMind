@@ -29,7 +29,7 @@ TRACE_BY_TOOL = {
     'list': 'opencode.tool_use.search',
     'read': 'opencode.tool_use.read_file',
     'edit': 'opencode.tool_use.edit_file',
-    'write': 'opencode.tool_use.edit_file',
+    'write': 'opencode.tool_use.write_file',
     'bash': 'opencode.tool_use.run_command',
 }
 TRACE_BY_TYPE = {
@@ -92,14 +92,26 @@ def run_opencode_streaming(
     with stdout_log, events_log:
         stdout_tail = ''
         stdout_bytes = events_bytes = 0
+        artifact_write_error: dict[str, Any] | None = None
+
+        def remember_artifact_error(exc: OSError) -> None:
+            nonlocal artifact_write_error
+            if artifact_write_error is None:
+                artifact_write_error = {
+                    'type': 'artifact_write_failed',
+                    'message': f'{type(exc).__name__}: {exc}',
+                }
 
         def record(event: dict[str, Any]) -> dict[str, Any]:
             nonlocal events_bytes
             clean = _clean(event, secrets)
-            events_bytes = _write_bounded(
-                events_log, json.dumps(clean, ensure_ascii=False) + '\n',
-                events_bytes, whole_line=True,
-            )
+            try:
+                events_bytes = _write_bounded(
+                    events_log, json.dumps(clean, ensure_ascii=False) + '\n',
+                    events_bytes, whole_line=True,
+                )
+            except OSError as exc:
+                remember_artifact_error(exc)
             if trace is not None:
                 _emit_trace(trace, attempt, clean)
             return clean
@@ -107,7 +119,10 @@ def run_opencode_streaming(
         def write_stdout(line: str) -> None:
             nonlocal stdout_bytes, stdout_tail
             clean = _clean(line, secrets)
-            stdout_bytes = _write_bounded(stdout_log, clean, stdout_bytes)
+            try:
+                stdout_bytes = _write_bounded(stdout_log, clean, stdout_bytes)
+            except OSError as exc:
+                remember_artifact_error(exc)
             stdout_tail = (stdout_tail + clean)[-1000:]
 
         def fail(kind: str, message: object) -> OpenCodeRunResult:
@@ -129,6 +144,8 @@ def run_opencode_streaming(
         prompt_arg = f'Read {prompt_path.as_posix()} first, then follow the JSON task card exactly.'
         record({'type': 'setup', 'status': 'completed', 'message': f'workdir={root}'})
         record({'type': 'process_start', 'status': 'running', 'message': 'starting opencode'})
+        if artifact_write_error is not None:
+            return result(1, session_id, artifact_write_error)
         try:
             proc = subprocess.Popen(
                 _cmd(prompt_arg, session_id, settings),
@@ -161,6 +178,10 @@ def run_opencode_streaming(
                     ready[0].readline(), write_stdout, record,
                     session, error, finish_reason, secrets,
                 )
+                if artifact_write_error is not None:
+                    error = artifact_write_error
+                    _terminate(proc)
+                    break
             if proc.stdout:
                 for line in proc.stdout:
                     session, error, finish_reason = _read_line(
@@ -170,6 +191,8 @@ def run_opencode_streaming(
             returncode = proc.wait()
             record({'type': 'process_exit', 'status': 'completed' if returncode == 0 else 'failed',
                     'message': f'opencode exited with code {returncode}', 'returncode': returncode})
+            if artifact_write_error is not None:
+                error = artifact_write_error
             if returncode and not error:
                 error = record({'type': 'process_failed', 'message': stdout_tail})
         finally:
@@ -219,7 +242,13 @@ def _opencode_json(settings: dict[str, str]) -> dict[str, Any]:
     provider, model = settings.get('provider', ''), settings.get('provider_model', '')
     npm = settings.get('npm', '')
     base_url, api_key = settings.get('base_url', ''), settings.get('api_key', '')
-    config: dict[str, Any] = {'$schema': 'https://opencode.ai/config.json', 'permission': PERMISSIONS}
+    config: dict[str, Any] = {
+        '$schema': 'https://opencode.ai/config.json',
+        'permission': PERMISSIONS,
+        # Repair owns rollback through its managed Git workspace. OpenCode snapshots
+        # duplicate multi-gigabyte repositories and can stall every agent turn.
+        'snapshot': False,
+    }
     if provider and model and npm and base_url:
         options = {'baseURL': base_url}
         if api_key:

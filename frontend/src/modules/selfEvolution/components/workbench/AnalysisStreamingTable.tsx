@@ -22,8 +22,9 @@ export function AnalysisStreamingTable({
 }) {
   const { t } = useTranslation();
   const columns = buildAnalysisStreamingColumns(t);
-  const progressTotal = total || rows.length;
-  const progressCurrent = current;
+  const doneCount = rows.filter((row) => row.classifyCaseStatus === "done").length;
+  const progressCurrent = Math.max(current, doneCount);
+  const progressTotal = Math.max(total, rows.length, progressCurrent);
   const [currentPage, setCurrentPage] = useState(1);
   const prevProgressCurrentRef = useRef(0);
   const totalPages = getLastPage(rows.length);
@@ -31,17 +32,17 @@ export function AnalysisStreamingTable({
 
   useEffect(() => {
     const prevProgressCurrent = prevProgressCurrentRef.current;
-    prevProgressCurrentRef.current = current;
+    prevProgressCurrentRef.current = progressCurrent;
 
-    if (current > prevProgressCurrent) {
-      const activePage = Math.max(1, Math.ceil(current / PAGE_SIZE));
+    if (progressCurrent > prevProgressCurrent) {
+      const activePage = Math.max(1, Math.ceil(progressCurrent / PAGE_SIZE));
       const prevActivePage = Math.max(1, Math.ceil(prevProgressCurrent / PAGE_SIZE));
       setCurrentPage((page) => (page === prevActivePage ? activePage : page));
       return;
     }
 
     setCurrentPage((page) => Math.min(page, getLastPage(rows.length)));
-  }, [current, rows.length]);
+  }, [progressCurrent, rows.length]);
 
   return (
     <section

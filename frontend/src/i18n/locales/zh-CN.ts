@@ -5559,6 +5559,7 @@ const zhCN = {
     repairTraceEventOpencodeToolSearch: "搜索工具",
     repairTraceEventOpencodeToolReadFile: "读取文件",
     repairTraceEventOpencodeToolEditFile: "编辑文件",
+    repairTraceEventOpencodeToolWriteFile: "写入辅助文件",
     repairTraceEventOpencodeToolRunCommand: "执行命令",
     repairTraceEventOpencodeToolNamed: "工具 {{tool}}",
     repairTraceEventVerifyPreValidationStarted: "预验证开始",
