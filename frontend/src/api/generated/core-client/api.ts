@@ -905,6 +905,7 @@ export interface CreateModelProviderGroupOpenAPIResponse {
     'base_url': string;
     'check'?: CheckModelProviderData;
     'id': string;
+    'is_verified': boolean;
     'name': string;
     'user_model_provider_id': string;
 }
@@ -1793,6 +1794,7 @@ export interface ListModelProviderGroupsOpenAPIItem {
     'api_key': string;
     'base_url': string;
     'id': string;
+    'is_verified': boolean;
     'name': string;
     'user_model_provider_id': string;
 }

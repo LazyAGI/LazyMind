@@ -1,6 +1,7 @@
 import {
   assistantBridgeFetch,
   syncLocalAssistantSession,
+  type LocalAssistantSession,
 } from "./assistantSession";
 
 export type DesktopBridgeUnavailableReason = "unavailable" | "failed";
@@ -97,6 +98,7 @@ export interface DesktopExecutorPolicy {
   installed?: boolean;
   ready?: boolean;
   unavailable_reason?: string;
+  bridge_state?: "ready" | "authentication_required" | "unavailable";
 }
 
 export type DesktopRuntimeStatusResult =
@@ -161,6 +163,8 @@ interface LazyMindDesktopBridge {
   agentExecutableBindings?: () => Promise<unknown> | unknown;
   agentExecutableBind?: (target: DesktopAgentBindingTarget, path: string) => Promise<unknown> | unknown;
   agentExecutableClear?: (target: DesktopAgentBindingTarget) => Promise<unknown> | unknown;
+  assistantSessionSet?: (session: LocalAssistantSession) => Promise<unknown> | unknown;
+  assistantSessionClear?: () => Promise<unknown> | unknown;
   restartRuntime?: () => Promise<unknown> | unknown;
   resetRuntime?: (scope?: "kb" | "all") => Promise<unknown> | unknown;
   localFolderAccessStatus?: () => Promise<DesktopLocalFolderAccessState> | DesktopLocalFolderAccessState;
@@ -266,18 +270,14 @@ async function syncCurrentLocalAssistantSession() {
 
 export async function agentIntegrationStatuses(): Promise<DesktopAgentIntegrationStatusesResult> {
   const bridge = getDesktopBridge();
-  if (bridge?.agentIntegrationStatuses) {
-    try {
+  try {
+    await syncCurrentLocalAssistantSession();
+    if (bridge?.agentIntegrationStatuses) {
       const payload = await bridge.agentIntegrationStatuses() as {
         agents?: Partial<Record<DesktopAgent, DesktopAgentIntegrationStatus>>;
       };
       return { ok: true, data: payload?.agents || {} };
-    } catch (error) {
-      return { ok: false, reason: "failed", error };
     }
-  }
-  try {
-    await syncCurrentLocalAssistantSession();
     const response = await assistantBridgeFetch("/agents", undefined, STATUS_TIMEOUT_MS);
     const payload = await response.json().catch(() => ({})) as {
       agents?: Partial<Record<DesktopAgent, DesktopAgentIntegrationStatus>>;
@@ -292,11 +292,11 @@ export async function agentIntegrationStatuses(): Promise<DesktopAgentIntegratio
 
 export async function agentIntegrationAction(agent: DesktopAgent, action: DesktopAgentIntegrationAction): Promise<DesktopAgentIntegrationResult> {
   const bridge = getDesktopBridge();
-  if (bridge?.agentIntegrationAction) {
-    return callAgentIntegration((value) => value.agentIntegrationAction!(agent, action));
-  }
   try {
     await syncCurrentLocalAssistantSession();
+    if (bridge?.agentIntegrationAction) {
+      return callAgentIntegration((value) => value.agentIntegrationAction!(agent, action));
+    }
     return callLocalAssistantBridge(
       `/agents/${encodeURIComponent(agent)}/${action}`,
       { method: "POST" },
@@ -334,6 +334,7 @@ export async function executorIntegrationAction(
 ): Promise<DesktopExecutorPolicyResult> {
   const bridge = getDesktopBridge();
   try {
+    await syncCurrentLocalAssistantSession();
     let payload: unknown;
     if (bridge?.executorIntegrationAction) {
       payload = await bridge.executorIntegrationAction(provider, action);

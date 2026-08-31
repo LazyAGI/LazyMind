@@ -276,6 +276,9 @@ function Copy-RuntimeApp {
     if (-not (Test-Path -LiteralPath (Join-Path $appRoot 'frontend\dist\index.html') -PathType Leaf)) {
         throw 'Desktop frontend dist is missing from staged runtime app.'
     }
+    if (-not (Test-Path -LiteralPath (Join-Path $appRoot 'Makefile') -PathType Leaf)) {
+        throw 'Desktop runtime repo marker Makefile is missing from staged runtime app.'
+    }
     if (-not $releaseBuild -and -not (Test-Path -LiteralPath (Join-Path $appRoot 'algorithm\lazyllm\lazyllm') -PathType Container)) {
         throw 'Bundled LazyLLM source is missing from local desktop runtime app.'
     }

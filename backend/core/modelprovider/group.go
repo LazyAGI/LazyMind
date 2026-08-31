@@ -28,6 +28,7 @@ type createGroupResponse struct {
 	UserModelProviderID string                  `json:"user_model_provider_id"`
 	Name                string                  `json:"name"`
 	BaseURL             string                  `json:"base_url"`
+	IsVerified          bool                    `json:"is_verified"`
 	Check               *CheckModelProviderData `json:"check,omitempty"`
 	AutoSelection       *autoModelSelection     `json:"auto_selection,omitempty"`
 }
@@ -190,7 +191,6 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	apiKeyRequired := isAPIKeyRequiredForBaseURL(r.Context(), db, parent.DefaultModelProviderID, baseURL)
 	apiKeyCiphertext, err := encryptModelProviderAPIKey(apiKey)
 	if err != nil {
 		common.ReplyErr(w, "encrypt api key failed", http.StatusInternalServerError)
@@ -246,7 +246,7 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 		APIKey:              "",
 		APIKeyCiphertext:    apiKeyCiphertext,
 		CredentialVersion:   modelProviderCredentialVersion,
-		IsVerified:          checkData != nil || !apiKeyRequired,
+		IsVerified:          checkData != nil,
 		BaseModel: orm.BaseModel{
 			CreateUserID:   userID,
 			CreateUserName: userName,
@@ -283,6 +283,7 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 		UserModelProviderID: row.UserModelProviderID,
 		Name:                row.Name,
 		BaseURL:             row.BaseURL,
+		IsVerified:          row.IsVerified,
 		Check:               checkData,
 		AutoSelection:       autoSelection,
 	})
@@ -459,9 +460,6 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 	if effectiveAPIKey == "" && !baseURLChanged {
 		effectiveAPIKey = storedAPIKey
 	}
-	if effectiveAPIKey == "" {
-		updates["is_verified"] = true
-	}
 	if !skipVerify && effectiveAPIKey != "" && shouldVerifyCloudServiceOnSave(parent.Category, parent.Name) {
 		checkResult, checkErr := doProviderGroupCheck(r.Context(), parent.Category, parent.Name, baseURL, effectiveAPIKey, "")
 		if checkErr != nil || checkResult == nil || !checkResult.Success {
@@ -485,34 +483,37 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 
 	// verify=true: run connectivity check before persisting; on success mark is_verified=true atomically.
 	if req.Verify && checkData == nil {
-		if effectiveAPIKey == "" {
-			updates["is_verified"] = true
-		} else {
-			checkResult, checkErr := doProviderGroupCheck(r.Context(), parent.Category, parent.Name, baseURL, effectiveAPIKey, "")
-			if checkErr != nil || checkResult == nil || !checkResult.Success {
-				msg := "verification failed"
-				checkMsg := msg
-				if checkResult != nil {
-					checkMsg = strings.TrimSpace(checkResult.Message)
-					if checkMsg != "" {
-						msg = "verification failed: " + checkMsg
-					}
-				}
-				common.ReplyErrWithData(
-					w,
-					msg,
-					CheckModelProviderData{Success: false, Message: checkMsg},
-					http.StatusBadGateway,
-				)
-				return
-			}
-			checkData = &CheckModelProviderData{Success: true, Message: checkResult.Message}
-			updates["is_verified"] = true
+		if effectiveAPIKey == "" && isAPIKeyRequiredForBaseURL(r.Context(), db, parent.DefaultModelProviderID, baseURL) {
+			common.ReplyErr(w, "api_key is required", http.StatusBadRequest)
+			return
 		}
+		checkResult, checkErr := doProviderGroupCheck(r.Context(), parent.Category, parent.Name, baseURL, effectiveAPIKey, "")
+		if checkErr != nil || checkResult == nil || !checkResult.Success {
+			msg := "verification failed"
+			checkMsg := msg
+			if checkResult != nil {
+				checkMsg = strings.TrimSpace(checkResult.Message)
+				if checkMsg != "" {
+					msg = "verification failed: " + checkMsg
+				}
+			}
+			common.ReplyErrWithData(
+				w,
+				msg,
+				CheckModelProviderData{Success: false, Message: checkMsg},
+				http.StatusBadGateway,
+			)
+			return
+		}
+		checkData = &CheckModelProviderData{Success: true, Message: checkResult.Message}
+		updates["is_verified"] = true
 	}
 	if err := db.WithContext(r.Context()).Model(&row).Updates(updates).Error; err != nil {
 		common.ReplyErr(w, "update group failed", http.StatusInternalServerError)
 		return
+	}
+	if isVerified, ok := updates["is_verified"].(bool); ok {
+		row.IsVerified = isVerified
 	}
 	row.Name = name
 	row.BaseURL = baseURL
@@ -525,6 +526,7 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 		UserModelProviderID: row.UserModelProviderID,
 		Name:                row.Name,
 		BaseURL:             row.BaseURL,
+		IsVerified:          row.IsVerified,
 		Check:               checkData,
 	})
 }

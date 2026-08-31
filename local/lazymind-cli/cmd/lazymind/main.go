@@ -29,6 +29,8 @@ import (
 
 const agentDiscoveryRetryDelay = 2 * time.Second
 
+const maxInternalSessionBytes = 1 << 20
+
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -61,6 +63,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 }
 
 func runInternal(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	if len(args) > 0 && args[0] == "session" {
+		return runInternalSession(args[1:], os.Stdin, stdout)
+	}
 	if len(args) > 0 && args[0] == "binding" {
 		return runInternalBinding(args[1:], stdout, stderr)
 	}
@@ -68,7 +73,7 @@ func runInternal(ctx context.Context, args []string, stdout, stderr io.Writer) e
 		return errors.New("invalid internal command")
 	}
 	if args[0] == "executor" {
-		return runInternalExecutor(args[1:], stdout)
+		return runInternalExecutor(ctx, args[1:], stdout)
 	}
 	if args[0] != "agent" {
 		return errors.New("invalid internal command")
@@ -107,11 +112,17 @@ func runInternal(ctx context.Context, args []string, stdout, stderr io.Writer) e
 		return runInternalCodex(ctx, action, *agentBinary, bridge, stdout)
 	case string(mcpclient.Cursor), string(mcpclient.WorkBuddy), string(mcpclient.Raccoon), string(mcpclient.TRAEWork), string(mcpclient.DeepSeekHarness):
 		if action == "login" {
-			if agent != string(mcpclient.Cursor) {
+			if agent != string(mcpclient.Cursor) && agent != string(mcpclient.WorkBuddy) {
 				return fmt.Errorf("unsupported %s action %q", agent, action)
 			}
-			if err := cursor.Login(ctx, *agentBinary); err != nil {
-				return err
+			var loginErr error
+			if agent == string(mcpclient.WorkBuddy) {
+				loginErr = workbuddy.Login(ctx, *agentBinary)
+			} else {
+				loginErr = cursor.Login(ctx, *agentBinary)
+			}
+			if loginErr != nil {
+				return loginErr
 			}
 		}
 		adapter, err := mcpclient.New(mcpclient.Kind(agent), "", bridge)
@@ -135,6 +146,40 @@ func runInternal(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	default:
 		return fmt.Errorf("unsupported external Agent %q", agent)
 	}
+}
+
+func runInternalSession(args []string, stdin io.Reader, stdout io.Writer) error {
+	if len(args) != 1 {
+		return errors.New("usage: internal session <set|clear>")
+	}
+	store, err := credentials.NewStore("", "")
+	if err != nil {
+		return err
+	}
+	switch strings.ToLower(args[0]) {
+	case "set":
+		body, err := io.ReadAll(io.LimitReader(stdin, maxInternalSessionBytes+1))
+		if err != nil {
+			return fmt.Errorf("read LazyMind session: %w", err)
+		}
+		if len(body) > maxInternalSessionBytes {
+			return errors.New("LazyMind session is too large")
+		}
+		var value credentials.Credentials
+		if err := json.Unmarshal(body, &value); err != nil {
+			return fmt.Errorf("decode LazyMind session: %w", err)
+		}
+		if err := store.Save(value); err != nil {
+			return err
+		}
+	case "clear":
+		if err := store.Clear(); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("unsupported internal session action %q", args[0])
+	}
+	return printJSON(stdout, map[string]bool{"ok": true})
 }
 
 func runInternalBinding(args []string, stdout, stderr io.Writer) error {
@@ -194,7 +239,7 @@ func runInternalBinding(args []string, stdout, stderr io.Writer) error {
 	}
 }
 
-func runInternalExecutor(args []string, stdout io.Writer) error {
+func runInternalExecutor(ctx context.Context, args []string, stdout io.Writer) error {
 	if len(args) != 2 {
 		return errors.New("invalid internal executor command")
 	}
@@ -208,7 +253,15 @@ func runInternalExecutor(args []string, stdout io.Writer) error {
 		if action != "status" {
 			return fmt.Errorf("unsupported all executor action %q", action)
 		}
-		statuses, err := assistantbridge.ExecutorStatuses(policy)
+		store, storeErr := credentials.NewStore("", "")
+		if storeErr != nil {
+			return storeErr
+		}
+		bridge, bridgeErr := mcpbridge.New(store)
+		if bridgeErr != nil {
+			return bridgeErr
+		}
+		statuses, err := assistantbridge.ExecutorStatusesWithBridge(ctx, policy, bridge)
 		if err != nil {
 			return err
 		}

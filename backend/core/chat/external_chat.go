@@ -65,6 +65,7 @@ type chatExecutorStatus struct {
 	Installed         bool   `json:"installed"`
 	HostOnline        bool   `json:"host_online"`
 	Available         bool   `json:"available"`
+	Connected         bool   `json:"connected"`
 	UnavailableReason string `json:"unavailable_reason,omitempty"`
 }
 

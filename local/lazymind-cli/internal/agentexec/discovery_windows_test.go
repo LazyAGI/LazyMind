@@ -118,6 +118,50 @@ func TestWindowsCommandDiscoveryUsesAppPaths(t *testing.T) {
 	}
 }
 
+func TestWindowsCommandDiscoveryFindsPackagedCLIWithoutProductPathRules(t *testing.T) {
+	localAppData := t.TempDir()
+	command := filepath.Join(localAppData, "Programs", "Vendor App", "resources", "custom-agent.cmd")
+	if err := os.MkdirAll(filepath.Dir(command), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(command, []byte("@echo off\r\necho 1.0.0\r\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("LOCALAPPDATA", localAppData)
+	t.Setenv("PATH", "")
+
+	candidates := platformExecutableCandidates([]string{"custom-agent"})
+	if len(candidates) == 0 || !SameExecutable(candidates[0], command) {
+		t.Fatalf("candidates=%#v want=%q", candidates, command)
+	}
+}
+
+func TestWindowsCommandDiscoveryFindsCLIAlongsideBoundDesktopApplication(t *testing.T) {
+	root := t.TempDir()
+	desktop := filepath.Join(root, "Custom App.exe")
+	command := filepath.Join(root, "resources", "custom-agent.cmd")
+	if err := os.WriteFile(desktop, []byte("test"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(command), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(command, []byte("@echo off\r\necho 1.0.0\r\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("LAZYMIND_HOME", filepath.Join(root, "lazymind"))
+	t.Setenv("LOCALAPPDATA", filepath.Join(root, "empty-local-app-data"))
+	t.Setenv("PATH", "")
+	if _, err := SetExecutableBinding(CodexDesktop, desktop); err != nil {
+		t.Fatal(err)
+	}
+
+	candidates := platformExecutableCandidates([]string{"custom-agent"})
+	if len(candidates) == 0 || !SameExecutable(candidates[0], command) {
+		t.Fatalf("candidates=%#v want=%q", candidates, command)
+	}
+}
+
 func TestWindowsDesktopDiscoveryUsesUninstallRegistration(t *testing.T) {
 	installDirectory := t.TempDir()
 	displayName := fmt.Sprintf("LazyMind Test Agent %d", time.Now().UnixNano())

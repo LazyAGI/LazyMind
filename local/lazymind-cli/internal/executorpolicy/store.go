@@ -10,12 +10,21 @@ import (
 
 var providers = []string{"codex", "cursor", "workbuddy"}
 
+type BridgeState string
+
+const (
+	BridgeReady                  BridgeState = "ready"
+	BridgeAuthenticationRequired BridgeState = "authentication_required"
+	BridgeUnavailable            BridgeState = "unavailable"
+)
+
 type Status struct {
-	Provider          string `json:"provider"`
-	Enabled           bool   `json:"enabled"`
-	Installed         bool   `json:"installed,omitempty"`
-	Ready             bool   `json:"ready,omitempty"`
-	UnavailableReason string `json:"unavailable_reason,omitempty"`
+	Provider          string      `json:"provider"`
+	Enabled           bool        `json:"enabled"`
+	Installed         bool        `json:"installed,omitempty"`
+	Ready             bool        `json:"ready,omitempty"`
+	UnavailableReason string      `json:"unavailable_reason,omitempty"`
+	BridgeState       BridgeState `json:"bridge_state,omitempty"`
 }
 
 type Store struct {

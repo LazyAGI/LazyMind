@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   listConversations: vi.fn(),
   setPinned: vi.fn(),
   deleteConversation: vi.fn(),
+  listChatExecutors: vi.fn(),
   messageSuccess: vi.fn(),
   messageError: vi.fn(),
 }));
@@ -51,6 +52,9 @@ vi.mock("@/modules/chat/utils/request", () => ({
     conversationServiceListConversations: mocks.listConversations,
     conversationServiceSetPinned: mocks.setPinned,
     conversationServiceDeleteConversation: mocks.deleteConversation,
+  }),
+  ConversationSettingsApi: () => ({
+    listChatExecutors: mocks.listChatExecutors,
   }),
 }));
 
@@ -135,6 +139,9 @@ describe("RecordList conversation pinning", () => {
         conversations: [newerConversation, olderConversation],
         next_page_token: "",
       },
+    });
+    mocks.listChatExecutors.mockResolvedValue({
+      data: { data: { executors: [] } },
     });
   });
 

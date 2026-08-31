@@ -28,7 +28,15 @@ const (
 	maxAuthBody      = 1 << 20
 )
 
-var errNotLoggedIn = errors.New("not logged in to LazyMind; sign in to the local LazyMind page and try again")
+var ErrAuthenticationRequired = errors.New("not logged in to LazyMind; sign in to the local LazyMind page and try again")
+
+func IsAuthenticationRequired(err error) bool {
+	if errors.Is(err, ErrAuthenticationRequired) {
+		return true
+	}
+	var responseErr *apiError
+	return errors.As(err, &responseErr) && responseErr.StatusCode == http.StatusUnauthorized
+}
 
 type Credentials struct {
 	ServerURL    string  `json:"server_url"`
@@ -114,7 +122,7 @@ func (s *Store) AccessToken(ctx context.Context) (string, error) {
 	var token string
 	err := s.withLock(func() error {
 		value, err := s.loadUnlocked()
-		if errors.Is(err, errNotLoggedIn) {
+		if errors.Is(err, ErrAuthenticationRequired) {
 			value, err = s.bootstrapLocalSessionUnlocked(ctx)
 		}
 		if err != nil {
@@ -178,7 +186,7 @@ func (s *Store) bootstrapLocalSessionForServerUnlocked(ctx context.Context, pref
 		}
 		return value, nil
 	}
-	return Credentials{}, errNotLoggedIn
+	return Credentials{}, ErrAuthenticationRequired
 }
 
 func (s *Store) ForceRefresh(ctx context.Context, rejectedAccessToken string) (string, error) {
@@ -233,7 +241,7 @@ func (s *Store) ServerURL(ctx context.Context) (string, error) {
 
 func (s *Store) refreshUnlocked(ctx context.Context, current Credentials) (Credentials, error) {
 	if strings.TrimSpace(current.RefreshToken) == "" {
-		return Credentials{}, errNotLoggedIn
+		return Credentials{}, ErrAuthenticationRequired
 	}
 	var response struct {
 		AccessToken  string `json:"access_token"`
@@ -277,7 +285,7 @@ func (s *Store) refreshOrBootstrapUnlocked(ctx context.Context, current Credenti
 	}
 	bootstrapped, bootstrapErr := s.bootstrapLocalSessionForServerUnlocked(ctx, current.ServerURL, true)
 	if bootstrapErr != nil {
-		return Credentials{}, fmt.Errorf("%v; restore local LazyMind session: %w", err, bootstrapErr)
+		return Credentials{}, fmt.Errorf("%w; restore local LazyMind session: %w", err, bootstrapErr)
 	}
 	return bootstrapped, nil
 }
@@ -302,7 +310,7 @@ func localSessionCanRecover(serverURL string, err error) bool {
 func (s *Store) loadUnlocked() (Credentials, error) {
 	body, err := os.ReadFile(s.path())
 	if errors.Is(err, os.ErrNotExist) {
-		return Credentials{}, errNotLoggedIn
+		return Credentials{}, ErrAuthenticationRequired
 	}
 	if err != nil {
 		return Credentials{}, fmt.Errorf("read credentials: %w", err)
@@ -313,7 +321,7 @@ func (s *Store) loadUnlocked() (Credentials, error) {
 	}
 	value.ServerURL = normalizeServerURL(value.ServerURL)
 	if value.ServerURL == "" || value.AccessToken == "" || value.RefreshToken == "" {
-		return Credentials{}, errNotLoggedIn
+		return Credentials{}, ErrAuthenticationRequired
 	}
 	return value, nil
 }

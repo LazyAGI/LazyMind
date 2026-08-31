@@ -39,6 +39,14 @@ func ListChatExecutors(w http.ResponseWriter, r *http.Request) {
 			}
 			status.Installed, status.HostOnline, status.Available = host.Installed, host.HostOnline, host.Available
 			status.UnavailableReason = host.UnavailableReason
+			var connectedSessions int64
+			if err := store.DB().WithContext(r.Context()).Model(&orm.ExternalAgentSession{}).
+				Where("owner_user_id = ? AND provider = ? AND active = ?", owner, definition.ID, true).
+				Count(&connectedSessions).Error; err != nil {
+				common.ReplyErr(w, err.Error(), http.StatusServiceUnavailable)
+				return
+			}
+			status.Connected = connectedSessions > 0
 		}
 		executors = append(executors, status)
 	}

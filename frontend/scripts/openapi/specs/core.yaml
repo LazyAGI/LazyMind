@@ -4846,6 +4846,8 @@ components:
                     $ref: '#/components/schemas/CheckModelProviderData'
                 id:
                     type: string
+                is_verified:
+                    type: boolean
                 name:
                     type: string
                 user_model_provider_id:
@@ -4853,6 +4855,7 @@ components:
             required:
                 - base_url
                 - id
+                - is_verified
                 - name
                 - user_model_provider_id
             type: object
@@ -5443,6 +5446,8 @@ components:
                     type: string
                 id:
                     type: string
+                is_verified:
+                    type: boolean
                 name:
                     type: string
                 user_model_provider_id:
@@ -5451,6 +5456,7 @@ components:
                 - api_key
                 - base_url
                 - id
+                - is_verified
                 - name
                 - user_model_provider_id
             type: object

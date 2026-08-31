@@ -27,20 +27,22 @@ import (
 )
 
 const (
-	DefaultAddress    = "127.0.0.1:19091"
-	agentLoginTimeout = 2 * time.Minute
+	DefaultAddress     = "127.0.0.1:19091"
+	agentLoginTimeout  = 2 * time.Minute
+	bridgeProbeTimeout = 5 * time.Second
 )
 
 type Server struct {
-	address string
-	bridge  *mcpbridge.Bridge
-	store   *credentials.Store
-	policy  *executorpolicy.Store
-	mu      sync.Mutex
-	stop    context.CancelFunc
-	loginMu sync.Mutex
-	logins  map[string]agentLogin
-	loginID uint64
+	address       string
+	bridge        *mcpbridge.Bridge
+	executorProbe bridgeProber
+	store         *credentials.Store
+	policy        *executorpolicy.Store
+	mu            sync.Mutex
+	stop          context.CancelFunc
+	loginMu       sync.Mutex
+	logins        map[string]agentLogin
+	loginID       uint64
 
 	loginOverride func(context.Context, string) error
 }
@@ -67,7 +69,7 @@ func New(address string, bridge *mcpbridge.Bridge, store *credentials.Store, pol
 		return nil, errors.New("Assistant Bridge must listen on the loopback interface")
 	}
 	return &Server{
-		address: address, bridge: bridge, store: store, policy: policy,
+		address: address, bridge: bridge, executorProbe: bridge, store: store, policy: policy,
 		logins: make(map[string]agentLogin),
 	}, nil
 }
@@ -280,14 +282,43 @@ func (s *Server) handleExecutableBinding(writer http.ResponseWriter, request *ht
 	})
 }
 
-func (s *Server) handleExecutorPolicies(writer http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleExecutorPolicies(writer http.ResponseWriter, request *http.Request) {
 	s.policy.Recheck()
-	statuses, err := ExecutorStatuses(s.policy)
+	statuses, err := ExecutorStatusesWithBridge(request.Context(), s.policy, s.executorProbe)
 	if err != nil {
 		writeError(writer, err)
 		return
 	}
 	writeJSON(writer, http.StatusOK, map[string]any{"executors": statuses})
+}
+
+type bridgeProber interface {
+	Probe(context.Context) (mcpbridge.ProbeResult, error)
+}
+
+func ExecutorStatusesWithBridge(
+	ctx context.Context,
+	policy *executorpolicy.Store,
+	bridge bridgeProber,
+) (map[string]executorpolicy.Status, error) {
+	statuses, err := ExecutorStatuses(policy)
+	if err != nil {
+		return nil, err
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, bridgeProbeTimeout)
+	defer cancel()
+	_, probeErr := bridge.Probe(probeCtx)
+	state := executorpolicy.BridgeReady
+	if credentials.IsAuthenticationRequired(probeErr) {
+		state = executorpolicy.BridgeAuthenticationRequired
+	} else if probeErr != nil {
+		state = executorpolicy.BridgeUnavailable
+	}
+	for provider, status := range statuses {
+		status.BridgeState = state
+		statuses[provider] = status
+	}
+	return statuses, nil
 }
 
 func ExecutorStatuses(policy *executorpolicy.Store) (map[string]executorpolicy.Status, error) {
@@ -452,10 +483,13 @@ func (s *Server) agentAction(ctx context.Context, agent, action string) (agentin
 	case "disconnect":
 		return adapter.Disconnect(ctx), nil
 	case "login":
-		if agent != string(mcpclient.Cursor) {
+		if agent != string(mcpclient.Cursor) && agent != string(mcpclient.WorkBuddy) {
 			return agentintegration.Status{}, fmt.Errorf("unsupported %s action %q", agent, action)
 		}
 		s.startAgentLogin(agent, func(loginCtx context.Context) error {
+			if agent == string(mcpclient.WorkBuddy) {
+				return workbuddyadapter.Login(loginCtx, "")
+			}
 			return cursoradapter.Login(loginCtx, "")
 		})
 		return loginOpenedStatus(adapter.Status(ctx)), nil

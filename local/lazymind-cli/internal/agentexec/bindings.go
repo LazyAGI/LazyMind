@@ -93,12 +93,28 @@ func SetExecutableBinding(target BindingTarget, path string) (string, error) {
 }
 
 func resolveBindingExecutable(target BindingTarget, path string) (string, error) {
-	switch target {
-	case CodexCLI, CursorCLI, CodeBuddyCLI:
+	if isCLIBindingTarget(target) {
 		return ResolveRunnable(path)
-	default:
-		return ResolveExecutable(path)
 	}
+	return ResolveDesktopApplication(path)
+}
+
+func isCLIBindingTarget(target BindingTarget) bool {
+	return target == CodexCLI || target == CursorCLI || target == CodeBuddyCLI
+}
+
+func desktopApplicationBindings() []string {
+	bindings, err := ExecutableBindings()
+	if err != nil {
+		return nil
+	}
+	paths := make([]string, 0, len(bindings))
+	for target, path := range bindings {
+		if !isCLIBindingTarget(target) {
+			paths = append(paths, path)
+		}
+	}
+	return paths
 }
 
 func ClearExecutableBinding(target BindingTarget) error {
