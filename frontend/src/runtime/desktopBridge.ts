@@ -82,6 +82,7 @@ export type DesktopExecutorProvider = "codex" | "cursor" | "workbuddy";
 export type DesktopExecutorPolicyAction = "enable" | "disable";
 export type DesktopAgentBindingTarget =
   | "codex-cli"
+  | "codex-desktop"
   | "cursor-cli"
   | "codebuddy-cli"
   | "cursor-desktop"

@@ -833,7 +833,7 @@ const zhCN = {
     executorLoginRequired: "{{agent}} 未登录",
     executorStatusCheckFailed: "登录状态检测失败，请重新检测；如仍失败，可在终端运行对应 CLI 的状态命令确认。",
     mcpClients: {
-      codex: "Codex CLI",
+      codex: "Codex Desktop",
       cursor: "Cursor 桌面版",
       workbuddy: "WorkBuddy 桌面版",
       raccoon: "商汤小浣熊桌面版",
@@ -847,11 +847,16 @@ const zhCN = {
     enterExecutablePath: "输入本机路径",
     executablePathTitle: "配置本机程序路径",
     executablePathDescription: "输入运行 Docker 的主机上的完整可执行文件路径。LazyMind 会在本机验证该文件，不会把路径保存到服务端数据库。",
-    executablePathPlaceholder: "例如 C:\\Program Files\\Cursor\\Cursor.exe",
+    executablePathPlaceholderMacCodexDesktop: "例如 /Applications/ChatGPT.app/Contents/MacOS/ChatGPT",
+    executablePathPlaceholderMacCLI: "例如 /opt/homebrew/bin/codex",
+    executablePathPlaceholderMacDesktop: "例如 /Applications/Cursor.app/Contents/MacOS/Cursor",
+    executablePathPlaceholderWindowsCLI: "例如 C:\\Users\\你的用户名\\AppData\\Local\\Programs\\Codex\\resources\\codex.exe",
+    executablePathPlaceholderWindowsDesktop: "例如 C:\\Program Files\\ChatGPT\\ChatGPT.exe",
     restoreAutoDetection: "恢复自动检测",
     executableBindingSaved: "已保存本机程序路径。",
     executableBindingCleared: "已恢复自动检测。",
     requirements: {
+      codex_desktop: { ready: "Codex Desktop 已安装", missing: "Codex Desktop 未安装" },
       codex_cli: { ready: "Codex CLI 已安装", missing: "Codex CLI 未安装" },
       codex_login: { ready: "Codex CLI 已登录", missing: "Codex CLI 未登录" },
       cursor_desktop: { ready: "Cursor 桌面版已安装", missing: "Cursor 桌面版未安装" },
@@ -868,9 +873,9 @@ const zhCN = {
     guides: {
       codex: {
         mcp: {
-          install: "终端执行 `codex --version` 和 `codex login status`；两条命令均成功后完成。",
-          connect: "启用后，LazyMind 在 Codex CLI 用户配置中添加名为 `lazymind` 的 MCP 服务。",
-          verify: "重启 Codex CLI，执行 `codex mcp list`，确认 `lazymind` 已启用。",
+          install: "安装 Codex Desktop；此流程不使用 Codex CLI 的安装状态。",
+          connect: "启用后，LazyMind 在 Codex 共用配置中添加名为 `lazymind` 的 MCP 服务。",
+          verify: "重启 Codex Desktop，在 MCP servers 中确认 `lazymind` 已启用。",
         },
         executor: {
           install: "终端执行 `codex --version`，确认 Codex CLI 可运行。",

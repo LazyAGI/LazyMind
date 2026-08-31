@@ -51,9 +51,9 @@ interface AgentDefinition {
 const AGENTS: AgentDefinition[] = [
   {
     id: "codex", name: "Codex", icon: "/assistant-icons/codex.png",
-    installURL: "https://developers.openai.com/codex/cli",
+    installURL: "https://learn.chatgpt.com/docs/app",
     executorName: "Codex CLI", executorLogin: true,
-    mcpBindingTarget: "codex-cli", executorBindingTarget: "codex-cli",
+    mcpBindingTarget: "codex-desktop", executorBindingTarget: "codex-cli",
   },
   {
     id: "cursor", name: "Cursor", icon: "/assistant-icons/cursor.png",
@@ -344,12 +344,30 @@ export default function AgentIntegrationPage() {
         <Input
           autoFocus
           value={manualBindingPath}
-          placeholder={t("agentIntegration.executablePathPlaceholder")}
+          placeholder={t(executablePathPlaceholderKey(manualBindingTarget))}
           onChange={(event) => setManualBindingPath(event.target.value)}
         />
       </Modal>
     </div>
   );
+}
+
+function executablePathPlaceholderKey(target: DesktopAgentBindingTarget | null): string {
+  const desktopPlatform = getDesktopPlatform();
+  const browserPlatform = typeof navigator === "undefined"
+    ? ""
+    : `${navigator.platform || ""} ${navigator.userAgent || ""}`.toLowerCase();
+  const isMac = desktopPlatform === "darwin" || (!desktopPlatform && browserPlatform.includes("mac"));
+  if (isMac) {
+    return target === "codex-desktop"
+      ? "agentIntegration.executablePathPlaceholderMacCodexDesktop"
+      : target?.endsWith("-cli")
+        ? "agentIntegration.executablePathPlaceholderMacCLI"
+        : "agentIntegration.executablePathPlaceholderMacDesktop";
+  }
+  return target?.endsWith("-cli")
+    ? "agentIntegration.executablePathPlaceholderWindowsCLI"
+    : "agentIntegration.executablePathPlaceholderWindowsDesktop";
 }
 
 function AgentCard({
@@ -709,6 +727,12 @@ function AgentConfigurationFlow({
             />
           )}
         </div>
+        {mcpStatus?.message && ["error", "conflict"].includes(mcpState) && (
+          <div className="agent-integration-stage-hint is-error" role="alert">
+            <WarningOutlined />
+            {mcpStatus.message}
+          </div>
+        )}
         {!mcpCanToggle && !executorPrepared && (
           <div className="agent-integration-stage-hint">
             <InfoCircleFilled />

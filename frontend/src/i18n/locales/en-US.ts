@@ -860,7 +860,7 @@ const enUS = {
     executorLoginRequired: "{{agent}} is not signed in",
     executorStatusCheckFailed: "Sign-in status could not be checked. Check again; if it still fails, run the CLI status command in a terminal.",
     mcpClients: {
-      codex: "Codex CLI",
+      codex: "Codex Desktop",
       cursor: "Cursor Desktop",
       workbuddy: "WorkBuddy Desktop",
       raccoon: "SenseTime Raccoon Desktop",
@@ -874,11 +874,16 @@ const enUS = {
     enterExecutablePath: "Enter local path",
     executablePathTitle: "Configure a local program path",
     executablePathDescription: "Enter the full executable path on the host running Docker. LazyMind validates it locally and does not save it in the server database.",
-    executablePathPlaceholder: "For example, C:\\Program Files\\Cursor\\Cursor.exe",
+    executablePathPlaceholderMacCodexDesktop: "For example, /Applications/ChatGPT.app/Contents/MacOS/ChatGPT",
+    executablePathPlaceholderMacCLI: "For example, /opt/homebrew/bin/codex",
+    executablePathPlaceholderMacDesktop: "For example, /Applications/Cursor.app/Contents/MacOS/Cursor",
+    executablePathPlaceholderWindowsCLI: "For example, C:\\Users\\you\\AppData\\Local\\Programs\\Codex\\resources\\codex.exe",
+    executablePathPlaceholderWindowsDesktop: "For example, C:\\Program Files\\ChatGPT\\ChatGPT.exe",
     restoreAutoDetection: "Restore auto-detection",
     executableBindingSaved: "The local executable path was saved.",
     executableBindingCleared: "Automatic detection was restored.",
     requirements: {
+      codex_desktop: { ready: "Codex Desktop is installed", missing: "Codex Desktop is not installed" },
       codex_cli: { ready: "Codex CLI is installed", missing: "Codex CLI is not installed" },
       codex_login: { ready: "Codex CLI is signed in", missing: "Codex CLI is not signed in" },
       cursor_desktop: { ready: "Cursor Desktop is installed", missing: "Cursor Desktop is not installed" },
@@ -895,9 +900,9 @@ const enUS = {
     guides: {
       codex: {
         mcp: {
-          install: "Run `codex --version` and `codex login status`; both commands must succeed.",
-          connect: "When enabled, LazyMind adds an MCP server named `lazymind` to the Codex CLI user configuration.",
-          verify: "Restart Codex CLI and run `codex mcp list`; confirm `lazymind` is enabled.",
+          install: "Install Codex Desktop. This flow does not use the Codex CLI installation status.",
+          connect: "When enabled, LazyMind adds an MCP server named `lazymind` to the shared Codex configuration.",
+          verify: "Restart Codex Desktop and confirm `lazymind` is enabled under MCP servers.",
         },
         executor: {
           install: "Run `codex --version` to confirm Codex CLI is available.",

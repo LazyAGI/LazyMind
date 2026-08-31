@@ -256,6 +256,11 @@
     background: #f4f7fb;
     color: #728096;
     font-size: 12px;
+
+    &.is-error {
+      background: #fff2f0;
+      color: #c53b32;
+    }
   }
 
   .agent-integration-methods {

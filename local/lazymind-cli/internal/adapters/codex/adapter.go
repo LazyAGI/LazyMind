@@ -81,19 +81,13 @@ func New(binary, self string, bridge *mcpbridge.Bridge) (*Adapter, error) {
 	}, nil
 }
 
-func (a *Adapter) Status(ctx context.Context) agentintegration.Status {
-	installed := a.discoveryError == nil
-	requirements := []agentintegration.Requirement{
-		{ID: "codex_cli", Description: "Install the Codex CLI.", Satisfied: installed},
-		{ID: "codex_login", Description: "Sign in to Codex.", Satisfied: installed && a.loggedIn(ctx)},
-	}
+func (a *Adapter) Status(context.Context) agentintegration.Status {
+	requirements, err := desktopRequirements()
 	status := agentintegration.Status{
 		Agent: "codex", DisplayName: "Codex", Requirements: requirements,
 	}
-	if !installed {
-		status.State = agentintegration.RequirementsMissing
-		status.Message = a.discoveryError.Error()
-		return status
+	if err != nil {
+		return agentintegration.Fail(status, err.Error())
 	}
 	config, exists, err := a.getConfig()
 	if err != nil {
@@ -107,7 +101,6 @@ func (a *Adapter) Status(ctx context.Context) agentintegration.Status {
 		status.State = agentintegration.Enabled
 	case agentintegration.MissingRequirement(requirements):
 		status.State = agentintegration.RequirementsMissing
-		status.Action = &agentintegration.Action{Kind: "login"}
 	default:
 		status.State = agentintegration.Ready
 		if exists {
@@ -124,6 +117,9 @@ func (a *Adapter) Connect(ctx context.Context) agentintegration.Status {
 	status := a.Status(ctx)
 	if status.State != agentintegration.Ready {
 		return status
+	}
+	if a.discoveryError != nil {
+		return agentintegration.Fail(status, "Codex Desktop runtime is unavailable: "+a.discoveryError.Error())
 	}
 	if _, err := a.bridge.Probe(ctx); err != nil {
 		return agentintegration.Fail(status, "LazyMind MCP is unavailable: "+err.Error())
@@ -161,7 +157,7 @@ func (a *Adapter) Disconnect(ctx context.Context) agentintegration.Status {
 
 func (a *Adapter) Login(ctx context.Context) agentintegration.Status {
 	status := a.Status(ctx)
-	if a.discoveryError != nil || agentintegration.RequirementSatisfied(status.Requirements, "codex_login") {
+	if a.discoveryError != nil {
 		return status
 	}
 	loginCtx, cancel := context.WithTimeout(ctx, interactiveTimeout)
@@ -172,9 +168,18 @@ func (a *Adapter) Login(ctx context.Context) agentintegration.Status {
 	return a.Status(ctx)
 }
 
-func (a *Adapter) loggedIn(ctx context.Context) bool {
-	_, err := a.run(ctx, "login", "status")
-	return err == nil
+func desktopRequirements() ([]agentintegration.Requirement, error) {
+	state, err := agentexec.InspectDesktopApplication(agentexec.DesktopApplication{
+		BindingTarget:   agentexec.CodexDesktop,
+		ExecutableNames: []string{"ChatGPT.exe", "Codex.exe"},
+		DisplayNames:    []string{"ChatGPT", "Codex"},
+	})
+	if err != nil {
+		return nil, err
+	}
+	return []agentintegration.Requirement{{
+		ID: "codex_desktop", Description: "Install the Codex desktop app.", Satisfied: state.Installed,
+	}}, nil
 }
 
 func (a *Adapter) getConfig() (mcpConfig, bool, error) {
@@ -276,10 +281,17 @@ func codexCandidates(home, name string) []string {
 	}
 	switch runtime.GOOS {
 	case "darwin":
-		candidates = append(candidates, "/opt/homebrew/bin/codex", "/usr/local/bin/codex", "/Applications/Codex.app/Contents/Resources/codex")
+		candidates = append(candidates,
+			"/opt/homebrew/bin/codex", "/usr/local/bin/codex",
+			"/Applications/ChatGPT.app/Contents/Resources/codex",
+			"/Applications/Codex.app/Contents/Resources/codex",
+		)
 	case "windows":
 		if root := strings.TrimSpace(os.Getenv("LOCALAPPDATA")); root != "" {
-			candidates = append(candidates, filepath.Join(root, "Programs", "Codex", "resources", name))
+			candidates = append(candidates,
+				filepath.Join(root, "Programs", "ChatGPT", "resources", name),
+				filepath.Join(root, "Programs", "Codex", "resources", name),
+			)
 		}
 	}
 	return candidates
