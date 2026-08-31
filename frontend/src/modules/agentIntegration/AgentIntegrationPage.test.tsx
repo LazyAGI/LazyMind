@@ -70,6 +70,7 @@ vi.mock("react-i18next", () => ({
         "agentIntegration.awaitingConfirmation": "等待确认",
         "agentIntegration.configurationIncomplete": "配置未完成",
         "agentIntegration.configurationIssue": "配置异常",
+        "agentIntegration.bridgeUnavailable": "本机助理桥接器未运行",
         "agentIntegration.sessionPrivacyNotice": `启用后，LazyMind 会读取 ${agent} 的本机会话信息；关闭后停止读取。`,
         "agentIntegration.guideFooter": "完成后重新检测",
         "agentIntegration.checkAgain": "重新检测",
@@ -304,7 +305,7 @@ describe("AgentIntegrationPage", () => {
     const workbuddyStatus = {
       agent: "workbuddy",
       display_name: "WorkBuddy",
-      state: "ready",
+      state: "enabled",
       requirements: [
         { id: "workbuddy_desktop", description: "WorkBuddy installed", satisfied: true },
         { id: "workbuddy_desktop_initialized", description: "WorkBuddy initialized", satisfied: true },
@@ -332,6 +333,28 @@ describe("AgentIntegrationPage", () => {
     expect(within(workbuddy).getByText(/不提供独立的自动登录命令/)).toHaveTextContent("/login");
     fireEvent.click(within(workbuddy).getByRole("button", { name: /打开登录终端/ }));
     await waitFor(() => expect(mocks.action).toHaveBeenCalledWith("workbuddy", "login"));
+
+    mocks.executorPolicies.mockResolvedValue({
+      ok: true,
+      data: { workbuddy: { provider: "workbuddy", enabled: true, installed: true, ready: true } },
+    });
+    mocks.executors.mockResolvedValue({ data: { data: { executors: [{
+      id: "workbuddy", display_name: "CodeBuddy Code CLI", kind: "external",
+      installed: true, host_online: true, available: true, unavailable_reason: "",
+    }] } } });
+    await act(async () => window.dispatchEvent(new Event("focus")));
+    await waitFor(() => expect(within(workbuddy).getByText("执行器账号已登录")).toBeInTheDocument());
+  });
+
+  it("retries a transient Assistant Bridge failure before showing an error", async () => {
+    mocks.statuses
+      .mockResolvedValueOnce({ ok: false, reason: "unavailable", error: new Error("connection reset") })
+      .mockResolvedValueOnce({ ok: true, data: { codex: readyCodexStatus } });
+
+    render(<AgentIntegrationPage />);
+
+    await waitFor(() => expect(mocks.statuses).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText("本机助理桥接器未运行")).not.toBeInTheDocument();
   });
 
   it("does not report a sign-in probe failure before the CLI is installed", async () => {

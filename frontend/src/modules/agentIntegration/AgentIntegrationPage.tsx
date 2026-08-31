@@ -89,10 +89,22 @@ const AGENTS: AgentDefinition[] = [
 const EXECUTOR_SYNC_ATTEMPTS = 6;
 const EXECUTOR_SYNC_DELAY_MS = 500;
 const EXTERNAL_CONFIGURATION_RECHECK_DELAYS_MS = [1_500, 4_000, 10_000];
+const LOGIN_RECHECK_DELAYS_MS = [1_000, 2_500, 5_000, 10_000, 20_000, 40_000, 80_000, 120_000];
+const BRIDGE_RETRY_DELAYS_MS = [250, 750];
 
 type StatusMap = Partial<Record<DesktopAgent, DesktopAgentIntegrationStatus>>;
 type ExecutorPolicyMap = Partial<Record<DesktopExecutorProvider, DesktopExecutorPolicy>>;
 type BindingMap = Partial<Record<DesktopAgentBindingTarget, string>>;
+
+async function retryBridgeResult<T extends { ok: boolean }>(call: () => Promise<T>): Promise<T> {
+  let result = await call();
+  for (const delay of BRIDGE_RETRY_DELAYS_MS) {
+    if (result.ok) return result;
+    await new Promise((resolve) => window.setTimeout(resolve, delay));
+    result = await call();
+  }
+  return result;
+}
 
 function executorRuntimeState(
   status?: ChatExecutorDescriptor,
@@ -125,22 +137,27 @@ export default function AgentIntegrationPage() {
   const [manualBindingTarget, setManualBindingTarget] = useState<DesktopAgentBindingTarget | null>(null);
   const [manualBindingPath, setManualBindingPath] = useState("");
   const [externalConfigurationAgent, setExternalConfigurationAgent] = useState<DesktopAgent | null>(null);
+  const [pendingLoginAgent, setPendingLoginAgent] = useState<DesktopAgent | null>(null);
   const refreshVersion = useRef(0);
+  const initialRefreshDone = useRef(false);
 
   const refresh = useCallback(async () => {
     const version = ++refreshVersion.current;
     const isCurrent = () => refreshVersion.current === version;
-    setLoading(true);
+    if (!initialRefreshDone.current) setLoading(true);
     let nextError = "";
     let localBridgeUnavailable = false;
     let currentPolicies: ExecutorPolicyMap = {};
     try {
-      const result = await agentIntegrationStatuses();
+      const result = await retryBridgeResult(agentIntegrationStatuses);
       if (!isCurrent()) return;
       if (result.ok) setStatuses(result.data);
       else localBridgeUnavailable = true;
 
-      const policyResult = await executorIntegrationPolicies();
+      const [policyResult, bindingResult] = await Promise.all([
+        retryBridgeResult(executorIntegrationPolicies),
+        retryBridgeResult(agentExecutableBindings),
+      ]);
       if (!isCurrent()) return;
       if (policyResult.ok) {
         currentPolicies = policyResult.data;
@@ -148,8 +165,6 @@ export default function AgentIntegrationPage() {
       }
       else localBridgeUnavailable = true;
 
-      const bindingResult = await agentExecutableBindings();
-      if (!isCurrent()) return;
       if (bindingResult.ok) setBindings(bindingResult.data);
       else localBridgeUnavailable = true;
 
@@ -177,6 +192,7 @@ export default function AgentIntegrationPage() {
       }
     } finally {
       if (isCurrent()) {
+        initialRefreshDone.current = true;
         setError(nextError);
         setBridgeUnavailable(localBridgeUnavailable);
         setLoading(false);
@@ -192,20 +208,24 @@ export default function AgentIntegrationPage() {
   }, [refresh]);
 
   useEffect(() => {
-    if (!externalConfigurationAgent) return undefined;
+    const pendingAgent = pendingLoginAgent || externalConfigurationAgent;
+    if (!pendingAgent) return undefined;
     const refreshAfterExternalAction = () => {
       if (document.visibilityState === "visible") void refresh();
     };
     window.addEventListener("focus", refreshAfterExternalAction);
     document.addEventListener("visibilitychange", refreshAfterExternalAction);
-    const timers = EXTERNAL_CONFIGURATION_RECHECK_DELAYS_MS.map((delay) =>
+    const delays = pendingLoginAgent
+      ? LOGIN_RECHECK_DELAYS_MS
+      : EXTERNAL_CONFIGURATION_RECHECK_DELAYS_MS;
+    const timers = delays.map((delay) =>
       window.setTimeout(() => void refresh(), delay));
     return () => {
       window.removeEventListener("focus", refreshAfterExternalAction);
       document.removeEventListener("visibilitychange", refreshAfterExternalAction);
       timers.forEach((timer) => window.clearTimeout(timer));
     };
-  }, [externalConfigurationAgent, refresh]);
+  }, [externalConfigurationAgent, pendingLoginAgent, refresh]);
 
   useEffect(() => {
     if (externalConfigurationAgent &&
@@ -213,6 +233,15 @@ export default function AgentIntegrationPage() {
       setExternalConfigurationAgent(null);
     }
   }, [externalConfigurationAgent, statuses]);
+
+  useEffect(() => {
+    if (!pendingLoginAgent) return;
+    const policy = executorPolicies[pendingLoginAgent as DesktopExecutorProvider];
+    const executor = executors.find((item) => item.id === pendingLoginAgent);
+    if (policy?.ready && executor?.host_online && executor.available) {
+      setPendingLoginAgent(null);
+    }
+  }, [executors, executorPolicies, pendingLoginAgent]);
 
   const runAction = async (agent: DesktopAgent, nextAction: DesktopAgentIntegrationAction) => {
     const key = `${agent}:${nextAction}`;
@@ -227,14 +256,15 @@ export default function AgentIntegrationPage() {
     setError("");
     if (nextAction === "disconnect") {
       message.success(t("agentIntegration.disconnectSuccess", { agent: result.data.display_name }));
-    } else if (result.data.state === "enabled") {
-      message.success(t("agentIntegration.enableSuccess", { agent: result.data.display_name }));
     } else if (nextAction === "login") {
       const definition = AGENTS.find((item) => item.id === agent);
       const executorName = definition?.executorName || result.data.display_name;
       message.info(t(definition?.executorLoginMode === "interactive"
         ? "agentIntegration.interactiveLoginStarted"
         : "agentIntegration.loginStarted", { agent: executorName }));
+      setPendingLoginAgent(agent);
+    } else if (result.data.state === "enabled") {
+      message.success(t("agentIntegration.enableSuccess", { agent: result.data.display_name }));
     }
   };
 
