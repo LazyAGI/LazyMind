@@ -26,6 +26,7 @@ import { RightOutlined, ScheduleOutlined } from "@ant-design/icons";
 import { useChatThinkStore } from "@/modules/chat/store/chatThink";
 import FeaturedCases from "@/modules/showcase/FeaturedCases";
 import { getShowcaseCase, type ShowcaseCase } from "@/modules/showcase/api";
+import { openCloudTokenPlan } from "@/runtime/desktopBridge";
 
 function readRunInBackgroundMode() {
   try {
@@ -104,7 +105,9 @@ const NewChatPage = () => {
   const runtimeInitializingReason = runInBackground
     ? t("runtime.aiServiceInitializingWorkflow")
     : t("runtime.aiServiceInitializingMessage");
-  const chatDisabledReason = modelProviderGuard.needsModelProviderConfig
+  const chatDisabledReason = modelProviderGuard.cloudPlanRequired
+    ? t("chat.cloudPlanRequiredTitle")
+    : modelProviderGuard.needsModelProviderConfig
     ? t("chat.modelProviderRequiredTitle")
     : modelProviderGuard.status === "error"
       ? localizeErrorCode("2000509")
@@ -113,7 +116,9 @@ const NewChatPage = () => {
         : modelProviderGuard.isChecking
           ? t("chat.modelProviderChecking")
           : t("chat.modelProviderRequiredTitle");
-  const chatDisabledDescription = modelProviderGuard.needsModelProviderConfig
+  const chatDisabledDescription = modelProviderGuard.cloudPlanRequired
+    ? t("chat.cloudPlanRequiredDesc")
+    : modelProviderGuard.needsModelProviderConfig
     ? t("chat.modelProviderRequiredDesc")
     : modelProviderGuard.status === "error"
       ? localizeErrorCode("2000509")
@@ -122,7 +127,11 @@ const NewChatPage = () => {
         : modelProviderGuard.isChecking
           ? t("chat.modelProviderCheckingDesc")
           : t("chat.modelProviderRequiredDesc");
-  const chatDisabledAction = modelProviderGuard.isChecking ? null : modelProviderGuard.status === "error" ? (
+  const chatDisabledAction = modelProviderGuard.isChecking ? null : modelProviderGuard.cloudPlanRequired && modelProviderGuard.cloudPlanURL ? (
+    <Button type="primary" size="small" onClick={() => void openCloudTokenPlan(modelProviderGuard.cloudPlanURL as string)}>
+      {t("chat.openCloudFreePlan")}
+    </Button>
+  ) : modelProviderGuard.status === "error" ? (
     <Button size="small" onClick={() => void modelProviderGuard.refresh()}>
       {t("chat.retryCheckModelProvider")}
     </Button>

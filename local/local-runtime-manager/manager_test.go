@@ -1092,6 +1092,22 @@ func TestProcessComposeRuntimeStatusWaitsForAuthoritativeReady(t *testing.T) {
 	if got := processComposeRuntimeStatus("ready", false); got != "stale" {
 		t.Fatalf("status = %q, want stale", got)
 	}
+	if got := processComposeRuntimeStatus("failed", true); got != "ready" {
+		t.Fatalf("healthy runtime kept stale failed status %q", got)
+	}
+}
+
+func TestExistingRuntimeHealthOverridesStaleFailedState(t *testing.T) {
+	manager := NewRuntimeManager(&fakeRunner{t: t}, filepath.Join(t.TempDir(), "local-runtime-manager"))
+	manager.probeAPI = func(int, time.Duration) bool { return true }
+	manager.runtimeReady = func(context.Context, RuntimeConfig, RuntimePaths) bool { return true }
+	state := RuntimeState{
+		OverallStatus:  "failed",
+		ProcessCompose: ProcessComposeState{APIPort: 19080},
+	}
+	if !manager.isExistingRuntimeRunning(context.Background(), state, RuntimeConfig{Profile: "local"}, RuntimePaths{}) {
+		t.Fatal("live healthy runtime was ignored because persisted state was failed")
+	}
 }
 
 func TestDerivedToolInstallPathsUseLocalBuildRoot(t *testing.T) {

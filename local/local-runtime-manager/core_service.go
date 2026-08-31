@@ -174,6 +174,11 @@ func coreServiceEnv(cfg RuntimeConfig, paths RuntimePaths) []string {
 	coreURL := sqliteURL(paths.CoreDBPath)
 	return []string{
 		"LAZYMIND_RUNTIME_MODE=local",
+		"LAZYMIND_CLOUD_BASE_URL=" + strings.TrimSpace(os.Getenv("LAZYMIND_CLOUD_BASE_URL")),
+		"LAZYMIND_CLOUD_TOKEN_STORE=" + cloudTokenStoreMode(cfg.Profile),
+		"LAZYMIND_CREDENTIAL_MANIFEST_TRUST_PUBLIC_KEY_FILE=" + strings.TrimSpace(os.Getenv("LAZYMIND_CREDENTIAL_MANIFEST_TRUST_PUBLIC_KEY_FILE")),
+		"LAZYMIND_CREDENTIAL_MANIFEST_BOOTSTRAP_PAYLOAD_FILE=" + strings.TrimSpace(os.Getenv("LAZYMIND_CREDENTIAL_MANIFEST_BOOTSTRAP_PAYLOAD_FILE")),
+		"LAZYMIND_CREDENTIAL_MANIFEST_BOOTSTRAP_SIGNATURE_FILE=" + strings.TrimSpace(os.Getenv("LAZYMIND_CREDENTIAL_MANIFEST_BOOTSTRAP_SIGNATURE_FILE")),
 		"LAZYMIND_CORE_HOST=127.0.0.1",
 		"LAZYMIND_CORE_PORT=" + strconv.Itoa(cfg.LocalProxy.CoreHostPort),
 		"ACL_DB_DRIVER=sqlite",
@@ -213,9 +218,16 @@ func coreServiceEnv(cfg RuntimeConfig, paths RuntimePaths) []string {
 		"LAZYMIND_RESOURCE_UPDATE_ENABLED=" + envText("LAZYMIND_RESOURCE_UPDATE_ENABLED", "true"),
 		"LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN=" + envText("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN", "dev-internal-service-token"),
 		"LAZYMIND_WORKFLOW_EXECUTOR_TOKEN=" + envText("LAZYMIND_WORKFLOW_EXECUTOR_TOKEN", "dev-workflow-executor-token"),
-		"LAZYMIND_MODEL_PROVIDER_SECRET_KEY=" + envText("LAZYMIND_MODEL_PROVIDER_SECRET_KEY", "lazymind-core-model-provider-default-secret"),
+		"LAZYMIND_MODEL_PROVIDER_SECRET_KEY=" + strings.TrimSpace(os.Getenv("LAZYMIND_MODEL_PROVIDER_SECRET_KEY")),
 		"LAZYMIND_MCP_SECRET_KEY=" + envText("LAZYMIND_MCP_SECRET_KEY", "lazymind-core-mcp-default-secret"),
 	}
+}
+
+func cloudTokenStoreMode(profile string) string {
+	if strings.EqualFold(strings.TrimSpace(profile), "local") {
+		return "memory"
+	}
+	return "system"
 }
 
 func (m *CoreServiceManager) waitForCoreDatabase(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) error {

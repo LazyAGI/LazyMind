@@ -57,7 +57,8 @@ export type DesktopAgentIntegrationStatusesResult =
 type DesktopBridgeCommand =
   | "openLogsDir"
   | "openDataDir"
-  | "restartRuntime";
+  | "restartRuntime"
+  | "openCloudRegister";
 
 interface LazyMindDesktopBridge {
   openLogsDir?: () => Promise<void> | void;
@@ -71,6 +72,9 @@ interface LazyMindDesktopBridge {
   selectFolder?: () => Promise<string | null> | string | null;
   selectExecutable?: () => Promise<string | null> | string | null;
   exportDiagnostics?: () => Promise<string> | string;
+  openCloudLogin?: (url: string) => Promise<unknown> | unknown;
+  openCloudRegister?: () => Promise<unknown> | unknown;
+  openCloudTokenPlan?: (url: string) => Promise<unknown> | unknown;
 }
 
 function getDesktopBridge(): LazyMindDesktopBridge | undefined {
@@ -106,6 +110,68 @@ export function openLogsDir(): Promise<DesktopBridgeResult> {
 
 export function openDataDir(): Promise<DesktopBridgeResult> {
   return callDesktopBridge("openDataDir");
+}
+
+export async function openCloudRegister(url?: string): Promise<DesktopBridgeResult> {
+  const bridge = getDesktopBridge();
+  if (bridge?.openCloudRegister) {
+    try {
+      await bridge.openCloudRegister();
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, reason: "failed", error };
+    }
+  }
+  return openTrustedCloudBrowserURL(url, "register");
+}
+
+export async function openCloudLogin(url: string): Promise<DesktopBridgeResult> {
+  const bridge = getDesktopBridge();
+  if (!bridge?.openCloudLogin) {
+    return openTrustedCloudBrowserURL(url, "login");
+  }
+  try {
+    await bridge.openCloudLogin(url);
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, reason: "failed", error };
+  }
+}
+
+export async function openCloudTokenPlan(url: string): Promise<DesktopBridgeResult> {
+  const bridge = getDesktopBridge();
+  if (bridge?.openCloudTokenPlan) {
+    try {
+      await bridge.openCloudTokenPlan(url);
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, reason: "failed", error };
+    }
+  }
+  return openTrustedCloudBrowserURL(url, "token-plan");
+}
+
+function openTrustedCloudBrowserURL(value: string | undefined, purpose: "login" | "register" | "token-plan"): DesktopBridgeResult {
+  if (typeof window === "undefined" || !value) {
+    return { ok: false, reason: "unavailable" };
+  }
+  try {
+    const target = new URL(value);
+    const loopbackHTTP = target.protocol === "http:" && (target.hostname === "localhost" || target.hostname === "127.0.0.1");
+    const trustedProtocol = target.protocol === "https:" || loopbackHTTP;
+    const trustedPath = purpose === "login"
+      ? /^\/(?:zh|en)\/desktop\/authorize\/?$/.test(target.pathname) && target.hash === ""
+      : purpose === "register"
+        ? /^\/(?:zh|en)\/register\/?$/.test(target.pathname) && target.search === "" && target.hash === ""
+        : /^\/(?:zh|en)\/console\/?$/.test(target.pathname) && target.search === "" && target.hash === "#token-plan";
+    if (!trustedProtocol || !trustedPath || target.username || target.password) {
+      return { ok: false, reason: "failed" };
+    }
+    window.open(target.toString(), "_blank", "noopener,noreferrer");
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, reason: "failed", error };
+  }
 }
 
 export function runtimeStatus(): Promise<DesktopRuntimeStatusResult> {

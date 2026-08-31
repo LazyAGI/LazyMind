@@ -281,6 +281,15 @@ export default function SkillManagementToolbar({
         <button
           type="button"
           role="tab"
+          className={`memory-skill-view-tab ${skillView === "cloud" ? "is-active" : ""}`}
+          aria-selected={skillView === "cloud"}
+          onClick={() => onSkillViewChange("cloud")}
+        >
+          {t("admin.memorySkillViewCloud")}
+        </button>
+        <button
+          type="button"
+          role="tab"
           className={`memory-skill-view-tab ${skillView === "trash" ? "is-active" : ""}`}
           aria-selected={skillView === "trash"}
           onClick={() => onSkillViewChange("trash")}

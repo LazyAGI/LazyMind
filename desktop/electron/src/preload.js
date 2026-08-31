@@ -14,6 +14,9 @@ function createDesktopBridge(ipcRenderer) {
     notifyAppReady: () => ipcRenderer.send("lazymind:renderer-ready"),
     startupDiagnostics: () => ipcRenderer.invoke("lazymind:startupDiagnostics"),
     copyStartupLogs: () => ipcRenderer.invoke("lazymind:copyStartupLogs"),
+    openCloudLogin: (url) => ipcRenderer.invoke("lazymind:openCloudLogin", url),
+    openCloudRegister: () => ipcRenderer.invoke("lazymind:openCloudRegister"),
+    openCloudTokenPlan: (url) => ipcRenderer.invoke("lazymind:openCloudTokenPlan", url),
     onStartupDiagnosticsUpdate: (handler) => {
       if (typeof handler !== "function") return () => {};
       const listener = (_event, payload) => handler(payload);

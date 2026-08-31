@@ -23,6 +23,9 @@ declare global {
       resetRuntime?: (scope?: "kb" | "all") => Promise<unknown> | unknown;
       selectFolder?: () => Promise<string | null> | string | null;
       exportDiagnostics?: () => Promise<string> | string;
+      openCloudLogin?: (url: string) => Promise<unknown> | unknown;
+      openCloudRegister?: () => Promise<unknown> | unknown;
+      openCloudTokenPlan?: (url: string) => Promise<unknown> | unknown;
       notifyAppReady?: () => void;
     };
   }

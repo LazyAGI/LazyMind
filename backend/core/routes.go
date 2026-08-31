@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -12,6 +13,11 @@ import (
 	"lazymind/core/agent"
 	"lazymind/core/agentinvocation"
 	"lazymind/core/chat"
+	"lazymind/core/cloudbinding"
+	"lazymind/core/cloudclient"
+	"lazymind/core/cloudresource"
+	"lazymind/core/cloudsession"
+	"lazymind/core/credentialvault"
 	"lazymind/core/currentmemory"
 	"lazymind/core/datasource"
 	"lazymind/core/doc"
@@ -19,13 +25,17 @@ import (
 	"lazymind/core/evalset"
 	"lazymind/core/evolution"
 	"lazymind/core/file"
+	"lazymind/core/knowledgeplaza"
+	applog "lazymind/core/log"
 	"lazymind/core/mcp"
+	"lazymind/core/modelconfig"
 	"lazymind/core/modelprovider"
 	"lazymind/core/remotefs"
 	"lazymind/core/resourceupdate"
 	"lazymind/core/scheduler"
 	"lazymind/core/showcase"
 	skillv2handler "lazymind/core/skillv2/handler"
+	skillv2service "lazymind/core/skillv2/service"
 	corestore "lazymind/core/store"
 	"lazymind/core/subagent"
 	"lazymind/core/systemdeps"
@@ -77,6 +87,71 @@ func handleAgentThreadAPI(r *mux.Router, method, path string, perms []string, h 
 
 // registerAllRoutes text OpenAPI text（text Job），text handleAPI textPermissiontext（text extract_api_permissions.py text Kong RBAC）。
 func registerAllRoutes(r *mux.Router) {
+	cloudSession := cloudsession.DefaultService()
+	cloudSessionHandler := cloudsession.Handler{Service: cloudSession}
+	credentialBackupHandler := credentialvault.BackupHandler{Service: credentialvault.DefaultBackupService()}
+	credentialRestoreHandler := credentialvault.DefaultRestoreHandler()
+	cloudSessionHandler.TemporaryCredentials = credentialRestoreHandler
+	cloudKnowledgeHandler := knowledgeplaza.Handler{}
+	var cloudSkillHandler cloudresource.Handler
+	var cloudWorkflowHandler cloudresource.Handler
+	if client, err := cloudclient.New(os.Getenv("LAZYMIND_CLOUD_BASE_URL"), nil); err == nil {
+		cloudSessionHandler.Accounts = client
+		locale := cloudLocale()
+		authorizationPath := "/" + locale + "/desktop/authorize"
+		if login, loginErr := cloudsession.NewLoginCoordinator(cloudsession.LoginCoordinatorDeps{
+			Session: cloudSession, Handoff: client, CloudOrigin: client.Origin(),
+			AuthorizationPath: authorizationPath, Locale: locale,
+			ReportError: func(err error) {
+				applog.Logger.Warn().Err(err).Str("error_type", fmt.Sprintf("%T", err)).Msg("LazyMind Cloud browser login did not complete")
+			},
+		}); loginErr == nil {
+			cloudSessionHandler.Login = login
+		}
+		if registrationURL, registrationErr := client.RegistrationURL(locale); registrationErr == nil {
+			cloudSessionHandler.RegistrationURL = registrationURL
+		}
+		cloudRuntimeProvider := &modelconfig.CloudRuntimeProvider{Session: cloudSession, Client: client, Locale: locale}
+		modelconfig.SetRuntimeProvider(cloudRuntimeProvider)
+		modelprovider.SetCloudReadinessProvider(cloudRuntimeProvider)
+		cloudKnowledgeHandler.Source = knowledgeplaza.CloudSource{Tokens: cloudSession, Client: client}
+		cloudResources := &cloudresource.Service{
+			Session: cloudSession, Cloud: client, Bindings: cloudbinding.NewRepository(corestore.DB()),
+			DesktopVersion: strings.TrimSpace(os.Getenv("LAZYMIND_DESKTOP_APP_VERSION")),
+		}
+		skillService := skillv2service.NewSkillService(skillv2service.SkillServiceDeps{
+			DB: corestore.DB(), BlobStore: skillv2service.NewBlobStore(corestore.DB(), skillv2service.NewLocalObjectStore(skillv2service.DefaultObjectRoot())),
+		})
+		cloudSkillHandler = cloudresource.Handler{
+			Service: cloudResources, ResourceType: "skill",
+			Adapter: skillv2service.CloudAdapter{Service: skillService, DesktopVersion: cloudResources.DesktopVersion},
+		}
+		cloudWorkflowHandler = cloudresource.Handler{
+			Service: cloudResources, ResourceType: "workflow",
+			Adapter: workflow.CloudAdapter{DB: corestore.DB(), DesktopVersion: cloudResources.DesktopVersion},
+		}
+	} else {
+		modelconfig.SetRuntimeProvider(nil)
+		modelprovider.SetCloudReadinessProvider(nil)
+	}
+	handleAPI(r, "GET", "/cloud/session", []string{"user.read"}, cloudSessionHandler.Get)
+	handleAPI(r, "POST", "/cloud/login", []string{"user.read"}, cloudSessionHandler.BeginLogin)
+	handleAPI(r, "POST", "/cloud/logout", []string{"user.read"}, cloudSessionHandler.Logout)
+	handleAPI(r, "GET", "/credential-vault/backup", []string{"user.read"}, credentialBackupHandler.Status)
+	handleAPI(r, "POST", "/credential-vault/backup:enable", []string{"user.write"}, credentialBackupHandler.Enable)
+	handleAPI(r, "POST", "/credential-vault/backup:disable", []string{"user.write"}, credentialBackupHandler.Disable)
+	handleAPI(r, "GET", "/credential-vault/restores", []string{"user.read"}, credentialRestoreHandler.Discover)
+	handleAPI(r, "POST", "/credential-vault/restores", []string{"user.write"}, credentialRestoreHandler.Start)
+	handleAPI(r, "GET", "/credential-vault/restores/{operation_id}", []string{"user.read"}, credentialRestoreHandler.Get)
+	handleAPI(r, "DELETE", "/credential-vault/restores/{operation_id}", []string{"user.write"}, credentialRestoreHandler.Cancel)
+	handleAPI(r, "POST", "/credential-vault/restores:clear-temporary", []string{"user.write"}, credentialRestoreHandler.ClearTemporaryCredentials)
+	handleAPI(r, "GET", "/cloud/knowledge-square", []string{"document.read"}, cloudKnowledgeHandler.List)
+	handleAPI(r, "GET", "/cloud/skills", []string{"qa.read"}, cloudSkillHandler.List)
+	handleAPI(r, "POST", "/cloud/skills/{skill_id}:upload", []string{"qa.write"}, cloudSkillHandler.Upload)
+	handleAPI(r, "POST", "/cloud/skills/{resource_id}:download", []string{"qa.write"}, cloudSkillHandler.Download)
+	handleAPI(r, "GET", "/cloud/workflows", []string{"qa.read"}, cloudWorkflowHandler.List)
+	handleAPI(r, "POST", "/cloud/workflows/{resource_id}:download", []string{"qa.write"}, cloudWorkflowHandler.Download)
+
 	invocationHandler := agentinvocation.Handler{Service: agentinvocation.New(corestore.DB())}
 	handleAPI(r, "POST", "/agent-invocations/{invocation_id}:start", []string{"qa.write"}, invocationHandler.Start)
 	handleAPI(r, "POST", "/agent-invocations/{invocation_id}:finish", []string{"qa.write"}, invocationHandler.Finish)
@@ -655,4 +730,12 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/kb/{kb_id}/authorization", []string{"document.read"}, acl.GetKBAuthorization)
 	handleAPI(r, "POST", "/kb/{kb_id}/authorization", []string{"document.write"}, acl.SetKBAuthorization)
 	handleAPI(r, "GET", "/kb/grant-principals", []string{"document.read"}, acl.ListGrantPrincipals)
+}
+
+func cloudLocale() string {
+	value := strings.ToLower(strings.TrimSpace(os.Getenv("LAZYMIND_CLOUD_REGISTER_LOCALE")))
+	if value == "en" || value == "en-us" {
+		return "en"
+	}
+	return "zh"
 }

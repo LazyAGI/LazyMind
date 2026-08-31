@@ -1,4 +1,11 @@
 -- +migrate Dialect postgres
+DROP INDEX IF EXISTS idx_credential_backup_outbox_due;
+DROP TABLE IF EXISTS credential_backup_outbox;
+DROP TABLE IF EXISTS cloud_credential_bindings;
+DROP TABLE IF EXISTS cloud_credential_vault_accounts;
+DROP TABLE IF EXISTS cloud_resource_bindings;
+ALTER TABLE user_model_provider_groups DROP COLUMN IF EXISTS credential_revision;
+
 DROP INDEX IF EXISTS idx_chat_histories_conversation_seq;
 DROP TABLE IF EXISTS agent_invocations;
 ALTER TABLE conversations DROP COLUMN IF EXISTS chat_executor;
@@ -75,6 +82,13 @@ BEGIN
 END $$;
 
 -- +migrate Dialect sqlite
+DROP INDEX IF EXISTS idx_credential_backup_outbox_due;
+DROP TABLE IF EXISTS credential_backup_outbox;
+DROP TABLE IF EXISTS cloud_credential_bindings;
+DROP TABLE IF EXISTS cloud_credential_vault_accounts;
+DROP TABLE IF EXISTS cloud_resource_bindings;
+ALTER TABLE user_model_provider_groups DROP COLUMN credential_revision;
+
 DROP INDEX IF EXISTS idx_chat_histories_conversation_seq;
 DROP TABLE IF EXISTS agent_invocations;
 ALTER TABLE conversations DROP COLUMN chat_executor;

@@ -14,7 +14,21 @@ import {
   SearchOutlined,
   UpOutlined,
 } from "@ant-design/icons";
-import { modelProvidersApi, unwrapModelProviderData } from "../api";
+import {
+  cancelCredentialRestore,
+  getCredentialBackupStatus,
+  getCredentialRestoreDiscovery,
+  getCredentialRestoreOperation,
+  modelProvidersApi,
+  setCredentialBackupEnabled,
+  startCredentialRestore,
+  unwrapModelProviderData,
+  type CredentialRestoreRecord,
+} from "../api";
+import { CredentialBackupPanel } from "../components/CredentialBackupPanel";
+import { CredentialRestorePanel } from "../components/CredentialRestorePanel";
+import type { CredentialBackupStatus } from "../credentialBackupModel";
+import type { CredentialRestoreMode, CredentialRestoreStatus } from "../credentialRestoreModel";
 import "../index.scss";
 
 const SENSENOVA_LOGO_URL = "https://www.sensenova.ai/images/logo.png";
@@ -58,7 +72,6 @@ interface ProviderConnectionGroup {
   name: string;
   source: string;
   baseUrl: string;
-  apiKeyPreview?: string;
   apiKeyConfigured: boolean;
   verified: boolean;
   models: ProviderModel[];
@@ -199,7 +212,6 @@ function createConnectionGroup(provider: ProviderOption, overrides: Partial<Prov
     name: overrides.name || provider.name,
     source: provider.source,
     baseUrl: overrides.baseUrl || provider.baseUrl,
-    apiKeyPreview: overrides.apiKeyPreview,
     apiKeyConfigured: overrides.apiKeyConfigured ?? false,
     verified: overrides.verified ?? false,
     models: overrides.models || provider.models.map((model) => ({ ...model })),
@@ -321,9 +333,7 @@ interface ApiGroup {
   id: string;
   name: string;
   base_url?: string;
-  api_key?: string;
-  api_key_configured?: boolean;
-  api_key_preview?: string;
+  has_api_key?: boolean;
   is_verified?: boolean;
   user_model_provider_id: string;
 }
@@ -377,17 +387,14 @@ function mapApiGroup(
   group: ApiGroup | ProviderConnectionGroup,
   models: ApiModel[]
 ): ProviderConnectionGroup {
-  const isApiGroup = "base_url" in group || "api_key" in group || "is_verified" in group;
+  const isApiGroup = "base_url" in group || "has_api_key" in group || "is_verified" in group;
 
   return createConnectionGroup(provider, {
     id: group.id,
     name: group.name,
     baseUrl: isApiGroup ? (group as ApiGroup).base_url || provider.baseUrl : (group as ProviderConnectionGroup).baseUrl || provider.baseUrl,
-    apiKeyPreview: isApiGroup
-      ? getSafeApiKeyPreview((group as ApiGroup).api_key_preview || (group as ApiGroup).api_key)
-      : (group as ProviderConnectionGroup).apiKeyPreview,
     apiKeyConfigured: isApiGroup
-      ? Boolean((group as ApiGroup).api_key_configured || (group as ApiGroup).api_key)
+      ? Boolean((group as ApiGroup).has_api_key)
       : (group as ProviderConnectionGroup).apiKeyConfigured,
     verified: isApiGroup ? Boolean((group as ApiGroup).is_verified) : (group as ProviderConnectionGroup).verified,
     models: models.map((model) => ({
@@ -437,21 +444,6 @@ function normalizeFormText(value?: string) {
   return value?.trim() || "";
 }
 
-function maskApiKey(value?: string) {
-  const normalized = normalizeFormText(value);
-  if (!normalized) {
-    return "";
-  }
-  if (normalized.length <= 8) {
-    return "********";
-  }
-  return `${normalized.slice(0, 4)}...${normalized.slice(-4)}`;
-}
-
-function getSafeApiKeyPreview(value?: string) {
-  return maskApiKey(value) || "********";
-}
-
 function renderDescriptionWithLinks(description: string) {
   const parts = description.split(/(https?:\/\/[^\s，。；、）)]+)/g);
 
@@ -482,6 +474,16 @@ function isDefaultProviderBaseUrl(provider: Pick<ProviderOption, "baseUrl">, bas
   return normalizeBaseUrlForCompare(baseUrl) === normalizeBaseUrlForCompare(provider.baseUrl);
 }
 
+function getCredentialRestoreFailureCode(error: unknown) {
+  if (!error || typeof error !== "object" || !("response" in error)) return undefined;
+  const response = (error as { response?: { data?: unknown } }).response;
+  const payload = response?.data;
+  if (!payload || typeof payload !== "object") return undefined;
+  const data = "data" in payload ? (payload as { data?: unknown }).data : undefined;
+  if (!data || typeof data !== "object" || !("reason_code" in data)) return undefined;
+  return String((data as { reason_code?: unknown }).reason_code || "");
+}
+
 export default function ModelProviderPage() {
   const { t, i18n } = useTranslation();
   const currentLanguage = i18n.resolvedLanguage || i18n.language || "zh-CN";
@@ -503,6 +505,16 @@ export default function ModelProviderPage() {
   const [expandedGroupIds, setExpandedGroupIds] = useState<Record<string, boolean>>({});
   const [loadingGroupModelIds, setLoadingGroupModelIds] = useState<Record<string, boolean>>({});
   const [sensenovaBaseUrlPreset, setSensenovaBaseUrlPreset] = useState<string>("");
+  const [credentialBackupStatus, setCredentialBackupStatus] = useState<CredentialBackupStatus>({
+    enabled: false, backedUp: 0, pending: 0, failed: 0,
+  });
+  const [credentialBackupAvailable, setCredentialBackupAvailable] = useState(false);
+  const [credentialBackupLoading, setCredentialBackupLoading] = useState(false);
+  const [credentialRestoreRecords, setCredentialRestoreRecords] = useState<CredentialRestoreRecord[]>([]);
+  const [credentialRestoreLoading, setCredentialRestoreLoading] = useState(false);
+  const [credentialRestoreStatus, setCredentialRestoreStatus] = useState<CredentialRestoreStatus>({
+    available: false, requiresExplicitAction: true, backupCount: 0, status: "idle",
+  });
   const watchedProviderBaseUrl = Form.useWatch("baseUrl", providerConfigForm);
   const watchedProviderApiKey = Form.useWatch("apiKey", providerConfigForm);
   const providerApiKeyInputRef = useRef<InputRef>(null);
@@ -600,6 +612,157 @@ export default function ModelProviderPage() {
   useEffect(() => {
     void loadModelProviders();
   }, [loadModelProviders]);
+
+  const loadCredentialBackup = useCallback(async (showLoading = true) => {
+    if (showLoading) setCredentialBackupLoading(true);
+    try {
+      const status = await getCredentialBackupStatus();
+      setCredentialBackupAvailable(status.available);
+      setCredentialBackupStatus(status);
+    } catch {
+      setCredentialBackupAvailable(false);
+    } finally {
+      if (showLoading) setCredentialBackupLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadCredentialBackup();
+  }, [loadCredentialBackup]);
+
+  useEffect(() => {
+    if (!credentialBackupStatus.enabled) return;
+    const timer = window.setInterval(() => void loadCredentialBackup(false), 15_000);
+    return () => window.clearInterval(timer);
+  }, [credentialBackupStatus.enabled, loadCredentialBackup]);
+
+  const toggleCredentialBackup = useCallback(async (enabled: boolean) => {
+    setCredentialBackupLoading(true);
+    try {
+      const status = await setCredentialBackupEnabled(enabled);
+      setCredentialBackupAvailable(status.available);
+      setCredentialBackupStatus(status);
+      message.success(t(enabled ? "modelProvider.credentialBackup.enabledSuccess" : "modelProvider.credentialBackup.disabledSuccess"));
+    } catch {
+      message.error(t("modelProvider.credentialBackup.updateFailed"));
+    } finally {
+      setCredentialBackupLoading(false);
+    }
+  }, [t]);
+
+  const loadCredentialRestore = useCallback(async (showLoading = true) => {
+    if (showLoading) setCredentialRestoreLoading(true);
+    try {
+      const discovery = await getCredentialRestoreDiscovery();
+      setCredentialRestoreRecords(discovery.records);
+      setCredentialRestoreStatus((current) => ({
+        ...current,
+        available: discovery.available,
+        requiresExplicitAction: discovery.requiresExplicitAction,
+        backupCount: discovery.records.length,
+        status: discovery.activeOperation?.status || (current.status === "pending" || current.status === "running" ? current.status : "idle"),
+        completedRecords: discovery.activeOperation?.completedRecords,
+        totalRecords: discovery.activeOperation?.totalRecords,
+        temporaryExpiresAt: discovery.activeOperation?.temporaryExpiresAt,
+        operationId: discovery.activeOperation?.operationId,
+        failureCode: discovery.activeOperation?.failureCode,
+      }));
+    } catch {
+      setCredentialRestoreStatus((current) => ({ ...current, available: false, status: "idle" }));
+    } finally {
+      if (showLoading) setCredentialRestoreLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadCredentialRestore();
+  }, [loadCredentialRestore]);
+
+  const startRestore = useCallback(async (
+    mode: CredentialRestoreMode,
+    resolution: "fail" | "replace_local" | "save_copy" = "fail",
+  ) => {
+    if (!credentialRestoreRecords.length) return;
+    setCredentialRestoreLoading(true);
+    try {
+      const operation = await startCredentialRestore(mode, credentialRestoreRecords, resolution);
+      setCredentialRestoreStatus({
+        available: true,
+        requiresExplicitAction: true,
+        backupCount: credentialRestoreRecords.length,
+        status: operation.status,
+        completedRecords: operation.completedRecords,
+        totalRecords: operation.totalRecords,
+        failureCode: operation.failureCode,
+        temporaryExpiresAt: operation.temporaryExpiresAt,
+        operationId: operation.operationId,
+      });
+    } catch (error) {
+      const failureCode = getCredentialRestoreFailureCode(error);
+      setCredentialRestoreStatus((current) => ({
+        ...current,
+        status: failureCode === "local_conflict" ? "conflict" : "failed",
+        failureCode,
+      }));
+    } finally {
+      setCredentialRestoreLoading(false);
+    }
+  }, [credentialRestoreRecords]);
+
+  const cancelRestore = useCallback(async () => {
+    const operationId = credentialRestoreStatus.operationId;
+    if (!operationId) return;
+    setCredentialRestoreLoading(true);
+    try {
+      await cancelCredentialRestore(operationId);
+      await loadCredentialRestore(false);
+      setCredentialRestoreStatus((current) => ({ ...current, status: "idle", operationId: undefined }));
+    } catch (error) {
+      setCredentialRestoreStatus((current) => ({ ...current, status: "failed", failureCode: getCredentialRestoreFailureCode(error) }));
+    } finally {
+      setCredentialRestoreLoading(false);
+    }
+  }, [credentialRestoreStatus, loadCredentialRestore]);
+
+  useEffect(() => {
+    if (credentialRestoreStatus.status !== "pending" && credentialRestoreStatus.status !== "running") return;
+    const operationId = credentialRestoreStatus.operationId;
+    if (!operationId) return;
+    let disposed = false;
+    let inFlight = false;
+    const poll = async () => {
+      if (disposed || inFlight) return;
+      inFlight = true;
+      try {
+        const operation = await getCredentialRestoreOperation(operationId);
+        if (disposed) return;
+        setCredentialRestoreStatus((current) => ({
+          ...current,
+          status: operation.status,
+          completedRecords: operation.completedRecords,
+          totalRecords: operation.totalRecords,
+          failureCode: operation.failureCode,
+          temporaryExpiresAt: operation.temporaryExpiresAt,
+          operationId: operation.operationId,
+        }));
+        if (operation.status === "succeeded" && operation.mode === "trusted_device") {
+          await loadModelProviders();
+        }
+      } catch (error) {
+        if (!disposed) {
+          setCredentialRestoreStatus((current) => ({ ...current, status: "failed", failureCode: getCredentialRestoreFailureCode(error) }));
+        }
+      } finally {
+        inFlight = false;
+      }
+    };
+    const timer = window.setInterval(() => void poll(), 1500);
+    void poll();
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+    };
+  }, [credentialRestoreStatus.status, loadModelProviders]);
 
   useEffect(() => {
     if (!initialProvidersLoadedRef.current) {
@@ -704,8 +867,7 @@ export default function ModelProviderPage() {
         configProvider,
         {
           ...savedGroup,
-          api_key_configured: Boolean(apiKey || existingGroup?.apiKeyConfigured || savedGroup.api_key_configured || savedGroup.api_key),
-          api_key_preview: apiKey ? maskApiKey(apiKey) : existingGroup?.apiKeyPreview || savedGroup.api_key_preview,
+          has_api_key: Boolean(apiKey || existingGroup?.apiKeyConfigured || savedGroup.has_api_key),
           is_verified: apiKey ? savedGroup.check?.success === true : savedGroup.is_verified,
         },
         existingGroup?.models || []
@@ -1071,6 +1233,20 @@ export default function ModelProviderPage() {
     <div className="model-provider-page-content">
       <section className="model-provider-shell">
         <div className="model-provider-main-panel">
+          <CredentialBackupPanel
+            available={credentialBackupAvailable}
+            loading={credentialBackupLoading}
+            status={credentialBackupStatus}
+            onRetry={() => void loadCredentialBackup()}
+            onToggle={(enabled) => void toggleCredentialBackup(enabled)}
+          />
+          <CredentialRestorePanel
+            loading={credentialRestoreLoading}
+            status={credentialRestoreStatus}
+            onCancel={() => void cancelRestore()}
+            onRefresh={() => void loadCredentialRestore()}
+            onStart={(mode, resolution) => void startRestore(mode, resolution)}
+          />
           <section className="model-provider-added-section">
             <div className="model-provider-panel-heading">
               <h2 className="model-provider-section-title">{t("modelProvider.myGroupsTitle")}</h2>
@@ -1447,9 +1623,7 @@ export default function ModelProviderPage() {
             <div className="model-provider-key-status" role="status">
               <KeyOutlined />
               <span>
-                {t("modelProvider.keyConfiguredStatus", {
-                  preview: getSafeApiKeyPreview(verifyGroupModal.group.apiKeyPreview),
-                })}
+                {t("modelProvider.keyConfiguredStatus")}
               </span>
             </div>
           ) : null}

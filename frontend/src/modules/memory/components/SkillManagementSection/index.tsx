@@ -30,6 +30,7 @@ import SkillManagementToolbar, {
 } from "./SkillManagementToolbar";
 import SkillMarketView from "./SkillMarketView";
 import SkillTrashedView from "./SkillTrashedView";
+import CloudResourceTable from "./CloudResourceTable";
 import {
   collectMarketTags,
   filterMarketSkills,
@@ -96,6 +97,8 @@ export default function SkillManagementSection() {
     skillLoading,
     refreshSkillAssets,
     genericColumns,
+    cloudSkillRefreshKey,
+    onCloudSkillUploaded,
     skillView,
     setSkillView,
     marketSkillSource,
@@ -924,6 +927,18 @@ export default function SkillManagementSection() {
             }}
           />
         </div>
+      ) : null}
+
+      {skillView === "cloud" ? (
+        <CloudResourceTable
+          resourceType="skill"
+          t={t}
+          refreshKey={cloudSkillRefreshKey}
+          onDownloaded={async () => {
+            onCloudSkillUploaded();
+            await refreshSkillAssets({ page: skillListPage });
+          }}
+        />
       ) : null}
 
       {skillView === "trash" ? (

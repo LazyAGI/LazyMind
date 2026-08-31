@@ -25,6 +25,7 @@ type InputBinding = orm.WorkflowInputBinding
 // published Workflow revision. Files are addressed by package-relative paths;
 // callers never receive a filesystem root or Host-private path.
 type WorkflowPackage struct {
+	ResourceID      string            `json:"resource_id"`
 	WorkflowRef     string            `json:"workflow_ref"`
 	WorkflowID      string            `json:"workflow_id"`
 	Name            string            `json:"name"`

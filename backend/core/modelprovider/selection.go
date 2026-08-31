@@ -71,7 +71,9 @@ type setSharedModelRequest struct {
 
 type modelReadyResponse struct {
 	Ready        bool   `json:"ready"`
-	Source       string `json:"source,omitempty"`         // "own" | "shared"
+	Source       string `json:"source,omitempty"` // "own" | "shared" | "cloud"
+	Reason       string `json:"reason,omitempty"`
+	CloudPlanURL string `json:"cloud_plan_url,omitempty"`
 	SharedByName string `json:"shared_by_name,omitempty"` // sharer's display name
 	SharedByID   string `json:"shared_by_id,omitempty"`   // sharer's user_id
 	ProviderName string `json:"provider_name,omitempty"`  // e.g. "OpenAI"
@@ -464,6 +466,14 @@ func GetModelReady(w http.ResponseWriter, r *http.Request) {
 			resp.ModelName = detail.ModelName
 		}
 		common.ReplyOK(w, resp)
+		return
+	}
+
+	cloud, err := resolveCloudModelReadiness(r.Context(), modelType)
+	if err == nil && cloud.Known {
+		common.ReplyOK(w, modelReadyResponse{
+			Ready: cloud.Ready, Source: "cloud", Reason: cloud.Reason, CloudPlanURL: cloud.PlanURL,
+		})
 		return
 	}
 

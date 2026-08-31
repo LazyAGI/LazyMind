@@ -42,6 +42,7 @@ func TestCoreServiceEnvUsesLocalEndpoints(t *testing.T) {
 	env := coreServiceEnv(cfg, paths)
 
 	assertEnvContains(t, env, "LAZYMIND_CORE_HOST=127.0.0.1")
+	assertEnvContains(t, env, "LAZYMIND_CLOUD_TOKEN_STORE=memory")
 	assertEnvContains(t, env, "LAZYMIND_CORE_PORT="+strconv.Itoa(cfg.LocalProxy.CoreHostPort))
 	assertEnvContains(t, env, "ACL_DB_DRIVER=sqlite")
 	assertEnvContains(t, env, "ACL_DB_DSN="+sqliteDSN(paths.CoreDBPath))
@@ -55,6 +56,15 @@ func TestCoreServiceEnvUsesLocalEndpoints(t *testing.T) {
 	assertEnvContains(t, env, "LAZYMIND_READONLY_DB_DRIVER=sqlite")
 	assertEnvContains(t, env, "LAZYMIND_READONLY_DB_DSN="+paths.LazyLLMDBPath)
 	assertEnvNotContains(t, env, "LAZYMIND_CAPABILITY_MCP_ENABLED=")
+}
+
+func TestCloudTokenStoreModeUsesSystemStoreOutsideLocalProfile(t *testing.T) {
+	if got := cloudTokenStoreMode("desktop"); got != "system" {
+		t.Fatalf("desktop token store mode=%q", got)
+	}
+	if got := cloudTokenStoreMode("local"); got != "memory" {
+		t.Fatalf("local token store mode=%q", got)
+	}
 }
 
 func TestCoreServiceEnvUsesRuntimeUploadPaths(t *testing.T) {

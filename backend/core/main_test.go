@@ -1,12 +1,15 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/gorilla/mux"
 
+	"lazymind/core/cloudsession"
 	"lazymind/core/externallease"
 )
 
@@ -19,6 +22,31 @@ func TestOpenAPIArtifactExportCanBeDisabledForSignedDesktopBundle(t *testing.T) 
 	t.Setenv("LAZYMIND_OPENAPI_ARTIFACT_EXPORT_ENABLED", "")
 	if !openAPIArtifactExportEnabled() {
 		t.Fatal("OpenAPI artifact export should remain enabled by default")
+	}
+}
+
+func TestInitializeCloudSessionKeepsSignedOutWhenCloudIsNotConfigured(t *testing.T) {
+	previous := cloudsession.DefaultService()
+	t.Cleanup(func() { cloudsession.SetDefaultService(previous) })
+	t.Setenv("LAZYMIND_CLOUD_BASE_URL", "")
+	initializeCloudSession(context.Background())
+	if got := cloudsession.DefaultService().Status(context.Background()).State; got != cloudsession.StateSignedOut {
+		t.Fatalf("state=%q want=%q", got, cloudsession.StateSignedOut)
+	}
+}
+
+func TestCloudTokenStoreUsesNonPersistentMemoryModeWhenConfigured(t *testing.T) {
+	t.Setenv("LAZYMIND_CLOUD_TOKEN_STORE", "memory")
+	store := newCloudTokenStore("https://cloud.example")
+	if err := store.Save(context.Background(), "fixture-refresh"); err != nil {
+		t.Fatal(err)
+	}
+	if token, err := store.Load(context.Background()); err != nil || token != "fixture-refresh" {
+		t.Fatalf("load token=%q err=%v", token, err)
+	}
+	other := newCloudTokenStore("https://cloud.example")
+	if _, err := other.Load(context.Background()); !errors.Is(err, cloudsession.ErrNoRefreshToken) {
+		t.Fatalf("memory mode unexpectedly restored token: %v", err)
 	}
 }
 

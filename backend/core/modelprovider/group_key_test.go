@@ -155,7 +155,7 @@ func setupEncryptedGroupKeyTest(t *testing.T, apiKeys string) (*gorm.DB, orm.Use
 			UpdatedAt:      now,
 		},
 	}
-	ciphertext, err := encryptModelProviderAPIKey(apiKeys)
+	ciphertext, err := encryptModelProviderAPIKeyForGroup("user-1", "group-1", 1, apiKeys)
 	if err != nil {
 		t.Fatalf("encrypt API keys: %v", err)
 	}
@@ -166,6 +166,7 @@ func setupEncryptedGroupKeyTest(t *testing.T, apiKeys string) (*gorm.DB, orm.Use
 		BaseURL:             parent.BaseURL,
 		APIKeyCiphertext:    ciphertext,
 		CredentialVersion:   modelProviderCredentialVersion,
+		CredentialRevision:  1,
 		IsVerified:          true,
 		BaseModel: orm.BaseModel{
 			CreateUserID:   "user-1",

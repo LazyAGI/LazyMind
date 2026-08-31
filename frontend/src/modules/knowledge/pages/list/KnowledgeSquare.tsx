@@ -27,7 +27,6 @@ import { useTranslation } from "react-i18next";
 
 import {
   filterOfficialKnowledgeBases,
-  OFFICIAL_KNOWLEDGE_BASES,
   type KnowledgeSquareStatusMap,
   type KnowledgeSquareType,
   type OfficialKnowledgeBase,
@@ -36,6 +35,7 @@ import {
 type InstallStatusFilter = "all" | "installed" | "uninstalled" | "update";
 
 interface KnowledgeSquareProps {
+  items: OfficialKnowledgeBase[];
   statusMap: KnowledgeSquareStatusMap;
   onInstall: (item: OfficialKnowledgeBase) => void;
   onUpdate: (item: OfficialKnowledgeBase) => void;
@@ -58,6 +58,7 @@ const iconByType: Record<string, ReactNode> = {
 };
 
 export default function KnowledgeSquare({
+  items,
   statusMap,
   onInstall,
   onUpdate,
@@ -76,26 +77,26 @@ export default function KnowledgeSquare({
       "全部",
       ...Array.from(
         new Set(
-          OFFICIAL_KNOWLEDGE_BASES.filter((item) => item.type === type).map(
+          items.filter((item) => item.type === type).map(
             (item) => item.domain,
           ),
         ),
       ),
     ],
-    [type],
+    [items, type],
   );
 
   const visibleItems = useMemo(
     () =>
       filterOfficialKnowledgeBases({
-        items: OFFICIAL_KNOWLEDGE_BASES,
+        items,
         type,
         domain,
         status,
         keyword,
         statusMap,
       }),
-    [domain, keyword, status, statusMap, type],
+    [domain, items, keyword, status, statusMap, type],
   );
 
   const setActiveType = (nextType: KnowledgeSquareType) => {

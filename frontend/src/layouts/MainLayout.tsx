@@ -55,6 +55,8 @@ import UserAgreementConsentModal, {
   useUserAgreementConsentGate,
 } from "@/components/UserAgreementConsentModal";
 import TerminalConnectionQuickPanel from "@/modules/channelGateway/components/TerminalConnectionQuickPanel";
+import { beginCloudLogin, getCloudSession, LAZYMIND_CLOUD_SESSION_CHANGED_EVENT, logoutCloudSession, type CloudSessionState } from "@/runtime/cloud/session";
+import { openCloudLogin, openCloudRegister } from "@/runtime/desktopBridge";
 import "./index.scss";
 
 const { Content, Sider } = Layout;
@@ -151,6 +153,14 @@ export default function MainLayout() {
     () => !readStoredMainMenuCollapsed(),
   );
   const [developerActive, setDeveloperActive] = useState(isDeveloperModeActive);
+  const [cloudSessionState, setCloudSessionState] = useState<CloudSessionState>("signed_out");
+  const updateCloudSessionState = useCallback((state: CloudSessionState) => {
+    setCloudSessionState(state);
+    window.dispatchEvent(new CustomEvent(LAZYMIND_CLOUD_SESSION_CHANGED_EVENT, {detail: {state}}));
+  }, []);
+  const [cloudAccountName, setCloudAccountName] = useState("");
+  const [cloudRegistrationURL, setCloudRegistrationURL] = useState("");
+  const [cloudLoginLoading, setCloudLoginLoading] = useState(false);
   const [profileDetail, setProfileDetail] = useState<UserDetailResponse | null>(null);
 
   const pathname = location.pathname || "/agent/chat";
@@ -280,6 +290,18 @@ export default function MainLayout() {
       setUserInfo(AgentAppsAuth.getUserInfo());
     }
   }, []);
+  const refreshCloudSession = useCallback(async () => {
+    try {
+      const session = await getCloudSession();
+      updateCloudSessionState(session.state);
+      setCloudAccountName(session.username || session.email_masked || "");
+      setCloudRegistrationURL(session.registration_url || "");
+    } catch {
+      updateCloudSessionState("offline");
+      setCloudAccountName("");
+      setCloudRegistrationURL("");
+    }
+  }, [updateCloudSessionState]);
   const localSessionGate = useLocalSessionGate(refreshLayoutUser);
   const {
     needsConsent,
@@ -293,14 +315,17 @@ export default function MainLayout() {
     if (!localSessionGate.enabled) {
       refreshLayoutUser();
     }
+    void refreshCloudSession();
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === "visible") {
         refreshLayoutUser();
+        void refreshCloudSession();
       }
     };
     const handleFocus = () => {
       refreshLayoutUser();
+      void refreshCloudSession();
     };
     const handleStorage = (event: StorageEvent) => {
       if (event.key === "lazymind:user") {
@@ -329,7 +354,7 @@ export default function MainLayout() {
       window.removeEventListener(AUTH_USER_CHANGE_EVENT, handleUserChange);
       window.removeEventListener(DEVELOPER_ACTIVE_EVENT, handleDeveloperModeChange);
     };
-  }, [localSessionGate.enabled, refreshLayoutUser]);
+  }, [localSessionGate.enabled, refreshCloudSession, refreshLayoutUser]);
 
   useEffect(() => {
     if (!isAdminUser && developerActive) {
@@ -532,6 +557,51 @@ export default function MainLayout() {
   const handleGoLogin = () => {
     setSettingsOpen(false);
     navigate("/login");
+  };
+
+  const handleCloudLogout = async () => {
+    try {
+      updateCloudSessionState((await logoutCloudSession()).state);
+      setCloudAccountName("");
+      message.success(t("layout.cloudLogoutSuccess"));
+    } catch {
+      updateCloudSessionState("signed_out");
+      setCloudAccountName("");
+    }
+  };
+
+  const handleCloudLogin = async () => {
+    setCloudLoginLoading(true);
+    try {
+      const login = await beginCloudLogin();
+      const result = await openCloudLogin(login.authorization_url);
+      if (!result.ok) {
+        await logoutCloudSession().catch(() => undefined);
+        throw result.error || new Error(result.reason);
+      }
+      updateCloudSessionState("authorizing");
+      setSettingsOpen(false);
+    } catch {
+      message.error(t("layout.cloudLoginFailed"));
+      await refreshCloudSession();
+    } finally {
+      setCloudLoginLoading(false);
+    }
+  };
+
+  const handleCloudRegister = async () => {
+    let registrationURL = cloudRegistrationURL;
+    if (!registrationURL) {
+      try {
+        registrationURL = (await getCloudSession()).registration_url || "";
+      } catch {
+        registrationURL = "";
+      }
+    }
+    const result = await openCloudRegister(registrationURL);
+    if (!result.ok) {
+      message.error(t("layout.cloudOpenFailed"));
+    }
   };
 
   const currentPasswordRule = ({ getFieldValue }: any) => ({
@@ -914,6 +984,31 @@ export default function MainLayout() {
                         </span>
                       </button>
                     )}
+                    <div className="settings-popover-cloud" data-cloud-session={cloudSessionState}>
+                      <CloudOutlined className="settings-popover-icon" />
+                      <span className="settings-popover-cloud-copy">
+                        <strong>LazyMind Cloud</strong>
+                        <small>
+                          {cloudSessionState === "signed_in"
+                            ? cloudAccountName || t("layout.cloudSignedIn")
+                            : t("layout.cloudSignedOut")}
+                        </small>
+                      </span>
+                      {cloudSessionState === "signed_in" ? (
+                        <Button size="small" type="link" onClick={() => void handleCloudLogout()}>
+                          {t("layout.cloudLogout")}
+                        </Button>
+                      ) : (
+                        <span className="settings-popover-cloud-actions">
+                          <Button size="small" type="link" loading={cloudLoginLoading} onClick={() => void handleCloudLogin()}>
+                            {t("layout.cloudLogin")}
+                          </Button>
+                          <Button size="small" type="link" onClick={() => void handleCloudRegister()}>
+                            {t("layout.cloudRegister")}
+                          </Button>
+                        </span>
+                      )}
+                    </div>
                     {settingsMenuItems.map((item) => {
                       const btn = (
                         <Button

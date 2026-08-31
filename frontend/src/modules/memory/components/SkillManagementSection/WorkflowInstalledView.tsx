@@ -21,6 +21,7 @@ import { parseScenario, serializeScenario } from '@/modules/workflow/components/
 import { createEmptyModel } from '@/modules/workflow/components/StateGraphEditor/core/model';
 import type { WorkflowModel } from '@/modules/workflow/components/StateGraphEditor/core/workflowModel';
 import type { ScenarioData } from '@/modules/workflow/components/StateGraphEditor/ScenarioEditor';
+import CloudResourceTable from './CloudResourceTable';
 
 interface WorkflowInstalledViewProps {
   t: (key: string, options?: Record<string, unknown>) => string;
@@ -35,6 +36,7 @@ type WorkflowRow =
   | ({ _type: 'builtin' } & BuiltinWorkflow & { updated_at?: never; generate_status?: never });
 
 type TypeFilter = 'all' | 'builtin' | 'draft';
+type WorkflowSourceMode = 'local' | 'cloud';
 
 const PAGE_SIZE = 10;
 
@@ -53,6 +55,7 @@ export default function WorkflowInstalledView({
   const [searchInput, setSearchInput] = useState('');
   const [query, setQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
+  const [sourceMode, setSourceMode] = useState<WorkflowSourceMode>('local');
   const [infoModalRecord, setInfoModalRecord] = useState<WorkflowDraftRecord | null>(null);
   const [infoModalWorkflowModel, setInfoModalWorkflowModel] = useState<WorkflowModel>(createEmptyWorkflowModel());
   const [infoModalScenarioData, setInfoModalScenarioData] = useState<ScenarioData>({ overview: '', stepDescriptions: {}, notes: '' });
@@ -322,27 +325,43 @@ export default function WorkflowInstalledView({
   return (
     <div className="memory-skill-installed">
       <div className="memory-skill-installed-filters">
-        <Input.Search
-          allowClear
-          value={searchInput}
-          onChange={(e) => setSearchInput(e.target.value)}
-          onSearch={handleSearch}
-          placeholder={t('admin.memoryWorkflowSearchPlaceholder')}
-          className="memory-skill-installed-search"
-        />
         <Radio.Group
-          value={typeFilter}
-          onChange={(e) => { setTypeFilter(e.target.value as TypeFilter); setPage(1); }}
+          value={sourceMode}
+          onChange={(e) => setSourceMode(e.target.value as WorkflowSourceMode)}
           size="small"
           style={{ flexShrink: 0 }}
         >
-          <Radio.Button value="all">{t('admin.memoryWorkflowFilterAll')}</Radio.Button>
-          <Radio.Button value="builtin">{t('admin.memoryWorkflowFilterBuiltin')}</Radio.Button>
-          <Radio.Button value="draft">{t('admin.memoryWorkflowFilterCustom')}</Radio.Button>
+          <Radio.Button value="local">{t('admin.memoryWorkflowSourceLocal')}</Radio.Button>
+          <Radio.Button value="cloud">{t('admin.memoryWorkflowSourceCloud')}</Radio.Button>
         </Radio.Group>
-        <Button onClick={handleReset}>{t('admin.memoryReset')}</Button>
+        {sourceMode === 'local' ? (
+          <>
+            <Input.Search
+              allowClear
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              onSearch={handleSearch}
+              placeholder={t('admin.memoryWorkflowSearchPlaceholder')}
+              className="memory-skill-installed-search"
+            />
+            <Radio.Group
+              value={typeFilter}
+              onChange={(e) => { setTypeFilter(e.target.value as TypeFilter); setPage(1); }}
+              size="small"
+              style={{ flexShrink: 0 }}
+            >
+              <Radio.Button value="all">{t('admin.memoryWorkflowFilterAll')}</Radio.Button>
+              <Radio.Button value="builtin">{t('admin.memoryWorkflowFilterBuiltin')}</Radio.Button>
+              <Radio.Button value="draft">{t('admin.memoryWorkflowFilterCustom')}</Radio.Button>
+            </Radio.Group>
+            <Button onClick={handleReset}>{t('admin.memoryReset')}</Button>
+          </>
+        ) : null}
       </div>
 
+      {sourceMode === 'cloud' ? (
+        <CloudResourceTable resourceType="workflow" t={t} onDownloaded={loadList} />
+      ) : (
       <div className="memory-list-content" ref={listContentRef}>
         {filteredRows.length === 0 && !loading ? (
           <Empty
@@ -374,6 +393,7 @@ export default function WorkflowInstalledView({
           />
         )}
       </div>
+      )}
 
       {infoModalRecord && (
         <WorkflowInfoModal

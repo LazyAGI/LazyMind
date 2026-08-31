@@ -14,6 +14,7 @@ import type { ColumnsType } from "antd/es/table";
 import {
   AppstoreOutlined,
   BookOutlined,
+  CloudUploadOutlined,
   DeleteOutlined,
   EditOutlined,
   EyeOutlined,
@@ -36,6 +37,8 @@ import {
 import type { GroupItem, UserItem } from "@/api/generated/auth-client";
 import { createGroupApi, createUserApi } from "@/modules/signin/utils/request";
 import { runtimeFeatures } from "@/runtime/features";
+import { beginCloudLogin, getCloudSession } from "@/runtime/cloud/session";
+import { openCloudLogin } from "@/runtime/desktopBridge";
 import GlossaryInboxModal from "./components/GlossaryInboxModal";
 import { MemoryManagementContext } from "./context";
 import MemoryDraftModal, {
@@ -77,6 +80,7 @@ import {
 } from "./skillApi";
 import { buildSkillZipBlob } from "./skillPackage";
 import { uploadSkillTempFile } from "./skillUpload";
+import { uploadCloudSkill } from "./cloudResourceApi";
 import {
   approveEvolutionSuggestion,
   batchApproveEvolutionSuggestions,
@@ -288,6 +292,10 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
   const [skillEnableLoading, setSkillEnableLoading] = useState<Set<string>>(
     new Set(),
   );
+  const [cloudSkillUploading, setCloudSkillUploading] = useState<Set<string>>(
+    new Set(),
+  );
+  const [cloudSkillRefreshKey, setCloudSkillRefreshKey] = useState(0);
   const [builtinSkillEnableLoading, setBuiltinSkillEnableLoading] = useState<
     Set<string>
   >(new Set());
@@ -322,10 +330,10 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
   );
   const [skillListTotal, setSkillListTotal] = useState(initialSkills.length);
   const [skillView, setSkillView] = useState<
-    "installed" | "market" | "workflows" | "trash"
+    "installed" | "market" | "cloud" | "workflows" | "trash"
   >(() => {
     const sv = new URLSearchParams(window.location.search).get("skillView");
-    if (sv === "workflows" || sv === "market" || sv === "trash") return sv;
+    if (sv === "workflows" || sv === "market" || sv === "cloud" || sv === "trash") return sv;
     return "installed";
   });
   const [installedSkillSource, setInstalledSkillSource] = useState<
@@ -483,6 +491,9 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
 
   const currentTabMeta = tabMeta[activeTab];
   const currentStructuredItems = activeTab === "skills" ? skillAssets : [];
+  const onCloudSkillUploaded = useCallback(() => {
+    setCloudSkillRefreshKey((current) => current + 1);
+  }, []);
   const buildSkillPatchPayload = useCallback(
     (item: StructuredAsset, overrides: Record<string, unknown> = {}) =>
       buildSkillUpdatePayload({
@@ -4440,6 +4451,89 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
     },
   ];
 
+  const runCloudSkillUpload = async (record: StructuredAsset) => {
+    if (cloudSkillUploading.has(record.id)) {
+      return;
+    }
+    setCloudSkillUploading((current) => new Set(current).add(record.id));
+    try {
+      const result = await uploadCloudSkill(record.id);
+      const resourceId = result.resource_id?.slice(-8) || "";
+      switch (result.status) {
+        case "upload_first":
+        case "upload_update_available":
+          message.success(
+            t("admin.memoryCloudUploadSuccess", {
+              name: record.name,
+              id: resourceId,
+            }),
+          );
+          onCloudSkillUploaded();
+          break;
+        case "upload_not_required":
+          message.info(t("admin.memoryCloudUploadCurrent", { name: record.name }));
+          onCloudSkillUploaded();
+          break;
+        case "cloud_updated":
+          message.warning(t("admin.memoryCloudUploadCloudUpdated"));
+          break;
+        case "diverged":
+          message.warning(t("admin.memoryCloudUploadDiverged"));
+          break;
+        case "incompatible":
+          message.warning(t("admin.memoryCloudUploadIncompatible"));
+          break;
+      }
+    } catch (error) {
+      console.error("Upload Skill to LazyMind Cloud failed:", error);
+      message.error(t("admin.memoryCloudUploadFailed"));
+    } finally {
+      setCloudSkillUploading((current) => {
+        const next = new Set(current);
+        next.delete(record.id);
+        return next;
+      });
+    }
+  };
+
+  const openCloudUploadConfirmation = async (record: StructuredAsset) => {
+    let session;
+    try {
+      session = await getCloudSession();
+    } catch {
+      message.error(t("admin.memoryCloudUploadSessionFailed"));
+      return;
+    }
+    if (session.state !== "signed_in") {
+      Modal.confirm({
+        title: t("admin.memoryCloudUploadLoginRequired"),
+        content: t("admin.memoryCloudUploadLoginContent"),
+        okText: t("admin.memoryCloudUploadGoLogin"),
+        cancelText: t("common.cancel"),
+        onOk: async () => {
+          try {
+            const login = await beginCloudLogin();
+            const opened = await openCloudLogin(login.authorization_url);
+            if (!opened.ok) {
+              throw opened.error ?? new Error(opened.reason);
+            }
+          } catch (error) {
+            console.error("Start LazyMind Cloud login failed:", error);
+            message.error(t("layout.cloudLoginFailed"));
+          }
+        },
+      });
+      return;
+    }
+    Modal.confirm({
+      title: t("admin.memoryCloudUploadConfirmTitle", { name: record.name }),
+      content: t("admin.memoryCloudUploadConfirmHead"),
+      okText: t("admin.memoryCloudUploadConfirmAction"),
+      cancelText: t("common.cancel"),
+      onOk: () => runCloudSkillUpload(record),
+    });
+  };
+
   const genericColumns: ColumnsType<StructuredAsset> = [
     ...structuredInfoColumns,
     {
@@ -4535,6 +4629,16 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
       fixed: "right",
       render: (_value, record) => (
         <Space size={4}>
+          <Tooltip title={t("admin.memoryCloudUploadAction")}>
+            <Button
+              type="text"
+              icon={<CloudUploadOutlined />}
+              loading={cloudSkillUploading.has(record.id)}
+              disabled={cloudSkillUploading.has(record.id)}
+              aria-label={t("admin.memoryCloudUploadAction")}
+              onClick={() => void openCloudUploadConfirmation(record)}
+            />
+          </Tooltip>
           <Tooltip title={t("admin.memoryEditItem")}>
             <Button
               type="text"
@@ -4787,6 +4891,8 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
     filteredInstalledSkillTree,
     filteredStructuredItems,
     genericColumns,
+    cloudSkillRefreshKey,
+    onCloudSkillUploaded,
     skillView,
     setSkillView,
     installedSkillSource,

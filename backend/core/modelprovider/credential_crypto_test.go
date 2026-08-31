@@ -21,7 +21,7 @@ func TestAPIKeyForGroupMigratesLegacyPlaintext(t *testing.T) {
 	}
 	row := orm.UserModelProviderGroup{
 		ID: "group-1", UserModelProviderID: "provider-1", Name: "default", BaseURL: "https://example.test",
-		APIKey: "secret-api-key",
+		APIKey: "secret-api-key", BaseModel: orm.BaseModel{CreateUserID: "user-1"},
 	}
 	if err := db.Create(&row).Error; err != nil {
 		t.Fatal(err)
@@ -41,7 +41,7 @@ func TestAPIKeyForGroupMigratesLegacyPlaintext(t *testing.T) {
 	if stored.APIKey != "" || stored.CredentialVersion != modelProviderCredentialVersion {
 		t.Fatalf("legacy plaintext was not cleared: %#v", stored)
 	}
-	if !strings.Contains(stored.APIKeyCiphertext, `"enc":"aes-gcm"`) || strings.Contains(stored.APIKeyCiphertext, got) {
+	if !strings.Contains(stored.APIKeyCiphertext, `"version":2`) || strings.Contains(stored.APIKeyCiphertext, got) {
 		t.Fatalf("credential was not encrypted: %q", stored.APIKeyCiphertext)
 	}
 	decrypted, err := ResolveAPIKey(stored.APIKey, stored.APIKeyCiphertext)

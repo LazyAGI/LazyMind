@@ -3,8 +3,13 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/x509"
 	_ "embed"
 	"encoding/json"
+	"encoding/pem"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -17,9 +22,12 @@ import (
 	"lazymind/core/asyncjob"
 	capabilitybootstrap "lazymind/core/capability/bootstrap"
 	"lazymind/core/chat"
+	"lazymind/core/cloudclient"
+	"lazymind/core/cloudsession"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/common/readonlyorm"
+	"lazymind/core/credentialvault"
 	"lazymind/core/currentmemory"
 	"lazymind/core/episode"
 	"lazymind/core/evalset"
@@ -35,8 +43,10 @@ import (
 	"lazymind/core/workflow"
 	workflowexecutor "lazymind/core/workflow/executor"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"gopkg.in/yaml.v3"
+	"gorm.io/gorm"
 )
 
 //go:embed docs.html
@@ -218,6 +228,123 @@ func validateStartupConfig() error {
 	return err
 }
 
+func initializeCloudSession(ctx context.Context) {
+	client, err := cloudclient.New(os.Getenv("LAZYMIND_CLOUD_BASE_URL"), nil)
+	if err != nil {
+		cloudsession.SetDefaultService(nil)
+		return
+	}
+	service := cloudsession.NewService(cloudsession.ServiceDeps{
+		Store: newCloudTokenStore(client.Origin()),
+		Auth:  cloudsession.CloudAuthClient{Client: client},
+	})
+	cloudsession.SetDefaultService(service)
+	go func() {
+		restoreCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		if err := service.Restore(restoreCtx); err != nil && !errors.Is(err, cloudsession.ErrNoRefreshToken) {
+			log.Logger.Warn().Msg("LazyMind Cloud session restore was unavailable")
+		}
+	}()
+}
+
+func newCloudTokenStore(cloudIssuer string) cloudsession.SecureTokenStore {
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("LAZYMIND_CLOUD_TOKEN_STORE")), "memory") {
+		return cloudsession.NewMemorySecureTokenStore()
+	}
+	return cloudsession.NewSystemSecureTokenStore(cloudIssuer)
+}
+
+func initializeCredentialBackup(ctx context.Context, db *gorm.DB, keys *credentialvault.LocalKeyManager) error {
+	credentialvault.SetDefaultBackupService(nil)
+	client, err := cloudclient.New(os.Getenv("LAZYMIND_CLOUD_BASE_URL"), nil)
+	if err != nil {
+		return nil
+	}
+	manifest, err := loadDesktopCredentialManifest(client.Origin())
+	if err != nil || manifest == nil {
+		return err
+	}
+	service, err := credentialvault.NewBackupService(credentialvault.BackupServiceDeps{
+		Repository: credentialvault.NewRepository(db), Keys: keys, Manifest: manifest,
+		Tokens: cloudsession.DefaultService(), Cloud: client, Source: modelprovider.CredentialBackupSource{DB: db},
+		Random: rand.Reader, Now: time.Now,
+	})
+	if err != nil {
+		return err
+	}
+	credentialvault.SetDefaultBackupService(service)
+	go credentialvault.RunDefaultBackupWorker(ctx)
+	return nil
+}
+
+func initializeCredentialRestore(db *gorm.DB, keys *credentialvault.LocalKeyManager) error {
+	credentialvault.SetDefaultRestoreHandler(nil)
+	client, err := cloudclient.New(os.Getenv("LAZYMIND_CLOUD_BASE_URL"), nil)
+	if err != nil {
+		return nil
+	}
+	handler, err := credentialvault.NewRestoreHandler(func(localUserID string) (*credentialvault.RestoreService, error) {
+		sink, err := modelprovider.NewCredentialRestoreSink(db, keys, localUserID, time.Now)
+		if err != nil {
+			return nil, err
+		}
+		modelprovider.SetTemporaryCredentialSink(localUserID, sink)
+		return credentialvault.NewRestoreService(credentialvault.RestoreServiceDeps{
+			Tokens: cloudsession.DefaultService(), Cloud: client, Sink: sink, Random: rand.Reader,
+			Now: time.Now, NewOperationID: uuid.NewString,
+		})
+	})
+	if err != nil {
+		return err
+	}
+	credentialvault.SetDefaultRestoreHandler(handler)
+	return nil
+}
+
+func loadDesktopCredentialManifest(cloudIssuer string) (*credentialvault.ManifestCache, error) {
+	trustPath := strings.TrimSpace(os.Getenv("LAZYMIND_CREDENTIAL_MANIFEST_TRUST_PUBLIC_KEY_FILE"))
+	payloadPath := strings.TrimSpace(os.Getenv("LAZYMIND_CREDENTIAL_MANIFEST_BOOTSTRAP_PAYLOAD_FILE"))
+	signaturePath := strings.TrimSpace(os.Getenv("LAZYMIND_CREDENTIAL_MANIFEST_BOOTSTRAP_SIGNATURE_FILE"))
+	if trustPath == "" && payloadPath == "" && signaturePath == "" {
+		return nil, nil
+	}
+	if trustPath == "" || payloadPath == "" || signaturePath == "" {
+		return nil, errors.New("credential manifest trust, payload and signature files must all be configured")
+	}
+	trustBody, err := os.ReadFile(trustPath)
+	if err != nil {
+		return nil, err
+	}
+	if block, _ := pem.Decode(trustBody); block != nil {
+		trustBody = block.Bytes
+	}
+	parsed, err := x509.ParsePKIXPublicKey(trustBody)
+	if err != nil {
+		return nil, err
+	}
+	trust, ok := parsed.(ed25519.PublicKey)
+	if !ok {
+		return nil, errors.New("credential manifest trust key is not Ed25519")
+	}
+	cache, err := credentialvault.NewManifestCache(trust, cloudIssuer, time.Now)
+	if err != nil {
+		return nil, err
+	}
+	payload, err := os.ReadFile(payloadPath)
+	if err != nil {
+		return nil, err
+	}
+	signature, err := os.ReadFile(signaturePath)
+	if err != nil {
+		return nil, err
+	}
+	if err := cache.Replace(payload, signature); err != nil {
+		return nil, err
+	}
+	return cache, nil
+}
+
 func main() {
 	log.Init()
 
@@ -243,6 +370,11 @@ func main() {
 		log.Logger.Fatal().Msg("ACL_DB_DRIVER set but ACL_DB_DSN is empty")
 	}
 	db := orm.MustConnect(driver, dsn)
+	credentialKeys, err := credentialvault.NewLocalKeyManager(credentialvault.NewSystemLocalKeyStore(), rand.Reader)
+	if err != nil {
+		log.Logger.Fatal().Msg("initialize local credential key manager failed")
+	}
+	modelprovider.SetCredentialKeyManager(credentialKeys)
 	if err := migrate.RunUp(); err != nil {
 		log.Logger.Fatal().Err(err).Msg("run SQL migrations failed")
 	}
@@ -362,6 +494,13 @@ func main() {
 	// Start the schedule ticker.
 	if startBackgroundJobs {
 		scheduler.RunScheduler(context.Background(), store.DB(), "")
+	}
+	initializeCloudSession(context.Background())
+	if err := initializeCredentialBackup(context.Background(), store.DB(), credentialKeys); err != nil {
+		log.Logger.Warn().Str("error_type", fmt.Sprintf("%T", err)).Msg("credential backup is unavailable")
+	}
+	if err := initializeCredentialRestore(store.DB(), credentialKeys); err != nil {
+		log.Logger.Warn().Str("error_type", fmt.Sprintf("%T", err)).Msg("credential restore is unavailable")
 	}
 
 	r := mux.NewRouter()

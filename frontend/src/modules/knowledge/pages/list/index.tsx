@@ -18,6 +18,7 @@ import {
   Input,
   TablePaginationConfig,
   Select,
+  Spin,
   Tag,
   Space,
   Typography,
@@ -63,6 +64,7 @@ import { ListPageTable } from "@/components/ui";
 import { useTranslation } from "react-i18next";
 import { axiosInstance, BASE_URL } from "@/components/request";
 import { AgentAppsAuth } from "@/components/auth";
+import { getCloudSession } from "@/runtime/cloud/session";
 import {
   fetchModelFeatures,
   isImageEmbedRequired,
@@ -86,6 +88,7 @@ import {
   normalizeDataSourceStatus,
 } from "@/modules/dataSource/utils/status";
 import KnowledgeSquare from "./KnowledgeSquare";
+import { getCloudKnowledgeSquare } from "./cloudKnowledgeSquare";
 import {
   createInitialKnowledgeSquareStatus,
   OFFICIAL_KNOWLEDGE_BASES,
@@ -131,6 +134,13 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
   const [officialStatus, setOfficialStatus] = useState<KnowledgeSquareStatusMap>(
     createInitialKnowledgeSquareStatus,
   );
+  const [knowledgeSquareItems, setKnowledgeSquareItems] = useState<OfficialKnowledgeBase[]>(
+    OFFICIAL_KNOWLEDGE_BASES,
+  );
+  const [cloudKnowledgeStatus, setCloudKnowledgeStatus] = useState<KnowledgeSquareStatusMap>({});
+  const [isCloudKnowledgeSquare, setIsCloudKnowledgeSquare] = useState(false);
+  const [knowledgeSquareLoading, setKnowledgeSquareLoading] = useState(false);
+  const [knowledgeSquareError, setKnowledgeSquareError] = useState(false);
   const [mineSort, setMineSort] = useState("updated");
   const [officialSearch, setOfficialSearch] = useState("");
   const [cloudSources, setCloudSources] = useState<DataSourceItem[]>([]);
@@ -146,6 +156,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
     },
   });
   const cloudSourceRequestSeqRef = useRef(0);
+  const knowledgeSquareRequestSeqRef = useRef(0);
   const isCloudArchiveView = sourceCategory === "cloudArchive";
   const isOfficialView = sourceCategory === "official";
   const createActionDisabled =
@@ -172,9 +183,56 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
     t("knowledge.multimodalEmbeddingNotReadyBanner")
   );
 
+  const refreshKnowledgeSquareSource = useCallback(async () => {
+    const requestSeq = ++knowledgeSquareRequestSeqRef.current;
+    let session;
+    try {
+      session = await getCloudSession();
+    } catch {
+      if (requestSeq !== knowledgeSquareRequestSeqRef.current) return;
+      setIsCloudKnowledgeSquare(false);
+      setKnowledgeSquareItems(OFFICIAL_KNOWLEDGE_BASES);
+      setKnowledgeSquareError(false);
+      setKnowledgeSquareLoading(false);
+      return;
+    }
+    if (requestSeq !== knowledgeSquareRequestSeqRef.current) return;
+    if (session.state !== "signed_in") {
+      setIsCloudKnowledgeSquare(false);
+      setKnowledgeSquareItems(OFFICIAL_KNOWLEDGE_BASES);
+      setKnowledgeSquareError(false);
+      setKnowledgeSquareLoading(false);
+      return;
+    }
+
+    setIsCloudKnowledgeSquare(true);
+    setKnowledgeSquareItems([]);
+    setCloudKnowledgeStatus({});
+    setKnowledgeSquareError(false);
+    setKnowledgeSquareLoading(true);
+    try {
+      const items = await getCloudKnowledgeSquare();
+      if (requestSeq !== knowledgeSquareRequestSeqRef.current) return;
+      setKnowledgeSquareItems(items);
+      setCloudKnowledgeStatus(Object.fromEntries(items.map((item) => [
+        item.id,
+        { installed: item.installed, updateAvailable: Boolean(item.updateAvailable) },
+      ])));
+    } catch {
+      if (requestSeq !== knowledgeSquareRequestSeqRef.current) return;
+      setKnowledgeSquareItems([]);
+      setKnowledgeSquareError(true);
+    } finally {
+      if (requestSeq === knowledgeSquareRequestSeqRef.current) {
+        setKnowledgeSquareLoading(false);
+      }
+    }
+  }, []);
+
   useEffect(() => {
     getTags();
     void checkEmbeddingReady();
+    void refreshKnowledgeSquareSource();
 
     const onFeaturesChanged = () => {
       void checkEmbeddingReady();
@@ -183,6 +241,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
     const onVisibilityChange = () => {
       if (document.visibilityState === "visible") {
         void checkEmbeddingReady();
+        void refreshKnowledgeSquareSource();
       }
     };
     document.addEventListener("visibilitychange", onVisibilityChange);
@@ -193,7 +252,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
       );
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, []);
+  }, [refreshKnowledgeSquareSource]);
 
   async function checkEmbeddingReady() {
     try {
@@ -493,7 +552,10 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
 
   const setOfficialItemStatus = useCallback(
     (item: OfficialKnowledgeBase, next: Partial<KnowledgeSquareStatusMap[string]>) => {
-      setOfficialStatus((current) => ({
+      const setStatus = item.id.startsWith("cloud:")
+        ? setCloudKnowledgeStatus
+        : setOfficialStatus;
+      setStatus((current) => ({
         ...current,
         [item.id]: {
           installed: current[item.id]?.installed ?? item.installed,
@@ -1078,13 +1140,24 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
       </div>
 
       {activeView === "square" ? (
-        <KnowledgeSquare
-          statusMap={officialStatus}
-          onInstall={handleOfficialInstall}
-          onUpdate={handleOfficialUpdate}
-          onOpen={handleOfficialOpen}
-          onQuery={handleOfficialQuery}
-        />
+        <Spin spinning={knowledgeSquareLoading}>
+          {knowledgeSquareError ? (
+            <Alert
+              showIcon
+              type="error"
+              message={t("common.requestFailed")}
+              action={<Button onClick={() => void refreshKnowledgeSquareSource()}>{t("common.retry")}</Button>}
+            />
+          ) : null}
+          <KnowledgeSquare
+            items={knowledgeSquareItems}
+            statusMap={isCloudKnowledgeSquare ? cloudKnowledgeStatus : officialStatus}
+            onInstall={handleOfficialInstall}
+            onUpdate={handleOfficialUpdate}
+            onOpen={handleOfficialOpen}
+            onQuery={handleOfficialQuery}
+          />
+        </Spin>
       ) : (
         <div className="knowledge-mine-view">
           <div className="knowledge-source-tabs" role="tablist" aria-label={t("knowledge.sourceCategory")}>

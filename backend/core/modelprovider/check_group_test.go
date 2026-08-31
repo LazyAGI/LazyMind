@@ -82,7 +82,7 @@ func TestCheckGroupRequiresRequestAPIKey(t *testing.T) {
 					UpdatedAt:      now,
 				},
 			}
-			ciphertext, err := encryptModelProviderAPIKey("stored-key")
+			ciphertext, err := encryptModelProviderAPIKeyForGroup("user-1", "qwen-group", 1, "stored-key")
 			if err != nil {
 				t.Fatalf("encrypt stored key: %v", err)
 			}
@@ -93,6 +93,7 @@ func TestCheckGroupRequiresRequestAPIKey(t *testing.T) {
 				BaseURL:             defaultProvider.BaseURL,
 				APIKeyCiphertext:    ciphertext,
 				CredentialVersion:   modelProviderCredentialVersion,
+				CredentialRevision:  1,
 				BaseModel: orm.BaseModel{
 					CreateUserID:   "user-1",
 					CreateUserName: "User 1",

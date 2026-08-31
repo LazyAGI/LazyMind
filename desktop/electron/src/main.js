@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, dialog, clipboard, Menu, Tray, session } = require("electron");
+const { app, BrowserWindow, ipcMain, shell, dialog, clipboard, Menu, Tray, session, powerMonitor } = require("electron");
 const { spawn, execFile } = require("node:child_process");
 const { createHmac, randomBytes, randomUUID } = require("node:crypto");
 const fs = require("node:fs");
@@ -22,7 +22,7 @@ const {
   runInstallerWarmupLifecycle,
 } = require("./installer-warmup");
 const { clearFrontendCaches } = require("./frontend-cache");
-const { installExternalNavigationHandler } = require("./external-navigation");
+const { installExternalNavigationHandler, isTrustedCloudNavigation } = require("./external-navigation");
 
 const isWindows = process.platform === "win32";
 const isMac = process.platform === "darwin";
@@ -47,6 +47,8 @@ if (windowsDesktopPaths) {
 const isPackaged = app.isPackaged;
 const desktopTarget = isWindows ? "windows-x64" : "darwin-arm64";
 const ownerToken = randomUUID();
+const cloudBaseURL = String(process.env.LAZYMIND_CLOUD_BASE_URL || "").trim();
+const cloudRegisterLocale = String(process.env.LAZYMIND_CLOUD_REGISTER_LOCALE || "zh-CN").trim();
 const runtimeResourcesRoot = process.env.LAZYMIND_DESKTOP_RESOURCES_ROOT ||
   (isPackaged
     ? path.join(process.resourcesPath, "runtime")
@@ -835,11 +837,27 @@ function beginFastQuit(reason = "quit") {
   app.quit();
 }
 
-function enterBackgroundMode(reason, { discoverable }) {
+async function clearTemporaryCredentials(reason) {
+  const window = mainWindow;
+  if (!window || window.isDestroyed()) {
+    return;
+  }
+  try {
+    await Promise.race([
+      window.webContents.executeJavaScript(`fetch("/api/core/credential-vault/restores:clear-temporary", { method: "POST", credentials: "same-origin" }).then((response) => response.ok)`),
+      new Promise((resolve) => setTimeout(resolve, 2000)),
+    ]);
+  } catch {
+    appendStartupLog("desktop", `temporary credential cleanup could not be confirmed (${reason})`);
+  }
+}
+
+async function enterBackgroundMode(reason, { discoverable }) {
   if (isInstallerWarmup || isQuitting) {
     return;
   }
   windowHiddenByUser = true;
+  await clearTemporaryCredentials(reason);
   finishStartupMetrics("cancelled", "frontend-closed-to-background");
   rendererReadyWait?.cancel();
   rendererReadyWait = undefined;
@@ -1246,6 +1264,37 @@ function attachExternalNavigationHandler(window) {
   );
 }
 
+function configuredCloudOrigin() {
+  if (!cloudBaseURL) {
+    throw new Error("LazyMind Cloud is not configured");
+  }
+  let parsed;
+  try {
+    parsed = new URL(cloudBaseURL);
+  } catch {
+    throw new Error("LazyMind Cloud URL is invalid");
+  }
+  const loopbackHTTP = parsed.protocol === "http:" && (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1" || parsed.hostname === "::1");
+  if ((parsed.protocol !== "https:" && !loopbackHTTP) || parsed.username || parsed.password || parsed.hash || parsed.search) {
+    throw new Error("LazyMind Cloud must use HTTPS or an explicit Loopback HTTP origin");
+  }
+  return parsed.origin;
+}
+
+async function openTrustedCloudNavigation(rawURL, purpose) {
+  const origin = configuredCloudOrigin();
+  if (!isTrustedCloudNavigation(rawURL, origin, purpose)) {
+    throw new Error("LazyMind Cloud navigation was rejected");
+  }
+  await shell.openExternal(rawURL);
+  return { opened: true };
+}
+
+function cloudRegisterURL() {
+  const locale = /^(?:en|en-US)$/i.test(cloudRegisterLocale) ? "en" : "zh";
+  return new URL(`/${locale}/register`, configuredCloudOrigin()).toString();
+}
+
 function windowsDesktopIconPath() {
   if (!isWindows) {
     return undefined;
@@ -1289,7 +1338,7 @@ function ensureWindowsTray() {
       {
         label: "Exit",
         click: () => {
-          enterBackgroundMode("tray exit", { discoverable: false });
+          void enterBackgroundMode("tray exit", { discoverable: false });
         },
       },
     ]));
@@ -1305,7 +1354,7 @@ function attachManagedClose(window) {
       return;
     }
     event.preventDefault();
-    enterBackgroundMode("window close", { discoverable: true });
+    void enterBackgroundMode("window close", { discoverable: true });
   });
 }
 
@@ -1551,6 +1600,16 @@ ipcMain.handle("lazymind:copyStartupLogs", () => {
   clipboard.writeText(text);
   return true;
 });
+ipcMain.handle("lazymind:openCloudLogin", async (_event, url) => {
+  return openTrustedCloudNavigation(String(url || ""), "login");
+});
+ipcMain.handle("lazymind:openCloudRegister", async () => {
+  const url = cloudRegisterURL();
+  return openTrustedCloudNavigation(url, "register");
+});
+ipcMain.handle("lazymind:openCloudTokenPlan", async (_event, url) => {
+  return openTrustedCloudNavigation(String(url || ""), "token-plan");
+});
 ipcMain.handle("lazymind:exportDiagnostics", async () => {
   const status = currentStatus || await readStatus();
   const out = path.join(desktopLogsDir, "desktop-diagnostics.json");
@@ -1595,6 +1654,9 @@ if (!hasSingleInstanceLock) {
     if (isWindows) {
       app.setAppUserModelId("ai.lazymind.desktop");
     }
+    powerMonitor.on("lock-screen", () => {
+      void clearTemporaryCredentials("OS lock");
+    });
     if (isInstallerWarmup) {
       startupMetricsRecorder.mark("installerWarmupStarted");
       return runInstallerWarmup().then(
@@ -1639,7 +1701,7 @@ if (!hasSingleInstanceLock) {
     }
     if (!isQuitting) {
       event.preventDefault();
-      enterBackgroundMode("app quit", { discoverable: false });
+      void enterBackgroundMode("app quit", { discoverable: false });
     }
   });
 }

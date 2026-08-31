@@ -18,6 +18,7 @@ import { useTranslation } from "react-i18next";
 import { AgentAppsAuth } from "@/components/auth";
 import { useModelFeatures } from "@/hooks/useModelFeatures";
 import { runtimeFeatures } from "@/runtime/features";
+import { getCloudSession } from "@/runtime/cloud/session";
 import {
   modelProvidersApi,
   modelProvidersDefaultApi,
@@ -26,6 +27,7 @@ import {
 } from "../api";
 
 const SENSENOVA_LOGO_URL = "https://www.sensenova.ai/images/logo.png";
+const LAZYMIND_CLOUD_PROVIDER_KEY = "lazymind_cloud";
 
 export type SetupAvailabilityState = "loading" | "ready" | "empty" | "error";
 
@@ -643,6 +645,7 @@ export default function DefaultModelConfigPanel({
   const [modelReadyStatus, setModelReadyStatus] = useState<ModelReadyStatus>(
     {},
   );
+  const [lazyMindCloudAvailable, setLazyMindCloudAvailable] = useState(false);
   const isAdmin = AgentAppsAuth.getUserInfo()?.role === "system-admin";
   const modelFeaturesState = useModelFeatures();
   const imageEmbedEnabled =
@@ -659,6 +662,20 @@ export default function DefaultModelConfigPanel({
     () => createModelProviderFallbacks(t),
     [currentLanguage, t],
   );
+
+  useEffect(() => {
+    let cancelled = false;
+    void getCloudSession()
+      .then((session) => {
+        if (!cancelled) setLazyMindCloudAvailable(session.state === "signed_in");
+      })
+      .catch(() => {
+        if (!cancelled) setLazyMindCloudAvailable(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const loadDefaultModelState = useCallback(async () => {
     try {
@@ -1316,6 +1333,18 @@ export default function DefaultModelConfigPanel({
           </p>
         </div>
       </div>
+
+      <Alert
+        showIcon
+        data-provider-key={LAZYMIND_CLOUD_PROVIDER_KEY}
+        type={lazyMindCloudAvailable ? "success" : "info"}
+        message={t("modelProvider.lazyMindCloudTitle")}
+        description={t(
+          lazyMindCloudAvailable
+            ? "modelProvider.lazyMindCloudAvailable"
+            : "modelProvider.lazyMindCloudUnavailable",
+        )}
+      />
 
       <div className="model-provider-default-list">
         {modelProviderSetupState === "loading" && (

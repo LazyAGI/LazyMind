@@ -205,6 +205,7 @@ func LoadLLMConfig(ctx context.Context, db *gorm.DB, userID string) (map[string]
 			coveredTypes[normalized] = struct{}{}
 		}
 	}
+	rows = fillMissingRolesFromRuntimeProvider(ctx, rows)
 
 	return BuildLLMConfig(rows), nil
 }
