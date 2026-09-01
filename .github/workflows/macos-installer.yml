@@ -347,8 +347,9 @@ jobs:
             exit 1
           fi
 
-      - name: Fail rejected app ZIP notarization
+      - name: Download rejected app ZIP notarization log
         if: steps.release.outputs.is_tag == 'true' && steps.zip_notarization.outputs.status == 'Invalid'
+        continue-on-error: true
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
@@ -360,6 +361,21 @@ jobs:
             --password "${APPLE_APP_SPECIFIC_PASSWORD}" \
             --team-id "${APPLE_TEAM_ID}" \
             zip-notarization-log.json
+
+      - name: Upload rejected app ZIP notarization diagnostics
+        if: always() && steps.release.outputs.is_tag == 'true' && steps.zip_notarization.outputs.status == 'Invalid'
+        uses: actions/upload-artifact@v7
+        with:
+          name: LazyMind-macos-zip-notarization-diagnostics
+          path: |
+            zip-notarization-status.json
+            zip-notarization-log.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Fail rejected app ZIP notarization
+        if: always() && steps.release.outputs.is_tag == 'true' && steps.zip_notarization.outputs.status == 'Invalid'
+        run: |
           echo "::error::Apple rejected the app ZIP notarization submission."
           exit 1
 
@@ -475,8 +491,34 @@ jobs:
             exit 1
           fi
 
-      - name: Fail rejected DMG notarization
+      - name: Download rejected DMG notarization log
         if: steps.release.outputs.is_tag == 'true' && steps.dmg_notarization.outputs.status == 'Invalid'
+        continue-on-error: true
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          SUBMISSION_ID: ${{ steps.dmg_submission.outputs.submission_id }}
+        run: |
+          xcrun notarytool log "${SUBMISSION_ID}" \
+            --apple-id "${APPLE_ID}" \
+            --password "${APPLE_APP_SPECIFIC_PASSWORD}" \
+            --team-id "${APPLE_TEAM_ID}" \
+            dmg-notarization-log.json
+
+      - name: Upload rejected DMG notarization diagnostics
+        if: always() && steps.release.outputs.is_tag == 'true' && steps.dmg_notarization.outputs.status == 'Invalid'
+        uses: actions/upload-artifact@v7
+        with:
+          name: LazyMind-macos-dmg-notarization-diagnostics
+          path: |
+            dmg-notarization-status.json
+            dmg-notarization-log.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Fail rejected DMG notarization
+        if: always() && steps.release.outputs.is_tag == 'true' && steps.dmg_notarization.outputs.status == 'Invalid'
         run: |
           echo "::error::Apple rejected DMG notarization submission ${{ steps.dmg_submission.outputs.submission_id }}."
           exit 1

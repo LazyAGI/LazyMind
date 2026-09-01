@@ -70,7 +70,10 @@ jobs:
             exit 1
           fi
 
-          sha256sum "${dmg_files[0]}" "${exe_files[0]}" | tee release-assets/SHA256SUMS
+          for installer in "${dmg_files[0]}" "${exe_files[0]}"; do
+            installer_sha256="$(sha256sum "${installer}" | cut -d ' ' -f 1)"
+            printf '%s  %s\n' "${installer_sha256}" "$(basename "${installer}")"
+          done | tee release-assets/SHA256SUMS
 
       - name: Create or validate draft release
         env:

@@ -515,6 +515,10 @@ test("macOS CI notarizes ZIP then DMG and fails when notarization times out", ()
   assert.match(buildWorkflow, /sleep 30/);
   assert.match(buildWorkflow, /DMG notarization is still in progress after 30 minutes[\s\S]*exit 1/);
   assert.match(buildWorkflow, /name:\s*Require accepted DMG notarization/);
+  assert.match(buildWorkflow, /name:\s*Upload rejected app ZIP notarization diagnostics/);
+  assert.match(buildWorkflow, /name:\s*Upload rejected DMG notarization diagnostics/);
+  assert.match(buildWorkflow, /zip-notarization-log\.json/);
+  assert.match(buildWorkflow, /dmg-notarization-log\.json/);
   assert.match(buildWorkflow, /stapler staple "\$\{final_path\}"/);
   assert.match(buildWorkflow, /stapler validate "\$\{final_path\}"/);
   assert.match(buildWorkflow, /test-macos-installer:/);
@@ -543,6 +547,8 @@ test("desktop release builds each platform once and publishes only after both pa
   assert.match(source, /gh release create/);
   assert.match(source, /gh release upload/);
   assert.match(source, /--prerelease/);
+  assert.match(source, /printf '%s  %s\\n'.*basename/);
+  assert.doesNotMatch(source, /sha256sum "\$\{dmg_files\[0\]\}" "\$\{exe_files\[0\]\}" \| tee/);
 });
 
 test("installer workflows launch the packaged application before publishing", () => {
