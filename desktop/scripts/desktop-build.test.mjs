@@ -26,6 +26,14 @@ const windowsWorkflow = path.join(
   "workflows",
   "windows-installer.yml",
 );
+const desktopReleaseWorkflow = path.join(
+  scriptsDir,
+  "..",
+  "..",
+  ".github",
+  "workflows",
+  "desktop-release.yml",
+);
 const coreDockerfile = path.join(scriptsDir, "..", "..", "backend", "core", "Dockerfile");
 const dockerCompose = path.join(scriptsDir, "..", "..", "docker-compose.yml");
 const rootMakefile = path.join(scriptsDir, "..", "..", "Makefile");
@@ -341,6 +349,9 @@ test("Windows CI treats branches as non-tags without leaking git probe failures"
   assert.doesNotMatch(source, /git submodule update --init --recursive/);
   assert.match(source, /resolve-release-version\.mjs/);
   assert.match(source, /windows-2022[\s\S]*windows-2025/);
+  assert.match(source, /workflow_call:/);
+  assert.doesNotMatch(source, /push:\s*\n\s*tags:/);
+  assert.match(source, /permissions:\s*\n\s*contents:\s*read/);
   assert.match(source, /artifact_name:\s*lazymind-windows-x64-installer/);
   assert.match(source, /"artifact_name=\$outputName"/);
   assert.match(
@@ -398,8 +409,10 @@ test("macOS distribution build signs packages while CI owns notarization sequenc
   const builderSource = readFileSync(electronBuilderConfig, "utf8");
   const packageJson = JSON.parse(readFileSync(electronPackage, "utf8"));
   const workflow = readFileSync(macosWorkflow, "utf8");
-  assert.match(workflow, /on:\s*\n\s*push:\s*\n\s*tags:\s*\n\s*- "v\*"\s*\n\s*workflow_dispatch:/);
-  assert.doesNotMatch(workflow.match(/on:[\s\S]*?permissions:/)?.[0] || "", /branches:/);
+  assert.match(workflow, /on:\s*\n\s*workflow_call:/);
+  assert.match(workflow, /workflow_dispatch:/);
+  assert.doesNotMatch(workflow, /push:\s*\n\s*tags:/);
+  assert.match(workflow, /permissions:\s*\n\s*contents:\s*read/);
   assert.match(workflow, /name: Validate tag and set desktop version[\s\S]*resolve-release-version\.mjs/);
   assert.doesNotMatch(workflow, /pythonPrerelease|prereleaseNames/);
   assert.match(source, /PACKAGE_KIND=.*zip/);
@@ -490,14 +503,10 @@ test("macOS CI notarizes ZIP then DMG and fails when notarization times out", ()
   assert.match(buildWorkflow, /DMG notarization is still in progress after 30 minutes[\s\S]*exit 1/);
   assert.match(buildWorkflow, /stapler staple "\$\{final_path\}"/);
   assert.match(buildWorkflow, /stapler validate "\$\{final_path\}"/);
-  assert.match(buildWorkflow, /test-and-publish-macos-installer:/);
+  assert.match(buildWorkflow, /test-macos-installer:/);
   assert.match(buildWorkflow, /name:\s*Install application from DMG/);
   assert.match(buildWorkflow, /name:\s*Run installed application smoke/);
-  assert.match(buildWorkflow, /name:\s*Upload installer to draft release/);
-  assert.ok(
-    buildWorkflow.indexOf("name: Run installed application smoke") <
-      buildWorkflow.indexOf("name: Upload installer to draft release"),
-  );
+  assert.doesNotMatch(buildWorkflow, /gh release (?:create|upload)/);
   assert.match(buildWorkflow, /name:\s*Verify packaged runtime cleanup after artifact upload/);
   assert.match(buildWorkflow, /LAZYMIND_PROCESS_COMPOSE_DOWN_TIMEOUT=1s/);
   assert.ok(
@@ -505,6 +514,21 @@ test("macOS CI notarizes ZIP then DMG and fails when notarization times out", ()
       buildWorkflow.indexOf("name: Verify packaged runtime cleanup after artifact upload"),
   );
   assert.doesNotMatch(buildWorkflow, /name:\s*Report step timings/);
+});
+
+test("desktop release builds each platform once and publishes only after both pass", () => {
+  const source = readFileSync(desktopReleaseWorkflow, "utf8");
+
+  assert.match(source, /push:\s*\n\s*tags:\s*\n\s*- "v\*"/);
+  assert.match(source, /macos:[\s\S]*uses: \.\/\.github\/workflows\/macos-installer\.yml/);
+  assert.match(source, /windows:[\s\S]*uses: \.\/\.github\/workflows\/windows-installer\.yml/);
+  assert.match(source, /release:[\s\S]*needs:\s*\n\s*- macos\s*\n\s*- windows/);
+  assert.match(source, /release:[\s\S]*permissions:[\s\S]*contents: write/);
+  assert.match(source, /name: Download tested macOS installer/);
+  assert.match(source, /name: Download tested Windows installer/);
+  assert.match(source, /gh release create/);
+  assert.match(source, /gh release upload/);
+  assert.match(source, /--prerelease/);
 });
 
 test("installer workflows launch the packaged application before publishing", () => {

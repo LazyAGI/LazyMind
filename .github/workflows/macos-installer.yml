@@ -1,9 +1,17 @@
 name: macOS Desktop Installer
 
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_call:
+    inputs:
+      git_ref:
+        description: "Branch, tag, or commit SHA to build"
+        required: false
+        type: string
+    outputs:
+      installer_artifact_name:
+        value: ${{ jobs.build-macos-installer.outputs.installer_artifact_name }}
+      release_tag:
+        value: ${{ jobs.build-macos-installer.outputs.release_tag }}
   workflow_dispatch:
     inputs:
       git_ref:
@@ -12,7 +20,7 @@ on:
         type: string
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: macos-installer-${{ inputs.git_ref || github.ref }}
@@ -36,7 +44,6 @@ jobs:
     outputs:
       installer_artifact_name: ${{ steps.test_artifact.outputs.name }}
       installer_available: ${{ steps.test_artifact.outputs.available }}
-      is_formal_release: ${{ steps.release.outputs.is_formal_release }}
       release_tag: ${{ steps.release.outputs.tag }}
 
     steps:
@@ -81,41 +88,10 @@ jobs:
           if [[ -n "${release_tag}" ]]; then
             echo "is_tag=true" >> "${GITHUB_OUTPUT}"
             echo "tag=${release_tag}" >> "${GITHUB_OUTPUT}"
-            if [[ "${release_tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-              echo "is_formal_release=true" >> "${GITHUB_OUTPUT}"
-            else
-              echo "is_formal_release=false" >> "${GITHUB_OUTPUT}"
-            fi
             echo "Release tag detected: ${release_tag}"
           else
             echo "is_tag=false" >> "${GITHUB_OUTPUT}"
-            echo "is_formal_release=false" >> "${GITHUB_OUTPUT}"
             echo "Requested ref is not a tag; notarization will be skipped."
-          fi
-
-      - name: Ensure draft release exists
-        if: steps.release.outputs.is_formal_release == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ steps.release.outputs.tag }}
-        run: |
-          set -euo pipefail
-          if release_json="$(gh release view "${RELEASE_TAG}" --json isDraft 2>/dev/null)"; then
-            if [[ "$(jq -r .isDraft <<<"${release_json}")" != "true" ]]; then
-              echo "::error::Release ${RELEASE_TAG} already exists and is not a draft"
-              exit 1
-            fi
-            echo "Draft release ${RELEASE_TAG} already exists"
-            exit 0
-          fi
-
-          if ! gh release create "${RELEASE_TAG}" --draft --verify-tag --generate-notes --title "${RELEASE_TAG}"; then
-            sleep 3
-            is_draft="$(gh release view "${RELEASE_TAG}" --json isDraft --jq .isDraft)"
-            if [[ "${is_draft}" != "true" ]]; then
-              echo "::error::Could not create or find draft release ${RELEASE_TAG}"
-              exit 1
-            fi
           fi
 
       - name: Initialize development submodules
@@ -654,8 +630,8 @@ jobs:
         if: always()
         run: df -h /
 
-  test-and-publish-macos-installer:
-    name: Test and publish macOS installer
+  test-macos-installer:
+    name: Test macOS installer
     if: needs.build-macos-installer.outputs.installer_available == 'true'
     needs: build-macos-installer
     runs-on: macos-15
@@ -699,7 +675,7 @@ jobs:
           set -euo pipefail
           test -x "${INSTALLED_APP}/Contents/MacOS/LazyMind"
           codesign --verify --deep --strict --verbose=2 "${INSTALLED_APP}"
-          if [[ "${{ needs.build-macos-installer.outputs.is_formal_release }}" == "true" ]]; then
+          if [[ -n "${{ needs.build-macos-installer.outputs.release_tag }}" ]]; then
             spctl --assess --type execute --verbose=4 "${INSTALLED_APP}"
           fi
 
@@ -722,19 +698,3 @@ jobs:
         run: |
           rm -rf "${INSTALLED_APP}"
           test ! -e "${INSTALLED_APP}"
-
-      - name: Upload installer to draft release
-        if: needs.build-macos-installer.outputs.is_formal_release == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ needs.build-macos-installer.outputs.release_tag }}
-        run: |
-          set -euo pipefail
-          installer="$(find installer-under-test -maxdepth 1 -type f -name '*.dmg' -print -quit)"
-          test -n "${installer}"
-          is_draft="$(gh release view "${RELEASE_TAG}" --json isDraft --jq .isDraft)"
-          if [[ "${is_draft}" != "true" ]]; then
-            echo "::error::Release ${RELEASE_TAG} is not a draft"
-            exit 1
-          fi
-          gh release upload "${RELEASE_TAG}" "${installer}" --clobber

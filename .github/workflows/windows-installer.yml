@@ -1,9 +1,17 @@
 name: Windows Desktop Installer
 
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_call:
+    inputs:
+      git_ref:
+        description: "Branch, tag, or commit SHA to build"
+        required: false
+        type: string
+    outputs:
+      artifact_name:
+        value: ${{ jobs.build-windows-installer.outputs.artifact_name }}
+      release_tag:
+        value: ${{ jobs.build-windows-installer.outputs.release_tag }}
   workflow_dispatch:
     inputs:
       git_ref:
@@ -12,7 +20,7 @@ on:
         type: string
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: windows-installer-${{ inputs.git_ref || github.ref }}
@@ -35,7 +43,6 @@ jobs:
       package_version: ${{ steps.version.outputs.package_version }}
       artifact_name: lazymind-windows-x64-installer
       release_tag: ${{ steps.release.outputs.release_tag }}
-      is_formal_release: ${{ steps.release.outputs.is_formal_release }}
       installer_sha256: ${{ steps.package.outputs.installer_sha256 }}
 
     steps:
@@ -80,35 +87,7 @@ jobs:
           }
           "is_tag=$($isTag.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
           "release_tag=$(if ($isTag) { $tag } else { '' })" >> $env:GITHUB_OUTPUT
-          $isFormalRelease = $isTag -and $tag -match '^v\d+\.\d+\.\d+$'
-          "is_formal_release=$($isFormalRelease.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
           exit 0
-
-      - name: Ensure draft release exists
-        if: steps.release.outputs.is_formal_release == 'true'
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ steps.release.outputs.release_tag }}
-        run: |
-          $ErrorActionPreference = "Stop"
-          $existing = gh release view $env:RELEASE_TAG --json isDraft 2>$null
-          if ($LASTEXITCODE -eq 0) {
-            if (-not (($existing | ConvertFrom-Json).isDraft)) {
-              throw "Release $env:RELEASE_TAG already exists and is not a draft"
-            }
-            Write-Host "Draft release $env:RELEASE_TAG already exists"
-            exit 0
-          }
-
-          gh release create $env:RELEASE_TAG --draft --verify-tag --generate-notes --title $env:RELEASE_TAG
-          if ($LASTEXITCODE -ne 0) {
-            Start-Sleep -Seconds 3
-            $release = gh release view $env:RELEASE_TAG --json isDraft | ConvertFrom-Json
-            if ($LASTEXITCODE -ne 0 -or -not $release.isDraft) {
-              throw "Could not create or find draft release $env:RELEASE_TAG"
-            }
-          }
 
       - name: Initialize development submodules
         if: steps.release.outputs.is_tag != 'true'
@@ -588,34 +567,3 @@ jobs:
           if ($failures.Count -gt 0) {
             throw "Installer test stages failed or were skipped: $($failures.Key -join ', ')"
           }
-
-  publish-windows-installer:
-    name: Publish Windows installer to draft release
-    if: needs.build-windows-installer.outputs.is_formal_release == 'true'
-    needs:
-      - build-windows-installer
-      - test-windows-installer
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-
-    steps:
-      - name: Download tested Windows installer
-        uses: actions/download-artifact@v8
-        with:
-          name: ${{ needs.build-windows-installer.outputs.artifact_name }}
-          path: release-assets
-
-      - name: Upload installer to draft release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ needs.build-windows-installer.outputs.release_tag }}
-        run: |
-          set -euo pipefail
-          installer="$(find release-assets -maxdepth 1 -type f -name '*.exe' -print -quit)"
-          test -n "${installer}"
-          is_draft="$(gh release view "${RELEASE_TAG}" --json isDraft --jq .isDraft)"
-          if [[ "${is_draft}" != "true" ]]; then
-            echo "::error::Release ${RELEASE_TAG} is not a draft"
-            exit 1
-          fi
-          gh release upload "${RELEASE_TAG}" "${installer}" --clobber
