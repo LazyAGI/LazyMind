@@ -12,7 +12,7 @@ on:
         type: string
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: macos-installer-${{ inputs.git_ref || github.ref }}
@@ -33,6 +33,11 @@ jobs:
     environment: mac_dev
     runs-on: macos-15
     timeout-minutes: 180
+    outputs:
+      installer_artifact_name: ${{ steps.test_artifact.outputs.name }}
+      installer_available: ${{ steps.test_artifact.outputs.available }}
+      is_formal_release: ${{ steps.release.outputs.is_formal_release }}
+      release_tag: ${{ steps.release.outputs.tag }}
 
     steps:
       - name: Checkout
@@ -76,10 +81,41 @@ jobs:
           if [[ -n "${release_tag}" ]]; then
             echo "is_tag=true" >> "${GITHUB_OUTPUT}"
             echo "tag=${release_tag}" >> "${GITHUB_OUTPUT}"
+            if [[ "${release_tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "is_formal_release=true" >> "${GITHUB_OUTPUT}"
+            else
+              echo "is_formal_release=false" >> "${GITHUB_OUTPUT}"
+            fi
             echo "Release tag detected: ${release_tag}"
           else
             echo "is_tag=false" >> "${GITHUB_OUTPUT}"
+            echo "is_formal_release=false" >> "${GITHUB_OUTPUT}"
             echo "Requested ref is not a tag; notarization will be skipped."
+          fi
+
+      - name: Ensure draft release exists
+        if: steps.release.outputs.is_formal_release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if release_json="$(gh release view "${RELEASE_TAG}" --json isDraft 2>/dev/null)"; then
+            if [[ "$(jq -r .isDraft <<<"${release_json}")" != "true" ]]; then
+              echo "::error::Release ${RELEASE_TAG} already exists and is not a draft"
+              exit 1
+            fi
+            echo "Draft release ${RELEASE_TAG} already exists"
+            exit 0
+          fi
+
+          if ! gh release create "${RELEASE_TAG}" --draft --verify-tag --generate-notes --title "${RELEASE_TAG}"; then
+            sleep 3
+            is_draft="$(gh release view "${RELEASE_TAG}" --json isDraft --jq .isDraft)"
+            if [[ "${is_draft}" != "true" ]]; then
+              echo "::error::Could not create or find draft release ${RELEASE_TAG}"
+              exit 1
+            fi
           fi
 
       - name: Initialize development submodules
@@ -432,6 +468,13 @@ jobs:
               process.stdout.write(value.id);
             ' "${submission_path}"
           )"
+          node -e '
+            const fs = require("fs");
+            const file = process.argv[1];
+            const value = JSON.parse(fs.readFileSync(file, "utf8"));
+            value.releaseTag = process.argv[2];
+            fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
+          ' "${submission_path}" "${{ steps.release.outputs.tag }}"
           echo "submission_id=${submission_id}" >> "${GITHUB_OUTPUT}"
           echo "submission_path=${submission_path}" >> "${GITHUB_OUTPUT}"
 
@@ -528,6 +571,21 @@ jobs:
           if-no-files-found: error
           retention-days: 30
           archive: false
+
+      - name: Select installer artifact for installation testing
+        id: test_artifact
+        if: always() && steps.package.outcome == 'success'
+        run: |
+          if [[ "${{ steps.release.outputs.is_tag }}" != "true" ]]; then
+            echo "available=true" >> "${GITHUB_OUTPUT}"
+            echo "name=LazyMind-macos-arm64-development" >> "${GITHUB_OUTPUT}"
+          elif [[ "${{ steps.dmg_notarization.outputs.status }}" == "Accepted" ]]; then
+            echo "available=true" >> "${GITHUB_OUTPUT}"
+            echo "name=LazyMind-macos-arm64-notarized" >> "${GITHUB_OUTPUT}"
+          else
+            echo "available=false" >> "${GITHUB_OUTPUT}"
+            echo "name=" >> "${GITHUB_OUTPUT}"
+          fi
 
       - name: Add artifact summary
         if: always() && steps.package.outcome == 'success'
@@ -630,3 +688,88 @@ jobs:
       - name: Show final disk usage
         if: always()
         run: df -h /
+
+  test-and-publish-macos-installer:
+    name: Test and publish macOS installer
+    if: needs.build-macos-installer.outputs.installer_available == 'true'
+    needs: build-macos-installer
+    runs-on: macos-15
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout smoke test scripts
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.git_ref || github.ref }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Download the exact installer built above
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.build-macos-installer.outputs.installer_artifact_name }}
+          path: installer-under-test
+
+      - name: Install application from DMG
+        id: install
+        run: |
+          set -euo pipefail
+          dmg="$(find installer-under-test -maxdepth 1 -type f -name '*.dmg' -print -quit)"
+          test -n "${dmg}"
+          mount_dir="$(mktemp -d "${RUNNER_TEMP}/lazymind-install-test-mount.XXXXXX")"
+          install_root="${RUNNER_TEMP}/lazymind-install-test-applications"
+          installed_app="${install_root}/LazyMind.app"
+          mkdir -p "${install_root}"
+          hdiutil attach "${dmg}" -readonly -nobrowse -mountpoint "${mount_dir}"
+          trap 'hdiutil detach "${mount_dir}" >/dev/null 2>&1 || true' EXIT
+          ditto "${mount_dir}/LazyMind.app" "${installed_app}"
+          hdiutil detach "${mount_dir}"
+          trap - EXIT
+          echo "app=${installed_app}" >> "${GITHUB_OUTPUT}"
+
+      - name: Verify installed application
+        env:
+          INSTALLED_APP: ${{ steps.install.outputs.app }}
+        run: |
+          set -euo pipefail
+          test -x "${INSTALLED_APP}/Contents/MacOS/LazyMind"
+          codesign --verify --deep --strict --verbose=2 "${INSTALLED_APP}"
+          if [[ "${{ needs.build-macos-installer.outputs.is_formal_release }}" == "true" ]]; then
+            spctl --assess --type execute --verbose=4 "${INSTALLED_APP}"
+          fi
+
+      - name: Run installed application smoke
+        env:
+          INSTALLED_APP: ${{ steps.install.outputs.app }}
+        run: |
+          set -euo pipefail
+          smoke_root="${RUNNER_TEMP}/lazymind-installed-smoke"
+          node desktop/scripts/packaged-app-smoke.mjs \
+            --app "${INSTALLED_APP}" \
+            --runtime-root "${smoke_root}" \
+            --platform darwin \
+            --timeout-ms 300000
+
+      - name: Remove installed application
+        if: always() && steps.install.outcome == 'success'
+        env:
+          INSTALLED_APP: ${{ steps.install.outputs.app }}
+        run: |
+          rm -rf "${INSTALLED_APP}"
+          test ! -e "${INSTALLED_APP}"
+
+      - name: Upload installer to draft release
+        if: needs.build-macos-installer.outputs.is_formal_release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.build-macos-installer.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          installer="$(find installer-under-test -maxdepth 1 -type f -name '*.dmg' -print -quit)"
+          test -n "${installer}"
+          is_draft="$(gh release view "${RELEASE_TAG}" --json isDraft --jq .isDraft)"
+          if [[ "${is_draft}" != "true" ]]; then
+            echo "::error::Release ${RELEASE_TAG} is not a draft"
+            exit 1
+          fi
+          gh release upload "${RELEASE_TAG}" "${installer}" --clobber

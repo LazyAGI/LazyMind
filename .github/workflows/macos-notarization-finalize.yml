@@ -10,7 +10,7 @@ on:
 
 permissions:
   actions: read
-  contents: read
+  contents: write
 
 concurrency:
   group: macos-notarization-finalize-${{ inputs.source_run_id }}
@@ -24,6 +24,12 @@ jobs:
     timeout-minutes: 20
 
     steps:
+      - name: Checkout smoke test scripts
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
       - name: Set up Node.js
         uses: actions/setup-node@v6
         with:
@@ -100,6 +106,18 @@ jobs:
               process.stdout.write(value.id);
             ' "${submission_json}"
           )"
+          release_tag="$(
+            node -e '
+              const fs = require("fs");
+              const value = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+              if (!value.releaseTag) process.exit(1);
+              process.stdout.write(value.releaseTag);
+            ' "${submission_json}"
+          )"
+          if [[ ! "${release_tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Submission record has invalid formal release tag: ${release_tag}"
+            exit 1
+          fi
           xcrun notarytool info "${submission_id}" \
             --apple-id "${APPLE_ID}" \
             --password "${APPLE_APP_SPECIFIC_PASSWORD}" \
@@ -116,6 +134,7 @@ jobs:
           echo "submission_id=${submission_id}" >> "${GITHUB_OUTPUT}"
           echo "notarization_status=${notarization_status}" >> "${GITHUB_OUTPUT}"
           echo "pending_dmg=${pending_dmg}" >> "${GITHUB_OUTPUT}"
+          echo "release_tag=${release_tag}" >> "${GITHUB_OUTPUT}"
           {
             echo "## Apple notarization status"
             echo
@@ -198,6 +217,62 @@ jobs:
           if-no-files-found: error
           retention-days: 30
           archive: false
+
+      - name: Install application from finalized DMG
+        if: steps.status.outputs.notarization_status == 'Accepted'
+        id: install
+        env:
+          INSTALLER_PATH: ${{ steps.package.outputs.installer_path }}
+        run: |
+          set -euo pipefail
+          mount_dir="$(mktemp -d "${RUNNER_TEMP}/lazymind-install-test-mount.XXXXXX")"
+          install_root="${RUNNER_TEMP}/lazymind-install-test-applications"
+          installed_app="${install_root}/LazyMind.app"
+          mkdir -p "${install_root}"
+          hdiutil attach "${INSTALLER_PATH}" -readonly -nobrowse -mountpoint "${mount_dir}"
+          trap 'hdiutil detach "${mount_dir}" >/dev/null 2>&1 || true' EXIT
+          ditto "${mount_dir}/LazyMind.app" "${installed_app}"
+          hdiutil detach "${mount_dir}"
+          trap - EXIT
+          echo "app=${installed_app}" >> "${GITHUB_OUTPUT}"
+
+      - name: Verify and smoke-test installed application
+        if: steps.status.outputs.notarization_status == 'Accepted'
+        env:
+          INSTALLED_APP: ${{ steps.install.outputs.app }}
+        run: |
+          set -euo pipefail
+          test -x "${INSTALLED_APP}/Contents/MacOS/LazyMind"
+          codesign --verify --deep --strict --verbose=2 "${INSTALLED_APP}"
+          spctl --assess --type execute --verbose=4 "${INSTALLED_APP}"
+          node desktop/scripts/packaged-app-smoke.mjs \
+            --app "${INSTALLED_APP}" \
+            --runtime-root "${RUNNER_TEMP}/lazymind-installed-smoke" \
+            --platform darwin \
+            --timeout-ms 300000
+
+      - name: Remove installed application
+        if: always() && steps.install.outcome == 'success'
+        env:
+          INSTALLED_APP: ${{ steps.install.outputs.app }}
+        run: |
+          rm -rf "${INSTALLED_APP}"
+          test ! -e "${INSTALLED_APP}"
+
+      - name: Upload tested installer to draft release
+        if: steps.status.outputs.notarization_status == 'Accepted'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INSTALLER_PATH: ${{ steps.package.outputs.installer_path }}
+          RELEASE_TAG: ${{ steps.status.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          is_draft="$(gh release view "${RELEASE_TAG}" --json isDraft --jq .isDraft)"
+          if [[ "${is_draft}" != "true" ]]; then
+            echo "::error::Release ${RELEASE_TAG} is not a draft"
+            exit 1
+          fi
+          gh release upload "${RELEASE_TAG}" "${INSTALLER_PATH}" --clobber
 
       - name: Add final download link
         if: steps.status.outputs.notarization_status == 'Accepted'
