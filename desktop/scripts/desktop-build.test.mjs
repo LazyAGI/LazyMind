@@ -18,14 +18,6 @@ const darwinBuildScript = path.join(scriptsDir, "build-darwin-arm64.sh");
 const windowsBuildScript = path.join(scriptsDir, "build-windows-x64.ps1");
 const installerScript = path.join(scriptsDir, "..", "installer", "installer.nsh");
 const macosWorkflow = path.join(scriptsDir, "..", "..", ".github", "workflows", "macos-installer.yml");
-const macosFinalizeWorkflow = path.join(
-  scriptsDir,
-  "..",
-  "..",
-  ".github",
-  "workflows",
-  "macos-notarization-finalize.yml",
-);
 const windowsWorkflow = path.join(
   scriptsDir,
   "..",
@@ -349,7 +341,7 @@ test("Windows CI treats branches as non-tags without leaking git probe failures"
   assert.doesNotMatch(source, /git submodule update --init --recursive/);
   assert.match(source, /resolve-release-version\.mjs/);
   assert.match(source, /windows-2022[\s\S]*windows-2025/);
-  assert.match(source, /artifact_name:\s*\$\{\{ steps\.package\.outputs\.artifact_name \}\}/);
+  assert.match(source, /artifact_name:\s*lazymind-windows-x64-installer/);
   assert.match(source, /"artifact_name=\$outputName"/);
   assert.match(
     source,
@@ -467,9 +459,8 @@ test("macOS CI fails fast on missing credentials and raises the open-file limit"
   assert.doesNotMatch(source, /git submodule update --init --recursive/);
 });
 
-test("macOS CI notarizes ZIP then DMG and preserves only the DMG timeout fallback", () => {
+test("macOS CI notarizes ZIP then DMG and fails when notarization times out", () => {
   const buildWorkflow = readFileSync(macosWorkflow, "utf8");
-  const finalizeWorkflow = readFileSync(macosFinalizeWorkflow, "utf8");
 
   assert.match(buildWorkflow, /name:\s*Submit app ZIP for notarization/);
   assert.match(buildWorkflow, /notarytool submit "\$\{zip_path\}"/);
@@ -480,14 +471,15 @@ test("macOS CI notarizes ZIP then DMG and preserves only the DMG timeout fallbac
       buildWorkflow.indexOf("name: Start asynchronous packaged runtime cleanup"),
   );
   assert.match(buildWorkflow, /name:\s*Wait up to 30 minutes for app ZIP notarization/);
-  assert.match(buildWorkflow, /continuing directly to DMG packaging/);
+  assert.match(buildWorkflow, /ZIP notarization is still in progress[\s\S]*exit 1/);
   assert.match(buildWorkflow, /name:\s*Staple accepted app ticket/);
   assert.match(buildWorkflow, /dist:mac:arm64:prepackaged/);
   assert.match(buildWorkflow, /name:\s*Submit DMG for notarization/);
-  assert.match(buildWorkflow, /notarytool submit "\$\{PENDING_DMG\}"/);
-  assert.match(buildWorkflow, /name:\s*LazyMind-macos-notarization-submission/);
-  assert.match(buildWorkflow, /\.pending\.dmg/);
+  assert.match(buildWorkflow, /notarytool submit "\$\{NOTARIZATION_DMG\}"/);
+  assert.match(buildWorkflow, /\.notarization\.dmg/);
   assert.match(buildWorkflow, /\.unnotarized\.dmg/);
+  assert.doesNotMatch(buildWorkflow, /LazyMind-macos-arm64-pending/);
+  assert.doesNotMatch(buildWorkflow, /LazyMind-macos-notarization-submission/);
   assert.match(buildWorkflow, /git show-ref --verify --quiet "refs\/tags\/\$\{REQUESTED_REF\}"/);
   assert.match(buildWorkflow, /tag_commit=.*git rev-parse "refs\/tags\/\$\{tag_candidate\}\^\{commit\}"/);
   assert.doesNotMatch(buildWorkflow, /path:[^\n]*LazyMind-darwin-arm64\.zip/);
@@ -495,9 +487,17 @@ test("macOS CI notarizes ZIP then DMG and preserves only the DMG timeout fallbac
   assert.match(buildWorkflow, /name:\s*Wait up to 30 minutes for DMG notarization/);
   assert.match(buildWorkflow, /deadline="\$\(\( started_at \+ 1800 \)\)"/);
   assert.match(buildWorkflow, /sleep 30/);
-  assert.match(buildWorkflow, /DMG notarization timed out/);
+  assert.match(buildWorkflow, /DMG notarization is still in progress after 30 minutes[\s\S]*exit 1/);
   assert.match(buildWorkflow, /stapler staple "\$\{final_path\}"/);
   assert.match(buildWorkflow, /stapler validate "\$\{final_path\}"/);
+  assert.match(buildWorkflow, /test-and-publish-macos-installer:/);
+  assert.match(buildWorkflow, /name:\s*Install application from DMG/);
+  assert.match(buildWorkflow, /name:\s*Run installed application smoke/);
+  assert.match(buildWorkflow, /name:\s*Upload installer to draft release/);
+  assert.ok(
+    buildWorkflow.indexOf("name: Run installed application smoke") <
+      buildWorkflow.indexOf("name: Upload installer to draft release"),
+  );
   assert.match(buildWorkflow, /name:\s*Verify packaged runtime cleanup after artifact upload/);
   assert.match(buildWorkflow, /LAZYMIND_PROCESS_COMPOSE_DOWN_TIMEOUT=1s/);
   assert.ok(
@@ -505,16 +505,6 @@ test("macOS CI notarizes ZIP then DMG and preserves only the DMG timeout fallbac
       buildWorkflow.indexOf("name: Verify packaged runtime cleanup after artifact upload"),
   );
   assert.doesNotMatch(buildWorkflow, /name:\s*Report step timings/);
-
-  assert.match(finalizeWorkflow, /source_run_id:/);
-  assert.match(finalizeWorkflow, /run-id:\s*\$\{\{\s*inputs\.source_run_id\s*\}\}/);
-  assert.match(finalizeWorkflow, /pattern:\s*"LazyMind-macos-arm64-pending"/);
-  assert.match(finalizeWorkflow, /pattern:\s*"LazyMind-macos-notarization-submission"/);
-  assert.match(finalizeWorkflow, /merge-multiple:\s*true/);
-  assert.match(finalizeWorkflow, /notarytool info "\$\{submission_id\}"/);
-  assert.match(finalizeWorkflow, /notarytool log "\$\{SUBMISSION_ID\}"/);
-  assert.match(finalizeWorkflow, /stapler staple "\$\{final_path\}"/);
-  assert.match(finalizeWorkflow, /name:\s*LazyMind-macos-arm64-notarized/);
 });
 
 test("installer workflows launch the packaged application before publishing", () => {
