@@ -23,6 +23,7 @@ from .telemetry import (
 from .tool_call_guard import (
     ExactRepeatMonitor,
     FailureRetryPolicy,
+    OneShotNoticeBuffer,
     ToolExecutionMiddleware,
 )
 from .tool_limit_control import tool_limit_decision_coordinator
@@ -107,6 +108,7 @@ class AgentExecutor:
             if telemetry_enabled() else None
         )
         repeat_monitor = ExactRepeatMonitor()
+        notice_buffer = OneShotNoticeBuffer()
         kwargs = {
             'stream': True,
             'max_retries': options.max_retries or _cfg['max_retries'],
@@ -127,7 +129,7 @@ class AgentExecutor:
             'skills_dir': options.skills_dir,
             'extra_stop_condition': options.extra_stop_condition,
             'runtime_observer': observer,
-            'runtime_extensions': [repeat_monitor],
+            'model_context_provider': notice_buffer.take,
         }
         kwargs.update({key: value for key, value in optional.items() if value is not None})
         tools = _sanitize_tools(_deduplicate_tools(plan.tools))
@@ -143,8 +145,12 @@ class AgentExecutor:
             failure_policy=FailureRetryPolicy(options.tool_failure_limits),
             expanded_round_limit=max(2, int(_cfg['agentic_expanded_max_rounds'])),
             cancel_check=options.extra_stop_condition,
+            repeat_monitor=repeat_monitor,
+            notice_buffer=notice_buffer,
         )
         agent._agent_lab_run_id = run_id
+        agent._exact_repeat_monitor = repeat_monitor
+        agent._runtime_notice_buffer = notice_buffer
         # Restore lazy Toolkit activation before the streaming helper takes over.
         # Relying only on ReactAgent._pre_process makes restoration dependent on
         # llm_chat_history surviving the helper/framework call path.
@@ -182,6 +188,12 @@ class AgentExecutor:
     ) -> AsyncIterator[Tuple[str, Any]]:
         history = plan.history if plan.history else None
         run_id = getattr(agent, '_agent_lab_run_id', '')
+        repeat_monitor = getattr(agent, '_exact_repeat_monitor', None)
+        notice_buffer = getattr(agent, '_runtime_notice_buffer', None)
+        if repeat_monitor is not None:
+            repeat_monitor.reset()
+        if notice_buffer is not None:
+            notice_buffer.clear()
         if telemetry_enabled():
             append_event(
                 'run_start',
@@ -222,6 +234,10 @@ class AgentExecutor:
                 raise
             yield 'final', result
         finally:
+            if repeat_monitor is not None:
+                repeat_monitor.reset()
+            if notice_buffer is not None:
+                notice_buffer.clear()
             if telemetry_enabled():
                 append_event(
                     'run_end',

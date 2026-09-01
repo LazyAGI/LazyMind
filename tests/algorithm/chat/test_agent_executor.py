@@ -44,10 +44,11 @@ def test_executor_creates_agent_with_shared_defaults(monkeypatch) -> None:
     assert kwargs['enable_builtin_tools'] is False
     assert callable(kwargs['on_max_retries'])
     assert kwargs['workspace'] == '/tmp/work'
-    assert len(kwargs['runtime_extensions']) == 1
-    assert isinstance(kwargs['runtime_extensions'][0], executor_mod.ExactRepeatMonitor)
+    assert callable(kwargs['model_context_provider'])
     assert isinstance(agent._tools_manager, executor_mod.ToolExecutionMiddleware)
     assert agent._tools_manager._manager._manager is original_manager
+    assert isinstance(agent._exact_repeat_monitor, executor_mod.ExactRepeatMonitor)
+    assert isinstance(agent._runtime_notice_buffer, executor_mod.OneShotNoticeBuffer)
     agent._prepare_tool_context.assert_called_once_with(
         '### User Instruction\n\nhello', [],
     )
@@ -73,7 +74,7 @@ def test_tool_guard_checks_cancellation_before_dispatch(monkeypatch) -> None:
     with pytest.raises(CancelledError, match='stopped by user'):
         middleware.execute_with_records([])
 
-    manager.execute_prepared_calls.assert_not_called()
+    manager.execute_with_records.assert_not_called()
 
 
 def test_cancel_condition_stops_the_sid_scoped_agent(monkeypatch) -> None:
@@ -180,3 +181,48 @@ def test_executor_stream_passes_history_and_returns_final(monkeypatch) -> None:
         ('event', {'tag': 'text', 'delta': 'working'}),
         ('final', 'done'),
     ]
+
+
+@pytest.mark.parametrize('mode', ['success', 'exception', 'cancellation'])
+def test_stream_agent_clears_repeat_state_on_every_exit(monkeypatch, mode) -> None:
+    monitor = MagicMock()
+    buffer = MagicMock()
+
+    class Agent:
+        _agent_lab_run_id = 'run-id'
+        _exact_repeat_monitor = monitor
+        _runtime_notice_buffer = buffer
+
+    class Future:
+        def result(self):
+            if mode == 'exception':
+                raise RuntimeError('failed')
+            return 'done'
+
+    class Helper:
+        future = Future()
+
+        def __init__(self, _agent, init_sid):
+            assert init_sid is False
+
+        async def astream(self, _query, **_kwargs):
+            if mode == 'cancellation':
+                raise CancelledError('cancelled')
+            if False:
+                yield None
+
+    monkeypatch.setattr(executor_mod._sh, 'StreamCallHelper', Helper)
+
+    async def collect():
+        return [item async for item in AgentExecutor().stream_agent(Agent(), _plan())]
+
+    if mode == 'exception':
+        with pytest.raises(RuntimeError, match='failed'):
+            asyncio.run(collect())
+    elif mode == 'cancellation':
+        with pytest.raises(CancelledError, match='cancelled'):
+            asyncio.run(collect())
+    else:
+        assert asyncio.run(collect()) == [('final', 'done')]
+    assert monitor.reset.call_count == 2
+    assert buffer.clear.call_count == 2

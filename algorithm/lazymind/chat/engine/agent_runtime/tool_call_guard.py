@@ -9,10 +9,7 @@ from typing import Any
 
 import lazyllm
 from lazyllm.tools.agent import (
-    PreparedToolBatch,
     PreparedToolCall,
-    RuntimeContext,
-    RuntimeDelta,
     ToolExecutionBatch,
     ToolExecutionDisposition,
     ToolExecutionRecord,
@@ -221,25 +218,10 @@ class ExactRepeatMonitor:
         self._threshold = max(2, int(threshold))
         self._previous_batch_digest: str | None = None
         self._batch_count = 0
-        self._pending_notice = False
 
-    def _reset(self) -> None:
+    def reset(self) -> None:
         self._previous_batch_digest = None
         self._batch_count = 0
-        self._pending_notice = False
-
-    def begin_run(self, context: dict[str, Any]) -> None:
-        del context
-        self._reset()
-
-    def end_run(self, reason: str) -> None:
-        del reason
-        self._reset()
-
-    def runtime_context_delivered(self, batch_ids) -> None:
-        if self._pending_notice:
-            append_event('repeat_notice_delivered', batch_ids=list(batch_ids))
-            self._pending_notice = False
 
     @staticmethod
     def _record_fingerprint(record: ToolExecutionRecord):
@@ -252,27 +234,25 @@ class ExactRepeatMonitor:
             return None
         return record.tool_name, arguments_digest, result_digest
 
-    def after_tool_batch(self, records) -> RuntimeDelta:
-        self._pending_notice = False
+    def after_tool_batch(self, records) -> str | None:
         eligible = [
             record for record in records
             if record.disposition in {
                 ToolExecutionDisposition.EXECUTED,
                 ToolExecutionDisposition.PREPARATION_FAILED,
-                ToolExecutionDisposition.DISPATCH_FAILED,
-            } and not record.access.polling
+            } and not record.polling
         ]
         if not eligible:
-            self._reset()
-            return RuntimeDelta()
+            self.reset()
+            return None
         fingerprints = [self._record_fingerprint(record) for record in eligible]
         if any(item is None for item in fingerprints):
-            self._reset()
-            return RuntimeDelta()
+            self.reset()
+            return None
         batch_digest = _stable_digest(fingerprints)
         if batch_digest is None:
-            self._reset()
-            return RuntimeDelta()
+            self.reset()
+            return None
         previous_count = self._batch_count
         if batch_digest == self._previous_batch_digest:
             self._batch_count += 1
@@ -284,7 +264,7 @@ class ExactRepeatMonitor:
         intra_batch_count = max(Counter(fingerprints).values(), default=0)
         repeat_count = max(self._batch_count, intra_batch_count)
         if repeat_count < self._threshold:
-            return RuntimeDelta()
+            return None
         batch_ids = [record.call_id for record in records]
         append_event(
             'exact_repeat_detected',
@@ -292,23 +272,49 @@ class ExactRepeatMonitor:
             batch_ids=batch_ids,
             tool_names=[record.tool_name for record in eligible],
         )
-        self._pending_notice = True
-        return RuntimeDelta(model_context=(RuntimeContext(
+        return (
             '[Internal runtime notice]\n'
             f'The same tool call batch has returned the same result {repeat_count} consecutive times. '
             'Review the result and change the approach or arguments instead of repeating it unchanged.'
-        ),))
+        )
+
+
+class OneShotNoticeBuffer:
+    """Hold at most one model-only notice until the next tool-result turn."""
+
+    def __init__(self):
+        self.clear()
+
+    def publish(self, notice: str | None, batch_ids=()) -> None:
+        self._notice = notice.strip() if isinstance(notice, str) else ''
+        self._batch_ids = tuple(str(item) for item in batch_ids) if self._notice else ()
+
+    def take(self) -> str | None:
+        notice, batch_ids = self._notice, self._batch_ids
+        self.clear()
+        if not notice:
+            return None
+        append_event('repeat_notice_delivered', batch_ids=list(batch_ids))
+        return notice
+
+    def clear(self) -> None:
+        self._notice = ''
+        self._batch_ids = ()
 
 
 class ToolExecutionMiddleware:
     """Coordinate cancellation, failure policy, telemetry, and one prepared execution."""
 
     def __init__(self, manager: Any, failure_policy: FailureRetryPolicy | None = None,
-                 expanded_round_limit: int | None = None, cancel_check: Any = None):
+                 expanded_round_limit: int | None = None, cancel_check: Any = None,
+                 repeat_monitor: ExactRepeatMonitor | None = None,
+                 notice_buffer: OneShotNoticeBuffer | None = None):
         self._manager = manager
         self._failure_policy = failure_policy or FailureRetryPolicy()
         self._expanded_round_limit = expanded_round_limit
         self._cancel_check = cancel_check
+        self._repeat_monitor = repeat_monitor
+        self._notice_buffer = notice_buffer
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._manager, name)
@@ -328,46 +334,56 @@ class ToolExecutionMiddleware:
                 f'tool round limit to {self._expanded_round_limit}.'
             )
 
-    def execute_prepared_calls(self, prepared_batch: PreparedToolBatch):
+    def execute_with_records(self, tools: Any, verbose: bool = False,
+                             allowed_tool_names: set[str] | None = None):
+        del verbose
         if self._cancel_check is not None:
             self._cancel_check(None)
-        if not isinstance(prepared_batch, PreparedToolBatch):
-            raise TypeError('execute_prepared_calls requires a PreparedToolBatch')
-        prepared_calls = list(prepared_batch.calls)
-        if not prepared_calls:
-            return self._manager.execute_prepared_calls(prepared_batch)
-        decision = self._failure_policy.decide(prepared_calls)
-        for index, prepared in enumerate(prepared_calls):
-            if index in decision.pending_indices and prepared.ready:
-                self._expand_round_limit(prepared.tool_name)
-            arguments = redact_session_env_arguments(prepared.tool_name, prepared.arguments)
-            if index in decision.blocked_results:
-                emit_tool_call(prepared.tool_call, blocked=True, reason='failure_retry_policy')
-                _log_tool_call('blocked', prepared.tool_name, reason='failure_retry_policy', args=arguments)
-                append_event('failure_retry_blocked', name=prepared.tool_name, call_id=prepared.call_id)
-            elif index in decision.duplicate_sources:
-                emit_tool_call(prepared.tool_call, blocked=True, reason='duplicate_merged')
-                _log_tool_call('merged', prepared.tool_name, reason='duplicate_in_batch', args=arguments)
-            else:
-                emit_tool_call(prepared.tool_call)
-                _log_tool_call('start', prepared.tool_name, args=arguments)
-        started_at = time.perf_counter()
-        executed_batch = self._manager.execute_prepared_calls(
-            prepared_batch,
-            selected_indices=decision.pending_indices,
+        prepared_calls: list[PreparedToolCall] = []
+        decision: _FailureBatchDecision | None = None
+        started_at = 0.0
+
+        def select(prepared):
+            nonlocal prepared_calls, decision, started_at
+            prepared_calls = list(prepared)
+            decision = self._failure_policy.decide(prepared_calls)
+            for index, item in enumerate(prepared_calls):
+                if index in decision.pending_indices and item.ready:
+                    self._expand_round_limit(item.tool_name)
+                arguments = redact_session_env_arguments(item.tool_name, item.arguments)
+                if index in decision.blocked_results:
+                    emit_tool_call(item.tool_call, blocked=True, reason='failure_retry_policy')
+                    _log_tool_call(
+                        'blocked', item.tool_name,
+                        reason='failure_retry_policy', args=arguments,
+                    )
+                    append_event('failure_retry_blocked', name=item.tool_name, call_id=item.call_id)
+                elif index in decision.duplicate_sources:
+                    emit_tool_call(item.tool_call, blocked=True, reason='duplicate_merged')
+                    _log_tool_call('merged', item.tool_name, reason='duplicate_in_batch', args=arguments)
+                else:
+                    emit_tool_call(item.tool_call)
+                    _log_tool_call('start', item.tool_name, args=arguments)
+            started_at = time.perf_counter()
+            return decision.pending_indices
+
+        executed_batch = self._manager.execute_with_records(
+            tools,
+            allowed_tool_names=allowed_tool_names,
+            dispatch_selector=select,
         )
+        if decision is None:
+            return executed_batch
         elapsed = time.perf_counter() - started_at
         results: list[Any] = [None] * len(prepared_calls)
         records: list[ToolExecutionRecord | None] = [None] * len(prepared_calls)
-        for original_index, result, record in zip(
-            decision.pending_indices, executed_batch.results, executed_batch.records,
-        ):
-            results[original_index] = result
-            records[original_index] = record
-            emit_tool_result(prepared_calls[original_index].tool_call, result)
+        for result, record in zip(executed_batch.results, executed_batch.records):
+            results[record.index] = result
+            records[record.index] = record
+            emit_tool_result(prepared_calls[record.index].tool_call, result)
             _log_tool_call(
                 'done',
-                prepared_calls[original_index].tool_name,
+                prepared_calls[record.index].tool_name,
                 elapsed=f'{elapsed:.3f}s',
                 **_summarize_tool_result(result),
             )
@@ -376,7 +392,8 @@ class ToolExecutionMiddleware:
             records[index] = ToolExecutionRecord(
                 prepared_calls[index],
                 result,
-                disposition=ToolExecutionDisposition.POLICY_BLOCKED,
+                disposition=ToolExecutionDisposition.SKIPPED,
+                reason='policy_blocked',
             )
             emit_tool_result(prepared_calls[index].tool_call, result)
         for index, source_index in decision.duplicate_sources.items():
@@ -385,21 +402,20 @@ class ToolExecutionMiddleware:
             records[index] = ToolExecutionRecord(
                 prepared_calls[index],
                 result,
-                disposition=ToolExecutionDisposition.DEDUPLICATED,
+                disposition=ToolExecutionDisposition.SKIPPED,
+                reason='deduplicated',
             )
             emit_tool_result(prepared_calls[index].tool_call, result)
         completed_records = [record for record in records if record is not None]
         self._failure_policy.observe(completed_records)
-        return ToolExecutionBatch(
+        batch = ToolExecutionBatch(
             results=lazyllm.package(results),
             records=tuple(completed_records),
         )
-
-    def execute_with_records(self, tools: Any, verbose: bool = False,
-                             allowed_tool_names: set[str] | None = None):
-        del verbose
-        prepared_batch = self._manager.prepare_tool_calls(tools, allowed_tool_names)
-        return self.execute_prepared_calls(prepared_batch)
+        if self._repeat_monitor is not None and self._notice_buffer is not None:
+            notice = self._repeat_monitor.after_tool_batch(completed_records)
+            self._notice_buffer.publish(notice, [record.call_id for record in completed_records])
+        return batch
 
     def __call__(self, tools: Any, verbose: bool = False,
                  allowed_tool_names: set[str] | None = None) -> Any:

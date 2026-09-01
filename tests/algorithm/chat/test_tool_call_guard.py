@@ -12,13 +12,16 @@ from lazyllm.tools.agent import (
 from lazymind.chat.engine.agent_runtime.tool_call_guard import (
     ExactRepeatMonitor,
     FailureRetryPolicy,
+    OneShotNoticeBuffer,
     ToolExecutionMiddleware,
 )
 
 
-def _prepared(name='search', arguments=None, call_id='call-1', access=None):
+def _prepared(name='search', arguments=None, call_id='call-1', access=None,
+              index=0, polling=False):
     arguments = {'query': 'same'} if arguments is None else arguments
     return PreparedToolCall(
+        index=index,
         tool_call={
             'id': call_id,
             'function': {'name': name, 'arguments': json.dumps(arguments)},
@@ -28,19 +31,22 @@ def _prepared(name='search', arguments=None, call_id='call-1', access=None):
         arguments=arguments,
         validated_arguments=arguments,
         access=access or ResolvedToolAccess(),
+        polling=polling,
     )
 
 
-def _record(*, result=None, disposition=ToolExecutionDisposition.EXECUTED, **kwargs):
+def _record(*, result=None, disposition=ToolExecutionDisposition.EXECUTED,
+            reason='', **kwargs):
     return ToolExecutionRecord(
         _prepared(**kwargs),
         result if result is not None else {'ok': True, 'value': {'items': ['same']}},
         disposition=disposition,
+        reason=reason,
     )
 
 
-def _notice(delta):
-    return [item.content for item in delta.model_context]
+def _notice(notice):
+    return [notice] if notice else []
 
 
 @pytest.mark.parametrize('result', [
@@ -49,7 +55,6 @@ def _notice(delta):
 ])
 def test_third_identical_observation_emits_soft_notice_without_mutating_result(result):
     monitor = ExactRepeatMonitor()
-    monitor.begin_run({})
     notices = []
     for index in range(5):
         record = _record(call_id=f'call-{index}', result=result)
@@ -121,18 +126,52 @@ def test_write_and_exclusive_failures_are_not_exempt(access):
 
 def test_polling_records_are_excluded_and_hard_blocked_records_are_ignored():
     monitor = ExactRepeatMonitor()
-    polling = ResolvedToolAccess(polling=True)
     assert not _notice(monitor.after_tool_batch([
-        _record(access=polling),
-        _record(name='blocked', disposition=ToolExecutionDisposition.POLICY_BLOCKED),
+        _record(polling=True),
+        _record(
+            name='blocked',
+            disposition=ToolExecutionDisposition.SKIPPED,
+            reason='policy_blocked',
+        ),
     ]))
 
     for index in range(3):
         delta = monitor.after_tool_batch([
             _record(name='stable', call_id=f'stable-{index}'),
-            _record(name='poll', call_id=f'poll-{index}', access=polling),
+            _record(name='poll', call_id=f'poll-{index}', polling=True),
         ])
     assert _notice(delta)
+
+
+def test_middleware_publishes_only_the_current_repeat_notice():
+    from lazyllm.tools import ToolManager
+
+    def search(query: str):
+        '''Return a stable result.
+
+        Args:
+            query: Search query.
+        '''
+        return {'items': [query]}
+
+    monitor = ExactRepeatMonitor()
+    buffer = OneShotNoticeBuffer()
+    middleware = ToolExecutionMiddleware(
+        ToolManager([search]),
+        repeat_monitor=monitor,
+        notice_buffer=buffer,
+    )
+
+    for index in range(2):
+        middleware.execute_with_records(_call('same', f'call-{index}'))
+        assert buffer.take() is None
+
+    middleware.execute_with_records(_call('same', 'call-3'))
+    assert '3 consecutive times' in buffer.take()
+    assert buffer.take() is None
+
+    middleware.execute_with_records(_call('same', 'call-4'))
+    assert '4 consecutive times' in buffer.take()
 
 
 def _failing_manager(calls):
@@ -168,9 +207,9 @@ def test_failure_policy_blocks_same_failed_signature_without_monitoring_block():
     first = middleware.execute_with_records(_call('same', 'first'))
     second = middleware.execute_with_records(_call('same', 'second'))
 
-    assert first.records[0].executed is True
-    assert second.records[0].executed is False
-    assert second.records[0].disposition is ToolExecutionDisposition.POLICY_BLOCKED
+    assert first.records[0].disposition is ToolExecutionDisposition.EXECUTED
+    assert second.records[0].disposition is ToolExecutionDisposition.SKIPPED
+    assert second.records[0].reason == 'policy_blocked'
     assert second.results[0]['ok'] is False
     assert calls == ['same']
     assert not _notice(ExactRepeatMonitor().after_tool_batch(second.records))
@@ -195,11 +234,14 @@ def test_failure_policy_preserves_consecutive_budget_and_batch_merge():
         _call('three', 'three'),
     ])
 
-    assert [record.executed for record in first.records] == [True, False]
-    assert first.records[1].disposition is ToolExecutionDisposition.DEDUPLICATED
+    assert [record.disposition for record in first.records] == [
+        ToolExecutionDisposition.EXECUTED,
+        ToolExecutionDisposition.SKIPPED,
+    ]
+    assert first.records[1].reason == 'deduplicated'
     assert first.results[0] == first.results[1]
-    assert second.records[0].executed is True
-    assert third.records[0].executed is False
+    assert second.records[0].disposition is ToolExecutionDisposition.EXECUTED
+    assert third.records[0].disposition is ToolExecutionDisposition.SKIPPED
     assert calls == ['one', 'two']
 
 

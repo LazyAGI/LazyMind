@@ -7,7 +7,7 @@ from dataclasses import replace
 from typing import Any
 
 import lazyllm
-from lazyllm.tools.agent import PreparedToolBatch, ToolExecutionBatch
+from lazyllm.tools.agent import ToolExecutionBatch
 from lazyllm.tools.tools.search import SearchBase
 
 from lazymind.chat.engine.tools.lazy_kb import KBToolkit
@@ -119,7 +119,7 @@ class CitationResultMiddleware:
             return result
         return {**result, 'value': processed}
 
-    def _process_batch(self, batch: ToolExecutionBatch, tool_calls: list[dict[str, Any]]):
+    def _process_batch(self, batch: ToolExecutionBatch):
         results = list(batch.results)
         state = _citation_state()
         if not state:
@@ -128,9 +128,9 @@ class CitationResultMiddleware:
         collect_only = agentic_config.get('citation_mode') == 'collect_only'
         processed = [
             self._process_result(
-                tool_call, result, state, collect_only=collect_only,
+                record.prepared.tool_call, result, state, collect_only=collect_only,
             )
-            for tool_call, result in zip(tool_calls, results)
+            for record, result in zip(batch.records, results)
         ]
         records = tuple(
             replace(record, result=result)
@@ -138,25 +138,16 @@ class CitationResultMiddleware:
         )
         return ToolExecutionBatch(results=processed, records=records)
 
-    def execute_prepared_calls(
-        self,
-        prepared_batch: PreparedToolBatch,
-        selected_indices=None,
-    ):
-        batch = self._manager.execute_prepared_calls(
-            prepared_batch,
-            selected_indices=selected_indices,
-        )
-        return self._process_batch(
-            batch,
-            [record.prepared.tool_call for record in batch.records],
-        )
-
     def execute_with_records(self, tools: Any, verbose: bool = False,
-                             allowed_tool_names: set[str] | None = None):
+                             allowed_tool_names: set[str] | None = None,
+                             *, dispatch_selector=None):
         del verbose
-        prepared = self._manager.prepare_tool_calls(tools, allowed_tool_names)
-        return self.execute_prepared_calls(prepared)
+        batch = self._manager.execute_with_records(
+            tools,
+            allowed_tool_names=allowed_tool_names,
+            dispatch_selector=dispatch_selector,
+        )
+        return self._process_batch(batch)
 
     def __call__(self, tools: Any, verbose: bool = False,
                  allowed_tool_names: set[str] | None = None) -> Any:

@@ -108,7 +108,8 @@ def test_chat_file_runtime_access_uses_resolved_workspace_paths(tmp_path, monkey
         chat_artifact.read_file,
         chat_artifact.grep,
     ])
-    prepared = manager.prepare_tool_calls([
+    prepared = []
+    manager.execute_with_records([
         {'function': {'name': 'write_file', 'arguments': {
             'path': 'document.md', 'content': 'relative',
         }}},
@@ -120,7 +121,7 @@ def test_chat_file_runtime_access_uses_resolved_workspace_paths(tmp_path, monkey
         {'function': {'name': 'grep', 'arguments': {
             'target': 'document.md', 'pattern': 'relative',
         }}},
-    ])
+    ], dispatch_selector=lambda calls: prepared.extend(calls) or ())
 
     assert prepared[0].access.write_keys == prepared[1].access.write_keys
     assert _accesses_conflict(prepared[2].access, prepared[0].access)
