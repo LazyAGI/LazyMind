@@ -57,6 +57,7 @@ ALTER TABLE conversations
     DROP COLUMN IF EXISTS thinking_depth,
     DROP COLUMN IF EXISTS chat_executor;
 ALTER TABLE user_ui_preferences
+    DROP COLUMN IF EXISTS performance_stats_enabled,
     DROP COLUMN IF EXISTS document_parsing_enabled,
     DROP COLUMN IF EXISTS workflows_enabled,
     DROP COLUMN IF EXISTS mcp_enabled,
@@ -205,6 +206,7 @@ DROP INDEX IF EXISTS idx_chat_histories_conversation_seq;
 DROP TABLE IF EXISTS agent_invocations;
 ALTER TABLE conversations DROP COLUMN thinking_depth;
 ALTER TABLE conversations DROP COLUMN chat_executor;
+ALTER TABLE user_ui_preferences DROP COLUMN performance_stats_enabled;
 ALTER TABLE user_ui_preferences DROP COLUMN document_parsing_enabled;
 ALTER TABLE user_ui_preferences DROP COLUMN workflows_enabled;
 ALTER TABLE user_ui_preferences DROP COLUMN mcp_enabled;
