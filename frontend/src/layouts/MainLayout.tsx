@@ -177,20 +177,16 @@ export default function MainLayout() {
         <ApiOutlined className="settings-popover-icon" aria-hidden="true" />
       ),
     },
-    ...(!runtimeFeatures.hideEvo
-      ? [
-          {
-            key: "/settings?section=developer",
-            label: t("layout.developer"),
-            icon: (
-              <CodeOutlined
-                className="settings-popover-icon"
-                aria-hidden="true"
-              />
-            ),
-          },
-        ]
-      : []),
+    {
+      key: "/settings?section=developer",
+      label: t("layout.developer"),
+      icon: (
+        <CodeOutlined
+          className="settings-popover-icon"
+          aria-hidden="true"
+        />
+      ),
+    },
   ];
   const showSettingsTrigger =
     settingsMenuItems.length > 0 || !hideLocalUserControls;

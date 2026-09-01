@@ -108,13 +108,13 @@ slots:
   - {id: writing_task, label: Writer 写作任务, type: file, cardinality: single, exposed: false}
   - {id: resource_profiles, label: Writer 资源画像, type: file, cardinality: single, exposed: false}
   - {id: writing_context, label: Writer 写作上下文, type: file, cardinality: single, exposed: false}
-  - {id: outline_document, label: 可编辑论文大纲, type: file, cardinality: single, exposed: true}
+  - {id: outline_document, label: 论文大纲, type: file, cardinality: single, exposed: true}
   - {id: outline_check_report, label: 大纲检查报告, type: text, cardinality: single, exposed: true}
   - {id: writing_context_after_outline, label: 大纲后写作上下文, type: file, cardinality: single, exposed: false}
   - {id: effective_outline_check_report, label: 批准大纲一致性检查, type: text, cardinality: single, exposed: true}
   - {id: section_instructions, label: Writer 章节规划, type: file, cardinality: single, exposed: false}
   - {id: chapter_drafts, label: 分章生成稿, type: file, cardinality: list, ordered: true, allow_manual_add: false, exposed: true}
-  - {id: draft_document, label: 可编辑论文初稿, type: file, cardinality: single, exposed: true}
+  - {id: draft_document, label: 论文初稿, type: file, cardinality: single, exposed: true}
   - {id: writing_context_after_draft, label: 初稿后写作上下文, type: file, cardinality: single, exposed: false}
 
   - {id: pre_integrity_report, label: 审稿前完整性报告, type: text, cardinality: single, exposed: true}
@@ -129,7 +129,7 @@ slots:
   - {id: revision_modify_plan, label: 一轮修订计划, type: file, cardinality: single, exposed: false}
   - {id: revision_set, label: 一轮修订集, type: file, cardinality: single, exposed: false}
   - {id: revision_result, label: 一轮修订结果, type: file, cardinality: single, exposed: false}
-  - {id: revised_document, label: 可编辑一轮修订稿, type: file, cardinality: single, exposed: true}
+  - {id: revised_document, label: 一轮修订稿, type: file, cardinality: single, exposed: true}
   - {id: revision_response, label: 一轮修订响应表, type: text, cardinality: single, exposed: true}
   - {id: writing_context_after_revision, label: 一轮修订后上下文, type: file, cardinality: single, exposed: false}
   - {id: re_review_report, label: 修订验证复审报告, type: text, cardinality: single, exposed: true}
@@ -140,7 +140,7 @@ slots:
   - {id: second_revision_modify_plan, label: 二轮修订计划, type: file, cardinality: single, exposed: false}
   - {id: second_revision_set, label: 二轮修订集, type: file, cardinality: single, exposed: false}
   - {id: second_revision_result, label: 二轮修订结果, type: file, cardinality: single, exposed: false}
-  - {id: second_revised_document, label: 可编辑二轮修订稿, type: file, cardinality: single, exposed: true}
+  - {id: second_revised_document, label: 二轮修订稿, type: file, cardinality: single, exposed: true}
   - {id: second_revision_response, label: 二轮修订响应表, type: text, cardinality: single, exposed: true}
 
   - {id: final_integrity_report, label: 最终完整性报告, type: text, cardinality: single, exposed: true}

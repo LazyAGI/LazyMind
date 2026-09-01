@@ -256,6 +256,72 @@ describe('SlotWriterDocument render refresh', () => {
   });
 });
 
+describe('SlotText editing', () => {
+  it('keeps the preview footprint and focuses the clicked text', () => {
+    const text = '## First line\n\n**middle target**\n\nlast line';
+    const targetOffset = text.indexOf('middle target') + 7;
+    const slot: SlotRevision = {
+      slot_id: 'materials_summary',
+      revision: 1,
+      selected: true,
+      slot: 'materials_summary',
+      created_at: '2026-08-31T00:00:00Z',
+      artifact_value: { text },
+      content_type: 'text',
+    };
+    const { container } = render(
+      <div className='workflow-panel__tab-content'>
+        <SlotRenderer
+          slot={slot}
+          widget={{ widgetType: 'text-markdown' }}
+          sessionId='materials-session'
+          slotId='materials_summary'
+        />
+      </div>,
+    );
+    const scrollContainer = container.querySelector<HTMLElement>('.workflow-panel__tab-content')!;
+    const slotElement = container.querySelector<HTMLElement>('.workflow-slot--text')!;
+    const preview = container.querySelector<HTMLElement>('.workflow-slot__text--editable')!;
+    const renderedTextNode = preview.querySelector('div')!.firstChild!;
+    renderedTextNode.textContent = 'middle target';
+    scrollContainer.scrollTop = 84;
+    vi.spyOn(preview, 'getBoundingClientRect').mockReturnValue({
+      x: 10,
+      y: 100,
+      top: 100,
+      left: 10,
+      right: 410,
+      bottom: 420,
+      width: 400,
+      height: 320,
+      toJSON: () => ({}),
+    });
+    vi.spyOn(slotElement, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 90,
+      top: 90,
+      left: 0,
+      right: 600,
+      bottom: 450,
+      width: 600,
+      height: 360,
+      toJSON: () => ({}),
+    });
+    Object.defineProperty(document, 'caretPositionFromPoint', {
+      configurable: true,
+      value: () => ({ offsetNode: renderedTextNode, offset: 7 }),
+    });
+
+    fireEvent.click(preview, { clientX: 120, clientY: 240 });
+
+    const editor = container.querySelector<HTMLTextAreaElement>('.workflow-slot__text-editor')!;
+    expect(editor).toHaveStyle({ height: '360px', minHeight: '360px' });
+    expect(editor.selectionStart).toBe(targetOffset);
+    expect(document.activeElement).toBe(editor);
+    expect(scrollContainer.scrollTop).toBe(84);
+  });
+});
+
 describe('Writer version diff text', () => {
   it('compares JSON-encoded Writer snapshots as readable document content', async () => {
     const snapshot = JSON.stringify({

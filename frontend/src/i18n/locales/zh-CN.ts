@@ -1857,6 +1857,7 @@ const zhCN = {
     },
     writerMarkdown: {
       documentRegion: "Markdown 文档",
+      readOnly: "只读",
       blockTypes: {
         paragraph: "正文",
         quote: "引用",
@@ -7005,6 +7006,8 @@ const zhCN = {
       developerTitle: "{{action}}开发者模式",
       developerEnableContent: "开启后将启用开发者模式相关功能，包括工具管理、算法跃迁、内部 ID 和完整执行过程。",
       developerDisableContent: "关闭后将停用开发者模式相关功能，但不会删除已有的自进化数据。",
+      developerEnableContentWithoutEvo: "开启后将启用工具管理、内部 ID 和完整执行过程。",
+      developerDisableContentWithoutEvo: "关闭后将停用工具管理、内部 ID 和完整执行过程。",
       mcpEnabledToast: "已启用 {{updated}} 个服务，{{skipped}} 个未验证服务保持停用",
       mcpToggledToast: "已{{state}} {{count}} 个 MCP 服务",
     },
@@ -7324,6 +7327,7 @@ const zhCN = {
       enableTitle: "启用开发者模式",
       disableTitle: "关闭开发者模式",
       enableDesc: "激活工具管理、算法跃迁、内部 ID 和完整执行过程。",
+      enableDescWithoutEvo: "激活工具管理、内部 ID 和完整执行过程。",
       modeAria: "开发者模式",
     },
   },

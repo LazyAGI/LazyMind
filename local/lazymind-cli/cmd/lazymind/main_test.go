@@ -2,10 +2,13 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestInternalSessionSetAndClear(t *testing.T) {
@@ -29,5 +32,38 @@ func TestInternalSessionSetAndClear(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(home, "credentials.json")); !os.IsNotExist(err) {
 		t.Fatalf("credentials were not cleared: %v", err)
+	}
+}
+
+func TestContextWithOwnerProcessCancelsWhenParentChanges(t *testing.T) {
+	var parentPID atomic.Int64
+	parentPID.Store(123)
+	ctx, cancel, err := contextWithOwnerProcess(
+		context.Background(),
+		123,
+		func() int { return int(parentPID.Load()) },
+		time.Millisecond,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cancel()
+	parentPID.Store(1)
+	select {
+	case <-ctx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("owner context was not canceled after the parent process changed")
+	}
+}
+
+func TestContextWithOwnerProcessRejectsNonParentPID(t *testing.T) {
+	_, _, err := contextWithOwnerProcess(
+		context.Background(),
+		123,
+		func() int { return 456 },
+		time.Millisecond,
+	)
+	if err == nil || !strings.Contains(err.Error(), "not the current parent") {
+		t.Fatalf("error = %v, want current-parent validation", err)
 	}
 }

@@ -43,6 +43,19 @@ def test_ppt_material_slot_uses_same_image_list_contract_as_image_workflow():
     ]
 
 
+def test_ppt_analysis_and_material_summary_share_markdown_widget():
+    ppt = yaml.safe_load(
+        (_repo_root() / 'workflows' / 'ppt-workflow' / 'workflow.yaml').read_text(
+            encoding='utf-8'))
+
+    assert ppt['ui']['slots']['requirement_analysis'] == {
+        'widgetType': 'text-markdown',
+    }
+    assert ppt['ui']['slots']['material_summary'] == {
+        'widgetType': 'text-markdown',
+    }
+
+
 def test_ppt_analysis_has_one_deterministic_kb_first_collection_route():
     state = yaml.safe_load(
         (_repo_root() / 'workflows' / 'ppt-workflow' / 'scenario' / 'state.yml').read_text(

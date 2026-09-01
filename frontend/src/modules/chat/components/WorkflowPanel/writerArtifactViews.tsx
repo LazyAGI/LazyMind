@@ -12,25 +12,6 @@ function tr(key: string, options?: Record<string, unknown>): string {
   return i18n.t(key, options);
 }
 
-/** Slot ids rendered by WriterArtifactContent in the writer-workflow panel. */
-export const WRITER_ARTIFACT_SLOT_IDS = new Set([
-  'writing_task',
-  'resource_profiles',
-  'writing_context',
-  'outline',
-  'outline_document',
-  'section_instructions',
-  'draft_sections',
-  'flat_draft_document',
-  'draft_document',
-  'review_report',
-  'review_summary',
-  'final_document',
-  'final_document_md',
-  'writing_output',
-  'writing_output_md',
-]);
-
 export function unwrapArtifactPayload(raw: unknown): unknown {
   if (raw && typeof raw === 'object' && 'data' in raw) {
     return (raw as { data: unknown }).data;
