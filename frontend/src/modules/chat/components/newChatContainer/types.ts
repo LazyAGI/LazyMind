@@ -106,6 +106,7 @@ export interface ChatMessage {
     partial_output: boolean;
     model_call_id?: string;
     diagnostic_id?: string;
+    metrics?: import("@/modules/chat/utils/performanceStats").RunPerformanceMetrics;
   };
   inputs?: Query[];
   reasoning_content?: string;

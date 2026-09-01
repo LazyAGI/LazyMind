@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import re
+import time
 from typing import Any, Optional
 
 from lazymind.config import config as _cfg
 from lazymind.chat.runtime_events import RunAccumulator
+from lazymind.chat.service.run_metrics import RunMetricsTracker
 from lazymind.chat.service.utils import (
     build_stream_citation_scanner,
     materialize_source_views,
@@ -66,7 +68,7 @@ def _iter_scanned_text_frames(
 
 
 class AgentEventFrameTranslator:
-    def __init__(self, *, query: str, run_id: str = '') -> None:
+    def __init__(self, *, query: str, run_id: str = '', clock=None) -> None:
         self.query = query
         self.run = RunAccumulator(run_id=run_id or 'unbound-run')
         self.citation_state: dict[str, Any] = {}
@@ -76,6 +78,7 @@ class AgentEventFrameTranslator:
         self.streamed_text = False
         self.ask_pending_emitted = False
         self.tool_call_turns = 0
+        self.metrics = RunMetricsTracker(clock or time.monotonic)
         self.text_scanner, self.citation_plugin = build_stream_citation_scanner(self.citation_state)
 
     def feed(self, event: Any) -> list[dict[str, Any]]:
@@ -94,6 +97,8 @@ class AgentEventFrameTranslator:
             if not isinstance(value.get('data'), dict):
                 raise ValueError('runtime_event data must be an object')
             self.run.observe_model_event(value)
+            if value.get('type') == 'model_call_finished':
+                self.metrics.on_model_call_finished()
             frames.append(_stream_frame(extra={'runtime_event': value}))
             return frames
         if event_type == 'task_created':
@@ -134,6 +139,7 @@ class AgentEventFrameTranslator:
             delta = str(event.get('delta', '') or '')
             if delta:
                 self.run.semantic_output = True
+                self.metrics.mark_output()
                 frames.append(_stream_frame(think=delta))
             return frames
 
@@ -142,6 +148,7 @@ class AgentEventFrameTranslator:
             if not delta:
                 return frames
             self.run.semantic_output = True
+            self.metrics.mark_output()
             for has_text, frame in _iter_scanned_text_frames(
                 self.text_scanner.feed(delta), self.citation_state,
             ):
@@ -154,6 +161,7 @@ class AgentEventFrameTranslator:
             if tool_calls:
                 self.run.semantic_output = True
                 self.tool_call_turns += 1
+                self.metrics.on_tool_calls(len(tool_calls))
                 parts: list[str] = []
                 for tc in tool_calls:
                     text, pv = _tool_call_frame_text(tc, self.language)
@@ -166,6 +174,12 @@ class AgentEventFrameTranslator:
         if event_type == 'tool_results':
             tool_results = [tr for tr in (event.get('tool_results', []) or []) if isinstance(tr, dict)]
             if tool_results:
+                duration_ms = event.get('duration_ms')
+                try:
+                    measured = float(duration_ms) if duration_ms is not None else None
+                except (TypeError, ValueError):
+                    measured = None
+                self.metrics.on_tool_results(duration_ms=measured)
                 parts = [
                     _tool_result_frame_text(
                         tr,
@@ -183,8 +197,28 @@ class AgentEventFrameTranslator:
 
         return frames
 
-    def finish_run(self, *, succeeded: bool) -> dict[str, Any]:
-        return _stream_frame(extra={'runtime_event': self.run.finish(succeeded=succeeded)})
+    def finish_run(
+        self,
+        *,
+        succeeded: bool,
+        usage: Optional[dict[str, Any]] = None,
+        usage_map: Optional[dict[str, Any]] = None,
+        module_id: Optional[str] = None,
+        llm_config: Optional[dict[str, Any]] = None,
+        turn_seq: Optional[int] = None,
+        max_input_tokens: Optional[int] = None,
+    ) -> dict[str, Any]:
+        metrics = self.metrics.snapshot(
+            usage=usage,
+            usage_map=usage_map,
+            module_id=module_id,
+            llm_config=llm_config,
+            turn_seq=turn_seq,
+            max_input_tokens=max_input_tokens,
+        )
+        return _stream_frame(extra={
+            'runtime_event': self.run.finish(succeeded=succeeded, metrics=metrics),
+        })
 
     def flush(self) -> list[dict[str, Any]]:
         frames: list[dict[str, Any]] = []

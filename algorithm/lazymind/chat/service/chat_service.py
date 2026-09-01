@@ -64,6 +64,7 @@ from lazymind.chat.engine.agent_runtime import (
     attach_window_budget,
     render_attachment_content,
 )
+from lazymind.chat.engine.agent_runtime.budget import resolve_max_input_tokens
 from lazymind.chat.engine.tools.local_file.workspace import chat_agent_workspace
 from lazymind.chat.engine.tools.intent_writer import (
     build_intentwrite_tool,
@@ -1673,7 +1674,14 @@ async def _handle_chat_impl(
                 _unregister_active_session(_conv_id_key, conversation.session_id)
 
         cost = round(time.time() - start_time, 3)
-        terminal_frame = translator.finish_run(succeeded=succeeded)
+        terminal_frame = translator.finish_run(
+            succeeded=succeeded,
+            usage_map=lazyllm.globals.get('usage') or {},
+            module_id=getattr(llm, '_module_id', None),
+            llm_config=runtime.llm_config or {},
+            turn_seq=message.current_turn_seq,
+            max_input_tokens=resolve_max_input_tokens(runtime.llm_config or {}),
+        )
         terminal_frame['tool_call_turns'] = translator.tool_call_turns
         yield log_and_emit_frame(terminal_frame, cost, query, conversation.session_id, tag='RUN_FINISH')
 

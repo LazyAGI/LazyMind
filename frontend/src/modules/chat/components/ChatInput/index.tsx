@@ -56,6 +56,8 @@ import MentionEditor, {
   type MentionEditorRef,
 } from "./MentionEditor";
 import ContextUsageButton from "./ContextUsageButton";
+import PerformanceStatsBar from "./PerformanceStatsBar";
+import type { SessionPerformanceStats } from "../../utils/performanceStats";
 import { buildCitedMessageText } from "../newChatContainer/utils/citeMessage";
 
 // Stable empty array reference — must NOT be inline `?? []` in a zustand selector
@@ -407,6 +409,8 @@ interface ChatInputProps {
   showSkillDeposit?: boolean;
   showConversationConfig?: boolean;
   fixedThinkingDepth?: ThinkingDepth;
+  performanceStats?: SessionPerformanceStats;
+  showPerformanceStats?: boolean;
 }
 
 interface ShowcaseSelectControl {
@@ -612,6 +616,8 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       showSkillDeposit = true,
       showConversationConfig = true,
       fixedThinkingDepth,
+      performanceStats,
+      showPerformanceStats = false,
     } = props;
     const fileListRef = useRef<ImageUploadImperativeProps | null>(null);
     const knowledgeSelectorRef = useRef<ChatSelectorImperativeProps | null>(null);
@@ -1601,6 +1607,9 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
             </div>
           ) : null}
         </div>
+        {showPerformanceStats ? (
+          <PerformanceStatsBar stats={performanceStats} running={isStreaming} />
+        ) : null}
         <PromptModal
           ref={promptRef}
           onSelectPrompt={(prompt) => onChange(appendPromptToDraft(text, prompt))}

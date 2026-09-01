@@ -779,9 +779,15 @@ export function useChatConversation({
       assistantMessage = {
         ...assistantMessage,
         ...result,
+        seq: result.seq ?? assistantMessage.seq,
         model_retry: scheduledRetry ??
           (clearsRetry ? undefined : assistantMessage.model_retry),
-        run_terminal: finalRunTerminal || assistantMessage.run_terminal,
+        run_terminal:
+          (runtimeEventType === "run_finished" && runtimeEventData
+            ? runtimeEventData
+            : undefined) ||
+          finalRunTerminal ||
+          assistantMessage.run_terminal,
         run_status: finalRunTerminal?.status || assistantMessage.run_status,
         id: result.messageId,
         raw_delta: mergedRawDelta,

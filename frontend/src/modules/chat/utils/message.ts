@@ -268,6 +268,7 @@ export function buildChatMessageListFromHistory(
         ? ChatConversationsResponseFinishReasonEnum.FinishReasonUnspecified
         : ChatConversationsResponseFinishReasonEnum.FinishReasonStop,
       history_id: record.id,
+      seq: record.seq,
       sources: record.sources,
       feed_back: record.feed_back,
       thinking_time_s: record.thinking_time_s,

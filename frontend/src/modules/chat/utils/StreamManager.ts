@@ -1,5 +1,6 @@
 import { SSE } from "./sse";
 import i18n from "@/i18n";
+import type { RunPerformanceMetrics } from "./performanceStats";
 
 export interface StreamCallbacks {
   message?: (e: CustomEvent) => void;
@@ -35,6 +36,7 @@ export interface RunTerminal {
   partial_output: boolean;
   model_call_id?: string;
   diagnostic_id?: string;
+  metrics?: RunPerformanceMetrics;
 }
 
 export class StreamManager {

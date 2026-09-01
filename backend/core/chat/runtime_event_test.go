@@ -305,3 +305,31 @@ func TestStoredRunEventDropsLegacyProviderTransportFields(t *testing.T) {
 		t.Fatalf("legacy transport fields were re-exposed: %s", event.Data)
 	}
 }
+
+func TestRunTerminalPreservesMetrics(t *testing.T) {
+	hitRate := 0.0
+	inputTokens := int64(100)
+	cached := int64(0)
+	event := storedRunEvent("run_test", json.RawMessage(`{
+		"status":"completed",
+		"reason":"normal",
+		"partial_output":true,
+		"metrics":{"schema_version":1,"steps":4,"model_steps":2,"tool_steps":2,"input_tokens":100,"cached_tokens":0,"cache_hit_rate":0,"provider_usages":[{"prompt_tokens_details":{"cached_tokens":0}}]}
+	}`))
+	terminal, err := event.Terminal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if terminal.Metrics == nil || terminal.Metrics.Steps != 4 || terminal.Metrics.InputTokens == nil || *terminal.Metrics.InputTokens != inputTokens {
+		t.Fatalf("metrics were not preserved: %#v", terminal.Metrics)
+	}
+	if terminal.Metrics.CachedTokens == nil || *terminal.Metrics.CachedTokens != cached {
+		t.Fatalf("cached_tokens 0 was not preserved: %#v", terminal.Metrics)
+	}
+	if terminal.Metrics.CacheHitRate == nil || *terminal.Metrics.CacheHitRate != hitRate {
+		t.Fatalf("cache hit rate was not preserved: %#v", terminal.Metrics)
+	}
+	if len(terminal.Metrics.ProviderUsages) == 0 {
+		t.Fatalf("provider_usages was not preserved: %#v", terminal.Metrics)
+	}
+}

@@ -1,0 +1,104 @@
+import { foldSessionPerformanceStats } from "./performanceStats";
+import { RoleTypes } from "@/modules/chat/constants/common";
+
+describe("foldSessionPerformanceStats", () => {
+  it("counts distinct seq as turns and reports session vs current-turn cache rates", () => {
+    const stats = foldSessionPerformanceStats([
+      {
+        role: RoleTypes.ASSISTANT,
+        seq: 1,
+        run_terminal: {
+          metrics: {
+            steps: 2,
+            model_ms: 1000,
+            tool_ms: 500,
+            input_tokens: 100,
+            output_tokens: 10,
+            cached_tokens: 80,
+            cache_hit_rate: 0.8,
+            context_ratio: 0.1,
+            model: "deepseek-chat",
+          },
+        },
+      },
+      {
+        role: RoleTypes.ASSISTANT,
+        seq: 2,
+        run_terminal: {
+          metrics: {
+            steps: 3,
+            model_ms: 2000,
+            input_tokens: 50,
+            output_tokens: 20,
+            cached_tokens: 0,
+            model: "deepseek-chat",
+          },
+        },
+      },
+    ]);
+    expect(stats?.turns).toBe(2);
+    expect(stats?.steps).toBe(5);
+    expect(stats?.promptTokens).toBe(150);
+    expect(stats?.sessionCacheHitRate).toBeCloseTo(80 / 150);
+    expect(stats?.turnCacheHitRate).toBe(0);
+    expect(stats?.model).toBe("deepseek-chat");
+  });
+
+  it("averages multiple metrics in the current turn", () => {
+    const stats = foldSessionPerformanceStats([
+      {
+        role: RoleTypes.ASSISTANT,
+        seq: 1,
+        run_terminal: {
+          metrics: {
+            steps: 1,
+            input_tokens: 100,
+            cached_tokens: 100,
+          },
+        },
+      },
+      {
+        role: RoleTypes.ASSISTANT,
+        seq: 2,
+        run_terminal: {
+          metrics: {
+            steps: 1,
+            input_tokens: 40,
+            cached_tokens: 20,
+          },
+        },
+        answers: [
+          {
+            run_terminal: {
+              metrics: {
+                steps: 1,
+                input_tokens: 60,
+                cached_tokens: 0,
+              },
+            },
+          },
+        ],
+      },
+    ]);
+    expect(stats?.sessionCacheHitRate).toBeCloseTo(120 / 200);
+    expect(stats?.turnCacheHitRate).toBeCloseTo(20 / 100);
+  });
+
+  it("treats explicit cached_tokens 0 as observable", () => {
+    const stats = foldSessionPerformanceStats([
+      {
+        role: RoleTypes.ASSISTANT,
+        seq: 1,
+        run_terminal: {
+          metrics: {
+            steps: 1,
+            input_tokens: 100,
+            cached_tokens: 0,
+          },
+        },
+      },
+    ]);
+    expect(stats?.sessionCacheHitRate).toBe(0);
+    expect(stats?.turnCacheHitRate).toBe(0);
+  });
+});

@@ -26,6 +26,7 @@ type uiPreferencesAPITestResponse struct {
 		WorkflowsEnabled              bool   `json:"workflows_enabled"`
 		MCPEnabled                    bool   `json:"mcp_enabled"`
 		DocumentParsingEnabled        bool   `json:"document_parsing_enabled"`
+		PerformanceStatsEnabled       bool   `json:"performance_stats_enabled"`
 		UserPreferenceConfigured      bool   `json:"user_preference_configured"`
 		UpdatedAt                     string `json:"updated_at"`
 	} `json:"data"`
@@ -520,6 +521,28 @@ func TestPatchUIPreferencesPersistsAcceptedUserAgreementVersion(t *testing.T) {
 	getResp := decodeUIPreferencesResponse(t, getRec)
 	if getResp.Data.AcceptedUserAgreementVersion != "V0.2" {
 		t.Fatalf("expected persisted agreement version V0.2, got %q", getResp.Data.AcceptedUserAgreementVersion)
+	}
+}
+
+func TestPatchUIPreferencesPersistsPerformanceStats(t *testing.T) {
+	db := newUIPreferencesTestDB(t)
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+
+	patchReq := httptest.NewRequest(
+		http.MethodPatch,
+		"/api/core/user/ui-preferences",
+		strings.NewReader(`{"performance_stats_enabled":true}`),
+	)
+	patchReq.Header.Set("Content-Type", "application/json")
+	patchReq.Header.Set("X-User-Id", "u1")
+	patchRec := httptest.NewRecorder()
+	PatchUIPreferences(patchRec, patchReq)
+	if patchRec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", patchRec.Code, patchRec.Body.String())
+	}
+	if !decodeUIPreferencesResponse(t, patchRec).Data.PerformanceStatsEnabled {
+		t.Fatal("expected performance stats to be enabled")
 	}
 }
 

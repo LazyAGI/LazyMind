@@ -35,6 +35,15 @@ import type { ChatContainerProps, ChatImperativeProps } from "./types";
 import { useConversationTrail } from "./hooks/useConversationTrail";
 import { mergeConversationTrailIntoMessageList } from "@/modules/chat/utils/message";
 import type { ChatSource } from "@/modules/chat/utils/sourceAdapter";
+import { foldSessionPerformanceStats } from "@/modules/chat/utils/performanceStats";
+import {
+  DEVELOPER_ACTIVE_EVENT,
+  isDeveloperModeActive,
+} from "@/utils/developerMode";
+import {
+  fetchUserUiPreferences,
+  USER_UI_PREFERENCES_CHANGED_EVENT,
+} from "@/modules/user/uiPreferencesApi";
 
 export type { ChatImperativeProps, ChatMessage } from "./types";
 
@@ -141,6 +150,34 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
     const [sourcePanelSources, setSourcePanelSources] = useState<ChatSource[]>([]);
     const skillDepositWasReadyRef = useRef(false);
     const skillDepositMessageCountRef = useRef(0);
+    const [developerModeActive, setDeveloperModeActive] = useState(isDeveloperModeActive());
+    const [performanceStatsEnabled, setPerformanceStatsEnabled] = useState(false);
+
+    useEffect(() => {
+      const syncDeveloper = (event?: Event) => {
+        const detail = (event as CustomEvent<{ active?: boolean }>)?.detail;
+        setDeveloperModeActive(
+          typeof detail?.active === "boolean" ? detail.active : isDeveloperModeActive(),
+        );
+      };
+      const syncPreferences = (event?: Event) => {
+        const detail = (event as CustomEvent<{ performance_stats_enabled?: boolean }>)?.detail;
+        if (typeof detail?.performance_stats_enabled === "boolean") {
+          setPerformanceStatsEnabled(detail.performance_stats_enabled);
+          return;
+        }
+        void fetchUserUiPreferences()
+          .then((prefs) => setPerformanceStatsEnabled(Boolean(prefs.performance_stats_enabled)))
+          .catch(() => undefined);
+      };
+      window.addEventListener(DEVELOPER_ACTIVE_EVENT, syncDeveloper);
+      window.addEventListener(USER_UI_PREFERENCES_CHANGED_EVENT, syncPreferences);
+      syncPreferences();
+      return () => {
+        window.removeEventListener(DEVELOPER_ACTIVE_EVENT, syncDeveloper);
+        window.removeEventListener(USER_UI_PREFERENCES_CHANGED_EVENT, syncPreferences);
+      };
+    }, []);
 
     useEffect(() => {
       setSourcePanelSources([]);
@@ -283,6 +320,10 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
 
     const skillDepositStats = useMemo(
       () => getSkillDepositStats(conversation.messageList),
+      [conversation.messageList],
+    );
+    const performanceStats = useMemo(
+      () => foldSessionPerformanceStats(conversation.messageList),
       [conversation.messageList],
     );
     const isLastUserMessageSkillDepositPrompt = useMemo(() => {
@@ -518,6 +559,8 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
               showSkillDeposit={showSkillDeposit}
               showConversationConfig={showConversationConfig}
               fixedThinkingDepth={fixedThinkingDepth}
+              showPerformanceStats={developerModeActive && performanceStatsEnabled}
+              performanceStats={performanceStats}
             />
           </div>
           {sourcePanelSources.length > 0 && (

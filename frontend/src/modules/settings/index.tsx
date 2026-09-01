@@ -204,9 +204,10 @@ export default function SettingsPage() {
   const latestRequest = useRef(0);
   const [overview, setOverview] = useState<SettingsOverview | null>(null);
   const [developerActive, setDeveloperActive] = useState(false);
+  const [performanceStatsEnabled, setPerformanceStatsEnabled] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
-  const [saving, setSaving] = useState<MasterSetting | "developer" | null>(null);
+  const [saving, setSaving] = useState<MasterSetting | "developer" | "performance_stats" | null>(null);
   const [checks, setChecks] = useState<SettingsCheckResult[] | null>(null);
   const [checking, setChecking] = useState(false);
   const [diagnosticLoading, setDiagnosticLoading] = useState(false);
@@ -250,6 +251,7 @@ export default function SettingsPage() {
       if (requestID !== latestRequest.current) return;
       setOverview(nextOverview);
       setDeveloperActive(preferences.developer_mode_active);
+      setPerformanceStatsEnabled(Boolean(preferences.performance_stats_enabled));
     } catch {
       if (requestID !== latestRequest.current) return;
       setLoadError(true);
@@ -880,6 +882,35 @@ export default function SettingsPage() {
             />
           </div>
         </div>
+        {developerActive ? (
+          <div className="settings-detail-group">
+            <div className="settings-detail-row">
+              <div>
+                <strong>{t("settingsPage.developer.performanceTitle")}</strong>
+                <p>{t("settingsPage.developer.performanceDesc")}</p>
+              </div>
+              <Switch
+                className="settings-ref-switch"
+                checked={performanceStatsEnabled}
+                loading={saving === "performance_stats"}
+                disabled={saving !== null}
+                onChange={async (enabled) => {
+                  setSaving("performance_stats");
+                  try {
+                    await patchUserUiPreferences({ performance_stats_enabled: enabled });
+                    setPerformanceStatsEnabled(enabled);
+                    message.success(t("settingsPage.saved"));
+                  } catch {
+                    message.error(t("settingsPage.saveFailed"));
+                  } finally {
+                    setSaving(null);
+                  }
+                }}
+                aria-label={t("settingsPage.developer.performanceAria")}
+              />
+            </div>
+          </div>
+        ) : null}
       </>;
     }
 

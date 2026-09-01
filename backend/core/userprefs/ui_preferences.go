@@ -30,6 +30,7 @@ type uiPreferencesResponse struct {
 	WorkflowsEnabled              bool   `json:"workflows_enabled"`
 	MCPEnabled                    bool   `json:"mcp_enabled"`
 	DocumentParsingEnabled        bool   `json:"document_parsing_enabled"`
+	PerformanceStatsEnabled       bool   `json:"performance_stats_enabled"`
 	UserPreferenceConfigured      bool   `json:"user_preference_configured"`
 	UpdatedAt                     string `json:"updated_at"`
 }
@@ -44,6 +45,7 @@ type uiPreferencesPatchRequest struct {
 	WorkflowsEnabled              *bool   `json:"workflows_enabled"`
 	MCPEnabled                    *bool   `json:"mcp_enabled"`
 	DocumentParsingEnabled        *bool   `json:"document_parsing_enabled"`
+	PerformanceStatsEnabled       *bool   `json:"performance_stats_enabled"`
 }
 
 func GetUIPreferences(w http.ResponseWriter, r *http.Request) {
@@ -96,7 +98,8 @@ func PatchUIPreferences(w http.ResponseWriter, r *http.Request) {
 		req.SkillsEnabled == nil &&
 		req.WorkflowsEnabled == nil &&
 		req.MCPEnabled == nil &&
-		req.DocumentParsingEnabled == nil {
+		req.DocumentParsingEnabled == nil &&
+		req.PerformanceStatsEnabled == nil {
 		common.ReplyErr(w, "no valid fields to update", http.StatusBadRequest)
 		return
 	}
@@ -249,6 +252,9 @@ func UpsertUserUIPreferences(ctx context.Context, db *gorm.DB, userID string, re
 		if req.DocumentParsingEnabled != nil {
 			row.DocumentParsingEnabled = *req.DocumentParsingEnabled
 		}
+		if req.PerformanceStatsEnabled != nil {
+			row.PerformanceStatsEnabled = *req.PerformanceStatsEnabled
+		}
 		// Feature controls default to true. Map-based create preserves an explicit
 		// false from a first-time user instead of applying GORM's model default.
 		if err := db.WithContext(ctx).Model(&orm.UserUIPreferences{}).Create(map[string]any{
@@ -262,6 +268,7 @@ func UpsertUserUIPreferences(ctx context.Context, db *gorm.DB, userID string, re
 			"workflows_enabled":                row.WorkflowsEnabled,
 			"mcp_enabled":                      row.MCPEnabled,
 			"document_parsing_enabled":         row.DocumentParsingEnabled,
+			"performance_stats_enabled":        row.PerformanceStatsEnabled,
 			"created_at":                       row.CreatedAt,
 			"updated_at":                       row.UpdatedAt,
 		}).Error; err != nil {
@@ -311,6 +318,10 @@ func UpsertUserUIPreferences(ctx context.Context, db *gorm.DB, userID string, re
 		updates["document_parsing_enabled"] = *req.DocumentParsingEnabled
 		row.DocumentParsingEnabled = *req.DocumentParsingEnabled
 	}
+	if req.PerformanceStatsEnabled != nil {
+		updates["performance_stats_enabled"] = *req.PerformanceStatsEnabled
+		row.PerformanceStatsEnabled = *req.PerformanceStatsEnabled
+	}
 	if err := db.WithContext(ctx).Model(&orm.UserUIPreferences{}).
 		Where("user_id = ?", userID).
 		Updates(updates).Error; err != nil {
@@ -354,6 +365,7 @@ func buildUIPreferencesResponse(row orm.UserUIPreferences, userPreferenceConfigu
 		WorkflowsEnabled:              row.WorkflowsEnabled,
 		MCPEnabled:                    row.MCPEnabled,
 		DocumentParsingEnabled:        row.DocumentParsingEnabled,
+		PerformanceStatsEnabled:       row.PerformanceStatsEnabled,
 		UserPreferenceConfigured:      userPreferenceConfigured,
 		UpdatedAt:                     updatedAt,
 	}

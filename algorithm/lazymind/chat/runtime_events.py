@@ -41,7 +41,7 @@ class RunAccumulator:
             self.last_model_terminal = data
             self.semantic_output = self.semantic_output or bool(data.get('has_semantic_output'))
 
-    def finish(self, *, succeeded: bool) -> dict:
+    def finish(self, *, succeeded: bool, metrics: Optional[Dict[str, Any]] = None) -> dict:
         if self.terminal_emitted:
             raise RuntimeError(f'run {self.run_id} already has a terminal')
         self.terminal_emitted = True
@@ -59,6 +59,8 @@ class RunAccumulator:
         if isinstance(failure, dict):
             if failure.get('diagnostic_id'):
                 data['diagnostic_id'] = failure['diagnostic_id']
+        if metrics:
+            data['metrics'] = metrics
         return runtime_event('run_finished', self.run_id, data)
 
     def _terminal_fields(self, succeeded: bool) -> tuple[str, str, str]:
