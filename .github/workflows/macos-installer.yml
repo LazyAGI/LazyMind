@@ -376,7 +376,8 @@ jobs:
           echo "status=${status}" >> "${GITHUB_OUTPUT}"
           echo "duration_seconds=${duration_seconds}" >> "${GITHUB_OUTPUT}"
           if [[ "${status}" == "In Progress" ]]; then
-            echo "::warning::ZIP notarization is still in progress after ${duration_seconds}s; continuing directly to DMG packaging."
+            echo "::error::ZIP notarization is still in progress after ${duration_seconds}s."
+            exit 1
           fi
 
       - name: Fail rejected app ZIP notarization
@@ -422,13 +423,13 @@ jobs:
           publish_dir="${GITHUB_WORKSPACE}/desktop/dist/publish"
           package_version="$(node -p 'require("./desktop/electron/package.json").version')"
           short_sha="$(git rev-parse --short=8 HEAD)"
-          pending_path="${publish_dir}/LazyMind-macos-arm64-${package_version}-${short_sha}.pending.dmg"
+          notarization_path="${publish_dir}/LazyMind-macos-arm64-${package_version}-${short_sha}.notarization.dmg"
           development_path="${publish_dir}/LazyMind-macos-arm64-${package_version}-${short_sha}.unnotarized.dmg"
           mount_dir="$(mktemp -d "${RUNNER_TEMP}/lazymind-final-dmg.XXXXXX")"
 
           mkdir -p "${publish_dir}"
           if [[ "${IS_TAG}" == "true" ]]; then
-            cp "${source_dmg}" "${pending_path}"
+            cp "${source_dmg}" "${notarization_path}"
           else
             cp "${source_dmg}" "${development_path}"
           fi
@@ -440,7 +441,7 @@ jobs:
           trap - EXIT
 
           duration_seconds="$(( $(date +%s) - started_at ))"
-          echo "pending_path=${pending_path}" >> "${GITHUB_OUTPUT}"
+          echo "notarization_path=${notarization_path}" >> "${GITHUB_OUTPUT}"
           echo "development_path=${development_path}" >> "${GITHUB_OUTPUT}"
           echo "duration_seconds=${duration_seconds}" >> "${GITHUB_OUTPUT}"
 
@@ -451,11 +452,11 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          PENDING_DMG: ${{ steps.package.outputs.pending_path }}
+          NOTARIZATION_DMG: ${{ steps.package.outputs.notarization_path }}
         run: |
           set -euo pipefail
-          submission_path="${PENDING_DMG/.pending.dmg/.notarization.json}"
-          xcrun notarytool submit "${PENDING_DMG}" \
+          submission_path="${RUNNER_TEMP}/dmg-notarization-submission.json"
+          xcrun notarytool submit "${NOTARIZATION_DMG}" \
             --apple-id "${APPLE_ID}" \
             --password "${APPLE_APP_SPECIFIC_PASSWORD}" \
             --team-id "${APPLE_TEAM_ID}" \
@@ -468,15 +469,7 @@ jobs:
               process.stdout.write(value.id);
             ' "${submission_path}"
           )"
-          node -e '
-            const fs = require("fs");
-            const file = process.argv[1];
-            const value = JSON.parse(fs.readFileSync(file, "utf8"));
-            value.releaseTag = process.argv[2];
-            fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
-          ' "${submission_path}" "${{ steps.release.outputs.tag }}"
           echo "submission_id=${submission_id}" >> "${GITHUB_OUTPUT}"
-          echo "submission_path=${submission_path}" >> "${GITHUB_OUTPUT}"
 
       - name: Wait up to 30 minutes for DMG notarization
         if: steps.release.outputs.is_tag == 'true'
@@ -505,7 +498,8 @@ jobs:
           echo "status=${status}" >> "${GITHUB_OUTPUT}"
           echo "duration_seconds=$(( $(date +%s) - started_at ))" >> "${GITHUB_OUTPUT}"
           if [[ "${status}" == "In Progress" ]]; then
-            echo "::warning::DMG notarization timed out. Uploading pending inputs for the manual finalizer."
+            echo "::error::DMG notarization is still in progress after 30 minutes."
+            exit 1
           fi
 
       - name: Fail rejected DMG notarization
@@ -518,11 +512,11 @@ jobs:
         if: steps.release.outputs.is_tag == 'true' && steps.dmg_notarization.outputs.status == 'Accepted'
         id: final_package
         env:
-          PENDING_DMG: ${{ steps.package.outputs.pending_path }}
+          NOTARIZATION_DMG: ${{ steps.package.outputs.notarization_path }}
         run: |
           set -euo pipefail
-          final_path="${PENDING_DMG/.pending.dmg/.dmg}"
-          mv "${PENDING_DMG}" "${final_path}"
+          final_path="${NOTARIZATION_DMG/.notarization.dmg/.dmg}"
+          mv "${NOTARIZATION_DMG}" "${final_path}"
           xcrun stapler staple "${final_path}"
           xcrun stapler validate "${final_path}"
           spctl --assess --type open --context context:primary-signature --verbose=4 "${final_path}"
@@ -535,28 +529,6 @@ jobs:
         with:
           name: LazyMind-macos-arm64-notarized
           path: ${{ steps.final_package.outputs.installer_path }}
-          if-no-files-found: error
-          retention-days: 30
-          archive: false
-
-      - name: Upload pending DMG after timeout
-        if: steps.release.outputs.is_tag == 'true' && steps.dmg_notarization.outputs.status == 'In Progress'
-        id: upload_pending
-        uses: actions/upload-artifact@v7
-        with:
-          name: LazyMind-macos-arm64-pending
-          path: ${{ steps.package.outputs.pending_path }}
-          if-no-files-found: error
-          retention-days: 30
-          archive: false
-
-      - name: Upload DMG submission record after timeout
-        if: steps.release.outputs.is_tag == 'true' && steps.dmg_notarization.outputs.status == 'In Progress'
-        id: upload_submission
-        uses: actions/upload-artifact@v7
-        with:
-          name: LazyMind-macos-notarization-submission
-          path: ${{ steps.dmg_submission.outputs.submission_path }}
           if-no-files-found: error
           retention-days: 30
           archive: false
@@ -591,8 +563,6 @@ jobs:
         if: always() && steps.package.outcome == 'success'
         env:
           FINAL_URL: ${{ steps.upload_final.outputs.artifact-url }}
-          PENDING_URL: ${{ steps.upload_pending.outputs.artifact-url }}
-          SUBMISSION_URL: ${{ steps.upload_submission.outputs.artifact-url }}
           DEVELOPMENT_URL: ${{ steps.upload_development.outputs.artifact-url }}
         run: |
           {
@@ -600,13 +570,8 @@ jobs:
             echo
             if [[ "${{ steps.release.outputs.is_tag }}" != "true" ]]; then
               echo "[Download the signed but unnotarized development DMG](${DEVELOPMENT_URL})"
-            elif [[ "${{ steps.dmg_notarization.outputs.status }}" == "Accepted" ]]; then
-              echo "[Download the notarized and stapled DMG](${FINAL_URL})"
             else
-              echo "DMG notarization is still processing."
-              echo "- [Pending DMG](${PENDING_URL})"
-              echo "- [Submission record](${SUBMISSION_URL})"
-              echo "- Run **Finalize macOS Notarization** with source run ID \`${GITHUB_RUN_ID}\`."
+              echo "[Download the notarized and stapled DMG](${FINAL_URL})"
             fi
           } >> "${GITHUB_STEP_SUMMARY}"
 
