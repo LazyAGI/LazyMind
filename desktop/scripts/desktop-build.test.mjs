@@ -468,6 +468,18 @@ test("macOS CI fails fast on missing credentials and raises the open-file limit"
   }
   assert.match(source, /ulimit -n "\$\{target_open_files\}"/);
   assert.match(source, /actual_open_files < 8192/);
+  assert.match(
+    source,
+    /name: Validate release signing and notarization inputs\s*\n\s*if: steps\.release\.outputs\.is_tag == 'true'/,
+  );
+  assert.match(
+    source,
+    /LAZYMIND_DESKTOP_SIGNING_MODE: \$\{\{ steps\.release\.outputs\.is_tag == 'true' && 'developer-id' \|\| 'adhoc' \}\}/,
+  );
+  assert.match(
+    source,
+    /CSC_LINK: \$\{\{ steps\.release\.outputs\.is_tag == 'true' && secrets\.MAC_CSC_LINK \|\| '' \}\}/,
+  );
   assert.match(source, /git submodule update --init algorithm\/lazyllm/);
   assert.doesNotMatch(source, /git submodule update --init --recursive/);
 });
@@ -485,6 +497,7 @@ test("macOS CI notarizes ZIP then DMG and fails when notarization times out", ()
   );
   assert.match(buildWorkflow, /name:\s*Wait up to 30 minutes for app ZIP notarization/);
   assert.match(buildWorkflow, /ZIP notarization is still in progress[\s\S]*exit 1/);
+  assert.match(buildWorkflow, /name:\s*Require accepted app ZIP notarization/);
   assert.match(buildWorkflow, /name:\s*Staple accepted app ticket/);
   assert.match(buildWorkflow, /dist:mac:arm64:prepackaged/);
   assert.match(buildWorkflow, /name:\s*Submit DMG for notarization/);
@@ -501,6 +514,7 @@ test("macOS CI notarizes ZIP then DMG and fails when notarization times out", ()
   assert.match(buildWorkflow, /deadline="\$\(\( started_at \+ 1800 \)\)"/);
   assert.match(buildWorkflow, /sleep 30/);
   assert.match(buildWorkflow, /DMG notarization is still in progress after 30 minutes[\s\S]*exit 1/);
+  assert.match(buildWorkflow, /name:\s*Require accepted DMG notarization/);
   assert.match(buildWorkflow, /stapler staple "\$\{final_path\}"/);
   assert.match(buildWorkflow, /stapler validate "\$\{final_path\}"/);
   assert.match(buildWorkflow, /test-macos-installer:/);

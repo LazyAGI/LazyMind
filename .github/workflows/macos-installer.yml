@@ -173,53 +173,44 @@ jobs:
           echo "Checked out commit: $(git rev-parse HEAD)"
           df -h /
 
-      - name: Validate signing and notarization inputs
+      - name: Validate release signing and notarization inputs
+        if: steps.release.outputs.is_tag == 'true'
         env:
           CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          IS_TAG: ${{ steps.release.outputs.is_tag }}
         run: |
           set -euo pipefail
 
           missing=()
-          for variable in CSC_LINK CSC_KEY_PASSWORD; do
+          for variable in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
             if [[ -z "${!variable:-}" ]]; then
               missing+=("${variable}")
             fi
           done
-          if [[ "${IS_TAG}" == "true" ]]; then
-            for variable in APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
-              if [[ -z "${!variable:-}" ]]; then
-                missing+=("${variable}")
-              fi
-            done
-          fi
           if (( ${#missing[@]} > 0 )); then
             echo "::error::Missing mac_dev environment secrets: ${missing[*]}"
             exit 1
           fi
-          if [[ "${IS_TAG}" == "true" && ! "${APPLE_TEAM_ID}" =~ ^[A-Z0-9]{10}$ ]]; then
+          if [[ ! "${APPLE_TEAM_ID}" =~ ^[A-Z0-9]{10}$ ]]; then
             echo "::error::APPLE_TEAM_ID must be a 10-character Apple Team ID"
             exit 1
           fi
-          if [[ "${IS_TAG}" == "true" ]]; then
-            xcrun notarytool --version
-          fi
+          xcrun notarytool --version
 
       - name: Run Desktop tests
         run: |
           node --test desktop/scripts/*.test.mjs
 
-      - name: Build and sign app ZIP
+      - name: Build app ZIP
         id: build
         env:
-          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          CSC_LINK: ${{ steps.release.outputs.is_tag == 'true' && secrets.MAC_CSC_LINK || '' }}
+          CSC_KEY_PASSWORD: ${{ steps.release.outputs.is_tag == 'true' && secrets.MAC_CSC_KEY_PASSWORD || '' }}
           LAZYMIND_DESKTOP_PACKAGE_KIND: zip
-          LAZYMIND_DESKTOP_SIGNING_MODE: developer-id
+          LAZYMIND_DESKTOP_SIGNING_MODE: ${{ steps.release.outputs.is_tag == 'true' && 'developer-id' || 'adhoc' }}
           LAZYMIND_RELEASE_BUILD: ${{ steps.release.outputs.is_tag }}
         run: |
           set -euo pipefail
@@ -372,6 +363,12 @@ jobs:
           echo "::error::Apple rejected the app ZIP notarization submission."
           exit 1
 
+      - name: Require accepted app ZIP notarization
+        if: steps.release.outputs.is_tag == 'true' && steps.zip_notarization.outputs.status != 'Accepted'
+        run: |
+          echo "::error::Release builds require accepted app ZIP notarization; status=${{ steps.zip_notarization.outputs.status }}"
+          exit 1
+
       - name: Staple accepted app ticket
         if: steps.release.outputs.is_tag == 'true' && steps.zip_notarization.outputs.status == 'Accepted'
         run: |
@@ -381,14 +378,14 @@ jobs:
           xcrun stapler validate "${app_path}"
           spctl --assess --type execute --verbose=4 "${app_path}"
 
-      - name: Package signed app as DMG
+      - name: Package app as DMG
         id: package
         env:
-          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          CSC_LINK: ${{ steps.release.outputs.is_tag == 'true' && secrets.MAC_CSC_LINK || '' }}
+          CSC_KEY_PASSWORD: ${{ steps.release.outputs.is_tag == 'true' && secrets.MAC_CSC_KEY_PASSWORD || '' }}
           LAZYMIND_DESKTOP_RUNTIME_STAGE: ${{ github.workspace }}/desktop/build/darwin-arm64/runtime
           LAZYMIND_DESKTOP_OUTPUT_DIR: ${{ github.workspace }}/desktop/dist
-          LAZYMIND_DESKTOP_SIGNING_MODE: developer-id
+          LAZYMIND_DESKTOP_SIGNING_MODE: ${{ steps.release.outputs.is_tag == 'true' && 'developer-id' || 'adhoc' }}
           IS_TAG: ${{ steps.release.outputs.is_tag }}
         run: |
           set -euo pipefail
@@ -484,6 +481,12 @@ jobs:
           echo "::error::Apple rejected DMG notarization submission ${{ steps.dmg_submission.outputs.submission_id }}."
           exit 1
 
+      - name: Require accepted DMG notarization
+        if: steps.release.outputs.is_tag == 'true' && steps.dmg_notarization.outputs.status != 'Accepted'
+        run: |
+          echo "::error::Release builds require accepted DMG notarization; status=${{ steps.dmg_notarization.outputs.status }}"
+          exit 1
+
       - name: Staple and validate accepted DMG
         if: steps.release.outputs.is_tag == 'true' && steps.dmg_notarization.outputs.status == 'Accepted'
         id: final_package
@@ -545,7 +548,7 @@ jobs:
             echo "## macOS installer result"
             echo
             if [[ "${{ steps.release.outputs.is_tag }}" != "true" ]]; then
-              echo "[Download the signed but unnotarized development DMG](${DEVELOPMENT_URL})"
+              echo "[Download the ad-hoc signed, unnotarized development DMG](${DEVELOPMENT_URL})"
             else
               echo "[Download the notarized and stapled DMG](${FINAL_URL})"
             fi
