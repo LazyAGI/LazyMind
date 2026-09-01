@@ -140,6 +140,8 @@ def make_runtime_observer(*, role: str = '', run_id: str = '') -> Any:
 
 
 def emit_tool_call(tool_call: dict[str, Any], *, blocked: bool = False, reason: str = '') -> None:
+    if not telemetry_enabled():
+        return
     function = tool_call.get('function') or {}
     name = str(function.get('name') or '')
     arguments = function.get('arguments', {})
@@ -178,6 +180,8 @@ def emit_tool_call(tool_call: dict[str, Any], *, blocked: bool = False, reason: 
 
 
 def emit_tool_result(tool_call: dict[str, Any], result: Any) -> None:
+    if not telemetry_enabled():
+        return
     function = tool_call.get('function') or {}
     name = str(function.get('name') or '')
     category = classify_tool(name)
