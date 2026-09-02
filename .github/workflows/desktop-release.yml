@@ -118,3 +118,19 @@ jobs:
           set -euo pipefail
           mapfile -t installers < <(find release-assets/macos release-assets/windows -maxdepth 1 -type f \( -name '*.dmg' -o -name '*.exe' \) -print)
           gh release upload "${RELEASE_TAG}" "${installers[@]}" release-assets/SHA256SUMS --clobber
+
+          expected_assets=("$(basename "${installers[0]}")" "$(basename "${installers[1]}")" "SHA256SUMS")
+          while IFS= read -r asset_name; do
+            keep=false
+            for expected_asset in "${expected_assets[@]}"; do
+              if [[ "${asset_name}" == "${expected_asset}" ]]; then
+                keep=true
+                break
+              fi
+            done
+
+            if [[ "${keep}" == "false" && ( "${asset_name}" == *.dmg || "${asset_name}" == *.exe || "${asset_name}" == "SHA256SUMS" ) ]]; then
+              echo "Deleting stale desktop release asset: ${asset_name}"
+              gh release delete-asset "${RELEASE_TAG}" "${asset_name}" --yes
+            fi
+          done < <(gh release view "${RELEASE_TAG}" --json assets --jq '.assets[].name')

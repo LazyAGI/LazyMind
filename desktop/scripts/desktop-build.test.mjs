@@ -552,6 +552,12 @@ test("desktop release builds each platform once and publishes only after both pa
   assert.match(source, /name: Download tested Windows installer/);
   assert.match(source, /gh release create/);
   assert.match(source, /gh release upload/);
+  assert.match(source, /gh release delete-asset/);
+  assert.match(source, /gh release view .*--json assets/);
+  assert.ok(
+    source.indexOf("gh release upload") < source.indexOf("gh release delete-asset"),
+    "new release assets must be uploaded before stale assets are deleted",
+  );
   assert.match(source, /--prerelease/);
   assert.match(source, /printf '%s  %s\\n'.*basename/);
   assert.doesNotMatch(source, /sha256sum "\$\{dmg_files\[0\]\}" "\$\{exe_files\[0\]\}" \| tee/);
