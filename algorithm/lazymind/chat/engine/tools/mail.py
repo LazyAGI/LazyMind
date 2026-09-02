@@ -9,6 +9,8 @@ import mimetypes
 import os
 import re
 import smtplib
+import socket
+import ssl
 import uuid
 from datetime import datetime, timezone
 from email.header import decode_header, make_header
@@ -70,6 +72,45 @@ def _agentic_config() -> dict[str, Any]:
 
 def _fail(message: str) -> NoReturn:
     raise ToolExecutionError(message)
+
+
+def _draft_revision(draft: dict[str, Any]) -> int:
+    try:
+        value = int(draft.get('revision') or 1)
+    except (TypeError, ValueError):
+        value = 1
+    return value if value > 0 else 1
+
+
+def _confirm_revision() -> int:
+    raw = _agentic_config().get('mail_draft_confirm_revision')
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _is_uncertain_delivery_error(orig: BaseException) -> bool:
+    if isinstance(orig, smtplib.SMTPServerDisconnected):
+        return True
+    if isinstance(orig, (TimeoutError, socket.timeout, ConnectionError, ssl.SSLError, socket.gaierror)):
+        return True
+    if isinstance(orig, OSError) and not isinstance(orig, smtplib.SMTPException):
+        return True
+    return False
+
+
+def _raise_send_error(orig: BaseException, *, data_submitted: bool) -> NoReturn:
+    detail = str(orig).strip() or orig.__class__.__name__
+    if data_submitted and _is_uncertain_delivery_error(orig):
+        err = ToolExecutionError(
+            'Mail delivery is unknown: DATA may already have been accepted, but the '
+            f'server acknowledgement was not received ({detail}). Do not retry until '
+            'you confirm the recipient did not receive it; retrying can send a duplicate.'
+        )
+        err.delivery_unknown = True
+        raise err from orig
+    _fail(f'Failed to send the email: {detail}')
 
 
 def _parse_credential(raw: Any) -> dict[str, str]:
@@ -509,16 +550,36 @@ class _IMAPBackend:
         _fail('Failed to read the email attachment.')
 
     def send(self, message: EmailMessage) -> dict[str, Any]:
+        data_submitted = False
         try:
-            with smtplib.SMTP_SSL(self.endpoint['smtp_host'], self.endpoint['smtp_port'], timeout=30) as smtp:
+            with smtplib.SMTP_SSL(
+                self.endpoint['smtp_host'],
+                self.endpoint['smtp_port'],
+                timeout=30,
+            ) as smtp:
                 smtp.login(self.email, self.secret)
+                orig_send = smtp.send
+
+                def tracked_send(payload):
+                    orig_send(payload)
+                    blob = (
+                        payload if isinstance(payload, (bytes, bytearray))
+                        else str(payload).encode('utf-8', 'replace')
+                    )
+                    if blob.endswith(b'.\r\n') or blob.endswith(b'.\n'):
+                        nonlocal data_submitted
+                        data_submitted = True
+
+                smtp.send = tracked_send
                 smtp.send_message(message)
         except smtplib.SMTPAuthenticationError as orig:
             raise ToolExecutionError(
                 'Mailbox authorization expired. Re-authorize the mailbox in 资源库 → 云文档 → 邮箱连接.'
             ) from orig
-        except smtplib.SMTPException as orig:
-            _fail(f'Failed to send the email: {orig}')
+        except ToolExecutionError:
+            raise
+        except (smtplib.SMTPException, OSError, ssl.SSLError, TimeoutError) as orig:
+            _raise_send_error(orig, data_submitted=data_submitted)
         return {'id': message.get('Message-ID') or '', 'sent_at': _iso(datetime.now(timezone.utc))}
 
 
@@ -561,8 +622,10 @@ def _build_message(draft: dict[str, Any], mailbox: str) -> EmailMessage:
 
 
 def _preview(draft: dict[str, Any]) -> dict[str, Any]:
+    status = str(draft.get('status') or 'draft')
     return {
         'draft_id': draft.get('draft_id'),
+        'revision': _draft_revision(draft),
         'mailbox': draft.get('mailbox') or '',
         'provider': draft.get('provider') or '',
         'to': draft.get('to') or [],
@@ -571,12 +634,13 @@ def _preview(draft: dict[str, Any]) -> dict[str, Any]:
         'body': draft.get('body') or '',
         'attachments': [os.path.basename(path) for path in draft.get('attachment_paths') or []],
         'in_reply_to': draft.get('in_reply_to') or '',
-        'status': draft.get('status') or 'draft',
+        'status': status,
         'sent_at': draft.get('sent_at') or '',
         'last_error': draft.get('last_error') or '',
-        'requires_confirmation': draft.get('status') not in {'sent'},
+        'requires_confirmation': status not in {'sent'},
         'requires_reauth': bool(draft.get('requires_reauth')),
         'reauth_path': _REAUTH_PATH if draft.get('requires_reauth') else '',
+        'delivery_unknown': status == 'delivery_unknown',
     }
 
 
@@ -586,7 +650,7 @@ def _emit_draft_card(draft: dict[str, Any]) -> dict[str, Any]:
         'ask_pending',
         ask_id=str(uuid.uuid4()),
         title='邮件发送预览',
-        description='确认后才会发送。发送失败时草稿和附件会保留，可重试。',
+        description='确认后才会发送。发送失败可重新发送；若投递结果未知，不要轻易重试以免重复发送。',
         questions=[{
             'text': '确认发送这封邮件？',
             'type': 'boolean',
@@ -606,10 +670,12 @@ class MailToolkit:
     Search results are tagged with mailbox/provider. When more than one mailbox is
     enabled, pass mailbox (email address or provider name) to read, attach, compose,
     or send. Sending always requires the user to confirm the draft preview card.
+    Change an existing unsent draft with update_draft instead of composing a new one.
     """
 
     __public_apis__ = [
-        'search', 'read', 'read_thread', 'read_attachment', 'compose_draft', 'send_draft',
+        'search', 'read', 'read_thread', 'read_attachment',
+        'compose_draft', 'update_draft', 'send_draft',
     ]
     __tool_auto_activate__ = [
         r'邮件|邮箱|inbox|gmail|163|126|yeah\.net|qq邮箱|企业邮|(?<!\w)email(?!\w)|(?<!\w)mail(?!\w)',
@@ -752,6 +818,9 @@ class MailToolkit:
     ) -> dict[str, Any]:
         """Create a new or reply mail draft. Never send from this method.
 
+        To change recipients, subject, body, or attachments later, call update_draft
+        with this draft_id. Do not compose a second draft for the same email.
+
         Args:
             to: Recipient email or list of recipients.
             subject: Mail subject.
@@ -766,8 +835,10 @@ class MailToolkit:
         if not recipients:
             raise ToolExecutionError('at least one recipient is required')
         paths = _resolve_attachment_paths(attachment_paths)
+        now = _iso(datetime.now(timezone.utc))
         draft = {
             'draft_id': f'draft_{uuid.uuid4().hex[:16]}',
+            'revision': 1,
             'mailbox': cred['email'],
             'provider': cred['provider'],
             'to': recipients,
@@ -779,18 +850,78 @@ class MailToolkit:
             'status': 'draft',
             'sent_at': '',
             'last_error': '',
-            'created_at': _iso(datetime.now(timezone.utc)),
+            'created_at': now,
+            'updated_at': now,
         }
         _save_draft(draft)
         preview = _emit_draft_card(draft)
         return preview
+
+    def update_draft(
+        self,
+        draft_id: str,
+        to: Any = None,
+        subject: Any = None,
+        body: Any = None,
+        cc: Any = None,
+        attachment_paths: Any = None,
+        in_reply_to: Any = None,
+        mailbox: str = '',
+    ) -> dict[str, Any]:
+        """Update an existing unsent draft in place and bump its revision.
+
+        Confirm send is bound to draft_id plus this revision. An older preview card
+        cannot authorize a later revision.
+
+        Args:
+            draft_id: Draft id returned by compose_draft.
+            to: Replace recipients when provided.
+            subject: Replace subject when provided.
+            body: Replace body when provided.
+            cc: Replace CC addresses when provided.
+            attachment_paths: Replace attachments when provided. Pass [] to clear.
+            in_reply_to: Replace reply Message-ID when provided.
+            mailbox: Optional sending account (email or provider).
+        """
+        if not str(draft_id or '').strip():
+            raise ToolExecutionError('draft_id is required')
+        draft = _load_draft(draft_id)
+        if str(draft.get('status') or '') == 'sent':
+            _fail('Cannot update a draft that was already sent.')
+        if str(mailbox or '').strip():
+            cred = _pick_account(mailbox)
+            draft['mailbox'] = cred['email']
+            draft['provider'] = cred['provider']
+        if to is not None:
+            recipients = _split_addresses(to)
+            if not recipients:
+                raise ToolExecutionError('at least one recipient is required')
+            draft['to'] = recipients
+        if cc is not None:
+            draft['cc'] = _split_addresses(cc)
+        if subject is not None:
+            draft['subject'] = str(subject).strip()
+        if body is not None:
+            draft['body'] = str(body)
+        if attachment_paths is not None:
+            draft['attachment_paths'] = _resolve_attachment_paths(attachment_paths)
+        if in_reply_to is not None:
+            draft['in_reply_to'] = str(in_reply_to or '').strip()
+        draft['revision'] = _draft_revision(draft) + 1
+        draft['status'] = 'draft'
+        draft['last_error'] = ''
+        draft['requires_reauth'] = False
+        draft['updated_at'] = _iso(datetime.now(timezone.utc))
+        _save_draft(draft)
+        return _emit_draft_card(draft)
 
     def send_draft(self, draft_id: str, confirm: bool = False) -> dict[str, Any]:
         """Send a previously composed draft only after the user confirms the preview card.
 
         Args:
             draft_id: Draft id returned by compose_draft.
-            confirm: Ignored. Send is authorized only by mail_draft_confirm_id from the draft card.
+            confirm: Ignored. Send is authorized only by mail_draft_confirm_id and
+                mail_draft_confirm_revision from the draft card for this revision.
         """
         draft = _load_draft(draft_id)
         cred = _pick_account(str(draft.get('mailbox') or draft.get('provider') or ''))
@@ -801,11 +932,18 @@ class MailToolkit:
                 'Send blocked until the user confirms the preview card in this turn. '
                 'Do not call ask_user for send authorization. Wait for mail_draft_confirm_id.'
             )
+        expected_revision = _draft_revision(draft)
+        if _confirm_revision() != expected_revision:
+            _fail(
+                f'This preview is stale. The draft is now revision {expected_revision}. '
+                'Confirm the latest preview card; do not send from an older card.'
+            )
         message = _build_message(draft, cred['email'])
         try:
             result = _backend(cred).send(message)
         except ToolExecutionError as orig:
-            draft['status'] = 'failed'
+            unknown = bool(getattr(orig, 'delivery_unknown', False))
+            draft['status'] = 'delivery_unknown' if unknown else 'failed'
             draft['last_error'] = str(orig)
             draft['requires_reauth'] = 'Re-authorize' in str(orig)
             _save_draft(draft)
@@ -821,6 +959,7 @@ class MailToolkit:
         return {
             'status': 'sent',
             'draft_id': draft['draft_id'],
+            'revision': _draft_revision(draft),
             'sent_at': sent_at,
             'message_id': result.get('id') or '',
             'mailbox': cred['email'],

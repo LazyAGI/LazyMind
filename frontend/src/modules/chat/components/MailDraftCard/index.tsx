@@ -5,6 +5,7 @@ import "./index.scss";
 
 export interface MailDraftPreview {
   draft_id?: string;
+  revision?: number;
   mailbox?: string;
   to?: string[];
   cc?: string[];
@@ -19,25 +20,27 @@ export interface MailDraftPreview {
   error_code?: string;
   requires_reauth?: boolean;
   reauth_path?: string;
+  delivery_unknown?: boolean;
 }
 
 interface MailDraftCardProps {
   draft: MailDraftPreview;
   disabled?: boolean;
-  onConfirm: (draftId: string) => void;
-  onRetry?: (draftId: string) => void;
+  onConfirm: (draftId: string, revision: number) => void;
 }
 
 export default function MailDraftCard({
   draft,
   disabled,
   onConfirm,
-  onRetry,
 }: MailDraftCardProps) {
   const { t } = useTranslation();
   const draftId = String(draft.draft_id || "").trim();
-  const failed = draft.status === "failed" || Boolean(draft.last_error);
+  const revision = Number(draft.revision || 1);
   const sent = draft.status === "sent";
+  const deliveryUnknown =
+    draft.status === "delivery_unknown" || Boolean(draft.delivery_unknown);
+  const failed = !sent && !deliveryUnknown && (draft.status === "failed" || Boolean(draft.last_error));
 
   return (
     <div className="mail-draft-card">
@@ -86,6 +89,13 @@ export default function MailDraftCard({
       {failed ? (
         <Alert type="error" showIcon message={draft.last_error || t("chat.mailDraft.sendFailed")} />
       ) : null}
+      {deliveryUnknown ? (
+        <Alert
+          type="warning"
+          showIcon
+          message={draft.last_error || t("chat.mailDraft.deliveryUnknown")}
+        />
+      ) : null}
       {draft.requires_reauth ? (
         <Alert
           type="warning"
@@ -100,14 +110,15 @@ export default function MailDraftCard({
       ) : null}
       {!sent && !disabled ? (
         <Space>
-          <Button type="primary" disabled={!draftId} onClick={() => onConfirm(draftId)}>
-            {t("chat.mailDraft.confirmSend")}
-          </Button>
-          {failed ? (
-            <Button disabled={!draftId} onClick={() => (onRetry || onConfirm)(draftId)}>
-              {t("common.retry")}
+          {failed || deliveryUnknown ? (
+            <Button type="primary" disabled={!draftId} onClick={() => onConfirm(draftId, revision)}>
+              {deliveryUnknown ? t("chat.mailDraft.resendAnyway") : t("chat.mailDraft.resend")}
             </Button>
-          ) : null}
+          ) : (
+            <Button type="primary" disabled={!draftId} onClick={() => onConfirm(draftId, revision)}>
+              {t("chat.mailDraft.confirmSend")}
+            </Button>
+          )}
         </Space>
       ) : null}
     </div>

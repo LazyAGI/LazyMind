@@ -5,7 +5,7 @@ import lazyllm
 import pytest
 from lazyllm.tools.agent import ToolExecutionError
 
-from lazymind.chat.engine.tools.mail import MailToolkit, _resolve_imap_endpoint, _save_draft
+from lazymind.chat.engine.tools.mail import MailToolkit, _load_draft, _resolve_imap_endpoint, _save_draft
 
 
 @pytest.fixture
@@ -23,6 +23,7 @@ def mail_auth(tmp_path, monkeypatch):
         'user_id': 'u1',
         'conversation_id': 'c1',
         'mail_draft_confirm_id': '',
+        'mail_draft_confirm_revision': 0,
         'query': 'send mail',
     }
     yield
@@ -72,11 +73,13 @@ def test_send_after_confirm(mail_auth):
         'attachment_paths': [],
         'in_reply_to': '',
         'status': 'draft',
+        'revision': 1,
         'sent_at': '',
         'last_error': '',
     }
     _save_draft(draft)
     lazyllm.globals['agentic_config']['mail_draft_confirm_id'] = 'draft_ok'
+    lazyllm.globals['agentic_config']['mail_draft_confirm_revision'] = 1
     with patch(
         'lazymind.chat.engine.tools.mail._IMAPBackend.send',
         return_value={'id': 'm1', 'sent_at': '2026-09-01T00:00:00+00:00'},
@@ -149,3 +152,92 @@ def test_imap_endpoint_routes_netease_and_gmail():
     assert gmail_imap['imap_host'] == 'imap.gmail.com'
     exmail = _resolve_imap_endpoint('qqexmail', 'hr@acme.cn')
     assert exmail['imap_host'] == 'imap.exmail.qq.com'
+
+
+def test_update_draft_bumps_revision_and_rejects_stale_confirm(mail_auth):
+    preview = MailToolkit().compose_draft(to='a@b.com', subject='v1', body='one')
+    draft_id = preview['draft_id']
+    assert preview['revision'] == 1
+    updated = MailToolkit().update_draft(draft_id, body='two')
+    assert updated['revision'] == 2
+    assert updated['body'] == 'two'
+    lazyllm.globals['agentic_config']['mail_draft_confirm_id'] = draft_id
+    lazyllm.globals['agentic_config']['mail_draft_confirm_revision'] = 1
+    with pytest.raises(ToolExecutionError, match='stale'):
+        MailToolkit().send_draft(draft_id)
+
+
+class _FakeSMTP:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def login(self, *args):
+        return None
+
+    def send(self, payload):
+        return None
+
+
+def test_send_oserror_marks_failed(mail_auth):
+    draft = {
+        'draft_id': 'draft_fail',
+        'revision': 1,
+        'to': ['a@b.com'],
+        'cc': [],
+        'subject': 'hi',
+        'body': 'body',
+        'attachment_paths': [],
+        'in_reply_to': '',
+        'status': 'draft',
+        'sent_at': '',
+        'last_error': '',
+    }
+    _save_draft(draft)
+    lazyllm.globals['agentic_config']['mail_draft_confirm_id'] = 'draft_fail'
+    lazyllm.globals['agentic_config']['mail_draft_confirm_revision'] = 1
+
+    class BoomSMTP(_FakeSMTP):
+        def __init__(self, *args, **kwargs):
+            raise TimeoutError('timed out')
+
+    with patch('lazymind.chat.engine.tools.mail.smtplib.SMTP_SSL', BoomSMTP):
+        with pytest.raises(ToolExecutionError, match='Failed to send'):
+            MailToolkit().send_draft('draft_fail')
+    saved = _load_draft('draft_fail')
+    assert saved['status'] == 'failed'
+
+
+def test_send_reset_after_data_is_delivery_unknown(mail_auth):
+    draft = {
+        'draft_id': 'draft_unk',
+        'revision': 1,
+        'to': ['a@b.com'],
+        'cc': [],
+        'subject': 'hi',
+        'body': 'body',
+        'attachment_paths': [],
+        'in_reply_to': '',
+        'status': 'draft',
+        'sent_at': '',
+        'last_error': '',
+    }
+    _save_draft(draft)
+    lazyllm.globals['agentic_config']['mail_draft_confirm_id'] = 'draft_unk'
+    lazyllm.globals['agentic_config']['mail_draft_confirm_revision'] = 1
+
+    class ResetSMTP(_FakeSMTP):
+        def send_message(self, message):
+            self.send(b'payload\r\n.\r\n')
+            raise ConnectionResetError('Connection reset by peer')
+
+    with patch('lazymind.chat.engine.tools.mail.smtplib.SMTP_SSL', ResetSMTP):
+        with pytest.raises(ToolExecutionError, match='delivery is unknown'):
+            MailToolkit().send_draft('draft_unk')
+    saved = _load_draft('draft_unk')
+    assert saved['status'] == 'delivery_unknown'

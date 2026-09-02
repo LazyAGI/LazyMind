@@ -1073,13 +1073,14 @@ const AssistantMessage = (props: any) => {
             key={askPending.ask_id}
             draft={askPending.mail_draft}
             disabled={isReadOnly}
-            onConfirm={(draftId) => {
+            onConfirm={(draftId, revision) => {
               updateMessage({
                 ...item,
                 ask_answered: true,
               });
               props.sendMessage?.(t("chat.mailDraft.confirmQuery"), undefined, {
                 mail_draft_confirm_id: draftId,
+                mail_draft_confirm_revision: revision,
               });
             }}
           />

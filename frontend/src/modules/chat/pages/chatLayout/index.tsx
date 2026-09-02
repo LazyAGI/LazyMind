@@ -505,6 +505,11 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         ...(typeof extras?.mail_draft_confirm_id === "string" && extras.mail_draft_confirm_id
           ? { mail_draft_confirm_id: extras.mail_draft_confirm_id }
           : {}),
+        ...(typeof extras?.mail_draft_confirm_revision === "number" &&
+        Number.isFinite(extras.mail_draft_confirm_revision) &&
+        extras.mail_draft_confirm_revision > 0
+          ? { mail_draft_confirm_revision: extras.mail_draft_confirm_revision }
+          : {}),
         // If the user changed workflow settings before a conversation was created,
         // carry them in the first request so Go can persist them on ensureConversation.
         // Only send the three known fields to avoid polluting the payload with API response leftovers.

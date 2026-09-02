@@ -902,11 +902,16 @@ async def _handle_chat_impl(
             cost,
         ), run_id=run_id)
     confirm_id = (runtime.mail_draft_confirm_id or '').strip()
+    confirm_revision = runtime.mail_draft_confirm_revision
     if confirm_id:
+        revision_note = (
+            f' revision {int(confirm_revision)}' if confirm_revision else ''
+        )
         notice = (
-            f'\n\n[system] The user confirmed sending mail draft {confirm_id}. '
-            'Call MailToolkit_send_draft with that draft_id and confirm=True now. '
-            'Do not send any other draft.'
+            f'\n\n[system] The user confirmed sending mail draft {confirm_id}'
+            f'{revision_note}. '
+            'Call MailToolkit_send_draft with that draft_id now. '
+            'Do not send any other draft or an older revision.'
         )
         query = f'{query}{notice}'
         language_query = f'{language_query}{notice}'
@@ -974,6 +979,7 @@ async def _handle_chat_impl(
         'conversation_id': conversation_id,
         'query': query or '',
         'mail_draft_confirm_id': (runtime.mail_draft_confirm_id or '').strip(),
+        'mail_draft_confirm_revision': runtime.mail_draft_confirm_revision,
     }
     # Inject per-conversation workflow flags from Go (resolved from conversations table).
     # enable_workflow=None means "not set"; default to True so behaviour is unchanged

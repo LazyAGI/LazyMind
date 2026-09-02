@@ -112,6 +112,7 @@ type ChatRuntimeOptions struct {
 	ContextPreviewAllowLLMRouting bool           `json:"context_preview_allow_llm_routing,omitempty"`
 	SkipSensitiveFilter           bool           `json:"skip_sensitive_filter,omitempty"`
 	MailDraftConfirmID            string         `json:"mail_draft_confirm_id,omitempty"`
+	MailDraftConfirmRevision      int            `json:"mail_draft_confirm_revision,omitempty"`
 }
 
 type ChatPersonalizationOptions struct {
@@ -485,6 +486,9 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 	}
 	if draftID, ok := body["mail_draft_confirm_id"].(string); ok {
 		req.Runtime.MailDraftConfirmID = strings.TrimSpace(draftID)
+	}
+	if revision := mailDraftConfirmRevision(body["mail_draft_confirm_revision"]); revision > 0 {
+		req.Runtime.MailDraftConfirmRevision = revision
 	}
 	if llmConfig, ok := body["llm_config"].(map[string]any); ok {
 		req.Runtime.LLMConfig = llmConfig
