@@ -38,6 +38,15 @@ func ReviewMemory(ctx context.Context, req MemoryReviewRequest) (*MemoryReviewRe
 	return &out, status, nil
 }
 
+func OrganizePreference(ctx context.Context, req PreferenceOrganizerRequest) (*PreferenceOrganizerResponse, int, error) {
+	var out PreferenceOrganizerResponse
+	status, err := postReviewJSON(ctx, "/api/chat/preference_organize", req, &out)
+	if err != nil {
+		return nil, status, err
+	}
+	return &out, status, nil
+}
+
 func postReviewJSON(ctx context.Context, path string, req any, out any) (int, error) {
 	body, err := json.Marshal(req)
 	if err != nil {

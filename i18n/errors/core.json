@@ -1456,5 +1456,9 @@
   "2002317": { "en-US": "The AI returned invalid editable content", "zh-CN": "AI 返回的可编辑内容无效" },
   "2002318": { "en-US": "History injection failed", "zh-CN": "历史记录注入失败" },
   "2002319": { "en-US": "Base URL must be an API root without a request path", "zh-CN": "Base URL 必须为不包含请求路径的 API 根地址" },
-  "2002320": { "en-US": "Failed to restore the model", "zh-CN": "恢复模型失败" }
+  "2002320": { "en-US": "Failed to restore the model", "zh-CN": "恢复模型失败" },
+  "2002321": { "en-US": "Preference maintenance is in progress", "zh-CN": "Preference 正在整理中" },
+  "2002322": { "en-US": "Failed to create the Preference Organizer task", "zh-CN": "创建 Preference Organizer 任务失败" },
+  "2002323": { "en-US": "Failed to query the Preference Organizer task", "zh-CN": "查询 Preference Organizer 任务失败" },
+  "2002324": { "en-US": "The Preference Organizer task lease was lost", "zh-CN": "Preference Organizer 任务租约已丢失" }
 }

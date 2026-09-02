@@ -115,6 +115,14 @@ func manualSchemas() map[string]any {
 			prop("max_items", int64Schema()),
 			prop("over_limit", boolSchema()),
 		),
+		"CurrentMemoryPreferenceProjectionState": objReq(
+			[]string{"stored_items", "full_projection_chars", "projected_items", "projected_chars", "projection_truncated"},
+			prop("stored_items", intSchema()),
+			prop("full_projection_chars", intSchema()),
+			prop("projected_items", intSchema()),
+			prop("projected_chars", intSchema()),
+			prop("projection_truncated", boolSchema()),
+		),
 		"CurrentMemoryReferenceSource": objReq(
 			[]string{"kind", "conversation_id"},
 			prop("kind", enumStringSchema("memory_review", "chat_explicit")),
@@ -132,12 +140,30 @@ func manualSchemas() map[string]any {
 			prop("reason", strSchema()),
 		),
 		"CurrentMemoryPreferenceListData": objReq(
-			[]string{"items", "total_size", "resident_index_usage", "etag", "updated_at"},
+			[]string{"items", "total_size", "resident_index_usage", "etag", "updated_at", "projection_state"},
 			prop("items", array(refSchema("CurrentMemoryPreferenceItem"))),
 			prop("total_size", int64Schema()),
 			prop("resident_index_usage", refSchema("CurrentMemoryPreferenceResidentIndexUsage")),
 			prop("etag", strSchema()),
 			prop("updated_at", int64Schema()),
+			prop("projection_state", refSchema("CurrentMemoryPreferenceProjectionState")),
+		),
+		"PreferenceOrganizerTaskData": objReq(
+			[]string{"task_id", "status", "created_at"},
+			prop("task_id", strSchema()),
+			prop("status", enumStringSchema("pending", "running", "done", "failed", "skipped")),
+			prop("current_pass", intSchema()),
+			prop("result", obj()),
+			prop("error_code", strSchema()),
+			prop("error_message", strSchema()),
+			prop("created_at", dateTimeSchema()),
+			prop("started_at", dateTimeSchema()),
+			prop("finished_at", dateTimeSchema()),
+		),
+		"PreferenceOrganizerTaskResponse": objReq(
+			[]string{"code", "message", "data"},
+			prop("code", intSchema()), prop("message", strSchema()),
+			prop("data", refSchema("PreferenceOrganizerTaskData")),
 		),
 		"CurrentMemoryPreferenceListResponse": objReq(
 			[]string{"code", "message", "data"},
@@ -876,6 +902,28 @@ func manualPaths() map[string]any {
 					"401": response(401, "Gateway user identity is missing", refSchema("CurrentMemoryErrorResponse")),
 					"404": response(404, "Preference index is missing", refSchema("CurrentMemoryErrorResponse")),
 					"500": response(500, "Stored Preference index is invalid or unavailable", refSchema("CurrentMemoryErrorResponse")),
+				},
+			},
+		},
+		"/memory/preferences:organize": map[string]any{
+			"post": map[string]any{
+				"summary": "Create or return the active Preference Organizer task",
+				"responses": map[string]any{
+					"202": response(202, "Preference Organizer task accepted", refSchema("PreferenceOrganizerTaskResponse")),
+					"401": response(401, "Gateway user identity is missing", refSchema("CurrentMemoryErrorResponse")),
+					"500": response(500, "Preference Organizer task could not be created", refSchema("CurrentMemoryErrorResponse")),
+				},
+			},
+		},
+		"/memory/preferences:organize/{task_id}": map[string]any{
+			"get": map[string]any{
+				"summary":    "Get a Preference Organizer task",
+				"parameters": []map[string]any{param("path", "task_id", true, strSchema())},
+				"responses": map[string]any{
+					"200": response(200, "Preference Organizer task status", refSchema("PreferenceOrganizerTaskResponse")),
+					"401": response(401, "Gateway user identity is missing", refSchema("CurrentMemoryErrorResponse")),
+					"404": response(404, "Preference Organizer task was not found", refSchema("CurrentMemoryErrorResponse")),
+					"500": response(500, "Preference Organizer task could not be queried", refSchema("CurrentMemoryErrorResponse")),
 				},
 			},
 		},

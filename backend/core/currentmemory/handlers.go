@@ -11,20 +11,23 @@ import (
 	"gorm.io/gorm"
 
 	"lazymind/core/common"
+	"lazymind/core/resourceupdate"
 	"lazymind/core/store"
 )
 
 type Handler struct {
 	module *Module
+	db     *gorm.DB
 }
 
 func NewHandler(db *gorm.DB) *Handler {
-	return &Handler{module: NewModule(db)}
+	return &Handler{module: NewModule(db), db: db}
 }
 
 func NewHandlerWithPreferenceIndexMaxItems(db *gorm.DB, maxItems int) *Handler {
 	return &Handler{
 		module: NewModuleWithPreferenceIndexMaxItems(db, maxItems),
+		db:     db,
 	}
 }
 
@@ -157,6 +160,10 @@ func (h *Handler) ReorderPreferences(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if err := resourceupdate.AuthorizePreferenceMutation(r.Context(), h.db, userID, ""); err != nil {
+		replyPublicError(w, err)
+		return
+	}
 	var request CurrentMemoryPreferenceOrderRequest
 	if err := decodeJSONBody(r, &request); err != nil {
 		replyPublicError(w, err)
@@ -173,6 +180,10 @@ func (h *Handler) ReorderPreferences(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) DeletePreference(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requirePublicUser(w, r)
 	if !ok {
+		return
+	}
+	if err := resourceupdate.AuthorizePreferenceMutation(r.Context(), h.db, userID, ""); err != nil {
+		replyPublicError(w, err)
 		return
 	}
 	err := h.module.DeletePreference(
@@ -235,7 +246,15 @@ func decodeJSONBody(r *http.Request, target any) error {
 
 func replyPublicError(w http.ResponseWriter, err error) {
 	var etagConflict *ETagConflictError
+	var organizing *resourceupdate.PreferenceOrganizingError
 	switch {
+	case errors.As(err, &organizing):
+		common.ReplyErrWithData(
+			w,
+			"preference_organizing",
+			map[string]any{"error_code": "preference_organizing", "mutation": "none", "task_id": organizing.TaskID},
+			http.StatusConflict,
+		)
 	case errors.As(err, &etagConflict):
 		common.ReplyErrWithData(
 			w,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -41,8 +42,9 @@ func NewWorker(db *gorm.DB, cfg Config, workerID string, stateStores ...state.St
 		clock:         time.Now,
 		loadLLMConfig: modelconfig.LoadLLMConfig,
 		callers: reviewCallers{
-			Skill:  algo.ReviewSkill,
-			Memory: algo.ReviewMemory,
+			Skill:               algo.ReviewSkill,
+			Memory:              algo.ReviewMemory,
+			PreferenceOrganizer: algo.OrganizePreference,
 		},
 		stateStore: stateStore,
 	}
@@ -140,13 +142,57 @@ func (w *Worker) recoverExpiredRunning(ctx context.Context, now time.Time) (int,
 func (w *Worker) claimPending(ctx context.Context, now time.Time) ([]orm.ResourceUpdateTask, error) {
 	var claimed []orm.ResourceUpdateTask
 	err := w.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var ids []string
+		var runningLaneKeys []string
+		if err := tx.Model(&orm.ResourceUpdateTask{}).
+			Where("status = ? AND lane_key <> ''", orm.ResourceUpdateTaskStatusRunning).
+			Pluck("lane_key", &runningLaneKeys).Error; err != nil {
+			return err
+		}
+		busyLanes := make(map[string]struct{}, len(runningLaneKeys))
+		for _, laneKey := range runningLaneKeys {
+			busyLanes[laneKey] = struct{}{}
+		}
+		var candidates []orm.ResourceUpdateTask
 		if err := withUpdateLock(tx.Model(&orm.ResourceUpdateTask{})).
 			Where("status = ? AND next_run_at <= ?", orm.ResourceUpdateTaskStatusPending, now).
 			Order("created_at ASC").
-			Limit(w.cfg.WorkerBatchSize).
-			Pluck("id", &ids).Error; err != nil {
+			Find(&candidates).Error; err != nil {
 			return err
+		}
+		selected := make([]orm.ResourceUpdateTask, 0, len(candidates))
+		selectedLaneIndex := make(map[string]int)
+		for _, candidate := range candidates {
+			laneKey := strings.TrimSpace(candidate.LaneKey)
+			if laneKey != "" {
+				if _, busy := busyLanes[laneKey]; busy {
+					continue
+				}
+				if index, exists := selectedLaneIndex[laneKey]; exists {
+					current := selected[index]
+					if candidate.LanePriority > current.LanePriority ||
+						(candidate.LanePriority == current.LanePriority && candidate.LaneOrderAt.Before(current.LaneOrderAt)) {
+						selected[index] = candidate
+					}
+					continue
+				}
+				selectedLaneIndex[laneKey] = len(selected)
+			}
+			selected = append(selected, candidate)
+		}
+		sort.SliceStable(selected, func(i, j int) bool {
+			left, right := selected[i], selected[j]
+			leftOrder, rightOrder := effectiveLaneOrderAt(left), effectiveLaneOrderAt(right)
+			if !leftOrder.Equal(rightOrder) {
+				return leftOrder.Before(rightOrder)
+			}
+			return left.CreatedAt.Before(right.CreatedAt)
+		})
+		if len(selected) > w.cfg.WorkerBatchSize {
+			selected = selected[:w.cfg.WorkerBatchSize]
+		}
+		ids := make([]string, 0, len(selected))
+		for _, candidate := range selected {
+			ids = append(ids, candidate.ID)
 		}
 		if len(ids) == 0 {
 			return nil
@@ -166,16 +212,36 @@ func (w *Worker) claimPending(ctx context.Context, now time.Time) ([]orm.Resourc
 			}).Error; err != nil {
 			return err
 		}
-		return tx.Where("id IN ? AND status = ? AND locked_by = ?", ids, orm.ResourceUpdateTaskStatusRunning, w.workerID).
-			Order("created_at ASC").
-			Find(&claimed).Error
+		if err := tx.Where("id IN ? AND status = ? AND locked_by = ?", ids,
+			orm.ResourceUpdateTaskStatusRunning, w.workerID).Find(&claimed).Error; err != nil {
+			return err
+		}
+		orderByID := make(map[string]int, len(ids))
+		for index, id := range ids {
+			orderByID[id] = index
+		}
+		sort.SliceStable(claimed, func(i, j int) bool {
+			return orderByID[claimed[i].ID] < orderByID[claimed[j].ID]
+		})
+		return nil
 	})
 	return claimed, err
+}
+
+func effectiveLaneOrderAt(task orm.ResourceUpdateTask) time.Time {
+	if strings.TrimSpace(task.LaneKey) == "" || task.LaneOrderAt.IsZero() {
+		return task.CreatedAt
+	}
+	return task.LaneOrderAt
 }
 
 func (w *Worker) dispatch(ctx context.Context, task orm.ResourceUpdateTask) taskOutcome {
 	if task.TaskType == orm.ResourceUpdateTaskTypeAutoCommitSkillDraft {
 		return w.handleAutoCommitSkillDraft(ctx, task)
+	}
+	if task.TaskType == orm.ResourceUpdateTaskTypeOrganizePreference &&
+		task.ResourceType == orm.ResourceUpdateResourceTypeUserPreference {
+		return w.handlePreferenceOrganizer(ctx, task)
 	}
 	if task.TaskType != orm.ResourceUpdateTaskTypeGenerateReview {
 		return taskOutcome{
@@ -225,6 +291,7 @@ func (w *Worker) finishTask(ctx context.Context, task orm.ResourceUpdateTask, ou
 		updates := map[string]any{
 			"status":        outcome.Status,
 			"result_id":     outcome.ResultID,
+			"result_json":   outcome.ResultJSON,
 			"error_code":    "",
 			"error_message": "",
 			"locked_by":     "",
@@ -261,6 +328,7 @@ func (w *Worker) finishTask(ctx context.Context, task orm.ResourceUpdateTask, ou
 			Where("id = ? AND status = ? AND locked_by = ?", task.ID, orm.ResourceUpdateTaskStatusRunning, w.workerID).
 			Updates(map[string]any{
 				"status":        orm.ResourceUpdateTaskStatusFailed,
+				"result_json":   outcome.ResultJSON,
 				"error_code":    outcome.ErrorCode,
 				"error_message": outcome.ErrorMessage,
 				"locked_by":     "",
@@ -287,6 +355,7 @@ func (w *Worker) finishTask(ctx context.Context, task orm.ResourceUpdateTask, ou
 		Where("id = ? AND status = ? AND locked_by = ?", task.ID, orm.ResourceUpdateTaskStatusRunning, w.workerID).
 		Updates(map[string]any{
 			"status":        orm.ResourceUpdateTaskStatusPending,
+			"result_json":   outcome.ResultJSON,
 			"error_code":    outcome.ErrorCode,
 			"error_message": outcome.ErrorMessage,
 			"next_run_at":   nextRunAt,

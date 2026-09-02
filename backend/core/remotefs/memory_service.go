@@ -14,6 +14,7 @@ import (
 
 	"lazymind/core/common/orm"
 	"lazymind/core/currentmemory"
+	"lazymind/core/resourceupdate"
 )
 
 const (
@@ -213,6 +214,7 @@ func (s *memoryCurrentService) read(ctx context.Context, userID, rawPath string)
 func (s *memoryCurrentService) write(
 	ctx context.Context,
 	userID string,
+	taskID string,
 	rawPath string,
 	content []byte,
 	contentType string,
@@ -224,16 +226,11 @@ func (s *memoryCurrentService) write(
 	if entryPath == memoryRootPath {
 		return orm.MemoryCurrentEntry{}, errMemoryProtected
 	}
-	if err := currentmemory.ValidateDocumentForPath(entryPath, content); err != nil {
+	if err := s.authorizePreferenceMutation(ctx, userID, taskID, entryPath); err != nil {
 		return orm.MemoryCurrentEntry{}, err
 	}
-	nextPreferenceItems := -1
-	if entryPath == memoryPreferencePath {
-		document, parseErr := currentmemory.ParsePreferences(content)
-		if parseErr != nil {
-			return orm.MemoryCurrentEntry{}, parseErr
-		}
-		nextPreferenceItems = len(document.Preferences)
+	if err := currentmemory.ValidateDocumentForPath(entryPath, content); err != nil {
+		return orm.MemoryCurrentEntry{}, err
 	}
 	if err := s.ensureInitialized(ctx, userID); err != nil {
 		return orm.MemoryCurrentEntry{}, err
@@ -246,23 +243,6 @@ func (s *memoryCurrentService) write(
 		}
 		if existing, ok := byPath[entryPath]; ok && existing.EntryType == memoryEntryDir {
 			return fmt.Errorf("%w: cannot write file over directory", errMemoryConflict)
-		}
-		if nextPreferenceItems >= 0 {
-			currentPreferenceItems := 0
-			if existing, ok := byPath[entryPath]; ok {
-				document, parseErr := currentmemory.ParsePreferences(existing.Content)
-				if parseErr != nil {
-					return parseErr
-				}
-				currentPreferenceItems = len(document.Preferences)
-			}
-			if capacityErr := currentmemory.ValidatePreferenceCapacity(
-				currentPreferenceItems,
-				nextPreferenceItems,
-				s.preferenceIndexMaxItems,
-			); capacityErr != nil {
-				return capacityErr
-			}
 		}
 		now := s.clock().UTC()
 		if err := s.ensureParentDirectories(ctx, tx, userID, entryPath, byPath, now); err != nil {
@@ -283,12 +263,45 @@ func (s *memoryCurrentService) write(
 		}
 		return currentmemory.NewRepository(tx).UpsertEntry(ctx, out)
 	})
+	if err == nil && entryPath == memoryPreferencePath &&
+		!strings.HasPrefix(strings.TrimSpace(taskID), resourceupdate.PreferenceOrganizerAlgorithmPrefix) {
+		s.enqueuePreferenceOrganizerIfNeeded(ctx, userID, out.Content)
+	}
 	return out, err
 }
 
-func (s *memoryCurrentService) mkdir(ctx context.Context, userID, rawPath string, recursive bool) error {
+func (s *memoryCurrentService) enqueuePreferenceOrganizerIfNeeded(
+	ctx context.Context,
+	userID string,
+	content []byte,
+) {
+	document, err := currentmemory.ParsePreferences(content)
+	if err != nil {
+		return
+	}
+	maxChars, err := currentmemory.PreferenceContextMaxCharsFromEnv()
+	if err != nil {
+		maxChars = currentmemory.DefaultPreferenceContextMaxChars
+	}
+	state := currentmemory.BuildPreferenceProjectionState(
+		document, s.preferenceIndexMaxItems, maxChars,
+	)
+	if state.StoredItems < 80 && state.FullProjectionChars*100 < maxChars*80 && !state.ProjectionTruncated {
+		return
+	}
+	now := s.clock().UTC()
+	_, _, _ = resourceupdate.EnqueuePreferenceOrganizer(
+		ctx, s.db, userID, orm.ResourceUpdateTriggerTypePreferenceChange,
+		"preference-change:"+currentmemory.ContentETag(content), now,
+	)
+}
+
+func (s *memoryCurrentService) mkdir(ctx context.Context, userID, taskID, rawPath string, recursive bool) error {
 	entryPath, err := normalizeMemoryCurrentPath(rawPath)
 	if err != nil {
+		return err
+	}
+	if err := s.authorizePreferenceMutation(ctx, userID, taskID, entryPath); err != nil {
 		return err
 	}
 	if err := s.ensureInitialized(ctx, userID); err != nil {
@@ -319,13 +332,16 @@ func (s *memoryCurrentService) mkdir(ctx context.Context, userID, rawPath string
 	})
 }
 
-func (s *memoryCurrentService) delete(ctx context.Context, userID, rawPath string, recursive bool) error {
+func (s *memoryCurrentService) delete(ctx context.Context, userID, taskID, rawPath string, recursive bool) error {
 	entryPath, err := normalizeMemoryCurrentPath(rawPath)
 	if err != nil {
 		return err
 	}
 	if entryPath == memoryRootPath {
 		return errMemoryProtected
+	}
+	if err := s.authorizePreferenceMutation(ctx, userID, taskID, entryPath); err != nil {
+		return err
 	}
 	if err := s.ensureInitialized(ctx, userID); err != nil {
 		return err
@@ -358,6 +374,7 @@ func (s *memoryCurrentService) delete(ctx context.Context, userID, rawPath strin
 func (s *memoryCurrentService) copy(
 	ctx context.Context,
 	userID string,
+	taskID string,
 	rawFrom string,
 	rawTo string,
 	overwrite bool,
@@ -371,6 +388,9 @@ func (s *memoryCurrentService) copy(
 	}
 	if from == memoryRootPath {
 		return errMemoryProtected
+	}
+	if err := s.authorizePreferenceMutation(ctx, userID, taskID, from, to); err != nil {
+		return err
 	}
 	if from == to {
 		return nil
@@ -386,13 +406,16 @@ func (s *memoryCurrentService) copy(
 	})
 }
 
-func (s *memoryCurrentService) move(ctx context.Context, userID, rawFrom, rawTo string) error {
+func (s *memoryCurrentService) move(ctx context.Context, userID, taskID, rawFrom, rawTo string) error {
 	from, to, err := normalizeMemoryPathPair(rawFrom, rawTo)
 	if err != nil {
 		return err
 	}
 	if from == memoryRootPath || to == memoryRootPath {
 		return errMemoryProtected
+	}
+	if err := s.authorizePreferenceMutation(ctx, userID, taskID, from, to); err != nil {
+		return err
 	}
 	if from == to {
 		return nil
@@ -419,6 +442,21 @@ func (s *memoryCurrentService) move(ctx context.Context, userID, rawFrom, rawTo 
 		}
 		return currentmemory.NewRepository(tx).DeletePaths(ctx, userID, paths)
 	})
+}
+
+func (s *memoryCurrentService) authorizePreferenceMutation(
+	ctx context.Context,
+	userID string,
+	taskID string,
+	paths ...string,
+) error {
+	for _, entryPath := range paths {
+		if entryPath == memoryPreferencePath || entryPath == memoryReferencesPath ||
+			strings.HasPrefix(entryPath, memoryReferencesPath+"/") {
+			return resourceupdate.AuthorizePreferenceMutation(ctx, s.db, userID, taskID)
+		}
+	}
+	return nil
 }
 
 func (s *memoryCurrentService) copyEntries(

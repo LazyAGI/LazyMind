@@ -60,3 +60,25 @@ type MemoryReviewError struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
 }
+
+type PreferenceOrganizerRequest struct {
+	TaskID              string         `json:"task_id"`
+	UserID              string         `json:"user_id"`
+	LLMConfig           map[string]any `json:"llm_config"`
+	TargetItems         int            `json:"target_items"`
+	MinItems            int            `json:"min_items"`
+	MaxItems            int            `json:"max_items"`
+	TargetPromptPercent int            `json:"target_prompt_percent"`
+	MaxChanges          int            `json:"max_changes"`
+	MaxPasses           int            `json:"max_passes"`
+	MaxRoundsPerPass    int            `json:"max_rounds_per_pass"`
+}
+
+type PreferenceOrganizerResponse struct {
+	Status    string             `json:"status"`
+	TaskID    string             `json:"task_id"`
+	Outcome   string             `json:"outcome"`
+	Retryable bool               `json:"retryable"`
+	Result    map[string]any     `json:"result,omitempty"`
+	Error     *MemoryReviewError `json:"error,omitempty"`
+}

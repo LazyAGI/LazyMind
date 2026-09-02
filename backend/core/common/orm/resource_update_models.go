@@ -10,15 +10,18 @@ const (
 	ResourceUpdateTaskTypeAutoApplyReview      = "auto_apply_review"
 	ResourceUpdateTaskTypeAutoCommitSkillDraft = "auto_commit_skill_draft"
 	ResourceUpdateTaskTypeOrganizeSkill        = "organize_skill"
+	ResourceUpdateTaskTypeOrganizePreference   = "organize_preference"
 
-	ResourceUpdateResourceTypeSkill  = "skill"
-	ResourceUpdateResourceTypeMemory = "memory"
+	ResourceUpdateResourceTypeSkill          = "skill"
+	ResourceUpdateResourceTypeMemory         = "memory"
+	ResourceUpdateResourceTypeUserPreference = "user_preference"
 
 	ResourceUpdateTriggerTypeScheduled        = "scheduled"
 	ResourceUpdateTriggerTypeConversationIdle = "conversation_idle"
 	ResourceUpdateTriggerTypeManual           = "manual"
 	ResourceUpdateTriggerTypeReviewResult     = "review_result"
 	ResourceUpdateTriggerTypeAutoEvoEnabled   = "auto_evo_enabled"
+	ResourceUpdateTriggerTypePreferenceChange = "preference_changed"
 
 	ResourceUpdateTaskStatusPending = "pending"
 	ResourceUpdateTaskStatusRunning = "running"
@@ -37,18 +40,22 @@ type ResourceUpdateTask struct {
 	ID             string          `gorm:"column:id;type:varchar(36);primaryKey"`
 	TaskType       string          `gorm:"column:task_type;type:varchar(32);not null;index;uniqueIndex:uniq_resource_update_task_trigger,priority:1"`
 	ResourceType   string          `gorm:"column:resource_type;type:varchar(32);not null;index;uniqueIndex:uniq_resource_update_task_trigger,priority:2;uniqueIndex:uniq_resource_update_active_auto_apply_result,priority:1,where:task_type = 'auto_apply_review' AND (status = 'pending' OR status = 'running')"`
-	UserID         string          `gorm:"column:user_id;type:varchar(255);not null;default:'';index;index:idx_resource_update_tasks_user_created,priority:1"`
+	UserID         string          `gorm:"column:user_id;type:varchar(255);not null;default:'';index;index:idx_resource_update_tasks_user_created,priority:1;uniqueIndex:uniq_active_preference_organizer,where:task_type = 'organize_preference' AND (status = 'pending' OR status = 'running')"`
 	ResourceID     string          `gorm:"column:resource_id;type:varchar(128);not null;default:'';index"`
 	TriggerType    string          `gorm:"column:trigger_type;type:varchar(32);not null;index;uniqueIndex:uniq_resource_update_task_trigger,priority:3"`
 	TriggerID      string          `gorm:"column:trigger_id;type:varchar(512);not null;index;uniqueIndex:uniq_resource_update_task_trigger,priority:4"`
 	Status         string          `gorm:"column:status;type:varchar(32);not null;index;index:idx_resource_update_tasks_pending,priority:1;index:idx_resource_update_tasks_running_lock,priority:1"`
 	RequestJSON    json.RawMessage `gorm:"column:request_json;type:json"`
+	ResultJSON     json.RawMessage `gorm:"column:result_json;type:json"`
 	ReviewResultID string          `gorm:"column:review_result_id;type:varchar(128);index;uniqueIndex:uniq_resource_update_active_auto_apply_result,priority:2,where:task_type = 'auto_apply_review' AND (status = 'pending' OR status = 'running')"`
 	ResultID       string          `gorm:"column:result_id;type:varchar(128);index"`
 	ErrorCode      string          `gorm:"column:error_code;type:varchar(64);not null;default:''"`
 	ErrorMessage   string          `gorm:"column:error_message;type:text;not null;default:''"`
 	AttemptCount   int             `gorm:"column:attempt_count;not null;default:0"`
 	NextRunAt      time.Time       `gorm:"column:next_run_at;not null;index:idx_resource_update_tasks_pending,priority:2"`
+	LaneKey        string          `gorm:"column:lane_key;type:varchar(320);not null;default:'';index:idx_resource_update_tasks_lane_pending,priority:1;uniqueIndex:uniq_resource_update_running_lane,where:lane_key <> '' AND status = 'running'"`
+	LanePriority   int             `gorm:"column:lane_priority;not null;default:0;index:idx_resource_update_tasks_lane_pending,priority:3,sort:desc"`
+	LaneOrderAt    time.Time       `gorm:"column:lane_order_at;not null;index:idx_resource_update_tasks_lane_pending,priority:4"`
 	LockedBy       string          `gorm:"column:locked_by;type:varchar(128);not null;default:''"`
 	LockedUntil    *time.Time      `gorm:"column:locked_until;index:idx_resource_update_tasks_running_lock,priority:2"`
 	CreatedAt      time.Time       `gorm:"column:created_at;not null;index:idx_resource_update_tasks_pending,priority:3;index:idx_resource_update_tasks_user_created,priority:2,sort:desc"`

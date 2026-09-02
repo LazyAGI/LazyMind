@@ -506,6 +506,9 @@ func createIdleGenerateTask(ctx context.Context, db *gorm.DB, event orm.Conversa
 		Status:       orm.ResourceUpdateTaskStatusPending,
 		RequestJSON:  body,
 		NextRunAt:    now,
+		LaneKey:      MemoryMaintenanceLaneKey(event.UserID),
+		LanePriority: MemoryReviewLanePriority,
+		LaneOrderAt:  event.LastActivityAt.UTC(),
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}
