@@ -745,7 +745,7 @@ jobs:
         run: |
           set -euo pipefail
           smoke_root="${RUNNER_TEMP}/lazymind-installed-smoke"
-          node desktop/scripts/packaged-app-smoke.mjs \
+          LAZYMIND_DESKTOP_RUNTIME_ROOT="${smoke_root}" node desktop/scripts/packaged-app-smoke.mjs \
             --app "${INSTALLED_APP}" \
             --runtime-root "${smoke_root}" \
             --platform darwin \

@@ -532,6 +532,10 @@ test("macOS CI notarizes ZIP then DMG and fails when notarization times out", ()
   assert.match(buildWorkflow, /test-macos-installer:/);
   assert.match(buildWorkflow, /name:\s*Install application from DMG/);
   assert.match(buildWorkflow, /name:\s*Run installed application smoke/);
+  assert.match(
+    buildWorkflow,
+    /name:\s*Run installed application smoke[\s\S]*LAZYMIND_DESKTOP_RUNTIME_ROOT="\$\{smoke_root\}" node desktop\/scripts\/packaged-app-smoke\.mjs/,
+  );
   assert.doesNotMatch(buildWorkflow, /gh release (?:create|upload)/);
   assert.match(buildWorkflow, /name:\s*Verify packaged runtime cleanup after artifact upload/);
   assert.match(buildWorkflow, /LAZYMIND_PROCESS_COMPOSE_DOWN_TIMEOUT=1s/);
