@@ -8,8 +8,10 @@ import (
 )
 
 const (
-	PreferenceIndexMaxItemsEnv     = "LAZYMIND_PREFERENCE_INDEX_MAX_ITEMS"
-	DefaultPreferenceIndexMaxItems = 100
+	PreferenceIndexMaxItemsEnv       = "LAZYMIND_PREFERENCE_INDEX_MAX_ITEMS"
+	DefaultPreferenceIndexMaxItems   = 100
+	PreferenceContextMaxCharsEnv     = "LAZYMIND_PREFERENCE_CONTEXT_MAX_CHARS"
+	DefaultPreferenceContextMaxChars = 5000
 )
 
 func PreferenceIndexMaxItemsFromEnv() (int, error) {
@@ -28,6 +30,19 @@ func PreferenceIndexMaxItemsFromEnv() (int, error) {
 			PreferenceIndexMaxItemsEnv,
 			raw,
 		)
+	}
+	return value, nil
+}
+
+func PreferenceContextMaxCharsFromEnv() (int, error) {
+	raw, configured := os.LookupEnv(PreferenceContextMaxCharsEnv)
+	if !configured {
+		return DefaultPreferenceContextMaxChars, nil
+	}
+	raw = strings.TrimSpace(raw)
+	value, err := strconv.Atoi(raw)
+	if err != nil || value <= 0 {
+		return 0, fmt.Errorf("%s must be a positive integer, got %q", PreferenceContextMaxCharsEnv, raw)
 	}
 	return value, nil
 }

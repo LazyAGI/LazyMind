@@ -43,6 +43,7 @@ type CurrentMemoryPreferenceListData struct {
 	ResidentIndexUsage CurrentMemoryPreferenceResidentIndexUsage `json:"resident_index_usage"`
 	ETag               string                                    `json:"etag"`
 	UpdatedAt          int64                                     `json:"updated_at"`
+	ProjectionState    PreferenceProjectionState                 `json:"projection_state"`
 }
 
 type CurrentMemoryPreferenceDetailData struct {

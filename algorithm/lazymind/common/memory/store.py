@@ -4,9 +4,7 @@ import re
 from typing import Any, Optional
 
 from lazymind.common.integrations.remote_fs import RemoteFS
-from lazymind.config import config as _cfg
-
-from .exceptions import MemoryPartialApplyError, PreferenceCapacityExceededError
+from .exceptions import MemoryPartialApplyError
 from .field_contract import validate_memory_transition
 from .paths import (
     AGENTS_ROOT,
@@ -23,7 +21,6 @@ from .paths import (
 )
 from .validation import (
     PreferenceItem,
-    parse_preference_items,
     validate_preference_index,
     validate_reference_content,
 )
@@ -196,15 +193,6 @@ class MemoryStore:
         from .editors.preference import add_preference_entry
 
         loaded = self.read(PREFERENCE_PATH)
-        current_items = len(parse_preference_items(loaded))
-        max_items = int(_cfg['preference_index_max_items'])
-        if current_items >= max_items:
-            attempted_items = current_items + 1
-            raise PreferenceCapacityExceededError(
-                current_items=current_items,
-                attempted_items=attempted_items,
-                max_items=max_items,
-            )
         edited = add_preference_entry(
             loaded,
             name=name,

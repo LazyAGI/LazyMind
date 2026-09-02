@@ -732,6 +732,10 @@ func preferenceListData(
 	}
 	totalSize := int64(len(items))
 	maxSize := int64(maxItems)
+	maxChars, err := PreferenceContextMaxCharsFromEnv()
+	if err != nil {
+		maxChars = DefaultPreferenceContextMaxChars
+	}
 	return CurrentMemoryPreferenceListData{
 		Items:     items,
 		TotalSize: totalSize,
@@ -740,8 +744,9 @@ func preferenceListData(
 			MaxItems:  maxSize,
 			OverLimit: totalSize > maxSize,
 		},
-		ETag:      ContentETag(entry.Content),
-		UpdatedAt: formatUpdatedAt(entry.UpdatedAt),
+		ETag:            ContentETag(entry.Content),
+		UpdatedAt:       formatUpdatedAt(entry.UpdatedAt),
+		ProjectionState: BuildPreferenceProjectionState(document, maxItems, maxChars),
 	}
 }
 
