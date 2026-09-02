@@ -41,7 +41,7 @@ jobs:
     timeout-minutes: 120
     outputs:
       package_version: ${{ steps.version.outputs.package_version }}
-      artifact_name: lazymind-windows-x64-installer
+      artifact_name: ${{ steps.package.outputs.artifact_name }}
       release_tag: ${{ steps.release.outputs.release_tag }}
       installer_sha256: ${{ steps.package.outputs.installer_sha256 }}
 
@@ -298,7 +298,7 @@ jobs:
         id: upload
         uses: actions/upload-artifact@v7
         with:
-          name: lazymind-windows-x64-installer
+          name: ${{ steps.package.outputs.artifact_name }}
           path: ${{ steps.package.outputs.installer_path }}
           if-no-files-found: error
           retention-days: 14

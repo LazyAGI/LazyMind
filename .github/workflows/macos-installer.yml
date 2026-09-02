@@ -431,7 +431,11 @@ jobs:
           else
             cp "${source_dmg}" "${development_path}"
           fi
-          codesign --verify --strict --verbose=2 "${source_dmg}"
+          if [[ "${IS_OFFICIAL_RELEASE}" == "true" ]]; then
+            codesign --verify --strict --verbose=2 "${source_dmg}"
+          else
+            echo "Skipping DMG container signature verification for non-official build."
+          fi
           hdiutil attach "${source_dmg}" -readonly -nobrowse -mountpoint "${mount_dir}"
           trap 'hdiutil detach "${mount_dir}" >/dev/null 2>&1 || true' EXIT
           codesign --verify --deep --strict --verbose=2 "${mount_dir}/LazyMind.app"
@@ -441,6 +445,7 @@ jobs:
           duration_seconds="$(( $(date +%s) - started_at ))"
           echo "notarization_path=${notarization_path}" >> "${GITHUB_OUTPUT}"
           echo "development_path=${development_path}" >> "${GITHUB_OUTPUT}"
+          echo "development_artifact_name=$(basename "${development_path}")" >> "${GITHUB_OUTPUT}"
           echo "duration_seconds=${duration_seconds}" >> "${GITHUB_OUTPUT}"
 
       - name: Submit DMG for notarization
@@ -551,13 +556,14 @@ jobs:
           xcrun stapler validate "${final_path}"
           spctl --assess --type open --context context:primary-signature --verbose=4 "${final_path}"
           echo "installer_path=${final_path}" >> "${GITHUB_OUTPUT}"
+          echo "artifact_name=$(basename "${final_path}")" >> "${GITHUB_OUTPUT}"
 
       - name: Upload final notarized installer
         if: steps.release.outputs.official_release == 'true' && steps.dmg_notarization.outputs.status == 'Accepted'
         id: upload_final
         uses: actions/upload-artifact@v7
         with:
-          name: LazyMind-macos-arm64-notarized
+          name: ${{ steps.final_package.outputs.artifact_name }}
           path: ${{ steps.final_package.outputs.installer_path }}
           if-no-files-found: error
           retention-days: 30
@@ -568,7 +574,7 @@ jobs:
         id: upload_development
         uses: actions/upload-artifact@v7
         with:
-          name: LazyMind-macos-arm64-development
+          name: ${{ steps.package.outputs.development_artifact_name }}
           path: ${{ steps.package.outputs.development_path }}
           if-no-files-found: error
           retention-days: 30
@@ -580,10 +586,10 @@ jobs:
         run: |
           if [[ "${{ steps.release.outputs.official_release }}" != "true" ]]; then
             echo "available=true" >> "${GITHUB_OUTPUT}"
-            echo "name=LazyMind-macos-arm64-development" >> "${GITHUB_OUTPUT}"
+            echo "name=${{ steps.package.outputs.development_artifact_name }}" >> "${GITHUB_OUTPUT}"
           elif [[ "${{ steps.dmg_notarization.outputs.status }}" == "Accepted" ]]; then
             echo "available=true" >> "${GITHUB_OUTPUT}"
-            echo "name=LazyMind-macos-arm64-notarized" >> "${GITHUB_OUTPUT}"
+            echo "name=${{ steps.final_package.outputs.artifact_name }}" >> "${GITHUB_OUTPUT}"
           else
             echo "available=false" >> "${GITHUB_OUTPUT}"
             echo "name=" >> "${GITHUB_OUTPUT}"

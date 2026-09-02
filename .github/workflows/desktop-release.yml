@@ -29,6 +29,7 @@ jobs:
 
   release:
     name: Create draft desktop release
+    if: ${{ !contains(github.ref_name, '-') }}
     needs:
       - macos
       - windows

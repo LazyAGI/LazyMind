@@ -60,6 +60,11 @@ Tag builds in forks do not read these secrets or use a Developer ID identity.
 They apply only the ad-hoc signature required by the packaged arm64 application,
 skip Apple notarization, and publish an explicitly unnotarized DMG for testing.
 
+Desktop release tags containing a prerelease suffix, such as `v0.3.0-a0` or
+`v0.3.0-rc.1`, run the complete platform build and installer test workflows but
+do not create a GitHub Release. Stable tags such as `v0.3.0` create a draft
+GitHub Release after both platforms pass.
+
 A DMG drag-install cannot run a post-install script. To provide the same cache
 and runtime preparation as the Windows NSIS installer, the packaged macOS app
 runs the shared offline installer warmup once on first launch for each app

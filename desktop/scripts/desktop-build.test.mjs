@@ -352,7 +352,7 @@ test("Windows CI treats branches as non-tags without leaking git probe failures"
   assert.match(source, /workflow_call:/);
   assert.doesNotMatch(source, /push:\s*\n\s*tags:/);
   assert.match(source, /permissions:\s*\n\s*contents:\s*read/);
-  assert.match(source, /artifact_name:\s*lazymind-windows-x64-installer/);
+  assert.match(source, /artifact_name:\s*\$\{\{ steps\.package\.outputs\.artifact_name \}\}/);
   assert.match(source, /"artifact_name=\$outputName"/);
   assert.match(
     source,
@@ -485,7 +485,9 @@ test("macOS CI requires credentials only for official LazyAGI releases", () => {
   assert.match(source, /Non-official build: using ad-hoc signing and skipping notarization/);
   assert.match(source, /name: Submit app ZIP for notarization\s*\n\s*if: steps\.release\.outputs\.official_release == 'true'/);
   assert.match(source, /name: Submit DMG for notarization\s*\n\s*if: steps\.release\.outputs\.official_release == 'true'/);
-  assert.match(source, /if: steps\.release\.outputs\.official_release != 'true'[\s\S]*name: LazyMind-macos-arm64-development/);
+  assert.match(source, /if: steps\.release\.outputs\.official_release != 'true'[\s\S]*name: \$\{\{ steps\.package\.outputs\.development_artifact_name \}\}/);
+  assert.match(source, /Skipping DMG container signature verification for non-official build/);
+  assert.match(source, /name: \$\{\{ steps\.final_package\.outputs\.artifact_name \}\}/);
   assert.match(source, /git submodule update --init algorithm\/lazyllm/);
   assert.doesNotMatch(source, /git submodule update --init --recursive/);
 });
@@ -547,6 +549,7 @@ test("desktop release builds each platform once and publishes only after both pa
   assert.match(source, /macos:[\s\S]*uses: \.\/\.github\/workflows\/macos-installer\.yml/);
   assert.match(source, /windows:[\s\S]*uses: \.\/\.github\/workflows\/windows-installer\.yml/);
   assert.match(source, /release:[\s\S]*needs:\s*\n\s*- macos\s*\n\s*- windows/);
+  assert.match(source, /release:\s*\n\s*name: Create draft desktop release\s*\n\s*if: \$\{\{ !contains\(github\.ref_name, '-'\) \}\}/);
   assert.match(source, /release:[\s\S]*permissions:[\s\S]*contents: write/);
   assert.match(source, /name: Download tested macOS installer/);
   assert.match(source, /name: Download tested Windows installer/);
