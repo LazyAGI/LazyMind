@@ -125,7 +125,8 @@ def _require_accounts() -> list[dict[str, str]]:
     if not accounts:
         raise ToolExecutionError(
             json.dumps(_mail_error(
-                'No mailbox is enabled for chat. Connect a supported mailbox in 资源库 → 云文档 → 邮箱连接 and turn the switch on.',
+                'No mailbox is enabled for chat. Connect a supported mailbox in '
+                '资源库 → 云文档 → 邮箱连接 and turn the switch on.',
                 code='mail_disconnected',
                 reauth=True,
             ), ensure_ascii=False)
@@ -224,7 +225,10 @@ def _call_mailboxes(mailbox: str, runner):
     if last_error is not None:
         raise last_error
     raise ToolExecutionError(
-        json.dumps(_mail_error('The requested email was not found.', code='mail_not_found', retryable=True), ensure_ascii=False)
+        json.dumps(
+            _mail_error('The requested email was not found.', code='mail_not_found', retryable=True),
+            ensure_ascii=False,
+        )
     )
 
 
@@ -338,7 +342,6 @@ def _save_draft(draft: dict[str, Any]) -> dict[str, Any]:
     with open(path, 'w', encoding='utf-8') as handle:
         json.dump(draft, handle, ensure_ascii=False, indent=2)
     return draft
-
 
 
 def _imap_date(value: str, *, before: bool = False) -> str:
@@ -795,7 +798,10 @@ class MailToolkit:
                     code='mail_attachment_unsupported',
                 ), ensure_ascii=False))
             cfg = _agentic_config()
-            workspace = chat_agent_workspace(str(cfg.get('user_id') or '0'), str(cfg.get('conversation_id') or 'default'))
+            workspace = chat_agent_workspace(
+                str(cfg.get('user_id') or '0'),
+                str(cfg.get('conversation_id') or 'default'),
+            )
             folder = os.path.join(workspace, 'mail_attachments')
             os.makedirs(folder, exist_ok=True)
             target = os.path.join(folder, filename)
