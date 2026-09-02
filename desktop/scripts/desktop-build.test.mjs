@@ -454,7 +454,7 @@ test("macOS distribution build signs packages while CI owns notarization sequenc
   }
 });
 
-test("macOS CI fails fast on missing credentials and raises the open-file limit", () => {
+test("macOS CI requires credentials only for official LazyAGI releases", () => {
   const source = readFileSync(macosWorkflow, "utf8");
 
   for (const secret of [
@@ -470,16 +470,22 @@ test("macOS CI fails fast on missing credentials and raises the open-file limit"
   assert.match(source, /actual_open_files < 8192/);
   assert.match(
     source,
-    /name: Validate release signing and notarization inputs\s*\n\s*if: steps\.release\.outputs\.is_tag == 'true'/,
+    /name: Validate release signing and notarization inputs\s*\n\s*if: steps\.release\.outputs\.official_release == 'true'/,
   );
   assert.match(
     source,
-    /LAZYMIND_DESKTOP_SIGNING_MODE: \$\{\{ steps\.release\.outputs\.is_tag == 'true' && 'developer-id' \|\| 'adhoc' \}\}/,
+    /LAZYMIND_DESKTOP_SIGNING_MODE: \$\{\{ steps\.release\.outputs\.official_release == 'true' && 'developer-id' \|\| 'adhoc' \}\}/,
   );
   assert.match(
     source,
-    /CSC_LINK: \$\{\{ steps\.release\.outputs\.is_tag == 'true' && secrets\.MAC_CSC_LINK \|\| '' \}\}/,
+    /CSC_LINK: \$\{\{ steps\.release\.outputs\.official_release == 'true' && secrets\.MAC_CSC_LINK \|\| '' \}\}/,
   );
+  assert.match(source, /OFFICIAL_REPOSITORY: \$\{\{ github\.repository == 'LazyAGI\/LazyMind' \}\}/);
+  assert.match(source, /official_release=true/);
+  assert.match(source, /Non-official build: using ad-hoc signing and skipping notarization/);
+  assert.match(source, /name: Submit app ZIP for notarization\s*\n\s*if: steps\.release\.outputs\.official_release == 'true'/);
+  assert.match(source, /name: Submit DMG for notarization\s*\n\s*if: steps\.release\.outputs\.official_release == 'true'/);
+  assert.match(source, /if: steps\.release\.outputs\.official_release != 'true'[\s\S]*name: LazyMind-macos-arm64-development/);
   assert.match(source, /git submodule update --init algorithm\/lazyllm/);
   assert.doesNotMatch(source, /git submodule update --init --recursive/);
 });
