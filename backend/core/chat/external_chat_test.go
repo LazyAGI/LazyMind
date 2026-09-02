@@ -1147,6 +1147,10 @@ func TestExternalChatStopIsDurableAndPropagatesToLeaseOwner(t *testing.T) {
 	if err := app.requestStop(ctx, "user-1", "conversation-1", job.HistoryID); err != nil {
 		t.Fatalf("request stop: %v", err)
 	}
+	if _, err := app.appendEvent(ctx, "user-1", job.RunID, "host-1", job.LeaseToken,
+		externalChatEvent{EventID: "late-failure", Type: "failed", Error: "late failure"}); !errors.Is(err, errExternalChatLeaseLost) {
+		t.Fatalf("late failure after stop err=%v, want lease lost", err)
+	}
 	stop, err := app.heartbeat(ctx, "user-1", job.RunID, "host-1", job.LeaseToken)
 	if err != nil || !stop {
 		t.Fatalf("stopped heartbeat: stop=%v err=%v", stop, err)
@@ -1154,6 +1158,10 @@ func TestExternalChatStopIsDurableAndPropagatesToLeaseOwner(t *testing.T) {
 	var run orm.ExternalChatRun
 	if err := db.First(&run, "id = ?", job.RunID).Error; err != nil || run.Status != "stopped" || !run.StopRequested {
 		t.Fatalf("persisted stop: run=%#v err=%v", run, err)
+	}
+	var history orm.ChatHistory
+	if err := db.First(&history, "id = ?", job.HistoryID).Error; err != nil || history.RunStatus != "cancelled" {
+		t.Fatalf("persisted stopped history: history=%#v err=%v", history, err)
 	}
 }
 

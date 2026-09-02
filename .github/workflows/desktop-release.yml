@@ -1,0 +1,139 @@
+name: Desktop Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  macos:
+    name: Build and test macOS installer
+    uses: ./.github/workflows/macos-installer.yml
+    with:
+      git_ref: ${{ github.ref }}
+    secrets: inherit
+
+  windows:
+    name: Build and test Windows installer
+    uses: ./.github/workflows/windows-installer.yml
+    with:
+      git_ref: ${{ github.ref }}
+    secrets: inherit
+
+  release:
+    name: Create draft desktop release
+    if: ${{ !contains(github.ref_name, '-') }}
+    needs:
+      - macos
+      - windows
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: write
+
+    steps:
+      - name: Download tested macOS installer
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.macos.outputs.installer_artifact_name }}
+          path: release-assets/macos
+
+      - name: Download tested Windows installer
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.windows.outputs.artifact_name }}
+          path: release-assets/windows
+
+      - name: Validate release inputs
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          MACOS_RELEASE_TAG: ${{ needs.macos.outputs.release_tag }}
+          WINDOWS_RELEASE_TAG: ${{ needs.windows.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          if [[ "${MACOS_RELEASE_TAG}" != "${RELEASE_TAG}" || "${WINDOWS_RELEASE_TAG}" != "${RELEASE_TAG}" ]]; then
+            echo "::error::Platform release tags do not match ${RELEASE_TAG}: macOS=${MACOS_RELEASE_TAG}, Windows=${WINDOWS_RELEASE_TAG}"
+            exit 1
+          fi
+
+          mapfile -t dmg_files < <(find release-assets/macos -maxdepth 1 -type f -name '*.dmg' -print)
+          mapfile -t exe_files < <(find release-assets/windows -maxdepth 1 -type f -name '*.exe' -print)
+          if (( ${#dmg_files[@]} != 1 || ${#exe_files[@]} != 1 )); then
+            echo "::error::Expected exactly one DMG and one EXE; found ${#dmg_files[@]} DMG and ${#exe_files[@]} EXE"
+            exit 1
+          fi
+
+          for installer in "${dmg_files[0]}" "${exe_files[0]}"; do
+            installer_sha256="$(sha256sum "${installer}" | cut -d ' ' -f 1)"
+            printf '%s  %s\n' "${installer_sha256}" "$(basename "${installer}")"
+          done | tee release-assets/SHA256SUMS
+
+      - name: Create or validate draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          expected_prerelease=false
+          if [[ ! "${RELEASE_TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            expected_prerelease=true
+          fi
+
+          if release_json="$(gh release view "${RELEASE_TAG}" --json isDraft,isPrerelease 2>/dev/null)"; then
+            if [[ "$(jq -r .isDraft <<<"${release_json}")" != "true" ]]; then
+              echo "::error::Release ${RELEASE_TAG} already exists and is not a draft"
+              exit 1
+            fi
+            if [[ "$(jq -r .isPrerelease <<<"${release_json}")" != "${expected_prerelease}" ]]; then
+              echo "::error::Release ${RELEASE_TAG} prerelease state does not match the tag"
+              exit 1
+            fi
+            echo "Draft release ${RELEASE_TAG} already exists"
+            exit 0
+          fi
+
+          prerelease_args=()
+          if [[ "${expected_prerelease}" == "true" ]]; then
+            prerelease_args+=(--prerelease)
+          fi
+          gh release create "${RELEASE_TAG}" \
+            --draft \
+            --verify-tag \
+            --generate-notes \
+            --title "${RELEASE_TAG}" \
+            "${prerelease_args[@]}"
+
+      - name: Upload complete desktop release asset set
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          mapfile -t installers < <(find release-assets/macos release-assets/windows -maxdepth 1 -type f \( -name '*.dmg' -o -name '*.exe' \) -print)
+          gh release upload "${RELEASE_TAG}" "${installers[@]}" release-assets/SHA256SUMS --clobber
+
+          expected_assets=("$(basename "${installers[0]}")" "$(basename "${installers[1]}")" "SHA256SUMS")
+          while IFS= read -r asset_name; do
+            keep=false
+            for expected_asset in "${expected_assets[@]}"; do
+              if [[ "${asset_name}" == "${expected_asset}" ]]; then
+                keep=true
+                break
+              fi
+            done
+
+            if [[ "${keep}" == "false" && ( "${asset_name}" == *.dmg || "${asset_name}" == *.exe || "${asset_name}" == "SHA256SUMS" ) ]]; then
+              echo "Deleting stale desktop release asset: ${asset_name}"
+              gh release delete-asset "${RELEASE_TAG}" "${asset_name}" --yes
+            fi
+          done < <(gh release view "${RELEASE_TAG}" --json assets --jq '.assets[].name')

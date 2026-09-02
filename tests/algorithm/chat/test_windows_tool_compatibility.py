@@ -4,7 +4,9 @@ from pathlib import Path
 
 import pytest
 
+from lazyllm.tools import ToolManager
 from lazyllm.tools.agent import ToolExecutionError
+from lazyllm.tools.agent.tool_runtime import _accesses_conflict
 from lazyllm.tools.fs import client as fs_client
 from lazymind.chat.engine.tools.local_file import workspace as chat_artifact
 
@@ -93,6 +95,38 @@ def test_chat_write_file_append_does_not_require_overwrite_approval(tmp_path, mo
     assert first['status'] == 'ok'
     assert appended['status'] == 'ok'
     assert 'first second' in chat_artifact.read_file('document.md')['text']
+
+
+def test_chat_file_runtime_access_uses_resolved_workspace_paths(tmp_path, monkeypatch):
+    monkeypatch.setattr(chat_artifact, 'chat_agent_workspace', lambda *_args: str(tmp_path))
+    monkeypatch.setattr(
+        chat_artifact, '_current_artifact_scope', lambda: ('windows-user', 'windows-conversation'),
+    )
+    manager = ToolManager([
+        chat_artifact.write_file,
+        chat_artifact.list_dir,
+        chat_artifact.read_file,
+        chat_artifact.grep,
+    ])
+    prepared = []
+    manager.execute_with_records([
+        {'function': {'name': 'write_file', 'arguments': {
+            'path': 'document.md', 'content': 'relative',
+        }}},
+        {'function': {'name': 'write_file', 'arguments': {
+            'path': str(tmp_path / 'document.md'), 'content': 'absolute',
+        }}},
+        {'function': {'name': 'list_dir', 'arguments': {'path': '.'}}},
+        {'function': {'name': 'read_file', 'arguments': {'target': 'document.md'}}},
+        {'function': {'name': 'grep', 'arguments': {
+            'target': 'document.md', 'pattern': 'relative',
+        }}},
+    ], dispatch_selector=lambda calls: prepared.extend(calls) or ())
+
+    assert prepared[0].access.write_keys == prepared[1].access.write_keys
+    assert _accesses_conflict(prepared[2].access, prepared[0].access)
+    assert prepared[3].access.exclusive is True
+    assert prepared[4].access.exclusive is True
 
 
 def test_chat_file_tools_reject_outside_workspace_by_default(tmp_path, monkeypatch):

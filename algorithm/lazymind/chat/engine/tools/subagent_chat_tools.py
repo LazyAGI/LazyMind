@@ -5,6 +5,7 @@ import uuid
 from typing import Any, Dict, List, Optional
 
 import lazyllm
+from lazyllm.tools import fc_register
 
 from lazymind.chat.engine.subagent import SUBAGENT_ATTACHMENT_CONTEXT_KEY
 from lazymind.chat.engine.subagent.db import TaskQueryDB
@@ -321,6 +322,7 @@ def _resolve_task(task_ref: str, tasks: List[Dict[str, Any]]) -> Optional[Dict[s
     return None
 
 
+@fc_register(polling=True)
 def list_subagents(status: Optional[str] = None) -> Dict[str, Any]:
     """List SubAgent tasks in the current conversation, optionally filtered by status.
 
@@ -344,6 +346,7 @@ def list_subagents(status: Optional[str] = None) -> Dict[str, Any]:
     return {'status': 'ok', 'message': msg, 'tasks': tasks}
 
 
+@fc_register(polling=True)
 def get_subagent_status(task_ref: str) -> Dict[str, Any]:
     """Get the status of a SubAgent task.
 

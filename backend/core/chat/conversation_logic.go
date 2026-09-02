@@ -1677,7 +1677,9 @@ func handleStreamChat(
 			_ = clearChatData(chatCtx, stateStore, convID, historyID)
 		}
 		_ = setChatInput(chatCtx, stateStore, convID, historyID, query, target.Seq, historyExt)
-		_ = setChatRuntimeStatus(chatCtx, stateStore, convID, historyID, "generating", "", primaryRunID, nil)
+		if requestUsesRunDecision(reqBody) {
+			_ = setChatRuntimeStatus(chatCtx, stateStore, convID, historyID, "generating", "", primaryRunID, nil)
+		}
 		if dualReply {
 			_ = setChatInput(chatCtx, stateStore, convID, secondaryHistoryID, query, target.Seq, historyExt)
 			_ = setChatRuntimeStatus(chatCtx, stateStore, convID, secondaryHistoryID, "generating", "", secondaryRunID, nil)
@@ -1731,6 +1733,53 @@ func consumeRuntimeChunk(chunk UpstreamStreamChunk, runID string, partialOutput 
 	return decision, true
 }
 
+func resolveRuntimeChunkDecision(
+	parent context.Context,
+	stateStore state.Store,
+	convID, historyID, runID string,
+	decision runtimeChunkDecision,
+	partialOutput bool,
+	useRunDecision bool,
+) runtimeChunkDecision {
+	if decision.Terminal == nil {
+		return decision
+	}
+	normalized := *decision.Terminal
+	normalized.PartialOutput = partialOutput
+	decision.Terminal = &normalized
+	if useRunDecision {
+		ctx, cancel := terminalWriteContext(parent)
+		defer cancel()
+		decision.Terminal = resolveRunTerminal(
+			ctx, stateStore, convID, historyID, runID,
+			decision.Terminal, "upstream_terminal",
+		)
+	}
+	decision.Event = runFinishedEvent(runID, *decision.Terminal)
+	return decision
+}
+
+func requestUsesRunDecision(reqBody map[string]any) bool {
+	executor, _ := reqBody["_chat_executor"].(string)
+	return !isExternalChatProvider(executor)
+}
+
+func resolveCandidateRunTerminal(
+	parent context.Context,
+	stateStore state.Store,
+	convID, historyID, runID string,
+	candidate *RunTerminal,
+	source string,
+	useRunDecision bool,
+) *RunTerminal {
+	if !useRunDecision {
+		return candidate
+	}
+	ctx, cancel := terminalWriteContext(parent)
+	defer cancel()
+	return resolveRunTerminal(ctx, stateStore, convID, historyID, runID, candidate, source)
+}
+
 func publishRuntimeChunk(
 	reqCtx, storeCtx context.Context,
 	w http.ResponseWriter,
@@ -1770,6 +1819,32 @@ func streamSingleAnswer(
 	historyExt = archiveRegeneratedTrafficAttempt(historyExt, target)
 	seq := target.Seq
 	runID, _ := reqBody["run_id"].(string)
+	if strings.TrimSpace(runID) == "" {
+		runID = newID("run_")
+		reqBody["run_id"] = runID
+	}
+	useRunDecision := requestUsesRunDecision(reqBody)
+	if target.IsRegeneration && useRunDecision {
+		if err := claimChatHistoryRun(chatCtx, db, historyID, runID); err != nil {
+			log.Logger.Error().Err(err).Str("conversation_id", convID).Str("history_id", historyID).
+				Str("run_id", runID).Msg("failed to claim regenerated history for run")
+			event := failedRunEvent(runID, "history_run_claim_failed", false)
+			terminal, _ := event.Terminal()
+			terminal = resolveCandidateRunTerminal(
+				chatCtx, stateStore, convID, historyID, runID, terminal, "history_run_claim", useRunDecision,
+			)
+			event = runFinishedEvent(runID, *terminal)
+			if stateStore != nil {
+				statusCtx, cancel := terminalWriteContext(chatCtx)
+				_ = setChatRuntimeStatus(statusCtx, stateStore, convID, historyID, terminal.Status, "", runID, terminal)
+				cancel()
+			}
+			writeSSEChunk(w, flusher, &ChatChunkResponse{
+				ConversationID: convID, Seq: int32(seq), HistoryID: historyID, RuntimeEvent: event,
+			})
+			return
+		}
+	}
 	ch, algorithmID, err := streamChatOutput(
 		chatCtx, db, baseURL, reqBody, convID, historyID, query,
 		target.Seq, historyExt, target.IsRegeneration,
@@ -1777,9 +1852,15 @@ func streamSingleAnswer(
 	if err != nil {
 		runEvent := failedRunEvent(runID, "upstream_request_failed", false)
 		terminal, _ := runEvent.Terminal()
-		persistImmediateRunTerminal(db, convID, historyID, query, runID, target, historyExt, terminal)
-		if stateStore != nil {
-			_ = setChatRuntimeStatus(chatCtx, stateStore, convID, historyID, terminal.Status, "", runID, terminal)
+		terminal = resolveCandidateRunTerminal(
+			chatCtx, stateStore, convID, historyID, runID, terminal, "upstream_request", useRunDecision,
+		)
+		runEvent = runFinishedEvent(runID, *terminal)
+		persisted := persistImmediateRunTerminal(chatCtx, db, convID, historyID, query, runID, target, historyExt, terminal)
+		if stateStore != nil && persisted {
+			statusCtx, cancel := terminalWriteContext(chatCtx)
+			_ = setChatRuntimeStatus(statusCtx, stateStore, convID, historyID, terminal.Status, "", runID, terminal)
+			cancel()
 		}
 		writeSSEChunk(w, flusher, &ChatChunkResponse{
 			ConversationID: convID,
@@ -1788,6 +1869,12 @@ func streamSingleAnswer(
 			RuntimeEvent:   runEvent,
 		})
 		return
+	}
+	if !useRunDecision && stateStore != nil {
+		if err := setChatRuntimeStatus(chatCtx, stateStore, convID, historyID, "generating", "", runID, nil); err != nil {
+			log.Logger.Warn().Err(err).Str("conversation_id", convID).Str("history_id", historyID).
+				Str("run_id", runID).Msg("failed to project active external chat run to cache")
+		}
 	}
 	var fullText string
 	var pendingThink string
@@ -1819,7 +1906,7 @@ func streamSingleAnswer(
 			"update_time":         time.Now(),
 		}
 		if progressRowCreated {
-			if err := db.Model(&orm.ChatHistory{}).Where("id = ?", historyID).Updates(values).Error; err != nil {
+			if _, err := updateOwnedChatHistory(chatCtx, db, historyID, runID, values); err != nil {
 				log.Logger.Warn().Err(err).Str("history_id", historyID).Msg("failed to persist thinking progress")
 			}
 			return
@@ -1827,7 +1914,7 @@ func streamSingleAnswer(
 		now := time.Now()
 		if err := db.Create(&orm.ChatHistory{
 			ID: historyID, Seq: seq, ConversationID: convID, RawContent: query, Content: query, AlgorithmID: algorithmID,
-			Result: partialResult, ThinkingDurationS: thinkingDurationS, RunID: runID, Ext: historyExt,
+			Result: partialResult, ThinkingDurationS: thinkingDurationS, RunID: runID, RunStatus: "generating", Ext: historyExt,
 			TimeMixin: orm.TimeMixin{CreateTime: now, UpdateTime: now},
 		}).Error; err != nil {
 			log.Logger.Warn().Err(err).Str("history_id", historyID).Msg("failed to create thinking progress")
@@ -1847,8 +1934,13 @@ func streamSingleAnswer(
 		ThinkingDurationS: 0,
 	})
 	for d := range ch {
-		decision, handled := consumeRuntimeChunk(d, runID, fullResult != "" || pendingThink != "")
+		partialOutput := fullResult != "" || pendingThink != ""
+		decision, handled := consumeRuntimeChunk(d, runID, partialOutput)
 		if handled {
+			decision = resolveRuntimeChunkDecision(
+				chatCtx, stateStore, convID, historyID, runID,
+				decision, partialOutput, useRunDecision,
+			)
 			if decision.Terminal != nil {
 				runTerminal = decision.Terminal
 			}
@@ -2062,12 +2154,18 @@ func streamSingleAnswer(
 			runEvent = failedRunEvent(runID, "missing_run_terminal", fullResult != "" || pendingThink != "")
 		}
 		runTerminal, _ = runEvent.Terminal()
+		runTerminal = resolveCandidateRunTerminal(
+			chatCtx, stateStore, convID, historyID, runID, runTerminal, "core_fallback", useRunDecision,
+		)
+		runEvent = runFinishedEvent(runID, *runTerminal)
 		runtimeChunk := &ChatChunkResponse{ConversationID: convID, Seq: int32(seq), HistoryID: historyID, RuntimeEvent: runEvent}
 		if reqCtx.Err() == nil {
 			writeSSEChunk(w, flusher, runtimeChunk)
 		}
 		if stateStore != nil {
-			_ = appendChatChunk(context.Background(), stateStore, convID, historyID, runtimeChunk)
+			storeCtx, cancel := terminalWriteContext(chatCtx)
+			_ = appendChatChunk(storeCtx, stateStore, convID, historyID, runtimeChunk)
+			cancel()
 		}
 	}
 	now := time.Now()
@@ -2087,10 +2185,11 @@ func streamSingleAnswer(
 	externalFinalized := strings.HasPrefix(algorithmID, "external:")
 	if externalFinalized {
 		var persistedHistory orm.ChatHistory
-		persisted = db.Where("id = ? AND conversation_id = ?", historyID, convID).Take(&persistedHistory).Error == nil
+		persisted = db.Where("id = ? AND conversation_id = ? AND run_id = ?", historyID, convID, runID).
+			Take(&persistedHistory).Error == nil
 	}
 	if !externalFinalized && target.IsRegeneration && target.Existing != nil {
-		if err := db.Model(&orm.ChatHistory{}).Where("id = ?", historyID).Updates(map[string]any{
+		updated, err := updateOwnedChatHistory(chatCtx, db, historyID, runID, map[string]any{
 			"algorithm_id":        algorithmID,
 			"seq":                 seq,
 			"raw_content":         query,
@@ -2108,20 +2207,22 @@ func streamSingleAnswer(
 			"run_terminal":        terminalJSON(runTerminal),
 			"create_time":         now,
 			"update_time":         now,
-		}).Error; err != nil {
+		})
+		if err != nil {
 			log.Logger.Warn().Err(err).Str("conversation_id", convID).Str("history_id", historyID).Msg("failed to update stream chat history")
-		} else {
+		} else if updated {
 			persisted = true
 		}
 	} else if !externalFinalized && progressRowCreated {
-		if err := db.Model(&orm.ChatHistory{}).Where("id = ?", historyID).Updates(map[string]any{
+		updated, err := updateOwnedChatHistory(chatCtx, db, historyID, runID, map[string]any{
 			"algorithm_id": algorithmID, "seq": seq, "raw_content": query, "content": query, "result": fullResult,
 			"tool_call_turns": toolCallTurns, "thinking_duration_s": thinkingDurationS,
 			"retrieval_result": retrievalResult, "ext": historyExt, "update_time": now,
 			"run_id": runID, "run_status": runTerminal.Status, "run_terminal": terminalJSON(runTerminal),
-		}).Error; err != nil {
+		})
+		if err != nil {
 			log.Logger.Warn().Err(err).Str("conversation_id", convID).Str("history_id", historyID).Msg("failed to finalize stream chat history")
-		} else {
+		} else if updated {
 			persisted = true
 		}
 	} else if !externalFinalized {
@@ -2148,8 +2249,10 @@ func streamSingleAnswer(
 		}
 	}
 	finalStatus := runTerminal.Status
-	if stateStore != nil {
-		_ = setChatRuntimeStatus(context.Background(), stateStore, convID, historyID, finalStatus, stripToolTags(fullText), runID, runTerminal)
+	if stateStore != nil && persisted {
+		statusCtx, cancel := terminalWriteContext(chatCtx)
+		_ = setChatRuntimeStatus(statusCtx, stateStore, convID, historyID, finalStatus, stripToolTags(fullText), runID, runTerminal)
+		cancel()
 	}
 	if persisted && !externalFinalized {
 		db.Model(&orm.Conversation{}).Where("id = ?", convID).Update("updated_at", now)
@@ -2177,14 +2280,15 @@ func streamSingleAnswer(
 }
 
 func persistImmediateRunTerminal(
+	ctx context.Context,
 	db *gorm.DB,
 	convID, historyID, query, runID string,
 	target chatPersistTarget,
 	historyExt json.RawMessage,
 	terminal *RunTerminal,
-) {
+) bool {
 	if db == nil || terminal == nil {
-		return
+		return false
 	}
 	now := time.Now()
 	values := map[string]any{
@@ -2194,10 +2298,11 @@ func persistImmediateRunTerminal(
 	}
 	if target.IsRegeneration && target.Existing != nil {
 		values["create_time"] = now
-		if err := db.Model(&orm.ChatHistory{}).Where("id = ?", historyID).Updates(values).Error; err != nil {
+		updated, err := updateOwnedChatHistory(ctx, db, historyID, runID, values)
+		if err != nil {
 			log.Logger.Warn().Err(err).Str("history_id", historyID).Msg("failed to persist immediate run terminal")
 		}
-		return
+		return updated
 	}
 	history := orm.ChatHistory{
 		ID: historyID, Seq: target.Seq, ConversationID: convID, RawContent: query, Content: query,
@@ -2206,7 +2311,9 @@ func persistImmediateRunTerminal(
 	}
 	if err := db.Create(&history).Error; err != nil {
 		log.Logger.Warn().Err(err).Str("history_id", historyID).Msg("failed to persist immediate run terminal")
+		return false
 	}
+	return true
 }
 
 // persistAndPublishConversationArtifact is the shared main-Agent artifact path
@@ -2296,21 +2403,21 @@ func streamDualAnswer(
 	thinkStart := time.Now()
 	var primaryThinkingDurationS, secondaryThinkingDurationS int64
 	primaryProgressCreated, secondaryProgressCreated := false, false
-	persistProgress := func(id, result, pending string, duration int64, created *bool) {
+	persistProgress := func(id, runID, result, pending string, duration int64, created *bool) {
 		partialResult := result
 		if pending != "" {
 			partialResult += "<think>" + pending + "</think>"
 		}
 		if *created {
-			_ = db.Model(&orm.MultiAnswersChatHistory{}).Where("id = ?", id).Updates(map[string]any{
+			_, _ = updateOwnedMultiAnswerHistory(chatCtx, db, id, runID, map[string]any{
 				"result": partialResult, "thinking_duration_s": duration, "update_time": time.Now(),
-			}).Error
+			})
 			return
 		}
 		now := time.Now()
 		if err := db.Create(&orm.MultiAnswersChatHistory{
 			ID: id, Seq: seq, ConversationID: convID, RawContent: query, Content: query,
-			Result: partialResult, ThinkingDurationS: duration, Ext: historyExt,
+			Result: partialResult, ThinkingDurationS: duration, RunID: runID, RunStatus: "generating", Ext: historyExt,
 			TimeMixin: orm.TimeMixin{CreateTime: now, UpdateTime: now},
 		}).Error; err == nil {
 			*created = true
@@ -2325,7 +2432,7 @@ func streamDualAnswer(
 		if reasoning != "" {
 			primaryPendingThink += reasoning
 			primaryThinkingDurationS = int64(time.Since(thinkStart).Seconds())
-			persistProgress(historyID, primaryResult, primaryPendingThink, primaryThinkingDurationS, &primaryProgressCreated)
+			persistProgress(historyID, primaryRunID, primaryResult, primaryPendingThink, primaryThinkingDurationS, &primaryProgressCreated)
 			if reqCtx.Err() == nil {
 				writeSSEChunk(w, flusher, map[string]any{"conversation_id": convID, "seq": seq, "history_id": historyID, "thinking_duration_s": primaryThinkingDurationS})
 			}
@@ -2361,7 +2468,7 @@ func streamDualAnswer(
 		if reasoning != "" {
 			secondaryPendingThink += reasoning
 			secondaryThinkingDurationS = int64(time.Since(thinkStart).Seconds())
-			persistProgress(secondaryHistoryID, secondaryResult, secondaryPendingThink, secondaryThinkingDurationS, &secondaryProgressCreated)
+			persistProgress(secondaryHistoryID, secondaryRunID, secondaryResult, secondaryPendingThink, secondaryThinkingDurationS, &secondaryProgressCreated)
 			if reqCtx.Err() == nil {
 				writeSSEChunk(w, flusher, map[string]any{"conversation_id": convID, "seq": seq, "history_id": secondaryHistoryID, "thinking_duration_s": secondaryThinkingDurationS})
 			}
@@ -2398,7 +2505,12 @@ func streamDualAnswer(
 				primaryCh = nil
 				continue
 			}
-			if decision, handled := consumeRuntimeChunk(d, primaryRunID, primaryResult != "" || primaryPendingThink != ""); handled {
+			partialOutput := primaryResult != "" || primaryPendingThink != ""
+			if decision, handled := consumeRuntimeChunk(d, primaryRunID, partialOutput); handled {
+				decision = resolveRuntimeChunkDecision(
+					chatCtx, stateStore, convID, historyID, primaryRunID,
+					decision, partialOutput, true,
+				)
 				if decision.Terminal != nil {
 					primaryTerminal = decision.Terminal
 				}
@@ -2426,7 +2538,12 @@ func streamDualAnswer(
 				secondaryCh = nil
 				continue
 			}
-			if decision, handled := consumeRuntimeChunk(d, secondaryRunID, secondaryResult != "" || secondaryPendingThink != ""); handled {
+			partialOutput := secondaryResult != "" || secondaryPendingThink != ""
+			if decision, handled := consumeRuntimeChunk(d, secondaryRunID, partialOutput); handled {
+				decision = resolveRuntimeChunkDecision(
+					chatCtx, stateStore, convID, secondaryHistoryID, secondaryRunID,
+					decision, partialOutput, true,
+				)
 				if decision.Terminal != nil {
 					secondaryTerminal = decision.Terminal
 				}
@@ -2449,7 +2566,7 @@ func streamDualAnswer(
 			}
 			appendSecondary(d.Text, d.ReasoningText, d.Sources)
 		case <-reqCtx.Done():
-			bg := context.Background()
+			bg := chatCtx
 			for !primaryDone || !secondaryDone {
 				select {
 				case d, ok := <-primaryCh:
@@ -2457,7 +2574,12 @@ func streamDualAnswer(
 						primaryDone = true
 						primaryCh = nil
 					} else {
-						if decision, handled := consumeRuntimeChunk(d, primaryRunID, primaryResult != "" || primaryPendingThink != ""); handled {
+						partialOutput := primaryResult != "" || primaryPendingThink != ""
+						if decision, handled := consumeRuntimeChunk(d, primaryRunID, partialOutput); handled {
+							decision = resolveRuntimeChunkDecision(
+								bg, stateStore, convID, historyID, primaryRunID,
+								decision, partialOutput, true,
+							)
 							if decision.Terminal != nil {
 								primaryTerminal = decision.Terminal
 							}
@@ -2484,7 +2606,7 @@ func streamDualAnswer(
 						if d.ReasoningText != "" {
 							primaryPendingThink += d.ReasoningText
 							primaryThinkingDurationS = int64(time.Since(thinkStart).Seconds())
-							persistProgress(historyID, primaryResult, primaryPendingThink, primaryThinkingDurationS, &primaryProgressCreated)
+							persistProgress(historyID, primaryRunID, primaryResult, primaryPendingThink, primaryThinkingDurationS, &primaryProgressCreated)
 							continue
 						}
 						if primaryPendingThink != "" {
@@ -2509,7 +2631,12 @@ func streamDualAnswer(
 						secondaryDone = true
 						secondaryCh = nil
 					} else {
-						if decision, handled := consumeRuntimeChunk(d, secondaryRunID, secondaryResult != "" || secondaryPendingThink != ""); handled {
+						partialOutput := secondaryResult != "" || secondaryPendingThink != ""
+						if decision, handled := consumeRuntimeChunk(d, secondaryRunID, partialOutput); handled {
+							decision = resolveRuntimeChunkDecision(
+								bg, stateStore, convID, secondaryHistoryID, secondaryRunID,
+								decision, partialOutput, true,
+							)
 							if decision.Terminal != nil {
 								secondaryTerminal = decision.Terminal
 							}
@@ -2536,7 +2663,7 @@ func streamDualAnswer(
 						if d.ReasoningText != "" {
 							secondaryPendingThink += d.ReasoningText
 							secondaryThinkingDurationS = int64(time.Since(thinkStart).Seconds())
-							persistProgress(secondaryHistoryID, secondaryResult, secondaryPendingThink, secondaryThinkingDurationS, &secondaryProgressCreated)
+							persistProgress(secondaryHistoryID, secondaryRunID, secondaryResult, secondaryPendingThink, secondaryThinkingDurationS, &secondaryProgressCreated)
 							continue
 						}
 						if secondaryPendingThink != "" {
@@ -2570,25 +2697,49 @@ dualPersist:
 		secondaryResult += "<think>" + secondaryPendingThink + "</think>"
 	}
 	if primaryTerminal == nil {
-		event := failedRunEvent(primaryRunID, "missing_run_terminal", primaryResult != "")
+		partialOutput := primaryResult != ""
+		var event *ChatRuntimeEvent
+		if chatCtx.Err() != nil {
+			event = cancelledRunEvent(primaryRunID, partialOutput)
+		} else {
+			event = failedRunEvent(primaryRunID, "missing_run_terminal", partialOutput)
+		}
 		primaryTerminal, _ = event.Terminal()
+		primaryTerminal = resolveCandidateRunTerminal(
+			chatCtx, stateStore, convID, historyID, primaryRunID, primaryTerminal, "core_fallback", true,
+		)
+		event = runFinishedEvent(primaryRunID, *primaryTerminal)
 		chunk := &ChatChunkResponse{ConversationID: convID, Seq: int32(seq), HistoryID: historyID, RuntimeEvent: event}
 		if reqCtx.Err() == nil {
 			writeSSEChunk(w, flusher, chunk)
 		}
 		if stateStore != nil {
-			_ = appendChatChunk(context.Background(), stateStore, convID, historyID, chunk)
+			storeCtx, cancel := terminalWriteContext(chatCtx)
+			_ = appendChatChunk(storeCtx, stateStore, convID, historyID, chunk)
+			cancel()
 		}
 	}
 	if secondaryTerminal == nil {
-		event := failedRunEvent(secondaryRunID, "missing_run_terminal", secondaryResult != "")
+		partialOutput := secondaryResult != ""
+		var event *ChatRuntimeEvent
+		if chatCtx.Err() != nil {
+			event = cancelledRunEvent(secondaryRunID, partialOutput)
+		} else {
+			event = failedRunEvent(secondaryRunID, "missing_run_terminal", partialOutput)
+		}
 		secondaryTerminal, _ = event.Terminal()
+		secondaryTerminal = resolveCandidateRunTerminal(
+			chatCtx, stateStore, convID, secondaryHistoryID, secondaryRunID, secondaryTerminal, "core_fallback", true,
+		)
+		event = runFinishedEvent(secondaryRunID, *secondaryTerminal)
 		chunk := &ChatChunkResponse{ConversationID: convID, Seq: int32(seq), HistoryID: secondaryHistoryID, RuntimeEvent: event}
 		if reqCtx.Err() == nil {
 			writeSSEChunk(w, flusher, chunk)
 		}
 		if stateStore != nil {
-			_ = appendChatChunk(context.Background(), stateStore, convID, secondaryHistoryID, chunk)
+			storeCtx, cancel := terminalWriteContext(chatCtx)
+			_ = appendChatChunk(storeCtx, stateStore, convID, secondaryHistoryID, chunk)
+			cancel()
 		}
 	}
 	primaryHistory := &orm.MultiAnswersChatHistory{
@@ -2598,10 +2749,11 @@ dualPersist:
 		RunID: primaryRunID, RunStatus: primaryTerminal.Status, RunTerminal: terminalJSON(primaryTerminal),
 		TimeMixin: orm.TimeMixin{CreateTime: now, UpdateTime: now},
 	}
+	primaryPersisted := false
 	if primaryProgressCreated {
-		_ = db.Model(primaryHistory).Where("id = ?", historyID).Updates(primaryHistory).Error
+		primaryPersisted, _ = updateOwnedMultiAnswerHistory(chatCtx, db, historyID, primaryRunID, primaryHistory)
 	} else {
-		_ = db.Create(primaryHistory).Error
+		primaryPersisted = db.Create(primaryHistory).Error == nil
 	}
 	secondaryHistory := &orm.MultiAnswersChatHistory{
 		ID: secondaryHistoryID, Seq: seq, ConversationID: convID, RawContent: query, Content: query, Result: secondaryResult,
@@ -2610,14 +2762,21 @@ dualPersist:
 		RunID: secondaryRunID, RunStatus: secondaryTerminal.Status, RunTerminal: terminalJSON(secondaryTerminal),
 		TimeMixin: orm.TimeMixin{CreateTime: now, UpdateTime: now},
 	}
+	secondaryPersisted := false
 	if secondaryProgressCreated {
-		_ = db.Model(secondaryHistory).Where("id = ?", secondaryHistoryID).Updates(secondaryHistory).Error
+		secondaryPersisted, _ = updateOwnedMultiAnswerHistory(chatCtx, db, secondaryHistoryID, secondaryRunID, secondaryHistory)
 	} else {
-		_ = db.Create(secondaryHistory).Error
+		secondaryPersisted = db.Create(secondaryHistory).Error == nil
 	}
 	if stateStore != nil {
-		_ = setChatRuntimeStatus(context.Background(), stateStore, convID, historyID, primaryTerminal.Status, stripToolTags(primaryText), primaryRunID, primaryTerminal)
-		_ = setChatRuntimeStatus(context.Background(), stateStore, convID, secondaryHistoryID, secondaryTerminal.Status, stripToolTags(secondaryText), secondaryRunID, secondaryTerminal)
+		statusCtx, cancel := terminalWriteContext(chatCtx)
+		defer cancel()
+		if primaryPersisted {
+			_ = setChatRuntimeStatus(statusCtx, stateStore, convID, historyID, primaryTerminal.Status, stripToolTags(primaryText), primaryRunID, primaryTerminal)
+		}
+		if secondaryPersisted {
+			_ = setChatRuntimeStatus(statusCtx, stateStore, convID, secondaryHistoryID, secondaryTerminal.Status, stripToolTags(secondaryText), secondaryRunID, secondaryTerminal)
+		}
 	}
 	db.Model(&orm.Conversation{}).Where("id = ?", convID).Update("updated_at", now)
 	if !target.IsRegeneration {

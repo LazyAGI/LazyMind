@@ -14,6 +14,7 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/externalcontext"
+	"lazymind/core/log"
 	"lazymind/core/store"
 )
 
@@ -349,7 +350,11 @@ func PublishExternalChatEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if input.Type == "completed" || input.Type == "failed" {
-		_ = projectExternalChatRunStatus(r.Context(), store.DB(), store.State(), owner, mux.Vars(r)["run_id"])
+		runID := mux.Vars(r)["run_id"]
+		if err := projectExternalChatRunCache(r.Context(), store.DB(), store.State(), owner, runID); err != nil {
+			log.Logger.Warn().Err(err).Str("run_id", runID).
+				Msg("external chat terminal committed but cache projection failed")
+		}
 	}
 	common.ReplyOK(w, map[string]any{"sequence": sequence})
 }
