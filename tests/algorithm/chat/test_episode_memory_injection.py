@@ -348,10 +348,13 @@ def test_episode_hit_does_not_increment_when_model_stream_fails(monkeypatch) -> 
     payloads = [json.loads(chunk) for chunk in chunks]
     terminal = payloads[-1]['data']['runtime_event']
     assert terminal['type'] == 'run_finished'
-    assert terminal['data'] == {
+    data = dict(terminal['data'])
+    metrics = data.pop('metrics')
+    assert data == {
         'status': 'failed',
         'reason': 'runtime_failure',
         'partial_output': False,
         'code': 'runtime_failure',
     }
+    assert metrics['schema_version'] == 1
     assert store.hit_calls == []

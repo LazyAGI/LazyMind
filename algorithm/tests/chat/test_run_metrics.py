@@ -1,3 +1,4 @@
+from lazymind.chat.runtime_events import RunOutcome
 from lazymind.chat.service.component.event_translator import AgentEventFrameTranslator
 from lazymind.chat.service.run_metrics import RunMetricsTracker, snapshot_provider_usage
 
@@ -49,7 +50,7 @@ def test_dsh_steps_count_model_and_each_tool():
         },
     })
     frame = translator.finish_run(
-        succeeded=True,
+        outcome=RunOutcome.SUCCEEDED,
         usage={'prompt_tokens': 100, 'completion_tokens': 20,
                'prompt_cache_hit_tokens': 80, 'prompt_cache_miss_tokens': 20},
         llm_config={'llm': {'model': 'deepseek-chat'}},
@@ -97,7 +98,7 @@ def test_measured_tool_duration_is_not_attributed_to_model():
         'tool_results': [{'id': '1'}],
     })
     clock.add(1.0)
-    metrics = translator.finish_run(succeeded=True)['runtime_event']['data']['metrics']
+    metrics = translator.finish_run(outcome=RunOutcome.SUCCEEDED)['runtime_event']['data']['metrics']
     assert metrics['tool_ms'] == 1500
     assert metrics['model_ms'] == 9500
 

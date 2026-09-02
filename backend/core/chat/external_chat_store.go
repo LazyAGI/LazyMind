@@ -20,6 +20,7 @@ import (
 	"lazymind/core/agentinvocation"
 	"lazymind/core/common/orm"
 	"lazymind/core/externalcontext"
+	"lazymind/core/log"
 	"lazymind/core/workflow/artifactfile"
 )
 
@@ -112,7 +113,15 @@ func (a *externalChatApplication) createRun(ctx context.Context, run *orm.Extern
 	now := a.now()
 	run.Status = "pending"
 	run.CreatedAt, run.UpdatedAt = now, now
-	if err := a.db.WithContext(ctx).Create(run).Error; err != nil {
+	if err := a.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(run).Error; err != nil {
+			return err
+		}
+		if run.Action == "regenerate" {
+			return claimChatHistoryRun(ctx, tx, run.HistoryID, run.ID)
+		}
+		return nil
+	}); err != nil {
 		return err
 	}
 	externalRunsAvailable.notify()
@@ -344,7 +353,8 @@ func (a *externalChatApplication) appendEvent(
 			} else {
 				run.Status, run.ErrorMessage = "failed", updates["error_message"].(string)
 			}
-			return finalizeExternalChatHistory(tx, &run, now)
+			_, err := finalizeExternalChatHistory(tx, &run, now)
+			return err
 		}
 		return nil
 	})
@@ -384,7 +394,7 @@ func (a *externalChatApplication) requestStop(ctx context.Context, owner, conver
 				return err
 			}
 			run.Status, run.StopRequested = "stopped", true
-			if err := finalizeExternalChatHistory(tx, run, now); err != nil {
+			if _, err := finalizeExternalChatHistory(tx, run, now); err != nil {
 				return err
 			}
 		}
@@ -392,21 +402,43 @@ func (a *externalChatApplication) requestStop(ctx context.Context, owner, conver
 	})
 }
 
-func finalizeExternalChatHistory(tx *gorm.DB, run *orm.ExternalChatRun, now time.Time) error {
+func activeExternalChatHistoryIDs(
+	ctx context.Context,
+	db *gorm.DB,
+	owner, conversationID string,
+	historyIDs []string,
+) (map[string]struct{}, error) {
+	out := make(map[string]struct{})
+	if db == nil || len(historyIDs) == 0 {
+		return out, nil
+	}
+	var runs []orm.ExternalChatRun
+	if err := db.WithContext(ctx).Select("history_id").
+		Where("actor_user_id = ? AND conversation_id = ? AND history_id IN ? AND status IN ?", owner, conversationID, historyIDs, []string{"pending", "running"}).
+		Find(&runs).Error; err != nil {
+		return nil, err
+	}
+	for _, run := range runs {
+		out[run.HistoryID] = struct{}{}
+	}
+	return out, nil
+}
+
+func finalizeExternalChatHistory(tx *gorm.DB, run *orm.ExternalChatRun, now time.Time) (bool, error) {
 	var events []orm.ExternalChatRunEvent
 	if err := tx.Where("run_id = ? AND type = ?", run.ID, "message").Order("sequence ASC").Find(&events).Error; err != nil {
-		return err
+		return false, err
 	}
 	var result strings.Builder
 	for index := range events {
 		normalized, err := rewriteExternalArtifactReferences(tx, *run, events[index].Text)
 		if err != nil {
-			return err
+			return false, err
 		}
 		if normalized != events[index].Text {
 			if err := tx.Model(&orm.ExternalChatRunEvent{}).Where("id = ?", events[index].ID).
 				Update("text", normalized).Error; err != nil {
-				return err
+				return false, err
 			}
 		}
 		result.WriteString(normalized)
@@ -420,26 +452,43 @@ func finalizeExternalChatHistory(tx *gorm.DB, run *orm.ExternalChatRun, now time
 		RunTerminal: terminalJSON(terminal), Ext: run.HistoryExt,
 		TimeMixin: orm.TimeMixin{CreateTime: now, UpdateTime: now},
 	}
-	if err := tx.Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "id"}},
-		DoUpdates: clause.Assignments(map[string]any{
+	var existing orm.ChatHistory
+	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", run.HistoryID).Take(&existing).Error
+	switch {
+	case errors.Is(err, gorm.ErrRecordNotFound):
+		if err := tx.Create(&history).Error; err != nil {
+			return false, err
+		}
+	case err != nil:
+		return false, err
+	case existing.RunID != run.ID:
+		log.Logger.Info().
+			Str("conversation_id", run.ConversationID).
+			Str("history_id", run.HistoryID).
+			Str("run_id", run.ID).
+			Str("current_run_id", existing.RunID).
+			Msg("ignored stale external chat history finalization")
+		return false, nil
+	default:
+		persisted, err := updateOwnedChatHistory(tx.Statement.Context, tx, run.HistoryID, run.ID, map[string]any{
 			"seq": history.Seq, "conversation_id": history.ConversationID,
 			"algorithm_id": history.AlgorithmID, "raw_content": history.RawContent,
-			"content": history.Content, "result": history.Result, "run_id": history.RunID,
+			"content": history.Content, "result": history.Result,
 			"run_status": history.RunStatus, "run_terminal": history.RunTerminal, "ext": history.Ext,
 			"update_time": now,
-		}),
-	}).Create(&history).Error; err != nil {
-		return err
+		})
+		if err != nil || !persisted {
+			return persisted, err
+		}
 	}
 	if err := tx.Model(&orm.Conversation{}).Where("id = ?", run.ConversationID).
 		Update("updated_at", now).Error; err != nil {
-		return err
+		return false, err
 	}
 	if run.Action != "regenerate" {
 		if err := tx.Model(&orm.Conversation{}).Where("id = ?", run.ConversationID).
 			UpdateColumn("chat_times", gorm.Expr("chat_times + ?", 1)).Error; err != nil {
-			return err
+			return false, err
 		}
 	}
 	taskStatus := "succeeded"
@@ -448,9 +497,10 @@ func finalizeExternalChatHistory(tx *gorm.DB, run *orm.ExternalChatRun, now time
 	} else if run.Status == "stopped" {
 		taskStatus = "canceled"
 	}
-	return tx.Model(&orm.TaskCenterTask{}).
+	err = tx.Model(&orm.TaskCenterTask{}).
 		Where("conversation_id = ? AND task_type = ? AND archived_at IS NULL AND status NOT IN ('succeeded','failed','canceled')", run.ConversationID, "background_chat").
 		Updates(map[string]any{"status": taskStatus, "finished_at": now, "updated_at": now}).Error
+	return err == nil, err
 }
 
 var markdownLinkDestination = regexp.MustCompile(`\]\(([^)\n]+)\)`)

@@ -49,14 +49,21 @@ make desktop-darwin-arm64-dmg
 `electron-builder` discovers the local Developer ID identity automatically.
 The local target signs the app and DMG but does not submit them to Apple.
 
-For CI, provide `CSC_LINK`, `CSC_KEY_PASSWORD`, and the Apple notarization
-credentials. `.github/workflows/macos-installer.yml` maps those values from
+Official tag builds in `LazyAGI/LazyMind` require CI signing and notarization
+credentials. `.github/workflows/macos-installer.yml` maps them from
 `MAC_CSC_LINK`, `MAC_CSC_KEY_PASSWORD`, `APPLE_ID`,
-`APPLE_APP_SPECIFIC_PASSWORD`, and `APPLE_TEAM_ID` repository secrets.
-Release builds submit a ZIP first, staple the accepted app ticket when
-available, then package and submit the DMG. A ZIP timeout falls through to DMG
-packaging; a DMG timeout uploads the pending DMG and submission record for the
-manual finalizer.
+`APPLE_APP_SPECIFIC_PASSWORD`, and `APPLE_TEAM_ID` environment secrets. They
+submit a ZIP first, staple the accepted app ticket, then package, submit, and
+staple the DMG. Either notarization stage fails after its bounded timeout.
+
+Tag builds in forks do not read these secrets or use a Developer ID identity.
+They apply only the ad-hoc signature required by the packaged arm64 application,
+skip Apple notarization, and publish an explicitly unnotarized DMG for testing.
+
+Desktop release tags containing a prerelease suffix, such as `v0.3.0-a0` or
+`v0.3.0-rc.1`, run the complete platform build and installer test workflows but
+do not create a GitHub Release. Stable tags such as `v0.3.0` create a draft
+GitHub Release after both platforms pass.
 
 A DMG drag-install cannot run a post-install script. To provide the same cache
 and runtime preparation as the Windows NSIS installer, the packaged macOS app

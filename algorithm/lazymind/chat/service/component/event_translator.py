@@ -5,7 +5,7 @@ import time
 from typing import Any, Optional
 
 from lazymind.config import config as _cfg
-from lazymind.chat.runtime_events import RunAccumulator
+from lazymind.chat.runtime_events import RunAccumulator, RunOutcome
 from lazymind.chat.service.run_metrics import RunMetricsTracker
 from lazymind.chat.service.utils import (
     build_stream_citation_scanner,
@@ -174,6 +174,7 @@ class AgentEventFrameTranslator:
         if event_type == 'tool_results':
             tool_results = [tr for tr in (event.get('tool_results', []) or []) if isinstance(tr, dict)]
             if tool_results:
+                self.run.semantic_output = True
                 duration_ms = event.get('duration_ms')
                 try:
                     measured = float(duration_ms) if duration_ms is not None else None
@@ -193,6 +194,7 @@ class AgentEventFrameTranslator:
         if event_type == 'subagent_think':
             think = str(event.get('think') or '')
             if think:
+                self.run.semantic_output = True
                 frames.append(_stream_frame(think=think))
 
         return frames
@@ -200,7 +202,7 @@ class AgentEventFrameTranslator:
     def finish_run(
         self,
         *,
-        succeeded: bool,
+        outcome: RunOutcome,
         usage: Optional[dict[str, Any]] = None,
         usage_map: Optional[dict[str, Any]] = None,
         module_id: Optional[str] = None,
@@ -217,7 +219,7 @@ class AgentEventFrameTranslator:
             max_input_tokens=max_input_tokens,
         )
         return _stream_frame(extra={
-            'runtime_event': self.run.finish(succeeded=succeeded, metrics=metrics),
+            'runtime_event': self.run.finish(outcome=outcome, metrics=metrics),
         })
 
     def flush(self) -> list[dict[str, Any]]:
