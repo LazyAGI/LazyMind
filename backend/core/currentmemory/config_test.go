@@ -21,14 +21,18 @@ func TestPreferenceIndexMaxItemsFromEnv(t *testing.T) {
 	}
 }
 
-func TestValidatePreferenceCapacityAllowsNonGrowingOverLimitContent(t *testing.T) {
-	if err := ValidatePreferenceCapacity(100, 101, 100); err == nil {
-		t.Fatal("growing beyond capacity should fail")
+func TestPreferenceContextMaxCharsFromEnv(t *testing.T) {
+	t.Setenv(PreferenceContextMaxCharsEnv, "4096")
+	value, err := PreferenceContextMaxCharsFromEnv()
+	if err != nil || value != 4096 {
+		t.Fatalf("value=%d err=%v", value, err)
 	}
-	if err := ValidatePreferenceCapacity(120, 120, 100); err != nil {
-		t.Fatalf("equal over-limit content should be allowed: %v", err)
-	}
-	if err := ValidatePreferenceCapacity(120, 110, 100); err != nil {
-		t.Fatalf("shrinking over-limit content should be allowed: %v", err)
+	for _, invalid := range []string{"", "0", "invalid"} {
+		t.Run(invalid, func(t *testing.T) {
+			t.Setenv(PreferenceContextMaxCharsEnv, invalid)
+			if _, err := PreferenceContextMaxCharsFromEnv(); err == nil {
+				t.Fatalf("expected error for %q", invalid)
+			}
+		})
 	}
 }

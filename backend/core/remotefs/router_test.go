@@ -15,6 +15,7 @@ func newRemoteFSTestDB(t *testing.T) *orm.DB {
 	t.Helper()
 	return orm.MigrateTestDB(t,
 		&orm.MemoryCurrentEntry{},
+		&orm.ResourceUpdateTask{},
 		&orm.WorkflowResource{},
 		&orm.WorkflowBlob{},
 		&orm.WorkflowRevision{},

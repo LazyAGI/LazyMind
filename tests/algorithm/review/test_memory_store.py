@@ -5,10 +5,7 @@ from typing import Any, Dict, List, Optional
 import pytest
 import yaml
 
-from lazymind.common.memory.exceptions import (
-    MemoryPartialApplyError,
-    PreferenceCapacityExceededError,
-)
+from lazymind.common.memory.exceptions import MemoryPartialApplyError
 from lazymind.common.memory.paths import (
     PREFERENCE_PATH,
     PROFILE_PATH,
@@ -19,6 +16,7 @@ from lazymind.common.memory.paths import (
 from lazymind.common.memory.validation import (
     PreferenceItem,
     append_preference_item,
+    parse_preference_items,
     validate_preference_index,
 )
 from lazymind.common.memory.validation.document import validate_stored_memory_content
@@ -344,7 +342,7 @@ def test_fixed_memory_file_missing_is_an_error():
         store.read_soul()
 
 
-def test_preference_add_rejects_capacity_before_writing_reference():
+def test_preference_add_can_exceed_prompt_projection_limit():
     content = SAMPLE_PREFERENCE
     for idx in range(2):
         content = append_preference_item(
@@ -358,25 +356,19 @@ def test_preference_add_rejects_capacity_before_writing_reference():
             ),
         )
     fs = FakeRemoteFS({PREFERENCE_PATH: content})
-    original = fs.files[PREFERENCE_PATH]
-
     with _cfg.temp('preference_index_max_items', 2):
-        with pytest.raises(PreferenceCapacityExceededError) as captured:
-            MemoryStore(fs).add_preference_with_reference(
-                name='pref.response.concise',
-                summary='回答要简洁',
-                scenario='日常问答',
-                details='先给结论，再按需补充背景。',
-                reason='用户明确要求',
-                source_kind='memory_review',
-                conversation_id='conversation-1',
-            )
+        MemoryStore(fs).add_preference_with_reference(
+            name='pref.response.concise',
+            summary='回答要简洁',
+            scenario='日常问答',
+            details='先给结论，再按需补充背景。',
+            reason='用户明确要求',
+            source_kind='memory_review',
+            conversation_id='conversation-1',
+        )
 
-    assert captured.value.current_items == 2
-    assert captured.value.attempted_items == 3
-    assert captured.value.max_items == 2
-    assert fs.files[PREFERENCE_PATH] == original
-    assert build_reference_path('response-concise') not in fs.files
+    assert len(parse_preference_items(fs.files[PREFERENCE_PATH])) == 3
+    assert build_reference_path('response-concise') in fs.files
 
 
 def test_preference_add_returns_item_without_internal_envelope():

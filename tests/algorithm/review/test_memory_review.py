@@ -683,13 +683,13 @@ def test_review_memory_reports_partial_when_one_write_succeeds_and_another_fails
     }
 
 
-def test_review_memory_reports_capacity_exceeded_as_non_retryable(monkeypatch):
+def test_review_memory_reports_preference_organizing_as_non_retryable(monkeypatch):
     result = _run_review_with_tool_results(monkeypatch, [
         _tool_failure(
             tool='preference_editor',
             mutation=False,
             retryable=False,
-            code='capacity_exceeded',
+            code='preference_organizing',
         ),
     ])
 
@@ -699,8 +699,8 @@ def test_review_memory_reports_capacity_exceeded_as_non_retryable(monkeypatch):
         'outcome': 'failed',
         'retryable': False,
         'error': {
-            'code': 'capacity_exceeded',
-            'message': 'Preference capacity is full; the new preference was not saved.',
+            'code': 'preference_organizing',
+            'message': 'Preference maintenance is running; the new preference was not saved.',
         },
     }
 

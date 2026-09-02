@@ -3,6 +3,7 @@ package remotefs
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -679,7 +680,7 @@ func TestMemoryMountValidatesDomainDocumentsWithoutRestrictingGenericFiles(t *te
 	}
 }
 
-func TestMemoryMountEnforcesPreferenceCapacityWithoutBlockingShrink(t *testing.T) {
+func TestMemoryMountDoesNotUsePromptLimitAsStorageCapacity(t *testing.T) {
 	db := newRemoteFSTestDB(t)
 	service := newMemoryCurrentServiceWithPreferenceIndexMaxItems(db.DB, 2)
 	handler := newMemoryCurrentHandler(service)
@@ -719,12 +720,9 @@ func TestMemoryMountEnforcesPreferenceCapacityWithoutBlockingShrink(t *testing.T
 	if recorder := write(renderPreferences("pref.one", "pref.two")); recorder.Code != http.StatusOK {
 		t.Fatalf("write at capacity status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
-	exceeded := write(renderPreferences("pref.one", "pref.two", "pref.three"))
-	if exceeded.Code != http.StatusConflict ||
-		!strings.Contains(exceeded.Body.String(), `"code":"capacity_exceeded"`) ||
-		!strings.Contains(exceeded.Body.String(), `"used_items":3`) ||
-		!strings.Contains(exceeded.Body.String(), `"max_items":2`) {
-		t.Fatalf("capacity response status=%d body=%s", exceeded.Code, exceeded.Body.String())
+	overLimitWrite := write(renderPreferences("pref.one", "pref.two", "pref.three"))
+	if overLimitWrite.Code != http.StatusOK {
+		t.Fatalf("over-limit write status=%d body=%s", overLimitWrite.Code, overLimitWrite.Body.String())
 	}
 
 	repository := currentmemoryapi.NewRepository(db.DB)
@@ -744,6 +742,148 @@ func TestMemoryMountEnforcesPreferenceCapacityWithoutBlockingShrink(t *testing.T
 	if recorder := write(renderPreferences("pref.one", "pref.two")); recorder.Code != http.StatusOK {
 		t.Fatalf("shrink to capacity status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
+}
+
+func TestPreferenceWriteAtThresholdEnqueuesOneOrganizer(t *testing.T) {
+	db := newRemoteFSTestDB(t)
+	handler := newMemoryCurrentHandler(newMemoryCurrentService(db.DB))
+	content := renderPreferenceCount(t, 80, "short summary")
+	write := func() {
+		request := httptest.NewRequest(
+			http.MethodPut,
+			"/remote-fs/content?path="+memoryPreferencePath+"&user_id=u1",
+			strings.NewReader(content),
+		)
+		recorder := httptest.NewRecorder()
+		handler.Content(recorder, request, memoryPreferencePath)
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("preference write status=%d body=%s", recorder.Code, recorder.Body.String())
+		}
+	}
+	write()
+	write()
+
+	var tasks []orm.ResourceUpdateTask
+	if err := db.Where(
+		"user_id = ? AND task_type = ? AND status IN ?", "u1",
+		orm.ResourceUpdateTaskTypeOrganizePreference,
+		[]string{orm.ResourceUpdateTaskStatusPending, orm.ResourceUpdateTaskStatusRunning},
+	).Find(&tasks).Error; err != nil {
+		t.Fatalf("query organizer tasks: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("active organizer tasks=%d, want 1", len(tasks))
+	}
+}
+
+func TestPreferenceWriteAtCharacterThresholdEnqueuesOrganizer(t *testing.T) {
+	db := newRemoteFSTestDB(t)
+	handler := newMemoryCurrentHandler(newMemoryCurrentService(db.DB))
+	content := renderPreferenceCount(t, 40, strings.Repeat("x", 100))
+	request := httptest.NewRequest(
+		http.MethodPut,
+		"/remote-fs/content?path="+memoryPreferencePath+"&user_id=u-char-threshold",
+		strings.NewReader(content),
+	)
+	recorder := httptest.NewRecorder()
+	handler.Content(recorder, request, memoryPreferencePath)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("preference write status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var count int64
+	if err := db.Model(&orm.ResourceUpdateTask{}).
+		Where("user_id = ? AND task_type = ?", "u-char-threshold", orm.ResourceUpdateTaskTypeOrganizePreference).
+		Count(&count).Error; err != nil {
+		t.Fatalf("count organizer tasks: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("organizer task count=%d, want 1", count)
+	}
+}
+
+func TestPreferenceStorageAcceptsMoreThanOneHundredItems(t *testing.T) {
+	db := newRemoteFSTestDB(t)
+	handler := newMemoryCurrentHandler(newMemoryCurrentService(db.DB))
+	content := renderPreferenceCount(t, 101, "short summary")
+	request := httptest.NewRequest(
+		http.MethodPut,
+		"/remote-fs/content?path="+memoryPreferencePath+"&user_id=u-over-100",
+		strings.NewReader(content),
+	)
+	recorder := httptest.NewRecorder()
+	handler.Content(recorder, request, memoryPreferencePath)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("write 101 preferences status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	entry, err := currentmemoryapi.NewRepository(db.DB).GetEntry(
+		t.Context(), "u-over-100", memoryPreferencePath,
+	)
+	if err != nil {
+		t.Fatalf("read stored preferences: %v", err)
+	}
+	document, err := currentmemoryapi.ParsePreferences(entry.Content)
+	if err != nil || len(document.Preferences) != 101 {
+		t.Fatalf("stored preference count=%d err=%v", len(document.Preferences), err)
+	}
+}
+
+func TestPreferenceFreezeRejectsOrdinaryWriteAndAllowsCurrentOrganizer(t *testing.T) {
+	db := newRemoteFSTestDB(t)
+	handler := newMemoryCurrentHandler(newMemoryCurrentService(db.DB))
+	now := time.Date(2026, 9, 2, 1, 0, 0, 0, time.UTC)
+	task := orm.ResourceUpdateTask{
+		ID: "organizer-1", TaskType: orm.ResourceUpdateTaskTypeOrganizePreference,
+		ResourceType: orm.ResourceUpdateResourceTypeUserPreference, UserID: "u1", ResourceID: "u1",
+		TriggerType: orm.ResourceUpdateTriggerTypeManual, TriggerID: "manual-1",
+		Status: orm.ResourceUpdateTaskStatusRunning, NextRunAt: now,
+		LaneKey: "memory-maintenance:u1", LanePriority: 100, LaneOrderAt: now,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := db.Create(&task).Error; err != nil {
+		t.Fatalf("create organizer task: %v", err)
+	}
+	content := renderPreferenceCount(t, 1, "summary")
+	write := func(query string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(
+			http.MethodPut,
+			"/remote-fs/content?path="+memoryPreferencePath+"&user_id=u1"+query,
+			strings.NewReader(content),
+		)
+		recorder := httptest.NewRecorder()
+		handler.Content(recorder, request, memoryPreferencePath)
+		return recorder
+	}
+
+	ordinary := write("")
+	if ordinary.Code != http.StatusConflict ||
+		!strings.Contains(ordinary.Body.String(), "preference_organizing") ||
+		!strings.Contains(ordinary.Body.String(), "mutation=none") {
+		t.Fatalf("ordinary write status=%d body=%s", ordinary.Code, ordinary.Body.String())
+	}
+	organizer := write("&task_id=preference_organizer_organizer-1")
+	if organizer.Code != http.StatusOK {
+		t.Fatalf("organizer write status=%d body=%s", organizer.Code, organizer.Body.String())
+	}
+}
+
+func renderPreferenceCount(t *testing.T, count int, summary string) string {
+	t.Helper()
+	const timestamp = "2026-07-20T09:30:00+08:00"
+	items := make([]currentmemoryapi.PreferenceItem, 0, count)
+	for index := 0; index < count; index++ {
+		name := fmt.Sprintf("pref.test.%03d", index)
+		items = append(items, currentmemoryapi.PreferenceItem{
+			Name: name, Summary: summary, Ref: fmt.Sprintf("references/test-%03d.md", index),
+			CreatedAt: timestamp, UpdatedAt: timestamp,
+		})
+	}
+	content, err := currentmemoryapi.RenderPreferences(
+		currentmemoryapi.PreferenceDocument{Preferences: items},
+	)
+	if err != nil {
+		t.Fatalf("render preferences: %v", err)
+	}
+	return string(content)
 }
 
 func TestMemoryMountAndPublicCurrentMemoryShareAuthoritativeState(t *testing.T) {

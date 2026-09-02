@@ -405,6 +405,12 @@ func TestPreferencePublicHandlersListDetailReorderAndDelete(t *testing.T) {
 			listed.Data.ResidentIndexUsage,
 		)
 	}
+	if listed.Data.ProjectionState.StoredItems != 2 ||
+		listed.Data.ProjectionState.ProjectedItems != 2 ||
+		listed.Data.ProjectionState.ProjectionTruncated ||
+		listed.Data.ProjectionState.FullProjectionChars == 0 {
+		t.Fatalf("unexpected projection state: %#v", listed.Data.ProjectionState)
+	}
 	overLimitHandler := NewHandlerWithPreferenceIndexMaxItems(db.DB, 1)
 	overLimitRecorder := httptest.NewRecorder()
 	overLimitHandler.ListPreferences(overLimitRecorder, listRequest)
@@ -420,6 +426,11 @@ func TestPreferencePublicHandlersListDetailReorderAndDelete(t *testing.T) {
 			"unexpected over-limit usage: %#v",
 			overLimitListed.Data.ResidentIndexUsage,
 		)
+	}
+	if overLimitListed.Data.ProjectionState.StoredItems != 2 ||
+		overLimitListed.Data.ProjectionState.ProjectedItems != 1 ||
+		!overLimitListed.Data.ProjectionState.ProjectionTruncated {
+		t.Fatalf("unexpected over-limit projection: %#v", overLimitListed.Data.ProjectionState)
 	}
 	if bytes.Contains(listRecorder.Body.Bytes(), []byte(`"ref"`)) {
 		t.Fatalf("public preference list leaked ref: %s", listRecorder.Body.String())

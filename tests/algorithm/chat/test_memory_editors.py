@@ -16,7 +16,6 @@ from lazymind.common.memory.editors import (
     delete_preference_entry,
     validate_preference_name,
 )
-from lazymind.common.memory.exceptions import PreferenceCapacityExceededError
 from lazymind.common.memory.paths import (
     PREFERENCE_PATH,
     PROFILE_PATH,
@@ -434,7 +433,7 @@ def test_preference_editor_add_and_delete():
     assert all(entry['mutation'] == 'applied' for entry in ledger)
 
 
-def test_preference_editor_reports_capacity_rejection_without_eviction():
+def test_preference_editor_reports_organizer_freeze_without_retry():
     ledger = _reset_ledger()
     fs = FakeRemoteFS({
         SOUL_PATH: SAMPLE_SOUL,
@@ -442,10 +441,8 @@ def test_preference_editor_reports_capacity_rejection_without_eviction():
         PREFERENCE_PATH: SAMPLE_PREFERENCE,
     })
     tools, store = _tools_with_store(fs)
-    capacity_error = PreferenceCapacityExceededError(
-        current_items=20,
-        attempted_items=21,
-        max_items=20,
+    organizing_error = RuntimeError(
+        'preference_organizing: Preference Organizer is running; mutation=none'
     )
 
     with (
@@ -453,7 +450,7 @@ def test_preference_editor_reports_capacity_rejection_without_eviction():
             'lazymind.chat.engine.tools.memory.MemoryStore',
             lambda *args, **kwargs: store,
         ),
-        patch.object(store, 'add_preference_with_reference', side_effect=capacity_error),
+        patch.object(store, 'add_preference_with_reference', side_effect=organizing_error),
         pytest.raises(ToolExecutionError) as captured,
     ):
         tools.preference_editor(
@@ -466,16 +463,15 @@ def test_preference_editor_reports_capacity_rejection_without_eviction():
         )
 
     message = str(captured.value)
-    assert 'capacity is full (20/20)' in message
-    assert 'new preference was not saved' in message
-    assert 'No existing preference was deleted, overwritten, or reordered' in message
+    assert 'Preference Organizer is running' in message
+    assert 'was not saved' in message
+    assert 'do not retry' in message
     assert ledger[-1]['status'] == 'failed'
     assert ledger[-1]['mutation'] == 'none'
-    assert ledger[-1]['error_code'] == 'capacity_exceeded'
+    assert ledger[-1]['error_code'] == 'preference_organizing'
     assert ledger[-1]['result'] == {
-        'current_items': 20,
-        'attempted_items': 21,
-        'max_items': 20,
+        'status': 'blocked',
+        'mutation': 'none',
     }
 
 
@@ -507,7 +503,7 @@ def test_memory_tools_use_only_tool_manager_envelope():
             ),
         )
         with _cfg.temp('preference_index_max_items', 1):
-            failure = manager(_tool_call(
+            preference_success = manager(_tool_call(
                 'MemoryTools_preference_editor',
                 {
                     'op': 'add',
@@ -522,10 +518,8 @@ def test_memory_tools_use_only_tool_manager_envelope():
     assert set(success) == {'ok', 'value'}
     assert success['ok'] is True
     assert 'ok' not in success['value']
-    assert set(failure) == {'ok', 'value'}
-    assert failure['ok'] is False
-    assert isinstance(failure['value'], str)
-    assert 'new preference was not saved' in failure['value']
+    assert set(preference_success) == {'ok', 'value'}
+    assert preference_success['ok'] is True
 
 
 def test_preference_editor_records_partial_apply():
