@@ -30,6 +30,7 @@ import {
   CommentOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
+  MoreOutlined,
   PictureOutlined,
 } from '@ant-design/icons';
 import { Dropdown } from 'antd';
@@ -79,7 +80,10 @@ function WriterAnchorEditor(props: JsxEditorProps) {
   const id = props.mdastNode.attributes.find(
     (attribute) => attribute.type === 'mdxJsxAttribute' && attribute.name === 'id',
   )?.value;
-  if (typeof id === 'string' && id.startsWith('block-')) {
+  if (
+    typeof id === 'string'
+    && (id.startsWith('block-') || id.startsWith('writer-page-marker-'))
+  ) {
     return (
       <span
         id={id}
@@ -439,12 +443,14 @@ export function MarkdownArtifactEditor({
   const [baseRevision, setBaseRevision] = useState(sourceRevision);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string>();
+  const [renderErrorSource, setRenderErrorSource] = useState<string>();
   const [conflict, setConflict] = useState(false);
   const [outlineOpen, setOutlineOpen] = useState(false);
   const [pageWidth, setPageWidth] = useState<'default' | 'wide'>('default');
   const [selection, setSelection] = useState<MarkdownSelection | null>(null);
   const [selectionToolbar, setSelectionToolbar] = useState<FloatingToolbarAnchor | null>(null);
   const [referenceDropdownOpen, setReferenceDropdownOpen] = useState(false);
+  const [compactActionsOpen, setCompactActionsOpen] = useState(false);
   const [rewriteLayer, setRewriteLayer] = useState<HTMLDivElement | null>(null);
   const [rewriteSelectionPinned, setRewriteSelectionPinned] = useState(false);
   const [sourceReferencePopover, setSourceReferencePopover] = useState<
@@ -493,6 +499,7 @@ export function MarkdownArtifactEditor({
     () => collectWriterMarkdownOutline(materializedDraftMarkdown),
     [materializedDraftMarkdown],
   );
+  const hasOutline = Boolean(markdownOutline.title);
   const referenceTargets = useMemo(
     () => collectWriterMarkdownReferenceTargets(materializedDraftMarkdown),
     [materializedDraftMarkdown],
@@ -643,6 +650,7 @@ export function MarkdownArtifactEditor({
     selectionToolbarDismissedRef.current = true;
     setSelectionToolbar(null);
     setReferenceDropdownOpen(false);
+    setCompactActionsOpen(false);
   }, []);
 
   const updateSelectionToolbar = useCallback(() => {
@@ -737,13 +745,14 @@ export function MarkdownArtifactEditor({
     ) {
       return;
     }
-    if (nextSelection?.supported) {
+    if (nextSelection?.supported || nextSelection?.internalReference) {
       referenceSelectionRef.current = nextSelection;
       const browserSelection = globalThis.getSelection();
       if (browserSelection?.rangeCount) {
         capturedSelectionRangeRef.current = browserSelection.getRangeAt(0).cloneRange();
       }
     } else {
+      referenceSelectionRef.current = null;
       capturedSelectionRangeRef.current = null;
     }
     setSelection(nextSelection);
@@ -900,6 +909,7 @@ export function MarkdownArtifactEditor({
     setDraftMarkdown(normalizedMarkdown);
     setBaseRevision(sourceRevision);
     setSaveError(undefined);
+    setRenderErrorSource(undefined);
     setConflict(false);
     pendingSourceRef.current = undefined;
   }, [dirty, markdown, replaceMarkdownSilently, sourceRevision]);
@@ -943,6 +953,7 @@ export function MarkdownArtifactEditor({
       }
       setBaseRevision(savedRevision);
       setAnchorSourceMarkdown(persistedMarkdown);
+      setRenderErrorSource(undefined);
       staleSourceEchoRef.current = sourceBeforeSave;
       latestSourceRef.current = {
         markdown: persistedMarkdown,
@@ -1107,12 +1118,13 @@ export function MarkdownArtifactEditor({
     dismissSelectionToolbar();
   }, [dismissSelectionToolbar, onCiteSelection, selection]);
   const removableReferenceMarkdown = useMemo(() => {
-    if (!selection?.supported) return null;
+    if (!selection) return null;
     const nextMarkdown = removeWriterMarkdownInternalReference(
       draftMarkdown,
       selection.paragraph?.textContent ?? '',
       selection.startOffset ?? -1,
       selection.text,
+      selection.internalReference,
     );
     return nextMarkdown === draftMarkdown ? null : nextMarkdown;
   }, [draftMarkdown, selection]);
@@ -1123,7 +1135,6 @@ export function MarkdownArtifactEditor({
     || Boolean(removableReferenceMarkdown)
     || referenceTargets.length === 0;
   const removeReferenceDisabled = readOnly
-    || !selection?.supported
     || saving
     || conflict
     || !removableReferenceMarkdown;
@@ -1178,7 +1189,8 @@ export function MarkdownArtifactEditor({
     const referenceSelection = referenceSelectionRef.current ?? selection;
     if (
       !editor
-      || !referenceSelection?.supported
+      || !referenceSelection
+      || (!referenceSelection.supported && !referenceSelection.internalReference)
       || savingRef.current
       || conflictRef.current
       || readOnly
@@ -1189,6 +1201,7 @@ export function MarkdownArtifactEditor({
       referenceSelection.paragraph?.textContent ?? '',
       referenceSelection.startOffset ?? -1,
       referenceSelection.text,
+      referenceSelection.internalReference,
     );
     if (nextDraft === currentMarkdown) return;
     persistReferenceEdit(nextDraft, referenceSelection);
@@ -1264,7 +1277,9 @@ export function MarkdownArtifactEditor({
   return (
     <section
       className={`writer-markdown-editor writer-markdown-editor--width-${pageWidth}${
-        outlineOpen ? ' writer-markdown-editor--outline-open' : ''
+        outlineOpen && hasOutline ? ' writer-markdown-editor--outline-open' : ''
+      }${
+        !chatPresentation && !hasOutline ? ' writer-markdown-editor--no-outline' : ''
       }${
         selectionToolbar ? ' writer-markdown-editor--selection-toolbar-visible' : ''
       }${chatPresentation ? ' writer-markdown-editor--chat' : ''}`}
@@ -1435,7 +1450,7 @@ export function MarkdownArtifactEditor({
       )}
 
       <div className='writer-markdown-editor__document-layout'>
-        {!chatPresentation && <aside
+        {!chatPresentation && hasOutline && <aside
           className='writer-markdown-editor__outline-rail'
           id={outlineId}
           onClick={(event) => event.stopPropagation()}
@@ -1543,13 +1558,24 @@ export function MarkdownArtifactEditor({
               </div>
             </div>
           </div>}
-          <MDXEditor
+          {renderErrorSource !== undefined ? (
+            <div
+              className='writer-markdown-editor__parse-fallback'
+              role='alert'
+            >
+              <span className='writer-markdown-editor__parse-fallback-message'>
+                {t('chat.writerMarkdown.renderFallback')}
+              </span>
+              <pre>{renderErrorSource}</pre>
+            </div>
+          ) : <MDXEditor
             ref={editorRef}
             className='writer-markdown-editor__surface'
             markdown={baseMarkdown}
             translation={editorTranslation}
             readOnly={readOnly}
             onChange={handleMarkdownChange}
+            onError={({ source }: { source: string }) => setRenderErrorSource(source)}
             plugins={[
               headingsPlugin(),
               listsPlugin(),
@@ -1664,7 +1690,9 @@ export function MarkdownArtifactEditor({
                           onMouseDown={(event) => {
                             event.preventDefault();
                             event.stopPropagation();
-                            if (selection?.supported) referenceSelectionRef.current = selection;
+                            if (selection?.supported || selection?.internalReference) {
+                              referenceSelectionRef.current = selection;
+                            }
                           }}
                         >
                           <LinkOutlined aria-hidden />
@@ -1687,18 +1715,89 @@ export function MarkdownArtifactEditor({
                         onMouseDown={(event) => {
                           event.preventDefault();
                           event.stopPropagation();
-                          if (selection?.supported) referenceSelectionRef.current = selection;
+                          if (selection?.supported || selection?.internalReference) {
+                            referenceSelectionRef.current = selection;
+                          }
                         }}
                         onClick={removeCrossReference}
                       >
                         <DisconnectOutlined aria-hidden />
                       </button>}
                     </div>
+                    <Dropdown
+                      trigger={['click']}
+                      placement='bottomLeft'
+                      overlayClassName='writer-markdown-editor__reference-dropdown'
+                      open={compactActionsOpen}
+                      onOpenChange={(open: boolean) => setCompactActionsOpen(open)}
+                      menu={{
+                        items: [
+                          ...(chatPresentation && onCiteSelection ? [{
+                            key: 'cite',
+                            icon: <CommentOutlined />,
+                            label: t('chat.cite'),
+                            disabled: !selection?.text.trim(),
+                          }] : []),
+                          ...(showPolishAction ? [{
+                            key: 'polish',
+                            icon: <HighlightOutlined />,
+                            label: t('chat.artifactRewrite.action'),
+                            disabled: polishDisabled,
+                          }] : []),
+                          ...(!chatPresentation ? [{
+                            key: 'cross-reference',
+                            icon: <LinkOutlined />,
+                            label: t('chat.writerIR.crossReference'),
+                            disabled: referenceDisabled,
+                            children: referenceTargets.map((target) => ({
+                              key: `reference:${target.anchorId}`,
+                              label: target.label,
+                            })),
+                          }, {
+                            key: 'remove-reference',
+                            icon: <DisconnectOutlined />,
+                            label: t('chat.writerIR.removeCrossReference'),
+                            disabled: removeReferenceDisabled,
+                          }] : []),
+                        ],
+                        onClick: ({ key }: { key: string | number }) => {
+                          const action = String(key);
+                          setCompactActionsOpen(false);
+                          if (action === 'cite') citeSelection();
+                          if (action === 'polish') void requestPolish();
+                          if (action === 'remove-reference') removeCrossReference();
+                          if (action.startsWith('reference:')) {
+                            applyCrossReference(action.slice('reference:'.length));
+                          }
+                        },
+                      }}
+                    >
+                      <button
+                        type='button'
+                        className={
+                          'writer-markdown-editor__reference-select '
+                          + 'writer-markdown-editor__toolbar-more'
+                        }
+                        aria-label={t('chat.writerMarkdown.moreActions')}
+                        aria-haspopup='menu'
+                        aria-expanded={compactActionsOpen}
+                        title={t('chat.writerMarkdown.moreActions')}
+                        onMouseDown={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          if (selection?.supported || selection?.internalReference) {
+                            referenceSelectionRef.current = selection;
+                          }
+                        }}
+                      >
+                        <MoreOutlined aria-hidden />
+                      </button>
+                    </Dropdown>
                   </>
                 ),
               }),
             ]}
-          />
+          />}
         </div>
       </div>
       <div className='writer-markdown-editor__rewrite-layer' ref={setRewriteLayer} />

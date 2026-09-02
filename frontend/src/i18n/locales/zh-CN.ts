@@ -1969,8 +1969,10 @@ const zhCN = {
       saveAndReexecute: "保存并重新执行{{step}}",
       discard: "放弃修改",
       saveFailed: "保存失败，请重试",
+      renderFallback: "文档格式暂时无法解析，已按原文显示。",
       revisionConflict: "文档已有新版本，请刷新后处理冲突。",
       externalUpdate: "检测到远端新版本，当前本地修改已保留。请刷新后再决定如何处理。",
+      moreActions: "更多操作",
     },
     artifactRewrite: {
       action: "AI 润色",

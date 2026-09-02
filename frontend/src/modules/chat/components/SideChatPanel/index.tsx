@@ -547,6 +547,7 @@ export default function SideChatPanel({
                 </Button>
               </Tooltip>
               <Tooltip
+                placement="left"
                 title={
                   streaming || requestPending
                     ? t("chat.sideChat.generatingUnavailable")

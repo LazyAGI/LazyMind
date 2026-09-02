@@ -2032,8 +2032,10 @@ const enUS = {
       saveAndReexecute: "Save and rerun {{step}}",
       discard: "Discard changes",
       saveFailed: "Save failed. Please retry.",
+      renderFallback: "This document format could not be parsed. Showing the original text instead.",
       revisionConflict: "A newer document version is available. Refresh before resolving the conflict.",
       externalUpdate: "A newer remote version is available. Your local changes were kept. Refresh before deciding how to proceed.",
+      moreActions: "More actions",
     },
     artifactRewrite: {
       action: "AI polish",
