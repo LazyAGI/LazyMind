@@ -1220,6 +1220,12 @@ export function useChatConversation({
               ),
             }
           : {}),
+        ...(params.ask_answers_structured
+          ? { ask_answers_structured: params.ask_answers_structured }
+          : {}),
+        ...(params.mail_draft_confirm_id
+          ? { mail_draft_confirm_id: params.mail_draft_confirm_id }
+          : {}),
       },
     );
     if (!opened) {

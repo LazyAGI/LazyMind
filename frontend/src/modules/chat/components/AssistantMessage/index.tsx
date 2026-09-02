@@ -30,6 +30,7 @@ import { WorkflowPanel } from "@/modules/chat/components/WorkflowPanel";
 import MultiAnswerDisplay, { type PreferenceType } from "../MultiAnswerDisplay";
 import FeedbackModal from "../FeedbackModal";
 import AskCard from "@/modules/chat/components/AskCard";
+import MailDraftCard from "@/modules/chat/components/MailDraftCard";
 import ToolLimitCard from "@/modules/chat/components/ToolLimitCard";
 import ArtifactDownloadButton from "@/modules/chat/components/ArtifactCollectorCard/ArtifactDownloadButton";
 import RunStatusCard from "@/modules/chat/components/RunStatusCard";
@@ -1066,6 +1067,24 @@ const AssistantMessage = (props: any) => {
         index === length - 1,
         !!hasLaterUserMessage,
       );
+      if (askPending.mail_draft) {
+        return (
+          <MailDraftCard
+            key={askPending.ask_id}
+            draft={askPending.mail_draft}
+            disabled={isReadOnly}
+            onConfirm={(draftId) => {
+              updateMessage({
+                ...item,
+                ask_answered: true,
+              });
+              props.sendMessage?.(t("chat.mailDraft.confirmQuery"), undefined, {
+                mail_draft_confirm_id: draftId,
+              });
+            }}
+          />
+        );
+      }
       return (
         <AskCard
           key={askPending.ask_id}

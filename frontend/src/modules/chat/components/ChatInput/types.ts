@@ -30,6 +30,7 @@ export interface SendMessageParams {
   thinking_depth?: ThinkingDepth;
   run_in_background?: boolean;
   ask_answers_structured?: import("@/modules/chat/components/AskCard").AskAnswersStructured;
+  mail_draft_confirm_id?: string;
 }
 
 export interface ChatInputImperativeProps {

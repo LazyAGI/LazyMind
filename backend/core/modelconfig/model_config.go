@@ -2,6 +2,7 @@ package modelconfig
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
@@ -19,10 +20,17 @@ const cloudToolTokenTimeout = 5 * time.Second
 
 var cloudToolProviders = []string{"feishu", "googledrive", "notion"}
 
+var mailToolProviders = []string{"gmailimap", "qqmail", "qqexmail", "netease163", "neteaseqiye"}
+
 type cloudConnectionList struct {
 	Data struct {
 		Items []struct {
-			ConnectionID string `json:"connection_id"`
+			ConnectionID      string `json:"connection_id"`
+			Provider          string `json:"provider"`
+			DisplayName       string `json:"display_name"`
+			ProviderAccountID string `json:"provider_account_id"`
+			Scope             string `json:"scope"`
+			Status            string `json:"status"`
 		} `json:"items"`
 	} `json:"data"`
 }
@@ -47,7 +55,80 @@ func LoadCloudToolConfig(ctx context.Context, userID string) (map[string]any, er
 			toolConfig[provider] = tokens
 		}
 	}
+	mailCredentials, err := LoadMailToolConfig(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if len(mailCredentials) == 1 {
+		toolConfig["mail"] = mailCredentials[0]
+	} else if len(mailCredentials) > 1 {
+		toolConfig["mail"] = mailCredentials
+	}
 	return toolConfig, nil
+}
+
+// LoadMailToolConfig returns JSON credentials for every chat-enabled mailbox.
+func LoadMailToolConfig(ctx context.Context, userID string) ([]string, error) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return nil, nil
+	}
+	credentials := make([]string, 0)
+	for _, provider := range mailToolProviders {
+		items, err := loadMailProviderCredentials(ctx, provider, userID)
+		if err != nil {
+			return nil, err
+		}
+		credentials = append(credentials, items...)
+	}
+	return credentials, nil
+}
+
+func loadMailProviderCredentials(ctx context.Context, provider, userID string) ([]string, error) {
+	headers := map[string]string{}
+	if token := strings.TrimSpace(os.Getenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN")); token != "" {
+		headers["X-LazyMind-Internal-Token"] = token
+	}
+	listURL := fmt.Sprintf("%s/v1/cloud/connections/internal/chat-enabled?provider=%s&owner_user_id=%s",
+		common.AuthServiceBaseURL(), url.QueryEscape(provider), url.QueryEscape(userID))
+	var connections cloudConnectionList
+	if err := common.ApiGet(ctx, listURL, headers, &connections, cloudToolTokenTimeout); err != nil {
+		return nil, fmt.Errorf("list chat-enabled %s connections: %w", provider, err)
+	}
+	out := make([]string, 0, len(connections.Data.Items))
+	for _, item := range connections.Data.Items {
+		connectionID := strings.TrimSpace(item.ConnectionID)
+		if connectionID == "" {
+			continue
+		}
+		tokenURL := fmt.Sprintf("%s/v1/cloud/connections/%s/token?user_id=%s",
+			common.AuthServiceBaseURL(), url.PathEscape(connectionID), url.QueryEscape(userID))
+		var response cloudTokenResponse
+		if err := common.ApiGet(ctx, tokenURL, headers, &response, cloudToolTokenTimeout); err != nil {
+			continue
+		}
+		secret := strings.TrimSpace(response.Data.AccessToken)
+		if secret == "" {
+			continue
+		}
+		email := strings.TrimSpace(item.DisplayName)
+		if email == "" {
+			email = strings.TrimSpace(item.ProviderAccountID)
+		}
+		payload, err := json.Marshal(map[string]string{
+			"provider":      provider,
+			"email":         email,
+			"secret":        secret,
+			"scope":         strings.TrimSpace(item.Scope),
+			"connection_id": connectionID,
+			"status":        strings.TrimSpace(item.Status),
+		})
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, string(payload))
+	}
+	return out, nil
 }
 
 func LoadCloudProviderTokens(ctx context.Context, provider, userID string) ([]string, error) {

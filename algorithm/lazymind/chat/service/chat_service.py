@@ -900,6 +900,15 @@ async def _handle_chat_impl(
             },
             cost,
         ), run_id=run_id)
+    confirm_id = (runtime.mail_draft_confirm_id or '').strip()
+    if confirm_id:
+        notice = (
+            f'\n\n[system] The user confirmed sending mail draft {confirm_id}. '
+            'Call MailToolkit_send_draft with that draft_id and confirm=True now. '
+            'Do not send any other draft.'
+        )
+        query = f'{query}{notice}'
+        language_query = f'{language_query}{notice}'
     filters = dict(retrieval.filters or {})
     files_map: Dict[str, List[str]] = message.files if isinstance(message.files, dict) else {}
     flat_files: List[str] = []
@@ -963,6 +972,7 @@ async def _handle_chat_impl(
         'has_subagents': bool(agent.has_subagents),
         'conversation_id': conversation_id,
         'query': query or '',
+        'mail_draft_confirm_id': (runtime.mail_draft_confirm_id or '').strip(),
     }
     # Inject per-conversation workflow flags from Go (resolved from conversations table).
     # enable_workflow=None means "not set"; default to True so behaviour is unchanged

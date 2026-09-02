@@ -110,6 +110,17 @@ class ErrorCodes:
     CLOUD_CREDENTIAL_DECRYPT_FAILED: ErrorTuple = (500, 1000822, 'cloud credential decryption failed')
     CLOUD_PROVIDER_REFRESH_TOKEN_EMPTY: ErrorTuple = (502, 1000823, 'cloud provider returned an empty refresh token')
     GOOGLE_DRIVE_OAUTH_USER_ONLY: ErrorTuple = (400, 1000824, 'Google Drive only supports oauth_user connections')
+    MAIL_IMAP_LOGIN_FAILED: ErrorTuple = (400, 1000825, 'mailbox login failed')
+    MAIL_ACCOUNT_ALREADY_CONNECTED: ErrorTuple = (
+        409,
+        1000826,
+        'only one mailbox account can be connected',
+    )
+    MAIL_PROVIDER_AUTH_MODE_INVALID: ErrorTuple = (
+        400,
+        1000828,
+        'this mailbox provider does not support the requested auth mode',
+    )
 
     JWT_SECRET_REQUIRED: ErrorTuple = (500, 1000901, 'JWT signing secret is not configured')
     CLOUD_PROVIDER_HTTP_ERROR: ErrorTuple = (502, 1000902, 'cloud provider returned an HTTP error')
@@ -170,6 +181,8 @@ _EXCEPTION_PREFIXES: tuple[tuple[str, ErrorTuple], ...] = (
     ('feishu user info failed', ErrorCodes.FEISHU_USER_INFO_FAILED),
     ('invalid ciphertext', ErrorCodes.CLOUD_CIPHERTEXT_INVALID),
     ('Google Drive only supports oauth_user connections in LazyMind', ErrorCodes.GOOGLE_DRIVE_OAUTH_USER_ONLY),
+    ('mailbox IMAP login failed', ErrorCodes.MAIL_IMAP_LOGIN_FAILED),
+    ('mailbox SMTP login failed', ErrorCodes.MAIL_IMAP_LOGIN_FAILED),
     (
         'LAZYMIND_AUTH_CLOUD_SECRET_KEY is required for cloud oauth credential encryption',
         ErrorCodes.CLOUD_CRYPTO_UNAVAILABLE,
