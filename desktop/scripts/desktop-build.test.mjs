@@ -348,7 +348,8 @@ test("Windows CI treats branches as non-tags without leaking git probe failures"
   assert.match(source, /git submodule update --init algorithm\/lazyllm/);
   assert.doesNotMatch(source, /git submodule update --init --recursive/);
   assert.match(source, /resolve-release-version\.mjs/);
-  assert.match(source, /windows-2022[\s\S]*windows-2025/);
+  assert.match(source, /os: windows-2022[\s\S]*install_arguments: "\/S --simple-install"[\s\S]*verify_installer_warmup: false[\s\S]*smoke_timeout_ms: 1800000/);
+  assert.match(source, /os: windows-2025[\s\S]*install_arguments: "\/S --full-install"[\s\S]*verify_installer_warmup: true[\s\S]*smoke_timeout_ms: 300000/);
   assert.match(source, /workflow_call:/);
   assert.doesNotMatch(source, /push:\s*\n\s*tags:/);
   assert.match(source, /permissions:\s*\n\s*contents:\s*read/);
@@ -362,7 +363,8 @@ test("Windows CI treats branches as non-tags without leaking git probe failures"
     source,
     /test-windows-installer:[\s\S]*name: Checkout smoke test scripts[\s\S]*ref: \$\{\{ inputs\.git_ref \|\| github\.ref \}\}[\s\S]*name: Download the exact installer built above/,
   );
-  assert.match(source, /Start-Process -FilePath \$env:INSTALLER_PATH -ArgumentList "\/S --full-install" -Wait/);
+  assert.match(source, /Start-Process -FilePath \$env:INSTALLER_PATH -ArgumentList \$env:INSTALL_ARGUMENTS -Wait/);
+  assert.match(source, /!matrix\.verify_installer_warmup \|\| steps\.installer_warmup\.outcome == 'success'/);
   assert.match(source, /DisplayVersion -ne \$env:EXPECTED_VERSION/);
   assert.match(source, /expectedProductVersion = "\$\(\$Matches\[1\]\)\.\$\(\$Matches\[2\]\)\.\$\(\$Matches\[3\]\)\.0"/);
   assert.match(source, /Start-Process -FilePath \$uninstaller -ArgumentList "\/S" -Wait/);
@@ -399,7 +401,7 @@ test("Windows NSIS installer uses electron-builder's default LZMA payload", () =
   assert.match(buildScript, /LAZYMIND_DESKTOP_RUNTIME_STAGE = New-DeferredPythonRuntimeStage/);
   assert.match(buildScript, /'resume-installer' \{ Invoke-Doctor; Finalize-Desktop 'installer' \}/);
   assert.match(workflow, /Cache Electron and electron-builder downloads/);
-  assert.match(workflow, /ArgumentList "\/S --full-install"/);
+  assert.match(workflow, /install_arguments: "\/S --full-install"/);
   assert.match(workflow, /Submodule checkout attempt \$attempt\/3 failed/);
   assert.match(workflow, /pnpm activation attempt \$attempt\/3 failed/);
 });
@@ -575,8 +577,9 @@ test("installer workflows launch the packaged application before publishing", ()
   const windowsSource = readFileSync(windowsWorkflow, "utf8");
   for (const source of [macosSource, windowsSource]) {
     assert.match(source, /packaged-app-smoke\.mjs/);
-    assert.match(source, /--timeout-ms 300000/);
   }
+  assert.match(macosSource, /--timeout-ms 300000/);
+  assert.match(windowsSource, /--timeout-ms \$\{\{ matrix\.smoke_timeout_ms \}\}/);
   assert.match(macosSource, /LAZYMIND_DESKTOP_RUNTIME_ROOT=/);
   assert.ok(
     windowsSource.indexOf("packaged-app-smoke.mjs") < windowsSource.indexOf("$uninstall = Start-Process"),
