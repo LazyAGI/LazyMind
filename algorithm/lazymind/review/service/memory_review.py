@@ -24,7 +24,9 @@ _WRITE_TOOLS = frozenset({
     'episode_delete',
 })
 _SAFE_REVIEW_ERROR_MESSAGES = {
-    'capacity_exceeded': 'Preference capacity is full; the new preference was not saved.',
+    'preference_organizing': (
+        'Preference maintenance is running; the new preference was not saved.'
+    ),
     'partial_failure': 'A memory operation was only partially applied and requires reconciliation.',
     'storage_unavailable': 'Persistent memory storage is temporarily unavailable.',
     'storage_read_failed': 'Persistent memory storage could not be read.',

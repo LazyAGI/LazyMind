@@ -268,9 +268,9 @@ MEMORY_TOOLS_POLICY_APPENDIX: SystemPromptAppendix = {
         'use_memory=false does not disable explicit Episode creation. Never claim that information '
         'was saved unless `MemoryTools_episode_create` or a structured memory editor '
         '(`soul_editor` / `profile_editor` / `preference_editor`) succeeded in the current turn. '
-        'If `MemoryTools_preference_editor` reports `capacity_exceeded`, say that the new preference '
-        'was not saved and that no existing preference was deleted, overwritten, or reordered. '
-        'Never claim or imply automatic eviction or replacement of an existing preference.',
+        'If `MemoryTools_preference_editor` reports `preference_organizing`, say that the requested '
+        'preference change was not saved because maintenance is in progress. Never claim or imply '
+        'that the write was queued, retried, evicted, or replaced automatically.',
     ),
 }
 CLOUD_DOCUMENT_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {

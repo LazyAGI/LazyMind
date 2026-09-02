@@ -21,7 +21,12 @@ from lazymind.chat.service.utils.trace_archive import start_local_trace_maintena
 from lazymind.chat.runtime_loader import start_background_chat_runtime_warmup
 from lazymind.chat.workflow.remote_executor import start_remote_workflow_executor
 from lazymind.rewrite.api import rewrite_routes
-from lazymind.review.api import memory_review_routes, skill_organize_routes, skill_review_routes
+from lazymind.review.api import (
+    memory_review_routes,
+    preference_organizer_routes,
+    skill_organize_routes,
+    skill_review_routes,
+)
 
 
 # Internal workflow polling, heartbeats, and SubAgent event delivery are
@@ -46,6 +51,7 @@ def register_chat_routers(app: FastAPI) -> FastAPI:
     if not config['router_child_proxied_only']:
         app.include_router(rewrite_routes.router)
         app.include_router(memory_review_routes.router)
+        app.include_router(preference_organizer_routes.router)
         app.include_router(skill_organize_routes.router)
         app.include_router(skill_review_routes.router)
         app.include_router(model_features_routes.router)
