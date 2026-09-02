@@ -76,7 +76,7 @@
   "1000823": { "en-US": "cloud provider returned an empty refresh token", "zh-CN": "云服务提供商返回了空的刷新令牌" },
   "1000824": { "en-US": "Google Drive only supports oauth_user connections", "zh-CN": "Google Drive 仅支持 oauth_user 连接" },
   "1000825": { "en-US": "mailbox login failed", "zh-CN": "邮箱登录失败" },
-  "1000826": { "en-US": "only one mailbox account can be connected", "zh-CN": "同时只能连接一个邮箱账号" },
+  "1000826": { "en-US": "this mailbox account is already connected", "zh-CN": "该邮箱账号已连接" },
   "1000828": { "en-US": "this mailbox provider does not support the requested auth mode", "zh-CN": "该邮箱不支持当前授权方式" },
   "1000901": { "en-US": "JWT signing secret is not configured", "zh-CN": "未配置 JWT 签名密钥" },
   "1000902": { "en-US": "cloud provider returned an HTTP error", "zh-CN": "云服务提供商返回 HTTP 错误" },

@@ -20,6 +20,8 @@ const cloudToolTokenTimeout = 5 * time.Second
 
 var cloudToolProviders = []string{"feishu", "googledrive", "notion"}
 
+// gmailimap is IMAP + a Google app password (not Gmail OAuth). App passwords skip
+// Google Cloud OAuth client setup and are the more user-friendly connect path.
 var mailToolProviders = []string{"gmailimap", "qqmail", "qqexmail", "netease163", "neteaseqiye"}
 
 type cloudConnectionList struct {

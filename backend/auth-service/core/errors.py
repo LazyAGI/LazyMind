@@ -114,7 +114,7 @@ class ErrorCodes:
     MAIL_ACCOUNT_ALREADY_CONNECTED: ErrorTuple = (
         409,
         1000826,
-        'only one mailbox account can be connected',
+        'this mailbox account is already connected',
     )
     MAIL_PROVIDER_AUTH_MODE_INVALID: ErrorTuple = (
         400,

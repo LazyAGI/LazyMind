@@ -52,6 +52,8 @@ _IMAP_ENDPOINTS = {
         'imap_host': 'imap.qiye.163.com',
         'smtp_host': 'smtp.qiye.163.com',
     },
+    # IMAP + Google app password, not Gmail OAuth. App passwords skip Google Cloud
+    # OAuth client / consent-screen setup and are the more user-friendly connect path.
     'gmailimap': {'imap_host': 'imap.gmail.com', 'smtp_host': 'smtp.gmail.com'},
 }
 _REAUTH_PATH = '/cloud-documents/mail'
@@ -667,11 +669,12 @@ def _emit_draft_card(draft: dict[str, Any]) -> dict[str, Any]:
 class MailToolkit:
     """Search, read, cite, and send mail through enabled NetEase, Tencent, and Gmail accounts.
 
-    Personal and enterprise mailboxes can be enabled together. Gmail may be connected
-    with OAuth or IMAP. Search results are tagged with mailbox/provider. When more
-    than one mailbox is enabled, pass mailbox (email address or provider name) to
-    read, attach, compose, or send. Sending always requires an explicit user
-    confirmation of the draft preview.
+    Personal and enterprise mailboxes can be enabled together. Gmail connects via
+    IMAP/SMTP with a Google app password, not OAuth; that path is more user-friendly
+    because it does not require a Google Cloud OAuth client or consent screen.
+    Search results are tagged with mailbox/provider. When more than one mailbox is
+    enabled, pass mailbox (email address or provider name) to read, attach, compose,
+    or send. Sending always requires the user to confirm the draft preview card.
     """
 
     __public_apis__ = [
@@ -865,11 +868,11 @@ class MailToolkit:
         return {'ok': True, **preview}
 
     def send_draft(self, draft_id: str, confirm: bool = False) -> dict[str, Any]:
-        """Send a previously composed draft only after the user confirms the preview.
+        """Send a previously composed draft only after the user confirms the preview card.
 
         Args:
             draft_id: Draft id returned by compose_draft.
-            confirm: Must be true, and the current turn must carry the user confirmation.
+            confirm: Ignored. Send is authorized only by mail_draft_confirm_id from the draft card.
         """
         draft = _load_draft(draft_id)
         cred = _pick_account(str(draft.get('mailbox') or draft.get('provider') or ''))

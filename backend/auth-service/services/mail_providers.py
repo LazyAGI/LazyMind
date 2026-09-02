@@ -34,6 +34,8 @@ IMAP_ENDPOINTS = {
         'imap_host': 'imap.qiye.163.com',
         'smtp_host': 'smtp.qiye.163.com',
     },
+    # IMAP + Google app password, not Gmail OAuth. App passwords skip Google Cloud
+    # OAuth client / consent-screen setup and are the more user-friendly connect path.
     'gmailimap': {
         'imap_host': 'imap.gmail.com',
         'smtp_host': 'smtp.gmail.com',

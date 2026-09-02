@@ -18,30 +18,17 @@ import (
 	"lazymind/core/store"
 )
 
-func TestResolveMailDraftConfirmIDFromAskAnswer(t *testing.T) {
-	ext, err := json.Marshal(map[string]any{
-		"ask_pending": map[string]any{
-			"mail_draft": map[string]any{"draft_id": "draft_ac38c2afeac34780"},
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	histories := []orm.ChatHistory{{Ext: ext}}
-	query := "请输入“确认发送”（四个字）以授权从 ai.dev@qq.com 向 firmach@163.com 发送主题为“lazymind测试”的邮件。: 确认发送"
-	body := buildChatRequestBody(context.TODO(), nil, "conv-1", "", query, histories, map[string]any{}, nil, "", 1)
+func TestResolveMailDraftConfirmIDFromDraftCard(t *testing.T) {
+	body := buildChatRequestBody(context.TODO(), nil, "conv-1", "", "确认发送", nil, map[string]any{
+		"mail_draft_confirm_id": "draft_ac38c2afeac34780",
+	}, nil, "", 1)
 	if body["mail_draft_confirm_id"] != "draft_ac38c2afeac34780" {
-		t.Fatalf("expected recovered confirm id, got %#v", body["mail_draft_confirm_id"])
+		t.Fatalf("expected draft-card confirm id, got %#v", body["mail_draft_confirm_id"])
 	}
 
-	plain := buildChatRequestBody(context.TODO(), nil, "conv-1", "", "hello", histories, map[string]any{}, nil, "", 1)
+	plain := buildChatRequestBody(context.TODO(), nil, "conv-1", "", "确认发送", nil, map[string]any{}, nil, "", 1)
 	if _, ok := plain["mail_draft_confirm_id"]; ok {
-		t.Fatalf("did not expect confirm id on unrelated query: %#v", plain["mail_draft_confirm_id"])
-	}
-
-	denied := buildChatRequestBody(context.TODO(), nil, "conv-1", "", "先不发了，保留草稿即可", histories, map[string]any{}, nil, "", 1)
-	if _, ok := denied["mail_draft_confirm_id"]; ok {
-		t.Fatalf("did not expect confirm id on cancel query: %#v", denied["mail_draft_confirm_id"])
+		t.Fatalf("did not expect confirm id without draft card: %#v", plain["mail_draft_confirm_id"])
 	}
 }
 

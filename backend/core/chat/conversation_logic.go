@@ -1175,106 +1175,11 @@ func filesPerTurnMap(histories []orm.ChatHistory, currentFiles any, currentSeq i
 	return out
 }
 
-func lastMailDraftIDFromHistories(histories []orm.ChatHistory) string {
-	for i := len(histories) - 1; i >= 0; i-- {
-		if len(histories[i].Ext) == 0 {
-			continue
-		}
-		var ext struct {
-			AskPending map[string]any `json:"ask_pending"`
-		}
-		if err := json.Unmarshal(histories[i].Ext, &ext); err != nil || ext.AskPending == nil {
-			continue
-		}
-		draft, _ := ext.AskPending["mail_draft"].(map[string]any)
-		if draft == nil {
-			continue
-		}
-		id, _ := draft["draft_id"].(string)
-		if trimmed := strings.TrimSpace(id); trimmed != "" {
-			return trimmed
-		}
+func resolveMailDraftConfirmID(raw map[string]any) string {
+	if draftID, ok := raw["mail_draft_confirm_id"].(string); ok {
+		return strings.TrimSpace(draftID)
 	}
 	return ""
-}
-
-func askAnswerLooksLikeMailSendConfirm(raw map[string]any) bool {
-	structured := askAnswersStructuredFromRaw(raw)
-	if structured == nil {
-		return false
-	}
-	questions, _ := structured["questions"].([]any)
-	for _, item := range questions {
-		question, ok := item.(map[string]any)
-		if !ok {
-			continue
-		}
-		answer, _ := question["answer"].(map[string]any)
-		if answer == nil {
-			continue
-		}
-		switch value := answer["value"].(type) {
-		case string:
-			if mailSendConfirmAnswer(value) {
-				return true
-			}
-		case []any:
-			for _, part := range value {
-				text, _ := part.(string)
-				if mailSendConfirmAnswer(text) {
-					return true
-				}
-			}
-		}
-	}
-	return false
-}
-
-func mailSendConfirmAnswer(value string) bool {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "确认发送", "是", "yes", "y", "true", "send":
-		return true
-	default:
-		return false
-	}
-}
-
-func looksLikeMailSendConfirm(raw map[string]any, query string) bool {
-	if askAnswerLooksLikeMailSendConfirm(raw) {
-		return true
-	}
-	q := strings.TrimSpace(query)
-	if q == "" {
-		return false
-	}
-	lower := strings.ToLower(q)
-	for _, denied := range []string{"不发送", "不要发", "取消发送", "先不发", "don't send", "do not send", "cancel send"} {
-		if strings.Contains(lower, denied) || strings.Contains(q, denied) {
-			return false
-		}
-	}
-	if strings.Contains(q, "请发送刚才确认的邮件草稿") || strings.Contains(lower, "send the mail draft i just confirmed") {
-		return true
-	}
-	if mailSendConfirmAnswer(q) {
-		return true
-	}
-	if i := strings.LastIndex(q, ": "); i >= 0 {
-		return mailSendConfirmAnswer(q[i+2:])
-	}
-	return false
-}
-
-func resolveMailDraftConfirmID(raw map[string]any, query string, histories []orm.ChatHistory) string {
-	if draftID, ok := raw["mail_draft_confirm_id"].(string); ok {
-		if trimmed := strings.TrimSpace(draftID); trimmed != "" {
-			return trimmed
-		}
-	}
-	if !looksLikeMailSendConfirm(raw, query) {
-		return ""
-	}
-	return lastMailDraftIDFromHistories(histories)
 }
 
 func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, query string, histories []orm.ChatHistory, raw map[string]any, resourceContext *evolution.ChatResourceContext, userID string, currentSeq int) map[string]any {
@@ -1324,7 +1229,7 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 	if skip, ok := raw["skip_sensitive_filter"].(bool); ok && skip {
 		body["skip_sensitive_filter"] = true
 	}
-	if confirmID := resolveMailDraftConfirmID(raw, query, histories); confirmID != "" {
+	if confirmID := resolveMailDraftConfirmID(raw); confirmID != "" {
 		body["mail_draft_confirm_id"] = confirmID
 	}
 	if mentionContext := buildMentionResourceContext(ctx, db, userID, histories, raw); mentionContext != "" {
