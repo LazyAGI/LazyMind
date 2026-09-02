@@ -26,6 +26,7 @@ const (
 type PreferenceOrganizerRequest struct {
 	TargetItems         int `json:"target_items"`
 	MinItems            int `json:"min_items"`
+	HardMinItems        int `json:"hard_min_items"`
 	MaxItems            int `json:"max_items"`
 	TargetPromptPercent int `json:"target_prompt_percent"`
 	MaxChanges          int `json:"max_changes"`
@@ -45,8 +46,9 @@ func DefaultPreferenceOrganizerRequest() PreferenceOrganizerRequest {
 	return PreferenceOrganizerRequest{
 		TargetItems:         30,
 		MinItems:            20,
+		HardMinItems:        15,
 		MaxItems:            40,
-		TargetPromptPercent: 70,
+		TargetPromptPercent: 40,
 		MaxChanges:          50,
 		MaxPasses:           2,
 		MaxRoundsPerPass:    60,
@@ -274,7 +276,8 @@ func (w *Worker) handlePreferenceOrganizer(ctx context.Context, task orm.Resourc
 		var callErr error
 		resp, status, callErr = w.callers.PreferenceOrganizer(callCtx, algo.PreferenceOrganizerRequest{
 			TaskID: algorithmTaskID, UserID: userID, LLMConfig: llmConfig,
-			TargetItems: request.TargetItems, MinItems: request.MinItems, MaxItems: request.MaxItems,
+			TargetItems: request.TargetItems, MinItems: request.MinItems,
+			HardMinItems: request.HardMinItems, MaxItems: request.MaxItems,
 			TargetPromptPercent: request.TargetPromptPercent, MaxChanges: request.MaxChanges,
 			MaxPasses: request.MaxPasses, MaxRoundsPerPass: request.MaxRoundsPerPass,
 		})
@@ -312,7 +315,8 @@ func (w *Worker) handlePreferenceOrganizer(ctx context.Context, task orm.Resourc
 		return permanentOutcome("preference_organizer_invalid_result", marshalErr.Error())
 	}
 	if resp.Status == "success" && (resp.Outcome == "organized" ||
-		resp.Outcome == "no_safe_changes" || resp.Outcome == "budget_exhausted") {
+		resp.Outcome == "organized_with_remaining" || resp.Outcome == "no_safe_changes" ||
+		resp.Outcome == "budget_exhausted") {
 		return taskOutcome{Status: orm.ResourceUpdateTaskStatusDone, ResultID: algorithmTaskID, ResultJSON: resultJSON}
 	}
 	code := "preference_organizer_failed"

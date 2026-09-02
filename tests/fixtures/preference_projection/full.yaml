@@ -1,0 +1,16 @@
+preferences:
+- name: pref.fact.verify_latest
+  summary: 涉及时效信息时先联网核实。
+  ref: references/fact-verify-latest.md
+  created_at: '2026-08-15T00:00:00Z'
+  updated_at: '2026-08-15T00:00:00Z'
+- name: pref.review.overdesign
+  summary: PR Review 重点检查过度设计和冗余实现。
+  ref: references/review-overdesign.md
+  created_at: '2026-08-16T00:00:00Z'
+  updated_at: '2026-08-17T00:00:00Z'
+- name: pref.response.concise
+  summary: 默认使用简洁直接的表达。
+  ref: references/response-concise.md
+  created_at: '2026-08-18T00:00:00Z'
+  updated_at: '2026-08-18T00:00:00Z'

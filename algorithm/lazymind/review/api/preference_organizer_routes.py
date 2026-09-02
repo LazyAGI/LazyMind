@@ -20,8 +20,9 @@ class PreferenceOrganizerPayload(BaseModel):
     llm_config: Optional[Dict[str, Any]] = None
     target_items: int = Field(30, ge=1, le=100)
     min_items: int = Field(20, ge=1, le=100)
+    hard_min_items: int = Field(15, ge=1, le=100)
     max_items: int = Field(40, ge=1, le=100)
-    target_prompt_percent: int = Field(70, ge=1, le=100)
+    target_prompt_percent: int = Field(40, ge=1, le=100)
     max_changes: int = Field(50, ge=1, le=100)
     max_passes: int = Field(2, ge=1, le=2)
     max_rounds_per_pass: int = Field(60, ge=1, le=60)
@@ -34,8 +35,11 @@ class PreferenceOrganizerPayload(BaseModel):
             raise ValueError("task_id must start with 'preference_organizer_'.")
         if not self.user_id:
             raise ValueError('user_id must be non-empty.')
-        if not self.min_items <= self.target_items <= self.max_items:
-            raise ValueError('target_items must be between min_items and max_items.')
+        if not self.hard_min_items <= self.min_items <= self.target_items <= self.max_items:
+            raise ValueError(
+                'item limits must satisfy hard_min_items <= min_items <= '
+                'target_items <= max_items.'
+            )
         return self
 
 

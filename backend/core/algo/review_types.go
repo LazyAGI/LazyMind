@@ -67,6 +67,7 @@ type PreferenceOrganizerRequest struct {
 	LLMConfig           map[string]any `json:"llm_config"`
 	TargetItems         int            `json:"target_items"`
 	MinItems            int            `json:"min_items"`
+	HardMinItems        int            `json:"hard_min_items"`
 	MaxItems            int            `json:"max_items"`
 	TargetPromptPercent int            `json:"target_prompt_percent"`
 	MaxChanges          int            `json:"max_changes"`

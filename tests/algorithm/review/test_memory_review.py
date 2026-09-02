@@ -480,6 +480,18 @@ def test_review_memory_runs_agent_with_all_memory_tools(monkeypatch):
 
     memory_tools = FakeMemoryTools()
     review_episode_tools = object()
+    full_memory_context = SimpleNamespace(
+        soul='identity:\n  name: LazyMind',
+        profile='identity:\n  preferred_name: Alice',
+        preference=(
+            'preferences:\n'
+            '- name: pref.response.concise\n'
+            '  summary: Prefer concise responses.\n'
+            '  ref: references/response-concise.md\n'
+            '  created_at: 2026-08-15T00:00:00+00:00\n'
+            '  updated_at: 2026-08-16T00:00:00+00:00\n'
+        ),
+    )
 
     existing_episode = SimpleNamespace(
         id='ep_existing',
@@ -510,15 +522,17 @@ def test_review_memory_runs_agent_with_all_memory_tools(monkeypatch):
         memory_tools=memory_tools,
         review_episode_tools=review_episode_tools,
         episode_store=FakeEpisodeStore(),
-        memory_context=SimpleNamespace(
-            soul='identity:\n  name: LazyMind',
-            profile='identity:\n  preferred_name: Alice',
-            preference='- name: pref.response.concise',
-        ),
+        memory_context=full_memory_context,
         config={'core_api_url': 'http://core', 'review_max_retries': 2},
         inject_model_config=inject_model_config,
         normalize_history_for_agent=normalize_history_for_agent,
     )
+
+    def load_full_memory_context(**kwargs):
+        calls['memory_context_kwargs'] = kwargs
+        return full_memory_context
+
+    monkeypatch.setattr(memory_review, 'load_memory_context', load_full_memory_context)
     monkeypatch.setattr(memory_review, 'time_ns', lambda: 1_234_567_890_000_000)
 
     result = memory_review.review_memory(
@@ -545,6 +559,10 @@ def test_review_memory_runs_agent_with_all_memory_tools(monkeypatch):
     assert 'identity:' in calls['prompt']
     assert 'preferred_name: Alice' in calls['prompt']
     assert 'pref.response.concise' in calls['prompt']
+    assert 'references/response-concise.md' in calls['prompt']
+    assert 'created_at: 2026-08-15' in calls['prompt']
+    assert 'updated_at: 2026-08-16' in calls['prompt']
+    assert calls['memory_context_kwargs'] == {'project_preference': False}
     assert '发布方案已经确定为蓝色发布' in calls['prompt']
     assert calls['episode_scope'] == ('user-1', 'conversation-1')
     assert fake_lazyllm.globals['agentic_config']['user_id'] == 'user-1'

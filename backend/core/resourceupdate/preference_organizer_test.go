@@ -138,13 +138,15 @@ func TestPreferenceOrganizerWorkerPersistsStructuredResult(t *testing.T) {
 		request algo.PreferenceOrganizerRequest,
 	) (*algo.PreferenceOrganizerResponse, int, error) {
 		if request.TaskID != PreferenceOrganizerAlgorithmTaskID("organizer-worker-1") ||
-			request.MaxPasses != 2 || request.MaxChanges != 50 {
+			request.MaxPasses != 2 || request.MaxChanges != 50 ||
+			request.HardMinItems != 15 || request.TargetPromptPercent != 40 {
 			t.Fatalf("unexpected organizer request: %#v", request)
 		}
 		return &algo.PreferenceOrganizerResponse{
-			Status: "success", TaskID: request.TaskID, Outcome: "organized",
+			Status: "success", TaskID: request.TaskID, Outcome: "organized_with_remaining",
 			Result: map[string]any{
 				"current_pass": 2, "passes_attempted": 2, "total_changes": 7,
+				"target_reached": false, "stop_reason": "no_further_safe_changes",
 				"passes": []any{},
 			},
 		}, http.StatusOK, nil
@@ -160,6 +162,7 @@ func TestPreferenceOrganizerWorkerPersistsStructuredResult(t *testing.T) {
 	}
 	if task.Status != orm.ResourceUpdateTaskStatusDone ||
 		!strings.Contains(string(task.ResultJSON), `"passes_attempted":2`) ||
+		!strings.Contains(string(task.ResultJSON), `"stop_reason":"no_further_safe_changes"`) ||
 		strings.Contains(string(task.RequestJSON), "secret") {
 		t.Fatalf("unexpected persisted task: %#v result=%s", task, task.ResultJSON)
 	}

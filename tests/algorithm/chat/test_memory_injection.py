@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from lazymind.common.memory import (
@@ -7,12 +9,15 @@ from lazymind.common.memory import (
     truncate_preference_index,
 )
 from lazymind.common.memory.paths import PREFERENCE_PATH, PROFILE_PATH, SOUL_PATH
-from lazymind.common.memory.validation import PreferenceItem, append_preference_item
+from lazymind.common.memory.preference_projection import build_preference_projection
 from lazymind.common.memory.store import MemoryStore
+from lazymind.common.memory.validation import PreferenceItem, append_preference_item
+from lazymind.common.memory.validation.preference import parse_preference_items
 from lazymind.config import config as _cfg
 
 SAMPLE_PREFERENCE = 'preferences: []\n'
 TIMESTAMP = '2026-07-20T09:30:00+08:00'
+PROJECTION_FIXTURES = Path(__file__).parents[2] / 'fixtures' / 'preference_projection'
 
 
 class FakeRemoteFS:
@@ -73,11 +78,33 @@ def test_truncate_preference_index_uses_configured_item_and_character_limits():
         with _cfg.temp('preference_context_max_chars', 5000):
             truncated = truncate_preference_index(content)
 
-    assert truncated.count('- name:') == 2
-    assert 'pref.configured.0' in truncated
-    assert 'pref.configured.1' in truncated
-    assert 'pref.configured.2' not in truncated
+    assert truncated.count('- summary:') == 2
+    assert 'name:' not in truncated
+    assert 'created_at:' not in truncated
+    assert 'updated_at:' not in truncated
+    assert 'references/topic.md#item-0' in truncated
+    assert 'references/topic.md#item-1' in truncated
+    assert 'references/topic.md#item-2' not in truncated
     assert len(truncated) <= 5000
+
+
+def test_projection_matches_shared_golden_fixture_and_character_counts():
+    full = (PROJECTION_FIXTURES / 'full.yaml').read_text()
+    expected = (PROJECTION_FIXTURES / 'compact.yaml').read_text()
+    expected_first_two = (PROJECTION_FIXTURES / 'compact-first-two.yaml').read_text()
+    items = parse_preference_items(full)
+
+    complete = build_preference_projection(items, max_items=100, max_chars=5000)
+    truncated = build_preference_projection(items, max_items=2, max_chars=5000)
+
+    assert complete.content == expected
+    assert complete.full_projection_chars == len(expected)
+    assert complete.projected_chars == len(expected)
+    assert not complete.projection_truncated
+    assert truncated.content == expected_first_two
+    assert truncated.projected_chars == len(expected_first_two)
+    assert truncated.projected_items == 2
+    assert truncated.projection_truncated
 
 
 def test_load_memory_context_reads_store_without_references():
@@ -138,10 +165,15 @@ def test_load_memory_context_reads_store_without_references():
     ctx = load_memory_context(MemoryStore(fs))
     assert 'LazyMind' in ctx.soul
     assert 'Alice' in ctx.profile
-    assert 'pref.response.detail' in ctx.preference
+    assert ctx.preference == (
+        'preferences:\n'
+        '- summary: Prefer concise answers.\n'
+        '  ref: references/response.md\n'
+    )
     assert 'long detail body' not in ctx.preference
+    assert 'name:' not in ctx.preference
     assert 'created_at:' not in ctx.preference
-    assert 'updated_at:' in ctx.preference
+    assert 'updated_at:' not in ctx.preference
 
     full_ctx = load_memory_context(
         MemoryStore(fs),

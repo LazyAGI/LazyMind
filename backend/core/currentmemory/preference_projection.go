@@ -1,6 +1,11 @@
 package currentmemory
 
-import "gopkg.in/yaml.v3"
+import (
+	"strings"
+	"unicode/utf8"
+
+	"gopkg.in/yaml.v3"
+)
 
 type PreferenceProjectionState struct {
 	StoredItems         int  `json:"stored_items"`
@@ -11,10 +16,8 @@ type PreferenceProjectionState struct {
 }
 
 type preferencePromptItem struct {
-	Name      string `yaml:"name"`
-	Summary   string `yaml:"summary"`
-	Ref       string `yaml:"ref"`
-	UpdatedAt string `yaml:"updated_at"`
+	Summary string `yaml:"summary"`
+	Ref     string `yaml:"ref"`
 }
 
 func BuildPreferenceProjectionState(
@@ -25,7 +28,7 @@ func BuildPreferenceProjectionState(
 	all := make([]preferencePromptItem, 0, len(document.Preferences))
 	for _, item := range document.Preferences {
 		all = append(all, preferencePromptItem{
-			Name: item.Name, Summary: item.Summary, Ref: item.Ref, UpdatedAt: item.UpdatedAt,
+			Summary: item.Summary, Ref: item.Ref,
 		})
 	}
 	fullContent := renderPreferencePromptItems(all)
@@ -35,23 +38,44 @@ func BuildPreferenceProjectionState(
 			break
 		}
 		candidate := append(append([]preferencePromptItem{}, projected...), item)
-		if len(renderPreferencePromptItems(candidate)) > maxChars {
+		if preferenceProjectionChars(renderPreferencePromptItems(candidate)) > maxChars {
 			break
 		}
 		projected = candidate
 	}
 	projectedContent := renderPreferencePromptItems(projected)
 	return PreferenceProjectionState{
-		StoredItems: len(all), FullProjectionChars: len(fullContent),
-		ProjectedItems: len(projected), ProjectedChars: len(projectedContent),
+		StoredItems: len(all), FullProjectionChars: preferenceProjectionChars(fullContent),
+		ProjectedItems: len(projected), ProjectedChars: preferenceProjectionChars(projectedContent),
 		ProjectionTruncated: len(projected) < len(all),
 	}
 }
 
+func preferenceProjectionChars(content string) int {
+	return utf8.RuneCountInString(content)
+}
+
 func renderPreferencePromptItems(items []preferencePromptItem) string {
-	content, err := yaml.Marshal(map[string]any{"preferences": items})
-	if err != nil {
+	if len(items) == 0 {
 		return "preferences: []\n"
 	}
-	return string(content)
+	var output strings.Builder
+	output.WriteString("preferences:\n")
+	for _, item := range items {
+		content, err := yaml.Marshal(item)
+		if err != nil {
+			return "preferences: []\n"
+		}
+		lines := strings.Split(strings.TrimSuffix(string(content), "\n"), "\n")
+		for index, line := range lines {
+			if index == 0 {
+				output.WriteString("- ")
+			} else {
+				output.WriteString("  ")
+			}
+			output.WriteString(line)
+			output.WriteByte('\n')
+		}
+	}
+	return output.String()
 }

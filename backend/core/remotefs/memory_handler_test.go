@@ -801,6 +801,33 @@ func TestPreferenceWriteAtCharacterThresholdEnqueuesOrganizer(t *testing.T) {
 	}
 }
 
+func TestPreferenceProjectionTruncationEnqueuesOrganizer(t *testing.T) {
+	db := newRemoteFSTestDB(t)
+	handler := newMemoryCurrentHandler(
+		newMemoryCurrentServiceWithPreferenceIndexMaxItems(db.DB, 2),
+	)
+	content := renderPreferenceCount(t, 3, "short summary")
+	request := httptest.NewRequest(
+		http.MethodPut,
+		"/remote-fs/content?path="+memoryPreferencePath+"&user_id=u-truncated",
+		strings.NewReader(content),
+	)
+	recorder := httptest.NewRecorder()
+	handler.Content(recorder, request, memoryPreferencePath)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("preference write status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var count int64
+	if err := db.Model(&orm.ResourceUpdateTask{}).
+		Where("user_id = ? AND task_type = ?", "u-truncated", orm.ResourceUpdateTaskTypeOrganizePreference).
+		Count(&count).Error; err != nil {
+		t.Fatalf("count organizer tasks: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("organizer task count=%d, want 1", count)
+	}
+}
+
 func TestPreferenceStorageAcceptsMoreThanOneHundredItems(t *testing.T) {
 	db := newRemoteFSTestDB(t)
 	handler := newMemoryCurrentHandler(newMemoryCurrentService(db.DB))

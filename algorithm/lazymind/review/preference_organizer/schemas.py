@@ -44,6 +44,8 @@ class PreferenceOrganizerResultData(BaseModel):
     total_changes: int = 0
     outcome: str
     reason: str = ''
+    target_reached: bool = False
+    stop_reason: str = ''
 
 
 class PreferenceOrganizerResult(BaseModel):
@@ -53,6 +55,7 @@ class PreferenceOrganizerResult(BaseModel):
     task_id: str
     outcome: Literal[
         'organized',
+        'organized_with_remaining',
         'no_safe_changes',
         'budget_exhausted',
         'stale_state',

@@ -20,6 +20,7 @@ from lazymind.common.memory import (
     PreferenceItem,
     build_reference_path,
     get_episode_store,
+    validate_reference_content,
 )
 from lazymind.common.memory.editors.preference import (
     build_preference_reference_content,
@@ -60,7 +61,7 @@ class ChangeBudget:
 class PreferenceOrganizerGate:
     pass_number: int
     budget: ChangeBudget
-    min_items: int
+    hard_min_items: int
     phase: str = 'analyze'
     plan_markdown: str = ''
     plan_hash: str = ''
@@ -82,7 +83,7 @@ class PreferenceOrganizerGate:
             authorized = _parse_authorized_operations(
                 normalized,
                 snapshot,
-                min_items=self.min_items,
+                hard_min_items=self.hard_min_items,
                 changes_remaining=self.budget.maximum - self.budget.used,
             )
         except (TypeError, ValueError) as exc:
@@ -174,10 +175,11 @@ class PreferenceOrganizerAnalyzeTools:
 
     @tool_concurrency(read_keys=('memory', 'memory/users/preference.yaml'))
     def read_preference_state(self) -> dict[str, Any]:
-        """Read the complete, untruncated Preference index and projection statistics."""
+        """Read the complete Preference index and current item count."""
         snapshot = load_preference_state()
         return {
-            **snapshot.data.model_dump(),
+            'stored_items': snapshot.data.stored_items,
+            'etag': snapshot.data.etag,
             'preferences': [item.__dict__ for item in snapshot.items],
         }
 
@@ -223,8 +225,8 @@ class PreferenceOrganizerApplyTools:
             normalized_sources = operation['source_names']
             normalized_name = operation['name']
             self.gate.budget.require(len(normalized_sources))
-            if snapshot.data.stored_items - len(normalized_sources) + 1 < self.gate.min_items:
-                raise ValueError('merge would reduce Preference below the configured minimum.')
+            if snapshot.data.stored_items - len(normalized_sources) + 1 < self.gate.hard_min_items:
+                raise ValueError('merge would reduce Preference below the hard minimum.')
             _merge_preferences(
                 snapshot,
                 source_names=normalized_sources,
@@ -254,8 +256,8 @@ class PreferenceOrganizerApplyTools:
             )
             normalized_name = operation['name']
             self.gate.budget.require(1)
-            if snapshot.data.stored_items - 1 < self.gate.min_items:
-                raise ValueError('move would reduce Preference below the configured minimum.')
+            if snapshot.data.stored_items - 1 < self.gate.hard_min_items:
+                raise ValueError('move would reduce Preference below the hard minimum.')
             episode_id = _move_preference_to_episode(
                 snapshot, normalized_name, operation['episode_summary'],
             )
@@ -280,8 +282,8 @@ class PreferenceOrganizerApplyTools:
             replacement = operation['retained_or_replacement_name']
             names = [normalized_name, *([replacement] if replacement else [])]
             self.gate.budget.require(1)
-            if snapshot.data.stored_items - 1 < self.gate.min_items:
-                raise ValueError('delete would reduce Preference below the configured minimum.')
+            if snapshot.data.stored_items - 1 < self.gate.hard_min_items:
+                raise ValueError('delete would reduce Preference below the hard minimum.')
             try:
                 MemoryStore().remove_preference_with_reference(normalized_name)
                 changes = 1
@@ -303,7 +305,7 @@ def _parse_authorized_operations(
     markdown: str,
     snapshot: PreferenceStateSnapshot,
     *,
-    min_items: int,
+    hard_min_items: int,
     changes_remaining: int,
 ) -> list[dict[str, Any]]:
     match = _AUTHORIZED_OPERATIONS_RE.search(markdown)
@@ -347,14 +349,18 @@ def _parse_authorized_operations(
             name = validate_preference_name(raw.get('name'))
             if name in known_names or name in source_names:
                 raise ValueError('merge name must be new at Gate time.')
+            summary = _required_text(raw.get('summary'), 'summary')
+            if len(summary) > 100:
+                raise ValueError('merge summary must be at most 100 characters.')
             operation = {
                 'operation_id': operation_id,
                 'action': action,
                 'source_names': source_names,
                 'name': name,
+                'summary': summary,
                 **{
                     key: _required_text(raw.get(key), key)
-                    for key in ('summary', 'scenario', 'details', 'reason')
+                    for key in ('scenario', 'details', 'reason')
                 },
             }
             known_names.difference_update(source_names)
@@ -410,8 +416,8 @@ def _parse_authorized_operations(
             change_count += 1
         else:
             raise ValueError(f'unsupported authorized action: {action!r}.')
-        if count < min_items:
-            raise ValueError('Authorized Plan would reduce Preference below the minimum.')
+        if count < hard_min_items:
+            raise ValueError('Authorized Plan would reduce Preference below the hard minimum.')
         if change_count > changes_remaining:
             raise ValueError('Authorized Plan exceeds the remaining change budget.')
         authorized.append(operation)
@@ -452,7 +458,11 @@ def _merge_preferences(
     source_items = [by_name[source_name] for source_name in source_names]
     earliest_index = min(items.index(item) for item in source_items)
     earliest = min(source_items, key=lambda item: item.created_at)
-    frontmatter, _body = parse_yaml_frontmatter(MemoryStore().read_reference(earliest.ref))
+    source_references = {
+        item.name: _read_valid_reference(item.ref)
+        for item in source_items
+    }
+    frontmatter, _body = parse_yaml_frontmatter(source_references[earliest.name])
     source = frontmatter.get('source') if isinstance(frontmatter, dict) else {}
     source = source if isinstance(source, dict) else {}
     source_kind = str(source.get('kind') or '').strip()
@@ -512,7 +522,7 @@ def _move_preference_to_episode(
     item = next((candidate for candidate in snapshot.items if candidate.name == name), None)
     if item is None:
         raise StalePreferenceStateError(f'preference {name!r} no longer exists.')
-    reference_content = MemoryStore().read_reference(item.ref)
+    reference_content = _read_valid_reference(item.ref)
     frontmatter, _body = parse_yaml_frontmatter(reference_content)
     source = frontmatter.get('source') if isinstance(frontmatter, dict) else {}
     source = source if isinstance(source, dict) else {}
@@ -529,8 +539,25 @@ def _move_preference_to_episode(
             ),
         ),
     )
-    MemoryStore().remove_preference_with_reference(name)
+    try:
+        MemoryStore().remove_preference_with_reference(name)
+    except Exception as exc:
+        raise MemoryPartialApplyError(
+            'Episode was created but the source Preference could not be removed.',
+            operation='move_to_episode',
+            applied=['episode'],
+            failed=['preference_cleanup'],
+            item=item,
+        ) from exc
     return create_result.id
+
+
+def _read_valid_reference(ref: str) -> str:
+    content = MemoryStore().read_reference(ref)
+    error = validate_reference_content(content)
+    if error:
+        raise ValueError(f'Preference Reference {ref!r} is invalid: {error}')
+    return content
 
 
 def _agentic_value(key: str) -> Any:
