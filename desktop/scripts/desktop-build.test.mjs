@@ -557,6 +557,7 @@ test("desktop release builds each platform once and publishes only after both pa
   assert.match(source, /release:[\s\S]*needs:\s*\n\s*- macos\s*\n\s*- windows/);
   assert.match(source, /release:\s*\n\s*name: Create draft desktop release\s*\n\s*if: \$\{\{ !contains\(github\.ref_name, '-'\) \}\}/);
   assert.match(source, /release:[\s\S]*permissions:[\s\S]*contents: write/);
+  assert.match(source, /GH_REPO: \$\{\{ github\.repository \}\}/);
   assert.match(source, /name: Download tested macOS installer/);
   assert.match(source, /name: Download tested Windows installer/);
   assert.match(source, /gh release create/);
