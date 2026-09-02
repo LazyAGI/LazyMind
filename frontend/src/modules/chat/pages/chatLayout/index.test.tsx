@@ -21,15 +21,37 @@ const mocks = vi.hoisted(() => ({
   openResumeSSE: vi.fn(),
   disconnectConversationStream: vi.fn(),
   createNewChat: vi.fn(),
+  sendMessage: vi.fn(),
   setThinkingDepth: vi.fn(),
   messageError: vi.fn(),
+  clearPendingMessage: vi.fn(),
+  sseConstructor: vi.fn(),
+  pendingMessage: null as any,
+  latestChatContainerProps: null as any,
+  latestSideChatPanelProps: null as any,
 }));
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     i18n: { language: "zh-CN", resolvedLanguage: "zh-CN" },
-    t: (key: string) => key,
+    t: (key: string, params?: { parent?: string }) => {
+      if (key === "chat.conversationSourceFrom") {
+        return `来源：${params?.parent}`;
+      }
+      if (key === "chat.conversationForkedFrom") {
+        return `Fork自：${params?.parent}`;
+      }
+      return key;
+    },
   }),
+}));
+
+vi.mock("react-router-dom", () => ({
+  Link: ({ to, children, ...props }: any) => (
+    <a href={to} {...props}>
+      {children}
+    </a>
+  ),
 }));
 
 vi.mock("antd", () => ({
@@ -54,14 +76,29 @@ vi.mock("@/components/auth", () => ({
 
 vi.mock("@/modules/chat/components/newChatContainer", () => ({
   default: forwardRef(function MockChatContainer(props: any, ref) {
+    mocks.latestChatContainerProps = props;
     useImperativeHandle(ref, () => ({
       replaceMessageList: mocks.replaceMessageList,
       openResumeSSE: mocks.openResumeSSE,
       disconnectConversationStream: mocks.disconnectConversationStream,
       createNewChat: mocks.createNewChat,
+      sendMessage: mocks.sendMessage,
     }));
     return <div data-testid="chat-container" data-session-id={props.sessionId} />;
   }),
+}));
+
+vi.mock("@/modules/chat/components/SideChatPanel", () => ({
+  default: (props: any) => {
+    mocks.latestSideChatPanelProps = props;
+    return props.open ? (
+      <div
+        data-testid="side-chat-panel"
+        data-parent-id={props.parentConversationId}
+        data-selected-text={props.source?.selectedText || ""}
+      />
+    ) : null;
+  },
 }));
 
 vi.mock("@/modules/chat/components/InitialCard", () => ({ default: () => null }));
@@ -92,7 +129,7 @@ vi.mock("@/modules/chat/utils/message", () => ({
 
 vi.mock("@/modules/chat/utils/sse", () => ({
   Method: { POST: "POST" },
-  SSE: vi.fn(),
+  SSE: mocks.sseConstructor,
 }));
 
 vi.mock("@/modules/chat/utils/environment", () => ({
@@ -105,7 +142,10 @@ vi.mock("@/utils/developerMode", () => ({
 }));
 
 vi.mock("@/modules/chat/store/chatMessage", () => ({
-  useChatMessageStore: () => ({ pendingMessage: null, clearPendingMessage: vi.fn() }),
+  useChatMessageStore: () => ({
+    pendingMessage: mocks.pendingMessage,
+    clearPendingMessage: mocks.clearPendingMessage,
+  }),
 }));
 
 vi.mock("@/modules/chat/store/chatThink", () => ({
@@ -128,6 +168,8 @@ vi.mock("@/modules/chat/store/workflowPanel", () => {
     autoRunningByConversation: {},
     sessionByConversation: {},
     workflowUIByWorkflow: {},
+    focusedTabByConversation: {},
+    focusedSortOrderByConversation: {},
     fetchWorkflowUI: vi.fn(),
     syncSessionSearchConfig: vi.fn(),
   };
@@ -160,6 +202,9 @@ describe("ChatLayout conversation loading", () => {
   beforeEach(() => {
     window.sessionStorage.clear();
     vi.clearAllMocks();
+    mocks.pendingMessage = null;
+    mocks.latestChatContainerProps = null;
+    mocks.latestSideChatPanelProps = null;
     mocks.getChatStatus.mockResolvedValue({ data: { is_generating: false } });
     mocks.listConversations.mockResolvedValue({ data: { conversations: [] } });
     mocks.getConversationHistory.mockImplementation(({ name }: { name: string }) =>
@@ -179,6 +224,278 @@ describe("ChatLayout conversation loading", () => {
 
     expect(mocks.createNewChat).not.toHaveBeenCalled();
     expect(mocks.disconnectConversationStream).not.toHaveBeenCalled();
+  });
+
+  it("sends an initial model selection only for the first new-conversation request", async () => {
+    const initialModelSelection = { mode: "fixed", model_id: "model-1" };
+    mocks.pendingMessage = {
+      text: "hello",
+      initial_model_selection: initialModelSelection,
+    };
+
+    const { unmount } = render(
+      <ChatLayout
+        setIsChatContent={vi.fn()}
+        initchatConfig={{}}
+        setChatConfigFn={vi.fn()}
+        canChat
+      />,
+    );
+
+    await waitFor(() => {
+      expect(mocks.sendMessage).toHaveBeenCalledWith(mocks.pendingMessage);
+    });
+
+    const prepareFirstConversationId = vi.fn();
+    await act(async () => {
+      await mocks.latestChatContainerProps.onOpenSSE(
+        [],
+        "chat_action_next",
+        {},
+        { __prepareClientConversationId: prepareFirstConversationId },
+      );
+    });
+    const firstCall = mocks.sseConstructor.mock.calls[0];
+    const firstPayload = JSON.parse(firstCall[1].payload);
+    expect(firstPayload.conversation_id).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    );
+    expect(prepareFirstConversationId).toHaveBeenCalledWith(
+      firstPayload.conversation_id,
+    );
+    expect(firstPayload.initial_model_selection).toEqual(initialModelSelection);
+
+    const prepareRetryConversationId = vi.fn();
+    await act(async () => {
+      await mocks.latestChatContainerProps.onOpenSSE(
+        [],
+        "chat_action_next",
+        {},
+        { __prepareClientConversationId: prepareRetryConversationId },
+      );
+    });
+    const secondCall = mocks.sseConstructor.mock.calls[1];
+    const secondPayload = JSON.parse(secondCall[1].payload);
+    expect(secondPayload.conversation_id).toBe(firstPayload.conversation_id);
+    expect(prepareRetryConversationId).toHaveBeenCalledWith(
+      firstPayload.conversation_id,
+    );
+    expect(secondPayload).not.toHaveProperty("initial_model_selection");
+
+    act(() => {
+      mocks.latestChatContainerProps.onConversationIdChange(
+        "different-conversation",
+      );
+    });
+    expect(screen.getByTestId("chat-container")).toHaveAttribute(
+      "data-session-id",
+      "",
+    );
+
+    mocks.getConversationDetail.mockResolvedValue({
+      data: {
+        conversation: {
+          conversation_id: firstPayload.conversation_id,
+          thinking_depth: "medium",
+          search_config: {},
+          settings: { chat_executor: "lazymind" },
+        },
+      },
+    });
+    act(() => {
+      mocks.latestChatContainerProps.onConversationIdChange(
+        firstPayload.conversation_id,
+      );
+    });
+    expect(screen.getByTestId("chat-container")).toHaveAttribute(
+      "data-session-id",
+      firstPayload.conversation_id,
+    );
+
+    unmount();
+    mocks.pendingMessage = null;
+    mocks.sseConstructor.mockClear();
+    mocks.getConversationDetail.mockResolvedValue({
+      data: {
+        conversation: {
+          conversation_id: "conversation-history",
+          thinking_depth: "medium",
+          search_config: {},
+          settings: { chat_executor: "lazymind" },
+        },
+      },
+    });
+
+    render(
+      <ChatLayout
+        conversationId="conversation-history"
+        setIsChatContent={vi.fn()}
+        initchatConfig={{}}
+        setChatConfigFn={vi.fn()}
+        canChat
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("chat-container")).toHaveAttribute(
+        "data-session-id",
+        "conversation-history",
+      );
+    });
+    await act(async () => {
+      await mocks.latestChatContainerProps.onOpenSSE(
+        [],
+        "chat_action_next",
+        {},
+      );
+    });
+    const historicalCall = mocks.sseConstructor.mock.calls[0];
+    const historicalPayload = JSON.parse(historicalCall[1].payload);
+    expect(historicalPayload).not.toHaveProperty("initial_model_selection");
+  });
+
+  it("shows the parent source and return action for a child conversation", async () => {
+    mocks.getConversationDetail.mockResolvedValue({
+      data: {
+        conversation: {
+          conversation_id: "child-conversation",
+          thinking_depth: "medium",
+          search_config: {},
+          settings: { chat_executor: "lazymind" },
+          parent_conversation_id: "parent-conversation",
+          parent_display_name: "主会话标题",
+          relation_type: "sidechat",
+        },
+      },
+    });
+
+    render(
+      <ChatLayout
+        conversationId="child-conversation"
+        setIsChatContent={vi.fn()}
+        initchatConfig={{}}
+        setChatConfigFn={vi.fn()}
+        canChat
+      />,
+    );
+
+    expect(
+      await screen.findByRole("region", {
+        name: "chat.conversationRelationBannerLabel",
+      }),
+    ).toHaveTextContent("来源：主会话标题");
+    expect(
+      screen.getByRole("link", {
+        name: "chat.returnToParentConversation",
+      }),
+    ).toHaveAttribute(
+      "href",
+      "/agent/chat/home/parent-conversation",
+    );
+    expect(mocks.latestChatContainerProps.showConversationConfig).toBe(false);
+    expect(mocks.latestChatContainerProps.showSkillDeposit).toBe(false);
+    expect(mocks.latestChatContainerProps.allowKnowledgeBaseSelection).toBe(false);
+    expect(mocks.latestChatContainerProps.onOpenSideChat).toBeUndefined();
+  });
+
+  it("opens one side panel from the shared root-conversation callback and refreshes after retain", async () => {
+    mocks.getConversationDetail.mockResolvedValue({
+      data: {
+        conversation: {
+          conversation_id: "root-conversation",
+          thinking_depth: "medium",
+          search_config: {},
+          settings: { chat_executor: "lazymind" },
+        },
+      },
+    });
+    const refreshed = vi.fn();
+    window.addEventListener(
+      "lazymind:chat-conversation-list-refresh",
+      refreshed,
+    );
+
+    const view = render(
+      <ChatLayout
+        conversationId="root-conversation"
+        setIsChatContent={vi.fn()}
+        initchatConfig={{}}
+        setChatConfigFn={vi.fn()}
+        canChat
+      />,
+    );
+
+    await waitFor(() => {
+      expect(mocks.latestChatContainerProps.onOpenSideChat).toEqual(
+        expect.any(Function),
+      );
+    });
+    act(() => {
+      mocks.latestChatContainerProps.onOpenSideChat({
+        selectedText: "选中的回答",
+        historyId: "history-1",
+      });
+    });
+    expect(screen.getByTestId("side-chat-panel")).toHaveAttribute(
+      "data-parent-id",
+      "root-conversation",
+    );
+    expect(screen.getByTestId("side-chat-panel")).toHaveAttribute(
+      "data-selected-text",
+      "选中的回答",
+    );
+
+    act(() => {
+      mocks.latestSideChatPanelProps.onRetained({ id: "child-1" });
+    });
+    expect(refreshed).toHaveBeenCalledTimes(1);
+    view.rerender(
+      <ChatLayout
+        conversationId="next-conversation"
+        setIsChatContent={vi.fn()}
+        initchatConfig={{}}
+        setChatConfigFn={vi.fn()}
+        canChat
+      />,
+    );
+    await waitFor(() => {
+      expect(screen.queryByTestId("side-chat-panel")).not.toBeInTheDocument();
+    });
+    window.removeEventListener(
+      "lazymind:chat-conversation-list-refresh",
+      refreshed,
+    );
+  });
+
+  it("keeps execution configuration available for a fork child", async () => {
+    mocks.getConversationDetail.mockResolvedValue({
+      data: {
+        conversation: {
+          conversation_id: "fork-conversation",
+          thinking_depth: "medium",
+          search_config: {},
+          settings: { chat_executor: "lazymind" },
+          parent_conversation_id: "parent-conversation",
+          parent_display_name: "主会话标题",
+          relation_type: "fork",
+        },
+      },
+    });
+
+    render(
+      <ChatLayout
+        conversationId="fork-conversation"
+        setIsChatContent={vi.fn()}
+        initchatConfig={{}}
+        setChatConfigFn={vi.fn()}
+        canChat
+      />,
+    );
+
+    expect(await screen.findByText("Fork自：主会话标题")).toBeInTheDocument();
+    expect(mocks.latestChatContainerProps.showConversationConfig).toBe(true);
+    expect(mocks.latestChatContainerProps.showSkillDeposit).toBe(true);
+    expect(mocks.latestChatContainerProps.allowKnowledgeBaseSelection).toBe(true);
   });
 
   it("does not let a late route load overwrite a newer route selection", async () => {

@@ -1079,6 +1079,14 @@
     box-sizing: border-box;
   }
 
+  // Composite cells can be shorter than a JSON payload. Keep the widget in
+  // its assigned cell and let the block itself own the vertical scroll.
+  &--json-block {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+  }
+
   &__text {
     margin: 0;
     font-size: 13px;

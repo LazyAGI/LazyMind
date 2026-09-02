@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Button, Input, Progress, Select, Spin, Tooltip } from 'antd';
+import { Alert, Button, Empty, Input, Progress, Select, Spin, Tooltip } from 'antd';
 import { CheckCircleFilled, ClockCircleOutlined, CloseCircleOutlined, ReloadOutlined, RightOutlined, SearchOutlined, StopOutlined, SyncOutlined, UserOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -23,6 +23,7 @@ export default function Workbench({ active, onViewAllStatus }: WorkbenchProps) {
   const navigate = useNavigate();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [keyword, setKeyword] = useState('');
   const [type, setType] = useState('');
   const [statusCounts, setStatusCounts] = useState({ all: 0, pending: 0, waiting: 0, running: 0, succeeded: 0, failed: 0, canceled: 0 });
@@ -38,24 +39,21 @@ export default function Workbench({ active, onViewAllStatus }: WorkbenchProps) {
       const response = await listTasks({ keyword: keyword || undefined, task_type: type || undefined, page: 1, page_size: 60 });
       setTasks(response.items ?? []);
       if (response.status_counts) setStatusCounts(response.status_counts);
+      setLoadFailed(false);
     } catch {
       // API errors are reported by the shared request interceptor.
+      setLoadFailed(true);
     } finally {
       setLoading(false);
     }
-  }, [keyword, type, t]);
+  }, [keyword, type]);
 
   useEffect(() => {
     if (active) void load();
   }, [active, load]);
 
-  const waiting = tasks.filter((task) => ['waiting', 'interrupted', 'pending'].includes(task.status));
-  const running = tasks.filter((task) => task.status === 'running');
-  const failed = tasks.filter((task) => task.status === 'failed');
-  const canceled = tasks.filter((task) => task.status === 'canceled');
-  const completed = tasks.filter((task) => ['completed', 'succeeded'].includes(task.status));
-  const recentReferenceTime = Date.now();
-  const recent = completed.filter((task) => isTaskFinishedWithinDays(task, 7, recentReferenceTime));
+  const { waiting, running, failed, canceled, recent } = groupWorkbenchTasks(tasks);
+  const hasVisibleTasks = waiting.length + running.length + failed.length + canceled.length + recent.length > 0;
   const openConversation = (id: string) => {
     selectChatConversationFilter('task');
     navigate(getChatConversationPath(id));
@@ -83,11 +81,13 @@ export default function Workbench({ active, onViewAllStatus }: WorkbenchProps) {
       </div>
 
       <Spin spinning={loading}>
-        <AttentionSection tasks={waiting} expanded={attentionExpanded} onToggle={() => setAttentionExpanded((value) => !value)} onSelect={setSelected} onOpenGraph={setGraphTask} />
-        <RunningSection tasks={running} expanded={runningExpanded} onToggle={() => setRunningExpanded((value) => !value)} onSelect={setSelected} onOpenGraph={setGraphTask} />
-        <StatusCardSection status='failed' tasks={failed} totalCount={statusCounts.failed} onViewAll={() => onViewAllStatus('failed')} onSelect={setSelected} onOpenGraph={setGraphTask} />
-        <StatusCardSection status='canceled' tasks={canceled} totalCount={statusCounts.canceled} onViewAll={() => onViewAllStatus('canceled')} onSelect={setSelected} onOpenGraph={setGraphTask} />
-        <RecentSection tasks={recent} expanded={recentExpanded} onToggle={() => setRecentExpanded((value) => !value)} onSelect={setSelected} />
+        {loadFailed ? <Alert className='workbench-load-error' type='warning' showIcon message={t('taskCenter.loadError')} description={t('taskCenter.loadErrorDescription')} action={<Button size='small' onClick={() => void load()}>{t('common.retry')}</Button>} /> : null}
+        {waiting.length ? <AttentionSection tasks={waiting} expanded={attentionExpanded} onToggle={() => setAttentionExpanded((value) => !value)} onSelect={setSelected} onOpenGraph={setGraphTask} /> : null}
+        {running.length ? <RunningSection tasks={running} expanded={runningExpanded} onToggle={() => setRunningExpanded((value) => !value)} onSelect={setSelected} onOpenGraph={setGraphTask} /> : null}
+        {failed.length ? <StatusCardSection status='failed' tasks={failed} totalCount={statusCounts.failed} onViewAll={() => onViewAllStatus('failed')} onSelect={setSelected} onOpenGraph={setGraphTask} /> : null}
+        {canceled.length ? <StatusCardSection status='canceled' tasks={canceled} totalCount={statusCounts.canceled} onViewAll={() => onViewAllStatus('canceled')} onSelect={setSelected} onOpenGraph={setGraphTask} /> : null}
+        {recent.length ? <RecentSection tasks={recent} expanded={recentExpanded} onToggle={() => setRecentExpanded((value) => !value)} onSelect={setSelected} /> : null}
+        {!loading && !loadFailed && !hasVisibleTasks ? <WorkbenchEmpty /> : null}
       </Spin>
       <TaskDetail task={selected} onClose={() => setSelected(null)} onOpenConversation={openConversation} onOpenGraph={() => selected && setGraphTask(selected)} onDelete={async (task) => { await removeTask(task.id); setSelected(null); await load(); }} />
       {graphTask?.workflow_session_id && <StateGraphModal open onClose={() => setGraphTask(null)} sessionId={graphTask.workflow_session_id} workflowId='' liveRefresh={false} fallbackSteps={graphTask.steps} />}
@@ -202,7 +202,18 @@ function RecentSection({ tasks, expanded, onToggle, onSelect }: { tasks: Task[];
 
 function WorkbenchEmpty() {
   const { t } = useTranslation();
-  return <p className='workbench-empty'>{t('taskCenter.empty')}</p>;
+  return <div className='workbench-empty'><Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('taskCenter.empty')} /></div>;
+}
+
+export function groupWorkbenchTasks(tasks: Task[], referenceTime = Date.now()) {
+  const completed = tasks.filter((task) => ['completed', 'succeeded'].includes(task.status));
+  return {
+    waiting: tasks.filter((task) => ['waiting', 'waiting_inputs', 'interrupted', 'pending'].includes(task.status)),
+    running: tasks.filter((task) => task.status === 'running'),
+    failed: tasks.filter((task) => task.status === 'failed'),
+    canceled: tasks.filter((task) => task.status === 'canceled'),
+    recent: completed.filter((task) => isTaskFinishedWithinDays(task, 7, referenceTime)),
+  };
 }
 
 function taskTitle(task: Task, t: (key: string) => string) {

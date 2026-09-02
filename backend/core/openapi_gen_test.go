@@ -1732,6 +1732,32 @@ func TestOpenAPIBuiltinSkillIncludesOptionalProvider(t *testing.T) {
 	}
 }
 
+func TestOpenAPIConversationSearchConfigIncludesOptionalFilters(t *testing.T) {
+	schemas := generatedOpenAPISchemas(t)
+	schema, ok := schemas["conversationSearchConfigOpenAPIRequest"].(map[string]any)
+	if !ok {
+		t.Fatal("conversation search config request schema missing")
+	}
+	properties, ok := schema["properties"].(map[string]any)
+	if !ok {
+		t.Fatal("conversation search config request properties missing")
+	}
+	for _, field := range []string{"dataset_ids", "creators", "tags"} {
+		property, ok := properties[field].(map[string]any)
+		if !ok || property["type"] != "array" {
+			t.Fatalf("%s property = %#v, want array", field, properties[field])
+		}
+	}
+	requiredFields, _ := schema["required"].([]any)
+	for _, required := range requiredFields {
+		for _, field := range []string{"dataset_ids", "creators", "tags"} {
+			if required == field {
+				t.Fatalf("%s must remain optional", field)
+			}
+		}
+	}
+}
+
 func TestOpenAPISpecIncludesMCPOperations(t *testing.T) {
 	r := mux.NewRouter()
 	registerAllRoutes(r)

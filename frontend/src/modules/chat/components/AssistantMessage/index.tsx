@@ -1,7 +1,7 @@
 import { Button, Divider, Flex, message, Spin, Tooltip } from "antd";
 import { trim, debounce } from "lodash";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
-import type { MouseEvent } from "react";
+import type { KeyboardEvent, MouseEvent } from "react";
 import { useTranslation } from "react-i18next";
 
 import "./index.scss";
@@ -21,6 +21,7 @@ import {
   ChatConversationsResponseFinishReasonEnum,
   FeedBackChatHistoryRequestTypeEnum,
 } from "@/api/generated/chatbot-client";
+import type { ChatModelRoute } from "@/api/generated/core-client";
 import { AgentAppsAuth } from "@/components/auth";
 import { isAskPendingReadOnly } from "@/modules/chat/utils/message";
 import type { ExternalExecutionProjection } from "@/modules/chat/utils/message";
@@ -275,6 +276,29 @@ function ExternalExecutionSummary({
   );
 }
 
+function ModelRouteSummary({ route }: { route?: ChatModelRoute }) {
+  const { t } = useTranslation();
+  if (!route?.provider_name || !route.model_name) {
+    return null;
+  }
+  const model = `${route.provider_name} · ${route.model_name}`;
+  const label = t(
+    route.mode === "auto"
+      ? "chat.modelRouteAutoLabel"
+      : "chat.modelRouteFixedLabel",
+    { model },
+  );
+  const reason = route.reason
+    ? t(`chat.modelRouteReason.${route.reason}`, { defaultValue: "" })
+    : "";
+  const content = (
+    <div className="chat-model-route" aria-label={label}>
+      {label}
+    </div>
+  );
+  return reason ? <Tooltip title={reason}>{content}</Tooltip> : content;
+}
+
 type FeedbackAction =
   | { type: "OPEN_MODAL"; historyId: string }
   | { type: "CLOSE_MODAL" }
@@ -398,13 +422,16 @@ const AssistantMessage = (props: any) => {
     onPreferenceSelect,
     isLatestDualAnswer,
     onCiteMessage,
+    onOpenSideChat,
     hasLaterUserMessage,
     onOpenSources,
   } = props;
-  const citeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const selectionActionsRef = useRef<HTMLDivElement | null>(null);
   const citeSelectionTextRef = useRef("");
   const onCiteMessageRef = useRef(onCiteMessage);
   onCiteMessageRef.current = onCiteMessage;
+  const onOpenSideChatRef = useRef(onOpenSideChat);
+  onOpenSideChatRef.current = onOpenSideChat;
   // Debounced backend persistence for ask-card answers. Created once per component
   // instance with useRef so it is stable across re-renders.
   const persistAskAnswersRef = useRef(
@@ -444,8 +471,8 @@ const AssistantMessage = (props: any) => {
   };
 
   const hideCiteButton = useCallback(() => {
-    citeButtonRef.current?.remove();
-    citeButtonRef.current = null;
+    selectionActionsRef.current?.remove();
+    selectionActionsRef.current = null;
     citeSelectionTextRef.current = "";
   }, []);
 
@@ -463,33 +490,81 @@ const AssistantMessage = (props: any) => {
   const handleCiteSelectedTextRef = useRef(handleCiteSelectedText);
   handleCiteSelectedTextRef.current = handleCiteSelectedText;
 
+  const handleOpenSideChat = useCallback(() => {
+    const selectedText = citeSelectionTextRef.current.trim();
+    if (!selectedText) {
+      hideCiteButton();
+      return;
+    }
+    onOpenSideChatRef.current?.({
+      selectedText,
+      historyId: item.history_id || item.id,
+      sequence: item.seq,
+    });
+    window.getSelection()?.removeAllRanges();
+    hideCiteButton();
+  }, [hideCiteButton, item.history_id, item.id, item.seq]);
+
+  const handleOpenSideChatRef = useRef(handleOpenSideChat);
+  handleOpenSideChatRef.current = handleOpenSideChat;
+
   const showCiteButton = useCallback(
     (text: string, top: number, left: number) => {
-      let button = citeButtonRef.current;
-      if (!button) {
-        button = document.createElement("button");
-        button.type = "button";
-        button.className = "chat-cite-selection-btn";
+      let actions = selectionActionsRef.current;
+      if (!actions) {
+        actions = document.createElement("div");
+        actions.className = "chat-selection-actions";
+        actions.setAttribute("role", "toolbar");
+        actions.setAttribute("aria-label", t("chat.sideChat.selectionActions"));
         // Keep selection while clicking the cite button.
-        button.addEventListener("mousedown", (event) => {
+        actions.addEventListener("mousedown", (event) => {
           event.preventDefault();
           event.stopPropagation();
         });
-        button.addEventListener("pointerdown", (event) => {
+        actions.addEventListener("pointerdown", (event) => {
           event.stopPropagation();
         });
-        button.addEventListener("click", (event) => {
+
+        const citeButton = document.createElement("button");
+        citeButton.type = "button";
+        citeButton.className = "chat-selection-action";
+        citeButton.addEventListener("click", (event) => {
           event.stopPropagation();
           handleCiteSelectedTextRef.current();
         });
-        document.body.appendChild(button);
-        citeButtonRef.current = button;
+        actions.appendChild(citeButton);
+
+        if (onOpenSideChatRef.current) {
+          const sideChatButton = document.createElement("button");
+          sideChatButton.type = "button";
+          sideChatButton.className = "chat-selection-action";
+          sideChatButton.dataset.action = "side-chat";
+          sideChatButton.addEventListener("click", (event) => {
+            event.stopPropagation();
+            handleOpenSideChatRef.current();
+          });
+          actions.appendChild(sideChatButton);
+        }
+
+        document.body.appendChild(actions);
+        selectionActionsRef.current = actions;
       }
 
       citeSelectionTextRef.current = text;
-      button.textContent = t("chat.cite");
-      button.style.top = `${top}px`;
-      button.style.left = `${left}px`;
+      const buttons = actions.querySelectorAll<HTMLButtonElement>(
+        ".chat-selection-action",
+      );
+      if (buttons[0]) {
+        buttons[0].textContent = t("chat.cite");
+      }
+      const sideChatButton = actions.querySelector<HTMLButtonElement>(
+        '[data-action="side-chat"]',
+      );
+      if (sideChatButton) {
+        sideChatButton.textContent = t("chat.sideChat.askFromSelection");
+      }
+      actions.style.top = `${top}px`;
+      actions.style.left = `${left}px`;
     },
     [t],
   );
@@ -498,11 +573,11 @@ const AssistantMessage = (props: any) => {
   // the click lands outside this message's onMouseUp handler.
   useEffect(() => {
     const dismissOnPointerDown = (event: PointerEvent) => {
-      const button = citeButtonRef.current;
-      if (!button) {
+      const actions = selectionActionsRef.current;
+      if (!actions) {
         return;
       }
-      if (event.target instanceof Node && button.contains(event.target)) {
+      if (event.target instanceof Node && actions.contains(event.target)) {
         return;
       }
       window.getSelection()?.removeAllRanges();
@@ -516,7 +591,7 @@ const AssistantMessage = (props: any) => {
     };
   }, [hideCiteButton]);
 
-  const handleMouseUp = (event: MouseEvent<HTMLDivElement>) => {
+  const showSelectionActions = (container: HTMLDivElement) => {
     const selection = window.getSelection();
     const selectedText = selection?.toString().trim() || "";
     if (!selection || !selectedText || selection.rangeCount < 1) {
@@ -531,7 +606,7 @@ const AssistantMessage = (props: any) => {
         ? (currentTarget as Element)
         : currentTarget.parentElement;
 
-    const messageBody = event.currentTarget.querySelector(".chat-bot");
+    const messageBody = container.querySelector(".chat-bot");
     if (!element || !messageBody?.contains(element)) {
       hideCiteButton();
       return;
@@ -556,10 +631,26 @@ const AssistantMessage = (props: any) => {
     const left = Math.min(...lineRects.map((lineRect) => lineRect.left));
     const right = Math.max(...lineRects.map((lineRect) => lineRect.right));
     const centerX = (left + right) / 2;
-    // Keep the fixed button inside the viewport (button ~ translateX(-50%)).
-    const clampedLeft = Math.min(Math.max(centerX, 28), window.innerWidth - 28);
+    // Keep the fixed toolbar inside the viewport. The side-chat action makes
+    // it wider than the legacy single cite button.
+    const horizontalInset = onOpenSideChatRef.current ? 132 : 56;
+    const clampedLeft = Math.min(
+      Math.max(centerX, horizontalInset),
+      Math.max(horizontalInset, window.innerWidth - horizontalInset),
+    );
 
     showCiteButton(selectedText, Math.max(8, top - 42), clampedLeft);
+  };
+
+  const handleMouseUp = (event: MouseEvent<HTMLDivElement>) => {
+    showSelectionActions(event.currentTarget);
+  };
+
+  const handleKeyUp = (event: KeyboardEvent<HTMLDivElement>) => {
+    const selectsAll =
+      (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "a";
+    if (!event.shiftKey && !selectsAll) return;
+    showSelectionActions(event.currentTarget);
   };
 
   function renderLoading() {
@@ -1025,15 +1116,17 @@ const AssistantMessage = (props: any) => {
     );
   }
 
+  const runRetryable =
+    !item.archived_failure &&
+    index === length - 1 &&
+    (item.run_status === "failed" || item.run_status === "interrupted");
+  const runCancelled = item.run_status === "cancelled";
+
   function renderBottom() {
     const runActive =
       !item.run_status &&
       item.finish_reason ===
         ChatConversationsResponseFinishReasonEnum.FinishReasonUnspecified;
-    const runRetryable =
-      item.run_status === "failed" ||
-      item.run_status === "interrupted" ||
-      item.run_status === "cancelled";
     if (
       item.tool_limit_pending &&
       item.tool_limit_pending.decision_id !==
@@ -1111,8 +1204,8 @@ const AssistantMessage = (props: any) => {
         </Button>
       );
     }
-    // Offer regeneration after any retryable terminal run state.
-    if (runRetryable) {
+    // A cancelled run has no failure card, so keep its regeneration action here.
+    if (runCancelled) {
       return (
         <Button
           className="stop-btn"
@@ -1129,7 +1222,9 @@ const AssistantMessage = (props: any) => {
     ) {
       return (
         <>
-          <span style={{ color: "#b8c3d7" }}>{item.errMessage}</span>
+          <span style={{ color: "#b8c3d7" }}>
+            {t("chat.runStatus.providerError")}
+          </span>
           <Button
             className="stop-btn"
             style={{ marginLeft: 10 }}
@@ -1181,12 +1276,19 @@ const AssistantMessage = (props: any) => {
       <div
         className="chat-assistant-msg-multi-answer-wrap"
         onMouseUp={handleMouseUp}
+        onKeyUp={handleKeyUp}
       >
         <IdentityAvatar className="chat-avatar" kind="soul" size={32} />
         <div className="chat-bot-box-multi">
-          <div className="chat-bot">
+        <div className="chat-bot">
+            <ModelRouteSummary route={item.model_route} />
             <ExternalExecutionSummary execution={item.execution} />
-            <RunStatusCard terminal={item.run_terminal} />
+            <RunStatusCard
+              terminal={item.run_terminal}
+              conversationId={sessionId}
+              onRetry={runRetryable ? regenerate : undefined}
+              retryDisabled={regenerateDisabled}
+            />
             {shouldShowLoading
               ? renderLoading()
               : renderText({ ...item, delta: "" })}
@@ -1256,12 +1358,19 @@ const AssistantMessage = (props: any) => {
     <div
       className="chat-assistant-msg-single-answer-wrap"
       onMouseUp={handleMouseUp}
+      onKeyUp={handleKeyUp}
     >
       <IdentityAvatar className="chat-avatar" kind="soul" size={32} />
       <div className="chat-bot-box-single">
         <div className="chat-bot">
+          <ModelRouteSummary route={item.model_route} />
           <ExternalExecutionSummary execution={item.execution} />
-          <RunStatusCard terminal={item.run_terminal} />
+          <RunStatusCard
+            terminal={item.run_terminal}
+            conversationId={sessionId}
+            onRetry={runRetryable ? regenerate : undefined}
+            retryDisabled={regenerateDisabled}
+          />
           {shouldShowLoading
             ? renderLoading()
             : item.onboardingInfo

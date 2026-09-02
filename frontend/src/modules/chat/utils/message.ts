@@ -4,6 +4,7 @@ import {
   type Query,
 } from "@/api/generated/chatbot-client";
 import type {
+  ChatModelRoute,
   ConversationHistoryItem as CoreConversationHistoryItem,
   ConversationTrailItem,
 } from "@/api/generated/core-client";
@@ -59,7 +60,7 @@ export type ConversationHistoryRecord = Omit<
 > &
   Omit<
     Partial<CoreConversationHistoryItem>,
-    "feed_back" | "input" | "sources" | "execution"
+    "feed_back" | "input" | "sources" | "execution" | "failed_attempts"
   > & {
     feed_back?: BaseChatHistory["feed_back"] | number | string;
     input?: Query[] | Array<Record<string, unknown>> | null;
@@ -76,6 +77,15 @@ export type ConversationHistoryRecord = Omit<
     run_id?: string;
     run_status?: "completed" | "interrupted" | "failed" | "cancelled";
     run_terminal?: Record<string, unknown>;
+    model_route?: ChatModelRoute;
+    failed_attempts?: Array<{
+      result?: string;
+      run_id?: string;
+      run_status?: "interrupted" | "failed";
+      run_terminal?: Record<string, unknown>;
+      model_route?: ChatModelRoute;
+      create_time?: string;
+    }>;
   };
 
 export interface ExternalExecutionProjection {
@@ -183,7 +193,7 @@ export function stripCitationFromText(text?: string) {
 }
 
 export function buildChatMessageListFromHistory(
-  history?: ConversationHistoryRecord[] | null,
+  history?: Array<ConversationHistoryRecord | CoreConversationHistoryItem> | null,
   options: BuildChatMessageListOptions = {},
 ) {
   const {
@@ -200,7 +210,10 @@ export function buildChatMessageListFromHistory(
   const lastRecord = records[records.length - 1];
   const list: any[] = [];
 
-  records.forEach((record) => {
+  records.forEach((rawRecord) => {
+    // The generated Core schema is intentionally permissive. Normalize it at
+    // this boundary before constructing the stricter UI message shape.
+    const record = rawRecord as ConversationHistoryRecord;
     const normalizedInputs = normalizeMessageInputs(
       record.input as Query[] | null | undefined,
       record.query,
@@ -248,6 +261,34 @@ export function buildChatMessageListFromHistory(
       return;
     }
 
+    const failedAttempts = Array.isArray(record.failed_attempts)
+      ? record.failed_attempts
+      : [];
+    failedAttempts.forEach((attempt, attemptIndex) => {
+      const attemptResult = splitThinkingContent(attempt.result, undefined);
+      const attemptId = `${record.id || "history"}:failed:${
+        attempt.run_id || attemptIndex
+      }`;
+      list.push({
+        role: RoleTypes.ASSISTANT,
+        reasoning_content: attemptResult.reasoning_content,
+        delta: attemptResult.content,
+        raw_delta: attempt.result || "",
+        finish_reason:
+          ChatConversationsResponseFinishReasonEnum.FinishReasonStop,
+        id: attemptId,
+        history_id: attemptId,
+        original_history_id: record.id,
+        run_id: attempt.run_id,
+        run_status:
+          attempt.run_status || attempt.run_terminal?.status || "failed",
+        run_terminal: attempt.run_terminal,
+        model_route: attempt.model_route,
+        create_time: attempt.create_time,
+        archived_failure: true,
+      });
+    });
+
     const isLastRecord = record === lastRecord;
     const isActuallyGenerating = isGenerating && isLastRecord;
     const splitResult = splitThinkingContent(
@@ -277,6 +318,7 @@ export function buildChatMessageListFromHistory(
       run_id: record.run_id,
       run_status: isActuallyGenerating ? undefined : record.run_status,
       run_terminal: isActuallyGenerating ? undefined : record.run_terminal,
+      model_route: record.model_route,
     };
 
     // Restore ask_pending from persisted ext so the AskCard is visible after page reload.

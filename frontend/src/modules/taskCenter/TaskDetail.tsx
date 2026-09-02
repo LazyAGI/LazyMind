@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Button, Drawer, Empty, Popconfirm, Progress, Space, Tag, Tooltip } from 'antd';
-import { CheckCircleFilled, ClockCircleOutlined, CloseOutlined, DeleteOutlined, FolderOutlined } from '@ant-design/icons';
+import { Button, Drawer, Dropdown, Empty, Modal, Tag, Tooltip } from 'antd';
+import type { MenuProps } from 'antd';
+import { CheckCircleFilled, CloseOutlined, DeleteOutlined, EllipsisOutlined, FolderOutlined, SyncOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import type { Task } from './api';
 import { axiosInstance, BASE_URL } from '@/components/request';
@@ -15,8 +16,9 @@ interface TaskDetailProps {
 }
 
 const isDone = (status: string) => ['completed', 'succeeded'].includes(status);
+const containsChinese = (value: string) => /[\u3400-\u4dbf\u4e00-\u9fff]/.test(value);
 
-type PlannedStep = { step_id: string; status: string };
+type PlannedStep = { step_id: string; title?: string; status: string };
 
 export default function TaskDetail({ task, onClose, onOpenConversation, onOpenGraph, onArchive, onDelete }: TaskDetailProps) {
   const { t } = useTranslation();
@@ -41,68 +43,73 @@ export default function TaskDetail({ task, onClose, onOpenConversation, onOpenGr
     return () => { active = false; };
   }, [task]);
   const steps = useMemo(() => plannedSteps ?? task?.steps ?? [], [plannedSteps, task]);
-  const completed = steps.filter((step) => isDone(step.status)).length;
+  const taskName = task?.conversation_title || task?.title || t('taskCenter.noTitle');
+  const actions: NonNullable<MenuProps['items']> = task ? [
+    ...(onArchive ? [{ key: 'archive', icon: <FolderOutlined />, label: t('settingsPage.recovery.archiveAction'), disabled: !task.conversation_id }] : []),
+    ...(onDelete ? [{ key: 'trash', icon: <DeleteOutlined />, label: t('taskCenter.trashTask'), danger: true }] : []),
+  ] : [];
+
+  const handleAction = ({ key }: { key: string }) => {
+    if (!task) return;
+    if (key === 'archive') {
+      onArchive?.(task);
+      return;
+    }
+    if (key === 'trash' && onDelete) {
+      Modal.confirm({
+        title: t('taskCenter.trashTaskTitle', { name: taskName }),
+        content: t('taskCenter.trashTaskDescription'),
+        okText: t('settingsPage.recovery.moveToTrash'),
+        cancelText: t('common.cancel'),
+        okButtonProps: { danger: true },
+        onOk: () => onDelete(task),
+      });
+    }
+  };
 
   return (
     <Drawer
       className='task-detail-drawer'
-      title={t('taskCenter.taskDetail')}
+      title={task ? <div className='task-detail-drawer-title'><strong>{taskName}</strong><span>{t('taskCenter.createdAt')} {formatDate(task.created_at)} · {taskTypeLabel(task.task_type, t)}</span></div> : t('taskCenter.taskDetail')}
       width={480}
       open={Boolean(task)}
       onClose={onClose}
-      closeIcon={<CloseOutlined />}
+      closable={false}
+      extra={task ? <div className='task-detail-header-actions'>
+        {actions.length ? <Dropdown menu={{ items: actions, onClick: handleAction }} trigger={['click']}><Button type='text' icon={<EllipsisOutlined />} aria-label={t('taskCenter.moreActions')} /></Dropdown> : null}
+        <Button type='text' icon={<CloseOutlined />} aria-label={t('common.close')} onClick={onClose} />
+      </div> : null}
       footer={task ? (
-        <Space.Compact block>
-          {onArchive ? <Button size='large' icon={<FolderOutlined />} disabled={!task.conversation_id} onClick={() => onArchive(task)}>{t('settingsPage.recovery.archiveAction')}</Button> : null}
-          {onDelete ? <Popconfirm title={t('taskCenter.trashTaskTitle', { name: task.conversation_title || task.title || t('taskCenter.noTitle') })} description={t('taskCenter.trashTaskDescription')} okText={t('settingsPage.recovery.moveToTrash')} cancelText={t('common.cancel')} okButtonProps={{ danger: true }} onConfirm={() => onDelete(task)}><Button danger size='large' icon={<DeleteOutlined />}>{t('taskCenter.trashTask')}</Button></Popconfirm> : null}
-          <Tooltip title={!task.conversation_id ? '尚未创建关联对话，依赖就绪后才可打开' : undefined}>
-            <Button type='primary' block size='large' disabled={!task.conversation_id} onClick={() => task.conversation_id && onOpenConversation(task.conversation_id)}>
-              {t('taskCenter.openConversation')}
-            </Button>
-          </Tooltip>
-        </Space.Compact>
+        <Tooltip title={!task.conversation_id ? t('taskCenter.conversationUnavailable') : undefined}>
+          <Button type='primary' block size='large' disabled={!task.conversation_id} onClick={() => task.conversation_id && onOpenConversation(task.conversation_id)}>
+            {t('taskCenter.openConversation')}
+          </Button>
+        </Tooltip>
       ) : null}
     >
       {task ? (
         <div className='task-detail-content'>
-          <div className='task-detail-heading'>
-            <div className={`task-type-icon task-type-${task.task_type}`}><ClockCircleOutlined /></div>
-            <div className='task-detail-title-wrap'>
-              <h2>{task.conversation_title || task.title || t('taskCenter.noTitle')}</h2>
-              <span>{formatDate(task.created_at)}</span>
-            </div>
+          <div className='task-detail-status'>
             <StatusTag status={task.status} onClick={task.workflow_session_id && onOpenGraph ? () => onOpenGraph(task.workflow_session_id!) : undefined} />
           </div>
 
           <section className='task-detail-section task-detail-description'>
-            <span className='section-kicker'>{t('taskCenter.taskDescriptionCol')}</span>
+            <h3>{t('taskCenter.taskGoal')}</h3>
             <p>{task.title || task.conversation_title || t('taskCenter.noDescription')}</p>
           </section>
 
           <section className='task-detail-section'>
-            <h3>{t('taskCenter.executionProcess')}</h3>
+            <h3>{t('taskCenter.executionSteps')}</h3>
             {steps.length ? (
-              <>
-                <Progress percent={Math.round((completed / steps.length) * 100)} showInfo={false} />
-                <div className='task-step-list'>
-                  {steps.map((step, index) => (
-                    <div className={`task-step ${isDone(step.status) ? 'is-done' : step.status === 'running' ? 'is-running' : ''}`} key={`${step.step_id}-${index}`}>
-                      <span className='task-step-dot'>{isDone(step.status) ? <CheckCircleFilled /> : index + 1}</span>
-                      <div><strong>{step.step_id || `${t('taskCenter.steps')} ${index + 1}`}</strong><small>{step.status}</small></div>
-                    </div>
-                  ))}
-                </div>
-              </>
+              <div className='task-step-list'>
+                {steps.map((step, index) => (
+                  <div className={`task-step ${isDone(step.status) ? 'is-done' : step.status === 'running' ? 'is-running' : step.status === 'failed' ? 'is-failed' : ''}`} key={`${step.step_id}-${index}`}>
+                    <span className='task-step-dot'>{isDone(step.status) ? <CheckCircleFilled /> : step.status === 'running' ? <SyncOutlined spin /> : index + 1}</span>
+                    <div><strong>{taskStepLabel(step.title || step.step_id, index, t)}</strong><small>{taskStatusLabel(step.status, t)}</small></div>
+                  </div>
+                ))}
+              </div>
             ) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={task.waiting_reason || t('taskCenter.noSteps')} />}
-          </section>
-
-          <section className='task-detail-section task-detail-meta'>
-            <h3>{t('taskCenter.taskInfo')}</h3>
-            <dl>
-              <div><dt>{t('taskCenter.taskType')}</dt><dd>{task.schedule_name || task.task_type}</dd></div>
-              <div><dt>{t('taskCenter.createdAt')}</dt><dd>{formatDate(task.created_at)}</dd></div>
-              <div><dt>{t('taskCenter.finishedAt')}</dt><dd>{task.finished_at ? formatDate(task.finished_at) : '—'}</dd></div>
-            </dl>
           </section>
         </div>
       ) : null}
@@ -119,4 +126,59 @@ export function StatusTag({ status, onClick }: { status: string; onClick?: () =>
 
 export function formatDate(value?: string) {
   return value ? new Date(value).toLocaleString() : '—';
+}
+
+function taskTypeLabel(taskType: string, t: (key: string, options?: Record<string, unknown>) => string) {
+  const labels: Record<string, string> = {
+    workflow_run: t('taskCenter.typeWorkflowRun'),
+    background_chat: t('taskCenter.typeBackgroundChat'),
+    scheduled: t('taskCenter.typeScheduled'),
+  };
+  return labels[taskType] ?? t('taskCenter.typeOther');
+}
+
+function taskStepLabel(value: string, index: number, t: (key: string, options?: Record<string, unknown>) => string) {
+  const normalized = value.trim().toLowerCase().replace(/[\s-]+/g, '_');
+  const labels: Record<string, string> = {
+    prepare: t('taskCenter.stepPrepare'),
+    preparation: t('taskCenter.stepPrepare'),
+    outline: t('taskCenter.stepOutline'),
+    write: t('taskCenter.stepWriteDocument'),
+    writing: t('taskCenter.stepWriteDocument'),
+    write_document: t('taskCenter.stepWriteDocument'),
+    plan: t('taskCenter.stepPlan'),
+    planning: t('taskCenter.stepPlan'),
+    research: t('taskCenter.stepResearch'),
+    search: t('taskCenter.stepSearch'),
+    retrieve: t('taskCenter.stepSearch'),
+    draft: t('taskCenter.stepDraft'),
+    review: t('taskCenter.stepReview'),
+    finalize: t('taskCenter.stepFinalize'),
+    finish: t('taskCenter.stepFinalize'),
+  };
+  if (labels[normalized]) return labels[normalized];
+  if (containsChinese(value)) return value;
+  return t('taskCenter.stepFallback', { index: index + 1 });
+}
+
+function taskStatusLabel(status: string, t: (key: string, options?: Record<string, unknown>) => string) {
+  const labels: Record<string, string> = {
+    completed: t('taskCenter.statusCompleted'),
+    succeeded: t('taskCenter.statusSucceeded'),
+    failed: t('taskCenter.statusFailed'),
+    running: t('taskCenter.statusRunning'),
+    pending: t('taskCenter.statusPending'),
+    interrupted: t('taskCenter.statusInterrupted'),
+    waiting: t('taskCenter.statusWaiting'),
+    waiting_inputs: t('taskCenter.statusWaitingInputs'),
+    canceled: t('taskCenter.statusCanceled'),
+    skipped: t('taskCenter.statusSkipped'),
+    ready: t('taskCenter.statusReady'),
+    blocked: t('taskCenter.statusBlocked'),
+    stale: t('taskCenter.statusStale'),
+    pruned: t('taskCenter.statusSkipped'),
+    bypassed: t('taskCenter.statusSkipped'),
+    none: t('taskCenter.statusPending'),
+  };
+  return labels[status] ?? t('taskCenter.statusUnknown');
 }

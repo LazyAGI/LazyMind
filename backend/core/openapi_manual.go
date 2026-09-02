@@ -511,9 +511,8 @@ func manualSchemas() map[string]any {
 		"ConversationSwitchStatusRequest":  objReq([]string{"status"}, prop("status", intSchema())),
 		"ConversationSwitchStatusResponse": obj(prop("status", intSchema())),
 		"ConversationChatStatusResponse":   obj(prop("is_generating", boolSchema())),
-		"ConversationItem": obj(
-			prop("name", strSchema()), prop("conversation_id", strSchema()), prop("display_name", strSchema()), prop("search_config", obj()), prop("user", strSchema()), prop("chat_times", int64Schema()), prop("total_feedback_like", int64Schema()), prop("total_feedback_unlike", int64Schema()), prop("create_time", strSchema()), prop("update_time", strSchema()), prop("pinned_at", nullableSchema(dateTimeSchema())), prop("is_pinned", boolSchema()), prop("models", array(strSchema())), prop("chat_executor", enumStringSchema("lazymind", "codex", "cursor", "workbuddy")), prop("thinking_depth", enumStringSchema("low", "medium", "high", "max")), prop("assistant", enumStringSchema("lazymind", "codex", "cursor", "workbuddy")), prop("project_key", strSchema()), prop("project_name", strSchema()),
-		),
+		"ConversationItem":       conversationItemSchema(false),
+		"ConversationDetailItem": conversationItemSchema(true),
 		"ConversationPinResponse": objReq(
 			[]string{"conversation_id", "is_pinned"},
 			prop("conversation_id", strSchema()), prop("is_pinned", boolSchema()), prop("pinned_at", nullableSchema(dateTimeSchema())),
@@ -539,10 +538,23 @@ func manualSchemas() map[string]any {
 			prop("last_heartbeat_at", dateTimeSchema()), prop("completed_at", dateTimeSchema()),
 			prop("created_at", dateTimeSchema()), prop("updated_at", dateTimeSchema()),
 		),
-		"ConversationHistoryItem": obj(
-			prop("seq", intSchema()), prop("query", strSchema()), prop("result", strSchema()), prop("id", strSchema()), prop("feed_back", intSchema()), prop("sources", array(obj())), prop("input", array(obj())), prop("reasoning_content", strSchema()), prop("thinking_time_s", int64Schema()), prop("reason", strSchema()), prop("expected_answer", strSchema()), prop("create_time", strSchema()), prop("run_id", strSchema()), prop("run_status", strSchema()), prop("run_terminal", refSchema("RunTerminal")), prop("execution", refSchema("ExternalExecutionProjection")),
+		"FailedRunAttempt": obj(
+			prop("result", strSchema()), prop("run_id", strSchema()),
+			prop("run_status", enumStringSchema("failed", "interrupted")),
+			prop("run_terminal", refSchema("RunTerminal")), prop("model_route", refSchema("ChatModelRoute")),
+			prop("create_time", dateTimeSchema()),
 		),
-		"ConversationDetailResponse":      obj(prop("conversation", refSchema("ConversationItem"))),
+		"ChatModelRoute": obj(
+			prop("mode", enumStringSchema("auto", "fixed")), prop("strategy", strSchema()),
+			prop("task_class", enumStringSchema("simple", "balanced", "complex", "long_context", "fixed")),
+			prop("reason", enumStringSchema("simple_task", "complex_task", "long_context", "session_sticky", "default_balanced", "retry_same_model", "fixed")),
+			prop("model_id", strSchema()), prop("provider_id", strSchema()), prop("provider_name", strSchema()),
+			prop("model_name", strSchema()), prop("source", enumStringSchema("own", "shared")),
+		),
+		"ConversationHistoryItem": obj(
+			prop("seq", intSchema()), prop("query", strSchema()), prop("result", strSchema()), prop("id", strSchema()), prop("feed_back", intSchema()), prop("sources", array(obj())), prop("input", array(obj())), prop("reasoning_content", strSchema()), prop("thinking_time_s", int64Schema()), prop("reason", strSchema()), prop("expected_answer", strSchema()), prop("create_time", strSchema()), prop("run_id", strSchema()), prop("run_status", strSchema()), prop("run_terminal", refSchema("RunTerminal")), prop("failed_attempts", array(refSchema("FailedRunAttempt"))), prop("execution", refSchema("ExternalExecutionProjection")), prop("model_route", refSchema("ChatModelRoute")),
+		),
+		"ConversationDetailResponse":      obj(prop("conversation", refSchema("ConversationDetailItem"))),
 		"ConversationHistoryListResponse": obj(prop("conversation_id", strSchema()), prop("name", strSchema()), prop("history", array(refSchema("ConversationHistoryItem"))), prop("total_size", int64Schema()), prop("next_page_token", strSchema())),
 		"ConversationTrailItem": obj(
 			prop("history_id", strSchema()), prop("seq", intSchema()), prop("summary", strSchema()), prop("question", strSchema()), prop("depth", intSchema()), prop("parent_history_id", strSchema()), prop("source", strSchema()), prop("create_time", strSchema()),
@@ -598,7 +610,7 @@ func manualSchemas() map[string]any {
 			prop("diagnostic_id", strSchema()),
 		),
 		"ChatRuntimeEvent":            obj(prop("schema_version", intSchema()), prop("event_id", strSchema()), prop("run_id", strSchema()), prop("type", strSchema()), prop("data", obj())),
-		"ChatChunkResponse":           obj(prop("conversation_id", strSchema()), prop("seq", intSchema()), prop("message", strSchema()), prop("delta", strSchema()), prop("delta_mode", enumStringSchema("append", "replace")), prop("history_id", strSchema()), prop("sources", array(obj())), prop("prompt_questions", array(strSchema())), prop("reasoning_content", strSchema()), prop("thinking_duration_s", int64Schema()), prop("runtime_event", refSchema("ChatRuntimeEvent")), prop("execution", refSchema("ExternalExecutionProjection"))),
+		"ChatChunkResponse":           obj(prop("conversation_id", strSchema()), prop("seq", intSchema()), prop("message", strSchema()), prop("delta", strSchema()), prop("delta_mode", enumStringSchema("append", "replace")), prop("history_id", strSchema()), prop("sources", array(obj())), prop("prompt_questions", array(strSchema())), prop("reasoning_content", strSchema()), prop("thinking_duration_s", int64Schema()), prop("runtime_event", refSchema("ChatRuntimeEvent")), prop("execution", refSchema("ExternalExecutionProjection")), prop("model_route", refSchema("ChatModelRoute"))),
 		"ACLApiResponse":              obj(prop("code", intSchema()), prop("message", strSchema()), prop("data", obj())),
 		"AddACLRequest":               objReq([]string{"grantee_type", "grantee_id", "permission"}, prop("grantee_type", strSchema()), prop("grantee_id", strSchema()), prop("permission", strSchema()), prop("expires_at", dateTimeSchema())),
 		"UpdateACLRequest":            objReq([]string{"permission"}, prop("permission", strSchema()), prop("expires_at", dateTimeSchema())),
@@ -621,6 +633,42 @@ func manualSchemas() map[string]any {
 		"GrantPrincipal":              obj(prop("grantee_type", strSchema()), prop("grantee_id", strSchema()), prop("name", strSchema())),
 		"ListGrantPrincipalsResponse": obj(prop("users", array(refSchema("GrantPrincipal"))), prop("groups", array(refSchema("GrantPrincipal")))),
 	}
+}
+
+func conversationItemSchema(includeSourceContext bool) map[string]any {
+	properties := []map[string]any{
+		prop("name", strSchema()),
+		prop("conversation_id", strSchema()),
+		prop("display_name", strSchema()),
+		prop("search_config", obj()),
+		prop("user", strSchema()),
+		prop("chat_times", int64Schema()),
+		prop("total_feedback_like", int64Schema()),
+		prop("total_feedback_unlike", int64Schema()),
+		prop("create_time", strSchema()),
+		prop("update_time", strSchema()),
+		prop("pinned_at", nullableSchema(dateTimeSchema())),
+		prop("is_pinned", boolSchema()),
+		prop("models", array(strSchema())),
+		prop("chat_executor", enumStringSchema("lazymind", "codex", "cursor", "workbuddy")),
+		prop("thinking_depth", enumStringSchema("low", "medium", "high", "max")),
+		prop("assistant", enumStringSchema("lazymind", "codex", "cursor", "workbuddy")),
+		prop("project_key", strSchema()),
+		prop("project_name", strSchema()),
+		prop("parent_conversation_id", nullableSchema(strSchema())),
+		prop("relation_type", enumStringSchema("", "sidechat", "fork")),
+		prop("parent_display_name", strSchema()),
+	}
+	if includeSourceContext {
+		message := map[string]any{"type": "object", "additionalProperties": true}
+		properties = append(properties,
+			prop("source_history_id", nullableSchema(strSchema())),
+			prop("source_seq", nullableSchema(intSchema())),
+			prop("selected_text", strSchema()),
+			prop("source_context", nullableSchema(obj(prop("messages", array(message))))),
+		)
+	}
+	return obj(properties...)
 }
 
 func manualPaths() map[string]any {
@@ -720,7 +768,7 @@ func manualPaths() map[string]any {
 		"/conversations/{conversation_id}:toolLimitDecision": map[string]any{"post": op("Choose whether to continue after the tool-round limit", nil, nil, response(200, "Decision forwarded", refSchema("EmptyObject")))},
 		"/conversations/{conversation_id}:status":            map[string]any{"get": op("Get conversation status", nil, nil, response(200, "Conversation status", refSchema("ConversationChatStatusResponse")))},
 		"/conversations/{name}": map[string]any{
-			"get":    op("Get conversation", nil, nil, response(200, "Conversationtext", refSchema("ConversationItem"))),
+			"get":    op("Get conversation", nil, nil, response(200, "Conversationtext", refSchema("ConversationDetailItem"))),
 			"delete": op("Delete conversation", nil, nil, response(200, "Deleted successfully", refSchema("EmptyObject"))),
 		},
 		"/conversations/{name}:detail": map[string]any{"get": op(

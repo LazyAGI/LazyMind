@@ -279,6 +279,40 @@ afterEach(() => {
   }
 });
 
+describe('MarkdownArtifactEditor MDX compatibility', () => {
+  it('renders plain-text JSON braces without changing inline or fenced code', () => {
+    const markdown = [
+      '配图：{"reference_image_index": 0}',
+      '',
+      '行内代码：`{"keep": true}`',
+      '',
+      '```json',
+      '{"keep": true}',
+      '```',
+    ].join('\n');
+
+    const { container } = render(
+      <MarkdownArtifactEditor
+        markdown={markdown}
+        sourceRevision={1}
+        onSave={async () => 1}
+      />,
+    );
+
+    expect(
+      container.querySelector<HTMLElement>('.writer-markdown-editor__surface')?.dataset.markdown,
+    ).toBe([
+      '配图：\\{"reference_image_index": 0\\}',
+      '',
+      '行内代码：`{"keep": true}`',
+      '',
+      '```json',
+      '{"keep": true}',
+      '```',
+    ].join('\n'));
+  });
+});
+
 describe('MarkdownArtifactEditor rewrite selection highlight', () => {
   it('navigates internal references without opening the link editor', () => {
     const { container } = render(<Harness />);

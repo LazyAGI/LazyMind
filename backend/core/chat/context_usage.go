@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -279,6 +280,10 @@ func estimateContext(w http.ResponseWriter, r *http.Request, exportPrompt bool) 
 		}
 	}
 	if err := applyChatRuntimeConfigs(r.Context(), db, userID, reqBody); err != nil {
+		if errors.Is(err, errChatModelUnavailable) {
+			common.ReplyErr(w, err.Error(), http.StatusServiceUnavailable)
+			return
+		}
 		common.ReplyErr(w, "load chat runtime config failed", http.StatusInternalServerError)
 		return
 	}

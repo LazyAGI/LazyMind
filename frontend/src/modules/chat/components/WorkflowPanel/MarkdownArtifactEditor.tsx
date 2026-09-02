@@ -252,7 +252,7 @@ function isEscaped(value: string, index: number): boolean {
   return backslashes % 2 === 1;
 }
 
-function escapeMdxLessThanInLine(line: string): string {
+function escapeMdxPlainTextInLine(line: string): string {
   let result = '';
   let inlineCodeFence = 0;
 
@@ -270,6 +270,17 @@ function escapeMdxLessThanInLine(line: string): string {
       const next = line[index + 1] ?? '';
       // MDX treats "<" as a JSX opener. Escape comparison/plain-text uses.
       if (!/[A-Za-z_$/>!?]/.test(next)) result += '\\';
+    }
+    if (
+      (line[index] === '{' || line[index] === '}')
+      && inlineCodeFence === 0
+      && !isEscaped(line, index)
+    ) {
+      // Workflow artifacts can contain inline JSON such as
+      // `配图：{"reference_image_index": 0}`. MDX otherwise parses the braces
+      // as a JavaScript expression and replaces the whole document with an
+      // empty editor when that expression is invalid.
+      result += '\\';
     }
     result += line[index];
     index += 1;
@@ -294,7 +305,7 @@ function normalizeMarkdownForMdxEditor(markdown: string): string {
       }
       return line;
     }
-    return fenceCharacter ? line : escapeMdxLessThanInLine(line);
+    return fenceCharacter ? line : escapeMdxPlainTextInLine(line);
   }).join('\n');
 }
 
@@ -342,6 +353,7 @@ export type MarkdownSaveMode = 'draft' | 'checkpoint';
 interface MarkdownArtifactEditorProps {
   markdown: string;
   sourceRevision: number;
+  maxHeight?: number;
   /** Compact chat presentation hides Workflow-only document chrome. */
   presentation?: 'workflow' | 'chat';
   readOnly?: boolean;
@@ -399,6 +411,7 @@ function isMarkdownToolbarDropdownOpen(): boolean {
 export function MarkdownArtifactEditor({
   markdown,
   sourceRevision,
+  maxHeight,
   presentation = 'workflow',
   readOnly = false,
   editingKey,
@@ -1244,6 +1257,9 @@ export function MarkdownArtifactEditor({
       '--writer-markdown-selection-toolbar-max-width': `${selectionToolbar.maxWidth}px`,
     } as CSSProperties
     : undefined;
+  const editorStyle: CSSProperties | undefined = selectionToolbarStyle || maxHeight !== undefined
+    ? { ...selectionToolbarStyle, ...(maxHeight !== undefined ? { maxHeight } : {}) }
+    : undefined;
 
   return (
     <section
@@ -1254,7 +1270,7 @@ export function MarkdownArtifactEditor({
       }${chatPresentation ? ' writer-markdown-editor--chat' : ''}`}
       aria-label={t('chat.writerMarkdown.documentRegion')}
       ref={rootRef}
-      style={selectionToolbarStyle}
+      style={editorStyle}
       onBlurCapture={() => {
         if (!chatPresentation || readOnly) return;
         window.setTimeout(() => {

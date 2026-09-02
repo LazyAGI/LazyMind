@@ -120,6 +120,11 @@ interface MessageListProps {
   onResendEditedUserMessage?: (index: number, value: string) => void;
   onCopyUserMessage?: (item: any) => void;
   onCiteMessage?: (text: string, historyId?: string) => void;
+  onOpenSideChat?: (source: {
+    selectedText?: string;
+    historyId?: string;
+    sequence?: number;
+  }) => void;
   onOpenSources?: (sources: ChatSource[]) => void;
   footer?: React.ReactNode;
 }
@@ -270,6 +275,7 @@ const MessageList: React.FC<MessageListProps> = ({
   onResendEditedUserMessage,
   onCopyUserMessage,
   onCiteMessage,
+  onOpenSideChat,
   onOpenSources,
   footer,
 }) => {
@@ -505,6 +511,7 @@ const MessageList: React.FC<MessageListProps> = ({
                   onCiteMessage={(text: string) =>
                     onCiteMessage?.(text, item.history_id || item.id)
                   }
+                  onOpenSideChat={onOpenSideChat}
                   onOpenSources={onOpenSources}
                   hasLaterUserMessage={messageList
                     .slice(index + 1)
