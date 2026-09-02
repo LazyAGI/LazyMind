@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from email.header import decode_header, make_header
 from email.message import EmailMessage
 from email.utils import formatdate
-from typing import Any
+from typing import Any, NoReturn
 
 import lazyllm
 from lazyllm.tools.agent import ToolExecutionError
@@ -68,17 +68,8 @@ def _agentic_config() -> dict[str, Any]:
     return config if isinstance(config, dict) else {}
 
 
-def _mail_error(message: str, *, code: str, retryable: bool = False, reauth: bool = False) -> dict[str, Any]:
-    payload = {
-        'ok': False,
-        'error': message,
-        'error_code': code,
-        'retryable': retryable,
-        'requires_reauth': reauth,
-    }
-    if reauth:
-        payload['reauth_path'] = _REAUTH_PATH
-    return payload
+def _fail(message: str) -> NoReturn:
+    raise ToolExecutionError(message)
 
 
 def _parse_credential(raw: Any) -> dict[str, str]:
@@ -123,13 +114,9 @@ def _credential() -> dict[str, str]:
 def _require_accounts() -> list[dict[str, str]]:
     accounts = _accounts()
     if not accounts:
-        raise ToolExecutionError(
-            json.dumps(_mail_error(
-                'No mailbox is enabled for chat. Connect a supported mailbox in '
-                '资源库 → 云文档 → 邮箱连接 and turn the switch on.',
-                code='mail_disconnected',
-                reauth=True,
-            ), ensure_ascii=False)
+        _fail(
+            'No mailbox is enabled for chat. Connect a supported mailbox in '
+            '资源库 → 云文档 → 邮箱连接 and turn the switch on.'
         )
     valid: list[dict[str, str]] = []
     expired = False
@@ -144,20 +131,13 @@ def _require_accounts() -> list[dict[str, str]]:
     if valid:
         return valid
     if expired:
-        raise ToolExecutionError(
-            json.dumps(_mail_error(
-                'Mailbox authorization is invalid. Re-authorize the connected account.',
-                code='mail_auth_expired',
-                reauth=True,
-                retryable=True,
-            ), ensure_ascii=False)
+        _fail(
+            'Mailbox authorization is invalid. Re-authorize the connected account '
+            'in 资源库 → 云文档 → 邮箱连接.'
         )
-    raise ToolExecutionError(
-        json.dumps(_mail_error(
-            'No mailbox is enabled for chat. Connect a supported mailbox in 资源库 → 云文档 → 邮箱连接 and turn the switch on.',
-            code='mail_disconnected',
-            reauth=True,
-        ), ensure_ascii=False)
+    _fail(
+        'No mailbox is enabled for chat. Connect a supported mailbox in '
+        '资源库 → 云文档 → 邮箱连接 and turn the switch on.'
     )
 
 
@@ -174,12 +154,8 @@ def _pick_account(mailbox: str = '') -> dict[str, str]:
         }
         if key in candidates:
             return cred
-    raise ToolExecutionError(
-        json.dumps(_mail_error(
-            f'Mailbox {mailbox} is not enabled. Pass mailbox as the email address or provider.',
-            code='mail_mailbox_missing',
-            retryable=True,
-        ), ensure_ascii=False)
+    _fail(
+        f'Mailbox {mailbox} is not enabled. Pass mailbox as the email address or provider.'
     )
 
 
@@ -215,21 +191,12 @@ def _call_mailboxes(mailbox: str, runner):
             return _tag_mailbox(runner(cred), cred)
         except ToolExecutionError as orig:
             last_error = orig
-            try:
-                payload = json.loads(str(orig))
-            except Exception:
-                payload = {}
-            if payload.get('error_code') == 'mail_not_found':
+            if 'was not found' in str(orig):
                 continue
             raise
     if last_error is not None:
         raise last_error
-    raise ToolExecutionError(
-        json.dumps(
-            _mail_error('The requested email was not found.', code='mail_not_found', retryable=True),
-            ensure_ascii=False,
-        )
-    )
+    _fail('The requested email was not found.')
 
 
 def _split_addresses(value: Any) -> list[str]:
@@ -284,11 +251,7 @@ def _resolve_attachment_paths(attachment_paths: Any) -> list[str]:
             continue
         missing.append(raw_path)
     if missing:
-        raise ToolExecutionError(json.dumps(_mail_error(
-            'Attachment file was not found: ' + ', '.join(missing),
-            code='mail_attachment_missing',
-            retryable=True,
-        ), ensure_ascii=False))
+        _fail('Attachment file was not found: ' + ', '.join(missing))
     return resolved
 
 
@@ -327,12 +290,7 @@ def _draft_path(draft_id: str) -> str:
 def _load_draft(draft_id: str) -> dict[str, Any]:
     path = _draft_path(draft_id)
     if not os.path.exists(path):
-        raise ToolExecutionError(
-            json.dumps(
-                _mail_error('Mail draft was not found.', code='mail_draft_missing', retryable=True),
-                ensure_ascii=False,
-            )
-        )
+        _fail('Mail draft was not found.')
     with open(path, encoding='utf-8') as handle:
         return json.load(handle)
 
@@ -372,11 +330,7 @@ def _resolve_imap_endpoint(provider: str, email: str) -> dict[str, Any]:
     imap_host = hosts.get('imap_host') or spec.get('imap_host')
     smtp_host = hosts.get('smtp_host') or spec.get('smtp_host')
     if not imap_host or not smtp_host:
-        raise ToolExecutionError(json.dumps(_mail_error(
-            f'Unsupported mailbox domain for {provider}.',
-            code='mail_mailbox_missing',
-            retryable=True,
-        ), ensure_ascii=False))
+        _fail(f'Unsupported mailbox domain for {provider}.')
     return {
         'imap_host': imap_host,
         'imap_port': int(spec.get('imap_port') or 993),
@@ -404,20 +358,12 @@ class _IMAPBackend:
             status, _ = client.login(self.email, self.secret)
         except imaplib.IMAP4.error as orig:
             client.logout()
-            raise ToolExecutionError(json.dumps(_mail_error(
-                'Mailbox authorization expired. Re-authorize the mailbox.',
-                code='mail_auth_expired',
-                reauth=True,
-                retryable=True,
-            ), ensure_ascii=False)) from orig
+            raise ToolExecutionError(
+                'Mailbox authorization expired. Re-authorize the mailbox in 资源库 → 云文档 → 邮箱连接.'
+            ) from orig
         if status != 'OK':
             client.logout()
-            raise ToolExecutionError(json.dumps(_mail_error(
-                'Mailbox authorization expired. Re-authorize the mailbox.',
-                code='mail_auth_expired',
-                reauth=True,
-                retryable=True,
-            ), ensure_ascii=False))
+            _fail('Mailbox authorization expired. Re-authorize the mailbox in 资源库 → 云文档 → 邮箱连接.')
         return client
 
     def search(self, **filters: str) -> dict[str, Any]:
@@ -441,7 +387,7 @@ class _IMAPBackend:
                 criteria.extend(['BEFORE', before])
             status, data = client.search(None, *criteria)
             if status != 'OK':
-                return {'ok': True, 'provider': self.provider, 'mailbox': self.email, 'items': []}
+                return {'provider': self.provider, 'mailbox': self.email, 'items': []}
             ids = (data[0] or b'').split()[-20:]
             items = []
             for uid in reversed(ids):
@@ -459,7 +405,7 @@ class _IMAPBackend:
                     'date': _decode_header_value(msg.get('Date')),
                     'snippet': '',
                 })
-            return {'ok': True, 'provider': self.provider, 'mailbox': self.email, 'items': items}
+            return {'provider': self.provider, 'mailbox': self.email, 'items': items}
         finally:
             try:
                 client.logout()
@@ -472,11 +418,7 @@ class _IMAPBackend:
             client.select('INBOX', readonly=True)
             status, fetched = client.fetch(str(message_id).encode('ascii'), '(RFC822)')
             if status != 'OK' or not fetched or not fetched[0]:
-                raise ToolExecutionError(json.dumps(_mail_error(
-                    'The requested email was not found.',
-                    code='mail_not_found',
-                    retryable=True,
-                ), ensure_ascii=False))
+                _fail('The requested email was not found.')
             return email.message_from_bytes(fetched[0][1])
         finally:
             try:
@@ -509,7 +451,6 @@ class _IMAPBackend:
             elif part.get_content_type() == 'text/html' and not body_parts:
                 body_parts.append(re.sub(r'<[^>]+>', ' ', text))
         return {
-            'ok': True,
             'id': message_id,
             'thread_id': _decode_header_value(msg.get('Message-ID') or message_id),
             'from': _decode_header_value(msg.get('From')),
@@ -548,7 +489,7 @@ class _IMAPBackend:
             messages = [self.read(mid) for mid in reversed(matched[-20:])]
             if not messages and needle.isdigit():
                 messages = [self.read(needle)]
-            return {'ok': True, 'thread_id': thread_id, 'messages': messages}
+            return {'thread_id': thread_id, 'messages': messages}
         finally:
             try:
                 client.logout()
@@ -565,11 +506,7 @@ class _IMAPBackend:
                 if payload is None:
                     break
                 return payload
-        raise ToolExecutionError(json.dumps(_mail_error(
-            'Failed to read the email attachment.',
-            code='mail_attachment_failed',
-            retryable=True,
-        ), ensure_ascii=False))
+        _fail('Failed to read the email attachment.')
 
     def send(self, message: EmailMessage) -> dict[str, Any]:
         try:
@@ -577,30 +514,21 @@ class _IMAPBackend:
                 smtp.login(self.email, self.secret)
                 smtp.send_message(message)
         except smtplib.SMTPAuthenticationError as orig:
-            raise ToolExecutionError(json.dumps(_mail_error(
-                'Mailbox authorization expired. Re-authorize the mailbox.',
-                code='mail_auth_expired',
-                reauth=True,
-                retryable=True,
-            ), ensure_ascii=False)) from orig
+            raise ToolExecutionError(
+                'Mailbox authorization expired. Re-authorize the mailbox in 资源库 → 云文档 → 邮箱连接.'
+            ) from orig
         except smtplib.SMTPException as orig:
-            raise ToolExecutionError(json.dumps(_mail_error(
-                f'Failed to send the email: {orig}',
-                code='mail_send_failed',
-                retryable=True,
-            ), ensure_ascii=False)) from orig
-        return {'ok': True, 'id': message.get('Message-ID') or '', 'sent_at': _iso(datetime.now(timezone.utc))}
+            _fail(f'Failed to send the email: {orig}')
+        return {'id': message.get('Message-ID') or '', 'sent_at': _iso(datetime.now(timezone.utc))}
 
 
 def _backend(cred: dict[str, str]):
     provider = (cred.get('provider') or '').strip().lower()
     if provider in _IMAP_ENDPOINTS:
         return _IMAPBackend(cred)
-    raise ToolExecutionError(json.dumps(_mail_error(
-        'No mailbox is enabled for chat. Connect a supported mailbox in 资源库 → 云文档 → 邮箱连接.',
-        code='mail_disconnected',
-        reauth=True,
-    ), ensure_ascii=False))
+    _fail(
+        'No mailbox is enabled for chat. Connect a supported mailbox in 资源库 → 云文档 → 邮箱连接.'
+    )
 
 
 def _build_message(draft: dict[str, Any], mailbox: str) -> EmailMessage:
@@ -729,29 +657,21 @@ class MailToolkit:
             try:
                 result = _tag_mailbox(_backend(cred).search(**kwargs), cred)
             except ToolExecutionError as orig:
-                try:
-                    payload = json.loads(str(orig))
-                except Exception:
-                    payload = {'error': str(orig), 'error_code': 'mail_search_failed'}
                 errors.append({
                     'mailbox': cred.get('email') or '',
                     'provider': cred.get('provider') or '',
-                    'error': payload.get('error') or str(orig),
-                    'error_code': payload.get('error_code') or 'mail_search_failed',
+                    'error': str(orig),
                 })
                 continue
             items.extend(item for item in (result.get('items') or []) if isinstance(item, dict))
+        if not items and errors and len(errors) == len(accounts):
+            _fail(errors[0]['error'])
         payload: dict[str, Any] = {
-            'ok': True,
             'items': items,
             'mailboxes': [cred.get('email') or '' for cred in accounts],
         }
         if errors:
             payload['errors'] = errors
-        if not items and errors and len(errors) == len(accounts):
-            payload['ok'] = False
-            payload['error'] = errors[0]['error']
-            payload['error_code'] = errors[0]['error_code']
         return payload
 
     def read(self, message_id: str, mailbox: str = '') -> dict[str, Any]:
@@ -793,10 +713,7 @@ class MailToolkit:
             filename = os.path.basename(_decode_header_value(str(attachment_id))) or 'attachment.bin'
             ext = os.path.splitext(filename)[1].lower()
             if ext and ext not in _COMMON_ATTACHMENT_EXTS:
-                raise ToolExecutionError(json.dumps(_mail_error(
-                    f'Attachment type {ext} is not supported.',
-                    code='mail_attachment_unsupported',
-                ), ensure_ascii=False))
+                _fail(f'Attachment type {ext} is not supported.')
             cfg = _agentic_config()
             workspace = chat_agent_workspace(
                 str(cfg.get('user_id') or '0'),
@@ -812,13 +729,8 @@ class MailToolkit:
                 if ext in CHAT_ATTACHMENT_EXTENSIONS:
                     parsed = parse_attachment_content(target)[:20000]
             except Exception as orig:
-                raise ToolExecutionError(json.dumps(_mail_error(
-                    f'Failed to read the email attachment: {orig}',
-                    code='mail_attachment_failed',
-                    retryable=True,
-                ), ensure_ascii=False)) from orig
+                raise ToolExecutionError(f'Failed to read the email attachment: {orig}') from orig
             return {
-                'ok': True,
                 'path': target,
                 'filename': filename,
                 'size': len(raw),
@@ -871,7 +783,7 @@ class MailToolkit:
         }
         _save_draft(draft)
         preview = _emit_draft_card(draft)
-        return {'ok': True, **preview}
+        return preview
 
     def send_draft(self, draft_id: str, confirm: bool = False) -> dict[str, Any]:
         """Send a previously composed draft only after the user confirms the preview card.
@@ -885,28 +797,17 @@ class MailToolkit:
         confirm_id = str(_agentic_config().get('mail_draft_confirm_id') or '').strip()
         confirmed = confirm_id == str(draft_id).strip()
         if not confirmed:
-            preview = _preview(draft)
-            preview['ok'] = False
-            preview['error'] = (
+            _fail(
                 'Send blocked until the user confirms the preview card in this turn. '
                 'Do not call ask_user for send authorization. Wait for mail_draft_confirm_id.'
             )
-            preview['error_code'] = 'mail_confirm_required'
-            preview['confirm'] = bool(confirm)
-            preview['confirm_id_present'] = bool(confirm_id)
-            return preview
         message = _build_message(draft, cred['email'])
         try:
             result = _backend(cred).send(message)
         except ToolExecutionError as orig:
-            payload = {}
-            try:
-                payload = json.loads(str(orig))
-            except Exception:
-                payload = {}
             draft['status'] = 'failed'
-            draft['last_error'] = str(payload.get('error') or orig)
-            draft['requires_reauth'] = bool(payload.get('requires_reauth'))
+            draft['last_error'] = str(orig)
+            draft['requires_reauth'] = 'Re-authorize' in str(orig)
             _save_draft(draft)
             _emit_draft_card(draft)
             raise
@@ -918,7 +819,6 @@ class MailToolkit:
         _save_draft(draft)
         _emit_draft_card(draft)
         return {
-            'ok': True,
             'status': 'sent',
             'draft_id': draft['draft_id'],
             'sent_at': sent_at,

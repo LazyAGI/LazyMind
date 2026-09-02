@@ -32,16 +32,16 @@ def mail_auth(tmp_path, monkeypatch):
 
 def test_mail_search_disconnected():
     lazyllm.globals.config['dynamic_tool_auth'] = {}
-    with pytest.raises(ToolExecutionError, match='mail_disconnected'):
+    with pytest.raises(ToolExecutionError, match='No mailbox is enabled'):
         MailToolkit().search(keyword='invoice')
 
 
 def test_mail_search_filters(mail_auth):
     toolkit = MailToolkit()
     with patch.object(toolkit, 'search', wraps=toolkit.search):
-        with patch('lazymind.chat.engine.tools.mail._IMAPBackend.search', return_value={'ok': True, 'items': []}):
+        with patch('lazymind.chat.engine.tools.mail._IMAPBackend.search', return_value={'items': []}):
             result = toolkit.search(keyword='合同', sender='a@b.com')
-    assert result['ok'] is True
+    assert result['items'] == []
 
 
 def test_send_requires_user_confirmation(mail_auth, tmp_path):
@@ -58,10 +58,8 @@ def test_send_requires_user_confirmation(mail_auth, tmp_path):
         'last_error': '',
     }
     _save_draft(draft)
-    result = MailToolkit().send_draft('draft_abc', confirm=True)
-    assert result['ok'] is False
-    assert result['error_code'] == 'mail_confirm_required'
-    assert result['status'] == 'draft'
+    with pytest.raises(ToolExecutionError, match='confirms the preview card'):
+        MailToolkit().send_draft('draft_abc', confirm=True)
 
 
 def test_send_after_confirm(mail_auth):
@@ -81,10 +79,9 @@ def test_send_after_confirm(mail_auth):
     lazyllm.globals['agentic_config']['mail_draft_confirm_id'] = 'draft_ok'
     with patch(
         'lazymind.chat.engine.tools.mail._IMAPBackend.send',
-        return_value={'ok': True, 'id': 'm1', 'sent_at': '2026-09-01T00:00:00+00:00'},
+        return_value={'id': 'm1', 'sent_at': '2026-09-01T00:00:00+00:00'},
     ):
         result = MailToolkit().send_draft('draft_ok', confirm=False)
-    assert result['ok'] is True
     assert result['status'] == 'sent'
     assert result['sent_at']
 
@@ -112,13 +109,12 @@ def test_search_merges_enabled_mailboxes(mail_auth):
             self.cred = cred
 
         def search(self, **kwargs):
-            return {'ok': True, 'items': [{'id': '1', 'subject': self.cred['email']}]}
+            return {'items': [{'id': '1', 'subject': self.cred['email']}]}
 
     with patch('lazymind.chat.engine.tools.mail._backend', side_effect=lambda cred: FakeBackend(cred)):
         result = MailToolkit().search(keyword='invoice')
         filtered = MailToolkit().search(keyword='invoice', mailbox='b@163.com')
 
-    assert result['ok'] is True
     assert {item['mailbox'] for item in result['items']} == {'a@qq.com', 'b@163.com'}
     assert filtered['mailboxes'] == ['b@163.com']
     assert filtered['items'][0]['mailbox'] == 'b@163.com'
@@ -133,12 +129,11 @@ def test_compose_accepts_string_attachment_path(mail_auth, tmp_path):
         body='body',
         attachment_paths=str(attachment),
     )
-    assert result['ok'] is True
     assert result['attachments'] == ['attachment_test.txt']
 
 
 def test_compose_rejects_missing_attachment(mail_auth):
-    with pytest.raises(ToolExecutionError, match='mail_attachment_missing'):
+    with pytest.raises(ToolExecutionError, match='Attachment file was not found'):
         MailToolkit().compose_draft(
             to='a@b.com',
             subject='missing',
