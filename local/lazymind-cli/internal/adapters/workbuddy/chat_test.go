@@ -45,7 +45,7 @@ echo '{"type":"result","subtype":"success","is_error":false}'
 		script = `@echo off
 if not exist "%WORKBUDDY_CONFIG_DIR%\fixture" exit /b 28
 if not exist "%CODEBUDDY_CONFIG_DIR%\fixture" exit /b 28
-echo %7 | findstr /C:"ImageGen" >nul
+echo %* | findstr /C:"ImageGen" >nul
 if errorlevel 1 exit /b 29
 if not exist generated-images mkdir generated-images
 echo fixture>generated-images\workbuddy.png

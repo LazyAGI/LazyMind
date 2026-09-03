@@ -271,7 +271,14 @@ func SameExecutable(left, right string) bool {
 	if leftErr != nil || rightErr != nil {
 		return false
 	}
-	return os.SameFile(leftInfo, rightInfo)
+	if os.SameFile(leftInfo, rightInfo) {
+		return true
+	}
+	// Windows can temporarily refuse the file-ID lookup used by os.SameFile
+	// while another process (for example an installer or antivirus scanner)
+	// has the executable open. The paths above are already absolute and have
+	// had symlinks resolved, so a case-insensitive path match is a safe fallback.
+	return runtime.GOOS == "windows" && strings.EqualFold(resolvedLeft, resolvedRight)
 }
 
 func ConnectorRuntime() (string, string, error) {

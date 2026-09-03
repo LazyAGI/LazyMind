@@ -9,6 +9,8 @@ import (
 	"time"
 )
 
+const imageModTimeTolerance = 2 * time.Second
+
 // ImageAttachmentsSince returns regular image files created or updated in one
 // provider-owned output directory during the current run.
 func ImageAttachmentsSince(directory string, since time.Time) ([]Attachment, error) {
@@ -32,7 +34,10 @@ func ImageAttachmentsSince(directory string, since time.Time) ([]Attachment, err
 		if err != nil {
 			return nil, err
 		}
-		if !info.Mode().IsRegular() || info.ModTime().Before(since) {
+		// Filesystems do not all preserve sub-second modification times. Compare
+		// against the coarsest common two-second timestamp resolution so an image
+		// written immediately after the run starts is not dropped on another OS.
+		if !info.Mode().IsRegular() || info.ModTime().Before(since.Add(-imageModTimeTolerance)) {
 			continue
 		}
 		attachments = append(attachments, Attachment{
