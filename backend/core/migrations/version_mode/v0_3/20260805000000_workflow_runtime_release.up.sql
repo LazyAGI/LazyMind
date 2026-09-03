@@ -656,8 +656,8 @@ CREATE TABLE IF NOT EXISTS external_agent_bindings (
     created_at TIMESTAMP NOT NULL,
     updated_at TIMESTAMP NOT NULL
 );
-CREATE UNIQUE INDEX IF NOT EXISTS uk_external_agent_binding_conversation
-    ON external_agent_bindings(conversation_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_external_agent_binding_conversation_provider
+    ON external_agent_bindings(conversation_id, provider);
 CREATE UNIQUE INDEX IF NOT EXISTS uk_external_agent_binding_thread
     ON external_agent_bindings(provider, host_id, provider_thread_id);
 
@@ -973,8 +973,8 @@ CREATE TABLE IF NOT EXISTS external_agent_bindings (
     created_at TIMESTAMP NOT NULL,
     updated_at TIMESTAMP NOT NULL
 );
-CREATE UNIQUE INDEX IF NOT EXISTS uk_external_agent_binding_conversation
-    ON external_agent_bindings(conversation_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_external_agent_binding_conversation_provider
+    ON external_agent_bindings(conversation_id, provider);
 CREATE UNIQUE INDEX IF NOT EXISTS uk_external_agent_binding_thread
     ON external_agent_bindings(provider, host_id, provider_thread_id);
 

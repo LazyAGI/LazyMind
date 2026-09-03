@@ -213,7 +213,7 @@ func TestExternalContinuationPreservesProviderOwnedConversation(t *testing.T) {
 	}
 }
 
-func TestExternalConversationBindsExactlyOneNativeThread(t *testing.T) {
+func TestExternalConversationBindsOneNativeThreadPerProvider(t *testing.T) {
 	_, db := newExternalChatTestApplication(t)
 	service := externalcontext.New(db)
 	ctx := context.Background()
@@ -227,8 +227,12 @@ func TestExternalConversationBindsExactlyOneNativeThread(t *testing.T) {
 	if !managed.ManagedByLazyMind {
 		t.Fatal("LazyMind-created thread was not marked as managed")
 	}
-	if err := service.BindManagedThread(ctx, "user-1", ChatExecutorCursor, "host-1", "cursor-thread", "conversation-1"); !errors.Is(err, externalcontext.ErrThreadOwned) {
-		t.Fatalf("second provider in one conversation err=%v", err)
+	if err := service.BindManagedThread(ctx, "user-1", ChatExecutorCursor, "host-1", "cursor-thread", "conversation-1"); err != nil {
+		t.Fatalf("bind second provider in one conversation: %v", err)
+	}
+	var bindingCount int64
+	if err := db.Model(&orm.ExternalAgentBinding{}).Where("conversation_id = ?", "conversation-1").Count(&bindingCount).Error; err != nil || bindingCount != 2 {
+		t.Fatalf("provider bindings=%d err=%v", bindingCount, err)
 	}
 	now := time.Now().UTC()
 	if err := db.Create(&orm.Conversation{ID: "conversation-2", BaseModel: orm.BaseModel{
@@ -236,8 +240,8 @@ func TestExternalConversationBindsExactlyOneNativeThread(t *testing.T) {
 	}}).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := service.BindManagedThread(ctx, "user-1", ChatExecutorCursor, "host-1", "cursor-thread", "conversation-2"); err != nil {
-		t.Fatal(err)
+	if err := service.BindManagedThread(ctx, "user-1", ChatExecutorCursor, "host-1", "cursor-thread", "conversation-2"); !errors.Is(err, externalcontext.ErrThreadOwned) {
+		t.Fatalf("rebind Cursor thread err=%v, want ErrThreadOwned", err)
 	}
 	if err := service.BindManagedThread(ctx, "user-1", ChatExecutorCodex, "host-1", "another-codex-thread", "conversation-1"); !errors.Is(err, externalcontext.ErrThreadOwned) {
 		t.Fatalf("second Codex thread err=%v, want ErrThreadOwned", err)

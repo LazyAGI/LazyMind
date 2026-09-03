@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"lazymind/agentconnector/internal/agentexec"
+	"lazymind/agentconnector/internal/coreapi"
 )
 
 const (
@@ -504,6 +505,9 @@ func (h *Host) sendEventWithRetry(ctx context.Context, run Run, event Event, max
 		if err = h.doJSON(ctx, eventRequestTimeout, http.MethodPost, path, input, nil); err == nil {
 			return nil
 		}
+		if !retryableEventError(err) {
+			break
+		}
 		if maxAttempts > 0 && attempt+1 >= maxAttempts {
 			break
 		}
@@ -557,6 +561,9 @@ func (h *Host) sendAttachmentWithRetry(
 		if err = h.doJSON(ctx, attachmentRequestTimeout, http.MethodPost, path, input, nil); err == nil {
 			return nil
 		}
+		if !retryableEventError(err) {
+			break
+		}
 		if maxAttempts > 0 && attempt+1 >= maxAttempts {
 			break
 		}
@@ -565,6 +572,15 @@ func (h *Host) sendAttachmentWithRetry(
 		}
 	}
 	return err
+}
+
+func retryableEventError(err error) bool {
+	var apiErr *coreapi.Error
+	if !errors.As(err, &apiErr) {
+		return true
+	}
+	return apiErr.Retryable || apiErr.StatusCode == http.StatusRequestTimeout ||
+		apiErr.StatusCode == http.StatusTooManyRequests || apiErr.StatusCode >= http.StatusInternalServerError
 }
 
 func (h *Host) sendTerminalEvent(parent context.Context, run Run, event Event) error {

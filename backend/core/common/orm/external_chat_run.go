@@ -9,8 +9,8 @@ import (
 // provider-native thread and one LazyMind conversation.
 type ExternalAgentBinding struct {
 	ID                string    `gorm:"column:id;type:varchar(36);primaryKey" json:"binding_id"`
-	ConversationID    string    `gorm:"column:conversation_id;type:varchar(36);not null;uniqueIndex:uk_external_agent_binding_conversation" json:"conversation_id"`
-	Provider          string    `gorm:"column:provider;type:varchar(32);not null;uniqueIndex:uk_external_agent_binding_thread,priority:1" json:"provider"`
+	ConversationID    string    `gorm:"column:conversation_id;type:varchar(36);not null;uniqueIndex:uk_external_agent_binding_conversation_provider,priority:1" json:"conversation_id"`
+	Provider          string    `gorm:"column:provider;type:varchar(32);not null;uniqueIndex:uk_external_agent_binding_conversation_provider,priority:2;uniqueIndex:uk_external_agent_binding_thread,priority:1" json:"provider"`
 	HostID            string    `gorm:"column:host_id;type:varchar(128);not null;uniqueIndex:uk_external_agent_binding_thread,priority:2" json:"host_id"`
 	ProviderThreadID  string    `gorm:"column:provider_thread_id;type:varchar(128);not null;uniqueIndex:uk_external_agent_binding_thread,priority:3" json:"provider_thread_id"`
 	ManagedByLazyMind bool      `gorm:"column:managed_by_lazymind;not null;default:false" json:"managed_by_lazymind"`

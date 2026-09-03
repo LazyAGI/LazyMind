@@ -257,7 +257,7 @@ func (s *Service) BindManagedThread(
 		return err
 	}
 	err = s.db.WithContext(ctx).
-		Where("conversation_id = ?", conversationID).
+		Where("conversation_id = ? AND provider = ?", conversationID, source.Provider).
 		Take(&existing).Error
 	if err == nil {
 		return ErrThreadOwned
@@ -284,7 +284,7 @@ func (s *Service) BindManagedThread(
 		// A concurrent first turn may have won the per-provider binding with
 		// another thread between the pre-check and insert.
 		if conflictErr := s.db.WithContext(ctx).
-			Where("conversation_id = ?", conversationID).
+			Where("conversation_id = ? AND provider = ?", conversationID, source.Provider).
 			Take(&existing).Error; conflictErr == nil {
 			return ErrThreadOwned
 		} else if !errors.Is(conflictErr, gorm.ErrRecordNotFound) {

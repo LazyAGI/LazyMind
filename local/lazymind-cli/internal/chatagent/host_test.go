@@ -9,6 +9,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"lazymind/agentconnector/internal/coreapi"
 )
 
 type retryingCoreClient struct {
@@ -76,6 +78,8 @@ func (runner *privacyCatalogRunner) Sessions(context.Context) ([]NativeSession, 
 
 type blockingCoreClient struct{}
 
+type permanentFailureCoreClient struct{ calls int }
+
 type claimBlockingCoreClient struct{ started chan struct{} }
 
 type pendingMirrorCoreClient struct {
@@ -92,6 +96,11 @@ func (r *countingRunner) Run(context.Context, Run, func(Event) error) error {
 func (blockingCoreClient) DoJSON(ctx context.Context, _, _ string, _, _ any) error {
 	<-ctx.Done()
 	return ctx.Err()
+}
+
+func (client *permanentFailureCoreClient) DoJSON(context.Context, string, string, any, any) error {
+	client.calls++
+	return &coreapi.Error{StatusCode: 409, Message: "conflict"}
 }
 
 func (c claimBlockingCoreClient) DoJSON(ctx context.Context, _, _ string, _, _ any) error {
@@ -198,6 +207,21 @@ func TestHostEventRetryKeepsIdempotencyAndLeaseTokens(t *testing.T) {
 	}
 	if first["lease_token"] != run.LeaseToken || first["host_id"] != host.id {
 		t.Fatalf("event lost lease ownership: %#v", first)
+	}
+}
+
+func TestHostDoesNotRetryPermanentEventRejection(t *testing.T) {
+	client := &permanentFailureCoreClient{}
+	host := &Host{api: client, id: "host-1"}
+	ctx, cancel := context.WithTimeout(context.Background(), 450*time.Millisecond)
+	defer cancel()
+	if err := host.sendEvent(ctx, Run{RunID: "run-1", LeaseToken: "lease-1"}, Event{
+		Type: "thread_started", ProviderThreadID: "thread-1",
+	}); err == nil {
+		t.Fatal("permanent event rejection was ignored")
+	}
+	if client.calls != 1 {
+		t.Fatalf("permanent event attempts=%d, want 1", client.calls)
 	}
 }
 
