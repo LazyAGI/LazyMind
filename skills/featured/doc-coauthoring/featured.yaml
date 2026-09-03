@@ -1,0 +1,131 @@
+schema_version: 2
+id: doc-coauthoring
+type: chat
+version: 1.0.0
+status: published
+default_locale: zh-CN
+provider: GitHub
+
+skill:
+  source_url: https://github.com/anthropics/skills/tree/main/skills/doc-coauthoring
+  category: writing
+  required_version: 1.0.0
+
+placement:
+  home: true
+  gallery: true
+  order: 28
+
+classification:
+  category: 文档协作
+  tags:
+    - 文档共创
+    - 方案写作
+    - 技术文档
+    - 决策记录
+
+assets:
+  cover:
+    file: assets/cover.png
+    role: cover
+  document_coauthoring_demo:
+    file: assets/document-coauthoring-demo.html
+    role: result
+
+presentation:
+  card:
+    title: 文档共创助手
+    description: 和你一起从背景、结构到读者测试，把方案和技术文档逐步写清楚
+    output_type: report
+    output_label: 文档共创结果
+    cover_asset: cover
+    result_summary: 查看一份产品方案、技术方案和决策文档如何被共同梳理出来
+  detail:
+    title: 文档共创助手
+    description: 适合共同起草产品方案、技术方案和决策文档。先了解文档类型、读者、目标和约束，再一起确定结构、逐段讨论和起草，最后从读者角度检查是否清楚。不会在背景不完整时擅自补齐关键事实。来源：anthropics/skills，经 LazyMind 适配。
+    attachment_hint: 想共同起草的方案、技术文档、决策记录，或已有模板和背景材料
+
+tasks:
+  - id: coauthor-product-proposal
+    selector:
+      title: 一起写产品方案
+      description: 从问题和目标开始，逐步写出面向团队的产品方案
+      output_label: 产品方案
+    launch:
+      prompt_short: 我想写一份产品方案，能陪我一步步梳理吗？
+      prompt: >-
+        我想写一份关于团队知识库搜索的产品方案，能陪我一步步梳理吗？先了解背景、读者和目标，再和我一起确定结构、逐段写。不要一开始就把整份方案写完，信息不够时直接问我。
+    replay:
+      steps:
+        - title: 对齐背景和目标
+          description: 先确认文档要解决的问题、面向谁，以及希望读者看完后做什么
+        - title: 收集现有信息
+          description: 整理已有材料、约束和待确认的问题，不替用户补写没有依据的事实
+        - title: 确定文档结构
+          description: 根据读者和目标讨论章节顺序，并说明每一部分要回答的问题
+        - title: 逐段共同起草
+          description: 一次推进一个部分，先讨论取舍，再形成可以继续修改的文字
+        - title: 做读者测试
+          description: 从不了解背景的读者角度检查方案是否容易理解、执行和评估
+    result:
+      template: html_preview_v1
+      eyebrow: 产品方案
+      title: 团队知识库搜索方案
+      summary: 查看如何从背景、目标和读者出发，逐段形成一份可讨论的产品方案。
+      html_asset: document_coauthoring_demo
+
+  - id: coauthor-technical-spec
+    selector:
+      title: 一起写技术方案
+      description: 把背景、约束、方案取舍和落地步骤写成技术文档
+      output_label: 技术方案
+    launch:
+      prompt_short: 我需要写一份技术方案，帮我一起把它写清楚。
+      prompt: >-
+        我需要写一份技术方案，内容是把客服知识库接入现有工作台。请先问我需要补充的背景和约束，再一起整理章节和方案；每次先讨论一部分，不要替我假设没提供的技术细节。
+    replay:
+      steps:
+        - title: 了解系统背景
+          description: 确认现有系统、使用者、技术目标和需要解决的实际问题
+        - title: 梳理约束和选项
+          description: 把性能、权限、兼容性、时间等约束与候选方案分开记录
+        - title: 讨论章节和取舍
+          description: 共同确定技术方案需要覆盖的内容，并逐项说明为什么这样选择
+        - title: 分段完成初稿
+          description: 先写清楚已经确定的部分，对未决定的内容保留明确的问题
+        - title: 检查读者可执行性
+          description: 从实现者和评审者角度检查方案是否缺少上下文、依据或下一步
+    result:
+      template: html_preview_v1
+      eyebrow: 技术方案
+      title: 客服知识库接入工作台
+      summary: 查看系统背景、约束、方案取舍和待确认事项如何逐步形成技术方案。
+      html_asset: document_coauthoring_demo
+
+  - id: coauthor-decision-doc
+    selector:
+      title: 整理决策文档
+      description: 把选项、依据、取舍和结论整理成方便回看的决策记录
+      output_label: 决策文档
+    launch:
+      prompt_short: 帮我把这次技术选型整理成一份决策文档。
+      prompt: >-
+        我们在自建搜索和托管搜索之间做选择，团队规模、数据量和上线时间还没整理清楚。帮我先把这些背景问出来，再一起写方案、取舍和结论，最后从读者角度检查有没有看不懂的地方。
+    replay:
+      steps:
+        - title: 确认决策背景
+          description: 了解要做什么决定、为什么现在要决定，以及文档的读者
+        - title: 补齐事实和约束
+          description: 询问团队、数据、时间和风险等影响决策的关键信息
+        - title: 组织候选方案
+          description: 把选项、评估标准、证据和取舍放进清晰的结构中
+        - title: 共同写出结论
+          description: 区分已确认的决定、暂时的判断和仍需验证的内容
+        - title: 检查可读性
+          description: 模拟不了解讨论过程的读者，找出难以理解或无法复盘的地方
+    result:
+      template: html_preview_v1
+      eyebrow: 决策文档
+      title: 搜索方案技术选型记录
+      summary: 查看候选方案、评估依据、取舍和结论如何被整理成可复盘的记录。
+      html_asset: document_coauthoring_demo
