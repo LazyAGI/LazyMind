@@ -47,28 +47,22 @@ def load_memory_context(
 def truncate_preference_index(
     content: str,
     *,
-    max_items: Optional[int] = None,
     max_chars: Optional[int] = None,
 ) -> str:
     """Render the compact summary/ref Preference projection for Chat."""
-    if max_items is None:
-        max_items = int(_cfg['preference_index_max_items'])
     if max_chars is None:
         max_chars = int(_cfg['preference_context_max_chars'])
     text = content if isinstance(content, str) else ''
-    if max_items < 0:
-        raise ValueError('max_items must be >= 0')
     if max_chars < 1:
         raise ValueError('max_chars must be >= 1')
     if not text.strip():
-        return text
+        return ''
     error = validate_preference_index(text)
     if error:
         raise ValueError(error)
 
     projection = build_preference_projection(
         parse_preference_items(text),
-        max_items=max_items,
         max_chars=max_chars,
     )
     return projection.content

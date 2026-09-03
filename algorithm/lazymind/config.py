@@ -191,15 +191,6 @@ config.add('core_internal_token', str, '', 'AUTH_SERVICE_INTERNAL_TOKEN',
 config.add('agentic_kb_name', str, 'general_algo', 'AGENTIC_KB_NAME',
            description='Default knowledge base name for agentic.')
 config.add('skill_fs_url', str, 'remote://skills', 'SKILL_FS_URL', description='Skill filesystem URL.')
-_validate_positive_integer_env('LAZYMIND_PREFERENCE_INDEX_MAX_ITEMS')
-config.add(
-    'preference_index_max_items',
-    int,
-    100,
-    'PREFERENCE_INDEX_MAX_ITEMS',
-    description='Maximum number of Preference index items eligible for resident prompt projection.',
-    post_action=_require_positive_config_value('LAZYMIND_PREFERENCE_INDEX_MAX_ITEMS'),
-)
 _validate_positive_integer_env('LAZYMIND_PREFERENCE_CONTEXT_MAX_CHARS')
 config.add(
     'preference_context_max_chars',

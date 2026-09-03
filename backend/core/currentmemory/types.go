@@ -31,19 +31,12 @@ type CurrentMemoryPreferenceItem struct {
 	UpdatedAt string `json:"updated_at"`
 }
 
-type CurrentMemoryPreferenceResidentIndexUsage struct {
-	UsedItems int64 `json:"used_items"`
-	MaxItems  int64 `json:"max_items"`
-	OverLimit bool  `json:"over_limit"`
-}
-
 type CurrentMemoryPreferenceListData struct {
-	Items              []CurrentMemoryPreferenceItem             `json:"items"`
-	TotalSize          int64                                     `json:"total_size"`
-	ResidentIndexUsage CurrentMemoryPreferenceResidentIndexUsage `json:"resident_index_usage"`
-	ETag               string                                    `json:"etag"`
-	UpdatedAt          int64                                     `json:"updated_at"`
-	ProjectionState    PreferenceProjectionState                 `json:"projection_state"`
+	Items           []CurrentMemoryPreferenceItem `json:"items"`
+	TotalSize       int64                         `json:"total_size"`
+	ETag            string                        `json:"etag"`
+	UpdatedAt       int64                         `json:"updated_at"`
+	ProjectionState PreferenceProjectionState     `json:"projection_state"`
 }
 
 type CurrentMemoryPreferenceDetailData struct {

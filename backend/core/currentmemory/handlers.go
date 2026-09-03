@@ -24,9 +24,9 @@ func NewHandler(db *gorm.DB) *Handler {
 	return &Handler{module: NewModule(db), db: db}
 }
 
-func NewHandlerWithPreferenceIndexMaxItems(db *gorm.DB, maxItems int) *Handler {
+func NewHandlerWithPreferenceContextMaxChars(db *gorm.DB, maxChars int) *Handler {
 	return &Handler{
-		module: NewModuleWithPreferenceIndexMaxItems(db, maxItems),
+		module: NewModuleWithPreferenceContextMaxChars(db, maxChars),
 		db:     db,
 	}
 }

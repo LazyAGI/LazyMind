@@ -502,7 +502,7 @@ def test_memory_tools_use_only_tool_manager_envelope():
                 updated_at='2026-08-27T00:00:00+00:00',
             ),
         )
-        with _cfg.temp('preference_index_max_items', 1):
+        with _cfg.temp('preference_context_max_chars', 1):
             preference_success = manager(_tool_call(
                 'MemoryTools_preference_editor',
                 {

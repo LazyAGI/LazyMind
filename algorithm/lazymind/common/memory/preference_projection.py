@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
-import yaml
+import json
 
 from .validation.preference import PreferenceItem
 
@@ -19,30 +19,23 @@ class PreferenceProjection:
 
 
 def render_preference_projection(items: Iterable[PreferenceItem]) -> str:
-    """Render the compact Preference prompt projection used by Chat."""
-    payload = [
-        {
-            'summary': item.summary,
-            'ref': item.ref,
-        }
-        for item in items
-    ]
-    return yaml.safe_dump(
-        {'preferences': payload},
-        allow_unicode=True,
-        sort_keys=False,
-        default_flow_style=False,
-    )
+    """Canonical YAML projection shared with Core, using JSON-quoted scalars.
+
+    Fixed indentation, no line wrapping, and literal Unicode avoid dependence
+    on the different scalar styles chosen by Go YAML and PyYAML.
+    """
+    def scalar(value: str) -> str:
+        return json.dumps(value, ensure_ascii=False).replace('\u2028', r'\u2028').replace('\u2029', r'\u2029')
+
+    rows = [f'- summary: {scalar(item.summary)}\n  ref: {scalar(item.ref)}\n' for item in items]
+    return 'preferences:\n' + ''.join(rows) if rows else 'preferences: []\n'
 
 
 def build_preference_projection(
     items: Sequence[PreferenceItem],
     *,
-    max_items: int,
     max_chars: int,
 ) -> PreferenceProjection:
-    if max_items < 0:
-        raise ValueError('max_items must be >= 0')
     if max_chars < 1:
         raise ValueError('max_chars must be >= 1')
 
@@ -50,13 +43,14 @@ def build_preference_projection(
     full = render_preference_projection(all_items)
     projected: list[PreferenceItem] = []
     for item in all_items:
-        if len(projected) >= max_items:
-            break
         candidate = [*projected, item]
         if len(render_preference_projection(candidate)) > max_chars:
             break
         projected = candidate
     content = render_preference_projection(projected)
+    # Even the empty YAML envelope may not fit an unusually small budget.
+    if len(content) > max_chars:
+        content = ''
     return PreferenceProjection(
         content=content,
         stored_items=len(all_items),
@@ -65,37 +59,6 @@ def build_preference_projection(
         projected_chars=len(content),
         projection_truncated=len(projected) < len(all_items),
     )
-
-
-def projection_safe_item_count(
-    items: Sequence[PreferenceItem],
-    *,
-    max_chars: int,
-    target_percent: int,
-) -> int:
-    """Return the largest count whose worst current subset stays below target.
-
-    The longest current prompt entries form the worst retained subset. The
-    Organizer receives only the returned count; character budgets remain a
-    deterministic controller concern.
-    """
-    if max_chars < 1:
-        raise ValueError('max_chars must be >= 1')
-    if not 1 <= target_percent <= 100:
-        raise ValueError('target_percent must be between 1 and 100')
-
-    ranked = sorted(
-        items,
-        key=lambda item: len(render_preference_projection([item])),
-        reverse=True,
-    )
-    safe_count = 0
-    for count in range(1, len(ranked) + 1):
-        candidate = render_preference_projection(ranked[:count])
-        if len(candidate) * 100 >= max_chars * target_percent:
-            break
-        safe_count = count
-    return safe_count
 
 
 def projection_target_reached(
