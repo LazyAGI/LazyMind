@@ -143,7 +143,7 @@ func (r *ChatRunner) Run(ctx context.Context, run chatagent.Run, emit func(chata
 	}
 	arguments := []string{
 		"-p", "--output-format", "stream-json", "--permission-mode", "bypassPermissions",
-		"--tools", "Read,Write,Edit,Glob,Grep,ToolSearch,DeferExecuteTool",
+		"--tools", "Read,Write,Edit,Glob,Grep,ToolSearch,DeferExecuteTool,ImageGen",
 		"--strict-mcp-config", "--mcp-config", mcpConfig,
 	}
 	if resume {

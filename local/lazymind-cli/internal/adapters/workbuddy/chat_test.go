@@ -22,6 +22,10 @@ func TestWorkBuddyRunEmitsGeneratedImage(t *testing.T) {
 	t.Setenv("LAZYMIND_HOME", stateHome)
 	binary := filepath.Join(root, "codebuddy")
 	script := `#!/bin/sh
+case ",$7," in
+  *,ImageGen,*) ;;
+  *) echo "ImageGen was not enabled" >&2; exit 29 ;;
+esac
 mkdir -p generated-images
 printf '\211PNG\r\n\032\nfixture' > generated-images/workbuddy.png
 echo '{"type":"system","subtype":"init","session_id":"thread-1"}'
