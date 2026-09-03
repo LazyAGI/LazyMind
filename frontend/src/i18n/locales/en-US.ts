@@ -4939,7 +4939,9 @@ const enUS = {
     memorySkillCreateUploadTitle: "Upload skill",
     memorySkillCreateUploadDesc: "Upload a local file (.zip)",
     memorySkillCreateImportTitle: "Import from web",
-    memorySkillCreateImportDesc: "Import by URL from GitHub or SkillHub",
+    memorySkillCreateImportDesc: "Import from GitHub, SkillHub, or a direct HTTP(S) ZIP package URL",
+    memorySkillCreateImportPlaceholder:
+      "Enter a GitHub repository, SkillHub skill page, or direct HTTP(S) ZIP package URL",
     memorySkillReviewCardTitle: "Skill Review",
     memorySkillReviewCardHint: "Pending experience",
     memorySkillReviewDisabledLoading: "Checking for eligible conversations. Please wait.",
@@ -5076,7 +5078,8 @@ const enUS = {
     memorySkillImportMethodPackage: "Import from local package",
     memorySkillImportApply: "Import",
     memorySkillUploadRepoLabel: "Repository link",
-    memorySkillUploadRepoPlaceholder: "Enter a GitHub or SkillHub skill URL",
+    memorySkillUploadRepoPlaceholder:
+      "https://github.com/org/my-ability or an internal repository link",
     memorySkillUploadFileTitle: "Install from local package",
     memorySkillUploadFileHint:
       "Supports .zip, .tgz, or archives containing skill instruction files. Max 512 MiB per file.",

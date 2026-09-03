@@ -33,6 +33,7 @@ import (
 	skillrevision "lazymind/core/skillv2/revision"
 	skillservice "lazymind/core/skillv2/service"
 	skillshare "lazymind/core/skillv2/share"
+	skillurl "lazymind/core/skillv2/sourceurl"
 	"lazymind/core/store"
 )
 
@@ -1630,8 +1631,6 @@ func (s skillSourceRequest) toServiceSource(ctx context.Context) (skillservice.S
 
 const githubAPIBaseURL = "https://api.github.com"
 
-const skillHubAPIHost = "api.skillhub.cn"
-
 func normalizeSkillImportURL(ctx context.Context, rawURL string) (string, string, error) {
 	return normalizeSkillImportURLWithResolver(ctx, rawURL, &http.Client{Timeout: 10 * time.Second}, githubAPIBaseURL)
 }
@@ -1644,10 +1643,14 @@ func normalizeSkillImportURLWithResolver(ctx context.Context, rawURL string, cli
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
 		return "", "", skillImportURLValidationError("skill import URL must use HTTP or HTTPS")
 	}
-	host := strings.ToLower(strings.TrimPrefix(parsed.Hostname(), "www."))
-	if host == "skillhub.cn" {
-		return normalizeSkillHubImportURL(parsed)
+	resolution, matched, resolveErr := skillurl.ResolveSkillHubPageURL(parsed)
+	if resolveErr != nil {
+		return "", "", skillImportURLValidationError(resolveErr.Error())
 	}
+	if matched {
+		return resolution.DownloadURL, "", nil
+	}
+	host := strings.ToLower(strings.TrimPrefix(parsed.Hostname(), "www."))
 	if host != "github.com" {
 		return rawURL, "", nil
 	}
@@ -1684,41 +1687,6 @@ func normalizeSkillImportURLWithResolver(ctx context.Context, rawURL string, cli
 		return "", "", err
 	}
 	return githubArchiveURL(owner, repository, ref), pathPrefix, nil
-}
-
-func normalizeSkillHubImportURL(parsed *url.URL) (string, string, error) {
-	if parsed.User != nil || parsed.Port() != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
-		return "", "", skillImportURLValidationError("SkillHub URL must not contain credentials, query, or fragment")
-	}
-	parts, err := skillHubURLPathParts(parsed.EscapedPath())
-	if err != nil {
-		return "", "", err
-	}
-	if len(parts) != 2 && len(parts) != 3 || parts[0] != "skills" {
-		return "", "", skillImportURLValidationError("SkillHub URL must point to /skills/<slug> or /skills/<namespace>/<slug>")
-	}
-	coordinate := parts[1]
-	if len(parts) == 3 {
-		coordinate = "@" + parts[1] + "/" + parts[2]
-	}
-	downloadURL := url.URL{Scheme: "https", Host: skillHubAPIHost, Path: "/api/v1/download"}
-	query := downloadURL.Query()
-	query.Set("slug", coordinate)
-	downloadURL.RawQuery = query.Encode()
-	return downloadURL.String(), "", nil
-}
-
-func skillHubURLPathParts(escapedPath string) ([]string, error) {
-	rawParts := strings.Split(strings.Trim(escapedPath, "/"), "/")
-	parts := make([]string, 0, len(rawParts))
-	for _, rawPart := range rawParts {
-		part, err := url.PathUnescape(rawPart)
-		if err != nil || part == "" || part == "." || part == ".." || strings.ContainsAny(part, `/\\`) || strings.ContainsRune(part, 0) {
-			return nil, skillImportURLValidationError("SkillHub URL contains an invalid path segment")
-		}
-		parts = append(parts, part)
-	}
-	return parts, nil
 }
 
 func githubArchiveRef(parts []string) (string, bool) {

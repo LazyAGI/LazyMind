@@ -25,6 +25,7 @@ import (
 	skillmetadata "lazymind/core/skillv2/metadata"
 	skillpackage "lazymind/core/skillv2/skillpackage"
 	skillpatch "lazymind/core/skillv2/skillpatch"
+	skillurl "lazymind/core/skillv2/sourceurl"
 	"lazymind/core/workflow/graphengine"
 )
 
@@ -510,24 +511,16 @@ func resolveSource(raw string) (sourceSpec, error) {
 	if err != nil || parsed.Scheme != "https" && parsed.Scheme != "http" || parsed.Host == "" {
 		return sourceSpec{}, bundleFailure("invalid source URL %q", raw)
 	}
+	resolution, matched, resolveErr := skillurl.ResolveSkillHubPageURL(parsed)
+	if resolveErr != nil {
+		return sourceSpec{}, bundleFailure("unsupported SkillHub URL %q: %v", raw, resolveErr)
+	}
 	parsed.Fragment = ""
 	spec := sourceSpec{SourceURL: raw, ResolvedURL: parsed.String(), Identity: parsed.String()}
-	segments := strings.Split(strings.Trim(parsed.Path, "/"), "/")
-	host := strings.ToLower(parsed.Hostname())
-	if (host == "skillhub.cn" || host == "www.skillhub.cn") && len(segments) >= 2 && segments[0] == "skills" {
-		coordinate := segments[len(segments)-1]
-		if len(segments) == 3 {
-			coordinate = "@" + segments[1] + "/" + segments[2]
-		} else if len(segments) != 2 {
-			return sourceSpec{}, bundleFailure("unsupported SkillHub URL %q", raw)
-		}
-		download := &url.URL{Scheme: "https", Host: "api.skillhub.cn", Path: "/api/v1/download"}
-		query := download.Query()
-		query.Set("slug", coordinate)
-		download.RawQuery = query.Encode()
-		spec.ResolvedURL = download.String()
-		spec.Identity = "skillhub:" + coordinate
-		spec.Key = strings.TrimPrefix(coordinate, "@")
+	if matched {
+		spec.ResolvedURL = resolution.DownloadURL
+		spec.Identity = "skillhub:" + resolution.Coordinate
+		spec.Key = strings.TrimPrefix(resolution.Coordinate, "@")
 	}
 	if spec.Key == "" {
 		base := filepath.Base(parsed.Path)
