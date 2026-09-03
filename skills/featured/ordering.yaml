@@ -8,6 +8,7 @@ home:
     - novel-generator
     - chat-eq-reply
     - xiaohongshu-copywriter
+    - summarize-meeting
   work:
     - ppt-workflow
     - image-workflow
