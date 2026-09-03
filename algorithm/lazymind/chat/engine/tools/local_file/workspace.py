@@ -9,6 +9,7 @@ import uuid
 from typing import Any, Dict, Literal, Optional
 
 import lazyllm
+from lazyllm.tools import fc_register
 from lazyllm.tools.agent import (
     ToolExecutionError,
 )
@@ -19,6 +20,7 @@ from lazyllm.tools.agent.file_tool import (
 )
 
 from lazymind.config import config as _cfg
+
 from .resolver import resolve_text_target
 from .window import (
     RESULT_BYTE_BUDGET,
@@ -126,6 +128,12 @@ def _resolve_workspace_path(path: str, user_id: str, conversation_id: str) -> tu
     if not inside_workspace:
         raise ToolExecutionError('path must stay inside the current main-Agent workspace')
     return workspace, resolved
+
+
+def _workspace_file_resource(arguments: Dict[str, Any], key: str = 'path'):
+    user_id, conversation_id = _current_artifact_scope()
+    _, resolved = _resolve_workspace_path(str(arguments[key]), user_id, conversation_id)
+    return 'file', resolved
 
 
 def _file_tool_root(workspace: str) -> Optional[str]:
@@ -265,6 +273,7 @@ def save_chat_file(
     }
 
 
+@fc_register(write_keys=_workspace_file_resource)
 def write_file(
     path: str,
     content: str,
@@ -314,6 +323,7 @@ def _resolve_text_target_for_tool(
         raise ToolExecutionError(str(exc)) from exc
 
 
+@fc_register(exclusive=True)
 def read_file(
     target: str,
     offset: int = 1,
@@ -348,6 +358,7 @@ def read_file(
     return payload
 
 
+@fc_register(exclusive=True)
 def grep(
     target: str,
     pattern: str,
@@ -435,6 +446,7 @@ def grep(
     }
 
 
+@fc_register(read_keys=_workspace_file_resource)
 def list_dir(path: str = '.', recursive: bool = False, max_depth: int = 5) -> Dict[str, Any]:
     """List files in the current chat workspace or an allowed host path.
 

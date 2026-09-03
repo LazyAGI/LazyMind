@@ -1766,6 +1766,7 @@ const enUS = {
       completed: "Answer complete",
       interrupted: "Answer generation was interrupted",
       failed: "Model call failed",
+      runtimeFailed: "Runtime failed",
       cancelled: "Generation cancelled",
       partialOutput: "The partial output has been preserved.",
       noOutput: "No usable output was generated.",

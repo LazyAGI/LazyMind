@@ -18,14 +18,6 @@ const darwinBuildScript = path.join(scriptsDir, "build-darwin-arm64.sh");
 const windowsBuildScript = path.join(scriptsDir, "build-windows-x64.ps1");
 const installerScript = path.join(scriptsDir, "..", "installer", "installer.nsh");
 const macosWorkflow = path.join(scriptsDir, "..", "..", ".github", "workflows", "macos-installer.yml");
-const macosFinalizeWorkflow = path.join(
-  scriptsDir,
-  "..",
-  "..",
-  ".github",
-  "workflows",
-  "macos-notarization-finalize.yml",
-);
 const windowsWorkflow = path.join(
   scriptsDir,
   "..",
@@ -33,6 +25,14 @@ const windowsWorkflow = path.join(
   ".github",
   "workflows",
   "windows-installer.yml",
+);
+const desktopReleaseWorkflow = path.join(
+  scriptsDir,
+  "..",
+  "..",
+  ".github",
+  "workflows",
+  "desktop-release.yml",
 );
 const coreDockerfile = path.join(scriptsDir, "..", "..", "backend", "core", "Dockerfile");
 const dockerCompose = path.join(scriptsDir, "..", "..", "docker-compose.yml");
@@ -348,7 +348,11 @@ test("Windows CI treats branches as non-tags without leaking git probe failures"
   assert.match(source, /git submodule update --init algorithm\/lazyllm/);
   assert.doesNotMatch(source, /git submodule update --init --recursive/);
   assert.match(source, /resolve-release-version\.mjs/);
-  assert.match(source, /windows-2022[\s\S]*windows-2025/);
+  assert.match(source, /os: windows-2022[\s\S]*install_arguments: "\/S --simple-install"[\s\S]*verify_installer_warmup: false[\s\S]*smoke_timeout_ms: 1800000/);
+  assert.match(source, /os: windows-2025[\s\S]*install_arguments: "\/S --full-install"[\s\S]*verify_installer_warmup: true[\s\S]*smoke_timeout_ms: 300000/);
+  assert.match(source, /workflow_call:/);
+  assert.doesNotMatch(source, /push:\s*\n\s*tags:/);
+  assert.match(source, /permissions:\s*\n\s*contents:\s*read/);
   assert.match(source, /artifact_name:\s*\$\{\{ steps\.package\.outputs\.artifact_name \}\}/);
   assert.match(source, /"artifact_name=\$outputName"/);
   assert.match(
@@ -359,7 +363,8 @@ test("Windows CI treats branches as non-tags without leaking git probe failures"
     source,
     /test-windows-installer:[\s\S]*name: Checkout smoke test scripts[\s\S]*ref: \$\{\{ inputs\.git_ref \|\| github\.ref \}\}[\s\S]*name: Download the exact installer built above/,
   );
-  assert.match(source, /Start-Process -FilePath \$env:INSTALLER_PATH -ArgumentList "\/S --full-install" -Wait/);
+  assert.match(source, /Start-Process -FilePath \$env:INSTALLER_PATH -ArgumentList \$env:INSTALL_ARGUMENTS -Wait/);
+  assert.match(source, /!matrix\.verify_installer_warmup \|\| steps\.installer_warmup\.outcome == 'success'/);
   assert.match(source, /DisplayVersion -ne \$env:EXPECTED_VERSION/);
   assert.match(source, /expectedProductVersion = "\$\(\$Matches\[1\]\)\.\$\(\$Matches\[2\]\)\.\$\(\$Matches\[3\]\)\.0"/);
   assert.match(source, /Start-Process -FilePath \$uninstaller -ArgumentList "\/S" -Wait/);
@@ -396,7 +401,7 @@ test("Windows NSIS installer uses electron-builder's default LZMA payload", () =
   assert.match(buildScript, /LAZYMIND_DESKTOP_RUNTIME_STAGE = New-DeferredPythonRuntimeStage/);
   assert.match(buildScript, /'resume-installer' \{ Invoke-Doctor; Finalize-Desktop 'installer' \}/);
   assert.match(workflow, /Cache Electron and electron-builder downloads/);
-  assert.match(workflow, /ArgumentList "\/S --full-install"/);
+  assert.match(workflow, /install_arguments: "\/S --full-install"/);
   assert.match(workflow, /Submodule checkout attempt \$attempt\/3 failed/);
   assert.match(workflow, /pnpm activation attempt \$attempt\/3 failed/);
 });
@@ -406,8 +411,10 @@ test("macOS distribution build signs packages while CI owns notarization sequenc
   const builderSource = readFileSync(electronBuilderConfig, "utf8");
   const packageJson = JSON.parse(readFileSync(electronPackage, "utf8"));
   const workflow = readFileSync(macosWorkflow, "utf8");
-  assert.match(workflow, /on:\s*\n\s*push:\s*\n\s*tags:\s*\n\s*- "v\*"\s*\n\s*workflow_dispatch:/);
-  assert.doesNotMatch(workflow.match(/on:[\s\S]*?permissions:/)?.[0] || "", /branches:/);
+  assert.match(workflow, /on:\s*\n\s*workflow_call:/);
+  assert.match(workflow, /workflow_dispatch:/);
+  assert.doesNotMatch(workflow, /push:\s*\n\s*tags:/);
+  assert.match(workflow, /permissions:\s*\n\s*contents:\s*read/);
   assert.match(workflow, /name: Validate tag and set desktop version[\s\S]*resolve-release-version\.mjs/);
   assert.doesNotMatch(workflow, /pythonPrerelease|prereleaseNames/);
   assert.match(source, /PACKAGE_KIND=.*zip/);
@@ -449,7 +456,7 @@ test("macOS distribution build signs packages while CI owns notarization sequenc
   }
 });
 
-test("macOS CI fails fast on missing credentials and raises the open-file limit", () => {
+test("macOS CI requires credentials only for official LazyAGI releases", () => {
   const source = readFileSync(macosWorkflow, "utf8");
 
   for (const secret of [
@@ -463,13 +470,32 @@ test("macOS CI fails fast on missing credentials and raises the open-file limit"
   }
   assert.match(source, /ulimit -n "\$\{target_open_files\}"/);
   assert.match(source, /actual_open_files < 8192/);
+  assert.match(
+    source,
+    /name: Validate release signing and notarization inputs\s*\n\s*if: steps\.release\.outputs\.official_release == 'true'/,
+  );
+  assert.match(
+    source,
+    /LAZYMIND_DESKTOP_SIGNING_MODE: \$\{\{ steps\.release\.outputs\.official_release == 'true' && 'developer-id' \|\| 'adhoc' \}\}/,
+  );
+  assert.match(
+    source,
+    /CSC_LINK: \$\{\{ steps\.release\.outputs\.official_release == 'true' && secrets\.MAC_CSC_LINK \|\| '' \}\}/,
+  );
+  assert.match(source, /OFFICIAL_REPOSITORY: \$\{\{ github\.repository == 'LazyAGI\/LazyMind' \}\}/);
+  assert.match(source, /official_release=true/);
+  assert.match(source, /Non-official build: using ad-hoc signing and skipping notarization/);
+  assert.match(source, /name: Submit app ZIP for notarization\s*\n\s*if: steps\.release\.outputs\.official_release == 'true'/);
+  assert.match(source, /name: Submit DMG for notarization\s*\n\s*if: steps\.release\.outputs\.official_release == 'true'/);
+  assert.match(source, /if: steps\.release\.outputs\.official_release != 'true'[\s\S]*name: \$\{\{ steps\.package\.outputs\.development_artifact_name \}\}/);
+  assert.match(source, /Skipping DMG container signature verification for non-official build/);
+  assert.match(source, /name: \$\{\{ steps\.final_package\.outputs\.artifact_name \}\}/);
   assert.match(source, /git submodule update --init algorithm\/lazyllm/);
   assert.doesNotMatch(source, /git submodule update --init --recursive/);
 });
 
-test("macOS CI notarizes ZIP then DMG and preserves only the DMG timeout fallback", () => {
+test("macOS CI notarizes ZIP then DMG and fails when notarization times out", () => {
   const buildWorkflow = readFileSync(macosWorkflow, "utf8");
-  const finalizeWorkflow = readFileSync(macosFinalizeWorkflow, "utf8");
 
   assert.match(buildWorkflow, /name:\s*Submit app ZIP for notarization/);
   assert.match(buildWorkflow, /notarytool submit "\$\{zip_path\}"/);
@@ -480,14 +506,16 @@ test("macOS CI notarizes ZIP then DMG and preserves only the DMG timeout fallbac
       buildWorkflow.indexOf("name: Start asynchronous packaged runtime cleanup"),
   );
   assert.match(buildWorkflow, /name:\s*Wait up to 30 minutes for app ZIP notarization/);
-  assert.match(buildWorkflow, /continuing directly to DMG packaging/);
+  assert.match(buildWorkflow, /ZIP notarization is still in progress[\s\S]*exit 1/);
+  assert.match(buildWorkflow, /name:\s*Require accepted app ZIP notarization/);
   assert.match(buildWorkflow, /name:\s*Staple accepted app ticket/);
   assert.match(buildWorkflow, /dist:mac:arm64:prepackaged/);
   assert.match(buildWorkflow, /name:\s*Submit DMG for notarization/);
-  assert.match(buildWorkflow, /notarytool submit "\$\{PENDING_DMG\}"/);
-  assert.match(buildWorkflow, /name:\s*LazyMind-macos-notarization-submission/);
-  assert.match(buildWorkflow, /\.pending\.dmg/);
+  assert.match(buildWorkflow, /notarytool submit "\$\{NOTARIZATION_DMG\}"/);
+  assert.match(buildWorkflow, /\.notarization\.dmg/);
   assert.match(buildWorkflow, /\.unnotarized\.dmg/);
+  assert.doesNotMatch(buildWorkflow, /LazyMind-macos-arm64-pending/);
+  assert.doesNotMatch(buildWorkflow, /LazyMind-macos-notarization-submission/);
   assert.match(buildWorkflow, /git show-ref --verify --quiet "refs\/tags\/\$\{REQUESTED_REF\}"/);
   assert.match(buildWorkflow, /tag_commit=.*git rev-parse "refs\/tags\/\$\{tag_candidate\}\^\{commit\}"/);
   assert.doesNotMatch(buildWorkflow, /path:[^\n]*LazyMind-darwin-arm64\.zip/);
@@ -495,9 +523,22 @@ test("macOS CI notarizes ZIP then DMG and preserves only the DMG timeout fallbac
   assert.match(buildWorkflow, /name:\s*Wait up to 30 minutes for DMG notarization/);
   assert.match(buildWorkflow, /deadline="\$\(\( started_at \+ 1800 \)\)"/);
   assert.match(buildWorkflow, /sleep 30/);
-  assert.match(buildWorkflow, /DMG notarization timed out/);
+  assert.match(buildWorkflow, /DMG notarization is still in progress after 30 minutes[\s\S]*exit 1/);
+  assert.match(buildWorkflow, /name:\s*Require accepted DMG notarization/);
+  assert.match(buildWorkflow, /name:\s*Upload rejected app ZIP notarization diagnostics/);
+  assert.match(buildWorkflow, /name:\s*Upload rejected DMG notarization diagnostics/);
+  assert.match(buildWorkflow, /zip-notarization-log\.json/);
+  assert.match(buildWorkflow, /dmg-notarization-log\.json/);
   assert.match(buildWorkflow, /stapler staple "\$\{final_path\}"/);
   assert.match(buildWorkflow, /stapler validate "\$\{final_path\}"/);
+  assert.match(buildWorkflow, /test-macos-installer:/);
+  assert.match(buildWorkflow, /name:\s*Install application from DMG/);
+  assert.match(buildWorkflow, /name:\s*Run installed application smoke/);
+  assert.match(
+    buildWorkflow,
+    /name:\s*Run installed application smoke[\s\S]*LAZYMIND_DESKTOP_RUNTIME_ROOT="\$\{smoke_root\}" node desktop\/scripts\/packaged-app-smoke\.mjs/,
+  );
+  assert.doesNotMatch(buildWorkflow, /gh release (?:create|upload)/);
   assert.match(buildWorkflow, /name:\s*Verify packaged runtime cleanup after artifact upload/);
   assert.match(buildWorkflow, /LAZYMIND_PROCESS_COMPOSE_DOWN_TIMEOUT=1s/);
   assert.ok(
@@ -505,16 +546,31 @@ test("macOS CI notarizes ZIP then DMG and preserves only the DMG timeout fallbac
       buildWorkflow.indexOf("name: Verify packaged runtime cleanup after artifact upload"),
   );
   assert.doesNotMatch(buildWorkflow, /name:\s*Report step timings/);
+});
 
-  assert.match(finalizeWorkflow, /source_run_id:/);
-  assert.match(finalizeWorkflow, /run-id:\s*\$\{\{\s*inputs\.source_run_id\s*\}\}/);
-  assert.match(finalizeWorkflow, /pattern:\s*"LazyMind-macos-arm64-pending"/);
-  assert.match(finalizeWorkflow, /pattern:\s*"LazyMind-macos-notarization-submission"/);
-  assert.match(finalizeWorkflow, /merge-multiple:\s*true/);
-  assert.match(finalizeWorkflow, /notarytool info "\$\{submission_id\}"/);
-  assert.match(finalizeWorkflow, /notarytool log "\$\{SUBMISSION_ID\}"/);
-  assert.match(finalizeWorkflow, /stapler staple "\$\{final_path\}"/);
-  assert.match(finalizeWorkflow, /name:\s*LazyMind-macos-arm64-notarized/);
+test("desktop release builds each platform once and publishes only after both pass", () => {
+  const source = readFileSync(desktopReleaseWorkflow, "utf8");
+
+  assert.match(source, /push:\s*\n\s*tags:\s*\n\s*- "v\*"/);
+  assert.match(source, /macos:[\s\S]*uses: \.\/\.github\/workflows\/macos-installer\.yml/);
+  assert.match(source, /windows:[\s\S]*uses: \.\/\.github\/workflows\/windows-installer\.yml/);
+  assert.match(source, /release:[\s\S]*needs:\s*\n\s*- macos\s*\n\s*- windows/);
+  assert.match(source, /release:\s*\n\s*name: Create draft desktop release\s*\n\s*if: \$\{\{ !contains\(github\.ref_name, '-'\) \}\}/);
+  assert.match(source, /release:[\s\S]*permissions:[\s\S]*contents: write/);
+  assert.match(source, /GH_REPO: \$\{\{ github\.repository \}\}/);
+  assert.match(source, /name: Download tested macOS installer/);
+  assert.match(source, /name: Download tested Windows installer/);
+  assert.match(source, /gh release create/);
+  assert.match(source, /gh release upload/);
+  assert.match(source, /gh release delete-asset/);
+  assert.match(source, /gh release view .*--json assets/);
+  assert.ok(
+    source.indexOf("gh release upload") < source.indexOf("gh release delete-asset"),
+    "new release assets must be uploaded before stale assets are deleted",
+  );
+  assert.match(source, /--prerelease/);
+  assert.match(source, /printf '%s  %s\\n'.*basename/);
+  assert.doesNotMatch(source, /sha256sum "\$\{dmg_files\[0\]\}" "\$\{exe_files\[0\]\}" \| tee/);
 });
 
 test("installer workflows launch the packaged application before publishing", () => {
@@ -522,8 +578,9 @@ test("installer workflows launch the packaged application before publishing", ()
   const windowsSource = readFileSync(windowsWorkflow, "utf8");
   for (const source of [macosSource, windowsSource]) {
     assert.match(source, /packaged-app-smoke\.mjs/);
-    assert.match(source, /--timeout-ms 300000/);
   }
+  assert.match(macosSource, /--timeout-ms 300000/);
+  assert.match(windowsSource, /--timeout-ms \$\{\{ matrix\.smoke_timeout_ms \}\}/);
   assert.match(macosSource, /LAZYMIND_DESKTOP_RUNTIME_ROOT=/);
   assert.ok(
     windowsSource.indexOf("packaged-app-smoke.mjs") < windowsSource.indexOf("$uninstall = Start-Process"),
