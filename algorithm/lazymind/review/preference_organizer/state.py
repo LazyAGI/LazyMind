@@ -11,7 +11,6 @@ from lazymind.common.memory import (
 )
 from lazymind.common.memory.preference_projection import (
     build_preference_projection,
-    projection_safe_item_count,
     projection_target_reached,
 )
 from lazymind.config import config as _cfg
@@ -33,11 +32,9 @@ def load_preference_state(store: MemoryStore | None = None) -> PreferenceStateSn
     if error:
         raise ValueError(error)
     items = tuple(parse_preference_items(content))
-    max_items = int(_cfg['preference_index_max_items'])
     max_chars = int(_cfg['preference_context_max_chars'])
     projection = build_preference_projection(
         items,
-        max_items=max_items,
         max_chars=max_chars,
     )
     data = PreferenceStateData(
@@ -51,8 +48,6 @@ def load_preference_state(store: MemoryStore | None = None) -> PreferenceStateSn
     return PreferenceStateSnapshot(content=content, items=items, data=data)
 
 
-TARGET_ITEMS = 30
-SOFT_ITEMS = 20
 TARGET_PROMPT_PERCENT = 40
 MAX_CHANGES = 50
 MAX_PASSES = 2
@@ -61,18 +56,10 @@ MAX_ROUNDS_PER_PASS = 60
 
 def target_reached(state: PreferenceStateData) -> bool:
     return (
-        state.stored_items <= TARGET_ITEMS
-        and not state.projection_truncated
+        not state.projection_truncated
         and projection_target_reached(
             state.full_projection_chars,
             max_chars=int(_cfg['preference_context_max_chars']),
             target_percent=TARGET_PROMPT_PERCENT,
         )
     )
-
-
-def target_item_count(snapshot: PreferenceStateSnapshot) -> int:
-    safe_count = projection_safe_item_count(
-        snapshot.items, max_chars=int(_cfg['preference_context_max_chars']), target_percent=TARGET_PROMPT_PERCENT
-    )
-    return min(snapshot.data.stored_items, TARGET_ITEMS, safe_count)

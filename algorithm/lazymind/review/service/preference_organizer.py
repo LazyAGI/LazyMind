@@ -23,12 +23,10 @@ from lazymind.review.preference_organizer.schemas import (
 )
 from lazymind.review.preference_organizer.state import (
     load_preference_state,
-    target_item_count,
     target_reached,
     MAX_CHANGES,
     MAX_PASSES,
     MAX_ROUNDS_PER_PASS,
-    SOFT_ITEMS,
 )
 from lazymind.review.preference_organizer.tools import (
     ChangeBudget,
@@ -74,12 +72,12 @@ def organize_preferences(
         return _failure_result(task_id, 'storage_read_failed', str(exc), retryable=True)
 
     if initial.data.stored_items == 0 or (not force_analysis and target_reached(initial.data)):
-        return _success_result(
+        return _result(
             task_id,
             outcome='no_safe_changes',
             pass_results=[],
             total_changes=0,
-            current_pass=0,
+            passes_attempted=0,
             target_reached_value=target_reached(initial.data),
             stop_reason='empty_index' if initial.data.stored_items == 0 else 'target_reached',
             reason='No adjustment needed.',
@@ -102,18 +100,15 @@ def organize_preferences(
                 retryable=True,
                 pass_results=pass_results,
                 total_changes=budget.used,
-                current_pass=pass_number,
+                passes_attempted=attempted,
             )
         check_cancelled()
-        pass_target_items = target_item_count(before)
         gate = PreferenceOrganizerGate(pass_number=pass_number, budget=budget)
         budget_before = budget.used
         run_error = _run_organizer_pass(
             gate=gate,
             before=before,
             llm_config=llm_config,
-            target_items=pass_target_items,
-            preferred_min_items=SOFT_ITEMS,
             max_rounds_per_pass=MAX_ROUNDS_PER_PASS,
         )
         try:
@@ -135,6 +130,7 @@ def organize_preferences(
             terminal_error = gate.terminal_error or f'Final validation read failed: {exc}'
             stop_reason = 'validation_read_failed'
             break
+        reached = target_reached(after.data)
         pass_outcome = 'failed' if gate.terminal_outcome == 'cancelled' else gate.terminal_outcome
         if run_error and not pass_outcome:
             pass_outcome = 'failed'
@@ -148,14 +144,12 @@ def organize_preferences(
         if not pass_outcome:
             if budget.used == budget_before:
                 pass_outcome = 'no_safe_changes'
-            elif target_reached(after.data):
+            elif reached:
                 pass_outcome = 'organized'
             elif budget.used >= budget.maximum:
                 pass_outcome = 'budget_exhausted'
-            elif budget.used > budget_before:
-                pass_outcome = 'changes_applied'
             else:
-                pass_outcome = 'no_safe_changes'
+                pass_outcome = 'changes_applied'
         pass_results.append(
             PreferenceOrganizerPassResult(
                 pass_number=pass_number,
@@ -171,7 +165,6 @@ def organize_preferences(
         if pass_outcome == 'organized':
             terminal_outcome = 'organized'
             stop_reason = 'target_reached'
-            reached = True
             break
         if pass_outcome in {'stale_state', 'partial', 'failed', 'budget_exhausted'}:
             terminal_outcome = pass_outcome
@@ -193,42 +186,16 @@ def organize_preferences(
         terminal_outcome = 'failed'
         terminal_error = 'Organizer pass loop ended unexpectedly.'
         stop_reason = 'unexpected_loop_end'
-    if terminal_outcome in {
-        'organized',
-        'organized_with_remaining',
-        'no_safe_changes',
-        'budget_exhausted',
-    }:
-        return _success_result(
-            task_id,
-            outcome=terminal_outcome,
-            pass_results=pass_results,
-            total_changes=budget.used,
-            current_pass=attempted,
-            target_reached_value=reached,
-            stop_reason=stop_reason,
-            reason=terminal_error,
-        )
-    return PreferenceOrganizerResult(
-        status='failed',
-        task_id=task_id,
-        outcome=terminal_outcome if terminal_outcome in {'stale_state', 'partial'} else 'failed',
+    return _result(
+        task_id,
+        outcome=terminal_outcome,
+        pass_results=pass_results,
+        total_changes=budget.used,
+        passes_attempted=attempted,
+        target_reached_value=reached,
+        stop_reason=stop_reason,
+        reason=terminal_error,
         retryable=_retryable(terminal_error) and terminal_outcome not in {'stale_state', 'partial'},
-        result=PreferenceOrganizerResultData(
-            current_pass=attempted,
-            passes_attempted=attempted,
-            passes=pass_results,
-            receipts=[receipt for result in pass_results for receipt in result.receipts],
-            total_changes=budget.used,
-            outcome=terminal_outcome or 'failed',
-            reason=terminal_error,
-            target_reached=False,
-            stop_reason=stop_reason or terminal_outcome or 'failed',
-        ),
-        error=PreferenceOrganizerError(
-            code=terminal_outcome or 'failed',
-            message=terminal_error or 'Preference Organizer failed.',
-        ),
     )
 
 
@@ -237,15 +204,11 @@ def _run_organizer_pass(
     gate: PreferenceOrganizerGate,
     before,
     llm_config: Optional[dict[str, Any]],
-    target_items: int,
-    preferred_min_items: int,
     max_rounds_per_pass: int,
 ) -> str:
     prompt = build_preference_organizer_prompt(
         before,
         pass_number=gate.pass_number,
-        preferred_min_items=preferred_min_items,
-        target_items=target_items,
         changes_remaining=gate.budget.maximum - gate.budget.used,
     )
     try:
@@ -305,52 +268,48 @@ def _failure_result(
     retryable: bool,
     pass_results: Optional[list[PreferenceOrganizerPassResult]] = None,
     total_changes: int = 0,
-    current_pass: int = 0,
+    passes_attempted: int = 0,
 ) -> PreferenceOrganizerResult:
-    return PreferenceOrganizerResult(
-        status='failed',
-        task_id=task_id,
+    return _result(
+        task_id,
         outcome='failed',
         retryable=retryable,
-        result=PreferenceOrganizerResultData(
-            current_pass=current_pass,
-            passes_attempted=len(pass_results or []),
-            passes=pass_results or [],
-            receipts=[receipt for result in (pass_results or []) for receipt in result.receipts],
-            total_changes=total_changes,
-            outcome='failed',
-            reason=message,
-            target_reached=False,
-            stop_reason=code,
-        ),
-        error=PreferenceOrganizerError(code=code, message=message),
+        pass_results=pass_results or [],
+        passes_attempted=passes_attempted,
+        total_changes=total_changes,
+        reason=message,
+        stop_reason=code,
     )
 
 
-def _success_result(
+def _result(
     task_id: str,
     *,
     outcome: str,
     pass_results: list[PreferenceOrganizerPassResult],
     total_changes: int,
-    current_pass: int,
-    target_reached_value: bool,
+    passes_attempted: int,
     stop_reason: str,
     reason: str,
+    target_reached_value: bool = False,
+    retryable: bool = False,
 ) -> PreferenceOrganizerResult:
+    success = outcome in {'organized', 'organized_with_remaining', 'no_safe_changes', 'budget_exhausted'}
     return PreferenceOrganizerResult(
-        status='success',
+        status='success' if success else 'failed',
         task_id=task_id,
         outcome=outcome,
+        retryable=retryable if not success else False,
+        error=None if success else PreferenceOrganizerError(
+            code=stop_reason, message=reason or 'Preference Organizer failed.'
+        ),
         result=PreferenceOrganizerResultData(
-            current_pass=current_pass,
-            passes_attempted=len(pass_results),
+            passes_attempted=passes_attempted,
             passes=pass_results,
-            receipts=[receipt for result in pass_results for receipt in result.receipts],
             total_changes=total_changes,
             outcome=outcome,
             reason=reason,
-            target_reached=target_reached_value,
+            target_reached=target_reached_value if success else False,
             stop_reason=stop_reason,
         ),
     )

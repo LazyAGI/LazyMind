@@ -18,7 +18,6 @@ from lazymind.common.memory import (
     MemoryPartialApplyError,
     MemoryStore,
     PreferenceItem,
-    build_reference_path,
     get_episode_store,
     validate_reference_content,
 )
@@ -63,7 +62,6 @@ class PreferenceOrganizerGate:
     budget: ChangeBudget
     phase: str = 'analyze'
     plan_hash: str = ''
-    baseline_etag: str = ''
     current_etag: str = ''
     authorized_operations: list[dict[str, Any]] = field(default_factory=list)
     next_operation_index: int = 0
@@ -99,7 +97,7 @@ class PreferenceOrganizerGate:
             raise ToolExecutionError(str(exc)) from exc
         canonical = json.dumps(authorized, sort_keys=True, ensure_ascii=False, separators=(',', ':'))
         self.plan_hash = hashlib.sha256(canonical.encode('utf-8')).hexdigest()
-        self.baseline_etag = self.current_etag = snapshot.data.etag
+        self.current_etag = snapshot.data.etag
         self.authorized_operations = authorized
         self.phase = 'apply'
         return self.cursor()
@@ -240,6 +238,7 @@ class PreferenceOrganizerAnalyzeTools:
         snapshot = load_preference_state()
         return {
             'stored_items': snapshot.data.stored_items,
+            'full_projection_chars': snapshot.data.full_projection_chars,
             'etag': snapshot.data.etag,
             'preferences': [item.__dict__ for item in snapshot.items],
         }
@@ -376,7 +375,6 @@ def _parse_authorized_operations(
         raise ValueError('AUTHORIZED OPERATIONS must be a JSON list.')
 
     known_names = {item.name for item in snapshot.items}
-    count = snapshot.data.stored_items
     change_count = 0
     operation_ids: set[str] = set()
     authorized: list[dict[str, Any]] = []
@@ -432,7 +430,6 @@ def _parse_authorized_operations(
             }
             known_names.difference_update(source_names)
             known_names.add(name)
-            count -= len(source_names) - 1
             change_count += len(source_names)
         elif action == 'move_to_episode':
             _require_exact_keys(
@@ -457,7 +454,6 @@ def _parse_authorized_operations(
                 'episode_summary': episode_summary,
             }
             known_names.remove(name)
-            count -= 1
             change_count += 1
         elif action == 'delete':
             _require_exact_keys(
@@ -491,7 +487,6 @@ def _parse_authorized_operations(
                 'retained_or_replacement_name': replacement,
             }
             known_names.remove(name)
-            count -= 1
             change_count += 1
         else:
             raise ValueError(f'unsupported authorized action: {action!r}.')
@@ -566,22 +561,10 @@ def _merge_preferences(
     remaining.insert(earliest_index, new_item)
     content = render_preference_index(snapshot.content, remaining)
     store = MemoryStore()
-    store.validate_new_preference_reference(snapshot.content, content, reference_name)
-    store.write(build_reference_path(reference_name), reference_content)
-    try:
-        store.write('memory/users/preference.yaml', content)
-    except Exception as write_exc:
-        try:
-            store.delete_reference(reference_name)
-        except Exception as cleanup_exc:
-            raise MemoryPartialApplyError(
-                f'merge index failed and new reference cleanup failed: {cleanup_exc}',
-                operation='merge',
-                applied=['new_reference'],
-                failed=['preference_index', 'new_reference_cleanup'],
-                item=new_item,
-            ) from write_exc
-        raise
+    store.write_preference_with_new_reference(
+        original=snapshot.content, proposed=content, reference_name=reference_name,
+        reference_content=reference_content, item=new_item, operation='merge',
+    )
     failed_refs: list[str] = []
     for item in source_items:
         try:

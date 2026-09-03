@@ -196,30 +196,44 @@ class MemoryStore:
             conversation_id=conversation_id,
         )
         reference_name = edited['reference_name']
-        self.validate_new_preference_reference(loaded, edited['content'], reference_name)
-        self.write(
-            build_reference_path(reference_name),
-            edited['reference_content'],
+        self.write_preference_with_new_reference(
+            original=loaded, proposed=edited['content'], reference_name=reference_name,
+            reference_content=edited['reference_content'], item=edited['item'], operation='add',
         )
+        return edited['item']
+
+    def write_preference_with_new_reference(
+        self, *, original: str, proposed: str, reference_name: str,
+        reference_content: str, item: PreferenceItem, operation: str,
+    ) -> None:
+        """Persist a new reference before its index entry, compensating a failed index write.
+
+        Callers retain responsibility for semantic edits and old-reference cleanup.
+        Keep the established add/merge receipt vocabulary at this shared boundary.
+        """
+        self.validate_new_preference_reference(original, proposed, reference_name)
+        self.write(build_reference_path(reference_name), reference_content)
         try:
-            self.write(PREFERENCE_PATH, edited['content'])
+            self.write(PREFERENCE_PATH, proposed)
         except Exception as write_exc:
             try:
                 self.delete_reference(reference_name)
             except Exception as cleanup_exc:
                 raise MemoryPartialApplyError(
                     (
-                        f'preference add partially applied: reference '
+                        f'preference {operation} partially applied: reference '
                         f'{reference_name!r} was created but the index write failed; '
                         f'cleanup also failed: {cleanup_exc}'
                     ),
-                    operation='add',
-                    applied=['reference'],
-                    failed=['preference_index', 'reference_cleanup'],
-                    item=edited['item'],
+                    operation=operation,
+                    applied=['new_reference' if operation == 'merge' else 'reference'],
+                    failed=[
+                        'preference_index',
+                        'new_reference_cleanup' if operation == 'merge' else 'reference_cleanup',
+                    ],
+                    item=item,
                 ) from write_exc
             raise
-        return edited['item']
 
     def validate_new_preference_reference(self, original: str, proposed: str, reference_name: str) -> None:
         from .paths import split_reference_ref

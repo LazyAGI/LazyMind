@@ -39,10 +39,8 @@ class PreferenceOrganizerPassResult(BaseModel):
 class PreferenceOrganizerResultData(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
-    current_pass: int = 0
     passes_attempted: int = 0
     passes: List[PreferenceOrganizerPassResult] = Field(default_factory=list)
-    receipts: list[dict[str, Any]] = Field(default_factory=list)
     total_changes: int = 0
     outcome: str
     reason: str = ''

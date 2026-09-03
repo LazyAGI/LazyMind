@@ -67,6 +67,13 @@ func TestMaintenanceLaneClaimsOrganizerBeforeReviewWithoutBlockingOtherUsers(t *
 		Status: orm.ResourceUpdateTaskStatusPending, NextRunAt: now,
 		CreatedAt: now.Add(-2 * time.Minute), UpdatedAt: now,
 	})
+	insertTask(t, db, orm.ResourceUpdateTask{
+		ID: "unlaned-new", TaskType: orm.ResourceUpdateTaskTypeGenerateReview,
+		ResourceType: orm.ResourceUpdateResourceTypeSkill, UserID: "user-4",
+		TriggerType: orm.ResourceUpdateTriggerTypeScheduled, TriggerID: "unlaned-new",
+		Status: orm.ResourceUpdateTaskStatusPending, NextRunAt: now,
+		LaneOrderAt: time.Unix(0, 0), CreatedAt: now.Add(time.Minute), UpdatedAt: now,
+	})
 
 	worker := NewWorker(db, Config{WorkerBatchSize: 3, WorkerLockTTL: time.Minute}, "lane-worker")
 	var claimed []orm.ResourceUpdateTask
@@ -131,7 +138,7 @@ func TestPreferenceOrganizerFreezeOnlyAllowsCurrentAlgorithmTask(t *testing.T) {
 func TestPreferenceOrganizerWorkerPersistsStructuredResult(t *testing.T) {
 	db := newResourceUpdateTestDB(t)
 	now := time.Date(2026, 9, 2, 1, 0, 0, 0, time.UTC)
-	requestJSON, err := json.Marshal(DefaultPreferenceOrganizerRequest())
+	requestJSON, err := json.Marshal(PreferenceOrganizerRequest{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,6 +149,7 @@ func TestPreferenceOrganizerWorkerPersistsStructuredResult(t *testing.T) {
 		Status: orm.ResourceUpdateTaskStatusPending, RequestJSON: requestJSON, NextRunAt: now,
 		LaneKey: MemoryMaintenanceLaneKey("user-1"), LanePriority: PreferenceOrganizerLanePriority,
 		LaneOrderAt: now, CreatedAt: now, UpdatedAt: now,
+		ResultJSON: json.RawMessage(`{"current_pass":1,"receipts":[],"outcome":"failed"}`),
 	})
 	worker := NewWorker(db, Config{
 		WorkerBatchSize: 1, WorkerLockTTL: time.Minute, MaxAttempts: 1,
@@ -154,6 +162,13 @@ func TestPreferenceOrganizerWorkerPersistsStructuredResult(t *testing.T) {
 		_ context.Context,
 		request algo.PreferenceOrganizerRequest,
 	) (*algo.PreferenceOrganizerResponse, int, error) {
+		var running orm.ResourceUpdateTask
+		if err := db.First(&running, "id = ?", "organizer-worker-1").Error; err != nil {
+			t.Fatal(err)
+		}
+		if len(running.ResultJSON) != 0 {
+			t.Fatalf("execution must clear old result without fabricated progress: %s", running.ResultJSON)
+		}
 		if request.TaskID != PreferenceOrganizerAlgorithmTaskID("organizer-worker-1") ||
 			request.RunID == "" {
 			t.Fatalf("unexpected organizer request: %#v", request)
@@ -161,7 +176,7 @@ func TestPreferenceOrganizerWorkerPersistsStructuredResult(t *testing.T) {
 		return &algo.PreferenceOrganizerResponse{
 			Status: "success", TaskID: request.TaskID, Outcome: "organized_with_remaining",
 			Result: map[string]any{
-				"current_pass": 2, "passes_attempted": 2, "total_changes": 7,
+				"passes_attempted": 2, "total_changes": 7,
 				"target_reached": false, "stop_reason": "no_further_safe_changes",
 				"passes": []any{},
 			},
@@ -181,5 +196,24 @@ func TestPreferenceOrganizerWorkerPersistsStructuredResult(t *testing.T) {
 		!strings.Contains(string(task.ResultJSON), `"stop_reason":"no_further_safe_changes"`) ||
 		strings.Contains(string(task.RequestJSON), "secret") {
 		t.Fatalf("unexpected persisted task: %#v result=%s", task, task.ResultJSON)
+	}
+}
+
+func TestPreferenceOrganizerHistoricalResultsRemainReadable(t *testing.T) {
+	legacy := json.RawMessage(`{"current_pass":1,"receipts":[],"passes":[],"outcome":"no_safe_changes"}`)
+	response := preferenceOrganizerResponse(orm.ResourceUpdateTask{ID: "legacy", Status: "done", ResultJSON: legacy})
+	if string(response.Result) != string(legacy) {
+		t.Fatalf("historical JSON must not be rewritten: %s", response.Result)
+	}
+	encoded, err := json.Marshal(response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var envelope map[string]any
+	if err := json.Unmarshal(encoded, &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := envelope["current_pass"]; exists {
+		t.Fatal("task envelope must not expose fabricated current_pass")
 	}
 }

@@ -49,6 +49,7 @@ def _load_review_modules():
         'lazyllm.tools.fs.client',
         'lazymind',
         'lazymind.common',
+        'lazymind.common.maintenance',
         'lazymind.common.memory',
         'lazymind.common.memory.field_contract',
         'lazymind.chat',
@@ -65,6 +66,7 @@ def _load_review_modules():
         'lazymind.review.api.memory_review_routes',
         'lazymind.review.memory_review',
         'lazymind.review.memory_review.prompts',
+        'lazymind.review.memory_review.schemas',
         'lazymind.review.service',
         'lazymind.review.service.memory_review',
     ]
@@ -87,6 +89,22 @@ def _load_review_modules():
     )
     fake_lazyllm.globals = _SidDict()
     fake_lazyllm.locals = _SidDict()
+    # These are service/route unit tests; executor lifecycle has its own suite.
+    fake_maintenance = ModuleType('lazymind.common.maintenance')
+
+    def initialize_context(task_id, run_id, user_id):
+        fake_lazyllm.globals._init_sid(sid=f'{task_id}:{run_id}')
+        fake_lazyllm.globals['agentic_config'] = {
+            'task_id': task_id, 'run_id': run_id, 'user_id': user_id,
+        }
+
+    async def execute(request, function, *, timeout, **kwargs):
+        return function(**kwargs)
+
+    fake_maintenance.initialize_context = initialize_context
+    fake_maintenance.check_cancelled = lambda *_: False
+    fake_maintenance.execute = execute
+    fake_modules['lazymind.common.maintenance'] = fake_maintenance
     fake_fs_client = ModuleType('lazyllm.tools.fs.client')
     fake_fs_client.FS = object
     fake_tools_pkg = ModuleType('lazymind.chat.engine.tools')
@@ -159,6 +177,10 @@ def _load_review_modules():
 
     try:
         sys.modules.update(fake_modules)
+        _load_module(
+            'lazymind.review.memory_review.schemas',
+            Path(_ALGO) / 'lazymind/review/memory_review/schemas.py',
+        )
         _load_module(
             'lazymind.common.memory.field_contract',
             Path(_ALGO) / 'lazymind/common/memory/field_contract.py',

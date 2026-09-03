@@ -120,7 +120,6 @@ func (h *memoryCurrentHandler) writeContent(w http.ResponseWriter, r *http.Reque
 	entry, err := h.service.write(
 		maintenance.RequestContext(r),
 		userID,
-		r.URL.Query().Get("task_id"),
 		rawPath,
 		content,
 		r.Header.Get("Content-Type"),
@@ -149,7 +148,7 @@ func (h *memoryCurrentHandler) Dir(w http.ResponseWriter, r *http.Request) {
 		skillhttperr.Reply(w, "invalid json", http.StatusBadRequest)
 		return
 	}
-	if err := h.service.mkdir(maintenance.RequestContext(r), userID, r.URL.Query().Get("task_id"), body.Path, body.Recursive); err != nil {
+	if err := h.service.mkdir(maintenance.RequestContext(r), userID, body.Path, body.Recursive); err != nil {
 		replyMemoryError(w, err)
 		return
 	}
@@ -164,7 +163,6 @@ func (h *memoryCurrentHandler) Delete(w http.ResponseWriter, r *http.Request, ra
 	if err := h.service.delete(
 		maintenance.RequestContext(r),
 		userID,
-		r.URL.Query().Get("task_id"),
 		rawPath,
 		memoryTruthy(r.URL.Query().Get("recursive")),
 	); err != nil {
@@ -188,7 +186,7 @@ func (h *memoryCurrentHandler) Copy(w http.ResponseWriter, r *http.Request) {
 		skillhttperr.Reply(w, "invalid json", http.StatusBadRequest)
 		return
 	}
-	if err := h.service.copy(maintenance.RequestContext(r), userID, r.URL.Query().Get("task_id"), body.From, body.To, body.Overwrite); err != nil {
+	if err := h.service.copy(maintenance.RequestContext(r), userID, body.From, body.To, body.Overwrite); err != nil {
 		replyMemoryError(w, err)
 		return
 	}
@@ -208,7 +206,7 @@ func (h *memoryCurrentHandler) Move(w http.ResponseWriter, r *http.Request) {
 		skillhttperr.Reply(w, "invalid json", http.StatusBadRequest)
 		return
 	}
-	if err := h.service.move(maintenance.RequestContext(r), userID, r.URL.Query().Get("task_id"), body.From, body.To); err != nil {
+	if err := h.service.move(maintenance.RequestContext(r), userID, body.From, body.To); err != nil {
 		replyMemoryError(w, err)
 		return
 	}

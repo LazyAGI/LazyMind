@@ -685,7 +685,7 @@ func TestMemoryMountValidatesDomainDocumentsWithoutRestrictingGenericFiles(t *te
 
 func TestMemoryMountDoesNotUsePromptLimitAsStorageCapacity(t *testing.T) {
 	db := newRemoteFSTestDB(t)
-	service := newMemoryCurrentServiceWithPreferenceIndexMaxItems(db.DB, 2)
+	service := newMemoryCurrentService(db.DB)
 	handler := newMemoryCurrentHandler(service)
 	const timestamp = "2026-07-20T09:30:00+08:00"
 	renderPreferences := func(names ...string) string {
@@ -807,7 +807,7 @@ func TestPreferenceWriteAtCharacterThresholdEnqueuesOrganizer(t *testing.T) {
 func TestPreferenceProjectionTruncationEnqueuesOrganizer(t *testing.T) {
 	db := newRemoteFSTestDB(t)
 	handler := newMemoryCurrentHandler(
-		newMemoryCurrentServiceWithPreferenceIndexMaxItems(db.DB, 2),
+		newMemoryCurrentServiceWithPreferenceContextMaxChars(db.DB, 100),
 	)
 	content := renderPreferenceCount(t, 3, "short summary")
 	request := httptest.NewRequest(

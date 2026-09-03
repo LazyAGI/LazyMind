@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 from time import time_ns
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Optional
 
 from lazymind.common.maintenance import initialize_context, check_cancelled
 
 import lazyllm
 from lazyllm import AutoModel, LOG
 from lazyllm.tools.fs.client import FS
-from pydantic import BaseModel, ConfigDict
+from lazymind.review.memory_review.schemas import MemoryReviewError, MemoryReviewResult
 
 from lazymind.chat.engine.tools.memory import MemoryReviewEpisodeTools, MemoryTools
 from lazymind.chat.service.component.history import normalize_history_for_agent
@@ -38,23 +38,6 @@ _SAFE_REVIEW_ERROR_MESSAGES = {
     'missing_context': 'Required context for the memory operation is missing.',
     'write_failed': 'A memory write failed.',
 }
-
-
-class MemoryReviewError(BaseModel):
-    model_config = ConfigDict(extra='forbid')
-
-    code: str
-    message: str
-
-
-class MemoryReviewResult(BaseModel):
-    model_config = ConfigDict(extra='forbid')
-
-    status: Literal['success', 'failed']
-    task_id: str
-    outcome: Literal['saved', 'no_changes', 'partial', 'failed']
-    retryable: bool = False
-    error: Optional[MemoryReviewError] = None
 
 
 def _truncate_log_text(value: Any, limit: int = 4000) -> str:

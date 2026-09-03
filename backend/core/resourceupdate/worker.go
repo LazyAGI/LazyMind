@@ -158,7 +158,7 @@ func eligiblePending(tx *gorm.DB, now time.Time) *gorm.DB {
 
 func (w *Worker) claimPending(ctx context.Context, now time.Time) ([]orm.ResourceUpdateTask, error) {
 	var candidates []orm.ResourceUpdateTask
-	if err := eligiblePending(w.db.WithContext(ctx), now).Select("id", "user_id").Order("lane_order_at ASC, created_at ASC, id ASC").Limit(w.cfg.WorkerBatchSize).Find(&candidates).Error; err != nil {
+	if err := eligiblePending(w.db.WithContext(ctx), now).Select("id", "user_id").Order("CASE WHEN lane_key = '' THEN created_at ELSE lane_order_at END ASC, created_at ASC, id ASC").Limit(w.cfg.WorkerBatchSize).Find(&candidates).Error; err != nil {
 		return nil, err
 	}
 	for _, candidate := range candidates {
@@ -212,13 +212,6 @@ func (w *Worker) updateOwned(ctx context.Context, task orm.ResourceUpdateTask, u
 		}
 		return nil
 	})
-}
-
-func effectiveLaneOrderAt(task orm.ResourceUpdateTask) time.Time {
-	if strings.TrimSpace(task.LaneKey) == "" || task.LaneOrderAt.IsZero() {
-		return task.CreatedAt
-	}
-	return task.LaneOrderAt
 }
 
 func (w *Worker) dispatch(ctx context.Context, task orm.ResourceUpdateTask) taskOutcome {

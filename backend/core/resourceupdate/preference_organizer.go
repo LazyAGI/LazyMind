@@ -28,10 +28,6 @@ type PreferenceOrganizerRequest struct {
 	ForceAnalysis bool `json:"force_analysis"`
 }
 
-func DefaultPreferenceOrganizerRequest() PreferenceOrganizerRequest {
-	return PreferenceOrganizerRequest{}
-}
-
 func MemoryMaintenanceLaneKey(userID string) string {
 	return MemoryMaintenanceLanePrefix + strings.TrimSpace(userID)
 }
@@ -120,7 +116,6 @@ type preferenceOrganizerTaskResponse struct {
 	TaskID        string          `json:"task_id"`
 	Status        string          `json:"status"`
 	WaitingReason string          `json:"waiting_reason,omitempty"`
-	CurrentPass   int             `json:"current_pass,omitempty"`
 	Result        json.RawMessage `json:"result,omitempty"`
 	ErrorCode     string          `json:"error_code,omitempty"`
 	ErrorMessage  string          `json:"error_message,omitempty"`
@@ -204,14 +199,6 @@ func preferenceOrganizerResponse(task orm.ResourceUpdateTask) preferenceOrganize
 		ErrorCode: task.ErrorCode, ErrorMessage: task.ErrorMessage,
 		CreatedAt: task.CreatedAt, StartedAt: task.StartedAt, FinishedAt: task.FinishedAt,
 	}
-	if len(task.ResultJSON) > 0 {
-		var state struct {
-			CurrentPass int `json:"current_pass"`
-		}
-		if json.Unmarshal(task.ResultJSON, &state) == nil {
-			resp.CurrentPass = state.CurrentPass
-		}
-	}
 	return resp
 }
 
@@ -222,7 +209,7 @@ func replyPreferenceOrganizerAccepted(w http.ResponseWriter, data any) {
 }
 
 func (w *Worker) handlePreferenceOrganizer(ctx context.Context, task orm.ResourceUpdateTask) taskOutcome {
-	request := DefaultPreferenceOrganizerRequest()
+	var request PreferenceOrganizerRequest
 	if len(task.RequestJSON) > 0 {
 		if err := json.Unmarshal(task.RequestJSON, &request); err != nil {
 			return permanentOutcome("invalid_request_json", err.Error())
@@ -236,8 +223,7 @@ func (w *Worker) handlePreferenceOrganizer(ctx context.Context, task orm.Resourc
 	if err != nil {
 		return retryableOutcome("load_llm_config_failed", err)
 	}
-	progress, _ := json.Marshal(map[string]any{"current_pass": 1})
-	if err := w.updateOwned(ctx, task, map[string]any{"result_json": progress, "updated_at": w.clock().UTC()}); err != nil {
+	if err := w.updateOwned(ctx, task, map[string]any{"result_json": nil, "updated_at": w.clock().UTC()}); err != nil {
 		return retryableOutcome("task_lease_lost", err)
 	}
 	algorithmTaskID := PreferenceOrganizerAlgorithmTaskID(task.ID)

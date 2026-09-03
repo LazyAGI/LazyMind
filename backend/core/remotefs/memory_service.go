@@ -47,38 +47,36 @@ var (
 )
 
 type memoryCurrentService struct {
-	db                      *gorm.DB
-	repository              *currentmemory.Repository
-	currentMemory           *currentmemory.Module
-	clock                   func() time.Time
-	preferenceIndexMaxItems int
+	db            *gorm.DB
+	repository    *currentmemory.Repository
+	currentMemory *currentmemory.Module
+	clock         func() time.Time
 }
 
 func newMemoryCurrentService(db *gorm.DB) *memoryCurrentService {
-	return newMemoryCurrentServiceWithPreferenceIndexMaxItems(
+	return newMemoryCurrentServiceWithPreferenceContextMaxChars(
 		db,
-		mustPreferenceIndexMaxItems(),
+		mustPreferenceContextMaxChars(),
 	)
 }
 
-func newMemoryCurrentServiceWithPreferenceIndexMaxItems(
+func newMemoryCurrentServiceWithPreferenceContextMaxChars(
 	db *gorm.DB,
-	maxItems int,
+	maxChars int,
 ) *memoryCurrentService {
-	if maxItems <= 0 {
-		panic("preference index max items must be positive")
+	if maxChars <= 0 {
+		panic("preference context max chars must be positive")
 	}
 	return &memoryCurrentService{
-		db:                      db,
-		repository:              currentmemory.NewRepository(db),
-		currentMemory:           currentmemory.NewModuleWithPreferenceIndexMaxItems(db, maxItems),
-		clock:                   time.Now,
-		preferenceIndexMaxItems: maxItems,
+		db:            db,
+		repository:    currentmemory.NewRepository(db),
+		currentMemory: currentmemory.NewModuleWithPreferenceContextMaxChars(db, maxChars),
+		clock:         time.Now,
 	}
 }
 
-func mustPreferenceIndexMaxItems() int {
-	value, err := currentmemory.PreferenceIndexMaxItemsFromEnv()
+func mustPreferenceContextMaxChars() int {
+	value, err := currentmemory.PreferenceContextMaxCharsFromEnv()
 	if err != nil {
 		panic(err)
 	}
@@ -217,7 +215,6 @@ func (s *memoryCurrentService) read(ctx context.Context, userID, rawPath string)
 func (s *memoryCurrentService) write(
 	ctx context.Context,
 	userID string,
-	taskID string,
 	rawPath string,
 	content []byte,
 	contentType string,
@@ -237,7 +234,7 @@ func (s *memoryCurrentService) write(
 	}
 	var out orm.MemoryCurrentEntry
 	err = maintenance.UserTransaction(ctx, s.db, userID, func(tx *gorm.DB) error {
-		if err := s.authorizePreferenceMutation(ctx, tx, userID, taskID, entryPath); err != nil {
+		if err := s.authorizePreferenceMutation(ctx, tx, userID, entryPath); err != nil {
 			return err
 		}
 		_, byPath, err := s.loadEntries(ctx, tx, userID)
@@ -267,7 +264,7 @@ func (s *memoryCurrentService) write(
 		return currentmemory.NewRepository(tx).UpsertEntry(ctx, out)
 	})
 	if err == nil && entryPath == memoryPreferencePath &&
-		!strings.HasPrefix(strings.TrimSpace(taskID), resourceupdate.PreferenceOrganizerAlgorithmPrefix) {
+		!strings.HasPrefix(strings.TrimSpace(maintenance.Execution(ctx).TaskID), resourceupdate.PreferenceOrganizerAlgorithmPrefix) {
 		s.enqueuePreferenceOrganizerIfNeeded(ctx, userID, out.Content)
 	}
 	return out, err
@@ -282,14 +279,8 @@ func (s *memoryCurrentService) enqueuePreferenceOrganizerIfNeeded(
 	if err != nil {
 		return
 	}
-	maxChars, err := currentmemory.PreferenceContextMaxCharsFromEnv()
-	if err != nil {
-		maxChars = currentmemory.DefaultPreferenceContextMaxChars
-	}
-	state := currentmemory.BuildPreferenceProjectionState(
-		document, s.preferenceIndexMaxItems, maxChars,
-	)
-	if state.StoredItems < 80 && state.FullProjectionChars*100 < maxChars*80 && !state.ProjectionTruncated {
+	state := s.currentMemory.BuildPreferenceProjectionState(document)
+	if !state.NeedsOrganization() {
 		return
 	}
 	now := s.clock().UTC()
@@ -302,7 +293,7 @@ func (s *memoryCurrentService) enqueuePreferenceOrganizerIfNeeded(
 	}
 }
 
-func (s *memoryCurrentService) mkdir(ctx context.Context, userID, taskID, rawPath string, recursive bool) error {
+func (s *memoryCurrentService) mkdir(ctx context.Context, userID, rawPath string, recursive bool) error {
 	entryPath, err := normalizeMemoryCurrentPath(rawPath)
 	if err != nil {
 		return err
@@ -311,7 +302,7 @@ func (s *memoryCurrentService) mkdir(ctx context.Context, userID, taskID, rawPat
 		return err
 	}
 	return maintenance.UserTransaction(ctx, s.db, userID, func(tx *gorm.DB) error {
-		if err := s.authorizePreferenceMutation(ctx, tx, userID, taskID, entryPath); err != nil {
+		if err := s.authorizePreferenceMutation(ctx, tx, userID, entryPath); err != nil {
 			return err
 		}
 		_, byPath, err := s.loadEntries(ctx, tx, userID)
@@ -338,7 +329,7 @@ func (s *memoryCurrentService) mkdir(ctx context.Context, userID, taskID, rawPat
 	})
 }
 
-func (s *memoryCurrentService) delete(ctx context.Context, userID, taskID, rawPath string, recursive bool) error {
+func (s *memoryCurrentService) delete(ctx context.Context, userID, rawPath string, recursive bool) error {
 	entryPath, err := normalizeMemoryCurrentPath(rawPath)
 	if err != nil {
 		return err
@@ -350,7 +341,7 @@ func (s *memoryCurrentService) delete(ctx context.Context, userID, taskID, rawPa
 		return err
 	}
 	return maintenance.UserTransaction(ctx, s.db, userID, func(tx *gorm.DB) error {
-		if err := s.authorizePreferenceMutation(ctx, tx, userID, taskID, entryPath); err != nil {
+		if err := s.authorizePreferenceMutation(ctx, tx, userID, entryPath); err != nil {
 			return err
 		}
 		entries, byPath, err := s.loadEntries(ctx, tx, userID)
@@ -380,7 +371,6 @@ func (s *memoryCurrentService) delete(ctx context.Context, userID, taskID, rawPa
 func (s *memoryCurrentService) copy(
 	ctx context.Context,
 	userID string,
-	taskID string,
 	rawFrom string,
 	rawTo string,
 	overwrite bool,
@@ -405,14 +395,14 @@ func (s *memoryCurrentService) copy(
 		return err
 	}
 	return maintenance.UserTransaction(ctx, s.db, userID, func(tx *gorm.DB) error {
-		if err := s.authorizePreferenceMutation(ctx, tx, userID, taskID, from, to); err != nil {
+		if err := s.authorizePreferenceMutation(ctx, tx, userID, from, to); err != nil {
 			return err
 		}
 		return s.copyEntries(ctx, tx, userID, from, to)
 	})
 }
 
-func (s *memoryCurrentService) move(ctx context.Context, userID, taskID, rawFrom, rawTo string) error {
+func (s *memoryCurrentService) move(ctx context.Context, userID, rawFrom, rawTo string) error {
 	from, to, err := normalizeMemoryPathPair(rawFrom, rawTo)
 	if err != nil {
 		return err
@@ -430,7 +420,7 @@ func (s *memoryCurrentService) move(ctx context.Context, userID, taskID, rawFrom
 		return err
 	}
 	return maintenance.UserTransaction(ctx, s.db, userID, func(tx *gorm.DB) error {
-		if err := s.authorizePreferenceMutation(ctx, tx, userID, taskID, from, to); err != nil {
+		if err := s.authorizePreferenceMutation(ctx, tx, userID, from, to); err != nil {
 			return err
 		}
 		if err := s.copyEntries(ctx, tx, userID, from, to); err != nil {
@@ -450,18 +440,14 @@ func (s *memoryCurrentService) move(ctx context.Context, userID, taskID, rawFrom
 	})
 }
 
-func (s *memoryCurrentService) authorizePreferenceMutation(ctx context.Context, tx *gorm.DB, userID, taskID string, paths ...string) error {
+func (s *memoryCurrentService) authorizePreferenceMutation(ctx context.Context, tx *gorm.DB, userID string, paths ...string) error {
 	freeze := false
 	for _, p := range paths {
 		if p == memoryPreferencePath || p == memoryReferencesPath || strings.HasPrefix(p, memoryReferencesPath+"/") || strings.HasPrefix(memoryPreferencePath, p+"/") || strings.HasPrefix(memoryReferencesPath, p+"/") {
 			freeze = true
 		}
 	}
-	id := maintenance.Execution(ctx)
-	if id.TaskID == "" {
-		id.TaskID = taskID
-	}
-	return maintenance.Authorize(maintenance.WithIdentity(ctx, id), tx, userID, freeze)
+	return maintenance.Authorize(ctx, tx, userID, freeze)
 }
 
 func (s *memoryCurrentService) copyEntries(

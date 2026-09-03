@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from lazymind.common.memory.store import MemoryStore
+
 import pytest
 
 from lazyllm.tools.agent import ToolExecutionError
@@ -18,7 +20,6 @@ from lazymind.review.preference_organizer.schemas import PreferenceStateData
 from lazymind.review.preference_organizer.state import (
     PreferenceStateSnapshot,
     load_preference_state,
-    target_item_count,
     target_reached,
 )
 from lazymind.review.preference_organizer.tools import (
@@ -47,10 +48,6 @@ def _snapshot(
             etag=etag,
         ),
     )
-
-
-def _empty_plan(label: str = '') -> list:
-    return []
 
 
 def _gate(pass_number: int = 1):
@@ -93,9 +90,9 @@ def _valid_reference(*, kind='memory_review', conversation_id='conversation-1'):
 
 
 @pytest.mark.parametrize('compression_kind', ['compacted', 'spilled', 'summary'])
-def test_compactor_reinjects_exact_gate_plan_after_compression(compression_kind):
+def test_compactor_reinjects_gate_cursor_after_compression(compression_kind):
     gate = _gate()
-    plan = _empty_plan('Keep pref.a and pref.b.')
+    plan = []
     gate.submit(plan, _snapshot(50))
 
     def compressed_base(history, keep_full_turns=None, **kwargs):
@@ -126,7 +123,7 @@ def test_compactor_reinjects_exact_gate_plan_after_compression(compression_kind)
 
 def test_compactor_does_not_duplicate_plan_in_the_same_projection():
     gate = _gate()
-    gate.submit(_empty_plan('Keep this pass only.'), _snapshot(50))
+    gate.submit([], _snapshot(50))
 
     def compressed_base(history, keep_full_turns=None, **kwargs):
         kwargs['runtime_state']['entries'] = [
@@ -152,10 +149,10 @@ def test_compactor_does_not_duplicate_plan_in_the_same_projection():
 
 def test_second_pass_compactor_never_injects_first_pass_plan():
     first_gate = _gate(1)
-    first_plan = _empty_plan('first-pass-only')
+    first_plan = []
     first_gate.submit(first_plan, _snapshot(50))
     second_gate = _gate(2)
-    second_plan = _empty_plan('second-pass-only')
+    second_plan = []
     second_gate.submit(second_plan, _snapshot(50, etag='second'))
 
     def compressed_base(history, keep_full_turns=None, **kwargs):
@@ -197,7 +194,7 @@ def test_compactor_does_not_inject_before_gate_or_without_compression():
     compact = make_preference_organizer_compactor(gate, base_compactor=full_base)
     assert compact([], runtime_state={}) == ([], [])
 
-    gate.submit(_empty_plan(), _snapshot(50))
+    gate.submit([], _snapshot(50))
     assert compact([], runtime_state={}) == ([], [])
 
 
@@ -270,6 +267,8 @@ def test_merge_writes_new_reference_and_index_before_source_cleanup(monkeypatch)
     class Store:
         def validate_new_preference_reference(self, *args):
             pass
+
+        write_preference_with_new_reference = MemoryStore.write_preference_with_new_reference
 
         def read_reference(self, ref):
             return _valid_reference()
@@ -418,7 +417,7 @@ def test_move_cleanup_failure_is_partial_after_episode_creation(monkeypatch):
     assert captured.value.failed == ('preference_cleanup',)
 
 
-def test_organizer_model_sees_full_items_and_counts_but_no_projection_stats(monkeypatch):
+def test_organizer_model_sees_full_items_and_measured_character_budget(monkeypatch):
     item = PreferenceItem(
         name='pref.fact.verify_latest',
         summary='Verify current facts',
@@ -433,27 +432,21 @@ def test_organizer_model_sees_full_items_and_counts_but_no_projection_stats(monk
     prompt = build_preference_organizer_prompt(
         snapshot,
         pass_number=1,
-        preferred_min_items=20,
-        target_items=30,
         changes_remaining=50,
     )
 
-    assert set(response) == {'stored_items', 'etag', 'preferences'}
+    assert set(response) == {'stored_items', 'full_projection_chars', 'etag', 'preferences'}
     assert response['preferences'][0] == item.__dict__
     assert item.name in prompt and item.ref in prompt
     assert item.created_at in prompt and item.updated_at in prompt
-    for forbidden in (
-        'full_projection_chars',
-        'projected_chars',
-        'projection_truncated',
-        'target_prompt_percent',
-        '%',
-    ):
+    assert 'full_projection_chars=1000' in prompt
+    assert '40%' in prompt
+    for forbidden in ('target_items', 'preferred_min_items'):
         assert forbidden not in prompt
         assert forbidden not in str(response)
 
 
-def test_safe_operations_allow_counts_below_soft_preference():
+def test_safe_operations_do_not_have_a_minimum_item_count():
     items = [
         PreferenceItem(
             name=f'pref.narrow.{index}',
@@ -491,44 +484,10 @@ def test_safe_operations_allow_counts_below_soft_preference():
     )
 
 
-def test_count_target_uses_worst_retained_items_without_hard_floor():
-    items = [
-        PreferenceItem(
-            name=f'pref.item.{index}',
-            summary='x' * length,
-            ref=f'references/item-{index}.md',
-            created_at='2026-01-01T00:00:00+00:00',
-            updated_at='2026-01-01T00:00:00+00:00',
-        )
-        for index, length in enumerate([10, 20, 30, 40, 50])
-    ]
-    with _cfg.temp('preference_context_max_chars', 100):
-        target = target_item_count(
-            _snapshot_with_items(items),
-        )
-    assert target == 0
-
-    many_items = [
-        PreferenceItem(
-            name=f'pref.small.{index}',
-            summary='x',
-            ref=f'references/small-{index}.md',
-            created_at='2026-01-01T00:00:00+00:00',
-            updated_at='2026-01-01T00:00:00+00:00',
-        )
-        for index in range(40)
-    ]
-    with _cfg.temp('preference_context_max_chars', 5000):
-        target = target_item_count(
-            _snapshot_with_items(many_items),
-        )
-    assert target == 30
-
-
 def test_projection_target_is_strict_and_rejects_truncation():
     with _cfg.temp('preference_context_max_chars', 5000):
         assert target_reached(
-            _snapshot(30, projection_chars=1999).data,
+            _snapshot(150, projection_chars=1999).data,
         )
         assert not target_reached(
             _snapshot(30, projection_chars=2000).data,
@@ -562,7 +521,7 @@ def test_organizer_runs_at_most_two_fresh_passes(monkeypatch):
 
     def run_pass(*, gate, before, **kwargs):
         gates.append(gate)
-        gate.submit(_empty_plan(f'pass {gate.pass_number}'), before)
+        gate.submit([], before)
         gate.budget.commit(1)
         gate.operations.append({'action': 'test-change'})
         return ''
@@ -597,7 +556,7 @@ def test_first_pass_target_stops_without_second_pass(monkeypatch):
 
     def run_pass(*, gate, before, **kwargs):
         calls.append(gate.pass_number)
-        gate.submit(_empty_plan('Validation is already sufficient.'), before)
+        gate.submit([], before)
         gate.budget.commit(1)
         gate.operations.append({'action': 'test-change'})
         return ''
@@ -628,7 +587,7 @@ def test_first_no_safe_change_pass_stops_without_second_pass(monkeypatch):
 
     def run_pass(*, gate, before, **kwargs):
         calls.append(gate.pass_number)
-        gate.submit(_empty_plan(f'No safe changes in pass {gate.pass_number}.'), before)
+        gate.submit([], before)
         return ''
 
     monkeypatch.setattr(service, '_run_organizer_pass', run_pass)
@@ -662,7 +621,7 @@ def test_second_pass_no_safe_changes_reports_organized_with_remaining(monkeypatc
 
     def run_pass(*, gate, before, **kwargs):
         calls.append(gate.pass_number)
-        gate.submit(_empty_plan(f'pass {gate.pass_number}'), before)
+        gate.submit([], before)
         if gate.pass_number == 1:
             gate.budget.commit(1)
             gate.operations.append({'action': 'test-change'})
@@ -697,7 +656,7 @@ def test_partial_first_pass_never_starts_second_pass(monkeypatch):
 
     def run_pass(*, gate, before, **kwargs):
         calls.append(gate.pass_number)
-        gate.submit(_empty_plan('No additional safe write.'), before)
+        gate.submit([], before)
         gate.terminal_outcome = 'partial'
         gate.terminal_error = 'index applied; reference cleanup failed'
         return ''
@@ -739,7 +698,7 @@ def test_unsafe_terminal_first_pass_never_starts_second(
 
     def run_pass(*, gate, before, **kwargs):
         calls.append(gate.pass_number)
-        gate.submit(_empty_plan('Stop safely.'), before)
+        gate.submit([], before)
         gate.terminal_outcome = terminal_outcome
         gate.terminal_error = terminal_outcome
         return ''
@@ -784,6 +743,9 @@ def test_manual_analysis_runs_below_soft_count_and_returns_no_changes(monkeypatc
     )
     assert calls == [1]
     assert result.outcome == 'no_safe_changes'
+    assert result.result.target_reached is True
+    assert 'receipts' not in result.result.model_dump()
+    assert 'current_pass' not in result.result.model_dump()
 
 
 def test_empty_manual_index_skips_model(monkeypatch):
@@ -877,8 +839,9 @@ def test_service_retains_receipts_if_final_validation_read_fails(monkeypatch):
     result = service.organize_preferences(task_id='preference_organizer_read', run_id='read-run', user_id='u')
     assert result.outcome == 'partial'
     assert result.result.total_changes == 1
-    assert result.result.receipts[0]['episode_id'] == 'ep_1'
+    assert result.result.passes[0].receipts[0]['episode_id'] == 'ep_1'
     assert result.result.passes[0].after is None
+    assert result.result.target_reached is False
 
 
 def test_shared_path_with_different_anchors_is_invalid():
@@ -902,6 +865,8 @@ def test_compound_partial_receipts_keep_steps_episode_and_charge_once(monkeypatc
 
         def validate_new_preference_reference(self, *args):
             pass
+
+        write_preference_with_new_reference = MemoryStore.write_preference_with_new_reference
 
         def write(self, path, content):
             events.append(path)

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -8,6 +8,7 @@ from lazyllm import LOG
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from lazymind.common.maintenance import execute
+from lazymind.review.memory_review.schemas import MemoryReviewResult
 
 router = APIRouter()
 
@@ -66,23 +67,6 @@ class MemoryReviewPayload(BaseModel):
         ):
             raise ValueError("'history' must contain at least one user message.")
         return self
-
-
-class MemoryReviewError(BaseModel):
-    model_config = ConfigDict(extra='forbid')
-
-    code: str
-    message: str
-
-
-class MemoryReviewResult(BaseModel):
-    model_config = ConfigDict(extra='forbid')
-
-    status: Literal['success', 'failed']
-    task_id: str
-    outcome: Literal['saved', 'no_changes', 'partial', 'failed']
-    retryable: bool = False
-    error: Optional[MemoryReviewError] = None
 
 
 @router.post(

@@ -360,7 +360,7 @@ def test_preference_add_can_exceed_prompt_projection_limit():
             ),
         )
     fs = FakeRemoteFS({PREFERENCE_PATH: content})
-    with _cfg.temp('preference_index_max_items', 2):
+    with _cfg.temp('preference_context_max_chars', 2):
         MemoryStore(fs).add_preference_with_reference(
             name='pref.response.concise',
             summary='回答要简洁',
@@ -416,6 +416,34 @@ def test_preference_add_reports_partial_apply_when_cleanup_fails():
     assert captured.value.failed == ('preference_index', 'reference_cleanup')
     assert fs.files[PREFERENCE_PATH] == SAMPLE_PREFERENCE
     assert reference_path in fs.files
+
+
+@pytest.mark.parametrize('cleanup_fails', [False, True])
+def test_shared_merge_persistence_compensates_failed_index_write(cleanup_fails):
+    from lazymind.common.memory.editors.preference import add_preference_entry
+
+    edited = add_preference_entry(
+        SAMPLE_PREFERENCE, name='pref.merged', summary='Merged', scenario='Always',
+        details='Both source rules', reason='Same scope', source_kind='memory_review',
+        conversation_id='conversation-1',
+    )
+    fs = FakeRemoteFS({PREFERENCE_PATH: SAMPLE_PREFERENCE})
+    reference_path = build_reference_path(edited['reference_name'])
+    fs.fail_write_paths.add(PREFERENCE_PATH)
+    if cleanup_fails:
+        fs.fail_rm_paths.add(reference_path)
+    with pytest.raises(Exception) as captured:
+        MemoryStore(fs).write_preference_with_new_reference(
+            original=SAMPLE_PREFERENCE, proposed=edited['content'], reference_name=edited['reference_name'],
+            reference_content=edited['reference_content'], item=edited['item'], operation='merge',
+        )
+    assert fs.files[PREFERENCE_PATH] == SAMPLE_PREFERENCE
+    assert (reference_path in fs.files) == cleanup_fails
+    assert isinstance(captured.value, MemoryPartialApplyError) == cleanup_fails
+    if cleanup_fails:
+        assert captured.value.operation == 'merge'
+        assert captured.value.applied == ('new_reference',)
+        assert captured.value.failed == ('preference_index', 'new_reference_cleanup')
 
 
 @pytest.mark.parametrize('new_name', ['pref.a_b', 'pref.a-b'])
