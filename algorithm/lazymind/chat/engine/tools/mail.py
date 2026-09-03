@@ -12,7 +12,7 @@ import smtplib
 import socket
 import ssl
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.header import decode_header, make_header
 from email.message import EmailMessage
 from email.utils import formatdate
@@ -283,10 +283,7 @@ def _resolve_attachment_paths(attachment_paths: Any) -> list[str]:
     resolved: list[str] = []
     missing: list[str] = []
     for raw_path in requested:
-        try:
-            _, candidate = _resolve_workspace_path(raw_path, user_id, conversation_id)
-        except ToolExecutionError:
-            candidate = os.path.realpath(raw_path)
+        _, candidate = _resolve_workspace_path(raw_path, user_id, conversation_id)
         if os.path.isfile(candidate):
             resolved.append(candidate)
             continue
@@ -355,7 +352,9 @@ def _imap_date(value: str, *, before: bool = False) -> str:
         except ValueError:
             return ''
     if before:
-        dt = dt.replace(hour=23, minute=59, second=59)
+        # IMAP BEFORE is exclusive of the given date. Advance one day so the
+        # documented inclusive end date is actually included.
+        dt = dt + timedelta(days=1)
     return dt.strftime('%d-%b-%Y')
 
 
@@ -578,7 +577,7 @@ class _IMAPBackend:
             ) from orig
         except ToolExecutionError:
             raise
-        except (smtplib.SMTPException, OSError, ssl.SSLError, TimeoutError) as orig:
+        except (smtplib.SMTPException, OSError) as orig:
             _raise_send_error(orig, data_submitted=data_submitted)
         return {'id': message.get('Message-ID') or '', 'sent_at': _iso(datetime.now(timezone.utc))}
 
@@ -827,6 +826,7 @@ class MailToolkit:
             body: Plain-text body.
             cc: Optional CC addresses.
             attachment_paths: One workspace/artifact path, or a list of paths to attach.
+                Paths must stay inside the current conversation workspace.
             in_reply_to: Optional original Message-ID when composing a reply.
             mailbox: Optional sending account (email or provider). Defaults to the first enabled mailbox.
         """
@@ -880,6 +880,7 @@ class MailToolkit:
             body: Replace body when provided.
             cc: Replace CC addresses when provided.
             attachment_paths: Replace attachments when provided. Pass [] to clear.
+                Paths must stay inside the current conversation workspace.
             in_reply_to: Replace reply Message-ID when provided.
             mailbox: Optional sending account (email or provider).
         """
@@ -924,6 +925,8 @@ class MailToolkit:
                 mail_draft_confirm_revision from the draft card for this revision.
         """
         draft = _load_draft(draft_id)
+        if str(draft.get('status') or '') == 'sent':
+            _fail('This draft was already sent.')
         cred = _pick_account(str(draft.get('mailbox') or draft.get('provider') or ''))
         confirm_id = str(_agentic_config().get('mail_draft_confirm_id') or '').strip()
         confirmed = confirm_id == str(draft_id).strip()
