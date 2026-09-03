@@ -270,7 +270,7 @@ class TableConverterNode(ModuleBase):
                 table_image = None
                 for line in lines:
                     if line.get('type', 'text') == 'table' and line.get('image_path', None):
-                        true_image_path = os.path.join('images', line['image_path']).replace('\\', '/')
+                        true_image_path = os.path.join('images', line['image_path'])
                         table_image = f'![{table_caption}]({true_image_path})'
                         break
                 # set table_image_map

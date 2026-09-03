@@ -203,8 +203,7 @@ def write_file_atomically(filepath: str, content: bytes) -> None:
             os.fsync(temp_file.fileno())
         if stat_result is not None:
             os.chmod(temp_path, stat.S_IMODE(stat_result.st_mode))
-            if hasattr(os, 'chown'):
-                os.chown(temp_path, stat_result.st_uid, stat_result.st_gid)
+            os.chown(temp_path, stat_result.st_uid, stat_result.st_gid)
         os.replace(temp_path, filepath)
         temp_path = ''
     finally:

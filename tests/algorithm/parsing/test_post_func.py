@@ -1,5 +1,3 @@
-import pytest
-
 from lazyllm.tools.rag import DocNode
 from lazymind.processor.engine.table_image_map import normalize_table_image_map, serialize_table_image_map
 
@@ -55,12 +53,7 @@ def test_match_handles_empty_patterns_strings_docnodes_and_unknown_types():
     assert _match(DocNode(text='2024年1月2日'), [r'^\d{4}年\d{1,2}月\d{1,2}日$'])
 
 
-@pytest.mark.parametrize('image_path, expected_path', [
-    ('table.png', 'images/table.png'),
-    ('nested/table.png', 'images/nested/table.png'),
-    ('nested\\table.png', 'images/nested/table.png'),
-])
-def test_table_converter_preserves_non_table_and_builds_table_image_map(monkeypatch, image_path, expected_path):
+def test_table_converter_preserves_non_table_and_builds_table_image_map(monkeypatch):
     converter = TableConverterNode()
     monkeypatch.setattr(converter, '_html_table_to_markdown', lambda html: '| A |\n|---|\n| 1 |')
     table_node = DocNode(
@@ -70,7 +63,7 @@ def test_table_converter_preserves_non_table_and_builds_table_image_map(monkeypa
             'table_body': '<table><tr><td>1</td></tr></table>',
             'table_caption': '表1',
             'table_footnote': '注：说明',
-            'lines': [{'type': 'table', 'image_path': image_path}],
+            'lines': [{'type': 'table', 'image_path': 'table.png'}],
         },
     )
     text_node = DocNode(text='plain', metadata={'type': 'text'})
@@ -79,9 +72,9 @@ def test_table_converter_preserves_non_table_and_builds_table_image_map(monkeypa
 
     assert result == [table_node, text_node]
     assert table_node.text == '表1\n| A |\n|---|\n| 1 |\n注：说明\n'
-    assert table_node.metadata['table_image'] == f'![表1]({expected_path})'
+    assert table_node.metadata['table_image'] == '![表1](images/table.png)'
     assert normalize_table_image_map(table_node.metadata['table_image_map']) == [
-        {'content': '| A |\n|---|\n| 1 |', 'image': f'![表1]({expected_path})'}
+        {'content': '| A |\n|---|\n| 1 |', 'image': '![表1](images/table.png)'}
     ]
     assert 'table_body' not in table_node.metadata
 
