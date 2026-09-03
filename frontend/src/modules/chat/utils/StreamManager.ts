@@ -43,6 +43,7 @@ export interface RunTerminal {
   code?: string;
   partial_output: boolean;
   model_call_id?: string;
+  model_invoked?: boolean;
   diagnostic_id?: string;
 }
 

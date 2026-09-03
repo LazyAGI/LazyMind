@@ -3260,6 +3260,8 @@ components:
                     type: string
                 model_call_id:
                     type: string
+                model_invoked:
+                    type: boolean
                 partial_output:
                     type: boolean
                 reason:

@@ -370,6 +370,18 @@ func TestLastSuccessfulChatModelIgnoresLegacyAttemptedSnapshot(t *testing.T) {
 	if snapshot, err := lastSuccessfulChatModelSnapshot(context.Background(), db, &conversation); err != nil || snapshot != nil {
 		t.Fatalf("attempted snapshot treated as successful: %#v err=%v", snapshot, err)
 	}
+	notInvoked := false
+	if err := db.Create(&orm.ChatHistory{
+		ID: "host-only-history", ConversationID: conversation.ID, Seq: 2, RunID: "host-only-run", RunStatus: "completed",
+		RunTerminal: terminalJSON(&RunTerminal{Status: "completed", Reason: "normal", PartialOutput: true, ModelInvoked: &notInvoked}),
+		Ext:         json.RawMessage(`{"model_route":{"mode":"auto","model_id":"attempted","model_name":"Attempted"}}`),
+		TimeMixin:   orm.TimeMixin{CreateTime: time.Now().UTC(), UpdateTime: time.Now().UTC().Add(time.Second)},
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if snapshot, err := lastSuccessfulChatModelSnapshot(context.Background(), db, &conversation); err != nil || snapshot != nil {
+		t.Fatalf("host-only history treated as successful: %#v err=%v", snapshot, err)
+	}
 	terminal := &RunTerminal{Status: "completed", Reason: "normal"}
 	ext := json.RawMessage(`{"model_route":{"mode":"auto","model_id":"succeeded","provider_id":"provider","provider_name":"Provider","model_name":"Successful","source":"own"}}`)
 	if err := db.Create(&orm.MultiAnswersChatHistory{
@@ -386,10 +398,78 @@ func TestLastSuccessfulChatModelIgnoresLegacyAttemptedSnapshot(t *testing.T) {
 	}
 }
 
+func TestAutoChatModelIgnoresHostResponsesWhenAssessingProviderAvailability(t *testing.T) {
+	conversation := &orm.Conversation{ChatModelVersion: 1}
+	ext := json.RawMessage(`{"model_route":{"mode":"auto","model_id":"model-a","selection_version":1}}`)
+	failure := chatModelHistory{RunTerminal: json.RawMessage(`{"status":"failed","reason":"model_failure","code":"service_unavailable","partial_output":false}`), Ext: ext}
+	hostCompletion := chatModelHistory{RunTerminal: json.RawMessage(`{"status":"completed","reason":"normal","partial_output":true,"model_invoked":false}`), Ext: ext}
+	hostFailure := chatModelHistory{RunTerminal: json.RawMessage(`{"status":"failed","reason":"model_failure","code":"service_unavailable","partial_output":false,"model_invoked":false}`), Ext: ext}
+	for _, test := range []struct {
+		name            string
+		histories       []chatModelHistory
+		wantUnavailable bool
+	}{
+		{name: "host completion does not recover provider", histories: []chatModelHistory{hostCompletion, failure}, wantUnavailable: true},
+		{name: "host failure does not disable provider", histories: []chatModelHistory{hostFailure}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := unavailableAutoChatModels(conversation, test.histories)["model-a"]; got != test.wantUnavailable {
+				t.Fatalf("unavailable=%v, want %v", got, test.wantUnavailable)
+			}
+		})
+	}
+}
+
+func TestLegacyAutoRetryRespectsExplicitSelectionReset(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		version     int64
+		snapshot    json.RawMessage
+		wantModelID string
+	}{
+		{name: "original selection", version: 1, wantModelID: "model-a"},
+		{name: "legacy attempted binding", version: 3, snapshot: json.RawMessage(`{"model_id":"model-a"}`), wantModelID: "model-a"},
+		{name: "explicit Auto reset", version: 3, wantModelID: "model-b"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			database := newPromptTestDB(t)
+			db := database.DB
+			seedAvailableChatModel(t, db, "user-1", "provider-a", "group-a", "model-a", "A", "A", "a-chat", "llm", true, "secret-a")
+			seedAvailableChatModel(t, db, "user-1", "provider-b", "group-b", "model-b", "B", "B", "b-chat", "llm", true, "secret-b")
+			seedSelectedChatModel(t, db, "user-1", "model-b", false)
+			conversation, _, err := ensureConversation(context.Background(), db, "legacy-retry", "Auto", nil, nil, "user-1", "User", false, "", nil, &initialChatModelSelection{Mode: chatModelModeAuto})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Model(&orm.Conversation{}).Where("id = ?", conversation.ID).Updates(map[string]any{
+				"chat_model_version": test.version, "chat_model_snapshot": test.snapshot,
+			}).Error; err != nil {
+				t.Fatal(err)
+			}
+			legacyRoute := chatModelRouteFromHistoryExt(json.RawMessage(`{"model_route":{"mode":"auto","strategy":"structured_policy_v1","model_id":"model-a"}}`))
+			body := map[string]any{"conversation_id": conversation.ID, chatModelRetryRouteBodyKey: legacyRoute}
+			if err := applyConversationChatModelConfig(context.Background(), db, "user-1", body); err != nil || chatModelRouteFromBody(body).ModelID != test.wantModelID {
+				t.Fatalf("legacy retry route=%#v err=%v, want %s", chatModelRouteFromBody(body), err, test.wantModelID)
+			}
+		})
+	}
+}
+
 func TestChatModelSuccessPersistsAcrossReplyModes(t *testing.T) {
+	invoked, notInvoked := true, false
 	for _, replyMode := range []string{"nonstream", "stream", "dual"} {
-		for _, status := range []string{"completed", "failed", "cancelled"} {
-			t.Run(replyMode+"/"+status, func(t *testing.T) {
+		for _, test := range []struct {
+			name         string
+			terminal     RunTerminal
+			wantSnapshot bool
+		}{
+			{name: "completed legacy", terminal: RunTerminal{Status: "completed", Reason: "normal"}, wantSnapshot: true},
+			{name: "completed invoked", terminal: RunTerminal{Status: "completed", Reason: "normal", ModelInvoked: &invoked}, wantSnapshot: true},
+			{name: "completed host response", terminal: RunTerminal{Status: "completed", Reason: "normal", ModelInvoked: &notInvoked}},
+			{name: "failed", terminal: RunTerminal{Status: "failed", Reason: "model_failure", Code: "service_unavailable"}},
+			{name: "cancelled", terminal: RunTerminal{Status: "cancelled", Reason: "user_cancelled"}},
+		} {
+			t.Run(replyMode+"/"+test.name, func(t *testing.T) {
 				database := newPromptTestDB(t)
 				db := database.DB
 				seedAvailableChatModel(t, db, "user-1", "provider-default", "group-default", "model-default", "Default", "Default", "default-chat", "llm", true, "secret-default")
@@ -398,12 +478,8 @@ func TestChatModelSuccessPersistsAcrossReplyModes(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				terminal := RunTerminal{Status: status, Reason: "normal", PartialOutput: true}
-				if status == "failed" {
-					terminal.Reason, terminal.Code = "model_failure", "service_unavailable"
-				} else if status == "cancelled" {
-					terminal.Reason = "user_cancelled"
-				}
+				terminal := test.terminal
+				terminal.PartialOutput = true
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					var request LazyChatRequest
 					if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
@@ -412,8 +488,9 @@ func TestChatModelSuccessPersistsAcrossReplyModes(t *testing.T) {
 					}
 					w.Header().Set("Content-Type", "text/event-stream")
 					encoder := json.NewEncoder(w)
-					_ = encoder.Encode(map[string]any{"code": 200, "msg": "success", "data": map[string]any{"text": "answer"}})
-					_ = encoder.Encode(map[string]any{"code": 200, "msg": "success", "data": map[string]any{"runtime_event": runFinishedEvent(request.Conversation.RunID, terminal)}})
+					// Match single_event_stream_response, including a host-only terminal.
+					_ = encoder.Encode(map[string]any{"code": 200, "msg": "success", "data": map[string]any{"think": nil, "text": "answer", "sources": []any{}}, "cost": 0})
+					_ = encoder.Encode(map[string]any{"code": 200, "msg": "success", "data": map[string]any{"think": nil, "text": nil, "sources": []any{}, "runtime_event": runFinishedEvent(request.Conversation.RunID, terminal)}, "cost": 0})
 				}))
 				defer server.Close()
 				body := map[string]any{"conversation_id": conversation.ID, "user_id": "user-1", "query": "hello", "run_id": "primary-run", "secondary_run_id": "secondary-run"}
@@ -436,16 +513,86 @@ func TestChatModelSuccessPersistsAcrossReplyModes(t *testing.T) {
 				if err := db.Where("id = ?", conversation.ID).Take(&stored).Error; err != nil {
 					t.Fatal(err)
 				}
-				if status == "completed" {
+				if test.wantSnapshot {
 					var snapshot chatModelSnapshot
 					if json.Unmarshal(stored.ChatModelSnapshot, &snapshot) != nil || snapshot.ModelID != "model-default" || snapshot.SuccessfulRunID == "" {
 						t.Fatalf("completed reply did not persist success: %s; response=%s", stored.ChatModelSnapshot, recorder.Body.String())
 					}
 				} else if len(stored.ChatModelSnapshot) != 0 {
-					t.Fatalf("%s reply persisted successful model: %s", status, stored.ChatModelSnapshot)
+					t.Fatalf("%s reply persisted successful model: %s", test.name, stored.ChatModelSnapshot)
+				}
+				if terminal.ModelInvoked != nil && !*terminal.ModelInvoked {
+					histories, err := loadConversationChatModelHistory(ctx, db, conversation.ID)
+					if err != nil || len(histories) == 0 {
+						t.Fatalf("missing host response history: %#v err=%v", histories, err)
+					}
+					for _, history := range histories {
+						storedTerminal, err := parseRunTerminal(history.RunTerminal)
+						if err != nil || storedTerminal.Status != "completed" || storedTerminal.ModelInvoked == nil || *storedTerminal.ModelInvoked {
+							t.Fatalf("host response lost terminal flag: %s err=%v", history.RunTerminal, err)
+						}
+					}
+					if snapshot, err := lastSuccessfulChatModelSnapshot(ctx, db, &stored); err != nil || snapshot != nil {
+						t.Fatalf("host-only history restored a successful model: %#v err=%v", snapshot, err)
+					}
+					seedAvailableChatModel(t, db, "user-1", "provider-other", "group-other", "model-other", "Other", "Other", "other-chat", "llm", true, "secret-other")
+					if err := db.Model(&orm.UserSelectedModel{}).Where("user_id = ? AND model_type = ?", "user-1", "llm").Update("user_model_provider_group_model_id", "model-other").Error; err != nil {
+						t.Fatal(err)
+					}
+					next := map[string]any{"conversation_id": conversation.ID}
+					if err := applyConversationChatModelConfig(ctx, db, "user-1", next); err != nil || chatModelRouteFromBody(next).ModelID != "model-other" {
+						t.Fatalf("host-only history established Auto stickiness: %#v err=%v", chatModelRouteFromBody(next), err)
+					}
 				}
 			})
 		}
+	}
+}
+
+func TestHostResponsePreservesLastSuccessfulChatModel(t *testing.T) {
+	database := newPromptTestDB(t)
+	db := database.DB
+	seedAvailableChatModel(t, db, "user-1", "provider-a", "group-a", "model-a", "A", "A", "a-chat", "llm", true, "secret-a")
+	seedAvailableChatModel(t, db, "user-1", "provider-b", "group-b", "model-b", "B", "B", "b-chat", "llm", true, "secret-b")
+	seedSelectedChatModel(t, db, "user-1", "model-a", false)
+	conversation, _, err := ensureConversation(context.Background(), db, "host-response", "Auto", nil, nil, "user-1", "User", false, "", nil, &initialChatModelSelection{Mode: chatModelModeAuto})
+	if err != nil {
+		t.Fatal(err)
+	}
+	initial := map[string]any{"conversation_id": conversation.ID}
+	if err := applyConversationChatModelConfig(context.Background(), db, "user-1", initial); err != nil {
+		t.Fatal(err)
+	}
+	persistSuccessfulChatModel(context.Background(), db, "user-1", conversation.ID, "actual-success", initial, &RunTerminal{Status: "completed", Reason: "normal"})
+	if err := db.Where("id = ?", conversation.ID).Take(conversation).Error; err != nil {
+		t.Fatal(err)
+	}
+	successSnapshot := append(json.RawMessage(nil), conversation.ChatModelSnapshot...)
+	// The previous model becomes unavailable before the host filters a new turn.
+	if err := db.Model(&orm.UserModelProviderGroupModel{}).Where("id = ?", "model-a").Update("deleted_at", time.Now().UTC()).Error; err != nil {
+		t.Fatal(err)
+	}
+	body := map[string]any{"conversation_id": conversation.ID, "user_id": "user-1", "query": "filtered input"}
+	if err := applyConversationChatModelConfig(context.Background(), db, "user-1", body); err != nil || chatModelRouteFromBody(body).ModelID != "model-b" {
+		t.Fatalf("unavailable model did not select B: %#v err=%v", chatModelRouteFromBody(body), err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request LazyChatRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+			return
+		}
+		notInvoked := false
+		w.Header().Set("Content-Type", "text/event-stream")
+		encoder := json.NewEncoder(w)
+		_ = encoder.Encode(map[string]any{"code": 200, "msg": "success", "data": map[string]any{"think": nil, "text": "Sensitive filter host response", "sources": []any{}}, "cost": 0})
+		_ = encoder.Encode(map[string]any{"code": 200, "msg": "success", "data": map[string]any{"think": nil, "text": nil, "sources": []any{}, "runtime_event": runFinishedEvent(request.Conversation.RunID, RunTerminal{Status: "completed", Reason: "normal", PartialOutput: true, ModelInvoked: &notInvoked})}, "cost": 0})
+	}))
+	defer server.Close()
+	recorder := httptest.NewRecorder()
+	handleNonStreamChat(recorder, context.Background(), db, nil, server.URL, body, conversation.ID, "filtered input", chatPersistTarget{Seq: 1, HistoryID: "filtered-history"}, mergeChatModelRouteIntoExt(nil, body))
+	if err := db.Where("id = ?", conversation.ID).Take(conversation).Error; err != nil || !bytes.Equal(conversation.ChatModelSnapshot, successSnapshot) {
+		t.Fatalf("host response replaced last successful model: %s err=%v response=%s", conversation.ChatModelSnapshot, err, recorder.Body.String())
 	}
 }
 

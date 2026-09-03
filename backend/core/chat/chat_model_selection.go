@@ -318,12 +318,12 @@ func successfulChatModelSnapshot(conversation *orm.Conversation, histories []cha
 	if json.Unmarshal(conversation.ChatModelSnapshot, &snapshot) == nil && snapshot.SuccessfulRunID != "" {
 		return &snapshot
 	}
-	// Older snapshots were written before the model ran. Only a completed
-	// history entry proves which model actually succeeded.
+	// Older snapshots were written before the model ran. Recover the successful
+	// model from completed history, excluding responses that never invoked it.
 	for _, history := range histories {
 		terminal, err := parseRunTerminal(history.RunTerminal)
 		route := chatModelRouteFromHistoryExt(history.Ext)
-		if err != nil || terminal.Status != "completed" || route == nil || route.ModelID == "" {
+		if err != nil || !terminal.modelWasInvoked() || terminal.Status != "completed" || route == nil || route.ModelID == "" {
 			continue
 		}
 		if snapshot.ModelID != route.ModelID {
@@ -378,7 +378,7 @@ func unavailableAutoChatModels(conversation *orm.Conversation, histories []chatM
 			continue
 		}
 		terminal, err := parseRunTerminal(history.RunTerminal)
-		if err != nil {
+		if err != nil || !terminal.modelWasInvoked() {
 			continue
 		}
 		if terminal.Status == "completed" {
@@ -945,7 +945,7 @@ func applyConversationChatModelConfig(ctx context.Context, db *gorm.DB, userID s
 	if mode == chatModelModeAuto {
 		reason := "initial_selection"
 		retryRoute, _ := body[chatModelRetryRouteBodyKey].(*chatModelRoute)
-		if retryRoute != nil && (retryRoute.SelectionVersion == nil || *retryRoute.SelectionVersion == conversation.ChatModelVersion) {
+		if chatModelRouteMatchesSelection(retryRoute, &conversation) {
 			model = findAvailableChatModel(models, retryRoute.ModelID)
 			reason = "retry_same_model"
 		} else {
@@ -975,7 +975,8 @@ func applyConversationChatModelConfig(ctx context.Context, db *gorm.DB, userID s
 					if !chatModelRouteMatchesSelection(previousRoute, &conversation) {
 						continue
 					}
-					if _, err := parseRunTerminal(history.RunTerminal); err != nil {
+					terminal, err := parseRunTerminal(history.RunTerminal)
+					if err != nil || !terminal.modelWasInvoked() {
 						continue
 					}
 					model = findAvailableChatModel(usable, previousRoute.ModelID)
@@ -1041,7 +1042,7 @@ func applyConversationChatModelConfig(ctx context.Context, db *gorm.DB, userID s
 
 func persistSuccessfulChatModel(ctx context.Context, db *gorm.DB, userID, conversationID, runID string, body map[string]any, terminal *RunTerminal) {
 	route := chatModelRouteFromBody(body)
-	if db == nil || terminal == nil || terminal.Status != "completed" || route == nil || route.snapshot == nil || route.SelectionVersion == nil || runID == "" {
+	if db == nil || !terminal.modelWasInvoked() || terminal.Status != "completed" || route == nil || route.snapshot == nil || route.SelectionVersion == nil || runID == "" {
 		return
 	}
 	snapshot := *route.snapshot

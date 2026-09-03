@@ -129,6 +129,26 @@ describe("StreamManager runtime terminal", () => {
     );
   });
 
+  it("finishes a static response while preserving its model invocation flag", () => {
+    const manager = new StreamManager();
+    const stream = new FakeSSE();
+    const event = terminal("r1");
+    manager.registerStream("conv", stream as any, {});
+    stream.emit({
+      conversation_id: "conv",
+      runtime_event: {
+        ...event,
+        data: { ...event.data, model_invoked: false },
+      },
+    });
+
+    expect(manager.isStreamFinished("conv")).toBe(true);
+    expect(manager.getStreamState("conv")?.runTerminals.r1).toMatchObject({
+      status: "completed",
+      model_invoked: false,
+    });
+  });
+
   it("keeps a terminal first frame when registering the real conversation", () => {
     const manager = new StreamManager();
     const stream = new FakeSSE();

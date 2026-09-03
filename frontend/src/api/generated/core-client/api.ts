@@ -2353,6 +2353,7 @@ export interface RunTerminal {
     'code'?: string;
     'diagnostic_id'?: string;
     'model_call_id'?: string;
+    'model_invoked'?: boolean;
     'partial_output': boolean;
     'reason': RunTerminalReasonEnum;
     'status': RunTerminalStatusEnum;

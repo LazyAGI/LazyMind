@@ -608,6 +608,7 @@ func manualSchemas() map[string]any {
 			prop("code", strSchema()),
 			prop("partial_output", boolSchema()),
 			prop("model_call_id", strSchema()),
+			prop("model_invoked", boolSchema()),
 			prop("diagnostic_id", strSchema()),
 		),
 		"ChatRuntimeEvent":            obj(prop("schema_version", intSchema()), prop("event_id", strSchema()), prop("run_id", strSchema()), prop("type", strSchema()), prop("data", obj())),
