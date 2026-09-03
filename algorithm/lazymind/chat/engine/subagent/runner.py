@@ -19,7 +19,7 @@ from lazyllm.tools.agent.base import (
     TOOL_OBSERVATION_KEY,
     attachable_tool_observation,
 )
-from lazyllm.tools.tool_config_inject import inject_tool_config
+from lazymind.chat.engine.tool_auth import inject_tool_config
 
 from lazymind.chat.engine.agent_runtime import (
     AgentExecutionOptions,

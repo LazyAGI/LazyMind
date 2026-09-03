@@ -83,7 +83,8 @@ from lazymind.chat.service.utils import (
 )
 from lazyllm.tools.fs.client import FS
 from lazymind.model_config import inject_model_config, summarize_model_config_for_log
-from lazyllm.tools import inject_env_vars, inject_tool_config
+from lazyllm.tools import inject_env_vars
+from lazymind.chat.engine.tool_auth import inject_tool_config
 from lazyllm import AutoModel
 from lazyllm.tools.mcp.client import MCPClient
 from lazymind.config import config as _cfg
@@ -901,6 +902,20 @@ async def _handle_chat_impl(
             },
             cost,
         ), run_id=run_id)
+    confirm_id = (runtime.mail_draft_confirm_id or '').strip()
+    confirm_revision = runtime.mail_draft_confirm_revision
+    if confirm_id:
+        revision_note = (
+            f' revision {int(confirm_revision)}' if confirm_revision else ''
+        )
+        notice = (
+            f'\n\n[system] The user confirmed sending mail draft {confirm_id}'
+            f'{revision_note}. '
+            'Call MailToolkit_send_draft with that draft_id now. '
+            'Do not send any other draft or an older revision.'
+        )
+        query = f'{query}{notice}'
+        language_query = f'{language_query}{notice}'
     filters = dict(retrieval.filters or {})
     files_map: Dict[str, List[str]] = message.files if isinstance(message.files, dict) else {}
     flat_files: List[str] = []
@@ -964,6 +979,8 @@ async def _handle_chat_impl(
         'has_subagents': bool(agent.has_subagents),
         'conversation_id': conversation_id,
         'query': query or '',
+        'mail_draft_confirm_id': (runtime.mail_draft_confirm_id or '').strip(),
+        'mail_draft_confirm_revision': runtime.mail_draft_confirm_revision,
     }
     # Inject per-conversation workflow flags from Go (resolved from conversations table).
     # enable_workflow=None means "not set"; default to True so behaviour is unchanged

@@ -1,6 +1,7 @@
 import re
 from typing import Any, Dict
 
+from .citations import citation_state_lock
 from .static_file_url import static_file_url_from_any, basename_from_path as _basename
 
 _IMAGE_MD_RE = re.compile(r'!\[([^\]]*)\]\(([^)]+)\)')
@@ -18,22 +19,29 @@ def _is_blocked_external_url(url: str) -> bool:
     return any(marker in lowered for marker in _BLOCKED_HOST_MARKERS)
 
 
+def _snapshot_mapping(config: Dict[str, Any], key: str) -> Dict[str, Any]:
+    value = config.get(key)
+    if not isinstance(value, dict):
+        return {}
+    with citation_state_lock(config):
+        return dict(value)
+
+
 def build_image_url_map_from_config(config: Dict[str, Any] | None) -> Dict[str, str]:
     if not isinstance(config, dict):
         return {}
 
     url_map: Dict[str, str] = {}
-    registry = config.get('_image_url_registry')
-    if isinstance(registry, dict):
-        for key, value in list(registry.items()):
-            signed = static_file_url_from_any(str(value))
-            if signed:
-                url_map[str(key)] = signed
-                url_map[signed] = signed
+    registry = _snapshot_mapping(config, '_image_url_registry')
+    for key, value in registry.items():
+        signed = static_file_url_from_any(str(value))
+        if signed:
+            url_map[str(key)] = signed
+            url_map[signed] = signed
 
-    refs = config.get('_citation_sources')
-    if isinstance(refs, dict):
-        for source in list(refs.values()):
+    refs = _snapshot_mapping(config, '_citation_sources')
+    if refs:
+        for source in refs.values():
             if not isinstance(source, dict):
                 continue
             for field in ('text', 'content'):

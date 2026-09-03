@@ -26,6 +26,7 @@ from lazymind.chat.engine.tools import (
     LocalFileToolkit,
     WriterCreateToolkit,
     WriterRevisionToolkit,
+    MailToolkit,
     calculator,
     image_editor,
     image_generator,
@@ -286,6 +287,25 @@ CLOUD_DOCUMENT_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
         'When the user provides a Google Drive or Google Workspace document URL '
         '(`drive.google.com` or `docs.google.com`), use the Google Drive file-system tools '
         'instead of generic URL fetching.',
+    ),
+}
+MAIL_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
+    'tool_policy': (
+        '# Mailbox rules\n'
+        'Use MailToolkit for every NetEase, Tencent, and Gmail account whose chat switch is on. '
+        'Multiple mailboxes can be enabled at once. Search with keyword/from/to/subject/time '
+        'filters (optionally mailbox=email or provider), then read a message or thread '
+        'before citing it. Search hits include mailbox/provider; pass mailbox when reading '
+        'or composing if more than one account is enabled. Attachments can be read into '
+        'the conversation as task input. '
+        'compose_draft creates a preview and never sends. Use update_draft to change an '
+        'existing unsent draft (this increments revision). send_draft may run only after '
+        'the user confirms that preview in this turn (`mail_draft_confirm_id` plus the '
+        'matching `mail_draft_confirm_revision`). '
+        'Do not call ask_user to collect send authorization; the draft card is the only '
+        'confirmation UI. Never send mail automatically, never forward, and never delete, '
+        'archive, or mark messages. If authorization expired, tell the user to reconnect at '
+        '资源库 → 云文档 → 邮箱连接.',
     ),
 }
 
@@ -705,6 +725,16 @@ DEFAULT_TOOLS: list[ToolConfig] = [
         module='data', label_en='Cloud Files',
         description_en='Read and manage authenticated Feishu Wiki, Feishu Docs, Notion, and other cloud files.',
         appendix_system_prompt=CLOUD_DOCUMENT_TOOL_POLICY_APPENDIX,
+    ),
+    ToolConfig(
+        name='mail',
+        label='邮箱',
+        description='检索、阅读和引用已开启的网易 / 腾讯 / Gmail 邮件，并在用户确认后发送草稿',
+        tool=MailToolkit(),
+        module='data',
+        label_en='Mail',
+        description_en='Search, read, and cite enabled NetEase, Tencent, and Gmail mailboxes, and send drafts after confirmation.',
+        appendix_system_prompt=MAIL_TOOL_POLICY_APPENDIX,
     ),
     ToolConfig(
         name='schedule', label='定时任务', description='创建、查询、修改、取消和立即触发定时任务',

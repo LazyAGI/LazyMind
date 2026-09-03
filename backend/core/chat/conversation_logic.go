@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -1175,6 +1176,44 @@ func filesPerTurnMap(histories []orm.ChatHistory, currentFiles any, currentSeq i
 	return out
 }
 
+func resolveMailDraftConfirmID(raw map[string]any) string {
+	if draftID, ok := raw["mail_draft_confirm_id"].(string); ok {
+		return strings.TrimSpace(draftID)
+	}
+	return ""
+}
+
+func mailDraftConfirmRevision(raw any) int {
+	switch value := raw.(type) {
+	case int:
+		return value
+	case int32:
+		return int(value)
+	case int64:
+		return int(value)
+	case float64:
+		return int(value)
+	case json.Number:
+		parsed, err := value.Int64()
+		if err != nil {
+			return 0
+		}
+		return int(parsed)
+	case string:
+		parsed, err := strconv.Atoi(strings.TrimSpace(value))
+		if err != nil {
+			return 0
+		}
+		return parsed
+	default:
+		return 0
+	}
+}
+
+func resolveMailDraftConfirmRevision(raw map[string]any) int {
+	return mailDraftConfirmRevision(raw["mail_draft_confirm_revision"])
+}
+
 func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, query string, histories []orm.ChatHistory, raw map[string]any, resourceContext *evolution.ChatResourceContext, userID string, currentSeq int) map[string]any {
 	if strings.TrimSpace(sessionID) == "" {
 		sessionID = upstreamSessionID(convID)
@@ -1221,6 +1260,12 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 	}
 	if skip, ok := raw["skip_sensitive_filter"].(bool); ok && skip {
 		body["skip_sensitive_filter"] = true
+	}
+	if confirmID := resolveMailDraftConfirmID(raw); confirmID != "" {
+		body["mail_draft_confirm_id"] = confirmID
+	}
+	if revision := resolveMailDraftConfirmRevision(raw); revision > 0 {
+		body["mail_draft_confirm_revision"] = revision
 	}
 	if mentionContext := buildMentionResourceContext(ctx, db, userID, histories, raw); mentionContext != "" {
 		body["query"] = mentionContext + "\n\nUser query:\n" + query
