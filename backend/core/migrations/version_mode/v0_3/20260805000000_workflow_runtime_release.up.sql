@@ -651,6 +651,7 @@ CREATE TABLE IF NOT EXISTS external_agent_bindings (
     provider VARCHAR(32) NOT NULL,
     host_id VARCHAR(128) NOT NULL DEFAULT 'host-legacy',
     provider_thread_id VARCHAR(128) NOT NULL,
+    managed_by_lazymind BOOLEAN NOT NULL DEFAULT FALSE,
     created_by_user_id VARCHAR(255) NOT NULL,
     created_at TIMESTAMP NOT NULL,
     updated_at TIMESTAMP NOT NULL
@@ -967,6 +968,7 @@ CREATE TABLE IF NOT EXISTS external_agent_bindings (
     provider VARCHAR(32) NOT NULL,
     host_id VARCHAR(128) NOT NULL DEFAULT 'host-legacy',
     provider_thread_id VARCHAR(128) NOT NULL,
+    managed_by_lazymind BOOLEAN NOT NULL DEFAULT FALSE,
     created_by_user_id VARCHAR(255) NOT NULL,
     created_at TIMESTAMP NOT NULL,
     updated_at TIMESTAMP NOT NULL

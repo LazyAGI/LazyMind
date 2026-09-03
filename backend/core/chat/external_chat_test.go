@@ -206,6 +206,9 @@ func TestExternalContinuationPreservesProviderOwnedConversation(t *testing.T) {
 	if err := db.First(&binding, "id = ?", "external-binding").Error; err != nil {
 		t.Fatal(err)
 	}
+	if binding.ManagedByLazyMind {
+		t.Fatal("continuing a provider-owned thread changed its ownership")
+	}
 }
 
 func TestExternalConversationBindsExactlyOneNativeThread(t *testing.T) {
@@ -214,6 +217,13 @@ func TestExternalConversationBindsExactlyOneNativeThread(t *testing.T) {
 	ctx := context.Background()
 	if err := service.BindManagedThread(ctx, "user-1", ChatExecutorCodex, "host-1", "codex-thread", "conversation-1"); err != nil {
 		t.Fatal(err)
+	}
+	var managed orm.ExternalAgentBinding
+	if err := db.First(&managed, "provider_thread_id = ?", "codex-thread").Error; err != nil {
+		t.Fatal(err)
+	}
+	if !managed.ManagedByLazyMind {
+		t.Fatal("LazyMind-created thread was not marked as managed")
 	}
 	if err := service.BindManagedThread(ctx, "user-1", ChatExecutorCursor, "host-1", "cursor-thread", "conversation-1"); !errors.Is(err, externalcontext.ErrThreadOwned) {
 		t.Fatalf("second provider in one conversation err=%v", err)

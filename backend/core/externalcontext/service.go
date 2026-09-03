@@ -269,7 +269,7 @@ func (s *Service) BindManagedThread(
 	binding := orm.ExternalAgentBinding{
 		ID:             deterministicID("binding", source.Provider+"\x00"+source.HostID+"\x00"+source.ThreadID),
 		ConversationID: conversationID, Provider: source.Provider, ProviderThreadID: source.ThreadID,
-		HostID:          source.HostID,
+		HostID: source.HostID, ManagedByLazyMind: true,
 		CreatedByUserID: owner, CreatedAt: now, UpdatedAt: now,
 	}
 	if err := s.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&binding).Error; err != nil {

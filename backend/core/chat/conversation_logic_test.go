@@ -14,6 +14,7 @@ import (
 
 	"lazymind/core/common/orm"
 	"lazymind/core/evolution"
+	"lazymind/core/externalcontext"
 	"lazymind/core/state"
 	"lazymind/core/store"
 )
@@ -221,7 +222,8 @@ func TestConversationListSeparatesAssistantOwnershipFromExecutionEngine(t *testi
 	}
 	for _, binding := range []orm.ExternalAgentBinding{
 		{ID: "managed-binding", ConversationID: "managed", Provider: ChatExecutorCodex,
-			HostID: "host-1", ProviderThreadID: "managed-thread", CreatedByUserID: "u1", CreatedAt: now, UpdatedAt: now},
+			HostID: "host-1", ProviderThreadID: "managed-thread", ManagedByLazyMind: true,
+			CreatedByUserID: "u1", CreatedAt: now, UpdatedAt: now},
 		{ID: "external-binding", ConversationID: "external", Provider: ChatExecutorCodex,
 			HostID: "host-1", ProviderThreadID: "external-thread",
 			CreatedByUserID: "u1", CreatedAt: now, UpdatedAt: now},
@@ -284,6 +286,44 @@ func TestConversationListSeparatesAssistantOwnershipFromExecutionEngine(t *testi
 		codex[0].ChatExecutor != ChatExecutorCodex || codex[0].ProjectKey != "codex-project-1" ||
 		codex[0].ProjectName != "DataAnnotation" || codex[1].ID != "managed" {
 		t.Fatalf("Codex assistant conversations=%#v", codex)
+	}
+}
+
+func TestConversationListKeepsLazyMindManagedExternalConversationWithoutNativeSession(t *testing.T) {
+	database := newPromptTestDB(t)
+	db := database.DB
+	store.Init(db, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+	now := time.Now().UTC()
+	if err := db.Create(&orm.Conversation{
+		ID: "managed", DisplayName: "LazyMind managed Codex", ChatExecutor: ChatExecutorCodex,
+		BaseModel: orm.BaseModel{CreateUserID: "u1", CreatedAt: now, UpdatedAt: now},
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := externalcontext.New(db).BindManagedThread(
+		context.Background(), "u1", ChatExecutorCodex, "host-1", "managed-thread", "managed",
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/core/conversations?assistant=codex", nil)
+	req.Header.Set("X-User-Id", "u1")
+	rec := httptest.NewRecorder()
+	ListConversations(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var response struct {
+		Conversations []struct {
+			ID string `json:"conversation_id"`
+		} `json:"conversations"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Conversations) != 1 || response.Conversations[0].ID != "managed" {
+		t.Fatalf("managed conversation disappeared without a native catalog session: %#v", response.Conversations)
 	}
 }
 

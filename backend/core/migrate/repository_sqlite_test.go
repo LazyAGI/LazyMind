@@ -61,6 +61,75 @@ VALUES ('legacy-model','provider','Provider','Legacy','VLM','',CURRENT_TIMESTAMP
 	}
 }
 
+func TestManagedExternalBindingMigrationBackfillsOwnership(t *testing.T) {
+	db := openRawSQLite(t, t.TempDir()+"/managed-external-binding.db")
+	if _, err := db.Exec(`
+CREATE TABLE external_agent_bindings (
+  id text PRIMARY KEY,
+  conversation_id text NOT NULL,
+  provider text NOT NULL,
+  host_id text NOT NULL,
+  provider_thread_id text NOT NULL,
+  created_at datetime NOT NULL
+);
+CREATE TABLE external_agent_runs (
+  id text PRIMARY KEY,
+  conversation_id text NOT NULL,
+  provider text NOT NULL,
+  host_id text NOT NULL,
+  provider_thread_id text NOT NULL,
+  action text NOT NULL,
+  created_at datetime NOT NULL
+);
+INSERT INTO external_agent_bindings
+  (id, conversation_id, provider, host_id, provider_thread_id, created_at) VALUES
+  ('managed', 'managed-conversation', 'codex', 'host-1', 'managed-thread', '2026-09-03 10:01:00'),
+  ('native', 'native-conversation', 'codex', 'host-1', 'native-thread', '2026-09-03 10:00:00'),
+  ('unrelated', 'unrelated-conversation', 'codex', 'host-1', 'unrelated-thread', '2026-09-03 10:00:00');
+INSERT INTO external_agent_runs
+  (id, conversation_id, provider, host_id, provider_thread_id, action, created_at) VALUES
+  ('managed-run', 'managed-conversation', 'codex', 'host-1', 'managed-thread', 'start', '2026-09-03 10:00:00'),
+  ('native-later-run', 'native-conversation', 'codex', 'host-1', 'native-thread', 'resume', '2026-09-03 10:01:00');
+`); err != nil {
+		t.Fatalf("seed external bindings: %v", err)
+	}
+
+	migrationDir := filepath.Join("..", "migrations", "dev_mode", "v0_3")
+	upPath := filepath.Join(migrationDir, "20260903044957_restore_managed_external_agent_binding.up.sql")
+	execMigrationFileForDriver(t, db, upPath, "sqlite")
+
+	rows, err := db.Query(`SELECT id, managed_by_lazymind FROM external_agent_bindings ORDER BY id`)
+	if err != nil {
+		t.Fatalf("read migrated bindings: %v", err)
+	}
+	defer rows.Close()
+	got := map[string]bool{}
+	for rows.Next() {
+		var id string
+		var managed bool
+		if err := rows.Scan(&id, &managed); err != nil {
+			t.Fatalf("scan migrated binding: %v", err)
+		}
+		got[id] = managed
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate migrated bindings: %v", err)
+	}
+	if !got["managed"] || got["native"] || got["unrelated"] {
+		t.Fatalf("managed binding ownership=%v", got)
+	}
+
+	downPath := filepath.Join(migrationDir, "20260903044957_restore_managed_external_agent_binding.down.sql")
+	execMigrationFileForDriver(t, db, downPath, "sqlite")
+	var columnCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('external_agent_bindings') WHERE name = 'managed_by_lazymind'`).Scan(&columnCount); err != nil {
+		t.Fatalf("inspect rolled back binding schema: %v", err)
+	}
+	if columnCount != 0 {
+		t.Fatal("managed_by_lazymind should be removed by the down migration")
+	}
+}
+
 func TestFixTaskCenterWorkflowRunsMigrationBackfillsLifecycle(t *testing.T) {
 	db := openRawSQLite(t, t.TempDir()+"/task-center-workflow-runs.db")
 	if _, err := db.Exec(`
