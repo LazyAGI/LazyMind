@@ -33,6 +33,115 @@ func ReadZip(zipPath string) (Package, error) {
 	return readFiles(reader.File)
 }
 
+// ReadZipSubdirectory reads one Skill from a repository archive. A single
+// archive wrapper directory (such as repository-main/) is removed before the
+// requested prefix is selected, and package limits apply to the selected Skill.
+func ReadZipSubdirectory(zipPath, prefix string) (Package, error) {
+	prefix, err := CleanPath(prefix)
+	if err != nil {
+		return Package{}, err
+	}
+	reader, err := zip.OpenReader(zipPath)
+	if err != nil {
+		return Package{}, err
+	}
+	defer reader.Close()
+
+	root, err := singleArchiveRoot(reader.File)
+	if err != nil {
+		return Package{}, err
+	}
+	files := make(map[string][]byte)
+	prefixWithSlash := prefix + "/"
+	var total uint64
+	for _, entry := range reader.File {
+		if isIgnoredMetadata(entry.Name) {
+			continue
+		}
+		entryName := strings.TrimSuffix(entry.Name, "/")
+		name, err := CleanPath(entryName)
+		if err != nil {
+			return Package{}, err
+		}
+		if entry.FileInfo().IsDir() {
+			continue
+		}
+		if root != "" {
+			name = strings.TrimPrefix(name, root+"/")
+		}
+		if !strings.HasPrefix(name, prefixWithSlash) {
+			continue
+		}
+		relative := strings.TrimPrefix(name, prefixWithSlash)
+		if _, err := CleanPath(relative); err != nil {
+			return Package{}, err
+		}
+		if entry.Mode()&os.ModeSymlink != 0 {
+			return Package{}, fmt.Errorf("skill package cannot contain symlink %q", relative)
+		}
+		if _, exists := files[relative]; exists {
+			return Package{}, fmt.Errorf("skill package contains duplicate path %q", relative)
+		}
+		if len(files) >= MaxFiles {
+			return Package{}, fmt.Errorf("skill package contains too many entries: %d > %d", len(files)+1, MaxFiles)
+		}
+		if entry.UncompressedSize64 > MaxFileBytes {
+			return Package{}, fmt.Errorf("skill package file %q exceeds %d bytes", relative, MaxFileBytes)
+		}
+		total += entry.UncompressedSize64
+		if total > MaxTotalBytes {
+			return Package{}, fmt.Errorf("skill package exceeds %d uncompressed bytes", MaxTotalBytes)
+		}
+		rc, err := entry.Open()
+		if err != nil {
+			return Package{}, err
+		}
+		data, readErr := io.ReadAll(io.LimitReader(rc, MaxFileBytes+1))
+		closeErr := rc.Close()
+		if readErr != nil {
+			return Package{}, readErr
+		}
+		if closeErr != nil {
+			return Package{}, closeErr
+		}
+		if len(data) > MaxFileBytes {
+			return Package{}, fmt.Errorf("skill package file %q exceeds %d bytes", relative, MaxFileBytes)
+		}
+		files[relative] = data
+	}
+	if _, ok := files["SKILL.md"]; !ok {
+		return Package{}, fmt.Errorf("skill package must contain SKILL.md in subdirectory %q", prefix)
+	}
+	return Package{Files: files, PackageRoot: path.Base(prefix)}, nil
+}
+
+func singleArchiveRoot(entries []*zip.File) (string, error) {
+	root := ""
+	for _, entry := range entries {
+		if isIgnoredMetadata(entry.Name) {
+			continue
+		}
+		entryName := strings.TrimSuffix(entry.Name, "/")
+		name, err := CleanPath(entryName)
+		if err != nil {
+			return "", err
+		}
+		if entry.FileInfo().IsDir() {
+			continue
+		}
+		parts := strings.SplitN(name, "/", 2)
+		if len(parts) != 2 || parts[1] == "" {
+			return "", nil
+		}
+		if root == "" {
+			root = parts[0]
+		} else if root != parts[0] {
+			return "", nil
+		}
+	}
+	return root, nil
+}
+
 func CleanPath(name string) (string, error) {
 	if name == "" || strings.HasPrefix(name, "/") || strings.Contains(name, `\`) || strings.Contains(name, "//") || strings.ContainsRune(name, 0) {
 		return "", fmt.Errorf("unsafe path %q", name)

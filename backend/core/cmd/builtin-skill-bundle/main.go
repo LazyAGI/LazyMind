@@ -86,6 +86,7 @@ type bundledSource struct {
 type sourceSpec struct {
 	SourceURL       string
 	ResolvedURL     string
+	PathPrefix      string
 	Identity        string
 	Key             string
 	FallbackName    string
@@ -222,7 +223,7 @@ func run(ctx context.Context, opts options, client *http.Client) error {
 			return bundleFailure("load frozen lock: %v", err)
 		}
 		if len(locked.Skills) != len(sources) {
-			return bundleFailure("frozen lock contains %d skills, sources contain %d", len(locked.Skills), len(sources))
+			return bundleFailure("frozen lock contains %d skills, sources contain %d; run skills-build to update the lock before materializing", len(locked.Skills), len(sources))
 		}
 		lockedBySource = make(map[string]skillbuiltin.CatalogSkill, len(locked.Skills))
 		for _, entry := range locked.Skills {
@@ -246,7 +247,15 @@ func run(ctx context.Context, opts options, client *http.Client) error {
 	entriesBySource := make(map[string]skillbuiltin.CatalogSkill, len(sources))
 	appliedPatchCounts := make(map[string]int)
 	for _, source := range sources {
-		spec, err := resolveSourceInput(source, filepath.Dir(opts.Sources))
+		var locked skillbuiltin.CatalogSkill
+		if opts.FrozenLockfile {
+			var ok bool
+			locked, ok = lockedBySource[sourceInputURL(source)]
+			if !ok {
+				return bundleFailure("source %s is missing from frozen lock; run skills-build to update the lock before materializing", sourceInputURL(source))
+			}
+		}
+		spec, err := resolveSourceInputWithLockedArchive(ctx, client, source, filepath.Dir(opts.Sources), locked.ResolvedURL)
 		if err != nil {
 			return err
 		}
@@ -254,10 +263,6 @@ func run(ctx context.Context, opts options, client *http.Client) error {
 		var archivePath string
 		var appliedPatches []skillpatch.AppliedPatch
 		if opts.FrozenLockfile {
-			locked, ok := lockedBySource[spec.SourceURL]
-			if !ok {
-				return bundleFailure("source %s is missing from frozen lock", spec.SourceURL)
-			}
 			if locked.ResolvedURL != spec.ResolvedURL {
 				return bundleFailure("resolved URL changed for %s", spec.SourceURL)
 			}
@@ -448,11 +453,43 @@ func loadSources(path string) (sourceList, error) {
 	return raw, nil
 }
 
-func resolveSourceInput(source sourceInput, sourcesRoot string) (sourceSpec, error) {
+func resolveSourceInput(ctx context.Context, client *http.Client, source sourceInput, sourcesRoot string) (sourceSpec, error) {
+	return resolveSourceInputWithResolver(ctx, client, skillurl.GitHubAPIBaseURL, source, sourcesRoot)
+}
+
+func resolveSourceInputWithResolver(ctx context.Context, client *http.Client, githubAPIBaseURL string, source sourceInput, sourcesRoot string) (sourceSpec, error) {
+	return resolveSourceInputWithResolverAndLockedArchive(ctx, client, githubAPIBaseURL, source, sourcesRoot, "")
+}
+
+func resolveSourceInputWithLockedArchive(ctx context.Context, client *http.Client, source sourceInput, sourcesRoot, lockedResolvedURL string) (sourceSpec, error) {
+	return resolveSourceInputWithResolverAndLockedArchive(ctx, client, skillurl.GitHubAPIBaseURL, source, sourcesRoot, lockedResolvedURL)
+}
+
+func resolveSourceInputWithResolverAndLockedArchive(ctx context.Context, client *http.Client, githubAPIBaseURL string, source sourceInput, sourcesRoot, lockedResolvedURL string) (sourceSpec, error) {
 	if source.Bundled == nil {
 		spec, err := resolveSource(source.URL)
 		if err != nil {
 			return sourceSpec{}, err
+		}
+		parsed, err := url.Parse(source.URL)
+		if err != nil {
+			return sourceSpec{}, err
+		}
+		var githubResolution skillurl.GitHubResolution
+		var matched bool
+		var resolveErr error
+		if lockedResolvedURL != "" {
+			githubResolution, matched, resolveErr = skillurl.ResolveGitHubPageURLFromResolvedArchive(parsed, lockedResolvedURL)
+		}
+		if lockedResolvedURL == "" || !matched && resolveErr == nil {
+			githubResolution, matched, resolveErr = skillurl.ResolveGitHubPageURL(ctx, parsed, client, githubAPIBaseURL)
+		}
+		if resolveErr != nil {
+			return sourceSpec{}, bundleFailure("unsupported GitHub URL %q: %v", source.URL, resolveErr)
+		}
+		if matched {
+			spec.ResolvedURL = githubResolution.DownloadURL
+			spec.PathPrefix = githubResolution.PathPrefix
 		}
 		spec.FallbackName = source.FallbackName
 		spec.Category = source.Category
@@ -506,6 +543,13 @@ func bundledSourceURL(relativePath string) string {
 	return "builtin://" + filepath.ToSlash(relativePath)
 }
 
+func sourceInputURL(source sourceInput) string {
+	if source.Bundled != nil {
+		return bundledSourceURL(source.Bundled.Path)
+	}
+	return source.URL
+}
+
 func resolveSource(raw string) (sourceSpec, error) {
 	parsed, err := url.Parse(raw)
 	if err != nil || parsed.Scheme != "https" && parsed.Scheme != "http" || parsed.Host == "" {
@@ -550,12 +594,17 @@ func resolveEntry(ctx context.Context, client *http.Client, spec sourceSpec, cac
 		return skillbuiltin.CatalogSkill{}, "", nil, err
 	}
 	defer os.Remove(tempPath)
-	hash, _, err := fileDigest(tempPath)
+	originPath, cleanup, err := prepareOriginArchive(tempPath, spec.PathPrefix, cacheDir)
+	if err != nil {
+		return skillbuiltin.CatalogSkill{}, "", nil, err
+	}
+	defer cleanup()
+	hash, _, err := fileDigest(originPath)
 	if err != nil {
 		return skillbuiltin.CatalogSkill{}, "", nil, err
 	}
 	cachePath := filepath.Join(cacheDir, hash+".zip")
-	if err := copyFile(tempPath, cachePath); err != nil {
+	if err := copyFile(originPath, cachePath); err != nil {
 		return skillbuiltin.CatalogSkill{}, "", nil, err
 	}
 	origin, err := inspectOrigin(cachePath)
@@ -563,6 +612,21 @@ func resolveEntry(ctx context.Context, client *http.Client, spec sourceSpec, cac
 		return skillbuiltin.CatalogSkill{}, "", nil, err
 	}
 	return finalizeEntry(spec, origin, cacheDir, patchCatalog)
+}
+
+func prepareOriginArchive(archivePath, pathPrefix, cacheDir string) (string, func(), error) {
+	if pathPrefix == "" {
+		return archivePath, func() {}, nil
+	}
+	pkg, err := skillpackage.ReadZipSubdirectory(archivePath, pathPrefix)
+	if err != nil {
+		return "", nil, err
+	}
+	selectedPath, err := skillpackage.WriteZip(pkg.Files, cacheDir)
+	if err != nil {
+		return "", nil, err
+	}
+	return selectedPath, func() { _ = os.Remove(selectedPath) }, nil
 }
 
 func inspectOrigin(archivePath string) (originPackage, error) {
@@ -869,14 +933,19 @@ func materializeFrozen(ctx context.Context, client *http.Client, spec sourceSpec
 			return skillbuiltin.CatalogSkill{}, "", nil, err
 		}
 		defer os.Remove(tempPath)
-		hash, size, err := fileDigest(tempPath)
+		preparedPath, cleanup, err := prepareOriginArchive(tempPath, spec.PathPrefix, cacheDir)
+		if err != nil {
+			return skillbuiltin.CatalogSkill{}, "", nil, err
+		}
+		defer cleanup()
+		hash, size, err := fileDigest(preparedPath)
 		if err != nil {
 			return skillbuiltin.CatalogSkill{}, "", nil, err
 		}
 		if hash != expectedOriginHash || expectedOriginSize > 0 && size != expectedOriginSize {
 			return skillbuiltin.CatalogSkill{}, "", nil, bundleFailure("download does not match frozen lock origin")
 		}
-		if err := copyFile(tempPath, originPath); err != nil {
+		if err := copyFile(preparedPath, originPath); err != nil {
 			return skillbuiltin.CatalogSkill{}, "", nil, err
 		}
 	}

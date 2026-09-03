@@ -48,7 +48,7 @@ func TestResolveSourceInputPinsFeaturedSkillHubRequiredVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	spec, err := resolveSourceInput(input, "")
+	spec, err := resolveSourceInput(context.Background(), http.DefaultClient, input, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -600,6 +600,185 @@ func TestRunBuildsFeaturedCatalogAndKeepsSkillOutOfMarket(t *testing.T) {
 	asset := featuredCatalog.Cases[0].Assets["cover"]
 	if asset.URL == "" || asset.SHA256 == "" {
 		t.Fatalf("compiled asset = %#v", asset)
+	}
+}
+
+func TestRunBuildsFeaturedSkillFromGitHubSubdirectoryAndPreservesSource(t *testing.T) {
+	const (
+		sourceURL  = "https://github.com/example/skills/tree/main/skills/target"
+		archiveURL = "https://github.com/example/skills/archive/main.zip"
+	)
+	archive := makeSkillZipFromFiles(t, map[string][]byte{
+		"skills-main/skills/target/SKILL.md":        []byte("---\nname: target\ndescription: target skill\nversion: 1.2.3\n---\n# Target\n"),
+		"skills-main/skills/target/scripts/run.py":  []byte("print('target')\n"),
+		"skills-main/skills/ignored/SKILL.md":       []byte("---\nname: ignored\ndescription: ignored skill\nversion: 1.2.3\n---\n# Ignored\n"),
+		"skills-main/skills/ignored/scripts/run.py": []byte("print('ignored')\n"),
+	})
+	archiveDownloads := 0
+	githubAPIAvailable := true
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		switch request.URL.Hostname() {
+		case "api.github.com":
+			if !githubAPIAvailable {
+				return nil, fmt.Errorf("GitHub API must not be called during frozen build")
+			}
+			if request.URL.EscapedPath() == "/repos/example/skills/commits/main" {
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("")), Header: make(http.Header)}, nil
+			}
+			return &http.Response{StatusCode: http.StatusNotFound, Body: io.NopCloser(strings.NewReader("")), Header: make(http.Header)}, nil
+		case "github.com":
+			if request.URL.String() != archiveURL {
+				return nil, fmt.Errorf("unexpected GitHub download URL %q", request.URL.String())
+			}
+			archiveDownloads++
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(archive)), ContentLength: int64(len(archive)), Header: make(http.Header)}, nil
+		default:
+			return nil, fmt.Errorf("unexpected request URL %q", request.URL.String())
+		}
+	})}
+
+	root := t.TempDir()
+	sources := filepath.Join(root, "sources.yaml")
+	if err := os.WriteFile(sources, []byte("schema_version: 1\nskills: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	featuredSources := filepath.Join(root, "featured")
+	featuredDir := filepath.Join(featuredSources, "demo-featured")
+	writeTestPNG(t, filepath.Join(featuredDir, "assets", "cover.png"))
+	if err := os.WriteFile(filepath.Join(featuredDir, "featured.yaml"), []byte(testFeaturedDefinition(sourceURL, "1.2.3")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opts := options{
+		Sources:         sources,
+		Lock:            filepath.Join(root, "lock.json"),
+		Cache:           filepath.Join(root, "cache"),
+		Output:          filepath.Join(root, "runtime", "builtin-skills"),
+		FeaturedSources: featuredSources,
+		FeaturedOutput:  filepath.Join(root, "runtime", "featured-skills"),
+	}
+	if err := run(context.Background(), opts, client); err != nil {
+		t.Fatal(err)
+	}
+	if archiveDownloads != 1 {
+		t.Fatalf("archive download count = %d, want 1", archiveDownloads)
+	}
+	builtinCatalog := readCatalog(t, filepath.Join(opts.Output, "catalog.json"))
+	if len(builtinCatalog.Skills) != 1 {
+		t.Fatalf("builtin catalog = %#v", builtinCatalog)
+	}
+	entry := builtinCatalog.Skills[0]
+	if entry.SourceURL != sourceURL || entry.ResolvedURL != archiveURL || skillbuiltin.CatalogSkillMarketVisible(entry) {
+		t.Fatalf("GitHub Featured Skill provenance/distribution = %#v", entry)
+	}
+	lockedEntry := readCatalog(t, opts.Lock).Skills[0]
+	if lockedEntry.SourceURL != sourceURL || lockedEntry.ResolvedURL != archiveURL {
+		t.Fatalf("GitHub Featured Skill lock provenance = %#v", lockedEntry)
+	}
+	pkg, err := skillpackage.ReadZip(filepath.Join(opts.Output, filepath.FromSlash(entry.PackageFile)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pkg.Files) != 2 || string(pkg.Files["scripts/run.py"]) != "print('target')\n" {
+		t.Fatalf("selected GitHub Skill files = %#v", pkg.Files)
+	}
+	if _, exists := pkg.Files["skills/ignored/SKILL.md"]; exists {
+		t.Fatalf("package unexpectedly contains ignored subtree: %#v", pkg.Files)
+	}
+	featuredCatalog := readFeaturedCatalog(t, filepath.Join(opts.FeaturedOutput, "catalog.json"))
+	if len(featuredCatalog.Cases) != 1 || featuredCatalog.Cases[0].Skill.SourceURL != sourceURL || featuredCatalog.Cases[0].Skill.BuiltinSkillUID != entry.UID {
+		t.Fatalf("featured catalog = %#v", featuredCatalog)
+	}
+
+	if err := os.RemoveAll(opts.Cache); err != nil {
+		t.Fatal(err)
+	}
+	githubAPIAvailable = false
+	opts.Output = filepath.Join(root, "runtime-frozen", "builtin-skills")
+	opts.FeaturedOutput = filepath.Join(root, "runtime-frozen", "featured-skills")
+	opts.FrozenLockfile = true
+	if err := run(context.Background(), opts, client); err != nil {
+		t.Fatalf("frozen GitHub Featured Skill build failed: %v", err)
+	}
+	if archiveDownloads != 2 {
+		t.Fatalf("archive download count after frozen build = %d, want 2", archiveDownloads)
+	}
+}
+
+func TestRunBuildsFeaturedSkillFromGitHubRootWithoutFrozenAPIRequest(t *testing.T) {
+	const (
+		sourceURL  = "https://github.com/example/skills"
+		archiveURL = "https://github.com/example/skills/archive/main.zip"
+	)
+	archive := makeSkillZipFromFiles(t, map[string][]byte{
+		"skills-main/SKILL.md":       []byte("---\nname: root-skill\ndescription: root skill\nversion: 1.2.3\n---\n# Root Skill\n"),
+		"skills-main/scripts/run.py": []byte("print('root')\n"),
+	})
+	archiveDownloads := 0
+	githubAPIAvailable := true
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		switch request.URL.Hostname() {
+		case "api.github.com":
+			if !githubAPIAvailable {
+				return nil, fmt.Errorf("GitHub API must not be called during frozen build")
+			}
+			if request.URL.EscapedPath() == "/repos/example/skills" {
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"default_branch":"main"}`)), Header: make(http.Header)}, nil
+			}
+			return &http.Response{StatusCode: http.StatusNotFound, Body: io.NopCloser(strings.NewReader("")), Header: make(http.Header)}, nil
+		case "github.com":
+			if request.URL.String() != archiveURL {
+				return nil, fmt.Errorf("unexpected GitHub download URL %q", request.URL.String())
+			}
+			archiveDownloads++
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(archive)), ContentLength: int64(len(archive)), Header: make(http.Header)}, nil
+		default:
+			return nil, fmt.Errorf("unexpected request URL %q", request.URL.String())
+		}
+	})}
+
+	root := t.TempDir()
+	sources := filepath.Join(root, "sources.yaml")
+	if err := os.WriteFile(sources, []byte("schema_version: 1\nskills: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	featuredSources := filepath.Join(root, "featured")
+	featuredDir := filepath.Join(featuredSources, "root-featured")
+	writeTestPNG(t, filepath.Join(featuredDir, "assets", "cover.png"))
+	definition := strings.Replace(testFeaturedDefinition(sourceURL, "1.2.3"), "id: demo-featured", "id: root-featured", 1)
+	if err := os.WriteFile(filepath.Join(featuredDir, "featured.yaml"), []byte(definition), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opts := options{
+		Sources:         sources,
+		Lock:            filepath.Join(root, "lock.json"),
+		Cache:           filepath.Join(root, "cache"),
+		Output:          filepath.Join(root, "runtime", "builtin-skills"),
+		FeaturedSources: featuredSources,
+		FeaturedOutput:  filepath.Join(root, "runtime", "featured-skills"),
+	}
+	if err := run(context.Background(), opts, client); err != nil {
+		t.Fatal(err)
+	}
+	entry := readCatalog(t, filepath.Join(opts.Output, "catalog.json")).Skills[0]
+	if entry.SourceURL != sourceURL || entry.ResolvedURL != archiveURL || entry.Name != "root-skill" {
+		t.Fatalf("GitHub root Featured Skill = %#v", entry)
+	}
+	if archiveDownloads != 1 {
+		t.Fatalf("archive download count = %d, want 1", archiveDownloads)
+	}
+
+	if err := os.RemoveAll(opts.Cache); err != nil {
+		t.Fatal(err)
+	}
+	githubAPIAvailable = false
+	opts.Output = filepath.Join(root, "runtime-frozen", "builtin-skills")
+	opts.FeaturedOutput = filepath.Join(root, "runtime-frozen", "featured-skills")
+	opts.FrozenLockfile = true
+	if err := run(context.Background(), opts, client); err != nil {
+		t.Fatalf("frozen GitHub root Featured Skill build failed: %v", err)
+	}
+	if archiveDownloads != 2 {
+		t.Fatalf("archive download count after frozen build = %d, want 2", archiveDownloads)
 	}
 }
 

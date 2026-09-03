@@ -90,6 +90,11 @@ func TestNormalizeSkillImportURL(t *testing.T) {
 			wantURL: "https://github.com/example/skills/archive/feature%2Ffoo.zip",
 		},
 		{
+			name:    "GitHub release ZIP remains a direct package URL",
+			rawURL:  "https://github.com/example/skills/releases/download/v1.0.0/skill.zip",
+			wantURL: "https://github.com/example/skills/releases/download/v1.0.0/skill.zip",
+		},
+		{
 			name:    "direct zip URL",
 			rawURL:  "https://example.test/skills.zip",
 			wantURL: "https://example.test/skills.zip",
