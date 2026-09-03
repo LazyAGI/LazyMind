@@ -29,6 +29,7 @@ const GroupManagement = lazy(() => import("@/modules/admin/pages/group"));
 const GroupDetail = lazy(() => import("@/modules/admin/pages/group/detail.tsx"));
 const DatabaseConnectionsPage = lazy(() => import("@/modules/dataSource/database"));
 const DataSourceFeishuCallback = lazy(() => import("@/modules/dataSource/common/feishuCallback"));
+const WorkBuddyOAuthCallback = lazy(() => import("@/modules/agentIntegration/WorkBuddyOAuthCallback"));
 const CloudDocumentsPage = lazy(() => import("@/modules/modelProvider/pages/CloudDocumentsPage"));
 const FeishuAccountPage = lazy(() => import("@/modules/modelProvider/pages/FeishuAccountPage"));
 const GoogleDriveConnectionPage = lazy(() => import("@/modules/modelProvider/pages/GoogleDriveConnectionPage"));
@@ -107,6 +108,10 @@ export default function AppRouter() {
         <Route
           path="/oauth/feishu/callback"
           element={<DataSourceFeishuCallback />}
+        />
+        <Route
+          path="/oauth/workbuddy/callback"
+          element={<WorkBuddyOAuthCallback />}
         />
         <Route
           path="/oauth/notion/data-source/callback"

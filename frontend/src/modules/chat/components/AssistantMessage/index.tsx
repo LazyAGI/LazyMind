@@ -205,6 +205,13 @@ interface FeedbackState {
   targetHistoryId: string | undefined;
 }
 
+export function externalProviderDisplayName(provider: string): string {
+  if (provider.toLowerCase() === "workbuddy") {
+    return "WorkBuddy";
+  }
+  return provider.charAt(0).toUpperCase() + provider.slice(1);
+}
+
 function ExternalExecutionSummary({
   execution,
 }: {
@@ -214,8 +221,7 @@ function ExternalExecutionSummary({
   if (!execution) {
     return null;
   }
-  const provider =
-    execution.provider.charAt(0).toUpperCase() + execution.provider.slice(1);
+  const provider = externalProviderDisplayName(execution.provider);
   const status = t(`chat.executionStatus.${execution.status}`);
   const workflows = execution.workflows
     .map((workflow) => `${workflow.workflow_id} · ${workflow.status}`)

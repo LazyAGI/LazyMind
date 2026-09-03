@@ -35,6 +35,10 @@ import {
   ConversationSettingsApi,
   type ChatExecutorDescriptor,
 } from "@/modules/chat/utils/request";
+import {
+  startWorkBuddyAuthorization,
+  WORKBUDDY_OAUTH_CHANNEL,
+} from "./workbuddyOAuth";
 import "./index.scss";
 
 interface AgentDefinition {
@@ -44,7 +48,7 @@ interface AgentDefinition {
   installURL: string;
   executorInstallURL?: string;
   executorName?: string;
-  executorLoginMode?: "automatic" | "interactive";
+  executorLoginMode?: "automatic" | "interactive" | "oauth";
   mcpBindingTarget?: DesktopAgentBindingTarget;
   executorBindingTarget?: DesktopAgentBindingTarget;
 }
@@ -66,9 +70,8 @@ const AGENTS: AgentDefinition[] = [
   {
     id: "workbuddy", name: "WorkBuddy", icon: "/assistant-icons/workbuddy.png",
     installURL: "https://www.workbuddy.cn",
-    executorInstallURL: "https://www.codebuddy.ai/docs/cli/quickstart",
-    executorName: "CodeBuddy Code CLI", executorLoginMode: "interactive",
-    mcpBindingTarget: "workbuddy-desktop", executorBindingTarget: "codebuddy-cli",
+    executorName: "WorkBuddy", executorLoginMode: "oauth",
+    mcpBindingTarget: "workbuddy-desktop",
   },
   {
     id: "raccoon", name: "Raccoon", icon: "/assistant-icons/raccoon.svg",
@@ -243,6 +246,20 @@ export default function AgentIntegrationPage() {
     }
   }, [executors, executorPolicies, pendingLoginAgent]);
 
+  useEffect(() => {
+    const handleWorkBuddyOAuth = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin || event.data?.channel !== WORKBUDDY_OAUTH_CHANNEL) return;
+      if (event.data.status === "error") {
+        setError(event.data.message || t("agentIntegration.workbuddyAuthorizationFailed"));
+        return;
+      }
+      setPendingLoginAgent("workbuddy");
+      void refresh();
+    };
+    window.addEventListener("message", handleWorkBuddyOAuth);
+    return () => window.removeEventListener("message", handleWorkBuddyOAuth);
+  }, [refresh, t]);
+
   const runAction = async (agent: DesktopAgent, nextAction: DesktopAgentIntegrationAction) => {
     const key = `${agent}:${nextAction}`;
     setAction(key);
@@ -283,6 +300,19 @@ export default function AgentIntegrationPage() {
       ? "agentIntegration.executorEnableSuccess"
       : "agentIntegration.executorDisableSuccess", { agent: agentName }));
     await refresh();
+  };
+
+  const authorizeWorkBuddy = async () => {
+    setAction("executor:workbuddy:authorize");
+    try {
+      await startWorkBuddyAuthorization();
+      setPendingLoginAgent("workbuddy");
+      setError("");
+    } catch (authorizationError) {
+      setError(authorizationError instanceof Error ? authorizationError.message : String(authorizationError));
+    } finally {
+      setAction("");
+    }
   };
 
   const saveBinding = async (target: DesktopAgentBindingTarget, path?: string) => {
@@ -372,6 +402,7 @@ export default function AgentIntegrationPage() {
                     })}
                     onMCPAction={runAction}
                     onExecutorAction={runExecutorAction}
+                    onWorkBuddyAuthorize={authorizeWorkBuddy}
                     onBindingAction={runBindingAction}
                     onExternalConfigurationStarted={setExternalConfigurationAgent}
                     onRefresh={refresh}
@@ -443,6 +474,7 @@ function AgentCard({
   onToggle,
   onMCPAction,
   onExecutorAction,
+  onWorkBuddyAuthorize,
   onBindingAction,
   onExternalConfigurationStarted,
   onRefresh,
@@ -458,6 +490,7 @@ function AgentCard({
   onToggle: () => void;
   onMCPAction: (agent: DesktopAgent, action: DesktopAgentIntegrationAction) => Promise<void>;
   onExecutorAction: (provider: DesktopExecutorProvider, action: DesktopExecutorPolicyAction) => Promise<void>;
+  onWorkBuddyAuthorize: () => Promise<void>;
   onBindingAction: (target: DesktopAgentBindingTarget, clear: boolean) => Promise<void>;
   onExternalConfigurationStarted: (agent: DesktopAgent) => void;
   onRefresh: () => Promise<void>;
@@ -551,6 +584,7 @@ function AgentCard({
             bindings={bindings}
             onMCPAction={onMCPAction}
             onExecutorAction={onExecutorAction}
+            onWorkBuddyAuthorize={onWorkBuddyAuthorize}
             onBindingAction={onBindingAction}
             onExternalConfigurationStarted={onExternalConfigurationStarted}
             t={t}
@@ -592,13 +626,21 @@ function CollapsedDetectionSummary({
     const { installed, ready } = runtime;
     items.push({
       id: "executor-installed",
-      label: t(installed ? "agentIntegration.compactCLIInstalled" : "agentIntegration.compactCLIMissing"),
+      label: agent.id === "workbuddy"
+        ? t("agentIntegration.workbuddyOfficialAPI")
+        : t(installed ? "agentIntegration.compactCLIInstalled" : "agentIntegration.compactCLIMissing"),
       ready: installed,
     });
     if (installed) {
       items.push({
         id: "executor-login",
-        label: t(ready ? "agentIntegration.compactCLILoggedIn" : "agentIntegration.compactCLINotLoggedIn"),
+        label: agent.id === "workbuddy"
+          ? t(ready
+            ? "agentIntegration.workbuddyAuthorized"
+            : executorAuthenticationRequired(executorPolicy?.unavailable_reason)
+              ? "agentIntegration.workbuddyAuthorizationRequired"
+              : "agentIntegration.workbuddyUnavailable")
+          : t(ready ? "agentIntegration.compactCLILoggedIn" : "agentIntegration.compactCLINotLoggedIn"),
         ready,
       });
     }
@@ -710,6 +752,7 @@ function AgentConfigurationFlow({
   bindings,
   onMCPAction,
   onExecutorAction,
+  onWorkBuddyAuthorize,
   onBindingAction,
   onExternalConfigurationStarted,
   t,
@@ -722,6 +765,7 @@ function AgentConfigurationFlow({
   bindings: BindingMap;
   onMCPAction: (agent: DesktopAgent, action: DesktopAgentIntegrationAction) => Promise<void>;
   onExecutorAction: (provider: DesktopExecutorProvider, action: DesktopExecutorPolicyAction) => Promise<void>;
+  onWorkBuddyAuthorize: () => Promise<void>;
   onBindingAction: (target: DesktopAgentBindingTarget, clear: boolean) => Promise<void>;
   onExternalConfigurationStarted: (agent: DesktopAgent) => void;
   t: TFunction;
@@ -835,18 +879,31 @@ function AgentConfigurationFlow({
         </Button>
       )}
       {executorNeedsLogin && (
-        <Button
-          size="small"
-          type="primary"
-          icon={<LoginOutlined />}
-          loading={busyAction === `${agent.id}:login`}
-          disabled={busyAction !== ""}
-          onClick={() => void onMCPAction(agent.id, "login")}
-        >
-          {t(agent.executorLoginMode === "interactive"
-            ? "agentIntegration.openLoginTerminal"
-            : "agentIntegration.login")}
-        </Button>
+        agent.executorLoginMode === "oauth" ? (
+          <Button
+            size="small"
+            type="primary"
+            icon={<LoginOutlined />}
+            loading={busyAction === "executor:workbuddy:authorize"}
+            disabled={busyAction !== ""}
+            onClick={() => void onWorkBuddyAuthorize()}
+          >
+            {t("agentIntegration.authorizeWorkBuddy")}
+          </Button>
+        ) : (
+          <Button
+            size="small"
+            type="primary"
+            icon={<LoginOutlined />}
+            loading={busyAction === `${agent.id}:login`}
+            disabled={busyAction !== ""}
+            onClick={() => void onMCPAction(agent.id, "login")}
+          >
+            {t(agent.executorLoginMode === "interactive"
+              ? "agentIntegration.openLoginTerminal"
+              : "agentIntegration.login")}
+          </Button>
+        )
       )}
       {bindingActions(agent.executorBindingTarget, !executorInstalled, executorBindingConfigured)}
     </Space>
@@ -914,20 +971,28 @@ function AgentConfigurationFlow({
               },
               {
                 id: "installed",
-                label: executorInstalled
-                  ? t("agentIntegration.executorInstalled", { agent: agent.executorName })
-                  : t("agentIntegration.executorMissing", { agent: agent.executorName }),
+                label: agent.id === "workbuddy"
+                  ? t("agentIntegration.workbuddyOfficialAPI")
+                  : executorInstalled
+                    ? t("agentIntegration.executorInstalled", { agent: agent.executorName })
+                    : t("agentIntegration.executorMissing", { agent: agent.executorName }),
                 ready: executorInstalled,
               },
               {
                 id: "login",
-                label: !executorInstalled
-                  ? t("agentIntegration.executorWaitingForInstall", { agent: agent.executorName })
-                  : executorReady
-                    ? t("agentIntegration.executorAccountReady", { agent: agent.executorName })
+                label: agent.id === "workbuddy"
+                  ? t(executorReady
+                    ? "agentIntegration.workbuddyAuthorized"
                     : executorAuthenticationRequired(executorPolicy?.unavailable_reason)
-                      ? t("agentIntegration.executorLoginRequired", { agent: agent.executorName })
-                      : t("agentIntegration.executorStatusCheckFailed"),
+                      ? "agentIntegration.workbuddyAuthorizationRequired"
+                      : "agentIntegration.workbuddyUnavailable")
+                  : !executorInstalled
+                    ? t("agentIntegration.executorWaitingForInstall", { agent: agent.executorName })
+                    : executorReady
+                      ? t("agentIntegration.executorAccountReady", { agent: agent.executorName })
+                      : executorAuthenticationRequired(executorPolicy?.unavailable_reason)
+                        ? t("agentIntegration.executorLoginRequired", { agent: agent.executorName })
+                        : t("agentIntegration.executorStatusCheckFailed"),
                 ready: executorReady,
               },
             ]}
@@ -1141,5 +1206,6 @@ function mcpCapabilityStatus(state: DesktopAgentIntegrationStatus["state"], t: T
 function executorAuthenticationRequired(reason = "") {
   const normalized = reason.toLowerCase();
   return normalized.includes("not signed in") || normalized.includes("not logged in") ||
-    normalized.includes("login required") || normalized.includes("authentication required");
+    normalized.includes("login required") || normalized.includes("authentication required") ||
+    normalized.includes("authorization required");
 }

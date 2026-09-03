@@ -17,10 +17,11 @@ var ErrInvalid = errors.New("external Agent lease is invalid or expired")
 type Operation string
 
 const (
-	OperationCapabilityRead  Operation = "capability.read"
-	OperationInvocationWrite Operation = "invocation.write"
-	OperationWorkflowRead    Operation = "workflow.read"
-	OperationWorkflowWrite   Operation = "workflow.write"
+	OperationCapabilityRead      Operation = "capability.read"
+	OperationInvocationWrite     Operation = "invocation.write"
+	OperationWorkflowRead        Operation = "workflow.read"
+	OperationWorkflowWrite       Operation = "workflow.write"
+	OperationExternalAgentInvoke Operation = "external-agent.invoke"
 )
 
 // Request is the complete capability presented by an External Chat Agent.
@@ -73,7 +74,8 @@ func secureEqual(left, right string) bool {
 
 func allowedOperation(operation Operation) bool {
 	switch operation {
-	case OperationCapabilityRead, OperationInvocationWrite, OperationWorkflowRead, OperationWorkflowWrite:
+	case OperationCapabilityRead, OperationInvocationWrite, OperationWorkflowRead, OperationWorkflowWrite,
+		OperationExternalAgentInvoke:
 		return true
 	default:
 		return false

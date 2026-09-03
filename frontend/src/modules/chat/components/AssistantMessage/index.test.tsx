@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   ChatConversationsResponseFinishReasonEnum,
 } from "@/api/generated/chatbot-client";
-import AssistantMessage from "./index";
+import AssistantMessage, { externalProviderDisplayName } from "./index";
 
 vi.mock("react-i18next", () => ({
   initReactI18next: {
@@ -61,5 +61,11 @@ describe("AssistantMessage cancellation", () => {
     fireEvent.click(retryButton);
 
     expect(regenerate).toHaveBeenCalledOnce();
+  });
+});
+
+describe("externalProviderDisplayName", () => {
+  it("presents the provider ID as WorkBuddy", () => {
+    expect(externalProviderDisplayName("workbuddy")).toBe("WorkBuddy");
   });
 });

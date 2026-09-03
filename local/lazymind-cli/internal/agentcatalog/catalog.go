@@ -256,7 +256,7 @@ func WorkBuddySessions(ctx context.Context) ([]chatagent.NativeSession, error) {
 	if err != nil {
 		return nil, err
 	}
-	root := filepath.Join(home, ".codebuddy", "projects")
+	root := filepath.Join(home, ".workbuddy", "projects")
 	byThread := map[string]chatagent.NativeSession{}
 	err = filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil || entry.IsDir() || !strings.HasSuffix(entry.Name(), ".jsonl") {

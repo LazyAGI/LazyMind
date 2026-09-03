@@ -201,7 +201,7 @@ func TestWorkBuddySessionsUseNativeCWD(t *testing.T) {
 	home := t.TempDir()
 	setTestUserHome(t, home)
 	t.Setenv("LAZYMIND_HOME", filepath.Join(home, ".lazymind"))
-	directory := filepath.Join(home, ".codebuddy", "projects", "project")
+	directory := filepath.Join(home, ".workbuddy", "projects", "project")
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -227,7 +227,7 @@ func TestWorkBuddySessionsUseNativeCWD(t *testing.T) {
 func TestWorkBuddySessionsImportOnlyRealLazyMindTranscriptTurns(t *testing.T) {
 	home := t.TempDir()
 	setTestUserHome(t, home)
-	directory := filepath.Join(home, ".codebuddy", "projects", "project")
+	directory := filepath.Join(home, ".workbuddy", "projects", "project")
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		t.Fatal(err)
 	}

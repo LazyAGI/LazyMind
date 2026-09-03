@@ -34,7 +34,7 @@ var chatExecutorDefinitions = []chatExecutorDefinition{
 	{ID: ChatExecutorLazyMind, DisplayName: "LazyMind", Kind: "internal"},
 	{ID: ChatExecutorCodex, DisplayName: "Codex CLI", Kind: "external"},
 	{ID: ChatExecutorCursor, DisplayName: "Cursor Agent CLI", Kind: "external"},
-	{ID: ChatExecutorWorkBuddy, DisplayName: "CodeBuddy Code", Kind: "external"},
+	{ID: ChatExecutorWorkBuddy, DisplayName: "WorkBuddy", Kind: "external"},
 }
 
 type externalChatJob struct {
@@ -386,7 +386,7 @@ func streamExternalChat(
 	record := orm.ExternalChatRun{
 		ID: runID, RequestID: requestKey, ConversationID: conversationID, HistoryID: historyID,
 		Provider: provider, HostID: hostID, ProviderThreadID: threadID, ActorUserID: owner, Action: action,
-		Prompt: externalAgentPrompt(reqBody, query, !resume), Query: query,
+		Prompt: externalAgentPrompt(reqBody, query, externalAgentIncludesHistory(provider, resume)), Query: query,
 		Sequence: sequence, HistoryExt: historyExt,
 	}
 	app := newExternalChatApplication(db)
@@ -403,6 +403,10 @@ func streamExternalChat(
 		runID = existing.ID
 	}
 	return streamExistingExternalChat(ctx, db, owner, runID, runID), "external:" + provider, nil
+}
+
+func externalAgentIncludesHistory(provider string, resume bool) bool {
+	return !resume || provider == ChatExecutorWorkBuddy
 }
 
 func externalConversationThread(

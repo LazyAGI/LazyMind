@@ -106,7 +106,7 @@ func ResolveInvocation(provider, toolName string, now time.Time) (InvocationSour
 	if err != nil {
 		return InvocationSource{}, false
 	}
-	root := filepath.Join(home, ".codebuddy", "projects")
+	root := filepath.Join(home, ".workbuddy", "projects")
 	cursorByID := map[string]cursorChat{}
 	if provider == "cursor" {
 		root = filepath.Join(home, ".cursor", "projects")
@@ -257,7 +257,7 @@ func findNativeSessionPath(ctx context.Context, provider, threadID string) (stri
 	if err != nil {
 		return "", err
 	}
-	root := filepath.Join(home, ".codebuddy", "projects")
+	root := filepath.Join(home, ".workbuddy", "projects")
 	if provider == "cursor" {
 		root = filepath.Join(home, ".cursor", "projects")
 	} else if provider != "workbuddy" {
