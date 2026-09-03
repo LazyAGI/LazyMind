@@ -358,6 +358,23 @@ def _imap_date(value: str, *, before: bool = False) -> str:
     return dt.strftime('%d-%b-%Y')
 
 
+def _imap_uid(message_id: str) -> str:
+    uid = str(message_id or '').strip()
+    if not uid.isdigit():
+        _fail('The requested email was not found.')
+    return uid
+
+
+def _imap_payload(fetched: Any) -> bytes | None:
+    if not fetched:
+        return None
+    for item in fetched:
+        if isinstance(item, tuple) and len(item) >= 2 and item[1] is not None:
+            raw = item[1]
+            return raw if isinstance(raw, (bytes, bytearray)) else bytes(raw)
+    return None
+
+
 def _resolve_imap_endpoint(provider: str, email: str) -> dict[str, Any]:
     spec = _IMAP_ENDPOINTS.get((provider or '').strip().lower()) or {}
     domain = (email or '').rsplit('@', 1)[-1].lower()
@@ -425,16 +442,16 @@ class _IMAPBackend:
                 criteria.extend(['SINCE', since])
             if before:
                 criteria.extend(['BEFORE', before])
-            status, data = client.search(None, *criteria)
+            status, data = client.uid('SEARCH', *criteria)
             if status != 'OK':
                 return {'provider': self.provider, 'mailbox': self.email, 'items': []}
             ids = (data[0] or b'').split()[-20:]
             items = []
             for uid in reversed(ids):
-                status, fetched = client.fetch(uid, '(RFC822.HEADER)')
-                if status != 'OK' or not fetched or not fetched[0]:
+                status, fetched = client.uid('FETCH', uid, '(RFC822.HEADER)')
+                raw = _imap_payload(fetched)
+                if status != 'OK' or raw is None:
                     continue
-                raw = fetched[0][1]
                 msg = email.message_from_bytes(raw)
                 items.append({
                     'id': uid.decode('ascii'),
@@ -453,13 +470,15 @@ class _IMAPBackend:
                 pass
 
     def _fetch_message(self, message_id: str) -> email.message.Message:
+        uid = _imap_uid(message_id)
         client = self._connect()
         try:
             client.select('INBOX', readonly=True)
-            status, fetched = client.fetch(str(message_id).encode('ascii'), '(RFC822)')
-            if status != 'OK' or not fetched or not fetched[0]:
+            status, fetched = client.uid('FETCH', uid, '(RFC822)')
+            raw = _imap_payload(fetched)
+            if status != 'OK' or raw is None:
                 _fail('The requested email was not found.')
-            return email.message_from_bytes(fetched[0][1])
+            return email.message_from_bytes(raw)
         finally:
             try:
                 client.logout()
@@ -508,16 +527,18 @@ class _IMAPBackend:
         client = self._connect()
         try:
             client.select('INBOX', readonly=True)
-            status, data = client.search(None, 'ALL')
+            status, data = client.uid('SEARCH', 'ALL')
             ids = (data[0] or b'').split() if status == 'OK' else []
             matched: list[str] = []
             for uid in reversed(ids[-40:]):
-                status, fetched = client.fetch(
-                    uid, '(BODY.PEEK[HEADER.FIELDS (MESSAGE-ID IN-REPLY-TO REFERENCES)])',
+                status, fetched = client.uid(
+                    'FETCH',
+                    uid,
+                    '(BODY.PEEK[HEADER.FIELDS (MESSAGE-ID IN-REPLY-TO REFERENCES)])',
                 )
-                if status != 'OK' or not fetched or not fetched[0]:
+                raw = _imap_payload(fetched)
+                if status != 'OK' or raw is None:
                     continue
-                raw = fetched[0][1]
                 headers = email.message_from_bytes(raw)
                 blob = ' '.join([
                     _decode_header_value(headers.get('Message-ID')),
@@ -743,7 +764,7 @@ class MailToolkit:
         """Read one email, including headers, body, and attachment metadata.
 
         Args:
-            message_id: Provider message id returned by search.
+            message_id: IMAP UID returned by search. Sequence numbers are not stable.
             mailbox: Optional email or provider. Required when the same id could exist in more than one mailbox.
         """
         if not str(message_id or '').strip():

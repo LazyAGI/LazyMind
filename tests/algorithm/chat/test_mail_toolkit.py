@@ -9,6 +9,7 @@ from lazyllm.tools.agent import ToolExecutionError
 from lazymind.chat.engine.tools.local_file.workspace import chat_agent_workspace
 from lazymind.chat.engine.tools.mail import (
     MailToolkit,
+    _IMAPBackend,
     _imap_date,
     _load_draft,
     _resolve_imap_endpoint,
@@ -298,3 +299,42 @@ def test_imap_before_date_is_inclusive():
     assert _imap_date('2026-09-02') == '02-Sep-2026'
     assert _imap_date('2026-09-02', before=True) == '03-Sep-2026'
     assert _imap_date('2026-12-31', before=True) == '01-Jan-2027'
+
+
+class _RecordingIMAP:
+    def __init__(self):
+        self.calls: list[tuple[str, tuple]] = []
+
+    def select(self, *args, **kwargs):
+        return 'OK', []
+
+    def uid(self, command, *args):
+        self.calls.append((str(command).upper(), args))
+        if str(command).upper() == 'SEARCH':
+            return 'OK', [b'101 102']
+        header = (
+            b'From: a@b.com\r\nTo: c@d.com\r\nSubject: hi\r\n'
+            b'Date: Wed, 2 Sep 2026\r\nMessage-ID: <x@y>\r\n\r\nbody'
+        )
+        return 'OK', [(b'1 (UID 102 RFC822 {n}', header), b')']
+
+    def search(self, *args, **kwargs):
+        raise AssertionError('IMAP sequence SEARCH must not be used')
+
+    def fetch(self, *args, **kwargs):
+        raise AssertionError('IMAP sequence FETCH must not be used')
+
+    def logout(self):
+        return 'OK', []
+
+
+def test_imap_search_and_read_use_uid(mail_auth):
+    imap = _RecordingIMAP()
+    with patch.object(_IMAPBackend, '_connect', return_value=imap):
+        result = MailToolkit().search(keyword='hi', mailbox='user@qq.com')
+        assert result['items'][0]['id'] == '102'
+        MailToolkit().read('102', mailbox='user@qq.com')
+        MailToolkit().read_thread('<x@y>', mailbox='user@qq.com')
+    commands = [command for command, _args in imap.calls]
+    assert commands.count('SEARCH') >= 2
+    assert commands.count('FETCH') >= 2
