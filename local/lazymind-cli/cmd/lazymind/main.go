@@ -256,17 +256,7 @@ func runInternalExecutor(ctx context.Context, args []string, stdout io.Writer) e
 		if bridgeErr != nil {
 			return bridgeErr
 		}
-		api, apiErr := coreapi.New(store)
-		if apiErr != nil {
-			return apiErr
-		}
-		statuses, err := assistantbridge.ExecutorStatusesWithBridge(ctx, policy, bridge, func(ctx context.Context) (bool, bool, string) {
-			status, probeErr := workbuddy.Probe(ctx, api)
-			if probeErr != nil {
-				return true, false, probeErr.Error()
-			}
-			return status.Installed, status.Ready, status.UnavailableReason
-		})
+		statuses, err := assistantbridge.ExecutorStatusesWithBridge(ctx, policy, bridge)
 		if err != nil {
 			return err
 		}
@@ -506,14 +496,14 @@ func hostProviders(value string) ([]string, error) {
 	}
 }
 
-func newAgentRunner(provider, binary string, api *coreapi.Client) (chatagent.Runner, error) {
+func newAgentRunner(provider, binary string) (chatagent.Runner, error) {
 	switch provider {
 	case "codex":
 		return codex.NewChatRunner(binary)
 	case "cursor":
 		return cursor.NewChatRunner(binary)
 	case "workbuddy":
-		return workbuddy.NewChatRunner(api)
+		return workbuddy.NewChatRunner(binary)
 	default:
 		return nil, fmt.Errorf("unsupported external Agent provider %q", provider)
 	}
@@ -537,7 +527,7 @@ func runAgentHosts(ctx context.Context, api *coreapi.Client, policy *executorpol
 func runAgentProvider(ctx context.Context, api *coreapi.Client, policy *executorpolicy.Store, provider, binary string, stderr io.Writer) error {
 	lastDiscoveryError := ""
 	for ctx.Err() == nil {
-		runner, discoveryErr := newAgentRunner(provider, binary, api)
+		runner, discoveryErr := newAgentRunner(provider, binary)
 		if discoveryErr != nil {
 			if message := discoveryErr.Error(); message != lastDiscoveryError {
 				_, _ = fmt.Fprintf(stderr, "LazyMind %s Agent unavailable: %v\n", provider, discoveryErr)
@@ -614,7 +604,8 @@ Usage:
 
 LazyMind Desktop and the Docker Assistant Bridge both expose one-click managed
 connections in Settings -> Assistants. The bridge hosts installed Codex and
-Cursor CLIs, and invokes WorkBuddy through its official Open API. Raccoon, TRAE Work, and DeepSeek Harness
+Cursor CLIs, and automatically reuses the runtime and sign-in bundled with WorkBuddy.
+Raccoon, TRAE Work, and DeepSeek Harness
 remain MCP clients rather than Chat executors.
 Internal Adapter commands are not a public CLI.
 `)

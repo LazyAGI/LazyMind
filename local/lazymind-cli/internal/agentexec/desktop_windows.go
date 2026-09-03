@@ -16,17 +16,36 @@ type windowsInstalledApplication struct {
 }
 
 func platformDesktopInstalled(spec DesktopApplication, _ bool) bool {
+	return platformDesktopApplication(spec) != "" || hasInstalledApplication(spec.DisplayNames)
+}
+
+func platformDesktopApplication(spec DesktopApplication) string {
 	for _, name := range spec.ExecutableNames {
-		if appPath(name) != "" {
-			return true
+		if executable := appPath(name); executable != "" {
+			return executable
 		}
 	}
 	for _, protocol := range spec.Protocols {
-		if registeredProtocolExecutable(protocol) != "" {
-			return true
+		if executable := registeredProtocolExecutable(protocol); executable != "" {
+			return executable
 		}
 	}
-	return hasInstalledApplication(spec.DisplayNames)
+	for _, application := range windowsInstalledApplications() {
+		if !matchesInstalledDisplayName(application.displayName, normalizedDisplayNames(spec.DisplayNames)) {
+			continue
+		}
+		if fileExists(application.location) {
+			return filepath.Clean(application.location)
+		}
+		if directoryExists(application.location) {
+			for _, name := range spec.ExecutableNames {
+				if executable := firstExecutablePath(filepath.Join(application.location, name), windowsPathExtensions()); executable != "" {
+					return executable
+				}
+			}
+		}
+	}
+	return ""
 }
 
 func registeredProtocolExecutable(protocol string) string {
@@ -49,12 +68,7 @@ func hasInstalledApplication(displayNames []string) bool {
 	if len(displayNames) == 0 {
 		return false
 	}
-	wanted := make([]string, 0, len(displayNames))
-	for _, name := range displayNames {
-		if name = strings.ToLower(strings.TrimSpace(name)); name != "" {
-			wanted = append(wanted, name)
-		}
-	}
+	wanted := normalizedDisplayNames(displayNames)
 	for _, application := range windowsInstalledApplications() {
 		if !matchesInstalledDisplayName(application.displayName, wanted) {
 			continue
@@ -64,6 +78,16 @@ func hasInstalledApplication(displayNames []string) bool {
 		}
 	}
 	return false
+}
+
+func normalizedDisplayNames(displayNames []string) []string {
+	wanted := make([]string, 0, len(displayNames))
+	for _, name := range displayNames {
+		if name = strings.ToLower(strings.TrimSpace(name)); name != "" {
+			wanted = append(wanted, name)
+		}
+	}
+	return wanted
 }
 
 func windowsInstalledApplications() []windowsInstalledApplication {

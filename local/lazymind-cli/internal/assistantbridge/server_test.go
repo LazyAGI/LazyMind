@@ -293,7 +293,7 @@ exit 1
 	t.Setenv("LAZYMIND_CURSOR_AGENT_BIN", binary)
 	server := newTestServer(t, filepath.Join(home, "lazymind"))
 
-	statuses, err := ExecutorStatuses(context.Background(), server.policy, server.workBuddyProbe)
+	statuses, err := ExecutorStatuses(server.policy)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -319,7 +319,6 @@ func TestExecutorStatusesExposeAssistantBridgeState(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			statuses, err := ExecutorStatusesWithBridge(
 				context.Background(), server.policy, stubBridgeProber{err: test.err},
-				func(context.Context) (bool, bool, string) { return true, true, "" },
 			)
 			if err != nil {
 				t.Fatal(err)

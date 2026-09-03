@@ -18,7 +18,7 @@ from services.cloud_oauth_provider import (
     CloudProviderError,
     CloudTokenPayload,
 )
-from services.providers import FeishuOAuthProvider, GoogleDriveOAuthProvider, NotionOAuthProvider, WorkBuddyOAuthProvider
+from services.providers import FeishuOAuthProvider, GoogleDriveOAuthProvider, NotionOAuthProvider
 
 
 _AUTH_MODES = {'tenant', 'oauth_user', 'service_account'}
@@ -100,12 +100,10 @@ class CloudOAuthService:
         feishu = FeishuOAuthProvider()
         google_drive = GoogleDriveOAuthProvider()
         notion = NotionOAuthProvider()
-        workbuddy = WorkBuddyOAuthProvider()
         self._providers: dict[str, CloudOAuthProvider] = {
             feishu.provider_name(): feishu,
             google_drive.provider_name(): google_drive,
             notion.provider_name(): notion,
-            workbuddy.provider_name(): workbuddy,
         }
         self._cache_lock = threading.Lock()
         self._token_cache: dict[str, _TokenCacheItem] = {}
@@ -786,22 +784,14 @@ class CloudOAuthService:
             if provider_options is None:
                 provider_options = target_provider_options
         else:
-            configured_credentials = getattr(provider_impl, 'configured_app_credentials', None)
-            configured_client_id, configured_client_secret = (
-                configured_credentials() if callable(configured_credentials) else ('', '')
+            saved_client_id, saved_client_secret, saved_provider_options = self._get_saved_app_credentials(
+                provider=provider_impl.provider_name(),
+                owner_user_id=normalized_owner,
             )
-            if configured_client_id and configured_client_secret:
-                normalized_client_id = configured_client_id
-                normalized_client_secret = configured_client_secret
-            else:
-                saved_client_id, saved_client_secret, saved_provider_options = self._get_saved_app_credentials(
-                    provider=provider_impl.provider_name(),
-                    owner_user_id=normalized_owner,
-                )
-                normalized_client_id = saved_client_id
-                normalized_client_secret = saved_client_secret
-                if provider_options is None:
-                    provider_options = saved_provider_options
+            normalized_client_id = saved_client_id
+            normalized_client_secret = saved_client_secret
+            if provider_options is None:
+                provider_options = saved_provider_options
         redirect_uri = (redirect_uri or '').strip()
         if not redirect_uri:
             raise_error(ErrorCodes.CLOUD_REDIRECT_URI_REQUIRED_FOR_OAUTH_USER)
@@ -1027,7 +1017,7 @@ class CloudOAuthService:
                 raise_error(ErrorCodes.CLOUD_TOKEN_UNAVAILABLE, extra_msg=_truncate_error(exc))
             if not token.access_token:
                 raise_error(ErrorCodes.CLOUD_PROVIDER_ACCESS_TOKEN_EMPTY)
-            if provider_impl.provider_name() in {'feishu', 'workbuddy'} and not token.refresh_token:
+            if provider_impl.provider_name() == 'feishu' and not token.refresh_token:
                 row.status = 'ERROR'
                 row.last_error = 'provider returned empty refresh_token'
                 CloudAuthConnectionRepository.save(db, row)

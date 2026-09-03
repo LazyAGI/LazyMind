@@ -386,7 +386,7 @@ func streamExternalChat(
 	record := orm.ExternalChatRun{
 		ID: runID, RequestID: requestKey, ConversationID: conversationID, HistoryID: historyID,
 		Provider: provider, HostID: hostID, ProviderThreadID: threadID, ActorUserID: owner, Action: action,
-		Prompt: externalAgentPrompt(reqBody, query, externalAgentIncludesHistory(provider, resume)), Query: query,
+		Prompt: externalAgentPrompt(reqBody, query, !resume), Query: query,
 		Sequence: sequence, HistoryExt: historyExt,
 	}
 	app := newExternalChatApplication(db)
@@ -403,10 +403,6 @@ func streamExternalChat(
 		runID = existing.ID
 	}
 	return streamExistingExternalChat(ctx, db, owner, runID, runID), "external:" + provider, nil
-}
-
-func externalAgentIncludesHistory(provider string, resume bool) bool {
-	return !resume || provider == ChatExecutorWorkBuddy
 }
 
 func externalConversationThread(

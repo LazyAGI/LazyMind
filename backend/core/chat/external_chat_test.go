@@ -894,15 +894,6 @@ func TestExternalAgentPromptCarriesOnlySafeLazyMindContext(t *testing.T) {
 	}
 }
 
-func TestWorkBuddyAlwaysReceivesLazyMindConversationHistory(t *testing.T) {
-	if !externalAgentIncludesHistory(ChatExecutorWorkBuddy, true) {
-		t.Fatal("WorkBuddy has no isolated provider session, so resumed turns must include LazyMind history")
-	}
-	if externalAgentIncludesHistory(ChatExecutorCodex, true) {
-		t.Fatal("native resumable providers must not receive duplicate history")
-	}
-}
-
 func TestExternalConversationKnowledgeBaseIDsRespectsExplicitEmptyScope(t *testing.T) {
 	ids := externalConversationKnowledgeBaseIDs(
 		context.Background(),

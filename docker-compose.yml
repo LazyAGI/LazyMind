@@ -57,7 +57,6 @@ x-core-env: &core-env
   LAZYMIND_FILE_URL_SIGN_SECRET: changeme-in-production
   LAZYMIND_FILE_URL_EXPIRE_SECONDS: "3600"
   LAZYMIND_OFFICE_CONVERT_URL: http://office-convert-service:8080/v1/office/to-pdf
-  LAZYMIND_WORKBUDDY_OPENAPI_URL: ${LAZYMIND_WORKBUDDY_OPENAPI_URL:-https://www.workbuddy.cn/openapi/v2}
 
 x-llm-api-keys: &llm-api-keys
   LAZYLLM_OPENAI_API_KEY: ${LAZYLLM_OPENAI_API_KEY:-}
@@ -305,9 +304,6 @@ services:
       LAZYMIND_BOOTSTRAP_ADMIN_PASSWORD: ${LAZYMIND_BOOTSTRAP_ADMIN_PASSWORD:-admin}
       LAZYMIND_MODEL_CONFIG_PATH: ${LAZYMIND_MODEL_CONFIG_PATH:-dynamic}
       LAZYMIND_CHAT_UNLIKE_SWITCH: ${LAZYMIND_CHAT_UNLIKE_SWITCH:-true}
-      LAZYMIND_WORKBUDDY_OPENAPI_URL: ${LAZYMIND_WORKBUDDY_OPENAPI_URL:-https://www.workbuddy.cn/openapi/v2}
-      LAZYMIND_WORKBUDDY_OAUTH_CLIENT_ID: ${LAZYMIND_WORKBUDDY_OAUTH_CLIENT_ID:-}
-      LAZYMIND_WORKBUDDY_OAUTH_CLIENT_SECRET: ${LAZYMIND_WORKBUDDY_OAUTH_CLIENT_SECRET:-}
     healthcheck:
       test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/api/authservice/auth/health')\" || exit 1"]
       interval: 10s

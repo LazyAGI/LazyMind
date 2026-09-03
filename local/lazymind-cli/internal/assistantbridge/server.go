@@ -22,7 +22,6 @@ import (
 	workbuddyadapter "lazymind/agentconnector/internal/adapters/workbuddy"
 	"lazymind/agentconnector/internal/agentexec"
 	"lazymind/agentconnector/internal/agentintegration"
-	"lazymind/agentconnector/internal/coreapi"
 	"lazymind/agentconnector/internal/credentials"
 	"lazymind/agentconnector/internal/executorpolicy"
 	"lazymind/agentconnector/internal/mcpbridge"
@@ -36,17 +35,16 @@ const (
 )
 
 type Server struct {
-	address        string
-	bridge         *mcpbridge.Bridge
-	executorProbe  bridgeProber
-	workBuddyProbe workBuddyProbeFunc
-	store          *credentials.Store
-	policy         *executorpolicy.Store
-	mu             sync.Mutex
-	stop           context.CancelFunc
-	loginMu        sync.Mutex
-	logins         map[string]agentLogin
-	loginID        uint64
+	address       string
+	bridge        *mcpbridge.Bridge
+	executorProbe bridgeProber
+	store         *credentials.Store
+	policy        *executorpolicy.Store
+	mu            sync.Mutex
+	stop          context.CancelFunc
+	loginMu       sync.Mutex
+	logins        map[string]agentLogin
+	loginID       uint64
 
 	loginOverride func(context.Context, string) error
 }
@@ -59,10 +57,6 @@ type agentLogin struct {
 func New(address string, bridge *mcpbridge.Bridge, store *credentials.Store, policy *executorpolicy.Store) (*Server, error) {
 	if bridge == nil || store == nil || policy == nil {
 		return nil, errors.New("MCP bridge, credential store, and execution policy are required")
-	}
-	api, err := coreapi.New(store)
-	if err != nil {
-		return nil, err
 	}
 	address = strings.TrimSpace(address)
 	if address == "" {
@@ -78,13 +72,6 @@ func New(address string, bridge *mcpbridge.Bridge, store *credentials.Store, pol
 	}
 	return &Server{
 		address: address, bridge: bridge, executorProbe: bridge, store: store, policy: policy,
-		workBuddyProbe: func(ctx context.Context) (bool, bool, string) {
-			status, probeErr := workbuddyadapter.Probe(ctx, api)
-			if probeErr != nil {
-				return true, false, probeErr.Error()
-			}
-			return status.Installed, status.Ready, status.UnavailableReason
-		},
 		logins: make(map[string]agentLogin),
 	}, nil
 }
@@ -299,7 +286,7 @@ func (s *Server) handleExecutableBinding(writer http.ResponseWriter, request *ht
 
 func (s *Server) handleExecutorPolicies(writer http.ResponseWriter, request *http.Request) {
 	s.policy.Recheck()
-	statuses, err := ExecutorStatusesWithBridge(request.Context(), s.policy, s.executorProbe, s.workBuddyProbe)
+	statuses, err := ExecutorStatusesWithBridge(request.Context(), s.policy, s.executorProbe)
 	if err != nil {
 		writeError(writer, err)
 		return
@@ -311,15 +298,12 @@ type bridgeProber interface {
 	Probe(context.Context) (mcpbridge.ProbeResult, error)
 }
 
-type workBuddyProbeFunc func(context.Context) (bool, bool, string)
-
 func ExecutorStatusesWithBridge(
 	ctx context.Context,
 	policy *executorpolicy.Store,
 	bridge bridgeProber,
-	workBuddyProbe workBuddyProbeFunc,
 ) (map[string]executorpolicy.Status, error) {
-	statuses, err := ExecutorStatuses(ctx, policy, workBuddyProbe)
+	statuses, err := ExecutorStatuses(policy)
 	if err != nil {
 		return nil, err
 	}
@@ -339,26 +323,14 @@ func ExecutorStatusesWithBridge(
 	return statuses, nil
 }
 
-func ExecutorStatuses(
-	ctx context.Context,
-	policy *executorpolicy.Store,
-	workBuddyProbe workBuddyProbeFunc,
-) (map[string]executorpolicy.Status, error) {
+func ExecutorStatuses(policy *executorpolicy.Store) (map[string]executorpolicy.Status, error) {
 	statuses, err := policy.Statuses()
 	if err != nil {
 		return nil, err
 	}
 	probes := map[string]func(string) (bool, bool, string){
-		"codex": codex.Probe, "cursor": cursoradapter.Probe,
+		"codex": codex.Probe, "cursor": cursoradapter.Probe, "workbuddy": workbuddyadapter.Probe,
 	}
-	status := statuses["workbuddy"]
-	if workBuddyProbe == nil {
-		status.Installed = true
-		status.UnavailableReason = "WorkBuddy authorization required"
-	} else {
-		status.Installed, status.Ready, status.UnavailableReason = workBuddyProbe(ctx)
-	}
-	statuses["workbuddy"] = status
 	for provider, probe := range probes {
 		status := statuses[provider]
 		status.Installed, status.Ready, status.UnavailableReason = probe("")

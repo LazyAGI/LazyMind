@@ -14,7 +14,6 @@ const mocks = vi.hoisted(() => ({
   clearBinding: vi.fn(),
   selectExecutable: vi.fn(),
   platform: vi.fn(),
-  authorizeWorkBuddy: vi.fn(),
 }));
 
 vi.mock("@/runtime/desktopBridge", () => ({
@@ -31,10 +30,6 @@ vi.mock("@/runtime/desktopBridge", () => ({
 
 vi.mock("@/modules/chat/utils/request", () => ({
   ConversationSettingsApi: () => ({ listChatExecutors: mocks.executors }),
-}));
-
-vi.mock("./workbuddyOAuth", () => ({
-  startWorkBuddyAuthorization: mocks.authorizeWorkBuddy,
 }));
 
 vi.mock("react-i18next", () => ({
@@ -81,12 +76,12 @@ vi.mock("react-i18next", () => ({
         "agentIntegration.checkAgain": "重新检测",
         "agentIntegration.login": "登录",
         "agentIntegration.openLoginTerminal": "打开登录终端",
-        "agentIntegration.authorizeWorkBuddy": "前往 WorkBuddy 授权",
-        "agentIntegration.workbuddyOfficialAPI": "WorkBuddy 官方接口已就绪",
-        "agentIntegration.workbuddyAuthorized": "WorkBuddy 已授权且本地助理在线",
-        "agentIntegration.workbuddyAuthorizationRequired": "需要授权 WorkBuddy",
-        "agentIntegration.workbuddyUnavailable": "WorkBuddy 本地助理未在线",
-        "agentIntegration.workbuddyAuthorizationFailed": "WorkBuddy 授权失败",
+        "agentIntegration.openWorkBuddy": "打开 WorkBuddy 登录",
+        "agentIntegration.workbuddyRuntimeReady": "已自动识别 WorkBuddy 执行能力",
+        "agentIntegration.workbuddyRuntimeMissing": "未找到 WorkBuddy 执行能力",
+        "agentIntegration.workbuddySignInReused": "已自动复用 WorkBuddy 登录",
+        "agentIntegration.workbuddySignInRequired": "请打开 WorkBuddy 完成登录",
+        "agentIntegration.workbuddyRuntimeUnavailable": "WorkBuddy 当前不可用",
         "agentIntegration.interactiveLoginHint": `${agent} 不提供独立的自动登录命令；请输入 /login`,
         "agentIntegration.continueInAgent": `前往 ${agent} 完成`,
         "agentIntegration.executorDetectionReady": "本机 Agent 检测服务已就绪",
@@ -186,7 +181,6 @@ describe("AgentIntegrationPage", () => {
       },
     });
     mocks.bindings.mockResolvedValue({ ok: true, data: {} });
-    mocks.authorizeWorkBuddy.mockResolvedValue(undefined);
   });
 
   it("keeps Agent rows compact and allows multiple configuration flows to stay expanded", async () => {
@@ -313,7 +307,7 @@ describe("AgentIntegrationPage", () => {
     expect(within(codex).getByRole("alert")).toHaveTextContent("Codex runtime command is unavailable");
   });
 
-  it("keeps WorkBuddy unified and opens the official authorization flow", async () => {
+  it("keeps WorkBuddy unified and reuses the desktop installation without OAuth configuration", async () => {
     const workbuddyStatus = {
       agent: "workbuddy",
       display_name: "WorkBuddy",
@@ -327,13 +321,13 @@ describe("AgentIntegrationPage", () => {
     mocks.executors.mockResolvedValue({ data: { data: { executors: [{
       id: "workbuddy", display_name: "WorkBuddy", kind: "external",
       installed: true, host_online: true, available: false,
-      unavailable_reason: "WorkBuddy authorization required",
+      unavailable_reason: "WorkBuddy is not signed in; open WorkBuddy and complete sign-in",
     }] } } });
     mocks.executorPolicies.mockResolvedValue({
       ok: true,
       data: { workbuddy: {
         provider: "workbuddy", enabled: false, installed: true, ready: false,
-        unavailable_reason: "WorkBuddy authorization required",
+        unavailable_reason: "WorkBuddy is not signed in; open WorkBuddy and complete sign-in",
       } },
     });
     mocks.action.mockResolvedValue({ ok: true, data: workbuddyStatus });
@@ -344,8 +338,11 @@ describe("AgentIntegrationPage", () => {
     const workbuddy = expandAgent("workbuddy");
     expect(within(workbuddy).getByText("WorkBuddy")).toBeInTheDocument();
     expect(within(workbuddy).queryByText(/CodeBuddy/)).not.toBeInTheDocument();
-    fireEvent.click(within(workbuddy).getByRole("button", { name: /前往 WorkBuddy 授权/ }));
-    await waitFor(() => expect(mocks.authorizeWorkBuddy).toHaveBeenCalledOnce());
+    expect(within(workbuddy).queryByText(/OAuth|Client ID|Client Secret/)).not.toBeInTheDocument();
+    expect(within(workbuddy).getByText("已自动识别 WorkBuddy 执行能力")).toBeInTheDocument();
+    const login = within(workbuddy).getByRole("link", { name: /打开 WorkBuddy 登录/ });
+    expect(login).toHaveAttribute("href", "workbuddy://home");
+    fireEvent.click(login);
 
     mocks.executorPolicies.mockResolvedValue({
       ok: true,
@@ -355,8 +352,8 @@ describe("AgentIntegrationPage", () => {
       id: "workbuddy", display_name: "WorkBuddy", kind: "external",
       installed: true, host_online: true, available: true, unavailable_reason: "",
     }] } } });
-    await act(async () => window.dispatchEvent(new Event("focus")));
-    await waitFor(() => expect(within(workbuddy).getByText("WorkBuddy 已授权且本地助理在线")).toBeInTheDocument());
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: /reload刷新/ })));
+    await waitFor(() => expect(within(workbuddy).getByText("已自动复用 WorkBuddy 登录")).toBeInTheDocument());
   });
 
   it("retries a transient Assistant Bridge failure before showing an error", async () => {

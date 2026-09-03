@@ -64,11 +64,6 @@ class _Provider:
         )
 
 
-class _ConfiguredProvider(_Provider):
-    def configured_app_credentials(self) -> tuple[str, str]:
-        return 'configured-client', 'configured-secret'
-
-
 class CloudOAuthOwnerTest(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.NamedTemporaryFile(suffix='.db', delete=False)
@@ -127,25 +122,6 @@ class CloudOAuthOwnerTest(unittest.TestCase):
             state='state-1',
         )
         return callback['connection_id']
-
-    def test_authorize_url_uses_server_configured_app_credentials(self) -> None:
-        provider = _ConfiguredProvider()
-        self.service._providers = {'feishu': provider}
-
-        created = self.service.create_authorize_url(
-            provider='feishu',
-            tenant_id='',
-            owner_user_id='user-1',
-            auth_mode='oauth_user',
-            redirect_uri='https://example.test/callback',
-            state='configured-state',
-        )
-
-        self.assertEqual(provider.authorize_client_ids, ['configured-client'])
-        with cloud_oauth_module.SessionLocal() as db:
-            row = db.query(CloudAuthConnection).filter_by(connection_id=created['connection_id']).one()
-            credential = self.service._decrypt_payload(row.credential_ciphertext, field_name='credential')
-            self.assertEqual(credential['client_secret'], 'configured-secret')
 
     def _expire_access_token(self, connection_id: str) -> None:
         self.service._cache_delete(connection_id)

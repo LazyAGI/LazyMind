@@ -35,10 +35,6 @@ import {
   ConversationSettingsApi,
   type ChatExecutorDescriptor,
 } from "@/modules/chat/utils/request";
-import {
-  startWorkBuddyAuthorization,
-  WORKBUDDY_OAUTH_CHANNEL,
-} from "./workbuddyOAuth";
 import "./index.scss";
 
 interface AgentDefinition {
@@ -48,7 +44,8 @@ interface AgentDefinition {
   installURL: string;
   executorInstallURL?: string;
   executorName?: string;
-  executorLoginMode?: "automatic" | "interactive" | "oauth";
+  executorLoginMode?: "automatic" | "interactive";
+  executorLoginURL?: string;
   mcpBindingTarget?: DesktopAgentBindingTarget;
   executorBindingTarget?: DesktopAgentBindingTarget;
 }
@@ -70,7 +67,7 @@ const AGENTS: AgentDefinition[] = [
   {
     id: "workbuddy", name: "WorkBuddy", icon: "/assistant-icons/workbuddy.png",
     installURL: "https://www.workbuddy.cn",
-    executorName: "WorkBuddy", executorLoginMode: "oauth",
+    executorName: "WorkBuddy", executorLoginURL: "workbuddy://home",
     mcpBindingTarget: "workbuddy-desktop",
   },
   {
@@ -246,20 +243,6 @@ export default function AgentIntegrationPage() {
     }
   }, [executors, executorPolicies, pendingLoginAgent]);
 
-  useEffect(() => {
-    const handleWorkBuddyOAuth = (event: MessageEvent) => {
-      if (event.origin !== window.location.origin || event.data?.channel !== WORKBUDDY_OAUTH_CHANNEL) return;
-      if (event.data.status === "error") {
-        setError(event.data.message || t("agentIntegration.workbuddyAuthorizationFailed"));
-        return;
-      }
-      setPendingLoginAgent("workbuddy");
-      void refresh();
-    };
-    window.addEventListener("message", handleWorkBuddyOAuth);
-    return () => window.removeEventListener("message", handleWorkBuddyOAuth);
-  }, [refresh, t]);
-
   const runAction = async (agent: DesktopAgent, nextAction: DesktopAgentIntegrationAction) => {
     const key = `${agent}:${nextAction}`;
     setAction(key);
@@ -300,19 +283,6 @@ export default function AgentIntegrationPage() {
       ? "agentIntegration.executorEnableSuccess"
       : "agentIntegration.executorDisableSuccess", { agent: agentName }));
     await refresh();
-  };
-
-  const authorizeWorkBuddy = async () => {
-    setAction("executor:workbuddy:authorize");
-    try {
-      await startWorkBuddyAuthorization();
-      setPendingLoginAgent("workbuddy");
-      setError("");
-    } catch (authorizationError) {
-      setError(authorizationError instanceof Error ? authorizationError.message : String(authorizationError));
-    } finally {
-      setAction("");
-    }
   };
 
   const saveBinding = async (target: DesktopAgentBindingTarget, path?: string) => {
@@ -402,9 +372,11 @@ export default function AgentIntegrationPage() {
                     })}
                     onMCPAction={runAction}
                     onExecutorAction={runExecutorAction}
-                    onWorkBuddyAuthorize={authorizeWorkBuddy}
                     onBindingAction={runBindingAction}
-                    onExternalConfigurationStarted={setExternalConfigurationAgent}
+                    onExternalConfigurationStarted={(target) => {
+                      setExternalConfigurationAgent(target);
+                      if (target === "workbuddy") setPendingLoginAgent(target);
+                    }}
                     onRefresh={refresh}
                     t={t}
                   />
@@ -474,7 +446,6 @@ function AgentCard({
   onToggle,
   onMCPAction,
   onExecutorAction,
-  onWorkBuddyAuthorize,
   onBindingAction,
   onExternalConfigurationStarted,
   onRefresh,
@@ -490,7 +461,6 @@ function AgentCard({
   onToggle: () => void;
   onMCPAction: (agent: DesktopAgent, action: DesktopAgentIntegrationAction) => Promise<void>;
   onExecutorAction: (provider: DesktopExecutorProvider, action: DesktopExecutorPolicyAction) => Promise<void>;
-  onWorkBuddyAuthorize: () => Promise<void>;
   onBindingAction: (target: DesktopAgentBindingTarget, clear: boolean) => Promise<void>;
   onExternalConfigurationStarted: (agent: DesktopAgent) => void;
   onRefresh: () => Promise<void>;
@@ -584,7 +554,6 @@ function AgentCard({
             bindings={bindings}
             onMCPAction={onMCPAction}
             onExecutorAction={onExecutorAction}
-            onWorkBuddyAuthorize={onWorkBuddyAuthorize}
             onBindingAction={onBindingAction}
             onExternalConfigurationStarted={onExternalConfigurationStarted}
             t={t}
@@ -627,7 +596,7 @@ function CollapsedDetectionSummary({
     items.push({
       id: "executor-installed",
       label: agent.id === "workbuddy"
-        ? t("agentIntegration.workbuddyOfficialAPI")
+        ? t(installed ? "agentIntegration.workbuddyRuntimeReady" : "agentIntegration.workbuddyRuntimeMissing")
         : t(installed ? "agentIntegration.compactCLIInstalled" : "agentIntegration.compactCLIMissing"),
       ready: installed,
     });
@@ -636,10 +605,10 @@ function CollapsedDetectionSummary({
         id: "executor-login",
         label: agent.id === "workbuddy"
           ? t(ready
-            ? "agentIntegration.workbuddyAuthorized"
+            ? "agentIntegration.workbuddySignInReused"
             : executorAuthenticationRequired(executorPolicy?.unavailable_reason)
-              ? "agentIntegration.workbuddyAuthorizationRequired"
-              : "agentIntegration.workbuddyUnavailable")
+              ? "agentIntegration.workbuddySignInRequired"
+              : "agentIntegration.workbuddyRuntimeUnavailable")
           : t(ready ? "agentIntegration.compactCLILoggedIn" : "agentIntegration.compactCLINotLoggedIn"),
         ready,
       });
@@ -752,7 +721,6 @@ function AgentConfigurationFlow({
   bindings,
   onMCPAction,
   onExecutorAction,
-  onWorkBuddyAuthorize,
   onBindingAction,
   onExternalConfigurationStarted,
   t,
@@ -765,7 +733,6 @@ function AgentConfigurationFlow({
   bindings: BindingMap;
   onMCPAction: (agent: DesktopAgent, action: DesktopAgentIntegrationAction) => Promise<void>;
   onExecutorAction: (provider: DesktopExecutorProvider, action: DesktopExecutorPolicyAction) => Promise<void>;
-  onWorkBuddyAuthorize: () => Promise<void>;
   onBindingAction: (target: DesktopAgentBindingTarget, clear: boolean) => Promise<void>;
   onExternalConfigurationStarted: (agent: DesktopAgent) => void;
   t: TFunction;
@@ -790,7 +757,8 @@ function AgentConfigurationFlow({
     agent.executorBindingTarget && bindings[agent.executorBindingTarget],
   );
   const executorNeedsLogin = executorSupported && executorInstalled && !executorReady &&
-    Boolean(agent.executorLoginMode) && executorAuthenticationRequired(executorPolicy?.unavailable_reason);
+    Boolean(agent.executorLoginMode || agent.executorLoginURL) &&
+    executorAuthenticationRequired(executorPolicy?.unavailable_reason);
   const manualExecutableBinding = !getDesktopPlatform();
   const mcpClientName = t(`agentIntegration.mcpClients.${agent.id}`);
   const mcpGuideSteps = ["install", "connect", "verify"].map((step) =>
@@ -879,16 +847,15 @@ function AgentConfigurationFlow({
         </Button>
       )}
       {executorNeedsLogin && (
-        agent.executorLoginMode === "oauth" ? (
+        agent.executorLoginURL ? (
           <Button
             size="small"
             type="primary"
             icon={<LoginOutlined />}
-            loading={busyAction === "executor:workbuddy:authorize"}
-            disabled={busyAction !== ""}
-            onClick={() => void onWorkBuddyAuthorize()}
+            href={agent.executorLoginURL}
+            onClick={() => onExternalConfigurationStarted(agent.id)}
           >
-            {t("agentIntegration.authorizeWorkBuddy")}
+            {t("agentIntegration.openWorkBuddy")}
           </Button>
         ) : (
           <Button
@@ -972,7 +939,9 @@ function AgentConfigurationFlow({
               {
                 id: "installed",
                 label: agent.id === "workbuddy"
-                  ? t("agentIntegration.workbuddyOfficialAPI")
+                  ? t(executorInstalled
+                    ? "agentIntegration.workbuddyRuntimeReady"
+                    : "agentIntegration.workbuddyRuntimeMissing")
                   : executorInstalled
                     ? t("agentIntegration.executorInstalled", { agent: agent.executorName })
                     : t("agentIntegration.executorMissing", { agent: agent.executorName }),
@@ -982,10 +951,10 @@ function AgentConfigurationFlow({
                 id: "login",
                 label: agent.id === "workbuddy"
                   ? t(executorReady
-                    ? "agentIntegration.workbuddyAuthorized"
+                    ? "agentIntegration.workbuddySignInReused"
                     : executorAuthenticationRequired(executorPolicy?.unavailable_reason)
-                      ? "agentIntegration.workbuddyAuthorizationRequired"
-                      : "agentIntegration.workbuddyUnavailable")
+                      ? "agentIntegration.workbuddySignInRequired"
+                      : "agentIntegration.workbuddyRuntimeUnavailable")
                   : !executorInstalled
                     ? t("agentIntegration.executorWaitingForInstall", { agent: agent.executorName })
                     : executorReady
@@ -1206,6 +1175,5 @@ function mcpCapabilityStatus(state: DesktopAgentIntegrationStatus["state"], t: T
 function executorAuthenticationRequired(reason = "") {
   const normalized = reason.toLowerCase();
   return normalized.includes("not signed in") || normalized.includes("not logged in") ||
-    normalized.includes("login required") || normalized.includes("authentication required") ||
-    normalized.includes("authorization required");
+    normalized.includes("login required") || normalized.includes("authentication required");
 }

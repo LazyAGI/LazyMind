@@ -541,21 +541,10 @@ func init() {
 		"writer document write-back failed",
 		"render writer document failed",
 		"writer download conversion service unavailable",
-		"send workbuddy message", "poll workbuddy message", "download workbuddy attachment",
-		"workbuddy returned an empty message id", "workbuddy response timed out",
-		"workbuddy returned an invalid attachment", "workbuddy returned an unsafe attachment url",
-		"workbuddy attachment is empty or too large", "workbuddy response is too large",
-		"decode workbuddy response",
 	} {
 		registerAdditionalErrorAlias(source, "Upstream service error", http.StatusBadGateway, 2000110)
 	}
 	registerAdditionalErrorPattern("chat service returned status %d", "Upstream service error", http.StatusBadGateway, 2000110)
-	registerAdditionalErrorPattern("workbuddy http %d", "Upstream service error", http.StatusBadGateway, 2000110)
-	registerAdditionalErrorPattern("workbuddy error %d", "Upstream service error", http.StatusBadGateway, 2000110)
-	registerAdditionalErrorAlias("workbuddy authorization required", "unauthorized", http.StatusUnauthorized, 2000104)
-	registerAdditionalErrorAlias("invalid workbuddy execution request", "Invalid request", http.StatusBadRequest, 2000103)
-	registerAdditionalErrorAlias("workbuddy prompt is empty", "Invalid request", http.StatusBadRequest, 2000103)
-	registerAdditionalErrorAlias("workbuddy run not found", "Resource not found", http.StatusNotFound, 2000106)
 	registerAdditionalErrorAlias("record chat cancellation failed", "Upstream service error", http.StatusServiceUnavailable, 2000110)
 	registerAdditionalErrorPattern("migrate model provider credential %s", "Internal server error", http.StatusInternalServerError, 2000000)
 	registerAdditionalErrorPattern("load workflow head revision %s", "Internal server error", http.StatusInternalServerError, 2000000)
