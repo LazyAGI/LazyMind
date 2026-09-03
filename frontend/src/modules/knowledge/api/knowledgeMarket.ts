@@ -130,11 +130,22 @@ export async function listKnowledgeMarketTasks(
   jobType: string,
   options?: KnowledgeMarketRequestOptions,
 ): Promise<KnowledgeMarketTaskListOpenAPIResponse> {
+  const pageSize = 100;
   const response = await knowledgeMarketClient.apiCoreKnowledgeMarketTasksGet(
-    { page: 1, pageSize: 20, jobType },
+    { page: 1, pageSize, jobType },
     options,
   );
-  return unwrap(response.data);
+  const first = unwrap(response.data);
+  const items = [...(first.items || [])];
+  const pageCount = Math.ceil(first.total / pageSize);
+  for (let page = 2; page <= pageCount; page += 1) {
+    const next = await knowledgeMarketClient.apiCoreKnowledgeMarketTasksGet(
+      { page, pageSize, jobType },
+      options,
+    );
+    items.push(...(unwrap(next.data).items || []));
+  }
+  return { ...first, items };
 }
 
 export async function getKnowledgeMarketTask(

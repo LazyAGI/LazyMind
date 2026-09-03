@@ -65,6 +65,56 @@
   }
 }
 
+.knowledge-task-count .ant-badge-count {
+  min-width: 18px;
+  height: 18px;
+  line-height: 18px;
+  font-size: 12px;
+  box-shadow: none;
+}
+
+.ant-notification .knowledge-task-notification.ant-notification-notice {
+  width: 368px;
+  max-width: calc(100vw - 48px);
+  padding: 14px 16px;
+  margin-bottom: 0;
+  border-radius: 12px;
+  background: #35404a;
+  color: #fff;
+
+  .ant-notification-notice-message {
+    margin-bottom: 4px;
+    color: #fff;
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  .ant-notification-notice-description {
+    color: #d6dade;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+
+  .ant-notification-notice-with-icon {
+    .ant-notification-notice-message,
+    .ant-notification-notice-description {
+      margin-inline-start: 32px;
+    }
+  }
+
+  .knowledge-task-notification-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: #59636c;
+    color: #fff;
+    font-size: 13px;
+  }
+}
+
 .knowledge-view-tabs {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
