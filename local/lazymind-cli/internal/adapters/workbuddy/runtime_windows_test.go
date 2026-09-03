@@ -42,9 +42,13 @@ func TestFindRuntimeUsesWindowsWorkBuddyLayoutAndManagedNode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !agentexec.SameExecutable(command.Binary, node) ||
-		len(command.Arguments) != 1 || command.Arguments[0] != script {
-		t.Fatalf("command=%#v", command)
+	nodeMatches := agentexec.SameExecutable(command.Binary, node)
+	scriptMatches := len(command.Arguments) == 1 && agentexec.SameExecutable(command.Arguments[0], script)
+	if !nodeMatches || !scriptMatches {
+		t.Fatalf(
+			"command=%#v node=%q script=%q node_matches=%v script_matches=%v",
+			command, node, script, nodeMatches, scriptMatches,
+		)
 	}
 }
 
