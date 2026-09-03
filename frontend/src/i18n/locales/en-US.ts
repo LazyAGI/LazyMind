@@ -4289,17 +4289,18 @@ const enUS = {
     memoryPreferenceTitle: "Preference rules",
     memoryPreferenceDescription:
       "Long-term actionable rules shown in priority order.",
-    memoryPreferenceTotal: "{{count}} preferences",
+    memoryPreferenceTotal: "Total: {{count}}",
     memoryPreferenceLoadFailed: "Failed to load preferences",
     memoryPreferenceEmpty: "No preferences yet",
     memoryPreferenceUpdatedAt: "Updated {{time}}",
-    memoryPreferenceResidentIndex: "Resident index",
-    memoryPreferenceResidentUsageAria:
-      "Resident index usage: {{used}} of {{max}}",
-    memoryPreferenceNotResident: "Not resident",
-    memoryPreferenceOverLimitTitle: "Resident index capacity exceeded",
+    memoryPreferenceCharacterBudget: "Character budget",
+    memoryPreferenceBudgetAria: "Character budget: {{used}} of {{max}}",
+    memoryPreferenceBudgetDescription: "Full-index projection characters / character limit, including formatting. Not tokens or actual usage in a particular conversation.",
+    memoryPreferenceBudgetFull: "Character budget is full",
+    memoryPreferenceBudgetStale: "Budget awaiting refresh",
+    memoryPreferenceOverLimitTitle: "Character budget exceeded",
     memoryPreferenceOverLimitDescription:
-      "New preferences are paused. Delete, consolidate, or reorder preferences so the highest-priority {{max}} items remain resident.",
+      "Preferences beyond the budget remain fully stored but are not injected into conversations by default. Reorder or organize preferences to adjust them.",
     memoryPreferencePage:
       "Page {{page}} · {{count}} on this page / {{total}} total",
     memoryPreferenceReorderHandle:

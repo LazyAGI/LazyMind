@@ -14,7 +14,7 @@ const items = ["pref.a", "pref.b"].map((name) => ({ name, summary: `${name} summ
 const task = (status: api.PreferenceOrganizerTask["status"]): api.PreferenceOrganizerTask => ({ task_id: "task-1", status, waiting_reason: "memory_review", created_at: "2026-09-03T00:00:00Z" });
 beforeEach(() => {
  vi.resetAllMocks();
- vi.mocked(api.listPreferenceMemories).mockResolvedValue({ items, etag: "etag-1", totalSize: 2, updatedAt: 1 });
+ vi.mocked(api.listPreferenceMemories).mockResolvedValue({ items, etag: "etag-1", totalSize: 2, updatedAt: 1, budget: { usedChars: 120, maxChars: 5000 } });
  vi.mocked(api.getLatestPreferenceOrganizer).mockResolvedValue(null);
  vi.mocked(api.getPreferenceMemory).mockResolvedValue({ item: items[0], referenceStatus: "missing", reference: null });
 });
@@ -25,6 +25,7 @@ describe("Preference Organizer entry", () => {
   const view = render(<PreferenceMemorySection />);
   const submit = await screen.findByRole("button", { name: /memoryPreferenceOrganizeWaitingReview/ });
   expect(screen.getByRole("button", { name: "admin.memoryPreferenceDelete pref.a" })).toBeEnabled();
+  vi.mocked(api.getLatestPreferenceOrganizer).mockResolvedValue(task("running"));
   fireEvent.click(submit);
   await screen.findByRole("button", { name: /memoryPreferenceOrganizeRunning/ });
   expect(api.submitPreferenceOrganizer).toHaveBeenCalledTimes(1);
@@ -56,6 +57,45 @@ describe("Preference Organizer entry", () => {
   const view = render(<PreferenceMemorySection />);
   await screen.findByText("admin.memoryPreferenceEmpty");
   expect(screen.getByRole("button", { name: /memoryPreferenceOrganize$/ })).toBeDisabled();
+  view.unmount();
+ });
+
+ it("shows only total and character budget, preserving overflow numbers", async () => {
+  vi.mocked(api.listPreferenceMemories).mockResolvedValue({ items, etag: "etag-1", totalSize: 2, updatedAt: 1, budget: { usedChars: 6000, maxChars: 5000 } });
+  const view = render(<PreferenceMemorySection />);
+  await screen.findByText("6000 / 5000");
+  expect(view.container.querySelector(".memory-preference-usage")).toHaveClass("is-error");
+  expect(view.container.querySelector(".memory-preference-residency-label")).toBeNull();
+  expect(view.container.querySelector(".ant-progress-bg")).toHaveStyle({ width: "100%" });
+  view.unmount();
+ });
+
+ it("invalidates optimistic sorting statistics until the server responds", async () => {
+  let resolve!: (value: api.PreferenceMemoryList) => void;
+  vi.mocked(api.reorderPreferenceMemories).mockImplementation(() => new Promise((done) => { resolve = done; }));
+  const view = render(<PreferenceMemorySection />);
+  await screen.findByText("120 / 5000");
+  act(() => state.drag({ active: { id: "pref.a" }, over: { id: "pref.b" } }));
+  expect(screen.queryByText("120 / 5000")).not.toBeInTheDocument();
+  expect(screen.getByRole("status")).toHaveTextContent("admin.memoryPreferenceBudgetStale");
+  await act(async () => { resolve({ items: [...items].reverse(), etag: "etag-2", totalSize: 2, updatedAt: 2, budget: { usedChars: 130, maxChars: 4000 } }); });
+  expect(screen.getByText("130 / 4000")).toBeInTheDocument();
+  view.unmount();
+ });
+
+ it("keeps deleted items removed and budget stale after refresh failure, then recovers", async () => {
+  vi.mocked(api.deletePreferenceMemory).mockResolvedValue(undefined);
+  const view = render(<PreferenceMemorySection />);
+  await screen.findByText("120 / 5000");
+  vi.mocked(api.listPreferenceMemories).mockRejectedValueOnce(new Error("offline"));
+  fireEvent.click(screen.getByRole("button", { name: "admin.memoryPreferenceDelete pref.a" }));
+  fireEvent.click(await screen.findByRole("button", { name: "common.delete" }));
+  await waitFor(() => expect(screen.queryByRole("button", { name: "admin.memoryPreferenceDelete pref.a" })).not.toBeInTheDocument());
+  expect(screen.queryByText("120 / 5000")).not.toBeInTheDocument();
+  expect(screen.getByRole("status")).toHaveTextContent("admin.memoryPreferenceBudgetStale");
+  vi.mocked(api.listPreferenceMemories).mockResolvedValue({ items: items.slice(1), etag: "etag-2", totalSize: 1, updatedAt: 2, budget: { usedChars: 60, maxChars: 5000 } });
+  fireEvent.click(screen.getByRole("button", { name: "common.retry" }));
+  await screen.findByText("60 / 5000");
   view.unmount();
  });
 });

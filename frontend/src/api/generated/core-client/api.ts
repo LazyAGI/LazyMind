@@ -1055,7 +1055,6 @@ export interface CurrentMemoryPreferenceListData {
     'etag': string;
     'items': Array<CurrentMemoryPreferenceItem>;
     'projection_state': CurrentMemoryPreferenceProjectionState;
-    'resident_index_usage': CurrentMemoryPreferenceResidentIndexUsage;
     'total_size': number;
     'updated_at': number;
 }
@@ -1070,15 +1069,11 @@ export interface CurrentMemoryPreferenceOrderRequest {
 }
 export interface CurrentMemoryPreferenceProjectionState {
     'full_projection_chars': number;
+    'max_chars': number;
     'projected_chars': number;
     'projected_items': number;
     'projection_truncated': boolean;
     'stored_items': number;
-}
-export interface CurrentMemoryPreferenceResidentIndexUsage {
-    'max_items': number;
-    'over_limit': boolean;
-    'used_items': number;
 }
 export interface CurrentMemoryPresentation {
     'fallbacks': { [key: string]: { [key: string]: string; }; };
@@ -1955,6 +1950,16 @@ export interface PersonalizationSettingOpenAPIRequest {
 export interface PersonalizationSettingOpenAPIResponse {
     'enabled': boolean;
 }
+export interface PreferenceOrganizerPass {
+    'after'?: PreferenceOrganizerState | null;
+    'before': PreferenceOrganizerState;
+    'changes': number;
+    'operation_count': number;
+    'outcome': string;
+    'pass_number': number;
+    'plan_hash': string;
+    'receipts': Array<PreferenceOrganizerReceipt>;
+}
 export interface PreferenceOrganizerReceipt {
     'action': PreferenceOrganizerReceiptActionEnum;
     'applied_steps': Array<string>;
@@ -1987,12 +1992,10 @@ export const PreferenceOrganizerReceiptStatusEnum = {
 export type PreferenceOrganizerReceiptStatusEnum = typeof PreferenceOrganizerReceiptStatusEnum[keyof typeof PreferenceOrganizerReceiptStatusEnum];
 
 export interface PreferenceOrganizerResult {
-    'current_pass'?: number;
     'outcome'?: PreferenceOrganizerResultOutcomeEnum;
-    'passes'?: Array<object>;
+    'passes'?: Array<PreferenceOrganizerPass>;
     'passes_attempted'?: number;
     'reason'?: string;
-    'receipts'?: Array<PreferenceOrganizerReceipt>;
     'stop_reason'?: string;
     'target_reached'?: boolean;
     'total_changes'?: number;
@@ -2010,9 +2013,16 @@ export const PreferenceOrganizerResultOutcomeEnum = {
 
 export type PreferenceOrganizerResultOutcomeEnum = typeof PreferenceOrganizerResultOutcomeEnum[keyof typeof PreferenceOrganizerResultOutcomeEnum];
 
+export interface PreferenceOrganizerState {
+    'etag': string;
+    'full_projection_chars': number;
+    'projected_chars': number;
+    'projected_items': number;
+    'projection_truncated': boolean;
+    'stored_items': number;
+}
 export interface PreferenceOrganizerTaskData {
     'created_at': string;
-    'current_pass'?: number;
     'error_code'?: string;
     'error_message'?: string;
     'finished_at'?: string;

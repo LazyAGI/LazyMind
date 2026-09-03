@@ -1,5 +1,58 @@
 components:
     schemas:
+        PreferenceOrganizerPass:
+            properties:
+                after:
+                    allOf:
+                        - $ref: '#/components/schemas/PreferenceOrganizerState'
+                    nullable: true
+                before:
+                    $ref: '#/components/schemas/PreferenceOrganizerState'
+                changes:
+                    type: integer
+                operation_count:
+                    type: integer
+                outcome:
+                    type: string
+                pass_number:
+                    type: integer
+                plan_hash:
+                    type: string
+                receipts:
+                    items:
+                        $ref: '#/components/schemas/PreferenceOrganizerReceipt'
+                    type: array
+            required:
+                - pass_number
+                - plan_hash
+                - before
+                - receipts
+                - changes
+                - operation_count
+                - outcome
+            type: object
+        PreferenceOrganizerState:
+            properties:
+                etag:
+                    type: string
+                full_projection_chars:
+                    type: integer
+                projected_chars:
+                    type: integer
+                projected_items:
+                    type: integer
+                projection_truncated:
+                    type: boolean
+                stored_items:
+                    type: integer
+            required:
+                - stored_items
+                - full_projection_chars
+                - projected_items
+                - projected_chars
+                - projection_truncated
+                - etag
+            type: object
         ACLApiResponse:
             properties:
                 code:
@@ -1411,8 +1464,6 @@ components:
                     type: array
                 projection_state:
                     $ref: '#/components/schemas/CurrentMemoryPreferenceProjectionState'
-                resident_index_usage:
-                    $ref: '#/components/schemas/CurrentMemoryPreferenceResidentIndexUsage'
                 total_size:
                     format: int64
                     type: integer
@@ -1422,7 +1473,6 @@ components:
             required:
                 - items
                 - total_size
-                - resident_index_usage
                 - etag
                 - updated_at
                 - projection_state
@@ -1456,6 +1506,8 @@ components:
             properties:
                 full_projection_chars:
                     type: integer
+                max_chars:
+                    type: integer
                 projected_chars:
                     type: integer
                 projected_items:
@@ -1470,21 +1522,7 @@ components:
                 - projected_items
                 - projected_chars
                 - projection_truncated
-            type: object
-        CurrentMemoryPreferenceResidentIndexUsage:
-            properties:
-                max_items:
-                    format: int64
-                    type: integer
-                over_limit:
-                    type: boolean
-                used_items:
-                    format: int64
-                    type: integer
-            required:
-                - used_items
-                - max_items
-                - over_limit
+                - max_chars
             type: object
         CurrentMemoryPresentation:
             properties:
@@ -2961,8 +2999,6 @@ components:
             type: object
         PreferenceOrganizerResult:
             properties:
-                current_pass:
-                    type: integer
                 outcome:
                     enum:
                         - organized
@@ -2975,17 +3011,12 @@ components:
                     type: string
                 passes:
                     items:
-                        properties: {}
-                        type: object
+                        $ref: '#/components/schemas/PreferenceOrganizerPass'
                     type: array
                 passes_attempted:
                     type: integer
                 reason:
                     type: string
-                receipts:
-                    items:
-                        $ref: '#/components/schemas/PreferenceOrganizerReceipt'
-                    type: array
                 stop_reason:
                     type: string
                 target_reached:
@@ -2998,8 +3029,6 @@ components:
                 created_at:
                     format: date-time
                     type: string
-                current_pass:
-                    type: integer
                 error_code:
                     type: string
                 error_message:

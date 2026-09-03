@@ -32,10 +32,9 @@ import {
   reorderPreferenceMemories,
 } from "../../frontend/src/modules/memory/currentMemoryApi.ts";
 import {
-  getPreferenceResidentUsageTone,
+  getPreferenceBudgetTone,
   isCurrentMemoryConflict,
   isCurrentMemoryResourceNotFound,
-  isPreferenceResident,
   mergePreferenceOrderWithLatest,
   movePreferenceItem,
 } from "../../frontend/src/modules/memory/currentMemoryViewModel.ts";
@@ -59,10 +58,9 @@ describe("Preference Core interface", () => {
           ],
           etag: "preferences-v7",
           total_size: 1,
-          resident_index_usage: {
-            used_items: 1,
-            max_items: 100,
-            over_limit: false,
+          projection_state: {
+            full_projection_chars: 120,
+            max_chars: 5000,
           },
           updated_at: 1784880000000,
         },
@@ -80,10 +78,9 @@ describe("Preference Core interface", () => {
       ],
       etag: "preferences-v7",
       totalSize: 1,
-      residentIndexUsage: {
-        usedItems: 1,
-        maxItems: 100,
-        overLimit: false,
+      budget: {
+        usedChars: 120,
+        maxChars: 5000,
       },
       updatedAt: 1784880000000,
     });
@@ -317,27 +314,22 @@ describe("Preference reorder behavior", () => {
   });
 });
 
-describe("Preference resident usage behavior", () => {
+describe("Preference character budget behavior", () => {
   it.each([
-    [0, 100, false, "normal"],
-    [79, 100, false, "normal"],
-    [80, 100, false, "warning"],
-    [100, 100, false, "error"],
-    [120, 100, true, "error"],
+    [0, 100, "normal"],
+    [79, 100, "normal"],
+    [80, 100, "warning"],
+    [100, 100, "full"],
+    [120, 100, "error"],
   ])(
-    "maps %d / %d overLimit=%s to %s",
-    (usedItems, maxItems, overLimit, expected) => {
+    "maps %d / %d to %s",
+    (used, max, expected) => {
       expect(
-        getPreferenceResidentUsageTone(usedItems, maxItems, overLimit),
+        getPreferenceBudgetTone(used, max),
       ).toBe(expected);
     },
   );
 
-  it("marks only entries before the configured limit as resident", () => {
-    expect(isPreferenceResident(99, 100)).toBe(true);
-    expect(isPreferenceResident(100, 100)).toBe(false);
-    expect(isPreferenceResident(100, undefined)).toBe(true);
-  });
 });
 
 describe("Soul and Profile Core interface", () => {

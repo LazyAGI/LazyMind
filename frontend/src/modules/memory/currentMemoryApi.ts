@@ -34,10 +34,9 @@ export interface PreferenceMemoryItem {
   updatedAt: string;
 }
 
-export interface PreferenceResidentIndexUsage {
-  usedItems: number;
-  maxItems: number;
-  overLimit: boolean;
+export interface PreferenceCharacterBudget {
+  usedChars: number;
+  maxChars: number;
 }
 
 export interface PreferenceMemoryList {
@@ -45,7 +44,7 @@ export interface PreferenceMemoryList {
   etag: string;
   totalSize: number;
   updatedAt: number;
-  residentIndexUsage?: PreferenceResidentIndexUsage;
+  budget?: PreferenceCharacterBudget;
 }
 
 export interface PreferenceMemoryReference {
@@ -86,18 +85,17 @@ const mapPreferenceItem = (
 const mapPreferenceList = (
   data: CurrentMemoryPreferenceListData,
 ): PreferenceMemoryList => {
-  const residentIndexUsage = data.resident_index_usage;
+  const projection = data.projection_state;
   return {
     items: data.items.map(mapPreferenceItem),
     etag: data.etag,
     totalSize: data.total_size,
     updatedAt: data.updated_at,
-    ...(residentIndexUsage
+    ...(projection
       ? {
-          residentIndexUsage: {
-            usedItems: residentIndexUsage.used_items,
-            maxItems: residentIndexUsage.max_items,
-            overLimit: residentIndexUsage.over_limit,
+          budget: {
+            usedChars: projection.full_projection_chars,
+            maxChars: projection.max_chars,
           },
         }
       : {}),

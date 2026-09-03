@@ -57,4 +57,42 @@ describe("usePreferenceOrganizer", () => {
     const restored = renderHook(() => usePreferenceOrganizer(vi.fn())); await flush();
     expect(restored.result.current.running).toBe(true); restored.unmount();
   });
+
+  it("discovers background work on the idle interval and backs off after errors", async () => {
+    vi.mocked(getLatestPreferenceOrganizer).mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(task("running")).mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValue(task("done"));
+    const onFinished = vi.fn();
+    const view = renderHook(() => usePreferenceOrganizer(onFinished)); await flush();
+    await act(async () => { await vi.advanceTimersByTimeAsync(14999); });
+    expect(getLatestPreferenceOrganizer).toHaveBeenCalledTimes(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(view.result.current.running).toBe(true);
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    expect(view.result.current.error).toBeInstanceOf(Error);
+    await act(async () => { await vi.advanceTimersByTimeAsync(14999); });
+    expect(getLatestPreferenceOrganizer).toHaveBeenCalledTimes(3);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(view.result.current.error).toBeNull();
+    expect(onFinished).toHaveBeenCalledTimes(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(15000); });
+    expect(getLatestPreferenceOrganizer).toHaveBeenCalledTimes(5);
+    expect(onFinished).toHaveBeenCalledTimes(1);
+    view.unmount();
+  });
+
+  it("refreshes immediately after submit and ignores an older in-flight poll", async () => {
+    let resolveOld!: (value: apiTask) => void;
+    type apiTask = PreferenceOrganizerTask | null;
+    vi.mocked(getLatestPreferenceOrganizer).mockImplementationOnce(() => new Promise<apiTask>((resolve) => { resolveOld = resolve; }))
+      .mockResolvedValue(task("running", "new"));
+    vi.mocked(submitPreferenceOrganizer).mockResolvedValue(task("pending", "new"));
+    const view = renderHook(() => usePreferenceOrganizer(vi.fn())); await flush();
+    await act(async () => { await view.result.current.submit(); });
+    expect(getLatestPreferenceOrganizer).toHaveBeenCalledTimes(2);
+    await act(async () => { resolveOld(task("done", "old")); });
+    expect(view.result.current.task?.task_id).toBe("new");
+    expect(view.result.current.running).toBe(true);
+    view.unmount();
+  });
 });
