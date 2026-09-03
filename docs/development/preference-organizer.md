@@ -4,19 +4,23 @@
 
 偏好页直接提交整理任务。Core 合并同一用户的 active 任务，手动提交会升级 pending 自动任务的 `force_analysis`；running 任务直接复用。执行顺序为当前 Review 完成、Organizer 执行、恢复其余 Review。Organizer 退避时仍优先于 pending Review，等待和容量不足都不消耗失败次数。
 
-页面可见时每 2 秒读取 Core 的 active / 最近任务，离开页面只停止观察。pending 允许排序和删除；running 冻结这些写入，详情仍可读。完成、无需调整、部分完成和失败都会刷新实际数据，最新结果在重新进入页面后仍可见。页面不展示内部 Plan、执行身份或日志。
+页面可见时，pending / running 每 2 秒读取任务，无任务、结束或查询失败每 15 秒读取；进入页面、恢复可见和手动提交后立即查询，隐藏或卸载停止观察。pending 允许排序和删除；running 冻结这些写入，详情仍可读。完成、无需调整、部分完成和失败都会刷新实际数据和已打开的详情。页面只展示当前总条数和字符预算，不展示可投影条数或行级常驻标记。
 
 Algorithm 使用共享专用线程池，默认 2 个执行槽，可用 `LAZYMIND_MEMORY_MAINTENANCE_WORKERS` 配置。容量满立即返回 `503 maintenance_busy`，Core 延后 2 秒；取消 HTTP 等待不会提前释放槽位。Organizer 总等待上限 30 分钟，Review 10 分钟。每次执行按 task ID / run ID 隔离 LazyLLM 上下文，失效后禁止后续 Agent 轮次和 RemoteFS / Episode 请求。
 
-Gate 接收结构化 operations，保存规范化 JSON 的哈希和完整参数。Agent 按 operation ID 调用 Apply；压缩恢复只注入执行游标。策略固定为目标最多 30 条、软偏好 20 条、投影预算 40%，没有硬下限；最多两轮、每轮 60 round、总变更预算 50。手动任务在非空且已达标时仍分析第一轮。
+完整存储不设条目容量上限。唯一容量配置是正整数 `LAZYMIND_PREFERENCE_CONTEXT_MAX_CHARS`，默认 5000，Core 和 Chat 必须一致。投影按索引原顺序保留能完整放入预算的最长前缀，不跳过条目、不截断 summary。Core 与 Algorithm 使用相同的固定 YAML 布局和 JSON 引号转义，按 Unicode 字符（包含格式开销）计数，不按字节、UTF-16 或 token。空 YAML 包装也放不下时投影为空字符串。
 
-每个操作保存 receipt，包括涉及名称、状态、成本、完成/失败步骤、可获得的 ETag 和 Episode ID。部分写入和无法确认的结果会停止后续 Apply；最终读取失败仍保留已有记录。此实现不增加崩溃恢复审计或自动回滚。
+完整投影字符需求达到 80% 时自动触发整理，严格低于 40% 才达标。Gate 接收结构化 operations，保存规范化 JSON 的哈希和完整参数。Agent 按 operation ID 调用 Apply；压缩恢复只注入执行游标。没有条目数目标或硬下限；最多两轮、每轮 60 round、总变更预算 50，merge 单次仍为 2–10 条。手动任务在非空且已达标时仍分析第一轮，空索引不调用模型；没有安全动作时可以停止，不为达标强制删除。`target_reached` 根据最终验证快照计算，与是否发生改动分离；最终读取失败不推断达标。
+
+每个操作的 receipt 仅保存在 `passes[].receipts`，包括涉及名称、状态、成本、完成/失败步骤、可获得的 ETag 和 Episode ID。保留 `passes_attempted` / `pass_number`，不再提供伪进度 `current_pass`。部分写入和无法确认的结果会停止后续 Apply；最终读取失败仍保留已有记录。此实现不增加崩溃恢复审计或跨 operation lineage 系统。
 
 按去掉 anchor 后的文件路径校验一对一引用，删除偏好仍删除其独占 Markdown。新增和 Merge 在写新 Reference 前校验索引和名称映射碰撞。存量共享文件明确报错，不自动修复。
 
-公共能力采用组合：Core `maintenance.UserTransaction` / `Authorize` 和 Worker 续租包装、Algorithm `common.maintenance.execute`、前端 `usePreferenceOrganizer`。无需增加 Organizer 专属业务基类。
+公共能力采用组合：Core `maintenance.UserTransaction` / `Authorize` 和 Worker 续租包装、Algorithm `common.maintenance.execute`、前端 `usePreferenceOrganizer`。身份在 HTTP 入口统一解析到 `maintenance.Identity`（task Header 优先、query 回退，run ID 仅接受 Header），授权与避免自触发共用身份。MemoryStore 共享 add/merge 的新引用校验、Reference-first 写入和失败补偿，保留各自 receipt 步骤；MOVE 的 Episode-first 顺序独立。Review 的 route/service 共用 schema，前端 Organizer 状态和通知共用映射。共性已收敛到现有组件，不需要新增 Organizer 基类或通用轮询框架。
 
 ## 协同升级
+
+本次单字符预算改造不新增数据库迁移。删除旧 `resident_index_usage` 及条目预算配置；列表 `projection_state.max_chars` 与完整投影字符数作为前端唯一预算来源，需要配套升级 Core、Algorithm 和前端。历史任务 JSON 保持原样，读取允许旧额外字段。调序响应直接更新完整统计，乐观排序和冲突期间使预算失效；删除后刷新失败显示“预算待刷新”，不在前端估算。
 
 1. 在维护窗口停止旧 Worker 领取，并结束旧 Core / Chat 上所有维护执行。可通过 `LAZYMIND_RESOURCE_UPDATE_ENABLED=false` 启动暂停调度的 Core；该配置在进程启动时读取。
 2. 备份数据库，应用新的 dev migration `20260903044806_add_resource_update_run_id`，或新安装时使用更新后的 v0.3 aggregate。已共享的 dev migrations 不修改。
@@ -25,7 +29,22 @@ Gate 接收结构化 operations，保存规范化 JSON 的哈希和完整参数�
 
 用户锁只覆盖短数据库事务，顺序为用户锁、任务行、数据行。PostgreSQL 使用事务 advisory lock，SQLite 使用封装内的 BEGIN IMMEDIATE。写入时验证 lease / run ID，租约续期和最终确认还匹配 worker 与影响行数。旧执行即使返回成功也不能确认任务；旧 MOVE 也不能在 EpisodeStore 继续产生副作用。
 
-## 确定性验证
+## 单字符预算改造验证（2026-09-03）
+
+- Core 全量 `go test ./...` 通过；currentmemory、remotefs、resourceupdate、maintenance、episode 的 race 检查通过。新增普通无 Lane 任务不得凭零时间插队、Header 优先 / query 回退、历史结果读取及启动清空伪进度测试。
+- Algorithm 相关 102 项测试通过：共享 Unicode fixtures、超过 100 条且字符足够、完整前缀、恰好边界、空 / 极小预算、严格低于 40%、手动无改动达标、部分写入 / 补偿和最终读取失败等。
+- 前端局部 hook / 页面 12 项及 API / view-model 16 项测试通过，覆盖 2 / 15 秒轮询、后台任务发现、乱序响应、统计失效及恢复。
+- OpenAPI 生成检查、错误码检查、变更文件 ESLint、Python lint 和生产构建通过。全仓错误提示检查仍报告既有接口错误文案规则问题，未扩展本次范围去统一改写。
+- Node 25 全量测试需 `NODE_OPTIONS=--no-experimental-webstorage` 避免全局 localStorage 覆盖 jsdom。此环境下当前 538 passed / 3 failed，另有 1 个 suite 初始化失败；原 HEAD 为 533 passed / 相同 3 failed 和同一个 suite 初始化失败。失败点均位于 ChatMessageContent 的 i18n mock、Writer Markdown anchor、SkillInstalledView 的 matchMedia mock。完整 TypeScript 检查当前和原 HEAD 均为相同 550 条诊断，没有新增；不把这些检查报告为全绿。
+
+浏览器使用真实偏好组件、隔离 Core 数据库 / Worker、真实 Algorithm 路由及 `Qwen/Qwen3.8-Flash-Next`（OpenAI 兼容接口，skip_auth），Core / Algorithm 均配置 200 字符预算：
+
+- 整理任务 `1e2ff4383eff49ce90413a6f98dbc398`：3 条、194 字符 → 1 条、68 字符，2 个 applied receipts，`target_reached=true`。页面同步显示总条数和新字符占用。
+- 再次手动任务 `ae365e4d49834811b250bf5842379e44`：仍分析 1 轮，0 改动，`no_safe_changes + target_reached=true`；浏览器显示“无需调整”。
+- 中英文、390px 窄屏均检查通过，没有可投影数量或常驻标签。首次模型请求因宿主机不能解析容器专用地址失败，改用 `127.0.0.1:19001/v1/` 后重试成功，失败时页面也刷新了实际数据。
+- `make local-up LAZYMIND_FRONTEND_PORT=8091` 的 Core / 前端就绪，但共享开发数据的 `doc-summary` 注册签名冲突阻断完整算法 / Chat 启动。未重置数据；以上实际模型验证走独立测试入口，不宣称完整应用登录、Chat 注入和 Review 队列链路已重新验收。
+
+## 上一轮实现的验证记录（字符预算改造前）
 
 2026-09-03，本地执行：
 
@@ -58,7 +77,7 @@ Gate 接收结构化 operations，保存规范化 JSON 的哈希和完整参数�
  pnpm build
 ```
 
-## 实际浏览器和模型链路
+## 上一轮浏览器和模型链路记录
 
 本次使用隔离测试数据库、真实 PreferenceMemorySection、生产 Core handlers / Worker、真实 Algorithm 路由与 Qwen/Qwen3.8-Flash-Next。测试入口使用固定测试用户代替登录鉴权，不覆盖完整应用的登录、导航，也不代表历史 38 case 语义评估已经通过。
 

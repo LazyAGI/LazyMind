@@ -25,4 +25,4 @@ async def fixture_latency(request: Request, next_call):
 
 
 if __name__ == '__main__':
-    uvicorn.run(app, host='0.0.0.0', port=18049)
+    uvicorn.run(app, host='127.0.0.1', port=18049)
