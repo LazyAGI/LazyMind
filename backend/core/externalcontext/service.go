@@ -728,9 +728,6 @@ func (s *Service) managedHistoryID(
 	if direct > 0 {
 		return turn.ID, nil
 	}
-	if !turn.Managed {
-		return "", nil
-	}
 	var candidates []orm.ExternalChatRun
 	if err := s.db.WithContext(ctx).
 		Where("conversation_id = ? AND actor_user_id = ? AND provider = ? AND provider_thread_id = ? AND query = ?",

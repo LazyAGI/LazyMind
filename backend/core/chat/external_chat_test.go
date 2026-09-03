@@ -522,6 +522,50 @@ func TestNativeSessionSyncBindsImmediatelyAndImportsIncrementally(t *testing.T) 
 	}
 }
 
+func TestNativeSessionSyncReconcilesPlainLazyMindUserMessageWithoutDuplicatingTurn(t *testing.T) {
+	app, db := newExternalChatTestApplication(t)
+	createExternalChatTestRun(t, app, "run-plain-prompt")
+	job, err := app.claim(context.Background(), "user-1", ChatExecutorCodex, "host-1")
+	if err != nil || job == nil {
+		t.Fatalf("claim run: job=%#v err=%v", job, err)
+	}
+	if _, err := app.appendEvent(
+		context.Background(), "user-1", job.RunID, "host-1", job.LeaseToken,
+		externalChatEvent{EventID: "plain-thread", Type: "thread_started", ProviderThreadID: "thread-plain"},
+	); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	if err := db.Create(&orm.ChatHistory{
+		ID: job.HistoryID, Seq: 1, ConversationID: "conversation-1",
+		AlgorithmID: "external:codex", RawContent: "question", Content: "question",
+		TimeMixin: orm.TimeMixin{CreateTime: now, UpdateTime: now},
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	session := externalcontext.NativeSession{
+		ThreadID: "thread-plain", ProjectKey: "project-plain", ProjectName: "Project",
+		DisplayName: "question",
+		Turns: []externalcontext.NativeTurn{{
+			ID: "provider-turn", User: "question", Assistant: "answer", CreatedAt: now,
+		}},
+	}
+	if _, err := externalcontext.New(db).SyncSessionCatalog(
+		context.Background(), "user-1", ChatExecutorCodex, "host-1",
+		[]externalcontext.NativeSession{session}, true,
+	); err != nil {
+		t.Fatal(err)
+	}
+	var histories []orm.ChatHistory
+	if err := db.Where("conversation_id = ?", "conversation-1").Find(&histories).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(histories) != 1 || histories[0].ID != job.HistoryID ||
+		histories[0].Content != "question" || histories[0].Result != "answer" {
+		t.Fatalf("histories=%#v", histories)
+	}
+}
+
 func TestExternalSessionCatalogAPIExposesBoundAndUnboundSessions(t *testing.T) {
 	_, db := newExternalChatTestApplication(t)
 	store.Init(db, nil, nil)
@@ -855,54 +899,9 @@ func TestExternalChatRewritesHostLocalWorkflowArtifactLink(t *testing.T) {
 	}
 }
 
-func TestExternalAgentPromptCarriesOnlySafeLazyMindContext(t *testing.T) {
-	prompt := externalAgentPrompt(map[string]any{
-		"workflow_context": map[string]any{
-			"session_id": "session-1", "workflow_id": "image", "current_step": "prompt",
-			"workflow_mode": "dynamic", "remote_root": "/private/runtime", "tree_hash": "secret-hash",
-		},
-		"explicit_resource_bindings": map[string]any{
-			"skill_names": []string{"image-generation"}, "knowledge_base_ids": []string{"kb-1"},
-			"workflow_refs": []string{"builtin:image"},
-		},
-		"filters":     map[string]any{"kb_id": []string{"kb-configured"}},
-		"history":     []map[string]string{{"role": "user", "content": "earlier turn"}},
-		"llm_config":  map[string]any{"api_key": "must-not-leak"},
-		"tool_config": map[string]any{"token": "must-not-leak"},
-	}, "make an image", true)
-
-	for _, required := range []string{
-		"session_id: session-1", "workflow_id: image", "current_step: prompt",
-		"skills: image-generation", "knowledge_base_ids: kb-1", "workflow_refs: builtin:image",
-		"knowledge_base_ids: kb-configured",
-		"earlier turn", "make an image",
-	} {
-		if !strings.Contains(prompt, required) {
-			t.Fatalf("prompt does not contain %q: %s", required, prompt)
-		}
-	}
-	for _, forbidden := range []string{"must-not-leak", "/private/runtime", "secret-hash", "llm_config", "tool_config"} {
-		if strings.Contains(prompt, forbidden) {
-			t.Fatalf("prompt leaked %q: %s", forbidden, prompt)
-		}
-	}
-	resumed := externalAgentPrompt(map[string]any{
-		"history": []map[string]string{{"role": "user", "content": "do-not-replay"}},
-	}, "next turn", false)
-	if strings.Contains(resumed, "do-not-replay") {
-		t.Fatalf("resumed provider thread received duplicate history: %s", resumed)
-	}
-}
-
-func TestExternalConversationKnowledgeBaseIDsRespectsExplicitEmptyScope(t *testing.T) {
-	ids := externalConversationKnowledgeBaseIDs(
-		context.Background(),
-		nil,
-		map[string]any{"filters": map[string]any{"kb_id": []string{}}},
-		"conversation-1",
-	)
-	if len(ids) != 0 {
-		t.Fatalf("explicit empty knowledge scope = %v, want none", ids)
+func TestExternalAgentPromptContainsOnlyTheCurrentUserMessage(t *testing.T) {
+	if prompt := externalAgentPrompt("  make an image  "); prompt != "make an image" {
+		t.Fatalf("prompt=%q", prompt)
 	}
 }
 
