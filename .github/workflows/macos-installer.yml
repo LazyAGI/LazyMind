@@ -1,9 +1,17 @@
 name: macOS Desktop Installer
 
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_call:
+    inputs:
+      git_ref:
+        description: "Branch, tag, or commit SHA to build"
+        required: false
+        type: string
+    outputs:
+      installer_artifact_name:
+        value: ${{ jobs.build-macos-installer.outputs.installer_artifact_name }}
+      release_tag:
+        value: ${{ jobs.build-macos-installer.outputs.release_tag }}
   workflow_dispatch:
     inputs:
       git_ref:
@@ -33,6 +41,11 @@ jobs:
     environment: mac_dev
     runs-on: macos-15
     timeout-minutes: 180
+    outputs:
+      installer_artifact_name: ${{ steps.test_artifact.outputs.name }}
+      installer_available: ${{ steps.test_artifact.outputs.available }}
+      release_tag: ${{ steps.release.outputs.tag }}
+      official_release: ${{ steps.release.outputs.official_release }}
 
     steps:
       - name: Checkout
@@ -49,6 +62,7 @@ jobs:
           EXPLICIT_REF: ${{ inputs.git_ref }}
           REQUESTED_REF: ${{ inputs.git_ref || github.ref }}
           REQUESTED_REF_TYPE: ${{ github.ref_type }}
+          OFFICIAL_REPOSITORY: ${{ github.repository == 'LazyAGI/LazyMind' }}
         run: |
           set -euo pipefail
 
@@ -80,6 +94,13 @@ jobs:
           else
             echo "is_tag=false" >> "${GITHUB_OUTPUT}"
             echo "Requested ref is not a tag; notarization will be skipped."
+          fi
+          if [[ -n "${release_tag}" && "${OFFICIAL_REPOSITORY}" == "true" ]]; then
+            echo "official_release=true" >> "${GITHUB_OUTPUT}"
+            echo "Official LazyAGI release: signing and notarization are required."
+          else
+            echo "official_release=false" >> "${GITHUB_OUTPUT}"
+            echo "Non-official build: using ad-hoc signing and skipping notarization."
           fi
 
       - name: Initialize development submodules
@@ -161,53 +182,44 @@ jobs:
           echo "Checked out commit: $(git rev-parse HEAD)"
           df -h /
 
-      - name: Validate signing and notarization inputs
+      - name: Validate release signing and notarization inputs
+        if: steps.release.outputs.official_release == 'true'
         env:
           CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          IS_TAG: ${{ steps.release.outputs.is_tag }}
         run: |
           set -euo pipefail
 
           missing=()
-          for variable in CSC_LINK CSC_KEY_PASSWORD; do
+          for variable in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
             if [[ -z "${!variable:-}" ]]; then
               missing+=("${variable}")
             fi
           done
-          if [[ "${IS_TAG}" == "true" ]]; then
-            for variable in APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
-              if [[ -z "${!variable:-}" ]]; then
-                missing+=("${variable}")
-              fi
-            done
-          fi
           if (( ${#missing[@]} > 0 )); then
             echo "::error::Missing mac_dev environment secrets: ${missing[*]}"
             exit 1
           fi
-          if [[ "${IS_TAG}" == "true" && ! "${APPLE_TEAM_ID}" =~ ^[A-Z0-9]{10}$ ]]; then
+          if [[ ! "${APPLE_TEAM_ID}" =~ ^[A-Z0-9]{10}$ ]]; then
             echo "::error::APPLE_TEAM_ID must be a 10-character Apple Team ID"
             exit 1
           fi
-          if [[ "${IS_TAG}" == "true" ]]; then
-            xcrun notarytool --version
-          fi
+          xcrun notarytool --version
 
       - name: Run Desktop tests
         run: |
           node --test desktop/scripts/*.test.mjs
 
-      - name: Build and sign app ZIP
+      - name: Build app ZIP
         id: build
         env:
-          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          CSC_LINK: ${{ steps.release.outputs.official_release == 'true' && secrets.MAC_CSC_LINK || '' }}
+          CSC_KEY_PASSWORD: ${{ steps.release.outputs.official_release == 'true' && secrets.MAC_CSC_KEY_PASSWORD || '' }}
           LAZYMIND_DESKTOP_PACKAGE_KIND: zip
-          LAZYMIND_DESKTOP_SIGNING_MODE: developer-id
+          LAZYMIND_DESKTOP_SIGNING_MODE: ${{ steps.release.outputs.official_release == 'true' && 'developer-id' || 'adhoc' }}
           LAZYMIND_RELEASE_BUILD: ${{ steps.release.outputs.is_tag }}
         run: |
           set -euo pipefail
@@ -245,7 +257,7 @@ jobs:
             --leave-running true
 
       - name: Submit app ZIP for notarization
-        if: steps.release.outputs.is_tag == 'true'
+        if: steps.release.outputs.official_release == 'true'
         id: zip_submission
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
@@ -272,7 +284,7 @@ jobs:
           echo "submission_id=${submission_id}" >> "${GITHUB_OUTPUT}"
 
       - name: Start asynchronous packaged runtime cleanup
-        if: steps.packaged_smoke.outcome == 'success' && (steps.release.outputs.is_tag != 'true' || steps.zip_submission.outcome == 'success')
+        if: steps.packaged_smoke.outcome == 'success' && (steps.release.outputs.official_release != 'true' || steps.zip_submission.outcome == 'success')
         run: |
           set -euo pipefail
           smoke_root="${RUNNER_TEMP}/lazymind-packaged-smoke"
@@ -302,7 +314,7 @@ jobs:
           echo "Started packaged runtime cleanup as pid ${cleanup_pid}; notarization continues without waiting."
 
       - name: Wait up to 30 minutes for app ZIP notarization
-        if: steps.release.outputs.is_tag == 'true'
+        if: steps.release.outputs.official_release == 'true'
         id: zip_notarization
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
@@ -340,11 +352,13 @@ jobs:
           echo "status=${status}" >> "${GITHUB_OUTPUT}"
           echo "duration_seconds=${duration_seconds}" >> "${GITHUB_OUTPUT}"
           if [[ "${status}" == "In Progress" ]]; then
-            echo "::warning::ZIP notarization is still in progress after ${duration_seconds}s; continuing directly to DMG packaging."
+            echo "::error::ZIP notarization is still in progress after ${duration_seconds}s."
+            exit 1
           fi
 
-      - name: Fail rejected app ZIP notarization
-        if: steps.release.outputs.is_tag == 'true' && steps.zip_notarization.outputs.status == 'Invalid'
+      - name: Download rejected app ZIP notarization log
+        if: steps.release.outputs.official_release == 'true' && steps.zip_notarization.outputs.status == 'Invalid'
+        continue-on-error: true
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
@@ -356,11 +370,32 @@ jobs:
             --password "${APPLE_APP_SPECIFIC_PASSWORD}" \
             --team-id "${APPLE_TEAM_ID}" \
             zip-notarization-log.json
+
+      - name: Upload rejected app ZIP notarization diagnostics
+        if: always() && steps.release.outputs.official_release == 'true' && steps.zip_notarization.outputs.status == 'Invalid'
+        uses: actions/upload-artifact@v7
+        with:
+          name: LazyMind-macos-zip-notarization-diagnostics
+          path: |
+            zip-notarization-status.json
+            zip-notarization-log.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Fail rejected app ZIP notarization
+        if: always() && steps.release.outputs.official_release == 'true' && steps.zip_notarization.outputs.status == 'Invalid'
+        run: |
           echo "::error::Apple rejected the app ZIP notarization submission."
           exit 1
 
+      - name: Require accepted app ZIP notarization
+        if: steps.release.outputs.official_release == 'true' && steps.zip_notarization.outputs.status != 'Accepted'
+        run: |
+          echo "::error::Release builds require accepted app ZIP notarization; status=${{ steps.zip_notarization.outputs.status }}"
+          exit 1
+
       - name: Staple accepted app ticket
-        if: steps.release.outputs.is_tag == 'true' && steps.zip_notarization.outputs.status == 'Accepted'
+        if: steps.release.outputs.official_release == 'true' && steps.zip_notarization.outputs.status == 'Accepted'
         run: |
           set -euo pipefail
           app_path="${GITHUB_WORKSPACE}/desktop/dist/mac-arm64/LazyMind.app"
@@ -368,15 +403,15 @@ jobs:
           xcrun stapler validate "${app_path}"
           spctl --assess --type execute --verbose=4 "${app_path}"
 
-      - name: Package signed app as DMG
+      - name: Package app as DMG
         id: package
         env:
-          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          CSC_LINK: ${{ steps.release.outputs.official_release == 'true' && secrets.MAC_CSC_LINK || '' }}
+          CSC_KEY_PASSWORD: ${{ steps.release.outputs.official_release == 'true' && secrets.MAC_CSC_KEY_PASSWORD || '' }}
           LAZYMIND_DESKTOP_RUNTIME_STAGE: ${{ github.workspace }}/desktop/build/darwin-arm64/runtime
           LAZYMIND_DESKTOP_OUTPUT_DIR: ${{ github.workspace }}/desktop/dist
-          LAZYMIND_DESKTOP_SIGNING_MODE: developer-id
-          IS_TAG: ${{ steps.release.outputs.is_tag }}
+          LAZYMIND_DESKTOP_SIGNING_MODE: ${{ steps.release.outputs.official_release == 'true' && 'developer-id' || 'adhoc' }}
+          IS_OFFICIAL_RELEASE: ${{ steps.release.outputs.official_release }}
         run: |
           set -euo pipefail
 
@@ -386,17 +421,21 @@ jobs:
           publish_dir="${GITHUB_WORKSPACE}/desktop/dist/publish"
           package_version="$(node -p 'require("./desktop/electron/package.json").version')"
           short_sha="$(git rev-parse --short=8 HEAD)"
-          pending_path="${publish_dir}/LazyMind-macos-arm64-${package_version}-${short_sha}.pending.dmg"
+          notarization_path="${publish_dir}/LazyMind-macos-arm64-${package_version}-${short_sha}.notarization.dmg"
           development_path="${publish_dir}/LazyMind-macos-arm64-${package_version}-${short_sha}.unnotarized.dmg"
           mount_dir="$(mktemp -d "${RUNNER_TEMP}/lazymind-final-dmg.XXXXXX")"
 
           mkdir -p "${publish_dir}"
-          if [[ "${IS_TAG}" == "true" ]]; then
-            cp "${source_dmg}" "${pending_path}"
+          if [[ "${IS_OFFICIAL_RELEASE}" == "true" ]]; then
+            cp "${source_dmg}" "${notarization_path}"
           else
             cp "${source_dmg}" "${development_path}"
           fi
-          codesign --verify --strict --verbose=2 "${source_dmg}"
+          if [[ "${IS_OFFICIAL_RELEASE}" == "true" ]]; then
+            codesign --verify --strict --verbose=2 "${source_dmg}"
+          else
+            echo "Skipping DMG container signature verification for non-official build."
+          fi
           hdiutil attach "${source_dmg}" -readonly -nobrowse -mountpoint "${mount_dir}"
           trap 'hdiutil detach "${mount_dir}" >/dev/null 2>&1 || true' EXIT
           codesign --verify --deep --strict --verbose=2 "${mount_dir}/LazyMind.app"
@@ -404,22 +443,23 @@ jobs:
           trap - EXIT
 
           duration_seconds="$(( $(date +%s) - started_at ))"
-          echo "pending_path=${pending_path}" >> "${GITHUB_OUTPUT}"
+          echo "notarization_path=${notarization_path}" >> "${GITHUB_OUTPUT}"
           echo "development_path=${development_path}" >> "${GITHUB_OUTPUT}"
+          echo "development_artifact_name=$(basename "${development_path}")" >> "${GITHUB_OUTPUT}"
           echo "duration_seconds=${duration_seconds}" >> "${GITHUB_OUTPUT}"
 
       - name: Submit DMG for notarization
-        if: steps.release.outputs.is_tag == 'true'
+        if: steps.release.outputs.official_release == 'true'
         id: dmg_submission
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          PENDING_DMG: ${{ steps.package.outputs.pending_path }}
+          NOTARIZATION_DMG: ${{ steps.package.outputs.notarization_path }}
         run: |
           set -euo pipefail
-          submission_path="${PENDING_DMG/.pending.dmg/.notarization.json}"
-          xcrun notarytool submit "${PENDING_DMG}" \
+          submission_path="${RUNNER_TEMP}/dmg-notarization-submission.json"
+          xcrun notarytool submit "${NOTARIZATION_DMG}" \
             --apple-id "${APPLE_ID}" \
             --password "${APPLE_APP_SPECIFIC_PASSWORD}" \
             --team-id "${APPLE_TEAM_ID}" \
@@ -433,10 +473,9 @@ jobs:
             ' "${submission_path}"
           )"
           echo "submission_id=${submission_id}" >> "${GITHUB_OUTPUT}"
-          echo "submission_path=${submission_path}" >> "${GITHUB_OUTPUT}"
 
       - name: Wait up to 30 minutes for DMG notarization
-        if: steps.release.outputs.is_tag == 'true'
+        if: steps.release.outputs.official_release == 'true'
         id: dmg_notarization
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
@@ -462,93 +501,113 @@ jobs:
           echo "status=${status}" >> "${GITHUB_OUTPUT}"
           echo "duration_seconds=$(( $(date +%s) - started_at ))" >> "${GITHUB_OUTPUT}"
           if [[ "${status}" == "In Progress" ]]; then
-            echo "::warning::DMG notarization timed out. Uploading pending inputs for the manual finalizer."
+            echo "::error::DMG notarization is still in progress after 30 minutes."
+            exit 1
           fi
 
+      - name: Download rejected DMG notarization log
+        if: steps.release.outputs.official_release == 'true' && steps.dmg_notarization.outputs.status == 'Invalid'
+        continue-on-error: true
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          SUBMISSION_ID: ${{ steps.dmg_submission.outputs.submission_id }}
+        run: |
+          xcrun notarytool log "${SUBMISSION_ID}" \
+            --apple-id "${APPLE_ID}" \
+            --password "${APPLE_APP_SPECIFIC_PASSWORD}" \
+            --team-id "${APPLE_TEAM_ID}" \
+            dmg-notarization-log.json
+
+      - name: Upload rejected DMG notarization diagnostics
+        if: always() && steps.release.outputs.official_release == 'true' && steps.dmg_notarization.outputs.status == 'Invalid'
+        uses: actions/upload-artifact@v7
+        with:
+          name: LazyMind-macos-dmg-notarization-diagnostics
+          path: |
+            dmg-notarization-status.json
+            dmg-notarization-log.json
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Fail rejected DMG notarization
-        if: steps.release.outputs.is_tag == 'true' && steps.dmg_notarization.outputs.status == 'Invalid'
+        if: always() && steps.release.outputs.official_release == 'true' && steps.dmg_notarization.outputs.status == 'Invalid'
         run: |
           echo "::error::Apple rejected DMG notarization submission ${{ steps.dmg_submission.outputs.submission_id }}."
           exit 1
 
+      - name: Require accepted DMG notarization
+        if: steps.release.outputs.official_release == 'true' && steps.dmg_notarization.outputs.status != 'Accepted'
+        run: |
+          echo "::error::Release builds require accepted DMG notarization; status=${{ steps.dmg_notarization.outputs.status }}"
+          exit 1
+
       - name: Staple and validate accepted DMG
-        if: steps.release.outputs.is_tag == 'true' && steps.dmg_notarization.outputs.status == 'Accepted'
+        if: steps.release.outputs.official_release == 'true' && steps.dmg_notarization.outputs.status == 'Accepted'
         id: final_package
         env:
-          PENDING_DMG: ${{ steps.package.outputs.pending_path }}
+          NOTARIZATION_DMG: ${{ steps.package.outputs.notarization_path }}
         run: |
           set -euo pipefail
-          final_path="${PENDING_DMG/.pending.dmg/.dmg}"
-          mv "${PENDING_DMG}" "${final_path}"
+          final_path="${NOTARIZATION_DMG/.notarization.dmg/.dmg}"
+          mv "${NOTARIZATION_DMG}" "${final_path}"
           xcrun stapler staple "${final_path}"
           xcrun stapler validate "${final_path}"
           spctl --assess --type open --context context:primary-signature --verbose=4 "${final_path}"
           echo "installer_path=${final_path}" >> "${GITHUB_OUTPUT}"
+          echo "artifact_name=$(basename "${final_path}")" >> "${GITHUB_OUTPUT}"
 
       - name: Upload final notarized installer
-        if: steps.release.outputs.is_tag == 'true' && steps.dmg_notarization.outputs.status == 'Accepted'
+        if: steps.release.outputs.official_release == 'true' && steps.dmg_notarization.outputs.status == 'Accepted'
         id: upload_final
         uses: actions/upload-artifact@v7
         with:
-          name: LazyMind-macos-arm64-notarized
+          name: ${{ steps.final_package.outputs.artifact_name }}
           path: ${{ steps.final_package.outputs.installer_path }}
           if-no-files-found: error
           retention-days: 30
           archive: false
 
-      - name: Upload pending DMG after timeout
-        if: steps.release.outputs.is_tag == 'true' && steps.dmg_notarization.outputs.status == 'In Progress'
-        id: upload_pending
-        uses: actions/upload-artifact@v7
-        with:
-          name: LazyMind-macos-arm64-pending
-          path: ${{ steps.package.outputs.pending_path }}
-          if-no-files-found: error
-          retention-days: 30
-          archive: false
-
-      - name: Upload DMG submission record after timeout
-        if: steps.release.outputs.is_tag == 'true' && steps.dmg_notarization.outputs.status == 'In Progress'
-        id: upload_submission
-        uses: actions/upload-artifact@v7
-        with:
-          name: LazyMind-macos-notarization-submission
-          path: ${{ steps.dmg_submission.outputs.submission_path }}
-          if-no-files-found: error
-          retention-days: 30
-          archive: false
-
       - name: Upload development installer
-        if: steps.release.outputs.is_tag != 'true'
+        if: steps.release.outputs.official_release != 'true'
         id: upload_development
         uses: actions/upload-artifact@v7
         with:
-          name: LazyMind-macos-arm64-development
+          name: ${{ steps.package.outputs.development_artifact_name }}
           path: ${{ steps.package.outputs.development_path }}
           if-no-files-found: error
           retention-days: 30
           archive: false
 
+      - name: Select installer artifact for installation testing
+        id: test_artifact
+        if: always() && steps.package.outcome == 'success'
+        run: |
+          if [[ "${{ steps.release.outputs.official_release }}" != "true" ]]; then
+            echo "available=true" >> "${GITHUB_OUTPUT}"
+            echo "name=${{ steps.package.outputs.development_artifact_name }}" >> "${GITHUB_OUTPUT}"
+          elif [[ "${{ steps.dmg_notarization.outputs.status }}" == "Accepted" ]]; then
+            echo "available=true" >> "${GITHUB_OUTPUT}"
+            echo "name=${{ steps.final_package.outputs.artifact_name }}" >> "${GITHUB_OUTPUT}"
+          else
+            echo "available=false" >> "${GITHUB_OUTPUT}"
+            echo "name=" >> "${GITHUB_OUTPUT}"
+          fi
+
       - name: Add artifact summary
         if: always() && steps.package.outcome == 'success'
         env:
           FINAL_URL: ${{ steps.upload_final.outputs.artifact-url }}
-          PENDING_URL: ${{ steps.upload_pending.outputs.artifact-url }}
-          SUBMISSION_URL: ${{ steps.upload_submission.outputs.artifact-url }}
           DEVELOPMENT_URL: ${{ steps.upload_development.outputs.artifact-url }}
         run: |
           {
             echo "## macOS installer result"
             echo
-            if [[ "${{ steps.release.outputs.is_tag }}" != "true" ]]; then
-              echo "[Download the signed but unnotarized development DMG](${DEVELOPMENT_URL})"
-            elif [[ "${{ steps.dmg_notarization.outputs.status }}" == "Accepted" ]]; then
-              echo "[Download the notarized and stapled DMG](${FINAL_URL})"
+            if [[ "${{ steps.release.outputs.official_release }}" != "true" ]]; then
+              echo "[Download the ad-hoc signed, unnotarized development DMG](${DEVELOPMENT_URL})"
             else
-              echo "DMG notarization is still processing."
-              echo "- [Pending DMG](${PENDING_URL})"
-              echo "- [Submission record](${SUBMISSION_URL})"
-              echo "- Run **Finalize macOS Notarization** with source run ID \`${GITHUB_RUN_ID}\`."
+              echo "[Download the notarized and stapled DMG](${FINAL_URL})"
             fi
           } >> "${GITHUB_STEP_SUMMARY}"
 
@@ -630,3 +689,72 @@ jobs:
       - name: Show final disk usage
         if: always()
         run: df -h /
+
+  test-macos-installer:
+    name: Test macOS installer
+    if: needs.build-macos-installer.outputs.installer_available == 'true'
+    needs: build-macos-installer
+    runs-on: macos-15
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout smoke test scripts
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.git_ref || github.ref }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Download the exact installer built above
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.build-macos-installer.outputs.installer_artifact_name }}
+          path: installer-under-test
+
+      - name: Install application from DMG
+        id: install
+        run: |
+          set -euo pipefail
+          dmg="$(find installer-under-test -maxdepth 1 -type f -name '*.dmg' -print -quit)"
+          test -n "${dmg}"
+          mount_dir="$(mktemp -d "${RUNNER_TEMP}/lazymind-install-test-mount.XXXXXX")"
+          install_root="${RUNNER_TEMP}/lazymind-install-test-applications"
+          installed_app="${install_root}/LazyMind.app"
+          mkdir -p "${install_root}"
+          hdiutil attach "${dmg}" -readonly -nobrowse -mountpoint "${mount_dir}"
+          trap 'hdiutil detach "${mount_dir}" >/dev/null 2>&1 || true' EXIT
+          ditto "${mount_dir}/LazyMind.app" "${installed_app}"
+          hdiutil detach "${mount_dir}"
+          trap - EXIT
+          echo "app=${installed_app}" >> "${GITHUB_OUTPUT}"
+
+      - name: Verify installed application
+        env:
+          INSTALLED_APP: ${{ steps.install.outputs.app }}
+        run: |
+          set -euo pipefail
+          test -x "${INSTALLED_APP}/Contents/MacOS/LazyMind"
+          codesign --verify --deep --strict --verbose=2 "${INSTALLED_APP}"
+          if [[ "${{ needs.build-macos-installer.outputs.official_release }}" == "true" ]]; then
+            spctl --assess --type execute --verbose=4 "${INSTALLED_APP}"
+          fi
+
+      - name: Run installed application smoke
+        env:
+          INSTALLED_APP: ${{ steps.install.outputs.app }}
+        run: |
+          set -euo pipefail
+          smoke_root="${RUNNER_TEMP}/lazymind-installed-smoke"
+          LAZYMIND_DESKTOP_RUNTIME_ROOT="${smoke_root}" node desktop/scripts/packaged-app-smoke.mjs \
+            --app "${INSTALLED_APP}" \
+            --runtime-root "${smoke_root}" \
+            --platform darwin \
+            --timeout-ms 300000
+
+      - name: Remove installed application
+        if: always() && steps.install.outcome == 'success'
+        env:
+          INSTALLED_APP: ${{ steps.install.outputs.app }}
+        run: |
+          rm -rf "${INSTALLED_APP}"
+          test ! -e "${INSTALLED_APP}"

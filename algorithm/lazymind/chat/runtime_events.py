@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any, Dict, Optional
 from uuid import uuid4
 
@@ -12,6 +13,12 @@ INCOMPLETE_MODEL_FINISHES = frozenset({
     'insufficient_system_resource',
     'unknown',
 })
+
+
+class RunOutcome(str, Enum):
+    SUCCEEDED = 'succeeded'
+    FAILED = 'failed'
+    CANCELLED = 'cancelled'
 
 
 def runtime_event(event_type: str, run_id: str, data: Dict[str, Any], *, event_id: Optional[str] = None) -> dict:
@@ -41,11 +48,11 @@ class RunAccumulator:
             self.last_model_terminal = data
             self.semantic_output = self.semantic_output or bool(data.get('has_semantic_output'))
 
-    def finish(self, *, succeeded: bool) -> dict:
+    def finish(self, *, outcome: RunOutcome) -> dict:
         if self.terminal_emitted:
             raise RuntimeError(f'run {self.run_id} already has a terminal')
         self.terminal_emitted = True
-        status, reason, code = self._terminal_fields(succeeded)
+        status, reason, code = self._terminal_fields(outcome)
         data: Dict[str, Any] = {
             'status': status,
             'reason': reason,
@@ -61,8 +68,10 @@ class RunAccumulator:
                 data['diagnostic_id'] = failure['diagnostic_id']
         return runtime_event('run_finished', self.run_id, data)
 
-    def _terminal_fields(self, succeeded: bool) -> tuple[str, str, str]:
-        if succeeded:
+    def _terminal_fields(self, outcome: RunOutcome) -> tuple[str, str, str]:
+        if outcome == RunOutcome.CANCELLED:
+            return 'cancelled', 'user_cancelled', ''
+        if outcome == RunOutcome.SUCCEEDED:
             return 'completed', 'awaiting_user_input' if self.ask_pending else 'normal', ''
         terminal = self.last_model_terminal or {}
         if terminal.get('kind') == 'finish':

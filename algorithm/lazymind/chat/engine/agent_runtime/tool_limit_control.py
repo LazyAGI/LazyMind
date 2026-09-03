@@ -4,7 +4,6 @@ import json
 import threading
 import time
 import uuid
-from asyncio import CancelledError
 from typing import Any, Optional
 
 import lazyllm
@@ -12,6 +11,8 @@ from lazyllm import FileSystemQueue
 from lazyllm.tools.agent.base import _write_agent_data
 
 from lazymind.config import config
+
+from .cancellation import UserCancelledError
 
 
 class ToolLimitDecisionCoordinator:
@@ -59,7 +60,7 @@ class ToolLimitDecisionCoordinator:
             for raw in FileSystemQueue(klass='cancel').dequeue() or []:
                 try:
                     if json.loads(raw).get('tag') == 'cancel':
-                        raise CancelledError('stopped by user')
+                        raise UserCancelledError('stopped by user')
                 except (TypeError, ValueError):
                     continue
             time.sleep(min(0.2, max(0.01, deadline - time.monotonic())))

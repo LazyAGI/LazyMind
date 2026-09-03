@@ -545,6 +545,7 @@ func init() {
 		registerAdditionalErrorAlias(source, "Upstream service error", http.StatusBadGateway, 2000110)
 	}
 	registerAdditionalErrorPattern("chat service returned status %d", "Upstream service error", http.StatusBadGateway, 2000110)
+	registerAdditionalErrorAlias("record chat cancellation failed", "Upstream service error", http.StatusServiceUnavailable, 2000110)
 	registerAdditionalErrorPattern("migrate model provider credential %s", "Internal server error", http.StatusInternalServerError, 2000000)
 	registerAdditionalErrorPattern("load workflow head revision %s", "Internal server error", http.StatusInternalServerError, 2000000)
 	registerAdditionalErrorPattern("session_ids must belong to user %q and must not contain plugin conversations", "Invalid request", http.StatusBadRequest, 2000103)
