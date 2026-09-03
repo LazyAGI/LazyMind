@@ -7,6 +7,7 @@ import pytest
 from lazyllm.tools.agent import ToolExecutionError
 import lazymind.chat.engine.tools.local_fs as local_fs_mod
 from lazymind.chat.engine.tools.local_fs import LocalFileToolkit
+from lazymind.chat.engine.tools.text_edit import write_file_atomically
 
 
 def _set_local_fs_sources(monkeypatch, sources):
@@ -72,6 +73,7 @@ def test_local_fs_string_replace_updates_one_exact_match_atomically(monkeypatch,
     target = allowed / 'notes.md'
     target.write_bytes(b'heading\r\nold value\r\ntail\r\n')
     target.chmod(0o640)
+    original_mode = os.stat(target).st_mode & 0o777
     _set_local_fs_sources(monkeypatch, [_source('source-a', [allowed], ['md'])])
 
     result = LocalFileToolkit().string_replace(
@@ -83,7 +85,18 @@ def test_local_fs_string_replace_updates_one_exact_match_atomically(monkeypatch,
     assert result['replacements'] == 1
     assert result['source_id'] == 'source-a'
     assert target.read_bytes() == b'heading\r\nnew value\r\ntail\r\n'
-    assert os.stat(target).st_mode & 0o777 == 0o640
+    assert os.stat(target).st_mode & 0o777 == original_mode
+
+
+def test_write_file_atomically_supports_platforms_without_chown(monkeypatch, tmp_path):
+    target = tmp_path / 'notes.txt'
+    target.write_bytes(b'original\r\n')
+    monkeypatch.delattr(os, 'chown', raising=False)
+
+    write_file_atomically(str(target), b'updated\r\n')
+
+    assert target.read_bytes() == b'updated\r\n'
+    assert list(tmp_path.iterdir()) == [target]
 
 
 def test_local_fs_string_replace_requires_expected_match_count(monkeypatch, tmp_path):
@@ -159,8 +172,8 @@ def test_local_fs_glob_and_grep_search_multiple_sources_with_extensions(monkeypa
     globbed = LocalFileToolkit().glob('*')
     grepped = LocalFileToolkit().grep('needle')
 
-    assert [path.split('/')[-1] for path in globbed['matches']] == ['a.pdf', 'b.csv']
-    assert [(entry['source_id'], entry['file'].split('/')[-1]) for entry in grepped['matches']] == [
+    assert [os.path.basename(path) for path in globbed['matches']] == ['a.pdf', 'b.csv']
+    assert [(entry['source_id'], os.path.basename(entry['file'])) for entry in grepped['matches']] == [
         ('source-a', 'a.pdf'),
         ('source-b', 'b.csv'),
     ]

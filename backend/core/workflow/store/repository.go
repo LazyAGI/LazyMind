@@ -17,6 +17,7 @@ import (
 	"gorm.io/gorm/clause"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/taskcenter"
 )
 
 var (
@@ -594,6 +595,9 @@ func (r *Repository) createHostSession(ctx context.Context, owner, sessionID, co
 			if err := r.bindInputTx(tx, owner, binding); err != nil {
 				return err
 			}
+		}
+		if err := taskcenter.EnsureWorkflowTask(ctx, tx, created); err != nil {
+			return err
 		}
 		return nil
 	})

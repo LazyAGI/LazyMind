@@ -126,10 +126,10 @@ def write_output(path: Path, content: str, overwrite: bool) -> None:
     try:
         if overwrite:
             temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-            temporary.write_text(content, encoding="utf-8")
+            temporary.write_text(content, encoding="utf-8", newline="\n")
             os.replace(temporary, path)
         else:
-            with path.open("x", encoding="utf-8") as handle:
+            with path.open("x", encoding="utf-8", newline="\n") as handle:
                 handle.write(content)
     except OSError as error:
         fail(f"cannot write {path}: {error}")

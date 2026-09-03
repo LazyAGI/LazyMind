@@ -450,8 +450,113 @@ type conversationPathParams struct {
 	Name string `path:"name"`
 }
 
+type conversationModelPathParams struct {
+	ConversationID string `path:"conversation_id"`
+}
+
+type chatModelsQueryParams struct {
+	ConversationID string `query:"conversation_id" desc:"Optional owned conversation whose saved model selection should be restored."`
+}
+
+type chatModelSelectionOpenAPI struct {
+	Mode         string `json:"mode" enum:"fixed,auto"`
+	ModelID      string `json:"model_id,omitempty"`
+	ProviderID   string `json:"provider_id,omitempty"`
+	ProviderName string `json:"provider_name,omitempty"`
+	GroupID      string `json:"group_id,omitempty"`
+	GroupName    string `json:"group_name,omitempty"`
+	ModelName    string `json:"model_name,omitempty"`
+	Source       string `json:"source,omitempty" enum:"own,shared"`
+	Version      int64  `json:"version"`
+	Availability string `json:"availability" enum:"available,unavailable"`
+}
+
+type chatModelListOpenAPIItem struct {
+	ID           string   `json:"id"`
+	Name         string   `json:"name"`
+	GroupID      string   `json:"group_id"`
+	GroupName    string   `json:"group_name"`
+	Source       string   `json:"source" enum:"own,shared"`
+	Capabilities []string `json:"capabilities"`
+	Badges       []string `json:"badges"`
+	Availability string   `json:"availability" enum:"available,unavailable"`
+	Current      bool     `json:"current"`
+	Default      bool     `json:"default"`
+	Shared       bool     `json:"shared"`
+}
+
+type chatModelProviderOpenAPIItem struct {
+	ID     string                     `json:"id"`
+	Name   string                     `json:"name"`
+	Source string                     `json:"source" enum:"own,shared"`
+	Models []chatModelListOpenAPIItem `json:"models"`
+}
+
+type chatModelsOpenAPIResponse struct {
+	Selection           chatModelSelectionOpenAPI      `json:"selection"`
+	DefaultSelection    chatModelSelectionOpenAPI      `json:"default_selection"`
+	Providers           []chatModelProviderOpenAPIItem `json:"providers"`
+	SwitchAllowed       bool                           `json:"switch_allowed"`
+	SwitchBlockedReason string                         `json:"switch_blocked_reason,omitempty" enum:"generating,workflow_running,background_task_running"`
+	AutoAvailable       bool                           `json:"auto_available"`
+}
+
+type patchConversationModelOpenAPIRequest struct {
+	Mode            string `json:"mode" enum:"fixed,auto"`
+	ModelID         string `json:"model_id,omitempty" desc:"Required only when mode is fixed."`
+	ExpectedVersion int64  `json:"expected_version"`
+}
+
+type patchConversationModelOpenAPIResponse struct {
+	Selection chatModelSelectionOpenAPI `json:"selection"`
+}
+
+type sidechatParentPathParams struct {
+	ParentID string `path:"parent_id"`
+}
+
+type sidechatChildPathParams struct {
+	ChildID string `path:"child_id"`
+}
+
+type createSidechatOpenAPIRequest struct {
+	SourceHistoryID string `json:"source_history_id,omitempty"`
+	SourceSeq       *int   `json:"source_seq,omitempty"`
+	SelectedText    string `json:"selected_text,omitempty"`
+	ThinkingDepth   string `json:"thinking_depth,omitempty" enum:"low,medium,high,max"`
+}
+
+type sidechatPublicSourceContextOpenAPI struct {
+	Messages []map[string]any `json:"messages,omitempty"`
+}
+
+type sidechatConversationOpenAPI struct {
+	ID                   string                              `json:"id"`
+	ConversationID       string                              `json:"conversation_id"`
+	DisplayName          string                              `json:"display_name"`
+	ParentConversationID *string                             `json:"parent_conversation_id,omitempty"`
+	RelationType         string                              `json:"relation_type" enum:"sidechat,fork"`
+	SourceHistoryID      *string                             `json:"source_history_id,omitempty"`
+	SourceSeq            *int                                `json:"source_seq,omitempty"`
+	SelectedText         string                              `json:"selected_text,omitempty"`
+	SourceContext        *sidechatPublicSourceContextOpenAPI `json:"source_context,omitempty"`
+	ParentDisplayName    string                              `json:"parent_display_name,omitempty"`
+	SearchConfig         map[string]any                      `json:"search_config,omitempty"`
+	ChatModelMode        *string                             `json:"chat_model_mode,omitempty" enum:"fixed,auto"`
+	ChatModelID          *string                             `json:"chat_model_id,omitempty"`
+	ChatModelVersion     int64                               `json:"chat_model_version"`
+	ThinkingDepth        string                              `json:"thinking_depth,omitempty" enum:"low,medium,high,max"`
+	IsEphemeral          bool                                `json:"is_ephemeral"`
+}
+
+type sidechatConversationOpenAPIResponse struct {
+	Conversation sidechatConversationOpenAPI `json:"conversation"`
+}
+
 type conversationSearchConfigOpenAPIRequest struct {
-	DatasetIDs []string `json:"dataset_ids"`
+	DatasetIDs []string `json:"dataset_ids,omitempty" desc:"Optional. Replace knowledge bases; omit to preserve the current selection."`
+	Creators   []string `json:"creators,omitempty" desc:"Optional. Replace document creator filters; omit to preserve them."`
+	Tags       []string `json:"tags,omitempty" desc:"Optional. Replace document tag filters; omit to preserve them."`
 }
 
 type conversationSearchConfigOpenAPIResponse struct {
@@ -3773,6 +3878,53 @@ func registeredCoreOperations() []openAPIOperation {
 			Responses:   map[int]openAPIResponse{200: resp("Updated chat entry defaults", userChatSettingsOpenAPIResponse{})},
 		},
 		{
+			Method:      "GET",
+			Path:        "/chat/models",
+			Summary:     "List usable chat models and resolve the current selection",
+			Description: "Returns only non-deleted LLMs from verified provider groups that are owned by the current user or explicitly shared through the active shared llm selection. Credentials and endpoint configuration are never returned.",
+			Tags:        []string{"chat"},
+			QueryParams: chatModelsQueryParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Chat model selection and providers", chatModelsOpenAPIResponse{})},
+		},
+		{
+			Method:      "PATCH",
+			Path:        "/conversations/{conversation_id}/model",
+			Summary:     "Switch the conversation chat model",
+			Description: "Uses expected_version for optimistic locking and rejects changes while chat generation, a Workflow, or a background task is active. Fixed mode affects only the llm role from the next request onward.",
+			Tags:        []string{"chat", "conversations"},
+			PathParams:  conversationModelPathParams{},
+			RequestBody: jsonBodyOf(patchConversationModelOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Updated conversation model selection", patchConversationModelOpenAPIResponse{})},
+		},
+		{
+			Method:      "POST",
+			Path:        "/conversations/{parent_id}/sidechat",
+			Summary:     "Create an ephemeral side conversation",
+			Description: "Freezes the selected parent history boundary as read-only model context. The child starts with basic chat only and remains hidden from conversation lists until retained.",
+			Tags:        []string{"chat", "conversations"},
+			PathParams:  sidechatParentPathParams{},
+			RequestBody: jsonBodyOf(createSidechatOpenAPIRequest{}, false),
+			Responses:   map[int]openAPIResponse{200: resp("Created side conversation", sidechatConversationOpenAPIResponse{})},
+		},
+		{
+			Method:      "POST",
+			Path:        "/conversations/{child_id}/retain",
+			Summary:     "Retain a side conversation",
+			Description: "Promotes an ephemeral side conversation into visible history after at least one completed turn.",
+			Tags:        []string{"chat", "conversations"},
+			PathParams:  sidechatChildPathParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Retained side conversation", sidechatConversationOpenAPIResponse{})},
+		},
+		{
+			Method:      "DELETE",
+			Path:        "/conversations/{child_id}/sidechat",
+			Summary:     "Discard an ephemeral side conversation",
+			Description: "Permanently clears an unretained side conversation and its dependent records.",
+			Tags:        []string{"chat", "conversations"},
+			PathParams:  sidechatChildPathParams{},
+			Responses:   map[int]openAPIResponse{204: {Description: "Side conversation discarded"}},
+		},
+		{
 			Method:    "GET",
 			Path:      "/user/ui-preferences",
 			Summary:   "Get current user's UI preferences",
@@ -4019,8 +4171,8 @@ func registeredCoreOperations() []openAPIOperation {
 		{
 			Method:      "PATCH",
 			Path:        "/conversations/{name}:search-config",
-			Summary:     "Update conversation knowledge bases",
-			Description: "Replaces the knowledge bases on an existing conversation while preserving its other search settings.",
+			Summary:     "Update conversation search filters",
+			Description: "Replaces any supplied knowledge-base, creator, or tag filters while preserving omitted search settings.",
 			Tags:        []string{"conversations"},
 			PathParams:  conversationPathParams{},
 			RequestBody: jsonBodyOf(conversationSearchConfigOpenAPIRequest{}, true),

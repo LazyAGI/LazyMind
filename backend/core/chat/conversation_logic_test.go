@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -58,6 +59,27 @@ func TestBuildChatRequestBodyUsesConversationIDDerivedSessionID(t *testing.T) {
 	}
 }
 
+func TestEnsureConversationDoesNotReuseAnotherUsersID(t *testing.T) {
+	database := newPromptTestDB(t)
+	db := database.DB
+	now := time.Now().UTC()
+	if err := db.Create(&orm.Conversation{
+		ID: "foreign-conversation", DisplayName: "Private", ChannelID: "default",
+		BaseModel: orm.BaseModel{
+			CreateUserID: "user-1", CreateUserName: "User 1", CreatedAt: now, UpdatedAt: now,
+		},
+	}).Error; err != nil {
+		t.Fatalf("seed foreign conversation: %v", err)
+	}
+
+	if _, _, err := ensureConversation(
+		context.Background(), db, "foreign-conversation", "", nil, nil,
+		"user-2", "User 2", false, "", nil, nil,
+	); !errors.Is(err, errConversationUnavailable) {
+		t.Fatalf("cross-user conversation error=%v", err)
+	}
+}
+
 func TestEphemeralConversationIsHiddenUntilPromoted(t *testing.T) {
 	database := newPromptTestDB(t)
 	db := database.DB
@@ -68,7 +90,7 @@ func TestEphemeralConversationIsHiddenUntilPromoted(t *testing.T) {
 		context.Background(), db, "preview-chat", "Preview chat", nil, nil,
 		"u1", "User 1", false, "", map[string]any{
 			"ephemeral": true, "source_type": "pdf_preview", "source_document_id": "doc-1",
-		},
+		}, nil,
 	)
 	if err != nil || !conversation.IsEphemeral || conversation.EphemeralExpiresAt == nil ||
 		conversation.SourceType != "pdf_preview" || conversation.SourceDocumentID != "doc-1" {
@@ -211,7 +233,7 @@ func TestPersistentEphemeralConversationHasNoExpiry(t *testing.T) {
 		"u1", "User 1", false, "", map[string]any{
 			"ephemeral": true, "persistent_ephemeral": true,
 			"source_type": "pdf_preview", "source_document_id": "doc-1",
-		},
+		}, nil,
 	)
 	if err != nil {
 		t.Fatalf("create persistent ephemeral conversation: %v", err)
@@ -1031,6 +1053,112 @@ func TestChatHistoryResponseIncludesThinkingDuration(t *testing.T) {
 	}
 	if got := item["reasoning_content"]; got != "分析并调用工具" {
 		t.Fatalf("reasoning_content: got %#v", got)
+	}
+}
+
+func TestArchiveRegeneratedFailedRunAttemptsPreservesOrderAndExt(t *testing.T) {
+	firstCreatedAt := time.Date(2026, time.August, 31, 1, 2, 3, 0, time.FixedZone("UTC+8", 8*60*60))
+	first := orm.ChatHistory{
+		Result:      "first partial answer",
+		RunID:       "run-first",
+		RunStatus:   "failed",
+		RunTerminal: json.RawMessage(`{"status":"failed","reason":"model_failure","code":"authentication_failed","partial_output":true,"provider_raw_error":"secret-first"}`),
+		Ext:         json.RawMessage(`{"custom":{"keep":true},"input":[{"text":"old"}],"model_route":{"mode":"auto","strategy":"structured_policy_v1","task_class":"simple","reason":"simple_task","model_id":"model-first","provider_id":"provider-first","provider_name":"First","model_name":"first-model","source":"own"}}`),
+		TimeMixin:   orm.TimeMixin{CreateTime: firstCreatedAt},
+	}
+	archived := archiveRegeneratedFailedRunAttempt(
+		json.RawMessage(`{"input":[{"text":"current"}],"new_field":"keep-new"}`),
+		chatPersistTarget{IsRegeneration: true, Existing: &first},
+	)
+
+	secondCreatedAt := firstCreatedAt.Add(time.Minute)
+	second := orm.ChatHistory{
+		Result:      "second partial answer",
+		RunID:       "run-second",
+		RunStatus:   "interrupted",
+		RunTerminal: json.RawMessage(`{"status":"interrupted","reason":"model_failure","code":"rate_limited","partial_output":true,"provider_raw_error":"secret-second"}`),
+		Ext: mergeChatModelRouteIntoExt(archived, map[string]any{
+			chatModelRouteBodyKey: &chatModelRoute{
+				Mode: chatModelModeAuto, Strategy: chatModelRouteStrategy,
+				TaskClass: autoChatTaskComplex, Reason: "complex_task",
+				ModelID: "model-second", ProviderID: "provider-second",
+				ProviderName: "Second", ModelName: "second-model", Source: "own",
+			},
+		}),
+		TimeMixin: orm.TimeMixin{CreateTime: secondCreatedAt},
+	}
+	archived = archiveRegeneratedFailedRunAttempt(
+		json.RawMessage(`{"input":[{"text":"latest"}]}`),
+		chatPersistTarget{IsRegeneration: true, Existing: &second},
+	)
+
+	var payload struct {
+		Custom   map[string]any     `json:"custom"`
+		Input    []map[string]any   `json:"input"`
+		NewField string             `json:"new_field"`
+		Attempts []failedRunAttempt `json:"failed_run_attempts"`
+	}
+	if err := json.Unmarshal(archived, &payload); err != nil {
+		t.Fatalf("decode archived history ext: %v", err)
+	}
+	if keep, _ := payload.Custom["keep"].(bool); !keep || payload.NewField != "keep-new" {
+		t.Fatalf("existing ext fields were lost: %#v", payload)
+	}
+	if len(payload.Input) != 1 || payload.Input[0]["text"] != "latest" {
+		t.Fatalf("current ext did not override stale input: %#v", payload.Input)
+	}
+	if len(payload.Attempts) != 2 {
+		t.Fatalf("expected two failed attempts, got %#v", payload.Attempts)
+	}
+	if payload.Attempts[0].RunID != "run-first" || payload.Attempts[0].RunStatus != "failed" || payload.Attempts[0].Result != "first partial answer" {
+		t.Fatalf("unexpected first failed attempt: %#v", payload.Attempts[0])
+	}
+	if payload.Attempts[1].RunID != "run-second" || payload.Attempts[1].RunStatus != "interrupted" || payload.Attempts[1].Result != "second partial answer" {
+		t.Fatalf("unexpected second failed attempt: %#v", payload.Attempts[1])
+	}
+	if payload.Attempts[0].ModelRoute == nil || payload.Attempts[0].ModelRoute.ModelID != "model-first" ||
+		payload.Attempts[1].ModelRoute == nil || payload.Attempts[1].ModelRoute.ModelID != "model-second" {
+		t.Fatalf("failed attempt routes were not preserved: %#v", payload.Attempts)
+	}
+	if !payload.Attempts[0].CreateTime.Equal(firstCreatedAt.UTC()) || !payload.Attempts[1].CreateTime.Equal(secondCreatedAt.UTC()) {
+		t.Fatalf("failed attempt timestamps changed: %#v", payload.Attempts)
+	}
+	if strings.Contains(string(archived), "provider_raw_error") || strings.Contains(string(archived), "secret-") {
+		t.Fatalf("archived history leaked provider payload: %s", archived)
+	}
+}
+
+func TestChatHistoryResponseIncludesSanitizedFailedAttempts(t *testing.T) {
+	item := chatHistoryToResponseItem(orm.ChatHistory{
+		Ext: json.RawMessage(`{
+			"failed_run_attempts":[{
+				"result":"partial answer",
+				"run_id":"run-1",
+				"run_status":"failed",
+				"run_terminal":{"status":"failed","reason":"model_failure","code":"authentication_failed","partial_output":true,"provider_raw_error":"do-not-return"},
+				"model_route":{"mode":"auto","strategy":"structured_policy_v1","task_class":"simple","reason":"simple_task","model_id":"model-1","provider_id":"provider-1","provider_name":"Provider","model_name":"Model","source":"own"},
+				"create_time":"2026-08-31T01:02:03Z"
+			}],
+			"provider_raw_error":"also-do-not-return"
+		}`),
+	})
+
+	attempts, ok := item["failed_attempts"].([]failedRunAttempt)
+	if !ok || len(attempts) != 1 {
+		t.Fatalf("failed attempts missing from history response: %#v", item["failed_attempts"])
+	}
+	if attempts[0].RunID != "run-1" || attempts[0].RunTerminal.Code != "authentication_failed" {
+		t.Fatalf("unexpected failed attempt response: %#v", attempts[0])
+	}
+	if attempts[0].ModelRoute == nil || attempts[0].ModelRoute.ModelID != "model-1" {
+		t.Fatalf("failed attempt route missing from history response: %#v", attempts[0])
+	}
+	encoded, err := json.Marshal(item)
+	if err != nil {
+		t.Fatalf("encode history response: %v", err)
+	}
+	if strings.Contains(string(encoded), "provider_raw_error") || strings.Contains(string(encoded), "do-not-return") {
+		t.Fatalf("history response leaked provider payload: %s", encoded)
 	}
 }
 

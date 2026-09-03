@@ -25,10 +25,11 @@ VERIFY_SEQUENCE_OAUTH = SKILL_ROOT / "scripts" / "verify-sequence-oauth.py"
 
 def run_python(script: Path, *args: str | Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [sys.executable, str(script), *map(str, args)],
+        [sys.executable, "-X", "utf8", str(script), *map(str, args)],
         check=False,
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )
 
 
@@ -462,6 +463,7 @@ def test_svg_export_is_standalone_accessible_and_non_destructive(tmp_path: Path)
     assert result["status"] == "ok"
     assert result["output"] == str(output.resolve())
     assert result["bytes"] == output.stat().st_size
+    assert b"\r\n" not in output.read_bytes()
     assert source.read_text(encoding="utf-8") == source_text
 
     root = ET.parse(output).getroot()
@@ -475,6 +477,11 @@ def test_svg_export_is_standalone_accessible_and_non_destructive(tmp_path: Path)
     refused = run_python(EXPORT_SVG, source, "--out", output)
     assert refused.returncode == 2
     assert "already exists" in refused.stderr
+
+    overwritten = run_python(EXPORT_SVG, source, "--out", output, "--overwrite")
+    assert overwritten.returncode == 0, overwritten.stdout + overwritten.stderr
+    assert json.loads(overwritten.stdout)["bytes"] == output.stat().st_size
+    assert b"\r\n" not in output.read_bytes()
 
 
 def test_svg_export_turns_motion_html_into_complete_static_frame(tmp_path: Path) -> None:

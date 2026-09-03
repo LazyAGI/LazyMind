@@ -16,7 +16,7 @@ class FakeSSE {
   emit(result: Record<string, unknown>) {
     this.listeners.get("message")?.({
       data: JSON.stringify({ result }),
-    } as CustomEvent);
+    } as unknown as CustomEvent);
   }
   emitEvent(type: "error" | "timeout") {
     this.listeners.get(type)?.({ type } as CustomEvent);
@@ -44,6 +44,58 @@ const terminal = (
 });
 
 describe("StreamManager runtime terminal", () => {
+  it("keeps an opted-in side-chat stream alive beside the main stream", () => {
+    const manager = new StreamManager();
+    const main = new FakeSSE();
+    const side = new FakeSSE();
+
+    manager.registerStream("main", main as any, {});
+    manager.registerStream("side", side as any, {}, undefined, {
+      allowConcurrent: true,
+    });
+
+    expect(manager.hasActiveStream("main")).toBe(true);
+    expect(manager.hasActiveStream("side")).toBe(true);
+    expect(main.readyState).toBe(1);
+    expect(side.readyState).toBe(1);
+  });
+
+  it("closes a side-chat stream without interrupting the main stream", () => {
+    const manager = new StreamManager();
+    const main = new FakeSSE();
+    const side = new FakeSSE();
+
+    manager.registerStream("main", main as any, {});
+    manager.registerStream("side", side as any, {}, undefined, {
+      allowConcurrent: true,
+    });
+    manager.closeAndCleanup("side");
+
+    expect(manager.hasActiveStream("main")).toBe(true);
+    expect(manager.hasActiveStream("side")).toBe(false);
+    expect(main.readyState).toBe(1);
+    expect(side.readyState).toBe(2);
+  });
+
+  it("preserves legacy main-chat switching while a side chat is active", () => {
+    const manager = new StreamManager();
+    const firstMain = new FakeSSE();
+    const side = new FakeSSE();
+    const nextMain = new FakeSSE();
+
+    manager.registerStream("main-a", firstMain as any, {});
+    manager.registerStream("side", side as any, {}, undefined, {
+      allowConcurrent: true,
+    });
+    manager.registerStream("main-b", nextMain as any, {});
+
+    expect(manager.hasActiveStream("main-a")).toBe(false);
+    expect(manager.hasActiveStream("main-b")).toBe(true);
+    expect(manager.hasActiveStream("side")).toBe(true);
+    expect(firstMain.readyState).toBe(2);
+    expect(side.readyState).toBe(1);
+  });
+
   it("finishes a legacy stream from its terminal finish reason", () => {
     const manager = new StreamManager();
     const stream = new FakeSSE();
@@ -88,7 +140,7 @@ describe("StreamManager runtime terminal", () => {
           runtime_event: terminal("r1"),
         },
       }),
-    } as CustomEvent;
+    } as unknown as CustomEvent;
 
     manager.registerStream("real-conv", stream as any, {}, firstFrame);
 

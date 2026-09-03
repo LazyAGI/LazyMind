@@ -8,6 +8,7 @@ import type { SendMessageParams } from "../ChatInput/types";
 import type { ChatMention } from "../ChatInput/MentionEditor";
 import type { ChatConfig } from "../ChatConfigs";
 import type { ThinkingDepth } from "@/modules/chat/store/chatThink";
+import type { ChatModelRoute } from "@/api/generated/core-client";
 
 export interface ChatImperativeProps {
   replaceMessageList: (id: string, data: any[]) => void;
@@ -29,6 +30,7 @@ export interface ChatImperativeProps {
     conversationId: string,
     driverMessage: string,
   ) => void;
+  focusInput?: () => void;
 }
 
 export interface ChatContainerProps {
@@ -56,6 +58,7 @@ export interface ChatContainerProps {
   setChatConfig?: (chatConfig: ChatConfig) => void;
   setChatConfigFn: (chatConfig: ChatConfig) => void;
   knowledgeRefreshKey?: number | string;
+  allowKnowledgeBaseSelection?: boolean;
   embeddingReady?: boolean | null;
   multimodalEmbeddingReady?: boolean | null;
   rerankReady?: boolean | null;
@@ -71,7 +74,21 @@ export interface ChatContainerProps {
   showThinkingDepth?: boolean;
   showSkillDeposit?: boolean;
   showConversationConfig?: boolean;
+  showModelSelector?: boolean;
   fixedThinkingDepth?: ThinkingDepth;
+  /** Isolates this container's SSE lifecycle from the main conversation. */
+  concurrentStream?: boolean;
+  /** Controlled thinking depth for embedded chat surfaces. */
+  thinkingDepth?: ThinkingDepth;
+  onThinkingDepthChange?: (thinkingDepth: ThinkingDepth) => void;
+  onStreamingChange?: (streaming: boolean) => void;
+  /** Reports the gap between a submitted request and an attached SSE stream. */
+  onRequestPendingChange?: (pending: boolean) => void;
+  onOpenSideChat?: (source: {
+    selectedText?: string;
+    historyId?: string;
+    sequence?: number;
+  }) => void;
 }
 
 export interface ChatMessage {
@@ -93,6 +110,7 @@ export interface ChatMessage {
     retry_index: number;
     max_attempts: number;
   };
+  model_route?: ChatModelRoute;
   run_terminal?: {
     status: "completed" | "interrupted" | "failed" | "cancelled";
     reason:
