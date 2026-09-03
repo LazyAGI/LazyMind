@@ -1,18 +1,24 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Task } from './api';
 import TaskDetail from './TaskDetail';
+import { getTask } from './api';
+import { axiosInstance } from '@/components/request';
+
+vi.mock('./api', () => ({ getTask: vi.fn() }));
 
 const translations: Record<string, string> = {
   'common.cancel': '取消',
   'common.close': '关闭',
+  'common.retry': '重试',
   'settingsPage.recovery.archiveAction': '归档',
   'settingsPage.recovery.moveToTrash': '移入回收站',
   'taskCenter.conversationUnavailable': '关联对话尚未就绪，暂时无法打开',
   'taskCenter.createdAt': '创建时间',
   'taskCenter.executionSteps': '执行步骤',
   'taskCenter.moreActions': '更多操作',
+  'taskCenter.loadError': '加载失败',
   'taskCenter.noDescription': '暂无任务说明',
   'taskCenter.noSteps': '暂无执行步骤',
   'taskCenter.noTitle': '（无标题）',
@@ -20,6 +26,7 @@ const translations: Record<string, string> = {
   'taskCenter.statusCompleted': '已完成',
   'taskCenter.statusRunning': '进行中',
   'taskCenter.statusSucceeded': '已完成',
+  'taskCenter.statusWaiting': '等待审批',
   'taskCenter.stepFallback': '执行步骤 {{index}}',
   'taskCenter.stepPrepare': '准备任务',
   'taskCenter.taskGoal': '任务目标',
@@ -60,11 +67,68 @@ const task: Task = {
   updated_at: '2026-09-02T02:05:00Z',
 };
 
-afterEach(() => cleanup());
+beforeEach(() => {
+  vi.mocked(getTask).mockReset().mockResolvedValue(task);
+  vi.mocked(axiosInstance.get).mockReset().mockResolvedValue({ data: {} });
+});
+afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 describe('TaskDetail', () => {
-  it('shows localized task metadata and workflow steps without raw identifiers', () => {
+  it('refreshes a stale selected task and continues polling while the workflow waits', async () => {
+    vi.useFakeTimers();
+    const initial = { ...task, steps: [] };
+    const current = { ...task, workflow_session_id: 'writer', status: 'waiting' };
+    vi.mocked(getTask).mockResolvedValueOnce(current).mockResolvedValue({ ...current, status: 'succeeded' });
+    render(<TaskDetail task={initial} onClose={vi.fn()} onOpenConversation={vi.fn()} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(getTask).toHaveBeenCalledWith(task.id);
+    expect(screen.getByText('准备任务')).toBeInTheDocument();
+    expect(document.querySelector('.task-detail-status')).toHaveTextContent('等待审批');
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(document.querySelector('.task-detail-status')).toHaveTextContent('已完成');
+    const calls = vi.mocked(getTask).mock.calls.length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
+    expect(getTask).toHaveBeenCalledTimes(calls);
+  });
+
+  it('ignores a late detail response after switching tasks', async () => {
+    let resolveOld!: (value: Task) => void;
+    vi.mocked(getTask).mockReturnValueOnce(new Promise((resolve) => { resolveOld = resolve; }));
+    const next = { ...task, id: 'task-2', conversation_title: '另一个任务', title: '另一个目标' };
+    vi.mocked(getTask).mockResolvedValue(next);
+    const { rerender } = render(<TaskDetail task={task} onClose={vi.fn()} onOpenConversation={vi.fn()} />);
+    rerender(<TaskDetail task={next} onClose={vi.fn()} onOpenConversation={vi.fn()} />);
+    await waitFor(() => expect(getTask).toHaveBeenCalledWith(next.id));
+    await act(async () => { resolveOld({ ...task, status: 'failed' }); });
+    expect(document.querySelector('.task-detail-drawer-title')).toHaveTextContent('另一个任务');
+    expect(document.querySelector('.task-detail-status')).toHaveTextContent('进行中');
+  });
+
+  it('keeps loaded steps on refresh failure and supports retry', async () => {
+    vi.useFakeTimers();
+    vi.mocked(getTask).mockResolvedValueOnce(task).mockRejectedValueOnce(new Error('offline')).mockResolvedValue({ ...task, status: 'succeeded' });
+    render(<TaskDetail task={{ ...task, steps: [] }} onClose={vi.fn()} onOpenConversation={vi.fn()} />);
+    await act(async () => { await Promise.resolve(); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(screen.getByRole('alert')).toHaveTextContent('加载失败');
+    expect(screen.getByText('准备任务')).toBeInTheDocument();
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /重\s*试/ })); });
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(document.querySelector('.task-detail-status')).toHaveTextContent('已完成');
+  });
+
+  it('stops polling when the drawer closes', async () => {
+    vi.useFakeTimers();
+    const { rerender } = render(<TaskDetail task={task} onClose={vi.fn()} onOpenConversation={vi.fn()} />);
+    await act(async () => { await Promise.resolve(); });
+    rerender(<TaskDetail task={null} onClose={vi.fn()} onOpenConversation={vi.fn()} />);
+    await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
+    expect(getTask).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows localized task metadata and workflow steps without raw identifiers', async () => {
     render(<TaskDetail task={task} onClose={vi.fn()} onOpenConversation={vi.fn()} />);
+    await act(async () => { await Promise.resolve(); });
 
     expect(document.querySelector('.task-detail-drawer-title')).toHaveTextContent('工作流任务');
     expect(screen.getByText('准备任务')).toBeInTheDocument();

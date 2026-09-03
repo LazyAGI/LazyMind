@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Button, Drawer, Dropdown, Empty, Modal, Tag, Tooltip } from 'antd';
+import { Alert, Button, Drawer, Dropdown, Empty, Modal, Tag, Tooltip } from 'antd';
 import type { MenuProps } from 'antd';
 import { CheckCircleFilled, CloseOutlined, DeleteOutlined, EllipsisOutlined, FolderOutlined, SyncOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import type { Task } from './api';
+import { getTask } from './api';
 import { axiosInstance, BASE_URL } from '@/components/request';
 
 interface TaskDetailProps {
@@ -20,8 +21,36 @@ const containsChinese = (value: string) => /[\u3400-\u4dbf\u4e00-\u9fff]/.test(v
 
 type PlannedStep = { step_id: string; title?: string; status: string };
 
-export default function TaskDetail({ task, onClose, onOpenConversation, onOpenGraph, onArchive, onDelete }: TaskDetailProps) {
+export default function TaskDetail({ task: selectedTask, onClose, onOpenConversation, onOpenGraph, onArchive, onDelete }: TaskDetailProps) {
   const { t } = useTranslation();
+  const [detail, setDetail] = useState<Task | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [retryVersion, setRetryVersion] = useState(0);
+  const task = detail?.id === selectedTask?.id ? detail : selectedTask;
+  const selectedID = selectedTask?.id;
+  useEffect(() => {
+    setDetail((previous) => previous?.id === selectedID ? previous : null);
+    setLoadFailed(false);
+    if (!selectedID) return;
+    let active = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    async function refresh() {
+      let terminal = true;
+      try {
+        const current = await getTask(selectedID!);
+        if (!active) return;
+        setDetail(current);
+        setLoadFailed(false);
+        terminal = ['succeeded', 'completed', 'failed', 'canceled', 'skipped'].includes(current.status);
+      } catch {
+        if (!active) return;
+        setLoadFailed(true);
+      }
+      if (active && !terminal) timer = setTimeout(refresh, 5000);
+    }
+    void refresh();
+    return () => { active = false; clearTimeout(timer); };
+  }, [selectedID, retryVersion]);
   const [plannedSteps, setPlannedSteps] = useState<PlannedStep[] | null>(null);
   useEffect(() => {
     setPlannedSteps(null);
@@ -39,10 +68,10 @@ export default function TaskDetail({ task, onClose, onOpenConversation, onOpenGr
           status: current.includes(id) ? 'running' : nodes[id]?.execution || 'pending',
         })));
       })
-      .catch(() => setPlannedSteps(null));
+      .catch(() => { if (active) setPlannedSteps(null); });
     return () => { active = false; };
   }, [task]);
-  const steps = useMemo(() => plannedSteps ?? task?.steps ?? [], [plannedSteps, task]);
+  const steps = useMemo(() => plannedSteps?.length ? plannedSteps : task?.steps ?? [], [plannedSteps, task]);
   const taskName = task?.conversation_title || task?.title || t('taskCenter.noTitle');
   const actions: NonNullable<MenuProps['items']> = task ? [
     ...(onArchive ? [{ key: 'archive', icon: <FolderOutlined />, label: t('settingsPage.recovery.archiveAction'), disabled: !task.conversation_id }] : []),
@@ -89,7 +118,8 @@ export default function TaskDetail({ task, onClose, onOpenConversation, onOpenGr
     >
       {task ? (
         <div className='task-detail-content'>
-          <div className='task-detail-status'>
+          {loadFailed ? <Alert type='warning' showIcon message={t('taskCenter.loadError')} action={<Button size='small' onClick={() => setRetryVersion((value) => value + 1)}>{t('common.retry')}</Button>} /> : null}
+          <div className='task-detail-status' aria-live='polite'>
             <StatusTag status={task.status} onClick={task.workflow_session_id && onOpenGraph ? () => onOpenGraph(task.workflow_session_id!) : undefined} />
           </div>
 
