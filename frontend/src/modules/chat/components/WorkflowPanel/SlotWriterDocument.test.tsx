@@ -23,15 +23,24 @@ vi.mock('./FilePreviewDrawer', () => ({
 
 vi.mock('./MarkdownArtifactEditor', () => ({
   MarkdownArtifactEditor: ({
+    markdown,
     onSave,
     sourceRevision,
+    maxHeight,
+    editingKey,
   }: {
+    markdown: string;
     onSave: (markdown: string, revision: number, mode: 'draft') => Promise<unknown>;
     sourceRevision: number;
+    maxHeight?: number;
+    editingKey?: string;
   }) => (
     <button
       type='button'
+      data-markdown={markdown}
       data-source-revision={sourceRevision}
+      data-max-height={maxHeight}
+      data-editing-key={editingKey}
       onClick={() => void onSave('# Edited draft', sourceRevision, 'draft')}
     >
       save markdown draft
@@ -257,7 +266,83 @@ describe('SlotWriterDocument render refresh', () => {
 });
 
 describe('SlotText editing', () => {
-  it('keeps the preview footprint and focuses the clicked text', () => {
+  it('marks json-block slots as their own scroll container', () => {
+    const slot: SlotRevision = {
+      slot_id: 'generation_parameters',
+      revision: 1,
+      selected: true,
+      slot: 'generation_parameters',
+      created_at: '2026-09-01T00:00:00Z',
+      artifact_value: {
+        count_unit: 'chinese_characters',
+        paper_type: 'research',
+        word_target: 1000,
+      },
+      content_type: 'json',
+    };
+
+    const { container } = render(
+      <SlotRenderer
+        slot={slot}
+        widget={{ widgetType: 'json-block', readOnly: true, collapsed: false }}
+        sessionId='academic-session'
+        slotId='generation_parameters'
+        readOnly
+      />,
+    );
+
+    expect(container.querySelector('.workflow-slot--json-block')).toBeInTheDocument();
+    expect(screen.getByText(/chinese_characters/)).toBeInTheDocument();
+  });
+
+  it('reuses the Markdown editor and saves through the text-slot revision contract', async () => {
+    const patchSlotItemValue = vi.fn().mockResolvedValue(2);
+    useWorkflowStore.setState({ patchSlotItemValue });
+    const slot: SlotRevision = {
+      slot_id: 'materials_summary',
+      revision: 1,
+      selected: true,
+      slot: 'materials_summary',
+      created_at: '2026-08-31T00:00:00Z',
+      artifact_value: { text: '# Initial Markdown' },
+      content_type: 'text',
+    };
+
+    render(
+      <SlotRenderer
+        slot={slot}
+        widget={{ widgetType: 'text-markdown', maxHeight: 680 }}
+        sessionId='materials-session'
+        slotId='materials_summary'
+      />,
+    );
+
+    const editor = screen.getByRole('button', { name: 'save markdown draft' });
+    expect(editor).toHaveAttribute('data-markdown', '# Initial Markdown');
+    expect(editor).toHaveAttribute('data-source-revision', '1');
+    expect(editor).toHaveAttribute('data-max-height', '680');
+    expect(editor).toHaveAttribute(
+      'data-editing-key',
+      'materials-session:materials_summary:-1:markdown',
+    );
+
+    fireEvent.click(editor);
+
+    await waitFor(() => {
+      expect(patchSlotItemValue).toHaveBeenCalledWith(
+        'materials-session',
+        'materials_summary',
+        -1,
+        { text: '# Edited draft' },
+        'text',
+        'draft',
+        1,
+      );
+      expect(editor).toHaveAttribute('data-source-revision', '2');
+    });
+  });
+
+  it('keeps the preview footprint and focuses the clicked plain text', () => {
     const text = '## First line\n\n**middle target**\n\nlast line';
     const targetOffset = text.indexOf('middle target') + 7;
     const slot: SlotRevision = {
@@ -273,7 +358,7 @@ describe('SlotText editing', () => {
       <div className='workflow-panel__tab-content'>
         <SlotRenderer
           slot={slot}
-          widget={{ widgetType: 'text-markdown' }}
+          widget={{ widgetType: 'text-single' }}
           sessionId='materials-session'
           slotId='materials_summary'
         />
@@ -282,7 +367,7 @@ describe('SlotText editing', () => {
     const scrollContainer = container.querySelector<HTMLElement>('.workflow-panel__tab-content')!;
     const slotElement = container.querySelector<HTMLElement>('.workflow-slot--text')!;
     const preview = container.querySelector<HTMLElement>('.workflow-slot__text--editable')!;
-    const renderedTextNode = preview.querySelector('div')!.firstChild!;
+    const renderedTextNode = preview.firstChild!;
     renderedTextNode.textContent = 'middle target';
     scrollContainer.scrollTop = 84;
     vi.spyOn(preview, 'getBoundingClientRect').mockReturnValue({

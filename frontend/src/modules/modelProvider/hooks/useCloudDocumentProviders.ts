@@ -33,6 +33,7 @@ import {
   CLOUD_DOCUMENTS_FEISHU_PATH,
   CLOUD_DOCUMENTS_GOOGLE_DRIVE_PATH,
   CLOUD_DOCUMENTS_LOCAL_PATH,
+  CLOUD_DOCUMENTS_MAIL_PATH,
   CLOUD_DOCUMENTS_PATH,
 } from "../utils/cloudDocumentUrls";
 import { useLocalDataSourceSettings } from "./useLocalDataSourceSettings";
@@ -65,6 +66,9 @@ export function useCloudDocumentProviders() {
   >([]);
   const [googleDriveConnection, setGoogleDriveConnection] =
     useState<ManagementContext["notionOauthConnection"]>(null);
+  const [mailConnections, setMailConnections] = useState<
+    NonNullable<ManagementContext["notionOauthConnection"]>[]
+  >([]);
   const [oauthConnection, setOauthConnection] = useState<ManagementContext["oauthConnection"]>(null);
   const [oauthState, setOauthState] = useState<OAuthState>("pending");
   const [connectionVerified, setConnectionVerified] = useState(false);
@@ -96,6 +100,11 @@ export function useCloudDocumentProviders() {
   const isGoogleDriveAuthValid =
     googleDriveConnection?.status === "connected" &&
     Boolean(googleDriveConnection.connectionId);
+  const isMailConnected = mailConnections.length > 0;
+  const mailConnectionLabel = mailConnections
+    .map((item) => item.accountName)
+    .filter(Boolean)
+    .join("、");
 
   const ctx = {} as ManagementContext;
   Object.assign(ctx, {
@@ -220,6 +229,29 @@ export function useCloudDocumentProviders() {
     }
   };
 
+  const refreshMailConnection = async () => {
+    try {
+      const connected: NonNullable<ManagementContext["notionOauthConnection"]>[] = [];
+      for (const provider of ["gmailimap", "qqmail", "qqexmail", "netease163", "neteaseqiye"] as const) {
+        const response =
+          await dataSourceCloudOauthApi.listConnectionsApiAuthserviceV1CloudConnectionsGet({
+            provider,
+            status: "ACTIVE",
+          });
+        for (const connection of getCloudConnectionItems(response.data)
+          .map((item) => mapCloudConnectionToDataSourceConnection(item, provider as never))
+          .filter(
+            (item) => item.status === "connected" && Boolean(item.connectionId),
+          )) {
+          connected.push(connection);
+        }
+      }
+      setMailConnections(connected);
+    } catch {
+      setMailConnections([]);
+    }
+  };
+
   const refreshGoogleDriveConnection = async () => {
     try {
       const response =
@@ -248,6 +280,7 @@ export function useCloudDocumentProviders() {
         ctx.refreshFeishuAuthAccounts(),
         ctx.refreshNotionAuthConnection(),
         refreshGoogleDriveConnection(),
+        refreshMailConnection(),
       ]);
     } finally {
       setOauthLoading(false);
@@ -341,6 +374,10 @@ export function useCloudDocumentProviders() {
     navigate(CLOUD_DOCUMENTS_GOOGLE_DRIVE_PATH);
   };
 
+  const handleManageMail = () => {
+    navigate(CLOUD_DOCUMENTS_MAIL_PATH);
+  };
+
   const handleOpenNotionSetup = () => {
     openCloudSetupModal("notion", "auth");
   };
@@ -424,6 +461,8 @@ export function useCloudDocumentProviders() {
     isFeishuAuthValid,
     isNotionAuthValid,
     isGoogleDriveAuthValid,
+    isMailConnected,
+    mailConnectionLabel,
     isFeishuSetupReady,
     isNotionSetupReady,
     validFeishuAccounts,
@@ -432,6 +471,7 @@ export function useCloudDocumentProviders() {
     handleManageFeishuAuth,
     handleManageLocalSource,
     handleManageGoogleDrive,
+    handleManageMail,
     handleOpenNotionSetup,
     openCloudSetupModal,
     handleSaveFeishuSetup,

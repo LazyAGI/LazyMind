@@ -29,7 +29,7 @@ func testRepo(t *testing.T) *Repository {
 
 func createTestConversation(t *testing.T, repo *Repository, id, owner string) {
 	t.Helper()
-	if err := repo.db.AutoMigrate(&orm.Conversation{}, &orm.WorkflowSession{}); err != nil {
+	if err := repo.db.AutoMigrate(&orm.Conversation{}, &orm.WorkflowSession{}, &orm.TaskCenterTask{}); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()

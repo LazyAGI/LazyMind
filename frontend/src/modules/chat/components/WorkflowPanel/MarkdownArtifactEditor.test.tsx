@@ -29,6 +29,14 @@ vi.mock('@mdxeditor/editor', async () => {
     const toolbar = plugins.find((plugin) => plugin.toolbarContents)?.toolbarContents?.();
     const hasInternalReference = renderedMarkdown.includes('[beta](#block-sec-1)');
     const hasSourceReference = renderedMarkdown.includes('[1](#source-4.1)');
+    React.useEffect(() => {
+      if (renderedMarkdown.includes('<!-- unsupported -->')) {
+        (props.onError as ((payload: { error: string; source: string }) => void) | undefined)?.({
+          error: 'MDX parse error',
+          source: renderedMarkdown,
+        });
+      }
+    }, [props.onError, renderedMarkdown]);
     return (
       <div
         className={String(props.className ?? '')}
@@ -94,6 +102,7 @@ vi.mock('@ant-design/icons', () => ({
   LinkOutlined: () => null,
   MenuFoldOutlined: () => null,
   MenuUnfoldOutlined: () => null,
+  MoreOutlined: () => null,
   PictureOutlined: () => null,
 }));
 
@@ -206,7 +215,7 @@ function Harness() {
 
 function ReferenceHarness({ onSave }: { onSave: (markdown: string, revision: number) => Promise<number> }) {
   const [source, setSource] = useState({
-    markdown: 'Alpha [beta](#block-sec-1) gamma\n\n<a id="block-sec-1"></a>\n## 1 Target',
+    markdown: '**Alpha** [beta](#block-sec-1) gamma\n\n<a id="block-sec-1"></a>\n## 1 Target',
     revision: 7,
   });
   return (
@@ -277,6 +286,98 @@ afterEach(() => {
   } else {
     Reflect.deleteProperty(window.Range.prototype, 'getClientRects');
   }
+});
+
+describe('MarkdownArtifactEditor MDX compatibility', () => {
+  it('renders PDF text without passing HTML page comments to the MDX parser', () => {
+    const { container } = render(
+      <MarkdownArtifactEditor
+        markdown={'<!-- 第 1 页 -->\n\n招标文件正文'}
+        sourceRevision={1}
+        onSave={async () => 1}
+      />,
+    );
+
+    expect(
+      container.querySelector<HTMLElement>('.writer-markdown-editor__surface')?.dataset.markdown,
+    ).toBe('<a id="writer-page-marker-1" />\n\n招标文件正文');
+  });
+
+  it('shows the original text when the MDX parser rejects a document', async () => {
+    render(
+      <MarkdownArtifactEditor
+        markdown={'<!-- unsupported -->\n\n正文仍需可见'}
+        sourceRevision={1}
+        onSave={async () => 1}
+      />,
+    );
+
+    const fallback = await screen.findByRole('alert');
+    expect(fallback).toHaveTextContent('chat.writerMarkdown.renderFallback');
+    expect(fallback).toHaveTextContent('正文仍需可见');
+  });
+
+  it('renders outline controls only when the document has a heading', () => {
+    const withoutHeading = render(
+      <MarkdownArtifactEditor
+        markdown='正文内容'
+        sourceRevision={1}
+        onSave={async () => 1}
+      />,
+    );
+
+    expect(withoutHeading.container.querySelector('.writer-markdown-editor'))
+      .toHaveClass('writer-markdown-editor--no-outline');
+    expect(
+      screen.queryByRole('button', { name: 'chat.writerIR.expandOutline' }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText('chat.writerIR.noHeadings')).not.toBeInTheDocument();
+
+    withoutHeading.unmount();
+    render(
+      <MarkdownArtifactEditor
+        markdown='# 文档标题'
+        sourceRevision={1}
+        onSave={async () => 1}
+      />,
+    );
+
+    expect(
+      screen.getByRole('button', { name: 'chat.writerIR.expandOutline' }),
+    ).toBeInTheDocument();
+  });
+
+  it('renders plain-text JSON braces without changing inline or fenced code', () => {
+    const markdown = [
+      '配图：{"reference_image_index": 0}',
+      '',
+      '行内代码：`{"keep": true}`',
+      '',
+      '```json',
+      '{"keep": true}',
+      '```',
+    ].join('\n');
+
+    const { container } = render(
+      <MarkdownArtifactEditor
+        markdown={markdown}
+        sourceRevision={1}
+        onSave={async () => 1}
+      />,
+    );
+
+    expect(
+      container.querySelector<HTMLElement>('.writer-markdown-editor__surface')?.dataset.markdown,
+    ).toBe([
+      '配图：\\{"reference_image_index": 0\\}',
+      '',
+      '行内代码：`{"keep": true}`',
+      '',
+      '```json',
+      '{"keep": true}',
+      '```',
+    ].join('\n'));
+  });
 });
 
 describe('MarkdownArtifactEditor rewrite selection highlight', () => {
@@ -596,6 +697,31 @@ describe('MarkdownArtifactEditor rewrite selection highlight', () => {
     expect(referenceTrigger.getAttribute('aria-expanded')).toBe('false');
   });
 
+  it('keeps overflow actions available from the compact toolbar menu', async () => {
+    const { container } = render(<Harness />);
+    const paragraph = container.querySelector('p');
+    const textNode = paragraph?.firstChild;
+    expect(textNode).not.toBeNull();
+
+    const range = document.createRange();
+    range.setStart(textNode!, 0);
+    range.setEnd(textNode!, 5);
+    const browserSelection = window.getSelection();
+    browserSelection?.removeAllRanges();
+    browserSelection?.addRange(range);
+    fireEvent.mouseUp(paragraph!);
+
+    const moreActions = await screen.findByTitle('chat.writerMarkdown.moreActions');
+    expect(moreActions).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.mouseDown(moreActions);
+    fireEvent.click(moreActions);
+    expect(moreActions).toHaveAttribute('aria-expanded', 'true');
+    const overflowMenu = screen.getByRole('menu', { hidden: true });
+    expect(overflowMenu).toHaveTextContent('chat.artifactRewrite.action');
+    expect(overflowMenu).toHaveTextContent('chat.writerIR.crossReference');
+    expect(overflowMenu).toHaveTextContent('chat.writerIR.removeCrossReference');
+  });
+
   it('applies and saves a cross-reference to an anchored image', async () => {
     const onSave = vi.fn(async () => 12);
     const { container } = render(<ImageReferenceHarness onSave={onSave} />);
@@ -669,7 +795,7 @@ describe('MarkdownArtifactEditor rewrite selection highlight', () => {
 
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
     expect(onSave).toHaveBeenCalledWith(
-      'Alpha beta gamma\n\n<a id="block-sec-1"></a>\n## 1 Target',
+      '**Alpha** beta gamma\n\n<a id="block-sec-1"></a>\n## 1 Target',
       7,
     );
     await waitFor(() => {

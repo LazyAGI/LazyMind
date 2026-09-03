@@ -5,10 +5,12 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -32,13 +34,25 @@ const (
 	maxTopK                          = 10
 	defaultTopK                      = 3
 	routerTrafficAttemptsExtKey      = "router_traffic_attempts"
+	failedRunAttemptsExtKey          = "failed_run_attempts"
 )
+
+var errConversationUnavailable = errors.New("conversation not found")
 
 type routerTrafficAttempt struct {
 	AlgorithmID string    `json:"algorithm_id"`
 	FeedBack    int       `json:"feed_back"`
 	Reason      string    `json:"reason,omitempty"`
 	CreateTime  time.Time `json:"create_time"`
+}
+
+type failedRunAttempt struct {
+	Result      string          `json:"result"`
+	RunID       string          `json:"run_id"`
+	RunStatus   string          `json:"run_status"`
+	RunTerminal RunTerminal     `json:"run_terminal"`
+	ModelRoute  *chatModelRoute `json:"model_route,omitempty"`
+	CreateTime  time.Time       `json:"create_time"`
 }
 
 func shouldEmitStreamFrame(delta string, sources []any) bool {
@@ -208,7 +222,7 @@ func conversationIDFromName(name string) string {
 }
 
 // ensureConversation textCreatetextUsertextConversation，textConversation、text history text seq、error
-func ensureConversation(ctx context.Context, db *gorm.DB, convID, displayName string, searchConfig json.RawMessage, models json.RawMessage, userID, userName string, runInBackground bool, requestedThinkingDepth string, conversationSettings map[string]any) (*orm.Conversation, int, error) {
+func ensureConversation(ctx context.Context, db *gorm.DB, convID, displayName string, searchConfig json.RawMessage, models json.RawMessage, userID, userName string, runInBackground bool, requestedThinkingDepth string, conversationSettings map[string]any, initialModelSelection *initialChatModelSelection) (*orm.Conversation, int, error) {
 	now := time.Now()
 	var c orm.Conversation
 	err := db.Where("id = ? AND create_user_id = ?", convID, userID).First(&c).Error
@@ -221,15 +235,29 @@ func ensureConversation(ctx context.Context, db *gorm.DB, convID, displayName st
 
 		updates := map[string]any{}
 		if c.ArchivedAt != nil {
-			updates["archived_at"] = nil
-			updates["archive_folder_id"] = nil
-			c.ArchivedAt = nil
-			c.ArchiveFolderID = nil
-			if err := taskcenter.RestoreTasksForConversations(ctx, db, userID, []string{convID}, taskcenter.ArchivedReasonConversationArchive, now.UTC()); err != nil {
+			familyRootID := c.ID
+			if validChildConversation(c) {
+				familyRootID = *c.ParentConversationID
+			}
+			conversationIDs, err := ownedConversationFamilyIDs(ctx, db, userID, familyRootID)
+			if err != nil {
 				return nil, 0, err
 			}
+			if err := taskcenter.RestoreTasksForConversations(ctx, db, userID, conversationIDs, taskcenter.ArchivedReasonConversationArchive, now.UTC()); err != nil {
+				return nil, 0, err
+			}
+			if err := db.WithContext(ctx).Model(&orm.Conversation{}).
+				Where("id IN ? AND create_user_id = ? AND deleted_at IS NULL", conversationIDs, userID).
+				Updates(map[string]any{
+					"archived_at": nil, "archive_folder_id": nil, "updated_at": now,
+				}).Error; err != nil {
+				return nil, 0, err
+			}
+			c.ArchivedAt = nil
+			c.ArchiveFolderID = nil
 		}
-		if len(searchConfig) > 0 && (len(c.SearchConfig) == 0 || string(c.SearchConfig) == "{}") {
+		if len(searchConfig) > 0 && !isSidechatConversation(c) &&
+			(len(c.SearchConfig) == 0 || string(c.SearchConfig) == "{}") {
 			updates["search_config"] = searchConfig
 		}
 		if len(models) > 0 && len(c.Models) == 0 {
@@ -247,6 +275,13 @@ func ensureConversation(ctx context.Context, db *gorm.DB, convID, displayName st
 	if err != gorm.ErrRecordNotFound {
 		return nil, 0, err
 	}
+	var occupied int64
+	if err := db.WithContext(ctx).Model(&orm.Conversation{}).Where("id = ?", convID).Count(&occupied).Error; err != nil {
+		return nil, 0, err
+	}
+	if occupied > 0 {
+		return nil, 0, errConversationUnavailable
+	}
 	c = orm.Conversation{
 		ID:           convID,
 		DisplayName:  displayName,
@@ -261,6 +296,11 @@ func ensureConversation(ctx context.Context, db *gorm.DB, convID, displayName st
 			UpdatedAt:      now,
 		},
 	}
+	modelBinding, err := resolveInitialChatModelBinding(ctx, db, userID, initialModelSelection)
+	if err != nil {
+		return nil, 0, err
+	}
+	applyResolvedChatModelBinding(&c, modelBinding)
 	if ephemeral, _ := conversationSettings["ephemeral"].(bool); ephemeral {
 		c.IsEphemeral = true
 		if persistent, _ := conversationSettings["persistent_ephemeral"].(bool); !persistent {
@@ -721,7 +761,10 @@ func replaceAskUserToolResult(assistantContent, newContent string) string {
 	})
 }
 
-const chatActionRegeneration = "CHAT_ACTION_REGENERATION"
+const (
+	chatActionNext         = "CHAT_ACTION_NEXT"
+	chatActionRegeneration = "CHAT_ACTION_REGENERATION"
+)
 
 type chatPersistTarget struct {
 	HistoryID      string
@@ -889,6 +932,58 @@ func marshalChatHistoryExt(ext map[string]any) json.RawMessage {
 		return nil
 	}
 	return b
+}
+
+// archiveRegeneratedFailedRunAttempt preserves the replaced failed answer in
+// structured history metadata. Only the parsed terminal fields are retained;
+// provider payloads or connection configuration never enter the archive.
+func archiveRegeneratedFailedRunAttempt(historyExt json.RawMessage, target chatPersistTarget) json.RawMessage {
+	if !target.IsRegeneration || target.Existing == nil {
+		return historyExt
+	}
+
+	ext := map[string]any{}
+	mergeExt := func(raw json.RawMessage) {
+		var values map[string]any
+		if len(raw) == 0 || json.Unmarshal(raw, &values) != nil {
+			return
+		}
+		for key, value := range values {
+			ext[key] = value
+		}
+	}
+	mergeExt(target.Existing.Ext)
+	mergeExt(historyExt)
+
+	attempts := make([]failedRunAttempt, 0)
+	if encoded, err := json.Marshal(ext[failedRunAttemptsExtKey]); err == nil {
+		_ = json.Unmarshal(encoded, &attempts)
+	}
+
+	status := strings.TrimSpace(target.Existing.RunStatus)
+	if status == "failed" || status == "interrupted" {
+		modelRoute := chatModelRouteFromHistoryExt(target.Existing.Ext)
+		terminal, err := parseRunTerminal(target.Existing.RunTerminal)
+		if err != nil || terminal.Status != status {
+			terminal = &RunTerminal{
+				Status:        status,
+				Reason:        "invalid_persisted_terminal",
+				PartialOutput: strings.TrimSpace(target.Existing.Result) != "",
+			}
+		}
+		attempts = append(attempts, failedRunAttempt{
+			Result:      target.Existing.Result,
+			RunID:       strings.TrimSpace(target.Existing.RunID),
+			RunStatus:   status,
+			RunTerminal: *terminal,
+			ModelRoute:  modelRoute,
+			CreateTime:  target.Existing.CreateTime.UTC(),
+		})
+	}
+	if len(attempts) > 0 {
+		ext[failedRunAttemptsExtKey] = attempts
+	}
+	return marshalChatHistoryExt(ext)
 }
 
 // archiveRegeneratedTrafficAttempt keeps the minimal traffic fields for the
@@ -1175,6 +1270,44 @@ func filesPerTurnMap(histories []orm.ChatHistory, currentFiles any, currentSeq i
 	return out
 }
 
+func resolveMailDraftConfirmID(raw map[string]any) string {
+	if draftID, ok := raw["mail_draft_confirm_id"].(string); ok {
+		return strings.TrimSpace(draftID)
+	}
+	return ""
+}
+
+func mailDraftConfirmRevision(raw any) int {
+	switch value := raw.(type) {
+	case int:
+		return value
+	case int32:
+		return int(value)
+	case int64:
+		return int(value)
+	case float64:
+		return int(value)
+	case json.Number:
+		parsed, err := value.Int64()
+		if err != nil {
+			return 0
+		}
+		return int(parsed)
+	case string:
+		parsed, err := strconv.Atoi(strings.TrimSpace(value))
+		if err != nil {
+			return 0
+		}
+		return parsed
+	default:
+		return 0
+	}
+}
+
+func resolveMailDraftConfirmRevision(raw map[string]any) int {
+	return mailDraftConfirmRevision(raw["mail_draft_confirm_revision"])
+}
+
 func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, query string, histories []orm.ChatHistory, raw map[string]any, resourceContext *evolution.ChatResourceContext, userID string, currentSeq int) map[string]any {
 	if strings.TrimSpace(sessionID) == "" {
 		sessionID = upstreamSessionID(convID)
@@ -1188,13 +1321,16 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 	}
 	currentFilePaths := filePathsForUpstreamChat(raw)
 	filesMap := filesPerTurnMap(histories, currentFilePaths, currentSeq)
+	filesMap = mergeConversationSourceFiles(ctx, db, convID, userID, filesMap)
 	modelCtx := loadModelContext(ctx, db, convID)
+	historyMessages := buildModelHistoryMessages(histories, askAnswersStructuredFromRaw(raw), modelCtx)
+	historyMessages = prependConversationSourceContext(ctx, db, convID, historyMessages)
 	body := map[string]any{
 		"query":            query,
 		"user_query":       query,
 		"session_id":       sessionID,
 		"conversation_id":  convID,
-		"history":          buildModelHistoryMessages(histories, askAnswersStructuredFromRaw(raw), modelCtx),
+		"history":          historyMessages,
 		"filters":          raw["filters"],
 		"files":            filesMap,
 		"current_turn_seq": currentSeq,
@@ -1221,6 +1357,12 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 	}
 	if skip, ok := raw["skip_sensitive_filter"].(bool); ok && skip {
 		body["skip_sensitive_filter"] = true
+	}
+	if confirmID := resolveMailDraftConfirmID(raw); confirmID != "" {
+		body["mail_draft_confirm_id"] = confirmID
+	}
+	if revision := resolveMailDraftConfirmRevision(raw); revision > 0 {
+		body["mail_draft_confirm_revision"] = revision
 	}
 	if mentionContext := buildMentionResourceContext(ctx, db, userID, histories, raw); mentionContext != "" {
 		body["query"] = mentionContext + "\n\nUser query:\n" + query
@@ -1491,6 +1633,7 @@ func handleNonStreamChat(
 	target chatPersistTarget,
 	historyExt json.RawMessage,
 ) {
+	historyExt = archiveRegeneratedFailedRunAttempt(historyExt, target)
 	historyExt = archiveRegeneratedTrafficAttempt(historyExt, target)
 	runID := newID("run_")
 	reqBody["run_id"] = runID
@@ -1597,10 +1740,12 @@ func handleNonStreamChat(
 			return
 		}
 	}
+	persistSuccessfulChatModel(reqCtx, db, userIDFromChatRequestBody(reqBody), convID, runID, reqBody, runTerminal)
 	if stateStore != nil {
 		_ = setChatRuntimeStatus(reqCtx, stateStore, convID, historyID, runTerminal.Status, answer, runID, runTerminal)
 	}
 	db.Model(&orm.Conversation{}).Where("id = ?", convID).Update("updated_at", now)
+	touchConversationParent(reqCtx, db, convID, now)
 	if !target.IsRegeneration {
 		db.Model(&orm.Conversation{}).Where("id = ?", convID).UpdateColumn("chat_times", gorm.Expr("chat_times + ?", 1))
 	}
@@ -1613,6 +1758,7 @@ func handleNonStreamChat(
 		"history_id":      historyID,
 		"sources":         sources,
 		"runtime_event":   runEvent,
+		"model_route":     chatModelRouteFromBody(reqBody),
 	})
 }
 
@@ -1806,6 +1952,7 @@ func streamSingleAnswer(
 	target chatPersistTarget,
 	historyExt json.RawMessage,
 ) {
+	historyExt = archiveRegeneratedFailedRunAttempt(historyExt, target)
 	historyExt = archiveRegeneratedTrafficAttempt(historyExt, target)
 	seq := target.Seq
 	runID, _ := reqBody["run_id"].(string)
@@ -1893,6 +2040,7 @@ func streamSingleAnswer(
 			"thinking_duration_s": thinkingDurationS,
 			"ext":                 historyExt,
 			"run_id":              runID,
+			"run_status":          "generating",
 			"update_time":         time.Now(),
 		}
 		if progressRowCreated {
@@ -1912,7 +2060,7 @@ func streamSingleAnswer(
 		}
 		progressRowCreated = true
 	}
-	writeSSEChunk(w, flusher, &ChatChunkResponse{
+	initialChunk := &ChatChunkResponse{
 		ConversationID:    convID,
 		Seq:               int32(seq),
 		Message:           "",
@@ -1922,7 +2070,12 @@ func streamSingleAnswer(
 		PromptQuestions:   []string{},
 		ReasoningContent:  "",
 		ThinkingDurationS: 0,
-	})
+		ModelRoute:        chatModelRouteFromBody(reqBody),
+	}
+	writeSSEChunk(w, flusher, initialChunk)
+	if stateStore != nil {
+		_ = appendChatChunk(chatCtx, stateStore, convID, historyID, initialChunk)
+	}
 	for d := range ch {
 		partialOutput := fullResult != "" || pendingThink != ""
 		decision, handled := consumeRuntimeChunk(d, runID, partialOutput)
@@ -2128,6 +2281,7 @@ func streamSingleAnswer(
 			ThinkingDurationS:     thinkingDurationS,
 			ExternalEventSequence: d.ExternalEventSequence,
 			Execution:             d.Execution,
+			ModelRoute:            chatModelRouteFromBody(reqBody),
 		}
 		if reqCtx.Err() == nil {
 			writeSSEChunk(w, flusher, chunk)
@@ -2245,7 +2399,9 @@ func streamSingleAnswer(
 		cancel()
 	}
 	if persisted && !externalFinalized {
+		persistSuccessfulChatModel(chatCtx, db, userIDFromChatRequestBody(reqBody), convID, runID, reqBody, runTerminal)
 		db.Model(&orm.Conversation{}).Where("id = ?", convID).Update("updated_at", now)
+		touchConversationParent(context.Background(), db, convID, now)
 		// Reaching this point means the upstream SSE channel has closed and the
 		// final history payload was persisted. Intermediate thinking persistence
 		// never reaches this update.
@@ -2257,6 +2413,7 @@ func streamSingleAnswer(
 		}
 		if err := db.Model(&orm.TaskCenterTask{}).
 			Where("conversation_id = ? AND task_type = ? AND archived_at IS NULL AND status NOT IN ('succeeded','failed','canceled')", convID, "background_chat").
+			Where("plugin_session_id IS NULL OR plugin_session_id = ''"). // workflow-naming: persistence
 			Updates(map[string]any{"status": taskStatus, "finished_at": now, "updated_at": now}).Error; err != nil {
 			log.Logger.Warn().Err(err).Str("conversation_id", convID).Msg("failed to finish background task after SSE close")
 		}
@@ -2381,8 +2538,13 @@ func streamDualAnswer(
 	if err2 != nil {
 		secondaryCh = nil
 	}
-	writeSSEChunk(w, flusher, map[string]any{"conversation_id": convID, "seq": seq, "delta": "", "history_id": historyID})
-	writeSSEChunk(w, flusher, map[string]any{"conversation_id": convID, "seq": seq, "delta": "", "history_id": secondaryHistoryID})
+	modelRoute := chatModelRouteFromBody(reqBody)
+	writeSSEChunk(w, flusher, map[string]any{"conversation_id": convID, "seq": seq, "delta": "", "history_id": historyID, "model_route": modelRoute})
+	writeSSEChunk(w, flusher, map[string]any{"conversation_id": convID, "seq": seq, "delta": "", "history_id": secondaryHistoryID, "model_route": modelRoute})
+	if stateStore != nil {
+		_ = appendChatChunk(chatCtx, stateStore, convID, historyID, &ChatChunkResponse{ConversationID: convID, Seq: int32(seq), HistoryID: historyID, ModelRoute: modelRoute})
+		_ = appendChatChunk(chatCtx, stateStore, convID, secondaryHistoryID, &ChatChunkResponse{ConversationID: convID, Seq: int32(seq), HistoryID: secondaryHistoryID, ModelRoute: modelRoute})
+	}
 
 	var primaryText, secondaryText string
 	var primaryResult, secondaryResult string
@@ -2441,13 +2603,13 @@ func streamDualAnswer(
 		if reqCtx.Err() == nil {
 			writeSSEChunk(w, flusher, map[string]any{
 				"conversation_id": convID, "seq": seq, "delta": delta, "history_id": historyID,
-				"sources": sources,
+				"sources": sources, "model_route": modelRoute,
 			})
 		}
 		if stateStore != nil {
 			_ = appendChatChunk(chatCtx, stateStore, convID, historyID, &ChatChunkResponse{
 				ConversationID: convID, Seq: int32(seq), Delta: delta, HistoryID: historyID,
-				ReasoningContent: "", Sources: sources,
+				ReasoningContent: "", Sources: sources, ModelRoute: modelRoute,
 			})
 		}
 	}
@@ -2477,13 +2639,13 @@ func streamDualAnswer(
 		if reqCtx.Err() == nil {
 			writeSSEChunk(w, flusher, map[string]any{
 				"conversation_id": convID, "seq": seq, "delta": delta, "history_id": secondaryHistoryID,
-				"sources": sources,
+				"sources": sources, "model_route": modelRoute,
 			})
 		}
 		if stateStore != nil {
 			_ = appendChatChunk(chatCtx, stateStore, convID, secondaryHistoryID, &ChatChunkResponse{
 				ConversationID: convID, Seq: int32(seq), Delta: delta, HistoryID: secondaryHistoryID,
-				ReasoningContent: "", Sources: sources,
+				ReasoningContent: "", Sources: sources, ModelRoute: modelRoute,
 			})
 		}
 	}
@@ -2758,6 +2920,12 @@ dualPersist:
 	} else {
 		secondaryPersisted = db.Create(secondaryHistory).Error == nil
 	}
+	if primaryPersisted {
+		persistSuccessfulChatModel(chatCtx, db, userIDFromChatRequestBody(reqBody), convID, primaryRunID, reqBody, primaryTerminal)
+	}
+	if secondaryPersisted {
+		persistSuccessfulChatModel(chatCtx, db, userIDFromChatRequestBody(reqBody), convID, secondaryRunID, reqBody, secondaryTerminal)
+	}
 	if stateStore != nil {
 		statusCtx, cancel := terminalWriteContext(chatCtx)
 		defer cancel()
@@ -2769,6 +2937,7 @@ dualPersist:
 		}
 	}
 	db.Model(&orm.Conversation{}).Where("id = ?", convID).Update("updated_at", now)
+	touchConversationParent(context.Background(), db, convID, now)
 	if !target.IsRegeneration {
 		db.Model(&orm.Conversation{}).Where("id = ?", convID).UpdateColumn("chat_times", gorm.Expr("chat_times + ?", 1))
 	}
@@ -2777,6 +2946,14 @@ dualPersist:
 
 func recordConversationIdleActivity(ctx context.Context, db *gorm.DB, stateStore state.Store, conversationID, userID, historyID, userContent, assistantText string, now time.Time) {
 	if db == nil || stateStore == nil || strings.TrimSpace(conversationID) == "" || strings.TrimSpace(userID) == "" || strings.TrimSpace(historyID) == "" {
+		return
+	}
+	var conversation orm.Conversation
+	if err := db.WithContext(ctx).Select("relation_type").Where(
+		"id = ? AND create_user_id = ?", conversationID, userID,
+	).Take(&conversation).Error; err != nil || strings.TrimSpace(conversation.RelationType) == conversationRelationSidechat {
+		// Side chats are intentionally isolated from long-term Memory. Fail closed
+		// when the authoritative conversation relationship cannot be loaded.
 		return
 	}
 	_ = resourceupdate.RecordConversationIdleMessage(ctx, db, stateStore, resourceupdate.ConversationIdleRecord{

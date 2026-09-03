@@ -15,12 +15,13 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (key: string) =>
+    t: (key: string, params?: Record<string, unknown>) =>
       ({
         "chat.conversationGroupPinned": "已置顶",
         "chat.conversationGroupToday": "今天",
         "chat.conversationGroupRecentWeek": "近一周",
         "chat.conversationGroupEarlier": "以前",
+        "chat.conversationMainLabel": "主对话",
         "chat.pinConversation": "置顶",
         "chat.unpinConversation": "取消置顶",
         "chat.pinConversationSuccess": "会话已置顶",
@@ -29,6 +30,21 @@ vi.mock("react-i18next", () => ({
         "settingsPage.recovery.moreActions": "更多操作",
         "settingsPage.recovery.archiveAction": "归档",
         "settingsPage.recovery.moveToTrash": "移入回收站",
+        "chat.batch": "批量",
+        "chat.selectAll": "全选",
+        "chat.conversationChildSourceLabel": "来源",
+        "chat.conversationChildForkLabel": "Fork自",
+        "chat.expandChildConversations": `展开${params?.count}个子会话`,
+        "chat.collapseChildConversations": "收起子会话",
+        "chat.childConversationsLabel": `${params?.parent}的子会话`,
+        "chat.conversationSidechatRelationshipTooltip":
+          `“${params?.child}”是“${params?.parent}”的侧聊子会话`,
+        "chat.conversationForkRelationshipTooltip":
+          `“${params?.child}”由“${params?.parent}”Fork而来`,
+        "chat.conversationGenericRelationshipTooltip":
+          `“${params?.child}”来源于“${params?.parent}”`,
+        "chat.conversationSourceFrom": `来源：${params?.parent}`,
+        "chat.conversationForkedFrom": `Fork自：${params?.parent}`,
       })[key] || key,
   }),
 }));
@@ -93,14 +109,14 @@ const olderConversation = {
   search_config: {},
 };
 
-function renderRecordList() {
+function renderRecordList(currentSessionId = "", onSelected = vi.fn()) {
   return render(
     <MemoryRouter>
       <RecordList
         compact
         hideHeader
-        currentSessionId=""
-        onSelected={vi.fn()}
+        currentSessionId={currentSessionId}
+        onSelected={onSelected}
         onRemove={vi.fn()}
       />
     </MemoryRouter>,
@@ -108,7 +124,10 @@ function renderRecordList() {
 }
 
 function moreActionsFor(title: string) {
-  const record = screen.getByText(title).closest(".record");
+  const recordList = document.querySelector(".record-list");
+  const record = recordList
+    ? within(recordList as HTMLElement).getByText(title).closest(".record")
+    : null;
   if (!(record instanceof HTMLElement)) {
     throw new Error(`record not found: ${title}`);
   }
@@ -210,5 +229,205 @@ describe("RecordList conversation pinning", () => {
     expect(screen.queryByText("已置顶")).not.toBeInTheDocument();
     const todaySection = screen.getByText("今天").closest(".record-group");
     expect(todaySection?.querySelector(".title")?.textContent).toBe("较新的会话");
+  });
+
+  it("nests retained children under their parent and keeps them collapsed by default", async () => {
+    mocks.listConversations.mockResolvedValue({
+      data: {
+        conversations: [
+          {
+            ...newerConversation,
+            conversation_id: "parent",
+            display_name: "主会话",
+          },
+          {
+            ...olderConversation,
+            conversation_id: "sidechat-child",
+            display_name: "侧聊方案",
+            parent_conversation_id: "parent",
+            parent_display_name: "主会话",
+            relation_type: "sidechat",
+          },
+          {
+            ...olderConversation,
+            conversation_id: "fork-child",
+            display_name: "分支方案",
+            parent_conversation_id: "parent",
+            parent_display_name: "主会话",
+            relation_type: "fork",
+          },
+        ],
+        next_page_token: "",
+      },
+    });
+
+    const onSelected = vi.fn();
+    renderRecordList("", onSelected);
+
+    const parentTitle = await screen.findByText("主会话");
+    expect(screen.queryByText("侧聊方案")).not.toBeInTheDocument();
+    expect(screen.queryByText("分支方案")).not.toBeInTheDocument();
+
+    fireEvent.mouseOver(parentTitle);
+    const mainRelation = await screen.findByText("主对话");
+    const mainPreview = mainRelation.closest(".record-preview-card");
+    expect(mainPreview).not.toBeNull();
+    expect(within(mainPreview as HTMLElement).queryByText("今天")).not.toBeInTheDocument();
+    fireEvent.mouseOut(parentTitle);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "展开2个子会话" }),
+    );
+
+    const childGroup = screen.getByRole("group", {
+      name: "主会话的子会话",
+    });
+    expect(within(childGroup).getByText("侧聊方案")).toBeInTheDocument();
+    expect(within(childGroup).getByText("分支方案")).toBeInTheDocument();
+    expect(within(childGroup).queryByText("来源")).not.toBeInTheDocument();
+    expect(within(childGroup).queryByText("Fork自")).not.toBeInTheDocument();
+
+    const sideChatRecord = within(childGroup)
+      .getByText("侧聊方案")
+      .closest(".record");
+    expect(sideChatRecord).toHaveAttribute("role", "button");
+    expect(sideChatRecord).toHaveAttribute("tabindex", "0");
+    fireEvent.keyDown(sideChatRecord as HTMLElement, { key: "Enter" });
+    expect(onSelected).toHaveBeenCalledWith(
+      expect.objectContaining({ conversation_id: "sidechat-child" }),
+    );
+
+    const sidechatTitle = within(childGroup).getByText("侧聊方案");
+    fireEvent.mouseOver(sidechatTitle);
+    expect(await screen.findByText("来源：主会话")).toBeInTheDocument();
+    fireEvent.mouseOut(sidechatTitle);
+
+    const forkTitle = within(childGroup).getByText("分支方案");
+    fireEvent.mouseOver(forkTitle);
+    expect(await screen.findByText("Fork自：主会话")).toBeInTheDocument();
+    fireEvent.mouseOut(forkTitle);
+
+    fireEvent.click(moreActionsFor("侧聊方案"));
+    expect(await screen.findByText("移入回收站")).toBeInTheDocument();
+    expect(screen.queryByText("置顶")).not.toBeInTheDocument();
+    expect(screen.queryByText("归档")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "收起子会话" }));
+    expect(screen.queryByText("侧聊方案")).not.toBeInTheDocument();
+  });
+
+  it("does not allow a child conversation to be selected independently in batch mode", async () => {
+    mocks.listConversations.mockResolvedValue({
+      data: {
+        conversations: [
+          {
+            ...newerConversation,
+            conversation_id: "parent",
+            display_name: "主会话",
+          },
+          {
+            ...olderConversation,
+            conversation_id: "sidechat-child",
+            display_name: "侧聊方案",
+            parent_conversation_id: "parent",
+            parent_display_name: "主会话",
+            relation_type: "sidechat",
+          },
+        ],
+        next_page_token: "",
+      },
+    });
+
+    render(
+      <MemoryRouter>
+        <RecordList
+          compact
+          showBatchActions
+          currentSessionId=""
+          onSelected={vi.fn()}
+          onRemove={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+
+    await screen.findByText("主会话");
+    fireEvent.click(screen.getByRole("button", { name: "批量" }));
+    fireEvent.click(screen.getByRole("button", { name: "展开1个子会话" }));
+
+    const childCheckbox = within(
+      screen.getByRole("group", { name: "主会话的子会话" }),
+    ).getByRole("checkbox");
+    expect(childCheckbox).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("checkbox", { name: /全选/ }));
+    expect(childCheckbox).not.toBeChecked();
+  });
+
+  it("keeps a child nested when its parent is outside the loaded page", async () => {
+    mocks.listConversations.mockResolvedValue({
+      data: {
+        conversations: [
+          {
+            ...newerConversation,
+            conversation_id: "orphan-child",
+            display_name: "可见的子会话",
+            parent_conversation_id: "parent-not-loaded",
+            parent_display_name: "未加载的主会话",
+            relation_type: "sidechat",
+          },
+        ],
+        next_page_token: "next-page",
+      },
+    });
+
+    renderRecordList();
+
+    expect(await screen.findByText("未加载的主会话")).toBeInTheDocument();
+    expect(screen.queryByText("可见的子会话")).not.toBeInTheDocument();
+    expect(screen.queryByText("来源")).not.toBeInTheDocument();
+    expect(() => moreActionsFor("未加载的主会话")).toThrow();
+
+    fireEvent.click(screen.getByRole("button", { name: "展开1个子会话" }));
+    const childGroup = screen.getByRole("group", {
+      name: "未加载的主会话的子会话",
+    });
+    expect(within(childGroup).getByText("可见的子会话")).toBeInTheDocument();
+    expect(within(childGroup).queryByText("来源")).not.toBeInTheDocument();
+    fireEvent.mouseOver(within(childGroup).getByText("可见的子会话"));
+    expect(await screen.findByText("来源：未加载的主会话")).toBeInTheDocument();
+  });
+
+  it("expands an unloaded parent so a matching child remains visible in search", async () => {
+    mocks.listConversations.mockResolvedValue({
+      data: {
+        conversations: [
+          {
+            ...newerConversation,
+            conversation_id: "matched-child",
+            display_name: "命中的子会话",
+            parent_conversation_id: "parent-not-loaded",
+            parent_display_name: "主会话",
+            relation_type: "sidechat",
+          },
+        ],
+        next_page_token: "",
+      },
+    });
+
+    render(
+      <MemoryRouter>
+        <RecordList
+          compact
+          hideHeader
+          searchText="命中"
+          currentSessionId=""
+          onSelected={vi.fn()}
+          onRemove={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText("命中的子会话")).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "主会话的子会话" })).toBeInTheDocument();
   });
 });

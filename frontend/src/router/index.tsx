@@ -32,6 +32,7 @@ const DataSourceFeishuCallback = lazy(() => import("@/modules/dataSource/common/
 const CloudDocumentsPage = lazy(() => import("@/modules/modelProvider/pages/CloudDocumentsPage"));
 const FeishuAccountPage = lazy(() => import("@/modules/modelProvider/pages/FeishuAccountPage"));
 const GoogleDriveConnectionPage = lazy(() => import("@/modules/modelProvider/pages/GoogleDriveConnectionPage"));
+const EmailConnectionPage = lazy(() => import("@/modules/modelProvider/pages/EmailConnectionPage"));
 const GoogleDriveSetupGuide = lazy(() => import("@/modules/modelProvider/pages/GoogleDriveSetupGuide"));
 const LocalDataSourcePage = lazy(() => import("@/modules/modelProvider/pages/LocalDataSourcePage"));
 const FeishuSetupGuide = lazy(() => import("@/modules/modelProvider/pages/FeishuSetupGuide"));
@@ -121,10 +122,6 @@ export default function AppRouter() {
           element={<DataSourceFeishuCallback provider="googledrive" />}
         />
         <Route
-          path="/oauth/googledrive/callback"
-          element={<DataSourceFeishuCallback provider="googledrive" />}
-        />
-        <Route
           path="/loginTransition"
           element={
             localSessionEnabled ? (
@@ -181,6 +178,7 @@ export default function AppRouter() {
             <Route path="local" element={<LocalDataSourcePage />} />
             <Route path="feishu" element={<FeishuAccountPage />} />
             <Route path="google-drive" element={<GoogleDriveConnectionPage />} />
+            <Route path="mail" element={<EmailConnectionPage />} />
             <Route path="docs/feishu-setup" element={<FeishuSetupGuide />} />
             <Route path="docs/notion-setup" element={<NotionSetupGuide />} />
             <Route path="docs/google-drive-setup" element={<GoogleDriveSetupGuide />} />

@@ -23,6 +23,7 @@ _EXPORTS = {
     'read_file': ('.local_file.workspace', 'read_file'),
     'WriterCreateToolkit': ('.writer', 'WriterCreateToolkit'),
     'WriterRevisionToolkit': ('.writer', 'WriterRevisionToolkit'),
+    'MailToolkit': ('.mail', 'MailToolkit'),
 }
 
 __all__ = list(_EXPORTS)
