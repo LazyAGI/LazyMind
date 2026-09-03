@@ -1043,15 +1043,19 @@ func TestPurgeLeavesWorkspaceUntouchedWhenDatabaseDeleteRollsBack(t *testing.T) 
 	if err := os.WriteFile(artifactPath, []byte("preserve on rollback"), 0o600); err != nil {
 		t.Fatalf("write artifact: %v", err)
 	}
-	if err := db.Exec(`CREATE TRIGGER fail_sidechat_history_delete
-		BEFORE DELETE ON chat_histories
-		WHEN OLD.conversation_id = 'purge-rollback'
-		BEGIN SELECT RAISE(ABORT, 'forced purge rollback'); END`).Error; err != nil {
-		t.Fatalf("create failure trigger: %v", err)
+	forcedError := errors.New("forced purge rollback")
+	callbackName := "sidechat_test_fail_history_delete"
+	if err := db.Callback().Delete().Before("gorm:delete").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement != nil && tx.Statement.Schema != nil && tx.Statement.Schema.Table == "chat_histories" {
+			tx.AddError(forcedError)
+		}
+	}); err != nil {
+		t.Fatalf("register delete callback: %v", err)
 	}
+	t.Cleanup(func() { _ = db.Callback().Delete().Remove(callbackName) })
 
-	if err := purgeConversation(db, conversation.ID, "user-1"); err == nil {
-		t.Fatal("purge unexpectedly succeeded")
+	if err := purgeConversation(db, conversation.ID, "user-1"); !errors.Is(err, forcedError) {
+		t.Fatalf("purge error = %v, want forced rollback", err)
 	}
 	if err := db.Where("id = ?", conversation.ID).Take(&orm.Conversation{}).Error; err != nil {
 		t.Fatalf("conversation did not roll back: %v", err)
