@@ -150,6 +150,7 @@ func (r *ChatRunner) Run(ctx context.Context, run chatagent.Run, emit func(chata
 		arguments = append(arguments, "--resume", run.ProviderThreadID)
 	}
 	arguments = append(arguments, run.Prompt)
+	startedAt := time.Now()
 	sawMessage, completed, terminalError := false, false, ""
 	pendingMessages := []string{}
 	err = (agentexec.StreamCommand{
@@ -218,7 +219,17 @@ func (r *ChatRunner) Run(ctx context.Context, run chatagent.Run, emit func(chata
 		}
 		return fmt.Errorf("CodeBuddy Code failed: %w", err)
 	}
-	if !completed || !sawMessage {
+	attachments, err := chatagent.ImageAttachmentsSince(filepath.Join(workspace, "generated-images"), startedAt)
+	if err != nil {
+		return fmt.Errorf("discover CodeBuddy generated images: %w", err)
+	}
+	for index := range attachments {
+		attachment := attachments[index]
+		if err := emit(chatagent.Event{Type: "attachment", Attachment: &attachment}); err != nil {
+			return err
+		}
+	}
+	if !completed || (!sawMessage && len(attachments) == 0) {
 		return errors.New("CodeBuddy Code ended without a completed response")
 	}
 	return nil

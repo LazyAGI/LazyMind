@@ -2,7 +2,10 @@ package chatagent
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -195,6 +198,32 @@ func TestHostEventRetryKeepsIdempotencyAndLeaseTokens(t *testing.T) {
 	}
 	if first["lease_token"] != run.LeaseToken || first["host_id"] != host.id {
 		t.Fatalf("event lost lease ownership: %#v", first)
+	}
+}
+
+func TestHostUploadsAttachmentWithoutExposingItsLocalPath(t *testing.T) {
+	client := &retryingCoreClient{}
+	host := &Host{api: client, id: "host-1"}
+	run := Run{RunID: "run-1", LeaseToken: "lease-1"}
+	path := filepath.Join(t.TempDir(), "generated.png")
+	content := []byte("image-content")
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := host.sendEvent(context.Background(), run, Event{
+		Type: "attachment", Attachment: &Attachment{
+			Path: path, Filename: "generated.png", MediaType: "image/png",
+		},
+	}); err != nil {
+		t.Fatalf("send attachment: %v", err)
+	}
+	if len(client.inputs) != 1 || client.paths[0] != "/external-chat/runs/run-1:attachment" {
+		t.Fatalf("attachment requests: paths=%#v inputs=%#v", client.paths, client.inputs)
+	}
+	input := client.inputs[0]
+	if input["path"] != nil || input["filename"] != "generated.png" || input["media_type"] != "image/png" ||
+		input["content_base64"] != base64.StdEncoding.EncodeToString(content) {
+		t.Fatalf("attachment payload=%#v", input)
 	}
 }
 

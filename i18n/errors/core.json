@@ -1456,5 +1456,8 @@
   "2002317": { "en-US": "The AI returned invalid editable content", "zh-CN": "AI 返回的可编辑内容无效" },
   "2002318": { "en-US": "History injection failed", "zh-CN": "历史记录注入失败" },
   "2002319": { "en-US": "Base URL must be an API root without a request path", "zh-CN": "Base URL 必须为不包含请求路径的 API 根地址" },
-  "2002320": { "en-US": "Failed to restore the model", "zh-CN": "恢复模型失败" }
+  "2002320": { "en-US": "Failed to restore the model", "zh-CN": "恢复模型失败" },
+  "2002321": { "en-US": "Invalid external Agent attachment", "zh-CN": "外部 Agent 附件无效" },
+  "2002322": { "en-US": "Failed to create the external Agent attachment reference", "zh-CN": "创建外部 Agent 附件引用失败" },
+  "2002323": { "en-US": "The external Agent attachment conflicts with an existing event", "zh-CN": "外部 Agent 附件与已有事件冲突" }
 }

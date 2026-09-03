@@ -2,11 +2,13 @@ package chat
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -976,6 +978,101 @@ func TestExternalChatRunClaimEventAndHistoryAreDurable(t *testing.T) {
 	}
 	if history.Result != "answer" || history.AlgorithmID != "external:codex" {
 		t.Fatalf("unexpected finalized history: %#v", history)
+	}
+}
+
+func TestExternalChatAttachmentIsManagedAndPersistedInHistory(t *testing.T) {
+	uploadRoot := t.TempDir()
+	t.Setenv("LAZYMIND_UPLOAD_ROOT", uploadRoot)
+	app, db := newExternalChatTestApplication(t)
+	store.Init(db, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+	createExternalChatTestRun(t, app, "run-image")
+	job, err := app.claim(context.Background(), "user-1", ChatExecutorCodex, "host-1")
+	if err != nil || job == nil {
+		t.Fatalf("claim image run: job=%#v err=%v", job, err)
+	}
+	content := []byte("\x89PNG\r\n\x1a\nfixture")
+	body, _ := json.Marshal(map[string]any{
+		"host_id": "host-1", "lease_token": job.LeaseToken, "event_id": "evt-image-1",
+		"filename": "generated.png", "media_type": "image/png",
+		"content_base64": base64.StdEncoding.EncodeToString(content),
+	})
+	publish := func() *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodPost, "/external-chat/runs/run-image:attachment", strings.NewReader(string(body)))
+		request.Header.Set("X-User-Id", "user-1")
+		request = mux.SetURLVars(request, map[string]string{"run_id": "run-image"})
+		response := httptest.NewRecorder()
+		PublishExternalChatAttachment(response, request)
+		return response
+	}
+	for attempt := 0; attempt < 2; attempt++ {
+		if response := publish(); response.Code != http.StatusOK {
+			t.Fatalf("publish attempt %d: status=%d body=%s", attempt+1, response.Code, response.Body.String())
+		}
+	}
+	var events []orm.ExternalChatRunEvent
+	if err := db.Where("run_id = ? AND type = ?", job.RunID, "message").Find(&events).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || strings.Contains(events[0].Text, "content_base64") ||
+		!strings.Contains(events[0].Text, "![Generated image](/static-files/external-agent-attachments/") {
+		t.Fatalf("image events=%#v", events)
+	}
+	if _, err := app.appendEvent(context.Background(), "user-1", job.RunID, "host-1", job.LeaseToken,
+		externalChatEvent{EventID: "evt-image-completed", Type: "completed"}); err != nil {
+		t.Fatal(err)
+	}
+	var history orm.ChatHistory
+	if err := db.First(&history, "id = ?", "history-run-image").Error; err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(history.Result, "![Generated image](/static-files/external-agent-attachments/") {
+		t.Fatalf("history result=%q", history.Result)
+	}
+	files := 0
+	if err := filepath.Walk(uploadRoot, func(path string, info os.FileInfo, err error) error {
+		if err == nil && info.Mode().IsRegular() {
+			files++
+		}
+		return err
+	}); err != nil || files != 1 {
+		t.Fatalf("managed image files=%d err=%v", files, err)
+	}
+}
+
+func TestExternalChatAttachmentRejectsInvalidImageBeforeWriting(t *testing.T) {
+	uploadRoot := t.TempDir()
+	t.Setenv("LAZYMIND_UPLOAD_ROOT", uploadRoot)
+	app, db := newExternalChatTestApplication(t)
+	store.Init(db, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+	createExternalChatTestRun(t, app, "run-invalid-image")
+	job, err := app.claim(context.Background(), "user-1", ChatExecutorCodex, "host-1")
+	if err != nil || job == nil {
+		t.Fatalf("claim image run: job=%#v err=%v", job, err)
+	}
+	body, _ := json.Marshal(map[string]any{
+		"host_id": "host-1", "lease_token": job.LeaseToken, "event_id": "evt-invalid-image",
+		"filename": "not-an-image.png", "media_type": "image/png",
+		"content_base64": base64.StdEncoding.EncodeToString([]byte("plain text")),
+	})
+	request := httptest.NewRequest(http.MethodPost, "/external-chat/runs/run-invalid-image:attachment", strings.NewReader(string(body)))
+	request.Header.Set("X-User-Id", "user-1")
+	request = mux.SetURLVars(request, map[string]string{"run_id": "run-invalid-image"})
+	response := httptest.NewRecorder()
+	PublishExternalChatAttachment(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	files := 0
+	if err := filepath.Walk(uploadRoot, func(path string, info os.FileInfo, err error) error {
+		if err == nil && info.Mode().IsRegular() {
+			files++
+		}
+		return err
+	}); err != nil || files != 0 {
+		t.Fatalf("managed files=%d err=%v", files, err)
 	}
 }
 

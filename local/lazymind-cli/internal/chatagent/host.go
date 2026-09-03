@@ -3,12 +3,16 @@ package chatagent
 import (
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -17,15 +21,17 @@ import (
 )
 
 const (
-	heartbeatInterval       = 2 * time.Second
-	claimRequestTimeout     = 15 * time.Second
-	heartbeatRequestTimeout = 5 * time.Second
-	eventRequestTimeout     = 5 * time.Second
-	leaseLossGrace          = 20 * time.Second
-	eventRetryDelay         = 200 * time.Millisecond
-	terminalTimeout         = 10 * time.Second
-	sessionCatalogInterval  = time.Minute
-	executionDisabledReason = "Disabled in LazyMind settings"
+	heartbeatInterval        = 2 * time.Second
+	claimRequestTimeout      = 15 * time.Second
+	heartbeatRequestTimeout  = 5 * time.Second
+	eventRequestTimeout      = 5 * time.Second
+	attachmentRequestTimeout = 30 * time.Second
+	maxAttachmentBytes       = 20 << 20
+	leaseLossGrace           = 20 * time.Second
+	eventRetryDelay          = 200 * time.Millisecond
+	terminalTimeout          = 10 * time.Second
+	sessionCatalogInterval   = time.Minute
+	executionDisabledReason  = "Disabled in LazyMind settings"
 )
 
 type Run struct {
@@ -42,10 +48,19 @@ type Run struct {
 }
 
 type Event struct {
-	Type             string `json:"type"`
-	Text             string `json:"text,omitempty"`
-	ProviderThreadID string `json:"provider_thread_id,omitempty"`
-	Error            string `json:"error,omitempty"`
+	Type             string      `json:"type"`
+	Text             string      `json:"text,omitempty"`
+	ProviderThreadID string      `json:"provider_thread_id,omitempty"`
+	Error            string      `json:"error,omitempty"`
+	Attachment       *Attachment `json:"-"`
+}
+
+// Attachment is a Host-local file result. Its path never crosses the Host/Core
+// boundary; sendEvent transfers only the file content and display metadata.
+type Attachment struct {
+	Path      string
+	Filename  string
+	MediaType string
 }
 
 type Runner interface {
@@ -468,6 +483,9 @@ func (h *Host) sendEventWithRetry(ctx context.Context, run Run, event Event, max
 	if err != nil {
 		return err
 	}
+	if event.Type == "attachment" {
+		return h.sendAttachmentWithRetry(ctx, run, eventID, event.Attachment, maxAttempts)
+	}
 	path := "/external-chat/runs/" + url.PathEscape(run.RunID) + ":event"
 	input := map[string]any{
 		"host_id": h.id, "lease_token": run.LeaseToken,
@@ -484,6 +502,59 @@ func (h *Host) sendEventWithRetry(ctx context.Context, run Run, event Event, max
 	}
 	for attempt := 0; maxAttempts <= 0 || attempt < maxAttempts; attempt++ {
 		if err = h.doJSON(ctx, eventRequestTimeout, http.MethodPost, path, input, nil); err == nil {
+			return nil
+		}
+		if maxAttempts > 0 && attempt+1 >= maxAttempts {
+			break
+		}
+		if !waitEventRetry(ctx) {
+			break
+		}
+	}
+	return err
+}
+
+func (h *Host) sendAttachmentWithRetry(
+	ctx context.Context,
+	run Run,
+	eventID string,
+	attachment *Attachment,
+	maxAttempts int,
+) error {
+	if attachment == nil {
+		return errors.New("external Agent attachment is required")
+	}
+	filename := strings.TrimSpace(attachment.Filename)
+	if filename == "" || filename == "." || filename == ".." || filepath.Base(filename) != filename {
+		return errors.New("external Agent attachment filename is invalid")
+	}
+	file, err := os.Open(attachment.Path)
+	if err != nil {
+		return fmt.Errorf("open external Agent attachment: %w", err)
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		return errors.New("external Agent attachment must be a regular file")
+	}
+	if info.Size() > maxAttachmentBytes {
+		return fmt.Errorf("external Agent attachment exceeds %d bytes", maxAttachmentBytes)
+	}
+	content, err := io.ReadAll(io.LimitReader(file, maxAttachmentBytes+1))
+	if err != nil {
+		return fmt.Errorf("read external Agent attachment: %w", err)
+	}
+	if len(content) > maxAttachmentBytes {
+		return fmt.Errorf("external Agent attachment exceeds %d bytes", maxAttachmentBytes)
+	}
+	path := "/external-chat/runs/" + url.PathEscape(run.RunID) + ":attachment"
+	input := map[string]any{
+		"host_id": h.id, "lease_token": run.LeaseToken, "event_id": eventID,
+		"filename": filename, "media_type": strings.TrimSpace(attachment.MediaType),
+		"content_base64": base64.StdEncoding.EncodeToString(content),
+	}
+	for attempt := 0; maxAttempts <= 0 || attempt < maxAttempts; attempt++ {
+		if err = h.doJSON(ctx, attachmentRequestTimeout, http.MethodPost, path, input, nil); err == nil {
 			return nil
 		}
 		if maxAttempts > 0 && attempt+1 >= maxAttempts {

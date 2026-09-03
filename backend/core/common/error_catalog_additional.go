@@ -606,6 +606,10 @@ func init() {
 	registerAdditionalError("generate endpoint returned invalid editable polish content", http.StatusBadGateway, 2002317)
 	registerAdditionalError("base_url must be an api root without a request path", http.StatusBadRequest, 2002319)
 	registerAdditionalError("restore model failed", http.StatusInternalServerError, 2002320)
+	registerAdditionalError("invalid external Agent attachment", http.StatusBadRequest, 2002321)
+	registerAdditionalErrorAlias("invalid external Agent attachment content", "invalid external Agent attachment", http.StatusBadRequest, 2002321)
+	registerAdditionalError("create external Agent attachment reference", http.StatusInternalServerError, 2002322)
+	registerAdditionalError("external Agent attachment event conflicts with existing content", http.StatusConflict, 2002323)
 }
 
 func registerAdditionalError(message string, status, code int) {

@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"lazymind/agentconnector/internal/agentcatalog"
 	"lazymind/agentconnector/internal/agentexec"
@@ -101,6 +103,8 @@ func (r *ChatRunner) Run(ctx context.Context, run chatagent.Run, emit func(chata
 	if run.Action == "recover" {
 		prompt = strings.TrimSpace(run.Prompt + "\n\n" + codexRecoveryPrompt)
 	}
+	startedAt := time.Now()
+	providerThreadID := strings.TrimSpace(run.ProviderThreadID)
 	sawTurnCompleted, sawMessage := false, false
 	err = (agentexec.StreamCommand{
 		Binary: r.binary, Arguments: arguments, Environment: agentexec.SafeEnvironment(
@@ -120,6 +124,7 @@ func (r *ChatRunner) Run(ctx context.Context, run chatagent.Run, emit func(chata
 		switch envelope.Type {
 		case "thread.started":
 			if strings.TrimSpace(envelope.ThreadID) != "" {
+				providerThreadID = strings.TrimSpace(envelope.ThreadID)
 				return emit(chatagent.Event{Type: "thread_started", ProviderThreadID: envelope.ThreadID})
 			}
 		case "item.completed":
@@ -134,7 +139,6 @@ func (r *ChatRunner) Run(ctx context.Context, run chatagent.Run, emit func(chata
 		case "turn.completed":
 			if !sawTurnCompleted {
 				sawTurnCompleted = true
-				return emit(chatagent.Event{Type: "turn_completed"})
 			}
 		}
 		return nil
@@ -145,8 +149,30 @@ func (r *ChatRunner) Run(ctx context.Context, run chatagent.Run, emit func(chata
 		}
 		return fmt.Errorf("Codex failed: %w", err)
 	}
-	if !sawTurnCompleted || !sawMessage {
+	attachments := []chatagent.Attachment(nil)
+	if providerThreadID != "" {
+		stateHome, homeErr := codexHome()
+		if homeErr != nil {
+			return fmt.Errorf("resolve Codex generated images: %w", homeErr)
+		}
+		attachments, err = chatagent.ImageAttachmentsSince(
+			filepath.Join(stateHome, "generated_images", providerThreadID), startedAt,
+		)
+		if err != nil {
+			return fmt.Errorf("discover Codex generated images: %w", err)
+		}
+		for index := range attachments {
+			attachment := attachments[index]
+			if err := emit(chatagent.Event{Type: "attachment", Attachment: &attachment}); err != nil {
+				return err
+			}
+		}
+	}
+	if !sawTurnCompleted || (!sawMessage && len(attachments) == 0) {
 		return errors.New("Codex ended without a completed response")
+	}
+	if err := emit(chatagent.Event{Type: "turn_completed"}); err != nil {
+		return err
 	}
 	return nil
 }
