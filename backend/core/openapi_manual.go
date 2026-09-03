@@ -159,6 +159,7 @@ func manualSchemas() map[string]any {
 			prop("passes_attempted", intSchema()),
 			prop("passes", array(refSchema("PreferenceOrganizerPass"))),
 			prop("total_changes", intSchema()),
+			// Keep budget_exhausted readable in historical task results; new runs do not emit it.
 			prop("outcome", enumStringSchema("organized", "organized_with_remaining", "no_safe_changes", "budget_exhausted", "stale_state", "partial", "failed")),
 			prop("reason", strSchema()),
 			prop("target_reached", boolSchema()),

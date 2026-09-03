@@ -49,7 +49,6 @@ def load_preference_state(store: MemoryStore | None = None) -> PreferenceStateSn
 
 
 TARGET_PROMPT_PERCENT = 40
-MAX_CHANGES = 50
 MAX_PASSES = 2
 MAX_ROUNDS_PER_PASS = 60
 

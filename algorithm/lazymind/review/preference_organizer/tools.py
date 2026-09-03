@@ -39,27 +39,9 @@ class StalePreferenceStateError(RuntimeError):
     pass
 
 
-class BudgetExhaustedError(RuntimeError):
-    pass
-
-
-@dataclass
-class ChangeBudget:
-    maximum: int
-    used: int = 0
-
-    def require(self, count: int) -> None:
-        if count < 0 or self.used + count > self.maximum:
-            raise BudgetExhaustedError(f'Organizer change budget exhausted ({self.used}/{self.maximum}).')
-
-    def commit(self, count: int) -> None:
-        self.used += max(0, count)
-
-
 @dataclass
 class PreferenceOrganizerGate:
     pass_number: int
-    budget: ChangeBudget
     phase: str = 'analyze'
     plan_hash: str = ''
     current_etag: str = ''
@@ -90,9 +72,7 @@ class PreferenceOrganizerGate:
         if self.phase != 'analyze' or self.terminal_outcome:
             raise ToolExecutionError('A plan has already been submitted or this pass has stopped.')
         try:
-            authorized = _parse_authorized_operations(
-                operations, snapshot, changes_remaining=self.budget.maximum - self.budget.used
-            )
+            authorized = _parse_authorized_operations(operations, snapshot)
         except (TypeError, ValueError) as exc:
             raise ToolExecutionError(str(exc)) from exc
         canonical = json.dumps(authorized, sort_keys=True, ensure_ascii=False, separators=(',', ':'))
@@ -149,7 +129,6 @@ class PreferenceOrganizerGate:
     def _save_receipt(self, receipt: dict[str, Any], changes: int) -> None:
         if receipt not in self.operations:
             receipt['changes'] = changes
-            self.budget.commit(changes)
             self.operations.append(receipt)
 
     def record(self, action: str, names: list[str], changes: int, *, episode_id: str = '') -> dict[str, Any]:
@@ -189,8 +168,6 @@ class PreferenceOrganizerGate:
         if not self.terminal_outcome:
             if isinstance(exc, StalePreferenceStateError):
                 self.terminal_outcome = 'stale_state'
-            elif isinstance(exc, BudgetExhaustedError):
-                self.terminal_outcome = 'budget_exhausted'
             elif isinstance(exc, MemoryPartialApplyError):
                 self.terminal_outcome = 'partial'
             elif isinstance(exc, MaintenanceCancelled):
@@ -286,7 +263,6 @@ class PreferenceOrganizerApplyTools:
             snapshot, operation = self.gate.require_operation('merge', operation_id)
             normalized_sources = operation['source_names']
             normalized_name = operation['name']
-            self.gate.budget.require(len(normalized_sources))
             self.gate.begin_mutation()
             _merge_preferences(
                 snapshot,
@@ -321,7 +297,6 @@ class PreferenceOrganizerApplyTools:
                 operation_id,
             )
             normalized_name = operation['name']
-            self.gate.budget.require(1)
             self.gate.begin_mutation()
             episode_id = _move_preference_to_episode(
                 snapshot,
@@ -349,7 +324,6 @@ class PreferenceOrganizerApplyTools:
             normalized_name = operation['name']
             replacement = operation['retained_or_replacement_name']
             names = [normalized_name, *([replacement] if replacement else [])]
-            self.gate.budget.require(1)
             self.gate.begin_mutation()
             try:
                 MemoryStore().remove_preference_with_reference(normalized_name)
@@ -368,14 +342,11 @@ _OPERATION_ID_RE = re.compile(r'^[A-Za-z0-9._-]{1,64}$')
 def _parse_authorized_operations(
     raw_operations: list[dict[str, Any]],
     snapshot: PreferenceStateSnapshot,
-    *,
-    changes_remaining: int,
 ) -> list[dict[str, Any]]:
     if not isinstance(raw_operations, list):
         raise ValueError('AUTHORIZED OPERATIONS must be a JSON list.')
 
     known_names = {item.name for item in snapshot.items}
-    change_count = 0
     operation_ids: set[str] = set()
     authorized: list[dict[str, Any]] = []
     for raw in raw_operations:
@@ -430,7 +401,6 @@ def _parse_authorized_operations(
             }
             known_names.difference_update(source_names)
             known_names.add(name)
-            change_count += len(source_names)
         elif action == 'move_to_episode':
             _require_exact_keys(
                 raw,
@@ -454,7 +424,6 @@ def _parse_authorized_operations(
                 'episode_summary': episode_summary,
             }
             known_names.remove(name)
-            change_count += 1
         elif action == 'delete':
             _require_exact_keys(
                 raw,
@@ -487,11 +456,8 @@ def _parse_authorized_operations(
                 'retained_or_replacement_name': replacement,
             }
             known_names.remove(name)
-            change_count += 1
         else:
             raise ValueError(f'unsupported authorized action: {action!r}.')
-        if change_count > changes_remaining:
-            raise ValueError('Authorized Plan exceeds the remaining change budget.')
         authorized.append(operation)
     return authorized
 

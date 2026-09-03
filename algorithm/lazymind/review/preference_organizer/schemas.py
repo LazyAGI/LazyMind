@@ -57,7 +57,6 @@ class PreferenceOrganizerResult(BaseModel):
         'organized',
         'organized_with_remaining',
         'no_safe_changes',
-        'budget_exhausted',
         'stale_state',
         'partial',
         'failed',

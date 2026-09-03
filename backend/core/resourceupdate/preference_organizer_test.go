@@ -136,71 +136,76 @@ func TestPreferenceOrganizerFreezeOnlyAllowsCurrentAlgorithmTask(t *testing.T) {
 }
 
 func TestPreferenceOrganizerWorkerPersistsStructuredResult(t *testing.T) {
-	db := newResourceUpdateTestDB(t)
-	now := time.Date(2026, 9, 2, 1, 0, 0, 0, time.UTC)
-	requestJSON, err := json.Marshal(PreferenceOrganizerRequest{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	insertTask(t, db, orm.ResourceUpdateTask{
-		ID: "organizer-worker-1", TaskType: orm.ResourceUpdateTaskTypeOrganizePreference,
-		ResourceType: orm.ResourceUpdateResourceTypeUserPreference, UserID: "user-1", ResourceID: "user-1",
-		TriggerType: orm.ResourceUpdateTriggerTypeManual, TriggerID: "manual-worker-1",
-		Status: orm.ResourceUpdateTaskStatusPending, RequestJSON: requestJSON, NextRunAt: now,
-		LaneKey: MemoryMaintenanceLaneKey("user-1"), LanePriority: PreferenceOrganizerLanePriority,
-		LaneOrderAt: now, CreatedAt: now, UpdatedAt: now,
-		ResultJSON: json.RawMessage(`{"current_pass":1,"receipts":[],"outcome":"failed"}`),
-	})
-	worker := NewWorker(db, Config{
-		WorkerBatchSize: 1, WorkerLockTTL: time.Minute, MaxAttempts: 1,
-	}, "organizer-worker")
-	worker.clock = func() time.Time { return now }
-	worker.loadLLMConfig = func(context.Context, *gorm.DB, string) (map[string]any, error) {
-		return map[string]any{"llm": map[string]any{"api_key": "secret"}}, nil
-	}
-	worker.callers.PreferenceOrganizer = func(
-		_ context.Context,
-		request algo.PreferenceOrganizerRequest,
-	) (*algo.PreferenceOrganizerResponse, int, error) {
-		var running orm.ResourceUpdateTask
-		if err := db.First(&running, "id = ?", "organizer-worker-1").Error; err != nil {
-			t.Fatal(err)
-		}
-		if len(running.ResultJSON) != 0 {
-			t.Fatalf("execution must clear old result without fabricated progress: %s", running.ResultJSON)
-		}
-		if request.TaskID != PreferenceOrganizerAlgorithmTaskID("organizer-worker-1") ||
-			request.RunID == "" {
-			t.Fatalf("unexpected organizer request: %#v", request)
-		}
-		return &algo.PreferenceOrganizerResponse{
-			Status: "success", TaskID: request.TaskID, Outcome: "organized_with_remaining",
-			Result: map[string]any{
-				"passes_attempted": 2, "total_changes": 7,
-				"target_reached": false, "stop_reason": "no_further_safe_changes",
-				"passes": []any{},
-			},
-		}, http.StatusOK, nil
-	}
+	for _, outcome := range []string{"organized_with_remaining", "budget_exhausted"} {
+		t.Run(outcome, func(t *testing.T) {
+			db := newResourceUpdateTestDB(t)
+			now := time.Date(2026, 9, 2, 1, 0, 0, 0, time.UTC)
+			requestJSON, err := json.Marshal(PreferenceOrganizerRequest{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			insertTask(t, db, orm.ResourceUpdateTask{
+				ID: "organizer-worker-1", TaskType: orm.ResourceUpdateTaskTypeOrganizePreference,
+				ResourceType: orm.ResourceUpdateResourceTypeUserPreference, UserID: "user-1", ResourceID: "user-1",
+				TriggerType: orm.ResourceUpdateTriggerTypeManual, TriggerID: "manual-worker-1",
+				Status: orm.ResourceUpdateTaskStatusPending, RequestJSON: requestJSON, NextRunAt: now,
+				LaneKey: MemoryMaintenanceLaneKey("user-1"), LanePriority: PreferenceOrganizerLanePriority,
+				LaneOrderAt: now, CreatedAt: now, UpdatedAt: now,
+				ResultJSON: json.RawMessage(`{"current_pass":1,"receipts":[],"outcome":"failed"}`),
+			})
+			worker := NewWorker(db, Config{
+				WorkerBatchSize: 1, WorkerLockTTL: time.Minute, MaxAttempts: 1,
+			}, "organizer-worker")
+			worker.clock = func() time.Time { return now }
+			worker.loadLLMConfig = func(context.Context, *gorm.DB, string) (map[string]any, error) {
+				return map[string]any{"llm": map[string]any{"api_key": "secret"}}, nil
+			}
+			worker.callers.PreferenceOrganizer = func(
+				_ context.Context,
+				request algo.PreferenceOrganizerRequest,
+			) (*algo.PreferenceOrganizerResponse, int, error) {
+				var running orm.ResourceUpdateTask
+				if err := db.First(&running, "id = ?", "organizer-worker-1").Error; err != nil {
+					t.Fatal(err)
+				}
+				if len(running.ResultJSON) != 0 {
+					t.Fatalf("execution must clear old result without fabricated progress: %s", running.ResultJSON)
+				}
+				if request.TaskID != PreferenceOrganizerAlgorithmTaskID("organizer-worker-1") ||
+					request.RunID == "" {
+					t.Fatalf("unexpected organizer request: %#v", request)
+				}
+				return &algo.PreferenceOrganizerResponse{
+					Status: "success", TaskID: request.TaskID, Outcome: outcome,
+					Result: map[string]any{
+						"passes_attempted": 2, "total_changes": 7,
+						"target_reached": false, "stop_reason": "no_further_safe_changes",
+						"passes": []any{},
+					},
+				}, http.StatusOK, nil
+			}
 
-	result, err := worker.RunOnce(context.Background())
-	if err != nil || result.Done != 1 {
-		t.Fatalf("worker result=%#v err=%v", result, err)
-	}
-	var task orm.ResourceUpdateTask
-	if err := db.First(&task, "id = ?", "organizer-worker-1").Error; err != nil {
-		t.Fatal(err)
-	}
-	if task.Status != orm.ResourceUpdateTaskStatusDone ||
-		!strings.Contains(string(task.ResultJSON), `"passes_attempted":2`) ||
-		!strings.Contains(string(task.ResultJSON), `"stop_reason":"no_further_safe_changes"`) ||
-		strings.Contains(string(task.RequestJSON), "secret") {
-		t.Fatalf("unexpected persisted task: %#v result=%s", task, task.ResultJSON)
+			result, err := worker.RunOnce(context.Background())
+			if err != nil || result.Done != 1 {
+				t.Fatalf("worker result=%#v err=%v", result, err)
+			}
+			var task orm.ResourceUpdateTask
+			if err := db.First(&task, "id = ?", "organizer-worker-1").Error; err != nil {
+				t.Fatal(err)
+			}
+			if task.Status != orm.ResourceUpdateTaskStatusDone ||
+				!strings.Contains(string(task.ResultJSON), `"outcome":"`+outcome+`"`) ||
+				!strings.Contains(string(task.ResultJSON), `"passes_attempted":2`) ||
+				!strings.Contains(string(task.ResultJSON), `"stop_reason":"no_further_safe_changes"`) ||
+				strings.Contains(string(task.RequestJSON), "secret") {
+				t.Fatalf("unexpected persisted task: %#v result=%s", task, task.ResultJSON)
+			}
+		})
 	}
 }
 
 func TestPreferenceOrganizerHistoricalResultsRemainReadable(t *testing.T) {
-	legacy := json.RawMessage(`{"current_pass":1,"receipts":[],"passes":[],"outcome":"no_safe_changes"}`)
+	legacy := json.RawMessage(`{"current_pass":1,"receipts":[],"passes":[],"outcome":"budget_exhausted","total_changes":50}`)
 	response := preferenceOrganizerResponse(orm.ResourceUpdateTask{ID: "legacy", Status: "done", ResultJSON: legacy})
 	if string(response.Result) != string(legacy) {
 		t.Fatalf("historical JSON must not be rewritten: %s", response.Result)

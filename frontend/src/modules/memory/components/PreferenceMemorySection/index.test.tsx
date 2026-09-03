@@ -60,6 +60,14 @@ describe("Preference Organizer entry", () => {
   view.unmount();
  });
 
+ it("restores historical change-budget results without disabling organization", async () => {
+  vi.mocked(api.getLatestPreferenceOrganizer).mockResolvedValue({ ...task("done"), result: { outcome: "budget_exhausted", total_changes: 50, target_reached: false } });
+  const view = render(<PreferenceMemorySection />);
+  expect(await screen.findByRole("status")).toHaveTextContent("admin.memoryPreferenceOrganizeDone");
+  expect(screen.getByRole("button", { name: /memoryPreferenceOrganize$/ })).toBeEnabled();
+  view.unmount();
+ });
+
  it("shows only total and character budget, preserving overflow numbers", async () => {
   vi.mocked(api.listPreferenceMemories).mockResolvedValue({ items, etag: "etag-1", totalSize: 2, updatedAt: 1, budget: { usedChars: 6000, maxChars: 5000 } });
   const view = render(<PreferenceMemorySection />);

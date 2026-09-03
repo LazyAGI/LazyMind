@@ -23,7 +23,6 @@ from lazymind.review.preference_organizer.state import (
     target_reached,
 )
 from lazymind.review.preference_organizer.tools import (
-    ChangeBudget,
     PreferenceOrganizerGate,
 )
 from lazymind.review.service import preference_organizer as service
@@ -53,7 +52,6 @@ def _snapshot(
 def _gate(pass_number: int = 1):
     return PreferenceOrganizerGate(
         pass_number=pass_number,
-        budget=ChangeBudget(maximum=50),
     )
 
 
@@ -432,7 +430,6 @@ def test_organizer_model_sees_full_items_and_measured_character_budget(monkeypat
     prompt = build_preference_organizer_prompt(
         snapshot,
         pass_number=1,
-        changes_remaining=50,
     )
 
     assert set(response) == {'stored_items', 'full_projection_chars', 'etag', 'preferences'}
@@ -441,7 +438,7 @@ def test_organizer_model_sees_full_items_and_measured_character_budget(monkeypat
     assert item.created_at in prompt and item.updated_at in prompt
     assert 'full_projection_chars=1000' in prompt
     assert '40%' in prompt
-    for forbidden in ('target_items', 'preferred_min_items'):
+    for forbidden in ('target_items', 'preferred_min_items', 'changed-item budget', 'budget exhaustion'):
         assert forbidden not in prompt
         assert forbidden not in str(response)
 
@@ -522,8 +519,7 @@ def test_organizer_runs_at_most_two_fresh_passes(monkeypatch):
     def run_pass(*, gate, before, **kwargs):
         gates.append(gate)
         gate.submit([], before)
-        gate.budget.commit(1)
-        gate.operations.append({'action': 'test-change'})
+        gate.operations.append({'action': 'test-change', 'changes': 1})
         return ''
 
     monkeypatch.setattr(service, '_run_organizer_pass', run_pass)
@@ -539,11 +535,13 @@ def test_organizer_runs_at_most_two_fresh_passes(monkeypatch):
     assert result.result.passes_attempted == 2
     assert len(result.result.passes) == 2
     assert gates[0] is not gates[1]
-    assert gates[0].budget is gates[1].budget
+    assert result.result.total_changes == 2
+    assert [p.changes for p in result.result.passes] == [1, 1]
     assert gates[0].plan_hash == gates[1].plan_hash  # canonical empty operation list
 
 
-def test_first_pass_target_stops_without_second_pass(monkeypatch):
+@pytest.mark.parametrize('changes', [1, 55])
+def test_first_pass_target_stops_without_second_pass(monkeypatch, changes):
     snapshots = iter(
         [
             _snapshot(50, truncated=True, etag='initial'),
@@ -557,8 +555,7 @@ def test_first_pass_target_stops_without_second_pass(monkeypatch):
     def run_pass(*, gate, before, **kwargs):
         calls.append(gate.pass_number)
         gate.submit([], before)
-        gate.budget.commit(1)
-        gate.operations.append({'action': 'test-change'})
+        gate.operations.extend({'action': 'delete', 'changes': 1} for _ in range(changes))
         return ''
 
     monkeypatch.setattr(service, '_run_organizer_pass', run_pass)
@@ -570,6 +567,8 @@ def test_first_pass_target_stops_without_second_pass(monkeypatch):
 
     assert result.outcome == 'organized'
     assert calls == [1]
+    assert result.result.total_changes == changes
+    assert result.result.passes[0].changes == changes
 
 
 def test_first_no_safe_change_pass_stops_without_second_pass(monkeypatch):
@@ -623,8 +622,7 @@ def test_second_pass_no_safe_changes_reports_organized_with_remaining(monkeypatc
         calls.append(gate.pass_number)
         gate.submit([], before)
         if gate.pass_number == 1:
-            gate.budget.commit(1)
-            gate.operations.append({'action': 'test-change'})
+            gate.operations.append({'action': 'test-change', 'changes': 1})
         return ''
 
     monkeypatch.setattr(service, '_run_organizer_pass', run_pass)
@@ -678,7 +676,6 @@ def test_partial_first_pass_never_starts_second_pass(monkeypatch):
     [
         ('stale_state', 'stale_state'),
         ('failed', 'failed'),
-        ('budget_exhausted', 'budget_exhausted'),
     ],
 )
 def test_unsafe_terminal_first_pass_never_starts_second(
@@ -804,7 +801,7 @@ def test_receipt_survives_side_effect_failure_and_prevents_following_apply(monke
     with pytest.raises(ToolExecutionError):
         apply.delete_preference('delete-2')
     assert writes == ['pref.a']
-    assert gate.budget.used == 1
+    assert sum(receipt['changes'] for receipt in gate.operations) == 1
     assert len(gate.operations) == 1
     receipt = gate.operations[0]
     assert receipt['operation_id'] == 'delete-1'
@@ -828,9 +825,9 @@ def test_service_retains_receipts_if_final_validation_read_fails(monkeypatch):
     monkeypatch.setattr(service, 'load_preference_state', read)
 
     def run(*, gate, **_):
-        gate.budget.commit(1)
         gate.operations.append(
-            {'operation_id': 'move-1', 'action': 'move_to_episode', 'episode_id': 'ep_1', 'status': 'partial'}
+            {'operation_id': 'move-1', 'action': 'move_to_episode', 'episode_id': 'ep_1',
+             'status': 'partial', 'changes': 1}
         )
         gate.terminal_outcome = 'partial'
         return ''
@@ -913,7 +910,7 @@ def test_compound_partial_receipts_keep_steps_episode_and_charge_once(monkeypatc
     with pytest.raises(ToolExecutionError):
         tool('op-1')
     assert events == before_retry
-    assert gate.budget.used == cost
+    assert sum(receipt['changes'] for receipt in gate.operations) == cost
     assert len(gate.operations) == 1
     receipt = gate.operations[0]
     assert receipt['status'] == 'partial'
@@ -939,3 +936,172 @@ def test_invalid_existing_index_stops_without_model_or_retry(monkeypatch):
     assert not result.retryable
     assert result.error.code == 'invalid_preference_index'
     assert 'topic.md' in result.error.message
+
+
+@pytest.mark.parametrize('action', ['delete', 'merge', 'move_to_episode'])
+def test_gate_applies_more_than_fifty_changed_items(monkeypatch, action):
+    items = [_item(f'pref.item{i}', f'references/item{i}.md') for i in range(60)]
+    current = _snapshot_with_items(items)
+    monkeypatch.setattr(organizer_tools, 'load_preference_state', lambda: current)
+    writes = []
+
+    def consume(names, replacement=None):
+        nonlocal current
+        writes.append(list(names))
+        remaining = [item for item in current.items if item.name not in names]
+        if replacement:
+            remaining.append(_item(replacement, f'references/{replacement}.md'))
+        current = _snapshot_with_items(remaining, etag=f'etag-{len(writes)}')
+
+    class Store:
+        def remove_preference_with_reference(self, name):
+            consume([name])
+
+    def merge(snapshot, *, source_names, name, **kwargs):
+        consume(source_names, name)
+
+    def move(snapshot, name, summary):
+        consume([name])
+        return f'episode-{name}'
+
+    monkeypatch.setattr(organizer_tools, 'MemoryStore', Store)
+    monkeypatch.setattr(organizer_tools, '_merge_preferences', merge)
+    monkeypatch.setattr(organizer_tools, '_move_preference_to_episode', move)
+    if action == 'merge':
+        operations = [dict(
+            operation_id=f'merge-{i}', action='merge',
+            source_names=[item.name for item in items[i:i + 10]], name=f'pref.merged{i}',
+            summary='Merged', scenario='Same scope', details='Preserve all', reason='Duplicate rules',
+        ) for i in range(0, 60, 10)]
+    elif action == 'move_to_episode':
+        operations = [dict(operation_id=f'move-{i}', action=action, name=item.name,
+                           episode_summary='Retrievable narrow rule') for i, item in enumerate(items)]
+    else:
+        operations = [_delete_operation(item.name, f'delete-{i}') for i, item in enumerate(items)]
+    gate = _gate()
+    gate.submit(operations, current)
+    apply = organizer_tools.PreferenceOrganizerApplyTools(gate)
+    tool = {'merge': apply.merge_preferences, 'delete': apply.delete_preference,
+            'move_to_episode': apply.move_preference_to_episode}[action]
+    for operation in operations:
+        tool(operation['operation_id'])
+    assert gate.next_operation_index == len(operations)
+    assert not gate.terminal_outcome
+    assert len(writes) == len(gate.operations) == len(operations)
+    assert sum(receipt['changes'] for receipt in gate.operations) == 60
+    assert all(receipt['status'] == 'applied' for receipt in gate.operations)
+    assert [r['before_etag'] for r in gate.operations[1:]] == [r['etag'] for r in gate.operations[:-1]]
+
+
+@pytest.mark.parametrize('second_result', ['target', 'remaining', 'before_read_failure', 'after_read_failure'])
+def test_two_passes_have_no_shared_change_limit(monkeypatch, second_result):
+    reads = 0
+    calls = []
+
+    def read():
+        nonlocal reads
+        reads += 1
+        if ((second_result == 'before_read_failure' and reads == 4)
+                or (second_result == 'after_read_failure' and reads == 5)):
+            raise RuntimeError('storage read failed')
+        chars = 1000 if reads == 5 and second_result == 'target' else 3000
+        return _snapshot(150, projection_chars=chars, etag=f'etag-{reads}')
+
+    def run(*, gate, before, max_rounds_per_pass, **kwargs):
+        calls.append(gate.pass_number)
+        assert max_rounds_per_pass == 60
+        gate.submit([], before)
+        gate.operations.extend({'operation_id': f'delete-{i}', 'action': 'delete',
+                                'status': 'applied', 'changes': 1} for i in range(55))
+        return ''
+
+    monkeypatch.setattr(service, 'load_preference_state', read)
+    monkeypatch.setattr(service, '_run_organizer_pass', run)
+    result = service.organize_preferences(task_id='preference_organizer_large', run_id='run', user_id='u')
+    expected = {
+        'target': ('organized', 'target_reached', 110, True),
+        'remaining': ('organized_with_remaining', 'max_passes_reached', 110, False),
+        'before_read_failure': ('failed', 'storage_read_failed', 55, False),
+        'after_read_failure': ('partial', 'validation_read_failed', 110, False),
+    }[second_result]
+    assert (result.outcome, result.result.stop_reason, result.result.total_changes,
+            result.result.target_reached) == expected
+    assert calls == ([1] if second_result == 'before_read_failure' else [1, 2])
+    assert all(p.changes == sum(r['changes'] for r in p.receipts) for p in result.result.passes)
+
+
+def test_idempotent_receipt_and_duplicate_recording_do_not_inflate_changes(monkeypatch):
+    snapshot = _snapshot_with_items([_item()])
+    monkeypatch.setattr(organizer_tools, 'load_preference_state', lambda: snapshot)
+
+    class Store:
+        def remove_preference_with_reference(self, name):
+            raise FileNotFoundError(name)
+
+    monkeypatch.setattr(organizer_tools, 'MemoryStore', Store)
+    gate = _gate()
+    gate.submit([_delete_operation()], snapshot)
+    organizer_tools.PreferenceOrganizerApplyTools(gate).delete_preference('delete-1')
+    receipt = gate.operations[0]
+    gate._save_receipt(receipt, 1)
+    assert len(gate.operations) == 1
+    assert receipt['status'] == 'idempotent'
+    assert receipt['changes'] == 0
+
+
+def test_algorithm_result_schema_no_longer_accepts_change_budget_outcome():
+    from pydantic import ValidationError
+    from lazymind.review.preference_organizer.schemas import PreferenceOrganizerResult
+
+    with pytest.raises(ValidationError):
+        PreferenceOrganizerResult(status='success', task_id='task', outcome='budget_exhausted')
+
+
+def test_agent_round_limit_remains_sixty(monkeypatch):
+    captured = {}
+
+    def agent_factory(**kwargs):
+        captured.update(kwargs)
+        return lambda prompt: 'No changes'
+
+    monkeypatch.setattr(service, 'AutoModel', lambda **_: object())
+    monkeypatch.setattr(service.lazyllm.tools.agent, 'ReactAgent', agent_factory)
+    monkeypatch.setattr(service, 'make_preference_organizer_compactor', lambda *a, **kw: None)
+    assert service._run_organizer_pass(
+        gate=_gate(), before=_snapshot(1), llm_config=None, max_rounds_per_pass=60,
+    ) == ''
+    assert captured['max_retries'] == 59
+    assert captured['extra_stop_condition'] is service.check_cancelled
+
+
+@pytest.mark.parametrize('count', [1, 11])
+def test_merge_batch_bounds_remain_after_removing_task_limit(count):
+    items = [_item(f'pref.item{i}', f'references/item{i}.md') for i in range(count)]
+    operation = dict(operation_id='merge-1', action='merge', source_names=[i.name for i in items],
+                     name='pref.merged', summary='Merged', scenario='Same', details='All', reason='Duplicate')
+    with pytest.raises(ToolExecutionError, match='2-10'):
+        _gate().submit([operation], _snapshot_with_items(items))
+
+
+@pytest.mark.parametrize('failure', ['stale', 'cancelled'])
+def test_execution_guards_prevent_any_write(monkeypatch, failure):
+    before = _snapshot_with_items([_item()], etag='before')
+    gate = _gate()
+    operation = _delete_operation()
+    gate.submit([operation], before)
+    with pytest.raises(ToolExecutionError, match='already been submitted'):
+        gate.submit([operation], before)
+
+    def cancelled():
+        raise organizer_tools.MaintenanceCancelled('lease expired')
+
+    monkeypatch.setattr(organizer_tools, 'load_preference_state',
+                        lambda: _snapshot_with_items([_item()], etag='changed'))
+    if failure == 'cancelled':
+        monkeypatch.setattr(organizer_tools, 'check_cancelled', cancelled)
+    monkeypatch.setattr(organizer_tools, 'MemoryStore', lambda: pytest.fail('guard must prevent storage access'))
+    with pytest.raises(ToolExecutionError):
+        organizer_tools.PreferenceOrganizerApplyTools(gate).delete_preference('delete-1')
+    assert gate.terminal_outcome == ('stale_state' if failure == 'stale' else 'cancelled')
+    assert not gate.mutation_started
+    assert sum(r['changes'] for r in gate.operations) == 0

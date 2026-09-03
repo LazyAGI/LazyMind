@@ -24,12 +24,10 @@ from lazymind.review.preference_organizer.schemas import (
 from lazymind.review.preference_organizer.state import (
     load_preference_state,
     target_reached,
-    MAX_CHANGES,
     MAX_PASSES,
     MAX_ROUNDS_PER_PASS,
 )
 from lazymind.review.preference_organizer.tools import (
-    ChangeBudget,
     PreferenceOrganizerAnalyzeTools,
     PreferenceOrganizerApplyTools,
     PreferenceOrganizerGate,
@@ -61,7 +59,6 @@ def organize_preferences(
         'task_id': task_id,
         'memory_operation_ledger': [],
     }
-    budget = ChangeBudget(maximum=MAX_CHANGES)
     pass_results: list[PreferenceOrganizerPassResult] = []
 
     try:
@@ -76,7 +73,6 @@ def organize_preferences(
             task_id,
             outcome='no_safe_changes',
             pass_results=[],
-            total_changes=0,
             passes_attempted=0,
             target_reached_value=target_reached(initial.data),
             stop_reason='empty_index' if initial.data.stored_items == 0 else 'target_reached',
@@ -99,18 +95,17 @@ def organize_preferences(
                 str(exc),
                 retryable=True,
                 pass_results=pass_results,
-                total_changes=budget.used,
                 passes_attempted=attempted,
             )
         check_cancelled()
-        gate = PreferenceOrganizerGate(pass_number=pass_number, budget=budget)
-        budget_before = budget.used
+        gate = PreferenceOrganizerGate(pass_number=pass_number)
         run_error = _run_organizer_pass(
             gate=gate,
             before=before,
             llm_config=llm_config,
             max_rounds_per_pass=MAX_ROUNDS_PER_PASS,
         )
+        pass_changes = sum(receipt['changes'] for receipt in gate.operations)
         try:
             after = load_preference_state()
         except Exception as exc:
@@ -120,13 +115,13 @@ def organize_preferences(
                     plan_hash=gate.plan_hash,
                     before=before.data,
                     after=None,
-                    changes=budget.used - budget_before,
+                    changes=pass_changes,
                     operation_count=len(gate.operations),
                     receipts=gate.operations,
-                    outcome='partial' if budget.used > budget_before else 'failed',
+                    outcome='partial' if pass_changes else 'failed',
                 )
             )
-            terminal_outcome = 'partial' if budget.used > budget_before else 'failed'
+            terminal_outcome = 'partial' if pass_changes else 'failed'
             terminal_error = gate.terminal_error or f'Final validation read failed: {exc}'
             stop_reason = 'validation_read_failed'
             break
@@ -142,12 +137,10 @@ def organize_preferences(
             pass_outcome = 'failed'
             gate.terminal_error = 'Organizer ended before all gated operations were applied.'
         if not pass_outcome:
-            if budget.used == budget_before:
+            if not pass_changes:
                 pass_outcome = 'no_safe_changes'
             elif reached:
                 pass_outcome = 'organized'
-            elif budget.used >= budget.maximum:
-                pass_outcome = 'budget_exhausted'
             else:
                 pass_outcome = 'changes_applied'
         pass_results.append(
@@ -156,7 +149,7 @@ def organize_preferences(
                 plan_hash=gate.plan_hash,
                 before=before.data,
                 after=after.data,
-                changes=budget.used - budget_before,
+                changes=pass_changes,
                 operation_count=len(gate.operations),
                 receipts=gate.operations,
                 outcome=pass_outcome,
@@ -166,13 +159,13 @@ def organize_preferences(
             terminal_outcome = 'organized'
             stop_reason = 'target_reached'
             break
-        if pass_outcome in {'stale_state', 'partial', 'failed', 'budget_exhausted'}:
+        if pass_outcome in {'stale_state', 'partial', 'failed'}:
             terminal_outcome = pass_outcome
             terminal_error = gate.terminal_error
             stop_reason = pass_outcome
             break
         if pass_outcome == 'no_safe_changes':
-            terminal_outcome = 'no_safe_changes' if budget.used == 0 else 'organized_with_remaining'
+            terminal_outcome = 'organized_with_remaining' if any(p.changes for p in pass_results) else 'no_safe_changes'
             terminal_error = gate.terminal_error
             stop_reason = 'no_further_safe_changes'
             break
@@ -190,7 +183,6 @@ def organize_preferences(
         task_id,
         outcome=terminal_outcome,
         pass_results=pass_results,
-        total_changes=budget.used,
         passes_attempted=attempted,
         target_reached_value=reached,
         stop_reason=stop_reason,
@@ -209,7 +201,6 @@ def _run_organizer_pass(
     prompt = build_preference_organizer_prompt(
         before,
         pass_number=gate.pass_number,
-        changes_remaining=gate.budget.maximum - gate.budget.used,
     )
     try:
         llm = AutoModel(model='llm')
@@ -267,7 +258,6 @@ def _failure_result(
     *,
     retryable: bool,
     pass_results: Optional[list[PreferenceOrganizerPassResult]] = None,
-    total_changes: int = 0,
     passes_attempted: int = 0,
 ) -> PreferenceOrganizerResult:
     return _result(
@@ -276,7 +266,6 @@ def _failure_result(
         retryable=retryable,
         pass_results=pass_results or [],
         passes_attempted=passes_attempted,
-        total_changes=total_changes,
         reason=message,
         stop_reason=code,
     )
@@ -287,14 +276,13 @@ def _result(
     *,
     outcome: str,
     pass_results: list[PreferenceOrganizerPassResult],
-    total_changes: int,
     passes_attempted: int,
     stop_reason: str,
     reason: str,
     target_reached_value: bool = False,
     retryable: bool = False,
 ) -> PreferenceOrganizerResult:
-    success = outcome in {'organized', 'organized_with_remaining', 'no_safe_changes', 'budget_exhausted'}
+    success = outcome in {'organized', 'organized_with_remaining', 'no_safe_changes'}
     return PreferenceOrganizerResult(
         status='success' if success else 'failed',
         task_id=task_id,
@@ -306,7 +294,7 @@ def _result(
         result=PreferenceOrganizerResultData(
             passes_attempted=passes_attempted,
             passes=pass_results,
-            total_changes=total_changes,
+            total_changes=sum(p.changes for p in pass_results),
             outcome=outcome,
             reason=reason,
             target_reached=target_reached_value if success else False,

@@ -263,6 +263,7 @@ func (w *Worker) handlePreferenceOrganizer(ctx context.Context, task orm.Resourc
 	if marshalErr != nil {
 		return permanentOutcome("preference_organizer_invalid_result", marshalErr.Error())
 	}
+	// budget_exhausted is accepted only for compatibility with older Algorithm versions.
 	if resp.Status == "success" && (resp.Outcome == "organized" ||
 		resp.Outcome == "organized_with_remaining" || resp.Outcome == "no_safe_changes" ||
 		resp.Outcome == "budget_exhausted") {

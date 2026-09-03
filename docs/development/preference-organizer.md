@@ -10,7 +10,9 @@ Algorithm 使用共享专用线程池，默认 2 个执行槽，可用 `LAZYMIND
 
 完整存储不设条目容量上限。唯一容量配置是正整数 `LAZYMIND_PREFERENCE_CONTEXT_MAX_CHARS`，默认 5000，Core 和 Chat 必须一致。投影按索引原顺序保留能完整放入预算的最长前缀，不跳过条目、不截断 summary。Core 与 Algorithm 使用相同的固定 YAML 布局和 JSON 引号转义，按 Unicode 字符（包含格式开销）计数，不按字节、UTF-16 或 token。空 YAML 包装也放不下时投影为空字符串。
 
-完整投影字符需求达到 80% 时自动触发整理，严格低于 40% 才达标。Gate 接收结构化 operations，保存规范化 JSON 的哈希和完整参数。Agent 按 operation ID 调用 Apply；压缩恢复只注入执行游标。没有条目数目标或硬下限；最多两轮、每轮 60 round、总变更预算 50，merge 单次仍为 2–10 条。手动任务在非空且已达标时仍分析第一轮，空索引不调用模型；没有安全动作时可以停止，不为达标强制删除。`target_reached` 根据最终验证快照计算，与是否发生改动分离；最终读取失败不推断达标。
+完整投影字符需求达到 80% 时自动触发整理，严格低于 40% 才达标。Gate 接收结构化 operations，保存规范化 JSON 的哈希和完整参数。Agent 按 operation ID 调用 Apply；压缩恢复只注入执行游标。没有条目数目标、硬下限或任务总变更次数上限；最多两轮、每轮 60 round，merge 单次仍为 2–10 条。手动任务在非空且已达标时仍分析第一轮，空索引不调用模型；没有安全动作时可以停止，不为达标强制删除。`target_reached` 根据最终验证快照计算，与是否发生改动分离；最终读取失败不推断达标。
+
+`passes[].changes` 从该轮 receipts 汇总，`total_changes` 从各轮结果汇总，仅用于审计，不再限制执行次数。delete / MOVE 按一条计，merge 按源条目数计；幂等零改动不计，部分写入与结果未知保留原计数及状态，不能把总数当作全部已确认成功的变更。写入后验证读取失败也保留 receipt，不重复计数。Algorithm 不再产生 `budget_exhausted`；Core 结果契约和生成客户端保留该枚举以读取历史结果，并接收旧 Algorithm 返回值。历史 JSON 不重写，字符预算不受此兼容状态影响。
 
 每个操作的 receipt 仅保存在 `passes[].receipts`，包括涉及名称、状态、成本、完成/失败步骤、可获得的 ETag 和 Episode ID。保留 `passes_attempted` / `pass_number`，不再提供伪进度 `current_pass`。部分写入和无法确认的结果会停止后续 Apply；最终读取失败仍保留已有记录。此实现不增加崩溃恢复审计或跨 operation lineage 系统。
 
@@ -28,6 +30,15 @@ Algorithm 使用共享专用线程池，默认 2 个执行槽，可用 `LAZYMIND
 4. 发布配套前端。回滚前同样停止并结束维护执行，再执行对应 down migration；aggregate down 以前一 release schema 为基准。
 
 用户锁只覆盖短数据库事务，顺序为用户锁、任务行、数据行。PostgreSQL 使用事务 advisory lock，SQLite 使用封装内的 BEGIN IMMEDIATE。写入时验证 lease / run ID，租约续期和最终确认还匹配 worker 与影响行数。旧执行即使返回成功也不能确认任务；旧 MOVE 也不能在 EpisodeStore 继续产生副作用。
+
+## 取消变更次数上限验证（2026-09-03）
+
+- Algorithm 相关 132 项测试通过：单轮超过 50、两轮累计 110、merge / MOVE / delete 超过 50、幂等和重复记账、部分失败、最终读取失败，以及保留的 Gate / merge / round / 取消边界。变更文件 flake8 通过。
+- Core `go test ./...` 通过；`go test -race ./resourceupdate ./maintenance ./remotefs ./currentmemory` 通过。旧 `budget_exhausted` Algorithm 响应仍成功落库，旧任务 JSON 原样读取。
+- 前端 hook / 页面 13 项及接口 / view model / 生成客户端 / 双语契约 18 项测试通过；变更文件 ESLint、OpenAPI 新鲜度检查与生产构建通过。本轮未重复全量前端测试和全量 TypeScript 检查；此前基线问题见下文。
+- 在一次性 Core 数据库中使用 `Qwen/Qwen3.8-Flash-Next` 真实模型，手动任务 `dc574a5ecc77481aa8c2ab64836e7151` 于 09:46:14–09:48:26 UTC 完成，约 131.5 秒。仅一个任务、一个 attempt、一个 pass，55 次 duplicate DELETE 全部 applied；66 → 11 条，4528 → 758 字符（5000 上限），`organized + target_reached=true`。
+- 核对了全部 55 条 receipt、完整 ETag 链、保留的 11 个偏好及其 Reference；无失败步骤、缺失或多余引用，Core 与 Algorithm 最终快照一致。隔离浏览器页面显示 `Total: 11`、`758 / 5000` 和整理完成，操作按钮恢复可用。
+- 用户原验收账号保持 19 条、1273 字符，ETag 未变；原开发服务未重启。本次真实数据只验证精确去重，不代表复杂语义 merge / MOVE 的模型验收。
 
 ## 单字符预算改造验证（2026-09-03）
 
@@ -95,6 +106,7 @@ Algorithm 使用共享专用线程池，默认 2 个执行槽，可用 `LAZYMIND
 可复现入口：
 
 - `backend/core/organizer_browser_e2e_test.go`：设置 `ORGANIZER_BROWSER_FIXTURE_ADDR` 才启动，默认测试跳过。使用一次性测试 DB，最多运行 12 分钟。
+- 同时设置 `ORGANIZER_BROWSER_FIXTURE_LARGE=1` 时，初始化 66 条偏好（11 组各 6 份，共 55 个重复项），不创建 Review；以 5000 字符预算手动提交一次 Organizer，核对任务结果、实际存储和 receipts，验证超过旧 50 次限制。默认三条数据与 Lane 场景保持不变。
 - `tests/algorithm/review/organizer_browser_fixture.py`：加载真实路由，只在进入 Review / Organizer 前添加 35 / 12 秒等待，便于观察状态。使用自己的有效模型配置和内部测试 token。
 - `frontend/tests/fixtures/organizer/index.html`：Vite 下直接加载生产偏好组件。
 

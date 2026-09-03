@@ -39,12 +39,31 @@ func TestOrganizerBrowserFixture(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
+	large := os.Getenv("ORGANIZER_BROWSER_FIXTURE_LARGE") == "1"
+	summaries := []string{"默认使用中文回答。", "回答默认使用中文。", "本次排查临时把重试次数设置为 7；这不是长期偏好。"}
+	itemCount, reviewCount := 3, 3
+	if large {
+		// Eleven distinct global defaults, each repeated six times: 55 safe duplicate deletions.
+		summaries = []string{
+			"默认使用中文回答，技术术语可以保留英文原文。",
+			"回答先给结论，再解释依据和必要的背景。",
+			"代码示例优先使用 Python，并写出必要的导入。",
+			"终端命令按 macOS 和 zsh 环境编写。",
+			"修改代码前先说明方案，并明确确认修改范围。",
+			"删除数据或覆盖文件前，需要确认目标和影响范围。",
+			"诊断问题时区分已验证事实、推断和待验证事项。",
+			"引用外部资料时，提供支持结论的原始来源链接。",
+			"展示日程和时间时，默认使用北京时间。",
+			"金额比较应注明币种，不省略重要的费用条件。",
+			"英文邮件先给完整草稿，再提供简短中文说明。",
+		}
+		itemCount, reviewCount = len(summaries)*6, 0
+	}
 	items := []currentmemory.PreferenceItem{}
-	for i := 1; i <= 3; i++ {
+	for i := 1; i <= itemCount; i++ {
 		name := fmt.Sprintf("pref.answer.%d", i)
 		ref := fmt.Sprintf("answer-%d", i)
-		summaries := []string{"默认使用中文回答。", "回答默认使用中文。", "本次排查临时把重试次数设置为 7；这不是长期偏好。"}
-		item := currentmemory.PreferenceItem{Name: name, Summary: summaries[i-1], Ref: "references/" + ref + ".md", CreatedAt: "2026-09-01T00:00:00Z", UpdatedAt: "2026-09-01T00:00:00Z"}
+		item := currentmemory.PreferenceItem{Name: name, Summary: summaries[(i-1)%len(summaries)], Ref: "references/" + ref + ".md", CreatedAt: "2026-09-01T00:00:00Z", UpdatedAt: "2026-09-01T00:00:00Z"}
 		items = append(items, item)
 		body := fmt.Sprintf("---\nname: %s\nsummary: %s\ncreated_at: '2026-09-01T00:00:00Z'\nupdated_at: '2026-09-01T00:00:00Z'\nsource:\n  kind: memory_review\n  conversation_id: fixture-conversation\n---\n\n## Application Scenarios\n默认回答。\n\n## Preference Details\n%s\n\n## Reason\n用户明确表达。\n", ref, item.Summary, item.Summary)
 		if err := repo.UpsertEntry(ctx, orm.MemoryCurrentEntry{UserID: user, Path: currentmemory.ReferencesPath + "/" + ref + ".md", EntryType: "file", Content: []byte(body), Size: int64(len(body)), Mime: "text/markdown", CreatedAt: now, UpdatedAt: now}); err != nil {
@@ -58,8 +77,8 @@ func TestOrganizerBrowserFixture(t *testing.T) {
 	if err = repo.UpsertEntry(ctx, orm.MemoryCurrentEntry{UserID: user, Path: currentmemory.PreferencePath, EntryType: "file", Content: body, Size: int64(len(body)), Mime: "text/yaml", CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
-	// Start with one current Review and two pending Reviews, all genuine handlers.
-	for i := 0; i < 3; i++ {
+	// The default lane fixture includes Reviews; the large fixture isolates one Organizer task.
+	for i := 0; i < reviewCount; i++ {
 		request, _ := json.Marshal(map[string]any{"conversation_id": fmt.Sprintf("fixture-conversation-%d", i), "history": []map[string]string{{"role": "user", "content": "你好，请回复你好即可，没有要记住的信息。"}}})
 		task := orm.ResourceUpdateTask{ID: fmt.Sprintf("fixture-review-%d", i), TaskType: orm.ResourceUpdateTaskTypeGenerateReview, ResourceType: orm.ResourceUpdateResourceTypeMemory, UserID: user, ResourceID: fmt.Sprintf("fixture-conversation-%d", i), TriggerType: "manual", TriggerID: fmt.Sprintf("fixture-trigger-%d", i), Status: "pending", RequestJSON: request, NextRunAt: now, LaneKey: resourceupdate.MemoryMaintenanceLaneKey(user), LanePriority: resourceupdate.MemoryReviewLanePriority, LaneOrderAt: now.Add(time.Duration(i) * time.Millisecond), CreatedAt: now, UpdatedAt: now}
 		if err = db.Create(&task).Error; err != nil {
