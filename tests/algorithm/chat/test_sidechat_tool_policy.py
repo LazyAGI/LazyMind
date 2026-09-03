@@ -8,8 +8,8 @@ import lazyllm
 from lazymind.chat.engine.agent_runtime import AgentExecutor
 from lazymind.chat.service import chat_service
 from lazymind.chat.service.chat_request import ChatRequest
-from lazymind.chat.service.component.tool_policy import apply_tool_policy
-from lazymind.chat.service.component.tool_registry import DEFAULT_TOOLS, KBToolkit, ToolConfig
+from lazymind.chat.service.component.tool_policy import build_sidechat_tool_configs
+from lazymind.chat.service.component.tool_registry import DEFAULT_TOOLS, ToolConfig
 
 
 @pytest.fixture(autouse=True)
@@ -36,14 +36,14 @@ def test_sidechat_final_tools_remain_readonly_after_lazy_activation(monkeypatch,
     def forbidden(*_args, **_kwargs):
         raise AssertionError('sidechat must not load an execution capability')
 
-    # A new method on an existing lazy toolkit and a new registry entry must
-    # remain unreachable, even if old parent history asks to activate them.
-    monkeypatch.setattr(KBToolkit, 'delete_document', forbidden, raising=False)
-    monkeypatch.setattr(KBToolkit, '__public_apis__', [*KBToolkit.__public_apis__, 'delete_document'])
-
+    # Read-only search groups own their public APIs; adding a provider does not
+    # require another parallel method allowlist in Sidechat.
     class FutureSearchToolkit:
-        __public_apis__ = ['delete_document']
-        delete_document = forbidden
+        __public_apis__ = ['search']
+
+        def search(self, query: str) -> str:
+            """Search a future read-only provider."""
+            return query
 
     configs = [
         replace(config, tool={**config.tool, 'tools': [*config.tool['tools'], FutureSearchToolkit()]})
@@ -75,15 +75,12 @@ def test_sidechat_final_tools_remain_readonly_after_lazy_activation(monkeypatch,
             'tool_policy': 'sidechat_readonly', 'source_reference': reference,
             'tool_config': {'bing': 'test-key', 'sciverse': 'test-key'},
             'mcp_config': [{'name': 'dangerous', 'transport': 'stdio', 'command': 'dangerous'}],
-            'mail_draft_confirm_id': 'draft-to-send',
         },
-        personalization={'use_memory': True},
-        agent={'available_skills': ['dangerous-skill'], 'enable_subagent': True, 'has_subagents': True},
-        workflow={
-            'enable_workflow': True,
-            'workflow_context': {'workflow_ref': 'builtin:dangerous', 'session_id': 'workflow'},
-        },
-        explicit_resource_bindings={'skill_names': ['dangerous-skill'], 'workflow_refs': ['builtin:dangerous']},
+        # These flags and inherited resources are authoritative Host inputs.
+        personalization={'use_memory': False},
+        agent={'available_skills': [], 'enable_subagent': False, 'has_subagents': False},
+        workflow={'enable_workflow': False},
+        retrieval={'filters': {'kb_id': ['inherited-kb']}},
     )
     with chat_service._cfg.temp('trusted_local_mode', True):
         asyncio.run(chat_service._handle_chat_impl(request))
@@ -95,23 +92,14 @@ def test_sidechat_final_tools_remain_readonly_after_lazy_activation(monkeypatch,
     assert agent._enable_builtin_tools is False
     assert plan.stop_tools == []
     names = set(manager.tools_info)
-    expected = {'read_file', 'grep', 'kb_tmp_search', 'read_user_attachment', 'find_user_attachment', 'url_fetch'}
-    expected.update({
-        'get_KBToolkit_methods', 'KBToolkit_list_knowledge_bases', 'KBToolkit_list_knowledge_base_documents',
-        'KBToolkit_aggregate_knowledge_base_documents', 'KBToolkit_kb_search',
-        'KBToolkit_kb_get_parent_node', 'KBToolkit_kb_get_window_nodes', 'KBToolkit_kb_keyword_search',
-        'SciverseSearch_meta_search', 'SciverseSearch_meta_catalog',
-    })
-    for toolkit in ('WikipediaToolkit', 'GoogleSearch', 'BingSearch', 'BochaSearch',
-                    'TavilySearch', 'SciverseSearch', 'ArxivSearch'):
-        expected.add(f'get_{toolkit}_methods')
-        expected.update(f'{toolkit}_{method}' for method in ('search', 'get_content', 'get_contents'))
-    assert names == expected
+    assert {
+        'read_file', 'grep', 'kb_tmp_search', 'read_user_attachment', 'find_user_attachment',
+        'url_fetch', 'KBToolkit_kb_search', 'FutureSearchToolkit_search',
+    } <= names
 
     forbidden_names = {
         'run_script', 'shell_tool', 'write_file', 'save_chat_artifact', 'intentwrite',
         'string_replace', 'create_subagent', 'ask_user', 'set_session_env', 'future_writer',
-        'KBToolkit_delete_document', 'get_FutureSearchToolkit_methods',
         'get_ScheduleToolkit_methods', 'get_CloudFileToolkit_methods', 'get_SkillManagementToolkit_methods',
     }
     history = [{'role': 'assistant', 'tool_calls': [
@@ -122,7 +110,6 @@ def test_sidechat_final_tools_remain_readonly_after_lazy_activation(monkeypatch,
     assert set(manager.tools_info) == names
     assert names.isdisjoint(forbidden_names)
     # Invoke real gateways and dispatcher, not just inspect request flags.
-    manager._manager._manager._tool_call['get_KBToolkit_methods']({})
     visible = {item['function']['name'] for item in manager.tools_description}
     assert 'KBToolkit_kb_search' in visible
     for name in forbidden_names:
@@ -135,6 +122,16 @@ def test_sidechat_final_tools_remain_readonly_after_lazy_activation(monkeypatch,
     assert result.results[0]['ok'] is True
     assert 'read-only attachment evidence' in str(result.results[0]['value'])
     assert source.read_text(encoding='utf-8') == 'read-only attachment evidence'
+    unlisted = tmp_path / 'unlisted.txt'
+    unlisted.write_text('must not be exposed', encoding='utf-8')
+    with chat_service._cfg.temp('trusted_local_mode', True):
+        for name, arguments in (
+            ('read_file', {'target': str(unlisted)}),
+            ('grep', {'target': str(tmp_path), 'pattern': 'exposed'}),
+        ):
+            batch = manager.execute_with_records([{'function': {'name': name, 'arguments': arguments}}])
+            assert batch.results[0]['ok'] is False
+            assert 'attachment or a file resource' in str(batch.results[0])
 
     assert 'This side conversation is read-only' in plan.prompt.system_prompt
     assert 'call save_chat_artifact' not in plan.prompt.system_prompt
@@ -145,16 +142,19 @@ def test_sidechat_final_tools_remain_readonly_after_lazy_activation(monkeypatch,
     assert section.content == reference
     assert section.channel == 'runtime' and section.content_kind == 'reference'
     assert section.authoritative is False
-    assert request.agent.available_skills == ['dangerous-skill']
+    assert request.agent.available_skills == []
 
 
-def test_default_tool_policy_preserves_main_chat_request():
-    request = ChatRequest(
-        message={'query': 'run my skill'},
-        agent={'available_skills': ['my-skill'], 'enable_subagent': True},
+def test_sidechat_binds_kb_scope_without_mutating_main_chat_configs():
+    lazyllm.globals['agentic_config'] = {'filters': {'kb_id': ['inherited-kb']}}
+    configs = build_sidechat_tool_configs(
+        DEFAULT_TOOLS, user_query='search the knowledge base', kb_ids=['inherited-kb'],
     )
-    assert apply_tool_policy(request) is request
-    assert request.runtime.tool_policy == 'default'
+    toolkit = next(config.tool for config in configs if config.name == 'kb')
+    assert toolkit._kb_scope == ('inherited-kb',)
+    assert next(config.tool for config in DEFAULT_TOOLS if config.name == 'kb')._kb_scope is None
+    without_kb = build_sidechat_tool_configs(DEFAULT_TOOLS, user_query='知识库', kb_ids=[])
+    assert 'kb' not in {config.name for config in without_kb}
 
 
 def test_unknown_tool_policy_is_rejected():

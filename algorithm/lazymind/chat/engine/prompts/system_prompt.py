@@ -183,7 +183,7 @@ def _build_environment_context_prompt(environment_context: dict | None = None) -
     if not user_time:
         return ''
 
-    return f'Current user time: {user_time}'
+    return f'## Environment Context\nCurrent user time: {user_time}'
 
 
 _TOOL_APPENDIX_SECTION_TITLES = {
@@ -235,14 +235,13 @@ def add_standard_system_sections(
     )
 
     environment_prompt = _build_environment_context_prompt(environment_context)
-    builder.runtime(
-        'environment', 'Environment Context', environment_prompt, 'request.environment',
-        priority=1, authoritative=True, content_kind='state',
+    builder.system(
+        'environment', '', environment_prompt, 'request.environment', priority=30,
     )
 
     if dynamic_prompt_modules and task_profile is not None:
-        builder.runtime(
-            'task_profile_interpretation', 'Task Profile Interpretation',
+        builder.system(
+            'task_profile_interpretation', '# Task profile interpretation',
             'The enabled task modules and deliverable hints were selected by fast heuristic '
             'rules. They are provisional guidance, may be incomplete or inaccurate, and must '
             'not override the user\'s actual request. Independently infer the user\'s goal and '
@@ -252,47 +251,47 @@ def add_standard_system_sections(
             'platform.task.interpretation', priority=31,
         )
         outcomes = {task_profile.primary_outcome, *task_profile.secondary_outcomes}
-        builder.runtime(
-            'task_learning', 'Learning', LEARNING_GUIDANCE, 'platform.task.learning', priority=32,
+        builder.system(
+            'task_learning', '', LEARNING_GUIDANCE, 'platform.task.learning', priority=32,
             skip_if='learn' not in outcomes,
-        ).runtime(
-            'task_fresh_research', 'Current Research', FRESH_RESEARCH_GUIDANCE,
+        ).system(
+            'task_fresh_research', '', FRESH_RESEARCH_GUIDANCE,
             'platform.task.research', priority=33,
             skip_if=not task_profile.research_required and task_profile.freshness != 'current',
-        ).runtime(
-            'task_decision_planning', 'Decision and Planning', DECISION_PLANNING_GUIDANCE,
+        ).system(
+            'task_decision_planning', '', DECISION_PLANNING_GUIDANCE,
             'platform.task.decision', priority=34,
             skip_if=not outcomes.intersection({'decide', 'plan'}),
-        ).runtime(
-            'task_analysis', 'Analysis', ANALYSIS_GUIDANCE,
+        ).system(
+            'task_analysis', '', ANALYSIS_GUIDANCE,
             'platform.task.analysis', priority=34,
             skip_if='analyze' not in outcomes,
-        ).runtime(
-            'task_transformation', 'Transformation', TRANSFORMATION_GUIDANCE,
+        ).system(
+            'task_transformation', '', TRANSFORMATION_GUIDANCE,
             'platform.task.transformation', priority=34,
             skip_if='transform' not in outcomes,
         )
         deliverables = [task_profile.deliverable_kind, *task_profile.secondary_deliverables][:2]
         contracts = [DELIVERABLE_GUIDANCE[item] for item in deliverables if item in DELIVERABLE_GUIDANCE]
-        builder.runtime(
-            'task_deliverable', 'Deliverable Contract', '\n'.join(contracts),
+        builder.system(
+            'task_deliverable', '# Deliverable contract', '\n'.join(contracts),
             'platform.task.deliverable', priority=35,
             skip_if=not contracts or (
                 task_profile.complexity == 'simple' and task_profile.deliverable_kind == 'direct_answer'
             ),
-        ).runtime(
-            'task_skill_restraint', 'Skill Usage', SKILL_RESTRAINT_GUIDANCE,
+        ).system(
+            'task_skill_restraint', '', SKILL_RESTRAINT_GUIDANCE,
             'platform.task.skills', priority=36,
             skip_if=task_profile.skill_mode == 'explicit',
-        ).runtime(
-            'task_request_analysis', 'Request Analysis', REQUEST_ANALYSIS_GUIDANCE,
+        ).system(
+            'task_request_analysis', '', REQUEST_ANALYSIS_GUIDANCE,
             'platform.task.request_analysis', priority=37,
             skip_if=(
                 task_profile.request_assessment.status == 'ready'
                 and task_profile.complexity != 'compound'
             ),
-        ).runtime(
-            'task_clarification', 'Clarification', CLARIFICATION_GUIDANCE,
+        ).system(
+            'task_clarification', '', CLARIFICATION_GUIDANCE,
             'platform.task.clarification', priority=38,
             skip_if=task_profile.request_assessment.interaction_need != 'blocking',
         )

@@ -709,6 +709,9 @@ func enforceSidechatRequestPolicy(raw map[string]any, inheritedSearchConfig json
 	} else {
 		delete(conversation, "search_config")
 	}
+	// Override explicit retrieval filters as well as the UI search configuration.
+	// This runs both before and after building the Algorithm request.
+	raw["filters"] = filtersFromSearchConfig(searchConfig)
 	raw["conversation"] = conversation
 	mentions, err := parseChatMentions(raw)
 	if err != nil {
