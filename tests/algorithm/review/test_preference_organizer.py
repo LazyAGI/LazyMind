@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from uuid import uuid4
+
 from lazymind.common.memory.store import MemoryStore
 
+import lazyllm
 import pytest
 
 from lazyllm.tools.agent import ToolExecutionError
@@ -26,6 +29,25 @@ from lazymind.review.preference_organizer.tools import (
     PreferenceOrganizerGate,
 )
 from lazymind.review.service import preference_organizer as service
+
+
+@pytest.fixture(autouse=True)
+def _isolate_organizer_session():
+    previous = [(state, state._sid) for state in (lazyllm.globals, lazyllm.locals)]
+    test_sid = f'preference-organizer-test-{uuid4().hex}'
+    try:
+        for state, _ in previous:
+            state._init_sid(test_sid)
+        yield
+    finally:
+        # Direct service calls switch sessions; clean both the test and task sessions.
+        for state, previous_sid in previous:
+            try:
+                for sid in {test_sid, state._sid} - {previous_sid}:
+                    state._init_sid(sid)
+                    state.clear()
+            finally:
+                state._init_sid(previous_sid)
 
 
 def _snapshot(
