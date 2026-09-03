@@ -9,6 +9,7 @@ home:
     - chat-eq-reply
     - xiaohongshu-copywriter
     - summarize-meeting
+    - document-refinement
   work:
     - ppt-workflow
     - image-workflow
