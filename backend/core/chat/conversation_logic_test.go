@@ -1079,8 +1079,8 @@ func TestArchiveRegeneratedFailedRunAttemptsPreservesOrderAndExt(t *testing.T) {
 		RunTerminal: json.RawMessage(`{"status":"interrupted","reason":"model_failure","code":"rate_limited","partial_output":true,"provider_raw_error":"secret-second"}`),
 		Ext: mergeChatModelRouteIntoExt(archived, map[string]any{
 			chatModelRouteBodyKey: &chatModelRoute{
-				Mode: chatModelModeAuto, Strategy: chatModelRouteStrategy,
-				TaskClass: autoChatTaskComplex, Reason: "complex_task",
+				Mode: chatModelModeAuto, Strategy: "structured_policy_v1",
+				TaskClass: "complex", Reason: "complex_task",
 				ModelID: "model-second", ProviderID: "provider-second",
 				ProviderName: "Second", ModelName: "second-model", Source: "own",
 			},

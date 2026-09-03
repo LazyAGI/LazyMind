@@ -647,6 +647,7 @@ export interface ChatModelRoute {
     'provider_id'?: string;
     'provider_name'?: string;
     'reason'?: ChatModelRouteReasonEnum;
+    'selection_version'?: number;
     'source'?: ChatModelRouteSourceEnum;
     'strategy'?: string;
     'task_class'?: ChatModelRouteTaskClassEnum;
@@ -665,7 +666,9 @@ export const ChatModelRouteReasonEnum = {
     SessionSticky: 'session_sticky',
     DefaultBalanced: 'default_balanced',
     RetrySameModel: 'retry_same_model',
-    Fixed: 'fixed'
+    Fixed: 'fixed',
+    InitialSelection: 'initial_selection',
+    ModelUnavailable: 'model_unavailable'
 } as const;
 
 export type ChatModelRouteReasonEnum = typeof ChatModelRouteReasonEnum[keyof typeof ChatModelRouteReasonEnum];
@@ -680,7 +683,8 @@ export const ChatModelRouteTaskClassEnum = {
     Balanced: 'balanced',
     Complex: 'complex',
     LongContext: 'long_context',
-    Fixed: 'fixed'
+    Fixed: 'fixed',
+    Auto: 'auto'
 } as const;
 
 export type ChatModelRouteTaskClassEnum = typeof ChatModelRouteTaskClassEnum[keyof typeof ChatModelRouteTaskClassEnum];

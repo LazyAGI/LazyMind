@@ -30,16 +30,9 @@ const (
 	chatModelAvailabilityAvailable   = "available"
 	chatModelAvailabilityUnavailable = "unavailable"
 
-	chatModelRouteBodyKey         = "_chat_model_route"
-	chatModelRetryRouteBodyKey    = "_chat_model_retry_route"
-	chatModelWorkflowRouteBodyKey = "_chat_model_has_workflow"
-	chatModelRouteStrategy        = "structured_policy_v1"
-	autoChatContextReserveTokens  = int64(4096)
-
-	autoChatTaskSimple      = "simple"
-	autoChatTaskBalanced    = "balanced"
-	autoChatTaskComplex     = "complex"
-	autoChatTaskLongContext = "long_context"
+	chatModelRouteBodyKey      = "_chat_model_route"
+	chatModelRetryRouteBodyKey = "_chat_model_retry_route"
+	chatModelRouteStrategy     = "session_sticky_v1"
 )
 
 var (
@@ -68,6 +61,7 @@ type chatModelSnapshot struct {
 	GroupName       string `json:"group_name"`
 	ModelName       string `json:"model_name"`
 	Source          string `json:"source"`
+	SuccessfulRunID string `json:"successful_run_id,omitempty"`
 }
 
 type availableChatModel struct {
@@ -83,21 +77,21 @@ type availableChatModel struct {
 	APIKey           string  `gorm:"column:api_key"`
 	APIKeyCiphertext string  `gorm:"column:api_key_ciphertext"`
 	MaxInputTokens   *string `gorm:"column:max_input_tokens"`
-	FreeAutoPriority int     `gorm:"column:free_auto_select_priority"`
-	FreeAutoBaseURLs string  `gorm:"column:free_auto_select_base_urls"`
 	Source           string  `gorm:"-"`
 }
 
 type chatModelRoute struct {
-	Mode         string `json:"mode"`
-	Strategy     string `json:"strategy"`
-	TaskClass    string `json:"task_class"`
-	Reason       string `json:"reason"`
-	ModelID      string `json:"model_id"`
-	ProviderID   string `json:"provider_id"`
-	ProviderName string `json:"provider_name"`
-	ModelName    string `json:"model_name"`
-	Source       string `json:"source"`
+	Mode             string `json:"mode"`
+	Strategy         string `json:"strategy"`
+	TaskClass        string `json:"task_class"`
+	Reason           string `json:"reason"`
+	ModelID          string `json:"model_id"`
+	ProviderID       string `json:"provider_id"`
+	ProviderName     string `json:"provider_name"`
+	ModelName        string `json:"model_name"`
+	Source           string `json:"source"`
+	SelectionVersion *int64 `json:"selection_version,omitempty"`
+	snapshot         *chatModelSnapshot
 }
 
 type chatModelSelectionResponse struct {
@@ -203,8 +197,7 @@ func loadAvailableChatModels(ctx context.Context, db *gorm.DB, userID string) ([
 			"m.id AS model_id, m.user_model_provider_id AS provider_id, "+
 				"m.user_model_provider_group_id AS provider_group_id, "+
 				"m.create_user_id AS owner_user_id, m.provider_name, m.name AS model_name, "+
-				"m.model_type, m.max_input_tokens, m.free_auto_select_priority, "+
-				"m.free_auto_select_base_urls, g.name AS group_name, g.base_url, "+
+				"m.model_type, m.max_input_tokens, g.name AS group_name, g.base_url, "+
 				"g.api_key, g.api_key_ciphertext",
 		).
 		Joins(
@@ -300,312 +293,128 @@ func resolveDefaultChatModel(ctx context.Context, db *gorm.DB, userID string, mo
 	return nil, nil
 }
 
-func chatModelFromSnapshot(conversation *orm.Conversation, models []availableChatModel) *availableChatModel {
-	if conversation == nil || len(conversation.ChatModelSnapshot) == 0 {
-		return nil
-	}
+type chatModelHistory struct {
+	RunID       string
+	RunTerminal json.RawMessage
+	Ext         json.RawMessage
+}
+
+func loadConversationChatModelHistory(ctx context.Context, db *gorm.DB, conversationID string) ([]chatModelHistory, error) {
+	var histories []chatModelHistory
+	err := db.WithContext(ctx).Raw(`
+		SELECT run_id, run_terminal, ext FROM (
+			SELECT run_id, run_terminal, ext, update_time FROM chat_histories
+			WHERE conversation_id = ? AND run_status IN ('completed', 'failed', 'interrupted', 'cancelled')
+				AND (algorithm_id IS NULL OR algorithm_id NOT LIKE 'external:%')
+			UNION ALL
+			SELECT run_id, run_terminal, ext, update_time FROM multi_answers_chat_histories
+			WHERE conversation_id = ? AND run_status IN ('completed', 'failed', 'interrupted', 'cancelled')
+		) AS outcomes ORDER BY update_time DESC, run_id DESC`, conversationID, conversationID).Scan(&histories).Error
+	return histories, err
+}
+
+func successfulChatModelSnapshot(conversation *orm.Conversation, histories []chatModelHistory) *chatModelSnapshot {
 	var snapshot chatModelSnapshot
-	if json.Unmarshal(conversation.ChatModelSnapshot, &snapshot) != nil {
-		return nil
+	if json.Unmarshal(conversation.ChatModelSnapshot, &snapshot) == nil && snapshot.SuccessfulRunID != "" {
+		return &snapshot
 	}
-	return findAvailableChatModel(models, strings.TrimSpace(snapshot.ModelID))
-}
-
-func freeAutoRouteApplies(model *availableChatModel) bool {
-	if model == nil || model.FreeAutoPriority <= 0 {
-		return false
-	}
-	return modelprovider.FreeAutoSelectAppliesToBaseURL(model.FreeAutoBaseURLs, model.BaseURL)
-}
-
-func freeAutoRouteScore(model *availableChatModel) int {
-	if !freeAutoRouteApplies(model) {
-		return 0
-	}
-	// Lower catalog priority is preferred. The large constant keeps every valid
-	// free-model score positive without assigning quality meaning to the value.
-	if model.FreeAutoPriority >= 1_000_000 {
-		return 1
-	}
-	return 1_000_000 - model.FreeAutoPriority
-}
-
-func chatModelContextCapacity(model *availableChatModel) int64 {
-	if model == nil || model.MaxInputTokens == nil {
-		return 0
-	}
-	parsed := parseMaxInputTokens(*model.MaxInputTokens)
-	if parsed == nil {
-		return 0
-	}
-	return *parsed
-}
-
-func autoModelFitsRequest(model *availableChatModel, requiredTokens int64) bool {
-	capacity := chatModelContextCapacity(model)
-	return model != nil && (capacity <= 0 || capacity >= requiredTokens)
-}
-
-func autoRequestTextRunes(value any) int {
-	switch item := value.(type) {
-	case string:
-		return len([]rune(item))
-	case []map[string]string:
-		total := 0
-		for _, entry := range item {
-			total += autoRequestTextRunes(entry)
-		}
-		return total
-	case []any:
-		total := 0
-		for _, entry := range item {
-			total += autoRequestTextRunes(entry)
-		}
-		return total
-	case map[string]string:
-		return autoRequestTextRunes(item["content"])
-	case map[string]any:
-		total := 0
-		for _, key := range []string{"content", "text"} {
-			total += autoRequestTextRunes(item[key])
-		}
-		return total
-	default:
-		return 0
-	}
-}
-
-func estimatedAutoRequestTokens(body map[string]any) int64 {
-	if body == nil {
-		return 0
-	}
-	// One Unicode rune per token is deliberately conservative for Chinese while
-	// still being safe for English and code. This is only used for context-fit
-	// routing; the provider remains authoritative for exact tokenization.
-	total := autoRequestTextRunes(body["query"]) + autoRequestTextRunes(body["history"])
-	return int64(total)
-}
-
-func hasActiveWorkflowRouteSignal(value any) bool {
-	context, _ := value.(map[string]any)
-	for _, key := range []string{"session_id", "workflow_id", "workflow_ref", "current_step"} {
-		if text, ok := context[key].(string); ok && strings.TrimSpace(text) != "" {
-			return true
-		}
-	}
-	return false
-}
-
-func hasExplicitWorkflowRouteSignal(value any) bool {
-	bindings, _ := value.(map[string]any)
-	switch refs := bindings["workflow_refs"].(type) {
-	case []string:
-		for _, ref := range refs {
-			if strings.TrimSpace(ref) != "" {
-				return true
-			}
-		}
-	case []any:
-		for _, raw := range refs {
-			if ref, ok := raw.(string); ok && strings.TrimSpace(ref) != "" {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func hasAutoRequestFiles(value any) bool {
-	switch files := value.(type) {
-	case []string:
-		return len(files) > 0
-	case []any:
-		return len(files) > 0
-	case map[string][]string:
-		for _, paths := range files {
-			if len(paths) > 0 {
-				return true
-			}
-		}
-	case map[string]any:
-		for _, paths := range files {
-			if hasAutoRequestFiles(paths) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func classifyAutoChatTask(body map[string]any, anchor *availableChatModel, models []availableChatModel) string {
-	// Until a trained and evaluated semantic router is available, Auto must not
-	// infer intent from prompt keywords. Use only language-independent request
-	// metadata and model limits so equivalent prompts route consistently.
-	estimatedTokens := estimatedAutoRequestTokens(body)
-	anchorCapacity := chatModelContextCapacity(anchor)
-	if anchorCapacity > 0 && estimatedTokens+autoChatContextReserveTokens >= anchorCapacity*3/4 {
-		for index := range models {
-			if chatModelContextCapacity(&models[index]) > anchorCapacity {
-				return autoChatTaskLongContext
-			}
-		}
-	}
-
-	if hasWorkflow, _ := body[chatModelWorkflowRouteBodyKey].(bool); hasWorkflow {
-		return autoChatTaskComplex
-	}
-	if hasSubagents, _ := body["has_subagents"].(bool); hasSubagents ||
-		hasActiveWorkflowRouteSignal(body["workflow_context"]) ||
-		hasExplicitWorkflowRouteSignal(body["explicit_resource_bindings"]) ||
-		hasAutoRequestFiles(body["files"]) {
-		return autoChatTaskComplex
-	}
-	depth, _ := body["thinking_depth"].(string)
-	switch strings.ToLower(strings.TrimSpace(depth)) {
-	case "low":
-		return autoChatTaskSimple
-	case "high", "max":
-		return autoChatTaskComplex
-	}
-	return autoChatTaskBalanced
-}
-
-func preferAutoCandidate(candidate, current, previous, defaultModel *availableChatModel, score, currentScore int) bool {
-	if candidate == nil {
-		return false
-	}
-	if current == nil || score != currentScore {
-		return current == nil || score > currentScore
-	}
-	for _, preferred := range []*availableChatModel{previous, defaultModel} {
-		if preferred == nil {
+	// Older snapshots were written before the model ran. Only a completed
+	// history entry proves which model actually succeeded.
+	for _, history := range histories {
+		terminal, err := parseRunTerminal(history.RunTerminal)
+		route := chatModelRouteFromHistoryExt(history.Ext)
+		if err != nil || terminal.Status != "completed" || route == nil || route.ModelID == "" {
 			continue
 		}
-		if candidate.ID == preferred.ID && current.ID != preferred.ID {
-			return true
+		if snapshot.ModelID != route.ModelID {
+			snapshot = chatModelSnapshot{}
 		}
-		if current.ID == preferred.ID && candidate.ID != preferred.ID {
-			return false
-		}
-	}
-	if candidate.Source != current.Source {
-		return candidate.Source == "own"
-	}
-	return candidate.ID < current.ID
-}
-
-func highestScoredAutoModel(
-	models []availableChatModel,
-	previous, defaultModel *availableChatModel,
-	scoreModel func(*availableChatModel) int,
-	minimumScore int,
-) *availableChatModel {
-	var best *availableChatModel
-	bestScore := 0
-	for index := range models {
-		candidate := &models[index]
-		score := scoreModel(candidate)
-		if score < minimumScore {
-			continue
-		}
-		if preferAutoCandidate(candidate, best, previous, defaultModel, score, bestScore) {
-			best = candidate
-			bestScore = score
-		}
-	}
-	return best
-}
-
-func longestContextAutoModel(models []availableChatModel, previous, defaultModel *availableChatModel) *availableChatModel {
-	return highestScoredAutoModel(models, previous, defaultModel, func(model *availableChatModel) int {
-		capacity := chatModelContextCapacity(model)
-		if capacity <= 0 || capacity > int64(^uint(0)>>1) {
-			return 0
-		}
-		return int(capacity)
-	}, 1)
-}
-
-func fallbackAutoModel(
-	models []availableChatModel,
-	previous, defaultModel *availableChatModel,
-	requiredTokens int64,
-) *availableChatModel {
-	if autoModelFitsRequest(previous, requiredTokens) {
-		return previous
-	}
-	if autoModelFitsRequest(defaultModel, requiredTokens) {
-		return defaultModel
-	}
-	for index := range models {
-		if models[index].Source == "own" && autoModelFitsRequest(&models[index], requiredTokens) {
-			return &models[index]
-		}
-	}
-	for index := range models {
-		if autoModelFitsRequest(&models[index], requiredTokens) {
-			return &models[index]
-		}
+		snapshot.ModelID = route.ModelID
+		snapshot.ProviderID = route.ProviderID
+		snapshot.ProviderName = route.ProviderName
+		snapshot.ModelName = route.ModelName
+		snapshot.Source = route.Source
+		snapshot.SuccessfulRunID = history.RunID
+		return &snapshot
 	}
 	return nil
 }
 
-func resolveAutoChatModel(
-	body map[string]any,
-	models []availableChatModel,
-	previous, defaultModel *availableChatModel,
-) (*availableChatModel, *chatModelRoute) {
-	anchor := previous
-	if anchor == nil {
-		anchor = defaultModel
-	}
-	requiredTokens := estimatedAutoRequestTokens(body) + autoChatContextReserveTokens
-	taskClass := classifyAutoChatTask(body, anchor, models)
-	var selected *availableChatModel
-	reason := "default_balanced"
-	switch taskClass {
-	case autoChatTaskSimple:
-		selected = highestScoredAutoModel(models, previous, defaultModel, func(model *availableChatModel) int {
-			if !autoModelFitsRequest(model, requiredTokens) {
-				return 0
-			}
-			return freeAutoRouteScore(model)
-		}, 1)
-		if selected != nil {
-			reason = "simple_task"
-		}
-	case autoChatTaskComplex:
-		if autoModelFitsRequest(defaultModel, requiredTokens) {
-			selected = defaultModel
-		} else if autoModelFitsRequest(previous, requiredTokens) {
-			selected = previous
-		}
-		if selected == nil {
-			selected = fallbackAutoModel(models, previous, defaultModel, requiredTokens)
-		}
-		if selected != nil {
-			reason = "complex_task"
-		}
-	case autoChatTaskLongContext:
-		selected = longestContextAutoModel(models, previous, defaultModel)
-		if selected != nil {
-			reason = "long_context"
-		}
-	}
-	if selected == nil {
-		selected = fallbackAutoModel(models, previous, defaultModel, requiredTokens)
-		if previous != nil && selected != nil && selected.ID == previous.ID {
-			reason = "session_sticky"
-		}
-	}
-	if selected == nil {
+// lastSuccessfulChatModelSnapshot never treats the selected or attempted model
+// as a successful call and never changes conversation state.
+func lastSuccessfulChatModelSnapshot(ctx context.Context, db *gorm.DB, conversation *orm.Conversation) (*chatModelSnapshot, error) {
+	if conversation == nil {
 		return nil, nil
 	}
-	return selected, &chatModelRoute{
-		Mode: chatModelModeAuto, Strategy: chatModelRouteStrategy, TaskClass: taskClass, Reason: reason,
-		ModelID: selected.ID, ProviderID: selected.ProviderID, ProviderName: selected.ProviderName,
-		ModelName: selected.ModelName, Source: selected.Source,
+	if snapshot := successfulChatModelSnapshot(conversation, nil); snapshot != nil {
+		return snapshot, nil
 	}
+	histories, err := loadConversationChatModelHistory(ctx, db, conversation.ID)
+	if err != nil {
+		return nil, err
+	}
+	return successfulChatModelSnapshot(conversation, histories), nil
+}
+
+func chatModelRouteMatchesSelection(route *chatModelRoute, conversation *orm.Conversation) bool {
+	if route == nil || route.Mode != chatModelModeAuto {
+		return false
+	}
+	if route.SelectionVersion != nil {
+		return *route.SelectionVersion == conversation.ChatModelVersion
+	}
+	// Unversioned routes belong to the legacy binding. A newly saved or
+	// successful binding after an explicit reset must not reuse those failures.
+	return conversation.ChatModelVersion <= 1 ||
+		(len(conversation.ChatModelSnapshot) > 0 && successfulChatModelSnapshot(conversation, nil) == nil)
+}
+
+func unavailableAutoChatModels(conversation *orm.Conversation, histories []chatModelHistory) map[string]bool {
+	unavailable := map[string]bool{}
+	seen := map[string]bool{}
+	for _, history := range histories {
+		route := chatModelRouteFromHistoryExt(history.Ext)
+		if !chatModelRouteMatchesSelection(route, conversation) || route.ModelID == "" || seen[route.ModelID] {
+			continue
+		}
+		terminal, err := parseRunTerminal(history.RunTerminal)
+		if err != nil {
+			continue
+		}
+		if terminal.Status == "completed" {
+			seen[route.ModelID] = true
+			continue
+		}
+		if terminal.Reason != "model_failure" {
+			continue
+		}
+		seen[route.ModelID] = true
+		switch terminal.Code {
+		case "authentication_failed", "permission_denied", "not_found",
+			"rate_limited", "usage_limit_exceeded", "concurrency_limited", "quota_exhausted",
+			"balance_exhausted", "organization_spend_limit_exceeded", "project_spend_limit_exceeded",
+			"request_timeout", "provider_overloaded", "service_unavailable", "provider_internal_error", "transport_error":
+			unavailable[route.ModelID] = true
+		}
+	}
+	return unavailable
+}
+
+// Auto selects by availability only. The algorithm's final context budget and
+// compression remain authoritative; catalog capacities are not a fit guarantee.
+func initialAutoChatModel(models []availableChatModel, defaultModel *availableChatModel) *availableChatModel {
+	if defaultModel != nil {
+		return defaultModel
+	}
+	for index := range models {
+		if models[index].Source == "own" {
+			return &models[index]
+		}
+	}
+	if len(models) > 0 {
+		return &models[0]
+	}
+	return nil
 }
 
 func fixedChatModelRoute(model *availableChatModel) *chatModelRoute {
@@ -669,19 +478,22 @@ func findAvailableChatModel(models []availableChatModel, modelID string) *availa
 	return nil
 }
 
+func chatModelSnapshotForModel(model *availableChatModel) *chatModelSnapshot {
+	if model == nil {
+		return nil
+	}
+	return &chatModelSnapshot{
+		ModelID: model.ID, ProviderID: model.ProviderID, ProviderName: model.ProviderName,
+		ProviderGroupID: model.ProviderGroupID, GroupName: model.GroupName,
+		ModelName: model.ModelName, Source: model.Source,
+	}
+}
+
 func snapshotForChatModel(model *availableChatModel) (json.RawMessage, error) {
 	if model == nil {
 		return nil, nil
 	}
-	return json.Marshal(chatModelSnapshot{
-		ModelID:         model.ID,
-		ProviderID:      model.ProviderID,
-		ProviderName:    model.ProviderName,
-		ProviderGroupID: model.ProviderGroupID,
-		GroupName:       model.GroupName,
-		ModelName:       model.ModelName,
-		Source:          model.Source,
-	})
+	return json.Marshal(chatModelSnapshotForModel(model))
 }
 
 func resolveInitialChatModelBinding(ctx context.Context, db *gorm.DB, userID string, requested *initialChatModelSelection) (*resolvedChatModelBinding, error) {
@@ -1131,32 +943,67 @@ func applyConversationChatModelConfig(ctx context.Context, db *gorm.DB, userID s
 	var model *availableChatModel
 	var route *chatModelRoute
 	if mode == chatModelModeAuto {
-		if retryRoute, _ := body[chatModelRetryRouteBodyKey].(*chatModelRoute); retryRoute != nil {
+		reason := "initial_selection"
+		retryRoute, _ := body[chatModelRetryRouteBodyKey].(*chatModelRoute)
+		if retryRoute != nil && (retryRoute.SelectionVersion == nil || *retryRoute.SelectionVersion == conversation.ChatModelVersion) {
 			model = findAvailableChatModel(models, retryRoute.ModelID)
-			if model == nil {
-				return errChatModelUnavailable
-			}
-			route = &chatModelRoute{
-				Mode: chatModelModeAuto, Strategy: chatModelRouteStrategy,
-				TaskClass: retryRoute.TaskClass, Reason: "retry_same_model",
-				ModelID: model.ID, ProviderID: model.ProviderID, ProviderName: model.ProviderName,
-				ModelName: model.ModelName, Source: model.Source,
-			}
+			reason = "retry_same_model"
 		} else {
-			latestWorkflow, workflowErr := workflow.GetLatestSession(ctx, db, conversation.ID)
-			if workflowErr != nil {
-				return workflowErr
+			histories, historyErr := loadConversationChatModelHistory(ctx, db, conversation.ID)
+			if historyErr != nil {
+				return historyErr
 			}
-			if workflowSessionAvailableForRequest(latestWorkflow, body) {
-				body[chatModelWorkflowRouteBodyKey] = true
-				defer delete(body, chatModelWorkflowRouteBodyKey)
+			unavailable := unavailableAutoChatModels(&conversation, histories)
+			usable := make([]availableChatModel, 0, len(models))
+			for _, candidate := range models {
+				if !unavailable[candidate.ID] {
+					usable = append(usable, candidate)
+				}
 			}
-			defaultModel, defaultErr := resolveOwnDefaultChatModel(ctx, db, userID, models)
-			if defaultErr != nil {
-				return defaultErr
+			if len(conversation.ChatModelSnapshot) > 0 {
+				if previous := successfulChatModelSnapshot(&conversation, histories); previous != nil {
+					model = findAvailableChatModel(usable, previous.ModelID)
+					reason = "session_sticky"
+					if model == nil {
+						reason = "model_unavailable"
+					}
+				}
 			}
-			previous := chatModelFromSnapshot(&conversation, models)
-			model, route = resolveAutoChatModel(body, models, previous, defaultModel)
+			if model == nil {
+				for _, history := range histories {
+					previousRoute := chatModelRouteFromHistoryExt(history.Ext)
+					if !chatModelRouteMatchesSelection(previousRoute, &conversation) {
+						continue
+					}
+					if _, err := parseRunTerminal(history.RunTerminal); err != nil {
+						continue
+					}
+					model = findAvailableChatModel(usable, previousRoute.ModelID)
+					if model != nil {
+						if reason == "initial_selection" {
+							reason = "session_sticky"
+						}
+						break
+					}
+				}
+			}
+			if model == nil {
+				defaultModel, defaultErr := resolveDefaultChatModel(ctx, db, userID, usable)
+				if defaultErr != nil {
+					return defaultErr
+				}
+				model = initialAutoChatModel(usable, defaultModel)
+				if len(unavailable) > 0 {
+					reason = "model_unavailable"
+				}
+			}
+		}
+		if model != nil {
+			route = fixedChatModelRoute(model)
+			route.Mode = chatModelModeAuto
+			route.Strategy = chatModelRouteStrategy
+			route.TaskClass = "auto"
+			route.Reason = reason
 		}
 	} else if conversation.ChatModelID != nil {
 		model = findAvailableChatModel(models, strings.TrimSpace(*conversation.ChatModelID))
@@ -1176,17 +1023,8 @@ func applyConversationChatModelConfig(ctx context.Context, db *gorm.DB, userID s
 	config["llm"] = fixedLLM
 	body["llm_config"] = config
 	body[chatModelRouteBodyKey] = route
-	if mode == chatModelModeAuto {
-		snapshot, snapshotErr := snapshotForChatModel(model)
-		if snapshotErr != nil {
-			return snapshotErr
-		}
-		if updateErr := db.WithContext(ctx).Model(&orm.Conversation{}).
-			Where("id = ? AND create_user_id = ? AND chat_model_mode = ?", conversation.ID, strings.TrimSpace(userID), chatModelModeAuto).
-			UpdateColumn("chat_model_snapshot", snapshot).Error; updateErr != nil {
-			return updateErr
-		}
-	}
+	route.SelectionVersion = &conversation.ChatModelVersion
+	route.snapshot = chatModelSnapshotForModel(model)
 	if route != nil {
 		log.Logger.Info().
 			Str("conversation_id", conversation.ID).
@@ -1199,6 +1037,27 @@ func applyConversationChatModelConfig(ctx context.Context, db *gorm.DB, userID s
 			Msg("resolved chat model")
 	}
 	return nil
+}
+
+func persistSuccessfulChatModel(ctx context.Context, db *gorm.DB, userID, conversationID, runID string, body map[string]any, terminal *RunTerminal) {
+	route := chatModelRouteFromBody(body)
+	if db == nil || terminal == nil || terminal.Status != "completed" || route == nil || route.snapshot == nil || route.SelectionVersion == nil || runID == "" {
+		return
+	}
+	snapshot := *route.snapshot
+	snapshot.SuccessfulRunID = runID
+	raw, err := json.Marshal(snapshot)
+	if err != nil {
+		return
+	}
+	writeCtx, cancel := terminalWriteContext(ctx)
+	defer cancel()
+	if err := db.WithContext(writeCtx).Model(&orm.Conversation{}).
+		Where("id = ? AND create_user_id = ? AND deleted_at IS NULL AND chat_model_mode = ? AND chat_model_version = ?",
+			conversationID, strings.TrimSpace(userID), route.Mode, *route.SelectionVersion).
+		UpdateColumn("chat_model_snapshot", raw).Error; err != nil {
+		log.Logger.Warn().Err(err).Str("conversation_id", conversationID).Str("run_id", runID).Msg("failed to save successful chat model")
+	}
 }
 
 func buildChatLLMConfig(model *availableChatModel) (any, error) {

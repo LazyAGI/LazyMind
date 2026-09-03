@@ -538,13 +538,13 @@ def test_dynamic_prompt_builder_injects_only_selected_contracts() -> None:
         dynamic_prompt_modules=True,
     ).input('如何制作AI视频', source='user').build()
 
-    assert '# Learning requests' in bundle.system_prompt
-    assert '# Task profile interpretation' in bundle.system_prompt
-    assert 'provisional guidance' in bundle.system_prompt
-    assert '# Current research' in bundle.system_prompt
-    assert 'Deliver a tutorial' in bundle.system_prompt
-    assert '# Decision and planning requests' not in bundle.system_prompt
-    assert 'Deliver a decision brief' not in bundle.system_prompt
+    assert '# Learning requests' in bundle.current_input
+    assert 'Task Profile Interpretation' in bundle.current_input
+    assert 'provisional guidance' in bundle.current_input
+    assert '# Current research' in bundle.current_input
+    assert 'Deliver a tutorial' in bundle.current_input
+    assert '# Decision and planning requests' not in bundle.current_input
+    assert 'Deliver a decision brief' not in bundle.current_input
 
 
 def test_blocking_request_issue_is_disclosed_as_authoritative_runtime_state() -> None:
@@ -558,8 +558,8 @@ def test_blocking_request_issue_is_disclosed_as_authoritative_runtime_state() ->
         dynamic_prompt_modules=True,
     ).input('用500个场景覆盖10个目标的所有组合', source='user').build()
 
-    assert '# Request quality check' in bundle.system_prompt
-    assert '# Clarification required' in bundle.system_prompt
+    assert '# Request quality check' in bundle.current_input
+    assert '# Clarification required' in bundle.current_input
     assert '#### Request Assessment [AUTHORITATIVE]' in bundle.current_input
     assert 'mathematical_inconsistency' in bundle.current_input
     assert 'Interaction need: blocking' in bundle.current_input

@@ -71,9 +71,3 @@ func freeAutoSelectAppliesToBaseURL(encodedBaseURLs, baseURL string) bool {
 	}
 	return false
 }
-
-// FreeAutoSelectAppliesToBaseURL exposes the catalog's endpoint scoping rule to
-// request-time model routers without duplicating URL normalization semantics.
-func FreeAutoSelectAppliesToBaseURL(encodedBaseURLs, baseURL string) bool {
-	return freeAutoSelectAppliesToBaseURL(encodedBaseURLs, baseURL)
-}

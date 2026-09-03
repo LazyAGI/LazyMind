@@ -51,6 +51,17 @@ def test_prompt_builder_keeps_input_boundary_without_runtime_context() -> None:
     assert bundle.current_input == '### Task Objective\n\nDo the work.'
 
 
+@pytest.mark.parametrize('skip_if', [True, lambda: True, False, lambda: False])
+def test_runtime_section_respects_task_selection(skip_if) -> None:
+    bundle = PromptBuilder.for_role(AgentRole.CHAT).runtime(
+        'task', 'Task', 'Selected task guidance', 'task.profile', skip_if=skip_if,
+    ).input('User request', source='user').build()
+
+    skipped = skip_if() if callable(skip_if) else skip_if
+    assert ('Selected task guidance' in bundle.current_input) is not skipped
+    assert bundle.input_content == 'User request'
+
+
 def test_prompt_builder_renders_after_input_guard_after_user_instruction() -> None:
     bundle = (
         PromptBuilder.for_role(AgentRole.CHAT)

@@ -4,6 +4,8 @@ import { describe, expect, it, vi } from "vitest";
 import {
   ChatConversationsResponseFinishReasonEnum,
 } from "@/api/generated/chatbot-client";
+import enUS from "@/i18n/locales/en-US";
+import zhCN from "@/i18n/locales/zh-CN";
 import AssistantMessage from "./index";
 
 vi.mock("react-i18next", () => ({
@@ -27,7 +29,19 @@ vi.mock("@/modules/identityAvatar", () => ({
 }));
 
 describe("AssistantMessage cancellation", () => {
-  it("shows the actual model selected for an Auto response", () => {
+  it.each([
+    "initial_selection",
+    "model_unavailable",
+    "session_sticky",
+    "retry_same_model",
+    "fixed",
+    "simple_task",
+    "complex_task",
+    "long_context",
+    "default_balanced",
+  ] as const)("shows the actual model and the %s routing reason", async (reason) => {
+    expect(enUS.chat.modelRouteReason[reason]).toBeTruthy();
+    expect(zhCN.chat.modelRouteReason[reason]).toBeTruthy();
     render(
       <AssistantMessage
         item={{
@@ -36,10 +50,10 @@ describe("AssistantMessage cancellation", () => {
           finish_reason:
             ChatConversationsResponseFinishReasonEnum.FinishReasonStop,
           model_route: {
-            mode: "auto",
+            mode: reason === "fixed" ? "fixed" : "auto",
             provider_name: "Fast",
             model_name: "fast-free",
-            reason: "simple_task",
+            reason,
           },
         }}
         index={0}
@@ -53,8 +67,13 @@ describe("AssistantMessage cancellation", () => {
       />,
     );
 
+    const summary = screen.getByLabelText(
+      reason === "fixed" ? "chat.modelRouteFixedLabel" : "chat.modelRouteAutoLabel",
+    );
+    expect(summary).toBeInTheDocument();
+    fireEvent.mouseOver(summary);
     expect(
-      screen.getByLabelText("chat.modelRouteAutoLabel"),
+      await screen.findByText(`chat.modelRouteReason.${reason}`),
     ).toBeInTheDocument();
   });
 

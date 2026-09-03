@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-from lazymind.chat.engine.prompts.system_prompt import build_system_prompt
+from lazymind.chat.engine.agent_runtime import AgentRole, PromptBuilder
+from lazymind.chat.engine.prompts.system_prompt import add_standard_system_sections, build_system_prompt
 
 
-def test_system_prompt_uses_user_timezone_time() -> None:
-    prompt = build_system_prompt(
+def test_runtime_context_uses_user_timezone_time() -> None:
+    bundle = add_standard_system_sections(
+        PromptBuilder.for_role(AgentRole.CHAT),
         False,
         environment_context={
             'time': {
@@ -12,15 +14,16 @@ def test_system_prompt_uses_user_timezone_time() -> None:
                 'timezone': 'Asia/Shanghai',
             },
         },
-    )
+    ).build()
 
-    assert 'Current user time: 2026-05-11 19:48:00 (Asia/Shanghai)' in prompt
-    assert 'Use this context to interpret relative time expressions' not in prompt
-    assert 'User timezone:' not in prompt
+    assert 'Current user time: 2026-05-11 19:48:00 (Asia/Shanghai)' in bundle.current_input
+    assert 'Current user time' not in bundle.system_prompt
+    assert 'Environment Context [AUTHORITATIVE]' in bundle.current_input
 
 
-def test_system_prompt_falls_back_to_raw_time_when_timezone_is_invalid() -> None:
-    prompt = build_system_prompt(
+def test_runtime_context_falls_back_to_raw_time_when_timezone_is_invalid() -> None:
+    bundle = add_standard_system_sections(
+        PromptBuilder.for_role(AgentRole.CHAT),
         False,
         environment_context={
             'time': {
@@ -28,9 +31,37 @@ def test_system_prompt_falls_back_to_raw_time_when_timezone_is_invalid() -> None
                 'timezone': 'Bad/Timezone',
             },
         },
-    )
+    ).build()
 
-    assert 'Current user time: 2026-05-11T11:48:00.000Z' in prompt
+    assert 'Current user time: 2026-05-11T11:48:00.000Z' in bundle.current_input
+
+
+def test_time_and_task_changes_preserve_system_prefix_and_user_input() -> None:
+    from lazymind.chat.engine.prompts.task_profile import resolve_task_profile
+
+    history = [{'role': 'user', 'content': '你好'}, {'role': 'assistant', 'content': '你好！'}]
+    bundles = []
+    for now, query in [
+        ('2026-09-03T01:00:00Z', '教我学习摄影'),
+        ('2026-09-03T02:00:00Z', '分析附件里的财报'),
+    ]:
+        bundles.append(add_standard_system_sections(
+            PromptBuilder.for_role(AgentRole.CHAT),
+            True,
+            environment_context={'time': {'now': now}},
+            conversation_history=history,
+            current_query=query,
+            task_profile=resolve_task_profile(query, enable_llm_fallback=False),
+            dynamic_prompt_modules=True,
+        ).input(query, source='user').build())
+
+    first, second = bundles
+    assert first.system_prompt == second.system_prompt
+    assert first.current_input != second.current_input
+    assert '2026-09-03T02:00:00+00:00' in second.current_input
+    assert '2026-09-03T01:00:00' not in second.current_input
+    assert second.input_content == '分析附件里的财报'
+    assert history == [{'role': 'user', 'content': '你好'}, {'role': 'assistant', 'content': '你好！'}]
 
 
 def test_system_prompt_includes_cross_tool_policy_when_tools_are_active() -> None:

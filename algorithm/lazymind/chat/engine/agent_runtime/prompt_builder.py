@@ -89,6 +89,8 @@ class PromptBuilder:
             raise ValueError(f'unsupported prompt content_kind: {content_kind}')
         if placement not in ('before_input', 'after_input'):
             raise ValueError(f'unsupported prompt placement: {placement}')
+        if skip_if() if callable(skip_if) else skip_if:
+            return self
         return self._add(PromptSection(
             section_id=section_id.strip(),
             channel='runtime',

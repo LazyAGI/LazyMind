@@ -1740,6 +1740,7 @@ func handleNonStreamChat(
 			return
 		}
 	}
+	persistSuccessfulChatModel(reqCtx, db, userIDFromChatRequestBody(reqBody), convID, runID, reqBody, runTerminal)
 	if stateStore != nil {
 		_ = setChatRuntimeStatus(reqCtx, stateStore, convID, historyID, runTerminal.Status, answer, runID, runTerminal)
 	}
@@ -2398,6 +2399,7 @@ func streamSingleAnswer(
 		cancel()
 	}
 	if persisted && !externalFinalized {
+		persistSuccessfulChatModel(chatCtx, db, userIDFromChatRequestBody(reqBody), convID, runID, reqBody, runTerminal)
 		db.Model(&orm.Conversation{}).Where("id = ?", convID).Update("updated_at", now)
 		touchConversationParent(context.Background(), db, convID, now)
 		// Reaching this point means the upstream SSE channel has closed and the
@@ -2917,6 +2919,12 @@ dualPersist:
 		secondaryPersisted, _ = updateOwnedMultiAnswerHistory(chatCtx, db, secondaryHistoryID, secondaryRunID, secondaryHistory)
 	} else {
 		secondaryPersisted = db.Create(secondaryHistory).Error == nil
+	}
+	if primaryPersisted {
+		persistSuccessfulChatModel(chatCtx, db, userIDFromChatRequestBody(reqBody), convID, primaryRunID, reqBody, primaryTerminal)
+	}
+	if secondaryPersisted {
+		persistSuccessfulChatModel(chatCtx, db, userIDFromChatRequestBody(reqBody), convID, secondaryRunID, reqBody, secondaryTerminal)
 	}
 	if stateStore != nil {
 		statusCtx, cancel := terminalWriteContext(chatCtx)

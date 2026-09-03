@@ -511,7 +511,9 @@ const MessageList: React.FC<MessageListProps> = ({
                   onCiteMessage={(text: string) =>
                     onCiteMessage?.(text, item.history_id || item.id)
                   }
-                  onOpenSideChat={onOpenSideChat}
+                  onOpenSideChat={
+                    item.archived_failure ? undefined : onOpenSideChat
+                  }
                   onOpenSources={onOpenSources}
                   hasLaterUserMessage={messageList
                     .slice(index + 1)

@@ -1784,10 +1784,12 @@ const zhCN = {
     modelSelectorSearchPlaceholder: "搜索模型",
     modelSelectorSearchEmpty: "没有匹配的模型",
     modelSelectorAutoDescription:
-      "根据思考深度、上下文长度、附件、Workflow 和模型可用性自动选择对话模型",
+      "自动选择可用模型，后续沿用上次成功使用的模型；仅在模型不可用或主动切换时更换",
     modelRouteAutoLabel: "Auto · {{model}}",
     modelRouteFixedLabel: "{{model}}",
     modelRouteReason: {
+      initial_selection: "首次为此会话选择可用模型",
+      model_unavailable: "之前的模型不可用，已切换至另一可用模型",
       simple_task: "当前思考深度较低，优先使用已配置的低成本模型",
       complex_task: "当前请求包含高思考深度、附件或任务执行上下文，使用个人默认模型",
       long_context: "当前上下文较长，使用可容纳更多上下文的模型",

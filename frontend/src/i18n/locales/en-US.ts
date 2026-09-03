@@ -1841,10 +1841,12 @@ const enUS = {
     modelSelectorSearchPlaceholder: "Search models",
     modelSelectorSearchEmpty: "No matching models",
     modelSelectorAutoDescription:
-      "Choose a chat model using thinking depth, context length, attachments, workflows, and availability",
+      "Select an available model and keep the last model that responded successfully; switch only when it is unavailable or you change the selection",
     modelRouteAutoLabel: "Auto · {{model}}",
     modelRouteFixedLabel: "{{model}}",
     modelRouteReason: {
+      initial_selection: "An available model was selected for this conversation",
+      model_unavailable: "The previous model was unavailable, so another available model was selected",
       simple_task: "A configured low-cost model was preferred for low thinking depth",
       complex_task:
         "Your default model was used for high thinking depth, attachments, or task context",

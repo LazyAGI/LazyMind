@@ -546,10 +546,11 @@ func manualSchemas() map[string]any {
 		),
 		"ChatModelRoute": obj(
 			prop("mode", enumStringSchema("auto", "fixed")), prop("strategy", strSchema()),
-			prop("task_class", enumStringSchema("simple", "balanced", "complex", "long_context", "fixed")),
-			prop("reason", enumStringSchema("simple_task", "complex_task", "long_context", "session_sticky", "default_balanced", "retry_same_model", "fixed")),
+			prop("task_class", enumStringSchema("simple", "balanced", "complex", "long_context", "fixed", "auto")),
+			prop("reason", enumStringSchema("simple_task", "complex_task", "long_context", "session_sticky", "default_balanced", "retry_same_model", "fixed", "initial_selection", "model_unavailable")),
 			prop("model_id", strSchema()), prop("provider_id", strSchema()), prop("provider_name", strSchema()),
 			prop("model_name", strSchema()), prop("source", enumStringSchema("own", "shared")),
+			prop("selection_version", int64Schema()),
 		),
 		"ConversationHistoryItem": obj(
 			prop("seq", intSchema()), prop("query", strSchema()), prop("result", strSchema()), prop("id", strSchema()), prop("feed_back", intSchema()), prop("sources", array(obj())), prop("input", array(obj())), prop("reasoning_content", strSchema()), prop("thinking_time_s", int64Schema()), prop("reason", strSchema()), prop("expected_answer", strSchema()), prop("create_time", strSchema()), prop("run_id", strSchema()), prop("run_status", strSchema()), prop("run_terminal", refSchema("RunTerminal")), prop("failed_attempts", array(refSchema("FailedRunAttempt"))), prop("execution", refSchema("ExternalExecutionProjection")), prop("model_route", refSchema("ChatModelRoute")),

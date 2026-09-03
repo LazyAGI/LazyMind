@@ -96,25 +96,6 @@ func seedSelectedChatModel(t *testing.T, db *gorm.DB, owner, modelID string, sha
 	}
 }
 
-func setChatModelAutoMetadata(
-	t *testing.T,
-	db *gorm.DB,
-	modelID, maxInputTokens string,
-	freePriority int,
-	freeBaseURLs string,
-) {
-	t.Helper()
-	if err := db.Model(&orm.UserModelProviderGroupModel{}).
-		Where("id = ?", modelID).
-		Updates(map[string]any{
-			"max_input_tokens":           maxInputTokens,
-			"free_auto_select_priority":  freePriority,
-			"free_auto_select_base_urls": freeBaseURLs,
-		}).Error; err != nil {
-		t.Fatalf("set auto metadata for %s: %v", modelID, err)
-	}
-}
-
 func TestAvailableChatModelsUseUserSelectionAsDefault(t *testing.T) {
 	database := newPromptTestDB(t)
 	db := database.DB
@@ -224,229 +205,247 @@ func TestConversationFixedModelOverridesOnlyLLMAndNeverFallsBack(t *testing.T) {
 	}
 }
 
-func TestEnsureConversationSnapshotsDefaultAndAutoRoutesPerRequest(t *testing.T) {
+func TestAutoChatModelStaysWithSuccessfulModelAndRoutingIsReadOnly(t *testing.T) {
 	database := newPromptTestDB(t)
 	db := database.DB
-	seedAvailableChatModel(t, db, "user-1", "provider-default", "group-default", "model-default", "OpenAI", "Default", "gpt-default", "llm", true, "secret-default")
-	seedAvailableChatModel(t, db, "user-1", "provider-free", "group-free", "model-free", "Fast", "Free", "fast-free", "llm", true, "secret-free")
-	seedAvailableChatModel(t, db, "user-1", "provider-long", "group-long", "model-long", "LongContext", "Long", "long-context", "llm", true, "secret-long")
-	setChatModelAutoMetadata(t, db, "model-default", "16K", 0, "")
-	setChatModelAutoMetadata(t, db, "model-free", "8K", 1, `["https://provider-free.example/v1"]`)
-	setChatModelAutoMetadata(t, db, "model-long", "128K", 0, "")
+	seedAvailableChatModel(t, db, "user-1", "provider-default", "group-default", "model-default", "Default", "Default", "default-chat", "llm", true, "secret-default")
+	seedAvailableChatModel(t, db, "user-1", "provider-other", "group-other", "model-other", "Other", "Other", "other-chat", "llm", true, "secret-other")
 	seedSelectedChatModel(t, db, "user-1", "model-default", false)
-
-	fixed, _, err := ensureConversation(
-		context.Background(), db, "conversation-default", "Default", nil, nil,
-		"user-1", "User", false, "", nil, nil,
-	)
-	if err != nil {
-		t.Fatalf("create default conversation: %v", err)
+	fixed, _, err := ensureConversation(context.Background(), db, "fixed-default", "Fixed", nil, nil, "user-1", "User", false, "", nil, nil)
+	if err != nil || fixed.ChatModelID == nil || *fixed.ChatModelID != "model-default" || len(fixed.ChatModelSnapshot) == 0 {
+		t.Fatalf("default fixed binding=%#v err=%v", fixed, err)
 	}
-	if fixed.ChatModelMode == nil || *fixed.ChatModelMode != chatModelModeFixed ||
-		fixed.ChatModelID == nil || *fixed.ChatModelID != "model-default" ||
-		fixed.ChatModelVersion != 1 || len(fixed.ChatModelSnapshot) == 0 {
-		t.Fatalf("default binding=%#v", fixed)
-	}
-
-	auto, _, err := ensureConversation(
-		context.Background(), db, "conversation-auto", "Auto", nil, nil,
-		"user-1", "User", false, "", nil,
-		&initialChatModelSelection{Mode: chatModelModeAuto},
-	)
+	conversation, _, err := ensureConversation(context.Background(), db, "auto-sticky", "Auto", nil, nil, "user-1", "User", false, "", nil, &initialChatModelSelection{Mode: chatModelModeAuto})
 	if err != nil {
 		t.Fatalf("create auto conversation: %v", err)
 	}
-	if auto.ChatModelMode == nil || *auto.ChatModelMode != chatModelModeAuto ||
-		auto.ChatModelID != nil || auto.ChatModelVersion != 1 {
-		t.Fatalf("auto binding=%#v", auto)
-	}
-	applyAuto := func(body map[string]any) (*chatModelRoute, map[string]any) {
+	apply := func(body map[string]any) *chatModelRoute {
 		t.Helper()
-		body["conversation_id"] = auto.ID
-		body["llm_config"] = map[string]any{"llm": map[string]any{"model": "legacy"}}
-		if err := applyConversationChatModelConfig(context.Background(), db, "user-1", body); err != nil {
-			t.Fatalf("apply auto route: %v", err)
+		body["conversation_id"] = conversation.ID
+		if err := applyChatRuntimeConfigs(context.Background(), db, "user-1", body); err != nil {
+			t.Fatalf("apply runtime model: %v", err)
 		}
-		route := chatModelRouteFromBody(body)
-		if route == nil {
-			t.Fatal("auto route metadata was not recorded")
-		}
-		return route, body["llm_config"].(map[string]any)["llm"].(map[string]any)
+		return chatModelRouteFromBody(body)
 	}
-
-	route, llm := applyAuto(map[string]any{
-		"query":          "把这句话翻译成英文",
-		"thinking_depth": "low",
-	})
-	if llm["model"] != "fast-free" || route.ModelID != "model-free" || route.Reason != "simple_task" {
-		t.Fatalf("simple auto route=%#v config=%#v, want verified free model", route, llm)
+	body := map[string]any{"query": "hello", "thinking_depth": "low", "context_usage_preview": true}
+	first := apply(body)
+	if first == nil || first.ModelID != "model-default" || first.Reason != "initial_selection" {
+		t.Fatalf("initial auto route=%#v", first)
 	}
-	simpleRoute := *route
-
-	route, llm = applyAuto(map[string]any{
-		"query":          "分析这个跨文件并发死锁并给出修复方案",
-		"thinking_depth": "high",
-	})
-	if llm["model"] != "gpt-default" || route.ModelID != "model-default" || route.Reason != "complex_task" {
-		t.Fatalf("complex auto route=%#v config=%#v, want user default", route, llm)
-	}
-
-	route, llm = applyAuto(map[string]any{"query": strings.Repeat("上下文", 5000)})
-	if llm["model"] != "long-context" || route.ModelID != "model-long" || route.Reason != "long_context" {
-		t.Fatalf("long-context auto route=%#v config=%#v, want largest known window", route, llm)
-	}
-
-	route, llm = applyAuto(map[string]any{
-		"query":                    "现在改做复杂架构分析",
-		"thinking_depth":           "max",
-		chatModelRetryRouteBodyKey: &simpleRoute,
-	})
-	if llm["model"] != "fast-free" || route.ModelID != "model-free" || route.Reason != "retry_same_model" {
-		t.Fatalf("retry auto route=%#v config=%#v, want the original route", route, llm)
-	}
-
-	if err := db.Model(&orm.UserSelectedModel{}).
-		Where("user_id = ? AND model_type = ?", "user-1", "llm").
-		Delete(&orm.UserSelectedModel{}).Error; err != nil {
-		t.Fatalf("clear user default: %v", err)
-	}
-	route, llm = applyAuto(map[string]any{"query": "继续"})
-	if llm["model"] != "fast-free" || route.ModelID != "model-free" || route.Reason != "session_sticky" {
-		t.Fatalf("balanced auto route=%#v config=%#v, want previous available route", route, llm)
-	}
-
 	var stored orm.Conversation
-	if err := db.Where("id = ?", auto.ID).Take(&stored).Error; err != nil {
-		t.Fatalf("reload auto conversation: %v", err)
+	if err := db.Where("id = ?", conversation.ID).Take(&stored).Error; err != nil || len(stored.ChatModelSnapshot) != 0 {
+		t.Fatalf("preview wrote attempted model: snapshot=%s err=%v", stored.ChatModelSnapshot, err)
 	}
-	if strings.Contains(string(stored.ChatModelSnapshot), "secret-") {
-		t.Fatalf("auto snapshot leaked credentials: %s", stored.ChatModelSnapshot)
+	for _, terminal := range []*RunTerminal{
+		{Status: "failed", Reason: "model_failure", Code: "service_unavailable"},
+		{Status: "cancelled", Reason: "user_cancelled"},
+	} {
+		persistSuccessfulChatModel(context.Background(), db, "user-1", conversation.ID, "failed-or-cancelled", body, terminal)
 	}
-}
-
-func TestResolveAutoChatModelHonorsFreeEndpointScopeAndStableTieBreak(t *testing.T) {
-	models := []availableChatModel{
-		{ID: "free-wrong-scope", Source: "own", BaseURL: "https://wrong.example/v1", FreeAutoPriority: 1, FreeAutoBaseURLs: `["https://allowed.example/v1"]`},
-		{ID: "free-b", Source: "own", BaseURL: "https://b.example/v1", FreeAutoPriority: 2},
-		{ID: "free-a", Source: "own", BaseURL: "https://a.example/v1", FreeAutoPriority: 2},
+	if err := db.Where("id = ?", conversation.ID).Take(&stored).Error; err != nil || len(stored.ChatModelSnapshot) != 0 {
+		t.Fatalf("unsuccessful call changed snapshot=%s err=%v", stored.ChatModelSnapshot, err)
 	}
-	selected, route := resolveAutoChatModel(
-		map[string]any{"thinking_depth": "low"},
-		models,
-		nil,
-		nil,
-	)
-	if selected == nil || route == nil || selected.ID != "free-a" || route.ModelID != "free-a" {
-		t.Fatalf("simple route selected=%#v route=%#v, want scoped stable free-a", selected, route)
+	persistSuccessfulChatModel(context.Background(), db, "user-1", conversation.ID, "successful-run", body, &RunTerminal{Status: "completed", Reason: "normal"})
+	if err := db.Where("id = ?", conversation.ID).Take(&stored).Error; err != nil {
+		t.Fatal(err)
 	}
-	if taskClass := classifyAutoChatTask(
-		map[string]any{
-			"thinking_depth": "low",
-			"files":          map[string][]string{"1": {"/uploads/report.pdf"}},
-		},
-		nil,
-		models,
-	); taskClass != autoChatTaskComplex {
-		t.Fatalf("attachment task class=%q, want complex", taskClass)
+	successSnapshot := append(json.RawMessage(nil), stored.ChatModelSnapshot...)
+	var snapshot chatModelSnapshot
+	if err := json.Unmarshal(successSnapshot, &snapshot); err != nil || snapshot.SuccessfulRunID != "successful-run" || snapshot.ModelID != "model-default" {
+		t.Fatalf("successful snapshot=%s err=%v", successSnapshot, err)
 	}
-	if taskClass := classifyAutoChatTask(
-		map[string]any{
-			"thinking_depth": "low",
-			"explicit_resource_bindings": map[string]any{
-				"workflow_refs": []string{"video/workflow"},
-			},
-		},
-		nil,
-		models,
-	); taskClass != autoChatTaskComplex {
-		t.Fatalf("workflow task class=%q, want complex", taskClass)
+	if strings.Contains(string(successSnapshot), "secret-") {
+		t.Fatalf("successful snapshot leaked credentials: %s", successSnapshot)
 	}
-}
-
-func TestClassifyAutoChatTaskDoesNotInferIntentFromPromptWording(t *testing.T) {
-	tests := []string{
-		"debug this race condition and refactor the architecture across files",
-		"调试这个跨文件并发死锁并重构架构",
-		"translate summarize rewrite extract format what is",
-		"翻译总结改写提取格式化润色是什么",
-		"```go\nfunc main() {}\n```",
+	if err := db.Model(&orm.UserSelectedModel{}).Where("user_id = ? AND model_type = ?", "user-1", "llm").Update("user_model_provider_group_model_id", "model-other").Error; err != nil {
+		t.Fatal(err)
 	}
-	for _, query := range tests {
-		if taskClass := classifyAutoChatTask(
-			map[string]any{"query": query, "thinking_depth": "medium"},
-			nil,
-			nil,
-		); taskClass != autoChatTaskBalanced {
-			t.Fatalf("query %q classified as %q, want language-independent balanced fallback", query, taskClass)
+	for _, request := range []map[string]any{
+		{"query": "simple", "thinking_depth": "low"},
+		{"query": "complex", "thinking_depth": "max", "has_subagents": true, "files": map[string][]string{"1": {"/uploads/report.pdf"}}},
+		{"query": "continue", "history": []map[string]any{{"content": strings.Repeat("context", 20000)}}, "context_prompt_export": true},
+	} {
+		if route := apply(request); route.ModelID != "model-default" || route.Reason != "session_sticky" {
+			t.Fatalf("request signals or changed default switched model: %#v", route)
 		}
 	}
+	if err := db.Where("id = ?", conversation.ID).Take(&stored).Error; err != nil || !bytes.Equal(stored.ChatModelSnapshot, successSnapshot) || stored.ChatModelVersion != 1 {
+		t.Fatalf("runtime/preview changed successful binding: %#v err=%v", stored, err)
+	}
+	if err := db.Model(&orm.UserModelProviderGroupModel{}).Where("id = ?", "model-default").Update("deleted_at", time.Now().UTC()).Error; err != nil {
+		t.Fatal(err)
+	}
+	if route := apply(map[string]any{"query": "new turn"}); route.ModelID != "model-other" || route.Reason != "model_unavailable" {
+		t.Fatalf("unavailable successful model did not switch: %#v", route)
+	}
+	retryBody := map[string]any{"conversation_id": conversation.ID, chatModelRetryRouteBodyKey: first}
+	if err := applyConversationChatModelConfig(context.Background(), db, "user-1", retryBody); !errors.Is(err, errChatModelUnavailable) {
+		t.Fatalf("retry silently replaced deleted original model: %v", err)
+	}
+	if err := db.Model(&orm.Conversation{}).Where("id = ?", conversation.ID).Updates(map[string]any{
+		"chat_model_mode": chatModelModeFixed, "chat_model_id": "model-other", "chat_model_version": 2,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	persistSuccessfulChatModel(context.Background(), db, "user-1", conversation.ID, "late-old-run", body, &RunTerminal{Status: "completed", Reason: "normal"})
+	if err := db.Where("id = ?", conversation.ID).Take(&stored).Error; err != nil || !bytes.Equal(stored.ChatModelSnapshot, successSnapshot) {
+		t.Fatalf("old run overwrote new manual selection: %#v err=%v", stored, err)
+	}
+	if err := applyConversationChatModelConfig(context.Background(), db, "user-1", retryBody); err != nil || chatModelRouteFromBody(retryBody).ModelID != "model-other" {
+		t.Fatalf("manual selection overridden on retry: %#v err=%v", chatModelRouteFromBody(retryBody), err)
+	}
+	if err := db.Model(&orm.Conversation{}).Where("id = ?", conversation.ID).Updates(map[string]any{
+		"chat_model_mode": chatModelModeAuto, "chat_model_id": nil, "chat_model_snapshot": nil, "chat_model_version": 3,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	persistSuccessfulChatModel(context.Background(), db, "user-1", conversation.ID, "late-old-auto-run", body, &RunTerminal{Status: "completed", Reason: "normal"})
+	stored = orm.Conversation{}
+	if err := db.Where("id = ?", conversation.ID).Take(&stored).Error; err != nil || len(stored.ChatModelSnapshot) != 0 {
+		t.Fatalf("old run overwrote a newer Auto selection version: %#v err=%v", stored, err)
+	}
 }
 
-func TestResolveAutoChatModelRejectsKnownTooSmallLowCostModel(t *testing.T) {
-	defaultCapacity := "128K"
-	freeCapacity := "8K"
-	defaultModel := availableChatModel{
-		ID: "default", Source: "own", MaxInputTokens: &defaultCapacity,
-	}
-	models := []availableChatModel{
-		defaultModel,
-		{
-			ID: "free", Source: "own", MaxInputTokens: &freeCapacity,
-			FreeAutoPriority: 1,
-		},
-	}
-	selected, route := resolveAutoChatModel(
-		map[string]any{
-			"thinking_depth": "low",
-			"query":          strings.Repeat("context", 2_000),
-		},
-		models,
-		nil,
-		&defaultModel,
-	)
-	if selected == nil || route == nil || selected.ID != defaultModel.ID || route.Reason != "default_balanced" {
-		t.Fatalf("selected=%#v route=%#v, want the fitting default model", selected, route)
+func TestAutoChatModelUsesProviderFailureOnlyForNextTurn(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		terminal    RunTerminal
+		wantModelID string
+	}{
+		{name: "provider unavailable", terminal: RunTerminal{Status: "failed", Reason: "model_failure", Code: "service_unavailable"}, wantModelID: "model-other"},
+		{name: "credentials unavailable", terminal: RunTerminal{Status: "failed", Reason: "model_failure", Code: "authentication_failed"}, wantModelID: "model-other"},
+		{name: "context limit", terminal: RunTerminal{Status: "failed", Reason: "model_failure", Code: "token_limit"}, wantModelID: "model-default"},
+		{name: "tool failure", terminal: RunTerminal{Status: "failed", Reason: "runtime_failure", Code: "tool_error"}, wantModelID: "model-default"},
+		{name: "cancelled", terminal: RunTerminal{Status: "cancelled", Reason: "user_cancelled"}, wantModelID: "model-default"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			database := newPromptTestDB(t)
+			db := database.DB
+			seedAvailableChatModel(t, db, "user-1", "provider-default", "group-default", "model-default", "Default", "Default", "default-chat", "llm", true, "secret-default")
+			seedAvailableChatModel(t, db, "user-1", "provider-other", "group-other", "model-other", "Other", "Other", "other-chat", "llm", true, "secret-other")
+			seedSelectedChatModel(t, db, "user-1", "model-default", false)
+			conversation, _, err := ensureConversation(context.Background(), db, "auto-outcome", "Auto", nil, nil, "user-1", "User", false, "", nil, &initialChatModelSelection{Mode: chatModelModeAuto})
+			if err != nil {
+				t.Fatal(err)
+			}
+			body := map[string]any{"conversation_id": conversation.ID}
+			if err := applyConversationChatModelConfig(context.Background(), db, "user-1", body); err != nil {
+				t.Fatal(err)
+			}
+			firstRoute := chatModelRouteFromBody(body)
+			if err := db.Create(&orm.ChatHistory{
+				ID: "failed-history", ConversationID: conversation.ID, Seq: 1, RunID: "failed-run", RunStatus: test.terminal.Status,
+				RunTerminal: terminalJSON(&test.terminal), Ext: mergeChatModelRouteIntoExt(nil, body),
+				TimeMixin: orm.TimeMixin{CreateTime: time.Now().UTC(), UpdateTime: time.Now().UTC()},
+			}).Error; err != nil {
+				t.Fatal(err)
+			}
+			// Changing the settings default cannot switch an existing Auto session.
+			if err := db.Model(&orm.UserSelectedModel{}).Where("user_id = ? AND model_type = ?", "user-1", "llm").Update("user_model_provider_group_model_id", "model-other").Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := applyConversationChatModelConfig(context.Background(), db, "user-1", body); err != nil || chatModelRouteFromBody(body).ModelID != test.wantModelID {
+				t.Fatalf("next turn route=%#v err=%v, want %s", chatModelRouteFromBody(body), err, test.wantModelID)
+			}
+			retry := map[string]any{"conversation_id": conversation.ID, chatModelRetryRouteBodyKey: firstRoute}
+			if err := applyConversationChatModelConfig(context.Background(), db, "user-1", retry); err != nil || chatModelRouteFromBody(retry).ModelID != "model-default" {
+				t.Fatalf("retry replaced original model: %#v err=%v", chatModelRouteFromBody(retry), err)
+			}
+			// An explicit new Auto selection permits a fresh choice and ignores old failures.
+			if err := db.Model(&orm.Conversation{}).Where("id = ?", conversation.ID).Updates(map[string]any{"chat_model_snapshot": nil, "chat_model_version": 2}).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := applyConversationChatModelConfig(context.Background(), db, "user-1", retry); err != nil || chatModelRouteFromBody(retry).ModelID != "model-other" {
+				t.Fatalf("new Auto selection reused old route: %#v err=%v", chatModelRouteFromBody(retry), err)
+			}
+		})
 	}
 }
 
-func TestApplyAutoChatModelUsesDatabaseWorkflowSignal(t *testing.T) {
+func TestLastSuccessfulChatModelIgnoresLegacyAttemptedSnapshot(t *testing.T) {
 	database := newPromptTestDB(t)
 	db := database.DB
-	seedAvailableChatModel(t, db, "user-1", "provider-default", "group-default", "model-default", "Default", "Default", "default-model", "llm", true, "secret-default")
-	seedAvailableChatModel(t, db, "user-1", "provider-free", "group-free", "model-free", "Free", "Free", "free-model", "llm", true, "secret-free")
-	setChatModelAutoMetadata(t, db, "model-free", "128K", 1, "")
-	seedSelectedChatModel(t, db, "user-1", "model-default", false)
-
-	conversation, _, err := ensureConversation(
-		context.Background(), db, "conversation-workflow-auto", "Workflow Auto", nil, nil,
-		"user-1", "User", false, "", nil,
-		&initialChatModelSelection{Mode: chatModelModeAuto},
-	)
-	if err != nil {
-		t.Fatalf("create auto conversation: %v", err)
+	mode := chatModelModeAuto
+	conversation := orm.Conversation{ID: "legacy-attempt", ChatModelMode: &mode, ChatModelVersion: 1, ChatModelSnapshot: json.RawMessage(`{"model_id":"attempted","model_name":"Attempted"}`)}
+	if snapshot, err := lastSuccessfulChatModelSnapshot(context.Background(), db, &conversation); err != nil || snapshot != nil {
+		t.Fatalf("attempted snapshot treated as successful: %#v err=%v", snapshot, err)
 	}
-	now := time.Now().UTC()
-	if err := db.Create(&orm.WorkflowSession{
-		ID: "workflow-active-auto", ConversationID: conversation.ID, WorkflowID: "workflow-1",
-		Status: workflow.SessionStatusActive, CreateUserID: "user-1", CreatedAt: now, UpdatedAt: now,
+	terminal := &RunTerminal{Status: "completed", Reason: "normal"}
+	ext := json.RawMessage(`{"model_route":{"mode":"auto","model_id":"succeeded","provider_id":"provider","provider_name":"Provider","model_name":"Successful","source":"own"}}`)
+	if err := db.Create(&orm.MultiAnswersChatHistory{
+		ID: "dual-success", ConversationID: conversation.ID, Seq: 1, RunID: "success-run", RunStatus: "completed", RunTerminal: terminalJSON(terminal), Ext: ext,
+		TimeMixin: orm.TimeMixin{CreateTime: time.Now().UTC(), UpdateTime: time.Now().UTC()},
 	}).Error; err != nil {
-		t.Fatalf("create active workflow: %v", err)
+		t.Fatal(err)
 	}
+	if snapshot, err := lastSuccessfulChatModelSnapshot(context.Background(), db, &conversation); err != nil || snapshot == nil || snapshot.ModelID != "succeeded" || snapshot.SuccessfulRunID != "success-run" {
+		t.Fatalf("successful dual history missing: %#v err=%v", snapshot, err)
+	}
+	if string(conversation.ChatModelSnapshot) != `{"model_id":"attempted","model_name":"Attempted"}` {
+		t.Fatalf("read-only lookup mutated attempted snapshot: %s", conversation.ChatModelSnapshot)
+	}
+}
 
-	body := map[string]any{
-		"conversation_id": conversation.ID,
-		"query":           "continue",
-		"thinking_depth":  "low",
-	}
-	if err := applyConversationChatModelConfig(context.Background(), db, "user-1", body); err != nil {
-		t.Fatalf("apply auto route: %v", err)
-	}
-	route := chatModelRouteFromBody(body)
-	if route == nil || route.ModelID != "model-default" || route.TaskClass != autoChatTaskComplex || route.Reason != "complex_task" {
-		t.Fatalf("workflow auto route=%#v, want DB workflow to select default complex route", route)
-	}
-	if _, leaked := body[chatModelWorkflowRouteBodyKey]; leaked {
-		t.Fatalf("internal workflow route signal leaked into request body: %#v", body)
+func TestChatModelSuccessPersistsAcrossReplyModes(t *testing.T) {
+	for _, replyMode := range []string{"nonstream", "stream", "dual"} {
+		for _, status := range []string{"completed", "failed", "cancelled"} {
+			t.Run(replyMode+"/"+status, func(t *testing.T) {
+				database := newPromptTestDB(t)
+				db := database.DB
+				seedAvailableChatModel(t, db, "user-1", "provider-default", "group-default", "model-default", "Default", "Default", "default-chat", "llm", true, "secret-default")
+				seedSelectedChatModel(t, db, "user-1", "model-default", false)
+				conversation, _, err := ensureConversation(context.Background(), db, "reply-success", "Auto", nil, nil, "user-1", "User", false, "", nil, &initialChatModelSelection{Mode: chatModelModeAuto})
+				if err != nil {
+					t.Fatal(err)
+				}
+				terminal := RunTerminal{Status: status, Reason: "normal", PartialOutput: true}
+				if status == "failed" {
+					terminal.Reason, terminal.Code = "model_failure", "service_unavailable"
+				} else if status == "cancelled" {
+					terminal.Reason = "user_cancelled"
+				}
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					var request LazyChatRequest
+					if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+						t.Error(err)
+						return
+					}
+					w.Header().Set("Content-Type", "text/event-stream")
+					encoder := json.NewEncoder(w)
+					_ = encoder.Encode(map[string]any{"code": 200, "msg": "success", "data": map[string]any{"text": "answer"}})
+					_ = encoder.Encode(map[string]any{"code": 200, "msg": "success", "data": map[string]any{"runtime_event": runFinishedEvent(request.Conversation.RunID, terminal)}})
+				}))
+				defer server.Close()
+				body := map[string]any{"conversation_id": conversation.ID, "user_id": "user-1", "query": "hello", "run_id": "primary-run", "secondary_run_id": "secondary-run"}
+				if err := applyConversationChatModelConfig(context.Background(), db, "user-1", body); err != nil {
+					t.Fatal(err)
+				}
+				ext := mergeChatModelRouteIntoExt(nil, body)
+				recorder := httptest.NewRecorder()
+				target := chatPersistTarget{Seq: 1, HistoryID: "primary-history"}
+				ctx := context.Background()
+				switch replyMode {
+				case "nonstream":
+					handleNonStreamChat(recorder, ctx, db, nil, server.URL, body, conversation.ID, "hello", target, ext)
+				case "stream":
+					streamSingleAnswer(ctx, ctx, recorder, recorder, db, nil, server.URL, body, conversation.ID, "hello", target.HistoryID, target, ext)
+				case "dual":
+					streamDualAnswer(ctx, ctx, recorder, recorder, db, nil, server.URL, body, conversation.ID, "hello", target.HistoryID, "secondary-history", target, ext)
+				}
+				var stored orm.Conversation
+				if err := db.Where("id = ?", conversation.ID).Take(&stored).Error; err != nil {
+					t.Fatal(err)
+				}
+				if status == "completed" {
+					var snapshot chatModelSnapshot
+					if json.Unmarshal(stored.ChatModelSnapshot, &snapshot) != nil || snapshot.ModelID != "model-default" || snapshot.SuccessfulRunID == "" {
+						t.Fatalf("completed reply did not persist success: %s; response=%s", stored.ChatModelSnapshot, recorder.Body.String())
+					}
+				} else if len(stored.ChatModelSnapshot) != 0 {
+					t.Fatalf("%s reply persisted successful model: %s", status, stored.ChatModelSnapshot)
+				}
+			})
+		}
 	}
 }
 

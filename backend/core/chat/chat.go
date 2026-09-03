@@ -97,6 +97,8 @@ type ChatRetrievalOptions struct {
 }
 
 type ChatRuntimeOptions struct {
+	ToolPolicy                    string         `json:"tool_policy,omitempty"`
+	SourceReference               string         `json:"source_reference,omitempty"`
 	Debug                         bool           `json:"debug,omitempty"`
 	Reasoning                     bool           `json:"reasoning"`
 	ThinkingDepth                 string         `json:"thinking_depth,omitempty"`
@@ -447,6 +449,12 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 	}
 	if environmentContext, ok := body["environment_context"].(map[string]any); ok {
 		req.Runtime.EnvironmentContext = environmentContext
+	}
+	if toolPolicy, ok := body["tool_policy"].(string); ok {
+		req.Runtime.ToolPolicy = toolPolicy
+	}
+	if sourceReference, ok := body["source_reference"].(string); ok {
+		req.Runtime.SourceReference = sourceReference
 	}
 	if userID, ok := body["user_id"].(string); ok {
 		req.Conversation.UserID = strings.TrimSpace(userID)

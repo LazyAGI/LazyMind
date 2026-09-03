@@ -479,7 +479,12 @@ components:
                         - default_balanced
                         - retry_same_model
                         - fixed
+                        - initial_selection
+                        - model_unavailable
                     type: string
+                selection_version:
+                    format: int64
+                    type: integer
                 source:
                     enum:
                         - own
@@ -494,6 +499,7 @@ components:
                         - complex
                         - long_context
                         - fixed
+                        - auto
                     type: string
             type: object
         ChatRuntimeEvent:

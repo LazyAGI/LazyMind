@@ -210,7 +210,7 @@ func applyChatRuntimeConfigs(ctx context.Context, db *gorm.DB, userID string, bo
 			body["agentic_config"] = agentConfig
 		}
 	}
-	return nil
+	return applyConversationSourceRuntimeContext(ctx, db, userID, body)
 }
 
 // loadUserAgentConfig reads per-user defaults from user_chat_settings and applies
