@@ -21,7 +21,7 @@ class MemoryPartialApplyError(RuntimeError):
         self.failed = tuple(str(step) for step in failed)
         self.item = item
         self.metadata = dict(metadata or {})
-        super().__init__(self.message, self.operation, self.applied, self.failed, item)
+        super().__init__(self.message, self.operation, self.applied, self.failed, item, self.metadata)
 
     def __str__(self) -> str:
         return self.message

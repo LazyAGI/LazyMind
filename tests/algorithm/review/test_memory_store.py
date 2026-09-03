@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import copy
+import pickle
 from typing import Any, Dict, List, Optional
 
 import pytest
@@ -392,6 +394,28 @@ def test_preference_add_returns_item_without_internal_envelope():
     assert item.name == 'pref.response.concise'
     assert 'pref.response.concise' in fs.files[PREFERENCE_PATH]
     assert build_reference_path('response-concise') in fs.files
+
+
+@pytest.mark.parametrize('metadata', [None, {'episode_id': 'episode-1'}])
+def test_partial_apply_error_preserves_fields_when_reconstructed(metadata):
+    error = MemoryPartialApplyError(
+        'Preference index write failed', 'move', ['episode'], ['preference_index'],
+        {'name': 'pref.response.concise'}, metadata,
+    )
+
+    for restored in (
+        type(error)(*error.args),
+        copy.copy(error),
+        pickle.loads(pickle.dumps(error)),
+    ):
+        assert type(restored) is MemoryPartialApplyError
+        assert str(restored) == error.message
+        assert restored.operation == error.operation
+        assert restored.applied == error.applied
+        assert restored.failed == error.failed
+        assert restored.item == error.item
+        assert restored.metadata == (metadata or {})
+        assert restored.args == error.args
 
 
 def test_preference_add_reports_partial_apply_when_cleanup_fails():
