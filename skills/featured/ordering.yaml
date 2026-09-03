@@ -11,6 +11,7 @@ home:
     - summarize-meeting
     - document-refinement
     - doc-coauthoring
+    - tailored-resume-generator
   work:
     - ppt-workflow
     - image-workflow

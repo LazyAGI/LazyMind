@@ -1,0 +1,131 @@
+schema_version: 2
+id: tailored-resume-generator
+type: chat
+version: 1.0.0
+status: published
+default_locale: zh-CN
+provider: GitHub
+
+skill:
+  source_url: https://github.com/ComposioHQ/awesome-claude-skills/tree/master/tailored-resume-generator
+  category: career
+  required_version: 1.0.0
+
+placement:
+  home: true
+  gallery: true
+  order: 29
+
+classification:
+  category: 职业发展
+  tags:
+    - 简历优化
+    - 岗位匹配
+    - ATS
+    - 职业转型
+
+assets:
+  cover:
+    file: assets/cover.png
+    role: cover
+  tailored_resume_demo:
+    file: assets/tailored-resume-demo.html
+    role: result
+
+presentation:
+  card:
+    title: 定制简历助手
+    description: 根据目标岗位调整简历重点，保留真实经历并找出需要补充的证据
+    output_type: document
+    output_label: 定制简历
+    cover_asset: cover
+    result_summary: 查看岗位要求、经历匹配、简历改写和补强建议
+  detail:
+    title: 定制简历助手
+    description: 针对具体岗位分析职位描述，提炼关键要求，把真实经历重新组织成更匹配的简历，并检查 ATS 关键词和格式。会区分已有证据、需要补充的信息和不应该为了关键词硬加的内容，不编造经历。来源：awesome-claude-skills，经 LazyMind 适配。
+    attachment_hint: 目标岗位描述、现有简历、工作经历、项目成果或职业转型背景
+
+tasks:
+  - id: tailor-for-job
+    selector:
+      title: 按岗位修改简历
+      description: 把最相关的经历和成果放到目标岗位需要的位置
+      output_label: 岗位定制简历
+    launch:
+      prompt_short: 帮我按这个岗位改一下简历。
+      prompt: >-
+        我准备申请一家 SaaS 公司的产品经理岗位，下面有职位描述和我的简历。帮我先提炼岗位最看重的能力，再按真实经历调整简历重点；不要编造经历，缺少数据的地方标出来，最后给我一版方便继续修改的简历。
+    replay:
+      steps:
+        - title: 读取岗位要求
+          description: 提炼必需能力、关键词、行业经验和岗位最看重的结果
+        - title: 对照候选人经历
+          description: 找出直接匹配、可迁移的经验和目前没有证据支持的要求
+        - title: 调整简历重点
+          description: 重排摘要、技能和经历要点，让最相关的内容先被看到
+        - title: 保持内容真实
+          description: 不补造项目、数字或职责，把需要确认的事实单独列出
+        - title: 输出修改建议
+          description: 给出可直接使用的简历版本，以及优势、缺口和面试准备建议
+    result:
+      template: html_preview_v1
+      eyebrow: 岗位定制简历
+      title: SaaS 产品经理岗位匹配
+      summary: 查看岗位要求、经历匹配、简历重点调整和待补充证据。
+      html_asset: tailored_resume_demo
+
+  - id: career-transition
+    selector:
+      title: 梳理转型经历
+      description: 把原岗位中能迁移到新岗位的能力写得更清楚
+      output_label: 转型简历
+    launch:
+      prompt_short: 我想转做产品经理，帮我看看经历怎么写。
+      prompt: >-
+        我现在做市场运营，想申请产品经理。下面是岗位描述和我的经历，帮我找出能迁移的能力，重写摘要和项目经历；不确定的地方先问我，不要把没有做过的事情写成经验。
+    replay:
+      steps:
+        - title: 确认转型目标
+          description: 了解目标岗位、行业方向和候选人希望保留的经历
+        - title: 找出可迁移能力
+          description: 从项目、协作、分析和结果中寻找与新岗位相关的真实证据
+        - title: 重写职业叙事
+          description: 调整摘要和经历顺序，让转型原因和能力连接更自然
+        - title: 标记经验边界
+          description: 区分做过、参与过、了解过和还没有接触过的内容
+        - title: 提出补强方向
+          description: 建议可以补充的项目、指标、作品或面试故事
+    result:
+      template: html_preview_v1
+      eyebrow: 转型简历
+      title: 市场运营转产品经理
+      summary: 查看可迁移能力、职业叙事、证据边界和下一步补强方向。
+      html_asset: tailored_resume_demo
+
+  - id: check-ats-fit
+    selector:
+      title: 检查 ATS 匹配度
+      description: 找出关键词和格式问题，但不为了通过筛选堆砌术语
+      output_label: ATS 检查报告
+    launch:
+      prompt_short: 帮我检查这版简历能不能过 ATS。
+      prompt: >-
+        这是岗位描述和我现在的简历，帮我检查关键词、岗位匹配度和格式。请把建议分成：可以直接改的文字、需要我补充的证据、不能为了关键词硬加的内容，然后给出一版简洁的修改稿。
+    replay:
+      steps:
+        - title: 提取岗位关键词
+          description: 识别岗位名称、硬性要求、工具和反复出现的能力词
+        - title: 检查简历匹配
+          description: 对照简历中已有的事实，查看关键词是否自然且有证据支撑
+        - title: 检查 ATS 结构
+          description: 检查标题、顺序、格式和可解析性，避免复杂排版造成信息丢失
+        - title: 分开处理建议
+          description: 区分可以直接改写、需要用户补充和不应硬加的内容
+        - title: 生成简洁版本
+          description: 在不夸大经历的前提下输出一版便于继续编辑和投递的简历
+    result:
+      template: html_preview_v1
+      eyebrow: ATS 检查报告
+      title: 产品经理简历 ATS 检查
+      summary: 查看关键词匹配、结构问题、证据缺口和不建议硬加的内容。
+      html_asset: tailored_resume_demo

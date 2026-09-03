@@ -1,0 +1,107 @@
+locale: en-US
+
+classification:
+  category: Career development
+  tags:
+    - Resume tailoring
+    - Job matching
+    - ATS
+    - Career transition
+
+presentation:
+  card:
+    title: Tailored resume assistant
+    description: Reframe relevant experience for a target role while keeping every claim truthful
+    output_type: document
+    output_label: Tailored resume
+    cover_asset: cover
+    result_summary: Explore job requirements, experience matching, resume edits, and evidence gaps
+  detail:
+    title: Tailored resume assistant
+    description: Analyze a specific job description, identify its priorities, reorganize real experience into a better-matched resume, and check ATS keywords and structure. Separate supported evidence, information to add, and terms that should not be forced into the resume. Never invent experience. Sourced from awesome-claude-skills and adapted for LazyMind.
+    attachment_hint: A target job description, current resume, work history, project outcomes, or career-transition context
+
+tasks:
+  - id: tailor-for-job
+    selector:
+      title: Tailor a resume for a job
+      description: Put the most relevant experience and achievements where the target role will see them
+      output_label: Tailored resume
+    launch:
+      prompt_short: Can you tailor my resume for this job?
+      prompt: >-
+        I am applying for a product manager role at a SaaS company, and I have the job description and my resume below. First pull out what the role cares about most, then adjust the emphasis using only my real experience. Flag missing evidence instead of making it up, and give me a version I can keep editing.
+    replay:
+      steps:
+        - title: Read the job requirements
+          description: Extract must-have skills, keywords, domain experience, and valued outcomes
+        - title: Map the candidate experience
+          description: Find direct matches, transferable experience, and unsupported requirements
+        - title: Reorder the resume emphasis
+          description: Bring the most relevant summary, skills, and achievements forward
+        - title: Keep claims truthful
+          description: Separate done, contributed, familiar, and unverified experience
+        - title: Provide revision guidance
+          description: Return an editable resume plus strengths, gaps, and interview preparation notes
+    result:
+      template: html_preview_v1
+      eyebrow: Tailored resume
+      title: SaaS product manager role match
+      summary: Explore job priorities, experience matches, resume emphasis, and missing evidence.
+      html_asset: tailored_resume_demo
+
+  - id: career-transition
+    selector:
+      title: Reframe a career transition
+      description: Make transferable abilities from a previous role clear in a new-role resume
+      output_label: Transition resume
+    launch:
+      prompt_short: I want to move into product management. How should I frame my experience?
+      prompt: >-
+        I work in marketing operations and want to apply for product manager roles. Here is the job description and my experience. Help me find the transferable skills, then rewrite my summary and project experience. Ask when something is unclear, and do not turn work I have not done into experience.
+    replay:
+      steps:
+        - title: Confirm the transition goal
+          description: Understand the target role, industry direction, and experience to preserve
+        - title: Find transferable evidence
+          description: Connect real project, collaboration, analysis, and outcome evidence to the new role
+        - title: Reframe the career story
+          description: Make the transition and capability connections easier to follow
+        - title: Mark the experience boundary
+          description: Distinguish owned, contributed, familiar, and not-yet-experienced work
+        - title: Suggest ways to strengthen the case
+          description: Recommend relevant projects, metrics, portfolio pieces, or interview stories to add
+    result:
+      template: html_preview_v1
+      eyebrow: Transition resume
+      title: Marketing operations to product management
+      summary: Explore transferable skills, career narrative, evidence boundaries, and next steps.
+      html_asset: tailored_resume_demo
+
+  - id: check-ats-fit
+    selector:
+      title: Check ATS fit
+      description: Find keyword and structure issues without stuffing terms into the resume
+      output_label: ATS review report
+    launch:
+      prompt_short: Can you check whether this resume is ATS-friendly?
+      prompt: >-
+        Here is the job description and my current resume. Check the keywords, role match, and format. Separate suggestions into wording I can change now, evidence I need to add, and things I should not force in just to match keywords. Then give me a concise revised version.
+    replay:
+      steps:
+        - title: Extract role keywords
+          description: Identify the job title, hard requirements, tools, and recurring capabilities
+        - title: Check resume alignment
+          description: Compare keywords with claims that are actually supported by the resume
+        - title: Check ATS structure
+          description: Review headings, order, formatting, and parseability
+        - title: Separate the recommendations
+          description: Distinguish direct edits, missing evidence, and terms that should not be forced
+        - title: Produce a concise version
+          description: Return an editable resume without exaggerating the candidate's experience
+    result:
+      template: html_preview_v1
+      eyebrow: ATS review report
+      title: Product manager resume ATS check
+      summary: Explore keyword alignment, structure issues, evidence gaps, and terms not to force.
+      html_asset: tailored_resume_demo
