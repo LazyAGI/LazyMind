@@ -93,6 +93,16 @@ func TestNormalizeSkillImportURL(t *testing.T) {
 			wantURL: "https://example.test/skills.zip",
 		},
 		{
+			name:    "SkillHub namespaced skill page",
+			rawURL:  "https://skillhub.cn/skills/clawhub_paudyyin/summarize",
+			wantURL: "https://api.skillhub.cn/api/v1/download?slug=%40clawhub_paudyyin%2Fsummarize",
+		},
+		{
+			name:    "SkillHub unnamespaced skill page",
+			rawURL:  "https://skillhub.cn/skills/summarize",
+			wantURL: "https://api.skillhub.cn/api/v1/download?slug=summarize",
+		},
+		{
 			name:    "invalid scheme",
 			rawURL:  "ftp://example.test/skills.zip",
 			wantErr: true,
@@ -105,6 +115,11 @@ func TestNormalizeSkillImportURL(t *testing.T) {
 		{
 			name:    "GitHub URL with query",
 			rawURL:  "https://github.com/example/skills?download=1",
+			wantErr: true,
+		},
+		{
+			name:    "SkillHub URL missing slug",
+			rawURL:  "https://skillhub.cn/skills",
 			wantErr: true,
 		},
 	}
