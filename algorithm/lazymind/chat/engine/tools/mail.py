@@ -21,6 +21,7 @@ from typing import Any, NoReturn
 import lazyllm
 from lazyllm.tools.agent import ToolExecutionError
 from lazyllm.tools.agent.base import _write_agent_data
+from lazyllm.tools.tool_config_inject import register_tool_auth
 
 from lazymind.chat.config import CHAT_ATTACHMENT_EXTENSIONS
 from lazymind.chat.engine.attachment_reader import parse_attachment_content
@@ -700,6 +701,9 @@ class MailToolkit:
     __tool_auto_activate__ = [
         r'邮件|邮箱|inbox|gmail|163|126|yeah\.net|qq邮箱|企业邮|(?<!\w)email(?!\w)|(?<!\w)mail(?!\w)',
     ]
+
+    def __init__(self) -> None:
+        register_tool_auth('mail', 'dynamic_tool_auth')
 
     def __key_source__(self) -> Any:
         cred = _credential()

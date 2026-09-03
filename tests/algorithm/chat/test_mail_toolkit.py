@@ -6,6 +6,8 @@ import lazyllm
 import pytest
 from lazyllm.tools.agent import ToolExecutionError
 
+from lazyllm.tools.tool_config_inject import TOOL_AUTH_REGISTRY
+from lazymind.chat.engine.tool_auth import inject_tool_config
 from lazymind.chat.engine.tools.local_file.workspace import chat_agent_workspace
 from lazymind.chat.engine.tools.mail import (
     MailToolkit,
@@ -338,3 +340,21 @@ def test_imap_search_and_read_use_uid(mail_auth):
     commands = [command for command, _args in imap.calls]
     assert commands.count('SEARCH') >= 2
     assert commands.count('FETCH') >= 2
+
+
+def test_mail_toolkit_registers_only_mail_auth_name():
+    MailToolkit()
+    assert TOOL_AUTH_REGISTRY.get('mail') == 'dynamic_tool_auth'
+    for name in ('gmailimap', 'qqmail', 'qqexmail', 'netease163', 'neteaseqiye'):
+        assert name not in TOOL_AUTH_REGISTRY
+
+
+def test_inject_clears_stale_mail_auth_before_current_request(mail_auth):
+    lazyllm.globals.config['dynamic_tool_auth'] = {
+        'mail': json.dumps({'provider': 'qqmail', 'email': 'old@qq.com', 'secret': 'old'}),
+        'bing': 'keep-me',
+    }
+    inject_tool_config({'bing': 'keep-me'})
+    auth = lazyllm.globals.config['dynamic_tool_auth'] or {}
+    assert 'mail' not in auth
+    assert auth.get('bing') == 'keep-me'
