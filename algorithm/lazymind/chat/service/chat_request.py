@@ -45,6 +45,8 @@ class ChatRuntimeOptions(BaseModel):
     context_prompt_export: bool = False
     context_preview_allow_llm_routing: bool = False
     skip_sensitive_filter: bool = False
+    mail_draft_confirm_id: Optional[str] = None
+    mail_draft_confirm_revision: Optional[int] = None
 
 
 class ChatPersonalizationOptions(BaseModel):

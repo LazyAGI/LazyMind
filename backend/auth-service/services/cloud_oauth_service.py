@@ -18,7 +18,13 @@ from services.cloud_oauth_provider import (
     CloudProviderError,
     CloudTokenPayload,
 )
-from services.providers import FeishuOAuthProvider, GoogleDriveOAuthProvider, NotionOAuthProvider
+from services.mail_providers import MAIL_IMAP_PROVIDERS, is_mail_imap_provider
+from services.providers import (
+    FeishuOAuthProvider,
+    GoogleDriveOAuthProvider,
+    IMAPMailProvider,
+    NotionOAuthProvider,
+)
 
 
 _AUTH_MODES = {'tenant', 'oauth_user', 'service_account'}
@@ -105,6 +111,8 @@ class CloudOAuthService:
             google_drive.provider_name(): google_drive,
             notion.provider_name(): notion,
         }
+        for imap_name in MAIL_IMAP_PROVIDERS:
+            self._providers[imap_name] = IMAPMailProvider(imap_name)
         self._cache_lock = threading.Lock()
         self._token_cache: dict[str, _TokenCacheItem] = {}
 
@@ -580,11 +588,17 @@ class CloudOAuthService:
         mode = self._validate_auth_mode(auth_mode)
         if mode == 'oauth_user':
             raise_error(ErrorCodes.CLOUD_OAUTH_AUTHORIZE_MODE_REQUIRED)
+        if is_mail_imap_provider(provider_impl.provider_name()) and mode != 'service_account':
+            raise_error(ErrorCodes.MAIL_PROVIDER_AUTH_MODE_INVALID)
         tid, cid, csec = self._validate_required_credentials(
             tenant_id=tenant_id,
             client_id=client_id,
             client_secret=client_secret,
         )
+        options = dict(provider_options or {})
+        if is_mail_imap_provider(provider_impl.provider_name()):
+            options.setdefault('chat_enabled', True)
+            options.setdefault('chatEnabled', True)
         connection_id = self._create_connection_record(
             provider=provider_impl.provider_name(),
             tenant_id=tid,
@@ -592,9 +606,17 @@ class CloudOAuthService:
             auth_mode=mode,
             client_id=cid,
             client_secret=csec,
-            provider_options=provider_options,
+            provider_options=options,
             reuse_existing=True,
         )
+        if is_mail_imap_provider(provider_impl.provider_name()):
+            return self._activate_imap_mail_connection(
+                provider_impl=provider_impl,
+                connection_id=connection_id,
+                owner_user_id=_normalize_owner_user_id(owner_user_id),
+                email=cid,
+                secret=csec,
+            )
         return {
             'connection_id': connection_id,
             'tenant_id': tid,
@@ -1548,6 +1570,60 @@ class CloudOAuthService:
     def _ensure_connection_active(row) -> None:
         if (getattr(row, 'status', '') or '').strip().upper() != 'ACTIVE':
             raise_error(ErrorCodes.CLOUD_CONNECTION_NOT_FOUND)
+
+    def _activate_imap_mail_connection(
+        self,
+        *,
+        provider_impl: CloudOAuthProvider,
+        connection_id: str,
+        owner_user_id: str,
+        email: str,
+        secret: str,
+    ) -> dict[str, Any]:
+        try:
+            token = provider_impl.acquire_tenant_access_token(client_id=email, client_secret=secret)
+        except Exception as exc:
+            with SessionLocal() as db:
+                row = CloudAuthConnectionRepository.get_by_id(db, connection_id)
+                if row is not None:
+                    row.status = 'ERROR'
+                    row.last_error = _truncate_error(exc)
+                    CloudAuthConnectionRepository.save(db, row)
+            if isinstance(exc, AppException):
+                raise
+            raise_error(ErrorCodes.MAIL_IMAP_LOGIN_FAILED, extra_msg=_truncate_error(exc))
+        profile = CloudAccountProfile()
+        if hasattr(provider_impl, 'account_profile_from_email'):
+            profile = provider_impl.account_profile_from_email(email)
+        with SessionLocal() as db:
+            row = CloudAuthConnectionRepository.get_by_id(db, connection_id)
+            if row is None:
+                raise_error(ErrorCodes.CLOUD_CONNECTION_NOT_FOUND)
+            auth_state_payload = self._decrypt_payload(row.auth_state_ciphertext, field_name='auth_state')
+            auth_state_payload.update({
+                'access_token': token.access_token,
+                'access_expires_at': '',
+                'refresh_token': '',
+                'token_type': token.token_type or 'IMAP',
+            })
+            row.auth_state_ciphertext = self._encrypt_payload(auth_state_payload, field_name='auth_state')
+            row.scope = 'imap smtp'
+            self._apply_profile(row, profile, fallback_display_name=email)
+            row.status = 'ACTIVE'
+            row.last_error = ''
+            row.last_used_at = _utcnow()
+            CloudAuthConnectionRepository.save(db, row)
+            payload = self._connection_payload(row)
+        self._cache_set(connection_id, provider_impl.provider_name(), token)
+        return {
+            'connection_id': payload['connection_id'],
+            'tenant_id': payload['tenant_id'],
+            'owner_user_id': payload['owner_user_id'],
+            'provider': payload['provider'],
+            'auth_mode': payload['auth_mode'],
+            'scope': payload['scope'],
+            'status': payload['status'],
+        }
 
     def verify_connection(
         self,

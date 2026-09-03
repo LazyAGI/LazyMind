@@ -1226,6 +1226,17 @@ export function useChatConversation({
               ),
             }
           : {}),
+        ...(params.ask_answers_structured
+          ? { ask_answers_structured: params.ask_answers_structured }
+          : {}),
+        ...(params.mail_draft_confirm_id
+          ? { mail_draft_confirm_id: params.mail_draft_confirm_id }
+          : {}),
+        ...(typeof params.mail_draft_confirm_revision === "number" &&
+        Number.isFinite(params.mail_draft_confirm_revision) &&
+        params.mail_draft_confirm_revision > 0
+          ? { mail_draft_confirm_revision: params.mail_draft_confirm_revision }
+          : {}),
       },
     );
     if (!opened) {

@@ -3,6 +3,7 @@ import { Alert, Form, Input, Modal, Skeleton, Tag } from "antd";
 import {
   ArrowRightOutlined,
   FolderOpenOutlined,
+  MailOutlined,
 } from "@ant-design/icons";
 import { FeishuCredentialHintAlertFromForm } from "@/modules/dataSource/common/FeishuCredentialHintAlert";
 import { formatValidFeishuAccountNames } from "@/modules/dataSource/utils/feishuAccount";
@@ -116,9 +117,12 @@ export default function CloudDocumentProviderPanel({ vm }: { vm: CloudDocumentPr
     isGoogleDriveAuthValid,
     isFeishuSetupReady,
     isNotionSetupReady,
+    isMailConnected,
+    mailConnectionLabel,
     handleManageFeishuAuth,
     handleManageLocalSource,
     handleManageGoogleDrive,
+    handleManageMail,
     handleOpenNotionSetup,
   } = vm;
 
@@ -223,6 +227,37 @@ export default function CloudDocumentProviderPanel({ vm }: { vm: CloudDocumentPr
           </div>
         );
       })}
+      <div className="model-provider-cloud-doc-resource-row">
+        <ProviderLogo type="mail" icon={<MailOutlined />} />
+        <div className="model-provider-cloud-doc-resource-copy">
+          <h3>{t("modelProvider.mail.title")}</h3>
+          <p>
+            {isMailConnected
+              ? t("modelProvider.mail.connectedHint", { account: mailConnectionLabel })
+              : t("modelProvider.mail.hubHint")}
+          </p>
+        </div>
+        <Tag
+          className="model-provider-cloud-doc-resource-status"
+          color={isMailConnected ? "success" : "default"}
+        >
+          {isMailConnected
+            ? t("modelProvider.cloudDocuments.authValid")
+            : t("modelProvider.cloudDocuments.authPending")}
+        </Tag>
+        <div className="model-provider-cloud-doc-resource-controls">
+          <button
+            type="button"
+            className="model-provider-cloud-doc-resource-action"
+            onClick={handleManageMail}
+          >
+            {isMailConnected
+              ? t("modelProvider.cloudDocuments.manageAccount")
+              : t("modelProvider.cloudDocuments.configureConnection")}
+            <ArrowRightOutlined />
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
