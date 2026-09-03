@@ -668,6 +668,8 @@ tests/test_cli.py
 
 直接执行裸 `docker compose up` 无法启动宿主机进程，因此标准用户入口是 `make up`。Windows 必须从 Git Bash 执行该入口；构建会生成原生 `lazymind.exe`，且不会把 Unix 用户参数传给 Docker Desktop。已经用裸 compose 启动服务时，可在仓库根目录补充运行 `make assistant-bridge-start`。
 
+Windows 浏览器必须连接 Windows 原生 Assistant Bridge；WSL/Linux Bridge 中的 `lazymind` 是 Linux 可执行文件，不能通过路径格式转换交给 Windows 桌面 Agent。网页与 Bridge 平台不一致时，集成页会拒绝生成 MCP 安装配置，并提示先停止 WSL/Linux Bridge、再从 Windows Git Bash 启动原生 Bridge。
+
 ### 16.1 Codex Desktop 与 Codex CLI
 
 Codex 的两个方向独立检测和授权：“Codex 桌面端使用 LazyMind MCP”检测桌面应用及首次启动状态；“LazyMind 调用 Codex CLI”检测桌面应用内置的可执行命令和登录状态，不要求另行安装一套 CLI。连接前会验证 LazyMind 的 23 个工具，再调用桌面应用提供的原生命令执行 `codex mcp add`。ChatGPT 桌面应用、Codex CLI 和 IDE 扩展在同一主机上共享 `~/.codex/config.toml`，因此桌面端无需用户另行复制配置。重新连接和断开分别更新或移除同一个受管条目，不直接重写 Codex 私有配置。

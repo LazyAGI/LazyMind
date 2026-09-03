@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -27,9 +28,10 @@ import (
 )
 
 const (
-	DefaultAddress     = "127.0.0.1:19091"
-	agentLoginTimeout  = 2 * time.Minute
-	bridgeProbeTimeout = 5 * time.Second
+	DefaultAddress       = "127.0.0.1:19091"
+	agentLoginTimeout    = 2 * time.Minute
+	bridgeProbeTimeout   = 5 * time.Second
+	clientPlatformHeader = "X-LazyMind-Client-Platform"
 )
 
 type Server struct {
@@ -554,7 +556,7 @@ func (s *Server) allowLocalBrowser(next http.Handler) http.Handler {
 		}
 		if origin != "" {
 			writer.Header().Set("Access-Control-Allow-Origin", origin)
-			writer.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+			writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, "+clientPlatformHeader)
 			writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 			writer.Header().Set("Vary", "Origin")
 		}
@@ -562,8 +564,26 @@ func (s *Server) allowLocalBrowser(next http.Handler) http.Handler {
 			writer.WriteHeader(http.StatusNoContent)
 			return
 		}
+		if strings.HasPrefix(request.URL.Path, "/v1/agents") && clientPlatformMismatch(request) {
+			clientPlatform := strings.ToLower(strings.TrimSpace(request.Header.Get(clientPlatformHeader)))
+			writeJSON(writer, http.StatusConflict, map[string]string{
+				"error": fmt.Sprintf(
+					"LazyMind is open on %s, but Assistant Bridge is running on %s. Stop the Linux/WSL bridge and start the native %s Assistant Bridge; cross-platform desktop MCP paths are not executable.",
+					clientPlatform, runtime.GOOS, clientPlatform,
+				),
+			})
+			return
+		}
 		next.ServeHTTP(writer, request)
 	})
+}
+
+func clientPlatformMismatch(request *http.Request) bool {
+	clientPlatform := strings.ToLower(strings.TrimSpace(request.Header.Get(clientPlatformHeader)))
+	if clientPlatform == "" {
+		return false
+	}
+	return clientPlatform != runtime.GOOS
 }
 
 func localOrigin(value string) bool {
