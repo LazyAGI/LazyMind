@@ -17,7 +17,6 @@ import {
 import { Alert, Button, Drawer, Modal, Skeleton, Tooltip, message } from "antd";
 import { useTranslation } from "react-i18next";
 import i18n from "@/i18n";
-import { AgentAppsAuth } from "@/components/auth";
 import { localizeErrorCode } from "@/components/request";
 import { ChatConversationsRequestActionEnum } from "@/api/generated/chatbot-client";
 import ChatContainerComponent from "../newChatContainer";
@@ -31,7 +30,7 @@ import {
   CHAT_RESUME_STREAM_URL,
   CHAT_STREAM_URL,
 } from "@/modules/chat/utils/request";
-import { Method, SSE } from "@/modules/chat/utils/sse";
+import { createChatStream } from "@/modules/chat/utils/chatStream";
 import { streamManager } from "@/modules/chat/utils/StreamManager";
 import UIUtils from "@/modules/chat/utils/ui";
 import {
@@ -82,13 +81,6 @@ function requestStatus(error: unknown) {
 
 async function wait(milliseconds: number) {
   await new Promise<void>((resolve) => window.setTimeout(resolve, milliseconds));
-}
-
-function sourceCopy(
-  source: SideChatSource | null,
-  conversation: SideChatConversation | null,
-) {
-  return sideChatSourceText(source, conversation);
 }
 
 export default function SideChatPanel({
@@ -339,28 +331,20 @@ export default function SideChatPanel({
       const requestedDepth = extras?.thinking_depth as
         | ThinkingDepth
         | undefined;
-      return new SSE(CHAT_STREAM_URL, {
-        method: Method.POST,
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "text/event-stream",
-          ...AgentAppsAuth.getAuthHeaders(),
-        },
-        timeout: 1_800_000,
-        payload: JSON.stringify(
-          buildSideChatStreamPayload({
-            conversationId: conversation.id,
-            action,
-            input,
-            thinkingDepth: requestedDepth ?? thinkingDepthRef.current,
-            chatConfig: chatConfigRef.current,
-            modelLabel: t("chat.lazyMindModel"),
-            locale: i18n.resolvedLanguage || i18n.language,
-            clientRequestId: sideChatRequestId(),
-          }),
-        ),
+      return createChatStream(
+        CHAT_STREAM_URL,
+        buildSideChatStreamPayload({
+          conversationId: conversation.id,
+          action,
+          input,
+          thinkingDepth: requestedDepth ?? thinkingDepthRef.current,
+          chatConfig: chatConfigRef.current,
+          modelLabel: t("chat.lazyMindModel"),
+          locale: i18n.resolvedLanguage || i18n.language,
+          clientRequestId: sideChatRequestId(),
+        }),
         callbacks,
-      });
+      );
     },
     [t],
   );
@@ -371,23 +355,17 @@ export default function SideChatPanel({
       callbacks: Record<string, (event: CustomEvent) => void>,
       cursor?: { historyId?: string; afterSequence?: number },
     ) =>
-      new SSE(CHAT_RESUME_STREAM_URL, {
-        method: Method.POST,
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "text/event-stream",
-          ...AgentAppsAuth.getAuthHeaders(),
-        },
-        timeout: 1_800_000,
-        payload: JSON.stringify({
+      createChatStream(
+        CHAT_RESUME_STREAM_URL,
+        {
           conversation_id: conversationId,
           history_id: cursor?.historyId,
           after_sequence: cursor?.afterSequence || undefined,
           basic_chat_only: true,
           use_memory: false,
-        }),
+        },
         callbacks,
-      }),
+      ),
     [],
   );
 
@@ -484,7 +462,7 @@ export default function SideChatPanel({
     phase === "closing" ||
     streaming ||
     requestPending;
-  const sourceText = sourceCopy(activeSource, child);
+  const sourceText = sideChatSourceText(activeSource, child);
 
   return (
     <>

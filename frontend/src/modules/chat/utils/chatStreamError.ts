@@ -8,7 +8,7 @@ export interface MappedChatStreamError {
   semanticCode: ModelFailureCode;
 }
 
-const MODEL_FAILURE_CODES = new Set<ModelFailureCode>([
+export const MODEL_FAILURE_CODES: ReadonlySet<ModelFailureCode> = new Set([
   "invalid_request",
   "authentication_failed",
   "permission_denied",

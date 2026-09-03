@@ -1,4 +1,5 @@
 import type { RefObject } from "react";
+import type { CreateSidechatOpenAPIRequest } from "@/api/generated/core-client";
 import type { ChatConfig } from "../ChatConfigs";
 import type { ThinkingDepth } from "@/modules/chat/store/chatThink";
 
@@ -43,12 +44,7 @@ export interface SideChatPanelProps {
   returnFocusRef?: RefObject<HTMLElement | null>;
 }
 
-export interface SideChatCreateBody {
-  source_history_id?: string;
-  source_seq?: number;
-  selected_text?: string;
-  thinking_depth?: ThinkingDepth;
-}
+export type SideChatCreateBody = CreateSidechatOpenAPIRequest;
 
 export interface SideChatStreamPayloadOptions {
   conversationId: string;

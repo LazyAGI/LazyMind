@@ -6112,149 +6112,6 @@ export const ChatApiAxiosParamCreator = function (configuration?: Configuration)
                 options: localVarRequestOptions,
             };
         },
-        /**
-         * Promotes an ephemeral side conversation into visible history after at least one completed turn.
-         * @summary Retain a side conversation
-         * @param {string} childId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreConversationsChildIdRetainPost: async (childId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'childId' is not null or undefined
-            assertParamExists('apiCoreConversationsChildIdRetainPost', 'childId', childId)
-            const localVarPath = `/api/core/conversations/{child_id}/retain`
-                .replace(`{${"child_id"}}`, encodeURIComponent(String(childId)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         * Permanently clears an unretained side conversation and its dependent records.
-         * @summary Discard an ephemeral side conversation
-         * @param {string} childId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreConversationsChildIdSidechatDelete: async (childId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'childId' is not null or undefined
-            assertParamExists('apiCoreConversationsChildIdSidechatDelete', 'childId', childId)
-            const localVarPath = `/api/core/conversations/{child_id}/sidechat`
-                .replace(`{${"child_id"}}`, encodeURIComponent(String(childId)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         * Uses expected_version for optimistic locking and rejects changes while chat generation, a Workflow, or a background task is active. Fixed mode affects only the llm role from the next request onward.
-         * @summary Switch the conversation chat model
-         * @param {string} conversationId
-         * @param {PatchConversationModelOpenAPIRequest} patchConversationModelOpenAPIRequest
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreConversationsConversationIdModelPatch: async (conversationId: string, patchConversationModelOpenAPIRequest: PatchConversationModelOpenAPIRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'conversationId' is not null or undefined
-            assertParamExists('apiCoreConversationsConversationIdModelPatch', 'conversationId', conversationId)
-            // verify required parameter 'patchConversationModelOpenAPIRequest' is not null or undefined
-            assertParamExists('apiCoreConversationsConversationIdModelPatch', 'patchConversationModelOpenAPIRequest', patchConversationModelOpenAPIRequest)
-            const localVarPath = `/api/core/conversations/{conversation_id}/model`
-                .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'PATCH', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            localVarHeaderParameter['Content-Type'] = 'application/json';
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-            localVarRequestOptions.data = serializeDataIfNeeded(patchConversationModelOpenAPIRequest, localVarRequestOptions, configuration)
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         * Freezes the selected parent history boundary as read-only model context. The child starts with basic chat only and remains hidden from conversation lists until retained.
-         * @summary Create an ephemeral side conversation
-         * @param {string} parentId
-         * @param {CreateSidechatOpenAPIRequest} [createSidechatOpenAPIRequest]
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreConversationsParentIdSidechatPost: async (parentId: string, createSidechatOpenAPIRequest?: CreateSidechatOpenAPIRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'parentId' is not null or undefined
-            assertParamExists('apiCoreConversationsParentIdSidechatPost', 'parentId', parentId)
-            const localVarPath = `/api/core/conversations/{parent_id}/sidechat`
-                .replace(`{${"parent_id"}}`, encodeURIComponent(String(parentId)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            localVarHeaderParameter['Content-Type'] = 'application/json';
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-            localVarRequestOptions.data = serializeDataIfNeeded(createSidechatOpenAPIRequest, localVarRequestOptions, configuration)
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
     }
 };
 
@@ -6277,60 +6134,6 @@ export const ChatApiFp = function(configuration?: Configuration) {
             const localVarOperationServerBasePath = operationServerMap['ChatApi.apiCoreChatModelsGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
-        /**
-         * Promotes an ephemeral side conversation into visible history after at least one completed turn.
-         * @summary Retain a side conversation
-         * @param {string} childId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreConversationsChildIdRetainPost(childId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<SidechatConversationOpenAPIResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsChildIdRetainPost(childId, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['ChatApi.apiCoreConversationsChildIdRetainPost']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         * Permanently clears an unretained side conversation and its dependent records.
-         * @summary Discard an ephemeral side conversation
-         * @param {string} childId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreConversationsChildIdSidechatDelete(childId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsChildIdSidechatDelete(childId, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['ChatApi.apiCoreConversationsChildIdSidechatDelete']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         * Uses expected_version for optimistic locking and rejects changes while chat generation, a Workflow, or a background task is active. Fixed mode affects only the llm role from the next request onward.
-         * @summary Switch the conversation chat model
-         * @param {string} conversationId
-         * @param {PatchConversationModelOpenAPIRequest} patchConversationModelOpenAPIRequest
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreConversationsConversationIdModelPatch(conversationId: string, patchConversationModelOpenAPIRequest: PatchConversationModelOpenAPIRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PatchConversationModelOpenAPIResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsConversationIdModelPatch(conversationId, patchConversationModelOpenAPIRequest, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['ChatApi.apiCoreConversationsConversationIdModelPatch']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         * Freezes the selected parent history boundary as read-only model context. The child starts with basic chat only and remains hidden from conversation lists until retained.
-         * @summary Create an ephemeral side conversation
-         * @param {string} parentId
-         * @param {CreateSidechatOpenAPIRequest} [createSidechatOpenAPIRequest]
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreConversationsParentIdSidechatPost(parentId: string, createSidechatOpenAPIRequest?: CreateSidechatOpenAPIRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<SidechatConversationOpenAPIResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsParentIdSidechatPost(parentId, createSidechatOpenAPIRequest, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['ChatApi.apiCoreConversationsParentIdSidechatPost']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
     }
 };
 
@@ -6350,46 +6153,6 @@ export const ChatApiFactory = function (configuration?: Configuration, basePath?
         apiCoreChatModelsGet(requestParameters: ChatApiApiCoreChatModelsGetRequest = {}, options?: RawAxiosRequestConfig): AxiosPromise<ChatModelsOpenAPIResponse> {
             return localVarFp.apiCoreChatModelsGet(requestParameters.conversationId, options).then((request) => request(axios, basePath));
         },
-        /**
-         * Promotes an ephemeral side conversation into visible history after at least one completed turn.
-         * @summary Retain a side conversation
-         * @param {ChatApiApiCoreConversationsChildIdRetainPostRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreConversationsChildIdRetainPost(requestParameters: ChatApiApiCoreConversationsChildIdRetainPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<SidechatConversationOpenAPIResponse> {
-            return localVarFp.apiCoreConversationsChildIdRetainPost(requestParameters.childId, options).then((request) => request(axios, basePath));
-        },
-        /**
-         * Permanently clears an unretained side conversation and its dependent records.
-         * @summary Discard an ephemeral side conversation
-         * @param {ChatApiApiCoreConversationsChildIdSidechatDeleteRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreConversationsChildIdSidechatDelete(requestParameters: ChatApiApiCoreConversationsChildIdSidechatDeleteRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreConversationsChildIdSidechatDelete(requestParameters.childId, options).then((request) => request(axios, basePath));
-        },
-        /**
-         * Uses expected_version for optimistic locking and rejects changes while chat generation, a Workflow, or a background task is active. Fixed mode affects only the llm role from the next request onward.
-         * @summary Switch the conversation chat model
-         * @param {ChatApiApiCoreConversationsConversationIdModelPatchRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreConversationsConversationIdModelPatch(requestParameters: ChatApiApiCoreConversationsConversationIdModelPatchRequest, options?: RawAxiosRequestConfig): AxiosPromise<PatchConversationModelOpenAPIResponse> {
-            return localVarFp.apiCoreConversationsConversationIdModelPatch(requestParameters.conversationId, requestParameters.patchConversationModelOpenAPIRequest, options).then((request) => request(axios, basePath));
-        },
-        /**
-         * Freezes the selected parent history boundary as read-only model context. The child starts with basic chat only and remains hidden from conversation lists until retained.
-         * @summary Create an ephemeral side conversation
-         * @param {ChatApiApiCoreConversationsParentIdSidechatPostRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreConversationsParentIdSidechatPost(requestParameters: ChatApiApiCoreConversationsParentIdSidechatPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<SidechatConversationOpenAPIResponse> {
-            return localVarFp.apiCoreConversationsParentIdSidechatPost(requestParameters.parentId, requestParameters.createSidechatOpenAPIRequest, options).then((request) => request(axios, basePath));
-        },
     };
 };
 
@@ -6401,38 +6164,6 @@ export interface ChatApiApiCoreChatModelsGetRequest {
      * Optional owned conversation whose saved model selection should be restored.
      */
     readonly conversationId?: string
-}
-
-/**
- * Request parameters for apiCoreConversationsChildIdRetainPost operation in ChatApi.
- */
-export interface ChatApiApiCoreConversationsChildIdRetainPostRequest {
-    readonly childId: string
-}
-
-/**
- * Request parameters for apiCoreConversationsChildIdSidechatDelete operation in ChatApi.
- */
-export interface ChatApiApiCoreConversationsChildIdSidechatDeleteRequest {
-    readonly childId: string
-}
-
-/**
- * Request parameters for apiCoreConversationsConversationIdModelPatch operation in ChatApi.
- */
-export interface ChatApiApiCoreConversationsConversationIdModelPatchRequest {
-    readonly conversationId: string
-
-    readonly patchConversationModelOpenAPIRequest: PatchConversationModelOpenAPIRequest
-}
-
-/**
- * Request parameters for apiCoreConversationsParentIdSidechatPost operation in ChatApi.
- */
-export interface ChatApiApiCoreConversationsParentIdSidechatPostRequest {
-    readonly parentId: string
-
-    readonly createSidechatOpenAPIRequest?: CreateSidechatOpenAPIRequest
 }
 
 /**
@@ -6448,50 +6179,6 @@ export class ChatApi extends BaseAPI {
      */
     public apiCoreChatModelsGet(requestParameters: ChatApiApiCoreChatModelsGetRequest = {}, options?: RawAxiosRequestConfig) {
         return ChatApiFp(this.configuration).apiCoreChatModelsGet(requestParameters.conversationId, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     * Promotes an ephemeral side conversation into visible history after at least one completed turn.
-     * @summary Retain a side conversation
-     * @param {ChatApiApiCoreConversationsChildIdRetainPostRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreConversationsChildIdRetainPost(requestParameters: ChatApiApiCoreConversationsChildIdRetainPostRequest, options?: RawAxiosRequestConfig) {
-        return ChatApiFp(this.configuration).apiCoreConversationsChildIdRetainPost(requestParameters.childId, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     * Permanently clears an unretained side conversation and its dependent records.
-     * @summary Discard an ephemeral side conversation
-     * @param {ChatApiApiCoreConversationsChildIdSidechatDeleteRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreConversationsChildIdSidechatDelete(requestParameters: ChatApiApiCoreConversationsChildIdSidechatDeleteRequest, options?: RawAxiosRequestConfig) {
-        return ChatApiFp(this.configuration).apiCoreConversationsChildIdSidechatDelete(requestParameters.childId, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     * Uses expected_version for optimistic locking and rejects changes while chat generation, a Workflow, or a background task is active. Fixed mode affects only the llm role from the next request onward.
-     * @summary Switch the conversation chat model
-     * @param {ChatApiApiCoreConversationsConversationIdModelPatchRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreConversationsConversationIdModelPatch(requestParameters: ChatApiApiCoreConversationsConversationIdModelPatchRequest, options?: RawAxiosRequestConfig) {
-        return ChatApiFp(this.configuration).apiCoreConversationsConversationIdModelPatch(requestParameters.conversationId, requestParameters.patchConversationModelOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     * Freezes the selected parent history boundary as read-only model context. The child starts with basic chat only and remains hidden from conversation lists until retained.
-     * @summary Create an ephemeral side conversation
-     * @param {ChatApiApiCoreConversationsParentIdSidechatPostRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreConversationsParentIdSidechatPost(requestParameters: ChatApiApiCoreConversationsParentIdSidechatPostRequest, options?: RawAxiosRequestConfig) {
-        return ChatApiFp(this.configuration).apiCoreConversationsParentIdSidechatPost(requestParameters.parentId, requestParameters.createSidechatOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
     }
 }
 

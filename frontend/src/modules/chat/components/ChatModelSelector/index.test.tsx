@@ -24,8 +24,6 @@ vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (key: string, params?: Record<string, string>) => {
       const labels: Record<string, string> = {
-        "chat.modelSelectorTitle": "选择对话模型",
-        "chat.modelSelectorDescription": "先选择供应商，再选择模型",
         "chat.modelSelectorDialogLabel": "对话模型选择",
         "chat.modelSelectorLoading": "模型信息加载中",
         "chat.modelSelectorLoadFailed": "模型信息加载失败，请重试",
@@ -37,7 +35,6 @@ vi.mock("react-i18next", () => ({
         "chat.modelSelectorGenerating": "正在生成回复，暂时无法切换模型",
         "chat.modelSelectorWorkflowRunning": "Workflow 正在执行，暂时无法切换模型",
         "chat.modelSelectorBackgroundTaskRunning": "后台任务正在执行，暂时无法切换模型",
-        "chat.modelSelectorProvidersLabel": "模型供应商",
         "chat.modelSelectorSearchLabel": "搜索对话模型",
         "chat.modelSelectorSearchPlaceholder": "搜索模型",
         "chat.modelSelectorSearchEmpty": "没有匹配的模型",

@@ -5,7 +5,6 @@ import SideChatPanel from "./index";
 import {
   createSideChat,
   deleteSideChat,
-  patchSideChatKnowledge,
   patchSideChatThinkingDepth,
   retainSideChat,
 } from "./api";
@@ -92,7 +91,6 @@ vi.mock("../newChatContainer", () => ({
 vi.mock("./api", () => ({
   createSideChat: vi.fn(),
   deleteSideChat: vi.fn(),
-  patchSideChatKnowledge: vi.fn(),
   patchSideChatThinkingDepth: vi.fn(),
   retainSideChat: vi.fn(),
 }));
@@ -116,7 +114,6 @@ describe("SideChatPanel", () => {
     vi.mocked(retainSideChat)
       .mockReset()
       .mockResolvedValue({ ...child, isEphemeral: false });
-    vi.mocked(patchSideChatKnowledge).mockReset().mockResolvedValue(undefined);
     vi.mocked(patchSideChatThinkingDepth)
       .mockReset()
       .mockResolvedValue(undefined);
@@ -212,7 +209,17 @@ describe("SideChatPanel", () => {
       await mocks.latestChatProps.setChatConfigFn(nextConfig);
     });
     expect(patchSideChatThinkingDepth).toHaveBeenCalledWith("child-1", "low");
-    expect(patchSideChatKnowledge).not.toHaveBeenCalled();
+    expect(mocks.latestChatProps.chatConfig.knowledgeBaseId).toEqual(["kb-1"]);
+    const resumed = mocks.latestChatProps.onOpenResumeSSE(
+      "child-1", {}, { historyId: "history-1", afterSequence: 2 },
+    );
+    expect(JSON.parse(resumed.options.payload)).toEqual({
+      conversation_id: "child-1",
+      history_id: "history-1",
+      after_sequence: 2,
+      basic_chat_only: true,
+      use_memory: false,
+    });
   });
 
   it("blocks closing as soon as a request is submitted for runtime startup", async () => {

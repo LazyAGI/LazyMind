@@ -8934,7 +8934,6 @@ paths:
                     description: Retained side conversation
             summary: Retain a side conversation
             tags:
-                - chat
                 - conversations
     /api/core/conversations/{child_id}/sidechat:
         delete:
@@ -8950,7 +8949,6 @@ paths:
                     description: Side conversation discarded
             summary: Discard an ephemeral side conversation
             tags:
-                - chat
                 - conversations
     /api/core/conversations/{conversation_id}/artifacts:
         get:
@@ -9012,7 +9010,6 @@ paths:
                     description: Updated conversation model selection
             summary: Switch the conversation chat model
             tags:
-                - chat
                 - conversations
     /api/core/conversations/{conversation_id}/settings:
         patch:
@@ -9410,7 +9407,6 @@ paths:
                     description: Created side conversation
             summary: Create an ephemeral side conversation
             tags:
-                - chat
                 - conversations
     /api/core/conversations:archived:
         get:

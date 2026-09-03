@@ -281,6 +281,16 @@ describe("ChatLayout conversation loading", () => {
       firstPayload.conversation_id,
     );
     expect(secondPayload).not.toHaveProperty("initial_model_selection");
+    expect(secondPayload).not.toHaveProperty("basic_chat_only");
+    mocks.latestChatContainerProps.onOpenResumeSSE(
+      firstPayload.conversation_id, {}, { historyId: "history-1", afterSequence: 2 },
+    );
+    const resumeCall = mocks.sseConstructor.mock.calls[2];
+    expect(JSON.parse(resumeCall[1].payload)).toEqual({
+      conversation_id: firstPayload.conversation_id,
+      history_id: "history-1",
+      after_sequence: 2,
+    });
 
     act(() => {
       mocks.latestChatContainerProps.onConversationIdChange(

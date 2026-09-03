@@ -1822,9 +1822,6 @@ const enUS = {
     addResource: "Add",
     addResourceTooltip: "Add files, knowledge bases, and more (or type @)",
     addAttachment: "Attachment",
-    modelSelectorTitle: "Choose a chat model",
-    modelSelectorDescription:
-      "Choose a provider, then choose an available chat model",
     modelSelectorDialogLabel: "Chat model selection",
     modelSelectorTriggerLabel: "Current model: {{model}}. Open model selection",
     modelSelectorLoading: "Loading model information",
@@ -1840,7 +1837,6 @@ const enUS = {
       "A workflow is running. Models cannot be switched yet.",
     modelSelectorBackgroundTaskRunning:
       "A background task is running. Models cannot be switched yet.",
-    modelSelectorProvidersLabel: "Model providers",
     modelSelectorSearchLabel: "Search chat models",
     modelSelectorSearchPlaceholder: "Search models",
     modelSelectorSearchEmpty: "No matching models",

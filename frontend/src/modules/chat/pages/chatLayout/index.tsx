@@ -4,7 +4,6 @@ import { localizeErrorCode } from "@/components/request";
 import { message } from "antd";
 import { MessageOutlined, UnorderedListOutlined } from "@ant-design/icons";
 import { v4 as uuidv4 } from "uuid";
-import { AgentAppsAuth } from "@/components/auth";
 import {
   ChatConversationsRequestActionEnum,
   Query,
@@ -17,7 +16,7 @@ import "./index.scss";
 import UIUtils from "@/modules/chat/utils/ui";
 import InitialCard from "@/modules/chat/components/InitialCard";
 import { ChatConfig } from "@/modules/chat/components/ChatConfigs";
-import { Method, SSE } from "@/modules/chat/utils/sse";
+import { createChatStream } from "@/modules/chat/utils/chatStream";
 import {
   CHAT_RESUME_STREAM_URL,
   CHAT_STREAM_URL,
@@ -511,15 +510,9 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
       clearArtifactRefs(sessionId);
     }
 
-    return new SSE(CHAT_STREAM_URL, {
-      method: Method.POST,
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "text/event-stream",
-        ...AgentAppsAuth.getAuthHeaders(),
-      },
-      timeout: 1800000,
-      payload: JSON.stringify({
+    return createChatStream(
+      CHAT_STREAM_URL,
+      {
         action,
         conversation_id: requestConversationId,
         conversation: {
@@ -580,9 +573,9 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
           }
           return {};
         })(),
-      }),
+      },
       callbacks,
-    });
+    );
   }
 
   function onOpenResumeSSE(
@@ -590,21 +583,15 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     callbacks: Record<string, (e: CustomEvent) => void>,
     cursor?: { historyId?: string; afterSequence?: number },
   ) {
-    return new SSE(CHAT_RESUME_STREAM_URL, {
-      method: Method.POST,
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "text/event-stream",
-        ...AgentAppsAuth.getAuthHeaders(),
-      },
-      timeout: 1800000,
-      payload: JSON.stringify({
+    return createChatStream(
+      CHAT_RESUME_STREAM_URL,
+      {
         conversation_id: conversationId,
         history_id: cursor?.historyId,
         after_sequence: cursor?.afterSequence || undefined,
-      }),
+      },
       callbacks,
-    });
+    );
   }
 
   const sessionIdRef = useRef(sessionId);

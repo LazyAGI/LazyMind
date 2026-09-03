@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   applyChatStreamFailure,
+  MODEL_FAILURE_CODES,
   parseCoreChatStreamError,
 } from "./chatStreamError";
 
@@ -21,19 +22,19 @@ describe("Core chat stream error mapping", () => {
     },
   );
 
-  it("accepts an existing semantic code without returning provider text", () => {
+  it.each([...MODEL_FAILURE_CODES])("accepts semantic code %s without returning provider text", (code) => {
     const mapped = parseCoreChatStreamError(
       {
-        code: "organization_spend_limit_exceeded",
+        code,
         message: "provider secret diagnostic",
       },
       400,
     );
 
     expect(mapped).toEqual({
-      appCode: "organization_spend_limit_exceeded",
+      appCode: code,
       httpStatus: 400,
-      semanticCode: "organization_spend_limit_exceeded",
+      semanticCode: code,
     });
     expect(JSON.stringify(mapped)).not.toContain("provider secret diagnostic");
   });

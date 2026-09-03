@@ -3,33 +3,12 @@ import { Alert, Button, Space } from "antd";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { CHAT_OPEN_MODEL_SELECTOR_EVENT } from "@/modules/chat/constants/chat";
+import { MODEL_FAILURE_CODES } from "@/modules/chat/utils/chatStreamError";
 
 import "./index.scss";
 
 const KNOWN_CODES = new Set([
-  "invalid_request",
-  "authentication_failed",
-  "permission_denied",
-  "not_found",
-  "rate_limited",
-  "usage_limit_exceeded",
-  "concurrency_limited",
-  "quota_exhausted",
-  "balance_exhausted",
-  "organization_spend_limit_exceeded",
-  "project_spend_limit_exceeded",
-  "input_filtered",
-  "output_filtered",
-  "token_limit",
-  "request_timeout",
-  "provider_overloaded",
-  "service_unavailable",
-  "provider_internal_error",
-  "provider_rejected",
-  "conflict",
-  "unprocessable_entity",
-  "protocol_error",
-  "transport_error",
+  ...MODEL_FAILURE_CODES,
   "length",
   "content_filter",
   "insufficient_system_resource",

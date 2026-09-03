@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { CHAT_OPEN_MODEL_SELECTOR_EVENT } from "@/modules/chat/constants/chat";
+import { MODEL_FAILURE_CODES } from "@/modules/chat/utils/chatStreamError";
 
 import RunStatusCard from "./index";
 
@@ -39,10 +40,9 @@ describe("RunStatusCard", () => {
   });
 
   it.each([
-    "usage_limit_exceeded",
-    "concurrency_limited",
-    "rate_limited",
-  ])("renders normalized throttling code %s", (code) => {
+    ...MODEL_FAILURE_CODES,
+    "length", "content_filter", "insufficient_system_resource", "unknown",
+  ])("renders normalized terminal code %s", (code) => {
     render(<RunStatusCard terminal={{
       status: "failed",
       reason: "model_failure",

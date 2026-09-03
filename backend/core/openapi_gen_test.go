@@ -94,6 +94,31 @@ func TestOpenAPISpecIncludesSkillMarketDelete(t *testing.T) {
 	}
 }
 
+func TestOpenAPIChatSelectionAndSidechatHaveOneClientOwner(t *testing.T) {
+	r := mux.NewRouter()
+	registerCoreRoutes(r)
+	specJSON, err := buildOpenAPISpecFromRouter(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var spec map[string]any
+	if err := json.Unmarshal(specJSON, &spec); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ method, path, tag string }{
+		{"get", "/api/core/chat/models", "chat"},
+		{"patch", "/api/core/conversations/{conversation_id}/model", "conversations"},
+		{"post", "/api/core/conversations/{parent_id}/sidechat", "conversations"},
+		{"post", "/api/core/conversations/{child_id}/retain", "conversations"},
+		{"delete", "/api/core/conversations/{child_id}/sidechat", "conversations"},
+	} {
+		op := openAPIOperationForTest(t, spec, tc.method, tc.path)
+		if !reflect.DeepEqual(op["tags"], []any{tc.tag}) {
+			t.Errorf("%s %s tags = %#v, want only %s", tc.method, tc.path, op["tags"], tc.tag)
+		}
+	}
+}
+
 func TestOpenAPIConversationItemIncludesThinkingDepthEnum(t *testing.T) {
 	router := mux.NewRouter()
 	registerCoreRoutes(router)

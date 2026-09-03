@@ -1,4 +1,8 @@
 import { axiosInstance, BASE_URL } from "@/components/request";
+import {
+  ChatApiFactory,
+  ConversationsApiFactory,
+} from "@/api/generated/core-client";
 import type {
   ChatModelCatalog,
   ChatModelSelection,
@@ -13,9 +17,12 @@ type UpdateSelectionResponse =
   | ChatModelSelection
   | { selection?: ChatModelSelection };
 
-const CHAT_MODELS_URL = `${BASE_URL}/api/core/chat/models`;
+const chatApi = ChatApiFactory(undefined, BASE_URL, axiosInstance);
+const conversationsApi = ConversationsApiFactory(
+  undefined, BASE_URL, axiosInstance,
+);
 
-function unwrapData<T>(payload: T | ApiEnvelope<T>): T {
+function unwrapData<T>(payload: unknown): T {
   if (payload && typeof payload === "object" && "data" in payload) {
     return (payload as ApiEnvelope<T>).data as T;
   }
@@ -26,14 +33,11 @@ export async function fetchChatModelCatalog(
   conversationId?: string,
   signal?: AbortSignal,
 ): Promise<ChatModelCatalog> {
-  const response = await axiosInstance.get<
-    ChatModelCatalog | ApiEnvelope<ChatModelCatalog>
-  >(CHAT_MODELS_URL, {
-    ...(conversationId ? { params: { conversation_id: conversationId } } : {}),
-    signal,
-    silentError: true,
-  } as never);
-  return unwrapData(response.data);
+  const response = await chatApi.apiCoreChatModelsGet(
+    { conversationId: conversationId || undefined },
+    { signal, silentError: true } as never,
+  );
+  return unwrapData<ChatModelCatalog>(response.data);
 }
 
 export async function updateConversationChatModel(
@@ -42,17 +46,17 @@ export async function updateConversationChatModel(
   expectedVersion: number,
   signal?: AbortSignal,
 ): Promise<ChatModelSelection | undefined> {
-  const response = await axiosInstance.patch<
-    UpdateSelectionResponse | ApiEnvelope<UpdateSelectionResponse>
-  >(
-    `${BASE_URL}/api/core/conversations/${encodeURIComponent(conversationId)}/model`,
+  const response = await conversationsApi.apiCoreConversationsConversationIdModelPatch(
     {
-      ...selection,
-      expected_version: expectedVersion,
+      conversationId,
+      patchConversationModelOpenAPIRequest: {
+        ...selection,
+        expected_version: expectedVersion,
+      },
     },
     { signal, silentError: true } as never,
   );
-  const payload = unwrapData(response.data);
+  const payload = unwrapData<UpdateSelectionResponse>(response.data);
   if (payload && typeof payload === "object" && "selection" in payload) {
     return payload.selection;
   }

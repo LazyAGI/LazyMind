@@ -1,55 +1,43 @@
 import { create } from "zustand";
+import type {
+  ChatModelListOpenAPIItem,
+  ChatModelProviderOpenAPIItem,
+  ChatModelSelectionOpenAPI,
+  ChatModelsOpenAPIResponse,
+  PatchConversationModelOpenAPIRequest,
+} from "@/api/generated/core-client";
 
-export type ChatModelSelectionMode = "fixed" | "auto";
+export type ChatModelSelectionRequest = Pick<
+  PatchConversationModelOpenAPIRequest,
+  "mode" | "model_id"
+>;
 
-export interface ChatModelSelectionRequest {
-  mode: ChatModelSelectionMode;
-  model_id?: string;
-}
+export type ChatModelSelection = Pick<ChatModelSelectionOpenAPI, "mode" | "version"> &
+  Partial<ChatModelSelectionOpenAPI>;
 
-export interface ChatModelSelection extends ChatModelSelectionRequest {
-  provider_name?: string;
-  model_name?: string;
-  group_name?: string;
-  source?: string;
-  availability?: string;
-  version: number;
-}
+// Older catalogs use is_* badges; incomplete local selections are also allowed.
+export type ChatModelOption = Pick<ChatModelListOpenAPIItem, "id" | "name"> &
+  Partial<ChatModelListOpenAPIItem> & {
+    is_default?: boolean;
+    is_shared?: boolean;
+    is_recommended?: boolean;
+    is_low_cost?: boolean;
+    available?: boolean;
+  };
 
-export interface ChatModelOption {
-  id: string;
-  name: string;
-  group_id?: string;
-  group_name?: string;
-  source?: string;
-  badges?: string[];
-  availability?: string;
-  current?: boolean;
-  default?: boolean;
-  shared?: boolean;
-  is_default?: boolean;
-  is_shared?: boolean;
-  is_recommended?: boolean;
-  is_low_cost?: boolean;
-  capabilities?: string[];
-  available?: boolean;
-}
-
-export interface ChatModelProvider {
-  id: string;
-  name: string;
-  source?: string;
+export type ChatModelProvider = Pick<ChatModelProviderOpenAPIItem, "id" | "name"> & {
+  source?: ChatModelProviderOpenAPIItem["source"];
   models: ChatModelOption[];
-}
+};
 
-export interface ChatModelCatalog {
+export type ChatModelCatalog = Omit<
+  ChatModelsOpenAPIResponse,
+  "selection" | "default_selection" | "providers"
+> & {
   selection: ChatModelSelection;
   default_selection?: ChatModelSelection;
   providers: ChatModelProvider[];
-  switch_allowed: boolean;
-  switch_blocked_reason?: string;
-  auto_available: boolean;
-}
+};
 
 export const NEW_CHAT_MODEL_SELECTION_KEY = "__new_chat__";
 
