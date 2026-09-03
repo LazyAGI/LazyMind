@@ -49,18 +49,14 @@ def _snapshot(
     )
 
 
-def _empty_plan(label: str = 'No safe changes') -> str:
-    return (
-        f'## UNCERTAIN / KEEP\n{label}\n\n'
-        '## AUTHORIZED OPERATIONS\n```json\n[]\n```'
-    )
+def _empty_plan(label: str = '') -> list:
+    return []
 
 
 def _gate(pass_number: int = 1):
     return PreferenceOrganizerGate(
         pass_number=pass_number,
         budget=ChangeBudget(maximum=50),
-        hard_min_items=15,
     )
 
 
@@ -69,9 +65,12 @@ def _snapshot_with_items(items, *, etag='etag'):
         content=render_preference_index('', list(items)),
         items=tuple(items),
         data=PreferenceStateData(
-            stored_items=len(items), full_projection_chars=1000,
-            projected_items=len(items), projected_chars=1000,
-            projection_truncated=False, etag=etag,
+            stored_items=len(items),
+            full_projection_chars=1000,
+            projected_items=len(items),
+            projected_chars=1000,
+            projection_truncated=False,
+            etag=etag,
         ),
     )
 
@@ -100,27 +99,29 @@ def test_compactor_reinjects_exact_gate_plan_after_compression(compression_kind)
     gate.submit(plan, _snapshot(50))
 
     def compressed_base(history, keep_full_turns=None, **kwargs):
-        kwargs['runtime_state']['entries'] = [{
-            'source_start': 0,
-            'source_end': 1,
-            'message': {'role': 'user', 'content': 'summary'},
-            'kind': compression_kind,
-            'model_visible': True,
-        }]
+        kwargs['runtime_state']['entries'] = [
+            {
+                'source_start': 0,
+                'source_end': 1,
+                'message': {'role': 'user', 'content': 'summary'},
+                'kind': compression_kind,
+                'model_visible': True,
+            }
+        ]
         return history, []
 
     runtime_state = {}
     compact = make_preference_organizer_compactor(
-        gate, base_compactor=compressed_base,
+        gate,
+        base_compactor=compressed_base,
     )
     prior, current = compact([], runtime_state=runtime_state)
 
     assert prior == []
     assert len(current) == 1
-    assert plan in current[0]['content']
-    assert gate.plan_hash in current[0]['content']
-    assert 'only allowed action set' in current[0]['content']
-    assert runtime_state['preference_organizer_plan_injection_hash'] == gate.plan_hash
+    assert 'next_operation_id' in current[0]['content']
+    assert 'remaining' in current[0]['content']
+    assert gate.plan_hash not in current[0]['content']
 
 
 def test_compactor_does_not_duplicate_plan_in_the_same_projection():
@@ -128,19 +129,24 @@ def test_compactor_does_not_duplicate_plan_in_the_same_projection():
     gate.submit(_empty_plan('Keep this pass only.'), _snapshot(50))
 
     def compressed_base(history, keep_full_turns=None, **kwargs):
-        kwargs['runtime_state']['entries'] = [{
-            'source_start': 0, 'source_end': 1,
-            'message': {'role': 'user', 'content': 'summary'},
-            'kind': 'summary', 'model_visible': True,
-        }]
+        kwargs['runtime_state']['entries'] = [
+            {
+                'source_start': 0,
+                'source_end': 1,
+                'message': {'role': 'user', 'content': 'summary'},
+                'kind': 'summary',
+                'model_visible': True,
+            }
+        ]
         return [], list(history)
 
     compact = make_preference_organizer_compactor(
-        gate, base_compactor=compressed_base,
+        gate,
+        base_compactor=compressed_base,
     )
     _prior, first = compact([], runtime_state={})
     _prior, second = compact(first, runtime_state={})
-    marker = f'<preference_organizer_plan hash="{gate.plan_hash}"'
+    marker = '<preference_organizer_cursor>'
     assert sum(marker in item['content'] for item in second) == 1
 
 
@@ -153,32 +159,39 @@ def test_second_pass_compactor_never_injects_first_pass_plan():
     second_gate.submit(second_plan, _snapshot(50, etag='second'))
 
     def compressed_base(history, keep_full_turns=None, **kwargs):
-        kwargs['runtime_state']['entries'] = [{
-            'source_start': 0, 'source_end': 1,
-            'message': {'role': 'user', 'content': 'summary'},
-            'kind': 'summary', 'model_visible': True,
-        }]
+        kwargs['runtime_state']['entries'] = [
+            {
+                'source_start': 0,
+                'source_end': 1,
+                'message': {'role': 'user', 'content': 'summary'},
+                'kind': 'summary',
+                'model_visible': True,
+            }
+        ]
         return [], []
 
     compact = make_preference_organizer_compactor(
-        second_gate, base_compactor=compressed_base,
+        second_gate,
+        base_compactor=compressed_base,
     )
     _prior, current = compact([], runtime_state={})
-    assert second_plan in current[0]['content']
-    assert first_plan not in current[0]['content']
+    assert 'next_operation_id' in current[0]['content']
+    assert 'first-pass-only' not in current[0]['content']
 
 
 def test_compactor_does_not_inject_before_gate_or_without_compression():
     gate = _gate()
 
     def full_base(history, keep_full_turns=None, **kwargs):
-        kwargs['runtime_state']['entries'] = [{
-            'source_start': 0,
-            'source_end': 1,
-            'message': {'role': 'user', 'content': 'full'},
-            'kind': 'full',
-            'model_visible': True,
-        }]
+        kwargs['runtime_state']['entries'] = [
+            {
+                'source_start': 0,
+                'source_end': 1,
+                'message': {'role': 'user', 'content': 'full'},
+                'kind': 'full',
+                'model_visible': True,
+            }
+        ]
         return history, []
 
     compact = make_preference_organizer_compactor(gate, base_compactor=full_base)
@@ -190,7 +203,9 @@ def test_compactor_does_not_inject_before_gate_or_without_compression():
 
 def test_gate_rejects_write_tool_or_order_outside_authorized_plan():
     item = PreferenceItem(
-        name='pref.old', summary='old', ref='references/old.md',
+        name='pref.old',
+        summary='old',
+        ref='references/old.md',
         created_at='2026-01-01T00:00:00+00:00',
         updated_at='2026-01-01T00:00:00+00:00',
     )
@@ -198,16 +213,25 @@ def test_gate_rejects_write_tool_or_order_outside_authorized_plan():
         content='preferences: []\n',
         items=(item,),
         data=PreferenceStateData(
-            stored_items=21, full_projection_chars=1000, projected_items=21,
-            projected_chars=1000, projection_truncated=False, etag='etag',
+            stored_items=21,
+            full_projection_chars=1000,
+            projected_items=21,
+            projected_chars=1000,
+            projection_truncated=False,
+            etag='etag',
         ),
     )
     gate = _gate()
     gate.submit(
-        '## DELETE\nDelete the invalid extraction.\n\n'
-        '## AUTHORIZED OPERATIONS\n```json\n'
-        '[{"operation_id":"delete-1","action":"delete","name":"pref.old",'
-        '"reason_code":"invalid","retained_or_replacement_name":""}]\n```',
+        [
+            {
+                'operation_id': 'delete-1',
+                'action': 'delete',
+                'name': 'pref.old',
+                'reason_code': 'invalid',
+                'retained_or_replacement_name': '',
+            }
+        ],
         snapshot,
     )
 
@@ -220,17 +244,23 @@ def test_gate_rejects_write_tool_or_order_outside_authorized_plan():
 def test_merge_writes_new_reference_and_index_before_source_cleanup(monkeypatch):
     items = [
         PreferenceItem(
-            name='pref.a', summary='A', ref='references/a.md',
+            name='pref.a',
+            summary='A',
+            ref='references/a.md',
             created_at='2026-01-01T00:00:00+00:00',
             updated_at='2026-01-02T00:00:00+00:00',
         ),
         PreferenceItem(
-            name='pref.keep', summary='Keep', ref='references/keep.md',
+            name='pref.keep',
+            summary='Keep',
+            ref='references/keep.md',
             created_at='2026-01-02T00:00:00+00:00',
             updated_at='2026-01-02T00:00:00+00:00',
         ),
         PreferenceItem(
-            name='pref.b', summary='B', ref='references/b.md',
+            name='pref.b',
+            summary='B',
+            ref='references/b.md',
             created_at='2026-01-03T00:00:00+00:00',
             updated_at='2026-01-03T00:00:00+00:00',
         ),
@@ -238,6 +268,9 @@ def test_merge_writes_new_reference_and_index_before_source_cleanup(monkeypatch)
     events = []
 
     class Store:
+        def validate_new_preference_reference(self, *args):
+            pass
+
         def read_reference(self, ref):
             return _valid_reference()
 
@@ -262,14 +295,16 @@ def test_merge_writes_new_reference_and_index_before_source_cleanup(monkeypatch)
     assert events[0][0] == 'write' and events[0][1].endswith('/ab.md')
     assert events[1][0:2] == ('write', 'memory/users/preference.yaml')
     assert [event[0] for event in events[2:]] == [
-        'delete_reference', 'delete_reference',
+        'delete_reference',
+        'delete_reference',
     ]
     assert events[1][2].index('pref.ab') < events[1][2].index('pref.keep')
 
 
 def test_episode_create_failure_preserves_preference(monkeypatch):
     item = PreferenceItem(
-        name='pref.project', summary='Project preference',
+        name='pref.project',
+        summary='Project preference',
         ref='references/project.md',
         created_at='2026-01-01T00:00:00+00:00',
         updated_at='2026-01-02T00:00:00+00:00',
@@ -293,14 +328,17 @@ def test_episode_create_failure_preserves_preference(monkeypatch):
 
     with pytest.raises(RuntimeError, match='episode create failed'):
         organizer_tools._move_preference_to_episode(
-            _snapshot_with_items([item]), item.name, 'Project retrieval summary',
+            _snapshot_with_items([item]),
+            item.name,
+            'Project retrieval summary',
         )
     assert removed == []
 
 
 def test_move_to_episode_inherits_source_and_created_time(monkeypatch):
     item = PreferenceItem(
-        name='pref.project', summary='Project preference',
+        name='pref.project',
+        summary='Project preference',
         ref='references/project.md',
         created_at='2026-01-01T00:00:00+00:00',
         updated_at='2026-01-02T00:00:00+00:00',
@@ -310,7 +348,8 @@ def test_move_to_episode_inherits_source_and_created_time(monkeypatch):
     class Store:
         def read_reference(self, ref):
             return _valid_reference(
-                kind='chat_explicit', conversation_id='conversation-9',
+                kind='chat_explicit',
+                conversation_id='conversation-9',
             )
 
         def remove_preference_with_reference(self, name):
@@ -330,7 +369,9 @@ def test_move_to_episode_inherits_source_and_created_time(monkeypatch):
     monkeypatch.setattr(organizer_tools, '_agentic_value', lambda key: 'user-1')
 
     episode_id = organizer_tools._move_preference_to_episode(
-        _snapshot_with_items([item]), item.name, 'Project retrieval summary',
+        _snapshot_with_items([item]),
+        item.name,
+        'Project retrieval summary',
     )
 
     assert episode_id == 'episode-1'
@@ -342,7 +383,8 @@ def test_move_to_episode_inherits_source_and_created_time(monkeypatch):
 
 def test_move_cleanup_failure_is_partial_after_episode_creation(monkeypatch):
     item = PreferenceItem(
-        name='pref.project', summary='Project preference',
+        name='pref.project',
+        summary='Project preference',
         ref='references/project.md',
         created_at='2026-01-01T00:00:00+00:00',
         updated_at='2026-01-02T00:00:00+00:00',
@@ -368,7 +410,9 @@ def test_move_cleanup_failure_is_partial_after_episode_creation(monkeypatch):
 
     with pytest.raises(MemoryPartialApplyError) as captured:
         organizer_tools._move_preference_to_episode(
-            _snapshot_with_items([item]), item.name, 'Project retrieval summary',
+            _snapshot_with_items([item]),
+            item.name,
+            'Project retrieval summary',
         )
     assert captured.value.applied == ('episode',)
     assert captured.value.failed == ('preference_cleanup',)
@@ -376,7 +420,8 @@ def test_move_cleanup_failure_is_partial_after_episode_creation(monkeypatch):
 
 def test_organizer_model_sees_full_items_and_counts_but_no_projection_stats(monkeypatch):
     item = PreferenceItem(
-        name='pref.fact.verify_latest', summary='Verify current facts',
+        name='pref.fact.verify_latest',
+        summary='Verify current facts',
         ref='references/fact-verify-latest.md',
         created_at='2026-08-15T00:00:00+00:00',
         updated_at='2026-08-16T00:00:00+00:00',
@@ -389,7 +434,6 @@ def test_organizer_model_sees_full_items_and_counts_but_no_projection_stats(monk
         snapshot,
         pass_number=1,
         preferred_min_items=20,
-        hard_min_items=15,
         target_items=30,
         changes_remaining=50,
     )
@@ -399,17 +443,21 @@ def test_organizer_model_sees_full_items_and_counts_but_no_projection_stats(monk
     assert item.name in prompt and item.ref in prompt
     assert item.created_at in prompt and item.updated_at in prompt
     for forbidden in (
-        'full_projection_chars', 'projected_chars', 'projection_truncated',
-        'target_prompt_percent', '%',
+        'full_projection_chars',
+        'projected_chars',
+        'projection_truncated',
+        'target_prompt_percent',
+        '%',
     ):
         assert forbidden not in prompt
         assert forbidden not in str(response)
 
 
-def test_soft_floor_allows_plan_to_reach_eighteen_but_hard_floor_remains():
+def test_safe_operations_allow_counts_below_soft_preference():
     items = [
         PreferenceItem(
-            name=f'pref.narrow.{index}', summary=f'Narrow {index}',
+            name=f'pref.narrow.{index}',
+            summary=f'Narrow {index}',
             ref=f'references/narrow-{index}.md',
             created_at='2026-01-01T00:00:00+00:00',
             updated_at='2026-01-01T00:00:00+00:00',
@@ -418,28 +466,36 @@ def test_soft_floor_allows_plan_to_reach_eighteen_but_hard_floor_remains():
     ]
     gate = _gate()
     gate.submit(
-        '## MOVE TO EPISODE\nMove one narrow rule.\n\n'
-        '## AUTHORIZED OPERATIONS\n```json\n'
-        '[{"operation_id":"move-1","action":"move_to_episode",'
-        '"name":"pref.narrow.0","episode_summary":"Narrow retrieval rule"}]\n```',
+        [
+            {
+                'operation_id': 'move-1',
+                'action': 'move_to_episode',
+                'name': 'pref.narrow.0',
+                'episode_summary': 'Narrow retrieval rule',
+            }
+        ],
         _snapshot_with_items(items),
     )
     assert len(gate.authorized_operations) == 1
 
-    with pytest.raises(ToolExecutionError, match='hard minimum'):
-        _gate().submit(
-            '## MOVE TO EPISODE\nUnsafe move.\n\n'
-            '## AUTHORIZED OPERATIONS\n```json\n'
-            '[{"operation_id":"move-1","action":"move_to_episode",'
-            '"name":"pref.narrow.0","episode_summary":"Narrow retrieval rule"}]\n```',
-            _snapshot_with_items(items[:15]),
-        )
+    _gate().submit(
+        [
+            {
+                'operation_id': 'move-1',
+                'action': 'move_to_episode',
+                'name': 'pref.narrow.0',
+                'episode_summary': 'Narrow retrieval rule',
+            }
+        ],
+        _snapshot_with_items(items[:15]),
+    )
 
 
-def test_count_target_uses_worst_retained_items_and_clamps_to_hard_floor():
+def test_count_target_uses_worst_retained_items_without_hard_floor():
     items = [
         PreferenceItem(
-            name=f'pref.item.{index}', summary='x' * length,
+            name=f'pref.item.{index}',
+            summary='x' * length,
             ref=f'references/item-{index}.md',
             created_at='2026-01-01T00:00:00+00:00',
             updated_at='2026-01-01T00:00:00+00:00',
@@ -449,15 +505,13 @@ def test_count_target_uses_worst_retained_items_and_clamps_to_hard_floor():
     with _cfg.temp('preference_context_max_chars', 100):
         target = target_item_count(
             _snapshot_with_items(items),
-            preferred_target_items=30,
-            hard_min_items=3,
-            target_prompt_percent=40,
         )
-    assert target == 3
+    assert target == 0
 
     many_items = [
         PreferenceItem(
-            name=f'pref.small.{index}', summary='x',
+            name=f'pref.small.{index}',
+            summary='x',
             ref=f'references/small-{index}.md',
             created_at='2026-01-01T00:00:00+00:00',
             updated_at='2026-01-01T00:00:00+00:00',
@@ -467,9 +521,6 @@ def test_count_target_uses_worst_retained_items_and_clamps_to_hard_floor():
     with _cfg.temp('preference_context_max_chars', 5000):
         target = target_item_count(
             _snapshot_with_items(many_items),
-            preferred_target_items=100,
-            hard_min_items=15,
-            target_prompt_percent=40,
         )
     assert target == 30
 
@@ -478,15 +529,12 @@ def test_projection_target_is_strict_and_rejects_truncation():
     with _cfg.temp('preference_context_max_chars', 5000):
         assert target_reached(
             _snapshot(30, projection_chars=1999).data,
-            target_prompt_percent=40,
         )
         assert not target_reached(
             _snapshot(30, projection_chars=2000).data,
-            target_prompt_percent=40,
         )
         assert not target_reached(
             _snapshot(30, projection_chars=1000, truncated=True).data,
-            target_prompt_percent=40,
         )
 
 
@@ -500,13 +548,15 @@ def test_organizer_rejects_invalid_complete_preference_index():
 
 
 def test_organizer_runs_at_most_two_fresh_passes(monkeypatch):
-    snapshots = iter([
-        _snapshot(50, truncated=True, etag='initial'),
-        _snapshot(50, truncated=True, etag='before-1'),
-        _snapshot(50, truncated=True, etag='after-1'),
-        _snapshot(50, truncated=True, etag='before-2'),
-        _snapshot(30, projection_chars=1000, etag='after-2'),
-    ])
+    snapshots = iter(
+        [
+            _snapshot(50, truncated=True, etag='initial'),
+            _snapshot(50, truncated=True, etag='before-1'),
+            _snapshot(50, truncated=True, etag='after-1'),
+            _snapshot(50, truncated=True, etag='before-2'),
+            _snapshot(30, projection_chars=1000, etag='after-2'),
+        ]
+    )
     monkeypatch.setattr(service, 'load_preference_state', lambda: next(snapshots))
     gates = []
 
@@ -519,6 +569,7 @@ def test_organizer_runs_at_most_two_fresh_passes(monkeypatch):
 
     monkeypatch.setattr(service, '_run_organizer_pass', run_pass)
     result = service.organize_preferences(
+        run_id='run-test',
         task_id='preference_organizer_task-1',
         user_id='user-1',
     )
@@ -530,15 +581,17 @@ def test_organizer_runs_at_most_two_fresh_passes(monkeypatch):
     assert len(result.result.passes) == 2
     assert gates[0] is not gates[1]
     assert gates[0].budget is gates[1].budget
-    assert gates[0].plan_hash != gates[1].plan_hash
+    assert gates[0].plan_hash == gates[1].plan_hash  # canonical empty operation list
 
 
 def test_first_pass_target_stops_without_second_pass(monkeypatch):
-    snapshots = iter([
-        _snapshot(50, truncated=True, etag='initial'),
-        _snapshot(50, truncated=True, etag='before-1'),
-        _snapshot(30, projection_chars=1000, etag='after-1'),
-    ])
+    snapshots = iter(
+        [
+            _snapshot(50, truncated=True, etag='initial'),
+            _snapshot(50, truncated=True, etag='before-1'),
+            _snapshot(30, projection_chars=1000, etag='after-1'),
+        ]
+    )
     monkeypatch.setattr(service, 'load_preference_state', lambda: next(snapshots))
     calls = []
 
@@ -551,6 +604,7 @@ def test_first_pass_target_stops_without_second_pass(monkeypatch):
 
     monkeypatch.setattr(service, '_run_organizer_pass', run_pass)
     result = service.organize_preferences(
+        run_id='run-test',
         task_id='preference_organizer_task-one-pass',
         user_id='user-1',
     )
@@ -560,13 +614,15 @@ def test_first_pass_target_stops_without_second_pass(monkeypatch):
 
 
 def test_first_no_safe_change_pass_stops_without_second_pass(monkeypatch):
-    snapshots = iter([
-        _snapshot(50, truncated=True, etag='initial'),
-        _snapshot(50, truncated=True, etag='before-1'),
-        _snapshot(50, truncated=True, etag='after-1'),
-        _snapshot(50, truncated=True, etag='before-2'),
-        _snapshot(50, truncated=True, etag='after-2'),
-    ])
+    snapshots = iter(
+        [
+            _snapshot(50, truncated=True, etag='initial'),
+            _snapshot(50, truncated=True, etag='before-1'),
+            _snapshot(50, truncated=True, etag='after-1'),
+            _snapshot(50, truncated=True, etag='before-2'),
+            _snapshot(50, truncated=True, etag='after-2'),
+        ]
+    )
     monkeypatch.setattr(service, 'load_preference_state', lambda: next(snapshots))
     calls = []
 
@@ -577,6 +633,7 @@ def test_first_no_safe_change_pass_stops_without_second_pass(monkeypatch):
 
     monkeypatch.setattr(service, '_run_organizer_pass', run_pass)
     result = service.organize_preferences(
+        run_id='run-test',
         task_id='preference_organizer_task-no-safe',
         user_id='user-1',
     )
@@ -591,13 +648,15 @@ def test_first_no_safe_change_pass_stops_without_second_pass(monkeypatch):
 
 
 def test_second_pass_no_safe_changes_reports_organized_with_remaining(monkeypatch):
-    snapshots = iter([
-        _snapshot(50, truncated=True, etag='initial'),
-        _snapshot(50, truncated=True, etag='before-1'),
-        _snapshot(49, truncated=True, etag='after-1'),
-        _snapshot(49, truncated=True, etag='before-2'),
-        _snapshot(49, truncated=True, etag='after-2'),
-    ])
+    snapshots = iter(
+        [
+            _snapshot(50, truncated=True, etag='initial'),
+            _snapshot(50, truncated=True, etag='before-1'),
+            _snapshot(49, truncated=True, etag='after-1'),
+            _snapshot(49, truncated=True, etag='before-2'),
+            _snapshot(49, truncated=True, etag='after-2'),
+        ]
+    )
     monkeypatch.setattr(service, 'load_preference_state', lambda: next(snapshots))
     calls = []
 
@@ -611,6 +670,7 @@ def test_second_pass_no_safe_changes_reports_organized_with_remaining(monkeypatc
 
     monkeypatch.setattr(service, '_run_organizer_pass', run_pass)
     result = service.organize_preferences(
+        run_id='run-test',
         task_id='preference_organizer_task-remaining',
         user_id='user-1',
     )
@@ -625,11 +685,13 @@ def test_second_pass_no_safe_changes_reports_organized_with_remaining(monkeypatc
 
 
 def test_partial_first_pass_never_starts_second_pass(monkeypatch):
-    snapshots = iter([
-        _snapshot(50, truncated=True, etag='initial'),
-        _snapshot(50, truncated=True, etag='before-1'),
-        _snapshot(49, truncated=True, etag='after-1'),
-    ])
+    snapshots = iter(
+        [
+            _snapshot(50, truncated=True, etag='initial'),
+            _snapshot(50, truncated=True, etag='before-1'),
+            _snapshot(49, truncated=True, etag='after-1'),
+        ]
+    )
     monkeypatch.setattr(service, 'load_preference_state', lambda: next(snapshots))
     calls = []
 
@@ -642,6 +704,7 @@ def test_partial_first_pass_never_starts_second_pass(monkeypatch):
 
     monkeypatch.setattr(service, '_run_organizer_pass', run_pass)
     result = service.organize_preferences(
+        run_id='run-test',
         task_id='preference_organizer_task-2',
         user_id='user-1',
     )
@@ -664,11 +727,13 @@ def test_unsafe_terminal_first_pass_never_starts_second(
     terminal_outcome,
     reported_outcome,
 ):
-    snapshots = iter([
-        _snapshot(50, truncated=True, etag='initial'),
-        _snapshot(50, truncated=True, etag='before-1'),
-        _snapshot(50, truncated=True, etag='after-1'),
-    ])
+    snapshots = iter(
+        [
+            _snapshot(50, truncated=True, etag='initial'),
+            _snapshot(50, truncated=True, etag='before-1'),
+            _snapshot(50, truncated=True, etag='after-1'),
+        ]
+    )
     monkeypatch.setattr(service, 'load_preference_state', lambda: next(snapshots))
     calls = []
 
@@ -681,9 +746,231 @@ def test_unsafe_terminal_first_pass_never_starts_second(
 
     monkeypatch.setattr(service, '_run_organizer_pass', run_pass)
     result = service.organize_preferences(
+        run_id='run-test',
         task_id=f'preference_organizer_task-{terminal_outcome}',
         user_id='user-1',
     )
 
     assert result.outcome == reported_outcome
     assert calls == [1]
+
+
+def _delete_operation(name='pref.a', operation_id='delete-1'):
+    return dict(
+        operation_id=operation_id, action='delete', name=name, reason_code='invalid', retained_or_replacement_name=''
+    )
+
+
+def _item(name='pref.a', ref='references/a.md'):
+    return PreferenceItem(
+        name=name, summary='A', ref=ref, created_at='2026-01-01T00:00:00+00:00', updated_at='2026-01-01T00:00:00+00:00'
+    )
+
+
+@pytest.mark.parametrize('count', [1, 14, 19])
+def test_manual_analysis_runs_below_soft_count_and_returns_no_changes(monkeypatch, count):
+    snapshot = _snapshot(count, projection_chars=100)
+    monkeypatch.setattr(service, 'load_preference_state', lambda: snapshot)
+    calls = []
+
+    def analyze(*, gate, before, **_):
+        calls.append(gate.pass_number)
+        gate.submit([], before)
+        return ''
+
+    monkeypatch.setattr(service, '_run_organizer_pass', analyze)
+    result = service.organize_preferences(
+        task_id='preference_organizer_manual', run_id='manual-run', user_id='u', force_analysis=True
+    )
+    assert calls == [1]
+    assert result.outcome == 'no_safe_changes'
+
+
+def test_empty_manual_index_skips_model(monkeypatch):
+    monkeypatch.setattr(service, 'load_preference_state', lambda: _snapshot(0, projection_chars=0))
+    monkeypatch.setattr(service, '_run_organizer_pass', lambda **_: pytest.fail('empty index called agent'))
+    result = service.organize_preferences(
+        task_id='preference_organizer_empty', run_id='empty-run', user_id='u', force_analysis=True
+    )
+    assert result.outcome == 'no_safe_changes'
+
+
+def test_gate_canonical_json_and_strict_schema():
+    snapshot = _snapshot_with_items([_item()])
+    op = _delete_operation()
+    one, two = _gate(), _gate()
+    one.submit([op], snapshot)
+    two.submit([dict(reversed(list(op.items())))], snapshot)
+    assert one.plan_hash == two.plan_hash
+    assert one.cursor()['next_operation_id'] == 'delete-1'
+    assert 'name' not in one.cursor()
+    for invalid in ['## PLAN\n```json\n[]\n```', [{**op, 'extra': 1}], [{**op, 'name': False}]]:
+        with pytest.raises(ToolExecutionError):
+            _gate().submit(invalid, snapshot)
+
+
+@pytest.mark.parametrize('failure', ['cleanup', 'readback', 'unknown'])
+def test_receipt_survives_side_effect_failure_and_prevents_following_apply(monkeypatch, failure):
+    before = _snapshot_with_items([_item(), _item('pref.b', 'references/b.md')])
+    gate = _gate()
+    gate.submit([_delete_operation(), _delete_operation('pref.b', 'delete-2')], before)
+    reads = 0
+    writes = []
+
+    def read():
+        nonlocal reads
+        reads += 1
+        if failure == 'readback' and reads > 1:
+            raise RuntimeError('validation connection failed')
+        return before
+
+    class Store:
+        def remove_preference_with_reference(self, name):
+            writes.append(name)
+            if failure == 'unknown':
+                raise RuntimeError('connection lost after write; response unknown')
+            if failure == 'cleanup':
+                raise MemoryPartialApplyError(
+                    'reference delete failed', operation='delete', applied=['preference_index'], failed=['reference']
+                )
+
+    monkeypatch.setattr(organizer_tools, 'load_preference_state', read)
+    monkeypatch.setattr(organizer_tools, 'MemoryStore', Store)
+    apply = organizer_tools.PreferenceOrganizerApplyTools(gate)
+    with pytest.raises(ToolExecutionError):
+        apply.delete_preference('delete-1')
+    with pytest.raises(ToolExecutionError):
+        apply.delete_preference('delete-2')
+    assert writes == ['pref.a']
+    assert gate.budget.used == 1
+    assert len(gate.operations) == 1
+    receipt = gate.operations[0]
+    assert receipt['operation_id'] == 'delete-1'
+    assert receipt['status'] == ('unknown' if failure == 'unknown' else 'partial')
+    assert receipt['failed_steps']
+    if failure != 'unknown':
+        assert receipt['applied_steps']
+
+
+def test_service_retains_receipts_if_final_validation_read_fails(monkeypatch):
+    before = _snapshot(50, truncated=True)
+    reads = 0
+
+    def read():
+        nonlocal reads
+        reads += 1
+        if reads > 2:
+            raise RuntimeError('read failed')
+        return before
+
+    monkeypatch.setattr(service, 'load_preference_state', read)
+
+    def run(*, gate, **_):
+        gate.budget.commit(1)
+        gate.operations.append(
+            {'operation_id': 'move-1', 'action': 'move_to_episode', 'episode_id': 'ep_1', 'status': 'partial'}
+        )
+        gate.terminal_outcome = 'partial'
+        return ''
+
+    monkeypatch.setattr(service, '_run_organizer_pass', run)
+    result = service.organize_preferences(task_id='preference_organizer_read', run_id='read-run', user_id='u')
+    assert result.outcome == 'partial'
+    assert result.result.total_changes == 1
+    assert result.result.receipts[0]['episode_id'] == 'ep_1'
+    assert result.result.passes[0].after is None
+
+
+def test_shared_path_with_different_anchors_is_invalid():
+    from lazymind.common.memory import validate_preference_index
+
+    content = render_preference_index(
+        '', [_item(ref='references/a.md#one'), _item('pref.b', 'memory/users/references/a.md#two')]
+    )
+    assert 'duplicate preference reference' in validate_preference_index(content)
+
+
+@pytest.mark.parametrize('action,cost', [('merge', 2), ('move_to_episode', 1)])
+def test_compound_partial_receipts_keep_steps_episode_and_charge_once(monkeypatch, action, cost):
+    snapshot = _snapshot_with_items([_item(), _item('pref.b', 'references/b.md')])
+    gate = _gate()
+    events = []
+
+    class Store:
+        def read_reference(self, ref):
+            return _valid_reference()
+
+        def validate_new_preference_reference(self, *args):
+            pass
+
+        def write(self, path, content):
+            events.append(path)
+
+        def delete_reference(self, name):
+            raise RuntimeError('reference cleanup unavailable')
+
+        def remove_preference_with_reference(self, name):
+            events.append('preference_index')
+            raise MemoryPartialApplyError(
+                'reference delete failed', operation='delete', applied=['preference_index'], failed=['reference']
+            )
+
+    class EpisodeStore:
+        def create(self, user_id, episode):
+            events.append('episode')
+            return type('Created', (), {'id': 'episode-partial'})()
+
+    monkeypatch.setattr(organizer_tools, 'MemoryStore', Store)
+    monkeypatch.setattr(organizer_tools, 'get_episode_store', EpisodeStore)
+    monkeypatch.setattr(organizer_tools, '_agentic_value', lambda key: 'user-1')
+    monkeypatch.setattr(organizer_tools, 'load_preference_state', lambda: snapshot)
+    if action == 'merge':
+        operation = dict(
+            operation_id='op-1',
+            action=action,
+            source_names=['pref.a', 'pref.b'],
+            name='pref.merged',
+            summary='Merged',
+            scenario='Same scope',
+            details='Preserve both',
+            reason='Equivalent behaviors',
+        )
+    else:
+        operation = dict(
+            operation_id='op-1', action=action, name='pref.a', episode_summary='Temporary project decision'
+        )
+    gate.submit([operation], snapshot)
+    apply = organizer_tools.PreferenceOrganizerApplyTools(gate)
+    tool = apply.merge_preferences if action == 'merge' else apply.move_preference_to_episode
+    with pytest.raises(ToolExecutionError):
+        tool('op-1')
+    before_retry = list(events)
+    with pytest.raises(ToolExecutionError):
+        tool('op-1')
+    assert events == before_retry
+    assert gate.budget.used == cost
+    assert len(gate.operations) == 1
+    receipt = gate.operations[0]
+    assert receipt['status'] == 'partial'
+    assert 'preference_index' in receipt['applied_steps']
+    assert receipt['failed_steps']
+    if action == 'move_to_episode':
+        assert receipt['episode_id'] == 'episode-partial'
+        assert 'episode' in receipt['applied_steps']
+
+
+def test_invalid_existing_index_stops_without_model_or_retry(monkeypatch):
+    monkeypatch.setattr(service, 'inject_model_config', lambda _: None)
+
+    def read():
+        raise ValueError('preferences must not share references/topic.md across anchors')
+
+    monkeypatch.setattr(service, 'load_preference_state', read)
+    monkeypatch.setattr(service, '_run_organizer_pass', lambda **_: pytest.fail('invalid data reached model'))
+    result = service.organize_preferences(
+        task_id='preference_organizer_invalid', run_id='invalid-run', user_id='u', force_analysis=True
+    )
+    assert result.status == 'failed'
+    assert not result.retryable
+    assert result.error.code == 'invalid_preference_index'
+    assert 'topic.md' in result.error.message

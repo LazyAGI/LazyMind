@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from lazymind.common.maintenance import initialize_context, check_cancelled
+
 import lazyllm
 from lazyllm import AutoModel, LOG
 from lazyllm.tools.fs.client import FS
@@ -23,6 +25,10 @@ from lazymind.review.preference_organizer.state import (
     load_preference_state,
     target_item_count,
     target_reached,
+    MAX_CHANGES,
+    MAX_PASSES,
+    MAX_ROUNDS_PER_PASS,
+    SOFT_ITEMS,
 )
 from lazymind.review.preference_organizer.tools import (
     ChangeBudget,
@@ -35,66 +41,48 @@ from lazymind.review.preference_organizer.tools import (
 def organize_preferences(
     *,
     task_id: str,
+    run_id: str,
     user_id: str,
     llm_config: Optional[dict[str, Any]] = None,
-    target_items: int = 30,
-    min_items: int = 20,
-    hard_min_items: int = 15,
-    max_items: int = 40,
-    target_prompt_percent: int = 40,
-    max_changes: int = 50,
-    max_passes: int = 2,
-    max_rounds_per_pass: int = 60,
+    force_analysis: bool = False,
 ) -> PreferenceOrganizerResult:
-    lazyllm.globals._init_sid(sid=task_id)
-    lazyllm.locals._init_sid(sid=task_id)
-    lazyllm.set_trace_context({
-        'trace_id': task_id,
-        'session_id': task_id,
-        'user_id': user_id,
-        'sampled': True,
-        'request_tags': ['preference_organizer'],
-        'trace_metadata': {'task_id': task_id, 'max_passes': max_passes},
-    })
+    initialize_context(task_id, run_id, user_id)
+    lazyllm.set_trace_context(
+        {
+            'trace_id': task_id,
+            'user_id': user_id,
+            'sampled': True,
+            'request_tags': ['preference_organizer'],
+            'trace_metadata': {'task_id': task_id, 'run_id': run_id},
+        }
+    )
     inject_model_config(llm_config)
     lazyllm.globals['agentic_config'] = {
+        **lazyllm.globals['agentic_config'],
         'user_id': user_id,
         'task_id': task_id,
-        'session_id': task_id,
         'memory_operation_ledger': [],
     }
-    budget = ChangeBudget(maximum=max_changes)
+    budget = ChangeBudget(maximum=MAX_CHANGES)
     pass_results: list[PreferenceOrganizerPassResult] = []
 
     try:
         initial = load_preference_state()
+    except ValueError as exc:
+        return _failure_result(task_id, 'invalid_preference_index', str(exc), retryable=False)
     except Exception as exc:
         return _failure_result(task_id, 'storage_read_failed', str(exc), retryable=True)
 
-    if target_reached(
-        initial.data,
-        target_prompt_percent=target_prompt_percent,
-    ):
-        return _success_result(
-            task_id,
-            outcome='organized',
-            pass_results=[],
-            total_changes=0,
-            current_pass=0,
-            target_reached_value=True,
-            stop_reason='target_reached',
-            reason='Preference already fits the compact Chat projection target.',
-        )
-    if initial.data.stored_items <= hard_min_items:
+    if initial.data.stored_items == 0 or (not force_analysis and target_reached(initial.data)):
         return _success_result(
             task_id,
             outcome='no_safe_changes',
             pass_results=[],
             total_changes=0,
             current_pass=0,
-            target_reached_value=False,
-            stop_reason='hard_min_reached',
-            reason='Preference is already at or below the hard item minimum.',
+            target_reached_value=target_reached(initial.data),
+            stop_reason='empty_index' if initial.data.stored_items == 0 else 'target_reached',
+            reason='No adjustment needed.',
         )
 
     terminal_outcome = ''
@@ -102,72 +90,65 @@ def organize_preferences(
     stop_reason = ''
     reached = False
     attempted = 0
-    for pass_number in range(1, min(2, max_passes) + 1):
+    for pass_number in range(1, MAX_PASSES + 1):
         attempted = pass_number
         try:
             before = load_preference_state()
         except Exception as exc:
             return _failure_result(
-                task_id, 'storage_read_failed', str(exc), retryable=True,
+                task_id,
+                'storage_read_failed',
+                str(exc),
+                retryable=True,
                 pass_results=pass_results,
                 total_changes=budget.used,
                 current_pass=pass_number,
             )
-        pass_target_items = target_item_count(
-            before,
-            preferred_target_items=target_items,
-            hard_min_items=hard_min_items,
-            target_prompt_percent=target_prompt_percent,
-        )
-        gate = PreferenceOrganizerGate(
-            pass_number=pass_number,
-            budget=budget,
-            hard_min_items=hard_min_items,
-        )
+        check_cancelled()
+        pass_target_items = target_item_count(before)
+        gate = PreferenceOrganizerGate(pass_number=pass_number, budget=budget)
         budget_before = budget.used
         run_error = _run_organizer_pass(
             gate=gate,
             before=before,
             llm_config=llm_config,
             target_items=pass_target_items,
-            preferred_min_items=min_items,
-            hard_min_items=hard_min_items,
-            max_rounds_per_pass=max_rounds_per_pass,
+            preferred_min_items=SOFT_ITEMS,
+            max_rounds_per_pass=MAX_ROUNDS_PER_PASS,
         )
         try:
             after = load_preference_state()
         except Exception as exc:
-            if gate.operations or gate.terminal_outcome == 'partial':
-                terminal_outcome = 'partial'
-                terminal_error = (
-                    gate.terminal_error
-                    or f'Organizer changed data but validation read failed: {exc}'
+            pass_results.append(
+                PreferenceOrganizerPassResult(
+                    pass_number=pass_number,
+                    plan_hash=gate.plan_hash,
+                    before=before.data,
+                    after=None,
+                    changes=budget.used - budget_before,
+                    operation_count=len(gate.operations),
+                    receipts=gate.operations,
+                    outcome='partial' if budget.used > budget_before else 'failed',
                 )
-                break
-            return _failure_result(
-                task_id, 'storage_read_failed', str(exc), retryable=True,
-                pass_results=pass_results,
-                total_changes=budget.used,
-                current_pass=pass_number,
             )
-        pass_outcome = gate.terminal_outcome
+            terminal_outcome = 'partial' if budget.used > budget_before else 'failed'
+            terminal_error = gate.terminal_error or f'Final validation read failed: {exc}'
+            stop_reason = 'validation_read_failed'
+            break
+        pass_outcome = 'failed' if gate.terminal_outcome == 'cancelled' else gate.terminal_outcome
         if run_error and not pass_outcome:
             pass_outcome = 'failed'
             gate.terminal_error = run_error
         if not gate.plan_hash and not pass_outcome:
             pass_outcome = 'failed'
             gate.terminal_error = 'Organizer ended without submit_preference_plan.'
-        if (
-            not pass_outcome
-            and gate.next_operation_index < len(gate.authorized_operations)
-        ):
+        if not pass_outcome and gate.next_operation_index < len(gate.authorized_operations):
             pass_outcome = 'failed'
             gate.terminal_error = 'Organizer ended before all gated operations were applied.'
         if not pass_outcome:
-            if target_reached(
-                after.data,
-                target_prompt_percent=target_prompt_percent,
-            ):
+            if budget.used == budget_before:
+                pass_outcome = 'no_safe_changes'
+            elif target_reached(after.data):
                 pass_outcome = 'organized'
             elif budget.used >= budget.maximum:
                 pass_outcome = 'budget_exhausted'
@@ -175,15 +156,18 @@ def organize_preferences(
                 pass_outcome = 'changes_applied'
             else:
                 pass_outcome = 'no_safe_changes'
-        pass_results.append(PreferenceOrganizerPassResult(
-            pass_number=pass_number,
-            plan_hash=gate.plan_hash,
-            before=before.data,
-            after=after.data,
-            changes=budget.used - budget_before,
-            operation_count=len(gate.operations),
-            outcome=pass_outcome,
-        ))
+        pass_results.append(
+            PreferenceOrganizerPassResult(
+                pass_number=pass_number,
+                plan_hash=gate.plan_hash,
+                before=before.data,
+                after=after.data,
+                changes=budget.used - budget_before,
+                operation_count=len(gate.operations),
+                receipts=gate.operations,
+                outcome=pass_outcome,
+            )
+        )
         if pass_outcome == 'organized':
             terminal_outcome = 'organized'
             stop_reason = 'target_reached'
@@ -195,14 +179,11 @@ def organize_preferences(
             stop_reason = pass_outcome
             break
         if pass_outcome == 'no_safe_changes':
-            terminal_outcome = (
-                'no_safe_changes' if budget.used == 0
-                else 'organized_with_remaining'
-            )
+            terminal_outcome = 'no_safe_changes' if budget.used == 0 else 'organized_with_remaining'
             terminal_error = gate.terminal_error
             stop_reason = 'no_further_safe_changes'
             break
-        if pass_number == min(2, max_passes):
+        if pass_number == MAX_PASSES:
             terminal_outcome = 'organized_with_remaining'
             terminal_error = gate.terminal_error
             stop_reason = 'max_passes_reached'
@@ -213,7 +194,9 @@ def organize_preferences(
         terminal_error = 'Organizer pass loop ended unexpectedly.'
         stop_reason = 'unexpected_loop_end'
     if terminal_outcome in {
-        'organized', 'organized_with_remaining', 'no_safe_changes',
+        'organized',
+        'organized_with_remaining',
+        'no_safe_changes',
         'budget_exhausted',
     }:
         return _success_result(
@@ -235,6 +218,7 @@ def organize_preferences(
             current_pass=attempted,
             passes_attempted=attempted,
             passes=pass_results,
+            receipts=[receipt for result in pass_results for receipt in result.receipts],
             total_changes=budget.used,
             outcome=terminal_outcome or 'failed',
             reason=terminal_error,
@@ -255,14 +239,12 @@ def _run_organizer_pass(
     llm_config: Optional[dict[str, Any]],
     target_items: int,
     preferred_min_items: int,
-    hard_min_items: int,
     max_rounds_per_pass: int,
 ) -> str:
     prompt = build_preference_organizer_prompt(
         before,
         pass_number=gate.pass_number,
         preferred_min_items=preferred_min_items,
-        hard_min_items=hard_min_items,
         target_items=target_items,
         changes_remaining=gate.budget.maximum - gate.budget.used,
     )
@@ -279,11 +261,14 @@ def _run_organizer_pass(
             prompt=' ',
             keep_full_turns=3,
             history_compactor=make_preference_organizer_compactor(
-                gate, llm_config=llm_config, llm=llm,
+                gate,
+                llm_config=llm_config,
+                llm=llm,
             ),
             fs=FS,
             enable_builtin_tools=False,
             force_summarize=True,
+            extra_stop_condition=check_cancelled,
         )
         lazyllm.locals['_lazyllm_agent'] = {}
         result = agent(prompt)
@@ -300,9 +285,16 @@ def _run_organizer_pass(
 
 def _retryable(message: str) -> bool:
     normalized = str(message or '').casefold()
-    return any(marker in normalized for marker in (
-        'timeout', 'timed out', 'connection', 'temporarily unavailable', 'rate limit',
-    ))
+    return any(
+        marker in normalized
+        for marker in (
+            'timeout',
+            'timed out',
+            'connection',
+            'temporarily unavailable',
+            'rate limit',
+        )
+    )
 
 
 def _failure_result(
@@ -316,11 +308,15 @@ def _failure_result(
     current_pass: int = 0,
 ) -> PreferenceOrganizerResult:
     return PreferenceOrganizerResult(
-        status='failed', task_id=task_id, outcome='failed', retryable=retryable,
+        status='failed',
+        task_id=task_id,
+        outcome='failed',
+        retryable=retryable,
         result=PreferenceOrganizerResultData(
             current_pass=current_pass,
             passes_attempted=len(pass_results or []),
             passes=pass_results or [],
+            receipts=[receipt for result in (pass_results or []) for receipt in result.receipts],
             total_changes=total_changes,
             outcome='failed',
             reason=message,
@@ -350,6 +346,7 @@ def _success_result(
             current_pass=current_pass,
             passes_attempted=len(pass_results),
             passes=pass_results,
+            receipts=[receipt for result in pass_results for receipt in result.receipts],
             total_changes=total_changes,
             outcome=outcome,
             reason=reason,

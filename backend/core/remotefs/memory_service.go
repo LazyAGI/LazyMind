@@ -12,8 +12,11 @@ import (
 
 	"gorm.io/gorm"
 
+	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/currentmemory"
+	appLog "lazymind/core/log"
+	"lazymind/core/maintenance"
 	"lazymind/core/resourceupdate"
 )
 
@@ -226,9 +229,6 @@ func (s *memoryCurrentService) write(
 	if entryPath == memoryRootPath {
 		return orm.MemoryCurrentEntry{}, errMemoryProtected
 	}
-	if err := s.authorizePreferenceMutation(ctx, userID, taskID, entryPath); err != nil {
-		return orm.MemoryCurrentEntry{}, err
-	}
 	if err := currentmemory.ValidateDocumentForPath(entryPath, content); err != nil {
 		return orm.MemoryCurrentEntry{}, err
 	}
@@ -236,7 +236,10 @@ func (s *memoryCurrentService) write(
 		return orm.MemoryCurrentEntry{}, err
 	}
 	var out orm.MemoryCurrentEntry
-	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err = maintenance.UserTransaction(ctx, s.db, userID, func(tx *gorm.DB) error {
+		if err := s.authorizePreferenceMutation(ctx, tx, userID, taskID, entryPath); err != nil {
+			return err
+		}
 		_, byPath, err := s.loadEntries(ctx, tx, userID)
 		if err != nil {
 			return err
@@ -290,10 +293,13 @@ func (s *memoryCurrentService) enqueuePreferenceOrganizerIfNeeded(
 		return
 	}
 	now := s.clock().UTC()
-	_, _, _ = resourceupdate.EnqueuePreferenceOrganizer(
+	_, _, err = resourceupdate.EnqueuePreferenceOrganizer(
 		ctx, s.db, userID, orm.ResourceUpdateTriggerTypePreferenceChange,
-		"preference-change:"+currentmemory.ContentETag(content), now,
+		"preference-change:"+userID+":"+common.GenerateID(), now,
 	)
+	if err != nil {
+		appLog.Logger.Warn().Err(err).Str("event", "preference_organizer_enqueue_failed").Str("user_id", userID).Str("etag", currentmemory.ContentETag(content)).Msg("Preference was saved but Organizer enqueue failed")
+	}
 }
 
 func (s *memoryCurrentService) mkdir(ctx context.Context, userID, taskID, rawPath string, recursive bool) error {
@@ -301,13 +307,13 @@ func (s *memoryCurrentService) mkdir(ctx context.Context, userID, taskID, rawPat
 	if err != nil {
 		return err
 	}
-	if err := s.authorizePreferenceMutation(ctx, userID, taskID, entryPath); err != nil {
-		return err
-	}
 	if err := s.ensureInitialized(ctx, userID); err != nil {
 		return err
 	}
-	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return maintenance.UserTransaction(ctx, s.db, userID, func(tx *gorm.DB) error {
+		if err := s.authorizePreferenceMutation(ctx, tx, userID, taskID, entryPath); err != nil {
+			return err
+		}
 		_, byPath, err := s.loadEntries(ctx, tx, userID)
 		if err != nil {
 			return err
@@ -340,13 +346,13 @@ func (s *memoryCurrentService) delete(ctx context.Context, userID, taskID, rawPa
 	if entryPath == memoryRootPath {
 		return errMemoryProtected
 	}
-	if err := s.authorizePreferenceMutation(ctx, userID, taskID, entryPath); err != nil {
-		return err
-	}
 	if err := s.ensureInitialized(ctx, userID); err != nil {
 		return err
 	}
-	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return maintenance.UserTransaction(ctx, s.db, userID, func(tx *gorm.DB) error {
+		if err := s.authorizePreferenceMutation(ctx, tx, userID, taskID, entryPath); err != nil {
+			return err
+		}
 		entries, byPath, err := s.loadEntries(ctx, tx, userID)
 		if err != nil {
 			return err
@@ -389,9 +395,6 @@ func (s *memoryCurrentService) copy(
 	if from == memoryRootPath {
 		return errMemoryProtected
 	}
-	if err := s.authorizePreferenceMutation(ctx, userID, taskID, from, to); err != nil {
-		return err
-	}
 	if from == to {
 		return nil
 	}
@@ -401,7 +404,10 @@ func (s *memoryCurrentService) copy(
 	if err := s.ensureInitialized(ctx, userID); err != nil {
 		return err
 	}
-	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return maintenance.UserTransaction(ctx, s.db, userID, func(tx *gorm.DB) error {
+		if err := s.authorizePreferenceMutation(ctx, tx, userID, taskID, from, to); err != nil {
+			return err
+		}
 		return s.copyEntries(ctx, tx, userID, from, to)
 	})
 }
@@ -414,9 +420,6 @@ func (s *memoryCurrentService) move(ctx context.Context, userID, taskID, rawFrom
 	if from == memoryRootPath || to == memoryRootPath {
 		return errMemoryProtected
 	}
-	if err := s.authorizePreferenceMutation(ctx, userID, taskID, from, to); err != nil {
-		return err
-	}
 	if from == to {
 		return nil
 	}
@@ -426,7 +429,10 @@ func (s *memoryCurrentService) move(ctx context.Context, userID, taskID, rawFrom
 	if err := s.ensureInitialized(ctx, userID); err != nil {
 		return err
 	}
-	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return maintenance.UserTransaction(ctx, s.db, userID, func(tx *gorm.DB) error {
+		if err := s.authorizePreferenceMutation(ctx, tx, userID, taskID, from, to); err != nil {
+			return err
+		}
 		if err := s.copyEntries(ctx, tx, userID, from, to); err != nil {
 			return err
 		}
@@ -444,19 +450,18 @@ func (s *memoryCurrentService) move(ctx context.Context, userID, taskID, rawFrom
 	})
 }
 
-func (s *memoryCurrentService) authorizePreferenceMutation(
-	ctx context.Context,
-	userID string,
-	taskID string,
-	paths ...string,
-) error {
-	for _, entryPath := range paths {
-		if entryPath == memoryPreferencePath || entryPath == memoryReferencesPath ||
-			strings.HasPrefix(entryPath, memoryReferencesPath+"/") {
-			return resourceupdate.AuthorizePreferenceMutation(ctx, s.db, userID, taskID)
+func (s *memoryCurrentService) authorizePreferenceMutation(ctx context.Context, tx *gorm.DB, userID, taskID string, paths ...string) error {
+	freeze := false
+	for _, p := range paths {
+		if p == memoryPreferencePath || p == memoryReferencesPath || strings.HasPrefix(p, memoryReferencesPath+"/") || strings.HasPrefix(memoryPreferencePath, p+"/") || strings.HasPrefix(memoryReferencesPath, p+"/") {
+			freeze = true
 		}
 	}
-	return nil
+	id := maintenance.Execution(ctx)
+	if id.TaskID == "" {
+		id.TaskID = taskID
+	}
+	return maintenance.Authorize(maintenance.WithIdentity(ctx, id), tx, userID, freeze)
 }
 
 func (s *memoryCurrentService) copyEntries(

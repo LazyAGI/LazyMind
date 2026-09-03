@@ -1409,6 +1409,8 @@ components:
                     items:
                         $ref: '#/components/schemas/CurrentMemoryPreferenceItem'
                     type: array
+                projection_state:
+                    $ref: '#/components/schemas/CurrentMemoryPreferenceProjectionState'
                 resident_index_usage:
                     $ref: '#/components/schemas/CurrentMemoryPreferenceResidentIndexUsage'
                 total_size:
@@ -1423,6 +1425,7 @@ components:
                 - resident_index_usage
                 - etag
                 - updated_at
+                - projection_state
             type: object
         CurrentMemoryPreferenceListResponse:
             properties:
@@ -1448,6 +1451,25 @@ components:
             required:
                 - ordered_names
                 - expected_etag
+            type: object
+        CurrentMemoryPreferenceProjectionState:
+            properties:
+                full_projection_chars:
+                    type: integer
+                projected_chars:
+                    type: integer
+                projected_items:
+                    type: integer
+                projection_truncated:
+                    type: boolean
+                stored_items:
+                    type: integer
+            required:
+                - stored_items
+                - full_projection_chars
+                - projected_items
+                - projected_chars
+                - projection_truncated
             type: object
         CurrentMemoryPreferenceResidentIndexUsage:
             properties:
@@ -2888,6 +2910,142 @@ components:
                     type: array
                 source:
                     type: string
+            type: object
+        PreferenceOrganizerReceipt:
+            properties:
+                action:
+                    enum:
+                        - merge
+                        - move_to_episode
+                        - delete
+                    type: string
+                applied_steps:
+                    items:
+                        type: string
+                    type: array
+                before_etag:
+                    type: string
+                changes:
+                    type: integer
+                episode_id:
+                    type: string
+                etag:
+                    type: string
+                failed_steps:
+                    items:
+                        type: string
+                    type: array
+                names:
+                    items:
+                        type: string
+                    type: array
+                operation_id:
+                    type: string
+                status:
+                    enum:
+                        - pending
+                        - applied
+                        - idempotent
+                        - partial
+                        - failed
+                        - unknown
+                    type: string
+            required:
+                - operation_id
+                - action
+                - names
+                - status
+                - changes
+                - applied_steps
+                - failed_steps
+            type: object
+        PreferenceOrganizerResult:
+            properties:
+                current_pass:
+                    type: integer
+                outcome:
+                    enum:
+                        - organized
+                        - organized_with_remaining
+                        - no_safe_changes
+                        - budget_exhausted
+                        - stale_state
+                        - partial
+                        - failed
+                    type: string
+                passes:
+                    items:
+                        properties: {}
+                        type: object
+                    type: array
+                passes_attempted:
+                    type: integer
+                reason:
+                    type: string
+                receipts:
+                    items:
+                        $ref: '#/components/schemas/PreferenceOrganizerReceipt'
+                    type: array
+                stop_reason:
+                    type: string
+                target_reached:
+                    type: boolean
+                total_changes:
+                    type: integer
+            type: object
+        PreferenceOrganizerTaskData:
+            properties:
+                created_at:
+                    format: date-time
+                    type: string
+                current_pass:
+                    type: integer
+                error_code:
+                    type: string
+                error_message:
+                    type: string
+                finished_at:
+                    format: date-time
+                    type: string
+                result:
+                    $ref: '#/components/schemas/PreferenceOrganizerResult'
+                started_at:
+                    format: date-time
+                    type: string
+                status:
+                    enum:
+                        - pending
+                        - running
+                        - done
+                        - failed
+                        - skipped
+                    type: string
+                task_id:
+                    type: string
+                waiting_reason:
+                    enum:
+                        - memory_review
+                        - resources
+                    type: string
+            required:
+                - task_id
+                - status
+                - created_at
+            type: object
+        PreferenceOrganizerTaskResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    allOf:
+                        - $ref: '#/components/schemas/PreferenceOrganizerTaskData'
+                    nullable: true
+                message:
+                    type: string
+            required:
+                - code
+                - message
+                - data
             type: object
         PromptCategory:
             properties:
@@ -12051,6 +12209,83 @@ paths:
                                 $ref: '#/components/schemas/CurrentMemoryErrorResponse'
                     description: Stored Preference index is invalid or unavailable
             summary: Replace the order of current user's Preference items
+    /api/core/memory/preferences:organize:
+        get:
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/PreferenceOrganizerTaskResponse'
+                    description: Active task, latest task, or null
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Gateway user identity is missing
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Query failed
+            summary: Get current user active or most recent Preference Organizer task
+        post:
+            responses:
+                "202":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/PreferenceOrganizerTaskResponse'
+                    description: Preference Organizer task accepted
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Gateway user identity is missing
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Preference Organizer task could not be created
+            summary: Create or return the active Preference Organizer task
+    /api/core/memory/preferences:organize/{task_id}:
+        get:
+            parameters:
+                - in: path
+                  name: task_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/PreferenceOrganizerTaskResponse'
+                    description: Preference Organizer task status
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Preference Organizer task was not found
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Preference Organizer task could not be queried
+            summary: Get a Preference Organizer task
     /api/core/memory/profile:
         get:
             responses:

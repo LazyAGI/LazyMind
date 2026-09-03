@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import json
+
 from typing import Any, Callable, Optional
 
 from lazymind.chat.engine.agent_runtime.pruner import make_history_compactor
-from lazymind.chat.engine.agent_runtime.projection_state import projection_fingerprint
 
 from .tools import PreferenceOrganizerGate
 
@@ -33,29 +34,14 @@ def make_preference_organizer_compactor(
             isinstance(entry, dict) and entry.get('kind') in {'compacted', 'spilled', 'summary'}
             for entry in (entries or [])
         )
-        if gate.phase != 'apply' or not gate.plan_markdown or not compressed:
+        if not gate.plan_hash or not compressed:
             return list(prior), list(current)
-
-        marker = f'<preference_organizer_plan hash="{gate.plan_hash}" pass="{gate.pass_number}">'
-        visible = [*prior, *current]
-        if any(marker in str(message.get('content') or '') for message in visible):
-            return list(prior), list(current)
-        authoritative = {
-            'role': 'user',
-            'content': (
-                f'{marker}\n'
-                'This exact Gate Plan is the only allowed action set. Do not add new actions.\n\n'
-                f'{gate.plan_markdown}\n'
-                '</preference_organizer_plan>'
-            ),
-        }
-        projected = list(current)
-        projected.append(authoritative)
-        if isinstance(runtime_state, dict):
-            runtime_state['preference_organizer_plan_injection_fingerprint'] = (
-                projection_fingerprint(entries or [])
-            )
-            runtime_state['preference_organizer_plan_injection_hash'] = gate.plan_hash
+        marker = '<preference_organizer_cursor>'
+        projected = [m for m in current if not str(m.get('content') or '').startswith(marker)]
+        prior = [m for m in prior if not str(m.get('content') or '').startswith(marker)]
+        projected.append(
+            {'role': 'user', 'content': marker + json.dumps(gate.cursor()) + '</preference_organizer_cursor>'}
+        )
         return list(prior), projected
 
     return _compact

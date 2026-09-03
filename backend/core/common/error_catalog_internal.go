@@ -596,6 +596,8 @@ func init() {
 	} {
 		registerAdditionalErrorAlias(source, "algorithm chat stream failed", http.StatusBadGateway, 2002077)
 	}
+	registerAdditionalError("task_lease_lost", http.StatusConflict, 2002325)
+	registerAdditionalError("maintenance_busy", http.StatusServiceUnavailable, 2002326)
 	registerAdditionalError("preference_organizing", http.StatusConflict, 2002321)
 	registerAdditionalError("create preference organizer task failed", http.StatusInternalServerError, 2002322)
 	registerAdditionalError("query preference organizer task failed", http.StatusInternalServerError, 2002323)

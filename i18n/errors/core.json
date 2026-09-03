@@ -1460,5 +1460,7 @@
   "2002321": { "en-US": "Preference maintenance is in progress", "zh-CN": "Preference 正在整理中" },
   "2002322": { "en-US": "Failed to create the Preference Organizer task", "zh-CN": "创建 Preference Organizer 任务失败" },
   "2002323": { "en-US": "Failed to query the Preference Organizer task", "zh-CN": "查询 Preference Organizer 任务失败" },
-  "2002324": { "en-US": "The Preference Organizer task lease was lost", "zh-CN": "Preference Organizer 任务租约已丢失" }
+  "2002324": { "en-US": "The Preference Organizer task lease was lost", "zh-CN": "Preference Organizer 任务租约已丢失" },
+  "2002325": { "en-US": "The maintenance execution has expired", "zh-CN": "记忆维护任务执行已失效" },
+  "2002326": { "en-US": "Waiting for memory maintenance capacity", "zh-CN": "等待记忆维护执行资源" }
 }

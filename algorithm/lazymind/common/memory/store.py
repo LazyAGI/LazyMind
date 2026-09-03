@@ -155,16 +155,8 @@ class MemoryStore:
         _, after_visible = split_stored_memory_content(stored_content, label=label)
         before_stored = parse_yaml_mapping(loaded)
         after_stored = parse_yaml_mapping(stored_content)
-        before_metadata = {
-            key: value
-            for key, value in before_stored.items()
-            if is_internal_memory_path(key)
-        }
-        after_metadata = {
-            key: value
-            for key, value in after_stored.items()
-            if is_internal_memory_path(key)
-        }
+        before_metadata = {key: value for key, value in before_stored.items() if is_internal_memory_path(key)}
+        after_metadata = {key: value for key, value in after_stored.items() if is_internal_memory_path(key)}
         if before_metadata != after_metadata:
             raise ValueError(f'{label} internal metadata cannot be changed.')
         validate_memory_transition(
@@ -204,6 +196,7 @@ class MemoryStore:
             conversation_id=conversation_id,
         )
         reference_name = edited['reference_name']
+        self.validate_new_preference_reference(loaded, edited['content'], reference_name)
         self.write(
             build_reference_path(reference_name),
             edited['reference_content'],
@@ -228,6 +221,24 @@ class MemoryStore:
             raise
         return edited['item']
 
+    def validate_new_preference_reference(self, original: str, proposed: str, reference_name: str) -> None:
+        from .paths import split_reference_ref
+        from .validation.preference import parse_preference_items
+
+        for content in (original, proposed):
+            error = validate_preference_index(content)
+            if error:
+                raise ValueError(error)
+        path = build_reference_path(reference_name)
+        if any(split_reference_ref(item.ref)[0] == path for item in parse_preference_items(original)):
+            raise ValueError(f'Preference name maps to an existing reference: {path}')
+        # A reference left by an older partial operation is also never overwritten.
+        try:
+            self.read(path)
+        except FileNotFoundError:
+            return
+        raise ValueError(f'Preference reference already exists: {path}')
+
     def remove_preference_with_reference(self, name: str) -> PreferenceItem:
         from .editors.preference import delete_preference_entry, reference_name_from_item
 
@@ -241,7 +252,7 @@ class MemoryStore:
             raise MemoryPartialApplyError(
                 (
                     f'preference delete partially applied: index entry '
-                    f"{edited['item'].name!r} was removed but reference "
+                    f'{edited["item"].name!r} was removed but reference '
                     f'{reference_name!r} could not be deleted: {exc}'
                 ),
                 operation='delete',

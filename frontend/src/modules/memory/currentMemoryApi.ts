@@ -1,5 +1,6 @@
 import {
   Configuration,
+  type PreferenceOrganizerTaskData,
   DefaultApiFactory,
   type CurrentMemoryOperation,
   type CurrentMemoryOperationsRequest,
@@ -11,7 +12,7 @@ import {
 import { axiosInstance, BASE_URL } from "@/components/request";
 
 export type MemoryValue = string | null | string[] | MemoryDocument;
-export type MemoryDocument = Record<string, MemoryValue>;
+export interface MemoryDocument { [key: string]: MemoryValue }
 export type SoulDocument = MemoryDocument;
 export type MemoryOperation = CurrentMemoryOperation;
 export type MemoryPatch = CurrentMemoryOperationsRequest;
@@ -223,4 +224,22 @@ export async function deletePreferenceMemory(
   await currentMemoryApi.apiCoreMemoryPreferencesNameDelete({
     name: preferenceName,
   });
+}
+
+export type PreferenceOrganizerTask = PreferenceOrganizerTaskData;
+
+export async function getLatestPreferenceOrganizer(signal?: AbortSignal): Promise<PreferenceOrganizerTask | null> {
+  const response = await currentMemoryApi.apiCoreMemoryPreferencesOrganizeGet({ signal });
+  return response.data.data ?? null;
+}
+
+export async function submitPreferenceOrganizer(): Promise<PreferenceOrganizerTask> {
+  const response = await currentMemoryApi.apiCoreMemoryPreferencesOrganizePost();
+  if (!response.data.data) throw new Error("Missing organizer task response");
+  return response.data.data;
+}
+
+export function isPreferenceOrganizing(error: unknown): boolean {
+  const response = (error as { response?: { data?: { code?: number; data?: { error_code?: string } } } })?.response?.data;
+  return response?.code === 2002321 || response?.data?.error_code === "preference_organizing";
 }

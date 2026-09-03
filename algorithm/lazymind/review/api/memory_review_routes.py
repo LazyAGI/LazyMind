@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Literal, Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from lazyllm import LOG
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from lazymind.common.maintenance import execute
 
 router = APIRouter()
 
@@ -13,6 +15,7 @@ router = APIRouter()
 class MemoryReviewPayload(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
+    run_id: str = Field(..., min_length=1, pattern=r'\S')
     task_id: str = Field(..., description='Core resource update task ID for this review run')
     user_id: str = Field(..., description='Backend user ID being reviewed')
     conversation_id: str = Field(..., description='Source conversation ID being reviewed')
@@ -42,9 +45,7 @@ class MemoryReviewPayload(BaseModel):
     @model_validator(mode='before')
     @classmethod
     def preserve_missing_conversation_as_business_error(cls, data):
-        if isinstance(data, dict) and (
-            'conversation_id' not in data or data.get('conversation_id') is None
-        ):
+        if isinstance(data, dict) and ('conversation_id' not in data or data.get('conversation_id') is None):
             data = dict(data)
             data['conversation_id'] = ''
         return data
@@ -61,9 +62,7 @@ class MemoryReviewPayload(BaseModel):
             raise ValueError("'user_id' must be non-empty.")
         self.conversation_id = str(self.conversation_id).strip()
         if not any(
-            message.get('role') == 'user'
-            and str(message.get('content', '')).strip()
-            for message in self.history
+            message.get('role') == 'user' and str(message.get('content', '')).strip() for message in self.history
         ):
             raise ValueError("'history' must contain at least one user message.")
         return self
@@ -92,7 +91,7 @@ class MemoryReviewResult(BaseModel):
     response_model=MemoryReviewResult,
     response_model_exclude_none=True,
 )
-async def memory_review(payload: MemoryReviewPayload):
+async def memory_review(payload: MemoryReviewPayload, request: Request = None):
     if not payload.conversation_id:
         return MemoryReviewResult(
             status='failed',
@@ -108,7 +107,11 @@ async def memory_review(payload: MemoryReviewPayload):
     from lazymind.review.service.memory_review import review_memory
 
     try:
-        result = review_memory(
+        result = await execute(
+            request,
+            review_memory,
+            timeout=600,
+            run_id=payload.run_id,
             task_id=payload.task_id,
             user_id=payload.user_id,
             conversation_id=payload.conversation_id,
@@ -116,6 +119,8 @@ async def memory_review(payload: MemoryReviewPayload):
             llm_config=payload.llm_config,
             conversation_last_active_at_ms=payload.conversation_last_active_at_ms,
         )
+    except HTTPException:
+        raise
     except Exception as exc:
         LOG.exception(f'[MemoryReview] memory review failed: {exc}')
         return JSONResponse(

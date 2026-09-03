@@ -285,7 +285,7 @@ func (m *Module) ReorderPreferences(
 		return CurrentMemoryPreferenceListData{}, err
 	}
 	var result CurrentMemoryPreferenceListData
-	err = m.repository.Transaction(ctx, func(repository *Repository) error {
+	err = m.repository.PreferenceTransaction(ctx, userID, func(repository *Repository) error {
 		entry, getErr := repository.GetEntryForUpdate(ctx, userID, PreferencePath)
 		if getErr != nil {
 			return getErr
@@ -342,7 +342,7 @@ func (m *Module) DeletePreference(
 	if err := m.repository.EnsureInitialized(ctx, userID); err != nil {
 		return err
 	}
-	return m.repository.Transaction(ctx, func(repository *Repository) error {
+	return m.repository.PreferenceTransaction(ctx, userID, func(repository *Repository) error {
 		entry, err := repository.GetEntryForUpdate(ctx, userID, PreferencePath)
 		if errors.Is(err, ErrNotFound) {
 			return nil

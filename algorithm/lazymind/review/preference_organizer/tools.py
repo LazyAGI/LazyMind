@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
-from lazyllm.tools import tool_concurrency
+from lazyllm.tools import fc_register
 from lazyllm.tools.agent import ToolExecutionError
 
 from lazymind.chat.engine.tools.memory import MemoryTools
@@ -31,6 +31,8 @@ from lazymind.common.memory.editors.preference import (
 from lazymind.common.memory.validation.common import parse_yaml_frontmatter
 from lazymind.common.memory.validation.preference import render_preference_index
 
+from lazymind.common.maintenance import check_cancelled, MaintenanceCancelled
+
 from .state import PreferenceStateSnapshot, load_preference_state
 
 
@@ -49,9 +51,7 @@ class ChangeBudget:
 
     def require(self, count: int) -> None:
         if count < 0 or self.used + count > self.maximum:
-            raise BudgetExhaustedError(
-                f'Organizer change budget exhausted ({self.used}/{self.maximum}).'
-            )
+            raise BudgetExhaustedError(f'Organizer change budget exhausted ({self.used}/{self.maximum}).')
 
     def commit(self, count: int) -> None:
         self.used += max(0, count)
@@ -61,9 +61,7 @@ class ChangeBudget:
 class PreferenceOrganizerGate:
     pass_number: int
     budget: ChangeBudget
-    hard_min_items: int
     phase: str = 'analyze'
-    plan_markdown: str = ''
     plan_hash: str = ''
     baseline_etag: str = ''
     current_etag: str = ''
@@ -73,59 +71,72 @@ class PreferenceOrganizerGate:
     terminal_outcome: str = ''
     terminal_error: str = ''
 
-    def submit(self, markdown: str, snapshot: PreferenceStateSnapshot) -> dict[str, Any]:
-        if self.phase != 'analyze':
-            raise ToolExecutionError('A plan has already been submitted for this pass.')
-        normalized = str(markdown or '').strip()
-        if not normalized:
-            raise ToolExecutionError('markdown must contain a complete organizer plan.')
+    active_receipt: dict[str, Any] | None = None
+    mutation_started: bool = False
+
+    def cursor(self) -> dict[str, Any]:
+        next_op = (
+            self.authorized_operations[self.next_operation_index]
+            if not self.terminal_outcome and self.next_operation_index < len(self.authorized_operations)
+            else {}
+        )
+        return {
+            'phase': self.terminal_outcome or self.phase,
+            'next_operation_id': next_op.get('operation_id'),
+            'next_operation_type': next_op.get('action'),
+            'remaining': len(self.authorized_operations) - self.next_operation_index,
+        }
+
+    def submit(self, operations: list[dict[str, Any]], snapshot: PreferenceStateSnapshot) -> dict[str, Any]:
+        check_cancelled()
+        if self.phase != 'analyze' or self.terminal_outcome:
+            raise ToolExecutionError('A plan has already been submitted or this pass has stopped.')
         try:
             authorized = _parse_authorized_operations(
-                normalized,
-                snapshot,
-                hard_min_items=self.hard_min_items,
-                changes_remaining=self.budget.maximum - self.budget.used,
+                operations, snapshot, changes_remaining=self.budget.maximum - self.budget.used
             )
         except (TypeError, ValueError) as exc:
             raise ToolExecutionError(str(exc)) from exc
-        self.plan_markdown = normalized
-        self.plan_hash = hashlib.sha256(normalized.encode('utf-8')).hexdigest()
-        self.baseline_etag = snapshot.data.etag
-        self.current_etag = snapshot.data.etag
+        canonical = json.dumps(authorized, sort_keys=True, ensure_ascii=False, separators=(',', ':'))
+        self.plan_hash = hashlib.sha256(canonical.encode('utf-8')).hexdigest()
+        self.baseline_etag = self.current_etag = snapshot.data.etag
         self.authorized_operations = authorized
         self.phase = 'apply'
-        return {
-            'status': 'accepted',
-            'pass_number': self.pass_number,
-            'plan_hash': self.plan_hash,
-            'baseline_etag': self.baseline_etag,
-            'authorized_operation_ids': [
-                operation['operation_id'] for operation in authorized
-            ],
-            'write_tools_enabled': True,
-        }
+        return self.cursor()
 
     def require_operation(
         self,
         action: str,
         operation_id: str,
     ) -> tuple[PreferenceStateSnapshot, dict[str, Any]]:
-        if self.phase != 'apply' or not self.plan_markdown:
+        check_cancelled()
+        if self.terminal_outcome:
+            raise ToolExecutionError('Organizer Gate is terminal; no further Apply is allowed.')
+        if self.phase != 'apply' or not self.plan_hash:
             raise ToolExecutionError('submit_preference_plan must succeed before any write.')
         if self.next_operation_index >= len(self.authorized_operations):
-            raise ToolExecutionError(
-                'The submitted Plan does not authorize another write operation.'
-            )
+            raise ToolExecutionError('The submitted Plan does not authorize another write operation.')
         operation = self.authorized_operations[self.next_operation_index]
         if operation['operation_id'] != str(operation_id or '').strip():
             raise ToolExecutionError(
                 'Write operations must follow the exact order in AUTHORIZED OPERATIONS; '
-                f"expected {operation['operation_id']!r}."
+                f'expected {operation["operation_id"]!r}.'
             )
         if operation['action'] != action:
             raise ToolExecutionError(
-                f"Operation {operation_id!r} is authorized for {operation['action']}, not {action}."
+                f'Operation {operation_id!r} is authorized for {operation["action"]}, not {action}.'
             )
+        self.active_receipt = {
+            'operation_id': operation['operation_id'],
+            'action': action,
+            'names': operation.get('source_names', []) + [operation['name']],
+            'status': 'pending',
+            'changes': 0,
+            'applied_steps': [],
+            'failed_steps': [],
+            'before_etag': self.current_etag,
+        }
+        self.mutation_started = False
         snapshot = load_preference_state()
         if snapshot.data.etag != self.current_etag:
             self.terminal_outcome = 'stale_state'
@@ -133,30 +144,80 @@ class PreferenceOrganizerGate:
             raise StalePreferenceStateError(self.terminal_error)
         return snapshot, operation
 
-    def record(self, action: str, names: list[str], changes: int) -> dict[str, Any]:
-        snapshot = load_preference_state()
-        self.current_etag = snapshot.data.etag
-        self.budget.commit(changes)
+    def begin_mutation(self) -> None:
+        check_cancelled()
+        self.mutation_started = True
+
+    def _save_receipt(self, receipt: dict[str, Any], changes: int) -> None:
+        if receipt not in self.operations:
+            receipt['changes'] = changes
+            self.budget.commit(changes)
+            self.operations.append(receipt)
+
+    def record(self, action: str, names: list[str], changes: int, *, episode_id: str = '') -> dict[str, Any]:
+        receipt = self.active_receipt
+        assert receipt is not None
+        receipt.update(
+            status='applied' if changes else 'idempotent',
+            names=names,
+            applied_steps=(
+                []
+                if not changes
+                else ['episode', 'preference_index', 'reference_cleanup']
+                if action == 'move_to_episode'
+                else ['new_reference', 'preference_index', 'source_reference_cleanup']
+                if action == 'merge'
+                else ['preference_index', 'reference_cleanup']
+            ),
+        )
+        if episode_id:
+            receipt['episode_id'] = episode_id
+        # Record persistence BEFORE reading back: a failed read must retain this receipt.
+        self._save_receipt(receipt, changes)
         self.next_operation_index += 1
-        receipt = {
-            'action': action,
-            'names': names,
-            'changes': changes,
-            'etag': self.current_etag,
-        }
-        self.operations.append(receipt)
-        return receipt
+        try:
+            snapshot = load_preference_state()
+            self.current_etag = snapshot.data.etag
+            receipt['etag'] = self.current_etag
+        except Exception:
+            receipt['status'] = 'partial'
+            receipt['failed_steps'].append('validation_read')
+            self.terminal_outcome = 'partial'
+            raise
+        self.active_receipt = None
+        return self.cursor()
 
     def fail(self, exc: Exception) -> ToolExecutionError:
-        if isinstance(exc, StalePreferenceStateError):
-            self.terminal_outcome = 'stale_state'
-        elif isinstance(exc, BudgetExhaustedError):
-            self.terminal_outcome = 'budget_exhausted'
-        elif isinstance(exc, MemoryPartialApplyError):
-            self.terminal_outcome = 'partial'
-        else:
-            self.terminal_outcome = self.terminal_outcome or 'failed'
-        self.terminal_error = str(exc)
+        if not self.terminal_outcome:
+            if isinstance(exc, StalePreferenceStateError):
+                self.terminal_outcome = 'stale_state'
+            elif isinstance(exc, BudgetExhaustedError):
+                self.terminal_outcome = 'budget_exhausted'
+            elif isinstance(exc, MemoryPartialApplyError):
+                self.terminal_outcome = 'partial'
+            elif isinstance(exc, MaintenanceCancelled):
+                self.terminal_outcome = 'cancelled'
+            else:
+                self.terminal_outcome = 'failed'
+        receipt = self.active_receipt
+        if receipt is not None and receipt not in self.operations:
+            op = self.authorized_operations[self.next_operation_index]
+            cost = len(op['source_names']) if op['action'] == 'merge' else 1
+            if isinstance(exc, MemoryPartialApplyError):
+                receipt.update(
+                    status='partial', applied_steps=list(exc.applied), failed_steps=list(exc.failed), **exc.metadata
+                )
+                self._save_receipt(receipt, cost if exc.applied else 0)
+            else:
+                unknown = self.mutation_started and not isinstance(exc, (ValueError, FileNotFoundError))
+                receipt.update(
+                    status='unknown' if unknown else 'failed',
+                    failed_steps=['mutation' if self.mutation_started else 'precondition'],
+                )
+                self._save_receipt(receipt, cost if unknown else 0)
+                if unknown:
+                    self.terminal_outcome = 'partial'
+        self.terminal_error = self.terminal_error or str(exc)
         return ToolExecutionError(str(exc))
 
 
@@ -173,7 +234,7 @@ class PreferenceOrganizerAnalyzeTools:
     def __lazy_source__(self) -> bool:
         return False
 
-    @tool_concurrency(read_keys=('memory', 'memory/users/preference.yaml'))
+    @fc_register(read_keys=('memory', 'memory/users/preference.yaml'))
     def read_preference_state(self) -> dict[str, Any]:
         """Read the complete Preference index and current item count."""
         snapshot = load_preference_state()
@@ -187,9 +248,9 @@ class PreferenceOrganizerAnalyzeTools:
         """Read up to ten exact Preference refs when summaries are insufficient."""
         return MemoryTools().read_memory_reference(refs)
 
-    def submit_preference_plan(self, markdown: str) -> dict[str, Any]:
-        """Submit the complete Markdown Plan and enable the write tools for this pass."""
-        return self.gate.submit(markdown, load_preference_state())
+    def submit_preference_plan(self, operations: list[dict[str, Any]]) -> dict[str, Any]:
+        """Submit ordered structured operations to the Gate. Use [] for no safe changes."""
+        return self.gate.submit(operations, load_preference_state())
 
 
 class PreferenceOrganizerApplyTools:
@@ -199,7 +260,7 @@ class PreferenceOrganizerApplyTools:
         'delete_preference',
     ]
 
-    __key_source__ = lambda self: self.gate.phase == 'apply'  # noqa: E731
+    __key_source__ = lambda self: self.gate.phase == 'apply' and not self.gate.terminal_outcome  # noqa: E731
 
     def __init__(self, gate: PreferenceOrganizerGate):
         self.gate = gate
@@ -207,10 +268,12 @@ class PreferenceOrganizerApplyTools:
     def __lazy_source__(self) -> bool:
         return False
 
-    @tool_concurrency(write_keys=[
-        ('memory', 'memory/users/preference.yaml'),
-        ('memory-reference-collection',),
-    ])
+    @fc_register(
+        write_keys=[
+            ('memory', 'memory/users/preference.yaml'),
+            ('memory-reference-collection',),
+        ]
+    )
     def merge_preferences(
         self,
         operation_id: str,
@@ -225,8 +288,7 @@ class PreferenceOrganizerApplyTools:
             normalized_sources = operation['source_names']
             normalized_name = operation['name']
             self.gate.budget.require(len(normalized_sources))
-            if snapshot.data.stored_items - len(normalized_sources) + 1 < self.gate.hard_min_items:
-                raise ValueError('merge would reduce Preference below the hard minimum.')
+            self.gate.begin_mutation()
             _merge_preferences(
                 snapshot,
                 source_names=normalized_sources,
@@ -237,39 +299,47 @@ class PreferenceOrganizerApplyTools:
                 reason=operation['reason'],
             )
             receipt = self.gate.record(
-                'merge', [*normalized_sources, normalized_name], len(normalized_sources),
+                'merge',
+                [*normalized_sources, normalized_name],
+                len(normalized_sources),
             )
-            return {'status': 'applied', **receipt}
+            return receipt
         except Exception as exc:
             raise self.gate.fail(exc) from exc
 
-    @tool_concurrency(write_keys=[
-        ('memory', 'memory/users/preference.yaml'),
-        ('memory-reference-collection',),
-        ('episode-memory',),
-    ])
+    @fc_register(
+        write_keys=[
+            ('memory', 'memory/users/preference.yaml'),
+            ('memory-reference-collection',),
+            ('episode-memory',),
+        ]
+    )
     def move_preference_to_episode(self, operation_id: str) -> dict[str, Any]:
         """Apply the next exact move_to_episode entry from the gated Plan."""
         try:
             snapshot, operation = self.gate.require_operation(
-                'move_to_episode', operation_id,
+                'move_to_episode',
+                operation_id,
             )
             normalized_name = operation['name']
             self.gate.budget.require(1)
-            if snapshot.data.stored_items - 1 < self.gate.hard_min_items:
-                raise ValueError('move would reduce Preference below the hard minimum.')
+            self.gate.begin_mutation()
             episode_id = _move_preference_to_episode(
-                snapshot, normalized_name, operation['episode_summary'],
+                snapshot,
+                normalized_name,
+                operation['episode_summary'],
             )
-            receipt = self.gate.record('move_to_episode', [normalized_name], 1)
-            return {'status': 'applied', 'episode_id': episode_id, **receipt}
+            receipt = self.gate.record('move_to_episode', [normalized_name], 1, episode_id=episode_id)
+            return receipt
         except Exception as exc:
             raise self.gate.fail(exc) from exc
 
-    @tool_concurrency(write_keys=[
-        ('memory', 'memory/users/preference.yaml'),
-        ('memory-reference-collection',),
-    ])
+    @fc_register(
+        write_keys=[
+            ('memory', 'memory/users/preference.yaml'),
+            ('memory-reference-collection',),
+        ]
+    )
     def delete_preference(
         self,
         operation_id: str,
@@ -278,45 +348,30 @@ class PreferenceOrganizerApplyTools:
         try:
             snapshot, operation = self.gate.require_operation('delete', operation_id)
             normalized_name = operation['name']
-            reason = operation['reason_code']
             replacement = operation['retained_or_replacement_name']
             names = [normalized_name, *([replacement] if replacement else [])]
             self.gate.budget.require(1)
-            if snapshot.data.stored_items - 1 < self.gate.hard_min_items:
-                raise ValueError('delete would reduce Preference below the hard minimum.')
+            self.gate.begin_mutation()
             try:
                 MemoryStore().remove_preference_with_reference(normalized_name)
                 changes = 1
             except FileNotFoundError:
                 changes = 0
             receipt = self.gate.record('delete', names, changes)
-            return {'status': 'applied' if changes else 'idempotent', 'reason_code': reason, **receipt}
+            return receipt
         except Exception as exc:
             raise self.gate.fail(exc) from exc
 
 
-_AUTHORIZED_OPERATIONS_RE = re.compile(
-    r'(?ims)^#{1,6}\s+AUTHORIZED OPERATIONS\s*$.*?```json\s*(\[.*?\])\s*```'
-)
 _OPERATION_ID_RE = re.compile(r'^[A-Za-z0-9._-]{1,64}$')
 
 
 def _parse_authorized_operations(
-    markdown: str,
+    raw_operations: list[dict[str, Any]],
     snapshot: PreferenceStateSnapshot,
     *,
-    hard_min_items: int,
     changes_remaining: int,
 ) -> list[dict[str, Any]]:
-    match = _AUTHORIZED_OPERATIONS_RE.search(markdown)
-    if match is None:
-        raise ValueError(
-            'Plan must contain an AUTHORIZED OPERATIONS heading followed by one JSON list.'
-        )
-    try:
-        raw_operations = json.loads(match.group(1))
-    except json.JSONDecodeError as exc:
-        raise ValueError(f'AUTHORIZED OPERATIONS is not valid JSON: {exc.msg}.') from exc
     if not isinstance(raw_operations, list):
         raise ValueError('AUTHORIZED OPERATIONS must be a JSON list.')
 
@@ -328,6 +383,13 @@ def _parse_authorized_operations(
     for raw in raw_operations:
         if not isinstance(raw, dict):
             raise ValueError('Every authorized operation must be a JSON object.')
+        if any(not isinstance(value, str) for key, value in raw.items() if key != 'source_names'):
+            raise ValueError('Operation fields must be strings, except source_names.')
+        if 'source_names' in raw and (
+            not isinstance(raw['source_names'], list)
+            or any(not isinstance(value, str) for value in raw['source_names'])
+        ):
+            raise ValueError('source_names must be a list of strings.')
         operation_id = str(raw.get('operation_id') or '').strip()
         action = str(raw.get('action') or '').strip()
         if not _OPERATION_ID_RE.fullmatch(operation_id) or operation_id in operation_ids:
@@ -335,13 +397,21 @@ def _parse_authorized_operations(
         operation_ids.add(operation_id)
         if action == 'merge':
             allowed = {
-                'operation_id', 'action', 'source_names', 'name', 'summary',
-                'scenario', 'details', 'reason',
+                'operation_id',
+                'action',
+                'source_names',
+                'name',
+                'summary',
+                'scenario',
+                'details',
+                'reason',
             }
             _require_exact_keys(raw, allowed)
-            source_names = [
-                validate_preference_name(value) for value in raw['source_names']
-            ] if isinstance(raw.get('source_names'), list) else []
+            source_names = (
+                [validate_preference_name(value) for value in raw['source_names']]
+                if isinstance(raw.get('source_names'), list)
+                else []
+            )
             if len(source_names) != len(set(source_names)) or not 2 <= len(source_names) <= 10:
                 raise ValueError('merge source_names must contain 2-10 unique names.')
             if not set(source_names).issubset(known_names):
@@ -358,19 +428,22 @@ def _parse_authorized_operations(
                 'source_names': source_names,
                 'name': name,
                 'summary': summary,
-                **{
-                    key: _required_text(raw.get(key), key)
-                    for key in ('scenario', 'details', 'reason')
-                },
+                **{key: _required_text(raw.get(key), key) for key in ('scenario', 'details', 'reason')},
             }
             known_names.difference_update(source_names)
             known_names.add(name)
             count -= len(source_names) - 1
             change_count += len(source_names)
         elif action == 'move_to_episode':
-            _require_exact_keys(raw, {
-                'operation_id', 'action', 'name', 'episode_summary',
-            })
+            _require_exact_keys(
+                raw,
+                {
+                    'operation_id',
+                    'action',
+                    'name',
+                    'episode_summary',
+                },
+            )
             name = validate_preference_name(raw.get('name'))
             if name not in known_names:
                 raise ValueError('move_to_episode name must exist at Gate time.')
@@ -387,10 +460,16 @@ def _parse_authorized_operations(
             count -= 1
             change_count += 1
         elif action == 'delete':
-            _require_exact_keys(raw, {
-                'operation_id', 'action', 'name', 'reason_code',
-                'retained_or_replacement_name',
-            })
+            _require_exact_keys(
+                raw,
+                {
+                    'operation_id',
+                    'action',
+                    'name',
+                    'reason_code',
+                    'retained_or_replacement_name',
+                },
+            )
             name = validate_preference_name(raw.get('name'))
             if name not in known_names:
                 raise ValueError('delete name must exist at Gate time.')
@@ -416,8 +495,6 @@ def _parse_authorized_operations(
             change_count += 1
         else:
             raise ValueError(f'unsupported authorized action: {action!r}.')
-        if count < hard_min_items:
-            raise ValueError('Authorized Plan would reduce Preference below the hard minimum.')
         if change_count > changes_remaining:
             raise ValueError('Authorized Plan exceeds the remaining change budget.')
         authorized.append(operation)
@@ -426,13 +503,13 @@ def _parse_authorized_operations(
 
 def _require_exact_keys(raw: dict[str, Any], expected: set[str]) -> None:
     if set(raw) != expected:
-        raise ValueError(
-            f'authorized operation keys must be exactly {sorted(expected)}.'
-        )
+        raise ValueError(f'authorized operation keys must be exactly {sorted(expected)}.')
 
 
 def _required_text(value: Any, field_name: str) -> str:
-    normalized = str(value or '').strip()
+    if not isinstance(value, str):
+        raise ValueError(f'{field_name} must be a string.')
+    normalized = value.strip()
     if not normalized:
         raise ValueError(f'{field_name} must not be blank.')
     return normalized
@@ -458,10 +535,7 @@ def _merge_preferences(
     source_items = [by_name[source_name] for source_name in source_names]
     earliest_index = min(items.index(item) for item in source_items)
     earliest = min(source_items, key=lambda item: item.created_at)
-    source_references = {
-        item.name: _read_valid_reference(item.ref)
-        for item in source_items
-    }
+    source_references = {item.name: _read_valid_reference(item.ref) for item in source_items}
     frontmatter, _body = parse_yaml_frontmatter(source_references[earliest.name])
     source = frontmatter.get('source') if isinstance(frontmatter, dict) else {}
     source = source if isinstance(source, dict) else {}
@@ -492,11 +566,21 @@ def _merge_preferences(
     remaining.insert(earliest_index, new_item)
     content = render_preference_index(snapshot.content, remaining)
     store = MemoryStore()
+    store.validate_new_preference_reference(snapshot.content, content, reference_name)
     store.write(build_reference_path(reference_name), reference_content)
     try:
         store.write('memory/users/preference.yaml', content)
-    except Exception:
-        store.delete_reference(reference_name)
+    except Exception as write_exc:
+        try:
+            store.delete_reference(reference_name)
+        except Exception as cleanup_exc:
+            raise MemoryPartialApplyError(
+                f'merge index failed and new reference cleanup failed: {cleanup_exc}',
+                operation='merge',
+                applied=['new_reference'],
+                failed=['preference_index', 'new_reference_cleanup'],
+                item=new_item,
+            ) from write_exc
         raise
     failed_refs: list[str] = []
     for item in source_items:
@@ -545,15 +629,16 @@ def _move_preference_to_episode(
         raise MemoryPartialApplyError(
             'Episode was created but the source Preference could not be removed.',
             operation='move_to_episode',
-            applied=['episode'],
-            failed=['preference_cleanup'],
+            applied=['episode', *getattr(exc, 'applied', ())],
+            failed=list(getattr(exc, 'failed', ())) or ['preference_cleanup'],
             item=item,
+            metadata={'episode_id': create_result.id},
         ) from exc
     return create_result.id
 
 
 def _read_valid_reference(ref: str) -> str:
-    content = MemoryStore().read_reference(ref)
+    content = MemoryStore().read_reference(ref.partition('#')[0])
     error = validate_reference_content(content)
     if error:
         raise ValueError(f'Preference Reference {ref!r} is invalid: {error}')

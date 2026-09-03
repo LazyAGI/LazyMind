@@ -11,8 +11,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rs/zerolog"
+	"gorm.io/gorm"
 	"lazymind/core/common/orm"
 	currentmemoryapi "lazymind/core/currentmemory"
+	appLog "lazymind/core/log"
 )
 
 const validMemoryReferenceYAML = `---
@@ -857,9 +860,10 @@ func TestPreferenceStorageAcceptsMoreThanOneHundredItems(t *testing.T) {
 func TestPreferenceFreezeRejectsOrdinaryWriteAndAllowsCurrentOrganizer(t *testing.T) {
 	db := newRemoteFSTestDB(t)
 	handler := newMemoryCurrentHandler(newMemoryCurrentService(db.DB))
-	now := time.Date(2026, 9, 2, 1, 0, 0, 0, time.UTC)
+	now := time.Now().UTC()
+	until := now.Add(time.Minute)
 	task := orm.ResourceUpdateTask{
-		ID: "organizer-1", TaskType: orm.ResourceUpdateTaskTypeOrganizePreference,
+		ID: "organizer-1", RunID: "run-1", LockedUntil: &until, TaskType: orm.ResourceUpdateTaskTypeOrganizePreference,
 		ResourceType: orm.ResourceUpdateResourceTypeUserPreference, UserID: "u1", ResourceID: "u1",
 		TriggerType: orm.ResourceUpdateTriggerTypeManual, TriggerID: "manual-1",
 		Status: orm.ResourceUpdateTaskStatusRunning, NextRunAt: now,
@@ -876,6 +880,7 @@ func TestPreferenceFreezeRejectsOrdinaryWriteAndAllowsCurrentOrganizer(t *testin
 			"/remote-fs/content?path="+memoryPreferencePath+"&user_id=u1"+query,
 			strings.NewReader(content),
 		)
+		request.Header.Set("X-LazyMind-Run-Id", "run-1")
 		recorder := httptest.NewRecorder()
 		handler.Content(recorder, request, memoryPreferencePath)
 		return recorder
@@ -1079,5 +1084,75 @@ func TestMemoryMountProtectsRootAndRejectsCrossMountMoves(t *testing.T) {
 	}
 	if count == 0 {
 		t.Fatal("expected protected memory root and defaults to remain")
+	}
+}
+
+func TestAutoOrganizerUsesFreshUserScopedEventsAfterHistoricalCompletion(t *testing.T) {
+	db := newRemoteFSTestDB(t)
+	handler := newMemoryCurrentHandler(newMemoryCurrentService(db.DB))
+	content := renderPreferenceCount(t, 80, "same content")
+	write := func(user, body string) {
+		req := httptest.NewRequest(http.MethodPut, "/remote-fs/content?path="+memoryPreferencePath+"&user_id="+user, strings.NewReader(body))
+		rec := httptest.NewRecorder()
+		handler.Content(rec, req, memoryPreferencePath)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("write: %d %s", rec.Code, rec.Body.String())
+		}
+	}
+	write("user-a", content)
+	write("user-b", content)
+	var first []orm.ResourceUpdateTask
+	if err := db.Order("user_id").Find(&first).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(first) != 2 || first[0].TriggerID == first[1].TriggerID {
+		t.Fatalf("cross-user events: %+v", first)
+	}
+	if err := db.Model(&orm.ResourceUpdateTask{}).Where("user_id = ?", "user-a").Update("status", "done").Error; err != nil {
+		t.Fatal(err)
+	}
+	write("user-a", "preferences: []\n")
+	write("user-a", content)
+	write("user-a", content)
+	var tasks []orm.ResourceUpdateTask
+	if err := db.Where("user_id = ?", "user-a").Order("created_at").Find(&tasks).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(tasks) != 2 || tasks[0].TriggerID == tasks[1].TriggerID || tasks[1].Status != "pending" {
+		t.Fatalf("restored-content events: %+v", tasks)
+	}
+}
+
+func TestAutomaticEnqueueFailureWarnsWithoutRollingBackPreferenceWrite(t *testing.T) {
+	db := newRemoteFSTestDB(t)
+	var logs bytes.Buffer
+	previousLogger := appLog.Logger
+	appLog.Logger = zerolog.New(&logs)
+	t.Cleanup(func() { appLog.Logger = previousLogger })
+	if err := db.Callback().Create().Before("gorm:create").Register("test:enqueue_failure", func(tx *gorm.DB) {
+		if tx.Statement.Table == "resource_update_tasks" {
+			tx.AddError(fmt.Errorf("injected enqueue failure"))
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	content := renderPreferenceCount(t, 80, "persist even if enqueue fails")
+	handler := newMemoryCurrentHandler(newMemoryCurrentService(db.DB))
+	request := httptest.NewRequest(http.MethodPut, "/remote-fs/content?path="+memoryPreferencePath+"&user_id=u1", strings.NewReader(content))
+	recorder := httptest.NewRecorder()
+	handler.Content(recorder, request, memoryPreferencePath)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("write: %d %s", recorder.Code, recorder.Body.String())
+	}
+	stored, err := currentmemoryapi.NewRepository(db.DB).GetEntry(t.Context(), "u1", memoryPreferencePath)
+	if err != nil || string(stored.Content) != content {
+		t.Fatalf("preference write lost: %v", err)
+	}
+	var warning map[string]any
+	if err := json.Unmarshal(logs.Bytes(), &warning); err != nil {
+		t.Fatalf("warning: %s %v", logs.String(), err)
+	}
+	if warning["level"] != "warn" || warning["event"] != "preference_organizer_enqueue_failed" || warning["user_id"] != "u1" || warning["etag"] == "" {
+		t.Fatalf("missing warning context: %v", warning)
 	}
 }

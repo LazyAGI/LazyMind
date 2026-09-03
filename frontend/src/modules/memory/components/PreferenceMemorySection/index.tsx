@@ -20,6 +20,7 @@ import {
   LeftOutlined,
   RightOutlined,
   SettingOutlined,
+  ClearOutlined,
 } from "@ant-design/icons";
 import {
   Alert,
@@ -38,6 +39,7 @@ import { useTranslation } from "react-i18next";
 import { getLocalizedErrorMessage } from "@/components/request";
 import {
   deletePreferenceMemory,
+  isPreferenceOrganizing,
   getPreferenceMemory,
   listPreferenceMemories,
   reorderPreferenceMemories,
@@ -55,6 +57,8 @@ import {
 } from "../../currentMemoryViewModel";
 import { getMemorySourceLabelKey } from "../../memorySourceLabels";
 import SafeReferenceMarkdown from "./SafeReferenceMarkdown";
+
+import { usePreferenceOrganizer } from "../../hooks/usePreferenceOrganizer";
 
 const PAGE_SIZE = 5;
 
@@ -180,6 +184,7 @@ function SortablePreferenceRow({
 export default function PreferenceMemorySection() {
   const { i18n, t } = useTranslation();
   const detailRequestIdRef = useRef(0);
+  const selectedDetailRef = useRef<PreferenceMemoryItem | null>(null);
   const [list, setList] = useState<PreferenceMemoryList | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -228,6 +233,33 @@ export default function PreferenceMemorySection() {
     void refresh();
   }, [refresh]);
 
+  const organizer = usePreferenceOrganizer((completed) => {
+    void refresh();
+    if (detailOpen && selectedDetailRef.current) void openDetail(selectedDetailRef.current);
+    const outcome = completed.result?.outcome;
+    if (outcome === "partial") message.warning(t("admin.memoryPreferenceOrganizePartial"));
+    else if (completed.status === "failed") message.error(t("admin.memoryPreferenceOrganizeFailed"));
+    else message.success(t(outcome === "no_safe_changes" ? "admin.memoryPreferenceOrganizeNoChanges" : "admin.memoryPreferenceOrganizeDone"));
+  });
+  const organizerLabel = organizer.task?.status === "running"
+    ? "admin.memoryPreferenceOrganizeRunning"
+    : organizer.task?.status === "pending"
+      ? (organizer.task.waiting_reason === "memory_review" ? "admin.memoryPreferenceOrganizeWaitingReview" : "admin.memoryPreferenceOrganizeWaiting")
+      : "admin.memoryPreferenceOrganize";
+  const organizerResultLabel = organizer.task && !organizer.active
+    ? organizer.task.result?.outcome === "partial"
+      ? "admin.memoryPreferenceOrganizePartial"
+      : organizer.task.status === "failed"
+        ? "admin.memoryPreferenceOrganizeFailed"
+        : organizer.task.result?.outcome === "no_safe_changes"
+          ? "admin.memoryPreferenceOrganizeNoChanges"
+          : "admin.memoryPreferenceOrganizeDone"
+    : null;
+  const submitOrganizer = async () => {
+    try { await organizer.submit(); }
+    catch (error) { message.error(getLocalizedErrorMessage(error)); }
+  };
+
   const pageCount = Math.max(
     1,
     Math.ceil((list?.items.length || 0) / PAGE_SIZE),
@@ -269,7 +301,13 @@ export default function PreferenceMemorySection() {
       setPreDragList(null);
     } catch (error) {
       console.error("Reorder Preference memory failed:", error);
-      if (isCurrentMemoryConflict(error)) {
+      if (isPreferenceOrganizing(error)) {
+        if (rollbackList) setList(rollbackList);
+        setPreDragList(null);
+        setOrderConflict(false);
+        message.info(t("admin.memoryPreferenceOrganizeRunning"));
+        void organizer.refresh();
+      } else if (isCurrentMemoryConflict(error)) {
         setOrderConflict(true);
       } else {
         if (rollbackList) {
@@ -284,7 +322,7 @@ export default function PreferenceMemorySection() {
   };
 
   const handleDragEnd = (event: DragEndEvent) => {
-    if (!list || ordering || orderConflict || !event.over) {
+    if (!list || organizer.running || ordering || orderConflict || !event.over) {
       return;
     }
     const activeName = String(event.active.id);
@@ -304,7 +342,7 @@ export default function PreferenceMemorySection() {
   };
 
   const resubmitRetainedOrder = async () => {
-    if (!list || ordering) {
+    if (!list || organizer.running || ordering) {
       return;
     }
     setOrdering(true);
@@ -340,6 +378,7 @@ export default function PreferenceMemorySection() {
   };
 
   const openDetail = async (item: PreferenceMemoryItem) => {
+    selectedDetailRef.current = item;
     const requestId = detailRequestIdRef.current + 1;
     detailRequestIdRef.current = requestId;
     setDetailOpen(true);
@@ -364,7 +403,7 @@ export default function PreferenceMemorySection() {
   };
 
   const deleteItem = async (item: PreferenceMemoryItem) => {
-    if (ordering || orderConflict) {
+    if (organizer.running || ordering || orderConflict) {
       return;
     }
     setDeletingNames((current) => new Set(current).add(item.name));
@@ -415,7 +454,10 @@ export default function PreferenceMemorySection() {
       }
     } catch (error) {
       console.error("Delete Preference memory failed:", error);
-      message.error(getLocalizedErrorMessage(error));
+      if (isPreferenceOrganizing(error)) {
+        message.info(t("admin.memoryPreferenceOrganizeRunning"));
+        void organizer.refresh();
+      } else message.error(getLocalizedErrorMessage(error));
     } finally {
       setDeletingNames((current) => {
         const next = new Set(current);
@@ -474,6 +516,10 @@ export default function PreferenceMemorySection() {
           <h3>{t("admin.memoryPreferenceTitle")}</h3>
           <p>{t("admin.memoryPreferenceDescription")}</p>
         </div>
+        <Button icon={<ClearOutlined />} loading={organizer.submitting}
+          disabled={organizer.running || !list?.items.length} onClick={() => void submitOrganizer()}>
+          {t(organizerLabel)}
+        </Button>
         <span className="memory-current-section-count">
           {t("admin.memoryPreferenceTotal", {
             count: list?.totalSize || 0,
@@ -481,6 +527,9 @@ export default function PreferenceMemorySection() {
         </span>
       </div>
 
+      {organizerResultLabel ? <p role="status">{t(organizerResultLabel)}</p> : null}
+      {organizer.error ? <Alert type="warning" showIcon message={t("admin.memoryPreferenceOrganizeStatusFailed")}
+        action={<Button size="small" onClick={() => void organizer.refresh()}>{t("common.retry")}</Button>} /> : null}
       {residentIndexUsage ? (
         <div
           className={`memory-preference-usage is-${residentUsageTone}`}
@@ -524,14 +573,14 @@ export default function PreferenceMemorySection() {
           action={
             <div className="memory-current-conflict-actions">
               <Button
-                disabled={ordering}
+                disabled={organizer.running || ordering}
                 size="small"
                 onClick={() => void refresh()}
               >
                 {t("admin.memoryPreferenceReloadOrder")}
               </Button>
               <Button
-                disabled={ordering}
+                disabled={organizer.running || ordering}
                 loading={ordering}
                 size="small"
                 type="primary"
@@ -609,7 +658,7 @@ export default function PreferenceMemorySection() {
                 {visibleItems.map((item, index) => (
                   <SortablePreferenceRow
                     deleting={deletingNames.has(item.name)}
-                    disabled={ordering || orderConflict}
+                    disabled={organizer.running || ordering || orderConflict}
                     index={pageIndex * PAGE_SIZE + index}
                     item={item}
                     key={item.name}

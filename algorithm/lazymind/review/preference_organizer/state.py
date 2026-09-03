@@ -51,36 +51,28 @@ def load_preference_state(store: MemoryStore | None = None) -> PreferenceStateSn
     return PreferenceStateSnapshot(content=content, items=items, data=data)
 
 
-def target_reached(
-    state: PreferenceStateData,
-    *,
-    target_prompt_percent: int,
-) -> bool:
-    max_chars = int(_cfg['preference_context_max_chars'])
+TARGET_ITEMS = 30
+SOFT_ITEMS = 20
+TARGET_PROMPT_PERCENT = 40
+MAX_CHANGES = 50
+MAX_PASSES = 2
+MAX_ROUNDS_PER_PASS = 60
+
+
+def target_reached(state: PreferenceStateData) -> bool:
     return (
-        not state.projection_truncated
+        state.stored_items <= TARGET_ITEMS
+        and not state.projection_truncated
         and projection_target_reached(
             state.full_projection_chars,
-            max_chars=max_chars,
-            target_percent=target_prompt_percent,
+            max_chars=int(_cfg['preference_context_max_chars']),
+            target_percent=TARGET_PROMPT_PERCENT,
         )
     )
 
 
-def target_item_count(
-    snapshot: PreferenceStateSnapshot,
-    *,
-    preferred_target_items: int,
-    hard_min_items: int,
-    target_prompt_percent: int,
-) -> int:
-    max_chars = int(_cfg['preference_context_max_chars'])
+def target_item_count(snapshot: PreferenceStateSnapshot) -> int:
     safe_count = projection_safe_item_count(
-        snapshot.items,
-        max_chars=max_chars,
-        target_percent=target_prompt_percent,
+        snapshot.items, max_chars=int(_cfg['preference_context_max_chars']), target_percent=TARGET_PROMPT_PERCENT
     )
-    return min(
-        snapshot.data.stored_items,
-        max(hard_min_items, min(30, preferred_target_items, safe_count)),
-    )
+    return min(snapshot.data.stored_items, TARGET_ITEMS, safe_count)

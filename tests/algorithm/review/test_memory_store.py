@@ -81,7 +81,7 @@ class FakeRemoteFS:
         for file_path in sorted(self.files):
             if not file_path.startswith(prefix):
                 continue
-            rest = file_path[len(prefix):]
+            rest = file_path[len(prefix) :]
             name = rest.split('/', 1)[0]
             full = f'{normalized}/{name}'
             if full in seen:
@@ -90,12 +90,14 @@ class FakeRemoteFS:
             if '/' in rest:
                 items.append({'name': full, 'path': full, 'type': 'dir'})
             else:
-                items.append({
-                    'name': full,
-                    'path': full,
-                    'type': 'file',
-                    'size': len(self.files[file_path]),
-                })
+                items.append(
+                    {
+                        'name': full,
+                        'path': full,
+                        'type': 'file',
+                        'size': len(self.files[file_path]),
+                    }
+                )
         return items
 
     def makedirs(self, path: str, exist_ok: bool = True) -> None:
@@ -143,13 +145,7 @@ def test_validate_sample_documents():
 
 
 def test_profile_validation_discovers_current_fields_and_rejects_unsupported_types():
-    dynamic_profile = (
-        'schema_version: 2\n'
-        'personal:\n'
-        '  nickname: Neo\n'
-        '  interests: [AI]\n'
-        '  headline: null\n'
-    )
+    dynamic_profile = 'schema_version: 2\npersonal:\n  nickname: Neo\n  interests: [AI]\n  headline: null\n'
 
     assert validate_stored_memory_content(dynamic_profile, label='profile') is None
     error = validate_stored_memory_content(
@@ -169,11 +165,13 @@ def test_profile_validation_discovers_current_fields_and_rejects_unsupported_typ
 
 
 def test_memory_store_roundtrip():
-    fs = FakeRemoteFS({
-        SOUL_PATH: SAMPLE_SOUL,
-        PROFILE_PATH: SAMPLE_PROFILE,
-        PREFERENCE_PATH: SAMPLE_PREFERENCE,
-    })
+    fs = FakeRemoteFS(
+        {
+            SOUL_PATH: SAMPLE_SOUL,
+            PROFILE_PATH: SAMPLE_PROFILE,
+            PREFERENCE_PATH: SAMPLE_PREFERENCE,
+        }
+    )
     store = MemoryStore(fs)
     soul = store.read_soul()
     profile = store.read_profile()
@@ -232,10 +230,12 @@ def test_memory_store_does_not_migrate_versionless_documents():
         'accessibility:\n'
         '  communication_needs: []\n'
     )
-    fs = FakeRemoteFS({
-        SOUL_PATH: legacy_soul,
-        PROFILE_PATH: legacy_profile,
-    })
+    fs = FakeRemoteFS(
+        {
+            SOUL_PATH: legacy_soul,
+            PROFILE_PATH: legacy_profile,
+        }
+    )
     store = MemoryStore(fs)
 
     with pytest.raises(ValueError, match='internal version metadata is missing'):
@@ -294,9 +294,11 @@ def test_memory_store_rejects_profile_type_changes_before_writing(
     )
 
     with pytest.raises(ValueError, match=expected_error):
-        store.apply_profile_operations([
-            {'op': 'add', 'path': 'identity.aliases', 'value': 'Neo'},
-        ])
+        store.apply_profile_operations(
+            [
+                {'op': 'add', 'path': 'identity.aliases', 'value': 'Neo'},
+            ]
+        )
     assert fs.files[PROFILE_PATH] == original
 
 
@@ -319,9 +321,11 @@ def test_memory_store_writes_the_same_stored_profile_it_validates(monkeypatch):
         fake_apply,
     )
 
-    result = store.apply_profile_operations([
-        {'op': 'add', 'path': 'identity.aliases', 'value': 'Neo'},
-    ])
+    result = store.apply_profile_operations(
+        [
+            {'op': 'add', 'path': 'identity.aliases', 'value': 'Neo'},
+        ]
+    )
 
     assert 'ok' not in result
     assert result['content'] == visible_profile
@@ -412,3 +416,30 @@ def test_preference_add_reports_partial_apply_when_cleanup_fails():
     assert captured.value.failed == ('preference_index', 'reference_cleanup')
     assert fs.files[PREFERENCE_PATH] == SAMPLE_PREFERENCE
     assert reference_path in fs.files
+
+
+@pytest.mark.parametrize('new_name', ['pref.a_b', 'pref.a-b'])
+def test_new_preference_name_mapping_collision_is_rejected_before_write(new_name):
+    content = append_preference_item(
+        SAMPLE_PREFERENCE,
+        PreferenceItem(
+            name='pref.a.b',
+            summary='existing',
+            ref='references/a-b.md#section',
+            created_at=TIMESTAMP,
+            updated_at=TIMESTAMP,
+        ),
+    )
+    fs = FakeRemoteFS({PREFERENCE_PATH: content, build_reference_path('a-b'): 'existing reference'})
+    before = dict(fs.files)
+    with pytest.raises(ValueError, match='duplicate preference reference|existing reference'):
+        MemoryStore(fs).add_preference_with_reference(
+            name=new_name,
+            summary='new',
+            scenario='same scope',
+            details='details',
+            reason='reason',
+            source_kind='memory_review',
+            conversation_id='conversation-1',
+        )
+    assert fs.files == before

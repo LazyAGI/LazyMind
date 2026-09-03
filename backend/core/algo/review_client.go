@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
+	"time"
 
 	"lazymind/core/common"
 )
@@ -52,12 +54,16 @@ func postReviewJSON(ctx context.Context, path string, req any, out any) (int, er
 	if err != nil {
 		return 0, fmt.Errorf("marshal review request: %w", err)
 	}
-	respBytes, status, err := common.HTTPPost(ctx, common.JoinURL(common.ChatServiceEndpoint(), path), "application/json", body)
+	timeout := 10 * time.Minute
+	if path == "/api/chat/preference_organize" {
+		timeout = 30 * time.Minute
+	}
+	respBytes, status, err := common.HTTPPostWithTimeout(ctx, common.JoinURL(common.ChatServiceEndpoint(), path), "application/json", body, timeout)
 	if err != nil {
 		return status, err
 	}
 	if status != 200 {
-		return status, fmt.Errorf("review endpoint returned HTTP %d", status)
+		return status, fmt.Errorf("review endpoint returned HTTP %d: %s", status, respBytes)
 	}
 	if len(respBytes) == 0 {
 		return status, fmt.Errorf("review endpoint returned empty body")
@@ -66,4 +72,8 @@ func postReviewJSON(ctx context.Context, path string, req any, out any) (int, er
 		return status, fmt.Errorf("unmarshal review response: %w", err)
 	}
 	return status, nil
+}
+
+func IsMaintenanceBusy(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "maintenance_busy")
 }

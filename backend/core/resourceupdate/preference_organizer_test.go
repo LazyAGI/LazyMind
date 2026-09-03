@@ -13,6 +13,7 @@ import (
 
 	"lazymind/core/algo"
 	"lazymind/core/common/orm"
+	"lazymind/core/maintenance"
 )
 
 func TestEnqueuePreferenceOrganizerIsIdempotentWhileActive(t *testing.T) {
@@ -68,9 +69,16 @@ func TestMaintenanceLaneClaimsOrganizerBeforeReviewWithoutBlockingOtherUsers(t *
 	})
 
 	worker := NewWorker(db, Config{WorkerBatchSize: 3, WorkerLockTTL: time.Minute}, "lane-worker")
-	claimed, err := worker.claimPending(context.Background(), now)
-	if err != nil {
-		t.Fatalf("claim pending: %v", err)
+	var claimed []orm.ResourceUpdateTask
+	for i := 0; i < 3; i++ {
+		next, err := worker.claimPending(context.Background(), now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(next) != 1 {
+			t.Fatalf("must claim exactly one task: %#v", next)
+		}
+		claimed = append(claimed, next...)
 	}
 	got := map[string]bool{}
 	for _, task := range claimed {
@@ -86,9 +94,10 @@ func TestMaintenanceLaneClaimsOrganizerBeforeReviewWithoutBlockingOtherUsers(t *
 
 func TestPreferenceOrganizerFreezeOnlyAllowsCurrentAlgorithmTask(t *testing.T) {
 	db := newResourceUpdateTestDB(t)
-	now := time.Date(2026, 9, 2, 1, 0, 0, 0, time.UTC)
+	now := time.Now().UTC()
+	until := now.Add(time.Minute)
 	insertTask(t, db, orm.ResourceUpdateTask{
-		ID: "task-1", TaskType: orm.ResourceUpdateTaskTypeOrganizePreference,
+		ID: "task-1", RunID: "run-test", LockedUntil: &until, TaskType: orm.ResourceUpdateTaskTypeOrganizePreference,
 		ResourceType: orm.ResourceUpdateResourceTypeUserPreference, UserID: "user-1",
 		TriggerType: orm.ResourceUpdateTriggerTypeManual, TriggerID: "task-1",
 		Status: orm.ResourceUpdateTaskStatusRunning, NextRunAt: now,
@@ -96,17 +105,25 @@ func TestPreferenceOrganizerFreezeOnlyAllowsCurrentAlgorithmTask(t *testing.T) {
 		LaneOrderAt: now, CreatedAt: now, UpdatedAt: now,
 	})
 
-	err := AuthorizePreferenceMutation(context.Background(), db, "user-1", "memory_review_other")
-	var organizing *PreferenceOrganizingError
+	authorize := func(ctx context.Context, userID, taskID string) error {
+		id := maintenance.Execution(ctx)
+		id.TaskID = taskID
+		return maintenance.UserTransaction(ctx, db, userID, func(tx *gorm.DB) error {
+			return maintenance.Authorize(maintenance.WithIdentity(ctx, id), tx, userID, true)
+		})
+	}
+
+	err := authorize(context.Background(), "user-1", "ordinary")
+	var organizing *maintenance.PreferenceOrganizingError
 	if !errors.As(err, &organizing) || organizing.TaskID != "task-1" {
 		t.Fatalf("ordinary write error = %#v", err)
 	}
-	if err := AuthorizePreferenceMutation(
-		context.Background(), db, "user-1", PreferenceOrganizerAlgorithmTaskID("task-1"),
+	if err := authorize(
+		maintenance.WithIdentity(context.Background(), maintenance.Identity{RunID: "run-test"}), "user-1", PreferenceOrganizerAlgorithmTaskID("task-1"),
 	); err != nil {
 		t.Fatalf("organizer write rejected: %v", err)
 	}
-	if err := AuthorizePreferenceMutation(context.Background(), db, "user-2", "ordinary"); err != nil {
+	if err := authorize(context.Background(), "user-2", "ordinary"); err != nil {
 		t.Fatalf("other user write rejected: %v", err)
 	}
 }
@@ -138,8 +155,7 @@ func TestPreferenceOrganizerWorkerPersistsStructuredResult(t *testing.T) {
 		request algo.PreferenceOrganizerRequest,
 	) (*algo.PreferenceOrganizerResponse, int, error) {
 		if request.TaskID != PreferenceOrganizerAlgorithmTaskID("organizer-worker-1") ||
-			request.MaxPasses != 2 || request.MaxChanges != 50 ||
-			request.HardMinItems != 15 || request.TargetPromptPercent != 40 {
+			request.RunID == "" {
 			t.Fatalf("unexpected organizer request: %#v", request)
 		}
 		return &algo.PreferenceOrganizerResponse{

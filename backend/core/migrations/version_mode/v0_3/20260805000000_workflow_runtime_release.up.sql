@@ -1382,6 +1382,7 @@ CREATE UNIQUE INDEX uk_skills_owner_relative_root
 -- +migrate Dialect postgres
 ALTER TABLE public.resource_update_tasks
     ADD COLUMN result_json json,
+    ADD COLUMN run_id varchar(36) NOT NULL DEFAULT '',
     ADD COLUMN lane_key varchar(320) NOT NULL DEFAULT '',
     ADD COLUMN lane_priority integer NOT NULL DEFAULT 0,
     ADD COLUMN lane_order_at timestamp with time zone NOT NULL DEFAULT '1970-01-01 00:00:00+00';
@@ -1422,6 +1423,7 @@ CREATE UNIQUE INDEX uniq_active_preference_organizer
 
 -- +migrate Dialect sqlite
 ALTER TABLE resource_update_tasks ADD COLUMN result_json json;
+ALTER TABLE resource_update_tasks ADD COLUMN run_id varchar(36) NOT NULL DEFAULT '';
 ALTER TABLE resource_update_tasks ADD COLUMN lane_key varchar(320) NOT NULL DEFAULT '';
 ALTER TABLE resource_update_tasks ADD COLUMN lane_priority integer NOT NULL DEFAULT 0;
 ALTER TABLE resource_update_tasks ADD COLUMN lane_order_at datetime NOT NULL DEFAULT '1970-01-01T00:00:00Z';

@@ -14,6 +14,7 @@ import (
 	"lazymind/core/algo"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/maintenance"
 )
 
 const (
@@ -24,35 +25,11 @@ const (
 )
 
 type PreferenceOrganizerRequest struct {
-	TargetItems         int `json:"target_items"`
-	MinItems            int `json:"min_items"`
-	HardMinItems        int `json:"hard_min_items"`
-	MaxItems            int `json:"max_items"`
-	TargetPromptPercent int `json:"target_prompt_percent"`
-	MaxChanges          int `json:"max_changes"`
-	MaxPasses           int `json:"max_passes"`
-	MaxRoundsPerPass    int `json:"max_rounds_per_pass"`
-}
-
-type PreferenceOrganizingError struct {
-	TaskID string
-}
-
-func (e *PreferenceOrganizingError) Error() string {
-	return "preference_organizing: Preference Organizer is running; this preference write was not saved"
+	ForceAnalysis bool `json:"force_analysis"`
 }
 
 func DefaultPreferenceOrganizerRequest() PreferenceOrganizerRequest {
-	return PreferenceOrganizerRequest{
-		TargetItems:         30,
-		MinItems:            20,
-		HardMinItems:        15,
-		MaxItems:            40,
-		TargetPromptPercent: 40,
-		MaxChanges:          50,
-		MaxPasses:           2,
-		MaxRoundsPerPass:    60,
-	}
+	return PreferenceOrganizerRequest{}
 }
 
 func MemoryMaintenanceLaneKey(userID string) string {
@@ -80,18 +57,23 @@ func EnqueuePreferenceOrganizer(
 	}
 	var out orm.ResourceUpdateTask
 	created := false
-	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := maintenance.UserTransaction(ctx, db, userID, func(tx *gorm.DB) error {
 		query := withUpdateLock(tx.Model(&orm.ResourceUpdateTask{})).
 			Where("user_id = ? AND task_type = ? AND status IN ?", userID,
 				orm.ResourceUpdateTaskTypeOrganizePreference,
 				[]string{orm.ResourceUpdateTaskStatusPending, orm.ResourceUpdateTaskStatusRunning})
 		if err := query.Order("created_at ASC").Take(&out).Error; err == nil {
+			if (triggerType == "" || triggerType == orm.ResourceUpdateTriggerTypeManual) && out.Status == orm.ResourceUpdateTaskStatusPending {
+				body, _ := json.Marshal(PreferenceOrganizerRequest{ForceAnalysis: true})
+				out.RequestJSON = body
+				return tx.Model(&out).Updates(map[string]any{"request_json": body, "updated_at": now}).Error
+			}
 			return nil
 		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
 		}
 
-		requestBody, err := json.Marshal(DefaultPreferenceOrganizerRequest())
+		requestBody, err := json.Marshal(PreferenceOrganizerRequest{ForceAnalysis: triggerType == "" || triggerType == orm.ResourceUpdateTriggerTypeManual})
 		if err != nil {
 			return err
 		}
@@ -134,54 +116,17 @@ func EnqueuePreferenceOrganizer(
 	return out, created, err
 }
 
-func RunningPreferenceOrganizer(
-	ctx context.Context,
-	db *gorm.DB,
-	userID string,
-) (orm.ResourceUpdateTask, bool, error) {
-	if db == nil || !db.Migrator().HasTable(&orm.ResourceUpdateTask{}) {
-		return orm.ResourceUpdateTask{}, false, nil
-	}
-	var task orm.ResourceUpdateTask
-	err := db.WithContext(ctx).
-		Where("user_id = ? AND task_type = ? AND status = ?", strings.TrimSpace(userID),
-			orm.ResourceUpdateTaskTypeOrganizePreference, orm.ResourceUpdateTaskStatusRunning).
-		Take(&task).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return orm.ResourceUpdateTask{}, false, nil
-	}
-	if err != nil && strings.Contains(strings.ToLower(err.Error()), "no such table") {
-		return orm.ResourceUpdateTask{}, false, nil
-	}
-	return task, err == nil, err
-}
-
-func AuthorizePreferenceMutation(
-	ctx context.Context,
-	db *gorm.DB,
-	userID string,
-	algorithmTaskID string,
-) error {
-	task, running, err := RunningPreferenceOrganizer(ctx, db, userID)
-	if err != nil || !running {
-		return err
-	}
-	if strings.TrimSpace(algorithmTaskID) == PreferenceOrganizerAlgorithmTaskID(task.ID) {
-		return nil
-	}
-	return &PreferenceOrganizingError{TaskID: task.ID}
-}
-
 type preferenceOrganizerTaskResponse struct {
-	TaskID       string          `json:"task_id"`
-	Status       string          `json:"status"`
-	CurrentPass  int             `json:"current_pass,omitempty"`
-	Result       json.RawMessage `json:"result,omitempty"`
-	ErrorCode    string          `json:"error_code,omitempty"`
-	ErrorMessage string          `json:"error_message,omitempty"`
-	CreatedAt    time.Time       `json:"created_at"`
-	StartedAt    *time.Time      `json:"started_at,omitempty"`
-	FinishedAt   *time.Time      `json:"finished_at,omitempty"`
+	TaskID        string          `json:"task_id"`
+	Status        string          `json:"status"`
+	WaitingReason string          `json:"waiting_reason,omitempty"`
+	CurrentPass   int             `json:"current_pass,omitempty"`
+	Result        json.RawMessage `json:"result,omitempty"`
+	ErrorCode     string          `json:"error_code,omitempty"`
+	ErrorMessage  string          `json:"error_message,omitempty"`
+	CreatedAt     time.Time       `json:"created_at"`
+	StartedAt     *time.Time      `json:"started_at,omitempty"`
+	FinishedAt    *time.Time      `json:"finished_at,omitempty"`
 }
 
 func SubmitPreferenceOrganizer(w http.ResponseWriter, r *http.Request) {
@@ -198,7 +143,7 @@ func SubmitPreferenceOrganizer(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "create preference organizer task failed", http.StatusInternalServerError)
 		return
 	}
-	replyPreferenceOrganizerAccepted(w, preferenceOrganizerResponse(task))
+	replyPreferenceOrganizerAccepted(w, preferenceOrganizerResponseWithWaiting(r.Context(), db, task))
 }
 
 func GetPreferenceOrganizer(w http.ResponseWriter, r *http.Request) {
@@ -219,7 +164,38 @@ func GetPreferenceOrganizer(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "query preference organizer task failed", http.StatusInternalServerError)
 		return
 	}
-	common.ReplyOK(w, preferenceOrganizerResponse(task))
+	common.ReplyOK(w, preferenceOrganizerResponseWithWaiting(r.Context(), db, task))
+}
+
+func GetLatestPreferenceOrganizer(w http.ResponseWriter, r *http.Request) {
+	db, userID, ok := requestDBAndUser(w, r)
+	if !ok {
+		return
+	}
+	var task orm.ResourceUpdateTask
+	err := db.WithContext(r.Context()).Where("user_id = ? AND task_type = ?", userID, orm.ResourceUpdateTaskTypeOrganizePreference).
+		Order("CASE WHEN status IN ('pending', 'running') THEN 0 ELSE 1 END ASC").Order("created_at DESC, id DESC").Take(&task).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		common.ReplyOK(w, (*preferenceOrganizerTaskResponse)(nil))
+		return
+	}
+	if err != nil {
+		common.ReplyErr(w, "query preference organizer task failed", http.StatusInternalServerError)
+		return
+	}
+	common.ReplyOK(w, preferenceOrganizerResponseWithWaiting(r.Context(), db, task))
+}
+
+func preferenceOrganizerResponseWithWaiting(ctx context.Context, db *gorm.DB, task orm.ResourceUpdateTask) preferenceOrganizerTaskResponse {
+	resp := preferenceOrganizerResponse(task)
+	if task.Status == orm.ResourceUpdateTaskStatusPending {
+		resp.WaitingReason = "resources"
+		var count int64
+		if db.WithContext(ctx).Model(&orm.ResourceUpdateTask{}).Where("user_id = ? AND resource_type = ? AND task_type = ? AND status = ?", task.UserID, orm.ResourceUpdateResourceTypeMemory, orm.ResourceUpdateTaskTypeGenerateReview, orm.ResourceUpdateTaskStatusRunning).Count(&count).Error == nil && count > 0 {
+			resp.WaitingReason = "memory_review"
+		}
+	}
+	return resp
 }
 
 func preferenceOrganizerResponse(task orm.ResourceUpdateTask) preferenceOrganizerTaskResponse {
@@ -260,37 +236,24 @@ func (w *Worker) handlePreferenceOrganizer(ctx context.Context, task orm.Resourc
 	if err != nil {
 		return retryableOutcome("load_llm_config_failed", err)
 	}
-	progress, _ := json.Marshal(map[string]any{"current_pass": 1, "outcome": "running"})
-	if err := w.db.WithContext(ctx).Model(&orm.ResourceUpdateTask{}).
-		Where("id = ? AND status = ? AND locked_by = ?", task.ID, orm.ResourceUpdateTaskStatusRunning, w.workerID).
-		Updates(map[string]any{"result_json": progress, "updated_at": w.clock().UTC()}).Error; err != nil {
-		return retryableOutcome("persist_preference_organizer_progress_failed", err)
+	progress, _ := json.Marshal(map[string]any{"current_pass": 1})
+	if err := w.updateOwned(ctx, task, map[string]any{"result_json": progress, "updated_at": w.clock().UTC()}); err != nil {
+		return retryableOutcome("task_lease_lost", err)
 	}
-
 	algorithmTaskID := PreferenceOrganizerAlgorithmTaskID(task.ID)
-	var resp *algo.PreferenceOrganizerResponse
-	var status int
-	callOutcome := w.withTaskLeaseHeartbeat(ctx, task, func(callCtx context.Context) taskOutcome {
-		callCtx, cancel := context.WithTimeout(callCtx, w.cfg.PreferenceOrganizerTimeout)
-		defer cancel()
-		var callErr error
-		resp, status, callErr = w.callers.PreferenceOrganizer(callCtx, algo.PreferenceOrganizerRequest{
-			TaskID: algorithmTaskID, UserID: userID, LLMConfig: llmConfig,
-			TargetItems: request.TargetItems, MinItems: request.MinItems,
-			HardMinItems: request.HardMinItems, MaxItems: request.MaxItems,
-			TargetPromptPercent: request.TargetPromptPercent, MaxChanges: request.MaxChanges,
-			MaxPasses: request.MaxPasses, MaxRoundsPerPass: request.MaxRoundsPerPass,
-		})
-		if callErr != nil {
-			if status == http.StatusUnprocessableEntity {
-				return permanentOutcome("preference_organizer_invalid_request", callErr.Error())
-			}
-			return retryableOutcome("preference_organizer_call_failed", callErr)
-		}
-		return taskOutcome{Status: orm.ResourceUpdateTaskStatusDone}
+	callCtx, cancel := context.WithTimeout(ctx, w.cfg.PreferenceOrganizerTimeout)
+	defer cancel()
+	resp, status, callErr := w.callers.PreferenceOrganizer(callCtx, algo.PreferenceOrganizerRequest{
+		TaskID: algorithmTaskID, RunID: task.RunID, UserID: userID, LLMConfig: llmConfig, ForceAnalysis: request.ForceAnalysis,
 	})
-	if callOutcome.Status != orm.ResourceUpdateTaskStatusDone {
-		return callOutcome
+	if status == http.StatusServiceUnavailable && algo.IsMaintenanceBusy(callErr) {
+		return deferredOutcome("maintenance_busy", "maintenance executor is full", 2*time.Second)
+	}
+	if callErr != nil {
+		if status == http.StatusUnprocessableEntity {
+			return permanentOutcome("preference_organizer_invalid_request", callErr.Error())
+		}
+		return retryableOutcome("preference_organizer_call_failed", callErr)
 	}
 	if status != http.StatusOK || resp == nil || strings.TrimSpace(resp.TaskID) != algorithmTaskID {
 		return retryableOutcome("preference_organizer_unexpected_response", fmt.Errorf(
@@ -335,61 +298,4 @@ func (w *Worker) handlePreferenceOrganizer(ctx context.Context, task orm.Resourc
 		out.Permanent = true
 	}
 	return out
-}
-
-// withTaskLeaseHeartbeat keeps one claimed task, and therefore its lane, owned
-// while a long synchronous downstream call is in progress.
-func (w *Worker) withTaskLeaseHeartbeat(
-	ctx context.Context,
-	task orm.ResourceUpdateTask,
-	call func(context.Context) taskOutcome,
-) taskOutcome {
-	callCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	interval := w.cfg.WorkerLockTTL / 3
-	if interval < time.Second {
-		interval = time.Second
-	}
-	done := make(chan struct{})
-	leaseErrors := make(chan error, 1)
-	go func() {
-		defer close(done)
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-callCtx.Done():
-				return
-			case <-ticker.C:
-				now := w.clock().UTC()
-				update := w.db.WithContext(callCtx).Model(&orm.ResourceUpdateTask{}).
-					Where("id = ? AND status = ? AND locked_by = ?", task.ID,
-						orm.ResourceUpdateTaskStatusRunning, w.workerID).
-					Updates(map[string]any{
-						"locked_until": now.Add(w.cfg.WorkerLockTTL),
-						"updated_at":   now,
-					})
-				if update.Error != nil || update.RowsAffected != 1 {
-					err := update.Error
-					if err == nil {
-						err = errors.New("preference organizer task lease was lost")
-					}
-					leaseErrors <- err
-					cancel()
-					return
-				}
-			}
-		}
-	}()
-	outcome := call(callCtx)
-	cancel()
-	<-done
-	select {
-	case err := <-leaseErrors:
-		if outcome.Status != orm.ResourceUpdateTaskStatusDone {
-			return retryableOutcome("preference_organizer_lease_lost", err)
-		}
-	default:
-	}
-	return outcome
 }

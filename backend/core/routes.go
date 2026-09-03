@@ -493,6 +493,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/memory/preferences", []string{"qa.read"}, currentmemory.ListPreferences)
 	handleAPI(r, "POST", "/memory/preferences:organize", []string{"qa.write"}, resourceupdate.SubmitPreferenceOrganizer)
 	handleAPI(r, "GET", "/memory/preferences:organize/{task_id}", []string{"qa.read"}, resourceupdate.GetPreferenceOrganizer)
+	handleAPI(r, "GET", "/memory/preferences:organize", []string{"qa.read"}, resourceupdate.GetLatestPreferenceOrganizer)
 	handleAPI(r, "PUT", "/memory/preferences:order", []string{"qa.write"}, currentmemory.ReorderPreferences)
 	handleAPI(r, "GET", "/memory/preferences/{name}", []string{"qa.read"}, currentmemory.GetPreference)
 	handleAPI(r, "DELETE", "/memory/preferences/{name}", []string{"qa.write"}, currentmemory.DeletePreference)

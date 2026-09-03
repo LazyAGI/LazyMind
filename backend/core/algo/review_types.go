@@ -40,6 +40,7 @@ type SkillOrganizeData struct {
 }
 
 type MemoryReviewRequest struct {
+	RunID                      string         `json:"run_id"`
 	TaskID                     string         `json:"task_id"`
 	UserID                     string         `json:"user_id"`
 	ConversationID             string         `json:"conversation_id"`
@@ -62,17 +63,11 @@ type MemoryReviewError struct {
 }
 
 type PreferenceOrganizerRequest struct {
-	TaskID              string         `json:"task_id"`
-	UserID              string         `json:"user_id"`
-	LLMConfig           map[string]any `json:"llm_config"`
-	TargetItems         int            `json:"target_items"`
-	MinItems            int            `json:"min_items"`
-	HardMinItems        int            `json:"hard_min_items"`
-	MaxItems            int            `json:"max_items"`
-	TargetPromptPercent int            `json:"target_prompt_percent"`
-	MaxChanges          int            `json:"max_changes"`
-	MaxPasses           int            `json:"max_passes"`
-	MaxRoundsPerPass    int            `json:"max_rounds_per_pass"`
+	TaskID        string         `json:"task_id"`
+	RunID         string         `json:"run_id"`
+	UserID        string         `json:"user_id"`
+	LLMConfig     map[string]any `json:"llm_config"`
+	ForceAnalysis bool           `json:"force_analysis"`
 }
 
 type PreferenceOrganizerResponse struct {

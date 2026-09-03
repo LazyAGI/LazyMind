@@ -511,3 +511,6 @@ _runtime_mode = (config['runtime_mode'] or 'cloud').strip().lower()
 _ssl_verify_env = os.environ.get('LAZYLLM_MINERU_SSL_VERIFY', '').strip().lower()
 if _runtime_mode == 'local' or _ssl_verify_env in ('false', '0', 'no'):
     os.environ['LAZYLLM_MINERU_SSL_VERIFY'] = 'false'
+
+config.add('memory_maintenance_workers', int, 2, 'MEMORY_MAINTENANCE_WORKERS',
+           description='Dedicated shared Memory Review and Organizer worker capacity.')

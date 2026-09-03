@@ -10,6 +10,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"lazymind/core/maintenance"
 	"lazymind/core/state"
 
 	"lazymind/core/common"
@@ -342,9 +343,18 @@ func (p *IdleProcessor) ProcessEvent(ctx context.Context, eventID string) error 
 			Msg(logEventIdleEventSkipped)
 		return nil
 	}
+	// Read the immutable event identity and remote history before the short user transaction.
+	var candidate orm.ConversationIdleEvent
+	if err := p.db.WithContext(ctx).Where("event_id = ?", eventID).Take(&candidate).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		return err
+	}
+	history, historyErr := p.store.ReadHistory(ctx, conversationIdleHistoryKey(candidate.ConversationID))
 	now := p.clock().UTC()
 	cleanupConversationID := ""
-	err = p.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err = maintenance.UserTransaction(ctx, p.db, candidate.UserID, func(tx *gorm.DB) error {
 		var event orm.ConversationIdleEvent
 		if err := withUpdateLock(tx).Where("event_id = ?", eventID).Take(&event).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -383,10 +393,9 @@ func (p *IdleProcessor) ProcessEvent(ctx context.Context, eventID string) error 
 			return err
 		}
 
-		history, err := p.store.ReadHistory(ctx, conversationIdleHistoryKey(event.ConversationID))
-		if err != nil {
+		if historyErr != nil {
 			cleanupConversationID = event.ConversationID
-			return p.markEventFailed(tx, event.ID, now, "read_history_failed", err.Error())
+			return p.markEventFailed(tx, event.ID, now, "read_history_failed", historyErr.Error())
 		}
 		if !historyHasNonEmptyUserMessage(history) {
 			cleanupConversationID = event.ConversationID

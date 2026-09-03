@@ -148,12 +148,37 @@ func manualSchemas() map[string]any {
 			prop("updated_at", int64Schema()),
 			prop("projection_state", refSchema("CurrentMemoryPreferenceProjectionState")),
 		),
+		"PreferenceOrganizerReceipt": objReq(
+			[]string{"operation_id", "action", "names", "status", "changes", "applied_steps", "failed_steps"},
+			prop("operation_id", strSchema()),
+			prop("action", enumStringSchema("merge", "move_to_episode", "delete")),
+			prop("names", array(strSchema())),
+			prop("status", enumStringSchema("pending", "applied", "idempotent", "partial", "failed", "unknown")),
+			prop("changes", intSchema()),
+			prop("applied_steps", array(strSchema())),
+			prop("failed_steps", array(strSchema())),
+			prop("before_etag", strSchema()),
+			prop("etag", strSchema()),
+			prop("episode_id", strSchema()),
+		),
+		"PreferenceOrganizerResult": obj(
+			prop("current_pass", intSchema()),
+			prop("passes_attempted", intSchema()),
+			prop("passes", array(obj())),
+			prop("receipts", array(refSchema("PreferenceOrganizerReceipt"))),
+			prop("total_changes", intSchema()),
+			prop("outcome", enumStringSchema("organized", "organized_with_remaining", "no_safe_changes", "budget_exhausted", "stale_state", "partial", "failed")),
+			prop("reason", strSchema()),
+			prop("target_reached", boolSchema()),
+			prop("stop_reason", strSchema()),
+		),
 		"PreferenceOrganizerTaskData": objReq(
 			[]string{"task_id", "status", "created_at"},
 			prop("task_id", strSchema()),
 			prop("status", enumStringSchema("pending", "running", "done", "failed", "skipped")),
+			prop("waiting_reason", enumStringSchema("memory_review", "resources")),
 			prop("current_pass", intSchema()),
-			prop("result", obj()),
+			prop("result", refSchema("PreferenceOrganizerResult")),
 			prop("error_code", strSchema()),
 			prop("error_message", strSchema()),
 			prop("created_at", dateTimeSchema()),
@@ -163,7 +188,7 @@ func manualSchemas() map[string]any {
 		"PreferenceOrganizerTaskResponse": objReq(
 			[]string{"code", "message", "data"},
 			prop("code", intSchema()), prop("message", strSchema()),
-			prop("data", refSchema("PreferenceOrganizerTaskData")),
+			prop("data", nullableSchema(refSchema("PreferenceOrganizerTaskData"))),
 		),
 		"CurrentMemoryPreferenceListResponse": objReq(
 			[]string{"code", "message", "data"},
@@ -906,6 +931,14 @@ func manualPaths() map[string]any {
 			},
 		},
 		"/memory/preferences:organize": map[string]any{
+			"get": map[string]any{
+				"summary": "Get current user active or most recent Preference Organizer task",
+				"responses": map[string]any{
+					"200": response(200, "Active task, latest task, or null", refSchema("PreferenceOrganizerTaskResponse")),
+					"401": response(401, "Gateway user identity is missing", refSchema("CurrentMemoryErrorResponse")),
+					"500": response(500, "Query failed", refSchema("CurrentMemoryErrorResponse")),
+				},
+			},
 			"post": map[string]any{
 				"summary": "Create or return the active Preference Organizer task",
 				"responses": map[string]any{

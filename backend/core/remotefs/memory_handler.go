@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"lazymind/core/currentmemory"
-	"lazymind/core/resourceupdate"
+	"lazymind/core/maintenance"
 	skillhttperr "lazymind/core/skillv2/httperr"
 )
 
@@ -27,7 +27,7 @@ func (h *memoryCurrentHandler) List(w http.ResponseWriter, r *http.Request, rawP
 	if !ok {
 		return
 	}
-	entries, err := h.service.list(r.Context(), userID, rawPath)
+	entries, err := h.service.list(maintenance.RequestContext(r), userID, rawPath)
 	if err != nil {
 		replyMemoryError(w, err)
 		return
@@ -44,7 +44,7 @@ func (h *memoryCurrentHandler) Info(w http.ResponseWriter, r *http.Request, rawP
 	if !ok {
 		return
 	}
-	entry, err := h.service.info(r.Context(), userID, rawPath)
+	entry, err := h.service.info(maintenance.RequestContext(r), userID, rawPath)
 	if err != nil {
 		replyMemoryError(w, err)
 		return
@@ -64,7 +64,7 @@ func (h *memoryCurrentHandler) Exists(w http.ResponseWriter, r *http.Request, ra
 	if !ok {
 		return
 	}
-	exists, err := h.service.exists(r.Context(), userID, rawPath)
+	exists, err := h.service.exists(maintenance.RequestContext(r), userID, rawPath)
 	if err != nil {
 		replyMemoryError(w, err)
 		return
@@ -88,7 +88,7 @@ func (h *memoryCurrentHandler) readContent(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
-	entry, err := h.service.read(r.Context(), userID, rawPath)
+	entry, err := h.service.read(maintenance.RequestContext(r), userID, rawPath)
 	if err != nil {
 		replyMemoryError(w, err)
 		return
@@ -118,7 +118,7 @@ func (h *memoryCurrentHandler) writeContent(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	entry, err := h.service.write(
-		r.Context(),
+		maintenance.RequestContext(r),
 		userID,
 		r.URL.Query().Get("task_id"),
 		rawPath,
@@ -149,7 +149,7 @@ func (h *memoryCurrentHandler) Dir(w http.ResponseWriter, r *http.Request) {
 		skillhttperr.Reply(w, "invalid json", http.StatusBadRequest)
 		return
 	}
-	if err := h.service.mkdir(r.Context(), userID, r.URL.Query().Get("task_id"), body.Path, body.Recursive); err != nil {
+	if err := h.service.mkdir(maintenance.RequestContext(r), userID, r.URL.Query().Get("task_id"), body.Path, body.Recursive); err != nil {
 		replyMemoryError(w, err)
 		return
 	}
@@ -162,7 +162,7 @@ func (h *memoryCurrentHandler) Delete(w http.ResponseWriter, r *http.Request, ra
 		return
 	}
 	if err := h.service.delete(
-		r.Context(),
+		maintenance.RequestContext(r),
 		userID,
 		r.URL.Query().Get("task_id"),
 		rawPath,
@@ -188,7 +188,7 @@ func (h *memoryCurrentHandler) Copy(w http.ResponseWriter, r *http.Request) {
 		skillhttperr.Reply(w, "invalid json", http.StatusBadRequest)
 		return
 	}
-	if err := h.service.copy(r.Context(), userID, r.URL.Query().Get("task_id"), body.From, body.To, body.Overwrite); err != nil {
+	if err := h.service.copy(maintenance.RequestContext(r), userID, r.URL.Query().Get("task_id"), body.From, body.To, body.Overwrite); err != nil {
 		replyMemoryError(w, err)
 		return
 	}
@@ -208,7 +208,7 @@ func (h *memoryCurrentHandler) Move(w http.ResponseWriter, r *http.Request) {
 		skillhttperr.Reply(w, "invalid json", http.StatusBadRequest)
 		return
 	}
-	if err := h.service.move(r.Context(), userID, r.URL.Query().Get("task_id"), body.From, body.To); err != nil {
+	if err := h.service.move(maintenance.RequestContext(r), userID, r.URL.Query().Get("task_id"), body.From, body.To); err != nil {
 		replyMemoryError(w, err)
 		return
 	}
@@ -247,8 +247,10 @@ func memoryTruthy(value string) bool {
 }
 
 func replyMemoryError(w http.ResponseWriter, err error) {
-	var organizingError *resourceupdate.PreferenceOrganizingError
+	var organizingError *maintenance.PreferenceOrganizingError
 	switch {
+	case errors.Is(err, maintenance.ErrLeaseLost):
+		skillhttperr.ReplyWithCode(w, err.Error(), http.StatusConflict, "task_lease_lost")
 	case errors.As(err, &organizingError):
 		skillhttperr.ReplyWithCode(
 			w,

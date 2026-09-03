@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List, Literal, Optional
+from typing import Any, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -29,7 +29,8 @@ class PreferenceOrganizerPassResult(BaseModel):
     pass_number: int
     plan_hash: str = ''
     before: PreferenceStateData
-    after: PreferenceStateData
+    after: Optional[PreferenceStateData] = None
+    receipts: list[dict[str, Any]] = Field(default_factory=list)
     changes: int = 0
     operation_count: int = 0
     outcome: str
@@ -41,6 +42,7 @@ class PreferenceOrganizerResultData(BaseModel):
     current_pass: int = 0
     passes_attempted: int = 0
     passes: List[PreferenceOrganizerPassResult] = Field(default_factory=list)
+    receipts: list[dict[str, Any]] = Field(default_factory=list)
     total_changes: int = 0
     outcome: str
     reason: str = ''

@@ -37,6 +37,7 @@ const (
 )
 
 type ResourceUpdateTask struct {
+	RunID          string          `gorm:"column:run_id;type:varchar(36);not null;default:''"`
 	ID             string          `gorm:"column:id;type:varchar(36);primaryKey"`
 	TaskType       string          `gorm:"column:task_type;type:varchar(32);not null;index;uniqueIndex:uniq_resource_update_task_trigger,priority:1"`
 	ResourceType   string          `gorm:"column:resource_type;type:varchar(32);not null;index;uniqueIndex:uniq_resource_update_task_trigger,priority:2;uniqueIndex:uniq_resource_update_active_auto_apply_result,priority:1,where:task_type = 'auto_apply_review' AND (status = 'pending' OR status = 'running')"`
