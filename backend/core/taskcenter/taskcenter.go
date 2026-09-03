@@ -398,6 +398,22 @@ func resolveTaskStatus(ctx context.Context, db *gorm.DB, t orm.TaskCenterTask) s
 }
 
 func resolveTaskForResponse(ctx context.Context, db *gorm.DB, t orm.TaskCenterTask) orm.TaskCenterTask {
+	if t.ArchivedAt == nil && t.Status != "canceled" {
+		if session := workflowForTask(ctx, db, t); session != nil {
+			t.WorkflowSessionID = &session.ID
+			if status := workflowTaskStatus(session.Status); status != "" {
+				t.Status = status
+				t.FinishedAt = nil
+				if isTerminal(status) {
+					t.FinishedAt = &session.UpdatedAt
+				}
+				if session.UpdatedAt.After(t.UpdatedAt) {
+					t.UpdatedAt = session.UpdatedAt
+				}
+				return t
+			}
+		}
+	}
 	storedStatus := t.Status
 	t.Status = resolveTaskStatus(ctx, db, t)
 	if t.Status == "failed" && !isTerminal(storedStatus) &&

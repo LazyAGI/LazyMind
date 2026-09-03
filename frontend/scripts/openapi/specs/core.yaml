@@ -434,6 +434,8 @@ components:
                     type: string
                 message:
                     type: string
+                model_route:
+                    $ref: '#/components/schemas/ChatModelRoute'
                 prompt_questions:
                     items:
                         type: string
@@ -452,6 +454,53 @@ components:
                 thinking_duration_s:
                     format: int64
                     type: integer
+            type: object
+        ChatModelRoute:
+            properties:
+                mode:
+                    enum:
+                        - auto
+                        - fixed
+                    type: string
+                model_id:
+                    type: string
+                model_name:
+                    type: string
+                provider_id:
+                    type: string
+                provider_name:
+                    type: string
+                reason:
+                    enum:
+                        - simple_task
+                        - complex_task
+                        - long_context
+                        - session_sticky
+                        - default_balanced
+                        - retry_same_model
+                        - fixed
+                        - initial_selection
+                        - model_unavailable
+                    type: string
+                selection_version:
+                    format: int64
+                    type: integer
+                source:
+                    enum:
+                        - own
+                        - shared
+                    type: string
+                strategy:
+                    type: string
+                task_class:
+                    enum:
+                        - simple
+                        - balanced
+                        - complex
+                        - long_context
+                        - fixed
+                        - auto
+                    type: string
             type: object
         ChatRuntimeEvent:
             properties:
@@ -724,6 +773,10 @@ components:
                     $ref: '#/components/schemas/ExternalExecutionProjection'
                 expected_answer:
                     type: string
+                failed_attempts:
+                    items:
+                        $ref: '#/components/schemas/FailedRunAttempt'
+                    type: array
                 feed_back:
                     type: integer
                 id:
@@ -733,6 +786,8 @@ components:
                         properties: {}
                         type: object
                     type: array
+                model_route:
+                    $ref: '#/components/schemas/ChatModelRoute'
                 query:
                     type: string
                 reason:
@@ -2420,6 +2475,25 @@ components:
                 workflow_id:
                     type: string
             type: object
+        FailedRunAttempt:
+            properties:
+                create_time:
+                    format: date-time
+                    type: string
+                model_route:
+                    $ref: '#/components/schemas/ChatModelRoute'
+                result:
+                    type: string
+                run_id:
+                    type: string
+                run_status:
+                    enum:
+                        - failed
+                        - interrupted
+                    type: string
+                run_terminal:
+                    $ref: '#/components/schemas/RunTerminal'
+            type: object
         GetKBAuthorizationResponse:
             properties:
                 grants:
@@ -2980,6 +3054,8 @@ components:
             type: object
         PromptPolishRequest:
             properties:
+                allow_empty:
+                    type: boolean
                 content:
                     type: string
                 user_instruct:
@@ -3184,6 +3260,8 @@ components:
                     type: string
                 model_call_id:
                     type: string
+                model_invoked:
+                    type: boolean
                 partial_output:
                     type: boolean
                 reason:
@@ -3377,9 +3455,9 @@ components:
                     type: string
                 provider:
                     type: string
-                source_url:
-                    type: string
                 result_summary:
+                    type: string
+                source_url:
                     type: string
                 tags:
                     items:
@@ -3408,9 +3486,8 @@ components:
                 - output_label
                 - output_type
                 - provider
-                - source_url
                 - result_summary
-                - tasks
+                - source_url
                 - title
                 - type
             type: object
@@ -3467,13 +3544,13 @@ components:
                     items:
                         type: string
                     type: array
-                image_asset:
-                    type: string
-                image_url:
-                    type: string
                 html_asset:
                     type: string
                 html_url:
+                    type: string
+                image_asset:
+                    type: string
+                image_url:
                     type: string
                 product_report:
                     $ref: '#/components/schemas/ShowcaseCaseProductReport'
@@ -4788,6 +4865,134 @@ components:
                         - max
                     type: string
             type: object
+        chatModelListOpenAPIItem:
+            properties:
+                availability:
+                    enum:
+                        - available
+                        - unavailable
+                    type: string
+                badges:
+                    items:
+                        type: string
+                    type: array
+                capabilities:
+                    items:
+                        type: string
+                    type: array
+                current:
+                    type: boolean
+                default:
+                    type: boolean
+                group_id:
+                    type: string
+                group_name:
+                    type: string
+                id:
+                    type: string
+                name:
+                    type: string
+                shared:
+                    type: boolean
+                source:
+                    enum:
+                        - own
+                        - shared
+                    type: string
+            required:
+                - availability
+                - current
+                - default
+                - group_id
+                - group_name
+                - id
+                - name
+                - shared
+                - source
+            type: object
+        chatModelProviderOpenAPIItem:
+            properties:
+                id:
+                    type: string
+                models:
+                    items:
+                        $ref: '#/components/schemas/chatModelListOpenAPIItem'
+                    type: array
+                name:
+                    type: string
+                source:
+                    enum:
+                        - own
+                        - shared
+                    type: string
+            required:
+                - id
+                - name
+                - source
+            type: object
+        chatModelSelectionOpenAPI:
+            properties:
+                availability:
+                    enum:
+                        - available
+                        - unavailable
+                    type: string
+                group_id:
+                    type: string
+                group_name:
+                    type: string
+                mode:
+                    enum:
+                        - fixed
+                        - auto
+                    type: string
+                model_id:
+                    type: string
+                model_name:
+                    type: string
+                provider_id:
+                    type: string
+                provider_name:
+                    type: string
+                source:
+                    enum:
+                        - own
+                        - shared
+                    type: string
+                version:
+                    format: int64
+                    type: integer
+            required:
+                - availability
+                - mode
+                - version
+            type: object
+        chatModelsOpenAPIResponse:
+            properties:
+                auto_available:
+                    type: boolean
+                default_selection:
+                    $ref: '#/components/schemas/chatModelSelectionOpenAPI'
+                providers:
+                    items:
+                        $ref: '#/components/schemas/chatModelProviderOpenAPIItem'
+                    type: array
+                selection:
+                    $ref: '#/components/schemas/chatModelSelectionOpenAPI'
+                switch_allowed:
+                    type: boolean
+                switch_blocked_reason:
+                    enum:
+                        - generating
+                        - workflow_running
+                        - background_task_running
+                    type: string
+            required:
+                - auto_available
+                - default_selection
+                - selection
+                - switch_allowed
+            type: object
         checkModelProviderOpenAPIRequest:
             properties:
                 api_key:
@@ -4806,7 +5011,18 @@ components:
             type: object
         conversationSearchConfigOpenAPIRequest:
             properties:
+                creators:
+                    description: Optional. Replace document creator filters; omit to preserve them.
+                    items:
+                        type: string
+                    type: array
                 dataset_ids:
+                    description: Optional. Replace knowledge bases; omit to preserve the current selection.
+                    items:
+                        type: string
+                    type: array
+                tags:
+                    description: Optional. Replace document tag filters; omit to preserve them.
                     items:
                         type: string
                     type: array
@@ -4858,6 +5074,22 @@ components:
                 - is_verified
                 - name
                 - user_model_provider_id
+            type: object
+        createSidechatOpenAPIRequest:
+            properties:
+                selected_text:
+                    type: string
+                source_history_id:
+                    type: string
+                source_seq:
+                    type: integer
+                thinking_depth:
+                    enum:
+                        - low
+                        - medium
+                        - high
+                        - max
+                    type: string
             type: object
         deleteDatabaseConnectionOpenAPIResponse:
             properties:
@@ -5633,6 +5865,30 @@ components:
             required:
                 - ok
             type: object
+        patchConversationModelOpenAPIRequest:
+            properties:
+                expected_version:
+                    format: int64
+                    type: integer
+                mode:
+                    enum:
+                        - fixed
+                        - auto
+                    type: string
+                model_id:
+                    description: Required only when mode is fixed.
+                    type: string
+            required:
+                - expected_version
+                - mode
+            type: object
+        patchConversationModelOpenAPIResponse:
+            properties:
+                selection:
+                    $ref: '#/components/schemas/chatModelSelectionOpenAPI'
+            required:
+                - selection
+            type: object
         personalizationSettingOpenAPIRequest:
             properties:
                 enabled:
@@ -6116,6 +6372,80 @@ components:
                 target_user_ids:
                     items:
                         type: string
+                    type: array
+            type: object
+        sidechatConversationOpenAPI:
+            properties:
+                chat_model_id:
+                    type: string
+                chat_model_mode:
+                    enum:
+                        - fixed
+                        - auto
+                    type: string
+                chat_model_version:
+                    format: int64
+                    type: integer
+                conversation_id:
+                    type: string
+                display_name:
+                    type: string
+                id:
+                    type: string
+                is_ephemeral:
+                    type: boolean
+                parent_conversation_id:
+                    type: string
+                parent_display_name:
+                    type: string
+                relation_type:
+                    enum:
+                        - sidechat
+                        - fork
+                    type: string
+                search_config:
+                    additionalProperties:
+                        properties: {}
+                        type: object
+                    type: object
+                selected_text:
+                    type: string
+                source_context:
+                    $ref: '#/components/schemas/sidechatPublicSourceContextOpenAPI'
+                source_history_id:
+                    type: string
+                source_seq:
+                    type: integer
+                thinking_depth:
+                    enum:
+                        - low
+                        - medium
+                        - high
+                        - max
+                    type: string
+            required:
+                - chat_model_version
+                - conversation_id
+                - display_name
+                - id
+                - is_ephemeral
+                - relation_type
+            type: object
+        sidechatConversationOpenAPIResponse:
+            properties:
+                conversation:
+                    $ref: '#/components/schemas/sidechatConversationOpenAPI'
+            required:
+                - conversation
+            type: object
+        sidechatPublicSourceContextOpenAPI:
+            properties:
+                messages:
+                    items:
+                        additionalProperties:
+                            properties: {}
+                            type: object
+                        type: object
                     type: array
             type: object
         skillCategoriesOpenAPIResponse:
@@ -8396,6 +8726,26 @@ paths:
                 "200":
                     description: OK
             summary: GET /chat/executors
+    /api/core/chat/models:
+        get:
+            description: Returns only non-deleted LLMs from verified provider groups that are owned by the current user or explicitly shared through the active shared llm selection. Credentials and endpoint configuration are never returned.
+            parameters:
+                - description: Optional owned conversation whose saved model selection should be restored.
+                  in: query
+                  name: conversation_id
+                  required: false
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/chatModelsOpenAPIResponse'
+                    description: Chat model selection and providers
+            summary: List usable chat models and resolve the current selection
+            tags:
+                - chat
     /api/core/chat/settings/workflows:
         get:
             responses:
@@ -8579,6 +8929,40 @@ paths:
                                 $ref: '#/components/schemas/ConversationListResponse'
                     description: Conversation list
             summary: Conversation list
+    /api/core/conversations/{child_id}/retain:
+        post:
+            description: Promotes an ephemeral side conversation into visible history after at least one completed turn.
+            parameters:
+                - in: path
+                  name: child_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/sidechatConversationOpenAPIResponse'
+                    description: Retained side conversation
+            summary: Retain a side conversation
+            tags:
+                - conversations
+    /api/core/conversations/{child_id}/sidechat:
+        delete:
+            description: Permanently clears an unretained side conversation and its dependent records.
+            parameters:
+                - in: path
+                  name: child_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "204":
+                    description: Side conversation discarded
+            summary: Discard an ephemeral side conversation
+            tags:
+                - conversations
     /api/core/conversations/{conversation_id}/artifacts:
         get:
             parameters:
@@ -8615,6 +8999,31 @@ paths:
                 "200":
                     description: OK
             summary: GET /conversations/{conversation_id}/events
+    /api/core/conversations/{conversation_id}/model:
+        patch:
+            description: Uses expected_version for optimistic locking and rejects changes while chat generation, a Workflow, or a background task is active. Fixed mode affects only the llm role from the next request onward.
+            parameters:
+                - in: path
+                  name: conversation_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/patchConversationModelOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/patchConversationModelOpenAPIResponse'
+                    description: Updated conversation model selection
+            summary: Switch the conversation chat model
+            tags:
+                - conversations
     /api/core/conversations/{conversation_id}/settings:
         patch:
             parameters:
@@ -8725,6 +9134,18 @@ paths:
                                 $ref: '#/components/schemas/ConversationPinResponse'
                     description: Conversation pinned
             summary: Pin a conversation
+    /api/core/conversations/{conversation_id}:promote:
+        post:
+            parameters:
+                - in: path
+                  name: conversation_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /conversations/{conversation_id}:promote
     /api/core/conversations/{conversation_id}:purge:
         delete:
             parameters:
@@ -8923,7 +9344,7 @@ paths:
             summary: List conversation history (paginated)
     /api/core/conversations/{name}:search-config:
         patch:
-            description: Replaces the knowledge bases on an existing conversation while preserving its other search settings.
+            description: Replaces any supplied knowledge-base, creator, or tag filters while preserving omitted search settings.
             parameters:
                 - in: path
                   name: name
@@ -8943,7 +9364,7 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/conversationSearchConfigOpenAPIResponse'
                     description: Updated conversation search config
-            summary: Update conversation knowledge bases
+            summary: Update conversation search filters
             tags:
                 - conversations
     /api/core/conversations/{name}:trail:
@@ -8975,6 +9396,31 @@ paths:
                                 $ref: '#/components/schemas/ConversationTrailListResponse'
                     description: Conversation navigation metadata ordered by seq ascending
             summary: List conversation trail metadata (paginated)
+    /api/core/conversations/{parent_id}/sidechat:
+        post:
+            description: Freezes the selected parent history boundary as read-only model context. The child starts with basic chat only and remains hidden from conversation lists until retained.
+            parameters:
+                - in: path
+                  name: parent_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/createSidechatOpenAPIRequest'
+                required: false
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/sidechatConversationOpenAPIResponse'
+                    description: Created side conversation
+            summary: Create an ephemeral side conversation
+            tags:
+                - conversations
     /api/core/conversations:archived:
         get:
             parameters:
@@ -9036,6 +9482,12 @@ paths:
                 "200":
                     description: OK
             summary: POST /conversations:chat
+    /api/core/conversations:editable-block:
+        patch:
+            responses:
+                "200":
+                    description: OK
+            summary: PATCH /conversations:editable-block
     /api/core/conversations:estimateContextUsage:
         post:
             responses:
@@ -9360,10 +9812,15 @@ paths:
                   required: false
                   schema:
                     type: integer
-                - in: query
+                - description: Sort datasets by latest_updated (default), most_used (per current user usage), or recent_used (latest of last used and content update).
+                  in: query
                   name: order_by
                   required: false
                   schema:
+                    enum:
+                        - latest_updated
+                        - most_used
+                        - recent_used
                     type: string
                 - in: query
                   name: keyword

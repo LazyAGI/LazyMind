@@ -76,6 +76,7 @@ type ChatChunkResponse struct {
 	ToolCallTurns         int                          `json:"tool_call_turns,omitempty"`
 	ExternalEventSequence int64                        `json:"external_event_sequence,omitempty"`
 	Execution             *externalExecutionProjection `json:"execution,omitempty"`
+	ModelRoute            *chatModelRoute              `json:"model_route,omitempty"`
 	TaskCreated           *TaskCreatedNotice           `json:"task_created,omitempty"`
 	ArtifactCreated       *ConversationArtifactDTO     `json:"artifact_created,omitempty"`
 	AskPending            *AskPendingEvent             `json:"ask_pending,omitempty"`

@@ -786,6 +786,81 @@ CREATE TABLE versioned_probe (id integer PRIMARY KEY);
 	}
 }
 
+func TestRepositorySQLiteDownContinuesPastPostAggregateRelationColumns(t *testing.T) {
+	dir := newStructuredMigrationDir(t)
+	writeMigrationPair(t, versionModeDir(t, dir, "v0_1"), "20260101000000_baseline",
+		"CREATE TABLE conversations (id integer PRIMARY KEY);",
+		"DROP TABLE conversations;")
+	writeMigrationPair(t, versionModeDir(t, dir, "v0_2"), "20260201000000_release", `
+ALTER TABLE conversations ADD COLUMN parent_conversation_id text;
+ALTER TABLE conversations ADD COLUMN relation_type text NOT NULL DEFAULT '';
+CREATE TABLE aggregate_tail (id integer PRIMARY KEY);
+`, `
+ALTER TABLE conversations DROP COLUMN relation_type;
+ALTER TABLE conversations DROP COLUMN parent_conversation_id;
+DROP TABLE aggregate_tail;
+`)
+	runner := openSquashTestRunner(t, filepath.Join(t.TempDir(), "acl.db"), dir)
+	defer runner.Close()
+	if err := runner.Up(0); err != nil {
+		t.Fatalf("up through aggregate migration: %v", err)
+	}
+
+	writeMigrationPair(t, devModeDir(t, dir, "v0_2"), "20260301000000_add_relations", `
+ALTER TABLE conversations ADD COLUMN parent_conversation_id text;
+ALTER TABLE conversations ADD COLUMN relation_type text NOT NULL DEFAULT '';
+CREATE INDEX idx_conversations_relation ON conversations(parent_conversation_id, relation_type);
+`, `
+DROP INDEX IF EXISTS idx_conversations_relation;
+ALTER TABLE conversations DROP COLUMN relation_type;
+ALTER TABLE conversations DROP COLUMN parent_conversation_id;
+`)
+	if err := runner.Up(0); err != nil {
+		t.Fatalf("up post-aggregate relation migration: %v", err)
+	}
+	var indexCount int
+	if err := runner.db.QueryRow(`
+SELECT COUNT(*) FROM sqlite_master
+WHERE type = 'index' AND name = 'idx_conversations_relation'
+`).Scan(&indexCount); err != nil {
+		t.Fatalf("query relation index: %v", err)
+	}
+	if indexCount != 1 {
+		t.Fatalf("post-aggregate migration stopped after duplicate columns; index count=%d", indexCount)
+	}
+
+	if err := runner.Down(2); err != nil {
+		t.Fatalf("down post-aggregate relation migration and aggregate: %v", err)
+	}
+	var tailCount int
+	if err := runner.db.QueryRow(`
+SELECT COUNT(*) FROM sqlite_master
+WHERE type = 'table' AND name = 'aggregate_tail'
+`).Scan(&tailCount); err != nil {
+		t.Fatalf("query aggregate tail table: %v", err)
+	}
+	if tailCount != 0 {
+		t.Fatalf("aggregate down stopped after missing relation columns; table count=%d", tailCount)
+	}
+	var relationColumnCount int
+	if err := runner.db.QueryRow(`
+SELECT COUNT(*) FROM pragma_table_info('conversations')
+WHERE name IN ('parent_conversation_id', 'relation_type')
+`).Scan(&relationColumnCount); err != nil {
+		t.Fatalf("query relation columns: %v", err)
+	}
+	if relationColumnCount != 0 {
+		t.Fatalf("relation columns remain after down -n 2: count=%d", relationColumnCount)
+	}
+	history, err := runner.readHistory()
+	if err != nil {
+		t.Fatalf("read migration history: %v", err)
+	}
+	if len(history) != 1 || history[0].Name != "baseline" {
+		t.Fatalf("history after down -n 2=%#v, want only baseline", history)
+	}
+}
+
 func closeGORMDatabase(t *testing.T, db *gorm.DB) {
 	t.Helper()
 	sqlDB, err := db.DB()

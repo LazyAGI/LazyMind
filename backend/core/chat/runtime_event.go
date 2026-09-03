@@ -25,8 +25,15 @@ type RunTerminal struct {
 	Reason        string `json:"reason"`
 	Code          string `json:"code,omitempty"`
 	PartialOutput bool   `json:"partial_output"`
+	ModelInvoked  *bool  `json:"model_invoked,omitempty"`
 	ModelCallID   string `json:"model_call_id,omitempty"`
 	DiagnosticID  string `json:"diagnostic_id,omitempty"`
+}
+
+func (terminal *RunTerminal) modelWasInvoked() bool {
+	// Older producers did not report invocation. Preserve their routing behavior;
+	// an explicit false identifies a host response that never called the model.
+	return terminal != nil && (terminal.ModelInvoked == nil || *terminal.ModelInvoked)
 }
 
 type ModelRetryScheduledData struct {
@@ -166,6 +173,9 @@ func parseRunTerminal(raw json.RawMessage) (*RunTerminal, error) {
 	var terminal RunTerminal
 	if err := json.Unmarshal(raw, &terminal); err != nil {
 		return nil, errors.New("invalid run_finished data")
+	}
+	if _, exists := fields["model_invoked"]; exists && terminal.ModelInvoked == nil {
+		return nil, errors.New("run_finished model_invoked must be boolean")
 	}
 	codeRaw, codePresent := fields["code"]
 	if codePresent {

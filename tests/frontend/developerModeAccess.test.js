@@ -33,6 +33,9 @@ describe("developer mode access", () => {
     const settingsSource = readFrontendSource("modules/settings/index.tsx");
 
     expect(settingsSource).toContain(
+      'import { runtimeFeatures } from "@/runtime/features";',
+    );
+    expect(settingsSource).toContain(
       '"settingsPage.confirm.developerEnableContentWithoutEvo"',
     );
     expect(settingsSource).toContain(
