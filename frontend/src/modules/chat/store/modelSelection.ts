@@ -1,35 +1,88 @@
 import { create } from "zustand";
+import type {
+  ChatModelListOpenAPIItem,
+  ChatModelProviderOpenAPIItem,
+  ChatModelSelectionOpenAPI,
+  ChatModelsOpenAPIResponse,
+  PatchConversationModelOpenAPIRequest,
+} from "@/api/generated/core-client";
 
-// There is only one model mode now (LazyMind). This store is kept as a
-// thin wrapper so that callsites that reference getModelSelection /
-// setModelSelection don't need to be touched, but the "deepseek" and
-// "both" concepts are completely removed.
+export type ChatModelSelectionRequest = Pick<
+  PatchConversationModelOpenAPIRequest,
+  "mode" | "model_id"
+>;
 
-export type ModelSelectionType = "value_engineering";
+export type ChatModelSelection = Pick<ChatModelSelectionOpenAPI, "mode" | "version"> &
+  Partial<ChatModelSelectionOpenAPI>;
 
-interface ModelSelectionStore {
-  getModelSelection: (conversationId: string) => ModelSelectionType;
-  setModelSelection: (
-    conversationId: string,
-    selection: ModelSelectionType,
-  ) => void;
-  resetForNewChat: () => void;
-  clearModelSelection: (conversationId: string) => void;
+// Older catalogs use is_* badges; incomplete local selections are also allowed.
+export type ChatModelOption = Pick<ChatModelListOpenAPIItem, "id" | "name"> &
+  Partial<ChatModelListOpenAPIItem> & {
+    is_default?: boolean;
+    is_shared?: boolean;
+    is_recommended?: boolean;
+    is_low_cost?: boolean;
+    available?: boolean;
+  };
+
+export type ChatModelProvider = Pick<ChatModelProviderOpenAPIItem, "id" | "name"> & {
+  source?: ChatModelProviderOpenAPIItem["source"];
+  models: ChatModelOption[];
+};
+
+export type ChatModelCatalog = Omit<
+  ChatModelsOpenAPIResponse,
+  "selection" | "default_selection" | "providers"
+> & {
+  selection: ChatModelSelection;
+  default_selection?: ChatModelSelection;
+  providers: ChatModelProvider[];
+};
+
+export const NEW_CHAT_MODEL_SELECTION_KEY = "__new_chat__";
+
+export function chatModelSelectionKey(conversationId?: string): string {
+  const normalized = conversationId?.trim();
+  return normalized && !normalized.startsWith("temp_")
+    ? normalized
+    : NEW_CHAT_MODEL_SELECTION_KEY;
 }
 
-export const useModelSelectionStore = create<ModelSelectionStore>()(() => ({
-  getModelSelection: (_conversationId: string): ModelSelectionType =>
-    "value_engineering",
-  setModelSelection: (
-    _conversationId: string,
-    _selection: ModelSelectionType,
-  ) => {},
-  resetForNewChat: () => {},
-  clearModelSelection: (_conversationId: string) => {},
+interface ModelSelectionStore {
+  selections: Record<string, ChatModelSelection | undefined>;
+  setSelection: (key: string, selection: ChatModelSelection) => void;
+  clearSelection: (key: string) => void;
+  resetForNewChat: () => void;
+}
+
+export const useModelSelectionStore = create<ModelSelectionStore>()((set) => ({
+  selections: {},
+  setSelection: (key, selection) =>
+    set((state) => ({
+      selections: { ...state.selections, [key]: selection },
+    })),
+  clearSelection: (key) =>
+    set((state) => {
+      if (!(key in state.selections)) return state;
+      const selections = { ...state.selections };
+      delete selections[key];
+      return { selections };
+    }),
+  resetForNewChat: () =>
+    set((state) => {
+      if (!(NEW_CHAT_MODEL_SELECTION_KEY in state.selections)) return state;
+      const selections = { ...state.selections };
+      delete selections[NEW_CHAT_MODEL_SELECTION_KEY];
+      return { selections };
+    }),
 }));
 
-export function parseModelSelectionFromModels(
-  _models?: string[],
-): ModelSelectionType {
-  return "value_engineering";
+export function toChatModelSelectionRequest(
+  selection?: ChatModelSelection,
+): ChatModelSelectionRequest | undefined {
+  if (!selection) return undefined;
+  if (selection.mode === "auto") return { mode: "auto" };
+  return selection.model_id
+    ? { mode: "fixed", model_id: selection.model_id }
+    : undefined;
 }

@@ -239,5 +239,5 @@ export async function submitPreferenceOrganizer(): Promise<PreferenceOrganizerTa
 
 export function isPreferenceOrganizing(error: unknown): boolean {
   const response = (error as { response?: { data?: { code?: number; data?: { error_code?: string } } } })?.response?.data;
-  return response?.code === 2002321 || response?.data?.error_code === "preference_organizing";
+  return response?.code === 2002361 || response?.data?.error_code === "preference_organizing";
 }

@@ -286,6 +286,59 @@ describe("buildChatMessageListFromHistory", () => {
     expect(assistantMessage.ask_answered).toBe(true);
   });
 
+  it("restores archived failure attempts before the latest answer", () => {
+    const failedTerminal = {
+      status: "failed",
+      reason: "model_failure",
+      code: "rate_limited",
+      partial_output: true,
+      diagnostic_id: "diagnostic-1",
+    };
+    const list = buildChatMessageListFromHistory([
+      {
+        id: "h1",
+        query: "q1",
+        result: "latest answer",
+        failed_attempts: [
+          {
+            result: "partial answer",
+            run_id: "run-failed-1",
+            run_status: "failed",
+            run_terminal: failedTerminal,
+            model_route: {
+              mode: "auto",
+              provider_name: "Fast",
+              model_name: "fast-free",
+              reason: "simple_task",
+            },
+            create_time: "2026-09-01T00:00:00Z",
+          },
+        ],
+      },
+    ]);
+
+    expect(list).toHaveLength(3);
+    expect(list[1]).toMatchObject({
+      role: RoleTypes.ASSISTANT,
+      history_id: "h1:failed:run-failed-1",
+      original_history_id: "h1",
+      delta: "partial answer",
+      run_terminal: failedTerminal,
+      model_route: {
+        mode: "auto",
+        provider_name: "Fast",
+        model_name: "fast-free",
+        reason: "simple_task",
+      },
+      archived_failure: true,
+    });
+    expect(list[2]).toMatchObject({
+      role: RoleTypes.ASSISTANT,
+      history_id: "h1",
+      delta: "latest answer",
+    });
+  });
+
   it("separates image and file inputs into their respective arrays", () => {
     const history = [
       {

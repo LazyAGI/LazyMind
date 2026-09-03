@@ -511,6 +511,7 @@ export interface ChatChunkResponse {
     'execution'?: ExternalExecutionProjection;
     'history_id'?: string;
     'message'?: string;
+    'model_route'?: ChatModelRoute;
     'prompt_questions'?: Array<string>;
     'reasoning_content'?: string;
     'runtime_event'?: ChatRuntimeEvent;
@@ -597,6 +598,145 @@ export const ChatEntryDefaultsPatchOpenAPIRequestThinkingDepthEnum = {
 } as const;
 
 export type ChatEntryDefaultsPatchOpenAPIRequestThinkingDepthEnum = typeof ChatEntryDefaultsPatchOpenAPIRequestThinkingDepthEnum[keyof typeof ChatEntryDefaultsPatchOpenAPIRequestThinkingDepthEnum];
+
+export interface ChatModelListOpenAPIItem {
+    'availability': ChatModelListOpenAPIItemAvailabilityEnum;
+    'badges'?: Array<string>;
+    'capabilities'?: Array<string>;
+    'current': boolean;
+    'default': boolean;
+    'group_id': string;
+    'group_name': string;
+    'id': string;
+    'name': string;
+    'shared': boolean;
+    'source': ChatModelListOpenAPIItemSourceEnum;
+}
+
+export const ChatModelListOpenAPIItemAvailabilityEnum = {
+    Available: 'available',
+    Unavailable: 'unavailable'
+} as const;
+
+export type ChatModelListOpenAPIItemAvailabilityEnum = typeof ChatModelListOpenAPIItemAvailabilityEnum[keyof typeof ChatModelListOpenAPIItemAvailabilityEnum];
+export const ChatModelListOpenAPIItemSourceEnum = {
+    Own: 'own',
+    Shared: 'shared'
+} as const;
+
+export type ChatModelListOpenAPIItemSourceEnum = typeof ChatModelListOpenAPIItemSourceEnum[keyof typeof ChatModelListOpenAPIItemSourceEnum];
+
+export interface ChatModelProviderOpenAPIItem {
+    'id': string;
+    'models'?: Array<ChatModelListOpenAPIItem>;
+    'name': string;
+    'source': ChatModelProviderOpenAPIItemSourceEnum;
+}
+
+export const ChatModelProviderOpenAPIItemSourceEnum = {
+    Own: 'own',
+    Shared: 'shared'
+} as const;
+
+export type ChatModelProviderOpenAPIItemSourceEnum = typeof ChatModelProviderOpenAPIItemSourceEnum[keyof typeof ChatModelProviderOpenAPIItemSourceEnum];
+
+export interface ChatModelRoute {
+    'mode'?: ChatModelRouteModeEnum;
+    'model_id'?: string;
+    'model_name'?: string;
+    'provider_id'?: string;
+    'provider_name'?: string;
+    'reason'?: ChatModelRouteReasonEnum;
+    'selection_version'?: number;
+    'source'?: ChatModelRouteSourceEnum;
+    'strategy'?: string;
+    'task_class'?: ChatModelRouteTaskClassEnum;
+}
+
+export const ChatModelRouteModeEnum = {
+    Auto: 'auto',
+    Fixed: 'fixed'
+} as const;
+
+export type ChatModelRouteModeEnum = typeof ChatModelRouteModeEnum[keyof typeof ChatModelRouteModeEnum];
+export const ChatModelRouteReasonEnum = {
+    SimpleTask: 'simple_task',
+    ComplexTask: 'complex_task',
+    LongContext: 'long_context',
+    SessionSticky: 'session_sticky',
+    DefaultBalanced: 'default_balanced',
+    RetrySameModel: 'retry_same_model',
+    Fixed: 'fixed',
+    InitialSelection: 'initial_selection',
+    ModelUnavailable: 'model_unavailable'
+} as const;
+
+export type ChatModelRouteReasonEnum = typeof ChatModelRouteReasonEnum[keyof typeof ChatModelRouteReasonEnum];
+export const ChatModelRouteSourceEnum = {
+    Own: 'own',
+    Shared: 'shared'
+} as const;
+
+export type ChatModelRouteSourceEnum = typeof ChatModelRouteSourceEnum[keyof typeof ChatModelRouteSourceEnum];
+export const ChatModelRouteTaskClassEnum = {
+    Simple: 'simple',
+    Balanced: 'balanced',
+    Complex: 'complex',
+    LongContext: 'long_context',
+    Fixed: 'fixed',
+    Auto: 'auto'
+} as const;
+
+export type ChatModelRouteTaskClassEnum = typeof ChatModelRouteTaskClassEnum[keyof typeof ChatModelRouteTaskClassEnum];
+
+export interface ChatModelSelectionOpenAPI {
+    'availability': ChatModelSelectionOpenAPIAvailabilityEnum;
+    'group_id'?: string;
+    'group_name'?: string;
+    'mode': ChatModelSelectionOpenAPIModeEnum;
+    'model_id'?: string;
+    'model_name'?: string;
+    'provider_id'?: string;
+    'provider_name'?: string;
+    'source'?: ChatModelSelectionOpenAPISourceEnum;
+    'version': number;
+}
+
+export const ChatModelSelectionOpenAPIAvailabilityEnum = {
+    Available: 'available',
+    Unavailable: 'unavailable'
+} as const;
+
+export type ChatModelSelectionOpenAPIAvailabilityEnum = typeof ChatModelSelectionOpenAPIAvailabilityEnum[keyof typeof ChatModelSelectionOpenAPIAvailabilityEnum];
+export const ChatModelSelectionOpenAPIModeEnum = {
+    Fixed: 'fixed',
+    Auto: 'auto'
+} as const;
+
+export type ChatModelSelectionOpenAPIModeEnum = typeof ChatModelSelectionOpenAPIModeEnum[keyof typeof ChatModelSelectionOpenAPIModeEnum];
+export const ChatModelSelectionOpenAPISourceEnum = {
+    Own: 'own',
+    Shared: 'shared'
+} as const;
+
+export type ChatModelSelectionOpenAPISourceEnum = typeof ChatModelSelectionOpenAPISourceEnum[keyof typeof ChatModelSelectionOpenAPISourceEnum];
+
+export interface ChatModelsOpenAPIResponse {
+    'auto_available': boolean;
+    'default_selection': ChatModelSelectionOpenAPI;
+    'providers'?: Array<ChatModelProviderOpenAPIItem>;
+    'selection': ChatModelSelectionOpenAPI;
+    'switch_allowed': boolean;
+    'switch_blocked_reason'?: ChatModelsOpenAPIResponseSwitchBlockedReasonEnum;
+}
+
+export const ChatModelsOpenAPIResponseSwitchBlockedReasonEnum = {
+    Generating: 'generating',
+    WorkflowRunning: 'workflow_running',
+    BackgroundTaskRunning: 'background_task_running'
+} as const;
+
+export type ChatModelsOpenAPIResponseSwitchBlockedReasonEnum = typeof ChatModelsOpenAPIResponseSwitchBlockedReasonEnum[keyof typeof ChatModelsOpenAPIResponseSwitchBlockedReasonEnum];
 
 export interface ChatRuntimeEvent {
     'data'?: object;
@@ -697,8 +837,71 @@ export interface ConversationBatchDeleteResponse {
 export interface ConversationChatStatusResponse {
     'is_generating'?: boolean;
 }
+export interface ConversationDetailItem {
+    'assistant'?: ConversationDetailItemAssistantEnum;
+    'chat_executor'?: ConversationDetailItemChatExecutorEnum;
+    'chat_times'?: number;
+    'conversation_id'?: string;
+    'create_time'?: string;
+    'display_name'?: string;
+    'is_pinned'?: boolean;
+    'models'?: Array<string>;
+    'name'?: string;
+    'parent_conversation_id'?: string | null;
+    'parent_display_name'?: string;
+    'pinned_at'?: string | null;
+    'project_key'?: string;
+    'project_name'?: string;
+    'relation_type'?: ConversationDetailItemRelationTypeEnum;
+    'search_config'?: object;
+    'selected_text'?: string;
+    'source_context'?: ConversationDetailItemSourceContext | null;
+    'source_history_id'?: string | null;
+    'source_seq'?: number | null;
+    'thinking_depth'?: ConversationDetailItemThinkingDepthEnum;
+    'total_feedback_like'?: number;
+    'total_feedback_unlike'?: number;
+    'update_time'?: string;
+    'user'?: string;
+}
+
+export const ConversationDetailItemAssistantEnum = {
+    Lazymind: 'lazymind',
+    Codex: 'codex',
+    Cursor: 'cursor',
+    Workbuddy: 'workbuddy'
+} as const;
+
+export type ConversationDetailItemAssistantEnum = typeof ConversationDetailItemAssistantEnum[keyof typeof ConversationDetailItemAssistantEnum];
+export const ConversationDetailItemChatExecutorEnum = {
+    Lazymind: 'lazymind',
+    Codex: 'codex',
+    Cursor: 'cursor',
+    Workbuddy: 'workbuddy'
+} as const;
+
+export type ConversationDetailItemChatExecutorEnum = typeof ConversationDetailItemChatExecutorEnum[keyof typeof ConversationDetailItemChatExecutorEnum];
+export const ConversationDetailItemRelationTypeEnum = {
+    Empty: '',
+    Sidechat: 'sidechat',
+    Fork: 'fork'
+} as const;
+
+export type ConversationDetailItemRelationTypeEnum = typeof ConversationDetailItemRelationTypeEnum[keyof typeof ConversationDetailItemRelationTypeEnum];
+export const ConversationDetailItemThinkingDepthEnum = {
+    Low: 'low',
+    Medium: 'medium',
+    High: 'high',
+    Max: 'max'
+} as const;
+
+export type ConversationDetailItemThinkingDepthEnum = typeof ConversationDetailItemThinkingDepthEnum[keyof typeof ConversationDetailItemThinkingDepthEnum];
+
+export interface ConversationDetailItemSourceContext {
+    'messages'?: Array<{ [key: string]: any; }>;
+}
 export interface ConversationDetailResponse {
-    'conversation'?: ConversationItem;
+    'conversation'?: ConversationDetailItem;
 }
 export interface ConversationFeedbackRequest {
     'expected_answer'?: string;
@@ -716,9 +919,11 @@ export interface ConversationHistoryItem {
     'create_time'?: string;
     'execution'?: ExternalExecutionProjection;
     'expected_answer'?: string;
+    'failed_attempts'?: Array<FailedRunAttempt>;
     'feed_back'?: number;
     'id'?: string;
     'input'?: Array<object>;
+    'model_route'?: ChatModelRoute;
     'query'?: string;
     'reason'?: string;
     'reasoning_content'?: string;
@@ -747,9 +952,12 @@ export interface ConversationItem {
     'is_pinned'?: boolean;
     'models'?: Array<string>;
     'name'?: string;
+    'parent_conversation_id'?: string | null;
+    'parent_display_name'?: string;
     'pinned_at'?: string | null;
     'project_key'?: string;
     'project_name'?: string;
+    'relation_type'?: ConversationItemRelationTypeEnum;
     'search_config'?: object;
     'thinking_depth'?: ConversationItemThinkingDepthEnum;
     'total_feedback_like'?: number;
@@ -774,6 +982,13 @@ export const ConversationItemChatExecutorEnum = {
 } as const;
 
 export type ConversationItemChatExecutorEnum = typeof ConversationItemChatExecutorEnum[keyof typeof ConversationItemChatExecutorEnum];
+export const ConversationItemRelationTypeEnum = {
+    Empty: '',
+    Sidechat: 'sidechat',
+    Fork: 'fork'
+} as const;
+
+export type ConversationItemRelationTypeEnum = typeof ConversationItemRelationTypeEnum[keyof typeof ConversationItemRelationTypeEnum];
 export const ConversationItemThinkingDepthEnum = {
     Low: 'low',
     Medium: 'medium',
@@ -824,7 +1039,18 @@ export interface ConversationResumeRequest {
     'history_id'?: string;
 }
 export interface ConversationSearchConfigOpenAPIRequest {
+    /**
+     * Optional. Replace document creator filters; omit to preserve them.
+     */
+    'creators'?: Array<string>;
+    /**
+     * Optional. Replace knowledge bases; omit to preserve the current selection.
+     */
     'dataset_ids'?: Array<string>;
+    /**
+     * Optional. Replace document tag filters; omit to preserve them.
+     */
+    'tags'?: Array<string>;
 }
 export interface ConversationSearchConfigOpenAPIResponse {
     'conversation_id': string;
@@ -918,6 +1144,22 @@ export interface CreateServerRequest {
     'transport': string;
     'url': string;
 }
+export interface CreateSidechatOpenAPIRequest {
+    'selected_text'?: string;
+    'source_history_id'?: string;
+    'source_seq'?: number;
+    'thinking_depth'?: CreateSidechatOpenAPIRequestThinkingDepthEnum;
+}
+
+export const CreateSidechatOpenAPIRequestThinkingDepthEnum = {
+    Low: 'low',
+    Medium: 'medium',
+    High: 'high',
+    Max: 'max'
+} as const;
+
+export type CreateSidechatOpenAPIRequestThinkingDepthEnum = typeof CreateSidechatOpenAPIRequestThinkingDepthEnum[keyof typeof CreateSidechatOpenAPIRequestThinkingDepthEnum];
+
 export interface CreateTaskItem {
     'content_hash'?: string;
     'cross_dataset'?: boolean;
@@ -1502,6 +1744,22 @@ export interface ExternalExecutionWorkflow {
     'status'?: string;
     'workflow_id'?: string;
 }
+export interface FailedRunAttempt {
+    'create_time'?: string;
+    'model_route'?: ChatModelRoute;
+    'result'?: string;
+    'run_id'?: string;
+    'run_status'?: FailedRunAttemptRunStatusEnum;
+    'run_terminal'?: RunTerminal;
+}
+
+export const FailedRunAttemptRunStatusEnum = {
+    Failed: 'failed',
+    Interrupted: 'interrupted'
+} as const;
+
+export type FailedRunAttemptRunStatusEnum = typeof FailedRunAttemptRunStatusEnum[keyof typeof FailedRunAttemptRunStatusEnum];
+
 export interface GetKBAuthorizationResponse {
     'grants'?: Array<AuthorizationSubjectGrant>;
     'kb_id'?: string;
@@ -1933,6 +2191,25 @@ export interface ParserConfig {
     'params'?: { [key: string]: object; };
     'type': string;
 }
+export interface PatchConversationModelOpenAPIRequest {
+    'expected_version': number;
+    'mode': PatchConversationModelOpenAPIRequestModeEnum;
+    /**
+     * Required only when mode is fixed.
+     */
+    'model_id'?: string;
+}
+
+export const PatchConversationModelOpenAPIRequestModeEnum = {
+    Fixed: 'fixed',
+    Auto: 'auto'
+} as const;
+
+export type PatchConversationModelOpenAPIRequestModeEnum = typeof PatchConversationModelOpenAPIRequestModeEnum[keyof typeof PatchConversationModelOpenAPIRequestModeEnum];
+
+export interface PatchConversationModelOpenAPIResponse {
+    'selection': ChatModelSelectionOpenAPI;
+}
 export interface PermissionBatchItem {
     'kb_id'?: string;
     'permissions'?: Array<string>;
@@ -2147,6 +2424,7 @@ export interface PromptPolishOpenAPIResponse {
     'content': string;
 }
 export interface PromptPolishRequest {
+    'allow_empty'?: boolean;
     'content': string;
     'user_instruct': string;
 }
@@ -2255,6 +2533,7 @@ export interface RunTerminal {
     'code'?: string;
     'diagnostic_id'?: string;
     'model_call_id'?: string;
+    'model_invoked'?: boolean;
     'partial_output': boolean;
     'reason': RunTerminalReasonEnum;
     'status': RunTerminalStatusEnum;
@@ -2453,10 +2732,10 @@ export interface ShowcaseCase {
     'output_label': string;
     'output_type': string;
     'provider': string;
-    'source_url': string;
     'result_summary': string;
+    'source_url': string;
     'tags'?: Array<string>;
-    'tasks': Array<ShowcaseCaseTask>;
+    'tasks'?: Array<ShowcaseCaseTask>;
     'title': string;
     'type': string;
     'workflow_ref'?: string;
@@ -2480,10 +2759,10 @@ export interface ShowcaseCaseProductReport {
 export interface ShowcaseCaseResult {
     'eyebrow': string;
     'highlights'?: Array<string>;
-    'image_asset'?: string;
-    'image_url'?: string;
     'html_asset'?: string;
     'html_url'?: string;
+    'image_asset'?: string;
+    'image_url'?: string;
     'product_report'?: ShowcaseCaseProductReport;
     'summary': string;
     'template': string;
@@ -2511,6 +2790,52 @@ export interface ShowcaseCaseTask {
     'result': ShowcaseCaseResult;
     'steps'?: Array<ShowcaseCaseStep>;
     'title': string;
+}
+export interface SidechatConversationOpenAPI {
+    'chat_model_id'?: string;
+    'chat_model_mode'?: SidechatConversationOpenAPIChatModelModeEnum;
+    'chat_model_version': number;
+    'conversation_id': string;
+    'display_name': string;
+    'id': string;
+    'is_ephemeral': boolean;
+    'parent_conversation_id'?: string;
+    'parent_display_name'?: string;
+    'relation_type': SidechatConversationOpenAPIRelationTypeEnum;
+    'search_config'?: { [key: string]: object; };
+    'selected_text'?: string;
+    'source_context'?: SidechatPublicSourceContextOpenAPI;
+    'source_history_id'?: string;
+    'source_seq'?: number;
+    'thinking_depth'?: SidechatConversationOpenAPIThinkingDepthEnum;
+}
+
+export const SidechatConversationOpenAPIChatModelModeEnum = {
+    Fixed: 'fixed',
+    Auto: 'auto'
+} as const;
+
+export type SidechatConversationOpenAPIChatModelModeEnum = typeof SidechatConversationOpenAPIChatModelModeEnum[keyof typeof SidechatConversationOpenAPIChatModelModeEnum];
+export const SidechatConversationOpenAPIRelationTypeEnum = {
+    Sidechat: 'sidechat',
+    Fork: 'fork'
+} as const;
+
+export type SidechatConversationOpenAPIRelationTypeEnum = typeof SidechatConversationOpenAPIRelationTypeEnum[keyof typeof SidechatConversationOpenAPIRelationTypeEnum];
+export const SidechatConversationOpenAPIThinkingDepthEnum = {
+    Low: 'low',
+    Medium: 'medium',
+    High: 'high',
+    Max: 'max'
+} as const;
+
+export type SidechatConversationOpenAPIThinkingDepthEnum = typeof SidechatConversationOpenAPIThinkingDepthEnum[keyof typeof SidechatConversationOpenAPIThinkingDepthEnum];
+
+export interface SidechatConversationOpenAPIResponse {
+    'conversation': SidechatConversationOpenAPI;
+}
+export interface SidechatPublicSourceContextOpenAPI {
+    'messages'?: Array<{ [key: string]: object; }>;
 }
 export interface SkillCategoriesOpenAPIResponse {
     'categories'?: Array<string>;
@@ -5933,6 +6258,118 @@ export type ApiCoreAgentThreadsThreadIdGatesStepVersionsVersionDownloadGetFormat
 
 
 /**
+ * ChatApi - axios parameter creator
+ */
+export const ChatApiAxiosParamCreator = function (configuration?: Configuration) {
+    return {
+        /**
+         * Returns only non-deleted LLMs from verified provider groups that are owned by the current user or explicitly shared through the active shared llm selection. Credentials and endpoint configuration are never returned.
+         * @summary List usable chat models and resolve the current selection
+         * @param {string} [conversationId] Optional owned conversation whose saved model selection should be restored.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreChatModelsGet: async (conversationId?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/chat/models`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (conversationId !== undefined) {
+                localVarQueryParameter['conversation_id'] = conversationId;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+    }
+};
+
+/**
+ * ChatApi - functional programming interface
+ */
+export const ChatApiFp = function(configuration?: Configuration) {
+    const localVarAxiosParamCreator = ChatApiAxiosParamCreator(configuration)
+    return {
+        /**
+         * Returns only non-deleted LLMs from verified provider groups that are owned by the current user or explicitly shared through the active shared llm selection. Credentials and endpoint configuration are never returned.
+         * @summary List usable chat models and resolve the current selection
+         * @param {string} [conversationId] Optional owned conversation whose saved model selection should be restored.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreChatModelsGet(conversationId?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ChatModelsOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreChatModelsGet(conversationId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ChatApi.apiCoreChatModelsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+    }
+};
+
+/**
+ * ChatApi - factory interface
+ */
+export const ChatApiFactory = function (configuration?: Configuration, basePath?: string, axios?: AxiosInstance) {
+    const localVarFp = ChatApiFp(configuration)
+    return {
+        /**
+         * Returns only non-deleted LLMs from verified provider groups that are owned by the current user or explicitly shared through the active shared llm selection. Credentials and endpoint configuration are never returned.
+         * @summary List usable chat models and resolve the current selection
+         * @param {ChatApiApiCoreChatModelsGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreChatModelsGet(requestParameters: ChatApiApiCoreChatModelsGetRequest = {}, options?: RawAxiosRequestConfig): AxiosPromise<ChatModelsOpenAPIResponse> {
+            return localVarFp.apiCoreChatModelsGet(requestParameters.conversationId, options).then((request) => request(axios, basePath));
+        },
+    };
+};
+
+/**
+ * Request parameters for apiCoreChatModelsGet operation in ChatApi.
+ */
+export interface ChatApiApiCoreChatModelsGetRequest {
+    /**
+     * Optional owned conversation whose saved model selection should be restored.
+     */
+    readonly conversationId?: string
+}
+
+/**
+ * ChatApi - object-oriented interface
+ */
+export class ChatApi extends BaseAPI {
+    /**
+     * Returns only non-deleted LLMs from verified provider groups that are owned by the current user or explicitly shared through the active shared llm selection. Credentials and endpoint configuration are never returned.
+     * @summary List usable chat models and resolve the current selection
+     * @param {ChatApiApiCoreChatModelsGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreChatModelsGet(requestParameters: ChatApiApiCoreChatModelsGetRequest = {}, options?: RawAxiosRequestConfig) {
+        return ChatApiFp(this.configuration).apiCoreChatModelsGet(requestParameters.conversationId, options).then((request) => request(this.axios, this.basePath));
+    }
+}
+
+
+
+/**
  * ConversationsApi - axios parameter creator
  */
 export const ConversationsApiAxiosParamCreator = function (configuration?: Configuration) {
@@ -6007,8 +6444,114 @@ export const ConversationsApiAxiosParamCreator = function (configuration?: Confi
             };
         },
         /**
-         * Replaces the knowledge bases on an existing conversation while preserving its other search settings.
-         * @summary Update conversation knowledge bases
+         * Promotes an ephemeral side conversation into visible history after at least one completed turn.
+         * @summary Retain a side conversation
+         * @param {string} childId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsChildIdRetainPost: async (childId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'childId' is not null or undefined
+            assertParamExists('apiCoreConversationsChildIdRetainPost', 'childId', childId)
+            const localVarPath = `/api/core/conversations/{child_id}/retain`
+                .replace(`{${"child_id"}}`, encodeURIComponent(String(childId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Permanently clears an unretained side conversation and its dependent records.
+         * @summary Discard an ephemeral side conversation
+         * @param {string} childId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsChildIdSidechatDelete: async (childId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'childId' is not null or undefined
+            assertParamExists('apiCoreConversationsChildIdSidechatDelete', 'childId', childId)
+            const localVarPath = `/api/core/conversations/{child_id}/sidechat`
+                .replace(`{${"child_id"}}`, encodeURIComponent(String(childId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Uses expected_version for optimistic locking and rejects changes while chat generation, a Workflow, or a background task is active. Fixed mode affects only the llm role from the next request onward.
+         * @summary Switch the conversation chat model
+         * @param {string} conversationId
+         * @param {PatchConversationModelOpenAPIRequest} patchConversationModelOpenAPIRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsConversationIdModelPatch: async (conversationId: string, patchConversationModelOpenAPIRequest: PatchConversationModelOpenAPIRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'conversationId' is not null or undefined
+            assertParamExists('apiCoreConversationsConversationIdModelPatch', 'conversationId', conversationId)
+            // verify required parameter 'patchConversationModelOpenAPIRequest' is not null or undefined
+            assertParamExists('apiCoreConversationsConversationIdModelPatch', 'patchConversationModelOpenAPIRequest', patchConversationModelOpenAPIRequest)
+            const localVarPath = `/api/core/conversations/{conversation_id}/model`
+                .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PATCH', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(patchConversationModelOpenAPIRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Replaces any supplied knowledge-base, creator, or tag filters while preserving omitted search settings.
+         * @summary Update conversation search filters
          * @param {string} name
          * @param {ConversationSearchConfigOpenAPIRequest} conversationSearchConfigOpenAPIRequest
          * @param {*} [options] Override http request option.
@@ -6039,6 +6582,43 @@ export const ConversationsApiAxiosParamCreator = function (configuration?: Confi
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
             localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
             localVarRequestOptions.data = serializeDataIfNeeded(conversationSearchConfigOpenAPIRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Freezes the selected parent history boundary as read-only model context. The child starts with basic chat only and remains hidden from conversation lists until retained.
+         * @summary Create an ephemeral side conversation
+         * @param {string} parentId
+         * @param {CreateSidechatOpenAPIRequest} [createSidechatOpenAPIRequest]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsParentIdSidechatPost: async (parentId: string, createSidechatOpenAPIRequest?: CreateSidechatOpenAPIRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'parentId' is not null or undefined
+            assertParamExists('apiCoreConversationsParentIdSidechatPost', 'parentId', parentId)
+            const localVarPath = `/api/core/conversations/{parent_id}/sidechat`
+                .replace(`{${"parent_id"}}`, encodeURIComponent(String(parentId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(createSidechatOpenAPIRequest, localVarRequestOptions, configuration)
 
             return {
                 url: toPathString(localVarUrlObj),
@@ -6081,8 +6661,48 @@ export const ConversationsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Replaces the knowledge bases on an existing conversation while preserving its other search settings.
-         * @summary Update conversation knowledge bases
+         * Promotes an ephemeral side conversation into visible history after at least one completed turn.
+         * @summary Retain a side conversation
+         * @param {string} childId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreConversationsChildIdRetainPost(childId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<SidechatConversationOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsChildIdRetainPost(childId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ConversationsApi.apiCoreConversationsChildIdRetainPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Permanently clears an unretained side conversation and its dependent records.
+         * @summary Discard an ephemeral side conversation
+         * @param {string} childId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreConversationsChildIdSidechatDelete(childId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsChildIdSidechatDelete(childId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ConversationsApi.apiCoreConversationsChildIdSidechatDelete']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Uses expected_version for optimistic locking and rejects changes while chat generation, a Workflow, or a background task is active. Fixed mode affects only the llm role from the next request onward.
+         * @summary Switch the conversation chat model
+         * @param {string} conversationId
+         * @param {PatchConversationModelOpenAPIRequest} patchConversationModelOpenAPIRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreConversationsConversationIdModelPatch(conversationId: string, patchConversationModelOpenAPIRequest: PatchConversationModelOpenAPIRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PatchConversationModelOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsConversationIdModelPatch(conversationId, patchConversationModelOpenAPIRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ConversationsApi.apiCoreConversationsConversationIdModelPatch']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Replaces any supplied knowledge-base, creator, or tag filters while preserving omitted search settings.
+         * @summary Update conversation search filters
          * @param {string} name
          * @param {ConversationSearchConfigOpenAPIRequest} conversationSearchConfigOpenAPIRequest
          * @param {*} [options] Override http request option.
@@ -6092,6 +6712,20 @@ export const ConversationsApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsNameSearchConfigPatch(name, conversationSearchConfigOpenAPIRequest, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['ConversationsApi.apiCoreConversationsNameSearchConfigPatch']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Freezes the selected parent history boundary as read-only model context. The child starts with basic chat only and remains hidden from conversation lists until retained.
+         * @summary Create an ephemeral side conversation
+         * @param {string} parentId
+         * @param {CreateSidechatOpenAPIRequest} [createSidechatOpenAPIRequest]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreConversationsParentIdSidechatPost(parentId: string, createSidechatOpenAPIRequest?: CreateSidechatOpenAPIRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<SidechatConversationOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsParentIdSidechatPost(parentId, createSidechatOpenAPIRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ConversationsApi.apiCoreConversationsParentIdSidechatPost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
     }
@@ -6124,14 +6758,54 @@ export const ConversationsApiFactory = function (configuration?: Configuration, 
             return localVarFp.apiCoreConversationExportPost(requestParameters.exportConversationsRequest, options).then((request) => request(axios, basePath));
         },
         /**
-         * Replaces the knowledge bases on an existing conversation while preserving its other search settings.
-         * @summary Update conversation knowledge bases
+         * Promotes an ephemeral side conversation into visible history after at least one completed turn.
+         * @summary Retain a side conversation
+         * @param {ConversationsApiApiCoreConversationsChildIdRetainPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsChildIdRetainPost(requestParameters: ConversationsApiApiCoreConversationsChildIdRetainPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<SidechatConversationOpenAPIResponse> {
+            return localVarFp.apiCoreConversationsChildIdRetainPost(requestParameters.childId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Permanently clears an unretained side conversation and its dependent records.
+         * @summary Discard an ephemeral side conversation
+         * @param {ConversationsApiApiCoreConversationsChildIdSidechatDeleteRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsChildIdSidechatDelete(requestParameters: ConversationsApiApiCoreConversationsChildIdSidechatDeleteRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreConversationsChildIdSidechatDelete(requestParameters.childId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Uses expected_version for optimistic locking and rejects changes while chat generation, a Workflow, or a background task is active. Fixed mode affects only the llm role from the next request onward.
+         * @summary Switch the conversation chat model
+         * @param {ConversationsApiApiCoreConversationsConversationIdModelPatchRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsConversationIdModelPatch(requestParameters: ConversationsApiApiCoreConversationsConversationIdModelPatchRequest, options?: RawAxiosRequestConfig): AxiosPromise<PatchConversationModelOpenAPIResponse> {
+            return localVarFp.apiCoreConversationsConversationIdModelPatch(requestParameters.conversationId, requestParameters.patchConversationModelOpenAPIRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Replaces any supplied knowledge-base, creator, or tag filters while preserving omitted search settings.
+         * @summary Update conversation search filters
          * @param {ConversationsApiApiCoreConversationsNameSearchConfigPatchRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
         apiCoreConversationsNameSearchConfigPatch(requestParameters: ConversationsApiApiCoreConversationsNameSearchConfigPatchRequest, options?: RawAxiosRequestConfig): AxiosPromise<ConversationSearchConfigOpenAPIResponse> {
             return localVarFp.apiCoreConversationsNameSearchConfigPatch(requestParameters.name, requestParameters.conversationSearchConfigOpenAPIRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Freezes the selected parent history boundary as read-only model context. The child starts with basic chat only and remains hidden from conversation lists until retained.
+         * @summary Create an ephemeral side conversation
+         * @param {ConversationsApiApiCoreConversationsParentIdSidechatPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsParentIdSidechatPost(requestParameters: ConversationsApiApiCoreConversationsParentIdSidechatPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<SidechatConversationOpenAPIResponse> {
+            return localVarFp.apiCoreConversationsParentIdSidechatPost(requestParameters.parentId, requestParameters.createSidechatOpenAPIRequest, options).then((request) => request(axios, basePath));
         },
     };
 };
@@ -6151,12 +6825,44 @@ export interface ConversationsApiApiCoreConversationExportPostRequest {
 }
 
 /**
+ * Request parameters for apiCoreConversationsChildIdRetainPost operation in ConversationsApi.
+ */
+export interface ConversationsApiApiCoreConversationsChildIdRetainPostRequest {
+    readonly childId: string
+}
+
+/**
+ * Request parameters for apiCoreConversationsChildIdSidechatDelete operation in ConversationsApi.
+ */
+export interface ConversationsApiApiCoreConversationsChildIdSidechatDeleteRequest {
+    readonly childId: string
+}
+
+/**
+ * Request parameters for apiCoreConversationsConversationIdModelPatch operation in ConversationsApi.
+ */
+export interface ConversationsApiApiCoreConversationsConversationIdModelPatchRequest {
+    readonly conversationId: string
+
+    readonly patchConversationModelOpenAPIRequest: PatchConversationModelOpenAPIRequest
+}
+
+/**
  * Request parameters for apiCoreConversationsNameSearchConfigPatch operation in ConversationsApi.
  */
 export interface ConversationsApiApiCoreConversationsNameSearchConfigPatchRequest {
     readonly name: string
 
     readonly conversationSearchConfigOpenAPIRequest: ConversationSearchConfigOpenAPIRequest
+}
+
+/**
+ * Request parameters for apiCoreConversationsParentIdSidechatPost operation in ConversationsApi.
+ */
+export interface ConversationsApiApiCoreConversationsParentIdSidechatPostRequest {
+    readonly parentId: string
+
+    readonly createSidechatOpenAPIRequest?: CreateSidechatOpenAPIRequest
 }
 
 /**
@@ -6186,14 +6892,58 @@ export class ConversationsApi extends BaseAPI {
     }
 
     /**
-     * Replaces the knowledge bases on an existing conversation while preserving its other search settings.
-     * @summary Update conversation knowledge bases
+     * Promotes an ephemeral side conversation into visible history after at least one completed turn.
+     * @summary Retain a side conversation
+     * @param {ConversationsApiApiCoreConversationsChildIdRetainPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreConversationsChildIdRetainPost(requestParameters: ConversationsApiApiCoreConversationsChildIdRetainPostRequest, options?: RawAxiosRequestConfig) {
+        return ConversationsApiFp(this.configuration).apiCoreConversationsChildIdRetainPost(requestParameters.childId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Permanently clears an unretained side conversation and its dependent records.
+     * @summary Discard an ephemeral side conversation
+     * @param {ConversationsApiApiCoreConversationsChildIdSidechatDeleteRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreConversationsChildIdSidechatDelete(requestParameters: ConversationsApiApiCoreConversationsChildIdSidechatDeleteRequest, options?: RawAxiosRequestConfig) {
+        return ConversationsApiFp(this.configuration).apiCoreConversationsChildIdSidechatDelete(requestParameters.childId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Uses expected_version for optimistic locking and rejects changes while chat generation, a Workflow, or a background task is active. Fixed mode affects only the llm role from the next request onward.
+     * @summary Switch the conversation chat model
+     * @param {ConversationsApiApiCoreConversationsConversationIdModelPatchRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreConversationsConversationIdModelPatch(requestParameters: ConversationsApiApiCoreConversationsConversationIdModelPatchRequest, options?: RawAxiosRequestConfig) {
+        return ConversationsApiFp(this.configuration).apiCoreConversationsConversationIdModelPatch(requestParameters.conversationId, requestParameters.patchConversationModelOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Replaces any supplied knowledge-base, creator, or tag filters while preserving omitted search settings.
+     * @summary Update conversation search filters
      * @param {ConversationsApiApiCoreConversationsNameSearchConfigPatchRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
     public apiCoreConversationsNameSearchConfigPatch(requestParameters: ConversationsApiApiCoreConversationsNameSearchConfigPatchRequest, options?: RawAxiosRequestConfig) {
         return ConversationsApiFp(this.configuration).apiCoreConversationsNameSearchConfigPatch(requestParameters.name, requestParameters.conversationSearchConfigOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Freezes the selected parent history boundary as read-only model context. The child starts with basic chat only and remains hidden from conversation lists until retained.
+     * @summary Create an ephemeral side conversation
+     * @param {ConversationsApiApiCoreConversationsParentIdSidechatPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreConversationsParentIdSidechatPost(requestParameters: ConversationsApiApiCoreConversationsParentIdSidechatPostRequest, options?: RawAxiosRequestConfig) {
+        return ConversationsApiFp(this.configuration).apiCoreConversationsParentIdSidechatPost(requestParameters.parentId, requestParameters.createSidechatOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
     }
 }
 
@@ -7082,14 +7832,14 @@ export const DatasetsApiAxiosParamCreator = function (configuration?: Configurat
          * @summary Dataset list
          * @param {string} [pageToken]
          * @param {number} [pageSize]
-         * @param {string} [orderBy]
+         * @param {ApiCoreDatasetsGetOrderByEnum} [orderBy] Sort datasets by latest_updated (default), most_used (per current user usage), or recent_used (latest of last used and content update).
          * @param {string} [keyword]
          * @param {Array<string>} [tags]
          * @param {ApiCoreDatasetsGetSourceEnum} [source] Filter datasets by creation source: manual (local upload), cloud (cloud document sync) or official_installed (installed from the knowledge plaza).
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreDatasetsGet: async (pageToken?: string, pageSize?: number, orderBy?: string, keyword?: string, tags?: Array<string>, source?: ApiCoreDatasetsGetSourceEnum, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreDatasetsGet: async (pageToken?: string, pageSize?: number, orderBy?: ApiCoreDatasetsGetOrderByEnum, keyword?: string, tags?: Array<string>, source?: ApiCoreDatasetsGetSourceEnum, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             const localVarPath = `/api/core/datasets`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -7257,14 +8007,14 @@ export const DatasetsApiFp = function(configuration?: Configuration) {
          * @summary Dataset list
          * @param {string} [pageToken]
          * @param {number} [pageSize]
-         * @param {string} [orderBy]
+         * @param {ApiCoreDatasetsGetOrderByEnum} [orderBy] Sort datasets by latest_updated (default), most_used (per current user usage), or recent_used (latest of last used and content update).
          * @param {string} [keyword]
          * @param {Array<string>} [tags]
          * @param {ApiCoreDatasetsGetSourceEnum} [source] Filter datasets by creation source: manual (local upload), cloud (cloud document sync) or official_installed (installed from the knowledge plaza).
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreDatasetsGet(pageToken?: string, pageSize?: number, orderBy?: string, keyword?: string, tags?: Array<string>, source?: ApiCoreDatasetsGetSourceEnum, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ListDatasetsResponse>> {
+        async apiCoreDatasetsGet(pageToken?: string, pageSize?: number, orderBy?: ApiCoreDatasetsGetOrderByEnum, keyword?: string, tags?: Array<string>, source?: ApiCoreDatasetsGetSourceEnum, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ListDatasetsResponse>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsGet(pageToken, pageSize, orderBy, keyword, tags, source, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DatasetsApi.apiCoreDatasetsGet']?.[localVarOperationServerIndex]?.url;
@@ -7415,7 +8165,10 @@ export interface DatasetsApiApiCoreDatasetsGetRequest {
 
     readonly pageSize?: number
 
-    readonly orderBy?: string
+    /**
+     * Sort datasets by latest_updated (default), most_used (per current user usage), or recent_used (latest of last used and content update).
+     */
+    readonly orderBy?: ApiCoreDatasetsGetOrderByEnum
 
     readonly keyword?: string
 
@@ -7518,6 +8271,12 @@ export class DatasetsApi extends BaseAPI {
     }
 }
 
+export const ApiCoreDatasetsGetOrderByEnum = {
+    LatestUpdated: 'latest_updated',
+    MostUsed: 'most_used',
+    RecentUsed: 'recent_used'
+} as const;
+export type ApiCoreDatasetsGetOrderByEnum = typeof ApiCoreDatasetsGetOrderByEnum[keyof typeof ApiCoreDatasetsGetOrderByEnum];
 export const ApiCoreDatasetsGetSourceEnum = {
     Manual: 'manual',
     Cloud: 'cloud',
@@ -8427,6 +9186,39 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
+         * @summary POST /conversations/{conversation_id}:promote
+         * @param {string} conversationId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsConversationIdPromotePost: async (conversationId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'conversationId' is not null or undefined
+            assertParamExists('apiCoreConversationsConversationIdPromotePost', 'conversationId', conversationId)
+            const localVarPath = `/api/core/conversations/{conversation_id}:promote`
+                .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary Permanently delete a trashed conversation
          * @param {string} conversationId
          * @param {*} [options] Override http request option.
@@ -8839,6 +9631,35 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             assertParamExists('apiCoreConversationsConversationIdWorkflowSettingsPatch', 'conversationId', conversationId)
             const localVarPath = `/api/core/conversations/{conversation_id}/workflow-settings`
                 .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PATCH', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary PATCH /conversations:editable-block
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsEditableBlockPatch: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/conversations:editable-block`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -16087,6 +16908,19 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary POST /conversations/{conversation_id}:promote
+         * @param {string} conversationId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreConversationsConversationIdPromotePost(conversationId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsConversationIdPromotePost(conversationId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsConversationIdPromotePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary Permanently delete a trashed conversation
          * @param {string} conversationId
          * @param {*} [options] Override http request option.
@@ -16256,6 +17090,18 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary PATCH /conversations:editable-block
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreConversationsEditableBlockPatch(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsEditableBlockPatch(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsEditableBlockPatch']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary POST /conversations:estimateContextUsage
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -16353,7 +17199,7 @@ export const DefaultApiFp = function(configuration?: Configuration) {
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreConversationsNameGet(name: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationItem>> {
+        async apiCoreConversationsNameGet(name: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationDetailItem>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsNameGet(name, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsNameGet']?.[localVarOperationServerIndex]?.url;
@@ -19146,6 +19992,16 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
+         * @summary POST /conversations/{conversation_id}:promote
+         * @param {DefaultApiApiCoreConversationsConversationIdPromotePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsConversationIdPromotePost(requestParameters: DefaultApiApiCoreConversationsConversationIdPromotePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreConversationsConversationIdPromotePost(requestParameters.conversationId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary Permanently delete a trashed conversation
          * @param {DefaultApiApiCoreConversationsConversationIdPurgeDeleteRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -19276,6 +20132,15 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
+         * @summary PATCH /conversations:editable-block
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsEditableBlockPatch(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreConversationsEditableBlockPatch(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary POST /conversations:estimateContextUsage
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -19349,7 +20214,7 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreConversationsNameGet(requestParameters: DefaultApiApiCoreConversationsNameGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<ConversationItem> {
+        apiCoreConversationsNameGet(requestParameters: DefaultApiApiCoreConversationsNameGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<ConversationDetailItem> {
             return localVarFp.apiCoreConversationsNameGet(requestParameters.name, options).then((request) => request(axios, basePath));
         },
         /**
@@ -21337,6 +22202,13 @@ export interface DefaultApiApiCoreConversationsConversationIdPinPostRequest {
 }
 
 /**
+ * Request parameters for apiCoreConversationsConversationIdPromotePost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreConversationsConversationIdPromotePostRequest {
+    readonly conversationId: string
+}
+
+/**
  * Request parameters for apiCoreConversationsConversationIdPurgeDelete operation in DefaultApi.
  */
 export interface DefaultApiApiCoreConversationsConversationIdPurgeDeleteRequest {
@@ -22933,6 +23805,17 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
+     * @summary POST /conversations/{conversation_id}:promote
+     * @param {DefaultApiApiCoreConversationsConversationIdPromotePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreConversationsConversationIdPromotePost(requestParameters: DefaultApiApiCoreConversationsConversationIdPromotePostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreConversationsConversationIdPromotePost(requestParameters.conversationId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
      * @summary Permanently delete a trashed conversation
      * @param {DefaultApiApiCoreConversationsConversationIdPurgeDeleteRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -23072,6 +23955,16 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreConversationsConversationIdWorkflowSettingsPatch(requestParameters: DefaultApiApiCoreConversationsConversationIdWorkflowSettingsPatchRequest, options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreConversationsConversationIdWorkflowSettingsPatch(requestParameters.conversationId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary PATCH /conversations:editable-block
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreConversationsEditableBlockPatch(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreConversationsEditableBlockPatch(options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

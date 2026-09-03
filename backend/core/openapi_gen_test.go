@@ -94,6 +94,31 @@ func TestOpenAPISpecIncludesSkillMarketDelete(t *testing.T) {
 	}
 }
 
+func TestOpenAPIChatSelectionAndSidechatHaveOneClientOwner(t *testing.T) {
+	r := mux.NewRouter()
+	registerCoreRoutes(r)
+	specJSON, err := buildOpenAPISpecFromRouter(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var spec map[string]any
+	if err := json.Unmarshal(specJSON, &spec); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ method, path, tag string }{
+		{"get", "/api/core/chat/models", "chat"},
+		{"patch", "/api/core/conversations/{conversation_id}/model", "conversations"},
+		{"post", "/api/core/conversations/{parent_id}/sidechat", "conversations"},
+		{"post", "/api/core/conversations/{child_id}/retain", "conversations"},
+		{"delete", "/api/core/conversations/{child_id}/sidechat", "conversations"},
+	} {
+		op := openAPIOperationForTest(t, spec, tc.method, tc.path)
+		if !reflect.DeepEqual(op["tags"], []any{tc.tag}) {
+			t.Errorf("%s %s tags = %#v, want only %s", tc.method, tc.path, op["tags"], tc.tag)
+		}
+	}
+}
+
 func TestOpenAPIConversationItemIncludesThinkingDepthEnum(t *testing.T) {
 	router := mux.NewRouter()
 	registerCoreRoutes(router)
@@ -1730,6 +1755,32 @@ func TestOpenAPIBuiltinSkillIncludesOptionalProvider(t *testing.T) {
 	for _, name := range schema["required"].([]any) {
 		if name == "provider" {
 			t.Fatal("builtin provider must remain optional for old catalogs")
+		}
+	}
+}
+
+func TestOpenAPIConversationSearchConfigIncludesOptionalFilters(t *testing.T) {
+	schemas := generatedOpenAPISchemas(t)
+	schema, ok := schemas["conversationSearchConfigOpenAPIRequest"].(map[string]any)
+	if !ok {
+		t.Fatal("conversation search config request schema missing")
+	}
+	properties, ok := schema["properties"].(map[string]any)
+	if !ok {
+		t.Fatal("conversation search config request properties missing")
+	}
+	for _, field := range []string{"dataset_ids", "creators", "tags"} {
+		property, ok := properties[field].(map[string]any)
+		if !ok || property["type"] != "array" {
+			t.Fatalf("%s property = %#v, want array", field, properties[field])
+		}
+	}
+	requiredFields, _ := schema["required"].([]any)
+	for _, required := range requiredFields {
+		for _, field := range []string{"dataset_ids", "creators", "tags"} {
+			if required == field {
+				t.Fatalf("%s must remain optional", field)
+			}
 		}
 	}
 }

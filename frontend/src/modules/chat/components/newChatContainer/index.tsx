@@ -118,6 +118,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
       setChatConfig,
       setChatConfigFn,
       knowledgeRefreshKey,
+      allowKnowledgeBaseSelection = true,
       embeddingReady,
       multimodalEmbeddingReady,
       rerankReady,
@@ -131,13 +132,26 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
       showThinkingDepth = true,
       showSkillDeposit = true,
       showConversationConfig = true,
+      showModelSelector = true,
       fixedThinkingDepth,
+      concurrentStream = false,
+      thinkingDepth,
+      onThinkingDepthChange,
+      onStreamingChange,
+      onRequestPendingChange,
+      onOpenSideChat,
     } = props;
 
     const { clearPendingMessage: clearStorePendingMessage } =
       useChatMessageStore();
     const chatInputRef = useRef<ChatInputImperativeProps>(null);
     const userEditRef = useRef<ReturnType<typeof useUserMessageEdit>>();
+    const modelSelectionSavingRef = useRef(false);
+    const [modelSelectionSaving, setModelSelectionSaving] = useState(false);
+    const handleModelSelectionSavingChange = useCallback((saving: boolean) => {
+      modelSelectionSavingRef.current = saving;
+      setModelSelectionSaving(saving);
+    }, []);
     const [sourcePanelSources, setSourcePanelSources] = useState<ChatSource[]>([]);
     const skillDepositWasReadyRef = useRef(false);
     const skillDepositMessageCountRef = useRef(0);
@@ -173,10 +187,23 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
       chatInputRef,
       thinkingCollapseMap,
       getUserEdit: () => userEditRef.current,
+      isModelSelectionSaving: () => modelSelectionSavingRef.current,
+      concurrentStream,
+      onRequestPendingChange,
       t,
     });
 
+    useEffect(() => {
+      onStreamingChange?.(conversation.isStreaming);
+      if (conversation.isStreaming) {
+        onRequestPendingChange?.(false);
+      }
+    }, [conversation.isStreaming, onRequestPendingChange, onStreamingChange]);
+
     const handleRegenerate = useCallback(() => {
+      if (modelSelectionSavingRef.current) {
+        return;
+      }
       setSourcePanelSources([]);
       void conversation.regenerate();
     }, [conversation.regenerate]);
@@ -258,9 +285,11 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
     ]);
 
     const userEdit = useUserMessageEdit({
-      canChat,
-      disabledReason,
-      loading: conversation.loading,
+      canChat: canChat && !modelSelectionSaving,
+      disabledReason: modelSelectionSaving
+        ? t("chat.modelSelectorSwitching")
+        : disabledReason,
+      loading: conversation.loading || modelSelectionSaving,
       activeStreamRef: conversation.activeStreamRef,
       messageList: conversation.messageList,
       messageListRef: conversation.messageListRef,
@@ -273,6 +302,9 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
 
     const sendMessage = useCallback(
       (params: Parameters<typeof conversation.sendMessage>[0]) => {
+        if (modelSelectionSavingRef.current) {
+          return;
+        }
         collapseAllThinking();
         conversation.sendMessage(params);
       },
@@ -393,6 +425,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
         ? conversation.appendAutoAdvanceTurn
         : undefined,
       ensureAutoAdvanceUserTurn: conversation.ensureAutoAdvanceUserTurn,
+      focusInput: () => chatInputRef.current?.focus(),
     }));
 
     const renderText = useCallback(
@@ -436,12 +469,14 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
                 !canChat ||
                 conversation.loading ||
                 conversation.isStreaming ||
-                conversation.runtimeWaiting
+                conversation.runtimeWaiting ||
+                modelSelectionSaving
               }
               stopGeneration={conversation.stopGeneration}
               renderText={renderText}
               updateAssistantMessage={conversation.updateAssistantMessage}
               onCiteMessage={handleAddCiteMessage}
+              onOpenSideChat={onOpenSideChat}
               onOpenSources={setSourcePanelSources}
               onScroll={conversation.scroll.handleScroll}
               chatContentRef={conversation.scroll.chatContentRef}
@@ -490,6 +525,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
               setChatConfig={setChatConfig}
               setChatConfigFn={setChatConfigFn}
               knowledgeRefreshKey={knowledgeRefreshKey}
+              allowKnowledgeBaseSelection={allowKnowledgeBaseSelection}
               embeddingReady={embeddingReady}
               multimodalEmbeddingReady={multimodalEmbeddingReady}
               rerankReady={rerankReady}
@@ -517,7 +553,12 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
               showThinkingDepth={showThinkingDepth}
               showSkillDeposit={showSkillDeposit}
               showConversationConfig={showConversationConfig}
+              showModelSelector={showModelSelector}
+              modelSelectorBusy={conversation.runtimeWaiting}
+              onModelSelectionSavingChange={handleModelSelectionSavingChange}
               fixedThinkingDepth={fixedThinkingDepth}
+              thinkingDepth={thinkingDepth}
+              onThinkingDepthChange={onThinkingDepthChange}
             />
           </div>
           {sourcePanelSources.length > 0 && (
