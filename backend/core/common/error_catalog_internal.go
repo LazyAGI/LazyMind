@@ -595,6 +595,7 @@ func init() {
 		"invalid run_finished data",
 		"run_finished partial_output is required",
 		"run_finished partial_output must be boolean",
+		"run_finished model_invoked must be boolean",
 		"run_finished code must be a string",
 		"invalid run status/reason combination",
 	} {
