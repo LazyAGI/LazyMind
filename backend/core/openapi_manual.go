@@ -511,8 +511,8 @@ func manualSchemas() map[string]any {
 		"ConversationSwitchStatusRequest":  objReq([]string{"status"}, prop("status", intSchema())),
 		"ConversationSwitchStatusResponse": obj(prop("status", intSchema())),
 		"ConversationChatStatusResponse":   obj(prop("is_generating", boolSchema())),
-		"ConversationItem":       conversationItemSchema(false),
-		"ConversationDetailItem": conversationItemSchema(true),
+		"ConversationItem":                 conversationItemSchema(false),
+		"ConversationDetailItem":           conversationItemSchema(true),
 		"ConversationPinResponse": objReq(
 			[]string{"conversation_id", "is_pinned"},
 			prop("conversation_id", strSchema()), prop("is_pinned", boolSchema()), prop("pinned_at", nullableSchema(dateTimeSchema())),

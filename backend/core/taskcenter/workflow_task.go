@@ -16,20 +16,20 @@ func EnsureWorkflowTask(ctx context.Context, db *gorm.DB, session orm.WorkflowSe
 	}
 	var count int64
 	if err := db.WithContext(ctx).Model(&orm.TaskCenterTask{}).
-		Where("plugin_session_id = ?", session.ID).Count(&count).Error; err != nil || count > 0 {
+		Where("plugin_session_id = ?", session.ID).Count(&count).Error; err != nil || count > 0 { // workflow-naming: persistence
 		return err
 	}
 	var triggers []orm.TaskCenterTask
 	if err := db.WithContext(ctx).
 		Where("user_id = ? AND conversation_id = ? AND task_type IN ? AND status = ? AND archived_at IS NULL", session.CreateUserID, session.ConversationID, []string{"background_chat", "scheduled"}, "running").
-		Where("(plugin_session_id IS NULL OR plugin_session_id = '') AND created_at <= ? AND finished_at IS NULL", session.CreatedAt).
+		Where("(plugin_session_id IS NULL OR plugin_session_id = '') AND created_at <= ? AND finished_at IS NULL", session.CreatedAt). // workflow-naming: persistence
 		Order("created_at DESC").Limit(1).Find(&triggers).Error; err != nil {
 		return err
 	}
 	if len(triggers) == 1 {
 		result := db.WithContext(ctx).Model(&orm.TaskCenterTask{}).
-			Where("id = ? AND status = ? AND archived_at IS NULL AND (plugin_session_id IS NULL OR plugin_session_id = '')", triggers[0].ID, "running").
-			Updates(map[string]any{"plugin_session_id": session.ID, "updated_at": session.CreatedAt})
+			Where("id = ? AND status = ? AND archived_at IS NULL AND (plugin_session_id IS NULL OR plugin_session_id = '')", triggers[0].ID, "running"). // workflow-naming: persistence
+			Updates(map[string]any{"plugin_session_id": session.ID, "updated_at": session.CreatedAt})                                                    // workflow-naming: persistence
 		if result.Error != nil || result.RowsAffected == 1 {
 			return result.Error
 		}
