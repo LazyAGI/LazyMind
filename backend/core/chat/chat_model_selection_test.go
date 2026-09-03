@@ -28,6 +28,21 @@ func (f chatModelRoundTripFunc) RoundTrip(request *http.Request) (*http.Response
 	return f(request)
 }
 
+func mockEmptyChatScan(t *testing.T) {
+	t.Helper()
+	originalScanClient := localFSScanHTTPClient
+	localFSScanHTTPClient = &http.Client{Transport: chatModelRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"items":[],"total":0}`)),
+			Request:    request,
+		}, nil
+	})}
+	t.Cleanup(func() { localFSScanHTTPClient = originalScanClient })
+	t.Setenv("LAZYMIND_SCAN_CONTROL_PLANE_URL", "http://scan.invalid")
+}
+
 func seedAvailableChatModel(
 	t *testing.T,
 	db *gorm.DB,
@@ -463,17 +478,7 @@ func TestChatConversationPersistsSafeModelPreflightFailure(t *testing.T) {
 		t.Fatalf("delete bound model: %v", err)
 	}
 
-	originalScanClient := localFSScanHTTPClient
-	localFSScanHTTPClient = &http.Client{Transport: chatModelRoundTripFunc(func(request *http.Request) (*http.Response, error) {
-		return &http.Response{
-			StatusCode: http.StatusOK,
-			Header:     http.Header{"Content-Type": []string{"application/json"}},
-			Body:       io.NopCloser(strings.NewReader(`{"items":[],"total":0}`)),
-			Request:    request,
-		}, nil
-	})}
-	t.Cleanup(func() { localFSScanHTTPClient = originalScanClient })
-	t.Setenv("LAZYMIND_SCAN_CONTROL_PLANE_URL", "http://scan.invalid")
+	mockEmptyChatScan(t)
 
 	requestBody := func(regenerate bool) string {
 		action := ""
@@ -604,17 +609,7 @@ func TestChatConversationPersistsUnavailableInitialSelection(t *testing.T) {
 				)
 			}
 
-			originalScanClient := localFSScanHTTPClient
-			localFSScanHTTPClient = &http.Client{Transport: chatModelRoundTripFunc(func(request *http.Request) (*http.Response, error) {
-				return &http.Response{
-					StatusCode: http.StatusOK,
-					Header:     http.Header{"Content-Type": []string{"application/json"}},
-					Body:       io.NopCloser(strings.NewReader(`{"items":[],"total":0}`)),
-					Request:    request,
-				}, nil
-			})}
-			t.Cleanup(func() { localFSScanHTTPClient = originalScanClient })
-			t.Setenv("LAZYMIND_SCAN_CONTROL_PLANE_URL", "http://scan.invalid")
+			mockEmptyChatScan(t)
 
 			body := `{"conversation_id":"` + test.conversationID + `","stream":true,"input":[` +
 				`{"input_type":"text","text":"explain the first report"},` +

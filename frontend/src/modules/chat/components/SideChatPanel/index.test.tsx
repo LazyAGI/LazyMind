@@ -1,5 +1,10 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { forwardRef, useEffect, useImperativeHandle } from "react";
+import {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  type ComponentProps,
+} from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import SideChatPanel from "./index";
 import {
@@ -107,6 +112,32 @@ const child = {
   isEphemeral: true,
 };
 
+async function renderSideChat(
+  source?: ComponentProps<typeof SideChatPanel>["source"],
+) {
+  const onClose = vi.fn();
+  const view = render(
+    <SideChatPanel
+      open
+      parentConversationId="parent-1"
+      source={source}
+      onClose={onClose}
+    />,
+  );
+  await screen.findByTestId("side-chat-conversation");
+  return { ...view, onClose };
+}
+
+function sendSideChatQuestion() {
+  act(() => {
+    mocks.latestChatProps.onOpenSSE(
+      [{ input_type: "text", text: "question" }],
+      "CHAT_ACTION_NEXT",
+      {},
+    );
+  });
+}
+
 describe("SideChatPanel", () => {
   beforeEach(() => {
     vi.mocked(createSideChat).mockReset().mockResolvedValue(child);
@@ -127,16 +158,9 @@ describe("SideChatPanel", () => {
   });
 
   it("creates an isolated child and inherits its chat settings", async () => {
-    render(
-      <SideChatPanel
-        open
-        parentConversationId="parent-1"
-        source={{ selectedText: "选中的内容", historyId: "history-1" }}
-        onClose={vi.fn()}
-      />,
-    );
+    await renderSideChat({ selectedText: "选中的内容", historyId: "history-1" });
 
-    expect(await screen.findByTestId("side-chat-conversation")).toBeInTheDocument();
+    expect(screen.getByTestId("side-chat-conversation")).toBeInTheDocument();
     expect(createSideChat).toHaveBeenCalledWith(
       "parent-1",
       {
@@ -163,14 +187,7 @@ describe("SideChatPanel", () => {
   });
 
   it("sends only the side-chat contract and keeps inherited knowledge read-only", async () => {
-    render(
-      <SideChatPanel
-        open
-        parentConversationId="parent-1"
-        onClose={vi.fn()}
-      />,
-    );
-    await screen.findByTestId("side-chat-conversation");
+    await renderSideChat();
 
     const prepareClientConversationId = vi.fn();
     let stream: any;
@@ -223,14 +240,7 @@ describe("SideChatPanel", () => {
   });
 
   it("blocks closing as soon as a request is submitted for runtime startup", async () => {
-    render(
-      <SideChatPanel
-        open
-        parentConversationId="parent-1"
-        onClose={vi.fn()}
-      />,
-    );
-    await screen.findByTestId("side-chat-conversation");
+    await renderSideChat();
 
     act(() => mocks.latestChatProps.onRequestPendingChange(true));
 
@@ -243,78 +253,39 @@ describe("SideChatPanel", () => {
     expect(deleteSideChat).not.toHaveBeenCalled();
   });
 
-  it("deletes an unretained child before closing", async () => {
-    const onClose = vi.fn();
-    render(
-      <SideChatPanel
-        open
-        parentConversationId="parent-1"
-        onClose={onClose}
-      />,
-    );
-    await screen.findByTestId("side-chat-conversation");
-
-    fireEvent.click(screen.getByRole("button", { name: "chat.sideChat.close" }));
-    await waitFor(() => expect(deleteSideChat).toHaveBeenCalledWith("child-1"));
-    expect(onClose).toHaveBeenCalledTimes(1);
-    expect(mocks.closeStream).toHaveBeenCalledWith("child-1");
-  });
-
-  it("retries a discard that briefly overlaps server-side generation cleanup", async () => {
-    vi.mocked(deleteSideChat)
-      .mockRejectedValueOnce({ response: { status: 409 } })
-      .mockResolvedValueOnce(undefined);
-    const onClose = vi.fn();
-    render(
-      <SideChatPanel
-        open
-        parentConversationId="parent-1"
-        onClose={onClose}
-      />,
-    );
-    await screen.findByTestId("side-chat-conversation");
-
-    fireEvent.click(screen.getByRole("button", { name: "chat.sideChat.close" }));
-
-    await waitFor(() => expect(deleteSideChat).toHaveBeenCalledTimes(2));
-    expect(onClose).toHaveBeenCalledTimes(1);
-  });
-
-  it("treats an already discarded child as a successful close", async () => {
-    vi.mocked(deleteSideChat).mockRejectedValueOnce({ response: { status: 404 } });
-    const onClose = vi.fn();
-    render(
-      <SideChatPanel
-        open
-        parentConversationId="parent-1"
-        onClose={onClose}
-      />,
-    );
-    await screen.findByTestId("side-chat-conversation");
+  it.each([
+    {
+      name: "deletes an unretained child before closing",
+      status: undefined,
+      deleteCalls: 1,
+    },
+    {
+      name: "retries a discard that briefly overlaps server-side generation cleanup",
+      status: 409,
+      deleteCalls: 2,
+    },
+    {
+      name: "treats an already discarded child as a successful close",
+      status: 404,
+      deleteCalls: 1,
+    },
+  ])("$name", async ({ status, deleteCalls }) => {
+    if (status) {
+      vi.mocked(deleteSideChat).mockRejectedValueOnce({ response: { status } });
+    }
+    const { onClose } = await renderSideChat();
 
     fireEvent.click(screen.getByRole("button", { name: "chat.sideChat.close" }));
 
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
-    expect(deleteSideChat).toHaveBeenCalledTimes(1);
+    expect(deleteSideChat).toHaveBeenCalledWith("child-1");
+    expect(deleteSideChat).toHaveBeenCalledTimes(deleteCalls);
+    expect(mocks.closeStream).toHaveBeenCalledWith("child-1");
   });
 
   it("confirms before discarding a side chat with messages", async () => {
-    const onClose = vi.fn();
-    render(
-      <SideChatPanel
-        open
-        parentConversationId="parent-1"
-        onClose={onClose}
-      />,
-    );
-    await screen.findByTestId("side-chat-conversation");
-    act(() => {
-      mocks.latestChatProps.onOpenSSE(
-        [{ input_type: "text", text: "question" }],
-        "CHAT_ACTION_NEXT",
-        {},
-      );
-    });
+    const { onClose } = await renderSideChat();
+    sendSideChatQuestion();
 
     fireEvent.click(screen.getByRole("button", { name: "chat.sideChat.close" }));
     expect(screen.getByText("chat.sideChat.closeConfirmTitle")).toBeInTheDocument();
@@ -329,23 +300,9 @@ describe("SideChatPanel", () => {
   });
 
   it("rejects replacement of an active unretained draft", async () => {
-    const view = render(
-      <SideChatPanel
-        open
-        parentConversationId="parent-1"
-        source={{ selectedText: "第一段" }}
-        onClose={vi.fn()}
-      />,
-    );
-    await screen.findByTestId("side-chat-conversation");
+    const view = await renderSideChat({ selectedText: "第一段" });
 
-    act(() => {
-      mocks.latestChatProps.onOpenSSE(
-        [{ input_type: "text", text: "question" }],
-        "CHAT_ACTION_NEXT",
-        {},
-      );
-    });
+    sendSideChatQuestion();
     view.rerender(
       <SideChatPanel
         open
@@ -359,23 +316,9 @@ describe("SideChatPanel", () => {
   });
 
   it("keeps a retained side chat active when its source changes during generation", async () => {
-    const view = render(
-      <SideChatPanel
-        open
-        parentConversationId="parent-1"
-        source={{ selectedText: "第一段" }}
-        onClose={vi.fn()}
-      />,
-    );
-    await screen.findByTestId("side-chat-conversation");
+    const view = await renderSideChat({ selectedText: "第一段" });
 
-    act(() => {
-      mocks.latestChatProps.onOpenSSE(
-        [{ input_type: "text", text: "question" }],
-        "CHAT_ACTION_NEXT",
-        {},
-      );
-    });
+    sendSideChatQuestion();
     fireEvent.click(screen.getByRole("button", { name: "chat.sideChat.retain" }));
     await waitFor(() => expect(retainSideChat).toHaveBeenCalledWith("child-1"));
 
@@ -400,14 +343,7 @@ describe("SideChatPanel", () => {
 
   it("preserves the mounted transcript when clearing fails", async () => {
     vi.mocked(deleteSideChat).mockRejectedValueOnce(new Error("delete failed"));
-    render(
-      <SideChatPanel
-        open
-        parentConversationId="parent-1"
-        onClose={vi.fn()}
-      />,
-    );
-    await screen.findByTestId("side-chat-conversation");
+    await renderSideChat();
     expect(mocks.chatMounts).toBe(1);
 
     fireEvent.click(screen.getByRole("button", { name: "chat.sideChat.clear" }));
@@ -424,21 +360,8 @@ describe("SideChatPanel", () => {
   });
 
   it("closes a retained child without deleting it", async () => {
-    render(
-      <SideChatPanel
-        open
-        parentConversationId="parent-1"
-        onClose={vi.fn()}
-      />,
-    );
-    await screen.findByTestId("side-chat-conversation");
-    act(() => {
-      mocks.latestChatProps.onOpenSSE(
-        [{ input_type: "text", text: "question" }],
-        "CHAT_ACTION_NEXT",
-        {},
-      );
-    });
+    await renderSideChat();
+    sendSideChatQuestion();
 
     fireEvent.click(screen.getByRole("button", { name: "chat.sideChat.retain" }));
     await waitFor(() => expect(retainSideChat).toHaveBeenCalledWith("child-1"));

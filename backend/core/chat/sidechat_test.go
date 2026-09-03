@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -810,12 +809,6 @@ func TestSidechatDoesNotRecordConversationIdleMemoryActivity(t *testing.T) {
 
 func TestSidechatNextRequestIsMutuallyExclusiveAndIdempotent(t *testing.T) {
 	db := newSidechatTestDB(t)
-	stateStore, err := state.NewSQLiteStore(filepath.Join(t.TempDir(), "state.db"))
-	if err != nil {
-		t.Fatalf("open state store: %v", err)
-	}
-	t.Cleanup(func() { _ = stateStore.Close() })
-	store.Init(db, nil, stateStore)
 
 	seedAvailableChatModel(
 		t, db, "user-1", "provider-sidechat", "group-sidechat", "model-sidechat",
@@ -828,17 +821,7 @@ func TestSidechatNextRequestIsMutuallyExclusiveAndIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create sidechat: %v", err)
 	}
-	originalScanClient := localFSScanHTTPClient
-	localFSScanHTTPClient = &http.Client{Transport: chatModelRoundTripFunc(func(request *http.Request) (*http.Response, error) {
-		return &http.Response{
-			StatusCode: http.StatusOK,
-			Header:     http.Header{"Content-Type": []string{"application/json"}},
-			Body:       io.NopCloser(strings.NewReader(`{"items":[],"total":0}`)),
-			Request:    request,
-		}, nil
-	})}
-	t.Cleanup(func() { localFSScanHTTPClient = originalScanClient })
-	t.Setenv("LAZYMIND_SCAN_CONTROL_PLANE_URL", "http://scan.invalid")
+	mockEmptyChatScan(t)
 
 	var upstreamCalls atomic.Int32
 	firstStarted := make(chan struct{})
@@ -983,12 +966,7 @@ func TestExpiredSidechatCleanupSkipsActiveRequest(t *testing.T) {
 
 func TestParentPurgeDoesNotPartiallyDeleteWhenAChildIsBusy(t *testing.T) {
 	db := newSidechatTestDB(t)
-	stateStore, err := state.NewSQLiteStore(filepath.Join(t.TempDir(), "state.db"))
-	if err != nil {
-		t.Fatalf("open state store: %v", err)
-	}
-	t.Cleanup(func() { _ = stateStore.Close() })
-	store.Init(db, nil, stateStore)
+	stateStore := store.State()
 
 	parent := sidechatTestConversation(t, db, "purge-parent", "user-1", "Parent")
 	parentID := parent.ID
@@ -1122,12 +1100,7 @@ func TestSidechatRequestReplayMarkerStartsAfterAcceptance(t *testing.T) {
 
 func TestSidechatRetainAndDiscardRejectActiveRequestGuard(t *testing.T) {
 	db := newSidechatTestDB(t)
-	stateStore, err := state.NewSQLiteStore(filepath.Join(t.TempDir(), "state.db"))
-	if err != nil {
-		t.Fatalf("open state store: %v", err)
-	}
-	t.Cleanup(func() { _ = stateStore.Close() })
-	store.Init(db, nil, stateStore)
+	stateStore := store.State()
 
 	parent := sidechatTestConversation(t, db, "parent-mutation-guard", "user-1", "Parent")
 	child := sidechatTestConversation(t, db, "child-mutation-guard", "user-1", "Child")

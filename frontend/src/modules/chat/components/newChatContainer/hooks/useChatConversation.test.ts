@@ -58,6 +58,55 @@ vi.mock("./useChatScroll", () => ({
   }),
 }));
 
+function renderConversation(
+  overrides: Partial<Parameters<typeof useChatConversation>[0]> = {},
+) {
+  const options: Parameters<typeof useChatConversation>[0] = {
+    canChat: true,
+    onOpenSSE: vi.fn(),
+    setIsChatContent: vi.fn(),
+    clearStorePendingMessage: vi.fn(),
+    clearCiteMessages: vi.fn(),
+    chatInputRef: createRef<ChatInputImperativeProps>(),
+    thinkingCollapseMap: new Map(),
+    getUserEdit: () => undefined,
+    t: (key) => key,
+    ...overrides,
+  };
+  return renderHook(() => useChatConversation(options));
+}
+
+function createMockStream() {
+  const listeners = new Map<string, (event: any) => void>();
+  const stream = {
+    addEventListener: vi.fn((type: string, listener: (event: any) => void) => {
+      listeners.set(type, listener);
+    }),
+    removeEventListener: vi.fn(),
+    close: vi.fn(),
+  };
+  return { stream, listeners };
+}
+
+function createPreparedStream(clientConversationId: string) {
+  const { stream, listeners } = createMockStream();
+  const onOpenSSE = vi.fn(
+    (
+      _input: unknown,
+      _action: unknown,
+      _callbacks: unknown,
+      extras?: Record<string, unknown>,
+    ) => {
+      const prepareClientConversationId = extras?.__prepareClientConversationId;
+      if (typeof prepareClientConversationId === "function") {
+        prepareClientConversationId(clientConversationId);
+      }
+      return stream;
+    },
+  );
+  return { listeners, onOpenSSE };
+}
+
 describe("useChatConversation regeneration recovery", () => {
   beforeEach(() => {
     sessionStorage.clear();
@@ -73,18 +122,7 @@ describe("useChatConversation regeneration recovery", () => {
   });
 
   it("uses freshly loaded history instead of a stale per-conversation cache", () => {
-    const { result } = renderHook(() =>
-      useChatConversation({
-        canChat: true,
-        setIsChatContent: vi.fn(),
-        clearStorePendingMessage: vi.fn(),
-        clearCiteMessages: vi.fn(),
-        chatInputRef: createRef<ChatInputImperativeProps>(),
-        thinkingCollapseMap: new Map(),
-        getUserEdit: () => undefined,
-        t: (key) => key,
-      }),
-    );
+    const { result } = renderConversation();
     const first = [{ role: RoleTypes.ASSISTANT, delta: "cached answer" }];
     const second = [{ role: RoleTypes.ASSISTANT, delta: "server answer" }];
 
@@ -116,19 +154,9 @@ describe("useChatConversation regeneration recovery", () => {
           ChatConversationsResponseFinishReasonEnum.FinishReasonStop,
       },
     ];
-    const { result } = renderHook(() =>
-      useChatConversation({
-        canChat: true,
-        onOpenSSE,
-        setIsChatContent: vi.fn(),
-        clearStorePendingMessage: vi.fn(),
-        clearCiteMessages: vi.fn(),
-        chatInputRef: createRef<ChatInputImperativeProps>(),
-        thinkingCollapseMap: new Map(),
-        getUserEdit: () => undefined,
-        t: (key) => key,
-      }),
-    );
+    const { result } = renderConversation({
+      onOpenSSE,
+    });
 
     await act(async () => {
       result.current.replaceMessageList("conversation-1", originalMessages);
@@ -179,19 +207,9 @@ describe("useChatConversation regeneration recovery", () => {
           ChatConversationsResponseFinishReasonEnum.FinishReasonStop,
       },
     ];
-    const { result } = renderHook(() =>
-      useChatConversation({
-        canChat: true,
-        onOpenSSE,
-        setIsChatContent: vi.fn(),
-        clearStorePendingMessage: vi.fn(),
-        clearCiteMessages: vi.fn(),
-        chatInputRef: createRef<ChatInputImperativeProps>(),
-        thinkingCollapseMap: new Map(),
-        getUserEdit: () => undefined,
-        t: (key) => key,
-      }),
-    );
+    const { result } = renderConversation({
+      onOpenSSE,
+    });
 
     act(() => {
       result.current.replaceMessageList("conversation-1", messages);
@@ -205,11 +223,7 @@ describe("useChatConversation regeneration recovery", () => {
 
     await waitFor(() => expect(onOpenSSE).toHaveBeenCalledTimes(1));
 
-    const stream = {
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      close: vi.fn(),
-    };
+    const { stream } = createMockStream();
     await act(async () => {
       resolveOpen?.(stream);
       await firstRequest;
@@ -219,25 +233,11 @@ describe("useChatConversation regeneration recovery", () => {
   });
 
   it("does not reopen regeneration before synchronous stream state renders", async () => {
-    const stream = {
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      close: vi.fn(),
-    };
+    const { stream } = createMockStream();
     const onOpenSSE = vi.fn(() => stream);
-    const { result } = renderHook(() =>
-      useChatConversation({
-        canChat: true,
-        onOpenSSE,
-        setIsChatContent: vi.fn(),
-        clearStorePendingMessage: vi.fn(),
-        clearCiteMessages: vi.fn(),
-        chatInputRef: createRef<ChatInputImperativeProps>(),
-        thinkingCollapseMap: new Map(),
-        getUserEdit: () => undefined,
-        t: (key) => key,
-      }),
-    );
+    const { result } = renderConversation({
+      onOpenSSE,
+    });
 
     act(() => {
       result.current.replaceMessageList("conversation-1", [
@@ -264,26 +264,12 @@ describe("useChatConversation regeneration recovery", () => {
 
   it("does not retry while a model PATCH is pending and retries after release", async () => {
     let modelSelectionSaving = true;
-    const stream = {
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      close: vi.fn(),
-    };
+    const { stream } = createMockStream();
     const onOpenSSE = vi.fn(() => stream);
-    const { result } = renderHook(() =>
-      useChatConversation({
-        canChat: true,
-        onOpenSSE,
-        setIsChatContent: vi.fn(),
-        clearStorePendingMessage: vi.fn(),
-        clearCiteMessages: vi.fn(),
-        chatInputRef: createRef<ChatInputImperativeProps>(),
-        thinkingCollapseMap: new Map(),
-        getUserEdit: () => undefined,
-        isModelSelectionSaving: () => modelSelectionSaving,
-        t: (key) => key,
-      }),
-    );
+    const { result } = renderConversation({
+      onOpenSSE,
+      isModelSelectionSaving: () => modelSelectionSaving,
+    });
 
     act(() => {
       result.current.replaceMessageList("conversation-1", [
@@ -330,26 +316,12 @@ describe("useChatConversation regeneration recovery", () => {
     waitForRuntimeCapabilityMock
       .mockRejectedValueOnce(new Error("runtime unavailable"))
       .mockResolvedValue(undefined);
-    const stream = {
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      close: vi.fn(),
-    };
+    const { stream } = createMockStream();
     const onOpenSSE = vi.fn(() => stream);
     const clearFiles = vi.fn();
-    const { result } = renderHook(() =>
-      useChatConversation({
-        canChat: true,
-        onOpenSSE,
-        setIsChatContent: vi.fn(),
-        clearStorePendingMessage: vi.fn(),
-        clearCiteMessages: vi.fn(),
-        chatInputRef: createRef<ChatInputImperativeProps>(),
-        thinkingCollapseMap: new Map(),
-        getUserEdit: () => undefined,
-        t: (key) => key,
-      }),
-    );
+    const { result } = renderConversation({
+      onOpenSSE,
+    });
 
     await act(async () => {
       await result.current.sendMessage({
@@ -432,11 +404,7 @@ describe("useChatConversation regeneration recovery", () => {
   it("keeps a first submitted turn retryable when opening SSE rejects", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     const clientConversationId = "11111111-1111-4111-8111-111111111111";
-    const stream = {
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      close: vi.fn(),
-    };
+    const { stream } = createMockStream();
     let attempt = 0;
     const onOpenSSE = vi.fn(
       (
@@ -456,19 +424,9 @@ describe("useChatConversation regeneration recovery", () => {
           : stream;
       },
     );
-    const { result } = renderHook(() =>
-      useChatConversation({
-        canChat: true,
-        onOpenSSE,
-        setIsChatContent: vi.fn(),
-        clearStorePendingMessage: vi.fn(),
-        clearCiteMessages: vi.fn(),
-        chatInputRef: createRef<ChatInputImperativeProps>(),
-        thinkingCollapseMap: new Map(),
-        getUserEdit: () => undefined,
-        t: (key) => key,
-      }),
-    );
+    const { result } = renderConversation({
+      onOpenSSE,
+    });
 
     await act(async () => {
       await result.current.sendMessage({ text: "keep this turn" });
@@ -505,26 +463,12 @@ describe("useChatConversation regeneration recovery", () => {
     waitForRuntimeCapabilityMock.mockImplementationOnce(
       () => new Promise<void>((resolve) => { resolveRuntime = resolve; }),
     );
-    const stream = {
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      close: vi.fn(),
-    };
+    const { stream } = createMockStream();
     const onRequestPendingChange = vi.fn();
-    const { result } = renderHook(() =>
-      useChatConversation({
-        canChat: true,
-        onOpenSSE: vi.fn(() => stream),
-        onRequestPendingChange,
-        setIsChatContent: vi.fn(),
-        clearStorePendingMessage: vi.fn(),
-        clearCiteMessages: vi.fn(),
-        chatInputRef: createRef<ChatInputImperativeProps>(),
-        thinkingCollapseMap: new Map(),
-        getUserEdit: () => undefined,
-        t: (key) => key,
-      }),
-    );
+    const { result } = renderConversation({
+      onOpenSSE: vi.fn(() => stream),
+      onRequestPendingChange,
+    });
 
     let send: Promise<void> | undefined;
     act(() => {
@@ -545,11 +489,7 @@ describe("useChatConversation regeneration recovery", () => {
   });
 
   it("keeps the failed attempt visible while retrying the same user turn", async () => {
-    const stream = {
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      close: vi.fn(),
-    };
+    const { stream } = createMockStream();
     const onOpenSSE = vi.fn(() => stream);
     const failedMessages = [
       {
@@ -572,19 +512,9 @@ describe("useChatConversation regeneration recovery", () => {
         },
       },
     ];
-    const { result } = renderHook(() =>
-      useChatConversation({
-        canChat: true,
-        onOpenSSE,
-        setIsChatContent: vi.fn(),
-        clearStorePendingMessage: vi.fn(),
-        clearCiteMessages: vi.fn(),
-        chatInputRef: createRef<ChatInputImperativeProps>(),
-        thinkingCollapseMap: new Map(),
-        getUserEdit: () => undefined,
-        t: (key) => key,
-      }),
-    );
+    const { result } = renderConversation({
+      onOpenSSE,
+    });
 
     await act(async () => {
       result.current.replaceMessageList("conversation-1", failedMessages);
@@ -609,46 +539,14 @@ describe("useChatConversation regeneration recovery", () => {
 
   it("confirms the prepared conversation after a mapped 503 so model switching can target it", async () => {
     const clientConversationId = "44444444-4444-4444-8444-444444444444";
-    const listeners = new Map<string, (event: any) => void>();
-    const stream = {
-      addEventListener: vi.fn((type: string, listener: (event: any) => void) => {
-        listeners.set(type, listener);
-      }),
-      removeEventListener: vi.fn(),
-      close: vi.fn(),
-    };
-    const onOpenSSE = vi.fn(
-      (
-        _input: unknown,
-        _action: unknown,
-        _callbacks: unknown,
-        extras?: Record<string, unknown>,
-      ) => {
-        const prepareClientConversationId =
-          extras?.__prepareClientConversationId;
-        if (typeof prepareClientConversationId === "function") {
-          prepareClientConversationId(clientConversationId);
-        }
-        return stream;
-      },
-    );
+    const { listeners, onOpenSSE } = createPreparedStream(clientConversationId);
     const onOpenResumeSSE = vi.fn();
     const onConversationIdChange = vi.fn();
-    const { result } = renderHook(() =>
-      useChatConversation({
-        canChat: true,
-        onOpenSSE,
-        onOpenResumeSSE,
-        onConversationIdChange,
-        setIsChatContent: vi.fn(),
-        clearStorePendingMessage: vi.fn(),
-        clearCiteMessages: vi.fn(),
-        chatInputRef: createRef<ChatInputImperativeProps>(),
-        thinkingCollapseMap: new Map(),
-        getUserEdit: () => undefined,
-        t: (key) => key,
-      }),
-    );
+    const { result } = renderConversation({
+      onOpenSSE,
+      onOpenResumeSSE,
+      onConversationIdChange,
+    });
 
     await act(async () => {
       await result.current.sendMessage({ text: "keep this question", clearInput: false });
@@ -695,43 +593,12 @@ describe("useChatConversation regeneration recovery", () => {
       data: { conversations: [{ conversation_id: "old-conversation" }] },
     });
     const clientConversationId = "22222222-2222-4222-8222-222222222222";
-    const listeners = new Map<string, (event: any) => void>();
-    const stream = {
-      addEventListener: vi.fn((type: string, listener: (event: any) => void) => {
-        listeners.set(type, listener);
-      }),
-      removeEventListener: vi.fn(),
-      close: vi.fn(),
-    };
+    const { listeners, onOpenSSE } = createPreparedStream(clientConversationId);
     const onConversationIdChange = vi.fn();
-    const { result, unmount } = renderHook(() =>
-      useChatConversation({
-        canChat: true,
-        onOpenSSE: vi.fn(
-          (
-            _input: unknown,
-            _action: unknown,
-            _callbacks: unknown,
-            extras?: Record<string, unknown>,
-          ) => {
-            const prepareClientConversationId =
-              extras?.__prepareClientConversationId;
-            if (typeof prepareClientConversationId === "function") {
-              prepareClientConversationId(clientConversationId);
-            }
-            return stream;
-          },
-        ),
-        onConversationIdChange,
-        setIsChatContent: vi.fn(),
-        clearStorePendingMessage: vi.fn(),
-        clearCiteMessages: vi.fn(),
-        chatInputRef: createRef<ChatInputImperativeProps>(),
-        thinkingCollapseMap: new Map(),
-        getUserEdit: () => undefined,
-        t: (key) => key,
-      }),
-    );
+    const { result, unmount } = renderConversation({
+      onOpenSSE,
+      onConversationIdChange,
+    });
 
     await act(async () => {
       await result.current.sendMessage({ text: "keep this question" });
@@ -767,43 +634,12 @@ describe("useChatConversation regeneration recovery", () => {
 
   it("ignores a first SSE event with a different conversation id", async () => {
     const clientConversationId = "33333333-3333-4333-8333-333333333333";
-    const listeners = new Map<string, (event: any) => void>();
-    const stream = {
-      addEventListener: vi.fn((type: string, listener: (event: any) => void) => {
-        listeners.set(type, listener);
-      }),
-      removeEventListener: vi.fn(),
-      close: vi.fn(),
-    };
+    const { listeners, onOpenSSE } = createPreparedStream(clientConversationId);
     const onConversationIdChange = vi.fn();
-    const { result } = renderHook(() =>
-      useChatConversation({
-        canChat: true,
-        onOpenSSE: vi.fn(
-          (
-            _input: unknown,
-            _action: unknown,
-            _callbacks: unknown,
-            extras?: Record<string, unknown>,
-          ) => {
-            const prepareClientConversationId =
-              extras?.__prepareClientConversationId;
-            if (typeof prepareClientConversationId === "function") {
-              prepareClientConversationId(clientConversationId);
-            }
-            return stream;
-          },
-        ),
-        onConversationIdChange,
-        setIsChatContent: vi.fn(),
-        clearStorePendingMessage: vi.fn(),
-        clearCiteMessages: vi.fn(),
-        chatInputRef: createRef<ChatInputImperativeProps>(),
-        thinkingCollapseMap: new Map(),
-        getUserEdit: () => undefined,
-        t: (key) => key,
-      }),
-    );
+    const { result } = renderConversation({
+      onOpenSSE,
+      onConversationIdChange,
+    });
 
     await act(async () => {
       await result.current.sendMessage({ text: "keep this question" });
@@ -836,44 +672,13 @@ describe("useChatConversation regeneration recovery", () => {
 
   it("keeps status-zero failures on the existing stream recovery path", async () => {
     const clientConversationId = "55555555-5555-4555-8555-555555555555";
-    const listeners = new Map<string, (event: any) => void>();
-    const stream = {
-      addEventListener: vi.fn((type: string, listener: (event: any) => void) => {
-        listeners.set(type, listener);
-      }),
-      removeEventListener: vi.fn(),
-      close: vi.fn(),
-    };
+    const { listeners, onOpenSSE } = createPreparedStream(clientConversationId);
     const onConversationIdChange = vi.fn();
-    const { result, unmount } = renderHook(() =>
-      useChatConversation({
-        canChat: true,
-        onOpenSSE: vi.fn(
-          (
-            _input: unknown,
-            _action: unknown,
-            _callbacks: unknown,
-            extras?: Record<string, unknown>,
-          ) => {
-            const prepareClientConversationId =
-              extras?.__prepareClientConversationId;
-            if (typeof prepareClientConversationId === "function") {
-              prepareClientConversationId(clientConversationId);
-            }
-            return stream;
-          },
-        ),
-        onOpenResumeSSE: vi.fn(),
-        onConversationIdChange,
-        setIsChatContent: vi.fn(),
-        clearStorePendingMessage: vi.fn(),
-        clearCiteMessages: vi.fn(),
-        chatInputRef: createRef<ChatInputImperativeProps>(),
-        thinkingCollapseMap: new Map(),
-        getUserEdit: () => undefined,
-        t: (key) => key,
-      }),
-    );
+    const { result, unmount } = renderConversation({
+      onOpenSSE,
+      onOpenResumeSSE: vi.fn(),
+      onConversationIdChange,
+    });
 
     await act(async () => {
       await result.current.sendMessage({ text: "network test", clearInput: false });
