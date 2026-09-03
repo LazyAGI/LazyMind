@@ -1195,7 +1195,7 @@ func TestOpenAPISpecMarksUIPreferencesPatchFieldsOptional(t *testing.T) {
 	if !ok {
 		t.Fatalf("userUIPreferencesPatchOpenAPIRequest properties missing")
 	}
-	for _, name := range []string{"chat_preference_notice_dismissed", "developer_mode_active", "schedules_enabled", "skills_enabled", "workflows_enabled"} {
+	for _, name := range []string{"chat_preference_notice_dismissed", "developer_mode_active", "sensitive_word_filter_enabled", "schedules_enabled", "skills_enabled", "workflows_enabled"} {
 		if _, ok := properties[name]; !ok {
 			t.Fatalf("userUIPreferencesPatchOpenAPIRequest expected property %q", name)
 		}

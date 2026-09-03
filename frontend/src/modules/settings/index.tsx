@@ -41,10 +41,7 @@ import { fetchUserUiPreferences, patchUserUiPreferences } from "@/modules/user/u
 import { runtimeFeatures } from "@/runtime/features";
 import { isDesktopRuntime, isLocalRuntime } from "@/runtime/mode";
 import { setDeveloperModeActive } from "@/utils/developerMode";
-import {
-  isSensitiveWordFilterEnabled,
-  setSensitiveWordFilterEnabled as persistSensitiveWordFilterEnabled,
-} from "@/utils/sensitiveWordFilter";
+import { setSensitiveWordFilterEnabled } from "@/utils/sensitiveWordFilter";
 import MemoryCapabilitySettings from "./MemoryCapabilitySettings";
 import KnowledgeDataSettings from "./KnowledgeDataSettings";
 import KnowledgeToolSettings, { isKnowledgeToolView } from "./KnowledgeToolSettings";
@@ -255,7 +252,9 @@ export default function SettingsPage() {
       if (requestID !== latestRequest.current) return;
       setOverview(nextOverview);
       setDeveloperActive(preferences.developer_mode_active);
-      setSensitiveWordFilterEnabledState(isSensitiveWordFilterEnabled());
+      const sensitiveWordFilterEnabled = Boolean(preferences.sensitive_word_filter_enabled);
+      setSensitiveWordFilterEnabled(sensitiveWordFilterEnabled);
+      setSensitiveWordFilterEnabledState(sensitiveWordFilterEnabled);
     } catch {
       if (requestID !== latestRequest.current) return;
       setLoadError(true);
@@ -895,12 +894,15 @@ export default function SettingsPage() {
               checked={sensitiveWordFilterEnabled}
               loading={saving === "sensitive_word_filter"}
               disabled={!developerActive || saving !== null}
-              onChange={(enabled) => {
+              onChange={async (enabled) => {
                 setSaving("sensitive_word_filter");
                 try {
-                  persistSensitiveWordFilterEnabled(enabled);
-                  setSensitiveWordFilterEnabledState(enabled);
+                  await patchUserUiPreferences({ sensitive_word_filter_enabled: enabled });
+                  setSensitiveWordFilterEnabled(enabled);
+                  await refresh();
                   message.success(t("settingsPage.saved"));
+                } catch {
+                  message.error(t("settingsPage.saveFailed"));
                 } finally {
                   setSaving(null);
                 }
