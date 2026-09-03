@@ -43,13 +43,19 @@ func TestFindRuntimeUsesWindowsWorkBuddyLayoutAndManagedNode(t *testing.T) {
 		t.Fatal(err)
 	}
 	nodeMatches := agentexec.SameExecutable(command.Binary, node)
-	scriptMatches := len(command.Arguments) == 1 && agentexec.SameExecutable(command.Arguments[0], script)
+	scriptMatches := len(command.Arguments) == 1 && sameFile(command.Arguments[0], script)
 	if !nodeMatches || !scriptMatches {
 		t.Fatalf(
 			"command=%#v node=%q script=%q node_matches=%v script_matches=%v",
 			command, node, script, nodeMatches, scriptMatches,
 		)
 	}
+}
+
+func sameFile(left, right string) bool {
+	leftInfo, leftErr := os.Stat(left)
+	rightInfo, rightErr := os.Stat(right)
+	return leftErr == nil && rightErr == nil && os.SameFile(leftInfo, rightInfo)
 }
 
 func TestWorkBuddyAuthenticationUsesWindowsRoamingProfile(t *testing.T) {

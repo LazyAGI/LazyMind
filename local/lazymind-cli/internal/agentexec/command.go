@@ -266,12 +266,6 @@ func SameExecutable(left, right string) bool {
 	if leftErr != nil || rightErr != nil {
 		return false
 	}
-	// Windows paths are case-insensitive, and the same absolute path already
-	// identifies the same executable even when a concurrent scanner prevents
-	// the file-ID query used by os.SameFile.
-	if runtime.GOOS == "windows" && strings.EqualFold(resolvedLeft, resolvedRight) {
-		return true
-	}
 	leftInfo, leftErr := os.Stat(resolvedLeft)
 	rightInfo, rightErr := os.Stat(resolvedRight)
 	if leftErr != nil || rightErr != nil {
