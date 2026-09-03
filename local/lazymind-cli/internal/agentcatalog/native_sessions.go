@@ -25,7 +25,10 @@ const (
 	maxTurnRunes      = 1 << 20
 )
 
-var codexImagePathPattern = regexp.MustCompile(`(?i)<image\b[^>]*\bpath="([^"]+)"[^>]*>`)
+var (
+	codexImagePathPattern   = regexp.MustCompile(`(?i)<image\b[^>]*\bpath="([^"]+)"[^>]*>`)
+	codexRequestBodyPattern = regexp.MustCompile(`(?im)^#+\s*My request(?: for Codex)?:\s*$`)
+)
 
 type cachedSession struct {
 	modTime time.Time
@@ -49,7 +52,9 @@ func nativeSession(path, provider, projectReference, projectName string, fullTra
 	if err != nil || !info.Mode().IsRegular() {
 		return chatagent.NativeSession{}, false
 	}
-	cacheKey := provider + "\x00" + path + "\x00" + strconv.FormatBool(fullTranscript)
+	cacheKey := strings.Join([]string{
+		provider, path, projectReference, projectName, strconv.FormatBool(fullTranscript),
+	}, "\x00")
 	if cached, ok := nativeSessionCache.Load(cacheKey); ok {
 		entry := cached.(cachedSession)
 		if entry.size == info.Size() && entry.modTime.Equal(info.ModTime()) {
@@ -115,9 +120,7 @@ func ResolveInvocation(provider, toolName string, now time.Time) (InvocationSour
 			return InvocationSource{}, false
 		}
 		for _, chat := range chats {
-			if chat.HasConversation && !isLazyMindWorkspace(chat.CWD) {
-				cursorByID[chat.ID] = chat
-			}
+			cursorByID[chat.ID] = chat
 		}
 	}
 	cutoff := now.Add(-5 * time.Minute)
@@ -132,7 +135,11 @@ func ResolveInvocation(provider, toolName string, now time.Time) (InvocationSour
 		}
 		if provider == "cursor" {
 			threadID := filepath.Base(filepath.Dir(path))
-			if _, resumable := cursorByID[threadID]; !resumable {
+			workspace, _, workspaceFound := cursorTranscriptProject(path, home)
+			if chat, found := cursorByID[threadID]; found && strings.TrimSpace(chat.CWD) != "" {
+				workspace, workspaceFound = chat.CWD, true
+			}
+			if workspaceFound && isLazyMindWorkspace(workspace) {
 				return nil
 			}
 		}
@@ -150,7 +157,8 @@ func ResolveInvocation(provider, toolName string, now time.Time) (InvocationSour
 	projectReference, projectName := "", ""
 	if provider == "cursor" {
 		threadID := filepath.Base(filepath.Dir(bestPath))
-		if chat, found := cursorByID[threadID]; found {
+		projectReference, projectName, _ = cursorTranscriptProject(bestPath, home)
+		if chat, found := cursorByID[threadID]; found && strings.TrimSpace(chat.CWD) != "" {
 			projectReference = chat.CWD
 			projectName = filepath.Base(filepath.Clean(chat.CWD))
 		}
@@ -556,11 +564,23 @@ func cleanUserText(text string) string {
 			return compactText(text[start:start+end], maxTurnRunes)
 		}
 	}
+	if marker := codexRequestBodyMarker(text); marker >= 0 {
+		return compactText(text[marker:], maxTurnRunes)
+	}
 	if strings.HasPrefix(text, "<system-reminder") || strings.HasPrefix(text, "<recommended_plugins>") ||
-		strings.HasPrefix(text, "# AGENTS.md instructions") || strings.HasPrefix(text, "<environment_context>") {
+		strings.HasPrefix(text, "# AGENTS.md instructions") || strings.HasPrefix(text, "<environment_context>") ||
+		strings.HasPrefix(text, "<external_codex_apps_writing_block_edits>") {
 		return ""
 	}
 	return compactText(text, maxTurnRunes)
+}
+
+func codexRequestBodyMarker(text string) int {
+	matches := codexRequestBodyPattern.FindAllStringIndex(text, -1)
+	if len(matches) > 0 {
+		return matches[len(matches)-1][1]
+	}
+	return -1
 }
 
 func managedUserText(text string) bool {

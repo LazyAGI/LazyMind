@@ -28,7 +28,7 @@ import (
 )
 
 var (
-	codexRequestMarker = regexp.MustCompile(`(?im)^#+\s*My request for Codex:\s*$`)
+	codexRequestMarker = regexp.MustCompile(`(?im)^#+\s*My request(?: for Codex)?:\s*$`)
 	codexImageTag      = regexp.MustCompile(`(?i)<image\b[^>]*\bpath="([^"]+)"[^>]*>`)
 	codexAnyImageTag   = regexp.MustCompile(`(?i)</?image\b[^>]*>`)
 )
