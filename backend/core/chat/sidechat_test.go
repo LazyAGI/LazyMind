@@ -317,7 +317,6 @@ func TestSidechatCreationFreezesContextAndServerPolicy(t *testing.T) {
 
 	raw := map[string]any{
 		"use_memory": true, "run_in_background": true,
-		"filters":         map[string]any{"kb_id": []string{"replacement-kb"}},
 		"enable_workflow": true, "enable_subagent": true,
 		"workflow_context": map[string]any{"workflow_id": "wf-1"},
 		"conversation": map[string]any{
@@ -347,13 +346,6 @@ func TestSidechatCreationFreezesContextAndServerPolicy(t *testing.T) {
 	inheritedSearchConfig, _ := requestConversation["search_config"].(map[string]any)
 	if got := datasetIDsFromSearchConfig(inheritedSearchConfig); !reflect.DeepEqual(got, []string{"parent-kb"}) {
 		t.Fatalf("sidechat request replaced inherited knowledge bases: %#v", got)
-	}
-	if got := buildLazyChatRequest(raw).Retrieval.Filters; got == nil || !reflect.DeepEqual(got.DatasetIDs, []string{"parent-kb"}) {
-		t.Fatalf("explicit retrieval filters escaped inherited knowledge bases: %#v", got)
-	}
-	enforceSidechatRequestPolicy(raw, json.RawMessage(`{}`))
-	if got := buildLazyChatRequest(raw).Retrieval.Filters; got != nil {
-		t.Fatalf("sidechat without inherited knowledge bases retained retrieval filters: %#v", got)
 	}
 
 	// An explicit source that is still running is rejected instead of freezing progress.

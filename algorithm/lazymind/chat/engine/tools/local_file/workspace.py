@@ -6,7 +6,6 @@ import os
 import shutil
 import unicodedata
 import uuid
-from functools import wraps
 from typing import Any, Dict, Literal, Optional
 
 import lazyllm
@@ -308,32 +307,17 @@ def write_file(
     )
 
 
-def build_resource_read_tools() -> list:
-    """Bind file readers to attachments and this conversation's file resources."""
-    @wraps(read_file)
-    def scoped_read_file(*args, **kwargs):
-        return _read_file(*args, **kwargs, resources_only=True)
-
-    @wraps(grep)
-    def scoped_grep(*args, **kwargs):
-        return _grep(*args, **kwargs, resources_only=True)
-
-    return [scoped_grep, scoped_read_file]
-
-
 def _resolve_text_target_for_tool(
     target: str,
     *,
     allow_directory: bool = False,
     turn: Optional[int] = None,
-    resources_only: bool = False,
 ):
     try:
         return resolve_text_target(
             target,
             allow_directory=allow_directory,
             turn=turn,
-            resources_only=resources_only,
         )
     except (ValueError, FileNotFoundError) as exc:
         raise ToolExecutionError(str(exc)) from exc
@@ -358,18 +342,7 @@ def read_file(
         limit: Maximum lines to return (default 2000, max 4000).
         turn: Optional 1-based conversation turn used to disambiguate attachments.
     """
-    return _read_file(target, offset, limit, turn)
-
-
-def _read_file(
-    target: str,
-    offset: int = 1,
-    limit: int = 2000,
-    turn: Optional[int] = None,
-    *,
-    resources_only: bool = False,
-) -> Dict[str, Any]:
-    resolved = _resolve_text_target_for_tool(target, turn=turn, resources_only=resources_only)
+    resolved = _resolve_text_target_for_tool(target, turn=turn)
     payload = read_lines_window(
         load_text_lines(resolved.path),
         offset=offset,
@@ -403,22 +376,10 @@ def grep(
         max_results: Maximum matches (default 50).
         turn: Optional 1-based conversation turn used to disambiguate attachments.
     """
-    return _grep(target, pattern, max_results, turn)
-
-
-def _grep(
-    target: str,
-    pattern: str,
-    max_results: int = 50,
-    turn: Optional[int] = None,
-    *,
-    resources_only: bool = False,
-) -> Dict[str, Any]:
     resolved = _resolve_text_target_for_tool(
         target,
         allow_directory=True,
         turn=turn,
-        resources_only=resources_only,
     )
     files: list[str] = []
     if os.path.isfile(resolved.path):

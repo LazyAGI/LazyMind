@@ -3,7 +3,6 @@ from typing import Any, Dict, List, Literal, Optional, Sequence
 import os
 from concurrent.futures import TimeoutError as FuturesTimeoutError
 from pathlib import Path
-from urllib.parse import quote
 
 import lazyllm
 from lazyllm import AutoModel, LOG
@@ -301,16 +300,6 @@ class KBToolkit:
         r'知识库|(?<!\w)knowledge[\s_-]+bases?(?!\w)',
     ]
 
-    def __init__(self, kb_scope: Optional[List[str]] = None):
-        self._kb_scope = tuple(_string_list(kb_scope)) if kb_scope is not None else None
-
-    def _check_node_scope(self, nodes: list) -> None:
-        if self._kb_scope is not None:
-            for node in nodes:
-                metadata = getattr(node, 'global_metadata', {}) or {}
-                if metadata.get('kb_id') not in self._kb_scope:
-                    raise ToolExecutionError('Node is outside the inherited knowledge-base scope.')
-
     def __lazy_source__(self) -> bool:
         """Stay lazy only while the request has no explicit knowledge-base scope."""
         agentic_config = lazyllm.globals.get('agentic_config') or {}
@@ -323,13 +312,6 @@ class KBToolkit:
         page_size: int = 20,
     ) -> Dict[str, Any]:
         """List knowledge bases the current user can read."""
-        if self._kb_scope is not None:
-            datasets = [get_core_api(f'/datasets/{quote(kb_id, safe="")}') for kb_id in self._kb_scope]
-            tag_values = set(_string_list(tags))
-            datasets = [item for item in datasets
-                        if (not keyword or keyword.lower() in str(item.get('display_name') or '').lower())
-                        and tag_values.issubset(item.get('tags') or [])]
-            return {'datasets': datasets[:_bounded_page_size(page_size)], 'total_size': len(datasets)}
         params: Dict[str, Any] = {'page_size': _bounded_page_size(page_size)}
         if keyword:
             params['keyword'] = keyword
@@ -346,9 +328,7 @@ class KBToolkit:
     ) -> Dict[str, Any]:
         """List readable documents in the selected knowledge bases."""
         payload: Dict[str, Any] = {
-            'dataset_ids': (
-                self._kb_ids(knowledge_base_ids) if self._kb_scope is not None else _string_list(knowledge_base_ids)
-            ),
+            'dataset_ids': _string_list(knowledge_base_ids),
             'page_size': _bounded_page_size(page_size),
         }
         if keyword:
@@ -367,9 +347,7 @@ class KBToolkit:
     ) -> Dict[str, Any]:
         """Aggregate readable document counts, optionally grouped by metadata fields."""
         payload = {
-            'dataset_ids': (
-                self._kb_ids(knowledge_base_ids) if self._kb_scope is not None else _string_list(knowledge_base_ids)
-            ),
+            'dataset_ids': _string_list(knowledge_base_ids),
             'file_types': _string_list(file_types),
             'document_stages': _string_list(document_stages),
             'data_source_types': _string_list(data_source_types),
@@ -414,14 +392,11 @@ class KBToolkit:
         lazyllm.globals['agentic_config'] = config
         return accessible
 
-    def _kb_ids(self, explicit: Optional[List[str]] = None) -> List[str]:
+    @staticmethod
+    def _kb_ids(explicit: Optional[List[str]] = None) -> List[str]:
         config = lazyllm.globals.get('agentic_config') or {}
-        selected = explicit if explicit else (
-            list(self._kb_scope) if self._kb_scope is not None else (config.get('filters') or {}).get('kb_id')
-        )
+        selected = explicit if explicit else (config.get('filters') or {}).get('kb_id')
         ids = [str(item).strip() for item in iter_lookup_ids(selected, field_name='kb_ids') if item]
-        if self._kb_scope is not None and any(kb_id not in self._kb_scope for kb_id in ids):
-            raise ToolExecutionError('Knowledge base is outside the inherited knowledge-base scope.')
         if not ids:
             raise ToolExecutionError(
                 'kb_ids is required when no knowledge base is selected in the request'
@@ -474,8 +449,9 @@ class KBToolkit:
                 in the current request.
         """
         agentic_config = lazyllm.globals['agentic_config']
-        selected_ids = self._kb_ids(kb_ids)
         retrievers, reranker, image_retriever = _ensure_kb_search_runtime()
+
+        selected_ids = self._kb_ids(kb_ids)
         effective_filters = dict(filters or agentic_config.get('filters') or {})
         effective_filters['kb_id'] = selected_ids
         payload = {
@@ -514,7 +490,6 @@ class KBToolkit:
         doc = DOCUMENT
         current_nodes = doc.get_nodes(uids=[node_id])
         current_nodes = current_nodes if isinstance(current_nodes, list) else []
-        self._check_node_scope(current_nodes)
         if current_nodes:
             current_node = current_nodes[0]
             current = _serialize_doc_node_like(current_node)
@@ -524,7 +499,6 @@ class KBToolkit:
                 kb_id = global_metadata.get('kb_id') if isinstance(global_metadata, dict) else None
                 parent_nodes = doc.get_nodes(uids=[parent_id], kb_id=kb_id)
                 parent_nodes = parent_nodes if isinstance(parent_nodes, list) else []
-                self._check_node_scope(parent_nodes)
                 parent = _serialize_doc_node_like(parent_nodes[0]) if parent_nodes else None
             else:
                 parent = None
@@ -574,11 +548,9 @@ class KBToolkit:
         doc = DOCUMENT
         seed_nodes = doc.get_nodes(uids=[node_id])
         seed_nodes = seed_nodes if isinstance(seed_nodes, list) else []
-        self._check_node_scope(seed_nodes)
         if seed_nodes:
             nodes = doc.get_window_nodes(seed_nodes[0], span=(-before, after), merge=False)
             nodes = nodes if isinstance(nodes, list) else []
-            self._check_node_scope(nodes)
             result = {
                 'total': len(nodes),
                 'items': [_serialize_doc_node_like(n) for n in nodes],
