@@ -13,9 +13,6 @@ import (
 )
 
 func TestWorkBuddyRunReusesDesktopStateAndEmitsGeneratedImage(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("fixture uses a POSIX script")
-	}
 	root := t.TempDir()
 	stateHome := filepath.Join(root, "lazymind")
 	workBuddyHome := filepath.Join(root, "workbuddy")
@@ -26,7 +23,7 @@ func TestWorkBuddyRunReusesDesktopStateAndEmitsGeneratedImage(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(workBuddyHome, "fixture"), []byte("ready"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	binary := filepath.Join(root, "codebuddy")
+	name := "codebuddy"
 	script := `#!/bin/sh
 if [ ! -f "$WORKBUDDY_CONFIG_DIR/fixture" ] ||
    [ ! -f "$CODEBUDDY_CONFIG_DIR/fixture" ]; then
@@ -43,6 +40,21 @@ echo '{"type":"system","subtype":"init","session_id":"thread-1"}'
 echo '{"type":"assistant","message":{"content":[{"type":"text","text":"done"}]}}'
 echo '{"type":"result","subtype":"success","is_error":false}'
 `
+	if runtime.GOOS == "windows" {
+		name = "codebuddy.cmd"
+		script = `@echo off
+if not exist "%WORKBUDDY_CONFIG_DIR%\fixture" exit /b 28
+if not exist "%CODEBUDDY_CONFIG_DIR%\fixture" exit /b 28
+echo %7 | findstr /C:"ImageGen" >nul
+if errorlevel 1 exit /b 29
+if not exist generated-images mkdir generated-images
+echo fixture>generated-images\workbuddy.png
+echo {"type":"system","subtype":"init","session_id":"thread-1"}
+echo {"type":"assistant","message":{"content":[{"type":"text","text":"done"}]}}
+echo {"type":"result","subtype":"success","is_error":false}
+`
+	}
+	binary := filepath.Join(root, name)
 	if err := os.WriteFile(binary, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
