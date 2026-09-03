@@ -6993,7 +6993,7 @@ const zhCN = {
       organization: "组织 共享 系统管理 用户 用户组",
       recovery: "回收站 归档 恢复 文件夹 彻底删除",
       diagnostics: "同步 查验 模型 MCP 渠道 诊断",
-      developer: "开发者 调试 开发者模式",
+      developer: "开发者 调试 开发者模式 敏感词 过滤",
     },
 
     recovery: {
@@ -7475,6 +7475,9 @@ const zhCN = {
       enableDesc: "激活工具管理、算法跃迁、内部 ID 和完整执行过程。",
       enableDescWithoutEvo: "激活工具管理、内部 ID 和完整执行过程。",
       modeAria: "开发者模式",
+      sensitiveWordFilter: "启用敏感词过滤",
+      sensitiveWordFilterDesc: "开启后会对用户输入进行敏感词检测。默认关闭，需先启用开发者模式。",
+      sensitiveWordFilterAria: "敏感词过滤",
     },
   },
 

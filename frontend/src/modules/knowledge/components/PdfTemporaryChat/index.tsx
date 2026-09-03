@@ -13,6 +13,7 @@ import {
   CHAT_STREAM_URL,
   ChatServiceApi,
 } from "@/modules/chat/utils/request";
+import { skipSensitiveFilterChatField } from "@/utils/sensitiveWordFilter";
 import { axiosInstance, BASE_URL } from "@/components/request";
 import { emitConversationActivity } from "@/modules/chat/utils/conversationActivity";
 import { buildChatMessageListFromHistory } from "@/modules/chat/utils/message";
@@ -138,6 +139,7 @@ export default function PdfTemporaryChat({
       ...extras,
       thinking_depth: "low",
       mode: "auto",
+      ...skipSensitiveFilterChatField(),
       basic_chat_only: true,
       create_time: new Date().toISOString(),
       initial_conversation_settings: {

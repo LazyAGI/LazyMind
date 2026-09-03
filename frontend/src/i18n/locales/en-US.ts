@@ -7223,7 +7223,7 @@ const enUS = {
       organization: "organization sharing admin users groups",
       recovery: "trash archive restore folders permanently delete",
       diagnostics: "sync diagnostics models MCP channels",
-      developer: "developer debug developer mode",
+      developer: "developer debug developer mode sensitive words filter",
     },
 
     recovery: {
@@ -7705,6 +7705,9 @@ const enUS = {
       enableDesc: "Activate tool management, algorithm leap, internal IDs, and full execution traces.",
       enableDescWithoutEvo: "Activate tool management, internal IDs, and full execution traces.",
       modeAria: "Developer mode",
+      sensitiveWordFilter: "Enable sensitive-word filtering",
+      sensitiveWordFilterDesc: "When on, user input is checked against the sensitive-word list. Off by default, and requires developer mode.",
+      sensitiveWordFilterAria: "Sensitive-word filtering",
     },
   },
 
