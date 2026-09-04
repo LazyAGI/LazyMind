@@ -71,6 +71,9 @@ type TaskEvent struct {
 	// Tool step events forwarded from SubAgent runner for frontend display.
 	ToolCalls   json.RawMessage `json:"tool_calls,omitempty"`
 	ToolResults json.RawMessage `json:"tool_results,omitempty"`
+	// Writer document-level subtasks are carried on progress events for the
+	// developer Task Center. They are not workflow steps.
+	WritingSubtasks json.RawMessage `json:"writing_subtasks,omitempty"`
 	// Text / think streaming content.
 	Text  string `json:"text,omitempty"`
 	Think string `json:"think,omitempty"`
@@ -180,6 +183,11 @@ func routeEventWithWorkflowHooks(ctx context.Context, db *gorm.DB, stateStore st
 		}
 	case "progress":
 		_ = UpdateProgress(ctx, db, ev.TaskID, ev.Progress, ev.CurrentPhase, ev.EstimatedSec)
+		if len(ev.WritingSubtasks) > 0 {
+			if err := UpdateWritingSubtasks(ctx, db, ev.TaskID, ev.WritingSubtasks); err != nil {
+				return fmt.Errorf("save writing subtasks task=%s: %w", ev.TaskID, err)
+			}
+		}
 		_ = WriteStatus(ctx, stateStore, ev.TaskID, map[string]any{
 			"status": StatusRunning, "progress": ev.Progress, "current_phase": ev.CurrentPhase,
 		})

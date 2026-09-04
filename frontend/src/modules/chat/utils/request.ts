@@ -223,7 +223,7 @@ export interface SyncWriterDocumentPatchResult {
 export interface SyncWriterDocumentResult {
   status: "synced" | "no_change";
   revision: number;
-  feishu_synced: boolean;
+  provider_synced: boolean;
   artifact_saved: boolean;
   patch_result: SyncWriterDocumentPatchResult;
   document: Record<string, unknown>;
@@ -232,7 +232,7 @@ export interface SyncWriterDocumentResult {
 export interface WriteBackWriterDocumentResult {
   status: "synced";
   revision: number;
-  feishu_synced: boolean;
+  provider_synced: boolean;
   artifact_saved: boolean;
   patch_result: SyncWriterDocumentPatchResult;
   document: Record<string, unknown>;
@@ -248,11 +248,39 @@ export interface WriteBackWriterDocumentRequest {
 export type WriterDocumentSlot = 'outline_document' | 'flat_draft_document' | 'draft_document';
 export type WriterDocumentRepresentation = 'markdown' | 'ir';
 export type RenderedWriterDocument = string | Record<string, unknown>;
+export type WriterHeadingNumberingMode = 'ordered' | 'unordered';
+export type WriterOrderedHeadingNumberingStyle = 'hierarchical' | 'chinese' | 'parenthesized';
+
+export interface WriterNumberingEntry {
+  label: string;
+  mode?: WriterHeadingNumberingMode;
+  restart?: boolean;
+}
+
+export interface WriterNumberingState {
+  ordered_style: WriterOrderedHeadingNumberingStyle;
+  entries: Record<string, WriterNumberingEntry>;
+}
+
+export type WriterNumberingUpdate =
+  | {
+    type: 'ordered_style';
+    ordered_style: WriterOrderedHeadingNumberingStyle;
+  }
+  | {
+    type: 'heading';
+    target_id: string;
+    mode?: WriterHeadingNumberingMode;
+    restart?: boolean;
+  };
 
 export interface RenderWriterDocumentResult {
   title: string;
   representation: WriterDocumentRepresentation;
   document: RenderedWriterDocument;
+  /** Number-materialized Markdown used only by download/export flows. */
+  export_document?: string;
+  numbering: WriterNumberingState;
 }
 
 export interface SaveWriterDocumentResult extends RenderWriterDocumentResult {
@@ -494,12 +522,14 @@ export function WorkflowSessionApi() {
       document: RenderedWriterDocument,
       slot: WriterDocumentSlot,
       mode: SlotSaveMode,
+      numberingUpdate?: WriterNumberingUpdate,
       options?: RawAxiosRequestConfig,
     ) {
       const payload: Record<string, unknown> = {
         base_revision: baseRevision,
         document,
         mode,
+        ...(numberingUpdate ? { numbering_update: numberingUpdate } : {}),
       };
       if (slot !== 'draft_document') payload.slot = slot;
       return axiosInstance.post<{
@@ -518,6 +548,7 @@ export function WorkflowSessionApi() {
       sourceDocument?: Record<string, unknown>,
       revisedDocument?: Record<string, unknown>,
       slot?: WriterDocumentSlot,
+      provider?: string,
       options?: RawAxiosRequestConfig,
     ) {
       const payload: Record<string, unknown> = { base_revision: baseRevision };
@@ -526,6 +557,7 @@ export function WorkflowSessionApi() {
       if (sourceDocument !== undefined) payload.source_document = sourceDocument;
       if (revisedDocument !== undefined) payload.revised_document = revisedDocument;
       if (slot !== undefined && slot !== 'draft_document') payload.slot = slot;
+      if (provider !== undefined) payload.provider = provider;
       return axiosInstance.post<{
         code: number;
         message: string;

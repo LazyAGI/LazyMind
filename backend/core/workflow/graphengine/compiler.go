@@ -39,22 +39,23 @@ type uiMaterialSpec struct {
 }
 
 type rawStep struct {
-	ID              string
-	Label           string
-	Route           string
-	Inputs          any
-	InputExpression any
-	OptionalInputs  any
-	Outputs         any
-	SkipIf          any
-	Prompt          string
-	Acceptance      any
-	Capabilities    any
-	Tools           any
-	TerminalTools   any
-	ToolsOnly       bool
-	StreamHeartbeat bool
-	Mode            string
+	ID                string
+	Label             string
+	Route             string
+	Inputs            any
+	InputExpression   any
+	OptionalInputs    any
+	Outputs           any
+	SkipIf            any
+	Prompt            string
+	Acceptance        any
+	Capabilities      any
+	Tools             any
+	TerminalTools     any
+	ToolsOnly         bool
+	TerminalToolsOnly bool
+	StreamHeartbeat   bool
+	Mode              string
 }
 
 func Compile(workflowYAML, stateYAML, scenario string, profile Profile) CompileResult {
@@ -147,7 +148,8 @@ func Compile(workflowYAML, stateYAML, scenario string, profile Profile) CompileR
 		node := CompiledNode{ID: id, Label: step.Label, Route: step.Route, Prompt: step.Prompt,
 			Acceptance: stringList(step.Acceptance), Capabilities: stringList(step.Capabilities),
 			LegacyTools: stringList(step.Tools), TerminalTools: stringList(step.TerminalTools),
-			ToolsOnly: step.ToolsOnly, StreamHeartbeat: step.StreamHeartbeat, Mode: step.Mode}
+			ToolsOnly: step.ToolsOnly, TerminalToolsOnly: step.TerminalToolsOnly,
+			StreamHeartbeat: step.StreamHeartbeat, Mode: step.Mode}
 		if definition := workflowSteps[id]; definition != nil {
 			if len(node.Acceptance) == 0 {
 				node.Acceptance = stringList(definition["acceptance_criteria"])
@@ -556,7 +558,8 @@ func decodeRawStep(id string, raw map[string]any) rawStep {
 		Outputs: raw["outputs"], SkipIf: firstNonNil(raw["skip_if"], raw["skipif"]),
 		Prompt: scalar(raw["prompt"]), Acceptance: raw["acceptance_criteria"],
 		Capabilities: raw["capabilities"], Tools: raw["tools"], TerminalTools: raw["terminal_tools"],
-		ToolsOnly: boolValue(raw["tools_only"]), StreamHeartbeat: boolValue(raw["stream_heartbeat"]), Mode: scalar(raw["mode"])}
+		ToolsOnly: boolValue(raw["tools_only"]), TerminalToolsOnly: boolValue(raw["terminal_tools_only"]),
+		StreamHeartbeat: boolValue(raw["stream_heartbeat"]), Mode: scalar(raw["mode"])}
 }
 
 func stringList(value any) []string {

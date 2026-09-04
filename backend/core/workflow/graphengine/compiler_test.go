@@ -80,6 +80,22 @@ func TestCompileArbitraryDAGAndProjectBlockedMerge(t *testing.T) {
 	}
 }
 
+func TestCompilePreservesTerminalToolsOnly(t *testing.T) {
+	state := strings.Replace(validState, "  a: {outputs: []}", `  a:
+    outputs: []
+    tools: [cloud_files, writer_prepare_workspace]
+    terminal_tools: [writer_prepare_workspace]
+    terminal_tools_only: true`, 1)
+	result := Compile(validWorkflow, state, "", ProfilePublish)
+	if !result.Valid {
+		t.Fatalf("expected valid graph, diagnostics=%#v", result.Diagnostics)
+	}
+	node := result.Graph.Nodes["a"]
+	if !node.TerminalToolsOnly || len(node.LegacyTools) != 2 || len(node.TerminalTools) != 1 {
+		t.Fatalf("terminal tool visibility policy was not compiled: %#v", node)
+	}
+}
+
 func TestCompilePreservesDeclaredRuntimePolicy(t *testing.T) {
 	workflowYAML := strings.Replace(validWorkflow, "id: graph-test", `id: graph-test
 runtime:

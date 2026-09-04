@@ -24,6 +24,7 @@ func TestToTaskDTO(t *testing.T) {
 		EstimatedSec:      120,
 		Summary:           "Working on it",
 		Sources:           orm.RawJSON(`[{"index":"1.1"}]`),
+		WritingSubtasks:   orm.RawJSON(`[{"subtask_id":"extract-1","tools_used":["llm"]}]`),
 	}
 	dto := toTaskDTO(ot)
 	if dto.TaskID != "task-1" || dto.ConversationID != "conv-1" {
@@ -37,6 +38,9 @@ func TestToTaskDTO(t *testing.T) {
 	}
 	if string(dto.Sources) != `[{"index":"1.1"}]` {
 		t.Fatalf("sources: %s", dto.Sources)
+	}
+	if string(dto.WritingSubtasks) != `[{"subtask_id":"extract-1","tools_used":["llm"]}]` {
+		t.Fatalf("writing subtasks: %s", dto.WritingSubtasks)
 	}
 }
 

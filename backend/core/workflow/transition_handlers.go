@@ -320,7 +320,7 @@ func StartWorkflowSession(w http.ResponseWriter, r *http.Request) {
 		req.TaskID = uuid.NewString()
 	}
 	handOff := req.HandOff
-	params := WorkflowStepParams{WorkflowID: req.WorkflowID, WorkflowRef: req.WorkflowRef, RevisionID: req.WorkflowRevisionID, RevisionNo: req.WorkflowRevisionNo, TreeHash: req.WorkflowTreeHash, RemoteRoot: req.WorkflowRemoteRoot, StepID: req.TargetStepID, UserInput: req.UserInput, IsColdStart: true, HandOff: &handOff, PreflightID: req.PreflightID, ChatSessionID: req.ChatSessionID, TraceID: req.TraceID, ParentSpanID: req.ParentSpanID, WorkflowMode: req.WorkflowMode, UserID: req.UserID, HistoryFilesPerTurn: req.HistoryFilesPerTurn, Filters: req.Filters, ParentAgenticConfig: req.ParentAgenticConfig, RequiredOutputs: graph.Nodes[req.TargetStepID].RequiredOutputs, LegacyTools: graph.Nodes[req.TargetStepID].LegacyTools, TerminalTools: graph.Nodes[req.TargetStepID].TerminalTools, ToolsOnly: graph.Nodes[req.TargetStepID].ToolsOnly, StreamHeartbeat: graph.Nodes[req.TargetStepID].StreamHeartbeat, Runtime: graph.Runtime}
+	params := WorkflowStepParams{WorkflowID: req.WorkflowID, WorkflowRef: req.WorkflowRef, RevisionID: req.WorkflowRevisionID, RevisionNo: req.WorkflowRevisionNo, TreeHash: req.WorkflowTreeHash, RemoteRoot: req.WorkflowRemoteRoot, StepID: req.TargetStepID, UserInput: req.UserInput, IsColdStart: true, HandOff: &handOff, PreflightID: req.PreflightID, ChatSessionID: req.ChatSessionID, TraceID: req.TraceID, ParentSpanID: req.ParentSpanID, WorkflowMode: req.WorkflowMode, UserID: req.UserID, HistoryFilesPerTurn: req.HistoryFilesPerTurn, Filters: req.Filters, ParentAgenticConfig: req.ParentAgenticConfig, RequiredOutputs: graph.Nodes[req.TargetStepID].RequiredOutputs, LegacyTools: graph.Nodes[req.TargetStepID].LegacyTools, TerminalTools: graph.Nodes[req.TargetStepID].TerminalTools, ToolsOnly: graph.Nodes[req.TargetStepID].ToolsOnly, TerminalToolsOnly: graph.Nodes[req.TargetStepID].TerminalToolsOnly, StreamHeartbeat: graph.Nodes[req.TargetStepID].StreamHeartbeat, Runtime: graph.Runtime}
 	nodeDef := graph.Nodes[req.TargetStepID]
 	inputKeys := graphengine.Materials(nodeDef.Input)
 	for _, optional := range nodeDef.OptionalInputs {
@@ -689,7 +689,7 @@ func TransitionWorkflowSession(w http.ResponseWriter, r *http.Request) {
 				for _, optional := range nodeDef.OptionalInputs {
 					inputKeys = append(inputKeys, optional.Material)
 				}
-				params := WorkflowStepParams{WorkflowID: session.WorkflowID, WorkflowRef: session.WorkflowRef, RevisionID: session.WorkflowRevisionID, RevisionNo: session.WorkflowRevisionNo, TreeHash: session.WorkflowTreeHash, RemoteRoot: session.WorkflowRemoteRoot, StepID: target.TargetStepID, SessionID: session.ID, UserInput: target.UserInput, HandOff: &handOff, ChatSessionID: req.ChatSessionID, TraceID: req.TraceID, ParentSpanID: req.ParentSpanID, WorkflowMode: req.WorkflowMode, RetryHint: target.RuntimeInstruction, PartialIndices: target.PartialIndices, HistoryFilesPerTurn: req.HistoryFilesPerTurn, Filters: req.Filters, ParentAgenticConfig: req.ParentAgenticConfig, UserID: session.CreateUserID, RequiredOutputs: nodeDef.RequiredOutputs, LegacyTools: nodeDef.LegacyTools, TerminalTools: nodeDef.TerminalTools, ToolsOnly: nodeDef.ToolsOnly, StreamHeartbeat: nodeDef.StreamHeartbeat, Runtime: graph.Runtime}
+				params := WorkflowStepParams{WorkflowID: session.WorkflowID, WorkflowRef: session.WorkflowRef, RevisionID: session.WorkflowRevisionID, RevisionNo: session.WorkflowRevisionNo, TreeHash: session.WorkflowTreeHash, RemoteRoot: session.WorkflowRemoteRoot, StepID: target.TargetStepID, SessionID: session.ID, UserInput: target.UserInput, HandOff: &handOff, ChatSessionID: req.ChatSessionID, TraceID: req.TraceID, ParentSpanID: req.ParentSpanID, WorkflowMode: req.WorkflowMode, RetryHint: target.RuntimeInstruction, PartialIndices: target.PartialIndices, HistoryFilesPerTurn: req.HistoryFilesPerTurn, Filters: req.Filters, ParentAgenticConfig: req.ParentAgenticConfig, UserID: session.CreateUserID, RequiredOutputs: nodeDef.RequiredOutputs, LegacyTools: nodeDef.LegacyTools, TerminalTools: nodeDef.TerminalTools, ToolsOnly: nodeDef.ToolsOnly, TerminalToolsOnly: nodeDef.TerminalToolsOnly, StreamHeartbeat: nodeDef.StreamHeartbeat, Runtime: graph.Runtime}
 				var launchErr error
 				stepObjective := workflowStepObjective(nodeDef.Prompt, target.Objective, target.UserInput)
 				_, taskID, _, launchErr = launchWorkflowAttempt(r.Context(), tx, store.State(), session.ConversationID, session.TriggerHistoryID, session.CreateUserID, target.TaskID, session.WorkflowID+":"+target.TargetStepID, stepObjective, params, inputKeys, nodeDef.Outputs, req.LLMConfig, req.ToolConfig, false, false)
@@ -791,7 +791,7 @@ func queueHostAttempt(ctx context.Context, tx *gorm.DB, session orm.WorkflowSess
 		Instruction: target.RuntimeInstruction, PartialSelector: target.PartialIndices,
 		WorkflowRevision: session.WorkflowRevisionID, DeclaredOutputs: node.Outputs, DeclaredOutputTypes: outputTypes, RequiredOutputs: node.RequiredOutputs,
 		Capabilities: node.Capabilities, LegacyTools: node.LegacyTools, TerminalTools: node.TerminalTools,
-		ToolsOnly: node.ToolsOnly}
+		ToolsOnly: node.ToolsOnly, TerminalToolsOnly: node.TerminalToolsOnly}
 	payload, err := json.Marshal(value)
 	if err != nil {
 		return err

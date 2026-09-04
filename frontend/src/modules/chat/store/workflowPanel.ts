@@ -183,15 +183,15 @@ export interface SlotRevision {
   artifact_value?: any;
   /** Human-readable description for image/file artifacts. */
   caption?: string;
-  /** change_source: ai / human / provider_sync (Feishu-confirmed). */
+  /** change_source: ai / human / provider_sync (cloud-provider-confirmed). */
   change_source?: "ai" | "human" | "provider_sync";
-  /** Whether this draft has a server-owned Feishu baseline. */
+  /** Whether this draft has a server-owned cloud-provider baseline. */
   write_back_ready?: boolean;
-  /** Whether the selected draft differs from that Feishu baseline. */
+  /** Whether the selected draft differs from that cloud-provider baseline. */
   write_back_dirty?: boolean;
   /** Server-owned delivery state for the selected draft. */
   write_back_state?: 'initial_delivery' | 'synced_clean' | 'synced_dirty' | 'blocked';
-  /** Public Feishu document URL resolved by the server from source_document. */
+  /** Public cloud document URL resolved by the server from source_document. */
   write_back_url?: string;
   /** Cloud provider bound to source_document, for example "feishu". */
   provider?: string;

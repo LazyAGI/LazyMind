@@ -9,6 +9,23 @@ export interface WriterSpan {
   [key: string]: unknown;
 }
 
+export interface WriterContextRelation {
+  target_node_id?: string;
+  relation: string;
+  guidance?: string;
+}
+
+export interface WriterWritingSubtask {
+  subtask_id: string;
+  node_id: string;
+  question: string;
+  subtask_type: 'retrieve' | 'extract' | 'reason';
+  status?: 'pending' | 'running' | 'completed' | 'retrying' | 'failed';
+  result_summary?: string;
+  retry_count?: number;
+  result_references?: Array<Record<string, unknown>>;
+}
+
 export interface WriterBlock {
   node_id: string;
   type: string;
@@ -17,6 +34,9 @@ export interface WriterBlock {
   children?: WriterBlock[];
   stage?: WriterStage;
   status?: string;
+  target_chars?: number;
+  context_relations?: WriterContextRelation[];
+  subtasks?: WriterWritingSubtask[];
   authoring?: Record<string, unknown>;
   numbering?: Record<string, unknown>;
   references?: Array<Record<string, unknown>>;

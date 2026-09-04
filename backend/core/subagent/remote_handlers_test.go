@@ -231,7 +231,11 @@ func TestRemoteTaskEventsPersistStreamStateAndInvalidatePanel(t *testing.T) {
 		{"type": "think", "think": "reason"},
 		{"type": "tool_calls", "tool_calls": []map[string]any{{"id": "1", "name": "read"}}},
 		{"type": "tool_results", "tool_results": []map[string]any{{"id": "1", "result": "ok"}}},
-		{"type": "progress", "progress": 42, "current_phase": "working"},
+		{"type": "progress", "progress": 42, "current_phase": "working",
+			"writing_subtasks": []map[string]any{{
+				"subtask_id": "research-1", "node_id": "section-1",
+				"question": "Find evidence", "subtask_type": "retrieve", "status": "running",
+			}}},
 		{"type": "artifact_stream_start", "slot": "draft_document", "content_type": "text/markdown",
 			"stream_id": "stream-1", "chunk_index": 1},
 		{"type": "artifact_stream", "slot": "draft_document", "content_type": "text/markdown",
@@ -262,6 +266,9 @@ func TestRemoteTaskEventsPersistStreamStateAndInvalidatePanel(t *testing.T) {
 	if task.Status != StatusRunning || task.ProgressPct != 42 || task.CurrentPhase != "working" {
 		t.Fatalf("task=%#v", task)
 	}
+	if !bytes.Contains(task.WritingSubtasks, []byte(`"subtask_id":"research-1"`)) {
+		t.Fatalf("writing subtasks were not persisted: %s", task.WritingSubtasks)
+	}
 	artifacts, _ := LoadArtifacts(context.Background(), db.DB, "task-remote")
 	if len(artifacts) != 1 || artifacts[0].Slot != "report" {
 		t.Fatalf("artifacts=%#v", artifacts)
@@ -282,6 +289,9 @@ func TestRemoteTaskEventsPersistStreamStateAndInvalidatePanel(t *testing.T) {
 	}
 	if !reflect.DeepEqual(gotTaskUpdates, wantTaskUpdates) {
 		t.Fatalf("task updates=%v want=%v", gotTaskUpdates, wantTaskUpdates)
+	}
+	if !bytes.Contains(taskUpdates[1].WritingSubtasks, []byte(`"subtask_id":"research-1"`)) {
+		t.Fatalf("writing subtasks were not forwarded: %s", taskUpdates[1].WritingSubtasks)
 	}
 	if taskUpdates[3].Delta != "hello" || taskUpdates[3].StreamID != "stream-1" || taskUpdates[3].ChunkIndex != 2 {
 		t.Fatalf("stream delta=%#v", taskUpdates[3])

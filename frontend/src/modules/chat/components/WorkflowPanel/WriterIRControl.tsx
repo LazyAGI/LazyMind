@@ -39,7 +39,20 @@ import {
 } from './artifactRewriteSelection';
 import { highlightCode } from '../MarkdownViewer/syntaxHighlight';
 import { SlotEditingContext } from './slotEditingContext';
+import type { WriterNumberingState, WriterNumberingUpdate } from '@/modules/chat/utils/request';
 import './WriterIRControl.scss';
+
+function hasWriterOutlineInstructions(blocks: WriterBlock[]): boolean {
+  return blocks.some((block) => (
+    (block.type === 'heading'
+      && (
+        Number(block.target_chars) > 0
+        || (block.context_relations?.length ?? 0) > 0
+        || (block.subtasks?.length ?? 0) > 0
+      ))
+    || hasWriterOutlineInstructions(block.children ?? [])
+  ));
+}
 
 /** Idle debounce after the latest edit before draft autosave. */
 const WRITER_IR_AUTOSAVE_IDLE_MS = 1_000;
@@ -54,6 +67,7 @@ type WriterIRPageWidth = 'default' | 'wide';
 
 export interface WriterIRControlProps {
   document: WriterDocument;
+  numbering?: WriterNumberingState;
   sourceRevision?: string | number;
   readOnly?: boolean;
   /** Stable key used to register flush-before-retry with WorkflowPanel. */
@@ -68,6 +82,7 @@ export interface WriterIRControlProps {
     revisedDocument: WriterDocument,
     sourceRevision?: string | number,
     mode?: WriterIRSaveMode,
+    numberingUpdate?: WriterNumberingUpdate,
   ) => Promise<WriterIRSaveResult | void>;
   onEditingChange?: (editing: boolean) => void;
   /** Reports the current draft so the write-back action can compare it with its Feishu baseline. */
@@ -261,6 +276,7 @@ function BlockSequence({ blocks }: { blocks: WriterBlock[] }) {
 
 export function WriterIRControl({
   document,
+  numbering,
   sourceRevision,
   readOnly = false,
   editingKey,
@@ -285,6 +301,7 @@ export function WriterIRControl({
   const [saveError, setSaveError] = useState<string>();
   const [externalUpdate, setExternalUpdate] = useState(false);
   const [outlineOpen, setOutlineOpen] = useState(false);
+  const [outlineInstructionsExpanded, setOutlineInstructionsExpanded] = useState(true);
   const [pageWidth, setPageWidth] = useState<WriterIRPageWidth>('default');
   const [readOnlySelection, setReadOnlySelection] = useState<
     (WriterIRRewriteSelection & { anchor: SelectionActionAnchor }) | null
@@ -313,12 +330,47 @@ export function WriterIRControl({
   const saveQueuedRef = useRef(false);
   /** Highest pending save mode; checkpoint wins over draft until consumed. */
   const pendingSaveModeRef = useRef<WriterIRSaveMode>('draft');
+  const pendingNumberingUpdateRef = useRef<WriterNumberingUpdate>();
   const saveRunnerRef = useRef<() => Promise<WriterIRSaveRunResult>>(async () => 'noop');
   const onSaveRef = useRef(onSave);
   const historyRef = useRef(history);
   const futureRef = useRef(future);
   const outlineId = useId();
   const outlineItems = useMemo(() => collectWriterOutline(draft.blocks), [draft.blocks]);
+  const hasOutlineInstructions = useMemo(
+    () => hasWriterOutlineInstructions(draft.blocks),
+    [draft.blocks],
+  );
+
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root || readOnly) return undefined;
+    const syncExpandedState = () => {
+      const details = Array.from(
+        root.querySelectorAll<HTMLDetailsElement>('[data-writer-outline-instructions]'),
+      );
+      setOutlineInstructionsExpanded(
+        details.length > 0 && details.every((item) => item.open),
+      );
+    };
+    root.addEventListener('toggle', syncExpandedState, true);
+    syncExpandedState();
+    return () => root.removeEventListener('toggle', syncExpandedState, true);
+  }, [draft, readOnly]);
+  const setAllOutlineInstructionsExpanded = useCallback((expanded: boolean) => {
+    rootRef.current
+      ?.querySelectorAll<HTMLDetailsElement>('[data-writer-outline-instructions]')
+      .forEach((details) => { details.open = expanded; });
+    setOutlineInstructionsExpanded(expanded);
+  }, []);
+  const expandAllOutlineInstructions = useCallback(
+    () => setAllOutlineInstructionsExpanded(true),
+    [setAllOutlineInstructionsExpanded],
+  );
+  const collapseAllOutlineInstructions = useCallback(
+    () => setAllOutlineInstructionsExpanded(false),
+    [setAllOutlineInstructionsExpanded],
+  );
   const outlineBaseLevel = useMemo(
     () => Math.min(...outlineItems.map((item) => item.level), 6),
     [outlineItems],
@@ -567,6 +619,7 @@ export function WriterIRControl({
 
     const snapshot = draftRef.current;
     const saveMode = pendingSaveModeRef.current;
+    const numberingUpdate = pendingNumberingUpdateRef.current;
     const sameAsBase = snapshot === baseDocumentRef.current
       || sameWriterDocumentForSync(snapshot, baseDocumentRef.current);
     const sameAsCheckpoint = sameWriterDocumentForSync(
@@ -575,11 +628,12 @@ export function WriterIRControl({
     );
     // Draft only when dirty. Checkpoint (Save / conversation flush) may still
     // run after draft autosave when content is not yet versioned.
-    if (sameAsCheckpoint || (sameAsBase && saveMode !== 'checkpoint')) {
+    if (!numberingUpdate && (sameAsCheckpoint || (sameAsBase && saveMode !== 'checkpoint'))) {
       pendingSaveModeRef.current = 'draft';
       return 'noop';
     }
     pendingSaveModeRef.current = 'draft';
+    pendingNumberingUpdateRef.current = undefined;
     clearAutoSaveTimers();
     saveInFlightRef.current = true;
     saveQueuedRef.current = false;
@@ -600,6 +654,7 @@ export function WriterIRControl({
         snapshot,
         baseSourceRevisionRef.current,
         saveMode,
+        numberingUpdate,
       );
       if (!mountedRef.current) return 'saved';
       saved = true;
@@ -803,6 +858,13 @@ export function WriterIRControl({
     requestDraftSave();
   }, [handleDocumentChange, requestDraftSave]);
 
+  const handleNumberingUpdate = useCallback((update: WriterNumberingUpdate) => {
+    pendingNumberingUpdateRef.current = update;
+    escalateSaveMode('draft');
+    clearAutoSaveTimers();
+    void saveRunnerRef.current();
+  }, [clearAutoSaveTimers, escalateSaveMode]);
+
   const discardChanges = () => {
     const pending = pendingExternalDocumentRef.current;
     const nextDocument = pending?.document ?? baseDocument;
@@ -924,23 +986,32 @@ export function WriterIRControl({
             </button>
             {outlineItems.length > 0 ? (
               <ol className='writer-ir__outline-list'>
-                {outlineItems.map((item) => (
-                  <li key={item.nodeId}>
-                    <button
-                      type='button'
-                      className={
-                        `writer-ir__outline-link writer-ir__outline-link--level-${
-                          Math.max(1, item.level - outlineBaseLevel + 1)
-                        }`
-                      }
-                      title={item.title}
-                      aria-label={t('chat.writerIR.jumpToHeading', { title: item.title })}
-                      onClick={() => navigateToOutlineItem(item.nodeId)}
-                    >
-                      {item.title}
-                    </button>
-                  </li>
-                ))}
+                {outlineItems.map((item) => {
+                  const numberingLabel = numbering?.entries[item.nodeId]?.label;
+                  const displayLabel = numberingLabel
+                    ? `${numberingLabel} ${item.title}`
+                    : item.title;
+                  return (
+                    <li key={item.nodeId}>
+                      <button
+                        type='button'
+                        className={
+                          `writer-ir__outline-link writer-ir__outline-link--level-${
+                            Math.max(1, item.level - outlineBaseLevel + 1)
+                          }`
+                        }
+                        title={displayLabel}
+                        aria-label={t('chat.writerIR.jumpToHeading', { title: displayLabel })}
+                        onClick={() => navigateToOutlineItem(item.nodeId)}
+                      >
+                        {numberingLabel && (
+                          <span className='writer-ir__outline-number'>{numberingLabel}</span>
+                        )}
+                        <span>{item.title}</span>
+                      </button>
+                    </li>
+                  );
+                })}
               </ol>
             ) : (
               <div className='writer-ir__outline-empty' role='status'>
@@ -969,6 +1040,20 @@ export function WriterIRControl({
           aria-label={t('chat.writerIR.displaySettings')}
           onClick={(event) => event.stopPropagation()}
         >
+          {hasOutlineInstructions && !readOnly && (
+            <button
+              type='button'
+              className='writer-ir__outline-instructions-all'
+              aria-pressed={outlineInstructionsExpanded}
+              onClick={outlineInstructionsExpanded
+                ? collapseAllOutlineInstructions
+                : expandAllOutlineInstructions}
+            >
+              {t(outlineInstructionsExpanded
+                ? 'chat.writerIR.collapseAllOutlineInstructions'
+                : 'chat.writerIR.expandAllOutlineInstructions')}
+            </button>
+          )}
           <div className='writer-ir__width-control'>
             <span className='writer-ir__width-label'>{t('chat.writerIR.pageWidth')}</span>
             <div
@@ -1052,9 +1137,11 @@ export function WriterIRControl({
         ) : (
           <WriterIRDocumentEditor
             document={draft}
+            numbering={numbering}
             ariaLabel={t('chat.writerIR.documentRegion')}
             onChange={handleDocumentChange}
             onCrossReferenceApplied={handleCrossReferenceApplied}
+            onNumberingUpdate={handleNumberingUpdate}
             onFocus={beginTextEdit}
             onBlur={handleTextBlur}
             rewriteDialogOpen={rewriteDialogOpen}

@@ -29,6 +29,37 @@ describe('Writer Markdown system anchors', () => {
     expect(writerMarkdownForSave(source)).toBe(source);
   });
 
+  it('preserves opaque backend numbering metadata through editor round trips', () => {
+    const source = '<!-- heading-numbering: {"ordered_style":"chinese"} -->\n# 标题\n\n<a id="block-sec-1" numbering="restart"></a>\n## 章节';
+    const editorValue = writerMarkdownForEditor(source);
+    const editableValue = writerMarkdownForEditing(source);
+    const savedValue = writerMarkdownForSave(editorValue);
+    expect(editorValue).toContain('numbering="restart"');
+    expect(editableValue).not.toContain('heading-numbering');
+    expect(writerMarkdownForSave(
+      protectWriterMarkdownHeadingAnchors(source, editableValue),
+    )).toBe(source);
+    expect(savedValue).toBe(source);
+  });
+
+  it('keeps materialized roman-numbered headings visible in the editor', () => {
+    const source = [
+      '<!-- heading-numbering: {"ordered_style":"parenthesized"} -->',
+      '# Title',
+      '<a id="block-a"></a>',
+      '## (1) A',
+      '<a id="block-b"></a>',
+      '### (a) B',
+      '<a id="block-c"></a>',
+      '#### (i) C',
+    ].join('\n');
+
+    const editable = writerMarkdownForEditing(source);
+    expect(editable).toContain('#### (i) C');
+    expect(editable).not.toContain('heading-numbering');
+    expect(editable).not.toContain('<a id=');
+  });
+
   it('keeps PDF page markers hidden and round-trippable through MDXEditor', () => {
     const source = [
       '<!-- 第 1 页 -->',
@@ -65,9 +96,58 @@ describe('Writer Markdown system anchors', () => {
       '',
       '## 1 章节',
       '',
-      '<a id="block-image-1" />',
       '![插图](https://example.com/image.png)',
     ].join('\n'));
+  });
+
+  it('keeps image and following heading anchors stable across an HTML image round trip', () => {
+    const source = [
+      '# 标题',
+      '',
+      '<a id="block-sec-002-001"></a>',
+      '### 证据与谜团',
+      '',
+      '[因果链](#block-IMAGE-1)',
+      '',
+      '<a id="block-IMAGE-1"></a>',
+      '![恐惧递进因果链](/data/chain.jpg)',
+      '',
+      '<a id="block-sec-002-002"></a>',
+      '### 不可名状的征兆',
+    ].join('\n');
+    const editable = writerMarkdownForEditing(source).replace(
+      '![恐惧递进因果链](/data/chain.jpg)',
+      '<img height="712" width="712" alt="恐惧递进因果链" src="/data/chain.jpg" />',
+    );
+    const restored = writerMarkdownForSave(
+      protectWriterMarkdownHeadingAnchors(source, editable),
+    );
+
+    expect(editable).not.toContain('<a id=');
+    expect(restored).toContain(
+      '<a id="block-IMAGE-1"></a>\n<img height="712" width="712"',
+    );
+    expect(restored).toContain(
+      '<a id="block-sec-002-002"></a>\n### 不可名状的征兆',
+    );
+    expect(restored).not.toContain('block-user-');
+  });
+
+  it('keeps outline instructions hidden from the editor and restores them on save', () => {
+    const sidecar = '<!-- writer:outline {"node_id":"sec-1","target_chars":1200,"context_relations":[],"subtasks":[{"subtask_id":"st-1","subtask_type":"retrieve","question":"补充行业数据","status":"pending"}]} -->';
+    const source = [
+      '# 标题',
+      '',
+      '<a id="block-sec-1"></a>',
+      '## 系统设计',
+      sidecar,
+    ].join('\n');
+
+    const editable = writerMarkdownForEditing(source);
+    expect(editable).not.toContain('writer:outline');
+    expect(writerMarkdownForSave(
+      protectWriterMarkdownHeadingAnchors(source, editable),
+    )).toBe(source);
   });
 
   it('restores stable heading anchors on save and removes anchors for deleted headings', () => {
@@ -199,6 +279,36 @@ describe('Writer Markdown system anchors', () => {
         { anchorId: 'block-sec-1', label: '1 系统设计', level: 2 },
         { anchorId: 'block-sec-2', label: '1.1 接口设计', level: 3 },
       ],
+    });
+  });
+
+  it('collects hidden outline instructions for the outline rail', () => {
+    const source = [
+      '# 产品架构说明',
+      '<a id="block-sec-1"></a>',
+      '## 系统设计',
+      '<!-- writer:outline {"node_id":"ignored","target_chars":900,"context_relations":[{"relation":"continuity","target_node_id":"sec-0","guidance":"承接背景"}],"subtasks":[{"subtask_id":"st-1","subtask_type":"reason","question":"比较两种方案","status":"pending"}]} -->',
+    ].join('\n');
+
+    expect(collectWriterMarkdownOutline(source).items[0]).toEqual({
+      anchorId: 'block-sec-1',
+      label: '系统设计',
+      level: 2,
+      instructions: {
+        node_id: 'sec-1',
+        target_chars: 900,
+        context_relations: [{
+          relation: 'continuity',
+          target_node_id: 'sec-0',
+          guidance: '承接背景',
+        }],
+        subtasks: [{
+          subtask_id: 'st-1',
+          subtask_type: 'reason',
+          question: '比较两种方案',
+          status: 'pending',
+        }],
+      },
     });
   });
 

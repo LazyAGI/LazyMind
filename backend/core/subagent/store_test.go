@@ -1,6 +1,7 @@
 package subagent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"testing"
@@ -71,6 +72,11 @@ func TestStatusAndArtifactLifecycle(t *testing.T) {
 	if err := UpdateProgress(ctx, db.DB, "task-x", 40, "生成第1张", 30); err != nil {
 		t.Fatalf("update progress: %v", err)
 	}
+	if err := UpdateWritingSubtasks(ctx, db.DB, "task-x", json.RawMessage(
+		`[{"subtask_id":"extract-1","subtask_type":"extract","tools_used":["llm"]}]`,
+	)); err != nil {
+		t.Fatalf("update writing subtasks: %v", err)
+	}
 
 	for i := 1; i <= 3; i++ {
 		if err := SaveArtifact(ctx, db.DB, "task-x", "images", "image",
@@ -92,6 +98,9 @@ func TestStatusAndArtifactLifecycle(t *testing.T) {
 	got, err := GetTask(ctx, db.DB, "task-x")
 	if err != nil {
 		t.Fatalf("get task: %v", err)
+	}
+	if !bytes.Contains(got.WritingSubtasks, []byte(`"tools_used":["llm"]`)) {
+		t.Fatalf("writing subtasks were not persisted: %s", got.WritingSubtasks)
 	}
 	if got.Status != StatusSucceeded || got.ProgressPct != 100 {
 		t.Fatalf("expected succeeded/100, got %s/%d", got.Status, got.ProgressPct)

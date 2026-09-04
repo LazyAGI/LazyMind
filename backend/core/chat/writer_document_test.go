@@ -11,9 +11,30 @@ import (
 
 	"github.com/gorilla/mux"
 
+	"lazymind/core/algo"
 	"lazymind/core/common/orm"
 	"lazymind/core/store"
 )
+
+func TestWriterSyncReplyUsesProviderSynced(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	writerSyncReply(recorder, "synced", 2, true, &algo.WriterDocumentSyncResponse{
+		Success:        true,
+		ProviderSynced: true,
+		PatchResult:    json.RawMessage(`{"success":true}`),
+		PersistedDocument: json.RawMessage(
+			`{"document_id":"doc-1","blocks":[]}`,
+		),
+	})
+
+	body := recorder.Body.String()
+	if !strings.Contains(body, `"provider_synced":true`) {
+		t.Fatalf("provider_synced missing from response: %s", body)
+	}
+	if strings.Contains(body, "feishu_synced") {
+		t.Fatalf("legacy sync field leaked into response: %s", body)
+	}
+}
 
 func TestWriterSyncStatus(t *testing.T) {
 	for input, want := range map[int]int{
@@ -27,6 +48,30 @@ func TestWriterSyncStatus(t *testing.T) {
 		if got := writerSyncStatus(input); got != want {
 			t.Errorf("writerSyncStatus(%d) = %d, want %d", input, got, want)
 		}
+	}
+}
+
+func TestWriterProviderSelection(t *testing.T) {
+	for name, test := range map[string]struct {
+		value json.RawMessage
+		want  string
+	}{
+		"bound provider":  {json.RawMessage(`{"provider_binding":{"provider":"notion","document_id":"page-1"}}`), "notion"},
+		"target adapter":  {json.RawMessage(`{"adapter":"notion","uri":"https://notion.so/page"}`), "notion"},
+		"unbound default": {json.RawMessage(`{"document_id":"local"}`), "feishu"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := writerDocumentProvider(test.value); got != test.want {
+				t.Fatalf("provider = %q, want %q", got, test.want)
+			}
+		})
+	}
+
+	config, ok := writerProviderToolConfig(map[string]any{
+		"feishu": "feishu-token", "notion": "notion-token",
+	}, "notion")
+	if !ok || len(config) != 1 || config["notion"] != "notion-token" {
+		t.Fatalf("unexpected provider config: %#v, %v", config, ok)
 	}
 }
 
@@ -93,6 +138,90 @@ func TestWriteBackWriterDocumentRequiresFeishuConfiguration(t *testing.T) {
 	}
 	if revisionCount != 1 {
 		t.Fatalf("revision count = %d, want 1", revisionCount)
+	}
+}
+
+func TestRenderWriterDocumentKeepsIRCanonicalForPinnedWorkflow(t *testing.T) {
+	chatService := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"result": map[string]any{
+				"title":          "Document",
+				"representation": "ir",
+				"document": map[string]any{
+					"document_id": "doc-1",
+					"blocks": []map[string]any{{
+						"node_id": "heading-1", "type": "heading",
+						"content": "1. Heading", "numbering": map[string]any{"level": 1},
+					}},
+				},
+				"numbering": map[string]any{
+					"ordered_style": "hierarchical",
+					"entries":       map[string]any{"heading-1": map[string]any{"label": "1."}},
+				},
+			},
+		})
+	}))
+	t.Cleanup(chatService.Close)
+	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", chatService.URL)
+
+	db := orm.MigrateTestDB(t,
+		&orm.WorkflowSession{},
+		&orm.WorkflowSlotRevision{},
+		&orm.WorkflowHumanArtifact{},
+	)
+	store.Init(db.DB, db.DB, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+
+	now := time.Now().UTC()
+	if err := db.Create(&orm.WorkflowSession{
+		ID: "session", ConversationID: "conversation", WorkflowID: "writer-workflow",
+		Status: "completed", CreateUserID: "user-1", CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("seed writer session: %v", err)
+	}
+	if err := db.Create(&orm.WorkflowHumanArtifact{
+		ID: "provider-sync-1", SessionID: "session", Slot: "draft_document", ContentType: "json",
+		Value:     json.RawMessage(`{"schema":"lazyllm.tools.writer.data_models.writer_ir.WriterDocument","data":{"document_id":"doc-1","title":"Document","blocks":[{"node_id":"heading-1","type":"heading","content":"Heading","numbering":{"level":1}}]}}`),
+		CreatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("seed provider-sync artifact: %v", err)
+	}
+	humanID := "provider-sync-1"
+	if err := db.Create(&orm.WorkflowSlotRevision{
+		ID: "revision-1", SessionID: "session", SlotID: "draft_document",
+		Revision: 1, Selected: true, ChangeSource: "provider_sync", HumanArtifactID: &humanID,
+		Slot: "draft_document", StepID: "write_document", Attempt: 1, CreatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("seed writer revision: %v", err)
+	}
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/core/workflow-sessions/session/writer-document:render",
+		strings.NewReader(`{"slot":"draft_document"}`),
+	)
+	req.Header.Set("X-User-Id", "user-1")
+	req = mux.SetURLVars(req, map[string]string{"session_id": "session"})
+	recorder := httptest.NewRecorder()
+	RenderWriterDocument(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	var response struct {
+		Data struct {
+			Document struct {
+				Blocks []struct {
+					Content string `json:"content"`
+				} `json:"blocks"`
+			} `json:"document"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got := response.Data.Document.Blocks[0].Content; got != "Heading" {
+		t.Fatalf("rendered heading = %q, want canonical content", got)
 	}
 }
 
@@ -300,6 +429,48 @@ func TestWriterDocumentIsUnbound(t *testing.T) {
 	}
 	if writerDocumentIsUnbound(json.RawMessage(`{"document_id":"cloud","blocks":[],"provider_binding":{"provider":"feishu","document_id":"doc-1"}}`)) {
 		t.Fatal("Feishu WriterDocument should not be unbound")
+	}
+}
+
+func TestUnbindWriterDocumentClearsNestedProviderState(t *testing.T) {
+	unbound, err := unbindWriterDocument(json.RawMessage(`{
+		"document_id":"page-1",
+		"revision":"rev-1",
+		"provider_binding":{"provider":"notion","document_id":"page-1"},
+		"blocks":[{
+			"node_id":"heading-1",
+			"provider_binding":{"provider":"notion","block_id":"block-1"},
+			"provider_payload":{"archived":false},
+			"children":[{
+				"node_id":"paragraph-1",
+				"provider_binding":{"provider":"notion","block_id":"block-2"},
+				"provider_payload":{"archived":false}
+			}]
+		}]
+	}`))
+	if err != nil {
+		t.Fatalf("unbind WriterDocument: %v", err)
+	}
+	var document map[string]any
+	if err := json.Unmarshal(unbound, &document); err != nil {
+		t.Fatalf("decode unbound WriterDocument: %v", err)
+	}
+	if _, exists := document["revision"]; exists {
+		t.Fatal("provider revision was not removed")
+	}
+	if binding, _ := document["provider_binding"].(map[string]any); len(binding) != 0 {
+		t.Fatalf("document provider binding = %#v, want empty", binding)
+	}
+	blocks := document["blocks"].([]any)
+	parent := blocks[0].(map[string]any)
+	child := parent["children"].([]any)[0].(map[string]any)
+	for name, block := range map[string]map[string]any{"parent": parent, "child": child} {
+		if binding, _ := block["provider_binding"].(map[string]any); len(binding) != 0 {
+			t.Fatalf("%s provider binding = %#v, want empty", name, binding)
+		}
+		if payload, _ := block["provider_payload"].(map[string]any); len(payload) != 0 {
+			t.Fatalf("%s provider payload = %#v, want empty", name, payload)
+		}
 	}
 }
 

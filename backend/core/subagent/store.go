@@ -96,6 +96,7 @@ func CreateTask(ctx context.Context, db *gorm.DB, in CreateTaskInput) (*orm.SubA
 			InputSlots:        normalizeJSON(in.InputSlots, "[]"),
 			OutputSlots:       normalizeJSON(in.OutputSlots, "[]"),
 			Sources:           orm.RawJSON(`[]`),
+			WritingSubtasks:   orm.RawJSON(`[]`),
 			CreateUserID:      in.CreateUserID,
 			CreatedAt:         now,
 			UpdatedAt:         now,
@@ -123,6 +124,22 @@ func UpdateSources(ctx context.Context, db *gorm.DB, taskID string, sources json
 		Updates(map[string]any{
 			"sources":    orm.RawJSON(sources),
 			"updated_at": time.Now().UTC(),
+		}).Error
+}
+
+// UpdateWritingSubtasks replaces the latest document-level writing subtask snapshot.
+func UpdateWritingSubtasks(
+	ctx context.Context, db *gorm.DB, taskID string, subtasks json.RawMessage,
+) error {
+	subtasks = normalizeJSON(subtasks, "[]")
+	var items []json.RawMessage
+	if err := json.Unmarshal(subtasks, &items); err != nil {
+		return fmt.Errorf("invalid writing subtasks snapshot: %w", err)
+	}
+	return db.WithContext(ctx).Model(&orm.SubAgentTask{}).Where("id = ?", taskID).
+		Updates(map[string]any{
+			"writing_subtasks": orm.RawJSON(subtasks),
+			"updated_at":       time.Now().UTC(),
 		}).Error
 }
 

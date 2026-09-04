@@ -105,6 +105,19 @@ export interface TaskLogEntry {
   tool_results?: ToolResultItem[];
 }
 
+export interface WritingSubtask {
+  subtask_id: string;
+  node_id: string;
+  node_title?: string;
+  question: string;
+  subtask_type: "retrieve" | "extract" | "reason";
+  status: "pending" | "running" | "completed" | "retrying" | "failed";
+  result_summary?: string;
+  retry_count: number;
+  result_references?: Array<Record<string, unknown>>;
+  tools_used?: string[];
+}
+
 export interface SubAgentTask {
   task_id: string;
   conversation_id?: string;
@@ -126,6 +139,7 @@ export interface SubAgentTask {
   sources: ChatSource[];
   artifact_streams: TaskArtifactStream[];
   execution_log: TaskLogEntry[];
+  writing_subtasks?: WritingSubtask[];
 }
 
 function artifactKey(a: TaskArtifact): string {
@@ -319,6 +333,9 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
           task.progress_pct = event.progress ?? task.progress_pct;
           task.current_phase = event.current_phase ?? task.current_phase;
           task.estimated_sec = event.estimated_sec ?? task.estimated_sec;
+          if (Array.isArray(event.writing_subtasks)) {
+            task.writing_subtasks = event.writing_subtasks;
+          }
           break;
         case "artifact": {
           const newArtifact: TaskArtifact = {
@@ -712,6 +729,7 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
             sources: t.sources ?? [],
             artifact_streams: t.artifact_streams ?? [],
             execution_log: stepsToExecutionLog(t.steps ?? []),
+            writing_subtasks: t.writing_subtasks ?? t.progress?.writing_subtasks,
           }));
           set((state) => {
             const snapshotIds = new Set(normalized.map((task) => task.task_id));

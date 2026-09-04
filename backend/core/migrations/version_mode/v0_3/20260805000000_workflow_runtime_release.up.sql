@@ -47,6 +47,8 @@ ALTER TABLE user_ui_preferences
     ADD COLUMN IF NOT EXISTS sensitive_word_filter_enabled BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE sub_agent_tasks
     ADD COLUMN IF NOT EXISTS sources JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE sub_agent_tasks
+    ADD COLUMN IF NOT EXISTS writing_subtasks JSONB NOT NULL DEFAULT '[]'::jsonb;
 
 -- +migrate Dialect sqlite
 CREATE TABLE IF NOT EXISTS plugin_step_intents (
@@ -69,6 +71,7 @@ UPDATE user_ui_preferences SET workflows_enabled = skills_enabled;
 ALTER TABLE user_ui_preferences ADD COLUMN document_parsing_enabled BOOLEAN NOT NULL DEFAULT TRUE;
 ALTER TABLE user_ui_preferences ADD COLUMN sensitive_word_filter_enabled BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE sub_agent_tasks ADD COLUMN sources JSON NOT NULL DEFAULT '[]';
+ALTER TABLE sub_agent_tasks ADD COLUMN writing_subtasks JSON NOT NULL DEFAULT '[]';
 
 -- +migrate Dialect postgres
 ALTER TABLE user_plugin_settings

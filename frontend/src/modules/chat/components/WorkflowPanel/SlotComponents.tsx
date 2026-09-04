@@ -11,6 +11,7 @@ import {
   type RenderWriterDocumentResult,
   type RewriteSelectionPreview,
   type WriterDocumentSlot,
+  type WriterNumberingUpdate,
 } from "@/modules/chat/utils/request";
 import { FilePreviewDrawer } from "./FilePreviewDrawer";
 import {
@@ -52,6 +53,9 @@ import { SlotHtmlSlide } from './ppt/SlotHtmlSlide';
 import { SlotJsonSlide } from './ppt/SlotJsonSlide';
 import { isSlideSpecArtifact } from './ppt/slideSchema';
 import type { TaskArtifactStream } from '@/modules/chat/store/taskCenter';
+import { Modal, Radio, type RadioChangeEvent } from 'antd';
+import { WechatOutlined } from '@ant-design/icons';
+import { cloudProviderOptions } from '@/modules/modelProvider/constants/cloudProviderOptions';
 
 export { SlotEditingContext } from './slotEditingContext';
 export type { SlotEditingContextValue } from './slotEditingContext';
@@ -924,7 +928,7 @@ export function SlotVersionPopover({
     ? tr('chat.writerIR.localHistory')
     : tr('chat.slots.versionHistory');
   const changeSourceLabel = (version: SlotVersionEntry) => {
-    if (version.provider_synced) return tr('chat.slots.feishuSynced');
+    if (version.provider_synced) return tr('chat.slots.providerSynced');
     return version.change_source === 'human' ? tr('chat.slots.manual') : tr('chat.slots.ai');
   };
 
@@ -2434,7 +2438,7 @@ function replaceStructuredArtifactPayload(
   return document;
 }
 
-/** True when the document has a cloud provider target (Feishu uri or document_id). */
+/** True when the document has a cloud provider target (uri or document_id). */
 function hasProviderTarget(document?: WriterDocument | null): boolean {
   const binding = document?.provider_binding;
   if (!binding) return false;
@@ -2488,7 +2492,7 @@ async function syncWriterDocumentSlot(
     || (result.status !== 'synced' && result.status !== 'no_change')
     || typeof result.revision !== 'number'
     || result.revision <= 0
-    || result.feishu_synced !== true
+    || result.provider_synced !== true
     || (result.status === 'synced' && result.artifact_saved !== true)
     || (result.status === 'no_change' && result.artifact_saved !== false)
     || result.patch_result?.success !== true
@@ -2594,7 +2598,7 @@ function WriterWriteBackSummary({
       <span>{tr(stateKey)}</span>
       {slot.write_back_url && (
         <a href={slot.write_back_url} target='_blank' rel='noreferrer'>
-          {tr('chat.writerIR.openFeishuDocument')}
+          {tr('chat.writerIR.openCloudDocument')}
         </a>
       )}
     </div>
@@ -2620,6 +2624,61 @@ function isWriterWriteBackDisabled(
   );
 }
 
+type WriterWriteBackProvider = 'feishu' | 'notion';
+
+const futureWriterProviders = ['yuque', 'obsidian', 'githubWiki', 'wechatOfficialAccount'] as const;
+
+function WriterProviderChoice({
+  initialProvider,
+  onChange,
+}: {
+  initialProvider: WriterWriteBackProvider;
+  onChange: (provider: WriterWriteBackProvider) => void;
+}) {
+  const [value, setValue] = useState<WriterWriteBackProvider>(initialProvider);
+  const option = (provider: WriterWriteBackProvider) =>
+    cloudProviderOptions.find((item) => item.type === provider);
+  return (
+    <div className='workflow-writer-provider-picker'>
+      <div className='workflow-writer-provider-picker__hint'>
+        {tr('chat.writerIR.providerPickerHint')}
+      </div>
+      <Radio.Group
+        value={value}
+        onChange={(event: RadioChangeEvent) => {
+          const next = event.target.value as WriterWriteBackProvider;
+          setValue(next);
+          onChange(next);
+        }}
+        className='workflow-writer-provider-picker__options'
+      >
+        {(['feishu', 'notion'] as const).map((item) => {
+          const config = option(item);
+          return (
+            <Radio key={item} value={item}>
+              <span className='workflow-writer-provider-picker__option'>
+                {config?.logoUrl ? <img src={config.logoUrl} alt='' aria-hidden='true' /> : config?.icon}
+                <span>{tr(`chat.writerIR.providers.${item}`)}</span>
+              </span>
+            </Radio>
+          );
+        })}
+        {futureWriterProviders.map((item) => (
+          <Radio key={item} value={item} disabled>
+            <span className='workflow-writer-provider-picker__option'>
+              <span className='workflow-writer-provider-picker__fallback-icon' aria-hidden='true'>
+                {item === 'wechatOfficialAccount' ? <WechatOutlined /> : '◇'}
+              </span>
+              <span>{tr(`chat.writerIR.providers.${item}`)}</span>
+              <small>{tr('chat.writerIR.comingSoon')}</small>
+            </span>
+          </Radio>
+        ))}
+      </Radio.Group>
+    </div>
+  );
+}
+
 function useRegisterWriterWriteBack({
   enabled,
   initialDelivery,
@@ -2631,6 +2690,7 @@ function useRegisterWriterWriteBack({
   revision,
   getLatestRevision,
   writeBackUrl: serverWriteBackUrl,
+  provider,
   disabled,
   onSuccess,
   onConflict,
@@ -2645,6 +2705,7 @@ function useRegisterWriterWriteBack({
   revision: number;
   getLatestRevision?: () => number;
   writeBackUrl?: string;
+  provider?: string;
   disabled?: boolean;
   onSuccess?: (revision: number, document: WriterDocument) => void;
   onConflict?: () => void;
@@ -2652,11 +2713,19 @@ function useRegisterWriterWriteBack({
   const tabActive = useContext(WorkflowPanelTabActiveContext);
   const { registerFooterAction } = useContext(SlotEditingContext);
   const [status, setStatus] = useState<
-    'idle' | 'loading' | 'success' | 'error' | 'conflict' | 'feishu-configuration-required'
+    'idle' | 'loading' | 'success' | 'error' | 'conflict' | 'provider-configuration-required'
   >('idle');
   const writeBackUrl = serverWriteBackUrl;
 
-  const writeBack = useCallback(async () => {
+  const [selectedProvider, setSelectedProvider] = useState<WriterWriteBackProvider>(
+    provider === 'notion' ? 'notion' : 'feishu',
+  );
+
+  useEffect(() => {
+    setSelectedProvider(provider === 'notion' ? 'notion' : 'feishu');
+  }, [provider]);
+
+  const writeBack = useCallback(async (targetProvider: WriterWriteBackProvider) => {
     if (!sessionId) return;
     setStatus('loading');
     try {
@@ -2667,13 +2736,14 @@ function useRegisterWriterWriteBack({
         undefined,
         undefined,
         slotId,
+        targetProvider,
         { silentError: true } as never,
       );
       const result = response?.data?.data;
       if (
         response?.data?.code !== 0
         || result?.status !== 'synced'
-        || result.feishu_synced !== true
+        || result.provider_synced !== true
         || result.artifact_saved !== true
         || typeof result.revision !== 'number'
         || result.patch_result?.success !== true
@@ -2693,8 +2763,8 @@ function useRegisterWriterWriteBack({
       if (errorResponse?.status === 409) {
         setStatus('conflict');
         onConflict?.();
-      } else if (errorResponse?.data?.data?.status === 'feishu_configuration_required') {
-        setStatus('feishu-configuration-required');
+      } else if (errorResponse?.data?.data?.status?.endsWith('_configuration_required')) {
+        setStatus('provider-configuration-required');
       } else {
         setStatus('error');
       }
@@ -2707,8 +2777,8 @@ function useRegisterWriterWriteBack({
     if (!enabled || !tabActive || !actionKey || !sessionId) return undefined;
     return registerFooterAction(actionKey, {
       label: status === 'loading'
-        ? tr(initialDelivery ? 'chat.writerIR.writingToFeishu' : 'chat.writerIR.writingBack')
-        : tr(initialDelivery ? 'chat.writerIR.writeToFeishu' : 'chat.writerIR.writeBack'),
+        ? tr(initialDelivery ? 'chat.writerIR.writingToCloudDocument' : 'chat.writerIR.writingBack')
+        : tr(initialDelivery ? 'chat.writerIR.writeToCloudDocument' : 'chat.writerIR.writeBack'),
       order: 30,
       tone: 'primary',
       icon: 'write-back',
@@ -2716,12 +2786,27 @@ function useRegisterWriterWriteBack({
       flushBeforeAction: true,
       flushKey,
       onClick: () => {
-        void writeBackRef.current();
+        let chosen = provider === 'notion' ? 'notion' : selectedProvider;
+        Modal.confirm({
+          title: tr('chat.writerIR.providerPickerTitle'),
+          content: (
+            <WriterProviderChoice
+              initialProvider={chosen}
+              onChange={(next) => { chosen = next; }}
+            />
+          ),
+          okText: tr('chat.writerIR.confirmWriteBack'),
+          cancelText: tr('common.cancel'),
+          onOk: () => {
+            setSelectedProvider(chosen);
+            void writeBackRef.current(chosen);
+          },
+        });
       },
       statusText: status === 'success' || (synced && status === 'idle')
         ? tr('chat.writerIR.writeBackSuccess')
-        : status === 'feishu-configuration-required'
-          ? tr('chat.writerIR.feishuConfigurationRequired')
+        : status === 'provider-configuration-required'
+          ? tr('chat.writerIR.providerConfigurationRequired', { provider: tr(`chat.writerIR.providers.${selectedProvider}`) })
           : status === 'error'
             ? tr('chat.writerIR.writeBackFailed')
             : status === 'conflict'
@@ -2731,11 +2816,11 @@ function useRegisterWriterWriteBack({
         ? 'success'
         : status === 'error'
           || status === 'conflict'
-          || status === 'feishu-configuration-required'
+          || status === 'provider-configuration-required'
           ? 'error'
           : undefined,
       statusLink: writeBackUrl
-        ? { href: writeBackUrl, label: tr('chat.writerIR.openFeishuDocument') }
+        ? { href: writeBackUrl, label: tr('chat.writerIR.openCloudDocument') }
         : undefined,
     });
   }, [
@@ -2744,8 +2829,10 @@ function useRegisterWriterWriteBack({
     enabled,
     flushKey,
     initialDelivery,
+    provider,
     registerFooterAction,
     sessionId,
+    selectedProvider,
     status,
     synced,
     tabActive,
@@ -2784,6 +2871,8 @@ function useRegisterArtifactDownload({
 function isRenderedWriterDocument(value: unknown): value is RenderWriterDocumentResult {
   if (!value || typeof value !== 'object') return false;
   const result = value as Partial<RenderWriterDocumentResult>;
+  const numbering = result.numbering;
+  if (!numbering?.ordered_style || !numbering.entries) return false;
   if (result.representation === 'markdown') return typeof result.document === 'string';
   if (result.representation === 'ir') return isWriterDocument(result.document);
   return false;
@@ -2876,7 +2965,7 @@ function SlotWriterDocument({
       if (!active) return;
       setRendered(result);
       if (result.representation === 'markdown' && typeof result.document === 'string') {
-        setDownloadMarkdownContent(result.document);
+        setDownloadMarkdownContent(result.export_document ?? result.document);
       }
       setError(null);
       setLoading(false);
@@ -2943,6 +3032,7 @@ function SlotWriterDocument({
     document: WriterDocument,
     sourceRevision?: string | number,
     mode: WriterIRSaveMode = 'checkpoint',
+    numberingUpdate?: WriterNumberingUpdate,
   ): Promise<WriterIRSaveResult> => {
     if (readOnly || typeof sourceRevision !== 'number' || sourceRevision <= 0) {
       throw new Error(tr('chat.writerIR.saveFailed'));
@@ -2954,6 +3044,7 @@ function SlotWriterDocument({
         normalizeWriterDocumentForSync(document),
         slotId,
         ['draft_document', 'flat_draft_document'].includes(slotId) ? 'draft' : mode,
+        numberingUpdate,
         { silentError: true } as never,
       );
       const result = response?.data?.data;
@@ -2984,6 +3075,7 @@ function SlotWriterDocument({
     document: string,
     baseRevision: number,
     mode: MarkdownSaveMode = 'checkpoint',
+    numberingUpdate?: WriterNumberingUpdate,
   ) => {
     if (readOnly || baseRevision <= 0) {
       throw new Error(tr('chat.writerMarkdown.saveFailed'));
@@ -2995,6 +3087,7 @@ function SlotWriterDocument({
         document,
         slotId,
         ['draft_document', 'flat_draft_document'].includes(slotId) ? 'draft' : mode,
+        numberingUpdate,
         { silentError: true } as never,
       );
       const result = response?.data?.data;
@@ -3009,7 +3102,7 @@ function SlotWriterDocument({
       }
       const displayDocument = restoreWriterMarkdownInternalReferenceLabels(result.document, document);
       setRendered({ ...result, document: displayDocument });
-      setDownloadMarkdownContent(displayDocument);
+      setDownloadMarkdownContent(result.export_document ?? displayDocument);
       applySavedRevision(result.revision);
       return { markdown: displayDocument, revision: result.revision };
     } catch (saveError) {
@@ -3091,6 +3184,7 @@ function SlotWriterDocument({
     revision: displayRevision,
     getLatestRevision,
     writeBackUrl: slot.write_back_url,
+    provider: slot.provider,
     disabled: writeBackDisabled,
     synced: slot.write_back_state === 'synced_clean',
     onSuccess: handleWriteBackSuccess,
@@ -3143,6 +3237,7 @@ function SlotWriterDocument({
         {writerDocument ? (
           <WriterIRControl
             document={writerDocument}
+            numbering={rendered.numbering}
             sourceRevision={displayRevision}
             readOnly={!canEditWriterIR}
             editingKey={editingKey}
@@ -3164,12 +3259,12 @@ function SlotWriterDocument({
         ) : canEdit ? (
           <MarkdownArtifactEditor
             markdown={markdown}
+            numbering={rendered.numbering}
             sourceRevision={displayRevision}
             editingKey={editingKey}
             onSave={saveMarkdown}
             onRefresh={refreshDocument}
             onDownload={allowDownload ? () => setDownloadFormatOpen(true) : undefined}
-            onContentChange={setDownloadMarkdownContent}
             onRewriteSelection={rewriteSelection || rewritePreview ? undefined : openMarkdownRewrite}
             rewriteUnavailableReason={rewriteSelection || rewritePreview || canRewrite
               ? undefined
@@ -3194,7 +3289,7 @@ function SlotWriterDocument({
             tabIndex={canRewrite ? 0 : undefined}
           >
             <div className='writer-artifact__markdown'>
-              <MarkdownViewer>{markdown}</MarkdownViewer>
+              <MarkdownViewer>{rendered.export_document ?? markdown}</MarkdownViewer>
             </div>
           </div>
         )}
@@ -3596,6 +3691,7 @@ function SlotJsonFile({
     revision: displayRevision,
     getLatestRevision,
     writeBackUrl: slot.write_back_url,
+    provider: slot.provider,
     disabled: writeBackDisabled,
     synced: slot.write_back_state === 'synced_clean',
     onSuccess: handleWriteBackSuccess,
@@ -3940,6 +4036,7 @@ function SlotInlineStructured({
     slotId: isWriterWriteBackSlot(resolvedSlotId) ? resolvedSlotId : undefined,
     revision: displayRevision,
     writeBackUrl: slot.write_back_url,
+    provider: slot.provider,
     disabled: writeBackDisabled,
     synced: slot.write_back_state === 'synced_clean',
     onSuccess: handleWriteBackSuccess,
@@ -4361,6 +4458,7 @@ function SlotMarkdownFile({
     slotId: isWriterWriteBackSlot(resolvedSlotId) ? resolvedSlotId : undefined,
     revision: displayRevision,
     writeBackUrl: slot.write_back_url,
+    provider: slot.provider,
     disabled: writeBackDisabled,
     synced: slot.write_back_state === 'synced_clean',
     onSuccess: handleMarkdownWriteBackSuccess,
@@ -4836,6 +4934,7 @@ export function SlotRenderer({
     return <SlotPending type={expectedType ?? 'text'} cardMode={cardMode} />;
   }
 
+  const effectiveReadOnly = readOnly || widget?.readOnly;
   const resolvedWidgetSlotId = slotId ?? slot.slot;
   if (
     sessionId
@@ -4849,7 +4948,7 @@ export function SlotRenderer({
         slotId={resolvedWidgetSlotId as WriterDocumentSlot}
         revisionCount={revisionCount}
         onRefresh={onRefresh}
-        readOnly={readOnly}
+        readOnly={effectiveReadOnly}
       />
     );
   }
@@ -4864,7 +4963,7 @@ export function SlotRenderer({
         slotId={slotId}
         revisionCount={revisionCount}
         onRefresh={onRefresh}
-        readOnly={readOnly}
+        readOnly={effectiveReadOnly}
       />
     );
   }
@@ -4878,7 +4977,7 @@ export function SlotRenderer({
         compact={cardMode}
         sessionId={sessionId}
         slotId={artifactSlotKey}
-        readOnly={readOnly}
+        readOnly={effectiveReadOnly}
         onRefresh={onRefresh}
       />
     );
@@ -4894,7 +4993,7 @@ export function SlotRenderer({
         isDraggable={isDraggable}
         onRefresh={onRefresh}
         onReference={onReference}
-        readOnly={readOnly}
+        readOnly={effectiveReadOnly}
         hideMutationActions={hideImageMutationActions}
       />
     );
@@ -4908,7 +5007,7 @@ export function SlotRenderer({
         slotId={slotId}
         revisionCount={revisionCount}
         onRefresh={onRefresh}
-        readOnly={readOnly}
+        readOnly={effectiveReadOnly}
       />
     );
   }
@@ -4920,7 +5019,7 @@ export function SlotRenderer({
         slotId={slotId}
         revisionCount={revisionCount}
         onRefresh={onRefresh}
-        readOnly={readOnly}
+        readOnly={effectiveReadOnly}
       />
     );
   }
@@ -4932,11 +5031,11 @@ export function SlotRenderer({
         slotId={slotId}
         revisionCount={revisionCount}
         onRefresh={onRefresh}
-        readOnly={readOnly}
+        readOnly={effectiveReadOnly}
       />
     );
   }
-  if (normalized === 'file') return <SlotFile slot={slot} sessionId={sessionId} slotId={slotId} revisionCount={revisionCount} onRefresh={onRefresh} readOnly={readOnly} />;
+  if (normalized === 'file') return <SlotFile slot={slot} sessionId={sessionId} slotId={slotId} revisionCount={revisionCount} onRefresh={onRefresh} readOnly={effectiveReadOnly} />;
   return (
     <SlotText
       slot={slot}
@@ -4945,7 +5044,7 @@ export function SlotRenderer({
       slotId={slotId}
       revisionCount={revisionCount}
       onRefresh={onRefresh}
-      readOnly={readOnly}
+      readOnly={effectiveReadOnly}
     />
   );
 }

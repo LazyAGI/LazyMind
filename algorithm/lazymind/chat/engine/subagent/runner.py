@@ -342,6 +342,16 @@ def _tool_configs_for_runtime_tools(runtime_tools: List[Any]) -> list:
     return [cfg for cfg in DEFAULT_TOOLS if id(cfg.tool) in runtime_ids]
 
 
+def _model_visible_runtime_tools(runtime_tools: List[Any], params: Dict[str, Any]) -> List[Any]:
+    if not params.get('terminal_tools_only'):
+        return runtime_tools
+    terminal_names = set(_coerce_str_list(params.get('terminal_tools')))
+    return [
+        tool for tool in runtime_tools
+        if str(getattr(tool, '__name__', '') or '') in terminal_names
+    ]
+
+
 def _build_partial_sort_order_hints(
     partial_indices: 'Dict[str, List[int]]',
 ) -> str:
@@ -390,7 +400,7 @@ _STRUCTURED_PARAM_KEYS = {
     'workflow_id', 'workflow_ref', 'revision_id', 'revision_no', 'tree_hash',
     'remote_root', 'step_id', 'session_id', 'user_input', 'hand_off',
     'chat_session_id', 'workflow_mode', 'user_id', 'preflight_id',
-    'legacy_tools', 'parent_agentic_config', 'filters',
+    'legacy_tools', 'terminal_tools_only', 'parent_agentic_config', 'filters',
 }
 
 
@@ -1031,16 +1041,17 @@ async def run_subagent_stream(
 
         llm = AutoModel(model='llm')
         runtime_tools = _resolve_runtime_tools(tools, params)
+        visible_runtime_tools = _model_visible_runtime_tools(runtime_tools, params)
         attachment_configs = _resolve_attachment_configs(
             agentic_config, effective_agent_type, params,
         )
         subagent_tools_all = _build_subagent_tools(
-            runtime_tools,
+            visible_runtime_tools,
             attachment_configs,
             tools_only=bool(ctx.params.get('tools_only')),
             include_artifact_writes=not _publisher_owns_outputs(ctx),
         )
-        runtime_configs = _tool_configs_for_runtime_tools(runtime_tools)
+        runtime_configs = _tool_configs_for_runtime_tools(visible_runtime_tools)
         plan = _build_subagent_plan(
             ctx,
             db,

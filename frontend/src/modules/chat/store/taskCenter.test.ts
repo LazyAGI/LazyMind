@@ -151,6 +151,15 @@ describe("task center workflow events", () => {
         type: "progress",
         progress: 50,
         current_phase: "collecting references",
+        writing_subtasks: [{
+          subtask_id: "research-1",
+          node_id: "section-1",
+          question: "Find current market data",
+          subtask_type: "retrieve",
+          status: "running",
+          retry_count: 0,
+          tools_used: ["kb_search", "llm"],
+        }],
       }),
     } as unknown as CustomEvent);
     taskMessage?.({
@@ -166,11 +175,53 @@ describe("task center workflow events", () => {
         status: "running",
         progress_pct: 50,
         current_phase: "collecting references",
+        writing_subtasks: [expect.objectContaining({
+          subtask_id: "research-1",
+          status: "running",
+          tools_used: ["kb_search", "llm"],
+        })],
         execution_log: [
           { type: "think", content: "Searching for seasonal material." },
         ],
       }),
     ]);
+  });
+
+  it("restores persisted writing subtasks after a terminal task reload", async () => {
+    requestHarness.listConversationTasks.mockResolvedValue({
+      data: {
+        tasks: [{
+          task_id: "workflow-task-1",
+          agent_type: "workflow_step",
+          title: "writer-workflow:write_document",
+          status: "succeeded",
+          progress_pct: 100,
+          writing_subtasks: [{
+            subtask_id: "extract-1",
+            node_id: "section-1",
+            question: "Extract narrative structure",
+            subtask_type: "extract",
+            status: "completed",
+            retry_count: 0,
+            tools_used: ["llm"],
+            result_summary: "Resolved structure.",
+          }],
+        }],
+      },
+    });
+
+    await useTaskCenterStore.getState().loadConversationTasks("conversation-1");
+
+    expect(useTaskCenterStore.getState().getTasks("conversation-1")[0]).toEqual(
+      expect.objectContaining({
+        status: "succeeded",
+        writing_subtasks: [expect.objectContaining({
+          subtask_id: "extract-1",
+          status: "completed",
+          tools_used: ["llm"],
+        })],
+      }),
+    );
   });
 
   it("keeps a live task when an older REST snapshot resolves and queues a reload", async () => {

@@ -2438,7 +2438,7 @@ func registeredCoreOperations() []openAPIOperation {
 		{
 			Method:      "POST",
 			Path:        "/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:sync-writer-document",
-			Summary:     "Sync an edited WriterDocument to Feishu",
+			Summary:     "Sync an edited WriterDocument to its cloud provider",
 			Tags:        []string{"workflow", "writer"},
 			PathParams:  writerDocumentSyncPathParams{},
 			RequestBody: jsonBodyOf(writerDocumentSyncOpenAPIRequest{}, true),
@@ -2447,7 +2447,7 @@ func registeredCoreOperations() []openAPIOperation {
 		{
 			Method:      "POST",
 			Path:        "/workflow-sessions/{session_id}/writer-document:write-back",
-			Summary:     "Write the active WriterDocument back to Feishu",
+			Summary:     "Write the active WriterDocument back to its cloud provider",
 			Tags:        []string{"workflow", "writer"},
 			PathParams:  writerDocumentWriteBackPathParams{},
 			RequestBody: jsonBodyOf(writerDocumentWriteBackOpenAPIRequest{}, true),

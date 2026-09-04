@@ -87,10 +87,11 @@ type WorkflowStepParams struct {
 	// LegacyTools are immutable script-tool names compiled from the selected
 	// Workflow revision. They are resolved by the LazyMind Host when building
 	// the isolated Workflow SubAgent tool set; the model never supplies them.
-	LegacyTools     []string `json:"legacy_tools,omitempty"`
-	TerminalTools   []string `json:"terminal_tools,omitempty"`
-	ToolsOnly       bool     `json:"tools_only,omitempty"`
-	StreamHeartbeat bool     `json:"stream_heartbeat,omitempty"`
+	LegacyTools       []string `json:"legacy_tools,omitempty"`
+	TerminalTools     []string `json:"terminal_tools,omitempty"`
+	ToolsOnly         bool     `json:"tools_only,omitempty"`
+	TerminalToolsOnly bool     `json:"terminal_tools_only,omitempty"`
+	StreamHeartbeat   bool     `json:"stream_heartbeat,omitempty"`
 
 	// Runtime is the package-declared host behavior for this immutable revision.
 	// It replaces workflow-id conditionals in the LazyMind executor.
@@ -154,6 +155,9 @@ func (p WorkflowStepParams) asMap() map[string]any {
 	}
 	if p.ToolsOnly {
 		m["tools_only"] = true
+	}
+	if p.TerminalToolsOnly {
+		m["terminal_tools_only"] = true
 	}
 	if p.StreamHeartbeat {
 		m["stream_heartbeat"] = true
@@ -567,6 +571,9 @@ func launchWorkflowAttempt(
 	}
 	if params.ToolsOnly {
 		rawParamsMap["tools_only"] = true
+	}
+	if params.TerminalToolsOnly {
+		rawParamsMap["terminal_tools_only"] = true
 	}
 	if !params.Runtime.IsZero() {
 		rawParamsMap["workflow_runtime"] = params.Runtime

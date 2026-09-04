@@ -146,6 +146,37 @@ const headingDocument: WriterDocument = {
   ],
 };
 
+const outlineInstructionDocument: WriterDocument = {
+  document_id: 'writer-outline-instructions',
+  stage: 'outline',
+  title: '长篇小说大纲',
+  blocks: [
+    {
+      node_id: 'outline-section-1',
+      type: 'heading',
+      content: '旧日的仪式',
+      numbering: { level: 1 },
+      target_chars: 1800,
+      context_relations: [
+        {
+          target_node_id: 'outline-section-0',
+          relation: 'continuity',
+          guidance: '承接前文已暴露的禁忌线索',
+        },
+      ],
+      subtasks: [
+        {
+          subtask_id: 'subtask-1',
+          node_id: 'outline-section-1',
+          question: '仪式为什么会在此时失控？',
+          subtask_type: 'reason',
+          status: 'pending',
+        },
+      ],
+    },
+  ],
+};
+
 const referencedDocument: WriterDocument = {
   ...document,
   blocks: [
@@ -310,6 +341,82 @@ afterEach(() => {
   restoreProperty(HTMLElement.prototype, 'scrollIntoView', originalScrollIntoView);
   window.getSelection()?.removeAllRanges();
   vi.restoreAllMocks();
+});
+
+describe('WriterIRDocumentEditor numbering sidecar', () => {
+  it('renders an immutable highlighted marker without persisting it in heading content', async () => {
+    const onChange = vi.fn();
+    const cleanDocument: WriterDocument = {
+      ...document,
+      blocks: [{ ...document.blocks[0], content: 'Target section' }],
+    };
+    const { container } = render(
+      <WriterIRDocumentEditor
+        document={cleanDocument}
+        numbering={{
+          ordered_style: 'hierarchical',
+          entries: { 'sec-1': { label: '1.', mode: 'ordered' } },
+        }}
+        ariaLabel='Writer document'
+        onChange={onChange}
+      />,
+    );
+
+    const heading = container.querySelector<HTMLElement>(
+      '[data-node-id="sec-1"] > [data-writer-block-content]',
+    );
+    const marker = heading?.querySelector<HTMLElement>('[data-writer-numbering-marker="sec-1"]');
+    expect(marker).toHaveTextContent('1.');
+    expect(marker).toHaveAttribute('contenteditable', 'false');
+    expect(marker).toHaveClass('writer-ir__numbering-marker');
+
+    const editableText = heading?.cloneNode(true) as HTMLElement;
+    editableText.querySelector('[data-writer-numbering-marker]')?.remove();
+    expect(editableText).toHaveTextContent('Target section');
+
+    const textNode = Array.from(heading?.childNodes ?? []).find((node) => node.nodeType === Node.TEXT_NODE);
+    expect(textNode).toBeDefined();
+    textNode!.textContent = 'Renamed section';
+    fireEvent.input(heading!);
+
+    await waitFor(() => expect(onChange).toHaveBeenCalled());
+    const updated = onChange.mock.calls.at(-1)?.[0] as WriterDocument;
+    expect(updated.blocks[0].content).toBe('Renamed section');
+  });
+});
+
+describe('WriterIRDocumentEditor image preview', () => {
+  it('renders a Notion preview asset URL without requiring a media asset', async () => {
+    const previewDocument: WriterDocument = {
+      ...document,
+      blocks: [{
+        node_id: 'notion-image-1',
+        type: 'image',
+        content: '台风安全示意图',
+        references: [{
+          type: 'preview_asset',
+          provider: 'notion',
+          url: 'https://example.com/notion-preview.png',
+          expires_at: '2026-09-02T02:00:00Z',
+        }],
+      }],
+    };
+    const { container } = render(
+      <WriterIRDocumentEditor
+        document={previewDocument}
+        ariaLabel='Writer document'
+        onChange={vi.fn()}
+        onFocus={vi.fn()}
+        onBlur={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(container.querySelector('img')?.getAttribute('src')).toBe(
+        'https://example.com/notion-preview.png',
+      );
+    });
+  });
 });
 
 describe('WriterIRDocumentEditor cross-reference menu', () => {
@@ -509,6 +616,45 @@ describe('WriterIRDocumentEditor cross-reference menu', () => {
     expect(paragraph?.spans?.some(
       (span) => span.text.includes('beta') && getWriterInternalReference(span) !== undefined,
     )).toBe(false);
+  });
+});
+
+describe('WriterIRDocumentEditor outline instructions', () => {
+  it('renders structured instructions under the heading and preserves them after editing', async () => {
+    const onDocumentChange = vi.fn();
+    const { container } = render(
+      <ControlledWriter
+        initialDocument={outlineInstructionDocument}
+        onDocumentChange={onDocumentChange}
+      />,
+    );
+
+    const details = container.querySelector<HTMLDetailsElement>(
+      '[data-writer-outline-instructions]',
+    );
+    expect(details).not.toBeNull();
+    expect(details?.open).toBe(true);
+    expect(details).toHaveTextContent('chat.writerIR.outlineInstructions');
+    expect(details).toHaveTextContent('1800');
+    expect(details).toHaveTextContent('承接前文已暴露的禁忌线索');
+    expect(details).toHaveTextContent('仪式为什么会在此时失控？');
+
+    const heading = container.querySelector<HTMLElement>(
+      '[data-node-id="outline-section-1"] > [data-writer-block-content]',
+    );
+    expect(heading).not.toBeNull();
+    heading!.textContent = '旧日的仪式（修订）';
+    fireEvent.input(heading!);
+
+    await waitFor(() => expect(onDocumentChange).toHaveBeenCalled());
+    const lastCall = onDocumentChange.mock.calls[onDocumentChange.mock.calls.length - 1];
+    const updated = lastCall?.[0] as WriterDocument;
+    expect(updated.blocks[0]).toMatchObject({
+      content: '旧日的仪式（修订）',
+      target_chars: 1800,
+      context_relations: outlineInstructionDocument.blocks[0].context_relations,
+      subtasks: outlineInstructionDocument.blocks[0].subtasks,
+    });
   });
 });
 

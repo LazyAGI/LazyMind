@@ -1799,8 +1799,6 @@ export function WorkflowPanel({
     ? Math.min(activeTabIdx, tabs.length - 1)
     : 0;
   const hasIntent = true;
-  const sessionReadOnly = isWorkflowSessionReadOnly(session, autoRunning);
-
   const showActions =
     session.status === 'waiting' ||
     session.status === 'active' ||
@@ -2083,7 +2081,6 @@ export function WorkflowPanel({
                     onRefresh={refresh}
                     onReference={onReference}
                     onFocusSortOrder={handleFocusSortOrder}
-                    readOnly={sessionReadOnly}
                   />
                 </SlotDownloadContext.Provider>
                 </WorkflowPanelTabActiveContext.Provider>
@@ -2094,7 +2091,6 @@ export function WorkflowPanel({
               session={session}
               onRefresh={refresh}
               onReference={onReference}
-              readOnly={sessionReadOnly}
             />
           )}
         </div>

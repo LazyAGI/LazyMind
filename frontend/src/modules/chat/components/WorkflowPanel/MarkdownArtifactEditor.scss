@@ -86,7 +86,8 @@
 .writer-markdown-editor__display-toolbar {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
+  gap: 8px;
   min-height: 34px;
   padding: 2px 4px 8px;
   border-bottom: 1px solid #edf1f5;
@@ -122,6 +123,21 @@
   background: transparent;
   color: #64748b;
   line-height: 1;
+}
+
+.writer-markdown-editor .writer-markdown-editor__outline-instructions-all {
+  min-height: 28px;
+  padding: 3px 10px;
+  border: 1px solid #dbe3ee;
+  border-radius: 7px;
+  background: #fff;
+  color: #475569;
+  font-size: 12px;
+}
+
+.writer-markdown-editor .writer-markdown-editor__outline-instructions-all:hover {
+  border-color: #93c5fd;
+  color: #1d4ed8;
 }
 
 .writer-markdown-editor .writer-markdown-editor__width-option:hover {
@@ -202,7 +218,7 @@
   border: 0;
   border-radius: 5px;
   background: transparent;
-  color: #2563eb;
+  color: #0f172a;
   text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -214,7 +230,7 @@
 .writer-markdown-editor .writer-markdown-editor__outline-document-link:hover:not(:disabled) {
   border-color: transparent;
   background: #f1f5f9;
-  color: #1d4ed8;
+  color: #0f172a;
 }
 
 .writer-markdown-editor__outline-list {
@@ -228,7 +244,9 @@
 }
 
 .writer-markdown-editor .writer-markdown-editor__outline-link {
-  display: block;
+  display: flex;
+  align-items: baseline;
+  gap: 0.35em;
   width: 100%;
   min-height: 28px;
   padding: 4px 6px;
@@ -236,17 +254,23 @@
   border: 0;
   border-radius: 5px;
   background: transparent;
-  color: #475569;
+  color: #0f172a;
   text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
   cursor: pointer;
 }
 
+.writer-markdown-editor__outline-number {
+  flex: none;
+  color: #2563eb;
+  font-weight: 600;
+}
+
 .writer-markdown-editor .writer-markdown-editor__outline-link:hover {
   border-color: transparent;
   background: #f1f5f9;
-  color: #1d4ed8;
+  color: #0f172a;
 }
 
 .writer-markdown-editor .writer-markdown-editor__outline-link--level-2 { padding-left: 16px; }
@@ -260,6 +284,96 @@
   color: #94a3b8;
   font-size: 12px;
   line-height: 1.5;
+}
+
+.writer-markdown-editor .writer-markdown-editor__heading-instruction-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 22px;
+  margin-left: 8px;
+  padding: 2px 7px;
+  border: 1px solid #d9dee7;
+  border-radius: 5px;
+  background: #f3f4f6;
+  color: #667085;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.25;
+  vertical-align: middle;
+  cursor: pointer;
+}
+
+.writer-markdown-editor .writer-markdown-editor__heading-instruction-toggle::after {
+  width: 5px;
+  height: 5px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  content: '';
+  transform: translateY(-1px) rotate(45deg);
+  transition: transform 120ms ease;
+}
+
+.writer-markdown-editor .writer-markdown-editor__heading-instruction-toggle[aria-expanded='true']::after {
+  transform: translateY(1px) rotate(225deg);
+}
+
+.writer-markdown-editor .writer-markdown-editor__heading-instruction-toggle:hover {
+  border-color: #cbd2dc;
+  background: #e9ecf1;
+  color: #475467;
+}
+
+.writer-markdown-editor__heading-instructions {
+  margin: -2px 0 12px;
+  padding: 9px 12px;
+  border-left: 2px solid #d5dbe5;
+  background: #f8f9fb;
+  color: #5f6b7a;
+  font-size: 13px;
+  line-height: 1.55;
+  user-select: text;
+}
+
+.writer-markdown-editor__heading-instruction-row {
+  display: grid;
+  grid-template-columns: 82px minmax(0, 1fr);
+  gap: 8px;
+}
+
+.writer-markdown-editor__heading-instruction-row + .writer-markdown-editor__heading-instruction-row {
+  margin-top: 5px;
+}
+
+.writer-markdown-editor__heading-instruction-row ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.writer-markdown-editor .mdxeditor-root-contenteditable :is(h1, h2, h3, h4, h5, h6) {
+  color: #0f172a;
+}
+
+.writer-markdown-editor .mdxeditor-root-contenteditable [data-writer-numbering-label]::before {
+  margin-right: 0.35em;
+  color: #2563eb;
+  content: attr(data-writer-numbering-label);
+  cursor: pointer;
+  user-select: none;
+}
+
+.writer-markdown-editor .mdxeditor-root-contenteditable [data-writer-heading-mode='unordered'] {
+  position: relative;
+}
+
+.writer-markdown-editor .mdxeditor-root-contenteditable [data-writer-heading-mode='unordered']::before {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -14px;
+  width: 14px;
+  content: '';
+  cursor: pointer;
 }
 
 @container writer-markdown-editor (max-width: 680px) {
