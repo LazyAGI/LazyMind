@@ -12,7 +12,7 @@ def test_snapshot_provider_usage_ignores_negative_tokens():
 def test_dsh_steps_count_model_and_each_tool():
     translator = AgentEventFrameTranslator(query='q', run_id='run-1', clock=lambda: 1.0)
     translator.feed({'tag': 'think', 'delta': 'hmm'})
-    model_event_frames = translator.feed({
+    translator.feed({
         'tag': 'tool_calls',
         'tool_calls': [{'id': '1', 'function': {'name': 'grep', 'arguments': '{}'}},
                        {'id': '2', 'function': {'name': 'read_file', 'arguments': '{}'}}],
