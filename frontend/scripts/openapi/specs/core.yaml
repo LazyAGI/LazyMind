@@ -3540,58 +3540,12 @@ components:
                 - feedback_rate
                 - user_count
             type: object
-        RunPerformanceMetrics:
-            properties:
-                cache_hit_rate:
-                    type: number
-                cached_tokens:
-                    type: integer
-                context_ratio:
-                    type: number
-                input_tokens:
-                    type: integer
-                max_input_tokens:
-                    type: integer
-                model:
-                    type: string
-                model_ms:
-                    type: integer
-                model_steps:
-                    type: integer
-                output_tokens:
-                    type: integer
-                provider_usages:
-                    items:
-                        additionalProperties: true
-                        type: object
-                    type: array
-                reasoning_tokens:
-                    type: integer
-                schema_version:
-                    type: integer
-                steps:
-                    type: integer
-                tok_s:
-                    type: number
-                tool_ms:
-                    type: integer
-                tool_steps:
-                    type: integer
-                total_tokens:
-                    type: integer
-                ttft_ms:
-                    type: integer
-                turn_seq:
-                    type: integer
-            type: object
         RunTerminal:
             properties:
                 code:
                     type: string
                 diagnostic_id:
                     type: string
-                metrics:
-                    $ref: '#/components/schemas/RunPerformanceMetrics'
                 model_call_id:
                     type: string
                 model_invoked:

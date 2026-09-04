@@ -123,9 +123,7 @@ def _local_observation_writer() -> LocalObservationWriter:
                     else:
                         temp_dir = Path(str(_cfg['temp_dir']))
                         data_dir = temp_dir.parent / 'data'
-                    directory = str(data_dir / 'observability') if data_dir.is_dir() else os.path.join(
-                        str(_cfg['temp_dir']), 'observability',
-                    )
+                    directory = str(data_dir / 'observability')
                 _observation_writer = LocalObservationWriter(directory)
     return _observation_writer
 
@@ -1700,7 +1698,9 @@ async def _handle_chat_impl(
             async with rag_sem:
                 initial_agent_stream = lazyllm.enable_trace(
                     AgentInvocation(executor, react_agent, plan),
-                    trace_id=conversation.session_id,
+                    # A trace represents one invocation.  Keep the stable
+                    # conversation identifier as semantic correlation data.
+                    trace_id=translator.run.run_id,
                     session_id=conversation.session_id,
                     request_tags=['handle_chat', 'agent'],
                     debug_capture_payload=False,

@@ -79,13 +79,6 @@ function weightedCacheHitRate(rows: RunPerformanceMetrics[]): number | undefined
   return last ? asFiniteNumber(last.cache_hit_rate) : undefined;
 }
 
-export function metricsFromRunTerminal(terminal: unknown): RunPerformanceMetrics | undefined {
-  if (!terminal || typeof terminal !== "object") return undefined;
-  const metrics = (terminal as { metrics?: RunPerformanceMetrics }).metrics;
-  if (!metrics || typeof metrics !== "object") return undefined;
-  return metrics;
-}
-
 export function foldSessionPerformanceStats(
   messageList: PerformanceMessage[],
 ): SessionPerformanceStats | undefined {
@@ -98,14 +91,10 @@ export function foldSessionPerformanceStats(
     if (item.performance_metrics && typeof item.performance_metrics === "object") {
       collected.push(item.performance_metrics);
     }
-    const own = metricsFromRunTerminal(item.run_terminal);
-    if (own) collected.push(own);
     for (const answer of item.answers || []) {
       if (answer.performance_metrics && typeof answer.performance_metrics === "object") {
         collected.push(answer.performance_metrics);
       }
-      const nested = metricsFromRunTerminal(answer.run_terminal);
-      if (nested) collected.push(nested);
     }
     if (collected.length === 0) continue;
     if (seq != null) seqs.add(seq);

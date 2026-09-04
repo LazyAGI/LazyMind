@@ -7,8 +7,7 @@ describe("foldSessionPerformanceStats", () => {
       {
         role: RoleTypes.ASSISTANT,
         seq: 1,
-        run_terminal: {
-          metrics: {
+        performance_metrics: {
             steps: 2,
             model_ms: 1000,
             tool_ms: 500,
@@ -18,21 +17,18 @@ describe("foldSessionPerformanceStats", () => {
             cache_hit_rate: 0.8,
             context_ratio: 0.1,
             model: "deepseek-chat",
-          },
         },
       },
       {
         role: RoleTypes.ASSISTANT,
         seq: 2,
-        run_terminal: {
-          metrics: {
+        performance_metrics: {
             steps: 3,
             model_ms: 2000,
             input_tokens: 50,
             output_tokens: 20,
             cached_tokens: 0,
             model: "deepseek-chat",
-          },
         },
       },
     ]);
@@ -49,32 +45,26 @@ describe("foldSessionPerformanceStats", () => {
       {
         role: RoleTypes.ASSISTANT,
         seq: 1,
-        run_terminal: {
-          metrics: {
+        performance_metrics: {
             steps: 1,
             input_tokens: 100,
             cached_tokens: 100,
-          },
         },
       },
       {
         role: RoleTypes.ASSISTANT,
         seq: 2,
-        run_terminal: {
-          metrics: {
+        performance_metrics: {
             steps: 1,
             input_tokens: 40,
             cached_tokens: 20,
-          },
         },
         answers: [
           {
-            run_terminal: {
-              metrics: {
+            performance_metrics: {
                 steps: 1,
                 input_tokens: 60,
                 cached_tokens: 0,
-              },
             },
           },
         ],
@@ -89,12 +79,10 @@ describe("foldSessionPerformanceStats", () => {
       {
         role: RoleTypes.ASSISTANT,
         seq: 1,
-        run_terminal: {
-          metrics: {
+        performance_metrics: {
             steps: 1,
             input_tokens: 100,
             cached_tokens: 0,
-          },
         },
       },
     ]);

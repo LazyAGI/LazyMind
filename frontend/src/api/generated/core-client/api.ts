@@ -2532,33 +2532,11 @@ export interface RouterTrafficSummary {
 export interface RunTerminal {
     'code'?: string;
     'diagnostic_id'?: string;
-    'metrics'?: RunPerformanceMetrics;
     'model_call_id'?: string;
     'model_invoked'?: boolean;
     'partial_output': boolean;
     'reason': RunTerminalReasonEnum;
     'status': RunTerminalStatusEnum;
-}
-export interface RunPerformanceMetrics {
-    'cache_hit_rate'?: number;
-    'cached_tokens'?: number;
-    'context_ratio'?: number;
-    'input_tokens'?: number;
-    'max_input_tokens'?: number;
-    'model'?: string;
-    'model_ms'?: number;
-    'model_steps'?: number;
-    'output_tokens'?: number;
-    'provider_usages'?: Array<object>;
-    'reasoning_tokens'?: number;
-    'schema_version'?: number;
-    'steps'?: number;
-    'tok_s'?: number;
-    'tool_ms'?: number;
-    'tool_steps'?: number;
-    'total_tokens'?: number;
-    'ttft_ms'?: number;
-    'turn_seq'?: number;
 }
 
 export const RunTerminalReasonEnum = {

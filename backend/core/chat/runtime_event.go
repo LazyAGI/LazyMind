@@ -26,31 +26,8 @@ type RunTerminal struct {
 	Code          string      `json:"code,omitempty"`
 	PartialOutput bool        `json:"partial_output"`
 	ModelInvoked  *bool       `json:"model_invoked,omitempty"`
-	ModelCallID   string      `json:"model_call_id,omitempty"`
-	DiagnosticID  string      `json:"diagnostic_id,omitempty"`
-	Metrics       *RunMetrics `json:"metrics,omitempty"`
-}
-
-type RunMetrics struct {
-	SchemaVersion   int             `json:"schema_version,omitempty"`
-	TurnSeq         *int            `json:"turn_seq,omitempty"`
-	Steps           int             `json:"steps"`
-	ModelSteps      int             `json:"model_steps,omitempty"`
-	ToolSteps       int             `json:"tool_steps,omitempty"`
-	ModelMs         int64           `json:"model_ms,omitempty"`
-	ToolMs          int64           `json:"tool_ms,omitempty"`
-	Model           string          `json:"model,omitempty"`
-	InputTokens     *int64          `json:"input_tokens,omitempty"`
-	OutputTokens    *int64          `json:"output_tokens,omitempty"`
-	TotalTokens     *int64          `json:"total_tokens,omitempty"`
-	CachedTokens    *int64          `json:"cached_tokens,omitempty"`
-	ReasoningTokens *int64          `json:"reasoning_tokens,omitempty"`
-	CacheHitRate    *float64        `json:"cache_hit_rate,omitempty"`
-	ProviderUsages  json.RawMessage `json:"provider_usages,omitempty"`
-	TtftMs          *int64          `json:"ttft_ms,omitempty"`
-	TokS            *float64        `json:"tok_s,omitempty"`
-	MaxInputTokens  *int64          `json:"max_input_tokens,omitempty"`
-	ContextRatio    *float64        `json:"context_ratio,omitempty"`
+    ModelCallID   string `json:"model_call_id,omitempty"`
+    DiagnosticID  string `json:"diagnostic_id,omitempty"`
 }
 
 func (terminal *RunTerminal) modelWasInvoked() bool {
