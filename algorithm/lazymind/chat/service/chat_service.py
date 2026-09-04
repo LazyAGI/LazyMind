@@ -54,6 +54,7 @@ from lazymind.chat.service.component import (
 from lazymind.chat.engine.agent_runtime import (
     AgentExecutionOptions,
     AgentExecutor,
+    AgentInvocation,
     AgentRole,
     AgentRunPlan,
     UserCancelledError,
@@ -66,6 +67,8 @@ from lazymind.chat.engine.agent_runtime import (
     attach_window_budget,
     render_attachment_content,
 )
+from lazymind.chat.engine.agent_runtime.budget import resolve_max_input_tokens
+from lazymind.chat.service.local_observation import LocalObservationWriter
 from lazymind.chat.engine.tools.local_file.workspace import build_resource_read_tools, chat_agent_workspace
 from lazymind.chat.engine.tools.intent_writer import (
     build_intentwrite_tool,
@@ -101,6 +104,28 @@ sensitive_filter = SensitiveFilter(
 # Used by task-cancel endpoint to cancel ChatAgent by conversation_id.
 _active_sessions: dict[str, str] = {}
 _conversation_env_vars: dict[str, dict[str, str]] = {}
+_observation_writer: Optional[LocalObservationWriter] = None
+_observation_writer_lock = threading.Lock()
+
+
+def _local_observation_writer() -> LocalObservationWriter:
+    global _observation_writer
+    if _observation_writer is None:
+        with _observation_writer_lock:
+            if _observation_writer is None:
+                explicit_directory = os.environ.get('LAZYMIND_OBSERVABILITY_DIR')
+                if explicit_directory:
+                    directory = explicit_directory
+                else:
+                    configured_data_dir = os.environ.get('LAZYMIND_DATA_DIR')
+                    if configured_data_dir:
+                        data_dir = Path(configured_data_dir)
+                    else:
+                        temp_dir = Path(str(_cfg['temp_dir']))
+                        data_dir = temp_dir.parent / 'data'
+                    directory = str(data_dir / 'observability')
+                _observation_writer = LocalObservationWriter(directory)
+    return _observation_writer
 
 
 def _unregister_active_session(conversation_id: str, session_id: str) -> None:
@@ -866,6 +891,7 @@ async def _handle_chat_impl(
         f'[files_map_keys={sorted(message.files.keys()) if isinstance(message.files, dict) else None}]'
     )
     start_time = time.time()
+    metrics_started_at = time.monotonic()
     priority = runtime.priority or LAZYMIND_LLM_PRIORITY
     query, cited_message_context = _normalize_cite_message_query_for_agent(message.query)
     user_input, user_cited_context = _normalize_cite_message_query_for_agent(
@@ -951,7 +977,11 @@ async def _handle_chat_impl(
         raw_history,
         compact_workflow_receipts=compact_rewind_history,
     )
-    translator = AgentEventFrameTranslator(query=query, run_id=run_id)
+    translator = AgentEventFrameTranslator(
+        query=query,
+        run_id=run_id,
+        started_at=metrics_started_at,
+    )
 
     agentic_config = {
         'run_id': run_id,
@@ -1671,7 +1701,15 @@ async def _handle_chat_impl(
 
         try:
             async with rag_sem:
-                initial_agent_stream = executor.stream_agent(react_agent, plan)
+                initial_agent_stream = lazyllm.enable_trace(
+                    AgentInvocation(executor, react_agent, plan),
+                    # A trace represents one invocation.  Keep the stable
+                    # conversation identifier as semantic correlation data.
+                    trace_id=translator.run.run_id,
+                    session_id=conversation.session_id,
+                    request_tags=['handle_chat', 'agent'],
+                    debug_capture_payload=False,
+                )
                 guarded_agent_stream = guard_workflow_agent_stream(
                     initial_agent_stream,
                     all_tools=all_tools,
@@ -1732,8 +1770,38 @@ async def _handle_chat_impl(
                 _unregister_active_session(_conv_id_key, conversation.session_id)
 
         cost = round(time.time() - start_time, 3)
-        terminal_frame = translator.finish_run(outcome=outcome)
+        terminal_frame = translator.finish_run(
+            outcome=outcome,
+            usage_map=lazyllm.globals.get('usage') or {},
+            module_id=getattr(executor.runtime_llm(react_agent), '_module_id', None),
+            llm_config=runtime.llm_config or {},
+            turn_seq=message.current_turn_seq,
+            max_input_tokens=resolve_max_input_tokens(runtime.llm_config or {}),
+        )
         terminal_frame['tool_call_turns'] = translator.tool_call_turns
+        metrics = translator.last_metrics or terminal_frame.get('performance_metrics')
+        if isinstance(metrics, dict):
+            try:
+                writer = _local_observation_writer()
+                writer.write_summary({
+                    'run_id': translator.run.run_id,
+                    'status': outcome.value,
+                    'model': metrics.get('model'),
+                    'metrics': {
+                        key: value for key, value in metrics.items()
+                        if key != 'provider_usages'
+                    },
+                })
+                writer.write_full({
+                    'run_id': translator.run.run_id,
+                    'status': outcome.value,
+                    'observation': {
+                        'model_events': translator.model_events,
+                        'metrics': metrics,
+                    },
+                })
+            except Exception as exc:
+                LOG.warning(f'[ChatServer] local performance observation failed: {exc}')
         yield log_and_emit_frame(terminal_frame, cost, query, conversation.session_id, tag='RUN_FINISH')
 
         databases_str = json.dumps(retrieval.databases, ensure_ascii=False) if retrieval.databases else []

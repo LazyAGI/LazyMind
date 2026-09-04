@@ -489,6 +489,8 @@ components:
                     type: string
                 model_route:
                     $ref: '#/components/schemas/ChatModelRoute'
+                performance_metrics:
+                    $ref: '#/components/schemas/RunPerformanceMetrics'
                 prompt_questions:
                     items:
                         type: string
@@ -931,6 +933,8 @@ components:
                     type: array
                 model_route:
                     $ref: '#/components/schemas/ChatModelRoute'
+                performance_metrics:
+                    $ref: '#/components/schemas/RunPerformanceMetrics'
                 query:
                     type: string
                 reason:
@@ -3539,6 +3543,71 @@ components:
                 - feedback_count
                 - feedback_rate
                 - user_count
+            type: object
+        RunPerformanceMetrics:
+            properties:
+                cache_hit_rate:
+                    format: double
+                    type: number
+                cached_tokens:
+                    format: int64
+                    type: integer
+                cache_input_tokens:
+                    format: int64
+                    type: integer
+                context_input_tokens:
+                    format: int64
+                    type: integer
+                context_ratio:
+                    format: double
+                    type: number
+                input_tokens:
+                    format: int64
+                    type: integer
+                max_input_tokens:
+                    format: int64
+                    type: integer
+                model:
+                    type: string
+                model_ms:
+                    format: int64
+                    type: integer
+                model_steps:
+                    type: integer
+                output_tokens:
+                    format: int64
+                    type: integer
+                reasoning_tokens:
+                    format: int64
+                    type: integer
+                schema_version:
+                    type: integer
+                steps:
+                    type: integer
+                tok_s:
+                    format: double
+                    type: number
+                tool_ms:
+                    format: int64
+                    type: integer
+                tool_steps:
+                    type: integer
+                total_tokens:
+                    format: int64
+                    type: integer
+                ttft_ms:
+                    format: int64
+                    type: integer
+                turn_seq:
+                    type: integer
+                wall_ms:
+                    format: int64
+                    type: integer
+            required:
+                - schema_version
+                - steps
+                - model_steps
+                - tool_steps
             type: object
         RunTerminal:
             properties:
@@ -7844,6 +7913,8 @@ components:
                     type: boolean
                 mcp_enabled:
                     type: boolean
+                performance_stats_enabled:
+                    type: boolean
                 schedules_enabled:
                     type: boolean
                 sensitive_word_filter_enabled:
@@ -7864,6 +7935,7 @@ components:
                 - developer_mode_active
                 - document_parsing_enabled
                 - mcp_enabled
+                - performance_stats_enabled
                 - schedules_enabled
                 - sensitive_word_filter_enabled
                 - skills_enabled
@@ -7883,6 +7955,8 @@ components:
                 document_parsing_enabled:
                     type: boolean
                 mcp_enabled:
+                    type: boolean
+                performance_stats_enabled:
                     type: boolean
                 schedules_enabled:
                     type: boolean

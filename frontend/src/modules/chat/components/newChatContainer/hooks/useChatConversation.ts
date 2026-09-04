@@ -946,13 +946,19 @@ export function useChatConversation({
       assistantMessage = {
         ...assistantMessage,
         ...result,
+        seq: result.seq ?? assistantMessage.seq,
         // Raw upstream/provider diagnostics must remain server-side only.
         errMessage: undefined,
         error_message: undefined,
         provider_raw_error: undefined,
         model_retry: scheduledRetry ??
           (clearsRetry ? undefined : assistantMessage.model_retry),
-        run_terminal: finalRunTerminal || assistantMessage.run_terminal,
+        run_terminal:
+          (runtimeEventType === "run_finished" && runtimeEventData
+            ? runtimeEventData
+            : undefined) ||
+          finalRunTerminal ||
+          assistantMessage.run_terminal,
         run_status: finalRunTerminal?.status || assistantMessage.run_status,
         id: result.messageId,
         raw_delta: mergedRawDelta,

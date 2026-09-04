@@ -354,4 +354,5 @@ def test_episode_hit_does_not_increment_when_model_stream_fails(monkeypatch) -> 
         'partial_output': False,
         'code': 'runtime_failure',
     }
+    assert payloads[-1]['data']['performance_metrics']['schema_version'] == 1
     assert store.hit_calls == []

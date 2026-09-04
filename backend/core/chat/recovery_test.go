@@ -26,6 +26,7 @@ func recoveryTestDB(t *testing.T) *orm.DB {
 		&orm.ConversationArchiveFolder{},
 		&orm.ChatHistory{},
 		&orm.MultiAnswersChatHistory{},
+		&orm.ChatRunPerformance{},
 		&orm.ConversationArtifact{},
 		&orm.ConversationIdleEvent{},
 		&orm.EpisodeMemory{},
@@ -351,6 +352,14 @@ func TestConversationArchiveFolderDeleteToUnfiledAndOwnership(t *testing.T) {
 func TestConversationTrashRestoreAndPurgeLinksTaskCenterLifecycle(t *testing.T) {
 	db := recoveryTestDB(t)
 	seedRecoveryConversation(t, db, "conv-task", true)
+	performanceNow := time.Now().UTC()
+	if err := db.Create(&orm.ChatRunPerformance{
+		RunID: "run-performance", ConversationID: "conv-task", HistoryID: "history-performance", UserID: "u1",
+		SchemaVersion: 1, Status: "completed", ObservedAt: performanceNow,
+		CreatedAt: performanceNow, UpdatedAt: performanceNow,
+	}).Error; err != nil {
+		t.Fatalf("seed chat performance: %v", err)
+	}
 	now := time.Now().UTC()
 	if err := db.Create(&orm.TaskCenterTask{
 		ID: "task-1", UserID: "u1", ConversationID: "conv-task", TaskType: "background_chat",
@@ -382,6 +391,11 @@ func TestConversationTrashRestoreAndPurgeLinksTaskCenterLifecycle(t *testing.T) 
 	if err := db.First(&restoredTask, "id = ?", "task-1").Error; err != nil || restoredTask.ArchivedAt != nil || restoredTask.ArchivedReason != "" || restoredTask.Status != "canceled" {
 		t.Fatalf("restore did not revive canceled task history: task=%#v err=%v", restoredTask, err)
 	}
+	var performanceCount int64
+	db.Model(&orm.ChatRunPerformance{}).Where("run_id = ?", "run-performance").Count(&performanceCount)
+	if performanceCount != 1 {
+		t.Fatalf("trash/restore removed performance history: count=%d", performanceCount)
+	}
 
 	archiveRec, archiveReq := recoveryRequest(http.MethodPost, "/conversations/conv-task:archive", nil, map[string]string{"name": "conv-task:archive"})
 	ArchiveConversation(archiveRec, archiveReq)
@@ -409,8 +423,9 @@ func TestConversationTrashRestoreAndPurgeLinksTaskCenterLifecycle(t *testing.T) 
 	var conversationCount, taskCount int64
 	db.Model(&orm.Conversation{}).Where("id = ?", "conv-task").Count(&conversationCount)
 	db.Model(&orm.TaskCenterTask{}).Where("id = ?", "task-1").Count(&taskCount)
-	if conversationCount != 0 || taskCount != 1 {
-		t.Fatalf("counts after purge: conversation=%d task=%d", conversationCount, taskCount)
+	db.Model(&orm.ChatRunPerformance{}).Where("run_id = ?", "run-performance").Count(&performanceCount)
+	if conversationCount != 0 || taskCount != 1 || performanceCount != 0 {
+		t.Fatalf("counts after purge: conversation=%d task=%d performance=%d", conversationCount, taskCount, performanceCount)
 	}
 	if err := db.First(&task, "id = ?", "task-1").Error; err != nil || task.ArchivedAt == nil || task.ArchivedReason != "conversation_purged" {
 		t.Fatalf("purge did not preserve hidden task audit: task=%#v err=%v", task, err)

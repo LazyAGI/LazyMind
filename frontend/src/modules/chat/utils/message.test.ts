@@ -286,6 +286,34 @@ describe("buildChatMessageListFromHistory", () => {
     expect(assistantMessage.ask_answered).toBe(true);
   });
 
+  it("restores performance metrics onto the assistant message", () => {
+    const metrics = {
+      schema_version: 1,
+      steps: 2,
+      wall_ms: 1000,
+      model_ms: 800,
+      input_tokens: 100,
+      output_tokens: 20,
+      cached_tokens: 40,
+    };
+    const list = buildChatMessageListFromHistory([
+      {
+        id: "h1",
+        seq: 3,
+        query: "q1",
+        result: "a1",
+        run_id: "run-1",
+        performance_metrics: metrics,
+      },
+    ] as any);
+
+    expect(list[1]).toMatchObject({
+      role: RoleTypes.ASSISTANT,
+      run_id: "run-1",
+      performance_metrics: metrics,
+    });
+  });
+
   it("restores archived failure attempts before the latest answer", () => {
     const failedTerminal = {
       status: "failed",

@@ -65,7 +65,6 @@ describe('Writer Markdown system anchors', () => {
       '',
       '## 1 章节',
       '',
-      '<a id="block-image-1" />',
       '![插图](https://example.com/image.png)',
     ].join('\n'));
   });

@@ -165,10 +165,18 @@ func TestResumeSingleAnswerUsesReplaceWhenOnlyFullStatusExists(t *testing.T) {
 }
 
 func TestDatabaseFullResumeUsesReplaceMode(t *testing.T) {
-	db := orm.MigrateTestDB(t, &orm.ChatHistory{})
+	db := orm.MigrateTestDB(t, &orm.ChatHistory{}, &orm.ChatRunPerformance{})
 	if err := db.Create(&orm.ChatHistory{
 		ID: "history-db-resume", ConversationID: "conversation-db-resume", Seq: 1, Result: "full result",
+		RunID: "run-db-resume", RunStatus: "completed",
 	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := persistRunPerformance(context.Background(), db.DB, runPerformanceRecord{
+		RunID: "run-db-resume", ConversationID: "conversation-db-resume", HistoryID: "history-db-resume",
+		UserID: "user-db-resume", Status: "completed",
+		Metrics: &RunPerformanceMetrics{SchemaVersion: 1, Steps: 1, ModelSteps: 1, ModelMS: metricInt64(250)},
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -177,10 +185,10 @@ func TestDatabaseFullResumeUsesReplaceMode(t *testing.T) {
 		resume func(*httptest.ResponseRecorder)
 	}{
 		{name: "without state store", resume: func(recorder *httptest.ResponseRecorder) {
-			resumeFromDBOnly(db.DB, "conversation-db-resume", recorder, recorder)
+			resumeFromDBOnly(context.Background(), db.DB, "user-db-resume", "conversation-db-resume", recorder, recorder)
 		}},
 		{name: "completed", resume: func(recorder *httptest.ResponseRecorder) {
-			resumeCompletedFromDB(db.DB, "conversation-db-resume", recorder, recorder)
+			resumeCompletedFromDB(context.Background(), db.DB, "user-db-resume", "conversation-db-resume", recorder, recorder)
 		}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -189,6 +197,10 @@ func TestDatabaseFullResumeUsesReplaceMode(t *testing.T) {
 			chunks := decodeChatChunkSSE(t, recorder.Body.String())
 			if len(chunks) == 0 || chunks[0].Delta != "full result" || chunks[0].DeltaMode != ChatDeltaModeReplace {
 				t.Fatalf("first resumed chunk = %#v, want full result with replace mode", chunks)
+			}
+			if len(chunks) < 2 || chunks[1].PerformanceMetrics == nil || chunks[1].PerformanceMetrics.ModelMS == nil ||
+				*chunks[1].PerformanceMetrics.ModelMS != 250 {
+				t.Fatalf("terminal resume did not restore performance metrics: %#v", chunks)
 			}
 		})
 	}

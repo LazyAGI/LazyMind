@@ -309,6 +309,7 @@ export function buildChatMessageListFromHistory(
         ? ChatConversationsResponseFinishReasonEnum.FinishReasonUnspecified
         : ChatConversationsResponseFinishReasonEnum.FinishReasonStop,
       history_id: record.id,
+      seq: record.seq,
       sources: record.sources,
       feed_back: record.feed_back,
       thinking_time_s: record.thinking_time_s,
@@ -318,6 +319,7 @@ export function buildChatMessageListFromHistory(
       run_id: record.run_id,
       run_status: isActuallyGenerating ? undefined : record.run_status,
       run_terminal: isActuallyGenerating ? undefined : record.run_terminal,
+      performance_metrics: (record as any).performance_metrics,
       model_route: record.model_route,
     };
 

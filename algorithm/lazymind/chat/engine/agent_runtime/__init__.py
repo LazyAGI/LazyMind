@@ -1,6 +1,6 @@
 """Structured prompt composition and shared agent execution for LazyMind."""
 
-from .executor import AgentExecutor
+from .executor import AgentExecutor, AgentInvocation
 from .attachments import AttachmentRef, normalize_attachments, render_attachment_content
 from .models import (
     AgentExecutionOptions,
@@ -25,6 +25,7 @@ from .context_estimator import (
 __all__ = [
     'AgentExecutionOptions',
     'AgentExecutor',
+    'AgentInvocation',
     'AgentRole',
     'AgentRunPlan',
     'PromptBuilder',

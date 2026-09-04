@@ -39,7 +39,7 @@ _PROGRESS_PRIORITY = 2
 _PROGRESS_CAPACITY = 256
 
 
-class _TerminationFailure(ExceptionGroup):
+class _TerminationFailure(ExceptionGroup):  # noqa: F821
     pass
 
 
@@ -330,7 +330,7 @@ class RunSession:
                 try:
                     await self._flush_failure()
                 except Exception as persistence_error:
-                    reply_error = ExceptionGroup(
+                    reply_error = ExceptionGroup(  # noqa: F821
                         'command and failure persistence both failed',
                         [exc, persistence_error],
                     )

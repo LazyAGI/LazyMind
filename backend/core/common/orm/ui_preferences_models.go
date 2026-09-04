@@ -14,6 +14,7 @@ type UserUIPreferences struct {
 	WorkflowsEnabled              bool      `gorm:"column:workflows_enabled;not null;default:true"`
 	MCPEnabled                    bool      `gorm:"column:mcp_enabled;not null;default:true"`
 	DocumentParsingEnabled        bool      `gorm:"column:document_parsing_enabled;not null;default:true"`
+	PerformanceStatsEnabled       bool      `gorm:"column:performance_stats_enabled;not null;default:false"`
 	CreatedAt                     time.Time `gorm:"column:created_at;not null"`
 	UpdatedAt                     time.Time `gorm:"column:updated_at;not null"`
 }
