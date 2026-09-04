@@ -77,6 +77,23 @@ def _deduplicate_tools(tools: list[Any]) -> list[Any]:
     return result
 
 
+class AgentInvocation:
+    """LazyLLM-traceable boundary for one in-process agent invocation."""
+
+    __span_name__ = 'invoke_agent'
+    _type = 'agent'
+    _agent_name = 'ChatAgent'
+
+    def __init__(self, executor: 'AgentExecutor', agent: Any, plan: AgentRunPlan):
+        self._executor = executor
+        self._agent = agent
+        self._plan = plan
+        self._agent_name = 'ChatAgent'
+
+    def __call__(self):
+        return self._executor.stream_agent(self._agent, self._plan)
+
+
 class AgentExecutor:
     """Create and drive ReactAgent instances from a fully assembled run plan."""
 

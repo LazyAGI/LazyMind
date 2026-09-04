@@ -54,6 +54,7 @@ from lazymind.chat.service.component import (
 from lazymind.chat.engine.agent_runtime import (
     AgentExecutionOptions,
     AgentExecutor,
+    AgentInvocation,
     AgentRole,
     AgentRunPlan,
     UserCancelledError,
@@ -1697,7 +1698,13 @@ async def _handle_chat_impl(
 
         try:
             async with rag_sem:
-                initial_agent_stream = executor.stream_agent(react_agent, plan)
+                initial_agent_stream = lazyllm.enable_trace(
+                    AgentInvocation(executor, react_agent, plan),
+                    trace_id=conversation.session_id,
+                    session_id=conversation.session_id,
+                    request_tags=['handle_chat', 'agent'],
+                    debug_capture_payload=False,
+                )
                 guarded_agent_stream = guard_workflow_agent_stream(
                     initial_agent_stream,
                     all_tools=all_tools,
