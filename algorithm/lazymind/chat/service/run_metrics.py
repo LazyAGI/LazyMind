@@ -175,7 +175,10 @@ class RunMetricsTracker:
         model_name = model_name_from_llm_config(llm_config)
         if model_name:
             metrics['model'] = model_name
-        for key in ('input_tokens', 'output_tokens', 'total_tokens', 'cached_tokens', 'reasoning_tokens'):
+        for key in (
+            'input_tokens', 'output_tokens', 'total_tokens', 'cached_tokens',
+            'cache_input_tokens', 'reasoning_tokens',
+        ):
             if key in provider:
                 metrics[key] = provider[key]
         if frames:
@@ -188,6 +191,8 @@ class RunMetricsTracker:
             metrics['tok_s'] = tok_s
         if window:
             metrics['max_input_tokens'] = window
+        if last_input is not None:
+            metrics['context_input_tokens'] = last_input
         if context_ratio is not None:
             metrics['context_ratio'] = context_ratio
         return metrics

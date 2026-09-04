@@ -82,6 +82,45 @@ func TestStreamChatUpstreamBuffersTerminalUntilEOF(t *testing.T) {
 	}
 }
 
+func TestStreamChatUpstreamPreservesPerformanceMetricsOnTerminal(t *testing.T) {
+	server := streamServer(t, "run_test", algorithmFrame(t, map[string]any{
+		"runtime_event": map[string]any{
+			"schema_version": 1,
+			"event_id":       "evt_performance",
+			"run_id":         "run_test",
+			"type":           RuntimeEventRunFinished,
+			"data": map[string]any{
+				"status": "completed", "reason": "normal", "partial_output": true,
+			},
+		},
+		"performance_metrics": map[string]any{
+			"schema_version": 1,
+			"turn_seq":       3,
+			"model_steps":    2,
+			"tool_steps":     1,
+			"wall_ms":        1200,
+			"model_ms":       900,
+			"tool_ms":        200,
+			"input_tokens":   100,
+			"output_tokens":  20,
+			"cached_tokens":  40,
+		},
+	}))
+	defer server.Close()
+
+	chunks := collectUpstream(t, server.URL, "run_test")
+	if len(chunks) != 1 || chunks[0].PerformanceMetrics == nil {
+		t.Fatalf("performance metrics were dropped: %#v", chunks)
+	}
+	metrics := chunks[0].PerformanceMetrics
+	if metrics.SchemaVersion != 1 || metrics.TurnSeq == nil || *metrics.TurnSeq != 3 {
+		t.Fatalf("unexpected performance envelope: %#v", metrics)
+	}
+	if metrics.ModelMS == nil || *metrics.ModelMS != 900 || metrics.CachedTokens == nil || *metrics.CachedTokens != 40 {
+		t.Fatalf("unexpected performance facts: %#v", metrics)
+	}
+}
+
 func TestStreamChatUpstreamPreservesTerminalOnAbnormalEOF(t *testing.T) {
 	frame := runFinishedFrame(t, "run_test") + "\n"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

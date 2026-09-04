@@ -40,7 +40,7 @@ Add a real HTTP stream fixture with a matching `run_finished` event and literal 
 ```go
 "performance_metrics": map[string]any{
     "schema_version": 1, "turn_seq": 3,
-    "model_steps": 2, "tool_steps": 1,
+    "steps": 3, "model_steps": 2, "tool_steps": 1,
     "wall_ms": 1200, "model_ms": 900, "tool_ms": 200,
     "input_tokens": 100, "output_tokens": 20, "cached_tokens": 40,
 }
@@ -62,6 +62,7 @@ Define pointer-valued optional facts so missing values remain unknown:
 type RunPerformanceMetrics struct {
     SchemaVersion int     `json:"schema_version"`
     TurnSeq       *int    `json:"turn_seq,omitempty"`
+    Steps         int     `json:"steps"`
     ModelSteps    int     `json:"model_steps"`
     ToolSteps     int     `json:"tool_steps"`
     WallMS        *int64  `json:"wall_ms,omitempty"`
@@ -73,6 +74,7 @@ type RunPerformanceMetrics struct {
     OutputTokens  *int64  `json:"output_tokens,omitempty"`
     TotalTokens   *int64  `json:"total_tokens,omitempty"`
     CachedTokens  *int64  `json:"cached_tokens,omitempty"`
+    CacheInputTokens *int64 `json:"cache_input_tokens,omitempty"`
     ReasoningTokens *int64 `json:"reasoning_tokens,omitempty"`
     MaxInputTokens *int64 `json:"max_input_tokens,omitempty"`
     ContextInputTokens *int64 `json:"context_input_tokens,omitempty"`

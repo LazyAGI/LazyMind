@@ -25,16 +25,16 @@ Algorithm emits `performance_metrics` beside `runtime_event`, but Core's `LazyCh
 
 - Identity and ownership: `run_id` primary key, `conversation_id`, `history_id`, `user_id`, `turn_seq`.
 - Version and lifecycle: `schema_version`, `status`, `observed_at`, `created_at`, `updated_at`.
-- Model and work counts: `model`, `model_steps`, `tool_steps`.
+- Model and work counts: `model`, `steps`, `model_steps`, `tool_steps`. `steps` is stored independently so future step types are not lost when restoring history.
 - Measured durations: nullable `wall_ms`, `model_ms`, `tool_ms`, `ttft_ms`.
-- Token facts: nullable `input_tokens`, `output_tokens`, `total_tokens`, `cached_tokens`, `reasoning_tokens`.
+- Token facts: nullable `input_tokens`, `output_tokens`, `total_tokens`, `cached_tokens`, `cache_input_tokens`, `reasoning_tokens`. `cache_input_tokens` is the input-token denominator from only calls where cache usage was observable.
 - Context facts: nullable `max_input_tokens`, `context_input_tokens`.
 
 Only finite, non-negative values are accepted. Unknown values remain SQL `NULL`; they are not converted to zero. The row is upserted by `run_id`, and a stale run must not overwrite the current history owner's metrics.
 
 The following are derived at read time and are not authoritative database columns:
 
-- `cache_hit_rate = cached_tokens / input_tokens` when both values are observable and the denominator is positive.
+- `cache_hit_rate = cached_tokens / cache_input_tokens` when both values are observable and the denominator is positive. Older rows without that denominator may fall back to `input_tokens` in the frontend only.
 - `tok_s = output_tokens / model duration` when both values are observable and model duration is positive.
 - `context_ratio = context_input_tokens / max_input_tokens` when both values are observable and the denominator is positive.
 
@@ -47,7 +47,7 @@ The API may return those derived values for frontend compatibility. Provider usa
 3. Core validates that the runtime event belongs to the expected `run_id`, validates the metric schema and numeric bounds, and retains the summary only for an accepted authoritative terminal.
 4. Core forwards the same normalized summary in the terminal SSE chunk.
 5. Core finalizes chat history and upserts the matching performance row. The existing run ownership guard prevents late or retried runs from replacing a newer run.
-6. Conversation history loading queries performance rows for the page's run IDs in one batch and attaches `performance_metrics` to the corresponding history items. This includes single-answer and multi-answer histories.
+6. Conversation history loading queries performance rows for the page's run IDs in one batch and attaches `performance_metrics` to the corresponding history items. This includes single-answer and multi-answer histories, plus DB-only completed-run resume when transient state has expired.
 7. The frontend continues folding metrics from message objects; live and restored messages therefore use the same rendering path.
 
 No extra frontend request is required for refresh restoration.

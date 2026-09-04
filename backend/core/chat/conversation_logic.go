@@ -1839,9 +1839,10 @@ func elapsedThinkingSeconds(elapsed time.Duration) int64 {
 }
 
 type runtimeChunkDecision struct {
-	Event    *ChatRuntimeEvent
-	Terminal *RunTerminal
-	Stop     bool
+	Event              *ChatRuntimeEvent
+	Terminal           *RunTerminal
+	PerformanceMetrics *RunPerformanceMetrics
+	Stop               bool
 }
 
 // consumeRuntimeChunk centralizes the ordering contract shared by single,
@@ -1856,7 +1857,7 @@ func consumeRuntimeChunk(chunk UpstreamStreamChunk, runID string, partialOutput 
 	if chunk.RuntimeEvent == nil {
 		return runtimeChunkDecision{}, false
 	}
-	decision := runtimeChunkDecision{Event: chunk.RuntimeEvent}
+	decision := runtimeChunkDecision{Event: chunk.RuntimeEvent, PerformanceMetrics: chunk.PerformanceMetrics}
 	if chunk.RuntimeEvent.Type == RuntimeEventRunFinished {
 		terminal, err := chunk.RuntimeEvent.Terminal()
 		if err != nil {
@@ -1924,13 +1925,15 @@ func publishRuntimeChunk(
 	convID, historyID string,
 	seq int,
 	event *ChatRuntimeEvent,
+	performanceMetrics *RunPerformanceMetrics,
 	writeClient bool,
 ) {
 	chunk := &ChatChunkResponse{
-		ConversationID: convID,
-		Seq:            int32(seq),
-		HistoryID:      historyID,
-		RuntimeEvent:   event,
+		ConversationID:     convID,
+		Seq:                int32(seq),
+		HistoryID:          historyID,
+		RuntimeEvent:       event,
+		PerformanceMetrics: performanceMetrics,
 	}
 	if writeClient && reqCtx.Err() == nil {
 		writeSSEChunk(w, flusher, chunk)
@@ -2025,6 +2028,7 @@ func streamSingleAnswer(
 	var thinkingActive bool
 	var sawToolResultPreview bool
 	var runTerminal *RunTerminal
+	var performanceMetrics *RunPerformanceMetrics
 	progressRowCreated := target.IsRegeneration && target.Existing != nil
 	persistThinkingProgress := func() {
 		partialResult := fullResult
@@ -2086,8 +2090,12 @@ func streamSingleAnswer(
 			)
 			if decision.Terminal != nil {
 				runTerminal = decision.Terminal
+				performanceMetrics = decision.PerformanceMetrics
 			}
-			publishRuntimeChunk(reqCtx, chatCtx, w, flusher, stateStore, convID, historyID, seq, decision.Event, true)
+			publishRuntimeChunk(
+				reqCtx, chatCtx, w, flusher, stateStore, convID, historyID, seq,
+				decision.Event, decision.PerformanceMetrics, true,
+			)
 			if decision.Stop {
 				break
 			}
@@ -2422,6 +2430,16 @@ func streamSingleAnswer(
 		db.Model(&orm.Conversation{}).Where("id = ?", convID).UpdateColumn("chat_times", gorm.Expr("chat_times + ?", 1))
 	}
 	if persisted && !externalFinalized {
+		if performanceMetrics != nil {
+			if err := persistRunPerformance(chatCtx, db, runPerformanceRecord{
+				RunID: runID, ConversationID: convID, HistoryID: historyID,
+				UserID: userIDFromChatRequestBody(reqBody), Status: runTerminal.Status,
+				ObservedAt: now, Metrics: performanceMetrics,
+			}); err != nil {
+				log.Logger.Warn().Err(err).Str("conversation_id", convID).Str("history_id", historyID).
+					Str("run_id", runID).Msg("failed to persist chat run performance")
+			}
+		}
 		recordConversationIdleActivity(context.Background(), db, stateStore, convID, userIDFromChatRequestBody(reqBody), historyID, query, stripToolTags(fullText), now)
 	}
 }
@@ -2552,6 +2570,7 @@ func streamDualAnswer(
 	var primaryPendingThink, secondaryPendingThink string
 	var primaryToolCallTurns, secondaryToolCallTurns int
 	var primaryTerminal, secondaryTerminal *RunTerminal
+	var primaryPerformance, secondaryPerformance *RunPerformanceMetrics
 	thinkStart := time.Now()
 	var primaryThinkingDurationS, secondaryThinkingDurationS int64
 	primaryProgressCreated, secondaryProgressCreated := false, false
@@ -2665,8 +2684,12 @@ func streamDualAnswer(
 				)
 				if decision.Terminal != nil {
 					primaryTerminal = decision.Terminal
+					primaryPerformance = decision.PerformanceMetrics
 				}
-				publishRuntimeChunk(reqCtx, chatCtx, w, flusher, stateStore, convID, historyID, seq, decision.Event, true)
+				publishRuntimeChunk(
+					reqCtx, chatCtx, w, flusher, stateStore, convID, historyID, seq,
+					decision.Event, decision.PerformanceMetrics, true,
+				)
 				if decision.Stop {
 					primaryDone = true
 					primaryCh = nil
@@ -2698,8 +2721,12 @@ func streamDualAnswer(
 				)
 				if decision.Terminal != nil {
 					secondaryTerminal = decision.Terminal
+					secondaryPerformance = decision.PerformanceMetrics
 				}
-				publishRuntimeChunk(reqCtx, chatCtx, w, flusher, stateStore, convID, secondaryHistoryID, seq, decision.Event, true)
+				publishRuntimeChunk(
+					reqCtx, chatCtx, w, flusher, stateStore, convID, secondaryHistoryID, seq,
+					decision.Event, decision.PerformanceMetrics, true,
+				)
 				if decision.Stop {
 					secondaryDone = true
 					secondaryCh = nil
@@ -2734,8 +2761,12 @@ func streamDualAnswer(
 							)
 							if decision.Terminal != nil {
 								primaryTerminal = decision.Terminal
+								primaryPerformance = decision.PerformanceMetrics
 							}
-							publishRuntimeChunk(reqCtx, bg, w, flusher, stateStore, convID, historyID, seq, decision.Event, false)
+							publishRuntimeChunk(
+								reqCtx, bg, w, flusher, stateStore, convID, historyID, seq,
+								decision.Event, decision.PerformanceMetrics, false,
+							)
 							if decision.Stop {
 								primaryDone = true
 								primaryCh = nil
@@ -2791,8 +2822,12 @@ func streamDualAnswer(
 							)
 							if decision.Terminal != nil {
 								secondaryTerminal = decision.Terminal
+								secondaryPerformance = decision.PerformanceMetrics
 							}
-							publishRuntimeChunk(reqCtx, bg, w, flusher, stateStore, convID, secondaryHistoryID, seq, decision.Event, false)
+							publishRuntimeChunk(
+								reqCtx, bg, w, flusher, stateStore, convID, secondaryHistoryID, seq,
+								decision.Event, decision.PerformanceMetrics, false,
+							)
 							if decision.Stop {
 								secondaryDone = true
 								secondaryCh = nil
@@ -2922,9 +2957,29 @@ dualPersist:
 	}
 	if primaryPersisted {
 		persistSuccessfulChatModel(chatCtx, db, userIDFromChatRequestBody(reqBody), convID, primaryRunID, reqBody, primaryTerminal)
+		if primaryPerformance != nil {
+			if err := persistRunPerformance(chatCtx, db, runPerformanceRecord{
+				RunID: primaryRunID, ConversationID: convID, HistoryID: historyID,
+				UserID: userIDFromChatRequestBody(reqBody), Status: primaryTerminal.Status,
+				ObservedAt: now, Metrics: primaryPerformance,
+			}); err != nil {
+				log.Logger.Warn().Err(err).Str("conversation_id", convID).Str("history_id", historyID).
+					Str("run_id", primaryRunID).Msg("failed to persist primary chat run performance")
+			}
+		}
 	}
 	if secondaryPersisted {
 		persistSuccessfulChatModel(chatCtx, db, userIDFromChatRequestBody(reqBody), convID, secondaryRunID, reqBody, secondaryTerminal)
+		if secondaryPerformance != nil {
+			if err := persistRunPerformance(chatCtx, db, runPerformanceRecord{
+				RunID: secondaryRunID, ConversationID: convID, HistoryID: secondaryHistoryID,
+				UserID: userIDFromChatRequestBody(reqBody), Status: secondaryTerminal.Status,
+				ObservedAt: now, Metrics: secondaryPerformance,
+			}); err != nil {
+				log.Logger.Warn().Err(err).Str("conversation_id", convID).Str("history_id", secondaryHistoryID).
+					Str("run_id", secondaryRunID).Msg("failed to persist secondary chat run performance")
+			}
+		}
 	}
 	if stateStore != nil {
 		statusCtx, cancel := terminalWriteContext(chatCtx)

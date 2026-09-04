@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import ChatMessageContent from "./ChatMessageContent";
 
 vi.mock("react-i18next", () => ({
+  initReactI18next: { type: "3rdParty", init: vi.fn() },
   useTranslation: () => ({
     t: (key: string, values?: Record<string, unknown>) =>
       key === "chat.modelRetrying"

@@ -319,6 +319,7 @@ export function buildChatMessageListFromHistory(
       run_id: record.run_id,
       run_status: isActuallyGenerating ? undefined : record.run_status,
       run_terminal: isActuallyGenerating ? undefined : record.run_terminal,
+      performance_metrics: (record as any).performance_metrics,
       model_route: record.model_route,
     };
 

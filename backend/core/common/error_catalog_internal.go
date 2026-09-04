@@ -601,6 +601,19 @@ func init() {
 	} {
 		registerAdditionalErrorAlias(source, "algorithm chat stream failed", http.StatusBadGateway, 2002077)
 	}
+	for _, source := range []string{
+		"performance metrics are nil",
+		"unsupported performance metrics schema_version",
+		"performance step counts must be non-negative",
+		"performance turn_seq must be non-negative",
+		"performance numeric facts must be non-negative",
+		"performance derived values must be finite and non-negative",
+		"performance database is nil",
+		"performance ownership fields are required",
+		"performance run ownership does not match existing row",
+	} {
+		registerAdditionalErrorAlias(source, "Internal server error", http.StatusInternalServerError, 2000000)
+	}
 	registerAdditionalError("task_lease_lost", http.StatusConflict, 2002365)
 	registerAdditionalError("maintenance_busy", http.StatusServiceUnavailable, 2002366)
 	registerAdditionalError("preference_organizing", http.StatusConflict, 2002361)

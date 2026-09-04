@@ -65,7 +65,7 @@ describe("SkillInstalledView organize rules", () => {
 
   it("requires at least two selected internal skills before submit", () => {
     const { rerender } = renderView(["internal-one"]);
-    expect(screen.getByRole("button", { name: "start organize" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /start organize$/ })).toBeDisabled();
 
     rerender(
       <SkillInstalledView
@@ -94,6 +94,6 @@ describe("SkillInstalledView organize rules", () => {
         listContentRef={createRef<HTMLDivElement>()}
       />,
     );
-    expect(screen.getByRole("button", { name: "start organize" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /start organize$/ })).toBeEnabled();
   });
 });

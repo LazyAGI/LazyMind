@@ -512,6 +512,7 @@ export interface ChatChunkResponse {
     'history_id'?: string;
     'message'?: string;
     'model_route'?: ChatModelRoute;
+    'performance_metrics'?: RunPerformanceMetrics;
     'prompt_questions'?: Array<string>;
     'reasoning_content'?: string;
     'runtime_event'?: ChatRuntimeEvent;
@@ -924,6 +925,7 @@ export interface ConversationHistoryItem {
     'id'?: string;
     'input'?: Array<object>;
     'model_route'?: ChatModelRoute;
+    'performance_metrics'?: RunPerformanceMetrics;
     'query'?: string;
     'reason'?: string;
     'reasoning_content'?: string;
@@ -2528,6 +2530,29 @@ export interface RouterTrafficSummary {
     'feedback_count': number;
     'feedback_rate': number;
     'user_count': number;
+}
+export interface RunPerformanceMetrics {
+    'cache_hit_rate'?: number;
+    'cached_tokens'?: number;
+    'cache_input_tokens'?: number;
+    'context_input_tokens'?: number;
+    'context_ratio'?: number;
+    'input_tokens'?: number;
+    'max_input_tokens'?: number;
+    'model'?: string;
+    'model_ms'?: number;
+    'model_steps': number;
+    'output_tokens'?: number;
+    'reasoning_tokens'?: number;
+    'schema_version': number;
+    'steps': number;
+    'tok_s'?: number;
+    'tool_ms'?: number;
+    'tool_steps': number;
+    'total_tokens'?: number;
+    'ttft_ms'?: number;
+    'turn_seq'?: number;
+    'wall_ms'?: number;
 }
 export interface RunTerminal {
     'code'?: string;

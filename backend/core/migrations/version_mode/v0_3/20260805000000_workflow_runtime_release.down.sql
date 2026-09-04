@@ -424,3 +424,9 @@ ALTER TABLE resource_update_tasks DROP COLUMN lane_priority;
 ALTER TABLE resource_update_tasks DROP COLUMN run_id;
 ALTER TABLE resource_update_tasks DROP COLUMN lane_key;
 ALTER TABLE resource_update_tasks DROP COLUMN result_json;
+
+-- +migrate Dialect postgres
+DROP TABLE IF EXISTS chat_run_performance;
+
+-- +migrate Dialect sqlite
+DROP TABLE IF EXISTS chat_run_performance;

@@ -231,7 +231,9 @@ def test_snapshot_sums_provider_usages_and_uses_last_call_for_context():
     assert metrics['input_tokens'] == 150
     assert metrics['output_tokens'] == 30
     assert metrics['cached_tokens'] == 80
+    assert metrics['cache_input_tokens'] == 150
     assert metrics['cache_hit_rate'] == 80 / 150
+    assert metrics['context_input_tokens'] == 50
     assert metrics['context_ratio'] == 0.05
     assert len(metrics['provider_usages']) == 2
 

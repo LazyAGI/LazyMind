@@ -132,6 +132,62 @@ func TestEphemeralConversationIsHiddenUntilPromoted(t *testing.T) {
 	}
 }
 
+func TestSetChatHistoryRemovesRejectedAnswerPerformance(t *testing.T) {
+	database := newPromptTestDB(t)
+	db := database.DB
+	store.Init(db, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+
+	now := time.Now().UTC()
+	if err := db.Create(&orm.Conversation{
+		ID: "conv-multi", DisplayName: "Multi answer",
+		BaseModel: orm.BaseModel{
+			CreateUserID: "u1", CreateUserName: "User 1", CreatedAt: now, UpdatedAt: now,
+		},
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, history := range []orm.MultiAnswersChatHistory{
+		{ID: "history-selected", Seq: 1, ConversationID: "conv-multi", RunID: "run-selected"},
+		{ID: "history-rejected", Seq: 1, ConversationID: "conv-multi", RunID: "run-rejected"},
+	} {
+		if err := db.Create(&history).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, metric := range []orm.ChatRunPerformance{
+		{RunID: "run-selected", ConversationID: "conv-multi", HistoryID: "history-selected", UserID: "u1", SchemaVersion: 1, Status: "completed", ObservedAt: now, CreatedAt: now, UpdatedAt: now},
+		{RunID: "run-rejected", ConversationID: "conv-multi", HistoryID: "history-rejected", UserID: "u1", SchemaVersion: 1, Status: "completed", ObservedAt: now, CreatedAt: now, UpdatedAt: now},
+	} {
+		if err := db.Create(&metric).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/core/conversations:setChatHistory",
+		strings.NewReader(`{"set_history_id":"history-selected","deleted_history_id":"history-rejected"}`),
+	)
+	req.Header.Set("X-User-Id", "u1")
+	rec := httptest.NewRecorder()
+	SetChatHistory(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("set chat history status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	var selectedCount, rejectedCount int64
+	if err := db.Model(&orm.ChatRunPerformance{}).Where("run_id = ?", "run-selected").Count(&selectedCount).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&orm.ChatRunPerformance{}).Where("run_id = ?", "run-rejected").Count(&rejectedCount).Error; err != nil {
+		t.Fatal(err)
+	}
+	if selectedCount != 1 || rejectedCount != 0 {
+		t.Fatalf("performance lifecycle mismatch: selected=%d rejected=%d", selectedCount, rejectedCount)
+	}
+}
+
 func TestConversationPinningOrdersHistoryWithoutChangingUpdatedAt(t *testing.T) {
 	database := newPromptTestDB(t)
 	db := database.DB
@@ -1321,7 +1377,7 @@ func TestGetConversationDetailFiltersMissingDatasets(t *testing.T) {
 }
 
 func TestGetConversationHistoryReturnsStoredMultimodalInput(t *testing.T) {
-	db := orm.MigrateTestDB(t, &orm.Conversation{}, &orm.ChatHistory{})
+	db := orm.MigrateTestDB(t, &orm.Conversation{}, &orm.ChatHistory{}, &orm.ChatRunPerformance{})
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 
@@ -1357,11 +1413,20 @@ func TestGetConversationHistoryReturnsStoredMultimodalInput(t *testing.T) {
 		RawContent:     "记住这个是王牌超",
 		Content:        "记住这个是王牌超",
 		Result:         "好的",
+		RunID:          "run-history-performance",
 		ToolCallTurns:  8,
 		Ext:            ext,
 		TimeMixin:      orm.TimeMixin{CreateTime: now, UpdateTime: now},
 	}).Error; err != nil {
 		t.Fatalf("create history: %v", err)
+	}
+	if err := persistRunPerformance(context.Background(), db.DB, runPerformanceRecord{
+		RunID: "run-history-performance", ConversationID: "conv-1", HistoryID: "h_1", UserID: "u1",
+		Status: "completed", Metrics: &RunPerformanceMetrics{
+			SchemaVersion: 1, ModelSteps: 1, ModelMS: metricInt64(500), OutputTokens: metricInt64(10),
+		},
+	}); err != nil {
+		t.Fatalf("create performance history: %v", err)
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/core/conversations/conv-1:history", nil)
@@ -1377,8 +1442,9 @@ func TestGetConversationHistoryReturnsStoredMultimodalInput(t *testing.T) {
 	var resp struct {
 		ConversationID string `json:"conversation_id"`
 		History        []struct {
-			Input         []map[string]any `json:"input"`
-			ToolCallTurns int              `json:"tool_call_turns"`
+			Input              []map[string]any      `json:"input"`
+			ToolCallTurns      int                   `json:"tool_call_turns"`
+			PerformanceMetrics RunPerformanceMetrics `json:"performance_metrics"`
 		} `json:"history"`
 		TotalSize int `json:"total_size"`
 	}
@@ -1402,6 +1468,10 @@ func TestGetConversationHistoryReturnsStoredMultimodalInput(t *testing.T) {
 	}
 	if got := resp.History[0].ToolCallTurns; got != 8 {
 		t.Fatalf("expected tool_call_turns 8, got %d", got)
+	}
+	if resp.History[0].PerformanceMetrics.ModelMS == nil || *resp.History[0].PerformanceMetrics.ModelMS != 500 ||
+		resp.History[0].PerformanceMetrics.TokS == nil || *resp.History[0].PerformanceMetrics.TokS != 20 {
+		t.Fatalf("expected restored performance metrics, got %#v", resp.History[0].PerformanceMetrics)
 	}
 }
 

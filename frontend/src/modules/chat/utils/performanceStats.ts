@@ -14,6 +14,7 @@ export interface RunPerformanceMetrics {
   output_tokens?: number;
   total_tokens?: number;
   cached_tokens?: number;
+  cache_input_tokens?: number;
   reasoning_tokens?: number;
   prompt_tokens?: number;
   completion_tokens?: number;
@@ -23,6 +24,7 @@ export interface RunPerformanceMetrics {
   ttft_ms?: number;
   tok_s?: number;
   max_input_tokens?: number;
+  context_input_tokens?: number;
   context_ratio?: number;
 }
 
@@ -56,6 +58,9 @@ type PerformanceMessage = {
 };
 
 function asFiniteNumber(value: unknown): number | undefined {
+  if (value == null || (typeof value === "string" && value.trim() === "")) {
+    return undefined;
+  }
   const parsed = typeof value === "number" ? value : Number(value);
   return Number.isFinite(parsed) ? parsed : undefined;
 }
@@ -72,10 +77,16 @@ function cachedTokens(metrics: RunPerformanceMetrics): number | undefined {
   return asFiniteNumber(metrics.cached_tokens) ?? asFiniteNumber(metrics.prompt_cache_hit_tokens);
 }
 
+function cacheInputTokens(metrics: RunPerformanceMetrics): number | undefined {
+  return asFiniteNumber(metrics.cache_input_tokens) ?? inputTokens(metrics);
+}
+
 function weightedCacheHitRate(rows: RunPerformanceMetrics[]): number | undefined {
-  const observable = rows.filter((row) => cachedTokens(row) != null);
+  const observable = rows.filter(
+    (row) => cachedTokens(row) != null && cacheInputTokens(row) != null,
+  );
   const cached = observable.reduce((total, row) => total + (cachedTokens(row) ?? 0), 0);
-  const input = observable.reduce((total, row) => total + (inputTokens(row) ?? 0), 0);
+  const input = observable.reduce((total, row) => total + (cacheInputTokens(row) ?? 0), 0);
   if (observable.length && input > 0) return cached / input;
   const last = rows[rows.length - 1];
   return last ? asFiniteNumber(last.cache_hit_rate) : undefined;
@@ -109,9 +120,15 @@ export function foldSessionPerformanceStats(
   const metricsRows = rows.map((row) => row.metrics);
   const sum = (pick: (row: RunPerformanceMetrics) => number | undefined) =>
     metricsRows.reduce((total, row) => total + (pick(row) ?? 0), 0);
+  const sumObserved = (pick: (row: RunPerformanceMetrics) => number | undefined) => {
+    const values = metricsRows
+      .map(pick)
+      .filter((value): value is number => value != null);
+    return values.length ? values.reduce((total, value) => total + value, 0) : undefined;
+  };
   const last = metricsRows[metricsRows.length - 1];
-  const promptTokens = sum(inputTokens);
-  const completionTokens = sum(outputTokens);
+  const promptTokens = sumObserved(inputTokens);
+  const completionTokens = sumObserved(outputTokens);
   const modelDurations = metricsRows.map((row) => asFiniteNumber(row.model_ms));
   const modelMs = modelDurations.every((value) => value != null)
     ? modelDurations.reduce((total, value) => total + (value ?? 0), 0)
@@ -139,12 +156,12 @@ export function foldSessionPerformanceStats(
     wallMs: sum((row) => asFiniteNumber(row.wall_ms)),
     modelMs,
     toolMs,
-    promptTokens: promptTokens || undefined,
-    completionTokens: completionTokens || undefined,
+    promptTokens,
+    completionTokens,
     sessionCacheHitRate: weightedCacheHitRate(metricsRows),
     turnCacheHitRate: weightedCacheHitRate(turnRows),
     ttftMs: ttftValues.length ? ttftValues.reduce((a, b) => a + b, 0) / ttftValues.length : undefined,
-    tokS: completionTokens && modelMs != null && modelMs > 0
+    tokS: completionTokens != null && modelMs != null && modelMs > 0
       ? completionTokens / (modelMs / 1000)
       : undefined,
     contextRatio: asFiniteNumber(latestContext?.context_ratio),
