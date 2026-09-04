@@ -123,7 +123,11 @@ class CitationResultMiddleware:
         results = list(batch.results)
         state = _citation_state()
         if not state:
-            return ToolExecutionBatch(results=results, records=batch.records)
+            return ToolExecutionBatch(
+                results=results,
+                records=batch.records,
+                duration_ms=batch.duration_ms,
+            )
         agentic_config = lazyllm.globals.get('agentic_config') or {}
         collect_only = agentic_config.get('citation_mode') == 'collect_only'
         processed = [
@@ -136,7 +140,11 @@ class CitationResultMiddleware:
             replace(record, result=result)
             for record, result in zip(batch.records, processed)
         )
-        return ToolExecutionBatch(results=processed, records=records)
+        return ToolExecutionBatch(
+            results=processed,
+            records=records,
+            duration_ms=batch.duration_ms,
+        )
 
     def execute_with_records(self, tools: Any, verbose: bool = False,
                              allowed_tool_names: set[str] | None = None,
@@ -155,4 +163,4 @@ class CitationResultMiddleware:
             tools,
             verbose=verbose,
             allowed_tool_names=allowed_tool_names,
-        ).results
+        ).stamped_results()
