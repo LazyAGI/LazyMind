@@ -42,6 +42,7 @@ import {
   isDeveloperModeActive,
   syncDeveloperModeFromServer,
 } from "@/utils/developerMode";
+import { syncSensitiveWordFilterFromServer } from "@/utils/sensitiveWordFilter";
 import RecordList, {
   type RecordListImperativeProps,
 } from "@/modules/chat/components/RecordList";
@@ -244,7 +245,10 @@ export default function MainLayout() {
 
     try {
       await fetchCurrentUser();
-      const devActive = await syncDeveloperModeFromServer();
+      const [devActive] = await Promise.all([
+        syncDeveloperModeFromServer(),
+        syncSensitiveWordFilterFromServer(),
+      ]);
       setDeveloperActive(devActive);
     } catch (error) {
       console.error("Failed to refresh current user:", error);

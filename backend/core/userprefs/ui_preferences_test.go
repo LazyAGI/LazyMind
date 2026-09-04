@@ -19,6 +19,7 @@ type uiPreferencesAPITestResponse struct {
 	Data    struct {
 		ChatPreferenceNoticeDismissed bool   `json:"chat_preference_notice_dismissed"`
 		DeveloperModeActive           bool   `json:"developer_mode_active"`
+		SensitiveWordFilterEnabled    bool   `json:"sensitive_word_filter_enabled"`
 		AcceptedUserAgreementVersion  string `json:"accepted_user_agreement_version"`
 		TaskCenterEnabled             bool   `json:"task_center_enabled"`
 		SchedulesEnabled              bool   `json:"schedules_enabled"`
@@ -62,7 +63,7 @@ func TestGetUIPreferencesDefaultsAndDerivedPreferenceStatus(t *testing.T) {
 		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
 	resp := decodeUIPreferencesResponse(t, rec)
-	if resp.Data.ChatPreferenceNoticeDismissed || resp.Data.DeveloperModeActive || resp.Data.UserPreferenceConfigured ||
+	if resp.Data.ChatPreferenceNoticeDismissed || resp.Data.DeveloperModeActive || resp.Data.SensitiveWordFilterEnabled || resp.Data.UserPreferenceConfigured ||
 		!resp.Data.TaskCenterEnabled || !resp.Data.SchedulesEnabled || !resp.Data.SkillsEnabled || !resp.Data.WorkflowsEnabled || !resp.Data.MCPEnabled ||
 		!resp.Data.DocumentParsingEnabled {
 		t.Fatalf("expected legacy flags false and feature controls true, got %#v", resp.Data)
@@ -481,6 +482,21 @@ func TestPatchUIPreferencesPartiallyUpdatesProvidedFields(t *testing.T) {
 	thirdResp := decodeUIPreferencesResponse(t, thirdRec)
 	if !thirdResp.Data.ChatPreferenceNoticeDismissed || thirdResp.Data.DeveloperModeActive {
 		t.Fatalf("expected false value to update without clearing dismissed, got %#v", thirdResp.Data)
+	}
+
+	fourthReq := httptest.NewRequest(http.MethodPatch, "/api/core/user/ui-preferences", strings.NewReader(`{"sensitive_word_filter_enabled":true}`))
+	fourthReq.Header.Set("Content-Type", "application/json")
+	fourthReq.Header.Set("X-User-Id", "u1")
+	fourthRec := httptest.NewRecorder()
+
+	PatchUIPreferences(fourthRec, fourthReq)
+
+	if fourthRec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", fourthRec.Code, fourthRec.Body.String())
+	}
+	fourthResp := decodeUIPreferencesResponse(t, fourthRec)
+	if !fourthResp.Data.SensitiveWordFilterEnabled || fourthResp.Data.DeveloperModeActive {
+		t.Fatalf("expected sensitive-word filter enabled without changing developer mode, got %#v", fourthResp.Data)
 	}
 }
 

@@ -3396,6 +3396,7 @@ export interface UserUIPreferencesOpenAPIResponse {
     'chat_preference_notice_dismissed': boolean;
     'developer_mode_active': boolean;
     'document_parsing_enabled': boolean;
+    'sensitive_word_filter_enabled': boolean;
     'mcp_enabled': boolean;
     'schedules_enabled': boolean;
     'skills_enabled': boolean;
@@ -3409,6 +3410,7 @@ export interface UserUIPreferencesPatchOpenAPIRequest {
     'chat_preference_notice_dismissed'?: boolean;
     'developer_mode_active'?: boolean;
     'document_parsing_enabled'?: boolean;
+    'sensitive_word_filter_enabled'?: boolean;
     'mcp_enabled'?: boolean;
     'schedules_enabled'?: boolean;
     'skills_enabled'?: boolean;
