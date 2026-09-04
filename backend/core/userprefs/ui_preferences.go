@@ -198,13 +198,14 @@ func LoadUserUIPreferences(ctx context.Context, db *gorm.DB, userID string) (orm
 		Take(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return orm.UserUIPreferences{
-			UserID:                 strings.TrimSpace(userID),
-			TaskCenterEnabled:      true,
-			SchedulesEnabled:       true,
-			SkillsEnabled:          true,
-			WorkflowsEnabled:       true,
-			MCPEnabled:             true,
-			DocumentParsingEnabled: true,
+			UserID:                  strings.TrimSpace(userID),
+			TaskCenterEnabled:       true,
+			SchedulesEnabled:        true,
+			SkillsEnabled:           true,
+			WorkflowsEnabled:        true,
+			MCPEnabled:              true,
+			DocumentParsingEnabled:  true,
+			PerformanceStatsEnabled: false,
 		}, nil
 	}
 	return row, err
@@ -218,15 +219,16 @@ func UpsertUserUIPreferences(ctx context.Context, db *gorm.DB, userID string, re
 	err := db.WithContext(ctx).Where("user_id = ?", userID).Take(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		row = orm.UserUIPreferences{
-			UserID:                 userID,
-			TaskCenterEnabled:      true,
-			SchedulesEnabled:       true,
-			SkillsEnabled:          true,
-			WorkflowsEnabled:       true,
-			MCPEnabled:             true,
-			DocumentParsingEnabled: true,
-			CreatedAt:              now,
-			UpdatedAt:              now,
+			UserID:                  userID,
+			TaskCenterEnabled:       true,
+			SchedulesEnabled:        true,
+			SkillsEnabled:           true,
+			WorkflowsEnabled:        true,
+			MCPEnabled:              true,
+			DocumentParsingEnabled:  true,
+			PerformanceStatsEnabled: false,
+			CreatedAt:               now,
+			UpdatedAt:               now,
 		}
 		if req.ChatPreferenceNoticeDismissed != nil {
 			row.ChatPreferenceNoticeDismissed = *req.ChatPreferenceNoticeDismissed

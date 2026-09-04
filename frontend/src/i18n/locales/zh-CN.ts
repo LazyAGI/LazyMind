@@ -1663,7 +1663,6 @@ const zhCN = {
       turnCache: "本轮缓存",
       input: "输入",
       output: "输出",
-      context: "上下文",
     },
     contextUsageViewReport: "查看报告",
     contextUsageFull: "已使用 {{percent}}%",

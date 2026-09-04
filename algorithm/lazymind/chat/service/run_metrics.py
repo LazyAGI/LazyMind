@@ -73,6 +73,7 @@ class RunMetricsTracker:
         self._measured_model_steps = 0
         self._tool_batches = 0
         self._measured_tool_batches = 0
+        self._tool_batch_started_at: Optional[float] = None
         self.model_steps = 0
         self.tool_steps = 0
         self.model_ms = 0.0
@@ -87,9 +88,13 @@ class RunMetricsTracker:
         if count > 0:
             self.tool_steps += count
             self._tool_batches += 1
+            self._tool_batch_started_at = self._clock()
 
     def on_tool_results(self, duration_ms: Optional[float] = None) -> None:
         measured = _nonneg_float(duration_ms)
+        if measured is None and self._tool_batch_started_at is not None:
+            measured = max(0.0, (self._clock() - self._tool_batch_started_at) * 1000.0)
+        self._tool_batch_started_at = None
         if measured is not None:
             self.tool_ms += measured
             self._measured_tool_batches += 1

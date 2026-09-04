@@ -65,6 +65,25 @@ def test_anthropic_cache_read_schema():
     assert adapted['output_tokens'] == 8
 
 
+def test_provider_usages_unwrap_nested_provider_usage_envelopes():
+    adapted = adapt_provider_usage({
+        'provider_usages': [
+            {
+                'prompt_tokens': 24000,
+                'completion_tokens': 431,
+                'provider_usage': {
+                    'prompt_tokens': 24000,
+                    'completion_tokens': 431,
+                    'prompt_cache_hit_tokens': 19200,
+                    'prompt_cache_miss_tokens': 4800,
+                },
+            },
+        ],
+    })
+    assert adapted['cached_tokens'] == 19200
+    assert adapted['input_tokens'] == 24000
+
+
 def test_provider_usages_are_summed_across_calls():
     adapted = adapt_provider_usage({
         'prompt_tokens': 150,

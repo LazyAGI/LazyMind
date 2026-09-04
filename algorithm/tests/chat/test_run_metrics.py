@@ -159,12 +159,42 @@ def test_missing_model_duration_is_unknown_instead_of_zero():
     assert 'tok_s' not in metrics
 
 
-def test_missing_tool_duration_is_unknown_instead_of_zero():
-    tracker = RunMetricsTracker(clock=lambda: 0.0)
-    tracker.on_tool_calls(1)
-    tracker.on_tool_results()
+def test_missing_tool_duration_uses_elapsed_between_calls_and_results():
+    class Clock:
+        def __init__(self) -> None:
+            self.t = 0.0
 
-    assert 'tool_ms' not in tracker.snapshot()
+        def __call__(self) -> float:
+            return self.t
+
+        def add(self, seconds: float) -> None:
+            self.t += seconds
+
+    clock = Clock()
+    tracker = RunMetricsTracker(clock=clock)
+    tracker.on_tool_calls(1)
+    clock.add(1.5)
+    tracker.on_tool_results()
+    assert tracker.snapshot()['tool_ms'] == 1500
+
+
+def test_explicit_tool_duration_is_preferred_over_elapsed():
+    class Clock:
+        def __init__(self) -> None:
+            self.t = 0.0
+
+        def __call__(self) -> float:
+            return self.t
+
+        def add(self, seconds: float) -> None:
+            self.t += seconds
+
+    clock = Clock()
+    tracker = RunMetricsTracker(clock=clock)
+    tracker.on_tool_calls(1)
+    clock.add(1.5)
+    tracker.on_tool_results(duration_ms=400)
+    assert tracker.snapshot()['tool_ms'] == 400
 
 
 def test_wall_duration_can_start_before_tracker_construction():
@@ -262,6 +292,36 @@ def test_model_call_event_usage_is_preferred_over_global_usage_map():
     )['performance_metrics']
     assert metrics['input_tokens'] == 10
     assert metrics['output_tokens'] == 2
+
+
+def test_model_call_event_usage_unwraps_extract_usage_envelope():
+    translator = AgentEventFrameTranslator(query='q', run_id='run-1', clock=lambda: 0.0)
+    translator.feed({
+        'tag': 'runtime_event',
+        'runtime_event': {
+            'schema_version': 1,
+            'event_id': 'e1',
+            'type': 'model_call_finished',
+            'data': {
+                'model_call_id': 'call-1',
+                'kind': 'finish',
+                'usage': {
+                    'prompt_tokens': 24000,
+                    'completion_tokens': 431,
+                    'provider_usage': {
+                        'prompt_tokens': 24000,
+                        'completion_tokens': 431,
+                        'prompt_cache_hit_tokens': 19200,
+                        'prompt_cache_miss_tokens': 4800,
+                    },
+                },
+            },
+        },
+    })
+    metrics = translator.finish_run(outcome=RunOutcome.SUCCEEDED)['performance_metrics']
+    assert metrics['cached_tokens'] == 19200
+    assert metrics['cache_hit_rate'] == 19200 / 24000
+    assert translator.last_metrics['provider_usages'][0]['prompt_cache_hit_tokens'] == 19200
 
 
 def test_model_call_event_usage_preserves_provider_cache_details():

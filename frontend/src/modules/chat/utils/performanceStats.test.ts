@@ -43,6 +43,7 @@ describe("foldSessionPerformanceStats", () => {
     expect(stats?.sessionCacheHitRate).toBeCloseTo(80 / 150);
     expect(stats?.turnCacheHitRate).toBe(0);
     expect(stats?.model).toBe("deepseek-chat");
+    expect(stats?.toolMs).toBe(500);
   });
 
   it("averages multiple metrics in the current turn", () => {

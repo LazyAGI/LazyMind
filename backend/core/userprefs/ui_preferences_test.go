@@ -65,9 +65,10 @@ func TestGetUIPreferencesDefaultsAndDerivedPreferenceStatus(t *testing.T) {
 	}
 	resp := decodeUIPreferencesResponse(t, rec)
 	if resp.Data.ChatPreferenceNoticeDismissed || resp.Data.DeveloperModeActive || resp.Data.SensitiveWordFilterEnabled || resp.Data.UserPreferenceConfigured ||
+		resp.Data.PerformanceStatsEnabled ||
 		!resp.Data.TaskCenterEnabled || !resp.Data.SchedulesEnabled || !resp.Data.SkillsEnabled || !resp.Data.WorkflowsEnabled || !resp.Data.MCPEnabled ||
 		!resp.Data.DocumentParsingEnabled {
-		t.Fatalf("expected legacy flags false and feature controls true, got %#v", resp.Data)
+		t.Fatalf("expected legacy flags false, performance stats off, and feature controls true, got %#v", resp.Data)
 	}
 
 	seedUserPreferenceFile(t, db, "u1", `preferences:
@@ -468,6 +469,9 @@ func TestPatchUIPreferencesPartiallyUpdatesProvidedFields(t *testing.T) {
 	secondResp := decodeUIPreferencesResponse(t, secondRec)
 	if !secondResp.Data.ChatPreferenceNoticeDismissed || !secondResp.Data.DeveloperModeActive {
 		t.Fatalf("expected second patch to keep dismissed and set developer active, got %#v", secondResp.Data)
+	}
+	if secondResp.Data.PerformanceStatsEnabled {
+		t.Fatal("enabling developer mode must not turn on performance stats")
 	}
 
 	thirdReq := httptest.NewRequest(http.MethodPatch, "/api/core/user/ui-preferences", strings.NewReader(`{"developer_mode_active":false}`))

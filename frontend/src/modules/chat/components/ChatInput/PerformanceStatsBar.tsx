@@ -48,7 +48,6 @@ export default function PerformanceStatsBar({
     { key: "turnCache", label: t("chat.perf.turnCache"), value: formatPercent(stats?.turnCacheHitRate) },
     { key: "in", label: t("chat.perf.input"), value: formatTokens(stats?.promptTokens) },
     { key: "out", label: t("chat.perf.output"), value: formatTokens(stats?.completionTokens) },
-    { key: "ctx", label: t("chat.perf.context"), value: formatPercent(stats?.contextRatio) },
   ];
   const summary = segments.map((item) => item.value === "-" ? `${item.label} -` : `${item.label} ${item.value}`).join(" · ");
   const content = (

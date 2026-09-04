@@ -41,7 +41,6 @@ export interface SessionPerformanceStats {
   turnCacheHitRate?: number;
   ttftMs?: number;
   tokS?: number;
-  contextRatio?: number;
 }
 
 type MetricsRow = {
@@ -133,14 +132,10 @@ export function foldSessionPerformanceStats(
   const modelMs = modelDurations.every((value) => value != null)
     ? modelDurations.reduce((total, value) => total + (value ?? 0), 0)
     : undefined;
-  const toolDurations = metricsRows.map((row) => asFiniteNumber(row.tool_ms));
-  const toolMs = toolDurations.every((value) => value != null)
-    ? toolDurations.reduce((total, value) => total + (value ?? 0), 0)
-    : undefined;
+  const toolMs = sumObserved((row) => asFiniteNumber(row.tool_ms));
   const ttftValues = metricsRows
     .map((row) => asFiniteNumber(row.ttft_ms))
     .filter((value): value is number => value != null);
-  const latestContext = [...metricsRows].reverse().find((row) => asFiniteNumber(row.context_ratio) != null);
   const currentTurnSeq = rows.reduce<number | undefined>((latest, row) => {
     if (row.seq == null) return latest;
     return latest == null || row.seq > latest ? row.seq : latest;
@@ -164,6 +159,5 @@ export function foldSessionPerformanceStats(
     tokS: completionTokens != null && modelMs != null && modelMs > 0
       ? completionTokens / (modelMs / 1000)
       : undefined,
-    contextRatio: asFiniteNumber(latestContext?.context_ratio),
   };
 }

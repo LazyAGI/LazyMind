@@ -17,12 +17,19 @@ def _has(mapping: dict[str, Any], key: str) -> bool:
     return key in mapping
 
 
+def _usage_frame_payload(frame: dict[str, Any]) -> dict[str, Any]:
+    nested = frame.get('provider_usage')
+    if isinstance(nested, dict):
+        return nested
+    return frame
+
+
 def usage_frames(usage: Optional[dict[str, Any]]) -> list[dict[str, Any]]:
     if not isinstance(usage, dict):
         return []
     listed = usage.get('provider_usages')
     if isinstance(listed, list) and any(isinstance(item, dict) for item in listed):
-        return [item for item in listed if isinstance(item, dict)]
+        return [_usage_frame_payload(item) for item in listed if isinstance(item, dict)]
     nested = usage.get('provider_usage')
     if isinstance(nested, dict):
         return [nested]

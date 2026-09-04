@@ -1708,7 +1708,6 @@ const enUS = {
       turnCache: "Turn cache",
       input: "In",
       output: "Out",
-      context: "Context",
     },
     contextUsageViewReport: "View Report",
     contextUsageFull: "{{percent}}% Full",
