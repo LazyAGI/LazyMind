@@ -1,6 +1,10 @@
 from lazymind.chat.runtime_events import RunOutcome
 from lazymind.chat.service.component.event_translator import AgentEventFrameTranslator
-from lazymind.chat.service.run_metrics import RunMetricsTracker, snapshot_provider_usage
+from lazymind.chat.service.run_metrics import (
+    RunMetricsTracker,
+    choose_usage_record,
+    snapshot_provider_usage,
+)
 
 
 def test_snapshot_provider_usage_ignores_negative_tokens():
@@ -75,7 +79,7 @@ def test_dsh_steps_count_model_and_each_tool():
     assert 'provider_usages' not in metrics
 
 
-def test_measured_tool_duration_is_not_attributed_to_model():
+def test_model_ttft_and_duration_exclude_preprocessing_queue_and_tool_time():
     class Clock:
         def __init__(self) -> None:
             self.t = 0.0
@@ -88,7 +92,34 @@ def test_measured_tool_duration_is_not_attributed_to_model():
 
     clock = Clock()
     translator = AgentEventFrameTranslator(query='q', run_id='run-1', clock=clock)
-    clock.add(2.0)
+    clock.add(5.0)
+    started_frames = translator.feed({
+        'tag': 'runtime_event',
+        'runtime_event': {
+            'schema_version': 1,
+            'event_id': 'started-1',
+            'type': 'model_call_started',
+            'data': {'model_call_id': 'call-1'},
+        },
+    })
+    assert started_frames == []
+    clock.add(0.4)
+    translator.feed({'tag': 'think', 'delta': 'working'})
+    clock.add(0.6)
+    translator.feed({
+        'tag': 'runtime_event',
+        'runtime_event': {
+            'schema_version': 1,
+            'event_id': 'finished-1',
+            'type': 'model_call_finished',
+            'data': {
+                'model_call_id': 'call-1',
+                'kind': 'finish',
+                'finish': 'tool_calls',
+                'duration_ms': 1000,
+            },
+        },
+    })
     translator.feed({
         'tag': 'tool_calls',
         'tool_calls': [{'id': '1', 'function': {'name': 'grep', 'arguments': '{}'}}],
@@ -99,10 +130,62 @@ def test_measured_tool_duration_is_not_attributed_to_model():
         'duration_ms': 1500,
         'tool_results': [{'id': '1'}],
     })
-    clock.add(1.0)
+    clock.add(2.0)
     metrics = translator.finish_run(outcome=RunOutcome.SUCCEEDED)['performance_metrics']
     assert metrics['tool_ms'] == 1500
-    assert metrics['model_ms'] == 9500
+    assert metrics['model_ms'] == 1000
+    assert metrics['ttft_ms'] == 400
+    assert metrics['wall_ms'] == 16000
+
+
+def test_model_duration_sums_finished_events_and_drives_tok_s():
+    tracker = RunMetricsTracker(clock=lambda: 0.0)
+    tracker.on_model_call_finished(duration_ms=250)
+    tracker.on_model_call_finished(duration_ms=750)
+
+    metrics = tracker.snapshot(usage={'prompt_tokens': 10, 'completion_tokens': 20})
+
+    assert metrics['model_ms'] == 1000
+    assert metrics['tok_s'] == 20
+
+
+def test_missing_model_duration_is_unknown_instead_of_zero():
+    tracker = RunMetricsTracker(clock=lambda: 0.0)
+    tracker.on_model_call_finished()
+
+    metrics = tracker.snapshot(usage={'prompt_tokens': 10, 'completion_tokens': 20})
+
+    assert 'model_ms' not in metrics
+    assert 'tok_s' not in metrics
+
+
+def test_missing_tool_duration_is_unknown_instead_of_zero():
+    tracker = RunMetricsTracker(clock=lambda: 0.0)
+    tracker.on_tool_calls(1)
+    tracker.on_tool_results()
+
+    assert 'tool_ms' not in tracker.snapshot()
+
+
+def test_wall_duration_can_start_before_tracker_construction():
+    tracker = RunMetricsTracker(clock=lambda: 5.0, started_at=2.0)
+    assert tracker.snapshot()['wall_ms'] == 3000
+
+
+def test_usage_map_does_not_guess_between_multiple_modules():
+    records = {
+        'chat': {'prompt_tokens': 10, 'completion_tokens': 2},
+        'summary': {'prompt_tokens': 100, 'completion_tokens': 5},
+    }
+
+    assert choose_usage_record(usage_map=records) == {}
+    assert choose_usage_record(usage_map=records, module_id='missing') == {}
+    assert choose_usage_record(usage_map=records, module_id='chat') == records['chat']
+
+
+def test_usage_map_uses_single_unambiguous_record_without_module_id():
+    record = {'prompt_tokens': 10, 'completion_tokens': 2}
+    assert choose_usage_record(usage_map={'only': record}) == record
 
 
 def test_missing_provider_cache_omits_hit_rate():

@@ -1654,6 +1654,7 @@ const zhCN = {
       model: "模型",
       turns: "轮次",
       steps: "步骤",
+      wall: "端到端",
       llm: "LLM",
       tool: "工具",
       ttft: "TTFT",

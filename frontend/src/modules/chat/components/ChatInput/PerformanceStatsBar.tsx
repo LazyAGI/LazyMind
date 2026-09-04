@@ -39,6 +39,7 @@ export default function PerformanceStatsBar({
     { key: "model", label: t("chat.perf.model"), value: stats?.model || "-" },
     { key: "turns", label: t("chat.perf.turns"), value: stats ? String(stats.turns) : "-" },
     { key: "steps", label: t("chat.perf.steps"), value: stats ? String(stats.steps) : "-" },
+    { key: "wall", label: t("chat.perf.wall"), value: formatMs(stats?.wallMs) },
     { key: "llm", label: t("chat.perf.llm"), value: formatMs(stats?.modelMs) },
     { key: "tool", label: t("chat.perf.tool"), value: formatMs(stats?.toolMs) },
     { key: "ttft", label: t("chat.perf.ttft"), value: formatMs(stats?.ttftMs) },

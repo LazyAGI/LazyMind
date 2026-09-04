@@ -9,6 +9,7 @@ describe("foldSessionPerformanceStats", () => {
         seq: 1,
         performance_metrics: {
             steps: 2,
+            wall_ms: 1800,
             model_ms: 1000,
             tool_ms: 500,
             input_tokens: 100,
@@ -24,6 +25,7 @@ describe("foldSessionPerformanceStats", () => {
         seq: 2,
         performance_metrics: {
             steps: 3,
+            wall_ms: 2700,
             model_ms: 2000,
             input_tokens: 50,
             output_tokens: 20,
@@ -34,6 +36,7 @@ describe("foldSessionPerformanceStats", () => {
     ]);
     expect(stats?.turns).toBe(2);
     expect(stats?.steps).toBe(5);
+    expect(stats?.wallMs).toBe(4500);
     expect(stats?.promptTokens).toBe(150);
     expect(stats?.sessionCacheHitRate).toBeCloseTo(80 / 150);
     expect(stats?.turnCacheHitRate).toBe(0);

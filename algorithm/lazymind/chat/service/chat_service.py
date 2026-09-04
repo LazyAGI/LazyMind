@@ -891,6 +891,7 @@ async def _handle_chat_impl(
         f'[files_map_keys={sorted(message.files.keys()) if isinstance(message.files, dict) else None}]'
     )
     start_time = time.time()
+    metrics_started_at = time.monotonic()
     priority = runtime.priority or LAZYMIND_LLM_PRIORITY
     query, cited_message_context = _normalize_cite_message_query_for_agent(message.query)
     user_input, user_cited_context = _normalize_cite_message_query_for_agent(
@@ -976,7 +977,11 @@ async def _handle_chat_impl(
         raw_history,
         compact_workflow_receipts=compact_rewind_history,
     )
-    translator = AgentEventFrameTranslator(query=query, run_id=run_id)
+    translator = AgentEventFrameTranslator(
+        query=query,
+        run_id=run_id,
+        started_at=metrics_started_at,
+    )
 
     agentic_config = {
         'run_id': run_id,
@@ -1768,7 +1773,7 @@ async def _handle_chat_impl(
         terminal_frame = translator.finish_run(
             outcome=outcome,
             usage_map=lazyllm.globals.get('usage') or {},
-            module_id=getattr(llm, '_module_id', None),
+            module_id=getattr(executor.runtime_llm(react_agent), '_module_id', None),
             llm_config=runtime.llm_config or {},
             turn_seq=message.current_turn_seq,
             max_input_tokens=resolve_max_input_tokens(runtime.llm_config or {}),

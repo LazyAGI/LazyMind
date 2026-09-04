@@ -68,7 +68,14 @@ def _iter_scanned_text_frames(
 
 
 class AgentEventFrameTranslator:
-    def __init__(self, *, query: str, run_id: str = '', clock=None) -> None:
+    def __init__(
+        self,
+        *,
+        query: str,
+        run_id: str = '',
+        clock=None,
+        started_at: Optional[float] = None,
+    ) -> None:
         self.query = query
         self.run = RunAccumulator(run_id=run_id or 'unbound-run')
         self.citation_state: dict[str, Any] = {}
@@ -78,7 +85,7 @@ class AgentEventFrameTranslator:
         self.streamed_text = False
         self.ask_pending_emitted = False
         self.tool_call_turns = 0
-        self.metrics = RunMetricsTracker(clock or time.monotonic)
+        self.metrics = RunMetricsTracker(clock or time.monotonic, started_at=started_at)
         self.model_events: list[dict[str, Any]] = []
         self.last_metrics: Optional[dict[str, Any]] = None
         self.text_scanner, self.citation_plugin = build_stream_citation_scanner(self.citation_state)
@@ -94,14 +101,21 @@ class AgentEventFrameTranslator:
             value['run_id'] = self.run.run_id
             if value.get('schema_version') != 1:
                 raise ValueError('unsupported runtime_event schema_version')
-            if value.get('type') not in {'model_retry_scheduled', 'model_call_finished'}:
+            if value.get('type') not in {
+                'model_call_started', 'model_retry_scheduled', 'model_call_finished',
+            }:
                 raise ValueError('unexpected upstream runtime_event type')
             if not isinstance(value.get('data'), dict):
                 raise ValueError('runtime_event data must be an object')
             self.run.observe_model_event(value)
             self.model_events.append(value)
-            if value.get('type') == 'model_call_finished':
-                self.metrics.on_model_call_finished()
+            if value.get('type') == 'model_call_started':
+                self.metrics.on_model_call_started()
+                # This event only establishes the local timing boundary; the
+                # browser has no rendering or recovery behavior for it.
+                return frames
+            elif value.get('type') == 'model_call_finished':
+                self.metrics.on_model_call_finished(duration_ms=value['data'].get('duration_ms'))
             client_event = value
             if value.get('type') == 'model_call_finished':
                 client_data = dict(value['data'])

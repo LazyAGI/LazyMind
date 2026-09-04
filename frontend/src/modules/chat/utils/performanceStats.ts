@@ -6,6 +6,7 @@ export interface RunPerformanceMetrics {
   steps?: number;
   model_steps?: number;
   tool_steps?: number;
+  wall_ms?: number;
   model_ms?: number;
   tool_ms?: number;
   model?: string;
@@ -29,8 +30,9 @@ export interface SessionPerformanceStats {
   turns: number;
   steps: number;
   model?: string;
-  modelMs: number;
-  toolMs: number;
+  wallMs: number;
+  modelMs?: number;
+  toolMs?: number;
   promptTokens?: number;
   completionTokens?: number;
   sessionCacheHitRate?: number;
@@ -110,7 +112,14 @@ export function foldSessionPerformanceStats(
   const last = metricsRows[metricsRows.length - 1];
   const promptTokens = sum(inputTokens);
   const completionTokens = sum(outputTokens);
-  const modelMs = sum((row) => asFiniteNumber(row.model_ms));
+  const modelDurations = metricsRows.map((row) => asFiniteNumber(row.model_ms));
+  const modelMs = modelDurations.every((value) => value != null)
+    ? modelDurations.reduce((total, value) => total + (value ?? 0), 0)
+    : undefined;
+  const toolDurations = metricsRows.map((row) => asFiniteNumber(row.tool_ms));
+  const toolMs = toolDurations.every((value) => value != null)
+    ? toolDurations.reduce((total, value) => total + (value ?? 0), 0)
+    : undefined;
   const ttftValues = metricsRows
     .map((row) => asFiniteNumber(row.ttft_ms))
     .filter((value): value is number => value != null);
@@ -127,14 +136,17 @@ export function foldSessionPerformanceStats(
     turns: seqs.size || rows.length,
     steps: sum((row) => asFiniteNumber(row.steps)),
     model: last.model,
+    wallMs: sum((row) => asFiniteNumber(row.wall_ms)),
     modelMs,
-    toolMs: sum((row) => asFiniteNumber(row.tool_ms)),
+    toolMs,
     promptTokens: promptTokens || undefined,
     completionTokens: completionTokens || undefined,
     sessionCacheHitRate: weightedCacheHitRate(metricsRows),
     turnCacheHitRate: weightedCacheHitRate(turnRows),
     ttftMs: ttftValues.length ? ttftValues.reduce((a, b) => a + b, 0) / ttftValues.length : undefined,
-    tokS: completionTokens && modelMs > 0 ? completionTokens / (modelMs / 1000) : undefined,
+    tokS: completionTokens && modelMs != null && modelMs > 0
+      ? completionTokens / (modelMs / 1000)
+      : undefined,
     contextRatio: asFiniteNumber(latestContext?.context_ratio),
   };
 }

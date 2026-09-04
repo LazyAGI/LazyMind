@@ -176,6 +176,7 @@ class AgentExecutor:
             notice_buffer=notice_buffer,
         )
         agent._agent_lab_run_id = run_id
+        agent._runtime_llm = llm
         agent._exact_repeat_monitor = repeat_monitor
         agent._runtime_notice_buffer = notice_buffer
         # Restore lazy Toolkit activation before the streaming helper takes over.
@@ -198,6 +199,16 @@ class AgentExecutor:
             )
         agent.set_stop_tools(plan.stop_tools)
         return agent
+
+    @staticmethod
+    def runtime_llm(agent: Any) -> Any:
+        """Return the module that actually issued the agent's model calls."""
+        function_call = getattr(agent, '_fc', None)
+        function_call_llm = getattr(function_call, '_llm', None)
+        if function_call_llm is not None:
+            return function_call_llm
+        runtime_llm = getattr(agent, '_runtime_llm', None)
+        return runtime_llm if runtime_llm is not None else getattr(agent, '_llm', None)
 
     async def stream(
         self,

@@ -1699,6 +1699,7 @@ const enUS = {
       model: "Model",
       turns: "Turns",
       steps: "Steps",
+      wall: "End-to-end",
       llm: "LLM",
       tool: "Tool",
       ttft: "TTFT",

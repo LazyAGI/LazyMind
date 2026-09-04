@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from typing import Any, Callable, Optional
 
 from lazymind.chat.service.usage_adapter import (
@@ -16,6 +17,14 @@ def _nonneg_int(value: Any) -> Optional[int]:
     except (TypeError, ValueError):
         return None
     return parsed if parsed >= 0 else None
+
+
+def _nonneg_float(value: Any) -> Optional[float]:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if math.isfinite(parsed) and parsed >= 0 else None
 
 
 def model_name_from_llm_config(llm_config: Optional[dict[str, Any]]) -> Optional[str]:
@@ -40,16 +49,10 @@ def choose_usage_record(
     records = usage_map if isinstance(usage_map, dict) else {}
     if chosen is None and module_id and isinstance(records.get(module_id), dict):
         chosen = records[module_id]
-    if chosen is None:
-        best_prompt = -1
-        for record in records.values():
-            if not isinstance(record, dict):
-                continue
-            adapted = adapt_provider_usage(record)
-            prompt = adapted.get('input_tokens')
-            if isinstance(prompt, int) and prompt > best_prompt:
-                best_prompt = prompt
-                chosen = record
+    if chosen is None and not module_id:
+        candidates = [record for record in records.values() if isinstance(record, dict)]
+        if len(candidates) == 1:
+            chosen = candidates[0]
     return chosen or {}
 
 
@@ -62,12 +65,14 @@ def snapshot_provider_usage(
 
 
 class RunMetricsTracker:
-    def __init__(self, clock: Callable[[], float]) -> None:
+    def __init__(self, clock: Callable[[], float], *, started_at: Optional[float] = None) -> None:
         self._clock = clock
-        self._started = clock()
+        self._started = clock() if started_at is None else started_at
         self._first_output_at: Optional[float] = None
-        self._model_open_at: Optional[float] = self._started
-        self._tool_open_at: Optional[float] = None
+        self._first_model_started_at: Optional[float] = None
+        self._measured_model_steps = 0
+        self._tool_batches = 0
+        self._measured_tool_batches = 0
         self.model_steps = 0
         self.tool_steps = 0
         self.model_ms = 0.0
@@ -79,30 +84,26 @@ class RunMetricsTracker:
 
     def on_tool_calls(self, count: int) -> None:
         self.mark_output()
-        self._close_model()
         if count > 0:
             self.tool_steps += count
-            if self._tool_open_at is None:
-                self._tool_open_at = self._clock()
+            self._tool_batches += 1
 
     def on_tool_results(self, duration_ms: Optional[float] = None) -> None:
-        if duration_ms is not None:
-            self.tool_ms += max(0.0, float(duration_ms))
-            self._tool_open_at = None
-        else:
-            self._close_tools()
-        if self._model_open_at is None:
-            self._model_open_at = self._clock()
+        measured = _nonneg_float(duration_ms)
+        if measured is not None:
+            self.tool_ms += measured
+            self._measured_tool_batches += 1
 
-    def on_model_call_finished(self) -> None:
+    def on_model_call_started(self) -> None:
+        if self._first_model_started_at is None:
+            self._first_model_started_at = self._clock()
+
+    def on_model_call_finished(self, duration_ms: Optional[float] = None) -> None:
         self.model_steps += 1
-        if self._tool_open_at is None:
-            self._close_model()
-            self._model_open_at = self._clock()
-
-    def finish(self) -> None:
-        self._close_tools()
-        self._close_model()
+        measured = _nonneg_float(duration_ms)
+        if measured is not None:
+            self.model_ms += measured
+            self._measured_model_steps += 1
 
     def snapshot(
         self,
@@ -115,10 +116,7 @@ class RunMetricsTracker:
         max_input_tokens: Optional[int] = None,
         model_events: Optional[list[dict[str, Any]]] = None,
     ) -> dict[str, Any]:
-        self.finish()
         wall_ms = max(0.0, (self._clock() - self._started) * 1000.0)
-        if self.tool_ms > 0:
-            self.model_ms = max(0.0, wall_ms - self.tool_ms)
         event_usages = [
             data.get('usage') for event in (model_events or [])
             if isinstance(event, dict)
@@ -140,10 +138,13 @@ class RunMetricsTracker:
         elif cached is not None:
             cache_rate = 0.0
         ttft_ms = None
-        if self._first_output_at is not None:
-            ttft_ms = max(0.0, (self._first_output_at - self._started) * 1000.0)
+        if self._first_output_at is not None and self._first_model_started_at is not None:
+            ttft_ms = max(0.0, (self._first_output_at - self._first_model_started_at) * 1000.0)
+        model_duration_complete = (
+            self.model_steps > 0 and self._measured_model_steps == self.model_steps
+        )
         tok_s = None
-        if completion and self.model_ms > 0:
+        if completion and model_duration_complete and self.model_ms > 0:
             tok_s = completion / (self.model_ms / 1000.0)
         context_ratio = None
         window = _nonneg_int(max_input_tokens)
@@ -159,9 +160,14 @@ class RunMetricsTracker:
             'steps': self.model_steps + self.tool_steps,
             'model_steps': self.model_steps,
             'tool_steps': self.tool_steps,
-            'model_ms': round(self.model_ms),
-            'tool_ms': round(self.tool_ms),
+            'wall_ms': round(wall_ms),
         }
+        if model_duration_complete:
+            metrics['model_ms'] = round(self.model_ms)
+        if self.tool_steps == 0:
+            metrics['tool_ms'] = 0
+        elif self._tool_batches > 0 and self._measured_tool_batches == self._tool_batches:
+            metrics['tool_ms'] = round(self.tool_ms)
         if turn_seq is not None:
             parsed_turn = _nonneg_int(turn_seq)
             if parsed_turn is not None:
@@ -185,15 +191,3 @@ class RunMetricsTracker:
         if context_ratio is not None:
             metrics['context_ratio'] = context_ratio
         return metrics
-
-    def _close_model(self) -> None:
-        if self._model_open_at is None:
-            return
-        self.model_ms += max(0.0, (self._clock() - self._model_open_at) * 1000.0)
-        self._model_open_at = None
-
-    def _close_tools(self) -> None:
-        if self._tool_open_at is None:
-            return
-        self.tool_ms += max(0.0, (self._clock() - self._tool_open_at) * 1000.0)
-        self._tool_open_at = None

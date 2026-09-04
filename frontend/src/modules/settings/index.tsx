@@ -915,39 +915,35 @@ export default function SettingsPage() {
               aria-label={t("settingsPage.developer.sensitiveWordFilterAria")}
             />
           </div>
-        </div>
-        {developerActive ? (
-          <div className="settings-detail-group">
-            <div className="settings-detail-row">
-              <div>
-                <strong>{t("settingsPage.developer.performanceTitle")}</strong>
-                <p>{t("settingsPage.developer.performanceDesc")}</p>
-              </div>
-              <Switch
-                className="settings-ref-switch"
-                checked={performanceStatsEnabled}
-                loading={saving === "performance_stats"}
-                disabled={saving !== null}
-                onChange={async (enabled) => {
-                  setPerformanceStatsEnabled(enabled);
-                  setSaving("performance_stats");
-                  try {
-                    await patchUserUiPreferences({ performance_stats_enabled: enabled });
-                    cachePerformanceStatsEnabled(enabled);
-                    message.success(t("settingsPage.saved"));
-                  } catch {
-                    setPerformanceStatsEnabled(!enabled);
-                    cachePerformanceStatsEnabled(!enabled);
-                    message.error(t("settingsPage.saveFailed"));
-                  } finally {
-                    setSaving(null);
-                  }
-                }}
-                aria-label={t("settingsPage.developer.performanceAria")}
-              />
+          <div className="settings-detail-row">
+            <div>
+              <strong>{t("settingsPage.developer.performanceTitle")}</strong>
+              <p>{t("settingsPage.developer.performanceDesc")}</p>
             </div>
+            <Switch
+              className="settings-ref-switch"
+              checked={performanceStatsEnabled}
+              loading={saving === "performance_stats"}
+              disabled={!developerActive || saving !== null}
+              onChange={async (enabled) => {
+                setPerformanceStatsEnabled(enabled);
+                setSaving("performance_stats");
+                try {
+                  await patchUserUiPreferences({ performance_stats_enabled: enabled });
+                  cachePerformanceStatsEnabled(enabled);
+                  message.success(t("settingsPage.saved"));
+                } catch {
+                  setPerformanceStatsEnabled(!enabled);
+                  cachePerformanceStatsEnabled(!enabled);
+                  message.error(t("settingsPage.saveFailed"));
+                } finally {
+                  setSaving(null);
+                }
+              }}
+              aria-label={t("settingsPage.developer.performanceAria")}
+            />
           </div>
-        ) : null}
+        </div>
       </>;
     }
 
