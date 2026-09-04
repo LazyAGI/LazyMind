@@ -43,6 +43,8 @@ ALTER TABLE user_ui_preferences
 UPDATE user_ui_preferences SET workflows_enabled = skills_enabled;
 ALTER TABLE user_ui_preferences
     ADD COLUMN IF NOT EXISTS document_parsing_enabled BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE user_ui_preferences
+    ADD COLUMN IF NOT EXISTS sensitive_word_filter_enabled BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE sub_agent_tasks
     ADD COLUMN IF NOT EXISTS sources JSONB NOT NULL DEFAULT '[]'::jsonb;
 
@@ -65,6 +67,7 @@ ALTER TABLE user_ui_preferences ADD COLUMN mcp_enabled BOOLEAN NOT NULL DEFAULT 
 ALTER TABLE user_ui_preferences ADD COLUMN workflows_enabled BOOLEAN NOT NULL DEFAULT TRUE;
 UPDATE user_ui_preferences SET workflows_enabled = skills_enabled;
 ALTER TABLE user_ui_preferences ADD COLUMN document_parsing_enabled BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE user_ui_preferences ADD COLUMN sensitive_word_filter_enabled BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE sub_agent_tasks ADD COLUMN sources JSON NOT NULL DEFAULT '[]';
 
 -- +migrate Dialect postgres
@@ -484,6 +487,19 @@ ALTER TABLE conversations ADD COLUMN IF NOT EXISTS source_dataset_id VARCHAR(255
 ALTER TABLE conversations ADD COLUMN IF NOT EXISTS source_document_id VARCHAR(255) NOT NULL DEFAULT '';
 ALTER TABLE conversations ADD COLUMN IF NOT EXISTS source_display_name VARCHAR(255) NOT NULL DEFAULT '';
 ALTER TABLE conversations ADD COLUMN IF NOT EXISTS pinned_at TIMESTAMP NULL;
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS chat_model_mode VARCHAR(16) NULL;
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS chat_model_id VARCHAR(64) NULL;
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS chat_model_snapshot JSON NULL;
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS chat_model_version BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS parent_conversation_id VARCHAR(36) NULL;
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS relation_type VARCHAR(16) NOT NULL DEFAULT '';
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS source_history_id VARCHAR(36) NULL;
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS source_seq INTEGER NULL;
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS source_selected_text TEXT NOT NULL DEFAULT '';
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS source_context JSON NULL;
+ALTER TABLE conversations DROP CONSTRAINT IF EXISTS chk_conversations_relation_type;
+ALTER TABLE conversations ADD CONSTRAINT chk_conversations_relation_type
+    CHECK (relation_type IN ('', 'sidechat', 'fork'));
 CREATE TABLE IF NOT EXISTS conversation_archive_folders (
     id VARCHAR(36) PRIMARY KEY,
     user_id VARCHAR(255) NOT NULL,
@@ -508,6 +524,8 @@ CREATE INDEX IF NOT EXISTS idx_conversations_user_source
 CREATE INDEX IF NOT EXISTS idx_conversations_ephemeral_expiry
     ON conversations(is_ephemeral, ephemeral_expires_at)
     WHERE is_ephemeral = TRUE;
+CREATE INDEX IF NOT EXISTS idx_conversations_parent_relation
+    ON conversations(create_user_id, parent_conversation_id, relation_type, updated_at);
 ALTER TABLE plugin_drafts ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP NULL;
 ALTER TABLE plugin_drafts ADD COLUMN IF NOT EXISTS trash_expires_at TIMESTAMP NULL;
 ALTER TABLE plugin_drafts ADD COLUMN IF NOT EXISTS published_status_before_trash VARCHAR(16) NOT NULL DEFAULT '';
@@ -535,6 +553,17 @@ ALTER TABLE conversations ADD COLUMN source_dataset_id VARCHAR(255) NOT NULL DEF
 ALTER TABLE conversations ADD COLUMN source_document_id VARCHAR(255) NOT NULL DEFAULT '';
 ALTER TABLE conversations ADD COLUMN source_display_name VARCHAR(255) NOT NULL DEFAULT '';
 ALTER TABLE conversations ADD COLUMN pinned_at DATETIME NULL;
+ALTER TABLE conversations ADD COLUMN chat_model_mode VARCHAR(16) NULL;
+ALTER TABLE conversations ADD COLUMN chat_model_id VARCHAR(64) NULL;
+ALTER TABLE conversations ADD COLUMN chat_model_snapshot JSON NULL;
+ALTER TABLE conversations ADD COLUMN chat_model_version INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE conversations ADD COLUMN parent_conversation_id VARCHAR(36) NULL;
+ALTER TABLE conversations ADD COLUMN relation_type VARCHAR(16) NOT NULL DEFAULT ''
+    CHECK (relation_type IN ('', 'sidechat', 'fork'));
+ALTER TABLE conversations ADD COLUMN source_history_id VARCHAR(36) NULL;
+ALTER TABLE conversations ADD COLUMN source_seq INTEGER NULL;
+ALTER TABLE conversations ADD COLUMN source_selected_text TEXT NOT NULL DEFAULT '';
+ALTER TABLE conversations ADD COLUMN source_context JSON NULL;
 CREATE TABLE IF NOT EXISTS conversation_archive_folders (
     id VARCHAR(36) PRIMARY KEY,
     user_id VARCHAR(255) NOT NULL,
@@ -559,6 +588,8 @@ CREATE INDEX IF NOT EXISTS idx_conversations_user_source
 CREATE INDEX IF NOT EXISTS idx_conversations_ephemeral_expiry
     ON conversations(is_ephemeral, ephemeral_expires_at)
     WHERE is_ephemeral = TRUE;
+CREATE INDEX IF NOT EXISTS idx_conversations_parent_relation
+    ON conversations(create_user_id, parent_conversation_id, relation_type, updated_at);
 ALTER TABLE plugin_drafts ADD COLUMN deleted_at DATETIME NULL;
 ALTER TABLE plugin_drafts ADD COLUMN trash_expires_at DATETIME NULL;
 ALTER TABLE plugin_drafts ADD COLUMN published_status_before_trash VARCHAR(16) NOT NULL DEFAULT '';
@@ -1378,3 +1409,80 @@ DROP INDEX IF EXISTS uk_skills_owner_relative_root;
 CREATE UNIQUE INDEX uk_skills_owner_relative_root
     ON skills(owner_user_id, relative_root)
     WHERE deleted_at IS NULL;
+
+-- +migrate Dialect postgres
+ALTER TABLE public.resource_update_tasks
+    ADD COLUMN result_json json,
+    ADD COLUMN run_id varchar(36) NOT NULL DEFAULT '',
+    ADD COLUMN lane_key varchar(320) NOT NULL DEFAULT '',
+    ADD COLUMN lane_priority integer NOT NULL DEFAULT 0,
+    ADD COLUMN lane_order_at timestamp with time zone NOT NULL DEFAULT '1970-01-01 00:00:00+00';
+UPDATE public.resource_update_tasks SET lane_order_at = created_at;
+UPDATE public.resource_update_tasks AS task
+SET lane_key = 'memory-maintenance:' || task.user_id,
+    lane_priority = 10
+WHERE task.task_type = 'generate_review'
+  AND task.resource_type = 'memory'
+  AND task.user_id <> ''
+  AND (
+      task.status = 'pending'
+      OR (
+          task.status = 'running'
+          AND task.id = (
+              SELECT MIN(running.id)
+              FROM public.resource_update_tasks AS running
+              WHERE running.user_id = task.user_id
+                AND running.task_type = 'generate_review'
+                AND running.resource_type = 'memory'
+                AND running.status = 'running'
+          )
+      )
+  );
+ALTER TABLE public.resource_update_tasks DROP CONSTRAINT IF EXISTS chk_resource_update_tasks_task_type;
+ALTER TABLE public.resource_update_tasks ADD CONSTRAINT chk_resource_update_tasks_task_type
+    CHECK ((task_type)::text IN ('generate_review', 'auto_apply_review', 'auto_commit_skill_draft', 'organize_skill', 'organize_preference'));
+ALTER TABLE public.resource_update_tasks DROP CONSTRAINT IF EXISTS chk_resource_update_tasks_trigger_type;
+ALTER TABLE public.resource_update_tasks ADD CONSTRAINT chk_resource_update_tasks_trigger_type
+    CHECK ((trigger_type)::text IN ('scheduled', 'conversation_idle', 'manual', 'review_result', 'auto_evo_enabled', 'preference_changed'));
+CREATE INDEX idx_resource_update_tasks_lane_pending
+    ON public.resource_update_tasks(status, lane_key, lane_priority DESC, lane_order_at, created_at);
+CREATE UNIQUE INDEX uniq_resource_update_running_lane
+    ON public.resource_update_tasks(lane_key) WHERE lane_key <> '' AND status = 'running';
+CREATE UNIQUE INDEX uniq_active_preference_organizer
+    ON public.resource_update_tasks(user_id)
+    WHERE task_type = 'organize_preference' AND status IN ('pending', 'running');
+
+-- +migrate Dialect sqlite
+ALTER TABLE resource_update_tasks ADD COLUMN result_json json;
+ALTER TABLE resource_update_tasks ADD COLUMN run_id varchar(36) NOT NULL DEFAULT '';
+ALTER TABLE resource_update_tasks ADD COLUMN lane_key varchar(320) NOT NULL DEFAULT '';
+ALTER TABLE resource_update_tasks ADD COLUMN lane_priority integer NOT NULL DEFAULT 0;
+ALTER TABLE resource_update_tasks ADD COLUMN lane_order_at datetime NOT NULL DEFAULT '1970-01-01T00:00:00Z';
+UPDATE resource_update_tasks SET lane_order_at = created_at;
+UPDATE resource_update_tasks AS task
+SET lane_key = 'memory-maintenance:' || task.user_id,
+    lane_priority = 10
+WHERE task.task_type = 'generate_review'
+  AND task.resource_type = 'memory'
+  AND task.user_id <> ''
+  AND (
+      task.status = 'pending'
+      OR (
+          task.status = 'running'
+          AND task.id = (
+              SELECT MIN(running.id)
+              FROM resource_update_tasks AS running
+              WHERE running.user_id = task.user_id
+                AND running.task_type = 'generate_review'
+                AND running.resource_type = 'memory'
+                AND running.status = 'running'
+          )
+      )
+  );
+CREATE INDEX idx_resource_update_tasks_lane_pending
+    ON resource_update_tasks(status, lane_key, lane_priority DESC, lane_order_at, created_at);
+CREATE UNIQUE INDEX uniq_resource_update_running_lane
+    ON resource_update_tasks(lane_key) WHERE lane_key <> '' AND status = 'running';
+CREATE UNIQUE INDEX uniq_active_preference_organizer
+    ON resource_update_tasks(user_id)
+    WHERE task_type = 'organize_preference' AND status IN ('pending', 'running');

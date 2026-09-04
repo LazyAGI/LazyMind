@@ -39,27 +39,37 @@ class RemoteFS(LazyLLMFSBase):
         return payload if payload is not None else {}
 
     def _raw_request(self, method: str, endpoint: str, **kwargs) -> requests.Response:
+        from lazymind.common.maintenance import identity_headers, check_response
+
+        maintenance_headers = identity_headers()
         agentic_config = lazyllm.globals.get('agentic_config') or {}
         user_id = agentic_config.get('user_id')
-        task_id = agentic_config.get('session_id') or agentic_config.get('task_id')
+        task_id = (
+            agentic_config.get('task_id')
+            if agentic_config.get('run_id')
+            else (agentic_config.get('session_id') or agentic_config.get('task_id'))
+        )
         params = kwargs.pop('params', {})
         if user_id:
             params['user_id'] = user_id
         if task_id:
             params['task_id'] = task_id
         headers = dict(kwargs.pop('headers', {}) or {})
+        headers.update(maintenance_headers)
         internal_token = str(_cfg['core_internal_token'] or '').strip()
         if internal_token:
             headers.setdefault('X-LazyMind-Internal-Token', internal_token)
         if headers:
             kwargs['headers'] = headers
-        return requests.request(
+        response = requests.request(
             method,
             f'{self.base_url}/remote-fs/{endpoint}',
             params=params,
             timeout=self.timeout,
             **kwargs,
         )
+        check_response(response)
+        return response
 
     @staticmethod
     def _raise_for_status(response: requests.Response, endpoint: str) -> None:

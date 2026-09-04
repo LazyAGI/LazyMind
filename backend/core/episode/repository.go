@@ -18,6 +18,7 @@ import (
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/maintenance"
 )
 
 type Repository struct {
@@ -62,6 +63,21 @@ func Initialize(db *gorm.DB) error {
 }
 
 func (r *Repository) Create(ctx context.Context, input CreateInput) (CreateResult, error) {
+	var result CreateResult
+	err := maintenance.UserTransaction(ctx, r.db, input.UserID, func(tx *gorm.DB) error {
+		if err := maintenance.Authorize(ctx, tx, input.UserID, false); err != nil {
+			return err
+		}
+		child := *r
+		child.db = tx
+		var err error
+		result, err = child.create(ctx, input)
+		return err
+	})
+	return result, err
+}
+
+func (r *Repository) create(ctx context.Context, input CreateInput) (CreateResult, error) {
 	prepared, err := prepareCreateInput(input)
 	if err != nil {
 		return CreateResult{}, err
@@ -255,6 +271,17 @@ func (r *Repository) List(
 }
 
 func (r *Repository) Delete(ctx context.Context, userID, episodeID string) error {
+	return maintenance.UserTransaction(ctx, r.db, userID, func(tx *gorm.DB) error {
+		if err := maintenance.Authorize(ctx, tx, userID, false); err != nil {
+			return err
+		}
+		child := *r
+		child.db = tx
+		return child.delete(ctx, userID, episodeID)
+	})
+}
+
+func (r *Repository) delete(ctx context.Context, userID, episodeID string) error {
 	userID = strings.TrimSpace(userID)
 	episodeID = strings.TrimSpace(episodeID)
 	if userID == "" || episodeID == "" {

@@ -40,6 +40,7 @@ type SkillOrganizeData struct {
 }
 
 type MemoryReviewRequest struct {
+	RunID                      string         `json:"run_id"`
 	TaskID                     string         `json:"task_id"`
 	UserID                     string         `json:"user_id"`
 	ConversationID             string         `json:"conversation_id"`
@@ -59,4 +60,21 @@ type MemoryReviewResponse struct {
 type MemoryReviewError struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
+}
+
+type PreferenceOrganizerRequest struct {
+	TaskID        string         `json:"task_id"`
+	RunID         string         `json:"run_id"`
+	UserID        string         `json:"user_id"`
+	LLMConfig     map[string]any `json:"llm_config"`
+	ForceAnalysis bool           `json:"force_analysis"`
+}
+
+type PreferenceOrganizerResponse struct {
+	Status    string             `json:"status"`
+	TaskID    string             `json:"task_id"`
+	Outcome   string             `json:"outcome"`
+	Retryable bool               `json:"retryable"`
+	Result    map[string]any     `json:"result,omitempty"`
+	Error     *MemoryReviewError `json:"error,omitempty"`
 }

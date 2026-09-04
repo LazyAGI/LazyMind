@@ -66,6 +66,7 @@ type skillDraftAutoCommitRequestJSON struct {
 type taskOutcome struct {
 	Status       string
 	ResultID     string
+	ResultJSON   json.RawMessage
 	ErrorCode    string
 	ErrorMessage string
 	Permanent    bool
@@ -74,8 +75,9 @@ type taskOutcome struct {
 }
 
 type reviewCallers struct {
-	Skill  func(context.Context, algo.SkillReviewRequest) (*algo.SkillReviewResponse, int, error)
-	Memory func(context.Context, algo.MemoryReviewRequest) (*algo.MemoryReviewResponse, int, error)
+	Skill               func(context.Context, algo.SkillReviewRequest) (*algo.SkillReviewResponse, int, error)
+	Memory              func(context.Context, algo.MemoryReviewRequest) (*algo.MemoryReviewResponse, int, error)
+	PreferenceOrganizer func(context.Context, algo.PreferenceOrganizerRequest) (*algo.PreferenceOrganizerResponse, int, error)
 }
 
 type clockFunc func() time.Time

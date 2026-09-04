@@ -1079,6 +1079,14 @@
     box-sizing: border-box;
   }
 
+  // Composite cells can be shorter than a JSON payload. Keep the widget in
+  // its assigned cell and let the block itself own the vertical scroll.
+  &--json-block {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+  }
+
   &__text {
     margin: 0;
     font-size: 13px;
@@ -2477,6 +2485,31 @@
         max-width: 820px;
         margin: 8px auto 0;
         align-self: center;
+      }
+
+      // Constrained speaker notes scroll inside the Markdown surface instead
+      // of letting the editor's 300px content minimum get clipped by the card.
+      .workflow-slot--text > .writer-markdown-editor {
+        .writer-markdown-editor__document-layout {
+          flex: 1 1 auto;
+          min-height: 0;
+          overflow: hidden;
+          align-items: stretch;
+        }
+
+        .writer-markdown-editor__main {
+          display: flex;
+          min-height: 0;
+          flex-direction: column;
+          overflow: hidden;
+        }
+
+        .writer-markdown-editor__surface {
+          flex: 1 1 auto;
+          min-height: 0;
+          max-height: none;
+          overflow-y: auto;
+        }
       }
     }
 

@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { localizeErrorCode } from "@/components/request";
 import { message } from "antd";
 import { MessageOutlined, UnorderedListOutlined } from "@ant-design/icons";
-import { AgentAppsAuth } from "@/components/auth";
+import { v4 as uuidv4 } from "uuid";
 import {
   ChatConversationsRequestActionEnum,
   Query,
@@ -16,7 +16,7 @@ import "./index.scss";
 import UIUtils from "@/modules/chat/utils/ui";
 import InitialCard from "@/modules/chat/components/InitialCard";
 import { ChatConfig } from "@/modules/chat/components/ChatConfigs";
-import { Method, SSE } from "@/modules/chat/utils/sse";
+import { createChatStream } from "@/modules/chat/utils/chatStream";
 import {
   CHAT_RESUME_STREAM_URL,
   CHAT_STREAM_URL,
@@ -38,6 +38,7 @@ import {
 } from "@/utils/developerMode";
 import { allowedUploadTypes } from "@/modules/chat/components/ImageUpload";
 import {
+  CHAT_CONVERSATION_LIST_REFRESH_EVENT,
   CHAT_SELECT_CONVERSATION_EVENT,
   WORKFLOW_PANEL_EXPANDED_EVENT,
   WORKFLOW_PANEL_EXPANDED_STORAGE_PREFIX,
@@ -50,6 +51,22 @@ import { useTaskCenterStore } from "@/modules/chat/store/taskCenter";
 import type { SubAgentTask } from "@/modules/chat/store/taskCenter";
 import { useChatInputStore } from "@/modules/chat/store/chatInput";
 import { useChatThinkStore } from "@/modules/chat/store/chatThink";
+import ConversationRelationBanner from "@/modules/chat/components/ConversationRelationBanner";
+import SideChatPanel, {
+  type SideChatConversation,
+  type SideChatSource,
+} from "@/modules/chat/components/SideChatPanel";
+import {
+  CONVERSATION_RELATION_SIDECHAT,
+  getConversationRelation,
+  type ConversationRelation,
+} from "@/modules/chat/utils/conversationRelation";
+import {
+  NEW_CHAT_MODEL_SELECTION_KEY,
+  toChatModelSelectionRequest,
+  useModelSelectionStore,
+  type ChatModelSelectionRequest,
+} from "@/modules/chat/store/modelSelection";
 
 // Stable empty reference to avoid returning a fresh array from the zustand
 // selector on every render, which (with useSyncExternalStore) would trigger an
@@ -118,6 +135,11 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
   );
   // Workflow settings loaded from conversation detail (for existing conversations).
   const [conversationSettings, setConversationSettings] = useState<ConversationRuntimeSettings | undefined>(undefined);
+  const [conversationRelation, setConversationRelation] =
+    useState<ConversationRelation | null>(null);
+  const [sideChatOpen, setSideChatOpen] = useState(false);
+  const [sideChatSource, setSideChatSource] =
+    useState<SideChatSource | null>(null);
   const [knowledgeRefreshKey, setKnowledgeRefreshKey] = useState(0);
   const [isTaskPanelCollapsed, setIsTaskPanelCollapsed] = useState(false);
   const [panelWidth, setPanelWidth] = useState<number>(0); // 0 = use CSS default
@@ -175,6 +197,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
   // Load persisted workflow settings once a real conversation id is available.
   useEffect(() => {
     if (!sessionId || sessionId.startsWith('temp_')) {
+      setConversationRelation(null);
       if (!sessionId) {
         setConversationSettings(undefined);
       }
@@ -189,6 +212,9 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         }
         setConversationSettings(
           parseConversationRuntimeSettings(detailRes.data.conversation),
+        );
+        setConversationRelation(
+          getConversationRelation(detailRes.data.conversation),
         );
         useChatThinkStore.getState().setThinkingDepth(
           resolveConversationThinkingDepth(detailRes.data.conversation),
@@ -225,8 +251,12 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
   );
 
   const { pendingMessage, clearPendingMessage } = useChatMessageStore();
+  const pendingInitialModelSelectionRef =
+    useRef<ChatModelSelectionRequest | null>(null);
+  const pendingClientConversationIdRef = useRef("");
 
   const chatRef = useRef<ChatImperativeProps>(null);
+  const sideChatReturnFocusRef = useRef<HTMLElement | null>(null);
   const loadConversationRequestRef = useRef(0);
 
   const autoRunning = useWorkflowStore((s) =>
@@ -378,6 +408,8 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
 
   useEffect(() => {
     if (pendingMessage && chatEnabled) {
+      pendingInitialModelSelectionRef.current =
+        pendingMessage.initial_model_selection ?? null;
       const timer = setTimeout(() => {
         chatRef.current?.sendMessage(pendingMessage);
         clearPendingMessage();
@@ -394,6 +426,25 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     callbacks: Record<string, (e: CustomEvent) => void>,
     extras?: Record<string, unknown>,
   ) {
+    const requestConversationId =
+      sessionId || pendingClientConversationIdRef.current || uuidv4();
+    if (!sessionId) {
+      pendingClientConversationIdRef.current = requestConversationId;
+      const prepareClientConversationId =
+        extras?.__prepareClientConversationId;
+      if (typeof prepareClientConversationId === "function") {
+        prepareClientConversationId(requestConversationId);
+      }
+    }
+    const initialModelSelection = !sessionId
+      ? pendingInitialModelSelectionRef.current ??
+        toChatModelSelectionRequest(
+          useModelSelectionStore.getState().selections[
+            NEW_CHAT_MODEL_SELECTION_KEY
+          ],
+        )
+      : undefined;
+    pendingInitialModelSelectionRef.current = null;
     // Flush any pending slot drafts before sending so the AI sees the latest content.
     // Draft keys use the workflow session_id (not the conversation_id), so pass the
     // workflow session_id when one is active; fall back to conversationId otherwise.
@@ -459,17 +510,11 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
       clearArtifactRefs(sessionId);
     }
 
-    return new SSE(CHAT_STREAM_URL, {
-      method: Method.POST,
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "text/event-stream",
-        ...AgentAppsAuth.getAuthHeaders(),
-      },
-      timeout: 1800000,
-      payload: JSON.stringify({
+    return createChatStream(
+      CHAT_STREAM_URL,
+      {
         action,
-        conversation_id: sessionId,
+        conversation_id: requestConversationId,
         conversation: {
           search_config: {
             dataset_list: datasetList,
@@ -493,6 +538,9 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         ...(workflowUIState ? { workflow_ui_state: workflowUIState } : {}),
         ...(artifactRefs.length > 0 ? { artifact_refs: artifactRefs } : {}),
         ...(extras?.run_in_background ? { run_in_background: true } : {}),
+        ...(initialModelSelection
+          ? { initial_model_selection: initialModelSelection }
+          : {}),
         ...(Array.isArray(extras?.mentions) && extras.mentions.length > 0
           ? { mentions: extras.mentions }
           : {}),
@@ -525,9 +573,9 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
           }
           return {};
         })(),
-      }),
+      },
       callbacks,
-    });
+    );
   }
 
   function onOpenResumeSSE(
@@ -535,21 +583,15 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     callbacks: Record<string, (e: CustomEvent) => void>,
     cursor?: { historyId?: string; afterSequence?: number },
   ) {
-    return new SSE(CHAT_RESUME_STREAM_URL, {
-      method: Method.POST,
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "text/event-stream",
-        ...AgentAppsAuth.getAuthHeaders(),
-      },
-      timeout: 1800000,
-      payload: JSON.stringify({
+    return createChatStream(
+      CHAT_RESUME_STREAM_URL,
+      {
         conversation_id: conversationId,
         history_id: cursor?.historyId,
         after_sequence: cursor?.afterSequence || undefined,
-      }),
+      },
       callbacks,
-    });
+    );
   }
 
   const sessionIdRef = useRef(sessionId);
@@ -557,6 +599,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
 
   const setConversationId = useCallback((id: string) => {
     if (id === sessionIdRef.current) return;
+    pendingClientConversationIdRef.current = "";
     sessionIdRef.current = id;
     setSessionId(id);
     window.dispatchEvent(
@@ -566,9 +609,44 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     );
   }, []);
 
+  useEffect(() => {
+    setSideChatOpen(false);
+    setSideChatSource(null);
+  }, [routeConversationId, sessionId]);
+
+  const handleOpenSideChat = useCallback((source: SideChatSource = {}) => {
+    if (!sessionIdRef.current) return;
+    sideChatReturnFocusRef.current =
+      document.activeElement instanceof HTMLElement &&
+      document.activeElement !== document.body
+        ? document.activeElement
+        : null;
+    setSideChatSource(source);
+    setSideChatOpen(true);
+  }, []);
+
+  const handleSideChatRetained = useCallback(
+    (_conversation: SideChatConversation) => {
+      window.dispatchEvent(new Event(CHAT_CONVERSATION_LIST_REFRESH_EVENT));
+    },
+    [],
+  );
+
+  const handleConversationIdChange = useCallback(
+    (id: string) => {
+      const pendingId = pendingClientConversationIdRef.current;
+      if (pendingId && id !== pendingId) {
+        return;
+      }
+      setConversationId(id);
+    },
+    [setConversationId],
+  );
+
   const loadConversation = useCallback(async (conversationId: string) => {
     const requestId = ++loadConversationRequestRef.current;
     setIsRestoringConversation(true);
+    setConversationRelation(null);
     try {
       let isGenerating = false;
       try {
@@ -598,6 +676,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
       setChatConfigFn(tempData);
       setKnowledgeRefreshKey((key) => key + 1);
       setConversationSettings(parseConversationRuntimeSettings(conversation));
+      setConversationRelation(getConversationRelation(conversation));
       setConversationId(conversationId);
 
       const list = buildChatMessageListFromHistory(historyRes.data.history, {
@@ -636,6 +715,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
       setSessionId("");
       setIsRestoringConversation(false);
       setConversationSettings(undefined);
+      setConversationRelation(null);
       setChatConfig({});
       setChatConfigFn({});
       chatRef.current?.createNewChat();
@@ -730,6 +810,13 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
 
   const isTaskPanelRestoreVisible =
     !workflowPanelExpanded && hasTaskPanelContent && isTaskPanelCollapsed;
+  const isRetainedSidechat =
+    conversationRelation?.relationType === CONVERSATION_RELATION_SIDECHAT;
+  const canOpenSideChat =
+    canChat &&
+    Boolean(sessionId) &&
+    !isRestoringConversation &&
+    !conversationRelation;
 
   return (
     <div
@@ -775,48 +862,75 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         </div>
       )}
       <div className={`chat-conversation-pane${workflowPanelExpanded && expandedRailTab !== "chat" ? " chat-conversation-pane--hidden" : ""}${isTaskPanelRestoreVisible ? " chat-conversation-pane--task-restore-visible" : ""}`}>
-      <ChatContainerComponent
-        ref={chatRef}
-        canChat={chatEnabled}
-        initialCard={isRestoringConversation ? null : <InitialCard />}
-        sessionId={sessionId}
-        onOpenSSE={onOpenSSE}
-        onOpenResumeSSE={onOpenResumeSSE}
-        onConversationIdChange={setConversationId}
-        parseErrorData={parseErrorData}
-        showHistoryButton={false}
-        setIsChatContent={setIsChatContent}
-        chatConfig={chatConfig}
-        setChatConfig={setChatConfig}
-        setChatConfigFn={setChatConfigFn}
-        onConversationSettingsChange={(settings) => {
-          if (!sessionId) {
-            pendingConversationSettingsRef.current = settings;
-          } else {
-            setConversationSettings(settings);
+        <ConversationRelationBanner relation={conversationRelation} />
+        <ChatContainerComponent
+          ref={chatRef}
+          canChat={chatEnabled}
+          initialCard={isRestoringConversation ? null : <InitialCard />}
+          sessionId={sessionId}
+          onOpenSSE={onOpenSSE}
+          onOpenResumeSSE={onOpenResumeSSE}
+          onConversationIdChange={handleConversationIdChange}
+          parseErrorData={parseErrorData}
+          showHistoryButton={false}
+          showConversationConfig={!isRetainedSidechat}
+          showSkillDeposit={!isRetainedSidechat}
+          allowKnowledgeBaseSelection={!isRetainedSidechat}
+          onOpenSideChat={canOpenSideChat ? handleOpenSideChat : undefined}
+          setIsChatContent={setIsChatContent}
+          chatConfig={chatConfig}
+          setChatConfig={setChatConfig}
+          setChatConfigFn={setChatConfigFn}
+          onConversationSettingsChange={(settings) => {
+            if (!sessionId) {
+              pendingConversationSettingsRef.current = settings;
+            } else {
+              setConversationSettings(settings);
+            }
+          }}
+          initialConversationSettings={conversationSettings}
+          hasWorkflowSession={hasWorkflowSession}
+          knowledgeRefreshKey={knowledgeRefreshKey}
+          embeddingReady={embeddingReady}
+          multimodalEmbeddingReady={multimodalEmbeddingReady}
+          rerankReady={rerankReady}
+          disabledReason={
+            workflowDefinitionChanged
+              ? t("chat.workflowDefinitionChanged")
+              : autoRunning
+                ? t("chat.autoAdvanceRunning")
+                : chatDisabledReason
+          }
+          disabledDescription={
+            autoRunning || workflowDefinitionChanged
+              ? undefined
+              : chatDisabledDescription
+          }
+          disabledAction={
+            autoRunning || workflowDefinitionChanged
+              ? undefined
+              : chatDisabledAction
+          }
+        />
+      </div>
+      <SideChatPanel
+        open={sideChatOpen && canOpenSideChat}
+        parentConversationId={sessionId}
+        source={sideChatSource}
+        onClose={() => {
+          setSideChatOpen(false);
+          setSideChatSource(null);
+          if (!sideChatReturnFocusRef.current) {
+            requestAnimationFrame(() => chatRef.current?.focusInput?.());
           }
         }}
-        initialConversationSettings={conversationSettings}
-        hasWorkflowSession={hasWorkflowSession}
-        knowledgeRefreshKey={knowledgeRefreshKey}
+        onRetained={handleSideChatRetained}
+        canChat={canChat}
         embeddingReady={embeddingReady}
         multimodalEmbeddingReady={multimodalEmbeddingReady}
         rerankReady={rerankReady}
-        disabledReason={
-          workflowDefinitionChanged
-            ? t("chat.workflowDefinitionChanged")
-            : autoRunning
-              ? t("chat.autoAdvanceRunning")
-              : chatDisabledReason
-        }
-        disabledDescription={
-          autoRunning || workflowDefinitionChanged ? undefined : chatDisabledDescription
-        }
-        disabledAction={
-          autoRunning || workflowDefinitionChanged ? undefined : chatDisabledAction
-        }
+        returnFocusRef={sideChatReturnFocusRef}
       />
-      </div>
       {isTaskPanelRestoreVisible && (
         <button
           type="button"

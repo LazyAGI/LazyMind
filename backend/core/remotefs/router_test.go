@@ -15,6 +15,7 @@ func newRemoteFSTestDB(t *testing.T) *orm.DB {
 	t.Helper()
 	return orm.MigrateTestDB(t,
 		&orm.MemoryCurrentEntry{},
+		&orm.ResourceUpdateTask{},
 		&orm.WorkflowResource{},
 		&orm.WorkflowBlob{},
 		&orm.WorkflowRevision{},
@@ -97,6 +98,12 @@ func TestWorkflowRevisionViewReadsPinnedContent(t *testing.T) {
 
 func TestMemoryCurrentStateDoesNotUseTaskDraftModes(t *testing.T) {
 	db := newRemoteFSTestDB(t)
+	now := time.Now().UTC()
+	until := now.Add(time.Minute)
+	if err := db.Create(&orm.ResourceUpdateTask{ID: "1", RunID: "run-1", TaskType: orm.ResourceUpdateTaskTypeGenerateReview, ResourceType: orm.ResourceUpdateResourceTypeMemory, UserID: "u1", TriggerType: "manual", TriggerID: "review-1", Status: "running", NextRunAt: now, LaneOrderAt: now, CreatedAt: now, UpdatedAt: now, LockedUntil: &until}).Error; err != nil {
+		t.Fatal(err)
+	}
+
 	handler := NewHandler(db.DB)
 	memoryPath := "memory/users/references/direct.md"
 	reviewContent := validMemoryReferenceYAML
@@ -112,6 +119,7 @@ func TestMemoryCurrentStateDoesNotUseTaskDraftModes(t *testing.T) {
 		"/remote-fs/content?path="+memoryPath+"&user_id=u1&task_id=memory_review_1",
 		strings.NewReader(reviewContent),
 	)
+	writeReview.Header.Set("X-LazyMind-Run-Id", "run-1")
 	writeReviewRec := httptest.NewRecorder()
 	handler.Content(writeReviewRec, writeReview)
 	if writeReviewRec.Code != http.StatusOK {
@@ -119,6 +127,7 @@ func TestMemoryCurrentStateDoesNotUseTaskDraftModes(t *testing.T) {
 	}
 
 	readReview := httptest.NewRequest(http.MethodGet, "/remote-fs/content?path="+memoryPath+"&user_id=u1&task_id=memory_review_1", nil)
+	readReview.Header.Set("X-LazyMind-Run-Id", "run-1")
 	readReviewRec := httptest.NewRecorder()
 	handler.Content(readReviewRec, readReview)
 	if readReviewRec.Code != http.StatusOK || readReviewRec.Body.String() != reviewContent {

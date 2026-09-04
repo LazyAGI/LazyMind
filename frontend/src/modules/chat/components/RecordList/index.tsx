@@ -5,9 +5,12 @@ import {
   FilterOutlined,
   FolderOutlined,
   FilePdfOutlined,
+  LinkOutlined,
+  MessageOutlined,
   MoreOutlined,
   PushpinFilled,
   PushpinOutlined,
+  RightOutlined,
 } from "@ant-design/icons";
 import classnames from "classnames";
 import {
@@ -36,6 +39,7 @@ import {
   useRef,
   forwardRef,
   useImperativeHandle,
+  Fragment,
 } from "react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -67,6 +71,12 @@ import { downloadStream } from "@/modules/chat/utils/download";
 import ArchiveConversationModal from "../ArchiveConversationModal";
 import { unarchiveConversation } from "@/modules/settings/recoveryApi";
 import { RECOVERY_ARCHIVE_PATH } from "@/modules/settings/recoveryRoute";
+import {
+  CONVERSATION_RELATION_FORK,
+  getConversationRelation,
+  isChildConversation,
+  type ConversationWithRelation,
+} from "@/modules/chat/utils/conversationRelation";
 
 const EXPORT_FILE_TYPE_XLSX = "EXPORT_FILE_TYPE_XLSX";
 const SIDEBAR_SEARCH_DEBOUNCE_MS = 300;
@@ -115,7 +125,7 @@ export interface RecordListImperativeProps {
 
 const { Search } = Input;
 
-type SidebarConversation = Conversation & {
+type SidebarConversation = ConversationWithRelation & {
   pinned_at?: string | null;
   is_pinned?: boolean;
   source_type?: string;
@@ -123,6 +133,12 @@ type SidebarConversation = Conversation & {
 };
 
 type ConversationGroup = "pinned" | "today" | "recentWeek" | "earlier";
+
+type SidebarConversationNode = {
+  conversation: SidebarConversation;
+  children: SidebarConversation[];
+  isPlaceholderParent?: boolean;
+};
 
 function isConversationPinned(conversation: SidebarConversation) {
   return conversation.is_pinned === true || Boolean(conversation.pinned_at);
@@ -189,6 +205,9 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
     const [isHistoryLoading, setIsHistoryLoading] = useState(true);
     const [archiveItem, setArchiveItem] = useState<Conversation | null>(null);
     const [pinningConversationId, setPinningConversationId] = useState("");
+    const [expandedParentIds, setExpandedParentIds] = useState<Set<string>>(
+      () => new Set(),
+    );
     // convTypeFilter: which conversation types to show. Default = normal only (no task convs).
     // Values: 'normal' = non-task, 'task' = task. Multiple values allowed.
     const [convTypeFilter, setConvTypeFilter] = useState<string[]>(() => {
@@ -252,19 +271,94 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
         );
     }, [keyword]);
 
+    const conversationTree = useMemo(() => {
+      const conversationsById = new Map(
+        historyList.map((item) => [item.conversation_id || "", item]),
+      );
+      const childrenByParent = new Map<string, SidebarConversation[]>();
+      const nestedChildIds = new Set<string>();
+      historyList.forEach((item) => {
+        const relation = getConversationRelation(item);
+        const itemId = item.conversation_id || "";
+        if (
+          !relation ||
+          !itemId ||
+          relation.parentConversationId === itemId
+        ) {
+          return;
+        }
+        const children = childrenByParent.get(relation.parentConversationId) || [];
+        children.push(item);
+        childrenByParent.set(relation.parentConversationId, children);
+        nestedChildIds.add(itemId);
+      });
+      const nodes = historyList
+        .filter((item) => !nestedChildIds.has(item.conversation_id || ""))
+        .map((conversation) => ({
+          conversation,
+          children: childrenByParent.get(conversation.conversation_id || "") || [],
+        }));
+      childrenByParent.forEach((children, parentConversationId) => {
+        if (conversationsById.has(parentConversationId) || children.length === 0) {
+          return;
+        }
+        const firstChild = children[0];
+        const relation = getConversationRelation(firstChild);
+        nodes.push({
+          conversation: {
+            ...firstChild,
+            conversation_id: parentConversationId,
+            display_name: relation?.parentDisplayName || parentConversationId,
+            parent_conversation_id: undefined,
+            parent_display_name: undefined,
+            relation_type: undefined,
+            is_pinned: false,
+            pinned_at: null,
+          },
+          children,
+          isPlaceholderParent: true,
+        });
+      });
+      return nodes;
+    }, [historyList]);
+
+    useEffect(() => {
+      if (!keyword.trim()) {
+        return;
+      }
+      const placeholderParentIds = conversationTree
+        .filter((node) => node.isPlaceholderParent)
+        .map((node) => node.conversation.conversation_id || "")
+        .filter(Boolean);
+      if (placeholderParentIds.length === 0) {
+        return;
+      }
+      setExpandedParentIds((previous) => {
+        const next = new Set(previous);
+        let changed = false;
+        placeholderParentIds.forEach((id) => {
+          if (!next.has(id)) {
+            next.add(id);
+            changed = true;
+          }
+        });
+        return changed ? next : previous;
+      });
+    }, [conversationTree, keyword]);
+
     const groupedHistoryList = useMemo(() => {
-      const groups: Record<ConversationGroup, SidebarConversation[]> = {
+      const groups: Record<ConversationGroup, SidebarConversationNode[]> = {
         pinned: [],
         today: [],
         recentWeek: [],
         earlier: [],
       };
-      historyList.forEach((item) => {
-        if (isConversationPinned(item)) {
-          groups.pinned.push(item);
+      conversationTree.forEach((node) => {
+        if (isConversationPinned(node.conversation)) {
+          groups.pinned.push(node);
           return;
         }
-        groups[getConversationGroup(item.update_time)].push(item);
+        groups[getConversationGroup(node.conversation.update_time)].push(node);
       });
       return [
         {
@@ -288,7 +382,37 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
           items: groups.earlier,
         },
       ].filter((group) => group.items.length > 0);
-    }, [historyList, t]);
+    }, [conversationTree, t]);
+
+    const batchSelectableConversationIds = useMemo(
+      () =>
+        historyList.flatMap((item) =>
+          !isChildConversation(item) && item.conversation_id
+            ? [item.conversation_id]
+            : [],
+        ),
+      [historyList],
+    );
+
+    useEffect(() => {
+      const selected = historyList.find(
+        (item) => item.conversation_id === currentSessionId,
+      );
+      const relation = getConversationRelation(selected);
+      if (!relation || !historyList.some(
+        (item) => item.conversation_id === relation.parentConversationId,
+      )) {
+        return;
+      }
+      setExpandedParentIds((previous) => {
+        if (previous.has(relation.parentConversationId)) {
+          return previous;
+        }
+        const next = new Set(previous);
+        next.add(relation.parentConversationId);
+        return next;
+      });
+    }, [currentSessionId, historyList]);
     useImperativeHandle(ref, () => ({
       refresh: () => {
         getHistory({ isFirst: true, searchText: keyword });
@@ -639,30 +763,148 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
     function renderItemText(params: {
       item: SidebarConversation;
       selected: boolean;
+      childCount?: number;
+      isChild?: boolean;
+      hideActions?: boolean;
     }) {
-      const { item, selected } = params;
+      const {
+        item,
+        selected,
+        childCount = 0,
+        isChild = false,
+        hideActions = false,
+      } = params;
       const source = item;
       const pinned = isConversationPinned(item);
+      const conversationId = item.conversation_id || "";
+      const childrenExpanded = expandedParentIds.has(conversationId);
+      const relation = getConversationRelation(item);
+      const relationIsFork =
+        relation?.relationType === CONVERSATION_RELATION_FORK;
+      const conversationTitle = item.display_name || conversationId;
+      const relationDescription = relation
+        ? t(
+            relationIsFork
+              ? "chat.conversationForkedFrom"
+              : "chat.conversationSourceFrom",
+            { parent: relation.parentDisplayName },
+          )
+        : t("chat.conversationMainLabel");
+      const ownershipActionItems: MenuProps["items"] = relation
+        ? []
+        : [
+            {
+              key: pinned ? "unpin" : "pin",
+              icon: pinned ? <PushpinFilled /> : <PushpinOutlined />,
+              label: t(
+                pinned ? "chat.unpinConversation" : "chat.pinConversation",
+              ),
+              disabled: Boolean(pinningConversationId),
+              onClick: () => setConversationPinned(item, !pinned),
+            },
+            {
+              key: "archive",
+              icon: <FolderOutlined />,
+              label: t("settingsPage.recovery.archiveAction"),
+              onClick: () => setArchiveItem(item),
+            },
+          ];
+      const activateConversation = () => {
+        if (showBatchExport || selected) return;
+        onSelected(item);
+        setThink(false);
+        setNewMessage(false);
+      };
       return (
         <div
-          className={classnames("record", { selected })}
+          className={classnames("record", {
+            selected,
+            "record-child": isChild,
+          })}
           key={item.conversation_id}
+          role={showBatchExport ? undefined : "button"}
+          tabIndex={showBatchExport ? undefined : 0}
+          aria-current={selected ? "page" : undefined}
           onClick={(e) => {
             e.preventDefault();
-            if (showBatchExport) {
+            activateConversation();
+          }}
+          onKeyDown={(event) => {
+            if (
+              event.target !== event.currentTarget ||
+              (event.key !== "Enter" && event.key !== " ")
+            ) {
               return;
             }
-            if (selected) {
-              return;
-            }
-            onSelected(item);
-            setThink(false);
-            setNewMessage(false);
+            event.preventDefault();
+            activateConversation();
           }}
         >
-          <Tooltip title={item.display_name}>
-            <span className="title">{item.display_name}</span>
-          </Tooltip>
+          {childCount > 0 ? (
+            <Tooltip
+              title={t(
+                childrenExpanded
+                  ? "chat.collapseChildConversations"
+                  : "chat.expandChildConversations",
+                { count: childCount },
+              )}
+            >
+              <button
+                type="button"
+                className="record-children-toggle"
+                aria-expanded={childrenExpanded}
+                aria-controls={`record-children-${conversationId}`}
+                aria-label={t(
+                  childrenExpanded
+                    ? "chat.collapseChildConversations"
+                    : "chat.expandChildConversations",
+                  { count: childCount },
+                )}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setExpandedParentIds((previous) => {
+                    const next = new Set(previous);
+                    if (next.has(conversationId)) {
+                      next.delete(conversationId);
+                    } else {
+                      next.add(conversationId);
+                    }
+                    return next;
+                  });
+                }}
+              >
+                {childrenExpanded ? <DownOutlined /> : <RightOutlined />}
+                <span>{childCount}</span>
+              </button>
+            </Tooltip>
+          ) : null}
+          <Popover
+            placement="rightTop"
+            trigger="hover"
+            arrow={false}
+            mouseEnterDelay={0.2}
+            mouseLeaveDelay={0.08}
+            destroyOnHidden
+            classNames={{ root: "record-preview-popover" }}
+            content={
+              <div className="record-preview-card">
+                <strong className="record-preview-title">
+                  {conversationTitle}
+                </strong>
+                <div className="record-preview-meta">
+                  {relation ? (
+                    <LinkOutlined aria-hidden="true" />
+                  ) : (
+                    <MessageOutlined aria-hidden="true" />
+                  )}
+                  <span>{relationDescription}</span>
+                </div>
+              </div>
+            }
+          >
+            <span className="title">{conversationTitle}</span>
+          </Popover>
           {source.source_type === "pdf_preview" ? (
             <Tooltip title={source.source_display_name || t("knowledge.pdfChatSavedSource")}>
               <FilePdfOutlined className="record-source-icon" aria-label={t("knowledge.pdfChatSavedSource")} />
@@ -671,28 +913,12 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
           <span className="update-time">
             {dayjs(item.update_time).format("MM/DD")}
           </span>
-          {!showBatchExport ? (
+          {!showBatchExport && !hideActions ? (
             <Dropdown
               trigger={["click"]}
               menu={{
                 items: [
-                  {
-                    key: pinned ? "unpin" : "pin",
-                    icon: pinned ? <PushpinFilled /> : <PushpinOutlined />,
-                    label: t(
-                      pinned
-                        ? "chat.unpinConversation"
-                        : "chat.pinConversation",
-                    ),
-                    disabled: Boolean(pinningConversationId),
-                    onClick: () => setConversationPinned(item, !pinned),
-                  },
-                  {
-                    key: "archive",
-                    icon: <FolderOutlined />,
-                    label: t("settingsPage.recovery.archiveAction"),
-                    onClick: () => setArchiveItem(item),
-                  },
+                  ...ownershipActionItems,
                   {
                     key: "trash",
                     icon: <DeleteOutlined />,
@@ -721,6 +947,76 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
     }
 
     function renderItem() {
+      const renderNode = (node: SidebarConversationNode) => {
+        const item = node.conversation;
+        const conversationId = item.conversation_id || "";
+        const selected = conversationId === currentSessionId;
+        const childrenExpanded = expandedParentIds.has(conversationId);
+        const record = showBatchExport ? (
+          <Checkbox
+            className="export-checkbox-item"
+            value={item.conversation_id}
+            disabled={isChildConversation(item) || node.isPlaceholderParent}
+          >
+            {renderItemText({
+              item,
+              selected,
+              childCount: node.children.length,
+              hideActions: node.isPlaceholderParent,
+            })}
+          </Checkbox>
+        ) : (
+          renderItemText({
+            item,
+            selected,
+            childCount: node.children.length,
+            hideActions: node.isPlaceholderParent,
+          })
+        );
+        return (
+          <Fragment key={conversationId}>
+            <Col span={24}>{record}</Col>
+            {childrenExpanded && node.children.length > 0 ? (
+              <Col span={24}>
+                <div
+                  id={`record-children-${conversationId}`}
+                  className="record-children"
+                  role="group"
+                  aria-label={t("chat.childConversationsLabel", {
+                    parent: item.display_name || conversationId,
+                  })}
+                >
+                  {node.children.map((child) => {
+                    const childSelected =
+                      child.conversation_id === currentSessionId;
+                    return showBatchExport ? (
+                      <Checkbox
+                        key={child.conversation_id}
+                        className="export-checkbox-item record-child-checkbox"
+                        value={child.conversation_id}
+                        disabled
+                      >
+                        {renderItemText({
+                          item: child,
+                          selected: childSelected,
+                          isChild: true,
+                        })}
+                      </Checkbox>
+                    ) : (
+                      renderItemText({
+                        item: child,
+                        selected: childSelected,
+                        isChild: true,
+                      })
+                    );
+                  })}
+                </div>
+              </Col>
+            ) : null}
+          </Fragment>
+        );
+      };
+
       if (compact) {
         return (
           <div className="record-groups">
@@ -728,23 +1024,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
               <div className="record-group" key={group.key}>
                 <div className="record-group-title">{group.title}</div>
                 <Row>
-                  {group.items.map((item) => {
-                    const selected = item.conversation_id === currentSessionId;
-                    return (
-                      <Col span={24} key={item.conversation_id}>
-                        {showBatchExport ? (
-                          <Checkbox
-                            className="export-checkbox-item"
-                            value={item.conversation_id}
-                          >
-                            {renderItemText({ item, selected })}
-                          </Checkbox>
-                        ) : (
-                          renderItemText({ item, selected })
-                        )}
-                      </Col>
-                    );
-                  })}
+                  {group.items.map((node) => renderNode(node))}
                 </Row>
               </div>
             ))}
@@ -753,23 +1033,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
       }
       return (
         <Row>
-          {historyList?.map((item) => {
-            const selected = item.conversation_id === currentSessionId;
-            return (
-              <Col span={24} key={item.conversation_id}>
-                {showBatchExport ? (
-                  <Checkbox
-                    className="export-checkbox-item"
-                    value={item.conversation_id}
-                  >
-                    {renderItemText({ item, selected })}
-                  </Checkbox>
-                ) : (
-                  renderItemText({ item, selected })
-                )}
-              </Col>
-            );
-          })}
+          {conversationTree.map((node) => renderNode(node))}
         </Row>
       );
     }
@@ -899,17 +1163,15 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
             <Checkbox
               indeterminate={
                 checkedList?.length > 0 &&
-                checkedList.length < historyList?.length
+                checkedList.length < batchSelectableConversationIds.length
               }
               checked={
-                historyList?.length === checkedList?.length &&
+                batchSelectableConversationIds.length === checkedList?.length &&
                 !!checkedList?.length
               }
               onChange={(e) =>
                 setCheckedList(
-                  e.target.checked
-                    ? historyList?.map((it) => it?.conversation_id ?? "")
-                    : [],
+                  e.target.checked ? batchSelectableConversationIds : [],
                 )
               }
             >
@@ -934,9 +1196,15 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
               scrollableTarget={scrollableTargetId}
             >
               {showBatchExport ? (
-                <Checkbox.Group
+                <Checkbox.Group<string>
                   className="export-checkbox-group"
-                  onChange={(list) => setCheckedList(list)}
+                  onChange={(list: string[]) =>
+                    setCheckedList(
+                      list.filter((id: string) =>
+                        batchSelectableConversationIds.includes(String(id)),
+                      ),
+                    )
+                  }
                   value={checkedList}
                 >
                   {renderItem()}

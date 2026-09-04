@@ -1,5 +1,6 @@
 import {
   Configuration,
+  type PreferenceOrganizerTaskData,
   DefaultApiFactory,
   type CurrentMemoryOperation,
   type CurrentMemoryOperationsRequest,
@@ -11,7 +12,7 @@ import {
 import { axiosInstance, BASE_URL } from "@/components/request";
 
 export type MemoryValue = string | null | string[] | MemoryDocument;
-export type MemoryDocument = Record<string, MemoryValue>;
+export interface MemoryDocument { [key: string]: MemoryValue }
 export type SoulDocument = MemoryDocument;
 export type MemoryOperation = CurrentMemoryOperation;
 export type MemoryPatch = CurrentMemoryOperationsRequest;
@@ -33,10 +34,9 @@ export interface PreferenceMemoryItem {
   updatedAt: string;
 }
 
-export interface PreferenceResidentIndexUsage {
-  usedItems: number;
-  maxItems: number;
-  overLimit: boolean;
+export interface PreferenceCharacterBudget {
+  usedChars: number;
+  maxChars: number;
 }
 
 export interface PreferenceMemoryList {
@@ -44,7 +44,7 @@ export interface PreferenceMemoryList {
   etag: string;
   totalSize: number;
   updatedAt: number;
-  residentIndexUsage?: PreferenceResidentIndexUsage;
+  budget?: PreferenceCharacterBudget;
 }
 
 export interface PreferenceMemoryReference {
@@ -85,18 +85,17 @@ const mapPreferenceItem = (
 const mapPreferenceList = (
   data: CurrentMemoryPreferenceListData,
 ): PreferenceMemoryList => {
-  const residentIndexUsage = data.resident_index_usage;
+  const projection = data.projection_state;
   return {
     items: data.items.map(mapPreferenceItem),
     etag: data.etag,
     totalSize: data.total_size,
     updatedAt: data.updated_at,
-    ...(residentIndexUsage
+    ...(projection
       ? {
-          residentIndexUsage: {
-            usedItems: residentIndexUsage.used_items,
-            maxItems: residentIndexUsage.max_items,
-            overLimit: residentIndexUsage.over_limit,
+          budget: {
+            usedChars: projection.full_projection_chars,
+            maxChars: projection.max_chars,
           },
         }
       : {}),
@@ -223,4 +222,22 @@ export async function deletePreferenceMemory(
   await currentMemoryApi.apiCoreMemoryPreferencesNameDelete({
     name: preferenceName,
   });
+}
+
+export type PreferenceOrganizerTask = PreferenceOrganizerTaskData;
+
+export async function getLatestPreferenceOrganizer(signal?: AbortSignal): Promise<PreferenceOrganizerTask | null> {
+  const response = await currentMemoryApi.apiCoreMemoryPreferencesOrganizeGet({ signal });
+  return response.data.data ?? null;
+}
+
+export async function submitPreferenceOrganizer(): Promise<PreferenceOrganizerTask> {
+  const response = await currentMemoryApi.apiCoreMemoryPreferencesOrganizePost();
+  if (!response.data.data) throw new Error("Missing organizer task response");
+  return response.data.data;
+}
+
+export function isPreferenceOrganizing(error: unknown): boolean {
+  const response = (error as { response?: { data?: { code?: number; data?: { error_code?: string } } } })?.response?.data;
+  return response?.code === 2002361 || response?.data?.error_code === "preference_organizing";
 }

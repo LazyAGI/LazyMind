@@ -1,0 +1,46 @@
+.conversation-relation-banner {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex: 0 0 auto;
+  padding: 7px 16px;
+  border-bottom: 1px solid #e8edf5;
+  background: #f8faff;
+  color: #526078;
+  font-size: 12px;
+  line-height: 20px;
+
+  &__source {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__back {
+    flex: 0 0 auto;
+    border-radius: 5px;
+    padding: 1px 7px;
+    color: #285ecb;
+    font-weight: 500;
+    text-decoration: none;
+
+    &:hover {
+      background: #edf3ff;
+      color: #174cae;
+    }
+
+    &:active {
+      transform: translateY(1px);
+    }
+
+    &:focus-visible {
+      outline: 2px solid #74a0ff;
+      outline-offset: 2px;
+    }
+  }
+}

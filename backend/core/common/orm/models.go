@@ -141,7 +141,13 @@ type Conversation struct {
 	Ext           json.RawMessage `gorm:"column:ext;type:json"`
 	Model         string          `gorm:"column:model;type:varchar(64);default:''"`
 	Models        json.RawMessage `gorm:"column:models;type:json"`
-	ChatTimes     int32           `gorm:"column:chat_times;not null;default:0"`
+	// ChatModel* stores the conversation-scoped chat LLM selection. Historical
+	// rows keep these fields empty and continue to use the user's runtime default.
+	ChatModelMode     *string         `gorm:"column:chat_model_mode;type:varchar(16)"`
+	ChatModelID       *string         `gorm:"column:chat_model_id;type:varchar(64)"`
+	ChatModelSnapshot json.RawMessage `gorm:"column:chat_model_snapshot;type:json"`
+	ChatModelVersion  int64           `gorm:"column:chat_model_version;not null;default:0"`
+	ChatTimes         int32           `gorm:"column:chat_times;not null;default:0"`
 	// Workflow/subagent policy snapshot. Historical NULL values use the legacy hard defaults.
 	EnableWorkflow *bool   `gorm:"column:enable_plugin"`
 	WorkflowMode   *string `gorm:"column:plugin_mode;type:varchar(16)"`
@@ -159,10 +165,18 @@ type Conversation struct {
 	SourceDatasetID    string     `gorm:"column:source_dataset_id;type:varchar(255);not null;default:''"`
 	SourceDocumentID   string     `gorm:"column:source_document_id;type:varchar(255);not null;default:''"`
 	SourceDisplayName  string     `gorm:"column:source_display_name;type:varchar(255);not null;default:''"`
-	PinnedAt           *time.Time `gorm:"column:pinned_at"`
-	ArchivedAt         *time.Time `gorm:"column:archived_at"`
-	ArchiveFolderID    *string    `gorm:"column:archive_folder_id;type:varchar(36)"`
-	TrashExpiresAt     *time.Time `gorm:"column:trash_expires_at"`
+	// ParentConversationID and relation metadata keep side chats/forks attached
+	// to their owner conversation without mixing their independent histories.
+	ParentConversationID *string         `gorm:"column:parent_conversation_id;type:varchar(36);index"`
+	RelationType         string          `gorm:"column:relation_type;type:varchar(16);not null;default:'';check:chk_conversations_relation_type,relation_type IN ('','sidechat','fork')"`
+	SourceHistoryID      *string         `gorm:"column:source_history_id;type:varchar(36)"`
+	SourceSeq            *int            `gorm:"column:source_seq"`
+	SourceSelectedText   string          `gorm:"column:source_selected_text;type:text;not null;default:''"`
+	SourceContext        json.RawMessage `gorm:"column:source_context;type:json"`
+	PinnedAt             *time.Time      `gorm:"column:pinned_at"`
+	ArchivedAt           *time.Time      `gorm:"column:archived_at"`
+	ArchiveFolderID      *string         `gorm:"column:archive_folder_id;type:varchar(36)"`
+	TrashExpiresAt       *time.Time      `gorm:"column:trash_expires_at"`
 
 	BaseModel
 }

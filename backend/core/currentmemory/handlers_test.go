@@ -327,7 +327,7 @@ func TestOldUserProfileEditReconcilesAndAppliesOperationsInOneWrite(t *testing.T
 
 func TestPreferencePublicHandlersListDetailReorderAndDelete(t *testing.T) {
 	db := newCurrentMemoryTestDB(t)
-	handler := NewHandlerWithPreferenceIndexMaxItems(db.DB, 2)
+	handler := NewHandlerWithPreferenceContextMaxChars(db.DB, 5000)
 	repository := NewRepository(db.DB)
 	if err := repository.EnsureInitialized(t.Context(), "user-1"); err != nil {
 		t.Fatalf("initialize memory: %v", err)
@@ -397,15 +397,16 @@ func TestPreferencePublicHandlersListDetailReorderAndDelete(t *testing.T) {
 		listed.Data.UpdatedAt == 0 {
 		t.Fatalf("unexpected list response: %#v", listed.Data)
 	}
-	if listed.Data.ResidentIndexUsage.UsedItems != 2 ||
-		listed.Data.ResidentIndexUsage.MaxItems != 2 ||
-		listed.Data.ResidentIndexUsage.OverLimit {
-		t.Fatalf(
-			"unexpected resident index usage: %#v",
-			listed.Data.ResidentIndexUsage,
-		)
+	if listed.Data.ProjectionState.MaxChars != 5000 {
+		t.Fatalf("unexpected character budget: %#v", listed.Data.ProjectionState)
 	}
-	overLimitHandler := NewHandlerWithPreferenceIndexMaxItems(db.DB, 1)
+	if listed.Data.ProjectionState.StoredItems != 2 ||
+		listed.Data.ProjectionState.ProjectedItems != 2 ||
+		listed.Data.ProjectionState.ProjectionTruncated ||
+		listed.Data.ProjectionState.FullProjectionChars == 0 {
+		t.Fatalf("unexpected projection state: %#v", listed.Data.ProjectionState)
+	}
+	overLimitHandler := NewHandlerWithPreferenceContextMaxChars(db.DB, 1)
 	overLimitRecorder := httptest.NewRecorder()
 	overLimitHandler.ListPreferences(overLimitRecorder, listRequest)
 	var overLimitListed struct {
@@ -414,12 +415,13 @@ func TestPreferencePublicHandlersListDetailReorderAndDelete(t *testing.T) {
 	if err := json.Unmarshal(overLimitRecorder.Body.Bytes(), &overLimitListed); err != nil {
 		t.Fatalf("decode over-limit list response: %v", err)
 	}
-	if !overLimitListed.Data.ResidentIndexUsage.OverLimit ||
-		overLimitListed.Data.ResidentIndexUsage.MaxItems != 1 {
-		t.Fatalf(
-			"unexpected over-limit usage: %#v",
-			overLimitListed.Data.ResidentIndexUsage,
-		)
+	if overLimitListed.Data.ProjectionState.MaxChars != 1 || overLimitListed.Data.ProjectionState.ProjectedChars != 0 {
+		t.Fatalf("empty envelope exceeded tiny budget: %#v", overLimitListed.Data.ProjectionState)
+	}
+	if overLimitListed.Data.ProjectionState.StoredItems != 2 ||
+		overLimitListed.Data.ProjectionState.ProjectedItems != 0 ||
+		!overLimitListed.Data.ProjectionState.ProjectionTruncated {
+		t.Fatalf("unexpected over-limit projection: %#v", overLimitListed.Data.ProjectionState)
 	}
 	if bytes.Contains(listRecorder.Body.Bytes(), []byte(`"ref"`)) {
 		t.Fatalf("public preference list leaked ref: %s", listRecorder.Body.String())
