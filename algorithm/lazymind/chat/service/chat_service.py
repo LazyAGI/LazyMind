@@ -67,6 +67,7 @@ from lazymind.chat.engine.agent_runtime import (
     render_attachment_content,
 )
 from lazymind.chat.engine.agent_runtime.budget import resolve_max_input_tokens
+from lazymind.chat.service.local_observation import LocalObservationWriter
 from lazymind.chat.engine.tools.local_file.workspace import build_resource_read_tools, chat_agent_workspace
 from lazymind.chat.engine.tools.intent_writer import (
     build_intentwrite_tool,
@@ -102,6 +103,21 @@ sensitive_filter = SensitiveFilter(
 # Used by task-cancel endpoint to cancel ChatAgent by conversation_id.
 _active_sessions: dict[str, str] = {}
 _conversation_env_vars: dict[str, dict[str, str]] = {}
+_observation_writer: Optional[LocalObservationWriter] = None
+_observation_writer_lock = threading.Lock()
+
+
+def _local_observation_writer() -> LocalObservationWriter:
+    global _observation_writer
+    if _observation_writer is None:
+        with _observation_writer_lock:
+            if _observation_writer is None:
+                directory = os.environ.get(
+                    'LAZYMIND_OBSERVABILITY_DIR',
+                    os.path.join(str(_cfg['temp_dir']), 'observability'),
+                )
+                _observation_writer = LocalObservationWriter(directory)
+    return _observation_writer
 
 
 def _unregister_active_session(conversation_id: str, session_id: str) -> None:
@@ -1742,6 +1758,29 @@ async def _handle_chat_impl(
             max_input_tokens=resolve_max_input_tokens(runtime.llm_config or {}),
         )
         terminal_frame['tool_call_turns'] = translator.tool_call_turns
+        metrics = terminal_frame.get('performance_metrics')
+        if isinstance(metrics, dict):
+            try:
+                writer = _local_observation_writer()
+                writer.write_summary({
+                    'run_id': translator.run.run_id,
+                    'status': outcome.value,
+                    'model': metrics.get('model'),
+                    'metrics': {
+                        key: value for key, value in metrics.items()
+                        if key != 'provider_usages'
+                    },
+                })
+                writer.write_full({
+                    'run_id': translator.run.run_id,
+                    'status': outcome.value,
+                    'observation': {
+                        'model_events': translator.model_events,
+                        'metrics': metrics,
+                    },
+                })
+            except Exception as exc:
+                LOG.warning(f'[ChatServer] local performance observation failed: {exc}')
         yield log_and_emit_frame(terminal_frame, cost, query, conversation.session_id, tag='RUN_FINISH')
 
         databases_str = json.dumps(retrieval.databases, ensure_ascii=False) if retrieval.databases else []

@@ -79,6 +79,7 @@ class AgentEventFrameTranslator:
         self.ask_pending_emitted = False
         self.tool_call_turns = 0
         self.metrics = RunMetricsTracker(clock or time.monotonic)
+        self.model_events: list[dict[str, Any]] = []
         self.text_scanner, self.citation_plugin = build_stream_citation_scanner(self.citation_state)
 
     def feed(self, event: Any) -> list[dict[str, Any]]:
@@ -97,6 +98,7 @@ class AgentEventFrameTranslator:
             if not isinstance(value.get('data'), dict):
                 raise ValueError('runtime_event data must be an object')
             self.run.observe_model_event(value)
+            self.model_events.append(value)
             if value.get('type') == 'model_call_finished':
                 self.metrics.on_model_call_finished()
             frames.append(_stream_frame(extra={'runtime_event': value}))
@@ -213,13 +215,18 @@ class AgentEventFrameTranslator:
         metrics = self.metrics.snapshot(
             usage=usage,
             usage_map=usage_map,
+            model_events=self.model_events,
             module_id=module_id,
             llm_config=llm_config,
             turn_seq=turn_seq,
             max_input_tokens=max_input_tokens,
         )
         return _stream_frame(extra={
-            'runtime_event': self.run.finish(outcome=outcome, metrics=metrics),
+            # Performance data is an observation side-channel. Keep it out of
+            # run_terminal so chat-history persistence does not become an
+            # observability store.
+            'runtime_event': self.run.finish(outcome=outcome),
+            'performance_metrics': metrics,
         })
 
     def flush(self) -> list[dict[str, Any]]:

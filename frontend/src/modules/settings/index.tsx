@@ -42,6 +42,7 @@ import { runtimeFeatures } from "@/runtime/features";
 import { isDesktopRuntime, isLocalRuntime } from "@/runtime/mode";
 import { setDeveloperModeActive } from "@/utils/developerMode";
 import { setSensitiveWordFilterEnabled } from "@/utils/sensitiveWordFilter";
+import { setPerformanceStatsEnabled as cachePerformanceStatsEnabled } from "@/utils/performanceStatsPreference";
 import MemoryCapabilitySettings from "./MemoryCapabilitySettings";
 import KnowledgeDataSettings from "./KnowledgeDataSettings";
 import KnowledgeToolSettings, { isKnowledgeToolView } from "./KnowledgeToolSettings";
@@ -253,7 +254,9 @@ export default function SettingsPage() {
       if (requestID !== latestRequest.current) return;
       setOverview(nextOverview);
       setDeveloperActive(preferences.developer_mode_active);
-      setPerformanceStatsEnabled(Boolean(preferences.performance_stats_enabled));
+      const performanceEnabled = Boolean(preferences.performance_stats_enabled);
+      setPerformanceStatsEnabled(performanceEnabled);
+      cachePerformanceStatsEnabled(performanceEnabled);
       const sensitiveWordFilterEnabled = Boolean(preferences.sensitive_word_filter_enabled);
       setSensitiveWordFilterEnabled(sensitiveWordFilterEnabled);
       setSensitiveWordFilterEnabledState(sensitiveWordFilterEnabled);
@@ -929,7 +932,7 @@ export default function SettingsPage() {
                   setSaving("performance_stats");
                   try {
                     await patchUserUiPreferences({ performance_stats_enabled: enabled });
-                    setPerformanceStatsEnabled(enabled);
+                    cachePerformanceStatsEnabled(enabled);
                     message.success(t("settingsPage.saved"));
                   } catch {
                     message.error(t("settingsPage.saveFailed"));

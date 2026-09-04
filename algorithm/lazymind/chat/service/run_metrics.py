@@ -113,12 +113,20 @@ class RunMetricsTracker:
         llm_config: Optional[dict[str, Any]] = None,
         turn_seq: Optional[int] = None,
         max_input_tokens: Optional[int] = None,
+        model_events: Optional[list[dict[str, Any]]] = None,
     ) -> dict[str, Any]:
         self.finish()
         wall_ms = max(0.0, (self._clock() - self._started) * 1000.0)
         if self.tool_ms > 0:
             self.model_ms = max(0.0, wall_ms - self.tool_ms)
-        chosen = choose_usage_record(usage, usage_map, module_id)
+        event_usages = [
+            data.get('usage') for event in (model_events or [])
+            if isinstance(event, dict)
+            and isinstance((data := event.get('data')), dict)
+            and isinstance(data.get('usage'), dict)
+        ]
+        chosen = ({'provider_usages': event_usages} if event_usages
+                  else choose_usage_record(usage, usage_map, module_id))
         frames = usage_frames(chosen)
         adapted_frames = [adapt_usage_frame(frame) for frame in frames]
         provider = combine_adapted_usage(adapted_frames)

@@ -45,6 +45,14 @@ type MetricsRow = {
   metrics: RunPerformanceMetrics;
 };
 
+type PerformanceMessage = {
+  role?: string;
+  seq?: number;
+  run_terminal?: unknown;
+  performance_metrics?: RunPerformanceMetrics;
+  answers?: Array<{ run_terminal?: unknown; performance_metrics?: RunPerformanceMetrics }>;
+};
+
 function asFiniteNumber(value: unknown): number | undefined {
   const parsed = typeof value === "number" ? value : Number(value);
   return Number.isFinite(parsed) ? parsed : undefined;
@@ -79,7 +87,7 @@ export function metricsFromRunTerminal(terminal: unknown): RunPerformanceMetrics
 }
 
 export function foldSessionPerformanceStats(
-  messageList: Array<{ role?: string; seq?: number; run_terminal?: unknown; answers?: Array<{ run_terminal?: unknown }> }>,
+  messageList: PerformanceMessage[],
 ): SessionPerformanceStats | undefined {
   const rows: MetricsRow[] = [];
   const seqs = new Set<number>();
@@ -87,9 +95,15 @@ export function foldSessionPerformanceStats(
     if (item?.role !== RoleTypes.ASSISTANT) continue;
     const seq = asFiniteNumber(item.seq);
     const collected: RunPerformanceMetrics[] = [];
+    if (item.performance_metrics && typeof item.performance_metrics === "object") {
+      collected.push(item.performance_metrics);
+    }
     const own = metricsFromRunTerminal(item.run_terminal);
     if (own) collected.push(own);
     for (const answer of item.answers || []) {
+      if (answer.performance_metrics && typeof answer.performance_metrics === "object") {
+        collected.push(answer.performance_metrics);
+      }
       const nested = metricsFromRunTerminal(answer.run_terminal);
       if (nested) collected.push(nested);
     }

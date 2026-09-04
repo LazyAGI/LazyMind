@@ -57,7 +57,8 @@ def test_dsh_steps_count_model_and_each_tool():
         turn_seq=3,
         max_input_tokens=1000,
     )
-    metrics = frame['runtime_event']['data']['metrics']
+    metrics = frame['performance_metrics']
+    assert 'metrics' not in frame['runtime_event']['data']
     assert metrics['steps'] == 4
     assert metrics['model_steps'] == 2
     assert metrics['tool_steps'] == 2
@@ -98,7 +99,7 @@ def test_measured_tool_duration_is_not_attributed_to_model():
         'tool_results': [{'id': '1'}],
     })
     clock.add(1.0)
-    metrics = translator.finish_run(outcome=RunOutcome.SUCCEEDED)['runtime_event']['data']['metrics']
+    metrics = translator.finish_run(outcome=RunOutcome.SUCCEEDED)['performance_metrics']
     assert metrics['tool_ms'] == 1500
     assert metrics['model_ms'] == 9500
 
@@ -149,3 +150,27 @@ def test_snapshot_sums_provider_usages_and_uses_last_call_for_context():
     assert metrics['cache_hit_rate'] == 80 / 150
     assert metrics['context_ratio'] == 0.05
     assert len(metrics['provider_usages']) == 2
+
+
+def test_model_call_event_usage_is_preferred_over_global_usage_map():
+    translator = AgentEventFrameTranslator(query='q', run_id='run-1', clock=lambda: 0.0)
+    translator.feed({
+        'tag': 'runtime_event',
+        'runtime_event': {
+            'schema_version': 1,
+            'event_id': 'e1',
+            'type': 'model_call_finished',
+            'data': {
+                'model_call_id': 'call-1',
+                'kind': 'finish',
+                'has_semantic_output': True,
+                'usage': {'prompt_tokens': 10, 'completion_tokens': 2},
+            },
+        },
+    })
+    metrics = translator.finish_run(
+        outcome=RunOutcome.SUCCEEDED,
+        usage={'prompt_tokens': 999, 'completion_tokens': 999},
+    )['performance_metrics']
+    assert metrics['input_tokens'] == 10
+    assert metrics['output_tokens'] == 2

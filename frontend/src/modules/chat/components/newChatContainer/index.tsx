@@ -44,6 +44,10 @@ import {
   fetchUserUiPreferences,
   USER_UI_PREFERENCES_CHANGED_EVENT,
 } from "@/modules/user/uiPreferencesApi";
+import {
+  isPerformanceStatsEnabled,
+  PERFORMANCE_STATS_EVENT,
+} from "@/utils/performanceStatsPreference";
 
 export type { ChatImperativeProps, ChatMessage } from "./types";
 
@@ -165,7 +169,9 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
     const skillDepositWasReadyRef = useRef(false);
     const skillDepositMessageCountRef = useRef(0);
     const [developerModeActive, setDeveloperModeActive] = useState(isDeveloperModeActive());
-    const [performanceStatsEnabled, setPerformanceStatsEnabled] = useState(false);
+    const [performanceStatsEnabled, setPerformanceStatsEnabled] = useState(
+      isPerformanceStatsEnabled(),
+    );
 
     useEffect(() => {
       const syncDeveloper = (event?: Event) => {
@@ -186,10 +192,18 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
       };
       window.addEventListener(DEVELOPER_ACTIVE_EVENT, syncDeveloper);
       window.addEventListener(USER_UI_PREFERENCES_CHANGED_EVENT, syncPreferences);
+      const syncPerformancePreference = (event: Event) => {
+        const detail = (event as CustomEvent<{ performance_stats_enabled?: boolean }>)?.detail;
+        if (typeof detail?.performance_stats_enabled === "boolean") {
+          setPerformanceStatsEnabled(detail.performance_stats_enabled);
+        }
+      };
+      window.addEventListener(PERFORMANCE_STATS_EVENT, syncPerformancePreference);
       syncPreferences();
       return () => {
         window.removeEventListener(DEVELOPER_ACTIVE_EVENT, syncDeveloper);
         window.removeEventListener(USER_UI_PREFERENCES_CHANGED_EVENT, syncPreferences);
+        window.removeEventListener(PERFORMANCE_STATS_EVENT, syncPerformancePreference);
       };
     }, []);
 
