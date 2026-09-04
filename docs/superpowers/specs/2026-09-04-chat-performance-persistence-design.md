@@ -74,7 +74,7 @@ Local-write failure is logged but does not suppress the terminal SSE or database
 
 - The database table stores no prompt, completion text, headers, API keys, provider errors, or provider-specific raw usage.
 - API reads are scoped through the owning conversation and authenticated user, rather than by unrestricted `run_id` lookup.
-- Deleting a conversation removes its performance rows in the same deletion workflow.
+- Moving a conversation to the 30-day trash retains its performance rows so recovery is complete. Permanently purging the conversation removes the rows in the same database transaction.
 - Local observations contain operational identifiers and redacted metrics only. Rotation bounds retention; they are not used as a user-facing source of truth.
 
 ## OpenTelemetry compatibility
@@ -96,7 +96,7 @@ The JSONL files are not advertised as OTLP JSON. A future adapter or Collector p
 
 - Algorithm tests cover normalized facts, unknown usage, redaction, and local file writes.
 - Core stream tests prove metrics survive Algorithm-to-Core decoding, validation, SSE forwarding, and authoritative-run selection.
-- Core persistence tests cover upsert idempotency, unknown-as-null, ownership guards, batched history hydration, multi-answer history, and conversation deletion.
+- Core persistence tests cover upsert idempotency, unknown-as-null, ownership guards, batched history hydration, multi-answer history, trash recovery, and permanent conversation purge.
 - Frontend tests prove a restored history message produces the same session statistics as a live terminal frame.
 - Compose validation proves Chat receives a writable `data/observability` mount.
 - Build and runtime verification cover `core`, `chat`, and `frontend`; only `core` and `frontend` require image builds because Chat loads the repository's mounted Python sources in this development Compose setup.
