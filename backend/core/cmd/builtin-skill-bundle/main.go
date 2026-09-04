@@ -87,6 +87,7 @@ type sourceSpec struct {
 	SourceURL       string
 	ResolvedURL     string
 	PathPrefix      string
+	GitHubSource    bool
 	Identity        string
 	Key             string
 	FallbackName    string
@@ -490,6 +491,7 @@ func resolveSourceInputWithResolverAndLockedArchive(ctx context.Context, client 
 		if matched {
 			spec.ResolvedURL = githubResolution.DownloadURL
 			spec.PathPrefix = githubResolution.PathPrefix
+			spec.GitHubSource = true
 		}
 		spec.FallbackName = source.FallbackName
 		spec.Category = source.Category
@@ -765,12 +767,12 @@ func resolvedSkillVersion(spec sourceSpec, metadataVersion string, files map[str
 	if version == "" {
 		version = strings.TrimSpace(metadataVersion)
 	}
-	if version == "" {
+	if version == "" && !spec.GitHubSource {
 		var raw packageMeta
 		_ = json.Unmarshal(files["_meta.json"], &raw)
 		version = strings.TrimSpace(raw.Version)
 	}
-	if version == "" {
+	if version == "" && !spec.GitHubSource {
 		version = strings.TrimSpace(spec.FallbackVersion)
 	}
 	if version == "" {

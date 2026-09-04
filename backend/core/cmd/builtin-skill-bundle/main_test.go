@@ -69,6 +69,21 @@ func TestResolveSourceInputPinsFeaturedSkillHubRequiredVersion(t *testing.T) {
 	}
 }
 
+func TestResolvedSkillVersionUsesGitHubSkillMetadataOrTreeHash(t *testing.T) {
+	treeHash := strings.Repeat("a", 64)
+	files := map[string][]byte{"_meta.json": []byte(`{"version":"9.9.9"}`)}
+
+	if got := resolvedSkillVersion(sourceSpec{GitHubSource: true}, "1.2.3", files, treeHash); got != "1.2.3" {
+		t.Fatalf("GitHub SKILL.md version = %q", got)
+	}
+	if got := resolvedSkillVersion(sourceSpec{GitHubSource: true}, "", files, treeHash); got != "0.0.0+"+treeHash[:12] {
+		t.Fatalf("versionless GitHub content version = %q", got)
+	}
+	if got := resolvedSkillVersion(sourceSpec{}, "", files, treeHash); got != "9.9.9" {
+		t.Fatalf("non-GitHub package metadata version = %q", got)
+	}
+}
+
 func TestFrozenDownloadURLPinsSkillHubVersion(t *testing.T) {
 	spec, err := resolveSource("https://skillhub.cn/skills/user_5b28ea14/smart-charts")
 	if err != nil {
@@ -609,7 +624,8 @@ func TestRunBuildsFeaturedSkillFromGitHubSubdirectoryAndPreservesSource(t *testi
 		archiveURL = "https://github.com/example/skills/archive/main.zip"
 	)
 	archive := makeSkillZipFromFiles(t, map[string][]byte{
-		"skills-main/skills/target/SKILL.md":        []byte("---\nname: target\ndescription: target skill\nversion: 1.2.3\n---\n# Target\n"),
+		"skills-main/skills/target/SKILL.md":        []byte("---\nname: target\ndescription: target skill\n---\n# Target\n"),
+		"skills-main/skills/target/_meta.json":      []byte(`{"version":"9.9.9"}`),
 		"skills-main/skills/target/scripts/run.py":  []byte("print('target')\n"),
 		"skills-main/skills/ignored/SKILL.md":       []byte("---\nname: ignored\ndescription: ignored skill\nversion: 1.2.3\n---\n# Ignored\n"),
 		"skills-main/skills/ignored/scripts/run.py": []byte("print('ignored')\n"),
@@ -645,7 +661,7 @@ func TestRunBuildsFeaturedSkillFromGitHubSubdirectoryAndPreservesSource(t *testi
 	featuredSources := filepath.Join(root, "featured")
 	featuredDir := filepath.Join(featuredSources, "demo-featured")
 	writeTestPNG(t, filepath.Join(featuredDir, "assets", "cover.png"))
-	if err := os.WriteFile(filepath.Join(featuredDir, "featured.yaml"), []byte(testFeaturedDefinition(sourceURL, "1.2.3")), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(featuredDir, "featured.yaml"), []byte(testFeaturedDefinition(sourceURL, "")), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	opts := options{
@@ -670,15 +686,18 @@ func TestRunBuildsFeaturedSkillFromGitHubSubdirectoryAndPreservesSource(t *testi
 	if entry.SourceURL != sourceURL || entry.ResolvedURL != archiveURL || skillbuiltin.CatalogSkillMarketVisible(entry) {
 		t.Fatalf("GitHub Featured Skill provenance/distribution = %#v", entry)
 	}
+	if want := "0.0.0+" + entry.TreeSHA256[:12]; entry.Version != want {
+		t.Fatalf("versionless GitHub Featured Skill version = %q, want %q", entry.Version, want)
+	}
 	lockedEntry := readCatalog(t, opts.Lock).Skills[0]
-	if lockedEntry.SourceURL != sourceURL || lockedEntry.ResolvedURL != archiveURL {
+	if lockedEntry.SourceURL != sourceURL || lockedEntry.ResolvedURL != archiveURL || lockedEntry.Version != entry.Version || lockedEntry.ArchiveSHA256 != entry.ArchiveSHA256 || lockedEntry.TreeSHA256 != entry.TreeSHA256 {
 		t.Fatalf("GitHub Featured Skill lock provenance = %#v", lockedEntry)
 	}
 	pkg, err := skillpackage.ReadZip(filepath.Join(opts.Output, filepath.FromSlash(entry.PackageFile)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(pkg.Files) != 2 || string(pkg.Files["scripts/run.py"]) != "print('target')\n" {
+	if len(pkg.Files) != 3 || string(pkg.Files["scripts/run.py"]) != "print('target')\n" {
 		t.Fatalf("selected GitHub Skill files = %#v", pkg.Files)
 	}
 	if _, exists := pkg.Files["skills/ignored/SKILL.md"]; exists {
@@ -922,6 +941,10 @@ func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) 
 }
 
 func testFeaturedDefinition(source, requiredVersion string) string {
+	requiredVersionLine := ""
+	if requiredVersion != "" {
+		requiredVersionLine = "  required_version: " + requiredVersion + "\n"
+	}
 	return `schema_version: 2
 id: demo-featured
 type: work
@@ -932,8 +955,7 @@ provider: LazyMind
 skill:
   source_url: ` + source + `
   category: Demo
-  required_version: ` + requiredVersion + `
-placement:
+` + requiredVersionLine + `placement:
   home: true
   gallery: true
   order: 9
