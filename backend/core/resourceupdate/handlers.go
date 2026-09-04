@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -373,12 +374,16 @@ func (w *Worker) handleMemoryReview(ctx context.Context, task orm.ResourceUpdate
 		Msg(logEventMemoryReviewCallStart)
 	resp, status, err := w.callers.Memory(ctx, algo.MemoryReviewRequest{
 		TaskID:                     reviewTaskID,
+		RunID:                      task.RunID,
 		UserID:                     userID,
 		ConversationID:             conversationID,
 		ConversationLastActiveAtMS: request.ConversationLastActiveAtMS,
 		History:                    decodeHistory(request.History),
 		LLMConfig:                  llmConfig,
 	})
+	if status == http.StatusServiceUnavailable && algo.IsMaintenanceBusy(err) {
+		return deferredOutcome("maintenance_busy", "maintenance executor is full", 2*time.Second)
+	}
 	if err != nil {
 		resourceUpdateWarn(logEventMemoryReviewCallFailed, err).
 			Str("task_id", task.ID).

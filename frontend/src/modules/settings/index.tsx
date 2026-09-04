@@ -41,6 +41,7 @@ import { fetchUserUiPreferences, patchUserUiPreferences } from "@/modules/user/u
 import { runtimeFeatures } from "@/runtime/features";
 import { isDesktopRuntime, isLocalRuntime } from "@/runtime/mode";
 import { setDeveloperModeActive } from "@/utils/developerMode";
+import { setSensitiveWordFilterEnabled } from "@/utils/sensitiveWordFilter";
 import MemoryCapabilitySettings from "./MemoryCapabilitySettings";
 import KnowledgeDataSettings from "./KnowledgeDataSettings";
 import KnowledgeToolSettings, { isKnowledgeToolView } from "./KnowledgeToolSettings";
@@ -205,9 +206,10 @@ export default function SettingsPage() {
   const [overview, setOverview] = useState<SettingsOverview | null>(null);
   const [developerActive, setDeveloperActive] = useState(false);
   const [performanceStatsEnabled, setPerformanceStatsEnabled] = useState(false);
+  const [sensitiveWordFilterEnabled, setSensitiveWordFilterEnabledState] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
-  const [saving, setSaving] = useState<MasterSetting | "developer" | "performance_stats" | null>(null);
+  const [saving, setSaving] = useState<MasterSetting | "developer" | "performance_stats" | "sensitive_word_filter" | null>(null);
   const [checks, setChecks] = useState<SettingsCheckResult[] | null>(null);
   const [checking, setChecking] = useState(false);
   const [diagnosticLoading, setDiagnosticLoading] = useState(false);
@@ -252,6 +254,9 @@ export default function SettingsPage() {
       setOverview(nextOverview);
       setDeveloperActive(preferences.developer_mode_active);
       setPerformanceStatsEnabled(Boolean(preferences.performance_stats_enabled));
+      const sensitiveWordFilterEnabled = Boolean(preferences.sensitive_word_filter_enabled);
+      setSensitiveWordFilterEnabled(sensitiveWordFilterEnabled);
+      setSensitiveWordFilterEnabledState(sensitiveWordFilterEnabled);
     } catch {
       if (requestID !== latestRequest.current) return;
       setLoadError(true);
@@ -879,6 +884,32 @@ export default function SettingsPage() {
               disabled={saving !== null}
               onChange={requestDeveloperChange}
               aria-label={t("settingsPage.developer.modeAria")}
+            />
+          </div>
+          <div className="settings-detail-row">
+            <div>
+              <strong>{t("settingsPage.developer.sensitiveWordFilter")}</strong>
+              <p>{t("settingsPage.developer.sensitiveWordFilterDesc")}</p>
+            </div>
+            <Switch
+              className="settings-ref-switch"
+              checked={sensitiveWordFilterEnabled}
+              loading={saving === "sensitive_word_filter"}
+              disabled={!developerActive || saving !== null}
+              onChange={async (enabled) => {
+                setSaving("sensitive_word_filter");
+                try {
+                  await patchUserUiPreferences({ sensitive_word_filter_enabled: enabled });
+                  setSensitiveWordFilterEnabled(enabled);
+                  await refresh();
+                  message.success(t("settingsPage.saved"));
+                } catch {
+                  message.error(t("settingsPage.saveFailed"));
+                } finally {
+                  setSaving(null);
+                }
+              }}
+              aria-label={t("settingsPage.developer.sensitiveWordFilterAria")}
             />
           </div>
         </div>

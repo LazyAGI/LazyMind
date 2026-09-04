@@ -23,6 +23,7 @@ import (
 type uiPreferencesResponse struct {
 	ChatPreferenceNoticeDismissed bool   `json:"chat_preference_notice_dismissed"`
 	DeveloperModeActive           bool   `json:"developer_mode_active"`
+	SensitiveWordFilterEnabled    bool   `json:"sensitive_word_filter_enabled"`
 	AcceptedUserAgreementVersion  string `json:"accepted_user_agreement_version"`
 	TaskCenterEnabled             bool   `json:"task_center_enabled"`
 	SchedulesEnabled              bool   `json:"schedules_enabled"`
@@ -38,6 +39,7 @@ type uiPreferencesResponse struct {
 type uiPreferencesPatchRequest struct {
 	ChatPreferenceNoticeDismissed *bool   `json:"chat_preference_notice_dismissed"`
 	DeveloperModeActive           *bool   `json:"developer_mode_active"`
+	SensitiveWordFilterEnabled    *bool   `json:"sensitive_word_filter_enabled"`
 	AcceptedUserAgreementVersion  *string `json:"accepted_user_agreement_version"`
 	TaskCenterEnabled             *bool   `json:"task_center_enabled"`
 	SchedulesEnabled              *bool   `json:"schedules_enabled"`
@@ -92,6 +94,7 @@ func PatchUIPreferences(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.ChatPreferenceNoticeDismissed == nil &&
 		req.DeveloperModeActive == nil &&
+		req.SensitiveWordFilterEnabled == nil &&
 		req.AcceptedUserAgreementVersion == nil &&
 		req.TaskCenterEnabled == nil &&
 		req.SchedulesEnabled == nil &&
@@ -231,6 +234,9 @@ func UpsertUserUIPreferences(ctx context.Context, db *gorm.DB, userID string, re
 		if req.DeveloperModeActive != nil {
 			row.DeveloperModeActive = *req.DeveloperModeActive
 		}
+		if req.SensitiveWordFilterEnabled != nil {
+			row.SensitiveWordFilterEnabled = *req.SensitiveWordFilterEnabled
+		}
 		if req.AcceptedUserAgreementVersion != nil {
 			row.AcceptedUserAgreementVersion = strings.TrimSpace(*req.AcceptedUserAgreementVersion)
 		}
@@ -261,6 +267,7 @@ func UpsertUserUIPreferences(ctx context.Context, db *gorm.DB, userID string, re
 			"user_id":                          row.UserID,
 			"chat_preference_notice_dismissed": row.ChatPreferenceNoticeDismissed,
 			"developer_mode_active":            row.DeveloperModeActive,
+			"sensitive_word_filter_enabled":    row.SensitiveWordFilterEnabled,
 			"accepted_user_agreement_version":  row.AcceptedUserAgreementVersion,
 			"task_center_enabled":              row.TaskCenterEnabled,
 			"schedules_enabled":                row.SchedulesEnabled,
@@ -288,6 +295,10 @@ func UpsertUserUIPreferences(ctx context.Context, db *gorm.DB, userID string, re
 	if req.DeveloperModeActive != nil {
 		updates["developer_mode_active"] = *req.DeveloperModeActive
 		row.DeveloperModeActive = *req.DeveloperModeActive
+	}
+	if req.SensitiveWordFilterEnabled != nil {
+		updates["sensitive_word_filter_enabled"] = *req.SensitiveWordFilterEnabled
+		row.SensitiveWordFilterEnabled = *req.SensitiveWordFilterEnabled
 	}
 	if req.AcceptedUserAgreementVersion != nil {
 		version := strings.TrimSpace(*req.AcceptedUserAgreementVersion)
@@ -358,6 +369,7 @@ func buildUIPreferencesResponse(row orm.UserUIPreferences, userPreferenceConfigu
 	return uiPreferencesResponse{
 		ChatPreferenceNoticeDismissed: row.ChatPreferenceNoticeDismissed,
 		DeveloperModeActive:           row.DeveloperModeActive,
+		SensitiveWordFilterEnabled:    row.SensitiveWordFilterEnabled,
 		AcceptedUserAgreementVersion:  row.AcceptedUserAgreementVersion,
 		TaskCenterEnabled:             row.TaskCenterEnabled,
 		SchedulesEnabled:              row.SchedulesEnabled,

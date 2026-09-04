@@ -23,6 +23,15 @@ export interface StreamState {
   messageList?: any[];
 }
 
+export interface StreamRegistrationOptions {
+  /**
+   * Keeps this stream outside the legacy single-active-conversation eviction
+   * policy. Side chats opt in so opening either composer cannot interrupt the
+   * other one; existing callers retain the original exclusive behaviour.
+   */
+  allowConcurrent?: boolean;
+}
+
 export interface RunTerminal {
   status: "completed" | "interrupted" | "failed" | "cancelled";
   reason:
@@ -35,6 +44,7 @@ export interface RunTerminal {
   code?: string;
   partial_output: boolean;
   model_call_id?: string;
+  model_invoked?: boolean;
   diagnostic_id?: string;
   metrics?: RunPerformanceMetrics;
 }
@@ -43,6 +53,7 @@ export class StreamManager {
   private streams: Map<string, SSE> = new Map();
   private callbacks: Map<string, StreamCallbacks> = new Map();
   private streamStates: Map<string, StreamState> = new Map();
+  private registrations: Map<string, StreamRegistrationOptions> = new Map();
   private activeConversationId: string | null = null;
 
   registerStream(
@@ -50,9 +61,16 @@ export class StreamManager {
     sse: SSE,
     callbacks: StreamCallbacks,
     initialEvent?: CustomEvent,
+    options: StreamRegistrationOptions = {},
   ): void {
     this.streams.forEach((existing, existingConversationId) => {
-      if (existingConversationId !== conversationId) {
+      const existingAllowsConcurrent =
+        this.registrations.get(existingConversationId)?.allowConcurrent === true;
+      if (
+        existingConversationId !== conversationId &&
+        options.allowConcurrent !== true &&
+        !existingAllowsConcurrent
+      ) {
         try {
           existing.close();
         } catch (error) {
@@ -61,6 +79,7 @@ export class StreamManager {
         this.streams.delete(existingConversationId);
         this.callbacks.delete(existingConversationId);
         this.streamStates.delete(existingConversationId);
+        this.registrations.delete(existingConversationId);
       }
     });
 
@@ -83,6 +102,7 @@ export class StreamManager {
 
     this.streams.set(conversationId, sse);
     this.callbacks.set(conversationId, callbacks);
+    this.registrations.set(conversationId, options);
 
     if (!this.streamStates.has(conversationId)) {
       this.streamStates.set(conversationId, {
@@ -203,7 +223,7 @@ export class StreamManager {
       const data = (e as any).data;
       if (typeof data === "string") {
         if (data.trim() === "[DONE]") {
-          return;
+          return true;
         }
         const parsed = JSON.parse(data);
         const result = parsed?.result;
@@ -337,6 +357,7 @@ export class StreamManager {
     if (state && this.isStreamFinished(conversationId)) {
       this.streams.delete(conversationId);
       this.callbacks.delete(conversationId);
+      this.registrations.delete(conversationId);
     }
   }
 
@@ -414,6 +435,7 @@ export class StreamManager {
     this.streams.delete(conversationId);
     this.callbacks.delete(conversationId);
     this.streamStates.delete(conversationId);
+    this.registrations.delete(conversationId);
 
     if (this.activeConversationId === conversationId) {
       this.activeConversationId = null;
@@ -427,6 +449,7 @@ export class StreamManager {
   removeStreamEntry(conversationId: string): void {
     this.streams.delete(conversationId);
     this.callbacks.delete(conversationId);
+    this.registrations.delete(conversationId);
   }
 
   restoreStreamCallbacks(

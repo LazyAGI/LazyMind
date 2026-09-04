@@ -1,0 +1,39 @@
+preferences:
+- name: pref.edge.0
+  summary: 中文与 emoji 🧪
+  ref: references/edge-0.md
+  created_at: '2026-01-01T00:00:00Z'
+  updated_at: '2026-01-01T00:00:00Z'
+- name: pref.edge.1
+  summary: 'yes'
+  ref: references/edge-1.md
+  created_at: '2026-01-01T00:00:00Z'
+  updated_at: '2026-01-01T00:00:00Z'
+- name: pref.edge.2
+  summary: 'colon: value # tag'
+  ref: references/edge-2.md
+  created_at: '2026-01-01T00:00:00Z'
+  updated_at: '2026-01-01T00:00:00Z'
+- name: pref.edge.3
+  summary: 'line one
+
+    line two'
+  ref: references/edge-3.md
+  created_at: '2026-01-01T00:00:00Z'
+  updated_at: '2026-01-01T00:00:00Z'
+- name: pref.edge.4
+  summary: 'A long sentence A long sentence A long sentence A long sentence A long
+    sentence A long sentence '
+  ref: references/edge-4.md
+  created_at: '2026-01-01T00:00:00Z'
+  updated_at: '2026-01-01T00:00:00Z'
+- name: pref.edge.5
+  summary: quotes "double" and 'single'
+  ref: references/edge-5.md
+  created_at: '2026-01-01T00:00:00Z'
+  updated_at: '2026-01-01T00:00:00Z'
+- name: pref.edge.6
+  summary: "tab\tcontrol\x01"
+  ref: references/edge-6.md
+  created_at: '2026-01-01T00:00:00Z'
+  updated_at: '2026-01-01T00:00:00Z'

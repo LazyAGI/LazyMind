@@ -186,6 +186,7 @@ def test_sensitive_input_is_blocked_before_model_execution(monkeypatch):
         'status': 'completed',
         'reason': 'normal',
         'partial_output': True,
+        'model_invoked': False,
     }
 
 

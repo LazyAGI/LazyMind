@@ -59,6 +59,14 @@ import ContextUsageButton from "./ContextUsageButton";
 import PerformanceStatsBar from "./PerformanceStatsBar";
 import type { SessionPerformanceStats } from "../../utils/performanceStats";
 import { buildCitedMessageText } from "../newChatContainer/utils/citeMessage";
+import ChatModelSelector from "../ChatModelSelector";
+import {
+  NEW_CHAT_MODEL_SELECTION_KEY,
+  toChatModelSelectionRequest,
+  useModelSelectionStore,
+  type ChatModelSelectionRequest,
+} from "@/modules/chat/store/modelSelection";
+import { useTaskCenterStore } from "@/modules/chat/store/taskCenter";
 
 // Stable empty array reference — must NOT be inline `?? []` in a zustand selector
 // because a new array on every call triggers useSyncExternalStore to fire React error #185.
@@ -373,6 +381,8 @@ interface ChatInputProps {
   setChatConfig?: (chatConfig: ChatConfig) => void;
   setChatConfigFn?: (chatConfig: ChatConfig) => void;
   knowledgeRefreshKey?: number | string;
+  /** Prevent embedded child conversations from replacing inherited knowledge bases. */
+  allowKnowledgeBaseSelection?: boolean;
   /** Bump to remount the chat config popover (e.g. when starting a fresh welcome-screen chat). */
   configResetKey?: number | string;
   sessionId?: string;
@@ -408,9 +418,18 @@ interface ChatInputProps {
   showThinkingDepth?: boolean;
   showSkillDeposit?: boolean;
   showConversationConfig?: boolean;
+  /** Hide the main-chat model picker in specialized composers that own a separate model contract. */
+  showModelSelector?: boolean;
+  /** Locks model switching after a message was submitted but before the stream opens. */
+  modelSelectorBusy?: boolean;
+  /** Reports persisted model-selection saves so sibling retry actions can share the lock. */
+  onModelSelectionSavingChange?: (saving: boolean) => void;
   fixedThinkingDepth?: ThinkingDepth;
   performanceStats?: SessionPerformanceStats;
   showPerformanceStats?: boolean;
+  /** Controlled thinking depth for embedded chat surfaces such as side chat. */
+  thinkingDepth?: ThinkingDepth;
+  onThinkingDepthChange?: (thinkingDepth: ThinkingDepth) => void;
 }
 
 interface ShowcaseSelectControl {
@@ -505,7 +524,7 @@ function ShowcaseSelectButton({
       overlayClassName={`chat-showcase-popover chat-showcase-popover--${kind}`}
       placement="topLeft"
       trigger="click"
-      onOpenChange={(nextOpen) => {
+      onOpenChange={(nextOpen: boolean) => {
         if (!control.disabled) setOpen(nextOpen);
       }}
     >
@@ -587,6 +606,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       setChatConfig,
       setChatConfigFn,
       knowledgeRefreshKey,
+      allowKnowledgeBaseSelection = true,
       configResetKey,
       sessionId,
       isStreaming = false,
@@ -615,9 +635,14 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       showThinkingDepth = true,
       showSkillDeposit = true,
       showConversationConfig = true,
+      showModelSelector = true,
+      modelSelectorBusy = false,
+      onModelSelectionSavingChange,
       fixedThinkingDepth,
       performanceStats,
       showPerformanceStats = false,
+      thinkingDepth: controlledThinkingDepth,
+      onThinkingDepthChange,
     } = props;
     const fileListRef = useRef<ImageUploadImperativeProps | null>(null);
     const knowledgeSelectorRef = useRef<ChatSelectorImperativeProps | null>(null);
@@ -630,8 +655,12 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     const [polishingSuggestionKey, setPolishingSuggestionKey] = useState<
       string | null
     >(null);
-    const { thinkingDepth, setThinkingDepth } = useChatThinkStore();
-    const effectiveThinkingDepth = fixedThinkingDepth ?? thinkingDepth;
+    const { thinkingDepth: globalThinkingDepth, setThinkingDepth } =
+      useChatThinkStore();
+    const effectiveThinkingDepth =
+      fixedThinkingDepth ?? controlledThinkingDepth ?? globalThinkingDepth;
+    const handleThinkingDepthChange =
+      onThinkingDepthChange ?? setThinkingDepth;
     const { setNewMessage } = useChatNewMessageStore();
     const { t } = useTranslation();
     const [text, setText] = useState("");
@@ -652,6 +681,40 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     const disabledNoticeId = useId();
     const previousSessionIdRef = useRef<string | undefined>(undefined);
     const hasSentMessageRef = useRef(false);
+    const [initialModelSelection, setInitialModelSelection] =
+      useState<ChatModelSelectionRequest>();
+    const [modelSelectionSaving, setModelSelectionSaving] = useState(false);
+    const handleModelSelectionChange = useCallback(
+      (selection: ChatModelSelectionRequest) => {
+        setInitialModelSelection(selection);
+      },
+      [],
+    );
+    const handleModelSavingChange = useCallback((saving: boolean) => {
+      setModelSelectionSaving(saving);
+      onModelSelectionSavingChange?.(saving);
+    }, [onModelSelectionSavingChange]);
+    useEffect(() => {
+      setInitialModelSelection(undefined);
+    }, [configResetKey, sessionId]);
+    const workflowBlocksModelSwitch = useWorkflowStore((state) => {
+      if (!sessionId) return false;
+      const session = state.sessionByConversation[sessionId];
+      return (
+        session?.status === "active" ||
+        session?.status === "waiting" ||
+        Boolean(state.autoRunningByConversation[sessionId])
+      );
+    });
+    const backgroundTaskBlocksModelSwitch = useTaskCenterStore((state) =>
+      sessionId
+        ? Boolean(
+            state.tasksByConversation[sessionId]?.some(
+              (task) => task.status === "pending" || task.status === "running",
+            ),
+          )
+        : false,
+    );
 
     useEffect(() => {
       setContextRuntimeSettings(initialConversationSettings);
@@ -700,7 +763,11 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     }, [handleToolAvailabilityChanged, refreshKnowledgeToolAvailability]);
 
     const knowledgeBaseEnabled = knowledgeToolsEnabled.kb !== false;
-    const knowledgeBaseDisabledReason = "知识库检索已在设置中停用";
+    const knowledgeBaseSelectable =
+      allowKnowledgeBaseSelection && knowledgeBaseEnabled;
+    const knowledgeBaseDisabledReason = allowKnowledgeBaseSelection
+      ? "知识库检索已在设置中停用"
+      : t("chat.sideChat.knowledgeInheritedOnly");
     const uploadTypes = allowedUploadTypes;
 
     const debouncedSaveInput = useMemo(
@@ -928,7 +995,11 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     }, [citeMessage, citeMessages]);
     const isPromptPolishing = Boolean(polishingSuggestionKey);
     const isSendDisabled =
-      disabled || isPromptPolishing || !value?.trim() || isUploading;
+      disabled ||
+      isPromptPolishing ||
+      modelSelectionSaving ||
+      !value?.trim() ||
+      isUploading;
     const shouldShowPromptSuggestions =
       showPromptSuggestions &&
       !disabled &&
@@ -953,6 +1024,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       !isSkillDepositReady ||
       disabled ||
       isPromptPolishing ||
+      modelSelectionSaving ||
       isStreaming ||
       !onSkillDeposit;
     const skillDepositTooltip = useMemo(() => {
@@ -998,10 +1070,22 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
         }
         return;
       }
+      if (modelSelectionSaving) {
+        return;
+      }
       if (isStreaming || isSendDisabled) {
         return;
       }
       const normalizedText = value.trim();
+      const storedInitialModelSelection = !sessionId
+        ? toChatModelSelectionRequest(
+            useModelSelectionStore.getState().selections[
+              NEW_CHAT_MODEL_SELECTION_KEY
+            ],
+          )
+        : undefined;
+      const effectiveInitialModelSelection =
+        storedInitialModelSelection ?? initialModelSelection;
       setNewMessage(false);
       const sendParams: SendMessageParams = {
         text: normalizedText,
@@ -1023,6 +1107,9 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
         files: fileListRef.current?.getFiles(),
         create_time: new Date().toISOString(),
         ...(runInBackground ? { run_in_background: true } : {}),
+        ...(!sessionId && effectiveInitialModelSelection
+          ? { initial_model_selection: effectiveInitialModelSelection }
+          : {}),
       };
 
       if (!isChatContent) {
@@ -1286,7 +1373,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                 value={value}
                 onChange={handleInputChange}
                 onMentionsChange={setMentions}
-                disabledMentionReasons={knowledgeBaseEnabled ? undefined : {
+                disabledMentionReasons={knowledgeBaseSelectable ? undefined : {
                   knowledge_base: knowledgeBaseDisabledReason,
                 }}
                 onPaste={handlePaste}
@@ -1299,6 +1386,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                     isUploading ||
                     disabled ||
                     isPromptPolishing ||
+                    modelSelectionSaving ||
                     isStreaming
                   ) return;
                   handleSend();
@@ -1313,7 +1401,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                     <Popover
                       trigger="click"
                       open={addMenuOpen}
-                      onOpenChange={(open) => {
+                      onOpenChange={(open: boolean) => {
                         if (open && (disabled || isPromptPolishing)) {
                           if (disabledReason) {
                             message.warning(disabledReason);
@@ -1343,25 +1431,27 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                               <PaperClipOutlined />
                               {t("chat.addAttachment")}
                             </button>
-                          <Tooltip title={knowledgeBaseEnabled ? undefined : knowledgeBaseDisabledReason}>
-                            <span className="chat-add-resource-menu-tooltip-anchor">
-                              <button
-                                type="button"
-                                disabled={!knowledgeBaseEnabled}
-                                onClick={() => {
-                                  setAddMenuOpen(false);
-                                  // Let the menu click finish before opening the next Popover;
-                                  // otherwise its outside-click handler closes it immediately.
-                                  window.setTimeout(() => {
-                                    knowledgeSelectorRef.current?.open(document.body);
-                                  }, 0);
-                                }}
-                              >
-                                <BookOutlined />
-                                {t("chat.knowledgeBase")}
-                              </button>
-                            </span>
-                          </Tooltip>
+                          {allowKnowledgeBaseSelection ? (
+                            <Tooltip title={knowledgeBaseEnabled ? undefined : knowledgeBaseDisabledReason}>
+                              <span className="chat-add-resource-menu-tooltip-anchor">
+                                <button
+                                  type="button"
+                                  disabled={!knowledgeBaseEnabled}
+                                  onClick={() => {
+                                    setAddMenuOpen(false);
+                                    // Let the menu click finish before opening the next Popover;
+                                    // otherwise its outside-click handler closes it immediately.
+                                    window.setTimeout(() => {
+                                      knowledgeSelectorRef.current?.open(document.body);
+                                    }, 0);
+                                  }}
+                                >
+                                  <BookOutlined />
+                                  {t("chat.knowledgeBase")}
+                                </button>
+                              </span>
+                            </Tooltip>
+                          ) : null}
                           <button
                             type="button"
                             onClick={() => {
@@ -1387,19 +1477,21 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                         </div>
                       </Tooltip>
                     </Popover>
-                    <div className="chat-add-resource-hidden-selector">
-                      <ChatSelector
-                        ref={knowledgeSelectorRef}
-                        chatConfig={chatConfig ?? {}}
-                        refreshKey={knowledgeRefreshKey}
-                        embeddingReady={embeddingReady}
-                        multimodalEmbeddingReady={multimodalEmbeddingReady}
-                        rerankReady={rerankReady}
-                        disabled={!knowledgeBaseEnabled}
-                        disabledReason={knowledgeBaseDisabledReason}
-                        onChange={onKnowledgeBaseChange}
-                      />
-                    </div>
+                    {allowKnowledgeBaseSelection ? (
+                      <div className="chat-add-resource-hidden-selector">
+                        <ChatSelector
+                          ref={knowledgeSelectorRef}
+                          chatConfig={chatConfig ?? {}}
+                          refreshKey={knowledgeRefreshKey}
+                          embeddingReady={embeddingReady}
+                          multimodalEmbeddingReady={multimodalEmbeddingReady}
+                          rerankReady={rerankReady}
+                          disabled={!knowledgeBaseEnabled}
+                          disabledReason={knowledgeBaseDisabledReason}
+                          onChange={onKnowledgeBaseChange}
+                        />
+                      </div>
+                    ) : null}
                     <div className="chat-add-resource-hidden-upload">
                       <ImageUpload
                         updateFiles={updateImageList}
@@ -1442,14 +1534,38 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                       variant="borderless"
                       value={effectiveThinkingDepth}
                       disabled={disabled || isStreaming || Boolean(fixedThinkingDepth)}
-                      onChange={setThinkingDepth}
+                      onChange={handleThinkingDepthChange}
                       options={THINKING_DEPTH_VALUES.map((value) => ({
                         value,
                         label: t(THINKING_DEPTH_LABEL_KEYS[value]),
                       }))}
                     />
                   )}
-                  {/* <ModelSelector sessionId={sessionId} disabled={isStreaming} /> */}
+                  {showModelSelector ? (
+                    <ChatModelSelector
+                      key={`${sessionId || "new"}:${configResetKey ?? ""}`}
+                      conversationId={sessionId}
+                      disabled={
+                        isStreaming ||
+                        modelSelectorBusy ||
+                        workflowBlocksModelSwitch ||
+                        backgroundTaskBlocksModelSwitch
+                      }
+                      disabledReason={
+                        isStreaming
+                          ? t("chat.modelSelectorGenerating")
+                          : modelSelectorBusy
+                            ? t("runtime.aiServiceInitializingMessage")
+                            : workflowBlocksModelSwitch
+                              ? t("chat.modelSelectorWorkflowRunning")
+                              : backgroundTaskBlocksModelSwitch
+                                ? t("chat.modelSelectorBackgroundTaskRunning")
+                                : undefined
+                      }
+                      onSavingChange={handleModelSavingChange}
+                      onSelectionChange={handleModelSelectionChange}
+                    />
+                  ) : null}
                   {showHistoryButton && openHistory && (
                     <div
                       className={`input-bottom-actions-left-item ${showHistoryList ? "selected" : ""}`}

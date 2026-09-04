@@ -150,11 +150,15 @@ func ParsePreferences(content []byte) (PreferenceDocument, error) {
 		if _, exists := seenNames[item.Name]; exists {
 			return PreferenceDocument{}, invalidDocument("duplicate preference item name %q", item.Name)
 		}
-		if _, exists := seenRefs[item.Ref]; exists {
+		refPath, _, err := SplitReferenceRef(item.Ref)
+		if err != nil {
+			return PreferenceDocument{}, err
+		}
+		if _, exists := seenRefs[refPath]; exists {
 			return PreferenceDocument{}, invalidDocument("duplicate preference reference %q", item.Ref)
 		}
 		seenNames[item.Name] = struct{}{}
-		seenRefs[item.Ref] = struct{}{}
+		seenRefs[refPath] = struct{}{}
 		items = append(items, item)
 	}
 	return PreferenceDocument{Preferences: items}, nil

@@ -801,32 +801,56 @@ func migrationSQLForDriver(body, driver string) (string, error) {
 // also bake columns into seed/aggregate CREATE must tolerate duplicate/missing
 // column errors when upgrading fresh versus already-patched databases.
 func execMigrationSQL(exec sqlExecer, driver, sqlBody string) error {
-	_, err := exec.Exec(sqlBody)
-	if err == nil || driver != "sqlite" {
-		return err
+	remaining := sqlBody
+	for strings.TrimSpace(remaining) != "" {
+		_, err := exec.Exec(remaining)
+		if err == nil || driver != "sqlite" {
+			return err
+		}
+		next, ok := sqliteRemainderAfterBenignColumnChange(remaining, err)
+		if !ok {
+			return err
+		}
+		remaining = next
 	}
-	if isBenignSQLiteColumnChangeError(sqlBody, err) {
-		return nil
-	}
-	return err
+	return nil
 }
 
 func isBenignSQLiteColumnChangeError(sqlBody string, err error) bool {
+	_, ok := sqliteRemainderAfterBenignColumnChange(sqlBody, err)
+	return ok
+}
+
+var sqliteColumnChangeErrorPattern = regexp.MustCompile(`(?i)(duplicate column name|no such column):\s*["'` + "`" + `\[]?([A-Za-z_][A-Za-z0-9_]*)`)
+
+func sqliteRemainderAfterBenignColumnChange(sqlBody string, err error) (string, bool) {
 	if err == nil {
-		return false
+		return "", false
 	}
-	msg := strings.ToLower(err.Error())
-	normalized := strings.ToLower(stripSQLLineComments(sqlBody))
-	switch {
-	case strings.Contains(msg, "duplicate column name") &&
-		strings.Contains(normalized, "add column"):
-		return true
-	case strings.Contains(msg, "no such column") &&
-		strings.Contains(normalized, "drop column"):
-		return true
-	default:
-		return false
+	match := sqliteColumnChangeErrorPattern.FindStringSubmatch(err.Error())
+	if len(match) != 3 {
+		return "", false
 	}
+	operation := "drop"
+	if strings.EqualFold(match[1], "duplicate column name") {
+		operation = "add"
+	}
+	column := regexp.QuoteMeta(match[2])
+	statementPattern := regexp.MustCompile(
+		`(?is)\balter\s+table\b[^;]*\b` + operation + `\s+column\b[^;]*\b` + column + `\b[^;]*;`,
+	)
+	statement := statementPattern.FindStringIndex(stripSQLLineComments(sqlBody))
+	if statement == nil {
+		return "", false
+	}
+	// Line-comment stripping preserves all non-comment statement text but not
+	// byte offsets. Find the same ALTER statement in the original SQL so the
+	// returned suffix starts immediately after the failing statement.
+	statement = statementPattern.FindStringIndex(sqlBody)
+	if statement == nil {
+		return "", false
+	}
+	return sqlBody[statement[1]:], true
 }
 
 func stripSQLLineComments(sqlBody string) string {

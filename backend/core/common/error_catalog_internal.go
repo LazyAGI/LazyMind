@@ -5,6 +5,10 @@ package common
 import "net/http"
 
 func init() {
+	registerAdditionalErrorAlias("invalid chat model selection", "Invalid request", http.StatusBadRequest, 2000103)
+	registerAdditionalErrorAlias("conversation model selection changed", "Conflict", http.StatusConflict, 2000107)
+	registerAdditionalErrorAlias("conversation is busy", "Conflict", http.StatusConflict, 2000107)
+	registerAdditionalErrorAlias("save conversation model failed", "Internal server error", http.StatusInternalServerError, 2000000)
 	registerAdditionalErrorPattern("%w; fallback parser chunks failed", "Primary and fallback document parsing failed", http.StatusInternalServerError, 2001601)
 	registerAdditionalError("acl_db_dsn is empty", http.StatusInternalServerError, 2001602)
 	registerAdditionalError("active plugin session already exists for conversation", http.StatusConflict, 2001603)
@@ -591,9 +595,16 @@ func init() {
 		"invalid run_finished data",
 		"run_finished partial_output is required",
 		"run_finished partial_output must be boolean",
+		"run_finished model_invoked must be boolean",
 		"run_finished code must be a string",
 		"invalid run status/reason combination",
 	} {
 		registerAdditionalErrorAlias(source, "algorithm chat stream failed", http.StatusBadGateway, 2002077)
 	}
+	registerAdditionalError("task_lease_lost", http.StatusConflict, 2002365)
+	registerAdditionalError("maintenance_busy", http.StatusServiceUnavailable, 2002366)
+	registerAdditionalError("preference_organizing", http.StatusConflict, 2002361)
+	registerAdditionalError("create preference organizer task failed", http.StatusInternalServerError, 2002362)
+	registerAdditionalError("query preference organizer task failed", http.StatusInternalServerError, 2002363)
+	registerAdditionalError("preference organizer task lease was lost", http.StatusInternalServerError, 2002364)
 }
