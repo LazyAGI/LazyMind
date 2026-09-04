@@ -837,8 +837,71 @@ export interface ConversationBatchDeleteResponse {
 export interface ConversationChatStatusResponse {
     'is_generating'?: boolean;
 }
+export interface ConversationDetailItem {
+    'assistant'?: ConversationDetailItemAssistantEnum;
+    'chat_executor'?: ConversationDetailItemChatExecutorEnum;
+    'chat_times'?: number;
+    'conversation_id'?: string;
+    'create_time'?: string;
+    'display_name'?: string;
+    'is_pinned'?: boolean;
+    'models'?: Array<string>;
+    'name'?: string;
+    'parent_conversation_id'?: string | null;
+    'parent_display_name'?: string;
+    'pinned_at'?: string | null;
+    'project_key'?: string;
+    'project_name'?: string;
+    'relation_type'?: ConversationDetailItemRelationTypeEnum;
+    'search_config'?: object;
+    'selected_text'?: string;
+    'source_context'?: ConversationDetailItemSourceContext | null;
+    'source_history_id'?: string | null;
+    'source_seq'?: number | null;
+    'thinking_depth'?: ConversationDetailItemThinkingDepthEnum;
+    'total_feedback_like'?: number;
+    'total_feedback_unlike'?: number;
+    'update_time'?: string;
+    'user'?: string;
+}
+
+export const ConversationDetailItemAssistantEnum = {
+    Lazymind: 'lazymind',
+    Codex: 'codex',
+    Cursor: 'cursor',
+    Workbuddy: 'workbuddy'
+} as const;
+
+export type ConversationDetailItemAssistantEnum = typeof ConversationDetailItemAssistantEnum[keyof typeof ConversationDetailItemAssistantEnum];
+export const ConversationDetailItemChatExecutorEnum = {
+    Lazymind: 'lazymind',
+    Codex: 'codex',
+    Cursor: 'cursor',
+    Workbuddy: 'workbuddy'
+} as const;
+
+export type ConversationDetailItemChatExecutorEnum = typeof ConversationDetailItemChatExecutorEnum[keyof typeof ConversationDetailItemChatExecutorEnum];
+export const ConversationDetailItemRelationTypeEnum = {
+    Empty: '',
+    Sidechat: 'sidechat',
+    Fork: 'fork'
+} as const;
+
+export type ConversationDetailItemRelationTypeEnum = typeof ConversationDetailItemRelationTypeEnum[keyof typeof ConversationDetailItemRelationTypeEnum];
+export const ConversationDetailItemThinkingDepthEnum = {
+    Low: 'low',
+    Medium: 'medium',
+    High: 'high',
+    Max: 'max'
+} as const;
+
+export type ConversationDetailItemThinkingDepthEnum = typeof ConversationDetailItemThinkingDepthEnum[keyof typeof ConversationDetailItemThinkingDepthEnum];
+
+export interface ConversationDetailItemSourceContext {
+    'messages'?: Array<{ [key: string]: any; }>;
+}
 export interface ConversationDetailResponse {
-    'conversation'?: ConversationItem;
+    'conversation'?: ConversationDetailItem;
 }
 export interface ConversationFeedbackRequest {
     'expected_answer'?: string;
@@ -889,9 +952,12 @@ export interface ConversationItem {
     'is_pinned'?: boolean;
     'models'?: Array<string>;
     'name'?: string;
+    'parent_conversation_id'?: string | null;
+    'parent_display_name'?: string;
     'pinned_at'?: string | null;
     'project_key'?: string;
     'project_name'?: string;
+    'relation_type'?: ConversationItemRelationTypeEnum;
     'search_config'?: object;
     'thinking_depth'?: ConversationItemThinkingDepthEnum;
     'total_feedback_like'?: number;
@@ -916,6 +982,13 @@ export const ConversationItemChatExecutorEnum = {
 } as const;
 
 export type ConversationItemChatExecutorEnum = typeof ConversationItemChatExecutorEnum[keyof typeof ConversationItemChatExecutorEnum];
+export const ConversationItemRelationTypeEnum = {
+    Empty: '',
+    Sidechat: 'sidechat',
+    Fork: 'fork'
+} as const;
+
+export type ConversationItemRelationTypeEnum = typeof ConversationItemRelationTypeEnum[keyof typeof ConversationItemRelationTypeEnum];
 export const ConversationItemThinkingDepthEnum = {
     Low: 'low',
     Medium: 'medium',
@@ -1223,7 +1296,7 @@ export interface CurrentMemoryPreferenceItem {
 export interface CurrentMemoryPreferenceListData {
     'etag': string;
     'items': Array<CurrentMemoryPreferenceItem>;
-    'resident_index_usage': CurrentMemoryPreferenceResidentIndexUsage;
+    'projection_state': CurrentMemoryPreferenceProjectionState;
     'total_size': number;
     'updated_at': number;
 }
@@ -1236,10 +1309,13 @@ export interface CurrentMemoryPreferenceOrderRequest {
     'expected_etag': string;
     'ordered_names': Array<string>;
 }
-export interface CurrentMemoryPreferenceResidentIndexUsage {
-    'max_items': number;
-    'over_limit': boolean;
-    'used_items': number;
+export interface CurrentMemoryPreferenceProjectionState {
+    'full_projection_chars': number;
+    'max_chars': number;
+    'projected_chars': number;
+    'projected_items': number;
+    'projection_truncated': boolean;
+    'stored_items': number;
 }
 export interface CurrentMemoryPresentation {
     'fallbacks': { [key: string]: { [key: string]: string; }; };
@@ -2150,6 +2226,110 @@ export interface PersonalizationSettingOpenAPIRequest {
 }
 export interface PersonalizationSettingOpenAPIResponse {
     'enabled': boolean;
+}
+export interface PreferenceOrganizerPass {
+    'after'?: PreferenceOrganizerState | null;
+    'before': PreferenceOrganizerState;
+    'changes': number;
+    'operation_count': number;
+    'outcome': string;
+    'pass_number': number;
+    'plan_hash': string;
+    'receipts': Array<PreferenceOrganizerReceipt>;
+}
+export interface PreferenceOrganizerReceipt {
+    'action': PreferenceOrganizerReceiptActionEnum;
+    'applied_steps': Array<string>;
+    'before_etag'?: string;
+    'changes': number;
+    'episode_id'?: string;
+    'etag'?: string;
+    'failed_steps': Array<string>;
+    'names': Array<string>;
+    'operation_id': string;
+    'status': PreferenceOrganizerReceiptStatusEnum;
+}
+
+export const PreferenceOrganizerReceiptActionEnum = {
+    Merge: 'merge',
+    MoveToEpisode: 'move_to_episode',
+    Delete: 'delete'
+} as const;
+
+export type PreferenceOrganizerReceiptActionEnum = typeof PreferenceOrganizerReceiptActionEnum[keyof typeof PreferenceOrganizerReceiptActionEnum];
+export const PreferenceOrganizerReceiptStatusEnum = {
+    Pending: 'pending',
+    Applied: 'applied',
+    Idempotent: 'idempotent',
+    Partial: 'partial',
+    Failed: 'failed',
+    Unknown: 'unknown'
+} as const;
+
+export type PreferenceOrganizerReceiptStatusEnum = typeof PreferenceOrganizerReceiptStatusEnum[keyof typeof PreferenceOrganizerReceiptStatusEnum];
+
+export interface PreferenceOrganizerResult {
+    'outcome'?: PreferenceOrganizerResultOutcomeEnum;
+    'passes'?: Array<PreferenceOrganizerPass>;
+    'passes_attempted'?: number;
+    'reason'?: string;
+    'stop_reason'?: string;
+    'target_reached'?: boolean;
+    'total_changes'?: number;
+}
+
+export const PreferenceOrganizerResultOutcomeEnum = {
+    Organized: 'organized',
+    OrganizedWithRemaining: 'organized_with_remaining',
+    NoSafeChanges: 'no_safe_changes',
+    BudgetExhausted: 'budget_exhausted',
+    StaleState: 'stale_state',
+    Partial: 'partial',
+    Failed: 'failed'
+} as const;
+
+export type PreferenceOrganizerResultOutcomeEnum = typeof PreferenceOrganizerResultOutcomeEnum[keyof typeof PreferenceOrganizerResultOutcomeEnum];
+
+export interface PreferenceOrganizerState {
+    'etag': string;
+    'full_projection_chars': number;
+    'projected_chars': number;
+    'projected_items': number;
+    'projection_truncated': boolean;
+    'stored_items': number;
+}
+export interface PreferenceOrganizerTaskData {
+    'created_at': string;
+    'error_code'?: string;
+    'error_message'?: string;
+    'finished_at'?: string;
+    'result'?: PreferenceOrganizerResult;
+    'started_at'?: string;
+    'status': PreferenceOrganizerTaskDataStatusEnum;
+    'task_id': string;
+    'waiting_reason'?: PreferenceOrganizerTaskDataWaitingReasonEnum;
+}
+
+export const PreferenceOrganizerTaskDataStatusEnum = {
+    Pending: 'pending',
+    Running: 'running',
+    Done: 'done',
+    Failed: 'failed',
+    Skipped: 'skipped'
+} as const;
+
+export type PreferenceOrganizerTaskDataStatusEnum = typeof PreferenceOrganizerTaskDataStatusEnum[keyof typeof PreferenceOrganizerTaskDataStatusEnum];
+export const PreferenceOrganizerTaskDataWaitingReasonEnum = {
+    MemoryReview: 'memory_review',
+    Resources: 'resources'
+} as const;
+
+export type PreferenceOrganizerTaskDataWaitingReasonEnum = typeof PreferenceOrganizerTaskDataWaitingReasonEnum[keyof typeof PreferenceOrganizerTaskDataWaitingReasonEnum];
+
+export interface PreferenceOrganizerTaskResponse {
+    'code': number;
+    'data': PreferenceOrganizerTaskData | null;
+    'message': string;
 }
 export interface PromptCategory {
     'id': string;
@@ -3396,9 +3576,9 @@ export interface UserUIPreferencesOpenAPIResponse {
     'chat_preference_notice_dismissed': boolean;
     'developer_mode_active': boolean;
     'document_parsing_enabled': boolean;
-    'sensitive_word_filter_enabled': boolean;
     'mcp_enabled': boolean;
     'schedules_enabled': boolean;
+    'sensitive_word_filter_enabled': boolean;
     'skills_enabled': boolean;
     'task_center_enabled': boolean;
     'updated_at': string;
@@ -3410,9 +3590,9 @@ export interface UserUIPreferencesPatchOpenAPIRequest {
     'chat_preference_notice_dismissed'?: boolean;
     'developer_mode_active'?: boolean;
     'document_parsing_enabled'?: boolean;
-    'sensitive_word_filter_enabled'?: boolean;
     'mcp_enabled'?: boolean;
     'schedules_enabled'?: boolean;
+    'sensitive_word_filter_enabled'?: boolean;
     'skills_enabled'?: boolean;
     'task_center_enabled'?: boolean;
     'workflows_enabled'?: boolean;
@@ -12100,6 +12280,100 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
+         * @summary Get current user active or most recent Preference Organizer task
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreMemoryPreferencesOrganizeGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/memory/preferences:organize`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Create or return the active Preference Organizer task
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreMemoryPreferencesOrganizePost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/memory/preferences:organize`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Get a Preference Organizer task
+         * @param {string} taskId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreMemoryPreferencesOrganizeTaskIdGet: async (taskId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'taskId' is not null or undefined
+            assertParamExists('apiCoreMemoryPreferencesOrganizeTaskIdGet', 'taskId', taskId)
+            const localVarPath = `/api/core/memory/preferences:organize/{task_id}`
+                .replace(`{${"task_id"}}`, encodeURIComponent(String(taskId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary Delete current user\'s Profile avatar
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -16927,7 +17201,7 @@ export const DefaultApiFp = function(configuration?: Configuration) {
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreConversationsNameGet(name: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationItem>> {
+        async apiCoreConversationsNameGet(name: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationDetailItem>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsNameGet(name, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsNameGet']?.[localVarOperationServerIndex]?.url;
@@ -17785,6 +18059,43 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreMemoryPreferencesOrderPut(currentMemoryPreferenceOrderRequest, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreMemoryPreferencesOrderPut']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Get current user active or most recent Preference Organizer task
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreMemoryPreferencesOrganizeGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PreferenceOrganizerTaskResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreMemoryPreferencesOrganizeGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreMemoryPreferencesOrganizeGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Create or return the active Preference Organizer task
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreMemoryPreferencesOrganizePost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PreferenceOrganizerTaskResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreMemoryPreferencesOrganizePost(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreMemoryPreferencesOrganizePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Get a Preference Organizer task
+         * @param {string} taskId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreMemoryPreferencesOrganizeTaskIdGet(taskId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PreferenceOrganizerTaskResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreMemoryPreferencesOrganizeTaskIdGet(taskId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreMemoryPreferencesOrganizeTaskIdGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -19905,7 +20216,7 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreConversationsNameGet(requestParameters: DefaultApiApiCoreConversationsNameGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<ConversationItem> {
+        apiCoreConversationsNameGet(requestParameters: DefaultApiApiCoreConversationsNameGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<ConversationDetailItem> {
             return localVarFp.apiCoreConversationsNameGet(requestParameters.name, options).then((request) => request(axios, basePath));
         },
         /**
@@ -20526,6 +20837,34 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          */
         apiCoreMemoryPreferencesOrderPut(requestParameters: DefaultApiApiCoreMemoryPreferencesOrderPutRequest, options?: RawAxiosRequestConfig): AxiosPromise<CurrentMemoryPreferenceListResponse> {
             return localVarFp.apiCoreMemoryPreferencesOrderPut(requestParameters.currentMemoryPreferenceOrderRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Get current user active or most recent Preference Organizer task
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreMemoryPreferencesOrganizeGet(options?: RawAxiosRequestConfig): AxiosPromise<PreferenceOrganizerTaskResponse> {
+            return localVarFp.apiCoreMemoryPreferencesOrganizeGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Create or return the active Preference Organizer task
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreMemoryPreferencesOrganizePost(options?: RawAxiosRequestConfig): AxiosPromise<PreferenceOrganizerTaskResponse> {
+            return localVarFp.apiCoreMemoryPreferencesOrganizePost(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Get a Preference Organizer task
+         * @param {DefaultApiApiCoreMemoryPreferencesOrganizeTaskIdGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreMemoryPreferencesOrganizeTaskIdGet(requestParameters: DefaultApiApiCoreMemoryPreferencesOrganizeTaskIdGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<PreferenceOrganizerTaskResponse> {
+            return localVarFp.apiCoreMemoryPreferencesOrganizeTaskIdGet(requestParameters.taskId, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -22467,6 +22806,13 @@ export interface DefaultApiApiCoreMemoryPreferencesOrderPutRequest {
 }
 
 /**
+ * Request parameters for apiCoreMemoryPreferencesOrganizeTaskIdGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreMemoryPreferencesOrganizeTaskIdGetRequest {
+    readonly taskId: string
+}
+
+/**
  * Request parameters for apiCoreMemoryProfileAvatarPut operation in DefaultApi.
  */
 export interface DefaultApiApiCoreMemoryProfileAvatarPutRequest {
@@ -24389,6 +24735,37 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreMemoryPreferencesOrderPut(requestParameters: DefaultApiApiCoreMemoryPreferencesOrderPutRequest, options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreMemoryPreferencesOrderPut(requestParameters.currentMemoryPreferenceOrderRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Get current user active or most recent Preference Organizer task
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreMemoryPreferencesOrganizeGet(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreMemoryPreferencesOrganizeGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Create or return the active Preference Organizer task
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreMemoryPreferencesOrganizePost(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreMemoryPreferencesOrganizePost(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Get a Preference Organizer task
+     * @param {DefaultApiApiCoreMemoryPreferencesOrganizeTaskIdGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreMemoryPreferencesOrganizeTaskIdGet(requestParameters: DefaultApiApiCoreMemoryPreferencesOrganizeTaskIdGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreMemoryPreferencesOrganizeTaskIdGet(requestParameters.taskId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

@@ -1497,7 +1497,13 @@
   "2002358": { "en-US": "Failed to query the chat source upload", "zh-CN": "查询对话来源上传文件失败" },
   "2002359": { "en-US": "Failed to query the chat source upload session", "zh-CN": "查询对话来源上传会话失败" },
   "2002360": { "en-US": "Failed to query the chat source datasets", "zh-CN": "查询对话来源知识库失败" },
-  "2002361": { "en-US": "Invalid external Agent attachment", "zh-CN": "外部 Agent 附件无效" },
-  "2002362": { "en-US": "Failed to create the external Agent attachment reference", "zh-CN": "创建外部 Agent 附件引用失败" },
-  "2002363": { "en-US": "The external Agent attachment conflicts with an existing event", "zh-CN": "外部 Agent 附件与已有事件冲突" }
+  "2002361": { "en-US": "Preference maintenance is in progress", "zh-CN": "Preference 正在整理中" },
+  "2002362": { "en-US": "Failed to create the Preference Organizer task", "zh-CN": "创建 Preference Organizer 任务失败" },
+  "2002363": { "en-US": "Failed to query the Preference Organizer task", "zh-CN": "查询 Preference Organizer 任务失败" },
+  "2002364": { "en-US": "The Preference Organizer task lease was lost", "zh-CN": "Preference Organizer 任务租约已丢失" },
+  "2002365": { "en-US": "The maintenance execution has expired", "zh-CN": "记忆维护任务执行已失效" },
+  "2002366": { "en-US": "Waiting for memory maintenance capacity", "zh-CN": "等待记忆维护执行资源" },
+  "2002367": { "en-US": "Invalid external Agent attachment", "zh-CN": "外部 Agent 附件无效" },
+  "2002368": { "en-US": "Failed to create the external Agent attachment reference", "zh-CN": "创建外部 Agent 附件引用失败" },
+  "2002369": { "en-US": "The external Agent attachment conflicts with an existing event", "zh-CN": "外部 Agent 附件与已有事件冲突" }
 }

@@ -646,10 +646,10 @@ func init() {
 	registerAdditionalError("query chat source upload", http.StatusInternalServerError, 2002358)
 	registerAdditionalError("query chat source upload session", http.StatusInternalServerError, 2002359)
 	registerAdditionalError("query chat source datasets", http.StatusInternalServerError, 2002360)
-	registerAdditionalError("invalid external Agent attachment", http.StatusBadRequest, 2002361)
-	registerAdditionalErrorAlias("invalid external Agent attachment content", "invalid external Agent attachment", http.StatusBadRequest, 2002361)
-	registerAdditionalError("create external Agent attachment reference", http.StatusInternalServerError, 2002362)
-	registerAdditionalError("external Agent attachment event conflicts with existing content", http.StatusConflict, 2002363)
+	registerAdditionalError("invalid external Agent attachment", http.StatusBadRequest, 2002367)
+	registerAdditionalErrorAlias("invalid external Agent attachment content", "invalid external Agent attachment", http.StatusBadRequest, 2002367)
+	registerAdditionalError("create external Agent attachment reference", http.StatusInternalServerError, 2002368)
+	registerAdditionalError("external Agent attachment event conflicts with existing content", http.StatusConflict, 2002369)
 }
 
 func registerAdditionalError(message string, status, code int) {
