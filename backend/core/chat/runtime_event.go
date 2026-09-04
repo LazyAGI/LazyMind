@@ -21,13 +21,13 @@ type ChatRuntimeEvent struct {
 }
 
 type RunTerminal struct {
-	Status        string      `json:"status"`
-	Reason        string      `json:"reason"`
-	Code          string      `json:"code,omitempty"`
-	PartialOutput bool        `json:"partial_output"`
-	ModelInvoked  *bool       `json:"model_invoked,omitempty"`
-    ModelCallID   string `json:"model_call_id,omitempty"`
-    DiagnosticID  string `json:"diagnostic_id,omitempty"`
+	Status        string `json:"status"`
+	Reason        string `json:"reason"`
+	Code          string `json:"code,omitempty"`
+	PartialOutput bool   `json:"partial_output"`
+	ModelInvoked  *bool  `json:"model_invoked,omitempty"`
+	ModelCallID   string `json:"model_call_id,omitempty"`
+	DiagnosticID  string `json:"diagnostic_id,omitempty"`
 }
 
 func (terminal *RunTerminal) modelWasInvoked() bool {
