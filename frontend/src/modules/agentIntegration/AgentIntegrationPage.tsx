@@ -131,6 +131,7 @@ export default function AgentIntegrationPage() {
   const [bindings, setBindings] = useState<BindingMap>({});
   const [expandedAgents, setExpandedAgents] = useState<Set<DesktopAgent>>(() => new Set(["codex"]));
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [action, setAction] = useState("");
   const [error, setError] = useState("");
   const [bridgeUnavailable, setBridgeUnavailable] = useState(false);
@@ -139,71 +140,81 @@ export default function AgentIntegrationPage() {
   const [externalConfigurationAgent, setExternalConfigurationAgent] = useState<DesktopAgent | null>(null);
   const [pendingLoginAgent, setPendingLoginAgent] = useState<DesktopAgent | null>(null);
   const refreshVersion = useRef(0);
-  const initialRefreshDone = useRef(false);
+  const refreshInFlight = useRef<Promise<void> | null>(null);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(() => {
+    if (refreshInFlight.current) return refreshInFlight.current;
     const version = ++refreshVersion.current;
     const isCurrent = () => refreshVersion.current === version;
-    if (!initialRefreshDone.current) setLoading(true);
-    let nextError = "";
-    let localBridgeUnavailable = false;
-    let currentPolicies: ExecutorPolicyMap = {};
-    try {
-      const result = await retryBridgeResult(agentIntegrationStatuses);
-      if (!isCurrent()) return;
-      if (result.ok) setStatuses(result.data);
-      else localBridgeUnavailable = true;
-
-      const [policyResult, bindingResult] = await Promise.all([
-        retryBridgeResult(executorIntegrationPolicies),
-        retryBridgeResult(agentExecutableBindings),
-      ]);
-      if (!isCurrent()) return;
-      if (policyResult.ok) {
-        currentPolicies = policyResult.data;
-        setExecutorPolicies(policyResult.data);
-      }
-      else localBridgeUnavailable = true;
-
-      if (bindingResult.ok) setBindings(bindingResult.data);
-      else localBridgeUnavailable = true;
-
+    const request = (async () => {
+      setRefreshing(true);
+      let nextError = "";
+      let localBridgeUnavailable = false;
+      let currentPolicies: ExecutorPolicyMap = {};
       try {
-        let values: ChatExecutorDescriptor[] = [];
-        for (let attempt = 0; attempt < EXECUTOR_SYNC_ATTEMPTS; attempt += 1) {
-          if (!isCurrent()) return;
-          const response = await ConversationSettingsApi().listChatExecutors();
-          if (!isCurrent()) return;
-          values = response.data.data.executors;
-          setExecutors(values);
-          const waitingForHost = values.some((executor) =>
-            executor.kind === "external" && !executor.host_online);
-          const waitingForEnabledExecutor = values.some((executor) =>
-            executor.kind === "external" &&
-            currentPolicies[executor.id as DesktopExecutorProvider]?.enabled &&
-            (!executor.installed || !executor.available));
-          if (!waitingForHost && !waitingForEnabledExecutor) break;
-          if (attempt + 1 < EXECUTOR_SYNC_ATTEMPTS) {
-            await new Promise((resolve) => window.setTimeout(resolve, EXECUTOR_SYNC_DELAY_MS));
-          }
+        const result = await retryBridgeResult(agentIntegrationStatuses);
+        if (!isCurrent()) return;
+        if (result.ok) setStatuses(result.data);
+        else localBridgeUnavailable = true;
+
+        const [policyResult, bindingResult] = await Promise.all([
+          retryBridgeResult(executorIntegrationPolicies),
+          retryBridgeResult(agentExecutableBindings),
+        ]);
+        if (!isCurrent()) return;
+        if (policyResult.ok) {
+          currentPolicies = policyResult.data;
+          setExecutorPolicies(policyResult.data);
         }
-      } catch (executorError) {
-        nextError = executorError instanceof Error ? executorError.message : String(executorError);
+        else localBridgeUnavailable = true;
+
+        if (bindingResult.ok) setBindings(bindingResult.data);
+        else localBridgeUnavailable = true;
+
+        try {
+          let values: ChatExecutorDescriptor[] = [];
+          for (let attempt = 0; attempt < EXECUTOR_SYNC_ATTEMPTS; attempt += 1) {
+            if (!isCurrent()) return;
+            const response = await ConversationSettingsApi().listChatExecutors();
+            if (!isCurrent()) return;
+            values = response.data.data.executors;
+            setExecutors(values);
+            const waitingForHost = values.some((executor) =>
+              executor.kind === "external" && !executor.host_online);
+            const waitingForEnabledExecutor = values.some((executor) =>
+              executor.kind === "external" &&
+              currentPolicies[executor.id as DesktopExecutorProvider]?.enabled &&
+              (!executor.installed || !executor.available));
+            if (!waitingForHost && !waitingForEnabledExecutor) break;
+            if (attempt + 1 < EXECUTOR_SYNC_ATTEMPTS) {
+              await new Promise((resolve) => window.setTimeout(resolve, EXECUTOR_SYNC_DELAY_MS));
+            }
+          }
+        } catch (executorError) {
+          nextError = executorError instanceof Error ? executorError.message : String(executorError);
+        }
+      } finally {
+        if (isCurrent()) {
+          setError(nextError);
+          setBridgeUnavailable(localBridgeUnavailable);
+          setLoading(false);
+          setRefreshing(false);
+        }
       }
-    } finally {
-      if (isCurrent()) {
-        initialRefreshDone.current = true;
-        setError(nextError);
-        setBridgeUnavailable(localBridgeUnavailable);
-        setLoading(false);
-      }
-    }
+    })();
+    refreshInFlight.current = request;
+    const clearRequest = () => {
+      if (refreshInFlight.current === request) refreshInFlight.current = null;
+    };
+    void request.then(clearRequest, clearRequest);
+    return request;
   }, []);
 
   useEffect(() => {
     void refresh();
     return () => {
       refreshVersion.current += 1;
+      refreshInFlight.current = null;
     };
   }, [refresh]);
 
@@ -324,7 +335,12 @@ export default function AgentIntegrationPage() {
           <Typography.Title level={2}>{t("agentIntegration.title")}</Typography.Title>
           <Typography.Paragraph type="secondary">{t("agentIntegration.mergedDescription")}</Typography.Paragraph>
         </div>
-        <Button icon={<ReloadOutlined />} onClick={() => void refresh()} loading={loading}>
+        <Button
+          icon={<ReloadOutlined />}
+          onClick={() => void refresh()}
+          loading={loading || refreshing}
+          disabled={loading || refreshing}
+        >
           {t("common.refresh")}
         </Button>
       </div>
@@ -363,6 +379,7 @@ export default function AgentIntegrationPage() {
                     executorPolicy={executorPolicies[agent.id as DesktopExecutorProvider]}
                     expanded={expandedAgents.has(agent.id)}
                     busyAction={action}
+                    refreshing={loading || refreshing}
                     bindings={bindings}
                     onToggle={() => setExpandedAgents((current) => {
                       const next = new Set(current);
@@ -442,6 +459,7 @@ function AgentCard({
   executorPolicy,
   expanded,
   busyAction,
+  refreshing,
   bindings,
   onToggle,
   onMCPAction,
@@ -457,6 +475,7 @@ function AgentCard({
   executorPolicy?: DesktopExecutorPolicy;
   expanded: boolean;
   busyAction: string;
+  refreshing: boolean;
   bindings: BindingMap;
   onToggle: () => void;
   onMCPAction: (agent: DesktopAgent, action: DesktopAgentIntegrationAction) => Promise<void>;
@@ -560,7 +579,12 @@ function AgentCard({
           />
           <div className="agent-integration-card-footer">
             <span><InfoCircleFilled />{t("agentIntegration.guideFooter")}</span>
-            <Button icon={<ReloadOutlined />} onClick={() => void onRefresh()}>
+            <Button
+              icon={<ReloadOutlined />}
+              onClick={() => void onRefresh()}
+              loading={refreshing}
+              disabled={refreshing}
+            >
               {t("agentIntegration.checkAgain")}
             </Button>
           </div>

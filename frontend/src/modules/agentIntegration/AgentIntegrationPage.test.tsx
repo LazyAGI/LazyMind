@@ -367,6 +367,37 @@ describe("AgentIntegrationPage", () => {
     expect(screen.queryByText("本机助理桥接器未运行")).not.toBeInTheDocument();
   });
 
+  it("shows refresh progress and coalesces repeated refresh clicks", async () => {
+    render(<AgentIntegrationPage />);
+
+    await screen.findByText("外部 Agent 集成");
+    await waitFor(() => expect(mocks.statuses).toHaveBeenCalledTimes(1));
+    const codex = screen.getByTestId("agent-panel-codex");
+    const refreshButton = screen.getByRole("button", { name: /reload刷新/ });
+    const recheckButton = within(codex).getByRole("button", { name: /reload重新检测/ });
+    let finishRefresh!: (value: { ok: true; data: { codex: typeof readyCodexStatus } }) => void;
+    mocks.statuses.mockImplementationOnce(() => new Promise((resolve) => {
+      finishRefresh = resolve;
+    }));
+
+    fireEvent.click(refreshButton);
+
+    await waitFor(() => {
+      expect(refreshButton).toBeDisabled();
+      expect(recheckButton).toBeDisabled();
+      expect(refreshButton).toHaveClass("ant-btn-loading");
+      expect(recheckButton).toHaveClass("ant-btn-loading");
+    });
+    fireEvent.click(recheckButton);
+    expect(mocks.statuses).toHaveBeenCalledTimes(2);
+
+    act(() => finishRefresh({ ok: true, data: { codex: readyCodexStatus } }));
+    await waitFor(() => {
+      expect(refreshButton).toBeEnabled();
+      expect(recheckButton).toBeEnabled();
+    });
+  });
+
   it("does not report a sign-in probe failure before the CLI is installed", async () => {
     mocks.executorPolicies.mockResolvedValue({
       ok: true,
