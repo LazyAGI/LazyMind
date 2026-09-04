@@ -26,7 +26,7 @@ func reconcileInjectedWorkflowTasks(ctx context.Context, db *gorm.DB, manifest M
 
 	var linkedSessionIDs []string
 	if err := db.WithContext(ctx).Model(&orm.TaskCenterTask{}).
-		Where("plugin_session_id IN ?", manifest.SessionIDs).Pluck("plugin_session_id", &linkedSessionIDs).Error; err != nil {
+		Where("plugin_session_id IN ?", manifest.SessionIDs).Pluck("plugin_session_id", &linkedSessionIDs).Error; err != nil { // workflow-naming: persistence
 		return err
 	}
 	linked := make(map[string]bool, len(linkedSessionIDs))
@@ -40,14 +40,14 @@ func reconcileInjectedWorkflowTasks(ctx context.Context, db *gorm.DB, manifest M
 	if len(sessions) == 1 && !linked[sessions[0].ID] {
 		var candidates []orm.TaskCenterTask
 		if err := db.WithContext(ctx).
-			Where("user_id = ? AND conversation_id = ? AND task_type IN ? AND (plugin_session_id IS NULL OR plugin_session_id = '')",
+			Where("user_id = ? AND conversation_id = ? AND task_type IN ? AND (plugin_session_id IS NULL OR plugin_session_id = '')", // workflow-naming: persistence
 				owner.ID, manifest.ConversationID, []string{"background_chat", "scheduled"}).
 			Order("created_at, id").Limit(2).Find(&candidates).Error; err != nil {
 			return err
 		}
 		if len(candidates) == 1 {
 			result := db.WithContext(ctx).Model(&orm.TaskCenterTask{}).
-				Where("id = ? AND (plugin_session_id IS NULL OR plugin_session_id = '')", candidates[0].ID).
+				Where("id = ? AND (plugin_session_id IS NULL OR plugin_session_id = '')", candidates[0].ID). // workflow-naming: persistence
 				Update("plugin_session_id", sessions[0].ID)
 			if result.Error != nil {
 				return result.Error
