@@ -3733,6 +3733,8 @@ components:
                     type: integer
                 gallery:
                     type: boolean
+                hot:
+                    type: boolean
                 id:
                     type: string
                 image_url:
@@ -3769,6 +3771,7 @@ components:
                 - featured
                 - featured_order
                 - gallery
+                - hot
                 - id
                 - image_url
                 - output_label

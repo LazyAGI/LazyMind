@@ -1713,18 +1713,24 @@ func TestOpenAPIShowcaseCaseIncludesSkillSourceURL(t *testing.T) {
 	if provider, ok := properties["provider"].(map[string]any); !ok || provider["type"] != "string" {
 		t.Fatalf("ShowcaseCase provider = %#v, want required string", properties["provider"])
 	}
+	if hot, ok := properties["hot"].(map[string]any); !ok || hot["type"] != "boolean" {
+		t.Fatalf("ShowcaseCase hot = %#v, want required boolean", properties["hot"])
+	}
 	required := schema["required"].([]any)
 	foundSourceURL := false
 	foundProvider := false
+	foundHot := false
 	for _, field := range required {
 		switch field {
 		case "source_url":
 			foundSourceURL = true
 		case "provider":
 			foundProvider = true
+		case "hot":
+			foundHot = true
 		}
 	}
-	if !foundSourceURL || !foundProvider {
+	if !foundSourceURL || !foundProvider || !foundHot {
 		t.Fatalf("ShowcaseCase required fields = %#v", required)
 	}
 }

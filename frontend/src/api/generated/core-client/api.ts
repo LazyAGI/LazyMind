@@ -2727,6 +2727,7 @@ export interface ShowcaseCase {
     'featured': boolean;
     'featured_order': number;
     'gallery': boolean;
+    'hot': boolean;
     'id': string;
     'image_url': string;
     'output_label': string;

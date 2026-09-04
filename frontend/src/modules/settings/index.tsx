@@ -420,13 +420,9 @@ export default function SettingsPage() {
   };
 
   const requestDeveloperChange = (enabled: boolean) => {
-    const confirmationKey = runtimeFeatures.hideEvo
-      ? enabled
-        ? "settingsPage.confirm.developerEnableContentWithoutEvo"
-        : "settingsPage.confirm.developerDisableContentWithoutEvo"
-      : enabled
-        ? "settingsPage.confirm.developerEnableContent"
-        : "settingsPage.confirm.developerDisableContent";
+    const confirmationKey = enabled
+      ? "settingsPage.confirm.developerEnableContent"
+      : "settingsPage.confirm.developerDisableContent";
     Modal.confirm({
       title: t("settingsPage.confirm.developerTitle", {
         action: enabled ? t("settingsPage.enable") : t("settingsPage.disable"),
