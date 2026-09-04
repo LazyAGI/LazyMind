@@ -80,6 +80,7 @@ class AgentEventFrameTranslator:
         self.tool_call_turns = 0
         self.metrics = RunMetricsTracker(clock or time.monotonic)
         self.model_events: list[dict[str, Any]] = []
+        self.last_metrics: Optional[dict[str, Any]] = None
         self.text_scanner, self.citation_plugin = build_stream_citation_scanner(self.citation_state)
 
     def feed(self, event: Any) -> list[dict[str, Any]]:
@@ -101,7 +102,12 @@ class AgentEventFrameTranslator:
             self.model_events.append(value)
             if value.get('type') == 'model_call_finished':
                 self.metrics.on_model_call_finished()
-            frames.append(_stream_frame(extra={'runtime_event': value}))
+            client_event = value
+            if value.get('type') == 'model_call_finished':
+                client_data = dict(value['data'])
+                client_data.pop('usage', None)
+                client_event = {**value, 'data': client_data}
+            frames.append(_stream_frame(extra={'runtime_event': client_event}))
             return frames
         if event_type == 'task_created':
             task_created = {k: v for k, v in event.items() if k != 'tag'}
@@ -221,12 +227,19 @@ class AgentEventFrameTranslator:
             turn_seq=turn_seq,
             max_input_tokens=max_input_tokens,
         )
+        self.last_metrics = metrics
+        client_metrics = {
+            key: value for key, value in metrics.items()
+            if key != 'provider_usages'
+        }
         return _stream_frame(extra={
             # Performance data is an observation side-channel. Keep it out of
             # run_terminal so chat-history persistence does not become an
             # observability store.
             'runtime_event': self.run.finish(outcome=outcome),
-            'performance_metrics': metrics,
+            # Provider-specific usage frames stay in the local full
+            # observation; the browser only needs the normalized summary.
+            'performance_metrics': client_metrics,
         })
 
     def flush(self) -> list[dict[str, Any]]:

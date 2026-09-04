@@ -929,12 +929,15 @@ export default function SettingsPage() {
                 loading={saving === "performance_stats"}
                 disabled={saving !== null}
                 onChange={async (enabled) => {
+                  setPerformanceStatsEnabled(enabled);
                   setSaving("performance_stats");
                   try {
                     await patchUserUiPreferences({ performance_stats_enabled: enabled });
                     cachePerformanceStatsEnabled(enabled);
                     message.success(t("settingsPage.saved"));
                   } catch {
+                    setPerformanceStatsEnabled(!enabled);
+                    cachePerformanceStatsEnabled(!enabled);
                     message.error(t("settingsPage.saveFailed"));
                   } finally {
                     setSaving(null);

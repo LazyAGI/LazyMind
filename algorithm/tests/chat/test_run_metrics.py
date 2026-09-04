@@ -12,7 +12,7 @@ def test_snapshot_provider_usage_ignores_negative_tokens():
 def test_dsh_steps_count_model_and_each_tool():
     translator = AgentEventFrameTranslator(query='q', run_id='run-1', clock=lambda: 1.0)
     translator.feed({'tag': 'think', 'delta': 'hmm'})
-    translator.feed({
+    model_event_frames = translator.feed({
         'tag': 'tool_calls',
         'tool_calls': [{'id': '1', 'function': {'name': 'grep', 'arguments': '{}'}},
                        {'id': '2', 'function': {'name': 'read_file', 'arguments': '{}'}}],
@@ -71,7 +71,8 @@ def test_dsh_steps_count_model_and_each_tool():
     assert metrics['cached_tokens'] == 80
     assert 'prompt_tokens' not in metrics
     assert 'prompt_cache_hit_tokens' not in metrics
-    assert metrics['provider_usages'][0]['prompt_cache_hit_tokens'] == 80
+    assert translator.last_metrics['provider_usages'][0]['prompt_cache_hit_tokens'] == 80
+    assert 'provider_usages' not in metrics
 
 
 def test_measured_tool_duration_is_not_attributed_to_model():
@@ -154,7 +155,7 @@ def test_snapshot_sums_provider_usages_and_uses_last_call_for_context():
 
 def test_model_call_event_usage_is_preferred_over_global_usage_map():
     translator = AgentEventFrameTranslator(query='q', run_id='run-1', clock=lambda: 0.0)
-    translator.feed({
+    model_event_frames = translator.feed({
         'tag': 'runtime_event',
         'runtime_event': {
             'schema_version': 1,
@@ -168,9 +169,35 @@ def test_model_call_event_usage_is_preferred_over_global_usage_map():
             },
         },
     })
+    assert 'usage' not in model_event_frames[0]['runtime_event']['data']
+    assert translator.model_events[0]['data']['usage']['prompt_tokens'] == 10
     metrics = translator.finish_run(
         outcome=RunOutcome.SUCCEEDED,
         usage={'prompt_tokens': 999, 'completion_tokens': 999},
     )['performance_metrics']
     assert metrics['input_tokens'] == 10
     assert metrics['output_tokens'] == 2
+
+
+def test_model_call_event_usage_preserves_provider_cache_details():
+    translator = AgentEventFrameTranslator(query='q', run_id='run-1', clock=lambda: 0.0)
+    translator.feed({
+        'tag': 'runtime_event',
+        'runtime_event': {
+            'schema_version': 1,
+            'event_id': 'e1',
+            'type': 'model_call_finished',
+            'data': {
+                'model_call_id': 'call-1',
+                'kind': 'finish',
+                'usage': {
+                    'prompt_tokens': 100,
+                    'completion_tokens': 10,
+                    'prompt_tokens_details': {'cached_tokens': 80},
+                },
+            },
+        },
+    })
+    metrics = translator.finish_run(outcome=RunOutcome.SUCCEEDED)['performance_metrics']
+    assert metrics['cached_tokens'] == 80
+    assert translator.last_metrics['provider_usages'][0]['prompt_tokens_details']['cached_tokens'] == 80

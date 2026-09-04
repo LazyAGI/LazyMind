@@ -6,6 +6,11 @@ import threading
 from pathlib import Path
 from typing import Any, Mapping
 
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - Windows fallback
+    fcntl = None
+
 
 _SENSITIVE_KEYS = frozenset({
     'prompt', 'input', 'output', 'content', 'messages', 'history', 'files',
@@ -41,13 +46,21 @@ class LocalObservationWriter:
         payload = json.dumps(_redact(record), ensure_ascii=False, separators=(',', ':'), default=str)
         with self._lock:
             path = self.directory / filename
-            if path.exists() and path.stat().st_size + len(payload.encode()) + 1 > self.max_bytes:
-                rotated = path.with_name(f'{path.name}.1')
+            lock_path = path.with_name(f'{path.name}.lock')
+            with lock_path.open('a', encoding='utf-8') as lock_stream:
+                if fcntl is not None:
+                    fcntl.flock(lock_stream.fileno(), fcntl.LOCK_EX)
                 try:
-                    rotated.unlink(missing_ok=True)
-                    path.replace(rotated)
-                except OSError:
-                    return
-            with path.open('a', encoding='utf-8') as stream:
-                stream.write(payload)
-                stream.write('\n')
+                    if path.exists() and path.stat().st_size + len(payload.encode()) + 1 > self.max_bytes:
+                        rotated = path.with_name(f'{path.name}.1')
+                        try:
+                            rotated.unlink(missing_ok=True)
+                            path.replace(rotated)
+                        except OSError:
+                            return
+                    with path.open('a', encoding='utf-8') as stream:
+                        stream.write(payload)
+                        stream.write('\n')
+                finally:
+                    if fcntl is not None:
+                        fcntl.flock(lock_stream.fileno(), fcntl.LOCK_UN)

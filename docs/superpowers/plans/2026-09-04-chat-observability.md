@@ -53,7 +53,7 @@
 ### Task 3: Add local summary/full observation writer
 
 **Files:**
-- Create: `algorithm/lazymind/chat/service/local_observation.py`
+- Create: `algorithm/lazymind/chat/service/local_observation.py` and write default records under `data/observability` (with environment-variable overrides)
 - Modify: `algorithm/lazymind/chat/service/chat_service.py`
 - Test: `algorithm/tests/chat/test_local_observation.py`
 
@@ -96,5 +96,5 @@
 
 - [ ] Run all changed Python tests.
 - [ ] Run all changed frontend tests and type checking.
-- [ ] Inspect the final diff for database metrics writes, raw-content leakage, and unrelated changes.
+- [x] Inspect the final diff for database metrics writes, raw-content leakage, and unrelated changes.
 - [ ] Report exact verification results and remaining limitations.

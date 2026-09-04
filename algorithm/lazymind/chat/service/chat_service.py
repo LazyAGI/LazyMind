@@ -112,10 +112,19 @@ def _local_observation_writer() -> LocalObservationWriter:
     if _observation_writer is None:
         with _observation_writer_lock:
             if _observation_writer is None:
-                directory = os.environ.get(
-                    'LAZYMIND_OBSERVABILITY_DIR',
-                    os.path.join(str(_cfg['temp_dir']), 'observability'),
-                )
+                explicit_directory = os.environ.get('LAZYMIND_OBSERVABILITY_DIR')
+                if explicit_directory:
+                    directory = explicit_directory
+                else:
+                    configured_data_dir = os.environ.get('LAZYMIND_DATA_DIR')
+                    if configured_data_dir:
+                        data_dir = Path(configured_data_dir)
+                    else:
+                        temp_dir = Path(str(_cfg['temp_dir']))
+                        data_dir = temp_dir.parent / 'data'
+                    directory = str(data_dir / 'observability') if data_dir.is_dir() else os.path.join(
+                        str(_cfg['temp_dir']), 'observability',
+                    )
                 _observation_writer = LocalObservationWriter(directory)
     return _observation_writer
 
@@ -1758,7 +1767,7 @@ async def _handle_chat_impl(
             max_input_tokens=resolve_max_input_tokens(runtime.llm_config or {}),
         )
         terminal_frame['tool_call_turns'] = translator.tool_call_turns
-        metrics = terminal_frame.get('performance_metrics')
+        metrics = translator.last_metrics or terminal_frame.get('performance_metrics')
         if isinstance(metrics, dict):
             try:
                 writer = _local_observation_writer()

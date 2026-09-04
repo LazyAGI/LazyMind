@@ -135,14 +135,12 @@ def test_handle_chat_constructs_react_agent_from_runtime_context(monkeypatch):
     payloads = [json.loads(chunk) for chunk in body.strip().split('\n\n')]
     terminal = payloads[-1]['data']['runtime_event']
     assert terminal['type'] == 'run_finished'
-    data = dict(terminal['data'])
-    metrics = data.pop('metrics')
-    assert data == {
+    assert terminal['data'] == {
         'status': 'completed',
         'reason': 'normal',
         'partial_output': True,
     }
-    assert metrics['schema_version'] == 1
+    assert payloads[-1]['data']['performance_metrics']['schema_version'] == 1
 
 
 def test_sensitive_input_is_blocked_before_model_execution(monkeypatch):
