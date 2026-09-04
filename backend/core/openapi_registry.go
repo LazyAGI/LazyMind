@@ -2214,6 +2214,7 @@ type userChatSettingsOpenAPIResponse struct {
 type userUIPreferencesPatchOpenAPIRequest struct {
 	ChatPreferenceNoticeDismissed *bool   `json:"chat_preference_notice_dismissed,omitempty"`
 	DeveloperModeActive           *bool   `json:"developer_mode_active,omitempty"`
+	SensitiveWordFilterEnabled    *bool   `json:"sensitive_word_filter_enabled,omitempty"`
 	AcceptedUserAgreementVersion  *string `json:"accepted_user_agreement_version,omitempty"`
 	TaskCenterEnabled             *bool   `json:"task_center_enabled,omitempty"`
 	SchedulesEnabled              *bool   `json:"schedules_enabled,omitempty"`
@@ -2226,6 +2227,7 @@ type userUIPreferencesPatchOpenAPIRequest struct {
 type userUIPreferencesOpenAPIResponse struct {
 	ChatPreferenceNoticeDismissed bool   `json:"chat_preference_notice_dismissed"`
 	DeveloperModeActive           bool   `json:"developer_mode_active"`
+	SensitiveWordFilterEnabled    bool   `json:"sensitive_word_filter_enabled"`
 	AcceptedUserAgreementVersion  string `json:"accepted_user_agreement_version"`
 	TaskCenterEnabled             bool   `json:"task_center_enabled"`
 	SchedulesEnabled              bool   `json:"schedules_enabled"`

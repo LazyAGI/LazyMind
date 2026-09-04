@@ -72,11 +72,13 @@ describe('settings copy contract', () => {
     expect(zhCN).toContain('developerEnableContent: "开启后将启用开发者模式相关功能');
     expect(zhCN).toContain('developerDisableContent: "关闭后将停用开发者模式相关功能');
     expect(zhCN).toContain('developerEnableContentWithoutEvo: "开启后将启用工具管理、内部 ID 和完整执行过程。"');
-    expect(zhCN).toContain('enableDescWithoutEvo: "激活工具管理、内部 ID 和完整执行过程。"');
+    expect(zhCN).toContain('enableDesc: "本页总开关。关闭后下方选项不可用；开启后可使用工具管理、算法跃迁、内部 ID 和完整执行过程。"');
+    expect(zhCN).toContain('enableDescWithoutEvo: "本页总开关。关闭后下方选项不可用；开启后可使用工具管理、内部 ID 和完整执行过程。"');
     expect(enUS).toContain('disableTitle: "Disable developer mode"');
     expect(enUS).toContain('developerEnableContent: "Turning this on enables developer-mode features');
     expect(enUS).toContain('developerDisableContent: "Turning this off disables developer-mode features');
     expect(enUS).toContain('developerEnableContentWithoutEvo: "Turning this on enables tool management, internal IDs, and full execution traces."');
-    expect(enUS).toContain('enableDescWithoutEvo: "Activate tool management, internal IDs, and full execution traces."');
+    expect(enUS).toContain('enableDesc: "Master switch for this page. When off, the options below are unavailable. When on, tool management, algorithm leap, internal IDs, and full execution traces are available."');
+    expect(enUS).toContain('enableDescWithoutEvo: "Master switch for this page. When off, the options below are unavailable. When on, tool management, internal IDs, and full execution traces are available."');
   });
 });

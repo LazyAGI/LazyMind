@@ -102,13 +102,16 @@ func TestRepositoryStructuredMigrationCatalogLoads(t *testing.T) {
 		v03.Aggregate == nil || v03.Aggregate.Version != 20260805000000 {
 		t.Fatalf("unexpected v0_3 mode: %#v", v03)
 	}
-	if len(v03.Dev) != 48 {
-		t.Fatalf("v0_3 dev migration count=%d, want 48", len(v03.Dev))
+	if len(v03.Dev) != 49 {
+		t.Fatalf("v0_3 dev migration count=%d, want 49", len(v03.Dev))
 	}
 	for _, version := range []uint64{20260730100000, 20260803120000, 20260803150000, 20260803160000, 20260803220000, 20260804090000, 20260804100000, 20260805100000, 20260805120000, 20260805121000, 20260805173000, 20260806110000, 20260806120000, 20260806173000, 20260807120000, 20260807160000, 20260809203000, 20260810100000, 20260811120000, 20260811153000, 20260811173000, 20260813120000, 20260813140000, 20260813190000, 20260814110000, 20260814120000, 20260814121000, 20260815160000, 20260816120000, 20260817084853, 20260817120000, 20260818064304, 20260820190000, 20260821120000, 20260822013000, 20260822193000, 20260824120000, 20260824140000, 20260825022749, 20260825031307, 20260826065814, 20260826190000, 20260827120000, 20260830120000, 20260901064250, 20260902020829, 20260902031035, 20260903044806} {
 		if !containsMigrationFileVersion(v03.Dev, version) {
 			t.Fatalf("v0_3 dev migrations are missing %d", version)
 		}
+	}
+	if !containsMigrationFileVersion(v03.Dev, 20260903093000) {
+		t.Fatal("v0_3 dev migrations are missing 20260903093000")
 	}
 	v03Up, err := os.ReadFile(v03.Aggregate.UpPath)
 	if err != nil {
@@ -119,6 +122,9 @@ func TestRepositoryStructuredMigrationCatalogLoads(t *testing.T) {
 			t.Fatalf("v0_3 aggregate up is missing %s", token)
 		}
 	}
+	if !strings.Contains(string(v03Up), "sensitive_word_filter_enabled") {
+		t.Fatal("v0_3 aggregate up is missing sensitive_word_filter_enabled")
+	}
 	v03Down, err := os.ReadFile(v03.Aggregate.DownPath)
 	if err != nil {
 		t.Fatalf("read v0_3 aggregate down: %v", err)
@@ -127,6 +133,9 @@ func TestRepositoryStructuredMigrationCatalogLoads(t *testing.T) {
 		if !strings.Contains(string(v03Down), token) {
 			t.Fatalf("v0_3 aggregate down is missing %s", token)
 		}
+	}
+	if !strings.Contains(string(v03Down), "DROP COLUMN IF EXISTS sensitive_word_filter_enabled") {
+		t.Fatal("v0_3 aggregate down is missing sensitive_word_filter_enabled rollback")
 	}
 }
 

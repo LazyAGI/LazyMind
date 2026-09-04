@@ -3578,6 +3578,7 @@ export interface UserUIPreferencesOpenAPIResponse {
     'document_parsing_enabled': boolean;
     'mcp_enabled': boolean;
     'schedules_enabled': boolean;
+    'sensitive_word_filter_enabled': boolean;
     'skills_enabled': boolean;
     'task_center_enabled': boolean;
     'updated_at': string;
@@ -3591,6 +3592,7 @@ export interface UserUIPreferencesPatchOpenAPIRequest {
     'document_parsing_enabled'?: boolean;
     'mcp_enabled'?: boolean;
     'schedules_enabled'?: boolean;
+    'sensitive_word_filter_enabled'?: boolean;
     'skills_enabled'?: boolean;
     'task_center_enabled'?: boolean;
     'workflows_enabled'?: boolean;

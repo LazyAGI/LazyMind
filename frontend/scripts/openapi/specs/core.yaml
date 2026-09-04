@@ -7843,6 +7843,8 @@ components:
                     type: boolean
                 schedules_enabled:
                     type: boolean
+                sensitive_word_filter_enabled:
+                    type: boolean
                 skills_enabled:
                     type: boolean
                 task_center_enabled:
@@ -7860,6 +7862,7 @@ components:
                 - document_parsing_enabled
                 - mcp_enabled
                 - schedules_enabled
+                - sensitive_word_filter_enabled
                 - skills_enabled
                 - task_center_enabled
                 - updated_at
@@ -7879,6 +7882,8 @@ components:
                 mcp_enabled:
                     type: boolean
                 schedules_enabled:
+                    type: boolean
+                sensitive_word_filter_enabled:
                     type: boolean
                 skills_enabled:
                     type: boolean
