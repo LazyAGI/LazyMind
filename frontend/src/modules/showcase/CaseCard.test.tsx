@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 
@@ -37,6 +37,7 @@ const item: ShowcaseCase = {
   featured: true,
   featured_order: 1,
   gallery: true,
+  hot: true,
   image_url: "/showcase/product.png",
   output_label: "PRD",
   output_type: "document",
@@ -142,33 +143,47 @@ describe("CaseCard", () => {
     expect(screen.getByText("/agent/chat/home?section=featured")).toBeInTheDocument();
   });
 
-  it("shows HOT only for Workflow cards in the Featured section", () => {
+  it("uses the backend hot field on home and in the capability center", () => {
+    const cases = [
+      ["ppt-workflow", "AI PPT", true],
+      ["image-workflow", "创意图片与表情包生成", true],
+      ["academic_research_pipeline", "学术研究与论文写作", true],
+      ["product_solution_delivery", "产品方案交付", true],
+      ["bid_tech_proposal_writer", "投标技术方案编写", false],
+      ["writer-workflow", "AI Writer 长文写作", false],
+    ] as const;
+
     const { rerender } = render(
       <MemoryRouter>
-        <CaseCard item={{ ...item, type: "workflow" }} showWorkflowHot />
+        {cases.map(([id, title, hot]) => (
+          <CaseCard key={id} item={{ ...item, id, title, hot, type: "workflow" }} />
+        ))}
       </MemoryRouter>,
     );
 
-    const hotBadge = screen.getByRole("img", { name: "HOT" });
-    expect(hotBadge).toBeInTheDocument();
-    expect(hotBadge).toHaveClass("showcase-workflow-hot");
-    expect(hotBadge.parentElement).toHaveClass("showcase-card-image-stage");
-    expect(screen.getByRole("link", { name: /产品设计与 PRD 生成/ })).not.toContainElement(
-      hotBadge,
-    );
+    expect(screen.getAllByRole("img", { name: "HOT" })).toHaveLength(4);
+    cases.slice(0, 4).forEach(([, title]) => {
+      const card = screen.getByText(title).closest("article");
+      expect(card).not.toBeNull();
+      expect(within(card!).getByRole("img", { name: "HOT" })).toHaveClass("showcase-hot");
+    });
+    cases.slice(4).forEach(([, title]) => {
+      const card = screen.getByText(title).closest("article");
+      expect(card).not.toBeNull();
+      expect(within(card!).queryByRole("img", { name: "HOT" })).not.toBeInTheDocument();
+    });
 
     rerender(
       <MemoryRouter>
-        <CaseCard item={{ ...item, type: "work" }} showWorkflowHot />
+        {cases.map(([id, title, hot]) => (
+          <CaseCard
+            key={id}
+            item={{ ...item, id, title, hot, type: "workflow" }}
+            primaryAction="details"
+          />
+        ))}
       </MemoryRouter>,
     );
-    expect(screen.queryByRole("img", { name: "HOT" })).not.toBeInTheDocument();
-
-    rerender(
-      <MemoryRouter>
-        <CaseCard item={{ ...item, type: "workflow" }} />
-      </MemoryRouter>,
-    );
-    expect(screen.queryByRole("img", { name: "HOT" })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("img", { name: "HOT" })).toHaveLength(4);
   });
 });

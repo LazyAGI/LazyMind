@@ -2349,22 +2349,6 @@
   }
 }
 
-.model-provider-cloud-doc-resource-count {
-  display: flex;
-  align-items: baseline;
-  justify-content: flex-end;
-  gap: 4px;
-  color: #667085;
-  font-size: 14px;
-  white-space: nowrap;
-
-  strong {
-    color: #344054;
-    font-size: 16px;
-    font-weight: 600;
-  }
-}
-
 .model-provider-cloud-doc-resource-status.ant-tag {
   min-width: 0;
   margin: 0 0 0 auto;
@@ -2374,6 +2358,7 @@
 }
 
 .model-provider-cloud-doc-resource-controls {
+  grid-column: 4;
   display: flex;
   align-items: center;
   justify-content: flex-end;
@@ -2814,7 +2799,6 @@
     padding: 16px;
   }
 
-  .model-provider-cloud-doc-resource-count,
   .model-provider-cloud-doc-resource-status.ant-tag,
   .model-provider-cloud-doc-resource-controls {
     grid-column: 2;

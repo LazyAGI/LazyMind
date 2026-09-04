@@ -29,14 +29,14 @@ describe("developer mode access", () => {
     expect(layoutSource).not.toContain("if (!isAdminUser && developerActive)");
   });
 
-  it("uses developer copy without self-evolution when evo is hidden", () => {
+  it("uses the same developer confirmation copy when evo is hidden", () => {
     const settingsSource = readFrontendSource("modules/settings/index.tsx");
 
     expect(settingsSource).toContain(
       'import { runtimeFeatures } from "@/runtime/features";',
     );
-    expect(settingsSource).toContain(
-      '"settingsPage.confirm.developerEnableContentWithoutEvo"',
+    expect(settingsSource).not.toContain(
+      'developerEnableContentWithoutEvo',
     );
     expect(settingsSource).toContain(
       '"settingsPage.developer.enableDescWithoutEvo"',
