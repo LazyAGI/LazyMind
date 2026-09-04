@@ -6,7 +6,7 @@ import {
 } from "@/api/generated/chatbot-client";
 import enUS from "@/i18n/locales/en-US";
 import zhCN from "@/i18n/locales/zh-CN";
-import AssistantMessage from "./index";
+import AssistantMessage, { externalProviderDisplayName } from "./index";
 
 vi.mock("react-i18next", () => ({
   initReactI18next: {
@@ -286,5 +286,11 @@ describe("AssistantMessage cancellation", () => {
       historyId: "history-keyboard",
       sequence: 8,
     });
+  });
+});
+
+describe("externalProviderDisplayName", () => {
+  it("presents the provider ID as WorkBuddy", () => {
+    expect(externalProviderDisplayName("workbuddy")).toBe("WorkBuddy");
   });
 });

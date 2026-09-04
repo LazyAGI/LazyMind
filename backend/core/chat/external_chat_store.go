@@ -1,13 +1,18 @@
 package chat
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"mime"
+	"net/http"
 	"net/url"
+	"os"
 	"path"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -19,14 +24,27 @@ import (
 
 	"lazymind/core/agentinvocation"
 	"lazymind/core/common/orm"
+	"lazymind/core/doc"
 	"lazymind/core/externalcontext"
 	"lazymind/core/log"
 	"lazymind/core/workflow/artifactfile"
 )
 
 var errExternalChatLeaseLost = errors.New("external chat lease is no longer owned by this host")
+var errInvalidExternalChatAttachment = errors.New("invalid external Agent attachment")
 
-const externalRunClaimFallback = 2 * time.Second
+const (
+	externalRunClaimFallback        = 2 * time.Second
+	maxExternalChatAttachmentBytes  = 20 << 20
+	externalChatAttachmentDirectory = "external-agent-attachments"
+)
+
+type externalChatAttachment struct {
+	EventID   string
+	Filename  string
+	MediaType string
+	Content   []byte
+}
 
 type externalRunWakeup struct {
 	mu     sync.Mutex
@@ -359,6 +377,127 @@ func (a *externalChatApplication) appendEvent(
 		return nil
 	})
 	return sequence, err
+}
+
+func (a *externalChatApplication) appendAttachment(
+	ctx context.Context,
+	owner, runID, hostID, leaseToken string,
+	attachment externalChatAttachment,
+) (int64, error) {
+	if len(attachment.Content) == 0 || len(attachment.Content) > maxExternalChatAttachmentBytes ||
+		!validArtifactFilename(attachment.Filename) {
+		return 0, errInvalidExternalChatAttachment
+	}
+	extension, err := externalChatImageExtension(attachment.Content, attachment.MediaType)
+	if err != nil {
+		return 0, err
+	}
+	run, err := a.attachmentRun(ctx, owner, runID, hostID, leaseToken, attachment.EventID)
+	if err != nil {
+		return 0, err
+	}
+	directory := filepath.Join(
+		doc.UploadRoot(), externalChatAttachmentDirectory,
+		artifactScopeHash(owner), artifactScopeHash(run.HistoryID),
+	)
+	target := filepath.Join(directory, artifactScopeHash(attachment.EventID)+extension)
+	created, err := persistExternalChatAttachment(target, attachment.Content)
+	if err != nil {
+		return 0, err
+	}
+	reference := doc.StaticFileReferenceFromAnyStoragePath(target)
+	if reference == "" {
+		if created {
+			_ = os.Remove(target)
+		}
+		return 0, errors.New("create external Agent attachment reference")
+	}
+	text := fmt.Sprintf("\n\n![Generated image](%s)\n\n", reference)
+	sequence, err := a.appendEvent(ctx, owner, runID, hostID, leaseToken, externalChatEvent{
+		EventID: attachment.EventID, Type: "message", Text: text,
+	})
+	if err != nil && created {
+		_ = os.Remove(target)
+	}
+	return sequence, err
+}
+
+func (a *externalChatApplication) attachmentRun(
+	ctx context.Context,
+	owner, runID, hostID, leaseToken, eventID string,
+) (orm.ExternalChatRun, error) {
+	var run orm.ExternalChatRun
+	if a == nil || a.db == nil {
+		return run, errExternalChatLeaseLost
+	}
+	if err := a.db.WithContext(ctx).Where("id = ? AND actor_user_id = ?", runID, owner).Take(&run).Error; err != nil {
+		return run, errExternalChatLeaseLost
+	}
+	if run.HostID != hostID || run.LeaseToken == "" || run.LeaseToken != leaseToken {
+		return run, errExternalChatLeaseLost
+	}
+	if run.Status != "running" || run.LeaseExpiresAt == nil || run.LeaseExpiresAt.Before(a.now()) {
+		var existing int64
+		if err := a.db.WithContext(ctx).Model(&orm.ExternalChatRunEvent{}).
+			Where("id = ? AND run_id = ?", eventID, runID).Count(&existing).Error; err != nil || existing == 0 {
+			return run, errExternalChatLeaseLost
+		}
+	}
+	return run, nil
+}
+
+func externalChatImageExtension(content []byte, supplied string) (string, error) {
+	mediaType, _, err := mime.ParseMediaType(strings.TrimSpace(supplied))
+	if err != nil {
+		return "", errInvalidExternalChatAttachment
+	}
+	detected := http.DetectContentType(content)
+	extensions := map[string]string{
+		"image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif", "image/webp": ".webp",
+	}
+	extension, ok := extensions[detected]
+	if !ok || mediaType != detected {
+		return "", errInvalidExternalChatAttachment
+	}
+	return extension, nil
+}
+
+func persistExternalChatAttachment(target string, content []byte) (bool, error) {
+	if existing, err := os.ReadFile(target); err == nil {
+		if !bytes.Equal(existing, content) {
+			return false, errors.New("external Agent attachment event conflicts with existing content")
+		}
+		return false, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return false, err
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+		return false, err
+	}
+	temporary, err := os.CreateTemp(filepath.Dir(target), ".external-agent-attachment-*")
+	if err != nil {
+		return false, err
+	}
+	temporaryPath := temporary.Name()
+	defer os.Remove(temporaryPath)
+	if err := temporary.Chmod(0o600); err != nil {
+		temporary.Close()
+		return false, err
+	}
+	if _, err := temporary.Write(content); err != nil {
+		temporary.Close()
+		return false, err
+	}
+	if err := temporary.Close(); err != nil {
+		return false, err
+	}
+	if err := os.Link(temporaryPath, target); err != nil {
+		if existing, readErr := os.ReadFile(target); readErr == nil && bytes.Equal(existing, content) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 func sameExternalChatEvent(existing orm.ExternalChatRunEvent, runID string, event externalChatEvent) bool {

@@ -76,6 +76,12 @@ vi.mock("react-i18next", () => ({
         "agentIntegration.checkAgain": "重新检测",
         "agentIntegration.login": "登录",
         "agentIntegration.openLoginTerminal": "打开登录终端",
+        "agentIntegration.openWorkBuddy": "打开 WorkBuddy 登录",
+        "agentIntegration.workbuddyRuntimeReady": "已自动识别 WorkBuddy 执行能力",
+        "agentIntegration.workbuddyRuntimeMissing": "未找到 WorkBuddy 执行能力",
+        "agentIntegration.workbuddySignInReused": "已自动复用 WorkBuddy 登录",
+        "agentIntegration.workbuddySignInRequired": "请打开 WorkBuddy 完成登录",
+        "agentIntegration.workbuddyRuntimeUnavailable": "WorkBuddy 当前不可用",
         "agentIntegration.interactiveLoginHint": `${agent} 不提供独立的自动登录命令；请输入 /login`,
         "agentIntegration.continueInAgent": `前往 ${agent} 完成`,
         "agentIntegration.executorDetectionReady": "本机 Agent 检测服务已就绪",
@@ -301,7 +307,7 @@ describe("AgentIntegrationPage", () => {
     expect(within(codex).getByRole("alert")).toHaveTextContent("Codex runtime command is unavailable");
   });
 
-  it("opens an interactive terminal and guides WorkBuddy sign-in", async () => {
+  it("keeps WorkBuddy unified and reuses the desktop installation without OAuth configuration", async () => {
     const workbuddyStatus = {
       agent: "workbuddy",
       display_name: "WorkBuddy",
@@ -313,15 +319,15 @@ describe("AgentIntegrationPage", () => {
     };
     mocks.statuses.mockResolvedValue({ ok: true, data: { workbuddy: workbuddyStatus } });
     mocks.executors.mockResolvedValue({ data: { data: { executors: [{
-      id: "workbuddy", display_name: "CodeBuddy Code CLI", kind: "external",
+      id: "workbuddy", display_name: "WorkBuddy", kind: "external",
       installed: true, host_online: true, available: false,
-      unavailable_reason: "CodeBuddy Code is not signed in",
+      unavailable_reason: "WorkBuddy is not signed in; open WorkBuddy and complete sign-in",
     }] } } });
     mocks.executorPolicies.mockResolvedValue({
       ok: true,
       data: { workbuddy: {
         provider: "workbuddy", enabled: false, installed: true, ready: false,
-        unavailable_reason: "CodeBuddy Code is not signed in; start `codebuddy` and run `/login`",
+        unavailable_reason: "WorkBuddy is not signed in; open WorkBuddy and complete sign-in",
       } },
     });
     mocks.action.mockResolvedValue({ ok: true, data: workbuddyStatus });
@@ -330,20 +336,24 @@ describe("AgentIntegrationPage", () => {
 
     await screen.findByText("外部 Agent 集成");
     const workbuddy = expandAgent("workbuddy");
-    expect(within(workbuddy).getByText(/不提供独立的自动登录命令/)).toHaveTextContent("/login");
-    fireEvent.click(within(workbuddy).getByRole("button", { name: /打开登录终端/ }));
-    await waitFor(() => expect(mocks.action).toHaveBeenCalledWith("workbuddy", "login"));
+    expect(within(workbuddy).getByText("WorkBuddy")).toBeInTheDocument();
+    expect(within(workbuddy).queryByText(/CodeBuddy/)).not.toBeInTheDocument();
+    expect(within(workbuddy).queryByText(/OAuth|Client ID|Client Secret/)).not.toBeInTheDocument();
+    expect(within(workbuddy).getByText("已自动识别 WorkBuddy 执行能力")).toBeInTheDocument();
+    const login = within(workbuddy).getByRole("link", { name: /打开 WorkBuddy 登录/ });
+    expect(login).toHaveAttribute("href", "workbuddy://home");
+    fireEvent.click(login);
 
     mocks.executorPolicies.mockResolvedValue({
       ok: true,
       data: { workbuddy: { provider: "workbuddy", enabled: true, installed: true, ready: true } },
     });
     mocks.executors.mockResolvedValue({ data: { data: { executors: [{
-      id: "workbuddy", display_name: "CodeBuddy Code CLI", kind: "external",
+      id: "workbuddy", display_name: "WorkBuddy", kind: "external",
       installed: true, host_online: true, available: true, unavailable_reason: "",
     }] } } });
-    await act(async () => window.dispatchEvent(new Event("focus")));
-    await waitFor(() => expect(within(workbuddy).getByText("执行器账号已登录")).toBeInTheDocument());
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: /reload刷新/ })));
+    await waitFor(() => expect(within(workbuddy).getByText("已自动复用 WorkBuddy 登录")).toBeInTheDocument());
   });
 
   it("retries a transient Assistant Bridge failure before showing an error", async () => {
@@ -355,6 +365,37 @@ describe("AgentIntegrationPage", () => {
 
     await waitFor(() => expect(mocks.statuses).toHaveBeenCalledTimes(2));
     expect(screen.queryByText("本机助理桥接器未运行")).not.toBeInTheDocument();
+  });
+
+  it("shows refresh progress and coalesces repeated refresh clicks", async () => {
+    render(<AgentIntegrationPage />);
+
+    await screen.findByText("外部 Agent 集成");
+    await waitFor(() => expect(mocks.statuses).toHaveBeenCalledTimes(1));
+    const codex = screen.getByTestId("agent-panel-codex");
+    const refreshButton = screen.getByRole("button", { name: /reload刷新/ });
+    const recheckButton = within(codex).getByRole("button", { name: /reload重新检测/ });
+    let finishRefresh!: (value: { ok: true; data: { codex: typeof readyCodexStatus } }) => void;
+    mocks.statuses.mockImplementationOnce(() => new Promise((resolve) => {
+      finishRefresh = resolve;
+    }));
+
+    fireEvent.click(refreshButton);
+
+    await waitFor(() => {
+      expect(refreshButton).toBeDisabled();
+      expect(recheckButton).toBeDisabled();
+      expect(refreshButton).toHaveClass("ant-btn-loading");
+      expect(recheckButton).toHaveClass("ant-btn-loading");
+    });
+    fireEvent.click(recheckButton);
+    expect(mocks.statuses).toHaveBeenCalledTimes(2);
+
+    act(() => finishRefresh({ ok: true, data: { codex: readyCodexStatus } }));
+    await waitFor(() => {
+      expect(refreshButton).toBeEnabled();
+      expect(recheckButton).toBeEnabled();
+    });
   });
 
   it("does not report a sign-in probe failure before the CLI is installed", async () => {

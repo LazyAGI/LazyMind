@@ -8,14 +8,15 @@ import (
 // ExternalAgentBinding is the durable one-to-one correspondence between one
 // provider-native thread and one LazyMind conversation.
 type ExternalAgentBinding struct {
-	ID               string    `gorm:"column:id;type:varchar(36);primaryKey" json:"binding_id"`
-	ConversationID   string    `gorm:"column:conversation_id;type:varchar(36);not null;uniqueIndex:uk_external_agent_binding_conversation" json:"conversation_id"`
-	Provider         string    `gorm:"column:provider;type:varchar(32);not null;uniqueIndex:uk_external_agent_binding_thread,priority:1" json:"provider"`
-	HostID           string    `gorm:"column:host_id;type:varchar(128);not null;uniqueIndex:uk_external_agent_binding_thread,priority:2" json:"host_id"`
-	ProviderThreadID string    `gorm:"column:provider_thread_id;type:varchar(128);not null;uniqueIndex:uk_external_agent_binding_thread,priority:3" json:"provider_thread_id"`
-	CreatedByUserID  string    `gorm:"column:created_by_user_id;type:varchar(255);not null" json:"-"`
-	CreatedAt        time.Time `gorm:"column:created_at;not null" json:"created_at"`
-	UpdatedAt        time.Time `gorm:"column:updated_at;not null" json:"updated_at"`
+	ID                string    `gorm:"column:id;type:varchar(36);primaryKey" json:"binding_id"`
+	ConversationID    string    `gorm:"column:conversation_id;type:varchar(36);not null;uniqueIndex:uk_external_agent_binding_conversation_provider,priority:1" json:"conversation_id"`
+	Provider          string    `gorm:"column:provider;type:varchar(32);not null;uniqueIndex:uk_external_agent_binding_conversation_provider,priority:2;uniqueIndex:uk_external_agent_binding_thread,priority:1" json:"provider"`
+	HostID            string    `gorm:"column:host_id;type:varchar(128);not null;uniqueIndex:uk_external_agent_binding_thread,priority:2" json:"host_id"`
+	ProviderThreadID  string    `gorm:"column:provider_thread_id;type:varchar(128);not null;uniqueIndex:uk_external_agent_binding_thread,priority:3" json:"provider_thread_id"`
+	ManagedByLazyMind bool      `gorm:"column:managed_by_lazymind;not null;default:false" json:"managed_by_lazymind"`
+	CreatedByUserID   string    `gorm:"column:created_by_user_id;type:varchar(255);not null" json:"-"`
+	CreatedAt         time.Time `gorm:"column:created_at;not null" json:"created_at"`
+	UpdatedAt         time.Time `gorm:"column:updated_at;not null" json:"updated_at"`
 }
 
 func (ExternalAgentBinding) TableName() string { return "external_agent_bindings" }

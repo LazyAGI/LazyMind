@@ -61,6 +61,131 @@ VALUES ('legacy-model','provider','Provider','Legacy','VLM','',CURRENT_TIMESTAMP
 	}
 }
 
+func TestManagedExternalBindingMigrationBackfillsOwnership(t *testing.T) {
+	db := openRawSQLite(t, t.TempDir()+"/managed-external-binding.db")
+	if _, err := db.Exec(`
+CREATE TABLE external_agent_bindings (
+  id text PRIMARY KEY,
+  conversation_id text NOT NULL,
+  provider text NOT NULL,
+  host_id text NOT NULL,
+  provider_thread_id text NOT NULL,
+  created_at datetime NOT NULL
+);
+CREATE TABLE external_agent_runs (
+  id text PRIMARY KEY,
+  conversation_id text NOT NULL,
+  provider text NOT NULL,
+  host_id text NOT NULL,
+  provider_thread_id text NOT NULL,
+  action text NOT NULL,
+  created_at datetime NOT NULL
+);
+INSERT INTO external_agent_bindings
+  (id, conversation_id, provider, host_id, provider_thread_id, created_at) VALUES
+  ('managed', 'managed-conversation', 'codex', 'host-1', 'managed-thread', '2026-09-03 10:01:00'),
+  ('native', 'native-conversation', 'codex', 'host-1', 'native-thread', '2026-09-03 10:00:00'),
+  ('unrelated', 'unrelated-conversation', 'codex', 'host-1', 'unrelated-thread', '2026-09-03 10:00:00');
+INSERT INTO external_agent_runs
+  (id, conversation_id, provider, host_id, provider_thread_id, action, created_at) VALUES
+  ('managed-run', 'managed-conversation', 'codex', 'host-1', 'managed-thread', 'start', '2026-09-03 10:00:00'),
+  ('native-later-run', 'native-conversation', 'codex', 'host-1', 'native-thread', 'resume', '2026-09-03 10:01:00');
+`); err != nil {
+		t.Fatalf("seed external bindings: %v", err)
+	}
+
+	migrationDir := filepath.Join("..", "migrations", "dev_mode", "v0_3")
+	upPath := filepath.Join(migrationDir, "20260903044957_restore_managed_external_agent_binding.up.sql")
+	execMigrationFileForDriver(t, db, upPath, "sqlite")
+
+	rows, err := db.Query(`SELECT id, managed_by_lazymind FROM external_agent_bindings ORDER BY id`)
+	if err != nil {
+		t.Fatalf("read migrated bindings: %v", err)
+	}
+	defer rows.Close()
+	got := map[string]bool{}
+	for rows.Next() {
+		var id string
+		var managed bool
+		if err := rows.Scan(&id, &managed); err != nil {
+			t.Fatalf("scan migrated binding: %v", err)
+		}
+		got[id] = managed
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate migrated bindings: %v", err)
+	}
+	if !got["managed"] || got["native"] || got["unrelated"] {
+		t.Fatalf("managed binding ownership=%v", got)
+	}
+
+	downPath := filepath.Join(migrationDir, "20260903044957_restore_managed_external_agent_binding.down.sql")
+	execMigrationFileForDriver(t, db, downPath, "sqlite")
+	var columnCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('external_agent_bindings') WHERE name = 'managed_by_lazymind'`).Scan(&columnCount); err != nil {
+		t.Fatalf("inspect rolled back binding schema: %v", err)
+	}
+	if columnCount != 0 {
+		t.Fatal("managed_by_lazymind should be removed by the down migration")
+	}
+}
+
+func TestExternalBindingProviderScopeMigration(t *testing.T) {
+	db := openRawSQLite(t, t.TempDir()+"/external-binding-provider-scope.db")
+	if _, err := db.Exec(`
+CREATE TABLE external_agent_bindings (
+  id text PRIMARY KEY,
+  conversation_id text NOT NULL UNIQUE,
+  provider text NOT NULL,
+  host_id text NOT NULL,
+  provider_thread_id text NOT NULL,
+  managed_by_lazymind numeric NOT NULL DEFAULT false,
+  created_by_user_id text NOT NULL,
+  created_at datetime NOT NULL,
+  updated_at datetime NOT NULL,
+  UNIQUE (provider, host_id, provider_thread_id)
+);
+INSERT INTO external_agent_bindings
+  (id, conversation_id, provider, host_id, provider_thread_id, managed_by_lazymind,
+   created_by_user_id, created_at, updated_at)
+VALUES
+  ('codex-binding', 'conversation-1', 'codex', 'host-1', 'codex-thread', true,
+   'user-1', '2026-09-03 15:00:00', '2026-09-03 15:00:00');
+`); err != nil {
+		t.Fatalf("seed external binding: %v", err)
+	}
+
+	migrationDir := filepath.Join("..", "migrations", "dev_mode", "v0_3")
+	upPath := filepath.Join(migrationDir, "20260903154000_scope_external_agent_binding_by_provider.up.sql")
+	execMigrationFileForDriver(t, db, upPath, "sqlite")
+	if _, err := db.Exec(`
+INSERT INTO external_agent_bindings
+  (id, conversation_id, provider, host_id, provider_thread_id, managed_by_lazymind,
+   created_by_user_id, created_at, updated_at)
+VALUES
+  ('workbuddy-binding', 'conversation-1', 'workbuddy', 'host-1', 'workbuddy-thread', true,
+   'user-1', '2026-09-03 15:01:00', '2026-09-03 15:01:00')
+`); err != nil {
+		t.Fatalf("bind second provider after migration: %v", err)
+	}
+	if _, err := db.Exec(`
+INSERT INTO external_agent_bindings
+  (id, conversation_id, provider, host_id, provider_thread_id, created_by_user_id, created_at, updated_at)
+VALUES
+  ('second-workbuddy', 'conversation-1', 'workbuddy', 'host-1', 'other-thread',
+   'user-1', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+`); err == nil {
+		t.Fatal("migration allowed two WorkBuddy threads in one conversation")
+	}
+
+	downPath := filepath.Join(migrationDir, "20260903154000_scope_external_agent_binding_by_provider.down.sql")
+	execMigrationFileForDriver(t, db, downPath, "sqlite")
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM external_agent_bindings WHERE conversation_id='conversation-1'`).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("rolled back conversation bindings=%d err=%v", count, err)
+	}
+}
+
 func TestFixTaskCenterWorkflowRunsMigrationBackfillsLifecycle(t *testing.T) {
 	db := openRawSQLite(t, t.TempDir()+"/task-center-workflow-runs.db")
 	if _, err := db.Exec(`

@@ -685,12 +685,13 @@ CREATE TABLE IF NOT EXISTS external_agent_bindings (
     provider VARCHAR(32) NOT NULL,
     host_id VARCHAR(128) NOT NULL DEFAULT 'host-legacy',
     provider_thread_id VARCHAR(128) NOT NULL,
+    managed_by_lazymind BOOLEAN NOT NULL DEFAULT FALSE,
     created_by_user_id VARCHAR(255) NOT NULL,
     created_at TIMESTAMP NOT NULL,
     updated_at TIMESTAMP NOT NULL
 );
-CREATE UNIQUE INDEX IF NOT EXISTS uk_external_agent_binding_conversation
-    ON external_agent_bindings(conversation_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_external_agent_binding_conversation_provider
+    ON external_agent_bindings(conversation_id, provider);
 CREATE UNIQUE INDEX IF NOT EXISTS uk_external_agent_binding_thread
     ON external_agent_bindings(provider, host_id, provider_thread_id);
 
@@ -1001,12 +1002,13 @@ CREATE TABLE IF NOT EXISTS external_agent_bindings (
     provider VARCHAR(32) NOT NULL,
     host_id VARCHAR(128) NOT NULL DEFAULT 'host-legacy',
     provider_thread_id VARCHAR(128) NOT NULL,
+    managed_by_lazymind BOOLEAN NOT NULL DEFAULT FALSE,
     created_by_user_id VARCHAR(255) NOT NULL,
     created_at TIMESTAMP NOT NULL,
     updated_at TIMESTAMP NOT NULL
 );
-CREATE UNIQUE INDEX IF NOT EXISTS uk_external_agent_binding_conversation
-    ON external_agent_bindings(conversation_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_external_agent_binding_conversation_provider
+    ON external_agent_bindings(conversation_id, provider);
 CREATE UNIQUE INDEX IF NOT EXISTS uk_external_agent_binding_thread
     ON external_agent_bindings(provider, host_id, provider_thread_id);
 

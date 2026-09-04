@@ -1,4 +1,17 @@
 export const LOCAL_ASSISTANT_BRIDGE = "http://127.0.0.1:19091/v1";
+const CLIENT_PLATFORM_HEADER = "X-LazyMind-Client-Platform";
+
+export function browserClientPlatform(): "windows" | "darwin" | "linux" | "" {
+  if (typeof navigator === "undefined") return "";
+  const userAgentData = (navigator as Navigator & {
+    userAgentData?: { platform?: string };
+  }).userAgentData;
+  const value = `${userAgentData?.platform || navigator.platform || ""} ${navigator.userAgent || ""}`;
+  if (/windows|win32|win64/i.test(value)) return "windows";
+  if (/macintosh|macintel|mac os/i.test(value)) return "darwin";
+  if (/linux/i.test(value)) return "linux";
+  return "";
+}
 
 interface SessionUser {
   token: string;
@@ -36,7 +49,14 @@ export async function assistantBridgeFetch(
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(`${LOCAL_ASSISTANT_BRIDGE}${path}`, { ...init, signal: controller.signal });
+    const headers = new Headers(init?.headers);
+    const platform = browserClientPlatform();
+    if (platform) headers.set(CLIENT_PLATFORM_HEADER, platform);
+    return await fetch(`${LOCAL_ASSISTANT_BRIDGE}${path}`, {
+      ...init,
+      headers,
+      signal: controller.signal,
+    });
   } finally {
     window.clearTimeout(timeout);
   }

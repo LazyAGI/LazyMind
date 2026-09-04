@@ -62,6 +62,7 @@ describe("browser Assistant Bridge session synchronization", () => {
   });
 
   it("sends the current web session before reading Agent status", async () => {
+    vi.spyOn(navigator, "platform", "get").mockReturnValue("Win32");
     mocks.user.mockReturnValue({
       username: "admin",
       token: "access",
@@ -87,6 +88,11 @@ describe("browser Assistant Bridge session synchronization", () => {
       access_token: "access",
       refresh_token: "refresh",
     });
+    const platformHeader = new Headers(init.headers).get(
+      "X-LazyMind-Client-Platform",
+    );
+    expect(platformHeader).not.toBeNull();
+    expect(platformHeader || "").toMatch(/^(windows|darwin|linux)$/);
     expect(fetchMock.mock.calls[1][0]).toBe("http://127.0.0.1:19091/v1/agents");
   });
 

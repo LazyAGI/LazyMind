@@ -145,7 +145,7 @@ func TestStatusesDoNotLaunchDesktopAgentCandidates(t *testing.T) {
 }
 
 func TestInteractiveLoginActionsReturnBeforeExternalLoginCompletes(t *testing.T) {
-	for _, agent := range []string{"cursor", "workbuddy"} {
+	for _, agent := range []string{"cursor"} {
 		t.Run(agent, func(t *testing.T) {
 			server := newTestServer(t, t.TempDir())
 			changes := server.policy.Changes()
@@ -218,6 +218,34 @@ func TestBrowserSessionRejectsAnotherServerOrigin(t *testing.T) {
 	server.routes().ServeHTTP(response, request)
 	if response.Code != http.StatusForbidden {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestBrowserAgentRoutesRejectAnotherHostPlatform(t *testing.T) {
+	server := newTestServer(t, t.TempDir())
+	clientPlatform := "windows"
+	if runtime.GOOS == "windows" {
+		clientPlatform = "linux"
+	}
+	request := httptest.NewRequest(http.MethodGet, "/v1/agents", nil)
+	request.Header.Set("X-LazyMind-Client-Platform", clientPlatform)
+	response := httptest.NewRecorder()
+	server.routes().ServeHTTP(response, request)
+	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "native") {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestBrowserPreflightAllowsClientPlatformHeader(t *testing.T) {
+	server := newTestServer(t, t.TempDir())
+	request := httptest.NewRequest(http.MethodOptions, "/v1/agents", nil)
+	request.Header.Set("Origin", "http://127.0.0.1:8090")
+	request.Header.Set("Access-Control-Request-Headers", clientPlatformHeader)
+	response := httptest.NewRecorder()
+	server.routes().ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent ||
+		!strings.Contains(response.Header().Get("Access-Control-Allow-Headers"), clientPlatformHeader) {
+		t.Fatalf("status=%d headers=%v", response.Code, response.Header())
 	}
 }
 

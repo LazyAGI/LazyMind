@@ -164,6 +164,16 @@ describe("RecordList conversation pinning", () => {
     });
   });
 
+  it("does not exclude external assistants from the default conversation list", async () => {
+    renderRecordList();
+
+    await screen.findByText("较早的会话");
+    expect(mocks.listConversations).toHaveBeenCalledWith(
+      expect.anything(),
+      { params: { is_task_conv: "false" } },
+    );
+  });
+
   it("pins and unpins a conversation without changing its activity date", async () => {
     mocks.setPinned
       .mockResolvedValueOnce({

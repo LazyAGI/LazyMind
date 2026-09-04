@@ -113,17 +113,11 @@ func runInternal(ctx context.Context, args []string, stdout, stderr io.Writer) e
 		return runInternalCodex(ctx, action, *agentBinary, bridge, stdout)
 	case string(mcpclient.Cursor), string(mcpclient.WorkBuddy), string(mcpclient.Raccoon), string(mcpclient.TRAEWork), string(mcpclient.DeepSeekHarness):
 		if action == "login" {
-			if agent != string(mcpclient.Cursor) && agent != string(mcpclient.WorkBuddy) {
+			if agent != string(mcpclient.Cursor) {
 				return fmt.Errorf("unsupported %s action %q", agent, action)
 			}
-			var loginErr error
-			if agent == string(mcpclient.WorkBuddy) {
-				loginErr = workbuddy.Login(ctx, *agentBinary)
-			} else {
-				loginErr = cursor.Login(ctx, *agentBinary)
-			}
-			if loginErr != nil {
-				return loginErr
+			if err := cursor.Login(ctx, *agentBinary); err != nil {
+				return err
 			}
 		}
 		adapter, err := mcpclient.New(mcpclient.Kind(agent), "", bridge)
@@ -609,8 +603,9 @@ Usage:
   lazymind agent host <run|status> [--provider codex|cursor|workbuddy|all]
 
 LazyMind Desktop and the Docker Assistant Bridge both expose one-click managed
-connections in Settings -> Assistants. The bridge also hosts installed Codex,
-Cursor, and CodeBuddy Code CLIs. Raccoon, TRAE Work, and DeepSeek Harness
+connections in Settings -> Assistants. The bridge hosts installed Codex and
+Cursor CLIs, and automatically reuses the runtime and sign-in bundled with WorkBuddy.
+Raccoon, TRAE Work, and DeepSeek Harness
 remain MCP clients rather than Chat executors.
 Internal Adapter commands are not a public CLI.
 `)

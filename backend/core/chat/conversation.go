@@ -2123,12 +2123,12 @@ func ListConversations(w http.ResponseWriter, r *http.Request) {
 	externalBinding := db.Model(&orm.ExternalAgentBinding{}).Select("1").
 		Where("external_agent_bindings.conversation_id = conversations.id").
 		Where("external_agent_bindings.created_by_user_id = ?", userID)
-	validatedExternalBinding := db.Table("external_agent_bindings AS validated_bindings").Select("1").
-		Joins("JOIN external_agent_sessions AS validated_sessions ON validated_sessions.owner_user_id = validated_bindings.created_by_user_id AND validated_sessions.provider = validated_bindings.provider AND validated_sessions.host_id = validated_bindings.host_id AND validated_sessions.provider_thread_id = validated_bindings.provider_thread_id").
-		Where("validated_bindings.conversation_id = conversations.id").
-		Where("validated_bindings.created_by_user_id = ?", userID).
-		Where("validated_sessions.active = ?", true)
-	q = q.Where("NOT EXISTS (?) OR EXISTS (?)", externalBinding, validatedExternalBinding)
+	visibleExternalBinding := db.Table("external_agent_bindings AS visible_bindings").Select("1").
+		Joins("LEFT JOIN external_agent_sessions AS visible_sessions ON visible_sessions.owner_user_id = visible_bindings.created_by_user_id AND visible_sessions.provider = visible_bindings.provider AND visible_sessions.host_id = visible_bindings.host_id AND visible_sessions.provider_thread_id = visible_bindings.provider_thread_id").
+		Where("visible_bindings.conversation_id = conversations.id").
+		Where("visible_bindings.created_by_user_id = ?", userID).
+		Where("visible_bindings.managed_by_lazymind = ? OR visible_sessions.active = ?", true, true)
+	q = q.Where("NOT EXISTS (?) OR EXISTS (?)", externalBinding, visibleExternalBinding)
 	assistantFilter := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("assistant")))
 	if assistantFilter != "" {
 		if normalized, valid := normalizeChatExecutor(assistantFilter); !valid || normalized != assistantFilter {
@@ -2138,7 +2138,7 @@ func ListConversations(w http.ResponseWriter, r *http.Request) {
 		if assistantFilter == ChatExecutorLazyMind {
 			q = q.Where("NOT EXISTS (?)", externalBinding)
 		} else {
-			q = q.Where("EXISTS (?)", validatedExternalBinding.Where("validated_bindings.provider = ?", assistantFilter))
+			q = q.Where("EXISTS (?)", visibleExternalBinding.Where("visible_bindings.provider = ?", assistantFilter))
 		}
 	}
 	assistantsFilter := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("assistants")))
@@ -2162,11 +2162,11 @@ func ListConversations(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case includeLazyMind && len(providers) > 0:
 			q = q.Where("NOT EXISTS (?) OR EXISTS (?)", externalBinding,
-				validatedExternalBinding.Where("validated_bindings.provider IN ?", providers))
+				visibleExternalBinding.Where("visible_bindings.provider IN ?", providers))
 		case includeLazyMind:
 			q = q.Where("NOT EXISTS (?)", externalBinding)
 		case len(providers) > 0:
-			q = q.Where("EXISTS (?)", validatedExternalBinding.Where("validated_bindings.provider IN ?", providers))
+			q = q.Where("EXISTS (?)", visibleExternalBinding.Where("visible_bindings.provider IN ?", providers))
 		}
 	}
 	if keyword != "" {

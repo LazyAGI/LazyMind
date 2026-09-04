@@ -966,6 +966,12 @@ const zhCN = {
     executorHostStateStale: "对话服务尚未同步当前 CLI 状态；请重新检测，仍不一致时重启 LazyMind",
     executorLoginRequired: "{{agent}} 未登录",
     executorStatusCheckFailed: "登录状态检测失败，请重新检测；如仍失败，可在终端运行对应 CLI 的状态命令确认。",
+    openWorkBuddy: "打开 WorkBuddy 登录",
+    workbuddyRuntimeReady: "已自动识别 WorkBuddy 执行能力",
+    workbuddyRuntimeMissing: "未找到 WorkBuddy 执行能力",
+    workbuddySignInReused: "已自动复用 WorkBuddy 登录",
+    workbuddySignInRequired: "请打开 WorkBuddy 完成登录",
+    workbuddyRuntimeUnavailable: "WorkBuddy 当前不可用",
     compactDetectionStatus: "检测情况",
     compactCLIInstalled: "CLI 已安装",
     compactCLIMissing: "CLI 未安装",
@@ -1033,14 +1039,14 @@ const zhCN = {
       },
       workbuddy: {
         mcp: {
-          install: "安装并启动一次 WorkBuddy 桌面版；此流程不检查 CodeBuddy Code CLI。",
+          install: "安装并启动一次 WorkBuddy 桌面版。",
           connect: "启用后，LazyMind 在 `~/.workbuddy/mcp.json` 写入 `lazymind` 配置。",
-          verify: "重启 WorkBuddy 桌面版，在 MCP 工具列表中确认 `lazymind`。",
+          verify: "重启 WorkBuddy，在 MCP 工具列表中确认 `lazymind`。",
         },
         executor: {
-          install: "安装 CodeBuddy Code CLI，执行 `codebuddy --version`。",
-          login: "启动 `codebuddy`，输入 `/login` 并完成登录。",
-          enable: "检测完成后启用“LazyMind 调用 CodeBuddy Code CLI”；不调用 WorkBuddy 桌面版。",
+          install: "安装并启动一次 WorkBuddy；无需另装命令行工具。",
+          login: "LazyMind 自动复用 WorkBuddy 登录；未登录时点击“打开 WorkBuddy 登录”。",
+          enable: "自动识别成功后，启用“LazyMind 调用 WorkBuddy”。",
         },
       },
       raccoon: {

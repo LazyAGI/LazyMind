@@ -516,13 +516,21 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
             pageToken: isFirst ? "" : pageToken,
             pageSize: 50,
           },
-          { params: {
-            ...(isTaskConvParam !== undefined ? { is_task_conv: isTaskConvParam } : {}),
-            assistants: [
-              ...(hasNormal || hasTask ? ['lazymind'] : []),
-              ...selectedAgents,
-            ].join(','),
-          } },
+          {
+            params: {
+              ...(isTaskConvParam !== undefined
+                ? { is_task_conv: isTaskConvParam }
+                : {}),
+              ...(selectedAgents.length > 0
+                ? {
+                    assistants: [
+                      ...(hasNormal || hasTask ? ["lazymind"] : []),
+                      ...selectedAgents,
+                    ].join(","),
+                  }
+                : {}),
+            },
+          },
         )
         .then((res) => {
           const conversations: SidebarConversation[] =

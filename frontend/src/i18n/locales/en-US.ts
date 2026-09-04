@@ -993,6 +993,12 @@ const enUS = {
     executorHostStateStale: "Chat has not synchronized the current CLI state. Check again; if it persists, restart LazyMind.",
     executorLoginRequired: "{{agent}} is not signed in",
     executorStatusCheckFailed: "Sign-in status could not be checked. Check again; if it still fails, run the CLI status command in a terminal.",
+    openWorkBuddy: "Open WorkBuddy to sign in",
+    workbuddyRuntimeReady: "WorkBuddy runtime detected automatically",
+    workbuddyRuntimeMissing: "WorkBuddy runtime was not found",
+    workbuddySignInReused: "WorkBuddy sign-in reused automatically",
+    workbuddySignInRequired: "Open WorkBuddy and complete sign-in",
+    workbuddyRuntimeUnavailable: "WorkBuddy is currently unavailable",
     compactDetectionStatus: "Detection status",
     compactCLIInstalled: "CLI installed",
     compactCLIMissing: "CLI not installed",
@@ -1060,14 +1066,14 @@ const enUS = {
       },
       workbuddy: {
         mcp: {
-          install: "Install and open WorkBuddy Desktop once. This flow does not inspect CodeBuddy Code CLI.",
+          install: "Install and open WorkBuddy Desktop once.",
           connect: "When enabled, LazyMind writes `lazymind` to `~/.workbuddy/mcp.json`.",
-          verify: "Restart WorkBuddy Desktop and confirm `lazymind` in its MCP tool list.",
+          verify: "Restart WorkBuddy and confirm `lazymind` in its MCP tool list.",
         },
         executor: {
-          install: "Install CodeBuddy Code CLI and run `codebuddy --version`.",
-          login: "Start `codebuddy`, enter `/login`, and complete sign-in.",
-          enable: "After both checks pass, enable “LazyMind calls CodeBuddy Code CLI”. WorkBuddy Desktop is not invoked.",
+          install: "Install and open WorkBuddy once; no separate CLI is required.",
+          login: "LazyMind reuses the WorkBuddy sign-in automatically. If signed out, choose “Open WorkBuddy to sign in”.",
+          enable: "After automatic detection succeeds, enable “LazyMind calls WorkBuddy”.",
         },
       },
       raccoon: {
