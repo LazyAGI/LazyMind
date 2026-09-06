@@ -172,7 +172,7 @@ func coreServiceEnv(cfg RuntimeConfig, paths RuntimePaths) []string {
 	endpoints := serviceEndpointsFromConfig(cfg)
 	coreDSN := sqliteDSN(paths.CoreDBPath)
 	coreURL := sqliteURL(paths.CoreDBPath)
-	return []string{
+	environment := []string{
 		"LAZYMIND_RUNTIME_MODE=local",
 		"LAZYMIND_CLOUD_BASE_URL=" + strings.TrimSpace(os.Getenv("LAZYMIND_CLOUD_BASE_URL")),
 		"LAZYMIND_CLOUD_TOKEN_STORE=" + cloudTokenStoreMode(cfg.Profile),
@@ -220,10 +220,35 @@ func coreServiceEnv(cfg RuntimeConfig, paths RuntimePaths) []string {
 		"LAZYMIND_READONLY_SCHEMA=",
 		"LAZYMIND_READONLY_TABLES=lazyllm_documents,lazyllm_doc_service_tasks,lazyllm_kb_documents",
 		"LAZYMIND_RESOURCE_UPDATE_ENABLED=" + envText("LAZYMIND_RESOURCE_UPDATE_ENABLED", "true"),
-		"LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN=" + envText("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN", "dev-internal-service-token"),
+		"LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN=" + internalServiceToken(),
+		"LAZYMIND_CLIENT_INSTANCE_ID=" + runtimeClientInstanceID(),
 		"LAZYMIND_WORKFLOW_EXECUTOR_TOKEN=" + envText("LAZYMIND_WORKFLOW_EXECUTOR_TOKEN", "dev-workflow-executor-token"),
 		"LAZYMIND_MODEL_PROVIDER_SECRET_KEY=" + strings.TrimSpace(os.Getenv("LAZYMIND_MODEL_PROVIDER_SECRET_KEY")),
 		"LAZYMIND_MCP_SECRET_KEY=" + envText("LAZYMIND_MCP_SECRET_KEY", "lazymind-core-mcp-default-secret"),
+	}
+	return append(environment, feishuCLIRuntimeEnv(paths)...)
+}
+
+func feishuCLIRuntimeEnv(paths RuntimePaths) []string {
+	binaryPath := strings.TrimSpace(os.Getenv("LAZYMIND_FEISHU_CLI_PATH"))
+	binarySHA256 := strings.ToLower(strings.TrimSpace(os.Getenv("LAZYMIND_FEISHU_CLI_SHA256")))
+	if binaryPath == "" {
+		binaryPath = executablePath(paths.BinDir, "lark-cli")
+	}
+	if binarySHA256 == "" {
+		payload, err := os.ReadFile(filepath.Join(paths.BinDir, "lark-cli.sha256"))
+		if err == nil {
+			binarySHA256 = strings.ToLower(strings.TrimSpace(string(payload)))
+		}
+	}
+	if info, err := os.Stat(binaryPath); err != nil || !info.Mode().IsRegular() || len(binarySHA256) != 64 {
+		binaryPath = ""
+		binarySHA256 = ""
+	}
+	return []string{
+		"LAZYMIND_FEISHU_CLI_PATH=" + binaryPath,
+		"LAZYMIND_FEISHU_CLI_SHA256=" + binarySHA256,
+		"LAZYMIND_FEISHU_CLI_RUNTIME_ROOT=" + filepath.Join(paths.RuntimeRoot, "provider-connections", "feishu-cli"),
 	}
 }
 

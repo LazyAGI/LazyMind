@@ -108,6 +108,37 @@ function Assert-Command([string]$Name, [string]$Hint) {
     }
 }
 
+function Install-FeishuCLI {
+    $version = '1.0.93'
+    $archiveSha256 = '18e9320e378a0eefdb3b7004e0c6d42f48da85ae196d2bf5e89e4299ae7674d7'
+    $licenseSha256 = 'c969fc7e3af68e6bf40b0d8dd9c3dcc377eb685a2139535b203b39fdcad739ee'
+    $archive = Join-Path $targetRoot "lark-cli-$version-windows-amd64.zip"
+    $unpacked = Join-Path $targetRoot 'lark-cli-unpacked'
+    Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/larksuite/cli/releases/download/v$version/lark-cli-$version-windows-amd64.zip" -OutFile $archive
+    $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash.ToLowerInvariant()
+    if ($actual -ne $archiveSha256) {
+        throw "Feishu CLI archive integrity mismatch"
+    }
+    Remove-GeneratedPath $unpacked
+    Expand-Archive -LiteralPath $archive -DestinationPath $unpacked -Force
+    $binary = Get-ChildItem -LiteralPath $unpacked -Filter 'lark-cli.exe' -File -Recurse | Select-Object -First 1
+    if (-not $binary) {
+        throw 'Official Feishu CLI archive did not contain lark-cli.exe'
+    }
+    $destination = Join-Path $runtimeRoot 'bin\lark-cli.exe'
+    Copy-Item -LiteralPath $binary.FullName -Destination $destination -Force
+    $binaryHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $destination).Hash.ToLowerInvariant()
+    Set-Content -LiteralPath (Join-Path $runtimeRoot 'bin\lark-cli.sha256') -Value $binaryHash -Encoding ascii
+    $licenseDir = Join-Path $runtimeRoot 'licenses\lark-cli'
+    New-Item -ItemType Directory -Force -Path $licenseDir | Out-Null
+    $licensePath = Join-Path $licenseDir 'LICENSE'
+    Invoke-WebRequest -UseBasicParsing -Uri "https://raw.githubusercontent.com/larksuite/cli/v$version/LICENSE" -OutFile $licensePath
+    $actualLicense = (Get-FileHash -Algorithm SHA256 -LiteralPath $licensePath).Hash.ToLowerInvariant()
+    if ($actualLicense -ne $licenseSha256) {
+        throw 'Feishu CLI license integrity mismatch'
+    }
+}
+
 function Invoke-Doctor {
     if ([Runtime.InteropServices.RuntimeInformation]::OSArchitecture -ne [Runtime.InteropServices.Architecture]::X64) {
         throw 'LazyMind Windows Desktop currently supports Windows x64 only.'
@@ -434,6 +465,9 @@ function Build-Desktop([ValidateSet('zip', 'installer')][string]$PackageKind = '
     New-Item -ItemType Directory -Force -Path (Join-Path $runtimeRoot 'bin') | Out-Null
     New-Item -ItemType Directory -Force -Path (Join-Path $runtimeRoot 'runtimes\python') | Out-Null
     New-Item -ItemType Directory -Force -Path (Join-Path $runtimeRoot 'deps\python') | Out-Null
+
+    Write-Host '==> Installing verified Feishu CLI 1.0.93'
+    Install-FeishuCLI
 
     Write-Host '==> Building Go desktop runtime binaries'
     $desktopManager = Join-Path $runtimeRoot 'bin\local-runtime-manager.exe'

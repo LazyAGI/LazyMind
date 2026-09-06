@@ -36,7 +36,11 @@ const {
   runInstallerWarmupLifecycle,
 } = require("./installer-warmup");
 const { clearFrontendCaches } = require("./frontend-cache");
-const { installExternalNavigationHandler, isTrustedCloudNavigation } = require("./external-navigation");
+const {
+  installExternalNavigationHandler,
+  isTrustedCloudNavigation,
+  isTrustedFeishuCLINavigation,
+} = require("./external-navigation");
 const {
   collapseRoots,
   containsPath,
@@ -70,6 +74,8 @@ if (windowsDesktopPaths) {
 const isPackaged = app.isPackaged;
 const desktopTarget = isWindows ? "windows-x64" : "darwin-arm64";
 const ownerToken = randomUUID();
+const internalServiceToken = randomBytes(32).toString("base64url");
+const clientInstanceId = `ci_${randomBytes(24).toString("base64url")}`;
 const cloudBaseURL = String(process.env.LAZYMIND_CLOUD_BASE_URL || "").trim();
 const cloudRegisterLocale = String(process.env.LAZYMIND_CLOUD_REGISTER_LOCALE || "zh-CN").trim();
 const runtimeResourcesRoot = process.env.LAZYMIND_DESKTOP_RESOURCES_ROOT ||
@@ -232,6 +238,8 @@ function sidecarEnv() {
     ...process.env,
     LAZYMIND_RUNTIME_PROFILE: "desktop",
     LAZYMIND_RUNTIME_OWNER_TOKEN: ownerToken,
+    LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN: internalServiceToken,
+    LAZYMIND_CLIENT_INSTANCE_ID: clientInstanceId,
     LAZYMIND_DESKTOP_APP_VERSION: app.getVersion(),
     LAZYMIND_DESKTOP_OWNER_PID: String(process.pid),
     LAZYMIND_RUNTIME_RESOURCES_ROOT: runtimeResourcesRoot,
@@ -1741,6 +1749,14 @@ async function openTrustedCloudNavigation(rawURL, purpose) {
   return { opened: true };
 }
 
+async function openTrustedFeishuCLINavigation(rawURL) {
+  if (!isTrustedFeishuCLINavigation(rawURL)) {
+    throw new Error("Feishu CLI authorization navigation was rejected");
+  }
+  await shell.openExternal(rawURL);
+  return { opened: true };
+}
+
 function cloudRegisterURL() {
   const locale = /^(?:en|en-US)$/i.test(cloudRegisterLocale) ? "en" : "zh";
   return new URL(`/${locale}/register`, configuredCloudOrigin()).toString();
@@ -2185,6 +2201,12 @@ ipcMain.handle("lazymind:copyStartupLogs", () => {
 });
 ipcMain.handle("lazymind:openCloudLogin", async (_event, url) => {
   return openTrustedCloudNavigation(String(url || ""), "login");
+});
+ipcMain.handle("lazymind:openManagedProviderAuthorization", async (_event, url) => {
+  return openTrustedCloudNavigation(String(url || ""), "provider-authorization");
+});
+ipcMain.handle("lazymind:openFeishuCLIAuthorization", async (_event, url) => {
+  return openTrustedFeishuCLINavigation(String(url || ""));
 });
 ipcMain.handle("lazymind:openCloudRegister", async () => {
   const url = cloudRegisterURL();

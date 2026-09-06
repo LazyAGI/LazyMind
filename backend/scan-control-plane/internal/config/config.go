@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -52,10 +53,46 @@ type Config struct {
 func Load() (Config, error) {
 	cfg := defaultConfig()
 	cfg.applyEnv()
+	token, err := internalServiceTokenFromEnv()
+	if err != nil {
+		return Config{}, err
+	}
+	if token != "" {
+		cfg.AuthServiceInternalToken = token
+	}
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
 	}
 	return cfg, nil
+}
+
+func internalServiceTokenFromEnv() (string, error) {
+	if token := strings.TrimSpace(os.Getenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN")); token != "" {
+		return token, nil
+	}
+	path := strings.TrimSpace(os.Getenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN_FILE"))
+	if path == "" {
+		return "", nil
+	}
+	if !filepath.IsAbs(path) {
+		return "", errors.New("auth service internal token is required")
+	}
+	info, err := os.Stat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Size() <= 0 || info.Size() > 4096 {
+		return "", errors.New("auth service internal token is required")
+	}
+	if !strings.HasPrefix(filepath.Clean(path), "/run/secrets/") && info.Mode().Perm()&0o077 != 0 {
+		return "", errors.New("auth service internal token is required")
+	}
+	payload, err := os.ReadFile(path)
+	if err != nil {
+		return "", errors.New("auth service internal token is required")
+	}
+	token := strings.TrimSpace(string(payload))
+	if len(token) < 16 || len(token) > 4096 {
+		return "", errors.New("auth service internal token is required")
+	}
+	return token, nil
 }
 
 func defaultConfig() Config {

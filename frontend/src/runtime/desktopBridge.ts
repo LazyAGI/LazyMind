@@ -176,6 +176,8 @@ interface LazyMindDesktopBridge {
   selectExecutable?: (target?: DesktopAgentBindingTarget) => Promise<string | null> | string | null;
   exportDiagnostics?: () => Promise<string> | string;
   openCloudLogin?: (url: string) => Promise<unknown> | unknown;
+  openManagedProviderAuthorization?: (url: string) => Promise<unknown> | unknown;
+  openFeishuCLIAuthorization?: (url: string) => Promise<unknown> | unknown;
   openCloudRegister?: () => Promise<unknown> | unknown;
   openCloudTokenPlan?: (url: string) => Promise<unknown> | unknown;
   showItemInFolder?: (
@@ -242,10 +244,39 @@ export async function openCloudRegister(url?: string): Promise<DesktopBridgeResu
   return openTrustedCloudBrowserURL(url, "register");
 }
 
-export async function openCloudLogin(url: string): Promise<DesktopBridgeResult> {
+export type ReservedCloudLoginPopup = Window | null | undefined;
+
+export function reserveCloudLoginPopup(): ReservedCloudLoginPopup {
+  const bridge = getDesktopBridge();
+  if (bridge?.openCloudLogin || typeof window === "undefined") {
+    return undefined;
+  }
+  const popup = window.open("about:blank", "_blank");
+  if (!popup) {
+    return null;
+  }
+  try {
+    popup.opener = null;
+    return popup;
+  } catch {
+    popup.close();
+    return null;
+  }
+}
+
+export function closeCloudLoginPopup(popup: ReservedCloudLoginPopup): void {
+  if (popup && !popup.closed) {
+    popup.close();
+  }
+}
+
+export async function openCloudLogin(
+  url: string,
+  popup?: ReservedCloudLoginPopup,
+): Promise<DesktopBridgeResult> {
   const bridge = getDesktopBridge();
   if (!bridge?.openCloudLogin) {
-    return openTrustedCloudBrowserURL(url, "login");
+    return openTrustedCloudBrowserURL(url, "login", popup);
   }
   try {
     await bridge.openCloudLogin(url);
@@ -268,8 +299,13 @@ export async function openCloudTokenPlan(url: string): Promise<DesktopBridgeResu
   return openTrustedCloudBrowserURL(url, "token-plan");
 }
 
-function openTrustedCloudBrowserURL(value: string | undefined, purpose: "login" | "register" | "token-plan"): DesktopBridgeResult {
+function openTrustedCloudBrowserURL(
+  value: string | undefined,
+  purpose: "login" | "register" | "token-plan",
+  popup?: ReservedCloudLoginPopup,
+): DesktopBridgeResult {
   if (typeof window === "undefined" || !value) {
+    closeCloudLoginPopup(popup);
     return { ok: false, reason: "unavailable" };
   }
   try {
@@ -282,11 +318,20 @@ function openTrustedCloudBrowserURL(value: string | undefined, purpose: "login" 
         ? /^\/(?:zh|en)\/register\/?$/.test(target.pathname) && target.search === "" && target.hash === ""
         : /^\/(?:zh|en)\/console\/?$/.test(target.pathname) && target.search === "" && target.hash === "#token-plan";
     if (!trustedProtocol || !trustedPath || target.username || target.password) {
+      closeCloudLoginPopup(popup);
       return { ok: false, reason: "failed" };
+    }
+    if (purpose === "login" && popup !== undefined) {
+      if (!popup || popup.closed) {
+        return { ok: false, reason: "failed" };
+      }
+      popup.location.replace(target.toString());
+      return { ok: true };
     }
     window.open(target.toString(), "_blank", "noopener,noreferrer");
     return { ok: true };
   } catch (error) {
+    closeCloudLoginPopup(popup);
     return { ok: false, reason: "failed", error };
   }
 }

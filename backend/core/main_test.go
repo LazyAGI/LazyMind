@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"testing"
 	"time"
@@ -17,6 +18,40 @@ import (
 	"lazymind/core/externallease"
 	workflowstore "lazymind/core/workflow/store"
 )
+
+func TestLoadInternalServiceTokenEnvironmentFromSecretFile(t *testing.T) {
+	t.Setenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN", "")
+	path := filepath.Join(t.TempDir(), "internal-token")
+	if err := os.WriteFile(path, []byte("test-only-internal-token"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN_FILE", path)
+
+	if err := loadInternalServiceTokenEnvironment(); err != nil {
+		t.Fatal(err)
+	}
+	if got := os.Getenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN"); got != "test-only-internal-token" {
+		t.Fatalf("loaded internal token = %q", got)
+	}
+}
+
+func TestLoadInternalServiceTokenEnvironmentPrefersDirectValueAndRejectsUnsafeFile(t *testing.T) {
+	t.Setenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN", "direct-test-token")
+	t.Setenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN_FILE", filepath.Join(t.TempDir(), "missing"))
+	if err := loadInternalServiceTokenEnvironment(); err != nil {
+		t.Fatalf("direct token should remain compatible: %v", err)
+	}
+
+	t.Setenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN", "")
+	path := filepath.Join(t.TempDir(), "unsafe-token")
+	if err := os.WriteFile(path, []byte("test-only-internal-token"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN_FILE", path)
+	if err := loadInternalServiceTokenEnvironment(); err == nil {
+		t.Fatal("world-readable internal token file was accepted")
+	}
+}
 
 func TestOpenAPIArtifactExportCanBeDisabledForSignedDesktopBundle(t *testing.T) {
 	t.Setenv("LAZYMIND_OPENAPI_ARTIFACT_EXPORT_ENABLED", "false")

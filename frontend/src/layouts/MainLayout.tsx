@@ -64,7 +64,12 @@ import UserAgreementConsentModal, {
 } from "@/components/UserAgreementConsentModal";
 import TerminalConnectionQuickPanel from "@/modules/channelGateway/components/TerminalConnectionQuickPanel";
 import { beginCloudLogin, getCloudSession, LAZYMIND_CLOUD_SESSION_CHANGED_EVENT, logoutCloudSession, type CloudSessionState } from "@/runtime/cloud/session";
-import { openCloudLogin, openCloudRegister } from "@/runtime/desktopBridge";
+import {
+  closeCloudLoginPopup,
+  openCloudLogin,
+  openCloudRegister,
+  reserveCloudLoginPopup,
+} from "@/runtime/desktopBridge";
 import "./index.scss";
 
 const { Content, Sider } = Layout;
@@ -594,10 +599,15 @@ export default function MainLayout() {
   };
 
   const handleCloudLogin = async () => {
+    const popup = reserveCloudLoginPopup();
+    if (popup === null) {
+      message.error(t("layout.cloudOpenFailed"));
+      return;
+    }
     setCloudLoginLoading(true);
     try {
       const login = await beginCloudLogin();
-      const result = await openCloudLogin(login.authorization_url);
+      const result = await openCloudLogin(login.authorization_url, popup);
       if (!result.ok) {
         await logoutCloudSession().catch(() => undefined);
         throw result.error || new Error(result.reason);
@@ -605,6 +615,7 @@ export default function MainLayout() {
       updateCloudSessionState("authorizing");
       setSettingsOpen(false);
     } catch {
+      closeCloudLoginPopup(popup);
       message.error(t("layout.cloudLoginFailed"));
       await refreshCloudSession();
     } finally {

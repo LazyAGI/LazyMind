@@ -26,12 +26,13 @@ import (
 	"lazymind/core/evolution"
 	"lazymind/core/exporter"
 	"lazymind/core/file"
+	"lazymind/core/knowledge_market"
 	"lazymind/core/knowledgeplaza"
 	applog "lazymind/core/log"
-	"lazymind/core/knowledge_market"
 	"lazymind/core/mcp"
 	"lazymind/core/modelconfig"
 	"lazymind/core/modelprovider"
+	coreproviderconnection "lazymind/core/providerconnection"
 	"lazymind/core/remotefs"
 	"lazymind/core/resourceupdate"
 	"lazymind/core/scheduler"
@@ -93,6 +94,10 @@ func registerAllRoutes(r *mux.Router) {
 	cloudSessionHandler := cloudsession.Handler{Service: cloudSession}
 	credentialBackupHandler := credentialvault.BackupHandler{Service: credentialvault.DefaultBackupService()}
 	credentialRestoreHandler := credentialvault.DefaultRestoreHandler()
+	providerConnectionHandler := coreproviderconnection.Handler{Service: coreproviderconnection.DefaultService()}
+	providerTokenBridge := coreproviderconnection.TokenBridge{
+		Service: coreproviderconnection.DefaultService(), InternalToken: os.Getenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN"),
+	}
 	cloudSessionHandler.TemporaryCredentials = credentialRestoreHandler
 	cloudKnowledgeHandler := knowledgeplaza.Handler{}
 	var cloudSkillHandler cloudresource.Handler
@@ -103,7 +108,9 @@ func registerAllRoutes(r *mux.Router) {
 		authorizationPath := "/" + locale + "/desktop/authorize"
 		if login, loginErr := cloudsession.NewLoginCoordinator(cloudsession.LoginCoordinatorDeps{
 			Session: cloudSession, Handoff: client, CloudOrigin: client.Origin(),
-			AuthorizationPath: authorizationPath, Locale: locale,
+			AuthorizationPath:     authorizationPath,
+			CallbackListenAddress: os.Getenv("LAZYMIND_CLOUD_CALLBACK_LISTEN_ADDRESS"),
+			Locale:                locale,
 			ReportError: func(err error) {
 				applog.Logger.Warn().Err(err).Str("error_type", fmt.Sprintf("%T", err)).Msg("LazyMind Cloud browser login did not complete")
 			},
@@ -139,6 +146,15 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/cloud/session", []string{"user.read"}, cloudSessionHandler.Get)
 	handleAPI(r, "POST", "/cloud/login", []string{"user.read"}, cloudSessionHandler.BeginLogin)
 	handleAPI(r, "POST", "/cloud/logout", []string{"user.read"}, cloudSessionHandler.Logout)
+	handleAPI(r, "POST", "/provider-connections/sessions", []string{"user.write"}, providerConnectionHandler.CreateSession)
+	handleAPI(r, "GET", "/provider-connections/sessions/{session_id}", []string{"user.read"}, providerConnectionHandler.GetSession)
+	handleAPI(r, "DELETE", "/provider-connections/sessions/{session_id}", []string{"user.write"}, providerConnectionHandler.CancelSession)
+	handleAPI(r, "GET", "/provider-connections", []string{"user.read"}, providerConnectionHandler.List)
+	handleAPI(r, "POST", "/provider-connections/{auth_connection_id}:reauthorize", []string{"user.write"}, providerConnectionHandler.Reauthorize)
+	handleAPI(r, "DELETE", "/provider-connections/{auth_connection_id}", []string{"user.write"}, providerConnectionHandler.Revoke)
+	handleAPI(r, "POST", "/v1/internal/provider-connections/{auth_connection_id}/access-token:resolve", nil, providerTokenBridge.Resolve)
+	handleAPI(r, "POST", "/v1/internal/provider-connections/{auth_connection_id}/access-token:report", nil, providerTokenBridge.Report)
+	handleAPI(r, "POST", "/v1/internal/provider-connections/feishu-cli:execute", nil, providerTokenBridge.ExecuteFeishuCLI)
 	handleAPI(r, "GET", "/credential-vault/backup", []string{"user.read"}, credentialBackupHandler.Status)
 	handleAPI(r, "POST", "/credential-vault/backup:enable", []string{"user.write"}, credentialBackupHandler.Enable)
 	handleAPI(r, "POST", "/credential-vault/backup:disable", []string{"user.write"}, credentialBackupHandler.Disable)

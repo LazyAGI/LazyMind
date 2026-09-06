@@ -58,6 +58,7 @@ func (h *Handler) validateBindingTarget(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	req.UserID = actor.UserID
+	req.ProviderOptions = withActorProviderOptions(req.ProviderOptions, actor)
 	conn, err := h.registry.Get(req.ConnectorType)
 	if err != nil {
 		writeError(w, err)

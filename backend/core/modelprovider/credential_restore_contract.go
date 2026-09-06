@@ -191,7 +191,7 @@ func (sink *CredentialRestoreSink) persistOne(ctx context.Context, tx *gorm.DB, 
 			return err
 		}
 		if tx.Migrator().HasTable(&orm.DefaultModel{}) && tx.Migrator().HasTable(&orm.UserModelProviderGroupModel{}) {
-			if err := seedGroupModelsFromDefaults(tx, ctx, &group, &provider, restored.Provider.BaseURL, sink.localUserID, "", now); err != nil {
+			if _, err := seedGroupModelsFromDefaults(tx, ctx, &group, &provider, restored.Provider.BaseURL, sink.localUserID, "", now); err != nil {
 				return err
 			}
 		}

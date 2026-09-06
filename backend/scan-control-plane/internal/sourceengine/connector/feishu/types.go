@@ -17,9 +17,15 @@ const (
 	ErrorCodeExportDenied   connector.ErrorCode     = "UNSUPPORTED_EXPORT"
 )
 
-type AuthConnectionClient interface {
+type ProviderTokenResolver interface {
 	GetToken(ctx context.Context, req TokenRequest) (Token, error)
 }
+
+type ProviderTokenFailureReporter interface {
+	ReportTokenFailure(ctx context.Context, report TokenFailureReport) error
+}
+
+type AuthConnectionClient = ProviderTokenResolver
 
 type FeishuClient interface {
 	GetDriveRoot(ctx context.Context, token string) (Object, error)
@@ -37,13 +43,45 @@ type TempObjectStore interface {
 	Put(ctx context.Context, input worker.TempObjectInput) (worker.TempObject, error)
 }
 
+type TokenContextMode string
+
+const (
+	TokenContextModeSourceBinding    TokenContextMode = "source_binding"
+	TokenContextModePreBindingBrowse TokenContextMode = "pre_binding_browse"
+)
+
 type TokenRequest struct {
-	AuthConnectionID string
-	UserID           string
+	AuthConnectionID   string
+	UserID             string
+	TenantID           string
+	SourceID           string
+	BindingID          string
+	ContextMode        TokenContextMode
+	Consumer           string
+	RequiredCapability string
+}
+
+type TokenFailureReport struct {
+	AuthConnectionID   string
+	UserID             string
+	TenantID           string
+	SourceID           string
+	BindingID          string
+	ContextMode        TokenContextMode
+	Consumer           string
+	RequiredCapability string
+	TokenVersion       int64
+	ErrorClass         string
 }
 
 type Token struct {
-	AccessToken string
+	AccessToken  string `json:"access_token"`
+	Provider     string `json:"provider"`
+	TokenType    string `json:"token_type"`
+	SubjectType  string `json:"subject_type"`
+	Status       string `json:"status"`
+	ExpiresAt    string `json:"expires_at"`
+	TokenVersion int64  `json:"token_version"`
 }
 
 type ConnectionStatusRequest struct {

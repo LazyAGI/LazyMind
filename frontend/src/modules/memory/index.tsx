@@ -38,7 +38,11 @@ import type { GroupItem, UserItem } from "@/api/generated/auth-client";
 import { createGroupApi, createUserApi } from "@/modules/signin/utils/request";
 import { runtimeFeatures } from "@/runtime/features";
 import { beginCloudLogin, getCloudSession } from "@/runtime/cloud/session";
-import { openCloudLogin } from "@/runtime/desktopBridge";
+import {
+  closeCloudLoginPopup,
+  openCloudLogin,
+  reserveCloudLoginPopup,
+} from "@/runtime/desktopBridge";
 import GlossaryInboxModal from "./components/GlossaryInboxModal";
 import { MemoryManagementContext } from "./context";
 import MemoryDraftModal, {
@@ -4539,13 +4543,19 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
         okText: t("admin.memoryCloudUploadGoLogin"),
         cancelText: t("common.cancel"),
         onOk: async () => {
+          const popup = reserveCloudLoginPopup();
+          if (popup === null) {
+            message.error(t("layout.cloudOpenFailed"));
+            return;
+          }
           try {
             const login = await beginCloudLogin();
-            const opened = await openCloudLogin(login.authorization_url);
+            const opened = await openCloudLogin(login.authorization_url, popup);
             if (!opened.ok) {
               throw opened.error ?? new Error(opened.reason);
             }
           } catch (error) {
+            closeCloudLoginPopup(popup);
             console.error("Start LazyMind Cloud login failed:", error);
             message.error(t("layout.cloudLoginFailed"));
           }

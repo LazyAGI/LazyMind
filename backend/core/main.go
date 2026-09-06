@@ -39,6 +39,7 @@ import (
 	"lazymind/core/log"
 	"lazymind/core/migrate"
 	"lazymind/core/modelprovider"
+	coreproviderconnection "lazymind/core/providerconnection"
 	"lazymind/core/recovery"
 	"lazymind/core/resourceupdate"
 	"lazymind/core/scheduler"
@@ -297,30 +298,167 @@ func validateStartupConfig() error {
 }
 
 func initializeCloudSession(ctx context.Context) {
-	client, err := cloudclient.New(os.Getenv("LAZYMIND_CLOUD_BASE_URL"), nil)
-	if err != nil {
+	clientInstanceID := strings.TrimSpace(os.Getenv("LAZYMIND_CLIENT_INSTANCE_ID"))
+	if clientInstanceID == "" {
+		clientInstanceID = "ci_" + uuid.NewString()
+	}
+	internalToken := strings.TrimSpace(os.Getenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN"))
+	registry := coreproviderconnection.HTTPRegistry{
+		BaseURL: common.AuthServiceBaseURL(), InternalToken: internalToken,
+	}
+	authorizer := coreproviderconnection.HTTPSourceBindingAuthorizer{
+		BaseURL: common.ScanControlPlaneEndpoint(), InternalToken: internalToken,
+	}
+	if internalToken == "" {
 		cloudsession.SetDefaultService(nil)
+		coreproviderconnection.SetDefaultService(nil)
 		return
 	}
-	service := cloudsession.NewService(cloudsession.ServiceDeps{
-		Store: newCloudTokenStore(client.Origin()),
-		Auth:  cloudsession.CloudAuthClient{Client: client},
-	})
-	cloudsession.SetDefaultService(service)
+
+	client, cloudErr := cloudclient.New(os.Getenv("LAZYMIND_CLOUD_BASE_URL"), nil)
+	var sessionService *cloudsession.Service
+	var providerService *coreproviderconnection.Service
+	var providerErr error
+	if cloudErr == nil {
+		sessionService = cloudsession.NewService(cloudsession.ServiceDeps{
+			Store: newCloudTokenStore(client.Origin()),
+			Auth:  cloudsession.CloudAuthClient{Client: client},
+		})
+		cloudsession.SetDefaultService(sessionService)
+		providerService, providerErr = coreproviderconnection.NewService(client, sessionService, registry, authorizer, clientInstanceID)
+	} else {
+		cloudsession.SetDefaultService(nil)
+		providerService, providerErr = coreproviderconnection.NewLocalService(registry, authorizer, clientInstanceID)
+	}
+	if providerErr != nil || internalToken == "" {
+		coreproviderconnection.SetDefaultService(nil)
+	} else {
+		configureFeishuCLI(providerService, registry)
+		coreproviderconnection.SetDefaultService(providerService)
+	}
+	if sessionService == nil {
+		return
+	}
 	go func() {
 		restoreCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
-		if err := service.Restore(restoreCtx); err != nil && !errors.Is(err, cloudsession.ErrNoRefreshToken) {
+		if err := sessionService.Restore(restoreCtx); err != nil && !errors.Is(err, cloudsession.ErrNoRefreshToken) {
 			log.Logger.Warn().Msg("LazyMind Cloud session restore was unavailable")
 		}
 	}()
 }
 
+func configureFeishuCLI(service *coreproviderconnection.Service, registry coreproviderconnection.HTTPRegistry) {
+	sidecarURL := strings.TrimSpace(os.Getenv("LAZYMIND_FEISHU_CLI_SIDECAR_URL"))
+	if service != nil && sidecarURL != "" {
+		key, err := readFeishuCLISidecarKey(os.Getenv("LAZYMIND_FEISHU_CLI_SIDECAR_HMAC_KEY_FILE"))
+		if err != nil {
+			log.Logger.Warn().Str("error_code", "CLI_UNAVAILABLE").Msg("Feishu CLI sidecar is unavailable")
+			return
+		}
+		client, err := coreproviderconnection.NewFeishuCLISidecarClient(sidecarURL, key, nil)
+		for index := range key {
+			key[index] = 0
+		}
+		if err != nil {
+			log.Logger.Warn().Str("error_code", "CLI_UNAVAILABLE").Msg("Feishu CLI sidecar is unavailable")
+			return
+		}
+		service.FeishuCLI = client
+		return
+	}
+	binaryPath := strings.TrimSpace(os.Getenv("LAZYMIND_FEISHU_CLI_PATH"))
+	runtimeRoot := strings.TrimSpace(os.Getenv("LAZYMIND_FEISHU_CLI_RUNTIME_ROOT"))
+	binarySHA256 := strings.TrimSpace(os.Getenv("LAZYMIND_FEISHU_CLI_SHA256"))
+	if service == nil || binaryPath == "" || runtimeRoot == "" || binarySHA256 == "" {
+		return
+	}
+	runner, err := coreproviderconnection.NewFeishuCLIRunner(binaryPath, binarySHA256)
+	if err != nil {
+		log.Logger.Warn().Str("error_code", "CLI_INTEGRITY_MISMATCH").Msg("Feishu CLI runtime is unavailable")
+		return
+	}
+	profiles, err := coreproviderconnection.NewFeishuCLIProfileStore(runtimeRoot)
+	if err != nil {
+		log.Logger.Warn().Str("error_code", "PROFILE_NOT_FOUND").Msg("Feishu CLI runtime is unavailable")
+		return
+	}
+	coordinator, err := coreproviderconnection.NewFeishuCLIDeviceFlowCoordinator(
+		runner, profiles, registry, coreproviderconnection.DefaultFeishuCLIReadScopes,
+	)
+	if err != nil {
+		log.Logger.Warn().Str("error_code", "CLI_UNAVAILABLE").Msg("Feishu CLI runtime is unavailable")
+		return
+	}
+	service.FeishuCLI = coordinator
+}
+
+func readFeishuCLISidecarKey(rawPath string) ([]byte, error) {
+	path := filepath.Clean(strings.TrimSpace(rawPath))
+	if !filepath.IsAbs(path) || path == string(filepath.Separator) {
+		return nil, errors.New("Feishu CLI sidecar key is unavailable")
+	}
+	info, err := os.Stat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Size() < 32 || info.Size() > 4096 {
+		return nil, errors.New("Feishu CLI sidecar key is unavailable")
+	}
+	if !strings.HasPrefix(path, "/run/secrets/") && info.Mode().Perm()&0o077 != 0 {
+		return nil, errors.New("Feishu CLI sidecar key is unavailable")
+	}
+	payload, err := os.ReadFile(path)
+	if err != nil {
+		return nil, errors.New("Feishu CLI sidecar key is unavailable")
+	}
+	key := []byte(strings.TrimSpace(string(payload)))
+	for index := range payload {
+		payload[index] = 0
+	}
+	if len(key) < 32 {
+		return nil, errors.New("Feishu CLI sidecar key is unavailable")
+	}
+	return key, nil
+}
+
 func newCloudTokenStore(cloudIssuer string) cloudsession.SecureTokenStore {
-	if strings.EqualFold(strings.TrimSpace(os.Getenv("LAZYMIND_CLOUD_TOKEN_STORE")), "memory") {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("LAZYMIND_CLOUD_TOKEN_STORE"))) {
+	case "memory":
 		return cloudsession.NewMemorySecureTokenStore()
+	case "encrypted-file":
+		return cloudsession.NewEncryptedFileSecureTokenStore(
+			os.Getenv("LAZYMIND_CLOUD_TOKEN_STORE_FILE"),
+			os.Getenv("LAZYMIND_CLOUD_TOKEN_STORE_KEY_FILE"),
+		)
 	}
 	return cloudsession.NewSystemSecureTokenStore(cloudIssuer)
+}
+
+func loadInternalServiceTokenEnvironment() error {
+	if strings.TrimSpace(os.Getenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN")) != "" {
+		return nil
+	}
+	path := strings.TrimSpace(os.Getenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN_FILE"))
+	if path == "" {
+		return nil
+	}
+	if !filepath.IsAbs(path) {
+		return errors.New("internal token required")
+	}
+	info, err := os.Stat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Size() <= 0 || info.Size() > 4096 {
+		return errors.New("internal token required")
+	}
+	if !strings.HasPrefix(filepath.Clean(path), "/run/secrets/") && info.Mode().Perm()&0o077 != 0 {
+		return errors.New("internal token required")
+	}
+	payload, err := os.ReadFile(path)
+	if err != nil {
+		return errors.New("internal token required")
+	}
+	token := strings.TrimSpace(string(payload))
+	if len(token) < 16 || len(token) > 4096 {
+		return errors.New("internal token required")
+	}
+	return os.Setenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN", token)
 }
 
 func initializeCredentialBackup(ctx context.Context, db *gorm.DB, keys *credentialvault.LocalKeyManager) error {
@@ -422,6 +560,9 @@ func main() {
 		}
 		log.Logger.Info().Msg("OpenAPI artifacts exported")
 		return
+	}
+	if err := loadInternalServiceTokenEnvironment(); err != nil {
+		log.Logger.Fatal().Msg("invalid Core internal service token file")
 	}
 	if err := validateStartupConfig(); err != nil {
 		log.Logger.Fatal().Err(err).Msg("invalid Core internal API configuration")

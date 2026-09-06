@@ -82,18 +82,6 @@ func (s *LocalObjectStore) URL(key string) string {
 	return localObjectFileURL(filepath.Join(s.root, filepath.FromSlash(key)))
 }
 
-func (s *LocalObjectStore) Get(ctx context.Context, key string) ([]byte, error) {
-	if s == nil {
-		return nil, fmt.Errorf("object store is nil")
-	}
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	default:
-	}
-	return os.ReadFile(filepath.Join(s.root, filepath.FromSlash(key)))
-}
-
 func localObjectFileURL(localPath string) string {
 	if absolutePath, err := filepath.Abs(localPath); err == nil {
 		localPath = absolutePath

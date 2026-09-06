@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -117,6 +118,72 @@ func TestLoginCoordinatorCompletesOneLoopbackPKCEExchange(t *testing.T) {
 	}
 	if store.token != "refresh" || session.Status(context.Background()).State != StateSignedIn {
 		t.Fatalf("store=%q status=%+v", store.token, session.Status(context.Background()))
+	}
+}
+
+func TestLoginCoordinatorAdvertisesLoopbackForConfiguredReachableListener(t *testing.T) {
+	store := &fakeSecureStore{}
+	session := NewService(ServiceDeps{Store: store})
+	handoff := &fakeDesktopHandoff{
+		url:  "https://cloud.example/zh/desktop/authorize?client_id=lazymind-desktop",
+		pair: TokenPair{AccessToken: "access", RefreshToken: "refresh", AccessExpiresAt: time.Now().Add(time.Minute)},
+	}
+	coordinator, err := NewLoginCoordinator(LoginCoordinatorDeps{
+		Session: session, Handoff: handoff, CloudOrigin: "https://cloud.example", AttemptTTL: time.Minute,
+		AuthorizationPath:     "/zh/desktop/authorize",
+		CallbackListenAddress: "0.0.0.0:0",
+		Random:                strings.NewReader(strings.Repeat("a", 64)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := coordinator.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(coordinator.Cancel)
+
+	callback, err := url.Parse(handoff.begin.CallbackURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if callback.Scheme != "http" || callback.Hostname() != "127.0.0.1" || callback.Port() == "" || callback.Path != "/cloud-auth/callback" {
+		t.Fatalf("callback is not the strict Cloud loopback contract: %s://%s%s", callback.Scheme, callback.Host, callback.Path)
+	}
+	coordinator.mu.Lock()
+	listenHost, _, splitErr := net.SplitHostPort(coordinator.active.listener.Addr().String())
+	coordinator.mu.Unlock()
+	if splitErr != nil || listenHost != "0.0.0.0" {
+		t.Fatalf("configured listener host=%q err=%v", listenHost, splitErr)
+	}
+
+	query := callback.Query()
+	query.Set("state", handoff.begin.State)
+	query.Set("code", "code-1")
+	callback.RawQuery = query.Encode()
+	response, err := http.Get(callback.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = io.Copy(io.Discard, response.Body)
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("callback status=%d", response.StatusCode)
+	}
+	if store.token != "refresh" || session.Status(context.Background()).State != StateSignedIn {
+		t.Fatalf("store=%q status=%+v", store.token, session.Status(context.Background()))
+	}
+}
+
+func TestLoginCoordinatorRejectsNonLocalCallbackListener(t *testing.T) {
+	_, err := NewLoginCoordinator(LoginCoordinatorDeps{
+		Session:               NewService(ServiceDeps{Store: &fakeSecureStore{}}),
+		Handoff:               &fakeDesktopHandoff{url: "https://cloud.example/zh/desktop/authorize"},
+		CloudOrigin:           "https://cloud.example",
+		AuthorizationPath:     "/zh/desktop/authorize",
+		CallbackListenAddress: "198.51.100.20:18081",
+	})
+	if err == nil {
+		t.Fatal("non-local callback listener was accepted")
 	}
 }
 

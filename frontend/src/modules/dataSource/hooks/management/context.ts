@@ -28,6 +28,7 @@ export type CloudSetupIntent = FeishuSetupIntent;
 export type DataSourceSaveMode = "create" | "createAndSync";
 
 export interface StartCloudOAuthOptions {
+  reauthorizeConnectionId?: string;
   setup?: FeishuAppSetup;
   draftSelectedType?: SourceType | null;
   draftWizardStep?: number;

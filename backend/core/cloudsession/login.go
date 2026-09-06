@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -30,27 +31,29 @@ type DesktopHandoffClient interface {
 }
 
 type LoginCoordinatorDeps struct {
-	Session           *Service
-	Handoff           DesktopHandoffClient
-	CloudOrigin       string
-	AuthorizationPath string
-	Locale            string
-	AttemptTTL        time.Duration
-	Random            io.Reader
-	ReportError       func(error)
+	Session               *Service
+	Handoff               DesktopHandoffClient
+	CloudOrigin           string
+	AuthorizationPath     string
+	CallbackListenAddress string
+	Locale                string
+	AttemptTTL            time.Duration
+	Random                io.Reader
+	ReportError           func(error)
 }
 
 type LoginCoordinator struct {
-	mu                sync.Mutex
-	session           *Service
-	handoff           DesktopHandoffClient
-	cloudOrigin       string
-	authorizationPath string
-	locale            string
-	attemptTTL        time.Duration
-	random            io.Reader
-	reportError       func(error)
-	active            *loginAttempt
+	mu                    sync.Mutex
+	session               *Service
+	handoff               DesktopHandoffClient
+	cloudOrigin           string
+	authorizationPath     string
+	callbackListenAddress string
+	locale                string
+	attemptTTL            time.Duration
+	random                io.Reader
+	reportError           func(error)
+	active                *loginAttempt
 }
 
 type loginAttempt struct {
@@ -87,6 +90,18 @@ func NewLoginCoordinator(deps LoginCoordinatorDeps) (*LoginCoordinator, error) {
 	if !strings.HasPrefix(path, "/") {
 		return nil, errors.New("LazyMind Cloud authorization path is invalid")
 	}
+	callbackListenAddress := strings.TrimSpace(deps.CallbackListenAddress)
+	if callbackListenAddress == "" {
+		callbackListenAddress = "127.0.0.1:0"
+	}
+	callbackHost, callbackPort, err := net.SplitHostPort(callbackListenAddress)
+	if err != nil || (callbackHost != "127.0.0.1" && callbackHost != "0.0.0.0") {
+		return nil, errors.New("LazyMind Cloud callback listener is invalid")
+	}
+	port, err := strconv.Atoi(callbackPort)
+	if err != nil || port < 0 || port > 65535 {
+		return nil, errors.New("LazyMind Cloud callback listener is invalid")
+	}
 	ttl := deps.AttemptTTL
 	if ttl <= 0 {
 		ttl = 5 * time.Minute
@@ -104,7 +119,8 @@ func NewLoginCoordinator(deps LoginCoordinatorDeps) (*LoginCoordinator, error) {
 	}
 	return &LoginCoordinator{
 		session: deps.Session, handoff: deps.Handoff, cloudOrigin: origin.Scheme + "://" + origin.Host,
-		authorizationPath: path, locale: locale, attemptTTL: ttl, random: random, reportError: deps.ReportError,
+		authorizationPath: path, callbackListenAddress: callbackListenAddress,
+		locale: locale, attemptTTL: ttl, random: random, reportError: deps.ReportError,
 	}, nil
 }
 
@@ -117,11 +133,16 @@ func (c *LoginCoordinator) Start(ctx context.Context) (LoginStart, error) {
 	if err != nil {
 		return LoginStart{}, err
 	}
-	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	listener, err := net.Listen("tcp4", c.callbackListenAddress)
 	if err != nil {
 		return LoginStart{}, err
 	}
-	callbackURL := "http://" + listener.Addr().String() + "/cloud-auth/callback"
+	_, callbackPort, err := net.SplitHostPort(listener.Addr().String())
+	if err != nil {
+		_ = listener.Close()
+		return LoginStart{}, err
+	}
+	callbackURL := "http://" + net.JoinHostPort("127.0.0.1", callbackPort) + "/cloud-auth/callback"
 	challengeBytes := sha256.Sum256([]byte(verifier))
 	authorization, err := c.handoff.BeginDesktopAuthorization(ctx, DesktopAuthorizationRequest{
 		RedirectURI: callbackURL, CallbackURL: callbackURL, State: state, Locale: c.locale,

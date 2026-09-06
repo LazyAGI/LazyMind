@@ -10,6 +10,9 @@ PACKAGE_KIND="${LAZYMIND_DESKTOP_PACKAGE_KIND:-zip}"
 SIGNING_MODE="${LAZYMIND_DESKTOP_SIGNING_MODE:-adhoc}"
 LAZYLLM_VERSION="${LAZYMIND_LAZYLLM_VERSION:-$(tr -d '[:space:]' < "${ROOT}/LAZYLLM_VERSION")}"
 RELEASE_BUILD="${LAZYMIND_RELEASE_BUILD:-false}"
+FEISHU_CLI_VERSION="1.0.93"
+FEISHU_CLI_ARCHIVE_SHA256="eaa09754925c00a6858e91518a49ab8e0a24bd4178e4698a7b185046b8ea24e2"
+FEISHU_CLI_LICENSE_SHA256="c969fc7e3af68e6bf40b0d8dd9c3dcc377eb685a2139535b203b39fdcad739ee"
 
 GO_BIN="${GO:-go}"
 PNPM_BIN="${PNPM:-pnpm}"
@@ -53,6 +56,31 @@ remove_generated_path() {
     chmod -R u+w "${target}" 2>/dev/null || true
     rm -rf "${target}"
   fi
+}
+
+install_feishu_cli() {
+  local archive="${BUILD_ROOT}/lark-cli-${FEISHU_CLI_VERSION}-darwin-arm64.tar.gz"
+  local unpacked
+  unpacked="$(mktemp -d "${BUILD_ROOT}/lark-cli.XXXXXX")"
+  curl --fail --location --retry 3 \
+    "https://github.com/larksuite/cli/releases/download/v${FEISHU_CLI_VERSION}/lark-cli-${FEISHU_CLI_VERSION}-darwin-arm64.tar.gz" \
+    --output "${archive}"
+  echo "${FEISHU_CLI_ARCHIVE_SHA256}  ${archive}" | shasum -a 256 --check
+  tar -xzf "${archive}" -C "${unpacked}"
+  local binary
+  binary="$(find "${unpacked}" -type f -name lark-cli -print -quit)"
+  if [[ -z "${binary}" ]]; then
+    echo "Official Feishu CLI archive did not contain lark-cli" >&2
+    exit 1
+  fi
+  install -m 0755 "${binary}" "${RUNTIME_ROOT}/bin/lark-cli"
+  shasum -a 256 "${RUNTIME_ROOT}/bin/lark-cli" | awk '{print $1}' > "${RUNTIME_ROOT}/bin/lark-cli.sha256"
+  mkdir -p "${RUNTIME_ROOT}/licenses/lark-cli"
+  curl --fail --location --retry 3 \
+    "https://raw.githubusercontent.com/larksuite/cli/v${FEISHU_CLI_VERSION}/LICENSE" \
+    --output "${RUNTIME_ROOT}/licenses/lark-cli/LICENSE"
+  echo "${FEISHU_CLI_LICENSE_SHA256}  ${RUNTIME_ROOT}/licenses/lark-cli/LICENSE" | shasum -a 256 --check
+  rm -rf "${unpacked}"
 }
 
 make_internal_symlinks_relative() {
@@ -148,8 +176,12 @@ mkdir -p \
   "${RUNTIME_ROOT}/runtimes/node" \
   "${RUNTIME_ROOT}/deps/python" \
   "${RUNTIME_ROOT}/deps/node" \
+  "${RUNTIME_ROOT}/licenses" \
   "${ELECTRON_CACHE}" \
   "${ELECTRON_BUILDER_CACHE}"
+
+echo "==> Installing verified Feishu CLI ${FEISHU_CLI_VERSION}"
+install_feishu_cli
 
 echo "==> Building Go desktop runtime binaries"
 (cd "${ROOT}/local/local-runtime-manager" && "${GO_BIN}" build "${GO_BUILD_FLAGS[@]}" -o "${RUNTIME_ROOT}/bin/local-runtime-manager" .)

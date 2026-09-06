@@ -89,6 +89,44 @@ func TestCoreServiceEnvUsesRuntimeUploadPaths(t *testing.T) {
 	assertEnvNotContains(t, env, filepath.Join(paths.RepoRoot, "data", "subagent"))
 }
 
+func TestCoreServiceEnvInjectsVerifiedBundledFeishuCLI(t *testing.T) {
+	root := t.TempDir()
+	paths := RuntimePaths{
+		RuntimeRoot: filepath.Join(root, "runtime"),
+		BinDir:      filepath.Join(root, "resources", "bin"),
+	}
+	if err := os.MkdirAll(paths.BinDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	binaryPath := executablePath(paths.BinDir, "lark-cli")
+	if err := os.WriteFile(binaryPath, []byte("fixture executable"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	digest := strings.Repeat("a", 64)
+	if err := os.WriteFile(filepath.Join(paths.BinDir, "lark-cli.sha256"), []byte(digest+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	environment := feishuCLIEnvMap(feishuCLIRuntimeEnv(paths))
+	if environment["LAZYMIND_FEISHU_CLI_PATH"] != binaryPath || environment["LAZYMIND_FEISHU_CLI_SHA256"] != digest {
+		t.Fatalf("Feishu CLI runtime env = %#v", environment)
+	}
+	wantRoot := filepath.Join(paths.RuntimeRoot, "provider-connections", "feishu-cli")
+	if environment["LAZYMIND_FEISHU_CLI_RUNTIME_ROOT"] != wantRoot {
+		t.Fatalf("Feishu CLI profile root = %q, want %q", environment["LAZYMIND_FEISHU_CLI_RUNTIME_ROOT"], wantRoot)
+	}
+}
+
+func feishuCLIEnvMap(items []string) map[string]string {
+	result := make(map[string]string, len(items))
+	for _, item := range items {
+		key, value, found := strings.Cut(item, "=")
+		if found {
+			result[key] = value
+		}
+	}
+	return result
+}
+
 func TestCoreServiceWaitForDatabasePreparesSQLiteDirs(t *testing.T) {
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)

@@ -164,6 +164,7 @@ export default function CloudDocumentProviderPanel({ vm }: { vm: CloudDocumentPr
 
       {cloudAuthProviderOptions.map((item) => {
         const isFeishu = item.type === "feishu";
+        const isNotion = item.type === "notion";
         const isGoogleDrive = item.type === "googledrive";
         const isAuthValid = isFeishu
           ? isFeishuAuthValid
@@ -216,7 +217,11 @@ export default function CloudDocumentProviderPanel({ vm }: { vm: CloudDocumentPr
               >
                 {isAuthValid
                   ? t("modelProvider.cloudDocuments.manageAccount")
-                  : t("modelProvider.cloudDocuments.configureConnection")}
+                  : isNotion
+                    ? t("modelProvider.cloudDocuments.notionConnectAction")
+                    : isFeishu
+                      ? t("modelProvider.cloudDocuments.feishuConnectAction")
+                    : t("modelProvider.cloudDocuments.configureConnection")}
                 <ArrowRightOutlined />
               </button>
             </div>

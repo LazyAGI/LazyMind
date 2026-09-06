@@ -29,6 +29,8 @@ function createDesktopBridge(ipcRenderer) {
     startupDiagnostics: () => ipcRenderer.invoke("lazymind:startupDiagnostics"),
     copyStartupLogs: () => ipcRenderer.invoke("lazymind:copyStartupLogs"),
     openCloudLogin: (url) => ipcRenderer.invoke("lazymind:openCloudLogin", url),
+    openManagedProviderAuthorization: (url) => ipcRenderer.invoke("lazymind:openManagedProviderAuthorization", url),
+    openFeishuCLIAuthorization: (url) => ipcRenderer.invoke("lazymind:openFeishuCLIAuthorization", url),
     openCloudRegister: () => ipcRenderer.invoke("lazymind:openCloudRegister"),
     openCloudTokenPlan: (url) => ipcRenderer.invoke("lazymind:openCloudTokenPlan", url),
     onStartupDiagnosticsUpdate: (handler) => {

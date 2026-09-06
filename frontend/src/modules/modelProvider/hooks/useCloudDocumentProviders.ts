@@ -19,7 +19,10 @@ import {
   type CloudDataSourceProvider,
   type FeishuDataSourceOAuthMessage,
 } from "@/modules/dataSource/common/feishuOAuth";
-import { createOAuthEngine } from "@/modules/dataSource/hooks/management/createOAuthEngine";
+import {
+  createOAuthEngine,
+  startFeishuCLISession,
+} from "@/modules/dataSource/hooks/management/createOAuthEngine";
 import type { ManagementContext } from "@/modules/dataSource/hooks/management/context";
 import type { FeishuAppSetup, OAuthState, PendingOAuthAttempt } from "@/modules/dataSource/constants/types";
 import { loadNotionAppSetup, persistNotionAppSetup } from "@/modules/dataSource/utils/notionSetup";
@@ -52,9 +55,6 @@ export function useCloudDocumentProviders() {
   const [notionAppSetup, setNotionAppSetup] = useState<FeishuAppSetup | null>(() =>
     loadNotionAppSetup(),
   );
-  const [feishuSecretConfigured, setFeishuSecretConfigured] = useState(() =>
-    Boolean(loadFeishuAppSetup()?.appSecret.trim()),
-  );
   const [notionSecretConfigured, setNotionSecretConfigured] = useState(() =>
     Boolean(loadNotionAppSetup()?.appSecret.trim()),
   );
@@ -79,12 +79,8 @@ export function useCloudDocumentProviders() {
   const feishuAuthAccountsLoadedRef = useRef(false);
   const loading = localSettings.loading || oauthLoading;
 
-  const isFeishuSetupReady = Boolean(
-    feishuAppSetup?.appId.trim() && (feishuAppSetup?.appSecret.trim() || feishuSecretConfigured),
-  );
-  const isNotionSetupReady = Boolean(
-    notionAppSetup?.appId.trim() && (notionAppSetup?.appSecret.trim() || notionSecretConfigured),
-  );
+  const isFeishuSetupReady = true;
+  const isNotionSetupReady = true;
   const validFeishuAccounts = feishuAuthAccounts.filter(
     (account) =>
       account.status === "connected" && Boolean(account.connection?.connectionId),
@@ -208,7 +204,6 @@ export function useCloudDocumentProviders() {
         setFeishuAppSetup((current) =>
           current?.appId === appId && current.appSecret.trim() ? current : setup,
         );
-        setFeishuSecretConfigured(true);
       } else {
         setNotionAppSetup((current) =>
           current?.appId === appId && current.appSecret.trim() ? current : setup,
@@ -244,7 +239,6 @@ export function useCloudDocumentProviders() {
     try {
       await Promise.all([
         refreshCloudAppCredential("feishu"),
-        refreshCloudAppCredential("notion"),
         ctx.refreshFeishuAuthAccounts(),
         ctx.refreshNotionAuthConnection(),
         refreshGoogleDriveConnection(),
@@ -291,7 +285,6 @@ export function useCloudDocumentProviders() {
       if (provider === "feishu") {
         persistFeishuAppSetup(nextSetup);
         setFeishuAppSetup(nextSetup);
-        setFeishuSecretConfigured(true);
       } else {
         persistNotionAppSetup(nextSetup);
         setNotionAppSetup(nextSetup);
@@ -330,7 +323,22 @@ export function useCloudDocumentProviders() {
   };
 
   const handleManageFeishuAuth = () => {
-    navigate(CLOUD_DOCUMENTS_FEISHU_PATH);
+    if (isFeishuAuthValid) {
+      navigate(CLOUD_DOCUMENTS_FEISHU_PATH);
+      return;
+    }
+    void startFeishuCLISession(undefined, undefined, t)
+      .then(async (connectionId) => {
+        if (!connectionId) {
+          message.error(t("modelProvider.cloudDocuments.feishuManagedAuthorizationFailed"));
+          return;
+        }
+        await ctx.refreshFeishuAuthAccounts();
+        markCloudDocumentConnectionSuccess("feishu");
+      })
+      .catch(() => {
+        message.error(t("modelProvider.cloudDocuments.feishuManagedAuthorizationFailed"));
+      });
   };
 
   const handleManageLocalSource = () => {
@@ -342,7 +350,15 @@ export function useCloudDocumentProviders() {
   };
 
   const handleOpenNotionSetup = () => {
-    openCloudSetupModal("notion", "auth");
+    void ctx.startCloudOAuth("notion")
+      .then((connected) => {
+        if (!connected) {
+          message.error(t("modelProvider.cloudDocuments.notionManagedAuthorizationFailed"));
+        }
+      })
+      .catch(() => {
+        message.error(t("modelProvider.cloudDocuments.notionManagedAuthorizationFailed"));
+      });
   };
 
   useEffect(() => {

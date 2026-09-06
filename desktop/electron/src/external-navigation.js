@@ -2,6 +2,7 @@ const EXTERNAL_PROTOCOLS = new Set(["http:", "https:", "mailto:"]);
 const CLOUD_LOGIN_PATH = /^\/(?:zh|en)\/desktop\/authorize\/?$/;
 const CLOUD_REGISTER_PATH = /^\/(?:zh|en)\/register\/?$/;
 const CLOUD_TOKEN_PLAN_PATH = /^\/(?:zh|en)\/console\/?$/;
+const MANAGED_PROVIDER_AUTHORIZATION_PATH = /^\/v1\/provider-connections\/authorize\/[A-Za-z0-9_-]{43,256}$/;
 
 function parseUrl(value) {
   try {
@@ -54,12 +55,30 @@ function isTrustedCloudNavigation(value, configuredOrigin, purpose) {
   if (purpose === "token-plan") {
     return CLOUD_TOKEN_PLAN_PATH.test(target.pathname) && target.search === "" && target.hash === "#token-plan";
   }
+  if (purpose === "provider-authorization") {
+    return MANAGED_PROVIDER_AUTHORIZATION_PATH.test(target.pathname) && target.search === "" && target.hash === "";
+  }
   return false;
 }
 
 function isAllowedCloudProtocol(url) {
   if (url.protocol === "https:") return true;
   return url.protocol === "http:" && isLoopbackHostname(url.hostname);
+}
+
+function isTrustedFeishuCLINavigation(value) {
+  const target = parseUrl(value);
+  if (!target || target.protocol !== "https:" || target.username || target.password || target.port || target.hash) {
+    return false;
+  }
+  const hostname = target.hostname.toLowerCase();
+  if (new Set(["accounts.feishu.cn", "accounts.larksuite.com"]).has(hostname)) {
+    return target.toString().length <= 4096 && target.pathname === "/oauth/v1/device/verify";
+  }
+  if (new Set(["open.feishu.cn", "open.larksuite.com"]).has(hostname)) {
+    return target.toString().length <= 4096 && target.pathname === "/page/cli";
+  }
+  return false;
 }
 
 function isLoopbackHostname(hostname) {
@@ -90,5 +109,6 @@ module.exports = {
   installExternalNavigationHandler,
   isOAuthPopup,
   isSameOrigin,
+  isTrustedFeishuCLINavigation,
   isTrustedCloudNavigation,
 };

@@ -13,6 +13,7 @@ import (
 
 	"lazymind/core/common"
 	"lazymind/core/modelprovider"
+	coreproviderconnection "lazymind/core/providerconnection"
 )
 
 const cloudToolTokenTimeout = 5 * time.Second
@@ -72,14 +73,28 @@ func LoadCloudProviderTokens(ctx context.Context, provider, userID string) ([]st
 		if connectionID == "" {
 			continue
 		}
-		tokenURL := fmt.Sprintf("%s/v1/cloud/connections/%s/token?user_id=%s",
-			common.AuthServiceBaseURL(), url.PathEscape(connectionID), url.QueryEscape(userID))
-		var response cloudTokenResponse
-		if err := common.ApiGet(ctx, tokenURL, headers, &response, cloudToolTokenTimeout); err != nil {
+		var bridge *coreproviderconnection.ProviderConnectionBridge = coreproviderconnection.DefaultService()
+		if bridge != nil {
+			capability := "chat.read"
+			if provider == "feishu" {
+				capability = "chat.search"
+			}
+			resolved, err := bridge.ResolveAccessToken(ctx, coreproviderconnection.ResolveRequest{
+				AuthConnectionID: connectionID, UserID: userID, SourceID: "chat:" + provider,
+				BindingID: "chat:" + connectionID, Consumer: "chat", RequiredCapability: capability,
+			})
+			if err == nil && strings.TrimSpace(resolved.AccessToken) != "" {
+				tokens = append(tokens, strings.TrimSpace(resolved.AccessToken))
+			}
 			continue
 		}
-		if token := strings.TrimSpace(response.Data.AccessToken); token != "" {
-			tokens = append(tokens, token)
+		legacyTokenURL := fmt.Sprintf("%s/v1/cloud/"+"connections/%s/token?user_id=%s",
+			common.AuthServiceBaseURL(), url.PathEscape(connectionID), url.QueryEscape(userID))
+		var response cloudTokenResponse
+		if err := common.ApiGet(ctx, legacyTokenURL, headers, &response, cloudToolTokenTimeout); err == nil {
+			if token := strings.TrimSpace(response.Data.AccessToken); token != "" {
+				tokens = append(tokens, token)
+			}
 		}
 	}
 	return tokens, nil
