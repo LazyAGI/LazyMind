@@ -15,7 +15,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.sql import bindparam
 
-from lazymind.common.database.postgres import normalize_postgres_connection_url
+from lazymind.common.database.postgres import normalize_postgres_connection_url, sqlalchemy_engine_options
 from lazymind.config import config
 
 
@@ -34,8 +34,9 @@ def _decode(raw: Any, default: Any = None) -> Any:
 
 class SubAgentDB:
     def __init__(self, dsn: str) -> None:
+        engine_url = normalize_postgres_connection_url(dsn=dsn)
         self._engine: Engine = create_engine(
-            normalize_postgres_connection_url(dsn=dsn), pool_pre_ping=True, future=True,
+            engine_url, pool_pre_ping=True, future=True, **sqlalchemy_engine_options(engine_url),
         )
 
     def dispose(self) -> None:
@@ -158,9 +159,9 @@ def _engine() -> Engine:
     if _query_engine is None:
         core_url = str(config['core_database_url'] or '').strip()
         acl_dsn = str(config['acl_db_dsn'] or '').strip()
+        engine_url = normalize_postgres_connection_url(url=core_url or None, dsn=acl_dsn or None)
         _query_engine = create_engine(
-            normalize_postgres_connection_url(url=core_url or None, dsn=acl_dsn or None),
-            pool_pre_ping=True, future=True,
+            engine_url, pool_pre_ping=True, future=True, **sqlalchemy_engine_options(engine_url),
         )
     return _query_engine
 

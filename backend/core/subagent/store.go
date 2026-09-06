@@ -268,7 +268,7 @@ func AcceptFinalStatus(
 // SaveArtifact appends one artifact row for a task.
 func SaveArtifact(ctx context.Context, db *gorm.DB, taskID, key, contentType string, value json.RawMessage, seq int) error {
 	now := time.Now().UTC()
-	return common.TransactionWithSQLiteBusyRetry(ctx, db, func(tx *gorm.DB) error {
+	return common.ImmediateTransactionWithSQLiteBusyRetry(ctx, db, func(tx *gorm.DB) error {
 		var task orm.SubAgentTask
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Select("id", "status").
@@ -368,7 +368,7 @@ func LoadSteps(ctx context.Context, db *gorm.DB, taskID string) ([]orm.SubAgentS
 // AppendRemoteStep persists streamed Host events so reconnects and lease
 // reclaims have the same durable execution history as an in-process SubAgent.
 func AppendRemoteStep(ctx context.Context, db *gorm.DB, taskID, role string, content json.RawMessage) error {
-	return common.TransactionWithSQLiteBusyRetry(ctx, db, func(tx *gorm.DB) error {
+	return common.ImmediateTransactionWithSQLiteBusyRetry(ctx, db, func(tx *gorm.DB) error {
 		var maxSeq int
 		if err := tx.Model(&orm.SubAgentStep{}).Where("task_id = ?", taskID).
 			Select("COALESCE(MAX(seq), -1)").Scan(&maxSeq).Error; err != nil {

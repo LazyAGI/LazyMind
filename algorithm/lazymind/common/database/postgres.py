@@ -10,6 +10,24 @@ from sqlalchemy.engine import URL
 DEFAULT_SQLALCHEMY_POSTGRES_DRIVER = 'psycopg2'
 
 
+def sqlalchemy_engine_options(url: str) -> Dict[str, Any]:
+    """Return conservative SQLAlchemy options for a local SQLite database.
+
+    Desktop services share one SQLite file with Core. A one-connection pool
+    prevents a Python process from creating several competing writers, while
+    the driver timeout lets the sole connection wait for another process's
+    short transaction. Server databases retain SQLAlchemy's normal pooling.
+    """
+    parts = urlsplit(url.strip())
+    if not parts.scheme.lower().startswith('sqlite'):
+        return {}
+
+    options: Dict[str, Any] = {'connect_args': {'timeout': 30.0}}
+    if parts.path not in {'', '/:memory:'}:
+        options.update({'pool_size': 1, 'max_overflow': 0})
+    return options
+
+
 def normalize_postgres_sqlalchemy_url(
     url: str,
     *,

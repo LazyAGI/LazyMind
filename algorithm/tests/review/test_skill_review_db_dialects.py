@@ -54,6 +54,7 @@ def _load_review_modules(monkeypatch):
 
     common_database_postgres = types.ModuleType('lazymind.common.database.postgres')
     common_database_postgres.normalize_postgres_sqlalchemy_url = lambda url: url
+    common_database_postgres.sqlalchemy_engine_options = lambda _url: {}
     monkeypatch.setitem(sys.modules, 'lazymind.common', types.ModuleType('lazymind.common'))
     monkeypatch.setitem(sys.modules, 'lazymind.common.database', types.ModuleType('lazymind.common.database'))
     monkeypatch.setitem(sys.modules, 'lazymind.common.database.postgres', common_database_postgres)

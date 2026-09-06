@@ -10,7 +10,7 @@ from uuid import UUID
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 
-from lazymind.common.database.postgres import normalize_postgres_sqlalchemy_url
+from lazymind.common.database.postgres import normalize_postgres_sqlalchemy_url, sqlalchemy_engine_options
 from lazymind.config import config as _cfg
 from lazymind.review.skill_review.db import SKILL_REVIEW_RUN_STATS_TABLE
 
@@ -98,7 +98,9 @@ def _get_engine(url: str) -> Engine:
     with _engine_cache_lock:
         engine = _engine_cache.get(engine_url)
         if engine is None:
-            engine = create_engine(engine_url, future=True, pool_pre_ping=True)
+            engine = create_engine(
+                engine_url, future=True, pool_pre_ping=True, **sqlalchemy_engine_options(engine_url),
+            )
             _engine_cache[engine_url] = engine
     return engine
 

@@ -51,6 +51,9 @@ func Connect(driver, dsn string) (*DB, error) {
 		if err != nil {
 			return nil, err
 		}
+		// Keep enough connections for legacy transaction callbacks that perform a
+		// nested read through the root DB. Contended write paths are serialized by
+		// TransactionWithSQLiteBusyRetry instead of constraining the whole pool.
 		sqlDB.SetMaxOpenConns(4)
 		for _, stmt := range []string{
 			"PRAGMA busy_timeout=30000",
