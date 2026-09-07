@@ -1,4 +1,5 @@
 -- +migrate Dialect postgres
+DROP TABLE IF EXISTS public.workflow_approval_preferences;
 ALTER TABLE public.task_center_tasks DROP CONSTRAINT IF EXISTS chk_tct_task_type;
 UPDATE public.task_center_tasks SET task_type = 'plugin_run' WHERE task_type = 'workflow_run';
 ALTER TABLE public.task_center_tasks
@@ -139,6 +140,7 @@ DROP TABLE IF EXISTS workflow_commands;
 DROP TABLE IF EXISTS workflow_preparations;
 DROP INDEX IF EXISTS idx_plugin_sessions_origin;
 ALTER TABLE plugin_sessions
+    DROP COLUMN IF EXISTS workflow_mode,
     DROP COLUMN IF EXISTS controller_host,
     DROP COLUMN IF EXISTS origin_ref,
     DROP COLUMN IF EXISTS origin_host;
@@ -174,6 +176,7 @@ BEGIN
 END $$;
 
 -- +migrate Dialect sqlite
+DROP TABLE IF EXISTS workflow_approval_preferences;
 UPDATE task_center_tasks SET task_type = 'plugin_run' WHERE task_type = 'workflow_run';
 
 DROP INDEX IF EXISTS `idx_skill_revision_distributions_archive`;
@@ -297,6 +300,7 @@ DROP TABLE IF EXISTS workflow_events;
 DROP TABLE IF EXISTS workflow_commands;
 DROP TABLE IF EXISTS workflow_preparations;
 DROP INDEX IF EXISTS idx_plugin_sessions_origin;
+ALTER TABLE plugin_sessions DROP COLUMN workflow_mode;
 ALTER TABLE plugin_sessions DROP COLUMN controller_host;
 ALTER TABLE plugin_sessions DROP COLUMN origin_ref;
 ALTER TABLE plugin_sessions DROP COLUMN origin_host;

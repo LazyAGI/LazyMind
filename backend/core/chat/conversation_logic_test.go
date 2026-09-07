@@ -1139,6 +1139,37 @@ func TestChatHistoryResponseIncludesMentions(t *testing.T) {
 	}
 }
 
+func TestChatHistoryResponseOmitsAnsweredAskPending(t *testing.T) {
+	item := chatHistoryToResponseItem(orm.ChatHistory{
+		Ext: json.RawMessage(`{
+			"ask_pending":{"ask_id":"ask-1","questions":[]},
+			"ask_answered":true,
+			"ask_saved_answers":{"0":{"type":"text","value":"done"}}
+		}`),
+	})
+	if _, exists := item["ask_pending"]; exists {
+		t.Fatalf("answered ask_pending leaked into history response: %#v", item)
+	}
+	if _, exists := item["ask_saved_answers"]; exists {
+		t.Fatalf("answered ask_saved_answers leaked into history response: %#v", item)
+	}
+}
+
+func TestChatHistoryResponseKeepsLatestUnansweredAskPending(t *testing.T) {
+	item := chatHistoryToResponseItem(orm.ChatHistory{
+		Ext: json.RawMessage(`{
+			"ask_pending":{"ask_id":"ask-1","questions":[]},
+			"ask_saved_answers":{"0":{"type":"text","value":"partial"}}
+		}`),
+	})
+	if _, exists := item["ask_pending"]; !exists {
+		t.Fatalf("unanswered ask_pending missing from history response: %#v", item)
+	}
+	if _, exists := item["ask_saved_answers"]; !exists {
+		t.Fatalf("unanswered ask_saved_answers missing from history response: %#v", item)
+	}
+}
+
 func TestChatHistoryResponseIncludesThinkingDuration(t *testing.T) {
 	item := chatHistoryToResponseItem(orm.ChatHistory{
 		Result:            "<think>分析并调用工具</think>最终答案",

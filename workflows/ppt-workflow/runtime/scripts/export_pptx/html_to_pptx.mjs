@@ -137,6 +137,7 @@ async function main() {
     rasterFallbacks: result.fallbackCount || 0,
     fallbackDetails: result.fallbacks || [],
     failures: result.failures || [],
+    embeddedFonts: result.embeddedFonts || [],
     fileSize: `${sizeKB} KB`,
     error: ok ? undefined : `${result.failCount} page(s) failed DOM→PPTX (often Chromium/Playwright mismatch)`,
   }));

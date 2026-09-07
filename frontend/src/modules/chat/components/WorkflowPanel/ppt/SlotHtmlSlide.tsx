@@ -7,7 +7,11 @@ import {
   ArtifactRewriteDialog,
   type ArtifactRewriteSelection,
 } from '../ArtifactRewriteDialog';
-import { extractHtmlFromArtifact, htmlForStaticPreview } from './exportHtmlToPptx';
+import {
+  applyHtmlPreviewCompatibilityFallbacks,
+  extractHtmlFromArtifact,
+  htmlForStaticPreview,
+} from './exportHtmlToPptx';
 import { htmlWithInlinedEcharts } from './echartsInline';
 
 function isSpaFallbackHtml(text: string): boolean {
@@ -302,6 +306,7 @@ export function SlotHtmlSlide({
     frameCleanupRef.current.get(frame)?.();
     const doc = frame.contentDocument;
     if (!doc) return;
+    applyHtmlPreviewCompatibilityFallbacks(doc);
     const style = doc.createElement('style');
     style.dataset.lazymindPptEditor = 'true';
     style.textContent = EDITOR_STYLE;

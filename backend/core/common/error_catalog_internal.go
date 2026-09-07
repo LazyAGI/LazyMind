@@ -465,6 +465,8 @@ func init() {
 		"basic chat does not support ask answers", "basic chat does not support plugin mentions",
 		"conversation_id, decision_id and a valid action are required", "conversation and x-user-id are required",
 		"invalid search config patch", "at most 20 knowledge bases are allowed",
+		"invalid approval preference", "step_id and scope (step|following) are required",
+		"approval_required must be false",
 		"selected_revision must be >= 1", "group name required", "multiple json values",
 		"model max_input_tokens is only supported for llm, vlm, or embed models",
 		"model max_input_tokens must be a positive integer or use a k or m suffix, for example 512, 128k, or 1m",
@@ -507,7 +509,7 @@ func init() {
 	registerAdditionalErrorAlias("knowledge base is not readable", "forbidden", http.StatusForbidden, 2000102)
 	registerAdditionalErrorAlias("workflow not found", "Resource not found", http.StatusNotFound, 2000408)
 	for _, source := range []string{
-		"workflow session not found", "selected artifact not found",
+		"workflow session not found", "workflow step not found", "selected artifact not found",
 		"writer session not found", "active draft_document not found",
 		"writer download conversion not found",
 	} {
@@ -518,7 +520,8 @@ func init() {
 	for _, source := range []string{
 		"no chat model configured", "failed to deliver tool-limit decision", "update search config failed",
 		"marshal writerdocument artifact failed", "artifact save failed", "decrypt api key failed",
-		"encrypt api key failed", "failed to create waiting task",
+		"encrypt api key failed", "failed to create waiting task", "save approval preference failed",
+		"copy failed",
 		"invalid workflow action response",
 		"unsupported model provider credential ciphertext", "decode sensitive-word check",
 		"built-in workflow package directory not found", "workflow.yaml missing from revision",
@@ -567,6 +570,10 @@ func init() {
 	registerAdditionalErrorPattern("lazymind host execution failed: %s", "Internal server error", http.StatusInternalServerError, 2000000)
 	registerAdditionalErrorAlias("lazymind host execution failed", "Internal server error", http.StatusInternalServerError, 2000000)
 	registerAdditionalErrorPattern("save sources task=%s", "Internal server error", http.StatusInternalServerError, 2000000)
+	registerAdditionalErrorPattern("start task=%s", "Internal server error", http.StatusInternalServerError, 2000000)
+	registerAdditionalErrorPattern("update task progress task=%s", "Internal server error", http.StatusInternalServerError, 2000000)
+	registerAdditionalErrorPattern("complete task=%s", "Internal server error", http.StatusInternalServerError, 2000000)
+	registerAdditionalErrorPattern("fail task=%s", "Internal server error", http.StatusInternalServerError, 2000000)
 	registerAdditionalErrorPattern("invalid sources snapshot", "Internal server error", http.StatusInternalServerError, 2000000)
 	for _, source := range []string{
 		"chat service returned no run terminal",

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -26,6 +27,13 @@ const (
 	SessionStatusFailed    = "failed"
 	SessionStatusWaiting   = "waiting"
 )
+
+func normalizeSessionWorkflowMode(value string) string {
+	if strings.EqualFold(strings.TrimSpace(value), "auto") {
+		return "auto"
+	}
+	return "dynamic"
+}
 
 // Step status mirrors sub_agent_tasks.status.
 const (
@@ -46,6 +54,7 @@ type CreateSessionInput struct {
 	WorkflowRevisionNo int64
 	WorkflowTreeHash   string
 	WorkflowRemoteRoot string
+	WorkflowMode       string
 	GraphHash          string
 	GraphSchemaVersion string
 	TriggerHistoryID   string
@@ -75,7 +84,8 @@ func CreateSession(ctx context.Context, db *gorm.DB, in CreateSessionInput) (*or
 		ConversationID: in.ConversationID,
 		WorkflowID:     in.WorkflowID,
 		WorkflowRef:    in.WorkflowRef, WorkflowRevisionID: in.WorkflowRevisionID, WorkflowRevisionNo: in.WorkflowRevisionNo, WorkflowTreeHash: in.WorkflowTreeHash, WorkflowRemoteRoot: in.WorkflowRemoteRoot,
-		GraphHash: in.GraphHash, GraphSchemaVersion: in.GraphSchemaVersion,
+		WorkflowMode: normalizeSessionWorkflowMode(in.WorkflowMode),
+		GraphHash:    in.GraphHash, GraphSchemaVersion: in.GraphSchemaVersion,
 		TriggerHistoryID: in.TriggerHistoryID,
 		Status:           SessionStatusActive,
 		CurrentStepID:    in.CurrentStepID,
@@ -411,6 +421,7 @@ func WriteSlotRevision(ctx context.Context, db *gorm.DB,
 
 	now := time.Now().UTC()
 	var revision int
+	var revisionID string
 	var finalListIndex *int
 
 	// Resolve artifact_seq: find the task_id for this step attempt, then pick
@@ -499,6 +510,7 @@ func WriteSlotRevision(ctx context.Context, db *gorm.DB,
 			ProducerAttemptID: step.ID,
 			CreatedAt:         now,
 		}
+		revisionID = row.ID
 		if err := tx.Create(row).Error; err != nil {
 			return err
 		}
@@ -517,7 +529,7 @@ func WriteSlotRevision(ctx context.Context, db *gorm.DB,
 
 	var result orm.WorkflowSlotRevision
 	err := db.WithContext(ctx).
-		Where("session_id = ? AND slot_id = ? AND revision = ?", sessionID, slotID, revision).
+		Where("id = ?", revisionID).
 		First(&result).Error
 	return &result, err
 }
@@ -539,6 +551,7 @@ func WriteSlotRevisionWithSnapshot(ctx context.Context, db *gorm.DB,
 
 	now := time.Now().UTC()
 	var revision int
+	var revisionID string
 	var finalListIndex *int
 
 	if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -603,6 +616,7 @@ func WriteSlotRevisionWithSnapshot(ctx context.Context, db *gorm.DB,
 			Attempt:         attempt,
 			CreatedAt:       now,
 		}
+		revisionID = row.ID
 		if err := tx.Create(row).Error; err != nil {
 			return err
 		}
@@ -619,7 +633,7 @@ func WriteSlotRevisionWithSnapshot(ctx context.Context, db *gorm.DB,
 
 	var result orm.WorkflowSlotRevision
 	err := db.WithContext(ctx).
-		Where("session_id = ? AND slot_id = ? AND revision = ?", sessionID, slotID, revision).
+		Where("id = ?", revisionID).
 		First(&result).Error
 	return &result, err
 }
@@ -1180,6 +1194,7 @@ func WriteSlotRevisionWithHumanArtifact(
 	}
 
 	var revision int
+	var revisionID string
 	var finalListIndex *int
 	var expected *int
 	if len(expectedRevision) > 0 {
@@ -1262,6 +1277,7 @@ func WriteSlotRevisionWithHumanArtifact(
 			Attempt:         attempt,
 			CreatedAt:       now,
 		}
+		revisionID = row.ID
 		if err := tx.Create(row).Error; err != nil {
 			return err
 		}
@@ -1277,7 +1293,7 @@ func WriteSlotRevisionWithHumanArtifact(
 
 	var result orm.WorkflowSlotRevision
 	err := db.WithContext(ctx).
-		Where("session_id = ? AND slot_id = ? AND revision = ?", sessionID, slotID, revision).
+		Where("id = ?", revisionID).
 		First(&result).Error
 	return &result, err
 }

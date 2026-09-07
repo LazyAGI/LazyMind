@@ -191,6 +191,7 @@ ALTER TABLE conversations
 ALTER TABLE plugin_sessions ADD COLUMN IF NOT EXISTS origin_host VARCHAR(32) NOT NULL DEFAULT 'lazymind';
 ALTER TABLE plugin_sessions ADD COLUMN IF NOT EXISTS origin_ref VARCHAR(255) NOT NULL DEFAULT '';
 ALTER TABLE plugin_sessions ADD COLUMN IF NOT EXISTS controller_host VARCHAR(32) NOT NULL DEFAULT 'lazymind';
+ALTER TABLE plugin_sessions ADD COLUMN IF NOT EXISTS workflow_mode VARCHAR(16) NOT NULL DEFAULT 'dynamic';
 CREATE INDEX IF NOT EXISTS idx_plugin_sessions_origin ON plugin_sessions(origin_host, origin_ref);
 
 -- +migrate Dialect sqlite
@@ -283,6 +284,7 @@ ALTER TABLE conversations
 ALTER TABLE plugin_sessions ADD COLUMN origin_host varchar(32) NOT NULL DEFAULT 'lazymind';
 ALTER TABLE plugin_sessions ADD COLUMN origin_ref varchar(255) NOT NULL DEFAULT '';
 ALTER TABLE plugin_sessions ADD COLUMN controller_host varchar(32) NOT NULL DEFAULT 'lazymind';
+ALTER TABLE plugin_sessions ADD COLUMN workflow_mode varchar(16) NOT NULL DEFAULT 'dynamic';
 CREATE INDEX IF NOT EXISTS idx_plugin_sessions_origin ON plugin_sessions(origin_host, origin_ref);
 
 -- +migrate Dialect postgres
@@ -1416,6 +1418,28 @@ CREATE UNIQUE INDEX uk_skills_owner_relative_root
     WHERE deleted_at IS NULL;
 
 -- +migrate Dialect postgres
+CREATE TABLE IF NOT EXISTS public.workflow_approval_preferences (
+    user_id VARCHAR(255) NOT NULL,
+    workflow_id VARCHAR(64) NOT NULL,
+    step_id VARCHAR(64) NOT NULL,
+    approval_required BOOLEAN NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    PRIMARY KEY (user_id, workflow_id, step_id)
+);
+
+-- +migrate Dialect sqlite
+CREATE TABLE IF NOT EXISTS workflow_approval_preferences (
+    user_id VARCHAR(255) NOT NULL,
+    workflow_id VARCHAR(64) NOT NULL,
+    step_id VARCHAR(64) NOT NULL,
+    approval_required BOOLEAN NOT NULL,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    PRIMARY KEY (user_id, workflow_id, step_id)
+);
+
+-- +migrate Dialect postgres
 ALTER TABLE public.resource_update_tasks
     ADD COLUMN result_json json,
     ADD COLUMN run_id varchar(36) NOT NULL DEFAULT '',
@@ -1444,8 +1468,6 @@ WHERE task.task_type = 'generate_review'
       )
   );
 ALTER TABLE public.resource_update_tasks DROP CONSTRAINT IF EXISTS chk_resource_update_tasks_task_type;
-ALTER TABLE public.resource_update_tasks ADD CONSTRAINT chk_resource_update_tasks_task_type
-    CHECK ((task_type)::text IN ('generate_review', 'auto_apply_review', 'auto_commit_skill_draft', 'organize_skill', 'organize_preference'));
 ALTER TABLE public.resource_update_tasks DROP CONSTRAINT IF EXISTS chk_resource_update_tasks_trigger_type;
 ALTER TABLE public.resource_update_tasks ADD CONSTRAINT chk_resource_update_tasks_trigger_type
     CHECK ((trigger_type)::text IN ('scheduled', 'conversation_idle', 'manual', 'review_result', 'auto_evo_enabled', 'preference_changed'));

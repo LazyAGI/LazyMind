@@ -1,13 +1,16 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { createRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { Modal } from "antd";
 import {
   ChatConversationsRequestActionEnum,
   ChatConversationsResponseFinishReasonEnum,
 } from "@/api/generated/chatbot-client";
 import { RoleTypes } from "@/modules/chat/constants/common";
+import { CHAT_WORKFLOW_STEP_FEEDBACK_EVENT } from "@/modules/chat/constants/chat";
 import type { ChatInputImperativeProps } from "../../ChatInput";
 import { useChatConversation } from "./useChatConversation";
+import { useTaskCenterStore } from "@/modules/chat/store/taskCenter";
 
 const { listConversationsMock, waitForRuntimeCapabilityMock } = vi.hoisted(() => ({
   listConversationsMock: vi.fn(),
@@ -19,6 +22,7 @@ vi.mock("@/runtime/readiness", () => ({
 }));
 
 vi.mock("antd", () => ({
+  Button: "button",
   message: {
     error: vi.fn(),
     warning: vi.fn(),
@@ -114,6 +118,11 @@ describe("useChatConversation regeneration recovery", () => {
     listConversationsMock.mockResolvedValue({ data: { conversations: [] } });
     waitForRuntimeCapabilityMock.mockReset();
     waitForRuntimeCapabilityMock.mockResolvedValue(undefined);
+    vi.mocked(Modal.confirm).mockClear();
+    useTaskCenterStore.setState({
+      activeConversationId: "",
+      tasksByConversation: {},
+    });
   });
 
   afterEach(() => {
@@ -135,6 +144,44 @@ describe("useChatConversation regeneration recovery", () => {
     expect(result.current.messageList).toEqual(second);
     expect(result.current.conversationMessagesCache.current.get("conversation-1"))
       .toEqual(second);
+  });
+
+  it("appends every completed workflow step to its assistant chat message once", () => {
+    const { result } = renderConversation();
+    const messages = [
+      { role: RoleTypes.USER, delta: "生成 PPT", history_id: "history-1" },
+      {
+        role: RoleTypes.ASSISTANT,
+        delta: "PPT 工作流已启动。",
+        raw_delta: "PPT 工作流已启动。",
+        history_id: "history-1",
+        finish_reason:
+          ChatConversationsResponseFinishReasonEnum.FinishReasonStop,
+      },
+    ];
+    const detail = {
+      conversationId: "conversation-1",
+      feedbackId: "task-outline",
+      historyId: "history-1",
+      message: "步骤「生成大纲」已完成：已生成 10 页大纲。",
+      status: "succeeded",
+    };
+
+    act(() => {
+      result.current.replaceMessageList("conversation-1", messages);
+      window.dispatchEvent(
+        new CustomEvent(CHAT_WORKFLOW_STEP_FEEDBACK_EVENT, { detail }),
+      );
+      window.dispatchEvent(
+        new CustomEvent(CHAT_WORKFLOW_STEP_FEEDBACK_EVENT, { detail }),
+      );
+    });
+
+    expect(result.current.messageList[1]).toMatchObject({
+      delta:
+        "PPT 工作流已启动。\n\n步骤「生成大纲」已完成：已生成 10 页大纲。",
+      workflow_step_feedback_ids: ["task-outline"],
+    });
   });
 
   it("restores the previous answer and clears busy state when opening SSE rejects", async () => {
@@ -184,6 +231,57 @@ describe("useChatConversation regeneration recovery", () => {
     });
 
     await waitFor(() => expect(onOpenSSE).toHaveBeenCalledTimes(2));
+  });
+
+  it("shows a setup card when a persisted workflow task contains a capability failure", async () => {
+    renderHook(() =>
+      useChatConversation({
+        canChat: true,
+        onOpenSSE: vi.fn(),
+        setIsChatContent: vi.fn(),
+        clearStorePendingMessage: vi.fn(),
+        clearCiteMessages: vi.fn(),
+        chatInputRef: createRef<ChatInputImperativeProps>(),
+        thinkingCollapseMap: new Map(),
+        getUserEdit: () => undefined,
+        t: (key) => key,
+      }),
+    );
+    const failure =
+      'MEDIA_CAPABILITY_DEPENDENCY_MISSING '
+      + '{"status":"blocked","workflow":"CREATE_ANIMATED_MEME",'
+      + '"required":["video_generator"],"missing":[{"id":"video_generator",'
+      + '"label":"视频生成模型","available":false,"settings_url":"/settings?section=models",'
+      + '"reason":"尚未配置视频生成模型。"}],"message":"缺少视频生成模型。"}';
+
+    act(() => {
+      useTaskCenterStore.setState({
+        activeConversationId: "conversation-capability",
+        tasksByConversation: {
+          "conversation-capability": [{
+            task_id: "task-capability",
+            conversation_id: "conversation-capability",
+            title: "image-workflow:analyze_subject",
+            agent_type: "workflow_step",
+            mode: "auto",
+            status: "failed",
+            progress_pct: 100,
+            artifacts: [],
+            sources: [],
+            artifact_streams: [],
+            execution_log: [{ type: "tool_results", content: "", tool_results: [{
+              tool_call_id: "tool-1",
+              name: "check_image_workflow_capabilities",
+              result: failure,
+            }] }],
+          }],
+        },
+      });
+    });
+
+    await waitFor(() => expect(Modal.confirm).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(Modal.confirm).mock.calls[0]?.[0]?.title)
+      .toBe("chat.mediaCapabilitiesRequiredTitle");
   });
 
   it("does not open parallel regeneration requests", async () => {

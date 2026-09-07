@@ -60,7 +60,10 @@ vi.mock("@/components/StateGraphModal", () => ({
 }));
 
 import { useTaskCenterStore } from "./taskCenter";
-import { CHAT_AUTO_ADVANCE_EVENT } from "@/modules/chat/constants/chat";
+import {
+  CHAT_AUTO_ADVANCE_EVENT,
+  CHAT_WORKFLOW_STEP_FEEDBACK_EVENT,
+} from "@/modules/chat/constants/chat";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -173,6 +176,59 @@ describe("task center workflow events", () => {
     ]);
   });
 
+  it("refreshes workflow slots when a task publishes an artifact before completion", async () => {
+    useTaskCenterStore.getState().subscribeConvEvents("conversation-1");
+    emitConversationEvent({
+      type: "task_created",
+      payload: {
+        task_id: "workflow-task-ppt",
+        agent_type: "workflow_step",
+        title: "ppt-workflow:generate_ppt",
+        status: "running",
+      },
+    });
+    await vi.advanceTimersByTimeAsync(100);
+    workflowState.loadActiveSession.mockClear();
+
+    const taskMessage = sseHarness.callbacks.get("/tasks/workflow-task-ppt/stream")?.message;
+    taskMessage?.({
+      data: JSON.stringify({
+        type: "artifact",
+        slot: "preview_html",
+        content_type: "text",
+        seq: 1,
+        value: { text: "<html>page one</html>", list_index: 0 },
+      }),
+    } as unknown as CustomEvent);
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(workflowState.loadActiveSession).toHaveBeenCalledWith("conversation-1", {
+      silentError: true,
+    });
+  });
+
+  it("merges consecutive token deltas into one execution-log entry", () => {
+    useTaskCenterStore.getState().subscribeConvEvents("conversation-1");
+    emitConversationEvent({
+      type: "task_created",
+      payload: {
+        task_id: "workflow-task-stream",
+        agent_type: "workflow_step",
+        title: "ppt-workflow:generate_ppt",
+        status: "running",
+      },
+    });
+    const taskMessage = sseHarness.callbacks.get("/tasks/workflow-task-stream/stream")?.message;
+    for (const token of ["<", "html", ">"]) {
+      taskMessage?.({
+        data: JSON.stringify({ type: "text", text: token }),
+      } as unknown as CustomEvent);
+    }
+
+    expect(useTaskCenterStore.getState().getTasks("conversation-1")[0].execution_log)
+      .toEqual([{ type: "text", content: "<html>" }]);
+  });
+
   it("keeps a live task when an older REST snapshot resolves and queues a reload", async () => {
     const firstSnapshot = deferred<{ data: { tasks: any[] } }>();
     const reconciledSnapshot = deferred<{ data: { tasks: any[] } }>();
@@ -283,6 +339,35 @@ describe("task center workflow events", () => {
       CHAT_AUTO_ADVANCE_EVENT,
     );
     dispatchSpy.mockRestore();
+  });
+
+  it("forwards each live workflow step feedback to chat and ignores replay", () => {
+    const received: CustomEvent[] = [];
+    const listener = (event: Event) => received.push(event as CustomEvent);
+    window.addEventListener(CHAT_WORKFLOW_STEP_FEEDBACK_EVENT, listener);
+    useTaskCenterStore.getState().subscribeConvEvents("conversation-1");
+
+    const workflowFeedback = {
+      type: "workflow_step_feedback",
+      payload: {
+        task_id: "workflow-task-feedback",
+        history_id: "history-1",
+        status: "succeeded",
+        message: "步骤「生成大纲」已完成：已生成 10 页大纲。",
+      },
+    };
+    emitConversationEvent(workflowFeedback);
+    emitConversationEvent({ ...workflowFeedback, replayed: true });
+
+    expect(received).toHaveLength(1);
+    expect(received[0].detail).toEqual({
+      conversationId: "conversation-1",
+      feedbackId: "workflow-task-feedback",
+      historyId: "history-1",
+      message: "步骤「生成大纲」已完成：已生成 10 页大纲。",
+      status: "succeeded",
+    });
+    window.removeEventListener(CHAT_WORKFLOW_STEP_FEEDBACK_EVENT, listener);
   });
 
   it("refreshes the active workflow session for live and replayed creation events", async () => {

@@ -169,7 +169,10 @@ func routeEvent(ctx context.Context, db *gorm.DB, stateStore state.Store, ev Tas
 func routeEventWithWorkflowHooks(ctx context.Context, db *gorm.DB, stateStore state.Store, ev TaskEvent, artifactHook, terminalHook bool) error {
 	switch ev.Type {
 	case "task_start":
-		accepted, _ := AcceptTaskStart(ctx, db, ev.TaskID)
+		accepted, err := AcceptTaskStart(ctx, db, ev.TaskID)
+		if err != nil {
+			return fmt.Errorf("start task=%s: %w", ev.TaskID, err)
+		}
 		if !accepted {
 			return nil
 		}
@@ -179,7 +182,9 @@ func routeEventWithWorkflowHooks(ctx context.Context, db *gorm.DB, stateStore st
 			routeWorkflowStepStatus(ctx, db, stateStore, ev.TaskID, StatusRunning, "")
 		}
 	case "progress":
-		_ = UpdateProgress(ctx, db, ev.TaskID, ev.Progress, ev.CurrentPhase, ev.EstimatedSec)
+		if err := UpdateProgress(ctx, db, ev.TaskID, ev.Progress, ev.CurrentPhase, ev.EstimatedSec); err != nil {
+			return fmt.Errorf("update task progress task=%s: %w", ev.TaskID, err)
+		}
 		_ = WriteStatus(ctx, stateStore, ev.TaskID, map[string]any{
 			"status": StatusRunning, "progress": ev.Progress, "current_phase": ev.CurrentPhase,
 		})
@@ -206,7 +211,10 @@ func routeEventWithWorkflowHooks(ctx context.Context, db *gorm.DB, stateStore st
 		if status == "" {
 			status = StatusSucceeded
 		}
-		accepted, _ := AcceptFinalStatus(ctx, db, ev.TaskID, status, ev.Summary)
+		accepted, err := AcceptFinalStatus(ctx, db, ev.TaskID, status, ev.Summary)
+		if err != nil {
+			return fmt.Errorf("complete task=%s: %w", ev.TaskID, err)
+		}
 		if !accepted {
 			return nil
 		}
@@ -222,7 +230,10 @@ func routeEventWithWorkflowHooks(ctx context.Context, db *gorm.DB, stateStore st
 		if status == "" {
 			status = StatusFailed
 		}
-		accepted, _ := AcceptFinalStatus(ctx, db, ev.TaskID, status, ev.Message)
+		accepted, err := AcceptFinalStatus(ctx, db, ev.TaskID, status, ev.Message)
+		if err != nil {
+			return fmt.Errorf("fail task=%s: %w", ev.TaskID, err)
+		}
 		if !accepted {
 			return nil
 		}
@@ -309,7 +320,8 @@ type eventHooks struct {
 	onTerminalStatus func(ctx context.Context, db *gorm.DB, stateStore state.Store, taskID, status, message string)
 	// onConversationEvent is called when a plugin lifecycle event should be pushed to the
 	// main conversation SSE stream. convID and historyID identify the target stream;
-	// eventType is one of "step_waiting", "workflow_completed", "workflow_error".
+	// eventType is a bounded workflow lifecycle notification such as
+	// "workflow_step_feedback", "step_waiting", "workflow_completed", or "workflow_error".
 	onConversationEvent func(ctx context.Context, stateStore state.Store, convID, historyID, eventType string, payload map[string]any) error
 }
 

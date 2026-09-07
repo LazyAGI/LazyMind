@@ -78,6 +78,9 @@ func workflowFiles(d orm.WorkflowDraft) (map[string][]byte, error) {
 	if strings.TrimSpace(d.DriverContent) != "" {
 		files["scenario/driver.md"] = []byte(d.DriverContent)
 	}
+	if strings.TrimSpace(d.StateLayoutContent) != "" && strings.TrimSpace(d.StateLayoutContent) != "{}" {
+		files["scenario/layout.json"] = []byte(d.StateLayoutContent)
+	}
 	if strings.TrimSpace(d.ScriptsContent) != "" && strings.TrimSpace(d.ScriptsContent) != "{}" {
 		var scripts map[string]string
 		if err := json.Unmarshal([]byte(d.ScriptsContent), &scripts); err != nil {
@@ -109,6 +112,15 @@ func workflowTreeHash(files map[string][]byte) string {
 		entries[p] = versionfs.Entry{Path: p, EntryType: "file", BlobHash: hex.EncodeToString(sum[:]), Size: int64(len(body)), Mode: 420}
 	}
 	return versionfs.HashTree(entries)
+}
+
+func workflowContainsScripts(files map[string][]byte) bool {
+	for path := range files {
+		if strings.HasPrefix(path, "scripts/") {
+			return true
+		}
+	}
+	return false
 }
 
 // PublishWorkflowDraft commits the current draft as an immutable, content-addressed revision.
@@ -215,7 +227,7 @@ func PublishWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 		if err := tx.Create(&entries).Error; err != nil {
 			return err
 		}
-		updates := map[string]any{"head_revision_id": revID, "version": next, "updated_at": now, "name": d.Name, "description": yamlScalar(d.WorkflowYAMLContent, "description"), "when_to_use": yamlScalar(d.WorkflowYAMLContent, "when_to_use"), "contains_scripts": len(files) > 3}
+		updates := map[string]any{"head_revision_id": revID, "version": next, "updated_at": now, "name": d.Name, "description": yamlScalar(d.WorkflowYAMLContent, "description"), "when_to_use": yamlScalar(d.WorkflowYAMLContent, "when_to_use"), "contains_scripts": workflowContainsScripts(files)}
 		if err := tx.Model(&resource).Updates(updates).Error; err != nil {
 			return err
 		}

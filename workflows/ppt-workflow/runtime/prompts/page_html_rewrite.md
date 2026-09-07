@@ -27,6 +27,8 @@
 - `inherited_image_size` —— 若非空，给出该图片的原生像素尺寸 `{w, h, aspect}`。aspect = 宽/高。query 里要把这个尺寸 / 长宽比讲给生成器，让它给图片容器选合适的 width / height（保持长宽比，不压扁不拉长）。
 - `inherited_image_alt` —— 若非空，是该图片的简短 alt 文本（来自原文档的 alt 属性或文件名派生，例 `"fig3 dram market share"`）—— 兜底用，质量参差。
 - `inherited_image_caption_hint` —— **优先使用这条**作为图的内容描述基准。来源解析顺序（最优 → 兜底）：(1) ppt-entry 的 `caption_images.py` 用 VLM 真看图后写的中文 caption（最准）；(2) digest LLM 基于文档文字猜的 caption_hint（次之）；(3) 都没有就靠 `inherited_image_alt` 兜底。**必须在 query 里明文把这条写出来**，并据此引导生成器写贴合图片内容的 caption / 副标题 / 配文，而不是只放一张图不解释。
+- `background_image_local_path` —— 若非空，是用户在启动询问中启用后按页生成的专用 AI 底图。query 必须保留其精确 `../images/page_XXX_background.*` 路径，并要求仅作为 `#bg` 背景使用。
+- `background_image_size` —— AI 底图的原始像素尺寸；背景使用 cover + center，不得当作前景素材图。
 - `language` —— zh / en。
 
 ## 重写要求
@@ -50,7 +52,9 @@
    - 摆放：作为前景 `<img>` 放在版面中显著位置（建议占页面 30-50% 视觉面积）。**不能当成背景（background-image）、不能放在蒙版下、不能用遮罩/渐变压暗覆盖文字**。
    - 如果页面还有要点和数据，应该与这张图形成"图 + 文"的并列布局；宁可删减部分文字也要保住这张图的可见性。
 9. **无配图时**：如果没有 `inherited_image_local_path`，query 要明说"这页没有可用的配图，请用纯文字 + CSS / SVG / ECharts 装饰把版面填满，不要留大片空白"。不要编造图片路径。
-10. **图表防遮挡（硬性）**：如果本页要用 ECharts（bar/line/pie 等），query 必须明确要求"图表区域内不要有任何覆盖元素"：禁止把说明卡、渐变遮罩、半透明蒙层、装饰线、悬浮标签、绝对定位文字压在图表上；图表说明文字放在图表外部并留出间距，确保图表完整可见，避免导出后只显示一半。
+   `background_image_local_path` 不算前景配图；即使有底图，没有 inherited image 时仍不得编造前景 `<img>`。
+10. **处理 AI 底图（硬性）**：若 `background_image_local_path` 非空，query 必须写出精确相对路径，并要求生成器设置 `#bg { background-image: url(<精确路径>); background-size: cover; background-position: center; }`。不得将它输出为前景 `<img>`，也不得替换成自选颜色或虚构路径。
+11. **图表防遮挡（硬性）**：如果本页要用 ECharts（bar/line/pie 等），query 必须明确要求"图表区域内不要有任何覆盖元素"：禁止把说明卡、渐变遮罩、半透明蒙层、装饰线、悬浮标签、绝对定位文字压在图表上；图表说明文字放在图表外部并留出间距，确保图表完整可见，避免导出后只显示一半。
 
 ## 输出
 

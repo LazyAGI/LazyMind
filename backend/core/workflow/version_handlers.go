@@ -80,7 +80,7 @@ func workflowVersionPayload(p orm.WorkflowResource, revisionID string) (map[stri
 	if workflowYAML == "" {
 		workflowYAML = files["workflow.yaml"]
 	}
-	return map[string]any{"workflow_ref": p.WorkflowRef, "revision_id": rev.ID, "revision_no": rev.RevisionNo, "tree_hash": rev.TreeHash, "workflow_yaml_content": workflowYAML, "state_yaml_content": files["scenario/state.yml"], "scenario_content": files["scenario/scenario.md"], "driver_content": files["scenario/driver.md"], "scripts_content": string(scriptsJSON), "readonly": true}, nil
+	return map[string]any{"workflow_ref": p.WorkflowRef, "revision_id": rev.ID, "revision_no": rev.RevisionNo, "tree_hash": rev.TreeHash, "workflow_yaml_content": workflowYAML, "state_yaml_content": files["scenario/state.yml"], "state_layout_content": files["scenario/layout.json"], "scenario_content": files["scenario/scenario.md"], "driver_content": files["scenario/driver.md"], "scripts_content": string(scriptsJSON), "readonly": true}, nil
 }
 
 func GetWorkflowVersion(w http.ResponseWriter, r *http.Request) {
@@ -124,7 +124,7 @@ func ReplaceDraftFromWorkflowVersion(w http.ResponseWriter, r *http.Request) {
 	if workflowYAML == "" {
 		workflowYAML = files["workflow.yaml"]
 	}
-	updates := map[string]any{"state_yaml_content": files["scenario/state.yml"], "scenario_content": files["scenario/scenario.md"], "driver_content": files["scenario/driver.md"], "scripts_content": string(scriptsJSON), "state_layout_content": "", "base_revision_id": common.PathVar(r, "revision_id"), "version": draft.Version + 1, "updated_at": time.Now().UTC()}
+	updates := map[string]any{"state_yaml_content": files["scenario/state.yml"], "scenario_content": files["scenario/scenario.md"], "driver_content": files["scenario/driver.md"], "scripts_content": string(scriptsJSON), "state_layout_content": files["scenario/layout.json"], "base_revision_id": common.PathVar(r, "revision_id"), "version": draft.Version + 1, "updated_at": time.Now().UTC()}
 	setWorkflowYAMLUpdate(updates, workflowYAML)
 	if err := store.DB().Model(&draft).Updates(updates).Error; err != nil {
 		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)

@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
-import { Popconfirm, Tooltip } from 'antd';
+import { message as antdMessage, Popconfirm, Tooltip } from 'antd';
 import {
   CloudUploadOutlined,
   DownloadOutlined,
@@ -36,6 +36,10 @@ import type {
   InnerTabsNode,
 } from '@/modules/chat/store/workflowPanel';
 import {
+  resolveWorkflowTabStepId,
+  workflowSlotMatchesTabScope,
+} from './workflowTabScope';
+import {
   isWriterIrSource,
   SlotRenderer,
   SlotDownloadContext,
@@ -46,7 +50,12 @@ import { WorkflowTabActions } from './actions/WorkflowTabActions';
 import { WorkflowPanelTabActiveContext, SlotEditingContext, type SlotFooterAction } from './slotEditingContext';
 import { findWriterArtifactStream } from './writerArtifactStream';
 import { resolveCompletedContinueStep } from './workflowContinue';
+import { resolvePendingApprovalStep } from './workflowApproval';
 import { moveSelectedCompositePages, sameCompositePageOrder } from './compositePageReorder';
+import {
+  filterPresentCompositeItems,
+  findAlignedCompositeRevision,
+} from './compositeArtifactLayout';
 import './WorkflowPanel.scss';
 
 const DOCUMENT_FOOTER_LINK_ORDER = 20;
@@ -376,14 +385,7 @@ function revisionMatchesTabScope(
   if (scope === 'selected') {
     return Boolean(slot.selected);
   }
-  if (tab.step_id) {
-    return slot.step_id === tab.step_id;
-  }
-  const isStepTab = session.steps?.some((s) => s.step_id === tab.id);
-  if (isStepTab) {
-    return slot.step_id === tab.id;
-  }
-  return Boolean(slot.selected);
+  return workflowSlotMatchesTabScope(tab, session.steps, slot);
 }
 
 /** Slot ids that currently have at least one revision under the tab's empty-column scope. */
@@ -448,7 +450,7 @@ function filterColumnsByVisibleSlots(
     if (typeof col.slotId !== 'string') return true;
     return visible.has(col.slotId);
   });
-  return filtered.length > 0 ? filtered : columns;
+  return filtered;
 }
 
 function getTabSlotRevisions(
@@ -456,15 +458,10 @@ function getTabSlotRevisions(
   tab: TabDef,
   artifactKey: string,
 ): SlotRevision[] {
-  const slots = session.slots ?? [];
-  if (tab.step_id) {
-    return slots.filter((s) => s.slot === artifactKey && s.step_id === tab.step_id);
-  }
-  const isStepTab = session.steps?.some((s) => s.step_id === tab.id);
-  if (isStepTab) {
-    return slots.filter((s) => s.slot === artifactKey && s.step_id === tab.id);
-  }
-  return slots.filter((s) => s.slot === artifactKey && s.selected);
+  return (session.slots ?? []).filter(
+    (slot) => slot.slot === artifactKey
+      && workflowSlotMatchesTabScope(tab, session.steps, slot),
+  );
 }
 
 function isStructuredArtifactRevision(slot: SlotRevision): boolean {
@@ -519,8 +516,7 @@ function getCompositeRows(
 ): number[] {
   const participating = new Set(tab.slots.map((s) => s.id));
   const orders = new Set<number>();
-  const scopeStepId = tab.step_id
-    ?? (session.steps?.some((s) => s.step_id === tab.id) ? tab.id : undefined);
+  const scopeStepId = resolveWorkflowTabStepId(tab, session.steps);
   for (const slot of session.slots ?? []) {
     const matchesTabStep = scopeStepId ? slot.step_id === scopeStepId : slot.selected;
     if (matchesTabStep && participating.has(slot.slot) && slot.sort_order !== undefined) {
@@ -537,8 +533,13 @@ function findSlotRevision(
   artifactKey: string,
   sortOrder: number,
 ): SlotRevision | undefined {
-  return getTabSlotRevisions(session, tab, artifactKey).find(
-    (s) => s.slot === artifactKey && s.sort_order === sortOrder,
+  const revisions = getTabSlotRevisions(session, tab, artifactKey).filter(
+    (slot) => slot.slot === artifactKey,
+  );
+  return findAlignedCompositeRevision(
+    revisions,
+    sortOrder,
+    tab.composite_behavior?.repeat_single_slots?.includes(artifactKey) ?? false,
   );
 }
 
@@ -571,7 +572,16 @@ function InnerTabsCell({
 
   const innerSlotIds = tabsNode.tabs
     .map((n) => (typeof n === 'string' ? n : isColumnNode(n) ? (typeof n.slot === 'string' ? n.slot : null) : null))
-    .filter((id): id is string => id !== null);
+    .filter((id): id is string => id !== null)
+    .filter((slotId) => Boolean(findSlotRevision(session, tab, slotId, sortOrder)));
+
+  useEffect(() => {
+    if (activeIdx >= innerSlotIds.length) setActiveIdx(0);
+  }, [activeIdx, innerSlotIds.length]);
+
+  if (innerSlotIds.length === 0) {
+    return <div className='composite-cell__empty'>—</div>;
+  }
 
   return (
     <div className='composite-cell__inner-tabs'>
@@ -844,6 +854,7 @@ function CompositeSlotGrid({
     buildColumns(tab),
     resolveVisibleSlotIds(tab, session),
   );
+  const hideEmptyCells = Boolean(tab.composite_behavior?.hide_empty_columns);
   const hideImageMutationActions = tab.id === 'result';
 
   // Compute total weight for flex proportions.
@@ -943,6 +954,7 @@ function CompositeSlotGrid({
   ) => {
     const def = tab.slots.find((slot) => slot.id === slotId);
     const rev = findSlotRevision(session, tab, def?.id ?? slotId, sortOrder);
+    if (!rev && hideEmptyCells) return null;
     return (
       <div key={key} className='composite-grid__cell' style={style}>
         {def?.label && <span className='composite-grid__cell-label'>{def.label}</span>}
@@ -972,6 +984,13 @@ function CompositeSlotGrid({
   const formatCLayout = tab.composite_layout && !Array.isArray(tab.composite_layout)
     ? tab.composite_layout
     : undefined;
+  const nodeHasRevision = (node: CompositePanelNode, sortOrder: number): boolean => {
+    if (node.slot) return Boolean(findSlotRevision(session, tab, node.slot, sortOrder));
+    if (node.tabs?.length) {
+      return node.tabs.some((slotId) => Boolean(findSlotRevision(session, tab, slotId, sortOrder)));
+    }
+    return Boolean(node.children?.some((child) => nodeHasRevision(child, sortOrder)));
+  };
   const renderNestedComposite = (
     node: CompositePanelNode,
     sortOrder: number,
@@ -1002,9 +1021,14 @@ function CompositeSlotGrid({
       );
     }
     if (!node.direction || !node.children?.length) {
-      return <div key={path} className='composite-grid__cell-empty'>—</div>;
+      return hideEmptyCells ? null : <div key={path} className='composite-grid__cell-empty'>—</div>;
     }
-    const children = node.children;
+    const children = filterPresentCompositeItems(
+      node.children,
+      (child) => nodeHasRevision(child, sortOrder),
+      hideEmptyCells,
+    );
+    if (children.length === 0) return null;
     return (
       <div
         key={path}
@@ -1023,7 +1047,26 @@ function CompositeSlotGrid({
     );
   };
 
-  const renderRow = (sortOrder: number) => (
+  const renderRow = (sortOrder: number) => {
+    const rowColumns = filterPresentCompositeItems(
+      columns,
+      (column) => {
+        if (typeof column.slotId === 'string') {
+          return Boolean(findSlotRevision(session, tab, column.slotId, sortOrder));
+        }
+        return column.slotId.tabs.some((node) => {
+          const slotId = typeof node === 'string'
+            ? node
+            : isColumnNode(node) && typeof node.slot === 'string'
+              ? node.slot
+              : undefined;
+          return slotId ? Boolean(findSlotRevision(session, tab, slotId, sortOrder)) : false;
+        });
+      },
+      hideEmptyCells,
+    );
+    const rowTotalWeight = rowColumns.reduce((sum, column) => sum + column.weight, 0) || totalWeight;
+    return (
         <div
           key={sortOrder}
           className={`composite-grid__row${formatCLayout && hasNestedContainer(formatCLayout) ? ' composite-grid__row--tree' : stackCompositeCells ? ' composite-grid__row--stack' : ''}`}
@@ -1034,8 +1077,8 @@ function CompositeSlotGrid({
         >
           {formatCLayout && hasNestedContainer(formatCLayout)
             ? renderNestedComposite(formatCLayout, sortOrder, `page-${sortOrder}`, true)
-            : columns.map((col, colIdx) => {
-            const flexBasis = `${(col.weight / totalWeight) * 100}%`;
+            : rowColumns.map((col, colIdx) => {
+            const flexBasis = `${(col.weight / rowTotalWeight) * 100}%`;
             if (isInnerTabsNode(col.slotId)) {
               return (
                 <div
@@ -1065,7 +1108,8 @@ function CompositeSlotGrid({
             });
           })}
         </div>
-  );
+    );
+  };
 
   if (!paged) {
     return <div className='composite-grid'>{rows.map(renderRow)}</div>;
@@ -1507,8 +1551,12 @@ function TabSlotGrid({
   const resolveVisibleSlots = (slotDefs: SlotDef[]): SlotDef[] => {
     const visible = resolveVisibleSlotIds(tab, session);
     if (!visible) return slotDefs;
-    const filtered = slotDefs.filter((s) => visible.has(s.id));
-    return filtered.length > 0 ? filtered : slotDefs;
+    return slotDefs.filter((slotDef) => visible.has(slotDef.id) || Boolean(findWriterArtifactStream(
+      session,
+      getTabStepId(tab),
+      slotDef.id,
+      tasks,
+    )));
   };
   const visibleSlots = resolveVisibleSlots(resolvePreferredStructuredSlotDefs(tab, session));
   return (
@@ -1850,14 +1898,15 @@ export function WorkflowPanel({
       : undefined);
   const effectivePast = new Set(session.projection?.past ?? []);
   const continueDisabled = buttonsDisabled || currentStepStatus === 'failed';
+  const approvalStepId = resolvePendingApprovalStep(session, displayStatus);
 
-  async function runFooterAction(action: () => void, flushKey?: string) {
+  async function runFooterAction(action: () => void | Promise<void>, flushKey?: string) {
     if (sessionBusy || actionPending) return;
     setActionPending(true);
     try {
       const saved = await flushPendingEdits(flushKey);
       if (!saved) return;
-      action();
+      await action();
     } finally {
       setActionPending(false);
     }
@@ -1870,6 +1919,22 @@ export function WorkflowPanel({
     void runFooterAction(() => onSendMessage?.(message));
   }
 
+  function handleContinueWithApprovalPreference(scope: 'step' | 'following') {
+    if (!approvalStepId) return;
+    void runFooterAction(async () => {
+      try {
+        await WorkflowSessionApi().setApprovalPreference(session.session_id, {
+          step_id: approvalStepId,
+          scope,
+          approval_required: false,
+        });
+        onSendMessage?.(t('chat.workflowContinue'));
+      } catch {
+        antdMessage.error(t('chat.workflowApprovalPreferenceSaveFailed'));
+      }
+    });
+  }
+
   function handleRetry() {
     void runFooterAction(() => onSendMessage?.(t('chat.workflowRetry')));
   }
@@ -1878,8 +1943,10 @@ export function WorkflowPanel({
     void runFooterAction(() => onSendMessage?.(`${t('chat.workflowRollbackPrefix')}${stepId}`));
   }
 
-  const continueLabel = displayStatus === 'waiting'
-    ? t('chat.workflowSaveAndContinue')
+  const continueLabel = approvalStepId
+    ? t('chat.workflowContinueExecution')
+    : displayStatus === 'waiting'
+      ? t('chat.workflowSaveAndContinue')
     : t('chat.workflowContinue');
 
   const panel = (
@@ -2198,7 +2265,7 @@ export function WorkflowPanel({
               {actionPending ? t('chat.workflowSavingBeforeAction') : t('chat.workflowRetry')}
             </button>
           )}
-          {showContinue && (
+          {showContinue && !approvalStepId && (
             <button
               type='button'
               className='workflow-panel__action-btn workflow-panel__action-btn--primary'
@@ -2256,6 +2323,40 @@ export function WorkflowPanel({
         </div>
       )}
     </div>
+    {!collapsed && approvalStepId && (
+      <div className='workflow-panel__approval-bar' role='group' aria-label={t('chat.workflowApprovalActions')}>
+        <span className='workflow-panel__approval-label'>{t('chat.workflowApprovalRequired')}</span>
+        <button
+          type='button'
+          className='workflow-panel__action-btn workflow-panel__action-btn--primary'
+          disabled={continueDisabled}
+          aria-disabled={continueDisabled}
+          onClick={handleContinue}
+        >
+          {t('chat.workflowContinueExecution')}
+        </button>
+        <button
+          type='button'
+          className='workflow-panel__action-btn workflow-panel__action-btn--secondary'
+          disabled={continueDisabled}
+          aria-disabled={continueDisabled}
+          onClick={() => handleContinueWithApprovalPreference('step')}
+          title={t('chat.workflowSkipThisApprovalHint')}
+        >
+          {t('chat.workflowSkipThisApproval')}
+        </button>
+        <button
+          type='button'
+          className='workflow-panel__action-btn workflow-panel__action-btn--secondary'
+          disabled={continueDisabled}
+          aria-disabled={continueDisabled}
+          onClick={() => handleContinueWithApprovalPreference('following')}
+          title={t('chat.workflowSkipFollowingApprovalsHint')}
+        >
+          {t('chat.workflowSkipFollowingApprovals')}
+        </button>
+      </div>
+    )}
     {session && (
       <StateGraphModal
         open={stateGraphOpen}

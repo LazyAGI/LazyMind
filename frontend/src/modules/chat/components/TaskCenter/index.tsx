@@ -519,6 +519,7 @@ function TaskCard({ task }: { task: SubAgentTask }) {
   const cardDragRef = useRef<{ startY: number; startH: number } | null>(null);
   const { t } = useTranslation();
   const isRunning = RUNNING_STATUSES.includes(task.status);
+  const runInstruction = task.query?.trim();
 
   const onCardResizeStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -565,6 +566,14 @@ function TaskCard({ task }: { task: SubAgentTask }) {
       </div>
       {!collapsed && (
         <>
+          {runInstruction && (
+            <CollapsibleSection
+              title={t("taskCenter.runInstruction")}
+              defaultOpen={false}
+            >
+              <div className="task-card-instruction-content">{runInstruction}</div>
+            </CollapsibleSection>
+          )}
           {isRunning && (
           <Progress
             percent={task.progress_pct}

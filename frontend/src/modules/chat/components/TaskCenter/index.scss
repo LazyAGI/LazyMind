@@ -385,6 +385,19 @@
       flex-shrink: 0;
     }
   }
+
+  .task-card-instruction-content {
+    margin: 2px 0 8px 20px;
+    padding: 8px 10px;
+    font-size: 12px;
+    line-height: 1.6;
+    color: #526071;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    background: #f7f9fc;
+    border: 1px solid #edf1f6;
+    border-radius: 6px;
+  }
 }
 
 // ── Task status badge ─────────────────────────────────────────────────────────

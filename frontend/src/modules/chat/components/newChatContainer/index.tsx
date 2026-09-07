@@ -141,6 +141,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
       onConversationSettingsChange,
       initialConversationSettings,
       hasWorkflowSession,
+      lockedWorkflowMode,
       conversationTrailEnabled = true,
       showThinkingDepth = true,
       showSkillDeposit = true,
@@ -605,6 +606,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
               onConversationSettingsChange={onConversationSettingsChange}
               initialConversationSettings={initialConversationSettings}
               hasWorkflowSession={hasWorkflowSession}
+              lockedWorkflowMode={lockedWorkflowMode}
               showThinkingDepth={showThinkingDepth}
               showSkillDeposit={showSkillDeposit}
               showConversationConfig={showConversationConfig}

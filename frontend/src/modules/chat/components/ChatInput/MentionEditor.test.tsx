@@ -125,4 +125,44 @@ describe("MentionEditor", () => {
     expect(await screen.findByRole("option", { name: "新增技能" })).toBeInTheDocument();
     expect(mocks.listSkillAssetsPage).toHaveBeenCalledTimes(2);
   });
+
+  it("reloads workflows so newly published workflows are shown", async () => {
+    render(
+      <MentionEditor
+        value=""
+        placeholder="message"
+        onChange={vi.fn()}
+        onMentionsChange={vi.fn()}
+        onPaste={vi.fn()}
+        onSend={vi.fn()}
+        onCompositionChange={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => expect(mocks.axiosGet).toHaveBeenCalledTimes(1));
+    mocks.axiosGet.mockResolvedValue({
+      data: {
+        workflows: [{
+          workflow_ref: "user:user-1:ppt-workflow-copy",
+          workflow_id: "ppt-workflow-copy",
+          name: "AI PPT 规划 副本",
+          description: "",
+        }],
+      },
+    });
+
+    const editor = screen.getByRole("textbox");
+    editor.textContent = "@workflow:";
+    const textNode = editor.firstChild;
+    if (!textNode) throw new Error("Mention editor did not create a text node");
+    const range = document.createRange();
+    range.setStart(textNode, textNode.textContent?.length || 0);
+    range.collapse(true);
+    window.getSelection()?.removeAllRanges();
+    window.getSelection()?.addRange(range);
+    fireEvent.input(editor);
+
+    expect(await screen.findByRole("option", { name: "AI PPT 规划 副本" })).toBeInTheDocument();
+    expect(mocks.axiosGet).toHaveBeenCalledTimes(2);
+  });
 });

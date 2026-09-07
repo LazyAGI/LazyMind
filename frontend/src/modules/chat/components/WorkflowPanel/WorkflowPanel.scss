@@ -937,6 +937,26 @@
     background: #fff;
   }
 
+  &__approval-bar {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 10px;
+    padding: 10px 12px;
+    border: 1px solid #fed7aa;
+    border-radius: 10px;
+    background: #fffaf3;
+  }
+
+  &__approval-label {
+    margin-right: auto;
+    color: #9a5b13;
+    font-size: 13px;
+    font-weight: 600;
+  }
+
   &__footer-document {
     display: flex;
     align-items: center;
@@ -2002,6 +2022,16 @@
     }
   }
 
+  &--video {
+    width: 100%;
+    position: relative;
+    background: #111827;
+
+    &:hover .workflow-slot__download-btn--overlay {
+      opacity: 1;
+    }
+  }
+
   // Top-right action group (upload + delete buttons)
   &__top-right-actions {
     position: absolute;
@@ -2297,6 +2327,15 @@
     max-width: 100%;
     border-radius: 6px;
     object-fit: contain;
+  }
+
+  &__video {
+    display: block;
+    width: 100%;
+    max-height: min(48dvh, 520px);
+    border-radius: 6px;
+    object-fit: contain;
+    background: #111827;
   }
 
   &__image-card-img {

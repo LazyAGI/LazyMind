@@ -22,6 +22,171 @@ def test_remote_executor_ignores_non_json_stream_frames():
 
 
 @pytest.mark.asyncio
+async def test_post_step_capability_check_runs_in_analysis_attempt_without_another_subagent(
+    monkeypatch, tmp_path,
+):
+    worker = RemoteWorkflowExecutor()
+
+    class Runtime:
+        events = []
+        completed = None
+
+        async def context(self, *_):
+            return {'metadata': {'task_id': 'task-analysis'}, 'inputs': {}}
+
+        async def execution_spec(self, *_):
+            return {
+                'task': {'input_slots': [], 'output_slots': ['workflow_routing']},
+                'workspace_path': str(tmp_path / 'task-analysis'),
+                'params': {
+                    'workflow_id': 'image-workflow',
+                    'revision_id': 'revision-1',
+                    'step_id': 'analyze_subject',
+                    'workflow_runtime': {'post_step_checks': [{
+                        'step_id': 'analyze_subject',
+                        'tool': 'check_image_workflow_capabilities',
+                        'arguments': {'workflow_routing': 'workflow_routing'},
+                    }]},
+                },
+                'steps': [], 'llm_config': {},
+            }
+
+        async def task_event(self, _client, _task, _lease, event):
+            self.events.append(event)
+
+        async def artifact(self, *_):
+            return None
+
+        async def progress(self, *_):
+            return None
+
+        async def complete(self, _client, _attempt, _lease, result):
+            self.completed = result
+
+        async def fail(self, *_):
+            pytest.fail('ready capability check must not fail the attempt')
+
+    subagent_runs = 0
+
+    async def stream(**_kwargs):
+        nonlocal subagent_runs
+        subagent_runs += 1
+        yield 'data: ' + json.dumps({
+            'type': 'artifact', 'slot': 'workflow_routing', 'content_type': 'text',
+            'seq': 1, 'value': {'text': 'WORKFLOW: CREATE_NEW\nREQUIRES: image_generator'},
+        }) + '\n\n'
+        yield 'data: {"type":"done","status":"succeeded","summary":"analyzed"}\n\n'
+
+    checked = []
+
+    def check_image_workflow_capabilities(workflow_routing):
+        checked.append(workflow_routing)
+        return {'status': 'ready', 'required': ['image_generator']}
+
+    from lazymind.chat.engine.subagent import runner
+    runtime = Runtime()
+    worker.runtime = runtime
+    monkeypatch.setattr(runner, 'run_subagent_stream', stream)
+    monkeypatch.setattr(runner, 'load_workflow_tools', lambda _params, _names: {
+        'check_image_workflow_capabilities': check_image_workflow_capabilities,
+    })
+
+    await worker._run_claim(
+        object(), {'attempt_id': 'attempt-1', 'lease_token': 'lease-1'},
+    )
+
+    assert subagent_runs == 1
+    assert checked == ['WORKFLOW: CREATE_NEW\nREQUIRES: image_generator']
+    assert runtime.completed['summary'] == 'analyzed'
+    assert [event['type'] for event in runtime.events] == [
+        'artifact', 'tool_calls', 'tool_results', 'done',
+    ]
+    assert runtime.events[2]['tool_results'][0]['result']['value']['status'] == 'ready'
+
+
+@pytest.mark.asyncio
+async def test_post_step_capability_failure_is_terminal_and_keeps_card_marker(
+    monkeypatch, tmp_path,
+):
+    worker = RemoteWorkflowExecutor()
+    marker = (
+        'MEDIA_CAPABILITY_DEPENDENCY_MISSING '
+        '{"status":"blocked","missing":[{"id":"video_generator"}]}'
+    )
+
+    class Runtime:
+        events = []
+        failure = ''
+
+        async def context(self, *_):
+            return {'metadata': {'task_id': 'task-analysis'}, 'inputs': {}}
+
+        async def execution_spec(self, *_):
+            return {
+                'task': {'input_slots': [], 'output_slots': ['workflow_routing']},
+                'workspace_path': str(tmp_path / 'task-analysis'),
+                'params': {
+                    'workflow_id': 'image-workflow', 'revision_id': 'revision-1',
+                    'step_id': 'analyze_subject',
+                    'workflow_runtime': {'post_step_checks': [{
+                        'step_id': 'analyze_subject',
+                        'tool': 'check_image_workflow_capabilities',
+                        'arguments': {'workflow_routing': 'workflow_routing'},
+                    }]},
+                },
+                'steps': [], 'llm_config': {},
+            }
+
+        async def task_event(self, _client, _task, _lease, event):
+            self.events.append(event)
+
+        async def artifact(self, *_):
+            return None
+
+        async def progress(self, *_):
+            return None
+
+        async def complete(self, *_):
+            pytest.fail('blocked capability check must not complete the attempt')
+
+        async def fail(self, _client, _attempt, _lease, message):
+            self.failure = message
+
+    async def stream(**_kwargs):
+        yield 'data: ' + json.dumps({
+            'type': 'artifact', 'slot': 'workflow_routing', 'content_type': 'text',
+            'seq': 1, 'value': {'text': 'WORKFLOW: CREATE_ANIMATED_MEME\nREQUIRES: video_generator'},
+        }) + '\n\n'
+        yield 'data: {"type":"done","status":"succeeded","summary":"analyzed"}\n\n'
+
+    def blocked(**_kwargs):
+        raise RuntimeError(marker)
+
+    from lazymind.chat.engine.subagent import runner
+    runtime = Runtime()
+    worker.runtime = runtime
+    monkeypatch.setattr(runner, 'run_subagent_stream', stream)
+    monkeypatch.setattr(runner, 'load_workflow_tools', lambda _params, _names: {
+        'check_image_workflow_capabilities': blocked,
+    })
+
+    await worker._run_claim(
+        object(), {'attempt_id': 'attempt-1', 'lease_token': 'lease-1'},
+    )
+
+    assert runtime.failure == marker
+    tool_result = next(
+        event for event in runtime.events if event['type'] == 'tool_results'
+    )
+    assert tool_result['tool_results'][0]['result'] == {
+        'ok': False, 'value': marker,
+    }
+    assert runtime.events[-1] == {
+        'type': 'error', 'status': 'failed', 'message': marker,
+    }
+
+
+@pytest.mark.asyncio
 async def test_remote_executor_persists_artifact_before_task_center_event(monkeypatch, tmp_path):
     worker = RemoteWorkflowExecutor()
 

@@ -27,6 +27,60 @@ func testRepo(t *testing.T) *Repository {
 	return repo
 }
 
+func TestWaitTaskStatusesReturnsConcreteFailureReason(t *testing.T) {
+	repo := testRepo(t)
+	if err := repo.db.AutoMigrate(&orm.SubAgentTask{}, &orm.SubAgentStep{}, &orm.WorkflowSessionStep{}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	taskID := "task-image"
+	summary := "image_generator: provider returned no generated image files"
+	if err := repo.db.Table("sub_agent_tasks").Create(map[string]any{
+		"id": taskID, "conversation_id": "conversation-1", "agent_type": "workflow_step",
+		"seq_in_conversation": 1, "title": "image-workflow:generate_image", "mode": "manual", "status": "failed",
+		"summary": summary, "last_heartbeat": now, "created_at": now, "updated_at": now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	step := orm.WorkflowSessionStep{
+		ID: "attempt-image", SessionID: "session-image", StepID: "generate_image",
+		Attempt: 1, TaskID: taskID, Status: "failed", Validity: "effective",
+		TerminalCode: "LAZYMIND_EXECUTION_FAILED", ResultJSON: `{}`,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := repo.db.Create(&step).Error; err != nil {
+		t.Fatal(err)
+	}
+	toolStep := orm.SubAgentStep{
+		ID: "tool-step-image", TaskID: taskID, Seq: 1, Role: "tool",
+		Content:   json.RawMessage(`{"tool_results":[{"name":"check_image_workflow_capabilities","result":{"ok":false,"value":"MEDIA_CAPABILITY_DEPENDENCY_MISSING {\"status\":\"blocked\",\"missing\":[{\"id\":\"video_generator\"}]}"}}]}`),
+		CreatedAt: now,
+	}
+	if err := repo.db.Create(&toolStep).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	statuses, err := repo.WaitTaskStatuses(t.Context(), step.SessionID, []string{taskID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `MEDIA_CAPABILITY_DEPENDENCY_MISSING {"status":"blocked","missing":[{"id":"video_generator"}]}`
+	if got := statuses[taskID].FailureReason; got != want {
+		t.Fatalf("failure reason = %q, want %q", got, want)
+	}
+}
+
+func TestAttemptFailureReasonFallsBackToHostedResult(t *testing.T) {
+	row := orm.WorkflowSessionStep{
+		Status:       "failed",
+		ResultJSON:   `{"error":"video_generator authentication failed"}`,
+		TerminalCode: "EXECUTION_FAILED",
+	}
+	if got := attemptFailureReason(row, nil, nil); got != "video_generator authentication failed" {
+		t.Fatalf("failure reason = %q", got)
+	}
+}
+
 func createTestConversation(t *testing.T, repo *Repository, id, owner string) {
 	t.Helper()
 	if err := repo.db.AutoMigrate(&orm.Conversation{}, &orm.WorkflowSession{}, &orm.TaskCenterTask{}); err != nil {
@@ -227,6 +281,7 @@ func TestCreateInitializedHostSessionRollsBackSessionIntentAndBindings(t *testin
 	_, created, err := repo.CreateInitializedHostSession(
 		t.Context(), "u1", "new-session", "conversation", "lazymind", "conversation", "lazymind",
 		WorkflowPackage{WorkflowID: "writer", WorkflowRef: "builtin:writer", RevisionID: "rev-1"},
+		"auto",
 		`{"text":"draft carefully"}`,
 		[]InputBinding{
 			{MaterialID: "valid", ResourceType: "input_resource", ResourceID: resource.ID,

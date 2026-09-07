@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional
 
 import lazyllm
 from lazyllm import LOG, AutoModel
+from lazyllm.tools.fs.client import FS
 from lazyllm.tools.agent.base import (
     TOOL_OBSERVATION_KEY,
     attachable_tool_observation,
@@ -51,7 +52,11 @@ from lazymind.chat.workflow.artifacts import build_artifact_context_section
 from lazymind.config import config as _cfg
 from lazymind.model_config import inject_model_config
 
-from . import SUBAGENT_ATTACHMENT_CONTEXT_KEY, SUBAGENT_CORE_TOOL_NAMES
+from . import (
+    SUBAGENT_ATTACHMENT_CONTEXT_KEY,
+    SUBAGENT_CORE_TOOL_NAMES,
+    SUBAGENT_SKILLS_CONTEXT_KEY,
+)
 from . import tools as subagent_tools
 from .context import LARGE_TOOL_RESULT_THRESHOLD, SubAgentContext, set_context
 from .db import MemorySubAgentStore, SubAgentDB
@@ -63,6 +68,13 @@ DRAFT_STREAM_EVENT_TYPES = frozenset({
     'artifact_stream_abort',
     'progress',
 })
+
+# Model runtimes commonly deliver one token (and sometimes one character) per
+# event. Forwarding every tiny delta all the way to React makes rendering cost
+# grow with the complete execution log. Keep SubAgent output live, but coalesce
+# adjacent text/think deltas into bounded UI updates.
+SUBAGENT_TEXT_STREAM_CHUNK_CHARS = 256
+SUBAGENT_TEXT_STREAM_MAX_LATENCY_SECONDS = 0.25
 
 
 def _publisher_owns_outputs(ctx: 'SubAgentContext') -> bool:
@@ -391,6 +403,7 @@ _STRUCTURED_PARAM_KEYS = {
     'remote_root', 'step_id', 'session_id', 'user_input', 'hand_off',
     'chat_session_id', 'workflow_mode', 'user_id', 'preflight_id',
     'legacy_tools', 'parent_agentic_config', 'filters',
+    SUBAGENT_SKILLS_CONTEXT_KEY,
 }
 
 
@@ -703,6 +716,18 @@ def _build_subagent_plan(
     available_tool_names = {
         str(getattr(tool, '__name__', '') or '') for tool in tools
     }
+    inherited_skills = (
+        [] if str(ctx.agent_type or '') == 'workflow_step'
+        else _coerce_str_list(ctx.params.get(SUBAGENT_SKILLS_CONTEXT_KEY))
+    )
+    skills_dir = None
+    if inherited_skills:
+        from lazymind.workflow_toolkit import workflow_skills_dir
+
+        skills_dir = ','.join(filter(None, [
+            str(_cfg['skill_fs_url'] or '').strip(),
+            workflow_skills_dir(),
+        ]))
     return AgentRunPlan(
         role=AgentRole.SUBAGENT,
         prompt=builder.build(),
@@ -711,6 +736,9 @@ def _build_subagent_plan(
         stop_tools=sorted(terminal_tool_names & available_tool_names),
         force_summarize_context=ctx.objective,
         execution_options=AgentExecutionOptions(
+            skills=inherited_skills or None,
+            fs=FS if inherited_skills else None,
+            skills_dir=skills_dir,
             extra_stop_condition=make_cancel_stop_condition(),
             max_retries=max(1, int(_cfg['agentic_expanded_max_rounds']) - 1),
             llm_config=llm_config or {},
@@ -901,10 +929,51 @@ async def run_subagent_stream(
     emitted: List[Dict[str, Any]] = []
     stream_events: asyncio.Queue[Dict[str, Any]] = asyncio.Queue()
     loop = asyncio.get_running_loop()
+    stream_merge_active = False
     clear_cancel_queue = True
     source_state: Dict[str, Any] = {}
     reset_citation_state(source_state)
     last_sources_snapshot = '[]'
+    outbound_text_type = ''
+    outbound_text = ''
+    outbound_text_started = 0.0
+
+    def _drain_outbound_text() -> Optional[Dict[str, Any]]:
+        nonlocal outbound_text_type, outbound_text, outbound_text_started
+        if not outbound_text_type or not outbound_text:
+            return None
+        event = {
+            'type': outbound_text_type,
+            'task_id': task_id,
+            outbound_text_type: outbound_text,
+        }
+        outbound_text_type = ''
+        outbound_text = ''
+        outbound_text_started = 0.0
+        return event
+
+    def _buffer_outbound_text(event_type: str, content: str) -> List[Dict[str, Any]]:
+        nonlocal outbound_text_type, outbound_text, outbound_text_started
+        if not content:
+            return []
+        ready: List[Dict[str, Any]] = []
+        now = time.monotonic()
+        if outbound_text_type and outbound_text_type != event_type:
+            event = _drain_outbound_text()
+            if event is not None:
+                ready.append(event)
+        if not outbound_text_type:
+            outbound_text_type = event_type
+            outbound_text_started = now
+        outbound_text += content
+        if (
+            len(outbound_text) >= SUBAGENT_TEXT_STREAM_CHUNK_CHARS
+            or now - outbound_text_started >= SUBAGENT_TEXT_STREAM_MAX_LATENCY_SECONDS
+        ):
+            event = _drain_outbound_text()
+            if event is not None:
+                ready.append(event)
+        return ready
 
     def _sources_event() -> Optional[Dict[str, Any]]:
         nonlocal last_sources_snapshot
@@ -916,11 +985,15 @@ async def run_subagent_stream(
         return {'type': 'sources', 'task_id': task_id, 'sources': sources}
 
     def _emit(ev: Dict[str, Any]) -> None:
-        if ev.get('type') in DRAFT_STREAM_EVENT_TYPES:
+        event_type = ev.get('type')
+        if (
+            event_type in DRAFT_STREAM_EVENT_TYPES
+            or (event_type == 'artifact' and stream_merge_active)
+        ):
             try:
                 loop.call_soon_threadsafe(stream_events.put_nowait, dict(ev))
             except RuntimeError as exc:
-                LOG.warning('[SubAgent] failed to enqueue Draft stream event: %s', exc)
+                LOG.warning('[SubAgent] failed to enqueue live tool event: %s', exc)
             return
         emitted.append(ev)
 
@@ -1075,13 +1148,22 @@ async def run_subagent_stream(
         # Accumulate streaming text/think chunks; flush to DB when a tool step follows or at end.
         _pending_text: str = ''
         _pending_think: str = ''
+        workflow_tool_in_flight = False
 
         executor = AgentExecutor()
+        # Package publisher tools can emit several durable artifacts during one
+        # long-running tool call (for example, one HTML artifact per completed
+        # PPT page). Route those events through the live queue while the Agent
+        # iterator is running instead of holding them until tool_results.
+        stream_merge_active = True
         merged_events = merge_agent_and_stream_events(
             executor.stream(llm, plan), stream_events,
         )
         async for source, merged_payload in merged_events:
             if source == 'stream':
+                pending_event = _drain_outbound_text()
+                if pending_event is not None:
+                    yield _sse(pending_event)
                 stream_event = dict(merged_payload)
                 stream_event['task_id'] = task_id
                 if stream_event.get('type') == 'progress':
@@ -1096,6 +1178,9 @@ async def run_subagent_stream(
                 tag = item.get('tag')
                 # Persist tool steps for resume / breakpoint recovery.
                 if tag in ('tool_calls', 'tool_results'):
+                    pending_event = _drain_outbound_text()
+                    if pending_event is not None:
+                        yield _sse(pending_event)
                     # Flush accumulated text/think as a single step before tool call.
                     if _pending_think:
                         ctx.db.append_step(task_id, step_seq, 'think', {'content': _pending_think})
@@ -1138,6 +1223,7 @@ async def run_subagent_stream(
                             if isinstance(tc, dict)
                         ]
                         if calls:
+                            workflow_tool_in_flight = effective_agent_type == 'workflow_step'
                             yield _sse({'type': 'tool_calls', 'task_id': task_id, 'tool_calls': calls})
                     elif tag == 'tool_results':
                         results = [
@@ -1151,6 +1237,7 @@ async def run_subagent_stream(
                         ]
                         if results:
                             yield _sse({'type': 'tool_results', 'task_id': task_id, 'tool_results': results})
+                        workflow_tool_in_flight = False
                         source_event = _sources_event()
                         if source_event is not None:
                             yield _sse(source_event)
@@ -1165,13 +1252,20 @@ async def run_subagent_stream(
                                     'current_phase': '执行中...'})
                 # Translate all events (text/think/tool_calls/tool_results) via shared translator.
                 for frame in translator.feed(item):
+                    # Tool calls/results already have compact structured SSE events. Some
+                    # workflow tools run nested streaming models (PPT page HTML is the
+                    # largest example); those internal tokens are implementation output,
+                    # not the SubAgent's user-facing execution log.
+                    if tag in ('tool_calls', 'tool_results') or workflow_tool_in_flight:
+                        continue
                     ev_type = 'think' if frame.get('think') else 'text'
-                    yield _sse({'type': ev_type, 'task_id': task_id,
-                                'think': frame.get('think'), 'text': frame.get('text')})
+                    content = frame.get(ev_type) or ''
+                    for buffered_event in _buffer_outbound_text(ev_type, content):
+                        yield _sse(buffered_event)
                     if ev_type == 'think':
-                        _pending_think += frame.get('think') or ''
+                        _pending_think += content
                     else:
-                        _pending_text += frame.get('text') or ''
+                        _pending_text += content
             else:  # 'final' -- AgentExecutor propagates future exceptions before yielding this.
                 final_result = payload
                 # Flush any remaining accumulated text/think as the final step.
@@ -1183,6 +1277,7 @@ async def run_subagent_stream(
                     ctx.db.append_step(task_id, step_seq, 'text', {'content': _pending_text})
                     step_seq += 1
                     _pending_text = ''
+        stream_merge_active = False
 
         # Drain remaining artifact events.
         while emitted:
@@ -1193,8 +1288,13 @@ async def run_subagent_stream(
         # Flush any buffered text/think from translator (e.g. citation scanning remainder).
         for frame in translator.finish(final_result):
             ev_type = 'think' if frame.get('think') else 'text'
-            yield _sse({'type': ev_type, 'task_id': task_id,
-                        'think': frame.get('think'), 'text': frame.get('text')})
+            content = frame.get(ev_type) or ''
+            for buffered_event in _buffer_outbound_text(ev_type, content):
+                yield _sse(buffered_event)
+
+        pending_event = _drain_outbound_text()
+        if pending_event is not None:
+            yield _sse(pending_event)
 
         source_event = _sources_event()
         if source_event is not None:
@@ -1265,6 +1365,9 @@ async def run_subagent_stream(
         yield 'data: [DONE]\n\n'
     except Exception as exc:  # noqa: BLE001
         LOG.exception('[SubAgent] run failed')
+        pending_event = _drain_outbound_text()
+        if pending_event is not None:
+            yield _sse(pending_event)
         source_event = _sources_event()
         if source_event is not None:
             yield _sse(source_event)

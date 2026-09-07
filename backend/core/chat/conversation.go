@@ -488,8 +488,9 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 	//   2. Frontend sent workflow_context → cross-check with DB; overwrite any stale fields
 	//      so Python always receives the ground-truth session_id / current_step.
 	//
-	// Resolve workflow_mode with correct priority:
-	//   request body > conversation DB (loaded via applyChatRuntimeConfigs) > global default
+	// Resolve workflow_mode for a new run with this priority:
+	//   request body > conversation DB (loaded via applyChatRuntimeConfigs) > global default.
+	// An existing Workflow Session overrides all three with its immutable launch mode below.
 	// applyChatRuntimeConfigs is called later, so we first apply it to get DB-resolved values,
 	// then override with any explicit body value.
 	if target.IsRegeneration && target.Existing != nil {
@@ -577,6 +578,12 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 
 		if activeSess, err := workflow.GetLatestSession(r.Context(), db, convID); err == nil &&
 			workflowSessionAvailableForRequest(activeSess, raw) {
+			// A Workflow's execution mode is selected when its Session is created.
+			// Conversation settings may change later, but cannot mutate an existing run.
+			workflowMode = "dynamic"
+			if activeSess.WorkflowMode == "auto" {
+				workflowMode = "auto"
+			}
 			refOrID := activeSess.WorkflowRef
 			if refOrID == "" {
 				refOrID = activeSess.WorkflowID
@@ -1612,9 +1619,10 @@ func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
 		}
 	}
 	if askPending != nil {
-		item["ask_pending"] = askPending
-		if askAnswered {
-			item["ask_answered"] = true
+		// ask_pending is an interaction request, not durable transcript content.
+		// Once answered, do not send it back and reopen a guide card in history.
+		if !askAnswered {
+			item["ask_pending"] = askPending
 		}
 		if askSavedAnswers != nil && !askAnswered {
 			item["ask_saved_answers"] = askSavedAnswers

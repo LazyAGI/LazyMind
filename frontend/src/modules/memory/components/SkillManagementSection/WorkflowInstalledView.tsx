@@ -1,12 +1,14 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Button, Empty, Input, Popconfirm, Radio, Select, Table, Tag, Tooltip, message } from 'antd';
-import { DeleteOutlined, EditOutlined, EyeOutlined, PlusOutlined } from '@ant-design/icons';
+import { CopyOutlined, DeleteOutlined, EditOutlined, EyeOutlined, PlusOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import type { SelectProps } from 'antd';
 import { useNavigate } from 'react-router-dom';
 import { getLocalizedTablePagination } from '@/components/ui/pagination';
 import {
   listWorkflowDrafts,
+  copyWorkflowDraft,
+  copyBuiltinWorkflow,
   deleteWorkflowDraft,
   updateWorkflowDraftContent,
   listBuiltinWorkflows,
@@ -54,6 +56,7 @@ export default function WorkflowInstalledView({
   const [callModeByRef, setCallModeByRef] = useState<Record<string, WorkflowCallMode>>({});
   const [callModePendingByRef, setCallModePendingByRef] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(false);
+  const [copyingRowKey, setCopyingRowKey] = useState('');
   const [page, setPage] = useState(1);
   const [searchInput, setSearchInput] = useState('');
   const [query, setQuery] = useState('');
@@ -92,6 +95,23 @@ export default function WorkflowInstalledView({
       message.success(t('admin.memoryWorkflowDeleteSuccess'));
       void loadList();
     } catch {
+    }
+  };
+
+  const handleCopy = async (row: WorkflowRow) => {
+    const rowKey = row._type === 'builtin' ? `builtin:${row.id}` : row.id;
+    setCopyingRowKey(rowKey);
+    try {
+      const copyName = t('admin.memoryWorkflowCopyName', { name: row.name });
+      const copied = row._type === 'builtin'
+        ? await copyBuiltinWorkflow(row.id, copyName)
+        : await copyWorkflowDraft(row.id, copyName);
+      message.success(t('admin.memoryWorkflowCopySuccess'));
+      navigate(`/memory-management/workflows/${copied.id}`);
+    } catch {
+      message.error(t('admin.memoryWorkflowCopyFailed'));
+    } finally {
+      setCopyingRowKey('');
     }
   };
 
@@ -312,18 +332,31 @@ export default function WorkflowInstalledView({
     {
       title: t('common.actions'),
       key: 'actions',
-      width: 96,
+      width: 120,
       render: (_: unknown, row: WorkflowRow) => {
         if (row._type === 'builtin') {
           return (
-            <Tooltip title={t('admin.memoryWorkflowActionView')}>
-              <Button
-                type="text"
-                size="small"
-                icon={<EyeOutlined />}
-                onClick={() => navigate(`/memory-management/workflows/builtin/${row.id}`)}
-              />
-            </Tooltip>
+            <div className="workflow-list-actions">
+              <Tooltip title={t('admin.memoryWorkflowActionView')}>
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<EyeOutlined />}
+                  onClick={() => navigate(`/memory-management/workflows/builtin/${row.id}`)}
+                />
+              </Tooltip>
+              <Tooltip title={t('admin.memoryWorkflowActionCopy')}>
+                <Button
+                  type="text"
+                  size="small"
+                  aria-label={t('admin.memoryWorkflowActionCopy')}
+                  icon={<CopyOutlined />}
+                  loading={copyingRowKey === `builtin:${row.id}`}
+                  disabled={Boolean(copyingRowKey)}
+                  onClick={() => void handleCopy(row)}
+                />
+              </Tooltip>
+            </div>
           );
         }
         return (
@@ -334,6 +367,17 @@ export default function WorkflowInstalledView({
                 size="small"
                 icon={<EditOutlined />}
                 onClick={() => openInfoModal(row)}
+              />
+            </Tooltip>
+            <Tooltip title={t('admin.memoryWorkflowActionCopy')}>
+              <Button
+                type="text"
+                size="small"
+                aria-label={t('admin.memoryWorkflowActionCopy')}
+                icon={<CopyOutlined />}
+                loading={copyingRowKey === row.id}
+                disabled={Boolean(copyingRowKey)}
+                onClick={() => void handleCopy(row)}
               />
             </Tooltip>
             <Popconfirm

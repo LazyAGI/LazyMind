@@ -86,8 +86,13 @@ runtime:
   publisher_owned_slots: [final]
   collects_knowledge: true
   completed_edit_step: f
+  completed_edit_routing: Route insertions to b before using the fallback.
   completed_continue_steps: [f]
   exclusive_tool_capabilities: [writer.create]
+  post_step_checks:
+    - step_id: b
+      tool: check_ready
+      arguments: {brief: b_result}
   clarification_fields:
     - id: topic
       label: Topic
@@ -107,8 +112,14 @@ runtime:
 	if !policy.CollectsKnowledge || policy.CompletedEditStep != "f" || len(policy.CompletedContinueSteps) != 1 || policy.CompletedContinueSteps[0] != "f" || len(policy.ExclusiveToolCapabilities) != 1 || policy.ExclusiveToolCapabilities[0] != "writer.create" || len(policy.PublisherOwnedSlots) != 1 || policy.PublisherOwnedSlots[0] != "final" {
 		t.Fatalf("runtime policy was not compiled: %#v", policy)
 	}
+	if policy.CompletedEditRouting != "Route insertions to b before using the fallback." {
+		t.Fatalf("completed edit routing was not compiled: %#v", policy)
+	}
 	if len(policy.ClarificationFields) != 2 || policy.ClarificationFields[0].ID != "topic" || policy.ClarificationFields[1].Choices[1] != "Minimal" || policy.ClarificationFields[1].ChoicePolicy != "subset" {
 		t.Fatalf("runtime clarification fields were not compiled: %#v", policy.ClarificationFields)
+	}
+	if len(policy.PostStepChecks) != 1 || policy.PostStepChecks[0].StepID != "b" || policy.PostStepChecks[0].Tool != "check_ready" || policy.PostStepChecks[0].Arguments["brief"] != "b_result" {
+		t.Fatalf("runtime post-step checks were not compiled: %#v", policy.PostStepChecks)
 	}
 }
 

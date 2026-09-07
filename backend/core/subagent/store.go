@@ -268,7 +268,7 @@ func AcceptFinalStatus(
 // SaveArtifact appends one artifact row for a task.
 func SaveArtifact(ctx context.Context, db *gorm.DB, taskID, key, contentType string, value json.RawMessage, seq int) error {
 	now := time.Now().UTC()
-	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return common.TransactionWithSQLiteBusyRetry(ctx, db, func(tx *gorm.DB) error {
 		var task orm.SubAgentTask
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Select("id", "status").

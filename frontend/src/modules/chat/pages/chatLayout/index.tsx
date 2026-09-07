@@ -924,6 +924,10 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
             requestAnimationFrame(() => chatRef.current?.focusInput?.());
           }
         }}
+        initialConversationSettings={conversationSettings}
+        hasWorkflowSession={hasWorkflowSession}
+        lockedWorkflowMode={workflowSession?.workflow_mode}
+        knowledgeRefreshKey={knowledgeRefreshKey}
         onRetained={handleSideChatRetained}
         canChat={canChat}
         embeddingReady={embeddingReady}

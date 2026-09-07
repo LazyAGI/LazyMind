@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"sort"
 	"strings"
 	"time"
 
@@ -178,116 +177,119 @@ type WorkflowChatContext struct {
 	HandOff             *bool
 }
 
-type handoffBatchStep struct {
-	StepID string
-	Status string
-}
+const workflowStepFeedbackSummaryLimit = 120
 
-func terminalWorkflowStepStatus(status string) bool {
-	return status == subagent.StatusSucceeded || status == subagent.StatusFailed ||
-		status == subagent.StatusInterrupted || status == subagent.StatusCanceled
-}
-
-func handoffStepName(stepID string, labels map[string]string) string {
-	label := strings.TrimSpace(labels[stepID])
-	if label == "" || label == stepID {
-		return stepID
+func workflowStepFeedbackName(ctx context.Context, db *gorm.DB, pctx *WorkflowChatContext) string {
+	if pctx == nil {
+		return "工作流步骤"
 	}
-	return fmt.Sprintf("%s（%s）", label, stepID)
-}
-
-func joinedHandoffStepNames(ids []string, labels map[string]string) string {
-	sort.Strings(ids)
-	names := make([]string, 0, len(ids))
-	for _, id := range ids {
-		names = append(names, handoffStepName(id, labels))
+	name := strings.TrimSpace(pctx.StepID)
+	if name == "" {
+		name = "工作流步骤"
 	}
-	return strings.Join(names, "、")
+	if db == nil || strings.TrimSpace(pctx.SessionID) == "" {
+		return name
+	}
+	var session orm.WorkflowSession
+	if db.WithContext(ctx).Where("id = ?", pctx.SessionID).First(&session).Error != nil {
+		return name
+	}
+	graph, err := loadSessionGraph(ctx, db, &session)
+	if err != nil {
+		return name
+	}
+	if node, ok := graph.Nodes[pctx.StepID]; ok && strings.TrimSpace(node.Label) != "" {
+		return strings.TrimSpace(node.Label)
+	}
+	return name
 }
 
-// appendHandoffHistorySummary writes once after every SubTask launched by the same handoff
-// turn is terminal. Parallel step statuses are merged into one concise history sentence.
-func appendHandoffHistorySummary(
+func compactWorkflowStepFeedbackSummary(summary string) string {
+	value := strings.TrimSpace(summary)
+	for _, marker := range []string{"\n执行路径", "\nExecution path", "\nExecution Path"} {
+		if index := strings.Index(value, marker); index >= 0 {
+			value = value[:index]
+		}
+	}
+	value = strings.Join(strings.Fields(value), " ")
+	value = strings.Trim(value, "#*- ")
+	if value == "" {
+		return ""
+	}
+	runes := []rune(value)
+	if len(runes) > workflowStepFeedbackSummaryLimit {
+		value = strings.TrimSpace(string(runes[:workflowStepFeedbackSummaryLimit])) + "…"
+	}
+	return strings.TrimRight(value, "。.!！；; ")
+}
+
+func buildWorkflowStepFeedback(
 	ctx context.Context,
 	db *gorm.DB,
 	pctx *WorkflowChatContext,
-	sessionCompleted bool,
-) error {
+	status, summary string,
+) string {
+	name := workflowStepFeedbackName(ctx, db, pctx)
+	detail := compactWorkflowStepFeedbackSummary(summary)
+	switch status {
+	case subagent.StatusSucceeded:
+		if detail == "" {
+			detail = "本步骤产出已保存"
+		}
+		return fmt.Sprintf("步骤「%s」已完成：%s。", name, detail)
+	case subagent.StatusInterrupted, subagent.StatusCanceled:
+		if detail == "" {
+			detail = "执行已停止"
+		}
+		return fmt.Sprintf("步骤「%s」已停止：%s。", name, detail)
+	default:
+		if detail == "" {
+			detail = "执行失败，暂无更多详情"
+		}
+		return fmt.Sprintf("步骤「%s」未完成：%s。", name, detail)
+	}
+}
+
+// appendWorkflowStepFeedback persists one concise user-facing completion note for
+// each terminal Workflow SubAgent. The task marker makes terminal-hook retries
+// idempotent. Inline executions are reported live but remain owned by the active
+// ChatAgent turn, which may still be writing the same history row.
+func appendWorkflowStepFeedback(
+	ctx context.Context,
+	db *gorm.DB,
+	pctx *WorkflowChatContext,
+	taskID, status, summary string,
+) (string, error) {
+	feedback := buildWorkflowStepFeedback(ctx, db, pctx, status, summary)
 	if db == nil || pctx == nil || strings.TrimSpace(pctx.TriggerHistoryID) == "" {
-		return nil
+		return feedback, nil
 	}
 	handOff := true
 	if pctx.HandOff != nil {
 		handOff = *pctx.HandOff
 	}
 	if !handOff {
-		return nil
-	}
-	labels := map[string]string{}
-	var session orm.WorkflowSession
-	if db.WithContext(ctx).Where("id = ?", pctx.SessionID).First(&session).Error == nil {
-		if graph, err := loadSessionGraph(ctx, db, &session); err == nil {
-			for id, node := range graph.Nodes {
-				labels[id] = node.Label
-			}
-		}
+		return feedback, nil
 	}
 
-	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var batch []handoffBatchStep
-		if err := tx.Table("plugin_session_steps AS steps"). // workflow-naming: persistence
-									Select("steps.step_id, steps.status").
-									Joins("JOIN sub_agent_tasks AS tasks ON tasks.id = steps.task_id").
-									Where("steps.session_id = ? AND steps.validity <> ? AND tasks.trigger_history_id = ?",
-				pctx.SessionID, "stale", pctx.TriggerHistoryID).
-			Scan(&batch).Error; err != nil {
-			return err
-		}
-		if len(batch) == 0 {
-			return nil
-		}
-		for _, step := range batch {
-			if !terminalWorkflowStepStatus(step.Status) {
-				return nil
-			}
-		}
-
+	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var history orm.ChatHistory
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("id = ? AND conversation_id = ?", pctx.TriggerHistoryID, pctx.ConvID).
 			First(&history).Error; err != nil {
 			return err
 		}
-		marker := fmt.Sprintf("<!-- workflow-handoff-summary:%s -->", pctx.TriggerHistoryID)
+		marker := fmt.Sprintf("<!-- workflow-step-feedback:%s -->", taskID)
 		if strings.Contains(history.Result, marker) {
 			return nil
 		}
-
-		groups := map[string][]string{}
-		for _, step := range batch {
-			groups[step.Status] = append(groups[step.Status], step.StepID)
-		}
-		parts := make([]string, 0, 4)
-		if ids := groups[subagent.StatusSucceeded]; len(ids) > 0 {
-			parts = append(parts, "已完成 "+joinedHandoffStepNames(ids, labels))
-		}
-		interrupted := append(groups[subagent.StatusInterrupted], groups[subagent.StatusCanceled]...)
-		if len(interrupted) > 0 {
-			parts = append(parts, "用户中断了 "+joinedHandoffStepNames(interrupted, labels))
-		}
-		if ids := groups[subagent.StatusFailed]; len(ids) > 0 {
-			parts = append(parts, "执行失败 "+joinedHandoffStepNames(ids, labels))
-		}
-		text := strings.Join(parts, "；") + "。"
-		if sessionCompleted {
-			text += " 工作流已完成。"
-		}
-		block := fmt.Sprintf("\n\n%s\n%s", marker, text)
+		block := fmt.Sprintf("\n\n%s\n%s", marker, feedback)
 		return tx.Model(&orm.ChatHistory{}).Where("id = ?", history.ID).Updates(map[string]any{
 			"result":      strings.TrimSpace(history.Result) + block,
 			"update_time": time.Now(),
 		}).Error
 	})
+	return feedback, err
 }
 
 func conversationPreflight(ctx context.Context, db *gorm.DB, convID string) (map[string]any, map[string]any) {
@@ -438,6 +440,7 @@ func launchWorkflowAttempt(
 				ConversationID: convID,
 				WorkflowID:     workflowID,
 				WorkflowRef:    params.WorkflowRef, WorkflowRevisionID: params.RevisionID, WorkflowRevisionNo: params.RevisionNo, WorkflowTreeHash: params.TreeHash, WorkflowRemoteRoot: params.RemoteRoot,
+				WorkflowMode:     params.WorkflowMode,
 				TriggerHistoryID: historyID,
 				CurrentStepID:    currentStepID,
 				CreateUserID:     userID,
@@ -711,8 +714,23 @@ func OnSubAgentDone(
 			}
 		}
 	}
-	if err := appendHandoffHistorySummary(ctx, db, pctx, sessionCompleted); err != nil {
-		fmt.Printf("[plugin] persist handoff history summary failed task=%s err=%v\n", taskID, err)
+	feedbackStatus := status
+	if stepFailed && status == subagent.StatusSucceeded {
+		feedbackStatus = subagent.StatusFailed
+	}
+	feedback, feedbackErr := appendWorkflowStepFeedback(ctx, db, pctx, taskID, feedbackStatus, summary)
+	if feedbackErr != nil {
+		fmt.Printf("[plugin] persist workflow step feedback failed task=%s err=%v\n", taskID, feedbackErr)
+	}
+	if pctx != nil && onSSE != nil {
+		onSSE("workflow_step_feedback", map[string]any{
+			"session_id": pctx.SessionID,
+			"step_id":    pctx.StepID,
+			"task_id":    taskID,
+			"history_id": pctx.TriggerHistoryID,
+			"status":     feedbackStatus,
+			"message":    feedback,
+		})
 	}
 
 	if stepFailed {

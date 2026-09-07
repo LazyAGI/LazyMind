@@ -9,6 +9,8 @@ const workflowApiMocks = vi.hoisted(() => ({
   listBuiltinWorkflows: vi.fn(),
   listUserWorkflowSettings: vi.fn(),
   setUserWorkflowCallMode: vi.fn(),
+  copyBuiltinWorkflow: vi.fn(),
+  copyWorkflowDraft: vi.fn(),
 }));
 
 vi.mock('@/modules/workflow/workflowDraftApi', () => ({
@@ -34,6 +36,10 @@ const labels: Record<string, string> = {
   'admin.memoryWorkflowCallModeUpdateFailed': '更新工作流调用方式失败',
   'admin.memoryWorkflowTypeBuiltin': '内置',
   'admin.memoryWorkflowActionView': '查看工作流',
+  'admin.memoryWorkflowActionCopy': '复制工作流',
+  'admin.memoryWorkflowCopyName': '{{name}} 副本',
+  'admin.memoryWorkflowCopySuccess': '工作流已复制',
+  'admin.memoryWorkflowCopyFailed': '复制工作流失败',
   'admin.memoryWorkflowSearchPlaceholder': '搜索工作流名称...',
   'admin.memoryWorkflowFilterAll': '全部',
   'admin.memoryWorkflowFilterBuiltin': '内置',
@@ -41,7 +47,13 @@ const labels: Record<string, string> = {
   'admin.memoryWorkflowEmptyNoResult': '没有工作流',
 };
 
-const t = (key: string) => labels[key] || key;
+const t = (key: string, options?: Record<string, unknown>) => {
+  let value = labels[key] || key;
+  Object.entries(options ?? {}).forEach(([name, replacement]) => {
+    value = value.replace(`{{${name}}}`, String(replacement));
+  });
+  return value;
+};
 
 beforeAll(() => {
   Object.defineProperty(window, 'matchMedia', {
@@ -131,6 +143,17 @@ describe('WorkflowInstalledView call mode', () => {
     await waitFor(() => {
       expect(workflowApiMocks.setUserWorkflowCallMode).toHaveBeenCalledWith('builtin:image-workflow', 'disabled');
       expect(combobox.closest('.ant-select')).toHaveTextContent('仅手动调用');
+    });
+  });
+
+  it('copies a built-in workflow into an editable draft', async () => {
+    workflowApiMocks.copyBuiltinWorkflow.mockResolvedValue({ id: 'new-draft-id' });
+    renderView();
+
+    fireEvent.click(await screen.findByRole('button', { name: '复制工作流' }));
+
+    await waitFor(() => {
+      expect(workflowApiMocks.copyBuiltinWorkflow).toHaveBeenCalledWith('image-workflow', 'AI 图片生成 副本');
     });
   });
 });

@@ -919,6 +919,12 @@ func TestSidechatNextRequestIsMutuallyExclusiveAndIdempotent(t *testing.T) {
 		t.Fatalf("create sidechat: %v", err)
 	}
 	mockEmptyChatScan(t)
+	authService := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"items":[]}}`))
+	}))
+	t.Cleanup(authService.Close)
+	t.Setenv("LAZYMIND_AUTH_SERVICE_URL", authService.URL)
 
 	var upstreamCalls atomic.Int32
 	firstStarted := make(chan struct{})

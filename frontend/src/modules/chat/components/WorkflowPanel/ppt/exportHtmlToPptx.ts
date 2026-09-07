@@ -49,6 +49,19 @@ const PREVIEW_STATIC_STYLE =
   'animation-duration:0s!important;' +
   'transition:none!important;' +
   'scroll-behavior:auto!important;' +
+  'backdrop-filter:none!important;' +
+  '-webkit-backdrop-filter:none!important;' +
+  'mix-blend-mode:normal!important;' +
+  'background-blend-mode:normal!important;' +
+  '}' +
+  '*::before,*::after{filter:none!important;}' +
+  'html,body,.wrapper{isolation:isolate!important;}' +
+  'svg [filter]{filter:none!important;}' +
+  'object,embed,iframe,video,svg foreignObject,' +
+  '[data-lazymind-unsupported-visual]{' +
+  'opacity:0!important;' +
+  'visibility:hidden!important;' +
+  'background:transparent!important;' +
   '}' +
   'html,body,body *{cursor:pointer!important;}' +
   '</style>';
@@ -60,6 +73,19 @@ const PREVIEW_STATIC_TAIL =
   'animation:none!important;' +
   'animation-duration:0s!important;' +
   'transition:none!important;' +
+  'backdrop-filter:none!important;' +
+  '-webkit-backdrop-filter:none!important;' +
+  'mix-blend-mode:normal!important;' +
+  'background-blend-mode:normal!important;' +
+  '}' +
+  '*::before,*::after{filter:none!important;}' +
+  'html,body,.wrapper{isolation:isolate!important;}' +
+  'svg [filter]{filter:none!important;}' +
+  'object,embed,iframe,video,svg foreignObject,' +
+  '[data-lazymind-unsupported-visual]{' +
+  'opacity:0!important;' +
+  'visibility:hidden!important;' +
+  'background:transparent!important;' +
   '}' +
   'html,body,body *{cursor:pointer!important;}' +
   '</style>';
@@ -108,6 +134,70 @@ const RASTER_SAFE_STYLE =
 /** 1×1 transparent GIF — used when relative/remote images 404 during capture. */
 const TRANSPARENT_PIXEL =
   'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+
+const UNSUPPORTED_VISUAL_ATTRIBUTE = 'data-lazymind-unsupported-visual';
+
+function suppressVisualElement(element: Element, reason: string): void {
+  element.setAttribute(UNSUPPORTED_VISUAL_ATTRIBUTE, reason);
+  const styledElement = element as Element & { style?: CSSStyleDeclaration };
+  if (styledElement.style?.setProperty) {
+    // Keep the box in layout so a failed decorative renderer cannot reflow the
+    // slide. Duck typing is intentional: iframe nodes belong to another realm,
+    // so parent-window instanceof HTMLElement checks would reject them. Inline
+    // styles also survive html-to-image's deep SVG clone path.
+    styledElement.style.setProperty('opacity', '0', 'important');
+    styledElement.style.setProperty('visibility', 'hidden', 'important');
+    styledElement.style.setProperty('background', 'transparent', 'important');
+  }
+}
+
+/**
+ * Disable visual primitives that Chromium/html-to-image cannot snapshot
+ * reliably. A missing decoration is preferable to an opaque black rectangle.
+ * The source HTML is not changed; fallbacks only affect this preview document.
+ */
+export function applyHtmlPreviewCompatibilityFallbacks(doc: Document): number {
+  let fallbackCount = 0;
+  const suppress = (element: Element, reason: string) => {
+    if (element.hasAttribute(UNSUPPORTED_VISUAL_ATTRIBUTE)) return;
+    suppressVisualElement(element, reason);
+    fallbackCount += 1;
+  };
+
+  doc.querySelectorAll('object, embed, iframe, video').forEach((element) => {
+    suppress(element, element.tagName.toLowerCase());
+  });
+  doc.querySelectorAll('svg foreignObject').forEach((element) => {
+    suppress(element, 'svg-foreign-object');
+  });
+
+  doc.querySelectorAll<HTMLCanvasElement>('canvas').forEach((canvas) => {
+    try {
+      // A canvas with an existing WebGL/WebGPU context returns null for 2d.
+      // Those buffers commonly serialize as opaque black when cloned.
+      if (!canvas.getContext('2d')) {
+        suppress(canvas, 'non-2d-canvas');
+        return;
+      }
+      // Tainted and over-sized canvases throw or return the empty data URL.
+      if (canvas.toDataURL() === 'data:,') suppress(canvas, 'unserializable-canvas');
+    } catch {
+      suppress(canvas, 'unserializable-canvas');
+    }
+  });
+
+  const win = doc.defaultView;
+  if (win) {
+    doc.querySelectorAll<HTMLElement | SVGElement>('html, body, body *').forEach((element) => {
+      const computed = win.getComputedStyle(element);
+      if (/\bblur\(/i.test(computed.filter || '')) {
+        element.style.setProperty('filter', 'none', 'important');
+        fallbackCount += 1;
+      }
+    });
+  }
+  return fallbackCount;
+}
 
 /** Prepare slide HTML for html-to-image (static fonts/images; keep chart scripts). */
 export function htmlForRasterCapture(html: string): string {
@@ -350,11 +440,21 @@ function captureOptions(pixelRatio: number) {
     height: SLIDE_H_PX,
     cacheBust: true,
     skipFonts: true,
-    backgroundColor: '#0f172a',
+    // Transparent or suppressed unsupported regions should reveal a neutral
+    // canvas, not the old dark-navy fallback that looked like a render failure
+    // on light slides.
+    backgroundColor: '#ffffff',
     pixelRatio,
     imagePlaceholder: TRANSPARENT_PIXEL,
     // Broken imgs used to reject the whole capture as a DOM Event → "[object Event]".
     onImageErrorHandler: (() => undefined) as OnErrorEventHandler,
+    // html-to-image calls canvas.toDataURL before cloning styles. Exclude a
+    // canvas/embed that compatibility checks already found unsafe, otherwise a
+    // tainted canvas can still fail or paint black despite visibility:hidden.
+    filter: ((node: HTMLElement) => (
+      typeof node?.getAttribute !== 'function'
+      || !node.getAttribute(UNSUPPORTED_VISUAL_ATTRIBUTE)
+    )),
     style: {
       transform: 'none',
       margin: '0',
@@ -406,6 +506,8 @@ export async function captureHtmlSlidePng(
       timeoutMs: options?.timeoutMs ?? (needsJs ? 8000 : 2000),
       settleMs: options?.waitMs ?? (needsJs ? 280 : 120),
     });
+    applyHtmlPreviewCompatibilityFallbacks(doc);
+    await waitForAnimationFrames(doc.defaultView, 1);
     return await toPngSafe(wrapper, { pixelRatio });
   } finally {
     iframe.remove();
