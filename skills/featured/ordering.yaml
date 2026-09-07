@@ -12,6 +12,7 @@ home:
     - document-refinement
     - doc-coauthoring
     - tailored-resume-generator
+    - diagram-design
   work:
     - ppt-workflow
     - image-workflow
