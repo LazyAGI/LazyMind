@@ -10,14 +10,14 @@ classification:
 
 presentation:
   card:
-    title: Tailored resume assistant
+    title: Resume optimization assistant
     description: Reframe relevant experience for a target role while keeping every claim truthful
     output_type: document
     output_label: Tailored resume
     cover_asset: cover
     result_summary: Explore job requirements, experience matching, resume edits, and evidence gaps
   detail:
-    title: Tailored resume assistant
+    title: Resume optimization assistant
     description: Analyze a specific job description, identify its priorities, reorganize real experience into a better-matched resume, and check ATS keywords and structure. Separate supported evidence, information to add, and terms that should not be forced into the resume. Never invent experience. Sourced from awesome-claude-skills and adapted for LazyMind.
     attachment_hint: A target job description, current resume, work history, project outcomes, or career-transition context
 
@@ -30,7 +30,9 @@ tasks:
     launch:
       prompt_short: Can you tailor my resume for this job?
       prompt: >-
-        I am applying for a product manager role at a SaaS company, and I have the job description and my resume below. First pull out what the role cares about most, then adjust the emphasis using only my real experience. Flag missing evidence instead of making it up, and give me a version I can keep editing.
+        Directly turn the materials below into a resume for a SaaS product manager role without asking me for more information first. Use only the materials in this message, not other candidate information from earlier context. Start by extracting the job priorities, then reorder my real experience around them. Return the job priorities, experience matches, a revised summary and experience bullets, and evidence to add. Mark unsupported numbers, responsibilities, team details, or skills as “To add” instead of inventing them, and do not present target-role requirements as experience I already have.
+
+        Known context: the target role is SaaS product manager; I have B2B SaaS and enterprise knowledge-base Q&A project experience, coordinated a four-person team to launch the first version, and improved first-answer hit rate from 62% to 78%; user interviews, pricing experience, and growth results have not been provided.
     replay:
       steps:
         - title: Read the job requirements
@@ -58,7 +60,9 @@ tasks:
     launch:
       prompt_short: I want to move into product management. How should I frame my experience?
       prompt: >-
-        I work in marketing operations and want to apply for product manager roles. Here is the job description and my experience. Help me find the transferable skills, then rewrite my summary and project experience. Ask when something is unclear, and do not turn work I have not done into experience.
+        Directly turn the marketing-operations experience below into a transition resume for product manager roles without asking me for more information first. Use only the materials in this message, not other candidate information from earlier context. Start with transferable skills and the evidence boundary, then provide a draft summary, project experience, information to add, and claims not to exaggerate. Mark unprovided experience, responsibilities, or technical details as “To add” instead of presenting transferable skills as product work I have already done.
+
+        Known context: I have four years of marketing-operations experience and ran one new-user growth campaign; user interviews revealed an activation problem, I coordinated design and sales to adjust the flow, and registration conversion improved by 18%; whether I joined product-solution or feature-priority decisions has not been confirmed.
     replay:
       steps:
         - title: Confirm the transition goal
@@ -86,7 +90,9 @@ tasks:
     launch:
       prompt_short: Can you check whether this resume is ATS-friendly?
       prompt: >-
-        Here is the job description and my current resume. Check the keywords, role match, and format. Separate suggestions into wording I can change now, evidence I need to add, and things I should not force in just to match keywords. Then give me a concise revised version.
+        Directly check whether the product-manager resume and job description below are ATS-friendly without asking me for more information first. Use only the materials in this message, not other candidate information from earlier context. Start with keyword alignment and structure checks, then separate edits I can make now, evidence to add, and terms not to force. Finish with a concise revised version; do not add keywords, responsibilities, or technical details without real experience behind them, and do not treat job-description requirements as existing skills.
+
+        Known context: the resume includes product planning, user research, data analysis, and B2B knowledge-base product experience, with standard headings, reverse-chronological experience, and ordinary bullets; the job description’s SQL and pricing keywords currently have no supporting evidence.
     replay:
       steps:
         - title: Extract role keywords
