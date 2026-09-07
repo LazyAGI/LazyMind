@@ -8,8 +8,6 @@ import lazyllm
 from lazyllm import AutoModel
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-from lazymind.chat.engine.agent_runtime.budget import parse_token_limit
-from lazymind.chat.engine.agent_runtime.context_estimator import estimate_tokens
 from lazymind.model_config import get_model_role_runtime_identity
 
 
@@ -82,17 +80,10 @@ def describe_opening(request):
     timeout = int(request.options.get('timeout_seconds', 60))
     if timeout <= 0:
         raise OpeningTaskError('invalid_task_config')
-    estimated = estimate_tokens(prompt)
     selected = request.llm_config.get('llm')
-    capacity = parse_token_limit((selected or {}).get('max_input_tokens'))
     identity = ({'role': 'llm', 'source': selected.get('source', ''), 'model': selected.get('model', '')}
                 if selected else get_model_role_runtime_identity('llm'))
-    usage = {'estimated_input_tokens': estimated, 'token_count_source': 'estimate',
-             'safety_margin_tokens': max(256, estimated // 10), 'context_capacity': capacity,
-             'context_capacity_source': 'model_config' if capacity else 'provider',
-             'output_budget_tokens': None, 'model_id': identity, 'truncated': False}
-    if capacity and estimated + usage['safety_margin_tokens'] > capacity:
-        raise OpeningTaskError('input_too_large', usage=usage)
+    usage = {'model_id': identity, 'truncated': False}
     try:
         model = (AutoModel(source='dynamic', type='llm', name='llm', dynamic_auth=True)
                  if selected else AutoModel(model='llm'))

@@ -378,7 +378,56 @@ func TestOpeningEligibilityAndArchiveDuringCall(t *testing.T) {
 	}
 }
 
-func TestOpeningRealModelCapacityFallback(t *testing.T) {
+func TestOpeningBackfillReadsOriginalHistoryAfterCompression(t *testing.T) {
+	s := openingTestService(t)
+	conv := openingTestConversation(t, s, "compressed", "设计销售报表", "unknown")
+	inputs := []string{"设计销售报表", "按月份汇总", "只给方案，暂不实施", "后来改为排查登录故障"}
+	for i, input := range inputs {
+		openingTestInput(t, s, fmt.Sprintf("compressed-h%d", i+1), conv.ID, input, i+1)
+	}
+	handleModelContextUpdated(t.Context(), s.db, conv.ID, &ModelContextUpdatedEvent{
+		SummaryText: "当前正在排查登录故障", CoveredThroughSeq: 3, Version: 1,
+	})
+	modelContext := loadModelContext(t.Context(), s.db, conv.ID)
+	if modelContext == nil || modelContext.CoveredThroughSeq != 3 {
+		t.Fatal("compressed context was not persisted", modelContext)
+	}
+	var histories []orm.ChatHistory
+	if err := s.db.Where("conversation_id = ?", conv.ID).Order("seq").Find(&histories).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(histories) != 4 || len(buildModelHistoryMessages(histories, nil, modelContext)) != 3 {
+		t.Fatal("expected original history plus a separate compressed model view")
+	}
+	s.call = func(_ context.Context, input json.RawMessage, _ map[string]any, _ int) (algo.OpeningTaskResult, error) {
+		for _, original := range inputs[:3] {
+			if !strings.Contains(string(input), original) {
+				t.Fatalf("opening message lost after compression: %s", input)
+			}
+		}
+		if strings.Contains(string(input), "登录故障") {
+			t.Fatalf("compressed summary or later task entered opening: %s", input)
+		}
+		return openingTestResult("ready"), nil
+	}
+	if queued, err := s.enqueue(t.Context(), conv.ID, "history-batch"); err != nil || !queued {
+		t.Fatal("historical opening was not queued", err)
+	}
+	if _, err := openingTestRun(t, s, conv.ID); err != nil {
+		t.Fatal(err)
+	}
+	if meta := openingTestMeta(t, s, conv.ID); meta.Status != "done" || meta.OpeningTurns != 3 || meta.CallCount != 1 {
+		t.Fatal("compressed history backfill failed", meta)
+	}
+	handleModelContextUpdated(t.Context(), s.db, conv.ID, &ModelContextUpdatedEvent{
+		SummaryText: "登录故障已经修复", CoveredThroughSeq: 4, Version: 1,
+	})
+	if queued, err := s.enqueue(t.Context(), conv.ID, "history-batch"); err != nil || queued {
+		t.Fatal("later compression reopened the original intent", err)
+	}
+}
+
+func TestOpeningRealModelDescription(t *testing.T) {
 	url := os.Getenv("OPENING_MODEL_URL")
 	if url == "" {
 		t.Skip("opt-in real model acceptance")
@@ -387,8 +436,7 @@ func TestOpeningRealModelCapacityFallback(t *testing.T) {
 	s.loadConfig = func(context.Context, *gorm.DB, string) (map[string]any, error) {
 		model := os.Getenv("OPENING_MODEL_NAME")
 		return map[string]any{
-			"conversation_metadata": map[string]any{"source": "openai", "model": model, "base_url": url, "skip_auth": true, "max_input_tokens": 32},
-			"llm":                   map[string]any{"source": "openai", "model": model, "base_url": url, "skip_auth": true, "max_input_tokens": 262144},
+			"conversation_metadata": map[string]any{"source": "openai", "model": model, "base_url": url, "skip_auth": true},
 		}, nil
 	}
 	s.call = algo.DescribeConversationOpening
@@ -397,15 +445,12 @@ func TestOpeningRealModelCapacityFallback(t *testing.T) {
 	if _, err := s.enqueue(context.Background(), "real", ""); err != nil {
 		t.Fatal(err)
 	}
-	if result, err := openingTestRun(t, s, "real"); err == nil || result.Permanent {
-		t.Fatal("capacity fallback missing", result, err)
-	}
 	if _, err := openingTestRun(t, s, "real"); err != nil {
 		t.Fatal(err)
 	}
 	meta := openingTestMeta(t, s, "real")
 	if meta.Status != "done" || meta.CallCount != 1 || !strings.Contains(meta.Summary, "倒排索引") {
-		t.Fatal("real fallback failed", meta)
+		t.Fatal("real description failed", meta)
 	}
-	t.Logf("real fallback: calls=%d summary=%s usage=%s", meta.CallCount, meta.Summary, meta.UsageJSON)
+	t.Logf("real description: calls=%d summary=%s usage=%s", meta.CallCount, meta.Summary, meta.UsageJSON)
 }

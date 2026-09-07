@@ -6,6 +6,7 @@ from lazyllm.module.llms.onlinemodule.base.model_outcome import (
     ModelFailureOrigin, ModelFinish,
 )
 from lazymind.chat.service import conversation_opening as opening
+from lazymind.chat.service import llm_task
 from lazymind.chat.service.llm_task import LLMTaskRequest
 
 
@@ -24,13 +25,16 @@ def test_complete_output_and_single_call(monkeypatch):
         calls.append((prompt, options))
         return output()
     monkeypatch.setattr(opening, 'AutoModel', lambda **_: model)
+    monkeypatch.setattr(llm_task, 'inject_model_config', lambda _: None)
     monkeypatch.setattr(opening, 'get_model_role_runtime_identity', lambda _: {'model': 'test'})
-    description, usage = opening.describe_opening(request(llm_config={'llm': {'max_input_tokens': 32000}}))
-    assert description['intent_status'] == 'ready'
+    result = llm_task.run_llm_task(request(llm_config={'llm': {'max_input_tokens': 32000}}))
+    assert result.status == 'succeeded'
+    assert result.output['intent_status'] == 'ready'
     assert len(calls) == 1
     assert calls[0][1]['max_retries'] == 1
     assert 'max_tokens' not in calls[0][1]
-    assert usage['model_calls'] == 1
+    assert 'max_completion_tokens' not in calls[0][1]
+    assert result.usage['model_calls'] == 1
 
 
 @pytest.mark.parametrize('raw', [output()[:-2], output(extra='not allowed'),
@@ -49,9 +53,9 @@ def test_invalid_output_is_not_repaired_or_retried(monkeypatch, raw):
     assert len(calls) == 1
 
 
-def test_input_capacity_preflight_preserves_long_text(monkeypatch):
+def test_long_input_is_forwarded_without_estimated_capacity_rejection(monkeypatch):
     text = '资料内容\n' * 20000 + '最后要求：计算年度销售额'
-    req = LLMTaskRequest(input={'text': text}, llm_config={'llm': {'max_input_tokens': 256000}})
+    req = LLMTaskRequest(input={'text': text}, llm_config={'llm': {'max_input_tokens': 4096}})
     seen = []
     def model(prompt, **_):
         seen.append(prompt)
@@ -60,17 +64,7 @@ def test_input_capacity_preflight_preserves_long_text(monkeypatch):
     monkeypatch.setattr(opening, 'get_model_role_runtime_identity', lambda _: {})
     opening.describe_opening(req)
     assert text.replace('\n', '\\n') in seen[0]
-    req.llm_config['llm']['max_input_tokens'] = 4096
-    with pytest.raises(opening.OpeningTaskError) as error:
-        opening.describe_opening(req)
-    assert error.value.code == 'input_too_large'
-    assert error.value.calls == 0
     assert len(seen) == 1
-    req.llm_config = {}
-    _, usage = opening.describe_opening(req)
-    assert usage['context_capacity'] is None
-    assert usage['output_budget_tokens'] is None
-    assert len(seen) == 2
 
 
 @pytest.mark.parametrize('code,status,retryable,expected', [
