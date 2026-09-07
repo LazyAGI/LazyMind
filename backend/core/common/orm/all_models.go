@@ -21,6 +21,8 @@ func AllModelsForDDL() []interface{} {
 		&AgentInvocation{},
 		&MultiAnswersSwitch{},
 		&Conversation{},
+		&ConversationForkOrigin{},
+		&ConversationForkRequest{},
 		&ExternalAgentBinding{},
 		&ExternalAgentSession{},
 		&ConversationArchiveFolder{},

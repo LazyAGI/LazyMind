@@ -11,7 +11,7 @@ import type { ThinkingDepth } from "@/modules/chat/store/chatThink";
 import type { ChatModelRoute } from "@/api/generated/core-client";
 
 export interface ChatImperativeProps {
-  replaceMessageList: (id: string, data: any[]) => void;
+  replaceMessageList: (id: string, data: any[], preserveScroll?: boolean) => void;
   createNewChat: () => void;
   sendMessage: (params: SendMessageParams) => void;
   prepareMessage: (
@@ -34,6 +34,8 @@ export interface ChatImperativeProps {
 }
 
 export interface ChatContainerProps {
+  onFork?: (historyId: string) => void;
+  forkPending?: boolean;
   canChat?: boolean;
   initialCard?: ReactNode;
   sessionId?: string;

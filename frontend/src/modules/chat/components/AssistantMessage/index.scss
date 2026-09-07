@@ -357,6 +357,23 @@
   }
 }
 
+.chat-fork-action {
+  display: inline-flex;
+
+  .tool-btn {
+    border: none;
+    padding: 0;
+    width: 16px;
+    min-width: auto;
+
+    svg {
+      width: 16px;
+      height: 16px;
+      font-size: 16px;
+    }
+  }
+}
+
 .chat-source-button-label {
   color: inherit;
   font-weight: 500;

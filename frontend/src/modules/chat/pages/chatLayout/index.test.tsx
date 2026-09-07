@@ -46,7 +46,12 @@ vi.mock("react-i18next", () => ({
   }),
 }));
 
+vi.mock("@/modules/chat/components/ForkConversation/ForkStatus", () => ({ default: () => null }));
+vi.mock("@/modules/chat/components/ForkConversation/useForkConversation", () => ({ useForkConversation: () => ({ begin: vi.fn() }) }));
+
 vi.mock("react-router-dom", () => ({
+  useLocation: () => ({ key: "test", pathname: "/chat", search: "" }),
+  useNavigate: () => vi.fn(),
   Link: ({ to, children, ...props }: any) => (
     <a href={to} {...props}>
       {children}
@@ -71,7 +76,8 @@ vi.mock("@/components/request", () => ({
 }));
 
 vi.mock("@/components/auth", () => ({
-  AgentAppsAuth: { getAuthHeaders: () => ({}) },
+  AgentAppsAuth: { getAuthHeaders: () => ({}), getUserInfo: () => ({ userId: "test-user" }) },
+  AUTH_USER_CHANGE_EVENT: "lazymind:user-change",
 }));
 
 vi.mock("@/modules/chat/components/newChatContainer", () => ({
@@ -475,6 +481,19 @@ describe("ChatLayout conversation loading", () => {
       "lazymind:chat-conversation-list-refresh",
       refreshed,
     );
+  });
+
+  it("keeps fork thinking depth local and clears it when starting a new conversation", async () => {
+    mocks.getConversationDetail.mockResolvedValue({ data: { conversation: { conversation_id: "fork", thinking_depth: "high", search_config: {}, settings: { chat_executor: "lazymind" }, fork_origin: { source_conversation_id: "source", source_history_id: "h1", source_status: "available", can_locate: true } } } });
+    const props = { setIsChatContent: vi.fn(), initchatConfig: {}, setChatConfigFn: vi.fn(), canChat: true };
+    const { rerender } = render(<ChatLayout {...props} conversationId="fork" />);
+    await waitFor(() => expect(mocks.latestChatContainerProps.thinkingDepth).toBe("high"));
+    expect(mocks.setThinkingDepth).not.toHaveBeenCalled();
+    act(() => mocks.latestChatContainerProps.onThinkingDepthChange("low"));
+    expect(mocks.latestChatContainerProps.thinkingDepth).toBe("low");
+    expect(mocks.setThinkingDepth).not.toHaveBeenCalled();
+    rerender(<ChatLayout {...props} conversationId="" />);
+    await waitFor(() => expect(mocks.latestChatContainerProps.thinkingDepth).toBeUndefined());
   });
 
   it("keeps execution configuration available for a fork child", async () => {

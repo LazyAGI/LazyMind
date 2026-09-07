@@ -3,9 +3,9 @@ package main
 func manualOpenAPISpec() map[string]any {
 	return map[string]any{
 		"components": map[string]any{
-			"schemas": manualSchemas(),
+			"schemas": forkOpenAPISchemas(manualSchemas()),
 		},
-		"paths": manualPaths(),
+		"paths": forkOpenAPIPaths(manualPaths()),
 	}
 }
 
@@ -616,10 +616,11 @@ func manualSchemas() map[string]any {
 			prop("selection_version", int64Schema()),
 		),
 		"ConversationHistoryItem": obj(
+			prop("fork_read_only", boolSchema()),
 			prop("seq", intSchema()), prop("query", strSchema()), prop("result", strSchema()), prop("id", strSchema()), prop("feed_back", intSchema()), prop("sources", array(obj())), prop("input", array(obj())), prop("reasoning_content", strSchema()), prop("thinking_time_s", int64Schema()), prop("reason", strSchema()), prop("expected_answer", strSchema()), prop("create_time", strSchema()), prop("run_id", strSchema()), prop("run_status", strSchema()), prop("run_terminal", refSchema("RunTerminal")), prop("failed_attempts", array(refSchema("FailedRunAttempt"))), prop("execution", refSchema("ExternalExecutionProjection")), prop("model_route", refSchema("ChatModelRoute")),
 		),
 		"ConversationDetailResponse":      obj(prop("conversation", refSchema("ConversationDetailItem"))),
-		"ConversationHistoryListResponse": obj(prop("conversation_id", strSchema()), prop("name", strSchema()), prop("history", array(refSchema("ConversationHistoryItem"))), prop("total_size", int64Schema()), prop("next_page_token", strSchema())),
+		"ConversationHistoryListResponse": obj(prop("older_page_token", strSchema()), prop("newer_page_token", strSchema()), prop("conversation_id", strSchema()), prop("name", strSchema()), prop("history", array(refSchema("ConversationHistoryItem"))), prop("total_size", int64Schema()), prop("next_page_token", strSchema())),
 		"ConversationTrailItem": obj(
 			prop("history_id", strSchema()), prop("seq", intSchema()), prop("summary", strSchema()), prop("question", strSchema()), prop("depth", intSchema()), prop("parent_history_id", strSchema()), prop("source", strSchema()), prop("create_time", strSchema()),
 		),
@@ -705,6 +706,9 @@ func conversationItemSchema(includeSourceContext bool) map[string]any {
 		prop("name", strSchema()),
 		prop("conversation_id", strSchema()),
 		prop("display_name", strSchema()),
+		prop("fork_origin", nullableSchema(refSchema("ConversationForkOrigin"))),
+		prop("fork_capability", refSchema("ConversationForkCapability")),
+		prop("has_fork_descendants", boolSchema()),
 		prop("search_config", obj()),
 		prop("user", strSchema()),
 		prop("chat_times", int64Schema()),
@@ -1189,6 +1193,8 @@ func queryParams(params ...map[string]any) []map[string]any { return params }
 
 func conversationHistoryListParams() []map[string]any {
 	return []map[string]any{
+		param("query", "anchor_history_id", false, strSchema()),
+		param("query", "anchor_page_token", false, strSchema()),
 		param("path", "name", true, map[string]any{
 			"type":        "string",
 			"description": "Conversation ID or resource name (e.g. conv-1 or conversations/conv-1; :history suffix is stripped)",

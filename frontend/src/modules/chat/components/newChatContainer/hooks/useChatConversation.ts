@@ -1637,7 +1637,7 @@ export function useChatConversation({
     }
   }
 
-  function replaceMessageList(id: string, list: any[]) {
+  function replaceMessageList(id: string, list: any[], preserveScroll = false) {
     const userEdit = getUserEdit();
     const previousConversationId = currentConversationIdRef.current;
     if (previousConversationId && previousConversationId !== id) {
@@ -1709,7 +1709,8 @@ export function useChatConversation({
       userEdit?.restoreUserMessageEditDraft(id, messageListRef.current);
     }
 
-    scroll.scrollToEndImmediately();
+    if (!preserveScroll) scroll.scrollToEndImmediately();
+    else scroll.isMouseScrollingRef.current = false;
   }
 
   function createNewChat() {

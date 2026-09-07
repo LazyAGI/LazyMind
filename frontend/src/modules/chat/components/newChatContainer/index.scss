@@ -1036,3 +1036,10 @@ pre {
     --identity-avatar-size: 28px !important;
   }
 }
+
+.chat-fork-source-highlight {
+  background: rgba(22, 119, 255, 0.08);
+  outline: 2px solid rgba(22, 119, 255, 0.25);
+  border-radius: 8px;
+  transition: background 0.3s;
+}
