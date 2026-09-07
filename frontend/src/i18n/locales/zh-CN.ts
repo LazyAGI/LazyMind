@@ -958,6 +958,7 @@ const zhCN = {
     disconnectSuccess: "已移除由 LazyMind 管理的 {{agent}} MCP 配置",
     operationFailed: "操作未完成",
     bridgeUnavailable: "本机助理桥接器未运行。请在仓库根目录使用 make up 启动 Docker；如果已经使用裸 docker compose 启动，请运行 make assistant-bridge-start。",
+    bridgePlatformMismatch: "当前页面与助理桥接器运行在不同操作系统中。Windows + WSL/Docker 场景请停止 WSL/Linux 桥接器，并启动 Windows 原生桥接器。",
     executorDetectionReady: "本机检测服务已就绪",
     executorConnecting: "正在连接",
     executorSessionExpired: "LazyMind 登录已失效，请重新登录",

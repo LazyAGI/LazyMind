@@ -985,6 +985,7 @@ const enUS = {
     disconnectSuccess: "Removed the {{agent}} MCP configuration managed by LazyMind",
     operationFailed: "The operation did not complete",
     bridgeUnavailable: "The local Assistant Bridge is not running. Start Docker with make up from the repository root. If you used bare docker compose, run make assistant-bridge-start.",
+    bridgePlatformMismatch: "This page and the Assistant Bridge are running on different operating systems. For Windows with WSL/Docker, stop the WSL/Linux Bridge and start the native Windows Bridge.",
     executorDetectionReady: "Local detection service is ready",
     executorConnecting: "Connecting",
     executorSessionExpired: "Your LazyMind session expired. Sign in again.",

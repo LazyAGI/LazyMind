@@ -13,6 +13,7 @@ import {
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
+import { ASSISTANT_BRIDGE_PLATFORM_MISMATCH } from "@/runtime/assistantSession";
 import {
   agentIntegrationAction,
   agentIntegrationStatuses,
@@ -96,10 +97,10 @@ type StatusMap = Partial<Record<DesktopAgent, DesktopAgentIntegrationStatus>>;
 type ExecutorPolicyMap = Partial<Record<DesktopExecutorProvider, DesktopExecutorPolicy>>;
 type BindingMap = Partial<Record<DesktopAgentBindingTarget, string>>;
 
-async function retryBridgeResult<T extends { ok: boolean }>(call: () => Promise<T>): Promise<T> {
+async function retryBridgeResult<T extends { ok: boolean; reason?: string }>(call: () => Promise<T>): Promise<T> {
   let result = await call();
   for (const delay of BRIDGE_RETRY_DELAYS_MS) {
-    if (result.ok) return result;
+    if (result.ok || result.reason === ASSISTANT_BRIDGE_PLATFORM_MISMATCH) return result;
     await new Promise((resolve) => window.setTimeout(resolve, delay));
     result = await call();
   }
@@ -135,6 +136,7 @@ export default function AgentIntegrationPage() {
   const [action, setAction] = useState("");
   const [error, setError] = useState("");
   const [bridgeUnavailable, setBridgeUnavailable] = useState(false);
+  const [bridgePlatformMismatch, setBridgePlatformMismatch] = useState(false);
   const [manualBindingTarget, setManualBindingTarget] = useState<DesktopAgentBindingTarget | null>(null);
   const [manualBindingPath, setManualBindingPath] = useState("");
   const [externalConfigurationAgent, setExternalConfigurationAgent] = useState<DesktopAgent | null>(null);
@@ -150,12 +152,17 @@ export default function AgentIntegrationPage() {
       setRefreshing(true);
       let nextError = "";
       let localBridgeUnavailable = false;
+      let localBridgePlatformMismatch = false;
       let currentPolicies: ExecutorPolicyMap = {};
+      const recordBridgeFailure = (reason?: string) => {
+        if (reason === ASSISTANT_BRIDGE_PLATFORM_MISMATCH) localBridgePlatformMismatch = true;
+        else localBridgeUnavailable = true;
+      };
       try {
         const result = await retryBridgeResult(agentIntegrationStatuses);
         if (!isCurrent()) return;
         if (result.ok) setStatuses(result.data);
-        else localBridgeUnavailable = true;
+        else recordBridgeFailure(result.reason);
 
         const [policyResult, bindingResult] = await Promise.all([
           retryBridgeResult(executorIntegrationPolicies),
@@ -166,10 +173,10 @@ export default function AgentIntegrationPage() {
           currentPolicies = policyResult.data;
           setExecutorPolicies(policyResult.data);
         }
-        else localBridgeUnavailable = true;
+        else recordBridgeFailure(policyResult.reason);
 
         if (bindingResult.ok) setBindings(bindingResult.data);
-        else localBridgeUnavailable = true;
+        else recordBridgeFailure(bindingResult.reason);
 
         try {
           let values: ChatExecutorDescriptor[] = [];
@@ -197,6 +204,7 @@ export default function AgentIntegrationPage() {
         if (isCurrent()) {
           setError(nextError);
           setBridgeUnavailable(localBridgeUnavailable);
+          setBridgePlatformMismatch(localBridgePlatformMismatch);
           setLoading(false);
           setRefreshing(false);
         }
@@ -345,7 +353,7 @@ export default function AgentIntegrationPage() {
         </Button>
       </div>
 
-      {(error || bridgeUnavailable) && (
+      {(error || bridgeUnavailable || bridgePlatformMismatch) && (
         <Alert
           type="error"
           showIcon
@@ -353,6 +361,8 @@ export default function AgentIntegrationPage() {
           message={t("agentIntegration.operationFailed")}
           description={(
             <span className="agent-integration-error">
+              {bridgePlatformMismatch && <span>{t("agentIntegration.bridgePlatformMismatch")}</span>}
+              {bridgePlatformMismatch && (bridgeUnavailable || error) && <br />}
               {bridgeUnavailable && <span>{t("agentIntegration.bridgeUnavailable")}</span>}
               {bridgeUnavailable && error && <br />}
               {error}
@@ -361,6 +371,7 @@ export default function AgentIntegrationPage() {
           onClose={() => {
             setError("");
             setBridgeUnavailable(false);
+            setBridgePlatformMismatch(false);
           }}
         />
       )}
