@@ -4,11 +4,9 @@ from __future__ import annotations
 import json
 from typing import Literal
 
-import lazyllm
-from lazyllm import AutoModel
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from lazymind.model_config import get_model_role_runtime_identity
+from .llm_task import LLMTaskCallError, LLMTaskRequest
 
 
 INSTRUCTION = '''根据开场对话生成短标题和初始意图摘要。描述用户开启会话的主要目标，不总结助手回答或任务成果。
@@ -44,56 +42,7 @@ class OpeningDescription(BaseModel):
         return self
 
 
-class OpeningTaskError(Exception):
-    def __init__(self, code: str, *, retryable: bool = False, calls: int = 0, usage=None):
-        super().__init__(code)
-        self.code, self.retryable, self.calls = code, retryable, calls
-        self.usage = usage or {}
-
-
-def opening_error(exc: Exception) -> OpeningTaskError:
-    from lazyllm.module.llms.onlinemodule.base.model_outcome import ModelCallError
-    import requests
-    current = exc
-    while current is not None:
-        if isinstance(current, ModelCallError):
-            if current.terminal.finish and current.terminal.finish.value == 'length':
-                return OpeningTaskError('output_too_large', calls=1)
-            failure = current.terminal.failure
-            code = failure.code.value if failure else 'model_failed'
-            provider_code = (failure.provider_error_code or '') if failure else ''
-            if 'context' in provider_code.lower() or 'context' in code or code == 'token_limit':
-                return OpeningTaskError('input_too_large', calls=1)
-            status = failure.provider_http_status if failure else None
-            return OpeningTaskError(code, retryable=status in (408, 429, 500, 502, 503, 504)
-                                    or code in ('request_timeout', 'transport_error'), calls=1)
-        if isinstance(current, (requests.Timeout, requests.ConnectionError)):
-            return OpeningTaskError('transport_error', retryable=True, calls=1)
-        current = current.__cause__ or current.__context__
-    return OpeningTaskError('invalid_output' if isinstance(exc, (ValidationError, ValueError)) else 'model_failed', calls=1)
-
-
-def describe_opening(request):
+def opening_prompt(request: LLMTaskRequest) -> str:
     if request.mode != 'llm' or request.tools or request.skills or request.input.files:
-        raise OpeningTaskError('invalid_task_config')
-    prompt = INSTRUCTION + '\n\n开场资料：\n' + json.dumps(request.input.model_dump(exclude={'files'}), ensure_ascii=False)
-    timeout = int(request.options.get('timeout_seconds', 60))
-    if timeout <= 0:
-        raise OpeningTaskError('invalid_task_config')
-    selected = request.llm_config.get('llm')
-    identity = ({'role': 'llm', 'source': selected.get('source', ''), 'model': selected.get('model', '')}
-                if selected else get_model_role_runtime_identity('llm'))
-    usage = {'model_id': identity, 'truncated': False}
-    try:
-        model = (AutoModel(source='dynamic', type='llm', name='llm', dynamic_auth=True)
-                 if selected else AutoModel(model='llm'))
-        raw = model(prompt, response_format={'type': 'json_object'},
-                    temperature=0, timeout=timeout, max_retries=1,
-                    stream_output=False)
-        # Deliberately no JSON repair: incomplete output must not become a valid result.
-        output = OpeningDescription.model_validate_json(raw).model_dump()
-    except Exception as exc:
-        error = opening_error(exc)
-        error.usage = usage
-        raise error from exc
-    return output, {**usage, 'model_calls': 1, 'provider_usage': dict(lazyllm.globals['usage'])}
+        raise LLMTaskCallError('invalid_task_config')
+    return INSTRUCTION + '\n\n开场资料：\n' + json.dumps(request.input.model_dump(exclude={'files'}), ensure_ascii=False)
