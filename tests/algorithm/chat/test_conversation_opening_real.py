@@ -16,7 +16,7 @@ filler = '\n'.join(f'背景资料记录 {i}：系统提供文档上传、查询�
 goal = '\n本次唯一任务：排查静海项目的 PostgreSQL 连接池泄漏，输出排查方案。\n'
 for position in ['start', 'middle', 'end']:
     split = {'start': 0, 'middle': len(filler) // 2, 'end': len(filler)}[position]
-    cases.append([f'long_{position}', 'ready', [['user', filler[:split]+goal+filler[split:]]], []])
+    cases.append([f'long_{position}', 'ready', [['user', filler[:split] + goal + filler[split:]]], []])
 
 
 @pytest.fixture(scope='module')
