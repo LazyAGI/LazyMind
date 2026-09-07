@@ -15,8 +15,9 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from email.header import decode_header, make_header
 from email.message import EmailMessage
-from email.utils import formatdate
+from email.utils import formatdate, getaddresses, parsedate_to_datetime
 from typing import Any, NoReturn
+from zoneinfo import ZoneInfo
 
 import lazyllm
 from lazyllm.tools.agent import ToolExecutionError
@@ -366,6 +367,190 @@ def _imap_uid(message_id: str) -> str:
     return uid
 
 
+def _split_mail_ref(message_id: str) -> tuple[str, str]:
+    text = str(message_id or '').strip()
+    if '::' in text:
+        folder, uid = text.rsplit('::', 1)
+        return (folder.strip() or 'INBOX'), _imap_uid(uid)
+    return 'INBOX', _imap_uid(text)
+
+
+def _mail_ref(folder: str, uid: str) -> str:
+    return f'{folder}::{uid}'
+
+
+def _user_timezone() -> ZoneInfo | None:
+    env = _agentic_config().get('environment_context')
+    if not isinstance(env, dict):
+        return None
+    time_info = env.get('time')
+    if not isinstance(time_info, dict):
+        return None
+    name = str(time_info.get('timezone') or '').strip()
+    if not name:
+        return None
+    try:
+        return ZoneInfo(name)
+    except Exception:
+        return None
+
+
+def _display_mail_date(raw: Any) -> str:
+    text = _decode_header_value(raw)
+    if not text:
+        return ''
+    try:
+        dt = parsedate_to_datetime(text)
+    except (TypeError, ValueError, IndexError):
+        return text
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    tzinfo = _user_timezone()
+    try:
+        dt = dt.astimezone(tzinfo) if tzinfo is not None else dt.astimezone()
+    except Exception:
+        dt = dt.astimezone(timezone.utc)
+    return dt.isoformat()
+
+
+def _quote_mailbox(name: str) -> str:
+    text = (name or '').strip() or 'INBOX'
+    if text.upper() == 'INBOX':
+        return 'INBOX'
+    escaped = text.replace('\\', '\\\\').replace('"', '\\"')
+    return f'"{escaped}"'
+
+
+def _select_mailbox(client, folder: str, *, readonly: bool = True) -> bool:
+    name = (folder or 'INBOX').strip() or 'INBOX'
+    candidates = [name]
+    quoted = _quote_mailbox(name)
+    if quoted not in candidates:
+        candidates.append(quoted)
+    for candidate in candidates:
+        try:
+            status, _ = client.select(candidate, readonly=readonly)
+        except Exception:
+            continue
+        if status == 'OK':
+            return True
+    return False
+
+
+def _parse_imap_list_line(line: Any) -> tuple[str, set[str]] | None:
+    raw = line[-1] if isinstance(line, tuple) else line
+    if isinstance(raw, bytes):
+        text = raw.decode('utf-8', 'replace')
+    else:
+        text = str(raw or '')
+    match = re.match(
+        r'\((?P<flags>[^)]*)\)\s+(?P<delim>NIL|"(?:\\.|[^"])*")\s+(?P<name>.+)$',
+        text.strip(),
+    )
+    if not match:
+        return None
+    flags = {
+        flag.strip('\\').lower()
+        for flag in match.group('flags').split()
+        if flag.strip()
+    }
+    name = match.group('name').strip()
+    if len(name) >= 2 and name[0] == '"' and name[-1] == '"':
+        name = name[1:-1].replace('\\"', '"').replace('\\\\', '\\')
+    if not name:
+        return None
+    return name, flags
+
+
+def _mailbox_role(name: str, flags: set[str]) -> str | None:
+    if 'noselect' in flags:
+        return None
+    lowered = name.lower().replace('[gmail]/', '').strip()
+    if 'all' in flags or 'all mail' in lowered or lowered.endswith('/all'):
+        return None
+    if 'inbox' in flags or name.upper() == 'INBOX':
+        return 'inbox'
+    if 'sent' in flags:
+        return 'sent'
+    if 'drafts' in flags:
+        return 'drafts'
+    if 'trash' in flags:
+        return 'trash'
+    if 'junk' in flags:
+        return 'junk'
+    hints = (
+        ('inbox', ('inbox',)),
+        ('sent', ('sent', '已发送', '已傳送')),
+        ('drafts', ('draft', '草稿')),
+        ('trash', ('trash', 'deleted', '已删除', '已刪除', 'bin')),
+        ('junk', ('junk', 'spam', '垃圾')),
+    )
+    for role, needles in hints:
+        if any(needle in lowered for needle in needles):
+            return role
+    return None
+
+
+def _list_mailboxes(client) -> list[tuple[str, set[str]]]:
+    try:
+        status, data = client.list()
+    except Exception:
+        return [('INBOX', {'inbox'})]
+    if status != 'OK':
+        return [('INBOX', {'inbox'})]
+    mailboxes: list[tuple[str, set[str]]] = []
+    for line in data or []:
+        parsed = _parse_imap_list_line(line)
+        if parsed is not None:
+            mailboxes.append(parsed)
+    if not mailboxes:
+        mailboxes.append(('INBOX', {'inbox'}))
+    return mailboxes
+
+
+def _resolve_search_folders(client, folder_filter: str) -> list[str]:
+    listed = _list_mailboxes(client)
+    by_role: dict[str, str] = {}
+    for name, flags in listed:
+        role = _mailbox_role(name, flags)
+        if role and role not in by_role:
+            by_role[role] = name
+    if 'inbox' not in by_role:
+        by_role['inbox'] = 'INBOX'
+    wanted = str(folder_filter or 'all').strip().lower()
+    if wanted in {'', 'all'}:
+        return [by_role[role] for role in ('inbox', 'sent', 'drafts', 'trash', 'junk') if role in by_role]
+    if wanted in by_role:
+        return [by_role[wanted]]
+    for name, _flags in listed:
+        if name.lower() == wanted or name == folder_filter:
+            return [name]
+    return [by_role['inbox']]
+
+
+def _draft_patch() -> dict[str, Any]:
+    raw = _agentic_config().get('mail_draft_patch')
+    return dict(raw) if isinstance(raw, dict) else {}
+
+
+def _apply_confirm_patch(draft: dict[str, Any]) -> dict[str, Any]:
+    patch = _draft_patch()
+    if not patch:
+        return draft
+    if 'to' in patch:
+        recipients = _split_addresses(patch.get('to'))
+        if not recipients:
+            _fail('at least one recipient is required')
+        draft['to'] = recipients
+    if 'cc' in patch:
+        draft['cc'] = _split_addresses(patch.get('cc'))
+    if 'subject' in patch:
+        draft['subject'] = str(patch.get('subject') or '').strip()
+    if 'body' in patch:
+        draft['body'] = str(patch.get('body') or '')
+    return draft
+
+
 def _imap_payload(fetched: Any) -> bytes | None:
     if not fetched:
         return None
@@ -427,7 +612,6 @@ class _IMAPBackend:
     def search(self, **filters: str) -> dict[str, Any]:
         client = self._connect()
         try:
-            client.select('INBOX', readonly=True)
             criteria = ['ALL']
             if filters.get('sender'):
                 criteria.extend(['FROM', filters['sender']])
@@ -443,27 +627,39 @@ class _IMAPBackend:
                 criteria.extend(['SINCE', since])
             if before:
                 criteria.extend(['BEFORE', before])
-            status, data = client.uid('SEARCH', *criteria)
-            if status != 'OK':
-                return {'provider': self.provider, 'mailbox': self.email, 'items': []}
-            ids = (data[0] or b'').split()[-20:]
+            folders = _resolve_search_folders(client, filters.get('folder', ''))
             items = []
-            for uid in reversed(ids):
-                status, fetched = client.uid('FETCH', uid, '(RFC822.HEADER)')
-                raw = _imap_payload(fetched)
-                if status != 'OK' or raw is None:
+            for folder in folders:
+                if not _select_mailbox(client, folder, readonly=True):
                     continue
-                msg = email.message_from_bytes(raw)
-                items.append({
-                    'id': uid.decode('ascii'),
-                    'thread_id': _decode_header_value(msg.get('Message-ID') or uid.decode('ascii')),
-                    'from': _decode_header_value(msg.get('From')),
-                    'to': _decode_header_value(msg.get('To')),
-                    'subject': _decode_header_value(msg.get('Subject')),
-                    'date': _decode_header_value(msg.get('Date')),
-                    'snippet': '',
-                })
-            return {'provider': self.provider, 'mailbox': self.email, 'items': items}
+                status, data = client.uid('SEARCH', *criteria)
+                if status != 'OK':
+                    continue
+                ids = (data[0] or b'').split()[-20:]
+                for uid in reversed(ids):
+                    status, fetched = client.uid('FETCH', uid, '(RFC822.HEADER)')
+                    raw = _imap_payload(fetched)
+                    if status != 'OK' or raw is None:
+                        continue
+                    msg = email.message_from_bytes(raw)
+                    token = uid.decode('ascii')
+                    items.append({
+                        'id': _mail_ref(folder, token),
+                        'folder': folder,
+                        'thread_id': _decode_header_value(msg.get('Message-ID') or token),
+                        'from': _decode_header_value(msg.get('From')),
+                        'to': _decode_header_value(msg.get('To')),
+                        'subject': _decode_header_value(msg.get('Subject')),
+                        'date': _display_mail_date(msg.get('Date')),
+                        'snippet': '',
+                    })
+            items.sort(key=lambda row: str(row.get('date') or ''), reverse=True)
+            return {
+                'provider': self.provider,
+                'mailbox': self.email,
+                'folders': folders,
+                'items': items[:20],
+            }
         finally:
             try:
                 client.logout()
@@ -471,10 +667,11 @@ class _IMAPBackend:
                 pass
 
     def _fetch_message(self, message_id: str) -> email.message.Message:
-        uid = _imap_uid(message_id)
+        folder, uid = _split_mail_ref(message_id)
         client = self._connect()
         try:
-            client.select('INBOX', readonly=True)
+            if not _select_mailbox(client, folder, readonly=True):
+                _fail('The requested email was not found.')
             status, fetched = client.uid('FETCH', uid, '(RFC822)')
             raw = _imap_payload(fetched)
             if status != 'OK' or raw is None:
@@ -517,7 +714,8 @@ class _IMAPBackend:
             'to': _decode_header_value(msg.get('To')),
             'cc': _decode_header_value(msg.get('Cc')),
             'subject': _decode_header_value(msg.get('Subject')),
-            'date': _decode_header_value(msg.get('Date')),
+            'date': _display_mail_date(msg.get('Date')),
+            'folder': _split_mail_ref(message_id)[0],
             'body': '\n'.join(body_parts)[:20000],
             'attachments': attachments,
             'cite': f'email:{message_id}',
@@ -527,29 +725,34 @@ class _IMAPBackend:
         needle = (thread_id or '').strip()
         client = self._connect()
         try:
-            client.select('INBOX', readonly=True)
-            status, data = client.uid('SEARCH', 'ALL')
-            ids = (data[0] or b'').split() if status == 'OK' else []
+            folders = _resolve_search_folders(client, 'all')
             matched: list[str] = []
-            for uid in reversed(ids[-40:]):
-                status, fetched = client.uid(
-                    'FETCH',
-                    uid,
-                    '(BODY.PEEK[HEADER.FIELDS (MESSAGE-ID IN-REPLY-TO REFERENCES)])',
-                )
-                raw = _imap_payload(fetched)
-                if status != 'OK' or raw is None:
+            for folder in folders:
+                if not _select_mailbox(client, folder, readonly=True):
                     continue
-                headers = email.message_from_bytes(raw)
-                blob = ' '.join([
-                    _decode_header_value(headers.get('Message-ID')),
-                    _decode_header_value(headers.get('In-Reply-To')),
-                    _decode_header_value(headers.get('References')),
-                ])
-                if needle and (needle in blob or needle.strip('<>') in blob):
-                    matched.append(uid.decode('ascii'))
+                status, data = client.uid('SEARCH', 'ALL')
+                ids = (data[0] or b'').split() if status == 'OK' else []
+                for uid in reversed(ids[-40:]):
+                    status, fetched = client.uid(
+                        'FETCH',
+                        uid,
+                        '(BODY.PEEK[HEADER.FIELDS (MESSAGE-ID IN-REPLY-TO REFERENCES)])',
+                    )
+                    raw = _imap_payload(fetched)
+                    if status != 'OK' or raw is None:
+                        continue
+                    headers = email.message_from_bytes(raw)
+                    blob = ' '.join([
+                        _decode_header_value(headers.get('Message-ID')),
+                        _decode_header_value(headers.get('In-Reply-To')),
+                        _decode_header_value(headers.get('References')),
+                    ])
+                    if needle and (needle in blob or needle.strip('<>') in blob):
+                        matched.append(_mail_ref(folder, uid.decode('ascii')))
             messages = [self.read(mid) for mid in reversed(matched[-20:])]
             if not messages and needle.isdigit():
+                messages = [self.read(_mail_ref('INBOX', needle))]
+            elif not messages and '::' in needle:
                 messages = [self.read(needle)]
             return {'thread_id': thread_id, 'messages': messages}
         finally:
@@ -572,6 +775,14 @@ class _IMAPBackend:
 
     def send(self, message: EmailMessage) -> dict[str, Any]:
         data_submitted = False
+        recipients = [
+            addr for _name, addr in getaddresses(
+                message.get_all('To', []) + message.get_all('Cc', []) + message.get_all('Bcc', [])
+            )
+            if addr
+        ]
+        if not recipients:
+            _fail('Failed to send the email: no valid recipients.')
         try:
             with smtplib.SMTP_SSL(
                 self.endpoint['smtp_host'],
@@ -592,16 +803,35 @@ class _IMAPBackend:
                         data_submitted = True
 
                 smtp.send = tracked_send
-                smtp.send_message(message)
+                refused = smtp.sendmail(self.email, recipients, message.as_bytes())
         except smtplib.SMTPAuthenticationError as orig:
             raise ToolExecutionError(
                 'Mailbox authorization expired. Re-authorize the mailbox in 资源库 → 云文档 → 邮箱连接.'
             ) from orig
+        except smtplib.SMTPRecipientsRefused as orig:
+            detail = ', '.join(
+                f'{addr} ({code} {err})'
+                for addr, (code, err) in (orig.recipients or {}).items()
+            ) or str(orig)
+            _fail(f'Failed to send the email: all recipients were rejected ({detail}).')
         except ToolExecutionError:
             raise
         except (smtplib.SMTPException, OSError) as orig:
             _raise_send_error(orig, data_submitted=data_submitted)
-        return {'id': message.get('Message-ID') or '', 'sent_at': _iso(datetime.now(timezone.utc))}
+        if refused:
+            detail = ', '.join(
+                f'{addr} ({code} {err})' for addr, (code, err) in refused.items()
+            )
+            accepted = [addr for addr in recipients if addr not in refused]
+            if accepted:
+                _fail(
+                    'Failed to send the email: some recipients were rejected '
+                    f'({detail}). Accepted: {", ".join(accepted)}.'
+                )
+            _fail(f'Failed to send the email: recipients were rejected ({detail}).')
+        tzinfo = _user_timezone()
+        now = datetime.now(tzinfo) if tzinfo is not None else datetime.now().astimezone()
+        return {'id': message.get('Message-ID') or '', 'sent_at': now.isoformat()}
 
 
 def _backend(cred: dict[str, str]):
@@ -720,6 +950,7 @@ class MailToolkit:
         after: str = '',
         before: str = '',
         mailbox: str = '',
+        folder: str = '',
     ) -> dict[str, Any]:
         """Search enabled mailboxes without building a local index.
 
@@ -731,6 +962,9 @@ class MailToolkit:
             after: Inclusive start date, YYYY-MM-DD.
             before: Inclusive end date, YYYY-MM-DD.
             mailbox: Optional email or provider (netease163/qqmail/gmailimap). Empty searches all enabled mailboxes.
+            folder: Optional mailbox folder: inbox, sent, drafts, trash, junk, or all.
+                Default all searches Inbox plus Sent, Drafts, Trash, and Junk when present.
+                Result ids are folder::UID; pass that exact id to read.
         """
         accounts = [_pick_account(mailbox)] if str(mailbox or '').strip() else _require_accounts()
         items: list[dict[str, Any]] = []
@@ -742,6 +976,7 @@ class MailToolkit:
             'subject': str(subject or '').strip(),
             'after': str(after or '').strip(),
             'before': str(before or '').strip(),
+            'folder': str(folder or '').strip(),
         }
         for cred in accounts:
             try:
@@ -768,7 +1003,7 @@ class MailToolkit:
         """Read one email, including headers, body, and attachment metadata.
 
         Args:
-            message_id: IMAP UID returned by search. Sequence numbers are not stable.
+            message_id: folder::UID returned by search (IMAP UIDs are not unique across folders).
             mailbox: Optional email or provider. Required when the same id could exist in more than one mailbox.
         """
         if not str(message_id or '').strip():
@@ -840,7 +1075,10 @@ class MailToolkit:
         in_reply_to: str = '',
         mailbox: str = '',
     ) -> dict[str, Any]:
-        """Create a new or reply mail draft. Never send from this method.
+        """Create a new or reply mail draft and show the preview card. Never send from this method.
+
+        Always call this (or update_draft) so the user can confirm the card. Do not skip
+        the preview or send without mail_draft_confirm_id from that card.
 
         To change recipients, subject, body, or attachments later, call update_draft
         with this draft_id. Do not compose a second draft for the same email.
@@ -956,16 +1194,20 @@ class MailToolkit:
         confirm_id = str(_agentic_config().get('mail_draft_confirm_id') or '').strip()
         confirmed = confirm_id == str(draft_id).strip()
         if not confirmed:
+            _emit_draft_card(draft)
             _fail(
                 'Send blocked until the user confirms the preview card in this turn. '
                 'Do not call ask_user for send authorization. Wait for mail_draft_confirm_id.'
             )
         expected_revision = _draft_revision(draft)
         if _confirm_revision() != expected_revision:
+            _emit_draft_card(draft)
             _fail(
                 f'This preview is stale. The draft is now revision {expected_revision}. '
                 'Confirm the latest preview card; do not send from an older card.'
             )
+        _apply_confirm_patch(draft)
+        _save_draft(draft)
         message = _build_message(draft, cred['email'])
         try:
             result = _backend(cred).send(message)

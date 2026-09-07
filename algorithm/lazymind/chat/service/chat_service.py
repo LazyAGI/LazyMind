@@ -981,6 +981,7 @@ async def _handle_chat_impl(
         'query': query or '',
         'mail_draft_confirm_id': (runtime.mail_draft_confirm_id or '').strip(),
         'mail_draft_confirm_revision': runtime.mail_draft_confirm_revision,
+        'mail_draft_patch': runtime.mail_draft_patch or {},
     }
     # Inject per-conversation workflow flags from Go (resolved from conversations table).
     # enable_workflow=None means "not set"; default to True so behaviour is unchanged

@@ -169,6 +169,8 @@ export interface ChatMessage {
     }>;
     title?: string;
     description?: string;
+    mail_draft?: import("@/modules/chat/components/MailDraftCard").MailDraftPreview;
+    mail_drafts?: import("@/modules/chat/components/MailDraftCard").MailDraftPreview[];
   };
   ask_answered?: boolean;
   ask_saved_answers?: Record<number, unknown>;

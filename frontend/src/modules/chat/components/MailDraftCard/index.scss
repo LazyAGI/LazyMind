@@ -30,3 +30,9 @@
     font-family: inherit;
   }
 }
+
+.mail-draft-card-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}

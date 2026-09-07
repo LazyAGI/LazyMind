@@ -277,6 +277,8 @@ const zhCN = {
       title: "邮箱连接",
       hubHint: "连接网易、腾讯或 Gmail。每个账号右侧可独立开关，多个邮箱可同时在对话中启用。",
       connectedHint: "当前已连接：{{account}}",
+      connectedAccounts: "已连接账号",
+      addAnother: "再连接一个账号",
       description:
         "支持网易个人/企业邮箱、腾讯 QQ/企业邮箱的授权码，以及 Gmail 的应用专用密码（IMAP）。连接后可在对话中 @邮箱 检索、阅读、引用邮件并生成草稿；发送前必须预览确认。不会在浏览器中保存密码。",
       back: "返回云文档",

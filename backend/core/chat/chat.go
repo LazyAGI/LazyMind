@@ -113,6 +113,7 @@ type ChatRuntimeOptions struct {
 	SkipSensitiveFilter           bool           `json:"skip_sensitive_filter,omitempty"`
 	MailDraftConfirmID            string         `json:"mail_draft_confirm_id,omitempty"`
 	MailDraftConfirmRevision      int            `json:"mail_draft_confirm_revision,omitempty"`
+	MailDraftPatch                map[string]any `json:"mail_draft_patch,omitempty"`
 }
 
 type ChatPersonalizationOptions struct {
@@ -192,11 +193,12 @@ type AskQuestion struct {
 // The frontend renders a clarification UI; the user's answers are sent as plain text
 // in the next chat turn's query — no special ask_response parameter is needed.
 type AskPendingEvent struct {
-	AskID       string         `json:"ask_id"`
-	Questions   []AskQuestion  `json:"questions"`
-	Title       string         `json:"title,omitempty"`
-	Description string         `json:"description,omitempty"`
-	MailDraft   map[string]any `json:"mail_draft,omitempty"`
+	AskID       string           `json:"ask_id"`
+	Questions   []AskQuestion    `json:"questions"`
+	Title       string           `json:"title,omitempty"`
+	Description string           `json:"description,omitempty"`
+	MailDraft   map[string]any   `json:"mail_draft,omitempty"`
+	MailDrafts  []map[string]any `json:"mail_drafts,omitempty"`
 }
 
 type ToolLimitPendingEvent struct {
@@ -489,6 +491,9 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 	}
 	if revision := mailDraftConfirmRevision(body["mail_draft_confirm_revision"]); revision > 0 {
 		req.Runtime.MailDraftConfirmRevision = revision
+	}
+	if patch, ok := body["mail_draft_patch"].(map[string]any); ok && len(patch) > 0 {
+		req.Runtime.MailDraftPatch = patch
 	}
 	if llmConfig, ok := body["llm_config"].(map[string]any); ok {
 		req.Runtime.LLMConfig = llmConfig

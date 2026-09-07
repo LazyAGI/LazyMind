@@ -25,6 +25,7 @@ import {
   buildChatMessageListFromHistory,
   getRegenerationInputs,
   mergeChatMessageLists,
+  mergeAskPending,
   stripAskUserReceipt,
 } from "@/modules/chat/utils/message";
 import { mergeChatStreamDelta } from "@/modules/chat/utils/streamDelta";
@@ -794,6 +795,10 @@ export function useChatConversation({
           result.sources && result.sources.length > 0
             ? result.sources
             : assistantMessage.sources,
+        ask_pending: mergeAskPending(
+          assistantMessage.ask_pending,
+          result.ask_pending,
+        ),
       };
 
       newList[assistantMessageIndex] = assistantMessage;
@@ -1230,6 +1235,9 @@ export function useChatConversation({
         Number.isFinite(params.mail_draft_confirm_revision) &&
         params.mail_draft_confirm_revision > 0
           ? { mail_draft_confirm_revision: params.mail_draft_confirm_revision }
+          : {}),
+        ...(params.mail_draft_patch && Object.keys(params.mail_draft_patch).length
+          ? { mail_draft_patch: params.mail_draft_patch }
           : {}),
       },
     );

@@ -48,6 +48,44 @@ export function isAskPendingReadOnly(
   return !!askAnswered || (!isLatestMessage && hasLaterUserMessage);
 }
 
+function mailDraftsFromAskPending(askPending: any): any[] {
+  if (!askPending || typeof askPending !== "object") {
+    return [];
+  }
+  const listed = Array.isArray(askPending.mail_drafts) ? askPending.mail_drafts : [];
+  const drafts = listed.filter((item: any) => item && typeof item === "object" && item.draft_id);
+  if (drafts.length) {
+    return drafts;
+  }
+  if (askPending.mail_draft?.draft_id) {
+    return [askPending.mail_draft];
+  }
+  return [];
+}
+
+export function mergeAskPending(previous: any, incoming: any) {
+  if (!incoming) {
+    return previous;
+  }
+  if (!previous) {
+    const drafts = mailDraftsFromAskPending(incoming);
+    return drafts.length
+      ? { ...incoming, mail_drafts: drafts, mail_draft: drafts[drafts.length - 1] }
+      : incoming;
+  }
+  const merged = new Map<string, any>();
+  for (const draft of [...mailDraftsFromAskPending(previous), ...mailDraftsFromAskPending(incoming)]) {
+    merged.set(String(draft.draft_id), draft);
+  }
+  const drafts = [...merged.values()];
+  return {
+    ...previous,
+    ...incoming,
+    mail_draft: drafts[drafts.length - 1] || incoming.mail_draft || previous.mail_draft,
+    mail_drafts: drafts.length ? drafts : undefined,
+  };
+}
+
 interface ChatUserMessageLike {
   delta?: string;
   inputs?: Query[] | null;

@@ -38,6 +38,21 @@ func TestResolveMailDraftConfirmIDFromDraftCard(t *testing.T) {
 	if withRevision["mail_draft_confirm_revision"] != 2 {
 		t.Fatalf("expected draft-card confirm revision, got %#v", withRevision["mail_draft_confirm_revision"])
 	}
+
+	withPatch := buildChatRequestBody(context.TODO(), nil, "conv-1", "", "确认发送", nil, map[string]any{
+		"mail_draft_confirm_id": "draft_ac38c2afeac34780",
+		"mail_draft_patch": map[string]any{
+			"subject": "edited",
+			"ignored": "nope",
+		},
+	}, nil, "", 1)
+	patch, ok := withPatch["mail_draft_patch"].(map[string]any)
+	if !ok || patch["subject"] != "edited" {
+		t.Fatalf("expected draft patch subject, got %#v", withPatch["mail_draft_patch"])
+	}
+	if _, exists := patch["ignored"]; exists {
+		t.Fatalf("did not expect unknown patch fields: %#v", patch)
+	}
 }
 
 func TestBuildChatRequestBodyUsesConversationIDDerivedSessionID(t *testing.T) {

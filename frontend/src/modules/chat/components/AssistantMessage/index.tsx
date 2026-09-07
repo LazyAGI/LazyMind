@@ -1067,23 +1067,32 @@ const AssistantMessage = (props: any) => {
         index === length - 1,
         !!hasLaterUserMessage,
       );
-      if (askPending.mail_draft) {
+      if (askPending.mail_draft || (askPending.mail_drafts && askPending.mail_drafts.length)) {
+        const drafts =
+          askPending.mail_drafts && askPending.mail_drafts.length
+            ? askPending.mail_drafts
+            : askPending.mail_draft
+              ? [askPending.mail_draft]
+              : [];
         return (
-          <MailDraftCard
-            key={askPending.ask_id}
-            draft={askPending.mail_draft}
-            disabled={isReadOnly}
-            onConfirm={(draftId, revision) => {
-              updateMessage({
-                ...item,
-                ask_answered: true,
-              });
-              props.sendMessage?.(t("chat.mailDraft.confirmQuery"), undefined, {
-                mail_draft_confirm_id: draftId,
-                mail_draft_confirm_revision: revision,
-              });
-            }}
-          />
+          <div className="mail-draft-card-list" key={askPending.ask_id}>
+            {drafts.map((draft) => {
+              const draftId = String(draft.draft_id || "").trim();
+              return (
+                <MailDraftCard
+                  key={draftId || askPending.ask_id}
+                  draft={draft}
+                  onConfirm={(confirmedId, revision, patch) => {
+                    props.sendMessage?.(t("chat.mailDraft.confirmQuery"), undefined, {
+                      mail_draft_confirm_id: confirmedId,
+                      mail_draft_confirm_revision: revision,
+                      ...(patch ? { mail_draft_patch: patch } : {}),
+                    });
+                  }}
+                />
+              );
+            })}
+          </div>
         );
       }
       return (

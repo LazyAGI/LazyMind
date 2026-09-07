@@ -292,6 +292,8 @@ const enUS = {
       title: "Mailbox",
       hubHint: "Connect NetEase, Tencent, or Gmail. Use the switch on the right of each account; multiple mailboxes can be enabled at the same time.",
       connectedHint: "Connected: {{account}}",
+      connectedAccounts: "Connected accounts",
+      addAnother: "Connect another account",
       description:
         "Supports NetEase personal/enterprise and Tencent QQ/enterprise authorization codes, plus Gmail app passwords over IMAP. After connecting, @ Mail in chat to search, read, cite, and draft messages. Sending always requires preview confirmation. Passwords are not stored in the browser.",
       back: "Back to cloud documents",

@@ -1,5 +1,6 @@
 import json
 import os
+import smtplib
 from unittest.mock import patch
 
 import lazyllm
@@ -12,10 +13,12 @@ from lazymind.chat.engine.tools.local_file.workspace import chat_agent_workspace
 from lazymind.chat.engine.tools.mail import (
     MailToolkit,
     _IMAPBackend,
+    _display_mail_date,
     _imap_date,
     _load_draft,
     _resolve_imap_endpoint,
     _save_draft,
+    _split_mail_ref,
 )
 
 
@@ -237,6 +240,10 @@ class _FakeSMTP:
     def send(self, payload):
         return None
 
+    def sendmail(self, from_addr, to_addrs, msg, *args, **kwargs):
+        self.send(b'payload\r\n.\r\n')
+        return {}
+
 
 def test_send_oserror_marks_failed(mail_auth):
     draft = {
@@ -286,7 +293,7 @@ def test_send_reset_after_data_is_delivery_unknown(mail_auth):
     lazyllm.globals['agentic_config']['mail_draft_confirm_revision'] = 1
 
     class ResetSMTP(_FakeSMTP):
-        def send_message(self, message):
+        def sendmail(self, from_addr, to_addrs, msg, *args, **kwargs):
             self.send(b'payload\r\n.\r\n')
             raise ConnectionResetError('Connection reset by peer')
 
@@ -306,8 +313,18 @@ def test_imap_before_date_is_inclusive():
 class _RecordingIMAP:
     def __init__(self):
         self.calls: list[tuple[str, tuple]] = []
+        self.selected: list[str] = []
 
-    def select(self, *args, **kwargs):
+    def list(self, *args, **kwargs):
+        return 'OK', [
+            b'(\\HasNoChildren) "/" INBOX',
+            b'(\\Sent) "/" "Sent"',
+            b'(\\Drafts) "/" Drafts',
+            b'(\\Trash) "/" Trash',
+        ]
+
+    def select(self, mailbox='INBOX', readonly=False):
+        self.selected.append(str(mailbox).strip('"'))
         return 'OK', []
 
     def uid(self, command, *args):
@@ -316,7 +333,7 @@ class _RecordingIMAP:
             return 'OK', [b'101 102']
         header = (
             b'From: a@b.com\r\nTo: c@d.com\r\nSubject: hi\r\n'
-            b'Date: Wed, 2 Sep 2026\r\nMessage-ID: <x@y>\r\n\r\nbody'
+            b'Date: Wed, 2 Sep 2026 12:00:00 +0000\r\nMessage-ID: <x@y>\r\n\r\nbody'
         )
         return 'OK', [(b'1 (UID 102 RFC822 {n}', header), b')']
 
@@ -334,12 +351,86 @@ def test_imap_search_and_read_use_uid(mail_auth):
     imap = _RecordingIMAP()
     with patch.object(_IMAPBackend, '_connect', return_value=imap):
         result = MailToolkit().search(keyword='hi', mailbox='user@qq.com')
-        assert result['items'][0]['id'] == '102'
-        MailToolkit().read('102', mailbox='user@qq.com')
+        assert result['items'][0]['id'].endswith('::102')
+        assert _split_mail_ref(result['items'][0]['id'])[1] == '102'
+        folders = {item['folder'] for item in result['items']}
+        assert folders >= {'INBOX', 'Sent', 'Drafts', 'Trash'}
+        MailToolkit().read(result['items'][0]['id'], mailbox='user@qq.com')
         MailToolkit().read_thread('<x@y>', mailbox='user@qq.com')
     commands = [command for command, _args in imap.calls]
     assert commands.count('SEARCH') >= 2
     assert commands.count('FETCH') >= 2
+    assert 'Sent' in imap.selected
+
+
+def test_mail_date_uses_user_timezone(mail_auth):
+    lazyllm.globals['agentic_config']['environment_context'] = {
+        'time': {'timezone': 'Asia/Shanghai'},
+    }
+    assert _display_mail_date('Wed, 2 Sep 2026 12:00:00 +0000').startswith('2026-09-02T20:00:00')
+
+
+def test_send_rejects_refused_recipients(mail_auth):
+    draft = {
+        'draft_id': 'draft_bad',
+        'revision': 1,
+        'to': ['nobody@invalid.example'],
+        'cc': [],
+        'subject': 'hi',
+        'body': 'body',
+        'attachment_paths': [],
+        'in_reply_to': '',
+        'status': 'draft',
+        'sent_at': '',
+        'last_error': '',
+    }
+    _save_draft(draft)
+    lazyllm.globals['agentic_config']['mail_draft_confirm_id'] = 'draft_bad'
+    lazyllm.globals['agentic_config']['mail_draft_confirm_revision'] = 1
+
+    class RefuseSMTP(_FakeSMTP):
+        def sendmail(self, from_addr, to_addrs, msg, *args, **kwargs):
+            raise smtplib.SMTPRecipientsRefused({
+                'nobody@invalid.example': (550, b'user unknown'),
+            })
+
+    with patch('lazymind.chat.engine.tools.mail.smtplib.SMTP_SSL', RefuseSMTP):
+        with pytest.raises(ToolExecutionError, match='rejected'):
+            MailToolkit().send_draft('draft_bad')
+    saved = _load_draft('draft_bad')
+    assert saved['status'] == 'failed'
+
+
+def test_send_applies_confirm_patch(mail_auth):
+    draft = {
+        'draft_id': 'draft_patch',
+        'revision': 1,
+        'to': ['old@b.com'],
+        'cc': [],
+        'subject': 'old',
+        'body': 'old-body',
+        'attachment_paths': [],
+        'in_reply_to': '',
+        'status': 'draft',
+        'sent_at': '',
+        'last_error': '',
+    }
+    _save_draft(draft)
+    lazyllm.globals['agentic_config']['mail_draft_confirm_id'] = 'draft_patch'
+    lazyllm.globals['agentic_config']['mail_draft_confirm_revision'] = 1
+    lazyllm.globals['agentic_config']['mail_draft_patch'] = {
+        'to': 'new@b.com',
+        'subject': 'new',
+        'body': 'new-body',
+    }
+    with patch(
+        'lazymind.chat.engine.tools.mail._IMAPBackend.send',
+        return_value={'id': 'm1', 'sent_at': '2026-09-01T08:00:00+08:00'},
+    ) as send:
+        MailToolkit().send_draft('draft_patch')
+    message = send.call_args[0][0]
+    assert message['To'] == 'new@b.com'
+    assert message['Subject'] == 'new'
 
 
 def test_mail_toolkit_registers_only_mail_auth_name():

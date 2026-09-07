@@ -192,11 +192,9 @@ export default function EmailConnectionPage() {
     }
   }, []);
 
-  const connectionFor = (provider: MailProvider) =>
-    connections.find((item) => item.provider === provider && isActiveStatus(item.status));
-  const connected = MAIL_LIST_PROVIDERS.map((provider) => connectionFor(provider)).filter(
-    (item): item is MailConnection => Boolean(item),
-  );
+  const connectionsFor = (provider: MailProvider) =>
+    connections.filter((item) => item.provider === provider && isActiveStatus(item.status));
+  const connected = MAIL_LIST_PROVIDERS.flatMap((provider) => connectionsFor(provider));
 
   const toggleChat = async (connection: MailConnection, enabled: boolean) => {
     try {
@@ -263,11 +261,10 @@ export default function EmailConnectionPage() {
     event.stopPropagation();
   };
 
-  const chatSwitch = (provider: MailProvider, compactLabel?: string) => {
-    const connection = connectionFor(provider);
+  const chatSwitch = (connection: MailConnection, compactLabel?: string) => {
     const canToggle = Boolean(connection);
     const enabled = Boolean(connection?.chatEnabled);
-    const label = connection?.display_name || t(`modelProvider.mail.providers.${provider}`);
+    const label = connection.display_name || t(`modelProvider.mail.providers.${connection.provider}`);
     return (
       <div className="mail-provider-row-switch" onClick={stopRowOpen} onKeyDown={stopRowOpen}>
         {compactLabel ? <span className="mail-provider-row-switch-name">{compactLabel}</span> : null}
@@ -306,22 +303,36 @@ export default function EmailConnectionPage() {
     );
   };
 
-  const disconnectButton = (provider: MailProvider) => {
-    const connection = connectionFor(provider);
-    if (!connection) {
+  const accountRows = (provider: MailProvider) => {
+    const accounts = connectionsFor(provider);
+    if (!accounts.length) {
       return null;
     }
     return (
-      <Button danger loading={loading} onClick={() => void disconnect(connection.connection_id)}>
-        {t("modelProvider.mail.disconnect")}
-      </Button>
+      <div className="mail-account-rows">
+        <div className="mail-account-rows-title">{t("modelProvider.mail.connectedAccounts")}</div>
+        {accounts.map((connection) => (
+          <div key={connection.connection_id} className="mail-account-row">
+            <span className="mail-account-row-email">
+              {connection.display_name || t(`modelProvider.mail.providers.${provider}`)}
+            </span>
+            {chatSwitch(connection)}
+            <Button
+              danger
+              size="small"
+              loading={loading}
+              onClick={() => void disconnect(connection.connection_id)}
+            >
+              {t("modelProvider.mail.disconnect")}
+            </Button>
+          </div>
+        ))}
+      </div>
     );
   };
 
   const rowHint = (row: (typeof MAIL_ROWS)[number]) => {
-    const accounts = row.providers
-      .map((provider) => connectionFor(provider))
-      .filter((item): item is MailConnection => Boolean(item));
+    const accounts = row.providers.flatMap((provider) => connectionsFor(provider));
     if (!accounts.length) {
       return t(`modelProvider.mail.${row.id}.summary`);
     }
@@ -387,9 +398,10 @@ export default function EmailConnectionPage() {
       </Form.Item>
       <Space wrap>
         <Button type="primary" loading={saving === provider} onClick={() => void connectImap(provider, form)}>
-          {options?.submitLabel}
+          {connectionsFor(provider).length
+            ? t("modelProvider.mail.addAnother")
+            : options?.submitLabel}
         </Button>
-        {disconnectButton(provider)}
       </Space>
     </Form>
   );
@@ -398,6 +410,7 @@ export default function EmailConnectionPage() {
     if (rowId === "netease163") {
       return (
         <>
+          {accountRows("netease163")}
           {renderImapForm("netease163", formNetease, {
             emailPlaceholder: t("modelProvider.mail.netease163.emailPlaceholder"),
             domainError: t("modelProvider.mail.netease163.domainError"),
@@ -411,6 +424,7 @@ export default function EmailConnectionPage() {
     if (rowId === "neteaseqiye") {
       return (
         <>
+          {accountRows("neteaseqiye")}
           {renderImapForm("neteaseqiye", formNeteaseQiye, {
             emailPlaceholder: t("modelProvider.mail.neteaseqiye.emailPlaceholder"),
             submitLabel: t("modelProvider.mail.connectNeteaseQiye"),
@@ -422,6 +436,7 @@ export default function EmailConnectionPage() {
     if (rowId === "qqmail") {
       return (
         <>
+          {accountRows("qqmail")}
           {renderImapForm("qqmail", formQQ, {
             emailPlaceholder: t("modelProvider.mail.qqmail.emailPlaceholder"),
             submitLabel: t("modelProvider.mail.connectQQ"),
@@ -433,6 +448,7 @@ export default function EmailConnectionPage() {
     if (rowId === "qqexmail") {
       return (
         <>
+          {accountRows("qqexmail")}
           {renderImapForm("qqexmail", formQQExmail, {
             emailPlaceholder: t("modelProvider.mail.qqexmail.emailPlaceholder"),
             submitLabel: t("modelProvider.mail.connectQQExmail"),
@@ -466,6 +482,7 @@ export default function EmailConnectionPage() {
             </div>
           }
         />
+        {accountRows("gmailimap")}
         {renderImapForm("gmailimap", formGmailImap, {
           emailPlaceholder: t("modelProvider.mail.gmail.emailPlaceholder"),
           authLabel: t("modelProvider.mail.gmail.imapPassword"),
@@ -512,7 +529,8 @@ export default function EmailConnectionPage() {
 
         <div className="model-provider-cloud-doc-grid mail-provider-list">
           {MAIL_ROWS.map((row) => {
-            const active = row.providers.some((provider) => connectionFor(provider));
+            const accounts = row.providers.flatMap((provider) => connectionsFor(provider));
+            const active = accounts.length > 0;
             return (
               <div
                 key={row.id}
@@ -543,7 +561,7 @@ export default function EmailConnectionPage() {
                     : t("modelProvider.cloudDocuments.authPending")}
                 </Tag>
                 <div className="mail-provider-row-controls">
-                  {chatSwitch(row.providers[0])}
+                  {accounts.length === 1 ? chatSwitch(accounts[0]) : null}
                   <button
                     type="button"
                     className="model-provider-cloud-doc-resource-action"

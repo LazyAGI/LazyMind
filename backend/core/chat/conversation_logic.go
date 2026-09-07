@@ -1214,6 +1214,24 @@ func resolveMailDraftConfirmRevision(raw map[string]any) int {
 	return mailDraftConfirmRevision(raw["mail_draft_confirm_revision"])
 }
 
+func resolveMailDraftPatch(raw map[string]any) map[string]any {
+	patch, ok := raw["mail_draft_patch"].(map[string]any)
+	if !ok || len(patch) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(patch))
+	for key, value := range patch {
+		switch key {
+		case "to", "cc", "subject", "body":
+			out[key] = value
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, query string, histories []orm.ChatHistory, raw map[string]any, resourceContext *evolution.ChatResourceContext, userID string, currentSeq int) map[string]any {
 	if strings.TrimSpace(sessionID) == "" {
 		sessionID = upstreamSessionID(convID)
@@ -1266,6 +1284,9 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 	}
 	if revision := resolveMailDraftConfirmRevision(raw); revision > 0 {
 		body["mail_draft_confirm_revision"] = revision
+	}
+	if patch := resolveMailDraftPatch(raw); patch != nil {
+		body["mail_draft_patch"] = patch
 	}
 	if mentionContext := buildMentionResourceContext(ctx, db, userID, histories, raw); mentionContext != "" {
 		body["query"] = mentionContext + "\n\nUser query:\n" + query

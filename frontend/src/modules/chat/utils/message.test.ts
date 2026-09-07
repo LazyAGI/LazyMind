@@ -7,6 +7,7 @@ import {
   getCitationsFromText,
   getRegenerationInputs,
   isAskPendingReadOnly,
+  mergeAskPending,
   mergeChatMessageLists,
   mergeConversationTrailIntoMessageList,
   normalizeMessageInputs,
@@ -39,6 +40,19 @@ describe("isAskPendingReadOnly", () => {
 
   it("keeps an unanswered Ask interactive when only assistant placeholders follow it", () => {
     expect(isAskPendingReadOnly(false, false, false)).toBe(false);
+  });
+});
+
+describe("mergeAskPending", () => {
+  it("keeps every mail draft card from later stream frames", () => {
+    const merged = mergeAskPending(
+      { ask_id: "a1", mail_draft: { draft_id: "draft_one", subject: "one" } },
+      { ask_id: "a2", mail_draft: { draft_id: "draft_two", subject: "two" } },
+    );
+    expect(merged.mail_drafts.map((item: { draft_id: string }) => item.draft_id)).toEqual([
+      "draft_one",
+      "draft_two",
+    ]);
   });
 });
 
