@@ -74,8 +74,22 @@ func TestForkFirstActualRequestUsesNodeConfigurationAndOnlyItsPrefix(t *testing.
 	}
 	select {
 	case request := <-captured:
+		wantHistory := []ChatMessage{
+			{Role: "user", Content: "q1", HistorySeq: 1},
+			{Role: "assistant", Content: "a1", HistorySeq: 1},
+			{Role: "user", Content: "q2", HistorySeq: 2},
+			{Role: "assistant", Content: "a2", HistorySeq: 2},
+		}
+		if len(request.Message.History) != len(wantHistory) {
+			t.Fatalf("fork history = %#v, want %#v", request.Message.History, wantHistory)
+		}
+		for i, want := range wantHistory {
+			if got := request.Message.History[i]; got != want {
+				t.Fatalf("fork history[%d] = %#v, want %#v", i, got, want)
+			}
+		}
 		raw, _ := json.Marshal(request)
-		if request.Runtime.ThinkingDepth != "high" || request.Runtime.Reasoning || request.Conversation.Mode != "manual" || request.Runtime.LLMConfig["llm"].(map[string]any)["max_input_tokens"] != "4096" || request.Personalization.UseMemory || !strings.Contains(string(raw), "q1") || !strings.Contains(string(raw), "a2") || strings.Contains(string(raw), "a3") || strings.Contains(string(raw), "FUTURE_") || strings.Contains(string(raw), "model-global") {
+		if request.Runtime.ThinkingDepth != "high" || request.Runtime.Reasoning || request.Conversation.Mode != "manual" || request.Runtime.LLMConfig["llm"].(map[string]any)["max_input_tokens"] != "4096" || request.Personalization.UseMemory || strings.Contains(string(raw), "FUTURE_") || strings.Contains(string(raw), "model-global") {
 			t.Fatalf("wrong fork request: %s", raw)
 		}
 	case <-time.After(time.Second):
