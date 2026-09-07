@@ -267,7 +267,7 @@ func (s *openingService) runOpeningCall(ctx context.Context, job asyncjob.Job, r
 			}
 			return s.failOpening(ctx, job, meta, "token_limit", true, errors.New("retry with default model"))
 		}
-		return s.failOpening(ctx, job, meta, result.ErrorCode, result.Retryable, errors.New(result.ErrorCode))
+		return s.failOpening(ctx, job, meta, result.ErrorCode, result.Retryable, fmt.Errorf("conversation opening model failed: %s", result.ErrorCode))
 	}
 	rebuild := false
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {

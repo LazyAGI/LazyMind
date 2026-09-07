@@ -5,6 +5,14 @@ package common
 import "net/http"
 
 func init() {
+	registerAdditionalErrorAlias("invalid title", "Invalid request", http.StatusBadRequest, 2000103)
+	registerAdditionalErrorAlias("conversation changed", "Conflict", http.StatusConflict, 2000107)
+	registerAdditionalErrorAlias("update backfill failed", "Internal server error", http.StatusInternalServerError, 2000000)
+	registerAdditionalErrorAlias("reconcile metadata state failed", "Internal server error", http.StatusInternalServerError, 2000000)
+	registerAdditionalErrorAlias("rename conversation failed", "Internal server error", http.StatusInternalServerError, 2000000)
+	registerAdditionalErrorAlias("opening call budget exhausted or seed replaced", "Conflict", http.StatusConflict, 2000107)
+	registerAdditionalErrorAlias("retry with default model", "Internal server error", http.StatusInternalServerError, 2000000)
+	registerAdditionalErrorAlias("conversation opening model failed", "Internal server error", http.StatusInternalServerError, 2000000)
 	registerAdditionalErrorAlias("invalid chat model selection", "Invalid request", http.StatusBadRequest, 2000103)
 	registerAdditionalErrorAlias("conversation model selection changed", "Conflict", http.StatusConflict, 2000107)
 	registerAdditionalErrorAlias("conversation is busy", "Conflict", http.StatusConflict, 2000107)
