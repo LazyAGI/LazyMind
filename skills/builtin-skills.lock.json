@@ -187,6 +187,21 @@
       "package_file": "packages/bsk_6ACDCFC9A48A7A276D31323C0D65.zip"
     },
     {
+      "key": "diagram-design",
+      "uid": "bsk_2DAC078B55AD2AD8DFFAC8D18DBD",
+      "source_url": "https://github.com/cathrynlavery/diagram-design/tree/main/skills/diagram-design",
+      "resolved_url": "https://github.com/cathrynlavery/diagram-design/archive/main.zip",
+      "version": "0.0.0+08dc4a36ad25",
+      "name": "diagram-design",
+      "description": "Create branded architecture, IT current-state, flowchart, sequence, state machine, ER/data model, timeline, swimlane, quadrant, radar/spider, polar chart (polar/radial lollipop), loop/flywheel, nested, tree, org chart, layer stack, Venn, pyramid/funnel, treemap, bar, line, Gantt and scatter charts, high-level, process, medallion, data flow, DP integration, DP security matrix, Sankey, fishbone, Wardley map, kanban, user journey, deployment, dependency graph, UML class, story map, or database schema diagrams as standalone HTML/SVG/PNG. Redraw .drawio/.drawio.png/.drawio.svg or Mermaid .mmd sources at a chosen size/detail; onboard brand tokens from a website; add semantic patterns, callouts, accessible motion, or sketchy/hand-drawn styling.",
+      "category": "design",
+      "market_visible": false,
+      "archive_sha256": "86894d6c06386ba427d7a9f64e13f46fc0fefdb02fead5d925f7288a23efc06b",
+      "tree_sha256": "08dc4a36ad25012256b46f91b283a376d3094933b2c92322275d04d1cc47103f",
+      "archive_size": 864528,
+      "package_file": "packages/bsk_2DAC078B55AD2AD8DFFAC8D18DBD.zip"
+    },
+    {
       "key": "doc-coauthoring",
       "uid": "bsk_08955D51118973AC41019759A3C1",
       "source_url": "https://github.com/anthropics/skills/tree/main/skills/doc-coauthoring",
