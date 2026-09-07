@@ -183,6 +183,62 @@ func TestOpeningCompletionAndEvidenceReplacement(t *testing.T) {
 		t.Fatalf("stale result accepted: %+v", m)
 	}
 }
+
+func TestOpeningEmptyTurnsDoNotConsumeWindow(t *testing.T) {
+	s := openingTestService(t)
+	openingTestConversation(t, s, "c1", "新对话", "default")
+	for i, text := range []string{"在吗", "嗯", "好的", "排查数据库连接池泄漏"} {
+		openingTestInput(t, s, fmt.Sprintf("h%d", i+1), "c1", text, i+1)
+	}
+	calls := 0
+	s.call = func(_ context.Context, input json.RawMessage, _ map[string]any, _ int) (algo.OpeningTaskResult, error) {
+		calls++
+		if !strings.Contains(string(input), "连接池泄漏") {
+			return algo.OpeningTaskResult{Status: "succeeded", Output: algo.OpeningDescription{IntentStatus: "empty"}, Usage: json.RawMessage(`{"model_calls":1}`)}, nil
+		}
+		return openingTestResult("ready"), nil
+	}
+	if queued, err := s.enqueue(context.Background(), "c1", ""); err != nil || !queued {
+		t.Fatal("initial opening was not queued", err)
+	}
+	if _, err := openingTestRun(t, s, "c1"); err != nil {
+		t.Fatal(err)
+	}
+	meta := openingTestMeta(t, s, "c1")
+	if meta.Status != "pending" || meta.GenerationCount != 0 || meta.OpeningTurns != 1 || !strings.Contains(string(meta.InputJSON), "连接池泄漏") {
+		t.Fatalf("empty turns did not advance to the effective request: %+v input=%s", meta, meta.InputJSON)
+	}
+	if _, err := openingTestRun(t, s, "c1"); err != nil {
+		t.Fatal(err)
+	}
+	meta = openingTestMeta(t, s, "c1")
+	if !meta.WindowClosed || meta.GenerationCount != 1 || calls != 2 {
+		t.Fatalf("effective request was not finalized: %+v calls=%d", meta, calls)
+	}
+}
+
+func TestOpeningExplicitRetrySameConfiguration(t *testing.T) {
+	foundInvalidOutput := false
+	for _, code := range openingExplicitRetryErrorCodes {
+		foundInvalidOutput = foundInvalidOutput || code == "invalid_output"
+	}
+	if !foundInvalidOutput {
+		t.Fatal("invalid_output is missing from explicit retry candidates")
+	}
+	for _, code := range []string{"invalid_output", "model_failed", "transport_error", "request_timeout", "rate_limited", "service_unavailable"} {
+		if !openingShouldRetry(code, "same", "same") {
+			t.Fatalf("same configuration should allow explicit retry for %s", code)
+		}
+	}
+	for _, code := range []string{"token_limit", "model_configuration", "authentication_failed", "invalid_request", "not_found"} {
+		if openingShouldRetry(code, "same", "same") {
+			t.Fatalf("same configuration should not retry deterministic failure %s", code)
+		}
+		if !openingShouldRetry(code, "old", "new") {
+			t.Fatalf("configuration change should allow retry for %s", code)
+		}
+	}
+}
 func TestOpeningAttachmentArrivalAndLongInput(t *testing.T) {
 	s := openingTestService(t)
 	c := openingTestConversation(t, s, "c1", "看看这个", "default")

@@ -54,10 +54,12 @@ def test_opening_real_model(client, report, name, expected, messages, attachment
         'general': ['倒排索引'],
         'attachment_ready': ['合同', '风险'],
         'unconfirmed_suggestion': ['LazyMind', '标题'],
+        'answer_then_clarification': ['本地', '检索'],
         'data_instruction': ['销售'],
     }
     forbidden = {
         'unconfirmed_suggestion': ['Redis', 'Celery', '重构'],
+        'answer_then_clarification': ['embedding', 'BM25', '重排序'],
         'data_instruction': ['hacked', '数据库改造'],
     }
     passed = passed and all(word in description for word in required.get(name, []))

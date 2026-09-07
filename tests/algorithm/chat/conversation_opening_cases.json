@@ -124,6 +124,25 @@
     []
   ],
   [
+    "answer_then_clarification",
+    "ready",
+    [
+      [
+        "user",
+        "帮我优化检索"
+      ],
+      [
+        "assistant",
+        "可以考虑 embedding 和 BM25 两路召回，也可以增加重排序。你主要处理本地文件还是云文件？"
+      ],
+      [
+        "user",
+        "本地文件"
+      ]
+    ],
+    []
+  ],
+  [
     "unresolved_reference",
     "provisional",
     [

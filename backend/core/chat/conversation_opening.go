@@ -39,6 +39,19 @@ type openingService struct {
 	loadConfig func(context.Context, *gorm.DB, string) (map[string]any, error)
 }
 
+func openingIgnoredHistoryIDs(meta orm.ConversationOpening) []string {
+	var ids []string
+	_ = json.Unmarshal(meta.SourceHistoryIDs, &ids)
+	if meta.IntentStatus == "empty" {
+		return ids
+	}
+	ignored := len(ids) - meta.OpeningTurns
+	if ignored <= 0 {
+		return nil
+	}
+	return ids[:ignored]
+}
+
 func newOpeningService(db *gorm.DB) *openingService {
 	return &openingService{db: db, call: algo.DescribeConversationOpening, loadConfig: modelconfig.LoadLLMConfig}
 }
@@ -103,7 +116,11 @@ func (s *openingService) enqueue(ctx context.Context, id, backfillID string) (bo
 				return nil
 			}
 		}
-		snap, err := loadOpeningSnapshot(tx, conv)
+		var ignored []string
+		if exists && !changed {
+			ignored = openingIgnoredHistoryIDs(meta)
+		}
+		snap, err := loadOpeningSnapshot(tx, conv, ignored...)
 		if err != nil {
 			return err
 		}
@@ -270,6 +287,7 @@ func (s *openingService) runOpeningCall(ctx context.Context, job asyncjob.Job, r
 		return s.failOpening(ctx, job, meta, result.ErrorCode, result.Retryable, fmt.Errorf("conversation opening model failed: %s", result.ErrorCode))
 	}
 	rebuild := false
+	advanceEmpty := false
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var conv orm.Conversation
 		if err := openingConversations(tx).Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND create_user_id = ?", meta.ConversationID, meta.UserID).Take(&conv).Error; err != nil {
@@ -300,21 +318,28 @@ func (s *openingService) runOpeningCall(ctx context.Context, job asyncjob.Job, r
 			ModelID json.RawMessage `json:"model_id"`
 		}
 		_ = json.Unmarshal(result.Usage, &usage)
-		update := tx.Model(&orm.ConversationOpening{}).Where("conversation_id = ? AND seed_revision = ? AND job_id = ?", meta.ConversationID, meta.SeedRevision, job.ID).Updates(map[string]any{
+		values := map[string]any{
 			"summary": result.Output.Summary, "intent_status": result.Output.IntentStatus, "missing_context": missing,
-			"metadata_revision": gorm.Expr("metadata_revision + 1"), "generation_count": gorm.Expr("generation_count + 1"),
-			"window_closed": result.Output.IntentStatus == "ready" || meta.GenerationCount+1 >= 3 || meta.BackfillID != "",
-			"model_id":      usage.ModelID, "usage_json": result.Usage, "status": "done", "error_code": "", "updated_at": time.Now().UTC(),
-		})
+			"metadata_revision": gorm.Expr("metadata_revision + 1"),
+			"model_id":          usage.ModelID, "usage_json": result.Usage, "status": "done", "error_code": "", "updated_at": time.Now().UTC(),
+		}
+		if result.Output.IntentStatus != "empty" {
+			values["generation_count"] = gorm.Expr("generation_count + 1")
+			values["window_closed"] = result.Output.IntentStatus == "ready" || meta.GenerationCount+1 >= 3 || meta.BackfillID != ""
+		} else if len(ids) >= maxOpeningScannedTurns {
+			values["window_closed"] = true
+		}
+		update := tx.Model(&orm.ConversationOpening{}).Where("conversation_id = ? AND seed_revision = ? AND job_id = ?", meta.ConversationID, meta.SeedRevision, job.ID).Updates(values)
 		if update.Error != nil {
 			return update.Error
 		}
+		advanceEmpty = update.RowsAffected == 1 && result.Output.IntentStatus == "empty"
 		if update.RowsAffected == 1 && result.Output.Title != "" {
 			return tx.Model(&orm.Conversation{}).Where("id = ? AND title_revision = ? AND title_source IN ?", conv.ID, meta.TitleRevision, []string{"default", "auto"}).UpdateColumns(map[string]any{"display_name": result.Output.Title, "title_source": "auto", "title_revision": gorm.Expr("title_revision + 1")}).Error
 		}
 		return nil
 	})
-	if err == nil && rebuild {
+	if err == nil && (rebuild || advanceEmpty) {
 		_, err = s.enqueue(ctx, meta.ConversationID, meta.BackfillID)
 	}
 	return asyncjob.Result{}, err

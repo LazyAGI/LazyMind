@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -352,5 +353,81 @@ func TestRunnerRecoversLeaseThatExpiresAfterStartup(t *testing.T) {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("unexpired startup lease was never recovered")
+	}
+}
+
+func TestRunnerRenewsLeaseWhileHandlerRuns(t *testing.T) {
+	db := newTestDB(t)
+	resetRegistryForTest()
+	defer resetRegistryForTest()
+	var calls atomic.Int32
+	started := make(chan struct{}, 1)
+	Register("test.long-running", func(context.Context, Job, Reporter) (Result, error) {
+		calls.Add(1)
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+		time.Sleep(350 * time.Millisecond)
+		return Result{}, nil
+	})
+	job := enqueueTestJob(t, db, "test.long-running", 3)
+	ctx, cancel := context.WithCancel(context.Background())
+	runner := Start(ctx, db, Options{Concurrency: 2, PollInterval: 10 * time.Millisecond, LockTTL: 90 * time.Millisecond, JobTypes: []string{"test.long-running"}})
+	defer func() { cancel(); <-runner.Done() }()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("handler did not start")
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if getTestJob(t, db, job.ID).Status == string(StatusSucceeded) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	got := getTestJob(t, db, job.ID)
+	if got.Status != string(StatusSucceeded) || got.AttemptCount != 1 || calls.Load() != 1 {
+		t.Fatalf("long handler was reclaimed: job=%+v calls=%d", got, calls.Load())
+	}
+}
+
+func TestRunnerRecoveryRespectsManagedJobTypes(t *testing.T) {
+	db := newTestDB(t)
+	now := time.Now().UTC()
+	expired := now.Add(-time.Minute)
+	for _, jobType := range []string{"managed", "other"} {
+		job := enqueueTestJob(t, db, jobType, 2)
+		if err := db.Model(&orm.AsyncJob{}).Where("id = ?", job.ID).Updates(map[string]any{
+			"status": StatusRunning, "attempt_count": 1, "locked_by": "old", "lock_until": expired,
+		}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	runner := newRunner(db, Options{JobTypes: []string{"managed"}})
+	if err := runner.recoverStaleJobs(context.Background(), now); err != nil {
+		t.Fatal(err)
+	}
+	var managed, other orm.AsyncJob
+	db.First(&managed, "job_type = ?", "managed")
+	db.First(&other, "job_type = ?", "other")
+	if managed.Status != string(StatusPending) || other.Status != string(StatusRunning) {
+		t.Fatalf("scoped recovery changed wrong jobs: managed=%s other=%s", managed.Status, other.Status)
+	}
+}
+
+func TestReporterCannotRenewNewerAttemptFromSameWorker(t *testing.T) {
+	db := newTestDB(t)
+	job := enqueueTestJob(t, db, "test.fenced-heartbeat", 3)
+	until := time.Now().UTC().Add(time.Minute)
+	if err := db.Model(&orm.AsyncJob{}).Where("id = ?", job.ID).Updates(map[string]any{
+		"status": StatusRunning, "attempt_count": 2, "locked_by": "same-worker", "lock_until": until,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	reporter := &jobReporter{db: db, jobID: job.ID, workerID: "same-worker", attemptCount: 1, lockTTL: time.Minute}
+	if err := reporter.Heartbeat(context.Background()); !errors.Is(err, errJobLeaseLost) {
+		t.Fatalf("stale attempt renewed newer lease: %v", err)
 	}
 }

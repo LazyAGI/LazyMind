@@ -17,6 +17,11 @@ import (
 	"lazymind/core/store"
 )
 
+var openingExplicitRetryErrorCodes = []string{
+	"token_limit", "input_too_large", "output_too_large", "model_configuration", "authentication_failed", "invalid_request", "not_found",
+	"invalid_output", "model_failed", "transport_error", "request_timeout", "rate_limited", "service_unavailable",
+}
+
 func enqueueOpeningScan(ctx context.Context, db *gorm.DB, batch orm.ConversationOpeningBackfill) error {
 	var failed int64
 	key := fmt.Sprintf("%s:%s:%d", batch.ID, batch.CursorID, batch.Scanned)
@@ -160,7 +165,7 @@ func OpeningBackfill(w http.ResponseWriter, r *http.Request) {
 					return err
 				}
 				var failed []orm.ConversationOpening
-				if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("user_id = ? AND status = ? AND error_code IN ?", userID, "failed", []string{"token_limit", "input_too_large", "output_too_large", "model_configuration", "authentication_failed", "invalid_request", "not_found", "model_failed", "transport_error", "request_timeout", "rate_limited", "service_unavailable"}).Find(&failed).Error; err != nil {
+				if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("user_id = ? AND status = ? AND error_code IN ?", userID, "failed", openingExplicitRetryErrorCodes).Find(&failed).Error; err != nil {
 					return err
 				}
 				for _, meta := range failed {
@@ -168,7 +173,7 @@ func OpeningBackfill(w http.ResponseWriter, r *http.Request) {
 						ConfigurationHash string `json:"configuration_hash"`
 					}
 					_ = json.Unmarshal(meta.UsageJSON, &usage)
-					if usage.ConfigurationHash == openingConfigHash(config) {
+					if !openingShouldRetry(meta.ErrorCode, usage.ConfigurationHash, openingConfigHash(config)) {
 						continue
 					}
 					meta.SeedRevision++
@@ -251,6 +256,18 @@ func OpeningBackfill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeConversationJSON(w, http.StatusOK, map[string]any{"batch": batch, "completed": states["done"], "failed": states["failed"], "skipped": batch.Skipped + states["skipped"], "pending": revision.Pending, "revision": revision.Revision, "unprocessed": remaining + states["pending"] + states["running"]})
+}
+
+func openingSameConfigRetryable(code string) bool {
+	switch code {
+	case "invalid_output", "model_failed", "transport_error", "request_timeout", "rate_limited", "service_unavailable":
+		return true
+	}
+	return false
+}
+
+func openingShouldRetry(code, previousConfigHash, currentConfigHash string) bool {
+	return previousConfigHash != currentConfigHash || openingSameConfigRetryable(code)
 }
 
 func RenameConversation(w http.ResponseWriter, r *http.Request) {

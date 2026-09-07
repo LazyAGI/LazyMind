@@ -22,6 +22,9 @@ type openingSnapshot struct {
 	Active       bool
 }
 
+// Bound model calls when a historical conversation starts with only semantic-empty chatter.
+const maxOpeningScannedTurns = 12
+
 type openingEvidenceRow struct {
 	ID, RawContent, Result string
 	Ext                    json.RawMessage
@@ -130,8 +133,12 @@ func openingAttachmentDescriptions(files []map[string]any, answer string) {
 	}
 }
 
-func loadOpeningSnapshot(db *gorm.DB, conv orm.Conversation) (openingSnapshot, error) {
+func loadOpeningSnapshot(db *gorm.DB, conv orm.Conversation, ignoredHistoryIDs ...string) (openingSnapshot, error) {
 	var snapshot openingSnapshot
+	ignored := make(map[string]struct{}, len(ignoredHistoryIDs))
+	for _, id := range ignoredHistoryIDs {
+		ignored[id] = struct{}{}
+	}
 	rows, err := db.Model(&orm.ChatHistory{}).Where("conversation_id = ?", conv.ID).Order("seq ASC, create_time ASC, id ASC").Rows()
 	if err != nil {
 		return snapshot, err
@@ -153,6 +160,14 @@ func loadOpeningSnapshot(db *gorm.DB, conv orm.Conversation) (openingSnapshot, e
 		text := strings.TrimSpace(openingText(displayChatHistoryContent(row.RawContent)))
 		attachments := openingAttachments(row.Ext)
 		openingAttachmentDescriptions(attachments, row.Result)
+		if _, skip := ignored[row.ID]; skip {
+			snapshot.IDs = append(snapshot.IDs, row.ID)
+			evidence = append(evidence, openingEvidenceRow{row.ID, row.RawContent, row.Result, row.Ext})
+			continue
+		}
+		if len(snapshot.IDs) >= maxOpeningScannedTurns {
+			break
+		}
 		if snapshot.DefaultTitle == "" {
 			snapshot.DefaultTitle = GetDefaultDisplayName(conv.ID, []map[string]any{{"text": text}})
 		}
