@@ -19,7 +19,7 @@ _logger = logging.getLogger(__name__)
 )
 async def llm_task_run(request: LLMTaskRequest) -> LLMTaskResult:
     result = await asyncio.to_thread(run_llm_task, request)
-    if result.status == 'failed':
+    if result.status == 'failed' and request.task_type != 'conversation.describe_opening':
         _logger.warning(
             'llm_task_failed task_type=%s task_id=%s error=%s',
             request.task_type,

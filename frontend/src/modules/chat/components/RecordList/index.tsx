@@ -126,6 +126,8 @@ export interface RecordListImperativeProps {
 const { Search } = Input;
 
 type SidebarConversation = ConversationWithRelation & {
+  metadata_pending?: boolean;
+  title_revision?: number;
   pinned_at?: string | null;
   is_pinned?: boolean;
   source_type?: string;
@@ -825,6 +827,8 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
       };
       return (
         <div
+          aria-busy={item.metadata_pending || undefined}
+          data-title-revision={item.title_revision}
           className={classnames("record", {
             selected,
             "record-child": isChild,

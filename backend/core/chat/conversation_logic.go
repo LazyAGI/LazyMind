@@ -285,6 +285,7 @@ func ensureConversation(ctx context.Context, db *gorm.DB, convID, displayName st
 	c = orm.Conversation{
 		ID:           convID,
 		DisplayName:  displayName,
+		TitleSource:  "default",
 		ChannelID:    "default",
 		SearchConfig: searchConfig,
 		Models:       models,
@@ -301,6 +302,9 @@ func ensureConversation(ctx context.Context, db *gorm.DB, convID, displayName st
 		return nil, 0, err
 	}
 	applyResolvedChatModelBinding(&c, modelBinding)
+	if title, _ := conversationSettings["display_name"].(string); strings.TrimSpace(title) != "" {
+		c.TitleSource = "user"
+	}
 	if ephemeral, _ := conversationSettings["ephemeral"].(bool); ephemeral {
 		c.IsEphemeral = true
 		if persistent, _ := conversationSettings["persistent_ephemeral"].(bool); !persistent {
@@ -2437,6 +2441,7 @@ func persistImmediateRunTerminal(
 	if db == nil || terminal == nil {
 		return false
 	}
+	defer notifyConversationOpening(db, convID)
 	now := time.Now()
 	values := map[string]any{
 		"seq": target.Seq, "raw_content": query, "content": query, "result": "",
@@ -2945,6 +2950,7 @@ dualPersist:
 }
 
 func recordConversationIdleActivity(ctx context.Context, db *gorm.DB, stateStore state.Store, conversationID, userID, historyID, userContent, assistantText string, now time.Time) {
+	notifyConversationOpening(db, conversationID)
 	if db == nil || stateStore == nil || strings.TrimSpace(conversationID) == "" || strings.TrimSpace(userID) == "" || strings.TrimSpace(historyID) == "" {
 		return
 	}

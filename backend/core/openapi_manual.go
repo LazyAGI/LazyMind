@@ -234,6 +234,9 @@ func manualSchemas() map[string]any {
 			prop("message", strSchema()),
 			prop("data", refSchema("CurrentMemoryConflictData")),
 		),
+		"ConversationOpeningState": objReq([]string{"batch", "pending", "revision", "completed", "failed", "skipped", "unprocessed"},
+			prop("batch", obj(prop("id", strSchema()), prop("status", enumStringSchema("idle", "running", "paused", "done", "failed")), prop("scanned", int64Schema()), prop("scan_complete", boolSchema()))),
+			prop("pending", int64Schema()), prop("revision", int64Schema()), prop("completed", int64Schema()), prop("failed", int64Schema()), prop("skipped", int64Schema()), prop("unprocessed", int64Schema())),
 		"Algo": obj(
 			prop("algo_id", strSchema()),
 			prop("description", strSchema()),
@@ -705,6 +708,8 @@ func conversationItemSchema(includeSourceContext bool) map[string]any {
 		prop("name", strSchema()),
 		prop("conversation_id", strSchema()),
 		prop("display_name", strSchema()),
+		prop("title_revision", int64Schema()),
+		prop("metadata_pending", boolSchema()),
 		prop("search_config", obj()),
 		prop("user", strSchema()),
 		prop("chat_times", int64Schema()),
@@ -930,7 +935,12 @@ func manualPaths() map[string]any {
 				param("path", "schedule_id", true, strSchema()), param("query", "page", false, intSchema()), param("query", "page_size", false, intSchema()),
 			), nil, response(200, "Schedule task page", refSchema("TaskCenterTaskListResponse")),
 		)},
-		"/conversations": map[string]any{"get": op("Conversation list", queryParams(param("query", "keyword", false, strSchema()), param("query", "assistant", false, enumStringSchema("lazymind", "codex", "cursor", "workbuddy")), param("query", "page_size", false, intSchema()), param("query", "page_token", false, strSchema())), nil, response(200, "Conversation list", refSchema("ConversationListResponse")))},
+		"/conversations/metadata-backfill": map[string]any{
+			"get":  op("Conversation metadata progress", nil, nil, response(200, "Metadata progress", refSchema("ConversationOpeningState"))),
+			"post": op("Start, pause, resume or retry conversation metadata backfill", nil, jsonBody(objReq([]string{"action"}, prop("action", enumStringSchema("start", "pause", "resume", "retry"))), true), response(200, "Metadata progress", refSchema("ConversationOpeningState"))),
+		},
+		"/conversations/{name}/title": map[string]any{"patch": op("Rename conversation with title revision protection", queryParams(param("path", "name", true, strSchema())), jsonBody(objReq([]string{"display_name", "title_revision"}, prop("display_name", strSchema()), prop("title_revision", int64Schema())), true), response(200, "Updated title", obj(prop("display_name", strSchema()), prop("title_revision", int64Schema()))))},
+		"/conversations":              map[string]any{"get": op("Conversation list", queryParams(param("query", "keyword", false, strSchema()), param("query", "assistant", false, enumStringSchema("lazymind", "codex", "cursor", "workbuddy")), param("query", "page_size", false, intSchema()), param("query", "page_token", false, strSchema())), nil, response(200, "Conversation list", refSchema("ConversationListResponse")))},
 		"/memory/soul": map[string]any{
 			"get": map[string]any{
 				"summary": "Get current user's Soul memory",

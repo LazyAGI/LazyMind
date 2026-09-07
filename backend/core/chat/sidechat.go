@@ -467,6 +467,7 @@ func createSidechatConversation(
 		child = orm.Conversation{
 			ID:                   newConversationID(),
 			DisplayName:          sidechatDisplayName(parent.DisplayName, request.SelectedText),
+			TitleSource:          "default",
 			ChannelID:            "default",
 			SearchConfig:         parent.SearchConfig,
 			ChatModelMode:        parent.ChatModelMode,
@@ -818,7 +819,7 @@ func RetainSidechat(w http.ResponseWriter, r *http.Request) {
 				}).Error; err != nil {
 				return err
 			}
-		} else if child.DisplayName != displayName {
+		} else if child.TitleSource == "default" && child.DisplayName != displayName {
 			if err := tx.Model(&orm.Conversation{}).Where("id = ? AND create_user_id = ?", childID, userID).
 				Updates(map[string]any{"display_name": displayName, "updated_at": time.Now().UTC()}).Error; err != nil {
 				return err
@@ -845,6 +846,8 @@ func RetainSidechat(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "retain sidechat failed", http.StatusInternalServerError)
 		return
 	}
+	notifyConversationOpening(db, childID)
+
 	writeConversationJSON(w, http.StatusOK, map[string]any{
 		"conversation": sidechatConversationPayload(child, loadParentDisplayName(r.Context(), db, child, userID)),
 	})

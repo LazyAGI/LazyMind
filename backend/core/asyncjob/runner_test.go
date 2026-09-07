@@ -281,3 +281,76 @@ func getTestJob(t *testing.T, db *gorm.DB, id string) *orm.AsyncJob {
 	}
 	return job
 }
+
+func TestRunnerTypePriorityAndResourceSerialization(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	history := enqueueTestJob(t, db, "opening.backfill", 3)
+	live := enqueueTestJob(t, db, "opening.live", 3)
+	background := newRunner(db, Options{JobTypes: []string{"opening.backfill"}, YieldToJobTypes: []string{"opening.live"}, SerializeResources: true})
+	if row, err := background.claimOne(ctx, time.Now()); err != nil || row != nil {
+		t.Fatal("backfill did not yield", err)
+	}
+	foreground := newRunner(db, Options{JobTypes: []string{"opening.live"}, SerializeResources: true})
+	row, err := foreground.claimOne(ctx, time.Now())
+	if err != nil || row == nil || row.ID != live.ID {
+		t.Fatal("live claim", err)
+	}
+	// Both jobs use the same resource in enqueueTestJob.
+	if row, err := background.claimOne(ctx, time.Now()); err != nil || row != nil {
+		t.Fatal("same resource ran concurrently", err)
+	}
+	if err := foreground.markSucceeded(ctx, *row, Result{}); err != nil {
+		t.Fatal(err)
+	}
+	if row, err := background.claimOne(ctx, time.Now()); err != nil || row == nil || row.ID != history.ID {
+		t.Fatal("backfill did not resume", err)
+	}
+}
+func TestRunnerPermanentFailureAndStaleOwner(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	runner := newTestRunner(db)
+	job := enqueueTestJob(t, db, "opening.test", 3)
+	row, err := runner.claimOne(ctx, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runner.markFailedAttempt(ctx, *row, Result{Permanent: true}, errors.New("invalid config")); err != nil {
+		t.Fatal(err)
+	}
+	if got := getTestJob(t, db, job.ID); got.Status != "failed" || got.AttemptCount != 1 {
+		t.Fatal("deterministic failure retried")
+	}
+	db.Model(&orm.AsyncJob{}).Where("id = ?", job.ID).Updates(map[string]any{"status": "running", "attempt_count": 2, "locked_by": "new-owner"})
+	if err := runner.markSucceeded(ctx, *row, Result{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := getTestJob(t, db, job.ID); got.Status != "running" || got.LockedBy != "new-owner" {
+		t.Fatal("stale owner finalized newer attempt")
+	}
+}
+
+func TestRunnerRecoversLeaseThatExpiresAfterStartup(t *testing.T) {
+	db := newTestDB(t)
+	resetRegistryForTest()
+	defer resetRegistryForTest()
+	done := make(chan struct{}, 1)
+	Register("test.recover-later", func(context.Context, Job, Reporter) (Result, error) {
+		done <- struct{}{}
+		return Result{}, nil
+	})
+	job := enqueueTestJob(t, db, "test.recover-later", 3)
+	until := time.Now().Add(200 * time.Millisecond)
+	if err := db.Model(&orm.AsyncJob{}).Where("id = ?", job.ID).Updates(map[string]any{"status": StatusRunning, "lock_until": until, "locked_by": "previous-process", "attempt_count": 1}).Error; err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	runner := Start(ctx, db, Options{Concurrency: 1, PollInterval: 20 * time.Millisecond, LockTTL: 100 * time.Millisecond})
+	defer func() { cancel(); <-runner.Done() }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("unexpired startup lease was never recovered")
+	}
+}

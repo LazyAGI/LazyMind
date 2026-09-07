@@ -69,6 +69,8 @@ class LLMTaskResult(BaseModel):
     tool_call_turns: int = 0
     usage: dict[str, Any] = Field(default_factory=dict)
     error: str | None = None
+    error_code: str | None = None
+    retryable: bool = False
 
 
 class LLMTaskError(RuntimeError):
@@ -90,6 +92,20 @@ def run_llm_task(request: LLMTaskRequest) -> LLMTaskResult:
     task_id = str(uuid4())
     lazyllm.globals._init_sid(sid=f'llm_task_{task_id}')
     lazyllm.locals._init_sid(sid=f'llm_task_{task_id}')
+    if request.task_type == 'conversation.describe_opening':
+        from .conversation_opening import OpeningTaskError, describe_opening
+        try:
+            inject_model_config(request.llm_config)
+            output, usage = describe_opening(request)
+            return LLMTaskResult(status='succeeded', task_id=task_id, output=output,
+                                 text=json.dumps(output, ensure_ascii=False), usage=usage)
+        except OpeningTaskError as exc:
+            return LLMTaskResult(status='failed', task_id=task_id, error=str(exc),
+                                 error_code=exc.code, retryable=exc.retryable,
+                                 usage={**exc.usage, 'model_calls': exc.calls})
+        except Exception:
+            return LLMTaskResult(status='failed', task_id=task_id, error='model_configuration',
+                                 error_code='model_configuration', usage={'model_calls': 0})
     inject_model_config(request.llm_config)
     try:
         output, text, files = _run_task(request)

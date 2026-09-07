@@ -1351,3 +1351,21 @@ export function ConversationSettingsApi() {
     },
   };
 }
+
+export interface ConversationOpeningState {
+  batch: {status: string; scan_complete: boolean; scanned: number};
+  pending: number;
+  revision: number;
+  completed: number;
+  failed: number;
+  skipped: number;
+  unprocessed: number;
+}
+
+export async function conversationOpeningState(action?: "start" | "pause" | "resume" | "retry", signal?: AbortSignal) {
+  const url = `${coreApiBaseUrl}/conversations/metadata-backfill`;
+  const response = action
+    ? await axiosInstance.post<ConversationOpeningState>(url, {action}, {signal})
+    : await axiosInstance.get<ConversationOpeningState>(url, {signal});
+  return response.data;
+}

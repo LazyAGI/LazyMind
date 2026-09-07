@@ -64,6 +64,7 @@ import UserAgreementConsentModal, {
   useUserAgreementConsentGate,
 } from "@/components/UserAgreementConsentModal";
 import TerminalConnectionQuickPanel from "@/modules/channelGateway/components/TerminalConnectionQuickPanel";
+import { useConversationOpening } from "@/modules/chat/hooks/useConversationOpening";
 import "./index.scss";
 
 const { Content, Sider } = Layout;
@@ -147,6 +148,8 @@ export default function MainLayout() {
     currentSidebarConversationId,
   );
   const recordListRef = useRef<RecordListImperativeProps>(null);
+  const refreshOpeningTitles = useCallback(() => { recordListRef.current?.refresh(); }, []);
+  useConversationOpening(isLoggedIn ? userName : "", refreshOpeningTitles);
   currentSidebarConversationIdRef.current = currentSidebarConversationId;
   const [profileModalOpen, setProfileModalOpen] = useState(false);
   const [profileLoading, setProfileLoading] = useState(false);
