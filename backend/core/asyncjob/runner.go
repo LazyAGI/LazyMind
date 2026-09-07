@@ -437,7 +437,7 @@ type jobReporter struct {
 	lockTTL      time.Duration
 }
 
-var errJobLeaseLost = errors.New("asyncjob: job lease lost")
+var errJobLeaseLost = errors.New("async job lease lost")
 
 func (r *jobReporter) SetProgress(ctx context.Context, current, total int64) error {
 	result := r.db.WithContext(ctx).Model(&orm.AsyncJob{}).
