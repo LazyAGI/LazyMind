@@ -45,6 +45,25 @@ def test_workflow_script_tool_is_loaded_from_pinned_revision():
     client.get_workflow.assert_called_once_with('test-workflow', 'revision-1')
 
 
+def test_terminal_tools_only_filters_model_tools_without_mutating_runtime_tools():
+    def cloud_files():
+        pass
+
+    def writer_prepare_workspace():
+        pass
+
+    runtime_tools = [cloud_files, writer_prepare_workspace]
+
+    assert runner_mod._model_visible_runtime_tools(runtime_tools, {}) is runtime_tools
+    visible = runner_mod._model_visible_runtime_tools(runtime_tools, {
+        'terminal_tools_only': True,
+        'terminal_tools': ['writer_prepare_workspace'],
+    })
+
+    assert runtime_tools == [cloud_files, writer_prepare_workspace]
+    assert visible == [writer_prepare_workspace]
+
+
 # ---------------------------------------------------------------------------
 # In-memory FakeDB
 # ---------------------------------------------------------------------------

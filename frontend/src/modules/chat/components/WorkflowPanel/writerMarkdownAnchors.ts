@@ -1,7 +1,26 @@
-const MATERIALIZED_SYSTEM_ANCHOR_RE = /<a\s+id=(["'])(block-[^"']+)\1\s*>\s*<\/a>/gi;
-const EDITOR_SYSTEM_ANCHOR_RE = /<a\s+id=(["'])(block-[^"']+)\1\s*\/>/gi;
+const MATERIALIZED_SYSTEM_ANCHOR_RE = /<a\s+id=(["'])(block-[^"']+)\1((?:\s+[^>]*?)?)\s*>\s*<\/a>/gi;
+const EDITOR_SYSTEM_ANCHOR_RE = /<a\s+id=(["'])(block-[^"']+)\1((?:\s+[^>]*?)?)\s*\/>/gi;
+const SYSTEM_ANCHOR_LINE_RE = /^<a\s+id=(["'])(block-[^"']+)\1((?:\s+[^>]*?)?)\s*(?:\/>|>\s*<\/a>)$/i;
+const HEADING_NUMBERING_CONFIG_LINE_RE = /^\s*<!--\s*heading-numbering:[^\r\n]*-->\s*$/i;
+const OUTLINE_INSTRUCTION_LINE_RE = /^\s*<!--\s*writer:outline\s+(\{.*\})\s*-->\s*$/;
 const SOURCE_PAGE_MARKER_RE = /^([ \t]*)<!--[ \t]*第[ \t]*(\d+)[ \t]*页[ \t]*-->[ \t]*$/i;
 const EDITOR_PAGE_MARKER_RE = /^([ \t]*)<a\s+id=(["'])writer-page-marker-(\d+)\2\s*(?:\/>|>\s*<\/a>)[ \t]*$/i;
+
+export interface WriterMarkdownOutlineInstruction {
+  node_id: string;
+  target_chars?: number;
+  context_relations: Array<{
+    relation: string;
+    guidance?: string;
+    target_node_id: string;
+  }>;
+  subtasks: Array<{
+    subtask_id: string;
+    subtask_type: 'retrieve' | 'extract' | 'reason';
+    question: string;
+    status: 'pending' | 'running' | 'completed' | 'retrying' | 'failed';
+  }>;
+}
 
 function mapMarkdownLinesOutsideFences(
   markdown: string,
@@ -51,6 +70,7 @@ export interface WriterMarkdownOutlineItem {
   anchorId: string;
   label: string;
   level: number;
+  instructions?: WriterMarkdownOutlineInstruction;
 }
 
 export interface WriterMarkdownOutline {
@@ -62,14 +82,48 @@ interface WriterMarkdownTargetBinding {
   lineIndex: number;
   anchorLineIndex?: number;
   anchorId?: string;
+  anchorAttributes?: string;
   type: 'heading' | 'image';
   level?: number;
   signature: string;
+  outlineInstructionLine?: string;
 }
 
 interface WriterMarkdownImageTarget {
   source: string;
   label: string;
+}
+
+interface WriterAnchorAssignment {
+  anchorId?: string;
+  anchorAttributes?: string;
+}
+
+function headingNumberingConfigLine(markdown: string): string | undefined {
+  return markdown.split(/\r?\n/).find(
+    (line) => HEADING_NUMBERING_CONFIG_LINE_RE.test(line),
+  )?.trim();
+}
+
+function withHeadingNumberingConfigLine(
+  markdown: string,
+  configLine?: string,
+): string {
+  const lines = markdown.split(/\r?\n/).filter(
+    (line) => !HEADING_NUMBERING_CONFIG_LINE_RE.test(line),
+  );
+  if (!configLine) return lines.join('\n');
+  let insertAt = 0;
+  if (lines[0]?.trim() === '---') {
+    const end = lines.slice(1).findIndex((line) => /^(?:---|\.\.\.)\s*$/.test(line));
+    if (end >= 0) insertAt = end + 2;
+  }
+  lines.splice(
+    insertAt,
+    0,
+    configLine,
+  );
+  return lines.join('\n');
 }
 
 function writerMarkdownImageTarget(line: string): WriterMarkdownImageTarget | undefined {
@@ -99,9 +153,14 @@ function writerMarkdownImageTarget(line: string): WriterMarkdownImageTarget | un
 
 function writerMarkdownTargetBindings(markdown: string): WriterMarkdownTargetBinding[] {
   const bindings: WriterMarkdownTargetBinding[] = [];
-  let pendingAnchor: { id: string; lineIndex: number } | undefined;
+  let pendingAnchor: {
+    id: string;
+    lineIndex: number;
+    attributes?: string;
+  } | undefined;
   let fenceCharacter = '';
   let fenceLength = 0;
+  let currentHeadingIndex: number | undefined;
 
   markdown.split(/\r?\n/).forEach((line, lineIndex) => {
     const fence = line.match(/^\s*(`{3,}|~{3,})/);
@@ -120,11 +179,19 @@ function writerMarkdownTargetBindings(markdown: string): WriterMarkdownTargetBin
     if (fenceCharacter) return;
 
     const trimmed = line.trim();
-    const anchor = trimmed.match(
-      /^<a\s+id=(["'])(block-[^"']+)\1\s*(?:\/>|>\s*<\/a>)$/i,
-    );
+    if (OUTLINE_INSTRUCTION_LINE_RE.test(trimmed)) {
+      if (currentHeadingIndex !== undefined) {
+        bindings[currentHeadingIndex].outlineInstructionLine = trimmed;
+      }
+      return;
+    }
+    const anchor = trimmed.match(SYSTEM_ANCHOR_LINE_RE);
     if (anchor) {
-      pendingAnchor = { id: anchor[2], lineIndex };
+      pendingAnchor = {
+        id: anchor[2],
+        lineIndex,
+        attributes: anchor[3]?.trim() || undefined,
+      };
       return;
     }
     if (!trimmed) return;
@@ -135,17 +202,21 @@ function writerMarkdownTargetBindings(markdown: string): WriterMarkdownTargetBin
         lineIndex,
         anchorLineIndex: pendingAnchor?.lineIndex,
         anchorId: pendingAnchor?.id,
+        anchorAttributes: pendingAnchor?.attributes,
         type: 'heading',
         level: heading[1].length,
         signature: `${heading[1].length}:${heading[2].trim()}`,
       });
+      currentHeadingIndex = bindings.length - 1;
     } else {
+      currentHeadingIndex = undefined;
       const image = writerMarkdownImageTarget(trimmed);
       if (image) {
         bindings.push({
           lineIndex,
           anchorLineIndex: pendingAnchor?.lineIndex,
           anchorId: pendingAnchor?.id,
+          anchorAttributes: pendingAnchor?.attributes,
           type: 'image',
           // The URL is the stable identity when numbering changes image alt text.
           signature: `image:${image.source}`,
@@ -177,9 +248,13 @@ export function protectWriterMarkdownAnchors(
   nextMarkdown: string,
   generateMissingAnchors = true,
 ): string {
+  const configLine = headingNumberingConfigLine(nextMarkdown)
+    ?? headingNumberingConfigLine(previousMarkdown);
   const previous = writerMarkdownTargetBindings(previousMarkdown);
   const next = writerMarkdownTargetBindings(nextMarkdown);
-  if (next.length === 0) return nextMarkdown;
+  if (next.length === 0) {
+    return withHeadingNumberingConfigLine(nextMarkdown, configLine);
+  }
 
   const previousBySignature = new Map<string, number[]>();
   const previousAnchorOwner = new Map<string, number>();
@@ -202,21 +277,25 @@ export function protectWriterMarkdownAnchors(
     matchedPrevious.filter((index): index is number => index !== undefined),
   );
   const assignedAnchorIds = new Set<string>();
-  const assignments = next.map((target, index) => {
+  const assignments: WriterAnchorAssignment[] = next.map((target, index) => {
     const previousIndex = matchedPrevious[index];
+    const previousTarget = previousIndex === undefined ? undefined : previous[previousIndex];
     const previousAnchorId = previousIndex === undefined
       ? undefined
       : previous[previousIndex]?.anchorId;
     if (previousAnchorId && !assignedAnchorIds.has(previousAnchorId)) {
       assignedAnchorIds.add(previousAnchorId);
-      return previousAnchorId;
+      return {
+        anchorId: previousAnchorId,
+        anchorAttributes: previousTarget?.anchorAttributes ?? target.anchorAttributes,
+      };
     }
 
     if (target.anchorId && !assignedAnchorIds.has(target.anchorId)) {
       const previousOwner = previousAnchorOwner.get(target.anchorId);
       if (previousOwner === undefined || !consumedPrevious.has(previousOwner)) {
         assignedAnchorIds.add(target.anchorId);
-        return target.anchorId;
+        return { anchorId: target.anchorId, anchorAttributes: target.anchorAttributes };
       }
     }
 
@@ -226,16 +305,20 @@ export function protectWriterMarkdownAnchors(
       const anchorId = previous[index].anchorId;
       if (!assignedAnchorIds.has(anchorId)) {
         assignedAnchorIds.add(anchorId);
-        return anchorId;
+        return {
+          anchorId,
+          anchorAttributes: previous[index].anchorAttributes ?? target.anchorAttributes,
+        };
       }
     }
 
     // A leading H1 is the document title. Other unmatched headings and images
     // are reference targets and need a stable id.
-    return !generateMissingAnchors
+    const anchorId = !generateMissingAnchors
       || (index === 0 && target.type === 'heading' && target.level === 1)
       ? undefined
       : nextWriterUserAnchorId(usedAnchorIds);
+    return { anchorId, anchorAttributes: target.anchorAttributes };
   });
 
   const lines = nextMarkdown.split(/\r?\n/);
@@ -245,14 +328,30 @@ export function protectWriterMarkdownAnchors(
       .filter((lineIndex): lineIndex is number => lineIndex !== undefined),
   );
   const insertBefore = new Map<number, string>();
+  const insertAfter = new Map<number, string>();
   next.forEach((target, index) => {
-    const anchorId = assignments[index];
-    if (anchorId) insertBefore.set(target.lineIndex, `<a id="${anchorId}" />`);
+    const assignment = assignments[index];
+    if (assignment.anchorId) {
+      insertBefore.set(
+        target.lineIndex,
+        `<a id="${assignment.anchorId}"${
+          assignment.anchorAttributes ? ` ${assignment.anchorAttributes}` : ''
+        } />`,
+      );
+    }
+    if (target.type === 'heading' && assignment.anchorId) {
+      const previousTarget = previous.find(
+        (item) => item.anchorId === assignment.anchorId && item.type === 'heading',
+      );
+      if (previousTarget?.outlineInstructionLine) {
+        insertAfter.set(target.lineIndex, previousTarget.outlineInstructionLine);
+      }
+    }
   });
 
   const result: string[] = [];
   lines.forEach((line, lineIndex) => {
-    if (targetAnchorLines.has(lineIndex)) return;
+    if (targetAnchorLines.has(lineIndex) || OUTLINE_INSTRUCTION_LINE_RE.test(line)) return;
     const anchor = insertBefore.get(lineIndex);
     if (anchor) {
       // MDX serializers may surround a standalone JSX anchor with extra empty
@@ -265,8 +364,10 @@ export function protectWriterMarkdownAnchors(
       result.push(anchor);
     }
     result.push(line);
+    const instruction = insertAfter.get(lineIndex);
+    if (instruction) result.push(instruction);
   });
-  return result.join('\n');
+  return withHeadingNumberingConfigLine(result.join('\n'), configLine);
 }
 
 /** Backward-compatible name for callers outside the editor module. */
@@ -276,7 +377,10 @@ export const protectWriterMarkdownHeadingAnchors = protectWriterMarkdownAnchors;
 export function writerMarkdownForEditor(markdown: string): string {
   return pageMarkersForEditor(markdown).replace(
     MATERIALIZED_SYSTEM_ANCHOR_RE,
-    (_match, _quote: string, anchorId: string) => `<a id="${anchorId}" />`,
+    (_match, _quote: string, anchorId: string, attributes = '') => {
+      const suffix = attributes.trim();
+      return `<a id="${anchorId}"${suffix ? ` ${suffix}` : ''} />`;
+    },
   );
 }
 
@@ -290,19 +394,31 @@ export function writerMarkdownForEditing(markdown: string): string {
   const bindings = writerMarkdownTargetBindings(editorMarkdown);
   const anchorLines = new Set(
     bindings
-      .map((heading) => heading.anchorLineIndex)
+      .map((target) => target.anchorLineIndex)
       .filter((lineIndex): lineIndex is number => lineIndex !== undefined),
   );
   const anchoredTargetLines = new Set(
     bindings
-      .filter((heading) => heading.anchorLineIndex !== undefined)
-      .map((heading) => heading.lineIndex),
+      .filter((target) => target.anchorLineIndex !== undefined)
+      .map((target) => target.lineIndex),
   );
-  if (anchorLines.size === 0) return editorMarkdown;
+  const hasConfig = editorMarkdown.split(/\r?\n/).some(
+    (line) => HEADING_NUMBERING_CONFIG_LINE_RE.test(line),
+  );
+  const hasOutlineInstructions = editorMarkdown.split(/\r?\n/).some(
+    (line) => OUTLINE_INSTRUCTION_LINE_RE.test(line),
+  );
+  if (anchorLines.size === 0 && !hasConfig && !hasOutlineInstructions) {
+    return editorMarkdown;
+  }
 
   const result: string[] = [];
   editorMarkdown.split(/\r?\n/).forEach((line, lineIndex) => {
-    if (anchorLines.has(lineIndex)) return;
+    if (
+      anchorLines.has(lineIndex)
+      || HEADING_NUMBERING_CONFIG_LINE_RE.test(line)
+      || OUTLINE_INSTRUCTION_LINE_RE.test(line)
+    ) return;
     if (anchoredTargetLines.has(lineIndex)) {
       while (
         result.length >= 2
@@ -329,7 +445,11 @@ export function collectWriterMarkdownDomAnchors(markdown: string): WriterMarkdow
   writerMarkdownTargetBindings(markdown).forEach((target) => {
     const targetIndex = target.type === 'heading' ? headingIndex++ : imageIndex++;
     if (target.anchorId) {
-      anchors.push({ anchorId: target.anchorId, type: target.type, targetIndex });
+      anchors.push({
+        anchorId: target.anchorId,
+        type: target.type,
+        targetIndex,
+      });
     }
   });
   return anchors;
@@ -393,7 +513,10 @@ export function writerMarkdownPersistenceIdentity(markdown: string): string {
 export function writerMarkdownForSave(markdown: string): string {
   return pageMarkersForSave(markdown.replace(
     EDITOR_SYSTEM_ANCHOR_RE,
-    (_match, _quote: string, anchorId: string) => `<a id="${anchorId}"></a>`,
+    (_match, _quote: string, anchorId: string, attributes = '') => {
+      const suffix = attributes.trim();
+      return `<a id="${anchorId}"${suffix ? ` ${suffix}` : ''}></a>`;
+    },
   ));
 }
 
@@ -404,6 +527,7 @@ export function collectWriterMarkdownOutline(markdown: string): WriterMarkdownOu
   let pendingAnchorId: string | undefined;
   let fenceCharacter = '';
   let fenceLength = 0;
+  let currentItemIndex: number | undefined;
 
   for (const line of markdown.split(/\r?\n/)) {
     const fence = line.match(/^\s*(`{3,}|~{3,})/);
@@ -417,16 +541,39 @@ export function collectWriterMarkdownOutline(markdown: string): WriterMarkdownOu
         fenceLength = 0;
       }
       pendingAnchorId = undefined;
+      currentItemIndex = undefined;
       continue;
     }
     if (fenceCharacter) continue;
 
     const trimmed = line.trim();
-    const anchor = trimmed.match(
-      /^<a\s+id=(["'])(block-[^"']+)\1\s*(?:\/>|>\s*<\/a>)$/i,
-    );
+    const instruction = trimmed.match(OUTLINE_INSTRUCTION_LINE_RE);
+    if (instruction) {
+      if (currentItemIndex !== undefined) {
+        try {
+          const payload = JSON.parse(instruction[1]);
+          if (payload && typeof payload === 'object') {
+            items[currentItemIndex].instructions = {
+              node_id: items[currentItemIndex].anchorId.replace(/^block-/, ''),
+              target_chars: typeof payload.target_chars === 'number'
+                ? payload.target_chars
+                : undefined,
+              context_relations: Array.isArray(payload.context_relations)
+                ? payload.context_relations
+                : [],
+              subtasks: Array.isArray(payload.subtasks) ? payload.subtasks : [],
+            };
+          }
+        } catch {
+          // Invalid sidecars stay hidden and are ignored by the outline UI.
+        }
+      }
+      continue;
+    }
+    const anchor = trimmed.match(SYSTEM_ANCHOR_LINE_RE);
     if (anchor) {
       pendingAnchorId = anchor[2];
+      currentItemIndex = undefined;
       continue;
     }
     if (!trimmed) continue;
@@ -441,7 +588,12 @@ export function collectWriterMarkdownOutline(markdown: string): WriterMarkdownOu
           label,
           level: heading[1].length,
         });
+        currentItemIndex = items.length - 1;
+      } else {
+        currentItemIndex = undefined;
       }
+    } else {
+      currentItemIndex = undefined;
     }
     pendingAnchorId = undefined;
   }
@@ -475,9 +627,7 @@ export function collectWriterMarkdownReferenceTargets(
     if (fenceCharacter) continue;
 
     const trimmed = line.trim();
-    const anchor = trimmed.match(
-      /^<a\s+id=(["'])(block-[^"']+)\1\s*(?:\/>|>\s*<\/a>)$/i,
-    );
+    const anchor = trimmed.match(SYSTEM_ANCHOR_LINE_RE);
     if (anchor) {
       pendingAnchorId = anchor[2];
       continue;

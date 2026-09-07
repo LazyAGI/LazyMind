@@ -486,6 +486,7 @@ func init() {
 		"invalid writer download conversion key", "invalid writer download filename",
 		"invalid writer download conversion request", "invalid writer download source format",
 		"invalid writer download target format", "writer download conversion failed",
+		"unsupported writer document provider",
 	} {
 		registerAdditionalErrorAlias(source, "Invalid request", http.StatusBadRequest, 2000103)
 	}
@@ -499,6 +500,8 @@ func init() {
 		"writerdocument identity does not match synchronized baseline",
 		"synchronized baseline is not bound to a feishu document",
 		"current writerdocument feishu binding does not match baseline",
+		"synchronized baseline is not bound to a supported cloud document",
+		"current writerdocument provider binding does not match baseline",
 		"task center is paused in settings",
 		"scheduled tasks are paused in settings",
 		"skills and plugins are paused in settings", "workflows are paused in settings",
@@ -516,6 +519,7 @@ func init() {
 		registerAdditionalErrorAlias(source, "Resource not found", http.StatusNotFound, 2000106)
 	}
 	registerAdditionalErrorAlias("feishu authorization required", "unauthorized", http.StatusUnauthorized, 2000104)
+	registerAdditionalErrorAlias("cloud document authorization required", "unauthorized", http.StatusUnauthorized, 2000104)
 	registerAdditionalErrorAlias("dataset_ids is required", "dataset_ids required", http.StatusBadRequest, 2001349)
 	for _, source := range []string{
 		"no chat model configured", "failed to deliver tool-limit decision", "update search config failed",
@@ -530,7 +534,7 @@ func init() {
 		"load artifact action head revision", "parse artifact action policy",
 		"artifact action head revision is incomplete",
 		"decode sync_document action response", "artifact sync state save failed",
-		"invalid render response",
+		"invalid render response", "invalid writer ir artifact",
 		"task unavailable",
 		"query task center settings failed", "query settings controls failed",
 		"query document parsing settings failed",
@@ -575,6 +579,8 @@ func init() {
 	registerAdditionalErrorPattern("complete task=%s", "Internal server error", http.StatusInternalServerError, 2000000)
 	registerAdditionalErrorPattern("fail task=%s", "Internal server error", http.StatusInternalServerError, 2000000)
 	registerAdditionalErrorPattern("invalid sources snapshot", "Internal server error", http.StatusInternalServerError, 2000000)
+	registerAdditionalErrorPattern("save writing subtasks task=%s", "Internal server error", http.StatusInternalServerError, 2000000)
+	registerAdditionalErrorPattern("invalid writing subtasks snapshot", "Internal server error", http.StatusInternalServerError, 2000000)
 	for _, source := range []string{
 		"chat service returned no run terminal",
 		"invalid algorithm stream frame",

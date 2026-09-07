@@ -270,6 +270,58 @@
   }
 }
 
+.writing-subtask-list {
+  display: flex;
+  max-height: 260px;
+  flex-direction: column;
+  overflow-y: auto;
+  border: 1px solid #e5ecf5;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.writing-subtask-item {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: 8px;
+  padding: 9px 10px;
+
+  & + & { border-top: 1px solid #edf1f6; }
+  &.is-completed .writing-subtask-status { color: #16824f; }
+  &.is-failed .writing-subtask-status { color: #b42318; }
+  &.is-running .writing-subtask-status,
+  &.is-retrying .writing-subtask-status { color: #2f6bff; }
+}
+
+.writing-subtask-status {
+  padding-top: 2px;
+  color: #8c98a8;
+}
+
+.writing-subtask-copy,
+.writing-subtask-heading {
+  display: flex;
+  min-width: 0;
+  gap: 6px;
+}
+
+.writing-subtask-copy {
+  flex-direction: column;
+  color: #3a4553;
+  font-size: 12px;
+  line-height: 1.45;
+
+  small { color: #748196; }
+}
+
+.writing-subtask-heading {
+  align-items: center;
+  flex-wrap: wrap;
+
+  strong { color: #263244; }
+  span { color: #748196; font-size: 11px; }
+}
+
 // ── Task card ─────────────────────────────────────────────────────────────────
 .task-card {
   border: 1px solid #e6ecf3;
