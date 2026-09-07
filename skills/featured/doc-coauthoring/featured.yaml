@@ -27,8 +27,14 @@ assets:
   cover:
     file: assets/cover.png
     role: cover
-  document_coauthoring_demo:
-    file: assets/document-coauthoring-demo.html
+  coauthor_product_proposal_demo:
+    file: assets/coauthor-product-proposal-demo.html
+    role: result
+  coauthor_technical_spec_demo:
+    file: assets/coauthor-technical-spec-demo.html
+    role: result
+  coauthor_decision_doc_demo:
+    file: assets/coauthor-decision-doc-demo.html
     role: result
   product_proposal_scene:
     file: assets/product-proposal-scene.png
@@ -82,7 +88,7 @@ tasks:
       eyebrow: 产品方案
       title: 团队知识库搜索方案
       summary: 查看如何从背景、目标和读者出发，逐段形成一份可讨论的产品方案。
-      html_asset: document_coauthoring_demo
+      html_asset: coauthor_product_proposal_demo
 
   - id: coauthor-technical-spec
     selector:
@@ -112,7 +118,7 @@ tasks:
       eyebrow: 技术方案
       title: 客服知识库接入工作台
       summary: 查看系统背景、约束、方案取舍和待确认事项如何逐步形成技术方案。
-      html_asset: document_coauthoring_demo
+      html_asset: coauthor_technical_spec_demo
 
   - id: coauthor-decision-doc
     selector:
@@ -142,4 +148,4 @@ tasks:
       eyebrow: 决策文档
       title: 搜索方案技术选型记录
       summary: 查看候选方案、评估依据、取舍和结论如何被整理成可复盘的记录。
-      html_asset: document_coauthoring_demo
+      html_asset: coauthor_decision_doc_demo

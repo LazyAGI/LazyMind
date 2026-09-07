@@ -27,8 +27,14 @@ assets:
   cover:
     file: assets/cover.png
     role: cover
-  diagram_design_demo:
-    file: assets/diagram-design-demo.html
+  diagram_system_architecture_demo:
+    file: assets/diagram-system-architecture-demo.html
+    role: result
+  diagram_knowledge_search_flow_demo:
+    file: assets/diagram-knowledge-search-flow-demo.html
+    role: result
+  diagram_oauth_sequence_demo:
+    file: assets/diagram-oauth-sequence-demo.html
     role: result
 
 presentation:
@@ -71,7 +77,7 @@ tasks:
       eyebrow: 系统架构图
       title: 团队知识库系统架构
       summary: 查看 Web、API、认证、搜索和数据存储如何被组织成一张可复核的系统图。
-      html_asset: diagram_design_demo
+      html_asset: diagram_system_architecture_demo
 
   - id: knowledge-search-flow
     selector:
@@ -99,7 +105,7 @@ tasks:
       eyebrow: 业务流程图
       title: 团队知识库文档搜索流程
       summary: 查看登录、权限校验、检索和异常分支如何被放进一条可执行流程。
-      html_asset: diagram_design_demo
+      html_asset: diagram_knowledge_search_flow_demo
 
   - id: oauth-sequence
     selector:
@@ -127,4 +133,4 @@ tasks:
       eyebrow: OAuth 时序图
       title: 团队知识库 OAuth 登录时序
       summary: 查看浏览器、客户端、OAuth 服务和资源服务之间的授权码流程。
-      html_asset: diagram_design_demo
+      html_asset: diagram_oauth_sequence_demo

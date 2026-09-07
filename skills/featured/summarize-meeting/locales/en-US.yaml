@@ -50,7 +50,7 @@ tasks:
       eyebrow: Product review notes
       title: AI assistant v1 scope review
       summary: See how scope, decision rationale, owners, and unresolved items are kept separate.
-      html_asset: meeting_summary_demo
+      html_asset: meeting_product_review_demo
 
   - id: client-call-summary
     selector:
@@ -78,7 +78,7 @@ tasks:
       eyebrow: Client call notes
       title: Customer-service knowledge-base pilot
       summary: See client needs, pilot scope, commitments, and follow-up gaps in one note.
-      html_asset: meeting_summary_demo
+      html_asset: meeting_client_call_demo
 
   - id: sprint-retro-summary
     selector:
@@ -106,4 +106,4 @@ tasks:
       eyebrow: Sprint retrospective notes
       title: Requirement clarity and testing-window review
       summary: See how observations become improvement actions while cost and ownership gaps remain visible.
-      html_asset: meeting_summary_demo
+      html_asset: meeting_sprint_retro_demo

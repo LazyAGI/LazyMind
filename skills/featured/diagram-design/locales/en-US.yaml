@@ -48,7 +48,7 @@ tasks:
       eyebrow: System architecture
       title: Team knowledge-base architecture
       summary: See how the web, API, authentication, search, and storage layers fit together.
-      html_asset: diagram_design_demo
+      html_asset: diagram_system_architecture_demo
 
   - id: knowledge-search-flow
     selector:
@@ -76,7 +76,7 @@ tasks:
       eyebrow: Business flowchart
       title: Team knowledge-base search flow
       summary: See sign-in, permission checks, search, and failure branches in one executable flow.
-      html_asset: diagram_design_demo
+      html_asset: diagram_knowledge_search_flow_demo
 
   - id: oauth-sequence
     selector:
@@ -104,4 +104,4 @@ tasks:
       eyebrow: OAuth sequence
       title: Team knowledge-base OAuth sequence
       summary: See the authorization-code flow between the browser, client, OAuth service, and resource service.
-      html_asset: diagram_design_demo
+      html_asset: diagram_oauth_sequence_demo

@@ -50,7 +50,7 @@ tasks:
       eyebrow: Tailored resume
       title: SaaS product manager role match
       summary: Explore job priorities, experience matches, resume emphasis, and missing evidence.
-      html_asset: tailored_resume_demo
+      html_asset: resume_job_tailoring_demo
 
   - id: career-transition
     selector:
@@ -80,7 +80,7 @@ tasks:
       eyebrow: Transition resume
       title: Marketing operations to product management
       summary: Explore transferable skills, career narrative, evidence boundaries, and next steps.
-      html_asset: tailored_resume_demo
+      html_asset: resume_career_transition_demo
 
   - id: check-ats-fit
     selector:
@@ -110,4 +110,4 @@ tasks:
       eyebrow: ATS review report
       title: Product manager resume ATS check
       summary: Explore keyword alignment, structure issues, evidence gaps, and terms not to force.
-      html_asset: tailored_resume_demo
+      html_asset: resume_ats_check_demo

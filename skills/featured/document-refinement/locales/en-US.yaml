@@ -50,7 +50,7 @@ tasks:
       eyebrow: Plan review report
       title: Bulk export implementation plan
       summary: Explore vague wording, missing boundaries, acceptance criteria, and handoff blockers.
-      html_asset: document_refinement_demo
+      html_asset: refinement_implementation_plan_demo
 
   - id: review-product-requirement
     selector:
@@ -80,7 +80,7 @@ tasks:
       eyebrow: PRD review report
       title: Smart reminder requirement review
       summary: Explore gaps in user goals, trigger rules, acceptance criteria, and first-version scope.
-      html_asset: document_refinement_demo
+      html_asset: refinement_product_requirement_demo
 
   - id: review-brainstorm
     selector:
@@ -110,4 +110,4 @@ tasks:
       eyebrow: Brainstorm review report
       title: Team knowledge-base idea refinement
       summary: See how a feature list becomes a clear problem, testable direction, and bounded next step.
-      html_asset: document_refinement_demo
+      html_asset: refinement_brainstorm_demo

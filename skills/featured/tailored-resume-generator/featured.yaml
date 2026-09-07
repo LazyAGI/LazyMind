@@ -27,8 +27,14 @@ assets:
   cover:
     file: assets/cover.png
     role: cover
-  tailored_resume_demo:
-    file: assets/tailored-resume-demo.html
+  resume_job_tailoring_demo:
+    file: assets/resume-job-tailoring-demo.html
+    role: result
+  resume_career_transition_demo:
+    file: assets/resume-career-transition-demo.html
+    role: result
+  resume_ats_check_demo:
+    file: assets/resume-ats-check-demo.html
     role: result
   job_tailoring_scene:
     file: assets/job-tailoring-scene.png
@@ -82,7 +88,7 @@ tasks:
       eyebrow: 岗位定制简历
       title: SaaS 产品经理岗位匹配
       summary: 查看岗位要求、经历匹配、简历重点调整和待补充证据。
-      html_asset: tailored_resume_demo
+      html_asset: resume_job_tailoring_demo
 
   - id: career-transition
     selector:
@@ -112,7 +118,7 @@ tasks:
       eyebrow: 转型简历
       title: 市场运营转产品经理
       summary: 查看可迁移能力、职业叙事、证据边界和下一步补强方向。
-      html_asset: tailored_resume_demo
+      html_asset: resume_career_transition_demo
 
   - id: check-ats-fit
     selector:
@@ -142,4 +148,4 @@ tasks:
       eyebrow: ATS 检查报告
       title: 产品经理简历 ATS 检查
       summary: 查看关键词匹配、结构问题、证据缺口和不建议硬加的内容。
-      html_asset: tailored_resume_demo
+      html_asset: resume_ats_check_demo

@@ -27,8 +27,14 @@ assets:
   cover:
     file: assets/cover.png
     role: cover
-  meeting_summary_demo:
-    file: assets/meeting-summary-demo.html
+  meeting_product_review_demo:
+    file: assets/meeting-product-review-demo.html
+    role: result
+  meeting_client_call_demo:
+    file: assets/meeting-client-call-demo.html
+    role: result
+  meeting_sprint_retro_demo:
+    file: assets/meeting-sprint-retro-demo.html
     role: result
   product_review_scene:
     file: assets/product-review-scene.png
@@ -82,7 +88,7 @@ tasks:
       eyebrow: 产品评审纪要
       title: AI 助手首版范围评审记录
       summary: 查看如何将功能边界、决策依据、负责人和待确认事项分开记录。
-      html_asset: meeting_summary_demo
+      html_asset: meeting_product_review_demo
 
   - id: client-call-summary
     selector:
@@ -110,7 +116,7 @@ tasks:
       eyebrow: 客户沟通纪要
       title: 客服知识库接入需求沟通
       summary: 查看如何把客户诉求、试点范围、承诺边界和后续核实项放在同一份纪要中。
-      html_asset: meeting_summary_demo
+      html_asset: meeting_client_call_demo
 
   - id: sprint-retro-summary
     selector:
@@ -138,4 +144,4 @@ tasks:
       eyebrow: Sprint 回顾纪要
       title: 需求澄清与测试窗口复盘
       summary: 查看如何把复盘观察转成明确改进动作，同时保留成本评估和负责人缺口。
-      html_asset: meeting_summary_demo
+      html_asset: meeting_sprint_retro_demo

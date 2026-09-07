@@ -50,7 +50,7 @@ tasks:
       eyebrow: Product proposal
       title: Team knowledge-base search proposal
       summary: See how context, goals, and audience become a proposal one section at a time.
-      html_asset: document_coauthoring_demo
+      html_asset: coauthor_product_proposal_demo
 
   - id: coauthor-technical-spec
     selector:
@@ -80,7 +80,7 @@ tasks:
       eyebrow: Technical plan
       title: Connect the support knowledge base
       summary: See system context, constraints, tradeoffs, and open questions become a technical plan.
-      html_asset: document_coauthoring_demo
+      html_asset: coauthor_technical_spec_demo
 
   - id: coauthor-decision-doc
     selector:
@@ -110,4 +110,4 @@ tasks:
       eyebrow: Decision record
       title: Search architecture decision
       summary: See options, evidence, tradeoffs, and the conclusion organized for future readers.
-      html_asset: document_coauthoring_demo
+      html_asset: coauthor_decision_doc_demo

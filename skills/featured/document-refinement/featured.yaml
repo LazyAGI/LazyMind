@@ -27,8 +27,14 @@ assets:
   cover:
     file: assets/cover.png
     role: cover
-  document_refinement_demo:
-    file: assets/document-refinement-demo.html
+  refinement_implementation_plan_demo:
+    file: assets/refinement-implementation-plan-demo.html
+    role: result
+  refinement_product_requirement_demo:
+    file: assets/refinement-product-requirement-demo.html
+    role: result
+  refinement_brainstorm_demo:
+    file: assets/refinement-brainstorm-demo.html
     role: result
   implementation_plan_scene:
     file: assets/implementation-plan-scene.png
@@ -82,7 +88,7 @@ tasks:
       eyebrow: 计划审阅报告
       title: 批量导出功能实施计划检查
       summary: 查看计划中的模糊表述、缺失边界、验收条件和交接前必须补充的内容。
-      html_asset: document_refinement_demo
+      html_asset: refinement_implementation_plan_demo
 
   - id: review-product-requirement
     selector:
@@ -112,7 +118,7 @@ tasks:
       eyebrow: PRD 审阅报告
       title: 智能提醒需求清晰度检查
       summary: 查看用户目标、触发规则、验收标准和第一版范围中的关键缺口。
-      html_asset: document_refinement_demo
+      html_asset: refinement_product_requirement_demo
 
   - id: review-brainstorm
     selector:
@@ -142,4 +148,4 @@ tasks:
       eyebrow: 想法梳理报告
       title: 团队知识库想法精修
       summary: 查看如何从功能堆叠中找出真实问题、验证方向和暂时不该扩大的范围。
-      html_asset: document_refinement_demo
+      html_asset: refinement_brainstorm_demo
