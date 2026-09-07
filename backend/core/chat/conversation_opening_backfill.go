@@ -160,7 +160,7 @@ func OpeningBackfill(w http.ResponseWriter, r *http.Request) {
 					return err
 				}
 				var failed []orm.ConversationOpening
-				if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("user_id = ? AND status = ? AND error_code IN ?", userID, "failed", []string{"input_too_large", "output_too_large", "model_configuration", "authentication_failed", "invalid_request", "not_found", "model_failed", "transport_error", "request_timeout", "rate_limited", "service_unavailable"}).Find(&failed).Error; err != nil {
+				if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("user_id = ? AND status = ? AND error_code IN ?", userID, "failed", []string{"token_limit", "input_too_large", "output_too_large", "model_configuration", "authentication_failed", "invalid_request", "not_found", "model_failed", "transport_error", "request_timeout", "rate_limited", "service_unavailable"}).Find(&failed).Error; err != nil {
 					return err
 				}
 				for _, meta := range failed {

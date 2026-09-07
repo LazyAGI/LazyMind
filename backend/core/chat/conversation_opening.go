@@ -257,7 +257,7 @@ func (s *openingService) runOpeningCall(ctx context.Context, job asyncjob.Job, r
 		return s.failOpening(ctx, job, meta, "transport_error", retryable, err)
 	}
 	if result.Status != "succeeded" {
-		if result.ErrorCode == "input_too_large" && mayFallback {
+		if result.ErrorCode == "token_limit" && mayFallback {
 			var payload openingJobPayload
 			_ = json.Unmarshal(job.PayloadJSON, &payload)
 			payload.UseDefault = true
@@ -265,7 +265,7 @@ func (s *openingService) runOpeningCall(ctx context.Context, job asyncjob.Job, r
 			if err := s.db.WithContext(ctx).Model(&orm.AsyncJob{}).Where("id = ? AND status = ? AND attempt_count = ? AND lock_until > ?", job.ID, asyncjob.StatusRunning, job.AttemptCount, time.Now().UTC()).UpdateColumn("payload_json", raw).Error; err != nil {
 				return asyncjob.Result{}, err
 			}
-			return s.failOpening(ctx, job, meta, "input_too_large", true, errors.New("retry with default model"))
+			return s.failOpening(ctx, job, meta, "token_limit", true, errors.New("retry with default model"))
 		}
 		return s.failOpening(ctx, job, meta, result.ErrorCode, result.Retryable, errors.New(result.ErrorCode))
 	}

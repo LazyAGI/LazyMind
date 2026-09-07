@@ -95,7 +95,7 @@ def test_length_finish_is_failure_even_when_partial_json_looks_valid():
         'call', 1, 'failed', False,
         failure=ModelFailure(ModelFailureOrigin.HTTP, ModelFailureCode.TOKEN_LIMIT,
                              provider_error_code='context_length_exceeded', provider_http_status=400)))
-    assert llm_task._task_call_error(error).code == 'input_too_large'
+    assert llm_task._task_call_error(error).code == 'token_limit'
 
 
 @pytest.mark.parametrize('json_output', [False, True])

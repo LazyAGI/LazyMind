@@ -10,7 +10,7 @@ import lazyllm
 import requests
 from json_repair import repair_json
 from lazyllm import AutoModel, LOG
-from lazyllm.module.llms.onlinemodule.base import ModelCallError, ModelFailureCode, ModelFinish
+from lazyllm.module.llms.onlinemodule.base import ModelCallError, ModelFinish
 from pydantic import BaseModel, Field
 
 from lazymind.model_config import get_model_role_runtime_identity, inject_model_config
@@ -156,8 +156,6 @@ def _task_call_error(exc: Exception) -> LLMTaskCallError:
             if current.terminal.finish == ModelFinish.LENGTH:
                 return LLMTaskCallError('output_too_large', calls=1)
             failure = current.terminal.failure
-            if failure and failure.code == ModelFailureCode.TOKEN_LIMIT:
-                return LLMTaskCallError('input_too_large', calls=1)
             code = failure.code.value if failure else 'model_failed'
             status = failure.provider_http_status if failure else None
             retryable = status in (408, 429, 500, 502, 503, 504) or code in ('request_timeout', 'transport_error')

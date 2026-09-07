@@ -212,7 +212,7 @@ func TestOpeningAttachmentArrivalAndLongInput(t *testing.T) {
 	}
 }
 func TestOpeningFallbackAndRetryBudget(t *testing.T) {
-	for _, code := range []string{"input_too_large", "transport_error", "authentication_failed"} {
+	for _, code := range []string{"token_limit", "transport_error", "authentication_failed"} {
 		t.Run(code, func(t *testing.T) {
 			s := openingTestService(t)
 			openingTestConversation(t, s, "c1", "整理对话", "default")
@@ -238,7 +238,7 @@ func TestOpeningFallbackAndRetryBudget(t *testing.T) {
 				}
 			}
 			expected := 1
-			if code == "input_too_large" {
+			if code == "token_limit" {
 				expected = 2
 			}
 			if code == "transport_error" {
@@ -247,7 +247,7 @@ func TestOpeningFallbackAndRetryBudget(t *testing.T) {
 			if len(calls) != expected {
 				t.Fatalf("calls: %v", calls)
 			}
-			if code == "input_too_large" && calls[1] != "default" {
+			if code == "token_limit" && calls[1] != "default" {
 				t.Fatal("capacity fallback missing")
 			}
 			for _, model := range calls {
@@ -281,7 +281,7 @@ func TestOpeningSavedImageDescriptionAndCapacityFallback(t *testing.T) {
 	s.call = func(context.Context, json.RawMessage, map[string]any, int) (algo.OpeningTaskResult, error) {
 		requests++
 		if requests == 1 {
-			return algo.OpeningTaskResult{Status: "failed", ErrorCode: "input_too_large", Usage: json.RawMessage(`{"model_calls":0}`)}, nil
+			return algo.OpeningTaskResult{Status: "failed", ErrorCode: "token_limit", Usage: json.RawMessage(`{"model_calls":0}`)}, nil
 		}
 		return openingTestResult("ready"), nil
 	}
