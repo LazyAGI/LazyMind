@@ -30,7 +30,7 @@ tasks:
     launch:
       prompt_short: Can you check whether this implementation plan is ready for the developers?
       prompt: >-
-        Can you check whether this implementation plan is clear enough to hand to the developers? Point out missing details, vague wording, and anything that seems out of scope. Fix small issues directly and list the important gaps separately.
+        Directly review the implementation plan below without asking me for more information first. Return: plan summary, what can stay, what must be confirmed, edits you can make directly, and a handoff verdict. Mark missing formats, row limits, permission rules, failure messages, and acceptance criteria as “To confirm”; do not invent them. Separate items that block engineering and QA from wording that is merely unclear.
 
         Goal: add bulk export to an admin panel. Plan: add an export button; support export on the backend; handle errors; add proper permission checks; test it. We have not defined the formats, maximum number of rows, who can use it, or what users see when export fails.
     replay:
@@ -60,7 +60,7 @@ tasks:
     launch:
       prompt_short: Can you check whether this product requirement is clear?
       prompt: >-
-        Can you review this product requirement and tell me whether engineering and design could interpret it differently? Point out missing details, vague wording, and items that may not belong in the first version. Fix simple wording where possible and list the important gaps separately.
+        Directly review the product requirement below without asking me for more information first. Return: the requirement goal, what is already clear, key gaps, edits you can make directly, and a first-version scope suggestion. Mark missing users, trigger rules, reminder channels, opt-out rules, performance targets, and acceptance criteria as “To confirm”; do not invent them. Do not treat “right time,” “quickly,” or “good experience” as executable requirements.
 
         We want to build a smart reminder feature so users can see important messages more easily. The system should remind users at the right time, respond quickly, and provide a good experience. Users can configure or turn it off. We will build the first version and look at the data later.
     replay:
@@ -90,7 +90,7 @@ tasks:
     launch:
       prompt_short: Here is an idea. Can you tell me if I am overbuilding it?
       prompt: >-
-        This is an early idea. Help me sort it out. Start by making the problem clear, then separate directions worth validating from features that are only here because they might be useful someday. Do not turn it into a huge plan yet.
+        Directly refine the team knowledge-base idea below without asking me for more information first. Return: the real problem, directions worth validating, items to leave out for now, questions to confirm, and next steps. Keep the known problem that new team members cannot find project materials. Do not treat support for every format or every chat integration as a first-version requirement, and do not invent users, data, or success criteria.
 
         I want to build a team knowledge base where people can upload documents, get automatic summaries, ask questions, generate weekly reports, receive stale-content reminders, and see who uses which materials. It should support every format and connect to every chat tool. The problem we have today is that new team members cannot find project materials.
     replay:
