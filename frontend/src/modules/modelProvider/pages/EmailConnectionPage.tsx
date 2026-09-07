@@ -561,7 +561,6 @@ export default function EmailConnectionPage() {
                     : t("modelProvider.cloudDocuments.authPending")}
                 </Tag>
                 <div className="mail-provider-row-controls">
-                  {accounts.length === 1 ? chatSwitch(accounts[0]) : null}
                   <button
                     type="button"
                     className="model-provider-cloud-doc-resource-action"

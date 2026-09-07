@@ -433,6 +433,41 @@ def test_send_applies_confirm_patch(mail_auth):
     assert message['Subject'] == 'new'
 
 
+def test_search_named_disabled_mailbox_is_final(mail_auth):
+    with patch('lazymind.chat.engine.tools.mail._IMAPBackend.search') as search:
+        result = MailToolkit().search(mailbox='missing@qq.com')
+    search.assert_not_called()
+    assert result['status'] == 'mailbox_not_enabled'
+    assert result['requested'] == 'missing@qq.com'
+    assert result['enabled_mailboxes'][0]['email'] == 'user@qq.com'
+    assert 'Do not call MailToolkit_search' in result['message']
+
+
+def test_send_empty_to_marks_failed_and_keeps_card(mail_auth):
+    draft = {
+        'draft_id': 'draft_empty',
+        'revision': 1,
+        'to': ['a@b.com'],
+        'cc': [],
+        'subject': 'hi',
+        'body': 'body',
+        'attachment_paths': [],
+        'in_reply_to': '',
+        'status': 'draft',
+        'sent_at': '',
+        'last_error': '',
+    }
+    _save_draft(draft)
+    lazyllm.globals['agentic_config']['mail_draft_confirm_id'] = 'draft_empty'
+    lazyllm.globals['agentic_config']['mail_draft_confirm_revision'] = 1
+    lazyllm.globals['agentic_config']['mail_draft_patch'] = {'to': ''}
+    with pytest.raises(ToolExecutionError, match='To field is empty'):
+        MailToolkit().send_draft('draft_empty')
+    saved = _load_draft('draft_empty')
+    assert saved['status'] == 'failed'
+    assert 'No recipients' in saved['last_error']
+
+
 def test_mail_toolkit_registers_only_mail_auth_name():
     MailToolkit()
     assert TOOL_AUTH_REGISTRY.get('mail') == 'dynamic_tool_auth'

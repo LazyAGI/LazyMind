@@ -75,6 +75,7 @@ export default function MailDraftCard({
   }, [draft.body, draft.cc, draft.draft_id, draft.revision, draft.subject, draft.to]);
 
   const patch: MailDraftPatch = { to, cc, subject, body };
+  const hasRecipient = Boolean(to.trim());
 
   return (
     <div className="mail-draft-card">
@@ -144,6 +145,9 @@ export default function MailDraftCard({
           message={t("chat.mailDraft.sentAt", { time: formatMailTime(draft.sent_at || "") })}
         />
       ) : null}
+      {!hasRecipient && !sent ? (
+        <Alert type="error" showIcon message={t("chat.mailDraft.recipientRequired")} />
+      ) : null}
       {failed ? (
         <Alert type="error" showIcon message={draft.last_error || t("chat.mailDraft.sendFailed")} />
       ) : null}
@@ -169,11 +173,19 @@ export default function MailDraftCard({
       {!sent && !disabled ? (
         <Space>
           {failed || deliveryUnknown ? (
-            <Button type="primary" disabled={!draftId} onClick={() => onConfirm(draftId, revision, patch)}>
+            <Button
+              type="primary"
+              disabled={!draftId || !hasRecipient}
+              onClick={() => onConfirm(draftId, revision, patch)}
+            >
               {deliveryUnknown ? t("chat.mailDraft.resendAnyway") : t("chat.mailDraft.resend")}
             </Button>
           ) : (
-            <Button type="primary" disabled={!draftId} onClick={() => onConfirm(draftId, revision, patch)}>
+            <Button
+              type="primary"
+              disabled={!draftId || !hasRecipient}
+              onClick={() => onConfirm(draftId, revision, patch)}
+            >
               {t("chat.mailDraft.confirmSend")}
             </Button>
           )}

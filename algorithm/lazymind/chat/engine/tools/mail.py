@@ -154,6 +154,16 @@ def _credential() -> dict[str, str]:
     return accounts[0] if accounts else {}
 
 
+def _enabled_accounts() -> list[dict[str, str]]:
+    valid: list[dict[str, str]] = []
+    for cred in _accounts():
+        status = (cred.get('status') or 'ACTIVE').strip().upper()
+        if status in {'REVOKED', 'DISCONNECTED', 'EXPIRED', 'ERROR'}:
+            continue
+        valid.append(cred)
+    return valid
+
+
 def _require_accounts() -> list[dict[str, str]]:
     accounts = _accounts()
     if not accounts:
@@ -161,18 +171,13 @@ def _require_accounts() -> list[dict[str, str]]:
             'No mailbox is enabled for chat. Connect a supported mailbox in '
             '资源库 → 云文档 → 邮箱连接 and turn the switch on.'
         )
-    valid: list[dict[str, str]] = []
-    expired = False
-    for cred in accounts:
-        status = (cred.get('status') or 'ACTIVE').strip().upper()
-        if status in {'REVOKED', 'DISCONNECTED'}:
-            continue
-        if status in {'EXPIRED', 'ERROR'}:
-            expired = True
-            continue
-        valid.append(cred)
+    valid = _enabled_accounts()
     if valid:
         return valid
+    expired = any(
+        (cred.get('status') or 'ACTIVE').strip().upper() in {'EXPIRED', 'ERROR'}
+        for cred in accounts
+    )
     if expired:
         _fail(
             'Mailbox authorization is invalid. Re-authorize the connected account '
@@ -184,12 +189,11 @@ def _require_accounts() -> list[dict[str, str]]:
     )
 
 
-def _pick_account(mailbox: str = '') -> dict[str, str]:
-    accounts = _require_accounts()
+def _find_account(mailbox: str) -> dict[str, str] | None:
     key = str(mailbox or '').strip().lower()
     if not key:
-        return accounts[0]
-    for cred in accounts:
+        return None
+    for cred in _enabled_accounts():
         candidates = {
             (cred.get('email') or '').strip().lower(),
             (cred.get('provider') or '').strip().lower(),
@@ -197,9 +201,39 @@ def _pick_account(mailbox: str = '') -> dict[str, str]:
         }
         if key in candidates:
             return cred
-    _fail(
-        f'Mailbox {mailbox} is not enabled. Pass mailbox as the email address or provider.'
-    )
+    return None
+
+
+def _unavailable_mailbox(mailbox: str) -> dict[str, Any]:
+    enabled = [
+        {'email': cred.get('email') or '', 'provider': cred.get('provider') or ''}
+        for cred in _enabled_accounts()
+    ]
+    emails = ', '.join(item['email'] or item['provider'] for item in enabled) or '(none)'
+    return {
+        'status': 'mailbox_not_enabled',
+        'requested': str(mailbox or '').strip(),
+        'enabled_mailboxes': enabled,
+        'items': [],
+        'message': (
+            f'Requested mailbox {mailbox!r} is not connected or not enabled for chat. '
+            f'Enabled mailboxes: {emails}. '
+            'Stop now. Do not call MailToolkit_search, read, or send_draft again for this '
+            'user request, and do not omit mailbox to search other accounts. '
+            'Tell the user to connect and enable this mailbox in 资源库 → 云文档 → 邮箱连接.'
+        ),
+    }
+
+
+def _pick_account(mailbox: str = '') -> dict[str, str]:
+    accounts = _require_accounts()
+    key = str(mailbox or '').strip()
+    if not key:
+        return accounts[0]
+    cred = _find_account(key)
+    if cred is not None:
+        return cred
+    _fail(_unavailable_mailbox(key)['message'])
 
 
 def _require_connection() -> dict[str, str]:
@@ -538,10 +572,7 @@ def _apply_confirm_patch(draft: dict[str, Any]) -> dict[str, Any]:
     if not patch:
         return draft
     if 'to' in patch:
-        recipients = _split_addresses(patch.get('to'))
-        if not recipients:
-            _fail('at least one recipient is required')
-        draft['to'] = recipients
+        draft['to'] = _split_addresses(patch.get('to'))
     if 'cc' in patch:
         draft['cc'] = _split_addresses(patch.get('cc'))
     if 'subject' in patch:
@@ -962,11 +993,20 @@ class MailToolkit:
             after: Inclusive start date, YYYY-MM-DD.
             before: Inclusive end date, YYYY-MM-DD.
             mailbox: Optional email or provider (netease163/qqmail/gmailimap). Empty searches all enabled mailboxes.
+                If the user named a mailbox, always pass it. A mailbox_not_enabled result is final:
+                do not retry and do not search other accounts.
             folder: Optional mailbox folder: inbox, sent, drafts, trash, junk, or all.
                 Default all searches Inbox plus Sent, Drafts, Trash, and Junk when present.
                 Result ids are folder::UID; pass that exact id to read.
         """
-        accounts = [_pick_account(mailbox)] if str(mailbox or '').strip() else _require_accounts()
+        requested = str(mailbox or '').strip()
+        if requested:
+            cred = _find_account(requested)
+            if cred is None:
+                return _unavailable_mailbox(requested)
+            accounts = [cred]
+        else:
+            accounts = _require_accounts()
         items: list[dict[str, Any]] = []
         errors: list[dict[str, Any]] = []
         kwargs = {
@@ -1008,6 +1048,9 @@ class MailToolkit:
         """
         if not str(message_id or '').strip():
             raise ToolExecutionError('message_id is required')
+        requested = str(mailbox or '').strip()
+        if requested and _find_account(requested) is None:
+            return _unavailable_mailbox(requested)
         return _call_mailboxes(mailbox, lambda cred: _backend(cred).read(str(message_id).strip()))
 
     def read_thread(self, thread_id: str, mailbox: str = '') -> dict[str, Any]:
@@ -1093,10 +1136,16 @@ class MailToolkit:
             in_reply_to: Optional original Message-ID when composing a reply.
             mailbox: Optional sending account (email or provider). Defaults to the first enabled mailbox.
         """
+        requested = str(mailbox or '').strip()
+        if requested and _find_account(requested) is None:
+            return _unavailable_mailbox(requested)
         cred = _pick_account(mailbox)
         recipients = _split_addresses(to)
         if not recipients:
-            raise ToolExecutionError('at least one recipient is required')
+            raise ToolExecutionError(
+                'No recipients. The To field is empty. Do not retry send. '
+                'Ask the user to provide at least one email address.'
+            )
         paths = _resolve_attachment_paths(attachment_paths)
         now = _iso(datetime.now(timezone.utc))
         draft = {
@@ -1207,6 +1256,16 @@ class MailToolkit:
                 'Confirm the latest preview card; do not send from an older card.'
             )
         _apply_confirm_patch(draft)
+        recipients = [addr for addr in (draft.get('to') or []) if str(addr).strip()]
+        if not recipients:
+            draft['status'] = 'failed'
+            draft['last_error'] = 'No recipients. Add at least one address in To, then confirm again.'
+            _save_draft(draft)
+            _emit_draft_card(draft)
+            _fail(
+                'Send failed: the To field is empty. Do not retry until the user adds a recipient. '
+                'The preview card now shows this error.'
+            )
         _save_draft(draft)
         message = _build_message(draft, cred['email'])
         try:
