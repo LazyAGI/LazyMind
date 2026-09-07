@@ -116,6 +116,37 @@ def test_unified_tools_resolve_workspace_and_text_attachment(monkeypatch, tmp_pa
     assert attachment_grep['total'] == 1
 
 
+def test_resource_read_tools_restrict_trusted_local_mode(monkeypatch, tmp_path):
+    from lazymind.config import config
+
+    workspace = tmp_path / 'workspace'
+    workspace.mkdir()
+    attachment = tmp_path / 'upload.txt'
+    attachment.write_text('attachment needle', encoding='utf-8')
+    secret = tmp_path / 'secret.txt'
+    secret.write_text('secret needle', encoding='utf-8')
+    draft = workspace / 'draft.txt'
+    draft.write_text('workspace needle', encoding='utf-8')
+    link = workspace / 'link.txt'
+    link.symlink_to(secret)
+    _set_scope(monkeypatch, workspace, files=[attachment])
+    manifest = _ingest(monkeypatch, workspace, text='resource needle')
+    tools = {tool.__name__: tool for tool in workspace_tools.build_resource_read_tools()}
+
+    with config.temp('trusted_local_mode', True):
+        for target in (str(attachment), 'upload.txt', manifest['file_id'], 'paper.pdf'):
+            assert 'needle' in tools['read_file'](target)['text']
+            assert tools['grep'](target, 'needle')['total'] == 1
+        for target in (str(secret), str(draft), 'draft.txt', str(link), str(tmp_path), str(workspace)):
+            with pytest.raises(ToolExecutionError, match='attachment or a file resource'):
+                tools['read_file'](target)
+            with pytest.raises(ToolExecutionError, match='attachment or a file resource'):
+                tools['grep'](target, 'needle')
+        # The scoped instances must not change Main Chat's file capabilities.
+        assert 'secret needle' in workspace_tools.read_file(str(secret))['text']
+        assert workspace_tools.grep(str(draft), 'needle')['total'] == 1
+
+
 def test_office_attachment_parse_is_cached_by_content(monkeypatch, tmp_path):
     attachment = tmp_path / 'report.docx'
     attachment.write_bytes(b'office-content')

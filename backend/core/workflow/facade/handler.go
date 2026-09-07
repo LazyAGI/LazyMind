@@ -188,6 +188,7 @@ type prepareRequest struct {
 	ConversationID string         `json:"conversation_id"`
 	ControllerHost string         `json:"controller_host"`
 	RequestContext string         `json:"request_context"`
+	WorkflowMode   string         `json:"workflow_mode"`
 }
 
 type preparationGraph struct {
@@ -640,6 +641,9 @@ func (h Handler) Prepare(w http.ResponseWriter, r *http.Request) {
 		fail(w, 422, "INVALID_REQUEST", "workflow_id is required", false)
 		return
 	}
+	if req.WorkflowMode != "auto" {
+		req.WorkflowMode = "dynamic"
+	}
 	key := strings.TrimSpace(req.IdempotencyKey)
 	if key == "" {
 		key = strings.TrimSpace(r.Header.Get("Idempotency-Key"))
@@ -796,7 +800,7 @@ func (h Handler) Consume(w http.ResponseWriter, r *http.Request) {
 		}
 		session, _, createErr := h.Store.CreateInitializedHostSession(
 			r.Context(), owner, sessionID, conversationID, original.OriginHost, original.OriginRef,
-			original.ControllerHost, workflowPackage, intentContext, bindings,
+			original.ControllerHost, workflowPackage, original.WorkflowMode, intentContext, bindings,
 		)
 		if createErr != nil {
 			code := "SESSION_CREATE_FAILED"
@@ -812,6 +816,7 @@ func (h Handler) Consume(w http.ResponseWriter, r *http.Request) {
 					"conversation_id": session.ConversationID,
 					"session_id":      session.ID,
 					"workflow_id":     session.WorkflowID,
+					"workflow_mode":   session.WorkflowMode,
 					"status":          session.Status,
 					"state_version":   session.StateVersion,
 				},
@@ -822,6 +827,7 @@ func (h Handler) Consume(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusOK, envelope{Data: map[string]any{
 			"workflow_session_id": session.ID, "session_id": session.ID, "status": session.Status,
+			"workflow_mode":    session.WorkflowMode,
 			"state_version":    session.StateVersion,
 			"event_stream_url": "/workflow-sessions/" + session.ID + "/events",
 			"status_url":       "/workflow-sessions/" + session.ID + "/projection",

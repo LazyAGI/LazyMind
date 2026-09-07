@@ -15,18 +15,16 @@ import (
 	"lazymind/agentconnector/internal/chatagent"
 )
 
-const (
-	maxEventBytes     = 4 << 20
-	loginPollInterval = 500 * time.Millisecond
-)
-
-var openInteractiveCommand = agentexec.OpenInteractiveCommand
+const maxEventBytes = 4 << 20
 
 type ChatRunner struct {
-	binary string
-	self   string
-	home   string
-	auth   string
+	binary             string
+	prefixArguments    []string
+	runtimeEnvironment []string
+	self               string
+	home               string
+	workBuddyHome      string
+	auth               string
 }
 
 func (r *ChatRunner) Sessions(ctx context.Context) ([]chatagent.NativeSession, error) {
@@ -34,7 +32,8 @@ func (r *ChatRunner) Sessions(ctx context.Context) ([]chatagent.NativeSession, e
 }
 
 func NewChatRunner(binary string) (*ChatRunner, error) {
-	resolved, err := findBinary(binary)
+	workBuddyHome := workBuddyConfigDir()
+	runtimeCommand, err := findRuntime(binary, workBuddyHome)
 	if err != nil {
 		return nil, err
 	}
@@ -42,7 +41,11 @@ func NewChatRunner(binary string) (*ChatRunner, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &ChatRunner{binary: resolved, self: self, home: home, auth: authFile()}, nil
+	return &ChatRunner{
+		binary: runtimeCommand.Binary, prefixArguments: runtimeCommand.Arguments,
+		runtimeEnvironment: runtimeCommand.Environment, self: self, home: home,
+		workBuddyHome: workBuddyHome, auth: authFile(),
+	}, nil
 }
 
 func (r *ChatRunner) Availability() (bool, string) {
@@ -50,74 +53,76 @@ func (r *ChatRunner) Availability() (bool, string) {
 }
 
 func Probe(binary string) (bool, bool, string) {
-	if _, err := findBinary(binary); err != nil {
+	if _, err := findRuntime(binary, workBuddyConfigDir()); err != nil {
 		return false, false, err.Error()
 	}
 	ready, reason := availability(authFile())
 	return true, ready, reason
 }
 
-func Login(ctx context.Context, binary string) error {
-	return login(ctx, binary, authFile())
-}
-
-func login(ctx context.Context, binary, authenticationFile string) error {
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	default:
-	}
-	resolved, err := findBinary(binary)
-	if err != nil {
-		return err
-	}
-	if err := openInteractiveCommand(resolved); err != nil {
-		return err
-	}
-	ticker := time.NewTicker(loginPollInterval)
-	defer ticker.Stop()
-	for {
-		if ready, _ := availability(authenticationFile); ready {
-			return nil
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-ticker.C:
-		}
-	}
-}
-
 func availability(auth string) (bool, string) {
 	info, err := os.Stat(auth)
 	if err != nil || info.IsDir() || info.Size() == 0 {
-		return false, "CodeBuddy Code is not signed in; start `codebuddy` and run `/login`"
+		return false, "WorkBuddy is not signed in; open WorkBuddy and complete sign-in"
 	}
 	return true, ""
 }
 
 func authFile() string {
 	root, _ := os.UserConfigDir()
-	return filepath.Join(root, "CodeBuddyExtension", "Data", "Public", "auth", "Tencent-Cloud.coding-copilot.info")
+	return filepath.Join(root, "CodeBuddyExtension", "Data", "Public", "auth", "workbuddy-desktop.info")
 }
 
-func findBinary(configured string) (string, error) {
-	names := []string{"codebuddy", "cbc"}
-	resolved, err := agentexec.FindBound(
-		configured, "LAZYMIND_WORKBUDDY_AGENT_BIN", agentexec.CodeBuddyCLI, names,
-	)
-	if err != nil {
-		if strings.TrimSpace(configured) != "" || strings.TrimSpace(os.Getenv("LAZYMIND_WORKBUDDY_AGENT_BIN")) != "" {
-			return "", fmt.Errorf("resolve configured CodeBuddy Code CLI: %w", err)
-		}
-		return "", errors.New("CodeBuddy Code CLI is not installed; install it from https://www.codebuddy.ai/docs/cli/quickstart")
+func workBuddyConfigDir() string {
+	if configured := strings.TrimSpace(os.Getenv("WORKBUDDY_CONFIG_DIR")); configured != "" {
+		return filepath.Clean(configured)
 	}
-	return resolved, nil
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".workbuddy")
+}
+
+type runtimeCommand struct {
+	Binary      string
+	Arguments   []string
+	Environment []string
+}
+
+func findRuntime(configured, configDir string) (runtimeCommand, error) {
+	if value := strings.TrimSpace(configured); value != "" {
+		return configuredBinary(value)
+	}
+	if value := strings.TrimSpace(os.Getenv("LAZYMIND_WORKBUDDY_AGENT_BIN")); value != "" {
+		return configuredBinary(value)
+	}
+	application, err := agentexec.FindDesktopApplication(agentexec.DesktopApplication{
+		BindingTarget: agentexec.WorkBuddyDesktop,
+		ExecutableNames: []string{
+			"WorkBuddy", "WorkBuddy.exe",
+		},
+		Protocols:    []string{"workbuddy"},
+		DisplayNames: []string{"WorkBuddy"},
+	})
+	if err != nil {
+		return runtimeCommand{}, errors.New("WorkBuddy is not installed; install and open WorkBuddy once")
+	}
+	runtimeCommand, err := bundledRuntime(application, configDir)
+	if err != nil {
+		return runtimeCommand, fmt.Errorf("locate WorkBuddy runtime: %w", err)
+	}
+	return runtimeCommand, nil
+}
+
+func configuredBinary(value string) (runtimeCommand, error) {
+	resolved, err := agentexec.Find(value, nil)
+	if err != nil {
+		return runtimeCommand{}, fmt.Errorf("resolve configured WorkBuddy runtime: %w", err)
+	}
+	return runtimeCommand{Binary: resolved}, nil
 }
 
 func (r *ChatRunner) Run(ctx context.Context, run chatagent.Run, emit func(chatagent.Event) error) error {
 	if r == nil || strings.TrimSpace(r.binary) == "" {
-		return errors.New("CodeBuddy Code CLI is unavailable")
+		return errors.New("WorkBuddy is unavailable")
 	}
 	resume := (run.Action == "resume" || run.Action == "regenerate") && strings.TrimSpace(run.ProviderThreadID) != ""
 	workspace := ""
@@ -129,7 +134,7 @@ func (r *ChatRunner) Run(ctx context.Context, run chatagent.Run, emit func(chata
 			return err
 		}
 		if !found {
-			return errors.New("CodeBuddy CLI session workspace is unavailable")
+			return errors.New("WorkBuddy session workspace is unavailable")
 		}
 	} else {
 		workspace, err = agentexec.EnsureConversationWorkspace(run.ConversationID)
@@ -141,23 +146,29 @@ func (r *ChatRunner) Run(ctx context.Context, run chatagent.Run, emit func(chata
 	if err != nil {
 		return err
 	}
-	arguments := []string{
+	arguments := append([]string(nil), r.prefixArguments...)
+	arguments = append(arguments,
 		"-p", "--output-format", "stream-json", "--permission-mode", "bypassPermissions",
-		"--tools", "Read,Write,Edit,Glob,Grep,ToolSearch,DeferExecuteTool",
+		"--tools", "Read,Write,Edit,Glob,Grep,ToolSearch,DeferExecuteTool,ImageGen",
 		"--strict-mcp-config", "--mcp-config", mcpConfig,
-	}
+	)
 	if resume {
 		arguments = append(arguments, "--resume", run.ProviderThreadID)
 	}
 	arguments = append(arguments, run.Prompt)
+	startedAt := time.Now()
 	sawMessage, completed, terminalError := false, false, ""
 	pendingMessages := []string{}
 	err = (agentexec.StreamCommand{
 		Binary: r.binary, Arguments: arguments, Directory: workspace,
-		Environment: agentexec.SafeEnvironment("LAZYMIND_EXTERNAL_REF="+run.RunID,
+		Environment: agentexec.SafeEnvironment(append(append([]string(nil), r.runtimeEnvironment...),
+			"WORKBUDDY_CONFIG_DIR="+r.workBuddyHome,
+			"CODEBUDDY_CONFIG_DIR="+r.workBuddyHome,
+			"LAZYMIND_EXTERNAL_REF="+run.RunID,
 			"LAZYMIND_EXTERNAL_LEASE="+run.LeaseToken,
 			"LAZYMIND_EXTERNAL_HOST="+run.HostID,
-			"LAZYMIND_CONVERSATION_ID="+run.ConversationID),
+			"LAZYMIND_CONVERSATION_ID="+run.ConversationID,
+		)...),
 		MaxLineBytes: maxEventBytes,
 	}).Run(ctx, func(line []byte) error {
 		var event struct {
@@ -204,7 +215,7 @@ func (r *ChatRunner) Run(ctx context.Context, run chatagent.Run, emit func(chata
 			} else if len(event.Errors) > 0 {
 				terminalError = strings.Join(event.Errors, "; ")
 			} else {
-				terminalError = "CodeBuddy Code returned " + strings.TrimSpace(event.Subtype)
+				terminalError = "WorkBuddy returned " + strings.TrimSpace(event.Subtype)
 			}
 		}
 		return nil
@@ -216,10 +227,20 @@ func (r *ChatRunner) Run(ctx context.Context, run chatagent.Run, emit func(chata
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		return fmt.Errorf("CodeBuddy Code failed: %w", err)
+		return fmt.Errorf("WorkBuddy failed: %w", err)
 	}
-	if !completed || !sawMessage {
-		return errors.New("CodeBuddy Code ended without a completed response")
+	attachments, err := chatagent.ImageAttachmentsSince(filepath.Join(workspace, "generated-images"), startedAt)
+	if err != nil {
+		return fmt.Errorf("discover WorkBuddy generated images: %w", err)
+	}
+	for index := range attachments {
+		attachment := attachments[index]
+		if err := emit(chatagent.Event{Type: "attachment", Attachment: &attachment}); err != nil {
+			return err
+		}
+	}
+	if !completed || (!sawMessage && len(attachments) == 0) {
+		return errors.New("WorkBuddy ended without a completed response")
 	}
 	return nil
 }
@@ -227,7 +248,7 @@ func (r *ChatRunner) Run(ctx context.Context, run chatagent.Run, emit func(chata
 func (r *ChatRunner) invocationMCPConfig(run chatagent.Run) (string, error) {
 	body, err := agentexec.LazyMindMCPConfig(r.self, r.home, run.RunID, run.ConversationID, run.LeaseToken, run.HostID)
 	if err != nil {
-		return "", fmt.Errorf("build CodeBuddy invocation MCP configuration: %w", err)
+		return "", fmt.Errorf("build WorkBuddy invocation MCP configuration: %w", err)
 	}
 	return string(body), nil
 }

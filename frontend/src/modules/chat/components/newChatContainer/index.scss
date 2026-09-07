@@ -76,6 +76,13 @@
         }
       }
 
+      &.is-recovered {
+        .ant-alert-success {
+          border-color: #b7eb8f;
+          background: #f6ffed;
+        }
+      }
+
       &.is-failed {
         .ant-alert-error {
           border-color: #ffccc7;

@@ -284,7 +284,7 @@ func validateStartupConfig() error {
 	if err := episode.ValidateInternalTokenConfig(); err != nil {
 		return err
 	}
-	_, err := currentmemory.PreferenceIndexMaxItemsFromEnv()
+	_, err := currentmemory.PreferenceContextMaxCharsFromEnv()
 	return err
 }
 

@@ -107,6 +107,9 @@ func Apply(ctx context.Context, db *gorm.DB, source BundleSource, owner TargetOw
 			if err := normalizeInjectedConversation(ctx, tx, manifest, owner); err != nil {
 				return err
 			}
+			if err := reconcileInjectedWorkflowTasks(ctx, tx, manifest, owner); err != nil {
+				return err
+			}
 			return normalizeSQLiteJSONColumns(ctx, tx, statements)
 		})
 		return result, err
@@ -140,6 +143,9 @@ func Apply(ctx context.Context, db *gorm.DB, source BundleSource, owner TargetOw
 			}
 		}
 		if err := normalizeInjectedConversation(ctx, tx, manifest, owner); err != nil {
+			return err
+		}
+		if err := reconcileInjectedWorkflowTasks(ctx, tx, manifest, owner); err != nil {
 			return err
 		}
 		return normalizeSQLiteJSONColumns(ctx, tx, statements)

@@ -92,6 +92,10 @@ func TestWindowsDesktopDiscoveryUsesRegisteredProtocol(t *testing.T) {
 	if err != nil || !state.Installed {
 		t.Fatalf("state=%#v err=%v", state, err)
 	}
+	resolved, err := FindDesktopApplication(DesktopApplication{Protocols: []string{protocol}})
+	if err != nil || !SameExecutable(resolved, executable) {
+		t.Fatalf("resolved=%q err=%v", resolved, err)
+	}
 }
 
 func TestWindowsCommandDiscoveryUsesAppPaths(t *testing.T) {

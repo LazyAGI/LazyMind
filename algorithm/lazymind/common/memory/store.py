@@ -4,9 +4,7 @@ import re
 from typing import Any, Optional
 
 from lazymind.common.integrations.remote_fs import RemoteFS
-from lazymind.config import config as _cfg
-
-from .exceptions import MemoryPartialApplyError, PreferenceCapacityExceededError
+from .exceptions import MemoryPartialApplyError
 from .field_contract import validate_memory_transition
 from .paths import (
     AGENTS_ROOT,
@@ -23,7 +21,6 @@ from .paths import (
 )
 from .validation import (
     PreferenceItem,
-    parse_preference_items,
     validate_preference_index,
     validate_reference_content,
 )
@@ -158,16 +155,8 @@ class MemoryStore:
         _, after_visible = split_stored_memory_content(stored_content, label=label)
         before_stored = parse_yaml_mapping(loaded)
         after_stored = parse_yaml_mapping(stored_content)
-        before_metadata = {
-            key: value
-            for key, value in before_stored.items()
-            if is_internal_memory_path(key)
-        }
-        after_metadata = {
-            key: value
-            for key, value in after_stored.items()
-            if is_internal_memory_path(key)
-        }
+        before_metadata = {key: value for key, value in before_stored.items() if is_internal_memory_path(key)}
+        after_metadata = {key: value for key, value in after_stored.items() if is_internal_memory_path(key)}
         if before_metadata != after_metadata:
             raise ValueError(f'{label} internal metadata cannot be changed.')
         validate_memory_transition(
@@ -196,15 +185,6 @@ class MemoryStore:
         from .editors.preference import add_preference_entry
 
         loaded = self.read(PREFERENCE_PATH)
-        current_items = len(parse_preference_items(loaded))
-        max_items = int(_cfg['preference_index_max_items'])
-        if current_items >= max_items:
-            attempted_items = current_items + 1
-            raise PreferenceCapacityExceededError(
-                current_items=current_items,
-                attempted_items=attempted_items,
-                max_items=max_items,
-            )
         edited = add_preference_entry(
             loaded,
             name=name,
@@ -216,29 +196,62 @@ class MemoryStore:
             conversation_id=conversation_id,
         )
         reference_name = edited['reference_name']
-        self.write(
-            build_reference_path(reference_name),
-            edited['reference_content'],
+        self.write_preference_with_new_reference(
+            original=loaded, proposed=edited['content'], reference_name=reference_name,
+            reference_content=edited['reference_content'], item=edited['item'], operation='add',
         )
+        return edited['item']
+
+    def write_preference_with_new_reference(
+        self, *, original: str, proposed: str, reference_name: str,
+        reference_content: str, item: PreferenceItem, operation: str,
+    ) -> None:
+        """Persist a new reference before its index entry, compensating a failed index write.
+
+        Callers retain responsibility for semantic edits and old-reference cleanup.
+        Keep the established add/merge receipt vocabulary at this shared boundary.
+        """
+        self.validate_new_preference_reference(original, proposed, reference_name)
+        self.write(build_reference_path(reference_name), reference_content)
         try:
-            self.write(PREFERENCE_PATH, edited['content'])
+            self.write(PREFERENCE_PATH, proposed)
         except Exception as write_exc:
             try:
                 self.delete_reference(reference_name)
             except Exception as cleanup_exc:
                 raise MemoryPartialApplyError(
                     (
-                        f'preference add partially applied: reference '
+                        f'preference {operation} partially applied: reference '
                         f'{reference_name!r} was created but the index write failed; '
                         f'cleanup also failed: {cleanup_exc}'
                     ),
-                    operation='add',
-                    applied=['reference'],
-                    failed=['preference_index', 'reference_cleanup'],
-                    item=edited['item'],
+                    operation=operation,
+                    applied=['new_reference' if operation == 'merge' else 'reference'],
+                    failed=[
+                        'preference_index',
+                        'new_reference_cleanup' if operation == 'merge' else 'reference_cleanup',
+                    ],
+                    item=item,
                 ) from write_exc
             raise
-        return edited['item']
+
+    def validate_new_preference_reference(self, original: str, proposed: str, reference_name: str) -> None:
+        from .paths import split_reference_ref
+        from .validation.preference import parse_preference_items
+
+        for content in (original, proposed):
+            error = validate_preference_index(content)
+            if error:
+                raise ValueError(error)
+        path = build_reference_path(reference_name)
+        if any(split_reference_ref(item.ref)[0] == path for item in parse_preference_items(original)):
+            raise ValueError(f'Preference name maps to an existing reference: {path}')
+        # A reference left by an older partial operation is also never overwritten.
+        try:
+            self.read(path)
+        except FileNotFoundError:
+            return
+        raise ValueError(f'Preference reference already exists: {path}')
 
     def remove_preference_with_reference(self, name: str) -> PreferenceItem:
         from .editors.preference import delete_preference_entry, reference_name_from_item
@@ -253,7 +266,7 @@ class MemoryStore:
             raise MemoryPartialApplyError(
                 (
                     f'preference delete partially applied: index entry '
-                    f"{edited['item'].name!r} was removed but reference "
+                    f'{edited["item"].name!r} was removed but reference '
                     f'{reference_name!r} could not be deleted: {exc}'
                 ),
                 operation='delete',

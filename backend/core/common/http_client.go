@@ -18,6 +18,10 @@ const (
 // - contentType text "application/json"。
 // textResponse body、HTTP text error（text/text/text body Failedtext error）。
 func HTTPPost(ctx context.Context, url, contentType string, body []byte) ([]byte, int, error) {
+	return HTTPPostWithTimeout(ctx, url, contentType, body, defaultHTTPTimeout)
+}
+
+func HTTPPostWithTimeout(ctx context.Context, url, contentType string, body []byte, timeout time.Duration) ([]byte, int, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -31,7 +35,7 @@ func HTTPPost(ctx context.Context, url, contentType string, body []byte) ([]byte
 	}
 
 	client := &http.Client{
-		Timeout: defaultHTTPTimeout,
+		Timeout: timeout,
 	}
 
 	resp, err := client.Do(req)

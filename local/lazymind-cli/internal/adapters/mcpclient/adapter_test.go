@@ -56,6 +56,26 @@ func TestCursorInstallURLCarriesOneManagedStdioDefinition(t *testing.T) {
 	assertStdioDefinition(t, encoded, adapter.self, adapter.home, Cursor)
 }
 
+func TestCursorInstallURLPreservesNativeWindowsPaths(t *testing.T) {
+	adapter := &Adapter{
+		kind: Cursor, self: `C:\Program Files\LazyMind\runtime\bin\lazymind.exe`,
+		home: `C:\Users\Alice\AppData\Local\LazyMind`, hostID: "host-1",
+	}
+	value, err := adapter.cursorInstallURL()
+	if err != nil {
+		t.Fatal(err)
+	}
+	installURL, err := url.Parse(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := base64.StdEncoding.DecodeString(installURL.Query().Get("config"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertStdioDefinition(t, encoded, adapter.self, adapter.home, Cursor)
+}
+
 func TestWorkBuddyUsesWorkBuddyConfiguration(t *testing.T) {
 	home := t.TempDir()
 	setTestHome(t, home)

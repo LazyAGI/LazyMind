@@ -6,11 +6,37 @@ transitions:
 
   analyze_requirements:
     - to: collect_materials
+      when: >
+        skip_material_collection was not saved because uploaded sources,
+        knowledge-base/web research, citations, current facts, real photos,
+        product evidence, cases, data, or reference images are still needed.
+    - to: plan_background_prompts
+      when: >
+        skip_material_collection was saved and ppt_capability_requirements is
+        exactly AI_BACKGROUND_IMAGES: enabled.
+    - to: build_outline
+      when: >
+        skip_material_collection was saved and ppt_capability_requirements is
+        exactly AI_BACKGROUND_IMAGES: disabled.
 
   collect_materials:
+    - to: plan_background_prompts
+      when: >
+        ppt_capability_requirements is exactly AI_BACKGROUND_IMAGES: enabled.
+    - to: build_outline
+      when: >
+        ppt_capability_requirements is exactly AI_BACKGROUND_IMAGES: disabled.
+
+  plan_background_prompts:
+    - to: generate_backgrounds
+
+  generate_backgrounds:
     - to: build_outline
 
   build_outline:
+    - to: plan_page_prompts
+
+  plan_page_prompts:
     - to: generate_ppt
 
   generate_ppt:
@@ -20,6 +46,7 @@ steps:
   analyze_requirements:
     label: Analyze Requirements
     mode: auto
+    route: choice
     prompt: |
       You are a senior presentation strategist.
 
@@ -29,15 +56,15 @@ steps:
       {{runtime_instruction}}
 
       Analyze the presentation requirements. Produce a concise but useful
-      requirement brief in the user's language. The next step is always
-      collect_materials; do not try to skip directly to build_outline.
+      requirement brief in the user's language. Decide whether external or
+      uploaded source collection is genuinely needed; a simple, self-contained
+      presentation request should not spend a separate step collecting material.
 
       Step boundary (mandatory):
       - This step only analyzes requirements.
       - Do NOT search or call a knowledge base in this step. When the user asks
         to use a knowledge base, record that requirement clearly;
-        collect_materials is the next step and is the only step that performs
-        KB retrieval.
+        collect_materials is the only step that performs KB retrieval.
 
       Input availability rule:
       - A user upload is NOT required. For a text-only request, immediately
@@ -48,8 +75,9 @@ steps:
 
       Startup clarification contract:
       - The Chat host collects presentation topic, exact slide count, target
-        customer/audience, and visual style before creating this workflow
-        session. Extract all four faithfully from {{user_input}}; clarification
+        customer/audience, visual style, and whether per-slide AI background
+        generation is enabled before creating this workflow session. Extract
+        all five faithfully from {{user_input}}; clarification
         answers may have been merged into the original request.
       - Do not replace an explicitly supplied value with a generic default.
       - Do not interpret the phrase "make a PPT" itself as a presentation topic,
@@ -87,6 +115,8 @@ steps:
         industry / case-study visual; otherwise CSS/SVG/ECharts only)
       - whether the user explicitly asked for AI-generated material images
         (default: no — do not invent this need)
+      - AI background generation: record exactly enabled or disabled from the
+        startup answer. This is independent from foreground material images.
 
       If the user already attached a PDF/PPTX/report or pasted key facts, fold the
       usable numbers and claims into the brief. collect_materials will reuse
@@ -94,18 +124,57 @@ steps:
 
       Save the result:
         save_artifact(key='requirement_analysis', content_type='text', value=<analysis>)
+        save_artifact(
+          key='ppt_capability_requirements',
+          content_type='text',
+          value='AI_BACKGROUND_IMAGES: enabled' if the startup answer enabled
+                per-slide AI backgrounds, otherwise
+                'AI_BACKGROUND_IMAGES: disabled',
+        )
+        When and only when that marker is disabled, also save:
+          save_artifact(
+            key='skip_background_images', content_type='text', value='skip',
+          )
 
-      Stop after saving. Do not call advance tools yourself.
+        Also decide whether to skip material collection. Save:
+          save_artifact(
+            key='skip_material_collection', content_type='text', value='skip',
+          )
+        when ALL of these are true:
+        - the request is self-contained and uses common, stable knowledge;
+        - there is no uploaded source, selected/mentioned knowledge base, or
+          pasted source material that needs processing;
+        - the user did not request research, current facts, citations, real
+          photos, product/industry evidence, cases, data, or reference images.
+        Examples that should skip: a short children's holiday introduction,
+        a simple classroom deck, or a basic concept explainer whose topic,
+        audience, page count, and style are already known. Do not save this
+        marker for research/report/product/case-study decks or any request that
+        needs source-grounded claims or foreground visual assets.
+
+      Use exactly one of those two capability marker values. Do not add prose,
+      punctuation, Markdown, or any other capability to that hidden artifact.
+      After both artifacts are saved, Executor runs the deterministic model
+      capability check. Stop after saving. Do not call advance tools yourself.
     outputs:
       - material: requirement_analysis
+      - material: ppt_capability_requirements
+      - material: skip_background_images
+        required: false
+      - material: skip_material_collection
+        required: false
     acceptance_criteria: |
       requirement_analysis must be saved and must cover goal, presentation
       topic, exact slide count, target customer/audience, communication tone,
       explicit visual constraints, structure, constraints, and assumptions.
+      ppt_capability_requirements must be exactly AI_BACKGROUND_IMAGES: enabled
+      or AI_BACKGROUND_IMAGES: disabled. Executor must run the configured
+      deterministic check exactly once before this Attempt can pass.
 
   collect_materials:
     label: Collect Materials
     mode: auto
+    route: choice
     prompt: |
       You are a presentation research and material collection assistant.
 
@@ -262,9 +331,14 @@ steps:
   build_outline:
     label: Build Outline
     mode: auto
+    rerun_when: >
+      用户要求在未启用 AI 底图的现有 PPT 中插入整页；或 AI 底图插页流程
+      已经先插入底图提示词和底图，需要发布对应的新大纲。
     prompt: |
       You are a PPT outline planner. Build the deck structure and publish one
-      editable outline brief per page for the UI. Do NOT generate slide HTML yet.
+      concise Markdown deck outline for the UI. The Markdown must describe what
+      each page covers. Do NOT publish per-page generation prompts and do NOT
+      generate slide HTML yet.
 
       Requirement analysis:
       {{requirement_analysis}}
@@ -277,14 +351,39 @@ steps:
 
       {{runtime_instruction}}
 
-      Call ONE tool only:
+      ## Incremental whole-slide insertion
+
+      If the current request inserts/adds one whole slide into an existing deck
+      (for example, between pages 3 and 4), do NOT run the full outline pipeline.
+      Resolve deck_dir with ppt_find_deck and author exactly one structured page
+      object from the request. Use ppt_read_page_outline for the adjacent pages
+      when their context is needed. The object must contain page_kind, title,
+      subtitle/narrative, bullets/data_points, visual_hints, and any explicit
+      use_image/use_table binding; omit page_no because insert_before is authoritative.
+
+      - When ppt_capability_requirements is AI_BACKGROUND_IMAGES: disabled, call
+        ppt_insert_outline_page(deck_dir, insert_before=N, page_json=<one object>).
+        This opens the page gap and publishes the revised deck_outline without
+        rebuilding or rewriting any existing page.
+      - When ppt_capability_requirements is AI_BACKGROUND_IMAGES: enabled, the
+        earlier plan_background_prompts insertion already opened the gap and
+        saved this page object. Call ppt_publish_deck_outline(deck_dir) only.
+
+      Stop after that one insertion publication call. Never call
+      ppt_build_outline for a whole-slide insertion.
+
+      When AI backgrounds were enabled, first call ppt_find_deck to locate the
+      deck prepared by the background-prompt step. Then call ppt_build_outline
+      once with its deck_dir:
 
       ppt_build_outline — pass only these (omit unused optionals; never pass null):
+           deck_dir=<ppt_find_deck deck_dir>,
            user_query=<merged request>,
            page_count=<positive integer>,
            topic=<short topic>,
            role / audience / scene=<from analysis>,
            style_hint=<ONLY visual constraints explicitly stated by the user>,
+           generate_background_images=<true only when startup answer enabled it>,
            key_points_json='["point1","point2"]'  (JSON string, or omit)
          Defaults: ppt_mode=fast.
          Slide photos come from registered material_images (KB/web, or
@@ -295,16 +394,23 @@ steps:
       from requirement_analysis into style_hint. The PPT runtime selects one
       deck-wide style and applies that same contract to every page.
 
-      This single call runs init → preflight → style → outline → publish_outline
-      and writes slide_outline list items (sort_order=page) for the Outline tab.
+      This call reuses the prepared deck and runs preflight → style → outline,
+      then writes one deck_outline Markdown artifact for the Outline tab.
+      This step never generates AI backgrounds; the dedicated stages before it
+      already published prompts and images. When AI backgrounds were
+      disabled and those steps were skipped, do not call ppt_find_deck: call
+      ppt_build_outline without deck_dir so it initializes the deck itself.
 
       This is an atomic step. If ppt_build_outline fails, report that exact tool
       error and stop so the Workflow step fails and can be retried. Do NOT recover
-      by calling save_artifacts, and never write a multi-page JSON array into one
-      slide_outline item.
+      by calling save_artifacts.
       Do NOT call batch-page-html or export here — HTML is generate_ppt.
       After success, stop.
     tools:
+      - ppt_find_deck
+      - ppt_read_page_outline
+      - ppt_insert_outline_page
+      - ppt_publish_deck_outline
       - ppt_build_outline
     inputs:
       - material: requirement_analysis
@@ -313,15 +419,255 @@ steps:
         required: false
       - material: material_images
         required: false
+      - material: ppt_capability_requirements
+        required: true
+    outputs:
+      - material: deck_outline
+    acceptance_criteria: |
+      deck_outline must be one non-empty Markdown document with one concise page
+      description for every requested page.
+
+  plan_page_prompts:
+    label: Plan Page Prompts
+    mode: human
+    prompt: |
+      You are a PPT per-page prompt planner. The deck structure already exists.
+      Publish exactly one editable generation prompt per page for human review.
+      Do NOT rebuild the outline and do NOT generate slide HTML.
+
+      Deck outline:
+      {{deck_outline}}
+
+      Requirement analysis:
+      {{requirement_analysis}}
+
+      Material summary (optional):
+      {{material_summary}}
+
+      Original user request:
+      {{user_input}}
+
+      {{runtime_instruction}}
+
+      First call ppt_find_deck, then call ppt_publish_outline once with that
+      deck_dir. It publishes the existing outline.json pages as aligned,
+      editable slide_outline list items. Treat those items as per-page PPT HTML
+      generation prompts, not as the deck-level outline.
+
+      Incremental insertion: when the current request added one whole slide at
+      position N, call
+        ppt_publish_outline(deck_dir, pages=[N], insert_before=N)
+      so only one new composite page-prompt card is inserted. Never republish or
+      rewrite the prompts after N. The prompt body is position-independent and
+      must not contain a page number; its visual position is owned by sort_order.
+
+      Stop immediately after publishing. Do not call ppt_build_outline,
+      ppt_generate_pages, page-html, or save_artifacts.
+    tools:
+      - ppt_find_deck
+      - ppt_publish_outline
+    inputs:
+      - material: deck_outline
+        required: true
+      - material: requirement_analysis
+        required: true
+      - material: material_summary
+        required: false
+      - material: material_images
+        required: false
+      - material: background_images
+        required: false
     outputs:
       - material: slide_outline
     acceptance_criteria: |
-      slide_outline must be saved as a list with at least 2 pages (sort_order
-      aligned), each containing that page's title / bullets / layout brief.
+      slide_outline must contain exactly one non-empty, editable generation
+      prompt per requested page with aligned sort_order.
+
+  plan_background_prompts:
+    label: Plan Background Prompts
+    mode: auto
+    skip_if: {material: skip_background_images}
+    rerun_when: >
+      用户要求修改、替换或重新生成全部/指定页的底图提示词；或者在已启用
+      AI 底图的现有 PPT 中插入整页（插页必须从此步骤开始）。
+    prompt: |
+      You are the AI-background art director for one presentation. Produce one
+      editable English image prompt per slide, then finish automatically.
+      Do not generate any image in this step.
+
+      Requirement analysis:
+      {{requirement_analysis}}
+
+      Material summary:
+      {{material_summary}}
+
+      Existing background prompts, if this is a targeted revision:
+      {{background_prompts}}
+
+      Original/current user request:
+      {{user_input}}
+
+      {{runtime_instruction}}
+
+      On the first full run, call ppt_init_deck once using the analyzed request,
+      exact positive page_count N, audience/scene/style, and
+      generate_background_images=true. Then call
+      ppt_publish_background_prompts with that deck_dir and exactly N objects:
+        [{"page_no":1,"prompt":"..."}, ..., {"page_no":N,"prompt":"..."}]
+
+      On a targeted rerun, call ppt_find_deck instead of ppt_init_deck, then
+      publish only the selected page objects into that existing deck.
+
+      Whole-slide insertion into an existing deck: call ppt_find_deck, read the
+      two adjacent page outlines with ppt_read_page_outline when available, and
+      author exactly one structured page_json for the new slide (page_kind,
+      title, subtitle/narrative, bullets/data_points, visual_hints, and explicit
+      use_image/use_table; omit page_no). Then call once:
+        ppt_publish_background_prompts(
+          deck_dir=<existing deck>,
+          prompts_json=[{"page_no":N,"prompt":"<new English prompt>"}],
+          insert_before=N,
+          page_json=<new structured page object>
+        )
+      This inserts one prompt card and opens one aligned page gap while keeping
+      every old prompt/card revision unchanged. Do not publish or rewrite any
+      prompt after N.
+
+      Prompt-series contract:
+      - Every prompt is a complete standalone 16:9 slide-background prompt.
+      - Start each prompt with canvas/use and spatial allocation before describing
+        the subject: `16:9 widescreen presentation background`, the page role,
+        exact safe-zone side/region and approximate percentage, then the visual
+        focus and its location. The API ratio alone is not a composition instruction.
+      - Derive the safe zone from the planned page role and content density:
+        left-text/right-visual keeps the left 40–45% continuous, low-texture, and
+        low-contrast; right-text mirrors it; centered cover/title keeps the central
+        55–65% calm; top-title pages keep the top 20–25% calm; data-heavy pages keep
+        most of the canvas quiet with decoration confined to edges/corners. When
+        layout is not yet known, use a calm left 42% and a right-side visual focus
+        consistently rather than switching sides at random.
+      - Never place a face, hard horizon, bright flare, busy silhouette, or high-frequency
+        texture through the content-safe region. Put the strongest contrast and detail
+        inside the declared visual region and make the transition into the safe zone gradual.
+      - Use one shared visual world: identical palette, dominant art medium or camera
+        grammar, lighting direction/softness, material and texture family, shape language,
+        edge-detail strategy, spatial depth, and one recurring visual motif.
+        Compress these fixed properties into one concise series-anchor sentence and repeat
+        that sentence verbatim in every prompt; never rely on a previous page's context.
+      - Evolve that motif with the deck narrative so adjacent backgrounds feel
+        connected, while each page remains recognizably different in at least one
+        structural axis such as distance, density, scale, direction, or motif state.
+      - Describe 5–12 concrete visible elements with explicit spatial relationships.
+        Control materials, lighting, and a 3–5 color palette separately. Use visible
+        evidence such as believable shadows, tactile surfaces, atmospheric depth, or
+        crisp silhouettes instead of empty `beautiful/professional/high quality` stacks.
+      - Use a page-specific visual metaphor tied to that page's message. Do not default
+        unrelated topics to cyan-purple tech glow, glass dashboards, neural networks,
+        floating data particles, random geometric collage, or an all-black background.
+      - Keep title/central safe areas calm and low contrast; detail belongs near
+        edges. No words, letters, numbers, logos, watermarks, UI, charts, labels,
+        or text placeholders.
+      - Backgrounds never carry exact processes, diagrams, tables, axes, KPI values,
+        or fake dashboards; those belong to the later HTML/PPT/SVG chart layer.
+      - Keep the final avoid clause short and targeted. Do not bury the positive scene
+        description under a long negative prompt.
+
+      For a targeted request such as “重新生成底图提示词 1、2” or “替换第 3
+      页提示词”, preserve all other prompts and pass only the requested page
+      objects. The publisher overwrites those sort_order positions. Never append
+      replacements and never renumber pages.
+
+      After ppt_publish_background_prompts succeeds, stop. This step does not
+      require approval by default; the generated backgrounds step follows.
+    tools:
+      - ppt_init_deck
+      - ppt_find_deck
+      - ppt_read_page_outline
+      - ppt_publish_background_prompts
+    inputs:
+      - material: requirement_analysis
+        required: true
+      - material: material_summary
+        required: false
+    outputs:
+      - material: background_prompts
+        required: true
+    acceptance_criteria: |
+      On a full run, background_prompts has exactly one non-empty English prompt
+      for the analyzed page count with aligned sort_order. Every prompt repeats a shared
+      series anchor verbatim and contains page-specific structural variation plus an
+      explicit percentage-based no-text/content-safe-area contract. Materials, lighting,
+      and palette are independently specified. On a targeted rerun, only requested
+      positions are replaced.
+
+  generate_backgrounds:
+    label: Generate Backgrounds
+    mode: human
+    skip_if: {material: skip_background_images}
+    rerun_when: >
+      用户要求重新生成全部底图、重新生成/替换第 1、2 等指定位置的底图，
+      或者底图提示词步骤刚为现有 PPT 插入了一页新的底图提示词。
+    prompt: |
+      Generate PPT AI backgrounds strictly from the approved editable prompt
+      list. Do not rewrite, summarize, merge, or improve any prompt here.
+
+      Approved background prompts:
+      {{background_prompts}}
+
+      Existing background images, if any:
+      {{background_images}}
+
+      Original/current user request:
+      {{user_input}}
+
+      {{runtime_instruction}}
+
+      First call ppt_find_deck(). Then call ppt_generate_background_images once.
+      The tool normalizes every saved background to the exact 1280x720 slide
+      canvas. Do not treat a provider's square source image as the final asset.
+      Never call ppt_generate_background_images more than once in the same step.
+      On a provider failure, stop and surface the exact error; a later workflow
+      retry resumes from the per-page checkpoint and reuses completed images.
+
+      First full run:
+      - Pass every prompt as prompts_json with its page_no.
+      - Omit pages_json and use replace=false.
+
+      Targeted regeneration such as “重新生成底图 1、2”:
+      - Pass the CURRENT approved prompt objects for pages 1 and 2 only.
+      - Pass pages_json=[1,2] and replace=true.
+      - Existing images at positions 1 and 2 must be overwritten. Do not append,
+        delete, reorder, or regenerate any other page.
+
+      Full regeneration:
+      - Pass all current prompts and replace=true.
+
+      Incremental whole-slide insertion at N:
+      - Pass only the new approved prompt object for page N.
+      - Pass pages_json=[N], insert_before=N, and replace=false.
+      - Generate and insert exactly one new image card. Do not regenerate,
+        republish, or revise any existing background image.
+
+      If generation fails or returns no file, report the exact model/tool reason
+      and fail the step. After success, stop for human image approval.
+    tools:
+      - ppt_find_deck
+      - ppt_generate_background_images
+    inputs:
+      - material: background_prompts
+        required: true
+    outputs:
+      - material: background_images
+        required: true
+    acceptance_criteria: |
+      background_images aligns one-to-one with background_prompts by sort_order.
+      Full runs have N images. Targeted reruns replace only requested positions,
+      preserve all others, and expose exact provider failures instead of empty
+      success.
 
   generate_ppt:
     label: Generate PPT
-    mode: auto
+    mode: human
     prompt: |
       You are a PPT HTML generator. You do NOT rewrite the outline. You MUST
       drive generation through ppt_* tools and publish preview_html.
@@ -333,7 +679,10 @@ steps:
       Material summary (optional):
       {{material_summary}}
 
-      Per-page outline briefs already published (and possibly edited by the user):
+      Existing editable AI-background prompts, if any:
+      {{background_prompts}}
+
+      Per-page generation prompts already published (and possibly edited by the user):
       {{slide_outline}}
 
       Original user request:
@@ -343,13 +692,22 @@ steps:
 
       ## Mode selection
 
-      ### A) Delete an entire page
+      ### A) Insert an entire page
+      If the current request inserted/added one whole slide at position N, its
+      outline and page-prompt card were already inserted by upstream steps.
+      Resolve deck_dir with ppt_find_deck, then call exactly:
+        ppt_run_stage(deck_dir, stage='page-html', page=N, insert_before=N)
+      This generates and inserts only the new preview_html + preview_notes cards.
+      Stop immediately. Do not run ppt_generate_pages, asset-plan, outline,
+      style, or any later page; existing page/card revisions must remain intact.
+
+      ### B) Delete an entire page
       If the user asks to remove a whole slide (e.g. "删掉第3页", "去掉封面",
       "delete page 2") — not a bullet inside a page:
         ppt_find_deck() → ppt_delete_page(deck_dir, page=N)
       Stop after delete. Do NOT re-run outline/style/batch-page-html.
 
-      ### B) Single-page content edit
+      ### C) Single-page content edit
       If user_input / runtime_instruction asks to modify specific pages
       (e.g. "改第3页", "page 2", "这一页", "删掉最后一个要点", or a focused sort_order):
 
@@ -376,8 +734,51 @@ steps:
       6. ppt_edit_page_html and page-html auto-publish. Stop immediately afterward:
          do NOT call ppt_publish_pages and do NOT call save_artifacts.
 
-      ### C) Full deck HTML generation (default)
-      Outline already exists from build_outline. Do NOT call ppt_init_deck,
+      ### D) Single-page image/background edit
+      If the request changes an image on one existing slide, resolve the target
+      from an explicit page number first, otherwise use focused_sort_order from
+      runtime_instruction. Do not rebuild the outline or regenerate other pages.
+
+      Foreground/material image ("换图片/配图/产品图/照片"):
+      1. Call ppt_find_deck.
+      2. Obtain exactly the requested replacement:
+         - KB/upload/local/web image: search only when needed, then call
+           ppt_register_material_images once for the chosen image.
+         - AI-created foreground image: only when the user explicitly asks to
+           generate/draw it; call ppt_generate_material_images once.
+         - Existing Materials-tab/deck image: do not search or generate again;
+           use material_index (1-based Materials position) or the
+           reference_image_index returned by ppt_find_deck.
+      3. Call ppt_replace_page_material_image exactly once. Omit both index
+         arguments to use the newest image just registered/generated, or pass
+         reference_image_index to reuse an existing deck image. This updates
+         use_image and regenerates only the target page HTML.
+      4. Stop. Do not call collect_materials as a Workflow step, outline/style,
+         ppt_generate_pages, or a second page-html call.
+
+      AI slide background ("换背景/换底图/重新生成背景") when the deck already
+      has background_images, or the user explicitly asks for AI regeneration:
+      1. Call ppt_find_deck.
+      2. Call ppt_replace_page_background exactly once for the target page.
+         - For plain regeneration, omit prompt so the approved prompt is reused.
+         - For a changed scene/style, pass one complete English 16:9 background
+           prompt with a calm content-safe region and no text/logos.
+         The tool overwrites the prompt/image at the same list position and
+         refreshes only that page preview. If no image model is configured it
+         returns the model-settings dependency error; surface it unchanged.
+      3. Stop. Do not treat a foreground image as a background, and do not run
+         the full background, outline, or deck generation stages.
+
+      When the deck has no AI background_images, an ordinary color/gradient/
+      texture background request is a structural/layout edit, not AI generation:
+      patch visual_hints when needed and redraw only that page. Do not invoke an
+      image model merely because the user used the word "background". If the
+      user explicitly wants to enable AI backgrounds on a deck that has none,
+      explain that this changes the deck-wide background capability instead of
+      pretending a one-page replacement succeeded.
+
+      ### E) Full deck HTML generation (default)
+      Page prompts already exist from plan_page_prompts. Do NOT call ppt_init_deck,
       stage=style, or stage=outline again.
 
       Call ONE tool:
@@ -399,6 +800,11 @@ steps:
       - Full outline run → ppt_build_outline. Full HTML run → ppt_generate_pages.
       - Whole-page delete → ppt_delete_page. Bullet/element delete →
         ppt_patch_page_outline / ppt_edit_page_html (not ppt_delete_page).
+      - Whole-page insert → page-html with page=N and insert_before=N. Never
+        regenerate or republish shifted pages.
+      - Foreground image replacement → register/generate one material, then
+        ppt_replace_page_material_image. AI background replacement →
+        ppt_replace_page_background. Both update one preview page only.
       - Never stage=outline / style / ppt_init_deck on a full generate after
         build_outline already ran (unless ppt_find_deck finds nothing).
       - Never export PPTX from tools — UI Export only.
@@ -417,12 +823,23 @@ steps:
       - ppt_patch_page_outline
       - ppt_edit_page_html
       - ppt_delete_page
+      - kb
+      - web_search
+      - ppt_search_web_images
+      - ppt_register_material_images
+      - ppt_generate_material_images
+      - ppt_replace_page_material_image
+      - ppt_replace_page_background
     inputs:
       - material: requirement_analysis
         required: true
       - material: material_summary
         required: false
       - material: material_images
+        required: false
+      - material: background_images
+        required: false
+      - material: background_prompts
         required: false
       - material: slide_outline
         required: true
@@ -435,3 +852,7 @@ steps:
       preview_notes must be aligned with preview_html; the auto-generated draft is
       sufficient unless the user explicitly requests a richer speaker script.
       For a single-page edit: only the requested sort_order rows need updating.
+      For a foreground image or AI-background replacement, the corresponding
+      page prompt/binding and preview_html must update at the same sort_order;
+      the tool result must report updated_pages=[N], and untouched pages must
+      keep their existing revisions.

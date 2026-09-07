@@ -261,6 +261,7 @@ export default function PdfTemporaryChat({
           showThinkingDepth={false}
           showSkillDeposit={false}
           showConversationConfig={false}
+          showModelSelector={false}
           fixedThinkingDepth="low"
         />
       </div>

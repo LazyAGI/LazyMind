@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import time
 import uuid
 from typing import Any, Dict, List, Optional
@@ -7,7 +8,10 @@ from typing import Any, Dict, List, Optional
 import lazyllm
 from lazyllm.tools import fc_register
 
-from lazymind.chat.engine.subagent import SUBAGENT_ATTACHMENT_CONTEXT_KEY
+from lazymind.chat.engine.subagent import (
+    SUBAGENT_ATTACHMENT_CONTEXT_KEY,
+    SUBAGENT_SKILLS_CONTEXT_KEY,
+)
 from lazymind.chat.engine.subagent.db import TaskQueryDB
 from lazyllm.tools.agent.base import _write_agent_data
 
@@ -16,6 +20,13 @@ _HEARTBEAT_INTERVAL = 15
 # Poll interval for auto-mode status checks (seconds).
 _POLL_INTERVAL = 2
 _TERMINAL = {'succeeded', 'failed', 'interrupted', 'canceled'}
+_IMAGE_PROMPT_SKILL = 'image-prompt-craft'
+_IMAGE_TASK_RE = re.compile(
+    r'图片|图像|生图|绘图|底图|背景图|海报|插画|摄影|修图|改图|'
+    r'\bimage\b|\bphoto(?:graphy)?\b|\billustration\b|\bposter\b|'
+    r'\bbackground\b|\bppt\b|\bslide\b|\bpresentation\b',
+    re.IGNORECASE,
+)
 
 
 def _agentic_config() -> Dict[str, Any]:
@@ -74,6 +85,30 @@ def _resolve_file_path_for_artifact(value: str, cfg: Dict[str, Any]) -> str:
 def _mode() -> str:
     mode = str(_agentic_config().get('mode') or 'auto')
     return mode if mode in ('auto', 'manual') else 'auto'
+
+
+def _skills_for_subagent(
+    cfg: Dict[str, Any], *, agent_type: str, title: str, objective: str,
+) -> List[str]:
+    """Inherit only parent-selected skills plus task-relevant visual guidance."""
+    available = {
+        str(item).strip()
+        for item in (cfg.get('available_skills') or [])
+        if str(item).strip()
+    }
+    selected = [
+        str(item).strip()
+        for item in (cfg.get('subagent_skills') or [])
+        if str(item).strip() and str(item).strip() in available
+    ]
+    task_text = ' '.join((str(agent_type or ''), str(title or ''), str(objective or '')))
+    image_skill_refs = [
+        item for item in available
+        if item == _IMAGE_PROMPT_SKILL or item.rsplit('/', 1)[-1] == _IMAGE_PROMPT_SKILL
+    ]
+    if len(image_skill_refs) == 1 and _IMAGE_TASK_RE.search(task_text):
+        selected.append(image_skill_refs[0])
+    return list(dict.fromkeys(selected))
 
 
 def _current_attachment_context() -> Dict[str, Any]:
@@ -142,7 +177,17 @@ def create_subagent(
     """
     mode = _mode()
     params = dict(params or {})
-    params['_thinking_depth'] = str(_agentic_config().get('thinking_depth') or 'medium')
+    cfg = _agentic_config()
+    params['_thinking_depth'] = str(cfg.get('thinking_depth') or 'medium')
+    inherited_skills = _skills_for_subagent(
+        cfg, agent_type=agent_type, title=title, objective=objective,
+    )
+    if inherited_skills:
+        # Override any model-supplied internal value. Only Host-selected and installed
+        # skill names may cross the SubAgent task boundary.
+        params[SUBAGENT_SKILLS_CONTEXT_KEY] = inherited_skills
+    else:
+        params.pop(SUBAGENT_SKILLS_CONTEXT_KEY, None)
     trace = lazyllm.get_trace_context()
     if trace.trace_id and trace.parent_span_id:
         params.update(trace_id=trace.trace_id, parent_span_id=trace.parent_span_id)

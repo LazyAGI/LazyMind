@@ -25,6 +25,19 @@ func TestNormalizeCodexUserMessageStripsTransportEnvelope(t *testing.T) {
 	}
 }
 
+func TestNormalizeCodexUserMessageStripsResponseAnnotationsEnvelope(t *testing.T) {
+	raw := `# Response annotations:
+internal instructions
+<response-annotations>[{"text":"旧回答"}]</response-annotations>
+
+## My request:
+只保留真实问题`
+	text, inputs := normalizeCodexUserMessage("user-1", "history-1", raw, nil)
+	if text != "只保留真实问题" || len(inputs) != 1 || inputs[0]["text"] != text {
+		t.Fatalf("text=%q inputs=%#v", text, inputs)
+	}
+}
+
 func TestNormalizeCodexUserMessageLeavesRegularTextUntouched(t *testing.T) {
 	raw := "普通 Codex 用户消息"
 	text, inputs := normalizeCodexUserMessage("user-1", "history-1", raw, nil)

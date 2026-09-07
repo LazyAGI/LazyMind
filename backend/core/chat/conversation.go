@@ -16,6 +16,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"lazymind/core/acl"
 	"lazymind/core/common"
@@ -234,12 +235,22 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var searchConfigJSON json.RawMessage
+	var requestSearchConfig any
 	if conv != nil {
 		if sc, ok := conv["search_config"]; ok {
+			requestSearchConfig = sc
 			if b, err := json.Marshal(sc); err == nil {
 				searchConfigJSON = b
 			}
 		}
+	}
+	if err := authorizeConversationSearchConfig(r.Context(), db, userID, convID, requestSearchConfig); err != nil {
+		if errors.Is(err, errKnowledgeBaseNotReadable) {
+			common.ReplyErr(w, errKnowledgeBaseNotReadable.Error(), http.StatusForbidden)
+		} else {
+			common.ReplyErr(w, "validate knowledge bases failed", http.StatusInternalServerError)
+		}
+		return
 	}
 	var modelsJSON json.RawMessage
 	if len(modelStrs) > 0 {
@@ -256,6 +267,11 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 	} else if value, ok := raw["initial_workflow_settings"].(map[string]any); ok {
 		initialConversationSettings = value
 	}
+	initialModelSelection, err := parseInitialChatModelSelection(raw)
+	if err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 	if rawExecutor, present := initialConversationSettings["chat_executor"]; present {
 		executor, ok := rawExecutor.(string)
 		normalized, valid := normalizeChatExecutor(executor)
@@ -268,18 +284,92 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 	runInBackground, _ := raw["run_in_background"].(bool)
 	requestedThinkingDepth, _ := raw["thinking_depth"].(string)
 
-	conversationRecord, seq, err := ensureConversation(r.Context(), db, convID, displayName, searchConfigJSON, modelsJSON, userID, userName, runInBackground, requestedThinkingDepth, initialConversationSettings)
+	conversationRecord, seq, err := ensureConversation(r.Context(), db, convID, displayName, searchConfigJSON, modelsJSON, userID, userName, runInBackground, requestedThinkingDepth, initialConversationSettings, initialModelSelection)
 	if err != nil {
+		if errors.Is(err, errConversationUnavailable) {
+			common.ReplyErr(w, err.Error(), http.StatusNotFound)
+			return
+		}
 		if errors.Is(err, errConversationInTrash) {
 			common.ReplyErr(w, err.Error(), http.StatusConflict)
+			return
+		}
+		if errors.Is(err, errChatModelUnavailable) {
+			common.ReplyErr(w, err.Error(), http.StatusServiceUnavailable)
 			return
 		}
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "failed to ensure conversation", err), http.StatusInternalServerError)
 		return
 	}
+	isSidechat := isSidechatConversation(*conversationRecord)
+	if isSidechat {
+		if !stream {
+			common.ReplyErr(w, "sidechat requires streaming", http.StatusBadRequest)
+			return
+		}
+		basicChatOnly = true
+		runInBackground = false
+		enforceSidechatRequestPolicy(raw, conversationRecord.SearchConfig)
+	}
+	var sidechatRequestGuard *sidechatNextRequestGuard
+	if executor, valid := normalizeChatExecutor(conversationRecord.ChatExecutor); isSidechat && valid && executor == ChatExecutorLazyMind {
+		clientRequestID, err := sidechatClientRequestID(raw)
+		if err != nil {
+			common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		requestGuard, err := acquireSidechatNextRequestGuard(r.Context(), store.State(), convID, clientRequestID)
+		switch {
+		case errors.Is(err, errSidechatRequestBusy):
+			common.ReplyErr(w, err.Error(), http.StatusConflict)
+			return
+		case errors.Is(err, errSidechatRequestReplay):
+			common.ReplyErr(w, "sidechat request already accepted; resume the existing response", http.StatusConflict)
+			return
+		case err != nil:
+			common.ReplyErr(w, errSidechatStateUnavailable.Error(), http.StatusServiceUnavailable)
+			return
+		}
+		sidechatRequestGuard = requestGuard
+		defer requestGuard.Release()
+
+		// Retain, discard, and expiry cleanup use the same guard. Reload after
+		// acquiring it so none of those operations can leave this request using a
+		// stale conversation row that has already been promoted or deleted.
+		var current orm.Conversation
+		if err := db.WithContext(r.Context()).Where(
+			"id = ? AND create_user_id = ? AND deleted_at IS NULL AND archived_at IS NULL",
+			convID, userID,
+		).Take(&current).Error; err != nil || !isSidechatConversation(current) {
+			common.ReplyErr(w, "sidechat not found", http.StatusNotFound)
+			return
+		}
+		conversationRecord = &current
+		if err := validateSidechatSourceAttachments(
+			r.Context(), db, current, userID, sidechatDatasetCaller(r, userID),
+		); replySidechatSourceAttachmentError(w, err) {
+			return
+		}
+	}
 
 	var histories []orm.ChatHistory
-	db.Where("conversation_id = ?", convID).Order("seq ASC").Find(&histories)
+	if err := db.Where("conversation_id = ?", convID).
+		Order("seq ASC").Order("create_time ASC").Order("id ASC").
+		Find(&histories).Error; err != nil {
+		common.ReplyErr(w, "load conversation history failed", http.StatusInternalServerError)
+		return
+	}
+	if isSidechat {
+		// The request guard serializes child turns. Recompute from the histories
+		// loaded inside that guard instead of using ensureConversation's earlier
+		// count, which another request may have advanced while this one waited.
+		seq = 1
+		for _, history := range histories {
+			if history.Seq >= seq {
+				seq = history.Seq + 1
+			}
+		}
+	}
 	target := resolvePersistTarget(histories, raw, seq)
 	upstreamHistories := historiesForUpstream(histories, target)
 	sessionID := upstreamSessionID(convID)
@@ -398,11 +488,40 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 	//   2. Frontend sent workflow_context → cross-check with DB; overwrite any stale fields
 	//      so Python always receives the ground-truth session_id / current_step.
 	//
-	// Resolve workflow_mode with correct priority:
-	//   request body > conversation DB (loaded via applyChatRuntimeConfigs) > global default
+	// Resolve workflow_mode for a new run with this priority:
+	//   request body > conversation DB (loaded via applyChatRuntimeConfigs) > global default.
+	// An existing Workflow Session overrides all three with its immutable launch mode below.
 	// applyChatRuntimeConfigs is called later, so we first apply it to get DB-resolved values,
 	// then override with any explicit body value.
+	if target.IsRegeneration && target.Existing != nil {
+		if route := chatModelRouteFromHistoryExt(target.Existing.Ext); route != nil && route.Mode == chatModelModeAuto {
+			reqBody[chatModelRetryRouteBodyKey] = route
+		}
+	}
 	if err := applyChatRuntimeConfigs(r.Context(), db, userID, reqBody); err != nil {
+		if errors.Is(err, errChatModelUnavailable) {
+			historyExt := buildChatHistoryExtWithTrail(raw, displayQuery, histories, target)
+			historyExt = archiveRegeneratedFailedRunAttempt(historyExt, target)
+			historyID := target.HistoryID
+			if historyID == "" {
+				historyID = newID("h_")
+			}
+			runID := newID("run_")
+			if target.IsRegeneration && target.Existing != nil {
+				if err := claimChatHistoryRun(r.Context(), db, historyID, runID); err != nil {
+					common.ReplyErr(w, "failed to claim regenerated history for run", http.StatusInternalServerError)
+					return
+				}
+			}
+			persistImmediateRunTerminal(r.Context(), db, convID, historyID, displayQuery, runID, target, historyExt, &RunTerminal{
+				Status:        "failed",
+				Reason:        "model_failure",
+				Code:          "not_found",
+				PartialOutput: false,
+			})
+			common.ReplyErr(w, err.Error(), http.StatusServiceUnavailable)
+			return
+		}
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "load chat runtime config failed", err), http.StatusInternalServerError)
 		return
 	}
@@ -459,6 +578,12 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 
 		if activeSess, err := workflow.GetLatestSession(r.Context(), db, convID); err == nil &&
 			workflowSessionAvailableForRequest(activeSess, raw) {
+			// A Workflow's execution mode is selected when its Session is created.
+			// Conversation settings may change later, but cannot mutate an existing run.
+			workflowMode = "dynamic"
+			if activeSess.WorkflowMode == "auto" {
+				workflowMode = "auto"
+			}
 			refOrID := activeSess.WorkflowRef
 			if refOrID == "" {
 				refOrID = activeSess.WorkflowID
@@ -536,9 +661,33 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 	}
 	recordDatasetUsageForChat(r.Context(), raw, reqBody, userID, userName, target.IsRegeneration)
 	historyExt := buildChatHistoryExtWithTrail(raw, displayQuery, histories, target)
+	historyExt = mergeChatModelRouteIntoExt(historyExt, reqBody)
 	if err := applyChatAttachmentConversion(r.Context(), reqBody); err != nil {
-		common.ReplyErr(w, fmt.Sprintf("%s: %v", "prepare chat attachments failed", err), http.StatusBadGateway)
+		common.ReplyErr(w, chatAttachmentConversionReplyMessage(isSidechat, err), http.StatusBadGateway)
 		return
+	}
+	if isSidechat && conversationRecord.IsEphemeral {
+		expiresAt := time.Now().UTC().Add(24 * time.Hour)
+		result := db.WithContext(r.Context()).Model(&orm.Conversation{}).
+			Where("id = ? AND create_user_id = ? AND is_ephemeral = ?", convID, userID, true).
+			Update("ephemeral_expires_at", expiresAt)
+		if result.Error != nil {
+			common.ReplyErr(w, "extend sidechat session failed", http.StatusInternalServerError)
+			return
+		}
+		if result.RowsAffected != 1 {
+			common.ReplyErr(w, "sidechat not found", http.StatusNotFound)
+			return
+		}
+	}
+	if sidechatRequestGuard != nil {
+		if err := sidechatRequestGuard.MarkAccepted(r.Context()); errors.Is(err, errSidechatRequestReplay) {
+			common.ReplyErr(w, "sidechat request already accepted; resume the existing response", http.StatusConflict)
+			return
+		} else if err != nil {
+			common.ReplyErr(w, errSidechatStateUnavailable.Error(), http.StatusServiceUnavailable)
+			return
+		}
 	}
 	baseURL := chatServiceURL()
 	reqCtx := r.Context()
@@ -772,6 +921,7 @@ func mergeChunksToFirstChunk(chunks []*ChatChunkResponse) *ChatChunkResponse {
 	}
 	var fullDelta, fullReasoning string
 	var intentUpdated *IntentUpdatedEvent
+	var modelRoute *chatModelRoute
 	var sources []any
 	last := chunks[len(chunks)-1]
 	for _, ch := range chunks {
@@ -785,6 +935,9 @@ func mergeChunksToFirstChunk(chunks []*ChatChunkResponse) *ChatChunkResponse {
 		}
 		if len(ch.Sources) > 0 {
 			sources = ch.Sources
+		}
+		if ch.ModelRoute != nil {
+			modelRoute = ch.ModelRoute
 		}
 		if ch.RuntimeEvent != nil {
 			continue
@@ -802,6 +955,7 @@ func mergeChunksToFirstChunk(chunks []*ChatChunkResponse) *ChatChunkResponse {
 		ReasoningContent: fullReasoning,
 		Sources:          sources,
 		IntentUpdated:    intentUpdated,
+		ModelRoute:       modelRoute,
 	}
 }
 
@@ -1242,7 +1396,7 @@ func GetConversation(w http.ResponseWriter, r *http.Request) {
 	db.Model(&orm.ChatHistory{}).Where("conversation_id = ? AND feed_back = ?", c.ID, 1).Count(&likeCnt)
 	db.Model(&orm.ChatHistory{}).Where("conversation_id = ? AND feed_back = ?", c.ID, 2).Count(&unlikeCnt)
 
-	writeConversationJSON(w, http.StatusOK, map[string]any{
+	item := map[string]any{
 		"name":                  "conversations/" + c.ID,
 		"conversation_id":       c.ID,
 		"display_name":          c.DisplayName,
@@ -1254,7 +1408,9 @@ func GetConversation(w http.ResponseWriter, r *http.Request) {
 		"create_time":           c.CreatedAt.UTC().Format(time.RFC3339),
 		"update_time":           c.UpdatedAt.UTC().Format(time.RFC3339),
 		"models":                models,
-	})
+	}
+	mergeConversationRelationMetadata(item, c, loadParentDisplayName(r.Context(), db, c, userID), true)
+	writeConversationJSON(w, http.StatusOK, item)
 }
 
 func parseConversationHistoryPage(r *http.Request) (pageSize, offset int) {
@@ -1391,15 +1547,19 @@ func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
 	var askSavedAnswers any
 	var intentUpdated any
 	var externalAgentActivity any
+	var modelRoute *chatModelRoute
+	var failedAttempts []failedRunAttempt
 	if len(h.Ext) > 0 {
 		var ext struct {
-			Input                 any  `json:"input"`
-			Mentions              any  `json:"mentions"`
-			AskPending            any  `json:"ask_pending"`
-			AskAnswered           bool `json:"ask_answered"`
-			AskSavedAnswers       any  `json:"ask_saved_answers"`
-			IntentUpdated         any  `json:"intent_updated"`
-			ExternalAgentActivity any  `json:"external_agent_activity"`
+			Input                 any                `json:"input"`
+			Mentions              any                `json:"mentions"`
+			AskPending            any                `json:"ask_pending"`
+			AskAnswered           bool               `json:"ask_answered"`
+			AskSavedAnswers       any                `json:"ask_saved_answers"`
+			IntentUpdated         any                `json:"intent_updated"`
+			ExternalAgentActivity any                `json:"external_agent_activity"`
+			ModelRoute            *chatModelRoute    `json:"model_route"`
+			FailedAttempts        []failedRunAttempt `json:"failed_run_attempts"`
 		}
 		if err := json.Unmarshal(h.Ext, &ext); err == nil {
 			input = ext.Input
@@ -1409,6 +1569,8 @@ func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
 			askSavedAnswers = ext.AskSavedAnswers
 			intentUpdated = ext.IntentUpdated
 			externalAgentActivity = ext.ExternalAgentActivity
+			modelRoute = ext.ModelRoute
+			failedAttempts = ext.FailedAttempts
 		}
 	}
 	item := map[string]any{
@@ -1429,15 +1591,19 @@ func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
 		"run_id":            h.RunID,
 		"run_status":        h.RunStatus,
 	}
+	if modelRoute != nil {
+		item["model_route"] = modelRoute
+	}
 	if len(h.RunTerminal) > 0 {
 		if terminal, err := parseRunTerminal(h.RunTerminal); err == nil {
 			item["run_terminal"] = terminal
 		}
 	}
 	if askPending != nil {
-		item["ask_pending"] = askPending
-		if askAnswered {
-			item["ask_answered"] = true
+		// ask_pending is an interaction request, not durable transcript content.
+		// Once answered, do not send it back and reopen a guide card in history.
+		if !askAnswered {
+			item["ask_pending"] = askPending
 		}
 		if askSavedAnswers != nil && !askAnswered {
 			item["ask_saved_answers"] = askSavedAnswers
@@ -1448,6 +1614,9 @@ func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
 	}
 	if externalAgentActivity != nil && strings.TrimSpace(h.Result) == "" {
 		item["external_user_only"] = true
+	}
+	if len(failedAttempts) > 0 {
+		item["failed_attempts"] = failedAttempts
 	}
 	return item
 }
@@ -1613,30 +1782,32 @@ func GetConversationDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	conversationItem := map[string]any{
+		"name":                  "conversations/" + c.ID,
+		"conversation_id":       c.ID,
+		"display_name":          c.DisplayName,
+		"search_config":         searchCfg,
+		"user":                  c.CreateUserName,
+		"chat_times":            c.ChatTimes,
+		"total_feedback_like":   likeCnt,
+		"total_feedback_unlike": unlikeCnt,
+		"create_time":           c.CreatedAt.UTC().Format(time.RFC3339),
+		"update_time":           c.UpdatedAt.UTC().Format(time.RFC3339),
+		"pinned_at":             c.PinnedAt,
+		"is_pinned":             c.PinnedAt != nil,
+		"models":                models,
+		"enable_workflow":       c.EnableWorkflow,
+		"workflow_mode":         c.WorkflowMode,
+		"enable_subagent":       c.EnableSubagent,
+		"chat_executor":         c.ChatExecutor,
+		"thinking_depth":        c.ThinkingDepth,
+		"assistant":             source.Assistant,
+		"project_key":           source.ProjectKey,
+		"project_name":          source.ProjectName,
+	}
+	mergeConversationRelationMetadata(conversationItem, c, loadParentDisplayName(r.Context(), db, c, userID), true)
 	writeConversationJSON(w, http.StatusOK, map[string]any{
-		"conversation": map[string]any{
-			"name":                  "conversations/" + c.ID,
-			"conversation_id":       c.ID,
-			"display_name":          c.DisplayName,
-			"search_config":         searchCfg,
-			"user":                  c.CreateUserName,
-			"chat_times":            c.ChatTimes,
-			"total_feedback_like":   likeCnt,
-			"total_feedback_unlike": unlikeCnt,
-			"create_time":           c.CreatedAt.UTC().Format(time.RFC3339),
-			"update_time":           c.UpdatedAt.UTC().Format(time.RFC3339),
-			"pinned_at":             c.PinnedAt,
-			"is_pinned":             c.PinnedAt != nil,
-			"models":                models,
-			"enable_workflow":       c.EnableWorkflow,
-			"workflow_mode":         c.WorkflowMode,
-			"enable_subagent":       c.EnableSubagent,
-			"chat_executor":         c.ChatExecutor,
-			"thinking_depth":        c.ThinkingDepth,
-			"assistant":             source.Assistant,
-			"project_key":           source.ProjectKey,
-			"project_name":          source.ProjectName,
-		},
+		"conversation": conversationItem,
 	})
 }
 
@@ -1715,7 +1886,11 @@ func DeleteConversation(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	notifySessionEnvClear(convID)
+	conversationIDs, familyErr := ownedConversationFamilyIDs(r.Context(), db, userID, convID)
+	if familyErr != nil {
+		conversationIDs = []string{convID}
+	}
+	notifySessionEnvClear(conversationIDs...)
 	writeConversationJSON(w, http.StatusOK, map[string]any{})
 }
 
@@ -1737,6 +1912,10 @@ func PromoteConversation(w http.ResponseWriter, r *http.Request) {
 		return
 	} else if err != nil {
 		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if isSidechatConversation(conversation) {
+		common.ReplyErr(w, "use the sidechat retain operation", http.StatusConflict)
 		return
 	}
 	if err := db.Model(&orm.Conversation{}).
@@ -1809,10 +1988,20 @@ func archiveConversation(
 	now := time.Now().UTC()
 	expiresAt := now.Add(30 * 24 * time.Hour)
 	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var root orm.Conversation
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id").Where(
+			"id = ? AND create_user_id = ? AND deleted_at IS NULL", conversationID, userID,
+		).Take(&root).Error; err != nil {
+			return err
+		}
+		conversationIDs, err := ownedConversationFamilyIDs(ctx, tx, userID, conversationID)
+		if err != nil {
+			return err
+		}
 		res := tx.Model(&orm.Conversation{}).
 			Where(
-				"id = ? AND create_user_id = ? AND deleted_at IS NULL",
-				conversationID,
+				"id IN ? AND create_user_id = ? AND deleted_at IS NULL",
+				conversationIDs,
 				userID,
 			).
 			Updates(map[string]any{
@@ -1826,7 +2015,7 @@ func archiveConversation(
 			return gorm.ErrRecordNotFound
 		}
 		if err := taskcenter.ArchiveTasksForConversations(
-			ctx, tx, userID, []string{conversationID}, taskcenter.ArchivedReasonConversationTrash, now,
+			ctx, tx, userID, conversationIDs, taskcenter.ArchivedReasonConversationTrash, now,
 		); err != nil {
 			return err
 		}
@@ -1873,18 +2062,20 @@ func BatchDeleteConversations(w http.ResponseWriter, r *http.Request) {
 	db := store.DB()
 
 	var ownedIDs []string
-	if err := db.Model(&orm.Conversation{}).
-		Where("id IN ? AND create_user_id = ? AND deleted_at IS NULL", uniqueIDs, userID).
-		Pluck("id", &ownedIDs).Error; err != nil {
-		common.ReplyErr(w, fmt.Sprintf("%s: %v", "query conversations failed", err), http.StatusInternalServerError)
-		return
-	}
-	if len(ownedIDs) == 0 {
-		common.ReplyErr(w, "conversation not found", http.StatusNotFound)
-		return
-	}
-
-	if err := db.Transaction(func(tx *gorm.DB) error {
+	err := db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Model(&orm.Conversation{}).
+			Where("id IN ? AND create_user_id = ? AND deleted_at IS NULL", uniqueIDs, userID).
+			Pluck("id", &ownedIDs).Error; err != nil {
+			return err
+		}
+		if len(ownedIDs) == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		expandedIDs, err := expandOwnedConversationFamilyIDs(r.Context(), tx, userID, ownedIDs)
+		if err != nil {
+			return err
+		}
+		ownedIDs = expandedIDs
 		now := time.Now().UTC()
 		expiresAt := now.Add(30 * 24 * time.Hour)
 		if err := tx.Model(&orm.Conversation{}).Where("id IN ? AND deleted_at IS NULL", ownedIDs).
@@ -1895,7 +2086,12 @@ func BatchDeleteConversations(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		return taskcenter.ArchiveTasksForConversations(r.Context(), tx, userID, ownedIDs, taskcenter.ArchivedReasonConversationTrash, now)
-	}); err != nil {
+	})
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		common.ReplyErr(w, "conversation not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "batch delete conversations failed", err), http.StatusInternalServerError)
 		return
 	}
@@ -1935,12 +2131,12 @@ func ListConversations(w http.ResponseWriter, r *http.Request) {
 	externalBinding := db.Model(&orm.ExternalAgentBinding{}).Select("1").
 		Where("external_agent_bindings.conversation_id = conversations.id").
 		Where("external_agent_bindings.created_by_user_id = ?", userID)
-	validatedExternalBinding := db.Table("external_agent_bindings AS validated_bindings").Select("1").
-		Joins("JOIN external_agent_sessions AS validated_sessions ON validated_sessions.owner_user_id = validated_bindings.created_by_user_id AND validated_sessions.provider = validated_bindings.provider AND validated_sessions.host_id = validated_bindings.host_id AND validated_sessions.provider_thread_id = validated_bindings.provider_thread_id").
-		Where("validated_bindings.conversation_id = conversations.id").
-		Where("validated_bindings.created_by_user_id = ?", userID).
-		Where("validated_sessions.active = ?", true)
-	q = q.Where("NOT EXISTS (?) OR EXISTS (?)", externalBinding, validatedExternalBinding)
+	visibleExternalBinding := db.Table("external_agent_bindings AS visible_bindings").Select("1").
+		Joins("LEFT JOIN external_agent_sessions AS visible_sessions ON visible_sessions.owner_user_id = visible_bindings.created_by_user_id AND visible_sessions.provider = visible_bindings.provider AND visible_sessions.host_id = visible_bindings.host_id AND visible_sessions.provider_thread_id = visible_bindings.provider_thread_id").
+		Where("visible_bindings.conversation_id = conversations.id").
+		Where("visible_bindings.created_by_user_id = ?", userID).
+		Where("visible_bindings.managed_by_lazymind = ? OR visible_sessions.active = ?", true, true)
+	q = q.Where("NOT EXISTS (?) OR EXISTS (?)", externalBinding, visibleExternalBinding)
 	assistantFilter := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("assistant")))
 	if assistantFilter != "" {
 		if normalized, valid := normalizeChatExecutor(assistantFilter); !valid || normalized != assistantFilter {
@@ -1950,7 +2146,7 @@ func ListConversations(w http.ResponseWriter, r *http.Request) {
 		if assistantFilter == ChatExecutorLazyMind {
 			q = q.Where("NOT EXISTS (?)", externalBinding)
 		} else {
-			q = q.Where("EXISTS (?)", validatedExternalBinding.Where("validated_bindings.provider = ?", assistantFilter))
+			q = q.Where("EXISTS (?)", visibleExternalBinding.Where("visible_bindings.provider = ?", assistantFilter))
 		}
 	}
 	assistantsFilter := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("assistants")))
@@ -1974,11 +2170,11 @@ func ListConversations(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case includeLazyMind && len(providers) > 0:
 			q = q.Where("NOT EXISTS (?) OR EXISTS (?)", externalBinding,
-				validatedExternalBinding.Where("validated_bindings.provider IN ?", providers))
+				visibleExternalBinding.Where("visible_bindings.provider IN ?", providers))
 		case includeLazyMind:
 			q = q.Where("NOT EXISTS (?)", externalBinding)
 		case len(providers) > 0:
-			q = q.Where("EXISTS (?)", validatedExternalBinding.Where("validated_bindings.provider IN ?", providers))
+			q = q.Where("EXISTS (?)", visibleExternalBinding.Where("visible_bindings.provider IN ?", providers))
 		}
 	}
 	if keyword != "" {
@@ -2023,6 +2219,7 @@ func ListConversations(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	parentNames := parentDisplayNames(r.Context(), db, userID, list)
 
 	items := make([]map[string]any, 0, len(list))
 	for _, c := range list {
@@ -2043,7 +2240,7 @@ func ListConversations(w http.ResponseWriter, r *http.Request) {
 		db.Model(&orm.ChatHistory{}).Where("conversation_id = ? AND feed_back = ?", c.ID, 1).Count(&likeCnt)
 		db.Model(&orm.ChatHistory{}).Where("conversation_id = ? AND feed_back = ?", c.ID, 2).Count(&unlikeCnt)
 
-		items = append(items, map[string]any{
+		item := map[string]any{
 			"name":                  "conversations/" + c.ID,
 			"conversation_id":       c.ID,
 			"display_name":          c.DisplayName,
@@ -2067,7 +2264,13 @@ func ListConversations(w http.ResponseWriter, r *http.Request) {
 			"assistant":             sources[c.ID].Assistant,
 			"project_key":           sources[c.ID].ProjectKey,
 			"project_name":          sources[c.ID].ProjectName,
-		})
+		}
+		parentName := ""
+		if c.ParentConversationID != nil {
+			parentName = parentNames[*c.ParentConversationID]
+		}
+		mergeConversationRelationMetadata(item, c, parentName, false)
+		items = append(items, item)
 	}
 	nextToken := ""
 	if offset+len(list) < int(total) {

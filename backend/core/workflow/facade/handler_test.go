@@ -338,6 +338,7 @@ func TestConsumeRetriesSessionEventWithPreparedSessionAndIdempotentBindings(t *t
 	h, db := testHandler(t)
 	if err := db.AutoMigrate(
 		&orm.Conversation{},
+		&orm.TaskCenterTask{},
 		&orm.WorkflowSession{},
 		&orm.WorkflowResource{},
 		&orm.WorkflowRevision{},
@@ -463,6 +464,7 @@ func TestConsumeRetriesSessionEventWithPreparedSessionAndIdempotentBindings(t *t
 		"conversation_id": "conversation-1",
 		"session_id":      "session-1",
 		"workflow_id":     "writer",
+		"workflow_mode":   "dynamic",
 		"status":          "active",
 		"state_version":   int64(1),
 	}

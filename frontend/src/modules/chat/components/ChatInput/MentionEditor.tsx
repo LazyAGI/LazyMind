@@ -98,7 +98,7 @@ const cacheKey = (type: CandidateType, keyword: string) =>
   `${type}:${keyword.trim().toLocaleLowerCase()}`;
 
 const bypassCandidateCache = (type: CandidateType) =>
-  type === "skill" || type === "tool";
+  type === "skill" || type === "tool" || type === "workflow";
 
 function escapeHtml(value: string) {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");

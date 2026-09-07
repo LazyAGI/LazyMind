@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, Field
 
@@ -32,6 +32,8 @@ class ChatRetrievalOptions(BaseModel):
 
 
 class ChatRuntimeOptions(BaseModel):
+    tool_policy: Literal['default', 'sidechat_readonly'] = 'default'
+    source_reference: Optional[str] = None
     debug: Optional[bool] = False
     reasoning: Optional[bool] = False
     thinking_depth: str = 'medium'

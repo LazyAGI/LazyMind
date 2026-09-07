@@ -747,6 +747,18 @@ export async function extractPage(page, htmlPath) {
   await page.goto(fileUrl, { waitUntil: 'load' });
   await page.waitForTimeout(200);
 
+  // CSS @import web fonts may finish after the document load event. Waiting
+  // here keeps the measured DOM bounds and fallback screenshot aligned with
+  // the font that the browser preview actually displays. A remote font outage
+  // must not block export, so cap the wait and continue with browser fallback.
+  await page.evaluate(async () => {
+    if (!document.fonts?.ready) return;
+    await Promise.race([
+      document.fonts.ready.catch(() => undefined),
+      new Promise(resolve => setTimeout(resolve, 5000)),
+    ]);
+  });
+
   // 检测 HTML 实际画布尺寸（.wrapper / .slide / body）
   const canvasSize = await page.evaluate(() => {
     const wrapper = document.querySelector('.wrapper') || document.querySelector('.slide');

@@ -46,23 +46,24 @@ type ProducerRef struct {
 }
 
 type CompiledNode struct {
-	ID              string            `json:"id"`
-	Label           string            `json:"label,omitempty"`
-	Route           string            `json:"route"`
-	Input           *Expression       `json:"input_expression,omitempty"`
-	OptionalInputs  []MaterialRef     `json:"optional_inputs,omitempty"`
-	InputTransports map[string]string `json:"input_transports,omitempty"`
-	Outputs         []string          `json:"outputs,omitempty"`
-	RequiredOutputs []string          `json:"required_outputs,omitempty"`
-	SkipIf          *Expression       `json:"skip_if,omitempty"`
-	Prompt          string            `json:"prompt,omitempty"`
-	Acceptance      []string          `json:"acceptance_criteria,omitempty"`
-	Capabilities    []string          `json:"capabilities,omitempty"`
-	LegacyTools     []string          `json:"legacy_tools,omitempty"`
-	TerminalTools   []string          `json:"terminal_tools,omitempty"`
-	ToolsOnly       bool              `json:"tools_only,omitempty"`
-	StreamHeartbeat bool              `json:"stream_heartbeat,omitempty"`
-	Mode            string            `json:"mode,omitempty"`
+	ID                string            `json:"id"`
+	Label             string            `json:"label,omitempty"`
+	Route             string            `json:"route"`
+	Input             *Expression       `json:"input_expression,omitempty"`
+	OptionalInputs    []MaterialRef     `json:"optional_inputs,omitempty"`
+	InputTransports   map[string]string `json:"input_transports,omitempty"`
+	Outputs           []string          `json:"outputs,omitempty"`
+	RequiredOutputs   []string          `json:"required_outputs,omitempty"`
+	SkipIf            *Expression       `json:"skip_if,omitempty"`
+	Prompt            string            `json:"prompt,omitempty"`
+	Acceptance        []string          `json:"acceptance_criteria,omitempty"`
+	Capabilities      []string          `json:"capabilities,omitempty"`
+	LegacyTools       []string          `json:"legacy_tools,omitempty"`
+	TerminalTools     []string          `json:"terminal_tools,omitempty"`
+	ToolsOnly         bool              `json:"tools_only,omitempty"`
+	TerminalToolsOnly bool              `json:"terminal_tools_only,omitempty"`
+	StreamHeartbeat   bool              `json:"stream_heartbeat,omitempty"`
+	Mode              string            `json:"mode,omitempty"`
 }
 
 type CompiledEdge struct {
@@ -93,6 +94,17 @@ type ClarificationField struct {
 	ChoicePolicy string   `json:"choice_policy,omitempty" yaml:"choice_policy,omitempty"`
 }
 
+// PostStepCheck is a deterministic package-owned function that a Host must run
+// after the named step has produced its artifacts, but before the Attempt may
+// be committed as successful. Arguments map function parameter names to
+// artifacts produced by that step. Unlike a Workflow node, this check never
+// starts another model/SubAgent turn.
+type PostStepCheck struct {
+	StepID    string            `json:"step_id" yaml:"step_id"`
+	Tool      string            `json:"tool" yaml:"tool"`
+	Arguments map[string]string `json:"arguments,omitempty" yaml:"arguments,omitempty"`
+}
+
 // RuntimePolicy contains host-neutral execution behavior declared by a
 // Workflow package. Hosts consume this policy instead of branching on a
 // particular workflow id.
@@ -101,13 +113,16 @@ type RuntimePolicy struct {
 	ExclusiveToolCapabilities []string             `json:"exclusive_tool_capabilities,omitempty" yaml:"exclusive_tool_capabilities,omitempty"`
 	CollectsKnowledge         bool                 `json:"collects_knowledge,omitempty" yaml:"collects_knowledge,omitempty"`
 	CompletedEditStep         string               `json:"completed_edit_step,omitempty" yaml:"completed_edit_step,omitempty"`
+	CompletedEditRouting      string               `json:"completed_edit_routing,omitempty" yaml:"completed_edit_routing,omitempty"`
 	CompletedContinueSteps    []string             `json:"completed_continue_steps,omitempty" yaml:"completed_continue_steps,omitempty"`
 	ClarificationFields       []ClarificationField `json:"clarification_fields,omitempty" yaml:"clarification_fields,omitempty"`
+	PostStepChecks            []PostStepCheck      `json:"post_step_checks,omitempty" yaml:"post_step_checks,omitempty"`
 }
 
 func (p RuntimePolicy) IsZero() bool {
 	return len(p.PublisherOwnedSlots) == 0 && len(p.ExclusiveToolCapabilities) == 0 && !p.CollectsKnowledge &&
-		p.CompletedEditStep == "" && len(p.CompletedContinueSteps) == 0 && len(p.ClarificationFields) == 0
+		p.CompletedEditStep == "" && p.CompletedEditRouting == "" && len(p.CompletedContinueSteps) == 0 && len(p.ClarificationFields) == 0 &&
+		len(p.PostStepChecks) == 0
 }
 
 type CompiledStateGraph struct {

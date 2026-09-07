@@ -67,6 +67,7 @@ export function serializeWorkflowModel(model: WorkflowModel, graphModel?: GraphM
     uiDoc.tabs = model.ui.tabs.map((tab) => {
       const t: Record<string, unknown> = { id: tab.id };
       if (tab.step_id) t.step_id = tab.step_id;
+      if (tab.slot_scope) t.slot_scope = tab.slot_scope;
       if (tab.label) t.label = tab.label;
       if (tab.layout) t.layout = tab.layout;
       if (tab.gridCols != null) t.grid_cols = tab.gridCols;

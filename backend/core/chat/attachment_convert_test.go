@@ -2,10 +2,26 @@ package chat
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func TestChatAttachmentConversionReplyMessageHidesSidechatPath(t *testing.T) {
+	path := "/srv/lazymind/private/tenant-1/source.docx"
+	err := errors.New("convert attachment " + path + ": service unavailable")
+
+	sidechatMessage := chatAttachmentConversionReplyMessage(true, err)
+	if sidechatMessage != "prepare chat attachments failed" || strings.Contains(sidechatMessage, path) {
+		t.Fatalf("sidechat conversion response leaked path: %q", sidechatMessage)
+	}
+	ordinaryMessage := chatAttachmentConversionReplyMessage(false, err)
+	if !strings.Contains(ordinaryMessage, path) {
+		t.Fatalf("ordinary chat compatibility response lost detail: %q", ordinaryMessage)
+	}
+}
 
 func TestResolveChatAttachmentFilesKeepsOfficialMinerUPPT(t *testing.T) {
 	pptx := "/tmp/sample.pptx"

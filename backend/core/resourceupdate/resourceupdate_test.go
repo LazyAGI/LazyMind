@@ -1564,11 +1564,11 @@ func TestMemoryWorkerDoesNotRetryNonRetryableReviewFailures(t *testing.T) {
 		message       string
 	}{
 		{
-			name:          "capacity exceeded",
+			name:          "preference organizing",
 			outcome:       "failed",
-			responseCode:  "capacity_exceeded",
-			persistedCode: "capacity_exceeded",
-			message:       "Preference capacity is full; the new preference was not saved.",
+			responseCode:  "preference_organizing",
+			persistedCode: "preference_organizing",
+			message:       "Preference maintenance is running; the new preference was not saved.",
 		},
 		{
 			name:          "partial failure",

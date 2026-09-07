@@ -12,7 +12,7 @@ from .editors import (
     preference_name_to_reference_name,
     validate_preference_name,
 )
-from .exceptions import MemoryPartialApplyError, PreferenceCapacityExceededError
+from .exceptions import MemoryPartialApplyError
 from .models import (
     EpisodeCreateInput,
     EpisodeCreateResult,
@@ -89,7 +89,6 @@ __all__ = [
     'PREFERENCE_PATH',
     'PROFILE_PATH',
     'PreferenceItem',
-    'PreferenceCapacityExceededError',
     'REFERENCE_ROOT',
     'SOUL_PATH',
     'USERS_ROOT',

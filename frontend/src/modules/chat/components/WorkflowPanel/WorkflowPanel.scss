@@ -937,6 +937,26 @@
     background: #fff;
   }
 
+  &__approval-bar {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 10px;
+    padding: 10px 12px;
+    border: 1px solid #fed7aa;
+    border-radius: 10px;
+    background: #fffaf3;
+  }
+
+  &__approval-label {
+    margin-right: auto;
+    color: #9a5b13;
+    font-size: 13px;
+    font-weight: 600;
+  }
+
   &__footer-document {
     display: flex;
     align-items: center;
@@ -1077,6 +1097,14 @@
     border: 1px solid #e5e7eb;
     border-radius: 6px;
     box-sizing: border-box;
+  }
+
+  // Composite cells can be shorter than a JSON payload. Keep the widget in
+  // its assigned cell and let the block itself own the vertical scroll.
+  &--json-block {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
   }
 
   &__text {
@@ -1994,6 +2022,16 @@
     }
   }
 
+  &--video {
+    width: 100%;
+    position: relative;
+    background: #111827;
+
+    &:hover .workflow-slot__download-btn--overlay {
+      opacity: 1;
+    }
+  }
+
   // Top-right action group (upload + delete buttons)
   &__top-right-actions {
     position: absolute;
@@ -2291,6 +2329,15 @@
     object-fit: contain;
   }
 
+  &__video {
+    display: block;
+    width: 100%;
+    max-height: min(48dvh, 520px);
+    border-radius: 6px;
+    object-fit: contain;
+    background: #111827;
+  }
+
   &__image-card-img {
     display: block;
     width: 100%;
@@ -2477,6 +2524,31 @@
         max-width: 820px;
         margin: 8px auto 0;
         align-self: center;
+      }
+
+      // Constrained speaker notes scroll inside the Markdown surface instead
+      // of letting the editor's 300px content minimum get clipped by the card.
+      .workflow-slot--text > .writer-markdown-editor {
+        .writer-markdown-editor__document-layout {
+          flex: 1 1 auto;
+          min-height: 0;
+          overflow: hidden;
+          align-items: stretch;
+        }
+
+        .writer-markdown-editor__main {
+          display: flex;
+          min-height: 0;
+          flex-direction: column;
+          overflow: hidden;
+        }
+
+        .writer-markdown-editor__surface {
+          flex: 1 1 auto;
+          min-height: 0;
+          max-height: none;
+          overflow-y: auto;
+        }
       }
     }
 
@@ -3719,6 +3791,60 @@
   }
 }
 
+.workflow-writer-provider-picker {
+  padding-top: 4px;
+}
+
+.workflow-writer-provider-picker__hint {
+  margin-bottom: 14px;
+  color: var(--text-secondary, #667085);
+  line-height: 1.5;
+}
+
+.workflow-writer-provider-picker__options {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+
+  .ant-radio-wrapper {
+    width: 100%;
+    margin: 0;
+    padding: 10px 12px;
+    border: 1px solid var(--border-color, #e4e7ec);
+    border-radius: 10px;
+  }
+}
+
+.workflow-writer-provider-picker__option {
+  display: grid;
+  grid-template-columns: 24px auto 1fr;
+  align-items: center;
+  gap: 10px;
+
+  img {
+    width: 22px;
+    height: 22px;
+    border-radius: 5px;
+    object-fit: contain;
+  }
+
+  small {
+    justify-self: end;
+    color: var(--text-tertiary, #98a2b3);
+  }
+}
+
+.workflow-writer-provider-picker__fallback-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  background: #f2f4f7;
+  color: #667085;
+}
+
 .workflow-slot__artifact-actions {
   display: flex;
   align-items: center;
@@ -4130,6 +4256,10 @@
       max-height: 180px;
     }
   }
+}
+
+.writer-artifact__markdown :is(h1, h2, h3, h4, h5, h6) {
+  color: #163b6d;
 }
 
 // ---------------------------------------------------------------------------

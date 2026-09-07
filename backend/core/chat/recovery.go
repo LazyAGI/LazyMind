@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
@@ -189,8 +191,15 @@ func listRecoveryConversations(w http.ResponseWriter, r *http.Request, archived 
 		}
 	}
 	items := make([]map[string]any, 0, len(rows))
+	parentNames := parentDisplayNames(r.Context(), db, userID, rows)
 	for _, row := range rows {
-		items = append(items, conversationRecoveryItem(row, folderNames))
+		item := conversationRecoveryItem(row, folderNames)
+		parentName := ""
+		if row.ParentConversationID != nil {
+			parentName = parentNames[*row.ParentConversationID]
+		}
+		mergeConversationRelationMetadata(item, row, parentName, false)
+		items = append(items, item)
 	}
 	writeConversationJSON(w, http.StatusOK, map[string]any{
 		"items": items, "total": total, "page": page, "page_size": pageSize,
@@ -242,20 +251,28 @@ func ArchiveConversation(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC()
 	var conversation orm.Conversation
 	err = db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", conversationID, userID).First(&conversation).Error; err != nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", conversationID, userID).First(&conversation).Error; err != nil {
 			return err
 		}
-		updates := map[string]any{"archive_folder_id": folderID, "updated_at": now}
-		if conversation.ArchivedAt == nil {
-			updates["archived_at"] = now
-			if err := taskcenter.ArchiveTasksForConversations(r.Context(), tx, userID, []string{conversationID}, taskcenter.ArchivedReasonConversationArchive, now); err != nil {
-				return err
-			}
+		if conversation.ParentConversationID != nil {
+			return errChildGroupOperation
+		}
+		conversationIDs, err := ownedConversationFamilyIDs(r.Context(), tx, userID, conversationID)
+		if err != nil {
+			return err
+		}
+		updates := map[string]any{"archive_folder_id": folderID, "archived_at": now, "updated_at": now}
+		if err := taskcenter.ArchiveTasksForConversations(r.Context(), tx, userID, conversationIDs, taskcenter.ArchivedReasonConversationArchive, now); err != nil {
+			return err
 		}
 		return tx.Model(&orm.Conversation{}).
-			Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", conversationID, userID).
+			Where("id IN ? AND create_user_id = ? AND deleted_at IS NULL", conversationIDs, userID).
 			Updates(updates).Error
 	})
+	if errors.Is(err, errChildGroupOperation) {
+		common.ReplyErr(w, err.Error(), http.StatusConflict)
+		return
+	}
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		common.ReplyErr(w, "archive conversation failed", http.StatusInternalServerError)
 		return
@@ -276,8 +293,22 @@ func UnarchiveConversation(w http.ResponseWriter, r *http.Request) {
 	db := store.DB().WithContext(r.Context())
 	userID := recoveryUserID(r)
 	err := db.Transaction(func(tx *gorm.DB) error {
+		var conversation orm.Conversation
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where(
+			"id = ? AND create_user_id = ? AND deleted_at IS NULL AND archived_at IS NOT NULL",
+			conversationID, userID,
+		).Take(&conversation).Error; err != nil {
+			return err
+		}
+		if conversation.ParentConversationID != nil {
+			return errChildGroupOperation
+		}
+		conversationIDs, err := ownedConversationFamilyIDs(r.Context(), tx, userID, conversationID)
+		if err != nil {
+			return err
+		}
 		result := tx.Model(&orm.Conversation{}).
-			Where("id = ? AND create_user_id = ? AND deleted_at IS NULL AND archived_at IS NOT NULL", conversationID, userID).
+			Where("id IN ? AND create_user_id = ? AND deleted_at IS NULL AND archived_at IS NOT NULL", conversationIDs, userID).
 			Updates(map[string]any{"archived_at": nil, "archive_folder_id": nil, "updated_at": now})
 		if result.Error != nil {
 			return result.Error
@@ -285,8 +316,12 @@ func UnarchiveConversation(w http.ResponseWriter, r *http.Request) {
 		if result.RowsAffected == 0 {
 			return gorm.ErrRecordNotFound
 		}
-		return taskcenter.RestoreTasksForConversations(r.Context(), tx, userID, []string{conversationID}, taskcenter.ArchivedReasonConversationArchive, now)
+		return taskcenter.RestoreTasksForConversations(r.Context(), tx, userID, conversationIDs, taskcenter.ArchivedReasonConversationArchive, now)
 	})
+	if errors.Is(err, errChildGroupOperation) {
+		common.ReplyErr(w, err.Error(), http.StatusConflict)
+		return
+	}
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		common.ReplyErr(w, "unarchive conversation failed", http.StatusInternalServerError)
 		return
@@ -307,8 +342,37 @@ func RestoreConversation(w http.ResponseWriter, r *http.Request) {
 	db := store.DB().WithContext(r.Context())
 	userID := recoveryUserID(r)
 	err := db.Transaction(func(tx *gorm.DB) error {
+		var conversation orm.Conversation
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where(
+			"id = ? AND create_user_id = ? AND deleted_at IS NOT NULL",
+			conversationID, userID,
+		).Take(&conversation).Error; err != nil {
+			return err
+		}
+		conversationIDs := []string{conversation.ID}
+		if conversation.ParentConversationID != nil {
+			var parent orm.Conversation
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where(
+				"id = ? AND create_user_id = ? AND deleted_at IS NULL AND archived_at IS NULL",
+				*conversation.ParentConversationID, userID,
+			).Take(&parent).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+				return errChildGroupOperation
+			} else if err != nil {
+				return err
+			}
+		} else if conversation.DeletedAt != nil {
+			var childIDs []string
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Model(&orm.Conversation{}).
+				Where(
+					"parent_conversation_id = ? AND create_user_id = ? AND deleted_at = ?",
+					conversation.ID, userID, *conversation.DeletedAt,
+				).Pluck("id", &childIDs).Error; err != nil {
+				return err
+			}
+			conversationIDs = append(conversationIDs, childIDs...)
+		}
 		result := tx.Model(&orm.Conversation{}).
-			Where("id = ? AND create_user_id = ? AND deleted_at IS NOT NULL", conversationID, userID).
+			Where("id IN ? AND create_user_id = ? AND deleted_at IS NOT NULL", conversationIDs, userID).
 			Updates(map[string]any{
 				"deleted_at": nil, "trash_expires_at": nil, "archived_at": nil,
 				"archive_folder_id": nil, "updated_at": now,
@@ -319,8 +383,12 @@ func RestoreConversation(w http.ResponseWriter, r *http.Request) {
 		if result.RowsAffected == 0 {
 			return gorm.ErrRecordNotFound
 		}
-		return taskcenter.RestoreTasksForConversations(r.Context(), tx, userID, []string{conversationID}, taskcenter.ArchivedReasonConversationTrash, now)
+		return taskcenter.RestoreTasksForConversations(r.Context(), tx, userID, conversationIDs, taskcenter.ArchivedReasonConversationTrash, now)
 	})
+	if errors.Is(err, errChildGroupOperation) {
+		common.ReplyErr(w, err.Error(), http.StatusConflict)
+		return
+	}
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		common.ReplyErr(w, "restore conversation failed", http.StatusInternalServerError)
 		return
@@ -333,25 +401,93 @@ func RestoreConversation(w http.ResponseWriter, r *http.Request) {
 }
 
 func purgeConversation(ctxDB *gorm.DB, conversationID, userID string) error {
-	var conversation orm.Conversation
-	if err := ctxDB.Where("id = ? AND create_user_id = ? AND (deleted_at IS NOT NULL OR is_ephemeral = ?)", conversationID, userID, true).
-		First(&conversation).Error; err != nil {
+	ctx := ctxDB.Statement.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	var root orm.Conversation
+	if err := ctxDB.Where(
+		"id = ? AND create_user_id = ? AND (deleted_at IS NOT NULL OR is_ephemeral = ?)",
+		conversationID, userID, true,
+	).First(&root).Error; err != nil {
 		return err
 	}
-	if err := removeConversationArtifactFiles(userID, conversationID); err != nil {
-		return err
+
+	family := []orm.Conversation{root}
+	if root.ParentConversationID == nil {
+		var children []orm.Conversation
+		if err := ctxDB.Where(
+			"parent_conversation_id = ? AND create_user_id = ?", root.ID, userID,
+		).Find(&children).Error; err != nil {
+			return err
+		}
+		family = append(family, children...)
 	}
-	return ctxDB.Transaction(func(tx *gorm.DB) error {
+	sort.Slice(family, func(i, j int) bool { return family[i].ID < family[j].ID })
+
+	guards := make([]*sidechatNextRequestGuard, 0, len(family))
+	for _, conversation := range family {
+		if !isSidechatConversation(conversation) {
+			continue
+		}
+		guard, err := acquireSidechatNextRequestGuard(ctx, store.State(), conversation.ID, "")
+		if err != nil {
+			for index := len(guards) - 1; index >= 0; index-- {
+				guards[index].Release()
+			}
+			return err
+		}
+		guards = append(guards, guard)
+	}
+	defer func() {
+		for index := len(guards) - 1; index >= 0; index-- {
+			guards[index].Release()
+		}
+	}()
+
+	expected := make(map[string]struct{}, len(family))
+	conversationIDs := make([]string, 0, len(family))
+	for _, conversation := range family {
+		expected[conversation.ID] = struct{}{}
+		conversationIDs = append(conversationIDs, conversation.ID)
+	}
+	err := ctxDB.Transaction(func(tx *gorm.DB) error {
+		var lockedRoot orm.Conversation
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where(
+			"id = ? AND create_user_id = ? AND (deleted_at IS NOT NULL OR is_ephemeral = ?)",
+			root.ID, userID, true,
+		).Take(&lockedRoot).Error; err != nil {
+			return err
+		}
+		var lockedFamily []orm.Conversation
+		query := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("create_user_id = ?", userID)
+		if lockedRoot.ParentConversationID == nil {
+			query = query.Where("id = ? OR parent_conversation_id = ?", lockedRoot.ID, lockedRoot.ID)
+		} else {
+			query = query.Where("id = ?", lockedRoot.ID)
+		}
+		if err := query.Find(&lockedFamily).Error; err != nil {
+			return err
+		}
+		if len(lockedFamily) != len(expected) {
+			return errSidechatRequestBusy
+		}
+		for _, conversation := range lockedFamily {
+			if _, ok := expected[conversation.ID]; !ok {
+				return errSidechatRequestBusy
+			}
+		}
+
 		deletions := []struct {
 			model any
 			where string
 			args  []any
 		}{
-			{&orm.ChatHistory{}, "conversation_id = ?", []any{conversationID}},
-			{&orm.MultiAnswersChatHistory{}, "conversation_id = ?", []any{conversationID}},
-			{&orm.ConversationArtifact{}, "conversation_id = ? AND create_user_id = ?", []any{conversationID, userID}},
-			{&orm.ConversationIdleEvent{}, "session_id = ? AND user_id = ?", []any{conversationID, userID}},
-			{&orm.EpisodeMemory{}, "conversation_id = ? AND user_id = ?", []any{conversationID, userID}},
+			{&orm.ChatHistory{}, "conversation_id IN ?", []any{conversationIDs}},
+			{&orm.MultiAnswersChatHistory{}, "conversation_id IN ?", []any{conversationIDs}},
+			{&orm.ConversationArtifact{}, "conversation_id IN ? AND create_user_id = ?", []any{conversationIDs, userID}},
+			{&orm.ConversationIdleEvent{}, "session_id IN ? AND user_id = ?", []any{conversationIDs, userID}},
+			{&orm.EpisodeMemory{}, "conversation_id IN ? AND user_id = ?", []any{conversationIDs, userID}},
 		}
 		for _, deletion := range deletions {
 			if err := tx.Where(deletion.where, deletion.args...).Delete(deletion.model).Error; err != nil {
@@ -359,28 +495,44 @@ func purgeConversation(ctxDB *gorm.DB, conversationID, userID string) error {
 			}
 		}
 		if err := tx.Model(&orm.SkillV2Draft{}).
-			Where("conversation_id = ?", conversationID).
+			Where("conversation_id IN ?", conversationIDs).
 			Update("conversation_id", nil).Error; err != nil {
 			return err
 		}
 		if tx.Migrator().HasTable("external_agent_bindings") {
-			if err := tx.Exec("DELETE FROM external_agent_bindings WHERE conversation_id = ? AND created_by_user_id = ?", conversationID, userID).Error; err != nil {
+			if err := tx.Exec("DELETE FROM external_agent_bindings WHERE conversation_id IN ? AND created_by_user_id = ?", conversationIDs, userID).Error; err != nil {
 				return err
 			}
 		}
-		if err := taskcenter.MarkConversationPurged(context.Background(), tx, userID, conversationID, time.Now().UTC()); err != nil {
-			return err
+		for _, id := range conversationIDs {
+			if err := taskcenter.MarkConversationPurged(ctx, tx, userID, id, time.Now().UTC()); err != nil {
+				return err
+			}
 		}
-		result := tx.Where("id = ? AND create_user_id = ? AND (deleted_at IS NOT NULL OR is_ephemeral = ?)", conversationID, userID, true).
+		result := tx.Where("id IN ? AND create_user_id = ?", conversationIDs, userID).
 			Delete(&orm.Conversation{})
 		if result.Error != nil {
 			return result.Error
 		}
-		if result.RowsAffected == 0 {
+		if result.RowsAffected != int64(len(conversationIDs)) {
 			return gorm.ErrRecordNotFound
 		}
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	notifySessionEnvClear(conversationIDs...)
+	// Only remove files after the database transaction commits. A rollback or
+	// process exit before commit therefore leaves every live conversation and its
+	// workspace intact; a post-commit interruption can only leave unreachable
+	// files, never a live conversation with missing artifacts.
+	for _, id := range conversationIDs {
+		if err := removeConversationArtifactFiles(userID, id); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func PurgeConversation(w http.ResponseWriter, r *http.Request) {
@@ -389,6 +541,14 @@ func PurgeConversation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	err := purgeConversation(store.DB().WithContext(r.Context()), conversationID, recoveryUserID(r))
+	if errors.Is(err, errSidechatRequestBusy) {
+		common.ReplyErr(w, "conversation is busy", http.StatusConflict)
+		return
+	}
+	if errors.Is(err, errSidechatStateUnavailable) {
+		common.ReplyErr(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		common.ReplyErr(w, "trashed conversation not found", http.StatusNotFound)
 		return
@@ -397,7 +557,6 @@ func PurgeConversation(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "purge conversation failed", http.StatusInternalServerError)
 		return
 	}
-	notifySessionEnvClear(conversationID)
 	writeConversationJSON(w, http.StatusOK, map[string]any{})
 }
 
@@ -421,7 +580,7 @@ func EmptyConversationTrash(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, conversationID := range ids {
-		if err := purgeConversation(db, conversationID, userID); err != nil {
+		if err := purgeConversation(db, conversationID, userID); err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 			common.ReplyErr(w, "empty conversation trash failed", http.StatusInternalServerError)
 			return
 		}
@@ -618,7 +777,9 @@ func PurgeExpiredConversationTrash(ctx context.Context, db *gorm.DB, now time.Ti
 		return 0, 1
 	}
 	for _, row := range rows {
-		if err := purgeConversation(db.WithContext(ctx), row.ID, row.CreateUserID); err != nil {
+		if err := purgeConversation(db.WithContext(ctx), row.ID, row.CreateUserID); errors.Is(err, errSidechatRequestBusy) {
+			continue
+		} else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 			failed++
 			continue
 		}

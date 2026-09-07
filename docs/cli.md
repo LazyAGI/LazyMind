@@ -666,7 +666,9 @@ tests/test_cli.py
 
 桥接器只监听 `127.0.0.1`，只接受本机 LazyMind 页面来源。Desktop 通过 Electron IPC 和 connector 标准输入同步当前会话，令牌不会进入命令行参数；标准 Docker 网页通过同源回环接口同步。两种入口都会把会话写入 `0600` 凭证文件，并在退出时清除。同步接口拒绝与页面 Origin 不一致的服务地址。Host 遇到被拒绝的 access token 时会刷新令牌，本地 refresh token 失效时会尝试从当前本地 Runtime 重建会话；仍无法恢复时，“助理”页会明确显示 LazyMind 登录失效或本机连接失败，不再无限显示“正在连接”。写入外部 Agent 配置的内容始终只有 connector 绝对路径、`mcp proxy` 参数以及可选的 `LAZYMIND_HOME`，不会把 access token 或 refresh token 写入任何 Agent 配置。
 
-直接执行裸 `docker compose up` 无法启动宿主机进程，因此标准用户入口是 `make up`。Windows 必须从 Git Bash 执行该入口；构建会生成原生 `lazymind.exe`，且不会把 Unix 用户参数传给 Docker Desktop。已经用裸 compose 启动服务时，可在仓库根目录补充运行 `make assistant-bridge-start`。
+直接执行裸 `docker compose up` 无法启动宿主机进程，因此标准用户入口是 `make up`。Windows 可从 Git Bash 或启用了 Windows 可执行文件互操作的 WSL 执行该入口；两种方式都会生成并启动原生 `lazymind.exe`，不会把 Linux Bridge 路径写入 Windows Agent。已经用裸 compose 启动服务时，可在同一环境补充运行 `make assistant-bridge-start`。
+
+Windows 浏览器必须连接 Windows 原生 Assistant Bridge。WSL 启动流程会识别宿主平台并通过 WSL 互操作运行 `lazymind.exe`；若互操作不可用则启动命令会直接失败并给出提示。网页与 Bridge 平台仍不一致时，所有助理配置和凭证同步接口都会拒绝请求，集成页会显示平台错配，而不会误报桥接器未运行。
 
 ### 16.1 Codex Desktop 与 Codex CLI
 
@@ -684,7 +686,7 @@ LazyMind 生成 Cursor 官方 `cursor://anysphere.cursor-deeplink/mcp/install` �
 
 ### 16.4 WorkBuddy
 
-桥接器为 WorkBuddy 原子合并 `~/.workbuddy/mcp.json#mcpServers`。备份、归属判断和精确移除规则与其他文件型 Provider 相同。WorkBuddy 与 CodeBuddy Code 是两个产品：前者在本节作为 MCP 客户端，后者仅作为下文的外部会话执行器。
+桥接器为 WorkBuddy 原子合并 `~/.workbuddy/mcp.json#mcpServers`。备份、归属判断和精确移除规则与其他文件型 Provider 相同。反向执行会自动定位 WorkBuddy 安装包内自带的运行时，并把 `WORKBUDDY_CONFIG_DIR` 与兼容变量 `CODEBUDDY_CONFIG_DIR` 指向 WorkBuddy 的 `~/.workbuddy` 数据目录，从而复用当前桌面端登录。用户无需另装 CLI、申请开放平台应用或填写 Client ID/Client Secret。
 
 ### 16.5 代码小浣熊 Raccoon
 
@@ -740,15 +742,15 @@ LazyMind 生成 Cursor 官方 `cursor://anysphere.cursor-deeplink/mcp/install` �
 
 ### 16.9 用外部 Agent 执行 LazyMind 对话
 
-“外部 Agent 使用 LazyMind MCP”和“外部 Agent 替代 LazyMind ChatAgent”是两个独立方向。完成前面的 MCP 配置后，Cursor、WorkBuddy、Raccoon、TRAE Work 和 DeepSeek Harness 可以在自己的界面调用 LazyMind；要让外部 Agent 在 LazyMind 对话界面内生成回复，还必须具备可靠的非交互运行、事件和会话恢复接口。当前只接入以下三个官方 CLI：
+“外部 Agent 使用 LazyMind MCP”和“外部 Agent 替代 LazyMind ChatAgent”是两个独立方向。完成前面的 MCP 配置后，Cursor、WorkBuddy、Raccoon、TRAE Work 和 DeepSeek Harness 可以在自己的界面调用 LazyMind；要让外部 Agent 在 LazyMind 对话界面内生成回复，还必须具备可靠的非交互运行、事件和会话恢复接口。当前接入以下三个运行时：
 
 - Codex 使用 `codex exec --json`；
 - Cursor 使用独立的 Cursor Agent CLI，当前官方主命令为 `cursor-agent`，安装后执行 `cursor-agent login`；Windows 可使用官方原生安装或 WSL；
-- CodeBuddy Code 执行器使用 `codebuddy` 或 `cbc`，启动交互会话后执行 `/login`。
+- WorkBuddy 使用其桌面安装包自带的无头运行时；LazyMind 自动发现并复用 WorkBuddy 登录。
 
-Cursor IDE 和 WorkBuddy 已登录，不代表 Cursor Agent CLI 或 CodeBuddy Code CLI 已登录。Cursor 通过官方 `cursor-agent status` 检查，且会正确识别“退出码为 0、输出为 Not logged in”的状态；CodeBuddy Code 只检查其官方认证文件是否存在，不读取凭证内容。LazyMind 不复制或保存外部 Agent 的登录凭证。
+Cursor IDE 已登录不代表 Cursor Agent CLI 已登录，LazyMind 通过官方 `cursor-agent status` 检查。WorkBuddy 执行器则直接使用桌面端自带运行时和数据目录；LazyMind 只检查 WorkBuddy 登录状态文件是否存在，不读取凭证内容，也不复制或保存凭证。
 
-LazyMind Desktop 和 Docker Assistant Bridge 都会自动托管本机已经安装的三个 CLI；用户不需要另起 `agent host` 进程。缺失的 CLI 只会把自身注册为不可用，不影响其他 provider。然后可在 LazyMind 的对话配置中选择 Codex、Cursor 或 WorkBuddy；若对应 Host 尚未连接，界面会拒绝切换并给出提示。`lazymind agent host ...` 仅保留为开发诊断入口。
+LazyMind Desktop 和 Docker Assistant Bridge 会自动托管 Codex、Cursor 和 WorkBuddy 三个 Provider；用户不需要另起 `agent host` 进程。然后可在 LazyMind 的对话配置中选择 Codex、Cursor 或 WorkBuddy；若对应 Host 尚未连接，界面会拒绝切换并给出提示。`lazymind agent host ...` 仅保留为开发诊断入口。WorkBuddy 的公共无头运行时会把会话产物写入 `~/.workbuddy/projects`，LazyMind 据此恢复上下文；它不会把外部启动的会话登记到 WorkBuddy 桌面端的任务列表。
 
 所有 CLI 共用同一个可执行文件解析器，不再由各 Agent Adapter 维护安装路径。macOS 会合并桌面进程和登录 Shell 的 PATH，并在标准应用目录中按可执行文件名检查 `.app` 包；Windows 会读取当前、用户和系统 PATH、`PATHEXT`、App Execution Alias、App Paths、安装注册信息及打包应用目录。桌面应用同样共用平台检测：macOS 检查应用包，Windows 检查协议、App Paths 和卸载注册信息。对于自定义或便携位置，Desktop 可通过原生文件选择器定位 CLI、Windows 可执行文件或 macOS `.app`；Docker 网页可输入宿主机完整路径。本机验证成功后将路径保存到当前主机的 `LAZYMIND_HOME/agent-bindings.json`，可随时恢复自动检测。该文件不保存账号凭证，也不进入 Core 数据库。
 

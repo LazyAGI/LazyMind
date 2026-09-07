@@ -51,11 +51,14 @@
 
 .user-agreement-consent-checkbox {
   display: flex;
+  justify-content: center;
+  gap: 8px;
   margin: 22px 32px 0;
   padding: 13px 14px;
   border-radius: 10px;
   background: #f7f8fa;
   color: rgba(0, 0, 0, 0.68);
+  text-align: center;
   font-size: 13px;
   line-height: 1.55;
 

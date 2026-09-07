@@ -112,3 +112,10 @@ func applyChatAttachmentConversion(ctx context.Context, body map[string]any) err
 	}
 	return nil
 }
+
+func chatAttachmentConversionReplyMessage(sidechat bool, err error) string {
+	if sidechat {
+		return "prepare chat attachments failed"
+	}
+	return fmt.Sprintf("%s: %v", "prepare chat attachments failed", err)
+}

@@ -17,13 +17,14 @@ type WriterDocumentSyncRequest struct {
 	MarkdownContent string          `json:"markdown_content"`
 	TargetDocument  json.RawMessage `json:"target_document"`
 	Title           string          `json:"title"`
+	Adapter         string          `json:"adapter"`
 	ToolConfig      map[string]any  `json:"tool_config"`
 }
 
 type WriterDocumentSyncResponse struct {
 	Success           bool            `json:"success"`
 	Changed           bool            `json:"changed"`
-	FeishuSynced      bool            `json:"feishu_synced"`
+	ProviderSynced    bool            `json:"provider_synced"`
 	PatchResult       json.RawMessage `json:"patch_result"`
 	PersistedDocument json.RawMessage `json:"persisted_document"`
 }
@@ -50,6 +51,9 @@ func SyncWriterDocument(
 	}
 	if req.Title != "" {
 		arguments["title"] = req.Title
+	}
+	if req.Adapter != "" {
+		arguments["adapter"] = req.Adapter
 	}
 	action, status, err := InvokeWorkflowAction(ctx, WorkflowActionInvokeRequest{
 		WorkflowID: req.WorkflowID,

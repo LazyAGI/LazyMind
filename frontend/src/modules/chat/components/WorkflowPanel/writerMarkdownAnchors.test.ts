@@ -29,6 +29,56 @@ describe('Writer Markdown system anchors', () => {
     expect(writerMarkdownForSave(source)).toBe(source);
   });
 
+  it('preserves opaque backend numbering metadata through editor round trips', () => {
+    const source = '<!-- heading-numbering: {"ordered_style":"chinese"} -->\n# 标题\n\n<a id="block-sec-1" numbering="restart"></a>\n## 章节';
+    const editorValue = writerMarkdownForEditor(source);
+    const editableValue = writerMarkdownForEditing(source);
+    const savedValue = writerMarkdownForSave(editorValue);
+    expect(editorValue).toContain('numbering="restart"');
+    expect(editableValue).not.toContain('heading-numbering');
+    expect(writerMarkdownForSave(
+      protectWriterMarkdownHeadingAnchors(source, editableValue),
+    )).toBe(source);
+    expect(savedValue).toBe(source);
+  });
+
+  it('keeps materialized roman-numbered headings visible in the editor', () => {
+    const source = [
+      '<!-- heading-numbering: {"ordered_style":"parenthesized"} -->',
+      '# Title',
+      '<a id="block-a"></a>',
+      '## (1) A',
+      '<a id="block-b"></a>',
+      '### (a) B',
+      '<a id="block-c"></a>',
+      '#### (i) C',
+    ].join('\n');
+
+    const editable = writerMarkdownForEditing(source);
+    expect(editable).toContain('#### (i) C');
+    expect(editable).not.toContain('heading-numbering');
+    expect(editable).not.toContain('<a id=');
+  });
+
+  it('keeps PDF page markers hidden and round-trippable through MDXEditor', () => {
+    const source = [
+      '<!-- 第 1 页 -->',
+      '',
+      '招标文件正文',
+      '',
+      '```html',
+      '<!-- 第 2 页 -->',
+      '```',
+    ].join('\n');
+
+    const editorValue = writerMarkdownForEditing(source);
+
+    expect(editorValue).toContain('<a id="writer-page-marker-1" />');
+    expect(editorValue).not.toContain('<!-- 第 1 页 -->');
+    expect(editorValue).toContain('```html\n<!-- 第 2 页 -->\n```');
+    expect(writerMarkdownForSave(editorValue)).toBe(source);
+  });
+
   it('keeps heading anchors out of the editable document without leaving blank blocks', () => {
     const source = [
       '# 标题',
@@ -46,9 +96,58 @@ describe('Writer Markdown system anchors', () => {
       '',
       '## 1 章节',
       '',
-      '<a id="block-image-1" />',
       '![插图](https://example.com/image.png)',
     ].join('\n'));
+  });
+
+  it('keeps image and following heading anchors stable across an HTML image round trip', () => {
+    const source = [
+      '# 标题',
+      '',
+      '<a id="block-sec-002-001"></a>',
+      '### 证据与谜团',
+      '',
+      '[因果链](#block-IMAGE-1)',
+      '',
+      '<a id="block-IMAGE-1"></a>',
+      '![恐惧递进因果链](/data/chain.jpg)',
+      '',
+      '<a id="block-sec-002-002"></a>',
+      '### 不可名状的征兆',
+    ].join('\n');
+    const editable = writerMarkdownForEditing(source).replace(
+      '![恐惧递进因果链](/data/chain.jpg)',
+      '<img height="712" width="712" alt="恐惧递进因果链" src="/data/chain.jpg" />',
+    );
+    const restored = writerMarkdownForSave(
+      protectWriterMarkdownHeadingAnchors(source, editable),
+    );
+
+    expect(editable).not.toContain('<a id=');
+    expect(restored).toContain(
+      '<a id="block-IMAGE-1"></a>\n<img height="712" width="712"',
+    );
+    expect(restored).toContain(
+      '<a id="block-sec-002-002"></a>\n### 不可名状的征兆',
+    );
+    expect(restored).not.toContain('block-user-');
+  });
+
+  it('keeps outline instructions hidden from the editor and restores them on save', () => {
+    const sidecar = '<!-- writer:outline {"node_id":"sec-1","target_chars":1200,"context_relations":[],"subtasks":[{"subtask_id":"st-1","subtask_type":"retrieve","question":"补充行业数据","status":"pending"}]} -->';
+    const source = [
+      '# 标题',
+      '',
+      '<a id="block-sec-1"></a>',
+      '## 系统设计',
+      sidecar,
+    ].join('\n');
+
+    const editable = writerMarkdownForEditing(source);
+    expect(editable).not.toContain('writer:outline');
+    expect(writerMarkdownForSave(
+      protectWriterMarkdownHeadingAnchors(source, editable),
+    )).toBe(source);
   });
 
   it('restores stable heading anchors on save and removes anchors for deleted headings', () => {
@@ -183,6 +282,36 @@ describe('Writer Markdown system anchors', () => {
     });
   });
 
+  it('collects hidden outline instructions for the outline rail', () => {
+    const source = [
+      '# 产品架构说明',
+      '<a id="block-sec-1"></a>',
+      '## 系统设计',
+      '<!-- writer:outline {"node_id":"ignored","target_chars":900,"context_relations":[{"relation":"continuity","target_node_id":"sec-0","guidance":"承接背景"}],"subtasks":[{"subtask_id":"st-1","subtask_type":"reason","question":"比较两种方案","status":"pending"}]} -->',
+    ].join('\n');
+
+    expect(collectWriterMarkdownOutline(source).items[0]).toEqual({
+      anchorId: 'block-sec-1',
+      label: '系统设计',
+      level: 2,
+      instructions: {
+        node_id: 'sec-1',
+        target_chars: 900,
+        context_relations: [{
+          relation: 'continuity',
+          target_node_id: 'sec-0',
+          guidance: '承接背景',
+        }],
+        subtasks: [{
+          subtask_id: 'st-1',
+          subtask_type: 'reason',
+          question: '比较两种方案',
+          status: 'pending',
+        }],
+      },
+    });
+  });
+
   it('constructs an internal Markdown link from selected text and an anchor', () => {
     expect(writerMarkdownInternalReference('第 1 节', 'block-sec-1'))
       .toBe('[第 1 节](#block-sec-1)');
@@ -221,6 +350,34 @@ describe('Writer Markdown system anchors', () => {
     expect(revised).toContain('详见前文约定。');
     expect(revised).not.toContain('](#block-sec-1)');
     expect(revised).toContain('<a id="block-sec-1"></a>');
+  });
+
+  it('unwraps a selected reference by target when the paragraph contains inline formatting', () => {
+    const source = '**重点**：详见[需求理解](#block-sec-1)。';
+
+    expect(removeWriterMarkdownInternalReference(
+      source,
+      '重点：详见需求理解。',
+      5,
+      '需求理解',
+      { anchorId: 'block-sec-1', occurrence: 0 },
+    )).toBe('**重点**：详见需求理解。');
+  });
+
+  it('uses the selected reference occurrence when a target is linked more than once', () => {
+    const source = [
+      '[第一次](#block-sec-1)',
+      '',
+      '[第二次](#block-sec-1)',
+    ].join('\n');
+
+    expect(removeWriterMarkdownInternalReference(
+      source,
+      '第二次',
+      0,
+      '第二次',
+      { anchorId: 'block-sec-1', occurrence: 1 },
+    )).toBe('[第一次](#block-sec-1)\n\n第二次');
   });
 
   it('keeps escaped link labels intact when removing the reference', () => {

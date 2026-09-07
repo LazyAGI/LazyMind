@@ -93,10 +93,11 @@ def validate_preference_index(content: str) -> Optional[str]:
             return error
         if item.name in seen_names:
             return f'duplicate preference item name: {item.name!r}.'
-        if item.ref in seen_refs:
+        ref_path, _ = split_reference_ref(item.ref)
+        if ref_path in seen_refs:
             return f'duplicate preference reference: {item.ref!r}.'
         seen_names.add(item.name)
-        seen_refs.add(item.ref)
+        seen_refs.add(ref_path)
     return None
 
 
@@ -106,10 +107,7 @@ def validate_preference_item(item: PreferenceItem) -> Optional[str]:
     if not item.summary:
         return f'preference item {item.name!r} requires a non-empty summary.'
     if len(item.summary) > _SUMMARY_MAX_CHARS:
-        return (
-            f'preference item {item.name!r} summary must be '
-            f'{_SUMMARY_MAX_CHARS} characters or less.'
-        )
+        return f'preference item {item.name!r} summary must be {_SUMMARY_MAX_CHARS} characters or less.'
     try:
         path, _anchor = split_reference_ref(item.ref)
     except ValueError as exc:

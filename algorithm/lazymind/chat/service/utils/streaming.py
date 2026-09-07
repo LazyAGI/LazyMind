@@ -30,6 +30,7 @@ def single_event_stream_response(
     *,
     run_id: str,
 ) -> StreamingResponse:
+    """Complete a static response without claiming a successful model call."""
     async def _stream():
         yield sse_line(payload)
         yield sse_line(response_payload(
@@ -43,6 +44,7 @@ def single_event_stream_response(
                     'status': 'completed',
                     'reason': 'normal',
                     'partial_output': True,
+                    'model_invoked': False,
                 }),
             },
             0.0,

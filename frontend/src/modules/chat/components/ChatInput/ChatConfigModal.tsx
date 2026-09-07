@@ -27,6 +27,8 @@ interface ChatConfigPopoverProps {
   onSave?: (settings: ConversationRuntimeSettings) => void;
   /** When true, workflows cannot be disabled because a workflow session is active. */
   hasWorkflowSession?: boolean;
+  /** Immutable execution mode saved on the active Workflow Session. */
+  lockedWorkflowMode?: 'auto' | 'dynamic';
 }
 
 type WorkflowExecutionMode = 'auto' | 'dynamic' | 'disabled';
@@ -83,6 +85,7 @@ export default function ChatConfigPopover({
   initialSettings,
   onSave,
   hasWorkflowSession = false,
+  lockedWorkflowMode,
 }: ChatConfigPopoverProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -290,11 +293,9 @@ export default function ChatConfigPopover({
   const featureControlsLoaded = featureControls.loaded && !featureControls.error;
   const taskControlsAvailable = featureControlsLoaded && featureControls.taskCenterEnabled;
   const workflowControlsAvailable = featureControlsLoaded && featureControls.workflowsEnabled;
-  const executionMode = resolveWorkflowExecutionMode(
-    settings,
-    hasWorkflowSession,
-    workflowControlsAvailable,
-  );
+  const executionMode = hasWorkflowSession && lockedWorkflowMode
+    ? lockedWorkflowMode
+    : resolveWorkflowExecutionMode(settings, hasWorkflowSession, workflowControlsAvailable);
   const sharedFeatureControlsMessage = !featureControls.loaded
     ? t('chat.conversationConfigFeatureControlsLoading')
     : featureControls.error
@@ -321,6 +322,7 @@ export default function ChatConfigPopover({
       : undefined;
 
   function handleExecutionModeChange(mode: string | number) {
+    if (hasWorkflowSession) return;
     const nextMode = mode as WorkflowExecutionMode;
     if (nextMode === 'disabled') {
       void handleChange({ enable_workflow: false });
@@ -399,7 +401,7 @@ export default function ChatConfigPopover({
           block
           className="chat-config-workflow-mode"
           value={executionMode}
-          disabled={!workflowControlsAvailable}
+          disabled={!workflowControlsAvailable || hasWorkflowSession}
           aria-label={t('chat.conversationConfigWorkflowExecution')}
           aria-describedby={workflowControlsMessageId}
           onChange={handleExecutionModeChange}

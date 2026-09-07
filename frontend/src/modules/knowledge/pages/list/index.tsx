@@ -10,11 +10,13 @@ import {
 } from "react";
 import {
   Alert,
+  Badge,
   Button,
   Modal,
   Tooltip,
   Flex,
   message,
+  notification,
   Input,
   TablePaginationConfig,
   Tag,
@@ -27,6 +29,7 @@ import moment from "moment";
 import {
   AppstoreOutlined,
   ArrowLeftOutlined,
+  CheckOutlined,
   DatabaseOutlined,
   HistoryOutlined,
   PlusOutlined,
@@ -101,6 +104,7 @@ import {
   type KnowledgeMineSort,
 } from "./knowledgeMineFilters";
 import {
+  getLatestKnowledgeMarketTasks,
   isKnowledgeMarketTaskFailed,
   isKnowledgeMarketTaskPartiallyFailed,
   isKnowledgeMarketTaskTerminal,
@@ -112,6 +116,7 @@ import {
   listKnowledgeMarket,
   listKnowledgeMarketDomains,
   listKnowledgeMarketInstalls,
+  listKnowledgeMarketTasks,
   updateAllKnowledgeMarketItems,
   updateKnowledgeMarketItem,
 } from "@/modules/knowledge/api/knowledgeMarket";
@@ -125,6 +130,13 @@ import "./index.scss";
 import "@/modules/dataSource/index.scss";
 
 const { Text } = Typography;
+
+const marketTaskNoticeOptions = {
+  className: "knowledge-task-notification",
+  icon: <span className="knowledge-task-notification-icon"><CheckOutlined /></span>,
+  closable: false,
+  role: "status" as const,
+};
 
 type SourceCategory = "local" | "cloudArchive" | "official";
 type KnowledgePageView = "mine" | "square";
@@ -146,6 +158,9 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
   const navigate = useNavigate();
   const location = useLocation();
   const { t } = useTranslation();
+  const [taskNotification, taskNotificationHolder] = notification.useNotification({
+    placement: "bottomRight",
+  });
   const confirmRef = useRef<TypedConfirmModalRef>(null);
   const createUpdateRef = useRef<UpdateImperativeProps>(null);
   const createKnowledgeRef = useRef<CreateKnowledgeBaseModalRef>(null);
@@ -198,6 +213,9 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
   const mineTableRequestSeqRef = useRef(0);
   const officialSortRequestSeqRef = useRef(0);
   const marketRequestSeqRef = useRef(0);
+  const finishedMarketJobIds = useRef(new Set<string>());
+  const activeMarketTaskCount = Object.keys(trackedMarketJobs).length;
+  const marketTaskRefreshKey = Object.keys(trackedMarketJobs).sort().join(",");
   const isCloudArchiveView = sourceCategory === "cloudArchive";
   const isOfficialView = sourceCategory === "official";
   const createActionDisabled =
@@ -676,11 +694,81 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
   );
 
   const trackMarketJob = useCallback((job: TrackedKnowledgeMarketJob) => {
-    setTrackedMarketJobs((current) => ({ ...current, [job.jobId]: job }));
+    setTrackedMarketJobs((current) =>
+      current[job.jobId] ? current : { ...current, [job.jobId]: job },
+    );
     if (job.itemId) {
-      setMarketProgress((current) => ({ ...current, [job.itemId]: 0 }));
+      setMarketProgress((current) =>
+        job.itemId in current ? current : { ...current, [job.itemId]: 0 },
+      );
     }
   }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    let timer: number | undefined;
+    const restoreTasks = async () => {
+      try {
+        const lists = await Promise.all(
+          ["install", "update", "update_all"].map((type) =>
+            listKnowledgeMarketTasks(`knowledge_market_${type}`, {
+              signal: controller.signal,
+              silentError: true,
+            }),
+          ),
+        );
+        const tasks = await Promise.all(
+          getLatestKnowledgeMarketTasks(
+            lists.flatMap((list) => list.items || []),
+          ).map((task) =>
+            getKnowledgeMarketTask(task.job_id, {
+              signal: controller.signal,
+              silentError: true,
+            }).catch(() => null),
+          ),
+        );
+        if (controller.signal.aborted) return;
+        tasks.forEach((task) => {
+          if (
+            !task ||
+            finishedMarketJobIds.current.has(task.job_id) ||
+            isKnowledgeMarketTaskTerminal({
+              jobType: task.job_type,
+              jobStatus: task.job_status,
+              stage: task.stage,
+              overallPercent: task.overall_percent,
+              progress: task.progress,
+            })
+          ) {
+            return;
+          }
+          trackMarketJob({
+            jobId: task.job_id,
+            itemId: task.market_item_id,
+            jobType:
+              task.job_type === "knowledge_market_install"
+                ? "install"
+                : task.job_type === "knowledge_market_update"
+                  ? "update"
+                  : "updateAll",
+            name: task.name || t("knowledge.taskTypeUpdateAll"),
+          });
+        });
+        if (tasks.some((task) => !task)) {
+          timer = window.setTimeout(restoreTasks, 2000);
+        }
+      } catch {
+        if (!controller.signal.aborted) {
+          timer = window.setTimeout(restoreTasks, 2000);
+        }
+      }
+    };
+    void restoreTasks();
+    return () => {
+      controller.abort();
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [marketTaskRefreshKey, t, trackMarketJob]);
 
   const handleOfficialInstall = useCallback(
     async (item: OfficialKnowledgeBase) => {
@@ -692,13 +780,17 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
           jobType: "install",
           name: item.name,
         });
-        message.info(t("knowledge.installSubmitted", { name: item.name }));
+        taskNotification.open({
+          ...marketTaskNoticeOptions,
+          message: t("knowledge.marketTaskAdded"),
+          description: t("knowledge.marketTaskAddedDescription", { name: item.name }),
+        });
         void loadKnowledgeMarket();
       } catch {
         // The shared request interceptor displays the localized error.
       }
     },
-    [loadKnowledgeMarket, t, trackMarketJob],
+    [loadKnowledgeMarket, t, taskNotification, trackMarketJob],
   );
 
   const handleOfficialUpdate = useCallback(
@@ -711,13 +803,17 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
           jobType: "update",
           name: item.name,
         });
-        message.info(t("knowledge.updateSubmitted", { name: item.name }));
+        taskNotification.open({
+          ...marketTaskNoticeOptions,
+          message: t("knowledge.marketTaskAdded"),
+          description: t("knowledge.marketTaskAddedDescription", { name: item.name }),
+        });
         void loadKnowledgeMarket();
       } catch {
         // The shared request interceptor displays the localized error.
       }
     },
-    [loadKnowledgeMarket, t, trackMarketJob],
+    [loadKnowledgeMarket, t, taskNotification, trackMarketJob],
   );
 
   const handleOfficialOpen = useCallback(
@@ -894,23 +990,29 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
         jobType: "updateAll",
         name: t("knowledge.taskTypeUpdateAll"),
       });
-      message.info(t("knowledge.updateAllSubmitted"));
+      taskNotification.open({
+        ...marketTaskNoticeOptions,
+        message: t("knowledge.marketTaskAdded"),
+        description: t("knowledge.taskTypeUpdateAll"),
+      });
     } catch {
       // The shared request interceptor displays the localized error.
     }
-  }, [t, trackMarketJob]);
+  }, [t, taskNotification, trackMarketJob]);
 
   useEffect(() => {
     const jobs = Object.values(trackedMarketJobs);
     if (jobs.length === 0) return;
 
     let stopped = false;
+    const controller = new AbortController();
     let timer: number | undefined;
     const poll = async () => {
       const taskResults = await Promise.all(
         jobs.map(async (job) => {
           try {
             const detail = await getKnowledgeMarketTask(job.jobId, {
+              signal: controller.signal,
               silentError: true,
             });
             return { job, detail };
@@ -959,6 +1061,8 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
 
       taskResults.forEach((result) => {
         if (!result || !terminalJobIds.includes(result.job.jobId)) return;
+        if (finishedMarketJobIds.current.has(result.job.jobId)) return;
+        finishedMarketJobIds.current.add(result.job.jobId);
         const failed = isKnowledgeMarketTaskFailed({
           jobType: result.job.jobType,
           jobStatus: result.detail.job_status,
@@ -974,23 +1078,19 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
           progress: result.detail.progress,
         });
         if (partiallyFailed) {
-          message.warning(
-            t("knowledge.marketTaskPartiallyFailed", { name: result.job.name }),
-          );
+          taskNotification.warning({
+            message: t("knowledge.marketTaskPartiallyFailed", { name: result.job.name }),
+          });
         } else if (failed) {
-          message.error(
-            t("knowledge.marketTaskFailed", { name: result.job.name }),
-          );
-        } else if (result.job.jobType === "install") {
-          message.success(
-            t("knowledge.installSuccess", { name: result.job.name }),
-          );
-        } else if (result.job.jobType === "update") {
-          message.success(
-            t("knowledge.updateCheckComplete", { name: result.job.name }),
-          );
+          taskNotification.error({
+            message: t("knowledge.marketTaskFailed", { name: result.job.name }),
+          });
         } else {
-          message.success(t("knowledge.updateAllChecked"));
+          taskNotification.open({
+            ...marketTaskNoticeOptions,
+            message: t("knowledge.marketTaskCompleted"),
+            description: result.job.name,
+          });
         }
       });
 
@@ -1010,9 +1110,10 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
     void poll();
     return () => {
       stopped = true;
+      controller.abort();
       if (timer !== undefined) window.clearTimeout(timer);
     };
-  }, [loadKnowledgeMarket, t, trackedMarketJobs]);
+  }, [loadKnowledgeMarket, t, taskNotification, trackedMarketJobs]);
 
   useEffect(() => {
     if (!officialItems.some((item) => item.active)) return;
@@ -1472,6 +1573,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
 
   return (
     <div className="knowledge-list-page">
+      {taskNotificationHolder}
       <div className="knowledge-page-header">
         <div>
           {new URLSearchParams(location.search).get("from") === "settings-knowledge" ? (
@@ -1504,9 +1606,22 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
           ) : null}
           <Button
             icon={<HistoryOutlined />}
+            aria-label={t("knowledge.backgroundTasksCount", {
+              count: activeMarketTaskCount,
+            })}
+            aria-haspopup="dialog"
+            aria-expanded={marketTaskModalOpen}
             onClick={() => setMarketTaskModalOpen(true)}
           >
             {t("knowledge.backgroundTasks")}
+            {activeMarketTaskCount > 0 ? (
+              <Badge
+                className="knowledge-task-count"
+                count={activeMarketTaskCount}
+                overflowCount={Infinity}
+                size="small"
+              />
+            ) : null}
           </Button>
         </div>
       </div>
@@ -1753,7 +1868,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
       <SyncKnowledgeBaseCreationFlow vm={syncCreateVm} hideProviderModal />
       <KnowledgeMarketTaskModal
         open={marketTaskModalOpen}
-        refreshKey={Object.keys(trackedMarketJobs).sort().join(",")}
+        refreshKey={marketTaskRefreshKey}
         onClose={() => setMarketTaskModalOpen(false)}
       />
     </div>

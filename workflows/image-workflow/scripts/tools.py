@@ -28,6 +28,7 @@ import uuid
 from urllib.parse import urlparse
 
 import requests
+from lazyllm.tools.agent import ToolExecutionError
 from lazyllm.tools.tools.search import (
     BingSearch,
     BochaSearch,
@@ -41,6 +42,8 @@ from lazymind.chat.service.utils.static_file_url import (
     resolve_local_image_path,
     static_file_url_from_any,
 )
+from lazymind.common.ffmpeg_deps import resolve_ffmpeg_binaries
+from lazymind.model_config import is_model_role_available
 
 LOG = logging.getLogger(__name__)
 
@@ -84,9 +87,54 @@ _IMAGE_ROUTE_TARGETS = {
     'CREATE_MEME_PACK': 'generate_image',
 }
 
+_MEDIA_CAPABILITY_IDS = frozenset({
+    'image_generator',
+    'image_editor',
+    'video_generator',
+    'ffmpeg',
+})
 
-def select_image_route(workflow_routing: str) -> dict[str, Any]:
-    """Return the only valid post-optimization branch from the routing artifact."""
+_MEDIA_CAPABILITY_METADATA = {
+    'image_generator': {
+        'label': '文生图模型',
+        'settings_url': '/settings?section=models',
+        'missing_reason': '当前任务需要先生成基础图，但尚未配置可用的文生图模型。',
+    },
+    'image_editor': {
+        'label': '图片编辑模型',
+        'settings_url': '/settings?section=models',
+        'missing_reason': '当前任务需要修改已有图片，但尚未配置可用的图片编辑模型。',
+    },
+    'video_generator': {
+        'label': '视频生成模型',
+        'settings_url': '/settings?section=models',
+        'missing_reason': '当前任务需要把基础图生成视频，但尚未配置可用的视频生成模型。',
+    },
+    'ffmpeg': {
+        'label': 'FFmpeg',
+        'settings_url': '/settings?section=system_tools#ffmpeg-dependency',
+        'missing_reason': '当前任务需要将视频转为 GIF，但未检测到 FFmpeg/FFprobe。',
+    },
+}
+
+# Older in-flight sessions may not yet contain the explicit REQUIRES line.
+# Keep their preflight deterministic while new analyses use the finer-grained
+# task-specific dependency declaration.
+_LEGACY_ROUTE_CAPABILITIES = {
+    'CREATE_NEW': ('image_generator',),
+    'KB_STYLE': ('image_generator',),
+    'REFERENCE_GENERATE': ('image_generator',),
+    'FIND_AND_EDIT': ('image_editor',),
+    'EDIT_UPLOAD': ('image_editor',),
+    'CREATE_ANIMATED': ('image_generator', 'video_generator', 'ffmpeg'),
+    'ANIMATE_UPLOAD': ('video_generator', 'ffmpeg'),
+    'CREATE_STATIC_MEME': ('image_generator',),
+    'CREATE_ANIMATED_MEME': ('image_generator', 'video_generator', 'ffmpeg'),
+    'CREATE_MEME_PACK': ('image_generator',),
+}
+
+
+def _workflow_route(workflow_routing: str) -> str:
     matches = re.findall(
         r'^\s*WORKFLOW\s*:\s*([A-Z][A-Z0-9_]*)\s*$',
         str(workflow_routing or ''),
@@ -95,9 +143,114 @@ def select_image_route(workflow_routing: str) -> dict[str, Any]:
     if len(matches) != 1:
         raise ValueError('workflow_routing must contain exactly one WORKFLOW: <route> line')
     route = matches[0]
-    next_step = _IMAGE_ROUTE_TARGETS.get(route)
-    if not next_step:
+    if route not in _IMAGE_ROUTE_TARGETS:
         raise ValueError(f'unsupported image workflow route: {route}')
+    return route
+
+
+def _required_media_capabilities(workflow_routing: str, route: str) -> List[str]:
+    matches = re.findall(
+        r'^\s*REQUIRES\s*:\s*([^\r\n]+?)\s*$',
+        str(workflow_routing or ''),
+        flags=re.MULTILINE,
+    )
+    if len(matches) > 1:
+        raise ValueError('workflow_routing must contain at most one REQUIRES line')
+    if not matches:
+        return list(_LEGACY_ROUTE_CAPABILITIES[route])
+    raw = matches[0].strip().lower()
+    if raw in {'', 'none'}:
+        return []
+    required = list(dict.fromkeys(
+        item.strip() for item in raw.split(',') if item.strip()
+    ))
+    unknown = [item for item in required if item not in _MEDIA_CAPABILITY_IDS]
+    if unknown:
+        raise ValueError(
+            'workflow_routing REQUIRES contains unsupported capabilities: '
+            + ', '.join(unknown)
+        )
+    return required
+
+
+def _media_capability_available(capability_id: str) -> bool:
+    if capability_id == 'ffmpeg':
+        ffmpeg_path, ffprobe_path = resolve_ffmpeg_binaries()
+        return bool(ffmpeg_path and ffprobe_path)
+    return bool(is_model_role_available(capability_id))
+
+
+def check_image_workflow_capabilities(workflow_routing: str) -> dict[str, Any]:
+    """Preflight only the media dependencies required by the analyzed route.
+
+    The analysis step declares ``REQUIRES`` after it has selected a behavior
+    mode. This check deliberately does not demand unrelated models: captioning
+    an existing source can require no paid media model, while an animated result
+    requires video generation and FFmpeg in addition to any model used to make
+    its first frame.
+
+    Missing dependencies are returned as a structured error marker consumed by
+    Chat and the setup-jump card. No generation call should be attempted after
+    this error.
+    """
+    route = _workflow_route(workflow_routing)
+    required = _required_media_capabilities(workflow_routing, route)
+    checks = []
+    for capability_id in required:
+        metadata = _MEDIA_CAPABILITY_METADATA[capability_id]
+        available = _media_capability_available(capability_id)
+        checks.append({
+            'id': capability_id,
+            'label': metadata['label'],
+            'available': available,
+            'settings_url': metadata['settings_url'],
+            'reason': '' if available else metadata['missing_reason'],
+        })
+    missing = [item for item in checks if not item['available']]
+    payload = {
+        'status': 'blocked' if missing else 'ready',
+        'workflow': route,
+        'required': required,
+        'checks': checks,
+        'missing': missing,
+        'message': (
+            '所需媒体能力已配置，可以继续执行。'
+            if not missing else
+            '当前任务缺少：' + '、'.join(item['label'] for item in missing)
+            + '。请完成配置后重试当前工作流。'
+        ),
+    }
+    if missing:
+        raise ToolExecutionError(
+            'MEDIA_CAPABILITY_DEPENDENCY_MISSING '
+            + json.dumps(payload, ensure_ascii=False, separators=(',', ':'))
+        )
+    return payload
+
+
+def select_image_route(workflow_routing: str) -> dict[str, Any]:
+    """Return the only valid post-optimization branch from the routing artifact."""
+    route = _workflow_route(workflow_routing)
+    # Every mode first produces or stages a concrete base image. Editing,
+    # animation, GIF conversion and deterministic captions happen afterward in
+    # enhance_image when that post-processing step applies.
+    next_step = 'generate_image'
+    return {
+        'status': 'ok',
+        'workflow': route,
+        'next_step': next_step,
+        'control': {'next_step': next_step},
+    }
+
+
+def select_image_postprocess_route(workflow_routing: str) -> dict[str, Any]:
+    """Choose whether a generated base image needs the optional enhance step."""
+    route = _workflow_route(workflow_routing)
+    next_step = (
+        '__end__'
+        if route in {'CREATE_NEW', 'KB_STYLE', 'REFERENCE_GENERATE'}
+        else 'enhance_image'
+    )
     return {
         'status': 'ok',
         'workflow': route,

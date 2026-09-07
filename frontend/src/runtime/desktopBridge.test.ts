@@ -62,6 +62,7 @@ describe("browser Assistant Bridge session synchronization", () => {
   });
 
   it("sends the current web session before reading Agent status", async () => {
+    vi.spyOn(navigator, "platform", "get").mockReturnValue("Win32");
     mocks.user.mockReturnValue({
       username: "admin",
       token: "access",
@@ -87,6 +88,11 @@ describe("browser Assistant Bridge session synchronization", () => {
       access_token: "access",
       refresh_token: "refresh",
     });
+    const platformHeader = new Headers(init.headers).get(
+      "X-LazyMind-Client-Platform",
+    );
+    expect(platformHeader).not.toBeNull();
+    expect(platformHeader || "").toMatch(/^(windows|darwin|linux)$/);
     expect(fetchMock.mock.calls[1][0]).toBe("http://127.0.0.1:19091/v1/agents");
   });
 
@@ -119,6 +125,44 @@ describe("browser Assistant Bridge session synchronization", () => {
       data: { codex: { provider: "codex", enabled: false } },
     });
     expect(fetchMock.mock.calls[0][0]).toBe("http://127.0.0.1:19091/v1/executors");
+  });
+
+  it("preserves a structured platform mismatch from the local Bridge", async () => {
+    mocks.user.mockReturnValue(null);
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(JSON.stringify({
+      code: "platform_mismatch",
+      error: "LazyMind is open on windows, but Assistant Bridge is running on linux.",
+      client_platform: "windows",
+      bridge_platform: "linux",
+    }), { status: 409 }));
+
+    const result = await executorIntegrationPolicies();
+
+    expect(result).toMatchObject({
+      ok: false,
+      reason: "platform_mismatch",
+      error: {
+        message: "LazyMind is open on windows, but Assistant Bridge is running on linux.",
+        code: "platform_mismatch",
+        clientPlatform: "windows",
+        bridgePlatform: "linux",
+      },
+    });
+  });
+
+  it("does not synchronize credentials into a mismatched Bridge", async () => {
+    mocks.user.mockReturnValue({ token: "access", refreshToken: "refresh" });
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(JSON.stringify({
+      code: "platform_mismatch",
+      error: "Assistant Bridge platform mismatch",
+      client_platform: "windows",
+      bridge_platform: "linux",
+    }), { status: 409 }));
+
+    const result = await agentIntegrationStatuses();
+
+    expect(result).toMatchObject({ ok: false, reason: "platform_mismatch" });
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   it("changes one executor permission through the local Bridge", async () => {

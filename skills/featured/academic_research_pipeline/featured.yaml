@@ -11,6 +11,7 @@ workflow:
 
 placement:
   home: true
+  hot: true
   gallery: true
   order: 20
 

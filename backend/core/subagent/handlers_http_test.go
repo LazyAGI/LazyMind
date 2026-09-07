@@ -30,6 +30,7 @@ func seedSubagentTask(t *testing.T, db *orm.DB, taskID, convID, userID, status s
 		ID: taskID, ConversationID: convID, TriggerHistoryID: "hist-1",
 		SeqInConversation: 1, AgentType: "code-gen", Title: "Test Task",
 		Objective: "Test objective", Mode: "auto", Status: status,
+		Params:      json.RawMessage(`{}`),
 		ProgressPct: 50, CurrentPhase: "working", EstimatedSec: 60,
 		CreateUserID: userID, WorkspacePath: "/ws/" + taskID,
 		InputSlots: json.RawMessage("[]"), OutputSlots: json.RawMessage("[]"),
@@ -106,6 +107,11 @@ func TestListConversationTasks_EmptyTasks(t *testing.T) {
 func TestListConversationTasks_WithData(t *testing.T) {
 	db := newSubagentHTTPTestDB(t)
 	seedSubagentTask(t, db, "task-1", "conv-1", "user-1", "running")
+	db.DB.Model(&orm.SubAgentTask{}).Where("id = ?", "task-1").Updates(map[string]any{
+		"agent_type": "workflow_step",
+		"objective":  "SYSTEM: expanded workflow prompt",
+		"params":     json.RawMessage(`{"user_input":"只显示这条用户 query"}`),
+	})
 	seedSubagentStep(t, db, "task-1", 1, "text", `{"content":"hello"}`)
 	seedSubagentArtifact(t, db, "task-1", "output", 1, "image/png", `{"url":"http://example.com/img.png"}`)
 
@@ -121,6 +127,21 @@ func TestListConversationTasks_WithData(t *testing.T) {
 	tasks := data["tasks"].([]any)
 	if len(tasks) != 1 {
 		t.Fatalf("expected 1 task, got %d", len(tasks))
+	}
+	task := tasks[0].(map[string]any)
+	if task["query"] != "只显示这条用户 query" {
+		t.Fatalf("unexpected display query: %v", task["query"])
+	}
+}
+
+func TestTaskDisplayQueryNeverFallsBackToWorkflowObjective(t *testing.T) {
+	task := &orm.SubAgentTask{
+		AgentType: "workflow_step",
+		Objective: "SYSTEM: expanded workflow prompt",
+		Params:    json.RawMessage(`{}`),
+	}
+	if query := TaskDisplayQuery(task); query != "" {
+		t.Fatalf("workflow objective leaked as display query: %q", query)
 	}
 }
 

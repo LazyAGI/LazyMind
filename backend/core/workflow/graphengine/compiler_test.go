@@ -80,14 +80,35 @@ func TestCompileArbitraryDAGAndProjectBlockedMerge(t *testing.T) {
 	}
 }
 
+func TestCompilePreservesTerminalToolsOnly(t *testing.T) {
+	state := strings.Replace(validState, "  a: {outputs: []}", `  a:
+    outputs: []
+    tools: [cloud_files, writer_prepare_workspace]
+    terminal_tools: [writer_prepare_workspace]
+    terminal_tools_only: true`, 1)
+	result := Compile(validWorkflow, state, "", ProfilePublish)
+	if !result.Valid {
+		t.Fatalf("expected valid graph, diagnostics=%#v", result.Diagnostics)
+	}
+	node := result.Graph.Nodes["a"]
+	if !node.TerminalToolsOnly || len(node.LegacyTools) != 2 || len(node.TerminalTools) != 1 {
+		t.Fatalf("terminal tool visibility policy was not compiled: %#v", node)
+	}
+}
+
 func TestCompilePreservesDeclaredRuntimePolicy(t *testing.T) {
 	workflowYAML := strings.Replace(validWorkflow, "id: graph-test", `id: graph-test
 runtime:
   publisher_owned_slots: [final]
   collects_knowledge: true
   completed_edit_step: f
+  completed_edit_routing: Route insertions to b before using the fallback.
   completed_continue_steps: [f]
   exclusive_tool_capabilities: [writer.create]
+  post_step_checks:
+    - step_id: b
+      tool: check_ready
+      arguments: {brief: b_result}
   clarification_fields:
     - id: topic
       label: Topic
@@ -107,8 +128,14 @@ runtime:
 	if !policy.CollectsKnowledge || policy.CompletedEditStep != "f" || len(policy.CompletedContinueSteps) != 1 || policy.CompletedContinueSteps[0] != "f" || len(policy.ExclusiveToolCapabilities) != 1 || policy.ExclusiveToolCapabilities[0] != "writer.create" || len(policy.PublisherOwnedSlots) != 1 || policy.PublisherOwnedSlots[0] != "final" {
 		t.Fatalf("runtime policy was not compiled: %#v", policy)
 	}
+	if policy.CompletedEditRouting != "Route insertions to b before using the fallback." {
+		t.Fatalf("completed edit routing was not compiled: %#v", policy)
+	}
 	if len(policy.ClarificationFields) != 2 || policy.ClarificationFields[0].ID != "topic" || policy.ClarificationFields[1].Choices[1] != "Minimal" || policy.ClarificationFields[1].ChoicePolicy != "subset" {
 		t.Fatalf("runtime clarification fields were not compiled: %#v", policy.ClarificationFields)
+	}
+	if len(policy.PostStepChecks) != 1 || policy.PostStepChecks[0].StepID != "b" || policy.PostStepChecks[0].Tool != "check_ready" || policy.PostStepChecks[0].Arguments["brief"] != "b_result" {
+		t.Fatalf("runtime post-step checks were not compiled: %#v", policy.PostStepChecks)
 	}
 }
 

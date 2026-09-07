@@ -40,7 +40,7 @@ slots:
     cardinality: single
   - id: metadata_json
     label: JSON Metadata
-    type: text
+    type: json
     cardinality: single
   - id: text_attachment
     label: Text Attachment

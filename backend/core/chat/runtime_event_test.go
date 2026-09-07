@@ -181,6 +181,9 @@ func TestRunTerminalRejectsInvalidContract(t *testing.T) {
 		{name: "invalid combination", data: `{"status":"completed","reason":"runtime_failure","partial_output":false}`},
 		{name: "missing partial output", data: `{"status":"failed","reason":"runtime_failure"}`},
 		{name: "invalid partial output", data: `{"status":"failed","reason":"runtime_failure","partial_output":null}`},
+		{name: "null model invoked", data: `{"status":"completed","reason":"normal","partial_output":true,"model_invoked":null}`},
+		{name: "string model invoked", data: `{"status":"completed","reason":"normal","partial_output":true,"model_invoked":"false"}`},
+		{name: "numeric model invoked", data: `{"status":"completed","reason":"normal","partial_output":true,"model_invoked":0}`},
 		{name: "completed with code", data: `{"status":"completed","reason":"normal","code":"rate_limited","partial_output":false}`},
 		{name: "cancelled with code", data: `{"status":"cancelled","reason":"user_cancelled","code":"user_cancelled","partial_output":false}`},
 		{name: "model incomplete without code", data: `{"status":"interrupted","reason":"model_incomplete","partial_output":true}`},
@@ -193,6 +196,33 @@ func TestRunTerminalRejectsInvalidContract(t *testing.T) {
 			event := &ChatRuntimeEvent{Type: RuntimeEventRunFinished, Data: json.RawMessage(test.data)}
 			if _, err := event.Terminal(); err == nil {
 				t.Fatal("invalid run terminal was accepted")
+			}
+		})
+	}
+}
+
+func TestRunTerminalPreservesOptionalModelInvocation(t *testing.T) {
+	for _, value := range []string{"", "false", "true"} {
+		t.Run("model_invoked="+value, func(t *testing.T) {
+			raw := `{"status":"completed","reason":"normal","partial_output":true`
+			if value != "" {
+				raw += `,"model_invoked":` + value
+			}
+			raw += `}`
+			event := storedRunEvent("run_test", json.RawMessage(raw))
+			terminal, err := event.Terminal()
+			if err != nil || terminal.Status != "completed" {
+				t.Fatalf("valid invocation flag rejected: %#v err=%v", terminal, err)
+			}
+			if terminal.modelWasInvoked() != (value != "false") {
+				t.Fatalf("unexpected invocation interpretation: %#v", terminal)
+			}
+			var fields map[string]json.RawMessage
+			if err := json.Unmarshal(event.Data, &fields); err != nil {
+				t.Fatal(err)
+			}
+			if string(fields["model_invoked"]) != value {
+				t.Fatalf("stored terminal lost invocation flag: %s", event.Data)
 			}
 		})
 	}

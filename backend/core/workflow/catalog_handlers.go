@@ -41,6 +41,7 @@ func loadWorkflowCatalogSpec(r *http.Request, refOrID string, includeRawFiles bo
 	if includeRawFiles {
 		spec["workflow_yaml_raw"] = string(body)
 		spec["state_yaml_raw"] = string(pkg.Files["scenario/state.yml"])
+		spec["layout_raw"] = string(pkg.Files["scenario/layout.json"])
 		spec["scenario_raw"] = string(pkg.Files["scenario/scenario.md"])
 		spec["scripts_raw"] = workflowScriptsRaw(pkg.Files)
 	}

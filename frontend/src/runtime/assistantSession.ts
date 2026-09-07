@@ -1,4 +1,34 @@
 export const LOCAL_ASSISTANT_BRIDGE = "http://127.0.0.1:19091/v1";
+const CLIENT_PLATFORM_HEADER = "X-LazyMind-Client-Platform";
+export const ASSISTANT_BRIDGE_PLATFORM_MISMATCH = "platform_mismatch";
+
+export class AssistantBridgeRequestError extends Error {
+  constructor(
+    message: string,
+    public readonly code = "",
+    public readonly clientPlatform = "",
+    public readonly bridgePlatform = "",
+  ) {
+    super(message);
+    this.name = "AssistantBridgeRequestError";
+  }
+}
+
+export function isAssistantBridgePlatformMismatch(error: unknown): boolean {
+  return error instanceof AssistantBridgeRequestError && error.code === ASSISTANT_BRIDGE_PLATFORM_MISMATCH;
+}
+
+export function browserClientPlatform(): "windows" | "darwin" | "linux" | "" {
+  if (typeof navigator === "undefined") return "";
+  const userAgentData = (navigator as Navigator & {
+    userAgentData?: { platform?: string };
+  }).userAgentData;
+  const value = `${userAgentData?.platform || navigator.platform || ""} ${navigator.userAgent || ""}`;
+  if (/windows|win32|win64/i.test(value)) return "windows";
+  if (/macintosh|macintel|mac os/i.test(value)) return "darwin";
+  if (/linux/i.test(value)) return "linux";
+  return "";
+}
 
 interface SessionUser {
   token: string;
@@ -36,10 +66,40 @@ export async function assistantBridgeFetch(
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(`${LOCAL_ASSISTANT_BRIDGE}${path}`, { ...init, signal: controller.signal });
+    const headers = new Headers(init?.headers);
+    const platform = browserClientPlatform();
+    if (platform) headers.set(CLIENT_PLATFORM_HEADER, platform);
+    return await fetch(`${LOCAL_ASSISTANT_BRIDGE}${path}`, {
+      ...init,
+      headers,
+      signal: controller.signal,
+    });
   } finally {
     window.clearTimeout(timeout);
   }
+}
+
+export async function assistantBridgeJSON<T>(
+  path: string,
+  init: RequestInit | undefined,
+  timeoutMs: number,
+): Promise<T> {
+  const response = await assistantBridgeFetch(path, init, timeoutMs);
+  const payload = await response.json().catch(() => ({})) as T & {
+    code?: string;
+    error?: string;
+    client_platform?: string;
+    bridge_platform?: string;
+  };
+  if (!response.ok) {
+    throw new AssistantBridgeRequestError(
+      payload.error || `Assistant Bridge returned HTTP ${response.status}`,
+      payload.code,
+      payload.client_platform,
+      payload.bridge_platform,
+    );
+  }
+  return payload;
 }
 
 export async function syncLocalAssistantSession(
@@ -64,7 +124,7 @@ export async function syncLocalAssistantSession(
     await desktopBridge.assistantSessionSet(session);
     return;
   }
-  const response = await assistantBridgeFetch(
+  await assistantBridgeJSON(
     "/session",
     {
       method: "POST",
@@ -73,7 +133,6 @@ export async function syncLocalAssistantSession(
     },
     timeoutMs,
   );
-  if (!response.ok) throw new Error(`Assistant Bridge returned HTTP ${response.status}`);
 }
 
 export async function clearLocalAssistantSession(timeoutMs = 15_000): Promise<void> {
@@ -83,6 +142,5 @@ export async function clearLocalAssistantSession(timeoutMs = 15_000): Promise<vo
     await desktopBridge.assistantSessionClear();
     return;
   }
-  const response = await assistantBridgeFetch("/session", { method: "DELETE" }, timeoutMs);
-  if (!response.ok) throw new Error(`Assistant Bridge returned HTTP ${response.status}`);
+  await assistantBridgeJSON("/session", { method: "DELETE" }, timeoutMs);
 }

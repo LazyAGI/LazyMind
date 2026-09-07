@@ -9,8 +9,8 @@ import (
 	"path"
 	"strings"
 
-	"lazymind/core/common"
 	"lazymind/core/currentmemory"
+	"lazymind/core/maintenance"
 	skillhttperr "lazymind/core/skillv2/httperr"
 )
 
@@ -27,7 +27,7 @@ func (h *memoryCurrentHandler) List(w http.ResponseWriter, r *http.Request, rawP
 	if !ok {
 		return
 	}
-	entries, err := h.service.list(r.Context(), userID, rawPath)
+	entries, err := h.service.list(maintenance.RequestContext(r), userID, rawPath)
 	if err != nil {
 		replyMemoryError(w, err)
 		return
@@ -44,7 +44,7 @@ func (h *memoryCurrentHandler) Info(w http.ResponseWriter, r *http.Request, rawP
 	if !ok {
 		return
 	}
-	entry, err := h.service.info(r.Context(), userID, rawPath)
+	entry, err := h.service.info(maintenance.RequestContext(r), userID, rawPath)
 	if err != nil {
 		replyMemoryError(w, err)
 		return
@@ -64,7 +64,7 @@ func (h *memoryCurrentHandler) Exists(w http.ResponseWriter, r *http.Request, ra
 	if !ok {
 		return
 	}
-	exists, err := h.service.exists(r.Context(), userID, rawPath)
+	exists, err := h.service.exists(maintenance.RequestContext(r), userID, rawPath)
 	if err != nil {
 		replyMemoryError(w, err)
 		return
@@ -88,7 +88,7 @@ func (h *memoryCurrentHandler) readContent(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
-	entry, err := h.service.read(r.Context(), userID, rawPath)
+	entry, err := h.service.read(maintenance.RequestContext(r), userID, rawPath)
 	if err != nil {
 		replyMemoryError(w, err)
 		return
@@ -118,7 +118,7 @@ func (h *memoryCurrentHandler) writeContent(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	entry, err := h.service.write(
-		r.Context(),
+		maintenance.RequestContext(r),
 		userID,
 		rawPath,
 		content,
@@ -148,7 +148,7 @@ func (h *memoryCurrentHandler) Dir(w http.ResponseWriter, r *http.Request) {
 		skillhttperr.Reply(w, "invalid json", http.StatusBadRequest)
 		return
 	}
-	if err := h.service.mkdir(r.Context(), userID, body.Path, body.Recursive); err != nil {
+	if err := h.service.mkdir(maintenance.RequestContext(r), userID, body.Path, body.Recursive); err != nil {
 		replyMemoryError(w, err)
 		return
 	}
@@ -161,7 +161,7 @@ func (h *memoryCurrentHandler) Delete(w http.ResponseWriter, r *http.Request, ra
 		return
 	}
 	if err := h.service.delete(
-		r.Context(),
+		maintenance.RequestContext(r),
 		userID,
 		rawPath,
 		memoryTruthy(r.URL.Query().Get("recursive")),
@@ -186,7 +186,7 @@ func (h *memoryCurrentHandler) Copy(w http.ResponseWriter, r *http.Request) {
 		skillhttperr.Reply(w, "invalid json", http.StatusBadRequest)
 		return
 	}
-	if err := h.service.copy(r.Context(), userID, body.From, body.To, body.Overwrite); err != nil {
+	if err := h.service.copy(maintenance.RequestContext(r), userID, body.From, body.To, body.Overwrite); err != nil {
 		replyMemoryError(w, err)
 		return
 	}
@@ -206,7 +206,7 @@ func (h *memoryCurrentHandler) Move(w http.ResponseWriter, r *http.Request) {
 		skillhttperr.Reply(w, "invalid json", http.StatusBadRequest)
 		return
 	}
-	if err := h.service.move(r.Context(), userID, body.From, body.To); err != nil {
+	if err := h.service.move(maintenance.RequestContext(r), userID, body.From, body.To); err != nil {
 		replyMemoryError(w, err)
 		return
 	}
@@ -245,18 +245,16 @@ func memoryTruthy(value string) bool {
 }
 
 func replyMemoryError(w http.ResponseWriter, err error) {
-	var capacityError *currentmemory.PreferenceCapacityExceededError
+	var organizingError *maintenance.PreferenceOrganizingError
 	switch {
-	case errors.As(err, &capacityError):
-		common.ReplyErrWithData(
+	case errors.Is(err, maintenance.ErrLeaseLost):
+		skillhttperr.ReplyWithCode(w, err.Error(), http.StatusConflict, "task_lease_lost")
+	case errors.As(err, &organizingError):
+		skillhttperr.ReplyWithCode(
 			w,
-			capacityError.Error(),
-			map[string]any{
-				"code":       "capacity_exceeded",
-				"used_items": capacityError.UsedItems,
-				"max_items":  capacityError.MaxItems,
-			},
+			"preference_organizing: Preference Organizer is running; this preference write was not saved (mutation=none)",
 			http.StatusConflict,
+			"preference_organizing",
 		)
 	case errors.Is(err, currentmemory.ErrInvalidDocument):
 		skillhttperr.ReplyWithCode(w, err.Error(), http.StatusBadRequest, skillhttperr.CodeInvalidRequest)

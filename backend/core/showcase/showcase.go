@@ -90,6 +90,7 @@ type ShowcaseCase struct {
 	BuiltinSkillUID   string             `json:"builtin_skill_uid,omitempty"`
 	WorkflowRef       string             `json:"workflow_ref,omitempty"`
 	Featured          bool               `json:"featured"`
+	Hot               bool               `json:"hot"`
 	FeaturedOrder     int                `json:"featured_order"`
 	Gallery           bool               `json:"gallery"`
 	SearchAliases     []string           `json:"-"`

@@ -1,4 +1,8 @@
-import { DisconnectOutlined, ReloadOutlined } from "@ant-design/icons";
+import {
+  CheckCircleOutlined,
+  DisconnectOutlined,
+  ReloadOutlined,
+} from "@ant-design/icons";
 import { Alert, Button } from "antd";
 import { useTranslation } from "react-i18next";
 import type { StreamRecoveryViewState } from "@/modules/chat/utils/streamRecovery";
@@ -19,6 +23,7 @@ export default function StreamRecoveryBanner({
   }
 
   const failed = recovery.status === "failed";
+  const recovered = recovery.status === "recovered";
   return (
     <div
       className={`chat-stream-recovery-banner is-${recovery.status}`}
@@ -26,16 +31,26 @@ export default function StreamRecoveryBanner({
     >
       <Alert
         role={failed ? "alert" : "status"}
-        type={failed ? "error" : "warning"}
+        type={failed ? "error" : recovered ? "success" : "warning"}
         showIcon
-        icon={failed ? <DisconnectOutlined /> : <ReloadOutlined spin />}
+        icon={
+          failed ? (
+            <DisconnectOutlined />
+          ) : recovered ? (
+            <CheckCircleOutlined />
+          ) : (
+            <ReloadOutlined spin />
+          )
+        }
         message={
           failed
             ? t("chat.streamResumeFailed")
-            : t("chat.streamResuming", {
-                attempt: recovery.attempt,
-                max: recovery.maxAttempts,
-              })
+            : recovered
+              ? t("chat.streamRecovered")
+              : t("chat.streamResuming", {
+                  attempt: recovery.attempt,
+                  max: recovery.maxAttempts,
+                })
         }
         action={
           failed ? (

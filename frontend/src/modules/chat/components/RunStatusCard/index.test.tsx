@@ -1,5 +1,7 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { CHAT_OPEN_MODEL_SELECTOR_EVENT } from "@/modules/chat/constants/chat";
+import { MODEL_FAILURE_CODES } from "@/modules/chat/utils/chatStreamError";
 
 import RunStatusCard from "./index";
 
@@ -38,10 +40,9 @@ describe("RunStatusCard", () => {
   });
 
   it.each([
-    "usage_limit_exceeded",
-    "concurrency_limited",
-    "rate_limited",
-  ])("renders normalized throttling code %s", (code) => {
+    ...MODEL_FAILURE_CODES,
+    "length", "content_filter", "insufficient_system_resource", "unknown",
+  ])("renders normalized terminal code %s", (code) => {
     render(<RunStatusCard terminal={{
       status: "failed",
       reason: "model_failure",
@@ -107,5 +108,50 @@ describe("RunStatusCard", () => {
     expect(screen.getByText(/chat\.runStatus\.providerError/)).toBeInTheDocument();
     expect(screen.queryByText(/secret_provider_code/)).not.toBeInTheDocument();
     expect(screen.queryByText(/raw secret body/)).not.toBeInTheDocument();
+  });
+
+  it("offers one retry without duplicating the submitted message", () => {
+    const onRetry = vi.fn();
+    render(<RunStatusCard terminal={{
+      status: "failed",
+      reason: "model_failure",
+      code: "provider_overloaded",
+      partial_output: false,
+    }} onRetry={onRetry} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "chat.tryAgain" }));
+
+    expect(onRetry).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens the model selector for the failed conversation", () => {
+    const listener = vi.fn();
+    window.addEventListener(CHAT_OPEN_MODEL_SELECTOR_EVENT, listener);
+    render(<RunStatusCard terminal={{
+      status: "failed",
+      reason: "model_failure",
+      code: "rate_limited",
+      partial_output: false,
+    }} conversationId="conversation-1" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "chat.changeModel" }));
+
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect((listener.mock.calls[0][0] as CustomEvent).detail).toEqual({
+      conversationId: "conversation-1",
+    });
+    window.removeEventListener(CHAT_OPEN_MODEL_SELECTOR_EVENT, listener);
+  });
+
+  it("links credential failures to model settings", () => {
+    render(<RunStatusCard terminal={{
+      status: "failed",
+      reason: "model_failure",
+      code: "authentication_failed",
+      partial_output: false,
+    }} />);
+
+    expect(screen.getByRole("link", { name: "chat.checkModelSettings" }))
+      .toHaveAttribute("href", "/settings?section=models");
   });
 });

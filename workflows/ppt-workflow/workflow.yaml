@@ -16,18 +16,36 @@ when_to_use: >
   from the user's prompt and must never ask for an upload unless the user
   explicitly asks to base the deck on a source file that is not available.
   Before starting, collect only any missing presentation topic, slide count,
-  target customer/audience, and visual style declared by runtime policy.
+  target customer/audience, visual style, and whether AI-generated per-slide
+  background images should be enabled, as declared by runtime policy.
   Do not trigger for simple one-off explanations, ordinary image generation,
   ordinary long-form writing, or requests that only ask to preview an uploaded
   PowerPoint file.
 
 runtime:
   publisher_owned_slots:
+    - deck_outline
     - slide_outline
+    - background_prompts
+    - background_images
     - preview_html
     - preview_notes
   collects_knowledge: true
   completed_edit_step: generate_ppt
+  completed_edit_routing: |
+    For a request to insert or add a whole slide into an already generated deck,
+    first call read_artifact(artifact_ref='ppt_capability_requirements') to inspect
+    the saved capability marker. When its content is exactly
+    AI_BACKGROUND_IMAGES: enabled, rewind to plan_background_prompts so the new
+    background prompt is inserted first. When it is exactly
+    AI_BACKGROUND_IMAGES: disabled, rewind to build_outline. These insertion
+    routes take precedence over completed_edit_step; all other completed-deck
+    edits use the generate_ppt fallback.
+  post_step_checks:
+    - step_id: analyze_requirements
+      tool: check_ppt_workflow_capabilities
+      arguments:
+        capability_requirements: ppt_capability_requirements
   clarification_fields:
     - id: topic
       label: 主题
@@ -71,6 +89,15 @@ runtime:
         - 自然生态｜有机曲线、大地色、舒展图文关系
         - 医疗/健康｜浅蓝绿、可信留白、专业信息层级
         - 卡通可爱｜圆润造型、活泼色彩、友好叙事
+    - id: generate_background_images
+      label: AI 底图
+      question: 是否为每一页启用 AI 生成底图？启用后会根据需求和素材先生成一组相互关联、可编辑的底图提示词，再生成 16:9 无文字背景并应用到幻灯片背景层。
+      type: single
+      choice_policy: fixed
+      allow_other: false
+      choices:
+        - 启用｜为每页生成独立 AI 底图
+        - 不启用｜使用纯色、渐变和矢量装饰
 
 tool_scripts:
   - path: scripts/tools.py
@@ -78,8 +105,15 @@ tool_scripts:
       - ppt_search_web_images
       - ppt_register_material_images
       - ppt_generate_material_images
+      - ppt_publish_background_prompts
+      - ppt_generate_background_images
+      - check_ppt_workflow_capabilities
       - ppt_attach_material_images
+      - ppt_replace_page_material_image
+      - ppt_replace_page_background
       - ppt_build_outline
+      - ppt_insert_outline_page
+      - ppt_publish_deck_outline
       - ppt_generate_pages
       - ppt_init_deck
       - ppt_find_deck
@@ -108,8 +142,14 @@ steps:
     label: Analyze Requirements
   - id: collect_materials
     label: Collect Materials
+  - id: plan_background_prompts
+    label: Plan Background Prompts
+  - id: generate_backgrounds
+    label: Generate Backgrounds
   - id: build_outline
     label: Build Outline
+  - id: plan_page_prompts
+    label: Plan Page Prompts
   - id: generate_ppt
     label: Generate PPT
 
@@ -119,6 +159,27 @@ slots:
     type: text
     cardinality: single
     summary_max_chars: 600
+
+  - id: ppt_capability_requirements
+    label: PPT Capability Requirements
+    type: text
+    cardinality: single
+    exposed: false
+    summary_max_chars: 80
+
+  - id: skip_background_images
+    label: Skip AI Backgrounds
+    type: text
+    cardinality: single
+    exposed: false
+    summary_max_chars: 40
+
+  - id: skip_material_collection
+    label: Skip Material Collection
+    type: text
+    cardinality: single
+    exposed: false
+    summary_max_chars: 40
 
   - id: uploaded_materials
     label: Uploaded Materials
@@ -141,12 +202,31 @@ slots:
     cardinality: list
     ordered: true
 
+  - id: background_images
+    label: AI Background Images
+    type: image
+    cardinality: list
+    ordered: true
+
+  - id: background_prompts
+    label: AI Background Prompts
+    type: text
+    cardinality: list
+    ordered: true
+    summary_max_chars: 1200
+
   - id: slide_outline
-    label: Slide Outline
+    label: Page Prompt
     type: text
     cardinality: list
     ordered: true
     summary_max_chars: 900
+
+  - id: deck_outline
+    label: Deck Outline
+    type: text
+    cardinality: single
+    summary_max_chars: 1600
 
   - id: preview_html
     label: Slide
@@ -168,7 +248,15 @@ ui:
       widgetType: text-markdown
     material_summary:
       widgetType: text-markdown
+    background_prompts:
+      widgetType: text-markdown
+      maxHeight: 420
+    background_images:
+      widgetType: image-gallery
     slide_outline:
+      widgetType: text-markdown
+      maxHeight: 420
+    deck_outline:
       widgetType: text-markdown
       maxHeight: 420
     preview_html:
@@ -195,12 +283,60 @@ ui:
         - id: material_summary
         - id: material_images
 
+    - id: background_prompts
+      step_id: plan_background_prompts
+      label: Background Prompts
+      layout: composite
+      slot_scope: step
+      composite_tab_position: left
+      slots:
+        - id: background_prompts
+      composite_layout:
+        direction: row
+        children:
+          - slot: background_prompts
+      composite_behavior:
+        hide_empty_columns: true
+        empty_column_scope: selected
+
+    - id: background_images
+      step_id: generate_backgrounds
+      label: Background Images
+      layout: composite
+      slot_scope: step
+      composite_tab_position: left
+      slots:
+        - id: background_images
+      composite_layout:
+        direction: row
+        children:
+          - slot: background_images
+      composite_behavior:
+        hide_empty_columns: true
+        empty_column_scope: selected
+
     - id: outline
       step_id: build_outline
       label: Outline
       layout: list
       slots:
+        - id: deck_outline
+
+    - id: page_prompts
+      step_id: plan_page_prompts
+      label: Page Prompts
+      layout: composite
+      slot_scope: step
+      composite_tab_position: left
+      slots:
         - id: slide_outline
+      composite_layout:
+        direction: row
+        children:
+          - slot: slide_outline
+      composite_behavior:
+        hide_empty_columns: true
+        empty_column_scope: selected
 
     - id: composite_preview
       step_id: generate_ppt
@@ -237,16 +373,25 @@ i18n:
       analyze_requirements: {label: 需求分析}
       collect_materials: {label: 收集素材}
       build_outline: {label: 大纲}
+      plan_page_prompts: {label: 每页提示词}
+      plan_background_prompts: {label: 底图提示词}
+      generate_backgrounds: {label: 生成底图}
       generate_ppt: {label: 生成PPT}
     tabs:
       analysis: {label: 分析}
       materials: {label: 素材}
       outline: {label: 大纲}
+      page_prompts: {label: 每页提示词}
+      background_prompts: {label: 底图提示词}
+      background_images: {label: 底图}
       composite_preview: {label: 幻灯片}
     slots:
       requirement_analysis: {label: 需求分析}
       material_summary: {label: 素材摘要}
       material_images: {label: 素材图片}
-      slide_outline: {label: 页面大纲}
+      background_prompts: {label: 底图提示词}
+      background_images: {label: AI 底图}
+      deck_outline: {label: 大纲}
+      slide_outline: {label: 每页提示词}
       preview_html: {label: 幻灯片}
       preview_notes: {label: 讲稿}

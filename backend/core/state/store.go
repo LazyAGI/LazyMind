@@ -37,3 +37,9 @@ type Store interface {
 type ExpiredKeyNotifier interface {
 	SubscribeExpiredKeys(ctx context.Context, onExpired func(key string) error)
 }
+
+// CompareAndDeleteStore is an optional atomic lock-release capability. Callers
+// fall back to Get+Del only for older test doubles that do not implement it.
+type CompareAndDeleteStore interface {
+	CompareAndDelete(ctx context.Context, key string, expected []byte) (bool, error)
+}

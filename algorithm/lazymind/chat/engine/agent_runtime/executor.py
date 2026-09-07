@@ -112,7 +112,10 @@ class AgentExecutor:
         kwargs = {
             'stream': True,
             'max_retries': options.max_retries or _cfg['max_retries'],
-            'enable_builtin_tools': bool(_cfg['trusted_local_mode']),
+            'enable_builtin_tools': (
+                bool(_cfg['trusted_local_mode'])
+                if options.enable_builtin_tools is None else options.enable_builtin_tools
+            ),
             'force_summarize': True,
             'force_summarize_context': plan.force_summarize_context,
             'on_max_retries': (

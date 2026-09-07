@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -27,9 +28,11 @@ import (
 )
 
 const (
-	DefaultAddress     = "127.0.0.1:19091"
-	agentLoginTimeout  = 2 * time.Minute
-	bridgeProbeTimeout = 5 * time.Second
+	DefaultAddress       = "127.0.0.1:19091"
+	agentLoginTimeout    = 2 * time.Minute
+	bridgeProbeTimeout   = 5 * time.Second
+	clientPlatformHeader = "X-LazyMind-Client-Platform"
+	platformMismatchCode = "platform_mismatch"
 )
 
 type Server struct {
@@ -75,12 +78,15 @@ func New(address string, bridge *mcpbridge.Bridge, store *credentials.Store, pol
 }
 
 func Start(ctx context.Context, address string) (map[string]any, error) {
-	if status, err := Health(ctx, address); err == nil {
-		return status, nil
-	}
 	self, err := os.Executable()
 	if err != nil {
 		return nil, err
+	}
+	if status, healthErr := Health(ctx, address); healthErr == nil {
+		if err := validateBridgeIdentity(status, self); err != nil {
+			return nil, err
+		}
+		return status, nil
 	}
 	home, err := assistantHome()
 	if err != nil {
@@ -109,11 +115,34 @@ func Start(ctx context.Context, address string) (map[string]any, error) {
 	for time.Now().Before(deadline) {
 		status, healthErr := Health(ctx, address)
 		if healthErr == nil {
+			if err := validateBridgeIdentity(status, self); err != nil {
+				return nil, err
+			}
 			return status, nil
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
 	return nil, fmt.Errorf("Assistant Bridge did not start; inspect %s", logPath)
+}
+
+func validateBridgeIdentity(status map[string]any, expectedExecutable string) error {
+	platform, _ := status["platform"].(string)
+	platform = strings.ToLower(strings.TrimSpace(platform))
+	if platform == "" {
+		return errors.New("the running Assistant Bridge does not report its platform; stop it before starting this version")
+	}
+	if platform != runtime.GOOS {
+		return fmt.Errorf(
+			"Assistant Bridge is already running on %s; stop it before starting the native %s bridge",
+			platform, runtime.GOOS,
+		)
+	}
+	executable, _ := status["executable"].(string)
+	executable = strings.TrimSpace(executable)
+	if executable == "" || !agentexec.SameExecutable(executable, expectedExecutable) {
+		return errors.New("the running Assistant Bridge belongs to another LazyMind executable; stop it before starting this version")
+	}
+	return nil
 }
 
 func Stop(ctx context.Context, address string) error {
@@ -223,7 +252,11 @@ func (s *Server) cancelAgentLogins() {
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/health", func(writer http.ResponseWriter, _ *http.Request) {
-		writeJSON(writer, http.StatusOK, map[string]any{"ok": true, "pid": os.Getpid(), "version": "v1"})
+		executable, _ := os.Executable()
+		writeJSON(writer, http.StatusOK, map[string]any{
+			"ok": true, "pid": os.Getpid(), "version": "v1",
+			"platform": runtime.GOOS, "executable": executable,
+		})
 	})
 	mux.HandleFunc("GET /v1/agents", s.handleAgentStatuses)
 	mux.HandleFunc("GET /v1/agents/{agent}", s.handleAgentStatus)
@@ -483,13 +516,10 @@ func (s *Server) agentAction(ctx context.Context, agent, action string) (agentin
 	case "disconnect":
 		return adapter.Disconnect(ctx), nil
 	case "login":
-		if agent != string(mcpclient.Cursor) && agent != string(mcpclient.WorkBuddy) {
+		if agent != string(mcpclient.Cursor) {
 			return agentintegration.Status{}, fmt.Errorf("unsupported %s action %q", agent, action)
 		}
 		s.startAgentLogin(agent, func(loginCtx context.Context) error {
-			if agent == string(mcpclient.WorkBuddy) {
-				return workbuddyadapter.Login(loginCtx, "")
-			}
 			return cursoradapter.Login(loginCtx, "")
 		})
 		return loginOpenedStatus(adapter.Status(ctx)), nil
@@ -554,7 +584,7 @@ func (s *Server) allowLocalBrowser(next http.Handler) http.Handler {
 		}
 		if origin != "" {
 			writer.Header().Set("Access-Control-Allow-Origin", origin)
-			writer.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+			writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, "+clientPlatformHeader)
 			writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 			writer.Header().Set("Vary", "Origin")
 		}
@@ -562,8 +592,29 @@ func (s *Server) allowLocalBrowser(next http.Handler) http.Handler {
 			writer.WriteHeader(http.StatusNoContent)
 			return
 		}
+		if request.URL.Path != "/v1/health" && clientPlatformMismatch(request) {
+			clientPlatform := strings.ToLower(strings.TrimSpace(request.Header.Get(clientPlatformHeader)))
+			writeJSON(writer, http.StatusConflict, map[string]string{
+				"code":            platformMismatchCode,
+				"client_platform": clientPlatform,
+				"bridge_platform": runtime.GOOS,
+				"error": fmt.Sprintf(
+					"LazyMind is open on %s, but Assistant Bridge is running on %s. Stop the current bridge and start the native %s Assistant Bridge; cross-platform desktop MCP paths are not executable.",
+					clientPlatform, runtime.GOOS, clientPlatform,
+				),
+			})
+			return
+		}
 		next.ServeHTTP(writer, request)
 	})
+}
+
+func clientPlatformMismatch(request *http.Request) bool {
+	clientPlatform := strings.ToLower(strings.TrimSpace(request.Header.Get(clientPlatformHeader)))
+	if clientPlatform == "" {
+		return false
+	}
+	return clientPlatform != runtime.GOOS
 }
 
 func localOrigin(value string) bool {

@@ -240,7 +240,7 @@ func PlanWorkflowSessionStart(w http.ResponseWriter, r *http.Request) {
 	common.ReplyOK(w, map[string]any{
 		"graph_hash":     graph.GraphHash,
 		"schema_version": graph.SchemaVersion,
-		"projection":     graphengine.Project(graph, graphengine.RuntimeSnapshot{Materials: materials}),
+		"projection":     projectWithApprovalPreferences(store.DB().WithContext(r.Context()), req.UserID, req.WorkflowID, graph, graphengine.RuntimeSnapshot{Materials: materials}),
 	})
 }
 
@@ -265,6 +265,7 @@ func StartWorkflowSession(w http.ResponseWriter, r *http.Request) {
 	if req.CommandID == "" {
 		req.CommandID = uuid.NewString()
 	}
+	req.WorkflowMode = normalizeSessionWorkflowMode(req.WorkflowMode)
 	req.Operation = "start"
 	if existing, ok := loadExistingTransition(store.DB(), req.CommandID); ok {
 		status := http.StatusOK
@@ -300,7 +301,7 @@ func StartWorkflowSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	externalMaterials := externalMaterialFacts(graph, req.ExternalMaterials)
-	projection := graphengine.Project(graph, graphengine.RuntimeSnapshot{Materials: externalMaterials})
+	projection := projectWithApprovalPreferences(store.DB().WithContext(r.Context()), req.UserID, req.WorkflowID, graph, graphengine.RuntimeSnapshot{Materials: externalMaterials})
 	node, exists := projection.Nodes[req.TargetStepID]
 	if !exists || node.Reachability != "reachable" || node.Readiness != "ready" {
 		code := "STEP_NOT_REACHABLE"
@@ -320,7 +321,7 @@ func StartWorkflowSession(w http.ResponseWriter, r *http.Request) {
 		req.TaskID = uuid.NewString()
 	}
 	handOff := req.HandOff
-	params := WorkflowStepParams{WorkflowID: req.WorkflowID, WorkflowRef: req.WorkflowRef, RevisionID: req.WorkflowRevisionID, RevisionNo: req.WorkflowRevisionNo, TreeHash: req.WorkflowTreeHash, RemoteRoot: req.WorkflowRemoteRoot, StepID: req.TargetStepID, UserInput: req.UserInput, IsColdStart: true, HandOff: &handOff, PreflightID: req.PreflightID, ChatSessionID: req.ChatSessionID, TraceID: req.TraceID, ParentSpanID: req.ParentSpanID, WorkflowMode: req.WorkflowMode, UserID: req.UserID, HistoryFilesPerTurn: req.HistoryFilesPerTurn, Filters: req.Filters, ParentAgenticConfig: req.ParentAgenticConfig, RequiredOutputs: graph.Nodes[req.TargetStepID].RequiredOutputs, LegacyTools: graph.Nodes[req.TargetStepID].LegacyTools, TerminalTools: graph.Nodes[req.TargetStepID].TerminalTools, ToolsOnly: graph.Nodes[req.TargetStepID].ToolsOnly, StreamHeartbeat: graph.Nodes[req.TargetStepID].StreamHeartbeat, Runtime: graph.Runtime}
+	params := WorkflowStepParams{WorkflowID: req.WorkflowID, WorkflowRef: req.WorkflowRef, RevisionID: req.WorkflowRevisionID, RevisionNo: req.WorkflowRevisionNo, TreeHash: req.WorkflowTreeHash, RemoteRoot: req.WorkflowRemoteRoot, StepID: req.TargetStepID, UserInput: req.UserInput, IsColdStart: true, HandOff: &handOff, PreflightID: req.PreflightID, ChatSessionID: req.ChatSessionID, TraceID: req.TraceID, ParentSpanID: req.ParentSpanID, WorkflowMode: req.WorkflowMode, UserID: req.UserID, HistoryFilesPerTurn: req.HistoryFilesPerTurn, Filters: req.Filters, ParentAgenticConfig: req.ParentAgenticConfig, RequiredOutputs: graph.Nodes[req.TargetStepID].RequiredOutputs, LegacyTools: graph.Nodes[req.TargetStepID].LegacyTools, TerminalTools: graph.Nodes[req.TargetStepID].TerminalTools, ToolsOnly: graph.Nodes[req.TargetStepID].ToolsOnly, TerminalToolsOnly: graph.Nodes[req.TargetStepID].TerminalToolsOnly, StreamHeartbeat: graph.Nodes[req.TargetStepID].StreamHeartbeat, Runtime: graph.Runtime}
 	nodeDef := graph.Nodes[req.TargetStepID]
 	inputKeys := graphengine.Materials(nodeDef.Input)
 	for _, optional := range nodeDef.OptionalInputs {
@@ -532,6 +533,9 @@ func TransitionWorkflowSession(w http.ResponseWriter, r *http.Request) {
 			}
 			return err
 		}
+		// The execution mode is a session creation decision. Never allow a later
+		// chat request or transition command to change it.
+		req.WorkflowMode = normalizeSessionWorkflowMode(session.WorkflowMode)
 		graphErr := error(nil)
 		graph, graphErr = loadSessionGraph(r.Context(), tx, &session)
 		if graphErr != nil {
@@ -554,7 +558,7 @@ func TransitionWorkflowSession(w http.ResponseWriter, r *http.Request) {
 		if snapshotErr != nil {
 			return snapshotErr
 		}
-		projection := graphengine.Project(graph, snapshot)
+		projection := projectWithApprovalPreferences(tx.WithContext(r.Context()), session.CreateUserID, session.WorkflowID, graph, snapshot)
 		if req.ExpectedStateVersion != session.StateVersion {
 			return rejectTransition(req.CommandID, &session, projection, http.StatusConflict, "STATE_VERSION_CONFLICT", "plugin session state changed; use the returned projection", true, map[string]any{"expected": req.ExpectedStateVersion, "actual": session.StateVersion})
 		}
@@ -609,7 +613,7 @@ func TransitionWorkflowSession(w http.ResponseWriter, r *http.Request) {
 			if reloadErr != nil {
 				return reloadErr
 			}
-			projection = graphengine.Project(graph, snapshot)
+			projection = projectWithApprovalPreferences(tx.WithContext(r.Context()), session.CreateUserID, session.WorkflowID, graph, snapshot)
 		}
 		evaluations := make(map[string]graphengine.Evaluation, len(targets))
 		invalidTargets := make([]map[string]any, 0)
@@ -689,7 +693,7 @@ func TransitionWorkflowSession(w http.ResponseWriter, r *http.Request) {
 				for _, optional := range nodeDef.OptionalInputs {
 					inputKeys = append(inputKeys, optional.Material)
 				}
-				params := WorkflowStepParams{WorkflowID: session.WorkflowID, WorkflowRef: session.WorkflowRef, RevisionID: session.WorkflowRevisionID, RevisionNo: session.WorkflowRevisionNo, TreeHash: session.WorkflowTreeHash, RemoteRoot: session.WorkflowRemoteRoot, StepID: target.TargetStepID, SessionID: session.ID, UserInput: target.UserInput, HandOff: &handOff, ChatSessionID: req.ChatSessionID, TraceID: req.TraceID, ParentSpanID: req.ParentSpanID, WorkflowMode: req.WorkflowMode, RetryHint: target.RuntimeInstruction, PartialIndices: target.PartialIndices, HistoryFilesPerTurn: req.HistoryFilesPerTurn, Filters: req.Filters, ParentAgenticConfig: req.ParentAgenticConfig, UserID: session.CreateUserID, RequiredOutputs: nodeDef.RequiredOutputs, LegacyTools: nodeDef.LegacyTools, TerminalTools: nodeDef.TerminalTools, ToolsOnly: nodeDef.ToolsOnly, StreamHeartbeat: nodeDef.StreamHeartbeat, Runtime: graph.Runtime}
+				params := WorkflowStepParams{WorkflowID: session.WorkflowID, WorkflowRef: session.WorkflowRef, RevisionID: session.WorkflowRevisionID, RevisionNo: session.WorkflowRevisionNo, TreeHash: session.WorkflowTreeHash, RemoteRoot: session.WorkflowRemoteRoot, StepID: target.TargetStepID, SessionID: session.ID, UserInput: target.UserInput, HandOff: &handOff, ChatSessionID: req.ChatSessionID, TraceID: req.TraceID, ParentSpanID: req.ParentSpanID, WorkflowMode: req.WorkflowMode, RetryHint: target.RuntimeInstruction, PartialIndices: target.PartialIndices, HistoryFilesPerTurn: req.HistoryFilesPerTurn, Filters: req.Filters, ParentAgenticConfig: req.ParentAgenticConfig, UserID: session.CreateUserID, RequiredOutputs: nodeDef.RequiredOutputs, LegacyTools: nodeDef.LegacyTools, TerminalTools: nodeDef.TerminalTools, ToolsOnly: nodeDef.ToolsOnly, TerminalToolsOnly: nodeDef.TerminalToolsOnly, StreamHeartbeat: nodeDef.StreamHeartbeat, Runtime: graph.Runtime}
 				var launchErr error
 				stepObjective := workflowStepObjective(nodeDef.Prompt, target.Objective, target.UserInput)
 				_, taskID, _, launchErr = launchWorkflowAttempt(r.Context(), tx, store.State(), session.ConversationID, session.TriggerHistoryID, session.CreateUserID, target.TaskID, session.WorkflowID+":"+target.TargetStepID, stepObjective, params, inputKeys, nodeDef.Outputs, req.LLMConfig, req.ToolConfig, false, false)
@@ -791,7 +795,7 @@ func queueHostAttempt(ctx context.Context, tx *gorm.DB, session orm.WorkflowSess
 		Instruction: target.RuntimeInstruction, PartialSelector: target.PartialIndices,
 		WorkflowRevision: session.WorkflowRevisionID, DeclaredOutputs: node.Outputs, DeclaredOutputTypes: outputTypes, RequiredOutputs: node.RequiredOutputs,
 		Capabilities: node.Capabilities, LegacyTools: node.LegacyTools, TerminalTools: node.TerminalTools,
-		ToolsOnly: node.ToolsOnly}
+		ToolsOnly: node.ToolsOnly, TerminalToolsOnly: node.TerminalToolsOnly}
 	payload, err := json.Marshal(value)
 	if err != nil {
 		return err
@@ -1029,6 +1033,7 @@ func emitTaskCreatedConvEvent(ctx context.Context, taskID, sessionID, conversati
 	subagent.EventHooks.CallConversationEvent(ctx, store.State(), conversationID, "", "task_created", map[string]any{
 		"task_id":             task.ID,
 		"title":               task.Title,
+		"query":               subagent.TaskDisplayQuery(task),
 		"agent_type":          task.AgentType,
 		"mode":                task.Mode,
 		"status":              task.Status,

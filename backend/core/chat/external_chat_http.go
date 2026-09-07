@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -355,6 +356,50 @@ func PublishExternalChatEvent(w http.ResponseWriter, r *http.Request) {
 			log.Logger.Warn().Err(err).Str("run_id", runID).
 				Msg("external chat terminal committed but cache projection failed")
 		}
+	}
+	common.ReplyOK(w, map[string]any{"sequence": sequence})
+}
+
+func PublishExternalChatAttachment(w http.ResponseWriter, r *http.Request) {
+	owner := store.UserID(r)
+	var input struct {
+		HostID        string `json:"host_id"`
+		LeaseToken    string `json:"lease_token"`
+		EventID       string `json:"event_id"`
+		Filename      string `json:"filename"`
+		MediaType     string `json:"media_type"`
+		ContentBase64 string `json:"content_base64"`
+	}
+	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 32<<20)).Decode(&input) != nil ||
+		strings.TrimSpace(input.HostID) == "" || strings.TrimSpace(input.LeaseToken) == "" ||
+		strings.TrimSpace(input.EventID) == "" || !validArtifactFilename(input.Filename) {
+		common.ReplyErr(w, "invalid external Agent attachment", http.StatusBadRequest)
+		return
+	}
+	input.EventID = strings.TrimSpace(input.EventID)
+	if len(input.EventID) > 64 {
+		common.ReplyErr(w, "event_id is too long", http.StatusBadRequest)
+		return
+	}
+	content, err := base64.StdEncoding.DecodeString(input.ContentBase64)
+	if err != nil || len(content) == 0 || len(content) > maxExternalChatAttachmentBytes {
+		common.ReplyErr(w, "invalid external Agent attachment content", http.StatusBadRequest)
+		return
+	}
+	sequence, err := newExternalChatApplication(store.DB()).appendAttachment(
+		r.Context(), owner, mux.Vars(r)["run_id"], strings.TrimSpace(input.HostID),
+		strings.TrimSpace(input.LeaseToken), externalChatAttachment{
+			EventID: input.EventID, Filename: strings.TrimSpace(input.Filename),
+			MediaType: strings.TrimSpace(input.MediaType), Content: content,
+		},
+	)
+	if errors.Is(err, errInvalidExternalChatAttachment) {
+		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusConflict)
+		return
 	}
 	common.ReplyOK(w, map[string]any{"sequence": sequence})
 }

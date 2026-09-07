@@ -1,14 +1,13 @@
 from __future__ import annotations
 
+import copy
+import pickle
 from typing import Any, Dict, List, Optional
 
 import pytest
 import yaml
 
-from lazymind.common.memory.exceptions import (
-    MemoryPartialApplyError,
-    PreferenceCapacityExceededError,
-)
+from lazymind.common.memory.exceptions import MemoryPartialApplyError
 from lazymind.common.memory.paths import (
     PREFERENCE_PATH,
     PROFILE_PATH,
@@ -19,6 +18,7 @@ from lazymind.common.memory.paths import (
 from lazymind.common.memory.validation import (
     PreferenceItem,
     append_preference_item,
+    parse_preference_items,
     validate_preference_index,
 )
 from lazymind.common.memory.validation.document import validate_stored_memory_content
@@ -83,7 +83,7 @@ class FakeRemoteFS:
         for file_path in sorted(self.files):
             if not file_path.startswith(prefix):
                 continue
-            rest = file_path[len(prefix):]
+            rest = file_path[len(prefix) :]
             name = rest.split('/', 1)[0]
             full = f'{normalized}/{name}'
             if full in seen:
@@ -92,12 +92,14 @@ class FakeRemoteFS:
             if '/' in rest:
                 items.append({'name': full, 'path': full, 'type': 'dir'})
             else:
-                items.append({
-                    'name': full,
-                    'path': full,
-                    'type': 'file',
-                    'size': len(self.files[file_path]),
-                })
+                items.append(
+                    {
+                        'name': full,
+                        'path': full,
+                        'type': 'file',
+                        'size': len(self.files[file_path]),
+                    }
+                )
         return items
 
     def makedirs(self, path: str, exist_ok: bool = True) -> None:
@@ -145,13 +147,7 @@ def test_validate_sample_documents():
 
 
 def test_profile_validation_discovers_current_fields_and_rejects_unsupported_types():
-    dynamic_profile = (
-        'schema_version: 2\n'
-        'personal:\n'
-        '  nickname: Neo\n'
-        '  interests: [AI]\n'
-        '  headline: null\n'
-    )
+    dynamic_profile = 'schema_version: 2\npersonal:\n  nickname: Neo\n  interests: [AI]\n  headline: null\n'
 
     assert validate_stored_memory_content(dynamic_profile, label='profile') is None
     error = validate_stored_memory_content(
@@ -171,11 +167,13 @@ def test_profile_validation_discovers_current_fields_and_rejects_unsupported_typ
 
 
 def test_memory_store_roundtrip():
-    fs = FakeRemoteFS({
-        SOUL_PATH: SAMPLE_SOUL,
-        PROFILE_PATH: SAMPLE_PROFILE,
-        PREFERENCE_PATH: SAMPLE_PREFERENCE,
-    })
+    fs = FakeRemoteFS(
+        {
+            SOUL_PATH: SAMPLE_SOUL,
+            PROFILE_PATH: SAMPLE_PROFILE,
+            PREFERENCE_PATH: SAMPLE_PREFERENCE,
+        }
+    )
     store = MemoryStore(fs)
     soul = store.read_soul()
     profile = store.read_profile()
@@ -234,10 +232,12 @@ def test_memory_store_does_not_migrate_versionless_documents():
         'accessibility:\n'
         '  communication_needs: []\n'
     )
-    fs = FakeRemoteFS({
-        SOUL_PATH: legacy_soul,
-        PROFILE_PATH: legacy_profile,
-    })
+    fs = FakeRemoteFS(
+        {
+            SOUL_PATH: legacy_soul,
+            PROFILE_PATH: legacy_profile,
+        }
+    )
     store = MemoryStore(fs)
 
     with pytest.raises(ValueError, match='internal version metadata is missing'):
@@ -296,9 +296,11 @@ def test_memory_store_rejects_profile_type_changes_before_writing(
     )
 
     with pytest.raises(ValueError, match=expected_error):
-        store.apply_profile_operations([
-            {'op': 'add', 'path': 'identity.aliases', 'value': 'Neo'},
-        ])
+        store.apply_profile_operations(
+            [
+                {'op': 'add', 'path': 'identity.aliases', 'value': 'Neo'},
+            ]
+        )
     assert fs.files[PROFILE_PATH] == original
 
 
@@ -321,9 +323,11 @@ def test_memory_store_writes_the_same_stored_profile_it_validates(monkeypatch):
         fake_apply,
     )
 
-    result = store.apply_profile_operations([
-        {'op': 'add', 'path': 'identity.aliases', 'value': 'Neo'},
-    ])
+    result = store.apply_profile_operations(
+        [
+            {'op': 'add', 'path': 'identity.aliases', 'value': 'Neo'},
+        ]
+    )
 
     assert 'ok' not in result
     assert result['content'] == visible_profile
@@ -344,7 +348,7 @@ def test_fixed_memory_file_missing_is_an_error():
         store.read_soul()
 
 
-def test_preference_add_rejects_capacity_before_writing_reference():
+def test_preference_add_can_exceed_prompt_projection_limit():
     content = SAMPLE_PREFERENCE
     for idx in range(2):
         content = append_preference_item(
@@ -358,25 +362,19 @@ def test_preference_add_rejects_capacity_before_writing_reference():
             ),
         )
     fs = FakeRemoteFS({PREFERENCE_PATH: content})
-    original = fs.files[PREFERENCE_PATH]
+    with _cfg.temp('preference_context_max_chars', 2):
+        MemoryStore(fs).add_preference_with_reference(
+            name='pref.response.concise',
+            summary='回答要简洁',
+            scenario='日常问答',
+            details='先给结论，再按需补充背景。',
+            reason='用户明确要求',
+            source_kind='memory_review',
+            conversation_id='conversation-1',
+        )
 
-    with _cfg.temp('preference_index_max_items', 2):
-        with pytest.raises(PreferenceCapacityExceededError) as captured:
-            MemoryStore(fs).add_preference_with_reference(
-                name='pref.response.concise',
-                summary='回答要简洁',
-                scenario='日常问答',
-                details='先给结论，再按需补充背景。',
-                reason='用户明确要求',
-                source_kind='memory_review',
-                conversation_id='conversation-1',
-            )
-
-    assert captured.value.current_items == 2
-    assert captured.value.attempted_items == 3
-    assert captured.value.max_items == 2
-    assert fs.files[PREFERENCE_PATH] == original
-    assert build_reference_path('response-concise') not in fs.files
+    assert len(parse_preference_items(fs.files[PREFERENCE_PATH])) == 3
+    assert build_reference_path('response-concise') in fs.files
 
 
 def test_preference_add_returns_item_without_internal_envelope():
@@ -396,6 +394,28 @@ def test_preference_add_returns_item_without_internal_envelope():
     assert item.name == 'pref.response.concise'
     assert 'pref.response.concise' in fs.files[PREFERENCE_PATH]
     assert build_reference_path('response-concise') in fs.files
+
+
+@pytest.mark.parametrize('metadata', [None, {'episode_id': 'episode-1'}])
+def test_partial_apply_error_preserves_fields_when_reconstructed(metadata):
+    error = MemoryPartialApplyError(
+        'Preference index write failed', 'move', ['episode'], ['preference_index'],
+        {'name': 'pref.response.concise'}, metadata,
+    )
+
+    for restored in (
+        type(error)(*error.args),
+        copy.copy(error),
+        pickle.loads(pickle.dumps(error)),
+    ):
+        assert type(restored) is MemoryPartialApplyError
+        assert str(restored) == error.message
+        assert restored.operation == error.operation
+        assert restored.applied == error.applied
+        assert restored.failed == error.failed
+        assert restored.item == error.item
+        assert restored.metadata == (metadata or {})
+        assert restored.args == error.args
 
 
 def test_preference_add_reports_partial_apply_when_cleanup_fails():
@@ -420,3 +440,58 @@ def test_preference_add_reports_partial_apply_when_cleanup_fails():
     assert captured.value.failed == ('preference_index', 'reference_cleanup')
     assert fs.files[PREFERENCE_PATH] == SAMPLE_PREFERENCE
     assert reference_path in fs.files
+
+
+@pytest.mark.parametrize('cleanup_fails', [False, True])
+def test_shared_merge_persistence_compensates_failed_index_write(cleanup_fails):
+    from lazymind.common.memory.editors.preference import add_preference_entry
+
+    edited = add_preference_entry(
+        SAMPLE_PREFERENCE, name='pref.merged', summary='Merged', scenario='Always',
+        details='Both source rules', reason='Same scope', source_kind='memory_review',
+        conversation_id='conversation-1',
+    )
+    fs = FakeRemoteFS({PREFERENCE_PATH: SAMPLE_PREFERENCE})
+    reference_path = build_reference_path(edited['reference_name'])
+    fs.fail_write_paths.add(PREFERENCE_PATH)
+    if cleanup_fails:
+        fs.fail_rm_paths.add(reference_path)
+    with pytest.raises(Exception) as captured:
+        MemoryStore(fs).write_preference_with_new_reference(
+            original=SAMPLE_PREFERENCE, proposed=edited['content'], reference_name=edited['reference_name'],
+            reference_content=edited['reference_content'], item=edited['item'], operation='merge',
+        )
+    assert fs.files[PREFERENCE_PATH] == SAMPLE_PREFERENCE
+    assert (reference_path in fs.files) == cleanup_fails
+    assert isinstance(captured.value, MemoryPartialApplyError) == cleanup_fails
+    if cleanup_fails:
+        assert captured.value.operation == 'merge'
+        assert captured.value.applied == ('new_reference',)
+        assert captured.value.failed == ('preference_index', 'new_reference_cleanup')
+
+
+@pytest.mark.parametrize('new_name', ['pref.a_b', 'pref.a-b'])
+def test_new_preference_name_mapping_collision_is_rejected_before_write(new_name):
+    content = append_preference_item(
+        SAMPLE_PREFERENCE,
+        PreferenceItem(
+            name='pref.a.b',
+            summary='existing',
+            ref='references/a-b.md#section',
+            created_at=TIMESTAMP,
+            updated_at=TIMESTAMP,
+        ),
+    )
+    fs = FakeRemoteFS({PREFERENCE_PATH: content, build_reference_path('a-b'): 'existing reference'})
+    before = dict(fs.files)
+    with pytest.raises(ValueError, match='duplicate preference reference|existing reference'):
+        MemoryStore(fs).add_preference_with_reference(
+            name=new_name,
+            summary='new',
+            scenario='same scope',
+            details='details',
+            reason='reason',
+            source_kind='memory_review',
+            conversation_id='conversation-1',
+        )
+    assert fs.files == before

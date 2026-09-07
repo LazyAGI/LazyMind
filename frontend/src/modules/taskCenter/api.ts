@@ -128,6 +128,11 @@ export async function cancelTask(id: string): Promise<void> {
   await axiosInstance.post(`${CORE}/task-center/tasks/${id}:cancel`);
 }
 
+export async function getTask(id: string): Promise<Task> {
+  const response = await axiosInstance.get<Task>(`${CORE}/task-center/tasks/${encodeURIComponent(id)}`, { silentError: true } as never);
+  return response.data;
+}
+
 export async function removeTask(id: string): Promise<void> {
   await axiosInstance.post(`${CORE}/task-center/tasks/${id}:remove`);
 }

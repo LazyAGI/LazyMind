@@ -5,6 +5,7 @@ import {
   StreamRecoveryRegistry,
   isTemporaryStreamFailure,
   preserveProviderRetryAfterReconciliation,
+  removeTrailingEmptyAssistantPlaceholder,
 } from "./streamRecovery";
 
 describe("stream recovery policy", () => {
@@ -72,5 +73,32 @@ describe("stream recovery policy", () => {
         "assistant",
       )[0].model_retry,
     ).toBeUndefined();
+  });
+
+  it("removes only a trailing empty assistant after recovery is exhausted", () => {
+    const user = { role: "user", delta: "question" };
+    const emptyAssistant = { role: "assistant", delta: "", answers: [] };
+    expect(
+      removeTrailingEmptyAssistantPlaceholder(
+        [user, emptyAssistant],
+        "assistant",
+      ),
+    ).toEqual([user]);
+
+    const partialAssistant = { role: "assistant", delta: "partial answer" };
+    const partialList = [user, partialAssistant];
+    expect(
+      removeTrailingEmptyAssistantPlaceholder(partialList, "assistant"),
+    ).toBe(partialList);
+
+    const failedAssistant = {
+      role: "assistant",
+      delta: "",
+      run_status: "failed",
+    };
+    const failedList = [user, failedAssistant];
+    expect(
+      removeTrailingEmptyAssistantPlaceholder(failedList, "assistant"),
+    ).toBe(failedList);
   });
 });

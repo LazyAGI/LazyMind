@@ -59,6 +59,7 @@ function showcaseCase(tasks: ReturnType<typeof task>[]): ShowcaseCase {
     featured: true,
     featured_order: 1,
     gallery: true,
+    hot: false,
     image_url: "/showcase/demo.png",
     output_label: "Report",
     output_type: "report",

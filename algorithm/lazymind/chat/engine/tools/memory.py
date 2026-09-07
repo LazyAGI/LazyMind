@@ -19,7 +19,6 @@ from lazymind.common.memory import (
     MemoryPartialApplyError,
     MemoryStore,
     MemoryOperationRecord,
-    PreferenceCapacityExceededError,
     get_episode_store,
     preference_name_to_reference_name,
     split_reference_ref,
@@ -159,20 +158,7 @@ def _record_memory_editor_exception(tool_name: str, exc: Exception) -> Any:
     mutation = False
     ledger_result: dict[str, Any] | None = None
 
-    if isinstance(exc, PreferenceCapacityExceededError):
-        error = ToolExecutionError(
-            f'Preference capacity is full ({exc.current_items}/{exc.max_items}). '
-            'The new preference was not saved. No existing preference was deleted, '
-            'overwritten, or reordered. Ask the user to remove an existing preference '
-            'before retrying.'
-        )
-        error_code = 'capacity_exceeded'
-        ledger_result = {
-            'current_items': exc.current_items,
-            'attempted_items': exc.attempted_items,
-            'max_items': exc.max_items,
-        }
-    elif isinstance(exc, MemoryPartialApplyError):
+    if isinstance(exc, MemoryPartialApplyError):
         mutation = True
         error = ToolExecutionError(_visible_memory_message(str(exc)))
         error_code = 'partial_failure'
@@ -187,6 +173,13 @@ def _record_memory_editor_exception(tool_name: str, exc: Exception) -> Any:
     elif isinstance(exc, (ValueError, FileNotFoundError)):
         error = ToolExecutionError(_visible_memory_message(str(exc)))
         error_code = 'invalid_arguments'
+    elif isinstance(exc, RuntimeError) and 'preference_organizing' in str(exc):
+        error = ToolExecutionError(
+            'Preference Organizer is running. This preference write was not saved; '
+            'do not retry it in this run.'
+        )
+        error_code = 'preference_organizing'
+        ledger_result = {'status': 'blocked', 'mutation': 'none'}
     elif isinstance(exc, RuntimeError):
         error = _memory_storage_error(str(exc))
         error_code = 'storage_failed'

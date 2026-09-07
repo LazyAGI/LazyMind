@@ -2,11 +2,13 @@ package chat
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -206,17 +208,31 @@ func TestExternalContinuationPreservesProviderOwnedConversation(t *testing.T) {
 	if err := db.First(&binding, "id = ?", "external-binding").Error; err != nil {
 		t.Fatal(err)
 	}
+	if binding.ManagedByLazyMind {
+		t.Fatal("continuing a provider-owned thread changed its ownership")
+	}
 }
 
-func TestExternalConversationBindsExactlyOneNativeThread(t *testing.T) {
+func TestExternalConversationBindsOneNativeThreadPerProvider(t *testing.T) {
 	_, db := newExternalChatTestApplication(t)
 	service := externalcontext.New(db)
 	ctx := context.Background()
 	if err := service.BindManagedThread(ctx, "user-1", ChatExecutorCodex, "host-1", "codex-thread", "conversation-1"); err != nil {
 		t.Fatal(err)
 	}
-	if err := service.BindManagedThread(ctx, "user-1", ChatExecutorCursor, "host-1", "cursor-thread", "conversation-1"); !errors.Is(err, externalcontext.ErrThreadOwned) {
-		t.Fatalf("second provider in one conversation err=%v", err)
+	var managed orm.ExternalAgentBinding
+	if err := db.First(&managed, "provider_thread_id = ?", "codex-thread").Error; err != nil {
+		t.Fatal(err)
+	}
+	if !managed.ManagedByLazyMind {
+		t.Fatal("LazyMind-created thread was not marked as managed")
+	}
+	if err := service.BindManagedThread(ctx, "user-1", ChatExecutorCursor, "host-1", "cursor-thread", "conversation-1"); err != nil {
+		t.Fatalf("bind second provider in one conversation: %v", err)
+	}
+	var bindingCount int64
+	if err := db.Model(&orm.ExternalAgentBinding{}).Where("conversation_id = ?", "conversation-1").Count(&bindingCount).Error; err != nil || bindingCount != 2 {
+		t.Fatalf("provider bindings=%d err=%v", bindingCount, err)
 	}
 	now := time.Now().UTC()
 	if err := db.Create(&orm.Conversation{ID: "conversation-2", BaseModel: orm.BaseModel{
@@ -224,8 +240,8 @@ func TestExternalConversationBindsExactlyOneNativeThread(t *testing.T) {
 	}}).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := service.BindManagedThread(ctx, "user-1", ChatExecutorCursor, "host-1", "cursor-thread", "conversation-2"); err != nil {
-		t.Fatal(err)
+	if err := service.BindManagedThread(ctx, "user-1", ChatExecutorCursor, "host-1", "cursor-thread", "conversation-2"); !errors.Is(err, externalcontext.ErrThreadOwned) {
+		t.Fatalf("rebind Cursor thread err=%v, want ErrThreadOwned", err)
 	}
 	if err := service.BindManagedThread(ctx, "user-1", ChatExecutorCodex, "host-1", "another-codex-thread", "conversation-1"); !errors.Is(err, externalcontext.ErrThreadOwned) {
 		t.Fatalf("second Codex thread err=%v, want ErrThreadOwned", err)
@@ -503,6 +519,50 @@ func TestNativeSessionSyncBindsImmediatelyAndImportsIncrementally(t *testing.T) 
 	if err := db.Where("conversation_id = ?", binding.ConversationID).Take(&history).Error; err != nil ||
 		history.Content != "继续 Cursor 任务" || history.Result != "Cursor 任务已恢复" {
 		t.Fatalf("history=%#v err=%v", history, err)
+	}
+}
+
+func TestNativeSessionSyncReconcilesPlainLazyMindUserMessageWithoutDuplicatingTurn(t *testing.T) {
+	app, db := newExternalChatTestApplication(t)
+	createExternalChatTestRun(t, app, "run-plain-prompt")
+	job, err := app.claim(context.Background(), "user-1", ChatExecutorCodex, "host-1")
+	if err != nil || job == nil {
+		t.Fatalf("claim run: job=%#v err=%v", job, err)
+	}
+	if _, err := app.appendEvent(
+		context.Background(), "user-1", job.RunID, "host-1", job.LeaseToken,
+		externalChatEvent{EventID: "plain-thread", Type: "thread_started", ProviderThreadID: "thread-plain"},
+	); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	if err := db.Create(&orm.ChatHistory{
+		ID: job.HistoryID, Seq: 1, ConversationID: "conversation-1",
+		AlgorithmID: "external:codex", RawContent: "question", Content: "question",
+		TimeMixin: orm.TimeMixin{CreateTime: now, UpdateTime: now},
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	session := externalcontext.NativeSession{
+		ThreadID: "thread-plain", ProjectKey: "project-plain", ProjectName: "Project",
+		DisplayName: "question",
+		Turns: []externalcontext.NativeTurn{{
+			ID: "provider-turn", User: "question", Assistant: "answer", CreatedAt: now,
+		}},
+	}
+	if _, err := externalcontext.New(db).SyncSessionCatalog(
+		context.Background(), "user-1", ChatExecutorCodex, "host-1",
+		[]externalcontext.NativeSession{session}, true,
+	); err != nil {
+		t.Fatal(err)
+	}
+	var histories []orm.ChatHistory
+	if err := db.Where("conversation_id = ?", "conversation-1").Find(&histories).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(histories) != 1 || histories[0].ID != job.HistoryID ||
+		histories[0].Content != "question" || histories[0].Result != "answer" {
+		t.Fatalf("histories=%#v", histories)
 	}
 }
 
@@ -839,54 +899,9 @@ func TestExternalChatRewritesHostLocalWorkflowArtifactLink(t *testing.T) {
 	}
 }
 
-func TestExternalAgentPromptCarriesOnlySafeLazyMindContext(t *testing.T) {
-	prompt := externalAgentPrompt(map[string]any{
-		"workflow_context": map[string]any{
-			"session_id": "session-1", "workflow_id": "image", "current_step": "prompt",
-			"workflow_mode": "dynamic", "remote_root": "/private/runtime", "tree_hash": "secret-hash",
-		},
-		"explicit_resource_bindings": map[string]any{
-			"skill_names": []string{"image-generation"}, "knowledge_base_ids": []string{"kb-1"},
-			"workflow_refs": []string{"builtin:image"},
-		},
-		"filters":     map[string]any{"kb_id": []string{"kb-configured"}},
-		"history":     []map[string]string{{"role": "user", "content": "earlier turn"}},
-		"llm_config":  map[string]any{"api_key": "must-not-leak"},
-		"tool_config": map[string]any{"token": "must-not-leak"},
-	}, "make an image", true)
-
-	for _, required := range []string{
-		"session_id: session-1", "workflow_id: image", "current_step: prompt",
-		"skills: image-generation", "knowledge_base_ids: kb-1", "workflow_refs: builtin:image",
-		"knowledge_base_ids: kb-configured",
-		"earlier turn", "make an image",
-	} {
-		if !strings.Contains(prompt, required) {
-			t.Fatalf("prompt does not contain %q: %s", required, prompt)
-		}
-	}
-	for _, forbidden := range []string{"must-not-leak", "/private/runtime", "secret-hash", "llm_config", "tool_config"} {
-		if strings.Contains(prompt, forbidden) {
-			t.Fatalf("prompt leaked %q: %s", forbidden, prompt)
-		}
-	}
-	resumed := externalAgentPrompt(map[string]any{
-		"history": []map[string]string{{"role": "user", "content": "do-not-replay"}},
-	}, "next turn", false)
-	if strings.Contains(resumed, "do-not-replay") {
-		t.Fatalf("resumed provider thread received duplicate history: %s", resumed)
-	}
-}
-
-func TestExternalConversationKnowledgeBaseIDsRespectsExplicitEmptyScope(t *testing.T) {
-	ids := externalConversationKnowledgeBaseIDs(
-		context.Background(),
-		nil,
-		map[string]any{"filters": map[string]any{"kb_id": []string{}}},
-		"conversation-1",
-	)
-	if len(ids) != 0 {
-		t.Fatalf("explicit empty knowledge scope = %v, want none", ids)
+func TestExternalAgentPromptContainsOnlyTheCurrentUserMessage(t *testing.T) {
+	if prompt := externalAgentPrompt("  make an image  "); prompt != "make an image" {
+		t.Fatalf("prompt=%q", prompt)
 	}
 }
 
@@ -966,6 +981,101 @@ func TestExternalChatRunClaimEventAndHistoryAreDurable(t *testing.T) {
 	}
 	if history.Result != "answer" || history.AlgorithmID != "external:codex" {
 		t.Fatalf("unexpected finalized history: %#v", history)
+	}
+}
+
+func TestExternalChatAttachmentIsManagedAndPersistedInHistory(t *testing.T) {
+	uploadRoot := t.TempDir()
+	t.Setenv("LAZYMIND_UPLOAD_ROOT", uploadRoot)
+	app, db := newExternalChatTestApplication(t)
+	store.Init(db, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+	createExternalChatTestRun(t, app, "run-image")
+	job, err := app.claim(context.Background(), "user-1", ChatExecutorCodex, "host-1")
+	if err != nil || job == nil {
+		t.Fatalf("claim image run: job=%#v err=%v", job, err)
+	}
+	content := []byte("\x89PNG\r\n\x1a\nfixture")
+	body, _ := json.Marshal(map[string]any{
+		"host_id": "host-1", "lease_token": job.LeaseToken, "event_id": "evt-image-1",
+		"filename": "generated.png", "media_type": "image/png",
+		"content_base64": base64.StdEncoding.EncodeToString(content),
+	})
+	publish := func() *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodPost, "/external-chat/runs/run-image:attachment", strings.NewReader(string(body)))
+		request.Header.Set("X-User-Id", "user-1")
+		request = mux.SetURLVars(request, map[string]string{"run_id": "run-image"})
+		response := httptest.NewRecorder()
+		PublishExternalChatAttachment(response, request)
+		return response
+	}
+	for attempt := 0; attempt < 2; attempt++ {
+		if response := publish(); response.Code != http.StatusOK {
+			t.Fatalf("publish attempt %d: status=%d body=%s", attempt+1, response.Code, response.Body.String())
+		}
+	}
+	var events []orm.ExternalChatRunEvent
+	if err := db.Where("run_id = ? AND type = ?", job.RunID, "message").Find(&events).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || strings.Contains(events[0].Text, "content_base64") ||
+		!strings.Contains(events[0].Text, "![Generated image](/static-files/external-agent-attachments/") {
+		t.Fatalf("image events=%#v", events)
+	}
+	if _, err := app.appendEvent(context.Background(), "user-1", job.RunID, "host-1", job.LeaseToken,
+		externalChatEvent{EventID: "evt-image-completed", Type: "completed"}); err != nil {
+		t.Fatal(err)
+	}
+	var history orm.ChatHistory
+	if err := db.First(&history, "id = ?", "history-run-image").Error; err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(history.Result, "![Generated image](/static-files/external-agent-attachments/") {
+		t.Fatalf("history result=%q", history.Result)
+	}
+	files := 0
+	if err := filepath.Walk(uploadRoot, func(path string, info os.FileInfo, err error) error {
+		if err == nil && info.Mode().IsRegular() {
+			files++
+		}
+		return err
+	}); err != nil || files != 1 {
+		t.Fatalf("managed image files=%d err=%v", files, err)
+	}
+}
+
+func TestExternalChatAttachmentRejectsInvalidImageBeforeWriting(t *testing.T) {
+	uploadRoot := t.TempDir()
+	t.Setenv("LAZYMIND_UPLOAD_ROOT", uploadRoot)
+	app, db := newExternalChatTestApplication(t)
+	store.Init(db, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+	createExternalChatTestRun(t, app, "run-invalid-image")
+	job, err := app.claim(context.Background(), "user-1", ChatExecutorCodex, "host-1")
+	if err != nil || job == nil {
+		t.Fatalf("claim image run: job=%#v err=%v", job, err)
+	}
+	body, _ := json.Marshal(map[string]any{
+		"host_id": "host-1", "lease_token": job.LeaseToken, "event_id": "evt-invalid-image",
+		"filename": "not-an-image.png", "media_type": "image/png",
+		"content_base64": base64.StdEncoding.EncodeToString([]byte("plain text")),
+	})
+	request := httptest.NewRequest(http.MethodPost, "/external-chat/runs/run-invalid-image:attachment", strings.NewReader(string(body)))
+	request.Header.Set("X-User-Id", "user-1")
+	request = mux.SetURLVars(request, map[string]string{"run_id": "run-invalid-image"})
+	response := httptest.NewRecorder()
+	PublishExternalChatAttachment(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	files := 0
+	if err := filepath.Walk(uploadRoot, func(path string, info os.FileInfo, err error) error {
+		if err == nil && info.Mode().IsRegular() {
+			files++
+		}
+		return err
+	}); err != nil || files != 0 {
+		t.Fatalf("managed files=%d err=%v", files, err)
 	}
 }
 
@@ -1209,4 +1319,16 @@ func TestNormalizeChatExecutorSupportsAllHostedProviders(t *testing.T) {
 	if _, valid := normalizeChatExecutor("unknown"); valid {
 		t.Fatal("unknown provider was accepted")
 	}
+}
+
+func TestWorkBuddyExecutorUsesUnifiedProductName(t *testing.T) {
+	for _, definition := range chatExecutorDefinitions {
+		if definition.ID == ChatExecutorWorkBuddy {
+			if definition.DisplayName != "WorkBuddy" {
+				t.Fatalf("display name=%q", definition.DisplayName)
+			}
+			return
+		}
+	}
+	t.Fatal("CodeBuddy executor definition is missing")
 }

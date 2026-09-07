@@ -22,12 +22,13 @@ type Config struct {
 	MaxWindow             time.Duration
 	Stages                []Stage
 
-	WorkerInterval   time.Duration
-	WorkerLockTTL    time.Duration
-	WorkerBatchSize  int
-	MaxAttempts      int
-	RetryBackoffBase time.Duration
-	RetryBackoffMax  time.Duration
+	WorkerInterval             time.Duration
+	WorkerLockTTL              time.Duration
+	WorkerBatchSize            int
+	MaxAttempts                int
+	RetryBackoffBase           time.Duration
+	RetryBackoffMax            time.Duration
+	PreferenceOrganizerTimeout time.Duration
 
 	ScannerInterval time.Duration
 
@@ -59,12 +60,13 @@ func DefaultConfig() Config {
 			{Window: 3 * 24 * time.Hour, Interval: 3 * 24 * time.Hour, QuantityThreshold: 20, Successes: 0},
 		},
 
-		WorkerInterval:   2 * time.Second,
-		WorkerLockTTL:    5 * time.Minute,
-		WorkerBatchSize:  10,
-		MaxAttempts:      3,
-		RetryBackoffBase: time.Second,
-		RetryBackoffMax:  4 * time.Second,
+		WorkerInterval:             2 * time.Second,
+		WorkerLockTTL:              5 * time.Minute,
+		WorkerBatchSize:            10,
+		MaxAttempts:                3,
+		RetryBackoffBase:           time.Second,
+		RetryBackoffMax:            4 * time.Second,
+		PreferenceOrganizerTimeout: 30 * time.Minute,
 
 		ScannerInterval: 5 * time.Second,
 
@@ -126,6 +128,9 @@ func normalizeConfig(cfg Config) Config {
 	}
 	if cfg.RetryBackoffMax <= 0 {
 		cfg.RetryBackoffMax = def.RetryBackoffMax
+	}
+	if cfg.PreferenceOrganizerTimeout <= 0 {
+		cfg.PreferenceOrganizerTimeout = def.PreferenceOrganizerTimeout
 	}
 	if cfg.ScannerInterval <= 0 {
 		cfg.ScannerInterval = def.ScannerInterval

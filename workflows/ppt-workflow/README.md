@@ -57,20 +57,51 @@ can use CSS, SVG, and ECharts instead.
    existing Materials layout shows preview cards with the original caption
    instead of local paths
 4. `ppt_build_outline` auto-inits the deck and attaches them into
-   `info_pack.user_assets.reference_images`, then style/outline/publish
-5. Outline assigns `use_image.reference_image_index`; UI gets per-page `slide_outline`
+   `info_pack.user_assets.reference_images`, then publishes one Markdown `deck_outline`
+5. `plan_page_prompts` publishes one editable `slide_outline` prompt per page;
+   outline assigns `use_image.reference_image_index`
 6. `ppt_generate_pages` runs asset-plan + batch-page-html (incl. UI edits) and
    embeds foreground `<img>`
 
 Do not generate material images unless the user explicitly requests them.
 
+## Opt-in AI slide backgrounds
+
+Startup clarification asks whether the user wants a dedicated AI background for
+every slide. The default remains the export-safe CSS/SVG path unless the user
+explicitly enables it.
+
+When enabled, background creation is split into an automatic prompt stage and a human image checkpoint
+immediately after material collection and before outline generation:
+
+1. `plan_background_prompts` publishes one editable prompt per page without pausing for approval. Every
+   prompt repeats the same visual-series anchor (palette, medium, light,
+   texture, camera grammar, edge-detail strategy, recurring motif) while its
+   page scene evolves with the deck narrative.
+2. `generate_backgrounds` sends the approved prompts to the configured framework
+   `image_generator`, writes `images/page_NNN_background.*`, publishes aligned
+   `background_images`, and records `background_images.json`.
+
+The prompt step prepares the conversation-scoped deck first; `build_outline`
+later reuses that same deck so approved prompts and generated files are retained.
+
+Both steps are skipped when AI backgrounds are disabled. Requests such as
+“重新生成底图提示词 1、2” or “重新生成底图 1、2” publish/overwrite only those
+positions and preserve every unselected item. Page HTML uses the exact generated
+file as its `#bg` CSS background; it remains separate from foreground Pool-B
+`material_images`. Provider failures are terminal and include the failing page
+and provider reason instead of silently falling back.
+
 ## Outline → HTML split
 
-- `build_outline`: **one call** `ppt_build_outline` → list slot `slide_outline`
+- `plan_background_prompts`: N editable, connected prompts (automatic)
+- `generate_backgrounds`: N generated images from approved prompts (human approval)
+- `build_outline`: **one call** `ppt_build_outline` → one Markdown `deck_outline` (automatic)
+- `plan_page_prompts`: `ppt_publish_outline` → editable per-page `slide_outline` prompts (human approval)
 - `generate_ppt`: **one call** `ppt_generate_pages` — **no** re-outline
 - Low-level `ppt_init_deck` / `ppt_run_stage` / `ppt_publish_*` remain for
   debug, recovery, and single-page edits
-- User can edit each page brief in the Outline tab; generate reads human revisions via `_resolve_artifact_text`
+- User can edit each page prompt in the Page Prompts tab; generate reads human revisions via `_resolve_artifact_text`
 
 ## Deck storage (conversation-scoped)
 
@@ -115,9 +146,10 @@ rebuilding the deck:
 Whole-slide removal ("删掉第3页", "去掉封面") is different from deleting a bullet:
 
 1. `ppt_find_deck`
-2. `ppt_delete_page(deck_dir, page=N)` — updates outline/asset_plan, renumbers
-   later pages on disk, and removes the matching UI list items
-   (`slide_outline` / `preview_html` / `preview_notes`)
+2. `ppt_delete_page(deck_dir, page=N)` — updates outline/asset-plan/background
+   manifests, renumbers later pages on disk, and removes the matching UI list
+   items (`slide_outline` / `background_prompts` / `background_images` /
+   `preview_html` / `preview_notes`)
 
 Do not re-run outline/style or regenerate untouched pages after a delete.
 

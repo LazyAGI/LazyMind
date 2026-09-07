@@ -144,6 +144,49 @@ func TestResolveAppErrorMatchesDynamicTemplate(t *testing.T) {
 	}
 }
 
+func TestResolveSidechatErrorsUseSpecificCodes(t *testing.T) {
+	for _, sample := range []struct {
+		message string
+		status  int
+		code    int
+	}{
+		{"sidechat already has a request in progress", 409, 2002348},
+		{"sidechat source attachment access denied", 403, 2002356},
+		{"query chat source upload session: connection reset", 500, 2002359},
+		{"at most 100 dataset_list are allowed", 400, 2002341},
+		{"database_ids value is too long", 400, 2002342},
+	} {
+		t.Run(sample.message, func(t *testing.T) {
+			appErr := ResolveAppError(sample.message, sample.status)
+			if appErr.Code != sample.code || appErr.HTTPStatus != sample.status {
+				t.Fatalf("resolved error = %#v, want code %d and HTTP status %d", appErr, sample.code, sample.status)
+			}
+		})
+	}
+}
+
+func TestResolveMaintenanceErrorsUseSpecificCodes(t *testing.T) {
+	for _, sample := range []struct {
+		message string
+		status  int
+		code    int
+	}{
+		{"preference_organizing", 409, 2002361},
+		{"create preference organizer task failed", 500, 2002362},
+		{"query preference organizer task failed", 500, 2002363},
+		{"preference organizer task lease was lost", 500, 2002364},
+		{"task_lease_lost", 409, 2002365},
+		{"maintenance_busy", 503, 2002366},
+	} {
+		t.Run(sample.message, func(t *testing.T) {
+			appErr := ResolveAppError(sample.message, sample.status)
+			if appErr.Code != sample.code || appErr.HTTPStatus != sample.status {
+				t.Fatalf("resolved error = %#v, want code %d and HTTP status %d", appErr, sample.code, sample.status)
+			}
+		})
+	}
+}
+
 func TestDirectAPIErrorMessagesAreCatalogued(t *testing.T) {
 	fset := token.NewFileSet()
 	err := filepath.Walk("..", func(file string, info os.FileInfo, walkErr error) error {

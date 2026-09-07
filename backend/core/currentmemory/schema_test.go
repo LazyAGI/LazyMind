@@ -363,3 +363,13 @@ func containsAll(value string, expected ...string) bool {
 	}
 	return true
 }
+
+func TestPreferenceReferencesCannotShareFileAcrossAnchors(t *testing.T) {
+	_, err := RenderPreferences(PreferenceDocument{Preferences: []PreferenceItem{
+		{Name: "pref.a", Summary: "A", Ref: "references/topic.md#a", CreatedAt: "2026-09-01T00:00:00Z", UpdatedAt: "2026-09-01T00:00:00Z"},
+		{Name: "pref.b", Summary: "B", Ref: "references/topic.md#b", CreatedAt: "2026-09-01T00:00:00Z", UpdatedAt: "2026-09-01T00:00:00Z"},
+	}})
+	if !errors.Is(err, ErrInvalidDocument) {
+		t.Fatalf("shared reference error = %v", err)
+	}
+}

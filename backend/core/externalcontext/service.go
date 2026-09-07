@@ -28,7 +28,7 @@ import (
 )
 
 var (
-	codexRequestMarker = regexp.MustCompile(`(?im)^#+\s*My request for Codex:\s*$`)
+	codexRequestMarker = regexp.MustCompile(`(?im)^#+\s*My request(?: for Codex)?:\s*$`)
 	codexImageTag      = regexp.MustCompile(`(?i)<image\b[^>]*\bpath="([^"]+)"[^>]*>`)
 	codexAnyImageTag   = regexp.MustCompile(`(?i)</?image\b[^>]*>`)
 )
@@ -257,7 +257,7 @@ func (s *Service) BindManagedThread(
 		return err
 	}
 	err = s.db.WithContext(ctx).
-		Where("conversation_id = ?", conversationID).
+		Where("conversation_id = ? AND provider = ?", conversationID, source.Provider).
 		Take(&existing).Error
 	if err == nil {
 		return ErrThreadOwned
@@ -269,7 +269,7 @@ func (s *Service) BindManagedThread(
 	binding := orm.ExternalAgentBinding{
 		ID:             deterministicID("binding", source.Provider+"\x00"+source.HostID+"\x00"+source.ThreadID),
 		ConversationID: conversationID, Provider: source.Provider, ProviderThreadID: source.ThreadID,
-		HostID:          source.HostID,
+		HostID: source.HostID, ManagedByLazyMind: true,
 		CreatedByUserID: owner, CreatedAt: now, UpdatedAt: now,
 	}
 	if err := s.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&binding).Error; err != nil {
@@ -284,7 +284,7 @@ func (s *Service) BindManagedThread(
 		// A concurrent first turn may have won the per-provider binding with
 		// another thread between the pre-check and insert.
 		if conflictErr := s.db.WithContext(ctx).
-			Where("conversation_id = ?", conversationID).
+			Where("conversation_id = ? AND provider = ?", conversationID, source.Provider).
 			Take(&existing).Error; conflictErr == nil {
 			return ErrThreadOwned
 		} else if !errors.Is(conflictErr, gorm.ErrRecordNotFound) {
@@ -727,9 +727,6 @@ func (s *Service) managedHistoryID(
 	}
 	if direct > 0 {
 		return turn.ID, nil
-	}
-	if !turn.Managed {
-		return "", nil
 	}
 	var candidates []orm.ExternalChatRun
 	if err := s.db.WithContext(ctx).

@@ -220,7 +220,7 @@ func projectSession(ctx context.Context, db *gorm.DB, session *orm.WorkflowSessi
 			inputWitnesses[attempt.ID] = append(inputWitnesses[attempt.ID], graphengine.Witness{MaterialID: binding.MaterialID, RevisionID: binding.MaterialRevisionID, BindAs: binding.BindAs})
 		}
 	}
-	projection := graphengine.Project(graph, snapshot)
+	projection := projectWithApprovalPreferences(db.WithContext(ctx), session.CreateUserID, session.WorkflowID, graph, snapshot)
 	return projectionResponse{
 		SessionID: session.ID, StateVersion: session.StateVersion, GraphHash: graph.GraphHash, SchemaVersion: graph.SchemaVersion,
 		Projection: projection, Graph: graph, AttemptHistory: attemptHistory, InputWitnesses: inputWitnesses,

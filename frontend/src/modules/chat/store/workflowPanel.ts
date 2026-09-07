@@ -183,15 +183,15 @@ export interface SlotRevision {
   artifact_value?: any;
   /** Human-readable description for image/file artifacts. */
   caption?: string;
-  /** change_source: ai / human / provider_sync (Feishu-confirmed). */
+  /** change_source: ai / human / provider_sync (cloud-provider-confirmed). */
   change_source?: "ai" | "human" | "provider_sync";
-  /** Whether this draft has a server-owned Feishu baseline. */
+  /** Whether this draft has a server-owned cloud-provider baseline. */
   write_back_ready?: boolean;
-  /** Whether the selected draft differs from that Feishu baseline. */
+  /** Whether the selected draft differs from that cloud-provider baseline. */
   write_back_dirty?: boolean;
   /** Server-owned delivery state for the selected draft. */
   write_back_state?: 'initial_delivery' | 'synced_clean' | 'synced_dirty' | 'blocked';
-  /** Public Feishu document URL resolved by the server from source_document. */
+  /** Public cloud document URL resolved by the server from source_document. */
   write_back_url?: string;
   /** Cloud provider bound to source_document, for example "feishu". */
   provider?: string;
@@ -211,6 +211,8 @@ export interface WorkflowSession {
   session_id: string;
   conversation_id: string;
   workflow_id: string;
+  /** Execution mode selected when this immutable session was created. */
+  workflow_mode: 'auto' | 'dynamic';
   /** Immutable package revision selected when this session was created. */
   pinned_revision_id?: string;
   status: "active" | "completed" | "failed" | "waiting" | "stopped";
@@ -342,6 +344,8 @@ export interface TabDef {
   id: string;
   /** Optional workflow step id represented by this tab. Falls back to id when omitted. */
   step_id?: string;
+  /** Artifact producer scope. `selected` lets a composite join adjacent workflow steps. */
+  slot_scope?: 'step' | 'selected';
   status_step_ids?: string[];
   label: string;
   layout?: 'grid' | 'list' | 'vertical' | 'composite' | 'horizontal';
@@ -414,6 +418,8 @@ export interface CompositeMutuallyExclusiveGroup {
 export interface CompositeBehavior {
   hide_empty_columns?: boolean;
   empty_column_scope?: 'selected' | 'tab';
+  /** Reuse a slot's sole revision on every composite page when no exact sort_order exists. */
+  repeat_single_slots?: string[];
   mutually_exclusive?: CompositeMutuallyExclusiveGroup[];
 }
 

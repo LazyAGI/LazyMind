@@ -6,6 +6,7 @@ type UserUIPreferences struct {
 	UserID                        string    `gorm:"column:user_id;type:varchar(255);primaryKey"`
 	ChatPreferenceNoticeDismissed bool      `gorm:"column:chat_preference_notice_dismissed;not null;default:false"`
 	DeveloperModeActive           bool      `gorm:"column:developer_mode_active;not null;default:false"`
+	SensitiveWordFilterEnabled    bool      `gorm:"column:sensitive_word_filter_enabled;not null;default:false"`
 	AcceptedUserAgreementVersion  string    `gorm:"column:accepted_user_agreement_version;type:varchar(64);not null;default:''"`
 	TaskCenterEnabled             bool      `gorm:"column:task_center_enabled;not null;default:true"`
 	SchedulesEnabled              bool      `gorm:"column:schedules_enabled;not null;default:true"`

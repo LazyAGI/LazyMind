@@ -48,6 +48,7 @@ const featuredCase: ShowcaseCase = {
   featured: true,
   featured_order: 1,
   gallery: true,
+  hot: false,
   image_url: "/showcase/product.png",
   output_label: "PRD",
   output_type: "document",

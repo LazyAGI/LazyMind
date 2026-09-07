@@ -714,7 +714,7 @@ model_providers:
     - name: Qwen
       description:
         zh-CN: |
-          阿里云开源与闭源双轨并行的王牌模型，全家桶覆盖文本、视觉、语音及图像编辑，国内生态最为丰富，API 调用极其便捷。
+          阿里云开源与闭源双轨并行的王牌模型，全家桶覆盖文本、视觉、语音、图像编辑及视频生成，国内生态最为丰富，API 调用极其便捷。
 
           获取 API Key：
           https://bailian.console.aliyun.com/?apiKey=1#/api-key
@@ -727,7 +727,7 @@ model_providers:
 
           3. 点击"创建 API-KEY"，系统会立即生成一串鉴权密钥，点击复制即可在应用中使用。
         en-US: |
-          Qwen by Alibaba Cloud provides open and commercial models spanning text, vision, speech, embeddings, and image editing.
+          Qwen by Alibaba Cloud provides open and commercial models spanning text, vision, speech, embeddings, image editing, and video generation.
 
           Get an API key:
           https://bailian.console.aliyun.com/?apiKey=1#/api-key
@@ -968,6 +968,16 @@ model_providers:
           type: cross_modal_embed
         - name: wan2.6-t2i
           type: text2image
+        - name: wan3.0-video
+          type: text2video
+        - name: wan3.0-video-prime
+          type: text2video
+        - name: wan2.6-t2v
+          type: text2video
+        - name: wan2.6-i2v
+          type: text2video
+        - name: wan2.6-i2v-flash
+          type: text2video
         - name: wanx2.1-t2i-pro
           type: text2image
         - name: wanx2.1-t2i-turbo
@@ -1209,6 +1219,10 @@ model_providers:
       base_url: "https://api.siliconflow.cn/v1/"
       # Verified-free model source: https://siliconflow.cn/pricing
       models:
+        - name: Wan-AI/Wan2.2-T2V-A14B
+          type: text2video
+        - name: Wan-AI/Wan2.2-I2V-A14B
+          type: text2video
         - name: deepseek-ai/DeepSeek-V4-Flash
           type: llm
           max_input_tokens: "1M"

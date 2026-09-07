@@ -11,20 +11,23 @@ import (
 	"gorm.io/gorm"
 
 	"lazymind/core/common"
+	"lazymind/core/maintenance"
 	"lazymind/core/store"
 )
 
 type Handler struct {
 	module *Module
+	db     *gorm.DB
 }
 
 func NewHandler(db *gorm.DB) *Handler {
-	return &Handler{module: NewModule(db)}
+	return &Handler{module: NewModule(db), db: db}
 }
 
-func NewHandlerWithPreferenceIndexMaxItems(db *gorm.DB, maxItems int) *Handler {
+func NewHandlerWithPreferenceContextMaxChars(db *gorm.DB, maxChars int) *Handler {
 	return &Handler{
-		module: NewModuleWithPreferenceIndexMaxItems(db, maxItems),
+		module: NewModuleWithPreferenceContextMaxChars(db, maxChars),
+		db:     db,
 	}
 }
 
@@ -235,7 +238,15 @@ func decodeJSONBody(r *http.Request, target any) error {
 
 func replyPublicError(w http.ResponseWriter, err error) {
 	var etagConflict *ETagConflictError
+	var organizing *maintenance.PreferenceOrganizingError
 	switch {
+	case errors.As(err, &organizing):
+		common.ReplyErrWithData(
+			w,
+			"preference_organizing",
+			map[string]any{"error_code": "preference_organizing", "mutation": "none", "task_id": organizing.TaskID},
+			http.StatusConflict,
+		)
 	case errors.As(err, &etagConflict):
 		common.ReplyErrWithData(
 			w,

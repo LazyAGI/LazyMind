@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"unicode"
@@ -40,9 +41,8 @@ type cachedCodexSessionTitles struct {
 }
 
 type cursorChat struct {
-	ID              string
-	CWD             string
-	HasConversation bool
+	ID  string
+	CWD string
 }
 
 func Project(provider, reference, name string) (string, string) {
@@ -256,7 +256,7 @@ func WorkBuddySessions(ctx context.Context) ([]chatagent.NativeSession, error) {
 	if err != nil {
 		return nil, err
 	}
-	root := filepath.Join(home, ".codebuddy", "projects")
+	root := filepath.Join(home, ".workbuddy", "projects")
 	byThread := map[string]chatagent.NativeSession{}
 	err = filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil || entry.IsDir() || !strings.HasSuffix(entry.Name(), ".jsonl") {
@@ -295,9 +295,7 @@ func CursorSessions(ctx context.Context) ([]chatagent.NativeSession, error) {
 	}
 	byID := make(map[string]cursorChat, len(chats))
 	for _, chat := range chats {
-		if chat.HasConversation && !isLazyMindWorkspace(chat.CWD) {
-			byID[chat.ID] = chat
-		}
+		byID[chat.ID] = chat
 	}
 	root := filepath.Join(home, ".cursor", "projects")
 	byThread := map[string]chatagent.NativeSession{}
@@ -310,12 +308,20 @@ func CursorSessions(ctx context.Context) ([]chatagent.NativeSession, error) {
 			return fs.SkipAll
 		}
 		threadID := filepath.Base(filepath.Dir(path))
-		chat, resumable := byID[threadID]
-		if entry.Name() != threadID+".jsonl" || !resumable {
+		if entry.Name() != threadID+".jsonl" {
 			return nil
 		}
-		projectName := filepath.Base(filepath.Clean(chat.CWD))
-		if session, ok := nativeSession(path, "cursor", chat.CWD, projectName, true); ok {
+		projectReference, projectName, workspaceFound := cursorTranscriptProject(path, home)
+		if chat, found := byID[threadID]; found && strings.TrimSpace(chat.CWD) != "" {
+			projectReference = filepath.Clean(chat.CWD)
+			projectName = filepath.Base(projectReference)
+			workspaceFound = true
+		}
+		if workspaceFound && isLazyMindWorkspace(projectReference) {
+			return nil
+		}
+		if session, ok := nativeSession(path, "cursor", projectReference, projectName, true); ok &&
+			len(session.Turns) > 0 {
 			byThread[threadID] = session
 		}
 		return nil
@@ -345,14 +351,11 @@ func cursorChats(ctx context.Context, home string) ([]cursorChat, error) {
 			return nil
 		}
 		var meta struct {
-			CWD             string `json:"cwd"`
-			HasConversation bool   `json:"hasConversation"`
+			CWD string `json:"cwd"`
 		}
 		threadID := filepath.Base(filepath.Dir(path))
 		if json.Unmarshal(body, &meta) == nil && validSessionID(threadID) && strings.TrimSpace(meta.CWD) != "" {
-			chats = append(chats, cursorChat{
-				ID: threadID, CWD: filepath.Clean(meta.CWD), HasConversation: meta.HasConversation,
-			})
+			chats = append(chats, cursorChat{ID: threadID, CWD: filepath.Clean(meta.CWD)})
 		}
 		return nil
 	})
@@ -372,11 +375,113 @@ func findCursorChat(ctx context.Context, threadID string) (cursorChat, bool, err
 		return cursorChat{}, false, err
 	}
 	for _, chat := range chats {
-		if chat.ID == threadID && chat.HasConversation {
+		if chat.ID == threadID && strings.TrimSpace(chat.CWD) != "" {
 			return chat, true, nil
 		}
 	}
-	return cursorChat{}, false, nil
+	path, err := findNativeSessionPath(ctx, "cursor", threadID)
+	if err != nil || path == "" {
+		return cursorChat{}, false, err
+	}
+	workspace, _, found := cursorTranscriptProject(path, home)
+	if !found {
+		return cursorChat{}, false, nil
+	}
+	return cursorChat{ID: threadID, CWD: workspace}, true, nil
+}
+
+func cursorTranscriptProject(path, home string) (string, string, bool) {
+	projectDirectory := filepath.Dir(filepath.Dir(filepath.Dir(path)))
+	if workspace := cursorTerminalWorkspace(projectDirectory); workspace != "" {
+		return workspace, filepath.Base(workspace), true
+	}
+	slug := filepath.Base(projectDirectory)
+	for _, root := range []string{home, filepath.Join(string(filepath.Separator), "private", "tmp"), os.TempDir()} {
+		if workspace := resolveCursorWorkspace(root, slug, 16); workspace != "" {
+			return workspace, filepath.Base(workspace), true
+		}
+	}
+	name := slug
+	if separator := strings.LastIndex(name, "-"); separator >= 0 && separator+1 < len(name) {
+		name = name[separator+1:]
+	}
+	return "cursor-project:" + slug, cleanName(name), false
+}
+
+func cursorTerminalWorkspace(projectDirectory string) string {
+	entries, err := os.ReadDir(filepath.Join(projectDirectory, "terminals"))
+	if err != nil {
+		return ""
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".txt") {
+			continue
+		}
+		file, err := os.Open(filepath.Join(projectDirectory, "terminals", entry.Name()))
+		if err != nil {
+			continue
+		}
+		scanner := bufio.NewScanner(file)
+		for line := 0; line < 8 && scanner.Scan(); line++ {
+			raw := strings.TrimSpace(scanner.Text())
+			if !strings.HasPrefix(raw, "cwd:") {
+				continue
+			}
+			value := strings.TrimSpace(strings.TrimPrefix(raw, "cwd:"))
+			if value == "" {
+				continue
+			}
+			workspace, err := strconv.Unquote(value)
+			if err == nil && filepath.IsAbs(workspace) {
+				_ = file.Close()
+				return filepath.Clean(workspace)
+			}
+		}
+		_ = file.Close()
+	}
+	return ""
+}
+
+func resolveCursorWorkspace(root, slug string, depth int) string {
+	root = filepath.Clean(strings.TrimSpace(root))
+	if root == "." || slug == "" || depth < 0 {
+		return ""
+	}
+	encoded := cursorWorkspaceSlug(root)
+	if encoded == slug {
+		if info, err := os.Stat(root); err == nil && info.IsDir() {
+			return root
+		}
+		return ""
+	}
+	if !strings.HasPrefix(slug, encoded+"-") {
+		return ""
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return ""
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		child := filepath.Join(root, entry.Name())
+		childSlug := cursorWorkspaceSlug(child)
+		if slug != childSlug && !strings.HasPrefix(slug, childSlug+"-") {
+			continue
+		}
+		if resolved := resolveCursorWorkspace(child, slug, depth-1); resolved != "" {
+			return resolved
+		}
+	}
+	return ""
+}
+
+func cursorWorkspaceSlug(path string) string {
+	path = filepath.Clean(path)
+	path = strings.TrimPrefix(path, filepath.VolumeName(path))
+	path = strings.TrimLeft(path, `/\`)
+	return strings.NewReplacer("/", "-", "\\", "-", ":", "-").Replace(path)
 }
 
 func isLazyMindWorkspace(path string) bool {

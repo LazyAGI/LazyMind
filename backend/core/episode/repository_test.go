@@ -2,11 +2,14 @@ package episode
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"lazymind/core/maintenance"
 	"math"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
@@ -597,4 +600,40 @@ func newSQLiteRepository(t *testing.T) *Repository {
 		t.Fatalf("new repository: %v", err)
 	}
 	return repo
+}
+
+func TestMaintenanceLeaseProtectsEpisodeCreateAndDelete(t *testing.T) {
+	db := orm.MigrateTestDB(t, &orm.EpisodeMemory{}, &orm.ResourceUpdateTask{})
+	if err := Initialize(db.DB); err != nil {
+		t.Fatal(err)
+	}
+	repo, err := NewRepository(db.DB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	until := now.Add(time.Minute)
+	task := orm.ResourceUpdateTask{ID: "lease-test", RunID: "valid-run", UserID: "user-1", TaskType: orm.ResourceUpdateTaskTypeOrganizePreference, ResourceType: orm.ResourceUpdateResourceTypeUserPreference, TriggerType: "manual", TriggerID: "lease-test", Status: "running", NextRunAt: now, LaneOrderAt: now, CreatedAt: now, UpdatedAt: now, LockedUntil: &until}
+	if err = db.Create(&task).Error; err != nil {
+		t.Fatal(err)
+	}
+	input := CreateInput{UserID: "user-1", ConversationID: "conversation-1", SourceKind: SourceKindMemoryReview, EpisodeType: EpisodeTypeDecision, Summary: "A narrow valid rule", SearchText: "narrow valid rule", TokenizerVersion: "jieba-v1", OccurredAtMS: 1721800000000}
+	ctx := maintenance.WithIdentity(context.Background(), maintenance.Identity{TaskID: "preference_organizer_lease-test", RunID: "valid-run"})
+	created, err := repo.Create(ctx, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = db.Model(&task).Update("run_id", "replacement-run").Error; err != nil {
+		t.Fatal(err)
+	}
+	input.Summary = "Another narrow rule"
+	if _, err = repo.Create(ctx, input); !errors.Is(err, maintenance.ErrLeaseLost) {
+		t.Fatalf("stale episode create accepted: %v", err)
+	}
+	if err = repo.Delete(ctx, "user-1", created.ID); !errors.Is(err, maintenance.ErrLeaseLost) {
+		t.Fatalf("stale episode delete accepted: %v", err)
+	}
+	if _, err = repo.Get(context.Background(), "user-1", created.ID); err != nil {
+		t.Fatalf("stale execution removed episode: %v", err)
+	}
 }

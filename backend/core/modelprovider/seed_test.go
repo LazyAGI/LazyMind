@@ -101,6 +101,52 @@ func TestModelCatalogIncludesOpenRouter(t *testing.T) {
 	t.Fatal("OpenRouter provider is missing from model catalog")
 }
 
+func TestModelCatalogIncludesWanVideoSuppliers(t *testing.T) {
+	yamlBytes, err := os.ReadFile("../config/model_catalog.yaml")
+	if err != nil {
+		t.Fatalf("read model catalog: %v", err)
+	}
+	catalog, err := loadModelCatalog(yamlBytes)
+	if err != nil {
+		t.Fatalf("load model catalog: %v", err)
+	}
+
+	expected := map[string]map[string]string{
+		"Qwen": {
+			"wan3.0-video":       "text2video",
+			"wan3.0-video-prime": "text2video",
+			"wan2.6-t2v":         "text2video",
+			"wan2.6-i2v":         "text2video",
+			"wan2.6-i2v-flash":   "text2video",
+		},
+		"SiliconFlow": {
+			"Wan-AI/Wan2.2-T2V-A14B": "text2video",
+			"Wan-AI/Wan2.2-I2V-A14B": "text2video",
+		},
+	}
+
+	for _, supplier := range catalog["model_providers"].Suppliers {
+		models, ok := expected[supplier.Name]
+		if !ok {
+			continue
+		}
+		for _, model := range supplier.Models {
+			if expectedType, exists := models[model.Name]; exists {
+				if model.Type != expectedType {
+					t.Fatalf("unexpected %s model type for %q: %q", supplier.Name, model.Name, model.Type)
+				}
+				delete(models, model.Name)
+			}
+		}
+		if len(models) == 0 {
+			delete(expected, supplier.Name)
+		}
+	}
+	if len(expected) != 0 {
+		t.Fatalf("missing Wan video catalog entries: %+v", expected)
+	}
+}
+
 func TestModelCatalogIncludesCurrentSenseNovaModels(t *testing.T) {
 	yamlBytes, err := os.ReadFile("../config/model_catalog.yaml")
 	if err != nil {

@@ -934,7 +934,8 @@
   gap: 7px;
   margin-top: 16px;
 
-  &.is-warning {
+  &.is-warning,
+  &.is-full {
     .memory-preference-usage-copy strong {
       color: #b76e00;
     }
@@ -1004,10 +1005,6 @@
     opacity: 0.82;
   }
 
-  &.is-not-resident {
-    border-color: #f0d9a8;
-    background: #fffaf0;
-  }
 }
 
 .memory-preference-drag-handle.ant-btn {
@@ -1083,11 +1080,6 @@
     color: #9ba4b3;
     font-size: 10px;
   }
-}
-
-.memory-preference-residency-label {
-  color: #b76e00;
-  font-weight: 650;
 }
 
 .memory-preference-delete.ant-btn {

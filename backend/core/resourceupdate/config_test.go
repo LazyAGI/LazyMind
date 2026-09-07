@@ -13,6 +13,9 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.SchedulerLockTTL <= 0 {
 		t.Fatal("SchedulerLockTTL should be > 0")
 	}
+	if cfg.PreferenceOrganizerTimeout <= 0 {
+		t.Fatal("PreferenceOrganizerTimeout should be > 0")
+	}
 	if cfg.WorkerInterval <= 0 {
 		t.Fatal("WorkerInterval should be > 0")
 	}

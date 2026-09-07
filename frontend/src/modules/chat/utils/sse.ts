@@ -6,6 +6,7 @@
  */
 
 import { timer, Subscription } from "rxjs";
+import { applySkipSensitiveFilterToChatPayload } from "@/utils/sensitiveWordFilter";
 
 /** Default timeout for the SSE connection. */
 const DEFAULT_TIMEOUT = 2000;
@@ -171,7 +172,7 @@ class SSE {
     this.url = url;
     this.headers = options.headers || {};
     this.timeout = options.timeout || DEFAULT_TIMEOUT;
-    this.payload = options.payload ?? "";
+    this.payload = applySkipSensitiveFilterToChatPayload(url, options.payload ?? "");
     this.method = options.method || (this.payload && Method.POST) || Method.GET;
     this.withCredentials = !!options.withCredentials;
     this.debug = !!options.debug;
