@@ -1465,8 +1465,6 @@ WHERE task.task_type = 'generate_review'
       )
   );
 ALTER TABLE public.resource_update_tasks DROP CONSTRAINT IF EXISTS chk_resource_update_tasks_task_type;
-ALTER TABLE public.resource_update_tasks ADD CONSTRAINT chk_resource_update_tasks_task_type
-    CHECK ((task_type)::text IN ('generate_review', 'auto_apply_review', 'auto_commit_skill_draft', 'organize_skill', 'organize_preference'));
 ALTER TABLE public.resource_update_tasks DROP CONSTRAINT IF EXISTS chk_resource_update_tasks_trigger_type;
 ALTER TABLE public.resource_update_tasks ADD CONSTRAINT chk_resource_update_tasks_trigger_type
     CHECK ((trigger_type)::text IN ('scheduled', 'conversation_idle', 'manual', 'review_result', 'auto_evo_enabled', 'preference_changed'));
