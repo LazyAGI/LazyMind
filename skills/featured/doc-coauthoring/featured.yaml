@@ -30,6 +30,15 @@ assets:
   document_coauthoring_demo:
     file: assets/document-coauthoring-demo.html
     role: result
+  product_proposal_scene:
+    file: assets/product-proposal-scene.png
+    role: result
+  technical_plan_scene:
+    file: assets/technical-plan-scene.png
+    role: result
+  decision_record_scene:
+    file: assets/decision-record-scene.png
+    role: result
 
 presentation:
   card:

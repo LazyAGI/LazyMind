@@ -30,6 +30,15 @@ assets:
   tailored_resume_demo:
     file: assets/tailored-resume-demo.html
     role: result
+  job_tailoring_scene:
+    file: assets/job-tailoring-scene.png
+    role: result
+  career_transition_scene:
+    file: assets/career-transition-scene.png
+    role: result
+  ats_check_scene:
+    file: assets/ats-check-scene.png
+    role: result
 
 presentation:
   card:

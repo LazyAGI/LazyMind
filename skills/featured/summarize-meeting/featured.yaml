@@ -30,6 +30,15 @@ assets:
   meeting_summary_demo:
     file: assets/meeting-summary-demo.html
     role: result
+  product_review_scene:
+    file: assets/product-review-scene.png
+    role: result
+  client_call_scene:
+    file: assets/client-call-scene.png
+    role: result
+  sprint_retro_scene:
+    file: assets/sprint-retro-scene.png
+    role: result
 
 presentation:
   card:

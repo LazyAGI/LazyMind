@@ -30,6 +30,15 @@ assets:
   document_refinement_demo:
     file: assets/document-refinement-demo.html
     role: result
+  implementation_plan_scene:
+    file: assets/implementation-plan-scene.png
+    role: result
+  product_requirement_scene:
+    file: assets/product-requirement-scene.png
+    role: result
+  brainstorm_refinement_scene:
+    file: assets/brainstorm-refinement-scene.png
+    role: result
 
 presentation:
   card:
