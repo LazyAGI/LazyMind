@@ -324,8 +324,8 @@ func run(ctx context.Context, opts options, client *http.Client) error {
 			if !ok {
 				return bundleFailure("featured Skill %s source was not bundled", definition.ID)
 			}
-			if required := strings.TrimSpace(definition.Skill.RequiredVersion); required != "" && required != entry.Version {
-				return bundleFailure("featured Skill %s requires version %s, got %s", definition.ID, required, entry.Version)
+			if err := validateFeaturedRequiredVersion(definition.ID, definition.Skill.RequiredVersion, entry); err != nil {
+				return err
 			}
 			definition.Skill.BuiltinSkillUID = entry.UID
 			definition.Skill.Version = entry.Version
@@ -969,6 +969,33 @@ func materializeFrozen(ctx context.Context, client *http.Client, spec sourceSpec
 		return skillbuiltin.CatalogSkill{}, "", nil, err
 	}
 	return current, archivePath, appliedPatches, nil
+}
+
+func validateFeaturedRequiredVersion(featuredID, requiredVersion string, entry skillbuiltin.CatalogSkill) error {
+	required := strings.TrimSpace(requiredVersion)
+	if required == "" {
+		return nil
+	}
+	if isVersionlessGitHubEntry(entry) {
+		return bundleFailure(
+			"featured Skill %s configures required_version %s, but GitHub source %s has no version in SKILL.md; remove required_version and regenerate the lockfile, or add version to SKILL.md",
+			featuredID,
+			required,
+			entry.SourceURL,
+		)
+	}
+	if required != entry.Version {
+		return bundleFailure("featured Skill %s requires version %s, got %s", featuredID, required, entry.Version)
+	}
+	return nil
+}
+
+func isVersionlessGitHubEntry(entry skillbuiltin.CatalogSkill) bool {
+	if !strings.HasPrefix(strings.TrimSpace(entry.Version), "0.0.0+") {
+		return false
+	}
+	parsed, err := url.Parse(strings.TrimSpace(entry.SourceURL))
+	return err == nil && strings.EqualFold(parsed.Hostname(), "github.com")
 }
 
 func lockedOriginArtifact(locked skillbuiltin.CatalogSkill) (string, int64, string) {

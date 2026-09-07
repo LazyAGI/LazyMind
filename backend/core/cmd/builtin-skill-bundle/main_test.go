@@ -84,6 +84,38 @@ func TestResolvedSkillVersionUsesGitHubSkillMetadataOrTreeHash(t *testing.T) {
 	}
 }
 
+func TestValidateFeaturedRequiredVersionExplainsVersionlessGitHubSource(t *testing.T) {
+	entry := skillbuiltin.CatalogSkill{
+		SourceURL: "https://github.com/example/skills/tree/main/skills/target",
+		Version:   "0.0.0+0123456789ab",
+	}
+	err := validateFeaturedRequiredVersion("demo-featured", "1.2.3", entry)
+	if err == nil {
+		t.Fatal("expected required_version validation to fail")
+	}
+	message := err.Error()
+	for _, expected := range []string{
+		"GitHub source https://github.com/example/skills/tree/main/skills/target has no version in SKILL.md",
+		"remove required_version and regenerate the lockfile",
+		"add version to SKILL.md",
+	} {
+		if !strings.Contains(message, expected) {
+			t.Fatalf("error %q does not contain %q", message, expected)
+		}
+	}
+}
+
+func TestValidateFeaturedRequiredVersionKeepsVersionMismatchError(t *testing.T) {
+	entry := skillbuiltin.CatalogSkill{
+		SourceURL: "https://github.com/example/skills",
+		Version:   "1.2.2",
+	}
+	err := validateFeaturedRequiredVersion("demo-featured", "1.2.3", entry)
+	if err == nil || err.Error() != "featured Skill demo-featured requires version 1.2.3, got 1.2.2" {
+		t.Fatalf("unexpected version mismatch error: %v", err)
+	}
+}
+
 func TestFrozenDownloadURLPinsSkillHubVersion(t *testing.T) {
 	spec, err := resolveSource("https://skillhub.cn/skills/user_5b28ea14/smart-charts")
 	if err != nil {
