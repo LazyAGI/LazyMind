@@ -30,7 +30,9 @@ tasks:
     launch:
       prompt_short: I want to write a product proposal. Can you work through it with me?
       prompt: >-
-        I want to write a product proposal for team knowledge-base search. Can you work through it with me? Start by understanding the context, audience, and goal, then help me choose a structure and draft it section by section. Do not write the whole proposal at once, and ask when information is missing.
+        Work with me directly on the team knowledge-base search proposal below without asking me for more information first. Use the known context to provide the background, target users, core problem, first-version scope, suggested sections, and a first editable draft. Move one part at a time, and mark missing information as “To confirm” instead of turning it into fact.
+
+        Known context: the readers are product, design, and engineering teams; the goal is to help new team members find project materials faster; new members currently rely on asking people directly; the most common material types and the search success standard are not decided yet.
     replay:
       steps:
         - title: Align on context and goal
@@ -58,7 +60,9 @@ tasks:
     launch:
       prompt_short: I need to write a technical plan. Can you help me make it clear?
       prompt: >-
-        I need to write a technical plan for connecting a customer-support knowledge base to an existing workspace. Ask for the missing context and constraints first, then help me shape the sections and options. Move one part at a time, and do not assume technical details I have not provided.
+        Work with me directly on the technical plan for connecting the customer-support knowledge base to the existing workspace without asking me for more information first. Use the known context to organize the system background, goal, constraints, candidate options, tradeoffs, and section structure, then provide a first editable draft. Mark interface stability, permission synchronization, and failure fallback as “To confirm”; do not invent them.
+
+        Known context: the existing systems are a customer-support workspace and a knowledge-base service; the goal is to search the knowledge base inside the current workspace; existing permissions cannot be bypassed and the first phase has limited time; interface stability, permission synchronization, and failure fallback still need confirmation.
     replay:
       steps:
         - title: Understand the system context
@@ -86,7 +90,9 @@ tasks:
     launch:
       prompt_short: Help me turn this technical choice into a decision record.
       prompt: >-
-        We are choosing between building search ourselves and using a hosted search service, but the team size, data volume, and launch date are not clear yet. Help me ask for that context first, then write the options, tradeoffs, and decision together. Finish by checking whether someone who missed the discussion could understand it.
+        Work with me directly on this search-technology decision record without asking me for more information first. Use the known context to write the decision background, evaluation criteria, options, evidence, and tradeoffs, then provide a first editable record. Mark data volume, long-term cost, vendor dependency, and the final decision as “To confirm”; do not turn a provisional view into a confirmed decision.
+
+        Known context: the options are building search ourselves or using a hosted search service; the team has limited maintenance capacity and limited time before launch; readers may have missed the discussion, so the record should explain why the choice is being made and when it should be revisited.
     replay:
       steps:
         - title: Confirm the decision context
