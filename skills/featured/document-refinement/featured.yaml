@@ -9,7 +9,6 @@ provider: GitHub
 skill:
   source_url: https://github.com/majesticlabs-dev/majestic-marketplace/tree/master/plugins/majestic-tools/skills/document-refinement
   category: writing
-  required_version: 1.0.0
 
 placement:
   home: true
@@ -34,14 +33,14 @@ assets:
 
 presentation:
   card:
-    title: 文档精修助手
+    title: 文档挑错助手
     description: 找出需求、计划和方案里说不清楚、缺信息或超出范围的地方
     output_type: report
     output_label: 文档审阅报告
     cover_asset: cover
     result_summary: 查看一份实施计划、产品需求和头脑风暴如何被检查并变得更清楚
   detail:
-    title: 文档精修助手
+    title: 文档挑错助手
     description: 审阅 brainstorm、实施计划和 PRD，检查内容是否清楚、完整、具体，是否加入了不必要的范围，并指出哪些问题会影响下一步交付。简单的问题可以直接改，重要的缺口会单独列出。来源：majestic-marketplace，经 LazyMind 适配。
     attachment_hint: 需要审阅的 brainstorm、实施计划、PRD 或准备交接的方案文档
 

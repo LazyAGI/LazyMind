@@ -10,14 +10,14 @@ classification:
 
 presentation:
   card:
-    title: Document refinement assistant
+    title: Document issue finder
     description: Find vague language, missing details, and unnecessary scope in plans, requirements, and ideas
     output_type: report
     output_label: Document review report
     cover_asset: cover
     result_summary: See an implementation plan, product requirement, and brainstorm checked for readiness
   detail:
-    title: Document refinement assistant
+    title: Document issue finder
     description: Review brainstorms, implementation plans, and PRDs for clarity, completeness, specificity, scope, and readiness for the next workflow phase. Minor issues can be fixed directly while important gaps are called out separately. Sourced from majestic-marketplace and adapted for LazyMind.
     attachment_hint: A brainstorm, implementation plan, PRD, or handoff document to review
 

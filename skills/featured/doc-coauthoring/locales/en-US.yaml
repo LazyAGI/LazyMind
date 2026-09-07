@@ -10,14 +10,14 @@ classification:
 
 presentation:
   card:
-    title: Document co-authoring assistant
+    title: Solution coauthoring assistant
     description: Work through context, structure, drafting, and reader testing together
     output_type: report
     output_label: Co-authored document
     cover_asset: cover
     result_summary: See a product proposal, technical plan, and decision record take shape
   detail:
-    title: Document co-authoring assistant
+    title: Solution coauthoring assistant
     description: Co-author product proposals, technical plans, and decision documents. Start with the document type, audience, goal, and constraints, then agree on a structure, draft section by section, and test the result from a reader's perspective. Key facts are not invented when the context is incomplete. Sourced from anthropics/skills and adapted for LazyMind.
     attachment_hint: A proposal, technical document, decision record, template, or background material to develop together
 

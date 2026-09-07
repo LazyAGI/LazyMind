@@ -9,7 +9,6 @@ provider: GitHub
 skill:
   source_url: https://github.com/borghei/Claude-Skills/tree/main/project-management/execution/summarize-meeting
   category: project-management
-  required_version: 1.0.1
 
 placement:
   home: true

@@ -9,7 +9,6 @@ provider: GitHub
 skill:
   source_url: https://github.com/ComposioHQ/awesome-claude-skills/tree/master/tailored-resume-generator
   category: career
-  required_version: 1.0.0
 
 placement:
   home: true

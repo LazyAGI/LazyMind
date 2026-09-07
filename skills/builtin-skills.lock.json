@@ -208,6 +208,36 @@
       "package_file": "packages/bsk_6ACDCFC9A48A7A276D31323C0D65.zip"
     },
     {
+      "key": "doc-coauthoring",
+      "uid": "bsk_08955D51118973AC41019759A3C1",
+      "source_url": "https://github.com/anthropics/skills/tree/main/skills/doc-coauthoring",
+      "resolved_url": "https://github.com/anthropics/skills/archive/main.zip",
+      "version": "0.0.0+4d0f87156a34",
+      "name": "doc-coauthoring",
+      "description": "Guide users through a structured workflow for co-authoring documentation. Use when user wants to write documentation, proposals, technical specs, decision docs, or similar structured content. This workflow helps users efficiently transfer context, refine content through iteration, and verify the doc works for readers. Trigger when user mentions writing docs, creating proposals, drafting specs, or similar documentation tasks.",
+      "category": "writing",
+      "market_visible": false,
+      "archive_sha256": "d006999b385e8426f906a0c0f108270bbe4ee4cb20f4c92c317a57b7a1e5ea9f",
+      "tree_sha256": "4d0f87156a34eda3df7d19b6a941f73998af6236658458907b69bdaf6127791b",
+      "archive_size": 5867,
+      "package_file": "packages/bsk_08955D51118973AC41019759A3C1.zip"
+    },
+    {
+      "key": "document-refinement",
+      "uid": "bsk_F14D4A21F5D6D330663DB3F0A0F1",
+      "source_url": "https://github.com/majesticlabs-dev/majestic-marketplace/tree/master/plugins/majestic-tools/skills/document-refinement",
+      "resolved_url": "https://github.com/majesticlabs-dev/majestic-marketplace/archive/master.zip",
+      "version": "0.0.0+082382c55818",
+      "name": "document-refinement",
+      "description": "Use when reviewing brainstorms, plans, or PRDs for clarity and readiness before next workflow phase. Assesses documents for vagueness, gaps, and YAGNI violations.",
+      "category": "writing",
+      "market_visible": false,
+      "archive_sha256": "a4895f38fcfbe81546313968e5e758932b6c4b87a1f1fac40bf9cd5d7ece5bb4",
+      "tree_sha256": "082382c558184b9d839b3afd9ee5a8fd217c9c159cbb2f3e1c8bc4e4a8742877",
+      "archive_size": 4258,
+      "package_file": "packages/bsk_F14D4A21F5D6D330663DB3F0A0F1.zip"
+    },
+    {
       "key": "user_7c4df347/gaokao-volunteer-advisor",
       "uid": "bsk_C8C501AEDCEC9283F2C9F9F59AD8",
       "source_url": "https://skillhub.cn/skills/user_7c4df347/gaokao-volunteer-advisor",
@@ -373,6 +403,36 @@
       "tree_sha256": "ee2a2e765c4e8ec1091e0ae48237135a8e6abe014c912ce90d4d7cd3d646f4c1",
       "archive_size": 411674,
       "package_file": "packages/bsk_FFB9D957F2E7E6045A01B28AA5D1.zip"
+    },
+    {
+      "key": "summarize-meeting",
+      "uid": "bsk_0023B1334FD37C63E2277D2E1B8B",
+      "source_url": "https://github.com/borghei/Claude-Skills/tree/main/project-management/execution/summarize-meeting",
+      "resolved_url": "https://github.com/borghei/Claude-Skills/archive/main.zip",
+      "version": "0.0.0+53be3579ea46",
+      "name": "summarize-meeting",
+      "description": "Structured meeting summarization that captures decisions, action items, and open questions in a consistent format.",
+      "category": "project-management",
+      "market_visible": false,
+      "archive_sha256": "eb4e478b7f83fef7b936e0371ee60e62c34e82675abf13bbf63ce37ffcfcc43a",
+      "tree_sha256": "53be3579ea46d13c1fe2233f15225a85c0c4e9cf5e089ff2aae17d14916b0d34",
+      "archive_size": 25128,
+      "package_file": "packages/bsk_0023B1334FD37C63E2277D2E1B8B.zip"
+    },
+    {
+      "key": "tailored-resume-generator",
+      "uid": "bsk_6B5A71104C1A464589204B4EA34A",
+      "source_url": "https://github.com/ComposioHQ/awesome-claude-skills/tree/master/tailored-resume-generator",
+      "resolved_url": "https://github.com/ComposioHQ/awesome-claude-skills/archive/master.zip",
+      "version": "0.0.0+aa45551207cc",
+      "name": "tailored-resume-generator",
+      "description": "Analyzes job descriptions and generates tailored resumes that highlight relevant experience, skills, and achievements to maximize interview chances",
+      "category": "career",
+      "market_visible": false,
+      "archive_sha256": "6692bf0fc08d8ef3f10811257baa05be16c49de675a89d57c7595f94f40fc237",
+      "tree_sha256": "aa45551207cc53bf258369d1fde4aa31268bfe576c686ef26e2fd1ad3f736efc",
+      "archive_size": 5191,
+      "package_file": "packages/bsk_6B5A71104C1A464589204B4EA34A.zip"
     },
     {
       "key": "user_865e3592/ui-new",

@@ -9,7 +9,6 @@ provider: GitHub
 skill:
   source_url: https://github.com/anthropics/skills/tree/main/skills/doc-coauthoring
   category: writing
-  required_version: 1.0.0
 
 placement:
   home: true
@@ -34,14 +33,14 @@ assets:
 
 presentation:
   card:
-    title: 文档共创助手
+    title: 方案共创助手
     description: 和你一起从背景、结构到读者测试，把方案和技术文档逐步写清楚
     output_type: report
     output_label: 文档共创结果
     cover_asset: cover
     result_summary: 查看一份产品方案、技术方案和决策文档如何被共同梳理出来
   detail:
-    title: 文档共创助手
+    title: 方案共创助手
     description: 适合共同起草产品方案、技术方案和决策文档。先了解文档类型、读者、目标和约束，再一起确定结构、逐段讨论和起草，最后从读者角度检查是否清楚。不会在背景不完整时擅自补齐关键事实。来源：anthropics/skills，经 LazyMind 适配。
     attachment_hint: 想共同起草的方案、技术文档、决策记录，或已有模板和背景材料
 
