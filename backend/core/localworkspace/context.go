@@ -79,10 +79,7 @@ func snapshotForValues(id, root string, workspaceVersion int64, mode string, per
 	}
 }
 
-func BuildRequestQuery(original string, snapshot *ContextSnapshot) string {
-	if snapshot == nil {
-		return original
-	}
+func ModelNotice(snapshot ContextSnapshot, actor string) string {
 	data, _ := json.Marshal(map[string]any{"root": snapshot.Root,
 		"permission_mode": snapshot.PermissionMode, "permission_version": snapshot.PermissionVersion})
 	rule := "文件修改、命令、联网及应用副作用按当前权限规则执行。"
@@ -91,8 +88,17 @@ func BuildRequestQuery(original string, snapshot *ContextSnapshot) string {
 	} else if snapshot.PermissionMode == PermissionAllowAll {
 		rule = "用户已允许本任务在工作区内执行操作；仍不得访问工作区外目录。"
 	}
-	notice := "本任务的用户已在界面选择并授权以下本地工作区。\n工作区数据：" + string(data) +
+	if actor == "subagent" {
+		rule += " 普通子任务不能直接询问用户；需要新增确认时返回主任务说明，不执行尚待确认的操作。"
+	}
+	return "本任务的用户已在界面选择并授权以下本地工作区。\n工作区数据：" + string(data) +
 		"\n用户请求中的相对本地文件路径以该目录为基准。优先使用现有 local_fs 工具列出、搜索、读取和精确修改匹配类型的文件。" +
 		"\n创建、覆盖或追加文件只使用当前运行环境实际提供的能力；工具拒绝时说明原因。\n工作区之外的目录不在本任务授权范围。\n权限规则：" + rule
-	return notice + "\n\n" + original
+}
+
+func BuildRequestQuery(original string, snapshot *ContextSnapshot) string {
+	if snapshot == nil {
+		return original
+	}
+	return ModelNotice(*snapshot, "main") + "\n\n" + original
 }

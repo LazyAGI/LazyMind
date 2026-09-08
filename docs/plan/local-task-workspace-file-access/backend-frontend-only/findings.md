@@ -189,3 +189,12 @@ f9f7d345ee718b7783a0eda75b6727bd053ad04d505df109d8c3dd4e3f8d1822  local/local-ru
 - 规模：总 +262/-13；测试增加纯函数、排序副本、绑定跳过scan、草稿不落库和 ext无根路径。期间误覆盖既有 text_file_test，审计时恢复并仅追加新用例；无有效旧测试被删除。
 - 验证：`go test ./chat ./localworkspace ./common -count=1`通过；冻结 Local/Desktop SHA全通过且与 `ec4676e0` 零差异；algorithm/tests/algorithm/LazyLLM零差异。
 - 未验证：真实模型 ContextPrompt内容、普通子任务/Workflow私有上下文、权限询问和撤销停止；由任务4–6继续。任务3A仍暂停。
+
+
+### 2026-09-08 T4-SUBAGENT-PARTIAL：子任务上下文接入，专项验收待补
+
+- 新增 `localworkspace/subagent_context.go`：无绑定保持原 params；绑定任务从 DB snapshot重建 parent_agentic_config的 owner/conversation/local_fs_sources，保存 Core私有原始 instruction元数据，从原文生成一次 subagent ModelNotice，避免 resume累加；忽略模型伪造的 Core metadata。
+- `handleTaskCreated` create在落库前重建 params；resume校验 task owner/conversation，读取 DB中已有 params重建并先更新数据库再启动 runner。InternalGetExecutionSpec在 executor/lease认证后重建 private params，并把同一 JSON用于 task DTO和顶层 params；workspace_path仍为内部产物目录。
+- 普通无工作区精简 fixture最初因缺少 conversations/workspace表返回503；修正为先检查 binding表和实际 binding，无 schema/无绑定原样返回，不隐藏真实绑定错误。
+- 验证命令 `go test ./chat ./subagent ./localworkspace ./workflow/executor -run 'Test.*(Workspace|ExecutionSpec|Subagent|SubAgent|InterruptConversation|Context)' -count=1` 四包通过；冻结 SHA和禁区零差异通过。
+- 本批未标记任务4完成：还需专用测试覆盖 create/resume DB Params、跨用户/跨会话 resume、revoked和permission version更新、private响应两份 params一致、公共 AttemptContext不含root。任务5–7未开始，3A暂停。

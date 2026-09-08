@@ -19,6 +19,7 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/evolution"
+	"lazymind/core/localworkspace"
 	"lazymind/core/log"
 	"lazymind/core/resourceupdate"
 	"lazymind/core/state"
@@ -2996,7 +2997,12 @@ func handleTaskCreated(
 	if mode != "auto" && mode != "manual" {
 		mode = "auto"
 	}
-	paramsJSON, _ := json.Marshal(ev.Params)
+	params := localworkspace.StripUntrustedWorkspaceMetadata(ev.Params)
+	params, err := localworkspace.RebuildSubagentParams(chatCtx, db, userID, convID, params)
+	if err != nil {
+		return nil, fmt.Errorf("resolve subagent workspace: %w", err)
+	}
+	paramsJSON, _ := json.Marshal(params)
 	inputKeysJSON, _ := json.Marshal(ev.InputSlots)
 	outputKeysJSON, _ := json.Marshal(ev.OutputSlots)
 	workspacePath := subagent.WorkspacePath(userID, ev.TaskID)
@@ -3005,6 +3011,23 @@ func handleTaskCreated(
 	if ev.Resume {
 		existing, getErr := subagent.GetTask(chatCtx, db, ev.TaskID)
 		if getErr == nil && existing != nil {
+			if existing.CreateUserID != strings.TrimSpace(userID) || existing.ConversationID != convID {
+				return nil, fmt.Errorf("resume subagent task ownership mismatch")
+			}
+			stored := map[string]any{}
+			if err := json.Unmarshal(existing.Params, &stored); err != nil {
+				return nil, fmt.Errorf("decode stored subagent params: %w", err)
+			}
+			params, err = localworkspace.RebuildSubagentParams(chatCtx, db, userID, convID, stored)
+			if err != nil {
+				return nil, fmt.Errorf("resolve resumed subagent workspace: %w", err)
+			}
+			paramsJSON, _ = json.Marshal(params)
+			if err := db.WithContext(chatCtx).Model(&orm.SubAgentTask{}).Where("id = ? AND create_user_id = ? AND conversation_id = ?",
+				existing.ID, userID, convID).Updates(map[string]any{"params": paramsJSON, "updated_at": time.Now().UTC()}).Error; err != nil {
+				return nil, fmt.Errorf("update resumed subagent params: %w", err)
+			}
+			existing.Params = paramsJSON
 			_ = subagent.UpdateStatus(chatCtx, db, existing.ID, subagent.StatusRunning)
 			_ = subagent.WriteStatus(chatCtx, stateStore, existing.ID, map[string]any{
 				"status": subagent.StatusRunning, "progress": existing.ProgressPct,
@@ -3012,7 +3035,7 @@ func handleTaskCreated(
 			go subagent.Run(context.Background(), db, stateStore, subagent.RunRequest{
 				TaskID:        existing.ID,
 				AgentType:     existing.AgentType,
-				Params:        ev.Params,
+				Params:        params,
 				WorkspacePath: existing.WorkspacePath,
 				Tools:         ev.Tools,
 				DBDSN:         subagent.DBDSN(),
@@ -3059,7 +3082,7 @@ func handleTaskCreated(
 	go subagent.Run(context.Background(), db, stateStore, subagent.RunRequest{
 		TaskID:        task.ID,
 		AgentType:     ev.AgentType,
-		Params:        ev.Params,
+		Params:        params,
 		WorkspacePath: workspacePath,
 		Tools:         ev.Tools,
 		DBDSN:         subagent.DBDSN(),
