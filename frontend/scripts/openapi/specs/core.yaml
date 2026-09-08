@@ -770,6 +770,10 @@ components:
                     nullable: true
                 has_fork_descendants:
                     type: boolean
+                history_order:
+                    format: int64
+                    nullable: true
+                    type: integer
                 is_pinned:
                     type: boolean
                 metadata_pending:
@@ -1019,6 +1023,10 @@ components:
                     nullable: true
                 has_fork_descendants:
                     type: boolean
+                history_order:
+                    format: int64
+                    nullable: true
+                    type: integer
                 is_pinned:
                     type: boolean
                 metadata_pending:
@@ -1135,8 +1143,25 @@ components:
             properties:
                 conversation_id:
                     type: string
+                history_order:
+                    format: int64
+                    nullable: true
+                    type: integer
                 is_pinned:
                     type: boolean
+                order_updates:
+                    items:
+                        properties:
+                            conversation_id:
+                                type: string
+                            history_order:
+                                format: int64
+                                type: integer
+                        required:
+                            - conversation_id
+                            - history_order
+                        type: object
+                    type: array
                 pinned_at:
                     format: date-time
                     nullable: true
@@ -1201,6 +1226,19 @@ components:
                 - total
                 - page
                 - page_size
+            type: object
+        ConversationReorderRequest:
+            properties:
+                position:
+                    enum:
+                        - before
+                        - after
+                    type: string
+                target_conversation_id:
+                    type: string
+            required:
+                - target_conversation_id
+                - position
             type: object
         ConversationResumeRequest:
             properties:
@@ -9978,6 +10016,28 @@ paths:
                                 $ref: '#/components/schemas/EmptyObject'
                     description: Conversation permanently deleted
             summary: Permanently delete a trashed conversation
+    /api/core/conversations/{conversation_id}:reorder:
+        post:
+            parameters:
+                - in: path
+                  name: conversation_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ConversationReorderRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ConversationPinResponse'
+                    description: Conversation reordered
+            summary: Move a conversation within its pinned or ordinary history
     /api/core/conversations/{conversation_id}:restore:
         post:
             parameters:

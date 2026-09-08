@@ -15,6 +15,7 @@ func init() {
 	registerAdditionalErrorAlias("conversation opening model failed", "Internal server error", http.StatusInternalServerError, 2000000)
 	registerAdditionalErrorAlias("invalid chat model selection", "Invalid request", http.StatusBadRequest, 2000103)
 	registerAdditionalErrorAlias("conversation model selection changed", "Conflict", http.StatusConflict, 2000107)
+	registerAdditionalErrorAlias("conversation order changed", "Conflict", http.StatusConflict, 2000107)
 	registerAdditionalErrorAlias("conversation is busy", "Conflict", http.StatusConflict, 2000107)
 	registerAdditionalErrorAlias("save conversation model failed", "Internal server error", http.StatusInternalServerError, 2000000)
 	registerAdditionalErrorPattern("%w; fallback parser chunks failed", "Primary and fallback document parsing failed", http.StatusInternalServerError, 2001601)

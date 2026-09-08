@@ -1,12 +1,28 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import type { DragEndEvent } from "@dnd-kit/core";
 import { MemoryRouter } from "react-router-dom";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import RecordList from "./index";
+import { emitConversationActivity } from "@/modules/chat/utils/conversationActivity";
+import { CHAT_CONVERSATION_FILTER_KEY } from "@/modules/chat/constants/chat";
+
+const drag = vi.hoisted(() => ({ end: (_event: DragEndEvent): Promise<void> | void => {} }));
+vi.mock("@dnd-kit/core", async () => {
+  const actual = await vi.importActual<typeof import("@dnd-kit/core")>("@dnd-kit/core");
+  return {
+    ...actual,
+    DndContext: (props: React.ComponentProps<typeof actual.DndContext>) => {
+      drag.end = props.onDragEnd!;
+      return <actual.DndContext {...props} />;
+    },
+  };
+});
 
 const mocks = vi.hoisted(() => ({
   listConversations: vi.fn(),
   setPinned: vi.fn(),
+  reorder: vi.fn(),
   deleteConversation: vi.fn(),
   listChatExecutors: vi.fn(),
   messageSuccess: vi.fn(),
@@ -27,6 +43,7 @@ vi.mock("react-i18next", () => ({
         "chat.pinConversationSuccess": "会话已置顶",
         "chat.unpinConversationSuccess": "已取消置顶",
         "chat.pinConversationFailed": "置顶状态更新失败，请重试",
+        "chat.reorderConversationFailed": "顺序保存失败，请重试",
         "settingsPage.recovery.moreActions": "更多操作",
         "settingsPage.recovery.archiveAction": "归档",
         "settingsPage.recovery.moveToTrash": "移入回收站",
@@ -67,6 +84,7 @@ vi.mock("@/modules/chat/utils/request", () => ({
   ChatServiceApi: () => ({
     conversationServiceListConversations: mocks.listConversations,
     conversationServiceSetPinned: mocks.setPinned,
+    conversationServiceReorder: mocks.reorder,
     conversationServiceDeleteConversation: mocks.deleteConversation,
   }),
   ConversationSettingsApi: () => ({
@@ -152,6 +170,7 @@ describe("RecordList conversation pinning", () => {
   });
 
   beforeEach(() => {
+    sessionStorage.removeItem(CHAT_CONVERSATION_FILTER_KEY);
     Object.values(mocks).forEach((mock) => mock.mockReset());
     mocks.listConversations.mockResolvedValue({
       data: {
@@ -162,6 +181,71 @@ describe("RecordList conversation pinning", () => {
     mocks.listChatExecutors.mockResolvedValue({
       data: { data: { executors: [] } },
     });
+  });
+
+  it.each(["normal", "task"])("saves manual order in %s mode and preserves it after activity and reload", async (mode: string) => {
+    sessionStorage.setItem(CHAT_CONVERSATION_FILTER_KEY, JSON.stringify([mode]));
+    const saved = {
+      conversation_id: "older", is_pinned: false, pinned_at: null, history_order: 1,
+      order_updates: [
+        { conversation_id: "older", history_order: 1 },
+        { conversation_id: "newer", history_order: 2 },
+      ],
+    };
+    let resolveSave!: (value: { data: typeof saved }) => void;
+    mocks.reorder.mockImplementation(() => new Promise((resolve) => { resolveSave = resolve; }));
+    const view = renderRecordList();
+    await screen.findByText("较早的会话");
+    expect(mocks.listConversations).toHaveBeenCalledWith(expect.anything(), {
+      params: mode === "task" ? { is_task_conv: "true" } : { is_task_conv: "false", assistants: "lazymind" },
+    });
+    const event = { active: { id: "older" }, over: { id: "newer" } } as DragEndEvent;
+    await act(async () => { void drag.end(event); void drag.end(event); });
+    expect(mocks.reorder).toHaveBeenCalledTimes(1);
+    expect(mocks.reorder).toHaveBeenCalledWith("older", "newer", "before");
+    expect(document.querySelector(".record .title")?.textContent).toBe("较新的会话");
+    await act(async () => resolveSave({ data: saved }));
+    expect(document.querySelector(".record .title")?.textContent).toBe("较早的会话");
+    expect(screen.queryByText("今天")).not.toBeInTheDocument();
+    act(() => emitConversationActivity({ conversationId: "newer" }));
+    expect(document.querySelector(".record .title")?.textContent).toBe("较早的会话");
+    view.unmount();
+    mocks.listConversations.mockResolvedValue({ data: {
+      conversations: [{ ...newerConversation, history_order: 2 }, { ...olderConversation, history_order: 1 }],
+      next_page_token: "",
+    } });
+    renderRecordList();
+    await screen.findByText("较早的会话");
+    expect(document.querySelector(".record .title")?.textContent).toBe("较早的会话");
+  });
+
+  it("keeps the existing order when saving a drag fails", async () => {
+    mocks.reorder.mockRejectedValue(new Error("offline"));
+    renderRecordList();
+    await screen.findByText("较早的会话");
+    await act(async () => drag.end({ active: { id: "older" }, over: { id: "newer" } } as DragEndEvent));
+    expect(mocks.messageError).toHaveBeenCalledWith("顺序保存失败，请重试");
+    expect(document.querySelector(".record .title")?.textContent).toBe("较新的会话");
+  });
+
+  it("reorders pinned conversations without moving ordinary history", async () => {
+    const pin = { is_pinned: true, pinned_at: "2026-09-01T08:00:00Z" };
+    mocks.listConversations.mockResolvedValue({ data: {
+      conversations: [{ ...newerConversation, ...pin, history_order: 1 }, { ...olderConversation, ...pin, history_order: 2 },
+        { conversation_id: "ordinary", display_name: "普通会话", search_config: {} }],
+    } });
+    mocks.reorder.mockResolvedValue({ data: {
+      ...pin, conversation_id: "older", history_order: 1,
+      order_updates: [{ conversation_id: "older", history_order: 1 }, { conversation_id: "newer", history_order: 2 }],
+    } });
+    renderRecordList();
+    await screen.findByText("较早的会话");
+    await act(async () => drag.end({ active: { id: "older" }, over: { id: "ordinary" } } as DragEndEvent));
+    expect(mocks.reorder).not.toHaveBeenCalled();
+    await act(async () => drag.end({ active: { id: "older" }, over: { id: "newer" } } as DragEndEvent));
+    const pinnedSection = screen.getByText("已置顶").closest(".record-group");
+    expect(pinnedSection?.querySelector(".record .title")?.textContent).toBe("较早的会话");
+    expect(within(pinnedSection as HTMLElement).queryByText("普通会话")).not.toBeInTheDocument();
   });
 
   it("limits the default normal filter to non-task LazyMind conversations", async () => {

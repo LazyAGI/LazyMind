@@ -300,6 +300,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/conversations/{conversation_id}:promote", []string{"qa.write"}, chat.PromoteConversation)
 	handleAPI(r, "POST", "/conversations/{conversation_id}:pin", []string{"qa.write"}, chat.PinConversation)
 	handleAPI(r, "POST", "/conversations/{conversation_id}:unpin", []string{"qa.write"}, chat.UnpinConversation)
+	handleAPI(r, "POST", "/conversations/{conversation_id}:reorder", []string{"qa.write"}, chat.ReorderConversation)
 	handleAPI(r, "GET", "/chat/executors", []string{"qa.read"}, chat.ListChatExecutors)
 	handleAPI(r, "GET", "/external-chat/hosts/{provider}/status", []string{"qa.read"}, chat.ExternalChatHostStatus)
 	handleAPI(r, "GET", "/external-chat/providers/{provider}/sessions", []string{"qa.read"}, chat.ListExternalAgentSessions)

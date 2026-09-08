@@ -869,6 +869,7 @@ export interface ConversationDetailItem {
     'fork_capability'?: ConversationForkCapability;
     'fork_origin'?: ConversationForkOrigin | null;
     'has_fork_descendants'?: boolean;
+    'history_order'?: number | null;
     'is_pinned'?: boolean;
     'metadata_pending'?: boolean;
     'models'?: Array<string>;
@@ -1010,6 +1011,7 @@ export interface ConversationItem {
     'fork_capability'?: ConversationForkCapability;
     'fork_origin'?: ConversationForkOrigin | null;
     'has_fork_descendants'?: boolean;
+    'history_order'?: number | null;
     'is_pinned'?: boolean;
     'metadata_pending'?: boolean;
     'models'?: Array<string>;
@@ -1094,8 +1096,14 @@ export type ConversationOpeningStateBatchStatusEnum = typeof ConversationOpening
 
 export interface ConversationPinResponse {
     'conversation_id': string;
+    'history_order'?: number | null;
     'is_pinned': boolean;
+    'order_updates'?: Array<ConversationPinResponseOrderUpdatesInner>;
     'pinned_at'?: string | null;
+}
+export interface ConversationPinResponseOrderUpdatesInner {
+    'conversation_id': string;
+    'history_order': number;
 }
 export interface ConversationRecoveryItem {
     'archive_folder_name'?: string;
@@ -1123,6 +1131,18 @@ export interface ConversationRecoveryListResponse {
     'page_size': number;
     'total': number;
 }
+export interface ConversationReorderRequest {
+    'position': ConversationReorderRequestPositionEnum;
+    'target_conversation_id': string;
+}
+
+export const ConversationReorderRequestPositionEnum = {
+    Before: 'before',
+    After: 'after'
+} as const;
+
+export type ConversationReorderRequestPositionEnum = typeof ConversationReorderRequestPositionEnum[keyof typeof ConversationReorderRequestPositionEnum];
+
 export interface ConversationResumeRequest {
     'conversation_id': string;
     'history_id'?: string;
@@ -9652,6 +9672,45 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
+         * @summary Move a conversation within its pinned or ordinary history
+         * @param {string} conversationId
+         * @param {ConversationReorderRequest} conversationReorderRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsConversationIdReorderPost: async (conversationId: string, conversationReorderRequest: ConversationReorderRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'conversationId' is not null or undefined
+            assertParamExists('apiCoreConversationsConversationIdReorderPost', 'conversationId', conversationId)
+            // verify required parameter 'conversationReorderRequest' is not null or undefined
+            assertParamExists('apiCoreConversationsConversationIdReorderPost', 'conversationReorderRequest', conversationReorderRequest)
+            const localVarPath = `/api/core/conversations/{conversation_id}:reorder`
+                .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(conversationReorderRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary Restore a trashed conversation
          * @param {string} conversationId
          * @param {*} [options] Override http request option.
@@ -17579,6 +17638,20 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary Move a conversation within its pinned or ordinary history
+         * @param {string} conversationId
+         * @param {ConversationReorderRequest} conversationReorderRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreConversationsConversationIdReorderPost(conversationId: string, conversationReorderRequest: ConversationReorderRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationPinResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsConversationIdReorderPost(conversationId, conversationReorderRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsConversationIdReorderPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary Restore a trashed conversation
          * @param {string} conversationId
          * @param {*} [options] Override http request option.
@@ -20750,6 +20823,16 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
+         * @summary Move a conversation within its pinned or ordinary history
+         * @param {DefaultApiApiCoreConversationsConversationIdReorderPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsConversationIdReorderPost(requestParameters: DefaultApiApiCoreConversationsConversationIdReorderPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ConversationPinResponse> {
+            return localVarFp.apiCoreConversationsConversationIdReorderPost(requestParameters.conversationId, requestParameters.conversationReorderRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary Restore a trashed conversation
          * @param {DefaultApiApiCoreConversationsConversationIdRestorePostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -23023,6 +23106,15 @@ export interface DefaultApiApiCoreConversationsConversationIdPurgeDeleteRequest 
 }
 
 /**
+ * Request parameters for apiCoreConversationsConversationIdReorderPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreConversationsConversationIdReorderPostRequest {
+    readonly conversationId: string
+
+    readonly conversationReorderRequest: ConversationReorderRequest
+}
+
+/**
  * Request parameters for apiCoreConversationsConversationIdRestorePost operation in DefaultApi.
  */
 export interface DefaultApiApiCoreConversationsConversationIdRestorePostRequest {
@@ -24678,6 +24770,17 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreConversationsConversationIdPurgeDelete(requestParameters: DefaultApiApiCoreConversationsConversationIdPurgeDeleteRequest, options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreConversationsConversationIdPurgeDelete(requestParameters.conversationId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Move a conversation within its pinned or ordinary history
+     * @param {DefaultApiApiCoreConversationsConversationIdReorderPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreConversationsConversationIdReorderPost(requestParameters: DefaultApiApiCoreConversationsConversationIdReorderPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreConversationsConversationIdReorderPost(requestParameters.conversationId, requestParameters.conversationReorderRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

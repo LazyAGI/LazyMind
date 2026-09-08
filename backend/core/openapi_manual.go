@@ -582,6 +582,12 @@ func manualSchemas() map[string]any {
 		"ConversationPinResponse": objReq(
 			[]string{"conversation_id", "is_pinned"},
 			prop("conversation_id", strSchema()), prop("is_pinned", boolSchema()), prop("pinned_at", nullableSchema(dateTimeSchema())),
+			prop("history_order", nullableSchema(int64Schema())),
+			prop("order_updates", array(objReq([]string{"conversation_id", "history_order"}, prop("conversation_id", strSchema()), prop("history_order", int64Schema())))),
+		),
+		"ConversationReorderRequest": objReq(
+			[]string{"target_conversation_id", "position"},
+			prop("target_conversation_id", strSchema()), prop("position", enumStringSchema("before", "after")),
 		),
 		"ExternalExecutionInvocation": obj(
 			prop("total", intSchema()), prop("running", intSchema()), prop("succeeded", intSchema()),
@@ -747,6 +753,7 @@ func conversationItemSchema(includeSourceContext bool) map[string]any {
 		prop("update_time", strSchema()),
 		prop("pinned_at", nullableSchema(dateTimeSchema())),
 		prop("is_pinned", boolSchema()),
+		prop("history_order", nullableSchema(int64Schema())),
 		prop("models", array(strSchema())),
 		prop("chat_executor", enumStringSchema("lazymind", "codex", "cursor", "workbuddy")),
 		prop("thinking_depth", enumStringSchema("low", "medium", "high", "max")),
@@ -931,6 +938,10 @@ func manualPaths() map[string]any {
 		)},
 		"/conversations/{conversation_id}:unpin": map[string]any{"post": op(
 			"Unpin a conversation", queryParams(param("path", "conversation_id", true, strSchema())), nil, response(200, "Conversation unpinned", refSchema("ConversationPinResponse")),
+		)},
+		"/conversations/{conversation_id}:reorder": map[string]any{"post": op(
+			"Move a conversation within its pinned or ordinary history", queryParams(param("path", "conversation_id", true, strSchema())), jsonBody(refSchema("ConversationReorderRequest"), true),
+			response(200, "Conversation reordered", refSchema("ConversationPinResponse")),
 		)},
 		"/conversations/{conversation_id}:restore": map[string]any{"post": op(
 			"Restore a trashed conversation", queryParams(param("path", "conversation_id", true, strSchema())), nil, response(200, "Conversation restored", refSchema("EmptyObject")),

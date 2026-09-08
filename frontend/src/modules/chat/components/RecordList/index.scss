@@ -233,6 +233,48 @@
     }
   }
 
+  .record-sortable {
+    position: relative;
+    width: 100%;
+
+    > .ant-col > .record {
+      padding-left: 20px;
+    }
+
+    &--dragging {
+      z-index: 2;
+      background: var(--color-primary-bg);
+      border-radius: 4px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+    }
+
+    &:hover > .record-drag-handle,
+    &:focus-within > .record-drag-handle {
+      opacity: 1;
+    }
+  }
+
+  .record-drag-handle {
+    position: absolute;
+    top: 5px;
+    left: 0;
+    z-index: 1;
+    width: 18px;
+    height: 24px;
+    padding: 0;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: #94a3b8;
+    cursor: grab;
+    touch-action: none;
+    opacity: 0;
+
+    &:active { cursor: grabbing; }
+    &[aria-disabled="true"] { cursor: default; }
+    &:focus-visible { outline: 2px solid #74a0ff; }
+  }
+
   .record-empty {
     display: flex;
     align-items: center;

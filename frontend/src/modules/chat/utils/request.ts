@@ -27,6 +27,7 @@ import {
   DefaultApiFactory as CoreDefaultApiFactory,
   PromptsApiFactory as CorePromptsApiFactory,
   type ConversationHistoryListResponse,
+  type ConversationPinResponse,
   type ConversationTrailListResponse,
   type DefaultApiApiCoreConversationsNameHistoryGetRequest,
   type DefaultApiApiCoreConversationsNameTrailGetRequest,
@@ -69,6 +70,8 @@ const corePromptsClient = CorePromptsApiFactory(
   BASE_URL,
   axiosInstance,
 );
+
+export type ConversationOrderResult = ConversationPinResponse;
 
 export interface PromptLibraryListParams {
   pageSize?: number; // 每页数量
@@ -752,14 +755,20 @@ export function ChatServiceApi() {
       pinned: boolean,
       options?: RawAxiosRequestConfig,
     ) {
-      return axiosInstance.post<{
-        conversation_id: string;
-        is_pinned: boolean;
-        pinned_at?: string | null;
-      }>(
+      return axiosInstance.post<ConversationOrderResult>(
         `${coreApiBaseUrl}/conversations/${encodeURIComponent(conversationId)}:${pinned ? "pin" : "unpin"}`,
         undefined,
         options,
+      );
+    },
+    conversationServiceReorder(
+      conversationId: string,
+      targetConversationId: string,
+      position: "before" | "after",
+    ) {
+      return axiosInstance.post<ConversationOrderResult>(
+        `${coreApiBaseUrl}/conversations/${encodeURIComponent(conversationId)}:reorder`,
+        { target_conversation_id: targetConversationId, position },
       );
     },
     conversationServiceDeleteConversation(

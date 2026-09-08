@@ -495,6 +495,7 @@ ALTER TABLE conversations ADD COLUMN IF NOT EXISTS source_dataset_id VARCHAR(255
 ALTER TABLE conversations ADD COLUMN IF NOT EXISTS source_document_id VARCHAR(255) NOT NULL DEFAULT '';
 ALTER TABLE conversations ADD COLUMN IF NOT EXISTS source_display_name VARCHAR(255) NOT NULL DEFAULT '';
 ALTER TABLE conversations ADD COLUMN IF NOT EXISTS pinned_at TIMESTAMP NULL;
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS history_order BIGINT NULL;
 ALTER TABLE conversations ADD COLUMN IF NOT EXISTS chat_model_mode VARCHAR(16) NULL;
 ALTER TABLE conversations ADD COLUMN IF NOT EXISTS chat_model_id VARCHAR(64) NULL;
 ALTER TABLE conversations ADD COLUMN IF NOT EXISTS chat_model_snapshot JSON NULL;
@@ -561,6 +562,7 @@ ALTER TABLE conversations ADD COLUMN source_dataset_id VARCHAR(255) NOT NULL DEF
 ALTER TABLE conversations ADD COLUMN source_document_id VARCHAR(255) NOT NULL DEFAULT '';
 ALTER TABLE conversations ADD COLUMN source_display_name VARCHAR(255) NOT NULL DEFAULT '';
 ALTER TABLE conversations ADD COLUMN pinned_at DATETIME NULL;
+ALTER TABLE conversations ADD COLUMN history_order INTEGER NULL;
 ALTER TABLE conversations ADD COLUMN chat_model_mode VARCHAR(16) NULL;
 ALTER TABLE conversations ADD COLUMN chat_model_id VARCHAR(64) NULL;
 ALTER TABLE conversations ADD COLUMN chat_model_snapshot JSON NULL;
