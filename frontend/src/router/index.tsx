@@ -15,6 +15,7 @@ import { isLocalSessionEnabled } from "@/runtime/localSession";
 import UserAgreementPage from "@/pages/UserAgreementPage";
 import SettingsPage from "@/modules/settings";
 
+const WorkflowRunPage = lazy(() => import("@/modules/chat/pages/workflowRun"));
 const ShowcaseGalleryPage = lazy(() => import("@/modules/showcase/GalleryPage"));
 const ShowcaseDetailPage = lazy(() => import("@/modules/showcase/DetailPage"));
 const KnowledgeApp = lazy(() => import("@/modules/knowledge/KnowledgeApp"));
@@ -131,7 +132,9 @@ export default function AppRouter() {
             )
           }
         />
+        <Route path="/workflow-runs/:sessionId/embed" element={<WorkflowRunPage embedded />} />
         <Route path="/" element={<MainLayout />}>
+          <Route path="workflow-runs/:sessionId" element={<WorkflowRunPage />} />
           <Route index element={<Navigate to="/agent/chat" replace />} />
           <Route path="agent/chat" element={<ChatApp />}>
             <Route index element={<Navigate to="home" replace />} />

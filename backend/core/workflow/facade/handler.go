@@ -108,28 +108,37 @@ func (h Handler) GetWorkflow(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, envelope{Data: value})
 }
 
+// SessionAccess authorizes a run before delegating its browser reads or writes.
+func (h Handler) SessionAccess(delegate http.Handler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		owner, ok := identityAndVersion(w, r)
+		if !ok {
+			return
+		}
+		if err := h.Store.AuthorizeSession(r.Context(), mux.Vars(r)["session_id"], owner); err != nil {
+			if errors.Is(err, workflowstore.ErrNotFound) {
+				fail(w, http.StatusNotFound, "WORKFLOW_SESSION_NOT_FOUND", "workflow session was not found", false)
+			} else if errors.Is(err, workflowstore.ErrPermissionDenied) {
+				fail(w, http.StatusForbidden, "PERMISSION_DENIED", "workflow session belongs to another owner", false)
+			} else {
+				fail(w, http.StatusServiceUnavailable, "WORKFLOW_PROJECTION_UNAVAILABLE", err.Error(), true)
+			}
+			return
+		}
+		delegate.ServeHTTP(w, r)
+	}
+}
+
 // GetProjection adds owner and contract checks around the existing pure
 // projection handler. Internal Runtime callers keep using the raw handler.
 func (h Handler) GetProjection(w http.ResponseWriter, r *http.Request) {
-	owner, ok := identityAndVersion(w, r)
-	if !ok {
-		return
-	}
-	if err := h.Store.AuthorizeSession(r.Context(), mux.Vars(r)["session_id"], owner); err != nil {
-		if errors.Is(err, workflowstore.ErrNotFound) {
-			fail(w, http.StatusNotFound, "WORKFLOW_SESSION_NOT_FOUND", "workflow session was not found", false)
-		} else if errors.Is(err, workflowstore.ErrPermissionDenied) {
-			fail(w, http.StatusForbidden, "PERMISSION_DENIED", "workflow session belongs to another owner", false)
-		} else {
-			fail(w, http.StatusServiceUnavailable, "WORKFLOW_PROJECTION_UNAVAILABLE", err.Error(), true)
+	h.SessionAccess(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if h.Projection == nil {
+			fail(w, http.StatusServiceUnavailable, "WORKFLOW_PROJECTION_UNAVAILABLE", "Workflow projection handler is unavailable", true)
+			return
 		}
-		return
-	}
-	if h.Projection == nil {
-		fail(w, http.StatusServiceUnavailable, "WORKFLOW_PROJECTION_UNAVAILABLE", "Workflow projection handler is unavailable", true)
-		return
-	}
-	h.Projection.ServeHTTP(w, r)
+		h.Projection.ServeHTTP(w, r)
+	}))(w, r)
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {

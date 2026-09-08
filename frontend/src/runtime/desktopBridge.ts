@@ -281,6 +281,17 @@ async function syncCurrentLocalAssistantSession() {
   );
 }
 
+/** Forward a WorkflowPanel chat action to the host DSH session (prompt/cancel). */
+export async function workflowRunControl(sessionId: string, action: 'prompt' | 'cancel', message?: string): Promise<void> {
+  await syncCurrentLocalAssistantSession();
+  const response = await assistantBridgeFetch(`/workflow-runs/${encodeURIComponent(sessionId)}/control`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, message, request_id: crypto.randomUUID() }),
+  }, ACTION_TIMEOUT_MS);
+  const body = await response.json();
+  if (!response.ok || body.accepted !== true) throw new Error(body.error || `Assistant Bridge returned HTTP ${response.status}`);
+}
+
 export async function agentIntegrationStatuses(): Promise<DesktopAgentIntegrationStatusesResult> {
   const bridge = getDesktopBridge();
   try {

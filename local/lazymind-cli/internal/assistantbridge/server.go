@@ -258,6 +258,8 @@ func (s *Server) routes() http.Handler {
 			"platform": runtime.GOOS, "executable": executable,
 		})
 	})
+	mux.HandleFunc("POST /v1/workflow-runs/{session}/control", s.handleWorkflowControl)
+	mux.HandleFunc("POST /v1/workflow-runs/{session}/binding", s.handleWorkflowBinding)
 	mux.HandleFunc("GET /v1/agents", s.handleAgentStatuses)
 	mux.HandleFunc("GET /v1/agents/{agent}", s.handleAgentStatus)
 	mux.HandleFunc("POST /v1/agents/{agent}/{action}", s.handleAgentAction)

@@ -266,6 +266,8 @@ func dshProfilePatch(self string, environment map[string]string) string {
 			lines = append(lines, "          "+key+": "+strconv.Quote(environment[key]))
 		}
 	}
+	// Surface proxy auth/start failures in the DSH plugin panel instead of
+	// silently omitting mcp__lazymind__* tools.
 	return strings.Join(append(lines, "        failOnStartupError: true"), "\n") + "\n"
 }
 

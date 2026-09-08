@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 
 	"lazymind/agentconnector/internal/coreapi"
@@ -22,14 +23,22 @@ type StartOrigin struct {
 }
 
 type Client struct {
-	api    *coreapi.Client
-	origin StartOrigin
+	api                *coreapi.Client
+	origin             StartOrigin
+	interactionBaseURL string
+	// OnRun records host routing after a successful MCP start or state request.
+	OnRun func(context.Context, string, map[string]any) error
+	// OnBegin can refuse a new step after a human submit until the panel continues.
+	OnBegin func(context.Context, string, string) error
+	// AfterSubmit records local host bookkeeping; it must not fail a successful submit.
+	AfterSubmit func(context.Context, string, SubmitResult)
 }
 
 type Projection struct {
-	SessionID    string `json:"session_id"`
-	StateVersion int64  `json:"state_version"`
-	Projection   struct {
+	InteractionURL string `json:"interaction_url"`
+	SessionID      string `json:"session_id"`
+	StateVersion   int64  `json:"state_version"`
+	Projection     struct {
 		Past       []string         `json:"past"`
 		Current    []string         `json:"current"`
 		Reachable  []string         `json:"reachable"`
@@ -74,9 +83,10 @@ type InputImportResult struct {
 }
 
 type StartResult struct {
-	PreparationID string     `json:"preparation_id"`
-	SessionID     string     `json:"session_id"`
-	State         Projection `json:"state"`
+	InteractionURL string     `json:"interaction_url"`
+	PreparationID  string     `json:"preparation_id"`
+	SessionID      string     `json:"session_id"`
+	State          Projection `json:"state"`
 }
 
 type SessionSummary struct {
@@ -203,7 +213,14 @@ func NewClient(api *coreapi.Client, origin StartOrigin) (*Client, error) {
 	}
 	origin.ConversationID = strings.TrimSpace(origin.ConversationID)
 	origin.ExternalRef = strings.TrimSpace(origin.ExternalRef)
-	return &Client{api: api, origin: origin}, nil
+	base := strings.TrimSpace(os.Getenv("LAZYMIND_WEB_URL"))
+	if base != "" {
+		parsed, err := url.Parse(base)
+		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+			return nil, errors.New("LAZYMIND_WEB_URL must be an absolute HTTP(S) frontend URL without credentials, query or fragment")
+		}
+	}
+	return &Client{api: api, origin: origin, interactionBaseURL: strings.TrimRight(base, "/")}, nil
 }
 
 func (c *Client) List(ctx context.Context) (map[string]any, error) {
@@ -231,7 +248,18 @@ func (c *Client) State(ctx context.Context, sessionID string) (Projection, error
 	}
 	var state Projection
 	err := c.api.DoJSON(ctx, http.MethodGet, "/workflow-sessions/"+url.PathEscape(sessionID)+"/projection", nil, &state)
-	return state, err
+	if err != nil {
+		return Projection{}, err
+	}
+	base := c.interactionBaseURL
+	if base == "" {
+		base, err = c.api.ServerURL(ctx)
+		if err != nil {
+			return Projection{}, err
+		}
+	}
+	state.InteractionURL = strings.TrimRight(base, "/") + "/workflow-runs/" + url.PathEscape(sessionID)
+	return state, nil
 }
 
 func (c *Client) ListSessions(ctx context.Context, status string, pageSize int, pageToken string) (SessionPage, error) {
@@ -365,7 +393,7 @@ func (c *Client) Start(ctx context.Context, input StartInput) (StartResult, erro
 	if err != nil {
 		return StartResult{}, err
 	}
-	return StartResult{PreparationID: prepared.PreparationID, SessionID: consumed.SessionID, State: state}, nil
+	return StartResult{PreparationID: prepared.PreparationID, SessionID: consumed.SessionID, InteractionURL: state.InteractionURL, State: state}, nil
 }
 
 func (c *Client) Begin(ctx context.Context, input BeginInput) (BeginResult, error) {
@@ -376,6 +404,11 @@ func (c *Client) Begin(ctx context.Context, input BeginInput) (BeginResult, erro
 	if !contains(state.Projection.Ready, input.StepID) && !contains(state.Projection.Retryable, input.StepID) && !contains(state.Projection.Rewindable, input.StepID) {
 		return BeginResult{}, fmt.Errorf("step %q is not ready; ready=%v retryable=%v rewindable=%v", input.StepID,
 			state.Projection.Ready, state.Projection.Retryable, state.Projection.Rewindable)
+	}
+	if c.OnBegin != nil {
+		if err := c.OnBegin(ctx, input.SessionID, input.StepID); err != nil {
+			return BeginResult{}, err
+		}
 	}
 	if input.CommandID == "" {
 		input.CommandID, err = newID("mcp-step-")
@@ -455,6 +488,9 @@ func (c *Client) Submit(ctx context.Context, input SubmitInput, artifacts []map[
 		return SubmitResult{}, err
 	}
 	result.State, err = c.State(ctx, input.SessionID)
+	if err == nil && c.AfterSubmit != nil {
+		c.AfterSubmit(ctx, input.SessionID, result)
+	}
 	return result, err
 }
 
@@ -485,6 +521,24 @@ func contains(values []string, target string) bool {
 		}
 	}
 	return false
+}
+
+func AwaitingReview(state Projection) bool {
+	past := state.Projection.Past
+	if len(past) == 0 {
+		return false
+	}
+	raw, ok := state.Projection.Nodes[past[len(past)-1]]
+	if !ok {
+		return false
+	}
+	node, _ := raw.(map[string]any)
+	if node == nil {
+		return false
+	}
+	mode, _ := node["mode"].(string)
+	approval, _ := node["requires_approval"].(bool)
+	return strings.EqualFold(strings.TrimSpace(mode), "human") || approval
 }
 
 func newID(prefix string) (string, error) {

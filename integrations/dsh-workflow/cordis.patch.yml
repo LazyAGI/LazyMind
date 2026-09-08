@@ -1,0 +1,7 @@
+- insert:
+    - id: lazymind-workflow-panel
+      name: '@lazymind/dsh-workflow'
+      config:
+        bridgeUrl: http://127.0.0.1:19091
+        dshUrl: http://127.0.0.1:3080
+        serverName: lazymind

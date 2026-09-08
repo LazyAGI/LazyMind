@@ -195,7 +195,9 @@ function IntentPopover({
 interface WorkflowPanelProps {
   conversationId: string;
   /** Called when the user clicks Continue or Retry — simulates sending a user message. */
-  onSendMessage?: (text: string) => void;
+  onSendMessage?: (text: string) => void | Promise<void>;
+  /** Direct-run refresh supplied by the standalone page. */
+  onRefresh?: () => void | Promise<void>;
   /** Called when the user clicks the reference button on a slot item. */
   onReference?: (slot: SlotRevision) => void;
   /** Called when the user clicks the Stop button during an active session. */
@@ -1635,9 +1637,11 @@ export function WorkflowPanel({
   onReference,
   onStop,
   onDismissed,
+  onRefresh,
 }: WorkflowPanelProps) {
   const { t, i18n } = useTranslation();
-  const { session, loading, refresh } = useWorkflowSession(conversationId);
+  const { session, loading, refresh: refreshConversation } = useWorkflowSession(conversationId);
+  const refresh = onRefresh ?? refreshConversation;
   const taskCenterTasks = useTaskCenterStore((state) =>
     conversationId
       ? state.tasksByConversation[conversationId] ?? EMPTY_TASK_CENTER_TASKS

@@ -137,14 +137,24 @@ func Register(server *mcp.Server, client *Client) {
 		})
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.start", Title: "Start a LazyMind Workflow",
 		Description: "Create a durable Workflow session in the current external-Agent conversation. A prior completed, failed, or stopped session is archived atomically; if one is active or waiting, list and stop that current session before retrying. LazyMind pins the revision and owns all subsequent state and versions.", Annotations: write},
-		func(ctx context.Context, _ *mcp.CallToolRequest, input StartInput) (*mcp.CallToolResult, StartResult, error) {
+		func(ctx context.Context, request *mcp.CallToolRequest, input StartInput) (*mcp.CallToolResult, StartResult, error) {
 			value, err := client.Start(ctx, input)
+			if err == nil && client.OnRun != nil {
+				if bindingErr := client.OnRun(ctx, value.SessionID, request.Params.Meta); bindingErr != nil {
+					err = fmt.Errorf("Workflow %s is available at %s, but controller binding failed: %w", value.SessionID, value.InteractionURL, bindingErr)
+				}
+			}
 			return nil, value, err
 		})
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.state", Title: "Read LazyMind Workflow state",
 		Description: "Read authoritative Workflow readiness, attempts and completion state. Use this before choosing the next step.", Annotations: readOnly},
-		func(ctx context.Context, _ *mcp.CallToolRequest, input StateInput) (*mcp.CallToolResult, Projection, error) {
+		func(ctx context.Context, request *mcp.CallToolRequest, input StateInput) (*mcp.CallToolResult, Projection, error) {
 			value, err := client.State(ctx, input.SessionID)
+			if err == nil && client.OnRun != nil {
+				if bindingErr := client.OnRun(ctx, value.SessionID, request.Params.Meta); bindingErr != nil {
+					err = fmt.Errorf("Workflow %s is available at %s, but controller binding failed: %w", value.SessionID, value.InteractionURL, bindingErr)
+				}
+			}
 			return nil, value, err
 		})
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.session.list", Title: "List external-Agent Workflow sessions",
@@ -166,7 +176,7 @@ func Register(server *mcp.Server, client *Client) {
 			return nil, value, err
 		})
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.step.begin", Title: "Begin a LazyMind Workflow step",
-		Description: "Reserve one currently ready step and return its immutable execution contract. Execute that contract with your native Agent tools, then call workflow.step.submit.", Annotations: write},
+		Description: "Reserve one currently ready step and return its immutable execution contract. Execute that contract now with your native Agent tools and call workflow.step.submit. Names in step_contract.legacy_tools are LazyMind Host scripts, not MCP tools; still produce required_outputs and submit.", Annotations: write},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input BeginInput) (*mcp.CallToolResult, BeginResult, error) {
 			value, err := client.Begin(ctx, input)
 			return nil, value, err
@@ -178,14 +188,25 @@ func Register(server *mcp.Server, client *Client) {
 			return nil, value, err
 		})
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.step.submit", Title: "Submit a LazyMind Workflow step",
-		Description: "Return the external Agent outcome and declared artifacts to LazyMind. LazyMind validates required outputs, versions artifacts and advances authoritative state.", Annotations: write},
+		Description: "Return the external Agent outcome and declared artifacts to LazyMind. LazyMind validates required outputs, versions artifacts and advances authoritative state. If the submitted step is human, stop this turn and wait for the user to continue from the run page.", Annotations: write},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input SubmitInput) (*mcp.CallToolResult, SubmitResult, error) {
 			artifacts, err := encodeOutputs(input.Outputs)
 			if err != nil {
 				return nil, SubmitResult{}, err
 			}
 			value, err := client.Submit(ctx, input, artifacts)
-			return nil, value, err
+			if err != nil {
+				return nil, value, err
+			}
+			if AwaitingReview(value.State) {
+				message := "Stop this turn. The submitted step requires user review"
+				if value.State.InteractionURL != "" {
+					message += " at " + value.State.InteractionURL
+				}
+				message += ". Do not call workflow.step.begin until the user asks to continue."
+				return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: message}}}, value, nil
+			}
+			return nil, value, nil
 		})
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.artifact.list", Title: "List LazyMind Workflow artifacts",
 		Description: "List the selected artifact revisions currently owned by a Workflow session.", Annotations: readOnly},

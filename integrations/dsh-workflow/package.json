@@ -1,0 +1,12 @@
+{
+  "name": "@lazymind/dsh-workflow",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "exports": { ".": "./lib/index.js", "./client": "./lib/client.js", "./cordis.patch.yml": "./cordis.patch.yml" },
+  "dsh": { "bundle": { "patch": "./cordis.patch.yml" }, "client": { "platform": "web", "inject": ["@deepseek-ai/dsh-client-ui-chat", "@deepseek-ai/dsh-client-ui-conversation", "@deepseek-ai/dsh-client-ui-layout", "@deepseek-ai/dsh-client-ui-renderer"] } },
+  "peerDependencies": { "@deepseek-ai/cordis": "^4.0.2" },
+  "devDependencies": { "tsdown": "^0.19.0" },
+  "scripts": { "bundle": "tsdown" },
+  "files": ["lib/index.js", "lib/client.js", "cordis.patch.yml"]
+}

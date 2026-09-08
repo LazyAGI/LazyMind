@@ -13,6 +13,7 @@ import (
 
 	"lazymind/agentconnector/internal/agentexec"
 	"lazymind/agentconnector/internal/localfile"
+	"lazymind/agentconnector/internal/workflowcontrol"
 )
 
 type managedConfigState struct {
@@ -118,6 +119,9 @@ func readJSONConfig(path string) (rawMCPFile, map[string]json.RawMessage, error)
 func managedStdio(self, home, hostID string, kind Kind) stdioMCPDefinition {
 	environment := map[string]string{
 		"LAZYMIND_AGENT_PROVIDER": string(kind), "LAZYMIND_AGENT_HOST_ID": hostID,
+	}
+	if webURL := strings.TrimSpace(os.Getenv("LAZYMIND_WEB_URL")); webURL != "" {
+		environment["LAZYMIND_WEB_URL"] = webURL
 	}
 	if home != "" {
 		environment["LAZYMIND_HOME"] = home
@@ -229,7 +233,18 @@ func writeDSHConfig(path, self, home, hostID string) error {
 	if err != nil {
 		return err
 	}
-	entry, err := newDSHEntry(self, home, hostID)
+	webURL := strings.TrimSpace(os.Getenv("LAZYMIND_WEB_URL"))
+	dshURL := strings.TrimSpace(os.Getenv("LAZYMIND_DSH_URL"))
+	if existing := findDSHEntry(document); existing != nil {
+		env := decodeDSHStdio(existing).Env
+		if webURL == "" {
+			webURL = strings.TrimSpace(env["LAZYMIND_WEB_URL"])
+		}
+		if dshURL == "" {
+			dshURL = strings.TrimSpace(env["LAZYMIND_DSH_URL"])
+		}
+	}
+	entry, err := newDSHEntry(self, home, hostID, webURL, dshURL)
 	if err != nil {
 		return err
 	}
@@ -332,10 +347,19 @@ func decodeDSHStdio(item *yaml.Node) stdioMCPDefinition {
 	return result
 }
 
-func newDSHEntry(self, home, hostID string) (*yaml.Node, error) {
+func newDSHEntry(self, home, hostID, webURL, dshURL string) (*yaml.Node, error) {
 	var document yaml.Node
 	environment := map[string]string{
 		"LAZYMIND_AGENT_PROVIDER": string(DeepSeekHarness), "LAZYMIND_AGENT_HOST_ID": hostID,
+	}
+	if endpoint := strings.TrimSpace(dshURL); endpoint != "" {
+		if err := workflowcontrol.ValidateEndpoint(endpoint); err != nil {
+			return nil, err
+		}
+		environment["LAZYMIND_DSH_URL"] = endpoint
+	}
+	if webURL = strings.TrimSpace(webURL); webURL != "" {
+		environment["LAZYMIND_WEB_URL"] = webURL
 	}
 	if home != "" {
 		environment["LAZYMIND_HOME"] = home

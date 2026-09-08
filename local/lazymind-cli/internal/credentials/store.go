@@ -28,7 +28,7 @@ const (
 	maxAuthBody      = 1 << 20
 )
 
-var ErrAuthenticationRequired = errors.New("not logged in to LazyMind; sign in to the local LazyMind page and try again")
+var ErrAuthenticationRequired = errors.New("not logged in to LazyMind; open the local LazyMind desktop so local-proxy can write credentials.json via /_local/admin-session (Kong does not serve that path), then retry")
 
 func IsAuthenticationRequired(err error) bool {
 	if errors.Is(err, ErrAuthenticationRequired) {
@@ -93,6 +93,9 @@ func NewStore(home, server string) (*Store, error) {
 		httpClient:     &http.Client{Timeout: 30 * time.Second},
 	}, nil
 }
+
+// Directory returns the private connector data directory.
+func (s *Store) Directory() string { return s.home }
 
 func (s *Store) path() string { return filepath.Join(s.home, credentialFile) }
 
