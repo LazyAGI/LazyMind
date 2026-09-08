@@ -111,13 +111,13 @@ func TestRaccoonUsesDesktopConfiguration(t *testing.T) {
 	}
 }
 
-func TestDeepSeekRequirementsCheckProfileAndMCPClient(t *testing.T) {
+func TestDeepSeekRequiresProfileButInstallsMCPClientAutomatically(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("DSH_HOME", root)
 	adapter := testAdapter(DeepSeekHarness)
 
 	status := adapter.Status(context.Background())
-	if status.State != agentintegration.RequirementsMissing || len(status.Requirements) != 2 {
+	if status.State != agentintegration.RequirementsMissing || len(status.Requirements) != 1 {
 		t.Fatalf("status=%#v", status)
 	}
 	writeTestFile(t, filepath.Join(root, "profiles", "web", "package.json"), `{}`)

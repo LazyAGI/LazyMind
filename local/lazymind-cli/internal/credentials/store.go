@@ -3,7 +3,9 @@ package credentials
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -96,6 +98,31 @@ func NewStore(home, server string) (*Store, error) {
 
 // Directory returns the private connector data directory.
 func (s *Store) Directory() string { return s.home }
+
+// AccountScope changes on account/server switches, but not on access-token refresh.
+// It is a local pairing namespace, never an authorization decision.
+func (s *Store) AccountScope() (string, error) {
+	var scope string
+	err := s.withLock(func() error {
+		value, err := s.loadUnlocked()
+		if err != nil {
+			return err
+		}
+		subject := ""
+		if parts := strings.Split(value.AccessToken, "."); len(parts) == 3 {
+			if body, err := base64.RawURLEncoding.DecodeString(parts[1]); err == nil {
+				var claims map[string]json.RawMessage
+				if json.Unmarshal(body, &claims) == nil {
+					subject = string(claims["sub"])
+				}
+			}
+		}
+		sum := sha256.Sum256([]byte(value.ServerURL + "\x00" + value.Username + "\x00" + value.TenantID + "\x00" + subject))
+		scope = hex.EncodeToString(sum[:])
+		return nil
+	})
+	return scope, err
+}
 
 func (s *Store) path() string { return filepath.Join(s.home, credentialFile) }
 

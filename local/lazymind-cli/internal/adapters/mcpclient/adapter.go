@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -30,11 +31,12 @@ const (
 )
 
 type Adapter struct {
-	kind   Kind
-	self   string
-	bridge *mcpbridge.Bridge
-	home   string
-	hostID string
+	dshRunner func(context.Context, string, ...string) error
+	kind      Kind
+	self      string
+	bridge    *mcpbridge.Bridge
+	home      string
+	hostID    string
 }
 
 type stdioMCPDefinition struct {
@@ -97,7 +99,15 @@ func (a *Adapter) Connect(ctx context.Context) agentintegration.Status {
 		status.Message = "Approve the LazyMind MCP installation in Cursor, then check again."
 		return status
 	}
-	if err := writeManagedConfig(a.kind, configPath(a.kind), a.self, a.home, a.hostID); err != nil {
+	controlled := false
+	if a.kind == DeepSeekHarness {
+		var err error
+		controlled, err = a.installDSHWorkflow(ctx)
+		if err != nil {
+			return agentintegration.Fail(status, err.Error())
+		}
+	}
+	if err := writeManagedConfig(a.kind, configPath(a.kind), a.self, a.home, a.hostID, controlled); err != nil {
 		return agentintegration.Fail(status, err.Error())
 	}
 	return a.status()
@@ -107,6 +117,11 @@ func (a *Adapter) Disconnect(context.Context) agentintegration.Status {
 	status := a.status()
 	if status.State == agentintegration.Conflict || status.State == agentintegration.Failed {
 		return status
+	}
+	if a.kind == DeepSeekHarness {
+		if err := a.disconnectDSHWorkflow(); err != nil {
+			return agentintegration.Fail(status, err.Error())
+		}
 	}
 	if err := removeManagedConfig(a.kind, configPath(a.kind)); err != nil {
 		return agentintegration.Fail(status, err.Error())
@@ -128,6 +143,17 @@ func (a *Adapter) status() agentintegration.Status {
 	if err != nil {
 		return agentintegration.Fail(status, err.Error())
 	}
+	if a.kind == DeepSeekHarness && state.configured && state.owned && state.current {
+		version, _ := dshModuleVersion(filepath.Dir(configPath(a.kind)), "@deepseek-ai/dsh-session")
+		if version == dshSDKVersion && !a.dshWorkflowConfigured() {
+			state.current = false
+			status.Message = "MCP is configured; reconnect to install or update the Workflow panel and host adapter."
+		} else if version != dshSDKVersion {
+			status.Message = "MCP is configured. Native Workflow control is currently verified for DSH " + dshSDKVersion + "."
+		} else {
+			status.Message = "MCP and the Workflow bundle are configured. Restart DSH to activate updated plugins."
+		}
+	}
 	switch {
 	case state.configured && !state.owned:
 		status.State = agentintegration.Conflict
@@ -138,7 +164,7 @@ func (a *Adapter) status() agentintegration.Status {
 		status.State = agentintegration.RequirementsMissing
 	default:
 		status.State = agentintegration.Ready
-		if state.configured {
+		if state.configured && status.Message == "" {
 			status.Message = "The existing LazyMind MCP entry needs to be enabled again."
 		}
 	}
@@ -190,11 +216,13 @@ func requirements(kind Kind) ([]agentintegration.Requirement, error) {
 			StatePaths:      []string{filepath.Dir(traeWorkConfigPath())},
 		}, "trae_work_desktop", "TRAE Work")
 	case DeepSeekHarness:
-		profile := filepath.Join(dshHome(), "profiles", "web", "package.json")
-		client := filepath.Join(dshHome(), "profiles", "node_modules", "@deepseek-ai", "dsh-mcp-client", "package.json")
+		if name := dshProfileName(); name == "." || name == ".." || filepath.Base(name) != name || strings.ContainsAny(name, "/\\") {
+			return nil, errors.New("invalid DSH profile name")
+		}
+		directory := filepath.Join(dshHome(), "profiles", dshProfileName())
+		profile := filepath.Join(directory, "package.json")
 		return []agentintegration.Requirement{
 			{ID: "dsh_web_profile", Description: "Initialize the DeepSeek Harness web profile.", Satisfied: pathExists(profile)},
-			{ID: "dsh_mcp_client", Description: "Install @deepseek-ai/dsh-mcp-client in the web profile.", Satisfied: pathExists(client)},
 		}, nil
 	default:
 		return nil, nil
@@ -226,7 +254,7 @@ func configPath(kind Kind) string {
 	case TRAEWork:
 		return traeWorkConfigPath()
 	case DeepSeekHarness:
-		return filepath.Join(dshHome(), "profiles", "web", "cordis.patch.yml")
+		return filepath.Join(dshHome(), "profiles", dshProfileName(), "cordis.patch.yml")
 	default:
 		return ""
 	}
@@ -277,7 +305,10 @@ func dshHome() string {
 			return filepath.Clean(absolute)
 		}
 	}
-	home, _ := os.UserHomeDir()
+	home := strings.TrimSpace(os.Getenv("LAZYMIND_HOST_HOME"))
+	if home == "" {
+		home, _ = os.UserHomeDir()
+	}
 	return filepath.Join(home, ".dsh")
 }
 

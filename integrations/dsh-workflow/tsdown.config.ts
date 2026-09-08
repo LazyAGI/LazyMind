@@ -13,6 +13,7 @@ export default defineConfig([
     outDir: 'lib',
     format: 'esm',
     platform: 'node',
+    external: [/^@deepseek-ai\//],
     target: 'es2024',
     fixedExtension: false,
     dts: false,
@@ -26,7 +27,7 @@ export default defineConfig([
     target: 'es2024',
     dts: false,
     clean: false,
-    deps: { neverBundle: ['react', 'react/jsx-runtime'] },
+    external: ['react', 'react/jsx-runtime'],
     outputOptions: {
       entryFileNames: 'client.js',
       banner: 'window.__ModuleLoader__.load({ id: "@lazymind/dsh-workflow", factory: (require) => {',
