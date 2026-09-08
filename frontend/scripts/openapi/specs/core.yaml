@@ -103,6 +103,15 @@ components:
                 - deleted_conflict_rows
                 - word
             type: object
+        Admission:
+            properties:
+                can_begin:
+                    type: boolean
+                reason:
+                    type: string
+            required:
+                - can_begin
+            type: object
         AggregateDocumentsGroup:
             properties:
                 count:
@@ -261,6 +270,114 @@ components:
             required:
                 - action
             type: object
+        Artifact:
+            properties:
+                content_type:
+                    type: string
+                seq:
+                    type: integer
+                slot:
+                    type: string
+                value:
+                    items:
+                        minimum: 0
+                        type: integer
+                    type: array
+            required:
+                - content_type
+                - seq
+                - slot
+            type: object
+        AttemptContext:
+            properties:
+                acceptance_criteria:
+                    items:
+                        type: string
+                    type: array
+                attempt_id:
+                    type: string
+                attempt_no:
+                    type: integer
+                capabilities:
+                    items:
+                        type: string
+                    type: array
+                contract_version:
+                    type: string
+                declared_input_transports:
+                    additionalProperties:
+                        type: string
+                    type: object
+                declared_input_types:
+                    additionalProperties:
+                        type: string
+                    type: object
+                declared_output_types:
+                    additionalProperties:
+                        type: string
+                    type: object
+                declared_outputs:
+                    items:
+                        type: string
+                    type: array
+                inputs:
+                    additionalProperties:
+                        properties: {}
+                        type: object
+                    type: object
+                instruction:
+                    type: string
+                legacy_tools:
+                    items:
+                        type: string
+                    type: array
+                metadata:
+                    additionalProperties:
+                        type: string
+                    type: object
+                objective:
+                    type: string
+                operation:
+                    type: string
+                output_cardinality:
+                    additionalProperties:
+                        type: string
+                    type: object
+                partial_selector:
+                    additionalProperties:
+                        items:
+                            type: integer
+                        type: array
+                    type: object
+                prompt:
+                    type: string
+                required_outputs:
+                    items:
+                        type: string
+                    type: array
+                session_id:
+                    type: string
+                step_id:
+                    type: string
+                terminal_tools:
+                    items:
+                        type: string
+                    type: array
+                terminal_tools_only:
+                    type: boolean
+                tools_only:
+                    type: boolean
+                workflow_revision:
+                    type: string
+            required:
+                - attempt_id
+                - attempt_no
+                - contract_version
+                - operation
+                - session_id
+                - step_id
+                - workflow_revision
+            type: object
         AuthorizationSubjectGrant:
             properties:
                 grantee_id:
@@ -387,6 +504,23 @@ components:
                     items:
                         $ref: '#/components/schemas/TaskResponse'
                     type: array
+            type: object
+        BindingView:
+            properties:
+                bound:
+                    type: boolean
+                connector_id:
+                    type: string
+                driver_session_id:
+                    type: string
+                generation:
+                    format: int64
+                    type: integer
+                provider:
+                    type: string
+            required:
+                - bound
+                - generation
             type: object
         BulkUpdateServerEnabledRequest:
             properties:
@@ -634,6 +768,11 @@ components:
             required:
                 - stored_path
                 - upload_id
+            type: object
+        Control:
+            properties:
+                next_step:
+                    type: string
             type: object
         ConversationArchiveFolder:
             properties:
@@ -2529,6 +2668,25 @@ components:
                 - shard_id
                 - updated_at
             type: object
+        Execution:
+            properties:
+                execution_handle:
+                    type: string
+                execution_id:
+                    type: string
+                lease_expires_at:
+                    format: date-time
+                    type: string
+                review_after_submit:
+                    type: boolean
+                step_contract:
+                    $ref: '#/components/schemas/AttemptContext'
+            required:
+                - execution_id
+                - lease_expires_at
+                - review_after_submit
+                - step_contract
+            type: object
         ExportConversationsRequest:
             properties:
                 conversation_ids:
@@ -3822,10 +3980,10 @@ components:
                 cache_hit_rate:
                     format: double
                     type: number
-                cached_tokens:
+                cache_input_tokens:
                     format: int64
                     type: integer
-                cache_input_tokens:
+                cached_tokens:
                     format: int64
                     type: integer
                 context_input_tokens:
@@ -4261,6 +4419,47 @@ components:
                 - result
                 - title
             type: object
+        Snapshot:
+            properties:
+                active_execution_ids:
+                    items:
+                        type: string
+                    type: array
+                active_executions:
+                    format: int64
+                    type: integer
+                admission:
+                    $ref: '#/components/schemas/Admission'
+                available_actions:
+                    items:
+                        type: string
+                    type: array
+                binding:
+                    $ref: '#/components/schemas/BindingView'
+                continuation:
+                    type: string
+                delivery:
+                    $ref: '#/components/schemas/WorkflowHostAction'
+                protocol:
+                    type: string
+                reviews:
+                    items:
+                        $ref: '#/components/schemas/WorkflowReviewCheckpoint'
+                    type: array
+                session_id:
+                    type: string
+                state_version:
+                    format: int64
+                    type: integer
+            required:
+                - active_executions
+                - admission
+                - binding
+                - continuation
+                - protocol
+                - session_id
+                - state_version
+            type: object
         StartTaskRequest:
             properties:
                 start_mode:
@@ -4308,6 +4507,53 @@ components:
                 - failed_count
                 - requested_count
                 - started_count
+            type: object
+        Submission:
+            properties:
+                artifacts:
+                    items:
+                        $ref: '#/components/schemas/Artifact'
+                    type: array
+                control:
+                    $ref: '#/components/schemas/Control'
+                error_code:
+                    type: string
+                execution_handle:
+                    type: string
+                executor_ref:
+                    type: string
+                outcome:
+                    type: string
+                summary:
+                    type: string
+            required:
+                - outcome
+            type: object
+        SubmissionReceipt:
+            properties:
+                command_id:
+                    type: string
+                execution_id:
+                    type: string
+            required:
+                - command_id
+                - execution_id
+            type: object
+        SubmissionResult:
+            properties:
+                already_terminal:
+                    type: boolean
+                attempt_status:
+                    type: string
+                control:
+                    $ref: '#/components/schemas/Snapshot'
+                execution_id:
+                    type: string
+                receipt:
+                    $ref: '#/components/schemas/SubmissionReceipt'
+            required:
+                - attempt_status
+                - execution_id
             type: object
         SuspendJobRequest:
             properties:
@@ -4901,6 +5147,226 @@ components:
                 - reason
                 - updated_at
                 - word
+            type: object
+        WorkflowControlCommand:
+            properties:
+                command_id:
+                    type: string
+                expected_state_version:
+                    format: int64
+                    type: integer
+                kind:
+                    type: string
+                manifest_hash:
+                    type: string
+                objective:
+                    type: string
+                preference_scope:
+                    type: string
+                review_id:
+                    type: string
+                review_version:
+                    format: int64
+                    type: integer
+                runtime_instruction:
+                    type: string
+                step_id:
+                    type: string
+            required:
+                - command_id
+                - expected_state_version
+                - kind
+            type: object
+        WorkflowControlReceipt:
+            properties:
+                action_id:
+                    type: string
+                command_id:
+                    type: string
+                execution_id:
+                    type: string
+                kind:
+                    type: string
+                resume_reason:
+                    type: string
+                review_id:
+                    type: string
+            required:
+                - command_id
+                - kind
+            type: object
+        WorkflowControlResult:
+            properties:
+                control:
+                    $ref: '#/components/schemas/Snapshot'
+                receipt:
+                    $ref: '#/components/schemas/WorkflowControlReceipt'
+            required:
+                - receipt
+            type: object
+        WorkflowHostAction:
+            properties:
+                accepted_at:
+                    format: date-time
+                    type: string
+                attempt_count:
+                    type: integer
+                binding_generation:
+                    format: int64
+                    type: integer
+                command_id:
+                    type: string
+                connector_id:
+                    type: string
+                consumed_at:
+                    format: date-time
+                    type: string
+                created_at:
+                    format: date-time
+                    type: string
+                dispatch_expires_at:
+                    format: date-time
+                    type: string
+                execution_id:
+                    type: string
+                id:
+                    type: string
+                kind:
+                    type: string
+                last_error:
+                    type: string
+                native_event_seq:
+                    format: int64
+                    type: integer
+                native_session_id:
+                    type: string
+                session_id:
+                    type: string
+                status:
+                    type: string
+                updated_at:
+                    format: date-time
+                    type: string
+            required:
+                - attempt_count
+                - binding_generation
+                - command_id
+                - connector_id
+                - created_at
+                - id
+                - kind
+                - native_session_id
+                - session_id
+                - status
+                - updated_at
+            type: object
+        WorkflowHostActionPage:
+            properties:
+                actions:
+                    items:
+                        $ref: '#/components/schemas/WorkflowHostAction'
+                    type: array
+                next_page_token:
+                    type: string
+            type: object
+        WorkflowHostBindingRequest:
+            properties:
+                driver_session_id:
+                    type: string
+                executor_session_id:
+                    type: string
+                provider:
+                    type: string
+                workflowHostIdentity:
+                    $ref: '#/components/schemas/WorkflowHostIdentity'
+            required:
+                - driver_session_id
+                - executor_session_id
+                - provider
+                - workflowHostIdentity
+            type: object
+        WorkflowHostClaim:
+            properties:
+                action:
+                    $ref: '#/components/schemas/WorkflowHostAction'
+                control:
+                    $ref: '#/components/schemas/Snapshot'
+                dispatch_token:
+                    type: string
+            required:
+                - action
+            type: object
+        WorkflowHostIdentity:
+            properties:
+                connector_id:
+                    type: string
+                credential:
+                    type: string
+                instance_id:
+                    type: string
+            required:
+                - connector_id
+                - credential
+                - instance_id
+            type: object
+        WorkflowHostReceipt:
+            properties:
+                dispatch_token:
+                    type: string
+                error:
+                    type: string
+                native_event_seq:
+                    format: int64
+                    type: integer
+                status:
+                    type: string
+                workflowHostIdentity:
+                    $ref: '#/components/schemas/WorkflowHostIdentity'
+            required:
+                - dispatch_token
+                - status
+                - workflowHostIdentity
+            type: object
+        WorkflowReviewCheckpoint:
+            properties:
+                accepted_at:
+                    format: date-time
+                    type: string
+                accepted_by:
+                    type: string
+                created_at:
+                    format: date-time
+                    type: string
+                decision_command_id:
+                    type: string
+                execution_id:
+                    type: string
+                id:
+                    type: string
+                manifest_hash:
+                    type: string
+                session_id:
+                    type: string
+                status:
+                    type: string
+                step_id:
+                    type: string
+                updated_at:
+                    format: date-time
+                    type: string
+                version:
+                    format: int64
+                    type: integer
+            required:
+                - created_at
+                - execution_id
+                - id
+                - manifest_hash
+                - session_id
+                - status
+                - step_id
+                - updated_at
+                - version
             type: object
         WorkflowTrashEmptyData:
             properties:
@@ -8095,6 +8561,35 @@ components:
                 - disabled
                 - name
             type: object
+        translationOpenAPIRequest:
+            properties:
+                target:
+                    type: string
+                text:
+                    type: string
+            required:
+                - text
+            type: object
+        translationOpenAPIResponse:
+            properties:
+                source:
+                    type: string
+                target:
+                    type: string
+                translated_text:
+                    type: string
+            required:
+                - source
+                - target
+                - translated_text
+            type: object
+        translationStatusOpenAPIResponse:
+            properties:
+                configured:
+                    type: boolean
+            required:
+                - configured
+            type: object
         updateModelProviderGroupOpenAPIRequest:
             properties:
                 api_key:
@@ -8287,6 +8782,180 @@ components:
                     type: string
             required:
                 - ready
+            type: object
+        workflowCapabilitiesData:
+            properties:
+                protocol:
+                    type: string
+                schema_ready:
+                    type: boolean
+            required:
+                - protocol
+                - schema_ready
+            type: object
+        workflowCapabilitiesReply:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/workflowCapabilitiesData'
+                message:
+                    type: string
+            required:
+                - code
+                - data
+                - message
+            type: object
+        workflowControlError:
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+            required:
+                - code
+                - message
+            type: object
+        workflowControlErrorReply:
+            properties:
+                error:
+                    $ref: '#/components/schemas/workflowControlError'
+                ok:
+                    type: boolean
+            required:
+                - error
+                - ok
+            type: object
+        workflowControlReply:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/WorkflowControlResult'
+                message:
+                    type: string
+            required:
+                - code
+                - data
+                - message
+            type: object
+        workflowControlSnapshotData:
+            properties:
+                control:
+                    $ref: '#/components/schemas/Snapshot'
+                projection:
+                    additionalProperties:
+                        properties: {}
+                        type: object
+                    type: object
+                session:
+                    additionalProperties:
+                        properties: {}
+                        type: object
+                    type: object
+            type: object
+        workflowControlSnapshotReply:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/workflowControlSnapshotData'
+                message:
+                    type: string
+            required:
+                - code
+                - data
+                - message
+            type: object
+        workflowExecutionBeginBody:
+            properties:
+                command_id:
+                    type: string
+                expected_state_version:
+                    format: int64
+                    type: integer
+                objective:
+                    type: string
+                runtime_instruction:
+                    type: string
+                step_id:
+                    type: string
+            required:
+                - command_id
+                - expected_state_version
+                - step_id
+            type: object
+        workflowExecutionStopBody:
+            properties:
+                command_id:
+                    type: string
+            required:
+                - command_id
+            type: object
+        workflowHostClaimReply:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/WorkflowHostClaim'
+                message:
+                    type: string
+            required:
+                - code
+                - data
+                - message
+            type: object
+        workflowHostPageReply:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/WorkflowHostActionPage'
+                message:
+                    type: string
+            required:
+                - code
+                - data
+                - message
+            type: object
+        workflowHostReceiptReply:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/WorkflowHostAction'
+                message:
+                    type: string
+            required:
+                - code
+                - data
+                - message
+            type: object
+        workflowHostedExecutionReply:
+            properties:
+                contract_version:
+                    type: string
+                ok:
+                    type: boolean
+                result:
+                    $ref: '#/components/schemas/Execution'
+            required:
+                - contract_version
+                - ok
+                - result
+            type: object
+        workflowHostedSubmissionReply:
+            properties:
+                contract_version:
+                    type: string
+                ok:
+                    type: boolean
+                result:
+                    $ref: '#/components/schemas/SubmissionResult'
+            required:
+                - contract_version
+                - ok
+                - result
             type: object
         writerDocumentSyncOpenAPIRequest:
             properties:
@@ -16500,6 +17169,38 @@ paths:
             summary: Enable tool
             tags:
                 - tools
+    /api/core/translation/status:
+        get:
+            description: Reports whether the current user has a selected translation provider with credentials. Secrets are never returned.
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/translationStatusOpenAPIResponse'
+                    description: Translation configuration status
+            summary: Get translation configuration status
+            tags:
+                - translation
+    /api/core/translation:translate:
+        post:
+            description: Translates up to 5000 characters with the current user's server-side translation credential.
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/translationOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/translationOpenAPIResponse'
+                    description: Translated text
+            summary: Translate selected document text
+            tags:
+                - translation
     /api/core/upload_files:
         post:
             responses:
@@ -16928,6 +17629,24 @@ paths:
                 "200":
                     description: OK
             summary: GET /workflow-commands/{command_id}
+    /api/core/workflow-control/capabilities:
+        get:
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowCapabilitiesReply'
+                    description: Workflow control result
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowControlErrorReply'
+                    description: Stale state, invalid admission, or conflicting command
+            summary: Inspect installed workflow control protocol and schema readiness
+            tags:
+                - workflow-control
     /api/core/workflow-drafts:
         get:
             responses:
@@ -17160,6 +17879,108 @@ paths:
                                 $ref: '#/components/schemas/WorkflowTrashListResponse'
                     description: Workflow trash page
             summary: List workflow draft trash
+    /api/core/workflow-host-actions:
+        get:
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowHostPageReply'
+                    description: Workflow control result
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowControlErrorReply'
+                    description: Stale state, invalid admission, or conflicting command
+            summary: Page unsettled actions for a paired connector
+            tags:
+                - workflow-control
+    /api/core/workflow-host-actions/{action_id}:
+        get:
+            parameters:
+                - in: path
+                  name: action_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowHostClaimReply'
+                    description: Workflow control result
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowControlErrorReply'
+                    description: Stale state, invalid admission, or conflicting command
+            summary: Inspect a host action and its current control state
+            tags:
+                - workflow-control
+    /api/core/workflow-host-actions/{action_id}:claim:
+        post:
+            parameters:
+                - in: path
+                  name: action_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/WorkflowHostIdentity'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowHostClaimReply'
+                    description: Workflow control result
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowControlErrorReply'
+                    description: Stale state, invalid admission, or conflicting command
+            summary: Acquire an exclusive delivery lease without resending unknown outcomes
+            tags:
+                - workflow-control
+    /api/core/workflow-host-actions/{action_id}:settle:
+        post:
+            parameters:
+                - in: path
+                  name: action_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/WorkflowHostReceipt'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowHostReceiptReply'
+                    description: Workflow control result
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowControlErrorReply'
+                    description: Stale state, invalid admission, or conflicting command
+            summary: Record host acceptance or reconcile a durable native event
+            tags:
+                - workflow-control
     /api/core/workflow-input-resources:
         post:
             responses:
@@ -17255,6 +18076,60 @@ paths:
                 "200":
                     description: OK
             summary: POST /workflow-sessions/{session_id}/artifacts
+    /api/core/workflow-sessions/{session_id}/control:
+        get:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowControlSnapshotReply'
+                    description: Workflow control result
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowControlErrorReply'
+                    description: Stale state, invalid admission, or conflicting command
+            summary: Read one consistent workflow control and workbench snapshot
+            tags:
+                - workflow-control
+        post:
+            description: Review commands are not exposed as MCP tools. Reuse the identical command_id and body after an uncertain response. A fixed receipt and fresh control are returned separately. Confirmation requires the exact displayed review version and manifest hash.
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/WorkflowControlCommand'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowControlReply'
+                    description: Workflow control result
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowControlErrorReply'
+                    description: Stale state, invalid admission, or conflicting command
+            summary: Apply an authenticated user review or lifecycle decision
+            tags:
+                - workflow-control
     /api/core/workflow-sessions/{session_id}/events:
         get:
             parameters:
@@ -17267,6 +18142,96 @@ paths:
                 "200":
                     description: OK
             summary: GET /workflow-sessions/{session_id}/events
+    /api/core/workflow-sessions/{session_id}/executions:begin:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/workflowExecutionBeginBody'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowControlReply'
+                    description: Workflow control result
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowControlErrorReply'
+                    description: Stale state, invalid admission, or conflicting command
+            summary: Create one execution grant subject to authoritative admission
+            tags:
+                - workflow-control
+    /api/core/workflow-sessions/{session_id}/executions:stop:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/workflowExecutionStopBody'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowControlReply'
+                    description: Workflow control result
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowControlErrorReply'
+                    description: Stale state, invalid admission, or conflicting command
+            summary: Fence workflow executions and request host cancellation
+            tags:
+                - workflow-control
+    /api/core/workflow-sessions/{session_id}/host-binding:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/WorkflowHostBindingRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowControlSnapshotReply'
+                    description: Workflow control result
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowControlErrorReply'
+                    description: Stale state, invalid admission, or conflicting command
+            summary: Pair the workflow with its original host driver
+            tags:
+                - workflow-control
     /api/core/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:begin:
         post:
             parameters:
@@ -17282,8 +18247,20 @@ paths:
                     type: string
             responses:
                 "200":
-                    description: OK
-            summary: POST /workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:begin
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowHostedExecutionReply'
+                    description: Workflow control result
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowControlErrorReply'
+                    description: Stale state, invalid admission, or conflicting command
+            summary: Claim an existing queued execution and receive its fenced handle
+            tags:
+                - workflow-control
     /api/core/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:resume:
         post:
             parameters:
@@ -17299,10 +18276,23 @@ paths:
                     type: string
             responses:
                 "200":
-                    description: OK
-            summary: POST /workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:resume
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowHostedExecutionReply'
+                    description: Workflow control result
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowControlErrorReply'
+                    description: Stale state, invalid admission, or conflicting command
+            summary: Rotate the existing execution handle for explicit recovery
+            tags:
+                - workflow-control
     /api/core/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:submit:
         post:
+            description: workflow.control.v1 runs require execution_handle. Repeating the identical terminal submission returns its receipt and current control; conflicting content is rejected.
             parameters:
                 - in: path
                   name: session_id
@@ -17314,10 +18304,28 @@ paths:
                   required: true
                   schema:
                     type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/Submission'
+                required: true
             responses:
                 "200":
-                    description: OK
-            summary: POST /workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:submit
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowHostedSubmissionReply'
+                    description: Workflow control result
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowControlErrorReply'
+                    description: Stale state, invalid admission, or conflicting command
+            summary: Atomically submit artifacts, terminal outcome, and required review
+            tags:
+                - workflow-control
     /api/core/workflow-sessions/{session_id}/input-bindings:
         get:
             parameters:
@@ -17597,7 +18605,7 @@ paths:
                                 additionalProperties: true
                                 type: object
                     description: WriterDocument sync result
-            summary: Sync an edited WriterDocument to Feishu
+            summary: Sync an edited WriterDocument to its cloud provider
             tags:
                 - workflow
                 - writer
@@ -17704,7 +18712,7 @@ paths:
                                 additionalProperties: true
                                 type: object
                     description: WriterDocument write-back result
-            summary: Write the active WriterDocument back to Feishu
+            summary: Write the active WriterDocument back to its cloud provider
             tags:
                 - workflow
                 - writer

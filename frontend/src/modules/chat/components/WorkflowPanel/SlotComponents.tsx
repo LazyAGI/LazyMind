@@ -876,7 +876,7 @@ interface SlotVersionPopoverProps {
   /** User-visible version number; unlike revision, this excludes mutable Writer drafts. */
   currentVersionNumber?: number;
   currentValue?: any;
-  currentChangeSource?: 'ai' | 'human' | 'provider_sync';
+  currentChangeSource?: 'ai' | 'human' | 'provider_sync' | 'host' | 'agent';
   contentType?: string;
   onRollbackDone?: (revision?: number) => void;
   draftText?: string;
@@ -1890,6 +1890,8 @@ export function SlotText({ slot, widget, sessionId, slotId, revisionCount, onRef
   let text = '';
   if (isOffloaded) {
     text = offloadedText ?? '';
+  } else if (typeof raw === 'string') {
+    text = raw;
   } else if (raw?.text !== undefined) {
     text = String(raw.text);
   } else if (raw?.data !== undefined) {

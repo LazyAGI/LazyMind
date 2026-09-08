@@ -173,7 +173,7 @@ export interface SlotRevision {
   /** Human-readable description for image/file artifacts. */
   caption?: string;
   /** change_source: ai / human / provider_sync (cloud-provider-confirmed). */
-  change_source?: "ai" | "human" | "provider_sync";
+  change_source?: "ai" | "human" | "provider_sync" | "host" | "agent";
   /** Whether this draft has a server-owned cloud-provider baseline. */
   write_back_ready?: boolean;
   /** Whether the selected draft differs from that cloud-provider baseline. */
@@ -473,7 +473,7 @@ export interface SlotVersionEntry {
   revision: number;
   /** User-visible version number. Writer working drafts are excluded from this sequence. */
   version?: number;
-  change_source: "ai" | "human" | "provider_sync";
+  change_source: "ai" | "human" | "provider_sync" | "host" | "agent";
   created_at: string;
   selected: boolean;
   /** Whether this historical Writer revision was provider-confirmed. */

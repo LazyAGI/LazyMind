@@ -1,10 +1,34 @@
 import { reconcileWorkflowSessionStatus } from '@/modules/chat/store/workflowStatus';
 import type { WorkflowSession, WorkflowSessionStep } from '@/modules/chat/store/workflowPanel';
 import { subscribeWorkflowEventStream } from '@/modules/chat/utils/workflowEventStream';
+import type { WorkflowControlView } from '@/modules/chat/utils/workflowControl';
 
 interface RunAPI {
+  getControl?(id: string, options?: { signal?: AbortSignal }): Promise<{ data: { data: { session?: WorkflowSession; control?: WorkflowControlView; projection?: WorkflowSession['projection'] } } }>;
   getSession(id: string): Promise<{ data: { data: { session?: WorkflowSession } } }>;
   getProjection(id: string): Promise<{ data: { data: { projection?: WorkflowSession['projection'] } } }>;
+}
+
+export interface WorkflowRunSnapshot { session: WorkflowSession; control?: WorkflowControlView }
+
+export async function loadWorkflowRunSnapshot(id: string, api: RunAPI, signal?: AbortSignal): Promise<WorkflowRunSnapshot> {
+  if (api.getControl) {
+    try {
+      const response = await api.getControl(id, { signal });
+      const { session, control, projection } = response.data.data;
+      if (!session || session.session_id !== id || control?.protocol !== 'workflow.control.v1' || control.session_id !== id) throw new Error('Invalid workflow snapshot');
+      const pending = control.reviews.find(review => review.status === 'pending');
+      return { control, session: { ...session, projection,
+        current_step_id: pending?.step_id ?? panelCurrentStep(session.current_step_id, projection, session.steps),
+        status: control.continuation === 'completed' ? 'completed' : control.continuation === 'stopped' ? 'stopped' : control.continuation === 'failed' ? 'failed' : control.active_executions > 0 ? 'active' : 'waiting',
+        steps: (session.steps ?? []).filter(step => step.step_id !== '__end__'),
+      } };
+    } catch (error) {
+      const response = (error as { response?: { status?: number; data?: { error?: { code?: string } } } })?.response;
+      if (response?.status !== 404 && response?.data?.error?.code !== 'CONTROL_PROTOCOL_REQUIRED') throw error;
+    }
+  }
+  return { session: await loadWorkflowRun(id, api) };
 }
 
 /**
@@ -61,4 +85,14 @@ export function watchWorkflowRun(sessionId: string, onChange: () => void): () =>
     if (timer) clearTimeout(timer);
     subscription.close();
   };
+}
+
+/** The shared header describes execution facts, not a step's future human-review policy. */
+export function controlStatusKey(control: WorkflowControlView): string {
+  if (control.continuation === 'awaiting_user' || control.continuation === 'draining') return 'chat.workflowControlReviewStatus';
+  if (control.continuation === 'binding_required') return 'chat.workflowControlBindingStatus';
+  if (control.continuation === 'stopped') return 'chat.workflowStatusStopped';
+  if (control.continuation === 'completed') return 'chat.workflowStatusDone';
+  if (control.continuation === 'failed') return 'chat.workflowStatusFailed';
+  return control.active_executions > 0 ? 'chat.workflowStatusRunning' : 'chat.workflowStatusReady';
 }
