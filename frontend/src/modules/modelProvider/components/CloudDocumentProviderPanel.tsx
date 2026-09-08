@@ -3,6 +3,7 @@ import { Alert, Form, Input, Modal, Skeleton, Tag } from "antd";
 import {
   ArrowRightOutlined,
   FolderOpenOutlined,
+  MailOutlined,
 } from "@ant-design/icons";
 import { FeishuCredentialHintAlertFromForm } from "@/modules/dataSource/common/FeishuCredentialHintAlert";
 import { formatValidFeishuAccountNames } from "@/modules/dataSource/utils/feishuAccount";
@@ -114,9 +115,12 @@ export default function CloudDocumentProviderPanel({ vm }: { vm: CloudDocumentPr
     isFeishuAuthValid,
     isNotionAuthValid,
     isGoogleDriveAuthValid,
+    isMailAuthValid,
+    mailAccounts,
     handleManageFeishuAuth,
     handleManageLocalSource,
     handleManageGoogleDrive,
+    handleManageMail,
     handleOpenNotionSetup,
   } = vm;
 
@@ -212,6 +216,42 @@ export default function CloudDocumentProviderPanel({ vm }: { vm: CloudDocumentPr
           </div>
         );
       })}
+
+      <div
+        className={`model-provider-cloud-doc-resource-row${isMailAuthValid ? "" : " is-locked"}`}
+      >
+        <span className="model-provider-cloud-doc-resource-logo">
+          <MailOutlined />
+        </span>
+        <div className="model-provider-cloud-doc-resource-copy">
+          <h3>{t("modelProvider.mail.title")}</h3>
+          <p>
+            {isMailAuthValid
+              ? t("modelProvider.mail.connectedHint", { account: mailAccounts.join("、") })
+              : t("modelProvider.mail.hubHint")}
+          </p>
+        </div>
+        <Tag
+          className="model-provider-cloud-doc-resource-status"
+          color={isMailAuthValid ? "success" : "default"}
+        >
+          {isMailAuthValid
+            ? t("modelProvider.cloudDocuments.authValid")
+            : t("modelProvider.cloudDocuments.credentialMissing")}
+        </Tag>
+        <div className="model-provider-cloud-doc-resource-controls">
+          <button
+            type="button"
+            className="model-provider-cloud-doc-resource-action"
+            onClick={handleManageMail}
+          >
+            {isMailAuthValid
+              ? t("modelProvider.cloudDocuments.manageAccount")
+              : t("modelProvider.cloudDocuments.configureConnection")}
+            <ArrowRightOutlined />
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

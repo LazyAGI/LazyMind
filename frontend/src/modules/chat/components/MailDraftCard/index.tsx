@@ -26,6 +26,7 @@ export interface MailDraftPreview {
   requires_reauth?: boolean;
   reauth_path?: string;
   delivery_unknown?: boolean;
+  mailboxes?: Array<{ email?: string; provider?: string }>;
 }
 
 export interface MailDraftUploadedAttachment {
@@ -366,7 +367,7 @@ export default function MailDraftCard({
           showIcon
           message={t("chat.mailDraft.reauthRequired")}
           action={
-            <Link to={draft.reauth_path || "/external-connections/mail"}>
+            <Link to={draft.reauth_path || "/cloud-documents/mail"}>
               {t("chat.mailDraft.reauth")}
             </Link>
           }

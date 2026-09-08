@@ -27,3 +27,4 @@ export const CLOUD_DOCUMENTS_NOTION_SETUP_PATH =
   "/cloud-documents/docs/notion-setup";
 export const CLOUD_DOCUMENTS_GOOGLE_DRIVE_SETUP_PATH =
   "/cloud-documents/docs/google-drive-setup";
+export const CLOUD_DOCUMENTS_MAIL_PATH = "/cloud-documents/mail";

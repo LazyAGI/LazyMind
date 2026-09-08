@@ -107,14 +107,6 @@ const zhCN = {
       tools: "工具",
       defaultServices: "系统默认设置",
     },
-    externalConnections: {
-      title: "外部连接",
-      subtitle: "连接邮箱等外部账号，在对话中检索、阅读和发送。",
-      configure: "配置连接",
-      manage: "管理账号",
-      authValid: "已连接",
-      credentialMissing: "待连接",
-    },
     cloudDocuments: {
       title: "云文档",
       subtitle: "连接云文档后，可在对话中对云文档进行操作，也可以将云文档定期同步到知识库",
@@ -286,7 +278,7 @@ const zhCN = {
       connectedHint: "当前已连接：{{account}}",
       description:
         "支持网易个人/企业邮箱、腾讯 QQ/企业邮箱的授权码，以及 Gmail 的应用专用密码（IMAP）。连接后可在对话中 @邮箱 检索、阅读、引用邮件并生成草稿；发送前必须预览确认。不会在浏览器中保存密码。",
-      back: "返回外部连接",
+      back: "返回云文档",
       empty: "尚未连接邮箱。网易、腾讯（含企业邮）和 Gmail 可以同时连接，右侧开关控制是否在对话中启用。",
       connectedCount: "已连接 {{count}} 个邮箱",
       multiEnableHint: "{{accounts}}。右侧开关可同时开启，关闭后该邮箱不会用于对话检索和发送。历史引用内容不会删除。",
@@ -900,7 +892,6 @@ const zhCN = {
     dataSourceManagement: "数据源管理",
     datasetManagement: "数据集",
     cloudDocuments: "云文档",
-    externalConnections: "外部连接",
     terminalConnection: "终端连接",
     systemAdministrator: "系统管理员",
     normalUser: "普通用户",
@@ -1176,6 +1167,7 @@ const zhCN = {
     detailsReadAndReturn: "我已阅读并返回",
     consentVersion: "协议版本 {{version}}",
     consentChecking: "正在同步用户协议状态...",
+    consentCheckFailed: "无法同步用户协议状态，请重试",
     consentPersistFailed: "保存同意状态失败，请稍后重试",
   },
 
@@ -1742,6 +1734,13 @@ const zhCN = {
       sentAt: "发送成功，时间：{{time}}",
       reauthRequired: "邮箱授权已失效，请重新授权后再发送。",
       reauth: "重新授权",
+    },
+    mailMailbox: {
+      title: "选择发件邮箱",
+      description: "当前有多个已连接邮箱。请选择用来回复或发送的账号，确认后会继续邮件预览。",
+      confirm: "使用该邮箱继续",
+      confirmQuery: "请使用 {{mailbox}} 作为发件邮箱，继续刚才的邮件草稿预览。",
+      empty: "没有已连接且开启对话开关的邮箱。请先到云文档连接邮箱。",
     },
     contextUsageHistoryUser: "用户消息",
     contextUsageHistoryAssistant: "助手消息",

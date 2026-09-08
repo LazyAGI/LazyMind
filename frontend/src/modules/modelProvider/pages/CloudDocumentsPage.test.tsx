@@ -143,6 +143,7 @@ describe("CloudDocumentsPage onboarding", () => {
       isFeishuAuthValid: false,
       isNotionAuthValid: false,
       isGoogleDriveAuthValid: false,
+      isMailAuthValid: false,
       handleManageLocalSource: vi.fn(),
       handleManageFeishuAuth: vi.fn(),
       handleManageGoogleDrive: vi.fn(),
@@ -201,6 +202,19 @@ describe("CloudDocumentsPage onboarding", () => {
     fireEvent.click(screen.getByRole("button", { name: "新手指引" }));
 
     expect(await screen.findByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("counts mailbox as a fifth connected-provider type", async () => {
+    window.localStorage.setItem(
+      "lazymind.cloud-documents.onboarding.v2",
+      "seen",
+    );
+    const { unmount } = renderPage();
+    expect(await screen.findByText("0 / 5")).toBeInTheDocument();
+    unmount();
+    mocks.vm.isMailAuthValid = true;
+    renderPage();
+    expect(await screen.findByText("1 / 5")).toBeInTheDocument();
   });
 
   it("opens the selected provider setup from the source-choice stage", async () => {

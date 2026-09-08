@@ -163,8 +163,46 @@ def test_search_merges_enabled_mailboxes(mail_auth):
         filtered = MailToolkit().search(keyword='invoice', mailbox='b@163.com')
 
     assert {item['mailbox'] for item in result['items']} == {'a@qq.com', 'b@163.com'}
-    assert filtered['mailboxes'] == ['b@163.com']
-    assert filtered['items'][0]['mailbox'] == 'b@163.com'
+def test_compose_asks_for_mailbox_when_multiple_accounts_and_none_named(mail_auth):
+    lazyllm.globals.config['dynamic_tool_auth'] = {
+        'mail': [
+            json.dumps({
+                'provider': 'qqmail',
+                'email': 'a@qq.com',
+                'secret': 'auth-a',
+                'status': 'ACTIVE',
+            }),
+            json.dumps({
+                'provider': 'netease163',
+                'email': 'b@163.com',
+                'secret': 'auth-b',
+                'status': 'ACTIVE',
+            }),
+        ],
+    }
+    preview = MailToolkit().compose_draft(to='to@b.com', subject='hi', body='body')
+    assert preview['status'] == 'needs_mailbox'
+    assert preview['mailbox'] == ''
+    assert {row['email'] for row in preview['mailboxes']} == {'a@qq.com', 'b@163.com'}
+    lazyllm.globals['agentic_config']['mail_mailbox_confirm'] = 'b@163.com'
+    lazyllm.globals['agentic_config']['mail_mailbox_confirm_draft_id'] = preview['draft_id']
+    updated = MailToolkit().update_draft(preview['draft_id'])
+    assert updated['status'] == 'draft'
+    assert updated['mailbox'] == 'b@163.com'
+    named = MailToolkit().compose_draft(
+        to='to@b.com',
+        subject='named',
+        body='body',
+        mailbox='a@qq.com',
+    )
+    assert named['status'] == 'draft'
+    assert named['mailbox'] == 'a@qq.com'
+
+
+def test_compose_uses_the_only_enabled_mailbox_without_a_picker(mail_auth):
+    preview = MailToolkit().compose_draft(to='to@b.com', subject='hi', body='body')
+    assert preview['status'] == 'draft'
+    assert preview['mailbox'] == 'user@qq.com'
 
 
 def test_compose_accepts_string_attachment_path(mail_auth, tmp_path):

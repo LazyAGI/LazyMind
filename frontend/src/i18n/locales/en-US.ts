@@ -109,14 +109,6 @@ const enUS = {
       tools: "Tools",
       defaultServices: "System Default Settings",
     },
-    externalConnections: {
-      title: "External Connections",
-      subtitle: "Connect mailboxes and other accounts to search, read, and send in chat.",
-      configure: "Configure",
-      manage: "Manage account",
-      authValid: "Connected",
-      credentialMissing: "Not connected",
-    },
     cloudDocuments: {
       title: "Cloud Documents",
       subtitle:
@@ -301,7 +293,7 @@ const enUS = {
       connectedHint: "Connected: {{account}}",
       description:
         "Supports NetEase personal/enterprise and Tencent QQ/enterprise authorization codes, plus Gmail app passwords over IMAP. After connecting, @ Mail in chat to search, read, cite, and draft messages. Sending always requires preview confirmation. Passwords are not stored in the browser.",
-      back: "Back to external connections",
+      back: "Back to cloud documents",
       empty: "No mailbox connected. NetEase, Tencent (including enterprise mail), and Gmail can all be connected; the right-side switch controls whether they are used in chat.",
       connectedCount: "{{count}} mailboxes connected",
       multiEnableHint: "{{accounts}}. Use the right-side switch to enable them in chat at the same time. Turning a switch off stops search and send for that mailbox. Cited mail in past tasks is kept.",
@@ -927,7 +919,6 @@ const enUS = {
     dataSourceManagement: "Data Sources",
     datasetManagement: "Datasets",
     cloudDocuments: "Cloud Documents",
-    externalConnections: "External Connections",
     terminalConnection: "Channel Connections",
     systemAdministrator: "System Administrator",
     normalUser: "Regular User",
@@ -1203,6 +1194,7 @@ const enUS = {
     detailsReadAndReturn: "I have read this and return",
     consentVersion: "Agreement version {{version}}",
     consentChecking: "Syncing user agreement status...",
+    consentCheckFailed: "Could not sync user agreement status. Please try again.",
     consentPersistFailed: "Failed to save agreement. Please try again.",
   },
 
@@ -1787,6 +1779,13 @@ const enUS = {
       sentAt: "Sent at {{time}}",
       reauthRequired: "Mailbox authorization expired. Reauthorize, then retry.",
       reauth: "Reauthorize",
+    },
+    mailMailbox: {
+      title: "Choose sending mailbox",
+      description: "Several mailboxes are connected. Pick the account to reply or send from, then the send preview continues.",
+      confirm: "Continue with this mailbox",
+      confirmQuery: "Use {{mailbox}} as the sending mailbox and continue the mail draft preview.",
+      empty: "No chat-enabled mailbox is connected. Connect one under Cloud documents.",
     },
     contextUsageHistoryUser: "User message",
     contextUsageHistoryAssistant: "Assistant message",

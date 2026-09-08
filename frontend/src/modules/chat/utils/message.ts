@@ -49,14 +49,6 @@ export function isAskPendingReadOnly(
   return !!askAnswered || (!isLatestMessage && hasLaterUserMessage);
 }
 
-export function isAskPendingReadOnly(
-  askAnswered: boolean | undefined,
-  isLatestMessage: boolean,
-  hasLaterUserMessage = false,
-) {
-  return !!askAnswered || (!isLatestMessage && hasLaterUserMessage);
-}
-
 export function shouldRenderAskPending(
   askAnswered: boolean | undefined,
   isLatestMessage: boolean,

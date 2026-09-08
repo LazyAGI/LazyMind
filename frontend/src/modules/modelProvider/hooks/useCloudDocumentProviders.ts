@@ -33,10 +33,13 @@ import {
   CLOUD_DOCUMENTS_FEISHU_PATH,
   CLOUD_DOCUMENTS_GOOGLE_DRIVE_PATH,
   CLOUD_DOCUMENTS_LOCAL_PATH,
+  CLOUD_DOCUMENTS_MAIL_PATH,
   CLOUD_DOCUMENTS_PATH,
 } from "../utils/cloudDocumentUrls";
 import { useLocalDataSourceSettings } from "./useLocalDataSourceSettings";
 import { markCloudDocumentConnectionSuccess } from "../utils/cloudDocumentOnboarding";
+
+const MAIL_PROVIDERS = ["gmailimap", "qqmail", "qqexmail", "netease163", "neteaseqiye"] as const;
 
 export function useCloudDocumentProviders() {
   const { t } = useTranslation();
@@ -65,6 +68,7 @@ export function useCloudDocumentProviders() {
   >([]);
   const [googleDriveConnection, setGoogleDriveConnection] =
     useState<ManagementContext["notionOauthConnection"]>(null);
+  const [mailAccounts, setMailAccounts] = useState<string[]>([]);
   const [oauthConnection, setOauthConnection] = useState<ManagementContext["oauthConnection"]>(null);
   const [oauthState, setOauthState] = useState<OAuthState>("pending");
   const [connectionVerified, setConnectionVerified] = useState(false);
@@ -96,6 +100,7 @@ export function useCloudDocumentProviders() {
   const isGoogleDriveAuthValid =
     googleDriveConnection?.status === "connected" &&
     Boolean(googleDriveConnection.connectionId);
+  const isMailAuthValid = mailAccounts.length > 0;
   const ctx = {} as ManagementContext;
   Object.assign(ctx, {
     t,
@@ -238,6 +243,28 @@ export function useCloudDocumentProviders() {
     }
   };
 
+  const refreshMailAccounts = async () => {
+    try {
+      const names: string[] = [];
+      for (const provider of MAIL_PROVIDERS) {
+        const response = await dataSourceCloudOauthApi.listConnectionsApiAuthserviceV1CloudConnectionsGet({
+          provider,
+          status: "ACTIVE",
+        });
+        const items = getCloudConnectionItems(response.data);
+        for (const item of items) {
+          const name = String(item.display_name || (item as { client_id?: string }).client_id || "").trim();
+          if (name) {
+            names.push(name);
+          }
+        }
+      }
+      setMailAccounts(names);
+    } catch {
+      setMailAccounts([]);
+    }
+  };
+
   const refreshPageData = async () => {
     setOauthLoading(true);
     try {
@@ -247,6 +274,7 @@ export function useCloudDocumentProviders() {
         ctx.refreshFeishuAuthAccounts(),
         ctx.refreshNotionAuthConnection(),
         refreshGoogleDriveConnection(),
+        refreshMailAccounts(),
       ]);
     } finally {
       setOauthLoading(false);
@@ -340,6 +368,10 @@ export function useCloudDocumentProviders() {
     navigate(CLOUD_DOCUMENTS_GOOGLE_DRIVE_PATH);
   };
 
+  const handleManageMail = () => {
+    navigate(CLOUD_DOCUMENTS_MAIL_PATH);
+  };
+
   const handleOpenNotionSetup = () => {
     openCloudSetupModal("notion", "auth");
   };
@@ -423,14 +455,17 @@ export function useCloudDocumentProviders() {
     isFeishuAuthValid,
     isNotionAuthValid,
     isGoogleDriveAuthValid,
+    isMailAuthValid,
     isFeishuSetupReady,
     isNotionSetupReady,
     validFeishuAccounts,
     notionOauthConnection,
     googleDriveConnection,
+    mailAccounts,
     handleManageFeishuAuth,
     handleManageLocalSource,
     handleManageGoogleDrive,
+    handleManageMail,
     handleOpenNotionSetup,
     openCloudSetupModal,
     handleSaveFeishuSetup,

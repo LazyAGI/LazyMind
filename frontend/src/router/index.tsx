@@ -30,7 +30,6 @@ const GroupDetail = lazy(() => import("@/modules/admin/pages/group/detail.tsx"))
 const DatabaseConnectionsPage = lazy(() => import("@/modules/dataSource/database"));
 const DataSourceFeishuCallback = lazy(() => import("@/modules/dataSource/common/feishuCallback"));
 const CloudDocumentsPage = lazy(() => import("@/modules/modelProvider/pages/CloudDocumentsPage"));
-const ExternalConnectionsPage = lazy(() => import("@/modules/modelProvider/pages/ExternalConnectionsPage"));
 const FeishuAccountPage = lazy(() => import("@/modules/modelProvider/pages/FeishuAccountPage"));
 const GoogleDriveConnectionPage = lazy(() => import("@/modules/modelProvider/pages/GoogleDriveConnectionPage"));
 const EmailConnectionPage = lazy(() => import("@/modules/modelProvider/pages/EmailConnectionPage"));
@@ -174,12 +173,9 @@ export default function AppRouter() {
             path="channels/feishu"
             element={<Navigate to="/channels?provider=feishu" replace />}
           />
-          <Route path="external-connections" element={<CloudDocumentsLayout />}>
-            <Route index element={<ExternalConnectionsPage />} />
-            <Route path="mail" element={<EmailConnectionPage />} />
-          </Route>
           <Route path="cloud-documents" element={<CloudDocumentsLayout />}>
             <Route index element={<CloudDocumentsPage />} />
+            <Route path="mail" element={<EmailConnectionPage />} />
             <Route path="local" element={<LocalDataSourcePage />} />
             <Route path="feishu" element={<FeishuAccountPage />} />
             <Route path="google-drive" element={<GoogleDriveConnectionPage />} />
@@ -194,6 +190,7 @@ export default function AppRouter() {
           <Route path="model-providers/tools" element={<Navigate to="/settings?section=system_tools" replace />} />
           <Route path="model-providers/external-services" element={<Navigate to="/settings?section=system_tools" replace />} />
           <Route path="model-providers/cloud-documents" element={<Navigate to="/cloud-documents" replace />} />
+          <Route path="model-providers/cloud-documents/mail" element={<Navigate to="/cloud-documents/mail" replace />} />
           <Route path="model-providers/cloud-documents/local" element={<Navigate to="/cloud-documents/local" replace />} />
           <Route path="model-providers/cloud-documents/feishu" element={<Navigate to="/cloud-documents/feishu" replace />} />
           <Route path="model-providers/cloud-documents/google-drive" element={<Navigate to="/cloud-documents/google-drive" replace />} />

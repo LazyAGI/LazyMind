@@ -43,6 +43,8 @@ export interface SendMessageParams {
     attachment_paths?: string[];
     attachments?: Array<{ filename: string; content_base64: string }>;
   };
+  mail_mailbox_confirm?: string;
+  mail_mailbox_confirm_draft_id?: string;
 }
 
 export interface ChatInputImperativeProps {

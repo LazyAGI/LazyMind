@@ -1,7 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import type { CloudDocumentProvidersVm } from "../hooks/useCloudDocumentProviders";
 import CloudDocumentProviderPanel from "./CloudDocumentProviderPanel";
 
 const labels: Record<string, string> = {
@@ -10,11 +9,9 @@ const labels: Record<string, string> = {
   "modelProvider.cloudDocuments.authPending": "待授权",
 };
 
-function createVm(
-  overrides: Partial<CloudDocumentProvidersVm> = {},
-): CloudDocumentProvidersVm {
+function createVm(overrides: Record<string, unknown> = {}) {
   return {
-    t: ((key: string) => labels[key] || key) as CloudDocumentProvidersVm["t"],
+    t: (key: string) => labels[key] || key,
     loading: false,
     canCreateLocalSource: false,
     localSourceCount: 0,
@@ -26,12 +23,15 @@ function createVm(
     validFeishuAccounts: [],
     notionOauthConnection: null,
     googleDriveConnection: null,
+    isMailAuthValid: false,
+    mailAccounts: [],
     handleManageFeishuAuth: vi.fn(),
     handleManageLocalSource: vi.fn(),
     handleManageGoogleDrive: vi.fn(),
+    handleManageMail: vi.fn(),
     handleOpenNotionSetup: vi.fn(),
     ...overrides,
-  } as unknown as CloudDocumentProvidersVm;
+  } as never;
 }
 
 describe("CloudDocumentProviderPanel", () => {
@@ -49,7 +49,7 @@ describe("CloudDocumentProviderPanel", () => {
   it("shows only the missing-credentials status for unverified providers", () => {
     render(<CloudDocumentProviderPanel vm={createVm()} />);
 
-    expect(screen.getAllByText("待设置凭据")).toHaveLength(3);
+    expect(screen.getAllByText("待设置凭据")).toHaveLength(4);
     expect(screen.queryByText("待授权")).not.toBeInTheDocument();
   });
 
@@ -60,11 +60,12 @@ describe("CloudDocumentProviderPanel", () => {
           isFeishuAuthValid: true,
           isNotionAuthValid: true,
           isGoogleDriveAuthValid: true,
+          isMailAuthValid: true,
         })}
       />,
     );
 
-    expect(screen.getAllByText("认证有效")).toHaveLength(3);
+    expect(screen.getAllByText("认证有效")).toHaveLength(4);
     expect(screen.queryByText("待设置凭据")).not.toBeInTheDocument();
     expect(screen.queryByText("待授权")).not.toBeInTheDocument();
   });

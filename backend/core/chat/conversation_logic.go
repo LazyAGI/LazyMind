@@ -1308,6 +1308,22 @@ func resolveMailDraftConfirmRevision(raw map[string]any) int {
 	return mailDraftConfirmRevision(raw["mail_draft_confirm_revision"])
 }
 
+func resolveMailMailboxConfirm(raw map[string]any) string {
+	mailbox, ok := raw["mail_mailbox_confirm"].(string)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(mailbox)
+}
+
+func resolveMailMailboxConfirmDraftID(raw map[string]any) string {
+	draftID, ok := raw["mail_mailbox_confirm_draft_id"].(string)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(draftID)
+}
+
 func resolveMailDraftPatch(raw map[string]any) map[string]any {
 	patch, ok := raw["mail_draft_patch"].(map[string]any)
 	if !ok || len(patch) == 0 {
@@ -1318,10 +1334,60 @@ func resolveMailDraftPatch(raw map[string]any) map[string]any {
 		switch key {
 		case "to", "cc", "subject", "body":
 			out[key] = value
+		case "attachment_paths":
+			out[key] = sanitizeMailDraftAttachmentPaths(value)
+		case "attachments":
+			out[key] = sanitizeMailDraftUploads(value)
 		}
 	}
 	if len(out) == 0 {
 		return nil
+	}
+	return out
+}
+
+func sanitizeMailDraftAttachmentPaths(value any) []string {
+	items, ok := value.([]any)
+	if !ok {
+		return []string{}
+	}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		path, ok := item.(string)
+		if !ok {
+			continue
+		}
+		path = strings.TrimSpace(path)
+		if path == "" {
+			continue
+		}
+		out = append(out, path)
+	}
+	return out
+}
+
+func sanitizeMailDraftUploads(value any) []map[string]any {
+	items, ok := value.([]any)
+	if !ok {
+		return []map[string]any{}
+	}
+	out := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		raw, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		filename, _ := raw["filename"].(string)
+		content, _ := raw["content_base64"].(string)
+		filename = strings.TrimSpace(filename)
+		content = strings.TrimSpace(content)
+		if filename == "" || content == "" {
+			continue
+		}
+		out = append(out, map[string]any{
+			"filename":       filename,
+			"content_base64": content,
+		})
 	}
 	return out
 }
@@ -1399,6 +1465,12 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 	}
 	if patch := resolveMailDraftPatch(raw); patch != nil {
 		body["mail_draft_patch"] = patch
+	}
+	if mailbox := resolveMailMailboxConfirm(raw); mailbox != "" {
+		body["mail_mailbox_confirm"] = mailbox
+	}
+	if draftID := resolveMailMailboxConfirmDraftID(raw); draftID != "" {
+		body["mail_mailbox_confirm_draft_id"] = draftID
 	}
 	if mentionContext := buildMentionResourceContext(ctx, db, userID, histories, raw); mentionContext != "" {
 		body["query"] = mentionContext + "\n\nUser query:\n" + query

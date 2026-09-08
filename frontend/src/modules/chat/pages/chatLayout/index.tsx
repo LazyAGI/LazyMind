@@ -587,6 +587,13 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         !Array.isArray(extras.mail_draft_patch)
           ? { mail_draft_patch: extras.mail_draft_patch }
           : {}),
+        ...(typeof extras?.mail_mailbox_confirm === "string" && extras.mail_mailbox_confirm
+          ? { mail_mailbox_confirm: extras.mail_mailbox_confirm }
+          : {}),
+        ...(typeof extras?.mail_mailbox_confirm_draft_id === "string" &&
+        extras.mail_mailbox_confirm_draft_id
+          ? { mail_mailbox_confirm_draft_id: extras.mail_mailbox_confirm_draft_id }
+          : {}),
         // If the user changed workflow settings before a conversation was created,
         // carry them in the first request so Go can persist them on ensureConversation.
         // Only send the three known fields to avoid polluting the payload with API response leftovers.

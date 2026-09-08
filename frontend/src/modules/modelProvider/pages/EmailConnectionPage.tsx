@@ -26,7 +26,7 @@ import {
   enableCloudConnectionForChat,
   setCloudConnectionChatEnabled,
 } from "@/modules/dataSource/common/feishuOAuth";
-import { EXTERNAL_CONNECTIONS_PATH } from "@/modules/modelProvider/utils/externalConnectionUrls";
+import { CLOUD_DOCUMENTS_PATH } from "@/modules/modelProvider/utils/cloudDocumentUrls";
 import neteaseLogo from "../assets/mail/netease.png";
 import qqmailLogo from "../assets/mail/qqmail.png";
 import qqexmailLogo from "../assets/mail/qqexmail.png";
@@ -509,7 +509,7 @@ export default function EmailConnectionPage() {
   return (
     <div className="google-drive-provider-page mail-provider-page">
       <header className="google-drive-provider-header">
-        <Button type="link" icon={<ArrowLeftOutlined />} onClick={() => navigate(EXTERNAL_CONNECTIONS_PATH)}>
+        <Button type="link" icon={<ArrowLeftOutlined />} onClick={() => navigate(CLOUD_DOCUMENTS_PATH)}>
           {t("modelProvider.mail.back")}
         </Button>
         <div className="google-drive-provider-heading">

@@ -62,7 +62,7 @@ _IMAP_ENDPOINTS = {
     # OAuth client / consent-screen setup and are the more user-friendly connect path.
     'gmailimap': {'imap_host': 'imap.gmail.com', 'smtp_host': 'smtp.gmail.com'},
 }
-_REAUTH_PATH = '/external-connections/mail'
+_REAUTH_PATH = '/cloud-documents/mail'
 _EMAIL_RE = re.compile(r'[^,\s;]+@[^,\s;]+')
 _COMMON_ATTACHMENT_EXTS = set(CHAT_ATTACHMENT_EXTENSIONS) | {
     '.zip', '.rar', '.7z', '.xlsx', '.xls', '.csv', '.ppt', '.odt', '.rtf',
@@ -185,7 +185,7 @@ def _require_accounts() -> list[dict[str, str]]:
     if not accounts:
         _fail(
             'No mailbox is enabled for chat. Connect a supported mailbox in '
-            '资源库 → 外部连接 → 邮箱连接 and turn the switch on.'
+            '资源库 → 云文档 → 邮箱连接 and turn the switch on.'
         )
     valid = _enabled_accounts()
     if valid:
@@ -197,11 +197,11 @@ def _require_accounts() -> list[dict[str, str]]:
     if expired:
         _fail(
             'Mailbox authorization is invalid. Re-authorize the connected account '
-            'in 资源库 → 外部连接 → 邮箱连接.'
+            'in 资源库 → 云文档 → 邮箱连接.'
         )
     _fail(
         'No mailbox is enabled for chat. Connect a supported mailbox in '
-        '资源库 → 外部连接 → 邮箱连接 and turn the switch on.'
+        '资源库 → 云文档 → 邮箱连接 and turn the switch on.'
     )
 
 
@@ -236,7 +236,7 @@ def _unavailable_mailbox(mailbox: str) -> dict[str, Any]:
             f'Enabled mailboxes: {emails}. '
             'Stop now. Do not call MailToolkit_search, read, or send_draft again for this '
             'user request, and do not omit mailbox to search other accounts. '
-            'Tell the user to connect and enable this mailbox in 资源库 → 外部连接 → 邮箱连接.'
+            'Tell the user to connect and enable this mailbox in 资源库 → 云文档 → 邮箱连接.'
         ),
     }
 
@@ -250,6 +250,52 @@ def _pick_account(mailbox: str = '') -> dict[str, str]:
     if cred is not None:
         return cred
     _fail(_unavailable_mailbox(key)['message'])
+
+
+def _mailbox_choice_rows(accounts: list[dict[str, str]] | None = None) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    for cred in accounts if accounts is not None else _enabled_accounts():
+        email_addr = (cred.get('email') or '').strip()
+        if not email_addr:
+            continue
+        rows.append({
+            'email': email_addr,
+            'provider': (cred.get('provider') or '').strip(),
+        })
+    return rows
+
+
+def _confirmed_mailbox(draft_id: str = '') -> str:
+    cfg = _agentic_config()
+    mailbox = str(cfg.get('mail_mailbox_confirm') or '').strip()
+    if not mailbox:
+        return ''
+    bound = str(cfg.get('mail_mailbox_confirm_draft_id') or '').strip()
+    if bound and draft_id and bound != str(draft_id).strip():
+        return ''
+    return mailbox
+
+
+def _resolve_sending_account(
+    mailbox: str = '',
+    *,
+    draft_id: str = '',
+    draft_mailbox: str = '',
+) -> dict[str, str] | None:
+    accounts = _require_accounts()
+    requested = (
+        str(mailbox or '').strip()
+        or str(draft_mailbox or '').strip()
+        or _confirmed_mailbox(draft_id)
+    )
+    if requested:
+        cred = _find_account(requested)
+        if cred is None:
+            _fail(_unavailable_mailbox(requested)['message'])
+        return cred
+    if len(accounts) == 1:
+        return accounts[0]
+    return None
 
 
 def _require_connection() -> dict[str, str]:
@@ -783,11 +829,11 @@ class _IMAPBackend:
         except imaplib.IMAP4.error as orig:
             client.logout()
             raise ToolExecutionError(
-                'Mailbox authorization expired. Re-authorize the mailbox in 资源库 → 外部连接 → 邮箱连接.'
+                'Mailbox authorization expired. Re-authorize the mailbox in 资源库 → 云文档 → 邮箱连接.'
             ) from orig
         if status != 'OK':
             client.logout()
-            _fail('Mailbox authorization expired. Re-authorize the mailbox in 资源库 → 外部连接 → 邮箱连接.')
+            _fail('Mailbox authorization expired. Re-authorize the mailbox in 资源库 → 云文档 → 邮箱连接.')
         return client
 
     def search(self, **filters: str) -> dict[str, Any]:
@@ -1066,7 +1112,7 @@ class _IMAPBackend:
                 refused = smtp.sendmail(self.email, recipients, message.as_bytes())
         except smtplib.SMTPAuthenticationError as orig:
             raise ToolExecutionError(
-                'Mailbox authorization expired. Re-authorize the mailbox in 资源库 → 外部连接 → 邮箱连接.'
+                'Mailbox authorization expired. Re-authorize the mailbox in 资源库 → 云文档 → 邮箱连接.'
             ) from orig
         except smtplib.SMTPRecipientsRefused as orig:
             detail = ', '.join(
@@ -1099,7 +1145,7 @@ def _backend(cred: dict[str, str]):
     if provider in _IMAP_ENDPOINTS:
         return _IMAPBackend(cred)
     _fail(
-        'No mailbox is enabled for chat. Connect a supported mailbox in 资源库 → 外部连接 → 邮箱连接.'
+        'No mailbox is enabled for chat. Connect a supported mailbox in 资源库 → 云文档 → 邮箱连接.'
     )
 
 
@@ -1152,6 +1198,7 @@ def _preview(draft: dict[str, Any]) -> dict[str, Any]:
         'requires_reauth': bool(draft.get('requires_reauth')),
         'reauth_path': _REAUTH_PATH if draft.get('requires_reauth') else '',
         'delivery_unknown': status == 'delivery_unknown',
+        'mailboxes': list(draft.get('mailboxes') or []),
     }
 
 
@@ -1172,6 +1219,28 @@ def _emit_draft_card(draft: dict[str, Any]) -> dict[str, Any]:
     return preview
 
 
+def _emit_mailbox_card(draft: dict[str, Any]) -> dict[str, Any]:
+    choices = list(draft.get('mailboxes') or _mailbox_choice_rows())
+    draft['mailboxes'] = choices
+    preview = _preview(draft)
+    emails = [row.get('email') or '' for row in choices if row.get('email')]
+    _write_agent_data(
+        'ask_pending',
+        ask_id=str(uuid.uuid4()),
+        title='选择发件邮箱',
+        description='未指定发件邮箱。请从已连接且已开启对话开关的邮箱中选择一个，确认后再预览发送。',
+        questions=[{
+            'text': '请选择用来回复或发送的邮箱',
+            'type': 'single',
+            'choices': emails,
+            'allow_other': False,
+        }],
+        mail_draft=preview,
+        mail_mailbox_choice=preview,
+    )
+    return preview
+
+
 class MailToolkit:
     """Search, read, cite, and send mail through enabled NetEase, Tencent, and Gmail accounts.
 
@@ -1180,7 +1249,11 @@ class MailToolkit:
     because it does not require a Google Cloud OAuth client or consent screen.
     Search results are tagged with mailbox/provider. When more than one mailbox is
     enabled, pass mailbox (email address or provider name) to read, attach, compose,
-    or send. Sending always requires the user to confirm the draft preview card.
+    or send. If the user did not name a sending mailbox, compose_draft shows a
+    mailbox picker card listing only connected chat-enabled accounts; after the
+    user confirms, call update_draft with that mailbox so the send preview appears.
+    Do not invent a mailbox and do not call ask_user for this choice.
+    Sending always requires the user to confirm the draft preview card.
     Change an existing unsent draft with update_draft instead of composing a new one.
     """
 
@@ -1365,12 +1438,16 @@ class MailToolkit:
                 and must not be mixed into the chat file picker. Arbitrary paths
                 outside the workspace or conversation uploads are rejected.
             in_reply_to: Optional original Message-ID when composing a reply.
-            mailbox: Optional sending account (email or provider). Defaults to the first enabled mailbox.
+            mailbox: Sending account (email or provider). Required when more than one
+                mailbox is enabled and the user named one. If omitted and several
+                accounts are enabled, this method shows a mailbox picker card and
+                does not guess. After the user confirms, call update_draft with
+                that mailbox (do not compose a second draft).
         """
         requested = str(mailbox or '').strip()
         if requested and _find_account(requested) is None:
             return _unavailable_mailbox(requested)
-        cred = _pick_account(mailbox)
+        cred = _resolve_sending_account(mailbox)
         recipients = _split_addresses(to)
         if not recipients:
             raise ToolExecutionError(
@@ -1379,6 +1456,27 @@ class MailToolkit:
             )
         paths = _resolve_attachment_paths(attachment_paths)
         now = _iso(datetime.now(timezone.utc))
+        if cred is None:
+            draft = {
+                'draft_id': f'draft_{uuid.uuid4().hex[:16]}',
+                'revision': 1,
+                'mailbox': '',
+                'provider': '',
+                'to': recipients,
+                'cc': _split_addresses(cc),
+                'subject': str(subject or '').strip(),
+                'body': str(body or ''),
+                'attachment_paths': paths,
+                'in_reply_to': str(in_reply_to or '').strip(),
+                'status': 'needs_mailbox',
+                'mailboxes': _mailbox_choice_rows(),
+                'sent_at': '',
+                'last_error': '',
+                'created_at': now,
+                'updated_at': now,
+            }
+            _save_draft(draft)
+            return _emit_mailbox_card(draft)
         draft = {
             'draft_id': f'draft_{uuid.uuid4().hex[:16]}',
             'revision': 1,
@@ -1425,17 +1523,32 @@ class MailToolkit:
             attachment_paths: Replace attachments when provided. Pass [] to clear.
                 Accepts workspace artifacts or conversation-upload filenames.
             in_reply_to: Replace reply Message-ID when provided.
-            mailbox: Optional sending account (email or provider).
+            mailbox: Sending account (email or provider). Pass the mailbox the
+                user confirmed on the picker card.
         """
         if not str(draft_id or '').strip():
             raise ToolExecutionError('draft_id is required')
         draft = _load_draft(draft_id)
         if str(draft.get('status') or '') == 'sent':
             _fail('Cannot update a draft that was already sent.')
-        if str(mailbox or '').strip():
-            cred = _pick_account(mailbox)
-            draft['mailbox'] = cred['email']
-            draft['provider'] = cred['provider']
+        cred = _resolve_sending_account(
+            mailbox,
+            draft_id=str(draft.get('draft_id') or ''),
+            draft_mailbox=str(draft.get('mailbox') or draft.get('provider') or ''),
+        )
+        if cred is None:
+            draft['status'] = 'needs_mailbox'
+            draft['mailbox'] = ''
+            draft['provider'] = ''
+            draft['mailboxes'] = _mailbox_choice_rows()
+            draft['revision'] = _draft_revision(draft) + 1
+            draft['updated_at'] = _iso(datetime.now(timezone.utc))
+            _save_draft(draft)
+            return _emit_mailbox_card(draft)
+        draft['mailbox'] = cred['email']
+        draft['provider'] = cred['provider']
+        if str(draft.get('status') or '') == 'needs_mailbox':
+            draft['status'] = 'draft'
         if to is not None:
             recipients = _split_addresses(to)
             if not recipients:
@@ -1470,7 +1583,26 @@ class MailToolkit:
         draft = _load_draft(draft_id)
         if str(draft.get('status') or '') == 'sent':
             _fail('This draft was already sent.')
-        cred = _pick_account(str(draft.get('mailbox') or draft.get('provider') or ''))
+        cred = _resolve_sending_account(
+            '',
+            draft_id=str(draft.get('draft_id') or ''),
+            draft_mailbox=str(draft.get('mailbox') or draft.get('provider') or ''),
+        )
+        if cred is None:
+            draft['status'] = 'needs_mailbox'
+            draft['mailboxes'] = _mailbox_choice_rows()
+            _save_draft(draft)
+            _emit_mailbox_card(draft)
+            _fail(
+                'Send blocked until the user confirms the sending mailbox on the picker card. '
+                'Do not guess a mailbox or call ask_user. Wait for mail_mailbox_confirm.'
+            )
+        draft['mailbox'] = cred['email']
+        draft['provider'] = cred['provider']
+        if str(draft.get('status') or '') == 'needs_mailbox':
+            draft['status'] = 'draft'
+            draft['updated_at'] = _iso(datetime.now(timezone.utc))
+            _save_draft(draft)
         confirm_id = str(_agentic_config().get('mail_draft_confirm_id') or '').strip()
         confirmed = confirm_id == str(draft_id).strip()
         if not confirmed:

@@ -333,14 +333,18 @@ MAIL_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
         'before citing it. Search hits include mailbox/provider; pass mailbox when reading '
         'or composing if more than one account is enabled. Attachments can be read into '
         'the conversation as task input. '
-        'compose_draft creates a preview and never sends. Use update_draft to change an '
+        'compose_draft creates a preview and never sends. If the user did not name a '
+        'sending mailbox and more than one account is enabled, compose_draft shows a '
+        'mailbox picker of connected chat-enabled accounts; after mail_mailbox_confirm, '
+        'call update_draft with that mailbox so the send preview appears. '
+        'Use update_draft to change an '
         'existing unsent draft (this increments revision). send_draft may run only after '
         'the user confirms that preview in this turn (`mail_draft_confirm_id` plus the '
         'matching `mail_draft_confirm_revision`). '
         'Do not call ask_user to collect send authorization; the draft card is the only '
         'confirmation UI. Never send mail automatically, never forward, and never delete, '
         'archive, or mark messages. If authorization expired, tell the user to reconnect at '
-        '资源库 → 外部连接 → 邮箱连接.',
+        '资源库 → 云文档 → 邮箱连接.',
     ),
 }
 

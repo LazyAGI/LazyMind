@@ -1635,6 +1635,12 @@ export function useChatConversation({
         ...(params.mail_draft_patch && Object.keys(params.mail_draft_patch).length
           ? { mail_draft_patch: params.mail_draft_patch }
           : {}),
+        ...(params.mail_mailbox_confirm
+          ? { mail_mailbox_confirm: params.mail_mailbox_confirm }
+          : {}),
+        ...(params.mail_mailbox_confirm_draft_id
+          ? { mail_mailbox_confirm_draft_id: params.mail_mailbox_confirm_draft_id }
+          : {}),
       },
     );
     if (!opened) {
