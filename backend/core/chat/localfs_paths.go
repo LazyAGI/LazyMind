@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"lazymind/core/common"
+	"lazymind/core/localworkspace"
 	"net/http"
 	"net/url"
 	"sort"
@@ -54,12 +55,51 @@ type scanSourceBinding struct {
 }
 
 func applyLocalFSPathsForChat(ctx context.Context, r *http.Request, db *gorm.DB, userID string, reqBody map[string]any) error {
+	snapshot, err := workspaceSnapshotForRequest(ctx, db, userID, reqBody)
+	if err != nil {
+		return err
+	}
+	if snapshot != nil {
+		reqBody["local_fs_sources"] = snapshot.Sources
+		return nil
+	}
 	sources, err := loadLocalFSSourcesForChat(ctx, r, userID)
 	if err != nil {
 		return err
 	}
 	reqBody["local_fs_sources"] = sources
 	return nil
+}
+
+func workspaceSnapshotForRequest(ctx context.Context, db *gorm.DB, userID string, body map[string]any) (*localworkspace.ContextSnapshot, error) {
+	conversationID, _ := body["conversation_id"].(string)
+	if strings.TrimSpace(conversationID) != "" {
+		return localworkspace.ResolveForConversation(ctx, db, userID, strings.TrimSpace(conversationID))
+	}
+	workspaceID, _ := body["workspace_id"].(string)
+	if strings.TrimSpace(workspaceID) == "" {
+		return nil, nil
+	}
+	background, _ := body["run_in_background"].(bool)
+	if !background {
+		return nil, localworkspace.ModeError()
+	}
+	mode, _ := body["workspace_permission_mode"].(string)
+	if strings.TrimSpace(mode) == "" {
+		mode = localworkspace.PermissionAskAsNeeded
+	}
+	return localworkspace.ResolveForDraft(ctx, db, userID, strings.TrimSpace(workspaceID), strings.TrimSpace(mode))
+}
+
+func applyWorkspaceRequestContext(ctx context.Context, db *gorm.DB, userID string, body map[string]any) (*localworkspace.ContextSnapshot, error) {
+	snapshot, err := workspaceSnapshotForRequest(ctx, db, userID, body)
+	if err != nil || snapshot == nil {
+		return snapshot, err
+	}
+	body["local_fs_sources"] = snapshot.Sources
+	query, _ := body["query"].(string)
+	body["query"] = localworkspace.BuildRequestQuery(query, snapshot)
+	return snapshot, nil
 }
 
 func loadLocalFSSourcesForChat(ctx context.Context, r *http.Request, userID string) ([]map[string]any, error) {

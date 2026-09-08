@@ -1344,6 +1344,11 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 		"mode":             mode,
 		"intent_context":   loadConversationIntentContext(ctx, db, convID),
 	}
+	for _, key := range []string{"workspace_id", "workspace_permission_mode", "run_in_background"} {
+		if value, ok := raw[key]; ok {
+			body[key] = value
+		}
+	}
 	if modelCtx != nil {
 		body["model_context"] = map[string]any{
 			"summary_text":        modelCtx.SummaryText,

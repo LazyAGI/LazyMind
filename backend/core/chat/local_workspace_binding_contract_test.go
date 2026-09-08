@@ -2,8 +2,10 @@ package chat
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"lazymind/core/common"
@@ -86,5 +88,22 @@ func TestWorkspaceWorkCreationLocksBindingAndRollsBackUnauthorizedGrant(t *testi
 	}
 	if saved.WorkspaceID != grant.ID {
 		t.Fatalf("binding switched: %+v", saved)
+	}
+}
+
+func TestWorkspaceContextExtRecordsOnlyExecutionMetadata(t *testing.T) {
+	snapshot := &localworkspace.ContextSnapshot{WorkspaceID: "grant", Root: "/private/root",
+		WorkspaceVersion: 2, PermissionMode: localworkspace.PermissionAlwaysAsk, PermissionVersion: 3}
+	raw := mergeWorkspaceContextIntoExt(json.RawMessage(`{"existing":true}`), snapshot)
+	var ext map[string]any
+	if err := json.Unmarshal(raw, &ext); err != nil {
+		t.Fatal(err)
+	}
+	context, ok := ext["workspace_context"].(map[string]any)
+	if !ok || context["workspace_id"] != "grant" || context["permission_version"] != float64(3) {
+		t.Fatalf("ext=%v", ext)
+	}
+	if strings.Contains(string(raw), snapshot.Root) {
+		t.Fatalf("history ext persisted root: %s", raw)
 	}
 }

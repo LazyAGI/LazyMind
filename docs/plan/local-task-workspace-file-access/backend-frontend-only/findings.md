@@ -177,3 +177,15 @@ f9f7d345ee718b7783a0eda75b6727bd053ad04d505df109d8c3dd4e3f8d1822  local/local-ru
 
 - 实施异常：三次从子目录执行却带仓库前缀的写命令在首个重定向/读取前失败，没有部分写入；之后固定从工作树根执行。首次 hash脚本因 zsh未按换行拆分路径失败，改用 NUL分隔后生成以上清单。
 - 下一步：任务 3 只修改 backend/frontend；Local/Desktop 文件冻结，不再触碰。任务 3A仍暂停。
+
+
+### 2026-09-08 T3-CONTEXT：统一工作区请求快照
+
+- 生产修改净增约 135 行，没有新增生产文件：扩展 `localworkspace/context.go`、`chat/localfs_paths.go`、真实 Chat/ContextPrompt/ContextUsage 最终组装点、history ext 和 `common/text_file.go`。
+- `TextFileExtensions()` 返回现有扩展 map 的排序副本；保留既有 `IsTextFileExtension` 测试，因为它覆盖大小写、点前缀和二进制拒绝，新排序测试不能替代。
+- 已绑定 Work 在 scan 前解析 Core snapshot并直接设置唯一 `local_fs_sources`，不调用全局 Scan Control Plane；无绑定才沿用原 scan。撤销、目录替换或跨用户错误保留 Core HTTP/code/reason，不降级。
+- 新 Work preview用 workspace_id/permission_mode/run_in_background解析已有 grant，不落库。真实 Chat、regenerate/retry和 ContextPrompt/Usage均在附件转换后再次读取 snapshot，增强最终 query但保持 user_query/files/history；history ext只存 workspace/version/permission元数据，不存 root。
+- 修正两个既有引用会话组装点的 history类型为 `[]map[string]any`，不重建或丢弃历史。
+- 规模：总 +262/-13；测试增加纯函数、排序副本、绑定跳过scan、草稿不落库和 ext无根路径。期间误覆盖既有 text_file_test，审计时恢复并仅追加新用例；无有效旧测试被删除。
+- 验证：`go test ./chat ./localworkspace ./common -count=1`通过；冻结 Local/Desktop SHA全通过且与 `ec4676e0` 零差异；algorithm/tests/algorithm/LazyLLM零差异。
+- 未验证：真实模型 ContextPrompt内容、普通子任务/Workflow私有上下文、权限询问和撤销停止；由任务4–6继续。任务3A仍暂停。

@@ -4,11 +4,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
 	"lazymind/core/common/orm"
+	"lazymind/core/localworkspace"
 )
 
 func TestApplyLocalFSPathsForChatAddsActiveLocalBindings(t *testing.T) {
@@ -146,5 +149,81 @@ func TestApplyLocalFSPathsForChatFiltersByBindingChatEnabled(t *testing.T) {
 	exts := entry["file_extensions"].([]string)
 	if len(exts) != 1 || exts[0] != "pdf" {
 		t.Fatalf("unexpected file_extensions: %#v, want [pdf]", exts)
+	}
+}
+
+func TestApplyLocalFSPathsForBoundWorkSkipsGlobalScan(t *testing.T) {
+	t.Setenv("LAZYMIND_RUNTIME_MODE", "local")
+	db := orm.MigrateAllModelsForTest(t)
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	grant, err := localworkspace.Register(t.Context(), db.DB, "u1", localworkspace.RegisterInput{
+		DisplayName: "project", CanonicalPath: root, Source: "desktop",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	if err := db.Create(&orm.Conversation{ID: "work", IsTaskConv: true,
+		BaseModel: orm.BaseModel{CreateUserID: "u1", CreatedAt: now, UpdatedAt: now}}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.ConversationWorkspaceBinding{ConversationID: "work", WorkspaceID: grant.WorkspaceID,
+		PermissionMode: localworkspace.PermissionAlwaysAsk, PermissionVersion: 2, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+		t.Fatal(err)
+	}
+	var scans int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { scans++; http.Error(w, "must not scan", 500) }))
+	t.Cleanup(server.Close)
+	t.Setenv("LAZYMIND_SCAN_CONTROL_PLANE_URL", server.URL)
+	request := httptest.NewRequest(http.MethodPost, "/conversations:chat", nil)
+	body := map[string]any{"conversation_id": "work", "query": "read notes", "user_query": "read notes"}
+	if err := applyLocalFSPathsForChat(request.Context(), request, db.DB, "u1", body); err != nil {
+		t.Fatal(err)
+	}
+	if scans != 0 {
+		t.Fatalf("bound Work scanned %d global sources", scans)
+	}
+	sources, ok := body["local_fs_sources"].([]map[string]any)
+	if !ok || len(sources) != 1 || sources[0]["source_id"] != "local-workspace:"+grant.WorkspaceID {
+		t.Fatalf("sources=%T %v", body["local_fs_sources"], body["local_fs_sources"])
+	}
+	snapshot, err := applyWorkspaceRequestContext(request.Context(), db.DB, "u1", body)
+	if err != nil || snapshot == nil {
+		t.Fatalf("snapshot=%+v err=%v", snapshot, err)
+	}
+	if body["user_query"] != "read notes" || !strings.Contains(body["query"].(string), root) {
+		t.Fatalf("body=%v", body)
+	}
+}
+
+func TestWorkspaceDraftSnapshotRequiresBackgroundAndDoesNotPersist(t *testing.T) {
+	t.Setenv("LAZYMIND_RUNTIME_MODE", "local")
+	db := orm.MigrateAllModelsForTest(t)
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	grant, err := localworkspace.Register(t.Context(), db.DB, "u1", localworkspace.RegisterInput{
+		DisplayName: "draft", CanonicalPath: root, Source: "desktop",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := map[string]any{"workspace_id": grant.WorkspaceID,
+		"workspace_permission_mode": localworkspace.PermissionAllowAll, "run_in_background": true, "query": "draft"}
+	snapshot, err := workspaceSnapshotForRequest(t.Context(), db.DB, "u1", body)
+	if err != nil || snapshot == nil || snapshot.PermissionMode != localworkspace.PermissionAllowAll {
+		t.Fatalf("snapshot=%+v err=%v", snapshot, err)
+	}
+	var count int64
+	if err := db.Table("conversation_workspace_bindings").Count(&count).Error; err != nil || count != 0 {
+		t.Fatalf("draft persisted binding count=%d err=%v", count, err)
+	}
+	body["run_in_background"] = false
+	if _, err := workspaceSnapshotForRequest(t.Context(), db.DB, "u1", body); err == nil {
+		t.Fatal("Chat draft accepted workspace")
 	}
 }

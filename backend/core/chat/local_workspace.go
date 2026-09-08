@@ -118,3 +118,24 @@ func ensureConversationWithWorkspace(
 	})
 	return conversation, seq, err
 }
+
+func mergeWorkspaceContextIntoExt(raw json.RawMessage, snapshot *localworkspace.ContextSnapshot) json.RawMessage {
+	if snapshot == nil {
+		return raw
+	}
+	ext := map[string]any{}
+	if len(raw) > 0 {
+		_ = json.Unmarshal(raw, &ext)
+	}
+	ext["workspace_context"] = map[string]any{
+		"workspace_id":       snapshot.WorkspaceID,
+		"workspace_version":  snapshot.WorkspaceVersion,
+		"permission_mode":    snapshot.PermissionMode,
+		"permission_version": snapshot.PermissionVersion,
+	}
+	body, err := json.Marshal(ext)
+	if err != nil {
+		return raw
+	}
+	return body
+}
