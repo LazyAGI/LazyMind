@@ -164,13 +164,13 @@ describe("RecordList conversation pinning", () => {
     });
   });
 
-  it("does not exclude external assistants from the default conversation list", async () => {
+  it("limits the default normal filter to non-task LazyMind conversations", async () => {
     renderRecordList();
 
     await screen.findByText("较早的会话");
     expect(mocks.listConversations).toHaveBeenCalledWith(
       expect.anything(),
-      { params: { is_task_conv: "false" } },
+      { params: { is_task_conv: "false", assistants: "lazymind" } },
     );
   });
 

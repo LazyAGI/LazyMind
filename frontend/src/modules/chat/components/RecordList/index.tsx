@@ -521,10 +521,10 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
               ...(isTaskConvParam !== undefined
                 ? { is_task_conv: isTaskConvParam }
                 : {}),
-              ...(selectedAgents.length > 0
+              ...(hasNormal || selectedAgents.length > 0
                 ? {
                     assistants: [
-                      ...(hasNormal || hasTask ? ["lazymind"] : []),
+                      ...(hasNormal ? ["lazymind"] : []),
                       ...selectedAgents,
                     ].join(","),
                   }
