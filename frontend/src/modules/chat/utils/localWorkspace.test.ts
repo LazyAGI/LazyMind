@@ -1,7 +1,7 @@
 import { beforeEach, expect, it, vi } from "vitest";
 import { axiosInstance } from "@/components/request";
 import { selectLocalWorkspace } from "@/runtime/desktopBridge";
-import { selectWorkspaceCandidate, workspaceReason } from "./localWorkspace";
+import { listWorkspaces, selectWorkspaceCandidate, workspaceReason } from "./localWorkspace";
 vi.mock("@/components/request", () => ({ BASE_URL: "", axiosInstance: { post: vi.fn(), get: vi.fn(), put: vi.fn() } }));
 vi.mock("@/runtime/desktopBridge", () => ({ selectLocalWorkspace: vi.fn(), reauthorizeLocalWorkspace: vi.fn(), authorizeLocalWorkspace: vi.fn() }));
 beforeEach(() => vi.clearAllMocks());
@@ -17,4 +17,12 @@ it("uses the Local Proxy selection route", async () => {
 });
 it("reads Core reason details", () => {
   expect(workspaceReason({ response: { data: { data: { detail: { reason: "revoked" } } } } })).toBe("revoked");
+  expect(workspaceReason({ response: { data: { detail: { reason: "path_unavailable" } } } })).toBe("path_unavailable");
+});
+it("passes search and inactive filters to Core", async () => {
+  vi.mocked(axiosInstance.get).mockResolvedValue({ data: { data: { items: [] } } });
+  await listWorkspaces({ query: " project ", includeInactive: true });
+  expect(axiosInstance.get).toHaveBeenCalledWith("/api/core/local-workspaces", {
+    params: { query: "project", include_inactive: true },
+  });
 });

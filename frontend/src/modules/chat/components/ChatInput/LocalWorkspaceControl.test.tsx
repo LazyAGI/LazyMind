@@ -451,4 +451,30 @@ describe("LocalWorkspaceControl task binding and request lifetime", () => {
     expect(screen.getByText(beta.path)).toBeInTheDocument();
     expect(onChange).not.toHaveBeenCalled();
   });
+
+  it("searches active and inactive grants from the access manager", async () => {
+    mocks.listWorkspaces.mockResolvedValueOnce([]).mockResolvedValueOnce([alpha, { ...beta, status: "revoked" }]).mockResolvedValue([]);
+    render(<LocalWorkspaceControl onChange={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /chat\.workspace\.manage/ }));
+    expect(await screen.findByText(beta.path)).toBeInTheDocument();
+
+    const search = screen.getByPlaceholderText("chat.workspace.search");
+    fireEvent.change(search, { target: { value: "beta" } });
+    fireEvent.keyDown(search, { key: "Enter", code: "Enter" });
+    await waitFor(() => expect(mocks.listWorkspaces).toHaveBeenLastCalledWith({ query: "beta", includeInactive: true }));
+  });
+
+  it("reauthorizes an inactive grant without binding it to the draft", async () => {
+    const revoked = { ...alpha, status: "revoked" as const };
+    mocks.listWorkspaces.mockResolvedValueOnce([]).mockResolvedValueOnce([revoked]);
+    mocks.prepareWorkspaceReauthorization.mockResolvedValue({ canceled: false, selection_token: "renew", display_name: "Alpha", path: alpha.path });
+    const onChange = vi.fn();
+    render(<LocalWorkspaceControl onChange={onChange} />);
+    fireEvent.click(screen.getByRole("button", { name: /chat\.workspace\.manage/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "chat.workspace.reauthorize" }));
+    expect(await screen.findByText("chat.workspace.authorizeTitle")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "chat.workspace.authorize" }));
+    await waitFor(() => expect(mocks.authorizeWorkspace).toHaveBeenCalledWith("local", "renew"));
+    expect(onChange).not.toHaveBeenCalled();
+  });
 });

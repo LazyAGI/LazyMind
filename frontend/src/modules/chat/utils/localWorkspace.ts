@@ -44,8 +44,12 @@ export async function authorizeWorkspace(runtime: "local" | "desktop", token: st
   }
   return data<LocalWorkspaceView>((await axiosInstance.post("/_local/workspaces:authorize", { selection_token: token })).data);
 }
-export async function listWorkspaces(): Promise<LocalWorkspaceView[]> {
-  const result = data<{ items?: LocalWorkspaceView[] }>((await axiosInstance.get(`${coreBase}/local-workspaces`)).data);
+export async function listWorkspaces(options: { query?: string; includeInactive?: boolean } = {}): Promise<LocalWorkspaceView[]> {
+  const params = {
+    ...(options.query?.trim() ? { query: options.query.trim() } : {}),
+    ...(options.includeInactive ? { include_inactive: true } : {}),
+  };
+  const result = data<{ items?: LocalWorkspaceView[] }>((await axiosInstance.get(`${coreBase}/local-workspaces`, { params })).data);
   return result.items ?? [];
 }
 export async function getConversationWorkspace(conversationId: string): Promise<LocalWorkspaceView | undefined> {
@@ -60,8 +64,8 @@ export async function updateWorkspacePermission(conversationId: string, mode: Wo
   );
 }
 export function workspaceReason(error: unknown): string {
-  const value = error as { response?: { data?: { data?: { detail?: { reason?: string } } } }; code?: string };
-  return value.response?.data?.data?.detail?.reason ?? value.code ?? "unknown";
+  const value = error as { response?: { data?: { reason?: string; detail?: { reason?: string }; data?: { detail?: { reason?: string } } } }; code?: string };
+  return value.response?.data?.data?.detail?.reason ?? value.response?.data?.detail?.reason ?? value.response?.data?.reason ?? value.code ?? "unknown";
 }
 
 

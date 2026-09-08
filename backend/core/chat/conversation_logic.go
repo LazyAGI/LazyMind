@@ -3625,8 +3625,6 @@ func validateWorkspaceAskSubmission(histories []orm.ChatHistory, raw map[string]
 	if submission == nil {
 		return nil
 	}
-	askID, _ := submission["ask_id"].(string)
-	askID = strings.TrimSpace(askID)
 	for i := len(histories) - 1; i >= 0; i-- {
 		ext := map[string]any{}
 		if json.Unmarshal(histories[i].Ext, &ext) != nil {
@@ -3639,11 +3637,107 @@ func validateWorkspaceAskSubmission(histories []orm.ChatHistory, raw map[string]
 		if pending == nil {
 			continue
 		}
-		expected, _ := pending["ask_id"].(string)
-		if askID != "" && askID == strings.TrimSpace(expected) {
+		if validAskSubmission(pending, submission) {
 			return nil
 		}
 		return common.ResolveAppError("invalid request", http.StatusBadRequest)
 	}
 	return common.ResolveAppError("invalid request", http.StatusBadRequest)
+}
+
+func validAskSubmission(pending, submission map[string]any) bool {
+	pendingID, _ := pending["ask_id"].(string)
+	submittedID, _ := submission["ask_id"].(string)
+	if strings.TrimSpace(submittedID) == "" || strings.TrimSpace(submittedID) != strings.TrimSpace(pendingID) {
+		return false
+	}
+	body, err := json.Marshal(submission)
+	if err != nil {
+		return false
+	}
+	var submitted askAnswersStructuredPayload
+	if json.Unmarshal(body, &submitted) != nil {
+		return false
+	}
+	rawQuestions, exists := pending["questions"]
+	if !exists {
+		return len(submitted.Questions) == 0
+	}
+	questions, ok := rawQuestions.([]any)
+	if !ok || len(questions) != len(submitted.Questions) {
+		return false
+	}
+	for index, rawQuestion := range questions {
+		question, ok := rawQuestion.(map[string]any)
+		if !ok {
+			return false
+		}
+		text, _ := question["text"].(string)
+		kind, _ := question["type"].(string)
+		item := submitted.Questions[index]
+		choices := askStringSlice(question["choices"])
+		if strings.TrimSpace(item.Text) != strings.TrimSpace(text) || item.Type != kind || !sameStrings(item.Choices, choices) || len(item.CustomChoices) != len(choices) {
+			return false
+		}
+		if len(item.Answer) == 0 || string(item.Answer) == "null" {
+			continue
+		}
+		var answer struct {
+			Type  string `json:"type"`
+			Value any    `json:"value"`
+		}
+		if json.Unmarshal(item.Answer, &answer) != nil || answer.Type != kind || !validAskAnswerValue(kind, answer.Value) {
+			return false
+		}
+	}
+	return true
+}
+
+func askStringSlice(value any) []string {
+	if values, ok := value.([]string); ok {
+		return values
+	}
+	values, _ := value.([]any)
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		text, ok := value.(string)
+		if !ok {
+			return nil
+		}
+		result = append(result, text)
+	}
+	return result
+}
+
+func sameStrings(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
+}
+
+func validAskAnswerValue(kind string, value any) bool {
+	switch kind {
+	case "boolean", "single", "text":
+		_, ok := value.(string)
+		return ok
+	case "multiple":
+		values, ok := value.([]any)
+		if !ok {
+			return false
+		}
+		for _, value := range values {
+			if _, ok := value.(string); !ok {
+				return false
+			}
+		}
+		return true
+	default:
+		return false
+	}
 }

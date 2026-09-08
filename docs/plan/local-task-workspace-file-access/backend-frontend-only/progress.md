@@ -20,6 +20,15 @@
 - 算法相对 `245bc26d`、Local/Desktop 相对 `ec4676e0` 仍为零差异。无关未跟踪目录 `output/xiaobao-v2` 保留且不纳入本批。
 - T2 完成后停在 Review；下一批为 T3 的 U4–U5 测试计划，不自动实施。F 类能力仍未解决。
 
+## T3–T5 拉通批次（2026-09-08）
+
+- 用户明确要求先完成 T3、T4、T5 生产代码再统一测试。本批修改 6 个既有生产文件、未新增生产文件；生产代码新增 208 行、删除 25 行，净增 183 行。
+- T3 复用 Core `query/include_inactive`、冻结 bridge、撤销和权限 API，增加授权管理、名称/路径搜索、失效项重授权、reason 双语显示及冲突后真实状态刷新。新 grant 不恢复旧任务绑定。
+- T4 对当前未回答 AskCard 做逐题文本、类型、choices、custom choices 和 answer value 校验；旧历史没有 questions 时保留 ask_id 兼容。子任务身份覆盖顶层、`attachment_context` 和 `parent_agentic_config`，其他附件字段保留。
+- T5 复核并复用现有发送/上下文预览、AskCard 透传、子任务创建/恢复和 execution-spec 链路，没有新增生产代码。
+- 验证：前端聚焦 43/43；Core `go test ./localworkspace ./chat ./subagent -count=1` 全部通过；相关 ESLint、MCP TypeScript 检查和生产构建通过。真实 Local/打包 Desktop UI 验收仍归 T6。
+- 算法和 LazyLLM 相对 `245bc26d`、Local/Desktop 相对 `ec4676e0` 仍为零差异；F 类文件创建、追加和删除能力仍未解决。
+
 ## 当前状态（2026-09-08）
 
 - 本次唯一工作目录：/Users/theone/Downloads/lazymind；上一环境的目录名不作为本机路径依据。

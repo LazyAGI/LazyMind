@@ -104,6 +104,8 @@ U1–U3 已有组件级复现，F1–F3 已有实际文件工具级证据；其�
 
 T1 阶段一在 `frontend/src/modules/chat/components/ChatInput/LocalWorkspaceControl.test.tsx` 建立了 13 项真实组件合同，其中 7 项按预期失败。用户 Review 后完成 T2，并按方案的统一代次要求补充权限确认、权限更新、撤销迟到及同草稿列表保留 4 项合同；当前 17 项全部通过。生产实现只修改既有 `LocalWorkspaceControl.tsx`，净增 51 行，没有新增生产文件、服务、依赖或数据库对象。
 
+用户随后批准 T3–T5 先生产后统一测试。该批复用现有 Core/bridge/request/subagent 链路完成 U4–U5 与 C1–C2，6 个既有生产文件净增 183 行，无新服务、依赖、数据库表或生产文件；前端 43 项与 Core 三包回归通过。T6 仍需真实 Local/打包 Desktop 验收，F1–F4 仍未解决。
+
 F 类独立保持研究状态；只有同轮反馈、授权、批准、主子任务覆盖和平台验证均通过，才可加入正式实施任务。只完成 U/C 不得宣布旧需求完全复现。
 
 验收清单与执行顺序集中维护在 task_plan.md；每批同步更新方案、证据和 progress.md。用户已批准本批文档发布，使用当前单一功能分支 origin/feature/newWorkZone；不包含生产修复。

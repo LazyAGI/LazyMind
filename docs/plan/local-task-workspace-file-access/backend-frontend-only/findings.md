@@ -26,6 +26,14 @@
 - 阶段二新增 4 项合同后，组件测试 17/17 通过；其中额外确认取消 picker 不会作废同一草稿仍在加载的最近目录列表。连同 ChatInput 装配、workspace utility 和 Desktop bridge 的聚焦矩阵为 39/39。ESLint、`tsc -p tsconfig.mcp.json --noEmit` 和 `pnpm run build` 通过。
 - 本机 Node 26 默认暴露实验性 `localStorage`，使 `ChatInput/index.test.tsx` 收集前失败；使用 `NODE_OPTIONS=--no-experimental-webstorage` 后通过。发布工作流为 Node 20，本批未修改测试基础设施。
 
+## T3–T5 拉通证据
+
+- `listWorkspaces` 现直接传递 Core 已支持的 `query/include_inactive`；管理 Modal 展示 active/revoked/path_unavailable，复用同一 token 重授权流程和撤销 API。
+- 权限、授权和撤销遇到 binding_conflict/workspace_not_found/revoked/path_unavailable 时重新读取 Core 状态，不保留失败的乐观值；reason 使用中英文固定字典，未知值有明确兜底。
+- AskCard 新记录逐题校验问题文本、类型、原 choices、自定义 choices 数量及答案值类型；null 答案仍表示省略。无 questions 的旧历史仅按 ask_id 校验以保持兼容。
+- 官方 runner 优先读取 `attachment_context.user_id`；Core 现在对真实绑定同时归一化顶层、附件上下文和 parent 的 user/conversation，且保留附件内其他字段。
+- 自动化结果为前端 43/43、Core 三包通过、静态检查与生产构建通过；这不是打包 Desktop 的人工 UI 证据，也不证明 F 类文件执行闭环。
+
 ## 基线
 
 审计提交 bb46abd64ca5fc431f4f7748fb9e085099990d5e，旧对照 e7ed8a4189bb627e96814fc2f34818693cbc2050。旧 spec/checklist/代码在 Git 历史中可查；不继承其勾选为当前验收结果。

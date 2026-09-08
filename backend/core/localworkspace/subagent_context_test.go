@@ -27,7 +27,7 @@ func TestRebuildSubagentParamsUsesDBSnapshotWithoutAccumulatingNotice(t *testing
 	if err := db.Create(&orm.ConversationWorkspaceBinding{ConversationID: "work", WorkspaceID: grant.WorkspaceID, PermissionMode: PermissionAlwaysAsk, PermissionVersion: 2, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
 		t.Fatal(err)
 	}
-	original := map[string]any{"runtime_instruction": "keep attachments", "files": map[string]any{"1": []string{"a.txt"}}, "parent_agentic_config": map[string]any{coreWorkspaceContextKey: map[string]any{"runtime_instruction": "forged"}}}
+	original := map[string]any{"runtime_instruction": "keep attachments", "user_id": "forged", "conversation_id": "forged", "attachment_context": map[string]any{"user_id": "forged", "conversation_id": "forged", "files": []any{"keep"}}, "files": map[string]any{"1": []string{"a.txt"}}, "parent_agentic_config": map[string]any{coreWorkspaceContextKey: map[string]any{"runtime_instruction": "forged"}}}
 	clean := StripUntrustedWorkspaceMetadata(original)
 	first, err := RebuildSubagentParams(t.Context(), db.DB, "owner", "work", clean)
 	if err != nil {
@@ -40,6 +40,13 @@ func TestRebuildSubagentParamsUsesDBSnapshotWithoutAccumulatingNotice(t *testing
 	instruction := second["runtime_instruction"].(string)
 	if strings.Count(instruction, "本任务的用户已在界面选择") != 1 || !strings.Contains(instruction, "keep attachments") || !strings.Contains(instruction, "不能直接询问用户") {
 		t.Fatalf("instruction=%s", instruction)
+	}
+	if second["user_id"] != "owner" || second["conversation_id"] != "work" {
+		t.Fatalf("top-level identity=%v", second)
+	}
+	attachment := second["attachment_context"].(map[string]any)
+	if attachment["user_id"] != "owner" || attachment["conversation_id"] != "work" || attachment["files"] == nil {
+		t.Fatalf("attachment identity=%v", attachment)
 	}
 	if !strings.Contains(instruction, root) || strings.Contains(instruction, "forged") {
 		t.Fatalf("instruction=%s", instruction)
