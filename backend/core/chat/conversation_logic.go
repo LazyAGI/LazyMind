@@ -1999,7 +1999,10 @@ func streamSingleAnswer(
 		runID = newID("run_")
 		reqBody["run_id"] = runID
 	}
-	historyExt = mergeConversationConfigSnapshot(historyExt, reqBody)
+	// Reuse the snapshot captured before handleStreamChat registered this run.
+	if snapshot := forkConfigFromHistory(orm.ChatHistory{Ext: historyExt}); snapshot.Version != 1 || snapshot.RunID != runID {
+		historyExt = mergeConversationConfigSnapshot(historyExt, reqBody)
+	}
 	useRunDecision := requestUsesRunDecision(reqBody)
 	if target.IsRegeneration && useRunDecision {
 		if err := claimChatHistoryRun(chatCtx, db, historyID, runID); err != nil {

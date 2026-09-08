@@ -399,6 +399,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
 
     useImperativeHandle(ref, () => ({
       replaceMessageList: conversation.replaceMessageList,
+      mergeHistoryPage: conversation.mergeHistoryPage,
       createNewChat: conversation.createNewChat,
       sendMessage,
       prepareMessage: ({

@@ -4,7 +4,7 @@ import { localizeErrorCode } from "@/components/request";
 import { Alert, Button, message, Space } from "antd";
 import { useLocation } from "react-router-dom";
 import { AgentAppsAuth } from "@/components/auth";
-import type { ConversationForkCapability, ConversationHistoryItem } from "@/api/generated/core-client";
+import type { ConversationForkCapability } from "@/api/generated/core-client";
 import ForkStatus from "@/modules/chat/components/ForkConversation/ForkStatus";
 import { useForkConversation } from "@/modules/chat/components/ForkConversation/useForkConversation";
 import type { ThinkingDepth } from "@/modules/chat/store/chatThink";
@@ -139,7 +139,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
   const forkMetadataId = useRef("");
   const [forkThinkingDepth, setForkThinkingDepth] = useState<ThinkingDepth>();
   const [loadError, setLoadError] = useState(false);
-  const [historyWindow, setHistoryWindow] = useState<{ rows: ConversationHistoryItem[]; older: string; newer: string }>({ rows: [], older: "", newer: "" });
+  const [historyWindow, setHistoryWindow] = useState({ older: "", newer: "" });
   const [windowLoading, setWindowLoading] = useState(false);
   const windowRequestRef = useRef(0);
 
@@ -696,7 +696,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
       if (relation?.relationType !== "fork") useChatThinkStore.getState().setThinkingDepth(depth);
       forkMetadataId.current = conversationId;
       setForkSupported(Boolean((conversation as { fork_capability?: ConversationForkCapability })?.fork_capability?.supported));
-      setHistoryWindow({ rows: historyRes.data.history || [], older: historyRes.data.older_page_token || "", newer: historyRes.data.newer_page_token || "" });
+      setHistoryWindow({ older: historyRes.data.older_page_token || "", newer: historyRes.data.newer_page_token || "" });
       const tempData = {
         knowledgeBaseId: conversation?.search_config?.dataset_list
           ?.map((dataset: any) => dataset.id)
@@ -754,7 +754,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
       setConversationSettings(undefined);
       setConversationRelation(null);
       setForkThinkingDepth(undefined);
-      setHistoryWindow({ rows: [], older: "", newer: "" });
+      setHistoryWindow({ older: "", newer: "" });
       setChatConfig({});
       setChatConfigFn({});
       chatRef.current?.createNewChat();
@@ -797,11 +797,8 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     try {
       const response = await ChatServiceApi().conversationServiceGetConversationHistory({ name: id, anchorPageToken: historyWindow[direction] });
       if (request !== windowRequestRef.current || owner !== AgentAppsAuth.getUserInfo()?.userId) return;
-      const byId = new Map(historyWindow.rows.map((row) => [row.id, row]));
-      for (const row of response.data.history || []) byId.set(row.id, row);
-      const rows = [...byId.values()].sort((a,b) => (b.seq || 0) - (a.seq || 0) || String(b.create_time).localeCompare(String(a.create_time)) || String(b.id).localeCompare(String(a.id)));
-      setHistoryWindow({ rows, older: direction === "older" ? response.data.older_page_token || "" : historyWindow.older, newer: direction === "newer" ? response.data.newer_page_token || "" : historyWindow.newer });
-      chatRef.current?.replaceMessageList(id, buildChatMessageListFromHistory(rows), true);
+      setHistoryWindow((current) => ({ ...current, [direction]: response.data[`${direction}_page_token`] || "" }));
+      chatRef.current?.mergeHistoryPage(id, response.data.history || []);
     } catch { if (request === windowRequestRef.current && owner === AgentAppsAuth.getUserInfo()?.userId) message.error(t("chat.fork.historyLoadFailed")); }
     finally { if (request === windowRequestRef.current) setWindowLoading(false); }
   }

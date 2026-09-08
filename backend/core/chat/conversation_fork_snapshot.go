@@ -106,7 +106,7 @@ func forkConfigForConversation(c orm.Conversation) *conversationConfigSnapshot {
 
 // Request fields set by the user still take precedence. The frontend initializes
 // them from this conversation, and omits global mode/memory defaults for forks.
-func applyForkRequestDefaults(raw map[string]any, c orm.Conversation) {
+func applyForkRequestDefaults(raw map[string]any, c orm.Conversation, hasExplicitSearchConfig bool) {
 	s := forkConfigForConversation(c)
 	if s == nil {
 		return
@@ -116,7 +116,7 @@ func applyForkRequestDefaults(raw map[string]any, c orm.Conversation) {
 			raw[key] = value
 		}
 	}
-	if raw["filters"] == nil {
+	if raw["filters"] == nil && !hasExplicitSearchConfig {
 		filters := map[string]any{}
 		for key, value := range s.Filters {
 			filters[key] = value

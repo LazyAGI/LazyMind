@@ -139,6 +139,9 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	// Preserve whether the caller supplied a search config before defaults create one.
+	requestConversation, _ := raw["conversation"].(map[string]any)
+	_, hasExplicitSearchConfig := requestConversation["search_config"].(map[string]any)
 	setConversationDefaultValue(raw)
 	if !checkInput(raw) {
 		common.ReplyErr(w, "input required", http.StatusBadRequest)
@@ -301,7 +304,7 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "failed to ensure conversation", err), http.StatusInternalServerError)
 		return
 	}
-	applyForkRequestDefaults(raw, *conversationRecord)
+	applyForkRequestDefaults(raw, *conversationRecord, hasExplicitSearchConfig)
 	isSidechat := isSidechatConversation(*conversationRecord)
 	if isSidechat {
 		if !stream {
@@ -365,11 +368,6 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		// loaded inside that guard instead of using ensureConversation's earlier
 		// count, which another request may have advanced while this one waited.
 		seq = 1
-		for _, history := range histories {
-			if history.Seq >= seq {
-				seq = history.Seq + 1
-			}
-		}
 	}
 	for _, h := range histories {
 		if h.Seq >= seq {

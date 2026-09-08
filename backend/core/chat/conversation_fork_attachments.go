@@ -188,7 +188,8 @@ func revalidateForkHistoryAttachments(ctx context.Context, db *gorm.DB, caller d
 				}
 			}
 		}
-		for _, datasetID := range stringSliceFromAny(forkConfigFromHistory(h).Filters["kb_id"]) {
+		config := forkConfigFromHistory(h)
+		for _, datasetID := range stringSliceFromAny(config.Filters["kb_id"]) {
 			if err := authorizeKnowledgeBaseID(ctx, db, caller.UserID, datasetID); err != nil {
 				if !errors.Is(err, errKnowledgeBaseNotReadable) {
 					return nil, err
@@ -196,7 +197,7 @@ func revalidateForkHistoryAttachments(ctx context.Context, db *gorm.DB, caller d
 				unavailable = true
 			}
 		}
-		for _, id := range forkConfigFromHistory(h).LocalFSSourceIDs {
+		for _, id := range config.LocalFSSourceIDs {
 			if !localSources[id] {
 				unavailable = true
 			}

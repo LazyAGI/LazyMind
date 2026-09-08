@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { forwardRef, useImperativeHandle } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   getConversationHistory: vi.fn(),
   listConversations: vi.fn(),
   replaceMessageList: vi.fn(),
+  mergeHistoryPage: vi.fn(),
   openResumeSSE: vi.fn(),
   disconnectConversationStream: vi.fn(),
   createNewChat: vi.fn(),
@@ -29,6 +30,7 @@ const mocks = vi.hoisted(() => ({
   pendingMessage: null as any,
   latestChatContainerProps: null as any,
   latestSideChatPanelProps: null as any,
+  locationSearch: "",
 }));
 
 vi.mock("react-i18next", () => ({
@@ -50,7 +52,7 @@ vi.mock("@/modules/chat/components/ForkConversation/ForkStatus", () => ({ defaul
 vi.mock("@/modules/chat/components/ForkConversation/useForkConversation", () => ({ useForkConversation: () => ({ begin: vi.fn() }) }));
 
 vi.mock("react-router-dom", () => ({
-  useLocation: () => ({ key: "test", pathname: "/chat", search: "" }),
+  useLocation: () => ({ key: "test", pathname: "/chat", search: mocks.locationSearch }),
   useNavigate: () => vi.fn(),
   Link: ({ to, children, ...props }: any) => (
     <a href={to} {...props}>
@@ -60,6 +62,8 @@ vi.mock("react-router-dom", () => ({
 }));
 
 vi.mock("antd", () => ({
+  Button: ({ children, loading, ...props }: any) => <button {...props} disabled={loading || props.disabled}>{children}</button>,
+  Space: ({ children, ...props }: any) => <div {...props}>{children}</div>,
   message: {
     error: mocks.messageError,
     warning: vi.fn(),
@@ -85,6 +89,7 @@ vi.mock("@/modules/chat/components/newChatContainer", () => ({
     mocks.latestChatContainerProps = props;
     useImperativeHandle(ref, () => ({
       replaceMessageList: mocks.replaceMessageList,
+      mergeHistoryPage: mocks.mergeHistoryPage,
       openResumeSSE: mocks.openResumeSSE,
       disconnectConversationStream: mocks.disconnectConversationStream,
       createNewChat: mocks.createNewChat,
@@ -211,6 +216,7 @@ describe("ChatLayout conversation loading", () => {
     mocks.pendingMessage = null;
     mocks.latestChatContainerProps = null;
     mocks.latestSideChatPanelProps = null;
+    mocks.locationSearch = "";
     mocks.getChatStatus.mockResolvedValue({ data: { is_generating: false } });
     mocks.listConversations.mockResolvedValue({ data: { conversations: [] } });
     mocks.getConversationHistory.mockImplementation(({ name }: { name: string }) =>
@@ -230,6 +236,30 @@ describe("ChatLayout conversation loading", () => {
 
     expect(mocks.createNewChat).not.toHaveBeenCalled();
     expect(mocks.disconnectConversationStream).not.toHaveBeenCalled();
+  });
+
+  it("merges only the arriving history page after locating the latest reply", async () => {
+    const initial = { id: "h2", seq: 2, query: "initial question", result: "initial answer" };
+    const older = { id: "h1", seq: 1, query: "older question", result: "older answer" };
+    const page = deferred<any>();
+    mocks.locationSearch = "?anchor_history_id=h2";
+    mocks.getConversationDetail.mockResolvedValue({ data: { conversation: { conversation_id: "source", thinking_depth: "medium", settings: {} } } });
+    mocks.getConversationHistory.mockImplementation(({ anchorPageToken }: { anchorPageToken?: string }) => anchorPageToken
+      ? page.promise
+      : Promise.resolve({ data: { history: [initial], older_page_token: "older-token", newer_page_token: "" } }));
+    render(<ChatLayout conversationId="source" setIsChatContent={vi.fn()} initchatConfig={{}} setChatConfigFn={vi.fn()} canChat />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "chat.fork.older" }));
+    expect(mocks.latestChatContainerProps.canChat).toBe(true);
+    expect(mocks.getConversationHistory).toHaveBeenLastCalledWith({ name: "source", anchorPageToken: "older-token" });
+    await act(async () => {
+      page.resolve({ data: { history: [older], older_page_token: "", newer_page_token: "newer-token" } });
+    });
+
+    expect(mocks.mergeHistoryPage).toHaveBeenCalledWith("source", [older]);
+    expect(mocks.replaceMessageList).toHaveBeenCalledTimes(1);
+    expect(mocks.replaceMessageList).toHaveBeenCalledWith("source", [initial], true);
+    expect(mocks.latestChatContainerProps.canChat).toBe(true);
   });
 
   it("loads settings and Fork capability with one detail request for a new conversation", async () => {
