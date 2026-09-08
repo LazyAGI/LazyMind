@@ -208,6 +208,11 @@ export default function MainLayout() {
       icon: <CloudOutlined />,
     },
     {
+      key: "/external-connections",
+      label: t("layout.externalConnections"),
+      icon: <LinkOutlined />,
+    },
+    {
       key: "/databases",
       label: t("layout.database"),
       icon: <DatabaseOutlined />,
@@ -220,6 +225,7 @@ export default function MainLayout() {
       .VITE_APP_LOGO || "";
   const needsRestoreButtonSafeArea =
     pathname.startsWith("/cloud-documents") ||
+    pathname.startsWith("/external-connections") ||
     pathname.startsWith("/channels") ||
     pathname.startsWith("/settings") ||
     pathname.startsWith("/lib/knowledge/detail") ||

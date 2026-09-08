@@ -339,10 +339,8 @@ MAIL_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
         'matching `mail_draft_confirm_revision`). '
         'Do not call ask_user to collect send authorization; the draft card is the only '
         'confirmation UI. Never send mail automatically, never forward, and never delete, '
-        'archive, or mark messages. If a tool returns status=mailbox_not_enabled, stop and '
-        'tell the user to connect that mailbox; do not search other accounts. '
-        'If authorization expired, tell the user to reconnect at '
-        '资源库 → 云文档 → 邮箱连接.',
+        'archive, or mark messages. If authorization expired, tell the user to reconnect at '
+        '资源库 → 外部连接 → 邮箱连接.',
     ),
 }
 

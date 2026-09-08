@@ -16,13 +16,17 @@ import { ArrowLeftOutlined, ArrowRightOutlined, MailOutlined } from "@ant-design
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 
+import {
+  extractErrorCode,
+  getLocalizedErrorMessage,
+} from "@/components/request";
 import { dataSourceCloudOauthApi } from "@/modules/dataSource/api/clients";
 import { unwrapApiData } from "@/modules/dataSource/api/unwrap";
 import {
   enableCloudConnectionForChat,
   setCloudConnectionChatEnabled,
 } from "@/modules/dataSource/common/feishuOAuth";
-import { CLOUD_DOCUMENTS_PATH } from "@/modules/modelProvider/utils/cloudDocumentUrls";
+import { EXTERNAL_CONNECTIONS_PATH } from "@/modules/modelProvider/utils/externalConnectionUrls";
 import neteaseLogo from "../assets/mail/netease.png";
 import qqmailLogo from "../assets/mail/qqmail.png";
 import qqexmailLogo from "../assets/mail/qqexmail.png";
@@ -200,8 +204,8 @@ export default function EmailConnectionPage() {
     try {
       await setCloudConnectionChatEnabled(connection.connection_id, enabled);
       await refresh();
-    } catch (error: any) {
-      message.error(error?.message || t("modelProvider.mail.chatSwitchFailed"));
+    } catch {
+      // The shared request interceptor already surfaces the API error.
     }
   };
 
@@ -217,8 +221,8 @@ export default function EmailConnectionPage() {
       });
       await refresh();
       message.success(t("modelProvider.mail.disconnected"));
-    } catch (error: any) {
-      message.error(error?.message || t("modelProvider.mail.disconnectFailed"));
+    } catch {
+      // The shared request interceptor already surfaces the API error.
     } finally {
       setLoading(false);
     }
@@ -231,15 +235,18 @@ export default function EmailConnectionPage() {
     try {
       const values = await form.validateFields();
       setSaving(provider);
-      const response = await dataSourceCloudOauthApi.createConnectionApiAuthserviceV1CloudProviderConnectionsPost({
-        provider,
-        cloudConnectionCreateBody: {
-          auth_mode: "service_account",
-          client_id: values.email.trim(),
-          client_secret: values.authCode,
-          provider_options: { chat_enabled: true, chatEnabled: true },
+      const response = await dataSourceCloudOauthApi.createConnectionApiAuthserviceV1CloudProviderConnectionsPost(
+        {
+          provider,
+          cloudConnectionCreateBody: {
+            auth_mode: "service_account",
+            client_id: values.email.trim(),
+            client_secret: values.authCode,
+            provider_options: { chat_enabled: true, chatEnabled: true },
+          },
         },
-      });
+        { silentError: true } as never,
+      );
       const data = unwrapApiData<any>(response.data);
       if (data?.connection_id) {
         await enableCloudConnectionForChat(data.connection_id);
@@ -251,7 +258,13 @@ export default function EmailConnectionPage() {
       if (error?.errorFields) {
         return;
       }
-      message.error(error?.message || t("modelProvider.mail.connectFailed"));
+      const text = getLocalizedErrorMessage(error) || t("modelProvider.mail.connectFailed");
+      const code = extractErrorCode(error);
+      if (!code || ["1000825", "1000827", "1000829", "1000830"].includes(code)) {
+        form.setFields([{ name: "authCode", errors: [text] }]);
+        return;
+      }
+      message.error({ key: "mail-connect-error", content: text });
     } finally {
       setSaving(null);
     }
@@ -496,7 +509,7 @@ export default function EmailConnectionPage() {
   return (
     <div className="google-drive-provider-page mail-provider-page">
       <header className="google-drive-provider-header">
-        <Button type="link" icon={<ArrowLeftOutlined />} onClick={() => navigate(CLOUD_DOCUMENTS_PATH)}>
+        <Button type="link" icon={<ArrowLeftOutlined />} onClick={() => navigate(EXTERNAL_CONNECTIONS_PATH)}>
           {t("modelProvider.mail.back")}
         </Button>
         <div className="google-drive-provider-heading">

@@ -164,7 +164,7 @@ export default function MailDraftCard({
           showIcon
           message={t("chat.mailDraft.reauthRequired")}
           action={
-            <Link to={draft.reauth_path || "/cloud-documents/mail"}>
+            <Link to={draft.reauth_path || "/external-connections/mail"}>
               {t("chat.mailDraft.reauth")}
             </Link>
           }

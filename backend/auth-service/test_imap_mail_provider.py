@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 os.environ.setdefault('LAZYMIND_AUTH_CLOUD_SECRET_KEY', 'test-secret-key')
 
 from services.mail_providers import resolve_imap_endpoint  # noqa: E402
-from services.providers.imap_mail_provider import IMAPMailProvider  # noqa: E402
+from services.providers.imap_mail_provider import IMAPMailProvider, mail_verify_error  # noqa: E402
 
 
 class IMAPMailProviderTest(unittest.TestCase):
@@ -65,6 +65,25 @@ class IMAPMailProviderTest(unittest.TestCase):
         _, imap_cls, smtp_cls, _, _ = self._login('gmailimap', 'user@company.com')
         imap_cls.assert_called_once_with('imap.gmail.com', 993)
         smtp_cls.assert_called_once_with('smtp.gmail.com', 465, timeout=20)
+
+    def test_wrong_auth_code_is_classified(self) -> None:
+        err = mail_verify_error('imap', RuntimeError(b'[AUTHENTICATIONFAILED] Authentication failed.'))
+        self.assertTrue(str(err).startswith('mailbox authorization code is invalid'))
+
+    def test_timeout_is_classified_as_unreachable(self) -> None:
+        err = mail_verify_error('imap', TimeoutError('timed out'))
+        self.assertTrue(str(err).startswith('mailbox server unreachable'))
+
+    def test_wrong_auth_code_login_raises(self) -> None:
+        import imaplib
+
+        provider = IMAPMailProvider('qqmail')
+        imap = MagicMock()
+        imap.login.side_effect = imaplib.IMAP4.error('[AUTHENTICATIONFAILED] Authentication failed.')
+        with patch('services.providers.imap_mail_provider.imaplib.IMAP4_SSL', return_value=imap):
+            with self.assertRaises(RuntimeError) as raised:
+                provider.acquire_tenant_access_token(client_id='user@qq.com', client_secret='bad')
+        self.assertIn('authorization code is invalid', str(raised.exception))
 
 
 if __name__ == '__main__':

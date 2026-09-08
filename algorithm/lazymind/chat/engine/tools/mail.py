@@ -60,7 +60,7 @@ _IMAP_ENDPOINTS = {
     # OAuth client / consent-screen setup and are the more user-friendly connect path.
     'gmailimap': {'imap_host': 'imap.gmail.com', 'smtp_host': 'smtp.gmail.com'},
 }
-_REAUTH_PATH = '/cloud-documents/mail'
+_REAUTH_PATH = '/external-connections/mail'
 _EMAIL_RE = re.compile(r'[^,\s;]+@[^,\s;]+')
 _COMMON_ATTACHMENT_EXTS = set(CHAT_ATTACHMENT_EXTENSIONS) | {
     '.zip', '.rar', '.7z', '.xlsx', '.xls', '.csv', '.ppt', '.odt', '.rtf',
@@ -169,7 +169,7 @@ def _require_accounts() -> list[dict[str, str]]:
     if not accounts:
         _fail(
             'No mailbox is enabled for chat. Connect a supported mailbox in '
-            '资源库 → 云文档 → 邮箱连接 and turn the switch on.'
+            '资源库 → 外部连接 → 邮箱连接 and turn the switch on.'
         )
     valid = _enabled_accounts()
     if valid:
@@ -181,11 +181,11 @@ def _require_accounts() -> list[dict[str, str]]:
     if expired:
         _fail(
             'Mailbox authorization is invalid. Re-authorize the connected account '
-            'in 资源库 → 云文档 → 邮箱连接.'
+            'in 资源库 → 外部连接 → 邮箱连接.'
         )
     _fail(
         'No mailbox is enabled for chat. Connect a supported mailbox in '
-        '资源库 → 云文档 → 邮箱连接 and turn the switch on.'
+        '资源库 → 外部连接 → 邮箱连接 and turn the switch on.'
     )
 
 
@@ -220,7 +220,7 @@ def _unavailable_mailbox(mailbox: str) -> dict[str, Any]:
             f'Enabled mailboxes: {emails}. '
             'Stop now. Do not call MailToolkit_search, read, or send_draft again for this '
             'user request, and do not omit mailbox to search other accounts. '
-            'Tell the user to connect and enable this mailbox in 资源库 → 云文档 → 邮箱连接.'
+            'Tell the user to connect and enable this mailbox in 资源库 → 外部连接 → 邮箱连接.'
         ),
     }
 
@@ -585,11 +585,16 @@ def _apply_confirm_patch(draft: dict[str, Any]) -> dict[str, Any]:
 def _imap_payload(fetched: Any) -> bytes | None:
     if not fetched:
         return None
+    chunks: list[bytes] = []
     for item in fetched:
         if isinstance(item, tuple) and len(item) >= 2 and item[1] is not None:
             raw = item[1]
-            return raw if isinstance(raw, (bytes, bytearray)) else bytes(raw)
-    return None
+            chunks.append(raw if isinstance(raw, (bytes, bytearray)) else bytes(raw))
+    if not chunks:
+        return None
+    if len(chunks) == 1:
+        return chunks[0]
+    return chunks[0].rstrip(b'\r\n') + b'\r\n\r\n' + b''.join(chunks[1:])
 
 
 def _resolve_imap_endpoint(provider: str, email: str) -> dict[str, Any]:
@@ -633,11 +638,11 @@ class _IMAPBackend:
         except imaplib.IMAP4.error as orig:
             client.logout()
             raise ToolExecutionError(
-                'Mailbox authorization expired. Re-authorize the mailbox in 资源库 → 云文档 → 邮箱连接.'
+                'Mailbox authorization expired. Re-authorize the mailbox in 资源库 → 外部连接 → 邮箱连接.'
             ) from orig
         if status != 'OK':
             client.logout()
-            _fail('Mailbox authorization expired. Re-authorize the mailbox in 资源库 → 云文档 → 邮箱连接.')
+            _fail('Mailbox authorization expired. Re-authorize the mailbox in 资源库 → 外部连接 → 邮箱连接.')
         return client
 
     def search(self, **filters: str) -> dict[str, Any]:
@@ -668,7 +673,11 @@ class _IMAPBackend:
                     continue
                 ids = (data[0] or b'').split()[-20:]
                 for uid in reversed(ids):
-                    status, fetched = client.uid('FETCH', uid, '(RFC822.HEADER)')
+                    status, fetched = client.uid(
+                        'FETCH',
+                        uid,
+                        '(BODY.PEEK[HEADER.FIELDS (FROM TO SUBJECT DATE MESSAGE-ID)])',
+                    )
                     raw = _imap_payload(fetched)
                     if status != 'OK' or raw is None:
                         continue
@@ -697,39 +706,57 @@ class _IMAPBackend:
             except Exception:
                 pass
 
-    def _fetch_message(self, message_id: str) -> email.message.Message:
+    def _fetch_raw(self, message_id: str, spec: str, client=None, *, required: bool = True) -> bytes:
         folder, uid = _split_mail_ref(message_id)
-        client = self._connect()
+        own = client is None
+        if own:
+            client = self._connect()
         try:
             if not _select_mailbox(client, folder, readonly=True):
-                _fail('The requested email was not found.')
-            status, fetched = client.uid('FETCH', uid, '(RFC822)')
+                if required:
+                    _fail('The requested email was not found.')
+                return b''
+            status, fetched = client.uid('FETCH', uid, spec)
             raw = _imap_payload(fetched)
             if status != 'OK' or raw is None:
-                _fail('The requested email was not found.')
-            return email.message_from_bytes(raw)
+                if required:
+                    _fail('The requested email was not found.')
+                return b''
+            return raw
         finally:
-            try:
-                client.logout()
-            except Exception:
-                pass
+            if own:
+                try:
+                    client.logout()
+                except Exception:
+                    pass
 
-    def read(self, message_id: str) -> dict[str, Any]:
-        msg = self._fetch_message(message_id)
+    def _fetch_message(self, message_id: str, client=None) -> email.message.Message:
+        return email.message_from_bytes(self._fetch_raw(message_id, '(RFC822)', client))
+
+    def _read_message(self, message_id: str, client=None) -> dict[str, Any]:
+        raw = self._fetch_raw(
+            message_id,
+            '(BODY.PEEK[HEADER] BODY.PEEK[TEXT]<0.20000>)',
+            client,
+            required=False,
+        )
+        if not raw:
+            raw = self._fetch_raw(message_id, '(RFC822)', client)
+        msg = email.message_from_bytes(raw)
         attachments = []
         body_parts = []
         for part in msg.walk():
             filename = part.get_filename()
             if filename:
                 decoded = _decode_header_value(filename)
+                disposition = str(part.get('Content-Disposition') or '')
+                match = re.search(r'size\s*=\s*(\d+)', disposition, re.I)
                 attachments.append({
                     'attachment_id': decoded,
                     'filename': decoded,
                     'mime_type': part.get_content_type(),
-                    'size': len(part.get_payload(decode=True) or b''),
+                    'size': int(match.group(1)) if match else 0,
                 })
-                continue
-            if part.get_filename():
                 continue
             payload = part.get_payload(decode=True) or b''
             charset = part.get_content_charset() or 'utf-8'
@@ -752,6 +779,27 @@ class _IMAPBackend:
             'cite': f'email:{message_id}',
         }
 
+    def read(self, message_id: str) -> dict[str, Any]:
+        return self._read_message(message_id)
+
+    def _search_thread_uids(self, client, folder: str, needle: str) -> list[str]:
+        tokens = {needle, needle.strip('<>')}
+        found: list[str] = []
+        seen: set[str] = set()
+        for header in ('Message-ID', 'In-Reply-To', 'References'):
+            for token in tokens:
+                if not token:
+                    continue
+                status, data = client.uid('SEARCH', 'HEADER', header, token)
+                if status != 'OK':
+                    continue
+                for uid in (data[0] or b'').split():
+                    ref = _mail_ref(folder, uid.decode('ascii'))
+                    if ref not in seen:
+                        seen.add(ref)
+                        found.append(ref)
+        return found
+
     def read_thread(self, thread_id: str) -> dict[str, Any]:
         needle = (thread_id or '').strip()
         client = self._connect()
@@ -761,30 +809,14 @@ class _IMAPBackend:
             for folder in folders:
                 if not _select_mailbox(client, folder, readonly=True):
                     continue
-                status, data = client.uid('SEARCH', 'ALL')
-                ids = (data[0] or b'').split() if status == 'OK' else []
-                for uid in reversed(ids[-40:]):
-                    status, fetched = client.uid(
-                        'FETCH',
-                        uid,
-                        '(BODY.PEEK[HEADER.FIELDS (MESSAGE-ID IN-REPLY-TO REFERENCES)])',
-                    )
-                    raw = _imap_payload(fetched)
-                    if status != 'OK' or raw is None:
-                        continue
-                    headers = email.message_from_bytes(raw)
-                    blob = ' '.join([
-                        _decode_header_value(headers.get('Message-ID')),
-                        _decode_header_value(headers.get('In-Reply-To')),
-                        _decode_header_value(headers.get('References')),
-                    ])
-                    if needle and (needle in blob or needle.strip('<>') in blob):
-                        matched.append(_mail_ref(folder, uid.decode('ascii')))
-            messages = [self.read(mid) for mid in reversed(matched[-20:])]
+                matched.extend(self._search_thread_uids(client, folder, needle))
+            messages = [
+                self._read_message(mid, client) for mid in reversed(matched[-20:])
+            ]
             if not messages and needle.isdigit():
-                messages = [self.read(_mail_ref('INBOX', needle))]
+                messages = [self._read_message(_mail_ref('INBOX', needle), client)]
             elif not messages and '::' in needle:
-                messages = [self.read(needle)]
+                messages = [self._read_message(needle, client)]
             return {'thread_id': thread_id, 'messages': messages}
         finally:
             try:
@@ -837,7 +869,7 @@ class _IMAPBackend:
                 refused = smtp.sendmail(self.email, recipients, message.as_bytes())
         except smtplib.SMTPAuthenticationError as orig:
             raise ToolExecutionError(
-                'Mailbox authorization expired. Re-authorize the mailbox in 资源库 → 云文档 → 邮箱连接.'
+                'Mailbox authorization expired. Re-authorize the mailbox in 资源库 → 外部连接 → 邮箱连接.'
             ) from orig
         except smtplib.SMTPRecipientsRefused as orig:
             detail = ', '.join(
@@ -870,7 +902,7 @@ def _backend(cred: dict[str, str]):
     if provider in _IMAP_ENDPOINTS:
         return _IMAPBackend(cred)
     _fail(
-        'No mailbox is enabled for chat. Connect a supported mailbox in 资源库 → 云文档 → 邮箱连接.'
+        'No mailbox is enabled for chat. Connect a supported mailbox in 资源库 → 外部连接 → 邮箱连接.'
     )
 
 
@@ -983,7 +1015,7 @@ class MailToolkit:
         mailbox: str = '',
         folder: str = '',
     ) -> dict[str, Any]:
-        """Search enabled mailboxes without building a local index.
+        """List matching emails (headers only). Call read for the body of one id.
 
         Args:
             keyword: Free-text query matched against message bodies when supported.
@@ -1040,7 +1072,7 @@ class MailToolkit:
         return payload
 
     def read(self, message_id: str, mailbox: str = '') -> dict[str, Any]:
-        """Read one email, including headers, body, and attachment metadata.
+        """Read one email body on demand. Attachments are listed only; use read_attachment to download.
 
         Args:
             message_id: folder::UID returned by search (IMAP UIDs are not unique across folders).
