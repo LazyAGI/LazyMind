@@ -1,7 +1,13 @@
 import { FC, type ReactNode, useRef, useState, useEffect, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { localizeErrorCode } from "@/components/request";
-import { message } from "antd";
+import { Alert, Button, message, Space } from "antd";
+import { useLocation } from "react-router-dom";
+import { AgentAppsAuth } from "@/components/auth";
+import type { ConversationForkCapability } from "@/api/generated/core-client";
+import ForkStatus from "@/modules/chat/components/ForkConversation/ForkStatus";
+import { useForkConversation } from "@/modules/chat/components/ForkConversation/useForkConversation";
+import type { ThinkingDepth } from "@/modules/chat/store/chatThink";
 import { MessageOutlined, UnorderedListOutlined } from "@ant-design/icons";
 import { v4 as uuidv4 } from "uuid";
 import {
@@ -74,7 +80,7 @@ import {
 const EMPTY_TASKS: SubAgentTask[] = [];
 const CONVERSATION_HISTORY_RETRY_DELAYS_MS = [0, 500, 1500];
 
-async function loadConversationHistory(conversationId: string) {
+async function loadConversationHistory(conversationId: string, anchorHistoryId?: string) {
   let lastError: unknown;
   for (const delayMs of CONVERSATION_HISTORY_RETRY_DELAYS_MS) {
     if (delayMs > 0) {
@@ -84,6 +90,7 @@ async function loadConversationHistory(conversationId: string) {
       return await ChatServiceApi()
         .conversationServiceGetConversationHistory({
           name: conversationId,
+          anchorHistoryId,
         });
     } catch (error) {
       lastError = error;
@@ -125,6 +132,17 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     initPendingConversationSettings,
   } = props;
   const [sessionId, setSessionId] = useState("");
+  const fork = useForkConversation(routeConversationId || sessionId);
+  const location = useLocation();
+  const anchorHistoryId = new URLSearchParams(location.search).get("anchor_history_id") || undefined;
+  const [forkSupported, setForkSupported] = useState(false);
+  const forkMetadataId = useRef("");
+  const [forkThinkingDepth, setForkThinkingDepth] = useState<ThinkingDepth>();
+  const [loadError, setLoadError] = useState(false);
+  const [historyWindow, setHistoryWindow] = useState({ older: "", newer: "" });
+  const [windowLoading, setWindowLoading] = useState(false);
+  const windowRequestRef = useRef(0);
+
   const [chatConfig, setChatConfig] = useState<ChatConfig>(
     initchatConfig || {},
   );
@@ -196,6 +214,8 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
 
   // Load persisted workflow settings once a real conversation id is available.
   useEffect(() => {
+    if (sessionId && forkMetadataId.current === sessionId) return;
+    setForkSupported(false);
     if (!sessionId || sessionId.startsWith('temp_')) {
       setConversationRelation(null);
       if (!sessionId) {
@@ -210,15 +230,19 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         if (cancelled) {
           return;
         }
+        setForkSupported(Boolean((detailRes.data.conversation as { fork_capability?: ConversationForkCapability })?.fork_capability?.supported));
         setConversationSettings(
           parseConversationRuntimeSettings(detailRes.data.conversation),
         );
         setConversationRelation(
           getConversationRelation(detailRes.data.conversation),
         );
-        useChatThinkStore.getState().setThinkingDepth(
-          resolveConversationThinkingDepth(detailRes.data.conversation),
-        );
+        const depth = resolveConversationThinkingDepth(detailRes.data.conversation);
+        if (getConversationRelation(detailRes.data.conversation)?.relationType === "fork") {
+          setForkThinkingDepth(depth);
+        } else {
+          useChatThinkStore.getState().setThinkingDepth(depth);
+        }
       })
       .catch(() => {});
     return () => {
@@ -525,11 +549,11 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         },
         models: [t("chat.lazyMindModel")],
         thinking_depth:
-          extras?.thinking_depth ?? useChatThinkStore.getState().thinkingDepth,
+          extras?.thinking_depth ?? forkThinkingDepth ?? useChatThinkStore.getState().thinkingDepth,
         // enable_thinking: think ? true : false,
         stream: true,
         input,
-        mode: "auto",
+        ...(conversationRelation?.relationType === "fork" ? {} : { mode: "auto" }),
         create_time: new Date().toISOString(),
         environment_context: buildEnvironmentContext(
           i18n.resolvedLanguage || i18n.language,
@@ -646,7 +670,12 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
   const loadConversation = useCallback(async (conversationId: string) => {
     const requestId = ++loadConversationRequestRef.current;
     setIsRestoringConversation(true);
+    setLoadError(false);
+    setWindowLoading(false);
+    setForkSupported(false);
     setConversationRelation(null);
+    const owner = AgentAppsAuth.getUserInfo()?.userId;
+    windowRequestRef.current += 1;
     try {
       let isGenerating = false;
       try {
@@ -657,13 +686,17 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
       }
       const [detailRes, historyRes] = await Promise.all([
         ChatServiceApi().conversationServiceGetConversationDetail({ conversation: conversationId }),
-        loadConversationHistory(conversationId),
+        loadConversationHistory(conversationId, anchorHistoryId),
       ]);
-      if (requestId !== loadConversationRequestRef.current) return;
+      if (requestId !== loadConversationRequestRef.current || owner !== AgentAppsAuth.getUserInfo()?.userId) return;
       const conversation = detailRes.data.conversation;
-      useChatThinkStore.getState().setThinkingDepth(
-        resolveConversationThinkingDepth(conversation),
-      );
+      const relation = getConversationRelation(conversation);
+      const depth = resolveConversationThinkingDepth(conversation);
+      setForkThinkingDepth(relation?.relationType === "fork" ? depth : undefined);
+      if (relation?.relationType !== "fork") useChatThinkStore.getState().setThinkingDepth(depth);
+      forkMetadataId.current = conversationId;
+      setForkSupported(Boolean((conversation as { fork_capability?: ConversationForkCapability })?.fork_capability?.supported));
+      setHistoryWindow({ older: historyRes.data.older_page_token || "", newer: historyRes.data.newer_page_token || "" });
       const tempData = {
         knowledgeBaseId: conversation?.search_config?.dataset_list
           ?.map((dataset: any) => dataset.id)
@@ -683,13 +716,17 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         fallbackCreateTime: "xxx-xxx-xxx",
         isGenerating,
       });
-      chatRef.current?.replaceMessageList(conversationId, list);
-      if (isGenerating) {
+      if (anchorHistoryId) {
+        chatRef.current?.replaceMessageList(conversationId, list, true);
+      } else {
+        chatRef.current?.replaceMessageList(conversationId, list);
+      }
+      if (isGenerating && !anchorHistoryId) {
         chatRef.current?.openResumeSSE?.(conversationId);
       }
     } catch {
       if (requestId === loadConversationRequestRef.current) {
-        setIsChatContent(false);
+        setLoadError(true);
         message.error(localizeErrorCode("2000509"));
       }
     } finally {
@@ -697,7 +734,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         setIsRestoringConversation(false);
       }
     }
-  }, [setConversationId, setChatConfigFn, setIsChatContent]);
+  }, [setConversationId, setChatConfigFn, setIsChatContent, anchorHistoryId]);
 
   // Route changes own conversation loading, including browser reload/back/forward.
   useEffect(() => {
@@ -716,12 +753,14 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
       setIsRestoringConversation(false);
       setConversationSettings(undefined);
       setConversationRelation(null);
+      setForkThinkingDepth(undefined);
+      setHistoryWindow({ older: "", newer: "" });
       setChatConfig({});
       setChatConfigFn({});
       chatRef.current?.createNewChat();
       return;
     }
-    if (conversationId === sessionIdRef.current) {
+    if (conversationId === sessionIdRef.current && !anchorHistoryId) {
       return;
     }
     if (sessionIdRef.current) {
@@ -733,8 +772,36 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     void loadConversation(conversationId);
     return () => {
       loadConversationRequestRef.current += 1;
+      windowRequestRef.current += 1;
     };
   }, [loadConversation, routeConversationId, setChatConfigFn, setConversationId, setIsChatContent]);
+
+  useEffect(() => {
+    if (!anchorHistoryId || isRestoringConversation) return;
+    let timer: ReturnType<typeof setTimeout>;
+    const frame = requestAnimationFrame(() => {
+      const target = Array.from(document.querySelectorAll<HTMLElement>('[data-chat-role="assistant"]')).find((node) => node.dataset.chatHistoryId === anchorHistoryId);
+      if (!target) return;
+      target.scrollIntoView({ block: "center" });
+      target.classList.add("chat-fork-source-highlight");
+      timer = setTimeout(() => target.classList.remove("chat-fork-source-highlight"), 1800);
+    });
+    return () => { cancelAnimationFrame(frame); clearTimeout(timer); };
+  }, [anchorHistoryId, isRestoringConversation]);
+
+  async function loadWindowPage(direction: "older" | "newer") {
+    if (windowLoading || !historyWindow[direction]) return;
+    const request = ++windowRequestRef.current; const id = sessionId;
+    const owner = AgentAppsAuth.getUserInfo()?.userId;
+    setWindowLoading(true);
+    try {
+      const response = await ChatServiceApi().conversationServiceGetConversationHistory({ name: id, anchorPageToken: historyWindow[direction] });
+      if (request !== windowRequestRef.current || owner !== AgentAppsAuth.getUserInfo()?.userId) return;
+      setHistoryWindow((current) => ({ ...current, [direction]: response.data[`${direction}_page_token`] || "" }));
+      chatRef.current?.mergeHistoryPage(id, response.data.history || []);
+    } catch { if (request === windowRequestRef.current && owner === AgentAppsAuth.getUserInfo()?.userId) message.error(t("chat.fork.historyLoadFailed")); }
+    finally { if (request === windowRequestRef.current) setWindowLoading(false); }
+  }
 
   function parseErrorData(data: string) {
     const dataObject = UIUtils.jsonParser(data) || {};
@@ -862,10 +929,20 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         </div>
       )}
       <div className={`chat-conversation-pane${workflowPanelExpanded && expandedRailTab !== "chat" ? " chat-conversation-pane--hidden" : ""}${isTaskPanelRestoreVisible ? " chat-conversation-pane--task-restore-visible" : ""}`}>
+        <ForkStatus fork={fork} source={sessionId} />
         <ConversationRelationBanner relation={conversationRelation} />
+        {loadError && <Alert type="error" message={t("chat.fork.historyLoadFailed")} action={<Button onClick={() => loadConversation(routeConversationId || sessionId)}>{t("chat.fork.retryRead")}</Button>} />}
+        {anchorHistoryId && (historyWindow.older || historyWindow.newer) && <Space style={{ marginBottom: 12 }}>
+          {historyWindow.older && <Button loading={windowLoading} onClick={() => loadWindowPage("older")}>{t("chat.fork.older")}</Button>}
+          {historyWindow.newer && <Button loading={windowLoading} onClick={() => loadWindowPage("newer")}>{t("chat.fork.newer")}</Button>}
+        </Space>}
         <ChatContainerComponent
           ref={chatRef}
-          canChat={chatEnabled}
+          canChat={chatEnabled && !(anchorHistoryId && historyWindow.newer)}
+          onFork={forkSupported ? fork.begin : undefined}
+          forkPending={fork.pending}
+          thinkingDepth={forkThinkingDepth}
+          onThinkingDepthChange={forkThinkingDepth ? setForkThinkingDepth : undefined}
           initialCard={isRestoringConversation ? null : <InitialCard />}
           sessionId={sessionId}
           onOpenSSE={onOpenSSE}

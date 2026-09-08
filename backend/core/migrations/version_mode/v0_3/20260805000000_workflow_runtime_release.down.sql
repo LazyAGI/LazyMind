@@ -1,3 +1,6 @@
+DROP TABLE IF EXISTS conversation_fork_requests;
+DROP TABLE IF EXISTS conversation_fork_origins;
+
 -- +migrate Dialect postgres
 DROP TABLE IF EXISTS public.workflow_approval_preferences;
 ALTER TABLE public.task_center_tasks DROP CONSTRAINT IF EXISTS chk_tct_task_type;

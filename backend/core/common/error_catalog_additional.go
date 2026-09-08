@@ -650,6 +650,10 @@ func init() {
 	registerAdditionalErrorAlias("invalid external Agent attachment content", "invalid external Agent attachment", http.StatusBadRequest, 2002367)
 	registerAdditionalError("create external Agent attachment reference", http.StatusInternalServerError, 2002368)
 	registerAdditionalError("external Agent attachment event conflicts with existing content", http.StatusConflict, 2002369)
+	registerAdditionalError("invalid history selection", http.StatusBadRequest, 2002370)
+	registerAdditionalError("failed to start history run", http.StatusConflict, 2002371)
+	registerAdditionalError("editable block unavailable or changed; refresh and retry", http.StatusConflict, 2002372)
+	registerAdditionalError("inspect chat source attachment", http.StatusInternalServerError, 2002373)
 }
 
 func registerAdditionalError(message string, status, code int) {

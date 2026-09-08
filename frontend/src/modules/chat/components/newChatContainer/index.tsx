@@ -454,6 +454,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
 
     useImperativeHandle(ref, () => ({
       replaceMessageList: conversation.replaceMessageList,
+      mergeHistoryPage: conversation.mergeHistoryPage,
       createNewChat: conversation.createNewChat,
       sendMessage,
       prepareMessage: ({
@@ -515,6 +516,8 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
         <div className={`chat-box${sourcePanelSources.length ? " has-source-panel" : ""}`}>
           <div className="chat-main-column">
             <MessageList
+              onFork={props.onFork}
+              forkPending={props.forkPending}
               messageList={conversation.messageList}
               initialCard={initialCard}
               sendMessage={(text, clearInput, extras) => {

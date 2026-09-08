@@ -55,3 +55,12 @@ describe("ConversationRelationBanner", () => {
     expect(screen.getByText("Fork自：技术讨论")).toBeInTheDocument();
   });
 });
+
+it("locates an exact source reply and disables navigation after source deletion", () => {
+  const relation = { parentConversationId: "source", parentDisplayName: "Source", relationType: "fork" as const, sourceHistoryId: "h/40", canLocate: true, sourceStatus: "available" };
+  const { rerender } = render(<MemoryRouter><ConversationRelationBanner relation={relation} /></MemoryRouter>);
+  expect(screen.getByRole("link", { name: "chat.fork.locateSource" })).toHaveAttribute("href", "/agent/chat/home/source?anchor_history_id=h%2F40");
+  rerender(<MemoryRouter><ConversationRelationBanner relation={{ ...relation, canLocate: false, sourceStatus: "deleted" }} /></MemoryRouter>);
+  expect(screen.queryByRole("link")).not.toBeInTheDocument();
+  expect(screen.getByText("chat.fork.source.deleted")).toBeInTheDocument();
+});

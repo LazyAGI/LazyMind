@@ -165,6 +165,28 @@ func TestResolveSidechatErrorsUseSpecificCodes(t *testing.T) {
 	}
 }
 
+func TestResolveForkRelatedErrorsUseSpecificCodes(t *testing.T) {
+	for _, sample := range []struct {
+		message string
+		status  int
+		code    int
+	}{
+		{"invalid history selection", 400, 2002370},
+		{"failed to start history run", 409, 2002371},
+		{"editable block unavailable or changed; refresh and retry", 404, 2002372},
+		{"editable block unavailable or changed; refresh and retry", 409, 2002372},
+		{"editable block unavailable or changed; refresh and retry", 500, 2002372},
+		{"inspect chat source attachment: permission denied", 500, 2002373},
+	} {
+		t.Run(sample.message+"/"+strconv.Itoa(sample.status), func(t *testing.T) {
+			appErr := ResolveAppError(sample.message, sample.status)
+			if appErr.Code != sample.code || appErr.HTTPStatus != sample.status {
+				t.Fatalf("resolved error = %#v, want code %d and HTTP status %d", appErr, sample.code, sample.status)
+			}
+		})
+	}
+}
+
 func TestResolveMaintenanceErrorsUseSpecificCodes(t *testing.T) {
 	for _, sample := range []struct {
 		message string

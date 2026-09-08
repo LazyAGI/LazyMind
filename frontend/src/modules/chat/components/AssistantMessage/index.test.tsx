@@ -294,3 +294,156 @@ describe("externalProviderDisplayName", () => {
     expect(externalProviderDisplayName("workbuddy")).toBe("WorkBuddy");
   });
 });
+
+describe("Fork message action", () => {
+  const messageProps = {
+    index: 0,
+    length: 1,
+    sendMessage: vi.fn(),
+    regenerate: vi.fn(),
+    regenerateDisabled: false,
+    stopGeneration: vi.fn(),
+    renderText: () => null,
+    updateMessage: vi.fn(),
+  };
+  const persistedReply = {
+    role: "assistant",
+    history_id: "h1",
+    delta: "answer",
+    run_status: "completed",
+    finish_reason: ChatConversationsResponseFinishReasonEnum.FinishReasonStop,
+  };
+
+  it.each(["completed", undefined])(
+    "forks a persisted %s reply with one toolbar click",
+    (status) => {
+      const onFork = vi.fn();
+      render(
+        <AssistantMessage
+          {...messageProps}
+          item={{ ...persistedReply, run_status: status }}
+          onFork={onFork}
+        />,
+      );
+
+      const action = screen.getByRole("button", { name: "chat.fork.title" });
+      expect(action).toHaveTextContent(/^$/);
+      expect(screen.queryByRole("button", { name: "chat.fork.more" })).toBeNull();
+      fireEvent.click(action);
+      expect(onFork).toHaveBeenCalledOnce();
+      expect(onFork).toHaveBeenCalledWith("h1");
+      expect(screen.queryByRole("menu")).toBeNull();
+    },
+  );
+
+  it.each(["generating", "failed", "cancelled", "interrupted"])(
+    "hides Fork on a %s reply while keeping the previous successful reply available",
+    (status) => {
+      const onFork = vi.fn();
+      render(<>
+        <AssistantMessage {...messageProps} length={2} item={persistedReply} onFork={onFork} />
+        <AssistantMessage {...messageProps} index={1} length={2}
+          item={{ ...persistedReply, history_id: "h2", run_status: status }} onFork={onFork} />
+      </>);
+      const actions = screen.getAllByRole("button", { name: "chat.fork.title" });
+      expect(actions).toHaveLength(1);
+      fireEvent.click(actions[0]);
+      expect(onFork).toHaveBeenCalledOnce();
+      expect(onFork).toHaveBeenCalledWith("h1");
+    },
+  );
+
+  it("hides Fork while generating and restores it when the reply finishes", () => {
+    const onFork = vi.fn();
+    const { rerender } = render(
+      <AssistantMessage
+        {...messageProps}
+        item={{ ...persistedReply, run_status: "generating" }}
+        onFork={onFork}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "chat.fork.title" })).toBeNull();
+    expect(onFork).not.toHaveBeenCalled();
+
+    rerender(
+      <AssistantMessage {...messageProps} item={persistedReply} onFork={onFork} />,
+    );
+    const action = screen.getByRole("button", { name: "chat.fork.title" });
+    expect(action).toBeEnabled();
+    fireEvent.click(action);
+    expect(onFork).toHaveBeenCalledWith("h1");
+  });
+
+  it("requires selecting a candidate before Fork and enables it after selection", async () => {
+    const onFork = vi.fn();
+    const item = {
+      ...persistedReply,
+      answers: [
+        { index: 0, history_id: "h1", content: "first answer" },
+        { index: 1, history_id: "h2", content: "second answer" },
+      ],
+    };
+    const { rerender } = render(
+      <AssistantMessage {...messageProps} item={item} onFork={onFork} />,
+    );
+
+    const action = screen.getByRole("button", { name: "chat.fork.title" });
+    expect(action).toBeDisabled();
+    fireEvent.click(action);
+    expect(onFork).not.toHaveBeenCalled();
+    fireEvent.focus(action.parentElement!);
+    expect(
+      await screen.findByText("chat.fork.selectAnswerFirst"),
+    ).toBeInTheDocument();
+
+    rerender(
+      <AssistantMessage
+        {...messageProps}
+        item={{ ...item, selected_answer_index: 0 }}
+        onFork={onFork}
+      />,
+    );
+    const selectedAction = screen.getByRole("button", { name: "chat.fork.title" });
+    expect(selectedAction).toBeEnabled();
+    fireEvent.click(selectedAction);
+    expect(onFork).toHaveBeenCalledOnce();
+    expect(onFork).toHaveBeenCalledWith("h1");
+  });
+
+  it("disables Fork while another creation is pending", () => {
+    const onFork = vi.fn();
+    render(
+      <AssistantMessage
+        {...messageProps}
+        item={persistedReply}
+        onFork={onFork}
+        forkPending
+      />,
+    );
+
+    const action = screen.getByRole("button", { name: "chat.fork.title" });
+    expect(action).toBeDisabled();
+    fireEvent.click(action);
+    expect(onFork).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { archived_failure: true },
+    { history_id: undefined },
+  ])("hides Fork for an ineligible reply %j", (fields) => {
+    render(
+      <AssistantMessage
+        {...messageProps}
+        item={{ ...persistedReply, ...fields }}
+        onFork={vi.fn()}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "chat.fork.title" })).toBeNull();
+  });
+
+  it("hides Fork when the conversation does not support it", () => {
+    render(<AssistantMessage {...messageProps} item={persistedReply} />);
+    expect(screen.queryByRole("button", { name: "chat.fork.title" })).toBeNull();
+  });
+});
