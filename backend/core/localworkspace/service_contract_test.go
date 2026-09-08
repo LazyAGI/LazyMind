@@ -8,6 +8,7 @@ import (
 	"lazymind/core/store"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -191,5 +192,93 @@ func TestWorkspaceRevokeRejectsStaleVersionAndOtherOwner(t *testing.T) {
 		if err != nil || row.Version != 1 {
 			t.Fatalf("rejected revoke changed grant: %+v %v", row, err)
 		}
+	}
+}
+
+func TestWorkspaceDirectoryReplacementInvalidatesGrant(t *testing.T) {
+	db, grant := workspaceFixture(t)
+	// Keep the old directory alive so the filesystem cannot reuse its identity.
+	moved := grant.Path + "-old"
+	if err := os.Rename(grant.Path, moved); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(moved) })
+	if err := os.Mkdir(grant.Path, 0700); err != nil {
+		t.Fatal(err)
+	}
+	_, err := ResolveActiveForBinding(context.Background(), db.DB, "owner", grant.WorkspaceID)
+	requireWorkspaceReason(t, err, 409, "conflict", "path_unavailable")
+}
+
+func TestWorkspacePermissionUpdateUsesSavedVersion(t *testing.T) {
+	db, grant := workspaceFixture(t)
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+	now := time.Now().UTC()
+	conv := orm.Conversation{ID: "permission-task", IsTaskConv: true, BaseModel: orm.BaseModel{CreateUserID: "owner", CreatedAt: now, UpdatedAt: now}}
+	if err := db.Create(&conv).Error; err != nil {
+		t.Fatal(err)
+	}
+	binding := orm.ConversationWorkspaceBinding{ConversationID: conv.ID, WorkspaceID: grant.WorkspaceID, PermissionMode: "always_ask", PermissionVersion: 1, CreatedAt: now, UpdatedAt: now}
+	if err := db.Create(&binding).Error; err != nil {
+		t.Fatal(err)
+	}
+	update := func(user, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPut, "/conversations/"+conv.ID+":workspace-permission", strings.NewReader(body))
+		req.Header.Set("X-User-Id", user)
+		req = mux.SetURLVars(req, map[string]string{"conversation_id": conv.ID})
+		response := httptest.NewRecorder()
+		UpdateConversationPermission(response, req)
+		return response
+	}
+	denied := update("other", `{"permission_mode":"allow_all","version":1}`)
+	if denied.Code != 404 {
+		t.Fatalf("cross-owner update=%d %s", denied.Code, denied.Body.String())
+	}
+	response := update("owner", `{"permission_mode":"ask_as_needed","version":1}`)
+	var envelope struct {
+		Code int
+		Data struct {
+			PermissionMode    string `json:"permission_mode"`
+			PermissionVersion int64  `json:"permission_version"`
+			EffectiveAt       string `json:"effective_at"`
+		}
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if response.Code != 200 || envelope.Code != 0 || envelope.Data.PermissionMode != "ask_as_needed" || envelope.Data.PermissionVersion != 2 || envelope.Data.EffectiveAt != "next_request" {
+		t.Fatalf("update=%d %s", response.Code, response.Body.String())
+	}
+	stale := update("owner", `{"permission_mode":"allow_all","version":1}`)
+	var conflict struct {
+		Code int
+		Data struct{ Detail map[string]any }
+	}
+	if err := json.Unmarshal(stale.Body.Bytes(), &conflict); err != nil {
+		t.Fatal(err)
+	}
+	if stale.Code != 409 || conflict.Code != common.ResolveAppError("conflict", 409).Code || conflict.Data.Detail["reason"] != "binding_conflict" {
+		t.Fatalf("stale update=%d %s", stale.Code, stale.Body.String())
+	}
+	var saved orm.ConversationWorkspaceBinding
+	if err := db.Where("conversation_id = ?", conv.ID).First(&saved).Error; err != nil {
+		t.Fatal(err)
+	}
+	if saved.PermissionMode != "ask_as_needed" || saved.PermissionVersion != 2 {
+		t.Fatalf("stale request changed binding: %+v", saved)
+	}
+	if err := db.Model(&orm.LocalWorkspace{}).Where("id = ?", grant.WorkspaceID).Updates(map[string]any{"status": "revoked", "version": 2}).Error; err != nil {
+		t.Fatal(err)
+	}
+	rejected := update("owner", `{"permission_mode":"allow_all","version":2}`)
+	if rejected.Code != 409 {
+		t.Fatalf("revoked update=%d %s", rejected.Code, rejected.Body.String())
+	}
+	if err := db.Where("conversation_id = ?", conv.ID).First(&saved).Error; err != nil {
+		t.Fatal(err)
+	}
+	if saved.PermissionVersion != 2 {
+		t.Fatalf("revoked request changed version: %+v", saved)
 	}
 }

@@ -117,6 +117,10 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "invalid json", http.StatusBadRequest)
 		return
 	}
+	if appErr := validateWorkspaceRequestMode(raw); appErr != nil {
+		common.ReplyAppErr(w, appErr)
+		return
+	}
 	basicChatOnly, _ := raw["basic_chat_only"].(bool)
 	if basicChatOnly {
 		if runInBackground, _ := raw["run_in_background"].(bool); runInBackground {
@@ -284,7 +288,7 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 	runInBackground, _ := raw["run_in_background"].(bool)
 	requestedThinkingDepth, _ := raw["thinking_depth"].(string)
 
-	conversationRecord, seq, err := ensureConversation(r.Context(), db, convID, displayName, searchConfigJSON, modelsJSON, userID, userName, runInBackground, requestedThinkingDepth, initialConversationSettings, initialModelSelection)
+	conversationRecord, seq, err := ensureConversationWithWorkspace(r.Context(), db, convID, displayName, searchConfigJSON, modelsJSON, userID, userName, runInBackground, requestedThinkingDepth, initialConversationSettings, initialModelSelection, raw)
 	if err != nil {
 		if errors.Is(err, errConversationUnavailable) {
 			common.ReplyErr(w, err.Error(), http.StatusNotFound)
@@ -292,6 +296,11 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		}
 		if errors.Is(err, errConversationInTrash) {
 			common.ReplyErr(w, err.Error(), http.StatusConflict)
+			return
+		}
+		var appErr *common.AppError
+		if errors.As(err, &appErr) {
+			common.ReplyAppErr(w, appErr)
 			return
 		}
 		if errors.Is(err, errChatModelUnavailable) {

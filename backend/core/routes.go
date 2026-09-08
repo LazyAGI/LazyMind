@@ -21,6 +21,7 @@ import (
 	"lazymind/core/exporter"
 	"lazymind/core/file"
 	"lazymind/core/knowledge_market"
+	"lazymind/core/localworkspace"
 	"lazymind/core/mcp"
 	"lazymind/core/modelprovider"
 	"lazymind/core/remotefs"
@@ -79,6 +80,10 @@ func handleAgentThreadAPI(r *mux.Router, method, path string, perms []string, h 
 
 // registerAllRoutes text OpenAPI text（text Job），text handleAPI textPermissiontext（text extract_api_permissions.py text Kong RBAC）。
 func registerAllRoutes(r *mux.Router) {
+	handleAPI(r, "GET", "/local-workspaces", []string{"qa.read"}, localworkspace.List)
+	handleAPI(r, "POST", "/local-workspaces/{workspace_id}:revoke", []string{"qa.write"}, localworkspace.Revoke)
+	handleAPI(r, "GET", "/conversations/{conversation_id}:workspace", []string{"qa.read"}, localworkspace.ConversationBinding)
+	handleAPI(r, "PUT", "/conversations/{conversation_id}:workspace-permission", []string{"qa.write"}, localworkspace.UpdateConversationPermission)
 	invocationHandler := agentinvocation.Handler{Service: agentinvocation.New(corestore.DB())}
 	handleAPI(r, "POST", "/agent-invocations/{invocation_id}:start", []string{"qa.write"}, invocationHandler.Start)
 	handleAPI(r, "POST", "/agent-invocations/{invocation_id}:finish", []string{"qa.write"}, invocationHandler.Finish)

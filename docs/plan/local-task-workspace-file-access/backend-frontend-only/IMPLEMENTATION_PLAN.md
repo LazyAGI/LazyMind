@@ -895,3 +895,15 @@ print("PASS: all changed paths are in backend/frontend or the reviewed frozen Lo
 - 双数据库验证：`MIGRATION_TEST_POSTGRES_DSN=... go test ./migrate -count=1` 通过；SQLite/PostgreSQL 独立 ORM schema 测试通过；`go test ./common/orm -count=1` 通过。测试覆盖 FK 原始 ON/OFF、SQL/历史/integrity 失败回滚、up/down、绑定数据保留、修正 migration 时间戳保留、约束与索引、aggregate/dev 语义等价。
 - 禁区：algorithm、tests/algorithm、LazyLLM、Local/Desktop 与官方基线零差异。任务 2 尚未开始。
 - 下一步：继续任务 1 service/errors/context 小批次，使首批服务测试从 compile-red 进入行为验证，再单独接 handler/chat 绑定。
+
+
+### 2026-09-08 T1-CORE-2：Core 授权、绑定与 API 生产批次
+
+- 用户在迁移批次后再次指示继续生产。本批完成任务 1 的 Core service/errors/context、Unix/Windows 目录身份、四个公开 handler/route，以及 Chat 请求前门禁和会话+binding 原子事务；没有实现任务 2 的本机 picker/token，也没有内部算法执行接口。
+- 实际生产文件：新增 `backend/core/localworkspace/{service.go,errors.go,context.go,directory_identity.go,directory_identity_unix.go,directory_identity_windows.go,handlers.go}`、`backend/core/chat/local_workspace.go`；调整 `chat/conversation.go` 与 `routes.go`。生产 +706/-1，净增 705 行。测试增加 `chat/local_workspace_binding_contract_test.go`、`localworkspace/handlers_contract_test.go` 并扩展 service contract，共 +281。
+- 估算偏差：服务层先估 380–450 行，最终增加到 705 行。不可复用部分为四个公开 API（249）、会话原子绑定/门禁（130）、三平台身份实现（84）、grant/snapshot/error（238）和路由（5）。现有 `store.DB`、`common.AppError/ReplyAppErr`、GORM transaction、`systemdeps.IsLocalRuntime`、Conversation ORM 和 mux route 均已复用；没有 manager/facade、通用框架、重复业务 DTO 或新依赖。
+- 业务权威：Core 计算并保存目录身份；Register 的 source 仅为 local/desktop 展示元数据，不与 runtime 字符串比较。Resolve 每次检查 owner、Work、binding、grant status/version 和目录身份；目录被替换时旧 grant 单向变为 path_unavailable。撤销和权限变更使用乐观版本，权限响应明确 `effective_at=next_request`。
+- API 行为：Chat/Cloud 带 workspace 参数时在任何下游调用和会话落库前拒绝；Local Work 首次创建时 Conversation 与 binding 同事务；已有任务不能新增/切换 binding。List、Binding、Revoke、Permission 仅访问 owner 数据；Binding API仍可显示 revoked 状态，执行 Resolve 则拒绝。
+- 清理：List 从逐 workspace Count 改为单次 group 查询；新事务/错误 helper 仅在确有复用时使用。未删除仍被旧业务调用的代码。两次工具命令因在 `backend/core` 工作目录仍带仓库前缀而在写入前失败，已改用正确路径；一次 Windows `go test` 尝试执行 PE 文件导致 exec format error，改为 `go test -c` 验证编译。这些均未造成产品文件部分覆盖。
+- 验证：`go test ./localworkspace ./chat ./migrate . -count=1` 全通过；PostgreSQL `go test ./localworkspace` 与 `go test ./migrate` 全通过；`GOOS=windows GOARCH=amd64 go test -c ./localworkspace` 生成有效 PE32+；迁移不可变、diff check、禁区零差异和 LazyLLM 子模块干净均通过。
+- 未验证：真实 Local/Desktop 选择与授权转发、前端、ContextPrompt/请求增强、询问/停止、子任务/Workflow、OpenAPI。任务 3A 仍暂停。下一步严格进入任务 2，一次性完成 Local/Desktop 优化、接入、测试、hash 和冻结。
