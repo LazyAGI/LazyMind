@@ -7,7 +7,7 @@ default_locale: zh-CN
 provider: GitHub
 
 skill:
-  source_url: https://github.com/majesticlabs-dev/majestic-marketplace/tree/master/plugins/majestic-tools/skills/document-refinement
+  source_url: https://github.com/majesticlabs-dev/majestic-marketplace/tree/32a021027f2b33780d4f1a770acec364279485a9/plugins/majestic-tools/skills/document-refinement
   category: writing
 
 placement:

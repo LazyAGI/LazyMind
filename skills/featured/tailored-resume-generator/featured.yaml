@@ -7,7 +7,7 @@ default_locale: zh-CN
 provider: GitHub
 
 skill:
-  source_url: https://github.com/ComposioHQ/awesome-claude-skills/tree/master/tailored-resume-generator
+  source_url: https://github.com/ComposioHQ/awesome-claude-skills/tree/be2a406907dbc61b73e6827ded415c96139d13a2/tailored-resume-generator
   category: career
 
 placement:

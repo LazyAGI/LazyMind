@@ -7,7 +7,7 @@ default_locale: zh-CN
 provider: GitHub
 
 skill:
-  source_url: https://github.com/borghei/Claude-Skills/tree/main/project-management/execution/summarize-meeting
+  source_url: https://github.com/borghei/Claude-Skills/tree/ddca910e95580c63a236303fc1534054f0f14d4c/project-management/execution/summarize-meeting
   category: project-management
 
 placement:

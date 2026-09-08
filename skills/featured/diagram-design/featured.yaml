@@ -7,7 +7,7 @@ default_locale: zh-CN
 provider: GitHub
 
 skill:
-  source_url: https://github.com/cathrynlavery/diagram-design/tree/main/skills/diagram-design
+  source_url: https://github.com/cathrynlavery/diagram-design/tree/2724fd2efd8c6737f6fa704fbf5da52d67375497/skills/diagram-design
   category: design
 
 placement:
