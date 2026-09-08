@@ -1,0 +1,88 @@
+# 文档编写记录
+
+## 当前远端交接状态
+
+- 远端文档分支固定为 `origin/codex/local-workspace-handoff`，从官方 `upstream/main` 的 `TARGET_BASE` 建立；接手 agent 应从该分支读取本目录文档，再按主方案创建自己的功能分支。
+- 本轮交付只包含本目录四份方案/证据文档，不包含生产代码或阶段一测试代码。接手 agent 必须从官方 `TARGET_BASE=245bc26dca1f2e8b56b0766cf72fdfcdb49138d9` 建立或复用功能分支，不能在含旧实现的 `feature/newWorkZone` 上继续编码。
+- 本机隔离工作树曾创建三份未提交的阶段一测试草稿；它们不属于远端文档交付，不能被远端接手者视为已存在或已 Review。接手 agent 应按主方案任务 1 重新编写/核对测试，再遵守测试 Review 门禁。
+- 当前有效边界：算法/LazyLLM 与官方零差异；Local/Desktop 只在任务 2 的单一批次内精简复用旧工作区接入，聚焦验收后记录 hash 并冻结；其余生产实现限 backend/frontend；任务 3A create/append 暂停。
+- 代码量约束是验收条件：优先复用；局部小功能原则上新增不超过 1 个生产文件、净增约 200 行，超限先 Review；Local/Desktop 相对旧实现必须实质减量，不带回无关差异。
+
+## 2026-09-08
+
+### 编码执行交接（持续维护）
+
+- 用户已授权按本目录方案开始实现，并再次确认：`algorithm/`、`tests/algorithm/`、`local/`、`desktop/` 必须恢复并保持与官方上游一致；功能只在 `backend/`、`frontend/` 实现。
+- 原工作树 `/Users/zouyu/Downloads/LazyMind-main` 已在 `feature/newWorkZone` 拉取至 `b44a440cd938c5a0eb5b3be0ad6dc371e2f3c2df`，拉取前后均无未提交改动。
+- 已从真正的 `upstream/main` 建立隔离功能工作树 `/Users/zouyu/Downloads/lazymind-workspace-backend-frontend`，分支 `codex/workspace-backend-frontend`，`TARGET_BASE=245bc26dca1f2e8b56b0766cf72fdfcdb49138d9`。
+- 已确认旧 `feature/newWorkZone` 在算法和算法测试目录存在多处相对官方差异；这些差异不会提取到新功能分支。新功能工作树直接以官方目标基线为起点。
+- 已确认相同策略适用于 `local/` 与 `desktop/`：不提取旧差异，不在功能实现中修改；Desktop 只复用前端已有 `selectFolder()`，Local 目录选择收敛到 Core。
+- 当前正在执行任务 0：初始化官方 LazyLLM 子模块、验证冻结目录与官方零差异、核查原样算法读/改/建/追加能力。尚未开始生产代码实现。
+- 本需求涉及 API、权限、数据库迁移与跨部署兼容，遵循仓库两阶段门禁：先编写/调整测试并提交阶段一证据，等待用户 Review 后才进入生产实现。
+- 用户要求方案内的小改动也同步修改已有方案文档；已将持续维护规则补入 `IMPLEMENTATION_PLAN.md` 第 0 节。后续不允许出现“代码已变但方案仍旧”的未记录偏差。
+- 已完成官方冻结目录校验：新功能工作树的算法、算法测试、Local、Desktop 及 LazyLLM gitlink相对 `upstream/main` 零差异。
+- 已完成 macOS 原样算法工具级能力检查：读取和精确替换已有 `.txt` 成功；默认非 trusted 模式下，新建、嵌套新建、追加宿主文件均被 `write_file` 拒绝。证据已同步补入 `IMPLEMENTATION_PLAN.md` 14.1 与 `findings.md`；该能力缺口保持未通过。
+- 任务 0 后端聚焦基线通过：`go test ./chat ./subagent ./common -run 'Test(BuildChatRequestBody|BuildLazyChatRequest|ReplaceAskUserToolResult|ApplyLocalFSPathsForChat|InterruptConversationStopsOnlyActiveTasks|ErrorCatalogCodesHaveTranslations)' -count=1`，三个包均成功。功能工作树没有 `frontend/node_modules`，前端既有组件基线尚未运行。
+- 已进入阶段一并新增任务 1 首批测试：`backend/core/localworkspace/service_contract_test.go`、`backend/core/chat/local_workspace_schema_test.go`、`backend/core/migrate/local_workspace_migration_contract_test.go`。覆盖现有 runtime 门禁、授权/绑定用户隔离、Work/Chat 区分、撤销不降级、同路径重授权不恢复旧任务、通用错误码加 reason、元数据表结构、一任务一绑定、三组 dev migration 与 v0_3 aggregate 最终形态。
+- 测试命令 `go test ./localworkspace ./chat ./migrate -run 'Test.*(Workspace|LocalWorkspace)' -count=1` 按预期失败：官方基线尚无 `orm.LocalWorkspace`、`ConversationWorkspaceBinding`、localworkspace 服务 API、两张表及三组迁移；未发现与本批需求无关的异常失败。生产功能仍未实现。
+- 当前需要用户决策：是否接受 macOS/默认非 trusted 模式下“创建/追加宿主文件”保持明确未完成，或批准设计一个仅位于 `backend/` 的业务写入入口。后者会扩大当前方案架构，必须先更新方案、威胁边界与测试矩阵，不能默认实施。
+- 用户批准先提供后端受控写入方案、Review 后再编码。已在 `IMPLEMENTATION_PLAN.md` 新增 3.5 与任务 3A：复用官方算法既有 `mcp_config`/MCP client，由 Core 注入系统管理的主任务专用 MCP；仅提供受限 UTF-8 文本 create/append，使用请求级随机 capability token，always_ask 通过服务端绑定操作的现有 AskCard 两阶段确认。方案明确不改算法/Local/Desktop、不启用 trusted、不新增依赖/迁移、不向子任务/Workflow 扩大写能力，并补充 A11 验收矩阵。当前仅完成方案，尚未编写该部分测试或生产代码，等待用户 Review。
+- 已按用户要求 Review 3.5。结论：原版存在每请求 MCP header 导致官方算法缓存无界增长、run_id 生成时序不匹配、append replace 改变文件元数据、Lstat TOCTOU、preview 隔离、请求体上限和 MCP 错误合同等不足，暂不应实施。已在主方案 3.5.7 记录 P0/P1/P2 问题及推荐修订方向；任务 3A 继续暂停，等待用户确认修订边界。
+- 用户已批准第一轮推荐方向并要求继续 Review。第二轮确认官方算法会把工具参数写入常规日志和可选遥测，且完整参数进入 `<tool_call>` 帧；因此在算法保持官方零差异时，Core MCP 无法同时满足“模型写入正文/授权材料不进算法日志”。同时补充了所有权限模式 prepare/commit、同进程幂等边界、pending 内存配额、随机进程 caller token、always_ask 跨轮消费和 append 风险分级。结果已写入 `IMPLEMENTATION_PLAN.md` 3.5.8 与 `findings.md`；未修改生产代码，任务 3A 仍暂停，等待用户决定暂停 create/append、允许极窄算法脱敏补丁或接受日志风险。
+- 用户新增代码量约束：小功能不得膨胀为大量代码或多层抽象。已在主方案第 0 节加入复用优先和规模 Review 门槛：局部小功能原则上最多新增 1 个生产文件、净增约 200 行；必要例外须先报告 diff 规模和不可复用原因并重新 Review。后续每个任务都记录生产代码净增与复用点。
+- 用户最新放宽边界：允许一次性沿用旧版工作区相关 Local/Desktop 实现，但接入后不得继续在其基础上修改。已核对旧分支差异为 26 个文件、约 +1029/-214 行且混有 Caddy 升级、assistant bridge 改写、Windows 脚本删除和测试删减，不能整体搬运。主方案 0.2 已改为逐 hunk 提取、验收后记录 hash 并冻结；无关差异及只服务旧算法回调的环境注入明确排除。该放宽不改变算法必须官方零差异，也不自动解决 create/append 缺口。
+- 用户进一步要求冻结前优化旧功能并尽量复用已有实现。已明确不照搬旧版约 165 行 Desktop 第二套目录选择和 425 行 Local Proxy 业务/转发合集：Desktop 复用官方 `selectFolder()`/bridge，Local Proxy 复用既有 CORS、AdminSession、route proxy 与 JSON helper，Core 保持 DTO、错误 reason 和授权规则唯一权威；去掉官方算法不消费的 workspace token 注入。优化与接入同批验收后才冻结。
+
+- 开始二次代码核查，使用 writing-plans 和 planning-with-files 工作流。
+- 本轮只允许新增方案文档；不修改产品代码、不切分支、不提交、不更新 PR。
+- 已记录原 PR 基线和必须废弃的旧跨层授权。
+- 已完成请求/询问/停止/子任务生命周期核查，并整理为任务 0–7 的执行顺序。
+- 已核查 Desktop selectFolder、AskCard 续问、ContextPrompt、StopChatGeneration、子任务 create/resume、通用错误详情和 OpenAPI 生成流程。
+- 已发现并写入明确兼容性检查：默认非 trusted runtime 的 write_file 不能通过新增请求字段改写宿主目录。
+
+- 已编写主交接文档 IMPLEMENTATION_PLAN.md：包含逐文件提取范围、接口合同、测试示例、验证命令、原样算法能力检查与最终边界/冻结检查。
+- 已通过当前功能快照的后端聚焦测试（4 个 Go 包）及前端既有组件测试（2 个文件、9 个测试）；结果和局限记录在 findings.md。
+- 已完成子任务恢复去重元数据及 OpenAPI cache 路径复核。产品代码、算法和运行配置均未修改。
+- 文档复核通过：Markdown 围栏、嵌入 JSON/Python/shell 语法、任务 0–7、未实施状态均检查通过；git 差异只包含本目录四份文档。方案编写已完成，编码与真实平台验收仍未执行。
+
+## 2026-09-08 当前接手执行记录（优先于历史状态）
+
+- 文档远端已 fetch 并核对：`aa53e9699ba9f6b06383d3fe2eb94adf538a1a83`。
+- 当前工作树 `/Users/theone/Downloads/lazymind-workspace-core`，新分支 `codex/local-workspace-core`，直接建立于用户指定 `245bc26dca1f2e8b56b0766cf72fdfcdb49138d9`。原工作树仍在 `feature/newWorkZone`，开始时 status 干净，没有覆盖改动。
+- 官方 main 只读查询为 `bac0dc102775488df19908dbcf4f5fe4e47a084c`；本轮遵循用户指定基线，不自动升级。
+- 已完整阅读四份文档、`.cursor/rules/coding-standards.mdc`、迁移 AGENTS.md；父目录没有 AGENTS.md。遵循用户明确要求及本文历史交接的测试人工 Review 门禁，先交付任务 1 首批测试，不写生产功能。
+- 当前只导入四份文档，生产净增 0。复用现有 ORM 测试数据库、迁移 runner 和聚焦测试，不引入框架。
+- 已运行官方基线 `go test ./chat ./subagent ./common -run 'Test(BuildChatRequestBody|BuildLazyChatRequest|ReplaceAskUserToolResult|ApplyLocalFSPathsForChat|InterruptConversationStopsOnlyActiveTasks|ErrorCatalogCodesHaveTranslations)' -count=1`：三个包通过，退出码 0。
+- 文档冲突解释：0.1 与任务 2 及用户最新要求优先；2.3、3.1、任务 6 中直接提交 renderer path / Core picker / 删除窄 workspace IPC 的旧描述不再是实现合同。任务 2 前应形成精确的本机选择证明接口测试并 Review；不得按旧条款绕开选择证明。
+- 任务 3A 继续暂停。上述历史机器实测不当成本机验收；本机工具能力、前端及 PostgreSQL 尚待验证。
+- 下一步：完成任务 0 可运行的本机检查、编写任务 1 测试并报告预期失败/异常失败，然后等待人工 Review。
+
+### T1-RED-1 运行矩阵（本机实际结果）
+
+实际新增文件与规模：localworkspace/service_contract_test.go +195；chat/local_workspace_schema_test.go +138；chat/local_workspace_mode_contract_test.go +67；migrate/local_workspace_migration_contract_test.go +66（均位于 backend/core）。生产 +0/-0。四份交接文档同步更新；没有 Local/Desktop 提取或冻结提交。
+
+以下 Go 命令均在 `backend/core`，前端命令在工作树根：
+
+| 检查 / 命令 | 退出码 | 结果 |
+|---|---:|---|
+| `go test ./chat ./subagent ./common -run 'Test(BuildChatRequestBody|BuildLazyChatRequest|ReplaceAskUserToolResult|ApplyLocalFSPathsForChat|InterruptConversationStopsOnlyActiveTasks|ErrorCatalogCodesHaveTranslations)' -count=1` | 0 | 官方基线三个包通过 |
+| `frontend/node_modules/.bin/vitest run --root frontend src/runtime/desktopBridge.test.ts src/modules/chat/components/AskCard/index.test.tsx` | 0 | 2 文件 11 测试通过；复用既有 node_modules 的 gitignored 链接，没有安装或修改锁文件 |
+| `go test ./migrate -run 'TestRepository(SQLiteFreshAndUpgradePaths|SQLiteReleaseAndDevPathsMatch|PostgresMigrationPaths)$' -count=1 -v` | 0 | SQLite 两组通过；PostgreSQL 无临时 DSN，SKIP，不能算通过 |
+| `go test ./localworkspace ./chat ./migrate -run 'Test.*(Workspace|LocalWorkspace)' -count=1` | 1 | 预期 red：缺失服务/模型编译失败；两张表不存在；六份 migration 不存在；Chat/Cloud 门禁缺失（500、一次派发、一次落库） |
+| 原样算法 `/tmp/lazymind-workspace-evidence/check_tools.py` | 0 | 读/替换磁盘断言通过；三个宿主写调用预期拒绝；额外 atexit logger RuntimeError 单独记录 |
+| `git diff --exit-code 245bc26d -- algorithm tests/algorithm local desktop evo workflows skills .github .gitmodules LAZYLLM_VERSION` | 0 | 禁区与官方零差异 |
+| `git -C algorithm/lazyllm status --porcelain` / `git diff --check` | 0 | 子模块干净、空白检查通过 |
+
+工具复核的可重跑命令（工作树根）：
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 \
+PYTHONPATH="$PWD/algorithm:$PWD/algorithm/lazyllm" \
+LAZYLLM_HOME=/tmp/lazymind-workspace-evidence/lazyllm \
+LAZYMIND_AGENTIC_WORKSPACE=/tmp/lazymind-workspace-evidence/internal \
+/Users/theone/Downloads/lazymind/.venv/bin/python /tmp/lazymind-workspace-evidence/check_tools.py
+```
+
+本机日志：`/tmp/lazymind-workspace-tests.log`、`/tmp/lazymind-workspace-frontend.log`、`/tmp/lazymind-workspace-migration-baseline.log`、`/tmp/lazymind-workspace-evidence/tools.log`。临时日志未加入 Git；其他机器应重跑，不依赖它们存在。
+
+未验证：任务 1 完整 Work 绑定/换绑、权限更新、身份变化、PostgreSQL/aggregate 新增合同；真实 ContextPrompt、模型询问、Local/Desktop/Windows 端到端；任务 2–7。不要以首批 red 代替全阶段完成。下一步等待本批人工 Review，再顺序推进任务 1；3A 保持暂停。
