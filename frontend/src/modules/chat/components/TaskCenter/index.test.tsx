@@ -34,6 +34,9 @@ vi.mock("react-i18next", async (importOriginal) => ({
       if (key === "taskCenter.ordinaryIncompleteSummary") {
         return `${values?.count} remaining`;
       }
+      if (key === "taskCenter.writingSubtaskSummary") {
+        return `${values?.total} total · ${values?.completed} completed · ${values?.failed} failed`;
+      }
       return key;
     }) as TFunction,
   }),
@@ -169,6 +172,29 @@ describe("TaskCenter display modes", () => {
     expect(document.querySelectorAll(".task-card")).toHaveLength(4);
     expect(screen.getByText("raw trace analyze")).toBeInTheDocument();
     expect(screen.getByText("taskCenter.filterAll")).toBeInTheDocument();
+  });
+
+  it("shows only the user query as the run instruction", () => {
+    useTaskCenterStore.setState({
+      tasksByConversation: {
+        "conversation-1": [{
+          ...task("query-only", 1, "running"),
+          query: "继续生成三页 PPT",
+          objective: "SYSTEM: expanded workflow prompt that must stay hidden",
+        }],
+      },
+    });
+
+    render(
+      <TaskCenter
+        sessionId="conversation-1"
+        developerMode
+        workflowSteps={[]}
+      />,
+    );
+
+    expect(screen.getByText("继续生成三页 PPT")).toBeInTheDocument();
+    expect(screen.queryByText(/expanded workflow prompt/)).not.toBeInTheDocument();
   });
 
   it("renders tasks with overlapping execution intervals as accessible tabs", () => {
@@ -408,6 +434,44 @@ describe("TaskCenter display modes", () => {
     expect(screen.queryByRole("link", { name: /Unsafe source/ }))
       .not.toBeInTheDocument();
     expect(screen.getByText("Unsafe source")).toBeInTheDocument();
+  });
+
+  it("summarizes writing subtask outcomes and shows the actual search tool", () => {
+    useTaskCenterStore.setState({
+      tasksByConversation: {
+        "conversation-1": [{
+          ...task("writer", 1, "succeeded"),
+          writing_subtasks: [
+            {
+              subtask_id: "retrieve-1",
+              node_id: "section-1",
+              question: "Find evidence",
+              subtask_type: "retrieve",
+              status: "completed",
+              retry_count: 0,
+              tools_used: ["sciverse_search", "llm"],
+            },
+            {
+              subtask_id: "retrieve-2",
+              node_id: "section-2",
+              question: "Find another source",
+              subtask_type: "retrieve",
+              status: "failed",
+              retry_count: 1,
+              tools_used: ["google_search"],
+            },
+          ],
+        }],
+      },
+    });
+
+    render(<TaskCenter sessionId="conversation-1" developerMode />);
+
+    expect(screen.getByText(
+      "taskCenter.writingSubtasks (2 total · 1 completed · 1 failed)",
+    )).toBeInTheDocument();
+    expect(screen.getByText(/taskCenter\.writingSubtaskTool_sciverse_search/))
+      .toBeInTheDocument();
   });
 
   it("distinguishes loading and load failures from a true empty state", () => {

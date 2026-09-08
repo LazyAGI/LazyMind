@@ -49,6 +49,8 @@ ALTER TABLE user_ui_preferences
     ADD COLUMN IF NOT EXISTS performance_stats_enabled BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE sub_agent_tasks
     ADD COLUMN IF NOT EXISTS sources JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE sub_agent_tasks
+    ADD COLUMN IF NOT EXISTS writing_subtasks JSONB NOT NULL DEFAULT '[]'::jsonb;
 
 -- +migrate Dialect sqlite
 CREATE TABLE IF NOT EXISTS plugin_step_intents (
@@ -72,6 +74,7 @@ ALTER TABLE user_ui_preferences ADD COLUMN document_parsing_enabled BOOLEAN NOT 
 ALTER TABLE user_ui_preferences ADD COLUMN sensitive_word_filter_enabled BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE user_ui_preferences ADD COLUMN performance_stats_enabled BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE sub_agent_tasks ADD COLUMN sources JSON NOT NULL DEFAULT '[]';
+ALTER TABLE sub_agent_tasks ADD COLUMN writing_subtasks JSON NOT NULL DEFAULT '[]';
 
 -- +migrate Dialect postgres
 ALTER TABLE user_plugin_settings
@@ -191,6 +194,7 @@ ALTER TABLE conversations
 ALTER TABLE plugin_sessions ADD COLUMN IF NOT EXISTS origin_host VARCHAR(32) NOT NULL DEFAULT 'lazymind';
 ALTER TABLE plugin_sessions ADD COLUMN IF NOT EXISTS origin_ref VARCHAR(255) NOT NULL DEFAULT '';
 ALTER TABLE plugin_sessions ADD COLUMN IF NOT EXISTS controller_host VARCHAR(32) NOT NULL DEFAULT 'lazymind';
+ALTER TABLE plugin_sessions ADD COLUMN IF NOT EXISTS workflow_mode VARCHAR(16) NOT NULL DEFAULT 'dynamic';
 CREATE INDEX IF NOT EXISTS idx_plugin_sessions_origin ON plugin_sessions(origin_host, origin_ref);
 
 -- +migrate Dialect sqlite
@@ -283,6 +287,7 @@ ALTER TABLE conversations
 ALTER TABLE plugin_sessions ADD COLUMN origin_host varchar(32) NOT NULL DEFAULT 'lazymind';
 ALTER TABLE plugin_sessions ADD COLUMN origin_ref varchar(255) NOT NULL DEFAULT '';
 ALTER TABLE plugin_sessions ADD COLUMN controller_host varchar(32) NOT NULL DEFAULT 'lazymind';
+ALTER TABLE plugin_sessions ADD COLUMN workflow_mode varchar(16) NOT NULL DEFAULT 'dynamic';
 CREATE INDEX IF NOT EXISTS idx_plugin_sessions_origin ON plugin_sessions(origin_host, origin_ref);
 
 -- +migrate Dialect postgres
@@ -1416,6 +1421,28 @@ CREATE UNIQUE INDEX uk_skills_owner_relative_root
     WHERE deleted_at IS NULL;
 
 -- +migrate Dialect postgres
+CREATE TABLE IF NOT EXISTS public.workflow_approval_preferences (
+    user_id VARCHAR(255) NOT NULL,
+    workflow_id VARCHAR(64) NOT NULL,
+    step_id VARCHAR(64) NOT NULL,
+    approval_required BOOLEAN NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    PRIMARY KEY (user_id, workflow_id, step_id)
+);
+
+-- +migrate Dialect sqlite
+CREATE TABLE IF NOT EXISTS workflow_approval_preferences (
+    user_id VARCHAR(255) NOT NULL,
+    workflow_id VARCHAR(64) NOT NULL,
+    step_id VARCHAR(64) NOT NULL,
+    approval_required BOOLEAN NOT NULL,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    PRIMARY KEY (user_id, workflow_id, step_id)
+);
+
+-- +migrate Dialect postgres
 ALTER TABLE public.resource_update_tasks
     ADD COLUMN result_json json,
     ADD COLUMN run_id varchar(36) NOT NULL DEFAULT '',
@@ -1444,8 +1471,6 @@ WHERE task.task_type = 'generate_review'
       )
   );
 ALTER TABLE public.resource_update_tasks DROP CONSTRAINT IF EXISTS chk_resource_update_tasks_task_type;
-ALTER TABLE public.resource_update_tasks ADD CONSTRAINT chk_resource_update_tasks_task_type
-    CHECK ((task_type)::text IN ('generate_review', 'auto_apply_review', 'auto_commit_skill_draft', 'organize_skill', 'organize_preference'));
 ALTER TABLE public.resource_update_tasks DROP CONSTRAINT IF EXISTS chk_resource_update_tasks_trigger_type;
 ALTER TABLE public.resource_update_tasks ADD CONSTRAINT chk_resource_update_tasks_trigger_type
     CHECK ((trigger_type)::text IN ('scheduled', 'conversation_idle', 'manual', 'review_result', 'auto_evo_enabled', 'preference_changed'));
@@ -1557,3 +1582,24 @@ CREATE TABLE IF NOT EXISTS chat_run_performance (
 CREATE INDEX IF NOT EXISTS idx_chat_run_performance_conversation_id ON chat_run_performance(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_chat_run_performance_history_id ON chat_run_performance(history_id);
 CREATE INDEX IF NOT EXISTS idx_chat_run_performance_user_id ON chat_run_performance(user_id);
+
+-- +migrate Dialect postgres,sqlite
+CREATE TABLE IF NOT EXISTS conversation_fork_origins (
+    conversation_id VARCHAR(36) PRIMARY KEY,
+    source_conversation_id VARCHAR(36) NOT NULL,
+    source_history_id VARCHAR(36) NOT NULL,
+    source_seq INTEGER NOT NULL,
+    source_history_revision VARCHAR(80) NOT NULL,
+    source_prefix_revision VARCHAR(80) NOT NULL,
+    source_title_snapshot VARCHAR(255) NOT NULL,
+    forked_at TIMESTAMP NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_conversation_fork_origins_source_conversation_id ON conversation_fork_origins(source_conversation_id);
+CREATE TABLE IF NOT EXISTS conversation_fork_requests (
+    actor_user_id VARCHAR(255) NOT NULL,
+    idempotency_key VARCHAR(128) NOT NULL,
+    request_hash VARCHAR(80) NOT NULL,
+    conversation_id VARCHAR(36) NOT NULL,
+    created_at TIMESTAMP NOT NULL,
+    PRIMARY KEY (actor_user_id, idempotency_key)
+);

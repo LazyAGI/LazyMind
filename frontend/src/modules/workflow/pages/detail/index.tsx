@@ -738,10 +738,11 @@ export default function WorkflowDetailPage() {
   // state_layout_content stores x-layout JSON separately; merge it into stateYaml
   // so the editor initializes with correct node positions.
   const rawStateYaml = viewingHistory ? versionContent.state_yaml_content : (draft.state_yaml_content || draft.content || undefined);
+  const rawLayout = viewingHistory ? versionContent.state_layout_content : draft.state_layout_content;
   let stateYaml = rawStateYaml;
-  if (!viewingHistory && rawStateYaml && draft.state_layout_content) {
+  if (rawStateYaml && rawLayout) {
     try {
-      const layoutObj = JSON.parse(draft.state_layout_content) as Record<string, unknown>;
+      const layoutObj = JSON.parse(rawLayout) as Record<string, unknown>;
       if (Object.keys(layoutObj).length > 0) {
         // Prepend x-layout block to state YAML so the parser picks it up.
         // Support both 'w' (legacy) and 'width' (current NodeLayout field name).

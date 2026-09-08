@@ -24,13 +24,16 @@ export interface BuiltinWorkflowUiTabSlot {
 export interface BuiltinWorkflowUiTab {
   id: string;
   step_id?: string;
+  slot_scope?: 'step' | 'selected';
   label: string;
   layout: string;
   slots: BuiltinWorkflowUiTabSlot[];
   composite_layout?: unknown;
+  composite_tab_position?: 'top' | 'bottom' | 'left' | 'right';
   composite_behavior?: {
     hide_empty_columns?: boolean;
     empty_column_scope?: 'selected' | 'tab';
+    repeat_single_slots?: string[];
     mutually_exclusive?: Array<{ slots: string[]; prefer?: string[] }>;
   };
   actions?: Array<{
@@ -55,6 +58,7 @@ export interface BuiltinWorkflow {
   // Raw YAML texts returned by the backend (populated when fetching single workflow).
   workflow_yaml_raw?: string;
   state_yaml_raw?: string;
+  layout_raw?: string;
   scenario_raw?: string;
   scripts_raw?: string;
 }
@@ -135,6 +139,14 @@ export async function createWorkflowDraft(payload: { name: string; content?: str
   return resp.data.data;
 }
 
+export async function copyWorkflowDraft(id: string, name: string): Promise<WorkflowDraftRecord> {
+  const resp = await axiosInstance.post<CoreResponse<WorkflowDraftRecord>>(
+    `${coreBasePath}/workflow-drafts/${id}:copy`,
+    { name },
+  );
+  return resp.data.data;
+}
+
 export async function getWorkflowDraft(
   id: string,
   options?: RawAxiosRequestConfig,
@@ -211,7 +223,7 @@ export async function validateWorkflowDraft(id: string): Promise<WorkflowValidat
 }
 
 export interface WorkflowVersionSummary { revision_id: string; revision_no: number; tree_hash: string; message: string; created_by: string; created_at: string; current: boolean }
-export interface WorkflowVersionContent { workflow_ref: string; revision_id: string; revision_no: number; tree_hash: string; workflow_yaml_content: string; state_yaml_content: string; scenario_content: string; scripts_content: string; readonly: true }
+export interface WorkflowVersionContent { workflow_ref: string; revision_id: string; revision_no: number; tree_hash: string; workflow_yaml_content: string; state_yaml_content: string; state_layout_content: string; scenario_content: string; scripts_content: string; readonly: true }
 export async function listWorkflowVersions(workflowRef: string): Promise<WorkflowVersionSummary[]> { const r=await axiosInstance.get<CoreResponse<{versions:WorkflowVersionSummary[]}>>(`${coreBasePath}/published-workflows/${encodeURIComponent(workflowRef)}/versions`);return r.data.data.versions }
 export async function getWorkflowVersion(workflowRef: string, revisionId: string): Promise<WorkflowVersionContent> { const r=await axiosInstance.get<CoreResponse<WorkflowVersionContent>>(`${coreBasePath}/published-workflows/${encodeURIComponent(workflowRef)}/versions/${encodeURIComponent(revisionId)}`);return r.data.data }
 export async function editWorkflowVersion(workflowRef: string, revisionId: string): Promise<WorkflowDraftRecord> { const r=await axiosInstance.post<CoreResponse<WorkflowDraftRecord>>(`${coreBasePath}/published-workflows/${encodeURIComponent(workflowRef)}/versions/${encodeURIComponent(revisionId)}:edit`);return r.data.data }
@@ -361,4 +373,12 @@ export async function listBuiltinWorkflows(): Promise<BuiltinWorkflow[]> {
 export async function getBuiltinWorkflow(workflowId: string): Promise<BuiltinWorkflow> {
   const resp = await axiosInstance.get<unknown>(`${coreBasePath}/workflows/${workflowId}`);
   return resp.data as BuiltinWorkflow;
+}
+
+export async function copyBuiltinWorkflow(workflowId: string, name: string): Promise<WorkflowDraftRecord> {
+  const resp = await axiosInstance.post<CoreResponse<WorkflowDraftRecord>>(
+    `${coreBasePath}/workflows/${encodeURIComponent(workflowId)}:copy`,
+    { name },
+  );
+  return resp.data.data;
 }

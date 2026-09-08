@@ -141,6 +141,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
       onConversationSettingsChange,
       initialConversationSettings,
       hasWorkflowSession,
+      lockedWorkflowMode,
       conversationTrailEnabled = true,
       showThinkingDepth = true,
       showSkillDeposit = true,
@@ -453,6 +454,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
 
     useImperativeHandle(ref, () => ({
       replaceMessageList: conversation.replaceMessageList,
+      mergeHistoryPage: conversation.mergeHistoryPage,
       createNewChat: conversation.createNewChat,
       sendMessage,
       prepareMessage: ({
@@ -514,6 +516,8 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
         <div className={`chat-box${sourcePanelSources.length ? " has-source-panel" : ""}`}>
           <div className="chat-main-column">
             <MessageList
+              onFork={props.onFork}
+              forkPending={props.forkPending}
               messageList={conversation.messageList}
               initialCard={initialCard}
               sendMessage={(text, clearInput, extras) => {
@@ -605,6 +609,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
               onConversationSettingsChange={onConversationSettingsChange}
               initialConversationSettings={initialConversationSettings}
               hasWorkflowSession={hasWorkflowSession}
+              lockedWorkflowMode={lockedWorkflowMode}
               showThinkingDepth={showThinkingDepth}
               showSkillDeposit={showSkillDeposit}
               showConversationConfig={showConversationConfig}

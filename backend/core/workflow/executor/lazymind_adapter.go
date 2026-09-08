@@ -67,6 +67,7 @@ func (loader DBContextLoader) LoadAttemptContext(ctx context.Context, id string)
 					value.Capabilities, value.LegacyTools = node.Capabilities, node.LegacyTools
 					value.TerminalTools = node.TerminalTools
 					value.ToolsOnly = node.ToolsOnly
+					value.TerminalToolsOnly = node.TerminalToolsOnly
 				}
 			}
 			cardinality, err := loader.loadOutputCardinality(ctx, revision.ID, value.DeclaredOutputs)

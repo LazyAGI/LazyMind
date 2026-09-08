@@ -53,6 +53,7 @@ class AdvanceRequest:
     session_id: str
     expected_state_version: int
     steps: List[StepCommand]
+    workflow_mode: str = ''
     handoff: bool = False
     retry_origin: str = 'automatic'
     command_id: str = field(default_factory=lambda: str(uuid.uuid4()))
@@ -392,6 +393,7 @@ class WorkflowClient:
         payload = {'contract_version': CONTRACT_VERSION, 'command_id': request.command_id,
                    'tool': tool, 'session_id': request.session_id,
                    'expected_state_version': request.expected_state_version,
+                   'workflow_mode': request.workflow_mode,
                    'retry_origin': request.retry_origin,
                    'steps': [asdict(step) for step in request.steps]}
         if self.trace_context is not None:
@@ -433,6 +435,7 @@ class WorkflowClient:
                 user_input=str(start_fields.get('user_input') or ''),
             )],
             handoff=bool(start_fields.get('hand_off')),
+            workflow_mode=str(start_fields.get('workflow_mode') or ''),
             command_id=str(uuid.uuid4()),
         ))
 

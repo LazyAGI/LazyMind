@@ -39,22 +39,23 @@ type uiMaterialSpec struct {
 }
 
 type rawStep struct {
-	ID              string
-	Label           string
-	Route           string
-	Inputs          any
-	InputExpression any
-	OptionalInputs  any
-	Outputs         any
-	SkipIf          any
-	Prompt          string
-	Acceptance      any
-	Capabilities    any
-	Tools           any
-	TerminalTools   any
-	ToolsOnly       bool
-	StreamHeartbeat bool
-	Mode            string
+	ID                string
+	Label             string
+	Route             string
+	Inputs            any
+	InputExpression   any
+	OptionalInputs    any
+	Outputs           any
+	SkipIf            any
+	Prompt            string
+	Acceptance        any
+	Capabilities      any
+	Tools             any
+	TerminalTools     any
+	ToolsOnly         bool
+	TerminalToolsOnly bool
+	StreamHeartbeat   bool
+	Mode              string
 }
 
 func Compile(workflowYAML, stateYAML, scenario string, profile Profile) CompileResult {
@@ -147,7 +148,8 @@ func Compile(workflowYAML, stateYAML, scenario string, profile Profile) CompileR
 		node := CompiledNode{ID: id, Label: step.Label, Route: step.Route, Prompt: step.Prompt,
 			Acceptance: stringList(step.Acceptance), Capabilities: stringList(step.Capabilities),
 			LegacyTools: stringList(step.Tools), TerminalTools: stringList(step.TerminalTools),
-			ToolsOnly: step.ToolsOnly, StreamHeartbeat: step.StreamHeartbeat, Mode: step.Mode}
+			ToolsOnly: step.ToolsOnly, TerminalToolsOnly: step.TerminalToolsOnly,
+			StreamHeartbeat: step.StreamHeartbeat, Mode: step.Mode}
 		if definition := workflowSteps[id]; definition != nil {
 			if len(node.Acceptance) == 0 {
 				node.Acceptance = stringList(definition["acceptance_criteria"])
@@ -224,6 +226,62 @@ func Compile(workflowYAML, stateYAML, scenario string, profile Profile) CompileR
 				"E_RUNTIME_CONTINUE_STEP_UNKNOWN", "error", fmt.Sprintf("workflow.yaml.runtime.completed_continue_steps[%d]", i),
 				stepID, "runtime completed continue step is not declared: "+stepID,
 			))
+		}
+	}
+	for i := range graph.Runtime.PostStepChecks {
+		check := &graph.Runtime.PostStepChecks[i]
+		path := fmt.Sprintf("workflow.yaml.runtime.post_step_checks[%d]", i)
+		check.StepID = strings.TrimSpace(check.StepID)
+		check.Tool = strings.TrimSpace(check.Tool)
+		node, stepExists := graph.Nodes[check.StepID]
+		if check.StepID == "" {
+			result.Diagnostics = append(result.Diagnostics, diag(
+				"E_RUNTIME_POST_CHECK_STEP_REQUIRED", "error", path+".step_id",
+				"runtime post-step check step_id is required",
+			))
+		} else if !stepExists {
+			result.Diagnostics = append(result.Diagnostics, nodeDiag(
+				"E_RUNTIME_POST_CHECK_STEP_UNKNOWN", "error", path+".step_id", check.StepID,
+				"runtime post-step check references an unknown step: "+check.StepID,
+			))
+		}
+		if check.Tool == "" {
+			result.Diagnostics = append(result.Diagnostics, diag(
+				"E_RUNTIME_POST_CHECK_TOOL_REQUIRED", "error", path+".tool",
+				"runtime post-step check tool is required",
+			))
+		}
+		for argument, material := range check.Arguments {
+			argument = strings.TrimSpace(argument)
+			material = strings.TrimSpace(material)
+			if argument == "" || material == "" {
+				result.Diagnostics = append(result.Diagnostics, diag(
+					"E_RUNTIME_POST_CHECK_ARGUMENT_INVALID", "error", path+".arguments",
+					"runtime post-step check arguments require non-empty parameter and material ids",
+				))
+				continue
+			}
+			if !knownMaterials[material] {
+				result.Diagnostics = append(result.Diagnostics, materialDiag(
+					"E_RUNTIME_POST_CHECK_MATERIAL_UNKNOWN", "error", path+".arguments."+argument,
+					material, "runtime post-step check references an unknown material: "+material,
+				))
+				continue
+			}
+			produced := false
+			for _, output := range node.Outputs {
+				if output == material {
+					produced = true
+					break
+				}
+			}
+			if stepExists && !produced {
+				result.Diagnostics = append(result.Diagnostics, materialNodeDiag(
+					"E_RUNTIME_POST_CHECK_MATERIAL_NOT_PRODUCED", "error", path+".arguments."+argument,
+					check.StepID, material,
+					"runtime post-step check may only consume an artifact produced by its step",
+				))
+			}
 		}
 	}
 	clarificationIDs := map[string]bool{}
@@ -556,7 +614,8 @@ func decodeRawStep(id string, raw map[string]any) rawStep {
 		Outputs: raw["outputs"], SkipIf: firstNonNil(raw["skip_if"], raw["skipif"]),
 		Prompt: scalar(raw["prompt"]), Acceptance: raw["acceptance_criteria"],
 		Capabilities: raw["capabilities"], Tools: raw["tools"], TerminalTools: raw["terminal_tools"],
-		ToolsOnly: boolValue(raw["tools_only"]), StreamHeartbeat: boolValue(raw["stream_heartbeat"]), Mode: scalar(raw["mode"])}
+		ToolsOnly: boolValue(raw["tools_only"]), TerminalToolsOnly: boolValue(raw["terminal_tools_only"]),
+		StreamHeartbeat: boolValue(raw["stream_heartbeat"]), Mode: scalar(raw["mode"])}
 }
 
 func stringList(value any) []string {

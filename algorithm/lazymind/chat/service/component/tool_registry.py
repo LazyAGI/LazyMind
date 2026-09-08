@@ -41,7 +41,7 @@ from lazymind.chat.engine.tools import (
 )
 from lazymind.chat.engine.tools.memory import MemoryTools
 from lazymind.chat.engine.tools.lazy_kb import KBToolkit, kb_tmp_search
-from lazymind.model_config import is_model_role_available
+from lazymind.model_config import get_model_role_runtime_identity, is_model_role_available
 from lazymind.chat.engine.tools.ask_user import ask_user
 from lazymind.chat.engine.tools.session_env import build_session_env_tool
 from lazymind.chat.engine.subagent.tools import (
@@ -55,6 +55,21 @@ SystemPromptAppendixProvider = Callable[[], SystemPromptAppendix | None]
 QueryAppendixProvider = Callable[[], str | None]
 QueryAppendixPosition = Literal['before', 'after']
 SYSTEM_PROMPT_APPENDIX_SECTIONS = ('tool_policy', 'safety', 'output_contract', 'response_policy')
+
+
+def _ensure_google_drive_method_docs() -> None:
+    """Fill metadata omitted by the pinned LazyLLM Google Drive supplier."""
+    docs = {
+        'search': 'Search Google Drive file content and optionally narrow by name or folder.',
+        'find': 'Find Google Drive files whose names match a regular expression.',
+    }
+    for name, doc in docs.items():
+        method = getattr(GoogleDriveFS, name)
+        if not method.__doc__:
+            method.__doc__ = doc
+
+
+_ensure_google_drive_method_docs()
 
 IMAGE_MARKDOWN_OUTPUT_APPENDIX: SystemPromptAppendix = {
     'output_contract': (
@@ -78,6 +93,26 @@ VIDEO_MARKDOWN_OUTPUT_APPENDIX: SystemPromptAppendix = {
         '(or use `video_url` when markdown is absent). Do not invent or rewrite signed URLs.',
     ),
 }
+
+
+def _video_generator_prompt_appendix() -> SystemPromptAppendix:
+    identity = get_model_role_runtime_identity('video_generator')
+    source = identity.get('source') or 'unknown'
+    model = identity.get('model') or 'unknown'
+    return {
+        'tool_policy': (
+            '# Configured video generator (authoritative for this request)\n'
+            f'Provider: `{source}`; model: `{model}`. Apply the capability matrix in the '
+            '`video_generator` tool description before choosing text-only, first-frame, '
+            'first+last-frame, or ordinary-reference inputs. If either value is `unknown`, '
+            'do not assume advanced image-conditioning support. Never repeat an identical '
+            'call after an unsupported-capability error; explain which configured model and '
+            'requested input mode are incompatible.'
+        ),
+        **VIDEO_MARKDOWN_OUTPUT_APPENDIX,
+    }
+
+
 RETRIEVAL_CITATION_OUTPUT_APPENDIX: SystemPromptAppendix = {
     'output_contract': (
         '# Retrieval evidence citation rules (mandatory)\n'
@@ -663,14 +698,17 @@ DEFAULT_TOOLS: list[ToolConfig] = [
         name='video_generator',
         label='文生视频',
         label_en='Video Generator',
-        description='根据文字描述生成视频，可选首帧参考图；同轮多次调用并行，视频侧最多同时3路',
-        description_en='Generate videos from text descriptions, with optional first-frame reference images.',
+        description='根据已配置模型的能力生成视频，支持情况可能包括纯文本、首帧、首尾帧或多参考图；同轮多次调用并行，视频侧最多同时3路',
+        description_en=(
+            'Generate video using the configured model capability: text-only, first frame, '
+            'first/last frames, or multiple references when supported.'
+        ),
         tool=video_generator, module='content',
         model_role='video_generator',
         capability_id='video_generation',
         input_schema={'prompt': 'string'}, output_schema={'video': 'file'},
         required_config=['video_generator_model'],
-        appendix_system_prompt=VIDEO_MARKDOWN_OUTPUT_APPENDIX,
+        appendix_system_prompt=_video_generator_prompt_appendix,
     ),
     ToolConfig(
         name='video_to_gif',

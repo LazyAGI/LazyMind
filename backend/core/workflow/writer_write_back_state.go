@@ -38,7 +38,7 @@ type writerWriteBackInfo struct {
 
 // enrichWriterWriteBackSlots exposes the server-owned delivery state for the
 // selected Writer draft. A source_document remains authoritative when present;
-// ordinary Markdown drafts can create a Feishu document on first delivery.
+// ordinary Markdown drafts can create the default provider document on first delivery.
 func enrichWriterWriteBackSlots(ctx context.Context, db *gorm.DB, sessionID string, slots []slotDTO) {
 	var source *slotDTO
 	for i := range slots {
@@ -150,7 +150,7 @@ func writerWriteBackState(
 func applyWriterProviderBinding(info *writerWriteBackInfo, binding writerProviderBinding) {
 	info.Provider = binding.Provider
 	info.ProviderDocumentID = binding.DocumentID
-	info.URL = writerFeishuURL(binding.URI)
+	info.URL = writerProviderURL(binding.URI)
 }
 
 func writerRevisionPointer(revision int) *int {
@@ -206,7 +206,9 @@ func writerProviderBindingFromArtifact(value json.RawMessage) (writerProviderBin
 		document = envelope.Data
 	}
 	var identity writerDocumentIdentity
-	if json.Unmarshal(document, &identity) != nil || identity.ProviderBinding.Provider != "feishu" || identity.ProviderBinding.DocumentID == "" {
+	if json.Unmarshal(document, &identity) != nil ||
+		!writerProviderSupported(identity.ProviderBinding.Provider) ||
+		identity.ProviderBinding.DocumentID == "" {
 		return writerProviderBinding{}, false
 	}
 	return identity.ProviderBinding, true
@@ -296,12 +298,25 @@ func writerArtifactPathAllowed(path string) bool {
 	return false
 }
 
-func writerFeishuURL(uri string) string {
+func writerProviderSupported(provider string) bool {
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "feishu", "notion":
+		return true
+	default:
+		return false
+	}
+}
+
+func writerProviderURL(uri string) string {
 	if !strings.HasPrefix(uri, "https://") {
 		return ""
 	}
 	host := strings.ToLower(strings.Split(strings.TrimPrefix(uri, "https://"), "/")[0])
-	if host == "feishu.cn" || strings.HasSuffix(host, ".feishu.cn") || host == "larksuite.com" || strings.HasSuffix(host, ".larksuite.com") {
+	if host == "feishu.cn" || strings.HasSuffix(host, ".feishu.cn") ||
+		host == "larksuite.com" || strings.HasSuffix(host, ".larksuite.com") ||
+		host == "app.notion.com" ||
+		host == "notion.so" || strings.HasSuffix(host, ".notion.so") ||
+		host == "notion.site" || strings.HasSuffix(host, ".notion.site") {
 		return uri
 	}
 	return ""

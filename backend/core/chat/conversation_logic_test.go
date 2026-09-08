@@ -148,8 +148,8 @@ func TestSetChatHistoryRemovesRejectedAnswerPerformance(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, history := range []orm.MultiAnswersChatHistory{
-		{ID: "history-selected", Seq: 1, ConversationID: "conv-multi", RunID: "run-selected"},
-		{ID: "history-rejected", Seq: 1, ConversationID: "conv-multi", RunID: "run-rejected"},
+		{ID: "history-selected", Seq: 1, ConversationID: "conv-multi", Result: "selected answer", RunID: "run-selected", RunStatus: "completed"},
+		{ID: "history-rejected", Seq: 1, ConversationID: "conv-multi", Result: "rejected answer", RunID: "run-rejected", RunStatus: "completed"},
 	} {
 		if err := db.Create(&history).Error; err != nil {
 			t.Fatal(err)
@@ -1054,7 +1054,7 @@ func TestCollectedInputsForConversationReturnsSnapshotAndSummary(t *testing.T) {
 }
 
 func TestGetConversationDetailReturnsStoredMultimodalInput(t *testing.T) {
-	db := orm.MigrateTestDB(t, &orm.Conversation{}, &orm.ChatHistory{}, &orm.ExternalAgentBinding{})
+	db := orm.MigrateTestDB(t, &orm.Conversation{}, &orm.ChatHistory{}, &orm.ExternalAgentBinding{}, &orm.ConversationForkOrigin{})
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 
@@ -1136,6 +1136,37 @@ func TestChatHistoryResponseIncludesMentions(t *testing.T) {
 	mentions, ok := item["mentions"].([]any)
 	if !ok || len(mentions) != 1 {
 		t.Fatalf("mentions missing from history response: %#v", item["mentions"])
+	}
+}
+
+func TestChatHistoryResponseOmitsAnsweredAskPending(t *testing.T) {
+	item := chatHistoryToResponseItem(orm.ChatHistory{
+		Ext: json.RawMessage(`{
+			"ask_pending":{"ask_id":"ask-1","questions":[]},
+			"ask_answered":true,
+			"ask_saved_answers":{"0":{"type":"text","value":"done"}}
+		}`),
+	})
+	if _, exists := item["ask_pending"]; exists {
+		t.Fatalf("answered ask_pending leaked into history response: %#v", item)
+	}
+	if _, exists := item["ask_saved_answers"]; exists {
+		t.Fatalf("answered ask_saved_answers leaked into history response: %#v", item)
+	}
+}
+
+func TestChatHistoryResponseKeepsLatestUnansweredAskPending(t *testing.T) {
+	item := chatHistoryToResponseItem(orm.ChatHistory{
+		Ext: json.RawMessage(`{
+			"ask_pending":{"ask_id":"ask-1","questions":[]},
+			"ask_saved_answers":{"0":{"type":"text","value":"partial"}}
+		}`),
+	})
+	if _, exists := item["ask_pending"]; !exists {
+		t.Fatalf("unanswered ask_pending missing from history response: %#v", item)
+	}
+	if _, exists := item["ask_saved_answers"]; !exists {
+		t.Fatalf("unanswered ask_saved_answers missing from history response: %#v", item)
 	}
 }
 
@@ -1293,7 +1324,7 @@ func TestElapsedThinkingSecondsRoundsUp(t *testing.T) {
 }
 
 func TestGetConversationDetailFiltersMissingDatasets(t *testing.T) {
-	db := orm.MigrateTestDB(t, &orm.Conversation{}, &orm.ChatHistory{}, &orm.Dataset{}, &orm.ExternalAgentBinding{})
+	db := orm.MigrateTestDB(t, &orm.Conversation{}, &orm.ChatHistory{}, &orm.Dataset{}, &orm.ExternalAgentBinding{}, &orm.ConversationForkOrigin{})
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 

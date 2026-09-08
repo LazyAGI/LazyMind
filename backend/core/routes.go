@@ -32,6 +32,7 @@ import (
 	"lazymind/core/subagent"
 	"lazymind/core/systemdeps"
 	"lazymind/core/taskcenter"
+	"lazymind/core/translation"
 	"lazymind/core/userprefs"
 	"lazymind/core/wordgroup"
 	"lazymind/core/workflow"
@@ -288,6 +289,8 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/conversations/{conversation_id}:status", []string{"qa.read"}, chat.GetChatStatus)
 	handleAPI(r, "GET", "/chat/models", []string{"qa.read"}, chat.ListChatModels)
 	handleAPI(r, "PATCH", "/conversations/{conversation_id}/model", []string{"qa.write"}, chat.PatchConversationModel)
+	handleAPI(r, "POST", "/conversations/{conversation_id}/fork-preview", []string{"qa.read"}, chat.PreviewConversationFork)
+	handleAPI(r, "POST", "/conversations/{conversation_id}/forks", []string{"qa.write"}, chat.CreateConversationFork)
 	handleAPI(r, "POST", "/conversations/{parent_id}/sidechat", []string{"qa.write"}, chat.CreateSidechat)
 	handleAPI(r, "POST", "/conversations/{child_id}/retain", []string{"qa.write"}, chat.RetainSidechat)
 	handleAPI(r, "DELETE", "/conversations/{child_id}/sidechat", []string{"qa.write"}, chat.DiscardSidechat)
@@ -332,10 +335,12 @@ func registerAllRoutes(r *mux.Router) {
 	// ----- Workflow Drafts (user-created workflow authoring) -----
 	handleAPI(r, "GET", "/workflow-drafts", []string{"qa.read"}, workflow.ListWorkflowDrafts)
 	handleAPI(r, "POST", "/workflow-drafts", []string{"qa.write"}, workflow.CreateWorkflowDraft)
+	handleAPI(r, "POST", "/workflows/{workflow_id}:copy", []string{"qa.write"}, workflow.CopyBuiltinWorkflow)
 	handleAPI(r, "GET", "/workflow-drafts:trash", []string{"qa.read"}, workflow.ListWorkflowDraftTrash)
 	handleAPI(r, "DELETE", "/workflow-drafts:trash", []string{"qa.write"}, workflow.EmptyWorkflowDraftTrash)
 	handleAPI(r, "POST", "/workflow-drafts:polish-info", []string{"qa.write"}, workflow.PolishWorkflowDraftInfo)
 	handleAPI(r, "GET", "/workflow-drafts/{draft_id}", []string{"qa.read"}, workflow.GetWorkflowDraft)
+	handleAPI(r, "POST", "/workflow-drafts/{draft_id}:copy", []string{"qa.write"}, workflow.CopyWorkflowDraft)
 	handleAPI(r, "POST", "/workflow-drafts/{draft_id}:save", []string{"qa.write"}, workflow.SaveWorkflowDraft)
 	handleAPI(r, "POST", "/workflow-drafts/{draft_id}:validate", []string{"qa.read"}, workflow.ValidateWorkflowDraft)
 	handleAPI(r, "POST", "/workflow-drafts/{draft_id}:ai-generate", []string{"qa.write"}, workflow.AIGenerateWorkflowDraft)
@@ -449,6 +454,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/workflow-sessions/{session_id}", []string{"qa.read"}, workflow.GetSessionDetail)
 	handleAPI(r, "GET", "/workflow-sessions/{session_id}/slots", []string{"qa.read"}, workflow.GetSessionSlots)
 	handleAPI(r, "GET", "/workflow-sessions/{session_id}/steps", []string{"qa.read"}, workflow.GetSessionSteps)
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}:approval-preference", []string{"qa.write"}, workflow.SetWorkflowApprovalPreference)
 	// Compatibility alias: old clients receive the same authoritative projection;
 	// no independent BFS state calculation remains on an active route.
 	handleAPI(r, "GET", "/workflow-sessions/{session_id}/state-graph", []string{"qa.read"}, workflow.GetSessionProjection)
@@ -667,6 +673,8 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "DELETE", "/model_providers/{model_provider_id}/groups/{group_id}/models/{model_id}", []string{"model.write"}, modelprovider.DeleteGroupModel)
 	handleAPI(r, "POST", "/model_providers/{model_provider_id}/groups/{group_id}/keys", []string{"model.write"}, modelprovider.AddKey)
 	handleAPI(r, "DELETE", "/model_providers/{model_provider_id}/groups/{group_id}/keys", []string{"model.write"}, modelprovider.RemoveKey)
+	handleAPI(r, "GET", "/translation/status", []string{"document.read"}, translation.Status)
+	handleAPI(r, "POST", "/translation:translate", []string{"document.read"}, translation.Translate)
 
 	// ----- Prompttext -----
 	handleAPI(r, "POST", "/prompts", []string{"document.write"}, chat.CreatePrompt)

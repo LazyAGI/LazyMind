@@ -179,6 +179,9 @@ def image_editor(
 def video_generator(
     prompt: str,
     urls: Optional[Union[str, List[str]]] = None,
+    first_frame_url: Optional[str] = None,
+    last_frame_url: Optional[str] = None,
+    reference_urls: Optional[Union[str, List[str]]] = None,
     resolution: str = _DEFAULT_VIDEO_RESOLUTION,
     duration: int = _DEFAULT_VIDEO_DURATION,
     ratio: str = _DEFAULT_VIDEO_RATIO,
@@ -186,8 +189,31 @@ def video_generator(
     """Generate a video from a text prompt (text-to-video).
 
     Uses the configured ``video_generator`` role in runtime_models (type
-    ``text2video``). Optionally pass first-frame reference image(s) via ``urls``
-    for image-to-video. Generated files are relocated under
+    ``text2video``). The current provider/model identity is injected into the
+    active-tool instructions for each request. Select inputs using this matrix:
+
+    - Qwen ``wan3.0-video`` / ``wan3.0-video-prime``: text-only, one first
+      frame, first+last frames, or up to 10 ordinary reference images. Frame
+      control and ordinary-reference mode are mutually exclusive. Duration is
+      ``-1`` (auto) or 2-30 seconds.
+    - Qwen ``wan2.6-t2v``: text-only; do not pass any image argument.
+    - Qwen ``wan2.6-i2v`` / ``wan2.6-i2v-flash``: exactly one first-frame image;
+      no last frame and no multi-reference input.
+    - SiliconFlow ``Wan-AI/Wan2.2-T2V-A14B``: text-only. SiliconFlow
+      ``Wan-AI/Wan2.2-I2V-A14B``: exactly one first-frame image.
+    - Doubao Seedance: the adapter can send first/last-frame roles and ordinary
+      reference roles. Exact support still depends on the configured Seedance
+      variant; Seedance 2.5 supports ordinary-reference mode. Never combine
+      first/last-frame control with ordinary references.
+    - OpenRouter or an unlisted model: images are generic references only;
+      first/last-frame semantics are not guaranteed. Prefer text-only unless
+      the selected model's own capability is known.
+
+    If the selected provider/model is absent from the active-tool instructions,
+    do not assume advanced image conditioning. An unsupported combination
+    returns an explicit error; explain that configuration mismatch to the user
+    instead of retrying the same arguments. ``urls`` is a backward-compatible
+    generic image list. Generated files are relocated under
     ``shared_upload_dir/ai_generated/`` for signed static URLs.
 
     To generate multiple videos (e.g. three stickers), emit multiple
@@ -197,10 +223,16 @@ def video_generator(
 
     Args:
         prompt: Natural-language description of the video to generate.
-        urls: Optional first-frame / reference image path(s) or signed static
-            URLs. Prefer a JSON array of strings; a single path string is also
-            accepted. Frames smaller than Ark's 300px minimum are auto-upscaled
-            before upload.
+        urls: Backward-compatible generic image path(s). One image is treated
+            as a first frame; multiple images are treated as ordinary references.
+            Do not combine this argument with explicit frame arguments.
+        first_frame_url: Optional first-frame path or signed static URL.
+        last_frame_url: Optional last-frame path or signed static URL.
+        reference_urls: Optional ordinary reference image path(s). A JSON array
+            or a single path string is accepted. Images smaller than Ark's
+            300px minimum are auto-upscaled before upload. Frame-control mode
+            (first/last) and reference-image mode are separate task types; do
+            not combine explicit frame arguments with reference_urls.
         resolution: Output resolution enum, e.g. ``480p`` / ``720p`` / ``1080p``.
         duration: Video length in seconds.
         ratio: Aspect ratio, e.g. ``16:9``.
@@ -212,15 +244,58 @@ def video_generator(
         ``video_url`` if markdown is absent); do not invent or rewrite
         ``/static-files/`` paths.
     """
-    normalized_urls = _coerce_url_list(urls)
-    source_files = _resolve_source_image_paths(normalized_urls) if normalized_urls else None
+    normalized_references = _coerce_url_list(reference_urls) or []
+    normalized_legacy = _coerce_url_list(urls) or []
+    has_first_frame = bool(str(first_frame_url or '').strip())
+    has_last_frame = bool(str(last_frame_url or '').strip())
+    if has_last_frame and not has_first_frame:
+        raise ToolExecutionError('last_frame_url requires first_frame_url')
+    if (has_first_frame or has_last_frame) and (normalized_references or normalized_legacy):
+        raise ToolExecutionError(
+            'Frame-control mode cannot be combined with reference_urls or legacy urls; '
+            'use either first/last frames or reference images.'
+        )
+
+    ordered_urls: List[str] = []
+    image_semantics: List[str] = []
+    if has_first_frame:
+        ordered_urls.append(str(first_frame_url).strip())
+        image_semantics.append('first_frame')
+    if has_last_frame:
+        ordered_urls.append(str(last_frame_url).strip())
+        image_semantics.append('last_frame')
+    for ref in normalized_references:
+        ordered_urls.append(ref)
+        image_semantics.append('reference_image')
+    for ref in normalized_legacy:
+        ordered_urls.append(ref)
+        image_semantics.append(
+            'first_frame' if len(normalized_legacy) == 1 else 'reference_image'
+        )
+
+    # Preserve the first occurrence and its semantic role when the same upload
+    # is also present in the generic material list.
+    deduped_urls: List[str] = []
+    deduped_semantics: List[str] = []
+    seen_urls: set[str] = set()
+    for ref, semantic in zip(ordered_urls, image_semantics):
+        if ref in seen_urls:
+            continue
+        seen_urls.add(ref)
+        deduped_urls.append(ref)
+        deduped_semantics.append(semantic)
+
+    source_files = _resolve_source_image_paths(deduped_urls) if deduped_urls else None
     return run_video_model(
         'video_generator',
         prompt,
         files=source_files,
+        image_semantics=deduped_semantics or None,
         resolution=resolution,
         duration=duration,
-        ratio=ratio,
+        ratio='adaptive' if any(
+            role in {'first_frame', 'last_frame'} for role in deduped_semantics
+        ) else ratio,
     )
 
 

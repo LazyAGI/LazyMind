@@ -49,6 +49,18 @@ export function isAskPendingReadOnly(
   return !!askAnswered || (!isLatestMessage && hasLaterUserMessage);
 }
 
+export function shouldRenderAskPending(
+  askAnswered: boolean | undefined,
+  isLatestMessage: boolean,
+  hasLaterUserMessage = false,
+) {
+  return !isAskPendingReadOnly(
+    askAnswered,
+    isLatestMessage,
+    hasLaterUserMessage,
+  );
+}
+
 interface ChatUserMessageLike {
   delta?: string;
   inputs?: Query[] | null;
@@ -218,6 +230,7 @@ export function buildChatMessageListFromHistory(
       record.input as Query[] | null | undefined,
       record.query,
     );
+    const displayInputs = normalizedInputs as (Query & { filename?: string; fork_unavailable?: boolean })[];
     const textInput = normalizedInputs.find((input) => {
       const inputType = input.input_type || "text";
       return inputType === "text" && !!input.text;
@@ -236,16 +249,17 @@ export function buildChatMessageListFromHistory(
       display_delta: displayQuery,
       cite_message: citeMessages.join("\n\n"),
       cite_messages: citeMessages,
-      images: normalizedInputs
-        ?.filter((input) => input.input_type === "image")
+      images: displayInputs
+        ?.filter((input) => input.input_type === "image" && !input.fork_unavailable)
         .map((image) => ({
           base64: image?.input_base64 || image?.uri,
           uid: image.file_id,
         })),
-      files: normalizedInputs
-        ?.filter((input) => input.input_type === "file")
+      files: displayInputs
+        ?.filter((input) => input.input_type === "file" || (input.input_type === "image" && input.fork_unavailable))
         .map((file) => ({
-          name: file?.uri?.split("/").pop(),
+          name: file.filename || file?.uri?.split("/").pop(),
+          ...(file.fork_unavailable ? { unavailable: true } : {}),
           uid: file.file_id,
         })),
       finish_reason: ChatConversationsResponseFinishReasonEnum.FinishReasonStop,
@@ -321,6 +335,7 @@ export function buildChatMessageListFromHistory(
       run_terminal: isActuallyGenerating ? undefined : record.run_terminal,
       performance_metrics: (record as any).performance_metrics,
       model_route: record.model_route,
+      fork_read_only: (record as any).fork_read_only,
     };
 
     // Restore ask_pending from persisted ext so the AskCard is visible after page reload.

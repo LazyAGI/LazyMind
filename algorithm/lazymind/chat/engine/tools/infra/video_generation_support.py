@@ -121,6 +121,7 @@ def run_video_model(
     prompt: str,
     *,
     files: Optional[List[str]] = None,
+    image_semantics: Optional[List[str]] = None,
     resolution: str = _DEFAULT_VIDEO_RESOLUTION,
     duration: int = _DEFAULT_VIDEO_DURATION,
     ratio: str = _DEFAULT_VIDEO_RATIO,
@@ -146,9 +147,27 @@ def run_video_model(
     if files:
         call_kwargs['files'] = [_ensure_ark_first_frame_size(path) for path in files]
 
+    semantic_prompt = text
+    if files and image_semantics:
+        numbered = []
+        for index, semantic in enumerate(image_semantics[:len(files)], start=1):
+            if semantic == 'first_frame':
+                numbered.append(f'Image {index} is the required first frame')
+            elif semantic == 'last_frame':
+                numbered.append(f'Image {index} is the required last frame')
+            else:
+                numbered.append(f'Image {index} is a visual reference')
+        if numbered:
+            semantic_prompt = (
+                'Input image semantics: ' + '; '.join(numbered) + '. '
+                'Honor these roles and keep referenced subjects visually consistent.\n\n' + text
+            )
+
     with _VIDEO_SEMAPHORE:
         model = AutoModel(model=role)
-        raw = model(text, stream_output=False, **call_kwargs)
+        if files and image_semantics and getattr(model, 'SUPPORTED_IMAGE_ROLES', False):
+            call_kwargs['image_roles'] = list(image_semantics[:len(files)])
+        raw = model(semantic_prompt, stream_output=False, **call_kwargs)
         temp_paths = _parse_generated_files(raw)
         if not temp_paths:
             raise ToolExecutionError(
@@ -160,6 +179,8 @@ def run_video_model(
         primary = videos[0]
         return {
             'prompt': text,
+            'submitted_prompt': semantic_prompt,
+            'image_semantics': image_semantics or [],
             'resolution': res,
             'duration': dur,
             'ratio': aspect,

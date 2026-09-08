@@ -169,6 +169,7 @@ type taskDTO struct {
 	Seq              int             `json:"seq_in_conversation"`
 	AgentType        string          `json:"agent_type"`
 	Title            string          `json:"title"`
+	Query            string          `json:"query,omitempty"`
 	Objective        string          `json:"objective"`
 	Mode             string          `json:"mode"`
 	Status           string          `json:"status"`
@@ -179,10 +180,32 @@ type taskDTO struct {
 	InputSlots       json.RawMessage `json:"input_slots"`
 	OutputSlots      json.RawMessage `json:"output_slots"`
 	Sources          json.RawMessage `json:"sources"`
+	WritingSubtasks  json.RawMessage `json:"writing_subtasks"`
 	CreatedAt        time.Time       `json:"created_at"`
 	UpdatedAt        time.Time       `json:"updated_at"`
 	Artifacts        []artifactDTO   `json:"artifacts,omitempty"`
 	Steps            []stepDTO       `json:"steps,omitempty"`
+}
+
+// TaskDisplayQuery returns only the user-authored query suitable for TaskCenter.
+// Workflow objectives contain the expanded step/system prompt and must never be
+// used as a display fallback.
+func TaskDisplayQuery(t *orm.SubAgentTask) string {
+	var params struct {
+		UserInput string `json:"user_input"`
+		Query     string `json:"query"`
+	}
+	_ = json.Unmarshal(t.Params, &params)
+	if query := strings.TrimSpace(params.UserInput); query != "" {
+		return query
+	}
+	if query := strings.TrimSpace(params.Query); query != "" {
+		return query
+	}
+	if t.AgentType != "workflow_step" {
+		return strings.TrimSpace(t.Objective)
+	}
+	return ""
 }
 
 type taskProgressDTO struct {
@@ -218,6 +241,7 @@ func toTaskDTO(t *orm.SubAgentTask) taskDTO {
 		Seq:              t.SeqInConversation,
 		AgentType:        t.AgentType,
 		Title:            t.Title,
+		Query:            TaskDisplayQuery(t),
 		Objective:        t.Objective,
 		Mode:             t.Mode,
 		Status:           t.Status,
@@ -228,6 +252,7 @@ func toTaskDTO(t *orm.SubAgentTask) taskDTO {
 		InputSlots:       normalizeJSON(t.InputSlots, "[]"),
 		OutputSlots:      normalizeJSON(t.OutputSlots, "[]"),
 		Sources:          normalizeJSON(json.RawMessage(t.Sources), "[]"),
+		WritingSubtasks:  normalizeJSON(json.RawMessage(t.WritingSubtasks), "[]"),
 		CreatedAt:        t.CreatedAt,
 		UpdatedAt:        t.UpdatedAt,
 	}

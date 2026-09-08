@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { buildImageElement, buildPptx } from '../lib/pptx_builder.mjs';
+import { buildBackground, buildImageElement, buildPptx } from '../lib/pptx_builder.mjs';
 
 const ONE_PIXEL_PNG =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
@@ -26,6 +26,64 @@ test('buildImageElement keeps publisher-inlined data images', () => {
   assert.equal(image.data, ONE_PIXEL_PNG);
   assert.equal(image.path, undefined);
   assert.equal(image.sizing?.type, 'cover');
+});
+
+test('buildBackground keeps publisher-inlined CSS background images', () => {
+  const result = buildBackground({
+    bounds: { x: 0, y: 0, w: 1600, h: 900 },
+    styles: {
+      backgroundColor: 'rgba(0, 0, 0, 0)',
+      backgroundImage: `url("${ONE_PIXEL_PNG}")`,
+      opacity: '1',
+    },
+    children: [],
+  }, 'rgb(255, 255, 255)', '/deck');
+  assert.equal(result.slideBackground.data, ONE_PIXEL_PNG);
+  assert.equal(result.slideBackground.path, undefined);
+});
+
+test('editable PPTX embeds a publisher-inlined CSS background', async () => {
+  const deckDir = await mkdtemp(path.join(os.tmpdir(), 'lazymind-inline-background-'));
+  try {
+    const outputPath = path.join(deckDir, 'inline-background.pptx');
+    const ir = {
+      canvasWidth: 1600,
+      canvasHeight: 900,
+      bodyBgColor: 'rgb(255, 255, 255)',
+      bodyBgImage: 'none',
+      wrapperBgColor: 'rgba(0, 0, 0, 0)',
+      wrapperBgImage: 'none',
+      bg: {
+        tag: 'DIV',
+        id: 'bg',
+        bounds: { x: 0, y: 0, w: 1600, h: 900 },
+        styles: {
+          backgroundColor: 'rgba(0, 0, 0, 0)',
+          backgroundImage: `url("${ONE_PIXEL_PNG}")`,
+          opacity: '1',
+        },
+        children: [],
+      },
+      header: null,
+      footer: null,
+      overlays: [],
+      rest: [],
+      ct: null,
+    };
+
+    const result = await buildPptx(
+      [{ path: path.join(deckDir, 'page_001.html'), ir }],
+      deckDir,
+      outputPath,
+    );
+
+    assert.equal(result.successCount, 1);
+    assert.equal(result.failCount, 0);
+    const pptx = await readFile(outputPath);
+    assert.notEqual(pptx.indexOf(Buffer.from(ONE_PIXEL_PNG.split(',')[1], 'base64')), -1);
+  } finally {
+    await rm(deckDir, { recursive: true, force: true });
+  }
 });
 
 test('editable PPTX embeds publisher-inlined images instead of a transparent placeholder', async () => {

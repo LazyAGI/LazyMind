@@ -8,10 +8,14 @@ export const CHAT_CONVERSATION_FILTER_KEY = "chat_conversation_filter";
 export const CHAT_CONVERSATION_FILTER_EVENT = "lazymind:chat-conversation-filter";
 export const CHAT_SELECT_CONVERSATION_EVENT = "lazymind:chat-select-conversation";
 export const CHAT_AUTO_ADVANCE_EVENT = "lazymind:chat-auto-advance";
+export const CHAT_WORKFLOW_STEP_FEEDBACK_EVENT =
+  "lazymind:chat-workflow-step-feedback";
 export const CHAT_OPEN_MODEL_SELECTOR_EVENT =
   "lazymind:chat-open-model-selector";
 export const CHAT_FFMPEG_DEPENDENCY_MISSING_EVENT =
   "lazymind:chat-ffmpeg-dependency-missing";
+export const CHAT_MEDIA_CAPABILITY_MISSING_EVENT =
+  "lazymind:chat-media-capability-missing";
 export const CHAT_CONVERSATION_ACTIVITY_EVENT =
   "lazymind:chat-conversation-activity";
 export const CHAT_CONVERSATION_LIST_REFRESH_EVENT =
@@ -43,6 +47,14 @@ export interface ChatAutoAdvanceDetail {
   conversationId: string;
   driverMessage?: string;
   phase: ChatAutoAdvancePhase;
+}
+
+export interface ChatWorkflowStepFeedbackDetail {
+  conversationId: string;
+  feedbackId: string;
+  historyId?: string;
+  message: string;
+  status?: string;
 }
 
 export interface ChatConversationActivityDetail {

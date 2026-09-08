@@ -36,3 +36,16 @@ func TestSetWorkflowYAMLUpdateUsesPhysicalPluginIDColumn(t *testing.T) {
 		t.Fatalf("workflow YAML update must target physical plugin_yaml_content column: %s", sql)
 	}
 }
+
+func TestReplaceWorkflowYAMLIdentityKeepsDefinitionAndChangesIdentity(t *testing.T) {
+	source := "id: image-workflow\nname: AI Image\ndescription: keep me\nsteps:\n  - id: generate\n"
+	got := replaceWorkflowYAMLIdentity(source, "image-workflow-copy", "AI 图片生成 副本")
+	if extractWorkflowID(got) != "image-workflow-copy" {
+		t.Fatalf("copied workflow id = %q", extractWorkflowID(got))
+	}
+	for _, expected := range []string{`name: "AI 图片生成 副本"`, "description: keep me", "  - id: generate"} {
+		if !strings.Contains(got, expected) {
+			t.Fatalf("copied workflow lost %q:\n%s", expected, got)
+		}
+	}
+}

@@ -1505,5 +1505,19 @@
   "2002366": { "en-US": "Waiting for memory maintenance capacity", "zh-CN": "等待记忆维护执行资源" },
   "2002367": { "en-US": "Invalid external Agent attachment", "zh-CN": "外部 Agent 附件无效" },
   "2002368": { "en-US": "Failed to create the external Agent attachment reference", "zh-CN": "创建外部 Agent 附件引用失败" },
-  "2002369": { "en-US": "The external Agent attachment conflicts with an existing event", "zh-CN": "外部 Agent 附件与已有事件冲突" }
+  "2002369": { "en-US": "The external Agent attachment conflicts with an existing event", "zh-CN": "外部 Agent 附件与已有事件冲突" },
+  "2002370": { "en-US": "Invalid history selection", "zh-CN": "对话记录选择无效" },
+  "2002371": { "en-US": "Failed to start the response; retry", "zh-CN": "启动回复失败，请重试" },
+  "2002372": { "en-US": "The editable block is unavailable or has changed; refresh and retry", "zh-CN": "可编辑内容不可用或已发生变化，请刷新后重试" },
+  "2002373": { "en-US": "Failed to check the chat source attachment", "zh-CN": "检查对话来源附件失败" },
+  "2002374": { "en-US": "Text is required", "zh-CN": "请提供待翻译文本" },
+  "2002375": { "en-US": "Text exceeds 5000 characters", "zh-CN": "待翻译文本超过 5000 字符" },
+  "2002376": { "en-US": "Translation service is not configured", "zh-CN": "尚未配置翻译服务" },
+  "2002377": { "en-US": "Unsupported translation provider", "zh-CN": "不支持的翻译服务商" },
+  "2002378": { "en-US": "Invalid translation credentials", "zh-CN": "翻译服务凭据无效" },
+  "2002379": { "en-US": "SecretId and SecretKey are required", "zh-CN": "请同时提供 SecretId 和 SecretKey" },
+  "2002380": { "en-US": "Invalid Tencent translation endpoint", "zh-CN": "腾讯翻译服务地址无效" },
+  "2002381": { "en-US": "Tencent translation request failed", "zh-CN": "请求腾讯翻译服务失败" },
+  "2002382": { "en-US": "Tencent translation returned an invalid response", "zh-CN": "腾讯翻译返回了无效响应" },
+  "2002383": { "en-US": "Tencent translation failed", "zh-CN": "腾讯翻译失败" }
 }

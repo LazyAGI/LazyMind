@@ -70,6 +70,21 @@ func jsonBody(s string) io.Reader {
 	return strings.NewReader(s)
 }
 
+func TestWorkflowRefPathVarPreservesUserWorkflowID(t *testing.T) {
+	ref := "user:user-1:ppt-workflow-copy"
+	req := httptest.NewRequest(http.MethodGet, "/published-workflows/"+ref+"/versions", nil)
+	req = mux.SetURLVars(req, map[string]string{"workflow_ref": ref})
+	if got := workflowRefPathVar(req); got != ref {
+		t.Fatalf("workflow ref = %q, want %q", got, ref)
+	}
+
+	actionReq := httptest.NewRequest(http.MethodPost, "/published-workflows/"+ref+":rollback", nil)
+	actionReq = mux.SetURLVars(actionReq, map[string]string{"workflow_ref": ref + ":rollback"})
+	if got := workflowRefPathVar(actionReq); got != ref {
+		t.Fatalf("rollback workflow ref = %q, want %q", got, ref)
+	}
+}
+
 // testError2 is a simple error for testing error-matching functions.
 type testError2 struct{ msg string }
 
@@ -86,6 +101,44 @@ func TestValidateWorkflowDraft_NotFound(t *testing.T) {
 	ValidateWorkflowDraft(rec, req)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("got %d, want %d", rec.Code, http.StatusNotFound)
+	}
+}
+
+func TestCopyWorkflowDraftCopiesEditableContentWithNewIdentity(t *testing.T) {
+	db := newHandlerTestDB(t)
+	now := time.Now().UTC()
+	source := orm.WorkflowDraft{
+		ID: "source-draft", WorkflowID: "research", Name: "Research", CreatedBy: "user-1", Version: 4,
+		WorkflowYAMLContent: "id: research\nname: Research\ndescription: original\n", StateYAMLContent: "states: {}\n",
+		StateLayoutContent: `{"nodes":{"start":{"x":10}}}`, ScenarioContent: "# Scenario", DriverContent: "# Driver",
+		ScriptsContent: `{"scripts/run.py":"print('ok')"}`, DesignBriefContent: "# Brief", SourceType: "ai",
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := db.Create(&source).Error; err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/workflow-drafts/source-draft:copy", strings.NewReader(`{"name":"Research 副本"}`))
+	req = mux.SetURLVars(req, map[string]string{"draft_id": source.ID})
+	req.Header.Set("X-User-Id", "user-1")
+	rec := httptest.NewRecorder()
+	CopyWorkflowDraft(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("copy status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var copied orm.WorkflowDraft
+	if err := db.Where("created_by = ? AND plugin_id = ?", "user-1", "research-copy").First(&copied).Error; err != nil {
+		t.Fatalf("load copy: %v", err)
+	}
+	if copied.ID == source.ID || copied.Name != "Research 副本" || copied.SourceType != "blank" || copied.Version != 1 {
+		t.Fatalf("copy metadata = %#v", copied)
+	}
+	if copied.StateYAMLContent != source.StateYAMLContent || copied.StateLayoutContent != source.StateLayoutContent ||
+		copied.ScenarioContent != source.ScenarioContent || copied.DriverContent != source.DriverContent ||
+		copied.ScriptsContent != source.ScriptsContent || copied.DesignBriefContent != source.DesignBriefContent {
+		t.Fatalf("copy did not retain all editable content: %#v", copied)
+	}
+	if !strings.Contains(copied.WorkflowYAMLContent, "id: research-copy") || !strings.Contains(copied.WorkflowYAMLContent, "description: original") {
+		t.Fatalf("copy workflow yaml = %s", copied.WorkflowYAMLContent)
 	}
 }
 
@@ -362,6 +415,7 @@ func seedCatalogWorkflow(t *testing.T, db *orm.DB, id string) {
 	for path, content := range map[string][]byte{
 		"scenario/state.yml":   []byte("transitions:\n  __start__: [{to: first}]\n  first: [{to: __end__}]\n"),
 		"scenario/scenario.md": []byte("# Test scenario\n"),
+		"scenario/layout.json": []byte(`{"first":{"x":120,"y":80}}`),
 		"scripts/tools.py":     []byte("def test_tool():\n    return 'ok'\n"),
 	} {
 		fileSum := sha256.Sum256(content)
@@ -415,10 +469,31 @@ func TestWorkflowCatalogHandlersReadCoreRevisionWithoutChatUpstream(t *testing.T
 	if ui == nil || ui["tabs"] == nil {
 		t.Fatalf("panel UI declaration missing: %#v", spec)
 	}
-	for _, field := range []string{"workflow_yaml_raw", "state_yaml_raw", "scenario_raw", "scripts_raw"} {
+	for _, field := range []string{"workflow_yaml_raw", "state_yaml_raw", "layout_raw", "scenario_raw", "scripts_raw"} {
 		if value, _ := spec[field].(string); value == "" {
 			t.Fatalf("built-in detail field %s is empty: %#v", field, spec)
 		}
+	}
+}
+
+func TestCopyBuiltinWorkflowCopiesEveryEditablePackageFile(t *testing.T) {
+	db := newHandlerTestDB(t)
+	seedCatalogWorkflow(t, db, "catalog-copy-test")
+	req := httptest.NewRequest(http.MethodPost, "/workflows/catalog-copy-test:copy", strings.NewReader(`{"name":"完整副本"}`))
+	req = mux.SetURLVars(req, map[string]string{"workflow_id": "catalog-copy-test"})
+	req.Header.Set("X-User-Id", "user-1")
+	rec := httptest.NewRecorder()
+	CopyBuiltinWorkflow(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("copy built-in status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var copied orm.WorkflowDraft
+	if err := db.Where("created_by=? AND plugin_id=?", "user-1", "catalog-copy-test-copy").First(&copied).Error; err != nil {
+		t.Fatal(err)
+	}
+	if copied.StateLayoutContent != `{"first":{"x":120,"y":80}}` || !strings.Contains(copied.ScriptsContent, "scripts/tools.py") ||
+		!strings.Contains(copied.StateYAMLContent, "__start__") || copied.ScenarioContent != "# Test scenario\n" {
+		t.Fatalf("built-in copy is incomplete: %#v", copied)
 	}
 }
 

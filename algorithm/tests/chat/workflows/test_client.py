@@ -24,11 +24,13 @@ def test_advance_uses_typed_facade_payload_without_retry():
     result = client.advance(AdvanceRequest(
         session_id='ws1', expected_state_version=2,
         steps=[StepCommand(step_id='draft', user_input='write')], command_id='cmd1',
+        workflow_mode='auto',
     ))
     assert result.result['accepted'] is True
     call = transport.post.call_args
     assert call.args[0].endswith('/workflow-sessions/ws1:advance-step')
     assert call.kwargs['json']['contract_version'] == 'workflow.v1'
+    assert call.kwargs['json']['workflow_mode'] == 'auto'
     assert call.kwargs['json']['steps'][0]['step_id'] == 'draft'
 
 

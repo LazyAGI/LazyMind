@@ -1,4 +1,4 @@
-import { Button, message, Tag, Tooltip, Row, Col, Select, Switch, Tabs } from "antd";
+import { Button, message, Modal, Spin, Tag, Tooltip, Row, Col, Select, Switch, Tabs } from "antd";
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
@@ -37,6 +37,7 @@ import type { DocumentChatSelection } from "@/modules/knowledge/components/PdfTe
 import PdfTemporaryChat from "@/modules/knowledge/components/PdfTemporaryChat";
 import { localizeErrorCode } from "@/components/request";
 import { ChatServiceApi } from "@/modules/chat/utils/request";
+import { getTranslationStatus, translateText } from "@/modules/knowledge/api/translation";
 import "./index.scss";
 
 type KnowledgeDetail = Doc & {
@@ -104,6 +105,28 @@ const Detail = () => {
   const [showSegmentSequence, setShowSegmentSequence] = useState(true);
   const [documentChatHistory, setDocumentChatHistory] = useState<Conversation[]>([]);
   const [selectedDocumentConversation, setSelectedDocumentConversation] = useState<string>();
+  const [translationConfigured, setTranslationConfigured] = useState(false);
+  const [translationLoading, setTranslationLoading] = useState(false);
+  const [translationSource, setTranslationSource] = useState("");
+  const [translationResult, setTranslationResult] = useState("");
+
+  useEffect(() => {
+    getTranslationStatus().then(setTranslationConfigured).catch(() => setTranslationConfigured(false));
+  }, []);
+
+  const translatePdfSelection = useCallback(async (selection: PdfTextSelection) => {
+    setTranslationSource(selection.text);
+    setTranslationResult("");
+    setTranslationLoading(true);
+    try {
+      const result = await translateText(selection.text);
+      setTranslationResult(result.translated_text);
+    } catch {
+      message.error(t("knowledge.translationFailed"));
+    } finally {
+      setTranslationLoading(false);
+    }
+  }, [t]);
 
   const refreshDocumentChatHistory = useCallback(() => {
     if (!knowledgeId) return;
@@ -439,6 +462,8 @@ const Detail = () => {
             segment={segmentDetail}
             onExportReadyChange={setCanExportImagePdf}
             onPdfSelection={askPdfSelection}
+            onPdfTranslateSelection={translatePdfSelection}
+            translationConfigured={translationConfigured}
           />
         </Col>
         <Col
@@ -556,6 +581,26 @@ const Detail = () => {
           </div>
         </Col>
       </Row>
+      <Modal
+        open={Boolean(translationSource)}
+        title={t("knowledge.translationTitle")}
+        footer={null}
+        onCancel={() => {
+          if (!translationLoading) {
+            setTranslationSource("");
+            setTranslationResult("");
+          }
+        }}
+      >
+        <div className="knowledge-translation-block">
+          <div className="knowledge-translation-label">{t("knowledge.translationOriginal")}</div>
+          <div className="knowledge-translation-text">{translationSource}</div>
+        </div>
+        <div className="knowledge-translation-block">
+          <div className="knowledge-translation-label">{t("knowledge.translationResult")}</div>
+          {translationLoading ? <Spin size="small" /> : <div className="knowledge-translation-text">{translationResult}</div>}
+        </div>
+      </Modal>
     </div>
   );
 };

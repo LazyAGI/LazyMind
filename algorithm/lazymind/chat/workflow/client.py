@@ -1,5 +1,6 @@
 """LazyMind import compatibility for the public Host-neutral Workflow SDK."""
 
+import asyncio
 import base64
 from typing import Any, Dict
 
@@ -69,10 +70,20 @@ class RemoteExecutorClient:
 
     async def task_event(self, client: httpx.AsyncClient, task: str, lease: str,
                          event: Dict[str, Any]) -> httpx.Response:
-        response = await client.post(f'{self.base_url}/internal/subagent/tasks/{task}/events',
-                                     headers=self.headers(lease), json=event)
-        response.raise_for_status()
-        return response
+        url = f'{self.base_url}/internal/subagent/tasks/{task}/events'
+        for attempt in range(6):
+            response = await client.post(
+                url, headers=self.headers(lease), json=event,
+            )
+            if response.status_code != 503 or attempt == 5:
+                response.raise_for_status()
+                return response
+            # Core uses 503 for transient SQLite writer contention. Retrying the
+            # same fenced event keeps the workflow Attempt and task projection
+            # converged instead of turning a successful tool result into a
+            # failed step with a task that still says "running".
+            await asyncio.sleep(0.05 * (2 ** attempt))
+        raise RuntimeError('unreachable task event retry state')
 
     async def progress(self, client: httpx.AsyncClient, attempt: str, lease: str,
                        progress: Dict[str, Any]) -> httpx.Response:
