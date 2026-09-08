@@ -110,12 +110,11 @@ class IMAPMailProvider(CloudOAuthProvider):
         except OSError as orig:
             raise mail_verify_error('imap', orig) from orig
         finally:
-            if client is None:
-                return
-            try:
-                client.logout()
-            except Exception:
-                pass
+            if client is not None:
+                try:
+                    client.logout()
+                except Exception:
+                    pass
 
     def _verify_smtp(self, email: str, secret: str, endpoint: dict[str, object]) -> None:
         try:
