@@ -11,6 +11,15 @@
 - 第一批已新增 `frontend/src/modules/chat/components/ChatInput/LocalWorkspaceControl.test.tsx`（344 行测试代码），未修改生产代码。提交前矩阵共 30 项：7 项预期失败、23 项通过，其中新文件为 7 失败/6 通过，现有 workspace/bridge 17 项全部通过。
 - 7 项预期失败覆盖已有绑定/未绑定任务的目录锁定、切会话清理、picker/authorize 迟到、disabled 最近目录和运行中权限编辑；取消、关闭、Esc、旧查询隔离和 token 授权为通过项。当前停在人工 Review 门禁，T2 未开始。
 
+## T2 实现批次（2026-09-08）
+
+- 用户批准进入第二阶段后，只修改 `frontend/src/modules/chat/components/ChatInput/LocalWorkspaceControl.tsx`，并在既有测试文件补 4 项会话代次合同。生产文件 71 行新增、20 行删除，净增 51 行；没有新增生产文件。
+- 复用现有 Core binding、workspace API、Ant Design Button/Select/Modal 和 request-id 模式；没有新增服务、依赖、数据库表或 DTO。
+- 已实现已有任务目录锁定、会话切换立即清理父状态、查询/picker/authorize/权限/撤销迟到隔离、草稿 Select 禁用和运行中 next-request 权限编辑。
+- 验证：组件合同 17/17；ChatInput 装配、旧 workspace 合同、utility 和 Desktop bridge 聚焦矩阵 39/39；相关 ESLint、MCP TypeScript 检查和生产构建通过。构建仅有既有资源、动态导入和 chunk 大小警告。
+- 算法相对 `245bc26d`、Local/Desktop 相对 `ec4676e0` 仍为零差异。无关未跟踪目录 `output/xiaobao-v2` 保留且不纳入本批。
+- T2 完成后停在 Review；下一批为 T3 的 U4–U5 测试计划，不自动实施。F 类能力仍未解决。
+
 ## 当前状态（2026-09-08）
 
 - 本次唯一工作目录：/Users/theone/Downloads/lazymind；上一环境的目录名不作为本机路径依据。

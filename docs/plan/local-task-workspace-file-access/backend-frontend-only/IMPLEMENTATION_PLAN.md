@@ -102,7 +102,7 @@ U1–U3 已有组件级复现，F1–F3 已有实际文件工具级证据；其�
 
 先实施经过批准的 U/C 类行为修复，不重复已完成的基础设施。权限/API 相关修复先交付阶段一测试及预期失败，用户 Review 后实现。
 
-T1 阶段一已在 `frontend/src/modules/chat/components/ChatInput/LocalWorkspaceControl.test.tsx` 建立 13 项真实组件合同。当前 7 项按预期失败，分别对应已有任务锁定、会话切换清理、picker/authorize 迟到、disabled 草稿 Select 和运行中权限编辑；其余 6 项确认旧绑定查询隔离、取消/关闭/Esc 和 selection token 行为。该批生产代码净增为 0，停在人工 Review 门禁，尚未进入 T2。
+T1 阶段一在 `frontend/src/modules/chat/components/ChatInput/LocalWorkspaceControl.test.tsx` 建立了 13 项真实组件合同，其中 7 项按预期失败。用户 Review 后完成 T2，并按方案的统一代次要求补充权限确认、权限更新、撤销迟到及同草稿列表保留 4 项合同；当前 17 项全部通过。生产实现只修改既有 `LocalWorkspaceControl.tsx`，净增 51 行，没有新增生产文件、服务、依赖或数据库对象。
 
 F 类独立保持研究状态；只有同轮反馈、授权、批准、主子任务覆盖和平台验证均通过，才可加入正式实施任务。只完成 U/C 不得宣布旧需求完全复现。
 

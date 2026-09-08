@@ -17,6 +17,15 @@
 - 初次增加 Modal 关闭测试时，jsdom 不执行 CSS leave 动画，导致以“节点移除”为标准的三项异常失败；测试改为检查 Modal 已进入 leave 状态，并将 Esc 发到实际键盘容器。调整后异常失败归零。
 - 最终聚焦矩阵共 30 项：7 项预期失败、23 项通过；现有三个 workspace/bridge 文件的 17 项在加入新文件前后均保持通过。新测试 ESLint、diff 检查及冻结边界检查通过。阶段一不把预期 RED 计为产品验证通过。
 
+## T2 实现与验证证据
+
+- 仅修改既有 `LocalWorkspaceControl.tsx`：会话变化时立即清空目录、候选、权限和父状态；复用 request-id 模式为查询、picker、authorize、权限和撤销建立统一代次校验。
+- 已有任务目录入口锁定：有 `conversationId` 时，已绑定任务不能换绑，未绑定任务不能新增绑定；失效绑定仍保留后续重授权入口。Core 的 binding 权威规则未改变。
+- `disabled` 只禁用草稿目录选择入口；已绑定任务的权限 Select 保持可用，继续调用现有 `updateWorkspacePermission` 并沿用 `next_request` 语义。
+- 对静态风险确认框捕获打开时的会话代次；切会话后确认旧 allow-all 不再发请求。权限更新和撤销已经提交到后端时不伪造取消，只丢弃不属于当前会话的返回值和消息。
+- 阶段二新增 4 项合同后，组件测试 17/17 通过；其中额外确认取消 picker 不会作废同一草稿仍在加载的最近目录列表。连同 ChatInput 装配、workspace utility 和 Desktop bridge 的聚焦矩阵为 39/39。ESLint、`tsc -p tsconfig.mcp.json --noEmit` 和 `pnpm run build` 通过。
+- 本机 Node 26 默认暴露实验性 `localStorage`，使 `ChatInput/index.test.tsx` 收集前失败；使用 `NODE_OPTIONS=--no-experimental-webstorage` 后通过。发布工作流为 Node 20，本批未修改测试基础设施。
+
 ## 基线
 
 审计提交 bb46abd64ca5fc431f4f7748fb9e085099990d5e，旧对照 e7ed8a4189bb627e96814fc2f34818693cbc2050。旧 spec/checklist/代码在 Git 历史中可查；不继承其勾选为当前验收结果。
