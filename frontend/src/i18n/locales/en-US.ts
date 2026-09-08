@@ -1656,6 +1656,14 @@ const enUS = {
 
   // Chat
   chat: {
+    workspace: {
+      select: "Select workspace", recent: "Recent folders", authorizeTitle: "Allow access to this workspace?", authorize: "Allow access",
+      scope: "LazyMind will use this folder as the local file scope for the current Work.", chooseFailed: "Unable to select workspace", authorizeFailed: "Authorization failed",
+      everyAsk: "Ask every time", askAsNeeded: "Ask when needed", allowAll: "Allow actions", allowAllTitle: "Allow workspace actions?",
+      allowAllRisk: "This may modify files, run commands, access the network, or use connected apps.", savedNext: "Saved. Applies to the next run.", saveFailed: "Save failed",
+      revoke: "Revoke", revokeTitle: "Revoke folder access?", revokeAffected: "This affects {{count}} Work items.", revoked: "Access revoked",
+      revokedStopFailed: "Access revoked, but some stop requests failed", revokeFailed: "Revoke failed",
+    },
 	markdownDiagram: "Diagram",
 	markdownSource: "Source",
 	markdownRender: "Preview",

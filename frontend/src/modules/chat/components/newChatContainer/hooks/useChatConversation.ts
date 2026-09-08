@@ -1599,6 +1599,7 @@ export function useChatConversation({
       ChatConversationsRequestActionEnum.ChatActionNext,
       {
         ...(params.run_in_background ? { run_in_background: true } : {}),
+        ...(params.workspace_id ? { workspace_id: params.workspace_id, workspace_permission_mode: params.workspace_permission_mode } : {}),
         ...(params.thinking_depth
           ? { thinking_depth: params.thinking_depth }
           : {}),

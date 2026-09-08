@@ -181,3 +181,13 @@ f9f7d345ee718b7783a0eda75b6727bd053ad04d505df109d8c3dd4e3f8d1822  local/local-ru
 - bound workspace提交 ask_answers_structured时校验 ask_id必须匹配当前会话最后一个未回答AskCard；错卡片/无pending返回400。未提交、部分保存和权限模式切换不调用此提交路径；普通非工作区问答保持旧行为。
 - 验证：`go test ./chat ./localworkspace ./subagent ./workflow . -run 'Test.*(Ask|Workspace|Stop|Interrupt|Cancel|Permission)' -count=1` 五包通过；冻结/算法边界通过。
 - 下一步：任务6前端UI/API。
+
+
+### 2026-09-08 T6-FRONTEND：工作区选择、权限与撤销 UI完成
+
+- 新增 `utils/localWorkspace.ts`（72行）复用 axiosInstance和冻结的 Desktop token bridge，统一Local/Desktop选择、授权、重新授权、列表、binding、permission、revoke及Core reason读取；新增 `LocalWorkspaceControl.tsx`（141行）复用Ant Design Button/Select/Modal/Tag，不提取旧643行控件或504行样式。
+- 新Work和existing Work均显示控件：ChatLayout从detail.is_task_conv识别已有任务。真实SSE、SendMessageParams和ContextUsage buildRequest携带workspace_id/permission_mode；staleKey包含工作区与权限变化。请求从不发送root。
+- 授权必须先得到本机candidate token再由用户确认；取消不授权。allow_all显示四类副作用风险摘要；existing Work权限以后端返回version为准并提示下次执行生效。撤销显示影响任务数，stop_failed_count>0显示“授权已撤销，部分任务停止请求失败”。已撤销目录重新授权只产生新grant，不替换旧binding。
+- 中英文locale均增加工作区文案。生产+260，测试+46；新增两个生产文件是UI与runtime/API职责隔离所需，未增加manager/facade/生成DTO/样式文件。
+- 验证：工作区/desktop bridge合同17项通过；chatLayout/newChatContainer/AskCard 11项通过；修改文件ESLint通过；tsconfig.mcp通过；Vite production build通过。全量tsconfig.json仍有大量基线生成代码与implicit-any错误，本批不修复。
+- 下一步：任务7最终回归、真实能力矩阵、范围和分支收敛。

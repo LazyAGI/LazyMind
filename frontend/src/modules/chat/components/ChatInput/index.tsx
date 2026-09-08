@@ -43,6 +43,8 @@ import { resolveMarkdownImageUrlAsync } from "@/modules/knowledge/utils/imageUrl
 import "./index.scss";
 
 import { ChatConfig } from "../ChatConfigs";
+import LocalWorkspaceControl from "./LocalWorkspaceControl";
+import type { WorkspacePermissionMode } from "@/modules/chat/utils/localWorkspace";
 import ChatSelector, { type ChatSelectorImperativeProps } from "../ChatSelector";
 import PromptModal, { PromptImperativeProps } from "../PromptModal";
 import { appendPromptToDraft } from "../PromptModal/promptLibrary";
@@ -641,6 +643,8 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       thinkingDepth: controlledThinkingDepth,
       onThinkingDepthChange,
     } = props;
+    const [workspaceId, setWorkspaceId] = useState<string>();
+    const [workspacePermissionMode, setWorkspacePermissionMode] = useState<WorkspacePermissionMode>("ask_as_needed");
     const fileListRef = useRef<ImageUploadImperativeProps | null>(null);
     const knowledgeSelectorRef = useRef<ChatSelectorImperativeProps | null>(null);
     const promptRef = useRef<PromptImperativeProps>(null);
@@ -1104,6 +1108,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
         files: fileListRef.current?.getFiles(),
         create_time: new Date().toISOString(),
         ...(runInBackground ? { run_in_background: true } : {}),
+        ...(runInBackground && workspaceId ? { workspace_id: workspaceId, workspace_permission_mode: workspacePermissionMode } : {}),
         ...(!sessionId && effectiveInitialModelSelection
           ? { initial_model_selection: effectiveInitialModelSelection }
           : {}),
@@ -1394,6 +1399,14 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
 
               <div className="input-bottom-actions">
                 <div className="input-bottom-actions-left">
+                  {runInBackground && <LocalWorkspaceControl
+                    conversationId={sessionId && !sessionId.startsWith("temp_") ? sessionId : undefined}
+                    disabled={disabled || isStreaming}
+                    onChange={(id, permissionMode) => {
+                      setWorkspaceId(id);
+                      setWorkspacePermissionMode(permissionMode);
+                    }}
+                  />}
                   <div className="chat-add-resource">
                     <Popover
                       trigger="click"
@@ -1632,6 +1645,8 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                         },
                         runtime: contextRuntimeSettings,
                         thinkingDepth: effectiveThinkingDepth,
+                        workspaceId,
+                        workspacePermissionMode,
                       })}
                       buildRequest={() => {
                         const files = fileListRef.current?.getFiles() ?? [];
@@ -1661,6 +1676,8 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                             tags: chatConfig?.tags ?? [],
                           },
                           thinking_depth: effectiveThinkingDepth,
+                          ...(runInBackground ? { run_in_background: true } : {}),
+                          ...(runInBackground && workspaceId ? { workspace_id: workspaceId, workspace_permission_mode: workspacePermissionMode } : {}),
                           ...contextRuntimeSettings,
                         };
                       }}

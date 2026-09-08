@@ -113,6 +113,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
       setShowHistoryList,
       showHistoryList,
       showHistoryButton = true,
+      runInBackground = false,
       setIsChatContent,
       chatConfig,
       setChatConfig,
@@ -561,6 +562,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
               fixedThinkingDepth={fixedThinkingDepth}
               thinkingDepth={thinkingDepth}
               onThinkingDepthChange={onThinkingDepthChange}
+              runInBackground={runInBackground}
             />
           </div>
           {sourcePanelSources.length > 0 && (

@@ -1611,6 +1611,14 @@ const zhCN = {
   },
 
   chat: {
+    workspace: {
+      select: "选择工作区", recent: "最近目录", authorizeTitle: "允许访问此工作区？", authorize: "允许访问",
+      scope: "LazyMind 将把该目录作为当前任务的本地文件范围。", chooseFailed: "无法选择工作区", authorizeFailed: "授权失败",
+      everyAsk: "每次询问", askAsNeeded: "需要时询问", allowAll: "允许执行", allowAllTitle: "允许工作区内操作？",
+      allowAllRisk: "可能修改文件、运行命令、联网或操作已连接应用。", savedNext: "已保存，下次执行生效", saveFailed: "保存失败",
+      revoke: "撤销", revokeTitle: "撤销目录授权？", revokeAffected: "将影响 {{count}} 个任务。", revoked: "授权已撤销",
+      revokedStopFailed: "授权已撤销，部分任务停止请求失败", revokeFailed: "撤销失败",
+    },
 	markdownDiagram: "图表",
 	markdownSource: "源码",
 	markdownRender: "预览",

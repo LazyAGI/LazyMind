@@ -30,6 +30,8 @@ export interface SendMessageParams {
   create_time?: string;
   thinking_depth?: ThinkingDepth;
   run_in_background?: boolean;
+  workspace_id?: string;
+  workspace_permission_mode?: import("@/modules/chat/utils/localWorkspace").WorkspacePermissionMode;
   /** Model binding used when the first message creates a conversation. */
   initial_model_selection?: ChatModelSelectionRequest;
   ask_answers_structured?: import("@/modules/chat/components/AskCard").AskAnswersStructured;
