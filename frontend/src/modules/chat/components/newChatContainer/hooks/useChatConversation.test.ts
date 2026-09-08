@@ -11,6 +11,8 @@ import { CHAT_WORKFLOW_STEP_FEEDBACK_EVENT } from "@/modules/chat/constants/chat
 import type { ChatInputImperativeProps } from "../../ChatInput";
 import { useChatConversation } from "./useChatConversation";
 import { useTaskCenterStore } from "@/modules/chat/store/taskCenter";
+import { buildChatMessageListFromHistory } from "@/modules/chat/utils/message";
+import { streamManager } from "@/modules/chat/utils/StreamManager";
 
 const { listConversationsMock, waitForRuntimeCapabilityMock } = vi.hoisted(() => ({
   listConversationsMock: vi.fn(),
@@ -144,6 +146,127 @@ describe("useChatConversation regeneration recovery", () => {
     expect(result.current.messageList).toEqual(second);
     expect(result.current.conversationMessagesCache.current.get("conversation-1"))
       .toEqual(second);
+  });
+
+  it("keeps a completed new turn when an older history page arrives", async () => {
+    const initial = { id: "h2", seq: 2, query: "original question", result: "original answer" };
+    const older = { id: "h1", seq: 1, query: "older question", result: "older answer" };
+    const { stream, listeners } = createMockStream();
+    const { result } = renderConversation({ onOpenSSE: vi.fn(() => stream) });
+    act(() => result.current.replaceMessageList("conversation-1", buildChatMessageListFromHistory([initial])));
+    await act(async () => {
+      await result.current.sendMessage({ text: "new question" });
+    });
+    act(() => listeners.get("message")?.({ data: JSON.stringify({ result: {
+      conversation_id: "conversation-1", history_id: "h3", seq: 3,
+      delta: "new answer", finish_reason: ChatConversationsResponseFinishReasonEnum.FinishReasonUnspecified,
+    } }) }));
+    act(() => listeners.get("message")?.({ data: JSON.stringify({ result: {
+      conversation_id: "conversation-1", history_id: "h3", seq: 3,
+      finish_reason: ChatConversationsResponseFinishReasonEnum.FinishReasonStop,
+    } }) }));
+    const liveTurn = result.current.messageList.slice(-2);
+
+    act(() => result.current.mergeHistoryPage("conversation-1", [older]));
+
+    expect(result.current.messageList.map((item) => item.delta)).toEqual([
+      "older question", "older answer", "original question", "original answer", "new question", "new answer",
+    ]);
+    expect(result.current.messageList.slice(-2)).toEqual(liveTurn);
+    expect(result.current.conversationMessagesCache.current.get("conversation-1")).toEqual(result.current.messageList);
+    expect(streamManager.getStreamState("conversation-1")?.messageList).toEqual(result.current.messageList);
+  });
+
+  it("merges a pending history page without losing live deltas or resetting the active stream", async () => {
+    const initial = { id: "h2", seq: 2, query: "original question", result: "original answer" };
+    const older = { id: "h1", seq: 1, query: "older question", result: "older answer" };
+    const { stream, listeners } = createMockStream();
+    const { result } = renderConversation({ onOpenSSE: vi.fn(() => stream) });
+    act(() => result.current.replaceMessageList("conversation-1", buildChatMessageListFromHistory([initial])));
+    await act(async () => {
+      await result.current.sendMessage({ text: "new question" });
+    });
+    let resolvePage!: () => void;
+    const pendingPage = new Promise<void>((resolve) => { resolvePage = resolve; }).then(() => {
+      result.current.mergeHistoryPage("conversation-1", [older]);
+    });
+    const emitDelta = (delta: string) => listeners.get("message")?.({ data: JSON.stringify({ result: {
+      conversation_id: "conversation-1", history_id: "h3", seq: 3, delta, delta_mode: "append",
+      finish_reason: ChatConversationsResponseFinishReasonEnum.FinishReasonUnspecified,
+    } }) });
+    act(() => emitDelta("first part"));
+    await act(async () => {
+      resolvePage();
+      await pendingPage;
+    });
+
+    expect(result.current.messageList.map((item) => item.delta)).toEqual([
+      "older question", "older answer", "original question", "original answer", "new question", "first part",
+    ]);
+    expect(result.current.loading).toBe(true);
+    expect(result.current.isStreaming).toBe(true);
+    expect(result.current.activeStreamRef.current).toBe(true);
+    expect(stream.close).not.toHaveBeenCalled();
+    act(() => emitDelta(" and second part"));
+    expect(result.current.messageList.at(-1)?.delta).toBe("first part and second part");
+    expect(result.current.messageList.at(-2)).toMatchObject({ role: RoleTypes.USER, history_id: "h3", delta: "new question" });
+    expect(result.current.conversationMessagesCache.current.get("conversation-1")).toEqual(result.current.messageList);
+  });
+
+  it("deduplicates overlapping history by role and identity while preserving optimistic messages", async () => {
+    const initial = { id: "h2", seq: 2, query: "same question", result: "current answer" };
+    const newer = { id: "h3", seq: 3, query: "same question", result: "newer answer" };
+    const { stream } = createMockStream();
+    const { result } = renderConversation({ onOpenSSE: vi.fn(() => stream) });
+    act(() => result.current.replaceMessageList("conversation-1", buildChatMessageListFromHistory([initial])));
+    await act(async () => {
+      await result.current.sendMessage({ text: "optimistic question" });
+    });
+    const optimistic = result.current.messageList.slice(-2);
+    expect(optimistic.every((item) => !item.history_id)).toBe(true);
+    const page = [newer, { ...initial, result: "stale answer" }];
+    act(() => {
+      result.current.mergeHistoryPage("conversation-1", page);
+      result.current.mergeHistoryPage("conversation-1", page);
+    });
+
+    expect(result.current.messageList.map((item) => item.delta)).toEqual([
+      "same question", "current answer", "same question", "newer answer", "optimistic question", "",
+    ]);
+    expect(result.current.messageList.slice(-2)).toEqual(optimistic);
+    expect(result.current.isStreaming).toBe(true);
+    expect(streamManager.getStreamState("conversation-1")?.messageList).toEqual(result.current.messageList);
+  });
+
+  it("keeps archived attempts between their user message and final reply when paging", () => {
+    const initial = { id: "h2", seq: 2, query: "current question", result: "current answer" };
+    const older = {
+      id: "h1", seq: 1, query: "older question", result: "final answer",
+      failed_attempts: [{ run_id: "run-1", result: "partial failed answer", run_status: "failed" }],
+    };
+    const { result } = renderConversation();
+    act(() => {
+      result.current.replaceMessageList("conversation-1", buildChatMessageListFromHistory([initial]));
+      result.current.mergeHistoryPage("conversation-1", [older]);
+      result.current.mergeHistoryPage("conversation-1", [older]);
+    });
+
+    expect(result.current.messageList.map((item) => item.delta)).toEqual([
+      "older question", "partial failed answer", "final answer", "current question", "current answer",
+    ]);
+    expect(result.current.messageList[1]).toMatchObject({ archived_failure: true, history_id: "h1:failed:run-1" });
+  });
+
+  it("ignores a history page for a conversation that is no longer active", () => {
+    const current = buildChatMessageListFromHistory([{ id: "current", query: "current question", result: "current answer" }]);
+    const { result } = renderConversation();
+    act(() => {
+      result.current.replaceMessageList("conversation-2", current);
+      result.current.mergeHistoryPage("conversation-1", [{ id: "previous", query: "previous question", result: "previous answer" }]);
+    });
+    expect(result.current.currentConversationIdRef.current).toBe("conversation-2");
+    expect(result.current.messageList).toEqual(current);
+    expect(result.current.conversationMessagesCache.current.has("conversation-1")).toBe(false);
   });
 
   it("appends every completed workflow step to its assistant chat message once", () => {

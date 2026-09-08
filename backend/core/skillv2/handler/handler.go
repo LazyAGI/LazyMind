@@ -16,7 +16,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
 
 	"gopkg.in/yaml.v3"
 	"gorm.io/gorm"
@@ -33,6 +32,7 @@ import (
 	skillrevision "lazymind/core/skillv2/revision"
 	skillservice "lazymind/core/skillv2/service"
 	skillshare "lazymind/core/skillv2/share"
+	skillurl "lazymind/core/skillv2/sourceurl"
 	"lazymind/core/store"
 )
 
@@ -1628,10 +1628,8 @@ func (s skillSourceRequest) toServiceSource(ctx context.Context) (skillservice.S
 	}
 }
 
-const githubAPIBaseURL = "https://api.github.com"
-
 func normalizeSkillImportURL(ctx context.Context, rawURL string) (string, string, error) {
-	return normalizeSkillImportURLWithResolver(ctx, rawURL, &http.Client{Timeout: 10 * time.Second}, githubAPIBaseURL)
+	return normalizeSkillImportURLWithResolver(ctx, rawURL, &http.Client{Timeout: 10 * time.Second}, skillurl.GitHubAPIBaseURL)
 }
 
 func normalizeSkillImportURLWithResolver(ctx context.Context, rawURL string, client *http.Client, apiBaseURL string) (string, string, error) {
@@ -1642,152 +1640,21 @@ func normalizeSkillImportURLWithResolver(ctx context.Context, rawURL string, cli
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
 		return "", "", skillImportURLValidationError("skill import URL must use HTTP or HTTPS")
 	}
-	if !strings.EqualFold(strings.TrimPrefix(parsed.Hostname(), "www."), "github.com") {
-		return rawURL, "", nil
+	resolution, matched, resolveErr := skillurl.ResolveSkillHubPageURL(parsed)
+	if resolveErr != nil {
+		return "", "", skillImportURLValidationError(resolveErr.Error())
 	}
-	if parsed.User != nil || parsed.Port() != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
-		return "", "", skillImportURLValidationError("GitHub URL must not contain credentials, query, or fragment")
+	if matched {
+		return resolution.DownloadURL, "", nil
 	}
-	parts, err := githubURLPathParts(parsed.EscapedPath())
-	if err != nil {
-		return "", "", err
+	githubResolution, matched, resolveErr := skillurl.ResolveGitHubPageURL(ctx, parsed, client, apiBaseURL)
+	if resolveErr != nil {
+		return "", "", skillImportURLValidationError(resolveErr.Error())
 	}
-	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
-		return "", "", skillImportURLValidationError("GitHub URL must identify a repository")
+	if matched {
+		return githubResolution.DownloadURL, githubResolution.PathPrefix, nil
 	}
-	owner := parts[0]
-	repository := strings.TrimSuffix(parts[1], ".git")
-	if !isValidGitHubName(owner) || !isValidGitHubName(repository) {
-		return "", "", skillImportURLValidationError("GitHub URL must identify a repository")
-	}
-	if ref, ok := githubArchiveRef(parts); ok {
-		return githubArchiveURL(owner, repository, ref), "", nil
-	}
-	if len(parts) == 2 {
-		ref, err := resolveGitHubDefaultBranch(ctx, client, apiBaseURL, owner, repository)
-		if err != nil {
-			return "", "", err
-		}
-		return githubArchiveURL(owner, repository, ref), "", nil
-	}
-	if len(parts) < 5 || parts[2] != "tree" {
-		return "", "", skillImportURLValidationError("GitHub URL must point to a repository root or /tree/<ref>/<skill-path>")
-	}
-	ref, pathPrefix, err := resolveGitHubTreeRef(ctx, client, apiBaseURL, owner, repository, parts[3:])
-	if err != nil {
-		return "", "", err
-	}
-	return githubArchiveURL(owner, repository, ref), pathPrefix, nil
-}
-
-func githubArchiveRef(parts []string) (string, bool) {
-	if len(parts) < 4 || parts[2] != "archive" {
-		return "", false
-	}
-	refParts := parts[3:]
-	if len(refParts) >= 3 && refParts[0] == "refs" && (refParts[1] == "heads" || refParts[1] == "tags") {
-		refParts = refParts[2:]
-	} else if len(refParts) != 1 {
-		return "", false
-	}
-	last := refParts[len(refParts)-1]
-	if !strings.HasSuffix(last, ".zip") {
-		return "", false
-	}
-	refParts[len(refParts)-1] = strings.TrimSuffix(last, ".zip")
-	if refParts[len(refParts)-1] == "" {
-		return "", false
-	}
-	return strings.Join(refParts, "/"), true
-}
-
-func githubURLPathParts(escapedPath string) ([]string, error) {
-	rawParts := strings.Split(strings.Trim(escapedPath, "/"), "/")
-	if len(rawParts) == 1 && rawParts[0] == "" {
-		return nil, skillImportURLValidationError("GitHub URL must identify a repository")
-	}
-	parts := make([]string, 0, len(rawParts))
-	for _, rawPart := range rawParts {
-		part, err := url.PathUnescape(rawPart)
-		if err != nil || part == "" || part == "." || part == ".." || strings.ContainsAny(part, `/\\`) || strings.ContainsRune(part, 0) {
-			return nil, skillImportURLValidationError("GitHub URL contains an invalid path segment")
-		}
-		parts = append(parts, part)
-	}
-	return parts, nil
-}
-
-func resolveGitHubDefaultBranch(ctx context.Context, client *http.Client, apiBaseURL, owner, repository string) (string, error) {
-	var response struct {
-		DefaultBranch string `json:"default_branch"`
-	}
-	status, err := githubAPIGet(ctx, client, apiBaseURL+"/repos/"+url.PathEscape(owner)+"/"+url.PathEscape(repository), &response)
-	if err != nil {
-		return "", err
-	}
-	if status < 200 || status >= 300 || strings.TrimSpace(response.DefaultBranch) == "" {
-		return "", skillImportURLValidationError("GitHub repository default branch could not be resolved")
-	}
-	return response.DefaultBranch, nil
-}
-
-func resolveGitHubTreeRef(ctx context.Context, client *http.Client, apiBaseURL, owner, repository string, treeParts []string) (string, string, error) {
-	for split := len(treeParts) - 1; split > 0; split-- {
-		ref := strings.Join(treeParts[:split], "/")
-		pathPrefix := strings.Join(treeParts[split:], "/")
-		status, err := githubAPIGet(ctx, client, apiBaseURL+"/repos/"+url.PathEscape(owner)+"/"+url.PathEscape(repository)+"/commits/"+url.PathEscape(ref), nil)
-		if err != nil {
-			return "", "", err
-		}
-		if status == http.StatusNotFound || status == http.StatusUnprocessableEntity {
-			continue
-		}
-		if status >= 200 && status < 300 {
-			return ref, pathPrefix, nil
-		}
-		return "", "", fmt.Errorf("GitHub ref lookup failed with HTTP status %d", status)
-	}
-	return "", "", skillImportURLValidationError("GitHub URL ref could not be resolved")
-}
-
-func githubAPIGet(ctx context.Context, client *http.Client, endpoint string, out any) (int, error) {
-	if client == nil {
-		client = &http.Client{Timeout: 10 * time.Second}
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		return 0, err
-	}
-	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("User-Agent", "LazyMind-Skill-Importer")
-	resp, err := client.Do(req)
-	if err != nil {
-		return 0, fmt.Errorf("GitHub ref lookup failed: %w", err)
-	}
-	defer resp.Body.Close()
-	if out != nil && resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(out); err != nil {
-			return 0, fmt.Errorf("GitHub ref lookup returned invalid JSON: %w", err)
-		}
-	}
-	return resp.StatusCode, nil
-}
-
-func githubArchiveURL(owner, repository, ref string) string {
-	return "https://github.com/" + url.PathEscape(owner) + "/" + url.PathEscape(repository) + "/archive/" + url.PathEscape(ref) + ".zip"
-}
-
-func isValidGitHubName(value string) bool {
-	if value == "" {
-		return false
-	}
-	for _, char := range value {
-		if unicode.IsLetter(char) || unicode.IsDigit(char) || char == '-' || char == '_' || char == '.' {
-			continue
-		}
-		return false
-	}
-	return true
+	return rawURL, "", nil
 }
 
 type skillImportURLValidationError string

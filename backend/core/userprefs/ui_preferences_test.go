@@ -27,6 +27,7 @@ type uiPreferencesAPITestResponse struct {
 		WorkflowsEnabled              bool   `json:"workflows_enabled"`
 		MCPEnabled                    bool   `json:"mcp_enabled"`
 		DocumentParsingEnabled        bool   `json:"document_parsing_enabled"`
+		PerformanceStatsEnabled       bool   `json:"performance_stats_enabled"`
 		UserPreferenceConfigured      bool   `json:"user_preference_configured"`
 		UpdatedAt                     string `json:"updated_at"`
 	} `json:"data"`
@@ -64,9 +65,10 @@ func TestGetUIPreferencesDefaultsAndDerivedPreferenceStatus(t *testing.T) {
 	}
 	resp := decodeUIPreferencesResponse(t, rec)
 	if resp.Data.ChatPreferenceNoticeDismissed || resp.Data.DeveloperModeActive || resp.Data.SensitiveWordFilterEnabled || resp.Data.UserPreferenceConfigured ||
+		resp.Data.PerformanceStatsEnabled ||
 		!resp.Data.TaskCenterEnabled || !resp.Data.SchedulesEnabled || !resp.Data.SkillsEnabled || !resp.Data.WorkflowsEnabled || !resp.Data.MCPEnabled ||
 		!resp.Data.DocumentParsingEnabled {
-		t.Fatalf("expected legacy flags false and feature controls true, got %#v", resp.Data)
+		t.Fatalf("expected legacy flags false, performance stats off, and feature controls true, got %#v", resp.Data)
 	}
 
 	seedUserPreferenceFile(t, db, "u1", `preferences:
@@ -468,6 +470,9 @@ func TestPatchUIPreferencesPartiallyUpdatesProvidedFields(t *testing.T) {
 	if !secondResp.Data.ChatPreferenceNoticeDismissed || !secondResp.Data.DeveloperModeActive {
 		t.Fatalf("expected second patch to keep dismissed and set developer active, got %#v", secondResp.Data)
 	}
+	if secondResp.Data.PerformanceStatsEnabled {
+		t.Fatal("enabling developer mode must not turn on performance stats")
+	}
 
 	thirdReq := httptest.NewRequest(http.MethodPatch, "/api/core/user/ui-preferences", strings.NewReader(`{"developer_mode_active":false}`))
 	thirdReq.Header.Set("Content-Type", "application/json")
@@ -536,6 +541,28 @@ func TestPatchUIPreferencesPersistsAcceptedUserAgreementVersion(t *testing.T) {
 	getResp := decodeUIPreferencesResponse(t, getRec)
 	if getResp.Data.AcceptedUserAgreementVersion != "V0.2" {
 		t.Fatalf("expected persisted agreement version V0.2, got %q", getResp.Data.AcceptedUserAgreementVersion)
+	}
+}
+
+func TestPatchUIPreferencesPersistsPerformanceStats(t *testing.T) {
+	db := newUIPreferencesTestDB(t)
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+
+	patchReq := httptest.NewRequest(
+		http.MethodPatch,
+		"/api/core/user/ui-preferences",
+		strings.NewReader(`{"performance_stats_enabled":true}`),
+	)
+	patchReq.Header.Set("Content-Type", "application/json")
+	patchReq.Header.Set("X-User-Id", "u1")
+	patchRec := httptest.NewRecorder()
+	PatchUIPreferences(patchRec, patchReq)
+	if patchRec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", patchRec.Code, patchRec.Body.String())
+	}
+	if !decodeUIPreferencesResponse(t, patchRec).Data.PerformanceStatsEnabled {
+		t.Fatal("expected performance stats to be enabled")
 	}
 }
 

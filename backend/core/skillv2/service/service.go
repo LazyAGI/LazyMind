@@ -1067,20 +1067,14 @@ func (s *SkillService) filesFromSource(ctx context.Context, ownerUserID string, 
 		if downloaded.Cleanup != nil {
 			defer downloaded.Cleanup()
 		}
-		pkg, err := skillpackage.ReadZip(downloaded.Path)
+		var pkg skillpackage.Package
+		if source.PathPrefix != "" {
+			pkg, err = skillpackage.ReadZipSubdirectory(downloaded.Path, source.PathPrefix)
+		} else {
+			pkg, err = skillpackage.ReadZip(downloaded.Path)
+		}
 		if err != nil {
 			return sourcePackage{}, "", "", err
-		}
-		if source.PathPrefix != "" {
-			prefix, err := cleanSkillPath(source.PathPrefix)
-			if err != nil {
-				return sourcePackage{}, "", "", err
-			}
-			pkg.Files, err = filesFromSkillSubdirectory(pkg.Files, prefix)
-			if err != nil {
-				return sourcePackage{}, "", "", err
-			}
-			pkg.PackageRoot = path.Base(prefix)
 		}
 		ensureURLImportDefaults(pkg.Files)
 		sourceRef := source.SourceURL
@@ -1100,24 +1094,6 @@ func ensureURLImportDefaults(files map[string][]byte) {
 	if _, ok := files["scripts/run.py"]; !ok {
 		files["scripts/run.py"] = []byte("print(\"hello skill\")\n")
 	}
-}
-
-func filesFromSkillSubdirectory(files map[string][]byte, prefix string) (map[string][]byte, error) {
-	prefix, err := cleanSkillPath(prefix)
-	if err != nil {
-		return nil, err
-	}
-	selected := make(map[string][]byte)
-	prefixWithSlash := prefix + "/"
-	for filePath, data := range files {
-		if strings.HasPrefix(filePath, prefixWithSlash) {
-			selected[strings.TrimPrefix(filePath, prefixWithSlash)] = data
-		}
-	}
-	if _, ok := selected["SKILL.md"]; !ok {
-		return nil, fmt.Errorf("skill package must contain SKILL.md")
-	}
-	return selected, nil
 }
 
 func resolveExternalMetadata(pkg sourcePackage, skillID string) (skillmetadata.Metadata, error) {
