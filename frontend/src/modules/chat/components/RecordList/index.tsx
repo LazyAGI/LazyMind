@@ -620,10 +620,15 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
         });
     }
 
-    function confirmDeleteHistory(data: Conversation) {
+    async function confirmDeleteHistory(data: Conversation) {
+      let hasForks = false;
+      try {
+        const response = await ChatServiceApi().conversationServiceGetConversationDetail({ conversation: data.conversation_id || "" });
+        hasForks = Boolean((response.data.conversation as { has_fork_descendants?: boolean })?.has_fork_descendants);
+      } catch { message.error(t("chat.fork.historyLoadFailed")); return; }
       Modal.confirm({
         title: t("settingsPage.recovery.moveToTrashTitle", { name: data.display_name }),
-        content: t("settingsPage.recovery.moveToTrashDescription"),
+        content: t("settingsPage.recovery.moveToTrashDescription") + (hasForks ? " " + t("chat.fork.deleteNotice") : ""),
         okText: t("settingsPage.recovery.moveToTrash"),
         cancelText: t("common.cancel"),
         okButtonProps: { danger: true },
@@ -668,7 +673,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
         title: t("chat.batchDeleteConversationTitle", {
           count: checkedList.length,
         }),
-        content: t("chat.batchDeleteConversationContent"),
+        content: t("chat.batchDeleteConversationContent") + " " + t("chat.fork.deleteNotice"),
         okText: t("common.delete"),
         cancelText: t("common.cancel"),
         okButtonProps: { danger: true },

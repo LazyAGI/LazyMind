@@ -8,10 +8,12 @@ import type { SendMessageParams } from "../ChatInput/types";
 import type { ChatMention } from "../ChatInput/MentionEditor";
 import type { ChatConfig } from "../ChatConfigs";
 import type { ThinkingDepth } from "@/modules/chat/store/chatThink";
-import type { ChatModelRoute } from "@/api/generated/core-client";
+import type { ChatModelRoute, ConversationHistoryItem } from "@/api/generated/core-client";
+import type { RunPerformanceMetrics } from "@/modules/chat/utils/performanceStats";
 
 export interface ChatImperativeProps {
-  replaceMessageList: (id: string, data: any[]) => void;
+  replaceMessageList: (id: string, data: any[], preserveScroll?: boolean) => void;
+  mergeHistoryPage: (id: string, history: ConversationHistoryItem[]) => void;
   createNewChat: () => void;
   sendMessage: (params: SendMessageParams) => void;
   prepareMessage: (
@@ -34,6 +36,8 @@ export interface ChatImperativeProps {
 }
 
 export interface ChatContainerProps {
+  onFork?: (historyId: string) => void;
+  forkPending?: boolean;
   canChat?: boolean;
   initialCard?: ReactNode;
   sessionId?: string;
@@ -126,6 +130,7 @@ export interface ChatMessage {
     model_call_id?: string;
     diagnostic_id?: string;
   };
+  performance_metrics?: RunPerformanceMetrics;
   inputs?: Query[];
   reasoning_content?: string;
   thinking_duration_s?: number | string;
@@ -142,6 +147,7 @@ export interface ChatMessage {
     reasoning_content?: string;
     sources?: ChatSourceCollection;
     thinking_duration_s?: string;
+    performance_metrics?: RunPerformanceMetrics;
   }>;
   answer_index?: number;
   create_time?: string;

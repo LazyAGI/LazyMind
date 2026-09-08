@@ -1032,7 +1032,7 @@ func touchConversationParent(ctx context.Context, db *gorm.DB, conversationID st
 	var child orm.Conversation
 	if err := db.WithContext(ctx).Select("parent_conversation_id", "relation_type", "create_user_id").Where(
 		"id = ?", conversationID,
-	).Take(&child).Error; err != nil || !validChildConversation(child) {
+	).Take(&child).Error; err != nil || !isSidechatConversation(child) {
 		return
 	}
 	_ = db.WithContext(ctx).Model(&orm.Conversation{}).Where(
@@ -1053,7 +1053,7 @@ func ownedConversationFamilyIDs(ctx context.Context, db *gorm.DB, userID, conver
 	}
 	var children []string
 	if err := db.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Model(&orm.Conversation{}).
-		Where("parent_conversation_id = ? AND create_user_id = ?", conversation.ID, userID).
+		Where("parent_conversation_id = ? AND create_user_id = ? AND relation_type = ?", conversation.ID, userID, conversationRelationSidechat).
 		Pluck("id", &children).Error; err != nil {
 		return nil, err
 	}
@@ -1074,7 +1074,7 @@ func expandOwnedConversationFamilyIDs(ctx context.Context, db *gorm.DB, userID s
 	}
 	var children []string
 	if err := db.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Model(&orm.Conversation{}).
-		Where("parent_conversation_id IN ? AND create_user_id = ?", ids, userID).
+		Where("parent_conversation_id IN ? AND create_user_id = ? AND relation_type = ?", ids, userID, conversationRelationSidechat).
 		Pluck("id", &children).Error; err != nil {
 		return nil, err
 	}

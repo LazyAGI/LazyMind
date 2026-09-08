@@ -7,6 +7,7 @@ import { useTranslation } from "react-i18next";
 import "./index.scss";
 import {
   CopyOutlined,
+  BranchesOutlined,
   CloseOutlined,
   DislikeFilled,
   DislikeOutlined,
@@ -1055,6 +1056,31 @@ const AssistantMessage = (props: any) => {
     );
   }
 
+  function renderForkAction() {
+    if (!props.onFork || item.archived_failure || !item.history_id) return null;
+    if (!runCompleted) return null;
+    const candidate =
+      item.answers?.length >= 2 && item.selected_answer_index == null;
+    const disabled = candidate || props.forkPending;
+    const tooltip = candidate
+      ? "chat.fork.selectAnswerFirst"
+      : "chat.fork.title";
+
+    return (
+      <Tooltip title={t(tooltip)} trigger={["hover", "focus"]}>
+        <span className="chat-fork-action" tabIndex={disabled ? 0 : undefined}>
+          <Button
+            className="tool-btn"
+            aria-label={t("chat.fork.title")}
+            icon={<BranchesOutlined aria-hidden="true" />}
+            disabled={disabled}
+            onClick={() => props.onFork?.(item.history_id)}
+          />
+        </span>
+      </Tooltip>
+    );
+  }
+
   function renderFooter() {
     const currentFeedback = getCurrentFeedback();
 
@@ -1086,6 +1112,7 @@ const AssistantMessage = (props: any) => {
               </Tooltip>
             )}
             {renderSourceButton(item.sources)}
+            {renderForkAction()}
           </div>
           <Flex>
             {currentFeedback ===
@@ -1366,8 +1393,9 @@ const AssistantMessage = (props: any) => {
                   ChatConversationsResponseFinishReasonEnum.FinishReasonUnspecified
               }
             />
+            {renderForkAction()}
           </div>
-          {(item.ask_pending || index === length - 1) && renderBottom()}
+          {!item.fork_read_only && (item.ask_pending || index === length - 1) && renderBottom()}
           {index === length - 1 && workflowSession && sessionId && (
             <WorkflowPanel
               key={sessionId}
@@ -1417,8 +1445,9 @@ const AssistantMessage = (props: any) => {
 
           {}
           {runCompleted && !item.onboardingInfo && renderFooter()}
+          {item.fork_read_only && !item.delta && <span>{t("chat.fork.emptyTerminal")}</span>}
         </div>
-        {(item.ask_pending || index === length - 1) && renderBottom()}
+        {!item.fork_read_only && (item.ask_pending || index === length - 1) && renderBottom()}
         {index === length - 1 && workflowSession && sessionId && (
           <WorkflowPanel
             key={sessionId}
