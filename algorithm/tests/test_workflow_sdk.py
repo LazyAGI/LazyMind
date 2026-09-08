@@ -147,3 +147,31 @@ def test_sdk_reads_durable_slot_order():
     assert transport.get.call_args.args[0].endswith(
         '/workflow-sessions/session%201/slots/preview%2Fhtml/order'
     )
+
+
+def test_controlled_sdk_claims_existing_execution_and_preserves_control():
+    from lazymind.workflow_sdk import WorkflowClient
+    transport = MagicMock()
+    control = {'protocol': 'workflow.control.v1', 'continuation': 'awaiting_user'}
+    receipt = {'command_id': 'submit:attempt-1'}
+    transport.post.return_value = MagicMock(status_code=200, json=lambda: {
+        'ok': True, 'result': {'receipt': receipt, 'control': control},
+    })
+    client = WorkflowClient('http://core/api/core', 'u1', transport=transport)
+    client.claim_execution('run 1', 'attempt/1')
+    assert transport.post.call_args.args[0].endswith('/workflow-sessions/run%201/hosted-attempts/attempt%2F1:begin')
+    result = client.submit_execution('run 1', 'attempt/1', 'current-handle', outcome='succeeded')
+    assert transport.post.call_args.kwargs['json']['execution_handle'] == 'current-handle'
+    assert result.result['control'] == control
+    assert result.result['receipt'] == receipt
+
+
+def test_controlled_sdk_does_not_send_missing_execution_handle():
+    import pytest
+    from lazymind.workflow_sdk import WorkflowClient
+    from lazymind.workflow_sdk.client import WorkflowClientError
+    transport = MagicMock()
+    client = WorkflowClient('http://core/api/core', 'u1', transport=transport)
+    with pytest.raises(WorkflowClientError):
+        client.submit_execution('run', 'attempt', '', outcome='succeeded')
+    transport.post.assert_not_called()

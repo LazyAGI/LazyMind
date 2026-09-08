@@ -9,6 +9,7 @@ import (
 	"github.com/gorilla/mux"
 
 	"lazymind/core/workflow/attempt"
+	"lazymind/core/workflow/controlstore"
 	workflowstore "lazymind/core/workflow/store"
 )
 
@@ -53,7 +54,10 @@ func owner(w http.ResponseWriter, r *http.Request) (string, bool) {
 
 func writeServiceError(w http.ResponseWriter, err error) {
 	var protocol *ProtocolError
+	var control *controlstore.Error
 	switch {
+	case errors.As(err, &control):
+		reply(w, http.StatusConflict, nil, &responseError{Code: control.Code, Message: control.Message})
 	case errors.As(err, &protocol):
 		status := http.StatusConflict
 		if protocol.Code == "INVALID_EXECUTION" || protocol.Code == "INVALID_OUTCOME" || protocol.Code == "INVALID_ARTIFACT" ||

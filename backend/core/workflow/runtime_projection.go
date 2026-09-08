@@ -13,6 +13,7 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/store"
+	"lazymind/core/workflow/controlstore"
 	"lazymind/core/workflow/executor"
 	"lazymind/core/workflow/graphengine"
 )
@@ -121,6 +122,27 @@ func loadRuntimeSnapshot(ctx context.Context, db *gorm.DB, sessionID string) (gr
 		return graphengine.RuntimeSnapshot{}, err
 	}
 	snapshot := graphengine.RuntimeSnapshot{}
+	var controlledSession orm.WorkflowSession
+	if err := db.WithContext(ctx).Where("id = ?", sessionID).First(&controlledSession).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return graphengine.RuntimeSnapshot{}, err
+	}
+	controlled := controlstore.Controlled(controlledSession)
+	acceptedRevisions := map[string]bool{}
+	if controlled {
+		var reviews []orm.WorkflowReviewCheckpoint
+		if err := db.WithContext(ctx).Where("session_id = ? AND status = ?", sessionID, "accepted").Find(&reviews).Error; err != nil {
+			return graphengine.RuntimeSnapshot{}, err
+		}
+		for _, review := range reviews {
+			var manifest controlstore.Manifest
+			if err := json.Unmarshal([]byte(review.ManifestJSON), &manifest); err != nil {
+				return graphengine.RuntimeSnapshot{}, err
+			}
+			for _, item := range manifest.Items {
+				acceptedRevisions[item.RevisionID] = true
+			}
+		}
+	}
 	for _, row := range attempts {
 		validity := row.Validity
 		if validity == "" {
@@ -133,7 +155,17 @@ func loadRuntimeSnapshot(ctx context.Context, db *gorm.DB, sessionID string) (gr
 		if validity == "" {
 			validity = "effective"
 		}
-		snapshot.Materials = append(snapshot.Materials, graphengine.MaterialValue{MaterialID: row.SlotID, RevisionID: row.ID, Valid: validity == "effective"})
+		valid := validity == "effective"
+		if controlled && valid {
+			valid = false
+			for _, producer := range attempts {
+				if producer.ID == row.ProducerAttemptID || (producer.StepID == row.StepID && producer.Attempt == row.Attempt) {
+					valid = producer.Status == "succeeded" && producer.Validity == "effective" && (!producer.ReviewRequired || acceptedRevisions[row.ID])
+					break
+				}
+			}
+		}
+		snapshot.Materials = append(snapshot.Materials, graphengine.MaterialValue{MaterialID: row.SlotID, RevisionID: row.ID, Valid: valid})
 	}
 	for _, row := range inputBindings {
 		snapshot.Materials = append(snapshot.Materials, graphengine.MaterialValue{
@@ -151,6 +183,7 @@ func loadRuntimeSnapshot(ctx context.Context, db *gorm.DB, sessionID string) (gr
 }
 
 type projectionResponse struct {
+	Control        *controlstore.Snapshot           `json:"control,omitempty"`
 	SessionID      string                           `json:"session_id"`
 	StateVersion   int64                            `json:"state_version"`
 	GraphHash      string                           `json:"graph_hash"`
@@ -221,7 +254,20 @@ func projectSession(ctx context.Context, db *gorm.DB, session *orm.WorkflowSessi
 		}
 	}
 	projection := projectWithApprovalPreferences(db.WithContext(ctx), session.CreateUserID, session.WorkflowID, graph, snapshot)
+	control, err := controlstore.Read(db.WithContext(ctx), *session)
+	if err != nil {
+		return projectionResponse{}, err
+	}
+	if control != nil {
+		for _, review := range control.Reviews {
+			if review.Status == "pending" {
+				projection.Completed = false
+				break
+			}
+		}
+	}
 	return projectionResponse{
+		Control:   control,
 		SessionID: session.ID, StateVersion: session.StateVersion, GraphHash: graph.GraphHash, SchemaVersion: graph.SchemaVersion,
 		Projection: projection, Graph: graph, AttemptHistory: attemptHistory, InputWitnesses: inputWitnesses,
 	}, nil
@@ -237,13 +283,42 @@ func removeStepID(values []string, target string) []string {
 	return filtered
 }
 
+// SessionEventSnapshot holds the same session lock as controlled mutations while
+// reading the projection and cursor. Clients can safely replay strictly after it.
+func SessionEventSnapshot(r *http.Request, sessionID, owner string) (any, int64, error) {
+	var projection projectionResponse
+	var cursor int64
+	err := controlstore.Transaction(r.Context(), store.DB(), sessionID, func(tx *gorm.DB, session *orm.WorkflowSession) error {
+		if owner == "" || session.CreateUserID != owner {
+			return controlstore.Reject("PERMISSION_DENIED", "workflow belongs to another owner")
+		}
+		var err error
+		projection, err = projectSession(r.Context(), tx, session)
+		if err != nil {
+			return err
+		}
+		return tx.Model(&orm.WorkflowEvent{}).Select("COALESCE(MAX(id), 0)").Where("session_id = ? AND owner_user_id = ?", sessionID, owner).Scan(&cursor).Error
+	})
+	return projection, cursor, err
+}
+
 func GetSessionProjection(w http.ResponseWriter, r *http.Request) {
 	var session orm.WorkflowSession
 	if err := store.DB().Where("id = ? AND dismissed = false", common.PathVar(r, "session_id")).First(&session).Error; err != nil {
 		common.ReplyErr(w, "session not found", http.StatusNotFound)
 		return
 	}
-	projection, err := projectSession(r.Context(), store.DB(), &session)
+	var projection projectionResponse
+	var err error
+	if controlstore.Controlled(session) {
+		err = controlstore.Transaction(r.Context(), store.DB(), session.ID, func(tx *gorm.DB, current *orm.WorkflowSession) error {
+			var err error
+			projection, err = projectSession(r.Context(), tx, current)
+			return err
+		})
+	} else {
+		projection, err = projectSession(r.Context(), store.DB(), &session)
+	}
 	if err != nil {
 		var changed *workflowDefinitionChangedError
 		if errors.As(err, &changed) {
@@ -316,6 +391,19 @@ func freezeRouteDecision(ctx context.Context, db *gorm.DB, sessionID, from, task
 // LazyMind's managed ChatAgent after a Host-neutral Attempt reaches terminal
 // state. Host transport and product names never enter the graph algorithm.
 func FinalizeHostAttempt(ctx context.Context, db *gorm.DB, sessionID, stepID, attemptID, status string) error {
+	var session orm.WorkflowSession
+	if err := db.WithContext(ctx).Where("id = ?", sessionID).First(&session).Error; err != nil {
+		return err
+	}
+	if controlstore.Controlled(session) && status == "succeeded" {
+		var count int64
+		if err := db.Model(&orm.WorkflowReviewCheckpoint{}).Where("attempt_id = ? AND status = ?", attemptID, "pending").Count(&count).Error; err != nil {
+			return err
+		}
+		if count > 0 {
+			return reconcileSessionProjection(ctx, db, &session)
+		}
+	}
 	switch status {
 	case "succeeded":
 		var existing int64

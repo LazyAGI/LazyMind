@@ -19,6 +19,8 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/taskcenter"
+	"lazymind/core/workflow/controlpolicy"
+	"lazymind/core/workflow/controlstore"
 )
 
 var (
@@ -310,10 +312,28 @@ func (r *Repository) PatchArtifact(ctx context.Context, owner, artifactID string
 	if !current.Selected || current.Deleted || current.Revision != baseRevision {
 		return Artifact{}, ErrIdempotencyConflict
 	}
+	value, cleanup, stageErr := controlstore.StageValue(ctx, r.db, current.SessionID, contentType, value)
+	if stageErr != nil {
+		return Artifact{}, stageErr
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			cleanup()
+		}
+	}()
 	now := time.Now().UTC()
 	humanID, revisionID := uuid.NewString(), uuid.NewString()
 	var created orm.WorkflowSlotRevision
 	err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		session, err := controlstore.LockSession(tx, current.SessionID)
+		if err != nil {
+			return err
+		}
+		if err := controlstore.GuardMaterialEdit(tx, session, current.SlotID); err != nil {
+			return err
+		}
+
 		query := tx.Model(&orm.WorkflowSlotRevision{}).Where(
 			"session_id = ? AND slot_id = ? AND selected = ?", current.SessionID, current.SlotID, true)
 		if current.ListIndex == nil {
@@ -340,23 +360,23 @@ func (r *Repository) PatchArtifact(ctx context.Context, owner, artifactID string
 		if err := tx.Create(&created).Error; err != nil {
 			return err
 		}
-		var session orm.WorkflowSession
-		if err := tx.Where("id = ?", current.SessionID).First(&session).Error; err != nil {
-			return err
-		}
 		stateVersion := session.StateVersion + 1
 		if err := tx.Model(&session).Updates(map[string]any{"state_version": stateVersion, "updated_at": now}).Error; err != nil {
 			return err
 		}
 		payload, _ := json.Marshal(map[string]any{"artifact_id": created.ID, "slot_id": created.SlotID,
 			"revision": created.Revision, "state_version": stateVersion})
-		return tx.Create(&orm.WorkflowEvent{SessionID: current.SessionID, OwnerUserID: owner,
+		if err := tx.Create(&orm.WorkflowEvent{SessionID: current.SessionID, OwnerUserID: owner,
 			ContractVersion: "workflow.v1", EventType: "artifact.upsert", EntityID: created.ID,
-			StateVersion: stateVersion, CommandID: commandID, PayloadJSON: payload, CreatedAt: now}).Error
+			StateVersion: stateVersion, CommandID: commandID, PayloadJSON: payload, CreatedAt: now}).Error; err != nil {
+			return err
+		}
+		return controlstore.RefreshReviews(tx, &session)
 	})
 	if err != nil {
 		return Artifact{}, err
 	}
+	committed = true
 	return r.ReadArtifact(ctx, owner, created.ID)
 }
 
@@ -375,6 +395,14 @@ func (r *Repository) DeleteArtifact(ctx context.Context, owner, artifactID strin
 	humanID, revisionID := uuid.NewString(), uuid.NewString()
 	var created orm.WorkflowSlotRevision
 	err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		session, err := controlstore.LockSession(tx, current.SessionID)
+		if err != nil {
+			return err
+		}
+		if err := controlstore.GuardMaterialEdit(tx, session, current.SlotID); err != nil {
+			return err
+		}
+
 		query := tx.Model(&orm.WorkflowSlotRevision{}).Where(
 			"session_id = ? AND slot_id = ? AND selected = ?", current.SessionID, current.SlotID, true)
 		if current.ListIndex == nil {
@@ -403,10 +431,6 @@ func (r *Repository) DeleteArtifact(ctx context.Context, owner, artifactID strin
 		if err := tx.Create(&created).Error; err != nil {
 			return err
 		}
-		var session orm.WorkflowSession
-		if err := tx.Where("id = ?", current.SessionID).First(&session).Error; err != nil {
-			return err
-		}
 		stateVersion := session.StateVersion + 1
 		if err := tx.Model(&session).Updates(map[string]any{
 			"state_version": stateVersion, "updated_at": now,
@@ -416,9 +440,12 @@ func (r *Repository) DeleteArtifact(ctx context.Context, owner, artifactID strin
 		payload, _ := json.Marshal(map[string]any{"artifact_id": created.ID,
 			"previous_artifact_id": current.ID, "slot_id": created.SlotID,
 			"revision": created.Revision, "deleted": true, "state_version": stateVersion})
-		return tx.Create(&orm.WorkflowEvent{SessionID: current.SessionID, OwnerUserID: owner,
+		if err := tx.Create(&orm.WorkflowEvent{SessionID: current.SessionID, OwnerUserID: owner,
 			ContractVersion: "workflow.v1", EventType: "artifact.delete", EntityID: created.ID,
-			StateVersion: stateVersion, CommandID: commandID, PayloadJSON: payload, CreatedAt: now}).Error
+			StateVersion: stateVersion, CommandID: commandID, PayloadJSON: payload, CreatedAt: now}).Error; err != nil {
+			return err
+		}
+		return controlstore.RefreshReviews(tx, &session)
 	})
 	if err != nil {
 		return Artifact{}, err
@@ -452,6 +479,13 @@ func (r *Repository) UpdateCommandResponse(ctx context.Context, owner, commandID
 func (r *Repository) SetSessionStopped(ctx context.Context, owner, sessionID, commandID string, stop bool) (int64, error) {
 	if err := r.AuthorizeSession(ctx, sessionID, owner); err != nil {
 		return 0, err
+	}
+	var controlled orm.WorkflowSession
+	if err := r.db.WithContext(ctx).Where("id = ?", sessionID).First(&controlled).Error; err != nil {
+		return 0, err
+	}
+	if controlstore.Controlled(controlled) {
+		return 0, controlstore.Reject("CONTROL_COMMAND_REQUIRED", "use the workflow control page; legacy lifecycle commands cannot release a controlled run")
 	}
 	request, _ := json.Marshal(map[string]any{"session_id": sessionID, "stopped": stop})
 	command, _, err := r.Command(ctx, owner, sessionID, commandID, "workflow.v1", request, func(tx *gorm.DB) (int, json.RawMessage, error) {
@@ -513,19 +547,37 @@ func (r *Repository) CreateHostSession(ctx context.Context, owner, sessionID, co
 		workflow, "dynamic", "", nil)
 }
 
+type ControlSettings struct {
+	Protocol        string
+	BindingRequired bool
+	Provider        string
+}
+
 // CreateInitializedHostSession atomically creates a Host Session and persists
 // the preparation-derived intent and input bindings. A validation failure must
 // not leave an active, partially initialized Session behind.
 func (r *Repository) CreateInitializedHostSession(ctx context.Context, owner, sessionID, conversationID, originHost,
 	originRef, controllerHost string, workflow WorkflowPackage, workflowMode, intentContext string,
-	bindings []InputBinding) (orm.WorkflowSession, bool, error) {
+	bindings []InputBinding, controls ...ControlSettings) (orm.WorkflowSession, bool, error) {
 	return r.createHostSession(ctx, owner, sessionID, conversationID, originHost, originRef, controllerHost,
-		workflow, workflowMode, intentContext, bindings)
+		workflow, workflowMode, intentContext, bindings, controls...)
 }
 
 func (r *Repository) createHostSession(ctx context.Context, owner, sessionID, conversationID, originHost,
 	originRef, controllerHost string, workflow WorkflowPackage, workflowMode, intentContext string,
-	bindings []InputBinding) (orm.WorkflowSession, bool, error) {
+	bindings []InputBinding, controls ...ControlSettings) (orm.WorkflowSession, bool, error) {
+	control := ControlSettings{}
+	if len(controls) > 0 {
+		control = controls[0]
+	}
+	if control.Protocol != "" {
+		if control.Protocol != controlpolicy.Protocol || controllerHost != "external-agent" {
+			return orm.WorkflowSession{}, false, repositoryError("CONTROL_PROTOCOL_UNSUPPORTED")
+		}
+		if !r.db.Migrator().HasTable(&orm.WorkflowReviewCheckpoint{}) || !r.db.Migrator().HasTable(&orm.WorkflowHostAction{}) {
+			return orm.WorkflowSession{}, false, repositoryError("CONTROL_SCHEMA_UNAVAILABLE")
+		}
+	}
 	if scope := ConversationScope(ctx); scope != "" && scope != strings.TrimSpace(conversationID) {
 		return orm.WorkflowSession{}, false, ErrPermissionDenied
 	}
@@ -588,6 +640,13 @@ func (r *Repository) createHostSession(ctx context.Context, owner, sessionID, co
 				StateVersion: 1, GraphHash: workflow.GraphHash, GraphSchemaVersion: workflow.GraphVersion,
 				WorkflowMode: workflowMode, Status: "active", CreateUserID: owner,
 				CreatedAt: now, UpdatedAt: now}
+			if control.Protocol != "" {
+				binding, err := json.Marshal(controlstore.Binding{Required: control.BindingRequired, Provider: control.Provider})
+				if err != nil {
+					return err
+				}
+				created.ControlProtocol, created.ControlBindingJSON = control.Protocol, string(binding)
+			}
 			if err := tx.Create(&created).Error; err != nil {
 				return err
 			}
@@ -1035,7 +1094,15 @@ func (r *Repository) AppendEvent(ctx context.Context, event *Event) error {
 		event.ContractVersion = "workflow.v1"
 	}
 	event.CreatedAt = time.Now().UTC()
-	if err := r.db.WithContext(ctx).Create(event).Error; err != nil {
+	if err := common.TransactionWithSQLiteBusyRetry(ctx, r.db, func(tx *gorm.DB) error {
+		if tx.Migrator().HasColumn(&orm.WorkflowSession{}, "control_protocol") {
+			_, err := controlstore.LockSession(tx, event.SessionID)
+			if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
+		}
+		return tx.Create(event).Error
+	}); err != nil {
 		return err
 	}
 	r.publish(*event)

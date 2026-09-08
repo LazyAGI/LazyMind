@@ -188,16 +188,19 @@ func identityAndVersion(w http.ResponseWriter, r *http.Request) (string, bool) {
 }
 
 type prepareRequest struct {
-	PreparationID  string         `json:"preparation_id"`
-	IdempotencyKey string         `json:"idempotency_key"`
-	WorkflowID     string         `json:"workflow_id"`
-	InputBindings  map[string]any `json:"input_bindings"`
-	OriginHost     string         `json:"origin_host"`
-	OriginRef      string         `json:"origin_ref"`
-	ConversationID string         `json:"conversation_id"`
-	ControllerHost string         `json:"controller_host"`
-	RequestContext string         `json:"request_context"`
-	WorkflowMode   string         `json:"workflow_mode"`
+	ControlProtocol     string         `json:"control_protocol,omitempty"`
+	HostBindingRequired bool           `json:"host_binding_required,omitempty"`
+	HostProvider        string         `json:"host_provider,omitempty"`
+	PreparationID       string         `json:"preparation_id"`
+	IdempotencyKey      string         `json:"idempotency_key"`
+	WorkflowID          string         `json:"workflow_id"`
+	InputBindings       map[string]any `json:"input_bindings"`
+	OriginHost          string         `json:"origin_host"`
+	OriginRef           string         `json:"origin_ref"`
+	ConversationID      string         `json:"conversation_id"`
+	ControllerHost      string         `json:"controller_host"`
+	RequestContext      string         `json:"request_context"`
+	WorkflowMode        string         `json:"workflow_mode"`
 }
 
 type preparationGraph struct {
@@ -810,6 +813,7 @@ func (h Handler) Consume(w http.ResponseWriter, r *http.Request) {
 		session, _, createErr := h.Store.CreateInitializedHostSession(
 			r.Context(), owner, sessionID, conversationID, original.OriginHost, original.OriginRef,
 			original.ControllerHost, workflowPackage, original.WorkflowMode, intentContext, bindings,
+			workflowstore.ControlSettings{Protocol: original.ControlProtocol, BindingRequired: original.HostBindingRequired, Provider: original.HostProvider},
 		)
 		if createErr != nil {
 			code := "SESSION_CREATE_FAILED"
