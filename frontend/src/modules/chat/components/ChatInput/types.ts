@@ -40,6 +40,8 @@ export interface SendMessageParams {
     cc?: string;
     subject?: string;
     body?: string;
+    attachment_paths?: string[];
+    attachments?: Array<{ filename: string; content_base64: string }>;
   };
 }
 

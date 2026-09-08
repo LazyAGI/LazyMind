@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import email
 import imaplib
 import json
@@ -26,6 +27,7 @@ from lazyllm.tools.tool_config_inject import register_tool_auth
 
 from lazymind.chat.config import CHAT_ATTACHMENT_EXTENSIONS
 from lazymind.chat.engine.attachment_reader import parse_attachment_content
+from lazymind.chat.engine.tools.local_file.resolver import resolve_attachment_path
 from lazymind.chat.engine.tools.local_file.workspace import (
     chat_agent_workspace,
     _resolve_workspace_path,
@@ -65,6 +67,20 @@ _EMAIL_RE = re.compile(r'[^,\s;]+@[^,\s;]+')
 _COMMON_ATTACHMENT_EXTS = set(CHAT_ATTACHMENT_EXTENSIONS) | {
     '.zip', '.rar', '.7z', '.xlsx', '.xls', '.csv', '.ppt', '.odt', '.rtf',
 }
+_MAX_CARD_ATTACHMENT_BYTES = 15 * 1024 * 1024
+_TRANSFER_URL_RE = re.compile(
+    r'https?://[^\s"\'<>]+(?:'
+    r'(?:mail\.)?qq\.com/cgi-bin/ftn'
+    r'|ftn\.qq\.com'
+    r'|weiyun\.com'
+    r')[^\s"\'<>]*',
+    re.I,
+)
+_TRANSFER_HINT_RE = re.compile(r'文件中转站|超大附件|通过中转站|weiyun|ftnExs', re.I)
+_TRANSFER_NOTE = (
+    'This file is in the mailbox file-transfer station (e.g. QQ 文件中转站) '
+    'and cannot be downloaded over IMAP. Open the mailbox web UI to download it.'
+)
 
 
 def _agentic_config() -> dict[str, Any]:
@@ -309,24 +325,148 @@ def _coerce_path_list(value: Any) -> list[str]:
     return [item for item in items if item]
 
 
-def _resolve_attachment_paths(attachment_paths: Any) -> list[str]:
-    requested = _coerce_path_list(attachment_paths)
-    if not requested:
-        return []
+def _outgoing_dir() -> str:
+    cfg = _agentic_config()
+    root = chat_agent_workspace(str(cfg.get('user_id') or '0'), str(cfg.get('conversation_id') or 'default'))
+    path = os.path.join(root, 'mail_outgoing')
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def _unique_outgoing_path(filename: str) -> str:
+    folder = _outgoing_dir()
+    base = os.path.basename(str(filename or '').strip()) or 'attachment.bin'
+    stem, ext = os.path.splitext(base)
+    candidate = os.path.join(folder, base)
+    index = 1
+    while os.path.exists(candidate):
+        candidate = os.path.join(folder, f'{stem}_{index}{ext}')
+        index += 1
+    return candidate
+
+
+def _find_workspace_basename(workspace: str, name: str) -> str:
+    basename = os.path.basename(name)
+    if not basename:
+        return ''
+    for folder in (
+        workspace,
+        os.path.join(workspace, 'mail_outgoing'),
+        os.path.join(workspace, 'mail_attachments'),
+    ):
+        candidate = os.path.join(folder, basename)
+        if os.path.isfile(candidate):
+            return os.path.realpath(candidate)
+    return ''
+
+
+def _resolve_one_attachment(raw_path: str, existing_paths: list[str] | None = None) -> str:
+    raw = str(raw_path or '').strip()
+    if not raw:
+        return ''
+    for previous in existing_paths or []:
+        if not previous:
+            continue
+        if previous == raw or os.path.basename(previous) == raw or os.path.basename(previous) == os.path.basename(raw):
+            if os.path.isfile(previous):
+                return previous
     cfg = _agentic_config()
     user_id = str(cfg.get('user_id') or '0')
     conversation_id = str(cfg.get('conversation_id') or 'default')
+    workspace = chat_agent_workspace(user_id, conversation_id)
+    workspace_error: ToolExecutionError | None = None
+    try:
+        _, candidate = _resolve_workspace_path(raw, user_id, conversation_id)
+        if os.path.isfile(candidate):
+            return candidate
+    except ToolExecutionError as orig:
+        workspace_error = orig
+    found = _find_workspace_basename(workspace, raw)
+    if found:
+        return found
+    chat_path, _error = resolve_attachment_path(os.path.basename(raw), prefer_newest=True)
+    if chat_path and os.path.isfile(chat_path):
+        if os.path.isabs(raw) and os.path.realpath(raw) != os.path.realpath(chat_path):
+            if workspace_error is not None:
+                raise workspace_error
+            return ''
+        return chat_path
+    if workspace_error is not None and os.path.isabs(raw):
+        raise workspace_error
+    return ''
+
+
+def _resolve_attachment_paths(
+    attachment_paths: Any,
+    *,
+    existing_paths: list[str] | None = None,
+) -> list[str]:
+    requested = _coerce_path_list(attachment_paths)
+    if not requested:
+        return []
     resolved: list[str] = []
     missing: list[str] = []
     for raw_path in requested:
-        _, candidate = _resolve_workspace_path(raw_path, user_id, conversation_id)
-        if os.path.isfile(candidate):
+        candidate = _resolve_one_attachment(raw_path, existing_paths)
+        if candidate:
             resolved.append(candidate)
             continue
         missing.append(raw_path)
     if missing:
         _fail('Attachment file was not found: ' + ', '.join(missing))
     return resolved
+
+
+def _write_outgoing_attachments(items: Any) -> list[str]:
+    if not items:
+        return []
+    if not isinstance(items, (list, tuple)):
+        _fail('attachments must be a list of uploaded files.')
+    written: list[str] = []
+    for item in items:
+        if not isinstance(item, dict):
+            _fail('Each uploaded mail attachment must be an object with filename and content_base64.')
+        filename = os.path.basename(str(item.get('filename') or '').strip()) or 'attachment.bin'
+        raw_b64 = str(item.get('content_base64') or '').strip()
+        if not raw_b64:
+            _fail(f'Uploaded mail attachment {filename} is empty.')
+        try:
+            data = base64.b64decode(raw_b64, validate=False)
+        except Exception as orig:
+            raise ToolExecutionError(f'Uploaded mail attachment {filename} is not valid base64.') from orig
+        if len(data) > _MAX_CARD_ATTACHMENT_BYTES:
+            _fail(
+                f'Uploaded mail attachment {filename} exceeds '
+                f'{_MAX_CARD_ATTACHMENT_BYTES // (1024 * 1024)}MB.'
+            )
+        target = _unique_outgoing_path(filename)
+        with open(target, 'wb') as handle:
+            handle.write(data)
+        written.append(target)
+    return written
+
+
+def _extract_transfer_links(text: str) -> list[dict[str, Any]]:
+    source = str(text or '')
+    items: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for match in _TRANSFER_URL_RE.finditer(source):
+        url = match.group(0).rstrip(').,]"\'')
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        items.append({
+            'kind': 'transfer_station',
+            'url': url,
+            'note': _TRANSFER_NOTE,
+        })
+    if not items and _TRANSFER_HINT_RE.search(source):
+        items.append({
+            'kind': 'transfer_station',
+            'url': '',
+            'note': _TRANSFER_NOTE,
+        })
+    return items
 
 
 def _decode_header_value(raw: Any) -> str:
@@ -579,6 +719,11 @@ def _apply_confirm_patch(draft: dict[str, Any]) -> dict[str, Any]:
         draft['subject'] = str(patch.get('subject') or '').strip()
     if 'body' in patch:
         draft['body'] = str(patch.get('body') or '')
+    if 'attachment_paths' in patch or 'attachments' in patch:
+        existing = [str(path) for path in (draft.get('attachment_paths') or []) if str(path).strip()]
+        paths = _resolve_attachment_paths(patch.get('attachment_paths'), existing_paths=existing)
+        paths.extend(_write_outgoing_attachments(patch.get('attachments')))
+        draft['attachment_paths'] = paths
     return draft
 
 
@@ -742,9 +887,20 @@ class _IMAPBackend:
         )
         if not raw:
             raw = self._fetch_raw(message_id, '(RFC822)', client)
+        return self._read_parsed_message(message_id, raw, client=client)
+
+    def _read_parsed_message(
+        self,
+        message_id: str,
+        raw: bytes,
+        *,
+        retry_full: bool = True,
+        client=None,
+    ) -> dict[str, Any]:
         msg = email.message_from_bytes(raw)
         attachments = []
         body_parts = []
+        html_parts = []
         for part in msg.walk():
             filename = part.get_filename()
             if filename:
@@ -763,8 +919,38 @@ class _IMAPBackend:
             text = payload.decode(charset, errors='replace')
             if part.get_content_type() == 'text/plain':
                 body_parts.append(text)
-            elif part.get_content_type() == 'text/html' and not body_parts:
-                body_parts.append(re.sub(r'<[^>]+>', ' ', text))
+            elif part.get_content_type() == 'text/html':
+                html_parts.append(text)
+                if not body_parts:
+                    body_parts.append(re.sub(r'<[^>]+>', ' ', text))
+        transfer_links = []
+        for html in html_parts:
+            transfer_links.extend(_extract_transfer_links(html))
+        if not transfer_links:
+            transfer_links = _extract_transfer_links('\n'.join(body_parts))
+        hinted = bool(_TRANSFER_HINT_RE.search('\n'.join(html_parts + body_parts)))
+        if retry_full and hinted and not any(item.get('url') for item in transfer_links):
+            full = self._fetch_raw(message_id, '(RFC822)', client, required=False)
+            if full and full != raw:
+                return self._read_parsed_message(message_id, full, retry_full=False)
+        return self._message_payload(message_id, msg, body_parts, attachments, transfer_links)
+
+    def _message_payload(
+        self,
+        message_id: str,
+        msg: email.message.Message,
+        body_parts: list[str],
+        attachments: list[dict[str, Any]],
+        transfer_links: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        seen: set[str] = set()
+        unique_links: list[dict[str, Any]] = []
+        for item in transfer_links:
+            key = str(item.get('url') or item.get('note') or '')
+            if key in seen:
+                continue
+            seen.add(key)
+            unique_links.append(item)
         return {
             'id': message_id,
             'thread_id': _decode_header_value(msg.get('Message-ID') or message_id),
@@ -776,6 +962,7 @@ class _IMAPBackend:
             'folder': _split_mail_ref(message_id)[0],
             'body': '\n'.join(body_parts)[:20000],
             'attachments': attachments,
+            'transfer_links': unique_links,
             'cite': f'email:{message_id}',
         }
 
@@ -825,8 +1012,10 @@ class _IMAPBackend:
                 pass
 
     def read_attachment(self, message_id: str, attachment_id: str) -> bytes:
-        msg = self._fetch_message(message_id)
         wanted = (attachment_id or '').strip()
+        if wanted and _TRANSFER_URL_RE.search(wanted):
+            _fail(_TRANSFER_NOTE)
+        msg = self._fetch_message(message_id)
         for part in msg.walk():
             filename = part.get_filename() or ''
             if filename == wanted or _decode_header_value(filename) == wanted:
@@ -834,6 +1023,14 @@ class _IMAPBackend:
                 if payload is None:
                     break
                 return payload
+        html_parts = []
+        for part in msg.walk():
+            if part.get_content_type() == 'text/html':
+                payload = part.get_payload(decode=True) or b''
+                charset = part.get_content_charset() or 'utf-8'
+                html_parts.append(payload.decode(charset, errors='replace'))
+        if _extract_transfer_links('\n'.join(html_parts)) or _TRANSFER_HINT_RE.search('\n'.join(html_parts)):
+            _fail(_TRANSFER_NOTE)
         _fail('Failed to read the email attachment.')
 
     def send(self, message: EmailMessage) -> dict[str, Any]:
@@ -1163,8 +1360,10 @@ class MailToolkit:
             subject: Mail subject.
             body: Plain-text body.
             cc: Optional CC addresses.
-            attachment_paths: One workspace/artifact path, or a list of paths to attach.
-                Paths must stay inside the current conversation workspace.
+            attachment_paths: Workspace artifact path, conversation-upload filename,
+                or a list of those. Card-uploaded files are stored under mail_outgoing
+                and must not be mixed into the chat file picker. Arbitrary paths
+                outside the workspace or conversation uploads are rejected.
             in_reply_to: Optional original Message-ID when composing a reply.
             mailbox: Optional sending account (email or provider). Defaults to the first enabled mailbox.
         """
@@ -1224,7 +1423,7 @@ class MailToolkit:
             body: Replace body when provided.
             cc: Replace CC addresses when provided.
             attachment_paths: Replace attachments when provided. Pass [] to clear.
-                Paths must stay inside the current conversation workspace.
+                Accepts workspace artifacts or conversation-upload filenames.
             in_reply_to: Replace reply Message-ID when provided.
             mailbox: Optional sending account (email or provider).
         """

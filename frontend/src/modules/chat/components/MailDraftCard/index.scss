@@ -31,6 +31,19 @@
   }
 }
 
+.mail-draft-attachments {
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+
+  li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+}
+
 .mail-draft-card-list {
   display: flex;
   flex-direction: column;

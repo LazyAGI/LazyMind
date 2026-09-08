@@ -429,6 +429,7 @@ const AssistantMessage = (props: any) => {
     renderText,
     updateMessage,
     sessionId,
+    conversationFiles,
     onPreferenceSelect,
     isLatestDualAnswer,
     onCiteMessage,
@@ -1191,6 +1192,7 @@ const AssistantMessage = (props: any) => {
                   key={draftId || askPending.ask_id}
                   draft={draft}
                   disabled={isReadOnly}
+                  conversationFiles={conversationFiles}
                   onConfirm={(confirmedId, revision, patch) => {
                     updateMessage({
                       ...item,

@@ -13,7 +13,9 @@ from lazymind.chat.engine.tools.local_file.workspace import chat_agent_workspace
 from lazymind.chat.engine.tools.mail import (
     MailToolkit,
     _IMAPBackend,
+    _apply_confirm_patch,
     _display_mail_date,
+    _extract_transfer_links,
     _imap_date,
     _load_draft,
     _resolve_imap_endpoint,
@@ -473,6 +475,60 @@ def test_mail_toolkit_registers_only_mail_auth_name():
     assert TOOL_AUTH_REGISTRY.get('mail') == 'dynamic_tool_auth'
     for name in ('gmailimap', 'qqmail', 'qqexmail', 'netease163', 'neteaseqiye'):
         assert name not in TOOL_AUTH_REGISTRY
+
+
+def test_compose_accepts_conversation_upload_filename(mail_auth, tmp_path):
+    chat_file = tmp_path / 'uploads' / 'report.pdf'
+    chat_file.parent.mkdir()
+    chat_file.write_bytes(b'%PDF-1.4')
+    lazyllm.globals['agentic_config']['files'] = [str(chat_file)]
+    result = MailToolkit().compose_draft(
+        to='a@b.com',
+        subject='chat file',
+        body='body',
+        attachment_paths='report.pdf',
+    )
+    assert result['attachments'] == ['report.pdf']
+
+
+def test_confirm_patch_writes_card_upload_to_mail_outgoing(mail_auth):
+    import base64
+
+    draft = {
+        'draft_id': 'draft_card_file',
+        'to': ['a@b.com'],
+        'cc': [],
+        'subject': 'hi',
+        'body': 'body',
+        'attachment_paths': [],
+        'status': 'draft',
+        'revision': 1,
+    }
+    lazyllm.globals['agentic_config']['mail_draft_patch'] = {
+        'attachment_paths': [],
+        'attachments': [{
+            'filename': 'card.txt',
+            'content_base64': base64.b64encode(b'from card').decode('ascii'),
+        }],
+    }
+    _apply_confirm_patch(draft)
+    assert len(draft['attachment_paths']) == 1
+    path = draft['attachment_paths'][0]
+    assert os.path.basename(path) == 'card.txt'
+    assert 'mail_outgoing' in path
+    with open(path, 'rb') as handle:
+        assert handle.read() == b'from card'
+
+
+def test_extract_qq_transfer_station_links():
+    html = (
+        '<p>文件中转站</p>'
+        '<a href="https://mail.qq.com/cgi-bin/ftnExs_download?k=abc">big.zip</a>'
+    )
+    links = _extract_transfer_links(html)
+    assert links
+    assert 'ftn' in links[0]['url']
+    assert 'transfer station' in links[0]['note'].lower() or '中转站' in links[0]['note']
 
 
 def test_inject_clears_stale_mail_auth_before_current_request(mail_auth):
