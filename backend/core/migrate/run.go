@@ -2,7 +2,9 @@
 package migrate
 
 import (
+	"context"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"fmt"
 	"os"
@@ -687,32 +689,21 @@ func (r *Runner) applyUpMigration(mig migrationFile, currentMax uint64) error {
 		return err
 	}
 
-	tx, err := r.db.Begin()
-	if err != nil {
-		return err
-	}
 	sqlBody, err := migrationSQLForDriver(string(body), r.driver)
 	if err != nil {
-		_ = tx.Rollback()
 		return fmt.Errorf("migration %d: %w", mig.Version, err)
 	}
-	if err := execMigrationSQL(tx, r.driver, sqlBody); err != nil {
-		_ = tx.Rollback()
-		return err
-	}
-	if err := r.insertHistory(tx, mig.Version, mig.Name); err != nil {
-		_ = tx.Rollback()
-		return err
-	}
-	nextVersion := currentMax
-	if mig.Version > nextVersion {
-		nextVersion = mig.Version
-	}
-	if err := r.writeState(tx, &nextVersion, false); err != nil {
-		_ = tx.Rollback()
-		return err
-	}
-	if err := tx.Commit(); err != nil {
+	err = runMigrationTransaction(r.db, r.driver, sqlBody, nil, func(tx *sql.Tx) error {
+		if err := r.insertHistory(tx, mig.Version, mig.Name); err != nil {
+			return err
+		}
+		nextVersion := currentMax
+		if mig.Version > nextVersion {
+			nextVersion = mig.Version
+		}
+		return r.writeState(tx, &nextVersion, false)
+	})
+	if err != nil {
 		return err
 	}
 	log.Logger.Info().Uint64("version", mig.Version).Str("name", mig.Name).Msg("migration up applied")
@@ -731,40 +722,91 @@ func (r *Runner) applyDownMigration(mig migrationFile, remaining []historyRecord
 		return err
 	}
 
-	tx, err := r.db.Begin()
-	if err != nil {
-		return err
-	}
-	if err := r.deleteHistory(tx, mig.Version); err != nil {
-		_ = tx.Rollback()
-		return err
-	}
 	sqlBody, err := migrationSQLForDriver(string(body), r.driver)
 	if err != nil {
-		_ = tx.Rollback()
 		return fmt.Errorf("migration %d: %w", mig.Version, err)
 	}
-	if err := execMigrationSQL(tx, r.driver, sqlBody); err != nil {
-		_ = tx.Rollback()
-		return err
-	}
-	if len(remaining) == 0 {
-		if err := r.writeState(tx, nil, false); err != nil {
-			_ = tx.Rollback()
+	err = runMigrationTransaction(r.db, r.driver, sqlBody, func(tx *sql.Tx) error {
+		if err := r.deleteHistory(tx, mig.Version); err != nil {
 			return err
 		}
-	} else {
+		if len(remaining) == 0 {
+			return r.writeState(tx, nil, false)
+		}
 		nextVersion := highestAppliedVersion(remaining)
-		if err := r.writeState(tx, &nextVersion, false); err != nil {
-			_ = tx.Rollback()
-			return err
-		}
-	}
-	if err := tx.Commit(); err != nil {
+		return r.writeState(tx, &nextVersion, false)
+	}, nil)
+	if err != nil {
 		return err
 	}
 	log.Logger.Info().Uint64("version", mig.Version).Str("name", mig.Name).Msg("migration down applied")
 	return nil
+}
+
+var sqliteForeignKeysOff = regexp.MustCompile(`(?im)^\s*PRAGMA\s+foreign_keys\s*=\s*(?:OFF|0)\s*;`)
+
+// A rebuild's foreign-key setting must change before Begin on the same connection.
+func runMigrationTransaction(db *sql.DB, dialect, body string, before, after func(*sql.Tx) error) (err error) {
+	ctx := context.Background()
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	suspended := false
+	if dialect == "sqlite" && sqliteForeignKeysOff.MatchString(body) {
+		var enabled int
+		if err := conn.QueryRowContext(ctx, "PRAGMA foreign_keys").Scan(&enabled); err != nil {
+			return err
+		}
+		if enabled == 1 {
+			if _, err := conn.ExecContext(ctx, "PRAGMA foreign_keys=OFF"); err != nil {
+				return err
+			}
+			suspended = true
+			defer func() {
+				if _, restoreErr := conn.ExecContext(ctx, "PRAGMA foreign_keys=ON"); restoreErr != nil {
+					// Never return a connection with weakened enforcement to the pool.
+					_ = conn.Raw(func(any) error { return driver.ErrBadConn })
+					err = errors.Join(err, restoreErr)
+				}
+			}()
+		}
+	}
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if before != nil {
+		if err := before(tx); err != nil {
+			return err
+		}
+	}
+	if err := execMigrationSQL(tx, dialect, body); err != nil {
+		return err
+	}
+	if after != nil {
+		if err := after(tx); err != nil {
+			return err
+		}
+	}
+	if suspended {
+		rows, err := tx.Query("PRAGMA foreign_key_check")
+		if err != nil {
+			return err
+		}
+		invalid := rows.Next()
+		scanErr := rows.Err()
+		closeErr := rows.Close()
+		if scanErr != nil || closeErr != nil {
+			return errors.Join(scanErr, closeErr)
+		}
+		if invalid {
+			return errors.New("migration violates foreign key constraints")
+		}
+	}
+	return tx.Commit()
 }
 
 func migrationSQLForDriver(body, driver string) (string, error) {

@@ -1,13 +1,14 @@
 package chat
 
 import (
+	"lazymind/core/common/orm"
 	"strings"
 	"testing"
 )
 
 func contractColumns(t *testing.T, table string) map[string]bool {
 	t.Helper()
-	database := newPromptTestDB(t)
+	database := orm.MigrateAllModelsForTest(t)
 	columnTypes, err := database.DB.Migrator().ColumnTypes(table)
 	if err != nil {
 		t.Fatalf("read %s schema: %v", table, err)
@@ -71,7 +72,7 @@ func TestConversationWorkspaceBindingSchemaKeepsOneWorkspacePerTask(t *testing.T
 		"created_at",
 	)
 
-	database := newPromptTestDB(t)
+	database := orm.MigrateAllModelsForTest(t)
 	indexes, err := database.DB.Migrator().GetIndexes("conversation_workspace_bindings")
 	if err != nil {
 		t.Fatalf("read binding indexes: %v", err)

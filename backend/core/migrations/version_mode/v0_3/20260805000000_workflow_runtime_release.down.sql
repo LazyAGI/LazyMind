@@ -1,4 +1,9 @@
 -- +migrate Dialect postgres
+DROP INDEX IF EXISTS public.idx_conversation_workspace_bindings_workspace;
+DROP TABLE IF EXISTS public.conversation_workspace_bindings;
+DROP INDEX IF EXISTS public.idx_local_workspaces_user_recent;
+DROP TABLE IF EXISTS public.local_workspaces;
+
 DROP TABLE IF EXISTS public.workflow_approval_preferences;
 ALTER TABLE public.task_center_tasks DROP CONSTRAINT IF EXISTS chk_tct_task_type;
 UPDATE public.task_center_tasks SET task_type = 'plugin_run' WHERE task_type = 'workflow_run';
@@ -176,6 +181,11 @@ BEGIN
 END $$;
 
 -- +migrate Dialect sqlite
+DROP INDEX IF EXISTS idx_conversation_workspace_bindings_workspace;
+DROP TABLE IF EXISTS conversation_workspace_bindings;
+DROP INDEX IF EXISTS idx_local_workspaces_user_recent;
+DROP TABLE IF EXISTS local_workspaces;
+
 DROP TABLE IF EXISTS workflow_approval_preferences;
 UPDATE task_center_tasks SET task_type = 'plugin_run' WHERE task_type = 'workflow_run';
 

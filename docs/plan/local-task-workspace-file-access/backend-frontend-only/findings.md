@@ -122,3 +122,14 @@ node_modules/.bin/vitest run src/runtime/desktopBridge.test.ts src/modules/chat/
 - 测试开发期间异常已处理：一次 Go 命令误在仓库根运行而报缺少 go.mod，已在 backend/core 重跑；首次 HTTP fixture 用 map 解码上游 string detail，已改为 any 后显式断言 reason 类型，最终可观察到真实缺失门禁。查询中猜测文件不存在不属于产品失败。
 - 没有 PostgreSQL 临时 DSN，因此其既有迁移测试明确 SKIP；SQLite 两组既有迁移测试通过。ContextPrompt/真实模型询问、完整 Local/打包 Desktop/Windows、权限修改、停止及任务 2–7 未验收。
 - 后续实现风险：主方案任务 1 一次列出多份生产文件，不能视为豁免 200 行/1 文件门槛；需拆成可审查小批次或事先报告预计 diff 和不可复用原因。
+
+
+### 2026-09-08 T1-SCHEMA-1：ORM 与迁移生产批次
+
+- 用户明确批准直接进入生产，并批准超出原 297 行 SQL 的最小修复批次；共享的六份旧工作区 migration 从文档快照逐文件提取并通过 `scripts/check_migration_immutability.py --base 245bc26d...`，未改写历史 SQL。
+- 生产修改：新增 `common/orm/local_workspace_models.go`，在 `all_models.go` 注册两表；新增三组历史 dev migration 和一组 `20260908065108_fix_workspace_binding_timestamp` 修正 migration；更新既有 v0_3 aggregate；`migrate/run.go` 将声明 `PRAGMA foreign_keys=OFF` 的 SQLite migration 固定到单连接，在事务前暂停外键、事务内执行 `foreign_key_check`、所有出口恢复原设置。
+- 清理：新事务 helper 替代 apply up/down 与 migration 测试 helper 的重复 Begin/Rollback/Commit，共删除 52 行旧事务代码；没有删除仍被 dialect 容错测试使用的 `execMigrationSQL`/column-change helper。
+- 规模：本批生产约 +554/-42，净增约 512 行。其中不可压缩部分为八份获批 SQL（历史三对 214 行、修正一对 46 行）及 aggregate 83 行；runner +84/-42；ORM +44。未新增 manager、facade、DTO 或依赖。
+- 双数据库验证：`MIGRATION_TEST_POSTGRES_DSN=... go test ./migrate -count=1` 通过；SQLite/PostgreSQL 独立 ORM schema 测试通过；`go test ./common/orm -count=1` 通过。测试覆盖 FK 原始 ON/OFF、SQL/历史/integrity 失败回滚、up/down、绑定数据保留、修正 migration 时间戳保留、约束与索引、aggregate/dev 语义等价。
+- 禁区：algorithm、tests/algorithm、LazyLLM、Local/Desktop 与官方基线零差异。任务 2 尚未开始。
+- 下一步：继续任务 1 service/errors/context 小批次，使首批服务测试从 compile-red 进入行为验证，再单独接 handler/chat 绑定。
