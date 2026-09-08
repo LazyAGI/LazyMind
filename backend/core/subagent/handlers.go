@@ -89,7 +89,11 @@ func InternalGetExecutionSpec(w http.ResponseWriter, r *http.Request) {
 	for i := range steps {
 		stepDTOs = append(stepDTOs, toStepDTO(&steps[i]))
 	}
-	common.ReplyOK(w, map[string]any{"task": toTaskDTO(task), "params": params,
+	privateTaskBody, _ := json.Marshal(toTaskDTO(task))
+	privateTask := map[string]any{}
+	_ = json.Unmarshal(privateTaskBody, &privateTask)
+	privateTask["params"] = params
+	common.ReplyOK(w, map[string]any{"task": privateTask, "params": params,
 		"steps": stepDTOs, "create_user_id": task.CreateUserID, "llm_config": config,
 		"tool_config": toolConfig, "workspace_path": task.WorkspacePath})
 }

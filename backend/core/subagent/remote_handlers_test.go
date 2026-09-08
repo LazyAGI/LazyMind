@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -14,6 +15,7 @@ import (
 	"github.com/gorilla/mux"
 
 	"lazymind/core/common/orm"
+	"lazymind/core/localworkspace"
 	"lazymind/core/state"
 	"lazymind/core/store"
 )
@@ -311,5 +313,67 @@ func TestAppendRemoteStepAllocatesMonotonicSequence(t *testing.T) {
 		if steps[i].Seq != i {
 			t.Fatalf("steps=%#v", steps)
 		}
+	}
+}
+
+func TestRemoteWorkspaceExecutionSpecUsesOneAuthoritativeSnapshotAndRejectsRevoked(t *testing.T) {
+	db := remoteSubagentFixture(t)
+	t.Setenv("LAZYMIND_RUNTIME_MODE", "local")
+	if err := db.AutoMigrate(&orm.Conversation{}, &orm.LocalWorkspace{}, &orm.ConversationWorkspaceBinding{}); err != nil {
+		t.Fatal(err)
+	}
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	grant, err := localworkspace.Register(t.Context(), db.DB, "user-1", localworkspace.RegisterInput{DisplayName: "project", CanonicalPath: root, Source: "local"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	if err := db.Create(&orm.Conversation{ID: "conversation-1", IsTaskConv: true, BaseModel: orm.BaseModel{CreateUserID: "user-1", CreatedAt: now, UpdatedAt: now}}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.ConversationWorkspaceBinding{ConversationID: "conversation-1", WorkspaceID: grant.WorkspaceID, PermissionMode: localworkspace.PermissionAlwaysAsk, PermissionVersion: 3, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&orm.SubAgentTask{}).Where("id = ?", "task-remote").Update("params", json.RawMessage(`{"runtime_instruction":"keep","files":{"1":["a.txt"]}}`)).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/internal/subagent/tasks/task-remote/execution-spec", nil)
+	request = mux.SetURLVars(request, map[string]string{"task_id": "task-remote"})
+	request.Header.Set("Authorization", "Bearer executor-secret")
+	request.Header.Set("X-Workflow-Lease-Token", "lease-live")
+	response := httptest.NewRecorder()
+	InternalGetExecutionSpec(response, request)
+	if response.Code != 200 {
+		t.Fatalf("spec=%d %s", response.Code, response.Body.String())
+	}
+	data := getData(response.Body.Bytes())
+	params := data["params"].(map[string]any)
+	task := data["task"].(map[string]any)
+	if !reflect.DeepEqual(task["params"], params) {
+		t.Fatalf("params differ task=%v top=%v", task["params"], params)
+	}
+	instruction := params["runtime_instruction"].(string)
+	if !strings.Contains(instruction, root) || !strings.Contains(instruction, "不能直接询问用户") {
+		t.Fatalf("instruction=%s", instruction)
+	}
+	if data["workspace_path"] != "/core/path/must-not-be-used" {
+		t.Fatalf("workspace_path=%v", data["workspace_path"])
+	}
+
+	if err := db.Model(&orm.LocalWorkspace{}).Where("id = ?", grant.WorkspaceID).Updates(map[string]any{"status": localworkspace.StatusRevoked, "version": 2}).Error; err != nil {
+		t.Fatal(err)
+	}
+	request = httptest.NewRequest(http.MethodGet, "/internal/subagent/tasks/task-remote/execution-spec", nil)
+	request = mux.SetURLVars(request, map[string]string{"task_id": "task-remote"})
+	request.Header.Set("Authorization", "Bearer executor-secret")
+	request.Header.Set("X-Workflow-Lease-Token", "lease-live")
+	response = httptest.NewRecorder()
+	InternalGetExecutionSpec(response, request)
+	if response.Code != 409 {
+		t.Fatalf("revoked spec=%d %s", response.Code, response.Body.String())
 	}
 }
