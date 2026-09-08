@@ -3000,7 +3000,7 @@ func handleTaskCreated(
 	params := localworkspace.StripUntrustedWorkspaceMetadata(ev.Params)
 	params, err := localworkspace.RebuildSubagentParams(chatCtx, db, userID, convID, params)
 	if err != nil {
-		return nil, fmt.Errorf("resolve subagent workspace: %w", err)
+		return nil, err
 	}
 	paramsJSON, _ := json.Marshal(params)
 	inputKeysJSON, _ := json.Marshal(ev.InputSlots)
@@ -3012,20 +3012,20 @@ func handleTaskCreated(
 		existing, getErr := subagent.GetTask(chatCtx, db, ev.TaskID)
 		if getErr == nil && existing != nil {
 			if existing.CreateUserID != strings.TrimSpace(userID) || existing.ConversationID != convID {
-				return nil, fmt.Errorf("resume subagent task ownership mismatch")
+				return nil, common.ResolveAppError("forbidden", http.StatusForbidden)
 			}
 			stored := map[string]any{}
 			if err := json.Unmarshal(existing.Params, &stored); err != nil {
-				return nil, fmt.Errorf("decode stored subagent params: %w", err)
+				return nil, common.ResolveAppError("invalid request", http.StatusBadRequest)
 			}
 			params, err = localworkspace.RebuildSubagentParams(chatCtx, db, userID, convID, stored)
 			if err != nil {
-				return nil, fmt.Errorf("resolve resumed subagent workspace: %w", err)
+				return nil, err
 			}
 			paramsJSON, _ = json.Marshal(params)
 			if err := db.WithContext(chatCtx).Model(&orm.SubAgentTask{}).Where("id = ? AND create_user_id = ? AND conversation_id = ?",
 				existing.ID, userID, convID).Updates(map[string]any{"params": paramsJSON, "updated_at": time.Now().UTC()}).Error; err != nil {
-				return nil, fmt.Errorf("update resumed subagent params: %w", err)
+				return nil, err
 			}
 			existing.Params = paramsJSON
 			_ = subagent.UpdateStatus(chatCtx, db, existing.ID, subagent.StatusRunning)
@@ -3643,7 +3643,7 @@ func validateWorkspaceAskSubmission(histories []orm.ChatHistory, raw map[string]
 		if askID != "" && askID == strings.TrimSpace(expected) {
 			return nil
 		}
-		return fmt.Errorf("ask submission does not match the current pending card")
+		return common.ResolveAppError("invalid request", http.StatusBadRequest)
 	}
-	return fmt.Errorf("no pending ask card accepts this submission")
+	return common.ResolveAppError("invalid request", http.StatusBadRequest)
 }

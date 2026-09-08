@@ -46,7 +46,7 @@ func InternalGetExecutionSpec(w http.ResponseWriter, r *http.Request) {
 	}
 	params := map[string]any{}
 	if err := json.Unmarshal(task.Params, &params); err != nil {
-		common.ReplyErr(w, "task params unavailable", http.StatusServiceUnavailable)
+		common.ReplyErr(w, "request failed", http.StatusServiceUnavailable)
 		return
 	}
 	params, err = localworkspace.RebuildSubagentParams(r.Context(), store.DB(), task.CreateUserID, task.ConversationID, params)
@@ -55,7 +55,7 @@ func InternalGetExecutionSpec(w http.ResponseWriter, r *http.Request) {
 		if errors.As(err, &appErr) {
 			common.ReplyAppErr(w, appErr)
 		} else {
-			common.ReplyErr(w, "workspace context unavailable", http.StatusServiceUnavailable)
+			common.ReplyErr(w, "request failed", http.StatusServiceUnavailable)
 		}
 		return
 	}

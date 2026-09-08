@@ -281,6 +281,32 @@ func exportRegisteredOpenAPIArtifacts() error {
 	return nil
 }
 
+func exportRegisteredOpenAPITo(outputPath string) error {
+	outputPath = strings.TrimSpace(outputPath)
+	if outputPath == "" {
+		return common.ResolveAppError("invalid path", http.StatusBadRequest)
+	}
+	router := mux.NewRouter()
+	router.UseEncodedPath()
+	registerCoreRoutes(router)
+	raw, err := buildOpenAPISpecFromRouter(router)
+	if err != nil {
+		return err
+	}
+	var spec map[string]any
+	if err := json.Unmarshal(raw, &spec); err != nil {
+		return err
+	}
+	body, err := yaml.Marshal(spec)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(outputPath, append(bytes.TrimRight(body, "\r\n"), '\n'), 0o644)
+}
+
 func validateStartupConfig() error {
 	if err := episode.ValidateInternalTokenConfig(); err != nil {
 		return err
@@ -292,6 +318,15 @@ func validateStartupConfig() error {
 func main() {
 	log.Init()
 
+	if len(os.Args) > 1 && os.Args[1] == "--export-openapi-to" {
+		if len(os.Args) != 3 || strings.TrimSpace(os.Args[2]) == "" {
+			log.Logger.Fatal().Msg("--export-openapi-to requires one output path")
+		}
+		if err := exportRegisteredOpenAPITo(os.Args[2]); err != nil {
+			log.Logger.Fatal().Err(err).Msg("export OpenAPI file failed")
+		}
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "--export-openapi" {
 		if err := exportRegisteredOpenAPIArtifacts(); err != nil {
 			log.Logger.Fatal().Err(err).Msg("export OpenAPI artifacts failed")

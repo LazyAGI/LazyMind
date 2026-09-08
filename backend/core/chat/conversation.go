@@ -1233,7 +1233,7 @@ func StopChatGeneration(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		common.ReplyErr(w, "stop conversation failed", http.StatusServiceUnavailable)
+		common.ReplyErr(w, "request failed", http.StatusServiceUnavailable)
 		return
 	}
 	common.ReplyOK(w, nil)

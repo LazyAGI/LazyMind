@@ -151,3 +151,16 @@ f9f7d345ee718b7783a0eda75b6727bd053ad04d505df109d8c3dd4e3f8d1822  local/local-ru
 - 中英文locale均增加工作区文案。生产+260，测试+46；新增两个生产文件是UI与runtime/API职责隔离所需，未增加manager/facade/生成DTO/样式文件。
 - 验证：工作区/desktop bridge合同17项通过；chatLayout/newChatContainer/AskCard 11项通过；修改文件ESLint通过；tsconfig.mcp通过；Vite production build通过。全量tsconfig.json仍有大量基线生成代码与implicit-any错误，本批不修复。
 - 下一步：任务7最终回归、真实能力矩阵、范围和分支收敛。
+
+
+### 2026-09-08 T7-FINAL：OpenAPI、生成客户端与最终验证
+
+- 新增 `--export-openapi-to <path>` 单文件导出，只写显式目标；原 `--export-openapi`行为不变。Core spec新增四个公开workspace API及LocalWorkspace/list/binding/permission/revoke/error reason schema；internal本机路由因 `/internal/`规则不进入公开spec。
+- 只导出 `frontend/scripts/openapi/specs/core.yaml`并运行 `generate-api.mjs core`；仅core-client和Core cache条目变化，chatbot-client/error-codes及其他服务spec未改。check-stale和error-code检查通过。生成器仍报告基线 `/dataset/tags` parameter validation错误与unused model警告，但生成成功。
+- 自动化：Core全包第二次运行无失败；Local Proxy全包与Windows交叉编译通过；Runtime Manager全包约68秒与Windows交叉编译通过；Desktop 49项通过；Frontend workspace/bridge/chatLayout/newChatContainer/AskCard共28项通过，修改文件ESLint、tsconfig.mcp和Vite production build通过。全量tsconfig.json的基线生成代码/implicit-any错误未修复。
+- migration immutability通过。`scripts/test_migration_upgrade.sh` SQLite路径通过，脚本因未设置MIGRATION_TEST_POSTGRES_DSN明确跳过PostgreSQL；另用本机临时PostgreSQL `workspace_test@127.0.0.1:55439`运行完整migrate包通过。
+- 原样算法最终复核：trusted_local_mode=false；LocalFileToolkit read和string_replace通过；write_file创建、嵌套创建和append均返回 `path must stay inside the current main-Agent workspace`，磁盘无错误写入。官方LazyLLM atexit仍打印 `RuntimeError: can't create new thread at interpreter shutdown`，未修改算法。
+- 冻结commit `ec4676e0...` 的15个Local/Desktop文件SHA-256全部通过，冻结后零差异。algorithm、tests/algorithm、LazyLLM gitlink/子模块均与官方基线零差异。
+- 最终范围：87个路径（backend 50、frontend 18、local 11、desktop 4、docs 4），全部在白名单。相对245bc26d共+6265/-184，包含测试、四份完整交接文档、迁移SQL和生成客户端；不以总行数代表生产逻辑规模。
+- 未完成能力按要求保留：任务3A create/append宿主文件仍暂停且验收未通过；未启用trusted、未增加MCP、未修改算法。未在本机实际打包启动Desktop并连接真实模型做人工UI/ContextPrompt交互，自动化与工具级证据不冒充该项人工验收。
+- 下一步按用户要求将最终HEAD覆盖本地/远端 `feature/newWorkZone`，删除临时 `codex/local-workspace-core`，后续只在NewWorkZone分支继续。
