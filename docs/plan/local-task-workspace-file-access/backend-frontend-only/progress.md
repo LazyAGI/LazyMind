@@ -204,3 +204,10 @@ f9f7d345ee718b7783a0eda75b6727bd053ad04d505df109d8c3dd4e3f8d1822  local/local-ru
 - 最终范围：87个路径（backend 50、frontend 18、local 11、desktop 4、docs 4），全部在白名单。相对245bc26d共+6265/-184，包含测试、四份完整交接文档、迁移SQL和生成客户端；不以总行数代表生产逻辑规模。
 - 未完成能力按要求保留：任务3A create/append宿主文件仍暂停且验收未通过；未启用trusted、未增加MCP、未修改算法。未在本机实际打包启动Desktop并连接真实模型做人工UI/ContextPrompt交互，自动化与工具级证据不冒充该项人工验收。
 - 下一步按用户要求将最终HEAD覆盖本地/远端 `feature/newWorkZone`，删除临时 `codex/local-workspace-core`，后续只在NewWorkZone分支继续。
+
+
+### 2026-09-08 分支与目录最终收敛
+
+- 用户批准只保留一个代码目录和一个功能分支。linked worktree `/Users/theone/Downloads/lazymind-workspace-core` 已移除；当前唯一工作目录为 `/Users/theone/Downloads/lazymind`。
+- 最终功能HEAD `f465954bb13c95ab8caba6aad6a0cd09f3f1eb39` 已使用精确 `--force-with-lease` 覆盖远端 `feature/newWorkZone`（覆盖前远端为 `b44a440cd938c5a0eb5b3be0ad6dc371e2f3c2df`）；临时本地分支 `codex/local-workspace-core` 已删除。
+- 本记录提交后继续推送同一 `feature/newWorkZone`；后续开发和提交均在该分支进行。
