@@ -26,6 +26,9 @@ declare global {
       discoverLocalFolders?: () => Promise<unknown> | unknown;
       authorizeLocalFolders?: (paths: string[]) => Promise<unknown> | unknown;
       selectFolder?: () => Promise<string | null> | string | null;
+      selectLocalWorkspace?: () => Promise<unknown> | unknown;
+      reauthorizeLocalWorkspace?: (workspaceId: string) => Promise<unknown> | unknown;
+      authorizeLocalWorkspace?: (selectionToken: string) => Promise<unknown> | unknown;
       exportDiagnostics?: () => Promise<string> | string;
       notifyAppReady?: () => void;
     };

@@ -11,10 +11,13 @@ vi.mock("@/components/auth", () => ({
 
 import {
   agentExecutableBindings,
+  authorizeLocalWorkspace,
   agentIntegrationStatuses,
   bindAgentExecutable,
   executorIntegrationAction,
   executorIntegrationPolicies,
+  reauthorizeLocalWorkspace,
+  selectLocalWorkspace,
 } from "./desktopBridge";
 
 describe("browser Assistant Bridge session synchronization", () => {
@@ -22,6 +25,26 @@ describe("browser Assistant Bridge session synchronization", () => {
     mocks.user.mockReset();
     vi.restoreAllMocks();
     Reflect.deleteProperty(window, "lazymindDesktop");
+  });
+
+  it("forwards workspace selection tokens through the narrow Desktop bridge", async () => {
+    const select = vi.fn().mockResolvedValue({ canceled: false, selection_token: "selection" });
+    const reauthorize = vi.fn().mockResolvedValue({ canceled: true });
+    const authorize = vi.fn().mockResolvedValue({ workspace_id: "grant" });
+    Object.defineProperty(window, "lazymindDesktop", {
+      configurable: true,
+      value: {
+        selectLocalWorkspace: select,
+        reauthorizeLocalWorkspace: reauthorize,
+        authorizeLocalWorkspace: authorize,
+      },
+    });
+
+    await expect(selectLocalWorkspace()).resolves.toMatchObject({ selection_token: "selection" });
+    await expect(reauthorizeLocalWorkspace("grant")).resolves.toEqual({ canceled: true });
+    await expect(authorizeLocalWorkspace("selection")).resolves.toMatchObject({ workspace_id: "grant" });
+    expect(reauthorize).toHaveBeenCalledWith("grant");
+    expect(authorize).toHaveBeenCalledWith("selection");
   });
 
   it("clears a stale Assistant session before reading status through Desktop IPC", async () => {

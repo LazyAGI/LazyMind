@@ -46,6 +46,23 @@ export interface DesktopLocalFolderAccessState {
   durationMs?: number;
 }
 
+export interface DesktopWorkspaceSelection {
+  canceled: boolean;
+  selection_token?: string;
+  display_name?: string;
+  path?: string;
+  expires_in_seconds?: number;
+}
+
+export interface DesktopWorkspaceGrant {
+  workspace_id: string;
+  display_name: string;
+  path: string;
+  status: string;
+  version: number;
+  source: "local" | "desktop";
+}
+
 export interface DesktopLocalFolderAuthorizationResult
   extends DesktopLocalFolderAccessState {
   granted: boolean;
@@ -177,6 +194,9 @@ interface LazyMindDesktopBridge {
   discoverLocalFolders?: () => Promise<DesktopLocalFolderAccessState> | DesktopLocalFolderAccessState;
   authorizeLocalFolders?: (paths: string[]) => Promise<DesktopLocalFolderAuthorizationResult> | DesktopLocalFolderAuthorizationResult;
   selectFolder?: () => Promise<string | null> | string | null;
+  selectLocalWorkspace?: () => Promise<DesktopWorkspaceSelection> | DesktopWorkspaceSelection;
+  reauthorizeLocalWorkspace?: (workspaceId: string) => Promise<DesktopWorkspaceSelection> | DesktopWorkspaceSelection;
+  authorizeLocalWorkspace?: (selectionToken: string) => Promise<DesktopWorkspaceGrant> | DesktopWorkspaceGrant;
   selectExecutable?: (target?: DesktopAgentBindingTarget) => Promise<string | null> | string | null;
   exportDiagnostics?: () => Promise<string> | string;
   showItemInFolder?: (
@@ -458,6 +478,27 @@ export function selectFolder(): Promise<string | null> {
     return Promise.resolve(null);
   }
   return Promise.resolve(bridge.selectFolder());
+}
+
+export function selectLocalWorkspace(): Promise<DesktopWorkspaceSelection | null> {
+  const bridge = getDesktopBridge();
+  return bridge?.selectLocalWorkspace
+    ? Promise.resolve(bridge.selectLocalWorkspace())
+    : Promise.resolve(null);
+}
+
+export function reauthorizeLocalWorkspace(workspaceId: string): Promise<DesktopWorkspaceSelection | null> {
+  const bridge = getDesktopBridge();
+  return bridge?.reauthorizeLocalWorkspace
+    ? Promise.resolve(bridge.reauthorizeLocalWorkspace(workspaceId))
+    : Promise.resolve(null);
+}
+
+export function authorizeLocalWorkspace(selectionToken: string): Promise<DesktopWorkspaceGrant | null> {
+  const bridge = getDesktopBridge();
+  return bridge?.authorizeLocalWorkspace
+    ? Promise.resolve(bridge.authorizeLocalWorkspace(selectionToken))
+    : Promise.resolve(null);
 }
 
 export function localFolderAccessStatus(): Promise<DesktopLocalFolderAccessState | null> {

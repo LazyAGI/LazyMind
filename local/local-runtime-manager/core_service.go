@@ -176,6 +176,7 @@ func coreServiceEnv(cfg RuntimeConfig, paths RuntimePaths) []string {
 		"LAZYMIND_RUNTIME_MODE=local",
 		"LAZYMIND_CORE_HOST=127.0.0.1",
 		"LAZYMIND_CORE_PORT=" + strconv.Itoa(cfg.LocalProxy.CoreHostPort),
+		localWorkspaceHostTokenEnvVar + "=" + localWorkspaceHostToken(cfg, paths),
 		"ACL_DB_DRIVER=sqlite",
 		"ACL_DB_DSN=" + coreDSN,
 		"LAZYMIND_CORE_DATABASE_URL=" + coreURL,

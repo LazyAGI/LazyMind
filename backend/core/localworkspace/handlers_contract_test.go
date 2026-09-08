@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -98,5 +99,34 @@ func TestWorkspaceListAndBindingRemainOwnerScoped(t *testing.T) {
 	ConversationBinding(response, request)
 	if response.Code != 404 || string(response.Body.Bytes()) == "" {
 		t.Fatalf("other binding=%d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestInternalWorkspaceRegistrationRequiresHostTokenAndReauthorizesRevokedPath(t *testing.T) {
+	db, grant := workspaceFixture(t)
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+	t.Setenv("LAZYMIND_LOCAL_WORKSPACE_HOST_TOKEN", "native-caller")
+
+	request := httptest.NewRequest(http.MethodPost, "/internal/local-workspaces", strings.NewReader(`{"display_name":"project","canonical_path":"`+grant.Path+`","source":"desktop"}`))
+	request.Header.Set("X-User-Id", "owner")
+	response := httptest.NewRecorder()
+	InternalRegister(response, request)
+	if response.Code != 403 {
+		t.Fatalf("missing token=%d %s", response.Code, response.Body.String())
+	}
+
+	if err := db.Model(&orm.LocalWorkspace{}).Where("id = ?", grant.WorkspaceID).
+		Updates(map[string]any{"status": StatusRevoked, "version": 2, "revoked_at": time.Now().UTC()}).Error; err != nil {
+		t.Fatal(err)
+	}
+	request = httptest.NewRequest(http.MethodPost, "/internal/local-workspaces/"+grant.WorkspaceID+":select", nil)
+	request.Header.Set("X-User-Id", "owner")
+	request.Header.Set("X-LazyMind-Local-Workspace-Token", "native-caller")
+	request = mux.SetURLVars(request, map[string]string{"workspace_id": grant.WorkspaceID})
+	response = httptest.NewRecorder()
+	InternalPrepareReauthorization(response, request)
+	if response.Code != 200 || !strings.Contains(response.Body.String(), grant.Path) {
+		t.Fatalf("reauthorize=%d %s", response.Code, response.Body.String())
 	}
 }

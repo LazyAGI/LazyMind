@@ -1,9 +1,11 @@
 package localworkspace
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -246,4 +248,50 @@ func ConversationBinding(w http.ResponseWriter, r *http.Request) {
 	common.ReplyOK(w, BindingView{Status: workspace.Status, WorkspaceID: workspace.ID,
 		Workspace: &item, AffectedTaskCount: item.AffectedTaskCount,
 		PermissionMode: binding.PermissionMode, PermissionVersion: binding.PermissionVersion})
+}
+
+func InternalRegister(w http.ResponseWriter, r *http.Request) {
+	if rejectInternal(w, r) {
+		return
+	}
+	var input RegisterInput
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&input); err != nil {
+		common.ReplyAppErr(w, Error("invalid_selection", 400, "invalid request"))
+		return
+	}
+	workspace, err := Register(r.Context(), store.DB(), store.UserID(r), input)
+	if replyError(w, err) {
+		return
+	}
+	common.ReplyOK(w, workspace)
+}
+
+func InternalPrepareReauthorization(w http.ResponseWriter, r *http.Request) {
+	if rejectInternal(w, r) {
+		return
+	}
+	var workspace orm.LocalWorkspace
+	err := store.DB().WithContext(r.Context()).Where("id = ? AND create_user_id = ?",
+		mux.Vars(r)["workspace_id"], store.UserID(r)).First(&workspace).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		err = Error("workspace_not_found", 404, "resource not found")
+	}
+	if replyError(w, err) {
+		return
+	}
+	common.ReplyOK(w, map[string]any{"workspace_id": workspace.ID, "display_name": workspace.DisplayName,
+		"canonical_path": workspace.CanonicalPath})
+}
+
+func rejectInternal(w http.ResponseWriter, r *http.Request) bool {
+	if rejectUnlessEnabled(w) {
+		return true
+	}
+	expected := strings.TrimSpace(os.Getenv("LAZYMIND_LOCAL_WORKSPACE_HOST_TOKEN"))
+	actual := strings.TrimSpace(r.Header.Get("X-LazyMind-Local-Workspace-Token"))
+	if expected == "" || len(expected) != len(actual) || subtle.ConstantTimeCompare([]byte(expected), []byte(actual)) != 1 {
+		common.ReplyAppErr(w, Error("mode_forbidden", 403, "forbidden"))
+		return true
+	}
+	return false
 }
