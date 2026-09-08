@@ -148,8 +148,8 @@ func TestSetChatHistoryRemovesRejectedAnswerPerformance(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, history := range []orm.MultiAnswersChatHistory{
-		{ID: "history-selected", Seq: 1, ConversationID: "conv-multi", RunID: "run-selected"},
-		{ID: "history-rejected", Seq: 1, ConversationID: "conv-multi", RunID: "run-rejected"},
+		{ID: "history-selected", Seq: 1, ConversationID: "conv-multi", Result: "selected answer", RunID: "run-selected", RunStatus: "completed"},
+		{ID: "history-rejected", Seq: 1, ConversationID: "conv-multi", Result: "rejected answer", RunID: "run-rejected", RunStatus: "completed"},
 	} {
 		if err := db.Create(&history).Error; err != nil {
 			t.Fatal(err)
