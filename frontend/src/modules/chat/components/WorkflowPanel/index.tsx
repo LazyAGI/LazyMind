@@ -1669,6 +1669,33 @@ export function WorkflowPanel({
   const [anySlotEditing, setAnySlotEditing] = useState(false);
   const [actionPending, setActionPending] = useState(false);
   const [footerActions, setFooterActions] = useState<Map<string, SlotFooterAction>>(new Map());
+  const tabsWheelCleanupRef = useRef<(() => void) | null>(null);
+  const setTabsScrollRef = useCallback((element: HTMLDivElement | null) => {
+    tabsWheelCleanupRef.current?.();
+    tabsWheelCleanupRef.current = null;
+    if (!element) return;
+
+    const handleWheel = (event: WheelEvent) => {
+      // Keep native horizontal gestures, Shift+wheel and pinch zoom intact.
+      if (event.defaultPrevented || event.ctrlKey || event.shiftKey || event.deltaX !== 0 || event.deltaY === 0) return;
+      const maxScrollLeft = element.scrollWidth - element.clientWidth;
+      if (maxScrollLeft <= 0) return;
+
+      const unit = event.deltaMode === WheelEvent.DOM_DELTA_LINE
+        ? 16
+        : event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? element.clientWidth : 1;
+      const nextScrollLeft = Math.max(0, Math.min(maxScrollLeft, element.scrollLeft + event.deltaY * unit));
+      // Let the surrounding conversation scroll once this direction reaches an edge.
+      if (nextScrollLeft === element.scrollLeft) return;
+      element.scrollLeft = nextScrollLeft;
+      event.preventDefault();
+      event.stopPropagation();
+    };
+
+    // React's passive wheel listener cannot prevent simultaneous page scrolling.
+    element.addEventListener('wheel', handleWheel, { passive: false });
+    tabsWheelCleanupRef.current = () => element.removeEventListener('wheel', handleWheel);
+  }, []);
 
   const setExpandedMode = useCallback((nextExpanded: boolean) => {
     if (nextExpanded) setCollapsed(false);
@@ -2088,7 +2115,7 @@ export function WorkflowPanel({
 
       {/* Tabs — step navigator style */}
       {!collapsed && hasTabs && (
-        <div className='workflow-panel__tabs' role='tablist'>
+        <div className='workflow-panel__tabs' role='tablist' ref={setTabsScrollRef}>
           {tabs.map((tab, idx) => {
             const statusStepIds = tab.status_step_ids ?? [tab.step_id ?? tab.id];
             const step = session.steps
