@@ -1,5 +1,22 @@
 # 当前差异证据
 
+## 本次接手源码复核（69d4b603）
+
+- `LocalWorkspaceControl.tsx` 在有 `conversationId` 时仍保留可点击的目录按钮；Core 的 `ensureConversationWithWorkspace` 会对新增或不同 binding 返回 `binding_locked`，因此 U1 是前端状态约束缺口，不需要修改 Core 绑定规则。
+- 组件加载 effect 只用局部 `active` 防止旧绑定查询回写，但不会在 `conversationId` 变化时立即清空 `selected/items` 或通知父组件；`choose` 和 `allow` 的异步结果也不受该 `active` 标记保护。
+- 目录按钮接收 `disabled`，最近目录 Select 没有接收；权限 Select 使用同一个 `disabled`，与 `next_request` 权限更新语义冲突。
+- `listWorkspaces` 尚未暴露 Core 已实现的 `query/include_inactive` 参数；Core 的 `InternalPrepareReauthorization`、权限版本冲突和结构化 reason 均已存在，可直接复用，无需新增服务、依赖或数据库表。
+- `validateWorkspaceAskSubmission` 仅比对最近未回答卡片的 `ask_id`；`RebuildSubagentParams` 仅写入 `parent_agentic_config.user_id`，而官方 `runner.py` 构建 agentic config 时依次读取 `attachment_context.user_id`、顶层 `params.user_id`、parent 值。C1/C2 的文档判断与当前源码一致。
+- 当前 `LocalWorkspace.contract.test.ts` 的三项检查均读取源码并匹配字符串，不能覆盖 U1–U3 的交互和异步竞态；第一批应使用 React Testing Library 的 render/rerender/fireEvent 与可控 Promise 建立失败合同。
+
+## T1 阶段一测试证据
+
+- 新增 `LocalWorkspaceControl.test.tsx`，直接渲染真实组件和 Ant Design 控件；只 mock 运行模式、HTTP/bridge 边界、消息提示，使用可控 Promise 重现竞态。
+- 单文件运行结果为 13 项中 7 项预期失败、6 项通过。预期失败准确命中：绑定任务目录按钮未锁定、已有未绑定任务仍可选择、切会话残留旧状态、旧 picker 结果显示授权框、旧 authorize 结果回写、disabled 草稿 Select 可用、运行中权限 Select 不可用。
+- 通过项确认：旧绑定查询的 `active` 防护有效；原生 picker 取消、Modal Cancel、关闭按钮和 Esc 均不调用授权或 `onChange`；确认授权时只传 runtime 和 selection token。
+- 初次增加 Modal 关闭测试时，jsdom 不执行 CSS leave 动画，导致以“节点移除”为标准的三项异常失败；测试改为检查 Modal 已进入 leave 状态，并将 Esc 发到实际键盘容器。调整后异常失败归零。
+- 最终聚焦矩阵共 30 项：7 项预期失败、23 项通过；现有三个 workspace/bridge 文件的 17 项在加入新文件前后均保持通过。新测试 ESLint、diff 检查及冻结边界检查通过。阶段一不把预期 RED 计为产品验证通过。
+
 ## 基线
 
 审计提交 bb46abd64ca5fc431f4f7748fb9e085099990d5e，旧对照 e7ed8a4189bb627e96814fc2f34818693cbc2050。旧 spec/checklist/代码在 Git 历史中可查；不继承其勾选为当前验收结果。

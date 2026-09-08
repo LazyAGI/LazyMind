@@ -1,8 +1,19 @@
 # 工作区剩余功能交接进度
 
+## 接手核查（2026-09-08）
+
+- 当前唯一仓库目录为 `/Users/theone/Downloads/lazymind`，远端为 `https://github.com/YuZou-coding/LazyMind.git`；未发现另一份 `LazyMind-main` 目录，也未创建仓库或 worktree。
+- `feature/newWorkZone` 已安全快进检查；本地、`origin/feature/newWorkZone` 与交接提交均为 `69d4b603d0ae92cd71b9618ab098808b3de1b888`，核查开始时工作区和暂存区均为空。
+- 已完整阅读本目录四份文档及唯一适用的 `backend/core/migrations/AGENTS.md`。算法相关路径相对 `245bc26d` 为零差异，Local/Desktop 相对 `ec4676e0` 为零差异。
+- 当前源码再次确认 U1–U3：已有任务目录按钮仍可选择、切换到无绑定会话不会主动清除父状态、草稿 `disabled` 未禁用最近目录 Select，且运行中权限 Select 被一并禁用。选择和授权回调也没有统一的会话代次校验。
+- Core 已有列表 `query/include_inactive`、重授权、撤销、权限版本和 reason 契约，可供后续 U4–U5 复用。C1 当前只验证 `ask_id`；C2 当前只归一化 `parent_agentic_config`，而官方 runner 优先读取 `attachment_context.user_id` 和顶层 `params.user_id`。
+- 本机使用 Node 26.0.0、pnpm 10.0.0 重新运行现有 workspace/bridge 三个测试文件，17 项通过；该结果只证明现有测试设施可运行，不计为待补行为的验收，也不替代 CI 的 Node 20 验证。
+- 第一批已新增 `frontend/src/modules/chat/components/ChatInput/LocalWorkspaceControl.test.tsx`（344 行测试代码），未修改生产代码。提交前矩阵共 30 项：7 项预期失败、23 项通过，其中新文件为 7 失败/6 通过，现有 workspace/bridge 17 项全部通过。
+- 7 项预期失败覆盖已有绑定/未绑定任务的目录锁定、切会话清理、picker/authorize 迟到、disabled 最近目录和运行中权限编辑；取消、关闭、Esc、旧查询隔离和 token 授权为通过项。当前停在人工 Review 门禁，T2 未开始。
+
 ## 当前状态（2026-09-08）
 
-- 唯一工作目录：/Users/zouyu/Downloads/LazyMind-main。
+- 本次唯一工作目录：/Users/theone/Downloads/lazymind；上一环境的目录名不作为本机路径依据。
 - 当前分支：feature/newWorkZone；代码基线 bb46abd64ca5fc431f4f7748fb9e085099990d5e。
 - 用户最新决定：算法不能改；已实现功能的重复文档可删除，只维护新方案及剩余问题。
 - 本轮已重写本目录四份文档，清理历史实施流水、过期工作树路径、算法适配例外及失效方案，保留基线、冻结依据、实际审计证据和剩余验收。
