@@ -140,6 +140,7 @@ def test_handle_chat_constructs_react_agent_from_runtime_context(monkeypatch):
         'reason': 'normal',
         'partial_output': True,
     }
+    assert payloads[-1]['data']['performance_metrics']['schema_version'] == 1
 
 
 def test_sensitive_input_is_blocked_before_model_execution(monkeypatch):

@@ -835,13 +835,13 @@ func resumeChatStream(w http.ResponseWriter, r *http.Request) {
 	}
 	stateStore := store.State()
 	if stateStore == nil {
-		resumeFromDBOnly(db, convID, flusher, w)
+		resumeFromDBOnly(ctx, db, userID, convID, flusher, w)
 		return
 	}
 
 	generatingIDs, _ := getGeneratingHistoryIDs(ctx, stateStore, convID)
 	if len(generatingIDs) == 0 {
-		resumeCompletedFromDB(db, convID, flusher, w)
+		resumeCompletedFromDB(ctx, db, userID, convID, flusher, w)
 		return
 	}
 
@@ -866,7 +866,7 @@ func resumeChatStream(w http.ResponseWriter, r *http.Request) {
 	resumeSingleAnswerChat(ctx, stateStore, convID, targetHistoryID, w, flusher)
 }
 
-func resumeFromDBOnly(db *gorm.DB, convID string, flusher http.Flusher, w http.ResponseWriter) {
+func resumeFromDBOnly(ctx context.Context, db *gorm.DB, userID, convID string, flusher http.Flusher, w http.ResponseWriter) {
 	var last orm.ChatHistory
 	if err := db.Where("conversation_id = ?", convID).Order("seq DESC").First(&last).Error; err != nil || last.ID == "" {
 		writeSSEChunk(w, flusher, map[string]any{"runtime_event": failedRunEvent(newID("run_"), "history_not_found", false)})
@@ -883,10 +883,10 @@ func resumeFromDBOnly(db *gorm.DB, convID string, flusher http.Flusher, w http.R
 		"tool_call_turns":     last.ToolCallTurns,
 		"thinking_duration_s": last.ThinkingDurationS,
 	})
-	writeSSEChunk(w, flusher, map[string]any{"history_id": last.ID, "runtime_event": storedRunEvent(last.RunID, last.RunTerminal)})
+	writeSSEChunk(w, flusher, storedTerminalChunk(ctx, db, userID, convID, last.ID, last.RunID, last.RunTerminal))
 }
 
-func resumeCompletedFromDB(db *gorm.DB, convID string, flusher http.Flusher, w http.ResponseWriter) {
+func resumeCompletedFromDB(ctx context.Context, db *gorm.DB, userID, convID string, flusher http.Flusher, w http.ResponseWriter) {
 	var last orm.ChatHistory
 	if err := db.Where("conversation_id = ?", convID).Order("seq DESC").First(&last).Error; err == nil && last.ID != "" {
 		writeSSEChunk(w, flusher, map[string]any{
@@ -900,7 +900,7 @@ func resumeCompletedFromDB(db *gorm.DB, convID string, flusher http.Flusher, w h
 			"tool_call_turns":     last.ToolCallTurns,
 			"thinking_duration_s": last.ThinkingDurationS,
 		})
-		writeSSEChunk(w, flusher, map[string]any{"history_id": last.ID, "runtime_event": storedRunEvent(last.RunID, last.RunTerminal)})
+		writeSSEChunk(w, flusher, storedTerminalChunk(ctx, db, userID, convID, last.ID, last.RunID, last.RunTerminal))
 		return
 	}
 
@@ -921,8 +921,27 @@ func resumeCompletedFromDB(db *gorm.DB, convID string, flusher http.Flusher, w h
 			"tool_call_turns":     h.ToolCallTurns,
 			"thinking_duration_s": h.ThinkingDurationS,
 		})
-		writeSSEChunk(w, flusher, map[string]any{"history_id": h.ID, "runtime_event": storedRunEvent(h.RunID, h.RunTerminal)})
+		writeSSEChunk(w, flusher, storedTerminalChunk(ctx, db, userID, convID, h.ID, h.RunID, h.RunTerminal))
 	}
+}
+
+func storedTerminalChunk(
+	ctx context.Context,
+	db *gorm.DB,
+	userID, conversationID, historyID, runID string,
+	rawTerminal json.RawMessage,
+) map[string]any {
+	chunk := map[string]any{"history_id": historyID, "runtime_event": storedRunEvent(runID, rawTerminal)}
+	metricsByRun, err := loadRunPerformance(ctx, db, userID, conversationID, []string{runID})
+	if err != nil {
+		log.Logger.Warn().Err(err).Str("conversation_id", conversationID).Str("history_id", historyID).
+			Str("run_id", runID).Msg("failed to restore chat run performance")
+		return chunk
+	}
+	if metrics := metricsByRun[runID]; metrics != nil {
+		chunk["performance_metrics"] = metrics
+	}
+	return chunk
 }
 
 func mergeChunksToFirstChunk(chunks []*ChatChunkResponse) *ChatChunkResponse {
@@ -1880,6 +1899,10 @@ func GetConversationHistory(w http.ResponseWriter, r *http.Request) {
 		nextToken = encodeListPageToken(nextOffset, pageSize, total)
 	}
 	historyItems := conversationHistoryResponseItems(page)
+	if err := hydrateHistoryPerformance(r.Context(), store.DB(), userID, convID, historyItems); err != nil {
+		log.Logger.Warn().Err(err).Str("conversation_id", convID).
+			Msg("failed to hydrate chat performance history")
+	}
 	historyIDs := make([]string, 0, len(page))
 	for _, history := range page {
 		historyIDs = append(historyIDs, history.ID)
@@ -2422,6 +2445,10 @@ func SetChatHistory(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		if err := tx.Create(&target).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("history_id = ? AND conversation_id = ? AND user_id = ?", discarded.ID, conv.ID, userID).
+			Delete(&orm.ChatRunPerformance{}).Error; err != nil {
 			return err
 		}
 		return tx.Where("id IN ?", []string{selected.ID, discarded.ID}).Delete(&orm.MultiAnswersChatHistory{}).Error

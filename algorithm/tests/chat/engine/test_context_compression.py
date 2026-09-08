@@ -516,6 +516,7 @@ def test_function_call_passes_live_prefix_and_current_input() -> None:
     class FunctionCallState:
         _history_compactor = staticmethod(compactor)
         _keep_full_turns = 0
+        _model_context_provider = None
         _system_prompt = 'live system'
         _tools_manager = ToolManager()
         _skill_manager = None
@@ -611,6 +612,17 @@ def test_executor_does_not_replace_authoritative_history_with_projection(monkeyp
         AgentExecutor().create_agent(object(), plan)
     assert plan.history is history
     assert plan.history == [{'role': 'tool', 'content': 'history'}]
+
+
+def test_executor_resolves_function_call_llm_after_react_agent_build() -> None:
+    created_shared_llm = object()
+    function_call_llm = object()
+    agent = type('Agent', (), {
+        '_runtime_llm': created_shared_llm,
+        '_fc': type('FunctionCall', (), {'_llm': function_call_llm})(),
+    })()
+
+    assert AgentExecutor.runtime_llm(agent) is function_call_llm
 
 
 def test_compact_tool_result_routes_by_tool_name() -> None:

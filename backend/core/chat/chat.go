@@ -153,6 +153,7 @@ type LazyChatData struct {
 	Heartbeat                bool                           `json:"heartbeat,omitempty"`
 	ToolCallTurns            int64                          `json:"tool_call_turns"`
 	RuntimeEvent             *ChatRuntimeEvent              `json:"runtime_event,omitempty"`
+	PerformanceMetrics       *RunPerformanceMetrics         `json:"performance_metrics,omitempty"`
 }
 
 // TaskCreatedEvent is emitted by create_subagent (via translator) on the main SSE.
@@ -393,6 +394,7 @@ type UpstreamStreamChunk struct {
 	ExternalEventSequence    int64                          `json:"external_event_sequence,omitempty"`
 	Execution                *externalExecutionProjection   `json:"execution,omitempty"`
 	RuntimeEvent             *ChatRuntimeEvent              `json:"runtime_event,omitempty"`
+	PerformanceMetrics       *RunPerformanceMetrics         `json:"performance_metrics,omitempty"`
 	Err                      error                          `json:"-"`
 }
 
@@ -908,6 +910,11 @@ func StreamChatUpstream(ctx context.Context, baseURL string, body map[string]any
 					}
 				}
 			}
+			if chunk.PerformanceMetrics != nil {
+				if chunk.RuntimeEvent == nil || chunk.RuntimeEvent.Type != RuntimeEventRunFinished || chunk.PerformanceMetrics.Validate() != nil {
+					chunk.PerformanceMetrics = nil
+				}
+			}
 			if d.Resp.Code != http.StatusOK {
 				message := strings.TrimSpace(d.Resp.Msg)
 				if message == "" {
@@ -963,5 +970,6 @@ func upstreamStreamChunkFromData(data LazyChatData) UpstreamStreamChunk {
 		Heartbeat:                data.Heartbeat,
 		ToolCallTurns:            data.ToolCallTurns,
 		RuntimeEvent:             data.RuntimeEvent,
+		PerformanceMetrics:       data.PerformanceMetrics,
 	}
 }

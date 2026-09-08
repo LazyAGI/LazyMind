@@ -791,6 +791,7 @@ services:
     volumes:
       - ./data/core/uploads:/var/lib/lazymind/uploads
       - ./data/traces:/var/lib/lazymind/traces
+      - ./data/observability:/var/lib/lazymind/observability
       - evo-data:/var/lib/lazymind/evo:ro
       - ./data/subagent:/data/subagent
       - *algorithm-src-mount
@@ -818,6 +819,7 @@ services:
       LAZYMIND_SEGMENT_STORE_USER: ${LAZYMIND_SEGMENT_STORE_USER:-admin}
       LAZYMIND_SEGMENT_STORE_PASSWORD: ${LAZYMIND_SEGMENT_STORE_PASSWORD:-LazyRAG_OpenSearch123!}
       LAZYMIND_SHARED_UPLOAD_DIR: /var/lib/lazymind/uploads
+      LAZYMIND_OBSERVABILITY_DIR: /var/lib/lazymind/observability
       LAZYMIND_MOUNT_BASE_DIR: /var/lib/lazymind/uploads
       # Same root as SUBAGENT_WORKSPACE. chat_agent_workspace() adds chat-artifacts/<user>/<conv>/,
       # so unpublished working files and tool_spills persist next to published artifacts.

@@ -383,6 +383,23 @@ func init() {
 	registerAdditionalErrorPattern("github ref lookup failed with http status %d", "Invalid request", http.StatusBadRequest, 2000103)
 	registerAdditionalErrorAlias("github ref lookup failed", "Invalid request", http.StatusBadRequest, 2000103)
 	registerAdditionalErrorAlias("github ref lookup returned invalid json", "Invalid request", http.StatusBadRequest, 2000103)
+	for _, source := range []string{
+		"github url must identify a repository",
+		"github url must not contain credentials, port, query, or fragment",
+		"github url must point to a repository root, direct zip, or /tree/<ref>/<skill-path>",
+		"github url contains an invalid path segment",
+		"github repository default branch could not be resolved",
+		"github url ref could not be resolved",
+		"locked github archive ref does not match source url",
+		"locked github archive url is invalid",
+		"locked github archive url does not match source repository",
+		"skillhub url must not contain credentials, port, query, or fragment",
+		"skillhub url must point to /skills/<slug> or /skills/<namespace>/<slug>",
+		"skillhub url contains an invalid path segment",
+	} {
+		registerAdditionalErrorAlias(source, "Invalid request", http.StatusBadRequest, 2000103)
+	}
+	registerAdditionalErrorPattern("skill package must contain skill.md in subdirectory %q", "Invalid skill package", http.StatusBadRequest, 2002294)
 	registerAdditionalErrorPattern("skill package download exceeds %d bytes", "Invalid skill package", http.StatusBadRequest, 2002294)
 
 	// Personal recovery and archive lifecycle errors.

@@ -243,3 +243,36 @@ type MultiAnswersChatHistory struct {
 }
 
 func (MultiAnswersChatHistory) TableName() string { return "multi_answers_chat_histories" }
+
+// ChatRunPerformance stores normalized, content-free facts for restoring the
+// performance UI. Provider-specific observations remain outside Core.
+type ChatRunPerformance struct {
+	RunID              string    `gorm:"column:run_id;type:varchar(64);primaryKey"`
+	ConversationID     string    `gorm:"column:conversation_id;type:varchar(36);not null;index"`
+	HistoryID          string    `gorm:"column:history_id;type:varchar(36);not null;index"`
+	UserID             string    `gorm:"column:user_id;type:varchar(255);not null;index"`
+	TurnSeq            *int      `gorm:"column:turn_seq"`
+	SchemaVersion      int       `gorm:"column:schema_version;not null"`
+	Status             string    `gorm:"column:status;type:varchar(32);not null"`
+	Model              string    `gorm:"column:model;type:varchar(255);not null;default:''"`
+	Steps              int       `gorm:"column:steps;not null;default:0"`
+	ModelSteps         int       `gorm:"column:model_steps;not null;default:0"`
+	ToolSteps          int       `gorm:"column:tool_steps;not null;default:0"`
+	WallMS             *int64    `gorm:"column:wall_ms"`
+	ModelMS            *int64    `gorm:"column:model_ms"`
+	ToolMS             *int64    `gorm:"column:tool_ms"`
+	TTFTMS             *int64    `gorm:"column:ttft_ms"`
+	InputTokens        *int64    `gorm:"column:input_tokens"`
+	OutputTokens       *int64    `gorm:"column:output_tokens"`
+	TotalTokens        *int64    `gorm:"column:total_tokens"`
+	CachedTokens       *int64    `gorm:"column:cached_tokens"`
+	CacheInputTokens   *int64    `gorm:"column:cache_input_tokens"`
+	ReasoningTokens    *int64    `gorm:"column:reasoning_tokens"`
+	MaxInputTokens     *int64    `gorm:"column:max_input_tokens"`
+	ContextInputTokens *int64    `gorm:"column:context_input_tokens"`
+	ObservedAt         time.Time `gorm:"column:observed_at;not null"`
+	CreatedAt          time.Time `gorm:"column:created_at;not null"`
+	UpdatedAt          time.Time `gorm:"column:updated_at;not null"`
+}
+
+func (ChatRunPerformance) TableName() string { return "chat_run_performance" }
