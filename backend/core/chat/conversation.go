@@ -22,7 +22,6 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/evolution"
-	"lazymind/core/log"
 	"lazymind/core/modelconfig"
 	"lazymind/core/state"
 	"lazymind/core/store"
@@ -367,6 +366,19 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		Find(&histories).Error; err != nil {
 		common.ReplyErr(w, "load conversation history failed", http.StatusInternalServerError)
 		return
+	}
+	var workspaceBindingCount int64
+	if _, submitted := raw["ask_answers_structured"]; submitted {
+		if err := db.Model(&orm.ConversationWorkspaceBinding{}).Where("conversation_id = ?", convID).Count(&workspaceBindingCount).Error; err != nil {
+			common.ReplyErr(w, "validate workspace question failed", http.StatusInternalServerError)
+			return
+		}
+		if workspaceBindingCount > 0 {
+			if err := validateWorkspaceAskSubmission(histories, raw); err != nil {
+				common.ReplyErr(w, "invalid request", http.StatusBadRequest)
+				return
+			}
+		}
 	}
 	if isSidechat {
 		// The request guard serializes child turns. Recompute from the histories
@@ -1200,124 +1212,30 @@ func StopChatGeneration(w http.ResponseWriter, r *http.Request) {
 		HistoryID      string `json:"history_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil && err != io.EOF {
-		common.ReplyErr(w, fmt.Sprintf("%s: %v", "invalid body", err), http.StatusBadRequest)
+		common.ReplyErr(w, "invalid body", http.StatusBadRequest)
 		return
 	}
-	convID := strings.TrimSpace(body.ConversationID)
-	historyID := strings.TrimSpace(body.HistoryID)
-	if convID == "" {
-		convID = conversationIDFromPath(r)
+	conversationID := strings.TrimSpace(body.ConversationID)
+	if conversationID == "" {
+		conversationID = conversationIDFromPath(r)
 	}
-	if convID == "" {
+	if conversationID == "" {
 		common.ReplyErr(w, "conversation_id required", http.StatusBadRequest)
 		return
 	}
-
 	userID := store.UserID(r)
 	if userID == "" {
 		userID = "0"
 	}
-	var conv orm.Conversation
-	if err := store.DB().Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", convID, userID).First(&conv).Error; err != nil {
-		common.ReplyErr(w, fmt.Sprintf("%s: %v", "conversation not found", err), http.StatusNotFound)
+	err := StopConversationExecution(r.Context(), store.DB(), store.State(), userID, conversationID, strings.TrimSpace(body.HistoryID), "stopped by user")
+	if errors.Is(err, errConversationUnavailable) {
+		common.ReplyErr(w, "conversation not found", http.StatusNotFound)
 		return
 	}
-
-	stateStore := store.State()
-	var stopSignalErr error
-	if stateStore != nil {
-		ids, err := getGeneratingHistoryIDs(r.Context(), stateStore, convID)
-		if err != nil {
-			log.Logger.Warn().Err(err).Str("conversation_id", convID).
-				Msg("failed to load active chat runs before cancellation")
-			stopSignalErr = err
-		}
-		if len(ids) == 0 && historyID != "" {
-			ids = append(ids, historyID)
-		}
-		externalHistories := make(map[string]struct{})
-		if len(ids) > 0 {
-			var err error
-			externalHistories, err = activeExternalChatHistoryIDs(r.Context(), store.DB(), userID, convID, ids)
-			if err != nil {
-				log.Logger.Warn().Err(err).Str("conversation_id", convID).
-					Msg("failed to identify external chat runs before cancellation")
-				if stopSignalErr == nil {
-					stopSignalErr = err
-				}
-				ids = nil
-			}
-		}
-		for _, hid := range ids {
-			if _, external := externalHistories[hid]; external {
-				continue
-			}
-			if status, err := getChatStatus(r.Context(), stateStore, convID, hid); err == nil &&
-				status.Status == "generating" && strings.TrimSpace(status.RunID) != "" {
-				cancelIsWinner, err := claimUserCancelDecision(r.Context(), stateStore, convID, hid, status.RunID)
-				if err != nil {
-					log.Logger.Warn().Err(err).
-						Str("conversation_id", convID).
-						Str("history_id", hid).
-						Str("run_id", status.RunID).
-						Msg("failed to record user cancellation decision")
-					if stopSignalErr == nil {
-						stopSignalErr = err
-					}
-				} else if !cancelIsWinner {
-					log.Logger.Info().Str("conversation_id", convID).Str("history_id", hid).
-						Str("run_id", status.RunID).Msg("user stop arrived after authoritative terminal")
-				}
-			}
-			if err := setChatCancelSignal(r.Context(), stateStore, convID, hid); err != nil {
-				log.Logger.Warn().Err(err).Str("conversation_id", convID).Str("history_id", hid).
-					Msg("failed to publish chat cancellation wakeup")
-				if stopSignalErr == nil {
-					stopSignalErr = err
-				}
-			}
-		}
-	}
-
-	// Interrupt any active plugin session steps.
-	if db := store.DB(); db != nil {
-		if err := newExternalChatApplication(db).requestStop(r.Context(), userID, convID, historyID); err != nil {
-			common.ReplyErr(w, fmt.Sprintf("stop external chat failed: %v", err), http.StatusServiceUnavailable)
-			return
-		}
-		workflow.StopActiveWorkflowSession(r.Context(), db, stateStore, convID)
-		taskIDs, err := subagent.InterruptConversation(r.Context(), db, convID, "stopped by user")
-		if err == nil {
-			for _, taskID := range taskIDs {
-				event := subagent.TaskEvent{
-					Type: "error", TaskID: taskID, Status: subagent.StatusInterrupted,
-					Message: "stopped by user",
-				}
-				_ = subagent.WriteStatus(r.Context(), stateStore, taskID, map[string]any{
-					"status": subagent.StatusInterrupted, "summary": "stopped by user",
-				})
-				_ = subagent.AppendStreamEvent(r.Context(), stateStore, taskID, event)
-				subagent.PublishConversationTaskEvent(r.Context(), db, stateStore, event)
-			}
-			subagent.CancelRuns(taskIDs)
-		}
-	}
-
-	// Notify Python ChatAgent to cancel any active chat session for this conversation.
-	notifyCtx, cancelNotify := terminalWriteContext(r.Context())
-	go func() {
-		defer cancelNotify()
-		if err := workflow.NotifyChatCancel(notifyCtx, convID); err != nil {
-			log.Logger.Warn().Err(err).Str("conversation_id", convID).
-				Msg("failed to notify Python chat cancellation")
-		}
-	}()
-
-	if stopSignalErr != nil {
-		common.ReplyErr(w, fmt.Sprintf("record chat cancellation failed: %v", stopSignalErr), http.StatusServiceUnavailable)
+	if err != nil {
+		common.ReplyErr(w, "stop conversation failed", http.StatusServiceUnavailable)
 		return
 	}
-
 	common.ReplyOK(w, nil)
 }
 

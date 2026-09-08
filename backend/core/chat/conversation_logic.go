@@ -3619,3 +3619,31 @@ func SaveAskAnswers(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+func validateWorkspaceAskSubmission(histories []orm.ChatHistory, raw map[string]any) error {
+	submission := askAnswersStructuredFromRaw(raw)
+	if submission == nil {
+		return nil
+	}
+	askID, _ := submission["ask_id"].(string)
+	askID = strings.TrimSpace(askID)
+	for i := len(histories) - 1; i >= 0; i-- {
+		ext := map[string]any{}
+		if json.Unmarshal(histories[i].Ext, &ext) != nil {
+			continue
+		}
+		if answered, _ := ext["ask_answered"].(bool); answered {
+			continue
+		}
+		pending, _ := ext["ask_pending"].(map[string]any)
+		if pending == nil {
+			continue
+		}
+		expected, _ := pending["ask_id"].(string)
+		if askID != "" && askID == strings.TrimSpace(expected) {
+			return nil
+		}
+		return fmt.Errorf("ask submission does not match the current pending card")
+	}
+	return fmt.Errorf("no pending ask card accepts this submission")
+}

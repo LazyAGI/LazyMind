@@ -172,3 +172,12 @@ f9f7d345ee718b7783a0eda75b6727bd053ad04d505df109d8c3dd4e3f8d1822  local/local-ru
 - 专项测试覆盖 create/resume DB Params、permission version更新、伪造参数、跨用户恢复、revoked spec、private params一致和公共AttemptContext字段边界。
 - 验证：`go test ./chat ./subagent ./localworkspace ./workflow/executor -run 'Test.*(Workspace|ExecutionSpec|Subagent|SubAgent|InterruptConversation|Context)' -count=1` 四包通过；冻结SHA全部通过，Local/Desktop未修改。
 - 下一步：任务5询问与撤销停止。
+
+
+### 2026-09-08 T5-LIFECYCLE：询问、权限与撤销停止完成
+
+- 从 StopChatGeneration提取 `StopConversationExecution`，保持所有权、run decision/cancel signal、external chat、Workflow、普通子任务和 Python cancel链路；原 handler改为解析/回复，删除已无用的 log import和重复停止代码。
+- localworkspace通过启动时注入的 StopConversationFunc调用 chat service，避免包循环。Revoke事务提交后使用独立15秒context停止所有绑定会话；停止失败不回滚授权，响应返回 affected_task_count、stop_requested、stop_failed_count。事务冲突不调用停止。
+- bound workspace提交 ask_answers_structured时校验 ask_id必须匹配当前会话最后一个未回答AskCard；错卡片/无pending返回400。未提交、部分保存和权限模式切换不调用此提交路径；普通非工作区问答保持旧行为。
+- 验证：`go test ./chat ./localworkspace ./subagent ./workflow . -run 'Test.*(Ask|Workspace|Stop|Interrupt|Cancel|Permission)' -count=1` 五包通过；冻结/算法边界通过。
+- 下一步：任务6前端UI/API。

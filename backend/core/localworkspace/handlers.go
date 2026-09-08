@@ -1,6 +1,7 @@
 package localworkspace
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -43,7 +44,7 @@ func Revoke(w http.ResponseWriter, r *http.Request) {
 	}
 	id, userID := mux.Vars(r)["workspace_id"], store.UserID(r)
 	now := time.Now().UTC()
-	var affected int64
+	var conversationIDs []string
 	err := db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
 		result := tx.Model(&orm.LocalWorkspace{}).
 			Where("id = ? AND create_user_id = ? AND status = ? AND version = ?", id, userID, StatusActive, body.Version).
@@ -62,13 +63,24 @@ func Revoke(w http.ResponseWriter, r *http.Request) {
 			}
 			return Error("binding_conflict", 409, "conflict")
 		}
-		return tx.Model(&orm.ConversationWorkspaceBinding{}).Where("workspace_id = ?", id).Count(&affected).Error
+		return tx.Model(&orm.ConversationWorkspaceBinding{}).Where("workspace_id = ?", id).
+			Pluck("conversation_id", &conversationIDs).Error
 	})
 	if replyError(w, err) {
 		return
 	}
+	stopFailed := 0
+	for _, conversationID := range conversationIDs {
+		stopCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		err := requestConversationStop(stopCtx, userID, conversationID)
+		cancel()
+		if err != nil {
+			stopFailed++
+		}
+	}
 	common.ReplyOK(w, map[string]any{"workspace_id": id, "status": StatusRevoked,
-		"version": body.Version + 1, "affected_task_count": affected})
+		"version": body.Version + 1, "affected_task_count": len(conversationIDs),
+		"stop_requested": len(conversationIDs) > 0, "stop_failed_count": stopFailed})
 }
 
 func UpdateConversationPermission(w http.ResponseWriter, r *http.Request) {

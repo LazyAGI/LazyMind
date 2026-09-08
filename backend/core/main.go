@@ -29,6 +29,7 @@ import (
 	"lazymind/core/externallease"
 	"lazymind/core/historyinjection"
 	"lazymind/core/knowledge_market"
+	"lazymind/core/localworkspace"
 	"lazymind/core/log"
 	"lazymind/core/migrate"
 	"lazymind/core/modelprovider"
@@ -501,6 +502,9 @@ func run(ctx context.Context) error {
 
 	// text/PrompttextInitialize（DB + Redis）。DB text ACL text；Redis textConversationtext/text/text。
 	store.Init(db.DB, readonlyDB.DB, store.MustStateFromEnv())
+	localworkspace.SetStopConversationFunc(func(ctx context.Context, userID, conversationID string) error {
+		return chat.StopConversationExecution(ctx, db.DB, store.State(), userID, conversationID, "", "workspace authorization revoked")
+	})
 	if err := workflow.SeedBuiltinWorkflows(ctx, store.DB()); err != nil {
 		return &startupError{msg: "seed built-in workflows", err: err}
 	}
