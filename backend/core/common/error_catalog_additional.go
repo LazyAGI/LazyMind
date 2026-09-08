@@ -650,6 +650,18 @@ func init() {
 	registerAdditionalErrorAlias("invalid external Agent attachment content", "invalid external Agent attachment", http.StatusBadRequest, 2002367)
 	registerAdditionalError("create external Agent attachment reference", http.StatusInternalServerError, 2002368)
 	registerAdditionalError("external Agent attachment event conflicts with existing content", http.StatusConflict, 2002369)
+	registerAdditionalError("text is required", http.StatusBadRequest, 2002370)
+	registerAdditionalError("text exceeds 5000 characters", http.StatusBadRequest, 2002371)
+	registerAdditionalError("translation service is not configured", http.StatusPreconditionFailed, 2002372)
+	registerAdditionalError("unsupported translation provider", http.StatusBadRequest, 2002373)
+	registerAdditionalError("invalid translation credentials", http.StatusPreconditionFailed, 2002374)
+	registerAdditionalError("SecretId and SecretKey are required", http.StatusPreconditionFailed, 2002375)
+	registerAdditionalError("invalid Tencent translation endpoint", http.StatusBadRequest, 2002376)
+	registerAdditionalErrorPattern("Tencent translation request failed: %w", "Tencent translation request failed", http.StatusBadGateway, 2002377)
+	registerAdditionalErrorAlias("Tencent translation request failed", "Tencent translation request failed", http.StatusBadGateway, 2002377)
+	registerAdditionalErrorPattern("Tencent translation returned HTTP %d", "Tencent translation returned an invalid response", http.StatusBadGateway, 2002378)
+	registerAdditionalErrorPattern("Tencent translation failed: %s", "Tencent translation failed", http.StatusBadGateway, 2002379)
+	registerAdditionalErrorAlias("Tencent translation failed", "Tencent translation failed", http.StatusBadGateway, 2002379)
 }
 
 func registerAdditionalError(message string, status, code int) {

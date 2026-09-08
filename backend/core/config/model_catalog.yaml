@@ -5,6 +5,7 @@
 #   model_providers  → category: model
 #   ocr_providers    → category: ocr
 #   search_providers → category: search
+#   translation_providers → category: translation
 #
 # capabilities flags (comma-separated in DB):
 #   multi_group      — user may create multiple groups under one provider
@@ -25,6 +26,33 @@
 #                               Set only for models verified as zero-cost, not trial-credit models.
 #   free_auto_select_base_urls — optional endpoint allow-list for endpoint-specific free models.
 #                                Omit when the preference applies to every seeded endpoint.
+
+translation_providers:
+  capabilities: [api_key_required]
+  suppliers:
+    - name: Tencent Translation
+      description:
+        zh-CN: |
+          腾讯云机器翻译，用于知识库文档预览中的划词翻译。腾讯云暂不提供适用于此场景的用户 OAuth 授权，需要配置 SecretId 和 SecretKey。
+
+          开通和配置：
+
+          1. 访问 https://console.cloud.tencent.com/tmt ，登录并开通机器翻译服务。
+
+          2. 访问 https://console.cloud.tencent.com/cam/capi ，新建或查看 API 密钥。建议为 LazyMind 创建独立的子用户密钥，并只授予机器翻译所需权限。
+
+          3. 将 SecretId 和 SecretKey 填入下方。凭据会加密保存在 LazyMind 后端，不会发送到文档预览页。
+        en-US: |
+          Tencent Cloud Machine Translation powers selection translation in knowledge-base document previews. Tencent Cloud does not offer an end-user OAuth flow for this use case, so a SecretId and SecretKey are required.
+
+          Setup:
+
+          1. Open https://console.cloud.tencent.com/tmt, sign in, and enable Machine Translation.
+
+          2. Open https://console.cloud.tencent.com/cam/capi and create or view an API credential. Prefer a dedicated CAM sub-user with only the permissions required for Machine Translation.
+
+          3. Enter the SecretId and SecretKey below. LazyMind encrypts them on the server and never sends them to the document preview page.
+      base_url: "https://tmt.tencentcloudapi.com/"
 
 model_providers:
   capabilities: [multi_group, custom_base_url, has_models]
