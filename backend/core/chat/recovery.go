@@ -364,8 +364,8 @@ func RestoreConversation(w http.ResponseWriter, r *http.Request) {
 			var childIDs []string
 			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Model(&orm.Conversation{}).
 				Where(
-					"parent_conversation_id = ? AND create_user_id = ? AND deleted_at = ?",
-					conversation.ID, userID, *conversation.DeletedAt,
+					"parent_conversation_id = ? AND create_user_id = ? AND deleted_at = ? AND relation_type = ?",
+					conversation.ID, userID, *conversation.DeletedAt, conversationRelationSidechat,
 				).Pluck("id", &childIDs).Error; err != nil {
 				return err
 			}
@@ -417,7 +417,7 @@ func purgeConversation(ctxDB *gorm.DB, conversationID, userID string) error {
 	if root.ParentConversationID == nil {
 		var children []orm.Conversation
 		if err := ctxDB.Where(
-			"parent_conversation_id = ? AND create_user_id = ?", root.ID, userID,
+			"parent_conversation_id = ? AND create_user_id = ? AND relation_type = ?", root.ID, userID, conversationRelationSidechat,
 		).Find(&children).Error; err != nil {
 			return err
 		}
@@ -451,7 +451,7 @@ func purgeConversation(ctxDB *gorm.DB, conversationID, userID string) error {
 		expected[conversation.ID] = struct{}{}
 		conversationIDs = append(conversationIDs, conversation.ID)
 	}
-	err := ctxDB.Transaction(func(tx *gorm.DB) error {
+	err := conversationCheckpoint(ctx, ctxDB, conversationID, func(tx *gorm.DB) error {
 		var lockedRoot orm.Conversation
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where(
 			"id = ? AND create_user_id = ? AND (deleted_at IS NOT NULL OR is_ephemeral = ?)",
@@ -462,7 +462,7 @@ func purgeConversation(ctxDB *gorm.DB, conversationID, userID string) error {
 		var lockedFamily []orm.Conversation
 		query := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("create_user_id = ?", userID)
 		if lockedRoot.ParentConversationID == nil {
-			query = query.Where("id = ? OR parent_conversation_id = ?", lockedRoot.ID, lockedRoot.ID)
+			query = query.Where("id = ? OR (parent_conversation_id = ? AND relation_type = ?)", lockedRoot.ID, lockedRoot.ID, conversationRelationSidechat)
 		} else {
 			query = query.Where("id = ?", lockedRoot.ID)
 		}
@@ -486,6 +486,7 @@ func purgeConversation(ctxDB *gorm.DB, conversationID, userID string) error {
 			{&orm.ChatHistory{}, "conversation_id IN ?", []any{conversationIDs}},
 			{&orm.MultiAnswersChatHistory{}, "conversation_id IN ?", []any{conversationIDs}},
 			{&orm.ConversationArtifact{}, "conversation_id IN ? AND create_user_id = ?", []any{conversationIDs, userID}},
+			{&orm.ConversationForkOrigin{}, "conversation_id IN ?", []any{conversationIDs}},
 			{&orm.ConversationIdleEvent{}, "session_id IN ? AND user_id = ?", []any{conversationIDs, userID}},
 			{&orm.EpisodeMemory{}, "conversation_id IN ? AND user_id = ?", []any{conversationIDs, userID}},
 		}

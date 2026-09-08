@@ -139,6 +139,9 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	// Preserve whether the caller supplied a search config before defaults create one.
+	requestConversation, _ := raw["conversation"].(map[string]any)
+	_, hasExplicitSearchConfig := requestConversation["search_config"].(map[string]any)
 	setConversationDefaultValue(raw)
 	if !checkInput(raw) {
 		common.ReplyErr(w, "input required", http.StatusBadRequest)
@@ -301,6 +304,7 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "failed to ensure conversation", err), http.StatusInternalServerError)
 		return
 	}
+	applyForkRequestDefaults(raw, *conversationRecord, hasExplicitSearchConfig)
 	isSidechat := isSidechatConversation(*conversationRecord)
 	if isSidechat {
 		if !stream {
@@ -364,11 +368,16 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		// loaded inside that guard instead of using ensureConversation's earlier
 		// count, which another request may have advanced while this one waited.
 		seq = 1
-		for _, history := range histories {
-			if history.Seq >= seq {
-				seq = history.Seq + 1
-			}
+	}
+	for _, h := range histories {
+		if h.Seq >= seq {
+			seq = h.Seq + 1
 		}
+	}
+	histories, err = revalidateForkHistoryAttachments(r.Context(), db, sidechatDatasetCaller(r, userID), histories)
+	if err != nil {
+		forkReplyError(w, err)
+		return
 	}
 	target := resolvePersistTarget(histories, raw, seq)
 	upstreamHistories := historiesForUpstream(histories, target)
@@ -662,6 +671,7 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 	recordDatasetUsageForChat(r.Context(), raw, reqBody, userID, userName, target.IsRegeneration)
 	historyExt := buildChatHistoryExtWithTrail(raw, displayQuery, histories, target)
 	historyExt = mergeChatModelRouteIntoExt(historyExt, reqBody)
+	historyExt = mergeConversationConfigSnapshot(historyExt, reqBody)
 	if err := applyChatAttachmentConversion(r.Context(), reqBody); err != nil {
 		common.ReplyErr(w, chatAttachmentConversionReplyMessage(isSidechat, err), http.StatusBadGateway)
 		return
@@ -1591,6 +1601,11 @@ func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
 		"run_id":            h.RunID,
 		"run_status":        h.RunStatus,
 	}
+	var forkFlags struct {
+		ReadOnly bool `json:"fork_read_only"`
+	}
+	_ = json.Unmarshal(h.Ext, &forkFlags)
+	item["fork_read_only"] = forkFlags.ReadOnly
 	if modelRoute != nil {
 		item["model_route"] = modelRoute
 	}
@@ -1805,6 +1820,10 @@ func GetConversationDetail(w http.ResponseWriter, r *http.Request) {
 		"project_key":           source.ProjectKey,
 		"project_name":          source.ProjectName,
 	}
+	if err := mergeForkMetadata(r.Context(), db, c, conversationItem); err != nil {
+		forkReplyError(w, err)
+		return
+	}
 	mergeConversationRelationMetadata(conversationItem, c, loadParentDisplayName(r.Context(), db, c, userID), true)
 	writeConversationJSON(w, http.StatusOK, map[string]any{
 		"conversation": conversationItem,
@@ -1823,15 +1842,35 @@ func GetConversationHistory(w http.ResponseWriter, r *http.Request) {
 	if userID == "" {
 		userID = "0"
 	}
-	if err := store.DB().Where("id = ? AND create_user_id = ?", convID, userID).First(&orm.Conversation{}).Error; err != nil {
+	anchored := r.URL.Query().Get("anchor_history_id") != "" || r.URL.Query().Get("anchor_page_token") != ""
+	query := store.DB().WithContext(r.Context()).Where("id = ? AND create_user_id = ?", convID, userID)
+	if anchored {
+		query = query.Where("deleted_at IS NULL")
+	}
+	if err := query.First(&orm.Conversation{}).Error; err != nil {
+		if anchored {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				err = forkFail("SOURCE_UNAVAILABLE")
+			}
+			forkReplyError(w, err)
+			return
+		}
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "conversation not found", err), http.StatusNotFound)
 		return
 	}
 
+	if serveForkHistoryWindow(w, r, convID) {
+		return
+	}
 	pageSize, offset := parseConversationHistoryPage(r)
 	page, total, err := loadConversationHistoryPage(r.Context(), convID, pageSize, offset)
 	if err != nil {
 		common.ReplyErr(w, fmt.Sprintf("load conversation history: %v", err), http.StatusInternalServerError)
+		return
+	}
+	page, err = refreshForkAttachmentsForRead(r.Context(), store.DB(), sidechatDatasetCaller(r, userID), page)
+	if err != nil {
+		forkReplyError(w, err)
 		return
 	}
 
@@ -1987,7 +2026,7 @@ func archiveConversation(
 ) error {
 	now := time.Now().UTC()
 	expiresAt := now.Add(30 * 24 * time.Hour)
-	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return conversationCheckpoint(ctx, db, conversationID, func(tx *gorm.DB) error {
 		var root orm.Conversation
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id").Where(
 			"id = ? AND create_user_id = ? AND deleted_at IS NULL", conversationID, userID,
@@ -2062,10 +2101,10 @@ func BatchDeleteConversations(w http.ResponseWriter, r *http.Request) {
 	db := store.DB()
 
 	var ownedIDs []string
-	err := db.Transaction(func(tx *gorm.DB) error {
+	err := conversationCheckpoint(r.Context(), db, "", func(tx *gorm.DB) error {
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Model(&orm.Conversation{}).
 			Where("id IN ? AND create_user_id = ? AND deleted_at IS NULL", uniqueIDs, userID).
-			Pluck("id", &ownedIDs).Error; err != nil {
+			Order("id").Pluck("id", &ownedIDs).Error; err != nil {
 			return err
 		}
 		if len(ownedIDs) == 0 {
@@ -2342,74 +2381,55 @@ func SetChatHistory(w http.ResponseWriter, r *http.Request) {
 		SetHistoryID     string `json:"set_history_id"`
 		DeletedHistoryID string `json:"deleted_history_id"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		common.ReplyErr(w, fmt.Sprintf("%s: %v", "invalid body", err), http.StatusBadRequest)
+	if json.NewDecoder(r.Body).Decode(&body) != nil || body.SetHistoryID == "" || body.DeletedHistoryID == "" || body.SetHistoryID == body.DeletedHistoryID {
+		common.ReplyErr(w, "invalid history selection", http.StatusBadRequest)
 		return
 	}
-	if body.SetHistoryID == "" {
-		common.ReplyErr(w, "set_history_id required", http.StatusBadRequest)
-		return
-	}
-	if body.DeletedHistoryID == "" {
-		common.ReplyErr(w, "deleted_history_id required", http.StatusBadRequest)
-		return
-	}
-
 	db := store.DB()
-	now := time.Now()
-
 	var selected orm.MultiAnswersChatHistory
-	if err := db.Where("id = ?", body.SetHistoryID).First(&selected).Error; err != nil {
-		common.ReplyErr(w, fmt.Sprintf("%s: %v", "set_history_id not found", err), http.StatusNotFound)
-		return
-	}
-	var deleted orm.MultiAnswersChatHistory
-	if err := db.Where("id = ?", body.DeletedHistoryID).First(&deleted).Error; err != nil {
-		common.ReplyErr(w, fmt.Sprintf("%s: %v", "deleted_history_id not found", err), http.StatusNotFound)
-		return
-	}
-	if selected.ConversationID == "" || selected.ConversationID != deleted.ConversationID {
-		common.ReplyErr(w, "history ids are not in same conversation", http.StatusBadRequest)
+	if err := db.Where("id = ?", body.SetHistoryID).Take(&selected).Error; err != nil {
+		common.ReplyErr(w, "history not found", http.StatusNotFound)
 		return
 	}
 	userID := store.UserID(r)
 	if userID == "" {
 		userID = "0"
 	}
-	var conv orm.Conversation
-	if err := db.Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", selected.ConversationID, userID).First(&conv).Error; err != nil {
-		common.ReplyErr(w, fmt.Sprintf("%s: %v", "conversation not found", err), http.StatusNotFound)
+	err := conversationCheckpoint(r.Context(), db, selected.ConversationID, func(tx *gorm.DB) error {
+		var conv orm.Conversation
+		if err := tx.Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", selected.ConversationID, userID).Take(&conv).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("id = ? AND conversation_id = ?", body.SetHistoryID, conv.ID).Take(&selected).Error; err != nil {
+			return err
+		}
+		var discarded orm.MultiAnswersChatHistory
+		if err := tx.Where("id = ? AND conversation_id = ? AND seq = ?", body.DeletedHistoryID, conv.ID, selected.Seq).Take(&discarded).Error; err != nil {
+			return err
+		}
+		target := orm.ChatHistory{ID: selected.ID, Seq: selected.Seq, ConversationID: selected.ConversationID,
+			RawContent: selected.RawContent, Content: selected.Content, Result: selected.Result, RetrievalResult: selected.RetrievalResult,
+			ToolCallTurns: selected.ToolCallTurns, ThinkingDurationS: selected.ThinkingDurationS, RunID: selected.RunID,
+			RunStatus: selected.RunStatus, RunTerminal: selected.RunTerminal, FeedBack: selected.FeedBack,
+			Reason: selected.Reason, Ext: selected.Ext, Version: "2.3", TimeMixin: orm.TimeMixin{CreateTime: time.Now(), UpdateTime: time.Now()}}
+		if err := validateForkPrefix([]orm.ChatHistory{target}); err != nil {
+			return err
+		}
+		if discarded.RunStatus == "generating" {
+			return forkFail("SOURCE_NOT_SETTLED")
+		}
+		if err := tx.Where("conversation_id = ? AND seq = ?", conv.ID, selected.Seq).Delete(&orm.ChatHistory{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Create(&target).Error; err != nil {
+			return err
+		}
+		return tx.Where("id IN ?", []string{selected.ID, discarded.ID}).Delete(&orm.MultiAnswersChatHistory{}).Error
+	})
+	if err != nil {
+		forkReplyError(w, err)
 		return
 	}
-
-	var exists orm.ChatHistory
-	if err := db.Where("id = ?", body.SetHistoryID).First(&exists).Error; err != nil {
-		target := orm.ChatHistory{
-			ID:                selected.ID,
-			Seq:               selected.Seq,
-			ConversationID:    selected.ConversationID,
-			RawContent:        selected.RawContent,
-			RetrievalResult:   selected.RetrievalResult,
-			Content:           selected.Content,
-			Result:            selected.Result,
-			ToolCallTurns:     nonNegativeToolCallTurns(int64(selected.ToolCallTurns)),
-			ThinkingDurationS: selected.ThinkingDurationS,
-			RunID:             selected.RunID,
-			RunStatus:         selected.RunStatus,
-			RunTerminal:       selected.RunTerminal,
-			FeedBack:          selected.FeedBack,
-			Reason:            selected.Reason,
-			Ext:               selected.Ext,
-			Version:           "2.3",
-			TimeMixin:         orm.TimeMixin{CreateTime: now, UpdateTime: now},
-		}
-		if err := db.Create(&target).Error; err != nil {
-			common.ReplyErr(w, fmt.Sprintf("%s: %v", "set history failed", err), http.StatusInternalServerError)
-			return
-		}
-	}
-
-	_ = db.Where("id IN ?", []string{body.SetHistoryID, body.DeletedHistoryID}).Delete(&orm.MultiAnswersChatHistory{}).Error
 	writeConversationJSON(w, http.StatusOK, map[string]any{"history_id": body.SetHistoryID})
 }
 

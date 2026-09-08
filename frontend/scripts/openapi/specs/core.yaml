@@ -1,58 +1,5 @@
 components:
     schemas:
-        PreferenceOrganizerPass:
-            properties:
-                after:
-                    allOf:
-                        - $ref: '#/components/schemas/PreferenceOrganizerState'
-                    nullable: true
-                before:
-                    $ref: '#/components/schemas/PreferenceOrganizerState'
-                changes:
-                    type: integer
-                operation_count:
-                    type: integer
-                outcome:
-                    type: string
-                pass_number:
-                    type: integer
-                plan_hash:
-                    type: string
-                receipts:
-                    items:
-                        $ref: '#/components/schemas/PreferenceOrganizerReceipt'
-                    type: array
-            required:
-                - pass_number
-                - plan_hash
-                - before
-                - receipts
-                - changes
-                - operation_count
-                - outcome
-            type: object
-        PreferenceOrganizerState:
-            properties:
-                etag:
-                    type: string
-                full_projection_chars:
-                    type: integer
-                projected_chars:
-                    type: integer
-                projected_items:
-                    type: integer
-                projection_truncated:
-                    type: boolean
-                stored_items:
-                    type: integer
-            required:
-                - stored_items
-                - full_projection_chars
-                - projected_items
-                - projected_chars
-                - projection_truncated
-                - etag
-            type: object
         ACLApiResponse:
             properties:
                 code:
@@ -813,6 +760,14 @@ components:
                     type: string
                 display_name:
                     type: string
+                fork_capability:
+                    $ref: '#/components/schemas/ConversationForkCapability'
+                fork_origin:
+                    allOf:
+                        - $ref: '#/components/schemas/ConversationForkOrigin'
+                    nullable: true
+                has_fork_descendants:
+                    type: boolean
                 is_pinned:
                     type: boolean
                 models:
@@ -908,6 +863,50 @@ components:
                 - history_id
                 - type
             type: object
+        ConversationForkCapability:
+            properties:
+                reason_code:
+                    type: string
+                supported:
+                    type: boolean
+            required:
+                - supported
+            type: object
+        ConversationForkOrigin:
+            properties:
+                can_locate:
+                    type: boolean
+                conversation_id:
+                    type: string
+                forked_at:
+                    format: date-time
+                    type: string
+                source_conversation_id:
+                    type: string
+                source_history_id:
+                    type: string
+                source_history_revision:
+                    type: string
+                source_prefix_revision:
+                    type: string
+                source_seq:
+                    type: integer
+                source_status:
+                    enum:
+                        - available
+                        - changed
+                        - deleted
+                        - node_deleted
+                        - unavailable
+                    type: string
+                source_title_snapshot:
+                    type: string
+            required:
+                - source_conversation_id
+                - source_history_id
+                - source_status
+                - can_locate
+            type: object
         ConversationHistoryItem:
             properties:
                 create_time:
@@ -922,6 +921,8 @@ components:
                     type: array
                 feed_back:
                     type: integer
+                fork_read_only:
+                    type: boolean
                 id:
                     type: string
                 input:
@@ -966,7 +967,11 @@ components:
                     type: array
                 name:
                     type: string
+                newer_page_token:
+                    type: string
                 next_page_token:
+                    type: string
+                older_page_token:
                     type: string
                 total_size:
                     format: int64
@@ -997,6 +1002,14 @@ components:
                     type: string
                 display_name:
                     type: string
+                fork_capability:
+                    $ref: '#/components/schemas/ConversationForkCapability'
+                fork_origin:
+                    allOf:
+                        - $ref: '#/components/schemas/ConversationForkOrigin'
+                    nullable: true
+                has_fork_descendants:
+                    type: boolean
                 is_pinned:
                     type: boolean
                 models:
@@ -2655,6 +2668,213 @@ components:
                 run_terminal:
                     $ref: '#/components/schemas/RunTerminal'
             type: object
+        ForkAttachment:
+            properties:
+                name:
+                    type: string
+                reason:
+                    type: string
+                reference:
+                    properties: {}
+                    type: object
+                status:
+                    enum:
+                        - available
+                        - unavailable
+                    type: string
+            required:
+                - name
+                - status
+            type: object
+        ForkConfigIssue:
+            properties:
+                field:
+                    type: string
+                reason:
+                    type: string
+                requires_confirmation:
+                    type: boolean
+                suggested_value: {}
+            required:
+                - field
+                - reason
+                - requires_confirmation
+            type: object
+        ForkConfigSnapshot:
+            properties:
+                chat_executor:
+                    type: string
+                completeness:
+                    type: string
+                enable_subagent:
+                    type: boolean
+                enable_workflow:
+                    type: boolean
+                filters:
+                    properties: {}
+                    type: object
+                local_fs_source_ids:
+                    items:
+                        type: string
+                    type: array
+                max_input_tokens:
+                    type: string
+                mode:
+                    type: string
+                model:
+                    $ref: '#/components/schemas/ChatModelRoute'
+                reasoning:
+                    type: boolean
+                thinking_depth:
+                    type: string
+                use_memory:
+                    type: boolean
+                version:
+                    type: integer
+                workflow_mode:
+                    type: string
+            type: object
+        ForkCreateRequest:
+            properties:
+                confirmed_fields:
+                    items:
+                        type: string
+                    type: array
+                confirmed_values:
+                    additionalProperties: true
+                    type: object
+                expected_prefix_revision:
+                    type: string
+                replacement_model:
+                    $ref: '#/components/schemas/ForkModelSelection'
+                source_history_id:
+                    type: string
+            required:
+                - source_history_id
+                - expected_prefix_revision
+            type: object
+        ForkError:
+            properties:
+                code:
+                    enum:
+                        - SOURCE_UNAVAILABLE
+                        - SOURCE_NOT_SETTLED
+                        - SOURCE_NOT_COMPLETED
+                        - SOURCE_CHANGED
+                        - CONFIG_CONFIRMATION_REQUIRED
+                        - MODEL_UNAVAILABLE
+                        - CONFIG_UNSUPPORTED
+                        - ANSWER_SELECTION_REQUIRED
+                        - FORK_UNSUPPORTED
+                        - IDEMPOTENCY_CONFLICT
+                        - FORK_RESULT_UNAVAILABLE
+                        - FORK_TOO_LARGE
+                        - INVALID_REQUEST
+                        - FORK_FAILED
+                    type: string
+                message:
+                    type: string
+                request_id:
+                    type: string
+            required:
+                - code
+                - message
+                - request_id
+            type: object
+        ForkModelSelection:
+            properties:
+                mode:
+                    enum:
+                        - fixed
+                        - auto
+                    type: string
+                model_id:
+                    type: string
+            required:
+                - mode
+            type: object
+        ForkPreview:
+            properties:
+                attachments_summary:
+                    items:
+                        $ref: '#/components/schemas/ForkAttachment'
+                    type: array
+                can_fork:
+                    type: boolean
+                config_issues:
+                    items:
+                        $ref: '#/components/schemas/ForkConfigIssue'
+                    type: array
+                config_snapshot_summary:
+                    $ref: '#/components/schemas/ForkConfigSnapshot'
+                config_status:
+                    type: string
+                excerpt:
+                    type: string
+                inherited_message_count:
+                    type: integer
+                inherited_turn_count:
+                    type: integer
+                prefix_revision:
+                    type: string
+                reason_code:
+                    type: string
+                source_history_id:
+                    type: string
+                source_history_revision:
+                    type: string
+                source_seq:
+                    type: integer
+                source_title:
+                    type: string
+                warnings:
+                    items:
+                        type: string
+                    type: array
+            required:
+                - source_history_id
+                - source_seq
+                - source_title
+                - source_history_revision
+                - prefix_revision
+                - excerpt
+                - inherited_turn_count
+                - inherited_message_count
+                - config_snapshot_summary
+                - config_status
+                - config_issues
+                - attachments_summary
+                - warnings
+                - can_fork
+            type: object
+        ForkPreviewRequest:
+            properties:
+                source_history_id:
+                    type: string
+            required:
+                - source_history_id
+            type: object
+        ForkResult:
+            properties:
+                conversation:
+                    $ref: '#/components/schemas/ConversationItem'
+                fork_origin:
+                    $ref: '#/components/schemas/ConversationForkOrigin'
+                inherited_turn_count:
+                    type: integer
+                replayed:
+                    type: boolean
+                warnings:
+                    items:
+                        type: string
+                    type: array
+            required:
+                - conversation
+                - fork_origin
+                - inherited_turn_count
+                - warnings
+                - replayed
+            type: object
         GetKBAuthorizationResponse:
             properties:
                 grants:
@@ -3124,6 +3344,37 @@ components:
                 source:
                     type: string
             type: object
+        PreferenceOrganizerPass:
+            properties:
+                after:
+                    allOf:
+                        - $ref: '#/components/schemas/PreferenceOrganizerState'
+                    nullable: true
+                before:
+                    $ref: '#/components/schemas/PreferenceOrganizerState'
+                changes:
+                    type: integer
+                operation_count:
+                    type: integer
+                outcome:
+                    type: string
+                pass_number:
+                    type: integer
+                plan_hash:
+                    type: string
+                receipts:
+                    items:
+                        $ref: '#/components/schemas/PreferenceOrganizerReceipt'
+                    type: array
+            required:
+                - pass_number
+                - plan_hash
+                - before
+                - receipts
+                - changes
+                - operation_count
+                - outcome
+            type: object
         PreferenceOrganizerReceipt:
             properties:
                 action:
@@ -3198,6 +3449,28 @@ components:
                     type: boolean
                 total_changes:
                     type: integer
+            type: object
+        PreferenceOrganizerState:
+            properties:
+                etag:
+                    type: string
+                full_projection_chars:
+                    type: integer
+                projected_chars:
+                    type: integer
+                projected_items:
+                    type: integer
+                projection_truncated:
+                    type: boolean
+                stored_items:
+                    type: integer
+            required:
+                - stored_items
+                - full_projection_chars
+                - projected_items
+                - projected_chars
+                - projection_truncated
+                - etag
             type: object
         PreferenceOrganizerTaskData:
             properties:
@@ -9290,6 +9563,127 @@ paths:
                 "200":
                     description: OK
             summary: GET /conversations/{conversation_id}/events
+    /api/core/conversations/{conversation_id}/fork-preview:
+        post:
+            operationId: previewConversationFork
+            parameters:
+                - in: path
+                  name: conversation_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ForkPreviewRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ForkPreview'
+                    description: Success
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ForkError'
+                    description: Fork failed
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ForkError'
+                    description: Fork failed
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ForkError'
+                    description: Fork failed
+                "413":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ForkError'
+                    description: Fork failed
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ForkError'
+                    description: Fork failed
+            summary: previewConversationFork
+            tags:
+                - Conversations
+    /api/core/conversations/{conversation_id}/forks:
+        post:
+            operationId: createConversationFork
+            parameters:
+                - in: path
+                  name: conversation_id
+                  required: true
+                  schema:
+                    type: string
+                - in: header
+                  name: Idempotency-Key
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ForkCreateRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ForkResult'
+                    description: Success
+                "201":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ForkResult'
+                    description: Created
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ForkError'
+                    description: Fork failed
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ForkError'
+                    description: Fork failed
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ForkError'
+                    description: Fork failed
+                "413":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ForkError'
+                    description: Fork failed
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ForkError'
+                    description: Fork failed
+            summary: createConversationFork
+            tags:
+                - Conversations
     /api/core/conversations/{conversation_id}/model:
         patch:
             description: Uses expected_version for optimistic locking and rejects changes while chat generation, a Workflow, or a background task is active. Fixed mode affects only the llm role from the next request onward.
@@ -9607,6 +10001,16 @@ paths:
     /api/core/conversations/{name}:history:
         get:
             parameters:
+                - in: query
+                  name: anchor_history_id
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: anchor_page_token
+                  required: false
+                  schema:
+                    type: string
                 - in: path
                   name: name
                   required: true
@@ -11816,6 +12220,18 @@ paths:
                 "200":
                     description: OK
             summary: GET /external-chat/runs
+    /api/core/external-chat/runs/{run_id}:attachment:
+        post:
+            parameters:
+                - in: path
+                  name: run_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /external-chat/runs/{run_id}:attachment
     /api/core/external-chat/runs/{run_id}:event:
         post:
             parameters:
@@ -16537,6 +16953,18 @@ paths:
                 "200":
                     description: OK
             summary: POST /workflow-drafts/{draft_id}:confirm-workflow
+    /api/core/workflow-drafts/{draft_id}:copy:
+        post:
+            parameters:
+                - in: path
+                  name: draft_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-drafts/{draft_id}:copy
     /api/core/workflow-drafts/{draft_id}:publish:
         post:
             parameters:
@@ -17230,6 +17658,18 @@ paths:
                 "200":
                     description: OK
             summary: POST /workflow-sessions/{session_id}:advance-step-and-hand-off
+    /api/core/workflow-sessions/{session_id}:approval-preference:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-sessions/{session_id}:approval-preference
     /api/core/workflow-sessions/{session_id}:dismiss:
         post:
             parameters:
@@ -17308,6 +17748,18 @@ paths:
                 "200":
                     description: OK
             summary: GET /workflows/{workflow_id}
+    /api/core/workflows/{workflow_id}:copy:
+        post:
+            parameters:
+                - in: path
+                  name: workflow_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflows/{workflow_id}:copy
     /api/core/writer-download-conversions/{source_hash}/{target_format}:
         get:
             parameters:

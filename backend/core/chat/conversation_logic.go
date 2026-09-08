@@ -1323,6 +1323,18 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 	filesMap := filesPerTurnMap(histories, currentFilePaths, currentSeq)
 	filesMap = mergeConversationSourceFiles(ctx, db, convID, userID, filesMap)
 	modelCtx := loadModelContext(ctx, db, convID)
+	restrictedContext := false
+	for _, h := range histories {
+		var flags struct {
+			Restricted bool `json:"fork_restricted_context"`
+		}
+		_ = json.Unmarshal(h.Ext, &flags)
+		if flags.Restricted {
+			restrictedContext = true
+			modelCtx = nil
+			break
+		}
+	}
 	historyMessages := buildModelHistoryMessages(histories, askAnswersStructuredFromRaw(raw), modelCtx)
 	historyMessages = prependConversationSourceContext(ctx, db, convID, historyMessages)
 	body := map[string]any{
@@ -1350,6 +1362,9 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 			"covered_through_seq": modelCtx.CoveredThroughSeq,
 			"version":             modelCtx.Version,
 		}
+	}
+	if restrictedContext {
+		delete(body, "intent_context")
 	}
 	requestDisabledTools := stringSliceFromAny(raw["disabled_tools"])
 	if len(requestDisabledTools) > 0 {
@@ -1637,6 +1652,26 @@ func handleNonStreamChat(
 	historyExt = archiveRegeneratedTrafficAttempt(historyExt, target)
 	runID := newID("run_")
 	reqBody["run_id"] = runID
+	historyID := target.HistoryID
+	if historyID == "" {
+		historyID = newID("h_")
+	}
+	historyExt = mergeConversationConfigSnapshot(historyExt, reqBody)
+	if err := registerForkableHistoryRun(reqCtx, db, convID, historyID, runID, query, target, historyExt); err != nil {
+		common.ReplyErr(w, "failed to start history run", http.StatusConflict)
+		return
+	}
+	finalized := false
+	defer func() {
+		if !finalized {
+			terminal := &RunTerminal{Status: "failed", Reason: "runtime_failure", Code: "upstream_request_failed"}
+			if reqCtx.Err() != nil {
+				terminal.Status = "cancelled"
+				terminal.Reason = "user_cancel"
+			}
+			persistImmediateRunTerminal(reqCtx, db, convID, historyID, query, runID, target, historyExt, terminal)
+		}
+	}()
 	chunks, _, err := StreamChatUpstream(reqCtx, baseURL, reqBody)
 	if err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "chat service unavailable", err), http.StatusBadGateway)
@@ -1689,32 +1724,13 @@ func handleNonStreamChat(
 		common.ReplyErr(w, "chat service returned no answer", http.StatusBadGateway)
 		return
 	}
-	historyID := target.HistoryID
-	if historyID == "" {
-		historyID = newID("h_")
-	}
 	now := time.Now()
 	retrievalResult := marshalRetrievalResult(sources)
-	hist := orm.ChatHistory{
-		ID:              historyID,
-		Seq:             target.Seq,
-		ConversationID:  convID,
-		RawContent:      query,
-		RetrievalResult: retrievalResult,
-		Content:         query,
-		Result:          rawAnswer,
-		RunID:           runID,
-		RunStatus:       runTerminal.Status,
-		RunTerminal:     terminalJSON(runTerminal),
-		ToolCallTurns:   toolCallTurns,
-		FeedBack:        0,
-		Reason:          "",
-		ExpectedAnswer:  "",
-		Ext:             historyExt,
-		TimeMixin:       orm.TimeMixin{CreateTime: now, UpdateTime: now},
-	}
-	if target.IsRegeneration && target.Existing != nil {
-		if err := db.Model(&orm.ChatHistory{}).Where("id = ?", historyID).Updates(map[string]any{
+
+	{
+		persistCtx, cancel := terminalWriteContext(reqCtx)
+		defer cancel()
+		updated, err := updateOwnedChatHistory(persistCtx, db, historyID, runID, map[string]any{
 			"seq":              target.Seq,
 			"raw_content":      query,
 			"content":          query,
@@ -1730,16 +1746,13 @@ func handleNonStreamChat(
 			"ext":              historyExt,
 			"create_time":      now,
 			"update_time":      now,
-		}).Error; err != nil {
+		})
+		if err != nil || !updated {
 			common.ReplyErr(w, "failed to update history", http.StatusInternalServerError)
 			return
 		}
-	} else {
-		if err := db.Create(&hist).Error; err != nil {
-			common.ReplyErr(w, fmt.Sprintf("%s: %v", "failed to save history", err), http.StatusInternalServerError)
-			return
-		}
 	}
+	finalized = true
 	persistSuccessfulChatModel(reqCtx, db, userIDFromChatRequestBody(reqBody), convID, runID, reqBody, runTerminal)
 	if stateStore != nil {
 		_ = setChatRuntimeStatus(reqCtx, stateStore, convID, historyID, runTerminal.Status, answer, runID, runTerminal)
@@ -1808,6 +1821,32 @@ func handleStreamChat(
 	}
 	chatCtx, chatCancel := context.WithCancel(context.Background())
 	defer chatCancel()
+	if !dualReply && requestUsesRunDecision(reqBody) {
+		historyExt = mergeConversationConfigSnapshot(historyExt, reqBody)
+		if err := registerForkableHistoryRun(chatCtx, db, convID, historyID, primaryRunID, query, target, historyExt); err != nil {
+			writeSSEChunk(w, flusher, &ChatChunkResponse{ConversationID: convID, Seq: int32(target.Seq), HistoryID: historyID, RuntimeEvent: failedRunEvent(primaryRunID, "history_run_claim_failed", false)})
+			return
+		}
+	}
+	if dualReply {
+		if err := conversationCheckpoint(chatCtx, db, convID, func(tx *gorm.DB) error {
+			if target.IsRegeneration && target.Existing != nil {
+				if err := tx.Model(&orm.ChatHistory{}).Where("id = ?", target.Existing.ID).Updates(map[string]any{"run_id": primaryRunID, "run_status": "generating", "run_terminal": nil}).Error; err != nil {
+					return err
+				}
+			}
+			for _, identity := range [][2]string{{historyID, primaryRunID}, {secondaryHistoryID, secondaryRunID}} {
+				now := time.Now().UTC()
+				if err := tx.Create(&orm.MultiAnswersChatHistory{ID: identity[0], ConversationID: convID, Seq: target.Seq, RawContent: query, Content: query, RunID: identity[1], RunStatus: "generating", Ext: historyExt, TimeMixin: orm.TimeMixin{CreateTime: now, UpdateTime: now}}).Error; err != nil {
+					return err
+				}
+			}
+			return nil
+		}); err != nil {
+			writeSSEChunk(w, flusher, &ChatChunkResponse{ConversationID: convID, HistoryID: historyID, RuntimeEvent: failedRunEvent(primaryRunID, "history_run_claim_failed", false)})
+			return
+		}
+	}
 	if stateStore != nil {
 		if target.IsRegeneration {
 			_ = clearChatData(chatCtx, stateStore, convID, historyID)
@@ -1960,6 +1999,10 @@ func streamSingleAnswer(
 		runID = newID("run_")
 		reqBody["run_id"] = runID
 	}
+	// Reuse the snapshot captured before handleStreamChat registered this run.
+	if snapshot := forkConfigFromHistory(orm.ChatHistory{Ext: historyExt}); snapshot.Version != 1 || snapshot.RunID != runID {
+		historyExt = mergeConversationConfigSnapshot(historyExt, reqBody)
+	}
 	useRunDecision := requestUsesRunDecision(reqBody)
 	if target.IsRegeneration && useRunDecision {
 		if err := claimChatHistoryRun(chatCtx, db, historyID, runID); err != nil {
@@ -2025,7 +2068,9 @@ func streamSingleAnswer(
 	var thinkingActive bool
 	var sawToolResultPreview bool
 	var runTerminal *RunTerminal
-	progressRowCreated := target.IsRegeneration && target.Existing != nil
+	var progressRowCount int64
+	db.Model(&orm.ChatHistory{}).Where("id = ? AND run_id = ?", historyID, runID).Count(&progressRowCount)
+	progressRowCreated := progressRowCount > 0 || (target.IsRegeneration && target.Existing != nil)
 	persistThinkingProgress := func() {
 		partialResult := fullResult
 		if pendingThink != "" {
@@ -2325,6 +2370,8 @@ func streamSingleAnswer(
 	if pendingConversationIntent != nil {
 		historyExt = mergeIntentUpdatedIntoExt(historyExt, pendingConversationIntent)
 	}
+	persistCtx, persistCancel := terminalWriteContext(chatCtx)
+	defer persistCancel()
 	persisted := false
 	externalFinalized := strings.HasPrefix(algorithmID, "external:")
 	if externalFinalized {
@@ -2333,7 +2380,7 @@ func streamSingleAnswer(
 			Take(&persistedHistory).Error == nil
 	}
 	if !externalFinalized && target.IsRegeneration && target.Existing != nil {
-		updated, err := updateOwnedChatHistory(chatCtx, db, historyID, runID, map[string]any{
+		updated, err := updateOwnedChatHistory(persistCtx, db, historyID, runID, map[string]any{
 			"algorithm_id":        algorithmID,
 			"seq":                 seq,
 			"raw_content":         query,
@@ -2358,7 +2405,7 @@ func streamSingleAnswer(
 			persisted = true
 		}
 	} else if !externalFinalized && progressRowCreated {
-		updated, err := updateOwnedChatHistory(chatCtx, db, historyID, runID, map[string]any{
+		updated, err := updateOwnedChatHistory(persistCtx, db, historyID, runID, map[string]any{
 			"algorithm_id": algorithmID, "seq": seq, "raw_content": query, "content": query, "result": fullResult,
 			"tool_call_turns": toolCallTurns, "thinking_duration_s": thinkingDurationS,
 			"retrieval_result": retrievalResult, "ext": historyExt, "update_time": now,
@@ -2437,13 +2484,19 @@ func persistImmediateRunTerminal(
 	if db == nil || terminal == nil {
 		return false
 	}
+	ctx, cancel := terminalWriteContext(ctx)
+	defer cancel()
 	now := time.Now()
 	values := map[string]any{
 		"seq": target.Seq, "raw_content": query, "content": query, "result": "",
 		"run_id": runID, "run_status": terminal.Status, "run_terminal": terminalJSON(terminal),
 		"ext": historyExt, "update_time": now,
 	}
-	if target.IsRegeneration && target.Existing != nil {
+	var count int64
+	if err := db.WithContext(ctx).Model(&orm.ChatHistory{}).Where("id = ?", historyID).Count(&count).Error; err != nil {
+		return false
+	}
+	if count > 0 {
 		values["create_time"] = now
 		updated, err := updateOwnedChatHistory(ctx, db, historyID, runID, values)
 		if err != nil {
@@ -2529,7 +2582,12 @@ func streamDualAnswer(
 	secondaryReq["run_id"] = secondaryRunID
 	delete(secondaryReq, "secondary_run_id")
 	if sc, ok := secondaryReq["filters"].(map[string]any); ok {
-		sc["kb_id"] = nil
+		copy := map[string]any{}
+		for key, value := range sc {
+			copy[key] = value
+		}
+		copy["kb_id"] = nil
+		secondaryReq["filters"] = copy
 	}
 	secondaryCh, _, err2 := StreamChatUpstream(chatCtx, baseURL, secondaryReq)
 	if err1 != nil {
@@ -2554,7 +2612,10 @@ func streamDualAnswer(
 	var primaryTerminal, secondaryTerminal *RunTerminal
 	thinkStart := time.Now()
 	var primaryThinkingDurationS, secondaryThinkingDurationS int64
-	primaryProgressCreated, secondaryProgressCreated := false, false
+	var primaryCount, secondaryCount int64
+	db.Model(&orm.MultiAnswersChatHistory{}).Where("id = ? AND run_id = ?", historyID, primaryRunID).Count(&primaryCount)
+	db.Model(&orm.MultiAnswersChatHistory{}).Where("id = ? AND run_id = ?", secondaryHistoryID, secondaryRunID).Count(&secondaryCount)
+	primaryProgressCreated, secondaryProgressCreated := primaryCount > 0, secondaryCount > 0
 	persistProgress := func(id, runID, result, pending string, duration int64, created *bool) {
 		partialResult := result
 		if pending != "" {
@@ -2897,7 +2958,7 @@ dualPersist:
 	primaryHistory := &orm.MultiAnswersChatHistory{
 		ID: historyID, Seq: seq, ConversationID: convID, RawContent: query, Content: query, Result: primaryResult,
 		ToolCallTurns: primaryToolCallTurns, ThinkingDurationS: primaryThinkingDurationS,
-		RetrievalResult: marshalRetrievalResult(primarySources), Ext: historyExt,
+		RetrievalResult: marshalRetrievalResult(primarySources), Ext: mergeConversationConfigSnapshot(historyExt, reqBody),
 		RunID: primaryRunID, RunStatus: primaryTerminal.Status, RunTerminal: terminalJSON(primaryTerminal),
 		TimeMixin: orm.TimeMixin{CreateTime: now, UpdateTime: now},
 	}
@@ -2910,7 +2971,7 @@ dualPersist:
 	secondaryHistory := &orm.MultiAnswersChatHistory{
 		ID: secondaryHistoryID, Seq: seq, ConversationID: convID, RawContent: query, Content: query, Result: secondaryResult,
 		ToolCallTurns: secondaryToolCallTurns, ThinkingDurationS: secondaryThinkingDurationS,
-		RetrievalResult: marshalRetrievalResult(secondarySources), Ext: historyExt,
+		RetrievalResult: marshalRetrievalResult(secondarySources), Ext: mergeConversationConfigSnapshot(historyExt, secondaryReq),
 		RunID: secondaryRunID, RunStatus: secondaryTerminal.Status, RunTerminal: terminalJSON(secondaryTerminal),
 		TimeMixin: orm.TimeMixin{CreateTime: now, UpdateTime: now},
 	}

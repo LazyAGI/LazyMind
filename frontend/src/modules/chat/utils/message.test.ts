@@ -497,3 +497,12 @@ describe("mergeChatMessageLists", () => {
     expect(mergeChatMessageLists(api, cached)).toEqual(api);
   });
 });
+
+it("renders unavailable inherited attachments as named placeholders", () => {
+  const list = buildChatMessageListFromHistory([{ id: "h", query: "read file", result: "stored answer", input: [
+    { input_type: "image", filename: "diagram.png", file_id: "img", fork_unavailable: true },
+    { input_type: "file", filename: "report.pdf", file_id: "file", fork_unavailable: true },
+  ] }]);
+  expect(list[0].images).toEqual([]);
+  expect(list[0].files).toEqual([{ name: "diagram.png", uid: "img", unavailable: true }, { name: "report.pdf", uid: "file", unavailable: true }]);
+});

@@ -1621,6 +1621,30 @@ const zhCN = {
   },
 
   chat: {
+    fork: {
+      title: "Fork 为新会话", selectAnswerFirst: "请先选定回答，再 Fork",
+      creating: "正在创建 Fork 会话…", retryCreate: "重试 Fork", noModels: "暂无可用模型，请配置模型后重新读取。",
+      emptyTerminal: "此回复已结束，未生成正文。", chooseModel: "选择替代模型",
+      modelLoadFailed: "模型列表加载失败，请重新读取。",
+      locateSource: "定位来源回复",
+      attachmentUnavailable: "已不可用，不会传给模型",
+      create: "创建新会话", retry: "确认创建结果", unknown: "创建结果待确认",
+      unknownDescription: "上次操作可能已经成功。重试会核对同一次创建，不会重复生成分支。",
+      sourceUnavailable: "来源会话不可访问",
+      historyLoadFailed: "会话内容加载失败，请重试读取。", retryRead: "重新读取", older: "加载更早消息", newer: "加载更新消息",
+      deleteNotice: "删除此会话后，由它 Fork 的会话仍将保留。",
+      source: { changed: "来源内容已变化", deleted: "来源已删除", node_deleted: "来源回复已删除", unavailable: "来源不可访问" },
+      errors: {
+        SOURCE_UNAVAILABLE: "来源会话或回复不可访问，请重新选择。", SOURCE_NOT_SETTLED: "继承范围内仍有回复正在生成，请稍后重试。",
+        SOURCE_NOT_COMPLETED: "只能从生成成功的回复 Fork，请选择前面的成功回复。",
+        SOURCE_CHANGED: "继承内容已变化，请重试 Fork。", CONFIG_CONFIRMATION_REQUIRED: "创建配置已变化，请重试 Fork。",
+        PENDING_FORK: "上一项创建结果待确认，请先在提示栏确认结果。",
+        MODEL_UNAVAILABLE: "历史模型不可用，请选择可用的替代模型。", CONFIG_UNSUPPORTED: "当前配置无法安全继承。",
+        ANSWER_SELECTION_REQUIRED: "请先选定一条回答再 Fork。", FORK_UNSUPPORTED: "当前仅支持自己的普通持久化 LazyMind 会话及其 Fork。",
+        IDEMPOTENCY_CONFLICT: "此操作的请求不一致，请确认原操作结果。", FORK_RESULT_UNAVAILABLE: "此前创建的分支已删除或不可访问。",
+        FORK_TOO_LARGE: "超出当前支持范围：2000 轮、16 MiB 历史正文、64 MiB 产物快照、200 个附件与产物。", INVALID_REQUEST: "创建参数无效，请重试 Fork。", FORK_FAILED: "暂时无法确认创建结果，请重试。",
+      },
+    },
 	markdownDiagram: "图表",
 	markdownSource: "源码",
 	markdownRender: "预览",
@@ -1804,6 +1828,7 @@ const zhCN = {
     modelRouteAutoLabel: "Auto · {{model}}",
     modelRouteFixedLabel: "{{model}}",
     modelRouteReason: {
+      fork_selection: "沿用 Fork 来源节点的模型",
       initial_selection: "首次为此会话选择可用模型",
       model_unavailable: "之前的模型不可用，已切换至另一可用模型",
       simple_task: "当前思考深度较低，优先使用已配置的低成本模型",

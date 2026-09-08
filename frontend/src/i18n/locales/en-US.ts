@@ -1666,6 +1666,30 @@ const enUS = {
 
   // Chat
   chat: {
+    fork: {
+      title: "Fork into a new conversation", selectAnswerFirst: "Select an answer before forking",
+      creating: "Creating a Fork conversation…", retryCreate: "Retry Fork", noModels: "No models are available. Configure a model, then reload.",
+      emptyTerminal: "This reply ended without a response.", chooseModel: "Choose a replacement model",
+      modelLoadFailed: "Could not load models. Please reload.",
+      locateSource: "Locate source reply",
+      attachmentUnavailable: "Unavailable; excluded from model input",
+      create: "Create conversation", retry: "Check creation result", unknown: "Creation result is unknown",
+      unknownDescription: "The previous request may have succeeded. Retrying checks the same operation without creating a duplicate fork.",
+      sourceUnavailable: "Source conversation is unavailable",
+      historyLoadFailed: "Could not load the conversation. Retry reading it.", retryRead: "Retry loading", older: "Load older messages", newer: "Load newer messages",
+      deleteNotice: "Conversations forked from this conversation will remain after deletion.",
+      source: { changed: "Source content has changed", deleted: "Source deleted", node_deleted: "Source reply deleted", unavailable: "Source unavailable" },
+      errors: {
+        SOURCE_UNAVAILABLE: "The source conversation or reply is unavailable.", SOURCE_NOT_SETTLED: "A reply in the inherited history is still running. Try again later.",
+        SOURCE_NOT_COMPLETED: "Only successfully completed replies can be forked. Choose an earlier successful reply.",
+        SOURCE_CHANGED: "The inherited content has changed. Retry Fork.", CONFIG_CONFIRMATION_REQUIRED: "The creation settings have changed. Retry Fork.",
+        PENDING_FORK: "Check the previous creation result in the status message before starting another fork.",
+        MODEL_UNAVAILABLE: "Choose an available replacement model.", CONFIG_UNSUPPORTED: "These settings cannot be safely inherited.",
+        ANSWER_SELECTION_REQUIRED: "Select an answer before forking.", FORK_UNSUPPORTED: "Only your persistent LazyMind conversations and their forks are supported.",
+        IDEMPOTENCY_CONFLICT: "This operation has different parameters. Check its original result.", FORK_RESULT_UNAVAILABLE: "The previously created fork has been deleted or is unavailable.",
+        FORK_TOO_LARGE: "Supported limit exceeded: 2000 turns, 16 MiB of history, 64 MiB of artifact snapshots, 200 attachments and artifacts.", INVALID_REQUEST: "Invalid parameters. Retry Fork.", FORK_FAILED: "The creation result could not be confirmed. Try again.",
+      },
+    },
 	markdownDiagram: "Diagram",
 	markdownSource: "Source",
 	markdownRender: "Preview",
@@ -1861,6 +1885,7 @@ const enUS = {
     modelRouteAutoLabel: "Auto · {{model}}",
     modelRouteFixedLabel: "{{model}}",
     modelRouteReason: {
+      fork_selection: "Inherited the model used at the fork point",
       initial_selection: "An available model was selected for this conversation",
       model_unavailable: "The previous model was unavailable, so another available model was selected",
       simple_task: "A configured low-cost model was preferred for low thinking depth",

@@ -98,6 +98,8 @@ function UserMessageWithMentions({ text, mentions }: { text: string; mentions?: 
 }
 
 interface MessageListProps {
+  onFork?: (historyId: string) => void;
+  forkPending?: boolean;
   messageList: any[];
   initialCard?: React.ReactNode;
   sendMessage: (text: string, clearInput?: boolean, extras?: Record<string, unknown>) => void;
@@ -253,6 +255,8 @@ function UserCitationPreview({ citeMessages }: { citeMessages: string[] }) {
 }
 
 const MessageList: React.FC<MessageListProps> = ({
+  onFork,
+  forkPending,
   messageList,
   initialCard,
   sendMessage,
@@ -491,10 +495,13 @@ const MessageList: React.FC<MessageListProps> = ({
               className="chat-item"
               key={`chat-${index}`}
               data-chat-history-id={historyId || undefined}
+              data-chat-role={item.role === RoleTypes.ASSISTANT ? "assistant" : "user"}
             >
               {item.role === RoleTypes.USER && renderUser(item, index)}
               {item.role === RoleTypes.ASSISTANT && (
                 <AssistantMessage
+                  onFork={onFork}
+                  forkPending={forkPending}
                   item={item}
                   index={index}
                   length={messageList.length}

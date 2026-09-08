@@ -37,7 +37,7 @@ import {
   MAX_CITE_MESSAGE_COUNT,
 } from "../utils/citeMessage";
 import { getFileUrls } from "../utils/fileInputs";
-import type { ChatContainerProps } from "../types";
+import type { ChatContainerProps, ChatImperativeProps } from "../types";
 import type { useUserMessageEdit } from "./useUserMessageEdit";
 import { useChatScroll } from "./useChatScroll";
 import { waitForRuntimeCapability } from "@/runtime/readiness";
@@ -1637,7 +1637,51 @@ export function useChatConversation({
     }
   }
 
-  function replaceMessageList(id: string, list: any[]) {
+  const mergeHistoryPage: ChatImperativeProps["mergeHistoryPage"] = (id, history) => {
+    if (currentConversationIdRef.current !== id || history.length === 0) return;
+    scroll.isMouseScrollingRef.current = false;
+    setMessageList((current) => {
+      if (currentConversationIdRef.current !== id) return current;
+      const merged = [...current];
+      const messageKey = (item: any) => `${item.role}:${item.history_id}`;
+      const keys = new Set(current.filter((item) => item.history_id).map(messageKey));
+      const records = new Map<string, any>();
+      for (const item of current) {
+        if (item.history_id && !item.archived_failure && !records.has(item.history_id)) {
+          records.set(item.history_id, item);
+        }
+      }
+      for (const record of history) {
+        if (record.id && !records.has(record.id)) records.set(record.id, record);
+      }
+      for (const item of buildChatMessageListFromHistory(history)) {
+        if (keys.has(messageKey(item))) continue;
+        const historyId = item.original_history_id || item.history_id;
+        const record = records.get(historyId) || item;
+        const position = merged.findIndex((existing) => {
+          // Optimistic messages without a persisted identity remain at the tail.
+          if (!existing.history_id) return true;
+          const existingId = existing.original_history_id || existing.history_id;
+          const existingRecord = records.get(existingId) || existing;
+          const order = (existingRecord.seq || 0) - (record.seq || 0)
+            || String(existingRecord.create_time || "").localeCompare(String(record.create_time || ""))
+            || existingId.localeCompare(historyId);
+          if (order !== 0) return order > 0;
+          if (item.role === RoleTypes.USER) return existing.role !== RoleTypes.USER;
+          return item.archived_failure && existing.role === RoleTypes.ASSISTANT && !existing.archived_failure;
+        });
+        merged.splice(position < 0 ? merged.length : position, 0, item);
+        keys.add(messageKey(item));
+      }
+      if (merged.length === current.length) return current;
+      messageListRef.current = merged;
+      conversationMessagesCache.current.set(id, merged);
+      streamManager.saveMessageList(id, merged);
+      return merged;
+    });
+  };
+
+  function replaceMessageList(id: string, list: any[], preserveScroll = false) {
     const userEdit = getUserEdit();
     const previousConversationId = currentConversationIdRef.current;
     if (previousConversationId && previousConversationId !== id) {
@@ -1709,7 +1753,8 @@ export function useChatConversation({
       userEdit?.restoreUserMessageEditDraft(id, messageListRef.current);
     }
 
-    scroll.scrollToEndImmediately();
+    if (!preserveScroll) scroll.scrollToEndImmediately();
+    else scroll.isMouseScrollingRef.current = false;
   }
 
   function createNewChat() {
@@ -1915,6 +1960,7 @@ export function useChatConversation({
     conversationMessagesCache,
     sendMessage,
     replaceMessageList,
+    mergeHistoryPage,
     createNewChat,
     stopGeneration,
     regenerate,

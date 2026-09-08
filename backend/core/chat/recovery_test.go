@@ -27,6 +27,7 @@ func recoveryTestDB(t *testing.T) *orm.DB {
 		&orm.ChatHistory{},
 		&orm.MultiAnswersChatHistory{},
 		&orm.ConversationArtifact{},
+		&orm.ConversationForkOrigin{},
 		&orm.ConversationIdleEvent{},
 		&orm.EpisodeMemory{},
 		&orm.SkillV2Draft{},
