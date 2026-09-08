@@ -145,3 +145,35 @@ node_modules/.bin/vitest run src/runtime/desktopBridge.test.ts src/modules/chat/
 - 清理：List 从逐 workspace Count 改为单次 group 查询；新事务/错误 helper 仅在确有复用时使用。未删除仍被旧业务调用的代码。两次工具命令因在 `backend/core` 工作目录仍带仓库前缀而在写入前失败，已改用正确路径；一次 Windows `go test` 尝试执行 PE 文件导致 exec format error，改为 `go test -c` 验证编译。这些均未造成产品文件部分覆盖。
 - 验证：`go test ./localworkspace ./chat ./migrate . -count=1` 全通过；PostgreSQL `go test ./localworkspace` 与 `go test ./migrate` 全通过；`GOOS=windows GOARCH=amd64 go test -c ./localworkspace` 生成有效 PE32+；迁移不可变、diff check、禁区零差异和 LazyLLM 子模块干净均通过。
 - 未验证：真实 Local/Desktop 选择与授权转发、前端、ContextPrompt/请求增强、询问/停止、子任务/Workflow、OpenAPI。任务 3A 仍暂停。下一步严格进入任务 2，一次性完成 Local/Desktop 优化、接入、测试、hash 和冻结。
+
+
+### 2026-09-08 T2-NATIVE-FREEZE：Local/Desktop 一次性接入完成并冻结
+
+- 冻结提交：`ec4676e0d0fb290d81b3160a56e798849ea2d4e4`。此提交之后禁止修改下列 Local/Desktop 文件；发现问题先报告用户并等待重新授权。Backend/Frontend 后续任务不受此冻结影响。
+- 实际生产规模：任务 2 全批生产 +756/-11，净增 745；测试 +498。Local/Desktop 生产部分约净增 686：Desktop main/preload、Local Proxy workspace/picker/server/CORS、Runtime Manager Core/Proxy caller token；其余为 Core内部入口和 Frontend bridge 类型。旧 Local Proxy workspace.go 为 425 行，最终 398 行左右；删除两份重复 directory identity 平台文件并由 Core统一计算 identity，合并 Core HTTP helper，复用 transport/AdminSession/writeJSON/requestFromLoopback/CORS/route 配置。
+- 选择证明：Desktop candidate 绑定 webContents、AdminSession user、五分钟 TTL 和本机文件对象 proof；Local candidate 绑定 AdminSession user、五分钟 TTL 和 `os.SameFile` proof。authorize 只接受 selection token，消费后不可重放，注册前重新 realpath/stat。重新授权必须再次弹系统 picker并选择 Core记录的同一 canonical path；取消不创建 candidate/grant。
+- Core继续是 grant、binding、permission、reason 和目录 identity 唯一业务权威。本机层只证明选择并转发 path/source；Core内部入口使用 runtime caller token、重新计算目录 identity，不向算法注入 token。
+- 明确排除并由 diff 审计确认：Caddy版本、assistant bridge、Windows脚本删除、build测试删减、config.env、algorithm_service/token注入、旧 InternalResolve执行通道、Local Proxy重复 identity 文件均未带入。
+- 冻结前验证：Local Proxy `go test ./...` 与 Windows test binary编译通过；Runtime Manager `go test ./...`（约65秒）与 Windows编译通过；Desktop node测试49项通过；Frontend Desktop bridge Vitest 11项和 TypeScript检查通过；Core localworkspace及根包通过；algorithm/tests/algorithm/LazyLLM零差异。
+- SHA-256 清单：
+
+```text
+ada4ee40a6ec1edde0fc41f7a86d36157b70fcd4a359f19193a920b20119a47d  desktop/electron/src/main.js
+bff62d69cffe94ac07302d48c7d5725030971b1b25269fed9565dddd05e986e1  desktop/electron/src/preload.js
+ca42379a87872f70f2e6ea5d4a31caa35c0b570bf619741c90ae303b10a72ac1  desktop/scripts/local-workspace-contract.test.mjs
+4febe148728ae644bb7db91cf59bba82b0ed201172f7d002de1789b07753c57e  desktop/scripts/preload-bridge.test.mjs
+a30dac12f9f0e27f71cf68cb08e3d96f5435c77f8ff872bb5cb13f70262f6abe  local/local-proxy/internal/server/cors.go
+886c459122cf348603981518fc640578efcb0464a059cc836d49f12b242302ef  local/local-proxy/internal/server/server.go
+f0c048689f1b76b62bf34e6f5e30bef074cf3775bbbb4363fd39250339187774  local/local-proxy/internal/server/workspace.go
+12f304f9073e2539fee6a79efd7be119f2726871735c80c814c0357a1585f11a  local/local-proxy/internal/server/workspace_picker_darwin.go
+9d47b5c650e966441990273afb52cfd184820154c8ba7045c5d890069173be42  local/local-proxy/internal/server/workspace_picker_other.go
+7f6858e5db2d2ceebf6aec4c279481bcbceeaa5516faec72c50cc6c540d88e75  local/local-proxy/internal/server/workspace_picker_windows.go
+8e86a5697abb906395c4ccba9e79d74156d57513e80ade826e9d94c46b3c89e4  local/local-proxy/internal/server/workspace_selection_contract_test.go
+292e3dfa12ab35448792092205df8b5e7925cbf85c05b2f2a50184734ffbc379  local/local-runtime-manager/core_service.go
+94299dfda753f9b77eb4ca27964438ae0f2714b8707101576cf953a378850a12  local/local-runtime-manager/local_proxy.go
+f9f7d345ee718b7783a0eda75b6727bd053ad04d505df109d8c3dd4e3f8d1822  local/local-runtime-manager/local_workspace_env.go
+11f7f4a1918fcd24c43134a3afa9c2ed85fb31e359a48ac19273eebc001dca02  local/local-runtime-manager/local_workspace_env_test.go
+```
+
+- 实施异常：三次从子目录执行却带仓库前缀的写命令在首个重定向/读取前失败，没有部分写入；之后固定从工作树根执行。首次 hash脚本因 zsh未按换行拆分路径失败，改用 NUL分隔后生成以上清单。
+- 下一步：任务 3 只修改 backend/frontend；Local/Desktop 文件冻结，不再触碰。任务 3A仍暂停。
