@@ -122,3 +122,13 @@ f9f7d345ee718b7783a0eda75b6727bd053ad04d505df109d8c3dd4e3f8d1822  local/local-ru
 - 普通无工作区精简 fixture最初因缺少 conversations/workspace表返回503；修正为先检查 binding表和实际 binding，无 schema/无绑定原样返回，不隐藏真实绑定错误。
 - 验证命令 `go test ./chat ./subagent ./localworkspace ./workflow/executor -run 'Test.*(Workspace|ExecutionSpec|Subagent|SubAgent|InterruptConversation|Context)' -count=1` 四包通过；冻结 SHA和禁区零差异通过。
 - 本批未标记任务4完成：还需专用测试覆盖 create/resume DB Params、跨用户/跨会话 resume、revoked和permission version更新、private响应两份 params一致、公共 AttemptContext不含root。任务5–7未开始，3A暂停。
+
+
+### 2026-09-08 T4-SUBAGENT：普通子任务与 Workflow 私有上下文验收完成
+
+- 普通子任务 create 在落库前调用 `RebuildSubagentParams`；resume 校验 task owner/conversation，从数据库 Params中的 Core元数据恢复原始 instruction，重新读取最新 permission/grant并先更新数据库 Params再启动。模型本轮提交的 `_core_workspace_context`、伪造 Sources和 instruction不能覆盖数据库权威值。
+- private execution-spec在 executor/lease认证后重建同一快照，顶层 `params` 与 `task.params` 深度一致；已撤销 grant返回409。内部 `workspace_path`保持原子任务产物目录，公共 AttemptContext未新增 canonical path/local_fs_sources。
+- 无 binding或旧精简数据库 schema保持原行为；绑定任务保留 files/Skill等非工作区参数，notice在多次resume后只出现一次，并明确普通子任务不能直接ask_user。
+- 专项测试覆盖 create/resume DB Params、permission version更新、伪造参数、跨用户恢复、revoked spec、private params一致和公共AttemptContext字段边界。
+- 验证：`go test ./chat ./subagent ./localworkspace ./workflow/executor -run 'Test.*(Workspace|ExecutionSpec|Subagent|SubAgent|InterruptConversation|Context)' -count=1` 四包通过；冻结SHA全部通过，Local/Desktop未修改。
+- 下一步：任务5询问与撤销停止。
