@@ -232,6 +232,88 @@ describe("ChatLayout conversation loading", () => {
     expect(mocks.disconnectConversationStream).not.toHaveBeenCalled();
   });
 
+  it("loads settings and Fork capability with one detail request for a new conversation", async () => {
+    mocks.getConversationDetail.mockResolvedValue({
+      data: {
+        conversation: {
+          conversation_id: "new-conversation",
+          thinking_depth: "high",
+          settings: { chat_executor: "lazymind" },
+          fork_capability: { supported: true },
+        },
+      },
+    });
+    render(
+      <ChatLayout
+        setIsChatContent={vi.fn()}
+        initchatConfig={{}}
+        setChatConfigFn={vi.fn()}
+        canChat
+      />,
+    );
+
+    await act(async () => {
+      mocks.latestChatContainerProps.onConversationIdChange("new-conversation");
+    });
+
+    expect(mocks.getConversationDetail).toHaveBeenCalledTimes(1);
+    expect(mocks.getConversationDetail).toHaveBeenCalledWith({
+      conversation: "new-conversation",
+    });
+    expect(mocks.latestChatContainerProps.onFork).toEqual(expect.any(Function));
+    expect(mocks.setThinkingDepth).toHaveBeenLastCalledWith("high");
+  });
+
+  it("ignores late Fork capability from the previous conversation detail request", async () => {
+    const previousDetail = deferred<any>();
+    mocks.getConversationDetail.mockImplementation(
+      ({ conversation }: { conversation: string }) => conversation === "previous-conversation"
+        ? previousDetail.promise
+        : Promise.resolve({
+          data: {
+            conversation: {
+              conversation_id: conversation,
+              thinking_depth: "medium",
+              settings: { chat_executor: "lazymind" },
+              fork_capability: { supported: false },
+            },
+          },
+        }),
+    );
+    render(
+      <ChatLayout
+        setIsChatContent={vi.fn()}
+        initchatConfig={{}}
+        setChatConfigFn={vi.fn()}
+        canChat
+      />,
+    );
+
+    act(() => {
+      mocks.latestChatContainerProps.onConversationIdChange("previous-conversation");
+    });
+    await act(async () => {
+      mocks.latestChatContainerProps.onConversationIdChange("current-conversation");
+    });
+    expect(mocks.latestChatContainerProps.onFork).toBeUndefined();
+
+    await act(async () => {
+      previousDetail.resolve({
+        data: {
+          conversation: {
+            conversation_id: "previous-conversation",
+            thinking_depth: "high",
+            settings: { chat_executor: "lazymind" },
+            fork_capability: { supported: true },
+          },
+        },
+      });
+    });
+
+    expect(mocks.latestChatContainerProps.onFork).toBeUndefined();
+    expect(mocks.setThinkingDepth).toHaveBeenLastCalledWith("medium");
+  });
+
   it("sends an initial model selection only for the first new-conversation request", async () => {
     const initialModelSelection = { mode: "fixed", model_id: "model-1" };
     mocks.pendingMessage = {
@@ -496,8 +578,8 @@ describe("ChatLayout conversation loading", () => {
     await waitFor(() => expect(mocks.latestChatContainerProps.thinkingDepth).toBeUndefined());
   });
 
-  it("keeps execution configuration available for a fork child", async () => {
-    mocks.getConversationDetail.mockResolvedValue({
+  it("reuses restored Fork capability and configuration without a second detail request", async () => {
+    mocks.getConversationDetail.mockRejectedValue(new Error("second detail request failed")).mockResolvedValueOnce({
       data: {
         conversation: {
           conversation_id: "fork-conversation",
@@ -507,6 +589,7 @@ describe("ChatLayout conversation loading", () => {
           parent_conversation_id: "parent-conversation",
           parent_display_name: "主会话标题",
           relation_type: "fork",
+          fork_capability: { supported: true },
         },
       },
     });
@@ -525,6 +608,8 @@ describe("ChatLayout conversation loading", () => {
     expect(mocks.latestChatContainerProps.showConversationConfig).toBe(true);
     expect(mocks.latestChatContainerProps.showSkillDeposit).toBe(true);
     expect(mocks.latestChatContainerProps.allowKnowledgeBaseSelection).toBe(true);
+    expect(mocks.latestChatContainerProps.onFork).toEqual(expect.any(Function));
+    expect(mocks.getConversationDetail).toHaveBeenCalledTimes(1);
   });
 
   it("does not let a late route load overwrite a newer route selection", async () => {

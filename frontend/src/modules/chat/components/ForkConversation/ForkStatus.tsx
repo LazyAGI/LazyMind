@@ -34,7 +34,7 @@ export default function ForkStatus({ fork, source }: { fork: ReturnType<typeof u
     {fork.pending && <Space role="status" style={{ marginBottom: 8 }}>
       <Spin size="small" />{t("chat.fork.creating")}
     </Space>}
-    {!fork.pending && fork.recoverable.filter((operation) => !operation.resultId).map((operation) =>
+    {!fork.pending && fork.recoverable.map((operation) =>
       <Alert key={operation.id} type="info" showIcon style={{ marginBottom: 8 }}
         message={t("chat.fork.unknown")}
         description={t("chat.fork.unknownDescription")}

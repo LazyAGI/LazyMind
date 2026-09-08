@@ -81,8 +81,11 @@ describe("Fork creation state", () => {
     const first = renderHook(() => useForkConversation("source"));
     await act(async () => first.result.current.submit(request()));
     const saved = first.result.current.recoverable[0]; first.unmount();
+    sessionStorage.setItem("lazymind:fork:u1", JSON.stringify([
+      { ...saved, id: "previous-success", resultId: "previous-branch" }, saved,
+    ]));
     const second = renderHook(() => useForkConversation("source"));
-    expect(second.result.current.recoverable[0]).toEqual(saved);
+    expect(second.result.current.recoverable).toEqual([saved]);
     await act(async () => second.result.current.begin("h2"));
     expect(second.result.current.error).toBe("PENDING_FORK");
     expect(state.preview).not.toHaveBeenCalled();
@@ -93,7 +96,7 @@ describe("Fork creation state", () => {
     expect(state.preview).not.toHaveBeenCalled();
   });
 
-  it("records a late success without navigating after A to B to A", async () => {
+  it("clears a late success without navigating after A to B to A", async () => {
     const pending = deferred<ForkResult>(); state.create.mockReturnValue(pending.promise);
     const { result, rerender } = renderHook(({ source }) => useForkConversation(source), { initialProps: { source: "A" } });
     act(() => { void result.current.submit(request()); });
@@ -101,10 +104,32 @@ describe("Fork creation state", () => {
     state.location = { key: "A-new-visit" }; rerender({ source: "A" });
     await act(async () => pending.resolve(created()));
     expect(state.navigate).not.toHaveBeenCalled();
-    expect(result.current.recoverable[0].resultId).toBe("branch");
-    await act(async () => result.current.resume(result.current.recoverable[0]));
+    expect(result.current.recoverable).toHaveLength(0);
+    expect(JSON.parse(sessionStorage.getItem("lazymind:fork:u1") || "[]")).toEqual([]);
     expect(state.create).toHaveBeenCalledTimes(1);
-    expect(state.navigate).toHaveBeenCalledTimes(1);
+  });
+
+  it("removes confirmed operations while retaining the in-memory duplicate guard", async () => {
+    const { result } = renderHook(() => useForkConversation("source"));
+    await act(async () => result.current.submit(request()));
+    expect(result.current.recoverable).toHaveLength(0);
+    expect(JSON.parse(sessionStorage.getItem("lazymind:fork:u1") || "[]")).toEqual([]);
+    await act(async () => result.current.submit(request()));
+    expect(state.create).toHaveBeenCalledTimes(1);
+    expect(state.navigate).toHaveBeenLastCalledWith(expect.stringContaining("branch"));
+  });
+
+  it("clears a successful request after unmount so it is not restored as pending", async () => {
+    const pending = deferred<ForkResult>(); state.create.mockReturnValue(pending.promise);
+    const first = renderHook(() => useForkConversation("source"));
+    act(() => { void first.result.current.submit(request()); });
+    expect(JSON.parse(sessionStorage.getItem("lazymind:fork:u1") || "[]")).toHaveLength(1);
+    first.unmount();
+    await act(async () => pending.resolve(created()));
+    expect(JSON.parse(sessionStorage.getItem("lazymind:fork:u1") || "[]")).toEqual([]);
+    const second = renderHook(() => useForkConversation("source"));
+    expect(second.result.current.recoverable).toHaveLength(0);
+    expect(state.navigate).not.toHaveBeenCalled();
   });
 
   it("does not write a result after logout and login as the same user while unmounted", async () => {

@@ -146,7 +146,10 @@ func revalidateForkHistoryAttachments(ctx context.Context, db *gorm.DB, caller d
 	out := append([]orm.ChatHistory(nil), histories...)
 	var localSources map[string]bool
 	for _, h := range histories {
-		if len(forkConfigFromHistory(h).LocalFSSourceIDs) == 0 {
+		var flags struct {
+			ReadOnly bool `json:"fork_read_only"`
+		}
+		if json.Unmarshal(h.Ext, &flags) != nil || !flags.ReadOnly || len(forkConfigFromHistory(h).LocalFSSourceIDs) == 0 {
 			continue
 		}
 		r := &http.Request{Header: http.Header{}}

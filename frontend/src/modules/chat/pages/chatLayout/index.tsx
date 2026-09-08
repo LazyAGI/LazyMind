@@ -214,6 +214,8 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
 
   // Load persisted workflow settings once a real conversation id is available.
   useEffect(() => {
+    if (sessionId && forkMetadataId.current === sessionId) return;
+    setForkSupported(false);
     if (!sessionId || sessionId.startsWith('temp_')) {
       setConversationRelation(null);
       if (!sessionId) {
@@ -228,6 +230,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         if (cancelled) {
           return;
         }
+        setForkSupported(Boolean((detailRes.data.conversation as { fork_capability?: ConversationForkCapability })?.fork_capability?.supported));
         setConversationSettings(
           parseConversationRuntimeSettings(detailRes.data.conversation),
         );
@@ -772,15 +775,6 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
       windowRequestRef.current += 1;
     };
   }, [loadConversation, routeConversationId, setChatConfigFn, setConversationId, setIsChatContent]);
-
-  useEffect(() => {
-    if (!sessionId || forkMetadataId.current === sessionId) return;
-    let current = true;
-    ChatServiceApi().conversationServiceGetConversationDetail({ conversation: sessionId }).then((response) => {
-      if (current) setForkSupported(Boolean((response.data.conversation as { fork_capability?: ConversationForkCapability })?.fork_capability?.supported));
-    }).catch(() => { if (current) setForkSupported(false); });
-    return () => { current = false; };
-  }, [sessionId]);
 
   useEffect(() => {
     if (!anchorHistoryId || isRestoringConversation) return;

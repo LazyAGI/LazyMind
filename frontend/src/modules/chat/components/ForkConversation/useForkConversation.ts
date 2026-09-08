@@ -2,12 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { v4 as uuid } from "uuid";
 import { AgentAppsAuth, AUTH_USER_CHANGE_EVENT } from "@/components/auth";
-import type { ForkCreateRequest, ForkPreview, ForkResult } from "@/api/generated/core-client";
+import type { ForkCreateRequest, ForkPreview } from "@/api/generated/core-client";
 import { CHAT_CONVERSATION_LIST_REFRESH_EVENT, getChatConversationPath } from "@/modules/chat/constants/chat";
 import { createFork, previewFork } from "./api";
 
 export type ForkOperation = { id: string; source: string; request: ForkCreateRequest; resultId?: string };
-type Phase = "idle" | "previewing" | "ready" | "preview_error" | "submitting" | "unknown" | "failed" | "created";
+type Phase = "idle" | "previewing" | "ready" | "preview_error" | "submitting" | "unknown" | "failed";
 const storagePrefix = "lazymind:fork:";
 const actor = () => AgentAppsAuth.getUserInfo()?.userId || "";
 let loginEpoch = 0;
@@ -24,7 +24,7 @@ window.addEventListener(AUTH_USER_CHANGE_EVENT, () => {
 
 function readOperations(): ForkOperation[] {
   if (!actor()) return [];
-  try { const value = JSON.parse(sessionStorage.getItem(storagePrefix + actor()) || "[]"); return Array.isArray(value) ? value : []; } catch { return []; }
+  try { const value = JSON.parse(sessionStorage.getItem(storagePrefix + actor()) || "[]"); return Array.isArray(value) ? value.filter((operation: ForkOperation) => !operation.resultId) : []; } catch { return []; }
 }
 function saveOperation(operation: ForkOperation) {
   if (!actor()) return;
@@ -62,7 +62,6 @@ export function useForkConversation(source: string) {
   const [preview, setPreview] = useState<ForkPreview>();
   const [error, setError] = useState("");
   const [target, setTarget] = useState("");
-  const [result, setResult] = useState<ForkResult>();
   const [recoverable, setRecoverable] = useState(readOperations);
 
   function setBusy(value: boolean) {
@@ -77,7 +76,7 @@ export function useForkConversation(source: string) {
       if (nextActor === actorRef.current && nextActor) return;
       try { if (actorRef.current) sessionStorage.removeItem(storagePrefix + actorRef.current); } catch { /* Optional storage. */ }
       actorRef.current = nextActor; sequence.current += 1;
-      operationRef.current = null; setBusy(false); setPhase("idle"); setError(""); setRecoverable([]); setPreview(undefined); setResult(undefined);
+      operationRef.current = null; setBusy(false); setPhase("idle"); setError(""); setRecoverable([]); setPreview(undefined);
     };
     window.addEventListener(AUTH_USER_CHANGE_EVENT, change);
     return () => { mounted.current = false; sequence.current += 1; window.removeEventListener(AUTH_USER_CHANGE_EVENT, change); };
@@ -88,7 +87,7 @@ export function useForkConversation(source: string) {
   async function begin(historyId: string) {
     if (busy.current) return;
     const unresolved = (operationRef.current && !operationRef.current.resultId ? operationRef.current : null)
-      || readOperations().find((operation) => !operation.resultId);
+      || readOperations()[0];
     if (unresolved) {
       if (unresolved.source === source && unresolved.request.source_history_id === historyId) {
         await resume(unresolved);
@@ -99,7 +98,7 @@ export function useForkConversation(source: string) {
     }
     const seq = ++sequence.current; const epoch = loginEpoch; const user = actor();
     setBusy(true);
-    operationRef.current = null; setTarget(historyId); setPreview(undefined); setResult(undefined); setError(""); setPhase("previewing");
+    operationRef.current = null; setTarget(historyId); setPreview(undefined); setError(""); setPhase("previewing");
     try {
       const value = await previewFork(source, historyId);
       if (!mounted.current || sequence.current !== seq || epoch !== loginEpoch || user !== actor()) return;
@@ -135,11 +134,11 @@ export function useForkConversation(source: string) {
       if (epoch !== loginEpoch || user !== actor()) return;
       const resultId = value.conversation.conversation_id;
       if (!resultId) throw new Error("missing result");
-      operation.resultId = resultId; saveOperation(operation);
+      operation.resultId = resultId; removeOperation(operation.id);
       window.dispatchEvent(new Event(CHAT_CONVERSATION_LIST_REFRESH_EVENT));
       if (mounted.current) {
         setRecoverable(readOperations());
-        if (seq === sequence.current) { setResult(value); setPhase("created"); }
+        if (seq === sequence.current) setPhase("idle");
         if (nav === navigation.current && seq === sequence.current) { navigate(getChatConversationPath(resultId)); }
       }
     } catch (e) {
@@ -164,13 +163,13 @@ export function useForkConversation(source: string) {
   async function resume(operation: ForkOperation) {
     if (busy.current) return;
     if (operation.resultId) { navigate(getChatConversationPath(operation.resultId)); return; }
-    sequence.current += 1; operationRef.current = operation; setTarget(operation.request.source_history_id); setPreview(undefined); setResult(undefined); setPhase("unknown");
+    sequence.current += 1; operationRef.current = operation; setTarget(operation.request.source_history_id); setPreview(undefined); setPhase("unknown");
     await submit(undefined, operation);
   }
 
-  const operations = operationRef.current && !recoverable.some((operation) => operation.id === operationRef.current?.id)
+  const operations = operationRef.current && !operationRef.current.resultId && !recoverable.some((operation) => operation.id === operationRef.current?.id)
     ? [...recoverable, operationRef.current] : recoverable;
-  return { pending, phase, preview, error, result, recoverable: operations, begin, submit, resume,
+  return { pending, phase, preview, error, recoverable: operations, begin, submit, resume,
     retry: () => begin(target),
     selectModel: (modelId: string) => {
       if (phase === "ready" && preview?.can_fork && modelId) return submit(requestFromPreview(preview, modelId));

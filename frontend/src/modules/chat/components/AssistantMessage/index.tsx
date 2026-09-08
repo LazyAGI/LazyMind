@@ -1058,12 +1058,7 @@ const AssistantMessage = (props: any) => {
 
   function renderForkAction() {
     if (!props.onFork || item.archived_failure || !item.history_id) return null;
-    const completed =
-      item.run_status === "completed" ||
-      (!item.run_status &&
-        item.finish_reason ===
-          ChatConversationsResponseFinishReasonEnum.FinishReasonStop);
-    if (!completed) return null;
+    if (!runCompleted) return null;
     const candidate =
       item.answers?.length >= 2 && item.selected_answer_index == null;
     const disabled = candidate || props.forkPending;
@@ -1450,7 +1445,6 @@ const AssistantMessage = (props: any) => {
 
           {}
           {runCompleted && !item.onboardingInfo && renderFooter()}
-          {!runCompleted && renderForkAction()}
           {item.fork_read_only && !item.delta && <span>{t("chat.fork.emptyTerminal")}</span>}
         </div>
         {!item.fork_read_only && (item.ask_pending || index === length - 1) && renderBottom()}
