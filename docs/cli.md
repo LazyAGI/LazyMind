@@ -670,6 +670,8 @@ tests/test_cli.py
 
 Windows 浏览器必须连接 Windows 原生 Assistant Bridge。WSL 启动流程会识别宿主平台并通过 WSL 互操作运行 `lazymind.exe`；若互操作不可用则启动命令会直接失败并给出提示。网页与 Bridge 平台仍不一致时，所有助理配置和凭证同步接口都会拒绝请求，集成页会显示平台错配，而不会误报桥接器未运行。
 
+WSL 启停入口在运行时转换路径，通过 `WSLENV` 将脚本和可执行文件路径作为数据传给 Windows PowerShell，支持 WSL UNC 路径、盘符路径和带空格的目录。原生可执行文件仍暂存于 Windows 用户的 `%LOCALAPPDATA%\LazyMind\assistant-bridge`，不使用 WSL 的运行目录。启动成功须同时满足 Windows 端命令成功、Bridge 健康状态为 `running=true` 且平台为 `windows`、WSL 收到准确的成功回执；路径转换、脚本加载、健康检查或停止失败都会传回错误。这样即使 Windows 错误码被 WSL 截断为零，也不会显示虚假的启动成功。
+
 ### 16.1 Codex Desktop 与 Codex CLI
 
 Codex 的两个方向独立检测和授权：“Codex 桌面端使用 LazyMind MCP”检测桌面应用及首次启动状态；“LazyMind 调用 Codex CLI”检测桌面应用内置的可执行命令和登录状态，不要求另行安装一套 CLI。连接前会验证 LazyMind 的 23 个工具，再调用桌面应用提供的原生命令执行 `codex mcp add`。ChatGPT 桌面应用、Codex CLI 和 IDE 扩展在同一主机上共享 `~/.codex/config.toml`，因此桌面端无需用户另行复制配置。重新连接和断开分别更新或移除同一个受管条目，不直接重写 Codex 私有配置。

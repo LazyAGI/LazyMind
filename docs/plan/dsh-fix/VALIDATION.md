@@ -79,3 +79,18 @@
 | 新 CI | 已提供面向作者分支的工作流；远端 Actions 授权和运行状态以 GitHub 为准。 |
 
 本次不宣称 Windows/Linux 的完整桌面联调、其他 DSH 版本、Codex/WorkBuddy 原生 panel 或可编辑 PPTX 导出已通过实测。图片版 PPTX 是本轮明确验收的导出方式。
+
+## 5. Windows / WSL Bridge 启停补充验收
+
+2026-09-09 同一修复 PR 追加了“修复 Windows 桥接器启动路径”会话的问题。原 Makefile 在解析时转换 UNC 路径，再把带反斜杠的结果嵌入 shell 命令，脚本和 EXE 路径均会被重新解析；停止分支还吞掉失败。修复改为运行时转换、通过 `WSLENV` 传递路径数据、Windows 端归一化失败码，并要求健康状态和准确回执后才显示启动成功。
+
+| 验证 | 结果与范围 |
+| --- | --- |
+| 实际 Make recipe + `/bin/sh`、`/bin/bash` | 本地及 Linux CI 各 18 个回归用例通过：UNC/盘符、空格、单引号、美元符、反引号、方括号和中文路径；启动/停止；转换失败；原生失败；零退出码但缺失或错误回执。互操作端为探针，验证准确的传参边界。 |
+| 既有桌面构建检查 | 本地 39 个通过，包含 Windows/WSL 入口约束。 |
+| Windows Server 2025 + Windows PowerShell 5.1 | 执行真实 PowerShell 包装器和原始 `.ps1`，用原生 EXE 探针验证特殊字符路径、暂存替换、环境隔离、停止回退和幂等、脚本/源文件缺失、完整 `0xFFFD0000` 原生失败码及不合法健康状态。 |
+| Windows 原生产品 Bridge | 用 Go 1.25.11 编译本分支 CLI，经真实启动脚本执行 start → status → stop。确认 `running=true`、`platform=windows`、进程路径为 Windows 用户目录下暂存的 EXE；停止后状态查询失败，监听已关闭。 |
+
+Windows 与 Linux 两个 CI job 均通过，验证代码提交为 `af76b654adbbee1f4467069150c06ddbc3e05b33`。可直接查看 [CI 运行与原始日志](https://github.com/chenhao0205/LazyRAG/actions/runs/34301702842)。
+
+这组证据覆盖 POSIX/Make 传参边界和真实 Windows PowerShell/Bridge 执行，但不是同事原机器上的完整 WSL 互操作重测；也没有把同事未捕获的原始退出码当作已测事实。现有 PPT 验收结论保持在上文明确列出的环境范围内。

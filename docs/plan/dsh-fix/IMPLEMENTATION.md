@@ -177,6 +177,31 @@ OpenAPI 从 Go 路由及类型注册表生成；前端生成客户端和缓存�
 5. 旧运行不凭空补审批事实；不支持的宿主版本回退为普通 MCP/链接能力。新强控制运行遇到缺失绑定或不可用状态会阻止推进。
 6. 旧插件写坏的自定义事件必须单独处理：`lazymind internal agent deepseek-harness repair-log --file ...` 默认只预览；停掉 DSH 后显式 `--apply --offline`，自动备份、定点修复并保留其他记录。安装不批量修改历史。
 
+### Windows / WSL Bridge 启停边界
+
+```mermaid
+sequenceDiagram
+  participant M as Make / WSL
+  participant S as WSL 启停脚本
+  participant P as Windows PowerShell
+  participant B as Windows 原生 Bridge
+  M->>S: start
+  S->>S: 运行时 wslpath 转换
+  S->>P: WSLENV 路径数据 + 固定 Command
+  P->>P: 检查并加载脚本，捕获异常
+  P->>B: stop；暂存 EXE；start；status
+  B-->>P: 原生命令退出码 + 健康状态
+  alt 命令成功且 running=true、platform=windows
+    P-->>S: 退出 0 + 准确动作回执
+    S-->>M: 成功，允许显示启动完成
+  else 加载、原生命令或健康检查失败
+    P-->>S: 归一化退出 1，无成功回执
+    S-->>M: 失败，停止向上报告成功
+  end
+```
+
+该适配只负责宿主进程启动，不承担工作流审批或 DSH 回合控制。Make 只派发动作；WSL 脚本负责路径转换、互操作数据传递和回执校验；PowerShell 负责 Windows 用户目录下的暂存及原生命令的错误与健康校验；已有 Go CLI 负责进程启停、端口等待和可执行文件身份检查。停止动作优先使用已暂存的 EXE，失败必须向上传递；没有可用 EXE 时保持原有的幂等空操作。UNC 路径不再进入 Make 展开的 shell 源码，完整 Windows 失败码在返回 WSL 前被归一化，缺少成功回执同样视为失败。
+
 ## 6. 扩展能力边界
 
 - 本次真实宿主验收范围是 macOS arm64、Node 24、DSH `0.1.2-rc.1`；其他 DSH 版本和平台需通过契约及安装测试后再扩大支持承诺。
