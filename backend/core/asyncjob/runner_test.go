@@ -362,32 +362,68 @@ func TestRunnerRenewsLeaseWhileHandlerRuns(t *testing.T) {
 	defer resetRegistryForTest()
 	var calls atomic.Int32
 	started := make(chan struct{}, 1)
-	Register("test.long-running", func(context.Context, Job, Reporter) (Result, error) {
+	release := make(chan struct{})
+	Register("test.long-running", func(ctx context.Context, _ Job, _ Reporter) (Result, error) {
 		calls.Add(1)
 		select {
 		case started <- struct{}{}:
 		default:
 		}
-		time.Sleep(350 * time.Millisecond)
-		return Result{}, nil
+		select {
+		case <-release:
+			return Result{}, nil
+		case <-ctx.Done():
+			return Result{}, ctx.Err()
+		}
 	})
 	job := enqueueTestJob(t, db, "test.long-running", 3)
 	ctx, cancel := context.WithCancel(context.Background())
-	runner := Start(ctx, db, Options{Concurrency: 2, PollInterval: 10 * time.Millisecond, LockTTL: 90 * time.Millisecond, JobTypes: []string{"test.long-running"}})
+	runner := Start(ctx, db, Options{Concurrency: 2, PollInterval: 20 * time.Millisecond, LockTTL: 3 * time.Second, JobTypes: []string{"test.long-running"}})
 	defer func() { cancel(); <-runner.Done() }()
 	select {
 	case <-started:
-	case <-time.After(time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("handler did not start")
 	}
-	deadline := time.Now().Add(2 * time.Second)
+	initial := getTestJob(t, db, job.ID)
+	if initial.LockUntil == nil {
+		t.Fatal("running job has no lease")
+	}
+	// Observe a persisted renewal instead of assuming CI can schedule a
+	// heartbeat within a 90 ms lease. The handler stays active throughout.
+	deadline := time.Now().Add(10 * time.Second)
+	renewed := false
+	for time.Now().Before(deadline) {
+		got := getTestJob(t, db, job.ID)
+		if got.AttemptCount != 1 || got.Status != string(StatusRunning) {
+			t.Fatalf("handler lost its lease before renewal: %+v", got)
+		}
+		if got.LockUntil != nil && got.LockUntil.After(*initial.LockUntil) {
+			renewed = true
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !renewed {
+		t.Fatal("running handler did not renew its lease")
+	}
+	// The original lease is expired at this cutoff, but its renewal is not.
+	if err := runner.recoverStaleJobs(ctx, initial.LockUntil.Add(time.Microsecond)); err != nil {
+		t.Fatal(err)
+	}
+	got := getTestJob(t, db, job.ID)
+	if got.Status != string(StatusRunning) || got.AttemptCount != 1 || calls.Load() != 1 {
+		t.Fatalf("renewed handler was reclaimed: job=%+v calls=%d", got, calls.Load())
+	}
+	close(release)
+	deadline = time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		if getTestJob(t, db, job.ID).Status == string(StatusSucceeded) {
 			break
 		}
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(20 * time.Millisecond)
 	}
-	got := getTestJob(t, db, job.ID)
+	got = getTestJob(t, db, job.ID)
 	if got.Status != string(StatusSucceeded) || got.AttemptCount != 1 || calls.Load() != 1 {
 		t.Fatalf("long handler was reclaimed: job=%+v calls=%d", got, calls.Load())
 	}
