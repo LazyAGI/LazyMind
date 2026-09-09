@@ -1,13 +1,10 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone as datetime_timezone
-import re
-from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from lazymind.chat.engine.agent_runtime import AgentRole, PromptBuilder, PromptBundle
 from lazymind.common.memory.field_contract import memory_operation_rules
-from lazymind.common.memory.validation.common import parse_yaml_frontmatter, parse_yaml_mapping
 
 from .guidance import (
     ANALYSIS_GUIDANCE,
@@ -26,37 +23,6 @@ from .guidance import (
 from .task_profile import TaskProfile
 
 _DEFAULT_UI_LOCALE = 'zh-CN'
-_CJK_PATTERN = re.compile(r'[\u3400-\u9fff]')
-_LATIN_PATTERN = re.compile(r'[A-Za-z]')
-_URL_PATTERN = re.compile(r'https?://\S+|www\.\S+', re.IGNORECASE)
-_EXPLICIT_LANGUAGE_PATTERNS = (
-    (
-        'Chinese',
-        re.compile(
-            r'(?:请|始终|默认|务必|改为|切换到|使用|用|以).{0,16}'
-            r'(?:中文|汉语|普通话|Chinese|Mandarin)|'
-            r'(?:语言偏好|首选语言|默认语言).{0,8}(?:中文|汉语|普通话|Chinese|Mandarin)|'
-            r'(?:preferred language|language preference).{0,8}(?:Chinese|Mandarin)|'
-            r'(?:reply|answer|respond|write|speak|use|using|in).{0,16}'
-            r'(?:in\s+)?(?:Chinese|Mandarin)|'
-            r'(?:Chinese|Mandarin)\s+please',
-            re.IGNORECASE,
-        ),
-    ),
-    (
-        'English',
-        re.compile(
-            r'(?:请|始终|默认|务必|改为|切换到|使用|用|以).{0,16}'
-            r'(?:英文|英语|English)|'
-            r'(?:语言偏好|首选语言|默认语言).{0,8}(?:英文|英语|English)|'
-            r'(?:preferred language|language preference).{0,8}English|'
-            r'(?:reply|answer|respond|write|speak|use|using|in).{0,16}'
-            r'(?:in\s+)?English|'
-            r'English\s+please',
-            re.IGNORECASE,
-        ),
-    ),
-)
 
 
 def _get_ui_locale(environment_context: dict | None = None) -> str:
@@ -65,136 +31,6 @@ def _get_ui_locale(environment_context: dict | None = None) -> str:
         if locale:
             return locale
     return _DEFAULT_UI_LOCALE
-
-
-def _explicit_language(text: object) -> str:
-    value = str(text or '').strip()
-    if not value:
-        return ''
-    for language, pattern in _EXPLICIT_LANGUAGE_PATTERNS:
-        if pattern.search(value):
-            return language
-    return ''
-
-
-def _dominant_language(text: object) -> str:
-    # URLs are identifiers, not natural-language evidence. In particular, long
-    # Feishu/Notion links must not make a Chinese request look English.
-    value = _URL_PATTERN.sub(' ', str(text or '')[:2000])
-    cjk_count = len(_CJK_PATTERN.findall(value))
-    latin_count = len(_LATIN_PATTERN.findall(value))
-    if cjk_count >= 2 and cjk_count * 2 >= latin_count:
-        return 'Chinese'
-    if latin_count >= 4 and latin_count > cjk_count * 2:
-        return 'English'
-    return ''
-
-
-def _conversation_language(history: list[dict] | None = None) -> str:
-    recent_user_messages = []
-    for message in reversed(history or []):
-        if not isinstance(message, dict) or message.get('role') != 'user':
-            continue
-        content = message.get('content')
-        if isinstance(content, str) and content.strip():
-            recent_user_messages.append(content)
-        if len(recent_user_messages) >= 3:
-            break
-    return _dominant_language('\n'.join(reversed(recent_user_messages)))
-
-
-def _locale_language(locale: str) -> str:
-    normalized = locale.strip().lower()
-    if normalized.startswith('zh') or normalized in {'chinese', 'mandarin', '中文', '汉语', '普通话'}:
-        return 'Chinese'
-    if normalized.startswith('en') or normalized in {'english', '英文', '英语'}:
-        return 'English'
-    return locale.strip() or _DEFAULT_UI_LOCALE
-
-
-def _profile_mapping(profile: str | None) -> dict[str, Any]:
-    if not isinstance(profile, str) or not profile.strip():
-        return {}
-    frontmatter, _body = parse_yaml_frontmatter(profile)
-    if frontmatter:
-        return frontmatter
-    return parse_yaml_mapping(profile)
-
-
-def _saved_language_preference(profile: str | None) -> tuple[str, str]:
-    document = _profile_mapping(profile)
-    locale = document.get('locale')
-    if not isinstance(locale, dict):
-        nested = document.get('document')
-        if isinstance(nested, dict):
-            locale = nested.get('locale')
-    if not isinstance(locale, dict):
-        return '', ''
-    languages = locale.get('languages')
-    if isinstance(languages, str):
-        languages = [languages]
-    if not isinstance(languages, list) or not languages:
-        return '', ''
-    first = languages[0]
-    if not isinstance(first, str) or not first.strip():
-        return '', ''
-    return _locale_language(first.strip()), 'profile locale.languages'
-
-
-def _resolve_response_language(
-    *,
-    current_query: str | None = None,
-    conversation_history: list[dict] | None = None,
-    environment_context: dict | None = None,
-    profile: str | None = None,
-) -> tuple[str, str]:
-    current_instruction = _explicit_language(current_query)
-    if current_instruction:
-        return current_instruction, 'explicit instruction in the current request'
-
-    saved_language, saved_source = _saved_language_preference(profile)
-    if saved_language:
-        return saved_language, saved_source
-
-    request_language = _dominant_language(current_query)
-    if request_language:
-        return request_language, 'dominant language of the current request'
-
-    history_language = _conversation_language(conversation_history)
-    if history_language:
-        return history_language, 'dominant language of recent user messages'
-
-    locale = _get_ui_locale(environment_context)
-    return _locale_language(locale), f'default UI locale {locale}'
-
-
-def _build_session_language_prompt(environment_context: dict | None = None) -> str:
-    locale = _get_ui_locale(environment_context)
-    language = _locale_language(locale)
-    return (
-        f'{RESPONSE_LANGUAGE_GUIDANCE}\n'
-        f'Default UI locale for this conversation: {locale}.\n'
-        f'Session default response language: {language}.'
-    )
-
-
-def _build_turn_language_prompt(
-    environment_context: dict | None = None,
-    *,
-    current_query: str | None = None,
-    conversation_history: list[dict] | None = None,
-    profile: str | None = None,
-) -> str:
-    language, source = _resolve_response_language(
-        current_query=current_query,
-        conversation_history=conversation_history,
-        environment_context=environment_context,
-        profile=profile,
-    )
-    return (
-        f'Selected response language for this turn: {language} ({source}).\n'
-        f'Use {language} for all user-visible natural-language text in this turn.'
-    )
 
 
 def _environment_time_parts(environment_context: dict | None) -> tuple[object, object]:
@@ -247,9 +83,12 @@ def _format_user_time(time_now: object, timezone: object) -> str:
 def _build_environment_context_prompt(environment_context: dict | None = None) -> str:
     time_now, timezone = _environment_time_parts(environment_context)
     user_date = _format_user_date(time_now, timezone) if time_now else ''
-    if not user_date:
-        return ''
-    return f'## Environment Context\nCurrent user date: {user_date}'
+    locale = _get_ui_locale(environment_context)
+    lines = ['## Environment Context']
+    if user_date:
+        lines.append(f'Current user date: {user_date}')
+    lines.append(f'UI locale: {locale}')
+    return '\n'.join(lines)
 
 
 def _build_turn_time_prompt(environment_context: dict | None = None) -> str:
@@ -300,17 +139,7 @@ def add_standard_system_sections(
         'editable_writing', '', EDITABLE_WRITING_GUIDANCE,
         'platform.output.editable', priority=15, skip_if=not include_editable_writing,
     ).system(
-        'response_language', '', _build_session_language_prompt(environment_context),
-        'platform.language', priority=20,
-    ).runtime(
-        'response_language_turn', 'Response Language',
-        _build_turn_language_prompt(
-            environment_context,
-            current_query=current_query,
-            conversation_history=conversation_history,
-            profile=profile,
-        ),
-        'request.language', priority=1, authoritative=True, content_kind='instruction',
+        'response_language', '', RESPONSE_LANGUAGE_GUIDANCE, 'platform.language', priority=20,
     ).runtime(
         'environment_time', 'Current Time',
         _build_turn_time_prompt(environment_context),

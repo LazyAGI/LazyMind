@@ -68,7 +68,7 @@ def test_system_prompt_does_not_embed_tool_specific_web_guidance() -> None:
     assert 'one search intent' not in prompt
 
 
-def test_long_url_does_not_override_chinese_request_language() -> None:
+def test_system_prompt_does_not_classify_request_language_from_urls() -> None:
     bundle = build_standard_prompt_bundle(
         True,
         current_query=(
@@ -79,9 +79,10 @@ def test_long_url_does_not_override_chinese_request_language() -> None:
         environment_context={'locale': 'en-US'},
     )
 
-    assert 'Selected response language for this turn: Chinese' in bundle.current_input
-    assert 'Selected response language for this turn' not in bundle.system_prompt
-    assert 'Session default response language: English.' in bundle.system_prompt
+    assert 'Selected response language' not in bundle.current_input
+    assert 'Selected response language' not in bundle.system_prompt
+    assert 'Reply in the language the user is currently using.' in bundle.system_prompt
+    assert 'UI locale: en-US' in bundle.system_prompt
 
 
 def test_system_prompt_appends_partitioned_active_tool_contracts() -> None:
@@ -152,7 +153,7 @@ def test_system_prompt_explains_profile_operations_by_yaml_type() -> None:
     assert 'Use only existing leaf dot paths' in prompt
 
 
-def test_saved_language_preference_beats_current_request_language() -> None:
+def test_profile_languages_are_not_selected_as_reply_language() -> None:
     bundle = build_standard_prompt_bundle(
         True,
         current_query='What changed?',
@@ -160,22 +161,6 @@ def test_saved_language_preference_beats_current_request_language() -> None:
         environment_context={'locale': 'zh-CN'},
     )
 
-    assert (
-        'Selected response language for this turn: Chinese (profile locale.languages)'
-        in bundle.current_input
-    )
-
-
-def test_explicit_language_instruction_beats_saved_language_preference() -> None:
-    bundle = build_standard_prompt_bundle(
-        True,
-        current_query='Please answer this turn in English: what was the result?',
-        profile='locale:\n  languages: [Chinese]\n',
-        environment_context={'locale': 'zh-CN'},
-    )
-
-    assert (
-        'Selected response language for this turn: English (explicit instruction in the current request)'
-        in bundle.current_input
-    )
-    assert 'profile locale.languages' not in bundle.system_prompt
+    assert 'Selected response language' not in bundle.current_input
+    assert 'profile locale.languages' not in bundle.current_input
+    assert 'languages: [Chinese]' in bundle.system_prompt
