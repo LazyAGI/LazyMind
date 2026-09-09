@@ -34,6 +34,13 @@
 - 官方 runner 优先读取 `attachment_context.user_id`；Core 现在对真实绑定同时归一化顶层、附件上下文和 parent 的 user/conversation，且保留附件内其他字段。
 - 自动化结果为前端 43/43、Core 三包通过、静态检查与生产构建通过；这不是打包 Desktop 的人工 UI 证据，也不证明 F 类文件执行闭环。
 
+## 2026-09-09 后续稳定性审计
+
+- Local Proxy 的 workspace 端点用 `{code: "LOCAL_WORKSPACE_SELECTION_EXPIRED"}` 等响应错误；Axios 将其放在 `error.response.data.code`。当前 `workspaceReason` 只读取 Core 的嵌套 reason 和错误对象顶层 `code`，因此主机选择过期、选择禁止等错误会落入 `unknown`。
+- 当前中英文 reason 字典没有选择过期和选择禁止文案。已有 mode/path/invalid 文案可以在归一化后继续复用，不需要修改 Local Proxy 或 Core 协议。
+- `loadManagedItems` 只用独立的 `listRequestRef` 处理查询先后顺序。会话改变仅递增 `requestRef`，不会关闭 `manageOpen`、清空 `managedItems` 或作废在途管理查询；草稿切换到已有任务时，管理窗口及旧授权结果仍可能显示。
+- 修复可限制在 4 个既有前端生产文件，预计净增 30–50 行。算法、Backend、Local/Desktop 均无需修改；最终人工验收和文件执行能力不属于本批。
+
 ## 基线
 
 审计提交 bb46abd64ca5fc431f4f7748fb9e085099990d5e，旧对照 e7ed8a4189bb627e96814fc2f34818693cbc2050。旧 spec/checklist/代码在 Git 历史中可查；不继承其勾选为当前验收结果。
