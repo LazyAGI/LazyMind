@@ -98,7 +98,7 @@ def _materialize_workflow_package(
         if target.exists() and target.read_bytes() == raw:
             continue
         target.parent.mkdir(parents=True, exist_ok=True)
-        temporary = target.with_name(f'.{target.name}.{os.getpid()}.tmp')
+        temporary = target.with_name(f'.{target.name}.{uuid.uuid4().hex}.tmp')
         temporary.write_bytes(raw)
         os.replace(temporary, target)
     return root
