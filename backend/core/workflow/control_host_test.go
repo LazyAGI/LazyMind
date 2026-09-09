@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -254,5 +255,26 @@ func TestNativeChatStopUsesControlledLifecycle(t *testing.T) {
 	var attempt orm.WorkflowSessionStep
 	if err := svc.DB.First(&attempt, "id = ?", "active-attempt").Error; err != nil || attempt.Status != "cancelled" || attempt.LeaseToken != "" {
 		t.Fatalf("chat stop did not fence the attempt: %+v %v", attempt, err)
+	}
+}
+
+func TestStopFencesNativeExecutorAndUpdatesOriginalTask(t *testing.T) {
+	svc, _ := hostControlFixture(t)
+	expires := time.Now().Add(time.Minute)
+	if err := svc.DB.Create(&orm.SubAgentTask{ID: "native-task", Status: "running", InputSlots: json.RawMessage(`[]`), OutputSlots: json.RawMessage(`[]`)}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.DB.Create(&orm.WorkflowSessionStep{ID: "native-attempt", SessionID: "run", StepID: "write", TaskID: "native-task", ExecutorHost: "lazymind", Status: "running", LeaseToken: "old-handle", LeaseExpiresAt: &expires}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Execute(context.Background(), "owner", "run", WorkflowControlCommand{CommandID: "stop-native", Kind: "stop"}); err != nil {
+		t.Fatal(err)
+	}
+	var task orm.SubAgentTask
+	if err := svc.DB.First(&task, "id = ?", "native-task").Error; err != nil || task.Status != "interrupted" {
+		t.Fatalf("original task still running: %+v %v", task, err)
+	}
+	if err := workflowattempt.New(svc.DB, workflowattempt.Config{}).ValidateLease(context.Background(), "native-attempt", "old-handle"); err == nil {
+		t.Fatal("stopped native executor retained its lease")
 	}
 }

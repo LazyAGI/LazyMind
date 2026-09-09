@@ -22,8 +22,9 @@ def test_remote_executor_ignores_non_json_stream_frames():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('controlled', [False, True])
 async def test_post_step_capability_check_runs_in_analysis_attempt_without_another_subagent(
-    monkeypatch, tmp_path,
+    monkeypatch, tmp_path, controlled,
 ):
     worker = RemoteWorkflowExecutor()
 
@@ -32,7 +33,7 @@ async def test_post_step_capability_check_runs_in_analysis_attempt_without_anoth
         completed = None
 
         async def context(self, *_):
-            return {'metadata': {'task_id': 'task-analysis'}, 'inputs': {}}
+            return {'metadata': {'task_id': 'task-analysis', 'control_protocol': 'workflow.control.v1' if controlled else ''}, 'inputs': {}}
 
         async def execution_spec(self, *_):
             return {
@@ -55,6 +56,7 @@ async def test_post_step_capability_check_runs_in_analysis_attempt_without_anoth
             self.events.append(event)
 
         async def artifact(self, *_):
+            assert not controlled, 'controlled artifacts must publish only in finalization'
             return None
 
         async def progress(self, *_):
@@ -98,6 +100,7 @@ async def test_post_step_capability_check_runs_in_analysis_attempt_without_anoth
     assert subagent_runs == 1
     assert checked == ['WORKFLOW: CREATE_NEW\nREQUIRES: image_generator']
     assert runtime.completed['summary'] == 'analyzed'
+    assert runtime.completed['artifacts'][0]['slot'] == 'workflow_routing'
     assert [event['type'] for event in runtime.events] == [
         'artifact', 'tool_calls', 'tool_results', 'done',
     ]

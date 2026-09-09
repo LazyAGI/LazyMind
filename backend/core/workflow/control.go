@@ -105,7 +105,11 @@ func (s WorkflowControlService) Execute(ctx context.Context, owner, sessionID st
 				return controlstore.Reject("BEGIN_REJECTED", "step did not create one execution")
 			}
 			*session = updated
-			result.Receipt.ExecutionID = tasks[0]
+			var execution orm.WorkflowSessionStep
+			if err := tx.Select("id").Where("task_id = ?", tasks[0]).First(&execution).Error; err != nil {
+				return err
+			}
+			result.Receipt.ExecutionID = execution.ID
 			if err := tx.Model(&orm.WorkflowHostAction{}).Where("session_id = ? AND kind = 'continue' AND execution_id = '' AND status IN ? AND consumed_at IS NULL", session.ID, []string{"accepted", "dispatching", "unknown"}).
 				Update("consumed_at", time.Now().UTC()).Error; err != nil {
 				return err
@@ -172,8 +176,12 @@ func (s WorkflowControlService) Execute(ctx context.Context, owner, sessionID st
 				Updates(map[string]any{"status": "superseded", "decision_command_id": command.CommandID, "updated_at": time.Now().UTC()}).Error; err != nil {
 				return err
 			}
-			result.Receipt.ExecutionID = tasks[0]
-			result.Receipt.ActionID, err = controlstore.EnqueueHostAction(tx, *session, command.CommandID, "continue", tasks[0])
+			var execution orm.WorkflowSessionStep
+			if err := tx.Select("id").Where("task_id = ?", tasks[0]).First(&execution).Error; err != nil {
+				return err
+			}
+			result.Receipt.ExecutionID = execution.ID
+			result.Receipt.ActionID, err = controlstore.EnqueueHostAction(tx, *session, command.CommandID, "continue", result.Receipt.ExecutionID)
 			if err != nil {
 				return err
 			}

@@ -17,7 +17,7 @@ const publicName = (name: string) => name.startsWith('mcp__lazymind__workflow_')
 const cleanup: Array<() => Promise<unknown>> = []
 afterEach(async () => { for (const dispose of cleanup.splice(0).reverse()) await dispose() })
 
-async function fixture(seedPTC = false) {
+async function fixture(seedPTC = false, native = false) {
   const ctx = new Context()
   const prompt = ctx.plugin(SystemPrompt)
   await prompt.await(); cleanup.push(() => prompt.dispose())
@@ -61,8 +61,8 @@ async function fixture(seedPTC = false) {
     session_id: 'run-1', interaction_url: 'http://localhost:8090/workflow-runs/run-1', control,
   } })))
   ctx.tools.register(definition('mcp__lazymind__workflow_step_begin', async () => {
-    control = { ...control, state_version: 2, active_execution_ids: ['attempt-1'], active_executions: 1 }
-    return { structuredContent: { execution: { execution_id: 'attempt-1' }, state: { control } } }
+    control = { ...control, state_version: 2, active_execution_ids: ['attempt-1'], active_executions: 1, ...(native ? { native_execution_ids: ['attempt-1'], continuation: 'awaiting_executor', admission: { can_begin: false } } : {}) }
+    return { structuredContent: { execution: { execution_id: 'attempt-1', executor_host: native ? 'lazymind' : 'external-agent' }, state: { control } } }
   }))
   ctx.tools.register(definition('mcp__lazymind__workflow_step_submit', async () => {
     control = { ...control, state_version: 3, active_execution_ids: [], active_executions: 0,
@@ -167,4 +167,14 @@ it('lets a child return its committed result even when the subsequent Bridge rea
   const submitted=await f.execute('mcp__lazymind__workflow_step_submit',f.child,{session_id:'run-1',execution_id:'attempt-1'})
   expect(submitted.isError).toBe(false)
   expect((await f.execute('structured_output', f.child)).isError).toBe(false)
+})
+
+
+it('yields native tool steps without granting DSH permission to imitate their tools', async () => {
+  const f = await fixture(false, true)
+  await f.execute('mcp__lazymind__workflow_start')
+  expect(await f.execute('mcp__lazymind__workflow_step_begin', f.root, { session_id: 'run-1' })).toMatchObject({ isError: false, concludesTurn: true })
+  expect((await f.execute('shell')).isError).toBe(true)
+  expect(f.shell).not.toHaveBeenCalled()
+  expect((await f.execute('shell', f.unrelated)).isError).toBe(false)
 })

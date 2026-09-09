@@ -180,7 +180,8 @@ class RemoteWorkflowExecutor:
                     await self.runtime.task_event(client, task_id, lease, {
                         **event, 'value': artifact['value'],
                     })
-                    await self.runtime.artifact(client, attempt_id, lease, artifact)
+                    if not metadata.get('control_protocol'):
+                        await self.runtime.artifact(client, attempt_id, lease, artifact)
                     artifacts.append(artifact)
                 elif kind not in {'done', 'error'}:
                     await self.runtime.task_event(client, task_id, lease, event)

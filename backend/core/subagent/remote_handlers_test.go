@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"gorm.io/gorm"
 
 	"lazymind/core/common/orm"
 	"lazymind/core/state"
@@ -27,13 +28,16 @@ func remoteSubagentFixture(t *testing.T) *orm.DB {
 	t.Setenv("LAZYMIND_AUTH_SERVICE_URL", authService.URL)
 	db := newTestDB(t)
 	if err := db.AutoMigrate(
-		&orm.WorkflowSessionStep{},
+		&orm.WorkflowSession{}, &orm.WorkflowSessionStep{},
 		&orm.UserSelectedModel{},
 		&orm.UserSelectedProvider{},
 		&orm.UserModelProvider{},
 		&orm.UserModelProviderGroupModel{},
 		&orm.UserModelProviderGroup{},
 	); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.WorkflowSession{ID: "session-1"}).Error; err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
@@ -311,5 +315,28 @@ func TestAppendRemoteStepAllocatesMonotonicSequence(t *testing.T) {
 		if steps[i].Seq != i {
 			t.Fatalf("steps=%#v", steps)
 		}
+	}
+}
+
+func TestControlledNativeTerminalMirrorsTaskWithoutLegacyContinuation(t *testing.T) {
+	db := remoteSubagentFixture(t)
+	previous := EventHooks
+	EventHooks = &eventHooks{}
+	t.Cleanup(func() { EventHooks = previous })
+	called := false
+	EventHooks.RegisterTerminalStatusHook(func(context.Context, *gorm.DB, state.Store, string, string, string) { called = true })
+	if err := db.Model(&orm.WorkflowSession{}).Where("id = ?", "session-1").Update("control_protocol", "workflow.control.v1").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&orm.WorkflowSessionStep{}).Where("id = ?", "attempt-remote").Update("status", "succeeded").Error; err != nil {
+		t.Fatal(err)
+	}
+	rec := postRemoteTaskEvent(t, "lease-live", map[string]any{"type": "done", "status": "succeeded", "summary": "ready for review"})
+	if rec.Code != http.StatusOK || called {
+		t.Fatalf("controlled task invoked legacy continuation: status=%d called=%t body=%s", rec.Code, called, rec.Body.String())
+	}
+	task, err := GetTask(context.Background(), db.DB, "task-remote")
+	if err != nil || task.Status != StatusSucceeded {
+		t.Fatalf("task projection missing: %+v %v", task, err)
 	}
 }

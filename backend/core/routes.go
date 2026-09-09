@@ -63,22 +63,6 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/agent-invocations/{invocation_id}:finish", []string{"qa.write"}, invocationHandler.Finish)
 	handleAPI(r, "GET", "/agent-invocations", []string{"qa.read"}, invocationHandler.List)
 
-	attemptHandler := workflowattempt.Handler{Service: workflowattempt.New(corestore.DB(), workflowattempt.Config{})}
-	remoteExecutorHandler := workflowexecutor.RemoteHandler{
-		DB: corestore.DB(), Attempts: attemptHandler.Service,
-		Contexts:  workflowexecutor.DBContextLoader{DB: corestore.DB()},
-		Artifacts: workflowexecutor.DBArtifactSink{DB: corestore.DB()},
-	}
-	handleAPI(r, "POST", "/internal/workflow-attempts:claim", nil, attemptHandler.Claim)
-	handleAPI(r, "GET", "/internal/workflow-attempts/{attempt_id}/context", nil, remoteExecutorHandler.Context)
-	handleAPI(r, "GET", "/internal/workflow-attempts/{attempt_id}/inputs/{material_id}", nil, remoteExecutorHandler.Input)
-	handleAPI(r, "POST", "/internal/workflow-attempts/{attempt_id}/artifact-files", nil, remoteExecutorHandler.UploadArtifactFile)
-	handleAPI(r, "POST", "/internal/workflow-attempts/{attempt_id}/artifacts", nil, remoteExecutorHandler.SaveArtifact)
-	handleAPI(r, "POST", "/internal/workflow-attempts/{attempt_id}:heartbeat", nil, attemptHandler.Heartbeat)
-	handleAPI(r, "POST", "/internal/workflow-attempts/{attempt_id}:progress", nil, attemptHandler.Progress)
-	handleAPI(r, "POST", "/internal/workflow-attempts/{attempt_id}:complete", nil, remoteExecutorHandler.Complete)
-	handleAPI(r, "POST", "/internal/workflow-attempts/{attempt_id}:fail", nil, attemptHandler.Fail)
-	handleAPI(r, "POST", "/internal/workflow-attempts/{attempt_id}:cancel", nil, attemptHandler.Cancel)
 	workflowRepository := workflowstore.New(corestore.DB())
 	workflowFacade := workflowfacade.Handler{
 		Store:      workflowRepository,
@@ -91,6 +75,23 @@ func registerAllRoutes(r *mux.Router) {
 		Contexts:  workflowexecutor.DBContextLoader{DB: corestore.DB()},
 		Artifacts: workflowexecutor.DBArtifactSink{DB: corestore.DB()},
 	}
+	attemptHandler := workflowattempt.Handler{Service: workflowattempt.New(corestore.DB(), workflowattempt.Config{})}
+	remoteExecutorHandler := workflowexecutor.RemoteHandler{
+		DB: corestore.DB(), Attempts: attemptHandler.Service,
+		SettleControlled: hostedService.SettleNative,
+		Contexts:         workflowexecutor.DBContextLoader{DB: corestore.DB()},
+		Artifacts:        workflowexecutor.DBArtifactSink{DB: corestore.DB()},
+	}
+	handleAPI(r, "POST", "/internal/workflow-attempts:claim", nil, attemptHandler.Claim)
+	handleAPI(r, "GET", "/internal/workflow-attempts/{attempt_id}/context", nil, remoteExecutorHandler.Context)
+	handleAPI(r, "GET", "/internal/workflow-attempts/{attempt_id}/inputs/{material_id}", nil, remoteExecutorHandler.Input)
+	handleAPI(r, "POST", "/internal/workflow-attempts/{attempt_id}/artifact-files", nil, remoteExecutorHandler.UploadArtifactFile)
+	handleAPI(r, "POST", "/internal/workflow-attempts/{attempt_id}/artifacts", nil, remoteExecutorHandler.SaveArtifact)
+	handleAPI(r, "POST", "/internal/workflow-attempts/{attempt_id}:heartbeat", nil, attemptHandler.Heartbeat)
+	handleAPI(r, "POST", "/internal/workflow-attempts/{attempt_id}:progress", nil, attemptHandler.Progress)
+	handleAPI(r, "POST", "/internal/workflow-attempts/{attempt_id}:complete", nil, remoteExecutorHandler.Complete)
+	handleAPI(r, "POST", "/internal/workflow-attempts/{attempt_id}:fail", nil, remoteExecutorHandler.Fail)
+	handleAPI(r, "POST", "/internal/workflow-attempts/{attempt_id}:cancel", nil, remoteExecutorHandler.Cancel)
 	hostedHandler := workflowhosted.Handler{Service: hostedService}
 	workflowControl := workflow.WorkflowControlHandler{Service: workflow.WorkflowControlService{DB: corestore.DB()}}
 	handleAPI(r, "GET", "/workflow-control/capabilities", []string{"qa.read"}, workflowControl.Capabilities)

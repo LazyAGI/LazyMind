@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 
 	"lazymind/core/common/orm"
@@ -79,10 +78,7 @@ func TestHostedSubmissionRejectsUndeclaredOutputBeforeWrite(t *testing.T) {
 
 func hostedTestService(t *testing.T) (*Service, *gorm.DB) {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	db := orm.OpenTestDB(t).DB
 	models := []any{
 		&orm.WorkflowSession{}, &orm.WorkflowSessionStep{}, &orm.WorkflowOutbox{}, &orm.WorkflowEvent{},
 		&orm.WorkflowCommand{}, &orm.WorkflowRevision{}, &orm.WorkflowRevisionEntry{}, &orm.WorkflowBlob{},

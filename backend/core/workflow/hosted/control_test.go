@@ -283,3 +283,94 @@ func TestApprovalPreferenceEntryPointsShareFuturePolicy(t *testing.T) {
 		}
 	}
 }
+
+func TestNativeExecutionSharesAtomicReviewAndHostContinuation(t *testing.T) {
+	for _, review := range []bool{false, true} {
+		t.Run(map[bool]string{false: "automatic", true: "human"}[review], func(t *testing.T) {
+			service, db := hostedTestService(t)
+			if err := db.AutoMigrate(&orm.WorkflowReviewCheckpoint{}, &orm.WorkflowHostAction{}, &orm.WorkflowApprovalPreference{}); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Model(&orm.WorkflowSession{}).Where("id = ?", "session-1").Updates(map[string]any{
+				"control_protocol":     controlpolicy.Protocol,
+				"control_binding_json": `{"driver_session_id":"driver","connector_id":"connector","generation":1}`,
+			}).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Model(&orm.WorkflowSessionStep{}).Where("id = ?", "attempt-1").Updates(map[string]any{"executor_host": "lazymind", "review_required": review, "task_id": "native-task"}).Error; err != nil {
+				t.Fatal(err)
+			}
+			ctx := context.Background()
+			if _, err := service.Attempts.ClaimForHost(ctx, "external", HostName); err == nil {
+				t.Fatal("external host claimed a native execution")
+			}
+			observed, err := service.Begin(ctx, "owner", "session-1", "attempt-1")
+			if err != nil || observed.ExecutorHost != "lazymind" || observed.ExecutionHandle != "" || observed.StepContract.Prompt != "" {
+				t.Fatalf("native handoff leaked a contract: %+v %v", observed, err)
+			}
+			claim, err := service.Attempts.ClaimForHost(ctx, "native", "lazymind")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := service.Resume(ctx, "owner", "session-1", "attempt-1"); err != nil {
+				t.Fatal(err)
+			}
+			if err := service.Attempts.ValidateLease(ctx, claim.AttemptID, claim.LeaseToken); err != nil {
+				t.Fatal("external resume rotated the native lease", err)
+			}
+			var session orm.WorkflowSession
+			db.First(&session, "id = ?", "session-1")
+			waiting, err := controlstore.Read(db, session)
+			if err != nil || waiting.Continuation != "awaiting_executor" || waiting.Admission.CanBegin || len(waiting.NativeExecutionIDs) != 1 {
+				t.Fatalf("native wait not guarded: %+v %v", waiting, err)
+			}
+			input := successfulSubmission(claim.LeaseToken)
+			if _, err := service.Submit(ctx, "owner", session.ID, claim.AttemptID, input); err == nil {
+				t.Fatal("public submit accepted native artifacts")
+			}
+			missing := json.RawMessage(`{"summary":"missing artifacts"}`)
+			if err := service.SettleNative(ctx, claim.AttemptID, claim.LeaseToken, "succeeded", "", missing); err == nil {
+				t.Fatal("native completion skipped required outputs")
+			}
+			var count int64
+			db.Model(&orm.WorkflowSlotRevision{}).Count(&count)
+			if count != 0 {
+				t.Fatal("failed native completion published artifacts")
+			}
+			raw, _ := json.Marshal(executor.Result{Summary: "native result", Artifacts: input.Artifacts})
+			if err := service.SettleNative(ctx, claim.AttemptID, "stale", "succeeded", "", raw); err == nil {
+				t.Fatal("stale native lease accepted")
+			}
+			for i := 0; i < 2; i++ {
+				if err := service.SettleNative(ctx, claim.AttemptID, claim.LeaseToken, "succeeded", "", raw); err != nil {
+					t.Fatal(err)
+				}
+			}
+			db.First(&session, "id = ?", "session-1")
+			settled, err := controlstore.Read(db, session)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if review {
+				if settled.Continuation != "awaiting_user" || len(settled.Reviews) != 1 || settled.Delivery != nil {
+					t.Fatalf("review barrier bypassed: %+v", settled)
+				}
+			} else {
+				if settled.Continuation != "completed" || settled.Delivery == nil || settled.Delivery.ExecutionID != claim.AttemptID {
+					t.Fatalf("native completion did not wake driver: %+v", settled)
+				}
+				if _, err := service.Begin(ctx, "owner", session.ID, claim.AttemptID); err != nil {
+					t.Fatal(err)
+				}
+				db.Model(&orm.WorkflowHostAction{}).Where("consumed_at IS NULL").Count(&count)
+				if count != 0 {
+					t.Fatal("completed execution notification was not consumed")
+				}
+			}
+			db.Model(&orm.WorkflowSlotRevision{}).Count(&count)
+			if count != 1 {
+				t.Fatalf("replay duplicated native artifacts: %d", count)
+			}
+		})
+	}
+}

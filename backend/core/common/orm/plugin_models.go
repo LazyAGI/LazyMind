@@ -67,6 +67,8 @@ type WorkflowSessionStep struct {
 	StepID    string `gorm:"column:step_id;type:varchar(64);not null"`
 	Attempt   int    `gorm:"column:attempt;not null;default:1"`
 	TaskID    string `gorm:"column:task_id;type:varchar(36);not null"`
+	// Empty preserves the session's executor routing for existing attempts.
+	ExecutorHost string `gorm:"column:executor_host;type:varchar(32);not null;default:''"`
 	// Status is owned by Workflow Runtime. Native execution mirrors accepted task events.
 	Status            string     `gorm:"column:status;type:varchar(16);not null;default:pending"`
 	Validity          string     `gorm:"column:validity;type:varchar(16);not null;default:effective"`

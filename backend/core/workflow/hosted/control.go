@@ -25,38 +25,39 @@ func (s *Service) beginControlled(ctx context.Context, owner, sessionID, attempt
 		if err := controlstore.GuardClaim(tx, *session); err != nil {
 			return err
 		}
-		service := s.Attempts.WithDB(tx)
-		var claim attempt.Claim
-		var err error
-		if resume {
-			claim, err = service.ClaimAttemptForHost(ctx, attemptID, executorID(owner), HostName)
+		if row.ExecutorHost == "lazymind" {
+			execution = Execution{ExecutorHost: row.ExecutorHost, ExecutionID: row.ID, AttemptStatus: row.Status,
+				ReviewAfterSubmit: row.ReviewRequired}
 		} else {
-			claim, err = service.ClaimQueuedAttemptForHost(ctx, attemptID, executorID(owner), HostName)
-		}
-		if err != nil {
-			return &ProtocolError{Code: "EXECUTION_NOT_CLAIMABLE", Message: "execution is already claimed or terminal; use resume only to recover an interrupted execution", Cause: err}
-		}
-		loader := s.Contexts
-		if _, ok := loader.(executor.DBContextLoader); ok {
-			if err := executor.FreezeControlledInputs(ctx, tx, attemptID); err != nil {
+			service := s.Attempts.WithDB(tx)
+			var claim attempt.Claim
+			var err error
+			if resume {
+				claim, err = service.ClaimAttemptForHost(ctx, attemptID, executorID(owner), HostName)
+			} else {
+				claim, err = service.ClaimQueuedAttemptForHost(ctx, attemptID, executorID(owner), HostName)
+			}
+			if err != nil {
+				return &ProtocolError{Code: "EXECUTION_NOT_CLAIMABLE", Message: "execution is already claimed or terminal; use resume only to recover an interrupted execution", Cause: err}
+			}
+			loader := s.Contexts
+			if _, ok := loader.(executor.DBContextLoader); ok {
+				if err := executor.FreezeControlledInputs(ctx, tx, attemptID); err != nil {
+					return err
+				}
+				loader = executor.DBContextLoader{DB: tx}
+			}
+			contract, err := loader.LoadAttemptContext(ctx, attemptID)
+			if err != nil {
 				return err
 			}
-			loader = executor.DBContextLoader{DB: tx}
+			contract.Metadata = nil
+			execution = Execution{ExecutorHost: HostName, AttemptStatus: "claimed", ReviewAfterSubmit: row.ReviewRequired, ExecutionID: attemptID, ExecutionHandle: claim.LeaseToken, LeaseExpires: claim.LeaseExpiresAt, StepContract: contract}
 		}
-		contract, err := loader.LoadAttemptContext(ctx, attemptID)
-		if err != nil {
-			return err
-		}
-		contract.Metadata = nil
-		execution = Execution{ReviewAfterSubmit: row.ReviewRequired, ExecutionID: attemptID, ExecutionHandle: claim.LeaseToken, LeaseExpires: claim.LeaseExpiresAt, StepContract: contract}
-		if err := tx.Model(&orm.WorkflowHostAction{}).Where("session_id = ? AND execution_id = ? AND kind = 'continue' AND status IN ?", sessionID, attemptID, []string{"dispatching", "accepted"}).
-			Update("consumed_at", time.Now().UTC()).Error; err != nil {
-			return err
-		}
-		return tx.Model(&orm.WorkflowHostAction{}).Where("session_id = ? AND execution_id = ? AND kind = 'continue' AND status = 'pending'", sessionID, attemptID).
-			Updates(map[string]any{"status": "superseded", "consumed_at": time.Now().UTC()}).Error
+		return controlstore.ConsumeExecutionContinuation(tx, sessionID, attemptID)
+
 	})
-	if err == nil {
+	if err == nil && execution.ExecutionHandle != "" {
 		workflowcore.NotifyWorkflowRuntimeUpdated(ctx, s.DB, sessionID, attemptID, "running")
 	}
 	return execution, err
@@ -177,6 +178,16 @@ func (s *Service) submitControlled(ctx context.Context, owner, sessionID, attemp
 			return err
 		}
 		result.Control, err = controlstore.Read(tx, *session)
+		if err != nil {
+			return err
+		}
+		if row.ExecutorHost == "lazymind" && result.Control.Binding.Bound && result.Control.ActiveExecutions == 0 &&
+			(result.Control.Continuation == "continue" || result.Control.Continuation == "completed" || result.Control.Continuation == "failed") {
+			if _, err := controlstore.EnqueueHostAction(tx, *session, commandID, "continue", attemptID); err != nil {
+				return err
+			}
+			result.Control, err = controlstore.Read(tx, *session)
+		}
 		return err
 	})
 	if err == nil && !result.AlreadyTerminal {

@@ -12,7 +12,7 @@ import { workflowTool } from './tool'
 
 const READS = new Set(['list', 'get', 'input_get', 'state', 'session_list', 'artifact_list', 'artifact_get'])
 const ACQUIRE = new Set(['step_begin', 'step_claim', 'step_resume'])
-const PAUSED = new Set(['awaiting_user', 'draining', 'stopped', 'binding_required'])
+const PAUSED = new Set(['awaiting_user', 'awaiting_executor', 'draining', 'stopped', 'binding_required'])
 const STRUCTURED_OUTPUT = 'structured_output' // Published DSH 0.1.2 subagent completion contract.
 
 interface Scope {
@@ -77,7 +77,7 @@ export function installHost(ctx: Context, bridge: HostTransport, config: HostCon
       if (scope.control && scope.control.state_version > control.state_version) continue
       scope.control = control
       if (control.active_execution_ids) {
-        for (const id of scope.grants) if (!control.active_execution_ids.includes(id)) scope.grants.delete(id)
+        for (const id of scope.grants) if (!control.active_execution_ids.includes(id) || control.native_execution_ids?.includes(id)) scope.grants.delete(id)
       }
     }
   }
@@ -93,7 +93,7 @@ export function installHost(ctx: Context, bridge: HostTransport, config: HostCon
     const goal = goals.get(scope.agent)
     if (goal?.phase === 'active' && goal.activation === 'armed' && (!scope.goalId || scope.goalId === goal.id)) {
       goals.block(scope.agent, goal, { code: goalReason(scope.runId, goal.revision + 1, scope.control?.continuation === 'stopped'),
-        message: 'This LazyMind workflow needs user action before automatic work can continue.' })
+        message: scope.control.continuation === 'awaiting_executor' ? 'LazyMind is executing this workflow step.' : 'This LazyMind workflow needs user action before automatic work can continue.' })
     }
   }
 
@@ -187,8 +187,8 @@ export function installHost(ctx: Context, bridge: HostTransport, config: HostCon
     if (!runId) return null
     const execution = object(fields?.execution)
     if (operation && ACQUIRE.has(operation) && typeof execution?.execution_id === 'string') {
-      scope.grants.add(execution.execution_id)
-      scope.returnPending = false
+      if (execution.executor_host !== 'lazymind') scope.grants.add(execution.execution_id)
+      scope.returnPending = execution.executor_host === 'lazymind'
       scope.activeOwned = scope.automatic = true
       scope.manual = false
     }
@@ -243,7 +243,7 @@ export function installHost(ctx: Context, bridge: HostTransport, config: HostCon
       const definition = workflowTool(original, { trustedOrigin: config.webUrl, hostSessionId: driver(scope.agent).session.id,
         operation,
         afterResult: (value, exec) => own(afterResult(value, exec)),
-        shouldConclude: (control) => scope.activeOwned && !completion(scope) && (scope.unknown || !!scope.runId && control?.continuation === 'awaiting_user'),
+        shouldConclude: (control) => scope.activeOwned && !completion(scope) && (scope.unknown || !!scope.runId && ['awaiting_user', 'awaiting_executor'].includes(control?.continuation ?? '')),
       })
       scope.wrappers.set(schema.name, { original, dispose: registration.tools.register(definition) })
     }
@@ -399,7 +399,7 @@ export function installHost(ctx: Context, bridge: HostTransport, config: HostCon
         // A queued input gains scope only in pre-step, when that exact input runs.
         await ctx.sessionController.prompt({ sessionId: resolved.agent.session.id, requestId: action.id as Parameters<typeof ctx.sessionController.prompt>[0]['requestId'],
           mode: 'queue', content: [{ type: 'text', text: action.execution_id
-            ? `The user authorized recovery of LazyMind workflow ${action.session_id}. Call workflow.step.claim with execution_id=${action.execution_id}, execute that existing contract, and submit its result with execution_handle. Do not create another execution or workflow.`
+            ? `LazyMind workflow ${action.session_id} has an execution update. Call workflow.step.claim with execution_id=${action.execution_id} to inspect or acquire it. If executor_host is lazymind, it is managed by LazyMind: read the latest state and continue only ready steps when permitted; do not execute or submit it. Otherwise execute the granted contract and submit with execution_handle. Do not create a new workflow.`
             : `The user confirmed LazyMind workflow ${action.session_id}. Read its latest state through MCP and continue the ready steps. Use execution_handle on each submit and honor control.continuation. Do not create a new workflow.` }],
         }, signal())
         if (scope.runId === action.session_id) resumeGoal(scope)

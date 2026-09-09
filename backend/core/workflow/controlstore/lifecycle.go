@@ -44,6 +44,19 @@ func ApplyLifecycle(tx *gorm.DB, session *orm.WorkflowSession, commandID string,
 					"fencing_generation": gorm.Expr("fencing_generation + 1"), "updated_at": now}
 				binding.Generation++
 			}
+			if controlled {
+				var taskIDs []string
+				if err := tx.Model(&orm.WorkflowSessionStep{}).Where("session_id = ? AND executor_host = 'lazymind' AND validity = 'effective' AND status IN ?", session.ID,
+					[]string{"queued", "pending", "claimed", "running"}).Pluck("task_id", &taskIDs).Error; err != nil {
+					return "", false, err
+				}
+				if len(taskIDs) > 0 {
+					if err := tx.Model(&orm.SubAgentTask{}).Where("id IN ? AND status IN ?", taskIDs, []string{"pending", "running"}).
+						Updates(map[string]any{"status": "interrupted", "updated_at": now}).Error; err != nil {
+						return "", false, err
+					}
+				}
+			}
 			if err := attempts.Updates(updates).Error; err != nil {
 				return "", false, err
 			}
@@ -127,4 +140,15 @@ func EnqueueHostAction(tx *gorm.DB, session orm.WorkflowSession, commandID, kind
 		BindingGeneration: binding.Generation, ConnectorID: binding.ConnectorID, NativeSessionID: binding.DriverSession,
 		ExecutionID: executionID, Status: "pending", CreatedAt: now, UpdatedAt: now}
 	return action.ID, tx.Create(&action).Error
+}
+
+// ConsumeExecutionContinuation records that the requested execution was observed or claimed.
+func ConsumeExecutionContinuation(tx *gorm.DB, sessionID, attemptID string) error {
+	now := time.Now().UTC()
+	if err := tx.Model(&orm.WorkflowHostAction{}).Where("session_id = ? AND execution_id = ? AND kind = 'continue' AND status IN ?", sessionID, attemptID, []string{"dispatching", "accepted", "unknown"}).
+		Update("consumed_at", now).Error; err != nil {
+		return err
+	}
+	return tx.Model(&orm.WorkflowHostAction{}).Where("session_id = ? AND execution_id = ? AND kind = 'continue' AND status = 'pending'", sessionID, attemptID).
+		Updates(map[string]any{"status": "superseded", "consumed_at": now}).Error
 }

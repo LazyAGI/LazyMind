@@ -44,6 +44,7 @@ func (loader DBContextLoader) LoadAttemptContext(ctx context.Context, id string)
 		value.Metadata = map[string]string{}
 	}
 	value.Metadata["controller_host"] = session.ControllerHost
+	value.Metadata["control_protocol"] = session.ControlProtocol
 	value.Metadata["origin_host"] = session.OriginHost
 	value.Metadata["conversation_id"] = session.ConversationID
 	value.Metadata["owner_user_id"] = session.CreateUserID

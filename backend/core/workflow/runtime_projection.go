@@ -359,7 +359,7 @@ func freezeRouteDecision(ctx context.Context, db *gorm.DB, sessionID, from, task
 		decision := graphengine.DecideRoute(graph, from, snapshot.Materials)
 		var attempt orm.WorkflowSessionStep
 		if err := tx.Select("id", "result_json").Where(
-			"session_id = ? AND step_id = ? AND task_id = ?", sessionID, from, taskID,
+			"session_id = ? AND step_id = ? AND (task_id = ? OR id = ?)", sessionID, from, taskID, taskID,
 		).First(&attempt).Error; err != nil {
 			return err
 		}

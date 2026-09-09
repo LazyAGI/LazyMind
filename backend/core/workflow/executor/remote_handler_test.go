@@ -40,8 +40,11 @@ func remoteHandlerFixture(t *testing.T, value AttemptContext) (RemoteHandler, *g
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&orm.WorkflowSessionStep{}, &orm.WorkflowOutbox{}, &orm.WorkflowEvent{},
+	if err := db.AutoMigrate(&orm.WorkflowSession{}, &orm.WorkflowSessionStep{}, &orm.WorkflowOutbox{}, &orm.WorkflowEvent{},
 		&orm.WorkflowInputResource{}, &orm.WorkflowSlotRevision{}, &orm.WorkflowHumanArtifact{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.WorkflowSession{ID: value.SessionID}).Error; err != nil {
 		t.Fatal(err)
 	}
 	service := attempt.New(db, attempt.Config{LeaseDuration: time.Minute})

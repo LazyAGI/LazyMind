@@ -25,7 +25,7 @@ type WorkflowHostIdentity struct {
 func (h WorkflowControlHandler) Capabilities(w http.ResponseWriter, r *http.Request) {
 	db := h.Service.DB
 	ready := db.Migrator().HasTable(&orm.WorkflowReviewCheckpoint{}) && db.Migrator().HasTable(&orm.WorkflowHostAction{}) &&
-		db.Migrator().HasColumn(&orm.WorkflowSession{}, "control_protocol") && db.Migrator().HasColumn(&orm.WorkflowSessionStep{}, "submission_hash")
+		db.Migrator().HasColumn(&orm.WorkflowSession{}, "control_protocol") && db.Migrator().HasColumn(&orm.WorkflowSessionStep{}, "submission_hash") && db.Migrator().HasColumn(&orm.WorkflowSessionStep{}, "executor_host")
 	common.ReplyOK(w, map[string]any{"protocol": controlpolicy.Protocol, "schema_ready": ready})
 }
 
