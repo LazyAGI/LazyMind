@@ -152,3 +152,10 @@ NODE_OPTIONS=--no-experimental-webstorage pnpm run build
 - [ ] Core gate 尚未注入；未实现 pending 等待、Core 状态机、磁盘文件执行、批准 UI，因此不能宣称工作区文件授权闭环。
 
 A2 开始前继续遵守测试先行和人工 Review；Core 文件执行与批准状态仍按方案分开实现。
+
+## A2 首轮测试记录（2026-09-09）
+
+- [x] 新增 `operations_contract_test.go`：锁定读、创建、追加、替换、删除、expected_version、路径/撤销/版本/符号链接/.git/原子替换合同。
+- [x] 新增 `approval_routes_contract_test.go`：锁定 Core 内部操作路由和用户决定路由。
+- [x] 运行 `go test ./localworkspace -run 'Workspace(Operations|Approval|OperationRoutes)' -count=1`：4 个测试失败、0 个异常失败，全部为预期 RED。
+- [ ] Review A2 RED 后实现 Core 单一 operation service、批准状态机和真实文件操作；不得先写“临时允许”分支。

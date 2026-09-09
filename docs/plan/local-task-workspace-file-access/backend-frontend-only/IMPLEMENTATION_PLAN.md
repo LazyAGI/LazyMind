@@ -149,3 +149,8 @@ Core 的 request/result 结构各定义一次，直接由 handler/service 共用
 A1 已在算法项目接入轻量授权扩展点：ToolConfig 可声明方法级操作类别，AgentExecutionOptions/AgentExecutor 可传递授权 gate，ToolExecutionMiddleware 在底层 ToolManager 派发前闭合处理 deny/unknown，Workflow 绑定工作区时在脚本编译前默认拒绝未审计脚本。A1 不创建 Core gate 实例、不等待用户、不执行磁盘操作，故不改变当前真实工作区权限行为。
 
 A1 生产净增约 66 行、5 个既有算法文件；新增 1 个测试文件；52 项可运行矩阵通过。完整服务图仍受本地依赖组合限制，需在 CI/发布环境复核。下一批 A2 只新增 Core operation 状态/文件执行失败合同，先 Review 再实现。
+
+
+## 11. A2 首轮 RED
+
+A2 测试合同已建立但未实现生产：Core 目前没有 `operations.go`、`approvals.go` 或对应路由，合同运行结果为 4 个预期失败、0 个异常失败。生产实现必须先决定 operation service 与批准状态机边界，再补真实磁盘测试；不得以源码字符串合同通过后宣称文件能力完成。

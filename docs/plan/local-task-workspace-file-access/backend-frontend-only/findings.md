@@ -162,3 +162,11 @@ Agent Review 还未形成完整终稿；上述结论已足以阻止直接进入�
 - 授权 gate 只接受明确 `True/'allow'/'allowed'`；拒绝返回 `authorization_denied`，异常/未知状态闭合为 `authorization_unavailable`。没有 Core gate 实例注入，因此 A1 不改变现有运行时的真实授权行为。
 - Workflow 的 `runner.py:237 exec(compile(...))` 之前增加加载准入；绑定工作区且存在声明脚本时默认拒绝，避免把模型可写的 `workflow_package_authorized` 当成安全凭据。无工作区 Workflow 保持旧路径。
 - 发现并修复一次测试环境异常：`.venv` 的 FastAPI/Pydantic 版本冲突；未修改仓库依赖。最终可运行子集使用 Pydantic 2，52 项通过；完整服务图仍需在正式 CI/发布环境复核。
+
+## 2026-09-09 A2 首轮 RED
+
+- 新增 Core 合同测试：`backend/core/localworkspace/operations_contract_test.go`、`approval_routes_contract_test.go`；只读源码合同，不引入生产接口替身。
+- 命令 `go test ./localworkspace -run 'Workspace(Operations|Approval|OperationRoutes)' -count=1` 结果为 **4 个测试失败、0 个异常失败**。
+- 预期失败准确命中：`operations.go` 尚不存在；`approvals.go` 尚不存在；`routes.go` 尚未登记 workspace-operations prepare/status/execute 和用户 decide 路由。
+- 初次合同路径读取错误已修正：Go 测试工作目录是 `backend/core/localworkspace`；缺失生产文件现在报告字段缺口而不调用 `t.Fatalf`，保证 RED/异常失败可区分。
+- 本批尚未修改生产代码；A2 生产范围、状态机实现和文件原语仍待人工 Review。已有 `go test ./localworkspace -count=1` 基线在 A1 期间通过，A2 RED 仅是新增合同失败。

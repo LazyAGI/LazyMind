@@ -115,3 +115,9 @@
 - 未完成：Core 实际判权和 operation 状态机、pending/批准恢复、LocalFileToolkit Core 转发、读/建/改/追加/删磁盘闭环、前端批准 UI、主/子/Workflow 端到端及 T6。
 - 验证限制：完整算法测试收集曾受 `.venv` FastAPI/Pydantic 冲突影响；最终 A1 运行子集通过，仓库依赖未改。A2 前需在 CI/发布环境复核完整矩阵。
 - 下一步：A1 相关文件提交后，先为 A2 Core 操作/批准状态写失败合同，再进入实现；不把空 gate 误报为授权已生效。
+
+## 2026-09-09 A2 测试阶段
+
+- A2 已完成首轮测试合同，当前生产代码净增 0；新增 2 个 Core 测试文件，四份文档同步更新。
+- 4 个预期 RED 准确暴露 Core 尚无操作服务、批准状态机和路由；异常失败 0。合同不通过导入未实现符号制造编译错误，而是报告实际缺口。
+- 尚未实现 Core 磁盘访问、operation_id、pending/allowed/uncertain、版本冲突、敏感/.git/symlink 边界或用户批准接口。下一步需先 Review A2 生产范围和并发/原子语义。
