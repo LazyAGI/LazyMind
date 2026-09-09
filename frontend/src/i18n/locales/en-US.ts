@@ -950,8 +950,6 @@ const enUS = {
   },
 
   agentIntegration: {
-    detectedExecutablePath: "Current executable path",
-    installingWorkflowPlugin: 'Installing the LazyMind plugin into your existing DSH. You can return here to check the result.',
     title: "External Agent integrations",
     mergedDescription: "Manage both directions per Agent. Finish the matching setup before enabling it.",
     installed: "Installed",

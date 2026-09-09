@@ -923,8 +923,6 @@ const zhCN = {
   },
 
   agentIntegration: {
-    detectedExecutablePath: "当前使用的程序路径",
-    installingWorkflowPlugin: '正在向现有 DSH 安装 LazyMind 插件，可离开页面后返回查看结果。',
     title: "外部 Agent 集成",
     mergedDescription: "按 Agent 管理双向集成。完成对应配置后再启用。",
     installed: "已安装",
@@ -1005,7 +1003,7 @@ const zhCN = {
     locateCLI: "定位 CLI",
     enterExecutablePath: "输入本机路径",
     executablePathTitle: "配置本机程序路径",
-    executablePathDescription: "输入运行 Docker 的主机上的完整程序路径；macOS 桌面应用可选择 `.app`。LazyMind 会在本机验证该路径，不会保存到服务端数据库。",
+    executablePathDescription: "输入当前电脑上已安装程序的完整路径；macOS 桌面应用可选择 `.app`。LazyMind 会在本机验证该路径，不会保存到服务端数据库。",
     executablePathPlaceholder: "例如 C:\\Program Files\\Cursor\\Cursor.exe",
     restoreAutoDetection: "恢复自动检测",
     executableBindingSaved: "已保存本机程序路径。",

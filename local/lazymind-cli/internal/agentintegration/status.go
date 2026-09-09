@@ -5,7 +5,6 @@ import "strings"
 type State string
 
 const (
-	Connecting          State = "connecting"
 	RequirementsMissing State = "requirements_missing"
 	Ready               State = "ready"
 	ActionRequired      State = "action_required"
@@ -26,13 +25,12 @@ type Action struct {
 }
 
 type Status struct {
-	Agent          string        `json:"agent"`
-	DisplayName    string        `json:"display_name"`
-	ExecutablePath string        `json:"executable_path,omitempty"`
-	State          State         `json:"state"`
-	Requirements   []Requirement `json:"requirements,omitempty"`
-	Action         *Action       `json:"action,omitempty"`
-	Message        string        `json:"message,omitempty"`
+	Agent        string        `json:"agent"`
+	DisplayName  string        `json:"display_name"`
+	State        State         `json:"state"`
+	Requirements []Requirement `json:"requirements,omitempty"`
+	Action       *Action       `json:"action,omitempty"`
+	Message      string        `json:"message,omitempty"`
 }
 
 func MissingRequirement(requirements []Requirement) bool {

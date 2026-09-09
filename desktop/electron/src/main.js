@@ -94,6 +94,7 @@ const runtimeOwnershipHandoffTimeoutMs = 30 * 1000;
 const agentHostRestartMaxDelayMs = 30 * 1000;
 const agentHostStableAfterMs = 60 * 1000;
 const agentConnectorActionTimeoutMs = 15 * 1000;
+const agentConnectorInstallTimeoutMs = 120 * 1000;
 const agentConnectorBindingTimeoutMs = 30 * 1000;
 const macInstallationWarmupMarker = macWarmupMarkerPath(app.getPath("userData"));
 const startupMetricsHistoryPath = path.join(desktopLogsDir, "startup-metrics.jsonl");
@@ -532,7 +533,7 @@ function runSidecar(command, extra = [], options = {}) {
   });
 }
 
-async function runAgentConnector(agent, action) {
+function runAgentConnector(agent, action) {
   const allowedActions = {
     all: new Set(["status"]),
     codex: new Set(["connect", "status", "disconnect", "login"]),
@@ -548,21 +549,16 @@ async function runAgentConnector(agent, action) {
   if (action === "login") {
     return startAgentLogin(agent);
   }
-  const base = new URL(process.env.LAZYMIND_ASSISTANT_BRIDGE_URL || "http://127.0.0.1:19091");
-  if (base.protocol !== "http:" || !["localhost", "127.0.0.1", "[::1]"].includes(base.hostname) || base.username || base.password) {
-    throw new Error("Assistant Bridge must use a local HTTP address");
+  const installWorkflow = agent === "deepseek-harness" && action === "connect";
+  const run = () => runConnectorJSON(
+    ["internal", "agent", agent, action],
+    installWorkflow ? agentConnectorInstallTimeoutMs : agentConnectorActionTimeoutMs,
+  );
+  if (installWorkflow) {
+    const address = new URL(process.env.LAZYMIND_ASSISTANT_BRIDGE_URL || "http://127.0.0.1:19091").host;
+    return runConnectorJSON(["assistant", "start", "--listen", address], agentConnectorActionTimeoutMs).then(run);
   }
-  await runConnectorJSON(["assistant", "start", "--listen", base.host], agentConnectorActionTimeoutMs);
-  const endpoint = agent === "all" ? "/v1/agents"
-    : `/v1/agents/${encodeURIComponent(agent)}${action === "status" ? "" : `/${action}`}`;
-  const response = await fetch(new URL(endpoint, base), {
-    method: action === "status" ? "GET" : "POST",
-    headers: { "X-LazyMind-Client-Platform": process.platform },
-    signal: AbortSignal.timeout(agentConnectorActionTimeoutMs),
-  });
-  const result = await response.json();
-  if (!response.ok) throw new Error(result.error || `Assistant Bridge returned HTTP ${response.status}`);
-  return result;
+  return run();
 }
 
 function startAgentLogin(agent) {

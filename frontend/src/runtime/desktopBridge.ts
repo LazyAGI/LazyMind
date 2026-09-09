@@ -55,7 +55,6 @@ export interface DesktopLocalFolderAuthorizationResult
 export type DesktopAgent = "codex" | "cursor" | "workbuddy" | "raccoon" | "traework" | "deepseek-harness";
 
 export type DesktopAgentIntegrationState =
-  | "connecting"
   | "requirements_missing"
   | "ready"
   | "action_required"
@@ -77,7 +76,6 @@ export interface DesktopAgentAction {
 export interface DesktopAgentIntegrationStatus {
   agent: DesktopAgent;
   display_name: string;
-  executable_path?: string;
   version?: string;
   state: DesktopAgentIntegrationState;
   requirements?: DesktopAgentRequirement[];
@@ -313,7 +311,7 @@ export async function agentIntegrationAction(agent: DesktopAgent, action: Deskto
     return callLocalAssistantBridge(
       `/agents/${encodeURIComponent(agent)}/${action}`,
       { method: "POST" },
-      action === "login" ? LOGIN_TIMEOUT_MS : ACTION_TIMEOUT_MS,
+      action === "login" ? LOGIN_TIMEOUT_MS : agent === "deepseek-harness" && action === "connect" ? INSTALL_TIMEOUT_MS : ACTION_TIMEOUT_MS,
     );
   } catch (error) {
     return localBridgeFailure(error);
@@ -424,6 +422,7 @@ async function changeAgentExecutable(
 
 const STATUS_TIMEOUT_MS = 10_000;
 const ACTION_TIMEOUT_MS = 15_000;
+const INSTALL_TIMEOUT_MS = 120_000;
 const BINDING_TIMEOUT_MS = 30_000;
 const LOGIN_TIMEOUT_MS = 125_000;
 

@@ -139,9 +139,6 @@ func (a *Adapter) status() agentintegration.Status {
 		return agentintegration.Fail(status, err.Error())
 	}
 	status.Requirements = requirements
-	if a.kind == DeepSeekHarness {
-		status.ExecutablePath, _ = dshExecutable()
-	}
 	state, err := readManagedConfig(a.kind, configPath(a.kind), a.self, a.home, a.hostID)
 	if err != nil {
 		return agentintegration.Fail(status, err.Error())
