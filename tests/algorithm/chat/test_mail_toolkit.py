@@ -1,6 +1,8 @@
 import json
 import os
 import smtplib
+import threading
+import time
 from unittest.mock import patch
 
 import lazyllm
@@ -15,10 +17,17 @@ from lazymind.chat.engine.tools.mail import (
     _IMAPBackend,
     _apply_confirm_patch,
     _display_mail_date,
+    _encode_imap_utf7,
     _extract_transfer_links,
+    _find_account,
     _imap_date,
+    _imap_search_args,
+    _incoming_attachment_path,
     _load_draft,
+    _lookup_accounts,
+    _mailbox_role,
     _resolve_imap_endpoint,
+    _resolve_search_folders,
     _save_draft,
     _split_mail_ref,
 )
@@ -163,6 +172,10 @@ def test_search_merges_enabled_mailboxes(mail_auth):
         filtered = MailToolkit().search(keyword='invoice', mailbox='b@163.com')
 
     assert {item['mailbox'] for item in result['items']} == {'a@qq.com', 'b@163.com'}
+    assert filtered['mailboxes'] == ['b@163.com']
+    assert filtered['items'][0]['mailbox'] == 'b@163.com'
+
+
 def test_compose_asks_for_mailbox_when_multiple_accounts_and_none_named(mail_auth):
     lazyllm.globals.config['dynamic_tool_auth'] = {
         'mail': [
@@ -368,6 +381,10 @@ class _RecordingIMAP:
         return 'OK', []
 
     def uid(self, command, *args):
+        encoding = getattr(self, '_encoding', 'ascii')
+        for arg in args:
+            if isinstance(arg, str):
+                arg.encode(encoding)
         self.calls.append((str(command).upper(), args))
         if str(command).upper() == 'SEARCH':
             return 'OK', [b'101 102']
@@ -578,3 +595,173 @@ def test_inject_clears_stale_mail_auth_before_current_request(mail_auth):
     auth = lazyllm.globals.config['dynamic_tool_auth'] or {}
     assert 'mail' not in auth
     assert auth.get('bing') == 'keep-me'
+
+
+def test_imap_search_args_quote_and_charset():
+    assert _imap_search_args({'keyword': '合同'}) == [
+        'CHARSET', 'UTF-8', 'ALL', 'TEXT', '"合同"',
+    ]
+    assert _imap_search_args({'keyword': 'hello world'}) == [
+        'ALL', 'TEXT', '"hello world"',
+    ]
+    assert _imap_search_args({'subject': 'a "quoted" subject'}) == [
+        'ALL', 'SUBJECT', '"a \\"quoted\\" subject"',
+    ]
+
+
+def test_imap_search_encodes_unicode_and_quoted_values(mail_auth):
+    imap = _RecordingIMAP()
+    with patch.object(_IMAPBackend, '_connect', return_value=imap):
+        MailToolkit().search(keyword='合同', mailbox='user@qq.com')
+        MailToolkit().search(keyword='hello world', mailbox='user@qq.com')
+        MailToolkit().search(subject='a "quoted" subject', mailbox='user@qq.com')
+    searches = [args for command, args in imap.calls if command == 'SEARCH']
+    assert any('CHARSET' in args and '"合同"' in args for args in searches)
+    assert any('"hello world"' in args for args in searches)
+    assert any('"a \\"quoted\\" subject"' in args for args in searches)
+
+
+def _two_qq_accounts():
+    return [
+        json.dumps({
+            'provider': 'qqmail',
+            'email': 'a@qq.com',
+            'secret': 'auth-a',
+            'status': 'ACTIVE',
+        }),
+        json.dumps({
+            'provider': 'qqmail',
+            'email': 'b@qq.com',
+            'secret': 'auth-b',
+            'status': 'ACTIVE',
+        }),
+    ]
+
+
+def test_same_provider_mailbox_is_ambiguous_for_send(mail_auth):
+    lazyllm.globals.config['dynamic_tool_auth'] = {'mail': _two_qq_accounts()}
+    assert _find_account('qqmail') is None
+    assert {cred['email'] for cred in _lookup_accounts('qqmail')} == {'a@qq.com', 'b@qq.com'}
+    preview = MailToolkit().compose_draft(
+        to='to@b.com',
+        subject='hi',
+        body='body',
+        mailbox='qqmail',
+    )
+    assert preview['status'] == 'needs_mailbox'
+    assert {row['email'] for row in preview['mailboxes']} == {'a@qq.com', 'b@qq.com'}
+    named = MailToolkit().compose_draft(
+        to='to@b.com',
+        subject='named',
+        body='body',
+        mailbox='a@qq.com',
+    )
+    assert named['status'] == 'draft'
+    assert named['mailbox'] == 'a@qq.com'
+
+
+def test_search_same_provider_covers_every_account(mail_auth):
+    lazyllm.globals.config['dynamic_tool_auth'] = {'mail': _two_qq_accounts()}
+
+    class FakeBackend:
+        def __init__(self, cred):
+            self.cred = cred
+
+        def search(self, **kwargs):
+            return {'items': [{'id': '1', 'subject': self.cred['email']}]}
+
+    with patch('lazymind.chat.engine.tools.mail._backend', side_effect=lambda cred: FakeBackend(cred)):
+        result = MailToolkit().search(keyword='invoice', mailbox='qqmail')
+    assert {item['mailbox'] for item in result['items']} == {'a@qq.com', 'b@qq.com'}
+    assert set(result['mailboxes']) == {'a@qq.com', 'b@qq.com'}
+
+
+def test_read_attachment_namespaces_same_filename(mail_auth):
+    cred = {'email': 'user@qq.com', 'provider': 'qqmail', 'connection_id': ''}
+    path_a = _incoming_attachment_path(cred, 'INBOX::1', '报价单.pdf')
+    path_b = _incoming_attachment_path(cred, 'INBOX::2', '报价单.pdf')
+    assert path_a != path_b
+    assert os.path.basename(path_a) == '报价单.pdf'
+
+    class FakeBackend:
+        def read_attachment(self, message_id, attachment_id):
+            return b'content-a' if message_id.endswith('1') else b'content-b'
+
+    with patch('lazymind.chat.engine.tools.mail._backend', return_value=FakeBackend()):
+        with patch('lazymind.chat.engine.tools.mail.parse_attachment_content', return_value=''):
+            first = MailToolkit().read_attachment('INBOX::1', '报价单.pdf')
+            second = MailToolkit().read_attachment('INBOX::2', '报价单.pdf')
+    assert first['path'] != second['path']
+    with open(first['path'], 'rb') as handle:
+        assert handle.read() == b'content-a'
+    with open(second['path'], 'rb') as handle:
+        assert handle.read() == b'content-b'
+
+
+def test_imap_folder_fallback_decodes_modified_utf7(mail_auth):
+    sent = _encode_imap_utf7('已发送')
+    drafts = _encode_imap_utf7('草稿')
+    trash = _encode_imap_utf7('已删除')
+    assert sent != '已发送'
+    assert _mailbox_role(sent, set()) == 'sent'
+    assert _mailbox_role(drafts, set()) == 'drafts'
+    assert _mailbox_role(trash, set()) == 'trash'
+
+    class FakeList:
+        def list(self):
+            return 'OK', [
+                b'(\\HasNoChildren) "/" INBOX',
+                f'() "/" "{sent}"'.encode('ascii'),
+                f'() "/" "{drafts}"'.encode('ascii'),
+                f'() "/" "{trash}"'.encode('ascii'),
+            ]
+
+    folders = _resolve_search_folders(FakeList(), 'all')
+    assert folders == ['INBOX', sent, drafts, trash]
+
+
+def test_send_draft_is_idempotent_under_concurrency(mail_auth):
+    draft = {
+        'draft_id': 'draft_race',
+        'to': ['a@b.com'],
+        'cc': [],
+        'subject': 'hi',
+        'body': 'body',
+        'attachment_paths': [],
+        'in_reply_to': '',
+        'status': 'draft',
+        'revision': 1,
+        'sent_at': '',
+        'last_error': '',
+    }
+    _save_draft(draft)
+    lazyllm.globals['agentic_config']['mail_draft_confirm_id'] = 'draft_race'
+    lazyllm.globals['agentic_config']['mail_draft_confirm_revision'] = 1
+    send_count = {'n': 0}
+    auth = lazyllm.globals.config['dynamic_tool_auth']
+    cfg = lazyllm.globals['agentic_config']
+
+    def _slow_send(self, message):
+        send_count['n'] += 1
+        time.sleep(0.2)
+        return {'id': 'm1', 'sent_at': '2026-09-01T00:00:00+00:00'}
+
+    errors: list[str] = []
+
+    def _worker():
+        lazyllm.globals.config['dynamic_tool_auth'] = auth
+        lazyllm.globals['agentic_config'] = cfg
+        try:
+            MailToolkit().send_draft('draft_race')
+        except ToolExecutionError as orig:
+            errors.append(str(orig))
+
+    with patch('lazymind.chat.engine.tools.mail._IMAPBackend.send', _slow_send):
+        workers = [threading.Thread(target=_worker) for _ in range(2)]
+        for worker in workers:
+            worker.start()
+        for worker in workers:
+            worker.join()
+    assert send_count['n'] == 1
+    assert any('already sent' in item for item in errors)
+    assert _load_draft('draft_race')['status'] == 'sent'

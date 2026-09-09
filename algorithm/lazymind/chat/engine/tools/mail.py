@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import email
+import hashlib
 import imaplib
 import json
 import mimetypes
@@ -12,12 +13,14 @@ import re
 import smtplib
 import socket
 import ssl
+import time
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from email.header import decode_header, make_header
 from email.message import EmailMessage
 from email.utils import formatdate, getaddresses, parsedate_to_datetime
-from typing import Any, NoReturn
+from typing import Any, Iterator, NoReturn
 from zoneinfo import ZoneInfo
 
 import lazyllm
@@ -205,18 +208,27 @@ def _require_accounts() -> list[dict[str, str]]:
     )
 
 
-def _find_account(mailbox: str) -> dict[str, str] | None:
+def _lookup_accounts(mailbox: str) -> list[dict[str, str]]:
     key = str(mailbox or '').strip().lower()
     if not key:
-        return None
+        return []
+    exact: list[dict[str, str]] = []
+    by_provider: list[dict[str, str]] = []
     for cred in _enabled_accounts():
-        candidates = {
-            (cred.get('email') or '').strip().lower(),
-            (cred.get('provider') or '').strip().lower(),
-            (cred.get('connection_id') or '').strip().lower(),
-        }
-        if key in candidates:
-            return cred
+        email_addr = (cred.get('email') or '').strip().lower()
+        connection_id = (cred.get('connection_id') or '').strip().lower()
+        provider = (cred.get('provider') or '').strip().lower()
+        if key in {email_addr, connection_id}:
+            exact.append(cred)
+        elif key == provider:
+            by_provider.append(cred)
+    return exact or by_provider
+
+
+def _find_account(mailbox: str) -> dict[str, str] | None:
+    matches = _lookup_accounts(mailbox)
+    if len(matches) == 1:
+        return matches[0]
     return None
 
 
@@ -241,14 +253,34 @@ def _unavailable_mailbox(mailbox: str) -> dict[str, Any]:
     }
 
 
+def _ambiguous_mailbox(mailbox: str, matches: list[dict[str, str]]) -> dict[str, Any]:
+    enabled = [
+        {'email': cred.get('email') or '', 'provider': cred.get('provider') or ''}
+        for cred in matches
+    ]
+    emails = ', '.join(item['email'] or item['provider'] for item in enabled) or '(none)'
+    return {
+        'status': 'mailbox_ambiguous',
+        'requested': str(mailbox or '').strip(),
+        'enabled_mailboxes': enabled,
+        'items': [],
+        'message': (
+            f'Requested mailbox {mailbox!r} matches more than one connected account: {emails}. '
+            'Pass the exact email address. Do not pick the first account of this provider.'
+        ),
+    }
+
+
 def _pick_account(mailbox: str = '') -> dict[str, str]:
     accounts = _require_accounts()
     key = str(mailbox or '').strip()
     if not key:
         return accounts[0]
-    cred = _find_account(key)
-    if cred is not None:
-        return cred
+    matches = _lookup_accounts(key)
+    if len(matches) == 1:
+        return matches[0]
+    if matches:
+        _fail(_ambiguous_mailbox(key, matches)['message'])
     _fail(_unavailable_mailbox(key)['message'])
 
 
@@ -289,10 +321,12 @@ def _resolve_sending_account(
         or _confirmed_mailbox(draft_id)
     )
     if requested:
-        cred = _find_account(requested)
-        if cred is None:
+        matches = _lookup_accounts(requested)
+        if len(matches) == 1:
+            return matches[0]
+        if not matches:
             _fail(_unavailable_mailbox(requested)['message'])
-        return cred
+        return None
     if len(accounts) == 1:
         return accounts[0]
     return None
@@ -321,11 +355,18 @@ def _tag_mailbox(payload: dict[str, Any], cred: dict[str, str]) -> dict[str, Any
 
 
 def _call_mailboxes(mailbox: str, runner):
-    if str(mailbox or '').strip():
-        cred = _pick_account(mailbox)
-        return _tag_mailbox(runner(cred), cred)
+    key = str(mailbox or '').strip()
+    if key:
+        matches = _lookup_accounts(key)
+        if not matches:
+            _fail(_unavailable_mailbox(key)['message'])
+        accounts = matches
+    else:
+        accounts = _require_accounts()
+    if len(accounts) == 1:
+        return _tag_mailbox(runner(accounts[0]), accounts[0])
     last_error: Exception | None = None
-    for cred in _require_accounts():
+    for cred in accounts:
         try:
             return _tag_mailbox(runner(cred), cred)
         except ToolExecutionError as orig:
@@ -377,6 +418,22 @@ def _outgoing_dir() -> str:
     path = os.path.join(root, 'mail_outgoing')
     os.makedirs(path, exist_ok=True)
     return path
+
+
+def _incoming_attachment_path(cred: dict[str, str], message_id: str, filename: str) -> str:
+    cfg = _agentic_config()
+    workspace = chat_agent_workspace(
+        str(cfg.get('user_id') or '0'),
+        str(cfg.get('conversation_id') or 'default'),
+    )
+    mailbox_key = hashlib.sha256(
+        f"{cred.get('email') or ''}|{cred.get('connection_id') or ''}|{cred.get('provider') or ''}".encode()
+    ).hexdigest()[:12]
+    message_key = hashlib.sha256(str(message_id or '').encode()).hexdigest()[:12]
+    safe_name = os.path.basename(str(filename or '').strip()) or 'attachment.bin'
+    folder = os.path.join(workspace, 'mail_attachments', mailbox_key, message_key)
+    os.makedirs(folder, exist_ok=True)
+    return os.path.join(folder, safe_name)
 
 
 def _unique_outgoing_path(filename: str) -> str:
@@ -562,6 +619,37 @@ def _save_draft(draft: dict[str, Any]) -> dict[str, Any]:
     return draft
 
 
+@contextmanager
+def _locked_draft(draft_id: str) -> Iterator[None]:
+    lock_path = _draft_path(draft_id) + '.lock'
+    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        if os.name == 'nt':
+            import msvcrt
+            while True:
+                try:
+                    msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
+                    break
+                except OSError:
+                    time.sleep(0.05)
+        else:
+            import fcntl
+            fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        if os.name == 'nt':
+            import msvcrt
+            try:
+                os.lseek(fd, 0, os.SEEK_SET)
+                msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+            except OSError:
+                pass
+        else:
+            import fcntl
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+
+
 def _imap_date(value: str, *, before: bool = False) -> str:
     text = (value or '').strip()
     if not text:
@@ -578,6 +666,94 @@ def _imap_date(value: str, *, before: bool = False) -> str:
         # documented inclusive end date is actually included.
         dt = dt + timedelta(days=1)
     return dt.strftime('%d-%b-%Y')
+
+
+def _quote_imap_string(value: str) -> str:
+    escaped = str(value).replace('\\', '\\\\').replace('"', '\\"')
+    return f'"{escaped}"'
+
+
+def _imap_search_args(filters: dict[str, str]) -> list[str]:
+    fields: list[tuple[str, str]] = []
+    for key, atom in (
+        ('sender', 'FROM'),
+        ('recipient', 'TO'),
+        ('subject', 'SUBJECT'),
+        ('keyword', 'TEXT'),
+    ):
+        value = str(filters.get(key) or '').strip()
+        if value:
+            fields.append((atom, value))
+    since = _imap_date(str(filters.get('after') or ''))
+    before = _imap_date(str(filters.get('before') or ''), before=True)
+    needs_charset = any(not value.isascii() for _atom, value in fields)
+    args: list[str] = []
+    if needs_charset:
+        args.extend(['CHARSET', 'UTF-8'])
+    args.append('ALL')
+    for atom, value in fields:
+        args.extend([atom, _quote_imap_string(value)])
+    if since:
+        args.extend(['SINCE', since])
+    if before:
+        args.extend(['BEFORE', before])
+    return args
+
+
+def _decode_imap_utf7(name: str) -> str:
+    text = str(name or '')
+    if '&' not in text:
+        return text
+    parts: list[str] = []
+    index = 0
+    while index < len(text):
+        amp = text.find('&', index)
+        if amp < 0:
+            parts.append(text[index:])
+            break
+        parts.append(text[index:amp])
+        dash = text.find('-', amp + 1)
+        if dash < 0:
+            parts.append(text[amp:])
+            break
+        chunk = text[amp + 1:dash]
+        if chunk == '':
+            parts.append('&')
+        else:
+            padded = chunk.replace(',', '/')
+            padded += '=' * ((4 - len(padded) % 4) % 4)
+            try:
+                parts.append(base64.b64decode(padded).decode('utf-16-be'))
+            except Exception:
+                parts.append(text[amp:dash + 1])
+        index = dash + 1
+    return ''.join(parts)
+
+
+def _encode_imap_utf7(text: str) -> str:
+    out: list[str] = []
+    buf: list[str] = []
+
+    def flush() -> None:
+        if not buf:
+            return
+        raw = ''.join(buf).encode('utf-16-be')
+        token = base64.b64encode(raw).decode('ascii').rstrip('=').replace('/', ',')
+        out.append(f'&{token}-')
+        buf.clear()
+
+    for char in str(text or ''):
+        code = ord(char)
+        if char == '&':
+            flush()
+            out.append('&-')
+        elif 0x20 <= code <= 0x7E:
+            flush()
+            out.append(char)
+        else:
+            buf.append(char)
+    flush()
+    return ''.join(out)
 
 
 def _imap_uid(message_id: str) -> str:
@@ -685,10 +861,11 @@ def _parse_imap_list_line(line: Any) -> tuple[str, set[str]] | None:
 def _mailbox_role(name: str, flags: set[str]) -> str | None:
     if 'noselect' in flags:
         return None
-    lowered = name.lower().replace('[gmail]/', '').strip()
+    display = _decode_imap_utf7(name)
+    lowered = display.lower().replace('[gmail]/', '').strip()
     if 'all' in flags or 'all mail' in lowered or lowered.endswith('/all'):
         return None
-    if 'inbox' in flags or name.upper() == 'INBOX':
+    if 'inbox' in flags or display.upper() == 'INBOX' or name.upper() == 'INBOX':
         return 'inbox'
     if 'sent' in flags:
         return 'sent'
@@ -743,7 +920,8 @@ def _resolve_search_folders(client, folder_filter: str) -> list[str]:
     if wanted in by_role:
         return [by_role[wanted]]
     for name, _flags in listed:
-        if name.lower() == wanted or name == folder_filter:
+        display = _decode_imap_utf7(name)
+        if name.lower() == wanted or name == folder_filter or display.lower() == wanted:
             return [name]
     return [by_role['inbox']]
 
@@ -839,21 +1017,9 @@ class _IMAPBackend:
     def search(self, **filters: str) -> dict[str, Any]:
         client = self._connect()
         try:
-            criteria = ['ALL']
-            if filters.get('sender'):
-                criteria.extend(['FROM', filters['sender']])
-            if filters.get('recipient'):
-                criteria.extend(['TO', filters['recipient']])
-            if filters.get('subject'):
-                criteria.extend(['SUBJECT', filters['subject']])
-            if filters.get('keyword'):
-                criteria.extend(['TEXT', filters['keyword']])
-            since = _imap_date(filters.get('after', ''))
-            before = _imap_date(filters.get('before', ''), before=True)
-            if since:
-                criteria.extend(['SINCE', since])
-            if before:
-                criteria.extend(['BEFORE', before])
+            criteria = _imap_search_args(filters)
+            if any(isinstance(item, str) and not item.isascii() for item in criteria):
+                client._encoding = 'utf-8'
             folders = _resolve_search_folders(client, filters.get('folder', ''))
             items = []
             for folder in folders:
@@ -1294,7 +1460,9 @@ class MailToolkit:
             subject: Filter by subject.
             after: Inclusive start date, YYYY-MM-DD.
             before: Inclusive end date, YYYY-MM-DD.
-            mailbox: Optional email or provider (netease163/qqmail/gmailimap). Empty searches all enabled mailboxes.
+            mailbox: Optional email, connection id, or provider (netease163/qqmail/gmailimap).
+                Email/connection id match exactly. A provider name matches every enabled
+                account of that type. Empty searches all enabled mailboxes.
                 If the user named a mailbox, always pass it. A mailbox_not_enabled result is final:
                 do not retry and do not search other accounts.
             folder: Optional mailbox folder: inbox, sent, drafts, trash, junk, or all.
@@ -1303,10 +1471,9 @@ class MailToolkit:
         """
         requested = str(mailbox or '').strip()
         if requested:
-            cred = _find_account(requested)
-            if cred is None:
+            accounts = _lookup_accounts(requested)
+            if not accounts:
                 return _unavailable_mailbox(requested)
-            accounts = [cred]
         else:
             accounts = _require_accounts()
         items: list[dict[str, Any]] = []
@@ -1351,7 +1518,7 @@ class MailToolkit:
         if not str(message_id or '').strip():
             raise ToolExecutionError('message_id is required')
         requested = str(mailbox or '').strip()
-        if requested and _find_account(requested) is None:
+        if requested and not _lookup_accounts(requested):
             return _unavailable_mailbox(requested)
         return _call_mailboxes(mailbox, lambda cred: _backend(cred).read(str(message_id).strip()))
 
@@ -1384,14 +1551,7 @@ class MailToolkit:
             ext = os.path.splitext(filename)[1].lower()
             if ext and ext not in _COMMON_ATTACHMENT_EXTS:
                 _fail(f'Attachment type {ext} is not supported.')
-            cfg = _agentic_config()
-            workspace = chat_agent_workspace(
-                str(cfg.get('user_id') or '0'),
-                str(cfg.get('conversation_id') or 'default'),
-            )
-            folder = os.path.join(workspace, 'mail_attachments')
-            os.makedirs(folder, exist_ok=True)
-            target = os.path.join(folder, filename)
+            target = _incoming_attachment_path(cred, str(message_id).strip(), filename)
             with open(target, 'wb') as handle:
                 handle.write(raw)
             parsed = ''
@@ -1438,14 +1598,15 @@ class MailToolkit:
                 and must not be mixed into the chat file picker. Arbitrary paths
                 outside the workspace or conversation uploads are rejected.
             in_reply_to: Optional original Message-ID when composing a reply.
-            mailbox: Sending account (email or provider). Required when more than one
-                mailbox is enabled and the user named one. If omitted and several
+            mailbox: Sending account. Prefer the exact email. A provider name is
+                accepted only when exactly one enabled account uses that provider;
+                otherwise a mailbox picker is shown. If omitted and several
                 accounts are enabled, this method shows a mailbox picker card and
                 does not guess. After the user confirms, call update_draft with
                 that mailbox (do not compose a second draft).
         """
         requested = str(mailbox or '').strip()
-        if requested and _find_account(requested) is None:
+        if requested and not _lookup_accounts(requested):
             return _unavailable_mailbox(requested)
         cred = _resolve_sending_account(mailbox)
         recipients = _split_addresses(to)
@@ -1469,7 +1630,7 @@ class MailToolkit:
                 'attachment_paths': paths,
                 'in_reply_to': str(in_reply_to or '').strip(),
                 'status': 'needs_mailbox',
-                'mailboxes': _mailbox_choice_rows(),
+                'mailboxes': _mailbox_choice_rows(_lookup_accounts(requested) or None),
                 'sent_at': '',
                 'last_error': '',
                 'created_at': now,
@@ -1523,8 +1684,8 @@ class MailToolkit:
             attachment_paths: Replace attachments when provided. Pass [] to clear.
                 Accepts workspace artifacts or conversation-upload filenames.
             in_reply_to: Replace reply Message-ID when provided.
-            mailbox: Sending account (email or provider). Pass the mailbox the
-                user confirmed on the picker card.
+            mailbox: Sending account. Prefer the exact email. A provider name is
+                accepted only when it matches exactly one enabled account.
         """
         if not str(draft_id or '').strip():
             raise ToolExecutionError('draft_id is required')
@@ -1537,10 +1698,11 @@ class MailToolkit:
             draft_mailbox=str(draft.get('mailbox') or draft.get('provider') or ''),
         )
         if cred is None:
+            hint = str(mailbox or draft.get('mailbox') or draft.get('provider') or '')
             draft['status'] = 'needs_mailbox'
             draft['mailbox'] = ''
             draft['provider'] = ''
-            draft['mailboxes'] = _mailbox_choice_rows()
+            draft['mailboxes'] = _mailbox_choice_rows(_lookup_accounts(hint) or None)
             draft['revision'] = _draft_revision(draft) + 1
             draft['updated_at'] = _iso(datetime.now(timezone.utc))
             _save_draft(draft)
@@ -1580,6 +1742,10 @@ class MailToolkit:
             confirm: Ignored. Send is authorized only by mail_draft_confirm_id and
                 mail_draft_confirm_revision from the draft card for this revision.
         """
+        with _locked_draft(draft_id):
+            return self._send_draft_locked(draft_id)
+
+    def _send_draft_locked(self, draft_id: str) -> dict[str, Any]:
         draft = _load_draft(draft_id)
         if str(draft.get('status') or '') == 'sent':
             _fail('This draft was already sent.')
@@ -1589,8 +1755,9 @@ class MailToolkit:
             draft_mailbox=str(draft.get('mailbox') or draft.get('provider') or ''),
         )
         if cred is None:
+            hint = str(draft.get('mailbox') or draft.get('provider') or '')
             draft['status'] = 'needs_mailbox'
-            draft['mailboxes'] = _mailbox_choice_rows()
+            draft['mailboxes'] = _mailbox_choice_rows(_lookup_accounts(hint) or None)
             _save_draft(draft)
             _emit_mailbox_card(draft)
             _fail(
@@ -1629,6 +1796,7 @@ class MailToolkit:
                 'Send failed: the To field is empty. Do not retry until the user adds a recipient. '
                 'The preview card now shows this error.'
             )
+        draft['status'] = 'sending'
         _save_draft(draft)
         message = _build_message(draft, cred['email'])
         try:
