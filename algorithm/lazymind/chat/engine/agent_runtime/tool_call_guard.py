@@ -308,13 +308,15 @@ class ToolExecutionMiddleware:
     def __init__(self, manager: Any, failure_policy: FailureRetryPolicy | None = None,
                  expanded_round_limit: int | None = None, cancel_check: Any = None,
                  repeat_monitor: ExactRepeatMonitor | None = None,
-                 notice_buffer: OneShotNoticeBuffer | None = None):
+                 notice_buffer: OneShotNoticeBuffer | None = None,
+                 authorization_gate: Any = None):
         self._manager = manager
         self._failure_policy = failure_policy or FailureRetryPolicy()
         self._expanded_round_limit = expanded_round_limit
         self._cancel_check = cancel_check
         self._repeat_monitor = repeat_monitor
         self._notice_buffer = notice_buffer
+        self._authorization_gate = authorization_gate
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._manager, name)
@@ -341,23 +343,55 @@ class ToolExecutionMiddleware:
             self._cancel_check(None)
         prepared_calls: list[PreparedToolCall] = []
         decision: _FailureBatchDecision | None = None
+        authorization_reasons: dict[int, str] = {}
         started_at = 0.0
 
         def select(prepared):
-            nonlocal prepared_calls, decision, started_at
+            nonlocal prepared_calls, decision, authorization_reasons, started_at
             prepared_calls = list(prepared)
             decision = self._failure_policy.decide(prepared_calls)
+            blocked = dict(decision.blocked_results)
+            pending = list(decision.pending_indices)
+            authorization_reasons = {}
+            if self._authorization_gate is not None:
+                for index in tuple(pending):
+                    item = prepared_calls[index]
+                    try:
+                        outcome = self._authorization_gate(item)
+                    except Exception as error:
+                        outcome = 'deny'
+                        lazyllm.LOG.warning(
+                            f'[ToolCall] authorization gate failed for {item.tool_name}: '
+                            f'{type(error).__name__}: {error}'
+                        )
+                    if outcome not in (True, 'allow', 'allowed'):
+                        blocked[index] = tool_failure(
+                            'workspace authorization denied'
+                            if outcome in (False, 'deny', 'denied', 'rejected')
+                            else 'workspace authorization unavailable'
+                        )
+                        authorization_reasons[index] = (
+                            'authorization_denied'
+                            if outcome in (False, 'deny', 'denied', 'rejected')
+                            else 'authorization_unavailable'
+                        )
+                        pending.remove(index)
+            decision = _FailureBatchDecision(tuple(pending), blocked, decision.duplicate_sources)
             for index, item in enumerate(prepared_calls):
                 if index in decision.pending_indices and item.ready:
                     self._expand_round_limit(item.tool_name)
                 arguments = redact_session_env_arguments(item.tool_name, item.arguments)
                 if index in decision.blocked_results:
-                    emit_tool_call(item.tool_call, blocked=True, reason='failure_retry_policy')
+                    blocked_reason = authorization_reasons.get(index, 'failure_retry_policy')
+                    emit_tool_call(item.tool_call, blocked=True, reason=blocked_reason)
                     _log_tool_call(
                         'blocked', item.tool_name,
-                        reason='failure_retry_policy', args=arguments,
+                        reason=blocked_reason, args=arguments,
                     )
-                    append_event('failure_retry_blocked', name=item.tool_name, call_id=item.call_id)
+                    append_event(
+                        'authorization_blocked' if index in authorization_reasons else 'failure_retry_blocked',
+                        name=item.tool_name, call_id=item.call_id,
+                    )
                 elif index in decision.duplicate_sources:
                     emit_tool_call(item.tool_call, blocked=True, reason='duplicate_merged')
                     _log_tool_call('merged', item.tool_name, reason='duplicate_in_batch', args=arguments)
@@ -393,7 +427,7 @@ class ToolExecutionMiddleware:
                 prepared_calls[index],
                 result,
                 disposition=ToolExecutionDisposition.SKIPPED,
-                reason='policy_blocked',
+                reason=authorization_reasons.get(index, 'policy_blocked'),
             )
             emit_tool_result(prepared_calls[index].tool_call, result)
         for index, source_index in decision.duplicate_sources.items():

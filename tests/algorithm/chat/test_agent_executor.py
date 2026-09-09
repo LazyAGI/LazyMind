@@ -55,6 +55,17 @@ def test_executor_creates_agent_with_shared_defaults(monkeypatch) -> None:
     agent.set_stop_tools.assert_called_once_with(['stop'])
 
 
+def test_executor_passes_authorization_gate_to_middleware(monkeypatch) -> None:
+    agent = MagicMock()
+    constructor = MagicMock(return_value=agent)
+    monkeypatch.setattr(executor_mod._agent_mod, 'ReactAgent', constructor)
+    gate = MagicMock(return_value='allow')
+
+    AgentExecutor().create_agent('llm', _plan(authorization_gate=gate))
+
+    assert agent._tools_manager._authorization_gate is gate
+
+
 def test_executor_passes_cancel_condition_to_chat_agent(monkeypatch) -> None:
     agent = MagicMock()
     constructor = MagicMock(return_value=agent)

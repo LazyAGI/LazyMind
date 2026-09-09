@@ -190,6 +190,20 @@ def _materialize_workflow_package(
     return root
 
 
+def _validate_workflow_workspace_package(params: Dict[str, Any], names: List[str], files: Dict[str, Any]) -> None:
+    """Reject executable Workflow packages until Core supplies a trusted admission proof."""
+    parent = params.get('parent_agentic_config')
+    context = params.get('workspace_context')
+    if not isinstance(context, dict) or not context:
+        context = parent.get('_core_workspace_context') if isinstance(parent, dict) else None
+    if not isinstance(context, dict) or not context:
+        return
+    declared = {str(name).strip() for name in names if str(name).strip()}
+    scripts = {str(path) for path in files if str(path).startswith('scripts/') and str(path).endswith('.py')}
+    if declared and scripts:
+        raise RuntimeError('Workflow script tools are not admitted for a bound workspace')
+
+
 def load_workflow_tools(params: Dict[str, Any], names: List[str]) -> Dict[str, Any]:
     """Load declared callables from the exact published Workflow revision.
 
@@ -216,6 +230,7 @@ def load_workflow_tools(params: Dict[str, Any], names: List[str]) -> Dict[str, A
         if expected_hash and str(package.get('tree_hash') or '') != expected_hash:
             raise RuntimeError('Core returned a Workflow package with a different tree hash')
         files = package.get('files') if isinstance(package.get('files'), dict) else {}
+        _validate_workflow_workspace_package(params, names, files)
         package_root = _materialize_workflow_package(
             workflow_id,
             revision_id,

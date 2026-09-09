@@ -300,3 +300,57 @@ def test_round_expansion_only_applies_to_ready_scheduled_calls(monkeypatch):
         'function': {'name': 'create_subagent', 'arguments': {'task': 'inspect'}},
     })
     assert workspace['_react_round_limit'] == 200
+
+
+def test_workspace_authorization_rejection_happens_before_tool_effect():
+    from lazyllm.tools import ToolManager
+
+    effects = []
+
+    def write_file(filepath: str, content: str):
+        '''Write a file for the authorization contract.'''
+        effects.append((filepath, content))
+        return {'ok': True}
+
+    middleware = ToolExecutionMiddleware(
+        ToolManager([write_file]),
+        authorization_gate=lambda prepared: 'deny',
+    )
+
+    batch = middleware.execute_with_records({
+        'id': 'call-authorization-denied',
+        'function': {
+            'name': 'write_file',
+            'arguments': {'filepath': 'notes.txt', 'content': 'secret'},
+        },
+    })
+
+    assert effects == []
+    assert batch.records[0].disposition is ToolExecutionDisposition.SKIPPED
+    assert batch.records[0].reason == 'authorization_denied'
+
+
+def test_workspace_authorization_unknown_decision_is_fail_closed():
+    from lazyllm.tools import ToolManager
+
+    effects = []
+
+    def write_file(filepath: str):
+        '''Write a file for the fail-closed authorization contract.'''
+        effects.append(filepath)
+        return {'ok': True}
+
+    middleware = ToolExecutionMiddleware(
+        ToolManager([write_file]),
+        authorization_gate=lambda prepared: 'pending',
+    )
+
+    batch = middleware.execute_with_records({
+        'id': 'call-authorization-pending',
+        'function': {'name': 'write_file', 'arguments': {'filepath': 'notes.txt'}},
+    })
+
+    assert effects == []
+    assert batch.records[0].disposition is ToolExecutionDisposition.SKIPPED
+    assert batch.records[0].reason == 'authorization_unavailable'
+    assert batch.results[0]['ok'] is False

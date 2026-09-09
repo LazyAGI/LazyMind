@@ -150,6 +150,7 @@ class AgentExecutor:
             cancel_check=options.extra_stop_condition,
             repeat_monitor=repeat_monitor,
             notice_buffer=notice_buffer,
+            authorization_gate=options.authorization_gate,
         )
         agent._agent_lab_run_id = run_id
         agent._exact_repeat_monitor = repeat_monitor

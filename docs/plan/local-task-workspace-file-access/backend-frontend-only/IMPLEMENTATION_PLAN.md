@@ -1,131 +1,151 @@
-# 工作区剩余差异与前后端补齐方案
+# 工作区工具授权与文件执行方案
 
-## 1. 当前目标与不可变边界
+> 当前状态：2026-09-09 设计 Review 稿。用户已允许修改项目算法及对应测试，要求先明确方案再修改代码。实现时在本会话按 executing-plans 推进，测试先行，每个批次经过人工 Review；不创建其他仓库或工作树。
 
-仅维护尚未完成的行为差异、补齐方案和验收；已实现的授权、绑定、迁移和本机接入不再重复编写实施步骤。
+## 1. 目标与已确认边界
 
-- 算法不能改动。禁止修改 algorithm/、tests/algorithm/、LazyLLM 内容或 gitlink；不再提出算法适配例外或等待用户批准此例外。
-- Local/Desktop 已冻结，后续不能修改。禁止更改 trusted 模式、启动注入、打包配置或通过动态补丁、路径链接绕过边界。
-- 生产修改仅限本功能必需的 backend/、frontend/；本目录维护方案。未经另外明确要求，不新增服务、依赖、数据库表或通用命令框架。
-- 只使用现有 LazyMind-main 目录和 feature/newWorkZone 分支；不创建其他工作树，不覆盖未知改动。
-- 最大程度复用当前代码。不得复制旧整个 PR、旧 643 行控件或 504 行样式；每批报告手写生产增量，超过既有局部约 200 行/一个新文件门槛时说明不可复用的部分，不能拆批规避。
-- 当前任务为维护方案，不是实施生产修复。涉及权限/API 的实现继续遵守阶段一测试、用户 Review、阶段二实现的门禁。
-- 不使用“已完成缩减方案”替代“已完整复现旧需求”。任何暂不能等价恢复的能力均明确保留，不默默改变产品语义。
+让 Agent 在用户选定的工作区内读取、创建、修改、追加、删除文件。工具注册声明授权元数据，项目 ToolExecutionMiddleware 在实际执行前联系 Core；需要批准时等待用户决定，随后恢复同一个工具调用。主任务、普通子任务、已声明相应工具的 Workflow 使用同一规则。
 
-## 2. 当前实现基线
+- 当前唯一仓库 `/Users/theone/Downloads/lazymind`，分支 `feature/newWorkZone`，本轮起点 `7e04900ee331553829917be1e73c661ff8b0103c`。保留已有改动。
+- 用户已确认：允许必要的 `algorithm/lazymind/` 和对应测试修改。算法整体零差异不再是本轮要求；无需再次申请相同范围授权。
+- LazyLLM 内容、`algorithm/lazyllm` gitlink 仍与 `245bc26dca1f2e8b56b0766cf72fdfcdb49138d9` 一致；Local/Desktop 与 `ec4676e0d0fb290d81b3160a56e798849ea2d4e4` 一致。
+- 不开启 trusted，不做运行时补丁，不重新注入旧 workspace token；本机层仍只证明目录选择并转发授权。
+- Core 是 grant、binding、permission、目录状态和 reason 的唯一业务权威，负责受控工作区文件的磁盘访问。算法不能仅凭快照或模型文字批准操作。
+- 不新增服务、依赖、数据库表或通用授权框架；不改现有内部产物的存储语义，不恢复通用 shell 删除。
+- 原 U1–U7、C1–C2 的自动化补齐已经完成；历史 49/49 不能用作本次新能力验证。T6 实机验收和 F 文件执行仍未完成。
 
-| 项目 | 已核对基线 |
+## 2. 路线选择及复用
+
+| 路线 | 判断 |
 |---|---|
-| 本地/远端功能实现 | bb46abd64ca5fc431f4f7748fb9e085099990d5e |
-| 官方算法对齐基线 | 245bc26dca1f2e8b56b0766cf72fdfcdb49138d9 |
-| Local/Desktop 冻结提交 | ec4676e0d0fb290d81b3160a56e798849ea2d4e4 |
-| 旧需求及行为参考 | e7ed8a4189bb627e96814fc2f34818693cbc2050 |
+| 项目 ToolExecutionMiddleware + Core | 推荐。已有 dispatch_selector 在派发前运行，普通子任务也用 AgentExecutor；在项目层完成，不改 LazyLLM |
+| 修改 LazyLLM ToolManager | 不采用。已存在所需前置扩展点，修改底层库会扩大范围并破坏冻结要求 |
+| 每个工具各写一套批准/AskCard 新轮次 | 不采用。会重复判权、漏掉搜索/子任务，也不能保证恢复原调用 |
 
-当前已具备：本机选择证明、Core grant/任务绑定、元数据迁移、工作区上下文、权限设置和撤销停止、基本前端控件、子任务私有参数重建及 Core API。这些是继续复用的基础，不要求重做。
+直接复用：ToolConfig 注册、AgentExecutor 装配、FailureRetryPolicy/取消检查、`core_api_client.py` 的 get/post 与内部服务认证、Core ResolveForConversation/ResolveActiveForBinding/store.State、现有 API JSON/error helper、LocalWorkspaceControl/Modal/request-id/i18n。
 
-旧需求、历史实施记录及冻结时的文件清单可从上述 Git 提交检索；不再保留含错误工作树路径、过期进度或互相冲突的重复段落。详细审计证据见 findings.md，当前进度见 progress.md。
+ToolLimitDecisionCoordinator 仅参考同轮等待、取消和超时的实现方式：它按 sid 保存单项决定、动作只有 continue/summarize，不能整体复制或泛化成新框架。RemoteFS 只处理已有虚拟挂载，也不扩成任意宿主路径接口。
 
-## 3. 剩余差异和处理方向
+## 3. 工具注册与执行合同
 
-| ID | 差异 | 当前方案 |
+### 3.1 元数据
+
+在现有 ToolConfig 增加一个按方法声明的可选字段，建议形式：
+
+```python
+authorization: dict[str, Literal['read', 'write', 'delete', 'external']] | None = None
+# local_fs 的示例；这是可信代码配置，不是模型参数。
+authorization={'ls': 'read', 'glob': 'read', 'grep': 'read', 'read': 'read',
+               'info': 'read', 'create': 'write', 'mkdir': 'write',
+               'string_replace': 'write', 'overwrite': 'write',
+               'append': 'write', 'delete': 'delete'}
+```
+
+该字段表达“需要进入授权判定”及操作类别，不直接决定是否弹窗。具体方法从实际选中的 callable 解析，使用现有 Toolkit 展开规则建立每次执行器的索引；不得只匹配字符串前缀，不共享可变全局映射，不把完整 ToolConfig 再复制成第二套 DTO。
+
+在工作区任务中，未知/同名覆盖/未审计的宿主执行工具不能因缺字段自动放行；普通无工作区任务维持现有行为。纯计算工具仅在确认无宿主文件/外部副作用后免此工作区授权。注册声明用于调度，Core 仍验证具体操作，不能信任客户端传入的风险分类。
+
+### 3.2 执行顺序
+
+1. ToolManager 使用现有参数校验准备调用；中间件读取准备后的真实工具、规范化参数及可信任务身份。
+2. 对工作区调用先做取消检查、重试筛选，再向 Core prepare；禁止用模型传入的 owner/root/run/approval 覆盖系统字段。纯参数校验必须无磁盘副作用。
+3. Core 解析真实任务归属和绑定，检查授权、操作、路径、版本及风险，返回 allow/deny/pending。deny 生成明确失败记录，不能进入工具执行。
+4. pending 在原执行线程中有界等待，前端单独向 Core 决定；不结束 ReAct 轮次、不拼接一条用户消息，也不消费 AskCard。
+5. 批准后继续原 prepared call；调用参数不变，Core execute 再次检查状态并单次领取操作。LocalFileToolkit 对绑定工作区的文件访问统一转发 Core，不能在失败时回退 Python 本地读写。
+6. 返回 Core 的真实结果后继续模型下一步，因此同轮创建→读取→追加/修改→读取成立；拒绝和冲突作为真实结果返回。
+
+授权失败/待批准不算工具故障重试；带副作用的工作区调用不能被现有“相同参数”去重逻辑静默合并。网络重试复用同一 operation_id；模型生成新的 call_id 是新操作，不自动继承批准。
+
+## 4. Core 接口与批准状态
+
+建议接口放在现有 Core localworkspace 包和 routes 中，不创建新服务：
+
+| 接口 | 输入与作用 |
+|---|---|
+| POST `/internal/conversations/{conversation_id}/workspace-operations:prepare` | 内部服务身份 + run/task/attempt 身份、call_id、tool、operation、相对 path、参数摘要、expected_version；Core 生成 operation_id 与决定 |
+| GET `/internal/conversations/{conversation_id}/workspace-operations/{operation_id}` | 原运行者查询 allow/pending/deny/expired；算法短请求轮询并检查取消 |
+| POST `/internal/conversations/{conversation_id}/workspace-operations/{operation_id}:execute` | 原参数、内容及相同摘要；重新授权后执行，返回真实结果/version/reason |
+| GET `/conversations/{conversation_id}:workspace-approvals` | 登录用户按真实会话 owner 读取待批准摘要，支持刷新后恢复展示 |
+| POST `/conversations/{conversation_id}/workspace-approvals/{operation_id}:decide` | 仅 allow_once/reject，前端不提供路径或修改操作内容；Core 核对 owner 和状态 |
+
+Core 的 request/result 结构各定义一次，直接由 handler/service 共用；语言间必要的静态类型不再包一层 facade。内部认证使用已有服务凭据，与选择目录专用 host token 分开；缺少凭据时拒绝，不沿用部分旧端点“token 未设置则放行”的兼容逻辑。
+
+身份由 Core 会话/子任务/Workflow attempt 记录复核：子任务必须属于该 owner 和父会话，Workflow 必须是活跃 attempt、声明工具匹配且 lease 有效。仅传 user_id/conversation_id 不足以证明旧 run 仍有效。可信 workspace 上下文明确接入主请求 schema/组装与子任务私有参数；不能假定 ext 自动透传。
+
+复用 store.State() 的 SQLite/Redis，记录 operation_id、owner、conversation、run/task/attempt、call_id、参数摘要、grant/目录身份/文件版本、状态和期限。文件内容/凭据不进入批准卡片、模型参数、错误日志或公共 Attempt Context。
+
+- 状态：pending → allowed/rejected/expired；allowed → executing → completed/failed/uncertain。每次决定和领取使用 SetNX 等原子原语，不能用 Get+Del 模拟原子消费。
+- 建议等待期限 5 分钟、每个会话最多 16 项未完成请求，查询返回有界列表；终态回执保留 24 小时。算法每秒一次短查询，取消时立即终止等待；不持有文件锁等待用户。
+- 刷新页面可查询原 pending；终止任务、失去 Workflow lease 或算法 run 已结束后旧批准失效。审批不能启动一个已经结束的 run。
+- 权限切换影响后续操作；既有 pending 不因切成 allow_all 自动批准。用户明确批准旧 pending 后仍重新检查 grant 和文件版本，不能绕过新的永久拒绝。
+- 同一 operation_id 完成后返回保存的回执；执行中断而提交结果未知时返回 uncertain，禁止自动再次追加。不得声称数据库记录与任意宿主文件存在跨系统事务。期限后旧 ID 不重新创建，同一 call_id 也不重新自动发放批准。
+
+## 5. 权限和产品行为（本次 Review 内容）
+
+沿用历史三档权限定义，删除作为新增的破坏性文件操作明确列出：
+
+| 操作 | always_ask | ask_as_needed | allow_all |
+|---|---|---|---|
+| 普通列表/搜索/读取 | 允许 | 允许 | 允许 |
+| 普通创建/修改/覆盖/追加/mkdir | 逐次批准 | 允许 | 允许 |
+| 单文件删除 | 逐次批准 | 逐次批准（新增规则） | 允许 |
+| 命中敏感规则的读取 | 逐次批准 | 逐次批准 | 允许（沿用可批准操作免询问语义） |
+| 越界、失效授权、敏感文件写入、`.git` 写入 | 拒绝 | 拒绝 | 拒绝 |
+
+敏感规则由 Core 持有一份确定清单和测试：初始覆盖 `.env`/`.env.*`（明确排除 `.env.example`、`.env.sample`、`.env.template`）、`.ssh`/`.aws` 下文件、私钥/凭据文件名（id_rsa/id_ed25519、*.key、*.pem、credentials*、service-account*.json）。这是文件路径规则，不能声称能发现普通文件中的所有秘密。读内容的 grep 也须按匹配文件判权；不能先读出敏感内容再询问，混合搜索需逐文件授权或返回明确跳过原因。
+
+删除只针对工作区内一个普通文件，需 expected_version；不删除目录、不递归、不接受 glob，不用 shell，不默认改成回收站。mkdir 为显式受控动作，不在写文件失败时偷偷创建任意父目录。
+
+自定义 Python、shell、未声明 MCP/其他工具能够在其内部自行访问文件，元数据不是进程沙箱。建议绑定工作区的任务拒绝执行尚未接入的此类工具，返回 `tool_not_authorized` 并列明不兼容点；未绑定工作区的原流程保持原状。Workflow 自定义包同名覆盖官方工具也不能继承官方工具授权。这项兼容性收紧随本方案 Review，未经确认不能静默实施；命令/联网/应用完整授权不是本轮文件操作完成的附带承诺。
+
+## 6. 文件执行与竞态
+
+- Core 在现有 localworkspace 包实现路径访问和文本操作；LocalFileToolkit 保留既有无工作区数据源行为，工作区分支转发 Core。旧 Python 文本替换仍有其他消费者，不能直接删除。
+- read/info 返回可用于后续修改的文件 version；create 要求目标不存在；overwrite/string_replace/append/delete 要求 expected_version。版本与内容/文件身份相关，不能用 grant.version 冒充。
+- 保留旧方案 20 MiB 写入上限；超过限制明确失败。追加以读旧版本、构造新内容、同目录临时文件、替换的方式执行，不使用无版本 O_APPEND。精确修改保留现有匹配次数和错误语义。只复用与宿主访问兼容的文件处理逻辑，不把 Workflow 内部 artifact helper 直接当授权文件系统。
+- 绝对路径、`..`、路径编码歧义、根/中间路径替换、符号链接、非普通文件、Windows 路径别名需具体测试；不以字符串前缀或单次 realpath 作为安全保证。任何既有绝对路径兼容只能由 Core 在复核绑定后规范化，模型不能指定新的根。
+- 查询、读取、提交都重新检查 grant/binding、目录实际身份；提交与 Core revoke/权限变化协调。对用户在外部程序中的并发编辑，需要真实冲突测试；“检查后 rename”不能宣称原子的外部 compare-and-swap。
+- 在无新增依赖/冻结平台层的条件下，先验证可用的文件句柄与原子替换原语。某平台的符号链接/目录竞态或外部并发保证无法证明时，该验收项保持失败并报告，不能以弱实现、删测试或 trusted 放行。
+- 不新增 PDF/Office 解析器；复杂格式沿用已有资源解析能力，但宿主文件读取仍需受控。格式兼容和发现工具输出须逐项对照现有行为。
+
+## 7. 文件范围与规模预算
+
+当前只有四份文档的实际 diff，生产净增 0。下表为整个方案的预估，非已完成 diff；不通过拆批隐藏总量。
+
+| 职责 | 预计生产文件 | 净增预估 |
 |---|---|---|
-| U1 | 已有任务仍能选择其他 grant，导致界面换目录、Core 随后 binding_locked | 前端锁定已有任务绑定；区分草稿、已绑定、已创建未绑定任务 |
-| U2 | 同一组件切到未绑定会话后残留旧目录；选择/授权迟到缺少会话校验 | 会话切换清空状态并通知父组件；异步回调共用会话代次校验 |
-| U3 | disabled 草稿的最近目录 Select 仍可用；运行中权限被统一禁用 | 分开目录选择、发送和权限编辑的禁用条件 |
-| U4 | 缺名称/路径搜索、失效历史项重授权、完整授权管理 | 复用现有 query/include_inactive、原生 token bridge、Select/Dropdown/Modal |
-| U5 | 原因码直接显示 reason/unknown；冲突后状态未统一刷新 | 复用中英文字典和 Core reason，刷新真实绑定/版本 |
-| C1 | 结构化询问只检查 ask_id，不能证明完整回答及操作批准 | 补普通问答的答案/历史规范化；不把 AskCard 当成逐次工具批准 |
-| C2 | 子任务 parent.user_id 已重建，但官方 runner 优先读其他身份字段 | 按实际消费顺序核对 attachment_context/顶层 params/parent，统一可信身份 |
-| U6 | Local Proxy 的 `response.data.code` 大写错误码未被前端解析，选择过期或被拒绝时退化为未知错误 | 在现有 JSON helper 中归一化主机错误码，并补齐中英文提示 |
-| U7 | 草稿授权管理窗口和列表请求未随会话切换失效，旧查询可在新任务上下文继续显示 | 复用现有会话代次，切换时关闭管理窗口、清空列表并作废旧查询 |
-| F1 | 缺 mkdir/create/overwrite/append 及这些动作的同轮连续反馈 | 前后端同步工具接入研究项，尚无通过全部约束的方案 |
-| F2 | 无工作区 expected_version；执行/提交期未回查授权/目录身份 | 当前仅派发前校验，不能宣称已恢复旧版逐操作保证 |
-| F3 | always_ask、敏感读取、敏感/.git 写禁止未被工具执行层落实 | 提示词不等于运行时强制控制；保留为未解决差异 |
-| F4 | 原受控 shell 的删除/命令和跨主子任务批准未恢复 | 不把通用命令或主 Agent MCP 当作等价替代；继续核查现有接入能力 |
+| 注册、等待和主子任务装配 | 现有 algorithm/lazymind/chat/service/component/tool_registry.py；engine/agent_runtime/tool_call_guard.py、executor.py、models.py；service/chat_request.py、chat_service.py；engine/subagent/runner.py | 200–320 |
+| 工具转发及发现能力 | 现有 algorithm/lazymind/chat/engine/tools/local_fs.py；复用 infra/core_api_client.py，不另建 HTTP client | 100–180 |
+| Core 批准/权限/状态与文件执行 | 新增 backend/core/localworkspace/operations.go、approvals.go；现有 handlers.go、service.go、context.go、subagent_context.go；backend/core/routes.go、chat/local_workspace.go、必要的 chat/chat.go 请求组装 | 450–650 |
+| 批准 UI/API 与原因文案 | 现有 frontend/src/modules/chat/components/ChatInput/LocalWorkspaceControl.tsx、utils/localWorkspace.ts、i18n/locales/zh-CN.ts、en-US.ts | 120–200 |
 
-U1–U3 已有组件级复现，F1–F3 已有实际文件工具级证据；其余依据源码对照，验收层级见 findings.md。
+总预算约 870–1350 行生产净增、2 个新生产文件，超过原约 200 行/1 个新文件门槛，必须单独 Review。本轮不能以用户允许算法修改推导出规模自动获批。现有代码缺少 Core 文件执行和逐调用批准状态，这是两份新文件不可省略的职责；不用 manager/facade/重复 DTO 包装，也不把两者硬塞进 service.go 以满足文件数量。
 
-## 4. 可在前后端实施的具体修复方案
+尽量缩小事件/UI接入：复用现有工作区控件，在有绑定的当前会话查询 pending 并用已有 Modal 展示操作、相对路径、来源主/子任务和版本摘要；先查询再决定，切会话关闭窗口并使旧结果失效。隐藏/卸载时停止轮询，恢复显示时重查；已批准未完成不能标“成功”。不改 AskCard/ToolLimitCard 的产品语义，不新增聊天 SSE 字段链或通用弹窗框架。
 
-### 4.1 工作区选择、状态和异步结果
+删除只针对被本批替换且确认无其他调用者的旧提示词授权分支/重复工作区分支；保留普通问答、内部产物、无绑定数据源和其回归测试。不能靠删除拒绝/竞态测试降低代码量。
 
-主要修改现有 frontend/src/modules/chat/components/ChatInput/LocalWorkspaceControl.tsx、ChatInput/index.tsx 和 utils/localWorkspace.ts。
+## 8. 顺序、门禁和验收
 
-- 新草稿允许选择/清除；已创建任务不能新增或换绑。已有绑定展示原工作区及管理动作。
-- 切换 conversationId 时清空 selected、candidate、items 和旧权限快照，并通过 onChange 清除父组件旧 workspace_id，随后加载新状态。
-- 查询、原生选择、authorize、权限修改、撤销共用会话代次/请求序号。过期结果不得改变当前组件或父组件状态；授权 Modal 提交也核对代次。
-- 原生 picker 本身不能取消时，只丢弃过期结果，不修改冻结的 Local/Desktop；若已向后端提交授权，需保留其真实完成状态，不声称前端丢弃结果撤销了已提交授权。
-- 所有目录选择入口遵守 disabled/busy；运行中权限修改按已有 next_request 语义保持可用，现有 pending 不自动批准。
-- 已失效任务重新授权只产生可供新任务选择的 grant，不复活旧绑定；界面明确说明用途。
+任务与命令见 task_plan.md。A0 先交付测试及真实失败分类，不改生产；A1–A3 分别实现注册/可插拔执行阻断、Core文件执行、批准UI与主子Workflow闭环，每批先补该批失败合同再 Review 生产。任何单批也报告新增/删除/净增、真实文件和未验证项。
 
-### 4.2 搜索、授权管理和反馈
+首次测试重点是阻断位置、注册方法映射、权限矩阵与兼容性，不在设计阶段提交一套可绕过 Core 的临时生产实现。完成的判定必须同时包含真实磁盘、同轮反馈、拒绝零副作用、版本冲突、撤销、批准单次消费、主/子/Workflow 路径、Local/打包 Desktop 平台证据。只跑 mock/组件测试不称文件能力完成。
 
-- 使用已有列表 query 和 include_inactive，支持名称/路径搜索；失效项允许进入重授权流程，不能简单 disabled 后无后续入口。
-- 复用已冻结的选择/授权 bridge 及 Core 撤销 API；管理列表可撤销相应 grant，展示后端返回的受影响数量。
-- 用现有组件恢复菜单互斥、取消、Esc、遮罩、焦点和风险确认；不重建文件管理器。
-- 对 reason 做统一中英文映射。目录选择、权限、撤销冲突后重新读取对应状态，不保留错误的乐观值。
-- 新增真实 render/rerender/事件测试及可控异步 Promise，不使用源码 contains 断言代替行为验证。
+本稿具体生产设计、两项兼容性选择（删除规则和未接入工具拒绝）、等待/回执期限及总规模等待用户 Review。当前没有修改生产或测试，没有提交/推送。
 
-### 4.3 Core 问答和子任务上下文
+## 9. Review 后必须修正的设计
 
-主要落点为 backend/core/chat/conversation_logic.go、localworkspace/subagent_context.go 及其既有测试。
+独立审查发现 Workflow 自定义脚本在 `runner.py:237` 已于 `AgentExecutor` 安装前执行 `exec(compile(...))`。因此 A3 不能只在工具调用时拒绝未知 callable：绑定工作区的 Workflow 在加载脚本前必须通过 Core/本地静态准入检查，确认包只包含已声明、已审计的受控工具；无法证明时整包拒绝。A0 必须加入顶层 import-time 文件副作用测试。无工作区 Workflow 的既有行为保持不变。
 
-- 普通 AskCard 校验同会话的有效问题、答案结构和完整性，保留拒绝、部分填写、忽略的区别，不篡改普通 Chat 行为。
-- 正常问答确认只改善问答链，不授予模型任意文件操作权限，不伪造工具批准记录。
-- 核对官方 runner 的身份读取优先级；对真实工作区绑定，从 Core 确定的 owner/conversation 归一化相关字段，模型不能通过顶层或 attachment_context 覆盖。
-- 保留合法附件、Skill 和其他任务参数；无绑定维持原流程，不把整个输入清空。
-- 私有 execution-spec 的两份 params 保持一致；不向公共 AttemptContext 增加宿主路径，不改变 Workflow 内部产物目录。
-- 不增加工作区表或迁移；如测试发现必须扩大契约，先更新方案，不自行越界。
+`PreparedToolCall` 只有调用数据和资源访问描述，没有原始 callable 或批准句柄。授权上下文由项目中间件在 selector 内创建，包含原始调用摘要、任务身份和 Core operation_id；批准恢复时只接受匹配的上下文，绝不把批准状态写回模型参数或工具参数。`ResolvedToolAccess` 仅用于调度冲突，不能作为业务授权替代物。
 
-### 4.4 前端稳定性补齐
+为了减少冗余，Core 可以保留 prepare/status/decide/execute 的四种语义，但由一个 `workspace-operations` service 统一状态与类型，handler 只做认证、解码和回复；不要把状态机复制到多个 handler，也不要为了“少文件”塞入现有 `service.go`。前端登录用户的 pending 列表可以继续使用独立读取端点。这个调整将预算下修为约 700–1100 行生产净增、最多 2 个新生产文件，仍超过原门槛，必须单独 Review。
 
-本批仅覆盖 U6–U7，不包含最终人工验收或 Agent 文件读写能力。
+在 A0 失败合同完成前，不能开始生产实现。未验证的普通子任务全路径、远程 Workflow lease 和 Local/打包 Desktop 文件原语继续列为实测项。
 
-- `workspaceReason` 继续作为唯一前端错误解析入口，同时读取 Core 的嵌套 `detail.reason` 和 Local Proxy 的 `response.data.code`。只归一化现有稳定主机错误码，不引入新的错误协议。
-- 为选择禁止、选择过期补中英文文案；已有 invalid/path/mode 等 reason 继续复用现有文案。
-- 会话变化时递增现有列表请求序号，关闭授权管理窗口并清空其中的数据。已经发出的请求允许完成，但返回值不能再修改新会话界面。
-- 先增加两个行为合同并观察预期失败，再做最小实现。预计修改 `LocalWorkspaceControl.tsx`、`localWorkspace.ts` 和两份 locale，共 4 个既有生产文件，净增约 30–50 行；没有新生产文件、服务、依赖或数据库对象。
-- 4 个生产文件超过局部单文件门槛，但职责不可合并：控件负责会话生命周期，utility 负责协议归一化，两份 locale 负责对应语言。用户已于 2026-09-09 Review 并批准该范围。
 
-## 5. 算法冻结下尚未解决的文件能力
+## 10. A1 已交付范围
 
-完整目标仍是：一次真实用户轮次内 mkdir → create → read → append/replace → read，每次结果与当时磁盘一致；覆盖/追加/修改有版本校验，访问和提交重新校验授权，逐次批准回到原调用。
+A1 已在算法项目接入轻量授权扩展点：ToolConfig 可声明方法级操作类别，AgentExecutionOptions/AgentExecutor 可传递授权 gate，ToolExecutionMiddleware 在底层 ToolManager 派发前闭合处理 deny/unknown，Workflow 绑定工作区时在脚本编译前默认拒绝未审计脚本。A1 不创建 Core gate 实例、不等待用户、不执行磁盘操作，故不改变当前真实工作区权限行为。
 
-已核查的限制：
-
-1. 官方 LocalFileToolkit 只消费路径/扩展名快照，不能通过新增提示词获得 create/append、expected_version 或 Core 回调。
-2. 官方主 Agent 可通过既有 mcp_config 接入同步工具，但普通子任务工具解析不消费 MCP，Workflow 主轮排除通用 MCP。只给主任务加 MCP 不能覆盖其他现有工具的权限/目录校验。
-3. Core 收到工具轨迹/产物事件时，不能保证 Python 还未发生副作用；过滤 SSE 不等于阻止执行。
-4. 请求末落盘不能实现同轮写后读；ask_user 是结束当前轮次的工具，不能冒充旧同步批准暂停。
-5. 单独开放一个后端写文件 API，但没有官方工具消费者，同样不构成闭环。
-
-允许继续研究的方向仅限官方已有扩展点：先证明主 Agent 同步工具调用、Core 权威身份/生命周期传递、原调用批准与结果反馈，再核查普通子任务及 Workflow 的实际消费者。每个候选必须说明凭据传输、缓存生命周期、重试重复追加及撤销竞态；不得重新采用每请求改变 MCP 配置导致缓存不断累积的旧设计。
-
-这些是研究验收条件，尚不是获准的系统 MCP/文件服务实施方案。算法不能改的决定已确定，不再列“申请算法例外”为后续任务。无法通过全部条件时，继续明确标记 F1–F4 未解决；不能为了写出“完整方案”虚构官方扩展能力。
-
-保留原语义：
-
-- 旧文件 API 没有 delete；删除来自受控 shell。回收站是新产品行为，不能无声替代原删除。
-- 旧写入上限为 20 MiB，append 使用带版本的原子替换。改为 512 KiB、O_APPEND 原地写或只支持主任务，都需要明确列为差异，不能称等价恢复。
-- 旧发现工具支持更广文件类型，不等于已提供完整 PDF/Office 解析；解析复用既有资源通道。
-- 普通内容的现有日志/历史处理与 Secret 安全分开说明；不承诺全文零日志，也不允许授权凭据进入模型参数或日志。
-
-## 6. 执行和完成判定
-
-先实施经过批准的 U/C 类行为修复，不重复已完成的基础设施。权限/API 相关修复先交付阶段一测试及预期失败，用户 Review 后实现。
-
-T1 阶段一在 `frontend/src/modules/chat/components/ChatInput/LocalWorkspaceControl.test.tsx` 建立了 13 项真实组件合同，其中 7 项按预期失败。用户 Review 后完成 T2，并按方案的统一代次要求补充权限确认、权限更新、撤销迟到及同草稿列表保留 4 项合同；当前 17 项全部通过。生产实现只修改既有 `LocalWorkspaceControl.tsx`，净增 51 行，没有新增生产文件、服务、依赖或数据库对象。
-
-用户随后批准 T3–T5 先生产后统一测试。该批复用现有 Core/bridge/request/subagent 链路完成 U4–U5 与 C1–C2，6 个既有生产文件净增 183 行，无新服务、依赖、数据库表或生产文件；前端 43 项与 Core 三包回归通过。T6 仍需真实 Local/打包 Desktop 验收，F1–F4 仍未解决。
-
-2026-09-09 的后续审计确认 U6–U7。用户批准按 4.4 的窄范围继续完善；执行顺序为失败合同、最小实现、聚焦回归和边界检查。最终 Local/打包 Desktop 人工验收与 F1–F4 不进入本批。
-
-S1 已建立 6 项失败合同：5 个 Local Proxy 错误码归一化用例和 1 个会话切换管理窗口/在途列表用例。聚焦运行结果为新增 6 项预期失败、原有 23 项通过、异常失败 0；可以进入最小实现。
-
-S2 已按设计完成：4 个既有前端生产文件新增 15 行、删除 4 行，净增 11 行；没有新增生产文件。聚焦矩阵 29/29 通过，未触及 Backend、算法或 Local/Desktop。
-
-S3 已完成自动化回归：六个前端测试文件 49/49、相关 ESLint、MCP TypeScript 检查和生产构建通过。算法/LazyLLM 与 `245bc26d`、Local/Desktop 与 `ec4676e0` 保持零差异，Backend 在本批无差异。U6–U7 至此完成；T6 与 F1–F4 仍按排除范围保留。
-
-F 类独立保持研究状态；只有同轮反馈、授权、批准、主子任务覆盖和平台验证均通过，才可加入正式实施任务。只完成 U/C 不得宣布旧需求完全复现。
-
-验收清单与执行顺序集中维护在 task_plan.md；每批同步更新方案、证据和 progress.md。用户已批准本批文档发布，使用当前单一功能分支 origin/feature/newWorkZone；不包含生产修复。
+A1 生产净增约 66 行、5 个既有算法文件；新增 1 个测试文件；52 项可运行矩阵通过。完整服务图仍受本地依赖组合限制，需在 CI/发布环境复核。下一批 A2 只新增 Core operation 状态/文件执行失败合同，先 Review 再实现。

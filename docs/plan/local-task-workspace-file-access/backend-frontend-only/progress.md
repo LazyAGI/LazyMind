@@ -29,11 +29,11 @@
 - 验证：前端聚焦 43/43；Core `go test ./localworkspace ./chat ./subagent -count=1` 全部通过；相关 ESLint、MCP TypeScript 检查和生产构建通过。真实 Local/打包 Desktop UI 验收仍归 T6。
 - 算法和 LazyLLM 相对 `245bc26d`、Local/Desktop 相对 `ec4676e0` 仍为零差异；F 类文件创建、追加和删除能力仍未解决。
 
-## 当前状态（2026-09-08）
+## 历史文档整理状态（2026-09-08，已由后续批次覆盖）
 
 - 本次唯一工作目录：/Users/theone/Downloads/lazymind；上一环境的目录名不作为本机路径依据。
 - 当前分支：feature/newWorkZone；代码基线 bb46abd64ca5fc431f4f7748fb9e085099990d5e。
-- 用户最新决定：算法不能改；已实现功能的重复文档可删除，只维护新方案及剩余问题。
+- 当时决定为算法不能改；该限制已在 2026-09-09 调整。此处仅保留历史文档整理记录。
 - 本轮已重写本目录四份文档，清理历史实施流水、过期工作树路径、算法适配例外及失效方案，保留基线、冻结依据、实际审计证据和剩余验收。
 - 已有工作区授权/绑定/本机接入继续复用；算法及 Local/Desktop 未修改。
 - 当前没有生产修复、没有新增仓库测试。本批仅执行文档一致性和范围检查；用户已批准将四份文档提交并推送至 origin/feature/newWorkZone 供接手。
@@ -56,14 +56,62 @@
 - task_plan.md：后续执行顺序、测试 Review 和验收清单。
 - 本文件：最新决策、实际进度和交接信息，不重复粘贴全部方案或历史日志。
 
-## 接手约束与下一步
+## 当前接手规则
 
-1. 先检查 git status，保留任何未提交改动；从 origin/feature/newWorkZone 安全更新，不强制覆盖、不创建其他工作树。
-2. 用户已否决算法修改，不再次请求算法适配例外，不把 trusted/MCP/轮后落盘默认当作获批方案。
-3. 下一步为前后端 U/C 修复的行为测试计划与必要 Review；F 类仅按官方现有能力研究，未验证的实现不能承诺完整复现。
-4. 每完成一批，在本文件记录实际文件、生产增量、测试结果和未完成项，同时同步其他三份文档。
-5. 本批文档发布到 origin/feature/newWorkZone，提交标题为 docs(workspace): publish constrained handoff plan。接手时核对交接消息中的完整提交号已包含在本地历史中；不要把代码基线 bb46abd6 当作最新文档提交。推送结果及提交号以本次交接消息为准。
+1. 先检查 git status，保留未提交改动；只使用当前单一仓库和 feature/newWorkZone。
+2. 2026-09-09 用户已确认允许项目算法及对应测试必要修改；LazyLLM/gitlink、Local/Desktop 仍冻结。
+3. 当前先 Review IMPLEMENTATION_PLAN.md 新授权方案和总规模，再按 task_plan.md 的 A0–A3 推进。T6/F 不因旧自动化通过而完成。
+4. 每批更新四份文档并仅提交相关文件；没有新推送授权时不自动发布远端。
 
 ## 清理与恢复
 
 旧文档内容已从当前工作文件清理，已提交的历史可通过 Git 查阅，未清理 Git 历史。最新审计的重要差异和证据已归纳到新文档。没有删除产品文件或再次创建/删除代码目录。
+
+## 2026-09-09 算法同事方案接手
+
+- 用户要求按“注册授权字段 + ToolManager/ToolExecutionMiddleware 执行前决定询问”的方案解决文件能力。已读取本目录四份文档，检查工作区干净，HEAD 为 7e04900ee331553829917be1e73c661ff8b0103c。未拉取、提交或推送。
+- 本次只改本目录四份文档，生产代码净增 0；算法、LazyLLM、Local/Desktop 均未改动。已核实项目中间件存在派发前 selector，普通子任务复用 AgentExecutor，优先考虑该入口而非修改 LazyLLM。
+- Core 继续负责业务授权；工具标记不等于文件执行实现或安全保证。Workflow 全路径、批准恢复、具体文件操作和竞态尚未验证。
+- 执行命令为 git status/rev-parse、rg、源码及四份文档读取、git diff --check；未运行新测试，历史结果不计入本批。
+- 下一步先确认新指令对算法冻结边界的调整，再细化测试合同、具体文件与规模，按测试先行及人工 Review 推进。历史“永不申请算法例外”对应旧阶段，本节记录用户主动提出的新方向，不擅自视为所有算法/LazyLLM修改获批。
+
+## 2026-09-09 当前设计阶段（覆盖上节待确认状态）
+
+- 算法项目代码与对应测试范围已获用户确认；当前工作为明确方案，尚未获具体生产 diff/规模 Review。
+- 正在复用现有 ToolConfig、ToolExecutionMiddleware、core_api_client、Core grant/binding/state.Store 和前端工作区控件制定闭环；不新建仓库、服务、依赖或数据库表。
+- 已完整读取此前四份文档；当前新增证据写入 findings.md。生产代码净增仍为 0，未运行新测试。
+- 必须写清的产品决策包括三档权限、删除范围、未接入自定义工具的处理、批准超时/重启、版本冲突及目录竞态；方案完成后统一交用户 Review。
+
+## 2026-09-09 设计稿交付
+
+- 已将 IMPLEMENTATION_PLAN.md 更新为当前授权/文件执行设计，task_plan.md 更新为 A0–A3 测试与 Review 顺序；历史 U/C 完成状态保留。
+- 实际修改仅本目录四份 Markdown，生产代码净增 0，无新增测试/依赖/表/仓库；没有提交或推送。
+- 方案复用 core_api_client、store.State、ToolConfig/ToolExecutionMiddleware 和现有工作区控件，避免新 client/manager/facade/重复 DTO/事件协议。预估完整生产净增 870–1350 行、2 个新文件，超过原门槛，已作为独立 Review 项；不是获批 diff。
+- 明确提交未知时不自动重放追加；未接入自定义 Python/shell/MCP 的工作区任务行为需拒绝，不能把元数据当进程沙箱；删除建议单文件且按需模式也询问。以上产品规则与期限统一交用户 Review。
+- 检查为源码检索、旧 Git spec 对照、文档一致性、git diff --check 和冻结边界；未运行新测试或文件执行探针。A0 首次运行才建立本次基线，历史测试结果不计为本批通过。
+- 下一步：用户 Review 方案后执行 A0，报告真实预期失败/异常失败及文件范围，再进入生产门禁。
+
+- 设计交付检查结果：git diff --check 通过；Local/Desktop 相对 ec4676e0 零差异；LazyLLM gitlink 相对 245bc26d 相同，子模块工作区干净。git status 仅列出本目录四份文档修改。
+
+## 2026-09-09 独立 Agent Review 增量
+
+- Review 已发现一个阻断性问题：Workflow 脚本在工具中间件安装前执行顶层 `exec(compile(...))`，调用期拒绝不能阻止加载期副作用。设计已补充加载前准入和 import-time 测试要求。
+- Review 同时确认 PreparedToolCall 没有批准句柄，ResolvedToolAccess 不是业务授权；授权上下文必须由中间件内部保存并与 Core operation_id 绑定。
+- 可精简方向：Core 保留四种操作语义但统一一个 service 状态机，减少重复 handler/DTO；预算从粗估 870–1350 下修为约 700–1100 行，仍需规模 Review。不能削减文件操作、普通子任务、已声明 Workflow 或并发/撤销验收。
+- 本次仍只更新四份文档，生产/测试代码净增 0；未提交/推送。A0 之前不进入生产实现。
+
+## 2026-09-09 A0 测试阶段
+
+- 已新增 `tests/algorithm/chat/test_workspace_authorization_contract.py` 和中间件拒绝零副作用合同；这是测试代码，不是生产实现。
+- A0 可运行结果为 17 passed、4 预期失败、0 异常失败。失败准确暴露授权 gate、注册字段和 Workflow 加载前准入缺口。
+- Core `go test ./localworkspace -count=1` 通过。算法完整矩阵受本地 `.venv` FastAPI/Pydantic 版本不兼容阻塞，未把环境异常当作产品失败，也未修改依赖。
+- 当前 A0 生产净增 0；仅测试和四份文档有改动。按照人工 Review 门禁，下一步等待确认是否进入 A1 最小授权 gate 实现；Workflow 加载期旁路必须先纳入实现范围。
+
+## 2026-09-09 A1 完成
+
+- A1 已完成并通过可运行矩阵 52/52。生产净增约 66 行，修改 5 个既有算法文件；新增测试合同 1 个；四份文档同步记录。
+- 代码质量：复用 ToolConfig、AgentExecutor、ToolExecutionMiddleware、现有 ToolRuntimeMetadata 生态；没有新增 manager、facade、HTTP client、依赖或生产文件。
+- 安全行为：授权 gate 未明确 allow 时闭合拒绝；拒绝在底层 ToolManager 前生成 `SKIPPED` 且零副作用。Workflow 绑定工作区的自定义脚本在加载前拒绝，避免顶层副作用。
+- 未完成：Core 实际判权和 operation 状态机、pending/批准恢复、LocalFileToolkit Core 转发、读/建/改/追加/删磁盘闭环、前端批准 UI、主/子/Workflow 端到端及 T6。
+- 验证限制：完整算法测试收集曾受 `.venv` FastAPI/Pydantic 冲突影响；最终 A1 运行子集通过，仓库依赖未改。A2 前需在 CI/发布环境复核完整矩阵。
+- 下一步：A1 相关文件提交后，先为 A2 Core 操作/批准状态写失败合同，再进入实现；不把空 gate 误报为授权已生效。

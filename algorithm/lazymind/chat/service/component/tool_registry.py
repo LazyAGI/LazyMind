@@ -362,11 +362,16 @@ class ToolConfig:
     input_schema: dict[str, Any] | None = None
     output_schema: dict[str, Any] | None = None
     required_config: list[str] | None = None
+    authorization: dict[str, Literal['read', 'write', 'delete', 'external']] | None = None
     appendix_system_prompt: SystemPromptAppendix | SystemPromptAppendixProvider | None = None
     appendix_query: str | QueryAppendixProvider | None = None
     appendix_query_position: QueryAppendixPosition = 'after'
 
     def __post_init__(self) -> None:
+        if self.authorization is not None:
+            invalid = set(self.authorization.values()) - {'read', 'write', 'delete', 'external'}
+            if invalid or any(not isinstance(name, str) or not name.strip() for name in self.authorization):
+                raise ValueError('authorization must map non-empty method names to known operation kinds')
         if not callable(self.appendix_system_prompt):
             self._validate_appendix(self.appendix_system_prompt)
         if self.appendix_query is not None and not (
@@ -756,6 +761,10 @@ DEFAULT_TOOLS: list[ToolConfig] = [
         tool=LocalFileToolkit(), module='data',
         label_en='Local Files',
         description_en='Glob, grep, read, and perform exact text replacements within configured local paths.',
+        authorization={
+            'ls': 'read', 'glob': 'read', 'grep': 'read', 'read': 'read', 'info': 'read',
+            'string_replace': 'write', 'create': 'write', 'append': 'write', 'delete': 'delete',
+        },
     ),
     ToolConfig(
         name='cloud_files', label='云文件', description='浏览、搜索和管理已连接的云文件系统',

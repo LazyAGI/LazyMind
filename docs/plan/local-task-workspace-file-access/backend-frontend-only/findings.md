@@ -48,7 +48,7 @@
 
 审计提交 bb46abd64ca5fc431f4f7748fb9e085099990d5e，旧对照 e7ed8a4189bb627e96814fc2f34818693cbc2050。旧 spec/checklist/代码在 Git 历史中可查；不继承其勾选为当前验收结果。
 
-当前算法相对 245bc26d 零差异，Local/Desktop 相对 ec4676e0 冻结提交零差异。后续算法不允许修改，相关例外方案已经移除。
+截至原审计，算法相对 245bc26d 零差异，Local/Desktop 相对 ec4676e0 零差异。该阶段的算法冻结已由 2026-09-09 用户主动确认调整：允许项目算法及对应测试必要修改，LazyLLM/gitlink、Local/Desktop 仍冻结。
 
 ## 本机实际检查（2026-09-08）
 
@@ -102,3 +102,63 @@
 - frontend/src/modules/chat/utils/localWorkspace.ts：列表未带 include_inactive/search，reason 未完成本地化映射。
 
 未验证：真实模型同轮完整文件闭环、Local/打包 Desktop 全 UI、真实子任务批准、Windows 文件操作。不得以已有测试通过替代这些验收。
+
+## 2026-09-09 新授权提案源码复核
+
+本次 HEAD 为 7e04900ee331553829917be1e73c661ff8b0103c，核查开始工作区干净。完整读取四份交接文档；以下仅是本次源码证据，不是运行测试通过。
+
+- algorithm/lazymind/chat/service/component/tool_registry.py 的 ToolConfig 尚无授权字段；还需核查 Toolkit 展开后到具体方法的元数据传播，不能只标记整个 Toolkit。
+- algorithm/lazymind/chat/engine/agent_runtime/tool_call_guard.py 的 ToolExecutionMiddleware.execute_with_records 已通过 dispatch_selector 在派发前处理重试/去重，可作为授权接入候选。
+- algorithm/lazyllm/lazyllm/tools/agent/toolsManager.py 的现有 execute_with_records 先调用 selector 再执行选中的调用，支持复用，不需为获得此前置入口修改 gitlink。
+- executor.py 安装上述中间件；subagent/runner.py 使用 AgentExecutor，具备复用基础，但尚未证明所有 Workflow/工具旁路受控。
+- backend/core/localworkspace/context.go 已提供 ResolveForConversation 和权限快照，目前 ModelNotice 仍为提示词规则，并不提供逐调用批准执行保证。
+- chat_service.py 仍在 workflow_turn_is_bound 时排除通用 MCP；不能以主任务 MCP 代替完整覆盖。
+
+本批只运行 git status、git rev-parse、rg、源码及文档读取、git diff 检查；未运行测试或临时探针。
+
+## 2026-09-09 授权边界确认后的设计审计
+
+- 用户已确认允许 algorithm/lazymind/ 与对应测试的必要修改，要求修改前先明确方案、控制冗余。LazyLLM/gitlink、Local/Desktop 仍冻结。
+- 发现直接复用的算法 HTTP helper：chat/engine/tools/infra/core_api_client.py 的 post_core_api/get_core_api，已带现有内部服务 token 和可信运行时用户头，并关闭环境代理继承；无须增加 HTTP client 或复用选择目录专用 host token。
+- Core store.State() 已提供 SQLite/Redis state.Store；SetNX 和两种实现的 CompareAndDelete 可用于有界待批准状态与单次领取，不能把普通 Get+Del 当成原子消费。
+- tool_limit_control.py 已有同轮等待、取消、超时示例，但活动记录按 sid 单项保存、仅支持 continue/summarize，且 executor 仅为主 Chat 安装 on_max_retries；整套复制/改名不能解决多子任务并发批准。
+- LocalFileToolkit 同时包含 ls/glob/grep/read/string_replace/info，搜索也会读内容；只检查 read/string_replace 会留下路径和敏感读取旁路。
+- 主请求在 chat_service.py 显式组装 agentic_config，不能假设 Core ext.workspace_context 自动传入。子任务从 parent_agentic_config 复制再归一化身份；Workflow legacy_tools 来自不可变 Attempt Context，package 工具优先于同名 DEFAULT_TOOLS，必须处理同名覆盖和自定义代码旁路。
+- 已核对历史 e7ed8a41 的 spec：always_ask 普通读免询问、写与外部副作用询问；ask_as_needed 普通工作区文件操作允许，风险操作询问；allow_all 跳过可批准询问但不能绕过永久禁止项。权限改变不自动批准既有 pending。删除为本轮新增语义，需明确验收。
+- 自定义 Python/命令可以在工具内部直接访问文件，注册字段不构成进程沙箱。方案必须明确未接入工具的兼容性策略，不能宣称任何 Workflow 代码天然受控。
+- 读取时遇到两个不存在的候选文件名和 zsh 未匹配 glob，已改用 rg --files/实际路径；这些是检索错误，未运行测试，不计为产品失败。
+
+### 设计结论与验证限制
+
+- Core 已有 store.State()，但没有现成逐工具批准业务；批准记录和磁盘执行是必须补充的两项职责，方案预算为 2 个新生产文件，不机械复制 ToolLimitDecisionCoordinator。
+- 现有 Local runtime 已向 Core/算法传递内部服务 token 的配置；本次只读取对应源码，未读运行时秘密或修改冻结文件。新的内部文件操作必须验证 token 非空，不照搬 RemoteFS 未设置 token 时放行的行为。
+- 原子替换不自动提供数据库/磁盘跨系统事务，也不自动解决外部程序并发写；方案显式保留 uncertain 与真实竞态验收，不承诺未验证的 exactly-once 或沙箱隔离。
+- 当前设计未运行算法/Core/UI 新测试；预算、接口、策略表及新增文件属于待 Review 方案，不是实现完成事实。
+
+## 2026-09-09 独立 Agent Review 结论（进行中）
+
+- **P1，已证实：Workflow 自定义脚本存在加载期旁路。** `algorithm/lazymind/chat/engine/subagent/runner.py:219-237` 会在工具调用和 `AgentExecutor` 安装前对发布脚本执行 `exec(compile(...))`。因此仅在 `ToolExecutionMiddleware` 中拒绝未授权 callable，无法阻止脚本顶层代码在加载时访问宿主文件或产生副作用。绑定工作区的 Workflow 必须在加载前验证为受控工具包，或明确拒绝该类脚本；必须加入 import-time 副作用测试。
+- **P1，已证实：现有 `PreparedToolCall` 只保存调用数据和 `ResolvedToolAccess`，没有原始 callable、授权句柄或操作状态。** `algorithm/lazyllm/lazyllm/tools/agent/tool_runtime.py` 与 `toolsManager.py:1043-1058` 表明授权信息不能靠模型参数或工具名自然传递；中间件需要在自身内维护一次调用的不可伪造上下文，并在批准恢复时核对 call_id、参数摘要和运行身份。
+- **P1，已证实：`ToolExecutionMiddleware` 的 selector 适合作为执行前阻断点，但它不是批准状态机。** `tool_call_guard.py:345-374` 只负责失败策略、日志和派发索引；Core `state.Store` 的 `SetNX`/`CompareAndDelete` 是原子原语，不会自动实现状态转换、过期、单次领取和 uncertain 回执。A1 必须先定义并测试这些转换。
+- **P2，已证实：当前方案的 5 个 HTTP 接口可以合并为一个受限的操作资源接口，减少 handler/DTO 重复。** prepare/status/decide/execute 仍需保留语义，但可以由同一个 `workspace-operations` handler 按动作路由到一个 service 类型；前端用户列表继续使用独立登录端点。是否合并应以可读性和测试覆盖为准，不能把并发状态逻辑塞进 `handlers.go`。
+- **P2，已证实：`ToolRuntimeMetadata.read_keys/write_keys` 只能表达工具资源冲突，不能替代 Core 的 workspace grant/permission 判定。** 可复用其访问索引避免再造“文件资源 DTO”，但不能把本地绝对路径 key 当成授权证明。
+- **P2，需实测：普通子任务是否始终经过 `AgentExecutor` 中间件、Workflow 是否存在远程 executor 之外的本地脚本入口，以及 Local/打包 Desktop 的实际文件句柄语义。当前源码显示存在复用路径，但还没有端到端证据。
+
+Agent Review 还未形成完整终稿；上述结论已足以阻止直接进入生产，先修正设计再做 A0。
+
+## 2026-09-09 A0 首轮测试结果
+
+- 基线 `go test ./localworkspace -count=1` 通过。
+- 算法完整命令在系统 Python 下因未加载 LazyLLM 失败；使用仓库 `.venv` 并补充 `PYTHONPATH` 后，工具注册和 Workflow 收集又因 `.venv` FastAPI 与系统 Pydantic 版本不兼容（`ImportError: pydantic.main.IncEx`）阻塞。这是测试环境异常，不计入产品 RED；未改环境文件或仓库依赖。
+- 可运行的 A0 命令：`PYTHONPATH=algorithm/lazymind:algorithm/lazyllm .venv/bin/python -m pytest tests/algorithm/chat/test_tool_call_guard.py tests/algorithm/chat/test_workspace_authorization_contract.py -q`，结果 **17 passed, 4 failed, 0 abnormal**。
+- 4 项失败均为预期合同：`authorization_gate` 尚未接入中间件；`ToolConfig` 尚无 `authorization` 字段；中间件无授权 gate；Workflow 脚本无加载前 `_validate_workflow_workspace_package` 准入。此前静态合同选择器导致的异常已修正并重跑归零。
+- 当前只新增 A0 测试文件和测试合同，生产代码净增 0；未进入 A1 实现。Workflow 加载期副作用问题仍是 P1 阻断。
+
+## 2026-09-09 A1 实现与验证结果
+
+- A0 四项 RED 已转绿：`ToolConfig.authorization` 字段及 local_fs 方法映射、`ToolExecutionMiddleware.authorization_gate`、拒绝零副作用、Workflow 绑定工作区时加载前拒绝。
+- A1 可运行矩阵：`test_tool_call_guard.py`、`test_agent_executor.py`、`test_workspace_authorization_contract.py`、`test_local_fs_tool.py`、`test_core_api_client.py` 共 **52 passed**；`py_compile` 和 `git diff --check` 通过。
+- 生产修改 5 个既有 `algorithm/lazymind` 文件，净增约 **66 行**；新增测试文件 1 个，未新增生产文件。没有修改 LazyLLM 内容/gitlink、Local/Desktop、Backend 或依赖。
+- 授权 gate 只接受明确 `True/'allow'/'allowed'`；拒绝返回 `authorization_denied`，异常/未知状态闭合为 `authorization_unavailable`。没有 Core gate 实例注入，因此 A1 不改变现有运行时的真实授权行为。
+- Workflow 的 `runner.py:237 exec(compile(...))` 之前增加加载准入；绑定工作区且存在声明脚本时默认拒绝，避免把模型可写的 `workflow_package_authorized` 当成安全凭据。无工作区 Workflow 保持旧路径。
+- 发现并修复一次测试环境异常：`.venv` 的 FastAPI/Pydantic 版本冲突；未修改仓库依赖。最终可运行子集使用 Pydantic 2，52 项通过；完整服务图仍需在正式 CI/发布环境复核。
