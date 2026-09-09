@@ -1,7 +1,7 @@
-import { Form, Modal, Select } from "antd";
+import { Form, Modal } from "antd";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { assignConversation, createConversationGroup, emitConversationGroupsChanged, listConversationGroups, removeConversation, type ConversationGroup } from "./api";
+import { assignConversation, createConversationGroup, emitConversationGroupsChanged } from "./api";
 import GroupFields, { normalizeGroupValues, type GroupValues } from "./GroupFields";
 
 export type MembershipConversation = { conversationId: string; groupId?: string | null; title?: string };
@@ -10,50 +10,36 @@ export default function ConversationMembershipModal({ conversation, onClose }: {
   onClose: () => void;
 }) {
   const { t } = useTranslation();
-  const [groups, setGroups] = useState<ConversationGroup[]>([]);
   const [busy, setBusy] = useState(false);
-  const [target, setTarget] = useState("free");
+  const [createdGroupId, setCreatedGroupId] = useState<string | null>(null);
   const [form] = Form.useForm<GroupValues>();
   const id = conversation?.conversationId;
-  const groupId = conversation?.groupId;
   useEffect(() => {
     if (!id) return;
-    let disposed = false;
-    setTarget(groupId || "free");
+    setCreatedGroupId(null);
     form.resetFields();
-    void listConversationGroups().then(next => { if (!disposed) setGroups(next); }).catch(() => undefined);
-    return () => { disposed = true; };
-  }, [id, groupId, form]);
+  }, [id, form]);
 
   const save = async () => {
-    if (!conversation) return;
-    const values = target === "new" ? normalizeGroupValues(await form.validateFields()) : null;
+    if (!conversation || busy) return;
+    const values = normalizeGroupValues(await form.validateFields());
     setBusy(true);
     try {
-      let destination = target;
-      if (values) {
+      let destination = createdGroupId;
+      if (!destination) {
         const created = await createConversationGroup(values);
         destination = created.id;
-        setGroups(current => [...current, created]);
-        setTarget(destination);
+        setCreatedGroupId(destination);
+        emitConversationGroupsChanged();
       }
-      if (destination === "free") {
-        if (groupId) await removeConversation(groupId, conversation.conversationId);
-      } else if (destination !== groupId) {
-        await assignConversation(destination, conversation.conversationId);
-      }
+      await assignConversation(destination, conversation.conversationId);
       emitConversationGroupsChanged();
       onClose();
     } finally { setBusy(false); }
   };
 
-  return <Modal open={Boolean(conversation)} title={t("conversationOrganizer.adjustMembership")} onCancel={() => !busy && onClose()} onOk={save} confirmLoading={busy} okText={t("conversationOrganizer.save")} cancelText={t("common.cancel")}>
+  return <Modal open={Boolean(conversation)} title={t("conversationOrganizer.newAndMove")} onCancel={() => !busy && onClose()} onOk={save} confirmLoading={busy} okText={t("conversationOrganizer.save")} cancelText={t("common.cancel")}>
     <p className="membership-conversation-title">{conversation?.title}</p>
-    <Select style={{ width: "100%" }} showSearch optionFilterProp="label" aria-label={t("conversationOrganizer.groupPickerLabel")} value={target} onChange={setTarget} disabled={busy} options={[
-      { value: "free", label: t("conversationOrganizer.keepFree") },
-      ...groups.map(group => ({ value: group.id, label: group.name })),
-      { value: "new", label: t("conversationOrganizer.newAndMove") },
-    ]} />
-    <Form form={form} layout="vertical" style={target === "new" ? { marginTop: 18 } : undefined}>{target === "new" && <GroupFields />}</Form>
+    <Form form={form} layout="vertical" disabled={busy || Boolean(createdGroupId)}><GroupFields /></Form>
   </Modal>;
 }

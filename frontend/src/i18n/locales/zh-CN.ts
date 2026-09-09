@@ -7786,6 +7786,7 @@ const zhCN = {
     undoAccept: "确认撤销",
     continueReview: "继续查看",
 
+    searchGroups: "搜索对话组",
     groupPickerLabel: "所属分组", freeConversation: "自由会话",
     callError: { first_response_timeout: "模型在 300 秒内未返回有效内容", stream_idle_timeout: "模型流已连续 120 秒没有新内容", connection_timeout: "连接模型服务超时", connection_error: "模型服务连接失败或中断", response_timeout: "等待模型响应超时", cancellation_unconfirmed: "尚未确认旧调用已退出，未发起重试" },
     preparationProgress: "正在准备会话摘要 {{current}}/{{total}}",

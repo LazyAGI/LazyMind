@@ -8031,6 +8031,7 @@ const enUS = {
     undoAccept: "Undo organization",
     continueReview: "Continue reviewing",
 
+    searchGroups: "Search groups",
     groupPickerLabel: "Group", freeConversation: "Ungrouped",
     callError: { first_response_timeout: "No model content received within 300 seconds", stream_idle_timeout: "No new model content for 120 seconds", connection_timeout: "Model connection timed out", connection_error: "Model connection failed or interrupted", response_timeout: "Model response timed out", cancellation_unconfirmed: "Previous execution termination is unconfirmed; retry has not started" },
     preparationProgress: "Preparing conversation summaries {{current}}/{{total}}",

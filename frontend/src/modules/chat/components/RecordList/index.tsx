@@ -76,6 +76,7 @@ import {
 } from "@/modules/chat/conversationOrganizer/api";
 import { CONVERSATION_DRAG, readConversationDrag, startConversationDrag } from "@/modules/chat/conversationOrganizer/drag";
 import { removeConversation } from "@/modules/chat/conversationOrganizer/api";
+import { conversationGroupSubmenu } from "@/modules/chat/conversationOrganizer/ConversationGroupPicker";
 import ConversationMembershipModal from "@/modules/chat/conversationOrganizer/ConversationMembershipModal";
 import ConversationGroups from "@/modules/chat/conversationOrganizer/ConversationGroups";
 import { RECOVERY_ARCHIVE_PATH } from "@/modules/settings/recoveryRoute";
@@ -870,7 +871,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
               key: "move-to-group",
               label: t("conversationOrganizer.moveToGroup"),
               disabled: Boolean(item.organizing_run_id),
-              onClick: () => setMovingConversation(item),
+              children: conversationGroupSubmenu({ conversationId, groupId: item.group_id, title: item.display_name }, () => setMovingConversation(item)),
             },
           ];
       const activateConversation = () => {
@@ -981,6 +982,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
           </span>
           {!showBatchExport && !hideActions ? (
             <Dropdown
+              destroyPopupOnHide
               trigger={["click"]}
               menu={{
                 items: [
