@@ -33,7 +33,6 @@ CREATE TABLE workflow_host_actions (
     dispatch_owner VARCHAR(128) NOT NULL DEFAULT '',
     dispatch_token_hash VARCHAR(64) NOT NULL DEFAULT '',
     dispatch_expires_at TIMESTAMP,
-    attempt_count INTEGER NOT NULL DEFAULT 0,
     last_error TEXT NOT NULL DEFAULT '',
     native_event_seq BIGINT NOT NULL DEFAULT 0,
     accepted_at TIMESTAMP,

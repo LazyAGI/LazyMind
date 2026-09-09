@@ -215,11 +215,8 @@ func (s WorkflowControlService) Execute(ctx context.Context, owner, sessionID st
 				return err
 			}
 			session.ControlBindingJSON = string(encoded)
-			if err := tx.Model(session).Update("control_binding_json", session.ControlBindingJSON).Error; err != nil {
-				return err
-			}
 			session.Status = SessionStatusWaiting
-			if err := tx.Model(session).Update("status", session.Status).Error; err != nil {
+			if err := tx.Model(session).Updates(map[string]any{"control_binding_json": session.ControlBindingJSON, "status": session.Status}).Error; err != nil {
 				return err
 			}
 		default:
@@ -369,8 +366,8 @@ func enqueueHostAction(tx *gorm.DB, session orm.WorkflowSession, commandID, kind
 		return "", controlstore.Reject("BINDING_REQUIRED", "a paired host is required to resume automatically")
 	}
 	var previous orm.WorkflowHostAction
-	err = tx.Where("session_id = ? AND binding_generation = ? AND kind = ? AND consumed_at IS NULL AND (status IN ? OR status = 'accepted')",
-		session.ID, binding.Generation, kind, []string{"pending", "dispatching", "unknown"}).Order("created_at DESC").First(&previous).Error
+	err = tx.Where("session_id = ? AND binding_generation = ? AND kind = ? AND consumed_at IS NULL AND status IN ?",
+		session.ID, binding.Generation, kind, []string{"pending", "dispatching", "unknown", "accepted"}).Order("created_at DESC").First(&previous).Error
 	if err == nil {
 		if previous.Status == "unknown" {
 			return "", controlstore.Reject("DELIVERY_UNKNOWN", "reconcile the previous host delivery before sending another")
@@ -421,6 +418,10 @@ func (h WorkflowControlHandler) Command(w http.ResponseWriter, r *http.Request) 
 		writeWorkflowControlError(w, controlstore.Reject("PERMISSION_DENIED", "use the authenticated workflow page for user control actions"))
 		return
 	}
+	h.decodeCommand(w, r, "")
+}
+
+func (h WorkflowControlHandler) decodeCommand(w http.ResponseWriter, r *http.Request, kind string) {
 	var command WorkflowControlCommand
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 32<<10))
 	decoder.DisallowUnknownFields()
@@ -428,6 +429,13 @@ func (h WorkflowControlHandler) Command(w http.ResponseWriter, r *http.Request) 
 		writeWorkflowControlError(w, controlstore.Reject("INVALID_COMMAND", "invalid workflow control command"))
 		return
 	}
+	if kind != "" {
+		command.Kind = kind
+	}
+	h.executeCommand(w, r, command)
+}
+
+func (h WorkflowControlHandler) executeCommand(w http.ResponseWriter, r *http.Request, command WorkflowControlCommand) {
 	result, err := h.Service.Execute(r.Context(), strings.TrimSpace(r.Header.Get("X-User-Id")), common.PathVar(r, "session_id"), command)
 	if err != nil {
 		writeWorkflowControlError(w, err)
@@ -438,20 +446,7 @@ func (h WorkflowControlHandler) Command(w http.ResponseWriter, r *http.Request) 
 
 // Begin is the typed execution entry point. It creates a grant, never a user review decision.
 func (h WorkflowControlHandler) Begin(w http.ResponseWriter, r *http.Request) {
-	var command WorkflowControlCommand
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 32<<10))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&command); err != nil {
-		writeWorkflowControlError(w, controlstore.Reject("INVALID_COMMAND", "invalid begin command"))
-		return
-	}
-	command.Kind = "begin"
-	result, err := h.Service.Execute(r.Context(), strings.TrimSpace(r.Header.Get("X-User-Id")), common.PathVar(r, "session_id"), command)
-	if err != nil {
-		writeWorkflowControlError(w, err)
-		return
-	}
-	common.ReplyOK(w, result)
+	h.decodeCommand(w, r, "begin")
 }
 
 // StopExecution only removes execution authority. Resuming remains an interactive action.
@@ -463,12 +458,7 @@ func (h WorkflowControlHandler) StopExecution(w http.ResponseWriter, r *http.Req
 		writeWorkflowControlError(w, controlstore.Reject("INVALID_COMMAND", "command_id is required"))
 		return
 	}
-	result, err := h.Service.Execute(r.Context(), strings.TrimSpace(r.Header.Get("X-User-Id")), common.PathVar(r, "session_id"), WorkflowControlCommand{Kind: "stop", CommandID: input.CommandID})
-	if err != nil {
-		writeWorkflowControlError(w, err)
-		return
-	}
-	common.ReplyOK(w, result)
+	h.executeCommand(w, r, WorkflowControlCommand{Kind: "stop", CommandID: input.CommandID})
 }
 
 func (h WorkflowControlHandler) Read(w http.ResponseWriter, r *http.Request) {

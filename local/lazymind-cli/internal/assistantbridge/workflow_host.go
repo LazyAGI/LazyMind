@@ -20,6 +20,15 @@ func workflowHostError(w http.ResponseWriter, err error) {
 	writeJSON(w, http.StatusBadGateway, map[string]string{"code": "WORKFLOW_HOST_UNAVAILABLE", "error": err.Error()})
 }
 
+func relayWorkflowHost(w http.ResponseWriter, r *http.Request, api *coreapi.Client, method, path string, body any, headers http.Header) {
+	var result map[string]any
+	if err := api.DoJSONHeaders(r.Context(), method, path, body, &result, headers); err != nil {
+		workflowHostError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
 func (s *Server) workflowHost(w http.ResponseWriter, r *http.Request) (workflowhost.Pairing, *coreapi.Client, bool) {
 	scope, err := s.store.AccountScope()
 	if err != nil {
@@ -46,24 +55,17 @@ func (s *Server) handleWorkflowHostBind(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	var input struct {
-		RunID    string `json:"run_id"`
-		Driver   string `json:"driver_session_id"`
-		Executor string `json:"executor_session_id"`
+		RunID  string `json:"run_id"`
+		Driver string `json:"driver_session_id"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10)).Decode(&input); err != nil || input.RunID == "" || input.Driver == "" {
-		writeJSON(w, 422, map[string]string{"error": "run_id and driver_session_id are required"})
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "run_id and driver_session_id are required"})
 		return
 	}
-	var result map[string]any
-	err := api.DoJSON(r.Context(), http.MethodPost, "/workflow-sessions/"+url.PathEscape(input.RunID)+"/host-binding", map[string]any{
+	relayWorkflowHost(w, r, api, http.MethodPost, "/workflow-sessions/"+url.PathEscape(input.RunID)+"/host-binding", map[string]any{
 		"connector_id": pair.ConnectorID, "credential": pair.Token, "provider": "deepseek-harness",
-		"driver_session_id": input.Driver, "executor_session_id": input.Executor,
-	}, &result)
-	if err != nil {
-		workflowHostError(w, err)
-		return
-	}
-	writeJSON(w, 200, result)
+		"driver_session_id": input.Driver,
+	}, nil)
 }
 
 func (s *Server) handleWorkflowHostState(w http.ResponseWriter, r *http.Request) {
@@ -71,13 +73,7 @@ func (s *Server) handleWorkflowHostState(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
-	var result map[string]any
-	err := api.DoJSON(r.Context(), http.MethodGet, "/workflow-sessions/"+url.PathEscape(r.PathValue("session"))+"/control?view=control", nil, &result)
-	if err != nil {
-		workflowHostError(w, err)
-		return
-	}
-	writeJSON(w, 200, result)
+	relayWorkflowHost(w, r, api, http.MethodGet, "/workflow-sessions/"+url.PathEscape(r.PathValue("session"))+"/control?view=control", nil, nil)
 }
 
 func (s *Server) handleWorkflowHostActions(w http.ResponseWriter, r *http.Request) {
@@ -89,14 +85,8 @@ func (s *Server) handleWorkflowHostActions(w http.ResponseWriter, r *http.Reques
 	if after := r.URL.Query().Get("after"); after != "" {
 		query.Set("after", after)
 	}
-	var result map[string]any
-	err := api.DoJSONHeaders(r.Context(), http.MethodGet, "/workflow-host-actions?"+query.Encode(), nil, &result,
+	relayWorkflowHost(w, r, api, http.MethodGet, "/workflow-host-actions?"+query.Encode(), nil,
 		http.Header{"X-Workflow-Host-Credential": {pair.Token}})
-	if err != nil {
-		workflowHostError(w, err)
-		return
-	}
-	writeJSON(w, 200, result)
 }
 
 func (s *Server) handleWorkflowHostAction(w http.ResponseWriter, r *http.Request) {
@@ -104,14 +94,8 @@ func (s *Server) handleWorkflowHostAction(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
-	var result map[string]any
-	err := api.DoJSONHeaders(r.Context(), http.MethodGet, "/workflow-host-actions/"+url.PathEscape(r.PathValue("action"))+"?connector_id="+url.QueryEscape(pair.ConnectorID),
-		nil, &result, http.Header{"X-Workflow-Host-Credential": {pair.Token}})
-	if err != nil {
-		workflowHostError(w, err)
-		return
-	}
-	writeJSON(w, 200, result)
+	relayWorkflowHost(w, r, api, http.MethodGet, "/workflow-host-actions/"+url.PathEscape(r.PathValue("action"))+"?connector_id="+url.QueryEscape(pair.ConnectorID),
+		nil, http.Header{"X-Workflow-Host-Credential": {pair.Token}})
 }
 
 func (s *Server) handleWorkflowHostClaim(w http.ResponseWriter, r *http.Request) {
@@ -123,18 +107,12 @@ func (s *Server) handleWorkflowHostClaim(w http.ResponseWriter, r *http.Request)
 		InstanceID string `json:"instance_id"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10)).Decode(&input); err != nil || input.InstanceID == "" {
-		writeJSON(w, 422, map[string]string{"error": "instance_id is required"})
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "instance_id is required"})
 		return
 	}
-	var result map[string]any
-	err := api.DoJSON(r.Context(), http.MethodPost, "/workflow-host-actions/"+url.PathEscape(r.PathValue("action"))+":claim", map[string]any{
+	relayWorkflowHost(w, r, api, http.MethodPost, "/workflow-host-actions/"+url.PathEscape(r.PathValue("action"))+":claim", map[string]any{
 		"connector_id": pair.ConnectorID, "credential": pair.Token, "instance_id": input.InstanceID,
-	}, &result)
-	if err != nil {
-		workflowHostError(w, err)
-		return
-	}
-	writeJSON(w, 200, result)
+	}, nil)
 }
 
 func (s *Server) handleWorkflowHostReceipt(w http.ResponseWriter, r *http.Request) {
@@ -150,17 +128,11 @@ func (s *Server) handleWorkflowHostReceipt(w http.ResponseWriter, r *http.Reques
 		Error          string `json:"error,omitempty"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&input); err != nil {
-		writeJSON(w, 422, map[string]string{"error": "invalid host receipt"})
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "invalid host receipt"})
 		return
 	}
-	var result map[string]any
-	err := api.DoJSON(r.Context(), http.MethodPost, "/workflow-host-actions/"+url.PathEscape(r.PathValue("action"))+":settle", map[string]any{
+	relayWorkflowHost(w, r, api, http.MethodPost, "/workflow-host-actions/"+url.PathEscape(r.PathValue("action"))+":settle", map[string]any{
 		"connector_id": pair.ConnectorID, "credential": pair.Token, "instance_id": input.InstanceID,
 		"dispatch_token": input.DispatchToken, "status": input.Status, "native_event_seq": input.NativeEventSeq, "error": input.Error,
-	}, &result)
-	if err != nil {
-		workflowHostError(w, err)
-		return
-	}
-	writeJSON(w, 200, result)
+	}, nil)
 }

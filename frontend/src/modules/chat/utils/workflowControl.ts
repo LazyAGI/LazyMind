@@ -1,25 +1,14 @@
+import type { Snapshot, WorkflowControlCommand, WorkflowHostAction, WorkflowReviewCheckpoint } from '@/api/generated/core-client/api';
+
 export type WorkflowActionKind = 'save' | 'confirm' | 'confirm_and_continue' | 'continue' | 'retry' | 'rewind' | 'stop' | 'resume';
 
-export interface WorkflowReview {
-  id: string;
-  step_id: string;
-  execution_id: string;
-  status: 'pending' | 'accepted' | 'superseded' | 'cancelled';
-  version: number;
-  manifest_hash: string;
-}
+export type WorkflowReview = Pick<WorkflowReviewCheckpoint, 'id' | 'step_id' | 'execution_id' | 'status' | 'version' | 'manifest_hash'>;
 
-export interface WorkflowControlView {
+export interface WorkflowControlView extends Pick<Snapshot, 'session_id' | 'state_version' | 'continuation' | 'admission' | 'active_executions' | 'binding'> {
   protocol: 'workflow.control.v1';
-  session_id: string;
-  state_version: number;
-  continuation: string;
-  admission: { can_begin: boolean; reason?: string };
   reviews: WorkflowReview[];
-  active_executions: number;
   active_execution_ids: string[];
-  binding: { bound: boolean; generation: number; provider?: string; driver_session_id?: string };
-  delivery: { id: string; kind: string; status: string; consumed_at?: string; last_error?: string } | null;
+  delivery: Pick<WorkflowHostAction, 'id' | 'kind' | 'status' | 'consumed_at' | 'last_error'> | null;
   available_actions: string[];
 }
 
@@ -30,14 +19,8 @@ export interface WorkflowActionIntent {
   preferenceScope?: 'step' | 'following';
 }
 
-export interface WorkflowControlRequest {
-  command_id: string;
+export interface WorkflowControlRequest extends Pick<WorkflowControlCommand, 'command_id' | 'expected_state_version' | 'step_id' | 'review_id' | 'review_version' | 'manifest_hash'> {
   kind: Exclude<WorkflowActionKind, 'save'>;
-  expected_state_version: number;
-  step_id?: string;
-  review_id?: string;
-  review_version?: number;
-  manifest_hash?: string;
   preference_scope?: 'step' | 'following';
 }
 

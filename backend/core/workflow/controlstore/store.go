@@ -26,13 +26,12 @@ func (e *Error) Error() string          { return e.Code + ": " + e.Message }
 func Reject(code, message string) error { return &Error{Code: code, Message: message} }
 
 type Binding struct {
-	Required       bool     `json:"required"`
-	Provider       string   `json:"provider,omitempty"`
-	ConnectorID    string   `json:"connector_id,omitempty"`
-	DriverSession  string   `json:"driver_session_id,omitempty"`
-	Workers        []string `json:"worker_session_ids,omitempty"`
-	Generation     int64    `json:"generation"`
-	CredentialHash string   `json:"credential_hash,omitempty"`
+	Required       bool   `json:"required"`
+	Provider       string `json:"provider,omitempty"`
+	ConnectorID    string `json:"connector_id,omitempty"`
+	DriverSession  string `json:"driver_session_id,omitempty"`
+	Generation     int64  `json:"generation"`
+	CredentialHash string `json:"credential_hash,omitempty"`
 }
 
 type BindingView struct {

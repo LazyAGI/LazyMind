@@ -5209,8 +5209,6 @@ components:
                 accepted_at:
                     format: date-time
                     type: string
-                attempt_count:
-                    type: integer
                 binding_generation:
                     format: int64
                     type: integer
@@ -5248,7 +5246,6 @@ components:
                     format: date-time
                     type: string
             required:
-                - attempt_count
                 - binding_generation
                 - command_id
                 - connector_id
@@ -5271,19 +5268,19 @@ components:
             type: object
         WorkflowHostBindingRequest:
             properties:
-                driver_session_id:
+                connector_id:
                     type: string
-                executor_session_id:
+                credential:
+                    type: string
+                driver_session_id:
                     type: string
                 provider:
                     type: string
-                workflowHostIdentity:
-                    $ref: '#/components/schemas/WorkflowHostIdentity'
             required:
+                - connector_id
+                - credential
                 - driver_session_id
-                - executor_session_id
                 - provider
-                - workflowHostIdentity
             type: object
         WorkflowHostClaim:
             properties:
@@ -5311,21 +5308,27 @@ components:
             type: object
         WorkflowHostReceipt:
             properties:
+                connector_id:
+                    type: string
+                credential:
+                    type: string
                 dispatch_token:
                     type: string
                 error:
+                    type: string
+                instance_id:
                     type: string
                 native_event_seq:
                     format: int64
                     type: integer
                 status:
                     type: string
-                workflowHostIdentity:
-                    $ref: '#/components/schemas/WorkflowHostIdentity'
             required:
+                - connector_id
+                - credential
                 - dispatch_token
+                - instance_id
                 - status
-                - workflowHostIdentity
             type: object
         WorkflowReviewCheckpoint:
             properties:
@@ -8918,12 +8921,19 @@ components:
                 - data
                 - message
             type: object
+        workflowHostReceiptData:
+            properties:
+                action:
+                    $ref: '#/components/schemas/WorkflowHostAction'
+            required:
+                - action
+            type: object
         workflowHostReceiptReply:
             properties:
                 code:
                     type: integer
                 data:
-                    $ref: '#/components/schemas/WorkflowHostAction'
+                    $ref: '#/components/schemas/workflowHostReceiptData'
                 message:
                     type: string
             required:

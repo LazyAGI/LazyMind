@@ -2,7 +2,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { GoalService } from '@deepseek-ai/dsh-goal'
 import type {} from '@deepseek-ai/dsh-api-session-controller'
-import type { SessionId, SessionEvent } from '@deepseek-ai/dsh-session'
+import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { ToolDefinition, ToolExecution, ToolRunContext } from '@deepseek-ai/dsh-tools'
 import { createHash } from 'node:crypto'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -12,6 +12,7 @@ import { workflowTool } from './tool'
 
 const READS = new Set(['list', 'get', 'input_get', 'state', 'session_list', 'artifact_list', 'artifact_get'])
 const ACQUIRE = new Set(['step_begin', 'step_claim', 'step_resume'])
+const PAUSED = new Set(['awaiting_user', 'draining', 'stopped', 'binding_required'])
 const STRUCTURED_OUTPUT = 'structured_output' // Published DSH 0.1.2 subagent completion contract.
 
 interface Scope {
@@ -64,7 +65,7 @@ export function installHost(ctx: Context, bridge: HostTransport, config: HostCon
     }
     throw new Error('Workflow driver ownership contains a cycle')
   }
-  const paused = (scope: Scope) => scope.unknown || !!scope.control && ['awaiting_user', 'draining', 'stopped', 'binding_required'].includes(scope.control.continuation)
+  const paused = (scope: Scope) => scope.unknown || !!scope.control && PAUSED.has(scope.control.continuation)
   const completion = (scope: Scope) => driver(scope.agent) !== scope.agent && scope.returnPending
     && !!ctx.tools.get(STRUCTURED_OUTPUT, scope.agent)
 
@@ -75,7 +76,6 @@ export function installHost(ctx: Context, bridge: HostTransport, config: HostCon
       scope.unknown = false
       if (scope.control && scope.control.state_version > control.state_version) continue
       scope.control = control
-      scope.unknown = false
       if (control.active_execution_ids) {
         for (const id of scope.grants) if (!control.active_execution_ids.includes(id)) scope.grants.delete(id)
       }
@@ -89,7 +89,7 @@ export function installHost(ctx: Context, bridge: HostTransport, config: HostCon
 
   function suspendGoal(scope: Scope) {
     if (!goals || !scope.runId || !scope.automatic || driver(scope.agent) !== scope.agent || !scope.control
-      || !['awaiting_user', 'draining', 'stopped', 'binding_required'].includes(scope.control.continuation)) return
+      || !PAUSED.has(scope.control.continuation)) return
     const goal = goals.get(scope.agent)
     if (goal?.phase === 'active' && goal.activation === 'armed' && (!scope.goalId || scope.goalId === goal.id)) {
       goals.block(scope.agent, goal, { code: goalReason(scope.runId, goal.revision + 1, scope.control?.continuation === 'stopped'),
@@ -133,7 +133,7 @@ export function installHost(ctx: Context, bridge: HostTransport, config: HostCon
       const id = object(exec.arguments)?.execution_id
       return typeof id === 'string' && scope.control?.active_execution_ids?.includes(id) ? undefined : 'Only an already granted execution may finish while review is pending.'
     }
-    if (operation && !READS.has(operation)) return 'Review the submitted artifacts in the LazyMind panel before starting new Workflow work.'
+    if (operation) return 'Review the submitted artifacts in the LazyMind panel before starting new Workflow work.'
     if (scope.grants.size > 0 || scope.manual) return undefined
     if (scope.activeOwned) return 'This Workflow is waiting for user review.'
     return undefined
@@ -204,7 +204,7 @@ export function installHost(ctx: Context, bridge: HostTransport, config: HostCon
     }
     try {
       const fresh = operation === 'start'
-        ? await bridge.bind(runId, root.session.id, exec.agent.session.id, signal(exec.signal))
+        ? await bridge.bind(runId, root.session.id, signal(exec.signal))
         : returned ?? await bridge.state(runId, signal(exec.signal))
       if (fresh.binding?.driver_session_id !== root.session.id) return null
       if (rootScope.runId && rootScope.runId !== runId && operation !== 'start') {
@@ -233,14 +233,15 @@ export function installHost(ctx: Context, bridge: HostTransport, config: HostCon
     if (!registration) return
     const live = new Set<string>()
     for (const schema of ctx.tools.schemas()) {
-      if (workflowOperation(schema.name, config.serverName) === null) continue
+      const operation = workflowOperation(schema.name, config.serverName)
+      if (operation === null) continue
       live.add(schema.name)
       const original = ctx.tools.get(schema.name)
       const previous = scope.wrappers.get(schema.name)
       if (!original || previous?.original === original) continue
       previous?.dispose()
       const definition = workflowTool(original, { trustedOrigin: config.webUrl, hostSessionId: driver(scope.agent).session.id,
-        operation: workflowOperation(schema.name, config.serverName) ?? undefined,
+        operation,
         afterResult: (value, exec) => own(afterResult(value, exec)),
         shouldConclude: (control) => scope.activeOwned && !completion(scope) && (scope.unknown || !!scope.runId && control?.continuation === 'awaiting_user'),
       })
@@ -329,7 +330,7 @@ export function installHost(ctx: Context, bridge: HostTransport, config: HostCon
   })
   for (const agent of ctx.agents.list()) ensure(agent)
 
-  function inputSeq(events: readonly SessionEvent[], requestId: string): number {
+  function inputSeq(events: readonly { type: string; seq: number; data: unknown }[], requestId: string): number {
     for (const event of events) {
       if (event.type !== 'user/message') continue
       const source = object(object(event.data)?.message)?.source ?? object(event.data)?.source
@@ -344,20 +345,12 @@ export function installHost(ctx: Context, bridge: HostTransport, config: HostCon
       const frames = ctx.sessionController.follow({ address: { kind: 'session', sessionId: action.native_session_id as SessionId }, maxMessages: 100 }, signal(controller.signal))
       for await (const frame of frames) {
         if (frame.type !== 'snapshot') continue
-        const scan = (records: typeof frame.records) => {
-          for (const record of records) {
-            if (record.type !== 'event' || record.event.type !== 'user/message') continue
-            const data = object(record.event.data)
-            const source = object(object(data?.message)?.source ?? data?.source)
-            if (source?.rpcId === action.id) return record.event.seq
-          }
-          return 0
-        }
+        const scan = (records: typeof frame.records) => inputSeq(records.flatMap(record => record.type === 'event' ? [record.event] : []), action.id)
         let found = scan(frame.records)
         let records = frame.records
         let more = frame.hasMore
         while (!found && more) {
-          const seqs = records.map(record => record.type === 'event' ? record.event.seq : record.event.seq)
+          const seqs = records.map(record => record.event.seq)
           if (!seqs.length) break
           const page = await ctx.sessionController.page({ address: { kind: 'session', sessionId: action.native_session_id as SessionId },
             throughSeq: frame.cursor, beforeSeq: Math.min(...seqs), maxMessages: 100 }, signal(controller.signal))

@@ -217,8 +217,7 @@ func (a *Adapter) installDSHWorkflow(ctx context.Context) (bool, error) {
 	if bridgeURL == "" {
 		bridgeURL = "http://127.0.0.1:19091"
 	}
-	sum := sha256.Sum256(dshWorkflowArchive)
-	archive := filepath.Join(a.home, "bundles", "dsh-workflow-"+hex.EncodeToString(sum[:8])+".tgz")
+	archive := filepath.Join(a.home, "bundles", "dsh-workflow-"+dshBundleHash()[:16]+".tgz")
 	if err := os.MkdirAll(filepath.Dir(archive), 0700); err != nil {
 		return false, err
 	}

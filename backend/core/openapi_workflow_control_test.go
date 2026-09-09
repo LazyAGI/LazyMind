@@ -29,4 +29,15 @@ func TestWorkflowControlOpenAPIHasTypedContractsWithoutPrivateStorageFields(t *t
 			t.Fatalf("private storage field %s leaked", private)
 		}
 	}
+	schemas := spec["components"].(map[string]any)["schemas"].(map[string]any)
+	for _, name := range []string{"WorkflowHostBindingRequest", "WorkflowHostReceipt"} {
+		properties := schemas[name].(map[string]any)["properties"].(map[string]any)
+		if properties["connector_id"] == nil || properties["credential"] == nil || properties["workflowHostIdentity"] != nil {
+			t.Fatalf("%s must match the flat JSON host protocol", name)
+		}
+	}
+	properties := schemas["workflowHostReceiptData"].(map[string]any)["properties"].(map[string]any)
+	if properties["action"] == nil {
+		t.Fatal("host settlement reply must wrap its action in data.action")
+	}
 }

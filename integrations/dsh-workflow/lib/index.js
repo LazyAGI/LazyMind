@@ -109,8 +109,7 @@ async function loadPairing(path) {
 	if (!value || typeof value.connector_id !== "string" || typeof value.token !== "string" || value.token.length !== 64 || value.enabled !== true) throw new Error("Workflow pairing is unavailable; reconnect DeepSeek Harness from LazyMind");
 	return {
 		connector_id: value.connector_id,
-		token: value.token,
-		enabled: true
+		token: value.token
 	};
 }
 var HostBridge = class {
@@ -140,11 +139,10 @@ var HostBridge = class {
 		if (!response.ok) throw new BridgeError(typeof value.code === "string" ? value.code : "BRIDGE_ERROR", typeof value.error === "string" ? value.error : "Workflow Bridge request failed", response.status);
 		return value;
 	}
-	async bind(runId, driver, executor, signal) {
+	async bind(runId, driver, signal) {
 		return (await this.request("/bind", signal, {
 			run_id: runId,
-			driver_session_id: driver,
-			executor_session_id: executor
+			driver_session_id: driver
 		})).control;
 	}
 	async state(runId, signal) {
@@ -260,6 +258,12 @@ const ACQUIRE = new Set([
 	"step_claim",
 	"step_resume"
 ]);
+const PAUSED = new Set([
+	"awaiting_user",
+	"draining",
+	"stopped",
+	"binding_required"
+]);
 const STRUCTURED_OUTPUT = "structured_output";
 /** DSH-specific lifecycle work stays here; business decisions stay in Core. */
 function installHost(ctx, bridge, config, instanceId) {
@@ -291,12 +295,7 @@ function installHost(ctx, bridge, config, instanceId) {
 		}
 		throw new Error("Workflow driver ownership contains a cycle");
 	};
-	const paused = (scope) => scope.unknown || !!scope.control && [
-		"awaiting_user",
-		"draining",
-		"stopped",
-		"binding_required"
-	].includes(scope.control.continuation);
+	const paused = (scope) => scope.unknown || !!scope.control && PAUSED.has(scope.control.continuation);
 	const completion = (scope) => driver(scope.agent) !== scope.agent && scope.returnPending && !!ctx.tools.get(STRUCTURED_OUTPUT, scope.agent);
 	function publish(runId, control) {
 		if (control.protocol !== "workflow.control.v1" || control.session_id !== runId) throw new Error("Invalid workflow control response");
@@ -305,7 +304,6 @@ function installHost(ctx, bridge, config, instanceId) {
 			scope.unknown = false;
 			if (scope.control && scope.control.state_version > control.state_version) continue;
 			scope.control = control;
-			scope.unknown = false;
 			if (control.active_execution_ids) {
 				for (const id of scope.grants) if (!control.active_execution_ids.includes(id)) scope.grants.delete(id);
 			}
@@ -316,12 +314,7 @@ function installHost(ctx, bridge, config, instanceId) {
 		return `lazymind-${stopped ? "stopped" : "review"}-${run}-r${revision}`;
 	}
 	function suspendGoal(scope) {
-		if (!goals || !scope.runId || !scope.automatic || driver(scope.agent) !== scope.agent || !scope.control || ![
-			"awaiting_user",
-			"draining",
-			"stopped",
-			"binding_required"
-		].includes(scope.control.continuation)) return;
+		if (!goals || !scope.runId || !scope.automatic || driver(scope.agent) !== scope.agent || !scope.control || !PAUSED.has(scope.control.continuation)) return;
 		const goal = goals.get(scope.agent);
 		if (goal?.phase === "active" && goal.activation === "armed" && (!scope.goalId || scope.goalId === goal.id)) goals.block(scope.agent, goal, {
 			code: goalReason(scope.runId, goal.revision + 1, scope.control?.continuation === "stopped"),
@@ -372,7 +365,7 @@ function installHost(ctx, bridge, config, instanceId) {
 			const id = object(exec.arguments)?.execution_id;
 			return typeof id === "string" && scope.control?.active_execution_ids?.includes(id) ? void 0 : "Only an already granted execution may finish while review is pending.";
 		}
-		if (operation && !READS.has(operation)) return "Review the submitted artifacts in the LazyMind panel before starting new Workflow work.";
+		if (operation) return "Review the submitted artifacts in the LazyMind panel before starting new Workflow work.";
 		if (scope.grants.size > 0 || scope.manual) return void 0;
 		if (scope.activeOwned) return "This Workflow is waiting for user review.";
 	}
@@ -452,7 +445,7 @@ function installHost(ctx, bridge, config, instanceId) {
 			scope.manual = rootScope.manual = false;
 		}
 		try {
-			const fresh = operation === "start" ? await bridge.bind(runId, root.session.id, exec.agent.session.id, signal(exec.signal)) : returned ?? await bridge.state(runId, signal(exec.signal));
+			const fresh = operation === "start" ? await bridge.bind(runId, root.session.id, signal(exec.signal)) : returned ?? await bridge.state(runId, signal(exec.signal));
 			if (fresh.binding?.driver_session_id !== root.session.id) return null;
 			if (rootScope.runId && rootScope.runId !== runId && operation !== "start") {
 				if (scope !== rootScope) {
@@ -493,7 +486,8 @@ function installHost(ctx, bridge, config, instanceId) {
 		if (!registration) return;
 		const live = /* @__PURE__ */ new Set();
 		for (const schema of ctx.tools.schemas()) {
-			if (workflowOperation(schema.name, config.serverName) === null) continue;
+			const operation = workflowOperation(schema.name, config.serverName);
+			if (operation === null) continue;
 			live.add(schema.name);
 			const original = ctx.tools.get(schema.name);
 			const previous = scope.wrappers.get(schema.name);
@@ -502,7 +496,7 @@ function installHost(ctx, bridge, config, instanceId) {
 			const definition = workflowTool(original, {
 				trustedOrigin: config.webUrl,
 				hostSessionId: driver(scope.agent).session.id,
-				operation: workflowOperation(schema.name, config.serverName) ?? void 0,
+				operation,
 				afterResult: (value, exec) => own(afterResult(value, exec)),
 				shouldConclude: (control) => scope.activeOwned && !completion(scope) && (scope.unknown || !!scope.runId && control?.continuation === "awaiting_user")
 			});
@@ -647,19 +641,12 @@ function installHost(ctx, bridge, config, instanceId) {
 			}, signal(controller.signal));
 			for await (const frame of frames) {
 				if (frame.type !== "snapshot") continue;
-				const scan = (records$1) => {
-					for (const record of records$1) {
-						if (record.type !== "event" || record.event.type !== "user/message") continue;
-						const data = object(record.event.data);
-						if (object(object(data?.message)?.source ?? data?.source)?.rpcId === action.id) return record.event.seq;
-					}
-					return 0;
-				};
+				const scan = (records$1) => inputSeq(records$1.flatMap((record) => record.type === "event" ? [record.event] : []), action.id);
 				let found = scan(frame.records);
 				let records = frame.records;
 				let more = frame.hasMore;
 				while (!found && more) {
-					const seqs = records.map((record) => record.type === "event" ? record.event.seq : record.event.seq);
+					const seqs = records.map((record) => record.event.seq);
 					if (!seqs.length) break;
 					const page = await ctx.sessionController.page({
 						address: {

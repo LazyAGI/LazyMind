@@ -58,10 +58,11 @@ export default function WorkflowRunPage({ embedded = false }: { embedded?: boole
     setError('');
     setNotice('');
     // Subscribe before the baseline read. Both paths refresh the same versioned snapshot.
-    const unsubscribe = watchWorkflowRun(sessionId, () => {
+    const reload = () => {
       void refresh().catch(reason => { if (!current.controller.signal.aborted) setError(reason instanceof Error ? reason.message : translate.current('chat.workflowRunLoadFailed')); });
-    });
-    void refresh().catch(reason => { if (!current.controller.signal.aborted) setError(reason instanceof Error ? reason.message : translate.current('chat.workflowRunLoadFailed')); });
+    };
+    const unsubscribe = watchWorkflowRun(sessionId, reload);
+    reload();
     return () => { current.controller.abort(); unsubscribe(); if (lifetime.current === current) lifetime.current = undefined; setSession(key, null); };
   }, [sessionId, refresh, key, setSession]);
 

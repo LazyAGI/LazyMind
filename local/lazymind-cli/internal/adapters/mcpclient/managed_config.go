@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,7 +15,6 @@ import (
 
 	"lazymind/agentconnector/internal/agentexec"
 	"lazymind/agentconnector/internal/localfile"
-	"lazymind/agentconnector/internal/workflowcontrol"
 )
 
 type managedConfigState struct {
@@ -46,9 +47,9 @@ func readManagedConfig(kind Kind, path, self, home, hostID string) (managedConfi
 	return stateForStdio(entry, self, home, hostID, kind), nil
 }
 
-func writeManagedConfig(kind Kind, path, self, home, hostID string, controlled ...bool) error {
+func writeManagedConfig(kind Kind, path, self, home, hostID string, controlled bool) error {
 	if kind == DeepSeekHarness {
-		return writeDSHConfig(path, self, home, hostID, controlled...)
+		return writeDSHConfig(path, self, home, hostID, controlled)
 	}
 	root, servers, err := readJSONConfig(path)
 	if err != nil {
@@ -228,7 +229,7 @@ func readDSHConfig(path, self, home, hostID string) (managedConfigState, error) 
 	return stateForStdio(stdio, self, home, hostID, DeepSeekHarness), nil
 }
 
-func writeDSHConfig(path, self, home, hostID string, controlled ...bool) error {
+func writeDSHConfig(path, self, home, hostID string, controlled bool) error {
 	document, err := readYAMLDocument(path)
 	if err != nil {
 		return err
@@ -244,7 +245,7 @@ func writeDSHConfig(path, self, home, hostID string, controlled ...bool) error {
 			dshURL = strings.TrimSpace(env["LAZYMIND_DSH_URL"])
 		}
 	}
-	entry, err := newDSHEntry(self, home, hostID, webURL, dshURL, controlled...)
+	entry, err := newDSHEntry(self, home, hostID, webURL, dshURL, controlled)
 	if err != nil {
 		return err
 	}
@@ -347,16 +348,16 @@ func decodeDSHStdio(item *yaml.Node) stdioMCPDefinition {
 	return result
 }
 
-func newDSHEntry(self, home, hostID, webURL, dshURL string, controlled ...bool) (*yaml.Node, error) {
+func newDSHEntry(self, home, hostID, webURL, dshURL string, controlled bool) (*yaml.Node, error) {
 	var document yaml.Node
 	environment := map[string]string{
 		"LAZYMIND_AGENT_PROVIDER": string(DeepSeekHarness), "LAZYMIND_AGENT_HOST_ID": hostID,
 	}
-	if len(controlled) > 0 && controlled[0] {
+	if controlled {
 		environment["LAZYMIND_WORKFLOW_HOST_CONTROL"] = "1"
 	}
 	if endpoint := strings.TrimSpace(dshURL); endpoint != "" {
-		if err := workflowcontrol.ValidateEndpoint(endpoint); err != nil {
+		if err := validateDSHEndpoint(endpoint); err != nil {
 			return nil, err
 		}
 		environment["LAZYMIND_DSH_URL"] = endpoint
@@ -404,4 +405,16 @@ func encodeYAML(document *yaml.Node) ([]byte, error) {
 		return nil, err
 	}
 	return output.Bytes(), nil
+}
+
+func validateDSHEndpoint(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" || u.User != nil || u.Fragment != "" || u.RawQuery != "" || (u.Path != "" && u.Path != "/") {
+		return errors.New("configure the DSH root URL without credentials")
+	}
+	ip := net.ParseIP(u.Hostname())
+	if u.Scheme != "https" && !(u.Scheme == "http" && (u.Hostname() == "localhost" || (ip != nil && ip.IsLoopback()))) {
+		return errors.New("DSH requires HTTPS or a loopback HTTP address")
+	}
+	return nil
 }

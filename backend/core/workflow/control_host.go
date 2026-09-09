@@ -30,10 +30,10 @@ func (h WorkflowControlHandler) Capabilities(w http.ResponseWriter, r *http.Requ
 }
 
 type WorkflowHostBindingRequest struct {
-	WorkflowHostIdentity
-	Provider          string `json:"provider"`
-	DriverSessionID   string `json:"driver_session_id"`
-	ExecutorSessionID string `json:"executor_session_id"`
+	ConnectorID     string `json:"connector_id"`
+	Credential      string `json:"credential"`
+	Provider        string `json:"provider"`
+	DriverSessionID string `json:"driver_session_id"`
 }
 
 func (s WorkflowControlService) Bind(ctx context.Context, owner, sessionID string, input WorkflowHostBindingRequest) (*controlstore.Snapshot, error) {
@@ -68,17 +68,6 @@ func (s WorkflowControlService) Bind(ctx context.Context, owner, sessionID strin
 			binding.CredentialHash = controlstore.Hash([]byte(input.Credential))
 			binding.Generation++
 		}
-		if input.ExecutorSessionID != "" && input.ExecutorSessionID != input.DriverSessionID {
-			found := false
-			for _, worker := range binding.Workers {
-				if worker == input.ExecutorSessionID {
-					found = true
-				}
-			}
-			if !found {
-				binding.Workers = append(binding.Workers, input.ExecutorSessionID)
-			}
-		}
 		encoded, err := json.Marshal(binding)
 		if err != nil {
 			return err
@@ -104,6 +93,7 @@ type WorkflowHostActionPage struct {
 }
 
 func (s WorkflowControlService) HostActions(ctx context.Context, owner string, identity WorkflowHostIdentity, after string) (WorkflowHostActionPage, error) {
+	const pageSize = 100
 	page := WorkflowHostActionPage{Actions: []orm.WorkflowHostAction{}}
 	if owner == "" || identity.ConnectorID == "" || identity.Credential == "" {
 		return page, controlstore.Reject("HOST_AUTH_REQUIRED", "paired connector identity is required")
@@ -117,7 +107,7 @@ func (s WorkflowControlService) HostActions(ctx context.Context, owner string, i
 	if after != "" {
 		query = query.Where("workflow_host_actions.id > ?", after)
 	}
-	if err := query.Select("workflow_host_actions.*").Order("workflow_host_actions.id ASC").Limit(100).Find(&candidates).Error; err != nil {
+	if err := query.Select("workflow_host_actions.*").Order("workflow_host_actions.id ASC").Limit(pageSize).Find(&candidates).Error; err != nil {
 		return page, err
 	}
 	for _, action := range candidates {
@@ -133,10 +123,28 @@ func (s WorkflowControlService) HostActions(ctx context.Context, owner string, i
 			page.Actions = append(page.Actions, action)
 		}
 	}
-	if len(candidates) == 100 {
+	if len(candidates) == pageSize {
 		page.NextPageToken = candidates[len(candidates)-1].ID
 	}
 	return page, nil
+}
+
+// All action reads and writes revalidate the binding under the session lock.
+func authorizeHostAction(tx *gorm.DB, session orm.WorkflowSession, owner, id string, identity WorkflowHostIdentity, action *orm.WorkflowHostAction) (controlstore.Binding, error) {
+	if err := controlOwner(session, owner); err != nil {
+		return controlstore.Binding{}, err
+	}
+	binding, err := controlstore.AuthorizeHost(session, identity.ConnectorID, identity.Credential)
+	if err != nil {
+		return binding, err
+	}
+	if err := tx.Where("id = ? AND session_id = ?", id, session.ID).First(action).Error; err != nil {
+		return binding, err
+	}
+	if action.BindingGeneration != binding.Generation {
+		return binding, controlstore.Reject("BINDING_STALE", "host action belongs to an older binding")
+	}
+	return binding, nil
 }
 
 func (s WorkflowControlService) HostAction(ctx context.Context, owner, id string, identity WorkflowHostIdentity) (WorkflowHostClaim, error) {
@@ -145,18 +153,9 @@ func (s WorkflowControlService) HostAction(ctx context.Context, owner, id string
 		return result, err
 	}
 	err := controlstore.Transaction(ctx, s.DB, result.Action.SessionID, func(tx *gorm.DB, session *orm.WorkflowSession) error {
-		if err := controlOwner(*session, owner); err != nil {
-			return err
-		}
-		binding, err := controlstore.AuthorizeHost(*session, identity.ConnectorID, identity.Credential)
+		_, err := authorizeHostAction(tx, *session, owner, id, identity, &result.Action)
 		if err != nil {
 			return err
-		}
-		if err := tx.Where("id = ?", id).First(&result.Action).Error; err != nil {
-			return err
-		}
-		if result.Action.BindingGeneration != binding.Generation {
-			return controlstore.Reject("BINDING_STALE", "the host action is obsolete")
 		}
 		result.Control, err = controlstore.Read(tx, *session)
 		return err
@@ -180,18 +179,12 @@ func (s WorkflowControlService) ClaimHostAction(ctx context.Context, owner, acti
 		return result, err
 	}
 	err := controlstore.Transaction(ctx, s.DB, hint.SessionID, func(tx *gorm.DB, session *orm.WorkflowSession) error {
-		if err := controlOwner(*session, owner); err != nil {
-			return err
-		}
-		binding, err := controlstore.AuthorizeHost(*session, identity.ConnectorID, identity.Credential)
+		action := &result.Action
+		binding, err := authorizeHostAction(tx, *session, owner, actionID, identity, action)
 		if err != nil {
 			return err
 		}
-		if err := tx.Where("id = ?", actionID).First(&result.Action).Error; err != nil {
-			return err
-		}
-		action := &result.Action
-		if action.BindingGeneration != binding.Generation || action.NativeSessionID != binding.DriverSession {
+		if action.NativeSessionID != binding.DriverSession {
 			return controlstore.Reject("BINDING_STALE", "host action belongs to an older binding")
 		}
 		if action.ConsumedAt != nil && action.Status == "pending" {
@@ -241,7 +234,7 @@ func (s WorkflowControlService) ClaimHostAction(ctx context.Context, owner, acti
 		expires := now.Add(30 * time.Second)
 		if err := tx.Model(action).Updates(map[string]any{"status": "dispatching", "dispatch_owner": identity.InstanceID,
 			"dispatch_token_hash": controlstore.Hash([]byte(result.DispatchToken)), "dispatch_expires_at": expires,
-			"attempt_count": gorm.Expr("attempt_count + 1"), "updated_at": now}).Error; err != nil {
+			"updated_at": now}).Error; err != nil {
 			return err
 		}
 		action.Status = "dispatching"
@@ -254,7 +247,9 @@ func (s WorkflowControlService) ClaimHostAction(ctx context.Context, owner, acti
 }
 
 type WorkflowHostReceipt struct {
-	WorkflowHostIdentity
+	ConnectorID    string `json:"connector_id"`
+	Credential     string `json:"credential"`
+	InstanceID     string `json:"instance_id"`
 	DispatchToken  string `json:"dispatch_token"`
 	Status         string `json:"status"`
 	NativeEventSeq int64  `json:"native_event_seq,omitempty"`
@@ -267,18 +262,9 @@ func (s WorkflowControlService) SettleHostAction(ctx context.Context, owner, act
 		return action, err
 	}
 	err := controlstore.Transaction(ctx, s.DB, action.SessionID, func(tx *gorm.DB, session *orm.WorkflowSession) error {
-		if err := controlOwner(*session, owner); err != nil {
+		identity := WorkflowHostIdentity{ConnectorID: receipt.ConnectorID, Credential: receipt.Credential, InstanceID: receipt.InstanceID}
+		if _, err := authorizeHostAction(tx, *session, owner, actionID, identity, &action); err != nil {
 			return err
-		}
-		binding, err := controlstore.AuthorizeHost(*session, receipt.ConnectorID, receipt.Credential)
-		if err != nil {
-			return err
-		}
-		if err := tx.Where("id = ?", actionID).First(&action).Error; err != nil {
-			return err
-		}
-		if action.BindingGeneration != binding.Generation {
-			return controlstore.Reject("BINDING_STALE", "host action belongs to an older binding")
 		}
 		if !controlpolicy.CanSettleDelivery(action.Status, receipt.Status) {
 			return controlstore.Reject("DELIVERY_CONFLICT", "invalid delivery state transition")
@@ -286,14 +272,14 @@ func (s WorkflowControlService) SettleHostAction(ctx context.Context, owner, act
 		if action.Status == receipt.Status {
 			return nil
 		}
-		if receipt.Status == "accepted" && receipt.NativeEventSeq > 0 {
-			// A paired plugin can reconcile the exact standard input event after restart.
-		} else if action.Status == "unknown" {
-			if receipt.Status != "accepted" || receipt.NativeEventSeq <= 0 {
+		// A paired plugin can reconcile the exact standard input event after restart.
+		if receipt.Status != "accepted" || receipt.NativeEventSeq <= 0 {
+			if action.Status == "unknown" {
 				return controlstore.Reject("DELIVERY_UNKNOWN", "reconciliation requires the exact durable host event")
 			}
-		} else if action.DispatchOwner != receipt.InstanceID || receipt.DispatchToken == "" || controlstore.Hash([]byte(receipt.DispatchToken)) != action.DispatchTokenHash {
-			return controlstore.Reject("HOST_AUTH_REQUIRED", "receipt does not belong to the dispatch owner")
+			if action.DispatchOwner != receipt.InstanceID || receipt.DispatchToken == "" || controlstore.Hash([]byte(receipt.DispatchToken)) != action.DispatchTokenHash {
+				return controlstore.Reject("HOST_AUTH_REQUIRED", "receipt does not belong to the dispatch owner")
+			}
 		}
 		now := time.Now().UTC()
 		updates := map[string]any{"status": receipt.Status, "native_event_seq": receipt.NativeEventSeq, "last_error": receipt.Error, "updated_at": now}

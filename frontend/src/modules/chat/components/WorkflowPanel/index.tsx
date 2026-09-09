@@ -1866,6 +1866,8 @@ export function WorkflowPanel({
   const visibleActiveTabIdx = hasTabs
     ? Math.min(activeTabIdx, tabs.length - 1)
     : 0;
+  const controlTab = tabs[visibleActiveTabIdx];
+  const controlStepId = (controlTab ? getTabStepId(controlTab) : undefined) ?? session.current_step_id;
   const hasIntent = true;
   const showActions =
     session.status === 'waiting' ||
@@ -2274,8 +2276,8 @@ export function WorkflowPanel({
           ) : null}
           {controlled ? (control && onControl ? <WorkflowControlActions control={control} act={onControl} context={{
             session,
-            stepId: (tabs[visibleActiveTabIdx] ? getTabStepId(tabs[visibleActiveTabIdx]) : undefined) ?? session.current_step_id,
-            stepIds: tabs[visibleActiveTabIdx]?.status_step_ids ?? [(tabs[visibleActiveTabIdx] ? getTabStepId(tabs[visibleActiveTabIdx]) : undefined) ?? session.current_step_id],
+            stepId: controlStepId,
+            stepIds: controlTab?.status_step_ids ?? [controlStepId],
             pending: actionPending,
             runAction: runControlledAction,
           }} /> : <span role='status'>{t('chat.workflowControlLegacy')}</span>) : <>

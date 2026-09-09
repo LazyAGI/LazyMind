@@ -237,16 +237,12 @@ func (s *Service) claimCandidate(ctx context.Context, candidate orm.WorkflowSess
 	expires := now.Add(s.config.leaseDuration())
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if tx.Migrator().HasColumn(&orm.WorkflowSession{}, "control_protocol") {
-			var session orm.WorkflowSession
-			if err := tx.Where("id = ?", candidate.SessionID).First(&session).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			session, err := controlstore.LockSession(tx, candidate.SessionID)
+			if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 				return err
 			}
-			if session.ID != "" {
-				locked, err := controlstore.LockSession(tx, session.ID)
-				if err != nil {
-					return err
-				}
-				if err := controlstore.GuardClaim(tx, locked); err != nil {
+			if err == nil {
+				if err := controlstore.GuardClaim(tx, session); err != nil {
 					return err
 				}
 			}

@@ -3963,7 +3963,6 @@ export interface WorkflowExecutionStopBody {
 }
 export interface WorkflowHostAction {
     'accepted_at'?: string;
-    'attempt_count': number;
     'binding_generation': number;
     'command_id': string;
     'connector_id': string;
@@ -3985,10 +3984,10 @@ export interface WorkflowHostActionPage {
     'next_page_token'?: string;
 }
 export interface WorkflowHostBindingRequest {
+    'connector_id': string;
+    'credential': string;
     'driver_session_id': string;
-    'executor_session_id': string;
     'provider': string;
-    'workflowHostIdentity': WorkflowHostIdentity;
 }
 export interface WorkflowHostClaim {
     'action': WorkflowHostAction;
@@ -4011,15 +4010,20 @@ export interface WorkflowHostPageReply {
     'message': string;
 }
 export interface WorkflowHostReceipt {
+    'connector_id': string;
+    'credential': string;
     'dispatch_token': string;
     'error'?: string;
+    'instance_id': string;
     'native_event_seq'?: number;
     'status': string;
-    'workflowHostIdentity': WorkflowHostIdentity;
+}
+export interface WorkflowHostReceiptData {
+    'action': WorkflowHostAction;
 }
 export interface WorkflowHostReceiptReply {
     'code': number;
-    'data': WorkflowHostAction;
+    'data': WorkflowHostReceiptData;
     'message': string;
 }
 export interface WorkflowHostedExecutionReply {

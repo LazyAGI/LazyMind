@@ -1,7 +1,7 @@
 import { readFile, stat } from 'node:fs/promises'
 import { object, type WorkflowControl } from './protocol'
 
-export interface Pairing { connector_id: string; token: string; enabled: boolean }
+export interface Pairing { connector_id: string; token: string }
 export interface HostAction {
   id: string
   session_id: string
@@ -28,7 +28,7 @@ export async function loadPairing(path: string): Promise<Pairing> {
   if (!value || typeof value.connector_id !== 'string' || typeof value.token !== 'string' || value.token.length !== 64 || value.enabled !== true) {
     throw new Error('Workflow pairing is unavailable; reconnect DeepSeek Harness from LazyMind')
   }
-  return { connector_id: value.connector_id, token: value.token, enabled: true }
+  return { connector_id: value.connector_id, token: value.token }
 }
 
 export class HostBridge {
@@ -52,9 +52,9 @@ export class HostBridge {
     return value as T
   }
 
-  async bind(runId: string, driver: string, executor: string, signal: AbortSignal): Promise<WorkflowControl> {
+  async bind(runId: string, driver: string, signal: AbortSignal): Promise<WorkflowControl> {
     return (await this.request<{ control: WorkflowControl }>('/bind', signal, {
-      run_id: runId, driver_session_id: driver, executor_session_id: executor,
+      run_id: runId, driver_session_id: driver,
     })).control
   }
   async state(runId: string, signal: AbortSignal): Promise<WorkflowControl> {

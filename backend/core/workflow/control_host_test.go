@@ -24,7 +24,7 @@ func hostControlFixture(t *testing.T) (WorkflowControlService, WorkflowHostIdent
 	}
 	svc := WorkflowControlService{DB: db}
 	identity := WorkflowHostIdentity{ConnectorID: "connector", Credential: strings.Repeat("x", 64), InstanceID: "process-1"}
-	_, err := svc.Bind(context.Background(), "owner", "run", WorkflowHostBindingRequest{WorkflowHostIdentity: identity, Provider: "deepseek-harness", DriverSessionID: "driver"})
+	_, err := svc.Bind(context.Background(), "owner", "run", WorkflowHostBindingRequest{ConnectorID: identity.ConnectorID, Credential: identity.Credential, Provider: "deepseek-harness", DriverSessionID: "driver"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,11 +54,11 @@ func TestHostBindingCannotTransferDriverOrClearPendingReview(t *testing.T) {
 	if err := svc.DB.Create(&orm.WorkflowReviewCheckpoint{ID: "review", SessionID: "run", AttemptID: "a", Status: "pending", Version: 1, ManifestHash: "hash", SlotsJSON: "[]", ManifestJSON: `{"items":[],"orders":{}}`}).Error; err != nil {
 		t.Fatal(err)
 	}
-	c, err := svc.Bind(context.Background(), "owner", "run", WorkflowHostBindingRequest{WorkflowHostIdentity: id, Provider: "deepseek-harness", DriverSessionID: "driver"})
+	c, err := svc.Bind(context.Background(), "owner", "run", WorkflowHostBindingRequest{ConnectorID: id.ConnectorID, Credential: id.Credential, Provider: "deepseek-harness", DriverSessionID: "driver"})
 	if err != nil || c.Continuation != "awaiting_user" {
 		t.Fatalf("binding cleared review: %+v %v", c, err)
 	}
-	_, err = svc.Bind(context.Background(), "owner", "run", WorkflowHostBindingRequest{WorkflowHostIdentity: id, Provider: "deepseek-harness", DriverSessionID: "other"})
+	_, err = svc.Bind(context.Background(), "owner", "run", WorkflowHostBindingRequest{ConnectorID: id.ConnectorID, Credential: id.Credential, Provider: "deepseek-harness", DriverSessionID: "other"})
 	expectControlCode(t, err, "BINDING_CONFLICT")
 }
 func TestHostDeliveryUnknownDoesNotResendAndReconcilesExactReceipt(t *testing.T) {
@@ -86,7 +86,7 @@ func TestHostDeliveryUnknownDoesNotResendAndReconcilesExactReceipt(t *testing.T)
 	}
 	_, err = svc.Execute(ctx, "owner", "run", WorkflowControlCommand{CommandID: "continue-2", Kind: "continue", StateVersion: unknown.Control.StateVersion})
 	expectControlCode(t, err, "DELIVERY_UNKNOWN")
-	accepted, err := svc.SettleHostAction(ctx, "owner", claim.Action.ID, WorkflowHostReceipt{WorkflowHostIdentity: other, Status: "accepted", NativeEventSeq: 42})
+	accepted, err := svc.SettleHostAction(ctx, "owner", claim.Action.ID, WorkflowHostReceipt{ConnectorID: other.ConnectorID, Credential: other.Credential, InstanceID: other.InstanceID, Status: "accepted", NativeEventSeq: 42})
 	if err != nil || accepted.Status != "accepted" {
 		t.Fatalf("reconcile: %+v %v", accepted, err)
 	}
@@ -119,7 +119,7 @@ func TestStopFencesOldWritesAndResumePreservesReview(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = svc.SettleHostAction(ctx, "owner", claim.Action.ID, WorkflowHostReceipt{WorkflowHostIdentity: id, DispatchToken: claim.DispatchToken, Status: "accepted", NativeEventSeq: 10})
+	_, err = svc.SettleHostAction(ctx, "owner", claim.Action.ID, WorkflowHostReceipt{ConnectorID: id.ConnectorID, Credential: id.Credential, InstanceID: id.InstanceID, DispatchToken: claim.DispatchToken, Status: "accepted", NativeEventSeq: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +145,7 @@ func TestControlledRetryCreatesOneReplacementForCancelledAttempt(t *testing.T) {
 	}
 	svc := WorkflowControlService{DB: db.DB}
 	ctx := context.Background()
-	control, err := svc.Bind(ctx, "batch-user", "batch-session", WorkflowHostBindingRequest{WorkflowHostIdentity: WorkflowHostIdentity{ConnectorID: "connector", Credential: strings.Repeat("x", 64)}, Provider: "deepseek-harness", DriverSessionID: "driver"})
+	control, err := svc.Bind(ctx, "batch-user", "batch-session", WorkflowHostBindingRequest{ConnectorID: "connector", Credential: strings.Repeat("x", 64), Provider: "deepseek-harness", DriverSessionID: "driver"})
 	if err != nil {
 		t.Fatal(err)
 	}

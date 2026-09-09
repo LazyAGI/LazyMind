@@ -59,10 +59,13 @@ type workflowHostClaimReply struct {
 	Message string                     `json:"message"`
 	Data    workflow.WorkflowHostClaim `json:"data"`
 }
+type workflowHostReceiptData struct {
+	Action orm.WorkflowHostAction `json:"action"`
+}
 type workflowHostReceiptReply struct {
-	Code    int                    `json:"code"`
-	Message string                 `json:"message"`
-	Data    orm.WorkflowHostAction `json:"data"`
+	Code    int                     `json:"code"`
+	Message string                  `json:"message"`
+	Data    workflowHostReceiptData `json:"data"`
 }
 type workflowHostedExecutionReply struct {
 	ContractVersion string           `json:"contract_version"`

@@ -36,7 +36,6 @@ type WorkflowHostAction struct {
 	DispatchOwner     string     `gorm:"type:varchar(128);not null;default:''" json:"-"`
 	DispatchTokenHash string     `gorm:"type:varchar(64);not null;default:''" json:"-"`
 	DispatchExpiresAt *time.Time `json:"dispatch_expires_at,omitempty"`
-	AttemptCount      int        `gorm:"not null;default:0" json:"attempt_count"`
 	LastError         string     `gorm:"type:text;not null;default:''" json:"last_error,omitempty"`
 	NativeEventSeq    int64      `gorm:"not null;default:0" json:"native_event_seq,omitempty"`
 	AcceptedAt        *time.Time `json:"accepted_at,omitempty"`

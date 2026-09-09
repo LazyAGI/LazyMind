@@ -495,45 +495,33 @@ func (c *Client) Begin(ctx context.Context, input BeginInput) (BeginResult, erro
 	if executionID == "" {
 		return BeginResult{}, errors.New("LazyMind accepted the step but returned no execution_id")
 	}
-	execution, err := c.begin(ctx, input.SessionID, executionID, false)
-	if err != nil {
-		return BeginResult{}, err
-	}
-	state, err = c.State(ctx, input.SessionID)
-	return BeginResult{Execution: execution, State: state}, err
+	return c.begin(ctx, input.SessionID, executionID, false)
 }
 
 // Claim acquires a previously created recovery grant without advancing the graph again.
 func (c *Client) Claim(ctx context.Context, input ResumeInput) (BeginResult, error) {
-	execution, err := c.begin(ctx, input.SessionID, input.ExecutionID, false)
-	if err != nil {
-		return BeginResult{}, err
-	}
-	state, err := c.State(ctx, input.SessionID)
-	return BeginResult{Execution: execution, State: state}, err
+	return c.begin(ctx, input.SessionID, input.ExecutionID, false)
 }
 
 func (c *Client) Resume(ctx context.Context, input ResumeInput) (BeginResult, error) {
-	execution, err := c.begin(ctx, input.SessionID, input.ExecutionID, true)
-	if err != nil {
-		return BeginResult{}, err
-	}
-	state, err := c.State(ctx, input.SessionID)
-	return BeginResult{Execution: execution, State: state}, err
+	return c.begin(ctx, input.SessionID, input.ExecutionID, true)
 }
 
-func (c *Client) begin(ctx context.Context, sessionID, executionID string, resume bool) (Execution, error) {
+func (c *Client) begin(ctx context.Context, sessionID, executionID string, resume bool) (BeginResult, error) {
 	if strings.TrimSpace(sessionID) == "" || strings.TrimSpace(executionID) == "" {
-		return Execution{}, errors.New("session_id and execution_id are required")
+		return BeginResult{}, errors.New("session_id and execution_id are required")
 	}
 	action := ":begin"
 	if resume {
 		action = ":resume"
 	}
 	var execution Execution
-	err := c.api.DoJSON(ctx, http.MethodPost, "/workflow-sessions/"+url.PathEscape(sessionID)+
-		"/hosted-attempts/"+url.PathEscape(executionID)+action, map[string]any{}, &execution)
-	return execution, err
+	if err := c.api.DoJSON(ctx, http.MethodPost, "/workflow-sessions/"+url.PathEscape(sessionID)+
+		"/hosted-attempts/"+url.PathEscape(executionID)+action, map[string]any{}, &execution); err != nil {
+		return BeginResult{}, err
+	}
+	state, err := c.State(ctx, sessionID)
+	return BeginResult{Execution: execution, State: state}, err
 }
 
 func (c *Client) Submit(ctx context.Context, input SubmitInput, artifacts []map[string]any) (SubmitResult, error) {

@@ -544,7 +544,7 @@ func (r *Repository) SetSessionStopped(ctx context.Context, owner, sessionID, co
 func (r *Repository) CreateHostSession(ctx context.Context, owner, sessionID, conversationID, originHost,
 	originRef, controllerHost string, workflow WorkflowPackage) (orm.WorkflowSession, bool, error) {
 	return r.createHostSession(ctx, owner, sessionID, conversationID, originHost, originRef, controllerHost,
-		workflow, "dynamic", "", nil)
+		workflow, "dynamic", "", nil, ControlSettings{})
 }
 
 type ControlSettings struct {
@@ -558,18 +558,14 @@ type ControlSettings struct {
 // not leave an active, partially initialized Session behind.
 func (r *Repository) CreateInitializedHostSession(ctx context.Context, owner, sessionID, conversationID, originHost,
 	originRef, controllerHost string, workflow WorkflowPackage, workflowMode, intentContext string,
-	bindings []InputBinding, controls ...ControlSettings) (orm.WorkflowSession, bool, error) {
+	bindings []InputBinding, control ControlSettings) (orm.WorkflowSession, bool, error) {
 	return r.createHostSession(ctx, owner, sessionID, conversationID, originHost, originRef, controllerHost,
-		workflow, workflowMode, intentContext, bindings, controls...)
+		workflow, workflowMode, intentContext, bindings, control)
 }
 
 func (r *Repository) createHostSession(ctx context.Context, owner, sessionID, conversationID, originHost,
 	originRef, controllerHost string, workflow WorkflowPackage, workflowMode, intentContext string,
-	bindings []InputBinding, controls ...ControlSettings) (orm.WorkflowSession, bool, error) {
-	control := ControlSettings{}
-	if len(controls) > 0 {
-		control = controls[0]
-	}
+	bindings []InputBinding, control ControlSettings) (orm.WorkflowSession, bool, error) {
 	if control.Protocol != "" {
 		if control.Protocol != controlpolicy.Protocol || controllerHost != "external-agent" {
 			return orm.WorkflowSession{}, false, repositoryError("CONTROL_PROTOCOL_UNSUPPORTED")

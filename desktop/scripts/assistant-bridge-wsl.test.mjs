@@ -44,7 +44,13 @@ process.stdout.write('LAZYMIND_ASSISTANT_BRIDGE_OK:'+process.env.LAZYMIND_WSL_BR
   const env = { ...process.env, OS: '', PATH: `${bin}:${process.env.PATH}`, PROBE_LOG: log,
     PATH_LOG: path.join(root, 'paths.jsonl'), WSLENV: 'EXISTING/p',
     WINDOWS_ROOT: "\\\\wsl.localhost\\Ubuntu\\home\\O'Brien & $cash `cache` [资料]", CASE_MODE: 'success' };
-  return { root: realpathSync(root), bin, log, env };
+  return { root: realpathSync(root), log, env };
+}
+
+function runMake(f, action, shell = '/bin/sh') {
+  return spawnSync('make', ['--no-print-directory', '-f', path.join(repo, 'Makefile'),
+    '-o', 'lazymind-cli-build', `SHELL=${shell}`, 'HOST_IS_WSL=1', `assistant-bridge-${action}`],
+  { cwd: f.root, env: f.env, encoding: 'utf8', timeout: 10000 });
 }
 
 for (const shell of ['/bin/sh', '/bin/bash']) {
@@ -53,9 +59,7 @@ for (const shell of ['/bin/sh', '/bin/bash']) {
       test(`${shell} actual Make recipe preserves ${kind} paths for ${action}`, { skip: !posix }, t => {
         const f = fixture(t);
         if(kind === 'drive') f.env.WINDOWS_ROOT = "C:\\Users\\O'Brien & $cash `cache` [资料]";
-        const result = spawnSync('make', ['--no-print-directory', '-f', path.join(repo, 'Makefile'),
-          '-o', 'lazymind-cli-build', `SHELL=${shell}`, 'HOST_IS_WSL=1', `assistant-bridge-${action}`],
-        { cwd:f.root, env:f.env, encoding:'utf8', timeout:10000 });
+        const result = runMake(f, action, shell);
         assert.equal(result.status, 0, result.stderr);
         const called = JSON.parse(readFileSync(f.log, 'utf8'));
         assert.equal(called.script, f.env.WINDOWS_ROOT + '\\local\\scripts\\assistant-bridge-win.ps1');
@@ -78,7 +82,7 @@ for (const mode of ['native-failure', 'truncated-failure', 'wrong-receipt', 'con
   for (const action of ['start','stop']) {
     test(`${action} propagates ${mode} without a success banner`, {skip:!posix}, t => {
       const f=fixture(t);f.env.CASE_MODE=mode;
-      const result=spawnSync('make',['--no-print-directory','-f',path.join(repo,'Makefile'),'-o','lazymind-cli-build','HOST_IS_WSL=1',`assistant-bridge-${action}`],{cwd:f.root,env:f.env,encoding:'utf8',timeout:10000});
+      const result = runMake(f, action);
       assert.notEqual(result.status,0);
       assert.ok(!result.stdout.includes('已启动'));
       assert.ok(existsSync(path.join(f.root,'local/build/bin/lazymind')), 'failed start must not remove the old executable');

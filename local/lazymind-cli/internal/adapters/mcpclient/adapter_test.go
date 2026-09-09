@@ -140,7 +140,7 @@ func TestManagedJSONConfigPreservesOtherServersAndRemovesOnlyLazyMind(t *testing
 	writeTestFile(t, self, "test connector")
 	writeTestFile(t, path, `{"theme":"dark","mcpServers":{"existing":{"description":"keep","url":"https://example.com/mcp","type":"streamable_http","alwaysLoad":true,"disabled":false,"connect_timeout":15}}}`)
 
-	if err := writeManagedConfig(Cursor, path, self, home, "host-1"); err != nil {
+	if err := writeManagedConfig(Cursor, path, self, home, "host-1", false); err != nil {
 		t.Fatal(err)
 	}
 	state, err := readManagedConfig(Cursor, path, self, home, "host-1")
@@ -209,7 +209,7 @@ func TestManagedDSHConfigPreservesOtherPatchEntries(t *testing.T) {
 	writeTestFile(t, self, "test connector")
 	writeTestFile(t, path, "- insert:\n    - id: existing\n      name: existing-plugin\n      config:\n        value: keep\n")
 
-	if err := writeManagedConfig(DeepSeekHarness, path, self, home, "host-1"); err != nil {
+	if err := writeManagedConfig(DeepSeekHarness, path, self, home, "host-1", false); err != nil {
 		t.Fatal(err)
 	}
 	if err := removeManagedConfig(DeepSeekHarness, path); err != nil {
@@ -271,4 +271,17 @@ func setTestHome(t *testing.T, home string) {
 	t.Helper()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
+}
+
+func TestDSHEndpointValidation(t *testing.T) {
+	for _, endpoint := range []string{"https://dsh.example.com", "http://localhost:3000/", "http://127.0.0.1:3000", "http://[::1]:3000"} {
+		if err := validateDSHEndpoint(endpoint); err != nil {
+			t.Errorf("valid endpoint %q: %v", endpoint, err)
+		}
+	}
+	for _, endpoint := range []string{"http://dsh.example.com", "https://user:password@dsh.example.com", "https://dsh.example.com/path", "https://dsh.example.com/?token=x", "https://dsh.example.com/#fragment", "file:///tmp/dsh"} {
+		if err := validateDSHEndpoint(endpoint); err == nil {
+			t.Errorf("unsafe endpoint accepted: %q", endpoint)
+		}
+	}
 }
