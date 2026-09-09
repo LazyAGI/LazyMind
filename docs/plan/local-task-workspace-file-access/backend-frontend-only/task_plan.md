@@ -22,7 +22,7 @@
 
 - [x] S1：测试先行，复现 Local Proxy 大写错误码退化为 unknown，以及授权管理查询在会话切换后继续显示；新增 6 项预期失败、原有 23 项通过、异常失败 0。
 - [x] S2：最小修改现有控件、错误 helper 和中英文 locale；生产代码净增 11 行，S1 聚焦矩阵 29/29 通过。
-- [ ] S3：运行前端聚焦矩阵、ESLint、TypeScript、生产构建和冻结边界检查；同步四份文档并报告实际生产增量。
+- [x] S3：前端聚焦矩阵 49/49，ESLint、TypeScript、生产构建和冻结边界检查通过；四份文档已同步，生产代码净增 11 行。
 
 本批不执行 T6，也不实现或测试 Agent 对本机工作区文件的读、新建、修改、追加、删除。
 
@@ -51,9 +51,9 @@
 
 **回归与交付**
 
-- [ ] 运行六文件前端聚焦矩阵、相关 ESLint、`pnpm exec tsc -p tsconfig.mcp.json --noEmit` 和 `pnpm run build`。
-- [ ] 核对 `algorithm/`、`tests/algorithm/`、LazyLLM gitlink 与 `245bc26d` 一致，Local/Desktop 与 `ec4676e0` 一致；检查无 Backend 或范围外改动。
-- [ ] 统计生产 diff，更新本目录四份文档，提交本批但不自动宣称 T6 或 F 类完成。
+- [x] 运行六文件前端聚焦矩阵、相关 ESLint、`pnpm exec tsc -p tsconfig.mcp.json --noEmit` 和 `pnpm run build`，全部通过。
+- [x] 核对 `algorithm/`、`tests/algorithm/`、LazyLLM gitlink 与 `245bc26d` 一致，Local/Desktop 与 `ec4676e0` 一致；Backend 和范围外 diff 均为空。
+- [x] 统计生产 diff并更新本目录四份文档；本批明确不宣称 T6 或 F 类完成。
 
 T1–T6 依赖当前已实现的 grant/binding/bridge。不得再次提取 Local/Desktop 补丁或重做迁移。权限/API 相关测试与实现遵循人工 Review 门禁。
 
@@ -73,6 +73,6 @@ T1–T6 依赖当前已实现的 grant/binding/bridge。不得再次提取 Local
 - [x] 组件合同：取消/关闭/Esc 不修改选择；禁用覆盖草稿目录入口；运行中后续权限修改调用现有 next_request API。真实运行态验收仍归 T5/T6。
 - [x] 自动化合同：版本冲突刷新状态；错误 reason 有中英文；AskCard 与附件/任务身份参数保持兼容。真实运行验收留在 T6。
 - [ ] 若文件能力准入通过：同轮读建改、版本冲突、敏感/.git 边界、提交前撤销、原删除命令、子任务批准分别有真实证据。
-- [ ] 算法相对官方基线零差异，Local/Desktop 相对冻结提交零差异；无越界文件、依赖或新工作树。
-- [ ] 报告每批实际规模与复用点，区分源码/组件/工具/端到端验证。
-- [ ] 只完成 U/C 时报告“前后端缺陷已补齐”；F 未完成时不得报告“旧版完全复现”。
+- [x] 算法相对官方基线零差异，Local/Desktop 相对冻结提交零差异；无越界文件、依赖或新工作树。
+- [x] 已报告每批实际规模与复用点，并区分组件自动化、静态检查和未执行的人工/端到端验证。
+- [x] 当前仅报告前端管理链路缺陷已补齐；F 未完成，不报告旧版完全复现。

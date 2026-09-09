@@ -46,6 +46,8 @@
 - 本批明确排除 T6、F1–F4、算法、Backend、Local/Desktop。下一步为 S1 测试 RED，尚未实施生产修改。
 - S1 已新增 utility 表驱动错误码合同和组件会话切换合同。聚焦矩阵 29 项中新增 6 项按预期失败、原有 23 项通过；修正 dialog 定位方式后异常失败为 0。尚未修改生产代码。
 - S2 已修改 4 个既有前端生产文件，新增 15 行、删除 4 行，净增 11 行；复用 `workspaceReason`、会话 effect、`listRequestRef` 和既有 i18n 字典。聚焦测试由 6 RED 转为 29/29 通过，尚待 S3 完整回归。
+- S3 已完成：六文件前端聚焦矩阵 49/49，相关 ESLint、MCP TypeScript 检查和生产构建通过；构建仅有既有 warning。算法/LazyLLM 与 `245bc26d`、Local/Desktop 与 `ec4676e0` 零差异，Backend 本批零差异。
+- U6–U7 自动化补齐完成。本批没有执行 T6，也没有实现或测试 Agent 文件读、新建、修改、追加、删除；这些状态继续明确保留。
 
 ## 维护入口
 
