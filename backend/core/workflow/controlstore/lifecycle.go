@@ -142,13 +142,20 @@ func EnqueueHostAction(tx *gorm.DB, session orm.WorkflowSession, commandID, kind
 	return action.ID, tx.Create(&action).Error
 }
 
-// ConsumeExecutionContinuation records that the requested execution was observed or claimed.
-func ConsumeExecutionContinuation(tx *gorm.DB, sessionID, attemptID string) error {
-	now := time.Now().UTC()
-	if err := tx.Model(&orm.WorkflowHostAction{}).Where("session_id = ? AND execution_id = ? AND kind = 'continue' AND status IN ?", sessionID, attemptID, []string{"dispatching", "accepted", "unknown"}).
-		Update("consumed_at", now).Error; err != nil {
-		return err
+// ConsumeContinuation records receipt of an execution notification. An empty
+// execution ID means the driver has advanced, consuming notifications for settled
+// executions as well as the ordinary user continuation.
+func ConsumeContinuation(tx *gorm.DB, sessionID, executionID string) error {
+	query := tx.Model(&orm.WorkflowHostAction{}).Where("session_id = ? AND kind = 'continue' AND status IN ?", sessionID,
+		[]string{"pending", "dispatching", "accepted", "unknown"})
+	if executionID != "" {
+		query = query.Where("execution_id = ?", executionID)
+	} else {
+		settled := tx.Model(&orm.WorkflowSessionStep{}).Select("id").Where("session_id = ? AND status IN ?", sessionID,
+			[]string{"succeeded", "failed", "cancelled", "interrupted"})
+		query = query.Where("execution_id = '' OR execution_id IN (?)", settled)
 	}
-	return tx.Model(&orm.WorkflowHostAction{}).Where("session_id = ? AND execution_id = ? AND kind = 'continue' AND status = 'pending'", sessionID, attemptID).
-		Updates(map[string]any{"status": "superseded", "consumed_at": now}).Error
+	return query.Where("consumed_at IS NULL").Updates(map[string]any{
+		"consumed_at": time.Now().UTC(), "status": gorm.Expr("CASE WHEN status = 'pending' THEN 'superseded' ELSE status END"),
+	}).Error
 }

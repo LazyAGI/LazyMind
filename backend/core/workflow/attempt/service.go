@@ -272,7 +272,7 @@ func (s *Service) claimCandidate(ctx context.Context, candidate orm.WorkflowSess
 			return err
 		}
 		if controlled && candidate.ExecutorHost == "lazymind" {
-			if err := controlstore.ConsumeExecutionContinuation(tx, candidate.SessionID, candidate.ID); err != nil {
+			if err := controlstore.ConsumeContinuation(tx, candidate.SessionID, candidate.ID); err != nil {
 				return err
 			}
 		}

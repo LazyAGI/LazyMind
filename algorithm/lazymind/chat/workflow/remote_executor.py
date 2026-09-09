@@ -233,9 +233,22 @@ class RemoteWorkflowExecutor:
         except httpx.HTTPStatusError as exc:
             # A Runtime completion validation error is a terminal execution
             # failure, not a reason to leave the Attempt running until expiry.
-            if exc.response.status_code in {401, 409}:
+            if exc.response.status_code == 401:
                 return
+            if exc.response.status_code == 409:
+                # A conflict can also be a rejected result. Only abandon it when
+                # Runtime confirms that this worker has actually lost its lease.
+                try:
+                    await self.runtime.heartbeat(client, attempt_id, lease)
+                except httpx.HTTPStatusError:
+                    return
             failure = str(exc)
+            try:
+                rejected = exc.response.json().get('error', {})
+                if isinstance(rejected, dict) and rejected.get('message'):
+                    failure = str(rejected['message'])
+            except (ValueError, AttributeError):
+                pass
             await self.runtime.fail(client, attempt_id, lease, failure)
             terminal_event = {'type': 'error', 'status': 'failed', 'message': failure}
         if terminal_event is not None:

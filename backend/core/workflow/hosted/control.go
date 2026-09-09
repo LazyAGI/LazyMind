@@ -54,7 +54,7 @@ func (s *Service) beginControlled(ctx context.Context, owner, sessionID, attempt
 			contract.Metadata = nil
 			execution = Execution{ExecutorHost: HostName, AttemptStatus: "claimed", ReviewAfterSubmit: row.ReviewRequired, ExecutionID: attemptID, ExecutionHandle: claim.LeaseToken, LeaseExpires: claim.LeaseExpiresAt, StepContract: contract}
 		}
-		return controlstore.ConsumeExecutionContinuation(tx, sessionID, attemptID)
+		return controlstore.ConsumeContinuation(tx, sessionID, attemptID)
 
 	})
 	if err == nil && execution.ExecutionHandle != "" {

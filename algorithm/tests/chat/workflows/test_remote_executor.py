@@ -646,7 +646,8 @@ async def test_execution_spec_failure_marks_claimed_attempt_failed():
 
 
 @pytest.mark.asyncio
-async def test_completion_rejection_becomes_explicit_failure(monkeypatch, tmp_path):
+@pytest.mark.parametrize('status', [422, 409])
+async def test_completion_rejection_becomes_explicit_failure(monkeypatch, tmp_path, status):
     worker = RemoteWorkflowExecutor()
 
     class Runtime:
@@ -666,7 +667,7 @@ async def test_completion_rejection_becomes_explicit_failure(monkeypatch, tmp_pa
 
         async def complete(self, *_):
             request = httpx.Request('POST', 'http://runtime/complete')
-            response = httpx.Response(422, request=request)
+            response = httpx.Response(status, request=request, json={'error': {'message': 'missing output'}})
             raise httpx.HTTPStatusError('missing output', request=request, response=response)
 
         async def fail(self, *_):
@@ -686,6 +687,7 @@ async def test_completion_rejection_becomes_explicit_failure(monkeypatch, tmp_pa
     await worker._run_claim(object(), {'attempt_id': 'attempt-1', 'lease_token': 'lease-1'})
     assert runtime.failed is True
     assert runtime.terminal['type'] == 'error'
+    assert runtime.terminal['message'] == 'missing output'
 
 
 @pytest.mark.asyncio

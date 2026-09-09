@@ -341,9 +341,19 @@ func TestControlledDeclaredToolsUseNativeExecutorAndReturnAttemptID(t *testing.T
 			if err := db.Model(&orm.WorkflowSession{}).Where("id = ?", "batch-session").Updates(map[string]any{"control_protocol": "workflow.control.v1", "controller_host": "external-agent"}).Error; err != nil {
 				t.Fatal(err)
 			}
+			if err := db.Create(&orm.WorkflowSessionStep{ID: "prior-native", SessionID: "batch-session", StepID: "branch_c", TaskID: "prior-task", Status: "succeeded", ExecutorHost: "lazymind"}).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Create(&orm.WorkflowHostAction{ID: "prior-notification", SessionID: "batch-session", Kind: "continue", ExecutionID: "prior-native", Status: "accepted"}).Error; err != nil {
+				t.Fatal(err)
+			}
 			result, err := (WorkflowControlService{DB: db.DB}).Execute(context.Background(), "batch-user", "batch-session", WorkflowControlCommand{CommandID: "native-begin", Kind: "begin", StepID: "branch_b", StateVersion: 4})
 			if err != nil {
 				t.Fatal(err)
+			}
+			var notification orm.WorkflowHostAction
+			if err := db.First(&notification, "id = ?", "prior-notification").Error; err != nil || notification.ConsumedAt == nil {
+				t.Fatalf("advancing did not consume native completion: %+v %v", notification, err)
 			}
 			var execution orm.WorkflowSessionStep
 			if err := db.First(&execution, "id = ?", result.Receipt.ExecutionID).Error; err != nil {

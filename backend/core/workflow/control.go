@@ -110,12 +110,7 @@ func (s WorkflowControlService) Execute(ctx context.Context, owner, sessionID st
 				return err
 			}
 			result.Receipt.ExecutionID = execution.ID
-			if err := tx.Model(&orm.WorkflowHostAction{}).Where("session_id = ? AND kind = 'continue' AND execution_id = '' AND status IN ? AND consumed_at IS NULL", session.ID, []string{"accepted", "dispatching", "unknown"}).
-				Update("consumed_at", time.Now().UTC()).Error; err != nil {
-				return err
-			}
-			if err := tx.Model(&orm.WorkflowHostAction{}).Where("session_id = ? AND kind = 'continue' AND execution_id = '' AND status = 'pending' AND consumed_at IS NULL", session.ID).
-				Updates(map[string]any{"consumed_at": time.Now().UTC(), "status": "superseded"}).Error; err != nil {
+			if err := controlstore.ConsumeContinuation(tx, session.ID, ""); err != nil {
 				return err
 			}
 
@@ -181,6 +176,9 @@ func (s WorkflowControlService) Execute(ctx context.Context, owner, sessionID st
 				return err
 			}
 			result.Receipt.ExecutionID = execution.ID
+			if err := controlstore.ConsumeContinuation(tx, session.ID, ""); err != nil {
+				return err
+			}
 			result.Receipt.ActionID, err = controlstore.EnqueueHostAction(tx, *session, command.CommandID, "continue", result.Receipt.ExecutionID)
 			if err != nil {
 				return err
