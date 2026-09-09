@@ -19,7 +19,6 @@ import (
 	"lazymind/agentconnector/internal/workflowhost"
 )
 
-const dshSDKVersion = "0.1.2-rc.1"
 const dshWorkflowRow = "lazymind-workflow-panel"
 const dshWorkflowPackage = "@lazymind/dsh-workflow"
 
@@ -181,14 +180,6 @@ func (a *Adapter) installDSHWorkflow(ctx context.Context) (bool, error) {
 		}
 		version = strings.TrimPrefix(strings.TrimSpace(output), "v")
 	}
-	if version != dshSDKVersion {
-		if _, err := dshModuleVersion(profile, dshWorkflowPackage); err == nil {
-			if err := configureDSHWorkflow(configPath(DeepSeekHarness), "", "", "", true); err != nil {
-				return false, err
-			}
-		}
-		return false, nil
-	}
 	store, err := credentials.NewStore(a.home, "")
 	if err != nil {
 		return false, err
@@ -237,7 +228,7 @@ func (a *Adapter) installDSHWorkflow(ctx context.Context) (bool, error) {
 	if run == nil {
 		run = runDSHPlugin
 	}
-	if err := run(ctx, dshProfileName(), "add", "--workspace-root", "@deepseek-ai/dsh-mcp-client@"+dshSDKVersion, archive); err != nil {
+	if err := run(ctx, dshProfileName(), "add", "--workspace-root", "@deepseek-ai/dsh-mcp-client@"+version, archive); err != nil {
 		return false, err
 	}
 	pairingFile := filepath.Join(a.home, "workflow-hosts", pair.ConnectorID+".json")

@@ -1047,7 +1047,6 @@ const enUS = {
       trae_work_desktop: { ready: "TRAE Work Desktop is installed", missing: "TRAE Work Desktop is not installed" },
       trae_work_desktop_initialized: { ready: "TRAE Work Desktop completed its first launch", missing: "TRAE Work Desktop has not completed its first launch" },
       dsh_cli: { ready: "Existing DeepSeek Harness found", missing: "DSH was not found; select the installed executable" },
-      dsh_mcp_client: { ready: "DSH MCP Client is installed", missing: "DSH MCP Client is not installed" },
     },
     guides: {
       codex: {
@@ -1102,8 +1101,8 @@ const enUS = {
       },
       "deepseek-harness": {
         mcp: {
-          install: "Initialize DeepSeek Harness Web and install `@deepseek-ai/dsh-mcp-client`.",
-          connect: "When enabled, LazyMind updates `cordis.patch.yml` in the Web profile.",
+          install: "Install and start DeepSeek Harness Web once. Enabling this switch installs the LazyMind plugin into that DSH; it does not install DSH.",
+          connect: "When enabled, LazyMind installs MCP and the Workflow plugin into the initialized Web profile.",
           verify: "Reload DeepSeek Harness Web and confirm `lazymind` in its tool list.",
         },
       },

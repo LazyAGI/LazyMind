@@ -1020,7 +1020,6 @@ const zhCN = {
       trae_work_desktop: { ready: "TRAE Work 桌面版已安装", missing: "TRAE Work 桌面版未安装" },
       trae_work_desktop_initialized: { ready: "TRAE Work 桌面版已完成首次启动", missing: "TRAE Work 桌面版尚未完成首次启动" },
       dsh_cli: { ready: "已找到现有 DeepSeek Harness", missing: "未找到 DSH，请选择已安装的程序路径" },
-      dsh_mcp_client: { ready: "DSH MCP Client 已安装", missing: "DSH MCP Client 未安装" },
     },
     guides: {
       codex: {
@@ -1075,8 +1074,8 @@ const zhCN = {
       },
       "deepseek-harness": {
         mcp: {
-          install: "初始化 DeepSeek Harness Web，并安装 `@deepseek-ai/dsh-mcp-client`。",
-          connect: "启用后，LazyMind 更新 Web profile 的 `cordis.patch.yml`。",
+          install: "自行安装并启动一次 DeepSeek Harness Web。开启开关后，LazyMind 把插件写入已有 DSH，不会代装 DSH。",
+          connect: "启用后，LazyMind 在已初始化的 Web profile 中安装 MCP 与 Workflow 插件。",
           verify: "重新加载 DeepSeek Harness Web，确认工具列表中有 `lazymind`。",
         },
       },
