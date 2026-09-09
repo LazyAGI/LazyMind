@@ -5,6 +5,7 @@ import type { WorkflowStreamEvent } from '@/modules/chat/store/workflowProjectio
 
 const EVENT_TYPES = [
   'workflow.snapshot', 'snapshot', 'workflow.patch', 'step.patch', 'attempt.patch',
+  'control.changed', 'review.changed', 'execution.settled', 'delivery.changed', 'binding.changed', 'artifact.edited',
   'artifact.upsert', 'artifact.stale', 'workflow.waiting', 'workflow.completed', 'attempt.progress',
 ] as const;
 

@@ -30,6 +30,7 @@ var ToolNames = []string{
 	"workflow.session.stop",
 	"workflow.session.resume",
 	"workflow.step.begin",
+	"workflow.step.claim",
 	"workflow.step.resume",
 	"workflow.step.submit",
 	"workflow.artifact.list",
@@ -160,15 +161,21 @@ func Register(server *mcp.Server, client *Client) {
 			return nil, value, err
 		})
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.session.resume", Title: "Resume a stopped LazyMind Workflow session",
-		Description: "Resume a stopped Workflow session so its interrupted step can be begun again under Runtime rules. Safe to retry with the same command_id.", Annotations: write},
+		Description: "Resume a stopped legacy Workflow session so its interrupted step can be begun again under Runtime rules. Controlled workflows require the user to select Resume in the authenticated workflow page; this tool cannot bypass that decision. Safe to retry with the same command_id.", Annotations: write},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input SessionLifecycleInput) (*mcp.CallToolResult, SessionLifecycleResult, error) {
 			value, err := client.ResumeSession(ctx, input.SessionID, input.CommandID)
 			return nil, value, err
 		})
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.step.begin", Title: "Begin a LazyMind Workflow step",
-		Description: "Reserve one currently ready step and return its immutable execution contract. Execute that contract with your native Agent tools, then call workflow.step.submit.", Annotations: write},
+		Description: "Reserve one currently ready step and return its immutable execution contract. Execute that contract now with your native Agent tools and call workflow.step.submit. Names in step_contract.legacy_tools are LazyMind Host scripts, not MCP tools; still produce required_outputs and submit.", Annotations: write},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input BeginInput) (*mcp.CallToolResult, BeginResult, error) {
 			value, err := client.Begin(ctx, input)
+			return nil, value, err
+		})
+	mcp.AddTool(server, &mcp.Tool{Name: "workflow.step.claim", Title: "Claim a prepared Workflow execution",
+		Description: "Claim the execution_id returned by a user recovery action. This does not create a new step. Execute the returned contract and submit with its execution_handle.", Annotations: write},
+		func(ctx context.Context, _ *mcp.CallToolRequest, input ResumeInput) (*mcp.CallToolResult, BeginResult, error) {
+			value, err := client.Claim(ctx, input)
 			return nil, value, err
 		})
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.step.resume", Title: "Resume a LazyMind Workflow step",
@@ -178,14 +185,25 @@ func Register(server *mcp.Server, client *Client) {
 			return nil, value, err
 		})
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.step.submit", Title: "Submit a LazyMind Workflow step",
-		Description: "Return the external Agent outcome and declared artifacts to LazyMind. LazyMind validates required outputs, versions artifacts and advances authoritative state.", Annotations: write},
+		Description: "Return the external Agent outcome and declared artifacts to LazyMind with the unchanged execution_handle from begin, claim or resume. LazyMind validates required outputs, versions artifacts and advances authoritative state. If the submitted step is human, stop this turn and wait for the user to continue from the run page.", Annotations: write},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input SubmitInput) (*mcp.CallToolResult, SubmitResult, error) {
 			artifacts, err := encodeOutputs(input.Outputs)
 			if err != nil {
 				return nil, SubmitResult{}, err
 			}
 			value, err := client.Submit(ctx, input, artifacts)
-			return nil, value, err
+			if err != nil {
+				return nil, value, err
+			}
+			if AwaitingReview(value.State) {
+				message := "Stop this turn. The submitted step requires user review"
+				if value.State.InteractionURL != "" {
+					message += " at " + value.State.InteractionURL
+				}
+				message += ". Do not call workflow.step.begin until the user asks to continue."
+				return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: message}}}, value, nil
+			}
+			return nil, value, nil
 		})
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.artifact.list", Title: "List LazyMind Workflow artifacts",
 		Description: "List the selected artifact revisions currently owned by a Workflow session.", Annotations: readOnly},

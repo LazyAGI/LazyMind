@@ -11,6 +11,7 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/store"
+	"lazymind/core/workflow/controlstore"
 	"lazymind/core/workflow/graphengine"
 )
 
@@ -67,6 +68,31 @@ func projectWithApprovalPreferences(db *gorm.DB, userID, workflowID string, grap
 	return applyApprovalPreferences(db, userID, workflowID, graphengine.Project(graph, snapshot))
 }
 
+func workflowApprovalPreferenceTarget(stepID, scope string) (string, error) {
+	stepID = strings.TrimSpace(stepID)
+	if stepID == "" || (scope != "step" && scope != "following") {
+		return "", controlstore.Reject("INVALID_COMMAND", "step_id and scope (step|following) are required")
+	}
+	if scope == "following" {
+		stepID = workflowApprovalPreferenceAllSteps
+	}
+	return stepID, nil
+}
+
+func saveWorkflowApprovalPreference(db *gorm.DB, userID, workflowID, stepID, scope string) (string, error) {
+	stepID, err := workflowApprovalPreferenceTarget(stepID, scope)
+	if err != nil {
+		return "", err
+	}
+	now := time.Now().UTC()
+	err = db.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "user_id"}, {Name: "workflow_id"}, {Name: "step_id"}},
+		DoUpdates: clause.Assignments(map[string]any{"approval_required": false, "updated_at": now}),
+	}).Create(&orm.WorkflowApprovalPreference{UserID: userID, WorkflowID: workflowID, StepID: stepID,
+		ApprovalRequired: false, CreatedAt: now, UpdatedAt: now}).Error
+	return stepID, err
+}
+
 // SetWorkflowApprovalPreference persists a user-level exception to a package's
 // default approval modes. "step" affects this checkpoint in future sessions;
 // "following" means that, from this choice onward, this user never needs to
@@ -82,13 +108,17 @@ func SetWorkflowApprovalPreference(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "forbidden", http.StatusForbidden)
 		return
 	}
+	if controlstore.Controlled(session) && !IsWorkflowUserControlRequest(r) {
+		common.ReplyErr(w, "use the authenticated workflow page to change approval preferences", http.StatusForbidden)
+		return
+	}
 	var req approvalPreferenceRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		common.ReplyErr(w, "invalid approval preference", http.StatusBadRequest)
 		return
 	}
 	req.StepID = strings.TrimSpace(req.StepID)
-	if req.StepID == "" || (req.Scope != "step" && req.Scope != "following") {
+	if _, err := workflowApprovalPreferenceTarget(req.StepID, req.Scope); err != nil {
 		common.ReplyErr(w, "step_id and scope (step|following) are required", http.StatusUnprocessableEntity)
 		return
 	}
@@ -107,29 +137,13 @@ func SetWorkflowApprovalPreference(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "workflow step not found", http.StatusNotFound)
 		return
 	}
-	stepIDs := []string{req.StepID}
-	if req.Scope == "following" {
-		stepIDs = []string{workflowApprovalPreferenceAllSteps}
-	}
-	now := time.Now().UTC()
-	rows := make([]orm.WorkflowApprovalPreference, 0, len(stepIDs))
-	for _, stepID := range stepIDs {
-		rows = append(rows, orm.WorkflowApprovalPreference{
-			UserID: userID, WorkflowID: session.WorkflowID, StepID: stepID,
-			ApprovalRequired: false, CreatedAt: now, UpdatedAt: now,
-		})
-	}
-	if len(rows) > 0 {
-		if err := store.DB().Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "user_id"}, {Name: "workflow_id"}, {Name: "step_id"}},
-			DoUpdates: clause.Assignments(map[string]any{"approval_required": false, "updated_at": now}),
-		}).Create(&rows).Error; err != nil {
-			common.ReplyErr(w, "save approval preference failed", http.StatusInternalServerError)
-			return
-		}
+	stepID, err := saveWorkflowApprovalPreference(store.DB().WithContext(r.Context()), userID, session.WorkflowID, req.StepID, req.Scope)
+	if err != nil {
+		common.ReplyErr(w, "save approval preference failed", http.StatusInternalServerError)
+		return
 	}
 	common.ReplyOK(w, map[string]any{
-		"workflow_id": session.WorkflowID, "scope": req.Scope, "step_ids": stepIDs,
+		"workflow_id": session.WorkflowID, "scope": req.Scope, "step_ids": []string{stepID},
 		"workflow_wide": req.Scope == "following", "approval_required": false,
 	})
 }

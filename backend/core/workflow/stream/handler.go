@@ -13,12 +13,16 @@ import (
 	workflowstore "lazymind/core/workflow/store"
 )
 
-type SnapshotFunc func(*http.Request, string, string) (any, error)
+// SnapshotFunc reads both the projection and its durable cursor in one consistent view.
+type SnapshotFunc func(*http.Request, string, string) (any, int64, error)
 
 type Handler struct {
 	Store     *workflowstore.Repository
 	Snapshot  SnapshotFunc
 	Heartbeat time.Duration
+	// PollInterval replays persisted events written by another Core process.
+	// Repository subscriptions only observe events published in this process.
+	PollInterval time.Duration
 }
 
 type streamError struct {
@@ -77,12 +81,7 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	updates, cancel := h.Store.Subscribe(sessionID)
 	defer cancel()
 	if after == 0 && h.Snapshot != nil {
-		cursor, err := h.Store.LatestEventID(r.Context(), sessionID, owner)
-		if err != nil {
-			_ = writeEvent(w, flusher, 0, "error", streamError{Code: "STREAM_CURSOR_FAILED", Message: err.Error(), Retryable: true})
-			return
-		}
-		snapshot, err := h.Snapshot(r, sessionID, owner)
+		snapshot, cursor, err := h.Snapshot(r, sessionID, owner)
 		if err != nil {
 			code := "PERMISSION_DENIED"
 			if errors.Is(err, workflowstore.ErrNotFound) {
@@ -114,21 +113,49 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if heartbeat <= 0 {
 		heartbeat = 20 * time.Second
 	}
-	ticker := time.NewTicker(heartbeat)
-	defer ticker.Stop()
+	pollInterval := h.PollInterval
+	if pollInterval <= 0 {
+		pollInterval = time.Second
+	}
+	heartbeatTicker := time.NewTicker(heartbeat)
+	defer heartbeatTicker.Stop()
+	pollTicker := time.NewTicker(pollInterval)
+	defer pollTicker.Stop()
+	replay := func() bool {
+		for {
+			events, err := h.Store.Replay(r.Context(), sessionID, owner, after, 1000)
+			if err != nil {
+				_ = writeEvent(w, flusher, 0, "error", streamError{Code: "STREAM_REPLAY_FAILED", Message: err.Error(), Retryable: true})
+				return false
+			}
+			for _, event := range events {
+				if err := writeEvent(w, flusher, event.ID, event.EventType, event); err != nil {
+					return false
+				}
+				after = event.ID
+			}
+			if len(events) < 1000 {
+				return true
+			}
+		}
+	}
 	for {
 		select {
 		case <-r.Context().Done():
 			return
-		case event := <-updates:
-			if event.ID <= after || event.OwnerUserID != owner {
-				continue
-			}
-			if err := writeEvent(w, flusher, event.ID, event.EventType, event); err != nil {
+		case _, open := <-updates:
+			if !open {
 				return
 			}
-			after = event.ID
-		case <-ticker.C:
+			// A local event is a wakeup, never a cursor shortcut over another writer.
+			if !replay() {
+				return
+			}
+		case <-pollTicker.C:
+			if !replay() {
+				return
+			}
+		case <-heartbeatTicker.C:
 			_, _ = fmt.Fprint(w, ": heartbeat\n\n")
 			flusher.Flush()
 		}

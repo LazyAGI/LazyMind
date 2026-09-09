@@ -36,7 +36,9 @@ func TestStreamSendsSnapshotAndReplaysAfterLastEventID(t *testing.T) {
 	req.Header.Set("X-User-Id", "u1")
 	req.Header.Set("Last-Event-ID", "1")
 	recorder := httptest.NewRecorder()
-	Handler{Store: repo, Snapshot: func(_ *http.Request, _, _ string) (any, error) { return map[string]any{"state_version": 2}, nil }, Heartbeat: 5 * time.Millisecond}.ServeHTTP(recorder, req)
+	Handler{Store: repo, Snapshot: func(_ *http.Request, _, _ string) (any, int64, error) {
+		return map[string]any{"state_version": 2}, 2, nil
+	}, Heartbeat: 5 * time.Millisecond}.ServeHTTP(recorder, req)
 	body := recorder.Body.String()
 	if strings.Contains(body, "event: snapshot") {
 		t.Fatalf("resume must not resend snapshot: %s", body)
@@ -69,8 +71,8 @@ func TestInitialStreamSnapshotStartsAtLatestCursorWithoutHistoricalReplay(t *tes
 	req = mux.SetURLVars(req, map[string]string{"session_id": "s1"})
 	req.Header.Set("X-User-Id", "u1")
 	recorder := httptest.NewRecorder()
-	Handler{Store: repo, Snapshot: func(_ *http.Request, _, _ string) (any, error) {
-		return map[string]any{"state_version": 3, "status": "failed"}, nil
+	Handler{Store: repo, Snapshot: func(_ *http.Request, _, _ string) (any, int64, error) {
+		return map[string]any{"state_version": 3, "status": "failed"}, 2, nil
 	}, Heartbeat: 5 * time.Millisecond}.ServeHTTP(recorder, req)
 	body := recorder.Body.String()
 	if !strings.Contains(body, "id: 2\nevent: snapshot") || !strings.Contains(body, `"status":"failed"`) {

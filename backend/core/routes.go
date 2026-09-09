@@ -1,9 +1,6 @@
 package main
 
 import (
-	"bytes"
-	"encoding/json"
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -45,25 +42,6 @@ import (
 
 	"github.com/gorilla/mux"
 )
-
-type routeCapture struct {
-	header http.Header
-	body   bytes.Buffer
-	status int
-}
-
-type routeProjectionError string
-
-func (e routeProjectionError) Error() string { return string(e) }
-
-func (c *routeCapture) Header() http.Header    { return c.header }
-func (c *routeCapture) WriteHeader(status int) { c.status = status }
-func (c *routeCapture) Write(body []byte) (int, error) {
-	if c.status == 0 {
-		c.status = http.StatusOK
-	}
-	return c.body.Write(body)
-}
 
 func handleAgentThreadAPI(r *mux.Router, method, path string, perms []string, h http.HandlerFunc) {
 	handleAPI(r, method, path, perms, h).MatcherFunc(func(r *http.Request, _ *mux.RouteMatch) bool {
@@ -114,6 +92,8 @@ func registerAllRoutes(r *mux.Router) {
 		Artifacts: workflowexecutor.DBArtifactSink{DB: corestore.DB()},
 	}
 	hostedHandler := workflowhosted.Handler{Service: hostedService}
+	workflowControl := workflow.WorkflowControlHandler{Service: workflow.WorkflowControlService{DB: corestore.DB()}}
+	handleAPI(r, "GET", "/workflow-control/capabilities", []string{"qa.read"}, workflowControl.Capabilities)
 
 	// ----- Datasettext -----
 	handleAPI(r, "GET", "/dataset/algos", []string{"document.read"}, doc.ListAlgos)
@@ -434,63 +414,58 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}:stop", []string{"qa.write"}, workflowFacade.StopWorkflow)
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}:resume", []string{"qa.write"}, workflowFacade.ResumeWorkflow)
 	handleAPI(r, "GET", "/workflow-commands/{command_id}", []string{"qa.read"}, workflowFacade.GetCommand)
-	workflowEvents := workflowstream.Handler{Store: workflowRepository, Snapshot: func(req *http.Request, sessionID, owner string) (any, error) {
-		if err := workflowRepository.AuthorizeSession(req.Context(), sessionID, owner); err != nil {
-			return nil, err
-		}
-		recorder := &routeCapture{header: http.Header{}}
-		projectionRequest := mux.SetURLVars(req.Clone(req.Context()), map[string]string{"session_id": sessionID})
-		workflow.GetSessionProjection(recorder, projectionRequest)
-		if recorder.status >= http.StatusBadRequest {
-			return nil, routeProjectionError(fmt.Sprintf("projection status %d: %s", recorder.status, recorder.body.String()))
-		}
-		var projection any
-		if err := json.Unmarshal(recorder.body.Bytes(), &projection); err != nil {
-			return nil, err
-		}
-		return projection, nil
-	}}
+	workflowEvents := workflowstream.Handler{Store: workflowRepository, Snapshot: workflow.SessionEventSnapshot}
 	handleAPI(r, "GET", "/workflow-sessions/{session_id}/events", []string{"qa.read"}, workflowEvents.ServeHTTP)
 	handleAPI(r, "GET", "/conversations/{conversation_id}/workflow-sessions", []string{"qa.read"}, workflow.ListConversationSessions)
 	handleAPI(r, "GET", "/conversations/{conversation_id}/workflow-sessions:active", []string{"qa.read"}, workflow.GetActiveConversationSession)
 	handleAPI(r, "GET", "/conversations/{conversation_id}/workflow-sessions:latest", []string{"qa.read"}, workflow.GetLatestConversationSession)
-	handleAPI(r, "GET", "/workflow-sessions/{session_id}", []string{"qa.read"}, workflow.GetSessionDetail)
-	handleAPI(r, "GET", "/workflow-sessions/{session_id}/slots", []string{"qa.read"}, workflow.GetSessionSlots)
-	handleAPI(r, "GET", "/workflow-sessions/{session_id}/steps", []string{"qa.read"}, workflow.GetSessionSteps)
-	handleAPI(r, "POST", "/workflow-sessions/{session_id}:approval-preference", []string{"qa.write"}, workflow.SetWorkflowApprovalPreference)
+	handleAPI(r, "GET", "/workflow-sessions/{session_id}", []string{"qa.read"}, workflowFacade.SessionAccess(http.HandlerFunc(workflow.GetSessionDetail)))
+	handleAPI(r, "GET", "/workflow-sessions/{session_id}/control", []string{"qa.read"}, workflowFacade.SessionAccess(http.HandlerFunc(workflowControl.Read)))
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}/control", []string{"qa.write"}, workflowFacade.SessionAccess(http.HandlerFunc(workflowControl.Command)))
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}/executions:begin", []string{"qa.write"}, workflowFacade.SessionAccess(http.HandlerFunc(workflowControl.Begin)))
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}/executions:stop", []string{"qa.write"}, workflowFacade.SessionAccess(http.HandlerFunc(workflowControl.StopExecution)))
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}/host-binding", []string{"qa.write"}, workflowFacade.SessionAccess(http.HandlerFunc(workflowControl.Bind)))
+	handleAPI(r, "GET", "/workflow-host-actions", []string{"qa.read"}, workflowControl.Actions)
+	handleAPI(r, "GET", "/workflow-host-actions/{action_id}", []string{"qa.read"}, workflowControl.Action)
+	handleAPI(r, "POST", "/workflow-host-actions/{action_id}:claim", []string{"qa.write"}, workflowControl.ClaimAction)
+	handleAPI(r, "POST", "/workflow-host-actions/{action_id}:settle", []string{"qa.write"}, workflowControl.SettleAction)
+
+	handleAPI(r, "GET", "/workflow-sessions/{session_id}/slots", []string{"qa.read"}, workflowFacade.SessionAccess(http.HandlerFunc(workflow.GetSessionSlots)))
+	handleAPI(r, "GET", "/workflow-sessions/{session_id}/steps", []string{"qa.read"}, workflowFacade.SessionAccess(http.HandlerFunc(workflow.GetSessionSteps)))
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}:approval-preference", []string{"qa.write"}, workflowFacade.SessionAccess(http.HandlerFunc(workflow.SetWorkflowApprovalPreference)))
 	// Compatibility alias: old clients receive the same authoritative projection;
 	// no independent BFS state calculation remains on an active route.
-	handleAPI(r, "GET", "/workflow-sessions/{session_id}/state-graph", []string{"qa.read"}, workflow.GetSessionProjection)
+	handleAPI(r, "GET", "/workflow-sessions/{session_id}/state-graph", []string{"qa.read"}, workflowFacade.SessionAccess(http.HandlerFunc(workflow.GetSessionProjection)))
 	handleAPI(r, "GET", "/workflow-sessions/{session_id}/projection", []string{"qa.read"}, workflowFacade.GetProjection)
 	handleAPI(r, "GET", "/internal/workflow-sessions/{session_id}/projection", nil, workflow.GetSessionProjection)
 	handleAPI(r, "POST", "/internal/workflow-sessions:plan-start", nil, workflow.PlanWorkflowSessionStart)
 	handleAPI(r, "POST", "/internal/workflow-sessions:start", nil, workflow.StartWorkflowSession)
 	handleAPI(r, "POST", "/internal/workflow-sessions/{session_id}:transition", nil, workflow.TransitionWorkflowSession)
 	handleAPI(r, "GET", "/internal/workflow-transition-commands/{command_id}", nil, workflow.GetTransitionCommand)
-	handleAPI(r, "PATCH", "/workflow-sessions/{session_id}/slots/{slot_id}", []string{"qa.write"}, workflow.PatchSessionSlot)
-	handleAPI(r, "POST", "/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:action-preview", []string{"qa.write"}, workflow.PreviewArtifactAction)
-	handleAPI(r, "POST", "/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:action-execute", []string{"qa.write"}, workflow.ExecuteArtifactAction)
-	handleAPI(r, "POST", "/workflow-sessions/{session_id}:sync-search-config", []string{"qa.write"}, workflow.SyncSessionSearchConfig)
+	handleAPI(r, "PATCH", "/workflow-sessions/{session_id}/slots/{slot_id}", []string{"qa.write"}, workflowFacade.SessionAccess(http.HandlerFunc(workflow.PatchSessionSlot)))
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:action-preview", []string{"qa.write"}, workflowFacade.SessionAccess(http.HandlerFunc(workflow.PreviewArtifactAction)))
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:action-execute", []string{"qa.write"}, workflowFacade.SessionAccess(http.HandlerFunc(workflow.ExecuteArtifactAction)))
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}:sync-search-config", []string{"qa.write"}, workflowFacade.SessionAccess(http.HandlerFunc(workflow.SyncSessionSearchConfig)))
 	// Phase 3: slot item management.
 	// Stable list_index-based routes (preferred).
-	handleAPI(r, "DELETE", "/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}", []string{"qa.write"}, workflow.DeleteSlotItemByIndex)
-	handleAPI(r, "PATCH", "/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}", []string{"qa.write"}, workflow.PatchSlotItemByIndex)
+	handleAPI(r, "DELETE", "/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}", []string{"qa.write"}, workflowFacade.SessionAccess(http.HandlerFunc(workflow.DeleteSlotItemByIndex)))
+	handleAPI(r, "PATCH", "/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}", []string{"qa.write"}, workflowFacade.SessionAccess(http.HandlerFunc(workflow.PatchSlotItemByIndex)))
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:sync-writer-document", []string{"qa.write"}, chat.SyncWriterDocument)
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}/writer-document:write-back", []string{"qa.write"}, chat.WriteBackWriterDocument)
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}/writer-document:render", []string{"qa.read"}, chat.RenderWriterDocument)
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}/writer-document:save", []string{"qa.write"}, chat.SaveWriterDocument)
-	handleAPI(r, "GET", "/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/versions", []string{"qa.read"}, workflow.GetSlotItemVersionsByIndex)
-	handleAPI(r, "POST", "/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/rollback", []string{"qa.write"}, workflow.RollbackSlotItemByIndex)
-	handleAPI(r, "PATCH", "/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/caption", []string{"qa.write"}, workflow.PatchSlotCaptionByIndex)
+	handleAPI(r, "GET", "/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/versions", []string{"qa.read"}, workflowFacade.SessionAccess(http.HandlerFunc(workflow.GetSlotItemVersionsByIndex)))
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/rollback", []string{"qa.write"}, workflowFacade.SessionAccess(http.HandlerFunc(workflow.RollbackSlotItemByIndex)))
+	handleAPI(r, "PATCH", "/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/caption", []string{"qa.write"}, workflowFacade.SessionAccess(http.HandlerFunc(workflow.PatchSlotCaptionByIndex)))
 	// Order management
-	handleAPI(r, "PATCH", "/workflow-sessions/{session_id}/slots/{slot_id}/order", []string{"qa.write"}, workflow.ReorderSlotItems)
-	handleAPI(r, "GET", "/workflow-sessions/{session_id}/slots/{slot_id}/order", []string{"qa.read"}, workflow.GetSlotOrderHandler)
+	handleAPI(r, "PATCH", "/workflow-sessions/{session_id}/slots/{slot_id}/order", []string{"qa.write"}, workflowFacade.SessionAccess(http.HandlerFunc(workflow.ReorderSlotItems)))
+	handleAPI(r, "GET", "/workflow-sessions/{session_id}/slots/{slot_id}/order", []string{"qa.read"}, workflowFacade.SessionAccess(http.HandlerFunc(workflow.GetSlotOrderHandler)))
 	// Phase 4: caption editing and manual item creation
-	handleAPI(r, "POST", "/workflow-sessions/{session_id}/slots/{slot_id}/items", []string{"qa.write"}, workflow.CreateSlotItem)
-	handleAPI(r, "POST", "/workflow-sessions/{session_id}/artifacts", []string{"qa.write"}, workflow.SaveArtifactByKey)
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}/slots/{slot_id}/items", []string{"qa.write"}, workflowFacade.SessionAccess(http.HandlerFunc(workflow.CreateSlotItem)))
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}/artifacts", []string{"qa.write"}, workflowFacade.SessionAccess(http.HandlerFunc(workflow.SaveArtifactByKey)))
 	// Dismiss and restore workflow sessions.
-	handleAPI(r, "POST", "/workflow-sessions/{session_id}:dismiss", []string{"qa.write"}, workflow.DismissSessionHandler)
-	handleAPI(r, "POST", "/workflow-sessions/{session_id}:restore", []string{"qa.write"}, workflow.RestoreSessionHandler)
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}:dismiss", []string{"qa.write"}, workflowFacade.SessionAccess(http.HandlerFunc(workflow.DismissSessionHandler)))
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}:restore", []string{"qa.write"}, workflowFacade.SessionAccess(http.HandlerFunc(workflow.RestoreSessionHandler)))
 	// List dismissed sessions for a conversation (used by restore UI).
 	handleAPI(r, "GET", "/conversations/{conversation_id}/dismissed-workflow-sessions", []string{"qa.read"}, workflow.ListDismissedSessionsHandler)
 	handleAPI(r, "GET", "/personalization-setting", []string{"qa.read"}, evolution.GetPersonalizationSetting)

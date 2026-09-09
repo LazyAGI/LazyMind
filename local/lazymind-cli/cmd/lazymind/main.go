@@ -25,6 +25,7 @@ import (
 	"lazymind/agentconnector/internal/credentials"
 	"lazymind/agentconnector/internal/executorpolicy"
 	"lazymind/agentconnector/internal/mcpbridge"
+	"lazymind/agentconnector/internal/workflowhost"
 )
 
 const agentDiscoveryRetryDelay = 2 * time.Second
@@ -81,6 +82,9 @@ func runInternal(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	}
 	agent := strings.ToLower(args[1])
 	action := strings.ToLower(args[2])
+	if agent == "deepseek-harness" && action == "repair-log" {
+		return workflowhost.RepairLog(ctx, args[3:], stdout, stderr)
+	}
 	flags := flag.NewFlagSet("internal agent "+agent+" "+action, flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	agentBinary := flags.String("agent-bin", "", "external Agent CLI executable")

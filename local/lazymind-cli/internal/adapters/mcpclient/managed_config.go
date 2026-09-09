@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -45,9 +47,9 @@ func readManagedConfig(kind Kind, path, self, home, hostID string) (managedConfi
 	return stateForStdio(entry, self, home, hostID, kind), nil
 }
 
-func writeManagedConfig(kind Kind, path, self, home, hostID string) error {
+func writeManagedConfig(kind Kind, path, self, home, hostID string, controlled bool) error {
 	if kind == DeepSeekHarness {
-		return writeDSHConfig(path, self, home, hostID)
+		return writeDSHConfig(path, self, home, hostID, controlled)
 	}
 	root, servers, err := readJSONConfig(path)
 	if err != nil {
@@ -118,6 +120,9 @@ func readJSONConfig(path string) (rawMCPFile, map[string]json.RawMessage, error)
 func managedStdio(self, home, hostID string, kind Kind) stdioMCPDefinition {
 	environment := map[string]string{
 		"LAZYMIND_AGENT_PROVIDER": string(kind), "LAZYMIND_AGENT_HOST_ID": hostID,
+	}
+	if webURL := strings.TrimSpace(os.Getenv("LAZYMIND_WEB_URL")); webURL != "" {
+		environment["LAZYMIND_WEB_URL"] = webURL
 	}
 	if home != "" {
 		environment["LAZYMIND_HOME"] = home
@@ -224,12 +229,23 @@ func readDSHConfig(path, self, home, hostID string) (managedConfigState, error) 
 	return stateForStdio(stdio, self, home, hostID, DeepSeekHarness), nil
 }
 
-func writeDSHConfig(path, self, home, hostID string) error {
+func writeDSHConfig(path, self, home, hostID string, controlled bool) error {
 	document, err := readYAMLDocument(path)
 	if err != nil {
 		return err
 	}
-	entry, err := newDSHEntry(self, home, hostID)
+	webURL := strings.TrimSpace(os.Getenv("LAZYMIND_WEB_URL"))
+	dshURL := strings.TrimSpace(os.Getenv("LAZYMIND_DSH_URL"))
+	if existing := findDSHEntry(document); existing != nil {
+		env := decodeDSHStdio(existing).Env
+		if webURL == "" {
+			webURL = strings.TrimSpace(env["LAZYMIND_WEB_URL"])
+		}
+		if dshURL == "" {
+			dshURL = strings.TrimSpace(env["LAZYMIND_DSH_URL"])
+		}
+	}
+	entry, err := newDSHEntry(self, home, hostID, webURL, dshURL, controlled)
 	if err != nil {
 		return err
 	}
@@ -332,10 +348,22 @@ func decodeDSHStdio(item *yaml.Node) stdioMCPDefinition {
 	return result
 }
 
-func newDSHEntry(self, home, hostID string) (*yaml.Node, error) {
+func newDSHEntry(self, home, hostID, webURL, dshURL string, controlled bool) (*yaml.Node, error) {
 	var document yaml.Node
 	environment := map[string]string{
 		"LAZYMIND_AGENT_PROVIDER": string(DeepSeekHarness), "LAZYMIND_AGENT_HOST_ID": hostID,
+	}
+	if controlled {
+		environment["LAZYMIND_WORKFLOW_HOST_CONTROL"] = "1"
+	}
+	if endpoint := strings.TrimSpace(dshURL); endpoint != "" {
+		if err := validateDSHEndpoint(endpoint); err != nil {
+			return nil, err
+		}
+		environment["LAZYMIND_DSH_URL"] = endpoint
+	}
+	if webURL = strings.TrimSpace(webURL); webURL != "" {
+		environment["LAZYMIND_WEB_URL"] = webURL
 	}
 	if home != "" {
 		environment["LAZYMIND_HOME"] = home
@@ -377,4 +405,16 @@ func encodeYAML(document *yaml.Node) ([]byte, error) {
 		return nil, err
 	}
 	return output.Bytes(), nil
+}
+
+func validateDSHEndpoint(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" || u.User != nil || u.Fragment != "" || u.RawQuery != "" || (u.Path != "" && u.Path != "/") {
+		return errors.New("configure the DSH root URL without credentials")
+	}
+	ip := net.ParseIP(u.Hostname())
+	if u.Scheme != "https" && !(u.Scheme == "http" && (u.Hostname() == "localhost" || (ip != nil && ip.IsLoopback()))) {
+		return errors.New("DSH requires HTTPS or a loopback HTTP address")
+	}
+	return nil
 }

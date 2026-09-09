@@ -19,7 +19,9 @@ import (
 	"lazymind/core/common"
 	corestore "lazymind/core/store"
 	"lazymind/core/subagent"
+	workflowcore "lazymind/core/workflow"
 	"lazymind/core/workflow/artifactfile"
+	"lazymind/core/workflow/controlstore"
 	workflowexecutor "lazymind/core/workflow/executor"
 	"lazymind/core/workflow/graphengine"
 	workflowstore "lazymind/core/workflow/store"
@@ -108,28 +110,37 @@ func (h Handler) GetWorkflow(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, envelope{Data: value})
 }
 
+// SessionAccess authorizes a run before delegating its browser reads or writes.
+func (h Handler) SessionAccess(delegate http.Handler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		owner, ok := identityAndVersion(w, r)
+		if !ok {
+			return
+		}
+		if err := h.Store.AuthorizeSession(r.Context(), mux.Vars(r)["session_id"], owner); err != nil {
+			if errors.Is(err, workflowstore.ErrNotFound) {
+				fail(w, http.StatusNotFound, "WORKFLOW_SESSION_NOT_FOUND", "workflow session was not found", false)
+			} else if errors.Is(err, workflowstore.ErrPermissionDenied) {
+				fail(w, http.StatusForbidden, "PERMISSION_DENIED", "workflow session belongs to another owner", false)
+			} else {
+				fail(w, http.StatusServiceUnavailable, "WORKFLOW_PROJECTION_UNAVAILABLE", err.Error(), true)
+			}
+			return
+		}
+		delegate.ServeHTTP(w, r)
+	}
+}
+
 // GetProjection adds owner and contract checks around the existing pure
 // projection handler. Internal Runtime callers keep using the raw handler.
 func (h Handler) GetProjection(w http.ResponseWriter, r *http.Request) {
-	owner, ok := identityAndVersion(w, r)
-	if !ok {
-		return
-	}
-	if err := h.Store.AuthorizeSession(r.Context(), mux.Vars(r)["session_id"], owner); err != nil {
-		if errors.Is(err, workflowstore.ErrNotFound) {
-			fail(w, http.StatusNotFound, "WORKFLOW_SESSION_NOT_FOUND", "workflow session was not found", false)
-		} else if errors.Is(err, workflowstore.ErrPermissionDenied) {
-			fail(w, http.StatusForbidden, "PERMISSION_DENIED", "workflow session belongs to another owner", false)
-		} else {
-			fail(w, http.StatusServiceUnavailable, "WORKFLOW_PROJECTION_UNAVAILABLE", err.Error(), true)
+	h.SessionAccess(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if h.Projection == nil {
+			fail(w, http.StatusServiceUnavailable, "WORKFLOW_PROJECTION_UNAVAILABLE", "Workflow projection handler is unavailable", true)
+			return
 		}
-		return
-	}
-	if h.Projection == nil {
-		fail(w, http.StatusServiceUnavailable, "WORKFLOW_PROJECTION_UNAVAILABLE", "Workflow projection handler is unavailable", true)
-		return
-	}
-	h.Projection.ServeHTTP(w, r)
+		h.Projection.ServeHTTP(w, r)
+	}))(w, r)
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
@@ -179,16 +190,19 @@ func identityAndVersion(w http.ResponseWriter, r *http.Request) (string, bool) {
 }
 
 type prepareRequest struct {
-	PreparationID  string         `json:"preparation_id"`
-	IdempotencyKey string         `json:"idempotency_key"`
-	WorkflowID     string         `json:"workflow_id"`
-	InputBindings  map[string]any `json:"input_bindings"`
-	OriginHost     string         `json:"origin_host"`
-	OriginRef      string         `json:"origin_ref"`
-	ConversationID string         `json:"conversation_id"`
-	ControllerHost string         `json:"controller_host"`
-	RequestContext string         `json:"request_context"`
-	WorkflowMode   string         `json:"workflow_mode"`
+	ControlProtocol     string         `json:"control_protocol,omitempty"`
+	HostBindingRequired bool           `json:"host_binding_required,omitempty"`
+	HostProvider        string         `json:"host_provider,omitempty"`
+	PreparationID       string         `json:"preparation_id"`
+	IdempotencyKey      string         `json:"idempotency_key"`
+	WorkflowID          string         `json:"workflow_id"`
+	InputBindings       map[string]any `json:"input_bindings"`
+	OriginHost          string         `json:"origin_host"`
+	OriginRef           string         `json:"origin_ref"`
+	ConversationID      string         `json:"conversation_id"`
+	ControllerHost      string         `json:"controller_host"`
+	RequestContext      string         `json:"request_context"`
+	WorkflowMode        string         `json:"workflow_mode"`
 }
 
 type preparationGraph struct {
@@ -504,7 +518,7 @@ func (h Handler) setStopped(w http.ResponseWriter, r *http.Request, stopped bool
 		fail(w, http.StatusUnprocessableEntity, "IDEMPOTENCY_KEY_REQUIRED", "command_id is required", false)
 		return
 	}
-	version, err := h.Store.SetSessionStopped(r.Context(), owner, mux.Vars(r)["session_id"], commandID, stopped)
+	state, err := h.Store.SetSessionStopped(r.Context(), owner, mux.Vars(r)["session_id"], commandID, stopped, workflowcore.IsWorkflowUserControlRequest(r))
 	if errors.Is(err, workflowstore.ErrNotFound) {
 		fail(w, http.StatusNotFound, "WORKFLOW_SESSION_NOT_FOUND", "workflow session was not found", false)
 		return
@@ -513,18 +527,20 @@ func (h Handler) setStopped(w http.ResponseWriter, r *http.Request, stopped bool
 		fail(w, http.StatusForbidden, "PERMISSION_DENIED", "workflow session belongs to another owner", false)
 		return
 	}
+	var controlError *controlstore.Error
+	if errors.As(err, &controlError) {
+		status := http.StatusConflict
+		if controlError.Code == "USER_CONTROL_REQUIRED" {
+			status = http.StatusForbidden
+		}
+		fail(w, status, controlError.Code, controlError.Message, false)
+		return
+	}
 	if err != nil {
 		fail(w, http.StatusConflict, "LIFECYCLE_REJECTED", err.Error(), false)
 		return
 	}
-	status := "active"
-	if stopped {
-		status = "stopped"
-	}
-	writeJSON(w, http.StatusOK, envelope{Data: map[string]any{
-		"session_id": mux.Vars(r)["session_id"], "status": status,
-		"state_version": version, "command_id": commandID,
-	}})
+	writeJSON(w, http.StatusOK, envelope{Data: state})
 }
 
 func (h Handler) StopWorkflow(w http.ResponseWriter, r *http.Request)   { h.setStopped(w, r, true) }
@@ -801,6 +817,7 @@ func (h Handler) Consume(w http.ResponseWriter, r *http.Request) {
 		session, _, createErr := h.Store.CreateInitializedHostSession(
 			r.Context(), owner, sessionID, conversationID, original.OriginHost, original.OriginRef,
 			original.ControllerHost, workflowPackage, original.WorkflowMode, intentContext, bindings,
+			workflowstore.ControlSettings{Protocol: original.ControlProtocol, BindingRequired: original.HostBindingRequired, Provider: original.HostProvider},
 		)
 		if createErr != nil {
 			code := "SESSION_CREATE_FAILED"

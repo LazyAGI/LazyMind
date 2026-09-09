@@ -291,6 +291,7 @@ func TestCreateInitializedHostSessionRollsBackSessionIntentAndBindings(t *testin
 				ResourceRevision: resource.Revision, ContentHash: "sha256:wrong",
 				CreatedByCommandID: "prepare:1"},
 		},
+		ControlSettings{},
 	)
 	if !errors.Is(err, ErrIdempotencyConflict) || created {
 		t.Fatalf("invalid initialization created a Session: created=%v err=%v", created, err)

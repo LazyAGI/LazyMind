@@ -16,6 +16,7 @@ import (
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/workflow/controlstore"
 )
 
 // Session status constants. Interrupted attempts remain resumable as waiting, while
@@ -141,11 +142,19 @@ func GetLatestSession(ctx context.Context, db *gorm.DB, conversationID string) (
 func DismissSession(ctx context.Context, db *gorm.DB, sessionID string) error {
 	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var s orm.WorkflowSession
-		if err := tx.Where("id = ? AND dismissed = false", sessionID).First(&s).Error; err != nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND dismissed = false", sessionID).First(&s).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return fmt.Errorf("session not found or already dismissed")
 			}
 			return err
+		}
+		if controlstore.Controlled(s) && s.Status != SessionStatusCompleted {
+			if _, _, err := controlstore.ApplyLifecycle(tx, &s, "dismiss:"+common.GenerateID(), true); err != nil {
+				return err
+			}
+			if err := controlstore.BumpEvent(tx, &s, "control.changed", s.ID, "", map[string]any{"dismissed": true}); err != nil {
+				return err
+			}
 		}
 		// If active, mark queued/running steps interrupted before dismissing.
 		if s.Status == SessionStatusActive {
@@ -443,7 +452,7 @@ func WriteSlotRevision(ctx context.Context, db *gorm.DB,
 		}
 	}
 
-	if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	if err := reviewMaterialTransaction(ctx, db, sessionID, slotID, func(tx *gorm.DB) error {
 		// Compute next revision number scoped to (session, slot, list_index) so each
 		// list item has its own independent version counter starting at 1.
 		// For a new list append (listIndex == nil), this is always the first revision.
@@ -554,7 +563,7 @@ func WriteSlotRevisionWithSnapshot(ctx context.Context, db *gorm.DB,
 	var revisionID string
 	var finalListIndex *int
 
-	if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	if err := reviewMaterialTransaction(ctx, db, sessionID, slotID, func(tx *gorm.DB) error {
 		// Compute next revision number scoped to (session, slot, list_index) so each
 		// list item has its own independent version counter starting at 1.
 		// For a new list append (listIndex == nil), this is always the first revision.
@@ -703,7 +712,7 @@ func ReorderSlot(ctx context.Context, db *gorm.DB,
 	sessionID, slotID string, newListIndexOrder []int, version int) error {
 
 	now := time.Now().UTC()
-	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return reviewMaterialTransaction(ctx, db, sessionID, slotID, func(tx *gorm.DB) error {
 		var existing orm.WorkflowSlotOrder
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("session_id = ? AND slot_id = ?", sessionID, slotID).
@@ -746,7 +755,7 @@ func ReorderSlot(ctx context.Context, db *gorm.DB,
 // and are associated with this session/slot/list_index, and deselects all plugin_slot_revisions rows.
 func HideSlotItem(ctx context.Context, db *gorm.DB, sessionID, slotID string, listIndex int) error {
 	now := time.Now().UTC()
-	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return reviewMaterialTransaction(ctx, db, sessionID, slotID, func(tx *gorm.DB) error {
 		// Deselect all revisions at this list_index.
 		if err := tx.Model(&orm.WorkflowSlotRevision{}).
 			Where("session_id = ? AND slot_id = ? AND list_index = ?", sessionID, slotID, listIndex).
@@ -908,7 +917,7 @@ func RollbackSlotRevision(ctx context.Context, db *gorm.DB,
 		return nil, err
 	}
 
-	if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	if err := reviewMaterialTransaction(ctx, db, sessionID, slotID, func(tx *gorm.DB) error {
 		// Deselect current selected revision.
 		deselectQ := tx.Model(&orm.WorkflowSlotRevision{}).
 			Where("session_id = ? AND slot_id = ? AND selected = ?", sessionID, slotID, true)
@@ -1025,6 +1034,15 @@ func orderSlotRevisions(ctx context.Context, db *gorm.DB, sessionID string, rows
 // by each step attempt. The selected rows still define the current artifact value; the
 // extra step-scoped rows let the UI render each step tab as it looked when that step ran.
 func LoadDisplaySlots(ctx context.Context, db *gorm.DB, sessionID string) ([]orm.WorkflowSlotRevision, error) {
+	controlled := false
+	if db.Migrator().HasColumn(&orm.WorkflowSession{}, "control_protocol") {
+		var session orm.WorkflowSession
+		err := db.WithContext(ctx).Where("id = ?", sessionID).First(&session).Error
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
+		}
+		controlled = controlstore.Controlled(session)
+	}
 	selected, err := LoadSelectedSlots(ctx, db, sessionID)
 	if err != nil {
 		return nil, err
@@ -1042,12 +1060,18 @@ func LoadDisplaySlots(ctx context.Context, db *gorm.DB, sessionID string) ([]orm
 	seenIDs := make(map[string]bool, len(selected)+len(revisions))
 	seenDisplayItem := map[string]bool{}
 	for _, row := range selected {
+		if controlled && row.Validity != "effective" {
+			continue
+		}
 		result = append(result, row)
 		seenIDs[row.ID] = true
 		seenDisplayItem[slotDisplayKey(row)] = true
 	}
 
 	for _, row := range revisions {
+		if controlled && row.Validity != "effective" {
+			continue
+		}
 		if row.StepID == "__end__" {
 			continue
 		}
@@ -1121,6 +1145,16 @@ func UpdateSelectedHumanArtifactValue(
 	contentType string, value json.RawMessage, caption *string,
 	expectedRevision ...*int,
 ) (*orm.WorkflowSlotRevision, bool, error) {
+	value, cleanup, stageErr := controlstore.StageValue(ctx, db, sessionID, contentType, value)
+	if stageErr != nil {
+		return nil, false, stageErr
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			cleanup()
+		}
+	}()
 	var selected orm.WorkflowSlotRevision
 	var expected *int
 	if len(expectedRevision) > 0 {
@@ -1128,7 +1162,7 @@ func UpdateSelectedHumanArtifactValue(
 	}
 	updated := false
 
-	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := reviewMaterialTransaction(ctx, db, sessionID, slotID, func(tx *gorm.DB) error {
 		q := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("session_id = ? AND slot_id = ? AND selected = ?", sessionID, slotID, true)
 		if listIndex == nil {
@@ -1141,6 +1175,13 @@ func UpdateSelectedHumanArtifactValue(
 		}
 		if expected != nil && selected.Revision != *expected {
 			return ErrConflict
+		}
+		sealed, sealErr := controlstore.IsSealedRevision(tx, sessionID, selected.ID)
+		if sealErr != nil {
+			return sealErr
+		}
+		if sealed {
+			return nil
 		}
 		if selected.ChangeSource != "human" || selected.HumanArtifactID == nil || *selected.HumanArtifactID == "" {
 			return nil
@@ -1164,6 +1205,7 @@ func UpdateSelectedHumanArtifactValue(
 	if err != nil {
 		return nil, false, err
 	}
+	committed = updated
 	return &selected, updated, nil
 }
 
@@ -1181,6 +1223,16 @@ func WriteSlotRevisionWithHumanArtifact(
 	expectedRevision ...*int,
 ) (*orm.WorkflowSlotRevision, error) {
 
+	value, cleanup, stageErr := controlstore.StageValue(ctx, db, sessionID, contentType, value)
+	if stageErr != nil {
+		return nil, stageErr
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			cleanup()
+		}
+	}()
 	now := time.Now().UTC()
 	artifactID := "pha_" + common.GenerateID()
 	humanArt := &orm.WorkflowHumanArtifact{
@@ -1201,7 +1253,7 @@ func WriteSlotRevisionWithHumanArtifact(
 		expected = expectedRevision[0]
 	}
 
-	if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	if err := reviewMaterialTransaction(ctx, db, sessionID, slotID, func(tx *gorm.DB) error {
 		if expected != nil {
 			var current orm.WorkflowSlotRevision
 			q := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
@@ -1291,6 +1343,7 @@ func WriteSlotRevisionWithHumanArtifact(
 		return nil, err
 	}
 
+	committed = true
 	var result orm.WorkflowSlotRevision
 	err := db.WithContext(ctx).
 		Where("id = ?", revisionID).
@@ -1300,49 +1353,13 @@ func WriteSlotRevisionWithHumanArtifact(
 
 // LoadSlotRevisionValue resolves the selected artifact representation used by a
 // Workflow revision without duplicating storage lookup rules in HTTP handlers.
-func LoadSlotRevisionValue(
-	ctx context.Context,
-	db *gorm.DB,
-	revision orm.WorkflowSlotRevision,
-) (json.RawMessage, error) {
-	if revision.HumanArtifactID != nil {
-		var artifact orm.WorkflowHumanArtifact
-		if err := db.WithContext(ctx).Where("id = ?", *revision.HumanArtifactID).
-			First(&artifact).Error; err != nil {
-			return nil, err
-		}
-		return artifact.Value, nil
-	}
-	if revision.ArtifactSeq != nil {
-		taskID, err := loadSlotRevisionTaskID(ctx, db, revision)
-		if err != nil {
-			return nil, err
-		}
-		var artifact orm.SubAgentArtifact
-		if err := db.WithContext(ctx).Where(
-			"task_id = ? AND slot = ? AND seq = ? AND hidden = ?",
-			taskID, revision.Slot, *revision.ArtifactSeq, false,
-		).First(&artifact).Error; err != nil {
-			return nil, err
-		}
-		return artifact.Value, nil
-	}
-	if len(revision.ContentSnapshot) == 0 {
-		return nil, gorm.ErrRecordNotFound
-	}
-	return revision.ContentSnapshot, nil
+func LoadSlotRevisionValue(ctx context.Context, db *gorm.DB, revision orm.WorkflowSlotRevision) (json.RawMessage, error) {
+	return controlstore.ResolveValue(db.WithContext(ctx), revision)
 }
 
-func loadSlotRevisionTaskID(
-	ctx context.Context,
-	db *gorm.DB,
-	revision orm.WorkflowSlotRevision,
-) (string, error) {
+func loadSlotRevisionTaskID(ctx context.Context, db *gorm.DB, revision orm.WorkflowSlotRevision) (string, error) {
 	var step orm.WorkflowSessionStep
-	if err := db.WithContext(ctx).Where(
-		"session_id = ? AND step_id = ? AND attempt = ?",
-		revision.SessionID, revision.StepID, revision.Attempt,
-	).First(&step).Error; err != nil {
+	if err := db.WithContext(ctx).Where("session_id = ? AND step_id = ? AND attempt = ?", revision.SessionID, revision.StepID, revision.Attempt).First(&step).Error; err != nil {
 		return "", err
 	}
 	return step.TaskID, nil
