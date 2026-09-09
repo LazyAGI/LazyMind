@@ -270,7 +270,7 @@ func TestWorkspaceOperationSensitiveReadApproval(t *testing.T) {
 	}
 }
 
-// Pause at the state-store boundary after ExecuteOperation has read its snapshot.
+// Pause at the state-store boundary before ExecuteOperation claims its lock.
 // All SQL, authorization and file operations still use the real implementation.
 type delayedOperationClaimStore struct {
 	state.Store

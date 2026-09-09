@@ -1,6 +1,6 @@
 # 工作区工具授权任务与验收
 
-主方案：IMPLEMENTATION_PLAN.md，第 12 节为最新状态。用户已允许项目算法及对应测试修改，并批准原设计及 A1/A2 实现；LazyLLM/gitlink、Local/Desktop 继续冻结。当前为 A2-R1 修复测试 Review，A2 整体验收与 A3 尚未完成。
+主方案：IMPLEMENTATION_PLAN.md，第 12 节为最新状态。用户已允许项目算法及对应测试修改，并批准原设计及 A1/A2、A2-R1 实现；LazyLLM/gitlink、Local/Desktop 继续冻结。A2-R1 已修复并通过回归，A2 整体验收与 A3 尚未完成。
 
 ## 当前状态与总门禁
 
@@ -165,13 +165,13 @@ A2 开始前继续遵守测试先行和人工 Review；Core 文件执行与批�
 
 - [x] Core 基础文件操作、operation 状态结构及四条操作/决定路由已提交；历史测试只证明当时覆盖的场景。
 - [x] LocalFileToolkit 的 read/string_replace/create/append/delete 有 Core 转发分支；不代表发现工具也已接入，call_id 幂等未证明。
-- [ ] 完整权限表、目录竞态、撤销协调、单次执行、HTTP 身份边界与失败恢复验收；本次已复现 5 项失败。
-- [x] A2-R1：在既有 operations_test.go 增加 12 项行为用例，净增 168 行；本轮生产净增 0。
-- [x] A2-R1：基线通过；完整包 race 矩阵 43 通过、5 预期失败、0 异常失败，原有 36 项通过。
-- [ ] Review A2-R1：仅 operations.go，预计生产净增 15–40 行、0 新文件；修复敏感读决定、锁后状态复核、failed 禁止重试、completed 读取返回无内容回执。
-- [ ] Review 后实现 A2-R1 并将新增 12 项转绿，执行工作区/聊天/子任务回归，再更新四份文档和实际 diff 规模。
+- [ ] 完整权限表、目录竞态、撤销协调、单次执行、HTTP 身份边界与失败恢复验收；本次仅覆盖下列 12 项行为用例。
+- [x] A2-R1 测试批次 cff178a1：在既有 operations_test.go 增加 12 项行为用例，净增 168 行，生产净增 0；RED 为 43 通过、5 预期失败、0 异常失败，原有 36 项通过。
+- [x] 用户“直接生产吧”批准 A2-R1 最小修复；仅 operations.go，生产新增 13/删除 11/净增 2 行，无新生产文件。
+- [x] 修复敏感读决定、锁后状态复核、failed 禁止重试、completed 读取返回无内容回执；新增 12 项全部转绿，未删除或改弱断言。
+- [x] `go test -race ./localworkspace -count=1`、`go test ./chat ./subagent -count=1`、`go vet ./localworkspace` 通过；四份文档同步实际 diff 和未验证项。
 - [ ] A2 后续：批准前内容读取、路径/外部编辑/撤销竞态、原子解锁及租期、prepare 幂等与 uncertain，分别先补真实合同；本批不宣称这些问题已解决。
 - [ ] A3：把真实 Core gate 注入 middleware，pending 在原 Agent 调用中等待/恢复，批准 UI 和刷新/切会话隔离。
 - [ ] A3：证明普通子任务、已声明 Workflow、lease/取消/重启、uncertain 语义；完成 Local/打包 Desktop 实测。
 
-A2 已提交生产实际新增 894、删除 1、净增 893 行、2 个新生产文件；本次修复测试新增 168 行，不以拆批隐藏累计规模。
+A2 基础实现生产净增 893 行、2 个新生产文件；A2-R1 修复生产净增 2 行，合计 895 行。测试批次净增 168 行，本次只调整一行测试注释，不以拆批隐藏累计规模。

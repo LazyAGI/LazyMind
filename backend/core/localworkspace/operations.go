@@ -149,22 +149,6 @@ func ExecuteOperation(ctx context.Context, db *gorm.DB, stateStore state.Store, 
 	if stateStore == nil {
 		return OperationResult{}, common.ResolveAppError("store not initialized", 500)
 	}
-	value, err := loadOperationState(ctx, stateStore, operationID)
-	if err != nil {
-		return OperationResult{}, err
-	}
-	if !sameOperationCall(value.Request, req) || value.ContentDigest != digestString(req.Content) || value.OldContentDigest != digestString(req.OldContent) {
-		return OperationResult{}, Error("binding_conflict", 409, "conflict")
-	}
-	if value.Status == operationCompleted && req.Operation != OperationRead {
-		return value.Result, nil
-	}
-	if value.Status == operationExecuting || value.Status == operationUncertain {
-		return OperationResult{}, Error("binding_conflict", 409, "conflict")
-	}
-	if value.Decision != DecisionAllowed {
-		return OperationResult{}, Error("selection_forbidden", 403, "forbidden")
-	}
 	claimed, err := claimOperation(ctx, stateStore, operationID, req.CallID)
 	if err != nil {
 		return OperationResult{}, err
@@ -173,6 +157,24 @@ func ExecuteOperation(ctx context.Context, db *gorm.DB, stateStore state.Store, 
 		return OperationResult{}, Error("binding_conflict", 409, "conflict")
 	}
 	defer releaseOperation(ctx, stateStore, operationLockKey(operationID), req.CallID)
+
+	// Read the decision and execution status only after claiming the operation.
+	value, err := loadOperationState(ctx, stateStore, operationID)
+	if err != nil {
+		return OperationResult{}, err
+	}
+	if !sameOperationCall(value.Request, req) || value.ContentDigest != digestString(req.Content) || value.OldContentDigest != digestString(req.OldContent) {
+		return OperationResult{}, Error("binding_conflict", 409, "conflict")
+	}
+	if value.Status == operationCompleted {
+		return value.Result, nil
+	}
+	if value.Decision != DecisionAllowed {
+		return OperationResult{}, Error("selection_forbidden", 403, "forbidden")
+	}
+	if value.Status != operationAllowed {
+		return OperationResult{}, Error("binding_conflict", 409, "conflict")
+	}
 
 	value.Status = operationExecuting
 	if err := saveOperationState(ctx, stateStore, value); err != nil {
@@ -403,7 +405,7 @@ func digestBytes(content []byte) string {
 }
 
 func permissionDecision(mode string, operation OperationKind, path string) Decision {
-	if operation == OperationRead || mode == PermissionAllowAll {
+	if mode == PermissionAllowAll || (operation == OperationRead && !isSensitivePath(path)) {
 		return DecisionAllowed
 	}
 	if mode == PermissionAlwaysAsk || operation == OperationDelete || isSensitivePath(path) {

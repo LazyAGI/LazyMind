@@ -1,8 +1,14 @@
 # 当前差异证据
 
-## 最新：A2-R1 行为复现（2026-09-09）
+## 最新：A2-R1 修复与验证（2026-09-09）
 
-本节更正下方历史“A2 完成”判断，不继承旧测试成功作为本次验收。HEAD `a5761633`，本轮未修改生产代码。
+- 用户已批准从 `cff178a1` 直接实施生产。仅 operations.go 新增 13、删除 11、净增 2 行：将状态读取移至领取锁之后；completed 统一返回回执；只有 allowed 状态可执行；敏感读取不走普通读取免询问分支。复用已有函数和类型，没有新增生产文件或重复校验。
+- 本次新增四组 12 项测试全部通过，之前 5 项 RED 转绿；`go test -race ./localworkspace -count=1`、`go test ./chat ./subagent -count=1`、`go vet ./localworkspace` 全部通过。测试只调整一行顺序说明注释，断言未改。
+- 范围检查确认 Local/Desktop、LazyLLM/gitlink 未变化。状态读取顺序修复仅覆盖已复现的交错；锁租期、原子释放、prepare 幂等、目录竞态及运行身份仍按主方案保持未解决。算法/前端和实机本轮未测。
+
+### 修复前行为复现（测试提交 cff178a1）
+
+以下为基于 `a5761633` 建立失败合同的历史记录，更正下方历史“A2 完成”判断，不继承旧测试成功作为本次验收。
 
 - `permissionDecision` 首个分支对所有 read 返回 allowed，导致 `.env` 在 always_ask、ask_as_needed 下绕过 pending。通过实际 PrepareOperation + 临时假数据文件复现 2 项失败；普通读、示例文件和 allow_all 敏感读的 7 项兼容用例通过。
 - ExecuteOperation 在 SetNX 前读取 value，领取后未重新读取。测试在 Store 边界确定性插入另一请求完成追加，再让外部编辑器恢复原内容；延迟请求重用旧快照，把追加再次写入，实际磁盘断言失败。包装器只安排交错，授权、SQLite 与文件操作均为真实实现。

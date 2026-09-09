@@ -1,6 +1,14 @@
 # 工作区剩余功能交接进度
 
-## 当前批次：A2-R1 行为测试与修复 Review（2026-09-09）
+## 当前批次：A2-R1 生产修复完成（2026-09-09）
+
+- 用户“直接生产吧”已批准上一批 12 项行为合同及 operations.go 最小修复范围。本轮从 `cff178a1` 开始，工作区起始干净；无需重复申请该范围授权。
+- 实现采用先领取锁再读取一次状态，避免复制锁前/锁后两套校验；仅 allowed 可执行，completed 读写均返回保存回执；普通读取免询问排除敏感路径。复用既有 helper/错误，仅 operations.go 生产新增 13、删除 11、净增 2 行，无新生产文件；operations_test.go 仅调整一行注释。
+- 本次在 backend/core 执行 `go test ./localworkspace -run 'TestWorkspaceOperation(SensitiveReadApproval|DelayedExecutionCannotReplayCompletedAppend|FailedAppendCannotReuseApproval|CompletedReadReturnsReceiptWithoutReadingAgain)$' -count=1 -v`，12 项全部通过，原 5 项 RED 转绿；`go test -race ./localworkspace -count=1`、`go test ./chat ./subagent -count=1`、`go vet ./localworkspace` 均通过。
+- Local/Desktop 相对 ec4676e0 零差异，LazyLLM 相对 245bc26d 零差异，gitlink 一致且子模块干净。四份文档已同步实现、实际代码量和未验证项；本批提交仅包含上述生产文件、测试注释和四份文档，未推送。
+- 下一步是 A2 剩余的批准前内容读取、路径/外部编辑/撤销竞态、锁租期与幂等/uncertain 合同，再推进发现工具和 A3/T6。完整算法/前端/实机本轮未测，不能将 A2-R1 完成等同完整文件授权交付。
+
+### A2-R1 测试阶段记录（cff178a1，保留 RED 证据）
 
 - 用户要求进入下一阶段开发；先补 A2 遗留权限与重复执行问题，随后才推进 A3。当前 HEAD 为 `a576163308d10debccb21559d3495ba59080a85f`，工作区起始干净，本地领先远端跟踪分支 3 个提交；本轮未拉取或推送。
 - 更正下方历史“A2 完成”：仅基础操作已实现，敏感读取直接放行、领取执行锁后使用旧状态、完成的读取重新访问文件、failed 状态可以重试均需行为验证；完整 A2 验收仍未完成。
