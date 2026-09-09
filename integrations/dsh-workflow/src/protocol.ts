@@ -63,18 +63,50 @@ export function presentationRun(meta: unknown): RunLink | null {
   } : null
 }
 
-/** Read only our standard-event projection, including PTC's standard nested dispatch log. */
+function visitTexts(value: unknown, into: string[]): void {
+  const item = object(value)
+  if (!item) return
+  if (typeof item.text === 'string') into.push(item.text)
+  if (Array.isArray(item.content)) for (const child of item.content) visitTexts(child, into)
+}
+
+function runFromToolText(text: string): RunLink | null {
+  const hasRun = text.includes('"interaction_url"') && text.includes('"session_id"')
+  if (!hasRun && text.length > 8192 || text.length > 512 * 1024) return null
+  try {
+    const parsed = JSON.parse(text)
+    return presentationRun(parsed)
+      ?? interaction({ structuredContent: parsed })
+      ?? interaction({ structuredContent: object(parsed)?.state ?? object(parsed)?.result })
+  } catch {
+    return null
+  }
+}
+
+/** DSH web logs MCP JSON in tool-result message text. Meta is optional and often absent. */
 export function eventRun(event: unknown, serverName: string): RunLink | null {
   const value = object(event)
   const data = object(value?.data)
-  if (value?.type === 'tool/result') return presentationRun(data?.meta)
+  if (value?.type === 'tool/result') {
+    const fromMeta = presentationRun(data?.meta)
+    if (fromMeta) return fromMeta
+    const texts: string[] = []
+    visitTexts(object(data?.message), texts)
+    if (Array.isArray(data?.content)) for (const child of data.content) visitTexts(child, texts)
+    for (const text of texts.reverse()) {
+      const run = runFromToolText(text)
+      if (run) return run
+    }
+    return null
+  }
   if (value?.type !== 'tool/code-dispatch' || data?.isError !== false || typeof data.name !== 'string'
     || !['start', 'state', 'step_begin', 'step_claim', 'step_resume', 'step_submit'].includes(workflowOperation(data.name, serverName) ?? '')
     || !Array.isArray(data.content)) return null
   for (const raw of [...data.content].reverse()) {
     const content = object(raw)
-    if (content?.type !== 'text' || typeof content.text !== 'string' || content.text.length > 8192) continue
-    try { const run = presentationRun(JSON.parse(content.text)); if (run) return run } catch { /* ordinary tool text */ }
+    if (typeof content?.text !== 'string') continue
+    const run = runFromToolText(content.text)
+    if (run) return run
   }
   return null
 }

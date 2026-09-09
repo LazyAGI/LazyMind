@@ -111,7 +111,7 @@ func TestRaccoonUsesDesktopConfiguration(t *testing.T) {
 	}
 }
 
-func TestDeepSeekRequiresProfileButInstallsMCPClientAutomatically(t *testing.T) {
+func TestDeepSeekRequiresInitializedProfile(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("DSH_HOME", root)
 	adapter := testAdapter(DeepSeekHarness)
@@ -121,10 +121,81 @@ func TestDeepSeekRequiresProfileButInstallsMCPClientAutomatically(t *testing.T) 
 		t.Fatalf("status=%#v", status)
 	}
 	writeTestFile(t, filepath.Join(root, "profiles", "web", "package.json"), `{}`)
-	writeTestFile(t, filepath.Join(root, "profiles", "node_modules", "@deepseek-ai", "dsh-mcp-client", "package.json"), `{}`)
 	status = adapter.Status(context.Background())
 	if status.State != agentintegration.Ready {
 		t.Fatalf("status=%#v", status)
+	}
+}
+
+func TestRunDSHPluginRequiresInitializedProfile(t *testing.T) {
+	t.Setenv("DSH_HOME", t.TempDir())
+	t.Setenv("PATH", t.TempDir())
+	err := runDSHPlugin(context.Background(), "web", "add", "pkg")
+	if err == nil || !strings.Contains(err.Error(), "not initialized") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestRunDSHPluginInstallsIntoExistingProfile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("posix fake pnpm")
+	}
+	root := t.TempDir()
+	t.Setenv("DSH_HOME", root)
+	profile := filepath.Join(root, "profiles", "web")
+	writeTestFile(t, filepath.Join(profile, "package.json"), `{
+  "dependencies": {
+    "@lazymind/dsh-workflow": "file:plugin"
+  },
+  "dsh": {"profile": {"bundles": ["@deepseek-ai/dsh-base"]}}
+}`)
+	writeTestFile(t, filepath.Join(profile, "node_modules", "@lazymind", "dsh-workflow", "package.json"), `{
+  "name": "@lazymind/dsh-workflow",
+  "dsh": {"bundle": {"patch": "./cordis.patch.yml"}}
+}`)
+	bin := t.TempDir()
+	record := filepath.Join(bin, "args.txt")
+	writeFakePNPMWithScript(t, bin, "printf '%s\\n' \"$*\" > \"$PNPM_ARGS_FILE\"; pwd >> \"$PNPM_ARGS_FILE\"\n")
+	t.Setenv("PATH", bin)
+	t.Setenv("PNPM_ARGS_FILE", record)
+	if err := runDSHPlugin(context.Background(), "web", "add", "pkg"); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(body)), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("pnpm invocation=%q", body)
+	}
+	wantDir, err := filepath.EvalSymlinks(profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotDir, err := filepath.EvalSymlinks(lines[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lines[0] != "add pkg" || gotDir != wantDir {
+		t.Fatalf("pnpm invocation=%q", body)
+	}
+	manifest, err := os.ReadFile(filepath.Join(profile, "package.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var parsed struct {
+		DSH struct {
+			Profile struct {
+				Bundles []string `json:"bundles"`
+			} `json:"profile"`
+		} `json:"dsh"`
+	}
+	if err := json.Unmarshal(manifest, &parsed); err != nil {
+		t.Fatal(err)
+	}
+	if got := parsed.DSH.Profile.Bundles; len(got) != 2 || got[0] != "@deepseek-ai/dsh-base" || got[1] != "@lazymind/dsh-workflow" {
+		t.Fatalf("bundles=%#v", got)
 	}
 }
 
@@ -271,6 +342,13 @@ func setTestHome(t *testing.T, home string) {
 	t.Helper()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
+}
+
+func writeFakePNPMWithScript(t *testing.T, dir, script string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, "pnpm"), []byte("#!/bin/sh\n"+script), 0o755); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestDSHEndpointValidation(t *testing.T) {

@@ -144,12 +144,9 @@ func (a *Adapter) status() agentintegration.Status {
 		return agentintegration.Fail(status, err.Error())
 	}
 	if a.kind == DeepSeekHarness && state.configured && state.owned && state.current {
-		version, _ := dshModuleVersion(filepath.Dir(configPath(a.kind)), "@deepseek-ai/dsh-session")
-		if version == dshSDKVersion && !a.dshWorkflowConfigured() {
+		if !a.dshWorkflowConfigured() {
 			state.current = false
 			status.Message = "MCP is configured; reconnect to install or update the Workflow panel and host adapter."
-		} else if version != dshSDKVersion {
-			status.Message = "MCP is configured. Native Workflow control is currently verified for DSH " + dshSDKVersion + "."
 		} else {
 			status.Message = "MCP and the Workflow bundle are configured. Restart DSH to activate updated plugins."
 		}

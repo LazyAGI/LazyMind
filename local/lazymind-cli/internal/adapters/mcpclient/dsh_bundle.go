@@ -19,7 +19,6 @@ import (
 	"lazymind/agentconnector/internal/workflowhost"
 )
 
-const dshSDKVersion = "0.1.2-rc.1"
 const dshWorkflowRow = "lazymind-workflow-panel"
 const dshWorkflowPackage = "@lazymind/dsh-workflow"
 
@@ -60,20 +59,16 @@ func dshModuleVersion(profile, module string) (string, error) {
 }
 
 func runDSHPlugin(ctx context.Context, profile string, args ...string) error {
-	var command *exec.Cmd
-	dsh, dshErr := exec.LookPath("dsh")
-	_, pnpmErr := exec.LookPath("pnpm")
-	if dshErr == nil && pnpmErr == nil {
-		command = exec.CommandContext(ctx, dsh, append([]string{"plugin", "--profile", profile}, args...)...)
-	} else {
-		npx, err := exec.LookPath("npx")
-		if err != nil {
-			return errors.New("Node.js/npm is required to manage the installed DSH profile")
-		}
-		// npm provides both executables to this invocation; no global package is replaced.
-		arguments := []string{"--yes", "--package=pnpm@10.0.0", "--package=@deepseek-ai/dsh@" + dshSDKVersion, "--", "dsh", "plugin", "--profile", profile}
-		command = exec.CommandContext(ctx, npx, append(arguments, args...)...)
+	dir := filepath.Join(dshHome(), "profiles", profile)
+	if !pathExists(filepath.Join(dir, "package.json")) {
+		return errors.New("DeepSeek Harness is not initialized. Start DSH once, then enable this switch to install the LazyMind plugin")
 	}
+	pnpm, err := exec.LookPath("pnpm")
+	if err != nil {
+		return errors.New("pnpm is required to install the LazyMind plugin into the existing DSH profile")
+	}
+	command := exec.CommandContext(ctx, pnpm, args...)
+	command.Dir = dir
 	command.Env = append(os.Environ(), "DSH_HOME="+dshHome())
 	output, err := command.CombinedOutput()
 	if err != nil {
@@ -83,7 +78,93 @@ func runDSHPlugin(ctx context.Context, profile string, args ...string) error {
 		}
 		return fmt.Errorf("install DSH workflow bundle: %w: %s", err, message)
 	}
-	return nil
+	return reconcileProfileBundles(dir)
+}
+
+func hasDSHBundlePatch(profileDir, packageName string) bool {
+	for _, parent := range []string{profileDir, filepath.Dir(profileDir), filepath.Join(profileDir, "node_modules", ".pnpm")} {
+		body, err := os.ReadFile(filepath.Join(parent, "node_modules", filepath.FromSlash(packageName), "package.json"))
+		if err != nil {
+			continue
+		}
+		var manifest struct {
+			DSH struct {
+				Bundle struct {
+					Patch string `json:"patch"`
+				} `json:"bundle"`
+			} `json:"dsh"`
+		}
+		if json.Unmarshal(body, &manifest) == nil && manifest.DSH.Bundle.Patch != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func reconcileProfileBundles(profileDir string) error {
+	path := filepath.Join(profileDir, "package.json")
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	var manifest map[string]any
+	if err := json.Unmarshal(body, &manifest); err != nil {
+		return err
+	}
+	deps, _ := manifest["dependencies"].(map[string]any)
+	dsh, _ := manifest["dsh"].(map[string]any)
+	if dsh == nil {
+		dsh = map[string]any{}
+		manifest["dsh"] = dsh
+	}
+	profile, _ := dsh["profile"].(map[string]any)
+	if profile == nil {
+		profile = map[string]any{}
+		dsh["profile"] = profile
+	}
+	bundles := jsonStrings(profile["bundles"])
+	changed := false
+	for name := range deps {
+		if !hasDSHBundlePatch(profileDir, name) || containsString(bundles, name) {
+			continue
+		}
+		bundles = append(bundles, name)
+		changed = true
+	}
+	if !changed {
+		return nil
+	}
+	profile["bundles"] = bundles
+	out, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(out, '\n'), 0o644)
+}
+
+func jsonStrings(value any) []string {
+	items, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		name, ok := item.(string)
+		if !ok {
+			continue
+		}
+		out = append(out, name)
+	}
+	return out
+}
+
+func containsString(items []string, want string) bool {
+	for _, item := range items {
+		if item == want {
+			return true
+		}
+	}
+	return false
 }
 
 func configureDSHWorkflow(path, pairingFile, webURL, bridgeURL string, disabled bool) error {
@@ -155,31 +236,6 @@ func (a *Adapter) dshWorkflowConfigured() bool {
 
 func (a *Adapter) installDSHWorkflow(ctx context.Context) (bool, error) {
 	profile := filepath.Dir(configPath(DeepSeekHarness))
-	version, err := dshModuleVersion(profile, "@deepseek-ai/dsh-session")
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return false, err
-	}
-	if errors.Is(err, os.ErrNotExist) {
-		// A new official profile inherits its base from the launching CLI and has no
-		// local SDK dependencies. Install our MCP dependency through the supported CLI.
-		if binary, found := exec.LookPath("dsh"); found == nil {
-			output, probeErr := exec.CommandContext(ctx, binary, "--version").Output()
-			if probeErr != nil {
-				return false, probeErr
-			}
-			version = strings.TrimPrefix(strings.TrimSpace(string(output)), "v")
-		} else {
-			version = dshSDKVersion
-		}
-	}
-	if version != dshSDKVersion {
-		if _, err := dshModuleVersion(profile, dshWorkflowPackage); err == nil {
-			if err := configureDSHWorkflow(configPath(DeepSeekHarness), "", "", "", true); err != nil {
-				return false, err
-			}
-		}
-		return false, nil
-	}
 	store, err := credentials.NewStore(a.home, "")
 	if err != nil {
 		return false, err
@@ -228,7 +284,7 @@ func (a *Adapter) installDSHWorkflow(ctx context.Context) (bool, error) {
 	if run == nil {
 		run = runDSHPlugin
 	}
-	if err := run(ctx, dshProfileName(), "add", "--workspace-root", "@deepseek-ai/dsh-mcp-client@"+dshSDKVersion, archive); err != nil {
+	if err := run(ctx, dshProfileName(), "add", "--workspace-root", archive); err != nil {
 		return false, err
 	}
 	pairingFile := filepath.Join(a.home, "workflow-hosts", pair.ConnectorID+".json")
