@@ -4,7 +4,7 @@ name: CI
 on:
   workflow_dispatch:
   pull_request:
-    branches: [main, master, 'dev/*']
+    branches: [main, master, 'dev/*', workflow/DeepSeekHarness_integration]
     paths-ignore:
       - "**.md"
       - ".git*"
@@ -87,6 +87,10 @@ jobs:
         with:
           fetch-depth: 0
 
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '10.0.0'
+
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
@@ -94,6 +98,13 @@ jobs:
       - name: Verify generated OpenAPI clients
         working-directory: frontend
         run: node scripts/openapi/check-stale.mjs
+
+      - name: Shared workflow editor and PPT export regressions
+        working-directory: frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm exec vitest run src/modules/chat/utils/workflowControl.test.ts src/modules/chat/components/WorkflowPanel/SlotText.test.tsx src/modules/chat/components/WorkflowPanel/workflowApproval.test.ts src/modules/chat/components/WorkflowPanel/ppt/exportHtmlToPptx.test.ts
+          pnpm build
 
       - name: Install and test with coverage
         run: |
@@ -112,6 +123,39 @@ jobs:
         run: |
           cd tests/frontend
           npx c8 check-coverage --lines 10 --functions 10 --branches 10
+
+  test-dsh-plugin:
+    needs: [lint, doc_check]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '10.0.0'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+          cache-dependency-path: integrations/dsh-workflow/pnpm-lock.yaml
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.11'
+          cache-dependency-path: local/lazymind-cli/go.sum
+      - name: DSH SDK contracts and plugin build
+        working-directory: integrations/dsh-workflow
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm typecheck
+          pnpm test
+          pnpm bundle
+      - name: Verify the shipped plugin matches source
+        working-directory: local/lazymind-cli
+        run: |
+          go run ./cmd/package-workflow-bundle
+          git diff --exit-code -- ../../integrations/dsh-workflow/lib internal/adapters/mcpclient/assets/dsh-workflow.tgz
 
   test-local-runtime:
     needs: [lint, doc_check]
@@ -155,6 +199,19 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+      - uses: actions/setup-go@v5
+        if: runner.os == 'Windows'
+        with:
+          go-version: '1.25.11'
+          cache-dependency-path: local/lazymind-cli/go.sum
+      - name: Build native Bridge for lifecycle regression
+        if: runner.os == 'Windows'
+        shell: powershell
+        working-directory: local/lazymind-cli
+        run: |
+          go build -o "$env:RUNNER_TEMP\lazymind.exe" ./cmd/lazymind
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          "LAZYMIND_TEST_BRIDGE_EXE=$env:RUNNER_TEMP\lazymind.exe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Test Desktop shell
         shell: bash
         run: node --test desktop/scripts/*.test.mjs
