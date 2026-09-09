@@ -152,7 +152,7 @@ def test_system_prompt_explains_profile_operations_by_yaml_type() -> None:
     assert 'Use only existing leaf dot paths' in prompt
 
 
-def test_system_prompt_uses_query_history_and_environment_not_profile_language() -> None:
+def test_saved_language_preference_beats_current_request_language() -> None:
     bundle = build_standard_prompt_bundle(
         True,
         current_query='What changed?',
@@ -160,6 +160,22 @@ def test_system_prompt_uses_query_history_and_environment_not_profile_language()
         environment_context={'locale': 'zh-CN'},
     )
 
-    assert 'Selected response language for this turn: English' in bundle.current_input
-    assert 'profile locale.languages' not in bundle.current_input
+    assert (
+        'Selected response language for this turn: Chinese (profile locale.languages)'
+        in bundle.current_input
+    )
+
+
+def test_explicit_language_instruction_beats_saved_language_preference() -> None:
+    bundle = build_standard_prompt_bundle(
+        True,
+        current_query='Please answer this turn in English: what was the result?',
+        profile='locale:\n  languages: [Chinese]\n',
+        environment_context={'locale': 'zh-CN'},
+    )
+
+    assert (
+        'Selected response language for this turn: English (explicit instruction in the current request)'
+        in bundle.current_input
+    )
     assert 'profile locale.languages' not in bundle.system_prompt

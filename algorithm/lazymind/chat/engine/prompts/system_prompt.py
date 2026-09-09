@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from datetime import datetime, timezone as datetime_timezone
 import re
+from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from lazymind.chat.engine.agent_runtime import AgentRole, PromptBuilder, PromptBundle
 from lazymind.common.memory.field_contract import memory_operation_rules
+from lazymind.common.memory.validation.common import parse_yaml_frontmatter, parse_yaml_mapping
 
 from .guidance import (
     ANALYSIS_GUIDANCE,
@@ -103,11 +105,40 @@ def _conversation_language(history: list[dict] | None = None) -> str:
 
 def _locale_language(locale: str) -> str:
     normalized = locale.strip().lower()
-    if normalized.startswith('zh'):
+    if normalized.startswith('zh') or normalized in {'chinese', 'mandarin', '中文', '汉语', '普通话'}:
         return 'Chinese'
-    if normalized.startswith('en'):
+    if normalized.startswith('en') or normalized in {'english', '英文', '英语'}:
         return 'English'
     return locale.strip() or _DEFAULT_UI_LOCALE
+
+
+def _profile_mapping(profile: str | None) -> dict[str, Any]:
+    if not isinstance(profile, str) or not profile.strip():
+        return {}
+    frontmatter, _body = parse_yaml_frontmatter(profile)
+    if frontmatter:
+        return frontmatter
+    return parse_yaml_mapping(profile)
+
+
+def _saved_language_preference(profile: str | None) -> tuple[str, str]:
+    document = _profile_mapping(profile)
+    locale = document.get('locale')
+    if not isinstance(locale, dict):
+        nested = document.get('document')
+        if isinstance(nested, dict):
+            locale = nested.get('locale')
+    if not isinstance(locale, dict):
+        return '', ''
+    languages = locale.get('languages')
+    if isinstance(languages, str):
+        languages = [languages]
+    if not isinstance(languages, list) or not languages:
+        return '', ''
+    first = languages[0]
+    if not isinstance(first, str) or not first.strip():
+        return '', ''
+    return _locale_language(first.strip()), 'profile locale.languages'
 
 
 def _resolve_response_language(
@@ -115,10 +146,15 @@ def _resolve_response_language(
     current_query: str | None = None,
     conversation_history: list[dict] | None = None,
     environment_context: dict | None = None,
+    profile: str | None = None,
 ) -> tuple[str, str]:
     current_instruction = _explicit_language(current_query)
     if current_instruction:
         return current_instruction, 'explicit instruction in the current request'
+
+    saved_language, saved_source = _saved_language_preference(profile)
+    if saved_language:
+        return saved_language, saved_source
 
     request_language = _dominant_language(current_query)
     if request_language:
@@ -147,11 +183,13 @@ def _build_turn_language_prompt(
     *,
     current_query: str | None = None,
     conversation_history: list[dict] | None = None,
+    profile: str | None = None,
 ) -> str:
     language, source = _resolve_response_language(
         current_query=current_query,
         conversation_history=conversation_history,
         environment_context=environment_context,
+        profile=profile,
     )
     return (
         f'Selected response language for this turn: {language} ({source}).\n'
@@ -189,9 +227,9 @@ def _parse_user_local_time(time_now: object, timezone: object) -> tuple[datetime
 
 
 def _format_user_date(time_now: object, timezone: object) -> str:
-    parsed_time, timezone_name, raw_time = _parse_user_local_time(time_now, timezone)
+    parsed_time, timezone_name, _raw_time = _parse_user_local_time(time_now, timezone)
     if parsed_time is None:
-        return raw_time
+        return ''
     if timezone_name:
         return f'{parsed_time:%Y-%m-%d} ({timezone_name})'
     return f'{parsed_time:%Y-%m-%d}'
@@ -270,6 +308,7 @@ def add_standard_system_sections(
             environment_context,
             current_query=current_query,
             conversation_history=conversation_history,
+            profile=profile,
         ),
         'request.language', priority=1, authoritative=True, content_kind='instruction',
     ).runtime(

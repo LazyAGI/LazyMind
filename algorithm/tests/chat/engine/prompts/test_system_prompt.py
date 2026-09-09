@@ -9,9 +9,10 @@ def test_response_language_policy_uses_ui_locale_as_session_default():
 
     assert '# Response language (mandatory)' in bundle.system_prompt
     assert '1. An explicit language preference or instruction from the user.' in bundle.system_prompt
-    assert '2. The dominant natural language of the current user request.' in bundle.system_prompt
-    assert "3. The dominant language of the user's recent conversation messages." in bundle.system_prompt
-    assert '4. The session default language from the UI locale supplied below.' in bundle.system_prompt
+    assert "2. The user's saved language preference." in bundle.system_prompt
+    assert '3. The dominant natural language of the current user request.' in bundle.system_prompt
+    assert "4. The dominant language of the user's recent conversation messages." in bundle.system_prompt
+    assert '5. The session default language from the UI locale supplied below.' in bundle.system_prompt
     assert 'Default UI locale for this conversation: en-US.' in bundle.system_prompt
     assert 'Session default response language: English.' in bundle.system_prompt
     assert 'Selected response language for this turn' not in bundle.system_prompt
@@ -114,7 +115,7 @@ def test_recent_user_language_beats_ui_locale_for_ambiguous_follow_up():
     assert 'Session default response language: English.' in bundle.system_prompt
 
 
-def test_saved_language_preference_does_not_override_current_request_language():
+def test_saved_language_preference_beats_current_request_language():
     profile = (
         '---\n'
         'schema_version: 1\n'
@@ -129,9 +130,11 @@ def test_saved_language_preference_does_not_override_current_request_language():
         environment_context={'locale': 'en-US'},
     )
 
-    assert 'Selected response language for this turn: English' in bundle.current_input
-    assert 'profile locale.languages' not in bundle.current_input
-    assert 'profile locale.languages' not in bundle.system_prompt
+    assert (
+        'Selected response language for this turn: Chinese (profile locale.languages)'
+        in bundle.current_input
+    )
+    assert 'Selected response language for this turn' not in bundle.system_prompt
 
 
 def test_system_prompt_injects_soul_profile_preference():
@@ -200,3 +203,17 @@ def test_precise_current_time_lives_in_runtime_context():
     assert 'Current user time: 2026-05-11 09:15:30 (Asia/Shanghai)' in morning.current_input
     assert 'Current user time: 2026-05-11 23:48:00 (Asia/Shanghai)' in evening.current_input
     assert 'Current user time:' not in morning.system_prompt
+
+
+def test_unparseable_time_is_omitted_from_system_and_kept_in_runtime():
+    bundle = build_standard_prompt_bundle(
+        False,
+        environment_context={
+            'locale': 'zh-CN',
+            'time': {'now': 'Monday morning', 'timezone': 'Asia/Shanghai'},
+        },
+    )
+
+    assert 'Current user date:' not in bundle.system_prompt
+    assert 'Monday morning' not in bundle.system_prompt
+    assert 'Current user time: Monday morning' in bundle.current_input
