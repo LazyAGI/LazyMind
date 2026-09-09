@@ -1572,6 +1572,7 @@ CREATE TABLE conversation_group_states (
 CREATE INDEX idx_conversation_group_states_user ON conversation_group_states(user_id);
 CREATE INDEX idx_conversation_group_states_run ON conversation_group_states(source_run_id);
 CREATE TABLE conversation_organizer_runs (
+ protocol_version INTEGER NOT NULL DEFAULT 1,
  id VARCHAR(64) PRIMARY KEY, user_id VARCHAR(255) NOT NULL, status VARCHAR(16) NOT NULL,
  stage VARCHAR(32) NOT NULL DEFAULT 'snapshot', snapshot_json JSON NOT NULL, snapshot_hash VARCHAR(64) NOT NULL,
  model_config_json JSON NOT NULL, preparation_json JSON, stream_json JSON, checkpoint_json JSON, proposal_json JSON, result_json JSON,
@@ -1585,6 +1586,13 @@ CREATE INDEX idx_conversation_organizer_runs_status ON conversation_organizer_ru
 CREATE INDEX idx_conversation_organizer_runs_job ON conversation_organizer_runs(job_id);
 CREATE UNIQUE INDEX uk_conversation_organizer_active_user ON conversation_organizer_runs(user_id) WHERE status IN ('pending','running','applying');
 CREATE TABLE conversation_organizer_snapshot_items (
+ ordinal INTEGER NOT NULL DEFAULT 0,
+ frozen_input JSON,
+ preparation_status VARCHAR(16) NOT NULL DEFAULT '',
+ preparation_reason VARCHAR(64) NOT NULL DEFAULT '',
+ preparation_error VARCHAR(64) NOT NULL DEFAULT '',
+ assignment VARCHAR(255) NOT NULL DEFAULT '',
+
  run_id VARCHAR(64) NOT NULL REFERENCES conversation_organizer_runs(id) ON DELETE CASCADE,
  conversation_id VARCHAR(36) NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
  user_id VARCHAR(255) NOT NULL, title TEXT NOT NULL, summary TEXT NOT NULL,
@@ -1593,6 +1601,12 @@ CREATE TABLE conversation_organizer_snapshot_items (
 );
 CREATE INDEX idx_conversation_organizer_snapshot_conversation ON conversation_organizer_snapshot_items(conversation_id);
 CREATE INDEX idx_conversation_organizer_snapshot_user ON conversation_organizer_snapshot_items(user_id);
+CREATE TABLE conversation_organizer_candidates (
+ run_id VARCHAR(64) NOT NULL REFERENCES conversation_organizer_runs(id) ON DELETE CASCADE,
+ id VARCHAR(255) NOT NULL, data JSON NOT NULL, PRIMARY KEY (run_id,id)
+);
+CREATE INDEX idx_organizer_items_cursor ON conversation_organizer_snapshot_items(run_id,ordinal);
+CREATE INDEX idx_organizer_items_assignment ON conversation_organizer_snapshot_items(run_id,assignment,ordinal);
 CREATE TABLE conversation_organizer_changes (
  id VARCHAR(64) PRIMARY KEY, run_id VARCHAR(64) NOT NULL REFERENCES conversation_organizer_runs(id) ON DELETE CASCADE,
  conversation_id VARCHAR(36) NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
@@ -1630,6 +1644,7 @@ CREATE TABLE conversation_group_states (
 CREATE INDEX idx_conversation_group_states_user ON conversation_group_states(user_id);
 CREATE INDEX idx_conversation_group_states_run ON conversation_group_states(source_run_id);
 CREATE TABLE conversation_organizer_runs (
+ protocol_version INTEGER NOT NULL DEFAULT 1,
  id VARCHAR(64) PRIMARY KEY, user_id VARCHAR(255) NOT NULL, status VARCHAR(16) NOT NULL,
  stage VARCHAR(32) NOT NULL DEFAULT 'snapshot', snapshot_json JSON NOT NULL, snapshot_hash VARCHAR(64) NOT NULL,
  model_config_json JSON NOT NULL, preparation_json JSON, stream_json JSON, checkpoint_json JSON, proposal_json JSON, result_json JSON,
@@ -1643,6 +1658,13 @@ CREATE INDEX idx_conversation_organizer_runs_status ON conversation_organizer_ru
 CREATE INDEX idx_conversation_organizer_runs_job ON conversation_organizer_runs(job_id);
 CREATE UNIQUE INDEX uk_conversation_organizer_active_user ON conversation_organizer_runs(user_id) WHERE status IN ('pending','running','applying');
 CREATE TABLE conversation_organizer_snapshot_items (
+ ordinal INTEGER NOT NULL DEFAULT 0,
+ frozen_input JSON,
+ preparation_status VARCHAR(16) NOT NULL DEFAULT '',
+ preparation_reason VARCHAR(64) NOT NULL DEFAULT '',
+ preparation_error VARCHAR(64) NOT NULL DEFAULT '',
+ assignment VARCHAR(255) NOT NULL DEFAULT '',
+
  run_id VARCHAR(64) NOT NULL REFERENCES conversation_organizer_runs(id) ON DELETE CASCADE,
  conversation_id VARCHAR(36) NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
  user_id VARCHAR(255) NOT NULL, title TEXT NOT NULL, summary TEXT NOT NULL,
@@ -1651,6 +1673,12 @@ CREATE TABLE conversation_organizer_snapshot_items (
 );
 CREATE INDEX idx_conversation_organizer_snapshot_conversation ON conversation_organizer_snapshot_items(conversation_id);
 CREATE INDEX idx_conversation_organizer_snapshot_user ON conversation_organizer_snapshot_items(user_id);
+CREATE TABLE conversation_organizer_candidates (
+ run_id VARCHAR(64) NOT NULL REFERENCES conversation_organizer_runs(id) ON DELETE CASCADE,
+ id VARCHAR(255) NOT NULL, data JSON NOT NULL, PRIMARY KEY (run_id,id)
+);
+CREATE INDEX idx_organizer_items_cursor ON conversation_organizer_snapshot_items(run_id,ordinal);
+CREATE INDEX idx_organizer_items_assignment ON conversation_organizer_snapshot_items(run_id,assignment,ordinal);
 CREATE TABLE conversation_organizer_changes (
  id VARCHAR(64) PRIMARY KEY, run_id VARCHAR(64) NOT NULL REFERENCES conversation_organizer_runs(id) ON DELETE CASCADE,
  conversation_id VARCHAR(36) NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,

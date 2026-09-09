@@ -15,6 +15,7 @@ import {
 } from "./api";
 import type { ConversationGroupMember } from "@/api/generated/core-client";
 import "./index.scss";
+import useOrganizerNameLock from "./useOrganizerNameLock";
 import GroupFields, { normalizeGroupValues } from "./GroupFields";
 import ConversationMembership from "./ConversationMembership";
 import ChatInput from "@/modules/chat/components/ChatInput";
@@ -27,6 +28,7 @@ export default function ConversationGroupPage() {
   const { groupId = "" } = useParams<{ groupId: string }>();
   const navigate = useNavigate();
   const { t } = useTranslation();
+  const namesLocked = useOrganizerNameLock();
   const modelGuard = useChatModelProviderGuard();
   const [group, setGroup] = useState<ConversationGroup | null>(null);
   const [conversations, setConversations] = useState<ConversationGroupMember[]>([]);
@@ -105,7 +107,7 @@ export default function ConversationGroupPage() {
       {nextPageToken && <Button block loading={loading} onClick={() => void load(true, nextPageToken)}>{t("conversationOrganizer.loadMore")}</Button>}
     </section>
     <Modal open={editing} title={t("conversationOrganizer.editGroup")} okText={t("conversationOrganizer.save")} cancelText={t("common.cancel")} onOk={() => void save()} onCancel={() => setEditing(false)}>
-      <Form form={form} layout="vertical"><GroupFields scopeHint={t("conversationOrganizer.scopeEditHint")} /></Form>
+      <Form form={form} layout="vertical"><GroupFields nameDisabled={namesLocked} scopeHint={t(namesLocked ? "conversationOrganizer.namesLocked" : "conversationOrganizer.scopeEditHint")} /></Form>
     </Modal>
   </main>;
 }

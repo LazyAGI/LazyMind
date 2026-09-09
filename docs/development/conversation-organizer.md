@@ -40,7 +40,7 @@
 
 按冻结范围、准备摘要、分批分组及候选合并、本地完整性校验、应用结果顺序执行。准备期间显示“正在准备会话摘要 n/N”；N 只统计需要补齐或等待复用任务的会话，成功、无任务、失败均推进 n，零准备项不显示 0/0。准备检查点带版本逐条持久化，全部终态后封存分析快照，刷新与重试不重复计数。
 
-已有可用摘要直接复用。无消息、确认仅问候的会话不进入模型；其余缺摘要会话复用开场提取和模型接口补齐。匹配冻结输入的现有任务复用；写回检查输入证据及元数据版本，不能覆盖后续消息的新版本。单条失败继续其他会话，取消后不派发新任务，迟到结果不能落入已终止的整理任务。
+已关闭窗口的 done 摘要仅在原 evidence 未变化时复用；其他摘要必须 done 且匹配当前冻结输入 hash。无消息、确认仅问候的会话不进入模型；其余缺摘要会话复用开场提取和模型接口补齐。匹配冻结输入的现有任务复用；写回检查输入证据及元数据版本，不能覆盖后续消息的新版本。单条失败继续其他会话，取消后不派发新任务，迟到结果不能落入已终止的整理任务。
 
 结果包含所有被冻结会话。unassigned_reason 区分 no_matching_group、below_min_group_size、no_messages、no_task_intent、summary_failed、unsupported_conversation；summary_failed 附带 summary_error_code。skip_reason 仅用于应用冲突。free_count 包含全部未归组会话，skipped_count 为应用冲突计数。手动归组后隐藏原未归组原因；未进入分析的冻结会话也可纠错与撤回。没有分析输入时直接生成完整结果并解锁。旧任务 preparation_json 为空时仍使用旧快照和结果语义。
 
@@ -60,7 +60,7 @@ Chat 使用独立进程，是因为取消 asyncio.to_thread 不会停止阻塞�
 
 空组详情返回 conversations: []，前端在接口适配层兼容旧版 null，详情页及侧栏共用该归一化结果。
 
-旧 final 检查点恢复时直接进行本地完整性校验；保留 final_blocks/final_pair_cursor 字段以兼容既有检查点，不再触发最终全量模型复核。
+协议 v2 不恢复 v1 的未完成检查点。旧已完成结果仍支持查看、纠正和撤销；旧未完成任务在升级恢复时结束，用户重新发起整理。
 
 ### 整理结果确认
 
@@ -77,3 +77,35 @@ Chat 使用独立进程，是因为取消 asyncio.to_thread 不会停止阻塞�
 Core 与前端通过 `make up-build` 在现有开发容器中构建部署。此前浏览器检查覆盖原型布局、联合搜索、临时空组创建/移除、组置顶及刷新恢复；本次补查共用归属弹窗与主聊天页展示。
 
 全量 tsc 与错误提示扫描仍报告其他模块的存量问题。跨设备一致性由服务端持久化与用户隔离测试覆盖，未在第二台物理设备验收；未重新执行完整模型语义质量、长时间流式生成及跨服务重启验收。
+
+
+## PR #701 修复：协议 v2（2026-09-09）
+
+Chat 使用当前解释器启动独立 `organizer_worker` 模块，不加载 HTTP app 的后台生命周期。stdin 的首行传请求，其后保持父进程专有写端；worker 用原始 fd 监听 EOF，避免 daemon 线程持有 Python buffered-reader 锁而在正常退出时崩溃。Linux 额外设置并检查 parent-death signal。协议 stdout 与日志分离，接收线程持续排空输出；最终结果和 settled 都必须等进程确认退出。
+
+stream/cancel 必须路由到同一个 Chat 进程；当前协议只支持单 Chat 进程、单副本。Core 为每次 execution 固定发起时间，Chat 接收窗口为 60 秒加最多 30 秒时钟余量，拒绝早于本实例启动时间的请求；取消墓碑保留至少五分钟，并仅清理非活跃 execution。远端 provider 是否停止推理仍取决于断连处理。
+
+run 标记 protocol_version=2；snapshot-item 保存 ordinal、冻结输入（包含输入 hash/evidence/revision）、准备状态、原因和 assignment。run 的 preparation JSON 只保留计数，checkpoint 只保留 cursor、下一 ordinal、身份摘要、阶段及当前待审核提案。候选目录按 run 分表保存有界示例、数量、版本与 aliases。正式组快照固定，不能由算法修改。
+
+每轮仅传当前最多 50 条会话和分组目录；输入身份绑定 snapshot hash、算法/提示词版本及模型配置。Core 校验提案后暂存，范围更新/合并的旧成员通过 ordinal 分页审核；全部通过后 assignment、候选变化、cursor 在同一 lease-fenced 事务提交。候选合并不重写历史 assignment；结束时汇总一次完整 proposal。目录扫描与重复范围审核仍可能随组数增长，不宣称整体严格线性。
+
+整理活跃期间，同用户的新建组和组名修改被后端用户事务锁拒绝，覆盖普通创建与结果纠正创建。侧栏、详情页、归属菜单及新建表单同步禁用。收录范围修改及删除仍允许，由 apply 重新验证。SQLite 的 Start/Retry 使用 `asyncjob.EnqueueInTransaction`，避免在 BEGIN IMMEDIATE 内再次开启事务；独立入队仍使用原 Enqueue。
+
+### 升级与降级
+
+停止旧 Core 的任务领取及执行，并停止旧 Chat/worker，再成套启动新 Core/Chat。新 Core 在启动 runner 前执行 RecoverLegacyRuns，先确认持久化 execution 已 settled，再在事务中结束旧未完成 run/job 并释放锁；已完成结果不改变。不能只改数据库状态后宣称旧模型进程已经停止。旧 failed/canceled 任务不能重试旧协议，需重新整理。
+
+新增 dev migration 同时支持 PostgreSQL/SQLite，现有 v0.3 aggregate 描述相同最终结构。降级前先停止新版本执行并结束未完成任务，再执行 down；已应用归属及历史纠正/撤销记录保留。旧 JSON 字段继续用于历史结果读取，不做 v1→v2 checkpoint 转换。
+
+### 本轮验证证据
+
+- Docker：Core asyncjob/conversationgroup/chat/common 测试及主程序编译通过；PostgreSQL conversationgroup/asyncjob 行为测试通过。
+- PostgreSQL/SQLite migrate 测试通过，覆盖增量、aggregate 路径及上下迁移；新增迁移计数和组迁移夹具已同步。
+- Python 八项测试在 Docker Linux 与 macOS Local Python 均通过，包括实际独立 worker 的终态、EOF 回收、父进程 SIGKILL 回收、异常退出、断连清理、未退出不能 settled、取消先于启动及过期请求。
+- 可控 OpenAI provider + 真实 Docker Chat / macOS Local Chat：生产 Core handler/asyncjob 验收夹具完成 53 条会话、一条实际补摘要、两批分组、自动应用、纠正、重复撤销、取消/重试；进行中的十秒延迟模型调用在五秒内取消并 settled，随后重试成功。
+- Docker 最终回归另加入空会话，直接检查已落库的 free_count 和 no_messages 原因，避免旧 preparation JSON 字段导致负计数或原因丢失。
+- 上述接口验收的 Core handlers 在 Docker 测试进程中执行，macOS 使用真实 Local Chat；不将其表述为完整浏览器 E2E 或原生 Windows 验收，不衡量真实模型分组语义质量。
+- 1,000/10,000 条固定目录规模实验：分组请求累计约 94 KB/940 KB，模型步骤 20/200；preparation JSON 累计写入约 68 KB/699 KB，写入次数 1,000/10,000，已完成摘要恢复后不重复生成。
+- 前端分组相关四个文件、12 项测试通过，生产构建通过；OpenAPI 新鲜度与错误码翻译同步检查通过。全量 tsc 仍有生成客户端、desktopBridge 等其他文件的错误；未以本轮局部验证宣称全量类型检查通过。
+
+复现接口验收：启动 `algorithm/tests/fixtures/organizer_provider.py`，设置 `ORGANIZER_TEST_PROVIDER_URL`、`ORGANIZER_TEST_CONTROL_URL`、`LAZYMIND_CHAT_SERVICE_URL` 后，在 Core 容器运行 `go test ./chat -run '^TestOrganizerProductPath$' -v`。provider URL 是 Chat 可访问的地址，control URL 是测试进程可访问的地址；全部使用专用测试数据及占位凭据。

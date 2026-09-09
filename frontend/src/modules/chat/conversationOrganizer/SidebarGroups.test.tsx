@@ -43,3 +43,13 @@ describe("group sidebar", () => {
     expect(api.assignConversation).not.toHaveBeenCalled();
   });
 });
+
+ it("disables creating groups while organizer owns the name directory", async () => {
+   const onEdit = vi.fn();
+   const { unmount } = render(<MemoryRouter><SidebarGroups groups={[]} namesLocked onEdit={onEdit} onRemove={vi.fn()} /></MemoryRouter>);
+   const button = screen.getByRole("button", { name: "conversationOrganizer.newGroup" }) as HTMLButtonElement;
+   expect(button.disabled).toBe(true);
+   fireEvent.click(button);
+   expect(onEdit).not.toHaveBeenCalled();
+   unmount();
+ });

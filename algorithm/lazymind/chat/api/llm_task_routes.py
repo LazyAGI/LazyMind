@@ -8,6 +8,8 @@ from fastapi import APIRouter, HTTPException
 from lazymind.chat.service.llm_task import LLMTaskRequest, LLMTaskResult, run_llm_task
 
 
+from lazymind.chat.service.organizer_stream import stream_execution, cancel_execution
+
 router = APIRouter()
 _logger = logging.getLogger(__name__)
 
@@ -33,11 +35,9 @@ async def llm_task_run(request: LLMTaskRequest) -> LLMTaskResult:
 
 @router.post('/api/chat/organizer-executions/{execution_id}:stream')
 async def organizer_stream(execution_id: str, request: LLMTaskRequest):
-    from lazymind.chat.service.organizer_stream import stream_execution
     return await stream_execution(execution_id, request)
 
 
 @router.post('/api/chat/organizer-executions/{execution_id}:cancel')
 async def organizer_cancel(execution_id: str):
-    from lazymind.chat.service.organizer_stream import cancel_execution
     return await cancel_execution(execution_id)

@@ -81,7 +81,7 @@ func callOrganizerStream(ctx context.Context, db *gorm.DB, run *orm.Conversation
 		db.WithContext(cleanup).Model(&orm.ConversationOrganizerRun{}).Where("id=? AND job_id=? AND CAST(stream_json AS TEXT)=?", run.ID, job.ID, string(run.StreamJSON)).Update("stream_json", raw)
 		run.StreamJSON = raw
 	}()
-	payload, _ := json.Marshal(map[string]any{"mode": "llm", "task_type": organizerTaskType, "input": map[string]any{"data": input}, "llm_config": config, "options": map[string]any{"timeout_seconds": 310, "max_retries": 1}})
+	payload, _ := json.Marshal(map[string]any{"mode": "llm", "task_type": organizerTaskType, "input": map[string]any{"data": input}, "llm_config": config, "options": map[string]any{"timeout_seconds": 310, "max_retries": 1, "execution_issued_at": float64(time.Now().UnixMilli()) / 1000}})
 	// No total deadline: Chat enforces first-response and meaningful-data idle deadlines.
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()

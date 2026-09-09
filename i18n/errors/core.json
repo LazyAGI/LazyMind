@@ -1556,5 +1556,19 @@
   "2002417": {"en-US": "Conversation opening preparer is not registered", "zh-CN": "会话摘要准备服务未注册"},
   "2002418": {"en-US": "Unsupported organizer preparation version", "zh-CN": "不支持的整理准备检查点版本"},
   "2002419": {"en-US": "Previous organizer execution has not confirmed termination", "zh-CN": "尚未确认上一整理执行已停止"},
-  "2002420": {"en-US": "Organizer stream request failed", "zh-CN": "整理流式请求失败"}
+  "2002420": {"en-US": "Organizer stream request failed", "zh-CN": "整理流式请求失败"},
+  "2002421": {"en-US": "Unknown or cyclic candidate target", "zh-CN": "整理执行状态无效，请重新整理"},
+  "2002422": {"en-US": "Invalid candidate operation", "zh-CN": "整理执行状态无效，请重新整理"},
+  "2002423": {"en-US": "Duplicate group name", "zh-CN": "整理执行状态无效，请重新整理"},
+  "2002424": {"en-US": "Invalid incremental cursor", "zh-CN": "整理执行状态无效，请重新整理"},
+  "2002425": {"en-US": "Missing incremental batch", "zh-CN": "整理执行状态无效，请重新整理"},
+  "2002426": {"en-US": "Scope audit failed", "zh-CN": "整理执行状态无效，请重新整理"},
+  "2002427": {"en-US": "Invalid scope audit identity", "zh-CN": "整理执行状态无效，请重新整理"},
+  "2002428": {"en-US": "Scope audit rejected after repairs", "zh-CN": "整理执行状态无效，请重新整理"},
+  "2002429": {"en-US": "Invalid batch partition", "zh-CN": "整理执行状态无效，请重新整理"},
+  "2002430": {"en-US": "Invalid or duplicate assignment", "zh-CN": "整理执行状态无效，请重新整理"},
+  "2002431": {"en-US": "Organizer failed", "zh-CN": "整理执行状态无效，请重新整理"},
+  "2002432": {"en-US": "Invalid incremental identity or length", "zh-CN": "整理执行状态无效，请重新整理"},
+  "2002433": {"en-US": "Conversation organizer run cannot be retried after protocol upgrade; start a new run", "zh-CN": "版本已更新，请重新整理"},
+  "2002434": {"en-US": "Conversation organizer group names are locked", "zh-CN": "整理期间暂不可新建或重命名分组"}
 }

@@ -1,0 +1,10 @@
+DROP TABLE conversation_organizer_candidates;
+DROP INDEX idx_organizer_items_cursor;
+DROP INDEX idx_organizer_items_assignment;
+ALTER TABLE conversation_organizer_snapshot_items DROP COLUMN assignment;
+ALTER TABLE conversation_organizer_snapshot_items DROP COLUMN preparation_error;
+ALTER TABLE conversation_organizer_snapshot_items DROP COLUMN preparation_reason;
+ALTER TABLE conversation_organizer_snapshot_items DROP COLUMN preparation_status;
+ALTER TABLE conversation_organizer_snapshot_items DROP COLUMN frozen_input;
+ALTER TABLE conversation_organizer_snapshot_items DROP COLUMN ordinal;
+ALTER TABLE conversation_organizer_runs DROP COLUMN protocol_version;

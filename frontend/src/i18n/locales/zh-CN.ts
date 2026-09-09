@@ -7807,6 +7807,7 @@ const zhCN = {
     resultSubtitle: "你可以继续调整每段对话的归属。", resultNotice: "整理结果已自动应用。确认保留或撤销后，才能开始下一次整理。关闭面板不会处理本次结果。撤销包含面板内的调整，但会保留对话页面上的手动调整。", assignment: "归属",
     home: "快速问答", independentContexts: "相关对话集中管理，上下文各自独立", groupComposerHint: "新对话将自动归入「{{name}}」", groupConversations: "组内对话", fillScope: "填写收录范围",
     deleteLocked: "整理期间，开始整理时已有的自由会话暂不可删除、归档或移动分组；仍可查看和继续聊天，新建会话不受影响。",
+    namesLocked: "整理期间暂不可新建或重命名分组",
     nameDuplicate: "这个组名已经存在", scopeHint: "说明这个组适合收录哪些对话；编辑不会迁移已有成员。", failedHint: "对话和对话组保持原样。", canceledHint: "快照已解锁，对话归属没有改变。", summary: "已归组 {{organized}} · 未归组 {{free}} · 跳过 {{skipped}}", corrected: "已调整", editGroupShort: "编辑组", undo: "撤销本次整理", createAndMove: "创建并归入", movedTo: "已移入“{{name}}”", newAndMoveEllipsis: "新建组并归入…", createdAndMoved: "已新建“{{name}}”并归入对话",
     created: "对话组已创建", updated: "对话组已更新", removeConfirm: "移除“{{name}}”？",
     removeHint: "组内对话会恢复为未归组；置顶和归档状态都会保留。",

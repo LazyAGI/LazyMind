@@ -9,8 +9,8 @@ import { assignConversation, getConversationGroup, listConversationGroups, updat
 import ConversationMembership from "./ConversationMembership";
 import { CONVERSATION_DRAG, GROUP_DRAG, readConversationDrag, startConversationDrag } from "./drag";
 
-type Props = { groups: ConversationGroup[]; searchText?: string; currentConversationId?: string; onNew?: (id: string) => void; onEdit: (group: ConversationGroup | "new") => void; onRemove: (group: ConversationGroup) => void };
-export default function SidebarGroups({ groups, searchText = "", currentConversationId, onNew, onEdit, onRemove }: Props) {
+type Props = { namesLocked?: boolean; groups: ConversationGroup[]; searchText?: string; currentConversationId?: string; onNew?: (id: string) => void; onEdit: (group: ConversationGroup | "new") => void; onRemove: (group: ConversationGroup) => void };
+export default function SidebarGroups({ groups, searchText = "", currentConversationId, onNew, onEdit, onRemove, namesLocked = false }: Props) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
@@ -101,7 +101,7 @@ export default function SidebarGroups({ groups, searchText = "", currentConversa
   const visibleGroups = groups.filter(g => !matches || matches.has(g.id));
   return <>
     {visibleGroups.some(g => g.pinned) && <><div className="conversation-groups-heading">{t("conversationOrganizer.pinnedGroups")}</div>{visibleGroups.filter(g => g.pinned).map(block)}</>}
-    <div className="conversation-groups-heading"><span>{t("conversationOrganizer.groups")}</span><Button type="text" size="small" icon={<PlusOutlined />} aria-label={t("conversationOrganizer.newGroup")} onClick={() => onEdit("new")} /></div>
+    <div className="conversation-groups-heading"><span>{t("conversationOrganizer.groups")}</span><Button type="text" size="small" icon={<PlusOutlined />} disabled={namesLocked} title={namesLocked ? t("conversationOrganizer.namesLocked") : undefined} aria-label={t("conversationOrganizer.newGroup")} onClick={() => onEdit("new")} /></div>
     {visibleGroups.filter(g => !g.pinned).map(block)}
     {!visibleGroups.length && <div className="conversation-group-empty">{t(searchText ? "conversationOrganizer.noSearchResults" : "conversationOrganizer.emptyGroups")}</div>}
   </>;

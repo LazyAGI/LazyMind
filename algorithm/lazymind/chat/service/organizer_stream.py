@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 import asyncio
-import ctypes
 import json
-import multiprocessing
 import os
-import signal
+import subprocess
+import sys
+import threading
+import queue
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -14,42 +15,7 @@ from datetime import datetime, timezone
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 
-from .llm_task import LLMTaskRequest, run_llm_task
-
-
-def _worker(request_data, output, parent_pid):
-    # Core/Chat restarts must not orphan a model caller (production runtime is Linux).
-    ctypes.CDLL(None).prctl(1, signal.SIGKILL)
-    if os.getppid() != parent_pid:
-        return
-    from .conversation_organizer import _STREAM_SINK
-    last_emit = 0.0
-    received = 0
-
-    def sink(event):
-        nonlocal last_emit, received
-        now = time.monotonic()
-        runtime = event.get('runtime_event', {})
-        if runtime.get('type') == 'model_call_started':
-            received, last_emit = 0, 0
-            output.send({'type': 'progress', 'state': 'waiting', 'received_chars': 0})
-        elif event.get('tag') in ('text', 'think') and event.get('delta'):
-            received += len(event['delta'])
-            if now - last_emit >= 0.5:
-                output.send({'type': 'progress', 'state': 'generating', 'received_chars': received})
-                last_emit = now
-        elif runtime.get('type') == 'model_call_finished':
-            output.send({'type': 'progress', 'state': 'validating', 'received_chars': received})
-
-    _STREAM_SINK.set(sink)
-    try:
-        result = run_llm_task(LLMTaskRequest.model_validate(request_data))
-        output.send({'type': 'result', 'result': result.model_dump()})
-    except Exception as exc:
-        output.send({'type': 'result', 'result': {'status': 'failed', 'task_id': '',
-                     'error_code': 'worker_failed', 'error': type(exc).__name__, 'retryable': False}})
-    finally:
-        output.close()
+from .llm_task import LLMTaskRequest
 
 
 @dataclass
@@ -61,23 +27,68 @@ class Execution:
 
     async def stop(self):
         async with self.stop_lock:
-            if self.process.is_alive():
+            if self.process.poll() is None:
                 self.process.terminate()
-            await asyncio.to_thread(self.process.join, 2)
-            if self.process.is_alive():
+            try:
+                await asyncio.to_thread(self.process.wait, 2)
+            except subprocess.TimeoutExpired:
+                pass
+            if self.process.poll() is None:
                 self.process.kill()
-                await asyncio.to_thread(self.process.join, 2)
-            return not self.process.is_alive()
+                try:
+                    await asyncio.to_thread(self.process.wait, 2)
+                except subprocess.TimeoutExpired:
+                    pass
+            return self.process.poll() is not None
 
 
 _executions: dict[str, Execution] = {}
 _cleanup_tasks: set[asyncio.Task] = set()
 # Tombstones also fence a delayed POST arriving after its cancellation request.
-_canceled: set[str] = set()
+# This supervisor requires one Chat process/replica for both endpoints.
+_canceled: dict[str, float] = {}
+_started_at = time.time()
+
+
+def _prune():
+    now = time.monotonic()
+    for key, deadline in list(_canceled.items()):
+        if deadline <= now and key not in _executions:
+            del _canceled[key]
+
+
+def _tombstone(execution_id):
+    _prune()
+    _canceled[execution_id] = time.monotonic() + 300
+
+
+class WorkerOutput:
+    def __init__(self, stream):
+        self.events = queue.Queue()
+        self.stream = stream
+        self.reader = threading.Thread(target=self._read, daemon=True)
+        self.reader.start()
+
+    def _read(self):
+        try:
+            for line in self.stream:
+                self.events.put(json.loads(line))
+        except (ValueError, OSError):
+            pass
+
+    def poll(self):
+        return not self.events.empty()
+
+    def recv(self):
+        return self.events.get_nowait()
+
+    def close(self):
+        self.reader.join(2)
+        self.stream.close()
 
 
 async def cancel_execution(execution_id: str):
-    _canceled.add(execution_id)
+    _tombstone(execution_id)
     execution = _executions.get(execution_id)
     if execution is None:
         return {'settled': True}
@@ -88,15 +99,33 @@ async def cancel_execution(execution_id: str):
 async def stream_execution(execution_id: str, request: LLMTaskRequest):
     if request.task_type != 'conversation.organize_step':
         raise HTTPException(400, 'Only organizer steps support this endpoint')
+    _prune()
     if execution_id in _canceled or execution_id in _executions:
         raise HTTPException(409, 'Execution already exists or was canceled')
-    context = multiprocessing.get_context('spawn')
-    receiver, sender = context.Pipe(duplex=False)
-    process = context.Process(target=_worker, args=(request.model_dump(), sender, os.getpid()), daemon=True)
-    process.start()
-    sender.close()
+    _prune()
+    issued_at = request.options.get('execution_issued_at')
+    if (not isinstance(issued_at, (int, float)) or issued_at < _started_at
+            or time.time() - issued_at > 90 or issued_at - time.time() > 30):
+        raise HTTPException(409, 'Execution request expired')
+    process = subprocess.Popen(
+        [sys.executable, '-m', 'lazymind.chat.service.organizer_worker', str(os.getpid())],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=None, text=True,
+    )
+    receiver = WorkerOutput(process.stdout)
     execution = Execution(process, receiver)
     _executions[execution_id] = execution
+    try:
+        await asyncio.to_thread(process.stdin.write, request.model_dump_json() + '\n')
+        await asyncio.to_thread(process.stdin.flush)
+        if execution.canceled:
+            await execution.stop()
+    except BaseException:
+        if await asyncio.shield(execution.stop()):
+            process.stdin.close()
+            receiver.close()
+            _executions.pop(execution_id, None)
+            _tombstone(execution_id)
+        raise
 
     async def events():
         state, received = 'waiting', 0
@@ -112,7 +141,10 @@ async def stream_execution(execution_id: str, request: LLMTaskRequest):
                         break
                     if event['type'] == 'result':
                         # A terminal event means the worker has exited, not merely emitted JSON.
-                        await asyncio.to_thread(process.join, 2)
+                        try:
+                            await asyncio.to_thread(process.wait, 2)
+                        except subprocess.TimeoutExpired:
+                            pass
                         if not await execution.stop():
                             return
                         yield json.dumps(event) + '\n'
@@ -136,7 +168,10 @@ async def stream_execution(execution_id: str, request: LLMTaskRequest):
                     yield json.dumps({'type': 'result', 'result': {'status': 'failed', 'task_id': '',
                                       'error_code': code, 'error': code, 'retryable': True}}) + '\n'
                     return
-                if not process.is_alive():
+                if process.poll() is not None:
+                    await asyncio.to_thread(receiver.reader.join, 2)
+                    if receiver.poll():
+                        continue
                     yield json.dumps({'type': 'result', 'result': {'status': 'failed', 'task_id': '',
                                       'error_code': 'worker_exited', 'retryable': False}}) + '\n'
                     return
@@ -152,10 +187,11 @@ async def stream_execution(execution_id: str, request: LLMTaskRequest):
         finally:
             # Shield cleanup from HTTP disconnect cancellation before acknowledging settlement.
             async def cleanup():
-                await execution.stop()
-                receiver.close()
-                _canceled.add(execution_id)
-                _executions.pop(execution_id, None)
+                if await execution.stop():
+                    process.stdin.close()
+                    receiver.close()
+                    _tombstone(execution_id)
+                    _executions.pop(execution_id, None)
             cleanup_task = asyncio.create_task(cleanup())
             _cleanup_tasks.add(cleanup_task)
             cleanup_task.add_done_callback(_cleanup_tasks.discard)

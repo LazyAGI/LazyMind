@@ -32,6 +32,7 @@ func AllModelsForDDL() []interface{} {
 		&ConversationGroupMember{},
 		&ConversationGroupState{},
 		&ConversationOrganizerRun{},
+		&ConversationOrganizerCandidate{},
 		&ConversationOrganizerSnapshotItem{},
 		&ConversationOrganizerChange{},
 		&ExternalChatRun{},

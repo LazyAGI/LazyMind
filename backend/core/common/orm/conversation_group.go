@@ -52,6 +52,7 @@ type ConversationGroupState struct {
 func (ConversationGroupState) TableName() string { return "conversation_group_states" }
 
 type ConversationOrganizerRun struct {
+	ProtocolVersion int             `gorm:"column:protocol_version;not null;default:1"`
 	ID              string          `gorm:"column:id;type:varchar(64);primaryKey"`
 	UserID          string          `gorm:"column:user_id;type:varchar(255);not null;index"`
 	Status          string          `gorm:"column:status;type:varchar(16);not null;index"`
@@ -82,6 +83,13 @@ func (ConversationOrganizerRun) TableName() string { return "conversation_organi
 // SnapshotJSON separately holds only conversations eligible for analysis. A lock is active while
 // its owning run is pending, running, or applying.
 type ConversationOrganizerSnapshotItem struct {
+	Ordinal           int             `gorm:"column:ordinal;not null;default:0"`
+	FrozenInput       json.RawMessage `gorm:"column:frozen_input;type:json"`
+	PreparationStatus string          `gorm:"column:preparation_status;type:varchar(16);not null;default:''"`
+	PreparationReason string          `gorm:"column:preparation_reason;type:varchar(64);not null;default:''"`
+	PreparationError  string          `gorm:"column:preparation_error;type:varchar(64);not null;default:''"`
+	Assignment        string          `gorm:"column:assignment;type:varchar(255);not null;default:''"`
+
 	RunID            string    `gorm:"column:run_id;type:varchar(64);primaryKey"`
 	ConversationID   string    `gorm:"column:conversation_id;type:varchar(36);primaryKey;index"`
 	UserID           string    `gorm:"column:user_id;type:varchar(255);not null;index"`
@@ -111,3 +119,12 @@ type ConversationOrganizerChange struct {
 }
 
 func (ConversationOrganizerChange) TableName() string { return "conversation_organizer_changes" }
+
+// Directory rows contain only bounded cards, never full member lists.
+type ConversationOrganizerCandidate struct {
+	RunID string          `gorm:"column:run_id;type:varchar(64);primaryKey"`
+	ID    string          `gorm:"column:id;type:varchar(255);primaryKey"`
+	Data  json.RawMessage `gorm:"column:data;type:json;not null"`
+}
+
+func (ConversationOrganizerCandidate) TableName() string { return "conversation_organizer_candidates" }

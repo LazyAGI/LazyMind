@@ -117,7 +117,16 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 	uid, _ := user(r)
 	now := time.Now().UTC()
 	row := orm.ConversationGroup{ID: uuid.NewString(), UserID: uid, Name: name, NormalizedName: normalizeName(name), Scope: scope, Version: 1, CreatedBy: CreatedByUser, CreatedAt: now, UpdatedAt: now}
-	if err := UserTransaction(r.Context(), store.DB(), uid, func(tx *gorm.DB) error { return tx.Create(&row).Error }); err != nil {
+	if err := UserTransaction(r.Context(), store.DB(), uid, func(tx *gorm.DB) error {
+		if err := requireOrganizerNamesUnlocked(tx, uid); err != nil {
+			return err
+		}
+		return tx.Create(&row).Error
+	}); err != nil {
+		if strings.Contains(err.Error(), "group names are locked") {
+			common.ReplyErr(w, err.Error(), http.StatusConflict)
+			return
+		}
 		if isUnique(err) {
 			common.ReplyErr(w, "conversation group name already exists", http.StatusConflict)
 			return
@@ -239,6 +248,11 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND user_id = ? AND deleted_at IS NULL", id, uid).Take(&updated).Error; err != nil {
 			return err
 		}
+		if input.Name != nil && name != updated.Name {
+			if err := requireOrganizerNamesUnlocked(tx, uid); err != nil {
+				return err
+			}
+		}
 		if controlledRun != nil {
 			version, ok := controlledResult.ControlledGroupVersions[id]
 			if !ok || updated.CreatedBy != CreatedByOrganizer || updated.CreatedRunID != controlledRun.ID || updated.Version != version {
@@ -274,7 +288,7 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if isUnique(err) {
 			common.ReplyErr(w, "conversation group name already exists", 409)
-		} else if strings.Contains(err.Error(), "no longer controlled") || strings.Contains(err.Error(), "invalid organizer run") {
+		} else if strings.Contains(err.Error(), "group names are locked") || strings.Contains(err.Error(), "no longer controlled") || strings.Contains(err.Error(), "invalid organizer run") {
 			common.ReplyErr(w, err.Error(), 409)
 		} else {
 			replyNotFoundOrError(w, err)
@@ -511,4 +525,16 @@ func replyMembershipError(w http.ResponseWriter, err error) {
 	} else {
 		common.ReplyErr(w, err.Error(), 500)
 	}
+}
+
+// Called under UserTransaction, shared with StartOrganizer and apply.
+func requireOrganizerNamesUnlocked(tx *gorm.DB, uid string) error {
+	var count int64
+	if err := tx.Model(&orm.ConversationOrganizerRun{}).Where("user_id=? AND status IN ?", uid, []string{"pending", "running", "applying"}).Count(&count).Error; err != nil {
+		return err
+	}
+	if count > 0 {
+		return errors.New("conversation organizer group names are locked")
+	}
+	return nil
 }

@@ -5,6 +5,20 @@ package common
 import "net/http"
 
 func init() {
+	registerAdditionalErrorAlias("unknown or cyclic candidate target", "Unknown or cyclic candidate target", http.StatusBadGateway, 2002421)
+	registerAdditionalErrorAlias("invalid candidate operation", "Invalid candidate operation", http.StatusBadGateway, 2002422)
+	registerAdditionalErrorAlias("duplicate group name", "Duplicate group name", http.StatusBadGateway, 2002423)
+	registerAdditionalErrorAlias("invalid incremental cursor", "Invalid incremental cursor", http.StatusBadGateway, 2002424)
+	registerAdditionalErrorAlias("missing incremental batch", "Missing incremental batch", http.StatusBadGateway, 2002425)
+	registerAdditionalErrorAlias("scope audit failed", "Scope audit failed", http.StatusBadGateway, 2002426)
+	registerAdditionalErrorAlias("invalid scope audit identity", "Invalid scope audit identity", http.StatusBadGateway, 2002427)
+	registerAdditionalErrorAlias("scope audit rejected after repairs", "Scope audit rejected after repairs", http.StatusBadGateway, 2002428)
+	registerAdditionalErrorAlias("invalid batch partition", "Invalid batch partition", http.StatusBadGateway, 2002429)
+	registerAdditionalErrorAlias("invalid or duplicate assignment", "Invalid or duplicate assignment", http.StatusBadGateway, 2002430)
+	registerAdditionalErrorAlias("organizer failed", "Organizer failed", http.StatusBadGateway, 2002431)
+	registerAdditionalErrorAlias("invalid incremental identity or length", "Invalid incremental identity or length", http.StatusBadGateway, 2002432)
+	registerAdditionalErrorAlias("conversation organizer run cannot be retried after protocol upgrade; start a new run", "Conversation organizer run cannot be retried after protocol upgrade; start a new run", http.StatusConflict, 2002433)
+	registerAdditionalErrorAlias("conversation organizer group names are locked", "Conversation organizer group names are locked", http.StatusConflict, 2002434)
 	registerAdditionalErrorPattern("organizer stream returned http %d", "Organizer stream request failed", http.StatusBadGateway, 2002420)
 	registerAdditionalErrorAlias("invalid title", "Invalid request", http.StatusBadRequest, 2000103)
 	registerAdditionalErrorAlias("conversation changed", "Conflict", http.StatusConflict, 2000107)

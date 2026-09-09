@@ -84,10 +84,15 @@ type organizerProposal struct {
 	UnassignedReasons        map[string]string    `json:"unassigned_reasons,omitempty"`
 }
 type organizerStepOutput struct {
-	Checkpoint json.RawMessage    `json:"checkpoint"`
-	Progress   organizerProgress  `json:"progress"`
-	Done       bool               `json:"done"`
-	Proposal   *organizerProposal `json:"proposal,omitempty"`
+	Identity    string                  `json:"identity"`
+	Operations  []candidateOperation    `json:"operations"`
+	Assignments []incrementalAssignment `json:"assignments"`
+	Processed   int                     `json:"processed"`
+	Accepted    bool                    `json:"accepted"`
+	Checkpoint  json.RawMessage         `json:"checkpoint"`
+	Progress    organizerProgress       `json:"progress"`
+	Done        bool                    `json:"done"`
+	Proposal    *organizerProposal      `json:"proposal,omitempty"`
 }
 type organizerTaskResult struct {
 	Status    string              `json:"status"`
@@ -225,7 +230,7 @@ func StartOrganizer(w http.ResponseWriter, r *http.Request) {
 			return nil
 		}
 		now := time.Now().UTC()
-		run = orm.ConversationOrganizerRun{ID: uuid.NewString(), UserID: uid, Status: "pending", Stage: "snapshot", Version: 1, ModelConfigJSON: modelRaw, CreatedAt: now, UpdatedAt: now}
+		run = orm.ConversationOrganizerRun{ProtocolVersion: 2, ID: uuid.NewString(), UserID: uid, Status: "pending", Stage: "snapshot", Version: 1, ModelConfigJSON: modelRaw, CreatedAt: now, UpdatedAt: now}
 		snapshot, items, err := buildSnapshot(r.Context(), tx, run.ID, uid)
 		if err != nil {
 			return err
@@ -237,6 +242,19 @@ func StartOrganizer(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
+		for i := range items {
+			item := preparation.Items[i]
+			items[i].Ordinal = i
+			items[i].Title, items[i].Summary = item.Conversation.Title, item.Conversation.Summary
+			items[i].FrozenInput = item.Frozen
+			items[i].PreparationStatus = "done"
+			if !item.Done {
+				items[i].PreparationStatus = "pending"
+			}
+			items[i].PreparationReason = item.Reason
+		}
+		preparation.Version = 2
+		preparation.Items = nil
 		run.PreparationJSON, _ = json.Marshal(preparation)
 		if !preparation.Sealed {
 			run.Stage = "preparing"
@@ -255,7 +273,7 @@ func StartOrganizer(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 		}
-		job, err := asyncjob.Enqueue(r.Context(), tx, asyncjob.EnqueueRequest{JobType: organizerJobType, ResourceType: "conversation_organizer_run", ResourceID: run.ID, IdempotencyKey: run.ID, Payload: map[string]any{"run_id": run.ID}, MaxAttempts: 3, RunAt: now, CreateUserID: uid, CreateUserName: uname})
+		job, err := asyncjob.EnqueueInTransaction(r.Context(), tx, asyncjob.EnqueueRequest{JobType: organizerJobType, ResourceType: "conversation_organizer_run", ResourceID: run.ID, IdempotencyKey: run.ID, Payload: map[string]any{"run_id": run.ID}, MaxAttempts: 3, RunAt: now, CreateUserID: uid, CreateUserName: uname})
 		if err != nil {
 			return err
 		}
@@ -360,6 +378,9 @@ func RetryOrganizer(w http.ResponseWriter, r *http.Request) {
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id=? AND user_id=?", id, uid).Take(&row).Error; err != nil {
 			return err
 		}
+		if row.ProtocolVersion != 2 {
+			return errOrganizerProtocol
+		}
 		if row.Status != "failed" && row.Status != "canceled" {
 			return errors.New("conversation organizer run cannot be retried")
 		}
@@ -377,7 +398,7 @@ func RetryOrganizer(w http.ResponseWriter, r *http.Request) {
 		if active > 0 {
 			return fmt.Errorf("%s", organizerAlreadyActiveMessage)
 		}
-		job, err := asyncjob.Enqueue(r.Context(), tx, asyncjob.EnqueueRequest{JobType: organizerJobType, ResourceType: "conversation_organizer_run", ResourceID: id, IdempotencyKey: id + ":" + uuid.NewString(), Payload: map[string]any{"run_id": id}, MaxAttempts: 3, RunAt: now, CreateUserID: uid, CreateUserName: uname})
+		job, err := asyncjob.EnqueueInTransaction(r.Context(), tx, asyncjob.EnqueueRequest{JobType: organizerJobType, ResourceType: "conversation_organizer_run", ResourceID: id, IdempotencyKey: id + ":" + uuid.NewString(), Payload: map[string]any{"run_id": id}, MaxAttempts: 3, RunAt: now, CreateUserID: uid, CreateUserName: uname})
 		if err != nil {
 			return err
 		}
@@ -468,6 +489,9 @@ func CorrectOrganizerItem(w http.ResponseWriter, r *http.Request) {
 		}
 		target := ""
 		if newGroup != nil {
+			if err := requireOrganizerNamesUnlocked(tx, uid); err != nil {
+				return err
+			}
 			name, scope, err := validateGroupInput(*newGroup, true)
 			if err != nil {
 				return err
@@ -702,6 +726,9 @@ func handleOrganizerJob(ctx context.Context, job asyncjob.Job, reporter asyncjob
 		raw, _ := json.Marshal(map[string]any{"run_id": run.ID, "status": run.Status})
 		return asyncjob.Result{ResultJSON: raw}, nil
 	}
+	if run.ProtocolVersion != 2 {
+		return asyncjob.Result{Permanent: true, ErrorCode: "organizer_protocol_upgraded"}, errOrganizerProtocol
+	}
 	ctx, cancel := organizerContext(ctx, db, run, job)
 	defer cancel()
 	stage := "organizing"
@@ -757,10 +784,8 @@ func handleOrganizerJob(ctx context.Context, job asyncjob.Job, reporter asyncjob
 		result, _ := json.Marshal(map[string]any{"run_id": run.ID, "status": "succeeded"})
 		return asyncjob.Result{ResultJSON: result}, nil
 	}
-	checkpoint := run.CheckpointJSON
-	for step := 0; step < 10000; step++ {
-		input := map[string]any{"task_id": run.ID, "snapshot_id": run.ID, "snapshot": snapshot, "checkpoint": rawOrNil(checkpoint), "request_cap_tokens": 64000}
-		result, err := callOrganizerStream(ctx, db, &run, job, input, llmConfig)
+	for step := 0; step < 100000; step++ {
+		proposal, err := runIncrementalStep(ctx, db, &run, job, snapshot, llmConfig)
 		if err != nil {
 			if errors.Is(err, errCancellationUnconfirmed) {
 				_ = ownedRunUpdate(ctx, db, run.ID, job, "running", map[string]any{"stage": "canceling"})
@@ -769,40 +794,22 @@ func handleOrganizerJob(ctx context.Context, job asyncjob.Job, reporter asyncjob
 			if ctx.Err() != nil {
 				return asyncjob.Result{ErrorCode: "lease_lost"}, ctx.Err()
 			}
-			return retryOrFailRun(ctx, db, run, job, "algorithm_unavailable", err)
+			return retryOrFailRun(ctx, db, run, job, "incremental_step_failed", err)
 		}
-		if result.Status != "succeeded" {
-			err = fmt.Errorf("algorithm organizer failed: %s", result.ErrorCode)
-			if result.Retryable {
-				return retryOrFailRun(ctx, db, run, job, result.ErrorCode, err)
-			}
-			return failRun(ctx, db, run, job, result.ErrorCode, err)
-		}
-		if len(result.Output.Checkpoint) == 0 {
-			return failRun(ctx, db, run, job, "invalid_checkpoint", errors.New("algorithm returned empty checkpoint"))
-		}
-		updates := map[string]any{"checkpoint_json": result.Output.Checkpoint, "progress_current": result.Output.Progress.Processed, "stage": result.Output.Progress.Stage, "version": gorm.Expr("version + 1")}
-		if err := ownedRunUpdate(ctx, db, run.ID, job, "running", updates); err != nil {
-			return asyncjob.Result{ErrorCode: "lease_lost"}, err
-		}
-		checkpoint = result.Output.Checkpoint
 		if reporter != nil {
-			if err := reporter.SetProgress(ctx, result.Output.Progress.Processed, int64(len(snapshot.Conversations))); err != nil {
+			if err := reporter.SetProgress(ctx, run.ProgressCurrent, int64(len(snapshot.Conversations))); err != nil {
 				return asyncjob.Result{ErrorCode: "lease_lost"}, err
 			}
 		}
-		if !result.Output.Done {
+		if proposal == nil {
 			continue
 		}
-		if result.Output.Proposal == nil {
-			return failRun(ctx, db, run, job, "invalid_proposal", errors.New("algorithm returned done without proposal"))
-		}
-		rawProposal, _ := json.Marshal(result.Output.Proposal)
-		if err := applyProposal(ctx, db, run, job, *result.Output.Proposal, rawProposal); err != nil {
+		raw, _ := json.Marshal(proposal)
+		if err := applyProposal(ctx, db, run, job, *proposal, raw); err != nil {
 			return failRun(ctx, db, run, job, "apply_failed", err)
 		}
-		raw, _ := json.Marshal(map[string]any{"run_id": run.ID, "status": "succeeded"})
-		return asyncjob.Result{ResultJSON: raw}, nil
+		result, _ := json.Marshal(map[string]any{"run_id": run.ID, "status": "succeeded"})
+		return asyncjob.Result{ResultJSON: result}, nil
 	}
 	return failRun(ctx, db, run, job, "step_limit", errors.New("conversation organizer exceeded step limit"))
 }
@@ -963,21 +970,23 @@ func applyProposal(ctx context.Context, db *gorm.DB, run orm.ConversationOrganiz
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("conversation_id IN ? AND user_id=?", snapshotIDs, run.UserID).Order("conversation_id").Find(&lockedMembers).Error; err != nil {
 			return err
 		}
+		conversationByID := make(map[string]orm.Conversation, len(lockedConversations))
+		for _, conv := range lockedConversations {
+			conversationByID[conv.ID] = conv
+		}
+		memberByID := make(map[string]bool, len(lockedMembers))
+		for _, member := range lockedMembers {
+			memberByID[member.ConversationID] = true
+		}
 		validConversation := func(id string) bool {
 			if !allowed[id] || seen[id] {
 				return false
 			}
 			seen[id] = true
-			var state struct {
-				ConversationExists bool `gorm:"column:conversation_exists"`
-				Deleted            bool `gorm:"column:deleted"`
-				Archived           bool `gorm:"column:archived"`
-				Grouped            bool `gorm:"column:grouped"`
+			conv, exists := conversationByID[id]
+			state := struct{ ConversationExists, Deleted, Archived, Grouped bool }{
+				exists, conv.DeletedAt != nil, conv.ArchivedAt != nil, memberByID[id],
 			}
-			tx.Raw(`SELECT EXISTS(SELECT 1 FROM conversations WHERE id=? AND create_user_id=?) AS conversation_exists,
-				EXISTS(SELECT 1 FROM conversations WHERE id=? AND deleted_at IS NOT NULL) AS deleted,
-				EXISTS(SELECT 1 FROM conversations WHERE id=? AND archived_at IS NOT NULL) AS archived,
-				EXISTS(SELECT 1 FROM conversation_group_members WHERE conversation_id=?) AS grouped`, id, run.UserID, id, id, id).Scan(&state)
 			if state.ConversationExists && !state.Deleted && !state.Archived && !state.Grouped {
 				return true
 			}
@@ -1080,6 +1089,15 @@ func applyProposal(ctx context.Context, db *gorm.DB, run orm.ConversationOrganiz
 			var prep organizerPreparation
 			if err := json.Unmarshal(run.PreparationJSON, &prep); err != nil {
 				return err
+			}
+			if run.ProtocolVersion == 2 {
+				var rows []orm.ConversationOrganizerSnapshotItem
+				if err := tx.Select("conversation_id,preparation_reason,preparation_error").Where("run_id=?", run.ID).Find(&rows).Error; err != nil {
+					return err
+				}
+				for _, row := range rows {
+					prep.Items = append(prep.Items, preparationItem{Conversation: snapshotConversation{ID: row.ConversationID}, Reason: row.PreparationReason, ErrorCode: row.PreparationError})
+				}
 			}
 			total = len(prep.Items)
 			for _, item := range prep.Items {
@@ -1231,9 +1249,13 @@ func runDTO(ctx context.Context, db *gorm.DB, row orm.ConversationOrganizerRun, 
 		var grouped int64
 		db.WithContext(ctx).Table("conversation_organizer_snapshot_items s").Joins("JOIN conversation_group_members m ON m.conversation_id=s.conversation_id").Where("s.run_id=?", row.ID).Count(&grouped)
 		counts.OrganizedCount = int(grouped)
-		counts.FreeCount = len(preparation.Items) - int(grouped)
+		total := int64(len(preparation.Items))
+		if row.ProtocolVersion == 2 {
+			db.Model(&orm.ConversationOrganizerSnapshotItem{}).Where("run_id=?", row.ID).Count(&total)
+		}
+		counts.FreeCount = int(total - grouped)
 	}
-	dto := map[string]any{"id": row.ID, "status": row.Status, "stage": row.Stage, "progress": map[string]any{"current": row.ProgressCurrent, "total": row.ProgressTotal, "batch_current": batchCurrent, "batch_total": batchTotal, "preparation_current": preparation.Current, "preparation_total": preparation.Total}, "organized_count": counts.OrganizedCount, "free_count": counts.FreeCount, "skipped_count": counts.SkippedCount, "can_cancel": (row.Status == "pending" || row.Status == "running") && row.Stage != "canceling", "can_retry": row.Status == "failed" || row.Status == "canceled", "can_undo": row.Status == "succeeded" && row.ID == latestID, "created_at": row.CreatedAt, "updated_at": row.UpdatedAt}
+	dto := map[string]any{"id": row.ID, "status": row.Status, "stage": row.Stage, "progress": map[string]any{"current": row.ProgressCurrent, "total": row.ProgressTotal, "batch_current": batchCurrent, "batch_total": batchTotal, "preparation_current": preparation.Current, "preparation_total": preparation.Total}, "organized_count": counts.OrganizedCount, "free_count": counts.FreeCount, "skipped_count": counts.SkippedCount, "can_cancel": (row.Status == "pending" || row.Status == "running") && row.Stage != "canceling", "can_retry": row.ProtocolVersion == 2 && (row.Status == "failed" || row.Status == "canceled"), "can_undo": row.Status == "succeeded" && row.ID == latestID, "created_at": row.CreatedAt, "updated_at": row.UpdatedAt}
 	var streaming organizerStream
 	if json.Unmarshal(row.StreamJSON, &streaming) == nil {
 		dto["model_progress"] = map[string]any{"state": streaming.State, "received_chars": streaming.ReceivedChars, "elapsed_seconds": streaming.ElapsedSeconds, "idle_seconds": streaming.IdleSeconds, "first_response_at": streaming.FirstResponseAt, "last_activity_at": streaming.LastActivityAt}
@@ -1261,6 +1283,13 @@ func runDTO(ctx context.Context, db *gorm.DB, row orm.ConversationOrganizerRun, 
 			query = query.Where("s.conversation_id IN ?", snapshot.conversationIDs())
 		}
 		query.Scan(&items)
+		if row.ProtocolVersion == 2 {
+			var rows []orm.ConversationOrganizerSnapshotItem
+			db.Select("conversation_id,preparation_reason,preparation_error").Where("run_id=?", row.ID).Find(&rows)
+			for _, row := range rows {
+				preparation.Items = append(preparation.Items, preparationItem{Conversation: snapshotConversation{ID: row.ConversationID}, Reason: row.PreparationReason, ErrorCode: row.PreparationError})
+			}
+		}
 		for _, item := range preparation.Items {
 			if counts.UnassignedReasons == nil {
 				counts.UnassignedReasons = map[string]string{}

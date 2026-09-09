@@ -5,7 +5,7 @@ import * as api from "./api";
 
 const t = (key: string) => key;
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t }) }));
-vi.mock("./api", () => ({ listConversationGroups: vi.fn(), createConversationGroup: vi.fn(), assignConversation: vi.fn(), removeConversation: vi.fn(), emitConversationGroupsChanged: vi.fn() }));
+vi.mock("./api", () => ({ CONVERSATION_GROUPS_CHANGED_EVENT: "groups-changed", getLatestOrganizerState: vi.fn(async () => ({ run: null })), listConversationGroups: vi.fn(), createConversationGroup: vi.fn(), assignConversation: vi.fn(), removeConversation: vi.fn(), emitConversationGroupsChanged: vi.fn() }));
 const group = { id: "travel", name: "旅行" } as api.ConversationGroup;
 beforeEach(() => {
   vi.clearAllMocks();

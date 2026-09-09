@@ -41,9 +41,25 @@ func (OrganizerOpeningPreparer) Freeze(ctx context.Context, tx *gorm.DB, conv or
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return out, err
 	}
-	if (meta.IntentStatus == "ready" || meta.IntentStatus == "provisional") && strings.TrimSpace(meta.Summary) != "" {
-		out.Summary = meta.Summary
-		return out, nil
+	if meta.Status == "done" && meta.WindowClosed {
+		var ids []string
+		if err := json.Unmarshal(meta.SourceHistoryIDs, &ids); err != nil {
+			return out, err
+		}
+		evidence, err := openingEvidence(tx, conv, ids)
+		if err != nil {
+			return out, err
+		}
+		if evidence == meta.EvidenceHash {
+			if meta.IntentStatus == "empty" {
+				out.Reason = "no_task_intent"
+				return out, nil
+			}
+			if strings.TrimSpace(meta.Summary) != "" {
+				out.Summary = meta.Summary
+				return out, nil
+			}
+		}
 	}
 	var count int64
 	if err := tx.Model(&orm.ChatHistory{}).Where("conversation_id=?", conv.ID).Count(&count).Error; err != nil {
@@ -60,6 +76,16 @@ func (OrganizerOpeningPreparer) Freeze(ctx context.Context, tx *gorm.DB, conv or
 	if snap.Turns == 0 {
 		out.Reason = "no_task_intent"
 		return out, nil
+	}
+	if meta.Status == "done" && meta.SourceHash == snap.Hash {
+		if meta.IntentStatus == "empty" {
+			out.Reason = "no_task_intent"
+			return out, nil
+		}
+		if strings.TrimSpace(meta.Summary) != "" {
+			out.Summary = meta.Summary
+			return out, nil
+		}
 	}
 	frozen := frozenOrganizerOpening{Snapshot: snap, ConversationID: conv.ID, SeedRevision: meta.SeedRevision, MetadataRevision: meta.MetadataRevision, TitleRevision: conv.TitleRevision}
 	if meta.SourceHash == snap.Hash && (meta.Status == "pending" || meta.Status == "running") {

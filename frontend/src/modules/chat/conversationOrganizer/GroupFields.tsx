@@ -8,7 +8,7 @@ export const normalizeGroupValues = (values: GroupValues) => ({
   scope: values.scope?.trim() || "",
 });
 
-export default function GroupFields({ scopeHint }: { scopeHint?: ReactNode }) {
+export default function GroupFields({ scopeHint, nameDisabled = false }: { scopeHint?: ReactNode; nameDisabled?: boolean }) {
   const { t } = useTranslation();
   const count = (limit: number) => ({ formatter: ({ value }: { value: string }) => `${Array.from(value).length}/${limit}` });
   return <>
@@ -17,7 +17,7 @@ export default function GroupFields({ scopeHint }: { scopeHint?: ReactNode }) {
         const length = Array.from(String(value || "").trim()).length;
         if (!length || length > 24) throw new Error(t(length ? "conversationOrganizer.nameTooLong" : "conversationOrganizer.nameRequired"));
       },
-    }]}><Input showCount={count(24)} /></Form.Item>
+    }]}><Input disabled={nameDisabled} showCount={count(24)} /></Form.Item>
     <Form.Item name="scope" label={t("conversationOrganizer.scope")} extra={scopeHint} rules={[{
       validator: async (_, value) => {
         if (Array.from(String(value || "")).length > 500) throw new Error(t("conversationOrganizer.scopeTooLong"));

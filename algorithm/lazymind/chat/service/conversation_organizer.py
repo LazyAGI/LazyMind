@@ -591,6 +591,9 @@ def organize_step(request: LLMTaskRequest, *,
                   call: Callable[..., Any] | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
     _ACTIVE_USAGE.set({})
     try:
+        if request.input.data.get('protocol_version') == 2:
+            from .organizer_incremental import organize
+            return organize(request, call=call)
         return _organize_step(request, call=call)
     except Exception as exc:
         error = _task_call_error(exc)

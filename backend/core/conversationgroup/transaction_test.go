@@ -14,7 +14,7 @@ import (
 )
 
 func TestGroupRemovalSerializesNewMembersWithoutBlockingOtherUsers(t *testing.T) {
-	db := orm.MigrateTestDB(t, &orm.Conversation{}, &orm.ConversationGroup{}, &orm.ConversationGroupMember{}, &orm.ConversationGroupState{})
+	db := orm.MigrateTestDB(t, &orm.Conversation{}, &orm.ConversationGroup{}, &orm.ConversationGroupMember{}, &orm.ConversationGroupState{}, &orm.ConversationOrganizerRun{})
 	if db.Dialector.Name() != "postgres" {
 		t.Skip("PostgreSQL transaction coordination")
 	}

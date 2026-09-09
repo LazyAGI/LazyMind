@@ -3,6 +3,7 @@ DROP TABLE IF EXISTS conversation_fork_origins;
 
 -- +migrate Dialect postgres
 DROP TABLE IF EXISTS conversation_organizer_changes;
+DROP TABLE IF EXISTS conversation_organizer_candidates;
 DROP TABLE IF EXISTS conversation_organizer_snapshot_items;
 DROP TABLE IF EXISTS conversation_organizer_runs;
 DROP TABLE IF EXISTS conversation_group_states;
@@ -452,6 +453,7 @@ DELETE FROM user_selected_models WHERE model_type = 'conversation_metadata';
 -- +migrate Dialect sqlite
 DELETE FROM async_jobs WHERE job_type IN ('conversation.opening', 'conversation.opening.backfill');
 DROP TABLE IF EXISTS conversation_organizer_changes;
+DROP TABLE IF EXISTS conversation_organizer_candidates;
 DROP TABLE IF EXISTS conversation_organizer_snapshot_items;
 DROP TABLE IF EXISTS conversation_organizer_runs;
 DROP TABLE IF EXISTS conversation_group_states;

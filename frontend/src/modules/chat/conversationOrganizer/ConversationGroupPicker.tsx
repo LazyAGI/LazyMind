@@ -5,12 +5,14 @@ import { useTranslation } from "react-i18next";
 import { assignConversation, emitConversationGroupsChanged, listConversationGroups, removeConversation, type ConversationGroup } from "./api";
 import type { MembershipConversation } from "./ConversationMembershipModal";
 import "./ConversationGroupPicker.scss";
+import useOrganizerNameLock from "./useOrganizerNameLock";
 
 export default function ConversationGroupPicker({ conversation, onCreate }: {
   conversation: MembershipConversation;
   onCreate: () => void;
 }) {
   const { t } = useTranslation();
+  const namesLocked = useOrganizerNameLock();
   const [groups, setGroups] = useState<ConversationGroup[]>([]);
   const [keyword, setKeyword] = useState("");
   const [loading, setLoading] = useState(true);
@@ -48,7 +50,7 @@ export default function ConversationGroupPicker({ conversation, onCreate }: {
     </Spin>
     <div className="conversation-group-picker-footer">
       {conversation.groupId && <Button type="text" disabled={busy} onClick={() => void move()}>{t("conversationOrganizer.freeConversation")}</Button>}
-      <Button type="text" disabled={busy} onClick={onCreate}>{t("conversationOrganizer.newAndMoveEllipsis")}</Button>
+      <Button type="text" disabled={busy || namesLocked} title={namesLocked ? t("conversationOrganizer.namesLocked") : undefined} onClick={onCreate}>{t("conversationOrganizer.newAndMoveEllipsis")}</Button>
     </div>
   </div>;
 }
