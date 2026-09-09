@@ -51,7 +51,7 @@ vi.mock("react-i18next", () => ({
         "chat.batch": "批量",
         "chat.selectAll": "全选",
         "chat.conversationChildSourceLabel": "来源",
-        "chat.conversationChildForkLabel": "Fork自",
+        "chat.conversationChildForkLabel": "分支来源",
         "chat.expandChildConversations": `展开${params?.count}个子会话`,
         "chat.collapseChildConversations": "收起子会话",
         "chat.childConversationsLabel": `${params?.parent}的子会话`,
@@ -62,7 +62,7 @@ vi.mock("react-i18next", () => ({
         "chat.conversationGenericRelationshipTooltip":
           `“${params?.child}”来源于“${params?.parent}”`,
         "chat.conversationSourceFrom": `来源：${params?.parent}`,
-        "chat.conversationForkedFrom": `Fork自：${params?.parent}`,
+        "chat.conversationForkedFrom": `分支来源：${params?.parent}`,
       })[key] || key,
   }),
 }));
@@ -479,7 +479,7 @@ describe("RecordList conversation pinning", () => {
     expect(within(childGroup).getByText("侧聊方案")).toBeInTheDocument();
     expect(within(childGroup).getByText("分支方案")).toBeInTheDocument();
     expect(within(childGroup).queryByText("来源")).not.toBeInTheDocument();
-    expect(within(childGroup).queryByText("Fork自")).not.toBeInTheDocument();
+    expect(within(childGroup).queryByText("分支来源")).not.toBeInTheDocument();
 
     const sideChatRecord = within(childGroup)
       .getByText("侧聊方案")
@@ -498,7 +498,7 @@ describe("RecordList conversation pinning", () => {
 
     const forkTitle = within(childGroup).getByText("分支方案");
     fireEvent.mouseOver(forkTitle);
-    expect(await screen.findByText("Fork自：主会话")).toBeInTheDocument();
+    expect(await screen.findByText("分支来源：主会话")).toBeInTheDocument();
     fireEvent.mouseOut(forkTitle);
 
     fireEvent.click(moreActionsFor("侧聊方案"));
