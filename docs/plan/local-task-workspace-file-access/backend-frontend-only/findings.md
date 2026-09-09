@@ -40,6 +40,7 @@
 - 当前中英文 reason 字典没有选择过期和选择禁止文案。已有 mode/path/invalid 文案可以在归一化后继续复用，不需要修改 Local Proxy 或 Core 协议。
 - `loadManagedItems` 只用独立的 `listRequestRef` 处理查询先后顺序。会话改变仅递增 `requestRef`，不会关闭 `manageOpen`、清空 `managedItems` 或作废在途管理查询；草稿切换到已有任务时，管理窗口及旧授权结果仍可能显示。
 - 修复可限制在 4 个既有前端生产文件，预计净增 30–50 行。算法、Backend、Local/Desktop 均无需修改；最终人工验收和文件执行能力不属于本批。
+- S1 首次运行时管理窗口用例被前序 Ant Design confirm 的离场动画节点干扰，`findByRole("dialog")` 因多个匹配而异常失败。改为按 `chat.workspace.manageTitle` 定位所属 dialog 后，结果稳定为 5 个错误码断言收到 `unknown`、管理 dialog 未进入 leave 状态；这是 6 项预期产品失败，不再包含测试设施异常。
 
 ## 基线
 

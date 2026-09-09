@@ -464,6 +464,27 @@ describe("LocalWorkspaceControl task binding and request lifetime", () => {
     await waitFor(() => expect(mocks.listWorkspaces).toHaveBeenLastCalledWith({ query: "beta", includeInactive: true }));
   });
 
+  it("closes access management and ignores its pending list when the conversation changes", async () => {
+    const managedList = deferred<LocalWorkspaceView[]>();
+    mocks.listWorkspaces.mockResolvedValueOnce([]).mockReturnValueOnce(managedList.promise);
+    const view = render(<LocalWorkspaceControl onChange={vi.fn()} />);
+    await waitFor(() => expect(mocks.listWorkspaces).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByRole("button", { name: /chat\.workspace\.manage/ }));
+    const title = await screen.findByText("chat.workspace.manageTitle");
+    const dialog = title.closest("[role=dialog]");
+    if (!dialog) throw new Error("workspace access dialog missing");
+    await waitFor(() => expect(mocks.listWorkspaces).toHaveBeenCalledTimes(2));
+
+    view.rerender(
+      <LocalWorkspaceControl conversationId="conv-alpha" onChange={vi.fn()} />,
+    );
+    await act(async () => managedList.resolve([beta]));
+
+    await waitFor(() => expect(dialog).toHaveClass("ant-zoom-leave"));
+    expect(screen.queryByText(beta.path)).not.toBeInTheDocument();
+  });
+
   it("reauthorizes an inactive grant without binding it to the draft", async () => {
     const revoked = { ...alpha, status: "revoked" as const };
     mocks.listWorkspaces.mockResolvedValueOnce([]).mockResolvedValueOnce([revoked]);

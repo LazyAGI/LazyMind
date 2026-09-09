@@ -20,7 +20,7 @@
 
 ## 前端稳定性补齐（2026-09-09 已批准）
 
-- [ ] S1：测试先行，复现 Local Proxy 大写错误码退化为 unknown，以及授权管理查询在会话切换后继续显示。
+- [x] S1：测试先行，复现 Local Proxy 大写错误码退化为 unknown，以及授权管理查询在会话切换后继续显示；新增 6 项预期失败、原有 23 项通过、异常失败 0。
 - [ ] S2：最小修改现有控件、错误 helper 和中英文 locale，使 S1 合同通过。
 - [ ] S3：运行前端聚焦矩阵、ESLint、TypeScript、生产构建和冻结边界检查；同步四份文档并报告实际生产增量。
 
@@ -38,9 +38,9 @@
 
 **测试先行**
 
-- [ ] 在 utility 测试加入表驱动断言：`LOCAL_WORKSPACE_SELECTION_EXPIRED` → `selection_expired`、`LOCAL_WORKSPACE_SELECTION_FORBIDDEN` → `selection_forbidden`、现有 invalid/path/mode 大写码映射到已有 reason。
-- [ ] 在组件测试用可控 Promise 启动管理列表请求，随后从草稿 rerender 到已有任务；断言 Modal 进入关闭状态，迟到结果不显示旧路径。
-- [ ] 运行 `NODE_OPTIONS=--no-experimental-webstorage pnpm exec vitest run src/modules/chat/utils/localWorkspace.test.ts src/modules/chat/components/ChatInput/LocalWorkspaceControl.test.tsx`，预期新增合同失败且旧合同通过。
+- [x] 在 utility 测试加入表驱动断言：`LOCAL_WORKSPACE_SELECTION_EXPIRED` → `selection_expired`、`LOCAL_WORKSPACE_SELECTION_FORBIDDEN` → `selection_forbidden`、现有 invalid/path/mode 大写码映射到已有 reason。
+- [x] 在组件测试用可控 Promise 启动管理列表请求，随后从草稿 rerender 到已有任务；断言 Modal 进入关闭状态，迟到结果不显示旧路径。
+- [x] 运行 `NODE_OPTIONS=--no-experimental-webstorage pnpm exec vitest run src/modules/chat/utils/localWorkspace.test.ts src/modules/chat/components/ChatInput/LocalWorkspaceControl.test.tsx`，结果为新增 6 项预期失败、原有 23 项通过、异常失败 0。
 
 **最小实现**
 

@@ -19,6 +19,15 @@ it("reads Core reason details", () => {
   expect(workspaceReason({ response: { data: { data: { detail: { reason: "revoked" } } } } })).toBe("revoked");
   expect(workspaceReason({ response: { data: { detail: { reason: "path_unavailable" } } } })).toBe("path_unavailable");
 });
+it.each([
+  ["LOCAL_WORKSPACE_MODE_FORBIDDEN", "mode_forbidden"],
+  ["LOCAL_WORKSPACE_SELECTION_FORBIDDEN", "selection_forbidden"],
+  ["LOCAL_WORKSPACE_SELECTION_EXPIRED", "selection_expired"],
+  ["LOCAL_WORKSPACE_SELECTION_INVALID", "invalid_selection"],
+  ["LOCAL_WORKSPACE_PATH_INVALID", "path_invalid"],
+])("normalizes Local Proxy error %s", (code, reason) => {
+  expect(workspaceReason({ response: { data: { code } } })).toBe(reason);
+});
 it("passes search and inactive filters to Core", async () => {
   vi.mocked(axiosInstance.get).mockResolvedValue({ data: { data: { items: [] } } });
   await listWorkspaces({ query: " project ", includeInactive: true });
