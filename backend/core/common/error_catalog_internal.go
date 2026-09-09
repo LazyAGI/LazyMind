@@ -496,6 +496,8 @@ func init() {
 		"invalid writer download conversion request", "invalid writer download source format",
 		"invalid writer download target format", "writer download conversion failed",
 		"unsupported writer document provider",
+		"invalid conversation status request", "provide between 1 and 100 conversation ids",
+		"invalid conversation id",
 	} {
 		registerAdditionalErrorAlias(source, "Invalid request", http.StatusBadRequest, 2000103)
 	}
@@ -551,6 +553,7 @@ func init() {
 		"open writer download conversion failed", "read writer download conversion failed",
 		"save writer download conversion failed", "index writer download conversion failed",
 		"encode writer download conversion request failed",
+		"state unavailable",
 	} {
 		registerAdditionalErrorAlias(source, "Internal server error", http.StatusInternalServerError, 2000000)
 	}
@@ -566,6 +569,7 @@ func init() {
 	}
 	registerAdditionalErrorPattern("chat service returned status %d", "Upstream service error", http.StatusBadGateway, 2000110)
 	registerAdditionalErrorAlias("record chat cancellation failed", "Upstream service error", http.StatusServiceUnavailable, 2000110)
+	registerAdditionalErrorAlias("unable to query conversation status", "Internal server error", http.StatusServiceUnavailable, 2000000)
 	registerAdditionalErrorPattern("migrate model provider credential %s", "Internal server error", http.StatusInternalServerError, 2000000)
 	registerAdditionalErrorPattern("load workflow head revision %s", "Internal server error", http.StatusInternalServerError, 2000000)
 	registerAdditionalErrorPattern("session_ids must belong to user %q and must not contain plugin conversations", "Invalid request", http.StatusBadRequest, 2000103)
