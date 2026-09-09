@@ -26,6 +26,35 @@
 
 本批不执行 T6，也不实现或测试 Agent 对本机工作区文件的读、新建、修改、追加、删除。
 
+### S1–S3 执行步骤
+
+**文件职责**
+
+- 测试 `frontend/src/modules/chat/utils/localWorkspace.test.ts`：验证 Local Proxy 错误码归一化。
+- 测试 `frontend/src/modules/chat/components/ChatInput/LocalWorkspaceControl.test.tsx`：验证会话切换关闭管理窗口并隔离在途查询。
+- 生产 `frontend/src/modules/chat/utils/localWorkspace.ts`：继续作为唯一错误 reason 解析入口。
+- 生产 `frontend/src/modules/chat/components/ChatInput/LocalWorkspaceControl.tsx`：复用现有请求序号处理管理窗口生命周期。
+- 生产 `frontend/src/i18n/locales/zh-CN.ts`、`frontend/src/i18n/locales/en-US.ts`：只增加选择禁止和选择过期文案。
+
+**测试先行**
+
+- [ ] 在 utility 测试加入表驱动断言：`LOCAL_WORKSPACE_SELECTION_EXPIRED` → `selection_expired`、`LOCAL_WORKSPACE_SELECTION_FORBIDDEN` → `selection_forbidden`、现有 invalid/path/mode 大写码映射到已有 reason。
+- [ ] 在组件测试用可控 Promise 启动管理列表请求，随后从草稿 rerender 到已有任务；断言 Modal 进入关闭状态，迟到结果不显示旧路径。
+- [ ] 运行 `NODE_OPTIONS=--no-experimental-webstorage pnpm exec vitest run src/modules/chat/utils/localWorkspace.test.ts src/modules/chat/components/ChatInput/LocalWorkspaceControl.test.tsx`，预期新增合同失败且旧合同通过。
+
+**最小实现**
+
+- [ ] `workspaceReason` 按 Core 嵌套 reason、Local Proxy `response.data.code`、错误对象顶层 code 的顺序取字符串，并通过固定 map 归一化已有主机错误码；非字符串返回 `unknown`。
+- [ ] 会话 effect 开始时递增 `listRequestRef`、关闭 `manageOpen`、清空 `managedItems`，使旧查询不能更新新会话界面。
+- [ ] 两份 locale 增加 `selection_forbidden` 和 `selection_expired`，不改其他产品文案。
+- [ ] 重跑 S1 聚焦命令，预期全部通过。
+
+**回归与交付**
+
+- [ ] 运行六文件前端聚焦矩阵、相关 ESLint、`pnpm exec tsc -p tsconfig.mcp.json --noEmit` 和 `pnpm run build`。
+- [ ] 核对 `algorithm/`、`tests/algorithm/`、LazyLLM gitlink 与 `245bc26d` 一致，Local/Desktop 与 `ec4676e0` 一致；检查无 Backend 或范围外改动。
+- [ ] 统计生产 diff，更新本目录四份文档，提交本批但不自动宣称 T6 或 F 类完成。
+
 T1–T6 依赖当前已实现的 grant/binding/bridge。不得再次提取 Local/Desktop 补丁或重做迁移。权限/API 相关测试与实现遵循人工 Review 门禁。
 
 ## 文件能力研究与准入
