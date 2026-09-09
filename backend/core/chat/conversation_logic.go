@@ -1642,8 +1642,25 @@ func handleNonStreamChat(
 	historyExt = archiveRegeneratedFailedRunAttempt(historyExt, target)
 	historyExt = archiveRegeneratedTrafficAttempt(historyExt, target)
 	runID := newID("run_")
-	reqBody["run_id"] = runID
-	chunks, _, err := StreamChatUpstream(reqCtx, baseURL, reqBody)
+	historyID := target.HistoryID
+	if historyID == "" {
+		historyID = newID("h_")
+	}
+	reqBody["run_id"], reqBody["history_id"] = runID, historyID
+	runCtx, cancel := context.WithCancel(reqCtx)
+	defer cancel()
+	if stateStore == nil {
+		common.ReplyErr(w, "store not initialized", http.StatusServiceUnavailable)
+		return
+	}
+	if err := setChatRuntimeStatus(runCtx, stateStore, convID, historyID, "generating", "", runID, nil); err != nil {
+		common.ReplyErr(w, "store not initialized", http.StatusServiceUnavailable)
+		return
+	}
+	defer finishRegisteredChatRun(runCtx, stateStore, convID, historyID, runID)
+	_ = setChatInput(runCtx, stateStore, convID, historyID, query, target.Seq, historyExt)
+	go cancelChatOnStop(runCtx, stateStore, convID, historyID, cancel)
+	chunks, _, err := StreamChatUpstream(runCtx, baseURL, reqBody)
 	if err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "chat service unavailable", err), http.StatusBadGateway)
 		return
@@ -1695,10 +1712,8 @@ func handleNonStreamChat(
 		common.ReplyErr(w, "chat service returned no answer", http.StatusBadGateway)
 		return
 	}
-	historyID := target.HistoryID
-	if historyID == "" {
-		historyID = newID("h_")
-	}
+	runTerminal = resolveCandidateRunTerminal(runCtx, stateStore, convID, historyID, runID, runTerminal, "nonstream_terminal", true)
+	runEvent = runFinishedEvent(runID, *runTerminal)
 	now := time.Now()
 	retrievalResult := marshalRetrievalResult(sources)
 	hist := orm.ChatHistory{
@@ -1805,7 +1820,7 @@ func handleStreamChat(
 	if primaryRunID == "" {
 		primaryRunID = newID("run_")
 	}
-	reqBody["run_id"] = primaryRunID
+	reqBody["run_id"], reqBody["history_id"] = primaryRunID, historyID
 	secondaryRunID := ""
 	if dualReply {
 		secondaryHistoryID = newID("h_")
@@ -1814,17 +1829,29 @@ func handleStreamChat(
 	}
 	chatCtx, chatCancel := context.WithCancel(context.Background())
 	defer chatCancel()
+	if stateStore == nil && requestUsesRunDecision(reqBody) {
+		common.ReplyErr(w, "store not initialized", http.StatusServiceUnavailable)
+		return
+	}
 	if stateStore != nil {
 		if target.IsRegeneration {
 			_ = clearChatData(chatCtx, stateStore, convID, historyID)
 		}
 		_ = setChatInput(chatCtx, stateStore, convID, historyID, query, target.Seq, historyExt)
 		if requestUsesRunDecision(reqBody) {
-			_ = setChatRuntimeStatus(chatCtx, stateStore, convID, historyID, "generating", "", primaryRunID, nil)
+			if err := setChatRuntimeStatus(chatCtx, stateStore, convID, historyID, "generating", "", primaryRunID, nil); err != nil {
+				common.ReplyErr(w, "store not initialized", http.StatusServiceUnavailable)
+				return
+			}
+			defer finishRegisteredChatRun(chatCtx, stateStore, convID, historyID, primaryRunID)
 		}
 		if dualReply {
 			_ = setChatInput(chatCtx, stateStore, convID, secondaryHistoryID, query, target.Seq, historyExt)
-			_ = setChatRuntimeStatus(chatCtx, stateStore, convID, secondaryHistoryID, "generating", "", secondaryRunID, nil)
+			if err := setChatRuntimeStatus(chatCtx, stateStore, convID, secondaryHistoryID, "generating", "", secondaryRunID, nil); err != nil {
+				common.ReplyErr(w, "store not initialized", http.StatusServiceUnavailable)
+				return
+			}
+			defer finishRegisteredChatRun(chatCtx, stateStore, convID, secondaryHistoryID, secondaryRunID)
 			_ = setMultiAnswerInfo(chatCtx, stateStore, convID, historyID, secondaryHistoryID, target.Seq)
 		}
 		go cancelChatOnStop(chatCtx, stateStore, convID, historyID, chatCancel)
@@ -2532,7 +2559,7 @@ func streamDualAnswer(
 	for k, v := range reqBody {
 		secondaryReq[k] = v
 	}
-	secondaryReq["run_id"] = secondaryRunID
+	secondaryReq["run_id"], secondaryReq["history_id"] = secondaryRunID, secondaryHistoryID
 	delete(secondaryReq, "secondary_run_id")
 	if sc, ok := secondaryReq["filters"].(map[string]any); ok {
 		sc["kb_id"] = nil
@@ -3740,4 +3767,15 @@ func validAskAnswerValue(kind string, value any) bool {
 	default:
 		return false
 	}
+}
+
+func finishRegisteredChatRun(parent context.Context, stateStore state.Store, convID, historyID, runID string) {
+	ctx, cancel := terminalWriteContext(parent)
+	defer cancel()
+	current, err := getChatStatus(ctx, stateStore, convID, historyID)
+	if err == nil && (current.RunID != runID || current.Status != "generating") {
+		return
+	}
+	terminal := resolveRunTerminal(ctx, stateStore, convID, historyID, runID, nil, "request_closed")
+	_ = setChatRuntimeStatus(ctx, stateStore, convID, historyID, terminal.Status, "", runID, terminal)
 }

@@ -969,6 +969,10 @@ async def _handle_chat_impl(
 
     agentic_config = {
         'run_id': run_id,
+        '_workspace_execution': {
+            'history_id': str(conversation.history_id or ''),
+            'run_id': str(conversation.run_id or ''),
+        },
         'session_id': conversation.session_id,
         'task_id': conversation.session_id,
         'episode_occurred_at_ms': int(start_time * 1000),

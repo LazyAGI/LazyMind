@@ -25,6 +25,20 @@ export interface LocalWorkspaceView {
   permission_version?: number;
 }
 
+export interface WorkspaceApproval {
+  operation_id: string;
+  path: string;
+  operation: string;
+  tool_name?: string;
+  task_id?: string;
+  attempt_id?: string;
+  version?: string;
+  content_digest?: string;
+  status: "preparing" | "pending" | "allowed" | "executing" | "completed" | "failed" | "rejected" | "expired" | "uncertain";
+  expires_at: number;
+  reason?: string;
+}
+
 const coreBase = `${BASE_URL}/api/core`;
 const data = <T>(value: unknown): T => ((value as { data?: T })?.data ?? value) as T;
 const hostReasons: Record<string, string> = {
@@ -81,4 +95,15 @@ export async function revokeWorkspace(workspaceId: string, version: number) {
   return data<{ workspace_id: string; status: "revoked"; version: number; affected_task_count: number; stop_requested: boolean; stop_failed_count: number }>(
     (await axiosInstance.post(`${coreBase}/local-workspaces/${encodeURIComponent(workspaceId)}:revoke`, { version })).data,
   );
+}
+
+export async function listWorkspaceApprovals(conversationId: string, signal?: AbortSignal): Promise<WorkspaceApproval[]> {
+  return data<{ items: WorkspaceApproval[] }>((await axiosInstance.get(
+    `${coreBase}/conversations/${encodeURIComponent(conversationId)}:workspace-approvals`, { signal },
+  )).data).items ?? [];
+}
+export async function decideWorkspaceApproval(conversationId: string, operationId: string, action: "allow_once" | "reject") {
+  return data<{ status: WorkspaceApproval["status"] }>((await axiosInstance.post(
+    `${coreBase}/conversations/${encodeURIComponent(conversationId)}/workspace-approvals/${encodeURIComponent(operationId)}:decide`, { action },
+  )).data);
 }

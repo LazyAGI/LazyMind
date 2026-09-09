@@ -1,7 +1,7 @@
 import { beforeEach, expect, it, vi } from "vitest";
 import { axiosInstance } from "@/components/request";
 import { selectLocalWorkspace } from "@/runtime/desktopBridge";
-import { listWorkspaces, selectWorkspaceCandidate, workspaceReason } from "./localWorkspace";
+import { decideWorkspaceApproval, listWorkspaceApprovals, listWorkspaces, selectWorkspaceCandidate, workspaceReason } from "./localWorkspace";
 vi.mock("@/components/request", () => ({ BASE_URL: "", axiosInstance: { post: vi.fn(), get: vi.fn(), put: vi.fn() } }));
 vi.mock("@/runtime/desktopBridge", () => ({ selectLocalWorkspace: vi.fn(), reauthorizeLocalWorkspace: vi.fn(), authorizeLocalWorkspace: vi.fn() }));
 beforeEach(() => vi.clearAllMocks());
@@ -34,4 +34,19 @@ it("passes search and inactive filters to Core", async () => {
   expect(axiosInstance.get).toHaveBeenCalledWith("/api/core/local-workspaces", {
     params: { query: "project", include_inactive: true },
   });
+});
+
+it("loads bounded Core approval summaries through the encoded conversation route", async () => {
+  const signal = new AbortController().signal;
+  vi.mocked(axiosInstance.get).mockResolvedValue({ data: { data: { items: [{ operation_id: "op-1", status: "preparing", path: "notes.txt" }] } } });
+  await expect(listWorkspaceApprovals("conversation/a", signal)).resolves.toEqual([{ operation_id: "op-1", status: "preparing", path: "notes.txt" }]);
+  expect(axiosInstance.get).toHaveBeenCalledWith("/api/core/conversations/conversation%2Fa:workspace-approvals", { signal });
+});
+it.each(["allow_once", "reject"] as const)("submits only %s and returns the Core decision state", async (action) => {
+  vi.mocked(axiosInstance.post).mockResolvedValue({ data: { data: { status: action === "reject" ? "rejected" : "allowed" } } });
+  await expect(decideWorkspaceApproval("conversation/a", "operation/b", action)).resolves.toEqual({ status: action === "reject" ? "rejected" : "allowed" });
+  expect(axiosInstance.post).toHaveBeenCalledWith("/api/core/conversations/conversation%2Fa/workspace-approvals/operation%2Fb:decide", { action });
+});
+it.each(["approval_capacity", "operation_uncertain", "execution_inactive", "unsupported_file", "search_limit"])("preserves Core approval reason %s", (reason) => {
+  expect(workspaceReason({ response: { data: { data: { detail: { reason } } } } })).toBe(reason);
 });

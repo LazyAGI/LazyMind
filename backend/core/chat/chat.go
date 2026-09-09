@@ -83,6 +83,7 @@ type ChatMessageOptions struct {
 type ChatConversationOptions struct {
 	SessionID      string         `json:"session_id"`
 	RunID          string         `json:"run_id"`
+	HistoryID      string         `json:"history_id,omitempty"`
 	ConversationID string         `json:"conversation_id,omitempty"`
 	UserID         string         `json:"user_id"`
 	Mode           string         `json:"mode,omitempty"`
@@ -422,6 +423,9 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 	}
 	if runID, ok := body["run_id"].(string); ok {
 		req.Conversation.RunID = strings.TrimSpace(runID)
+	}
+	if historyID, ok := body["history_id"].(string); ok {
+		req.Conversation.HistoryID = strings.TrimSpace(historyID)
 	}
 	req.Message.History = chatMessagesFromAny(body["history"])
 	req.Message.Files = filesMapFromAny(body["files"])

@@ -5,8 +5,10 @@ import { useTranslation } from "react-i18next";
 import { getRuntimeMode } from "@/runtime/mode";
 import {
   authorizeWorkspace,
+  decideWorkspaceApproval,
   getConversationWorkspace,
   listWorkspaces,
+  listWorkspaceApprovals,
   prepareWorkspaceReauthorization,
   revokeWorkspace,
   selectWorkspaceCandidate,
@@ -14,6 +16,7 @@ import {
   workspaceReason,
   type LocalWorkspaceView,
   type WorkspacePermissionMode,
+  type WorkspaceApproval,
 } from "@/modules/chat/utils/localWorkspace";
 
 interface Props {
@@ -34,6 +37,12 @@ export default function LocalWorkspaceControl({ conversationId, disabled, onChan
   const [manageOpen, setManageOpen] = useState(false);
   const [managedItems, setManagedItems] = useState<LocalWorkspaceView[]>([]);
   const [busy, setBusy] = useState(false);
+  const [approvals, setApprovals] = useState<{ conversationId: string; items: WorkspaceApproval[] }>();
+  const [approvalsOpen, setApprovalsOpen] = useState<string>();
+  const [approvalBusy, setApprovalBusy] = useState<string>();
+  const [approvalError, setApprovalError] = useState<string>();
+  const approvalRequestRef = useRef(0);
+  const refreshApprovalsRef = useRef(() => {});
   const onChangeRef = useRef(onChange);
   const selectedRef = useRef<LocalWorkspaceView>();
   const requestRef = useRef(0);
@@ -73,8 +82,49 @@ export default function LocalWorkspaceControl({ conversationId, disabled, onChan
         onChangeRef.current(values[0].workspace_id, values[0].permission_mode ?? "ask_as_needed");
       }
     }).catch(() => undefined);
-    return () => { active = false; };
+    return () => { active = false; requestRef.current += 1; listRequestRef.current += 1; };
   }, [conversationId]);
+
+  useEffect(() => {
+    setApprovals(undefined);
+    setApprovalsOpen(undefined);
+    setApprovalBusy(undefined);
+    setApprovalError(undefined);
+    if (!conversationId || !selected?.workspace_id || (runtime !== "local" && runtime !== "desktop")) return;
+    let active = true;
+    let timer: ReturnType<typeof setTimeout>;
+    let controller: AbortController | undefined;
+    const visible = () => document.visibilityState !== "hidden";
+    const refresh = async () => {
+      clearTimeout(timer);
+      controller?.abort();
+      const request = ++approvalRequestRef.current;
+      if (!active || !visible()) return;
+      controller = new AbortController();
+      try {
+        const values = await listWorkspaceApprovals(conversationId, controller.signal);
+        if (!active || request !== approvalRequestRef.current || conversationId !== conversationRef.current) return;
+        setApprovals({ conversationId, items: values });
+        setApprovalError(undefined);
+      } catch (error) {
+        if (active && request === approvalRequestRef.current && conversationId === conversationRef.current && !controller.signal.aborted) setApprovalError(workspaceReason(error));
+      } finally {
+        if (active && request === approvalRequestRef.current && conversationId === conversationRef.current && visible()) timer = setTimeout(refresh, 1000);
+      }
+    };
+    const onVisibility = () => void refresh();
+    refreshApprovalsRef.current = onVisibility;
+    document.addEventListener("visibilitychange", onVisibility);
+    void refresh();
+    return () => {
+      active = false;
+      approvalRequestRef.current += 1;
+      clearTimeout(timer);
+      controller?.abort();
+      refreshApprovalsRef.current = () => {};
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [conversationId, selected?.workspace_id, runtime]);
 
   if (runtime !== "local" && runtime !== "desktop") return null;
 
@@ -228,6 +278,22 @@ export default function LocalWorkspaceControl({ conversationId, disabled, onChan
     }});
   };
 
+  const decideApproval = async (item: WorkspaceApproval, action: "allow_once" | "reject") => {
+    if (!conversationId || conversationId !== conversationRef.current || item.status !== "pending" || approvalBusy) return;
+    const request = requestRef.current;
+    setApprovalBusy(item.operation_id);
+    try {
+      const result = await decideWorkspaceApproval(conversationId, item.operation_id, action);
+      if (request === requestRef.current) setApprovals((current) => current && current.conversationId === conversationId
+        ? { ...current, items: current.items.map((value) => value.operation_id === item.operation_id ? { ...value, status: result.status } : value) } : current);
+    } catch (error) {
+      if (request === requestRef.current) message.error(`${t("chat.workspace.approval.decisionFailed")}：${reasonText(error)}`);
+    } finally {
+      if (request === requestRef.current) { setApprovalBusy(undefined); refreshApprovalsRef.current(); }
+    }
+  };
+  const currentApprovals = approvals && approvals.conversationId === conversationId ? approvals.items : [];
+  const pendingCount = currentApprovals.filter((item) => item.status === "pending").length;
   const folderLocked = Boolean(conversationId && (!selected || selected.status === "active"));
   const currentCandidate = candidate?.conversationId === conversationId ? candidate : undefined;
 
@@ -239,13 +305,16 @@ export default function LocalWorkspaceControl({ conversationId, disabled, onChan
       {items.length > 0 && !conversationId && <Select size="small" allowClear placeholder={t("chat.workspace.recent")} value={selected?.workspace_id}
         disabled={disabled || busy}
         options={items.map((item) => ({ value: item.workspace_id, label: item.display_name, disabled: item.status !== "active" }))}
-        onChange={(id) => { const workspace = items.find((item) => item.workspace_id === id); selectedRef.current = workspace; setSelected(workspace); onChangeRef.current(id, mode); }} />}
+        onChange={(id: string | undefined) => { const workspace = items.find((item) => item.workspace_id === id); selectedRef.current = workspace; setSelected(workspace); onChangeRef.current(id, mode); }} />}
       {!conversationId && <Button size="small" icon={<SettingOutlined />} disabled={disabled || busy} onClick={() => { setManageOpen(true); void loadManagedItems(); }}>
         {t("chat.workspace.manage")}
       </Button>}
+      {conversationId && selected && <Button size="small" onClick={() => { setApprovalsOpen(conversationId); refreshApprovalsRef.current(); }}>
+        {t("chat.workspace.approval.open", { count: pendingCount })}
+      </Button>}
       {selected && <><Tag color={selected.status === "active" ? undefined : "error"}>{selected.path}</Tag><Select size="small" value={mode} disabled={busy || selected.status !== "active"}
         options={Object.entries(labels).map(([value, label]) => ({ value, label }))}
-        onChange={(value) => void changeMode(value)} />
+        onChange={(value: WorkspacePermissionMode) => void changeMode(value)} />
         {conversationId && selected.status === "active" && <Button size="small" danger disabled={busy} onClick={() => revoke()}>{t("chat.workspace.revoke")}</Button>}
       </>}
     </Space>
@@ -253,8 +322,29 @@ export default function LocalWorkspaceControl({ conversationId, disabled, onChan
       <p>{currentCandidate?.name}</p><p style={{ wordBreak: "break-all" }}>{currentCandidate?.path}</p>
       <p>{t("chat.workspace.scope")}</p>
     </Modal>}
+    <Modal open={Boolean(conversationId && approvalsOpen === conversationId && selected)} title={t("chat.workspace.approval.title")} footer={null} onCancel={() => setApprovalsOpen(undefined)}>
+      <p>{t("chat.workspace.approval.notice")}</p>
+      {approvalError && <p role="alert">{t("chat.workspace.approval.loadFailed")}：{t(`chat.workspace.reason.${approvalError}`, { defaultValue: t("chat.workspace.reason.unknown") })}</p>}
+      {!approvalError && currentApprovals.length === 0 && <p>{t(approvals?.conversationId === conversationId ? "chat.workspace.approval.empty" : "chat.workspace.approval.loading")}</p>}
+      <Space direction="vertical" style={{ width: "100%" }}>
+        {currentApprovals.map((item) => <section key={item.operation_id} style={{ width: "100%", padding: "12px 0", borderTop: "1px solid var(--ant-color-border-secondary, #d9d9d9)", overflowWrap: "anywhere" }}>
+          <Space wrap><strong>{t(`chat.workspace.approval.operation.${item.operation}`, { defaultValue: item.operation })}</strong><Tag>{t(`chat.workspace.approval.status.${item.status}`, { defaultValue: t("chat.workspace.approval.status.unknown") })}</Tag></Space>
+          <p>{item.path}</p>
+          <p>{t(`chat.workspace.approval.source.${item.attempt_id ? "workflow" : item.task_id ? "subagent" : "main"}`)}{(item.attempt_id || item.task_id) && ` · ${item.attempt_id || item.task_id}`}{item.tool_name && ` · ${item.tool_name}`}</p>
+          {item.version && <p><small>{t("chat.workspace.approval.version")}：{item.version}</small></p>}
+          {item.content_digest && <p><small>{t("chat.workspace.approval.digest")}：{item.content_digest}</small></p>}
+          <p><small>{t("chat.workspace.approval.expires")}：{new Date(item.expires_at).toLocaleString()}</small></p>
+          {item.reason && <p>{t(`chat.workspace.reason.${item.reason}`, { defaultValue: t("chat.workspace.reason.unknown") })}</p>}
+          {item.status === "uncertain" && <p role="alert">{t("chat.workspace.approval.uncertain")}</p>}
+          {item.status === "pending" && <Space>
+            <Button type="primary" loading={approvalBusy === item.operation_id} disabled={Boolean(approvalBusy || approvalError) || item.expires_at <= Date.now()} onClick={() => void decideApproval(item, "allow_once")}>{t("chat.workspace.approval.allowOnce")}</Button>
+            <Button danger disabled={Boolean(approvalBusy || approvalError) || item.expires_at <= Date.now()} onClick={() => void decideApproval(item, "reject")}>{t("chat.workspace.approval.reject")}</Button>
+          </Space>}
+        </section>)}
+      </Space>
+    </Modal>
     <Modal open={manageOpen} title={t("chat.workspace.manageTitle")} footer={null} onCancel={() => setManageOpen(false)}>
-      <Input.Search allowClear placeholder={t("chat.workspace.search")} onSearch={(value) => void loadManagedItems(value)} />
+      <Input.Search allowClear placeholder={t("chat.workspace.search")} onSearch={(value: string) => void loadManagedItems(value)} />
       <Space direction="vertical" style={{ width: "100%", marginTop: 12 }}>
         {managedItems.map((item) => <Space key={item.workspace_id} style={{ justifyContent: "space-between", width: "100%" }}>
           <span><strong>{item.display_name}</strong><br /><small>{item.path}</small></span>

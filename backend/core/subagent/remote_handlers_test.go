@@ -357,7 +357,7 @@ func TestRemoteWorkspaceExecutionSpecUsesOneAuthoritativeSnapshotAndRejectsRevok
 		t.Fatalf("params differ task=%v top=%v", task["params"], params)
 	}
 	instruction := params["runtime_instruction"].(string)
-	if !strings.Contains(instruction, root) || !strings.Contains(instruction, "不能直接询问用户") {
+	if !strings.Contains(instruction, root) || !strings.Contains(instruction, "需要批准时工具会等待用户决定") {
 		t.Fatalf("instruction=%s", instruction)
 	}
 	if data["workspace_path"] != "/core/path/must-not-be-used" {

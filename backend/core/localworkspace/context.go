@@ -14,6 +14,7 @@ import (
 type ContextSnapshot struct {
 	WorkspaceID       string
 	Root              string
+	DirectoryIdentity string
 	WorkspaceVersion  int64
 	PermissionMode    string
 	PermissionVersion int64
@@ -68,7 +69,9 @@ func snapshot(workspace orm.LocalWorkspace, mode string, version int64) *Context
 	if version < 1 {
 		version = 1
 	}
-	return snapshotForValues(workspace.ID, workspace.CanonicalPath, workspace.Version, mode, version)
+	value := snapshotForValues(workspace.ID, workspace.CanonicalPath, workspace.Version, mode, version)
+	value.DirectoryIdentity = workspace.DirectoryIdentity
+	return value
 }
 
 func snapshotForValues(id, root string, workspaceVersion int64, mode string, permissionVersion int64) *ContextSnapshot {
@@ -82,18 +85,9 @@ func snapshotForValues(id, root string, workspaceVersion int64, mode string, per
 func ModelNotice(snapshot ContextSnapshot, actor string) string {
 	data, _ := json.Marshal(map[string]any{"root": snapshot.Root,
 		"permission_mode": snapshot.PermissionMode, "permission_version": snapshot.PermissionVersion})
-	rule := "文件修改、命令、联网及应用副作用按当前权限规则执行。"
-	if snapshot.PermissionMode == PermissionAlwaysAsk {
-		rule = "对文件修改、命令、联网及应用副作用先使用已有 ask_user 询问并等待用户回答。"
-	} else if snapshot.PermissionMode == PermissionAllowAll {
-		rule = "用户已允许本任务在工作区内执行操作；仍不得访问工作区外目录。"
-	}
-	if actor == "subagent" {
-		rule += " 普通子任务不能直接询问用户；需要新增确认时返回主任务说明，不执行尚待确认的操作。"
-	}
-	return "本任务的用户已在界面选择并授权以下本地工作区。\n工作区数据：" + string(data) +
-		"\n用户请求中的相对本地文件路径以该目录为基准。优先使用现有 local_fs 工具列出、搜索、读取和精确修改匹配类型的文件。" +
-		"\n创建、覆盖或追加文件只使用当前运行环境实际提供的能力；工具拒绝时说明原因。\n工作区之外的目录不在本任务授权范围。\n权限规则：" + rule
+	return "本任务的工作区：" + string(data) +
+		"\n相对路径以工作区为基准。使用 local_fs 读取、创建、修改、追加或删除文件；Core 负责权限检查，需要批准时工具会等待用户决定。" +
+		"\n只根据工具实际结果报告成功。拒绝、冲突或结果未知时说明原因，不使用其他工具绕过。工作区之外的目录不在本任务授权范围。"
 }
 
 func BuildRequestQuery(original string, snapshot *ContextSnapshot) string {

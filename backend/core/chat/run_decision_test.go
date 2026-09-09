@@ -3,13 +3,21 @@ package chat
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"os"
 	"path/filepath"
+
 	"sync"
 	"testing"
 	"time"
 
+	"gorm.io/gorm"
+
 	"lazymind/core/common/orm"
+	"lazymind/core/localworkspace"
 	"lazymind/core/state"
+	corestore "lazymind/core/store"
+	"lazymind/core/subagent"
 )
 
 func newRunDecisionTestStore(t *testing.T) state.Store {
@@ -255,5 +263,145 @@ func assertConcurrentRunDecisionWinner(t *testing.T, store state.Store, runID st
 func TestRunDecisionTTLRejectsLateCandidatesForOneDay(t *testing.T) {
 	if runDecisionTTL != 24*time.Hour {
 		t.Fatalf("runDecisionTTL=%v, want 24h", runDecisionTTL)
+	}
+}
+
+// This fixture installs the production dispatch callback with real DB/state.
+// It deliberately creates no ChatHistory: fresh runs authorize before history.
+func workspaceIdentityFixture(t *testing.T) (*gorm.DB, state.Store, localworkspace.OperationRequest) {
+	t.Helper()
+	t.Setenv("LAZYMIND_RUNTIME_MODE", "local")
+	db := orm.MigrateAllModelsForTest(t)
+	stateStore := newRunDecisionTestStore(t)
+	corestore.Init(db.DB, nil, stateStore)
+	localworkspace.SetValidateOperationRunFunc(func(ctx context.Context, db *gorm.DB, ss state.Store, request localworkspace.OperationRequest) error {
+		if request.TaskID != "" {
+			return subagent.ValidateWorkspaceRun(ctx, db, ss, request)
+		}
+		return ValidateWorkspaceRun(ctx, ss, request)
+	})
+	t.Cleanup(func() { corestore.Init(nil, nil, nil); localworkspace.SetValidateOperationRunFunc(nil) })
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "read.txt"), []byte("content"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	grant, err := localworkspace.Register(t.Context(), db.DB, "owner", localworkspace.RegisterInput{DisplayName: "project", CanonicalPath: root, Source: "local"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.Conversation{ID: "identity-conversation", IsTaskConv: true, BaseModel: orm.BaseModel{CreateUserID: "owner"}}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.ConversationWorkspaceBinding{ConversationID: "identity-conversation", WorkspaceID: grant.WorkspaceID, PermissionMode: localworkspace.PermissionAllowAll, PermissionVersion: 1}).Error; err != nil {
+		t.Fatal(err)
+	}
+	return db.DB, stateStore, localworkspace.OperationRequest{UserID: "owner", ConversationID: "identity-conversation", WorkspaceID: grant.WorkspaceID, Operation: localworkspace.OperationRead, Path: "read.txt", CallID: fmt.Sprintf("%d/call", time.Now().UnixMilli())}
+}
+
+func TestWorkspaceMainIdentityRequiresRegisteredLiveRun(t *testing.T) {
+	db, ss, req := workspaceIdentityFixture(t)
+	req.HistoryID, req.RunID = "fresh-history", "registered-run"
+	if _, err := localworkspace.PrepareOperation(t.Context(), db, ss, req); err == nil {
+		t.Fatal("unregistered run accepted")
+	}
+	if err := setChatRuntimeStatus(t.Context(), ss, req.ConversationID, req.HistoryID, "generating", "", req.RunID, nil); err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := localworkspace.PrepareOperation(t.Context(), db, ss, req)
+	if err != nil {
+		t.Fatalf("fresh registered run: %v", err)
+	}
+	if _, err := localworkspace.ExecuteOperation(t.Context(), db, ss, prepared.OperationID, req); err != nil {
+		t.Fatal(err)
+	}
+	for i, change := range []func(*localworkspace.OperationRequest){
+		func(r *localworkspace.OperationRequest) { r.RunID = "forged" },
+		func(r *localworkspace.OperationRequest) { r.HistoryID = "other-history" },
+		func(r *localworkspace.OperationRequest) { r.UserID = "other-owner" },
+		func(r *localworkspace.OperationRequest) { r.ConversationID = "other-conversation" },
+	} {
+		bad := req
+		bad.CallID = fmt.Sprintf("%d/identity-%d", time.Now().UnixMilli(), i)
+		change(&bad)
+		if _, err := localworkspace.PrepareOperation(t.Context(), db, ss, bad); err == nil {
+			t.Fatalf("identity mismatch %d accepted", i)
+		}
+	}
+	if won, err := claimUserCancelDecision(t.Context(), ss, req.ConversationID, req.HistoryID, req.RunID); err != nil || !won {
+		t.Fatalf("cancel: %v %v", won, err)
+	}
+	req.CallID = fmt.Sprintf("%d/after-cancel", time.Now().UnixMilli())
+	if _, err := localworkspace.PrepareOperation(t.Context(), db, ss, req); err == nil {
+		t.Fatal("cancelled run accepted")
+	}
+	req.RunID = "next-run"
+	if err := setChatRuntimeStatus(t.Context(), ss, req.ConversationID, req.HistoryID, "generating", "", req.RunID, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := localworkspace.PrepareOperation(t.Context(), db, ss, req); err != nil {
+		t.Fatalf("next run denied: %v", err)
+	}
+	finishRegisteredChatRun(t.Context(), ss, req.ConversationID, req.HistoryID, req.RunID)
+	req.CallID = fmt.Sprintf("%d/after-finish", time.Now().UnixMilli())
+	if _, err := localworkspace.PrepareOperation(t.Context(), db, ss, req); err == nil {
+		t.Fatal("finished run accepted")
+	}
+	localworkspace.SetValidateOperationRunFunc(nil)
+	if _, err := localworkspace.PrepareOperation(t.Context(), db, ss, req); err == nil {
+		t.Fatal("missing validator accepted")
+	}
+}
+
+func TestWorkspaceWorkflowIdentityRequiresCurrentOwnedLease(t *testing.T) {
+	db, ss, req := workspaceIdentityFixture(t)
+	expires := time.Now().UTC().Add(time.Hour)
+	task := orm.SubAgentTask{ID: "workflow-task", ConversationID: req.ConversationID, CreateUserID: req.UserID, AgentType: "workflow_step", Status: "running", Mode: "auto", InputSlots: json.RawMessage(`[]`), OutputSlots: json.RawMessage(`[]`)}
+	revision := orm.WorkflowRevision{ID: "workspace-revision", CompiledGraph: json.RawMessage(`{"nodes":{"step":{"legacy_tools":["local_fs"]}}}`)}
+	session := orm.WorkflowSession{WorkflowRevisionID: revision.ID, ID: "workflow-session", ConversationID: req.ConversationID, CreateUserID: req.UserID, Status: "active"}
+	step := orm.WorkflowSessionStep{ID: "workflow-attempt", SessionID: session.ID, TaskID: task.ID, StepID: "step", Status: "running", Validity: "effective", FencingGeneration: 2, LeaseToken: "current-lease", LeaseExpiresAt: &expires}
+	for _, row := range []any{&revision, &task, &session, &step} {
+		if err := db.Create(row).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	req.TaskID, req.AttemptID, req.Generation, req.LeaseToken = task.ID, step.ID, "2", step.LeaseToken
+	prepared, err := localworkspace.PrepareOperation(t.Context(), db, ss, req)
+	if err != nil {
+		t.Fatalf("live workflow lease: %v", err)
+	}
+	if _, err := localworkspace.ExecuteOperation(t.Context(), db, ss, prepared.OperationID, req); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name             string
+		model            any
+		id, column       string
+		invalid, restore any
+	}{
+		{"tool undeclared", &orm.WorkflowRevision{}, revision.ID, "compiled_graph", json.RawMessage(`{"nodes":{"step":{"legacy_tools":[]}}}`), revision.CompiledGraph},
+		{"lease replaced", &orm.WorkflowSessionStep{}, step.ID, "lease_token", "new-lease", step.LeaseToken},
+		{"generation replaced", &orm.WorkflowSessionStep{}, step.ID, "fencing_generation", 3, 2},
+		{"lease expired", &orm.WorkflowSessionStep{}, step.ID, "lease_expires_at", time.Now().UTC().Add(-time.Second), expires},
+		{"attempt terminal", &orm.WorkflowSessionStep{}, step.ID, "status", "succeeded", "running"},
+		{"attempt stale", &orm.WorkflowSessionStep{}, step.ID, "validity", "stale", "effective"},
+		{"task interrupted", &orm.SubAgentTask{}, task.ID, "status", "interrupted", "running"},
+		{"task other owner", &orm.SubAgentTask{}, task.ID, "create_user_id", "other", req.UserID},
+		{"session dismissed", &orm.WorkflowSession{}, session.ID, "dismissed", true, false},
+		{"session other conversation", &orm.WorkflowSession{}, session.ID, "conversation_id", "other", req.ConversationID},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := db.Model(tc.model).Where("id = ?", tc.id).UpdateColumn(tc.column, tc.invalid).Error; err != nil {
+				t.Fatal(err)
+			}
+			defer db.Model(tc.model).Where("id = ?", tc.id).UpdateColumn(tc.column, tc.restore)
+			bad := req
+			bad.CallID = fmt.Sprintf("%d/%s", time.Now().UnixMilli(), tc.name)
+			if _, err := localworkspace.PrepareOperation(t.Context(), db, ss, bad); err == nil {
+				t.Fatal("invalid workflow identity accepted")
+			}
+		})
 	}
 }

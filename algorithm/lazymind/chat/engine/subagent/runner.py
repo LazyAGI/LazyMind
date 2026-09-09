@@ -193,7 +193,7 @@ def _materialize_workflow_package(
 def _validate_workflow_workspace_package(params: Dict[str, Any], names: List[str], files: Dict[str, Any]) -> None:
     """Reject executable Workflow packages until Core supplies a trusted admission proof."""
     parent = params.get('parent_agentic_config')
-    context = params.get('workspace_context')
+    context = params.get('_core_workspace_context') or params.get('workspace_context')
     if not isinstance(context, dict) or not context:
         context = parent.get('_core_workspace_context') if isinstance(parent, dict) else None
     if not isinstance(context, dict) or not context:
@@ -269,8 +269,7 @@ def load_workflow_tools(params: Dict[str, Any], names: List[str]) -> Dict[str, A
             )
         return resolved
     except Exception as exc:
-        LOG.warning('[SubAgent] failed to load pinned Workflow script tools: %s', exc)
-        return {}
+        raise RuntimeError(f'failed to load pinned Workflow script tools: {exc}') from exc
 
 
 def _resolve_runtime_tools(
@@ -428,6 +427,7 @@ _STRUCTURED_PARAM_KEYS = {
     'remote_root', 'step_id', 'session_id', 'user_input', 'hand_off',
     'chat_session_id', 'workflow_mode', 'user_id', 'preflight_id',
     'legacy_tools', 'terminal_tools_only', 'parent_agentic_config', 'filters',
+    '_workspace_execution', '_core_workspace_context', 'workspace_context',
     SUBAGENT_SKILLS_CONTEXT_KEY,
 }
 
@@ -480,6 +480,10 @@ def _build_agentic_config(
     """Restore the request context needed by tools inside every SubAgent."""
     parent = params.get('parent_agentic_config')
     agentic_config = dict(parent) if isinstance(parent, dict) else {}
+    agentic_config.pop('_workspace_execution', None)
+    context = params.get('_core_workspace_context') or agentic_config.get('_core_workspace_context')
+    if isinstance(context, dict):
+        agentic_config['_core_workspace_context'] = dict(context)
     attachment_context = _attachment_context(params)
     history_files_per_turn = (
         attachment_context.get('history_files_per_turn')
@@ -942,6 +946,7 @@ async def run_subagent_stream(
     tools: Optional[List[str]] = None,
     task_spec: Optional[Dict[str, Any]] = None,
     initial_steps: Optional[List[Dict[str, Any]]] = None,
+    workspace_execution: Optional[Dict[str, Any]] = None,
 ):
     """Async generator yielding Task SSE lines.
 
@@ -949,6 +954,8 @@ async def run_subagent_stream(
     text and think frames come from AgentEventFrameTranslator (same as ChatAgent),
     giving a unified LLM output representation across both agent types.
     """
+    # Copy only the launch argument; Params may already belong to a later resume.
+    execution_identity = dict(workspace_execution or {})
     start_time = time.time()
     db: Optional[SubAgentDB] = None
     emitted: List[Dict[str, Any]] = []
@@ -1119,6 +1126,7 @@ async def run_subagent_stream(
         set_context(ctx)
 
         agentic_config = _build_agentic_config(task, params, effective_agent_type)
+        agentic_config['_workspace_execution'] = execution_identity
         agentic_config['citation_state'] = source_state
         agentic_config['citation_mode'] = 'collect_only'
         lazyllm.globals['agentic_config'] = agentic_config

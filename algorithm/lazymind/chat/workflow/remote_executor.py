@@ -162,6 +162,11 @@ class RemoteWorkflowExecutor:
                 agent_type='workflow_step',
                 task_spec=task,
                 initial_steps=initial_steps,
+                workspace_execution={
+                    'task_id': task_id, 'attempt_id': attempt_id,
+                    'generation': str(claim.get('fencing_generation') or ''),
+                    'lease_token': lease,
+                },
             ):
                 event = self._parse_frame(frame)
                 if event is None:

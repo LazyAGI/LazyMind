@@ -2,10 +2,14 @@ package localworkspace
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"gorm.io/gorm"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -15,6 +19,16 @@ import (
 
 func operationFixture(t *testing.T, mode string) (*orm.DB, PublicWorkspace, state.Store, string) {
 	t.Helper()
+	operationRunValidator.RLock()
+	previous := operationRunValidator.fn
+	operationRunValidator.RUnlock()
+	SetValidateOperationRunFunc(func(_ context.Context, _ *gorm.DB, _ state.Store, request OperationRequest) error {
+		if request.HistoryID != "history" || request.RunID != "run" {
+			return Error("execution_inactive", 409, "conflict")
+		}
+		return nil
+	})
+	t.Cleanup(func() { SetValidateOperationRunFunc(previous) })
 	db, grant := workspaceFixture(t)
 	now := time.Now().UTC()
 	conversationID := "operation-task-" + mode
@@ -37,10 +51,10 @@ func operationFixture(t *testing.T, mode string) (*orm.DB, PublicWorkspace, stat
 func TestWorkspaceOperationRoundTripAndVersionConflict(t *testing.T) {
 	db, grant, stateStore, conversationID := operationFixture(t, PermissionAllowAll)
 	ctx := context.Background()
-	base := OperationRequest{UserID: "owner", ConversationID: conversationID, WorkspaceID: grant.WorkspaceID}
+	base := OperationRequest{HistoryID: "history", RunID: "run", UserID: "owner", ConversationID: conversationID, WorkspaceID: grant.WorkspaceID}
 
 	createReq := base
-	createReq.Operation, createReq.Path, createReq.Content, createReq.CallID = OperationCreate, "notes.txt", "one", "create-1"
+	createReq.Operation, createReq.Path, createReq.Content, createReq.CallID = OperationCreate, "notes.txt", "one", operationTestCallID("create-1")
 	createdPrepared, err := PrepareOperation(ctx, db.DB, stateStore, createReq)
 	if err != nil {
 		t.Fatal(err)
@@ -54,7 +68,7 @@ func TestWorkspaceOperationRoundTripAndVersionConflict(t *testing.T) {
 	}
 
 	appendReq := base
-	appendReq.Operation, appendReq.Path, appendReq.Content, appendReq.ExpectedVersion, appendReq.CallID = OperationAppend, "notes.txt", "\ntwo", created.Version, "append-1"
+	appendReq.Operation, appendReq.Path, appendReq.Content, appendReq.ExpectedVersion, appendReq.CallID = OperationAppend, "notes.txt", "\ntwo", created.Version, operationTestCallID("append-1")
 	appendPrepared, err := PrepareOperation(ctx, db.DB, stateStore, appendReq)
 	if err != nil {
 		t.Fatal(err)
@@ -68,7 +82,7 @@ func TestWorkspaceOperationRoundTripAndVersionConflict(t *testing.T) {
 	}
 
 	replaceReq := base
-	replaceReq.Operation, replaceReq.Path, replaceReq.OldContent, replaceReq.Content, replaceReq.ExpectedVersion, replaceReq.CallID = OperationReplace, "notes.txt", "two", "THREE", appended.Version, "replace-1"
+	replaceReq.Operation, replaceReq.Path, replaceReq.OldContent, replaceReq.Content, replaceReq.ExpectedVersion, replaceReq.CallID = OperationReplace, "notes.txt", "two", "THREE", appended.Version, operationTestCallID("replace-1")
 	replacePrepared, err := PrepareOperation(ctx, db.DB, stateStore, replaceReq)
 	if err != nil {
 		t.Fatal(err)
@@ -82,7 +96,7 @@ func TestWorkspaceOperationRoundTripAndVersionConflict(t *testing.T) {
 	}
 
 	readReq := base
-	readReq.Operation, readReq.Path, readReq.CallID = OperationRead, "notes.txt", "read-1"
+	readReq.Operation, readReq.Path, readReq.CallID = OperationRead, "notes.txt", operationTestCallID("read-1")
 	readPrepared, err := PrepareOperation(ctx, db.DB, stateStore, readReq)
 	if err != nil {
 		t.Fatal(err)
@@ -96,7 +110,7 @@ func TestWorkspaceOperationRoundTripAndVersionConflict(t *testing.T) {
 	}
 
 	deleteReq := base
-	deleteReq.Operation, deleteReq.Path, deleteReq.ExpectedVersion, deleteReq.CallID = OperationDelete, "notes.txt", replaced.Version, "delete-1"
+	deleteReq.Operation, deleteReq.Path, deleteReq.ExpectedVersion, deleteReq.CallID = OperationDelete, "notes.txt", replaced.Version, operationTestCallID("delete-1")
 	deletePrepared, err := PrepareOperation(ctx, db.DB, stateStore, deleteReq)
 	if err != nil {
 		t.Fatal(err)
@@ -140,7 +154,7 @@ func TestWorkspaceOperationRejectsOutsideGitAndSymlinkPaths(t *testing.T) {
 		t.Skipf("symlink unavailable: %v", err)
 	}
 	for _, path := range []string{"../outside.txt", ".git/config", "link.txt"} {
-		_, err := PrepareOperation(context.Background(), db.DB, stateStore, OperationRequest{UserID: "owner", ConversationID: conversationID, WorkspaceID: grant.WorkspaceID, Operation: OperationRead, Path: path, CallID: "bad-" + path})
+		_, err := PrepareOperation(context.Background(), db.DB, stateStore, OperationRequest{HistoryID: "history", RunID: "run", UserID: "owner", ConversationID: conversationID, WorkspaceID: grant.WorkspaceID, Operation: OperationRead, Path: path, CallID: operationTestCallID("bad-") + path})
 		if err == nil {
 			t.Errorf("path %q unexpectedly allowed", path)
 		}
@@ -149,9 +163,9 @@ func TestWorkspaceOperationRejectsOutsideGitAndSymlinkPaths(t *testing.T) {
 
 func TestWorkspaceOperationRejectsSensitiveMutationEvenWhenAllAllowed(t *testing.T) {
 	db, grant, stateStore, conversationID := operationFixture(t, PermissionAllowAll)
-	_, err := PrepareOperation(context.Background(), db.DB, stateStore, OperationRequest{
+	_, err := PrepareOperation(context.Background(), db.DB, stateStore, OperationRequest{HistoryID: "history", RunID: "run",
 		UserID: "owner", ConversationID: conversationID, WorkspaceID: grant.WorkspaceID,
-		Operation: OperationCreate, Path: ".env", Content: "SECRET=x", CallID: "sensitive-create",
+		Operation: OperationCreate, Path: ".env", Content: "SECRET=x", CallID: operationTestCallID("sensitive-create"),
 	})
 	if err == nil {
 		t.Fatal("sensitive mutation unexpectedly allowed")
@@ -160,7 +174,7 @@ func TestWorkspaceOperationRejectsSensitiveMutationEvenWhenAllAllowed(t *testing
 
 func TestWorkspaceOperationRechecksPermissionBeforeExecution(t *testing.T) {
 	db, grant, stateStore, conversationID := operationFixture(t, PermissionAllowAll)
-	req := OperationRequest{UserID: "owner", ConversationID: conversationID, WorkspaceID: grant.WorkspaceID, Operation: OperationCreate, Path: "permission.txt", Content: "ok", CallID: "permission-call"}
+	req := OperationRequest{HistoryID: "history", RunID: "run", UserID: "owner", ConversationID: conversationID, WorkspaceID: grant.WorkspaceID, Operation: OperationCreate, Path: "permission.txt", Content: "ok", CallID: operationTestCallID("permission-call")}
 	prepared, err := PrepareOperation(context.Background(), db.DB, stateStore, req)
 	if err != nil {
 		t.Fatal(err)
@@ -182,7 +196,7 @@ func TestWorkspaceOperationRejectsSymlinkedParentOutsideRoot(t *testing.T) {
 	if err := os.Symlink(outside, filepath.Join(grant.Path, "linked")); err != nil {
 		t.Skipf("symlink unavailable: %v", err)
 	}
-	_, err := PrepareOperation(context.Background(), db.DB, stateStore, OperationRequest{UserID: "owner", ConversationID: conversationID, WorkspaceID: grant.WorkspaceID, Operation: OperationCreate, Path: "linked/escape.txt", Content: "x", CallID: "linked-create"})
+	_, err := PrepareOperation(context.Background(), db.DB, stateStore, OperationRequest{HistoryID: "history", RunID: "run", UserID: "owner", ConversationID: conversationID, WorkspaceID: grant.WorkspaceID, Operation: OperationCreate, Path: "linked/escape.txt", Content: "x", CallID: operationTestCallID("linked-create")})
 	if err == nil {
 		t.Fatal("symlinked parent unexpectedly allowed")
 	}
@@ -190,7 +204,7 @@ func TestWorkspaceOperationRejectsSymlinkedParentOutsideRoot(t *testing.T) {
 
 func TestWorkspaceOperationStateStoresDigestsInsteadOfContent(t *testing.T) {
 	db, grant, stateStore, conversationID := operationFixture(t, PermissionAlwaysAsk)
-	req := OperationRequest{UserID: "owner", ConversationID: conversationID, WorkspaceID: grant.WorkspaceID, Operation: OperationCreate, Path: "digest.txt", Content: "private-content", CallID: "digest-call"}
+	req := OperationRequest{HistoryID: "history", RunID: "run", UserID: "owner", ConversationID: conversationID, WorkspaceID: grant.WorkspaceID, Operation: OperationCreate, Path: "digest.txt", Content: "private-content", CallID: operationTestCallID("digest-call")}
 	prepared, err := PrepareOperation(context.Background(), db.DB, stateStore, req)
 	if err != nil {
 		t.Fatal(err)
@@ -209,7 +223,7 @@ func TestWorkspaceOperationStateStoresDigestsInsteadOfContent(t *testing.T) {
 
 func TestWorkspaceOperationCompletedStateStoresNoContent(t *testing.T) {
 	db, grant, stateStore, conversationID := operationFixture(t, PermissionAllowAll)
-	req := OperationRequest{UserID: "owner", ConversationID: conversationID, WorkspaceID: grant.WorkspaceID, Operation: OperationCreate, Path: "completed-state.txt", Content: "private-content", CallID: "completed-call"}
+	req := OperationRequest{HistoryID: "history", RunID: "run", UserID: "owner", ConversationID: conversationID, WorkspaceID: grant.WorkspaceID, Operation: OperationCreate, Path: "completed-state.txt", Content: "private-content", CallID: operationTestCallID("completed-call")}
 	prepared, err := PrepareOperation(context.Background(), db.DB, stateStore, req)
 	if err != nil {
 		t.Fatal(err)
@@ -236,8 +250,8 @@ func TestWorkspaceOperationSensitiveReadApproval(t *testing.T) {
 				if err := os.WriteFile(filepath.Join(grant.Path, path), []byte(content), 0o600); err != nil {
 					t.Fatal(err)
 				}
-				req := OperationRequest{UserID: "owner", ConversationID: conversationID, WorkspaceID: grant.WorkspaceID,
-					Operation: OperationRead, Path: path, CallID: "read-approval"}
+				req := OperationRequest{HistoryID: "history", RunID: "run", UserID: "owner", ConversationID: conversationID, WorkspaceID: grant.WorkspaceID,
+					Operation: OperationRead, Path: path, CallID: operationTestCallID("read-approval")}
 				prepared, err := PrepareOperation(ctx, db.DB, stateStore, req)
 				if err != nil {
 					t.Fatal(err)
@@ -258,7 +272,7 @@ func TestWorkspaceOperationSensitiveReadApproval(t *testing.T) {
 					if result.Content != "" {
 						t.Fatalf("unapproved read: result=%+v err=%v", result, err)
 					}
-					if _, err := DecideOperation(ctx, stateStore, prepared.OperationID, "allow_once", "owner"); err != nil {
+					if _, err := DecideOperation(ctx, db.DB, stateStore, prepared.OperationID, "allow_once", "owner"); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -296,8 +310,8 @@ func TestWorkspaceOperationDelayedExecutionCannotReplayCompletedAppend(t *testin
 	if err := os.WriteFile(path, []byte("seed"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	req := OperationRequest{UserID: "owner", ConversationID: conversationID, WorkspaceID: grant.WorkspaceID,
-		Operation: OperationAppend, Path: "notes.txt", Content: "+append", ExpectedVersion: digestString("seed"), CallID: "same-call"}
+	req := OperationRequest{HistoryID: "history", RunID: "run", UserID: "owner", ConversationID: conversationID, WorkspaceID: grant.WorkspaceID,
+		Operation: OperationAppend, Path: "notes.txt", Content: "+append", ExpectedVersion: digestString("seed"), CallID: operationTestCallID("same-call")}
 	prepared, err := PrepareOperation(ctx, db.DB, stateStore, req)
 	if err != nil {
 		t.Fatal(err)
@@ -336,13 +350,13 @@ func TestWorkspaceOperationFailedAppendCannotReuseApproval(t *testing.T) {
 	if err := os.WriteFile(path, []byte("seed"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	req := OperationRequest{UserID: "owner", ConversationID: conversationID, WorkspaceID: grant.WorkspaceID,
-		Operation: OperationAppend, Path: "notes.txt", Content: "+append", ExpectedVersion: digestString("seed"), CallID: "failed-call"}
+	req := OperationRequest{HistoryID: "history", RunID: "run", UserID: "owner", ConversationID: conversationID, WorkspaceID: grant.WorkspaceID,
+		Operation: OperationAppend, Path: "notes.txt", Content: "+append", ExpectedVersion: digestString("seed"), CallID: operationTestCallID("failed-call")}
 	prepared, err := PrepareOperation(ctx, db.DB, stateStore, req)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := DecideOperation(ctx, stateStore, prepared.OperationID, "allow_once", "owner"); err != nil {
+	if _, err := DecideOperation(ctx, db.DB, stateStore, prepared.OperationID, "allow_once", "owner"); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(path, []byte("external-edit"), 0o600); err != nil {
@@ -350,7 +364,8 @@ func TestWorkspaceOperationFailedAppendCannotReuseApproval(t *testing.T) {
 	}
 	_, err = ExecuteOperation(ctx, db.DB, stateStore, prepared.OperationID, req)
 	requireWorkspaceReason(t, err, 409, "conflict", "binding_conflict")
-	failed, err := OperationStatus(ctx, stateStore, prepared.OperationID)
+	failedState, err := loadOperationState(ctx, stateStore, prepared.OperationID)
+	failed := operationResult(failedState)
 	if err != nil || failed.Status != operationFailed {
 		t.Fatalf("expected failed operation: result=%+v err=%v", failed, err)
 	}
@@ -375,8 +390,8 @@ func TestWorkspaceOperationCompletedReadReturnsReceiptWithoutReadingAgain(t *tes
 	if err := os.WriteFile(path, []byte("first-version"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	req := OperationRequest{UserID: "owner", ConversationID: conversationID, WorkspaceID: grant.WorkspaceID,
-		Operation: OperationRead, Path: "notes.txt", CallID: "read-once"}
+	req := OperationRequest{HistoryID: "history", RunID: "run", UserID: "owner", ConversationID: conversationID, WorkspaceID: grant.WorkspaceID,
+		Operation: OperationRead, Path: "notes.txt", CallID: operationTestCallID("read-once")}
 	prepared, err := PrepareOperation(ctx, db.DB, stateStore, req)
 	if err != nil {
 		t.Fatal(err)
@@ -435,8 +450,8 @@ func TestWorkspaceClaimExpiryCannotReplayAppend(t *testing.T) {
 	if err := os.WriteFile(path, []byte("seed"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	req := OperationRequest{UserID: "owner", ConversationID: conversationID, WorkspaceID: grant.WorkspaceID,
-		Operation: OperationAppend, Path: "notes.txt", Content: "+append", ExpectedVersion: digestString("seed"), CallID: "stalled-append"}
+	req := OperationRequest{HistoryID: "history", RunID: "run", UserID: "owner", ConversationID: conversationID, WorkspaceID: grant.WorkspaceID,
+		Operation: OperationAppend, Path: "notes.txt", Content: "+append", ExpectedVersion: digestString("seed"), CallID: operationTestCallID("stalled-append")}
 	prepared, err := PrepareOperation(ctx, db.DB, stateStore, req)
 	if err != nil {
 		t.Fatal(err)
@@ -492,17 +507,17 @@ func TestWorkspaceClaimNeverUsesNonAtomicDelete(t *testing.T) {
 		t.Run(action, func(t *testing.T) {
 			db, grant, stateStore, conversationID := operationFixture(t, PermissionAlwaysAsk)
 			ctx := context.Background()
-			req := OperationRequest{UserID: "owner", ConversationID: conversationID, WorkspaceID: grant.WorkspaceID,
-				Operation: OperationCreate, Path: "notes.txt", Content: "seed", CallID: "no-unsafe-release"}
+			req := OperationRequest{HistoryID: "history", RunID: "run", UserID: "owner", ConversationID: conversationID, WorkspaceID: grant.WorkspaceID,
+				Operation: OperationCreate, Path: "notes.txt", Content: "seed", CallID: operationTestCallID("no-unsafe-release")}
 			prepared, err := PrepareOperation(ctx, db.DB, stateStore, req)
 			if err != nil {
 				t.Fatal(err)
 			}
 			recording := &recordingDeleteStore{Store: stateStore}
 			if action == "decide" {
-				_, err = DecideOperation(ctx, recording, prepared.OperationID, "allow_once", "owner")
+				_, err = DecideOperation(ctx, db.DB, recording, prepared.OperationID, "allow_once", "owner")
 			} else {
-				if _, err := DecideOperation(ctx, stateStore, prepared.OperationID, "allow_once", "owner"); err != nil {
+				if _, err := DecideOperation(ctx, db.DB, stateStore, prepared.OperationID, "allow_once", "owner"); err != nil {
 					t.Fatal(err)
 				}
 				_, err = ExecuteOperation(ctx, db.DB, recording, prepared.OperationID, req)
@@ -522,13 +537,13 @@ func TestWorkspaceClaimInvalidExecutionDoesNotConsumeApproval(t *testing.T) {
 		t.Run(field, func(t *testing.T) {
 			db, grant, stateStore, conversationID := operationFixture(t, PermissionAlwaysAsk)
 			ctx := context.Background()
-			req := OperationRequest{UserID: "owner", ConversationID: conversationID, WorkspaceID: grant.WorkspaceID,
-				Operation: OperationCreate, Path: "notes.txt", Content: "seed", CallID: "valid-call"}
+			req := OperationRequest{HistoryID: "history", RunID: "run", UserID: "owner", ConversationID: conversationID, WorkspaceID: grant.WorkspaceID,
+				Operation: OperationCreate, Path: "notes.txt", Content: "seed", CallID: operationTestCallID("valid-call")}
 			prepared, err := PrepareOperation(ctx, db.DB, stateStore, req)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := DecideOperation(ctx, stateStore, prepared.OperationID, "allow_once", "owner"); err != nil {
+			if _, err := DecideOperation(ctx, db.DB, stateStore, prepared.OperationID, "allow_once", "owner"); err != nil {
 				t.Fatal(err)
 			}
 			invalid := req
@@ -536,7 +551,7 @@ func TestWorkspaceClaimInvalidExecutionDoesNotConsumeApproval(t *testing.T) {
 			case "owner":
 				invalid.UserID = "other-owner"
 			case "call_id":
-				invalid.CallID = "other-call"
+				invalid.CallID = operationTestCallID("other-call")
 			case "content":
 				invalid.Content = "tampered"
 			}
@@ -568,8 +583,8 @@ func TestWorkspaceClaimStateFailureDoesNotPermitRetry(t *testing.T) {
 		t.Run(action, func(t *testing.T) {
 			db, grant, stateStore, conversationID := operationFixture(t, PermissionAlwaysAsk)
 			ctx := context.Background()
-			req := OperationRequest{UserID: "owner", ConversationID: conversationID, WorkspaceID: grant.WorkspaceID,
-				Operation: OperationCreate, Path: "notes.txt", Content: "seed", CallID: "state-failure"}
+			req := OperationRequest{HistoryID: "history", RunID: "run", UserID: "owner", ConversationID: conversationID, WorkspaceID: grant.WorkspaceID,
+				Operation: OperationCreate, Path: "notes.txt", Content: "seed", CallID: operationTestCallID("state-failure")}
 			prepared, err := PrepareOperation(ctx, db.DB, stateStore, req)
 			if err != nil {
 				t.Fatal(err)
@@ -578,12 +593,12 @@ func TestWorkspaceClaimStateFailureDoesNotPermitRetry(t *testing.T) {
 			failing := &failedOperationWriteStore{Store: stateStore,
 				key: operationKey(prepared.OperationID), err: failure}
 			if action == "execute" {
-				if _, err := DecideOperation(ctx, stateStore, prepared.OperationID, "allow_once", "owner"); err != nil {
+				if _, err := DecideOperation(ctx, db.DB, stateStore, prepared.OperationID, "allow_once", "owner"); err != nil {
 					t.Fatal(err)
 				}
 				_, err = ExecuteOperation(ctx, db.DB, failing, prepared.OperationID, req)
 			} else {
-				_, err = DecideOperation(ctx, failing, prepared.OperationID, "allow_once", "owner")
+				_, err = DecideOperation(ctx, db.DB, failing, prepared.OperationID, "allow_once", "owner")
 			}
 			if !errors.Is(err, failure) {
 				t.Fatalf("expected state write error, got %v", err)
@@ -595,12 +610,297 @@ func TestWorkspaceClaimStateFailureDoesNotPermitRetry(t *testing.T) {
 			if action == "execute" {
 				_, err = ExecuteOperation(ctx, db.DB, stateStore, prepared.OperationID, req)
 			} else {
-				_, err = DecideOperation(ctx, stateStore, prepared.OperationID, "allow_once", "owner")
+				_, err = DecideOperation(ctx, db.DB, stateStore, prepared.OperationID, "allow_once", "owner")
 			}
 			if _, statErr := os.Stat(filepath.Join(grant.Path, req.Path)); !os.IsNotExist(statErr) {
 				t.Errorf("retry changed the filesystem: %v", statErr)
 			}
 			requireWorkspaceReason(t, err, 409, "conflict", "binding_conflict")
 		})
+	}
+}
+
+func TestWorkspacePrepareIdentityCapacityAndExpiry(t *testing.T) {
+	db, grant, stateStore, conversation := operationFixture(t, PermissionAlwaysAsk)
+	ctx := context.Background()
+	req := OperationRequest{HistoryID: "history", RunID: "run", UserID: "owner", ConversationID: conversation, WorkspaceID: grant.WorkspaceID, CallID: operationTestCallID("same"), Operation: OperationCreate, Path: "a.txt", Content: "a"}
+	first, err := PrepareOperation(ctx, db.DB, stateStore, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := PrepareOperation(ctx, db.DB, stateStore, req)
+	if err != nil || again.OperationID != first.OperationID {
+		t.Fatalf("retry: %+v %v", again, err)
+	}
+	changed := req
+	changed.Content = "changed"
+	if _, err := PrepareOperation(ctx, db.DB, stateStore, changed); err == nil {
+		t.Fatal("reused identity changed content")
+	}
+	results := make(chan OperationResult, 24)
+	failures := make(chan error, 24)
+	var workers sync.WaitGroup
+	for i := 0; i < 24; i++ {
+		workers.Add(1)
+		go func(i int) {
+			defer workers.Done()
+			call := req
+			call.CallID = operationTestCallID(fmt.Sprint(i))
+			result, err := PrepareOperation(ctx, db.DB, stateStore, call)
+			results <- result
+			failures <- err
+		}(i)
+	}
+	workers.Wait()
+	close(results)
+	close(failures)
+	for err := range failures {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	pending, full := 1, 0
+	for result := range results {
+		if result.Status == operationPending {
+			pending++
+		}
+		if result.Reason == "approval_capacity" {
+			full++
+		}
+	}
+	if pending != 16 || full != 9 {
+		t.Fatalf("pending=%d full=%d", pending, full)
+	}
+	value, err := loadOperationState(ctx, stateStore, first.OperationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	value.ExpiresAt = time.Now().Add(-time.Second).UnixMilli()
+	if err := saveOperationState(ctx, stateStore, value); err != nil {
+		t.Fatal(err)
+	}
+	expired, err := PrepareOperation(ctx, db.DB, stateStore, req)
+	if err != nil || expired.Status != operationExpired {
+		t.Fatalf("expired: %+v %v", expired, err)
+	}
+	req.CallID = operationTestCallID("after-expiry")
+	result, err := PrepareOperation(ctx, db.DB, stateStore, req)
+	if err != nil || result.Status != operationPending {
+		t.Fatalf("freed slot: %+v %v", result, err)
+	}
+}
+
+func TestWorkspaceDiscoveryAndTextLimits(t *testing.T) {
+	db, grant, stateStore, conversation := operationFixture(t, PermissionAskAsNeeded)
+	ctx := context.Background()
+	for name, content := range map[string]string{"notes.txt": "visible needle", ".env": "secret needle", "binary.txt": "a\x00b"} {
+		if err := os.WriteFile(filepath.Join(grant.Path, name), []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	req := OperationRequest{HistoryID: "history", RunID: "run", UserID: "owner", ConversationID: conversation, WorkspaceID: grant.WorkspaceID, CallID: operationTestCallID("search"), Operation: OperationGrep, Path: ".", Pattern: "needle"}
+	prepared, err := PrepareOperation(ctx, db.DB, stateStore, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := ExecuteOperation(ctx, db.DB, stateStore, prepared.OperationID, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, _ := json.Marshal(result.Data)
+	if strings.Contains(string(data), "secret needle") || !strings.Contains(string(data), "visible needle") || !strings.Contains(string(data), "approval_required") {
+		t.Fatalf("search: %s", data)
+	}
+	req.Operation, req.Path, req.CallID = OperationRead, "binary.txt", operationTestCallID("binary")
+	prepared, err = PrepareOperation(ctx, db.DB, stateStore, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ExecuteOperation(ctx, db.DB, stateStore, prepared.OperationID, req); err == nil {
+		t.Fatal("binary read accepted")
+	}
+	req.Path, req.CallID = ".env", operationTestCallID("secret")
+	prepared, err = PrepareOperation(ctx, db.DB, stateStore, req)
+	if err != nil || prepared.Status != operationPending || prepared.Version != "" {
+		t.Fatalf("sensitive prepare must not return content hash: %+v %v", prepared, err)
+	}
+}
+
+func TestWorkspacePinnedRootAndCommitConflict(t *testing.T) {
+	db, grant, _, conversation := operationFixture(t, PermissionAllowAll)
+	ctx := context.Background()
+	snapshot, err := ResolveForConversation(ctx, db.DB, "owner", conversation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := grant.Path + "-original"
+	if err := os.Rename(grant.Path, original); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Rename(original, grant.Path)
+	if err := os.Mkdir(grant.Path, 0700); err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(grant.Path)
+	if root, _, _, err := openOperationPath(snapshot, "a.txt"); err == nil {
+		root.Close()
+		t.Fatal("replacement root accepted")
+	}
+	if err := os.Remove(grant.Path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(original, grant.Path); err != nil {
+		t.Fatal(err)
+	}
+	parent, name, info, err := openOperationPath(snapshot, "a.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer parent.Close()
+	touched := false
+	req := OperationRequest{Operation: OperationCreate, Path: "a.txt", Content: "ours"}
+	_, err = executeFileOperation(ctx, parent, name, info, req, PermissionAllowAll, &touched, func() error { return os.WriteFile(filepath.Join(grant.Path, "a.txt"), []byte("external"), 0600) })
+	if err == nil {
+		t.Fatal("create replaced concurrent file")
+	}
+	actual, _ := os.ReadFile(filepath.Join(grant.Path, "a.txt"))
+	if string(actual) != "external" {
+		t.Fatalf("actual %q", actual)
+	}
+}
+
+func TestWorkspaceReplacePreservesPermissionsAndCount(t *testing.T) {
+	db, grant, stateStore, conversation := operationFixture(t, PermissionAllowAll)
+	ctx := context.Background()
+	file := filepath.Join(grant.Path, "notes.txt")
+	if err := os.WriteFile(file, []byte("aa aa"), 0640); err != nil {
+		t.Fatal(err)
+	}
+	req := OperationRequest{HistoryID: "history", RunID: "run", UserID: "owner", ConversationID: conversation, WorkspaceID: grant.WorkspaceID, CallID: operationTestCallID("replace"), Operation: OperationReplace, Path: "notes.txt", OldContent: "aa", Content: "bb", ExpectedVersion: digestString("aa aa"), ExpectedReplacements: 2}
+	prepared, err := PrepareOperation(ctx, db.DB, stateStore, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := ExecuteOperation(ctx, db.DB, stateStore, prepared.OperationID, req)
+	if err != nil || result.Content != "bb bb" {
+		t.Fatalf("replace %+v %v", result, err)
+	}
+	info, _ := os.Stat(file)
+	if info.Mode().Perm() != 0640 {
+		t.Fatalf("mode %o", info.Mode().Perm())
+	}
+	req.CallID, req.ExpectedVersion, req.OldContent, req.ExpectedReplacements = operationTestCallID("wrong-count"), result.Version, "bb", 1
+	prepared, err = PrepareOperation(ctx, db.DB, stateStore, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ExecuteOperation(ctx, db.DB, stateStore, prepared.OperationID, req); err == nil {
+		t.Fatal("wrong replacement count succeeded")
+	}
+	actual, _ := os.ReadFile(file)
+	if string(actual) != "bb bb" {
+		t.Fatal("partial edit")
+	}
+}
+
+type completionFailureStore struct{ state.Store }
+
+func (s completionFailureStore) Set(ctx context.Context, key string, content []byte, ttl time.Duration) error {
+	var value operationState
+	if strings.HasPrefix(key, "local-workspace-operation:") && json.Unmarshal(content, &value) == nil && value.Status == operationCompleted {
+		return errors.New("injected completion save failure")
+	}
+	return s.Store.Set(ctx, key, content, ttl)
+}
+func TestWorkspaceCompletionFailureIsUncertainAndCannotReplay(t *testing.T) {
+	db, grant, stateStore, conversation := operationFixture(t, PermissionAllowAll)
+	ctx := context.Background()
+	file := filepath.Join(grant.Path, "notes.txt")
+	if err := os.WriteFile(file, []byte("seed"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	req := OperationRequest{HistoryID: "history", RunID: "run", UserID: "owner", ConversationID: conversation, WorkspaceID: grant.WorkspaceID, CallID: operationTestCallID("uncertain"), Operation: OperationAppend, Path: "notes.txt", Content: "+one", ExpectedVersion: digestString("seed")}
+	prepared, err := PrepareOperation(ctx, db.DB, stateStore, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ExecuteOperation(ctx, db.DB, completionFailureStore{stateStore}, prepared.OperationID, req); err == nil {
+		t.Fatal("completion storage failure hidden")
+	}
+	value, err := loadOperationState(ctx, stateStore, prepared.OperationID)
+	if err != nil || value.Status != operationUncertain {
+		t.Fatalf("state %+v %v", value, err)
+	}
+	if _, err := ExecuteOperation(ctx, db.DB, stateStore, prepared.OperationID, req); err == nil {
+		t.Fatal("uncertain replay succeeded")
+	}
+	data, _ := os.ReadFile(file)
+	if string(data) != "seed+one" {
+		t.Fatalf("data %q", data)
+	}
+}
+
+func TestWorkspaceExpiredAtCommitDoesNotMutate(t *testing.T) {
+	db, grant, _, conversation := operationFixture(t, PermissionAllowAll)
+	ctx := context.Background()
+	snapshot, err := ResolveForConversation(ctx, db.DB, "owner", conversation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range []OperationKind{OperationCreate, OperationMkdir, OperationAppend, OperationDelete} {
+		t.Run(string(kind), func(t *testing.T) {
+			if kind == OperationAppend || kind == OperationDelete {
+				if err := os.WriteFile(filepath.Join(grant.Path, "target"), []byte("seed"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			parent, name, info, err := openOperationPath(snapshot, "target")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer parent.Close()
+			touched := false
+			req := OperationRequest{Operation: kind, Content: "+one", ExpectedVersion: digestString("seed")}
+			_, err = executeFileOperation(ctx, parent, name, info, req, PermissionAllowAll, &touched, func() error { return Error("selection_expired", 409, "conflict") })
+			if err == nil || touched {
+				t.Fatalf("expired commit %v touched=%v", err, touched)
+			}
+			if kind == OperationAppend || kind == OperationDelete {
+				data, _ := os.ReadFile(filepath.Join(grant.Path, "target"))
+				if string(data) != "seed" {
+					t.Fatalf("mutated %q", data)
+				}
+				os.Remove(filepath.Join(grant.Path, "target"))
+			}
+		})
+	}
+}
+
+func operationTestCallID(id string) string { return fmt.Sprintf("%d/%s", time.Now().UnixMilli(), id) }
+
+func TestWorkspaceExpiredCallCannotRecreateAfterReceiptEviction(t *testing.T) {
+	db, grant, stateStore, conversation := operationFixture(t, PermissionAlwaysAsk)
+	req := OperationRequest{HistoryID: "history", RunID: "run", UserID: "owner", ConversationID: conversation, WorkspaceID: grant.WorkspaceID, CallID: fmt.Sprintf("%d/old-call", time.Now().Add(-25*time.Hour).UnixMilli()), Operation: OperationCreate, Path: "old.txt", Content: "old"}
+	if _, err := PrepareOperation(t.Context(), db.DB, stateStore, req); err == nil {
+		t.Fatal("expired call recreated without its receipt")
+	}
+	if _, err := os.Stat(filepath.Join(grant.Path, "old.txt")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("unexpected file %v", err)
+	}
+}
+
+func TestWorkspaceRecursiveGlobIncludesZeroAndManyDirectories(t *testing.T) {
+	for _, tc := range []struct {
+		pattern, path string
+		want          bool
+	}{
+		{"src/**/*.go", "src/main.go", true}, {"src/**/*.go", "src/a/b/main.go", true},
+		{"**/docs/*.md", "docs/readme.md", true}, {"**/docs/*.md", "a/b/docs/readme.md", true},
+		{"src/**/*.go", "other/main.go", false}, {"*.go", "src/main.go", true},
+	} {
+		got, err := matchOperationGlob(tc.pattern, tc.path)
+		if err != nil || got != tc.want {
+			t.Errorf("%s %s = %v %v", tc.pattern, tc.path, got, err)
+		}
 	}
 }

@@ -11,9 +11,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 
 	"lazymind/core/common"
+	"lazymind/core/common/orm"
+	"lazymind/core/localworkspace"
 	"lazymind/core/state"
 )
 
@@ -29,7 +32,7 @@ var activeRunCancels sync.Map
 func CancelRuns(taskIDs []string) {
 	for _, taskID := range taskIDs {
 		if value, ok := activeRunCancels.Load(taskID); ok {
-			value.(context.CancelFunc)()
+			(*value.(*context.CancelFunc))()
 		}
 	}
 }
@@ -42,15 +45,16 @@ func CancelRuns(taskIDs []string) {
 // tools is still forwarded for non-workflow_step agent types; workflow_step tasks
 // resolve their tools from the immutable public Host Attempt context.
 type RunRequest struct {
-	TaskID        string         `json:"task_id"`
-	AgentType     string         `json:"agent_type"`
-	Params        map[string]any `json:"params,omitempty"`
-	WorkspacePath string         `json:"workspace_path"`
-	Tools         []string       `json:"tools,omitempty"`
-	DBDSN         string         `json:"db_dsn"`
-	Resume        bool           `json:"resume"`
-	LLMConfig     map[string]any `json:"llm_config,omitempty"`
-	ToolConfig    map[string]any `json:"tool_config,omitempty"`
+	TaskID             string            `json:"task_id"`
+	AgentType          string            `json:"agent_type"`
+	Params             map[string]any    `json:"params,omitempty"`
+	WorkspacePath      string            `json:"workspace_path"`
+	Tools              []string          `json:"tools,omitempty"`
+	DBDSN              string            `json:"db_dsn"`
+	Resume             bool              `json:"resume"`
+	LLMConfig          map[string]any    `json:"llm_config,omitempty"`
+	ToolConfig         map[string]any    `json:"tool_config,omitempty"`
+	WorkspaceExecution map[string]string `json:"workspace_execution,omitempty"`
 }
 
 // TaskEvent is one event emitted by the SubAgent SSE stream.
@@ -101,9 +105,51 @@ func Run(ctx context.Context, db *gorm.DB, stateStore state.Store, req RunReques
 // the SSE stream a second time.
 func RunObserved(ctx context.Context, db *gorm.DB, stateStore state.Store, req RunRequest, observe func(TaskEvent) error) error {
 	runCtx, cancel := context.WithTimeout(ctx, subagentRunTimeout)
-	activeRunCancels.Store(req.TaskID, context.CancelFunc(cancel))
-	defer activeRunCancels.Delete(req.TaskID)
 	defer cancel()
+	// The generation is captured by this launch and passed separately from task
+	// Params. An old Python runner can never adopt a resumed task's generation.
+	generation := uuid.NewString()
+	if stateStore == nil {
+		return fmt.Errorf("store not initialized")
+	}
+	atomicStore, ok := stateStore.(state.CompareAndDeleteStore)
+	if !ok {
+		return fmt.Errorf("store not initialized")
+	}
+	activeRun := &cancel
+	if err := withWorkspaceRunUpdate(runCtx, db, req.TaskID, func(tx *gorm.DB) error {
+		task, err := GetTask(runCtx, tx, req.TaskID)
+		if err != nil {
+			return err
+		}
+		if task.Status != StatusPending && task.Status != StatusRunning {
+			return ErrTaskTerminal
+		}
+		if err := stateStore.Set(runCtx, workspaceRunKey(req.TaskID), []byte(generation), subagentRunTimeout); err != nil {
+			return err
+		}
+		if previous, loaded := activeRunCancels.Swap(req.TaskID, activeRun); loaded {
+			(*previous.(*context.CancelFunc))()
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	req.WorkspaceExecution = map[string]string{"task_id": req.TaskID, "generation": generation}
+	defer activeRunCancels.CompareAndDelete(req.TaskID, activeRun)
+	defer func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		_ = withWorkspaceRunUpdate(cleanupCtx, db, req.TaskID, func(_ *gorm.DB) error {
+			_, err := atomicStore.CompareAndDelete(cleanupCtx, workspaceRunKey(req.TaskID), []byte(generation))
+			return err
+		})
+	}()
+	runError := func(message string) {
+		_ = routeRunEvent(runCtx, db, stateStore, generation, TaskEvent{
+			Type: "error", TaskID: req.TaskID, Status: StatusFailed, Message: message,
+		})
+	}
 
 	bodyBytes, err := json.Marshal(req)
 	if err != nil {
@@ -120,12 +166,12 @@ func RunObserved(ctx context.Context, db *gorm.DB, stateStore state.Store, req R
 	client := &http.Client{Timeout: 0}
 	resp, err := client.Do(httpReq)
 	if err != nil {
-		routeError(runCtx, db, stateStore, req.TaskID, fmt.Sprintf("subagent run request failed: %v", err))
+		runError(fmt.Sprintf("subagent run request failed: %v", err))
 		return err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		routeError(runCtx, db, stateStore, req.TaskID, fmt.Sprintf("subagent run returned HTTP %d", resp.StatusCode))
+		runError(fmt.Sprintf("subagent run returned HTTP %d", resp.StatusCode))
 		return fmt.Errorf("subagent run returned non-200: %d", resp.StatusCode)
 	}
 
@@ -151,14 +197,14 @@ func RunObserved(ctx context.Context, db *gorm.DB, stateStore state.Store, req R
 				return fmt.Errorf("%w", err)
 			}
 		}
-		if err := routeEvent(runCtx, db, stateStore, ev); err != nil {
+		if err := routeRunEvent(runCtx, db, stateStore, generation, ev); err != nil {
 			message := fmt.Sprintf("persist subagent %s event failed: %v", ev.Type, err)
-			routeError(runCtx, db, stateStore, req.TaskID, message)
+			runError(message)
 			return fmt.Errorf("%s", message)
 		}
 	}
 	if err := scanner.Err(); err != nil && runCtx.Err() == nil {
-		routeError(runCtx, db, stateStore, req.TaskID, fmt.Sprintf("subagent stream read error: %v", err))
+		runError(fmt.Sprintf("subagent stream read error: %v", err))
 		return err
 	}
 	return nil
@@ -170,98 +216,101 @@ func routeEvent(ctx context.Context, db *gorm.DB, stateStore state.Store, ev Tas
 }
 
 func routeEventWithWorkflowHooks(ctx context.Context, db *gorm.DB, stateStore state.Store, ev TaskEvent, artifactHook, terminalHook bool) error {
+	accepted, err := persistTaskEvent(ctx, db, ev)
+	if err == nil && accepted {
+		publishTaskEvent(ctx, db, stateStore, ev, artifactHook, terminalHook)
+	}
+	return err
+}
+
+// routeRunEvent keeps generation validation and the DB projection under the
+// same task-row lock used by launch/resume. Callbacks run only after commit.
+func routeRunEvent(ctx context.Context, db *gorm.DB, stateStore state.Store, generation string, ev TaskEvent) error {
+	accepted := false
+	err := withWorkspaceRunUpdate(ctx, db, ev.TaskID, func(tx *gorm.DB) error {
+		current, err := stateStore.Get(ctx, workspaceRunKey(ev.TaskID))
+		if err != nil {
+			return err
+		}
+		if string(current) != generation {
+			return fmt.Errorf("conflict")
+		}
+		accepted, err = persistTaskEvent(ctx, tx, ev)
+		return err
+	})
+	if err == nil && accepted {
+		publishTaskEvent(ctx, db, stateStore, ev, true, true)
+	}
+	return err
+}
+
+func persistTaskEvent(ctx context.Context, db *gorm.DB, ev TaskEvent) (bool, error) {
+	var err error
 	switch ev.Type {
 	case "task_start":
-		accepted, err := AcceptTaskStart(ctx, db, ev.TaskID)
-		if err != nil {
-			return fmt.Errorf("start task=%s: %w", ev.TaskID, err)
-		}
-		if !accepted {
-			return nil
-		}
-		_ = WriteStatus(ctx, stateStore, ev.TaskID, map[string]any{"status": StatusRunning, "progress": 0})
-		// Mirror running status into workflow_session_steps if this is a workflow_step task.
-		if terminalHook {
-			routeWorkflowStepStatus(ctx, db, stateStore, ev.TaskID, StatusRunning, "")
-		}
+		return AcceptTaskStart(ctx, db, ev.TaskID)
 	case "progress":
-		if err := UpdateProgress(ctx, db, ev.TaskID, ev.Progress, ev.CurrentPhase, ev.EstimatedSec); err != nil {
-			return fmt.Errorf("update task progress task=%s: %w", ev.TaskID, err)
+		err = UpdateProgress(ctx, db, ev.TaskID, ev.Progress, ev.CurrentPhase, ev.EstimatedSec)
+		if err == nil && len(ev.WritingSubtasks) > 0 {
+			err = UpdateWritingSubtasks(ctx, db, ev.TaskID, ev.WritingSubtasks)
 		}
-		if len(ev.WritingSubtasks) > 0 {
-			if err := UpdateWritingSubtasks(ctx, db, ev.TaskID, ev.WritingSubtasks); err != nil {
-				return fmt.Errorf("save writing subtasks task=%s: %w", ev.TaskID, err)
-			}
-		}
-		_ = WriteStatus(ctx, stateStore, ev.TaskID, map[string]any{
-			"status": StatusRunning, "progress": ev.Progress, "current_phase": ev.CurrentPhase,
-		})
 	case "artifact":
-		seq := ev.Seq
-		if seq <= 0 {
-			seq = 1
-		}
-		if err := SaveArtifact(ctx, db, ev.TaskID, ev.ArtifactKey, ev.ContentType, ev.Value, seq); err != nil {
-			return fmt.Errorf("save artifact task=%s slot=%s seq=%d: %w", ev.TaskID, ev.ArtifactKey, seq, err)
-		}
-		// Write slot revision if this is a workflow_step task with a slot binding.
-		// list_index for partial retry is embedded inside the artifact JSON value and
-		// extracted by the plugin hook via extractListIndex — no need to pass it here.
-		if artifactHook {
-			routeWorkflowArtifact(ctx, db, stateStore, ev.TaskID, ev.ArtifactKey)
-		}
+		err = SaveArtifact(ctx, db, ev.TaskID, ev.ArtifactKey, ev.ContentType, ev.Value, max(1, ev.Seq))
 	case "sources":
-		if err := UpdateSources(ctx, db, ev.TaskID, ev.Sources); err != nil {
-			return fmt.Errorf("save sources task=%s: %w", ev.TaskID, err)
-		}
+		err = UpdateSources(ctx, db, ev.TaskID, ev.Sources)
 	case "done":
 		status := ev.Status
 		if status == "" {
 			status = StatusSucceeded
 		}
-		accepted, err := AcceptFinalStatus(ctx, db, ev.TaskID, status, ev.Summary)
-		if err != nil {
-			return fmt.Errorf("complete task=%s: %w", ev.TaskID, err)
-		}
-		if !accepted {
-			return nil
-		}
-		_ = WriteStatus(ctx, stateStore, ev.TaskID, map[string]any{
-			"status": status, "progress": 100, "summary": ev.Summary,
-		})
-		// Handle plugin step completion (auto-advance or step_waiting).
-		if terminalHook {
-			routeWorkflowStepStatus(ctx, db, stateStore, ev.TaskID, status, ev.Summary)
-		}
+		return AcceptFinalStatus(ctx, db, ev.TaskID, status, ev.Summary)
 	case "error":
 		status := ev.Status
 		if status == "" {
 			status = StatusFailed
 		}
-		accepted, err := AcceptFinalStatus(ctx, db, ev.TaskID, status, ev.Message)
-		if err != nil {
-			return fmt.Errorf("fail task=%s: %w", ev.TaskID, err)
-		}
-		if !accepted {
-			return nil
-		}
-		_ = WriteStatus(ctx, stateStore, ev.TaskID, map[string]any{"status": status, "summary": ev.Message})
-		if terminalHook {
-			routeWorkflowStepStatus(ctx, db, stateStore, ev.TaskID, status, ev.Message)
-		}
-	case "artifact_stream_start", "artifact_stream", "artifact_stream_end", "artifact_stream_abort":
-		// Draft preview events are intentionally ephemeral: append to the Task
-		// stream below, without creating DB steps, artifacts, or workflow revisions.
+		return AcceptFinalStatus(ctx, db, ev.TaskID, status, ev.Message)
 	}
-	if isArtifactStreamEvent(ev.Type) || ev.Type == "progress" ||
-		ev.Type == "done" || ev.Type == "error" {
-		// Deliver preview, phase, and terminal updates immediately to connected
-		// clients, without waiting for the Redis replay copy.
+	return err == nil, err
+}
+
+func publishTaskEvent(ctx context.Context, db *gorm.DB, stateStore state.Store, ev TaskEvent, artifactHook, terminalHook bool) {
+	switch ev.Type {
+	case "task_start":
+		_ = WriteStatus(ctx, stateStore, ev.TaskID, map[string]any{"status": StatusRunning, "progress": 0})
+		if terminalHook {
+			routeWorkflowStepStatus(ctx, db, stateStore, ev.TaskID, StatusRunning, "")
+		}
+	case "progress":
+		_ = WriteStatus(ctx, stateStore, ev.TaskID, map[string]any{"status": StatusRunning, "progress": ev.Progress, "current_phase": ev.CurrentPhase})
+	case "artifact":
+		if artifactHook {
+			routeWorkflowArtifact(ctx, db, stateStore, ev.TaskID, ev.ArtifactKey)
+		}
+	case "done", "error":
+		status, summary := ev.Status, ev.Summary
+		if ev.Type == "error" {
+			summary = ev.Message
+			if status == "" {
+				status = StatusFailed
+			}
+		} else if status == "" {
+			status = StatusSucceeded
+		}
+		fields := map[string]any{"status": status, "summary": summary}
+		if ev.Type == "done" {
+			fields["progress"] = 100
+		}
+		_ = WriteStatus(ctx, stateStore, ev.TaskID, fields)
+		if terminalHook {
+			routeWorkflowStepStatus(ctx, db, stateStore, ev.TaskID, status, summary)
+		}
+	}
+	if isArtifactStreamEvent(ev.Type) || ev.Type == "progress" || ev.Type == "done" || ev.Type == "error" {
 		taskLiveEvents.publish(ev.TaskID, ev)
 	}
 	_ = AppendStreamEvent(ctx, stateStore, ev.TaskID, ev)
 	PublishConversationTaskEvent(ctx, db, stateStore, ev)
-	return nil
 }
 
 // routeError synthesizes a terminal error event when the run cannot be driven by
@@ -376,4 +425,41 @@ func routeWorkflowArtifact(ctx context.Context, db *gorm.DB, stateStore state.St
 	if EventHooks.onArtifact != nil {
 		EventHooks.onArtifact(ctx, db, stateStore, taskID, slot)
 	}
+}
+
+func workspaceRunKey(taskID string) string { return "rag/subagent/execution:" + taskID }
+
+// ValidateWorkspaceRun is independent of the parent Chat run: detached tasks
+// survive normal parent completion, but not interruption or a later launch.
+func ValidateWorkspaceRun(ctx context.Context, db *gorm.DB, stateStore state.Store, req localworkspace.OperationRequest) error {
+	invalid := localworkspace.Error("binding_conflict", 409, "conflict")
+	if stateStore == nil || req.TaskID == "" || req.Generation == "" || req.RunID != "" || req.HistoryID != "" {
+		return invalid
+	}
+	task, err := GetTask(ctx, db, req.TaskID)
+	if err != nil {
+		return err
+	}
+	if task.CreateUserID != req.UserID || task.ConversationID != req.ConversationID || task.AgentType == "workflow_step" ||
+		(task.Status != StatusPending && task.Status != StatusRunning) {
+		return invalid
+	}
+	generation, err := stateStore.Get(ctx, workspaceRunKey(req.TaskID))
+	if err != nil {
+		return err
+	}
+	if string(generation) != req.Generation {
+		return invalid
+	}
+	return nil
+}
+
+func withWorkspaceRunUpdate(ctx context.Context, db *gorm.DB, taskID string, update func(*gorm.DB) error) error {
+	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&orm.SubAgentTask{}).Where("id = ?", taskID).
+			UpdateColumn("updated_at", gorm.Expr("updated_at")).Error; err != nil {
+			return err
+		}
+		return update(tx)
+	})
 }

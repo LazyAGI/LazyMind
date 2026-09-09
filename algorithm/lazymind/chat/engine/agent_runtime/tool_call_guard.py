@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import time
+import uuid
 from collections import Counter
 from dataclasses import dataclass
 from typing import Any
@@ -14,7 +15,8 @@ from lazyllm.tools.agent import (
     ToolExecutionDisposition,
     ToolExecutionRecord,
 )
-from lazyllm.tools.agent.toolError import tool_failure
+from lazyllm.tools.agent.toolError import exception_failure, tool_failure
+from lazymind.chat.engine.tools.local_fs import LocalFileToolkit
 
 from lazymind.chat.engine.tools.session_env import redact_session_env_arguments
 from .telemetry import append_event, emit_tool_call, emit_tool_result
@@ -154,7 +156,7 @@ class FailureRetryPolicy:
     def _blocked(name: str, message: str) -> dict[str, Any]:
         return tool_failure(f'[Repeated Tool Failure] {name}: {message}')
 
-    def decide(self, prepared_calls: list[PreparedToolCall]) -> _FailureBatchDecision:
+    def decide(self, prepared_calls: list[PreparedToolCall], independent_indices: set[int] | None = None) -> _FailureBatchDecision:
         pending_indices = []
         blocked_results: dict[int, Any] = {}
         duplicate_sources: dict[int, int] = {}
@@ -162,7 +164,7 @@ class FailureRetryPolicy:
         for index, prepared in enumerate(prepared_calls):
             name = prepared.tool_name
             limit = self._failure_limits.get(name)
-            if limit is None or not prepared.ready:
+            if limit is None or not prepared.ready or index in (independent_indices or ()):
                 pending_indices.append(index)
                 continue
             signature = self._signature(prepared)
@@ -309,7 +311,7 @@ class ToolExecutionMiddleware:
                  expanded_round_limit: int | None = None, cancel_check: Any = None,
                  repeat_monitor: ExactRepeatMonitor | None = None,
                  notice_buffer: OneShotNoticeBuffer | None = None,
-                 authorization_gate: Any = None):
+                 authorization_gate: Any = None, workspace_tools: dict[str, Any] | None = None):
         self._manager = manager
         self._failure_policy = failure_policy or FailureRetryPolicy()
         self._expanded_round_limit = expanded_round_limit
@@ -317,6 +319,8 @@ class ToolExecutionMiddleware:
         self._repeat_monitor = repeat_monitor
         self._notice_buffer = notice_buffer
         self._authorization_gate = authorization_gate
+        self._workspace_tools = workspace_tools or {}
+        self._workspace_versions: dict[int, dict[str, str]] = {}
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._manager, name)
@@ -345,37 +349,50 @@ class ToolExecutionMiddleware:
         decision: _FailureBatchDecision | None = None
         authorization_reasons: dict[int, str] = {}
         started_at = 0.0
+        workspace_records: dict[int, ToolExecutionRecord] = {}
+        invocation_id = uuid.uuid4().hex
 
         def select(prepared):
             nonlocal prepared_calls, decision, authorization_reasons, started_at
             prepared_calls = list(prepared)
-            decision = self._failure_policy.decide(prepared_calls)
+            workspace_active = LocalFileToolkit()._has_workspace_source() or LocalFileToolkit._workspace_context() is not None
+            workspace_indices = {
+                index for index, item in enumerate(prepared_calls)
+                if workspace_active and item.ready and item.tool_name in self._workspace_tools
+                and isinstance(self._workspace_tools[item.tool_name][0], LocalFileToolkit)
+            }
+            decision = self._failure_policy.decide(prepared_calls, workspace_indices)
             blocked = dict(decision.blocked_results)
             pending = list(decision.pending_indices)
             authorization_reasons = {}
-            if self._authorization_gate is not None:
-                for index in tuple(pending):
-                    item = prepared_calls[index]
-                    try:
-                        outcome = self._authorization_gate(item)
-                    except Exception as error:
+            for index in tuple(pending):
+                item = prepared_calls[index]
+                if not item.ready:
+                    continue
+                try:
+                    outcome = self._authorization_gate(item) if self._authorization_gate is not None else 'allow'
+                    if workspace_active and item.tool_name not in self._workspace_tools:
                         outcome = 'deny'
-                        lazyllm.LOG.warning(
-                            f'[ToolCall] authorization gate failed for {item.tool_name}: '
-                            f'{type(error).__name__}: {error}'
-                        )
-                    if outcome not in (True, 'allow', 'allowed'):
-                        blocked[index] = tool_failure(
-                            'workspace authorization denied'
-                            if outcome in (False, 'deny', 'denied', 'rejected')
-                            else 'workspace authorization unavailable'
-                        )
-                        authorization_reasons[index] = (
-                            'authorization_denied'
-                            if outcome in (False, 'deny', 'denied', 'rejected')
-                            else 'authorization_unavailable'
-                        )
-                        pending.remove(index)
+                    admission = self._workspace_tools.get(item.tool_name)
+                    if workspace_active and admission and admission[3] is not None and not admission[3](item.validated_arguments):
+                        outcome = 'deny'
+                    if index in workspace_indices:
+                        _, method, authorization, _ = self._workspace_tools[item.tool_name]
+                        if not authorization or method not in authorization:
+                            outcome = 'deny'
+                except Exception as error:
+                    outcome = 'deny'
+                    lazyllm.LOG.warning(f'[ToolCall] authorization failed: {error}')
+                if outcome not in (True, 'allow', 'allowed'):
+                    unavailable = outcome not in (False, 'deny', 'denied', 'rejected')
+                    blocked[index] = tool_failure(
+                        'workspace authorization unavailable' if unavailable
+                        else 'workspace authorization denied'
+                    )
+                    authorization_reasons[index] = (
+                        'authorization_unavailable' if unavailable else 'authorization_denied'
+                    )
+                    pending.remove(index)
             decision = _FailureBatchDecision(tuple(pending), blocked, decision.duplicate_sources)
             for index, item in enumerate(prepared_calls):
                 if index in decision.pending_indices and item.ready:
@@ -390,7 +407,7 @@ class ToolExecutionMiddleware:
                     )
                     append_event(
                         'authorization_blocked' if index in authorization_reasons else 'failure_retry_blocked',
-                        name=item.tool_name, call_id=item.call_id,
+                        name=item.tool_name, call_id=f'{invocation_id}:{item.index}:{item.call_id}',
                     )
                 elif index in decision.duplicate_sources:
                     emit_tool_call(item.tool_call, blocked=True, reason='duplicate_merged')
@@ -399,7 +416,28 @@ class ToolExecutionMiddleware:
                     emit_tool_call(item.tool_call)
                     _log_tool_call('start', item.tool_name, args=arguments)
             started_at = time.perf_counter()
-            return decision.pending_indices
+            for index in tuple(pending):
+                if index not in workspace_indices:
+                    continue
+                item = prepared_calls[index]
+                instance, method, _, _ = self._workspace_tools[item.tool_name]
+                config = lazyllm.globals.get('agentic_config') or {}
+                identity = config.get('_workspace_execution') or {}
+                try:
+                    if self._cancel_check is not None:
+                        self._cancel_check(None)
+                    result = {'ok': True, 'value': instance.execute_workspace_call(
+                        method, item.validated_arguments, call_id=f'{invocation_id}:{item.index}:{hashlib.sha256(item.call_id.encode()).hexdigest()}',
+                        tool_name=item.tool_name, identity=identity, cancel_check=self._cancel_check,
+                        versions=self._workspace_versions.setdefault(id(instance), {}),
+                    )}
+                    disposition = ToolExecutionDisposition.EXECUTED
+                except Exception as error:
+                    result = exception_failure(item.tool_name, error)
+                    disposition = (ToolExecutionDisposition.EXECUTED if getattr(error, 'workspace_execution_started', False)
+                                   else ToolExecutionDisposition.SKIPPED)
+                workspace_records[index] = ToolExecutionRecord(item, result, disposition, reason='workspace_operation')
+            return tuple(index for index in decision.pending_indices if index not in workspace_records)
 
         executed_batch = self._manager.execute_with_records(
             tools,
@@ -411,7 +449,9 @@ class ToolExecutionMiddleware:
         elapsed = time.perf_counter() - started_at
         results: list[Any] = [None] * len(prepared_calls)
         records: list[ToolExecutionRecord | None] = [None] * len(prepared_calls)
-        for result, record in zip(executed_batch.results, executed_batch.records):
+        executed = [*zip(executed_batch.results, executed_batch.records),
+                    *((record.result, record) for record in workspace_records.values())]
+        for result, record in executed:
             results[record.index] = result
             records[record.index] = record
             emit_tool_result(prepared_calls[record.index].tool_call, result)
@@ -441,7 +481,7 @@ class ToolExecutionMiddleware:
             )
             emit_tool_result(prepared_calls[index].tool_call, result)
         completed_records = [record for record in records if record is not None]
-        self._failure_policy.observe(completed_records)
+        self._failure_policy.observe([record for record in completed_records if record.reason != 'workspace_operation'])
         batch = ToolExecutionBatch(
             results=lazyllm.package(results),
             records=tuple(completed_records),

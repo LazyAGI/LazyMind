@@ -346,3 +346,59 @@ def test_tool_catalog_localizes_display_fields_without_changing_runtime_descript
     for group_config in [*DEFAULT_TOOLS, SKILL_TOOL_CONFIG]:
         assert group_config.label_en.strip()
         assert group_config.description_en.strip()
+
+
+def test_workspace_admission_restores_scoped_search_and_internal_writer_methods():
+    from lazyllm.tools.agent import ToolManager
+    from lazymind.chat.service.component.tool_registry import workspace_tool_metadata
+    tools = [cfg.tool for cfg in DEFAULT_TOOLS if cfg.name in {'web_search', 'academic_search', 'writer_create', 'writer_revision', 'mail'}]
+    from lazymind.chat.lazyllm_tool_docs import ensure_lazyllm_tool_docs
+    ensure_lazyllm_tool_docs(tools)
+    manager = ToolManager(tools)
+    admitted = workspace_tool_metadata(manager.tools_info)
+    assert 'WriterCreateToolkit_render_markdown' in admitted
+    assert 'WriterCreateToolkit_generate_outline' in admitted
+    assert 'WriterRevisionToolkit_apply_string_replace' in admitted
+    assert any(name.endswith('GoogleSearch_search') for name in admitted)
+    assert any(name.endswith('SciverseSearch_meta_search') for name in admitted)
+    assert 'WriterCreateToolkit_profile_resources' not in admitted
+    assert 'WriterCreateToolkit_generate_draft_section' not in admitted
+    assert not any(name.startswith('MailToolkit_') for name in admitted)
+    check = admitted['WriterRevisionToolkit_apply_patch'][3]
+    assert check({'writer_document_json': '{"document_id":"safe"}'})
+    assert not check({'writer_document_json': '{"document_id":"../../escape"}'})
+    assert not check({'sync_provider': True})
+    assert not check({'media_assets_json': '{"assets":{"x":{"local_path":"/workspace/private"}}}'})
+
+
+def test_workspace_artifact_save_admission_allows_text_and_json_only():
+    from lazyllm.tools.agent import ToolManager
+    from lazymind.chat.engine.subagent.tools import save_artifacts
+    from lazymind.chat.service.component.tool_registry import workspace_tool_metadata
+    manager = ToolManager([save_artifacts])
+    check = workspace_tool_metadata(manager.tools_info)['save_artifacts'][3]
+    assert check({'artifacts': [{'key': 'text', 'value': 'content'}, {'key': 'json', 'value': {}, 'content_type': 'json'}]})
+    assert not check({'artifacts': [{'key': 'file', 'value': '/workspace/secret', 'content_type': 'file'}]})
+
+
+def test_workspace_artifact_admission_prevalidates_scoped_files_and_remote_images(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from lazymind.chat.engine.subagent import context
+    from lazymind.chat.service.component.tool_registry import _workspace_artifact_arguments, _workspace_writer_arguments
+    task, upload, workspace = tmp_path / 'task', tmp_path / 'uploads', tmp_path / 'workspace'
+    for root in (task, upload, workspace):
+        root.mkdir()
+    monkeypatch.setattr(context, 'get_context', lambda: SimpleNamespace(workspace_path=str(task)))
+    monkeypatch.setenv('LAZYMIND_UPLOAD_ROOT', str(upload))
+    monkeypatch.setattr(lazyllm, 'globals', {'agentic_config': {'local_fs_sources': [{
+        'source_id': 'local-workspace:w', 'paths': [str(workspace)], 'file_extensions': ['txt'],
+    }]}})
+    def item(path, kind='file'):
+        return {'key': 'output', 'content_type': kind, 'value': path}
+    assert _workspace_artifact_arguments({'artifacts': [item(str(task / 'output.txt')), item('https://example.com/image.png', 'image'), item('/static-files/picture.png?sig=x', 'image')]})
+    assert _workspace_artifact_arguments({'artifacts': [item(str(upload / 'picture.png'), 'image')]})
+    assert not _workspace_artifact_arguments({'artifacts': [item(str(task / 'good.txt')), item(str(workspace / 'secret.txt'))]})
+    assert not _workspace_artifact_arguments({'artifacts': [item('../../outside')]})
+    (task / 'alias.txt').symlink_to(workspace / 'secret.txt')
+    assert not _workspace_artifact_arguments({'artifacts': [item(str(task / 'alias.txt'))]})
+    assert not _workspace_writer_arguments({'task_id': '..'})

@@ -5,18 +5,23 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"gorm.io/gorm"
 	"net/http"
 	"os"
+	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gorilla/mux"
 
 	"lazymind/core/common"
+	"lazymind/core/common/orm"
 	"lazymind/core/state"
 	"lazymind/core/store"
 )
 
-func DecideOperation(ctx context.Context, stateStore state.Store, operationID, action, userID string) (OperationResult, error) {
+func DecideOperation(ctx context.Context, db *gorm.DB, stateStore state.Store, operationID, action, userID string) (OperationResult, error) {
 	if stateStore == nil {
 		return OperationResult{}, common.ResolveAppError("store not initialized", 500)
 	}
@@ -26,6 +31,9 @@ func DecideOperation(ctx context.Context, stateStore state.Store, operationID, a
 	}
 	if value.Request.UserID != userID {
 		return OperationResult{}, Error("workspace_not_found", 404, "resource not found")
+	}
+	if err := validateLiveOperation(ctx, db, stateStore, value); err != nil {
+		return OperationResult{}, err
 	}
 	if value.Status != operationPending {
 		return OperationResult{}, Error("binding_conflict", 409, "conflict")
@@ -55,38 +63,30 @@ func DecideOperation(ctx context.Context, stateStore state.Store, operationID, a
 	if value.Request.UserID != userID || value.Status != operationPending {
 		return OperationResult{}, Error("binding_conflict", 409, "conflict")
 	}
+	if err := validateLiveOperation(ctx, db, stateStore, value); err != nil {
+		return OperationResult{}, err
+	}
 	value.Decision, value.Status = decision, nextStatus
 	if err := saveOperationState(ctx, stateStore, value); err != nil {
 		return OperationResult{}, err
 	}
-	return OperationResult{OperationID: operationID, Path: value.Request.Path, Version: value.Version, Decision: value.Decision, Status: value.Status}, nil
-}
-
-func OperationStatus(ctx context.Context, stateStore state.Store, operationID string) (OperationResult, error) {
-	if stateStore == nil {
-		return OperationResult{}, common.ResolveAppError("store not initialized", 500)
-	}
-	value, err := loadOperationState(ctx, stateStore, operationID)
-	if err != nil {
-		return OperationResult{}, err
-	}
-	return OperationResult{OperationID: operationID, Path: value.Request.Path, Content: value.Result.Content, Version: value.Version, Decision: value.Decision, Status: value.Status}, nil
+	return operationResult(value), nil
 }
 
 // InternalPrepareOperation prepares one operation for the authenticated algorithm host.
 func InternalPrepareOperation(w http.ResponseWriter, r *http.Request) {
-	if !requireOperationServiceToken(w, r) {
+	if rejectUnlessEnabled(w) || !requireOperationServiceToken(w, r) {
 		return
 	}
 	var request OperationRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxOperationBytes+4096)).Decode(&request); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2*maxOperationBytes+4096)).Decode(&request); err != nil {
 		common.ReplyAppErr(w, Error("invalid_selection", http.StatusBadRequest, "invalid request"))
 		return
 	}
 	request.UserID = store.UserID(r)
 	request.ConversationID = mux.Vars(r)["conversation_id"]
 	result, err := PrepareOperation(r.Context(), store.DB(), store.State(), request)
-	if replyOperationError(w, err) {
+	if replyError(w, err) {
 		return
 	}
 	common.ReplyOK(w, result)
@@ -94,7 +94,7 @@ func InternalPrepareOperation(w http.ResponseWriter, r *http.Request) {
 
 // InternalOperationStatus returns the current decision for an operation.
 func InternalOperationStatus(w http.ResponseWriter, r *http.Request) {
-	if !requireOperationServiceToken(w, r) {
+	if rejectUnlessEnabled(w) || !requireOperationServiceToken(w, r) {
 		return
 	}
 	operationID := mux.Vars(r)["operation_id"]
@@ -104,9 +104,17 @@ func InternalOperationStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	result := OperationResult{}
 	if err == nil {
-		result = OperationResult{OperationID: operationID, Path: value.Request.Path, Content: value.Result.Content, Version: value.Version, Decision: value.Decision, Status: value.Status}
+		q, request := r.URL.Query(), value.Request
+		if q.Get("run_id") != request.RunID || q.Get("history_id") != request.HistoryID || q.Get("task_id") != request.TaskID || q.Get("generation") != request.Generation || q.Get("attempt_id") != request.AttemptID {
+			err = Error("binding_conflict", 409, "conflict")
+		} else {
+			err = validateLiveOperation(r.Context(), store.DB(), store.State(), value)
+		}
+		if err == nil {
+			result, err = projectOperation(r.Context(), store.State(), value)
+		}
 	}
-	if replyOperationError(w, err) {
+	if replyError(w, err) {
 		return
 	}
 	common.ReplyOK(w, result)
@@ -114,18 +122,18 @@ func InternalOperationStatus(w http.ResponseWriter, r *http.Request) {
 
 // InternalExecuteOperation executes only the exact operation previously prepared.
 func InternalExecuteOperation(w http.ResponseWriter, r *http.Request) {
-	if !requireOperationServiceToken(w, r) {
+	if rejectUnlessEnabled(w) || !requireOperationServiceToken(w, r) {
 		return
 	}
 	var request OperationRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxOperationBytes+4096)).Decode(&request); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2*maxOperationBytes+4096)).Decode(&request); err != nil {
 		common.ReplyAppErr(w, Error("invalid_selection", http.StatusBadRequest, "invalid request"))
 		return
 	}
 	request.UserID = store.UserID(r)
 	request.ConversationID = mux.Vars(r)["conversation_id"]
 	result, err := ExecuteOperation(r.Context(), store.DB(), store.State(), mux.Vars(r)["operation_id"], request)
-	if replyOperationError(w, err) {
+	if replyError(w, err) {
 		return
 	}
 	common.ReplyOK(w, result)
@@ -133,6 +141,9 @@ func InternalExecuteOperation(w http.ResponseWriter, r *http.Request) {
 
 // DecideOperationHandler records one user decision for a pending operation.
 func DecideOperationHandler(w http.ResponseWriter, r *http.Request) {
+	if rejectUnlessEnabled(w) {
+		return
+	}
 	var body struct {
 		Action string `json:"action"`
 	}
@@ -147,9 +158,9 @@ func DecideOperationHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	result := OperationResult{}
 	if err == nil {
-		result, err = DecideOperation(r.Context(), store.State(), operationID, body.Action, store.UserID(r))
+		result, err = DecideOperation(r.Context(), store.DB(), store.State(), operationID, body.Action, store.UserID(r))
 	}
-	if replyOperationError(w, err) {
+	if replyError(w, err) {
 		return
 	}
 	common.ReplyOK(w, result)
@@ -165,15 +176,105 @@ func requireOperationServiceToken(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
-func replyOperationError(w http.ResponseWriter, err error) bool {
-	if err == nil {
-		return false
+func validateLiveOperation(ctx context.Context, db *gorm.DB, stateStore state.Store, value operationState) error {
+	if err := validateOperationRun(ctx, db, stateStore, value.Request); err != nil {
+		return err
 	}
-	var appErr *common.AppError
-	if errors.As(err, &appErr) {
-		common.ReplyAppErr(w, appErr)
-	} else {
-		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
+	snapshot, err := resolveOperation(ctx, db, value.Request)
+	if err != nil {
+		return err
 	}
-	return true
+	if snapshot.WorkspaceVersion != value.WorkspaceVersion || snapshot.PermissionVersion != value.PermissionVersion {
+		return Error("selection_forbidden", 403, "forbidden")
+	}
+	return nil
+}
+
+// ListOperationApprovals exposes only bounded summaries, never content or execution credentials.
+func ListOperationApprovals(w http.ResponseWriter, r *http.Request) {
+	if rejectUnlessEnabled(w) {
+		return
+	}
+	ctx, stateStore := r.Context(), store.State()
+	conversationID, userID := mux.Vars(r)["conversation_id"], store.UserID(r)
+	if stateStore == nil {
+		common.ReplyErr(w, "store not initialized", 500)
+		return
+	}
+	var count int64
+	err := store.DB().WithContext(ctx).Model(&orm.Conversation{}).Where("id = ? AND create_user_id = ?", conversationID, userID).Count(&count).Error
+	if err == nil && count != 1 {
+		err = Error("workspace_not_found", 404, "resource not found")
+	}
+	if replyError(w, err) {
+		return
+	}
+	index, err := stateStore.HGetAll(ctx, "local-workspace-operation-index:"+conversationID)
+	if replyError(w, err) {
+		return
+	}
+	items := []map[string]any{}
+	for slot := 0; slot < 16; slot++ {
+		id := index[strconv.Itoa(slot)]
+		if id == "" {
+			continue
+		}
+		value, err := loadOperationState(ctx, stateStore, id)
+		if err != nil {
+			var app *common.AppError
+			if errors.As(err, &app) && app.HTTPStatus == 404 {
+				continue
+			}
+			replyError(w, err)
+			return
+		}
+		if value.Request.UserID != userID || value.Request.ConversationID != conversationID {
+			continue
+		}
+		projected, err := projectOperation(ctx, stateStore, value)
+		if replyError(w, err) {
+			return
+		}
+		value.Status = projected.Status
+		reason := projected.Reason
+		if unfinishedOperation(value.Status) {
+			if err := validateLiveOperation(ctx, store.DB(), stateStore, value); err != nil {
+				value.Status, reason = operationExpired, "execution_inactive"
+			}
+		}
+		if value.ExpiresAt <= time.Now().UnixMilli() && unfinishedOperation(value.Status) {
+			value.Status = operationExpired
+		}
+		items = append(items, map[string]any{"operation_id": id, "path": value.Request.Path, "operation": value.Request.Operation,
+			"tool_name": value.Request.ToolName, "task_id": value.Request.TaskID, "attempt_id": value.Request.AttemptID,
+			"version": value.Version, "content_digest": value.ContentDigest, "status": value.Status, "expires_at": value.ExpiresAt, "reason": reason})
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i]["expires_at"].(int64) < items[j]["expires_at"].(int64) })
+	common.ReplyOK(w, map[string]any{"items": items})
+}
+
+// A retained claim can outlive a failed state write. Never show that operation
+// as still actionable; the original claimant alone may finish it before expiry.
+func projectOperation(ctx context.Context, store state.Store, value operationState) (OperationResult, error) {
+	key := ""
+	if value.Status == operationPending {
+		key = operationDecisionKey(value.OperationID)
+	}
+	if value.Status == operationAllowed {
+		key = operationLockKey(value.OperationID)
+	}
+	if key != "" {
+		consumed, err := store.Exists(ctx, key)
+		if err != nil {
+			return OperationResult{}, err
+		}
+		if consumed {
+			if value.Status == operationPending {
+				value.Status = "preparing"
+			} else {
+				value.Status = operationExecuting
+			}
+		}
+	}
+	return operationResult(value), nil
 }

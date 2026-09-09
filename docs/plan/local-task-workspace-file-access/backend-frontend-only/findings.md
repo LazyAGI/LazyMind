@@ -1,5 +1,7 @@
 # 当前差异证据
 
+> 2026-09-09 最新：用户确认的R3–R7生产及统一自动化测试已完成，结果/实际代码量/兼容限制见末尾“最终生产/自动化结果”；实际运行验收仍未完成。开发起点7bc81ffa，本轮相关代码与文档同批提交，未推送远端。
+
 ## 最新：剩余整体接入源码证据（2026-09-09）
 
 - 用户已改为完整生产后统一测试；本轮只读代码和更新四份文档，不继承旧通过数。起点 69e4809e，工作区干净；本轮生产/测试代码净增 0。
@@ -231,3 +233,205 @@ Agent Review 还未形成完整终稿；上述结论已足以阻止直接进入�
 - 算法实现：绑定工作区 source 或可信上下文时，LocalFileToolkit 的 read/string_replace/create/append/delete 转发 Core；Core pending 转成 `ToolExecutionError.approval_required`，Core 错误不会回退 Python 本地读写；无绑定 source 保留旧行为。
 - 验证：算法相关矩阵 103/103；Core `go test ./... -count=1`、`go vet ./...`、`go test -race ./localworkspace -count=1` 通过；本地 Python 警告不影响结果。
 - A2 未完成项：没有注入真实 Core authorization gate；pending 没有在同一 Agent 轮次轮询/恢复；UI pending 列表/决定尚未接入；Workflow 自定义包和普通子任务仅有源码路径证据，未端到端；uncertain/崩溃恢复和打包 Desktop 未验证。
+
+## 2026-09-09 R3–R7 生产整合进行中
+
+- 已获整体预算确认；当前复用现有文件，不新增生产文件/依赖/表。算法最小增量要求持续执行。
+- 当前生产实际 +1568/-482，净增 1086；算法净增 204。统计为未提交整合快照，会随审查变化。
+- 前端复用 LocalWorkspaceControl/Modal/axios/i18n 完成 pending 列表与允许一次/拒绝、可见性轮询、切会话隔离。Core 增加真实调用幂等、16 原子槽、24h 回执、运行身份及目录句柄访问；算法接入实际工具注册对象、私有调用身份与 Core 等待，仍在审查。
+- 身份/目录/文件生产整合期间执行 `go build ./...` 通过（backend/core）；`go test ./localworkspace -run '^$'` 编译通过。提前运行一次包回归失败：旧 fixture 不含新增真实运行身份，旧文本合同仍要求 ask_user/filepath.Rel/os.Rename；未作为最终验证。DecideOperation 必须接收 DB 复核生命周期，已有测试仅先适配签名，禁止增加绕过验证的 nil-db 兼容层。
+- 操作文件首轮批量草稿因缺失 helper 无法编译，已回退该未完成草稿后逐步整合；未提交该草稿。多次命令因 cwd 相对路径误用失败，后续使用绝对路径/明确 backend/core 工作目录，不计作产品 RED。
+- 冻结检查 Local/Desktop 对 ec4676e0、LazyLLM gitlink 对245bc26d 无差异。尚未统一测试、端到端或实机验收；未提交/推送。下一步完成只读 Review 修复并开始统一行为/构建矩阵。
+
+实际生产文件：
+
+- `algorithm/lazymind/chat/api/subagent_routes.py`：+2/-0（净 +2）
+- `algorithm/lazymind/chat/engine/agent_runtime/executor.py`：+2/-0（净 +2）
+- `algorithm/lazymind/chat/engine/agent_runtime/models.py`：+1/-0（净 +1）
+- `algorithm/lazymind/chat/engine/agent_runtime/tool_call_guard.py`：+62/-31（净 +31）
+- `algorithm/lazymind/chat/engine/subagent/runner.py`：+11/-3（净 +8）
+- `algorithm/lazymind/chat/engine/tools/local_fs.py`：+199/-111（净 +88）
+- `algorithm/lazymind/chat/service/chat_request.py`：+1/-0（净 +1）
+- `algorithm/lazymind/chat/service/chat_service.py`：+4/-0（净 +4）
+- `algorithm/lazymind/chat/service/component/tool_registry.py`：+63/-1（净 +62）
+- `algorithm/lazymind/chat/workflow/remote_executor.py`：+5/-0（净 +5）
+- `backend/core/chat/chat.go`：+4/-0（净 +4）
+- `backend/core/chat/conversation_logic.go`：+48/-10（净 +38）
+- `backend/core/chat/redis_cache.go`：+7/-4（净 +3）
+- `backend/core/chat/run_decision.go`：+65/-15（净 +50）
+- `backend/core/localworkspace/approvals.go`：+91/-33（净 +58）
+- `backend/core/localworkspace/context.go`：+7/-13（净 -6）
+- `backend/core/localworkspace/directory_identity_unix.go`：+5/-0（净 +5）
+- `backend/core/localworkspace/directory_identity_windows.go`：+5/-0（净 +5）
+- `backend/core/localworkspace/lifecycle.go`：+104/-0（净 +104）
+- `backend/core/localworkspace/operations.go`：+637/-243（净 +394）
+- `backend/core/main.go`：+6/-0（净 +6）
+- `backend/core/routes.go`：+1/-0（净 +1）
+- `backend/core/subagent/runner.go`：+101/-15（净 +86）
+- `frontend/src/i18n/locales/en-US.ts`：+11/-1（净 +10）
+- `frontend/src/i18n/locales/zh-CN.ts`：+11/-1（净 +10）
+- `frontend/src/modules/chat/components/ChatInput/LocalWorkspaceControl.tsx`：+90/-1（净 +89）
+- `frontend/src/modules/chat/utils/localWorkspace.ts`：+25/-0（净 +25）
+
+## 2026-09-09 统一验证进行中（二）
+
+- 当前生产28个既有文件净增约1181行，算法约217行；未新增生产文件/依赖/表。额外必要的 `backend/core/workflow/store.go` 5行会话锁统一 dismissal 锁顺序；总预算仍在900–1400内。
+- 只读Review发现并修复：打开根句柄与目录身份分离校验；过期index阻断列表；撤销后回执不可见；执行/决定已消费后的非可操作状态投影；Workflow session/task/attempt锁顺序；子任务旧代次事件覆盖；提交临界点重新核对有效期/运行资格。后两项仍由身份测试验证。
+- Core新增真实SQLite/磁盘行为：同调用幂等和不同调用并发16槽、失效记录不续期、敏感grep跳过与二进制拒绝、根替换拒绝、create不覆盖并发文件、replace计数与权限、撤销后回执/过期索引/跨owner、完成回执Set失败进入uncertain不重放、提交点到期零修改。原R2一次性领取合同保留。
+- `go test -race ./localworkspace -count=1 -json`：67叶子用例通过；`go vet ./localworkspace`、Windows amd64与Linux amd64交叉编译通过。交叉编译不是实机验证。
+- 原 filepath.Rel/os.Rename 源码字面合同已删除9行（1项），实际目录/版本/并发创建行为保留/增加；ask_user及子任务只能转述旧提示断言改为Core真实批准路径。未删除失败能力合同。
+- 前端六文件矩阵68/68，修改文件ESLint、定向tsc与生产构建通过；完整tsc失败662行诊断，修改文件零诊断，未扩大范围修复。相关测试新增19项，覆盖批准不等于完成、拒绝/错误、切会话/隐藏/卸载/恢复和axios边界。不是浏览器+真实Core联调。
+- 算法当前聚焦矩阵92通过（真实ToolManager/middleware+HTTP边界mock），更广Workflow/子任务矩阵运行中。算法待补显式receipt标志，禁止把无内容回执当空文件读取。
+- 全Core `go test ./...` 首次失败在common的2个错误目录合同：本轮新错误文字没有复用catalog。已定位为本次回归并复用既有store/conflict消息，待重跑。其余包包括chat/subagent/workflow已通过该次运行。不是环境RED。
+- 未提交/推送；无Redis服务实测、真实模型同轮闭环或Local/打包Desktop平台验收。下一步完成剩余Review和统一测试重跑，再记录最终兼容边界与准确diff。
+
+## 2026-09-09 R3–R7 最终生产/自动化结果
+
+用户已确认整体范围并要求算法尽量少增加。已按连续生产→统一测试完成本轮实现及已发现缺陷修复，尚未提交/推送。下列结果替代前面“等待整体Review/未执行本轮测试”的历史快照；不代表实机验收或旧版全部工具完全等价。
+
+### 实际范围与代码量
+
+| 范围 | 生产文件 | 新增 | 删除 | 净增 |
+|---|---:|---:|---:|---:|
+| Backend | 14 | 1304 | 400 | 904 |
+| Frontend | 4 | 141 | 6 | 135 |
+| Algorithm | 10 | 462 | 150 | 312 |
+| 总计 | 28 | 1907 | 556 | 1351 |
+
+0 新生产文件/服务/依赖/数据库表；预算900–1400内。算法身份传递本身净增20行，其余主要是实际工具派发、批准等待/句柄、Core转发和防止普通数据源/内部产物旁路的兼容校验。整个授权阶段相对7e04900e累计净增2301行，非本轮单独新增。
+
+- 复用现有ToolManager dispatch_selector、ToolConfig、真实实例索引、Core HTTP client；不改LazyLLM/不开trusted/不动态打补丁。真实调用nonce+索引+provider摘要，Core请求加不可变发起时间，记录到期后旧句柄不能重新授权。
+- Core保持业务权威；主/普通子/Workflow身份与lease复核，grant/binding/运行状态使用既有行锁协调；文件提交前再复核期限和资格。既有槽位SetNX限制16未完成请求，回执24h且无内容，失败未知不重放。
+- 文件操作包含读取、新建、覆盖、精确修改、追加、单文件删除、mkdir、ls/glob/grep/info；Core授权后读内容，敏感grep显式跳过。使用打开目录句柄身份、拒绝链接/别名、20MiB文本限制、保留文件权限、无覆盖create、精确计数及CRLF规范化；**不宣称对外部编辑器提供原子CAS**。
+- 旧提示词ask_user权限分支/子任务只能转述已由真实批准通路替代。前端批准≠完成，支持刷新、切会话、隐藏/卸载、uncertain与Core回执。
+
+### 验证结果与限制
+
+| 检查 | 本次结果 |
+|---|---|
+| Core `go test ./... -count=1` | 83包通过，5包无测试，退出0 |
+| Core `go vet ./...` | 通过 |
+| Core `go test -race ./localworkspace -count=1 -json` | 69叶子用例通过、0失败 |
+| 主/子/Workflow身份及交错race矩阵 | chat/subagent/workflow通过 |
+| Windows amd64 / Linux amd64 `go build ./localworkspace` | 交叉编译通过；不是平台执行证据 |
+| 算法7文件标准pytest矩阵 | 最终129通过；13个既有HTTPX弃用警告 |
+| Workflow remote executor既有20项 | 临时协程适配下20通过；标准pytest因缺pytest-asyncio有17环境失败，未改依赖 |
+| 前端6文件Vitest | 68/68通过 |
+| 修改前端文件ESLint、定向tsc、生产构建 | 通过；保留原资源/dynamic import/chunk等警告 |
+| 全前端tsc | 未通过，662行诊断在未修改文件；修改文件零诊断，未顺手修复 |
+| 冻结检查 | local/desktop对ec4676e0无差异，LazyLLM/gitlink对245bc26d无差异且子模块干净 |
+
+首次全Core的catalog失败是本次新错误文字回归，已复用既有错误并重跑通过；新增测试fixture签名/时间戳/对话框选择器引起的运行异常已纠正。旧filepath.Rel/os.Rename字面合同删除1项9行，保留并增强真实路径/版本/磁盘/并发测试。未把旧历史通过数算作本次通过。
+
+未验证：真实模型同轮读建改追加删、浏览器+真实Core登录批准联调、Redis/PostgreSQL跨进程并发、Local与打包Desktop实机、Windows/Linux实际文件执行和任意外部并发编辑。测试边界包括Core真实SQLite/磁盘及算法真实manager+HTTP mock，不能替代以上验收。
+
+### 仍然明确受限的工具兼容性
+
+下列工具只在绑定工作区的运行中拒绝，普通未绑定任务保持原行为。原因是现有工具存在尚未证明受控的宿主路径/额外副作用，**不是宣称这些工具均不安全**：
+
+- Writer profile_resources、generate_draft_section(_markdown)、generate_draft_blocks(_markdown)、generate_draft_document_markdown；结构化generate_draft_document及已核查内部Writer方法已接入。
+- ExternalDatabaseToolkit三项数据库工具；vision_extractor/image_generator/image_editor/video_generator/video_to_gif。
+- vocab_learn、MemoryTools读写个性化；SkillManagementToolkit安装/编辑/删除；全部MailToolkit方法；schedule创建/读取/更新/触发；FeishuWikiFS/NotionFS/GoogleDriveFS供应商方法。
+- 未登记/未知自定义工具、绑定工作区的Workflow脚本包在加载前拒绝，不以trusted或同名内置回退绕过。
+
+已保留已核查检索工具、普通计算/编排、内部文本/JSON产物，以及task/upload范围内文件/图像产物；整批路径先按实际saver规范化后校验。混合普通源grep在打开文件前排除工作区，未绑定源继续原rg路径。不能把这些限制描述为旧版功能完全恢复。
+
+### 下一步
+
+最后独立Review已确认具体修复，本轮准备相关提交；保留以上兼容限制和实机待验收清单。如需恢复被拒绝的额外工具，应先按具体工具的路径与副作用核查方案，再由用户确认产品边界，不自动扩大本轮。
+
+最终实际生产文件（相对仓库根）：
+
+- `algorithm/lazymind/chat/api/subagent_routes.py`：+2/-0，净+2
+- `algorithm/lazymind/chat/engine/agent_runtime/executor.py`：+2/-0，净+2
+- `algorithm/lazymind/chat/engine/agent_runtime/models.py`：+1/-0，净+1
+- `algorithm/lazymind/chat/engine/agent_runtime/tool_call_guard.py`：+71/-31，净+40
+- `algorithm/lazymind/chat/engine/subagent/runner.py`：+11/-3，净+8
+- `algorithm/lazymind/chat/engine/tools/local_fs.py`：+215/-115，净+100
+- `algorithm/lazymind/chat/service/chat_request.py`：+1/-0，净+1
+- `algorithm/lazymind/chat/service/chat_service.py`：+4/-0，净+4
+- `algorithm/lazymind/chat/service/component/tool_registry.py`：+150/-1，净+149
+- `algorithm/lazymind/chat/workflow/remote_executor.py`：+5/-0，净+5
+- `backend/core/chat/chat.go`：+4/-0，净+4
+- `backend/core/chat/conversation_logic.go`：+48/-10，净+38
+- `backend/core/chat/redis_cache.go`：+7/-4，净+3
+- `backend/core/chat/run_decision.go`：+65/-15，净+50
+- `backend/core/localworkspace/approvals.go`：+134/-33，净+101
+- `backend/core/localworkspace/context.go`：+7/-13，净-6
+- `backend/core/localworkspace/directory_identity_unix.go`：+13/-0，净+13
+- `backend/core/localworkspace/directory_identity_windows.go`：+14/-0，净+14
+- `backend/core/localworkspace/lifecycle.go`：+124/-0，净+124
+- `backend/core/localworkspace/operations.go`：+707/-242，净+465
+- `backend/core/main.go`：+6/-0，净+6
+- `backend/core/routes.go`：+1/-0，净+1
+- `backend/core/subagent/runner.go`：+169/-83，净+86
+- `backend/core/workflow/store.go`：+5/-0，净+5
+- `frontend/src/i18n/locales/en-US.ts`：+11/-1，净+10
+- `frontend/src/i18n/locales/zh-CN.ts`：+11/-1，净+10
+- `frontend/src/modules/chat/components/ChatInput/LocalWorkspaceControl.tsx`：+94/-4，净+90
+- `frontend/src/modules/chat/utils/localWorkspace.ts`：+25/-0，净+25
+
+### 本次可复现命令（仓库根）
+
+```sh
+PYTHONPATH="$PWD/algorithm:$PWD/algorithm/lazyllm" .venv/bin/python -m pytest \
+  tests/algorithm/chat/test_local_fs_tool.py tests/algorithm/chat/test_tool_call_guard.py \
+  tests/algorithm/chat/test_agent_executor.py tests/algorithm/chat/test_tool_registry.py \
+  tests/algorithm/chat/test_core_api_client.py tests/algorithm/chat/test_workspace_authorization_contract.py \
+  tests/algorithm/chat/test_subagent_runner.py -q
+```
+
+当前环境没有pytest-asyncio；以下命令只为执行仓库既有协程测试，无新增仓库探针/依赖，不能假定其他机器存在历史临时文件：
+
+```sh
+PYTHONPATH="$PWD/algorithm:$PWD/algorithm/lazyllm" .venv/bin/python - <<'PYTEST'
+import asyncio
+import inspect
+import lazyllm
+import pytest
+lazyllm.LOG.info('workflow coroutine regression')
+class ExistingCoroutineTests:
+    def pytest_configure(self, config):
+        config.addinivalue_line('markers', 'asyncio: coroutine test run with asyncio.run')
+    @pytest.hookimpl(tryfirst=True)
+    def pytest_pyfunc_call(self, pyfuncitem):
+        if inspect.iscoroutinefunction(pyfuncitem.obj):
+            arguments = {name: pyfuncitem.funcargs[name]
+                         for name in inspect.signature(pyfuncitem.obj).parameters}
+            asyncio.run(pyfuncitem.obj(**arguments))
+            return True
+raise SystemExit(pytest.main(
+    ['algorithm/tests/chat/workflows/test_remote_executor.py', '-q', '--disable-warnings'],
+    plugins=[ExistingCoroutineTests()]))
+PYTEST
+```
+
+Core命令（backend/core工作目录）：
+
+```sh
+go test ./... -count=1
+go vet ./...
+go test -race ./localworkspace -count=1 -json
+go test -race ./chat ./subagent ./workflow -run '^Test(Workspace(Main|Workflow|Subagent)|DismissSessionWaitsForWorkspace)' -count=1
+GOOS=windows GOARCH=amd64 go build ./localworkspace
+GOOS=linux GOARCH=amd64 go build ./localworkspace
+```
+
+前端命令（frontend工作目录）：
+
+```sh
+NODE_OPTIONS=--no-experimental-webstorage pnpm exec vitest run \
+ src/modules/chat/components/ChatInput/LocalWorkspaceControl.test.tsx \
+ src/modules/chat/components/ChatInput/LocalWorkspace.contract.test.ts \
+ src/modules/chat/components/ChatInput/index.test.tsx \
+ src/modules/chat/utils/localWorkspace.test.ts \
+ src/modules/chat/components/AskCard/index.test.tsx src/runtime/desktopBridge.test.ts
+pnpm exec tsc -p tsconfig.mcp.json --noEmit
+NODE_OPTIONS=--no-experimental-webstorage pnpm run build
+```
+
+最终独立Review：此前三个具体问题（混合源grep先读后过滤、产物路径空白规范化、递归glob）修复并回看通过；Core句柄/时效/回执/提交校验专项无critical/important发现。该Review范围不表示上方限制的工具或真实平台已验收。
+
+提交前最后验收对照：Core补充Workflow固定版本compiled_graph当前step必须声明local_fs，未声明/无版本则拒绝；新增真实版本fixture和未声明拒绝合同通过。该增量纳入上表，仍无新生产文件；执行时的Python声明检查不再是唯一约束。
+
+最终提交检查（2026-09-09）：Workflow声明校验独立Review无新增问题；全Core83包/5无测试与全vet最新重跑通过；根agent再次执行算法标准129项与前端六文件68项通过，diff检查/冻结检查通过。最终生产28文件+1907/-556净1351（算法312）；所有变更均本功能相关。提交后继续保留实机与兼容限制，不把本批提交称为完整产品验收。

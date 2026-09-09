@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import time
 
 import pytest
 from lazyllm.tools.agent import ToolExecutionError
@@ -202,6 +203,7 @@ def _set_bound_workspace(monkeypatch, root, workspace_id='workspace-1'):
         'agentic_config': {
             'user_id': 'user-1',
             'conversation_id': 'conversation-1',
+            '_workspace_execution': {'history_id': 'history-1', 'run_id': 'run-1'},
             'workspace_context': {
                 'workspace_id': workspace_id,
                 'permission_mode': 'allow_all',
@@ -210,6 +212,14 @@ def _set_bound_workspace(monkeypatch, root, workspace_id='workspace-1'):
             'local_fs_sources': [_source(f'local-workspace:{workspace_id}', [root], ['txt', 'md'])],
         },
     })
+
+
+def _prepared_workspace_call(toolkit, method, arguments, versions=None, identity=None):
+    return toolkit.execute_workspace_call(
+        method, arguments, call_id='prepared-call', tool_name='LocalFileToolkit_' + method,
+        identity=identity or {'history_id': 'history-1', 'run_id': 'run-1'},
+        cancel_check=None, versions=versions if versions is not None else {},
+    )
 
 
 def test_bound_workspace_read_delegates_to_core_without_local_fallback(monkeypatch, tmp_path):
@@ -224,30 +234,32 @@ def test_bound_workspace_read_delegates_to_core_without_local_fallback(monkeypat
         calls.append((path, payload))
         if path.endswith('workspace-operations:prepare'):
             return {'response': {'code': 0, 'data': {
-                'operation_id': 'operation-1', 'decision': 'allowed',
+                'operation_id': 'operation-1', 'decision': 'allowed', 'status': 'allowed',
                 'version': 'v0', 'path': 'notes.txt',
             }}}
         return {'response': {'code': 0, 'data': {
-            'operation_id': 'operation-1', 'content': 'core-content',
+            'operation_id': 'operation-1', 'content': 'core-content', 'status': 'completed',
             'version': 'v1', 'path': 'notes.txt',
         }}}
 
     monkeypatch.setattr(local_fs_mod, 'post_core_api', fake_post, raising=False)
 
-    result = LocalFileToolkit().read(str(target))
+    monkeypatch.setattr(local_fs_mod.os.path, 'realpath', lambda *_: pytest.fail('workspace resolved in Python'))
+    result = _prepared_workspace_call(LocalFileToolkit(), 'read', {'filepath': str(target)})
 
     assert result['content'] == 'core-content'
     assert len(calls) == 2
     assert calls[0][0].endswith('workspace-operations:prepare')
     assert calls[1][0].endswith('workspace-operations/operation-1:execute')
     assert calls[0][1]['operation'] == 'read'
-    assert calls[0][1]['call_id'].startswith('local-fs-')
+    assert calls[0][1]['call_id'].split('/', 1)[1] == 'prepared-call:1'
+    assert abs(int(calls[0][1]['call_id'].split('/', 1)[0]) - int(time.time() * 1000)) < 1000
     assert calls[0][1]['call_id'] == calls[1][1]['call_id']
     assert calls[0][1]['path'] == 'notes.txt'
 
 
 def test_bound_workspace_exposes_create_append_and_delete_operations():
-    assert {'create', 'append', 'delete'} <= set(LocalFileToolkit.__public_apis__)
+    assert {'create', 'overwrite', 'append', 'delete', 'mkdir'} <= set(LocalFileToolkit.__public_apis__)
 
 
 def test_bound_workspace_pending_approval_does_not_touch_local_file(monkeypatch, tmp_path):
@@ -257,18 +269,20 @@ def test_bound_workspace_pending_approval_does_not_touch_local_file(monkeypatch,
     target.write_text('local-secret', encoding='utf-8')
     _set_bound_workspace(monkeypatch, root)
 
+    requests = []
     def fake_post(path, payload):
+        requests.append((path, payload))
         assert path.endswith('workspace-operations:prepare')
         return {'response': {'code': 0, 'data': {
-            'operation_id': 'pending-1', 'decision': 'pending', 'path': 'notes.txt',
+            'operation_id': 'pending-1', 'decision': 'pending', 'status': 'pending',
+            'expires_at': int(time.time() * 1000) - 1, 'path': 'notes.txt',
         }}}
 
-    monkeypatch.setattr(local_fs_mod, 'post_core_api', fake_post, raising=False)
-
-    with pytest.raises(ToolExecutionError, match='operation_id=pending-1') as exc_info:
-        LocalFileToolkit().append(str(target), '\nnew')
-
-    assert exc_info.value.needs_approval is True
+    monkeypatch.setattr(local_fs_mod, 'post_core_api', fake_post)
+    with pytest.raises(ToolExecutionError, match='expired'):
+        _prepared_workspace_call(LocalFileToolkit(), 'append',
+                                 {'filepath': str(target), 'content': '\nnew', 'expected_version': 'observed'})
+    assert len(requests) == 1
     assert target.read_text(encoding='utf-8') == 'local-secret'
 
 
@@ -282,22 +296,162 @@ def test_bound_workspace_mutation_requests_use_core_operations(monkeypatch, tmp_
         calls.append((path, payload.copy()))
         if path.endswith(':prepare'):
             return {'response': {'code': 0, 'data': {
-                'operation_id': f"op-{len(calls)}", 'decision': 'allowed', 'path': payload['path'],
+                'operation_id': f"op-{len(calls)}", 'decision': 'allowed', 'status': 'allowed', 'path': payload['path'],
             }}}
         return {'response': {'code': 0, 'data': {
             'operation_id': path.split('/')[-1].split(':')[0], 'path': payload['path'],
-            'version': f"v-{len(calls)}", 'content': payload.get('content', ''),
+            'version': f"v-{len(calls)}", 'content': payload.get('content', ''), 'status': 'completed',
         }}}
 
     monkeypatch.setattr(local_fs_mod, 'post_core_api', fake_post, raising=False)
     toolkit = LocalFileToolkit()
-    toolkit.create(str(root / 'new.txt'), 'one')
-    toolkit.append(str(root / 'new.txt'), 'two', expected_version='v-2')
-    toolkit.delete(str(root / 'new.txt'), expected_version='v-4')
+    versions = {}
+    _prepared_workspace_call(toolkit, 'create', {'filepath': 'new.txt', 'content': 'one'}, versions)
+    _prepared_workspace_call(toolkit, 'append', {'filepath': 'new.txt', 'content': 'two'}, versions)
+    _prepared_workspace_call(toolkit, 'delete', {'filepath': 'new.txt'}, versions)
 
     prepare_payloads = [payload for path, payload in calls if path.endswith(':prepare')]
     assert [payload['operation'] for payload in prepare_payloads] == [
         'create', 'append', 'delete',
     ]
-    assert all(payload['call_id'].startswith('local-fs-') for _, payload in calls)
+    assert [payload.get('expected_version') for payload in prepare_payloads] == [None, 'v-2', 'v-4']
+    assert versions == {}
     assert calls[0][1]['call_id'] == calls[1][1]['call_id']
+
+
+def test_workspace_mutation_without_observation_never_reads_latest(monkeypatch, tmp_path):
+    _set_bound_workspace(monkeypatch, tmp_path / 'only-on-core')
+    monkeypatch.setattr(local_fs_mod, 'post_core_api', lambda *_: pytest.fail('unobserved mutation contacted Core'))
+    with pytest.raises(ToolExecutionError, match='read the file'):
+        _prepared_workspace_call(LocalFileToolkit(), 'append', {'filepath': 'notes.txt', 'content': '+'})
+
+
+def test_workspace_mixed_discovery_keeps_ordinary_sources_and_core_filter(monkeypatch, tmp_path):
+    workspace = tmp_path / 'only-on-core'
+    ordinary = tmp_path / 'ordinary'
+    ordinary.mkdir()
+    (ordinary / 'local.txt').write_text('needle ordinary', encoding='utf-8')
+    _set_bound_workspace(monkeypatch, workspace)
+    local_fs_mod.lazyllm.globals['agentic_config']['local_fs_sources'].append(_source('ordinary', [ordinary], ['txt']))
+    calls = []
+    def post(path, payload):
+        calls.append((path, payload.copy()))
+        if path.endswith(':prepare'):
+            return {'operation_id': 'op', 'decision': 'allowed', 'status': 'allowed'}
+        return {'operation_id': 'op', 'status': 'completed', 'data': {
+            'matches': [{'file': 'core.txt', 'path': 'core.txt', 'line': 1, 'content': 'needle core'}],
+            'skipped': [{'path': '.env', 'reason': 'approval_required'}],
+        }}
+    monkeypatch.setattr(local_fs_mod, 'post_core_api', post)
+    monkeypatch.setattr(LocalFileToolkit, '_has_rg', staticmethod(lambda: False))
+    result = _prepared_workspace_call(LocalFileToolkit(), 'grep', {'pattern': 'needle', 'glob': '*.txt'})
+    assert result['match_count'] == 2
+    assert {match['source_id'] for match in result['matches']} == {'local-workspace:workspace-1', 'ordinary'}
+    assert calls[0][1]['glob'] == '*.txt'
+    assert result['skipped'] == [{'path': '.env', 'reason': 'approval_required'}]
+    assert not workspace.exists()
+
+
+@pytest.mark.parametrize('method, arguments', [('ls', {'path': '/only-on-core'}), ('glob', {'pattern': '*.txt'}),
+                                                ('grep', {'pattern': 'needle'}), ('info', {'path': '/only-on-core'})])
+def test_workspace_discovery_never_reads_python_files(monkeypatch, method, arguments):
+    _set_bound_workspace(monkeypatch, '/only-on-core')
+    def post(path, payload):
+        if path.endswith(':prepare'):
+            return {'operation_id': 'op', 'decision': 'allowed', 'status': 'allowed'}
+        return {'operation_id': 'op', 'status': 'completed', 'data': {'entries': [], 'matches': [], 'path': '.'}}
+    monkeypatch.setattr(local_fs_mod, 'post_core_api', post)
+    with monkeypatch.context() as io:
+        for name in ('realpath', 'isfile', 'isdir'):
+            io.setattr(local_fs_mod.os.path, name, lambda *_: pytest.fail('workspace Python file access'))
+        io.setattr(local_fs_mod.os, 'stat', lambda *_: pytest.fail('workspace Python stat'))
+        result = _prepared_workspace_call(LocalFileToolkit(), method, arguments)
+    assert isinstance(result, dict)
+
+
+def test_mixed_ordinary_source_alias_does_not_read_workspace(monkeypatch, tmp_path):
+    workspace, ordinary = tmp_path / 'workspace', tmp_path / 'ordinary'
+    workspace.mkdir()
+    ordinary.mkdir()
+    (workspace / 'secret.txt').write_text('needle secret', encoding='utf-8')
+    (ordinary / 'alias.txt').symlink_to(workspace / 'secret.txt')
+    _set_bound_workspace(monkeypatch, workspace)
+    local_fs_mod.lazyllm.globals['agentic_config']['local_fs_sources'].append(_source('ordinary', [ordinary], ['txt']))
+    def post(path, payload):
+        if path.endswith(':prepare'):
+            return {'operation_id': 'op', 'decision': 'allowed', 'status': 'allowed'}
+        return {'operation_id': 'op', 'status': 'completed', 'data': {'matches': []}}
+    monkeypatch.setattr(local_fs_mod, 'post_core_api', post)
+    monkeypatch.setattr(LocalFileToolkit, '_has_rg', staticmethod(lambda: False))
+    result = _prepared_workspace_call(LocalFileToolkit(), 'grep', {'pattern': 'needle'})
+    assert result['matches'] == []
+
+
+def test_completed_read_receipt_is_not_reported_as_empty_file(monkeypatch, tmp_path):
+    _set_bound_workspace(monkeypatch, tmp_path / 'only-on-core')
+    def post(path, payload):
+        return {'operation_id': 'op', 'decision': 'allowed',
+                'status': 'allowed' if path.endswith(':prepare') else 'completed',
+                'receipt': not path.endswith(':prepare'), 'version': 'v1'}
+    monkeypatch.setattr(local_fs_mod, 'post_core_api', post)
+    with pytest.raises(ToolExecutionError, match='not replayed'):
+        _prepared_workspace_call(LocalFileToolkit(), 'read', {'filepath': 'notes.txt'})
+
+
+def test_fresh_empty_read_with_allowed_decision_is_not_a_receipt(monkeypatch, tmp_path):
+    _set_bound_workspace(monkeypatch, tmp_path / 'only-on-core')
+    def post(path, payload):
+        return {'operation_id': 'op', 'decision': 'allowed',
+                'status': 'allowed' if path.endswith(':prepare') else 'completed', 'version': 'v1'}
+    monkeypatch.setattr(local_fs_mod, 'post_core_api', post)
+    result = _prepared_workspace_call(LocalFileToolkit(), 'read', {'filepath': 'empty.txt'})
+    assert result['content'] == '' and result['version'] == 'v1'
+
+
+def test_workspace_context_uses_private_core_snapshot(monkeypatch):
+    monkeypatch.setattr(local_fs_mod.lazyllm, 'globals', {'agentic_config': {
+        'user_id': 'u', 'conversation_id': 'c',
+        '_core_workspace_context': {'workspace_id': 'private', 'permission_mode': 'always_ask'},
+        'workspace_context': {'workspace_id': 'public', 'permission_mode': 'allow_all'},
+    }})
+    assert LocalFileToolkit._workspace_context()['workspace_id'] == 'private'
+    assert LocalFileToolkit._workspace_context()['permission_mode'] == 'always_ask'
+
+
+@pytest.mark.parametrize('count', [0, -1, 101, True])
+def test_workspace_replacement_count_rejected_before_core(monkeypatch, tmp_path, count):
+    _set_bound_workspace(monkeypatch, tmp_path / 'only-on-core')
+    monkeypatch.setattr(local_fs_mod, 'post_core_api', lambda *_: pytest.fail('invalid count consumed an operation'))
+    with pytest.raises(ToolExecutionError, match='between 1 and 100'):
+        _prepared_workspace_call(LocalFileToolkit(), 'string_replace', {
+            'filepath': 'notes.txt', 'old_string': 'old', 'new_string': 'new',
+            'expected_replacements': count, 'expected_version': 'observed',
+        })
+
+
+def test_mixed_parent_grep_prunes_controlled_subtree_before_open(monkeypatch, tmp_path):
+    import builtins
+    ordinary, workspace = tmp_path / 'ordinary', tmp_path / 'ordinary' / 'workspace'
+    workspace.mkdir(parents=True)
+    secret = workspace / '.env'
+    secret.write_text('needle secret', encoding='utf-8')
+    (ordinary / 'visible.txt').write_text('needle public', encoding='utf-8')
+    _set_bound_workspace(monkeypatch, workspace)
+    local_fs_mod.lazyllm.globals['agentic_config']['local_fs_sources'].append(_source('ordinary', [ordinary], ['txt', 'env']))
+    def post(path, payload):
+        if path.endswith(':prepare'):
+            return {'operation_id': 'op', 'decision': 'allowed', 'status': 'allowed'}
+        return {'operation_id': 'op', 'status': 'completed', 'data': {'matches': []}}
+    monkeypatch.setattr(local_fs_mod, 'post_core_api', post)
+    monkeypatch.setattr(LocalFileToolkit, '_has_rg', staticmethod(lambda: True))
+    monkeypatch.setattr(LocalFileToolkit, '_run_rg', staticmethod(lambda *_: pytest.fail('rg searched controlled subtree')))
+    original = builtins.open
+    opened = []
+    def guarded(path, *args, **kwargs):
+        opened.append(str(path))
+        assert str(workspace) not in str(path)
+        return original(path, *args, **kwargs)
+    monkeypatch.setattr(builtins, 'open', guarded)
+    result = _prepared_workspace_call(LocalFileToolkit(), 'grep', {'pattern': 'needle'})
+    assert [match['content'] for match in result['matches']] == ['needle public']
+    assert str(secret) not in opened

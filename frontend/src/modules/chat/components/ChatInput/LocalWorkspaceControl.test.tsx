@@ -17,9 +17,10 @@ import {
   it,
   vi,
 } from "vitest";
-import { Modal } from "antd";
+import { Modal, message } from "antd";
+import { axiosInstance } from "@/components/request";
 
-import type { LocalWorkspaceView } from "@/modules/chat/utils/localWorkspace";
+import type { LocalWorkspaceView, WorkspaceApproval } from "@/modules/chat/utils/localWorkspace";
 import LocalWorkspaceControl from "./LocalWorkspaceControl";
 
 const mocks = vi.hoisted(() => ({
@@ -37,7 +38,10 @@ vi.mock("@/runtime/mode", () => ({
   getRuntimeMode: mocks.getRuntimeMode,
 }));
 
-vi.mock("@/modules/chat/utils/localWorkspace", () => ({
+vi.mock("@/components/request", () => ({ BASE_URL: "", axiosInstance: { get: vi.fn(), post: vi.fn(), put: vi.fn() } }));
+
+vi.mock("@/modules/chat/utils/localWorkspace", async () => ({
+  ...await vi.importActual<typeof import("@/modules/chat/utils/localWorkspace")>("@/modules/chat/utils/localWorkspace"),
   authorizeWorkspace: mocks.authorizeWorkspace,
   getConversationWorkspace: mocks.getConversationWorkspace,
   listWorkspaces: mocks.listWorkspaces,
@@ -45,7 +49,6 @@ vi.mock("@/modules/chat/utils/localWorkspace", () => ({
   revokeWorkspace: mocks.revokeWorkspace,
   selectWorkspaceCandidate: mocks.selectWorkspaceCandidate,
   updateWorkspacePermission: mocks.updateWorkspacePermission,
-  workspaceReason: () => "workspace_error",
 }));
 
 vi.mock("react-i18next", () => ({
@@ -106,7 +109,7 @@ async function findConfirmDialog(title: string) {
   const confirmTitle = titles.find((item) =>
     item.classList.contains("ant-modal-confirm-title"),
   );
-  const dialog = confirmTitle?.closest("[role=dialog]");
+  const dialog = confirmTitle?.closest<HTMLElement>("[role=dialog]");
   if (!dialog) throw new Error(`${title} dialog missing`);
   return dialog;
 }
@@ -120,6 +123,9 @@ describe("LocalWorkspaceControl task binding and request lifetime", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+    vi.mocked(axiosInstance.get).mockReset().mockResolvedValue({ data: { data: { items: [] } } });
+    vi.mocked(axiosInstance.post).mockReset().mockResolvedValue({ data: { data: { status: "allowed" } } });
     mocks.getRuntimeMode.mockReturnValue("local");
     mocks.listWorkspaces.mockResolvedValue([]);
     mocks.getConversationWorkspace.mockResolvedValue(undefined);
@@ -135,6 +141,7 @@ describe("LocalWorkspaceControl task binding and request lifetime", () => {
   afterEach(() => {
     Modal.destroyAll();
     cleanup();
+    vi.useRealTimers();
   });
   afterAll(() => vi.restoreAllMocks());
 
@@ -498,4 +505,163 @@ describe("LocalWorkspaceControl task binding and request lifetime", () => {
     await waitFor(() => expect(mocks.authorizeWorkspace).toHaveBeenCalledWith("local", "renew"));
     expect(onChange).not.toHaveBeenCalled();
   });
+
+  const approval = (status: WorkspaceApproval["status"] = "pending"): WorkspaceApproval => ({
+    operation_id: "operation-1", path: "notes/draft.txt", operation: "replace", tool_name: "string_replace",
+    task_id: "task-1", version: "observed-version", content_digest: "input-digest", status, expires_at: Date.now() + 300_000,
+  });
+  const respond = (items: WorkspaceApproval[]) => ({ data: { data: { items } } });
+  const openRequests = async () => {
+    mocks.getConversationWorkspace.mockResolvedValue(alpha);
+    const view = render(<LocalWorkspaceControl conversationId="conv-alpha" onChange={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "chat.workspace.approval.open" }));
+    expect(await screen.findByText("chat.workspace.approval.title")).toBeInTheDocument();
+    return view;
+  };
+  const refreshRequests = async () => act(async () => { fireEvent(document, new Event("visibilitychange")); });
+
+  it("continues one pending request through Core approval, execution and completion", async () => {
+    let items = [approval()];
+    vi.mocked(axiosInstance.get).mockImplementation(async () => respond(items));
+    await openRequests();
+    expect(await screen.findByText("notes/draft.txt")).toBeInTheDocument();
+    expect(screen.getByText(/chat.workspace.approval.source.subagent/)).toHaveTextContent("task-1");
+    expect(screen.getByText(/observed-version/)).toBeInTheDocument();
+    expect(screen.getByText(/input-digest/)).toBeInTheDocument();
+    items = [approval("allowed")];
+    fireEvent.click(screen.getByRole("button", { name: "chat.workspace.approval.allowOnce" }));
+    expect(await screen.findByText("chat.workspace.approval.status.allowed")).toBeInTheDocument();
+    expect(axiosInstance.post).toHaveBeenCalledWith(
+      "/api/core/conversations/conv-alpha/workspace-approvals/operation-1:decide", { action: "allow_once" },
+    );
+    expect(screen.queryByText("chat.workspace.approval.status.completed")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "chat.workspace.approval.allowOnce" })).not.toBeInTheDocument();
+    items = [approval("executing")];
+    await refreshRequests();
+    expect(screen.getByText("chat.workspace.approval.status.executing")).toBeInTheDocument();
+    items = [approval("completed")];
+    await refreshRequests();
+    expect(screen.getByText("chat.workspace.approval.status.completed")).toBeInTheDocument();
+  });
+
+  it("shows a rejected decision without treating it as execution", async () => {
+    let items = [approval()];
+    vi.mocked(axiosInstance.get).mockImplementation(async () => respond(items));
+    vi.mocked(axiosInstance.post).mockImplementation(async () => {
+      items = [approval("rejected")];
+      return { data: { data: { status: "rejected" } } };
+    });
+    await openRequests();
+    fireEvent.click(await screen.findByRole("button", { name: "chat.workspace.approval.reject" }));
+    expect(await screen.findByText("chat.workspace.approval.status.rejected")).toBeInTheDocument();
+    expect(axiosInstance.post).toHaveBeenCalledWith(
+      "/api/core/conversations/conv-alpha/workspace-approvals/operation-1:decide", { action: "reject" },
+    );
+    expect(screen.queryByRole("button", { name: "chat.workspace.approval.allowOnce" })).not.toBeInTheDocument();
+    expect(screen.queryByText("chat.workspace.approval.status.completed")).not.toBeInTheDocument();
+  });
+
+  it("shows a Core decision error and refreshes the authoritative expired status", async () => {
+    let items = [approval()];
+    vi.mocked(axiosInstance.get).mockImplementation(async () => respond(items));
+    vi.mocked(axiosInstance.post).mockImplementation(async () => {
+      items = [approval("expired")];
+      throw { response: { data: { detail: { reason: "execution_inactive" } } } };
+    });
+    await openRequests();
+    fireEvent.click(await screen.findByRole("button", { name: "chat.workspace.approval.allowOnce" }));
+    expect(await screen.findByText("chat.workspace.approval.status.expired")).toBeInTheDocument();
+    expect(message.error).toHaveBeenCalledWith(expect.stringContaining("chat.workspace.reason.execution_inactive"));
+    expect(screen.queryByText("chat.workspace.approval.status.allowed")).not.toBeInTheDocument();
+  });
+
+  it.each(["approval_capacity", "operation_uncertain", "execution_inactive", "unsupported_file", "search_limit"])(
+    "disables stale decisions and shows Core reason %s when refresh fails", async (reason) => {
+      vi.mocked(axiosInstance.get).mockResolvedValue(respond([approval()]));
+      await openRequests();
+      expect(await screen.findByRole("button", { name: "chat.workspace.approval.allowOnce" })).toBeEnabled();
+      vi.mocked(axiosInstance.get).mockRejectedValue({ response: { data: { data: { detail: { reason } } } } });
+      await refreshRequests();
+      expect(screen.getByRole("alert")).toHaveTextContent(`chat.workspace.reason.${reason}`);
+      expect(screen.getByRole("button", { name: "chat.workspace.approval.allowOnce" })).toBeDisabled();
+      expect(axiosInstance.post).not.toHaveBeenCalled();
+    },
+  );
+
+  it("renders preparing and unknown-result states without approval actions", async () => {
+    vi.mocked(axiosInstance.get).mockResolvedValue(respond([
+      approval("preparing"), { ...approval("uncertain"), operation_id: "operation-2", task_id: "", attempt_id: "attempt-2", reason: "operation_uncertain" },
+    ]));
+    await openRequests();
+    expect(await screen.findByText("chat.workspace.approval.status.preparing")).toBeInTheDocument();
+    expect(screen.getByText("chat.workspace.approval.status.uncertain")).toBeInTheDocument();
+    expect(screen.getByText("chat.workspace.approval.uncertain")).toBeInTheDocument();
+    expect(screen.getByText(/chat.workspace.approval.source.workflow/)).toHaveTextContent("attempt-2");
+    expect(screen.queryByRole("button", { name: "chat.workspace.approval.allowOnce" })).not.toBeInTheDocument();
+  });
+
+  it("clears busy decisions and discards old list and decision responses after switching conversations", async () => {
+    const oldList = deferred<ReturnType<typeof respond>>();
+    const oldDecision = deferred<{ data: { data: { status: string } } }>();
+    const betaItem = { ...approval(), operation_id: "beta-operation", path: "beta.txt" };
+    vi.mocked(axiosInstance.get).mockImplementation(async (url) => respond(String(url).includes("conv-beta") ? [betaItem] : [approval()]));
+    vi.mocked(axiosInstance.post).mockReturnValueOnce(oldDecision.promise);
+    const view = await openRequests();
+    mocks.getConversationWorkspace.mockImplementation(async (id) => id === "conv-beta" ? beta : alpha);
+    fireEvent.click(await screen.findByRole("button", { name: "chat.workspace.approval.allowOnce" }));
+    vi.mocked(axiosInstance.get).mockReturnValueOnce(oldList.promise);
+    await refreshRequests();
+    view.rerender(<LocalWorkspaceControl conversationId="conv-beta" onChange={vi.fn()} />);
+    expect(await screen.findByText(beta.path)).toBeInTheDocument();
+    await act(async () => {
+      oldList.resolve(respond([approval("completed")]));
+      oldDecision.resolve({ data: { data: { status: "allowed" } } });
+    });
+    fireEvent.click(screen.getByRole("button", { name: "chat.workspace.approval.open" }));
+    expect(await screen.findByText("beta.txt")).toBeInTheDocument();
+    expect(screen.queryByText("notes/draft.txt")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "chat.workspace.approval.allowOnce" })).toBeEnabled();
+    expect(screen.queryByText("chat.workspace.approval.status.completed")).not.toBeInTheDocument();
+  });
+
+  it("stops polling and ignores hidden or unmounted replies, then refetches when visible", async () => {
+    vi.mocked(axiosInstance.get).mockResolvedValue(respond([approval()]));
+    const view = await openRequests();
+    expect(await screen.findByText("notes/draft.txt")).toBeInTheDocument();
+    vi.useFakeTimers();
+    const hiddenResponse = deferred<ReturnType<typeof respond>>();
+    vi.mocked(axiosInstance.get).mockReturnValueOnce(hiddenResponse.promise);
+    await refreshRequests();
+    const signal = vi.mocked(axiosInstance.get).mock.calls.slice(-1)[0]?.[1]?.signal;
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
+    await refreshRequests();
+    expect(signal?.aborted).toBe(true);
+    const callsWhenHidden = vi.mocked(axiosInstance.get).mock.calls.length;
+    await act(async () => {
+      hiddenResponse.resolve(respond([approval("completed")]));
+      await vi.advanceTimersByTimeAsync(3000);
+    });
+    expect(axiosInstance.get).toHaveBeenCalledTimes(callsWhenHidden);
+    expect(screen.queryByText("chat.workspace.approval.status.completed")).not.toBeInTheDocument();
+    vi.mocked(axiosInstance.get).mockResolvedValue(respond([approval("allowed")]));
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+    await refreshRequests();
+    expect(screen.getByText("chat.workspace.approval.status.allowed")).toBeInTheDocument();
+    vi.mocked(axiosInstance.get).mockResolvedValue(respond([approval("executing")]));
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(screen.getByText("chat.workspace.approval.status.executing")).toBeInTheDocument();
+    const unmountedResponse = deferred<ReturnType<typeof respond>>();
+    vi.mocked(axiosInstance.get).mockReturnValueOnce(unmountedResponse.promise);
+    await refreshRequests();
+    const lastSignal = vi.mocked(axiosInstance.get).mock.calls.slice(-1)[0]?.[1]?.signal;
+    view.unmount();
+    expect(lastSignal?.aborted).toBe(true);
+    const callsAtUnmount = vi.mocked(axiosInstance.get).mock.calls.length;
+    await act(async () => {
+      unmountedResponse.resolve(respond([approval("completed")]));
+      await vi.advanceTimersByTimeAsync(3000);
+    });
+    expect(axiosInstance.get).toHaveBeenCalledTimes(callsAtUnmount);
+  });
+
 });

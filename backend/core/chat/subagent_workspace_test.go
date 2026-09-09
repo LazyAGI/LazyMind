@@ -72,7 +72,7 @@ func TestSubagentCreateAndResumePersistAuthoritativeWorkspaceParams(t *testing.T
 		t.Fatal(err)
 	}
 	instruction = params["runtime_instruction"].(string)
-	if strings.Contains(instruction, "attacker") || strings.Count(instruction, "本任务的用户已在界面选择") != 1 || !strings.Contains(instruction, "allow_all") {
+	if strings.Contains(instruction, "attacker") || strings.Count(instruction, "本任务的工作区：") != 1 || !strings.Contains(instruction, "allow_all") {
 		t.Fatalf("resume params=%v", params)
 	}
 	if _, err := handleTaskCreated(t.Context(), db.DB, stateStore, "work", "history", "other", event, nil, nil, "dynamic"); err == nil {

@@ -28,6 +28,7 @@ async def run_subagent(
     resume: Annotated[Optional[bool], Body(description='Resume from persisted steps when true')] = False,
     llm_config: Annotated[Optional[Dict[str, Any]], Body(description='Per-request model config')] = None,
     tool_config: Annotated[Optional[Dict[str, Any]], Body(description='Per-request tool credentials (API keys)')] = None,
+    workspace_execution: Annotated[Optional[Dict[str, Any]], Body(description='Core private execution identity')] = None,
 ):
     from lazymind.chat.engine.subagent.runner import run_subagent_stream
 
@@ -40,6 +41,7 @@ async def run_subagent(
             tool_config=tool_config,
             agent_type=agent_type,
             tools=tools,
+            workspace_execution=workspace_execution,
         ),
         media_type='text/event-stream',
     )

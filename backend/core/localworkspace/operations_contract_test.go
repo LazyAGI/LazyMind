@@ -24,12 +24,3 @@ func TestWorkspaceOperationsExposeCoreFileActions(t *testing.T) {
 		}
 	}
 }
-
-func TestWorkspaceOperationsValidatePathAndVersionBeforeMutation(t *testing.T) {
-	source := readWorkspaceSource(t, "operations.go")
-	for _, guard := range []string{"filepath.Rel", "ResolveForConversation", "ExpectedVersion", "ModeSymlink", ".git", "os.Rename"} {
-		if !strings.Contains(source, guard) {
-			t.Errorf("operations.go is missing required mutation guard %q", guard)
-		}
-	}
-}

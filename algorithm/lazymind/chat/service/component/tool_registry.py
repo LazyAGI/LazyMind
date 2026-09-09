@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import inspect
+import json
+import os
 import re
 from dataclasses import dataclass
 from typing import Any, Callable, Literal
@@ -763,7 +765,8 @@ DEFAULT_TOOLS: list[ToolConfig] = [
         description_en='Glob, grep, read, and perform exact text replacements within configured local paths.',
         authorization={
             'ls': 'read', 'glob': 'read', 'grep': 'read', 'read': 'read', 'info': 'read',
-            'string_replace': 'write', 'create': 'write', 'append': 'write', 'delete': 'delete',
+            'string_replace': 'write', 'create': 'write', 'overwrite': 'write', 'append': 'write',
+            'mkdir': 'write', 'delete': 'delete',
         },
     ),
     ToolConfig(
@@ -862,6 +865,152 @@ def _registration_key_source(tool: Any) -> Callable[[], Any] | None:
     if isinstance(tool, tuple) and len(tool) == 2 and callable(tool[1]):
         return tool[1]
     return None
+
+
+def _workspace_writer_arguments(arguments: dict[str, Any]) -> bool:
+    if arguments.get('sync_provider') or arguments.get('media_assets_json'):
+        return False
+    def safe_ids(value: Any) -> bool:
+        if isinstance(value, dict):
+            return all((not key.endswith('_id') or not isinstance(item, str)
+                        or (item not in {'.', '..'} and not any(part in item for part in ('/', '\\', '\0'))))
+                       and safe_ids(item) for key, item in value.items())
+        return not isinstance(value, list) or all(safe_ids(item) for item in value)
+    for key, value in arguments.items():
+        if key.endswith('_json') and value:
+            try:
+                decoded = json.loads(value)
+            except ValueError:
+                continue  # Writer's existing schema/Markdown parser reports invalid input.
+            if not safe_ids(decoded):
+                return False
+            if key == 'draft_blocks_json' and (not isinstance(decoded, list)
+                                               or not all(isinstance(item, dict) for item in decoded)):
+                return False
+    return safe_ids(arguments)
+
+
+def _workspace_artifact_arguments(arguments: dict[str, Any]) -> bool:
+    from urllib.parse import urlsplit
+    from lazymind.chat.engine.subagent.context import get_context
+    from lazymind.chat.service.utils.static_file_url import file_relative_path, local_path_from_static_file_url
+    context = get_context()
+    task_root = os.path.realpath(context.workspace_path) if context and context.workspace_path else ''
+    controlled = [root for scope in LocalFileToolkit()._get_scopes()
+                  if LocalFileToolkit._workspace_scope(scope) for root in scope.roots]
+    def scoped(path: str) -> bool:
+        resolved = os.path.realpath(path)
+        try:
+            return not any(os.path.commonpath([os.path.abspath(root), resolved]) == os.path.abspath(root)
+                           for root in controlled) and bool(
+                (task_root and os.path.commonpath([task_root, resolved]) == task_root)
+                or file_relative_path(resolved))
+        except ValueError:
+            return False
+    for item in arguments.get('artifacts', []):
+        kind, value = item.get('content_type', 'text'), item.get('value')
+        if kind in {'text', 'json'}:
+            continue
+        values = value if kind == 'file_list' and isinstance(value, list) else [value]
+        for value in values:
+            path = str(value.get('path') or value.get('image_url') or value.get('url') or '') if isinstance(value, dict) else str(value or '')
+            path = path.strip()
+            if kind == 'image' and urlsplit(path).scheme in {'http', 'https'} and urlsplit(path).hostname:
+                continue  # Existing saver keeps remote references; it does not fetch them.
+            if kind == 'image' and path.startswith('/static-files/'):
+                if local_path_from_static_file_url(path) and file_relative_path(local_path_from_static_file_url(path)):
+                    continue
+                return False
+            if not path or not task_root and not os.path.isabs(path):
+                return False
+            source = path if os.path.isabs(path) else os.path.join(task_root, path)
+            if kind == 'image':
+                source = local_path_from_static_file_url(path) or source
+            if not scoped(source):
+                return False
+    return True
+
+
+def workspace_tool_metadata(tools_info: dict[str, Any], configs: list[ToolConfig] | None = None) -> dict[str, Any]:
+    """Index controlled methods and audited project callables by registered identity."""
+    import types
+    from lazyllm.common.registry import bind_to_instance
+    from lazyllm.tools.agent.toolsManager import ToolGroup
+    from lazymind.chat.engine.tools.local_file import workspace as artifacts
+    from lazymind.chat.engine.tools import subagent_chat_tools as tasks
+    from lazymind.chat.engine.subagent import tools as task_artifacts
+    from lazymind.chat.engine.tools.calculator import calculator as arithmetic
+    from lazymind.chat.engine.tools.writer import WriterCreateToolkit, WriterRevisionToolkit
+    from lazymind.chat.engine.tools.intent_writer import build_intentwrite_tool
+    from lazymind.chat.engine.tools.skill_listing import build_list_skills_tool
+    from lazymind.chat.workflow import workflow_manager as workflows
+
+    # These exact implementations use internal artifacts, scoped remote sources,
+    # arithmetic, or Core orchestration. Registration alone is not admission.
+    audited = {
+        arithmetic, list_data_sources, kb_tmp_search, url_fetch, ask_user,
+        artifacts.read_file, artifacts.grep, artifacts.write_file, artifacts.list_dir,
+        artifacts.save_chat_artifact, read_user_attachment, find_user_attachment, string_replace,
+        tasks.create_subagent, tasks.list_subagents, tasks.get_subagent_status,
+        tasks.list_subagent_artifacts, tasks.get_subagent_artifacts,
+        task_artifacts.get_artifact, task_artifacts.patch_artifact, task_artifacts.discard_draft,
+        task_artifacts.list_artifacts, task_artifacts.find_artifact, task_artifacts.list_knowledge_bases,
+    }
+    factories = [
+        ToolGroup.make_gateway_tool, artifacts.build_resource_read_tools,
+        build_intentwrite_tool, build_list_skills_tool, build_session_env_tool,
+        workflows._handoff_tool, workflows._safe_session_tools,
+        workflows._safe_authoring_tools, workflows._workflow_trigger_tools,
+    ]
+    audited_codes = {constant for factory in factories for constant in factory.__code__.co_consts
+                     if isinstance(constant, types.CodeType)}
+    binding_code = bind_to_instance(lambda: None).__code__
+    registrations = []
+    for cfg in configs if configs is not None else DEFAULT_TOOLS:
+        target = _registration_target(cfg.tool)
+        targets = target.get('tools', []) if isinstance(target, dict) else [target]
+        registrations.extend((item, cfg.authorization) for item in targets)
+    matched = {}
+    for name, tool in tools_info.items():
+        instance, method = getattr(tool, '_instance', None), getattr(tool, '_method_name', '')
+        if isinstance(instance, LocalFileToolkit):
+            for target, authorization in registrations:
+                if instance is target and authorization and method in authorization:
+                    matched[name] = (instance, method, authorization, None)
+                    break
+            continue
+        if type(instance) is KBToolkit and method in KBToolkit.__public_apis__:
+            matched[name] = (instance, method, None, None)
+            continue
+        if (any(instance is item for item in [*_WEB_SEARCH_ENGINE_INSTANCES, *_ACADEMIC_SEARCH_ENGINE_INSTANCES])
+                or type(instance) is WikipediaToolkit) and method in {
+                    'search', 'get_content', 'get_contents', 'meta_search', 'meta_catalog'}:
+            matched[name] = (instance, method, None, None)
+            continue
+        writer_methods = {
+            'build_writing_task', 'build_resources', 'create_writing_context', 'prepare_outline',
+            'generate_outline', 'generate_rewrite_outline', 'generate_rewrite_section_instructions',
+            'generate_section_instructions', 'generate_draft_document', 'update_writing_context',
+            'check_consistency', 'generate_final_document', 'render_markdown',
+            'build_revise_task', 'build_revision_task', 'locate_revision_target', 'generate_modify_plan',
+            'build_revision_visual_plan', 'generate_patch_set', 'generate_string_replace_set',
+            'plan_revision', 'validate_patch_set', 'apply_patch', 'apply_string_replace', 'apply_revision',
+        }
+        if type(instance) in {WriterCreateToolkit, WriterRevisionToolkit} and method in writer_methods:
+            matched[name] = (instance, method, None, _workspace_writer_arguments)
+            continue
+        apply = getattr(tool, 'apply', None)
+        original = getattr(apply, '__func__', apply)
+        # Unwrap only LazyLLM's known binding implementation, never arbitrary closures.
+        if getattr(original, '__code__', None) is binding_code:
+            cells = dict(zip(original.__code__.co_freevars, original.__closure__ or ()))
+            original = cells['func'].cell_contents if 'func' in cells else None
+        if original is task_artifacts.save_artifacts:
+            matched[name] = (None, '', None, _workspace_artifact_arguments)
+        elif (any(original is item for item in audited)
+                or getattr(original, '__code__', None) in audited_codes):
+            matched[name] = (instance, method, None, None)
+    return matched
 
 
 def tool_is_active(cfg: ToolConfig) -> bool:

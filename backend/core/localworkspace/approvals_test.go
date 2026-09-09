@@ -2,16 +2,23 @@ package localworkspace
 
 import (
 	"context"
+	"github.com/gorilla/mux"
+	"lazymind/core/common/orm"
+	"lazymind/core/store"
+	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"lazymind/core/state"
 )
 
 func TestWorkspaceApprovalAllowsOnceAndRejectsSecondDecision(t *testing.T) {
 	db, grant, stateStore, conversationID := operationFixture(t, PermissionAlwaysAsk)
-	prepared, err := PrepareOperation(context.Background(), db.DB, stateStore, OperationRequest{
+	callID := operationTestCallID("call-1")
+	prepared, err := PrepareOperation(context.Background(), db.DB, stateStore, OperationRequest{HistoryID: "history", RunID: "run",
 		UserID: "owner", ConversationID: conversationID, WorkspaceID: grant.WorkspaceID,
-		Operation: OperationCreate, Path: "approved.txt", Content: "ok", CallID: "call-1",
+		Operation: OperationCreate, Path: "approved.txt", Content: "ok", CallID: callID,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -19,15 +26,15 @@ func TestWorkspaceApprovalAllowsOnceAndRejectsSecondDecision(t *testing.T) {
 	if prepared.Decision != DecisionPending {
 		t.Fatalf("decision=%s", prepared.Decision)
 	}
-	if _, err := DecideOperation(context.Background(), stateStore, prepared.OperationID, "allow_once", "owner"); err != nil {
+	if _, err := DecideOperation(context.Background(), db.DB, stateStore, prepared.OperationID, "allow_once", "owner"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := DecideOperation(context.Background(), stateStore, prepared.OperationID, "allow_once", "owner"); err == nil {
+	if _, err := DecideOperation(context.Background(), db.DB, stateStore, prepared.OperationID, "allow_once", "owner"); err == nil {
 		t.Fatal("second decision unexpectedly succeeded")
 	}
-	if _, err := ExecuteOperation(context.Background(), db.DB, stateStore, prepared.OperationID, OperationRequest{
+	if _, err := ExecuteOperation(context.Background(), db.DB, stateStore, prepared.OperationID, OperationRequest{HistoryID: "history", RunID: "run",
 		UserID: "owner", ConversationID: conversationID, WorkspaceID: grant.WorkspaceID,
-		Operation: OperationCreate, Path: "approved.txt", Content: "ok", CallID: "call-1",
+		Operation: OperationCreate, Path: "approved.txt", Content: "ok", CallID: callID,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -35,19 +42,19 @@ func TestWorkspaceApprovalAllowsOnceAndRejectsSecondDecision(t *testing.T) {
 
 func TestWorkspaceApprovalRejectsMismatchedCall(t *testing.T) {
 	db, grant, stateStore, conversationID := operationFixture(t, PermissionAlwaysAsk)
-	prepared, err := PrepareOperation(context.Background(), db.DB, stateStore, OperationRequest{
+	prepared, err := PrepareOperation(context.Background(), db.DB, stateStore, OperationRequest{HistoryID: "history", RunID: "run",
 		UserID: "owner", ConversationID: conversationID, WorkspaceID: grant.WorkspaceID,
-		Operation: OperationCreate, Path: "approved.txt", Content: "ok", CallID: "call-1",
+		Operation: OperationCreate, Path: "approved.txt", Content: "ok", CallID: operationTestCallID("call-1"),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := DecideOperation(context.Background(), stateStore, prepared.OperationID, "allow_once", "owner"); err != nil {
+	if _, err := DecideOperation(context.Background(), db.DB, stateStore, prepared.OperationID, "allow_once", "owner"); err != nil {
 		t.Fatal(err)
 	}
-	_, err = ExecuteOperation(context.Background(), db.DB, stateStore, prepared.OperationID, OperationRequest{
+	_, err = ExecuteOperation(context.Background(), db.DB, stateStore, prepared.OperationID, OperationRequest{HistoryID: "history", RunID: "run",
 		UserID: "owner", ConversationID: conversationID, WorkspaceID: grant.WorkspaceID,
-		Operation: OperationCreate, Path: "approved.txt", Content: "tampered", CallID: "call-2",
+		Operation: OperationCreate, Path: "approved.txt", Content: "tampered", CallID: operationTestCallID("call-2"),
 	})
 	if err == nil {
 		t.Fatal("mismatched call unexpectedly executed")
@@ -56,9 +63,9 @@ func TestWorkspaceApprovalRejectsMismatchedCall(t *testing.T) {
 
 func TestWorkspaceApprovalConcurrentDecisionsConsumeOneWinner(t *testing.T) {
 	db, grant, stateStore, conversationID := operationFixture(t, PermissionAlwaysAsk)
-	prepared, err := PrepareOperation(context.Background(), db.DB, stateStore, OperationRequest{
+	prepared, err := PrepareOperation(context.Background(), db.DB, stateStore, OperationRequest{HistoryID: "history", RunID: "run",
 		UserID: "owner", ConversationID: conversationID, WorkspaceID: grant.WorkspaceID,
-		Operation: OperationCreate, Path: "concurrent.txt", Content: "ok", CallID: "call-1",
+		Operation: OperationCreate, Path: "concurrent.txt", Content: "ok", CallID: operationTestCallID("call-1"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -66,7 +73,7 @@ func TestWorkspaceApprovalConcurrentDecisionsConsumeOneWinner(t *testing.T) {
 	results := make(chan error, 2)
 	for _, action := range []string{"allow_once", "reject"} {
 		go func(action string) {
-			_, callErr := DecideOperation(context.Background(), stateStore, prepared.OperationID, action, "owner")
+			_, callErr := DecideOperation(context.Background(), db.DB, stateStore, prepared.OperationID, action, "owner")
 			results <- callErr
 		}(action)
 	}
@@ -86,9 +93,9 @@ func TestWorkspaceApprovalConcurrentDecisionsConsumeOneWinner(t *testing.T) {
 func TestWorkspaceClaimExpiryCannotOverwriteDecision(t *testing.T) {
 	db, grant, stateStore, conversationID := operationFixture(t, PermissionAlwaysAsk)
 	ctx := context.Background()
-	prepared, err := PrepareOperation(ctx, db.DB, stateStore, OperationRequest{
+	prepared, err := PrepareOperation(ctx, db.DB, stateStore, OperationRequest{HistoryID: "history", RunID: "run",
 		UserID: "owner", ConversationID: conversationID, WorkspaceID: grant.WorkspaceID,
-		Operation: OperationCreate, Path: "notes.txt", Content: "seed", CallID: "stalled-decision",
+		Operation: OperationCreate, Path: "notes.txt", Content: "seed", CallID: operationTestCallID("stalled-decision"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -99,14 +106,14 @@ func TestWorkspaceClaimExpiryCannotOverwriteDecision(t *testing.T) {
 	interleaved := false
 	delayed.afterSnapshot = func() {
 		interleaved = true
-		_, err := DecideOperation(ctx, stateStore, prepared.OperationID, "reject", "owner")
+		_, err := DecideOperation(ctx, db.DB, stateStore, prepared.OperationID, "reject", "owner")
 		if err == nil {
 			succeeded++
 		} else {
 			requireWorkspaceReason(t, err, 409, "conflict", "binding_conflict")
 		}
 	}
-	_, err = DecideOperation(ctx, delayed, prepared.OperationID, "allow_once", "owner")
+	_, err = DecideOperation(ctx, db.DB, delayed, prepared.OperationID, "allow_once", "owner")
 	if err == nil {
 		succeeded++
 	} else {
@@ -122,24 +129,59 @@ func TestWorkspaceClaimInvalidDecisionDoesNotConsumeApproval(t *testing.T) {
 		t.Run(field, func(t *testing.T) {
 			db, grant, stateStore, conversationID := operationFixture(t, PermissionAlwaysAsk)
 			ctx := context.Background()
-			prepared, err := PrepareOperation(ctx, db.DB, stateStore, OperationRequest{
+			prepared, err := PrepareOperation(ctx, db.DB, stateStore, OperationRequest{HistoryID: "history", RunID: "run",
 				UserID: "owner", ConversationID: conversationID, WorkspaceID: grant.WorkspaceID,
-				Operation: OperationCreate, Path: "notes.txt", Content: "seed", CallID: "valid-decision",
+				Operation: OperationCreate, Path: "notes.txt", Content: "seed", CallID: operationTestCallID("valid-decision"),
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
 			if field == "owner" {
-				_, err = DecideOperation(ctx, stateStore, prepared.OperationID, "allow_once", "other-owner")
+				_, err = DecideOperation(ctx, db.DB, stateStore, prepared.OperationID, "allow_once", "other-owner")
 				requireWorkspaceReason(t, err, 404, "resource not found", "workspace_not_found")
 			} else {
-				_, err = DecideOperation(ctx, stateStore, prepared.OperationID, "invalid", "owner")
+				_, err = DecideOperation(ctx, db.DB, stateStore, prepared.OperationID, "invalid", "owner")
 				requireWorkspaceReason(t, err, 400, "invalid request", "invalid_selection")
 			}
-			result, err := DecideOperation(ctx, stateStore, prepared.OperationID, "allow_once", "owner")
+			result, err := DecideOperation(ctx, db.DB, stateStore, prepared.OperationID, "allow_once", "owner")
 			if err != nil || result.Decision != DecisionAllowed {
 				t.Fatalf("invalid request consumed valid decision: result=%+v err=%v", result, err)
 			}
 		})
+	}
+}
+
+func TestWorkspaceApprovalListRetainsReceiptsAfterRevokeAndMissingIndex(t *testing.T) {
+	db, grant, stateStore, conversation := operationFixture(t, PermissionAllowAll)
+	store.Init(db.DB, nil, stateStore)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+	ctx := context.Background()
+	req := OperationRequest{HistoryID: "history", RunID: "run", UserID: "owner", ConversationID: conversation, WorkspaceID: grant.WorkspaceID, CallID: operationTestCallID("receipt"), Operation: OperationCreate, Path: "created.txt", Content: "private body"}
+	prepared, err := PrepareOperation(ctx, db.DB, stateStore, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ExecuteOperation(ctx, db.DB, stateStore, prepared.OperationID, req); err != nil {
+		t.Fatal(err)
+	}
+	if err := stateStore.HSet(ctx, "local-workspace-operation-index:"+conversation, map[string]any{"15": "expired-record"}, time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&orm.LocalWorkspace{}).Where("id = ?", grant.WorkspaceID).Update("status", StatusRevoked).Error; err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest("GET", "/conversations/"+conversation+":workspace-approvals", nil)
+	request.Header.Set("X-User-Id", "owner")
+	request = mux.SetURLVars(request, map[string]string{"conversation_id": conversation})
+	response := httptest.NewRecorder()
+	ListOperationApprovals(response, request)
+	if response.Code != 200 || !strings.Contains(response.Body.String(), "completed") || strings.Contains(response.Body.String(), "private body") || strings.Contains(response.Body.String(), "lease_token") {
+		t.Fatalf("list %d %s", response.Code, response.Body.String())
+	}
+	request.Header.Set("X-User-Id", "other")
+	response = httptest.NewRecorder()
+	ListOperationApprovals(response, request)
+	if response.Code != 404 {
+		t.Fatalf("cross owner %d", response.Code)
 	}
 }
