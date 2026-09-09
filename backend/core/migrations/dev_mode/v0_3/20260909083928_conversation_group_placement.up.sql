@@ -1,0 +1,2 @@
+ALTER TABLE conversation_groups ADD COLUMN pinned BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE conversation_groups ADD COLUMN sort_order BIGINT NOT NULL DEFAULT 0;

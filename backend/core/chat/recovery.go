@@ -19,6 +19,7 @@ import (
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/conversationgroup"
 	"lazymind/core/store"
 	"lazymind/core/taskcenter"
 )
@@ -250,7 +251,7 @@ func ArchiveConversation(w http.ResponseWriter, r *http.Request) {
 	}
 	now := time.Now().UTC()
 	var conversation orm.Conversation
-	err = db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+	err = conversationgroup.UserTransaction(r.Context(), db, userID, func(tx *gorm.DB) error {
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", conversationID, userID).First(&conversation).Error; err != nil {
 			return err
 		}
@@ -259,6 +260,9 @@ func ArchiveConversation(w http.ResponseWriter, r *http.Request) {
 		}
 		conversationIDs, err := ownedConversationFamilyIDs(r.Context(), tx, userID, conversationID)
 		if err != nil {
+			return err
+		}
+		if err := conversationgroup.RequireOrganizerUnlocked(r.Context(), tx, userID, conversationIDs, ""); err != nil {
 			return err
 		}
 		updates := map[string]any{"archive_folder_id": folderID, "archived_at": now, "updated_at": now}
@@ -270,6 +274,10 @@ func ArchiveConversation(w http.ResponseWriter, r *http.Request) {
 			Updates(updates).Error
 	})
 	if errors.Is(err, errChildGroupOperation) {
+		common.ReplyErr(w, err.Error(), http.StatusConflict)
+		return
+	}
+	if errors.Is(err, conversationgroup.ErrConversationOrganizing) {
 		common.ReplyErr(w, err.Error(), http.StatusConflict)
 		return
 	}

@@ -134,6 +134,14 @@ func openingAttachmentDescriptions(files []map[string]any, answer string) {
 }
 
 func loadOpeningSnapshot(db *gorm.DB, conv orm.Conversation, ignoredHistoryIDs ...string) (openingSnapshot, error) {
+	return loadOpeningSnapshotInput(db, conv, false, ignoredHistoryIDs...)
+}
+
+func loadOrganizerOpeningSnapshot(db *gorm.DB, conv orm.Conversation) (openingSnapshot, error) {
+	return loadOpeningSnapshotInput(db, conv, true)
+}
+
+func loadOpeningSnapshotInput(db *gorm.DB, conv orm.Conversation, freezeActive bool, ignoredHistoryIDs ...string) (openingSnapshot, error) {
 	var snapshot openingSnapshot
 	ignored := make(map[string]struct{}, len(ignoredHistoryIDs))
 	for _, id := range ignoredHistoryIDs {
@@ -153,7 +161,7 @@ func loadOpeningSnapshot(db *gorm.DB, conv orm.Conversation, ignoredHistoryIDs .
 		if err := db.ScanRows(rows, &row); err != nil {
 			return snapshot, err
 		}
-		if row.RunStatus == "generating" || row.RunStatus == "running" {
+		if !freezeActive && (row.RunStatus == "generating" || row.RunStatus == "running") {
 			snapshot.Active = true
 			break
 		}
@@ -181,6 +189,9 @@ func loadOpeningSnapshot(db *gorm.DB, conv orm.Conversation, ignoredHistoryIDs .
 		messages = append(messages, map[string]any{"role": "user", "content": text})
 		files = append(files, attachments...)
 		answer := openingClarification(row.Result)
+		if row.RunStatus == "generating" || row.RunStatus == "running" {
+			answer = ""
+		}
 		// Short clarifying replies are evidence; full answers and tool output are not.
 		if answer != "" {
 			messages = append(messages, map[string]any{"role": "assistant", "content": answer})

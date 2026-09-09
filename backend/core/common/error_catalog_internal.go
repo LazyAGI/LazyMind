@@ -5,6 +5,7 @@ package common
 import "net/http"
 
 func init() {
+	registerAdditionalErrorPattern("organizer stream returned http %d", "Organizer stream request failed", http.StatusBadGateway, 2002420)
 	registerAdditionalErrorAlias("invalid title", "Invalid request", http.StatusBadRequest, 2000103)
 	registerAdditionalErrorAlias("conversation changed", "Conflict", http.StatusConflict, 2000107)
 	registerAdditionalErrorAlias("update backfill failed", "Internal server error", http.StatusInternalServerError, 2000000)

@@ -45,6 +45,7 @@ import {
 import { allowedUploadTypes } from "@/modules/chat/components/ImageUpload";
 import {
   CHAT_CONVERSATION_LIST_REFRESH_EVENT,
+  CHAT_PENDING_CONVERSATION_GROUP_KEY,
   CHAT_SELECT_CONVERSATION_EVENT,
   WORKFLOW_PANEL_EXPANDED_EVENT,
   WORKFLOW_PANEL_EXPANDED_STORAGE_PREFIX,
@@ -452,6 +453,9 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
   ) {
     const requestConversationId =
       sessionId || pendingClientConversationIdRef.current || uuidv4();
+    const pendingGroupId = !sessionId
+      ? sessionStorage.getItem(CHAT_PENDING_CONVERSATION_GROUP_KEY)?.trim() || ""
+      : "";
     if (!sessionId) {
       pendingClientConversationIdRef.current = requestConversationId;
       const prepareClientConversationId =
@@ -547,6 +551,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
             tags: effectiveChatConfig?.tags,
           },
         },
+        ...(pendingGroupId ? { group_id: pendingGroupId } : {}),
         models: [t("chat.lazyMindModel")],
         thinking_depth:
           extras?.thinking_depth ?? forkThinkingDepth ?? useChatThinkStore.getState().thinkingDepth,
@@ -626,6 +631,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     pendingClientConversationIdRef.current = "";
     sessionIdRef.current = id;
     setSessionId(id);
+    sessionStorage.removeItem(CHAT_PENDING_CONVERSATION_GROUP_KEY);
     window.dispatchEvent(
       new CustomEvent(CHAT_SELECT_CONVERSATION_EVENT, {
         detail: { conversationId: id, source: "chat" },

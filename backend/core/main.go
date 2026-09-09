@@ -23,6 +23,7 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/common/readonlyorm"
+	"lazymind/core/conversationgroup"
 	"lazymind/core/currentmemory"
 	"lazymind/core/episode"
 	"lazymind/core/evalset"
@@ -509,6 +510,8 @@ func run(ctx context.Context) error {
 	}
 	evalset.RegisterAsyncJobs()
 	chat.RegisterConversationOpeningJobs(store.DB())
+	conversationgroup.RegisterOpeningPreparer(chat.OrganizerOpeningPreparer{})
+	conversationgroup.RegisterAsyncJobs()
 	knowledge_market.RegisterAsyncJobs()
 	workflow.RegisterWorkflowDraftGenerateJob()
 	workflowHosts := workflowexecutor.DefaultHostRegistry
@@ -546,6 +549,7 @@ func run(ctx context.Context) error {
 			LockTTL:         asyncConfig.LockTTL,
 		})
 		backgroundDone = append(backgroundDone, runner.Done())
+		backgroundDone = append(backgroundDone, conversationgroup.StartTerminalJobReconciler(runtimeCtx, store.DB(), 2*time.Second))
 		backgroundDone = append(backgroundDone, chat.StartConversationOpening(runtimeCtx, store.DB())...)
 
 		importConfig := evalset.LoadImportRuntimeConfigFromEnv()

@@ -68,6 +68,7 @@ const SelfEvolutionObservationPage = lazy(() => import("@/modules/selfEvolution"
 })));
 const WorkflowDetailPage = lazy(() => import("@/modules/workflow/pages/detail"));
 const BuiltinWorkflowDetailPage = lazy(() => import("@/modules/workflow/pages/builtin-detail"));
+const ConversationGroupPage = lazy(() => import("@/modules/chat/conversationOrganizer/GroupPage"));
 
 export default function AppRouter() {
   const { i18n } = useTranslation();
@@ -138,6 +139,7 @@ export default function AppRouter() {
             <Route path="home" element={<Home />} />
             {/* Conversation detail URLs survive a full browser reload. */}
             <Route path="home/:conversationId" element={<Home />} />
+            <Route path="groups/:groupId" element={<ConversationGroupPage />} />
             <Route path="cases" element={<ShowcaseGalleryPage />} />
             <Route path="cases/:caseId" element={<ShowcaseDetailPage />} />
           </Route>

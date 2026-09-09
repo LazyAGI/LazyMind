@@ -3,6 +3,7 @@ import { MemoryRouter } from "react-router-dom";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import RecordList from "./index";
+vi.mock("../../conversationOrganizer/api", () => ({ listConversationGroups: vi.fn().mockResolvedValue([]), removeConversation: vi.fn(), emitConversationGroupsChanged: vi.fn(), CONVERSATION_GROUPS_CHANGED_EVENT: "groups-changed" }));
 
 const mocks = vi.hoisted(() => ({
   listConversations: vi.fn(),

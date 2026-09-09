@@ -1,0 +1,56 @@
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import ConversationGroups from "./ConversationGroups";
+import * as api from "./api";
+const tr = (key: string) => key;
+vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: tr }) }));
+vi.mock("./SidebarGroups", () => ({ default: () => null }));
+vi.mock("./api", () => ({
+  CONVERSATION_GROUPS_CHANGED_EVENT: "groups-changed",
+  listConversationGroups: vi.fn(async () => []), getLatestOrganizerState: vi.fn(), getOrganizerRun: vi.fn(), startOrganizerRun: vi.fn(), runAction: vi.fn(), getLatestSuccessfulOrganizerRun: vi.fn(), emitConversationGroupsChanged: vi.fn(), correctOrganizerItem: vi.fn(), createConversationGroup: vi.fn(), deleteConversationGroup: vi.fn(), updateConversationGroup: vi.fn(),
+}));
+const running: api.OrganizerRun = { created_at: "2026-09-09T00:00:00Z", updated_at: "2026-09-09T00:00:00Z", free_count: 2, organized_count: 0, skipped_count: 0, id: "r", status: "running", stage: "organizing", progress: { current: 0, total: 2, batch_current: 1, batch_total: 1 }, can_cancel: true, can_retry: false, can_undo: false, items: [] };
+beforeEach(() => { vi.clearAllMocks(); vi.mocked(api.getLatestOrganizerState).mockResolvedValue({ run: null, latest_successful_run_id: null, free_conversation_count: 2 }); vi.mocked(api.getOrganizerRun).mockResolvedValue(running); });
+describe("organizer entry", () => {
+ it("opens active progress without treating the entry click or close as cancellation", async () => {
+  vi.mocked(api.getLatestOrganizerState).mockResolvedValue({ run: running, latest_successful_run_id: null, free_conversation_count: 2 });
+  const { unmount } = render(<ConversationGroups mode="organizer" />);
+  await waitFor(() => expect(screen.getByRole("button", { name: /batchProgress/ })).toBeTruthy());
+  fireEvent.click(screen.getByRole("button", { name: /batchProgress/ }));
+  expect(await screen.findByRole("dialog")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: /close/i }));
+  expect(api.runAction).not.toHaveBeenCalled(); unmount();
+ });
+ it("disables empty-scope starts", async () => {
+  vi.mocked(api.getLatestOrganizerState).mockResolvedValue({ run: null, latest_successful_run_id: null, free_conversation_count: 0 });
+  const { unmount } = render(<ConversationGroups mode="organizer" />);
+  await waitFor(() => expect((screen.getByRole("button", { name: /conversationOrganizer.organize/ }) as HTMLButtonElement).disabled).toBe(true));
+  expect(api.startOrganizerRun).not.toHaveBeenCalled(); unmount();
+ });
+ it("starts with a progress drawer and retains unconfirmed results behind the same entry", async () => {
+  vi.mocked(api.startOrganizerRun).mockResolvedValue(running);
+  const { unmount } = render(<ConversationGroups mode="organizer" />);
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: /conversationOrganizer.organize/ })); });
+  expect(await screen.findByRole("dialog")).toBeTruthy();
+  expect(api.startOrganizerRun).toHaveBeenCalledTimes(1);
+  unmount();
+  const result: api.OrganizerRun = { ...running, status: "succeeded", can_cancel: false, can_undo: true };
+  vi.mocked(api.getLatestOrganizerState).mockResolvedValue({ run: result, latest_successful_run_id: "r", free_conversation_count: 2 });
+  vi.mocked(api.getLatestSuccessfulOrganizerRun).mockResolvedValue(result);
+  const second = render(<ConversationGroups mode="organizer" />);
+  fireEvent.click(await screen.findByRole("button", { name: /viewResult/ }));
+  expect(await screen.findByRole("button", { name: "conversationOrganizer.confirmResult" })).toBeTruthy();
+  expect(api.startOrganizerRun).toHaveBeenCalledTimes(1); second.unmount();
+ });
+ it("shows failure on the entry and opens the failure details without restarting", async () => {
+  const failed: api.OrganizerRun = { ...running, status: "failed", can_cancel: false, can_retry: true };
+  vi.mocked(api.getLatestOrganizerState).mockResolvedValue({ run: failed, latest_successful_run_id: null, free_conversation_count: 2 });
+  const { unmount } = render(<ConversationGroups mode="organizer" />);
+  fireEvent.click(await screen.findByRole("button", { name: /failedEntry/ }));
+  expect(await screen.findByRole("button", { name: "conversationOrganizer.retry" })).toBeTruthy();
+  expect(api.startOrganizerRun).not.toHaveBeenCalled();
+  expect(api.runAction).not.toHaveBeenCalled();
+  unmount();
+ });
+
+});

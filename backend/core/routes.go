@@ -12,6 +12,7 @@ import (
 	"lazymind/core/agent"
 	"lazymind/core/agentinvocation"
 	"lazymind/core/chat"
+	"lazymind/core/conversationgroup"
 	"lazymind/core/currentmemory"
 	"lazymind/core/datasource"
 	"lazymind/core/doc"
@@ -625,6 +626,22 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/conversations/{name}", []string{"qa.read"}, chat.GetConversation)
 	handleAPI(r, "DELETE", "/conversations/{name}", []string{"qa.write"}, chat.DeleteConversation)
 	handleAPI(r, "POST", "/conversations:batchDelete", []string{"qa.write"}, chat.BatchDeleteConversations)
+	handleAPI(r, "GET", "/conversation-groups", []string{"qa.read"}, conversationgroup.ListGroups)
+	handleAPI(r, "POST", "/conversation-groups", []string{"qa.write"}, conversationgroup.CreateGroup)
+	handleAPI(r, "GET", "/conversation-groups/{group_id}", []string{"qa.read"}, conversationgroup.GetGroup)
+	handleAPI(r, "PATCH", "/conversation-groups/{group_id}/placement", []string{"qa.write"}, conversationgroup.UpdateGroupPlacement)
+	handleAPI(r, "PATCH", "/conversation-groups/{group_id}", []string{"qa.write"}, conversationgroup.UpdateGroup)
+	handleAPI(r, "DELETE", "/conversation-groups/{group_id}", []string{"qa.write"}, conversationgroup.DeleteGroup)
+	handleAPI(r, "POST", "/conversation-groups/{group_id}/conversations", []string{"qa.write"}, conversationgroup.AddMember)
+	handleAPI(r, "DELETE", "/conversation-groups/{group_id}/conversations/{conversation_id}", []string{"qa.write"}, conversationgroup.RemoveMember)
+	handleAPI(r, "POST", "/conversation-organizer-runs", []string{"qa.write"}, conversationgroup.StartOrganizer)
+	handleAPI(r, "GET", "/conversation-organizer-runs:latest", []string{"qa.read"}, conversationgroup.GetLatestOrganizer)
+	handleAPI(r, "GET", "/conversation-organizer-runs/{run_id}", []string{"qa.read"}, conversationgroup.GetOrganizer)
+	handleAPI(r, "POST", "/conversation-organizer-runs/{run_id}:cancel", []string{"qa.write"}, conversationgroup.CancelOrganizer)
+	handleAPI(r, "POST", "/conversation-organizer-runs/{run_id}:retry", []string{"qa.write"}, conversationgroup.RetryOrganizer)
+	handleAPI(r, "POST", "/conversation-organizer-runs/{run_id}:confirm", []string{"qa.write"}, conversationgroup.ConfirmOrganizer)
+	handleAPI(r, "POST", "/conversation-organizer-runs/{run_id}:undo", []string{"qa.write"}, conversationgroup.UndoOrganizer)
+	handleAPI(r, "PATCH", "/conversation-organizer-runs/{run_id}/items/{conversation_id}", []string{"qa.write"}, conversationgroup.CorrectOrganizerItem)
 	handleAPI(r, "GET", "/conversations", []string{"qa.read"}, chat.ListConversations)
 	handleAPI(r, "POST", "/conversations:setChatHistory", []string{"qa.write"}, chat.SetChatHistory)
 	handleAPI(r, "POST", "/conversations:feedBackChatHistory", []string{"qa.write"}, chat.FeedBackChatHistory)
