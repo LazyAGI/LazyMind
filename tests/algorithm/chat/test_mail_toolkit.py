@@ -17,6 +17,7 @@ from lazymind.chat.engine.tools.mail import (
     MailToolkit,
     _IMAPBackend,
     _apply_confirm_patch,
+    _attachments_from_bodystructure,
     _display_mail_date,
     _encode_imap_utf7,
     _extract_transfer_links,
@@ -31,6 +32,7 @@ from lazymind.chat.engine.tools.mail import (
     _resolve_search_folders,
     _save_draft,
     _split_mail_ref,
+    _write_outgoing_attachments,
 )
 
 
@@ -722,7 +724,9 @@ def test_imap_read_attachments_walks_message_once():
     })
     with patch.object(backend, '_fetch_message', return_value=msg):
         result = backend.read_attachments('INBOX::1')
-    assert result['files'] == {'a.pdf': b'pdf-bytes', 'b.zip': b'zip-bytes'}
+    assert result['files']['a.pdf'] == b'pdf-bytes'
+    assert result['files']['b.zip'] == b'zip-bytes'
+    assert [part['attachment_id'] for part in result['parts']] == ['1', '2']
     assert result['transfer'] is False
     with patch.object(backend, '_fetch_message', return_value=msg) as fetch:
         assert backend.read_attachment('INBOX::1', 'b.zip') == b'zip-bytes'
@@ -835,3 +839,106 @@ def test_send_draft_is_idempotent_under_concurrency(mail_auth):
     assert send_count['n'] == 1
     assert any('already sent' in item for item in errors)
     assert _load_draft('draft_race')['status'] == 'sent'
+
+
+def test_read_requires_exact_mailbox_when_uids_could_collide(mail_auth):
+    lazyllm.globals.config['dynamic_tool_auth'] = {'mail': _two_qq_accounts()}
+    with pytest.raises(ToolExecutionError, match='ambiguous'):
+        MailToolkit().read('INBOX::123')
+
+    class FakeBackend:
+        def __init__(self, cred):
+            self.cred = cred
+
+        def read(self, message_id):
+            return {'id': message_id, 'body': self.cred['email']}
+
+    with patch('lazymind.chat.engine.tools.mail._backend', side_effect=lambda cred: FakeBackend(cred)):
+        result = MailToolkit().read('INBOX::123', mailbox='b@qq.com')
+    assert result['mailbox'] == 'b@qq.com'
+    assert result['body'] == 'b@qq.com'
+
+
+def test_search_merges_accounts_then_caps_at_twenty(mail_auth):
+    lazyllm.globals.config['dynamic_tool_auth'] = {'mail': _two_qq_accounts()}
+
+    class FakeBackend:
+        def __init__(self, cred):
+            self.cred = cred
+
+        def search(self, **kwargs):
+            email = self.cred['email']
+            if email.startswith('a@'):
+                items = [{'id': f'a{i}', 'date': '2020-01-01', 'subject': 'old'} for i in range(20)]
+            else:
+                items = [{'id': 'b-new', 'date': '2026-09-09', 'subject': 'new'}]
+            return {'items': items}
+
+    with patch('lazymind.chat.engine.tools.mail._backend', side_effect=lambda cred: FakeBackend(cred)):
+        result = MailToolkit().search(keyword='x')
+    assert len(result['items']) == 20
+    assert any(item['id'] == 'b-new' for item in result['items'])
+
+
+def test_bodystructure_keeps_duplicate_filenames():
+    raw = (
+        '1 (UID 12 BODYSTRUCTURE (('
+        '"TEXT" "PLAIN" ("CHARSET" "UTF-8") NIL NIL "7BIT" 12 1)'
+        '("APPLICATION" "PDF" ("NAME" "a.pdf") NIL NIL "BASE64" 100 NIL '
+        '("ATTACHMENT" ("FILENAME" "a.pdf")) NIL)'
+        '("APPLICATION" "PDF" ("NAME" "a.pdf") NIL NIL "BASE64" 80 NIL '
+        '("ATTACHMENT" ("FILENAME" "a.pdf")) NIL) "MIXED"))'
+    )
+    items = _attachments_from_bodystructure(raw)
+    assert [row['attachment_id'] for row in items] == ['2', '3']
+    assert [row['filename'] for row in items] == ['a.pdf', 'a.pdf']
+
+
+def test_card_upload_rejects_too_many_files(mail_auth):
+    import base64
+    items = [
+        {'filename': f'{index}.txt', 'content_base64': base64.b64encode(b'x').decode('ascii')}
+        for index in range(6)
+    ]
+    with pytest.raises(ToolExecutionError, match='At most 5'):
+        _write_outgoing_attachments(items)
+
+
+def test_partial_send_retries_only_refused_recipients(mail_auth):
+    draft = {
+        'draft_id': 'draft_partial',
+        'revision': 1,
+        'to': ['ok@b.com', 'bad@b.com'],
+        'cc': [],
+        'subject': 'hi',
+        'body': 'body',
+        'attachment_paths': [],
+        'in_reply_to': '',
+        'status': 'draft',
+        'mailbox': 'user@qq.com',
+        'provider': 'qqmail',
+        'sent_at': '',
+        'last_error': '',
+    }
+    _save_draft(draft)
+    lazyllm.globals['agentic_config']['mail_draft_confirm_id'] = 'draft_partial'
+    lazyllm.globals['agentic_config']['mail_draft_confirm_revision'] = 1
+    seen: list[list[str]] = []
+
+    class PartialSMTP(_FakeSMTP):
+        def sendmail(self, from_addr, to_addrs, msg, *args, **kwargs):
+            self.send(b'payload\r\n.\r\n')
+            seen.append(list(to_addrs))
+            if 'ok@b.com' in to_addrs:
+                return {'bad@b.com': (550, b'user unknown')}
+            return {}
+
+    with patch('lazymind.chat.engine.tools.mail.smtplib.SMTP_SSL', PartialSMTP):
+        first = MailToolkit().send_draft('draft_partial')
+        assert first['status'] == 'partial_sent'
+        saved = _load_draft('draft_partial')
+        assert saved['pending_recipients'] == ['bad@b.com']
+        second = MailToolkit().send_draft('draft_partial')
+    assert second['status'] == 'sent'
+    assert seen[0] == ['ok@b.com', 'bad@b.com']
+    assert seen[1] == ['bad@b.com']

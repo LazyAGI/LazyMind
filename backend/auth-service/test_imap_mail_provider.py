@@ -27,14 +27,14 @@ class IMAPMailProviderTest(unittest.TestCase):
     def test_163_login_success(self) -> None:
         token, imap_cls, smtp_cls, imap, smtp = self._login('netease163', 'user@163.com')
         self.assertEqual(token.access_token, 'auth-code')
-        imap_cls.assert_called_once_with('imap.163.com', 993)
+        imap_cls.assert_called_once_with('imap.163.com', 993, timeout=20)
         smtp_cls.assert_called_once_with('smtp.163.com', 465, timeout=20)
         imap.login.assert_called_once_with('user@163.com', 'auth-code')
         smtp.login.assert_called_once_with('user@163.com', 'auth-code')
 
     def test_126_uses_netease_126_host(self) -> None:
         _, imap_cls, smtp_cls, _, _ = self._login('netease163', 'user@126.com')
-        imap_cls.assert_called_once_with('imap.126.com', 993)
+        imap_cls.assert_called_once_with('imap.126.com', 993, timeout=20)
         smtp_cls.assert_called_once_with('smtp.126.com', 465, timeout=20)
 
     def test_vip_163_uses_longest_domain_match(self) -> None:
@@ -54,7 +54,7 @@ class IMAPMailProviderTest(unittest.TestCase):
 
     def test_qqexmail_allows_custom_domain(self) -> None:
         _, imap_cls, smtp_cls, _, _ = self._login('qqexmail', 'alice@company.com')
-        imap_cls.assert_called_once_with('imap.exmail.qq.com', 993)
+        imap_cls.assert_called_once_with('imap.exmail.qq.com', 993, timeout=20)
         smtp_cls.assert_called_once_with('smtp.exmail.qq.com', 465, timeout=20)
 
     def test_netease_enterprise_host(self) -> None:
@@ -63,7 +63,7 @@ class IMAPMailProviderTest(unittest.TestCase):
 
     def test_gmail_imap_workspace_domain(self) -> None:
         _, imap_cls, smtp_cls, _, _ = self._login('gmailimap', 'user@company.com')
-        imap_cls.assert_called_once_with('imap.gmail.com', 993)
+        imap_cls.assert_called_once_with('imap.gmail.com', 993, timeout=20)
         smtp_cls.assert_called_once_with('smtp.gmail.com', 465, timeout=20)
 
     def test_wrong_auth_code_is_classified(self) -> None:

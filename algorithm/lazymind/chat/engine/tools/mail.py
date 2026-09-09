@@ -73,6 +73,9 @@ _COMMON_ATTACHMENT_EXTS = set(CHAT_ATTACHMENT_EXTENSIONS) | {
     '.zip', '.rar', '.7z', '.xlsx', '.xls', '.csv', '.ppt', '.odt', '.rtf',
 }
 _MAX_CARD_ATTACHMENT_BYTES = 15 * 1024 * 1024
+_MAX_CARD_ATTACHMENT_COUNT = 5
+_MAX_CARD_ATTACHMENT_TOTAL_BYTES = 20 * 1024 * 1024
+_IMAP_TIMEOUT_SECONDS = 20
 _TRANSFER_URL_RE = re.compile(
     r'https?://[^\s"\'<>]+(?:'
     r'(?:mail\.)?qq\.com/cgi-bin/ftn'
@@ -365,20 +368,15 @@ def _call_mailboxes(mailbox: str, runner):
         accounts = matches
     else:
         accounts = _require_accounts()
-    if len(accounts) == 1:
-        return _tag_mailbox(runner(accounts[0]), accounts[0])
-    last_error: Exception | None = None
-    for cred in accounts:
-        try:
-            return _tag_mailbox(runner(cred), cred)
-        except ToolExecutionError as orig:
-            last_error = orig
-            if 'was not found' in str(orig):
-                continue
-            raise
-    if last_error is not None:
-        raise last_error
-    _fail('The requested email was not found.')
+    if len(accounts) != 1:
+        emails = ', '.join(
+            str(cred.get('email') or '') for cred in accounts if cred.get('email')
+        )
+        _fail(
+            'This email id is ambiguous across multiple mailboxes. '
+            f'Pass mailbox as the exact address ({emails}).'
+        )
+    return _tag_mailbox(runner(accounts[0]), accounts[0])
 
 
 def _split_addresses(value: Any) -> list[str]:
@@ -569,7 +567,12 @@ def _write_outgoing_attachments(items: Any) -> list[str]:
         return []
     if not isinstance(items, (list, tuple)):
         _fail('attachments must be a list of uploaded files.')
+    if len(items) > _MAX_CARD_ATTACHMENT_COUNT:
+        _fail(
+            f'At most {_MAX_CARD_ATTACHMENT_COUNT} card-uploaded attachments are allowed.'
+        )
     written: list[str] = []
+    total = 0
     for item in items:
         if not isinstance(item, dict):
             _fail('Each uploaded mail attachment must be an object with filename and content_base64.')
@@ -585,6 +588,12 @@ def _write_outgoing_attachments(items: Any) -> list[str]:
             _fail(
                 f'Uploaded mail attachment {filename} exceeds '
                 f'{_MAX_CARD_ATTACHMENT_BYTES // (1024 * 1024)}MB.'
+            )
+        total += len(data)
+        if total > _MAX_CARD_ATTACHMENT_TOTAL_BYTES:
+            _fail(
+                'Card-uploaded attachments exceed '
+                f'{_MAX_CARD_ATTACHMENT_TOTAL_BYTES // (1024 * 1024)}MB in total.'
             )
         target = _unique_outgoing_path(filename)
         with open(target, 'wb') as handle:
@@ -995,6 +1004,133 @@ def _apply_confirm_patch(draft: dict[str, Any]) -> dict[str, Any]:
     return draft
 
 
+def _imap_fetch_text(fetched: Any) -> str:
+    parts: list[str] = []
+    for item in fetched or []:
+        if isinstance(item, tuple):
+            for value in item:
+                if isinstance(value, (bytes, bytearray)):
+                    parts.append(value.decode('utf-8', 'replace'))
+                elif value is not None:
+                    parts.append(str(value))
+        elif isinstance(item, (bytes, bytearray)):
+            parts.append(item.decode('utf-8', 'replace'))
+        elif item is not None:
+            parts.append(str(item))
+    return ' '.join(parts)
+
+
+def _parse_imap_sexp(text: str) -> Any:
+    token_re = re.compile(r'\s+|("(?:\\.|[^"\\])*")|(\()|(\))|(NIL)|([^\s()]+)', re.I)
+    stack: list[list[Any]] = [[]]
+    for match in token_re.finditer(str(text or '')):
+        quoted, openp, closep, nilv, atom = match.groups()
+        if quoted is not None:
+            stack[-1].append(quoted[1:-1].replace('\\"', '"'))
+            continue
+        if openp:
+            stack.append([])
+            continue
+        if closep:
+            if len(stack) == 1:
+                continue
+            node = stack.pop()
+            stack[-1].append(node)
+            continue
+        if nilv:
+            stack[-1].append(None)
+            continue
+        if atom is None:
+            continue
+        if re.fullmatch(r'-?\d+', atom):
+            stack[-1].append(int(atom))
+        else:
+            stack[-1].append(atom)
+    data = stack[0]
+    return data[0] if len(data) == 1 else data
+
+
+def _sexp_string(value: Any) -> str:
+    if value is None:
+        return ''
+    return str(value).strip()
+
+
+def _attachment_from_body_part(node: list[Any], section: str) -> dict[str, Any] | None:
+    if not node or not isinstance(node[0], str):
+        return None
+    params = node[2] if len(node) > 2 and isinstance(node[2], list) else []
+    names = {str(params[idx]).lower(): _sexp_string(params[idx + 1])
+             for idx in range(0, len(params) - 1, 2) if isinstance(params[idx], str)}
+    filename = names.get('name') or names.get('filename') or ''
+    size = 0
+    if len(node) > 6 and isinstance(node[6], int):
+        size = node[6]
+    disposition = node[8] if len(node) > 8 else None
+    disp_name = ''
+    disp_kind = ''
+    if isinstance(disposition, list) and disposition:
+        disp_kind = _sexp_string(disposition[0]).upper()
+        disp_params = disposition[1] if len(disposition) > 1 and isinstance(disposition[1], list) else []
+        disp_map = {str(disp_params[idx]).lower(): _sexp_string(disp_params[idx + 1])
+                    for idx in range(0, len(disp_params) - 1, 2) if isinstance(disp_params[idx], str)}
+        disp_name = disp_map.get('filename') or ''
+    filename = filename or disp_name
+    if not filename and disp_kind != 'ATTACHMENT':
+        return None
+    filename = _decode_header_value(filename) or f'part-{section}'
+    subtype = _sexp_string(node[1] if len(node) > 1 else '').lower()
+    maintype = _sexp_string(node[0]).lower()
+    return {
+        'attachment_id': section,
+        'filename': filename,
+        'mime_type': f'{maintype}/{subtype}' if subtype else maintype,
+        'size': size,
+    }
+
+
+def _walk_bodystructure(node: Any, prefix: str = '') -> list[dict[str, Any]]:
+    if not isinstance(node, list) or not node:
+        return []
+    children = [item for item in node if isinstance(item, list)]
+    if children and isinstance(node[0], list):
+        found: list[dict[str, Any]] = []
+        for index, child in enumerate(children, start=1):
+            section = str(index) if not prefix else f'{prefix}.{index}'
+            found.extend(_walk_bodystructure(child, section))
+        return found
+    part = _attachment_from_body_part(node, prefix or '1')
+    return [part] if part else []
+
+
+def _attachments_from_bodystructure(raw: str) -> list[dict[str, Any]]:
+    match = re.search(r'BODYSTRUCTURE\s+(\(.*\))', str(raw or ''), re.I | re.S)
+    blob = match.group(1) if match else str(raw or '').strip()
+    if not blob:
+        return []
+    try:
+        parsed = _parse_imap_sexp(blob)
+    except Exception:
+        return []
+    return _walk_bodystructure(parsed)
+
+
+def _named_mime_parts(msg: email.message.Message) -> list[tuple[str, str, email.message.Message, bytes]]:
+    parts: list[tuple[str, str, email.message.Message, bytes]] = []
+    index = 0
+    for part in msg.walk():
+        filename = part.get_filename() or ''
+        if not filename:
+            continue
+        payload = part.get_payload(decode=True)
+        if payload is None:
+            continue
+        index += 1
+        decoded = _decode_header_value(filename)
+        parts.append((str(index), decoded, part, payload))
+    return parts
+
+
 def _imap_payload(fetched: Any) -> bytes | None:
     if not fetched:
         return None
@@ -1040,7 +1176,17 @@ class _IMAPBackend:
         self.endpoint = _resolve_imap_endpoint(self.provider, self.email)
 
     def _connect(self) -> imaplib.IMAP4_SSL:
-        client = imaplib.IMAP4_SSL(self.endpoint['imap_host'], self.endpoint['imap_port'])
+        try:
+            client = imaplib.IMAP4_SSL(
+                self.endpoint['imap_host'],
+                self.endpoint['imap_port'],
+                timeout=_IMAP_TIMEOUT_SECONDS,
+            )
+        except OSError as orig:
+            raise ToolExecutionError(f'Failed to connect to the mailbox: {orig}') from orig
+        sock = getattr(client, 'sock', None)
+        if sock is not None:
+            sock.settimeout(_IMAP_TIMEOUT_SECONDS)
         if self.endpoint.get('imap_id'):
             try:
                 client.xatom('ID', '("name" "LazyMind" "version" "1.0")')
@@ -1134,16 +1280,39 @@ class _IMAPBackend:
     def _fetch_message(self, message_id: str, client=None) -> email.message.Message:
         return email.message_from_bytes(self._fetch_raw(message_id, '(RFC822)', client))
 
+    def _list_structure_attachments(self, message_id: str, client) -> list[dict[str, Any]]:
+        folder, uid = _split_mail_ref(message_id)
+        if not _select_mailbox(client, folder, readonly=True):
+            return []
+        status, fetched = client.uid('FETCH', uid, '(BODYSTRUCTURE)')
+        if status != 'OK':
+            return []
+        return _attachments_from_bodystructure(_imap_fetch_text(fetched))
+
     def _read_message(self, message_id: str, client=None) -> dict[str, Any]:
-        raw = self._fetch_raw(
-            message_id,
-            '(BODY.PEEK[HEADER] BODY.PEEK[TEXT]<0.20000>)',
-            client,
-            required=False,
-        )
-        if not raw:
-            raw = self._fetch_raw(message_id, '(RFC822)', client)
-        return self._read_parsed_message(message_id, raw, client=client)
+        own = client is None
+        if own:
+            client = self._connect()
+        try:
+            attachments = self._list_structure_attachments(message_id, client)
+            raw = self._fetch_raw(
+                message_id,
+                '(BODY.PEEK[HEADER] BODY.PEEK[TEXT]<0.20000>)',
+                client,
+                required=False,
+            )
+            if not raw:
+                raw = self._fetch_raw(message_id, '(RFC822)', client)
+            parsed = self._read_parsed_message(message_id, raw, client=client)
+            if attachments:
+                parsed['attachments'] = attachments
+            return parsed
+        finally:
+            if own:
+                try:
+                    client.logout()
+                except Exception:
+                    pass
 
     def _read_parsed_message(
         self,
@@ -1164,7 +1333,7 @@ class _IMAPBackend:
                 disposition = str(part.get('Content-Disposition') or '')
                 match = re.search(r'size\s*=\s*(\d+)', disposition, re.I)
                 attachments.append({
-                    'attachment_id': decoded,
+                    'attachment_id': str(len(attachments) + 1),
                     'filename': decoded,
                     'mime_type': part.get_content_type(),
                     'size': int(match.group(1)) if match else 0,
@@ -1270,16 +1439,16 @@ class _IMAPBackend:
     def read_attachments(self, message_id: str) -> dict[str, Any]:
         """Fetch the message once and return every named MIME attachment payload."""
         msg = self._fetch_message(message_id)
+        parts: list[dict[str, Any]] = []
         files: dict[str, bytes] = {}
         html_parts: list[str] = []
+        for section, filename, _part, payload in _named_mime_parts(msg):
+            parts.append({'attachment_id': section, 'filename': filename, 'data': payload})
+            files.setdefault(section, payload)
+            files.setdefault(filename, payload)
         for part in msg.walk():
             filename = part.get_filename() or ''
             if filename:
-                decoded = _decode_header_value(filename)
-                payload = part.get_payload(decode=True)
-                if payload is None or decoded in files:
-                    continue
-                files[decoded] = payload
                 continue
             if part.get_content_type() == 'text/html':
                 payload = part.get_payload(decode=True) or b''
@@ -1287,7 +1456,7 @@ class _IMAPBackend:
                 html_parts.append(payload.decode(charset, errors='replace'))
         html = '\n'.join(html_parts)
         transfer = bool(_extract_transfer_links(html) or _TRANSFER_HINT_RE.search(html))
-        return {'files': files, 'transfer': transfer}
+        return {'files': files, 'parts': parts, 'transfer': transfer}
 
     def read_attachment(self, message_id: str, attachment_id: str) -> bytes:
         wanted = (attachment_id or '').strip()
@@ -1353,10 +1522,18 @@ class _IMAPBackend:
             )
             accepted = [addr for addr in recipients if addr not in refused]
             if accepted:
-                _fail(
-                    'Failed to send the email: some recipients were rejected '
-                    f'({detail}). Accepted: {", ".join(accepted)}.'
-                )
+                tzinfo = _user_timezone()
+                now = datetime.now(tzinfo) if tzinfo is not None else datetime.now().astimezone()
+                return {
+                    'id': message.get('Message-ID') or '',
+                    'sent_at': now.isoformat(),
+                    'partial_sent': True,
+                    'accepted': accepted,
+                    'refused': [
+                        {'address': addr, 'code': code, 'error': str(err)}
+                        for addr, (code, err) in refused.items()
+                    ],
+                }
             _fail(f'Failed to send the email: recipients were rejected ({detail}).')
         tzinfo = _user_timezone()
         now = datetime.now(tzinfo) if tzinfo is not None else datetime.now().astimezone()
@@ -1374,10 +1551,15 @@ def _backend(cred: dict[str, str]):
 
 def _build_message(draft: dict[str, Any], mailbox: str) -> EmailMessage:
     message = EmailMessage()
+    pending = [
+        str(addr).strip() for addr in (draft.get('pending_recipients') or []) if str(addr).strip()
+    ]
+    to_addrs = pending or list(draft.get('to') or [])
+    cc_addrs = [] if pending else list(draft.get('cc') or [])
     message['From'] = mailbox
-    message['To'] = ', '.join(draft.get('to') or [])
-    if draft.get('cc'):
-        message['Cc'] = ', '.join(draft['cc'])
+    message['To'] = ', '.join(to_addrs)
+    if cc_addrs:
+        message['Cc'] = ', '.join(cc_addrs)
     message['Subject'] = str(draft.get('subject') or '')
     message['Date'] = formatdate(localtime=True)
     if draft.get('in_reply_to'):
@@ -1421,6 +1603,9 @@ def _preview(draft: dict[str, Any]) -> dict[str, Any]:
         'requires_reauth': bool(draft.get('requires_reauth')),
         'reauth_path': _REAUTH_PATH if draft.get('requires_reauth') else '',
         'delivery_unknown': status == 'delivery_unknown',
+        'error_code': 'partial_sent' if status == 'partial_sent' else '',
+        'accepted_recipients': list(draft.get('accepted_recipients') or []),
+        'refused_recipients': list(draft.get('pending_recipients') or []),
         'mailboxes': list(draft.get('mailboxes') or []),
     }
 
@@ -1557,8 +1742,9 @@ class MailToolkit:
             items.extend(item for item in (result.get('items') or []) if isinstance(item, dict))
         if not items and errors and len(errors) == len(accounts):
             _fail(errors[0]['error'])
+        items.sort(key=lambda row: str(row.get('date') or ''), reverse=True)
         payload: dict[str, Any] = {
-            'items': items,
+            'items': items[:20],
             'mailboxes': [cred.get('email') or '' for cred in accounts],
         }
         if errors:
@@ -1610,35 +1796,70 @@ class MailToolkit:
             wanted = str(attachment_id).strip()
             if _TRANSFER_URL_RE.search(wanted):
                 _fail(_TRANSFER_NOTE)
-            filename = os.path.basename(_decode_header_value(wanted)) or 'attachment.bin'
-            ext = _attachment_ext(filename)
-            if ext and ext not in _COMMON_ATTACHMENT_EXTS:
-                _fail(f'Attachment type {ext} is not supported.')
             mid = str(message_id).strip()
-            target = _incoming_attachment_path(cred, mid, filename)
+            filename = os.path.basename(_decode_header_value(wanted)) or 'attachment.bin'
+            save_name = filename
+            target = _incoming_attachment_path(cred, mid, save_name)
             if not os.path.isfile(target):
                 result = _backend(cred).read_attachments(mid)
                 if not isinstance(result, dict):
                     result = {}
                 files = result.get('files') if isinstance(result.get('files'), dict) else {}
-                payload = files.get(filename) or files.get(wanted)
+                parts = [part for part in (result.get('parts') or []) if isinstance(part, dict)]
+                matched = next(
+                    (
+                        part for part in parts
+                        if str(part.get('attachment_id') or '') == wanted
+                        or str(part.get('filename') or '') == wanted
+                    ),
+                    None,
+                )
+                payload = None
+                if matched:
+                    payload = matched.get('data')
+                    filename = os.path.basename(str(matched.get('filename') or filename)) or filename
+                    save_name = f"{matched.get('attachment_id')}-{filename}"
+                else:
+                    payload = files.get(filename) or files.get(wanted)
+                    save_name = filename
+                ext = _attachment_ext(filename)
+                if ext and ext not in _COMMON_ATTACHMENT_EXTS:
+                    _fail(f'Attachment type {ext} is not supported.')
                 if payload is None:
                     if result.get('transfer'):
                         _fail(_TRANSFER_NOTE)
                     _fail('Failed to read the email attachment.')
-                for name, raw in files.items():
+                if parts:
+                    to_write = parts
+                else:
+                    to_write = [
+                        {'attachment_id': '', 'filename': name, 'data': raw}
+                        for name, raw in files.items()
+                        if isinstance(raw, (bytes, bytearray))
+                    ]
+                for part in to_write:
+                    raw = part.get('data')
                     if not isinstance(raw, (bytes, bytearray)):
                         continue
-                    saved_name = os.path.basename(_decode_header_value(str(name))) or 'attachment.bin'
-                    if not _is_common_attachment(saved_name):
+                    part_name = os.path.basename(str(part.get('filename') or 'attachment.bin'))
+                    if not _is_common_attachment(part_name):
                         continue
-                    path = _incoming_attachment_path(cred, mid, saved_name)
+                    aid = str(part.get('attachment_id') or '').strip()
+                    stored = f'{aid}-{part_name}' if aid else part_name
+                    path = _incoming_attachment_path(cred, mid, stored)
                     if os.path.isfile(path):
                         continue
                     with open(path, 'wb') as handle:
                         handle.write(raw)
+                target = _incoming_attachment_path(cred, mid, save_name)
+                if not os.path.isfile(target) and isinstance(payload, (bytes, bytearray)):
+                    with open(target, 'wb') as handle:
+                        handle.write(payload)
                 if not os.path.isfile(target):
                     _fail('Failed to read the email attachment.')
+            ext = _attachment_ext(filename)
+            if ext and ext not in _COMMON_ATTACHMENT_EXTS:
+                _fail(f'Attachment type {ext} is not supported.')
             return _parsed_mail_attachment(target, filename, mid)
 
         return _call_mailboxes(mailbox, _download)
@@ -1859,7 +2080,11 @@ class MailToolkit:
                 'Confirm the latest preview card; do not send from an older card.'
             )
         _apply_confirm_patch(draft)
-        recipients = [addr for addr in (draft.get('to') or []) if str(addr).strip()]
+        recipients = [
+            str(addr).strip()
+            for addr in (draft.get('pending_recipients') or draft.get('to') or [])
+            if str(addr).strip()
+        ]
         if not recipients:
             draft['status'] = 'failed'
             draft['last_error'] = 'No recipients. Add at least one address in To, then confirm again.'
@@ -1882,10 +2107,37 @@ class MailToolkit:
             _save_draft(draft)
             _emit_draft_card(draft)
             raise
+        if result.get('partial_sent'):
+            refused = [
+                str(item.get('address') or '').strip()
+                for item in (result.get('refused') or [])
+                if str(item.get('address') or '').strip()
+            ]
+            accepted = [str(addr).strip() for addr in (result.get('accepted') or []) if str(addr).strip()]
+            draft['status'] = 'partial_sent'
+            draft['accepted_recipients'] = accepted
+            draft['pending_recipients'] = refused
+            draft['last_error'] = (
+                'Some recipients were rejected after others were already accepted. '
+                f'Accepted: {", ".join(accepted)}. Refused: {", ".join(refused)}. '
+                'Resend only retries the refused addresses.'
+            )
+            draft['sent_at'] = result.get('sent_at') or ''
+            _save_draft(draft)
+            _emit_draft_card(draft)
+            return {
+                'status': 'partial_sent',
+                'draft_id': draft['draft_id'],
+                'revision': _draft_revision(draft),
+                'accepted': accepted,
+                'refused': refused,
+                'mailbox': cred['email'],
+            }
         sent_at = result.get('sent_at') or _iso(datetime.now(timezone.utc))
         draft['status'] = 'sent'
         draft['sent_at'] = sent_at
         draft['last_error'] = ''
+        draft['pending_recipients'] = []
         draft['provider_message_id'] = result.get('id') or ''
         _save_draft(draft)
         _emit_draft_card(draft)

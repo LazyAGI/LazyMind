@@ -57,7 +57,7 @@ describe("MailDraftCard", () => {
       <MemoryRouter>
         <MailDraftCard
           draft={{
-            draft_id: "draft_2",
+            draft_id: "draft_3",
             revision: 1,
             to: ["a@b.com"],
             subject: "hi",

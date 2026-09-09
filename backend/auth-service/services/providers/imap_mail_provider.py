@@ -94,7 +94,14 @@ class IMAPMailProvider(CloudOAuthProvider):
     def _verify_imap(self, email: str, secret: str, endpoint: dict[str, object]) -> None:
         client = None
         try:
-            client = imaplib.IMAP4_SSL(str(endpoint['imap_host']), int(endpoint['imap_port']))
+            client = imaplib.IMAP4_SSL(
+                str(endpoint['imap_host']),
+                int(endpoint['imap_port']),
+                timeout=20,
+            )
+            sock = getattr(client, 'sock', None)
+            if sock is not None:
+                sock.settimeout(20)
             if endpoint.get('imap_id'):
                 try:
                     client.xatom('ID', '("name" "LazyMind" "version" "1.0")')

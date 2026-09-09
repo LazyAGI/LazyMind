@@ -7,6 +7,8 @@ import { getArtifactFilename } from "@/modules/chat/utils/artifactLinks";
 import "./index.scss";
 
 const MAX_MAIL_ATTACHMENT_BYTES = 15 * 1024 * 1024;
+const MAX_MAIL_ATTACHMENT_COUNT = 5;
+const MAX_MAIL_ATTACHMENT_TOTAL_BYTES = 20 * 1024 * 1024;
 
 export interface MailDraftPreview {
   draft_id?: string;
@@ -26,6 +28,8 @@ export interface MailDraftPreview {
   requires_reauth?: boolean;
   reauth_path?: string;
   delivery_unknown?: boolean;
+  accepted_recipients?: string[];
+  refused_recipients?: string[];
   mailboxes?: Array<{ email?: string; provider?: string }>;
 }
 
@@ -112,7 +116,11 @@ export default function MailDraftCard({
   const sent = draft.status === "sent";
   const deliveryUnknown =
     draft.status === "delivery_unknown" || Boolean(draft.delivery_unknown);
-  const failed = !sent && !deliveryUnknown && (draft.status === "failed" || Boolean(draft.last_error));
+  const partialSent = draft.status === "partial_sent";
+  const failed =
+    !sent &&
+    !deliveryUnknown &&
+    (draft.status === "failed" || partialSent || Boolean(draft.last_error));
   const editable = !sent && !disabled;
   const [to, setTo] = useState((draft.to || []).join(", "));
   const [cc, setCc] = useState((draft.cc || []).join(", "));
@@ -129,12 +137,18 @@ export default function MailDraftCard({
     const seen = new Set<string>();
     return artifacts
       .map((artifact) => {
+        if (artifact.content_type !== "file" && artifact.content_type !== "image") {
+          return null;
+        }
+        const path = String(artifact.value?.path || "").trim();
+        if (!path) {
+          return null;
+        }
         const name = getArtifactFilename(artifact);
-        const path = String(artifact.value?.path || artifact.filename || name).trim();
         return { name, path };
       })
-      .filter((item) => {
-        if (!item.name || seen.has(item.name)) {
+      .filter((item): item is { name: string; path: string } => {
+        if (!item?.name || seen.has(item.name)) {
           return false;
         }
         seen.add(item.name);
@@ -188,11 +202,24 @@ export default function MailDraftCard({
     if (!files?.length) {
       return;
     }
+    const currentUploads = attachments.filter((item) => item.source === "upload");
     const next: LocalAttachment[] = [];
     for (const file of Array.from(files)) {
+      if (currentUploads.length + next.length >= MAX_MAIL_ATTACHMENT_COUNT) {
+        message.error(t("chat.mailDraft.attachmentTooMany"));
+        break;
+      }
       if (file.size > MAX_MAIL_ATTACHMENT_BYTES) {
         message.error(t("chat.mailDraft.attachmentTooLarge"));
         continue;
+      }
+      const used = currentUploads.reduce(
+        (sum, item) => sum + Math.floor(((item.content_base64 || "").length * 3) / 4),
+        0,
+      ) + next.reduce((sum, item) => sum + Math.floor(((item.content_base64 || "").length * 3) / 4), 0);
+      if (used + file.size > MAX_MAIL_ATTACHMENT_TOTAL_BYTES) {
+        message.error(t("chat.mailDraft.attachmentTotalTooLarge"));
+        break;
       }
       const content_base64 = await readFileBase64(file);
       next.push({
@@ -351,7 +378,10 @@ export default function MailDraftCard({
       {!hasRecipient && !sent ? (
         <Alert type="error" showIcon message={t("chat.mailDraft.recipientRequired")} />
       ) : null}
-      {failed ? (
+      {partialSent ? (
+        <Alert type="warning" showIcon message={draft.last_error || t("chat.mailDraft.partialSent")} />
+      ) : null}
+      {failed && !partialSent ? (
         <Alert type="error" showIcon message={draft.last_error || t("chat.mailDraft.sendFailed")} />
       ) : null}
       {deliveryUnknown ? (
