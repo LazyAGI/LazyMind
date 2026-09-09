@@ -228,7 +228,8 @@ func (h RemoteHandler) readAttemptInput(ctx context.Context, materialID string, 
 }
 
 func (h RemoteHandler) SaveArtifact(w http.ResponseWriter, r *http.Request) {
-	if _, ok := h.authorize(w, r); !ok {
+	token, ok := h.authorize(w, r)
+	if !ok {
 		return
 	}
 	var body Artifact
@@ -244,6 +245,7 @@ func (h RemoteHandler) SaveArtifact(w http.ResponseWriter, r *http.Request) {
 		remoteReply(w, 503, nil, "ATTEMPT_CONTEXT_FAILED", err.Error())
 		return
 	}
+	ctx.ExecutionHandle = token
 	declared := false
 	outputs := ctx.DeclaredOutputs
 	if len(outputs) == 0 {

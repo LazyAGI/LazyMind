@@ -1,9 +1,6 @@
 package main
 
 import (
-	"bytes"
-	"encoding/json"
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -45,25 +42,6 @@ import (
 
 	"github.com/gorilla/mux"
 )
-
-type routeCapture struct {
-	header http.Header
-	body   bytes.Buffer
-	status int
-}
-
-type routeProjectionError string
-
-func (e routeProjectionError) Error() string { return string(e) }
-
-func (c *routeCapture) Header() http.Header    { return c.header }
-func (c *routeCapture) WriteHeader(status int) { c.status = status }
-func (c *routeCapture) Write(body []byte) (int, error) {
-	if c.status == 0 {
-		c.status = http.StatusOK
-	}
-	return c.body.Write(body)
-}
 
 func handleAgentThreadAPI(r *mux.Router, method, path string, perms []string, h http.HandlerFunc) {
 	handleAPI(r, method, path, perms, h).MatcherFunc(func(r *http.Request, _ *mux.RouteMatch) bool {
@@ -114,6 +92,8 @@ func registerAllRoutes(r *mux.Router) {
 		Artifacts: workflowexecutor.DBArtifactSink{DB: corestore.DB()},
 	}
 	hostedHandler := workflowhosted.Handler{Service: hostedService}
+	workflowControl := workflow.WorkflowControlHandler{Service: workflow.WorkflowControlService{DB: corestore.DB()}}
+	handleAPI(r, "GET", "/workflow-control/capabilities", []string{"qa.read"}, workflowControl.Capabilities)
 
 	// ----- Datasettext -----
 	handleAPI(r, "GET", "/dataset/algos", []string{"document.read"}, doc.ListAlgos)
@@ -431,27 +411,22 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}:stop", []string{"qa.write"}, workflowFacade.StopWorkflow)
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}:resume", []string{"qa.write"}, workflowFacade.ResumeWorkflow)
 	handleAPI(r, "GET", "/workflow-commands/{command_id}", []string{"qa.read"}, workflowFacade.GetCommand)
-	workflowEvents := workflowstream.Handler{Store: workflowRepository, Snapshot: func(req *http.Request, sessionID, owner string) (any, error) {
-		if err := workflowRepository.AuthorizeSession(req.Context(), sessionID, owner); err != nil {
-			return nil, err
-		}
-		recorder := &routeCapture{header: http.Header{}}
-		projectionRequest := mux.SetURLVars(req.Clone(req.Context()), map[string]string{"session_id": sessionID})
-		workflow.GetSessionProjection(recorder, projectionRequest)
-		if recorder.status >= http.StatusBadRequest {
-			return nil, routeProjectionError(fmt.Sprintf("projection status %d: %s", recorder.status, recorder.body.String()))
-		}
-		var projection any
-		if err := json.Unmarshal(recorder.body.Bytes(), &projection); err != nil {
-			return nil, err
-		}
-		return projection, nil
-	}}
+	workflowEvents := workflowstream.Handler{Store: workflowRepository, Snapshot: workflow.SessionEventSnapshot}
 	handleAPI(r, "GET", "/workflow-sessions/{session_id}/events", []string{"qa.read"}, workflowEvents.ServeHTTP)
 	handleAPI(r, "GET", "/conversations/{conversation_id}/workflow-sessions", []string{"qa.read"}, workflow.ListConversationSessions)
 	handleAPI(r, "GET", "/conversations/{conversation_id}/workflow-sessions:active", []string{"qa.read"}, workflow.GetActiveConversationSession)
 	handleAPI(r, "GET", "/conversations/{conversation_id}/workflow-sessions:latest", []string{"qa.read"}, workflow.GetLatestConversationSession)
 	handleAPI(r, "GET", "/workflow-sessions/{session_id}", []string{"qa.read"}, workflowFacade.SessionAccess(http.HandlerFunc(workflow.GetSessionDetail)))
+	handleAPI(r, "GET", "/workflow-sessions/{session_id}/control", []string{"qa.read"}, workflowFacade.SessionAccess(http.HandlerFunc(workflowControl.Read)))
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}/control", []string{"qa.write"}, workflowFacade.SessionAccess(http.HandlerFunc(workflowControl.Command)))
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}/executions:begin", []string{"qa.write"}, workflowFacade.SessionAccess(http.HandlerFunc(workflowControl.Begin)))
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}/executions:stop", []string{"qa.write"}, workflowFacade.SessionAccess(http.HandlerFunc(workflowControl.StopExecution)))
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}/host-binding", []string{"qa.write"}, workflowFacade.SessionAccess(http.HandlerFunc(workflowControl.Bind)))
+	handleAPI(r, "GET", "/workflow-host-actions", []string{"qa.read"}, workflowControl.Actions)
+	handleAPI(r, "GET", "/workflow-host-actions/{action_id}", []string{"qa.read"}, workflowControl.Action)
+	handleAPI(r, "POST", "/workflow-host-actions/{action_id}:claim", []string{"qa.write"}, workflowControl.ClaimAction)
+	handleAPI(r, "POST", "/workflow-host-actions/{action_id}:settle", []string{"qa.write"}, workflowControl.SettleAction)
+
 	handleAPI(r, "GET", "/workflow-sessions/{session_id}/slots", []string{"qa.read"}, workflowFacade.SessionAccess(http.HandlerFunc(workflow.GetSessionSlots)))
 	handleAPI(r, "GET", "/workflow-sessions/{session_id}/steps", []string{"qa.read"}, workflowFacade.SessionAccess(http.HandlerFunc(workflow.GetSessionSteps)))
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}:approval-preference", []string{"qa.write"}, workflowFacade.SessionAccess(http.HandlerFunc(workflow.SetWorkflowApprovalPreference)))

@@ -87,6 +87,10 @@ jobs:
         with:
           fetch-depth: 0
 
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '10.0.0'
+
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
@@ -95,9 +99,13 @@ jobs:
         working-directory: frontend
         run: node scripts/openapi/check-stale.mjs
 
-      - name: Install and test with coverage
+      - name: Build frontend and test with coverage
         run: |
-          cd tests/frontend
+          cd frontend
+          pnpm install --frozen-lockfile
+          pnpm exec vitest run src/modules/chat/utils/workflowControl.test.ts src/modules/chat/components/WorkflowPanel/SlotText.test.tsx src/modules/chat/components/WorkflowPanel/workflowApproval.test.ts src/modules/chat/components/WorkflowPanel/ppt/exportHtmlToPptx.test.ts
+          pnpm build
+          cd ../tests/frontend
           npm install
           npm install -D c8
           npx c8 --reporter=html --reporter=cobertura npm test
@@ -129,6 +137,16 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.25.11'
+      - uses: pnpm/action-setup@v4
+        if: runner.os == 'Linux'
+        with:
+          version: '10.0.0'
+      - uses: actions/setup-node@v4
+        if: runner.os == 'Linux'
+        with:
+          node-version: '24'
+          cache: pnpm
+          cache-dependency-path: integrations/dsh-workflow/pnpm-lock.yaml
       - name: Test Local Proxy
         working-directory: local/local-proxy
         run: go test ./... -v
@@ -138,6 +156,16 @@ jobs:
       - name: Test LazyMind Agent Connector
         working-directory: local/lazymind-cli
         run: go test ./... -v
+      - name: Test and verify the bundled DSH plugin
+        if: runner.os == 'Linux'
+        working-directory: integrations/dsh-workflow
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm typecheck
+          pnpm test
+          pnpm bundle
+          (cd ../../local/lazymind-cli && go run ./cmd/package-workflow-bundle)
+          git diff --exit-code -- lib ../../local/lazymind-cli/internal/adapters/mcpclient/assets/dsh-workflow.tgz
 
   test-desktop-shell:
     needs: [lint, doc_check]
@@ -155,6 +183,19 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+      - uses: actions/setup-go@v5
+        if: runner.os == 'Windows'
+        with:
+          go-version: '1.25.11'
+          cache-dependency-path: local/lazymind-cli/go.sum
+      - name: Build native Bridge for lifecycle regression
+        if: runner.os == 'Windows'
+        shell: powershell
+        working-directory: local/lazymind-cli
+        run: |
+          go build -o "$env:RUNNER_TEMP\lazymind.exe" ./cmd/lazymind
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          "LAZYMIND_TEST_BRIDGE_EXE=$env:RUNNER_TEMP\lazymind.exe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Test Desktop shell
         shell: bash
         run: node --test desktop/scripts/*.test.mjs

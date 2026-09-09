@@ -50,6 +50,8 @@ import { WorkflowTabActions } from './actions/WorkflowTabActions';
 import { WorkflowPanelTabActiveContext, SlotEditingContext, type SlotFooterAction } from './slotEditingContext';
 import { findWriterArtifactStream } from './writerArtifactStream';
 import { resolveCompletedContinueStep } from './workflowContinue';
+import { WorkflowControlActions } from './WorkflowControlActions';
+import type { WorkflowActionIntent, WorkflowControlView } from '@/modules/chat/utils/workflowControl';
 import { resolvePendingApprovalStep } from './workflowApproval';
 import { moveSelectedCompositePages, sameCompositePageOrder } from './compositePageReorder';
 import {
@@ -192,7 +194,20 @@ function IntentPopover({
   );
 }
 
+export interface WorkflowPanelControlContext {
+  session: WorkflowSession;
+  stepId: string;
+  stepIds: string[];
+  pending: boolean;
+  runAction(action: () => Promise<void>, flush?: boolean): Promise<void>;
+}
+
 interface WorkflowPanelProps {
+  /** External hosts reuse this panel and its editors; only intent transport differs. */
+  control?: WorkflowControlView;
+  onControl?: (intent: WorkflowActionIntent) => Promise<void>;
+  controlled?: boolean;
+  statusLabel?: string;
   conversationId: string;
   /** Called when the user clicks Continue or Retry — simulates sending a user message. */
   onSendMessage?: (text: string) => void | Promise<void>;
@@ -1633,6 +1648,7 @@ function persistExpanded(conversationId: string, expanded: boolean) {
 
 export function WorkflowPanel({
   conversationId,
+  control, onControl, controlled = false, statusLabel,
   onSendMessage,
   onReference,
   onStop,
@@ -1850,6 +1866,8 @@ export function WorkflowPanel({
   const visibleActiveTabIdx = hasTabs
     ? Math.min(activeTabIdx, tabs.length - 1)
     : 0;
+  const controlTab = tabs[visibleActiveTabIdx];
+  const controlStepId = (controlTab ? getTabStepId(controlTab) : undefined) ?? session.current_step_id;
   const hasIntent = true;
   const showActions =
     session.status === 'waiting' ||
@@ -1860,6 +1878,14 @@ export function WorkflowPanel({
     () => buildDocumentFooterItems(footerActions),
     [footerActions],
   );
+  const tabReadOnly = (tab?: TabDef) => {
+    if (!controlled || !control) return false;
+    if (control.continuation === 'stopped') return true;
+    if (!tab) return control.continuation === 'completed';
+    const ids = tab.status_step_ids ?? [tab.step_id ?? tab.id];
+    const reviews = control.reviews.filter(review => ids.includes(review.step_id));
+    return reviews.some(review => review.status === 'accepted') && !reviews.some(review => review.status === 'pending');
+  };
   const displayStatus = autoRunning ? 'active' : session.status;
   const displayStatusKey = isWorkflowReadyToStart(
     displayStatus,
@@ -1912,6 +1938,17 @@ export function WorkflowPanel({
     } finally {
       setActionPending(false);
     }
+  }
+
+  async function runControlledAction(action: () => Promise<void>, flush = true) {
+    if (actionPending) return;
+    setActionPending(true);
+    try {
+      if (flush && !(await flushPendingEdits())) return;
+      await action();
+    } catch (error) {
+      antdMessage.error(error instanceof Error ? error.message : t('chat.workflowRunControlFailed'));
+    } finally { setActionPending(false); }
   }
 
   function handleContinue() {
@@ -1968,7 +2005,7 @@ export function WorkflowPanel({
           <span className='workflow-panel__title'>{ui.name || session.workflow_id}</span>
           <span
             className={`workflow-panel__status workflow-panel__status--${displayStatus}`}
-            aria-label={t('chat.workflowStatusAria', { status: t(displayStatusKey) })}
+            aria-label={t('chat.workflowStatusAria', { status: statusLabel ?? t(displayStatusKey) })}
             onClick={() => session && setStateGraphOpen(true)}
             style={{ cursor: 'pointer' }}
             title={t('chat.workflowViewWorkflow')}
@@ -1976,7 +2013,7 @@ export function WorkflowPanel({
             tabIndex={0}
             onKeyDown={(e) => e.key === 'Enter' && session && setStateGraphOpen(true)}
           >
-            {t(displayStatusKey)}
+            {statusLabel ?? t(displayStatusKey)}
           </span>
         </div>
         <div className='workflow-panel__header-right'>
@@ -2147,6 +2184,7 @@ export function WorkflowPanel({
                 <SlotDownloadContext.Provider value={workflowTabAllowsDownload(tab, idx, tabs.length)}>
                   <TabSlotGrid
                     tab={tab}
+                    readOnly={tabReadOnly(tab)}
                     session={session}
                     tasks={taskCenterTasks}
                     onRefresh={refresh}
@@ -2159,6 +2197,7 @@ export function WorkflowPanel({
             ))
           ) : (
             <AutoSlotGrid
+              readOnly={tabReadOnly()}
               session={session}
               onRefresh={refresh}
               onReference={onReference}
@@ -2168,7 +2207,7 @@ export function WorkflowPanel({
       )}
 
       {/* Footer */}
-      {!collapsed && showActions && (
+      {!collapsed && (showActions || controlled) && (
         <div className='workflow-panel__footer' role='group' aria-label={t('chat.workflowSessionControls')}>
           {documentFooter.actionItems.length > 0 || documentFooter.statusMessages.length > 0 ? (
             <div className='workflow-panel__footer-document'>
@@ -2235,6 +2274,13 @@ export function WorkflowPanel({
               ) : null}
             </div>
           ) : null}
+          {controlled ? (control && onControl ? <WorkflowControlActions control={control} act={onControl} context={{
+            session,
+            stepId: controlStepId,
+            stepIds: controlTab?.status_step_ids ?? [controlStepId],
+            pending: actionPending,
+            runAction: runControlledAction,
+          }} /> : <span role='status'>{t('chat.workflowControlLegacy')}</span>) : <>
           {displayStatus === 'active' && onStop && (
             <button
               type='button'
@@ -2320,10 +2366,11 @@ export function WorkflowPanel({
               </div>
             </div>
           )}
+          </>}
         </div>
       )}
     </div>
-    {!collapsed && approvalStepId && (
+    {!controlled && !collapsed && approvalStepId && (
       <div className='workflow-panel__approval-bar' role='group' aria-label={t('chat.workflowApprovalActions')}>
         <span className='workflow-panel__approval-label'>{t('chat.workflowApprovalRequired')}</span>
         <button

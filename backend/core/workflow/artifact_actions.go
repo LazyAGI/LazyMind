@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"lazymind/core/workflow/controlstore"
 	"net/http"
 	"strconv"
 
@@ -85,6 +86,10 @@ type artifactActionResult struct {
 func ExecuteArtifactAction(w http.ResponseWriter, r *http.Request) {
 	target, body, ok := prepareArtifactActionPreview(w, r)
 	if !ok {
+		return
+	}
+	if err := controlstore.GuardMaterialEdit(target.db, *target.session, target.revision.SlotID); err != nil {
+		writeWorkflowControlError(w, err)
 		return
 	}
 	llmConfig, err := modelconfig.LoadLLMConfig(r.Context(), target.db, store.UserID(r))

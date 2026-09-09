@@ -63,7 +63,7 @@ func newSchemaBuilder() *schemaBuilder {
 func operationRegistryOpenAPISpec() map[string]any {
 	builder := newSchemaBuilder()
 	paths := map[string]any{}
-	for _, op := range registeredCoreOperations() {
+	for _, op := range append(registeredCoreOperations(), workflowControlOperations()...) {
 		pathItem, _ := paths[op.Path].(map[string]any)
 		if pathItem == nil {
 			pathItem = map[string]any{}

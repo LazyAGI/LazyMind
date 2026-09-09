@@ -9,6 +9,7 @@ import (
 // trusted Executor boundaries. It never contains a model configuration, API
 // credential or Host-local path. Public adapters must redact Metadata.
 type AttemptContext struct {
+	ExecutionHandle         string            `json:"-"`
 	ContractVersion         string            `json:"contract_version"`
 	SessionID               string            `json:"session_id"`
 	AttemptID               string            `json:"attempt_id"`
@@ -37,6 +38,7 @@ type AttemptContext struct {
 }
 
 type Artifact struct {
+	stagedID    string
 	Slot        string          `json:"slot"`
 	ContentType string          `json:"content_type"`
 	Value       json.RawMessage `json:"value"`

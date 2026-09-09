@@ -1,136 +1,101 @@
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type { ConversationNodeDefinition } from '@deepseek-ai/dsh-client-ui-conversation/client'
-import type {} from '@deepseek-ai/dsh-client-ui-chat/client'
-import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
-import type { ChatConversationViewNode } from '@deepseek-ai/dsh-client-ui-chat/client'
-import { useEffect, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent } from 'react'
-
-type Run = { runId: string; url: string }
+import type {} from '@deepseek-ai/dsh-tools/types'
+import type { ChatNode } from '@deepseek-ai/dsh-client-ui-chat/client'
+import { useEffect, useRef, useSyncExternalStore, type PointerEvent as ReactPointerEvent } from 'react'
+import { eventRun, type RunLink } from '../protocol'
+import { runKey, windowStore } from './window-store'
 
 declare module '@deepseek-ai/dsh-client-ui-chat/client' {
-  interface ChatNodeDataMap {
-    'lazymind-workflow': Run
-  }
+  interface ChatNodeDataMap { 'lazymind-workflow': RunLink }
 }
 
-const definition: ConversationNodeDefinition<Run> = {
-  kind: 'lazymind-workflow',
-  target: 'chat',
-  match(event) { return event.type === 'lazymind-workflow/open' ? { id: event.data.runId, role: 'start' } : null },
-  start(_context, match) {
-    if (match.event.type !== 'lazymind-workflow/open') {
-      throw new Error('lazymind-workflow start requires lazymind-workflow/open')
-    }
-    return match.event.data as Run
-  },
-  update(context) { return context.state },
-  buildViewNode(context): ChatConversationViewNode<'lazymind-workflow'> | null {
-    if (context.start === undefined) return null
-    return {
-      key: context.key,
-      kind: 'lazymind-workflow',
-      id: context.id,
-      target: 'chat',
-      anchorSeq: context.start.event.seq,
-      location: context.start.location,
-      visibility: 'visible',
-      data: context.state,
-    }
-  },
-}
-
-type WindowState = { readonly run?: Run; readonly minimized: boolean }
-
-let state: WindowState = { minimized: false }
-const listeners = new Set<() => void>()
-const automaticallyOpened = new Set<string>()
-
-function publish(next: WindowState): void {
-  state = next
-  for (const listener of listeners) listener()
-}
-
-function subscribe(listener: () => void): () => void {
-  listeners.add(listener)
-  return () => listeners.delete(listener)
-}
-
-function openWorkflow(run: Run): void { publish({ run, minimized: false }) }
-
-/** Keep a visible launch affordance in the transcript while the panel lives above the app frame. */
-function Panel({ node }: { node: ChatConversationViewNode<'lazymind-workflow'> }) {
-  useEffect(() => {
-    if (automaticallyOpened.has(node.data.runId)) return
-    automaticallyOpened.add(node.data.runId)
-    openWorkflow(node.data)
-  }, [node.data])
-  return <section style={{ margin: '8px 0', border: '1px solid #d9d9d9', borderRadius: 8, padding: 12 }}>
-    <strong>LazyMind Workflow</strong>
-    <button style={{ marginLeft: 12 }} onClick={() => openWorkflow(node.data)}>Open workflow</button>
-  </section>
-}
-
-/** Normalize a legacy interaction URL to the root-level Workflow Run route. */
-function workflowPage(run: Run): string {
-  const source = new URL(run.url)
-  return new URL(`/workflow-runs/${encodeURIComponent(run.runId)}/embed`, source.origin).href
-}
-
-/** Fixed app-frame window: it remains visible while the DSH conversation scrolls. */
-function WorkflowWindow() {
-  const current = useSyncExternalStore(subscribe, () => state, () => state)
-  const panel = useRef<HTMLElement>(null)
-  const drag = useRef<{ offsetX: number; offsetY: number } | undefined>(undefined)
-  const [position, setPosition] = useState<{ left: number; top: number }>()
-  if (current.run === undefined) return null
-  if (current.minimized) {
-    return <button style={{ position: 'absolute', right: 24, bottom: 24, zIndex: 1 }} onClick={() => publish({ ...current, minimized: false })}>
-      Open LazyMind Workflow
-    </button>
-  }
-  const move = (event: ReactPointerEvent<HTMLElement>) => {
-    if (drag.current === undefined || panel.current === null) return
-    const width = panel.current.offsetWidth
-    const height = panel.current.offsetHeight
-    setPosition({
-      left: Math.max(0, Math.min(window.innerWidth - width, event.clientX - drag.current.offsetX)),
-      top: Math.max(0, Math.min(window.innerHeight - height, event.clientY - drag.current.offsetY)),
-    })
-  }
-  const beginDrag = (event: ReactPointerEvent<HTMLElement>) => {
-    if (panel.current === null || event.target instanceof HTMLButtonElement) return
-    const rect = panel.current.getBoundingClientRect()
-    drag.current = { offsetX: event.clientX - rect.left, offsetY: event.clientY - rect.top }
-    setPosition({ left: rect.left, top: rect.top })
-    event.currentTarget.setPointerCapture(event.pointerId)
-  }
-  const endDrag = () => { drag.current = undefined }
-  return <section ref={panel} role="dialog" aria-label="LazyMind Workflow" style={{ position: 'absolute', ...(position === undefined ? { right: 20, top: '50%', transform: 'translateY(-50%)' } : position), width: 'min(760px, calc(100vw - 40px))', height: 'min(460px, calc(100vh - 40px))', background: '#fff', color: '#111', border: '1px solid #d9d9d9', borderRadius: 10, boxShadow: '0 12px 48px rgba(0, 0, 0, .24)', overflow: 'hidden', display: 'flex', flexDirection: 'column', zIndex: 1 }}>
-    <header onPointerDown={beginDrag} onPointerMove={move} onPointerUp={endDrag} onPointerCancel={endDrag} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: 12, borderBottom: '1px solid #d9d9d9', cursor: 'grab', touchAction: 'none', userSelect: 'none' }}>
-      <strong>LazyMind Workflow</strong>
-      <span>
-        <button onPointerDown={event => event.stopPropagation()} onClick={() => publish({ ...current, minimized: true })}>Minimize</button>
-        <button style={{ marginLeft: 8 }} onPointerDown={event => event.stopPropagation()} onClick={() => publish({ minimized: false })}>Close</button>
-      </span>
-    </header>
-    <iframe title="LazyMind Workflow" src={workflowPage(current.run)} style={{ width: '100%', flex: 1, border: 0 }} />
-  </section>
-}
-
-/** Required browser services for the durable Conversation Node and its renderer. */
+// Root slots receive the public runtime session selector, as AppFrame does.
+interface SessionSelector { useSessions<T>(selector: (state: { current?: string }) => T): T }
 export const inject = ['uiConversation', 'slots']
 
-/** Register the external run event and its WorkflowPanel iframe renderer. */
-export function apply(ctx: ClientContext): void {
+export function apply(ctx: ClientContext, config: { serverName?: string } = {}): void {
+  const windows = windowStore()
+  const serverName = config.serverName ?? 'lazymind'
+  ctx.effect(() => () => windows.dispose())
+  const definition: ConversationNodeDefinition<RunLink> = {
+    kind: 'lazymind-workflow', target: 'chat',
+    match(event) {
+      const run = eventRun(event, serverName)
+      // Each standard event is immutable. Reusing runId as a start identity would
+      // make a repeated state/start result violate DSH's unique-start contract.
+      return run ? { id: `${run.runId}:${event.seq}`, role: 'start' } : null
+    },
+    start(_context, match) {
+      const run = eventRun(match.event, serverName)
+      if (!run) throw new Error('Workflow presentation requires a valid standard tool result')
+      return run
+    },
+    update(context) { return context.state },
+    buildViewNode(context): ChatNode<'lazymind-workflow'> | null {
+      if (!context.start || !context.state) return null
+      return { key: context.key, kind: 'lazymind-workflow', id: context.id, target: 'chat',
+        anchorSeq: context.start.event.seq, location: context.start.location, visibility: 'visible', data: context.state }
+    },
+  }
+
+  function Entry({ node, sessionId }: { node: ChatNode<'lazymind-workflow'>; sessionId?: string }) {
+    const run = node.data.hostSessionId ? node.data : { ...node.data, hostSessionId: sessionId }
+    const snapshot = useSyncExternalStore(windows.subscribe, windows.snapshot, windows.snapshot)
+    useEffect(() => { windows.observe(run, node.anchorSeq) }, [node.data, node.anchorSeq, sessionId])
+    const first = snapshot.firstCards[runKey(run)]
+    if (first !== undefined && first !== node.anchorSeq) return null
+    return <section style={{ margin: '8px 0', border: '1px solid #d9d9d9', borderRadius: 8, padding: 12 }}>
+      <strong>LazyMind Workflow</strong>
+      <button style={{ marginLeft: 12 }} onClick={() => windows.open(run, node.anchorSeq)}>Open workflow</button>
+    </section>
+  }
+
+  function WorkflowWindow({ useSessions }: SessionSelector) {
+    const sessionId = useSessions(state => state.current)
+    const state = useSyncExternalStore(windows.subscribe, windows.snapshot, windows.snapshot)
+    const current = sessionId ? state.entries[sessionId] : undefined
+    const panel = useRef<HTMLElement>(null)
+    const drag = useRef<{ offsetX: number; offsetY: number }>()
+    if (!current || !sessionId) return null
+    if (current.minimized) return <button style={{ position: 'absolute', right: 24, bottom: 24, pointerEvents: 'auto', zIndex: 1 }}
+      onClick={() => windows.open(current.run, current.anchor)}>Open LazyMind Workflow</button>
+    const move = (event: ReactPointerEvent<HTMLElement>) => {
+      if (!drag.current || !panel.current) return
+      windows.position(sessionId, {
+        left: Math.max(0, Math.min(window.innerWidth - panel.current.offsetWidth, event.clientX - drag.current.offsetX)),
+        top: Math.max(0, Math.min(window.innerHeight - panel.current.offsetHeight, event.clientY - drag.current.offsetY)),
+      })
+    }
+    const beginDrag = (event: ReactPointerEvent<HTMLElement>) => {
+      if (!panel.current || event.target instanceof HTMLButtonElement) return
+      const rect = panel.current.getBoundingClientRect()
+      drag.current = { offsetX: event.clientX - rect.left, offsetY: event.clientY - rect.top }
+      windows.position(sessionId, { left: rect.left, top: rect.top })
+      event.currentTarget.setPointerCapture(event.pointerId)
+    }
+    const endDrag = () => { drag.current = undefined }
+    const url = new URL(`/workflow-runs/${encodeURIComponent(current.run.runId)}/embed`, new URL(current.run.url).origin).href
+    return <section ref={panel} role="dialog" aria-label="LazyMind Workflow" style={{ position: 'absolute',
+      ...(current.position ?? { right: 20, top: '50%', transform: 'translateY(-50%)' }),
+      width: 'min(760px, calc(100vw - 40px))', height: 'min(560px, calc(100vh - 40px))', background: '#fff', color: '#111',
+      border: '1px solid #d9d9d9', borderRadius: 10, boxShadow: '0 12px 48px rgba(0, 0, 0, .24)', overflow: 'hidden',
+      display: 'flex', flexDirection: 'column', pointerEvents: 'auto', zIndex: 1 }}>
+      <header onPointerDown={beginDrag} onPointerMove={move} onPointerUp={endDrag} onPointerCancel={endDrag}
+        style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: 12,
+          borderBottom: '1px solid #d9d9d9', cursor: 'grab', touchAction: 'none', userSelect: 'none' }}>
+        <strong>LazyMind Workflow</strong>
+        <span>
+          <button onPointerDown={event => event.stopPropagation()} onClick={() => windows.minimize(sessionId)}>Minimize</button>
+          <button style={{ marginLeft: 8 }} onPointerDown={event => event.stopPropagation()} onClick={() => windows.minimize(sessionId)}>Close</button>
+        </span>
+      </header>
+      <iframe title="LazyMind Workflow" src={url} style={{ width: '100%', flex: 1, border: 0 }} />
+    </section>
+  }
   ctx.uiConversation.events.register(definition)
-  ctx.slots.inject('conversation.chat.node', () => ctx.slots.register({
-    name: 'conversation.chat.node',
-    key: 'lazymind-workflow',
-  }, Panel))
-  ctx.slots.inject('shell.overlay', () => ctx.slots.register({
-    name: 'shell.overlay',
-    id: 'lazymind-workflow-window',
-  }, WorkflowWindow))
+  ctx.slots.inject('conversation.chat.node', () => ctx.slots.register({ name: 'conversation.chat.node', key: 'lazymind-workflow' }, Entry))
+  ctx.slots.inject('shell.overlay', () => ctx.slots.register({ name: 'shell.overlay', id: 'lazymind-workflow-window' }, WorkflowWindow))
 }

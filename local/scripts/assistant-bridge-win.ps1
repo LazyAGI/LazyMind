@@ -19,10 +19,11 @@ $installDir = Join-Path $env:LOCALAPPDATA 'LazyMind\assistant-bridge'
 $installedBinary = Join-Path $installDir 'lazymind.exe'
 
 function Invoke-Bridge([string]$Path, [string[]]$Arguments) {
-    & $Path @Arguments | Out-Null
+    $output = & $Path @Arguments
     if ($LASTEXITCODE -ne 0) {
         throw "Assistant Bridge command failed with exit code $LASTEXITCODE"
     }
+    return ($output -join [Environment]::NewLine)
 }
 
 # WSL environment paths are not valid Windows runtime roots. The native
@@ -38,8 +39,9 @@ if ($Action -eq 'stop') {
     } else {
         $null
     }
-    if ($binary) { Invoke-Bridge $binary @('assistant', 'stop') }
-    exit 0
+    if ($binary) { Invoke-Bridge $binary @('assistant', 'stop') | Out-Null }
+    Write-Output 'LAZYMIND_ASSISTANT_BRIDGE_OK:stop'
+    return
 }
 
 if (-not (Test-Path -LiteralPath $SourcePath -PathType Leaf)) {
@@ -48,7 +50,7 @@ if (-not (Test-Path -LiteralPath $SourcePath -PathType Leaf)) {
 
 # Stop either an existing native Bridge or a stale WSL-forwarded Bridge before
 # replacing the executable. The CLI waits until the loopback listener closes.
-Invoke-Bridge $SourcePath @('assistant', 'stop')
+Invoke-Bridge $SourcePath @('assistant', 'stop') | Out-Null
 New-Item -ItemType Directory -Force -Path $installDir | Out-Null
 $temporary = "$installedBinary.$PID.tmp"
 try {
@@ -57,4 +59,9 @@ try {
 } finally {
     Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
 }
-Invoke-Bridge $installedBinary @('assistant', 'start')
+Invoke-Bridge $installedBinary @('assistant', 'start') | Out-Null
+$status = Invoke-Bridge $installedBinary @('assistant', 'status') | ConvertFrom-Json
+if ($status.running -isnot [bool] -or -not $status.running -or $status.platform -ne 'windows') {
+    throw 'Native Windows Assistant Bridge health verification failed.'
+}
+Write-Output 'LAZYMIND_ASSISTANT_BRIDGE_OK:start'

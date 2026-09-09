@@ -15,6 +15,7 @@ from urllib.parse import quote, urlencode, urlsplit
 import httpx
 
 CONTRACT_VERSION = 'workflow.v1'
+CONTROL_PROTOCOL = 'workflow.control.v1'
 
 
 class WorkflowClientError(RuntimeError):
@@ -287,9 +288,51 @@ class WorkflowClient:
         payload = {**(fields or {}), 'workflow_id': workflow_id, 'preparation_id': command_id,
                    'idempotency_key': command_id, 'input_bindings': input_bindings or {},
                    'origin_host': self.host, 'controller_host': self.host}
+        if self.host == 'external-agent':
+            payload.setdefault('control_protocol', CONTROL_PROTOCOL)
         return self._decode(self.transport.post(
             self.base_url + '/workflow-preparations', json=payload,
             headers=self._headers(command_id), timeout=self.timeout,
+        ))
+
+    def workflow_control(self, session_id: str) -> WorkflowResponse:
+        """Read authoritative execution/review/delivery state without changing it."""
+        return self._read(f'/workflow-sessions/{quote(session_id, safe="")}/control?view=control')
+
+    def begin_execution(self, session_id: str, step_id: str, expected_state_version: int,
+                        *, command_id: str = '', objective: str = '',
+                        runtime_instruction: str = '') -> WorkflowResponse:
+        """Create one execution grant; then claim the receipt's execution_id."""
+        command_id = command_id or str(uuid.uuid4())
+        return self._decode(self.transport.post(
+            f'{self.base_url}/workflow-sessions/{quote(session_id, safe="")}/executions:begin',
+            json={'command_id': command_id, 'step_id': step_id,
+                  'expected_state_version': expected_state_version, 'objective': objective,
+                  'runtime_instruction': runtime_instruction},
+            headers=self._headers(command_id), timeout=self.timeout,
+        ))
+
+    def claim_execution(self, session_id: str, execution_id: str, *, resume: bool = False) -> WorkflowResponse:
+        """Claim an existing grant, or explicitly rotate its handle when recovering."""
+        operation = 'resume' if resume else 'begin'
+        return self._decode(self.transport.post(
+            f'{self.base_url}/workflow-sessions/{quote(session_id, safe="")}'
+            f'/hosted-attempts/{quote(execution_id, safe="")}:{operation}',
+            json={}, headers=self._headers(), timeout=self.timeout,
+        ))
+
+    def submit_execution(self, session_id: str, execution_id: str, execution_handle: str,
+                         *, outcome: str, artifacts: Optional[List[Dict[str, Any]]] = None,
+                         summary: str = '', error_code: str = '', executor_ref: str = '') -> WorkflowResponse:
+        """Submit the caller's exact handle; preserve Core's fixed receipt and current control."""
+        if not execution_handle:
+            raise WorkflowClientError('EXECUTION_HANDLE_REQUIRED', 'execution_handle is required')
+        return self._decode(self.transport.post(
+            f'{self.base_url}/workflow-sessions/{quote(session_id, safe="")}'
+            f'/hosted-attempts/{quote(execution_id, safe="")}:submit',
+            json={'execution_handle': execution_handle, 'outcome': outcome, 'artifacts': artifacts or [],
+                  'summary': summary, 'error_code': error_code, 'executor_ref': executor_ref},
+            headers=self._headers(), timeout=self.timeout,
         ))
 
     def import_input_resource(self, name: str, mime_type: str, content: bytes) -> WorkflowResponse:

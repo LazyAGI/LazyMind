@@ -16,6 +16,7 @@ import (
 
 	"lazymind/core/common/orm"
 	"lazymind/core/workflow/artifactfile"
+	"lazymind/core/workflow/controlstore"
 )
 
 // DBArtifactSink is the shared executor output writer. Host implementations
@@ -59,10 +60,14 @@ func (sink DBArtifactSink) Save(ctx context.Context, attempt AttemptContext, art
 		return err
 	}
 	now := time.Now().UTC()
-	valueID := uuid.NewString()
-	storedValue, cleanupDirectory, err := artifactfile.Materialize(attempt.SessionID, valueID, artifact.Value)
-	if err != nil {
-		return err
+	valueID, storedValue, cleanupDirectory := artifact.stagedID, artifact.Value, ""
+	var err error
+	if valueID == "" {
+		valueID = uuid.NewString()
+		storedValue, cleanupDirectory, err = artifactfile.Materialize(attempt.SessionID, valueID, artifact.Value)
+		if err != nil {
+			return err
+		}
 	}
 	var caption *string
 	var metadata map[string]any
@@ -73,8 +78,17 @@ func (sink DBArtifactSink) Save(ctx context.Context, attempt AttemptContext, art
 	}
 	persisted := false
 	err = sink.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		lockedSession, err := controlstore.LockSession(tx, attempt.SessionID)
+		if err != nil {
+			return err
+		}
+		if controlstore.Controlled(lockedSession) {
+			if err := controlstore.ValidateExecution(tx, lockedSession, attempt.AttemptID, attempt.ExecutionHandle); err != nil {
+				return err
+			}
+		}
 		var existing orm.WorkflowSlotRevision
-		err := tx.Where("producer_attempt_id = ? AND slot = ? AND artifact_seq = ?", attempt.AttemptID, artifact.Slot, artifact.Seq).First(&existing).Error
+		err = tx.Where("producer_attempt_id = ? AND slot = ? AND artifact_seq = ?", attempt.AttemptID, artifact.Slot, artifact.Seq).First(&existing).Error
 		if err == nil {
 			return nil
 		}

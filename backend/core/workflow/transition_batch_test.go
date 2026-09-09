@@ -283,6 +283,7 @@ func TestResolveAdvanceOperationFromEffectiveAttempt(t *testing.T) {
 		"succeeded_step":   StepStatusSucceeded,
 		"failed_step":      StepStatusFailed,
 		"interrupted_step": StepStatusInterrupted,
+		"cancelled_step":   "cancelled",
 	}
 	for stepID, status := range statuses {
 		if status == "" {
@@ -298,7 +299,7 @@ func TestResolveAdvanceOperationFromEffectiveAttempt(t *testing.T) {
 	}
 	wants := map[string]string{
 		"ready_step": "execute", "succeeded_step": "rewind",
-		"failed_step": "retry", "interrupted_step": "retry",
+		"failed_step": "retry", "interrupted_step": "retry", "cancelled_step": "retry",
 	}
 	for stepID, want := range wants {
 		got, err := resolveAdvanceOperation(ctx, db.DB, "advance-operation-session", stepID)

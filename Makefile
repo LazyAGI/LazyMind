@@ -51,10 +51,6 @@ _HOST_DOCKER_USER_FLAG := --user "$$(id -u):$$(id -g)"
 _HOST_DOCKER_PREFIX :=
 endif
 override LAZYMIND_CLI_BIN := $(LOCAL_BUILD_DIR)/bin/$(LAZYMIND_CLI_FILENAME)
-ifeq ($(HOST_IS_WSL),1)
-_WSL_ASSISTANT_BRIDGE_SCRIPT := $(shell wslpath -w "$(CURDIR)/local/scripts/assistant-bridge-win.ps1" 2>/dev/null)
-_WSL_ASSISTANT_BRIDGE_SOURCE := $(shell wslpath -w "$(LAZYMIND_CLI_BIN)" 2>/dev/null)
-endif
 LOCAL_WIN_SCRIPT := $(CURDIR)/local/scripts/local-win.ps1
 DESKTOP_WIN_SCRIPT := $(CURDIR)/desktop/scripts/build-windows-x64.ps1
 LAZYMIND_LOCAL_DOWN_TIMEOUT ?= 150s
@@ -534,13 +530,7 @@ lazymind-cli-build:
 
 assistant-bridge-start: lazymind-cli-build
 ifeq ($(HOST_IS_WSL),1)
-	@if ! command -v powershell.exe >/dev/null 2>&1; then \
-		echo "❌ WSL interoperability is unavailable; enable Windows executable interop before starting the native Assistant Bridge."; \
-		exit 1; \
-	fi
-	@powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass \
-		-File "$(_WSL_ASSISTANT_BRIDGE_SCRIPT)" start "$(_WSL_ASSISTANT_BRIDGE_SOURCE)"
-	@rm -f "$(LOCAL_BUILD_DIR)/bin/lazymind"
+	@sh local/scripts/assistant-bridge-wsl.sh start
 else
 	@"$(LAZYMIND_CLI_BIN)" assistant stop >/dev/null
 	@if [ "$(LAZYMIND_CLI_FILENAME)" = "lazymind.exe" ]; then rm -f "$(LOCAL_BUILD_DIR)/bin/lazymind"; fi
@@ -550,10 +540,7 @@ endif
 
 assistant-bridge-stop:
 ifeq ($(HOST_IS_WSL),1)
-	@if command -v powershell.exe >/dev/null 2>&1; then \
-		powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass \
-			-File "$(_WSL_ASSISTANT_BRIDGE_SCRIPT)" stop "$(_WSL_ASSISTANT_BRIDGE_SOURCE)" || true; \
-	fi
+	@sh local/scripts/assistant-bridge-wsl.sh stop
 else
 	@if [ -x "$(LAZYMIND_CLI_BIN)" ]; then \
 		"$(LAZYMIND_CLI_BIN)" assistant stop >/dev/null || true; \

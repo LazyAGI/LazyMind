@@ -57,7 +57,7 @@ const PREVIEW_STATIC_STYLE =
   '*::before,*::after{filter:none!important;}' +
   'html,body,.wrapper{isolation:isolate!important;}' +
   'svg [filter]{filter:none!important;}' +
-  'object,embed,iframe,video,svg foreignObject,' +
+  'object,embed,iframe,video,body svg foreignObject,' +
   '[data-lazymind-unsupported-visual]{' +
   'opacity:0!important;' +
   'visibility:hidden!important;' +
@@ -81,7 +81,7 @@ const PREVIEW_STATIC_TAIL =
   '*::before,*::after{filter:none!important;}' +
   'html,body,.wrapper{isolation:isolate!important;}' +
   'svg [filter]{filter:none!important;}' +
-  'object,embed,iframe,video,svg foreignObject,' +
+  'object,embed,iframe,video,body svg foreignObject,' +
   '[data-lazymind-unsupported-visual]{' +
   'opacity:0!important;' +
   'visibility:hidden!important;' +
@@ -276,6 +276,9 @@ function loadHtmlIframe(
     document.body.appendChild(iframe);
 
     const cleanupReject = (err: unknown) => {
+      window.clearTimeout(loadTimer);
+      iframe.onload = null;
+      iframe.onerror = null;
       iframe.remove();
       const msg = err instanceof Error
         ? err.message
@@ -283,6 +286,7 @@ function loadHtmlIframe(
       reject(new Error(msg && !/^\[object\s+\w+\]$/i.test(msg) ? msg : 'iframe load failed'));
     };
 
+    const loadTimer = window.setTimeout(() => cleanupReject(new Error('slide iframe load timed out')), 10000);
     iframe.onload = () => {
       try {
         const doc = iframe.contentDocument;
@@ -301,6 +305,9 @@ function loadHtmlIframe(
         doc.body.style.width = `${SLIDE_W_PX}px`;
         doc.body.style.height = `${SLIDE_H_PX}px`;
         doc.body.style.overflow = 'hidden';
+        window.clearTimeout(loadTimer);
+        iframe.onload = null;
+        iframe.onerror = null;
         resolve({ iframe, doc, wrapper });
       } catch (err) {
         cleanupReject(err);
@@ -323,14 +330,26 @@ async function sleep(ms: number): Promise<void> {
   await new Promise((r) => setTimeout(r, ms));
 }
 
-async function waitForAnimationFrames(win: Window | null, frames = 2): Promise<void> {
+export async function waitForAnimationFrames(win: Pick<Window, 'requestAnimationFrame' | 'cancelAnimationFrame'> | null, frames = 2): Promise<void> {
   if (!win) {
     await sleep(32);
     return;
   }
   for (let i = 0; i < frames; i += 1) {
     await new Promise<void>((resolve) => {
-      win.requestAnimationFrame(() => resolve());
+      // Browsers suspend rAF in our offscreen/sandboxed capture iframe. Layout
+      // can still be cloned; never let that suspend the shared capture queue.
+      let frame = 0;
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        win.cancelAnimationFrame(frame);
+        resolve();
+      };
+      const timer = setTimeout(finish, 64);
+      frame = win.requestAnimationFrame(finish);
     });
   }
 }

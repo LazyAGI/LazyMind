@@ -1,41 +1,25 @@
 import type { Context } from '@deepseek-ai/cordis'
-import type { SessionEventMap } from '@deepseek-ai/dsh-session'
+import { randomUUID } from 'node:crypto'
+import { HostBridge, loadPairing } from './bridge'
+import { installHost } from './host'
+import { dispatcherLock } from './runtime-lock'
 
-declare module '@deepseek-ai/dsh-session' {
-  interface SessionEventMap {
-    'lazymind-workflow/open': { runId: string; url: string }
-  }
+export interface Config {
+  bridgeUrl: string
+  webUrl: string
+  pairingFile: string
+  serverName: string
 }
+export const inject = ['tools', 'agents', 'sessionController']
 
-export interface Config { bridgeUrl: string; dshUrl: string; serverName: string }
-
-function interaction(value: unknown): { runId: string; url: string } | null {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
-  const result = value as Record<string, unknown>
-  const structured = result.structuredContent
-  if (typeof structured !== 'object' || structured === null || Array.isArray(structured)) return null
-  const fields = structured as Record<string, unknown>
-  if (typeof fields.session_id !== 'string' || typeof fields.interaction_url !== 'string') return null
+/** Install only public DSH extensions. The pairing secret stays in a private host file. */
+export async function apply(ctx: Context, config: Config): Promise<void> {
+  if (!config.webUrl || !config.serverName) throw new Error('Reconnect DSH from LazyMind to configure the workflow bundle')
+  const pairing = await loadPairing(config.pairingFile)
+  const instance = randomUUID()
+  const release = await dispatcherLock(config.pairingFile, instance)
   try {
-    const url = new URL(fields.interaction_url)
-    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return null
-    return { runId: fields.session_id, url: url.href }
-  } catch { return null }
-}
-
-/** Persist LazyMind run links and bind each run to its owning DSH Session. */
-export function apply(ctx: Context, config: Config): void {
-  ctx.on('tools/result', (exec, result) => {
-    if (exec.agent === undefined || result.isError || !new RegExp(`^mcp__${config.serverName}__workflow_start(?:_|$)`).test(exec.name)) return
-    const run = interaction(result.value)
-    if (run === null) return
-    const sessionId = exec.agent.session.id
-    void fetch(`${config.bridgeUrl.replace(/\/$/, '')}/v1/workflow-runs/${encodeURIComponent(run.runId)}/binding`, {
-      method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ session_id: sessionId, dsh_url: config.dshUrl }), signal: exec.signal,
-    }).then(response => {
-      if (!response.ok) throw new Error(`LazyMind binding returned HTTP ${response.status}`)
-      exec.agent?.session.append('lazymind-workflow/open', run, { ignorable: true })
-    }).catch(error => ctx.logger.warn(`lazymind-workflow: ${String(error)}`))
-  })
+    const dispose = installHost(ctx, new HostBridge(config.bridgeUrl, pairing), config, instance)
+    ctx.effect(() => async () => { try { await dispose() } finally { await release() } })
+  } catch (error) { await release(); throw error }
 }

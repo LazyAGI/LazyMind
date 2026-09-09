@@ -13,6 +13,8 @@ type WorkflowSession struct {
 	OriginHost         string `gorm:"column:origin_host;type:varchar(32);not null;default:'lazymind'"`
 	OriginRef          string `gorm:"column:origin_ref;type:varchar(255);not null;default:''"`
 	ControllerHost     string `gorm:"column:controller_host;type:varchar(32);not null;default:'lazymind'"`
+	ControlProtocol    string `gorm:"column:control_protocol;type:varchar(32);not null;default:''" json:"-"`
+	ControlBindingJSON string `gorm:"column:control_binding_json;type:text;not null;default:'{}'" json:"-"`
 	WorkflowID         string `gorm:"column:plugin_id;type:varchar(64);not null"`
 	WorkflowRef        string `gorm:"column:plugin_ref;type:varchar(512);not null;default:''"`
 	WorkflowRevisionID string `gorm:"column:plugin_revision_id;type:varchar(36);not null;default:''"`
@@ -76,6 +78,8 @@ type WorkflowSessionStep struct {
 	ProgressJSON      string     `gorm:"column:progress_json;type:jsonb;not null;default:'{}'"`
 	TerminalCode      string     `gorm:"column:terminal_code;type:varchar(64);not null;default:''"`
 	ResultJSON        string     `gorm:"column:result_json;type:jsonb;not null;default:'{}'"`
+	ReviewRequired    bool       `gorm:"column:review_required;not null;default:false"`
+	SubmissionHash    string     `gorm:"column:submission_hash;type:varchar(64);not null;default:''"`
 	CreatedAt         time.Time  `gorm:"column:created_at;not null"`
 	UpdatedAt         time.Time  `gorm:"column:updated_at;not null"`
 }

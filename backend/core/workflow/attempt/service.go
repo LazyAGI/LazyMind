@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"lazymind/core/common/orm"
+	"lazymind/core/workflow/controlstore"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -46,9 +47,10 @@ func (c Config) leaseDuration() time.Duration {
 }
 
 type Service struct {
-	db     *gorm.DB
-	config Config
-	now    func() time.Time
+	controlFinalization bool
+	db                  *gorm.DB
+	config              Config
+	now                 func() time.Time
 }
 
 // ServiceCapable identifies the protocol implementation compiled into this
@@ -57,6 +59,20 @@ func ServiceCapable() bool { return ContractVersion == "workflow.v1" }
 
 func New(db *gorm.DB, config Config) *Service {
 	return &Service{db: db, config: config, now: func() time.Time { return time.Now().UTC() }}
+}
+
+// WithDB shares the caller's transaction while preserving lease policy and clock.
+func (s *Service) WithDB(db *gorm.DB) *Service {
+	copy := *s
+	copy.db = db
+	return &copy
+}
+
+// WithControlTransaction is used only by the workflow-owned atomic finalization use case.
+func (s *Service) WithControlTransaction(db *gorm.DB) *Service {
+	copy := s.WithDB(db)
+	copy.controlFinalization = true
+	return copy
 }
 
 func SchemaCapable(db *gorm.DB) bool {
@@ -196,6 +212,22 @@ func (s *Service) ClaimAttemptForHost(ctx context.Context, attemptID, executorID
 	return s.claimCandidate(ctx, candidate, executorID, true)
 }
 
+// ClaimQueuedAttemptForHost does not rotate a running worker's handle. Only explicit Resume may do that.
+func (s *Service) ClaimQueuedAttemptForHost(ctx context.Context, attemptID, executorID, host string) (Claim, error) {
+	var candidate orm.WorkflowSessionStep
+	err := s.db.WithContext(ctx).Model(&orm.WorkflowSessionStep{}).
+		Joins("JOIN plugin_sessions ps ON ps.id = plugin_session_steps.session_id").                                                                                                 // workflow-naming: persistence
+		Where("plugin_session_steps.id = ? AND plugin_session_steps.status = 'queued' AND plugin_session_steps.validity = 'effective' AND ps.controller_host = ?", attemptID, host). // workflow-naming: persistence
+		Select("plugin_session_steps.*").First(&candidate).Error                                                                                                                     // workflow-naming: persistence
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return Claim{}, ErrNotClaimable
+	}
+	if err != nil {
+		return Claim{}, err
+	}
+	return s.claimCandidate(ctx, candidate, executorID, false)
+}
+
 func (s *Service) claimCandidate(ctx context.Context, candidate orm.WorkflowSessionStep, executorID string, allowCurrentOwner bool) (Claim, error) {
 	now := s.now()
 	token, err := newToken()
@@ -204,7 +236,19 @@ func (s *Service) claimCandidate(ctx context.Context, candidate orm.WorkflowSess
 	}
 	expires := now.Add(s.config.leaseDuration())
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		condition := "id = ? AND fencing_generation = ? AND (status = 'queued' OR lease_expires_at < ?"
+		if tx.Migrator().HasColumn(&orm.WorkflowSession{}, "control_protocol") {
+			session, err := controlstore.LockSession(tx, candidate.SessionID)
+			if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
+			if err == nil {
+				if err := controlstore.GuardClaim(tx, session); err != nil {
+					return err
+				}
+			}
+		}
+
+		condition := "id = ? AND fencing_generation = ? AND (status = 'queued' OR (status IN ('claimed','running') AND lease_expires_at < ?)"
 		args := []any{candidate.ID, candidate.FencingGeneration, now}
 		if allowCurrentOwner {
 			condition += " OR (lease_owner = ? AND status IN ('claimed','running'))"
@@ -309,6 +353,15 @@ func (s *Service) Terminal(ctx context.Context, attemptID, token, status, code s
 				return ErrNotFound
 			}
 			return err
+		}
+		if tx.Migrator().HasColumn(&orm.WorkflowSession{}, "control_protocol") {
+			session, err := controlstore.LockSession(tx, current.SessionID)
+			if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
+			if controlstore.Controlled(session) && !s.controlFinalization {
+				return controlstore.Reject("CONTROL_FINALIZATION_REQUIRED", "use workflow.step.submit to settle this controlled execution")
+			}
 		}
 		if terminal(current.Status) {
 			if current.Status == status {

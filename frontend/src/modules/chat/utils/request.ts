@@ -368,6 +368,12 @@ export interface ExecuteArtifactActionResult {
 // Workflow Session API.
 export function WorkflowSessionApi() {
   return {
+    getControl(sessionId: string, options?: RawAxiosRequestConfig) {
+      return axiosInstance.get(`${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}/control`, options);
+    },
+    control(sessionId: string, command: import('./workflowControl').WorkflowControlRequest, options?: RawAxiosRequestConfig) {
+      return axiosInstance.post(`${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}/control`, command, options);
+    },
     getLatestSession(conversationId: string, options?: RawAxiosRequestConfig) {
       return axiosInstance.get(
         `${coreApiBaseUrl}/conversations/${encodeURIComponent(conversationId)}/workflow-sessions:latest`,

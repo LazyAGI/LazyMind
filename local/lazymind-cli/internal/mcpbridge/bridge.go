@@ -15,11 +15,10 @@ import (
 
 	"lazymind/agentconnector/internal/coreapi"
 	"lazymind/agentconnector/internal/credentials"
-	"lazymind/agentconnector/internal/workflowcontrol"
 	"lazymind/agentconnector/internal/workflowmcp"
 )
 
-const workflowInstructions = "When the user chooses a LazyMind Workflow, call workflow.start, then call workflow.step.begin for a ready step. The begin result's step_contract (prompt, inputs, required_outputs, legacy_tools) is that step — execute it in this turn: produce every required_output with your native Agent tools, then call workflow.step.submit. Names in step_contract.legacy_tools and in the prompt are LazyMind Host script names, not MCP tools; do not stop or wait for a tool of that name. After submit, read state.projection.nodes for that step_id: if mode is auto, you may begin the next ready step in this turn; if mode is human (or requires_approval is true), do not begin another step — tell the user to review artifacts at interaction_url and wait until they ask to continue. Resolve referenced step inputs with workflow.input.get or workflow.artifact.get according to source_type. If the Agent loses a session ID after restart, call workflow.session.list; if only an in-progress execution was interrupted, call workflow.step.resume with the same execution_id. Use workflow.session.stop/resume only for the whole session lifecycle. Never skip Workflow steps. Report the run complete only when workflow.state says completed; then call workflow.artifact.list and use the returned LazyMind-managed URL for user-facing file links; never expose local_path or file:// URLs. LazyMind owns Workflow state, artifacts, lineage and versions; submit generated workspace files through the local_path output field."
+const workflowInstructions = "When the user chooses a LazyMind Workflow, call workflow.start, then call workflow.step.begin for a ready step. The begin result's step_contract (prompt, inputs, required_outputs, legacy_tools) is that step — execute it in this turn: produce every required_output with your native Agent tools, then call workflow.step.submit. Names in step_contract.legacy_tools and in the prompt are LazyMind Host script names, not MCP tools; do not stop or wait for a tool of that name. Submit with the unchanged execution_handle from begin, claim or resume. Read authoritative control.continuation after submission: awaiting_user means end this turn and wait for confirmation in the workflow page; draining means finish only already granted work, without starting new steps. A begin/claim result is permission to execute that step now. Human/requires_approval/review_after_submit means review happens AFTER successful submission, never before executing the granted step. Never infer a current review barrier from node order or mode text. Keep execution_handle private to tool calls; do not display it to the user. If a panel recovery provides execution_id, use workflow.step.claim rather than creating another execution. Resolve referenced step inputs with workflow.input.get or workflow.artifact.get according to source_type. If the Agent loses a session ID after restart, call workflow.session.list; if only an in-progress execution was interrupted, call workflow.step.resume with the same execution_id. Use workflow.session.stop for the whole session lifecycle. Controlled workflows require user resume from the authenticated workflow page; workflow.session.resume is for legacy runs. Never skip Workflow steps. Report the run complete only when workflow.state says completed; then call workflow.artifact.list and use the returned LazyMind-managed URL for user-facing file links; never expose local_path or file:// URLs. LazyMind owns Workflow state, artifacts, lineage and versions; submit generated workspace files through the local_path output field."
 
 var requiredTools = []string{
 	"cloud_document.get",
@@ -104,39 +103,6 @@ func wrapMCPStartupError(err error) error {
 	return err
 }
 
-func (b *Bridge) refuseBeginWhileAwaitingReview() func(context.Context, string, string) error {
-	if b.sourceProvider != "deepseek-harness" {
-		return nil
-	}
-	return func(ctx context.Context, sessionID, _ string) error {
-		serverURL, err := b.api.ServerURL(ctx)
-		if err != nil {
-			return nil
-		}
-		binding, err := workflowcontrol.Load(b.home, serverURL, sessionID)
-		if err != nil || !binding.AwaitReview {
-			return nil
-		}
-		return errors.New("this Workflow is waiting for the user to continue from the run page")
-	}
-}
-
-func (b *Bridge) markAwaitReviewAfterHumanSubmit() func(context.Context, string, workflowmcp.SubmitResult) {
-	if b.sourceProvider != "deepseek-harness" {
-		return nil
-	}
-	return func(ctx context.Context, sessionID string, result workflowmcp.SubmitResult) {
-		if !workflowmcp.AwaitingReview(result.State) {
-			return
-		}
-		serverURL, err := b.api.ServerURL(ctx)
-		if err != nil {
-			return
-		}
-		_ = workflowcontrol.SetAwaitReview(b.home, serverURL, sessionID, true)
-	}
-}
-
 func (b *Bridge) Probe(ctx context.Context) (ProbeResult, error) {
 	session, tools, endpoint, err := b.Connect(ctx)
 	if err != nil {
@@ -192,10 +158,8 @@ func (b *Bridge) RunStdio(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	// DSH's external workflow bundle binds a successful run after its tool
-	// result commits. The generic MCP transport carries no DSH session metadata.
-	workflowClient.OnBegin = b.refuseBeginWhileAwaitingReview()
-	workflowClient.AfterSubmit = b.markAwaitReviewAfterHumanSubmit()
+	workflowClient.HostProvider = b.sourceProvider
+	workflowClient.RequireHostBinding = b.sourceProvider == "deepseek-harness" && os.Getenv("LAZYMIND_WORKFLOW_HOST_CONTROL") == "1"
 	workflowmcp.Register(server, workflowClient)
 	for _, name := range workflowmcp.ToolNames {
 		readOnlyTools[name] = workflowmcp.IsReadOnlyTool(name)

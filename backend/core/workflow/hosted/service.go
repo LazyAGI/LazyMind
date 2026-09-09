@@ -11,8 +11,10 @@ import (
 
 	"gorm.io/gorm"
 
+	"lazymind/core/common/orm"
 	workflowcore "lazymind/core/workflow"
 	"lazymind/core/workflow/attempt"
+	"lazymind/core/workflow/controlstore"
 	"lazymind/core/workflow/executor"
 	workflowstore "lazymind/core/workflow/store"
 )
@@ -30,24 +32,34 @@ type Service struct {
 }
 
 type Execution struct {
-	ExecutionID  string                  `json:"execution_id"`
-	LeaseExpires time.Time               `json:"lease_expires_at"`
-	StepContract executor.AttemptContext `json:"step_contract"`
+	ReviewAfterSubmit bool                    `json:"review_after_submit"`
+	ExecutionHandle   string                  `json:"execution_handle,omitempty"`
+	ExecutionID       string                  `json:"execution_id"`
+	LeaseExpires      time.Time               `json:"lease_expires_at"`
+	StepContract      executor.AttemptContext `json:"step_contract"`
 }
 
 type Submission struct {
-	Outcome     string              `json:"outcome"`
-	Summary     string              `json:"summary,omitempty"`
-	ErrorCode   string              `json:"error_code,omitempty"`
-	ExecutorRef string              `json:"executor_ref,omitempty"`
-	Artifacts   []executor.Artifact `json:"artifacts,omitempty"`
-	Control     *executor.Control   `json:"control,omitempty"`
+	ExecutionHandle string              `json:"execution_handle,omitempty"`
+	Outcome         string              `json:"outcome"`
+	Summary         string              `json:"summary,omitempty"`
+	ErrorCode       string              `json:"error_code,omitempty"`
+	ExecutorRef     string              `json:"executor_ref,omitempty"`
+	Artifacts       []executor.Artifact `json:"artifacts,omitempty"`
+	Control         *executor.Control   `json:"control,omitempty"`
 }
 
 type SubmissionResult struct {
-	ExecutionID     string `json:"execution_id"`
-	AttemptStatus   string `json:"attempt_status"`
-	AlreadyTerminal bool   `json:"already_terminal,omitempty"`
+	Receipt         *SubmissionReceipt     `json:"receipt,omitempty"`
+	Control         *controlstore.Snapshot `json:"control,omitempty"`
+	ExecutionID     string                 `json:"execution_id"`
+	AttemptStatus   string                 `json:"attempt_status"`
+	AlreadyTerminal bool                   `json:"already_terminal,omitempty"`
+}
+
+type SubmissionReceipt struct {
+	CommandID   string `json:"command_id"`
+	ExecutionID string `json:"execution_id"`
 }
 
 type ProtocolError struct {
@@ -65,11 +77,22 @@ func executorID(owner string) string {
 }
 
 func (s *Service) Begin(ctx context.Context, owner, sessionID, attemptID string) (Execution, error) {
+	return s.begin(ctx, owner, sessionID, attemptID, false)
+}
+
+func (s *Service) begin(ctx context.Context, owner, sessionID, attemptID string, resume bool) (Execution, error) {
 	if strings.TrimSpace(owner) == "" || strings.TrimSpace(sessionID) == "" || strings.TrimSpace(attemptID) == "" {
 		return Execution{}, &ProtocolError{Code: "INVALID_EXECUTION", Message: "owner, session_id and execution_id are required"}
 	}
 	if err := s.Store.AuthorizeSession(ctx, sessionID, owner); err != nil {
 		return Execution{}, err
+	}
+	var session orm.WorkflowSession
+	if err := s.DB.WithContext(ctx).Where("id = ?", sessionID).First(&session).Error; err != nil {
+		return Execution{}, err
+	}
+	if controlstore.Controlled(session) {
+		return s.beginControlled(ctx, owner, sessionID, attemptID, resume)
 	}
 	row, err := s.Attempts.Attempt(ctx, attemptID)
 	if err != nil || row.SessionID != sessionID {
@@ -88,11 +111,11 @@ func (s *Service) Begin(ctx context.Context, owner, sessionID, attemptID string)
 	// external-Agent contract.
 	contract.Metadata = nil
 	workflowcore.NotifyWorkflowRuntimeUpdated(ctx, s.DB, sessionID, attemptID, "running")
-	return Execution{ExecutionID: attemptID, LeaseExpires: claim.LeaseExpiresAt, StepContract: contract}, nil
+	return Execution{ExecutionID: attemptID, ExecutionHandle: claim.LeaseToken, LeaseExpires: claim.LeaseExpiresAt, StepContract: contract}, nil
 }
 
 func (s *Service) Resume(ctx context.Context, owner, sessionID, attemptID string) (Execution, error) {
-	return s.Begin(ctx, owner, sessionID, attemptID)
+	return s.begin(ctx, owner, sessionID, attemptID, true)
 }
 
 func normalizeOutcome(value string) (string, error) {
@@ -148,6 +171,17 @@ func validateArtifacts(contract executor.AttemptContext, values []executor.Artif
 }
 
 func (s *Service) Submit(ctx context.Context, owner, sessionID, attemptID string, submission Submission) (SubmissionResult, error) {
+	var session orm.WorkflowSession
+	if err := s.DB.WithContext(ctx).Where("id = ?", sessionID).First(&session).Error; err != nil {
+		return SubmissionResult{}, err
+	}
+	if controlstore.Controlled(session) {
+		return s.submitControlled(ctx, owner, sessionID, attemptID, submission)
+	}
+	return s.submitLegacy(ctx, owner, sessionID, attemptID, submission)
+}
+
+func (s *Service) submitLegacy(ctx context.Context, owner, sessionID, attemptID string, submission Submission) (SubmissionResult, error) {
 	if err := s.Store.AuthorizeSession(ctx, sessionID, owner); err != nil {
 		return SubmissionResult{}, err
 	}
