@@ -224,3 +224,171 @@ func TestWorkspaceOperationCompletedStateStoresNoContent(t *testing.T) {
 		t.Fatal("completed operation state contains content")
 	}
 }
+
+func TestWorkspaceOperationSensitiveReadApproval(t *testing.T) {
+	for _, mode := range []string{PermissionAlwaysAsk, PermissionAskAsNeeded, PermissionAllowAll} {
+		for _, path := range []string{"notes.txt", ".env", ".env.example"} {
+			t.Run(mode+"/"+path, func(t *testing.T) {
+				db, grant, stateStore, conversationID := operationFixture(t, mode)
+				ctx := context.Background()
+				const content = "synthetic-test-content"
+				if err := os.WriteFile(filepath.Join(grant.Path, path), []byte(content), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				req := OperationRequest{UserID: "owner", ConversationID: conversationID, WorkspaceID: grant.WorkspaceID,
+					Operation: OperationRead, Path: path, CallID: "read-approval"}
+				prepared, err := PrepareOperation(ctx, db.DB, stateStore, req)
+				if err != nil {
+					t.Fatal(err)
+				}
+				want := DecisionAllowed
+				if path == ".env" && mode != PermissionAllowAll {
+					want = DecisionPending
+				}
+				if prepared.Decision != want {
+					t.Fatalf("decision=%s, want %s", prepared.Decision, want)
+				}
+				if prepared.Content != "" {
+					t.Fatal("prepare exposed file content")
+				}
+				if want == DecisionPending {
+					result, err := ExecuteOperation(ctx, db.DB, stateStore, prepared.OperationID, req)
+					requireWorkspaceReason(t, err, 403, "forbidden", "selection_forbidden")
+					if result.Content != "" {
+						t.Fatalf("unapproved read: result=%+v err=%v", result, err)
+					}
+					if _, err := DecideOperation(ctx, stateStore, prepared.OperationID, "allow_once", "owner"); err != nil {
+						t.Fatal(err)
+					}
+				}
+				result, err := ExecuteOperation(ctx, db.DB, stateStore, prepared.OperationID, req)
+				if err != nil || result.Content != content {
+					t.Fatalf("approved read: result=%+v err=%v", result, err)
+				}
+			})
+		}
+	}
+}
+
+// Pause at the state-store boundary after ExecuteOperation has read its snapshot.
+// All SQL, authorization and file operations still use the real implementation.
+type delayedOperationClaimStore struct {
+	state.Store
+	state.CompareAndDeleteStore
+	key         string
+	beforeClaim func()
+}
+
+func (s *delayedOperationClaimStore) SetNX(ctx context.Context, key string, value []byte, ttl time.Duration) (bool, error) {
+	if key == s.key && s.beforeClaim != nil {
+		before := s.beforeClaim
+		s.beforeClaim = nil
+		before()
+	}
+	return s.Store.SetNX(ctx, key, value, ttl)
+}
+
+func TestWorkspaceOperationDelayedExecutionCannotReplayCompletedAppend(t *testing.T) {
+	db, grant, stateStore, conversationID := operationFixture(t, PermissionAllowAll)
+	ctx := context.Background()
+	path := filepath.Join(grant.Path, "notes.txt")
+	if err := os.WriteFile(path, []byte("seed"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	req := OperationRequest{UserID: "owner", ConversationID: conversationID, WorkspaceID: grant.WorkspaceID,
+		Operation: OperationAppend, Path: "notes.txt", Content: "+append", ExpectedVersion: digestString("seed"), CallID: "same-call"}
+	prepared, err := PrepareOperation(ctx, db.DB, stateStore, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var first OperationResult
+	delayed := &delayedOperationClaimStore{Store: stateStore,
+		CompareAndDeleteStore: stateStore.(state.CompareAndDeleteStore), key: operationLockKey(prepared.OperationID)}
+	delayed.beforeClaim = func() {
+		// A second request finishes while the first is delayed before claiming.
+		first, err = ExecuteOperation(ctx, db.DB, stateStore, prepared.OperationID, req)
+		if err != nil || first.Content != "seed+append" {
+			t.Fatalf("first execution: result=%+v err=%v", first, err)
+		}
+		// An external editor undoes that append; a duplicate must not redo it.
+		if err := os.WriteFile(path, []byte("seed"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	replayed, err := ExecuteOperation(ctx, db.DB, delayed, prepared.OperationID, req)
+	if err != nil || replayed.Status != operationCompleted || replayed.Version != first.Version {
+		t.Fatalf("duplicate must return completed receipt: result=%+v err=%v", replayed, err)
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "seed" {
+		t.Fatalf("completed operation changed the file again: %q", content)
+	}
+}
+
+func TestWorkspaceOperationFailedAppendCannotReuseApproval(t *testing.T) {
+	db, grant, stateStore, conversationID := operationFixture(t, PermissionAlwaysAsk)
+	ctx := context.Background()
+	path := filepath.Join(grant.Path, "notes.txt")
+	if err := os.WriteFile(path, []byte("seed"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	req := OperationRequest{UserID: "owner", ConversationID: conversationID, WorkspaceID: grant.WorkspaceID,
+		Operation: OperationAppend, Path: "notes.txt", Content: "+append", ExpectedVersion: digestString("seed"), CallID: "failed-call"}
+	prepared, err := PrepareOperation(ctx, db.DB, stateStore, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := DecideOperation(ctx, stateStore, prepared.OperationID, "allow_once", "owner"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("external-edit"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err = ExecuteOperation(ctx, db.DB, stateStore, prepared.OperationID, req)
+	requireWorkspaceReason(t, err, 409, "conflict", "binding_conflict")
+	failed, err := OperationStatus(ctx, stateStore, prepared.OperationID)
+	if err != nil || failed.Status != operationFailed {
+		t.Fatalf("expected failed operation: result=%+v err=%v", failed, err)
+	}
+	if err := os.WriteFile(path, []byte("seed"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, retryErr := ExecuteOperation(ctx, db.DB, stateStore, prepared.OperationID, req)
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "seed" {
+		t.Errorf("failed operation changed the file on retry: %q", content)
+	}
+	requireWorkspaceReason(t, retryErr, 409, "conflict", "binding_conflict")
+}
+
+func TestWorkspaceOperationCompletedReadReturnsReceiptWithoutReadingAgain(t *testing.T) {
+	db, grant, stateStore, conversationID := operationFixture(t, PermissionAllowAll)
+	ctx := context.Background()
+	path := filepath.Join(grant.Path, "notes.txt")
+	if err := os.WriteFile(path, []byte("first-version"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	req := OperationRequest{UserID: "owner", ConversationID: conversationID, WorkspaceID: grant.WorkspaceID,
+		Operation: OperationRead, Path: "notes.txt", CallID: "read-once"}
+	prepared, err := PrepareOperation(ctx, db.DB, stateStore, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := ExecuteOperation(ctx, db.DB, stateStore, prepared.OperationID, req)
+	if err != nil || first.Content != "first-version" {
+		t.Fatalf("first read: result=%+v err=%v", first, err)
+	}
+	if err := os.WriteFile(path, []byte("new-unapproved-content"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	replayed, err := ExecuteOperation(ctx, db.DB, stateStore, prepared.OperationID, req)
+	if err != nil || replayed.Status != operationCompleted || replayed.Version != first.Version || replayed.Content != "" {
+		t.Fatalf("completed read must return metadata receipt only: result=%+v err=%v", replayed, err)
+	}
+}

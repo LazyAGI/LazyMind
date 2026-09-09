@@ -1,6 +1,6 @@
 # 工作区工具授权任务与验收
 
-主方案：IMPLEMENTATION_PLAN.md，2026-09-09 Review 稿。用户已允许项目算法及对应测试修改；LazyLLM/gitlink、Local/Desktop 继续冻结。现在只编写方案，生产和测试代码均未修改。
+主方案：IMPLEMENTATION_PLAN.md，第 12 节为最新状态。用户已允许项目算法及对应测试修改，并批准原设计及 A1/A2 实现；LazyLLM/gitlink、Local/Desktop 继续冻结。当前为 A2-R1 修复测试 Review，A2 整体验收与 A3 尚未完成。
 
 ## 当前状态与总门禁
 
@@ -8,7 +8,7 @@
 - [ ] 原 T6：真实 Local/打包 Desktop UI、必要数据库及平台验收。
 - [x] 算法侧新方案源码核对和修改边界确认。
 - [x] 注册、中间件、Core HTTP/state、子任务/Workflow 和旧权限定义审计，设计写入现有方案。
-- [ ] 用户 Review 具体设计：删除规则、未接入自定义工具的拒绝、期限与总规模（预计生产净增 870–1350 行、2 个新文件）。
+- [x] 用户已 Review 原具体设计及 A1/A2 生产范围；本批 A2-R1 修复范围见下方，继续保留逐批 Review 门禁。
 - [ ] 每个实施批次先建立失败合同，报告预期失败/异常失败，Review 后再写该批生产代码。
 
 全流程在本会话执行；不创建子任务、worktree、第二仓库或新分支。下面是验收和修改步骤，不是预先批准的生产 diff。
@@ -161,14 +161,17 @@ A2 开始前继续遵守测试先行和人工 Review；Core 文件执行与批�
 - [x] Review A2 RED 后实现 Core 单一 operation service、批准状态机和真实文件操作；不得先写“临时允许”分支。
 
 
-## A2 完成记录（2026-09-09）
+## A2 基础实现与待修复项（2026-09-09，更正原完成记录）
 
-- [x] Core 文件操作和 operation 状态实现，读/建/改/追加/删真实磁盘闭环通过。
-- [x] 权限矩阵、敏感写拒绝、路径/版本/撤销复核、批准单次消费和并发决定测试通过。
-- [x] 内部 prepare/status/execute 与用户 decide 路由注册，owner/conversation 校验和内部 token 校验通过相关包回归。
-- [x] LocalFileToolkit 绑定工作区受控转发，稳定 call_id，pending 不回退本地文件；算法相关矩阵 103/103。
-- [x] Core 全仓测试、`go vet ./...`、`go test -race ./localworkspace -count=1` 通过。
+- [x] Core 基础文件操作、operation 状态结构及四条操作/决定路由已提交；历史测试只证明当时覆盖的场景。
+- [x] LocalFileToolkit 的 read/string_replace/create/append/delete 有 Core 转发分支；不代表发现工具也已接入，call_id 幂等未证明。
+- [ ] 完整权限表、目录竞态、撤销协调、单次执行、HTTP 身份边界与失败恢复验收；本次已复现 5 项失败。
+- [x] A2-R1：在既有 operations_test.go 增加 12 项行为用例，净增 168 行；本轮生产净增 0。
+- [x] A2-R1：基线通过；完整包 race 矩阵 43 通过、5 预期失败、0 异常失败，原有 36 项通过。
+- [ ] Review A2-R1：仅 operations.go，预计生产净增 15–40 行、0 新文件；修复敏感读决定、锁后状态复核、failed 禁止重试、completed 读取返回无内容回执。
+- [ ] Review 后实现 A2-R1 并将新增 12 项转绿，执行工作区/聊天/子任务回归，再更新四份文档和实际 diff 规模。
+- [ ] A2 后续：批准前内容读取、路径/外部编辑/撤销竞态、原子解锁及租期、prepare 幂等与 uncertain，分别先补真实合同；本批不宣称这些问题已解决。
 - [ ] A3：把真实 Core gate 注入 middleware，pending 在原 Agent 调用中等待/恢复，批准 UI 和刷新/切会话隔离。
 - [ ] A3：证明普通子任务、已声明 Workflow、lease/取消/重启、uncertain 语义；完成 Local/打包 Desktop 实测。
 
-A2 生产净增约 895 行、2 个新生产文件，超过门槛；本记录不把超量拆批隐藏。
+A2 已提交生产实际新增 894、删除 1、净增 893 行、2 个新生产文件；本次修复测试新增 168 行，不以拆批隐藏累计规模。

@@ -1,6 +1,6 @@
 # 工作区工具授权与文件执行方案
 
-> 当前状态：2026-09-09 设计 Review 稿。用户已允许修改项目算法及对应测试，要求先明确方案再修改代码。实现时在本会话按 executing-plans 推进，测试先行，每个批次经过人工 Review；不创建其他仓库或工作树。
+> 当前状态：2026-09-09 A2-R1 行为测试已交付，等待修复 Review。用户已批准原设计和 A1/A2 实现，但 A2 尚有权限与重复执行缺口，不能标记整体完成。测试先行，每个批次经过人工 Review；不创建其他仓库或工作树。当前状态以第 12 节为准，第 7–11 节保留原设计与阶段记录。
 
 ## 1. 目标与已确认边界
 
@@ -156,12 +156,24 @@ A1 生产净增约 66 行、5 个既有算法文件；新增 1 个测试文件�
 A2 测试合同已建立但未实现生产：Core 目前没有 `operations.go`、`approvals.go` 或对应路由，合同运行结果为 4 个预期失败、0 个异常失败。生产实现必须先决定 operation service 与批准状态机边界，再补真实磁盘测试；不得以源码字符串合同通过后宣称文件能力完成。
 
 
-## 12. A2 实现与验证结果（2026-09-09）
+## 12. A2 当前状态与 A2-R1 修复 Review（2026-09-09）
 
-A2 已完成 Core 与算法工具的最小受控文件操作接入：Core 新增 `backend/core/localworkspace/operations.go`（502 行）和 `approvals.go`（177 行），实现绑定会话下的读、创建、追加、精确替换、单文件删除、权限/版本/敏感/.git/symlink 边界、短期 operation 状态、批准决定、单次执行锁和内部/用户路由；算法修改既有 `algorithm/lazymind/chat/engine/tools/local_fs.py`（净增 211 行），绑定工作区的读写操作转发 Core，Core pending 返回 `needs_approval`，不回退本地磁盘。
+提交 `a5761633` 已提供 Core 读、创建、追加、替换、删除基础实现，以及算法 read/string_replace/create/append/delete 的 Core 转发分支。按 Git 重新统计，A2 生产新增 894、删除 1、净增 **893 行**：operations.go 502、approvals.go 177、routes.go 4、local_fs.py 210；新增生产文件 2 个。此前的 895 行和“完整安全边界/单次执行已完成”表述不准确。
 
-本批生产净增约 895 行、2 个新生产文件；超过原约 200 行/1 个新文件门槛，原因是 Core 磁盘操作与批准状态必须分离，不能复用现有 grant metadata 或内部 artifact 存储而保持语义。测试新增约 414 行（Core 308、算法 106，含合同调整），未新增依赖、数据库表或服务。
+先完成 A2 遗留修复，再进入 A3 批准 UI 和原调用恢复。A2-R1 仅针对已有合同中的权限决定与相同 operation_id 重复执行，不改变权限产品定义。
 
-验证：算法相关矩阵 103/103；Core `go test ./... -count=1`、`go vet ./...`、`go test -race ./localworkspace -count=1` 均通过。警告仅来自本地 Python 依赖包的既有 DeprecationWarning/SyntaxWarning。LazyLLM gitlink 与 Local/Desktop 冻结边界未变化。
+| A2-R1 验收 | 本次真实结果 | 拟修复方式 |
+|---|---|---|
+| `.env` 在 always_ask / ask_as_needed 下须 pending，批准前 execute 拒绝 | 2 项预期失败：直接 allowed | 普通读免询问前排除敏感路径；allow_all 和示例文件规则保留 |
+| 普通读取、`.env.example`、allow_all 敏感读保持允许 | 7 项通过 | 保留现有行为 |
+| 延迟执行者领取锁时发现操作已完成，只返回已保存回执 | 1 项预期失败：外部撤回的追加被再次执行 | 领取锁后重新加载状态再决定是否执行 |
+| failed 是终态，恢复文件旧版本也不能复用旧批准追加 | 1 项预期失败：再次写入 | 仅 allowed 状态可进入 executing，failed 返回现有冲突 reason |
+| completed 读取返回保存的无内容回执，不用旧 ID 获取新内容 | 1 项预期失败：返回文件新内容 | 读与写统一处理 completed；新读取必须发起新的调用 |
 
-限制：算法尚未把真实 Core gate 注入 `AgentExecutionOptions.authorization_gate`；pending 当前由 LocalFileToolkit 转换为 `ToolExecutionError.approval_required` 后结束本次工具调用，A3 需在现有 UI/控制通道恢复原调用。Core 的 `uncertain` 仅保留状态标识，跨进程崩溃后的真实不确定提交、Workflow lease、普通子任务端到端和 Local/打包 Desktop 实测仍未完成。A2 不宣称完整工作区能力交付。
+实际修改：既有 `backend/core/localworkspace/operations_test.go` 净增 **168 行**和本目录四份文档；生产净增 **0**。复用 operationFixture、SQLite state、临时文件和 requireWorkspaceReason；一个仅用于测试的 Store 包装在 SetNX 前确定性插入另一个请求，真实文件执行不 mock，无 sleep、运行时补丁或新增依赖。该用例证明具体交错下的重放缺陷，不替代完整并发/跨进程验收。
+
+拟生产修复仅修改既有 `backend/core/localworkspace/operations.go`，预计净增 **15–40 行**、新增生产文件 **0**。复用同一状态结构、状态读取/保存 helper、permissionDecision、现有错误 reason；不新增服务、表、manager 或 DTO。原子解锁、锁租期、prepare 幂等不混入这一次修复，后续须独立补合同，不能把本批通过称作完整单次执行保证。修改范围若超出上述预算，先报告实际 diff 再 Review。
+
+本次命令（`backend/core`）：基线 `go test ./localworkspace -count=1` 通过；新增四组聚焦测试为 7 通过、5 预期失败；`go test -race ./localworkspace -count=1 -json` 全包叶子用例共 **43 通过、5 预期失败、0 异常失败**，原有 36 项全部通过，未报告 Go data race。失败矩阵是待修复证据，不是验收通过。批准生产后须将新增 12 项转绿，并重新运行 Core 工作区/聊天/子任务回归。
+
+仍未解决：prepare 在决定前计算文件内容哈希；路径校验后重新按路径访问的竞态；根/父目录替换、外部并发提交及提交前撤销协调；执行锁租期/原子解锁、prepare 幂等、uncertain 与崩溃恢复；ls/glob/grep/info 的 Core 接入；mkdir 等方案项；真实 Core gate、原调用批准恢复、批准 UI、主/子任务和 Workflow 生命周期/lease 复核以及 T6 实机验收。这些项目不能因本批的状态修复而勾选完成。

@@ -1,5 +1,17 @@
 # 工作区剩余功能交接进度
 
+## 当前批次：A2-R1 行为测试与修复 Review（2026-09-09）
+
+- 用户要求进入下一阶段开发；先补 A2 遗留权限与重复执行问题，随后才推进 A3。当前 HEAD 为 `a576163308d10debccb21559d3495ba59080a85f`，工作区起始干净，本地领先远端跟踪分支 3 个提交；本轮未拉取或推送。
+- 更正下方历史“A2 完成”：仅基础操作已实现，敏感读取直接放行、领取执行锁后使用旧状态、完成的读取重新访问文件、failed 状态可以重试均需行为验证；完整 A2 验收仍未完成。
+- 实际修改既有 `backend/core/localworkspace/operations_test.go`，净增 168 行；复用真实 SQLite state、grant/binding fixture、临时文件和 reason 断言。通过 state.Store 边界的同步回调确定性交错两个请求，不模拟文件执行，不靠 sleep 或调度概率复现。
+- 本次基线：在 `backend/core` 执行 `go test ./localworkspace -count=1` 通过。新增四组测试共 12 个叶子用例：7 通过、5 预期失败；完整 `go test -race ./localworkspace -count=1 -json` 为 43 通过、5 预期失败、0 异常失败，原有 36 项通过，无 data race 报告。
+- 已定位 4 类原因：所有读取先行放行、锁前状态过时、failed 仍可执行、completed 读取重新读盘。不是测试设施异常，也没有将预期失败当作验收通过。
+- 拟生产范围仅 operations.go，预计净增 15–40 行、0 新生产文件；复用既有权限函数、状态结构与读写 helper。当前生产净增 0，四份文档已同步修复计划、验收与缺口；下一步等待本批测试/生产范围 Review，然后实施并重跑。
+- 完整 A2 的路径/撤销竞态、批准前内容读取、锁租期与幂等/uncertain、发现工具和 A3/T6 仍未完成，本批通过后也不能自动勾选。原 A2 生产规模重新按 Git 统计为新增 894、删除 1、净增 893 行，修正文档中 895 的误计。
+- 四份既有文档作为唯一交接入口；不新建计划目录，不改 Local/Desktop、LazyLLM 或 gitlink。
+- 交付检查：`git diff --check` 通过；Local/Desktop 相对 `ec4676e0` 零差异；LazyLLM 相对 `245bc26d` 零差异且子模块干净，gitlink 均为 `2e3d00ac3ae4ae983cb7d0ca4bd231c1a56ebfc0`。本批只提交测试与四份文档，刻意保留预期 RED 等待 Review，未推送远端。
+
 ## 接手核查（2026-09-08）
 
 - 当前唯一仓库目录为 `/Users/theone/Downloads/lazymind`，远端为 `https://github.com/YuZou-coding/LazyMind.git`；未发现另一份 `LazyMind-main` 目录，也未创建仓库或 worktree。

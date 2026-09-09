@@ -1,5 +1,18 @@
 # 当前差异证据
 
+## 最新：A2-R1 行为复现（2026-09-09）
+
+本节更正下方历史“A2 完成”判断，不继承旧测试成功作为本次验收。HEAD `a5761633`，本轮未修改生产代码。
+
+- `permissionDecision` 首个分支对所有 read 返回 allowed，导致 `.env` 在 always_ask、ask_as_needed 下绕过 pending。通过实际 PrepareOperation + 临时假数据文件复现 2 项失败；普通读、示例文件和 allow_all 敏感读的 7 项兼容用例通过。
+- ExecuteOperation 在 SetNX 前读取 value，领取后未重新读取。测试在 Store 边界确定性插入另一请求完成追加，再让外部编辑器恢复原内容；延迟请求重用旧快照，把追加再次写入，实际磁盘断言失败。包装器只安排交错，授权、SQLite 与文件操作均为真实实现。
+- failed 状态仍保留 DecisionAllowed，而 execute 未限制只能从 allowed 状态进入。临时文件先产生版本冲突，再恢复旧内容，同 operation_id 重试成功追加，违反批准单次执行合同。
+- completed 的读操作被专门排除在回执复用之外。首次读取后更改临时文件，再提交同一 ID，返回了新的文件内容。测试要求返回原有无内容回执；新读取须发起新调用。
+- 新增测试复用已有 requireWorkspaceReason，对 pending 拒绝和版本/失败重试检查既有 HTTP 状态及 reason，避免把数据库或其他异常当作期望拒绝。
+- 本次全包 `go test -race ./localworkspace -count=1 -json`：按叶子用例统计 43 通过、5 预期失败、0 异常失败；其中新增 12 项为 7 通过/5 失败，原有 36 项全部通过，无 data race 报告。测试代码净增 168 行，生产净增 0。
+- 拟最小修复：仅 operations.go 预计净增 15–40 行，无新生产文件，使用既有状态/helper；详细验收与范围见 IMPLEMENTATION_PLAN.md 第 12 节。目录竞态、锁租期/原子解锁、prepare 幂等、运行身份与 unknown/uncertain 等仍未覆盖，不能以这 12 项代替完整安全验收。
+- 本轮误读过两个不存在的候选路径（state/state.go、common/app_error.go），已用 rg 定位真实 store.go/error_catalog.go；是源码检索错误，未导致测试收集或编译失败。
+
 ## 本次接手源码复核（69d4b603）
 
 - `LocalWorkspaceControl.tsx` 在有 `conversationId` 时仍保留可点击的目录按钮；Core 的 `ensureConversationWithWorkspace` 会对新增或不同 binding 返回 `binding_locked`，因此 U1 是前端状态约束缺口，不需要修改 Core 绑定规则。
