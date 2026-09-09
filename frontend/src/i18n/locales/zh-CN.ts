@@ -1622,7 +1622,7 @@ const zhCN = {
 
   chat: {
     fork: {
-      title: "创建分支对话", selectAnswerFirst: "请先选定回答，再创建分支对话",
+      title: "从此处创建对话分支", selectAnswerFirst: "请先选定回答，再创建分支对话",
       creating: "正在创建分支对话…", retryCreate: "重试创建", noModels: "暂无可用模型，请配置模型后重新读取。",
       emptyTerminal: "此回复已结束，未生成正文。", chooseModel: "选择替代模型",
       modelLoadFailed: "模型列表加载失败，请重新读取。",

@@ -1667,7 +1667,7 @@ const enUS = {
   // Chat
   chat: {
     fork: {
-      title: "Create a branch conversation", selectAnswerFirst: "Select an answer before creating a branch conversation",
+      title: "Branch the conversation from here", selectAnswerFirst: "Select an answer before creating a branch conversation",
       creating: "Creating a branch conversation…", retryCreate: "Retry creation", noModels: "No models are available. Configure a model, then reload.",
       emptyTerminal: "This reply ended without a response.", chooseModel: "Choose a replacement model",
       modelLoadFailed: "Could not load models. Please reload.",
