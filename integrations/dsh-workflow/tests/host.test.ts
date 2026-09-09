@@ -17,7 +17,7 @@ const publicName = (name: string) => name.startsWith('mcp__lazymind__workflow_')
 const cleanup: Array<() => Promise<unknown>> = []
 afterEach(async () => { for (const dispose of cleanup.splice(0).reverse()) await dispose() })
 
-async function fixture(seedPTC = false, native = false) {
+async function fixture(seedPTC = false, native = false, laterManualInput = false) {
   const ctx = new Context()
   const prompt = ctx.plugin(SystemPrompt)
   await prompt.await(); cleanup.push(() => prompt.dispose())
@@ -86,6 +86,10 @@ async function fixture(seedPTC = false, native = false) {
       }})}],
     })
   }
+  if (laterManualInput) root.session.append('user/message', {
+    id: 'unrelated-input', source: { kind: 'user', rpcId: 'unrelated-input' },
+    content: [{ type: 'text', text: 'Work on something else' }],
+  } as unknown as UserMessage, { surfaceOp: 'append' })
   const installed = ctx.inject(['tools', 'agents'], injected => {
     const dispose = installHost(injected, bridge, { serverName: 'lazymind', webUrl: 'http://localhost:8090' }, 'instance-1')
     injected.effect(() => dispose)
@@ -191,13 +195,18 @@ it('does not bind historical discovery reads to the current driver', async () =>
   expect((await f.execute('mcp__lazymind__workflow_start')).isError).toBe(false)
 })
 
-it.each([false, true])('panel continuation replaces only workflow planning without grants (granted=%s)', async (granted) => {
-  const f = await fixture()
-  await f.execute('mcp__lazymind__workflow_start')
+it.each([
+  { granted: false, restored: false, manual: false },
+  { granted: true, restored: false, manual: false },
+  { granted: false, restored: true, manual: false },
+  { granted: false, restored: true, manual: true },
+])('panel continuation preserves ownership and grants: %j', async ({granted, restored, manual}) => {
+  const f = await fixture(restored, false, manual)
+  if (!restored) await f.execute('mcp__lazymind__workflow_start')
   if (granted) await f.execute('mcp__lazymind__workflow_step_begin', f.root, { session_id: 'run-1' })
   const control = await f.bridge.state('run-1', new AbortController().signal)
   const cancel = vi.fn()
-  const prompt = vi.fn(async () => ({}))
+  const prompt = vi.fn(async (_input: { content: Array<{text: string}> }) => ({}))
   f.ctx.provide('sessionController', { resolveAgent: async () => ({ agent: f.root }), cancel, prompt })
   const action = { id: 'panel-continue', session_id: 'run-1', kind: 'continue' as const,
     native_session_id: f.root.session.id, binding_generation: 1, status: 'pending' }
@@ -207,7 +216,8 @@ it.each([false, true])('panel continuation replaces only workflow planning witho
   vi.mocked(f.bridge.settle).mockResolvedValue(undefined)
   vi.mocked(f.bridge.actions).mockResolvedValueOnce({ actions: [action] })
   await vi.waitFor(() => expect(prompt).toHaveBeenCalledOnce(), { timeout: 2500 })
-  if (granted) expect(cancel).not.toHaveBeenCalled()
+  expect(prompt.mock.calls[0][0].content[0].text).toContain('requires review AFTER execution')
+  if (granted || manual) expect(cancel).not.toHaveBeenCalled()
   else {
     expect(cancel).toHaveBeenCalledWith({ sessionId: f.root.session.id })
     expect(cancel.mock.invocationCallOrder[0]).toBeLessThan(prompt.mock.invocationCallOrder[0])

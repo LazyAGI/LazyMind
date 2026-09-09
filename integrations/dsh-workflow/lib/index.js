@@ -331,7 +331,10 @@ function installHost(ctx, bridge, config, instanceId) {
 		const root = driver(scope.agent);
 		const finished = /* @__PURE__ */ new Set();
 		let ownedAt = 0;
+		let ownedSeq = -1;
+		let latestInputSeq = -1;
 		for (const event of [...scope.agent.session.ownEvents()].reverse()) {
+			if (event.type === "user/message" && latestInputSeq < 0) latestInputSeq = event.seq;
 			const run = eventRun(event, config.serverName);
 			if (!run || run.hostSessionId !== root.session.id || !run.operation || ![
 				"start",
@@ -344,11 +347,14 @@ function installHost(ctx, bridge, config, instanceId) {
 				scope.runId = run.runId;
 				scope.automatic = true;
 				ownedAt = event.time;
+				ownedSeq = event.seq;
 			}
 			if (run.runId !== scope.runId || !run.executionId) continue;
 			if (run.operation === "step_submit") finished.add(run.executionId);
 			else if (ACQUIRE.has(run.operation) && !finished.has(run.executionId)) scope.grants.add(run.executionId);
 		}
+		if (latestInputSeq > ownedSeq) scope.automatic = false;
+		scope.activeOwned = scope.agent.status === "running" && scope.automatic;
 		if (!scope.runId && root !== scope.agent) scope.runId = ensure(root).runId;
 		const goal = goals?.get(root);
 		if (goal && ownedAt && goal.createdAt <= ownedAt) scope.goalId = goal.id;
@@ -712,7 +718,7 @@ function installHost(ctx, bridge, config, instanceId) {
 					mode: "queue",
 					content: [{
 						type: "text",
-						text: action.execution_id ? `LazyMind workflow ${action.session_id} has an execution update. Call workflow.step.claim with execution_id=${action.execution_id} to inspect or acquire it. If executor_host is lazymind, it is managed by LazyMind: read the latest state and continue only ready steps when permitted; do not execute or submit it. Otherwise execute the granted contract and submit with execution_handle. Do not create a new workflow.` : `The user confirmed LazyMind workflow ${action.session_id}. Read its latest state through MCP and continue the ready steps. Use execution_handle on each submit and honor control.continuation. Do not create a new workflow.`
+						text: action.execution_id ? `LazyMind workflow ${action.session_id} has an execution update. Call workflow.step.claim with execution_id=${action.execution_id} to inspect or acquire it. If executor_host is lazymind, it is managed by LazyMind: read the latest state and continue only ready steps when permitted; do not execute or submit it. Otherwise execute the granted contract and submit with execution_handle. Do not create a new workflow.` : `The user clicked Continue in the LazyMind panel for workflow ${action.session_id} and has finished the current review. Call workflow.state, then workflow.step.begin for a ready step when control.continuation=continue and admission.can_begin=true. A human step requires review AFTER execution; its mode or requires_approval flag does not require another confirmation before begin. Continue until awaiting_user, awaiting_executor, stopped, or completed. For executor_host=lazymind, let LazyMind execute its tools; otherwise submit using execution_handle. Do not ask the user to confirm the review again or create a new workflow.`
 					}]
 				}, signal());
 				if (scope.runId === action.session_id) resumeGoal(scope);
