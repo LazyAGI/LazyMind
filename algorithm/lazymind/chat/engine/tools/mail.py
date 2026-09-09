@@ -29,8 +29,10 @@ from lazyllm.tools.agent.base import _write_agent_data
 from lazyllm.tools.tool_config_inject import register_tool_auth
 
 from lazymind.chat.config import CHAT_ATTACHMENT_EXTENSIONS
-from lazymind.chat.engine.attachment_reader import parse_attachment_content
-from lazymind.chat.engine.tools.local_file.resolver import resolve_attachment_path
+from lazymind.chat.engine.tools.local_file.resolver import (
+    _materialize_document_text,
+    resolve_attachment_path,
+)
 from lazymind.chat.engine.tools.local_file.workspace import (
     chat_agent_workspace,
     _resolve_workspace_path,
@@ -412,28 +414,70 @@ def _coerce_path_list(value: Any) -> list[str]:
     return [item for item in items if item]
 
 
-def _outgoing_dir() -> str:
+def _mail_workspace() -> str:
     cfg = _agentic_config()
-    root = chat_agent_workspace(str(cfg.get('user_id') or '0'), str(cfg.get('conversation_id') or 'default'))
-    path = os.path.join(root, 'mail_outgoing')
+    return chat_agent_workspace(
+        str(cfg.get('user_id') or '0'),
+        str(cfg.get('conversation_id') or 'default'),
+    )
+
+
+def _outgoing_dir() -> str:
+    path = os.path.join(_mail_workspace(), 'mail_outgoing')
     os.makedirs(path, exist_ok=True)
     return path
 
 
 def _incoming_attachment_path(cred: dict[str, str], message_id: str, filename: str) -> str:
-    cfg = _agentic_config()
-    workspace = chat_agent_workspace(
-        str(cfg.get('user_id') or '0'),
-        str(cfg.get('conversation_id') or 'default'),
-    )
     mailbox_key = hashlib.sha256(
         f"{cred.get('email') or ''}|{cred.get('connection_id') or ''}|{cred.get('provider') or ''}".encode()
     ).hexdigest()[:12]
     message_key = hashlib.sha256(str(message_id or '').encode()).hexdigest()[:12]
     safe_name = os.path.basename(str(filename or '').strip()) or 'attachment.bin'
-    folder = os.path.join(workspace, 'mail_attachments', mailbox_key, message_key)
+    folder = os.path.join(_mail_workspace(), 'mail_attachments', mailbox_key, message_key)
     os.makedirs(folder, exist_ok=True)
     return os.path.join(folder, safe_name)
+
+
+def _attachment_ext(filename: str) -> str:
+    return os.path.splitext(os.path.basename(str(filename or '').strip()))[1].lower()
+
+
+def _is_common_attachment(filename: str) -> bool:
+    ext = _attachment_ext(filename)
+    return not ext or ext in _COMMON_ATTACHMENT_EXTS
+
+
+def _parsed_mail_attachment(target: str, filename: str, message_id: str) -> dict[str, Any]:
+    ext = _attachment_ext(filename)
+    parsed = ''
+    parse_status = 'unsupported'
+    parse_note = (
+        f'Attachment type {ext or "(none)"} was downloaded but is not parsed. '
+        'The file is available at path; convert it or open it locally if you need the content.'
+    )
+    if ext in CHAT_ATTACHMENT_EXTENSIONS:
+        parse_note = ''
+        try:
+            parsed_path = _materialize_document_text(target, _mail_workspace())
+            with open(parsed_path, encoding='utf-8') as handle:
+                parsed = handle.read()[:20000]
+        except Exception as orig:
+            raise ToolExecutionError(f'Failed to read the email attachment: {orig}') from orig
+        parse_status = 'parsed' if str(parsed).strip() else 'empty'
+        if parse_status == 'empty':
+            parse_note = 'The attachment was parsed but no text content was extracted.'
+    payload = {
+        'path': target,
+        'filename': filename,
+        'size': os.path.getsize(target),
+        'text': parsed,
+        'parse_status': parse_status,
+        'cite': f'email-attachment:{message_id}:{filename}',
+    }
+    if parse_note:
+        payload['parse_note'] = parse_note
+    return payload
 
 
 def _unique_outgoing_path(filename: str) -> str:
@@ -1223,25 +1267,38 @@ class _IMAPBackend:
             except Exception:
                 pass
 
-    def read_attachment(self, message_id: str, attachment_id: str) -> bytes:
-        wanted = (attachment_id or '').strip()
-        if wanted and _TRANSFER_URL_RE.search(wanted):
-            _fail(_TRANSFER_NOTE)
+    def read_attachments(self, message_id: str) -> dict[str, Any]:
+        """Fetch the message once and return every named MIME attachment payload."""
         msg = self._fetch_message(message_id)
+        files: dict[str, bytes] = {}
+        html_parts: list[str] = []
         for part in msg.walk():
             filename = part.get_filename() or ''
-            if filename == wanted or _decode_header_value(filename) == wanted:
+            if filename:
+                decoded = _decode_header_value(filename)
                 payload = part.get_payload(decode=True)
-                if payload is None:
-                    break
-                return payload
-        html_parts = []
-        for part in msg.walk():
+                if payload is None or decoded in files:
+                    continue
+                files[decoded] = payload
+                continue
             if part.get_content_type() == 'text/html':
                 payload = part.get_payload(decode=True) or b''
                 charset = part.get_content_charset() or 'utf-8'
                 html_parts.append(payload.decode(charset, errors='replace'))
-        if _extract_transfer_links('\n'.join(html_parts)) or _TRANSFER_HINT_RE.search('\n'.join(html_parts)):
+        html = '\n'.join(html_parts)
+        transfer = bool(_extract_transfer_links(html) or _TRANSFER_HINT_RE.search(html))
+        return {'files': files, 'transfer': transfer}
+
+    def read_attachment(self, message_id: str, attachment_id: str) -> bytes:
+        wanted = (attachment_id or '').strip()
+        if wanted and _TRANSFER_URL_RE.search(wanted):
+            _fail(_TRANSFER_NOTE)
+        result = self.read_attachments(message_id)
+        files = result.get('files') or {}
+        raw = files.get(wanted) or files.get(_decode_header_value(wanted))
+        if raw is not None:
+            return raw
+        if result.get('transfer'):
             _fail(_TRANSFER_NOTE)
         _fail('Failed to read the email attachment.')
 
@@ -1536,6 +1593,11 @@ class MailToolkit:
     def read_attachment(self, message_id: str, attachment_id: str, mailbox: str = '') -> dict[str, Any]:
         """Download a common email attachment into the conversation workspace.
 
+        The first read of a message fetches that email once and writes every
+        ordinary attachment into the workspace. Later reads reuse those files.
+        Parseable types reuse attachment-text-cache. Types that can be saved
+        but not parsed return parse_status=unsupported instead of empty text.
+
         Args:
             message_id: Provider message id.
             attachment_id: Attachment id or filename from read().
@@ -1545,28 +1607,39 @@ class MailToolkit:
             raise ToolExecutionError('message_id and attachment_id are required')
 
         def _download(cred: dict[str, str]) -> dict[str, Any]:
-            backend = _backend(cred)
-            raw = backend.read_attachment(str(message_id).strip(), str(attachment_id).strip())
-            filename = os.path.basename(_decode_header_value(str(attachment_id))) or 'attachment.bin'
-            ext = os.path.splitext(filename)[1].lower()
+            wanted = str(attachment_id).strip()
+            if _TRANSFER_URL_RE.search(wanted):
+                _fail(_TRANSFER_NOTE)
+            filename = os.path.basename(_decode_header_value(wanted)) or 'attachment.bin'
+            ext = _attachment_ext(filename)
             if ext and ext not in _COMMON_ATTACHMENT_EXTS:
                 _fail(f'Attachment type {ext} is not supported.')
-            target = _incoming_attachment_path(cred, str(message_id).strip(), filename)
-            with open(target, 'wb') as handle:
-                handle.write(raw)
-            parsed = ''
-            try:
-                if ext in CHAT_ATTACHMENT_EXTENSIONS:
-                    parsed = parse_attachment_content(target)[:20000]
-            except Exception as orig:
-                raise ToolExecutionError(f'Failed to read the email attachment: {orig}') from orig
-            return {
-                'path': target,
-                'filename': filename,
-                'size': len(raw),
-                'text': parsed,
-                'cite': f'email-attachment:{message_id}:{filename}',
-            }
+            mid = str(message_id).strip()
+            target = _incoming_attachment_path(cred, mid, filename)
+            if not os.path.isfile(target):
+                result = _backend(cred).read_attachments(mid)
+                if not isinstance(result, dict):
+                    result = {}
+                files = result.get('files') if isinstance(result.get('files'), dict) else {}
+                payload = files.get(filename) or files.get(wanted)
+                if payload is None:
+                    if result.get('transfer'):
+                        _fail(_TRANSFER_NOTE)
+                    _fail('Failed to read the email attachment.')
+                for name, raw in files.items():
+                    if not isinstance(raw, (bytes, bytearray)):
+                        continue
+                    saved_name = os.path.basename(_decode_header_value(str(name))) or 'attachment.bin'
+                    if not _is_common_attachment(saved_name):
+                        continue
+                    path = _incoming_attachment_path(cred, mid, saved_name)
+                    if os.path.isfile(path):
+                        continue
+                    with open(path, 'wb') as handle:
+                        handle.write(raw)
+                if not os.path.isfile(target):
+                    _fail('Failed to read the email attachment.')
+            return _parsed_mail_attachment(target, filename, mid)
 
         return _call_mailboxes(mailbox, _download)
 

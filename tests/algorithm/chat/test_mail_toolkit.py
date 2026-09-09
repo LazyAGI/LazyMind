@@ -3,6 +3,7 @@ import os
 import smtplib
 import threading
 import time
+from pathlib import Path
 from unittest.mock import patch
 
 import lazyllm
@@ -684,18 +685,87 @@ def test_read_attachment_namespaces_same_filename(mail_auth):
     assert os.path.basename(path_a) == '报价单.pdf'
 
     class FakeBackend:
-        def read_attachment(self, message_id, attachment_id):
-            return b'content-a' if message_id.endswith('1') else b'content-b'
+        def read_attachments(self, message_id):
+            payload = b'content-a' if message_id.endswith('1') else b'content-b'
+            return {'files': {'报价单.pdf': payload}, 'transfer': False}
 
     with patch('lazymind.chat.engine.tools.mail._backend', return_value=FakeBackend()):
-        with patch('lazymind.chat.engine.tools.mail.parse_attachment_content', return_value=''):
+        with patch(
+            'lazymind.chat.engine.tools.local_file.resolver.parse_attachment_content',
+            return_value='parsed',
+        ):
             first = MailToolkit().read_attachment('INBOX::1', '报价单.pdf')
             second = MailToolkit().read_attachment('INBOX::2', '报价单.pdf')
     assert first['path'] != second['path']
+    assert first['parse_status'] == 'parsed'
     with open(first['path'], 'rb') as handle:
         assert handle.read() == b'content-a'
     with open(second['path'], 'rb') as handle:
         assert handle.read() == b'content-b'
+
+
+def test_imap_read_attachments_walks_message_once():
+    from email.message import EmailMessage
+
+    msg = EmailMessage()
+    msg['Subject'] = 'files'
+    msg['From'] = 'a@b.com'
+    msg.set_content('body')
+    msg.add_attachment(b'pdf-bytes', maintype='application', subtype='pdf', filename='a.pdf')
+    msg.add_attachment(b'zip-bytes', maintype='application', subtype='zip', filename='b.zip')
+
+    backend = _IMAPBackend({
+        'email': 'user@qq.com',
+        'provider': 'qqmail',
+        'secret': 'x',
+        'connection_id': '',
+    })
+    with patch.object(backend, '_fetch_message', return_value=msg):
+        result = backend.read_attachments('INBOX::1')
+    assert result['files'] == {'a.pdf': b'pdf-bytes', 'b.zip': b'zip-bytes'}
+    assert result['transfer'] is False
+    with patch.object(backend, '_fetch_message', return_value=msg) as fetch:
+        assert backend.read_attachment('INBOX::1', 'b.zip') == b'zip-bytes'
+        fetch.assert_called_once()
+
+
+def test_read_attachment_fetches_message_once_and_reuses_workspace(mail_auth):
+    calls = {'n': 0}
+
+    class FakeBackend:
+        def read_attachments(self, message_id):
+            calls['n'] += 1
+            return {
+                'files': {'invoice.pdf': b'%PDF-invoice', 'notes.zip': b'PK-zip'},
+                'transfer': False,
+            }
+
+    parse_calls = []
+
+    def fake_parse(path, priority=0):
+        parse_calls.append(path)
+        return 'invoice text'
+
+    with patch('lazymind.chat.engine.tools.mail._backend', return_value=FakeBackend()):
+        with patch(
+            'lazymind.chat.engine.tools.local_file.resolver.parse_attachment_content',
+            side_effect=fake_parse,
+        ):
+            pdf = MailToolkit().read_attachment('INBOX::9', 'invoice.pdf')
+            zip_file = MailToolkit().read_attachment('INBOX::9', 'notes.zip')
+            again = MailToolkit().read_attachment('INBOX::9', 'invoice.pdf')
+
+    assert calls['n'] == 1
+    assert pdf['parse_status'] == 'parsed'
+    assert pdf['text'] == 'invoice text'
+    assert zip_file['parse_status'] == 'unsupported'
+    assert zip_file['text'] == ''
+    assert 'not parsed' in zip_file['parse_note']
+    assert os.path.isfile(zip_file['path'])
+    assert again['text'] == 'invoice text'
+    assert parse_calls == [pdf['path']]
+    workspace = chat_agent_workspace('u1', 'c1')
+    assert list(Path(workspace).glob('attachment-text-cache/*/parsed.txt'))
 
 
 def test_imap_folder_fallback_decodes_modified_utf7(mail_auth):
