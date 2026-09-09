@@ -571,21 +571,21 @@ class RemoteWorkflowExecutor:
             for raw in values:
                 raw_text = str(raw)
                 if raw_text.startswith((
-                    'http://', 'https://', '/static-files/', '/api/core/static-files/',
+                    'http://', 'https://', 'data:', '/static-files/', '/api/core/static-files/',
                 )):
                     persisted.append(raw_text)
                     continue
                 path = pathlib.Path(raw_text)
                 if not path.is_absolute():
                     path = pathlib.Path(workspace) / path
+                resolved = path.resolve(strict=True)
                 try:
-                    resolved = path.resolve(strict=True)
                     resolved.relative_to(pathlib.Path(workspace).resolve())
-                    stable_path = await self.runtime.upload_artifact_file(
-                        client, attempt, lease, resolved.name, resolved.read_bytes())
-                    persisted.append(stable_path)
-                except (OSError, ValueError):
-                    persisted.append('')
+                except ValueError as exc:
+                    raise ValueError(f'Workflow artifact must be inside the execution workspace: {resolved}') from exc
+                stable_path = await self.runtime.upload_artifact_file(
+                    client, attempt, lease, resolved.name, resolved.read_bytes())
+                persisted.append(stable_path)
             result[key] = persisted[0] if scalar and persisted else persisted
         return result
 

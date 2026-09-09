@@ -1,6 +1,6 @@
 import base64
 
-from lazymind.chat.engine.subagent.runner import _materialize_workflow_package
+from lazymind.workflow_toolkit import _materialize_workflow_package
 
 
 def test_materialize_workflow_package_preserves_sibling_runtime(monkeypatch, tmp_path):

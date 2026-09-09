@@ -9,6 +9,7 @@ import asyncio
 import base64
 import json
 from typing import Any, Dict, List, Optional
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -17,32 +18,48 @@ import lazymind.chat.engine.subagent.runner as runner_mod
 
 
 def test_workflow_script_tool_is_loaded_from_pinned_revision():
-    source = 'def create_list_fixtures():\n    return ["one", "two"]\n'
+    root = Path(__file__).resolve().parents[3] / 'workflows' / 'test-workflow'
     response = MagicMock()
     response.result = {
-        'revision_id': 'revision-1',
-        'tree_hash': 'tree-1',
-        'files': {
-            'scripts/tools.py': base64.b64encode(source.encode()).decode(),
-        },
+        'revision_id': 'revision-1', 'tree_hash': 'tree-1',
+        'files': {name: base64.b64encode((root / name).read_bytes()).decode()
+                  for name in ['workflow.yaml', 'scripts/tools.py']},
     }
     client = MagicMock()
     client.get_workflow.return_value = response
-
     with patch('lazymind.workflow_sdk.WorkflowClient', return_value=client):
-        tools = runner_mod._resolve_runtime_tools(
-            ['create_list_fixtures'],
-            {
-                'workflow_id': 'test-workflow',
-                'revision_id': 'revision-1',
-                'tree_hash': 'tree-1',
-                'user_id': 'user-1',
-            },
-        )
-
-    assert [tool.__name__ for tool in tools] == ['create_list_fixtures']
-    assert tools[0]() == ['one', 'two']
+        tools = runner_mod._resolve_runtime_tools(['build_test_metadata'], {
+            'workflow_id': 'test-workflow', 'revision_id': 'revision-1',
+            'tree_hash': 'tree-1', 'user_id': 'user-1',
+        })
+    assert [tool.__name__ for tool in tools] == ['build_test_metadata']
+    assert tools[0]('no external get call') == {
+        'smoke_test': True, 'summary': 'no external get call', 'schema': 'test.v1',
+    }
     client.get_workflow.assert_called_once_with('test-workflow', 'revision-1')
+
+
+@pytest.mark.parametrize('failure', ['fetch', 'revision', 'hash', 'import', 'missing'])
+def test_required_workflow_tools_fail_before_inference(failure):
+    package = {
+        'revision_id': 'revision-1', 'tree_hash': 'tree-1',
+        'files': {
+            'workflow.yaml': base64.b64encode(b'tool_scripts:\n  - path: scripts/tools.py\n    functions: [required_tool]\n').decode(),
+            'scripts/tools.py': base64.b64encode(b'def required_tool(): return True\n').decode(),
+        },
+    }
+    client = MagicMock()
+    client.get_workflow.return_value.result = package
+    if failure == 'fetch': client.get_workflow.side_effect = RuntimeError('package unavailable')
+    elif failure == 'revision': package['revision_id'] = 'wrong-revision'
+    elif failure == 'hash': package['tree_hash'] = 'wrong-hash'
+    elif failure == 'import': package['files']['scripts/tools.py'] = base64.b64encode(b'raise ImportError("missing dependency")').decode()
+    elif failure == 'missing': package['files']['scripts/tools.py'] = base64.b64encode(b'other = 1').decode()
+    with patch('lazymind.workflow_sdk.WorkflowClient', return_value=client):
+        with pytest.raises(RuntimeError, match='WORKFLOW_TOOL_LOAD_FAILED'):
+            runner_mod._resolve_runtime_tools(['required_tool'], {
+                'workflow_id': 'test-workflow', 'revision_id': 'revision-1', 'tree_hash': 'tree-1',
+            })
 
 
 def test_terminal_tools_only_filters_model_tools_without_mutating_runtime_tools():

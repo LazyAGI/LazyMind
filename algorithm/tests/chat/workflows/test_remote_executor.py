@@ -823,3 +823,13 @@ async def test_worker_claim_loop_runs_up_to_configured_concurrency(monkeypatch):
     loop.cancel()
     with pytest.raises(asyncio.CancelledError):
         await loop
+
+@pytest.mark.asyncio
+async def test_remote_executor_rejects_unexportable_file_instead_of_saving_empty_path(tmp_path):
+    outside = tmp_path / 'outside.txt'
+    outside.write_text('fixture')
+    workspace = tmp_path / 'workspace'
+    workspace.mkdir()
+    worker = RemoteWorkflowExecutor()
+    with pytest.raises(ValueError, match='inside the execution workspace'):
+        await worker._persist_files(object(), 'attempt', 'lease', {'path': str(outside)}, 'file', str(workspace))

@@ -8,6 +8,8 @@ from __future__ import annotations
 import base64
 import logging
 import os
+import re
+import tempfile
 import types
 import uuid
 from dataclasses import dataclass
@@ -61,42 +63,97 @@ def workflow_package_input_types(package: Dict[str, Any]) -> Dict[str, str]:
     return result
 
 
+def _materialize_workflow_package(
+    workflow_id: str,
+    revision_id: str,
+    tree_hash: str,
+    files: Dict[str, Any],
+) -> Path:
+    """Materialize one immutable Workflow revision for path-based tool assets.
+
+    Workflow tools may load sibling runtime files relative to ``__file__``.  Executing
+    only scripts/*.py from an in-memory pseudo path breaks those tools even though Core
+    returned the complete pinned package.  The tree hash makes this cache immutable.
+    """
+    safe_workflow = re.sub(r'[^0-9A-Za-z_.-]+', '_', workflow_id).strip('._') or 'workflow'
+    safe_revision = re.sub(r'[^0-9A-Za-z_.-]+', '_', revision_id).strip('._') or 'revision'
+    safe_tree = re.sub(r'[^0-9A-Za-z]+', '', tree_hash)[:64] or 'unhashed'
+    root = Path(tempfile.gettempdir()) / 'lazymind-workflow-packages' / (
+        f'{safe_workflow}@{safe_revision}-{safe_tree}'
+    )
+    root.mkdir(parents=True, exist_ok=True)
+    resolved_root = root.resolve()
+    for relative, encoded in files.items():
+        relative_path = Path(str(relative))
+        if relative_path.is_absolute() or '..' in relative_path.parts:
+            raise RuntimeError(f'unsafe Workflow package path: {relative!r}')
+        target = (root / relative_path).resolve()
+        if target != resolved_root and resolved_root not in target.parents:
+            raise RuntimeError(f'unsafe Workflow package path: {relative!r}')
+        if encoded is None:
+            # Core serializes empty blobs as null in the public package map.
+            raw = b''
+        else:
+            raw = base64.b64decode(encoded) if isinstance(encoded, str) else bytes(encoded)
+        if target.exists() and target.read_bytes() == raw:
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        temporary = target.with_name(f'.{target.name}.{os.getpid()}.tmp')
+        temporary.write_bytes(raw)
+        os.replace(temporary, target)
+    return root
+
+
 def load_workflow_package_tools(
     package: Dict[str, Any], names: List[str], workflow_id: str, revision_id: str,
 ) -> Dict[str, Any]:
-    """Load named callables from an already validated Workflow package."""
+    """Materialize the pinned package and register its declared script functions."""
     files = package.get('files') if isinstance(package.get('files'), dict) else {}
-    remaining = set(names)
+    wanted = set(names)
+    declarations = _workflow_document(files).get('tool_scripts')
+    scripts: Dict[str, set[str]] = {}
+    if declarations is not None:
+        owners: Dict[str, str] = {}
+        for entry in declarations:
+            path = str(entry.get('path') or '')
+            if not path.startswith('scripts/') or not path.endswith('.py') or '..' in Path(path).parts:
+                continue
+            for name in entry.get('functions') or []:
+                if name in owners and owners[name] != path:
+                    raise ValueError(f'Workflow tool {name!r} is declared in multiple scripts')
+                owners[name] = path
+                if name in wanted:
+                    scripts.setdefault(path, set()).add(name)
+    else:
+        # Older published packages did not declare tool_scripts.
+        scripts = {path: wanted for path in sorted(files)
+                   if path.startswith('scripts/') and path.endswith('.py')
+                   and not path.startswith('scripts/tests/') and '/__tests__/' not in path}
+    if not scripts:
+        return {}
+    root = _materialize_workflow_package(
+        workflow_id, revision_id, str(package.get('tree_hash') or ''), files,
+    )
     resolved: Dict[str, Any] = {}
-    for path in sorted(files):
+    for path, declared_names in scripts.items():
+        remaining = declared_names - resolved.keys()
         if not remaining:
-            break
-        # Published packages may carry their own regression tests. They are
-        # package assets, not runtime tool modules, and often rely on a source
-        # checkout layout that does not exist for an immutable revision.
-        if (
-            not path.startswith('scripts/')
-            or not path.endswith('.py')
-            or path.startswith('scripts/tests/')
-            or '/__tests__/' in path
-        ):
             continue
-        encoded = files[path]
-        source = base64.b64decode(encoded) if isinstance(encoded, str) else bytes(encoded)
         module = types.ModuleType(
             f'_lazymind_workflow_{revision_id.replace("-", "_")}_{len(resolved)}'
         )
-        module.__file__ = f'{workflow_id}@{revision_id}/{path}'
-        exec(compile(source.decode('utf-8'), module.__file__, 'exec'), module.__dict__)
-        for name in tuple(remaining):
+        module.__file__ = str(root / path)
+        source = (root / path).read_text(encoding='utf-8')
+        exec(compile(source, module.__file__, 'exec'), module.__dict__)
+        for name in remaining:
             candidate = module.__dict__.get(name)
-            if callable(candidate):
-                if not str(getattr(candidate, '__doc__', '') or '').strip():
-                    candidate.__doc__ = f'Execute the published Workflow tool {name}.'
-                resolved[name] = candidate
-                remaining.remove(name)
-    if remaining:
-        LOG.warning('Workflow revision %s does not provide tools %s', revision_id, sorted(remaining))
+            if not callable(candidate):
+                if declarations is not None:
+                    raise ValueError(f'Declared Workflow tool {name!r} is unavailable in {path}')
+                continue
+            if not str(getattr(candidate, '__doc__', '') or '').strip():
+                candidate.__doc__ = f'Execute the published Workflow tool {name}.'
+            resolved[name] = candidate
     return resolved
 
 
