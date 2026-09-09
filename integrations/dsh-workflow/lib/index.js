@@ -705,6 +705,7 @@ function installHost(ctx, bridge, config, instanceId) {
 				if (scope.runId === action.session_id && (scope.activeOwned || scope.grants.size > 0)) ctx.sessionController.cancel({ sessionId: resolved.agent.session.id });
 				if (scope.runId === action.session_id) suspendGoal(scope);
 			} else {
+				if (!action.execution_id && scope.runId === action.session_id && scope.activeOwned && scope.grants.size === 0) ctx.sessionController.cancel({ sessionId: resolved.agent.session.id });
 				await ctx.sessionController.prompt({
 					sessionId: resolved.agent.session.id,
 					requestId: action.id,

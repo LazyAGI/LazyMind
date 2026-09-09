@@ -398,6 +398,11 @@ export function installHost(ctx: Context, bridge: HostTransport, config: HostCon
         if (scope.runId === action.session_id && (scope.activeOwned || scope.grants.size > 0)) ctx.sessionController.cancel({ sessionId: resolved.agent.session.id })
         if (scope.runId === action.session_id) suspendGoal(scope)
       } else {
+        // An explicit panel continuation may replace this workflow's pending
+        // question/planning turn, while preserving unrelated work and granted executions.
+        if (!action.execution_id && scope.runId === action.session_id && scope.activeOwned && scope.grants.size === 0) {
+          ctx.sessionController.cancel({ sessionId: resolved.agent.session.id })
+        }
         // A queued input gains scope only in pre-step, when that exact input runs.
         await ctx.sessionController.prompt({ sessionId: resolved.agent.session.id, requestId: action.id as Parameters<typeof ctx.sessionController.prompt>[0]['requestId'],
           mode: 'queue', content: [{ type: 'text', text: action.execution_id

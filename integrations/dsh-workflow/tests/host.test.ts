@@ -190,3 +190,26 @@ it('does not bind historical discovery reads to the current driver', async () =>
   expect(f.bridge.state).not.toHaveBeenCalled()
   expect((await f.execute('mcp__lazymind__workflow_start')).isError).toBe(false)
 })
+
+it.each([false, true])('panel continuation replaces only workflow planning without grants (granted=%s)', async (granted) => {
+  const f = await fixture()
+  await f.execute('mcp__lazymind__workflow_start')
+  if (granted) await f.execute('mcp__lazymind__workflow_step_begin', f.root, { session_id: 'run-1' })
+  const control = await f.bridge.state('run-1', new AbortController().signal)
+  const cancel = vi.fn()
+  const prompt = vi.fn(async () => ({}))
+  f.ctx.provide('sessionController', { resolveAgent: async () => ({ agent: f.root }), cancel, prompt })
+  const action = { id: 'panel-continue', session_id: 'run-1', kind: 'continue' as const,
+    native_session_id: f.root.session.id, binding_generation: 1, status: 'pending' }
+  const claim = { action: { ...action, status: 'dispatching' }, dispatch_token: 'dispatch', control }
+  vi.mocked(f.bridge.claim).mockResolvedValue(claim)
+  vi.mocked(f.bridge.action).mockResolvedValue(claim)
+  vi.mocked(f.bridge.settle).mockResolvedValue(undefined)
+  vi.mocked(f.bridge.actions).mockResolvedValueOnce({ actions: [action] })
+  await vi.waitFor(() => expect(prompt).toHaveBeenCalledOnce(), { timeout: 2500 })
+  if (granted) expect(cancel).not.toHaveBeenCalled()
+  else {
+    expect(cancel).toHaveBeenCalledWith({ sessionId: f.root.session.id })
+    expect(cancel.mock.invocationCallOrder[0]).toBeLessThan(prompt.mock.invocationCallOrder[0])
+  }
+})

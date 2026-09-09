@@ -140,6 +140,14 @@ func (s WorkflowControlService) Execute(ctx context.Context, owner, sessionID st
 			if err := ensureNoActiveAttempts(tx, session.ID); err != nil {
 				return err
 			}
+			// This explicit user action supersedes completed-execution notifications,
+			// but must not replay an earlier user continuation with an unknown outcome.
+			settled := tx.Model(&orm.WorkflowSessionStep{}).Select("id").Where("session_id = ? AND status IN ?", session.ID,
+				[]string{"succeeded", "failed", "cancelled", "interrupted"})
+			if err := tx.Model(&orm.WorkflowHostAction{}).Where("session_id = ? AND kind = 'continue' AND execution_id IN (?) AND consumed_at IS NULL", session.ID, settled).
+				Updates(map[string]any{"consumed_at": time.Now().UTC(), "status": gorm.Expr("CASE WHEN status = 'pending' THEN 'superseded' ELSE status END")}).Error; err != nil {
+				return err
+			}
 			result.Receipt.ActionID, err = controlstore.EnqueueHostAction(tx, *session, command.CommandID, "continue", "")
 			if err != nil {
 				return err

@@ -52,3 +52,15 @@ it('allows lifecycle resume after cancellation is accepted, without resending ac
   control.delivery.consumed_at = '2026-09-08T00:00:00Z';
   expect(deliveryPending(control)).toBe(false);
 });
+
+it('keeps panel controls available after a settled execution notification is delivered', () => {
+  const control = state();
+  control.delivery = { id: 'native-result', kind: 'continue', status: 'accepted', execution_id: 'native-1' };
+  control.active_execution_ids = [];
+  expect(deliveryPending(control)).toBe(false);
+  control.active_execution_ids = ['native-1'];
+  expect(deliveryPending(control)).toBe(true);
+  control.delivery.status = 'unknown';
+  control.active_execution_ids = [];
+  expect(deliveryPending(control)).toBe(true);
+});
