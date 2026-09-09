@@ -36,6 +36,7 @@ import type {
   InnerTabsNode,
 } from '@/modules/chat/store/workflowPanel';
 import {
+  resolveWorkflowControlScope,
   resolveWorkflowTabStepId,
   workflowSlotMatchesTabScope,
 } from './workflowTabScope';
@@ -1867,14 +1868,7 @@ export function WorkflowPanel({
     ? Math.min(activeTabIdx, tabs.length - 1)
     : 0;
   const controlTab = tabs[visibleActiveTabIdx];
-  const currentSteps = session.projection?.current ?? [];
-  const controlStepId = (controlTab ? resolveWorkflowTabStepId(controlTab, session.steps) : undefined)
-    || session.current_step_id || (currentSteps.length === 1 ? currentSteps[0] : '');
-  const controlStepIds = controlTab?.status_step_ids ?? [...new Set([
-    controlStepId,
-    ...(controlTab?.slots.flatMap(slot => getTabSlotRevisions(session, controlTab, slot.id)
-      .map(revision => revision.step_id)) ?? []),
-  ].filter(Boolean))];
+  const { stepId: controlStepId, stepIds: controlStepIds } = resolveWorkflowControlScope(controlTab, session);
   const hasIntent = true;
   const showActions =
     session.status === 'waiting' ||
