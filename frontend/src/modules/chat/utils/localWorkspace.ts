@@ -27,6 +27,13 @@ export interface LocalWorkspaceView {
 
 const coreBase = `${BASE_URL}/api/core`;
 const data = <T>(value: unknown): T => ((value as { data?: T })?.data ?? value) as T;
+const hostReasons: Record<string, string> = {
+  LOCAL_WORKSPACE_MODE_FORBIDDEN: "mode_forbidden",
+  LOCAL_WORKSPACE_SELECTION_FORBIDDEN: "selection_forbidden",
+  LOCAL_WORKSPACE_SELECTION_EXPIRED: "selection_expired",
+  LOCAL_WORKSPACE_SELECTION_INVALID: "invalid_selection",
+  LOCAL_WORKSPACE_PATH_INVALID: "path_invalid",
+};
 
 export async function selectWorkspaceCandidate(runtime: "local" | "desktop"): Promise<WorkspaceSelectionCandidate> {
   if (runtime === "desktop") return (await selectDesktopWorkspace()) ?? { canceled: true };
@@ -64,8 +71,9 @@ export async function updateWorkspacePermission(conversationId: string, mode: Wo
   );
 }
 export function workspaceReason(error: unknown): string {
-  const value = error as { response?: { data?: { reason?: string; detail?: { reason?: string }; data?: { detail?: { reason?: string } } } }; code?: string };
-  return value.response?.data?.data?.detail?.reason ?? value.response?.data?.detail?.reason ?? value.response?.data?.reason ?? value.code ?? "unknown";
+  const value = error as { response?: { data?: { code?: unknown; reason?: string; detail?: { reason?: string }; data?: { detail?: { reason?: string } } } }; code?: unknown };
+  const reason = value.response?.data?.data?.detail?.reason ?? value.response?.data?.detail?.reason ?? value.response?.data?.reason ?? value.response?.data?.code ?? value.code;
+  return typeof reason === "string" ? hostReasons[reason] ?? reason : "unknown";
 }
 
 

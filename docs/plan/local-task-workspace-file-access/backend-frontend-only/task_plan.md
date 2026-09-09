@@ -21,7 +21,7 @@
 ## 前端稳定性补齐（2026-09-09 已批准）
 
 - [x] S1：测试先行，复现 Local Proxy 大写错误码退化为 unknown，以及授权管理查询在会话切换后继续显示；新增 6 项预期失败、原有 23 项通过、异常失败 0。
-- [ ] S2：最小修改现有控件、错误 helper 和中英文 locale，使 S1 合同通过。
+- [x] S2：最小修改现有控件、错误 helper 和中英文 locale；生产代码净增 11 行，S1 聚焦矩阵 29/29 通过。
 - [ ] S3：运行前端聚焦矩阵、ESLint、TypeScript、生产构建和冻结边界检查；同步四份文档并报告实际生产增量。
 
 本批不执行 T6，也不实现或测试 Agent 对本机工作区文件的读、新建、修改、追加、删除。
@@ -44,10 +44,10 @@
 
 **最小实现**
 
-- [ ] `workspaceReason` 按 Core 嵌套 reason、Local Proxy `response.data.code`、错误对象顶层 code 的顺序取字符串，并通过固定 map 归一化已有主机错误码；非字符串返回 `unknown`。
-- [ ] 会话 effect 开始时递增 `listRequestRef`、关闭 `manageOpen`、清空 `managedItems`，使旧查询不能更新新会话界面。
-- [ ] 两份 locale 增加 `selection_forbidden` 和 `selection_expired`，不改其他产品文案。
-- [ ] 重跑 S1 聚焦命令，预期全部通过。
+- [x] `workspaceReason` 按 Core 嵌套 reason、Local Proxy `response.data.code`、错误对象顶层 code 的顺序取字符串，并通过固定 map 归一化已有主机错误码；非字符串返回 `unknown`。
+- [x] 会话 effect 开始时递增 `listRequestRef`、关闭 `manageOpen`、清空 `managedItems`，使旧查询不能更新新会话界面。
+- [x] 两份 locale 增加 `selection_forbidden` 和 `selection_expired`，不改其他产品文案。
+- [x] 重跑 S1 聚焦命令，29/29 通过。
 
 **回归与交付**
 

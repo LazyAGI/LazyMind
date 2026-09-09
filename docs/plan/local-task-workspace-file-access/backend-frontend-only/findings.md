@@ -41,6 +41,7 @@
 - `loadManagedItems` 只用独立的 `listRequestRef` 处理查询先后顺序。会话改变仅递增 `requestRef`，不会关闭 `manageOpen`、清空 `managedItems` 或作废在途管理查询；草稿切换到已有任务时，管理窗口及旧授权结果仍可能显示。
 - 修复可限制在 4 个既有前端生产文件，预计净增 30–50 行。算法、Backend、Local/Desktop 均无需修改；最终人工验收和文件执行能力不属于本批。
 - S1 首次运行时管理窗口用例被前序 Ant Design confirm 的离场动画节点干扰，`findByRole("dialog")` 因多个匹配而异常失败。改为按 `chat.workspace.manageTitle` 定位所属 dialog 后，结果稳定为 5 个错误码断言收到 `unknown`、管理 dialog 未进入 leave 状态；这是 6 项预期产品失败，不再包含测试设施异常。
+- S2 以固定 map 归一化 5 个现有 Local Proxy code，保持 Core detail reason 的读取优先级，并对非字符串 code 返回 unknown；没有把任意大写文本动态转换为翻译键。会话 effect 递增既有 `listRequestRef` 并清理管理窗口状态，迟到列表因此不能回写。
 
 ## 基线
 

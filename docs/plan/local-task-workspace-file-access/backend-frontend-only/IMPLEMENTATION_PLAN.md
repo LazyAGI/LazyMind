@@ -122,6 +122,8 @@ T1 阶段一在 `frontend/src/modules/chat/components/ChatInput/LocalWorkspaceCo
 
 S1 已建立 6 项失败合同：5 个 Local Proxy 错误码归一化用例和 1 个会话切换管理窗口/在途列表用例。聚焦运行结果为新增 6 项预期失败、原有 23 项通过、异常失败 0；可以进入最小实现。
 
+S2 已按设计完成：4 个既有前端生产文件新增 15 行、删除 4 行，净增 11 行；没有新增生产文件。聚焦矩阵 29/29 通过，未触及 Backend、算法或 Local/Desktop。
+
 F 类独立保持研究状态；只有同轮反馈、授权、批准、主子任务覆盖和平台验证均通过，才可加入正式实施任务。只完成 U/C 不得宣布旧需求完全复现。
 
 验收清单与执行顺序集中维护在 task_plan.md；每批同步更新方案、证据和 progress.md。用户已批准本批文档发布，使用当前单一功能分支 origin/feature/newWorkZone；不包含生产修复。

@@ -1665,7 +1665,7 @@ const enUS = {
       revokedStopFailed: "Access revoked, but some stop requests failed", revokeFailed: "Revoke failed",
       manage: "Manage access", manageTitle: "Workspace access", search: "Search name or path", loadFailed: "Failed to load access", reauthorize: "Reauthorize",
       status: { active: "Available", revoked: "Revoked", path_unavailable: "Folder unavailable" },
-      reason: { mode_forbidden: "Local workspaces are unavailable in this mode", invalid_selection: "The workspace selection is invalid", workspace_not_found: "The workspace was not found", binding_conflict: "The state changed. Try again.", binding_locked: "This Work folder is locked", revoked: "Access was revoked", path_unavailable: "The folder is unavailable", path_invalid: "The folder path is invalid", unknown: "An unknown error occurred" },
+      reason: { mode_forbidden: "Local workspaces are unavailable in this mode", selection_forbidden: "Workspace selection is unavailable", selection_expired: "The workspace selection expired. Select the folder again.", invalid_selection: "The workspace selection is invalid", workspace_not_found: "The workspace was not found", binding_conflict: "The state changed. Try again.", binding_locked: "This Work folder is locked", revoked: "Access was revoked", path_unavailable: "The folder is unavailable", path_invalid: "The folder path is invalid", unknown: "An unknown error occurred" },
     },
 	markdownDiagram: "Diagram",
 	markdownSource: "Source",

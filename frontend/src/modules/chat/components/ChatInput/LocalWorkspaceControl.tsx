@@ -55,6 +55,9 @@ export default function LocalWorkspaceControl({ conversationId, disabled, onChan
     setSelected(undefined);
     setMode("ask_as_needed");
     setCandidate(undefined);
+    listRequestRef.current += 1;
+    setManageOpen(false);
+    setManagedItems([]);
     setBusy(false);
     if (hadSelection) onChangeRef.current(undefined, "ask_as_needed");
     void (conversationId

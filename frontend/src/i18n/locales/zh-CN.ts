@@ -1620,7 +1620,7 @@ const zhCN = {
       revokedStopFailed: "授权已撤销，部分任务停止请求失败", revokeFailed: "撤销失败",
       manage: "管理授权", manageTitle: "工作区授权", search: "搜索名称或路径", loadFailed: "加载授权失败", reauthorize: "重新授权",
       status: { active: "可用", revoked: "已撤销", path_unavailable: "目录不可用" },
-      reason: { mode_forbidden: "当前模式不支持本地工作区", invalid_selection: "工作区选择无效", workspace_not_found: "工作区不存在", binding_conflict: "状态已变化，请重试", binding_locked: "任务工作区已锁定", revoked: "授权已撤销", path_unavailable: "目录当前不可用", path_invalid: "目录路径无效", unknown: "发生未知错误" },
+      reason: { mode_forbidden: "当前模式不支持本地工作区", selection_forbidden: "当前无法选择工作区", selection_expired: "工作区选择已过期，请重新选择", invalid_selection: "工作区选择无效", workspace_not_found: "工作区不存在", binding_conflict: "状态已变化，请重试", binding_locked: "任务工作区已锁定", revoked: "授权已撤销", path_unavailable: "目录当前不可用", path_invalid: "目录路径无效", unknown: "发生未知错误" },
     },
 	markdownDiagram: "图表",
 	markdownSource: "源码",
