@@ -119,8 +119,8 @@ def test_precise_current_time_lives_in_runtime_context():
     )
 
     assert morning.system_prompt == evening.system_prompt
-    assert 'Current user time: 2026-05-11 09:15:30 (Asia/Shanghai)' in morning.current_input
-    assert 'Current user time: 2026-05-11 23:48:00 (Asia/Shanghai)' in evening.current_input
+    assert 'Current user time: 09:15:30 (Asia/Shanghai)' in morning.current_input
+    assert 'Current user time: 23:48:00 (Asia/Shanghai)' in evening.current_input
     assert 'Current user time:' not in morning.system_prompt
 
 

@@ -76,8 +76,8 @@ def _format_user_time(time_now: object, timezone: object) -> str:
     if parsed_time is None:
         return raw_time
     if timezone_name:
-        return f'{parsed_time:%Y-%m-%d %H:%M:%S} ({timezone_name})'
-    return parsed_time.isoformat()
+        return f'{parsed_time:%H:%M:%S} ({timezone_name})'
+    return f'{parsed_time:%H:%M:%S}'
 
 
 def _build_environment_context_prompt(environment_context: dict | None = None) -> str:
