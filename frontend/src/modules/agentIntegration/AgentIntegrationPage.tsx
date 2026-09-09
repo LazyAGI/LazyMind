@@ -66,7 +66,7 @@ const AGENTS: AgentDefinition[] = [
     mcpBindingTarget: "cursor-desktop", executorBindingTarget: "cursor-cli",
   },
   {
-    id: "workbuddy", name: "WorkBuddy", icon: "/assistant-icons/workbuddy.png",
+    id: "workbuddy", name: "WorkBuddy", icon: "/assistant-icons/workbuddy.svg",
     installURL: "https://www.workbuddy.cn",
     executorName: "WorkBuddy", executorLoginURL: "workbuddy://home",
     mcpBindingTarget: "workbuddy-desktop",
