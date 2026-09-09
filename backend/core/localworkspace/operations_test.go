@@ -392,3 +392,159 @@ func TestWorkspaceOperationCompletedReadReturnsReceiptWithoutReadingAgain(t *tes
 		t.Fatalf("completed read must return metadata receipt only: result=%+v err=%v", replayed, err)
 	}
 }
+
+// Advance only the claim's clock by three minutes after capturing a snapshot.
+// The operation's five-minute validity still holds; SQL and file access are real.
+type claimSnapshotStore struct {
+	state.Store
+	state.CompareAndDeleteStore
+	claimKey, stateKey string
+	claimed            bool
+	claimTTL           time.Duration
+	afterSnapshot      func()
+}
+
+func (s *claimSnapshotStore) SetNX(ctx context.Context, key string, value []byte, ttl time.Duration) (bool, error) {
+	claimed, err := s.Store.SetNX(ctx, key, value, ttl)
+	if claimed && key == s.claimKey {
+		s.claimed, s.claimTTL = true, ttl
+	}
+	return claimed, err
+}
+
+func (s *claimSnapshotStore) Get(ctx context.Context, key string) ([]byte, error) {
+	value, err := s.Store.Get(ctx, key)
+	if err == nil && key == s.stateKey && s.claimed && s.afterSnapshot != nil {
+		after := s.afterSnapshot
+		s.afterSnapshot = nil
+		if s.claimTTL > 0 && s.claimTTL <= 3*time.Minute {
+			if err := s.Store.Del(ctx, s.claimKey); err != nil {
+				return nil, err
+			}
+		}
+		after()
+	}
+	return value, err
+}
+
+func TestWorkspaceClaimExpiryCannotReplayAppend(t *testing.T) {
+	db, grant, stateStore, conversationID := operationFixture(t, PermissionAllowAll)
+	ctx := context.Background()
+	path := filepath.Join(grant.Path, "notes.txt")
+	if err := os.WriteFile(path, []byte("seed"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	req := OperationRequest{UserID: "owner", ConversationID: conversationID, WorkspaceID: grant.WorkspaceID,
+		Operation: OperationAppend, Path: "notes.txt", Content: "+append", ExpectedVersion: digestString("seed"), CallID: "stalled-append"}
+	prepared, err := PrepareOperation(ctx, db.DB, stateStore, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	delayed := &claimSnapshotStore{Store: stateStore, CompareAndDeleteStore: stateStore.(state.CompareAndDeleteStore),
+		claimKey: operationLockKey(prepared.OperationID), stateKey: operationKey(prepared.OperationID)}
+	succeeded := 0
+	interleaved := false
+	delayed.afterSnapshot = func() {
+		interleaved = true
+		result, err := ExecuteOperation(ctx, db.DB, stateStore, prepared.OperationID, req)
+		if err != nil {
+			requireWorkspaceReason(t, err, 409, "conflict", "binding_conflict")
+			return
+		}
+		if result.Content != "seed+append" {
+			t.Fatalf("second execution did not append: %+v", result)
+		}
+		succeeded++
+		// Undo the second request's append before the stalled request resumes.
+		if err := os.WriteFile(path, []byte("seed"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	result, err := ExecuteOperation(ctx, db.DB, delayed, prepared.OperationID, req)
+	if err == nil {
+		if result.Content == "seed+append" {
+			succeeded++
+		} else if result.Status != operationCompleted || result.Content != "" {
+			t.Fatalf("unexpected execution result: %+v", result)
+		}
+	} else {
+		requireWorkspaceReason(t, err, 409, "conflict", "binding_conflict")
+	}
+	if !interleaved || succeeded != 1 {
+		t.Fatalf("interleaved=%v, actual executions=%d, want one (receipts excluded)", interleaved, succeeded)
+	}
+}
+
+// Deliberately expose only Store, without its optional CompareAndDelete method.
+type recordingDeleteStore struct {
+	state.Store
+	deleted []string
+}
+
+func (s *recordingDeleteStore) Del(ctx context.Context, keys ...string) error {
+	s.deleted = append(s.deleted, keys...)
+	return s.Store.Del(ctx, keys...)
+}
+
+func TestWorkspaceClaimNeverUsesNonAtomicDelete(t *testing.T) {
+	for _, action := range []string{"execute", "decide"} {
+		t.Run(action, func(t *testing.T) {
+			db, grant, stateStore, conversationID := operationFixture(t, PermissionAlwaysAsk)
+			ctx := context.Background()
+			req := OperationRequest{UserID: "owner", ConversationID: conversationID, WorkspaceID: grant.WorkspaceID,
+				Operation: OperationCreate, Path: "notes.txt", Content: "seed", CallID: "no-unsafe-release"}
+			prepared, err := PrepareOperation(ctx, db.DB, stateStore, req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			recording := &recordingDeleteStore{Store: stateStore}
+			if action == "decide" {
+				_, err = DecideOperation(ctx, recording, prepared.OperationID, "allow_once", "owner")
+			} else {
+				if _, err := DecideOperation(ctx, stateStore, prepared.OperationID, "allow_once", "owner"); err != nil {
+					t.Fatal(err)
+				}
+				_, err = ExecuteOperation(ctx, db.DB, recording, prepared.OperationID, req)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(recording.deleted) != 0 {
+				t.Fatalf("claim released with non-atomic Del: %v", recording.deleted)
+			}
+		})
+	}
+}
+
+func TestWorkspaceClaimInvalidExecutionDoesNotConsumeApproval(t *testing.T) {
+	for _, field := range []string{"owner", "call_id", "content"} {
+		t.Run(field, func(t *testing.T) {
+			db, grant, stateStore, conversationID := operationFixture(t, PermissionAlwaysAsk)
+			ctx := context.Background()
+			req := OperationRequest{UserID: "owner", ConversationID: conversationID, WorkspaceID: grant.WorkspaceID,
+				Operation: OperationCreate, Path: "notes.txt", Content: "seed", CallID: "valid-call"}
+			prepared, err := PrepareOperation(ctx, db.DB, stateStore, req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := DecideOperation(ctx, stateStore, prepared.OperationID, "allow_once", "owner"); err != nil {
+				t.Fatal(err)
+			}
+			invalid := req
+			switch field {
+			case "owner":
+				invalid.UserID = "other-owner"
+			case "call_id":
+				invalid.CallID = "other-call"
+			case "content":
+				invalid.Content = "tampered"
+			}
+			_, err = ExecuteOperation(ctx, db.DB, stateStore, prepared.OperationID, invalid)
+			requireWorkspaceReason(t, err, 409, "conflict", "binding_conflict")
+			result, err := ExecuteOperation(ctx, db.DB, stateStore, prepared.OperationID, req)
+			if err != nil || result.Content != "seed" {
+				t.Fatalf("invalid request consumed valid approval: result=%+v err=%v", result, err)
+			}
+		})
+	}
+}

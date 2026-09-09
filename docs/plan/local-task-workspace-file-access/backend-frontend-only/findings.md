@@ -1,6 +1,16 @@
 # 当前差异证据
 
-## 最新：A2-R1 修复与验证（2026-09-09）
+## 最新：A2-R2 领取过期行为证据（2026-09-09）
+
+- `operationLockTTL` 是 2 分钟，小于 operation 的 5 分钟有效期。执行/决定在锁后读取状态，但普通状态 Set 不受锁持有权约束；读取快照后停顿超过锁期限，后来的请求能够重新领取并写入，原请求仍可写回旧快照。
+- 新增 claimSnapshotStore 仅在测试的 State 边界模拟领取记录过去 3 分钟，并在已读取快照与返回之间插入第二请求。执行合同实测两次追加成功（排除仅返回 completed 回执的情况）；决定合同实测 allow_once/reject 两次成功。二者都是产品断言失败，不是 Go 内存 data race。
+- releaseOperation 在不提供可选 CompareAndDelete 能力时调用 Get+Del。只暴露必需 Store 接口的测试包装器记录到了 execute 和 decide 的非原子 Del，各产生一项失败。SQLite/Redis 实际实现均有原子 CompareAndDelete，不能将此测试说成已复现真实 Redis 后端的 Get+Del。
+- 5 项保护用例通过：执行的 owner/call_id/content 不匹配，以及决定的 owner/action 不合法，均不消耗随后合法请求的批准。一次性领取方案必须保留这些行为，不能简单删除 defer release 就结束。
+- 基线通过；新合同 9 项为 5 通过/4 预期失败；完整 `go test -race ./localworkspace -count=1 -json` 为 53 通过/4 预期失败，原有 48 项通过，无 data race 报告。首次漏导入 state 导致一次测试编译异常，修正后最终异常为 0。
+- 实际修改两个既有测试文件，共 +219 行；生产净增 0。拟复用 SetNX 的一次性标记代替短期互斥锁，删除释放分支，范围/期限/错误请求不消费/过期重查合同见 IMPLEMENTATION_PLAN.md 第 13 节，尚未获本批生产 Review。
+- 顺带核查未修改的 prepare：每次 newID，无 call_id 对应记录复用。算法 local_fs.py 的 call_id 为操作参数哈希，而 payload 没有完整 run/task/attempt 字段。下一批必须连同真实调用身份和过期运行拒绝设计，不能把增加短期缓存当作完整幂等。
+
+## A2-R1 修复与验证（2026-09-09）
 
 - 用户已批准从 `cff178a1` 直接实施生产。仅 operations.go 新增 13、删除 11、净增 2 行：将状态读取移至领取锁之后；completed 统一返回回执；只有 allowed 状态可执行；敏感读取不走普通读取免询问分支。复用已有函数和类型，没有新增生产文件或重复校验。
 - 本次新增四组 12 项测试全部通过，之前 5 项 RED 转绿；`go test -race ./localworkspace -count=1`、`go test ./chat ./subagent -count=1`、`go vet ./localworkspace` 全部通过。测试只调整一行顺序说明注释，断言未改。

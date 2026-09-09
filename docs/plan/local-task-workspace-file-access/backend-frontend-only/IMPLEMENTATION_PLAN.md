@@ -1,6 +1,6 @@
 # 工作区工具授权与文件执行方案
 
-> 当前状态：2026-09-09 A2-R1 已获用户批准并完成生产修复及回归。完整 A2 验收和 A3 仍未完成。测试先行，每个批次经过人工 Review；不创建其他仓库或工作树。当前状态以第 12 节为准，第 7–11 节保留原设计与阶段记录。
+> 当前状态：2026-09-09 A2-R2 已完成领取过期/非原子释放的失败合同，等待本批生产 Review。A2-R1 已完成；完整 A2 验收和 A3 仍未完成。测试先行，每个批次经过人工 Review；不创建其他仓库或工作树。当前状态以第 13 节为准，第 7–12 节保留设计与阶段记录。
 
 ## 1. 目标与已确认边界
 
@@ -177,3 +177,31 @@ A2 测试合同已建立但未实现生产：Core 目前没有 `operations.go`�
 验证（`backend/core`）：`cff178a1` 的 RED 矩阵为 43 通过、5 预期失败、0 异常失败；本次新增四组 **12 项全部通过**，`go test -race ./localworkspace -count=1`、`go test ./chat ./subagent -count=1`、`go vet ./localworkspace` 均通过，无 data race 报告。范围检查通过；Local/Desktop、LazyLLM/gitlink 均未改动。未运行完整算法/前端矩阵或实机验收，不用历史结果替代本次证据。
 
 仍未解决：prepare 在决定前计算文件内容哈希；路径校验后重新按路径访问的竞态；根/父目录替换、外部并发提交及提交前撤销协调；执行锁租期/原子解锁、prepare 幂等、uncertain 与崩溃恢复；ls/glob/grep/info 的 Core 接入；mkdir 等方案项；真实 Core gate、原调用批准恢复、批准 UI、主/子任务和 Workflow 生命周期/lease 复核以及 T6 实机验收。这些项目不能因本批的状态修复而勾选完成。
+
+## 13. A2-R2：一次性领取方案与测试 Review（2026-09-09）
+
+起点 `b76d18f4`。本批聚焦已有 operation_id 的批准决定和执行领取；生产代码尚未修改。R1 的锁后读取不能防止“读完状态后停顿，锁先到期”的交错。继续为互斥锁添加续期、所有者管理和后台回收会扩大实现；本功能需要的是一次性决定和执行，建议直接复用 SetNX 做一次性消费。
+
+| 行为合同 | 本次结果 |
+|---|---|
+| 领取后读取 allowed 快照，原 2 分钟锁过期，其他请求不能导致同一操作追加两次 | 1 项预期失败：两次实际执行成功；完成回执不计为执行 |
+| 领取后读取 pending 快照，锁过期不能使 allow_once 与 reject 均写入成功 | 1 项预期失败：两个决定均成功 |
+| execute / decide 不使用 Get+Del 释放领取 | 2 项预期失败：两条路径均调用非原子 Del |
+| 错误 owner/call_id/content 的执行请求不能消耗有效批准 | 3 项通过 |
+| 错误 owner/action 的决定请求不能消耗有效批准 | 2 项通过 |
+
+测试只扩展现有 `operations_test.go`（+156）和 `approvals_test.go`（+63），共 **219 行**，无新文件、生产净增 **0**。复用 operationFixture、真实 SQLite state、临时目录、requireWorkspaceReason。测试包装器捕获状态快照，并仅将领取记录的时间推进到第 3 分钟；操作本身仍在原 5 分钟有效期内。SetNX/状态持久化与磁盘操作仍调用真实实现，不等待真实分钟数。另一个包装器只暴露必需的 state.Store 接口，观察是否使用非原子 Del；没有修改状态接口或后端实现。该模拟证明具体交错，不能冒充 Redis/跨进程/长时间实测。
+
+拟生产范围仅既有 `backend/core/localworkspace/operations.go`、`approvals.go`，预计净增 **30–60 行**、**0 个新生产文件**：
+
+1. 领取前核对 owner、调用摘要、状态与批准 action，避免错误请求永久占用标记。completed 返回已保存的无内容回执，pending/failed/不匹配请求保持明确拒绝。
+2. 决定和执行各使用一个既有 SetNX 标记，保留 24 小时且不主动删除；它是一次性消费记录，不是到期后可接管的互斥锁。24 小时是本批标记保留时间，不代表原 5 分钟批准有效期延长，也不代表终态回执 24 小时保留已经完成。
+3. 成功领取后重读当前状态/有效期，不能执行旧快照。未能领取时只查询已有状态：completed 可返回回执，其他状态拒绝接管；不得因为文件版本又匹配或旧请求失联而重放。
+4. 删除不再调用的 releaseOperation 和 Get+Del 兜底，替换旧 2 分钟锁常量；不新增锁 manager、续期任务、依赖、表、状态接口或 DTO。无效 action 在消费前拒绝，已有身份和状态校验继续复用。
+5. 状态存储异常时不执行、不清除消费标记以强行重试；查询仍不能证明磁盘已成功。完整 uncertain/结果未知展示和崩溃恢复属于后续合同，不能在本批标记完成。
+
+生产批次同时淘汰 `operations_contract_test.go` 中只检查状态名/SetNX/CompareAndDelete 字面出现的旧源码合同；它不能证明单次执行，且强制保留 CompareAndDelete 与一次性消费不再相符。本批行为合同替代其领取/释放检查，未完成的过期/uncertain 行为验收继续保留，其他测试不删除。
+
+验证命令（`backend/core`）：基线 `go test ./localworkspace -count=1` 通过；`go test ./localworkspace -run '^TestWorkspaceClaim' -count=1 -v` 为 **5 通过、4 预期失败**；`go test -race ./localworkspace -count=1 -json` 按叶子用例统计 **53 通过、4 预期失败、0 异常失败**，原有 48 项通过，无 data race 报告。首次测试收集有一个漏导入 state 的编译错误，已补回测试 import；没有作为产品 RED。Review 后将新增 9 项转绿，重跑工作区/聊天/子任务回归及 vet，并按实际 diff 更新规模。
+
+后续边界：prepare 当前每次产生新 operation_id；算法 call_id 是参数哈希，相同参数的独立调用会相同，且请求未传递完整 run/task/attempt 身份。只给 Core prepare 加缓存会把独立调用合并，还不能证明过期 run 无法重新授权，故需在下一批按真实调用身份、存储保留/清理、取消/运行结束整体设计。本批不接入该缓存，不宣称跨 operation_id 幂等。目录/撤销竞态、混合版本 Core 并行运行、崩溃/uncertain、Redis 与 Local/打包 Desktop 实测均仍未完成。

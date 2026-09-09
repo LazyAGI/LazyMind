@@ -1,6 +1,15 @@
 # 工作区剩余功能交接进度
 
-## 当前批次：A2-R1 生产修复完成（2026-09-09）
+## 当前批次：A2-R2 失败合同完成，等待生产 Review（2026-09-09）
+
+- 用户要求下一阶段；本轮从 `b76d18f4` 开始，工作区干净，本地领先 origin 跟踪分支 5 个提交，未拉取/推送。先核对既有状态 helper、SQLite/Redis 的 SetNX/CompareAndDelete 实现以及四份交接文档，不改冻结目录。
+- 本批在既有 operations_test.go 新增 156 行、approvals_test.go 新增 63 行，共 +219 行；通过 State 边界的确定性交错复现，不等待真实分钟数，不 mock 掉授权或文件操作。新用例排除了“返回已保存回执”等于“再次执行”的错误计数。
+- 验证命令（backend/core）：`go test ./localworkspace -count=1` 基线通过；`go test ./localworkspace -run '^TestWorkspaceClaim' -count=1 -v` 为 5 通过/4 预期失败；`go test -race ./localworkspace -count=1 -json` 为 53 通过/4 预期失败，原有 48 项通过，最终异常 0、无 data race 报告。首次测试缺少 state import 造成编译错误，已修正并重跑。
+- 简化方案与验收已写入 IMPLEMENTATION_PLAN.md 第 13 节：仅 operations.go/approvals.go，预计生产净增 30–60 行、0 新生产文件；复用 SetNX 一次性消费标记，取消短期互斥锁及释放分支。领取前校验身份/动作，领取后复核状态/有效期，标记保留 24 小时，异常不强行接管；并淘汰只检查 CompareAndDelete 字面出现的旧源码合同。下一步 Review 后实施，不把方案记为完成。
+- 重复 prepare 当前生成新的 operation_id；完整修复还涉及算法真实 call_id/run 身份及过期记录清理，列入下一批整体合同，不能仅增加短期缓存就宣称幂等完成。本批尚未修改生产代码。
+- 交付检查：diff 空白检查和两个测试文件的 gofmt 检查通过；Local/Desktop 相对 ec4676e0 零差异；LazyLLM 内容/gitlink 相对 245bc26d 一致且子模块干净。仅提交两个测试文件和四份文档，保留预期 RED 供 Review，未推送。
+
+## 已完成批次：A2-R1 生产修复（2026-09-09）
 
 - 用户“直接生产吧”已批准上一批 12 项行为合同及 operations.go 最小修复范围。本轮从 `cff178a1` 开始，工作区起始干净；无需重复申请该范围授权。
 - 实现采用先领取锁再读取一次状态，避免复制锁前/锁后两套校验；仅 allowed 可执行，completed 读写均返回保存回执；普通读取免询问排除敏感路径。复用既有 helper/错误，仅 operations.go 生产新增 13、删除 11、净增 2 行，无新生产文件；operations_test.go 仅调整一行注释。
