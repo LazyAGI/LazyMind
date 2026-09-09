@@ -1,0 +1,66 @@
+name: Windows Assistant Bridge
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ch/dsh_fix]
+    paths:
+      - Makefile
+      - local/scripts/assistant-bridge-*
+      - local/lazymind-cli/**
+      - desktop/scripts/assistant-bridge-*
+      - desktop/scripts/fixtures/assistant-bridge-probe.go
+      - .github/workflows/windows-assistant-bridge.yml
+  pull_request:
+    branches: [main, master, 'dev/**', workflow/DeepSeekHarness_integration]
+    paths:
+      - Makefile
+      - local/scripts/assistant-bridge-*
+      - local/lazymind-cli/**
+      - desktop/scripts/assistant-bridge-*
+      - desktop/scripts/fixtures/assistant-bridge-probe.go
+      - .github/workflows/windows-assistant-bridge.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-assistant-bridge-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  wsl-shell-boundary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: node --test desktop/scripts/assistant-bridge-wsl.test.mjs
+
+  windows-native:
+    runs-on: windows-2025
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.11'
+          cache-dependency-path: local/lazymind-cli/go.sum
+      - name: Build the real native Bridge
+        working-directory: local/lazymind-cli
+        run: |
+          go build -o "$env:RUNNER_TEMP\lazymind.exe" ./cmd/lazymind
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+      - name: PowerShell 5.1 path, failure and real Bridge lifecycle tests
+        run: |
+          $env:LAZYMIND_TEST_BRIDGE_EXE = "$env:RUNNER_TEMP\lazymind.exe"
+          node --test desktop/scripts/assistant-bridge-win.test.mjs
+          if ($LASTEXITCODE -ne 0) { exit 1 }
