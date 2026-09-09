@@ -30,15 +30,24 @@ func DecideOperation(ctx context.Context, stateStore state.Store, operationID, a
 	if value.Status != operationPending {
 		return OperationResult{}, Error("binding_conflict", 409, "conflict")
 	}
+	var decision Decision
+	var nextStatus string
+	switch strings.ToLower(strings.TrimSpace(action)) {
+	case "allow_once":
+		decision, nextStatus = DecisionAllowed, operationAllowed
+	case "reject":
+		decision, nextStatus = DecisionDenied, operationRejected
+	default:
+		return OperationResult{}, Error("invalid_selection", 400, "invalid request")
+	}
 	decisionKey := operationDecisionKey(operationID)
-	claimed, err := stateStore.SetNX(ctx, decisionKey, []byte(userID), operationLockTTL)
+	claimed, err := stateStore.SetNX(ctx, decisionKey, []byte(userID), operationClaimTTL)
 	if err != nil {
 		return OperationResult{}, err
 	}
 	if !claimed {
 		return OperationResult{}, Error("binding_conflict", 409, "conflict")
 	}
-	defer releaseOperation(ctx, stateStore, decisionKey, userID)
 	value, err = loadOperationState(ctx, stateStore, operationID)
 	if err != nil {
 		return OperationResult{}, err
@@ -46,14 +55,7 @@ func DecideOperation(ctx context.Context, stateStore state.Store, operationID, a
 	if value.Request.UserID != userID || value.Status != operationPending {
 		return OperationResult{}, Error("binding_conflict", 409, "conflict")
 	}
-	switch strings.ToLower(strings.TrimSpace(action)) {
-	case "allow_once":
-		value.Decision, value.Status = DecisionAllowed, operationAllowed
-	case "reject":
-		value.Decision, value.Status = DecisionDenied, operationRejected
-	default:
-		return OperationResult{}, Error("invalid_selection", 400, "invalid request")
-	}
+	value.Decision, value.Status = decision, nextStatus
 	if err := saveOperationState(ctx, stateStore, value); err != nil {
 		return OperationResult{}, err
 	}

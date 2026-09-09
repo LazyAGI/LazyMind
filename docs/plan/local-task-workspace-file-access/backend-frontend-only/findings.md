@@ -1,6 +1,16 @@
 # 当前差异证据
 
-## 最新：A2-R2 领取过期行为证据（2026-09-09）
+## 最新：A2-R2 实现与验证（2026-09-09）
+
+- 用户已批准一次性消费方案。两份既有生产文件实际 +30/-35，净减少 5 行：24 小时 SetNX 标记替代 2 分钟互斥锁；有效期仍为 5 分钟，标记不会在状态错误时删除；错误身份/参数/action 在消费前拒绝，领取后重读状态。completed 重复请求返回保存回执，不重复读写。
+- 删除无调用者的 claimOperation/releaseOperation 与其中 Get+Del 分支；删除 14 行、1 项只检查字面的旧源码测试，其余已有测试保留。无新增生产文件/依赖/表/服务。
+- 本次在生产修改前补充状态 Set 失败的 2 项合同（+56 行）：原实现决定/执行均可再次领取，执行重试实际创建了文件；已复现 RED 后修复。原 9 项加补充 2 项全部通过。
+- 本次 `go test -race ./localworkspace -count=1 -json`、`go test ./chat ./subagent -count=1`、`go vet ./localworkspace` 通过，Local/Desktop、LazyLLM/gitlink 未变化。读状态后的完整过期/崩溃/uncertain、prepare 幂等、运行身份及实机仍未覆盖，保留原未完成项。
+- 一次 gofmt 使用了相对仓库根的路径但工作目录为 backend/core，命令报路径不存在；改为 localworkspace/operations_test.go 后成功，不是产品失败。
+
+- 本批只读 agent 审查无 critical/important 问题，已移除新测试包装器无用的 CompareAndDelete 接口依赖。新增错误测试只覆盖执行前/决定时状态 Set 失败；领取后 Get 和完成回执 Set 失败尚无注入测试，不能以本批结果宣称完整崩溃恢复。
+
+### 修复前领取过期行为证据（1542434e）
 
 - `operationLockTTL` 是 2 分钟，小于 operation 的 5 分钟有效期。执行/决定在锁后读取状态，但普通状态 Set 不受锁持有权约束；读取快照后停顿超过锁期限，后来的请求能够重新领取并写入，原请求仍可写回旧快照。
 - 新增 claimSnapshotStore 仅在测试的 State 边界模拟领取记录过去 3 分钟，并在已读取快照与返回之间插入第二请求。执行合同实测两次追加成功（排除仅返回 completed 回执的情况）；决定合同实测 allow_once/reject 两次成功。二者都是产品断言失败，不是 Go 内存 data race。

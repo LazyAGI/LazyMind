@@ -1,6 +1,16 @@
 # 工作区剩余功能交接进度
 
-## 当前批次：A2-R2 失败合同完成，等待生产 Review（2026-09-09）
+## 当前批次：A2-R2 生产修复完成（2026-09-09）
+
+- 用户已批准第 13 节方案，本轮从 `1542434e` 开始，工作区起始干净。按既定范围修改 operations.go/approvals.go，不重复申请授权。
+- 在改生产前补充已批准方案第 5 项的两条行为合同（operations_test.go +56）：决定/执行在持久化状态失败后，不清除消费标记再执行。先复现 2 项 RED，其中执行重试创建了真实临时文件；修复后与原 9 项共 11 项全部通过。
+- 生产修改仅 operations.go +18/-25、approvals.go +12/-10，合计净减少 5 行，无新生产文件；SetNX 一次性消费，领取前校验，领取后读状态，保留 24 小时消费标记；删除短期锁 helper 与释放分支。旧字面源码合同删除 14 行、1 项，其余断言保留。
+- 本次验证：backend/core 下 `go test -race ./localworkspace -count=1 -json`、`go test ./chat ./subagent -count=1`、`go vet ./localworkspace` 均通过，冻结边界不变。gofmt 初次因相对路径错误报错，修正为 localworkspace/operations_test.go 后通过。
+- 四份文档同步实际结果/规模/剩余项；只读 agent 审查已完成，本批无 critical/important 问题，采纳移除新测试包装器无用可选接口的建议。补充的 2 项错误用例仅证明执行前/决定时状态 Set 失败，不证明完成回执写入失败、领取后 Get 异常或完整崩溃恢复。算法/前端/Redis/跨进程/实机本轮未测；仅提交本批相关文件，不推送。
+
+- 最终提交门禁：采纳审查精简后，补充错误合同复跑通过；完整 `go test -race ./localworkspace -count=1`、`go test ./chat ./subagent -count=1`、`go vet ./localworkspace` 再次通过。diff/gofmt 检查、Local/Desktop 基线差异、LazyLLM/gitlink 与子模块状态检查均通过；仅提交本批八个相关文件，未推送。
+
+### 测试阶段记录（1542434e，保留 RED 证据）
 
 - 用户要求下一阶段；本轮从 `b76d18f4` 开始，工作区干净，本地领先 origin 跟踪分支 5 个提交，未拉取/推送。先核对既有状态 helper、SQLite/Redis 的 SetNX/CompareAndDelete 实现以及四份交接文档，不改冻结目录。
 - 本批在既有 operations_test.go 新增 156 行、approvals_test.go 新增 63 行，共 +219 行；通过 State 边界的确定性交错复现，不等待真实分钟数，不 mock 掉授权或文件操作。新用例排除了“返回已保存回执”等于“再次执行”的错误计数。

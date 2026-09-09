@@ -2,6 +2,7 @@ package localworkspace
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -545,6 +546,61 @@ func TestWorkspaceClaimInvalidExecutionDoesNotConsumeApproval(t *testing.T) {
 			if err != nil || result.Content != "seed" {
 				t.Fatalf("invalid request consumed valid approval: result=%+v err=%v", result, err)
 			}
+		})
+	}
+}
+
+type failedOperationWriteStore struct {
+	state.Store
+	key string
+	err error
+}
+
+func (s *failedOperationWriteStore) Set(ctx context.Context, key string, value []byte, ttl time.Duration) error {
+	if key == s.key {
+		return s.err
+	}
+	return s.Store.Set(ctx, key, value, ttl)
+}
+
+func TestWorkspaceClaimStateFailureDoesNotPermitRetry(t *testing.T) {
+	for _, action := range []string{"execute", "decide"} {
+		t.Run(action, func(t *testing.T) {
+			db, grant, stateStore, conversationID := operationFixture(t, PermissionAlwaysAsk)
+			ctx := context.Background()
+			req := OperationRequest{UserID: "owner", ConversationID: conversationID, WorkspaceID: grant.WorkspaceID,
+				Operation: OperationCreate, Path: "notes.txt", Content: "seed", CallID: "state-failure"}
+			prepared, err := PrepareOperation(ctx, db.DB, stateStore, req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			failure := errors.New("operation state write unavailable")
+			failing := &failedOperationWriteStore{Store: stateStore,
+				key: operationKey(prepared.OperationID), err: failure}
+			if action == "execute" {
+				if _, err := DecideOperation(ctx, stateStore, prepared.OperationID, "allow_once", "owner"); err != nil {
+					t.Fatal(err)
+				}
+				_, err = ExecuteOperation(ctx, db.DB, failing, prepared.OperationID, req)
+			} else {
+				_, err = DecideOperation(ctx, failing, prepared.OperationID, "allow_once", "owner")
+			}
+			if !errors.Is(err, failure) {
+				t.Fatalf("expected state write error, got %v", err)
+			}
+			if _, err := os.Stat(filepath.Join(grant.Path, req.Path)); !os.IsNotExist(err) {
+				t.Fatalf("file exists after state failure: %v", err)
+			}
+			// Recovery of the store does not prove that the original attempt is safe to retry.
+			if action == "execute" {
+				_, err = ExecuteOperation(ctx, db.DB, stateStore, prepared.OperationID, req)
+			} else {
+				_, err = DecideOperation(ctx, stateStore, prepared.OperationID, "allow_once", "owner")
+			}
+			if _, statErr := os.Stat(filepath.Join(grant.Path, req.Path)); !os.IsNotExist(statErr) {
+				t.Errorf("retry changed the filesystem: %v", statErr)
+			}
+			requireWorkspaceReason(t, err, 409, "conflict", "binding_conflict")
 		})
 	}
 }

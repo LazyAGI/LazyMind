@@ -33,17 +33,3 @@ func TestWorkspaceOperationsValidatePathAndVersionBeforeMutation(t *testing.T) {
 		}
 	}
 }
-
-func TestWorkspaceApprovalStateMachineHasSingleConsumeAndExpiry(t *testing.T) {
-	source := readWorkspaceSource(t, "approvals.go") + readWorkspaceSource(t, "operations.go")
-	for _, state := range []string{"pending", "allowed", "rejected", "expired", "executing", "completed", "uncertain"} {
-		if !strings.Contains(source, state) {
-			t.Errorf("approvals.go must represent state %q", state)
-		}
-	}
-	for _, primitive := range []string{"SetNX", "CompareAndDelete", "operation_id"} {
-		if !strings.Contains(source, primitive) {
-			t.Errorf("approvals.go must use %s for bounded single-consume approval", primitive)
-		}
-	}
-}

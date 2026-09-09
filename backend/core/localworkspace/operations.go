@@ -89,7 +89,7 @@ type operationState struct {
 
 const (
 	operationStateTTL = 5 * time.Minute
-	operationLockTTL  = 2 * time.Minute
+	operationClaimTTL = 24 * time.Hour
 	maxOperationBytes = 20 << 20
 )
 
@@ -149,16 +149,7 @@ func ExecuteOperation(ctx context.Context, db *gorm.DB, stateStore state.Store, 
 	if stateStore == nil {
 		return OperationResult{}, common.ResolveAppError("store not initialized", 500)
 	}
-	claimed, err := claimOperation(ctx, stateStore, operationID, req.CallID)
-	if err != nil {
-		return OperationResult{}, err
-	}
-	if !claimed {
-		return OperationResult{}, Error("binding_conflict", 409, "conflict")
-	}
-	defer releaseOperation(ctx, stateStore, operationLockKey(operationID), req.CallID)
-
-	// Read the decision and execution status only after claiming the operation.
+	// Invalid requests must not consume another call's authorization.
 	value, err := loadOperationState(ctx, stateStore, operationID)
 	if err != nil {
 		return OperationResult{}, err
@@ -173,6 +164,22 @@ func ExecuteOperation(ctx context.Context, db *gorm.DB, stateStore state.Store, 
 		return OperationResult{}, Error("selection_forbidden", 403, "forbidden")
 	}
 	if value.Status != operationAllowed {
+		return OperationResult{}, Error("binding_conflict", 409, "conflict")
+	}
+
+	// This is a one-time claim, retained beyond the operation's validity even on failure.
+	claimed, err := stateStore.SetNX(ctx, operationLockKey(operationID), []byte(req.CallID), operationClaimTTL)
+	if err != nil {
+		return OperationResult{}, err
+	}
+	value, err = loadOperationState(ctx, stateStore, operationID)
+	if err != nil {
+		return OperationResult{}, err
+	}
+	if value.Status == operationCompleted {
+		return value.Result, nil
+	}
+	if !claimed || value.Status != operationAllowed || value.Decision != DecisionAllowed {
 		return OperationResult{}, Error("binding_conflict", 409, "conflict")
 	}
 
@@ -487,18 +494,4 @@ func loadOperationState(ctx context.Context, store state.Store, operationID stri
 		return value, Error("selection_expired", 409, "conflict")
 	}
 	return value, nil
-}
-
-func claimOperation(ctx context.Context, store state.Store, operationID, callID string) (bool, error) {
-	return store.SetNX(ctx, operationLockKey(operationID), []byte(callID), operationLockTTL)
-}
-
-func releaseOperation(ctx context.Context, store state.Store, key, callID string) {
-	if atomicStore, ok := store.(state.CompareAndDeleteStore); ok {
-		_, _ = atomicStore.CompareAndDelete(ctx, key, []byte(callID))
-		return
-	}
-	if current, err := store.Get(ctx, key); err == nil && string(current) == callID {
-		_ = store.Del(ctx, key)
-	}
 }
