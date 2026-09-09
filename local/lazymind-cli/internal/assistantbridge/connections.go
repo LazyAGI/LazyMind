@@ -61,6 +61,7 @@ func (s *Server) connectionStatus(status agentintegration.Status) agentintegrati
 	if job := s.connections[status.Agent]; job != nil {
 		result := job.status
 		result.Requirements = status.Requirements
+		result.ExecutablePath = status.ExecutablePath
 		return result
 	}
 	return status

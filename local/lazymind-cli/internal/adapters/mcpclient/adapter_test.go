@@ -124,7 +124,7 @@ func TestDeepSeekRequiresExistingExecutableAndCanInitializeProfile(t *testing.T)
 	}
 	writeTestFile(t, binary, "existing DSH executable")
 	status = adapter.Status(context.Background())
-	if status.State != agentintegration.Ready {
+	if status.State != agentintegration.Ready || !agentexec.SameExecutable(status.ExecutablePath, binary) {
 		t.Fatalf("status=%#v", status)
 	}
 }

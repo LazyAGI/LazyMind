@@ -923,6 +923,7 @@ const zhCN = {
   },
 
   agentIntegration: {
+    detectedExecutablePath: "当前使用的程序路径",
     installingWorkflowPlugin: '正在向现有 DSH 安装 LazyMind 插件，可离开页面后返回查看结果。',
     title: "外部 Agent 集成",
     mergedDescription: "按 Agent 管理双向集成。完成对应配置后再启用。",

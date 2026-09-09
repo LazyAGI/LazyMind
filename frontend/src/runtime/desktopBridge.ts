@@ -77,6 +77,7 @@ export interface DesktopAgentAction {
 export interface DesktopAgentIntegrationStatus {
   agent: DesktopAgent;
   display_name: string;
+  executable_path?: string;
   version?: string;
   state: DesktopAgentIntegrationState;
   requirements?: DesktopAgentRequirement[];

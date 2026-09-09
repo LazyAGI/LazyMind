@@ -267,7 +267,7 @@ export default function AgentIntegrationPage() {
   useEffect(() => {
     if (!connecting) return;
     let disposed = false;
-    let timer: ReturnType<typeof window.setTimeout>;
+    let timer: number;
     const poll = async () => {
       const result = await agentIntegrationStatuses();
       if (disposed) return;
@@ -832,7 +832,7 @@ function AgentConfigurationFlow({
             size="small"
             icon={<FolderOpenOutlined />}
             loading={busyAction === `binding:${target}`}
-            disabled={busyAction !== ""}
+            disabled={busyAction !== "" || mcpState === "connecting"}
             onClick={() => void onBindingAction(target, false)}
           >
             {t(manualExecutableBinding
@@ -845,7 +845,7 @@ function AgentConfigurationFlow({
         {configured && (
           <Button
             size="small"
-            disabled={busyAction !== ""}
+            disabled={busyAction !== "" || mcpState === "connecting"}
             onClick={() => void onBindingAction(target, true)}
           >
             {t("agentIntegration.restoreAutoDetection")}
@@ -886,7 +886,7 @@ function AgentConfigurationFlow({
           {t("agentIntegration.continueInAgent", { agent: agent.name })}
         </Button>
       )}
-      {bindingActions(agent.mcpBindingTarget, mcpInstallationMissing, mcpBindingConfigured)}
+      {bindingActions(agent.mcpBindingTarget, mcpInstallationMissing || agent.id === "deepseek-harness", mcpBindingConfigured)}
     </Space>
   );
 
@@ -953,6 +953,11 @@ function AgentConfigurationFlow({
           }))}
           emptyLabel={t("agentIntegration.waitingForDetection")}
         />
+        {mcpStatus?.executable_path && (
+          <Typography.Paragraph type="secondary" style={{ overflowWrap: "anywhere" }}>
+            {t("agentIntegration.detectedExecutablePath")}<br /><Typography.Text code>{mcpStatus.executable_path}</Typography.Text>
+          </Typography.Paragraph>
+        )}
         {mcpActions}
       </ConfigurationStage>
 
