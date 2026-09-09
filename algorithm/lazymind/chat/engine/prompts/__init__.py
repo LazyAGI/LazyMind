@@ -6,7 +6,6 @@ from .guidance import (
 )
 from .system_prompt import (
     add_standard_system_sections,
-    build_standard_prompt_bundle,
     build_system_prompt,
 )
 from .task_profile import (
@@ -25,7 +24,6 @@ __all__ = [
     'DEFAULT_SYSTEM_PROMPT',
     'VISION_EXTRACT_DEFAULT_INSTRUCTION',
     'add_standard_system_sections',
-    'build_standard_prompt_bundle',
     'build_system_prompt',
     'ClarificationQuestion',
     'ExplicitResourceBindings',
