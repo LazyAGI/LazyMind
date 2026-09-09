@@ -158,4 +158,17 @@ A2 开始前继续遵守测试先行和人工 Review；Core 文件执行与批�
 - [x] 新增 `operations_contract_test.go`：锁定读、创建、追加、替换、删除、expected_version、路径/撤销/版本/符号链接/.git/原子替换合同。
 - [x] 新增 `approval_routes_contract_test.go`：锁定 Core 内部操作路由和用户决定路由。
 - [x] 运行 `go test ./localworkspace -run 'Workspace(Operations|Approval|OperationRoutes)' -count=1`：4 个测试失败、0 个异常失败，全部为预期 RED。
-- [ ] Review A2 RED 后实现 Core 单一 operation service、批准状态机和真实文件操作；不得先写“临时允许”分支。
+- [x] Review A2 RED 后实现 Core 单一 operation service、批准状态机和真实文件操作；不得先写“临时允许”分支。
+
+
+## A2 完成记录（2026-09-09）
+
+- [x] Core 文件操作和 operation 状态实现，读/建/改/追加/删真实磁盘闭环通过。
+- [x] 权限矩阵、敏感写拒绝、路径/版本/撤销复核、批准单次消费和并发决定测试通过。
+- [x] 内部 prepare/status/execute 与用户 decide 路由注册，owner/conversation 校验和内部 token 校验通过相关包回归。
+- [x] LocalFileToolkit 绑定工作区受控转发，稳定 call_id，pending 不回退本地文件；算法相关矩阵 103/103。
+- [x] Core 全仓测试、`go vet ./...`、`go test -race ./localworkspace -count=1` 通过。
+- [ ] A3：把真实 Core gate 注入 middleware，pending 在原 Agent 调用中等待/恢复，批准 UI 和刷新/切会话隔离。
+- [ ] A3：证明普通子任务、已声明 Workflow、lease/取消/重启、uncertain 语义；完成 Local/打包 Desktop 实测。
+
+A2 生产净增约 895 行、2 个新生产文件，超过门槛；本记录不把超量拆批隐藏。

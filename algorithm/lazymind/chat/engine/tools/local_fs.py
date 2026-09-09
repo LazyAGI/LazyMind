@@ -16,6 +16,7 @@ from __future__ import annotations
 import datetime
 from dataclasses import dataclass
 import fnmatch
+import hashlib
 import glob as _glob
 import json
 import os
@@ -28,6 +29,7 @@ import lazyllm
 from lazyllm.tools.agent import ToolExecutionError
 
 from lazymind.chat.engine.tools.text_edit import replace_exact_text_file
+from lazymind.chat.engine.tools.infra.core_api_client import post_core_api
 
 _RG_BINARY = shutil.which('rg') or ''
 _RG_TIMEOUT = 30
@@ -47,7 +49,7 @@ class LocalFileToolkit:
     for the current request.
     """
 
-    __public_apis__ = ['ls', 'glob', 'grep', 'read', 'string_replace', 'info']
+    __public_apis__ = ['ls', 'glob', 'grep', 'read', 'string_replace', 'create', 'append', 'delete', 'info']
 
     def _get_scopes(self) -> List[LocalFSScope]:
         config = lazyllm.globals.get('agentic_config') or {}
@@ -72,6 +74,129 @@ class LocalFileToolkit:
 
     def __key_source__(self) -> Any:
         return self._get_scopes()
+
+    @staticmethod
+    def _workspace_context() -> Optional[Dict[str, Any]]:
+        config = lazyllm.globals.get('agentic_config') or {}
+        context = config.get('workspace_context')
+        if not isinstance(context, dict) or not context.get('workspace_id'):
+            parent = config.get('parent_agentic_config')
+            context = parent.get('_core_workspace_context') if isinstance(parent, dict) else None
+        workspace_id = str(context.get('workspace_id') or '').strip() if isinstance(context, dict) else ''
+        if not workspace_id:
+            for source in config.get('local_fs_sources') or []:
+                source_id = str(source.get('source_id') or '').strip() if isinstance(source, dict) else ''
+                if source_id.startswith('local-workspace:'):
+                    workspace_id = source_id.removeprefix('local-workspace:').strip()
+                    break
+        user_id = str(config.get('user_id') or '').strip()
+        conversation_id = str(config.get('conversation_id') or '').strip()
+        if not workspace_id or not user_id or not conversation_id:
+            return None
+        return {
+            'workspace_id': workspace_id,
+            'permission_mode': str(context.get('permission_mode') or '').strip() if isinstance(context, dict) else '',
+            'permission_version': context.get('permission_version') if isinstance(context, dict) else None,
+            'user_id': user_id,
+            'conversation_id': conversation_id,
+        }
+
+    @staticmethod
+    def _has_workspace_source() -> bool:
+        config = lazyllm.globals.get('agentic_config') or {}
+        return any(
+            isinstance(source, dict)
+            and str(source.get('source_id') or '').strip().startswith('local-workspace:')
+            for source in config.get('local_fs_sources') or []
+        )
+
+    def _core_path(self, filepath: str, scope: LocalFSScope) -> str:
+        safe_path, resolved_scope = self._resolve_with_scope(filepath)
+        if resolved_scope != scope:
+            raise ToolExecutionError('path is not within the selected workspace source')
+        for root in scope.roots:
+            root_path = os.path.realpath(root)
+            try:
+                relative = os.path.relpath(safe_path, root_path)
+            except ValueError as exc:
+                raise ToolExecutionError('path is not within the selected workspace source') from exc
+            if relative != os.pardir and not relative.startswith(os.pardir + os.sep):
+                return relative.replace(os.sep, '/')
+        raise ToolExecutionError('path is not within the selected workspace source')
+
+    @staticmethod
+    def _core_result(response: Dict[str, Any]) -> Dict[str, Any]:
+        envelope = response.get('response') if isinstance(response, dict) else None
+        body = envelope if isinstance(envelope, dict) else response
+        data = body.get('data', body) if isinstance(body, dict) else {}
+        return data if isinstance(data, dict) else {}
+
+    def _core_operation(
+        self,
+        scope: LocalFSScope,
+        operation: str,
+        path: str,
+        *,
+        content: str = '',
+        old_content: str = '',
+        expected_version: str = '',
+    ) -> Dict[str, Any]:
+        context = self._workspace_context()
+        if context is None:
+            raise ToolExecutionError('workspace context is unavailable')
+        relative_path = self._core_path(path, scope)
+        call_material = '\0'.join((
+            context['conversation_id'],
+            str((lazyllm.globals.get('agentic_config') or {}).get('run_id') or ''),
+            operation,
+            relative_path,
+            expected_version,
+            content,
+            old_content,
+        ))
+        call_id = 'local-fs-' + hashlib.sha256(call_material.encode('utf-8')).hexdigest()[:32]
+        payload = {
+            **context,
+            'call_id': call_id,
+            'operation': operation,
+            'path': relative_path,
+            'content': content,
+            'old_content': old_content,
+            'expected_version': expected_version,
+            'tool_name': 'local_fs',
+        }
+        prepared = self._core_result(post_core_api(
+            f"internal/conversations/{context['conversation_id']}/workspace-operations:prepare",
+            payload,
+        ))
+        operation_id = str(prepared.get('operation_id') or '').strip()
+        decision = str(prepared.get('decision') or '').strip().lower()
+        if not operation_id:
+            raise ToolExecutionError('Core did not return an operation id')
+        if decision == 'pending':
+            raise ToolExecutionError.approval_required(
+                f'workspace approval required for {operation} {payload["path"]} '
+                f'(operation_id={operation_id})'
+            )
+        if decision != 'allowed':
+            raise ToolExecutionError(f'workspace operation denied: {operation}')
+        executed = self._core_result(post_core_api(
+            f"internal/conversations/{context['conversation_id']}/workspace-operations/{operation_id}:execute",
+            payload,
+        ))
+        if not executed:
+            raise ToolExecutionError('Core returned an empty operation result')
+        return executed
+
+    def _bound_scope_for_file(self, filepath: str) -> Optional[LocalFSScope]:
+        context = self._workspace_context()
+        if context is None:
+            if self._has_workspace_source():
+                raise ToolExecutionError('workspace context is unavailable')
+            return None
+        safe_path, scope = self._resolve_with_scope(filepath)
+        del safe_path
+        return scope
 
     def _resolve_with_scope(self, target: str) -> tuple[str, LocalFSScope]:
         """Resolve *target* to an absolute path within a configured source.
@@ -397,6 +522,22 @@ class LocalFileToolkit:
         Returns:
             File content plus line range and total line count metadata.
         """
+        bound_scope = self._bound_scope_for_file(filepath)
+        if bound_scope is not None:
+            result = self._core_operation(bound_scope, 'read', filepath)
+            content = str(result.get('content') or '')
+            lines = content.splitlines(keepends=True)
+            selected = lines[start_line:start_line + max_lines]
+            return {
+                'filepath': result.get('path') or self._core_path(filepath, bound_scope),
+                'source_id': bound_scope.source_id,
+                'total_lines': len(lines),
+                'start_line': start_line,
+                'end_line': start_line + len(selected),
+                'content': ''.join(selected),
+                'version': result.get('version') or '',
+            }
+
         safe_path, scope = self._resolve_with_scope(filepath)
         if not os.path.isfile(safe_path):
             raise ToolExecutionError(f'File not found: {filepath}')
@@ -447,6 +588,31 @@ class LocalFileToolkit:
             Replacement count and updated file metadata. On mismatch or any
             error, the original file remains unchanged.
         """
+        bound_scope = self._bound_scope_for_file(filepath)
+        if bound_scope is not None:
+            current = self._core_operation(bound_scope, 'read', filepath)
+            current_content = str(current.get('content') or '')
+            if current_content.count(old_string) != expected_replacements:
+                raise ToolExecutionError(
+                    f'found {current_content.count(old_string)} matches, expected {expected_replacements}'
+                )
+            result = self._core_operation(
+                bound_scope,
+                'replace',
+                filepath,
+                content=new_string,
+                old_content=old_string,
+                expected_version=str(current.get('version') or ''),
+            )
+            return {
+                'filepath': result.get('path') or self._core_path(filepath, bound_scope),
+                'source_id': bound_scope.source_id,
+                'replacements': expected_replacements,
+                'encoding': encoding,
+                'bytes': len(str(result.get('content') or '').encode(encoding)),
+                'version': result.get('version') or '',
+            }
+
         safe_path, scope = self._resolve_with_scope(filepath)
         if not os.path.isfile(safe_path):
             raise ToolExecutionError(f'File not found: {filepath}')
@@ -469,6 +635,50 @@ class LocalFileToolkit:
             'replacements': replacement.replacements,
             'encoding': replacement.encoding,
             'bytes': len(replacement.content),
+        }
+
+    def create(self, filepath: str, content: str = '', encoding: str = 'utf-8') -> Dict[str, Any]:
+        """Create one new text file in the bound workspace."""
+        bound_scope = self._bound_scope_for_file(filepath)
+        if bound_scope is None:
+            raise ToolExecutionError('file creation requires a bound workspace')
+        result = self._core_operation(bound_scope, 'create', filepath, content=content)
+        return {
+            'filepath': result.get('path') or self._core_path(filepath, bound_scope),
+            'source_id': bound_scope.source_id,
+            'bytes': len(content.encode(encoding)),
+            'version': result.get('version') or '',
+        }
+
+    def append(self, filepath: str, content: str, expected_version: str = '', encoding: str = 'utf-8') -> Dict[str, Any]:
+        """Append text to one file in the bound workspace using a version fence."""
+        bound_scope = self._bound_scope_for_file(filepath)
+        if bound_scope is None:
+            raise ToolExecutionError('file append requires a bound workspace')
+        if not expected_version:
+            current = self._core_operation(bound_scope, 'read', filepath)
+            expected_version = str(current.get('version') or '')
+        result = self._core_operation(bound_scope, 'append', filepath, content=content, expected_version=expected_version)
+        return {
+            'filepath': result.get('path') or self._core_path(filepath, bound_scope),
+            'source_id': bound_scope.source_id,
+            'bytes': len(str(result.get('content') or '').encode(encoding)),
+            'version': result.get('version') or '',
+        }
+
+    def delete(self, filepath: str, expected_version: str = '') -> Dict[str, Any]:
+        """Delete one regular file in the bound workspace using a version fence."""
+        bound_scope = self._bound_scope_for_file(filepath)
+        if bound_scope is None:
+            raise ToolExecutionError('file deletion requires a bound workspace')
+        if not expected_version:
+            current = self._core_operation(bound_scope, 'read', filepath)
+            expected_version = str(current.get('version') or '')
+        result = self._core_operation(bound_scope, 'delete', filepath, expected_version=expected_version)
+        return {
+            'filepath': result.get('path') or self._core_path(filepath, bound_scope),
+            'source_id': bound_scope.source_id,
+            'version': result.get('version') or expected_version,
         }
 
     def info(self, path: Optional[str] = None) -> Dict[str, Any]:

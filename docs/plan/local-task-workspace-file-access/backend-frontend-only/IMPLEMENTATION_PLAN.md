@@ -154,3 +154,14 @@ A1 生产净增约 66 行、5 个既有算法文件；新增 1 个测试文件�
 ## 11. A2 首轮 RED
 
 A2 测试合同已建立但未实现生产：Core 目前没有 `operations.go`、`approvals.go` 或对应路由，合同运行结果为 4 个预期失败、0 个异常失败。生产实现必须先决定 operation service 与批准状态机边界，再补真实磁盘测试；不得以源码字符串合同通过后宣称文件能力完成。
+
+
+## 12. A2 实现与验证结果（2026-09-09）
+
+A2 已完成 Core 与算法工具的最小受控文件操作接入：Core 新增 `backend/core/localworkspace/operations.go`（502 行）和 `approvals.go`（177 行），实现绑定会话下的读、创建、追加、精确替换、单文件删除、权限/版本/敏感/.git/symlink 边界、短期 operation 状态、批准决定、单次执行锁和内部/用户路由；算法修改既有 `algorithm/lazymind/chat/engine/tools/local_fs.py`（净增 211 行），绑定工作区的读写操作转发 Core，Core pending 返回 `needs_approval`，不回退本地磁盘。
+
+本批生产净增约 895 行、2 个新生产文件；超过原约 200 行/1 个新文件门槛，原因是 Core 磁盘操作与批准状态必须分离，不能复用现有 grant metadata 或内部 artifact 存储而保持语义。测试新增约 414 行（Core 308、算法 106，含合同调整），未新增依赖、数据库表或服务。
+
+验证：算法相关矩阵 103/103；Core `go test ./... -count=1`、`go vet ./...`、`go test -race ./localworkspace -count=1` 均通过。警告仅来自本地 Python 依赖包的既有 DeprecationWarning/SyntaxWarning。LazyLLM gitlink 与 Local/Desktop 冻结边界未变化。
+
+限制：算法尚未把真实 Core gate 注入 `AgentExecutionOptions.authorization_gate`；pending 当前由 LocalFileToolkit 转换为 `ToolExecutionError.approval_required` 后结束本次工具调用，A3 需在现有 UI/控制通道恢复原调用。Core 的 `uncertain` 仅保留状态标识，跨进程崩溃后的真实不确定提交、Workflow lease、普通子任务端到端和 Local/打包 Desktop 实测仍未完成。A2 不宣称完整工作区能力交付。

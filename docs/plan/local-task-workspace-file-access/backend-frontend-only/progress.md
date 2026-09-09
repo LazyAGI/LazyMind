@@ -121,3 +121,13 @@
 - A2 已完成首轮测试合同，当前生产代码净增 0；新增 2 个 Core 测试文件，四份文档同步更新。
 - 4 个预期 RED 准确暴露 Core 尚无操作服务、批准状态机和路由；异常失败 0。合同不通过导入未实现符号制造编译错误，而是报告实际缺口。
 - 尚未实现 Core 磁盘访问、operation_id、pending/allowed/uncertain、版本冲突、敏感/.git/symlink 边界或用户批准接口。下一步需先 Review A2 生产范围和并发/原子语义。
+
+
+## 2026-09-09 A2 完成
+
+- Core 新增 `operations.go` 502 行、`approvals.go` 177 行；算法 `local_fs.py` 净增 211 行。生产净增约 895 行、2 个新生产文件；测试新增约 414 行。
+- 复用点：现有 localworkspace grant/binding/permission/context、state.Store、内部 token、common response/error catalog、Core routes、算法 core_api_client、LocalFileToolkit；未新增服务、依赖、表或 LazyLLM 修改。
+- 测试：算法 103/103；Core `go test ./... -count=1`、`go vet ./...`、`go test -race ./localworkspace -count=1` 通过。
+- 结果：Core 可执行真实读/创建/追加/精确替换/删除；算法工作区操作不再本地旁路，pending 返回 needs_approval。
+- 限制：真实 Core gate 尚未注入 middleware；pending 尚未原轮次恢复，UI/主子 Workflow 端到端/T6/F 完成证据仍缺；uncertain 仅保留状态标识，未证明崩溃后的提交语义。
+- 下一步：A3 先补测试合同，再注入 Core gate、批准恢复和 UI；继续保持 LazyLLM/gitlink、Local/Desktop 冻结。

@@ -170,3 +170,12 @@ Agent Review 还未形成完整终稿；上述结论已足以阻止直接进入�
 - 预期失败准确命中：`operations.go` 尚不存在；`approvals.go` 尚不存在；`routes.go` 尚未登记 workspace-operations prepare/status/execute 和用户 decide 路由。
 - 初次合同路径读取错误已修正：Go 测试工作目录是 `backend/core/localworkspace`；缺失生产文件现在报告字段缺口而不调用 `t.Fatalf`，保证 RED/异常失败可区分。
 - 本批尚未修改生产代码；A2 生产范围、状态机实现和文件原语仍待人工 Review。已有 `go test ./localworkspace -count=1` 基线在 A1 期间通过，A2 RED 仅是新增合同失败。
+
+
+## 2026-09-09 A2 实现与验证
+
+- Core 新增 `operations.go` 502 行、`approvals.go` 177 行；算法既有 `local_fs.py` 净增 211 行；新增 Core/算法测试约 414 行。生产净增约 895 行，超过规模门槛，已按两份职责拆分并记录不可复用原因。
+- Core 实现：ResolveForConversation 复核 owner/binding/status/directory identity；prepare 保存 operation_id、调用摘要、权限版本和内容摘要；execute 重新复核绑定/权限版本/文件版本，采用临时文件+rename 写入，拒绝绝对路径、越界、.git、symlink、特殊文件和敏感写入；批准用 SetNX 决定锁，执行用 SetNX 单次锁。
+- 算法实现：绑定工作区 source 或可信上下文时，LocalFileToolkit 的 read/string_replace/create/append/delete 转发 Core；Core pending 转成 `ToolExecutionError.approval_required`，Core 错误不会回退 Python 本地读写；无绑定 source 保留旧行为。
+- 验证：算法相关矩阵 103/103；Core `go test ./... -count=1`、`go vet ./...`、`go test -race ./localworkspace -count=1` 通过；本地 Python 警告不影响结果。
+- A2 未完成项：没有注入真实 Core authorization gate；pending 没有在同一 Agent 轮次轮询/恢复；UI pending 列表/决定尚未接入；Workflow 自定义包和普通子任务仅有源码路径证据，未端到端；uncertain/崩溃恢复和打包 Desktop 未验证。

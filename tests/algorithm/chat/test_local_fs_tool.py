@@ -195,3 +195,109 @@ def test_local_fs_rg_includes_hidden_and_no_ignore_flags(monkeypatch, tmp_path):
     assert LocalFileToolkit().glob('*.pdf')['match_count'] == 1
     assert LocalFileToolkit().grep('needle')['match_count'] == 1
     assert all('--no-ignore' in args and '--hidden' in args for args in calls)
+
+
+def _set_bound_workspace(monkeypatch, root, workspace_id='workspace-1'):
+    monkeypatch.setattr(local_fs_mod.lazyllm, 'globals', {
+        'agentic_config': {
+            'user_id': 'user-1',
+            'conversation_id': 'conversation-1',
+            'workspace_context': {
+                'workspace_id': workspace_id,
+                'permission_mode': 'allow_all',
+                'permission_version': 1,
+            },
+            'local_fs_sources': [_source(f'local-workspace:{workspace_id}', [root], ['txt', 'md'])],
+        },
+    })
+
+
+def test_bound_workspace_read_delegates_to_core_without_local_fallback(monkeypatch, tmp_path):
+    root = tmp_path / 'workspace'
+    root.mkdir()
+    target = root / 'notes.txt'
+    target.write_text('local-secret', encoding='utf-8')
+    _set_bound_workspace(monkeypatch, root)
+    calls = []
+
+    def fake_post(path, payload):
+        calls.append((path, payload))
+        if path.endswith('workspace-operations:prepare'):
+            return {'response': {'code': 0, 'data': {
+                'operation_id': 'operation-1', 'decision': 'allowed',
+                'version': 'v0', 'path': 'notes.txt',
+            }}}
+        return {'response': {'code': 0, 'data': {
+            'operation_id': 'operation-1', 'content': 'core-content',
+            'version': 'v1', 'path': 'notes.txt',
+        }}}
+
+    monkeypatch.setattr(local_fs_mod, 'post_core_api', fake_post, raising=False)
+
+    result = LocalFileToolkit().read(str(target))
+
+    assert result['content'] == 'core-content'
+    assert len(calls) == 2
+    assert calls[0][0].endswith('workspace-operations:prepare')
+    assert calls[1][0].endswith('workspace-operations/operation-1:execute')
+    assert calls[0][1]['operation'] == 'read'
+    assert calls[0][1]['call_id'].startswith('local-fs-')
+    assert calls[0][1]['call_id'] == calls[1][1]['call_id']
+    assert calls[0][1]['path'] == 'notes.txt'
+
+
+def test_bound_workspace_exposes_create_append_and_delete_operations():
+    assert {'create', 'append', 'delete'} <= set(LocalFileToolkit.__public_apis__)
+
+
+def test_bound_workspace_pending_approval_does_not_touch_local_file(monkeypatch, tmp_path):
+    root = tmp_path / 'workspace'
+    root.mkdir()
+    target = root / 'notes.txt'
+    target.write_text('local-secret', encoding='utf-8')
+    _set_bound_workspace(monkeypatch, root)
+
+    def fake_post(path, payload):
+        assert path.endswith('workspace-operations:prepare')
+        return {'response': {'code': 0, 'data': {
+            'operation_id': 'pending-1', 'decision': 'pending', 'path': 'notes.txt',
+        }}}
+
+    monkeypatch.setattr(local_fs_mod, 'post_core_api', fake_post, raising=False)
+
+    with pytest.raises(ToolExecutionError, match='operation_id=pending-1') as exc_info:
+        LocalFileToolkit().append(str(target), '\nnew')
+
+    assert exc_info.value.needs_approval is True
+    assert target.read_text(encoding='utf-8') == 'local-secret'
+
+
+def test_bound_workspace_mutation_requests_use_core_operations(monkeypatch, tmp_path):
+    root = tmp_path / 'workspace'
+    root.mkdir()
+    _set_bound_workspace(monkeypatch, root)
+    calls = []
+
+    def fake_post(path, payload):
+        calls.append((path, payload.copy()))
+        if path.endswith(':prepare'):
+            return {'response': {'code': 0, 'data': {
+                'operation_id': f"op-{len(calls)}", 'decision': 'allowed', 'path': payload['path'],
+            }}}
+        return {'response': {'code': 0, 'data': {
+            'operation_id': path.split('/')[-1].split(':')[0], 'path': payload['path'],
+            'version': f"v-{len(calls)}", 'content': payload.get('content', ''),
+        }}}
+
+    monkeypatch.setattr(local_fs_mod, 'post_core_api', fake_post, raising=False)
+    toolkit = LocalFileToolkit()
+    toolkit.create(str(root / 'new.txt'), 'one')
+    toolkit.append(str(root / 'new.txt'), 'two', expected_version='v-2')
+    toolkit.delete(str(root / 'new.txt'), expected_version='v-4')
+
+    prepare_payloads = [payload for path, payload in calls if path.endswith(':prepare')]
+    assert [payload['operation'] for payload in prepare_payloads] == [
+        'create', 'append', 'delete',
+    ]
+    assert all(payload['call_id'].startswith('local-fs-') for _, payload in calls)
+    assert calls[0][1]['call_id'] == calls[1][1]['call_id']

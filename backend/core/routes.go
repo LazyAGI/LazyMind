@@ -86,6 +86,10 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "PUT", "/conversations/{conversation_id}:workspace-permission", []string{"qa.write"}, localworkspace.UpdateConversationPermission)
 	handleAPI(r, "POST", "/internal/local-workspaces", nil, localworkspace.InternalRegister)
 	handleAPI(r, "POST", "/internal/local-workspaces/{workspace_id}:select", nil, localworkspace.InternalPrepareReauthorization)
+	handleAPI(r, "POST", "/internal/conversations/{conversation_id}/workspace-operations:prepare", nil, localworkspace.InternalPrepareOperation)
+	handleAPI(r, "GET", "/internal/conversations/{conversation_id}/workspace-operations/{operation_id}", nil, localworkspace.InternalOperationStatus)
+	handleAPI(r, "POST", "/internal/conversations/{conversation_id}/workspace-operations/{operation_id}:execute", nil, localworkspace.InternalExecuteOperation)
+	handleAPI(r, "POST", "/conversations/{conversation_id}/workspace-approvals/{operation_id}:decide", []string{"qa.write"}, localworkspace.DecideOperationHandler)
 	invocationHandler := agentinvocation.Handler{Service: agentinvocation.New(corestore.DB())}
 	handleAPI(r, "POST", "/agent-invocations/{invocation_id}:start", []string{"qa.write"}, invocationHandler.Start)
 	handleAPI(r, "POST", "/agent-invocations/{invocation_id}:finish", []string{"qa.write"}, invocationHandler.Finish)

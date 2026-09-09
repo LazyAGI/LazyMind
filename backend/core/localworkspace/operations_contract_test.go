@@ -27,7 +27,7 @@ func TestWorkspaceOperationsExposeCoreFileActions(t *testing.T) {
 
 func TestWorkspaceOperationsValidatePathAndVersionBeforeMutation(t *testing.T) {
 	source := readWorkspaceSource(t, "operations.go")
-	for _, guard := range []string{"filepath.Rel", "StatusRevoked", "StatusPathUnavailable", "expected_version", "symlink", ".git", "os.Rename"} {
+	for _, guard := range []string{"filepath.Rel", "ResolveForConversation", "ExpectedVersion", "ModeSymlink", ".git", "os.Rename"} {
 		if !strings.Contains(source, guard) {
 			t.Errorf("operations.go is missing required mutation guard %q", guard)
 		}
@@ -35,7 +35,7 @@ func TestWorkspaceOperationsValidatePathAndVersionBeforeMutation(t *testing.T) {
 }
 
 func TestWorkspaceApprovalStateMachineHasSingleConsumeAndExpiry(t *testing.T) {
-	source := readWorkspaceSource(t, "approvals.go")
+	source := readWorkspaceSource(t, "approvals.go") + readWorkspaceSource(t, "operations.go")
 	for _, state := range []string{"pending", "allowed", "rejected", "expired", "executing", "completed", "uncertain"} {
 		if !strings.Contains(source, state) {
 			t.Errorf("approvals.go must represent state %q", state)
