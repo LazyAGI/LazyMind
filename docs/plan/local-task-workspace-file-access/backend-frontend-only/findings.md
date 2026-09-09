@@ -1,5 +1,18 @@
 # 当前差异证据
 
+## 最新：剩余整体接入源码证据（2026-09-09）
+
+- 用户已改为完整生产后统一测试；本轮只读代码和更新四份文档，不继承旧通过数。起点 69e4809e，工作区干净；本轮生产/测试代码净增 0。
+- ToolManager 的 PreparedToolCall 在 dispatch_selector 可读真实 call_id/validated_arguments，但下层 callable 只收到参数，且 diverter 会并行执行；不能用共享参数哈希队列回填调用身份。tools_info 可读实际 MethodModuleTool 的实例/方法，现有 CitationResultMiddleware 已使用同一路径识别工具，项目层可以复用，无需改 LazyLLM。
+- Core prepare 当前每次 newID；local_fs call_id 是参数哈希，run/task/attempt 没有完整传递。仅缓存哈希会合并独立调用，必须同时补真实执行代次/调用句柄与参数摘要。
+- 主流式 run_id 由 conversation_logic.go 在发算法请求前生成，ChatStatus 先写 generating/run_id；新 ChatHistory 可能在流式中途或终态才创建。Core runDecision 是比状态终结更早的取消屏障；非流式目前未登记同样的活动状态。用 ChatHistory 存在性判定会误拒绝正常新任务。
+- 普通子任务 SubAgentTask 没有 run/generation/lease 字段，恢复复用同 task_id；状态 running 不能拒绝恢复前旧 runner。现有 RunRequest → API → runner 可传 Core 生成的执行代次，持久化复用既有 Params/state。子任务 detached background 启动，不能把主轮正常结束当作子任务自动失效条件。
+- WorkflowSessionStep 已有 lease_token/fencing_generation/lease_expires_at，attempt.Service.ValidateLease 检查活跃租约；remote_executor._run_claim 已持有真实 lease，但没有传到 run_subagent_stream。authorizeWorkflowExecutorTask 为了终态回传允许 terminal，不能复用成文件操作授权。
+- localworkspace 被 chat/subagent 导入，反向 import 会循环；主运行校验应复用现有 lifecycle callback 风格在 main 装配，避免复制 chat 的缓存 DTO/key。
+- 工具现有 ls/glob/grep/info 仍直接本地访问；Core resolveOperation 在权限决定前计算文件哈希；原字符串路径解析后重新按路径访问存在竞态。前端已有控件/API/request-id，但无 pending 列表；不可把现有基础设施当成缺失业务已经可用。
+- 整个授权阶段按 Git 重算生产 +957/-7，净增 950（含 A1）；剩余预计净增 900–1,400，累计 1,850–2,350，约 30 既有文件、目标 0 新生产文件，触发用户原超量 Review，详细不可复用原因见方案第 14 节。
+- 只读 agent 给出了 main/ordinary subagent/Workflow 具体调用链和上述身份缺口；不是完整方案验收或测试通过。检索中三个候选路径不存在（subagent/dispatch.go、chat/routers/*、infra/citation_middleware.py），已用 rg 找到 runner.go、chat/api/subagent_routes.py、infra/tool_result_citations.py；没有执行失败的产品测试。
+
 ## 最新：A2-R2 实现与验证（2026-09-09）
 
 - 用户已批准一次性消费方案。两份既有生产文件实际 +30/-35，净减少 5 行：24 小时 SetNX 标记替代 2 分钟互斥锁；有效期仍为 5 分钟，标记不会在状态错误时删除；错误身份/参数/action 在消费前拒绝，领取后重读状态。completed 重复请求返回保存回执，不重复读写。

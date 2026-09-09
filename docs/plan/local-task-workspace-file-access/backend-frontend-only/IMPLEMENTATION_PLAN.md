@@ -1,6 +1,6 @@
 # 工作区工具授权与文件执行方案
 
-> 当前状态：2026-09-09 A2-R2 已获批准并完成生产修复与相关回归，本批只读代码审查无阻断项。A2-R1 已完成；完整 A2 验收和 A3 仍未完成。测试先行，每个批次经过人工 Review；不创建其他仓库或工作树。当前状态以第 13 节为准，第 7–12 节保留设计与阶段记录。
+> 当前状态：2026-09-09 用户已要求剩余功能连续实施生产、之后统一测试，替代原逐批测试先行及测试后 Review 顺序。A2-R2 已提交 `69e4809e`。本轮已完成全链路源码核对，剩余整体范围与超量预算见第 14 节；原代码量门槛仍须 Review，尚未实施本轮生产或运行测试。LazyLLM/gitlink、Local/Desktop 冻结不变。
 
 ## 1. 目标与已确认边界
 
@@ -108,7 +108,7 @@ Core 的 request/result 结构各定义一次，直接由 handler/service 共用
 - 在无新增依赖/冻结平台层的条件下，先验证可用的文件句柄与原子替换原语。某平台的符号链接/目录竞态或外部并发保证无法证明时，该验收项保持失败并报告，不能以弱实现、删测试或 trusted 放行。
 - 不新增 PDF/Office 解析器；复杂格式沿用已有资源解析能力，但宿主文件读取仍需受控。格式兼容和发现工具输出须逐项对照现有行为。
 
-## 7. 文件范围与规模预算
+## 7. 原设计文件范围与规模预算（历史，现以第 14 节为准）
 
 当前只有四份文档的实际 diff，生产净增 0。下表为整个方案的预估，非已完成 diff；不通过拆批隐藏总量。
 
@@ -125,7 +125,7 @@ Core 的 request/result 结构各定义一次，直接由 handler/service 共用
 
 删除只针对被本批替换且确认无其他调用者的旧提示词授权分支/重复工作区分支；保留普通问答、内部产物、无绑定数据源和其回归测试。不能靠删除拒绝/竞态测试降低代码量。
 
-## 8. 顺序、门禁和验收
+## 8. 原测试先行顺序（历史，2026-09-09 已由用户改为生产后统一测试）
 
 任务与命令见 task_plan.md。A0 先交付测试及真实失败分类，不改生产；A1–A3 分别实现注册/可插拔执行阻断、Core文件执行、批准UI与主子Workflow闭环，每批先补该批失败合同再 Review 生产。任何单批也报告新增/删除/净增、真实文件和未验证项。
 
@@ -208,3 +208,79 @@ A2 测试合同已建立但未实现生产：Core 目前没有 `operations.go`�
 后续边界：prepare 当前每次产生新 operation_id；算法 call_id 是参数哈希，相同参数的独立调用会相同，且请求未传递完整 run/task/attempt 身份。只给 Core prepare 加缓存会把独立调用合并，还不能证明过期 run 无法重新授权，故需在下一批按真实调用身份、存储保留/清理、取消/运行结束整体设计。本批不接入该缓存，不宣称跨 operation_id 幂等。目录/撤销竞态、混合版本 Core 并行运行、崩溃/uncertain、Redis 与 Local/打包 Desktop 实测均仍未完成。
 
 本批只读 agent 审查结论：A2-R2 范围无 critical/important 问题。已精简 failedOperationWriteStore 的无用 CompareAndDelete 接口依赖；未借审查扩大实现。新增错误用例只注入执行前/决定时的状态 Set 错误，不注入领取后的 Get 或完成回执 Set，后两者及完整 uncertain/崩溃恢复没有本批行为验收证据。
+
+
+## 14. 剩余功能整合：生产完成后统一测试（2026-09-09）
+
+### 14.1 新执行授权与本次实际规模
+
+用户连续要求“直接生产后面统一测试”“直接将功能都开发完再测试”，已明确变更执行顺序：不再为小功能先写 RED、等待确认、再生产。整体范围获批后连续实现下述 R3–R7，再统一补齐/运行测试、处理缺陷和代码 Review；实现途中持续更新本目录四份文档。统一测试后的真实 Local/打包 Desktop 验收仍须列明实际环境，不能以代码完成替代验证。
+
+本轮起点 `69e4809e`，`feature/newWorkZone` 工作区起始干净，领先远端跟踪分支 7 个提交。已读源码和派生调用链，未运行本轮测试，生产/测试代码实际 diff 为 **0**，本次只更新四份文档。不创建仓库/worktree，不推送。
+
+用户原始要求第 7 条的超量 Review 仍适用。按 `git diff --numstat 7e04900e HEAD -- backend frontend algorithm/lazymind` 排除测试，整个授权阶段至今生产新增 **957**、删除 **7**、净增 **950** 行（包括 A1，不能只报 A2 的 890）。剩余五组预计还需净增 **900–1,400 行**，阶段累计预计 **1,850–2,350 行**；低于既往报价的假设已不成立。本表是源码核对后的估计，不是实际完成 diff，不承诺靠删测试/压缩可读性满足估计。
+
+| 连续实施项 | 必需的既有文件范围（相对仓库根） | 预计净增 |
+|---|---|---:|
+| R3 真实运行身份、prepare 幂等和记录期限 | backend/core/localworkspace/{operations.go,approvals.go,lifecycle.go,subagent_context.go}；backend/core/chat/{chat.go,conversation_logic.go,redis_cache.go,run_decision.go}；backend/core/subagent/{runner.go,handlers.go}；backend/core/main.go；algorithm/lazymind/chat/{api/subagent_routes.py,engine/subagent/runner.py,workflow/remote_executor.py,service/chat_service.py,service/chat_request.py} | 250–400 |
+| R4 精确工具派发、原调用批准等待/恢复 | algorithm/lazymind/chat/service/component/tool_registry.py；engine/agent_runtime/{tool_call_guard.py,executor.py,models.py}；engine/tools/local_fs.py（共享修改在各项只计一次） | 180–300 |
+| R5 Core 文件/目录、搜索与版本/路径保护 | backend/core/localworkspace/{operations.go,approvals.go,context.go,directory_identity.go,directory_identity_unix.go,directory_identity_windows.go,handlers.go}；algorithm/lazymind/chat/engine/tools/local_fs.py | 300–450 |
+| R6 待批准入口与状态展示 | backend/core/routes.go；frontend/src/modules/chat/{utils/localWorkspace.ts,components/ChatInput/LocalWorkspaceControl.tsx}；frontend/src/i18n/locales/{zh-CN.ts,en-US.ts} | 100–150 |
+| R7 Workflow 加载准入、错误与兼容收尾 | algorithm/lazymind/chat/engine/subagent/runner.py；backend/core/localworkspace/{approvals.go,context.go}；上述既有路由/文案落点 | 70–100 |
+
+各组文件可重叠，总计约 30 个既有文件；目标 **0 个新生产文件**，不新增服务、依赖、数据库表、manager、facade 或通用框架。准确文件列表及新增/删除/净增在每个实际实现节点记录，若需超出总预算或改变产品/安全规则，再一次性说明新增范围，不重新为既已批准的同类实现请求许可。
+
+不可直接复用的原因已查明：现有 main gate 为空；工具内部没有原 prepared call 身份；普通子任务没有执行代次；Core prepare 每次 newID；不存在 pending 列表；发现工具仍在 Python 本地读盘。复用现有工具/状态/弹窗只能减少重复基础设施，不能替代上述缺失业务连接。
+
+### 14.2 R3：真实身份和一次调用
+
+**主任务：** Core 在 `conversation_logic.go` 创建 run_id 并在派发前写 ChatStatus，ChatHistory 对新任务可能尚无记录。复用 chat 包的 `getChatStatus`、`runDecisionKey`、取消和终态判定；通过现有 lifecycle callback 模式向 localworkspace 提供只读校验，避免 localworkspace 导入 chat 形成循环，不复制 cache key/JSON DTO。prepare/status/decide/execute 检查 owner/conversation、history/run 对应关系、generating 和不存在取消/终态决定。非流式和双回复入口也必须设置/清理同一真实状态，不能生成算法侧 UUID 伪造已注册 run。
+
+**普通子任务：**复用 SubAgentTask 和 Params/现有 state，不新增表。Core 每次真实启动/恢复生成独立执行代次，经 RunRequest → FastAPI 参数 → runner 的私有执行上下文传递。只取本次请求携带的代次，不能从持久化 task.Params 重新读到后来启动的代次而冒充新 runner。Core 校验自己的代次记录和任务 owner/conversation/status；结束/中断/再次恢复使旧代次不可用。子任务是脱离主轮上下文运行的独立任务，主任务正常完成不能直接使仍运行的子任务失效；显式会话停止继续复用已有中断子任务路径。
+
+**Workflow：**复用 `attempt.Service.ValidateLease`、WorkflowSessionStep/Session 的 task/owner/conversation 关系和 FencingGeneration；remote_executor 持有的真实 attempt_id/lease 通过私有执行上下文传入 runner。授权绑定 attempt 加代次，lease 变更即失效。不复用允许终态上报的 authorizeWorkflowExecutorTask 来授权文件访问，不把 lease 放入模型参数、提示词、普通事件或待批准列表。
+
+**原工具调用：**移除 local_fs 的参数哈希 call_id。ToolExecutionMiddleware 获取真实 PreparedToolCall，建立每次执行器内部生成的调用句柄，关联 run/调用序号/实际 tool call id；不同调用即使参数相同也使用不同句柄，同一调用的网络重试复用句柄。模型传入的 owner/root/run/approval 等字段不得覆盖私有上下文。read 预检查加 append 等复合方法使用明确子操作序号，不能把不同子操作混成同一个 Core operation。
+
+**Core 幂等：**在现有 state.Store 中按 owner/conversation/执行代次/调用句柄/子操作组成规范化身份，利用 SetNX 创建一次 prepare 记录；独立保存参数摘要，重用 ID 改参数返回冲突。重试优先返回原 pending/终态记录，不能先按当前文件存在性拒绝已完成 create 重试。5 分钟批准期不因重试延长；无内容回执及去重记录保留 24 小时，过期或运行结束不再创建新批准。不存在/损坏/不可读的状态不能通过 newID 自动兜底执行。
+
+### 14.3 R4：原调用等待，保留官方执行基础设施
+
+采用项目 ToolExecutionMiddleware 已有 dispatch_selector 和结果记录扩展点；通过 manager.tools_info 解析实际 ModuleTool 的实例/方法，与 ToolConfig 注册元数据形成每个执行器内索引。不能只看工具名前缀，不能 monkeypatch LazyLLM、替换其方法、设置 trusted，也不能用进程全局可变参数队列给并行工具“猜测”原 call_id。
+
+对于准确匹配已登记 LocalFileToolkit 的受控调用，在项目层用已有 prepared validated_arguments 驱动受控文件调用并构造原索引的 ToolExecutionRecord，不再把同一调用交给底层重复执行；普通工具继续现有 ToolManager/引用处理路径。注册元数据仍是准入标志，具体权限由 Core 判定。实现前后保留实际调用者身份与允许/拒绝/执行结果映射，不能把真实执行写成 SKIPPED 或把批准拒绝算作普通失败重试。
+
+Core pending 后在原调用内以短 HTTP 查询有界等待；每轮检查取消与运行有效性，批准后继续原参数，不结束 ReAct 轮次、不追加模拟用户消息、不复用 AskCard，不在等待时持有文件句柄/提交锁。模型看到真实执行结果后才进行下一步。权限切换不会自动允许旧 pending；拒绝/超时/取消明确结束对应调用。
+
+未知自定义宿主代码不能因没有 metadata 自动放行。对内置无工作区访问的工具保留已查证路径，逐项记录兼容结果；任意脚本/MCP/shell 的隔离不是 metadata 能提供的，沿用原已确认的未接入代码拒绝边界，不声称完整沙箱。
+
+### 14.4 R5：文件能力和提交边界
+
+- 将 read/create/overwrite/string_replace/append/delete、mkdir 及 ls/glob/grep/info 的工作区访问统一转发 Core；非工作区数据源与内部产物行为保持原有实现，不删除其他使用者代码。
+- Core 在读取文件内容前完成授权判定；敏感读取未批准不计算内容哈希，grep 对未获准文件明确跳过或单独申请，禁止先搜出内容再检查。只保留一份敏感路径规则。
+- 将路径字符串的重复 realpath/ReadFile/Rename 访问改为固定授权根及父目录句柄内的操作，复用 Go 1.25 文件原语和已存在平台目录身份 helper；校验中间路径、symlink/别名、普通文件与根身份，不把句柄能力夸大为任意进程沙箱。
+- create 不覆盖并发出现的文件；修改保留权限，限定文本编码/二进制与 20 MiB 上限，版本来源必须是 Agent 实际观察值，不能在修改前自动读取新版本来绕过冲突；精确替换保留 expected_replacements 行为，失败不部分写入。
+- grant/binding/permission、运行资格与提交点协调使用 Core 现有存储事务/相关生命周期逻辑，避免新增通用 manager；拒绝或冲突不能回退本地执行。状态保存失败保留一次性标记，提交结果不明进入 uncertain、禁止自动重放；UI 显示需核对实际文件。
+- 外部编辑器不会参与 Core 事务。版本核验加 rename 不能宣称任意外部并发写的原子 compare-and-swap。若某平台保证无法证明，按原第 6 节保留该验收未完成/报告，不通过弱化测试或 trusted 使其“通过”。该限制不会因本次改为后测而消失。
+
+### 14.5 R6/R7：前端和 Workflow
+
+复用 LocalWorkspaceControl 的 Modal、request-id、可见性 effect、现有 axios/error/i18n；补登录用户的 pending 列表，Core 过滤 owner/conversation，仅提供操作、相对路径、调用来源、版本摘要、期限及状态。会话最多 16 个未完成请求的容量控制必须由 Core 原子维护，超限返回明确 reason；不能让并发子任务用无界数组绕过。
+
+切会话关闭旧操作并拒收旧响应；隐藏/卸载停止查询，恢复后重查；允许一次/拒绝只提交 operation_id 和动作，不能把 UI 的路径/权限当权威。允许后显示待执行/执行中，只有 Core completed 才表示完成。原工具调用仍在等待时刷新页面能继续处理；旧运行结束的批准不可重新激活。
+
+Workflow 自定义脚本须在 materialize/import/exec 前完成准入；当前捕获所有异常后回退同名内置工具的路径需要显式拒绝，不能把阻断偷偷变成备用执行。已声明并受控的内置工具和主/普通子任务共用文件规则。移除被真实授权替代的 ModelNotice “ask_user 授权/子任务只能转述”旧分支，并保留一般安全说明，避免代码生效后模型仍遵循过时行为。
+
+### 14.6 统一测试与验收矩阵（实现完成后执行）
+
+| 组 | 必须观察的结果 |
+|---|---|
+| 身份/幂等 | 同调用多次 prepare 同 ID；同参数不同调用不同 ID；改参数冲突；旧 run/子任务恢复旧代次/过期或被替换 lease 均拒绝 |
+| 原调用恢复 | pending 时零副作用；刷新批准后同轮 create→read→append/replace→read→delete；拒绝/超时/取消不执行；传输重试不重复追加 |
+| 权限/目录/版本 | 三档权限、敏感内容未批不读、搜索不旁路、.git/符号链接/目录替换/版本冲突/撤销与提交、无覆盖 create、大小和替换计数 |
+| 状态故障 | SetNX/Get/写执行态/写终态/进程中断分别注入；保留有界回执/去重记录，uncertain 不自动重放，容量并发不超限 |
+| 实际任务入口 | 主流式/非流式/双回复，普通子任务创建/恢复/中断，Workflow 声明内置工具、lease 更替与脚本加载前拒绝 |
+| UI/兼容 | 切会话/刷新/隐藏恢复/重复点击、允许不等于成功；普通未绑定工具、AskCard、内部产物和既有文件格式结果回归 |
+| 运行环境 | SQLite/必要 Redis、Core/算法/前端回归与构建、Local/打包 Desktop 实机/平台分别记录；缺环境不写通过 |
+
+统一测试阶段保留既有行为合同，删除仅限被替换且无使用者的生产分支/字面测试；不得为了“全部通过”删除未解决能力测试。每组报告真实通过/失败/环境异常，最终完整功能状态以实际矩阵为准，不把方案或生产 diff 当成完成证据。
