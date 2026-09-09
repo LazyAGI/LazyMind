@@ -383,6 +383,23 @@ func init() {
 	registerAdditionalErrorPattern("github ref lookup failed with http status %d", "Invalid request", http.StatusBadRequest, 2000103)
 	registerAdditionalErrorAlias("github ref lookup failed", "Invalid request", http.StatusBadRequest, 2000103)
 	registerAdditionalErrorAlias("github ref lookup returned invalid json", "Invalid request", http.StatusBadRequest, 2000103)
+	for _, source := range []string{
+		"github url must identify a repository",
+		"github url must not contain credentials, port, query, or fragment",
+		"github url must point to a repository root, direct zip, or /tree/<ref>/<skill-path>",
+		"github url contains an invalid path segment",
+		"github repository default branch could not be resolved",
+		"github url ref could not be resolved",
+		"locked github archive ref does not match source url",
+		"locked github archive url is invalid",
+		"locked github archive url does not match source repository",
+		"skillhub url must not contain credentials, port, query, or fragment",
+		"skillhub url must point to /skills/<slug> or /skills/<namespace>/<slug>",
+		"skillhub url contains an invalid path segment",
+	} {
+		registerAdditionalErrorAlias(source, "Invalid request", http.StatusBadRequest, 2000103)
+	}
+	registerAdditionalErrorPattern("skill package must contain skill.md in subdirectory %q", "Invalid skill package", http.StatusBadRequest, 2002294)
 	registerAdditionalErrorPattern("skill package download exceeds %d bytes", "Invalid skill package", http.StatusBadRequest, 2002294)
 
 	// Personal recovery and archive lifecycle errors.
@@ -650,6 +667,22 @@ func init() {
 	registerAdditionalErrorAlias("invalid external Agent attachment content", "invalid external Agent attachment", http.StatusBadRequest, 2002367)
 	registerAdditionalError("create external Agent attachment reference", http.StatusInternalServerError, 2002368)
 	registerAdditionalError("external Agent attachment event conflicts with existing content", http.StatusConflict, 2002369)
+	registerAdditionalError("invalid history selection", http.StatusBadRequest, 2002370)
+	registerAdditionalError("failed to start history run", http.StatusConflict, 2002371)
+	registerAdditionalError("editable block unavailable or changed; refresh and retry", http.StatusConflict, 2002372)
+	registerAdditionalError("inspect chat source attachment", http.StatusInternalServerError, 2002373)
+	registerAdditionalError("text is required", http.StatusBadRequest, 2002374)
+	registerAdditionalError("text exceeds 5000 characters", http.StatusBadRequest, 2002375)
+	registerAdditionalError("translation service is not configured", http.StatusPreconditionFailed, 2002376)
+	registerAdditionalError("unsupported translation provider", http.StatusBadRequest, 2002377)
+	registerAdditionalError("invalid translation credentials", http.StatusPreconditionFailed, 2002378)
+	registerAdditionalError("SecretId and SecretKey are required", http.StatusPreconditionFailed, 2002379)
+	registerAdditionalError("invalid Tencent translation endpoint", http.StatusBadRequest, 2002380)
+	registerAdditionalErrorPattern("Tencent translation request failed: %w", "Tencent translation request failed", http.StatusBadGateway, 2002381)
+	registerAdditionalErrorAlias("Tencent translation request failed", "Tencent translation request failed", http.StatusBadGateway, 2002381)
+	registerAdditionalErrorPattern("Tencent translation returned HTTP %d", "Tencent translation returned an invalid response", http.StatusBadGateway, 2002382)
+	registerAdditionalErrorPattern("Tencent translation failed: %s", "Tencent translation failed", http.StatusBadGateway, 2002383)
+	registerAdditionalErrorAlias("Tencent translation failed", "Tencent translation failed", http.StatusBadGateway, 2002383)
 }
 
 func registerAdditionalError(message string, status, code int) {

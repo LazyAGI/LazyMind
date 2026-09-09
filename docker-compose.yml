@@ -415,7 +415,6 @@ services:
       MIGRATIONS_DIR: /migrations
       LAZYMIND_ALGO_SERVICE_URL: http://lazyllm-doc-server:8000
       LAZYMIND_SUBAGENT_WORKSPACE: /data/subagent
-      LAZYMIND_SUBAGENT_DB_DSN: ${ACL_DB_DSN}
       LAZYMIND_READONLY_VALIDATE: "0"
       LAZYMIND_READONLY_DB_DRIVER: postgres
       LAZYMIND_READONLY_DB_DSN: "host=db user=app password=app dbname=app port=5432 sslmode=disable TimeZone=UTC"
@@ -791,6 +790,7 @@ services:
     volumes:
       - ./data/core/uploads:/var/lib/lazymind/uploads
       - ./data/traces:/var/lib/lazymind/traces
+      - ./data/observability:/var/lib/lazymind/observability
       - evo-data:/var/lib/lazymind/evo:ro
       - ./data/subagent:/data/subagent
       - *algorithm-src-mount
@@ -818,6 +818,7 @@ services:
       LAZYMIND_SEGMENT_STORE_USER: ${LAZYMIND_SEGMENT_STORE_USER:-admin}
       LAZYMIND_SEGMENT_STORE_PASSWORD: ${LAZYMIND_SEGMENT_STORE_PASSWORD:-LazyRAG_OpenSearch123!}
       LAZYMIND_SHARED_UPLOAD_DIR: /var/lib/lazymind/uploads
+      LAZYMIND_OBSERVABILITY_DIR: /var/lib/lazymind/observability
       LAZYMIND_MOUNT_BASE_DIR: /var/lib/lazymind/uploads
       # Same root as SUBAGENT_WORKSPACE. chat_agent_workspace() adds chat-artifacts/<user>/<conv>/,
       # so unpublished working files and tool_spills persist next to published artifacts.

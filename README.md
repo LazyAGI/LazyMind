@@ -2,7 +2,9 @@
 
 **[中文](README.CN.md)** | **English**
 
-> **Make AI reliably complete real tasks using your knowledge, standards, and preferences.**
+<img width="1672" height="941" alt="img_v3_0215b_800b44bc-c72c-4bfa-8e99-7d7c9126310g" src="https://github.com/user-attachments/assets/8d2f370a-f7d9-4665-b616-0e3acd63ef18" />
+
+> **LazyMind: Keep AI-Agent under your control.**
 
 [![GitHub stars](https://img.shields.io/github/stars/LazyAGI/LazyMind?style=flat-square)](https://github.com/LazyAGI/LazyMind/stargazers)
 [![License](https://img.shields.io/github/license/LazyAGI/LazyMind?style=flat-square)](LICENSE)

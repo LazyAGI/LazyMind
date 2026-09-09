@@ -586,6 +586,8 @@ func init() {
 	registerAdditionalErrorPattern("update task progress task=%s", "Internal server error", http.StatusInternalServerError, 2000000)
 	registerAdditionalErrorPattern("complete task=%s", "Internal server error", http.StatusInternalServerError, 2000000)
 	registerAdditionalErrorPattern("fail task=%s", "Internal server error", http.StatusInternalServerError, 2000000)
+	registerAdditionalErrorPattern("prepare subagent run task=%s", "Internal server error", http.StatusInternalServerError, 2000000)
+	registerAdditionalErrorPattern("append task step task=%s role=%s", "Internal server error", http.StatusInternalServerError, 2000000)
 	registerAdditionalErrorPattern("invalid sources snapshot", "Internal server error", http.StatusInternalServerError, 2000000)
 	registerAdditionalErrorPattern("save writing subtasks task=%s", "Internal server error", http.StatusInternalServerError, 2000000)
 	registerAdditionalErrorPattern("invalid writing subtasks snapshot", "Internal server error", http.StatusInternalServerError, 2000000)
@@ -622,11 +624,24 @@ func init() {
 	} {
 		registerAdditionalErrorAlias(source, "algorithm chat stream failed", http.StatusBadGateway, 2002077)
 	}
+	for _, source := range []string{
+		"performance metrics are nil",
+		"unsupported performance metrics schema_version",
+		"performance step counts must be non-negative",
+		"performance turn_seq must be non-negative",
+		"performance numeric facts must be non-negative",
+		"performance derived values must be finite and non-negative",
+		"performance database is nil",
+		"performance ownership fields are required",
+		"performance run ownership does not match existing row",
+	} {
+		registerAdditionalErrorAlias(source, "Internal server error", http.StatusInternalServerError, 2000000)
+	}
 	registerAdditionalError("task_lease_lost", http.StatusConflict, 2002365)
 	registerAdditionalError("maintenance_busy", http.StatusServiceUnavailable, 2002366)
 	registerAdditionalError("preference_organizing", http.StatusConflict, 2002361)
 	registerAdditionalError("create preference organizer task failed", http.StatusInternalServerError, 2002362)
 	registerAdditionalError("query preference organizer task failed", http.StatusInternalServerError, 2002363)
 	registerAdditionalError("preference organizer task lease was lost", http.StatusInternalServerError, 2002364)
-	registerAdditionalError("async job lease lost", http.StatusInternalServerError, 2002370)
+	registerAdditionalError("async job lease lost", http.StatusInternalServerError, 2002384)
 }

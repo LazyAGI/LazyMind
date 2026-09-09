@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { forwardRef, useImperativeHandle } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   getConversationHistory: vi.fn(),
   listConversations: vi.fn(),
   replaceMessageList: vi.fn(),
+  mergeHistoryPage: vi.fn(),
   openResumeSSE: vi.fn(),
   disconnectConversationStream: vi.fn(),
   createNewChat: vi.fn(),
@@ -29,6 +30,7 @@ const mocks = vi.hoisted(() => ({
   pendingMessage: null as any,
   latestChatContainerProps: null as any,
   latestSideChatPanelProps: null as any,
+  locationSearch: "",
 }));
 
 vi.mock("react-i18next", () => ({
@@ -46,7 +48,12 @@ vi.mock("react-i18next", () => ({
   }),
 }));
 
+vi.mock("@/modules/chat/components/ForkConversation/ForkStatus", () => ({ default: () => null }));
+vi.mock("@/modules/chat/components/ForkConversation/useForkConversation", () => ({ useForkConversation: () => ({ begin: vi.fn() }) }));
+
 vi.mock("react-router-dom", () => ({
+  useLocation: () => ({ key: "test", pathname: "/chat", search: mocks.locationSearch }),
+  useNavigate: () => vi.fn(),
   Link: ({ to, children, ...props }: any) => (
     <a href={to} {...props}>
       {children}
@@ -55,6 +62,8 @@ vi.mock("react-router-dom", () => ({
 }));
 
 vi.mock("antd", () => ({
+  Button: ({ children, loading, ...props }: any) => <button {...props} disabled={loading || props.disabled}>{children}</button>,
+  Space: ({ children, ...props }: any) => <div {...props}>{children}</div>,
   message: {
     error: mocks.messageError,
     warning: vi.fn(),
@@ -71,7 +80,8 @@ vi.mock("@/components/request", () => ({
 }));
 
 vi.mock("@/components/auth", () => ({
-  AgentAppsAuth: { getAuthHeaders: () => ({}) },
+  AgentAppsAuth: { getAuthHeaders: () => ({}), getUserInfo: () => ({ userId: "test-user" }) },
+  AUTH_USER_CHANGE_EVENT: "lazymind:user-change",
 }));
 
 vi.mock("@/modules/chat/components/newChatContainer", () => ({
@@ -79,6 +89,7 @@ vi.mock("@/modules/chat/components/newChatContainer", () => ({
     mocks.latestChatContainerProps = props;
     useImperativeHandle(ref, () => ({
       replaceMessageList: mocks.replaceMessageList,
+      mergeHistoryPage: mocks.mergeHistoryPage,
       openResumeSSE: mocks.openResumeSSE,
       disconnectConversationStream: mocks.disconnectConversationStream,
       createNewChat: mocks.createNewChat,
@@ -205,6 +216,7 @@ describe("ChatLayout conversation loading", () => {
     mocks.pendingMessage = null;
     mocks.latestChatContainerProps = null;
     mocks.latestSideChatPanelProps = null;
+    mocks.locationSearch = "";
     mocks.getChatStatus.mockResolvedValue({ data: { is_generating: false } });
     mocks.listConversations.mockResolvedValue({ data: { conversations: [] } });
     mocks.getConversationHistory.mockImplementation(({ name }: { name: string }) =>
@@ -224,6 +236,112 @@ describe("ChatLayout conversation loading", () => {
 
     expect(mocks.createNewChat).not.toHaveBeenCalled();
     expect(mocks.disconnectConversationStream).not.toHaveBeenCalled();
+  });
+
+  it("merges only the arriving history page after locating the latest reply", async () => {
+    const initial = { id: "h2", seq: 2, query: "initial question", result: "initial answer" };
+    const older = { id: "h1", seq: 1, query: "older question", result: "older answer" };
+    const page = deferred<any>();
+    mocks.locationSearch = "?anchor_history_id=h2";
+    mocks.getConversationDetail.mockResolvedValue({ data: { conversation: { conversation_id: "source", thinking_depth: "medium", settings: {} } } });
+    mocks.getConversationHistory.mockImplementation(({ anchorPageToken }: { anchorPageToken?: string }) => anchorPageToken
+      ? page.promise
+      : Promise.resolve({ data: { history: [initial], older_page_token: "older-token", newer_page_token: "" } }));
+    render(<ChatLayout conversationId="source" setIsChatContent={vi.fn()} initchatConfig={{}} setChatConfigFn={vi.fn()} canChat />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "chat.fork.older" }));
+    expect(mocks.latestChatContainerProps.canChat).toBe(true);
+    expect(mocks.getConversationHistory).toHaveBeenLastCalledWith({ name: "source", anchorPageToken: "older-token" });
+    await act(async () => {
+      page.resolve({ data: { history: [older], older_page_token: "", newer_page_token: "newer-token" } });
+    });
+
+    expect(mocks.mergeHistoryPage).toHaveBeenCalledWith("source", [older]);
+    expect(mocks.replaceMessageList).toHaveBeenCalledTimes(1);
+    expect(mocks.replaceMessageList).toHaveBeenCalledWith("source", [initial], true);
+    expect(mocks.latestChatContainerProps.canChat).toBe(true);
+  });
+
+  it("loads settings and Fork capability with one detail request for a new conversation", async () => {
+    mocks.getConversationDetail.mockResolvedValue({
+      data: {
+        conversation: {
+          conversation_id: "new-conversation",
+          thinking_depth: "high",
+          settings: { chat_executor: "lazymind" },
+          fork_capability: { supported: true },
+        },
+      },
+    });
+    render(
+      <ChatLayout
+        setIsChatContent={vi.fn()}
+        initchatConfig={{}}
+        setChatConfigFn={vi.fn()}
+        canChat
+      />,
+    );
+
+    await act(async () => {
+      mocks.latestChatContainerProps.onConversationIdChange("new-conversation");
+    });
+
+    expect(mocks.getConversationDetail).toHaveBeenCalledTimes(1);
+    expect(mocks.getConversationDetail).toHaveBeenCalledWith({
+      conversation: "new-conversation",
+    });
+    expect(mocks.latestChatContainerProps.onFork).toEqual(expect.any(Function));
+    expect(mocks.setThinkingDepth).toHaveBeenLastCalledWith("high");
+  });
+
+  it("ignores late Fork capability from the previous conversation detail request", async () => {
+    const previousDetail = deferred<any>();
+    mocks.getConversationDetail.mockImplementation(
+      ({ conversation }: { conversation: string }) => conversation === "previous-conversation"
+        ? previousDetail.promise
+        : Promise.resolve({
+          data: {
+            conversation: {
+              conversation_id: conversation,
+              thinking_depth: "medium",
+              settings: { chat_executor: "lazymind" },
+              fork_capability: { supported: false },
+            },
+          },
+        }),
+    );
+    render(
+      <ChatLayout
+        setIsChatContent={vi.fn()}
+        initchatConfig={{}}
+        setChatConfigFn={vi.fn()}
+        canChat
+      />,
+    );
+
+    act(() => {
+      mocks.latestChatContainerProps.onConversationIdChange("previous-conversation");
+    });
+    await act(async () => {
+      mocks.latestChatContainerProps.onConversationIdChange("current-conversation");
+    });
+    expect(mocks.latestChatContainerProps.onFork).toBeUndefined();
+
+    await act(async () => {
+      previousDetail.resolve({
+        data: {
+          conversation: {
+            conversation_id: "previous-conversation",
+            thinking_depth: "high",
+            settings: { chat_executor: "lazymind" },
+            fork_capability: { supported: true },
+          },
+        },
+      });
+    });
+
+    expect(mocks.latestChatContainerProps.onFork).toBeUndefined();
+    expect(mocks.setThinkingDepth).toHaveBeenLastCalledWith("medium");
   });
 
   it("sends an initial model selection only for the first new-conversation request", async () => {
@@ -477,8 +595,21 @@ describe("ChatLayout conversation loading", () => {
     );
   });
 
-  it("keeps execution configuration available for a fork child", async () => {
-    mocks.getConversationDetail.mockResolvedValue({
+  it("keeps fork thinking depth local and clears it when starting a new conversation", async () => {
+    mocks.getConversationDetail.mockResolvedValue({ data: { conversation: { conversation_id: "fork", thinking_depth: "high", search_config: {}, settings: { chat_executor: "lazymind" }, fork_origin: { source_conversation_id: "source", source_history_id: "h1", source_status: "available", can_locate: true } } } });
+    const props = { setIsChatContent: vi.fn(), initchatConfig: {}, setChatConfigFn: vi.fn(), canChat: true };
+    const { rerender } = render(<ChatLayout {...props} conversationId="fork" />);
+    await waitFor(() => expect(mocks.latestChatContainerProps.thinkingDepth).toBe("high"));
+    expect(mocks.setThinkingDepth).not.toHaveBeenCalled();
+    act(() => mocks.latestChatContainerProps.onThinkingDepthChange("low"));
+    expect(mocks.latestChatContainerProps.thinkingDepth).toBe("low");
+    expect(mocks.setThinkingDepth).not.toHaveBeenCalled();
+    rerender(<ChatLayout {...props} conversationId="" />);
+    await waitFor(() => expect(mocks.latestChatContainerProps.thinkingDepth).toBeUndefined());
+  });
+
+  it("reuses restored Fork capability and configuration without a second detail request", async () => {
+    mocks.getConversationDetail.mockRejectedValue(new Error("second detail request failed")).mockResolvedValueOnce({
       data: {
         conversation: {
           conversation_id: "fork-conversation",
@@ -488,6 +619,7 @@ describe("ChatLayout conversation loading", () => {
           parent_conversation_id: "parent-conversation",
           parent_display_name: "主会话标题",
           relation_type: "fork",
+          fork_capability: { supported: true },
         },
       },
     });
@@ -506,6 +638,8 @@ describe("ChatLayout conversation loading", () => {
     expect(mocks.latestChatContainerProps.showConversationConfig).toBe(true);
     expect(mocks.latestChatContainerProps.showSkillDeposit).toBe(true);
     expect(mocks.latestChatContainerProps.allowKnowledgeBaseSelection).toBe(true);
+    expect(mocks.latestChatContainerProps.onFork).toEqual(expect.any(Function));
+    expect(mocks.getConversationDetail).toHaveBeenCalledTimes(1);
   });
 
   it("does not let a late route load overwrite a newer route selection", async () => {

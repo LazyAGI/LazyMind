@@ -39,6 +39,8 @@ interface FileViewerProps {
   segment?: Segment;
   onExportReadyChange?: (ready: boolean) => void;
   onPdfSelection?: (selection: PdfTextSelection) => void;
+  onPdfTranslateSelection?: (selection: PdfTextSelection) => void;
+  translationConfigured?: boolean;
 }
 
 const IMAGE_FILE_TYPES = [
@@ -87,6 +89,7 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
   const [content, setContent] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [mediaObjectUrl, setMediaObjectUrl] = useState("");
+  const [textSelectionAction, setTextSelectionAction] = useState<{ text: string; left: number; top: number } | null>(null);
 
   useEffect(() => {
     if (!segment) {
@@ -150,6 +153,24 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
     }
     return "unknown";
   }, [fileSuffix]);
+
+  const handlePreviewSelection = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    if (fileType === "pdf" || !props.onPdfTranslateSelection) return;
+    const selection = window.getSelection();
+    const text = selection?.toString().trim() || "";
+    if (!selection || selection.isCollapsed || !text) {
+      setTextSelectionAction(null);
+      return;
+    }
+    const container = event.currentTarget;
+    if (!container.contains(selection.anchorNode) || !container.contains(selection.focusNode)) return;
+    const rect = container.getBoundingClientRect();
+    setTextSelectionAction({
+      text,
+      left: Math.min(Math.max(event.clientX - rect.left, 52), rect.width - 52),
+      top: Math.max(event.clientY - rect.top - 42, 8),
+    });
+  }, [fileType, props.onPdfTranslateSelection]);
 
   const getFileData = useCallback(
     async (
@@ -277,6 +298,12 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
             content={content}
             onAskSelection={props.onPdfSelection}
             askSelectionLabel={t("knowledge.askPdfSelection")}
+            onTranslateSelection={props.onPdfTranslateSelection}
+            translateSelectionLabel={t("knowledge.translateSelection")}
+            translateSelectionDisabled={!props.translationConfigured}
+            translateSelectionDisabledTip={t("knowledge.translationConfigureTip")}
+            translateSelectionConfigureLabel={t("knowledge.translationConfigureAction")}
+            translateSelectionConfigureUrl="/settings?section=knowledge&tool=translation"
           />
         ) : null;
       case "docx":
@@ -357,6 +384,8 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
     pdfPreviewData,
     props.fileName,
     props.onPdfSelection,
+    props.onPdfTranslateSelection,
+    props.translationConfigured,
     t,
   ]);
 
@@ -398,7 +427,28 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
 
   return (
     <div className="file-viewer-container">
-      <div className="file-viewer-content">
+      <div className="file-viewer-content" onMouseUp={handlePreviewSelection}>
+        {textSelectionAction ? (
+          <span
+            className="file-viewer-selection-translate-wrap"
+            style={{ left: textSelectionAction.left, top: textSelectionAction.top }}
+            title={!props.translationConfigured ? t("knowledge.translationConfigureTip") : undefined}
+          >
+            <button
+              type="button"
+              className="file-viewer-selection-translate"
+              disabled={!props.translationConfigured}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => {
+                props.onPdfTranslateSelection?.({ text: textSelectionAction.text, page: 1 });
+                window.getSelection()?.removeAllRanges();
+                setTextSelectionAction(null);
+              }}
+            >
+              {t("knowledge.translateSelection")}
+            </button>
+          </span>
+        ) : null}
         {loading && renderLoading}
         {!loading && !fileData && renderEmpty}
         {!loading && fileData && renderFile}

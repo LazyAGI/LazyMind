@@ -1,0 +1,147 @@
+schema_version: 2
+id: summarize-meeting
+type: chat
+version: 1.0.0
+status: published
+default_locale: zh-CN
+provider: GitHub
+
+skill:
+  source_url: https://github.com/borghei/Claude-Skills/tree/ddca910e95580c63a236303fc1534054f0f14d4c/project-management/execution/summarize-meeting
+  category: project-management
+
+placement:
+  home: true
+  gallery: true
+  order: 26
+
+classification:
+  category: 项目管理
+  tags:
+    - 会议纪要
+    - 决策记录
+    - 行动项
+    - 项目协作
+
+assets:
+  cover:
+    file: assets/cover.png
+    role: cover
+  meeting_product_review_demo:
+    file: assets/meeting-product-review-demo.html
+    role: result
+  meeting_client_call_demo:
+    file: assets/meeting-client-call-demo.html
+    role: result
+  meeting_sprint_retro_demo:
+    file: assets/meeting-sprint-retro-demo.html
+    role: result
+  product_review_scene:
+    file: assets/product-review-scene.png
+    role: result
+  client_call_scene:
+    file: assets/client-call-scene.png
+    role: result
+  sprint_retro_scene:
+    file: assets/sprint-retro-scene.png
+    role: result
+
+presentation:
+  card:
+    title: 会议纪要整理助手
+    description: 把会议记录整理成清晰的讨论摘要、决策记录、行动项和待确认问题
+    output_type: report
+    output_label: 结构化会议纪要
+    cover_asset: cover
+    result_summary: 查看产品评审、客户沟通和 Sprint 回顾 3 类会议如何沉淀为可执行纪要
+  detail:
+    title: 会议纪要整理助手
+    description: 根据会议笔记、录音转写或讨论记录，提炼讨论主题、已确认决策、负责人明确的行动项和仍未解决的问题。来源：borghei/Claude-Skills，经 LazyMind 适配；缺少负责人、日期或结论时会明确标记，不把讨论中的想法写成既定事实。
+    attachment_hint: 会议笔记、录音转写、参会人及角色、会议类型、分发范围和保密要求
+
+tasks:
+  - id: product-review-summary
+    selector:
+      title: 产品评审会议纪要
+      description: 从功能评审讨论中区分决策、行动项和仍待确认的技术问题
+      output_label: 产品评审纪要
+    launch:
+      prompt_short: 帮我整理一下这次 AI 助手产品评审会的会议纪要。
+      prompt: >-
+        直接帮我整理下面这次 AI 助手产品评审会的会议纪要，不用先问我补充信息。请按“会议摘要、已确认决策、行动项、待确认问题”输出；没有提供的日期、负责人或结论直接标成“待确认”，不要自行补全。
+
+        会议类型：产品评审会。参会人：产品负责人林然、工程负责人周启、设计师许宁、客户成功王璐。日期和分发范围没有提供。讨论记录：首版先支持知识库问答和引用来源，不做多轮工作流；引用来源需要在本周内完成交互方案；工程侧认为权限模型还需要一次安全评审；客户成功希望下周给两个试点客户演示；是否支持导出暂未形成结论。
+    replay:
+      steps:
+        - title: 确认输入与会议语境
+          description: 识别记录来源、产品评审类型、参会角色和分发范围
+        - title: 提炼讨论主题
+          description: 用简洁语言总结功能范围、交互方案和安全约束，不扩大原意
+        - title: 区分决策与想法
+          description: 只把明确确认的首版范围写入决策，未定方案保留为开放问题
+        - title: 抽取行动项
+          description: 记录具体交付物、已知负责人和截止日期，缺失字段明确标记待确认
+        - title: 生成可分发纪要
+          description: 输出便于参会者和未参会者理解、跟进和复核的结构化结果
+    result:
+      template: html_preview_v1
+      eyebrow: 产品评审纪要
+      title: AI 助手首版范围评审记录
+      summary: 查看如何将功能边界、决策依据、负责人和待确认事项分开记录。
+      html_asset: meeting_product_review_demo
+
+  - id: client-call-summary
+    selector:
+      title: 客户沟通会议纪要
+      description: 将客户诉求、约定事项和未承诺内容整理成可跟进记录
+      output_label: 客户沟通纪要
+    launch:
+      prompt_short: 帮我整理一下这次客户需求沟通，方便后面跟进。
+      prompt: >-
+        直接帮我整理下面这次客户需求沟通，不用先问我补充信息。请按“客户诉求、已确认范围、行动项、承诺边界、待确认问题”输出；没有明确说定的内容不要写成承诺，缺少负责人、日期或验收定义的地方标成“待确认”。
+
+        会议是客户需求沟通，参会角色是客户方和我方项目组，具体姓名、日期和分发范围没有提供。客户希望把现有知识库接入客服工作台，重点关注回答是否能引用原文。会上确认先用 50 条历史问题做小范围验证，但验证开始日期没有确定；客户方会提供脱敏问答样本，具体负责人未指定；我方需要评估权限隔离和错误回答的人工兜底方式；客户希望月底前看到结果，但双方没有确认最终交付日期。
+    replay:
+      steps:
+        - title: 识别客户目标
+          description: 区分业务目标、使用场景、验收关注点与背景信息
+        - title: 标记承诺边界
+          description: 只记录双方明确同意的试点范围，不将期望日期写成承诺
+        - title: 整理验证计划
+          description: 抽取样本、权限、人工兜底和评估方式等需要推进的事项
+        - title: 标出缺口
+          description: 对未指定负责人、未确定开始日期和未确认交付时间的内容标记待确认
+    result:
+      template: html_preview_v1
+      eyebrow: 客户沟通纪要
+      title: 客服知识库接入需求沟通
+      summary: 查看如何把客户诉求、试点范围、承诺边界和后续核实项放在同一份纪要中。
+      html_asset: meeting_client_call_demo
+
+  - id: sprint-retro-summary
+    selector:
+      title: Sprint 回顾纪要
+      description: 从复盘讨论中沉淀改进决策、行动项和仍需观察的问题
+      output_label: Sprint 回顾纪要
+    launch:
+      prompt_short: 帮我把这次 Sprint 回顾整理成清晰的改进清单。
+      prompt: >-
+        直接帮我整理下面这次 Sprint 回顾，不用先问我补充信息。请按“复盘观察、已确认改进、行动项、待评估想法、下次关注指标”输出；负责人、日期或结论没有说清楚的地方标成“待确认”，不要把建议写成已经决定的事情。
+
+        会议类型：Sprint 回顾。参会角色：产品、研发、测试；具体姓名、日期和分发范围没有提供。团队反馈本 Sprint 的需求澄清太晚，导致测试窗口被压缩；大家同意以后在开发开始前安排一次 30 分钟的验收标准确认；产品和测试会共同维护风险清单，但具体负责人尚未指定；工程师提议为高风险变更加自动化回归测试，这个提议需要评估成本；下个 Sprint 想观察返工次数和测试阻塞时长。
+    replay:
+      steps:
+        - title: 区分事实与感受
+          description: 将团队观察还原为具体问题，避免把单次体验扩大为确定结论
+        - title: 记录复盘结论
+          description: 把团队明确同意的验收标准确认动作写成改进决策
+        - title: 形成行动清单
+          description: 提炼风险清单、自动化测试等行动，并保留负责人缺口
+        - title: 设置后续观察点
+          description: 将返工次数和测试阻塞时长整理为下一次复盘的检查指标
+    result:
+      template: html_preview_v1
+      eyebrow: Sprint 回顾纪要
+      title: 需求澄清与测试窗口复盘
+      summary: 查看如何把复盘观察转成明确改进动作，同时保留成本评估和负责人缺口。
+      html_asset: meeting_sprint_retro_demo

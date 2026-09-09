@@ -532,9 +532,8 @@ func launchWorkflowAttempt(
 		enrichedObjective += "\n\n--- Retry instruction (runtime only, not part of permanent prompt) ---\n" + params.RetryHint
 	}
 
-	// Create sub_agent_tasks record.
-	// Python SubAgent reads params from the DB row (not the HTTP RunRequest body),
-	// so attachment context and parent agentic_config must be persisted here.
+	// Create the authoritative sub_agent_tasks record. Core later materializes
+	// this row into the task_spec snapshot sent to the Python SubAgent.
 	if len(params.HistoryFilesPerTurn) == 0 {
 		params.HistoryFilesPerTurn = historyFilesFromConversation(db, convID)
 	}
@@ -679,7 +678,7 @@ func launchWorkflowAttempt(
 	}
 	runRequest := subagent.RunRequest{
 		TaskID: task.ID, AgentType: "workflow_step", WorkspacePath: task.WorkspacePath,
-		Params: runParams, DBDSN: subagent.DBDSN(), Resume: false,
+		Params: runParams, Resume: false,
 		LLMConfig: llmConfig, ToolConfig: toolConfig,
 	}
 	if enqueueErr := enqueueWorkflowAttemptRunner(ctx, db, runRequest); enqueueErr != nil {

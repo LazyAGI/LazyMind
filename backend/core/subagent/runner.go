@@ -37,20 +37,20 @@ func CancelRuns(taskIDs []string) {
 // RunRequest is the body posted to the algorithm layer /api/subagent/run.
 // task_id doubles as the request sid (independent FileSystemQueue bucket).
 //
-// objective, input_slots, and output_slots are intentionally
-// omitted: the Python runner reads those from the sub_agent_tasks DB record.
-// tools is still forwarded for non-workflow_step agent types; workflow_step tasks
-// resolve their tools from the immutable public Host Attempt context.
+// Core owns the task database. The Python runner receives an immutable task
+// snapshot and never receives a database DSN. Runtime events are streamed back
+// to Core, which is the only component that persists steps and artifacts.
 type RunRequest struct {
 	TaskID        string         `json:"task_id"`
 	AgentType     string         `json:"agent_type"`
 	Params        map[string]any `json:"params,omitempty"`
 	WorkspacePath string         `json:"workspace_path"`
 	Tools         []string       `json:"tools,omitempty"`
-	DBDSN         string         `json:"db_dsn"`
 	Resume        bool           `json:"resume"`
 	LLMConfig     map[string]any `json:"llm_config,omitempty"`
 	ToolConfig    map[string]any `json:"tool_config,omitempty"`
+	TaskSpec      map[string]any `json:"task_spec,omitempty"`
+	InitialSteps  []stepDTO      `json:"initial_steps,omitempty"`
 }
 
 // TaskEvent is one event emitted by the SubAgent SSE stream.
@@ -71,6 +71,9 @@ type TaskEvent struct {
 	// Tool step events forwarded from SubAgent runner for frontend display.
 	ToolCalls   json.RawMessage `json:"tool_calls,omitempty"`
 	ToolResults json.RawMessage `json:"tool_results,omitempty"`
+	// DurableToolResults carries the resume-safe (bounded or offloaded) result.
+	// Core persists it, then removes it before publishing the compact live event.
+	DurableToolResults json.RawMessage `json:"durable_tool_results,omitempty"`
 	// Writer document-level subtasks are carried on progress events for the
 	// developer Task Center. They are not workflow steps.
 	WritingSubtasks json.RawMessage `json:"writing_subtasks,omitempty"`
@@ -105,13 +108,20 @@ func RunObserved(ctx context.Context, db *gorm.DB, stateStore state.Store, req R
 	defer activeRunCancels.Delete(req.TaskID)
 	defer cancel()
 
+	if err := hydrateRunRequest(runCtx, db, &req); err != nil {
+		wrapped := fmt.Errorf("prepare subagent run task=%s: %w", req.TaskID, err)
+		routeError(runCtx, db, stateStore, req.TaskID, wrapped.Error())
+		return wrapped
+	}
 	bodyBytes, err := json.Marshal(req)
 	if err != nil {
+		routeError(runCtx, db, stateStore, req.TaskID, fmt.Sprintf("encode subagent run request failed: %v", err))
 		return err
 	}
 	url := algoServiceURL() + runPath
 	httpReq, err := http.NewRequestWithContext(runCtx, http.MethodPost, url, bytes.NewReader(bodyBytes))
 	if err != nil {
+		routeError(runCtx, db, stateStore, req.TaskID, fmt.Sprintf("create subagent run request failed: %v", err))
 		return err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
@@ -166,7 +176,72 @@ func RunObserved(ctx context.Context, db *gorm.DB, stateStore state.Store, req R
 
 // routeEvent persists a SubAgent event to DB (authoritative), then appends to Redis (live tail).
 func routeEvent(ctx context.Context, db *gorm.DB, stateStore state.Store, ev TaskEvent) error {
+	if role, content := remoteStepContent(ev); role != "" {
+		if err := AppendRemoteStep(ctx, db, ev.TaskID, role, content); err != nil {
+			return fmt.Errorf("append task step task=%s role=%s: %w", ev.TaskID, role, err)
+		}
+	}
+	ev.DurableToolResults = nil
 	return routeEventWithWorkflowHooks(ctx, db, stateStore, ev, true, true)
+}
+
+// hydrateRunRequest materializes the durable state required by the stateless
+// Algorithm runner. Keeping this translation in Core prevents database schema
+// details and the SQLite file path from crossing the service boundary.
+func hydrateRunRequest(ctx context.Context, db *gorm.DB, req *RunRequest) error {
+	if req == nil || strings.TrimSpace(req.TaskID) == "" {
+		return fmt.Errorf("task_id is required")
+	}
+	if req.TaskSpec != nil {
+		return nil
+	}
+	task, err := GetTask(ctx, db, req.TaskID)
+	if err != nil {
+		return err
+	}
+	steps, err := LoadSteps(ctx, db, req.TaskID)
+	if err != nil {
+		return err
+	}
+	artifacts, err := LoadArtifacts(ctx, db, req.TaskID)
+	if err != nil {
+		return err
+	}
+
+	req.TaskSpec = map[string]any{
+		"id":                  task.ID,
+		"conversation_id":     task.ConversationID,
+		"trigger_history_id":  task.TriggerHistoryID,
+		"seq_in_conversation": task.SeqInConversation,
+		"agent_type":          task.AgentType,
+		"title":               task.Title,
+		"objective":           task.Objective,
+		"params":              normalizeJSON(task.Params, "{}"),
+		"mode":                task.Mode,
+		"status":              task.Status,
+		"progress_pct":        task.ProgressPct,
+		"current_phase":       task.CurrentPhase,
+		"estimated_sec":       task.EstimatedSec,
+		"summary":             task.Summary,
+		"workspace_path":      task.WorkspacePath,
+		"input_slots":         normalizeJSON(task.InputSlots, "[]"),
+		"output_slots":        normalizeJSON(task.OutputSlots, "[]"),
+		"sources":             normalizeJSON(json.RawMessage(task.Sources), "[]"),
+		"create_user_id":      task.CreateUserID,
+	}
+	req.InitialSteps = make([]stepDTO, 0, len(steps))
+	for i := range steps {
+		req.InitialSteps = append(req.InitialSteps, toStepDTO(&steps[i]))
+	}
+	artifactSpecs := make([]map[string]any, 0, len(artifacts))
+	for i := range artifacts {
+		artifactSpecs = append(artifactSpecs, map[string]any{
+			"slot": artifacts[i].Slot, "content_type": artifacts[i].ContentType,
+			"value": normalizeJSON(artifacts[i].Value, "{}"), "seq": artifacts[i].Seq,
+		})
+	}
+	req.TaskSpec["artifacts"] = artifactSpecs
+	return nil
 }
 
 func routeEventWithWorkflowHooks(ctx context.Context, db *gorm.DB, stateStore state.Store, ev TaskEvent, artifactHook, terminalHook bool) error {

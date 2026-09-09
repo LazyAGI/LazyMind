@@ -77,6 +77,23 @@ def _deduplicate_tools(tools: list[Any]) -> list[Any]:
     return result
 
 
+class AgentInvocation:
+    """LazyLLM-traceable boundary for one in-process agent invocation."""
+
+    __span_name__ = 'invoke_agent'
+    _type = 'agent'
+    _agent_name = 'ChatAgent'
+
+    def __init__(self, executor: 'AgentExecutor', agent: Any, plan: AgentRunPlan):
+        self._executor = executor
+        self._agent = agent
+        self._plan = plan
+        self._agent_name = 'ChatAgent'
+
+    def __call__(self):
+        return self._executor.stream_agent(self._agent, self._plan)
+
+
 class AgentExecutor:
     """Create and drive ReactAgent instances from a fully assembled run plan."""
 
@@ -152,6 +169,7 @@ class AgentExecutor:
             notice_buffer=notice_buffer,
         )
         agent._agent_lab_run_id = run_id
+        agent._runtime_llm = llm
         agent._exact_repeat_monitor = repeat_monitor
         agent._runtime_notice_buffer = notice_buffer
         # Restore lazy Toolkit activation before the streaming helper takes over.
@@ -174,6 +192,16 @@ class AgentExecutor:
             )
         agent.set_stop_tools(plan.stop_tools)
         return agent
+
+    @staticmethod
+    def runtime_llm(agent: Any) -> Any:
+        """Return the module that actually issued the agent's model calls."""
+        function_call = getattr(agent, '_fc', None)
+        function_call_llm = getattr(function_call, '_llm', None)
+        if function_call_llm is not None:
+            return function_call_llm
+        runtime_llm = getattr(agent, '_runtime_llm', None)
+        return runtime_llm if runtime_llm is not None else getattr(agent, '_llm', None)
 
     async def stream(
         self,

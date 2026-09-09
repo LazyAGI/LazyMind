@@ -37,6 +37,14 @@ const desktopReleaseWorkflow = path.join(
 const coreDockerfile = path.join(scriptsDir, "..", "..", "backend", "core", "Dockerfile");
 const dockerCompose = path.join(scriptsDir, "..", "..", "docker-compose.yml");
 const rootMakefile = path.join(scriptsDir, "..", "..", "Makefile");
+const windowsAssistantBridgeScript = path.join(
+  scriptsDir,
+  "..",
+  "..",
+  "local",
+  "scripts",
+  "assistant-bridge-win.ps1",
+);
 
 function nsisMacro(source, name) {
   const match = source.match(new RegExp(`!macro ${name}\\b([\\s\\S]*?)!macroend`));
@@ -197,6 +205,22 @@ test("Docker startup builds a native Windows Assistant Bridge", () => {
   assert.match(source, /_HOST_DOCKER_PREFIX := MSYS_NO_PATHCONV=1/);
   assert.match(source, /\$\(_HOST_DOCKER_USER_FLAG\)[\s\S]*GOOS="\$\(HOST_GOOS\)"/);
   assert.match(source, /local\/build\/bin\/\$\(LAZYMIND_CLI_FILENAME\)/);
+});
+
+test("WSL Docker startup launches a native Windows Assistant Bridge", () => {
+  const source = readFileSync(rootMakefile, "utf8");
+  const launcher = readFileSync(windowsAssistantBridgeScript, "utf8");
+
+  assert.match(source, /HOST_IS_WSL[\s\S]*WSL_INTEROP[\s\S]*WSL_DISTRO_NAME/);
+  assert.match(source, /else ifeq \(\$\(HOST_IS_WSL\),1\)[\s\S]*LAZYMIND_CLI_FILENAME := lazymind\.exe/);
+  assert.match(source, /else ifeq \(\$\(HOST_IS_WSL\),1\)[\s\S]*HOST_GOOS := windows/);
+  assert.match(source, /_HOST_GO_BUILD := CGO_ENABLED=0 GOOS="\$\(HOST_GOOS\)" GOARCH="\$\(HOST_GOARCH\)" \$\(GO\)/);
+  assert.match(source, /\$\(_HOST_GO_BUILD\) build/);
+  assert.match(source, /wslpath -w[\s\S]*assistant-bridge-win\.ps1/);
+  assert.match(source, /HOST_IS_WSL[\s\S]*command -v powershell\.exe/);
+  assert.match(launcher, /LOCALAPPDATA[\s\S]*LazyMind\\assistant-bridge/);
+  assert.match(launcher, /Copy-Item[\s\S]*Move-Item[\s\S]*assistant', 'start/);
+  assert.match(launcher, /Remove-Item Env:LAZYMIND_HOME/);
 });
 
 test("generates a multi-resolution Windows ICO from the macOS icon", () => {

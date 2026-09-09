@@ -1,0 +1,348 @@
+from lazymind.chat.runtime_events import RunOutcome
+from lazymind.chat.service.component.event_translator import AgentEventFrameTranslator
+from lazymind.chat.service.run_metrics import (
+    RunMetricsTracker,
+    choose_usage_record,
+    snapshot_provider_usage,
+)
+
+
+def test_snapshot_provider_usage_ignores_negative_tokens():
+    assert snapshot_provider_usage({'prompt_tokens': -1, 'completion_tokens': 4}) == {
+        'output_tokens': 4,
+    }
+
+
+def test_dsh_steps_count_model_and_each_tool():
+    translator = AgentEventFrameTranslator(query='q', run_id='run-1', clock=lambda: 1.0)
+    translator.feed({'tag': 'think', 'delta': 'hmm'})
+    translator.feed({
+        'tag': 'tool_calls',
+        'tool_calls': [{'id': '1', 'function': {'name': 'grep', 'arguments': '{}'}},
+                       {'id': '2', 'function': {'name': 'read_file', 'arguments': '{}'}}],
+    })
+    translator.feed({
+        'tag': 'runtime_event',
+        'runtime_event': {
+            'schema_version': 1,
+            'event_id': 'e1',
+            'type': 'model_call_finished',
+            'data': {
+                'model_call_id': 'c1',
+                'attempt_count': 1,
+                'kind': 'finish',
+                'finish': 'tool_calls',
+                'has_semantic_output': True,
+            },
+        },
+    })
+    translator.feed({'tag': 'tool_results', 'tool_results': [{'id': '1'}, {'id': '2'}]})
+    translator.feed({'tag': 'text', 'delta': 'done'})
+    translator.feed({
+        'tag': 'runtime_event',
+        'runtime_event': {
+            'schema_version': 1,
+            'event_id': 'e2',
+            'type': 'model_call_finished',
+            'data': {
+                'model_call_id': 'c2',
+                'attempt_count': 1,
+                'kind': 'finish',
+                'finish': 'stop',
+                'has_semantic_output': True,
+            },
+        },
+    })
+    frame = translator.finish_run(
+        outcome=RunOutcome.SUCCEEDED,
+        usage={'prompt_tokens': 100, 'completion_tokens': 20,
+               'prompt_cache_hit_tokens': 80, 'prompt_cache_miss_tokens': 20},
+        llm_config={'llm': {'model': 'deepseek-chat'}},
+        turn_seq=3,
+        max_input_tokens=1000,
+    )
+    metrics = frame['performance_metrics']
+    assert 'metrics' not in frame['runtime_event']['data']
+    assert metrics['steps'] == 4
+    assert metrics['model_steps'] == 2
+    assert metrics['tool_steps'] == 2
+    assert metrics['turn_seq'] == 3
+    assert metrics['model'] == 'deepseek-chat'
+    assert metrics['cache_hit_rate'] == 0.8
+    assert metrics['context_ratio'] == 0.1
+    assert metrics['input_tokens'] == 100
+    assert metrics['output_tokens'] == 20
+    assert metrics['cached_tokens'] == 80
+    assert 'prompt_tokens' not in metrics
+    assert 'prompt_cache_hit_tokens' not in metrics
+    assert translator.last_metrics['provider_usages'][0]['prompt_cache_hit_tokens'] == 80
+    assert 'provider_usages' not in metrics
+
+
+def test_model_ttft_and_duration_exclude_preprocessing_queue_and_tool_time():
+    class Clock:
+        def __init__(self) -> None:
+            self.t = 0.0
+
+        def __call__(self) -> float:
+            return self.t
+
+        def add(self, seconds: float) -> None:
+            self.t += seconds
+
+    clock = Clock()
+    translator = AgentEventFrameTranslator(query='q', run_id='run-1', clock=clock)
+    clock.add(5.0)
+    started_frames = translator.feed({
+        'tag': 'runtime_event',
+        'runtime_event': {
+            'schema_version': 1,
+            'event_id': 'started-1',
+            'type': 'model_call_started',
+            'data': {'model_call_id': 'call-1'},
+        },
+    })
+    assert started_frames == []
+    clock.add(0.4)
+    translator.feed({'tag': 'think', 'delta': 'working'})
+    clock.add(0.6)
+    translator.feed({
+        'tag': 'runtime_event',
+        'runtime_event': {
+            'schema_version': 1,
+            'event_id': 'finished-1',
+            'type': 'model_call_finished',
+            'data': {
+                'model_call_id': 'call-1',
+                'kind': 'finish',
+                'finish': 'tool_calls',
+                'duration_ms': 1000,
+            },
+        },
+    })
+    translator.feed({
+        'tag': 'tool_calls',
+        'tool_calls': [{'id': '1', 'function': {'name': 'grep', 'arguments': '{}'}}],
+    })
+    clock.add(8.0)
+    translator.feed({
+        'tag': 'tool_results',
+        'duration_ms': 1500,
+        'tool_results': [{'id': '1'}],
+    })
+    clock.add(2.0)
+    metrics = translator.finish_run(outcome=RunOutcome.SUCCEEDED)['performance_metrics']
+    assert metrics['tool_ms'] == 1500
+    assert metrics['model_ms'] == 1000
+    assert metrics['ttft_ms'] == 400
+    assert metrics['wall_ms'] == 16000
+
+
+def test_model_duration_sums_finished_events_and_drives_tok_s():
+    tracker = RunMetricsTracker(clock=lambda: 0.0)
+    tracker.on_model_call_finished(duration_ms=250)
+    tracker.on_model_call_finished(duration_ms=750)
+
+    metrics = tracker.snapshot(usage={'prompt_tokens': 10, 'completion_tokens': 20})
+
+    assert metrics['model_ms'] == 1000
+    assert metrics['tok_s'] == 20
+
+
+def test_missing_model_duration_is_unknown_instead_of_zero():
+    tracker = RunMetricsTracker(clock=lambda: 0.0)
+    tracker.on_model_call_finished()
+
+    metrics = tracker.snapshot(usage={'prompt_tokens': 10, 'completion_tokens': 20})
+
+    assert 'model_ms' not in metrics
+    assert 'tok_s' not in metrics
+
+
+def test_missing_tool_duration_uses_elapsed_between_calls_and_results():
+    class Clock:
+        def __init__(self) -> None:
+            self.t = 0.0
+
+        def __call__(self) -> float:
+            return self.t
+
+        def add(self, seconds: float) -> None:
+            self.t += seconds
+
+    clock = Clock()
+    tracker = RunMetricsTracker(clock=clock)
+    tracker.on_tool_calls(1)
+    clock.add(1.5)
+    tracker.on_tool_results()
+    assert tracker.snapshot()['tool_ms'] == 1500
+
+
+def test_explicit_tool_duration_is_preferred_over_elapsed():
+    class Clock:
+        def __init__(self) -> None:
+            self.t = 0.0
+
+        def __call__(self) -> float:
+            return self.t
+
+        def add(self, seconds: float) -> None:
+            self.t += seconds
+
+    clock = Clock()
+    tracker = RunMetricsTracker(clock=clock)
+    tracker.on_tool_calls(1)
+    clock.add(1.5)
+    tracker.on_tool_results(duration_ms=400)
+    assert tracker.snapshot()['tool_ms'] == 400
+
+
+def test_wall_duration_can_start_before_tracker_construction():
+    tracker = RunMetricsTracker(clock=lambda: 5.0, started_at=2.0)
+    assert tracker.snapshot()['wall_ms'] == 3000
+
+
+def test_usage_map_does_not_guess_between_multiple_modules():
+    records = {
+        'chat': {'prompt_tokens': 10, 'completion_tokens': 2},
+        'summary': {'prompt_tokens': 100, 'completion_tokens': 5},
+    }
+
+    assert choose_usage_record(usage_map=records) == {}
+    assert choose_usage_record(usage_map=records, module_id='missing') == {}
+    assert choose_usage_record(usage_map=records, module_id='chat') == records['chat']
+
+
+def test_usage_map_uses_single_unambiguous_record_without_module_id():
+    record = {'prompt_tokens': 10, 'completion_tokens': 2}
+    assert choose_usage_record(usage_map={'only': record}) == record
+
+
+def test_missing_provider_cache_omits_hit_rate():
+    tracker = RunMetricsTracker(clock=lambda: 0.0)
+    metrics = tracker.snapshot(usage={'prompt_tokens': 10, 'completion_tokens': 2})
+    assert 'cache_hit_rate' not in metrics
+    assert 'cached_tokens' not in metrics
+
+
+def test_explicit_cached_zero_persists_hit_rate():
+    tracker = RunMetricsTracker(clock=lambda: 0.0)
+    metrics = tracker.snapshot(usage={
+        'prompt_tokens': 11062,
+        'completion_tokens': 61,
+        'prompt_tokens_details': {'cached_tokens': 0},
+    })
+    assert metrics['cached_tokens'] == 0
+    assert metrics['cache_hit_rate'] == 0.0
+    assert metrics['input_tokens'] == 11062
+
+
+def test_snapshot_sums_provider_usages_and_uses_last_call_for_context():
+    tracker = RunMetricsTracker(clock=lambda: 0.0)
+    metrics = tracker.snapshot(
+        usage={
+            'prompt_tokens': 150,
+            'completion_tokens': 30,
+            'provider_usages': [
+                {
+                    'prompt_tokens': 100,
+                    'completion_tokens': 10,
+                    'prompt_tokens_details': {'cached_tokens': 80},
+                },
+                {
+                    'prompt_tokens': 50,
+                    'completion_tokens': 20,
+                    'prompt_tokens_details': {'cached_tokens': 0},
+                },
+            ],
+        },
+        max_input_tokens=1000,
+    )
+    assert metrics['input_tokens'] == 150
+    assert metrics['output_tokens'] == 30
+    assert metrics['cached_tokens'] == 80
+    assert metrics['cache_input_tokens'] == 150
+    assert metrics['cache_hit_rate'] == 80 / 150
+    assert metrics['context_input_tokens'] == 50
+    assert metrics['context_ratio'] == 0.05
+    assert len(metrics['provider_usages']) == 2
+
+
+def test_model_call_event_usage_is_preferred_over_global_usage_map():
+    translator = AgentEventFrameTranslator(query='q', run_id='run-1', clock=lambda: 0.0)
+    model_event_frames = translator.feed({
+        'tag': 'runtime_event',
+        'runtime_event': {
+            'schema_version': 1,
+            'event_id': 'e1',
+            'type': 'model_call_finished',
+            'data': {
+                'model_call_id': 'call-1',
+                'kind': 'finish',
+                'has_semantic_output': True,
+                'usage': {'prompt_tokens': 10, 'completion_tokens': 2},
+            },
+        },
+    })
+    assert 'usage' not in model_event_frames[0]['runtime_event']['data']
+    assert translator.model_events[0]['data']['usage']['prompt_tokens'] == 10
+    metrics = translator.finish_run(
+        outcome=RunOutcome.SUCCEEDED,
+        usage={'prompt_tokens': 999, 'completion_tokens': 999},
+    )['performance_metrics']
+    assert metrics['input_tokens'] == 10
+    assert metrics['output_tokens'] == 2
+
+
+def test_model_call_event_usage_unwraps_extract_usage_envelope():
+    translator = AgentEventFrameTranslator(query='q', run_id='run-1', clock=lambda: 0.0)
+    translator.feed({
+        'tag': 'runtime_event',
+        'runtime_event': {
+            'schema_version': 1,
+            'event_id': 'e1',
+            'type': 'model_call_finished',
+            'data': {
+                'model_call_id': 'call-1',
+                'kind': 'finish',
+                'usage': {
+                    'prompt_tokens': 24000,
+                    'completion_tokens': 431,
+                    'provider_usage': {
+                        'prompt_tokens': 24000,
+                        'completion_tokens': 431,
+                        'prompt_cache_hit_tokens': 19200,
+                        'prompt_cache_miss_tokens': 4800,
+                    },
+                },
+            },
+        },
+    })
+    metrics = translator.finish_run(outcome=RunOutcome.SUCCEEDED)['performance_metrics']
+    assert metrics['cached_tokens'] == 19200
+    assert metrics['cache_hit_rate'] == 19200 / 24000
+    assert translator.last_metrics['provider_usages'][0]['prompt_cache_hit_tokens'] == 19200
+
+
+def test_model_call_event_usage_preserves_provider_cache_details():
+    translator = AgentEventFrameTranslator(query='q', run_id='run-1', clock=lambda: 0.0)
+    translator.feed({
+        'tag': 'runtime_event',
+        'runtime_event': {
+            'schema_version': 1,
+            'event_id': 'e1',
+            'type': 'model_call_finished',
+            'data': {
+                'model_call_id': 'call-1',
+                'kind': 'finish',
+                'usage': {
+                    'prompt_tokens': 100,
+                    'completion_tokens': 10,
+                    'prompt_tokens_details': {'cached_tokens': 80},
+                },
+            },
+        },
+    })
+    metrics = translator.finish_run(outcome=RunOutcome.SUCCEEDED)['performance_metrics']
+    assert metrics['cached_tokens'] == 80
+    assert translator.last_metrics['provider_usages'][0]['prompt_tokens_details']['cached_tokens'] == 80

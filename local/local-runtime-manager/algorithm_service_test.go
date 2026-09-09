@@ -142,6 +142,23 @@ func TestAlgorithmServiceEnvPinsLocalRouterHost(t *testing.T) {
 	assertEnvContains(t, env, "LAZYMIND_WORKFLOWS_DIR="+filepath.Join(repo, "workflows"))
 }
 
+func TestAlgorithmServiceEnvUsesSQLiteServerAliases(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+
+	env := algorithmServiceEnv(cfg, paths, algoProcessName)
+
+	assertEnvContains(t, env, "LAZYMIND_DATABASE_URL=sqliteproxy://lazyllm")
+	assertEnvContains(t, env, "LAZYMIND_CORE_DATABASE_URL=sqliteproxy://core")
+	assertEnvContains(t, env, "LAZYMIND_ACL_DB_DSN=sqliteproxy://core")
+	assertEnvContains(t, env, "LAZYMIND_SEGMENT_STORE_URI_OR_PATH=sqliteproxy://segments")
+	assertEnvContains(t, env, sqliteServerTokenFileEnvVar+"="+paths.RunDirTokenFile)
+}
+
 func TestWorkflowExecutorTokenMatchesCoreAndAlgorithmOverride(t *testing.T) {
 	t.Setenv("LAZYMIND_WORKFLOW_EXECUTOR_TOKEN", "custom-workflow-secret")
 	repo := t.TempDir()

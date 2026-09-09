@@ -44,6 +44,7 @@ func processTextMatchesRuntime(paths RuntimePaths, parts ...string) bool {
 func inferServiceFromProcessText(paths RuntimePaths, text string) string {
 	candidates := []string{
 		processComposeServiceName,
+		sqliteServerProcessName,
 		localProxyProcessName,
 		authServiceProcessName,
 		channelGatewayProcessName,

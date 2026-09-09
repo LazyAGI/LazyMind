@@ -36,11 +36,6 @@ bundled_skills:
     category: writing
     version: 1.0.0
     provider: 千问办公
-  - uid: bsk_01L0D6G4R4M8V2K7Q9C5X3H0EP
-    path: design/diagram-design
-    category: design
-    version: 4.1.0-lazymind-phase4-motion
-    provider: GitHub
 skills:
   - source_url: https://skillhub.cn/skills/user_290ac21c/find-skill-skillhub
     category: search

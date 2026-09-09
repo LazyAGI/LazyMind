@@ -109,8 +109,8 @@ func TestListUserProvidersReturnsCatalogDescriptionForRequestedLanguage(t *testi
 	if err := db.Model(&orm.DefaultModelProvider{}).Count(&providerCount).Error; err != nil {
 		t.Fatalf("count default providers: %v", err)
 	}
-	if providerCount != 19 {
-		t.Fatalf("expected 19 catalog providers, got %d", providerCount)
+	if providerCount != 20 {
+		t.Fatalf("expected 20 catalog providers, got %d", providerCount)
 	}
 	var freeModel orm.DefaultModel
 	if err := db.Where("provider_name = ? AND name = ?", "SiliconFlow", "deepseek-ai/DeepSeek-V4-Flash").
