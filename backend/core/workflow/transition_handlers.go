@@ -733,8 +733,15 @@ func applyWorkflowTransition(ctx context.Context, tx *gorm.DB, sessionID string,
 			nodeDef := graph.Nodes[target.TargetStepID]
 			taskID := target.TaskID
 			executorHost := session.ControllerHost
-			if controlstore.Controlled(session) && (nodeDef.ToolsOnly || nodeDef.TerminalToolsOnly || len(nodeDef.LegacyTools) > 0) {
-				executorHost = "lazymind"
+			if controlstore.Controlled(session) {
+				if nodeDef.ToolsOnly || nodeDef.TerminalToolsOnly || len(nodeDef.LegacyTools) > 0 {
+					executorHost = "lazymind"
+				}
+				for _, check := range graph.Runtime.PostStepChecks {
+					if check.StepID == target.TargetStepID {
+						executorHost = "lazymind"
+					}
+				}
 			}
 			if executorHost == "external-agent" {
 				if err := queueHostAttempt(ctx, tx, session, target, nodeDef, now); err != nil {

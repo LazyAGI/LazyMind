@@ -313,8 +313,8 @@ func TestResolveAdvanceOperationFromEffectiveAttempt(t *testing.T) {
 }
 
 func TestControlledDeclaredToolsUseNativeExecutorAndReturnAttemptID(t *testing.T) {
-	for _, toolsOnly := range []bool{false, true} {
-		t.Run(map[bool]string{false: "declared_tools", true: "tools_only"}[toolsOnly], func(t *testing.T) {
+	for _, requirement := range []string{"declared_tools", "tools_only", "post_step_check"} {
+		t.Run(requirement, func(t *testing.T) {
 			db, _ := setupBatchTransitionSession(t)
 			if err := db.AutoMigrate(&orm.WorkflowReviewCheckpoint{}, &orm.WorkflowHostAction{}, &orm.WorkflowCommand{}, &orm.WorkflowRevisionEntry{}, &orm.WorkflowBlob{}); err != nil {
 				t.Fatal(err)
@@ -326,9 +326,13 @@ func TestControlledDeclaredToolsUseNativeExecutorAndReturnAttemptID(t *testing.T
 				t.Fatal(err)
 			}
 			node := graph.Nodes["branch_b"]
-			node.ToolsOnly = toolsOnly
-			if !toolsOnly {
+			switch requirement {
+			case "declared_tools":
 				node.LegacyTools = []string{"package_tool"}
+			case "tools_only":
+				node.ToolsOnly = true
+			case "post_step_check":
+				graph.Runtime.PostStepChecks = []graphengine.PostStepCheck{{StepID: "branch_b", Tool: "check_ready"}}
 			}
 			graph.Nodes["branch_b"] = node
 			if err := db.Model(&revision).Update("compiled_graph", graph.JSON()).Error; err != nil {
