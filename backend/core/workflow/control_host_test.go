@@ -9,6 +9,7 @@ import (
 
 	"gorm.io/gorm"
 	"lazymind/core/common/orm"
+	workflowattempt "lazymind/core/workflow/attempt"
 	"lazymind/core/workflow/controlpolicy"
 	"lazymind/core/workflow/controlstore"
 )
@@ -187,5 +188,71 @@ func TestControlledRetryCreatesOneReplacementForCancelledAttempt(t *testing.T) {
 	db.First(&action, "id = ?", result.Receipt.ActionID)
 	if action.ExecutionID != rows[1].ID {
 		t.Fatal("host was not given the exact replacement grant")
+	}
+}
+
+func TestAdmissionKeepsLegacySemanticsAndAllowsGrantedWorkToDrain(t *testing.T) {
+	for _, controlled := range []bool{false, true} {
+		name := "legacy"
+		if controlled {
+			name = "controlled"
+		}
+		t.Run(name, func(t *testing.T) {
+			svc, _ := hostControlFixture(t)
+			if err := svc.DB.Create(&orm.WorkflowReviewCheckpoint{ID: "pending-review", SessionID: "run", AttemptID: "finished", Status: "pending"}).Error; err != nil {
+				t.Fatal(err)
+			}
+			var session orm.WorkflowSession
+			if err := svc.DB.First(&session, "id = ?", "run").Error; err != nil {
+				t.Fatal(err)
+			}
+			if !controlled {
+				session.ControlProtocol = ""
+				if err := svc.DB.Model(&session).Update("control_protocol", "").Error; err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := svc.DB.Model(&session).Update("controller_host", "external-agent").Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := svc.DB.Create(&orm.WorkflowSessionStep{ID: "granted", TaskID: "granted", SessionID: "run", StepID: "draft", Status: "queued", Validity: "effective"}).Error; err != nil {
+				t.Fatal(err)
+			}
+			err := controlstore.GuardBegin(svc.DB, session)
+			if controlled {
+				expectControlCode(t, err, "WORKFLOW_ADMISSION_DENIED")
+			} else if err != nil {
+				t.Fatalf("controlled review rules affected legacy admission: %v", err)
+			}
+			if err := controlstore.GuardClaim(svc.DB, session); err != nil {
+				t.Fatalf("existing grant cannot drain: %v", err)
+			}
+			if _, err := workflowattempt.New(svc.DB, workflowattempt.Config{}).ClaimQueuedAttemptForHost(context.Background(), "granted", "executor", "external-agent"); err != nil {
+				t.Fatalf("issued grant could not be claimed: %v", err)
+			}
+			session.Status = "stopped"
+			expectControlCode(t, controlstore.GuardBegin(svc.DB, session), "SESSION_STOPPED")
+			expectControlCode(t, controlstore.GuardClaim(svc.DB, session), "SESSION_STOPPED")
+		})
+	}
+}
+
+func TestNativeChatStopUsesControlledLifecycle(t *testing.T) {
+	svc, _ := hostControlFixture(t)
+	if err := svc.DB.Create(&orm.WorkflowSessionStep{ID: "active-attempt", TaskID: "active-attempt", SessionID: "run", Status: "running", Validity: "effective", LeaseToken: "old-handle"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	var session orm.WorkflowSession
+	if err := svc.DB.First(&session, "id = ?", "run").Error; err != nil {
+		t.Fatal(err)
+	}
+	stopWorkflowSession(context.Background(), svc.DB, nil, &session)
+	control := currentControl(t, svc.DB)
+	if control.Continuation != "stopped" || control.Delivery == nil || control.Delivery.Kind != "cancel" {
+		t.Fatalf("chat stop did not request controlled cancellation: %+v", control)
+	}
+	var attempt orm.WorkflowSessionStep
+	if err := svc.DB.First(&attempt, "id = ?", "active-attempt").Error; err != nil || attempt.Status != "cancelled" || attempt.LeaseToken != "" {
+		t.Fatalf("chat stop did not fence the attempt: %+v %v", attempt, err)
 	}
 }

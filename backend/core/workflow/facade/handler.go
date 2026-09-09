@@ -19,7 +19,9 @@ import (
 	"lazymind/core/common"
 	corestore "lazymind/core/store"
 	"lazymind/core/subagent"
+	workflowcore "lazymind/core/workflow"
 	"lazymind/core/workflow/artifactfile"
+	"lazymind/core/workflow/controlstore"
 	workflowexecutor "lazymind/core/workflow/executor"
 	"lazymind/core/workflow/graphengine"
 	workflowstore "lazymind/core/workflow/store"
@@ -516,7 +518,7 @@ func (h Handler) setStopped(w http.ResponseWriter, r *http.Request, stopped bool
 		fail(w, http.StatusUnprocessableEntity, "IDEMPOTENCY_KEY_REQUIRED", "command_id is required", false)
 		return
 	}
-	version, err := h.Store.SetSessionStopped(r.Context(), owner, mux.Vars(r)["session_id"], commandID, stopped)
+	state, err := h.Store.SetSessionStopped(r.Context(), owner, mux.Vars(r)["session_id"], commandID, stopped, workflowcore.IsWorkflowUserControlRequest(r))
 	if errors.Is(err, workflowstore.ErrNotFound) {
 		fail(w, http.StatusNotFound, "WORKFLOW_SESSION_NOT_FOUND", "workflow session was not found", false)
 		return
@@ -525,18 +527,20 @@ func (h Handler) setStopped(w http.ResponseWriter, r *http.Request, stopped bool
 		fail(w, http.StatusForbidden, "PERMISSION_DENIED", "workflow session belongs to another owner", false)
 		return
 	}
+	var controlError *controlstore.Error
+	if errors.As(err, &controlError) {
+		status := http.StatusConflict
+		if controlError.Code == "USER_CONTROL_REQUIRED" {
+			status = http.StatusForbidden
+		}
+		fail(w, status, controlError.Code, controlError.Message, false)
+		return
+	}
 	if err != nil {
 		fail(w, http.StatusConflict, "LIFECYCLE_REJECTED", err.Error(), false)
 		return
 	}
-	status := "active"
-	if stopped {
-		status = "stopped"
-	}
-	writeJSON(w, http.StatusOK, envelope{Data: map[string]any{
-		"session_id": mux.Vars(r)["session_id"], "status": status,
-		"state_version": version, "command_id": commandID,
-	}})
+	writeJSON(w, http.StatusOK, envelope{Data: state})
 }
 
 func (h Handler) StopWorkflow(w http.ResponseWriter, r *http.Request)   { h.setStopped(w, r, true) }

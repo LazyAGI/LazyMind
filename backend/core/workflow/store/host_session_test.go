@@ -155,18 +155,18 @@ func TestSessionLifecycleCommandIsIdempotentAndInterruptsAttempt(t *testing.T) {
 		t.Fatal(err)
 	}
 	wrongConversation := WithConversationScope(context.Background(), "conversation-2")
-	if _, err := repo.SetSessionStopped(wrongConversation, "owner", "session-1", "wrong-scope", true); !errors.Is(err, ErrPermissionDenied) {
+	if _, err := repo.SetSessionStopped(wrongConversation, "owner", "session-1", "wrong-scope", true, false); !errors.Is(err, ErrPermissionDenied) {
 		t.Fatalf("cross-conversation stop error=%v", err)
 	}
-	version, err := repo.SetSessionStopped(context.Background(), "owner", "session-1", "stop-1", true)
-	if err != nil || version != 5 {
-		t.Fatalf("stop: version=%d err=%v", version, err)
+	version, err := repo.SetSessionStopped(context.Background(), "owner", "session-1", "stop-1", true, false)
+	if err != nil || version.StateVersion != 5 {
+		t.Fatalf("stop: version=%d err=%v", version.StateVersion, err)
 	}
-	replayed, err := repo.SetSessionStopped(context.Background(), "owner", "session-1", "stop-1", true)
-	if err != nil || replayed != 5 {
-		t.Fatalf("replay: version=%d err=%v", replayed, err)
+	replayed, err := repo.SetSessionStopped(context.Background(), "owner", "session-1", "stop-1", true, false)
+	if err != nil || replayed.StateVersion != 5 {
+		t.Fatalf("replay: version=%d err=%v", replayed.StateVersion, err)
 	}
-	if _, err := repo.SetSessionStopped(wrongConversation, "owner", "session-1", "stop-1", true); !errors.Is(err, ErrPermissionDenied) {
+	if _, err := repo.SetSessionStopped(wrongConversation, "owner", "session-1", "stop-1", true, false); !errors.Is(err, ErrPermissionDenied) {
 		t.Fatalf("cross-conversation replay error=%v", err)
 	}
 	var session orm.WorkflowSession
@@ -177,17 +177,17 @@ func TestSessionLifecycleCommandIsIdempotentAndInterruptsAttempt(t *testing.T) {
 	if err := repo.db.First(&attempt, "id = ?", "attempt-1").Error; err != nil || attempt.Status != "interrupted" || attempt.TerminalCode != "WORKFLOW_STOPPED" {
 		t.Fatalf("attempt after stop: %+v err=%v", attempt, err)
 	}
-	if _, err := repo.SetSessionStopped(context.Background(), "owner", "session-1", "stop-1", false); !errors.Is(err, ErrIdempotencyConflict) {
+	if _, err := repo.SetSessionStopped(context.Background(), "owner", "session-1", "stop-1", false, false); !errors.Is(err, ErrIdempotencyConflict) {
 		t.Fatalf("same command with different action: %v", err)
 	}
-	version, err = repo.SetSessionStopped(context.Background(), "owner", "session-1", "resume-1", false)
-	if err != nil || version != 6 {
-		t.Fatalf("resume: version=%d err=%v", version, err)
+	version, err = repo.SetSessionStopped(context.Background(), "owner", "session-1", "resume-1", false, false)
+	if err != nil || version.StateVersion != 6 {
+		t.Fatalf("resume: version=%d err=%v", version.StateVersion, err)
 	}
 	if err := repo.db.Model(&orm.WorkflowSession{}).Where("id = ?", "session-1").Update("status", "completed").Error; err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.SetSessionStopped(context.Background(), "owner", "session-1", "stop-terminal", true); err == nil || err.Error() != "WORKFLOW_TERMINAL" {
+	if _, err := repo.SetSessionStopped(context.Background(), "owner", "session-1", "stop-terminal", true, false); err == nil || err.Error() != "WORKFLOW_TERMINAL" {
 		t.Fatalf("terminal session stop: %v", err)
 	}
 }

@@ -9,9 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/workflow/controlpolicy"
@@ -128,7 +126,7 @@ func (s WorkflowControlService) Execute(ctx context.Context, owner, sessionID st
 					return err
 				}
 				if state.Admission.CanBegin && state.ActiveExecutions == 0 && state.Binding.Bound {
-					result.Receipt.ActionID, err = enqueueHostAction(tx, *session, command.CommandID, "continue", "")
+					result.Receipt.ActionID, err = controlstore.EnqueueHostAction(tx, *session, command.CommandID, "continue", "")
 					if err != nil {
 						return err
 					}
@@ -143,7 +141,7 @@ func (s WorkflowControlService) Execute(ctx context.Context, owner, sessionID st
 			if err := ensureNoActiveAttempts(tx, session.ID); err != nil {
 				return err
 			}
-			result.Receipt.ActionID, err = enqueueHostAction(tx, *session, command.CommandID, "continue", "")
+			result.Receipt.ActionID, err = controlstore.EnqueueHostAction(tx, *session, command.CommandID, "continue", "")
 			if err != nil {
 				return err
 			}
@@ -175,48 +173,13 @@ func (s WorkflowControlService) Execute(ctx context.Context, owner, sessionID st
 				return err
 			}
 			result.Receipt.ExecutionID = tasks[0]
-			result.Receipt.ActionID, err = enqueueHostAction(tx, *session, command.CommandID, "continue", tasks[0])
+			result.Receipt.ActionID, err = controlstore.EnqueueHostAction(tx, *session, command.CommandID, "continue", tasks[0])
 			if err != nil {
 				return err
 			}
-		case "stop":
-			if err := stopControlledWorkflow(tx, session); err != nil {
-				return err
-			}
-			binding, err := controlstore.DecodeBinding(*session)
+		case "stop", "resume":
+			result.Receipt.ActionID, _, err = controlstore.ApplyLifecycle(tx, session, command.CommandID, command.Kind == "stop")
 			if err != nil {
-				return err
-			}
-			if binding.DriverSession != "" {
-				result.Receipt.ActionID, err = enqueueHostAction(tx, *session, command.CommandID, "cancel", "")
-				if err != nil {
-					return err
-				}
-			}
-		case "resume":
-			if session.Status != "stopped" {
-				return controlstore.Reject("WORKFLOW_NOT_STOPPED", "the workflow is not stopped")
-			}
-			binding, err := controlstore.DecodeBinding(*session)
-			if err != nil {
-				return err
-			}
-			var cancelling int64
-			if err := tx.Model(&orm.WorkflowHostAction{}).Where("session_id = ? AND binding_generation = ? AND kind = 'cancel' AND status IN ?", session.ID, binding.Generation,
-				[]string{"pending", "dispatching", "unknown"}).Count(&cancelling).Error; err != nil {
-				return err
-			}
-			if cancelling != 0 {
-				return controlstore.Reject("DELIVERY_PENDING", "wait for the host to acknowledge cancellation before resuming")
-			}
-			binding.Generation++
-			encoded, err := json.Marshal(binding)
-			if err != nil {
-				return err
-			}
-			session.ControlBindingJSON = string(encoded)
-			session.Status = SessionStatusWaiting
-			if err := tx.Model(session).Updates(map[string]any{"control_binding_json": session.ControlBindingJSON, "status": session.Status}).Error; err != nil {
 				return err
 			}
 		default:
@@ -300,16 +263,7 @@ func confirmWorkflowReview(ctx context.Context, tx *gorm.DB, session *orm.Workfl
 		return err
 	}
 	if command.PreferenceScope != "" {
-		step := review.StepID
-		if command.PreferenceScope == "following" {
-			step = workflowApprovalPreferenceAllSteps
-		} else if command.PreferenceScope != "step" {
-			return controlstore.Reject("INVALID_COMMAND", "invalid approval preference scope")
-		}
-		if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "user_id"}, {Name: "workflow_id"}, {Name: "step_id"}},
-			DoUpdates: clause.Assignments(map[string]any{"approval_required": false, "updated_at": now})}).
-			Create(&orm.WorkflowApprovalPreference{UserID: owner, WorkflowID: session.WorkflowID, StepID: step,
-				ApprovalRequired: false, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+		if _, err := saveWorkflowApprovalPreference(tx, owner, session.WorkflowID, review.StepID, command.PreferenceScope); err != nil {
 			return err
 		}
 	}
@@ -317,74 +271,6 @@ func confirmWorkflowReview(ctx context.Context, tx *gorm.DB, session *orm.Workfl
 		return err
 	}
 	return tx.Where("id = ?", session.ID).First(session).Error
-}
-
-func stopControlledWorkflow(tx *gorm.DB, session *orm.WorkflowSession) error {
-	if session.Status == "completed" {
-		return controlstore.Reject("SESSION_TERMINAL", "the workflow is already completed")
-	}
-	if session.Status == "stopped" {
-		return nil
-	}
-	now := time.Now().UTC()
-	binding, err := controlstore.DecodeBinding(*session)
-	if err != nil {
-		return err
-	}
-	binding.Generation++
-	encoded, err := json.Marshal(binding)
-	if err != nil {
-		return err
-	}
-	session.ControlBindingJSON = string(encoded)
-	if err := tx.Model(session).Update("control_binding_json", session.ControlBindingJSON).Error; err != nil {
-		return err
-	}
-	if err := tx.Model(&orm.WorkflowSessionStep{}).Where("session_id = ? AND validity = 'effective' AND status IN ?", session.ID,
-		[]string{"pending", "queued", "claimed", "running"}).Updates(map[string]any{"status": "cancelled", "lease_token": "",
-		"lease_expires_at": nil, "fencing_generation": gorm.Expr("fencing_generation + 1"), "updated_at": now}).Error; err != nil {
-		return err
-	}
-	if err := tx.Model(&orm.WorkflowOutbox{}).Where("session_id = ? AND status IN ?", session.ID, []string{"pending", "claimed"}).
-		Updates(map[string]any{"status": "cancelled", "updated_at": now}).Error; err != nil {
-		return err
-	}
-	if err := tx.Model(&orm.WorkflowHostAction{}).Where("session_id = ? AND status = ? AND kind = ?", session.ID, "pending", "continue").
-		Updates(map[string]any{"status": "superseded", "updated_at": now}).Error; err != nil {
-		return err
-	}
-	session.Status = "stopped"
-	return tx.Model(session).Update("status", session.Status).Error
-}
-
-func enqueueHostAction(tx *gorm.DB, session orm.WorkflowSession, commandID, kind, executionID string) (string, error) {
-	binding, err := controlstore.DecodeBinding(session)
-	if err != nil {
-		return "", err
-	}
-	if binding.DriverSession == "" || binding.ConnectorID == "" {
-		return "", controlstore.Reject("BINDING_REQUIRED", "a paired host is required to resume automatically")
-	}
-	var previous orm.WorkflowHostAction
-	err = tx.Where("session_id = ? AND binding_generation = ? AND kind = ? AND consumed_at IS NULL AND status IN ?",
-		session.ID, binding.Generation, kind, []string{"pending", "dispatching", "unknown", "accepted"}).Order("created_at DESC").First(&previous).Error
-	if err == nil {
-		if previous.Status == "unknown" {
-			return "", controlstore.Reject("DELIVERY_UNKNOWN", "reconcile the previous host delivery before sending another")
-		}
-		if previous.ExecutionID != executionID {
-			return "", controlstore.Reject("DELIVERY_PENDING", "another host action is still being delivered")
-		}
-		return previous.ID, nil
-	}
-	if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return "", err
-	}
-	now := time.Now().UTC()
-	action := orm.WorkflowHostAction{ID: uuid.NewString(), SessionID: session.ID, CommandID: commandID, Kind: kind,
-		BindingGeneration: binding.Generation, ConnectorID: binding.ConnectorID, NativeSessionID: binding.DriverSession,
-		ExecutionID: executionID, Status: "pending", CreatedAt: now, UpdatedAt: now}
-	return action.ID, tx.Create(&action).Error
 }
 
 type WorkflowControlHandler struct{ Service WorkflowControlService }
@@ -411,10 +297,16 @@ func writeWorkflowControlError(w http.ResponseWriter, err error) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": map[string]any{"code": code, "message": err.Error()}})
 }
 
+// IsWorkflowUserControlRequest classifies browser requests; authentication and
+// workflow ownership must still be checked by the caller.
+func IsWorkflowUserControlRequest(r *http.Request) bool {
+	origin, err := url.Parse(r.Header.Get("Origin"))
+	return err == nil && origin.Host != "" && (origin.Scheme == "http" || origin.Scheme == "https") && r.Header.Get("X-LazyMind-Invocation-Id") == ""
+}
+
 func (h WorkflowControlHandler) Command(w http.ResponseWriter, r *http.Request) {
 	// MCP invocations may execute steps; they never impersonate an interactive decision.
-	origin, err := url.Parse(r.Header.Get("Origin"))
-	if err != nil || origin.Host == "" || (origin.Scheme != "http" && origin.Scheme != "https") || r.Header.Get("X-LazyMind-Invocation-Id") != "" {
+	if !IsWorkflowUserControlRequest(r) {
 		writeWorkflowControlError(w, controlstore.Reject("PERMISSION_DENIED", "use the authenticated workflow page for user control actions"))
 		return
 	}

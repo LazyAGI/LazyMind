@@ -149,17 +149,8 @@ func DismissSession(ctx context.Context, db *gorm.DB, sessionID string) error {
 			return err
 		}
 		if controlstore.Controlled(s) && s.Status != SessionStatusCompleted {
-			if err := stopControlledWorkflow(tx, &s); err != nil {
+			if _, _, err := controlstore.ApplyLifecycle(tx, &s, "dismiss:"+common.GenerateID(), true); err != nil {
 				return err
-			}
-			binding, err := controlstore.DecodeBinding(s)
-			if err != nil {
-				return err
-			}
-			if binding.DriverSession != "" {
-				if _, err := enqueueHostAction(tx, s, "dismiss:"+common.GenerateID(), "cancel", ""); err != nil {
-					return err
-				}
 			}
 			if err := controlstore.BumpEvent(tx, &s, "control.changed", s.ID, "", map[string]any{"dismissed": true}); err != nil {
 				return err

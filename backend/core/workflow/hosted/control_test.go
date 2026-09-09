@@ -4,10 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
+	"github.com/gorilla/mux"
 	"gorm.io/gorm"
 	"lazymind/core/common/orm"
+	corestore "lazymind/core/store"
 	workflowcore "lazymind/core/workflow"
 	"lazymind/core/workflow/controlpolicy"
 	"lazymind/core/workflow/controlstore"
@@ -206,5 +211,75 @@ func TestConfirmationCannotAcceptADeletedRequiredOutput(t *testing.T) {
 	db.First(&review, "id = ?", review.ID)
 	if review.Status != "pending" {
 		t.Fatal("invalid confirmation changed the checkpoint")
+	}
+}
+
+func TestApprovalPreferenceEntryPointsShareFuturePolicy(t *testing.T) {
+	for _, scope := range []string{"step", "following"} {
+		for _, entry := range []string{"preference", "confirmation"} {
+			t.Run(scope+"/"+entry, func(t *testing.T) {
+				service, db, execution := controlledService(t)
+				ctx := context.Background()
+				result, err := service.Submit(ctx, "owner", "session-1", "attempt-1", successfulSubmission(execution.ExecutionHandle))
+				if err != nil {
+					t.Fatal(err)
+				}
+				review := result.Control.Reviews[0]
+				if entry == "preference" {
+					corestore.Init(db, nil, nil)
+					t.Cleanup(func() { corestore.Init(nil, nil, nil) })
+					body, _ := json.Marshal(map[string]any{"step_id": review.StepID, "scope": scope, "approval_required": false})
+					request := func(mcp bool) *http.Request {
+						r := httptest.NewRequest(http.MethodPost, "/workflow-sessions/session-1:approval-preference", strings.NewReader(string(body)))
+						r = mux.SetURLVars(r, map[string]string{"session_id": "session-1"})
+						r.Header.Set("X-User-Id", "owner")
+						r.Header.Set("Origin", "http://localhost:8090")
+						if mcp {
+							r.Header.Set("X-LazyMind-Invocation-Id", "mcp-call")
+						}
+						return r
+					}
+					denied := httptest.NewRecorder()
+					workflowcore.SetWorkflowApprovalPreference(denied, request(true))
+					if denied.Code != http.StatusForbidden {
+						t.Fatalf("MCP changed approval policy: %d %s", denied.Code, denied.Body.String())
+					}
+					response := httptest.NewRecorder()
+					workflowcore.SetWorkflowApprovalPreference(response, request(false))
+					if response.Code != http.StatusOK {
+						t.Fatalf("preference: %d %s", response.Code, response.Body.String())
+					}
+				} else {
+					_, err := (workflowcore.WorkflowControlService{DB: db}).Execute(ctx, "owner", "session-1", workflowcore.WorkflowControlCommand{
+						CommandID: "confirm", Kind: "confirm", ReviewID: review.ID, ReviewVersion: review.Version, ManifestHash: review.ManifestHash, PreferenceScope: scope,
+					})
+					if err != nil {
+						t.Fatal(err)
+					}
+				}
+				var preferences []orm.WorkflowApprovalPreference
+				if err := db.Where("user_id = ?", "owner").Find(&preferences).Error; err != nil {
+					t.Fatal(err)
+				}
+				step := review.StepID
+				if scope == "following" {
+					step = "*"
+				}
+				if len(preferences) != 1 || preferences[0].StepID != step || preferences[0].ApprovalRequired {
+					t.Fatalf("future approval policy: %+v", preferences)
+				}
+				var current orm.WorkflowReviewCheckpoint
+				if err := db.First(&current, "id = ?", review.ID).Error; err != nil {
+					t.Fatal(err)
+				}
+				want := "pending"
+				if entry == "confirmation" {
+					want = "accepted"
+				}
+				if current.Status != want {
+					t.Fatalf("future preference changed current review: %s", current.Status)
+				}
+			})
+		}
 	}
 }
