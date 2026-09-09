@@ -184,9 +184,9 @@ def _resolve_runtime_tools(
 ) -> List[Any]:
     """Build the runtime tool list for a SubAgent.
 
-    If explicit tool names are provided, each name is resolved in order:
-      1. DEFAULT_TOOLS registry (framework / global tools).
-    If a name is not found in either source it is silently skipped and a warning is logged.
+    Resolve pinned script functions first, then enabled framework/global tools.
+    Missing workflow tools fail before inference; disabled optional global tools
+    retain the normal availability filtering.
 
     When explicit is None/empty, fall back to all DEFAULT_TOOLS.
 
@@ -205,13 +205,15 @@ def _resolve_runtime_tools(
         # revision before falling back to framework/global tools.
         package_by_name = load_workflow_tools(params or {}, name_list)
         # Build lookup from DEFAULT_TOOLS.
-        default_by_name = {cfg.name: cfg for cfg in DEFAULT_TOOLS if tool_is_active(cfg)}
+        default_by_name = {cfg.name: cfg for cfg in DEFAULT_TOOLS}
         result = []
         for name in name_list:
             if name in package_by_name:
                 result.append(package_by_name[name])
             elif name in default_by_name:
-                result.append(default_by_name[name].tool)
+                config = default_by_name[name]
+                if tool_is_active(config):
+                    result.append(config.tool)
             else:
                 if params and params.get('workflow_id') and params.get('revision_id'):
                     raise RuntimeError(f'WORKFLOW_TOOL_UNAVAILABLE: declared tool {name!r} was not registered')

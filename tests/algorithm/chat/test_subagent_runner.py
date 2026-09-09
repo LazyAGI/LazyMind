@@ -27,8 +27,9 @@ def test_workflow_script_tool_is_loaded_from_pinned_revision():
     }
     client = MagicMock()
     client.get_workflow.return_value = response
-    with patch('lazymind.workflow_sdk.WorkflowClient', return_value=client):
-        tools = runner_mod._resolve_runtime_tools(['build_test_metadata'], {
+    with patch('lazymind.workflow_sdk.WorkflowClient', return_value=client), \
+            patch.object(runner_mod, 'tool_is_active', return_value=False):
+        tools = runner_mod._resolve_runtime_tools(['build_test_metadata', 'web_search'], {
             'workflow_id': 'test-workflow', 'revision_id': 'revision-1',
             'tree_hash': 'tree-1', 'user_id': 'user-1',
         })
