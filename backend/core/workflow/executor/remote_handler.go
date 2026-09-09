@@ -20,6 +20,7 @@ import (
 
 	"lazymind/core/common/orm"
 	"lazymind/core/doc"
+	"lazymind/core/workflow/artifactfile"
 	"lazymind/core/workflow/attempt"
 	"lazymind/core/workflow/controlstore"
 )
@@ -33,15 +34,6 @@ func safeArtifactPathPart(value string) string {
 		return "unknown"
 	}
 	return value
-}
-
-func isPublicArtifactReference(value string) bool {
-	value = strings.TrimSpace(value)
-	return strings.HasPrefix(value, "http://") ||
-		strings.HasPrefix(value, "https://") ||
-		strings.HasPrefix(value, "data:") ||
-		strings.HasPrefix(value, "/static-files/") ||
-		strings.HasPrefix(value, "/api/core/static-files/")
 }
 
 // RemoteHandler is the wire boundary used by out-of-process Host Executors.
@@ -191,7 +183,7 @@ func (h RemoteHandler) readAttemptInput(ctx context.Context, materialID string, 
 			// so the Host can use the public URL without Core performing an unsafe
 			// server-side download. Core-owned uploaded files still take the binary
 			// materialization path below.
-			if isPublicArtifactReference(file.Path) {
+			if artifactfile.IsPublicReference(file.Path) {
 				return map[string]any{"material_id": materialID,
 					"resource_id": revision.ID, "revision": revision.Revision, "name": revision.Slot + ".json",
 					"mime_type": "application/json", "size": len(artifact.Value),
