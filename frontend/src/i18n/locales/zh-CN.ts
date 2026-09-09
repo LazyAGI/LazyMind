@@ -1762,6 +1762,8 @@ const zhCN = {
     chatHistory: "对话历史",
     recentConversations: "最近对话",
     conversationGroupPinned: "已置顶",
+    conversationRunning: "运行中",
+    conversationStatusUnavailable: "状态暂时无法更新",
     conversationGroupToday: "今天",
     conversationGroupRecentWeek: "近一周",
     conversationGroupEarlier: "以前",

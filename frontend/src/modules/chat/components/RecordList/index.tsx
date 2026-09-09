@@ -4,6 +4,8 @@ import {
 } from "@dnd-kit/core";
 import { SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import SortableConversationRow from "./SortableConversationRow";
+import ConversationRunningIndicator from "./ConversationRunningIndicator";
+import { useConversationRunningStore } from "@/modules/chat/store/conversationRunning";
 import { applyConversationOrder, isConversationPinned, sortConversationHistory, type SidebarConversation } from "./conversationHistory";
 import {
   CloudDownloadOutlined,
@@ -44,6 +46,7 @@ import {
   useEffect,
   useMemo,
   useRef,
+  useId,
   forwardRef,
   useImperativeHandle,
 } from "react";
@@ -169,6 +172,13 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
       title,
     } = props;
     const [historyList, setHistoryList] = useState<SidebarConversation[]>([]);
+    const statusWatcherId = useId();
+    useEffect(() => {
+      useConversationRunningStore.getState().watch(statusWatcherId, historyList.flatMap((item) => [
+        item.conversation_id || "", getConversationRelation(item)?.parentConversationId || "",
+      ]));
+    }, [historyList, statusWatcherId]);
+    useEffect(() => () => useConversationRunningStore.getState().unwatch(statusWatcherId), [statusWatcherId]);
     const [keyword, setKeyword] = useState("");
     const [pageToken, setPageToken] = useState("");
     const [checkedList, setCheckedList] = useState<string[]>([]);
@@ -934,6 +944,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
           >
             <span className="title">{conversationTitle}</span>
           </Popover>
+          <ConversationRunningIndicator conversationId={conversationId} />
           {source.source_type === "pdf_preview" ? (
             <Tooltip title={source.source_display_name || t("knowledge.pdfChatSavedSource")}>
               <FilePdfOutlined className="record-source-icon" aria-label={t("knowledge.pdfChatSavedSource")} />

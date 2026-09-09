@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -25,6 +26,8 @@ import (
 var OnCancelHook func(ctx context.Context, convID string)
 
 const taskExecutionTimeoutReason = "任务执行超过2小时，未正常完成"
+
+var terminalTaskStatuses = []string{"succeeded", "failed", "skipped", "canceled"}
 
 const (
 	ArchivedReasonTaskRemove          = "task_remove"
@@ -133,11 +136,7 @@ func CancelTask(ctx context.Context, db *gorm.DB, userID, id string) error {
 }
 
 func isTerminal(status string) bool {
-	switch status {
-	case "succeeded", "failed", "skipped", "canceled":
-		return true
-	}
-	return false
+	return slices.Contains(terminalTaskStatuses, status)
 }
 
 // IsTerminalStatus is the exported variant of isTerminal for use by other packages.

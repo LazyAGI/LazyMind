@@ -6,6 +6,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import RecordList from "./index";
 import { emitConversationActivity } from "@/modules/chat/utils/conversationActivity";
 import { CHAT_CONVERSATION_FILTER_KEY } from "@/modules/chat/constants/chat";
+import { useConversationRunningStore } from "@/modules/chat/store/conversationRunning";
 
 const drag = vi.hoisted(() => ({ end: (_event: DragEndEvent): Promise<void> | void => {} }));
 vi.mock("@dnd-kit/core", async () => {
@@ -226,6 +227,20 @@ describe("RecordList conversation pinning", () => {
     await act(async () => drag.end({ active: { id: "older" }, over: { id: "newer" } } as DragEndEvent));
     expect(mocks.messageError).toHaveBeenCalledWith("顺序保存失败，请重试");
     expect(document.querySelector(".record .title")?.textContent).toBe("较新的会话");
+  });
+
+  it("keeps status subscriptions stable when conversation activity only changes display order", async () => {
+    const view = renderRecordList();
+    await screen.findByText("较早的会话");
+    const watchers = useConversationRunningStore.getState().watchers;
+    const list = document.querySelector<HTMLElement>(".record-list")!;
+    list.scrollTo = vi.fn();
+    act(() => emitConversationActivity({ conversationId: "older" }));
+    await waitFor(() => expect(list.scrollTo).toHaveBeenCalled());
+    expect(document.querySelector(".record .title")?.textContent).toBe("较早的会话");
+    expect(useConversationRunningStore.getState().watchers).toBe(watchers);
+    view.unmount();
+    expect(Object.keys(useConversationRunningStore.getState().watchers)).toHaveLength(0);
   });
 
   it("reorders pinned conversations without moving ordinary history", async () => {

@@ -46,6 +46,7 @@ import { syncSensitiveWordFilterFromServer } from "@/utils/sensitiveWordFilter";
 import RecordList, {
   type RecordListImperativeProps,
 } from "@/modules/chat/components/RecordList";
+import { useConversationRunningSync } from "@/modules/chat/store/conversationRunning";
 import {
   CHAT_CONVERSATION_FILTER_EVENT,
   CHAT_CONVERSATION_FILTER_KEY,
@@ -134,6 +135,7 @@ export default function MainLayout() {
 
   const [userInfo, setUserInfo] = useState(() => AgentAppsAuth.getUserInfo());
   const isLoggedIn = Boolean(userInfo?.token);
+  useConversationRunningSync(isLoggedIn ? userInfo?.userId || userInfo?.username || "" : "", routeConversationId);
   const userName = userInfo?.username || "";
   const isAdminUser = isAdminRole(userInfo?.role);
   const hideLocalUserControls = shouldHideLocalUserControls();

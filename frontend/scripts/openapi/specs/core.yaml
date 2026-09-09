@@ -732,6 +732,28 @@ components:
                         type: string
                     type: array
             type: object
+        ConversationBatchStatusRequest:
+            properties:
+                conversation_ids:
+                    items:
+                        maxLength: 64
+                        minLength: 1
+                        type: string
+                    maxItems: 100
+                    minItems: 1
+                    type: array
+            required:
+                - conversation_ids
+            type: object
+        ConversationBatchStatusResponse:
+            properties:
+                statuses:
+                    items:
+                        $ref: '#/components/schemas/ConversationRunningStatusItem'
+                    type: array
+            required:
+                - statuses
+            type: object
         ConversationChatStatusResponse:
             properties:
                 is_generating:
@@ -1248,6 +1270,20 @@ components:
                     type: string
             required:
                 - conversation_id
+            type: object
+        ConversationRunningStatusItem:
+            properties:
+                conversation_id:
+                    type: string
+                status:
+                    enum:
+                        - running
+                        - idle
+                        - unknown
+                    type: string
+            required:
+                - conversation_id
+                - status
             type: object
         ConversationSetHistoryRequest:
             properties:
@@ -10434,6 +10470,22 @@ paths:
                                 $ref: '#/components/schemas/ConversationBatchDeleteResponse'
                     description: Batch deleted conversations
             summary: Batch delete conversations
+    /api/core/conversations:batchStatus:
+        post:
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ConversationBatchStatusRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ConversationBatchStatusResponse'
+                    description: Running, idle, or unknown; inaccessible conversations are omitted
+            summary: Get a content-free status snapshot for up to 100 accessible conversations (32 KiB request limit)
     /api/core/conversations:chat:
         post:
             responses:

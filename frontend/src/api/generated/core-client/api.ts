@@ -856,6 +856,12 @@ export interface ConversationBatchDeleteResponse {
     'deleted_count'?: number;
     'deleted_ids'?: Array<string>;
 }
+export interface ConversationBatchStatusRequest {
+    'conversation_ids': Array<string>;
+}
+export interface ConversationBatchStatusResponse {
+    'statuses': Array<ConversationRunningStatusItem>;
+}
 export interface ConversationChatStatusResponse {
     'is_generating'?: boolean;
 }
@@ -1147,6 +1153,19 @@ export interface ConversationResumeRequest {
     'conversation_id': string;
     'history_id'?: string;
 }
+export interface ConversationRunningStatusItem {
+    'conversation_id': string;
+    'status': ConversationRunningStatusItemStatusEnum;
+}
+
+export const ConversationRunningStatusItemStatusEnum = {
+    Running: 'running',
+    Idle: 'idle',
+    Unknown: 'unknown'
+} as const;
+
+export type ConversationRunningStatusItemStatusEnum = typeof ConversationRunningStatusItemStatusEnum[keyof typeof ConversationRunningStatusItemStatusEnum];
+
 export interface ConversationSearchConfigOpenAPIRequest {
     /**
      * Optional. Replace document creator filters; omit to preserve them.
@@ -9404,6 +9423,41 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
+         * @summary Get a content-free status snapshot for up to 100 accessible conversations (32 KiB request limit)
+         * @param {ConversationBatchStatusRequest} conversationBatchStatusRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsBatchStatusPost: async (conversationBatchStatusRequest: ConversationBatchStatusRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'conversationBatchStatusRequest' is not null or undefined
+            assertParamExists('apiCoreConversationsBatchStatusPost', 'conversationBatchStatusRequest', conversationBatchStatusRequest)
+            const localVarPath = `/api/core/conversations:batchStatus`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(conversationBatchStatusRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary POST /conversations:chat
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -17534,6 +17588,19 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary Get a content-free status snapshot for up to 100 accessible conversations (32 KiB request limit)
+         * @param {ConversationBatchStatusRequest} conversationBatchStatusRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreConversationsBatchStatusPost(conversationBatchStatusRequest: ConversationBatchStatusRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationBatchStatusResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsBatchStatusPost(conversationBatchStatusRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsBatchStatusPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary POST /conversations:chat
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -20744,6 +20811,16 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
+         * @summary Get a content-free status snapshot for up to 100 accessible conversations (32 KiB request limit)
+         * @param {DefaultApiApiCoreConversationsBatchStatusPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsBatchStatusPost(requestParameters: DefaultApiApiCoreConversationsBatchStatusPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ConversationBatchStatusResponse> {
+            return localVarFp.apiCoreConversationsBatchStatusPost(requestParameters.conversationBatchStatusRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary POST /conversations:chat
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -23055,6 +23132,13 @@ export interface DefaultApiApiCoreConversationsBatchDeletePostRequest {
 }
 
 /**
+ * Request parameters for apiCoreConversationsBatchStatusPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreConversationsBatchStatusPostRequest {
+    readonly conversationBatchStatusRequest: ConversationBatchStatusRequest
+}
+
+/**
  * Request parameters for apiCoreConversationsConversationIdArchivePost operation in DefaultApi.
  */
 export interface DefaultApiApiCoreConversationsConversationIdArchivePostRequest {
@@ -24683,6 +24767,17 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreConversationsBatchDeletePost(requestParameters: DefaultApiApiCoreConversationsBatchDeletePostRequest, options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreConversationsBatchDeletePost(requestParameters.conversationBatchDeleteRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Get a content-free status snapshot for up to 100 accessible conversations (32 KiB request limit)
+     * @param {DefaultApiApiCoreConversationsBatchStatusPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreConversationsBatchStatusPost(requestParameters: DefaultApiApiCoreConversationsBatchStatusPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreConversationsBatchStatusPost(requestParameters.conversationBatchStatusRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

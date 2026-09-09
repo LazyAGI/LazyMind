@@ -1807,6 +1807,8 @@ const enUS = {
     chatHistory: "Chat History",
     recentConversations: "Recent Conversations",
     conversationGroupPinned: "Pinned",
+    conversationRunning: "Running",
+    conversationStatusUnavailable: "Status temporarily unavailable",
     conversationGroupToday: "Today",
     conversationGroupRecentWeek: "Past Week",
     conversationGroupEarlier: "Earlier",
