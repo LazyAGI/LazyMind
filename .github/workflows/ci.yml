@@ -4,7 +4,7 @@ name: CI
 on:
   workflow_dispatch:
   pull_request:
-    branches: [main, master, 'dev/*', workflow/DeepSeekHarness_integration]
+    branches: [main, master, 'dev/*']
     paths-ignore:
       - "**.md"
       - ".git*"
@@ -99,16 +99,13 @@ jobs:
         working-directory: frontend
         run: node scripts/openapi/check-stale.mjs
 
-      - name: Shared workflow editor and PPT export regressions
-        working-directory: frontend
+      - name: Build frontend and test with coverage
         run: |
+          cd frontend
           pnpm install --frozen-lockfile
           pnpm exec vitest run src/modules/chat/utils/workflowControl.test.ts src/modules/chat/components/WorkflowPanel/SlotText.test.tsx src/modules/chat/components/WorkflowPanel/workflowApproval.test.ts src/modules/chat/components/WorkflowPanel/ppt/exportHtmlToPptx.test.ts
           pnpm build
-
-      - name: Install and test with coverage
-        run: |
-          cd tests/frontend
+          cd ../tests/frontend
           npm install
           npm install -D c8
           npx c8 --reporter=html --reporter=cobertura npm test
@@ -123,39 +120,6 @@ jobs:
         run: |
           cd tests/frontend
           npx c8 check-coverage --lines 10 --functions 10 --branches 10
-
-  test-dsh-plugin:
-    needs: [lint, doc_check]
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: '10.0.0'
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-          cache: pnpm
-          cache-dependency-path: integrations/dsh-workflow/pnpm-lock.yaml
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.25.11'
-          cache-dependency-path: local/lazymind-cli/go.sum
-      - name: DSH SDK contracts and plugin build
-        working-directory: integrations/dsh-workflow
-        run: |
-          pnpm install --frozen-lockfile
-          pnpm typecheck
-          pnpm test
-          pnpm bundle
-      - name: Verify the shipped plugin matches source
-        working-directory: local/lazymind-cli
-        run: |
-          go run ./cmd/package-workflow-bundle
-          git diff --exit-code -- ../../integrations/dsh-workflow/lib internal/adapters/mcpclient/assets/dsh-workflow.tgz
 
   test-local-runtime:
     needs: [lint, doc_check]
@@ -173,6 +137,16 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.25.11'
+      - uses: pnpm/action-setup@v4
+        if: runner.os == 'Linux'
+        with:
+          version: '10.0.0'
+      - uses: actions/setup-node@v4
+        if: runner.os == 'Linux'
+        with:
+          node-version: '24'
+          cache: pnpm
+          cache-dependency-path: integrations/dsh-workflow/pnpm-lock.yaml
       - name: Test Local Proxy
         working-directory: local/local-proxy
         run: go test ./... -v
@@ -182,6 +156,16 @@ jobs:
       - name: Test LazyMind Agent Connector
         working-directory: local/lazymind-cli
         run: go test ./... -v
+      - name: Test and verify the bundled DSH plugin
+        if: runner.os == 'Linux'
+        working-directory: integrations/dsh-workflow
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm typecheck
+          pnpm test
+          pnpm bundle
+          (cd ../../local/lazymind-cli && go run ./cmd/package-workflow-bundle)
+          git diff --exit-code -- lib ../../local/lazymind-cli/internal/adapters/mcpclient/assets/dsh-workflow.tgz
 
   test-desktop-shell:
     needs: [lint, doc_check]
