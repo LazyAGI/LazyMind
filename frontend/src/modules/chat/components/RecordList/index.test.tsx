@@ -106,9 +106,6 @@ vi.mock("@/modules/chat/store/chatThink", () => ({
 vi.mock("@/modules/chat/store/chatNewMessage", () => ({
   useChatNewMessageStore: () => ({ setNewMessage: vi.fn() }),
 }));
-vi.mock("react-infinite-scroll-component", () => ({
-  default: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-}));
 vi.mock("../ArchiveConversationModal", () => ({ default: () => null }));
 vi.mock("@/modules/settings/recoveryApi", () => ({
   unarchiveConversation: vi.fn(),
@@ -205,6 +202,10 @@ describe("RecordList conversation pinning", () => {
     expect(mocks.reorder).toHaveBeenCalledTimes(1);
     expect(mocks.reorder).toHaveBeenCalledWith("older", "newer", "before");
     expect(document.querySelector(".record .title")?.textContent).toBe("较新的会话");
+    mocks.listConversations.mockResolvedValue({ data: {
+      conversations: [{ ...newerConversation, history_order: 2 }, { ...olderConversation, history_order: 1 }],
+      next_page_token: "",
+    } });
     await act(async () => resolveSave({ data: saved }));
     expect(document.querySelector(".record .title")?.textContent).toBe("较早的会话");
     expect(screen.queryByText("今天")).not.toBeInTheDocument();
@@ -249,10 +250,16 @@ describe("RecordList conversation pinning", () => {
       conversations: [{ ...newerConversation, ...pin, history_order: 1 }, { ...olderConversation, ...pin, history_order: 2 },
         { conversation_id: "ordinary", display_name: "普通会话", search_config: {} }],
     } });
-    mocks.reorder.mockResolvedValue({ data: {
-      ...pin, conversation_id: "older", history_order: 1,
-      order_updates: [{ conversation_id: "older", history_order: 1 }, { conversation_id: "newer", history_order: 2 }],
-    } });
+    mocks.reorder.mockImplementation(() => {
+      mocks.listConversations.mockResolvedValue({ data: {
+        conversations: [{ ...olderConversation, ...pin, history_order: 1 }, { ...newerConversation, ...pin, history_order: 2 },
+          { conversation_id: "ordinary", display_name: "普通会话", search_config: {} }],
+      } });
+      return Promise.resolve({ data: {
+        ...pin, conversation_id: "older", history_order: 1,
+        order_updates: [{ conversation_id: "older", history_order: 1 }, { conversation_id: "newer", history_order: 2 }],
+      } });
+    });
     renderRecordList();
     await screen.findByText("较早的会话");
     await act(async () => drag.end({ active: { id: "older" }, over: { id: "ordinary" } } as DragEndEvent));
@@ -274,13 +281,13 @@ describe("RecordList conversation pinning", () => {
   });
 
   it("pins and unpins a conversation without changing its activity date", async () => {
-    mocks.setPinned
-      .mockResolvedValueOnce({
-        data: { is_pinned: true, pinned_at: "2026-08-30T10:00:00Z" },
-      })
-      .mockResolvedValueOnce({
-        data: { is_pinned: false, pinned_at: null },
-      });
+    mocks.setPinned.mockImplementation((_id: string, pinned: boolean) => {
+      const data = { is_pinned: pinned, pinned_at: pinned ? "2026-08-30T10:00:00Z" : null };
+      mocks.listConversations.mockResolvedValue({ data: {
+        conversations: [newerConversation, { ...olderConversation, ...data }], next_page_token: "",
+      } });
+      return Promise.resolve({ data });
+    });
     renderRecordList();
 
     await screen.findByText("较早的会话");
@@ -314,6 +321,69 @@ describe("RecordList conversation pinning", () => {
     expect(todaySection?.querySelector(".title")?.textContent).toBe("较新的会话");
   });
 
+  it.each([false, true])("rebuilds pagination after unpinning beyond the loaded window (refresh fails: %s)", async (failRefresh) => {
+    const ordinary = Array.from({ length: 51 }, (_, index) => ({
+      ...newerConversation, conversation_id: `a${index + 1}`, display_name: `会话 A${index + 1}`,
+      update_time: new Date(Date.now() - (index + 1) * 60_000).toISOString(),
+    }));
+    const returning = { ...olderConversation, conversation_id: "p", display_name: "旧置顶会话",
+      update_time: "2026-01-01T00:00:00Z", is_pinned: true, pinned_at: "2026-09-01T00:00:00Z" };
+    let unpinned = false;
+    let refreshAttempts = 0;
+    let resolveOldPage!: (value: unknown) => void;
+    mocks.listConversations.mockImplementation(({ pageToken }: { pageToken: string }) => {
+      if (!pageToken) {
+        if (unpinned && ++refreshAttempts === 1 && failRefresh) return Promise.reject(new Error("offline"));
+        return Promise.resolve({ data: {
+          conversations: unpinned ? ordinary.slice(0, 50) : [returning, ...ordinary.slice(0, 49)],
+          next_page_token: "50",
+        } });
+      }
+      if (!unpinned) return new Promise((resolve) => { resolveOldPage = resolve; });
+      return Promise.resolve({ data: {
+        conversations: [...ordinary.slice(50), { ...returning, is_pinned: false, pinned_at: null }],
+        next_page_token: "",
+      } });
+    });
+    mocks.setPinned.mockImplementation(() => {
+      unpinned = true;
+      return Promise.resolve({ data: { is_pinned: false, pinned_at: null } });
+    });
+    renderRecordList();
+    await screen.findByText("旧置顶会话");
+    const list = document.querySelector<HTMLElement>(".record-list")!;
+    Object.defineProperties(list, {
+      clientHeight: { value: 500, configurable: true },
+      scrollHeight: { value: 1000, configurable: true },
+      scrollTop: { value: 500, writable: true, configurable: true },
+    });
+    list.scrollTo = vi.fn();
+    fireEvent.scroll(list);
+    await waitFor(() => expect(mocks.listConversations).toHaveBeenCalledTimes(2));
+    fireEvent.click(moreActionsFor("旧置顶会话"));
+    fireEvent.click(await screen.findByText("取消置顶"));
+    await waitFor(() => expect(mocks.setPinned).toHaveBeenCalledWith("p", false));
+    if (failRefresh) {
+      await waitFor(() => expect(mocks.messageError).toHaveBeenCalledWith("chat.fork.historyLoadFailed"));
+      fireEvent.scroll(list);
+    }
+    await screen.findByText("会话 A50");
+    expect(screen.queryByText("旧置顶会话")).not.toBeInTheDocument();
+    expect(mocks.listConversations).toHaveBeenLastCalledWith(
+      expect.objectContaining({ pageToken: "", pageSize: 50 }), expect.anything(),
+    );
+    // A page requested before unpinning must not append into the rebuilt window.
+    await act(async () => resolveOldPage({ data: { conversations: ordinary.slice(49), next_page_token: "" } }));
+    expect(screen.queryByText("会话 A51")).not.toBeInTheDocument();
+    fireEvent.scroll(list);
+    await screen.findByText("会话 A51");
+    expect(mocks.listConversations).toHaveBeenLastCalledWith(
+      expect.objectContaining({ pageToken: "50" }), expect.anything(),
+    );
+    const titles = [...list.querySelectorAll(".record .title")].map((node) => node.textContent);
+    expect(titles).toEqual([...ordinary.map((item) => item.display_name), returning.display_name]);
+  });
+
   it("keeps the current order and reports an error when pinning fails", async () => {
     mocks.setPinned.mockRejectedValueOnce(new Error("request failed"));
     renderRecordList();
@@ -328,6 +398,31 @@ describe("RecordList conversation pinning", () => {
     expect(screen.queryByText("已置顶")).not.toBeInTheDocument();
     const todaySection = screen.getByText("今天").closest(".record-group");
     expect(todaySection?.querySelector(".title")?.textContent).toBe("较新的会话");
+  });
+
+  it("loads children moved into the first page by reordering their parent", async () => {
+    const child = { ...olderConversation, conversation_id: "child", display_name: "随父会话移动的子会话",
+      parent_conversation_id: "older", parent_display_name: olderConversation.display_name, relation_type: "sidechat" };
+    mocks.listConversations.mockResolvedValue({ data: {
+      conversations: [newerConversation, olderConversation], next_page_token: "2",
+    } });
+    mocks.reorder.mockImplementation(() => {
+      mocks.listConversations.mockResolvedValue({ data: {
+        conversations: [{ ...olderConversation, history_order: 1 }, child], next_page_token: "2",
+      } });
+      return Promise.resolve({ data: {
+        conversation_id: "older", history_order: 1, is_pinned: false,
+        order_updates: [{ conversation_id: "older", history_order: 1 }, { conversation_id: "newer", history_order: 2 }],
+      } });
+    });
+    renderRecordList();
+    await screen.findByText("较早的会话");
+    await act(async () => drag.end({ active: { id: "older" }, over: { id: "newer" } } as DragEndEvent));
+    fireEvent.click(await screen.findByRole("button", { name: "展开1个子会话" }));
+    expect(within(screen.getByRole("group", { name: "较早的会话的子会话" })).getByText(child.display_name)).toBeInTheDocument();
+    expect(mocks.listConversations).toHaveBeenLastCalledWith(
+      expect.objectContaining({ pageToken: "" }), expect.anything(),
+    );
   });
 
   it("nests retained children under their parent and keeps them collapsed by default", async () => {

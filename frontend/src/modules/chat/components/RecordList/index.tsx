@@ -181,6 +181,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
     useEffect(() => () => useConversationRunningStore.getState().unwatch(statusWatcherId), [statusWatcherId]);
     const [keyword, setKeyword] = useState("");
     const [pageToken, setPageToken] = useState("");
+    const [historyRevision, setHistoryRevision] = useState(0);
     const [checkedList, setCheckedList] = useState<string[]>([]);
     const [showBatchExport, setShowBatchExport] = useState(false);
     const [isHistoryLoading, setIsHistoryLoading] = useState(true);
@@ -213,6 +214,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
     const batchDeleteInFlightRef = useRef(false);
     const pinningConversationRef = useRef(false);
     const historyRequestRef = useRef(0);
+    const historyRefreshRequiredRef = useRef(false);
     const [reorderingConversationId, setReorderingConversationId] = useState("");
     const reorderingConversationRef = useRef(false);
     const sensors = useSensors(
@@ -500,6 +502,8 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
       const { isMore = false, isFirst = false, searchText, filterOverride } = params ?? {};
       const activeFilter = filterOverride ?? convTypeFilter;
       const requestId = ++historyRequestRef.current;
+      const replaceHistory = isFirst || historyRefreshRequiredRef.current;
+      if (replaceHistory) historyRefreshRequiredRef.current = true;
       setIsHistoryLoading(true);
 
       // Determine is_task_conv query param based on active filter selection.
@@ -519,7 +523,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
         .conversationServiceListConversations(
           {
             keyword: searchText ?? keyword,
-            pageToken: isFirst ? "" : pageToken,
+            pageToken: replaceHistory ? "" : pageToken,
             pageSize: 50,
           },
           {
@@ -543,10 +547,19 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
             res?.data?.conversations ?? [];
           if (requestId !== historyRequestRef.current) return;
           setHistoryList((previous) => sortConversationHistory(
-            [...new Map((isMore ? [...previous, ...conversations] : conversations)
+            [...new Map((isMore && !replaceHistory ? [...previous, ...conversations] : conversations)
               .map((item) => [item.conversation_id, item])).values()],
           ));
           setPageToken(res.data.next_page_token || "");
+          historyRefreshRequiredRef.current = false;
+          if (replaceHistory) setHistoryRevision((revision) => revision + 1);
+        })
+        .catch(() => {
+          if (requestId !== historyRequestRef.current) return;
+          message.error(t("chat.fork.historyLoadFailed"));
+          // Reset InfiniteScroll's pending-load latch even when the row count
+          // stays the same, so a failed refresh can retry from the first page.
+          setHistoryRevision((revision) => revision + 1);
         })
         .finally(() => {
           if (requestId === historyRequestRef.current) setIsHistoryLoading(false);
@@ -602,6 +615,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
             is_pinned: pinned,
             pinned_at: pinned ? res.data?.pinned_at : null,
           }));
+          getHistory({ isFirst: true });
           message.success(
             t(
               pinned
@@ -636,6 +650,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
           String(active.id), String(over.id), sourceIndex < targetIndex ? "after" : "before",
         );
         setHistoryList((previous) => applyConversationOrder(previous, response.data));
+        getHistory({ isFirst: true });
       } catch {
         message.error(t("chat.reorderConversationFailed"));
       } finally {
@@ -1252,6 +1267,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
             </div>
           ) : (
             <InfiniteScroll
+              key={historyRevision}
               dataLength={historyList?.length || 0}
               next={() => getHistory({ isMore: true })}
               hasMore={!!pageToken}

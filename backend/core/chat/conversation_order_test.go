@@ -157,6 +157,62 @@ func TestConversationOrderRejectsUnavailableTargets(t *testing.T) {
 	}
 }
 
+func TestConversationOrderPaginatesChildrenAfterTheirParent(t *testing.T) {
+	for _, task := range []bool{false, true} {
+		for _, pinned := range []bool{false, true} {
+			t.Run(fmt.Sprintf("task=%t/pinned=%t", task, pinned), func(t *testing.T) {
+				db := newPromptTestDB(t).DB
+				store.Init(db, nil, nil)
+				t.Cleanup(func() { store.Init(nil, nil, nil) })
+				base := time.Date(2026, 9, 1, 8, 0, 0, 0, time.UTC)
+				for i, id := range []string{"b", "a", "c"} {
+					order := int64(i + 1)
+					row := orm.Conversation{ID: id, DisplayName: id, HistoryOrder: &order, IsTaskConv: task,
+						BaseModel: orm.BaseModel{CreateUserID: "u1", UpdatedAt: base.Add(time.Duration(i) * time.Hour)}}
+					if pinned {
+						row.PinnedAt = &row.UpdatedAt
+					}
+					if err := db.Create(&row).Error; err != nil {
+						t.Fatal(err)
+					}
+				}
+				parent := "a"
+				for _, id := range []string{"a-child", "foreign-child", "archived-child", "ephemeral-child"} {
+					row := orm.Conversation{ID: id, DisplayName: id, ParentConversationID: &parent, RelationType: "sidechat", IsTaskConv: task,
+						BaseModel: orm.BaseModel{CreateUserID: "u1", UpdatedAt: base.Add(24 * time.Hour)}}
+					switch id {
+					case "foreign-child":
+						row.CreateUserID = "u2"
+					case "archived-child":
+						row.ArchivedAt = &base
+					case "ephemeral-child":
+						row.IsEphemeral = true
+					}
+					if err := db.Create(&row).Error; err != nil {
+						t.Fatal(err)
+					}
+				}
+				query := fmt.Sprintf("is_task_conv=%t", task)
+				for offset, want := range []string{"b", "a", "a-child", "c"} {
+					if got := orderedConversationIDs(t, fmt.Sprintf("%s&page_size=1&page_token=%d", query, offset)); !reflect.DeepEqual(got, []string{want}) {
+						t.Fatalf("page %d=%v, want %s", offset, got, want)
+					}
+				}
+				if got := orderedConversationIDs(t, query+"&keyword=a-child"); !reflect.DeepEqual(got, []string{"a-child"}) {
+					t.Fatalf("child-only search=%v", got)
+				}
+				var child orm.Conversation
+				if err := db.First(&child, "id = ?", "a-child").Error; err != nil {
+					t.Fatal(err)
+				}
+				if child.HistoryOrder != nil || child.PinnedAt != nil || child.ParentConversationID == nil || *child.ParentConversationID != parent {
+					t.Fatalf("listing modified the child: %#v", child)
+				}
+			})
+		}
+	}
+}
+
 func TestConversationOrderUnpinPreservesOtherManualPositions(t *testing.T) {
 	db := newPromptTestDB(t).DB
 	store.Init(db, nil, nil)
