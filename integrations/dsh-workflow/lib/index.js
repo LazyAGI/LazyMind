@@ -428,6 +428,7 @@ function installHost(ctx, bridge, config, instanceId) {
 		} : null);
 		const runId = returned?.session_id ?? run?.runId;
 		if (!runId) return null;
+		if (operation && READS.has(operation) && runId !== scope.runId && runId !== rootScope.runId) return returned;
 		const execution = object(fields?.execution);
 		if (operation && ACQUIRE.has(operation) && typeof execution?.execution_id === "string") {
 			if (execution.executor_host !== "lazymind") scope.grants.add(execution.execution_id);

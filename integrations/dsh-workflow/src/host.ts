@@ -185,6 +185,8 @@ export function installHost(ctx: Context, bridge: HostTransport, config: HostCon
       url: new URL(`/workflow-runs/${encodeURIComponent(returned.session_id)}`, config.webUrl).href } : null)
     const runId = returned?.session_id ?? run?.runId
     if (!runId) return null
+    // Reading another run is discovery, not ownership of its driver session.
+    if (operation && READS.has(operation) && runId !== scope.runId && runId !== rootScope.runId) return returned
     const execution = object(fields?.execution)
     if (operation && ACQUIRE.has(operation) && typeof execution?.execution_id === 'string') {
       if (execution.executor_host !== 'lazymind') scope.grants.add(execution.execution_id)

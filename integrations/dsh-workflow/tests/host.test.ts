@@ -57,6 +57,9 @@ async function fixture(seedPTC = false, native = false) {
     name: publicName(name), description: name, parameters: { type: 'object', properties: {} },
     output: { schema: { type: 'object' }, render: () => [{ type: 'text', text: 'ok' }] }, execute,
   })
+  ctx.tools.register(definition('mcp__lazymind__workflow_state', async () => ({ structuredContent: {
+    session_id: 'unrelated-run', interaction_url: 'http://localhost:8090/workflow-runs/unrelated-run',
+  } })))
   ctx.tools.register(definition('mcp__lazymind__workflow_start', async () => ({ structuredContent: {
     session_id: 'run-1', interaction_url: 'http://localhost:8090/workflow-runs/run-1', control,
   } })))
@@ -177,4 +180,13 @@ it('yields native tool steps without granting DSH permission to imitate their to
   expect((await f.execute('shell')).isError).toBe(true)
   expect(f.shell).not.toHaveBeenCalled()
   expect((await f.execute('shell', f.unrelated)).isError).toBe(false)
+})
+
+
+it('does not bind historical discovery reads to the current driver', async () => {
+  const f = await fixture()
+  vi.mocked(f.bridge.state).mockRejectedValue(new Error('legacy run has no control binding'))
+  expect((await f.execute('mcp__lazymind__workflow_state', f.root, { session_id: 'unrelated-run' })).isError).toBe(false)
+  expect(f.bridge.state).not.toHaveBeenCalled()
+  expect((await f.execute('mcp__lazymind__workflow_start')).isError).toBe(false)
 })
