@@ -177,7 +177,9 @@ func (s *Store) bootstrapLocalSessionUnlocked(ctx context.Context) (Credentials,
 func (s *Store) bootstrapLocalSessionForServerUnlocked(ctx context.Context, preferredServer string, force bool) (Credentials, error) {
 	servers := runtimeServerCandidates()
 	if preferredServer = normalizeServerURL(preferredServer); preferredServer != "" {
-		servers = append([]string{preferredServer}, servers...)
+		// Session recovery must stay on the account's configured server.
+		// Another local installation is not a fallback for an expired login.
+		servers = []string{preferredServer}
 	}
 	seen := make(map[string]struct{}, len(servers))
 	for _, server := range servers {
