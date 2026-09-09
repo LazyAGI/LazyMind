@@ -84,6 +84,7 @@ const AGENTS: AgentDefinition[] = [
   {
     id: "deepseek-harness", name: "DeepSeek Harness", icon: "/assistant-icons/deepseek.png",
     installURL: "https://github.com/deepseek-ai/deepseek-harness",
+    mcpBindingTarget: "deepseek-harness-cli",
   },
 ];
 
@@ -261,6 +262,21 @@ export default function AgentIntegrationPage() {
       setPendingLoginAgent(null);
     }
   }, [executors, executorPolicies, pendingLoginAgent]);
+
+  const connecting = Object.values(statuses).some((status) => status?.state === "connecting");
+  useEffect(() => {
+    if (!connecting) return;
+    let disposed = false;
+    let timer: ReturnType<typeof window.setTimeout>;
+    const poll = async () => {
+      const result = await agentIntegrationStatuses();
+      if (disposed) return;
+      if (result.ok) setStatuses(result.data);
+      timer = window.setTimeout(() => void poll(), 1_500);
+    };
+    timer = window.setTimeout(() => void poll(), 1_500);
+    return () => { disposed = true; window.clearTimeout(timer); };
+  }, [connecting]);
 
   const runAction = async (agent: DesktopAgent, nextAction: DesktopAgentIntegrationAction) => {
     const key = `${agent}:${nextAction}`;
@@ -511,7 +527,7 @@ function AgentCard({
   const executorPrepared = executorSupported && executorRuntime.prepared;
   const detectionComplete = mcpPrepared && (!executorSupported || executorPrepared);
   const mcpEnabled = mcpState === "enabled";
-  const mcpCanToggle = mcpState === "ready" || mcpEnabled;
+  const mcpCanToggle = mcpState === "ready" || mcpEnabled || agent.id === "deepseek-harness" && mcpState === "error" && mcpPrepared;
 
   return (
     <Card
@@ -544,7 +560,7 @@ function AgentCard({
               mcpCanToggle={mcpCanToggle}
               executorEnabled={executorEnabled}
               executorPrepared={executorPrepared}
-              busyAction={busyAction}
+              busyAction={mcpState === "connecting" ? `${agent.id}:connect` : busyAction}
               onMCPAction={onMCPAction}
               onExecutorAction={onExecutorAction}
               t={t}
@@ -776,7 +792,7 @@ function AgentConfigurationFlow({
   const mcpRequirements = mcpStatus?.requirements || [];
   const mcpPrepared = mcpRequirements.length > 0 && mcpRequirements.every((item) => item.satisfied);
   const mcpEnabled = mcpState === "enabled";
-  const mcpCanToggle = mcpState === "ready" || mcpEnabled;
+  const mcpCanToggle = mcpState === "ready" || mcpEnabled || agent.id === "deepseek-harness" && mcpState === "error" && mcpPrepared;
   const mcpBindingConfigured = Boolean(agent.mcpBindingTarget && bindings[agent.mcpBindingTarget]);
   const mcpInstallationMissing = mcpRequirements.length > 0 && !mcpRequirements[0].satisfied;
 
@@ -1024,7 +1040,7 @@ function AgentConfigurationFlow({
             status={mcpCapabilityStatus(mcpState, t)}
             ready={mcpEnabled}
             disabled={!mcpEnabled && !mcpCanToggle}
-            loading={busyAction === `${agent.id}:${mcpEnabled ? "disconnect" : "connect"}`}
+            loading={mcpState === "connecting" || busyAction === `${agent.id}:${mcpEnabled ? "disconnect" : "connect"}`}
             checked={mcpEnabled}
             onChange={(checked) => void onMCPAction(agent.id, checked ? "connect" : "disconnect")}
           />
@@ -1048,10 +1064,10 @@ function AgentConfigurationFlow({
             />
           )}
         </div>
-        {mcpStatus?.message && ["error", "conflict"].includes(mcpState) && (
-          <div className="agent-integration-stage-hint is-error" role="alert">
-            <WarningOutlined />
-            {mcpStatus.message}
+        {mcpStatus?.message && (["error", "conflict", "connecting"].includes(mcpState) || agent.id === "deepseek-harness") && (
+          <div className={`agent-integration-stage-hint${["error", "conflict"].includes(mcpState) ? " is-error" : ""}`} role={mcpState === "connecting" ? "status" : "alert"}>
+            <InfoCircleFilled />
+            {mcpState === "connecting" ? t("agentIntegration.installingWorkflowPlugin") : mcpStatus.message}
           </div>
         )}
         {!mcpCanToggle && !executorPrepared && (
@@ -1202,6 +1218,7 @@ function GuideText({ text }: { text: string }) {
 
 function mcpCapabilityStatus(state: DesktopAgentIntegrationStatus["state"], t: TFunction) {
   if (state === "enabled") return t("agentIntegration.enabled");
+  if (state === "connecting") return t("agentIntegration.installingWorkflowPlugin");
   if (state === "action_required") return t("agentIntegration.awaitingConfirmation");
   if (state === "conflict" || state === "error") return t("agentIntegration.configurationIssue");
   return t("agentIntegration.notEnabled");

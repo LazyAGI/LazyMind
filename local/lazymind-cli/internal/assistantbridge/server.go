@@ -47,7 +47,10 @@ type Server struct {
 	logins        map[string]agentLogin
 	loginID       uint64
 
-	loginOverride func(context.Context, string) error
+	loginOverride   func(context.Context, string) error
+	connectionMu    sync.Mutex
+	connections     map[string]*agentConnection
+	connectOverride func(context.Context, string) agentintegration.Status
 }
 
 type agentLogin struct {
@@ -73,7 +76,7 @@ func New(address string, bridge *mcpbridge.Bridge, store *credentials.Store, pol
 	}
 	return &Server{
 		address: address, bridge: bridge, executorProbe: bridge, store: store, policy: policy,
-		logins: make(map[string]agentLogin),
+		logins: make(map[string]agentLogin), connections: make(map[string]*agentConnection),
 	}, nil
 }
 
@@ -86,7 +89,12 @@ func Start(ctx context.Context, address string) (map[string]any, error) {
 		if err := validateBridgeIdentity(status, self); err != nil {
 			return nil, err
 		}
-		return status, nil
+		if status["async_agent_connect"] == true {
+			return status, nil
+		}
+		if err := Stop(ctx, address); err != nil {
+			return nil, err
+		}
 	}
 	home, err := assistantHome()
 	if err != nil {
@@ -216,6 +224,7 @@ func (s *Server) Serve(ctx context.Context) error {
 	s.stop = cancel
 	defer cancel()
 	defer s.cancelAgentLogins()
+	defer s.cancelAgentConnections()
 	httpServer := &http.Server{
 		Addr:              s.address,
 		Handler:           s.routes(),
@@ -255,7 +264,7 @@ func (s *Server) routes() http.Handler {
 		executable, _ := os.Executable()
 		writeJSON(writer, http.StatusOK, map[string]any{
 			"ok": true, "pid": os.Getpid(), "version": "v1",
-			"platform": runtime.GOOS, "executable": executable,
+			"platform": runtime.GOOS, "executable": executable, "async_agent_connect": true,
 		})
 	})
 	mux.HandleFunc("POST /v1/workflow-runs/{session}/control", s.handleWorkflowControl)
@@ -424,6 +433,9 @@ func (s *Server) handleAgentStatuses(writer http.ResponseWriter, request *http.R
 		writeError(writer, err)
 		return
 	}
+	for agent, status := range statuses {
+		statuses[agent] = s.connectionStatus(status)
+	}
 	writeJSON(writer, http.StatusOK, map[string]any{"agents": statuses})
 }
 
@@ -453,13 +465,30 @@ func (s *Server) handleAgentStatus(writer http.ResponseWriter, request *http.Req
 		writeError(writer, err)
 		return
 	}
-	writeJSON(writer, http.StatusOK, status)
+	writeJSON(writer, http.StatusOK, s.connectionStatus(status))
 }
 
 func (s *Server) handleAgentAction(writer http.ResponseWriter, request *http.Request) {
 	action := strings.ToLower(strings.TrimSpace(request.PathValue("action")))
 	if action != "connect" && action != "disconnect" && action != "login" {
 		writeJSON(writer, http.StatusNotFound, map[string]string{"error": "unsupported Assistant action"})
+		return
+	}
+	if request.PathValue("agent") == string(mcpclient.DeepSeekHarness) && action == "connect" {
+		status, err := s.startAgentConnection(request.Context(), request.PathValue("agent"))
+		if err != nil {
+			writeError(writer, err)
+			return
+		}
+		code := http.StatusOK
+		if status.State == agentintegration.Connecting {
+			code = http.StatusAccepted
+		}
+		writeJSON(writer, code, status)
+		return
+	}
+	if current, err := s.agentStatus(request.Context(), request.PathValue("agent")); err == nil && s.connectionStatus(current).State == agentintegration.Connecting {
+		writeJSON(writer, http.StatusConflict, map[string]string{"error": "plugin installation is still running; wait for its result before changing the connection"})
 		return
 	}
 	s.mu.Lock()

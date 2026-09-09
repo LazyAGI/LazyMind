@@ -9,11 +9,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"gopkg.in/yaml.v3"
+	"lazymind/agentconnector/internal/agentexec"
 	"lazymind/agentconnector/internal/coreapi"
 	"lazymind/agentconnector/internal/credentials"
 	"lazymind/agentconnector/internal/workflowhost"
@@ -59,29 +59,38 @@ func dshModuleVersion(profile, module string) (string, error) {
 	return "", os.ErrNotExist
 }
 
+func dshExecutable() (string, error) {
+	return agentexec.FindBoundExecutable("", "LAZYMIND_DSH_PATH", agentexec.DeepSeekHarnessCLI, []string{"dsh"})
+}
+
 func runDSHPlugin(ctx context.Context, profile string, args ...string) error {
-	var command *exec.Cmd
-	dsh, dshErr := exec.LookPath("dsh")
-	_, pnpmErr := exec.LookPath("pnpm")
-	if dshErr == nil && pnpmErr == nil {
-		command = exec.CommandContext(ctx, dsh, append([]string{"plugin", "--profile", profile}, args...)...)
-	} else {
-		npx, err := exec.LookPath("npx")
-		if err != nil {
-			return errors.New("Node.js/npm is required to manage the installed DSH profile")
-		}
-		// npm provides both executables to this invocation; no global package is replaced.
-		arguments := []string{"--yes", "--package=pnpm@10.0.0", "--package=@deepseek-ai/dsh@" + dshSDKVersion, "--", "dsh", "plugin", "--profile", profile}
-		command = exec.CommandContext(ctx, npx, append(arguments, args...)...)
-	}
-	command.Env = append(os.Environ(), "DSH_HOME="+dshHome())
-	output, err := command.CombinedOutput()
+	dsh, err := dshExecutable()
 	if err != nil {
-		message := strings.TrimSpace(string(output))
-		if len(message) > 2048 {
-			message = message[len(message)-2048:]
+		return errors.New("DeepSeek Harness was not found; select your existing DSH executable in LazyMind settings")
+	}
+	binary := dsh
+	arguments := append([]string{"plugin", "--profile", profile}, args...)
+	if _, err := agentexec.FindExecutable("", []string{"pnpm"}); err != nil {
+		// Supply only DSH's package manager dependency. Never download another DSH.
+		npx, err := agentexec.FindExecutable("", []string{"npx"})
+		if err != nil {
+			return errors.New("pnpm or Node.js/npm is required to install the LazyMind plugin into DSH")
 		}
-		return fmt.Errorf("install DSH workflow bundle: %w: %s", err, message)
+		binary = npx
+		arguments = append([]string{"--yes", "--package=pnpm@10.0.0", "--", dsh}, arguments...)
+	}
+	var output strings.Builder
+	err = (agentexec.StreamCommand{Binary: binary, Arguments: arguments,
+		Environment: agentexec.SafeEnvironment("DSH_HOME=" + dshHome()),
+	}).Run(ctx, func(line []byte) error {
+		if output.Len() < 2048 {
+			output.Write(line)
+			output.WriteByte('\n')
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("install LazyMind plugin into DSH: %w (%s)", err, strings.TrimSpace(output.String()))
 	}
 	return nil
 }
@@ -162,15 +171,15 @@ func (a *Adapter) installDSHWorkflow(ctx context.Context) (bool, error) {
 	if errors.Is(err, os.ErrNotExist) {
 		// A new official profile inherits its base from the launching CLI and has no
 		// local SDK dependencies. Install our MCP dependency through the supported CLI.
-		if binary, found := exec.LookPath("dsh"); found == nil {
-			output, probeErr := exec.CommandContext(ctx, binary, "--version").Output()
-			if probeErr != nil {
-				return false, probeErr
-			}
-			version = strings.TrimPrefix(strings.TrimSpace(string(output)), "v")
-		} else {
-			version = dshSDKVersion
+		binary, findErr := dshExecutable()
+		if findErr != nil {
+			return false, findErr
 		}
+		output, probeErr := agentexec.Run(ctx, binary, "--version")
+		if probeErr != nil {
+			return false, probeErr
+		}
+		version = strings.TrimPrefix(strings.TrimSpace(output), "v")
 	}
 	if version != dshSDKVersion {
 		if _, err := dshModuleVersion(profile, dshWorkflowPackage); err == nil {

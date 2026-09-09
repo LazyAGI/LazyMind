@@ -219,10 +219,9 @@ func requirements(kind Kind) ([]agentintegration.Requirement, error) {
 		if name := dshProfileName(); name == "." || name == ".." || filepath.Base(name) != name || strings.ContainsAny(name, "/\\") {
 			return nil, errors.New("invalid DSH profile name")
 		}
-		directory := filepath.Join(dshHome(), "profiles", dshProfileName())
-		profile := filepath.Join(directory, "package.json")
+		_, err := dshExecutable()
 		return []agentintegration.Requirement{
-			{ID: "dsh_web_profile", Description: "Initialize the DeepSeek Harness web profile.", Satisfied: pathExists(profile)},
+			{ID: "dsh_cli", Description: "Locate the installed DeepSeek Harness CLI.", Satisfied: err == nil},
 		}, nil
 	default:
 		return nil, nil

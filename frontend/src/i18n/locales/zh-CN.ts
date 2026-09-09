@@ -923,6 +923,7 @@ const zhCN = {
   },
 
   agentIntegration: {
+    installingWorkflowPlugin: '正在向现有 DSH 安装 LazyMind 插件，可离开页面后返回查看结果。',
     title: "外部 Agent 集成",
     mergedDescription: "按 Agent 管理双向集成。完成对应配置后再启用。",
     installed: "已安装",
@@ -1019,7 +1020,7 @@ const zhCN = {
       raccoon_desktop_initialized: { ready: "商汤小浣熊桌面版已完成首次启动", missing: "商汤小浣熊桌面版尚未完成首次启动" },
       trae_work_desktop: { ready: "TRAE Work 桌面版已安装", missing: "TRAE Work 桌面版未安装" },
       trae_work_desktop_initialized: { ready: "TRAE Work 桌面版已完成首次启动", missing: "TRAE Work 桌面版尚未完成首次启动" },
-      dsh_web_profile: { ready: "DeepSeek Harness Web 已初始化", missing: "DeepSeek Harness Web 未初始化" },
+      dsh_cli: { ready: "已找到现有 DeepSeek Harness", missing: "未找到 DSH，请选择已安装的程序路径" },
       dsh_mcp_client: { ready: "DSH MCP Client 已安装", missing: "DSH MCP Client 未安装" },
     },
     guides: {

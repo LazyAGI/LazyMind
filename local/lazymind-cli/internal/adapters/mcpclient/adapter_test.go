@@ -111,17 +111,18 @@ func TestRaccoonUsesDesktopConfiguration(t *testing.T) {
 	}
 }
 
-func TestDeepSeekRequiresProfileButInstallsMCPClientAutomatically(t *testing.T) {
+func TestDeepSeekRequiresExistingExecutableAndCanInitializeProfile(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("DSH_HOME", root)
 	adapter := testAdapter(DeepSeekHarness)
+	binary := filepath.Join(root, "dsh")
+	t.Setenv("LAZYMIND_DSH_PATH", binary)
 
 	status := adapter.Status(context.Background())
 	if status.State != agentintegration.RequirementsMissing || len(status.Requirements) != 1 {
 		t.Fatalf("status=%#v", status)
 	}
-	writeTestFile(t, filepath.Join(root, "profiles", "web", "package.json"), `{}`)
-	writeTestFile(t, filepath.Join(root, "profiles", "node_modules", "@deepseek-ai", "dsh-mcp-client", "package.json"), `{}`)
+	writeTestFile(t, binary, "existing DSH executable")
 	status = adapter.Status(context.Background())
 	if status.State != agentintegration.Ready {
 		t.Fatalf("status=%#v", status)

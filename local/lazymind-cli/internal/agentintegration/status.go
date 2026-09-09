@@ -5,6 +5,7 @@ import "strings"
 type State string
 
 const (
+	Connecting          State = "connecting"
 	RequirementsMissing State = "requirements_missing"
 	Ready               State = "ready"
 	ActionRequired      State = "action_required"

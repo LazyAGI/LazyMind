@@ -532,7 +532,7 @@ function runSidecar(command, extra = [], options = {}) {
   });
 }
 
-function runAgentConnector(agent, action) {
+async function runAgentConnector(agent, action) {
   const allowedActions = {
     all: new Set(["status"]),
     codex: new Set(["connect", "status", "disconnect", "login"]),
@@ -548,10 +548,21 @@ function runAgentConnector(agent, action) {
   if (action === "login") {
     return startAgentLogin(agent);
   }
-  return runConnectorJSON(
-    ["internal", "agent", agent, action],
-    agentConnectorActionTimeoutMs,
-  );
+  const base = new URL(process.env.LAZYMIND_ASSISTANT_BRIDGE_URL || "http://127.0.0.1:19091");
+  if (base.protocol !== "http:" || !["localhost", "127.0.0.1", "[::1]"].includes(base.hostname) || base.username || base.password) {
+    throw new Error("Assistant Bridge must use a local HTTP address");
+  }
+  await runConnectorJSON(["assistant", "start", "--listen", base.host], agentConnectorActionTimeoutMs);
+  const endpoint = agent === "all" ? "/v1/agents"
+    : `/v1/agents/${encodeURIComponent(agent)}${action === "status" ? "" : `/${action}`}`;
+  const response = await fetch(new URL(endpoint, base), {
+    method: action === "status" ? "GET" : "POST",
+    headers: { "X-LazyMind-Client-Platform": process.platform },
+    signal: AbortSignal.timeout(agentConnectorActionTimeoutMs),
+  });
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error || `Assistant Bridge returned HTTP ${response.status}`);
+  return result;
 }
 
 function startAgentLogin(agent) {
@@ -604,7 +615,7 @@ async function runExecutorConnector(provider, action) {
 
 const agentBindingTargets = new Set([
   "codex-cli", "codex-desktop", "cursor-cli", "codebuddy-cli", "cursor-desktop",
-  "workbuddy-desktop", "raccoon-desktop", "traework-desktop",
+  "workbuddy-desktop", "raccoon-desktop", "traework-desktop", "deepseek-harness-cli",
 ]);
 const agentBindingActions = new Set(["status", "set", "clear"]);
 
@@ -617,7 +628,7 @@ async function runAgentBinding(target, action, executablePath = "") {
     args.push("--path", executablePath);
   }
   const result = await runConnectorJSON(args, agentConnectorBindingTimeoutMs);
-  if (action !== "status" && target.endsWith("-cli")) {
+  if (action !== "status" && target.endsWith("-cli") && target !== "deepseek-harness-cli") {
     restartAgentHost();
   }
   return result;

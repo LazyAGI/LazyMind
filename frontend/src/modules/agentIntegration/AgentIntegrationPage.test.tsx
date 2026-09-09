@@ -43,6 +43,7 @@ vi.mock("react-i18next", () => ({
         "agentIntegration.title": "外部 Agent 集成",
         "agentIntegration.mergedDescription": "双向集成说明",
         "agentIntegration.installed": "已安装",
+        "agentIntegration.installingWorkflowPlugin": "正在安装 LazyMind 插件",
         "agentIntegration.notInstalled": "未安装",
         "agentIntegration.detectedSummary": `已检测到 ${agent}`,
         "agentIntegration.singleDirectionSummary": `${agent} 已检测，仅支持接入 LazyMind MCP`,
@@ -767,4 +768,40 @@ describe("AgentIntegrationPage", () => {
       expect(mocks.executors).toHaveBeenCalledTimes(2);
     });
   });
+  it("locates an existing DSH executable through the same path picker as other CLIs", async () => {
+    mocks.statuses.mockResolvedValue({ ok: true, data: { "deepseek-harness": {
+      agent: "deepseek-harness", display_name: "DeepSeek Harness", state: "requirements_missing",
+      requirements: [{ id: "dsh_cli", description: "DSH missing", satisfied: false }],
+    } } });
+    mocks.selectExecutable.mockResolvedValue("D:\\Tools\\dsh.cmd");
+    mocks.bind.mockResolvedValue({ ok: true, data: {} });
+    render(<AgentIntegrationPage />);
+    await screen.findByText("外部 Agent 集成");
+    const dsh = expandAgent("deepseek-harness");
+    fireEvent.click(within(dsh).getByRole("button", { name: /定位 CLI/ }));
+    await waitFor(() => expect(mocks.bind).toHaveBeenCalledWith("deepseek-harness-cli", "D:\\Tools\\dsh.cmd"));
+  });
+
+  it("restores an ongoing DSH installation after reopening the page and shows its final result", async () => {
+    const ready = { agent: "deepseek-harness", display_name: "DeepSeek Harness", state: "ready",
+      requirements: [{ id: "dsh_cli", description: "DSH installed", satisfied: true }] };
+    const pending = { ...ready, state: "connecting", message: "installing" };
+    mocks.statuses.mockResolvedValue({ ok: true, data: { "deepseek-harness": ready } });
+    mocks.action.mockResolvedValue({ ok: true, data: pending });
+    const first = render(<AgentIntegrationPage />);
+    await screen.findByText("外部 Agent 集成");
+    const dsh = expandAgent("deepseek-harness");
+    fireEvent.click(within(dsh).getByRole("switch", { name: "DeepSeek Harness Web 使用 LazyMind MCP" }));
+    expect(await within(dsh).findByRole("status")).toHaveTextContent("正在安装 LazyMind 插件");
+    first.unmount();
+    mocks.statuses.mockResolvedValue({ ok: true, data: { "deepseek-harness": pending } });
+    render(<AgentIntegrationPage />);
+    await screen.findByText("外部 Agent 集成");
+    const restored = expandAgent("deepseek-harness");
+    expect(await within(restored).findByRole("status")).toHaveTextContent("正在安装 LazyMind 插件");
+    mocks.statuses.mockResolvedValue({ ok: true, data: { "deepseek-harness": { ...ready, state: "enabled" } } });
+    await waitFor(() => expect(within(restored).getByRole("switch", { name: "DeepSeek Harness Web 使用 LazyMind MCP" })).toBeChecked(), { timeout: 3500 });
+    expect(mocks.action).toHaveBeenCalledTimes(1);
+  });
+
 });

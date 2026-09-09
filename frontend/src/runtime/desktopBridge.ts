@@ -55,6 +55,7 @@ export interface DesktopLocalFolderAuthorizationResult
 export type DesktopAgent = "codex" | "cursor" | "workbuddy" | "raccoon" | "traework" | "deepseek-harness";
 
 export type DesktopAgentIntegrationState =
+  | "connecting"
   | "requirements_missing"
   | "ready"
   | "action_required"
@@ -95,7 +96,8 @@ export type DesktopAgentBindingTarget =
   | "cursor-desktop"
   | "workbuddy-desktop"
   | "raccoon-desktop"
-  | "traework-desktop";
+  | "traework-desktop"
+  | "deepseek-harness-cli";
 
 export interface DesktopExecutorPolicy {
   provider: DesktopExecutorProvider;

@@ -15,22 +15,23 @@ import (
 type BindingTarget string
 
 const (
-	CodexCLI         BindingTarget = "codex-cli"
-	CodexDesktop     BindingTarget = "codex-desktop"
-	CursorCLI        BindingTarget = "cursor-cli"
-	CodeBuddyCLI     BindingTarget = "codebuddy-cli"
-	CursorDesktop    BindingTarget = "cursor-desktop"
-	WorkBuddyDesktop BindingTarget = "workbuddy-desktop"
-	RaccoonDesktop   BindingTarget = "raccoon-desktop"
-	TRAEWorkDesktop  BindingTarget = "traework-desktop"
-	bindingsVersion                = 1
+	CodexCLI           BindingTarget = "codex-cli"
+	DeepSeekHarnessCLI BindingTarget = "deepseek-harness-cli"
+	CodexDesktop       BindingTarget = "codex-desktop"
+	CursorCLI          BindingTarget = "cursor-cli"
+	CodeBuddyCLI       BindingTarget = "codebuddy-cli"
+	CursorDesktop      BindingTarget = "cursor-desktop"
+	WorkBuddyDesktop   BindingTarget = "workbuddy-desktop"
+	RaccoonDesktop     BindingTarget = "raccoon-desktop"
+	TRAEWorkDesktop    BindingTarget = "traework-desktop"
+	bindingsVersion                  = 1
 )
 
 var (
 	bindingTargets = map[BindingTarget]bool{
 		CodexCLI: true, CursorCLI: true, CodeBuddyCLI: true, CodexDesktop: true,
 		CursorDesktop: true, WorkBuddyDesktop: true, RaccoonDesktop: true,
-		TRAEWorkDesktop: true,
+		TRAEWorkDesktop: true, DeepSeekHarnessCLI: true,
 	}
 	bindingsMu sync.Mutex
 )
@@ -100,7 +101,7 @@ func resolveBindingExecutable(target BindingTarget, path string) (string, error)
 }
 
 func isCLIBindingTarget(target BindingTarget) bool {
-	return target == CodexCLI || target == CursorCLI || target == CodeBuddyCLI
+	return target == CodexCLI || target == CursorCLI || target == CodeBuddyCLI || target == DeepSeekHarnessCLI
 }
 
 func desktopApplicationBindings() []string {
