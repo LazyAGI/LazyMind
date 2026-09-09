@@ -159,12 +159,20 @@ def _build_turn_language_prompt(
     )
 
 
-def _format_user_date(time_now: object, timezone: object) -> str:
-    raw_time = str(time_now).strip()
-    if not raw_time:
-        return ''
+def _environment_time_parts(environment_context: dict | None) -> tuple[object, object]:
+    if not isinstance(environment_context, dict):
+        return None, None
+    time_info = environment_context.get('time') or {}
+    if not isinstance(time_info, dict):
+        return None, None
+    return time_info.get('now'), time_info.get('timezone')
 
+
+def _parse_user_local_time(time_now: object, timezone: object) -> tuple[datetime | None, str, str]:
+    raw_time = str(time_now).strip()
     timezone_name = str(timezone).strip() if timezone is not None else ''
+    if not raw_time:
+        return None, timezone_name, ''
     try:
         normalized_time = raw_time[:-1] + '+00:00' if raw_time.endswith('Z') else raw_time
         parsed_time = datetime.fromisoformat(normalized_time)
@@ -172,29 +180,46 @@ def _format_user_date(time_now: object, timezone: object) -> str:
             parsed_time = parsed_time.replace(tzinfo=datetime_timezone.utc)
         if timezone_name:
             try:
-                user_time = parsed_time.astimezone(ZoneInfo(timezone_name))
-                return f'{user_time:%Y-%m-%d} ({timezone_name})'
+                return parsed_time.astimezone(ZoneInfo(timezone_name)), timezone_name, raw_time
             except ZoneInfoNotFoundError:
-                return f'{parsed_time:%Y-%m-%d}'
-        return f'{parsed_time:%Y-%m-%d}'
+                return parsed_time, '', raw_time
+        return parsed_time, '', raw_time
     except (ValueError, TypeError):
+        return None, timezone_name, raw_time
+
+
+def _format_user_date(time_now: object, timezone: object) -> str:
+    parsed_time, timezone_name, raw_time = _parse_user_local_time(time_now, timezone)
+    if parsed_time is None:
         return raw_time
+    if timezone_name:
+        return f'{parsed_time:%Y-%m-%d} ({timezone_name})'
+    return f'{parsed_time:%Y-%m-%d}'
+
+
+def _format_user_time(time_now: object, timezone: object) -> str:
+    parsed_time, timezone_name, raw_time = _parse_user_local_time(time_now, timezone)
+    if parsed_time is None:
+        return raw_time
+    if timezone_name:
+        return f'{parsed_time:%Y-%m-%d %H:%M:%S} ({timezone_name})'
+    return parsed_time.isoformat()
 
 
 def _build_environment_context_prompt(environment_context: dict | None = None) -> str:
-    time_now = None
-    timezone = None
-    if isinstance(environment_context, dict):
-        time_info = environment_context.get('time') or {}
-        if isinstance(time_info, dict):
-            time_now = time_info.get('now')
-            timezone = time_info.get('timezone')
-
+    time_now, timezone = _environment_time_parts(environment_context)
     user_date = _format_user_date(time_now, timezone) if time_now else ''
     if not user_date:
         return ''
-
     return f'## Environment Context\nCurrent user date: {user_date}'
+
+
+def _build_turn_time_prompt(environment_context: dict | None = None) -> str:
+    time_now, timezone = _environment_time_parts(environment_context)
+    user_time = _format_user_time(time_now, timezone) if time_now else ''
+    if not user_time:
+        return ''
+    return f'Current user time: {user_time}'
 
 
 _TOOL_APPENDIX_SECTION_TITLES = {
@@ -247,6 +272,10 @@ def add_standard_system_sections(
             conversation_history=conversation_history,
         ),
         'request.language', priority=1, authoritative=True, content_kind='instruction',
+    ).runtime(
+        'environment_time', 'Current Time',
+        _build_turn_time_prompt(environment_context),
+        'request.environment.time', priority=2, content_kind='state',
     )
 
     environment_prompt = _build_environment_context_prompt(environment_context)

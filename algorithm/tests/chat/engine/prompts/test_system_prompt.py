@@ -177,3 +177,26 @@ def test_same_calendar_day_keeps_stable_environment_system_prefix():
     assert morning == evening
     assert 'Current user date: 2026-05-11 (Asia/Shanghai)' in morning
     assert '19:48:00' not in morning
+    assert '09:15:30' not in morning
+
+
+def test_precise_current_time_lives_in_runtime_context():
+    morning = build_standard_prompt_bundle(
+        False,
+        environment_context={
+            'locale': 'zh-CN',
+            'time': {'now': '2026-05-11T01:15:30.000Z', 'timezone': 'Asia/Shanghai'},
+        },
+    )
+    evening = build_standard_prompt_bundle(
+        False,
+        environment_context={
+            'locale': 'zh-CN',
+            'time': {'now': '2026-05-11T15:48:00.000Z', 'timezone': 'Asia/Shanghai'},
+        },
+    )
+
+    assert morning.system_prompt == evening.system_prompt
+    assert 'Current user time: 2026-05-11 09:15:30 (Asia/Shanghai)' in morning.current_input
+    assert 'Current user time: 2026-05-11 23:48:00 (Asia/Shanghai)' in evening.current_input
+    assert 'Current user time:' not in morning.system_prompt

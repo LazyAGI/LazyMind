@@ -100,13 +100,6 @@ class AgentExecutor:
     def create_agent(self, llm: Any, plan: AgentRunPlan) -> Any:
         from lazymind.chat.lazyllm_tool_docs import ensure_lazyllm_tool_docs
 
-        # ReactAgent may execute model calls asynchronously and a caller can
-        # reuse the same OnlineChatModule for multiple runs.  A shared copy
-        # isolates module/session state, usage accounting, and stream sinks.
-        share = getattr(llm, 'share', None)
-        if callable(share):
-            llm = share()
-
         options = plan.execution_options
         keep_full_turns = options.keep_full_turns
         if keep_full_turns is None:

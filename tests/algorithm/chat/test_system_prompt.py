@@ -7,7 +7,7 @@ from lazymind.chat.engine.prompts.system_prompt import (
 
 
 def test_system_prompt_uses_user_timezone_time() -> None:
-    prompt = build_system_prompt(
+    bundle = build_standard_prompt_bundle(
         False,
         environment_context={
             'time': {
@@ -17,14 +17,15 @@ def test_system_prompt_uses_user_timezone_time() -> None:
         },
     )
 
-    assert 'Current user date: 2026-05-11 (Asia/Shanghai)' in prompt
-    assert '19:48:00' not in prompt
-    assert 'Use this context to interpret relative time expressions' not in prompt
-    assert 'User timezone:' not in prompt
+    assert 'Current user date: 2026-05-11 (Asia/Shanghai)' in bundle.system_prompt
+    assert '19:48:00' not in bundle.system_prompt
+    assert 'Current user time: 2026-05-11 19:48:00 (Asia/Shanghai)' in bundle.current_input
+    assert 'Use this context to interpret relative time expressions' not in bundle.system_prompt
+    assert 'User timezone:' not in bundle.system_prompt
 
 
 def test_system_prompt_falls_back_to_raw_time_when_timezone_is_invalid() -> None:
-    prompt = build_system_prompt(
+    bundle = build_standard_prompt_bundle(
         False,
         environment_context={
             'time': {
@@ -34,8 +35,9 @@ def test_system_prompt_falls_back_to_raw_time_when_timezone_is_invalid() -> None
         },
     )
 
-    assert 'Current user date: 2026-05-11' in prompt
-    assert '11:48:00' not in prompt
+    assert 'Current user date: 2026-05-11' in bundle.system_prompt
+    assert '11:48:00' not in bundle.system_prompt
+    assert 'Current user time: 2026-05-11T11:48:00+00:00' in bundle.current_input
 
 
 def test_system_prompt_includes_cross_tool_policy_when_tools_are_active() -> None:
