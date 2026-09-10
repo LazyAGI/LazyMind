@@ -1,27 +1,27 @@
 ---
 name: vocabulary-learning
-description: 查询 LazyMind 生词表和其中的单词，或在对话中进行单词复习训练并记录作答结果。用户说“我要复习”“复习一下”“开始复习”“出题”“考考我”、询问今天待复习或尚未记住的单词，以及回答正在进行的单词题目时，都应使用本 Skill。
+description: Query the user's LazyMind vocabulary and wordbooks, or run interactive vocabulary review sessions and record results. Use this Skill when the user asks to review, start a quiz, be tested, see words due today or not yet learned, or answers questions in an active vocabulary review.
 version: 1.5.0
 ---
 
-# 生词学习
+# Vocabulary learning
 
-使用 Core 注册的生词工具完成查询和训练，不猜测用户的数据，也不直接访问数据库。
+Use the vocabulary tools registered by Core for queries and practice. Never guess user data or access the database directly.
 
-## 查询
+## Queries
 
-1. 询问单词本数量或名称时，调用 `vocabulary.wordbook.list`。
-2. 询问指定单词本中的单词时，先从列表解析其准确 ID，再调用 `vocabulary.word.list`。未指定单词本时允许使用当前单词本。凡是询问“待复习、今天该复习、还没记住”的单词，必须传 `due_only=true`，只呈现后端调度器返回的结果；禁止根据 `state`、`review_count` 或自然语言自行推断。
-3. 回答时说明当前使用的数据来源，但不要要求用户理解或切换 backend。
+1. To list or count wordbooks, call `vocabulary.wordbook.list`.
+2. For words in a particular wordbook, first resolve its exact ID from that list, then call `vocabulary.word.list`. The current wordbook may be used when none is specified. For words due for review today or not yet learned, always pass `due_only=true` and present only the scheduler's results. Never infer due status from `state`, `review_count`, or natural-language context.
+3. State which data source was used, but do not require the user to understand or switch backends.
 
-## 训练
+## Review sessions
 
-1. 用户要求出题时，第一步必须调用 `get_review_words(count=5)`，不得先调用 `ask_words`。该工具创建或恢复用户当前词本唯一的活跃复习 session，并预览 1–200 个候选单词；同一 session 同时供 Chat 和生词表页面使用，12 小时未完成才过期。预览不算使用，只有 `ask_words` 才会签发实际出题的词。模型不接收、不保存、也不填写 session/item UUID；不得使用 `while` 或其他循环等待用户。若准备出完形填空，必须一次调用 `get_review_words(count=20..200)`，至少取得 20 个候选词。
-2. 若返回 `complete=true` 和 `remaining=0`，转到第 7 步。否则大模型只为当前批次选择出题策略：`e2c+choice`、`c2e+choice`、`c2e+fill`，或确有教学价值时使用 `create`。
-3. 客观题必须调用 `ask_words`，不得直接调用 `ask_user`：英问中只能 `mode=e2c,type=choice`；中问英可用 `mode=c2e,type=choice` 或 `mode=c2e,type=fill`。题目、六个选项、词性、标准答案和回写 hook 全部由工具向后端获取并填写，大模型不得传入或修改。
-4. `ask_words` 内部复用 ask-user 的 SSE 事件和 panel 展示，并立即结束当前算法回合。用户提交客观题后，Core hook 会直接判分、调用单词服务并逐题登记；大模型不得再次调用登记工具，也不得询问用户“记得/忘记”。
-5. 自由发挥题使用 `ask_words(mode=create, ...)`。普通自由题通过候选词文本关联；完形填空使用 `type=cloze`，每题提供 `correct_answer`，且必须从同一次预览候选中选择 10–20 个不同单词。后端根据结构化正确答案匹配并签发这些词；干扰词及其他未使用候选不会被签发。`correct_answer` 和可能泄题的评分标准不会进入前端题卡、SSE 工具参数或公开 hook；完形填空提交后由后端直接判分并登记。其他自由题每题还必须提供 `difficulty`（basic/intermediate/advanced）和 `grading_criteria`；权重由工具固定为基础题 3、中级题 2、高级题 1。用户回答后，模型逐题判断正误，再调用一次 `register_review_words`，原样传入 hook 给出的 `word_id`、`weight` 和 `correct`。工具按单词汇总加权得分、只登记一次掌握程度，并在内部直接请求下一批，仅以自然语言返回下一批候选或后端报告，不返回上一批的登记结果。不得漏题、直接写反馈或自行生成报告。
-6. 客观题提交后，后端自动判定和登记，并将下一批候选词或最终报告作为新的自然语言输入传给模型；模型不能再调用 `get_review_words`，也不会收到用户的选择或上一批的登记结果。自由题则使用 `register_review_words` 返回的自然语言续题信息。有词就再次选择题型并调用 `ask_words`；不得根据对话文本自行猜测进度。
-7. 当续题自然语言表明复习已全部完成时，其中已包含后端生成的最终报告，忠实展示即可；不存在需要模型调用的完成/报告工具。
-8. 必须忠实呈现 report 返回的题数、正确数、正确率、评分分布、困难词和间隔变化；大模型不得重新计算、改写或补造报告主体数据，只可追加简短学习建议。
-9. 如果 session 创建后立即没有题目，直接说明当前无需复习。用户忽略题卡 / 转向其他事项时不得持续追问；session 由后端保留，算法当前回合已结束。普通 `ask_user` 仍可用于其他澄清，但绝不能用于单词复习出题。
+1. When the user asks to be tested, first call `get_review_words(count=5)`; never call `ask_words` first. The tool creates or resumes the single active review session for the current wordbook and previews 1–200 candidate words. Chat and the vocabulary page share this session, which expires only after 12 hours without completion. Previewing does not issue a word; only `ask_words` does. Never receive, retain, or supply session/item UUIDs. Never use a `while` loop or any other loop to wait for the user. Before creating a cloze exercise, call `get_review_words(count=20..200)` and obtain at least 20 candidates.
+2. If the result has `complete=true` and `remaining=0`, continue at step 7. Otherwise choose only the strategy for this batch: `e2c+choice`, `c2e+choice`, `c2e+fill`, or `create` when it has genuine teaching value.
+3. Objective questions must use `ask_words`, never `ask_user`. English-to-Chinese supports only `mode=e2c,type=choice`; Chinese-to-English supports `mode=c2e,type=choice` or `mode=c2e,type=fill`. The tool obtains and supplies the questions, six choices, parts of speech, canonical answers, and registration hook from the backend. Never provide or alter those fields.
+4. `ask_words` reuses the ask-user SSE events and panel, then immediately ends the current algorithm turn. After the user submits objective questions, the Core hook grades them, calls the vocabulary service, and registers each result. Never call a registration tool for those questions and never ask whether the user remembered or forgot a word.
+5. For model-authored questions, use `ask_words(mode=create, ...)`. Ordinary authored questions associate candidates by word text. A cloze exercise uses `type=cloze`, supplies `correct_answer` for every blank, and selects 10–20 distinct words from one preview. The backend matches structured answers and issues only those words; distractors and unused candidates remain unissued. `correct_answer` and any grading criteria that could reveal an answer must never enter the frontend card, SSE tool parameters, or public hook. The backend grades and registers cloze submissions. For other authored questions, every question must include `difficulty` (`basic`, `intermediate`, or `advanced`) and `grading_criteria`; the tool fixes weights at 3, 2, and 1 respectively. After the user answers, grade every question and call `register_review_words` exactly once, passing the hook-issued `word_id`, `weight`, and `correct` unchanged. The tool aggregates the weighted score per word, registers mastery once, and internally obtains the next candidates. It returns only a natural-language next step or backend report, never the previous batch result. Do not omit questions, provide feedback before registration, or invent a report.
+6. After an objective submission, the backend grades and registers the batch and sends either the next candidates or the final report to the model as a new natural-language input. Do not call `get_review_words` again and do not expect the user's choices or the previous batch result. For authored questions, use the natural-language continuation returned by `register_review_words`. When candidates are present, select the next question type and call `ask_words`; never infer progress from conversation text.
+7. When the continuation says the review is complete, it already contains the backend-generated final report. Present it faithfully; there is no completion or report tool to call.
+8. Preserve the report's question count, correct count, accuracy, rating distribution, difficult words, and interval changes exactly. Never recalculate, alter, or invent report data. A short study suggestion may be added.
+9. If a newly created session immediately has no questions, explain that nothing is due. If the user ignores the card or changes topics, do not keep prompting. The backend retains the session and the current algorithm turn has ended. Generic `ask_user` remains available for unrelated clarification, but must never be used for vocabulary review questions.

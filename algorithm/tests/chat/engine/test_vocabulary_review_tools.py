@@ -20,8 +20,8 @@ def test_register_review_words_aggregates_weighted_score_once_per_word(monkeypat
         {'word_id': 'word-1', 'correct': False, 'weight': 1},
     ])
     assert calls == [('/vocabulary/review/sessions/active/answers:register', {'word_id': 'word-1', 'score': .75})]
-    assert '本次复习已全部完成' in result
-    assert '正确率 75.0%' in result
+    assert 'This review session is complete' in result
+    assert '75.0% accuracy' in result
     assert 'word-1' not in result
 
 

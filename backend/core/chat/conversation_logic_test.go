@@ -932,7 +932,7 @@ func TestBuildAskUserToolResultHidesObjectiveReviewAnswer(t *testing.T) {
 			t.Fatalf("objective result leaked %q: %s", hidden, got)
 		}
 	}
-	if !strings.Contains(got, "后端判定并登记") {
+	if !strings.Contains(got, "backend graded and registered") {
 		t.Fatalf("objective result did not explain backend registration: %s", got)
 	}
 }
@@ -943,7 +943,7 @@ func TestFormatVocabularyReviewReportUsesBackendValues(t *testing.T) {
 		AverageIntervalBefore: 2, AverageIntervalAfter: 6.5,
 		DifficultWords: []string{"diverse"},
 	})
-	for _, required := range []string{"共复习 4 个单词", "正确率 75.0%", "2.0 天", "6.5 天", "diverse"} {
+	for _, required := range []string{"Reviewed 4 words", "75.0% accuracy", "2.0 days", "6.5 days", "diverse"} {
 		if !strings.Contains(got, required) {
 			t.Fatalf("report missing %q: %s", required, got)
 		}

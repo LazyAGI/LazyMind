@@ -7771,7 +7771,23 @@ const zhCN = {
     },
   },
 
-  vocabulary: { cardTypes: { wordToMeaning: "看词选义", meaningToWord: "看义回忆单词", sentenceCloze: "例句填空", anki: "Anki 卡片" } },
+  vocabulary: {
+    reviewTitle: "单词复习",
+    cardTypes: { wordToMeaning: "看词选义", meaningToWord: "看义回忆单词", sentenceCloze: "例句填空", anki: "Anki 卡片" },
+    document: {
+      empty: "本文档还没有添加生词",
+      removeTitle: "从本文档移除 {{term}}？",
+      removeDescription: "只移除当前文档来源；单词、其他来源和复习记录都会保留。",
+      removeSource: "移除来源",
+      deleteTitle: "彻底删除 {{term}}？",
+      deleteDescription: "这是该单词的最后一个来源。删除后，相关例句和复习数据也会删除。",
+      deleteWord: "删除单词",
+      sourceCount: "{{count}} 个来源",
+      sourceLocation: "来源位置：{{location}}",
+      page: "第 {{page}} 页",
+      document: "文档",
+    },
+  },
   errors: zhCNErrorMessages,
 };
 

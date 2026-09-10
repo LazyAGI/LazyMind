@@ -8016,7 +8016,23 @@ const enUS = {
     },
   },
 
-  vocabulary: { cardTypes: { wordToMeaning: "Word to meaning", meaningToWord: "Meaning to word", sentenceCloze: "Sentence cloze", anki: "Anki card" } },
+  vocabulary: {
+    reviewTitle: "Vocabulary review",
+    cardTypes: { wordToMeaning: "Word to meaning", meaningToWord: "Meaning to word", sentenceCloze: "Sentence cloze", anki: "Anki card" },
+    document: {
+      empty: "No vocabulary has been added from this document",
+      removeTitle: "Remove {{term}} from this document?",
+      removeDescription: "Only this document source will be removed. The word, its other sources, and review history will be preserved.",
+      removeSource: "Remove source",
+      deleteTitle: "Delete {{term}} permanently?",
+      deleteDescription: "This is the word's last source. Its examples and review data will also be deleted.",
+      deleteWord: "Delete word",
+      sourceCount: "{{count}} sources",
+      sourceLocation: "Source: {{location}}",
+      page: "Page {{page}}",
+      document: "Document",
+    },
+  },
   errors: enUSErrorMessages,
 };
 

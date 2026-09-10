@@ -125,13 +125,13 @@
       "resolved_url": "builtin://vocabulary/vocabulary-learning",
       "version": "1.5.0",
       "name": "vocabulary-learning",
-      "description": "查询 LazyMind 生词表和其中的单词，或在对话中进行单词复习训练并记录作答结果。用户说“我要复习”“复习一下”“开始复习”“出题”“考考我”、询问今天待复习或尚未记住的单词，以及回答正在进行的单词题目时，都应使用本 Skill。",
+      "description": "Query the user's LazyMind vocabulary and wordbooks, or run interactive vocabulary review sessions and record results. Use this Skill when the user asks to review, start a quiz, be tested, see words due today or not yet learned, or answers questions in an active vocabulary review.",
       "category": "learning",
       "provider": "LazyMind",
       "market_visible": true,
-      "archive_sha256": "192e06be70016a684e64b39f8586fda6b85587e73d924ba6ed1ec9ccc12fe881",
-      "tree_sha256": "b783043452c3235e30b90f74ecf321739d0c070d9794b9d52a8adabf2b894b05",
-      "archive_size": 3096,
+      "archive_sha256": "681554134102387f0cbc7415ededf8c50ebfb72ea82451cf2949f4e7c4757796",
+      "tree_sha256": "1768e3b87f105ba59b203f5283935baefdb98975ed3fc20f22967c10ed199a2e",
+      "archive_size": 2675,
       "package_file": "packages/bsk_01L0VOCABULARYLEARNING00001.zip"
     },
     {
