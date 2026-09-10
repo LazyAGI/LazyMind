@@ -1572,5 +1572,9 @@
   "2002622": { "en-US": "e2c only supports choice questions", "zh-CN": "英译中仅支持选择题" },
   "2002623": { "en-US": "The review session has no previewed questions", "zh-CN": "复习会话中没有已预览的题目" },
   "2002624": { "en-US": "The review item has already been answered", "zh-CN": "该复习题已经作答" },
-  "2002625": { "en-US": "The review session still has remaining questions", "zh-CN": "复习会话仍有未完成的题目" }
+  "2002625": { "en-US": "The review session still has remaining questions", "zh-CN": "复习会话仍有未完成的题目" },
+  "2002626": { "en-US": "Processing level must be stored, parsed, chunked, or indexed", "zh-CN": "处理级别必须为仅存储、解析全文、解析并切片或向量索引" },
+  "2002627": { "en-US": "Failed to update the knowledge base processing level", "zh-CN": "更新知识库处理级别失败" },
+  "2002628": { "en-US": "Failed to create the document processing state", "zh-CN": "创建文档处理状态失败" },
+  "2002629": { "en-US": "Confirm removal of the embedding model and downgrade indexed knowledge bases to chunked", "zh-CN": "移除向量模型前需确认将所有向量索引知识库降级为解析并切片" }
 }
