@@ -8,17 +8,19 @@ import uuid
 
 import pytest
 
-from lazymind.chat.service.llm_task import LLMTaskCallError, LLMTaskRequest
-from lazymind.chat.service.conversation_organizer import organize_step
-from lazymind.chat.service import organizer_stream as supervisor
+from lazymind.conversation.model_client import ConversationCallError
+from lazymind.conversation.conversation_grouping.schemas import GroupingRequest
+from lazymind.conversation.conversation_grouping.grouping import organize_step
+from lazymind.conversation.conversation_grouping import execution as supervisor
 
 
 def request(**data):
-    return LLMTaskRequest(task_type='conversation.organize_step', input={'data': {
+    return GroupingRequest(input={
         'snapshot_id': 'run', 'snapshot_hash': 'hash',
         'cursor': 0, 'phase': 'batch', 'directory': [],
         'conversations': [{'id': 'c1', 'summary': '工作'}], **data,
-    }}, options={'execution_issued_at': time.time()})
+    }, llm_config={'llm': {'source': 'openai', 'model': 'test', 'skip_auth': True}},
+        options={'execution_issued_at': time.time()})
 
 
 def test_incremental_decision_and_audit():
@@ -31,7 +33,7 @@ def test_incremental_decision_and_audit():
     audited, _ = organize_step(request(phase='audit', scope='工作任务', identity=result['identity']),
                                call=lambda *args, **kwargs: '{"keep":["c1"],"reject":[]}')
     assert audited['accepted']
-    with pytest.raises(LLMTaskCallError):
+    with pytest.raises(ConversationCallError):
         organize_step(request(phase='audit', scope='工作任务', identity='wrong'), call=model)
 
 
@@ -39,14 +41,12 @@ def test_cancel_before_start_and_expired_requests():
     async def check():
         execution = str(uuid.uuid4())
         assert (await supervisor.cancel_execution(execution))['settled']
-        with pytest.raises(Exception) as canceled:
+        with pytest.raises(supervisor.ExecutionConflict):
             await supervisor.stream_execution(execution, request())
-        assert canceled.value.status_code == 409
         expired = request()
         expired.options['execution_issued_at'] = time.time() - 400
-        with pytest.raises(Exception) as rejected:
+        with pytest.raises(supervisor.ExecutionConflict):
             await supervisor.stream_execution(str(uuid.uuid4()), expired)
-        assert rejected.value.status_code == 409
         supervisor._canceled[execution] = time.monotonic() - 1
         supervisor._prune()
         assert execution not in supervisor._canceled
@@ -59,7 +59,7 @@ def test_real_worker_terminal_settlement():
         invalid = request(conversations=[{'id': ''}])
         response = await supervisor.stream_execution(execution, invalid)
         process = supervisor._executions[execution].process
-        events = [json.loads(line) async for line in response.body_iterator]
+        events = [json.loads(line) async for line in response]
         assert process.returncode == 0
         assert events[-1]['type'] == 'result'
         assert events[-1]['result']['status'] == 'failed'
@@ -108,14 +108,14 @@ def test_abnormal_exit_and_disconnected_stream(monkeypatch, disconnect):
         response = await supervisor.stream_execution(execution_id, request())
         process = supervisor._executions[execution_id].process
         if disconnect:
-            pending = asyncio.create_task(anext(response.body_iterator))
+            pending = asyncio.create_task(anext(response))
             await asyncio.sleep(0.02)
             pending.cancel()
             with pytest.raises(asyncio.CancelledError):
                 await pending
         else:
             process.kill()
-            events = [json.loads(line) async for line in response.body_iterator]
+            events = [json.loads(line) async for line in response]
             assert events[-1]['result']['error_code'] == 'worker_exited'
         assert process.poll() is not None
         assert execution_id not in supervisor._executions
@@ -125,20 +125,20 @@ def test_abnormal_exit_and_disconnected_stream(monkeypatch, disconnect):
 
 def test_parent_pipe_eof_terminates_worker(tmp_path):
     # Hold execution in a controlled model task, while running the real worker entrypoint.
-    from lazymind.chat.service import organizer_worker
+    from lazymind.conversation.conversation_grouping import worker as organizer_worker
     package = tmp_path / 'fixture_worker'
     package.mkdir()
     (package / '__init__.py').write_text('')
     (package / 'worker.py').write_text(open(organizer_worker.__file__).read())
-    (package / 'llm_task.py').write_text('''import time
-class LLMTaskRequest:
+    (package / 'schemas.py').write_text('''import time
+class GroupingRequest:
     @staticmethod
     def model_validate_json(raw): return raw
-def run_llm_task(request):
+def run_grouping(request):
     time.sleep(120)
 ''')
-    (package / 'conversation_organizer.py').write_text(
-        'from contextvars import ContextVar\n_STREAM_SINK = ContextVar("sink")\n')
+    (package / 'grouping.py').write_text(
+        'from contextvars import ContextVar\nfrom .schemas import run_grouping\n_STREAM_SINK = ContextVar("sink")\n')
     env = {**os.environ, 'PYTHONPATH': str(tmp_path)}
     proc = subprocess.Popen([sys.executable, '-m', 'fixture_worker.worker', str(os.getpid())],
                             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
@@ -158,19 +158,19 @@ def run_llm_task(request):
 
 def test_parent_crash_reaps_worker(tmp_path):
     import psutil
-    from lazymind.chat.service import organizer_worker
+    from lazymind.conversation.conversation_grouping import worker as organizer_worker
     package = tmp_path / 'fixture_worker'
     package.mkdir()
     (package / '__init__.py').write_text('')
     (package / 'worker.py').write_text(open(organizer_worker.__file__).read())
-    (package / 'llm_task.py').write_text('''import time
-class LLMTaskRequest:
+    (package / 'schemas.py').write_text('''import time
+class GroupingRequest:
     @staticmethod
     def model_validate_json(raw): return raw
-def run_llm_task(request): time.sleep(120)
+def run_grouping(request): time.sleep(120)
 ''')
-    (package / 'conversation_organizer.py').write_text(
-        'from contextvars import ContextVar\n_STREAM_SINK = ContextVar("sink")\n')
+    (package / 'grouping.py').write_text(
+        'from contextvars import ContextVar\nfrom .schemas import run_grouping\n_STREAM_SINK = ContextVar("sink")\n')
     script = '''import subprocess,sys,os,time
 worker=subprocess.Popen([sys.executable,'-m','fixture_worker.worker',str(os.getpid())],stdin=subprocess.PIPE,stdout=subprocess.DEVNULL)
 worker.stdin.write(b'{}\\n');worker.stdin.flush()

@@ -11,9 +11,13 @@ import requests
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from lazymind.chat.engine.agent_runtime.context_estimator import estimate_tokens
+from lazymind.common.token_estimation import estimate_tokens
 
-from .llm_task import LLMTaskCallError, LLMTaskRequest, _call_model, _json_object, _task_call_error
+from ..model_client import (
+    ConversationCallError, call_model, json_object, call_error, execute,
+)
+from ..schemas import ConversationResult
+from .schemas import GroupingRequest
 
 
 MAX_BATCH_SIZE = 50
@@ -133,7 +137,7 @@ def _referenced_cards(cards: list[dict[str, Any]], values: Any) -> list[dict[str
 _STREAM_SINK = ContextVar('organizer_stream_sink', default=None)
 
 
-def _model_json(request: LLMTaskRequest, payload: dict[str, Any], *,
+def _model_json(request: GroupingRequest, payload: dict[str, Any], *,
                 call: Callable[..., Any] | None = None,
                 usage: dict[str, Any] | None = None) -> dict[str, Any]:
     prompt = _prompt(payload)
@@ -146,21 +150,21 @@ def _model_json(request: LLMTaskRequest, payload: dict[str, Any], *,
     if sink:
         sink({'runtime_event': {'type': 'model_call_started'}})
     try:
-        raw = (call or _call_model)(request, prompt, response_format={'type': 'json_object'},
-                                    stream_output={'_stream_sink': sink} if sink else False,
-                                    default_timeout=300, max_retries=1)
+        raw = (call or call_model)(request, prompt, response_format={'type': 'json_object'},
+                                   stream_output={'_stream_sink': sink} if sink else False,
+                                   default_timeout=300, max_retries=1)
     except Exception as exc:
-        error = _task_call_error(exc)
+        error = call_error(exc)
         cause = exc
         while cause is not None:
             if isinstance(cause, requests.ConnectTimeout):
-                error = LLMTaskCallError('connection_timeout', retryable=True)
+                error = ConversationCallError('connection_timeout', retryable=True)
                 break
             if isinstance(cause, requests.ReadTimeout):
-                error = LLMTaskCallError('response_timeout', retryable=True)
+                error = ConversationCallError('response_timeout', retryable=True)
                 break
             if isinstance(cause, requests.ConnectionError):
-                error = LLMTaskCallError('connection_error', retryable=True)
+                error = ConversationCallError('connection_error', retryable=True)
                 break
             cause = cause.__cause__ or cause.__context__
         lazyllm.LOG.warning(f'organizer_model_failure code={error.code} exception={type(exc).__name__}')
@@ -168,16 +172,22 @@ def _model_json(request: LLMTaskRequest, payload: dict[str, Any], *,
         raise error from exc
     if tracked is not None:
         tracked['provider_usage'] = dict(lazyllm.globals['usage'])
-    return _json_object(raw)
+    return json_object(raw)
 
 
-def organize_step(request: LLMTaskRequest, *,
+def organize_step(request: GroupingRequest, *,
                   call: Callable[..., Any] | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
-    _ACTIVE_USAGE.set({})
+    token = _ACTIVE_USAGE.set({})
     try:
-        from .organizer_incremental import organize
+        from .incremental import organize
         return organize(request, call=call)
     except Exception as exc:
-        error = _task_call_error(exc)
+        error = call_error(exc)
         error.usage = _usage(0)
         raise error from exc
+    finally:
+        _ACTIVE_USAGE.reset(token)
+
+
+def run_grouping(request: GroupingRequest) -> ConversationResult:
+    return execute(request, organize_step)

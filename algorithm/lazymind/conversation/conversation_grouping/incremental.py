@@ -5,7 +5,7 @@ import hashlib
 import json
 import re
 
-from . import conversation_organizer as engine
+from . import grouping as engine
 
 
 def _validate_response(response, cards, items, allow_create):
@@ -45,9 +45,7 @@ def _validate_response(response, cards, items, allow_create):
 
 
 def organize(request, call=None):
-    data = request.input.data
-    if request.mode != 'llm' or request.tools or request.skills or request.input.files:
-        raise ValueError('invalid task config')
+    data = request.input
     identity = hashlib.sha256(json.dumps([
         engine.SYSTEM_PROMPT, data['snapshot_hash'],
         request.llm_config.get('llm'),
@@ -112,6 +110,6 @@ def organize(request, call=None):
                     'assignments': assignments, 'processed': len(items)}, engine._usage(calls)
         except Exception as exc:
             last = exc
-            if engine._task_call_error(exc).code != 'invalid_output':
+            if engine.call_error(exc).code != 'invalid_output':
                 raise
     raise last

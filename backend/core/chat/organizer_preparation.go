@@ -15,20 +15,20 @@ import (
 	"lazymind/core/conversationgroup"
 )
 
-// OrganizerOpeningPreparer reuses opening extraction and the provider protocol.
+// OrganizerTitlePreparer reuses opening extraction and the provider protocol.
 // It freezes evidence instead of re-reading a changing conversation during generation.
-type OrganizerOpeningPreparer struct{}
-type frozenOrganizerOpening struct {
-	Snapshot         openingSnapshot `json:"snapshot"`
-	ConversationID   string          `json:"conversation_id"`
-	SeedRevision     int64           `json:"seed_revision"`
-	MetadataRevision int64           `json:"metadata_revision"`
-	TitleRevision    int64           `json:"title_revision"`
-	JobID            string          `json:"job_id,omitempty"`
+type OrganizerTitlePreparer struct{}
+type frozenGroupingTitle struct {
+	Snapshot         conversationTitleSnapshot `json:"snapshot"`
+	ConversationID   string                    `json:"conversation_id"`
+	SeedRevision     int64                     `json:"seed_revision"`
+	MetadataRevision int64                     `json:"metadata_revision"`
+	TitleRevision    int64                     `json:"title_revision"`
+	JobID            string                    `json:"job_id,omitempty"`
 }
 
-func (OrganizerOpeningPreparer) Freeze(ctx context.Context, tx *gorm.DB, conv orm.Conversation) (conversationgroup.OpeningPreparation, error) {
-	out := conversationgroup.OpeningPreparation{Title: conv.DisplayName}
+func (OrganizerTitlePreparer) Freeze(ctx context.Context, tx *gorm.DB, conv orm.Conversation) (conversationgroup.TitlePreparation, error) {
+	out := conversationgroup.TitlePreparation{Title: conv.DisplayName}
 	var external int64
 	if err := tx.WithContext(ctx).Table("external_agent_bindings").Where("conversation_id=?", conv.ID).Count(&external).Error; err != nil {
 		return out, err
@@ -47,7 +47,7 @@ func (OrganizerOpeningPreparer) Freeze(ctx context.Context, tx *gorm.DB, conv or
 		if err := json.Unmarshal(meta.SourceHistoryIDs, &ids); err != nil {
 			return out, err
 		}
-		evidence, err := openingEvidence(tx, conv, ids)
+		evidence, err := conversationTitleEvidence(tx, conv, ids)
 		if err != nil {
 			return out, err
 		}
@@ -70,7 +70,7 @@ func (OrganizerOpeningPreparer) Freeze(ctx context.Context, tx *gorm.DB, conv or
 		out.Reason = "no_messages"
 		return out, nil
 	}
-	snap, err := loadOrganizerOpeningSnapshot(tx, conv)
+	snap, err := loadGroupingTitleSnapshot(tx, conv)
 	if err != nil {
 		return out, err
 	}
@@ -88,7 +88,7 @@ func (OrganizerOpeningPreparer) Freeze(ctx context.Context, tx *gorm.DB, conv or
 			return out, nil
 		}
 	}
-	frozen := frozenOrganizerOpening{Snapshot: snap, ConversationID: conv.ID, SeedRevision: meta.SeedRevision, MetadataRevision: meta.MetadataRevision, TitleRevision: conv.TitleRevision}
+	frozen := frozenGroupingTitle{Snapshot: snap, ConversationID: conv.ID, SeedRevision: meta.SeedRevision, MetadataRevision: meta.MetadataRevision, TitleRevision: conv.TitleRevision}
 	if meta.SourceHash == snap.Hash && (meta.Status == "pending" || meta.Status == "running") {
 		frozen.JobID = meta.JobID
 	}
@@ -96,17 +96,17 @@ func (OrganizerOpeningPreparer) Freeze(ctx context.Context, tx *gorm.DB, conv or
 	return out, err
 }
 
-func reuseOrganizerOpening(ctx context.Context, db *gorm.DB, uid string, frozen frozenOrganizerOpening) (algo.OpeningTaskResult, error) {
+func reuseGroupingTitle(ctx context.Context, db *gorm.DB, uid string, frozen frozenGroupingTitle) (algo.ConversationTitleResult, error) {
 	if frozen.JobID == "" {
 		var current orm.ConversationOpening
 		err := db.WithContext(ctx).Where("conversation_id=? AND user_id=? AND source_hash=?", frozen.ConversationID, uid, frozen.Snapshot.Hash).Take(&current).Error
 		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-			return algo.OpeningTaskResult{}, err
+			return algo.ConversationTitleResult{}, err
 		}
 		if err == nil && current.Status == "done" && (current.IntentStatus == "empty" || strings.TrimSpace(current.Summary) != "") {
 			var missing []string
 			_ = json.Unmarshal(current.MissingContext, &missing)
-			return algo.OpeningTaskResult{Status: "succeeded", Output: algo.OpeningDescription{Summary: current.Summary, IntentStatus: current.IntentStatus, MissingContext: missing}, Usage: current.UsageJSON}, nil
+			return algo.ConversationTitleResult{Status: "succeeded", Output: algo.ConversationTitle{Summary: current.Summary, IntentStatus: current.IntentStatus, MissingContext: missing}, Usage: current.UsageJSON}, nil
 		}
 		if err == nil && (current.Status == "pending" || current.Status == "running") {
 			frozen.JobID = current.JobID
@@ -115,7 +115,7 @@ func reuseOrganizerOpening(ctx context.Context, db *gorm.DB, uid string, frozen 
 	}
 	if frozen.JobID != "" {
 		// Reuse an exact frozen seed. A replaced seed must not supply a newer summary.
-		waitCtx, cancel := context.WithTimeout(ctx, time.Duration(3*(openingOption("LAZYMIND_OPENING_TIMEOUT_SECONDS", 60)+30))*time.Second)
+		waitCtx, cancel := context.WithTimeout(ctx, time.Duration(3*(conversationTitleOption("LAZYMIND_OPENING_TIMEOUT_SECONDS", 60)+30))*time.Second)
 		defer cancel()
 		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()
@@ -126,16 +126,16 @@ func reuseOrganizerOpening(ctx context.Context, db *gorm.DB, uid string, frozen 
 				break
 			}
 			if err != nil {
-				return algo.OpeningTaskResult{}, err
+				return algo.ConversationTitleResult{}, err
 			}
 			if meta.Status == "done" {
 				var missing []string
 				_ = json.Unmarshal(meta.MissingContext, &missing)
-				return algo.OpeningTaskResult{Status: "succeeded", Output: algo.OpeningDescription{Summary: meta.Summary, IntentStatus: meta.IntentStatus, MissingContext: missing}, Usage: meta.UsageJSON}, nil
+				return algo.ConversationTitleResult{Status: "succeeded", Output: algo.ConversationTitle{Summary: meta.Summary, IntentStatus: meta.IntentStatus, MissingContext: missing}, Usage: meta.UsageJSON}, nil
 			}
 			var job orm.AsyncJob
 			if err := db.WithContext(waitCtx).Where("id=?", frozen.JobID).Take(&job).Error; err != nil {
-				return algo.OpeningTaskResult{}, err
+				return algo.ConversationTitleResult{}, err
 			}
 			if meta.Status == "failed" || job.Status == "failed" || job.Status == "canceled" || job.Status == "succeeded" {
 				code := meta.ErrorCode
@@ -145,30 +145,30 @@ func reuseOrganizerOpening(ctx context.Context, db *gorm.DB, uid string, frozen 
 				if code == "" {
 					code = "model_failed"
 				}
-				return algo.OpeningTaskResult{Status: "failed", ErrorCode: code}, nil
+				return algo.ConversationTitleResult{Status: "failed", ErrorCode: code}, nil
 			}
 			select {
 			case <-waitCtx.Done():
-				return algo.OpeningTaskResult{Status: "failed", ErrorCode: "request_timeout"}, nil
+				return algo.ConversationTitleResult{Status: "failed", ErrorCode: "request_timeout"}, nil
 			case <-ticker.C:
 			}
 		}
 	}
-	return algo.OpeningTaskResult{}, nil
+	return algo.ConversationTitleResult{}, nil
 }
 
-func (OrganizerOpeningPreparer) ResolveBatch(ctx context.Context, db *gorm.DB, uid string, inputs []json.RawMessage, config map[string]any) ([]algo.OpeningTaskResult, error) {
-	results := make([]algo.OpeningTaskResult, len(inputs))
-	var pending []algo.OpeningBatchInput
+func (OrganizerTitlePreparer) ResolveBatch(ctx context.Context, db *gorm.DB, uid string, inputs []json.RawMessage, config map[string]any) ([]algo.ConversationTitleResult, error) {
+	results := make([]algo.ConversationTitleResult, len(inputs))
+	var pending []algo.ConversationTitleBatchInput
 	for i, raw := range inputs {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		var frozen frozenOrganizerOpening
+		var frozen frozenGroupingTitle
 		if err := json.Unmarshal(raw, &frozen); err != nil {
 			return nil, err
 		}
-		result, err := reuseOrganizerOpening(ctx, db, uid, frozen)
+		result, err := reuseGroupingTitle(ctx, db, uid, frozen)
 		if err != nil {
 			return nil, err
 		}
@@ -176,13 +176,13 @@ func (OrganizerOpeningPreparer) ResolveBatch(ctx context.Context, db *gorm.DB, u
 			results[i] = result
 		} else {
 			// Short request-local IDs avoid asking the model to copy UUIDs.
-			pending = append(pending, algo.OpeningBatchInput{ID: strconv.Itoa(i), Input: frozen.Snapshot.Input})
+			pending = append(pending, algo.ConversationTitleBatchInput{ID: strconv.Itoa(i), Input: frozen.Snapshot.Input})
 		}
 	}
 	if len(pending) == 0 {
 		return results, nil
 	}
-	generated, err := generateOrganizerOpenings(ctx, pending, config)
+	generated, err := generateGroupingTitles(ctx, pending, config)
 	if err != nil {
 		return nil, err
 	}
@@ -193,7 +193,7 @@ func (OrganizerOpeningPreparer) ResolveBatch(ctx context.Context, db *gorm.DB, u
 	return results, nil
 }
 
-func generateOrganizerOpenings(ctx context.Context, inputs []algo.OpeningBatchInput, config map[string]any) (map[string]algo.OpeningTaskResult, error) {
+func generateGroupingTitles(ctx context.Context, inputs []algo.ConversationTitleBatchInput, config map[string]any) (map[string]algo.ConversationTitleResult, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -206,15 +206,15 @@ func generateOrganizerOpenings(ctx context.Context, inputs []algo.OpeningBatchIn
 		requestConfig["llm"] = selected
 	}
 	// Match the platform model-call default; allow extra time for provider queueing.
-	timeout := openingOption("LAZYMIND_ORGANIZER_OPENING_BATCH_TIMEOUT_SECONDS", 600)
-	result, err := algo.DescribeConversationOpeningBatch(ctx, inputs, requestConfig, timeout)
+	timeout := conversationTitleOption("LAZYMIND_ORGANIZER_OPENING_BATCH_TIMEOUT_SECONDS", 600)
+	result, err := algo.GenerateConversationTitles(ctx, inputs, requestConfig, timeout)
 	if err == nil && result.Status != "succeeded" && result.ErrorCode == "token_limit" && aux {
-		result, err = algo.DescribeConversationOpeningBatch(ctx, inputs, map[string]any{"llm": config["llm"]}, timeout)
+		result, err = algo.GenerateConversationTitles(ctx, inputs, map[string]any{"llm": config["llm"]}, timeout)
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	out := make(map[string]algo.OpeningTaskResult, len(inputs))
+	out := make(map[string]algo.ConversationTitleResult, len(inputs))
 	if err != nil {
 		result.Status, result.ErrorCode = "failed", "transport_error"
 	}
@@ -228,7 +228,7 @@ func generateOrganizerOpenings(ctx context.Context, inputs []algo.OpeningBatchIn
 				result.Status, result.ErrorCode = "failed", "invalid_output"
 				break
 			}
-			out[item.ID] = algo.OpeningTaskResult{Status: "succeeded", Output: item.OpeningDescription}
+			out[item.ID] = algo.ConversationTitleResult{Status: "succeeded", Output: item.ConversationTitle}
 		}
 		if len(out) != len(inputs) {
 			result.Status, result.ErrorCode = "failed", "invalid_output"
@@ -243,11 +243,11 @@ func generateOrganizerOpenings(ctx context.Context, inputs []algo.OpeningBatchIn
 	}
 	if len(inputs) > 1 && (result.ErrorCode == "token_limit" || result.ErrorCode == "output_too_large" || result.ErrorCode == "invalid_output") {
 		mid := len(inputs) / 2
-		left, err := generateOrganizerOpenings(ctx, inputs[:mid], config)
+		left, err := generateGroupingTitles(ctx, inputs[:mid], config)
 		if err != nil {
 			return nil, err
 		}
-		right, err := generateOrganizerOpenings(ctx, inputs[mid:], config)
+		right, err := generateGroupingTitles(ctx, inputs[mid:], config)
 		if err != nil {
 			return nil, err
 		}
@@ -260,17 +260,17 @@ func generateOrganizerOpenings(ctx context.Context, inputs []algo.OpeningBatchIn
 		result.ErrorCode = "model_failed"
 	}
 	for _, input := range inputs {
-		out[input.ID] = algo.OpeningTaskResult{Status: "failed", ErrorCode: result.ErrorCode}
+		out[input.ID] = algo.ConversationTitleResult{Status: "failed", ErrorCode: result.ErrorCode}
 	}
 	return out, nil
 }
 
-func (OrganizerOpeningPreparer) Persist(ctx context.Context, tx *gorm.DB, conv orm.Conversation, raw json.RawMessage, result algo.OpeningTaskResult) error {
-	var frozen frozenOrganizerOpening
+func (OrganizerTitlePreparer) Persist(ctx context.Context, tx *gorm.DB, conv orm.Conversation, raw json.RawMessage, result algo.ConversationTitleResult) error {
+	var frozen frozenGroupingTitle
 	if err := json.Unmarshal(raw, &frozen); err != nil {
 		return err
 	}
-	current, err := loadOrganizerOpeningSnapshot(tx, conv)
+	current, err := loadGroupingTitleSnapshot(tx, conv)
 	if err != nil {
 		return err
 	}
@@ -313,7 +313,7 @@ func (OrganizerOpeningPreparer) Persist(ctx context.Context, tx *gorm.DB, conv o
 	meta.JobID = ""
 	meta.BackfillID = ""
 	meta.WindowClosed = result.Output.IntentStatus == "ready"
-	meta.GeneratorVersion = openingGeneratorVersion
+	meta.GeneratorVersion = conversationTitleGeneratorVersion
 	meta.GenerationCount++
 	meta.CallCount++
 	meta.UsageJSON = result.Usage

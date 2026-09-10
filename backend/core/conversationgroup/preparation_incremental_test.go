@@ -20,12 +20,12 @@ type interruptedPreparation struct {
 	sizes []int
 }
 
-func (p *interruptedPreparation) ResolveBatch(ctx context.Context, db *gorm.DB, uid string, inputs []json.RawMessage, config map[string]any) ([]algo.OpeningTaskResult, error) {
+func (p *interruptedPreparation) ResolveBatch(ctx context.Context, db *gorm.DB, uid string, inputs []json.RawMessage, config map[string]any) ([]algo.ConversationTitleResult, error) {
 	p.sizes = append(p.sizes, len(inputs))
 	return p.preparationFixture.ResolveBatch(ctx, db, uid, inputs, config)
 }
 
-func (p *interruptedPreparation) Persist(_ context.Context, _ *gorm.DB, conv orm.Conversation, _ json.RawMessage, _ algo.OpeningTaskResult) error {
+func (p *interruptedPreparation) Persist(_ context.Context, _ *gorm.DB, conv orm.Conversation, _ json.RawMessage, _ algo.ConversationTitleResult) error {
 	if p.fail && conv.ID == "c01" {
 		return errors.New("injected persistence failure")
 	}
@@ -33,10 +33,10 @@ func (p *interruptedPreparation) Persist(_ context.Context, _ *gorm.DB, conv orm
 }
 
 func TestPreparationBatchRollbackAndResume(t *testing.T) {
-	previous := openingPreparer
+	previous := titlePreparer
 	fixture := &interruptedPreparation{fail: true}
-	openingPreparer = fixture
-	t.Cleanup(func() { openingPreparer = previous })
+	titlePreparer = fixture
+	t.Cleanup(func() { titlePreparer = previous })
 	db := orm.MigrateTestDB(t, &orm.Conversation{}, &orm.ConversationOrganizerRun{}, &orm.ConversationOrganizerSnapshotItem{}, &orm.AsyncJob{}, &orm.ConversationGroupMember{})
 	now := time.Now().UTC()
 	until := now.Add(time.Hour)
@@ -88,27 +88,27 @@ func TestPreparationBatchRollbackAndResume(t *testing.T) {
 
 type preparationFixture struct{}
 
-func (preparationFixture) Freeze(context.Context, *gorm.DB, orm.Conversation) (OpeningPreparation, error) {
-	return OpeningPreparation{}, nil
+func (preparationFixture) Freeze(context.Context, *gorm.DB, orm.Conversation) (TitlePreparation, error) {
+	return TitlePreparation{}, nil
 }
-func (preparationFixture) ResolveBatch(_ context.Context, _ *gorm.DB, _ string, inputs []json.RawMessage, _ map[string]any) ([]algo.OpeningTaskResult, error) {
+func (preparationFixture) ResolveBatch(_ context.Context, _ *gorm.DB, _ string, inputs []json.RawMessage, _ map[string]any) ([]algo.ConversationTitleResult, error) {
 	if len(inputs) > 20 {
 		return nil, fmt.Errorf("oversized batch: %d", len(inputs))
 	}
-	results := make([]algo.OpeningTaskResult, len(inputs))
+	results := make([]algo.ConversationTitleResult, len(inputs))
 	for i := range results {
-		results[i] = algo.OpeningTaskResult{Status: "succeeded", Output: algo.OpeningDescription{Summary: "处理工作", IntentStatus: "provisional"}}
+		results[i] = algo.ConversationTitleResult{Status: "succeeded", Output: algo.ConversationTitle{Summary: "处理工作", IntentStatus: "provisional"}}
 	}
 	return results, nil
 }
-func (preparationFixture) Persist(context.Context, *gorm.DB, orm.Conversation, json.RawMessage, algo.OpeningTaskResult) error {
+func (preparationFixture) Persist(context.Context, *gorm.DB, orm.Conversation, json.RawMessage, algo.ConversationTitleResult) error {
 	return nil
 }
 
 func TestPreparationWritesScaleAndResume(t *testing.T) {
-	previous := openingPreparer
-	openingPreparer = preparationFixture{}
-	t.Cleanup(func() { openingPreparer = previous })
+	previous := titlePreparer
+	titlePreparer = preparationFixture{}
+	t.Cleanup(func() { titlePreparer = previous })
 	measurements := []int{}
 	for _, n := range []int{1000, 10000} {
 		t.Run(fmt.Sprint(n), func(t *testing.T) {

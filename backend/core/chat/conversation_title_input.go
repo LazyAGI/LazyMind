@@ -12,7 +12,7 @@ import (
 	"lazymind/core/common/orm"
 )
 
-type openingSnapshot struct {
+type conversationTitleSnapshot struct {
 	Input        json.RawMessage
 	IDs          []string
 	Hash         string
@@ -23,53 +23,53 @@ type openingSnapshot struct {
 }
 
 // Bound model calls when a historical conversation starts with only semantic-empty chatter.
-const maxOpeningScannedTurns = 12
+const maxTitleScannedTurns = 12
 
-type openingEvidenceRow struct {
+type conversationTitleEvidenceRow struct {
 	ID, RawContent, Result string
 	Ext                    json.RawMessage
 }
 
-func openingHash(value any) string {
+func conversationTitleHash(value any) string {
 	raw, _ := json.Marshal(value)
 	hash := sha256.Sum256(raw)
 	return hex.EncodeToString(hash[:])
 }
 
-func openingEvidenceRows(rows []openingEvidenceRow) []openingEvidenceRow {
+func conversationTitleEvidenceRows(rows []conversationTitleEvidenceRow) []conversationTitleEvidenceRow {
 	for i := range rows {
-		files := openingAttachments(rows[i].Ext)
+		files := conversationTitleAttachments(rows[i].Ext)
 		for _, file := range files {
 			delete(file, "description")
 			delete(file, "description_status")
 		}
 		rows[i].Ext, _ = json.Marshal(files)
-		rows[i].Result = openingClarification(rows[i].Result)
+		rows[i].Result = conversationTitleClarification(rows[i].Result)
 	}
 	return rows
 }
 
-func openingEvidence(db *gorm.DB, conv orm.Conversation, ids []string) (string, error) {
-	rows := []openingEvidenceRow{}
+func conversationTitleEvidence(db *gorm.DB, conv orm.Conversation, ids []string) (string, error) {
+	rows := []conversationTitleEvidenceRow{}
 	err := db.Model(&orm.ChatHistory{}).Select("id, raw_content, result, ext").Where("conversation_id = ? AND id IN ?", conv.ID, ids).Order("seq ASC, create_time ASC, id ASC").Find(&rows).Error
-	return openingHash([]any{openingEvidenceRows(rows), conv.SourceContext, conv.SourceSelectedText}), err
+	return conversationTitleHash([]any{conversationTitleEvidenceRows(rows), conv.SourceContext, conv.SourceSelectedText}), err
 }
 
-var openingSourceReference = regexp.MustCompile(`这个|那个|这段|这份|这些|上述|前面|刚才|上面|第.{1,3}(个|种)|照此|按此|(?i)\b(this|that|above|previous)\b`)
-var openingDataURI = regexp.MustCompile(`data:[^\s,]+;base64,[A-Za-z0-9+/=]+`)
+var conversationTitleSourceReference = regexp.MustCompile(`这个|那个|这段|这份|这些|上述|前面|刚才|上面|第.{1,3}(个|种)|照此|按此|(?i)\b(this|that|above|previous)\b`)
+var conversationTitleDataURI = regexp.MustCompile(`data:[^\s,]+;base64,[A-Za-z0-9+/=]+`)
 
-func openingText(text string) string {
-	return openingDataURI.ReplaceAllString(stripThinkTags(stripToolTags(text)), "[attachment]")
+func conversationTitleText(text string) string {
+	return conversationTitleDataURI.ReplaceAllString(stripThinkTags(stripToolTags(text)), "[attachment]")
 }
-func openingClarification(text string) string {
-	text = strings.TrimSpace(openingText(text))
+func conversationTitleClarification(text string) string {
+	text = strings.TrimSpace(conversationTitleText(text))
 	if len([]rune(text)) <= 2000 && strings.ContainsAny(text, "?？") {
 		return text
 	}
 	return ""
 }
 
-func openingGreeting(text string) bool {
+func conversationTitleGreeting(text string) bool {
 	switch strings.ToLower(strings.Trim(text, " \n\t!！。.,，?？")) {
 	case "", "你好", "您好", "嗨", "hi", "hello", "hey":
 		return true
@@ -77,7 +77,7 @@ func openingGreeting(text string) bool {
 	return false
 }
 
-func openingAttachments(ext json.RawMessage) []map[string]any {
+func conversationTitleAttachments(ext json.RawMessage) []map[string]any {
 	var data struct {
 		Input []map[string]any `json:"input"`
 	}
@@ -103,7 +103,7 @@ func openingAttachments(ext json.RawMessage) []map[string]any {
 }
 
 // Reuse image descriptions already saved with the answer; never execute tools here.
-func openingAttachmentDescriptions(files []map[string]any, answer string) {
+func conversationTitleAttachmentDescriptions(files []map[string]any, answer string) {
 	for _, block := range toolResultTagPattern.FindAllString(answer, -1) {
 		var result struct {
 			Name   string          `json:"name"`
@@ -127,22 +127,22 @@ func openingAttachmentDescriptions(files []map[string]any, answer string) {
 		for _, file := range files {
 			name := file["name"].(string)
 			if name == description.URL || path.Base(name) == path.Base(description.URL) {
-				file["description"], file["description_status"] = openingText(description.Description), "available"
+				file["description"], file["description_status"] = conversationTitleText(description.Description), "available"
 			}
 		}
 	}
 }
 
-func loadOpeningSnapshot(db *gorm.DB, conv orm.Conversation, ignoredHistoryIDs ...string) (openingSnapshot, error) {
-	return loadOpeningSnapshotInput(db, conv, false, ignoredHistoryIDs...)
+func loadConversationTitleSnapshot(db *gorm.DB, conv orm.Conversation, ignoredHistoryIDs ...string) (conversationTitleSnapshot, error) {
+	return loadConversationTitleSnapshotInput(db, conv, false, ignoredHistoryIDs...)
 }
 
-func loadOrganizerOpeningSnapshot(db *gorm.DB, conv orm.Conversation) (openingSnapshot, error) {
-	return loadOpeningSnapshotInput(db, conv, true)
+func loadGroupingTitleSnapshot(db *gorm.DB, conv orm.Conversation) (conversationTitleSnapshot, error) {
+	return loadConversationTitleSnapshotInput(db, conv, true)
 }
 
-func loadOpeningSnapshotInput(db *gorm.DB, conv orm.Conversation, freezeActive bool, ignoredHistoryIDs ...string) (openingSnapshot, error) {
-	var snapshot openingSnapshot
+func loadConversationTitleSnapshotInput(db *gorm.DB, conv orm.Conversation, freezeActive bool, ignoredHistoryIDs ...string) (conversationTitleSnapshot, error) {
+	var snapshot conversationTitleSnapshot
 	ignored := make(map[string]struct{}, len(ignoredHistoryIDs))
 	for _, id := range ignoredHistoryIDs {
 		ignored[id] = struct{}{}
@@ -154,7 +154,7 @@ func loadOpeningSnapshotInput(db *gorm.DB, conv orm.Conversation, freezeActive b
 	defer rows.Close()
 	messages := []map[string]any{}
 	files := []map[string]any{}
-	evidence := []openingEvidenceRow{}
+	evidence := []conversationTitleEvidenceRow{}
 	needsSource := false
 	for rows.Next() {
 		var row orm.ChatHistory
@@ -165,30 +165,30 @@ func loadOpeningSnapshotInput(db *gorm.DB, conv orm.Conversation, freezeActive b
 			snapshot.Active = true
 			break
 		}
-		text := strings.TrimSpace(openingText(displayChatHistoryContent(row.RawContent)))
-		attachments := openingAttachments(row.Ext)
-		openingAttachmentDescriptions(attachments, row.Result)
+		text := strings.TrimSpace(conversationTitleText(displayChatHistoryContent(row.RawContent)))
+		attachments := conversationTitleAttachments(row.Ext)
+		conversationTitleAttachmentDescriptions(attachments, row.Result)
 		if _, skip := ignored[row.ID]; skip {
 			snapshot.IDs = append(snapshot.IDs, row.ID)
-			evidence = append(evidence, openingEvidenceRow{row.ID, row.RawContent, row.Result, row.Ext})
+			evidence = append(evidence, conversationTitleEvidenceRow{row.ID, row.RawContent, row.Result, row.Ext})
 			continue
 		}
-		if len(snapshot.IDs) >= maxOpeningScannedTurns {
+		if len(snapshot.IDs) >= maxTitleScannedTurns {
 			break
 		}
 		if snapshot.DefaultTitle == "" {
 			snapshot.DefaultTitle = GetDefaultDisplayName(conv.ID, []map[string]any{{"text": text}})
 		}
-		if openingGreeting(text) && len(attachments) == 0 {
+		if conversationTitleGreeting(text) && len(attachments) == 0 {
 			continue
 		}
 		snapshot.Turns++
-		needsSource = needsSource || openingSourceReference.MatchString(text)
+		needsSource = needsSource || conversationTitleSourceReference.MatchString(text)
 		snapshot.IDs = append(snapshot.IDs, row.ID)
-		evidence = append(evidence, openingEvidenceRow{row.ID, row.RawContent, row.Result, row.Ext})
+		evidence = append(evidence, conversationTitleEvidenceRow{row.ID, row.RawContent, row.Result, row.Ext})
 		messages = append(messages, map[string]any{"role": "user", "content": text})
 		files = append(files, attachments...)
-		answer := openingClarification(row.Result)
+		answer := conversationTitleClarification(row.Result)
 		if row.RunStatus == "generating" || row.RunStatus == "running" {
 			answer = ""
 		}
@@ -205,7 +205,7 @@ func loadOpeningSnapshotInput(db *gorm.DB, conv orm.Conversation, freezeActive b
 	}
 	data := map[string]any{"attachments": files}
 	if validChildConversation(conv) && needsSource {
-		data["source_selected_text"] = openingText(conv.SourceSelectedText)
+		data["source_selected_text"] = conversationTitleText(conv.SourceSelectedText)
 		var source conversationSourceContextSnapshot
 		if json.Unmarshal(conv.SourceContext, &source) == nil {
 			contextMessages := []map[string]any{}
@@ -213,14 +213,14 @@ func loadOpeningSnapshotInput(db *gorm.DB, conv orm.Conversation, freezeActive b
 				role, _ := message["role"].(string)
 				content, _ := message["content"].(string)
 				if role == "user" || role == "assistant" {
-					contextMessages = append(contextMessages, map[string]any{"role": role, "content": openingText(content)})
+					contextMessages = append(contextMessages, map[string]any{"role": role, "content": conversationTitleText(content)})
 				}
 			}
 			data["source_context"] = contextMessages
 		}
 	}
 	snapshot.Input, _ = json.Marshal(map[string]any{"messages": messages, "data": data})
-	snapshot.Hash = openingHash(snapshot.Input)
-	snapshot.Evidence = openingHash([]any{openingEvidenceRows(evidence), conv.SourceContext, conv.SourceSelectedText})
+	snapshot.Hash = conversationTitleHash(snapshot.Input)
+	snapshot.Evidence = conversationTitleHash([]any{conversationTitleEvidenceRows(evidence), conv.SourceContext, conv.SourceSelectedText})
 	return snapshot, nil
 }

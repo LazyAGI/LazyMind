@@ -40,7 +40,7 @@ func runDTO(ctx context.Context, db *gorm.DB, row orm.ConversationOrganizerRun, 
 	}
 	preparationBatchTotal := preparation.BatchTotal
 	if preparationBatchTotal == 0 && preparation.Total > 0 {
-		preparationBatchTotal = (preparation.Total + openingPreparationBatchSize - 1) / openingPreparationBatchSize
+		preparationBatchTotal = (preparation.Total + titlePreparationBatchSize - 1) / titlePreparationBatchSize
 	}
 	preparationBatchCurrent := min(preparation.BatchCurrent+1, preparationBatchTotal)
 	if len(row.PreparationJSON) > 0 && (row.Status == "succeeded" || row.Status == "undone") {

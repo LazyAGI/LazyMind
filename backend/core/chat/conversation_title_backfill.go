@@ -17,26 +17,26 @@ import (
 	"lazymind/core/store"
 )
 
-var openingExplicitRetryErrorCodes = []string{
+var conversationTitleExplicitRetryErrorCodes = []string{
 	"token_limit", "input_too_large", "output_too_large", "model_configuration", "authentication_failed", "invalid_request", "not_found",
 	"invalid_output", "model_failed", "transport_error", "request_timeout", "rate_limited", "service_unavailable",
 }
 
-func enqueueOpeningScan(ctx context.Context, db *gorm.DB, batch orm.ConversationOpeningBackfill) error {
+func enqueueTitleScan(ctx context.Context, db *gorm.DB, batch orm.ConversationOpeningBackfill) error {
 	var failed int64
 	key := fmt.Sprintf("%s:%s:%d", batch.ID, batch.CursorID, batch.Scanned)
-	if err := db.Model(&orm.AsyncJob{}).Where("job_type = ? AND idempotency_key = ? AND status = ?", openingBackfillJobType, key, "failed").Count(&failed).Error; err != nil {
+	if err := db.Model(&orm.AsyncJob{}).Where("job_type = ? AND idempotency_key = ? AND status = ?", conversationTitleBackfillJobType, key, "failed").Count(&failed).Error; err != nil {
 		return err
 	}
 	if failed > 0 {
 		return nil
 	}
-	_, err := asyncjob.Enqueue(ctx, db, asyncjob.EnqueueRequest{JobType: openingBackfillJobType, ResourceType: "opening_backfill", ResourceID: batch.ID,
+	_, err := asyncjob.Enqueue(ctx, db, asyncjob.EnqueueRequest{JobType: conversationTitleBackfillJobType, ResourceType: "opening_backfill", ResourceID: batch.ID,
 		SkipSucceeded: true, IdempotencyKey: key, Payload: map[string]string{}, CreateUserID: batch.UserID, MaxAttempts: 3})
 	return err
 }
 
-func (s *openingService) backfill(ctx context.Context, job asyncjob.Job, reporter asyncjob.Reporter) (asyncjob.Result, error) {
+func (s *conversationTitleService) backfill(ctx context.Context, job asyncjob.Job, reporter asyncjob.Reporter) (asyncjob.Result, error) {
 	if job.ResourceType == "conversation" {
 		var meta orm.ConversationOpening
 		if err := s.db.WithContext(ctx).Where("conversation_id = ?", job.ResourceID).Take(&meta).Error; err != nil {
@@ -58,7 +58,7 @@ func (s *openingService) backfill(ctx context.Context, job asyncjob.Job, reporte
 	if batch.Status == "paused" || batch.ScanComplete {
 		return asyncjob.Result{}, nil
 	}
-	query := openingConversations(s.db.WithContext(ctx)).Where("create_user_id = ?", batch.UserID)
+	query := conversationTitleConversations(s.db.WithContext(ctx)).Where("create_user_id = ?", batch.UserID)
 	if batch.CursorTime != nil {
 		query = query.Where("updated_at < ? OR (updated_at = ? AND id < ?)", batch.CursorTime, batch.CursorTime, batch.CursorID)
 	}
@@ -102,15 +102,15 @@ func (s *openingService) backfill(ctx context.Context, job asyncjob.Job, reporte
 			return err
 		}
 		if !batch.ScanComplete && batch.Status != "paused" {
-			return enqueueOpeningScan(ctx, tx, batch)
+			return enqueueTitleScan(ctx, tx, batch)
 		}
 		return nil
 	})
 	return asyncjob.Result{}, err
 }
 
-// OpeningBackfill controls the user's one persistent batch; summaries never leave Core.
-func OpeningBackfill(w http.ResponseWriter, r *http.Request) {
+// ConversationTitleBackfill controls the user's one persistent batch; summaries never leave Core.
+func ConversationTitleBackfill(w http.ResponseWriter, r *http.Request) {
 	userID := store.UserID(r)
 	db := store.DB()
 	var batch orm.ConversationOpeningBackfill
@@ -127,7 +127,7 @@ func OpeningBackfill(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		err := db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
-			batch = orm.ConversationOpeningBackfill{ID: "opening_" + common.GenerateID(), UserID: userID, Version: openingGeneratorVersion, Status: "running", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+			batch = orm.ConversationOpeningBackfill{ID: "opening_" + common.GenerateID(), UserID: userID, Version: conversationTitleGeneratorVersion, Status: "running", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
 			if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "user_id"}}, DoNothing: true}).Create(&batch).Error; err != nil {
 				return err
 			}
@@ -139,7 +139,7 @@ func OpeningBackfill(w http.ResponseWriter, r *http.Request) {
 				if err := tx.Model(&batch).Update("status", "paused").Error; err != nil {
 					return err
 				}
-				return tx.Model(&orm.AsyncJob{}).Where("job_type = ? AND create_user_id = ? AND status = ?", openingBackfillJobType, userID, "pending").Updates(map[string]any{"status": "canceled", "updated_at": time.Now().UTC()}).Error
+				return tx.Model(&orm.AsyncJob{}).Where("job_type = ? AND create_user_id = ? AND status = ?", conversationTitleBackfillJobType, userID, "pending").Updates(map[string]any{"status": "canceled", "updated_at": time.Now().UTC()}).Error
 			}
 			if body.Action == "start" && batch.Status == "paused" {
 				return nil
@@ -149,23 +149,23 @@ func OpeningBackfill(w http.ResponseWriter, r *http.Request) {
 					return err
 				}
 				// Paused jobs are canceled rather than left holding a worker or consuming retry attempts.
-				if err := tx.Model(&orm.AsyncJob{}).Where("job_type = ? AND create_user_id = ? AND status IN ?", openingBackfillJobType, userID, []string{"canceled", "succeeded"}).
+				if err := tx.Model(&orm.AsyncJob{}).Where("job_type = ? AND create_user_id = ? AND status IN ?", conversationTitleBackfillJobType, userID, []string{"canceled", "succeeded"}).
 					Where("resource_id IN (SELECT conversation_id FROM conversation_opening_metadata WHERE backfill_id = ? AND status = 'pending')", batch.ID).
 					Updates(map[string]any{"status": "pending", "attempt_count": 0, "next_run_at": time.Now().UTC()}).Error; err != nil {
 					return err
 				}
 			}
 			if body.Action == "retry" {
-				if err := tx.Model(&orm.AsyncJob{}).Where("job_type = ? AND resource_type = ? AND resource_id = ? AND status = ?", openingBackfillJobType, "opening_backfill", batch.ID, "failed").
+				if err := tx.Model(&orm.AsyncJob{}).Where("job_type = ? AND resource_type = ? AND resource_id = ? AND status = ?", conversationTitleBackfillJobType, "opening_backfill", batch.ID, "failed").
 					Updates(map[string]any{"status": "pending", "attempt_count": 0, "next_run_at": time.Now().UTC()}).Error; err != nil {
 					return err
 				}
-				config, err := newOpeningService(tx).loadConfig(r.Context(), tx, userID)
+				config, err := newConversationTitleService(tx).loadConfig(r.Context(), tx, userID)
 				if err != nil {
 					return err
 				}
 				var failed []orm.ConversationOpening
-				if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("user_id = ? AND status = ? AND error_code IN ?", userID, "failed", openingExplicitRetryErrorCodes).Find(&failed).Error; err != nil {
+				if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("user_id = ? AND status = ? AND error_code IN ?", userID, "failed", conversationTitleExplicitRetryErrorCodes).Find(&failed).Error; err != nil {
 					return err
 				}
 				for _, meta := range failed {
@@ -173,7 +173,7 @@ func OpeningBackfill(w http.ResponseWriter, r *http.Request) {
 						ConfigurationHash string `json:"configuration_hash"`
 					}
 					_ = json.Unmarshal(meta.UsageJSON, &usage)
-					if !openingShouldRetry(meta.ErrorCode, usage.ConfigurationHash, openingConfigHash(config)) {
+					if !conversationTitleShouldRetry(meta.ErrorCode, usage.ConfigurationHash, conversationTitleConfigHash(config)) {
 						continue
 					}
 					meta.SeedRevision++
@@ -181,11 +181,11 @@ func OpeningBackfill(w http.ResponseWriter, r *http.Request) {
 					meta.Status = "pending"
 					meta.ErrorCode = ""
 					meta.UpdatedAt = time.Now().UTC()
-					kind := openingJobType
+					kind := conversationTitleJobType
 					if meta.BackfillID != "" {
-						kind = openingBackfillJobType
+						kind = conversationTitleBackfillJobType
 					}
-					if err := enqueueOpeningVersion(r.Context(), tx, &meta, kind); err != nil {
+					if err := enqueueTitleVersion(r.Context(), tx, &meta, kind); err != nil {
 						return err
 					}
 				}
@@ -194,7 +194,7 @@ func OpeningBackfill(w http.ResponseWriter, r *http.Request) {
 			if batch.ScanComplete {
 				return nil
 			}
-			return enqueueOpeningScan(r.Context(), tx, batch)
+			return enqueueTitleScan(r.Context(), tx, batch)
 		})
 		if err != nil {
 			common.ReplyErr(w, "update backfill failed", http.StatusInternalServerError)
@@ -232,7 +232,7 @@ func OpeningBackfill(w http.ResponseWriter, r *http.Request) {
 	}
 	if !batch.ScanComplete && batch.Status != "paused" {
 		var failedScans int64
-		if err := db.WithContext(r.Context()).Model(&orm.AsyncJob{}).Where("job_type = ? AND resource_type = ? AND resource_id = ? AND status = ?", openingBackfillJobType, "opening_backfill", batch.ID, "failed").Count(&failedScans).Error; err != nil {
+		if err := db.WithContext(r.Context()).Model(&orm.AsyncJob{}).Where("job_type = ? AND resource_type = ? AND resource_id = ? AND status = ?", conversationTitleBackfillJobType, "opening_backfill", batch.ID, "failed").Count(&failedScans).Error; err != nil {
 			common.ReplyErr(w, "load scan state failed", 500)
 			return
 		}
@@ -250,7 +250,7 @@ func OpeningBackfill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var remaining int64
-	if err := openingConversations(db.WithContext(r.Context())).Where("create_user_id = ?", userID).
+	if err := conversationTitleConversations(db.WithContext(r.Context())).Where("create_user_id = ?", userID).
 		Where("NOT EXISTS (SELECT 1 FROM conversation_opening_metadata WHERE conversation_id = conversations.id)").Count(&remaining).Error; err != nil {
 		common.ReplyErr(w, "load remaining conversations failed", 500)
 		return
@@ -258,7 +258,7 @@ func OpeningBackfill(w http.ResponseWriter, r *http.Request) {
 	writeConversationJSON(w, http.StatusOK, map[string]any{"batch": batch, "completed": states["done"], "failed": states["failed"], "skipped": batch.Skipped + states["skipped"], "pending": revision.Pending, "revision": revision.Revision, "unprocessed": remaining + states["pending"] + states["running"]})
 }
 
-func openingSameConfigRetryable(code string) bool {
+func conversationTitleSameConfigRetryable(code string) bool {
 	switch code {
 	case "invalid_output", "model_failed", "transport_error", "request_timeout", "rate_limited", "service_unavailable":
 		return true
@@ -266,8 +266,8 @@ func openingSameConfigRetryable(code string) bool {
 	return false
 }
 
-func openingShouldRetry(code, previousConfigHash, currentConfigHash string) bool {
-	return previousConfigHash != currentConfigHash || openingSameConfigRetryable(code)
+func conversationTitleShouldRetry(code, previousConfigHash, currentConfigHash string) bool {
+	return previousConfigHash != currentConfigHash || conversationTitleSameConfigRetryable(code)
 }
 
 func RenameConversation(w http.ResponseWriter, r *http.Request) {

@@ -32,8 +32,9 @@ def main():
         os._exit(1)
 
     threading.Thread(target=watch_parent, name='organizer-parent-watch', daemon=True).start()
-    from .llm_task import LLMTaskRequest, run_llm_task
-    from .conversation_organizer import _STREAM_SINK
+    from .schemas import GroupingRequest
+    from .grouping import run_grouping
+    from .grouping import _STREAM_SINK
     lock = threading.Lock()
 
     def emit(event):
@@ -60,7 +61,7 @@ def main():
 
     token = _STREAM_SINK.set(sink)
     try:
-        result = run_llm_task(LLMTaskRequest.model_validate_json(raw))
+        result = run_grouping(GroupingRequest.model_validate_json(raw))
         emit({'type': 'result', 'result': result.model_dump()})
     except Exception as exc:
         emit({'type': 'result', 'result': {'status': 'failed', 'task_id': '',

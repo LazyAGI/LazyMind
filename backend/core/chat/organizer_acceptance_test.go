@@ -52,7 +52,7 @@ func TestOrganizerProductPath(t *testing.T) {
 		}
 		// One item genuinely needs preparation; the rest reuse exact frozen summaries.
 		if i > 0 {
-			snap, err := loadOrganizerOpeningSnapshot(db.DB, conv)
+			snap, err := loadGroupingTitleSnapshot(db.DB, conv)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -66,7 +66,7 @@ func TestOrganizerProductPath(t *testing.T) {
 	if err := db.Create(&orm.Conversation{ID: "product-empty", DisplayName: "空会话", ChatExecutor: "lazymind", BaseModel: base}).Error; err != nil {
 		t.Fatal(err)
 	}
-	conversationgroup.RegisterOpeningPreparer(OrganizerOpeningPreparer{})
+	conversationgroup.RegisterTitlePreparer(OrganizerTitlePreparer{})
 	conversationgroup.RegisterAsyncJobs()
 	invoke := func(handler http.HandlerFunc, method string, body any, vars map[string]string) *httptest.ResponseRecorder {
 		raw, _ := json.Marshal(body)

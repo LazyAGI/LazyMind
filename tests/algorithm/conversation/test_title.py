@@ -1,18 +1,19 @@
 import json
 
 import pytest
-from lazymind.chat.service import llm_task
-from lazymind.chat.service.llm_task import LLMTaskRequest
+from lazymind.conversation import model_client
+from lazymind.conversation.schemas import TitleRequest
+from lazymind.conversation.conversation_title import generate_title
 
 
 @pytest.fixture(autouse=True)
 def model_context(monkeypatch):
-    monkeypatch.setattr(llm_task, 'inject_model_config', lambda _: None)
-    monkeypatch.setattr(llm_task, 'get_model_role_runtime_identity', lambda _: {'model': 'test'})
+    monkeypatch.setattr(model_client, 'inject_model_config', lambda _: None)
 
 
 def request(**kwargs):
-    return LLMTaskRequest(task_type='conversation.describe_opening', input={'text': '为 LazyMind 设计对话整理'}, **kwargs)
+    kwargs.setdefault('llm_config', {'llm': {'source': 'openai', 'model': 'test'}})
+    return TitleRequest(input={'text': '为 LazyMind 设计对话整理'}, **kwargs)
 
 
 def output(**kwargs):
@@ -26,8 +27,9 @@ def test_complete_output_and_single_call(monkeypatch):
     def model(prompt, **options):
         calls.append((prompt, options))
         return output()
-    monkeypatch.setattr(llm_task, 'AutoModel', lambda **_: model)
-    result = llm_task.run_llm_task(request(llm_config={'llm': {'max_input_tokens': 32000}}))
+    monkeypatch.setattr(model_client, 'AutoModel', lambda **_: model)
+    result = generate_title(
+        request(llm_config={'llm': {'source': 'openai', 'model': 'test', 'max_input_tokens': 32000}}))
     assert result.status == 'succeeded'
     assert result.output['intent_status'] == 'ready'
     assert len(calls) == 1
@@ -47,8 +49,8 @@ def test_invalid_output_is_not_repaired_or_retried(monkeypatch, raw):
     def model(*_, **__):
         calls.append(1)
         return raw
-    monkeypatch.setattr(llm_task, 'AutoModel', lambda **_: model)
-    result = llm_task.run_llm_task(request())
+    monkeypatch.setattr(model_client, 'AutoModel', lambda **_: model)
+    result = generate_title(request())
     assert result.status == 'failed'
     assert result.error_code == 'invalid_output'
     assert not result.retryable
@@ -57,15 +59,15 @@ def test_invalid_output_is_not_repaired_or_retried(monkeypatch, raw):
 
 def test_long_input_is_forwarded_without_estimated_capacity_rejection(monkeypatch):
     text = '资料内容\n' * 20000 + '最后要求：计算年度销售额'
-    req = LLMTaskRequest(task_type='conversation.describe_opening', input={'text': text},
-                         llm_config={'llm': {'max_input_tokens': 4096}})
+    req = TitleRequest(input={'text': text},
+                       llm_config={'llm': {'source': 'openai', 'model': 'test', 'max_input_tokens': 4096}})
     seen = []
 
     def model(prompt, **_):
         seen.append(prompt)
         return output()
-    monkeypatch.setattr(llm_task, 'AutoModel', lambda **_: model)
-    result = llm_task.run_llm_task(req)
+    monkeypatch.setattr(model_client, 'AutoModel', lambda **_: model)
+    result = generate_title(req)
     assert result.status == 'succeeded'
     assert text.replace('\n', '\\n') in seen[0]
     assert len(seen) == 1

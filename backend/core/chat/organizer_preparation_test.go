@@ -12,7 +12,7 @@ import (
 )
 
 func TestOrganizerBatchReusesSummaryAndSplitsInvalidIDs(t *testing.T) {
-	s := openingTestService(t)
+	s := conversationTitleTestService(t)
 	meta := orm.ConversationOpening{ConversationID: "cached", UserID: "u", Status: "done", SourceHash: "h", IntentStatus: "ready", Summary: "已有摘要", InputJSON: json.RawMessage(`{}`), SourceHistoryIDs: json.RawMessage(`[]`)}
 	if err := s.db.Create(&meta).Error; err != nil {
 		t.Fatal(err)
@@ -20,30 +20,25 @@ func TestOrganizerBatchReusesSummaryAndSplitsInvalidIDs(t *testing.T) {
 	var sizes []int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var request struct {
-			TaskType string `json:"task_type"`
-			Input    struct {
-				Data struct {
-					Items []algo.OpeningBatchInput `json:"items"`
-				} `json:"data"`
-			} `json:"input"`
+			Items []algo.ConversationTitleBatchInput `json:"items"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 			t.Error(err)
 			w.WriteHeader(400)
 			return
 		}
-		if request.TaskType != "conversation.describe_opening_batch" {
-			t.Errorf("unexpected task %s", request.TaskType)
+		if r.URL.Path != "/api/conversation/titles:generate" {
+			t.Errorf("unexpected path %s", r.URL.Path)
 		}
-		items := request.Input.Data.Items
+		items := request.Items
 		sizes = append(sizes, len(items))
-		result := algo.OpeningBatchResult{Status: "succeeded"}
+		result := algo.ConversationTitleBatchResult{Status: "succeeded"}
 		for _, input := range items {
 			id := input.ID
 			if len(items) > 1 {
 				id = items[0].ID
 			} // A whole invalid batch must be rejected before any mapping is accepted.
-			result.Output.Items = append(result.Output.Items, algo.OpeningBatchItem{ID: id, OpeningDescription: algo.OpeningDescription{Title: "标题" + input.ID, Summary: "摘要" + input.ID, IntentStatus: "ready"}})
+			result.Output.Items = append(result.Output.Items, algo.ConversationTitleBatchItem{ID: id, ConversationTitle: algo.ConversationTitle{Title: "标题" + input.ID, Summary: "摘要" + input.ID, IntentStatus: "ready"}})
 		}
 		_ = json.NewEncoder(w).Encode(result)
 	}))
@@ -51,13 +46,13 @@ func TestOrganizerBatchReusesSummaryAndSplitsInvalidIDs(t *testing.T) {
 	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", server.URL)
 	var inputs []json.RawMessage
 	for _, id := range []string{"cached", "new1", "new2"} {
-		raw, err := json.Marshal(frozenOrganizerOpening{ConversationID: id, Snapshot: openingSnapshot{Hash: "h", Input: json.RawMessage(`{"messages":[{"role":"user","content":"发邮件"}]}`)}})
+		raw, err := json.Marshal(frozenGroupingTitle{ConversationID: id, Snapshot: conversationTitleSnapshot{Hash: "h", Input: json.RawMessage(`{"messages":[{"role":"user","content":"发邮件"}]}`)}})
 		if err != nil {
 			t.Fatal(err)
 		}
 		inputs = append(inputs, raw)
 	}
-	results, err := (OrganizerOpeningPreparer{}).ResolveBatch(t.Context(), s.db, "u", inputs, map[string]any{})
+	results, err := (OrganizerTitlePreparer{}).ResolveBatch(t.Context(), s.db, "u", inputs, map[string]any{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,10 +62,10 @@ func TestOrganizerBatchReusesSummaryAndSplitsInvalidIDs(t *testing.T) {
 }
 
 func TestOrganizerFreezeRejectsStaleProvisionalAndPreservesClosedOpening(t *testing.T) {
-	s := openingTestService(t)
-	conv := openingTestConversation(t, s, "c1", "title", "auto")
-	openingTestInput(t, s, "h1", conv.ID, "帮我优化这个", 1)
-	first, err := loadOrganizerOpeningSnapshot(s.db, conv)
+	s := conversationTitleTestService(t)
+	conv := conversationTitleTestConversation(t, s, "c1", "title", "auto")
+	conversationTitleTestInput(t, s, "h1", conv.ID, "帮我优化这个", 1)
+	first, err := loadGroupingTitleSnapshot(s.db, conv)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,23 +74,23 @@ func TestOrganizerFreezeRejectsStaleProvisionalAndPreservesClosedOpening(t *test
 	if err := s.db.Create(&meta).Error; err != nil {
 		t.Fatal(err)
 	}
-	out, err := (OrganizerOpeningPreparer{}).Freeze(t.Context(), s.db, conv)
+	out, err := (OrganizerTitlePreparer{}).Freeze(t.Context(), s.db, conv)
 	if err != nil || out.Summary != "旧摘要" || out.Reason != "" {
 		t.Fatalf("matching provisional must remain eligible: %+v %v", out, err)
 	}
-	openingTestInput(t, s, "h2", conv.ID, "是 LazyMind 的本地文件检索", 2)
-	current, err := loadOrganizerOpeningSnapshot(s.db, conv)
+	conversationTitleTestInput(t, s, "h2", conv.ID, "是 LazyMind 的本地文件检索", 2)
+	current, err := loadGroupingTitleSnapshot(s.db, conv)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := s.db.Model(&meta).Updates(map[string]any{"status": "pending", "source_hash": current.Hash, "seed_revision": 2, "job_id": "new-job"}).Error; err != nil {
 		t.Fatal(err)
 	}
-	out, err = (OrganizerOpeningPreparer{}).Freeze(t.Context(), s.db, conv)
+	out, err = (OrganizerTitlePreparer{}).Freeze(t.Context(), s.db, conv)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var frozen frozenOrganizerOpening
+	var frozen frozenGroupingTitle
 	if err := json.Unmarshal(out.Frozen, &frozen); err != nil {
 		t.Fatal(err)
 	}
@@ -106,14 +101,14 @@ func TestOrganizerFreezeRejectsStaleProvisionalAndPreservesClosedOpening(t *test
 	if err := s.db.Model(&meta).Updates(map[string]any{"status": "done", "window_closed": true, "intent_status": "ready", "source_hash": first.Hash, "evidence_hash": first.Evidence, "source_history_ids": ids}).Error; err != nil {
 		t.Fatal(err)
 	}
-	out, err = (OrganizerOpeningPreparer{}).Freeze(t.Context(), s.db, conv)
+	out, err = (OrganizerTitlePreparer{}).Freeze(t.Context(), s.db, conv)
 	if err != nil || out.Summary != "旧摘要" {
 		t.Fatalf("closed intent lost: %+v %v", out, err)
 	}
 	if err := s.db.Model(&orm.ChatHistory{}).Where("id=?", "h1").Update("raw_content", "帮我开发新功能").Error; err != nil {
 		t.Fatal(err)
 	}
-	out, err = (OrganizerOpeningPreparer{}).Freeze(t.Context(), s.db, conv)
+	out, err = (OrganizerTitlePreparer{}).Freeze(t.Context(), s.db, conv)
 	if err != nil || out.Summary != "" {
 		t.Fatalf("changed evidence reused: %+v %v", out, err)
 	}

@@ -36,7 +36,7 @@ func organizerSteps(run orm.ConversationOrganizerRun) []organizerStep {
 	}
 	steps[0].Total = prep.BatchTotal
 	if steps[0].Total == 0 && prep.Total > 0 {
-		steps[0].Total = (prep.Total + openingPreparationBatchSize - 1) / openingPreparationBatchSize
+		steps[0].Total = (prep.Total + titlePreparationBatchSize - 1) / titlePreparationBatchSize
 	}
 	steps[0].Completed = prep.BatchCurrent
 	steps[0].Current = min(prep.BatchCurrent+1, steps[0].Total)

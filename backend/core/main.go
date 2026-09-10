@@ -509,8 +509,8 @@ func run(ctx context.Context) error {
 		return &startupError{msg: "inject bundled history", err: err}
 	}
 	evalset.RegisterAsyncJobs()
-	chat.RegisterConversationOpeningJobs(store.DB())
-	conversationgroup.RegisterOpeningPreparer(chat.OrganizerOpeningPreparer{})
+	chat.RegisterConversationTitleJobs(store.DB())
+	conversationgroup.RegisterTitlePreparer(chat.OrganizerTitlePreparer{})
 	conversationgroup.RegisterAsyncJobs()
 	knowledge_market.RegisterAsyncJobs()
 	workflow.RegisterWorkflowDraftGenerateJob()
@@ -544,13 +544,13 @@ func run(ctx context.Context) error {
 		asyncConfig := evalset.LoadAsyncJobRuntimeConfigFromEnv()
 		runner = asyncjob.Start(runtimeCtx, store.DB(), asyncjob.Options{
 			Concurrency:     asyncConfig.Concurrency,
-			ExcludeJobTypes: chat.ConversationOpeningJobTypes,
+			ExcludeJobTypes: chat.ConversationTitleJobTypes,
 			PollInterval:    asyncConfig.PollInterval,
 			LockTTL:         asyncConfig.LockTTL,
 		})
 		backgroundDone = append(backgroundDone, runner.Done())
 		backgroundDone = append(backgroundDone, conversationgroup.StartTerminalJobReconciler(runtimeCtx, store.DB(), 2*time.Second))
-		backgroundDone = append(backgroundDone, chat.StartConversationOpening(runtimeCtx, store.DB())...)
+		backgroundDone = append(backgroundDone, chat.StartConversationTitle(runtimeCtx, store.DB())...)
 
 		importConfig := evalset.LoadImportRuntimeConfigFromEnv()
 		backgroundDone = append(backgroundDone,

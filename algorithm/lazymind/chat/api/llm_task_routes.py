@@ -8,8 +8,6 @@ from fastapi import APIRouter, HTTPException
 from lazymind.chat.service.llm_task import LLMTaskRequest, LLMTaskResult, run_llm_task
 
 
-from lazymind.chat.service.organizer_stream import stream_execution, cancel_execution
-
 router = APIRouter()
 _logger = logging.getLogger(__name__)
 
@@ -21,10 +19,7 @@ _logger = logging.getLogger(__name__)
 )
 async def llm_task_run(request: LLMTaskRequest) -> LLMTaskResult:
     result = await asyncio.to_thread(run_llm_task, request)
-    structured_failures = {
-        'conversation.describe_opening', 'conversation.describe_opening_batch', 'conversation.organize_step',
-    }
-    if result.status == 'failed' and request.task_type not in structured_failures:
+    if result.status == 'failed':
         _logger.warning(
             'llm_task_failed task_type=%s task_id=%s error=%s',
             request.task_type,
@@ -33,13 +28,3 @@ async def llm_task_run(request: LLMTaskRequest) -> LLMTaskResult:
         )
         raise HTTPException(status_code=502, detail=result.error or 'llm task failed')
     return result
-
-
-@router.post('/api/chat/organizer-executions/{execution_id}:stream')
-async def organizer_stream(execution_id: str, request: LLMTaskRequest):
-    return await stream_execution(execution_id, request)
-
-
-@router.post('/api/chat/organizer-executions/{execution_id}:cancel')
-async def organizer_cancel(execution_id: str):
-    return await cancel_execution(execution_id)

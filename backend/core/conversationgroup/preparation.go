@@ -14,27 +14,27 @@ import (
 	"lazymind/core/common/orm"
 )
 
-// OpeningPreparation keeps the chat-specific evidence format out of the organizer.
+// TitlePreparation keeps the chat-specific evidence format out of the organizer.
 // Preparation alone decides eligibility: a non-empty summary without a skip reason
 // is usable, including provisional intent whose frozen input still matches.
-type OpeningPreparation struct {
+type TitlePreparation struct {
 	Frozen  json.RawMessage `json:"frozen,omitempty"`
 	Title   string          `json:"title"`
 	Summary string          `json:"summary"`
 	Reason  string          `json:"reason,omitempty"`
 }
 
-type OpeningPreparer interface {
-	Freeze(context.Context, *gorm.DB, orm.Conversation) (OpeningPreparation, error)
-	ResolveBatch(context.Context, *gorm.DB, string, []json.RawMessage, map[string]any) ([]algo.OpeningTaskResult, error)
-	Persist(context.Context, *gorm.DB, orm.Conversation, json.RawMessage, algo.OpeningTaskResult) error
+type TitlePreparer interface {
+	Freeze(context.Context, *gorm.DB, orm.Conversation) (TitlePreparation, error)
+	ResolveBatch(context.Context, *gorm.DB, string, []json.RawMessage, map[string]any) ([]algo.ConversationTitleResult, error)
+	Persist(context.Context, *gorm.DB, orm.Conversation, json.RawMessage, algo.ConversationTitleResult) error
 }
 
-var openingPreparer OpeningPreparer
+var titlePreparer TitlePreparer
 
-const openingPreparationBatchSize = 20
+const titlePreparationBatchSize = 20
 
-func RegisterOpeningPreparer(p OpeningPreparer) { openingPreparer = p }
+func RegisterTitlePreparer(p TitlePreparer) { titlePreparer = p }
 
 type preparationItem struct {
 	Conversation     snapshotConversation `json:"conversation"`
@@ -55,7 +55,7 @@ type organizerPreparation struct {
 
 func freezePreparation(ctx context.Context, tx *gorm.DB, snapshot *organizerSnapshot, locks []orm.ConversationOrganizerSnapshotItem) (organizerPreparation, error) {
 	p := organizerPreparation{Items: make([]preparationItem, 0, len(locks))}
-	if openingPreparer == nil {
+	if titlePreparer == nil {
 		return p, errors.New("opening preparer is not registered")
 	}
 	snapshot.Conversations = []snapshotConversation{}
@@ -64,7 +64,7 @@ func freezePreparation(ctx context.Context, tx *gorm.DB, snapshot *organizerSnap
 		if err := tx.WithContext(ctx).Where("id=? AND create_user_id=?", lock.ConversationID, lock.UserID).Take(&conv).Error; err != nil {
 			return p, err
 		}
-		input, err := openingPreparer.Freeze(ctx, tx, conv)
+		input, err := titlePreparer.Freeze(ctx, tx, conv)
 		if err != nil {
 			return p, err
 		}
@@ -125,7 +125,7 @@ func prepareOrganizer(ctx context.Context, db *gorm.DB, run *orm.ConversationOrg
 	if p.Sealed {
 		return nil
 	}
-	if openingPreparer == nil {
+	if titlePreparer == nil {
 		return errors.New("opening preparer is not registered")
 	}
 	var rows []orm.ConversationOrganizerSnapshotItem
@@ -141,17 +141,17 @@ func prepareOrganizer(ctx context.Context, db *gorm.DB, run *orm.ConversationOrg
 			pending = append(pending, i)
 		}
 	}
-	p.BatchTotal = p.BatchCurrent + (len(pending)+openingPreparationBatchSize-1)/openingPreparationBatchSize
-	for start := 0; start < len(pending); start += openingPreparationBatchSize {
+	p.BatchTotal = p.BatchCurrent + (len(pending)+titlePreparationBatchSize-1)/titlePreparationBatchSize
+	for start := 0; start < len(pending); start += titlePreparationBatchSize {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		indices := pending[start:min(start+openingPreparationBatchSize, len(pending))]
+		indices := pending[start:min(start+titlePreparationBatchSize, len(pending))]
 		inputs := make([]json.RawMessage, 0, len(indices))
 		for _, i := range indices {
 			inputs = append(inputs, p.Items[i].Frozen)
 		}
-		results, err := openingPreparer.ResolveBatch(ctx, db, run.UserID, inputs, config)
+		results, err := titlePreparer.ResolveBatch(ctx, db, run.UserID, inputs, config)
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -198,7 +198,7 @@ func prepareOrganizer(ctx context.Context, db *gorm.DB, run *orm.ConversationOrg
 					if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id=? AND create_user_id=?", item.Conversation.ID, run.UserID).Take(&conv).Error; err != nil {
 						return err
 					}
-					if err := openingPreparer.Persist(ctx, tx, conv, item.Frozen, result); err != nil {
+					if err := titlePreparer.Persist(ctx, tx, conv, item.Frozen, result); err != nil {
 						return err
 					}
 				}

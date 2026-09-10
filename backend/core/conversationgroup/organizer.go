@@ -20,8 +20,7 @@ import (
 )
 
 const (
-	organizerJobType  = "conversation_organize"
-	organizerTaskType = "conversation.organize_step"
+	organizerJobType = "conversation_organize"
 )
 
 var errLeaseLost = errors.New("conversation organizer lease lost")

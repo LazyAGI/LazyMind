@@ -2592,7 +2592,7 @@ func SetChatHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	defer notifyConversationOpening(db, selected.ConversationID)
+	defer notifyConversationTitle(db, selected.ConversationID)
 
 	writeConversationJSON(w, http.StatusOK, map[string]any{"history_id": body.SetHistoryID})
 }

@@ -5,17 +5,18 @@ import json
 
 import pytest
 
-from lazymind.chat.service.conversation_organizer import organize_step
-from lazymind.chat.service.llm_task import LLMTaskCallError, LLMTaskRequest, LLMTaskResult
-from lazymind.chat.api import llm_task_routes
+from lazymind.conversation.conversation_grouping.grouping import organize_step
+from lazymind.conversation.model_client import ConversationCallError
+from lazymind.conversation.conversation_grouping.schemas import GroupingRequest
+from lazymind.conversation.schemas import ConversationResult
+from lazymind.conversation.api import grouping_routes
 
 
 def _request(conversations, groups=None, cap=64_000, **data):
-    return LLMTaskRequest(
-        task_type='conversation.organize_step',
-        input={'data': {'task_id': 'task-1', 'snapshot_id': 'snap-1',
-                        'snapshot_hash': 'frozen-snapshot', 'cursor': 0, 'phase': 'batch',
-                        'conversations': conversations, 'directory': groups or [], **data}},
+    return GroupingRequest(
+        input={'task_id': 'task-1', 'snapshot_id': 'snap-1',
+               'snapshot_hash': 'frozen-snapshot', 'cursor': 0, 'phase': 'batch',
+               'conversations': conversations, 'directory': groups or [], **data},
         llm_config={'llm': {'max_input_tokens': cap}},
     )
 
@@ -54,7 +55,7 @@ def test_bad_ids_fail_atomically_after_two_repairs():
         calls.append(1)
         return {'candidate_operations': [], 'assignments': [{'id': 'not-c1', 'group_id': 'free'}]}
 
-    with pytest.raises(LLMTaskCallError, match='invalid_output') as caught:
+    with pytest.raises(ConversationCallError, match='invalid_output') as caught:
         organize_step(request, call=bad)
     assert len(calls) == 3
     assert caught.value.usage['model_calls'] == 3
@@ -76,11 +77,11 @@ def test_model_request_preserves_full_input_without_output_cap():
 
 
 def test_http_route_preserves_structured_organizer_failure(monkeypatch):
-    failed = LLMTaskResult(status='failed', task_id='t1', error='invalid_output',
-                           error_code='invalid_output', retryable=False,
-                           usage={'model_calls': 3})
-    monkeypatch.setattr(llm_task_routes, 'run_llm_task', lambda _request: failed)
-    result = asyncio.run(llm_task_routes.llm_task_run(_request([])))
+    failed = ConversationResult(status='failed', task_id='t1', error='invalid_output',
+                                error_code='invalid_output', retryable=False,
+                                usage={'model_calls': 3})
+    monkeypatch.setattr(grouping_routes, 'run_grouping', lambda _request: failed)
+    result = asyncio.run(grouping_routes.grouping_run(_request([])))
     assert result == failed
     assert result.error_code == 'invalid_output'
     assert result.retryable is False
@@ -95,7 +96,7 @@ def test_transport_failure_does_not_enter_output_repair():
         calls.append(1)
         raise requests.ConnectionError('connection lost')
 
-    with pytest.raises(LLMTaskCallError, match='connection_error'):
+    with pytest.raises(ConversationCallError, match='connection_error'):
         organize_step(_request([{'id': 'c1', 'title': 'A', 'summary': 'B'}]), call=disconnected)
     assert len(calls) == 1
 
@@ -121,8 +122,8 @@ def test_size_failure_is_returned_to_core_for_batch_reduction(code):
 
     def model(*_args, **_kwargs):
         calls.append(1)
-        raise LLMTaskCallError(code)
-    with pytest.raises(LLMTaskCallError, match=code):
+        raise ConversationCallError(code)
+    with pytest.raises(ConversationCallError, match=code):
         organize_step(_request([{'id': 'c1'}]), call=model)
     assert len(calls) == 1
 
@@ -139,6 +140,6 @@ def test_scope_audit_uses_complete_partition(verdict, accepted):
 
 
 def test_incomplete_scope_audit_is_rejected():
-    with pytest.raises(LLMTaskCallError, match='invalid_output'):
+    with pytest.raises(ConversationCallError, match='invalid_output'):
         organize_step(_request([{'id': 'c1'}], phase='audit', scope='范围'),
                       call=lambda *_a, **_k: {'keep': [], 'reject': []})

@@ -21,25 +21,25 @@ import (
 	"lazymind/core/modelconfig"
 )
 
-const openingGeneratorVersion = "v2"
-const openingJobType = "conversation.opening"
-const openingBackfillJobType = "conversation.opening.backfill"
+const conversationTitleGeneratorVersion = "v2"
+const conversationTitleJobType = "conversation.opening"
+const conversationTitleBackfillJobType = "conversation.opening.backfill"
 
-var ConversationOpeningJobTypes = []string{openingJobType, openingBackfillJobType}
-var conversationOpeningChanged func(context.Context, *gorm.DB, string) error
+var ConversationTitleJobTypes = []string{conversationTitleJobType, conversationTitleBackfillJobType}
+var conversationTitleChanged func(context.Context, *gorm.DB, string) error
 
-type openingJobPayload struct {
+type conversationTitleJobPayload struct {
 	SeedRevision int64 `json:"seed_revision"`
 	UseDefault   bool  `json:"use_default"`
 }
 
-type openingService struct {
+type conversationTitleService struct {
 	db         *gorm.DB
-	call       func(context.Context, json.RawMessage, map[string]any, int) (algo.OpeningTaskResult, error)
+	call       func(context.Context, json.RawMessage, map[string]any, int) (algo.ConversationTitleResult, error)
 	loadConfig func(context.Context, *gorm.DB, string) (map[string]any, error)
 }
 
-func openingIgnoredHistoryIDs(meta orm.ConversationOpening) []string {
+func conversationTitleIgnoredHistoryIDs(meta orm.ConversationOpening) []string {
 	var ids []string
 	_ = json.Unmarshal(meta.SourceHistoryIDs, &ids)
 	if meta.IntentStatus == "empty" {
@@ -52,46 +52,46 @@ func openingIgnoredHistoryIDs(meta orm.ConversationOpening) []string {
 	return ids[:ignored]
 }
 
-func newOpeningService(db *gorm.DB) *openingService {
-	return &openingService{db: db, call: algo.DescribeConversationOpening, loadConfig: modelconfig.LoadLLMConfig}
+func newConversationTitleService(db *gorm.DB) *conversationTitleService {
+	return &conversationTitleService{db: db, call: algo.GenerateConversationTitle, loadConfig: modelconfig.LoadLLMConfig}
 }
 
-func RegisterConversationOpeningJobs(db *gorm.DB) {
-	service := newOpeningService(db)
-	asyncjob.Register(openingJobType, service.generate)
-	asyncjob.Register(openingBackfillJobType, service.backfill)
-	conversationOpeningChanged = func(ctx context.Context, db *gorm.DB, id string) error {
-		_, err := newOpeningService(db).enqueue(ctx, id, "")
+func RegisterConversationTitleJobs(db *gorm.DB) {
+	service := newConversationTitleService(db)
+	asyncjob.Register(conversationTitleJobType, service.generate)
+	asyncjob.Register(conversationTitleBackfillJobType, service.backfill)
+	conversationTitleChanged = func(ctx context.Context, db *gorm.DB, id string) error {
+		_, err := newConversationTitleService(db).enqueue(ctx, id, "")
 		return err
 	}
 }
 
-func StartConversationOpening(ctx context.Context, db *gorm.DB) []<-chan struct{} {
-	live := asyncjob.Start(ctx, db, asyncjob.Options{Concurrency: 1, SerializeResources: true, LockTTL: time.Duration(openingOption("LAZYMIND_OPENING_TIMEOUT_SECONDS", 60)+30) * time.Second, JobTypes: []string{openingJobType}})
-	history := asyncjob.Start(ctx, db, asyncjob.Options{Concurrency: 1, SerializeResources: true, LockTTL: time.Duration(openingOption("LAZYMIND_OPENING_TIMEOUT_SECONDS", 60)+30) * time.Second, JobTypes: []string{openingBackfillJobType}, YieldToJobTypes: []string{openingJobType}})
+func StartConversationTitle(ctx context.Context, db *gorm.DB) []<-chan struct{} {
+	live := asyncjob.Start(ctx, db, asyncjob.Options{Concurrency: 1, SerializeResources: true, LockTTL: time.Duration(conversationTitleOption("LAZYMIND_OPENING_TIMEOUT_SECONDS", 60)+30) * time.Second, JobTypes: []string{conversationTitleJobType}})
+	history := asyncjob.Start(ctx, db, asyncjob.Options{Concurrency: 1, SerializeResources: true, LockTTL: time.Duration(conversationTitleOption("LAZYMIND_OPENING_TIMEOUT_SECONDS", 60)+30) * time.Second, JobTypes: []string{conversationTitleBackfillJobType}, YieldToJobTypes: []string{conversationTitleJobType}})
 	return []<-chan struct{}{live.Done(), history.Done()}
 }
 
-func notifyConversationOpening(db *gorm.DB, id string) {
-	if conversationOpeningChanged == nil {
+func notifyConversationTitle(db *gorm.DB, id string) {
+	if conversationTitleChanged == nil {
 		return
 	}
-	if err := conversationOpeningChanged(context.Background(), db, id); err != nil {
+	if err := conversationTitleChanged(context.Background(), db, id); err != nil {
 		log.Logger.Warn().Err(err).Str("conversation_id", id).Msg("enqueue conversation opening")
 	}
 }
 
-func openingConversations(db *gorm.DB) *gorm.DB {
+func conversationTitleConversations(db *gorm.DB) *gorm.DB {
 	return db.Model(&orm.Conversation{}).Where("deleted_at IS NULL AND archived_at IS NULL AND archive_folder_id IS NULL AND is_ephemeral = ?", false).
 		Where("chat_executor IN ?", []string{"", "lazymind"}).
 		Where("NOT EXISTS (SELECT 1 FROM external_agent_bindings b WHERE b.conversation_id = conversations.id)")
 }
 
-func (s *openingService) enqueue(ctx context.Context, id, backfillID string) (bool, error) {
+func (s *conversationTitleService) enqueue(ctx context.Context, id, backfillID string) (bool, error) {
 	queued := false
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var conv orm.Conversation
-		if err := openingConversations(tx).Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", id).Take(&conv).Error; err != nil {
+		if err := conversationTitleConversations(tx).Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", id).Take(&conv).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return nil
 			}
@@ -107,7 +107,7 @@ func (s *openingService) enqueue(ctx context.Context, id, backfillID string) (bo
 		if exists {
 			var ids []string
 			_ = json.Unmarshal(meta.SourceHistoryIDs, &ids)
-			hash, err := openingEvidence(tx, conv, ids)
+			hash, err := conversationTitleEvidence(tx, conv, ids)
 			if err != nil {
 				return err
 			}
@@ -118,9 +118,9 @@ func (s *openingService) enqueue(ctx context.Context, id, backfillID string) (bo
 		}
 		var ignored []string
 		if exists && !changed {
-			ignored = openingIgnoredHistoryIDs(meta)
+			ignored = conversationTitleIgnoredHistoryIDs(meta)
 		}
-		snap, err := loadOpeningSnapshot(tx, conv, ignored...)
+		snap, err := loadConversationTitleSnapshot(tx, conv, ignored...)
 		if err != nil {
 			return err
 		}
@@ -154,7 +154,7 @@ func (s *openingService) enqueue(ctx context.Context, id, backfillID string) (bo
 		meta.CallCount = 0
 		meta.Status = "pending"
 		meta.ErrorCode = ""
-		meta.GeneratorVersion = openingGeneratorVersion
+		meta.GeneratorVersion = conversationTitleGeneratorVersion
 		meta.UpdatedAt = time.Now().UTC()
 		if backfillID != "" {
 			meta.BackfillID = backfillID
@@ -165,22 +165,22 @@ func (s *openingService) enqueue(ctx context.Context, id, backfillID string) (bo
 			return tx.Save(&meta).Error
 		}
 		// A new seed gets its own job; the previous execution can no longer write back.
-		jobType := openingJobType
+		jobType := conversationTitleJobType
 		if backfillID != "" {
-			jobType = openingBackfillJobType
+			jobType = conversationTitleBackfillJobType
 		}
 		queued = true
-		return enqueueOpeningVersion(ctx, tx, &meta, jobType)
+		return enqueueTitleVersion(ctx, tx, &meta, jobType)
 
 	})
 	return queued, err
 }
 
-func enqueueOpeningVersion(ctx context.Context, tx *gorm.DB, meta *orm.ConversationOpening, jobType string) error {
+func enqueueTitleVersion(ctx context.Context, tx *gorm.DB, meta *orm.ConversationOpening, jobType string) error {
 	job, err := asyncjob.Enqueue(ctx, tx, asyncjob.EnqueueRequest{
 		JobType: jobType, ResourceType: "conversation", ResourceID: meta.ConversationID,
-		IdempotencyKey: fmt.Sprintf("%s:%s:%d:%s", meta.UserID, meta.ConversationID, meta.SeedRevision, openingGeneratorVersion),
-		Payload:        openingJobPayload{SeedRevision: meta.SeedRevision}, MaxAttempts: 3, CreateUserID: meta.UserID,
+		IdempotencyKey: fmt.Sprintf("%s:%s:%d:%s", meta.UserID, meta.ConversationID, meta.SeedRevision, conversationTitleGeneratorVersion),
+		Payload:        conversationTitleJobPayload{SeedRevision: meta.SeedRevision}, MaxAttempts: 3, CreateUserID: meta.UserID,
 	})
 	if err != nil {
 		return err
@@ -189,7 +189,7 @@ func enqueueOpeningVersion(ctx context.Context, tx *gorm.DB, meta *orm.Conversat
 	return tx.Save(meta).Error
 }
 
-func openingOption(name string, fallback int) int {
+func conversationTitleOption(name string, fallback int) int {
 	n, err := strconv.Atoi(os.Getenv(name))
 	if err == nil && n > 0 {
 		return n
@@ -197,12 +197,12 @@ func openingOption(name string, fallback int) int {
 	return fallback
 }
 
-func openingConfigHash(config map[string]any) string {
-	return openingHash([]any{config, openingOption("LAZYMIND_OPENING_TIMEOUT_SECONDS", 60)})
+func conversationTitleConfigHash(config map[string]any) string {
+	return conversationTitleHash([]any{config, conversationTitleOption("LAZYMIND_OPENING_TIMEOUT_SECONDS", 60)})
 }
 
-func (s *openingService) generate(ctx context.Context, job asyncjob.Job, reporter asyncjob.Reporter) (asyncjob.Result, error) {
-	var payload openingJobPayload
+func (s *conversationTitleService) generate(ctx context.Context, job asyncjob.Job, reporter asyncjob.Reporter) (asyncjob.Result, error) {
+	var payload conversationTitleJobPayload
 	if err := json.Unmarshal(job.PayloadJSON, &payload); err != nil {
 		return asyncjob.Result{Permanent: true}, err
 	}
@@ -215,7 +215,7 @@ func (s *openingService) generate(ctx context.Context, job asyncjob.Job, reporte
 		return asyncjob.Result{}, err
 	}
 	var eligible int64
-	if err := openingConversations(s.db.WithContext(ctx)).Where("id = ? AND create_user_id = ?", meta.ConversationID, meta.UserID).Count(&eligible).Error; err != nil {
+	if err := conversationTitleConversations(s.db.WithContext(ctx)).Where("id = ? AND create_user_id = ?", meta.ConversationID, meta.UserID).Count(&eligible).Error; err != nil {
 		return asyncjob.Result{}, err
 	}
 	if eligible == 0 {
@@ -223,7 +223,7 @@ func (s *openingService) generate(ctx context.Context, job asyncjob.Job, reporte
 	}
 	config, err := s.loadConfig(ctx, s.db, job.CreateUserID)
 	if err != nil {
-		return s.failOpening(ctx, job, meta, "model_configuration", false, err)
+		return s.failTitle(ctx, job, meta, "model_configuration", false, err)
 	}
 	selected, hasAux := config["conversation_metadata"]
 	if !hasAux || payload.UseDefault {
@@ -244,11 +244,11 @@ func (s *openingService) generate(ctx context.Context, job asyncjob.Job, reporte
 		return asyncjob.Result{Permanent: true}, errors.New("opening call budget exhausted or seed replaced")
 	}
 
-	return s.runOpeningCall(ctx, job, reporter, meta, requestConfig, hasAux && !payload.UseDefault, openingConfigHash(config))
+	return s.runTitleCall(ctx, job, reporter, meta, requestConfig, hasAux && !payload.UseDefault, conversationTitleConfigHash(config))
 }
 
-func (s *openingService) runOpeningCall(ctx context.Context, job asyncjob.Job, reporter asyncjob.Reporter, meta orm.ConversationOpening, config map[string]any, mayFallback bool, configHash string) (asyncjob.Result, error) {
-	result, err := s.call(ctx, meta.InputJSON, config, openingOption("LAZYMIND_OPENING_TIMEOUT_SECONDS", 60))
+func (s *conversationTitleService) runTitleCall(ctx context.Context, job asyncjob.Job, reporter asyncjob.Reporter, meta orm.ConversationOpening, config map[string]any, mayFallback bool, configHash string) (asyncjob.Result, error) {
+	result, err := s.call(ctx, meta.InputJSON, config, conversationTitleOption("LAZYMIND_OPENING_TIMEOUT_SECONDS", 60))
 	usage := map[string]any{}
 	_ = json.Unmarshal(result.Usage, &usage)
 	usage["configuration_hash"] = configHash
@@ -271,26 +271,26 @@ func (s *openingService) runOpeningCall(ctx context.Context, job asyncjob.Job, r
 		if errors.As(err, &upstream) {
 			retryable = upstream.StatusCode == 408 || upstream.StatusCode == 429 || upstream.StatusCode >= 500
 		}
-		return s.failOpening(ctx, job, meta, "transport_error", retryable, err)
+		return s.failTitle(ctx, job, meta, "transport_error", retryable, err)
 	}
 	if result.Status != "succeeded" {
 		if result.ErrorCode == "token_limit" && mayFallback {
-			var payload openingJobPayload
+			var payload conversationTitleJobPayload
 			_ = json.Unmarshal(job.PayloadJSON, &payload)
 			payload.UseDefault = true
 			raw, _ := json.Marshal(payload)
 			if err := s.db.WithContext(ctx).Model(&orm.AsyncJob{}).Where("id = ? AND status = ? AND attempt_count = ? AND lock_until > ?", job.ID, asyncjob.StatusRunning, job.AttemptCount, time.Now().UTC()).UpdateColumn("payload_json", raw).Error; err != nil {
 				return asyncjob.Result{}, err
 			}
-			return s.failOpening(ctx, job, meta, "token_limit", true, errors.New("retry with default model"))
+			return s.failTitle(ctx, job, meta, "token_limit", true, errors.New("retry with default model"))
 		}
-		return s.failOpening(ctx, job, meta, result.ErrorCode, result.Retryable, fmt.Errorf("conversation opening model failed: %s", result.ErrorCode))
+		return s.failTitle(ctx, job, meta, result.ErrorCode, result.Retryable, fmt.Errorf("conversation opening model failed: %s", result.ErrorCode))
 	}
 	rebuild := false
 	advanceEmpty := false
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var conv orm.Conversation
-		if err := openingConversations(tx).Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND create_user_id = ?", meta.ConversationID, meta.UserID).Take(&conv).Error; err != nil {
+		if err := conversationTitleConversations(tx).Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND create_user_id = ?", meta.ConversationID, meta.UserID).Take(&conv).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return tx.Model(&orm.ConversationOpening{}).Where("conversation_id = ? AND seed_revision = ?", meta.ConversationID, meta.SeedRevision).Updates(map[string]any{"status": "skipped", "error_code": "conversation_unavailable"}).Error
 			}
@@ -298,7 +298,7 @@ func (s *openingService) runOpeningCall(ctx context.Context, job asyncjob.Job, r
 		}
 		var ids []string
 		_ = json.Unmarshal(meta.SourceHistoryIDs, &ids)
-		hash, err := openingEvidence(tx, conv, ids)
+		hash, err := conversationTitleEvidence(tx, conv, ids)
 		if err != nil {
 			return err
 		}
@@ -326,7 +326,7 @@ func (s *openingService) runOpeningCall(ctx context.Context, job asyncjob.Job, r
 		if result.Output.IntentStatus != "empty" {
 			values["generation_count"] = gorm.Expr("generation_count + 1")
 			values["window_closed"] = result.Output.IntentStatus == "ready" || meta.GenerationCount+1 >= 3 || meta.BackfillID != ""
-		} else if len(ids) >= maxOpeningScannedTurns {
+		} else if len(ids) >= maxTitleScannedTurns {
 			values["window_closed"] = true
 		}
 		update := tx.Model(&orm.ConversationOpening{}).Where("conversation_id = ? AND seed_revision = ? AND job_id = ?", meta.ConversationID, meta.SeedRevision, job.ID).Updates(values)
@@ -345,7 +345,7 @@ func (s *openingService) runOpeningCall(ctx context.Context, job asyncjob.Job, r
 	return asyncjob.Result{}, err
 }
 
-func (s *openingService) failOpening(ctx context.Context, job asyncjob.Job, meta orm.ConversationOpening, code string, retryable bool, err error) (asyncjob.Result, error) {
+func (s *conversationTitleService) failTitle(ctx context.Context, job asyncjob.Job, meta orm.ConversationOpening, code string, retryable bool, err error) (asyncjob.Result, error) {
 	state := "failed"
 	var current orm.ConversationOpening
 	if readErr := s.db.WithContext(ctx).Where("conversation_id = ?", meta.ConversationID).Take(&current).Error; readErr != nil {

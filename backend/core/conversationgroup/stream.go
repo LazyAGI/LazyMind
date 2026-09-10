@@ -1,18 +1,15 @@
 package conversationgroup
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"net/http"
 	"time"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"lazymind/core/algo"
 	"lazymind/core/asyncjob"
-	"lazymind/core/common"
 	"lazymind/core/common/orm"
 )
 
@@ -41,11 +38,8 @@ func settleOrganizerStream(ctx context.Context, raw json.RawMessage) bool {
 	if state.Settled || state.ExecutionID == "" {
 		return true
 	}
-	var response struct {
-		Settled bool `json:"settled"`
-	}
-	err := common.ApiPost(ctx, common.JoinURL(common.ChatServiceEndpoint(), "/api/chat/organizer-executions/"+state.ExecutionID+":cancel"), map[string]any{}, nil, &response, 10*time.Second)
-	return err == nil && response.Settled
+	settled, err := algo.CancelConversationGrouping(ctx, state.ExecutionID)
+	return err == nil && settled
 }
 
 func callOrganizerStream(ctx context.Context, db *gorm.DB, run *orm.ConversationOrganizerRun, job asyncjob.Job, input map[string]any, config map[string]any) (out organizerTaskResult, err error) {
@@ -81,54 +75,12 @@ func callOrganizerStream(ctx context.Context, db *gorm.DB, run *orm.Conversation
 		db.WithContext(cleanup).Model(&orm.ConversationOrganizerRun{}).Where("id=? AND job_id=? AND CAST(stream_json AS TEXT)=?", run.ID, job.ID, string(run.StreamJSON)).Update("stream_json", raw)
 		run.StreamJSON = raw
 	}()
-	payload, _ := json.Marshal(map[string]any{"mode": "llm", "task_type": organizerTaskType, "input": map[string]any{"data": input}, "llm_config": config, "options": map[string]any{"timeout_seconds": 310, "max_retries": 1, "execution_issued_at": float64(time.Now().UnixMilli()) / 1000}})
-	// No total deadline: Chat enforces first-response and meaningful-data idle deadlines.
-	streamCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	req, e := http.NewRequestWithContext(streamCtx, http.MethodPost, common.JoinURL(common.ChatServiceEndpoint(), "/api/chat/organizer-executions/"+state.ExecutionID+":stream"), bytes.NewReader(payload))
-	if e != nil {
-		return out, e
-	}
-	req.Header.Set("Content-Type", "application/json")
-	// This watchdog detects a broken Chat transport, not model generation time.
-	watchdog := time.AfterFunc(30*time.Second, cancel)
-	defer watchdog.Stop()
-	response, e := http.DefaultClient.Do(req)
-	if e != nil {
-		return out, e
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		return out, fmt.Errorf("organizer stream returned HTTP %d", response.StatusCode)
-	}
-	decoder := json.NewDecoder(response.Body)
 	lastSave := time.Time{}
-	for {
-		var event struct {
-			FirstResponseAt string              `json:"first_response_at"`
-			LastActivityAt  string              `json:"last_activity_at"`
-			Type            string              `json:"type"`
-			State           string              `json:"state"`
-			ReceivedChars   int64               `json:"received_chars"`
-			ElapsedSeconds  int64               `json:"elapsed_seconds"`
-			IdleSeconds     int64               `json:"idle_seconds"`
-			Result          organizerTaskResult `json:"result"`
-		}
-		if e = decoder.Decode(&event); e != nil {
-			return out, e
-		}
-		watchdog.Reset(30 * time.Second)
-		if event.Type == "result" {
-			state.Settled = true
-			state.State = "completed"
-			if e = save(); e != nil {
-				return out, e
-			}
-			return event.Result, nil
-		}
-		if event.Type != "progress" {
-			continue
-		}
+	result, err := algo.StreamConversationGrouping(ctx, state.ExecutionID, algo.ConversationGroupingRequest{
+		Input: input, LLMConfig: config,
+		Options: map[string]any{"timeout_seconds": 310, "max_retries": 1,
+			"execution_issued_at": float64(time.Now().UnixMilli()) / 1000},
+	}, func(event algo.ConversationGroupingProgress) error {
 		changed := state.State != event.State
 		state.State = event.State
 		state.ReceivedChars = event.ReceivedChars
@@ -137,10 +89,25 @@ func callOrganizerStream(ctx context.Context, db *gorm.DB, run *orm.Conversation
 		state.FirstResponseAt = event.FirstResponseAt
 		state.LastActivityAt = event.LastActivityAt
 		if changed || time.Since(lastSave) >= time.Second {
-			if e = save(); e != nil {
-				return out, e
+			if err := save(); err != nil {
+				return err
 			}
 			lastSave = time.Now()
 		}
+		return nil
+	})
+	if err != nil {
+		return out, err
 	}
+	// A terminal frame confirms worker settlement even if its business output is invalid.
+	state.Settled = true
+	state.State = "completed"
+	if err := save(); err != nil {
+		return out, err
+	}
+	out.Status, out.ErrorCode, out.Retryable, out.Usage = result.Status, result.ErrorCode, result.Retryable, result.Usage
+	if len(result.Output) > 0 {
+		err = json.Unmarshal(result.Output, &out.Output)
+	}
+	return out, err
 }

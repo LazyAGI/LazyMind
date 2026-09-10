@@ -7,11 +7,11 @@ from pathlib import Path
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from lazymind.chat.api.llm_task_routes import router
+from lazymind.conversation.api.title_routes import router
 
 pytestmark = pytest.mark.skipif(not os.environ.get('OPENING_MODEL_URL'), reason='real model endpoint not configured')
 
-cases = json.loads(Path(__file__).with_name('conversation_opening_cases.json').read_text(encoding='utf-8'))
+cases = json.loads(Path(__file__).with_name('conversation_title_cases.json').read_text(encoding='utf-8'))
 filler = '\n'.join(f'背景资料记录 {i}：系统提供文档上传、查询、分类与历史记录功能。' for i in range(1200))
 goal = '\n本次唯一任务：排查静海项目的 PostgreSQL 连接池泄漏，输出排查方案。\n'
 for position in ['start', 'middle', 'end']:
@@ -37,8 +37,8 @@ def test_opening_real_model(client, report, name, expected, messages, attachment
     config = {'llm': {'source': 'openai', 'model': os.environ.get('OPENING_MODEL_NAME', 'Qwen/Qwen3.8-Flash-Next'),
                       'base_url': os.environ['OPENING_MODEL_URL'], 'skip_auth': True}}
     started = time.monotonic()
-    response = client.post('/api/chat/llm-task:run', json={
-        'mode': 'llm', 'task_type': 'conversation.describe_opening', 'llm_config': config,
+    response = client.post('/api/conversation/title:generate', json={
+        'llm_config': config,
         'input': {'messages': [{'role': role, 'content': content} for role, content in messages],
                   'data': {'attachments': attachments}},
         'options': {'timeout_seconds': 60},

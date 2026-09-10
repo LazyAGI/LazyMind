@@ -2,8 +2,9 @@ import json
 
 import pytest
 
-from lazymind.chat.service import llm_task
-from lazymind.chat.service.llm_task import LLMTaskRequest
+from lazymind.conversation import model_client
+from lazymind.conversation.schemas import BatchTitleRequest
+from lazymind.conversation.conversation_title import generate_titles
 
 
 def item(cid, status='ready'):
@@ -18,13 +19,14 @@ def item(cid, status='ready'):
     ([item('0'), item('2')], False),
 ])
 def test_opening_batch_checks_partition_and_accepts_reordering(monkeypatch, outputs, valid):
-    monkeypatch.setattr(llm_task, 'inject_model_config', lambda _: None)
-    monkeypatch.setattr(llm_task, 'get_model_role_runtime_identity', lambda _: {})
-    monkeypatch.setattr(llm_task, '_call_model', lambda *args, **kwargs: json.dumps({'items': outputs}))
-    request = LLMTaskRequest(task_type='conversation.describe_opening_batch', input={'data': {
-        'items': [{'id': str(i), 'input': {'messages': [{'role': 'user', 'content': '帮我发送邮件'}]}}
-                  for i in range(2)]}})
-    result = llm_task.run_llm_task(request)
+    monkeypatch.setattr(model_client, 'inject_model_config', lambda _: None)
+    monkeypatch.setattr(model_client, 'call_model', lambda *args, **kwargs: json.dumps({'items': outputs}))
+    request = BatchTitleRequest(
+        llm_config={'llm': {'source': 'openai', 'model': 'test'}},
+        items=[{'id': str(i), 'input': {'messages': [{'role': 'user', 'content': '帮我发送邮件'}]}}
+               for i in range(2)],
+    )
+    result = generate_titles(request)
     assert result.status == ('succeeded' if valid else 'failed')
     if valid:
         assert result.output['items'] == outputs

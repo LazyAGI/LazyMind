@@ -281,8 +281,8 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/agent/router/traffic-stats", []string{"user.admin"}, agent.GetRouterTrafficStats)
 
 	// ----- Conversation -----
-	handleAPI(r, "GET", "/conversations/metadata-backfill", []string{"qa.read"}, chat.OpeningBackfill)
-	handleAPI(r, "POST", "/conversations/metadata-backfill", []string{"qa.write"}, chat.OpeningBackfill)
+	handleAPI(r, "GET", "/conversations/metadata-backfill", []string{"qa.read"}, chat.ConversationTitleBackfill)
+	handleAPI(r, "POST", "/conversations/metadata-backfill", []string{"qa.write"}, chat.ConversationTitleBackfill)
 	handleAPI(r, "PATCH", "/conversations/{name}/title", []string{"qa.write"}, chat.RenameConversation)
 	handleAPI(r, "POST", "/conversations:chat", []string{"qa.write"}, chat.ChatConversations)
 	handleAPI(r, "POST", "/conversations:estimateContextUsage", []string{"qa.read"}, chat.EstimateContextUsage)

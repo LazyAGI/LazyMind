@@ -12,10 +12,11 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-from fastapi import HTTPException
-from fastapi.responses import StreamingResponse
+from .schemas import GroupingRequest
 
-from .llm_task import LLMTaskRequest
+
+class ExecutionConflict(RuntimeError):
+    """The execution is duplicate, expired, or already cancelled."""
 
 
 @dataclass
@@ -45,7 +46,7 @@ class Execution:
 _executions: dict[str, Execution] = {}
 _cleanup_tasks: set[asyncio.Task] = set()
 # Tombstones also fence a delayed POST arriving after its cancellation request.
-# This supervisor requires one Chat process/replica for both endpoints.
+# This supervisor requires one owning process/replica for both endpoints.
 _canceled: dict[str, float] = {}
 _started_at = time.time()
 
@@ -96,19 +97,17 @@ async def cancel_execution(execution_id: str):
     return {'settled': await execution.stop()}
 
 
-async def stream_execution(execution_id: str, request: LLMTaskRequest):
-    if request.task_type != 'conversation.organize_step':
-        raise HTTPException(400, 'Only organizer steps support this endpoint')
+async def stream_execution(execution_id: str, request: GroupingRequest):
     _prune()
     if execution_id in _canceled or execution_id in _executions:
-        raise HTTPException(409, 'Execution already exists or was canceled')
+        raise ExecutionConflict('Execution already exists or was canceled')
     _prune()
     issued_at = request.options.get('execution_issued_at')
     if (not isinstance(issued_at, (int, float)) or issued_at < _started_at
             or time.time() - issued_at > 90 or issued_at - time.time() > 30):
-        raise HTTPException(409, 'Execution request expired')
+        raise ExecutionConflict('Execution request expired')
     process = subprocess.Popen(
-        [sys.executable, '-m', 'lazymind.chat.service.organizer_worker', str(os.getpid())],
+        [sys.executable, '-m', 'lazymind.conversation.conversation_grouping.worker', str(os.getpid())],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=None, text=True,
     )
     receiver = WorkerOutput(process.stdout)
@@ -197,4 +196,4 @@ async def stream_execution(execution_id: str, request: LLMTaskRequest):
             cleanup_task.add_done_callback(_cleanup_tasks.discard)
             await asyncio.shield(cleanup_task)
 
-    return StreamingResponse(events(), media_type='application/x-ndjson', headers={'X-Accel-Buffering': 'no'})
+    return events()

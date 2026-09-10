@@ -2515,7 +2515,7 @@ func persistImmediateRunTerminal(
 	if db == nil || terminal == nil {
 		return false
 	}
-	defer notifyConversationOpening(db, convID)
+	defer notifyConversationTitle(db, convID)
 	ctx, cancel := terminalWriteContext(ctx)
 	defer cancel()
 	now := time.Now()
@@ -3075,7 +3075,7 @@ dualPersist:
 }
 
 func recordConversationIdleActivity(ctx context.Context, db *gorm.DB, stateStore state.Store, conversationID, userID, historyID, userContent, assistantText string, now time.Time) {
-	notifyConversationOpening(db, conversationID)
+	notifyConversationTitle(db, conversationID)
 	if db == nil || stateStore == nil || strings.TrimSpace(conversationID) == "" || strings.TrimSpace(userID) == "" || strings.TrimSpace(historyID) == "" {
 		return
 	}

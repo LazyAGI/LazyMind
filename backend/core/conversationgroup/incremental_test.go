@@ -43,18 +43,16 @@ func TestIncrementalBatchAuditResumeAndPartition(t *testing.T) {
 		}
 		var request struct {
 			Input struct {
-				Data struct {
-					Phase         string                 `json:"phase"`
-					Cursor        int                    `json:"cursor"`
-					Conversations []snapshotConversation `json:"conversations"`
-				} `json:"data"`
+				Phase         string                 `json:"phase"`
+				Cursor        int                    `json:"cursor"`
+				Conversations []snapshotConversation `json:"conversations"`
 			} `json:"input"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 			t.Error(err)
 			return
 		}
-		input := request.Input.Data
+		input := request.Input
 		out := organizerStepOutput{Identity: "identity", Processed: len(input.Conversations)}
 		if input.Phase == "audit" {
 			auditCalls++
@@ -179,13 +177,11 @@ func TestIncrementalTransferScalesWithConversationCount(t *testing.T) {
 				calls++
 				var request struct {
 					Input struct {
-						Data struct {
-							Conversations []snapshotConversation `json:"conversations"`
-						} `json:"data"`
+						Conversations []snapshotConversation `json:"conversations"`
 					} `json:"input"`
 				}
 				json.Unmarshal(body, &request)
-				items := request.Input.Data.Conversations
+				items := request.Input.Conversations
 				if len(items) > 50 {
 					t.Error("unbounded batch")
 				}

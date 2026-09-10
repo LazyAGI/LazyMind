@@ -6,7 +6,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from .llm_task import LLMTaskCallError, LLMTaskInput, LLMTaskRequest, _call_structured
+from .model_client import ConversationCallError, call_structured, execute
+from .schemas import BatchTitleRequest, ConversationResult, TitleRequest
 
 
 INSTRUCTION = '''根据开场对话生成短标题和初始意图摘要。描述用户开启会话的主要目标，不总结助手回答或任务成果。
@@ -30,7 +31,7 @@ ready：足以描述主要任务，missing_context为空数组；不要求技术
 只输出JSON，严格包含title、initial_intent_summary、intent_status、missing_context四个字段。'''
 
 
-class OpeningDescription(BaseModel):
+class TitleDescription(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
     title: str = Field(max_length=255)
     initial_intent_summary: str = Field(max_length=256)
@@ -49,37 +50,22 @@ class OpeningDescription(BaseModel):
         return self
 
 
-def opening_prompt(request: LLMTaskRequest) -> str:
-    if request.mode != 'llm' or request.tools or request.skills or request.input.files:
-        raise LLMTaskCallError('invalid_task_config')
-    return INSTRUCTION + '\n\n开场资料：\n' + json.dumps(request.input.model_dump(exclude={'files'}), ensure_ascii=False)
+def title_prompt(request: TitleRequest) -> str:
+    return INSTRUCTION + '\n\n开场资料：\n' + json.dumps(request.input.model_dump(), ensure_ascii=False)
 
 
-class OpeningBatchItem(OpeningDescription):
+class TitleBatchItem(TitleDescription):
     id: str
 
 
-class OpeningBatchDescription(BaseModel):
+class TitleBatchDescription(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
-    items: list[OpeningBatchItem] = Field(min_length=1, max_length=20)
+    items: list[TitleBatchItem] = Field(min_length=1, max_length=20)
 
 
-def opening_batch_prompt(request: LLMTaskRequest) -> tuple[str, list[str]]:
-    if request.mode != 'llm' or request.tools or request.skills or request.input.files:
-        raise LLMTaskCallError('invalid_task_config')
-    records = request.input.data.get('items')
-    if not isinstance(records, list) or not 1 <= len(records) <= 20:
-        raise LLMTaskCallError('invalid_task_config')
-    inputs = []
-    ids = []
-    for record in records:
-        if not isinstance(record, dict) or not isinstance(record.get('id'), str) or not record['id']:
-            raise LLMTaskCallError('invalid_task_config')
-        item = LLMTaskInput.model_validate(record['input'])
-        if item.files or record['id'] in ids:
-            raise LLMTaskCallError('invalid_task_config')
-        ids.append(record['id'])
-        inputs.append({'id': record['id'], 'input': item.model_dump(exclude={'files'})})
+def titles_prompt(request: BatchTitleRequest) -> tuple[str, list[str]]:
+    inputs = [item.model_dump() for item in request.items]
+    ids = [item.id for item in request.items]
     prompt = INSTRUCTION.rsplit('只输出JSON，', 1)[0] + '''
 批量处理彼此独立的会话，逐条应用上述规则。只能使用同一ID下的资料，不得跨会话借用对象、要求或意图。
 只输出JSON对象，唯一顶层字段items，其值为数组。每个输入ID恰好输出一次，原样复制ID，不漏项、不重复、不增加ID。
@@ -89,10 +75,18 @@ def opening_batch_prompt(request: LLMTaskRequest) -> tuple[str, list[str]]:
     return prompt, ids
 
 
-def describe_opening_batch(request: LLMTaskRequest) -> tuple[dict, dict]:
-    prompt, ids = opening_batch_prompt(request)
-    output, usage = _call_structured(request, prompt, OpeningBatchDescription)
+def _generate_titles(request: BatchTitleRequest) -> tuple[dict, dict]:
+    prompt, ids = titles_prompt(request)
+    output, usage = call_structured(request, prompt, TitleBatchDescription)
     actual = [item['id'] for item in output['items']]
     if len(actual) != len(ids) or set(actual) != set(ids):
-        raise LLMTaskCallError('invalid_output', calls=1, usage=usage)
+        raise ConversationCallError('invalid_output', calls=1, usage=usage)
     return output, usage
+
+
+def generate_title(request: TitleRequest) -> ConversationResult:
+    return execute(request, lambda req: call_structured(req, title_prompt(req), TitleDescription))
+
+
+def generate_titles(request: BatchTitleRequest) -> ConversationResult:
+    return execute(request, _generate_titles)
