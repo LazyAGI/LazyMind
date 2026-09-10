@@ -21,8 +21,13 @@ type Dataset struct {
 	BucketName  string `gorm:"column:bucket_name;type:varchar(255);not null"`
 	OssPath     string `gorm:"column:oss_path;type:varchar(255);not null"`
 
-	DatasetInfo  json.RawMessage `gorm:"column:dataset_info;type:json"`
-	DatasetState uint8           `gorm:"column:dataset_state;not null"`
+	DatasetInfo            json.RawMessage `gorm:"column:dataset_info;type:json"`
+	DatasetState           uint8           `gorm:"column:dataset_state;not null"`
+	ProcessingLevel        string          `gorm:"column:processing_level;type:varchar(16);not null;default:'indexed';index"`
+	ProcessingRevision     int64           `gorm:"column:processing_revision;not null;default:1"`
+	TransitionStatus       string          `gorm:"column:transition_status;type:varchar(32);not null;default:'idle'"`
+	ReaderFallbackAccepted bool            `gorm:"column:reader_fallback_accepted;not null;default:false"`
+	ProcessingConfig       json.RawMessage `gorm:"column:processing_config;type:json"`
 
 	EmbeddingModel         string `gorm:"column:embedding_model;type:varchar(255);not null"`
 	EmbeddingModelProvider string `gorm:"column:embedding_model_provider;type:varchar(255);not null"`

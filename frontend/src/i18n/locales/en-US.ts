@@ -521,6 +521,7 @@ const enUS = {
     cannotDelete: "Cannot delete",
     confirmDeleteModel: "Delete {{name}}?",
     confirmDeleteModelDesc: "Module configurations that reference this model will be cleared.",
+	confirmDeleteEmbeddingDesc: "Removing the embedding model downgrades all indexed knowledge bases to Chunked. Existing embeddings are retained and not deleted. Continue?",
     deleteModelAria: "Delete {{name}}",
     noModels: "No models",
     emptyAddedProviders: "No providers yet. Add a built-in provider from the right panel.",
@@ -3157,6 +3158,12 @@ const enUS = {
 
   // Knowledge Base
   knowledge: {
+	processingLevel: "Processing level",
+	processingLevelHint: "You can upgrade later; downgrading keeps existing artifacts.",
+	processingStored: "Store only (no model)",
+	processingParsed: "Parse full text",
+	processingChunked: "Parse and chunk",
+	processingIndexed: "Vector index",
     list: "Knowledge Base List",
     askPdfSelection: "Ask LazyMind",
     translateSelection: "Translate",

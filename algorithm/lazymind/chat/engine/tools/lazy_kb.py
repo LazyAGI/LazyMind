@@ -14,7 +14,7 @@ class KBToolkit:
 
     __public_apis__ = [
         'list_knowledge_bases', 'list_knowledge_base_documents',
-        'aggregate_knowledge_base_documents', 'kb_search',
+        'aggregate_knowledge_base_documents', 'read_document', 'kb_search',
         'kb_get_parent_node', 'kb_get_window_nodes', 'kb_keyword_search',
     ]
     __tool_auto_activate__ = [r'知识库|资料库|(?<!\w)knowledge[\s_-]+bases?(?!\w)']
@@ -78,6 +78,10 @@ class KBToolkit:
         return self._toolkit().kb_search(
             query, retriever_topk, rerank_topk, k_max, image_topk, filters, kb_ids,
         )
+
+    def read_document(self, knowledge_base_id: str, document_id: str) -> Dict[str, Any]:
+        """Read a document without requiring an embedding model."""
+        return self._toolkit().read_document(knowledge_base_id, document_id)
 
     def kb_get_parent_node(self, node_id: str) -> Dict[str, Any]:
         """Get the parent node of a document node returned by search."""

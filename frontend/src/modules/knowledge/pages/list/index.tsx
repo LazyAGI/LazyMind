@@ -218,8 +218,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
   const marketTaskRefreshKey = Object.keys(trackedMarketJobs).sort().join(",");
   const isCloudArchiveView = sourceCategory === "cloudArchive";
   const isOfficialView = sourceCategory === "official";
-  const createActionDisabled =
-    embeddingReady === false || multimodalEmbeddingReady === false;
+  const createActionDisabled = false;
   const createActionDisabledTooltip = isAdmin ? (
     <span>
       {embeddingReady === false
@@ -1863,6 +1862,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
       <CreateKnowledgeBaseModal
         ref={createKnowledgeRef}
         syncCreateVm={syncCreateVm}
+        embeddingReady={embeddingReady === false || multimodalEmbeddingReady === false ? false : embeddingReady}
         onCreate={onUpdate}
       />
       <SyncKnowledgeBaseCreationFlow vm={syncCreateVm} hideProviderModal />

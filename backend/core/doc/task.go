@@ -321,7 +321,7 @@ func BatchUploadTasks(w http.ResponseWriter, r *http.Request) {
 		replyDatasetForbidden(w)
 		return
 	}
-	if replyEmbedNotReady(w, r, userID) {
+	if datasetRequiresEmbedding(ds) && replyEmbedNotReady(w, r, userID) {
 		return
 	}
 	if err := r.ParseMultipartForm(512 << 20); err != nil {
@@ -375,7 +375,7 @@ func UploadFile(w http.ResponseWriter, r *http.Request) {
 		replyDatasetForbidden(w)
 		return
 	}
-	if replyEmbedNotReady(w, r, userID) {
+	if datasetRequiresEmbedding(ds) && replyEmbedNotReady(w, r, userID) {
 		return
 	}
 	if err := r.ParseMultipartForm(512 << 20); err != nil {
@@ -657,7 +657,7 @@ func CreateTask(w http.ResponseWriter, r *http.Request) {
 		replyDatasetForbidden(w)
 		return
 	}
-	if replyEmbedNotReady(w, r, userID) {
+	if datasetRequiresEmbedding(ds) && replyEmbedNotReady(w, r, userID) {
 		return
 	}
 
@@ -1369,6 +1369,9 @@ func startTasksInternal(r *http.Request, datasetID string, taskIDs []string) ([]
 	reparseTaskIDs := make([]string, 0, len(taskIDs))
 	copyTaskIDs := make([]string, 0, len(taskIDs))
 	moveTaskIDs := make([]string, 0, len(taskIDs))
+	var dataset orm.Dataset
+	_ = store.DB().WithContext(r.Context()).Where("id = ? AND deleted_at IS NULL", datasetID).Take(&dataset).Error
+	storeOnly := effectiveProcessingLevel(dataset.ProcessingLevel) == ProcessingLevelStored
 
 	for _, rawTaskID := range taskIDs {
 		taskID := strings.TrimSpace(rawTaskID)
@@ -1389,6 +1392,17 @@ func startTasksInternal(r *http.Request, datasetID string, taskIDs []string) ([]
 
 		switch TaskType(strings.TrimSpace(taskRow.TaskType)) {
 		case TaskTypeParse, TaskTypeParseUploaded:
+			if storeOnly {
+				var ext taskExt
+				_ = json.Unmarshal(taskRow.Ext, &ext)
+				ext.TaskState = string(TaskStateSucceeded)
+				if err := store.DB().WithContext(r.Context()).Model(&orm.Task{}).Where("id = ? AND dataset_id = ?", taskID, datasetID).Update("ext", mustJSON(ext)).Error; err != nil {
+					resultsByTaskID[taskID] = StartTaskResult{TaskID: taskID, DocumentID: taskRow.DocID, DisplayName: taskRow.DisplayName, Status: "FAILED", SubmitStatus: "REJECTED", Message: "store document task failed"}
+				} else {
+					resultsByTaskID[taskID] = StartTaskResult{TaskID: taskID, DocumentID: taskRow.DocID, DisplayName: taskRow.DisplayName, Status: "STARTED", SubmitStatus: "ACCEPTED", Message: "document stored without parsing"}
+				}
+				continue
+			}
 			parseTaskIDs = append(parseTaskIDs, taskID)
 		case TaskTypeReparse:
 			reparseTaskIDs = append(reparseTaskIDs, taskID)
@@ -2285,6 +2299,9 @@ func createUploadedTaskAndDocument(r *http.Request, ds *orm.Dataset, datasetID, 
 		if err := tx.Create(&docRow).Error; err != nil {
 			return err
 		}
+		if err := createDocumentProcessingState(tx, datasetID, documentID, now); err != nil {
+			return err
+		}
 		if err := tx.Create(&taskRow).Error; err != nil {
 			return err
 		}
@@ -2512,6 +2529,9 @@ func createTaskFromUploadedFile(r *http.Request, datasetID, userID, userName str
 		taskRow := orm.Task{ID: taskID, LazyllmTaskID: "", DocID: documentID, KbID: datasetID, AlgoID: datasetAlgoIDByID(datasetID), DatasetID: datasetID, TaskType: tType, DocumentPID: documentPID, TargetPID: strings.TrimSpace(item.Task.TargetPID), TargetDatasetID: strings.TrimSpace(item.Task.TargetDatasetID), DisplayName: displayName, Ext: mustJSON(tExt), BaseModel: orm.BaseModel{CreateUserID: userID, CreateUserName: userName, CreatedAt: now, UpdatedAt: now}}
 		if err := tx.Create(&docRow).Error; err != nil {
 			return fmt.Errorf("create document failed")
+		}
+		if err := createDocumentProcessingState(tx, datasetID, documentID, now); err != nil {
+			return fmt.Errorf("create document processing state failed")
 		}
 		if err := tx.Create(&taskRow).Error; err != nil {
 			return fmt.Errorf("create task failed")

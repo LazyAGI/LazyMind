@@ -30,6 +30,7 @@ type CreateTab = "direct" | "cloud";
 export interface CreateKnowledgeBaseModalProps {
   onCreate: (dataset: Dataset) => Promise<void>;
   syncCreateVm: SyncKnowledgeBaseCreationVm;
+  embeddingReady?: boolean | null;
 }
 
 export interface CreateKnowledgeBaseModalRef {
@@ -40,7 +41,7 @@ export interface CreateKnowledgeBaseModalRef {
 const CreateKnowledgeBaseModal = forwardRef<
   CreateKnowledgeBaseModalRef,
   CreateKnowledgeBaseModalProps
->(({ onCreate, syncCreateVm }, ref) => {
+>(({ onCreate, syncCreateVm, embeddingReady }, ref) => {
   const { t } = useTranslation();
   const [visible, setVisible] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -228,6 +229,19 @@ const CreateKnowledgeBaseModal = forwardRef<
             label: t("knowledge.createDirect"),
             children: (
               <Form form={form} layout="vertical">
+				<Form.Item
+				  name="processing_level"
+				  label={t("knowledge.processingLevel")}
+				  initialValue="indexed"
+				  extra={t("knowledge.processingLevelHint")}
+				>
+				  <Select options={[
+				    { value: "stored", label: t("knowledge.processingStored") },
+				    { value: "parsed", label: t("knowledge.processingParsed") },
+				    { value: "chunked", label: t("knowledge.processingChunked") },
+				    { value: "indexed", label: t("knowledge.processingIndexed"), disabled: embeddingReady === false },
+				  ]} />
+				</Form.Item>
                 <Form.Item
                   name="display_name"
                   label={t("knowledge.knowledgeBaseName")}

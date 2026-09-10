@@ -456,6 +456,14 @@ ALTER TABLE conversations DROP COLUMN title_source;
 DELETE FROM user_selected_models WHERE model_type = 'conversation_metadata';
 
 -- +migrate Dialect postgres
+DROP TABLE IF EXISTS document_processing_states;
+DROP INDEX IF EXISTS idx_datasets_processing_level;
+ALTER TABLE datasets DROP COLUMN IF EXISTS processing_config;
+ALTER TABLE datasets DROP COLUMN IF EXISTS reader_fallback_accepted;
+ALTER TABLE datasets DROP COLUMN IF EXISTS transition_status;
+ALTER TABLE datasets DROP COLUMN IF EXISTS processing_revision;
+ALTER TABLE datasets DROP COLUMN IF EXISTS processing_level;
+
 DROP TABLE IF EXISTS chat_run_performance;
 DROP TABLE IF EXISTS vocabulary_review_session_answers;
 DROP TABLE IF EXISTS vocabulary_review_session_items;
@@ -479,6 +487,14 @@ DROP TABLE IF EXISTS vocabulary_words;
 DROP TABLE IF EXISTS vocabulary_provider_settings;
 
 -- +migrate Dialect sqlite
+DROP TABLE IF EXISTS document_processing_states;
+DROP INDEX IF EXISTS idx_datasets_processing_level;
+ALTER TABLE datasets DROP COLUMN processing_config;
+ALTER TABLE datasets DROP COLUMN reader_fallback_accepted;
+ALTER TABLE datasets DROP COLUMN transition_status;
+ALTER TABLE datasets DROP COLUMN processing_revision;
+ALTER TABLE datasets DROP COLUMN processing_level;
+
 DROP TABLE IF EXISTS chat_run_performance;
 DROP TABLE IF EXISTS vocabulary_provider_operations;
 DROP TABLE IF EXISTS vocabulary_fsrs_profiles;

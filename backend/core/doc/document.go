@@ -717,7 +717,12 @@ func CreateDocument(w http.ResponseWriter, r *http.Request) {
 			UpdatedAt:      now,
 		},
 	}
-	if err := store.DB().WithContext(r.Context()).Create(&row).Error; err != nil {
+	if err := store.DB().WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&row).Error; err != nil {
+			return err
+		}
+		return createDocumentProcessingState(tx, datasetID, docID, now)
+	}); err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "create document failed", err), http.StatusInternalServerError)
 		return
 	}

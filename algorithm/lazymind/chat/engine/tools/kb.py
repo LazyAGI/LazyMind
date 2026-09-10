@@ -295,7 +295,7 @@ class KBToolkit:
 
     __public_apis__ = [
         'list_knowledge_bases', 'list_knowledge_base_documents',
-        'aggregate_knowledge_base_documents', 'kb_search',
+        'aggregate_knowledge_base_documents', 'read_document', 'kb_search',
         'kb_get_parent_node', 'kb_get_window_nodes', 'kb_keyword_search',
     ]
     __tool_auto_activate__ = [
@@ -379,6 +379,23 @@ class KBToolkit:
             'group_by': _string_list(group_by),
         }
         return post_core_api('/system-query/documents:aggregate', payload)
+
+    def read_document(self, knowledge_base_id: str, document_id: str) -> Dict[str, Any]:
+        """Read a knowledge-base document through Core's authorized content service.
+
+        This works independently of semantic retrieval and is therefore suitable
+        for stored or parsed knowledge bases. Core may return cached parsed text
+        when materialization is available.
+        """
+        kb_id = str(knowledge_base_id or '').strip()
+        doc_id = str(document_id or '').strip()
+        if not kb_id or not doc_id:
+            raise ToolExecutionError('knowledge_base_id and document_id are required')
+        if kb_id not in self._kb_ids([kb_id]):
+            raise ToolExecutionError('Knowledge base is unavailable.')
+        return get_core_api(
+            f'/datasets/{quote(kb_id, safe="")}/documents/{quote(doc_id, safe="")}:content'
+        )
 
     @staticmethod
     def _accessible_kb_ids() -> set[str]:

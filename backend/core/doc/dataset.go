@@ -41,30 +41,35 @@ type ParserConfig struct {
 }
 
 type Dataset struct {
-	Name                string         `json:"name"`
-	DatasetID           string         `json:"dataset_id"`
-	DisplayName         string         `json:"display_name"`
-	Desc                string         `json:"desc"`
-	CoverImage          string         `json:"cover_image"`
-	State               string         `json:"state"`
-	IsEmpty             bool           `json:"is_empty"`
-	DocumentCount       int64          `json:"document_count"`
-	DocumentSize        int64          `json:"document_size"`
-	SegmentCount        int64          `json:"segment_count"`
-	TokenCount          int64          `json:"token_count"`
-	Parsers             []ParserConfig `json:"parsers"`
-	Algo                Algo           `json:"algo"`
-	Creator             string         `json:"creator"`
-	IsOwner             bool           `json:"is_owner"`
-	CreateTime          time.Time      `json:"create_time"`
-	UpdateTime          time.Time      `json:"update_time"`
-	Acl                 []string       `json:"acl"`
-	ShareType           string         `json:"share_type"`
-	Type                string         `json:"type"`
-	Tags                []string       `json:"tags"`
-	DefaultDataset      bool           `json:"default_dataset"`
-	CreatedByDataSource *bool          `json:"created_by_data_source,omitempty"`
-	SourceType          string         `json:"source_type,omitempty"`
+	Name                   string              `json:"name"`
+	DatasetID              string              `json:"dataset_id"`
+	DisplayName            string              `json:"display_name"`
+	Desc                   string              `json:"desc"`
+	CoverImage             string              `json:"cover_image"`
+	State                  string              `json:"state"`
+	IsEmpty                bool                `json:"is_empty"`
+	DocumentCount          int64               `json:"document_count"`
+	DocumentSize           int64               `json:"document_size"`
+	SegmentCount           int64               `json:"segment_count"`
+	TokenCount             int64               `json:"token_count"`
+	Parsers                []ParserConfig      `json:"parsers"`
+	Algo                   Algo                `json:"algo"`
+	Creator                string              `json:"creator"`
+	IsOwner                bool                `json:"is_owner"`
+	CreateTime             time.Time           `json:"create_time"`
+	UpdateTime             time.Time           `json:"update_time"`
+	Acl                    []string            `json:"acl"`
+	ShareType              string              `json:"share_type"`
+	Type                   string              `json:"type"`
+	Tags                   []string            `json:"tags"`
+	DefaultDataset         bool                `json:"default_dataset"`
+	CreatedByDataSource    *bool               `json:"created_by_data_source,omitempty"`
+	SourceType             string              `json:"source_type,omitempty"`
+	ProcessingLevel        string              `json:"processing_level,omitempty"`
+	ProcessingRevision     int64               `json:"processing_revision,omitempty"`
+	TransitionStatus       string              `json:"transition_status,omitempty"`
+	ReaderFallbackAccepted bool                `json:"reader_fallback_accepted"`
+	Capabilities           DatasetCapabilities `json:"capabilities"`
 }
 
 // Dataset source types. They are derived per dataset and deliberately use the
@@ -921,6 +926,18 @@ func CreateDataset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body.Tags = normalizedTags
+	processingLevelRequested := strings.TrimSpace(body.ProcessingLevel) != ""
+	processingLevel, err := normalizeProcessingLevel(body.ProcessingLevel)
+	if err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	// Preserve the old client's creation contract: an omitted level still defaults
+	// to indexed, while readiness is enforced when a new client explicitly asks
+	// for indexed processing.
+	if processingLevelRequested && processingLevel == ProcessingLevelIndexed && replyEmbedNotReady(w, r, userID) {
+		return
+	}
 	// Provide explicit feedback for duplicate dataset names under the same user.
 	var existed int64
 	if err := corestore.DB().
@@ -1020,6 +1037,11 @@ func CreateDataset(w http.ResponseWriter, r *http.Request) {
 		OssPath:                "",
 		DatasetInfo:            json.RawMessage(`{}`),
 		DatasetState:           0,
+		ProcessingLevel:        processingLevel,
+		ProcessingRevision:     1,
+		TransitionStatus:       TransitionIdle,
+		ReaderFallbackAccepted: body.ReaderFallbackAccepted,
+		ProcessingConfig:       json.RawMessage(`{}`),
 		EmbeddingModel:         "default",
 		EmbeddingModelProvider: "default",
 		ShareType:              0,
@@ -1045,28 +1067,33 @@ func CreateDataset(w http.ResponseWriter, r *http.Request) {
 	}
 
 	common.ReplyJSON(w, Dataset{
-		Name:           "datasets/" + ds.ID,
-		DatasetID:      ds.ID,
-		DisplayName:    ds.DisplayName,
-		Desc:           ds.Desc,
-		CoverImage:     ds.CoverImage,
-		State:          "STATE_UNSPECIFIED",
-		IsEmpty:        true,
-		DocumentCount:  0,
-		DocumentSize:   0,
-		SegmentCount:   0,
-		TokenCount:     0,
-		Parsers:        parsers,
-		Algo:           Algo{AlgoID: algoID, DisplayName: body.Algo.DisplayName, Description: body.Algo.Description},
-		Creator:        userName,
-		IsOwner:        true,
-		CreateTime:     ds.CreatedAt,
-		UpdateTime:     ds.UpdatedAt,
-		Acl:            []string{acl.PermissionDatasetRead, acl.PermissionDatasetWrite, acl.PermissionDatasetUpload},
-		ShareType:      "SHARE_TYPE_UNSPECIFIED",
-		Type:           datasetTypeToPB(ds.Type),
-		Tags:           body.Tags,
-		DefaultDataset: false,
+		Name:                   "datasets/" + ds.ID,
+		DatasetID:              ds.ID,
+		DisplayName:            ds.DisplayName,
+		Desc:                   ds.Desc,
+		CoverImage:             ds.CoverImage,
+		State:                  "STATE_UNSPECIFIED",
+		IsEmpty:                true,
+		DocumentCount:          0,
+		DocumentSize:           0,
+		SegmentCount:           0,
+		TokenCount:             0,
+		Parsers:                parsers,
+		Algo:                   Algo{AlgoID: algoID, DisplayName: body.Algo.DisplayName, Description: body.Algo.Description},
+		Creator:                userName,
+		IsOwner:                true,
+		CreateTime:             ds.CreatedAt,
+		UpdateTime:             ds.UpdatedAt,
+		Acl:                    []string{acl.PermissionDatasetRead, acl.PermissionDatasetWrite, acl.PermissionDatasetUpload},
+		ShareType:              "SHARE_TYPE_UNSPECIFIED",
+		Type:                   datasetTypeToPB(ds.Type),
+		Tags:                   body.Tags,
+		DefaultDataset:         false,
+		ProcessingLevel:        processingLevel,
+		ProcessingRevision:     1,
+		TransitionStatus:       TransitionIdle,
+		ReaderFallbackAccepted: body.ReaderFallbackAccepted,
+		Capabilities:           capabilitiesForProcessingLevel(processingLevel),
 	})
 }
 func GetDataset(w http.ResponseWriter, r *http.Request) {
