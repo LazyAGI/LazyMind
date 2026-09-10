@@ -72,6 +72,9 @@ export default function ConversationGroups({ onChanged, onNewChatInGroup, mode =
       message.warning(t("conversationOrganizer.deleteLocked"));
     }
   }, [activeRun, correctingItemId, t]);
+  const subtitleKey = !run ? "" : run.status === "succeeded" ? "resultSubtitle"
+    : activeStatuses.has(run.status) ? (canceling || run.stage === "canceling" ? "cancelingSubtitle" : "runningSubtitle")
+    : run.status === "failed" ? "failedSubtitle" : run.status === "canceled" ? "canceledSubtitle" : "";
   const stageLabel = (stage?: string) => t(`conversationOrganizer.stage.${stage || "default"}`, { defaultValue: t("conversationOrganizer.stage.default") });
   const progressLabel = (value: OrganizerRun) => {
     const label = value.stage === "preparing" && value.progress.preparation_batch_total
@@ -292,7 +295,7 @@ export default function ConversationGroups({ onChanged, onNewChatInGroup, mode =
       <Form form={correctionForm} layout="vertical"><GroupFields nameDisabled={namesLocked} /></Form>
     </Modal>
 
-    <Drawer open={drawerOpen} width={480} className="conversation-organizer-drawer" title={<div className="organizer-drawer-title"><span>{run && activeStatuses.has(run.status) ? <LoadingOutlined /> : run?.status === "failed" ? <CloseCircleOutlined /> : <CheckCircleOutlined />}</span><div><strong>{run?.status === "succeeded" ? t("conversationOrganizer.done") : t("conversationOrganizer.title")}</strong><small>{t("conversationOrganizer.resultSubtitle")}</small></div></div>} onClose={closeResult} footer={run?.status === "succeeded" ? <div className="organizer-drawer-footer">{run.can_undo && <Button icon={<UndoOutlined />} onClick={() => confirmResultAction("undo")}>{t("conversationOrganizer.undo")}</Button>}<Button type="primary" onClick={() => confirmResultAction("confirm")}>{t("conversationOrganizer.confirmResult")}</Button></div> : null}>
+    <Drawer open={drawerOpen} width={480} className="conversation-organizer-drawer" title={<div className="organizer-drawer-title"><span>{run && activeStatuses.has(run.status) ? <LoadingOutlined /> : run?.status === "failed" ? <CloseCircleOutlined /> : <CheckCircleOutlined />}</span><div><strong>{run?.status === "succeeded" ? t("conversationOrganizer.done") : t("conversationOrganizer.title")}</strong><small>{subtitleKey && t(`conversationOrganizer.${subtitleKey}`)}</small></div></div>} onClose={closeResult} footer={run?.status === "succeeded" ? <div className="organizer-drawer-footer">{run.can_undo && <Button icon={<UndoOutlined />} onClick={() => confirmResultAction("undo")}>{t("conversationOrganizer.undo")}</Button>}<Button type="primary" onClick={() => confirmResultAction("confirm")}>{t("conversationOrganizer.confirmResult")}</Button></div> : null}>
       {run && <OrganizerSteps run={run} />}
       {!run ? <div className="organizer-empty">{resultLoadFailed ? <><p>{t("conversationOrganizer.loadFailed")}</p><Button onClick={() => void openLatest()}>{t("conversationOrganizer.retryLoad")}</Button></> : resultLoading ? <Spin /> : t("conversationOrganizer.noResult")}</div> : activeStatuses.has(run.status) ? <div className="organizer-progress">
         {!run.steps?.length && <h3>{progressLabel(run)}</h3>}

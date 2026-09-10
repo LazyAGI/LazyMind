@@ -26,6 +26,8 @@ describe("organizer entry", () => {
   await waitFor(() => expect(screen.getByRole("button", { name: /batchProgress/ })).toBeTruthy());
   fireEvent.click(screen.getByRole("button", { name: /batchProgress/ }));
   expect(await screen.findByRole("dialog")).toBeTruthy();
+  expect(screen.getByText("conversationOrganizer.runningSubtitle")).toBeTruthy();
+  expect(screen.queryByText("conversationOrganizer.resultSubtitle")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: /close/i }));
   expect(api.runAction).not.toHaveBeenCalled(); unmount();
  });
@@ -48,6 +50,7 @@ describe("organizer entry", () => {
   const second = render(<ConversationGroups mode="organizer" />);
   fireEvent.click(await screen.findByRole("button", { name: /viewResult/ }));
   expect(await screen.findByRole("button", { name: "conversationOrganizer.confirmResult" })).toBeTruthy();
+  expect(screen.getByText("conversationOrganizer.resultSubtitle")).toBeTruthy();
   expect(api.startOrganizerRun).toHaveBeenCalledTimes(1); second.unmount();
  });
  it("shows failure on the entry and opens the failure details without restarting", async () => {
