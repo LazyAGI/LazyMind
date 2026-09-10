@@ -14,7 +14,7 @@ func TestMissingDSHNeverInvokesPackageInstaller(t *testing.T) {
 	t.Setenv("LAZYMIND_HOME", root)
 	t.Setenv("LAZYMIND_DSH_PATH", filepath.Join(root, "missing-dsh"))
 	err := runDSHPlugin(context.Background(), "web", "add", "plugin.tgz")
-	if err == nil || !strings.Contains(err.Error(), "select your existing DSH executable") {
+	if err == nil || !strings.Contains(err.Error(), "DeepSeek Harness CLI was not found") {
 		t.Fatalf("missing DSH did not fail explicitly: %v", err)
 	}
 }

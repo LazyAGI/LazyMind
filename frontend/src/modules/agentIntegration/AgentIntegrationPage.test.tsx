@@ -105,6 +105,10 @@ vi.mock("react-i18next", () => ({
         "agentIntegration.mcpClients.raccoon": "商汤小浣熊桌面版",
         "agentIntegration.mcpClients.traework": "TRAE Work 桌面版",
         "agentIntegration.mcpClients.deepseek-harness": "DeepSeek Harness Web",
+        "agentIntegration.requirements.dsh_web.ready": "DeepSeek Harness Web 已安装",
+        "agentIntegration.requirements.dsh_web.missing": "DeepSeek Harness Web 未安装",
+        "agentIntegration.requirements.dsh_web_initialized.ready": "DeepSeek Harness Web 已完成首次启动",
+        "agentIntegration.requirements.dsh_web_initialized.missing": "DeepSeek Harness Web 尚未完成首次启动",
         "agentIntegration.requirements.workbuddy_desktop.missing": "WorkBuddy 桌面版未安装",
         "agentIntegration.requirements.workbuddy_desktop_initialized.missing": "WorkBuddy 桌面版尚未完成首次启动",
         "agentIntegration.locateApplication": "定位桌面应用",
@@ -767,18 +771,33 @@ describe("AgentIntegrationPage", () => {
       expect(mocks.executors).toHaveBeenCalledTimes(2);
     });
   });
-  it("reuses the existing executable picker for DSH", async () => {
+  it("detects DSH from the Web profile and does not ask for a local path", async () => {
     mocks.statuses.mockResolvedValue({ ok: true, data: { "deepseek-harness": {
-      agent: "deepseek-harness", display_name: "DeepSeek Harness", state: "requirements_missing",
-      requirements: [{ id: "dsh_cli", description: "DSH missing", satisfied: false }],
+      agent: "deepseek-harness", display_name: "DeepSeek Harness", state: "ready",
+      requirements: [
+        { id: "dsh_web", description: "DSH installed", satisfied: true },
+        { id: "dsh_web_initialized", description: "DSH launched", satisfied: true },
+      ],
     } } });
-    mocks.selectExecutable.mockResolvedValue("D:\\Tools\\dsh.cmd");
-    mocks.bind.mockResolvedValue({ ok: true, data: {} });
     render(<AgentIntegrationPage />);
     await screen.findByText("外部 Agent 集成");
     const dsh = expandAgent("deepseek-harness");
-    fireEvent.click(within(dsh).getByRole("button", { name: /定位 CLI/ }));
-    await waitFor(() => expect(mocks.bind).toHaveBeenCalledWith("deepseek-harness-cli", "D:\\Tools\\dsh.cmd"));
+    expect(within(dsh).getByText("已安装")).toBeInTheDocument();
+    expect(within(dsh).getByRole("switch", { name: "DeepSeek Harness Web 使用 LazyMind MCP" })).toBeEnabled();
+    expect(within(dsh).queryByRole("button", { name: /输入本机路径|定位 CLI|查看安装指南/ })).not.toBeInTheDocument();
+  });
+
+  it("keeps an enabled DSH connection installed without a path picker", async () => {
+    mocks.statuses.mockResolvedValue({ ok: true, data: { "deepseek-harness": {
+      agent: "deepseek-harness", display_name: "DeepSeek Harness", state: "enabled",
+      requirements: [{ id: "dsh_web", description: "DSH missing", satisfied: false }],
+    } } });
+    render(<AgentIntegrationPage />);
+    await screen.findByText("外部 Agent 集成");
+    const dsh = expandAgent("deepseek-harness");
+    expect(within(dsh).getByText("已安装")).toBeInTheDocument();
+    expect(within(dsh).getByRole("switch", { name: "DeepSeek Harness Web 使用 LazyMind MCP" })).toBeChecked();
+    expect(within(dsh).queryByRole("button", { name: /输入本机路径|定位 CLI|查看安装指南/ })).not.toBeInTheDocument();
   });
 
 });

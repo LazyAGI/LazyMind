@@ -1019,7 +1019,8 @@ const zhCN = {
       raccoon_desktop_initialized: { ready: "商汤小浣熊桌面版已完成首次启动", missing: "商汤小浣熊桌面版尚未完成首次启动" },
       trae_work_desktop: { ready: "TRAE Work 桌面版已安装", missing: "TRAE Work 桌面版未安装" },
       trae_work_desktop_initialized: { ready: "TRAE Work 桌面版已完成首次启动", missing: "TRAE Work 桌面版尚未完成首次启动" },
-      dsh_cli: { ready: "已找到现有 DeepSeek Harness", missing: "未找到 DSH，请选择已安装的程序路径" },
+      dsh_web: { ready: "DeepSeek Harness Web 已安装", missing: "DeepSeek Harness Web 未安装" },
+      dsh_web_initialized: { ready: "DeepSeek Harness Web 已完成首次启动", missing: "DeepSeek Harness Web 尚未完成首次启动" },
     },
     guides: {
       codex: {

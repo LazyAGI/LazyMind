@@ -111,21 +111,32 @@ func TestRaccoonUsesDesktopConfiguration(t *testing.T) {
 	}
 }
 
-func TestDeepSeekRequiresExistingExecutableAndCanInitializeProfile(t *testing.T) {
+func TestDeepSeekDetectsInitializedWebProfileWithoutCLIPath(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("DSH_HOME", root)
+	home := filepath.Join(root, ".dsh")
+	t.Setenv("DSH_HOME", home)
+	t.Setenv("LAZYMIND_DSH_PATH", filepath.Join(root, "missing-dsh"))
 	adapter := testAdapter(DeepSeekHarness)
-	binary := filepath.Join(root, "dsh")
-	t.Setenv("LAZYMIND_DSH_PATH", binary)
 
 	status := adapter.Status(context.Background())
-	if status.State != agentintegration.RequirementsMissing || len(status.Requirements) != 1 {
+	if status.State != agentintegration.RequirementsMissing || len(status.Requirements) != 2 {
 		t.Fatalf("status=%#v", status)
 	}
-	writeTestFile(t, binary, "existing DSH executable")
+	if status.Requirements[0].ID != "dsh_web" || status.Requirements[0].Satisfied {
+		t.Fatalf("install requirement=%#v", status.Requirements[0])
+	}
+
+	if err := os.MkdirAll(filepath.Join(home, "profiles", "web"), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	status = adapter.Status(context.Background())
 	if status.State != agentintegration.Ready {
 		t.Fatalf("status=%#v", status)
+	}
+	for _, requirement := range status.Requirements {
+		if !requirement.Satisfied {
+			t.Fatalf("unsatisfied requirement=%#v", requirement)
+		}
 	}
 }
 

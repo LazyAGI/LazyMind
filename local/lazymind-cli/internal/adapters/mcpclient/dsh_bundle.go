@@ -58,14 +58,43 @@ func dshModuleVersion(profile, module string) (string, error) {
 	return "", os.ErrNotExist
 }
 
+func dshBinaryNames() []string {
+	return []string{"dsh", "dsh.cmd", "dsh.exe"}
+}
+
+func dshLocalExecutableCandidates() []string {
+	home := dshHome()
+	profile := dshProfileDir()
+	var candidates []string
+	for _, name := range dshBinaryNames() {
+		candidates = append(candidates,
+			filepath.Join(profile, "node_modules", ".bin", name),
+			filepath.Join(home, "node_modules", ".bin", name),
+			filepath.Join(home, "bin", name),
+		)
+	}
+	return candidates
+}
+
 func dshExecutable() (string, error) {
-	return agentexec.FindBoundExecutable("", "LAZYMIND_DSH_PATH", agentexec.DeepSeekHarnessCLI, []string{"dsh"})
+	if resolved, err := agentexec.FindBoundExecutable("", "LAZYMIND_DSH_PATH", agentexec.DeepSeekHarnessCLI, dshBinaryNames()); err == nil {
+		return resolved, nil
+	}
+	if resolved, err := agentexec.FindExecutable("", dshBinaryNames()); err == nil {
+		return resolved, nil
+	}
+	for _, candidate := range dshLocalExecutableCandidates() {
+		if resolved, err := agentexec.ResolveExecutable(candidate); err == nil {
+			return resolved, nil
+		}
+	}
+	return "", errors.New("DeepSeek Harness CLI was not found")
 }
 
 func runDSHPlugin(ctx context.Context, profile string, args ...string) error {
 	dsh, err := dshExecutable()
 	if err != nil {
-		return errors.New("DeepSeek Harness was not found; select your existing DSH executable in LazyMind settings")
+		return errors.New("DeepSeek Harness CLI was not found; start DSH Web once so LazyMind can use the existing installation")
 	}
 	binary := dsh
 	arguments := append([]string{"plugin", "--profile", profile}, args...)

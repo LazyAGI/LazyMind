@@ -216,9 +216,10 @@ func requirements(kind Kind) ([]agentintegration.Requirement, error) {
 		if name := dshProfileName(); name == "." || name == ".." || filepath.Base(name) != name || strings.ContainsAny(name, "/\\") {
 			return nil, errors.New("invalid DSH profile name")
 		}
-		_, err := dshExecutable()
+		installed, initialized := dshPresence()
 		return []agentintegration.Requirement{
-			{ID: "dsh_cli", Description: "Locate the installed DeepSeek Harness CLI.", Satisfied: err == nil},
+			{ID: "dsh_web", Description: "Install DeepSeek Harness Web.", Satisfied: installed},
+			{ID: "dsh_web_initialized", Description: "Open DeepSeek Harness Web at least once.", Satisfied: initialized},
 		}, nil
 	default:
 		return nil, nil
@@ -306,6 +307,18 @@ func dshHome() string {
 		home, _ = os.UserHomeDir()
 	}
 	return filepath.Join(home, ".dsh")
+}
+
+func dshProfileDir() string {
+	return filepath.Dir(configPath(DeepSeekHarness))
+}
+
+func dshPresence() (installed, initialized bool) {
+	home := dshHome()
+	profile := dshProfileDir()
+	initialized = pathExists(profile)
+	installed = initialized || pathExists(home)
+	return installed, initialized
 }
 
 func userPath(parts ...string) string {
