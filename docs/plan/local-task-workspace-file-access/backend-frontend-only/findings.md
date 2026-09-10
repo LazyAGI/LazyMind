@@ -546,3 +546,8 @@ Core最终全量83包通过（另5包无测试），算法P1修复与Workflow广
 - 独立只读 Review 对工作区绑定、Core claim、一次性回执、Writer data 包装、factory closure、Skill FS、manifest/media/mail 路径边界逐项复核，无 Critical/Important。低优先级观察已记录在方案文档，不阻塞提交。
 - 冻结边界复核通过：Local/Desktop 未改；`algorithm/lazyllm` 与官方基线一致；LazyLLM gitlink 工作树干净。
 - 本次不再新增生产修复；剩余项属于真实登录/目录选择/打包和跨平台实机人工验收，或需要新的产品授权设计。
+
+### 冻结提交与校验摘要
+
+- 自动化改动冻结提交：`8f279db3`，提交树：`$(git rev-parse 8f279db3^{tree})`。
+- 关键生产文件 SHA-256 已在 `IMPLEMENTATION_PLAN.md` 同步记录；提交后不再修改这些文件。

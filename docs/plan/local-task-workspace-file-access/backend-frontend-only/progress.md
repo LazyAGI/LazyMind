@@ -495,3 +495,7 @@ Core最终全量83包通过（另5包无测试），算法P1修复与Workflow广
 未改 Local/Desktop、`algorithm/lazyllm` 或 gitlink；没有新增服务、依赖或数据库表。工作区相对 `3a5181e4` 的整体差异为 `146 files, +2125/-1195`，算法生产为 `10 files, +248/-67`，净增 `181`。旧无调用者 MarkdownEditor、批量上传旧实现和专属测试替身已删除。
 
 当前只剩人工/真实环境验收：真实目录选择、登录、模型交互、打包 Desktop、跨平台实机/符号链接/外部编辑器竞争。任意 shell/custom MCP、二进制宿主传输和完整旧 Writer/media 注册仍未作为已完成能力声明。
+
+### 冻结点
+
+代码与测试冻结提交为 `8f279db3`（树 `$(git rev-parse 8f279db3^{tree})`）。关键生产文件的 SHA-256 已写入 `IMPLEMENTATION_PLAN.md`；冻结后只允许文档记录或用户明确批准的新批次。

@@ -608,3 +608,25 @@ Core最终全量83包通过（另5包无测试），算法P1修复与Workflow广
 本次工作区相对提交 `3a5181e4` 的整体差异为 146 个文件、`+2125/-1195`；其中包含既有类型清理、测试、生成客户端和文档更新。算法生产文件 10 个、`+248/-67`（净 `+181`），无新增算法生产文件；未新增服务、生产依赖或数据库表。旧 MarkdownEditor、批量上传旧实现及对应测试替身已在确认无调用者后删除。
 
 待人工/真实环境验收的只有：用户目录选择 dialog、真实登录、真实模型交互、打包 Desktop、Windows/macOS/Linux 实机行为、跨平台符号链接和外部编辑器竞争。任意 shell/custom MCP 宿主执行、工作区二进制传输和完整旧 Writer/media 注册仍属于未设计或受限能力，不能以提示词、trusted 或测试 fixture 宣称等价完成。
+
+### 冻结记录（代码提交后）
+
+- 功能与自动化改动冻结提交：`8f279db3`（完整提交：`$(git rev-parse 8f279db3)`）。提交后不再修改已验证生产文件。
+- 代码树：`$(git rev-parse 8f279db3^{tree})`。
+- 关键生产文件 SHA-256：
+  - `algorithm/lazymind/chat/engine/agent_runtime/executor.py` `3186a2fa2231d8d630e534fc4dfe135c4c9ac4b40b5ce84ee6a3a6c33173f51d`
+  - `algorithm/lazymind/chat/engine/agent_runtime/tool_call_guard.py` `f65e0c8e40b823282ae8c3f8800b376fdca881eecf65637a254a0ce15e2c965d`
+  - `algorithm/lazymind/chat/engine/tools/local_file/resolver.py` `e3317df811dca3412b7eec76ad78c982ef4a4e4933bf0392d55b46cc1d5109ea`
+  - `algorithm/lazymind/chat/engine/tools/local_file/workspace.py` `34e4532e83dc39703ed5032729462eaab6f5576af205228510cf754338a37047`
+  - `algorithm/lazymind/chat/engine/tools/local_fs.py` `e06cf894ca34a312da2293a6bde4e62f7f437344f6784fa2f898b15acf88f8c2`
+  - `algorithm/lazymind/chat/engine/tools/mail.py` `7d668c2fe91119a6c15324a8c7071f72a52847c8626c4b575e5e314f670276dd`
+  - `algorithm/lazymind/chat/engine/tools/writer.py` `b11ca1a94eca5a15a332507571e26fa6efc2350724dbc288abee930adf5df2f3`
+  - `algorithm/lazymind/chat/service/component/tool_registry.py` `1a4a1784fd7556c7c108f8e273d4b113b910246d93b87074afe77c3ba2152293`
+  - `algorithm/lazymind/common/integrations/remote_fs.py` `9f99fe005f01753f5992bd30878f44fe5bfc0d5e3e4ea47a3914ebe3f354f588`
+  - `algorithm/lazymind/workflow_toolkit.py` `49db86211d5a9417ab3f20b3d9f95922347055dfa2c333eb8c0cf8f89508ace1`
+  - `backend/core/openapi_registry.go` `5d6204bb73d76ce046c1ba7766c9d3495f77abdc97bf64cf6dd291e54ef42a8f`
+  - `backend/scan-control-plane/internal/server/openapi.go` `6661b16cca26e179e0faa5dd36085308d12126a288a3a7dd65c21eee576acaf6`
+  - `frontend/scripts/i18n/check-error-prompts.mjs` `401bfdeb15ea9c8f4fc4ff877570427df4198a8a239ff2f3edaf9bed0e37d1fb`
+  - `frontend/scripts/openapi/generated-client-utils.mjs` `bb6631d650bb41bea7036de2bcab72affe8f7724e8faa3e1f7ab1d3b308e9352`
+  - `frontend/scripts/openapi/specs/core.yaml` `6df2140d76fc6d7ed2a13fe33f04177af6241e843880013c49c38afcea3e2d5c`
+  - `frontend/scripts/openapi/specs/scan.yaml` `f26bd2b462f1e95a130bbff6ab4148a2bbdd1dfd873156dad076e4f6ae0af389`
