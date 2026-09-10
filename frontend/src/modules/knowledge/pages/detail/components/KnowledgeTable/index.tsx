@@ -16,6 +16,7 @@ import {
 import {
   DocumentServiceApi,
   JobServiceApi,
+  TaskServiceApi,
   normalizeProxyableUrl,
 } from "@/modules/knowledge/utils/request";
 import { localizeErrorCode } from "@/components/request";
