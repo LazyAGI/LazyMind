@@ -146,7 +146,7 @@ func StartOrganizer(w http.ResponseWriter, r *http.Request) {
 			return nil
 		}
 		now := time.Now().UTC()
-		run = orm.ConversationOrganizerRun{ProtocolVersion: organizerProtocolVersion, ID: uuid.NewString(), UserID: uid, Status: "pending", Stage: "snapshot", Version: 1, ModelConfigJSON: modelRaw, CreatedAt: now, UpdatedAt: now}
+		run = orm.ConversationOrganizerRun{ID: uuid.NewString(), UserID: uid, Status: "pending", Stage: "snapshot", Version: 1, ModelConfigJSON: modelRaw, CreatedAt: now, UpdatedAt: now}
 		snapshot, items, err := buildSnapshot(r.Context(), tx, run.ID, uid)
 		if err != nil {
 			return err
@@ -169,8 +169,6 @@ func StartOrganizer(w http.ResponseWriter, r *http.Request) {
 			}
 			items[i].PreparationReason = item.Reason
 		}
-		preparation.Version = 2
-		preparation.Items = nil
 		run.PreparationJSON, _ = json.Marshal(preparation)
 		if !preparation.Sealed {
 			run.Stage = "preparing"
@@ -293,9 +291,6 @@ func RetryOrganizer(w http.ResponseWriter, r *http.Request) {
 		var row orm.ConversationOrganizerRun
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id=? AND user_id=?", id, uid).Take(&row).Error; err != nil {
 			return err
-		}
-		if row.ProtocolVersion != organizerProtocolVersion {
-			return errOrganizerProtocol
 		}
 		if row.Status != "failed" && row.Status != "canceled" {
 			return errors.New("conversation organizer run cannot be retried")

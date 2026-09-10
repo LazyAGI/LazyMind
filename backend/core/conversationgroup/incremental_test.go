@@ -30,7 +30,7 @@ func TestIncrementalBatchAuditResumeAndPartition(t *testing.T) {
 		}
 	}
 	raw, _ := json.Marshal(snapshot)
-	run := orm.ConversationOrganizerRun{ID: "r", ProtocolVersion: organizerProtocolVersion, Status: "running", JobID: "j", SnapshotHash: "hash", SnapshotJSON: raw, ModelConfigJSON: json.RawMessage(`{}`)}
+	run := orm.ConversationOrganizerRun{ID: "r", Status: "running", JobID: "j", SnapshotHash: "hash", SnapshotJSON: raw, ModelConfigJSON: json.RawMessage(`{}`)}
 	if err := db.Create(&run).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +160,7 @@ func TestIncrementalTransferScalesWithConversationCount(t *testing.T) {
 				t.Fatal(err)
 			}
 			raw, _ := json.Marshal(snapshot)
-			run := orm.ConversationOrganizerRun{ID: "r", ProtocolVersion: organizerProtocolVersion, Status: "running", JobID: "j", SnapshotHash: "hash", SnapshotJSON: raw, ModelConfigJSON: json.RawMessage(`{}`)}
+			run := orm.ConversationOrganizerRun{ID: "r", Status: "running", JobID: "j", SnapshotHash: "hash", SnapshotJSON: raw, ModelConfigJSON: json.RawMessage(`{}`)}
 			if err := db.Create(&run).Error; err != nil {
 				t.Fatal(err)
 			}
@@ -214,40 +214,6 @@ func TestIncrementalTransferScalesWithConversationCount(t *testing.T) {
 	}
 	if len(measurements) == 2 && measurements[1] > measurements[0]*11 {
 		t.Fatalf("superlinear transfer: %v", measurements)
-	}
-}
-
-func TestLegacyUpgradeKeepsCompletedRuns(t *testing.T) {
-	for _, version := range []int{1, 2} {
-		t.Run(fmt.Sprint(version), func(t *testing.T) {
-			db := orm.MigrateTestDB(t, &orm.ConversationOrganizerRun{}, &orm.AsyncJob{})
-			for _, status := range []string{"pending", "running", "applying", "succeeded", "confirmed", "undone"} {
-				run := orm.ConversationOrganizerRun{ID: status, UserID: status, ProtocolVersion: version, Status: status, JobID: status, SnapshotJSON: json.RawMessage(`{}`), ModelConfigJSON: json.RawMessage(`{}`)}
-				if err := db.Create(&run).Error; err != nil {
-					t.Fatal(err)
-				}
-				if err := db.Create(&orm.AsyncJob{ID: status, Status: "pending", JobType: organizerJobType}).Error; err != nil {
-					t.Fatal(err)
-				}
-			}
-			if err := RecoverLegacyRuns(t.Context(), db.DB); err != nil {
-				t.Fatal(err)
-			}
-			if err := RecoverLegacyRuns(t.Context(), db.DB); err != nil {
-				t.Fatal(err)
-			}
-			for _, status := range []string{"pending", "running", "applying", "succeeded", "confirmed", "undone"} {
-				var run orm.ConversationOrganizerRun
-				db.Where("id=?", status).Take(&run)
-				expected := status
-				if status == "pending" || status == "running" || status == "applying" {
-					expected = "canceled"
-				}
-				if run.Status != expected {
-					t.Fatalf("%s became %s", status, run.Status)
-				}
-			}
-		})
 	}
 }
 

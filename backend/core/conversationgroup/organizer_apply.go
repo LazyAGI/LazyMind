@@ -176,14 +176,12 @@ func applyProposal(ctx context.Context, db *gorm.DB, run orm.ConversationOrganiz
 			if err := json.Unmarshal(run.PreparationJSON, &prep); err != nil {
 				return err
 			}
-			if run.ProtocolVersion >= 2 {
-				var rows []orm.ConversationOrganizerSnapshotItem
-				if err := tx.Select("conversation_id,preparation_reason,preparation_error").Where("run_id=?", run.ID).Find(&rows).Error; err != nil {
-					return err
-				}
-				for _, row := range rows {
-					prep.Items = append(prep.Items, preparationItem{Conversation: snapshotConversation{ID: row.ConversationID}, Reason: row.PreparationReason, ErrorCode: row.PreparationError})
-				}
+			var rows []orm.ConversationOrganizerSnapshotItem
+			if err := tx.Select("conversation_id,preparation_reason,preparation_error").Where("run_id=?", run.ID).Find(&rows).Error; err != nil {
+				return err
+			}
+			for _, row := range rows {
+				prep.Items = append(prep.Items, preparationItem{Conversation: snapshotConversation{ID: row.ConversationID}, Reason: row.PreparationReason, ErrorCode: row.PreparationError})
 			}
 			total = len(prep.Items)
 			for _, item := range prep.Items {

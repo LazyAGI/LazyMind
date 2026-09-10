@@ -15,7 +15,7 @@ from lazymind.chat.service import organizer_stream as supervisor
 
 def request(**data):
     return LLMTaskRequest(task_type='conversation.organize_step', input={'data': {
-        'protocol_version': 3, 'snapshot_id': 'run', 'snapshot_hash': 'hash',
+        'snapshot_id': 'run', 'snapshot_hash': 'hash',
         'cursor': 0, 'phase': 'batch', 'directory': [],
         'conversations': [{'id': 'c1', 'summary': '工作'}], **data,
     }}, options={'execution_issued_at': time.time()})
@@ -56,7 +56,7 @@ def test_cancel_before_start_and_expired_requests():
 def test_real_worker_terminal_settlement():
     async def check():
         execution = str(uuid.uuid4())
-        invalid = request(protocol_version=999)
+        invalid = request(conversations=[{'id': ''}])
         response = await supervisor.stream_execution(execution, invalid)
         process = supervisor._executions[execution].process
         events = [json.loads(line) async for line in response.body_iterator]
@@ -257,10 +257,3 @@ def test_compact_directory_candidate_operations_and_audit_evidence():
         return '{"keep":["c1"],"reject":[]}'
 
     assert organize_step(request(phase='audit', scope='工作'), call=audit)[0]['accepted']
-
-
-def test_legacy_directory_protocol_is_rejected_without_model_call():
-    def model(*args, **kwargs):
-        pytest.fail('old protocol reached model')
-    with pytest.raises(Exception, match='invalid_output'):
-        organize_step(request(protocol_version=2), call=model)

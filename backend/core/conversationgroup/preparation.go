@@ -45,8 +45,7 @@ type preparationItem struct {
 	ErrorCode        string               `json:"error_code,omitempty"`
 }
 type organizerPreparation struct {
-	Version      int               `json:"version"`
-	Items        []preparationItem `json:"items"`
+	Items        []preparationItem `json:"-"`
 	Current      int               `json:"current"`
 	Total        int               `json:"total"`
 	Sealed       bool              `json:"sealed"`
@@ -55,7 +54,7 @@ type organizerPreparation struct {
 }
 
 func freezePreparation(ctx context.Context, tx *gorm.DB, snapshot *organizerSnapshot, locks []orm.ConversationOrganizerSnapshotItem) (organizerPreparation, error) {
-	p := organizerPreparation{Version: 1, Items: make([]preparationItem, 0, len(locks))}
+	p := organizerPreparation{Items: make([]preparationItem, 0, len(locks))}
 	if openingPreparer == nil {
 		return p, errors.New("opening preparer is not registered")
 	}
@@ -118,13 +117,10 @@ func organizerContext(ctx context.Context, db *gorm.DB, run orm.ConversationOrga
 func prepareOrganizer(ctx context.Context, db *gorm.DB, run *orm.ConversationOrganizerRun, job asyncjob.Job, config map[string]any) error {
 	if len(run.PreparationJSON) == 0 {
 		return nil
-	} // Old runs retain their original snapshot.
+	}
 	var p organizerPreparation
 	if err := json.Unmarshal(run.PreparationJSON, &p); err != nil {
 		return err
-	}
-	if p.Version != 1 && p.Version != 2 {
-		return errors.New("unsupported organizer preparation version")
 	}
 	if p.Sealed {
 		return nil
@@ -132,14 +128,12 @@ func prepareOrganizer(ctx context.Context, db *gorm.DB, run *orm.ConversationOrg
 	if openingPreparer == nil {
 		return errors.New("opening preparer is not registered")
 	}
-	if p.Version == 2 {
-		var rows []orm.ConversationOrganizerSnapshotItem
-		if err := db.Where("run_id=? AND preparation_status=?", run.ID, "pending").Order("ordinal").Find(&rows).Error; err != nil {
-			return err
-		}
-		for _, row := range rows {
-			p.Items = append(p.Items, preparationItem{Conversation: snapshotConversation{ID: row.ConversationID, Title: row.Title, Summary: row.Summary, TitleRevision: row.TitleRevision, MetadataRevision: row.MetadataRevision}, Frozen: row.FrozenInput, NeedsPreparation: true})
-		}
+	var rows []orm.ConversationOrganizerSnapshotItem
+	if err := db.Where("run_id=? AND preparation_status=?", run.ID, "pending").Order("ordinal").Find(&rows).Error; err != nil {
+		return err
+	}
+	for _, row := range rows {
+		p.Items = append(p.Items, preparationItem{Conversation: snapshotConversation{ID: row.ConversationID, Title: row.Title, Summary: row.Summary, TitleRevision: row.TitleRevision, MetadataRevision: row.MetadataRevision}, Frozen: row.FrozenInput, NeedsPreparation: true})
 	}
 	pending := make([]int, 0, len(p.Items))
 	for i := range p.Items {
@@ -189,7 +183,7 @@ func prepareOrganizer(ctx context.Context, db *gorm.DB, run *orm.ConversationOrg
 		}
 		p.Current += len(indices)
 		p.BatchCurrent++
-		raw, err := preparationJSON(p)
+		raw, err := json.Marshal(p)
 		if err != nil {
 			return err
 		}
@@ -223,18 +217,16 @@ func prepareOrganizer(ctx context.Context, db *gorm.DB, run *orm.ConversationOrg
 	if err := json.Unmarshal(run.SnapshotJSON, &snapshot); err != nil {
 		return err
 	}
-	if p.Version == 2 {
-		var rows []orm.ConversationOrganizerSnapshotItem
-		if err := db.Where("run_id=?", run.ID).Order("ordinal").Find(&rows).Error; err != nil {
-			return err
-		}
-		p.Items = nil
-		for _, row := range rows {
-			p.Items = append(p.Items, preparationItem{Conversation: snapshotConversation{ID: row.ConversationID, Title: row.Title, Summary: row.Summary, TitleRevision: row.TitleRevision, MetadataRevision: row.MetadataRevision}, Reason: row.PreparationReason})
-		}
+	rows = nil
+	if err := db.Where("run_id=?", run.ID).Order("ordinal").Find(&rows).Error; err != nil {
+		return err
+	}
+	p.Items = nil
+	for _, row := range rows {
+		p.Items = append(p.Items, preparationItem{Conversation: snapshotConversation{ID: row.ConversationID, Title: row.Title, Summary: row.Summary, TitleRevision: row.TitleRevision, MetadataRevision: row.MetadataRevision}, Reason: row.PreparationReason})
 	}
 	p.seal(&snapshot)
-	raw, _ := preparationJSON(p)
+	raw, _ := json.Marshal(p)
 	snapRaw, _ := json.Marshal(snapshot)
 	if err := ownedRunUpdate(ctx, db, run.ID, job, "running", map[string]any{"preparation_json": raw, "snapshot_json": snapRaw, "snapshot_hash": snapshotDigest(snapRaw), "progress_total": len(snapshot.Conversations), "stage": "organizing"}); err != nil {
 		return err
@@ -245,11 +237,4 @@ func prepareOrganizer(ctx context.Context, db *gorm.DB, run *orm.ConversationOrg
 	run.ProgressTotal = int64(len(snapshot.Conversations))
 	run.Stage = "organizing"
 	return nil
-}
-
-func preparationJSON(p organizerPreparation) ([]byte, error) {
-	if p.Version == 2 {
-		p.Items = nil
-	}
-	return json.Marshal(p)
 }

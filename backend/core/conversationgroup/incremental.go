@@ -321,7 +321,7 @@ func runIncrementalStep(ctx context.Context, db *gorm.DB, run *orm.ConversationO
 	if len(rows) == 0 {
 		return nil, errors.New("missing incremental batch")
 	}
-	input := map[string]any{"protocol_version": organizerProtocolVersion, "task_id": run.ID, "snapshot_id": run.ID, "snapshot_hash": run.SnapshotHash, "identity": cp.Identity, "cursor": cp.Cursor, "repair": cp.Repair, "phase": "batch", "conversations": itemConversations(rows), "directory": mappedDirectory(cards, cp)}
+	input := map[string]any{"task_id": run.ID, "snapshot_id": run.ID, "snapshot_hash": run.SnapshotHash, "identity": cp.Identity, "cursor": cp.Cursor, "repair": cp.Repair, "phase": "batch", "conversations": itemConversations(rows), "directory": mappedDirectory(cards, cp)}
 	// Rebuild tentative operations from the committed directory. Only audit progress persists.
 	if cp.Pending != nil {
 		pending := cp.Pending

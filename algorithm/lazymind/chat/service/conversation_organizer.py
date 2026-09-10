@@ -17,7 +17,6 @@ from .llm_task import LLMTaskCallError, LLMTaskRequest, _call_model, _json_objec
 
 
 MAX_BATCH_SIZE = 50
-ALGORITHM_VERSION = 'conversation-organizer-v3.3-compact-directory'
 _ACTIVE_USAGE: ContextVar[dict[str, Any] | None] = ContextVar('organizer_usage', default=None)
 OPERATION_SCHEMA = {'oneOf': [
     {'op': 'create', 'id': 'new_1（本次新候选临时编号）', 'name': '最多24字', 'scope': '最多500字'},

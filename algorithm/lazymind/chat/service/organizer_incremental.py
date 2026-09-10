@@ -1,4 +1,4 @@
-"""Version 3: decide one batch or audit one frozen member page."""
+"""Decide one batch or audit one frozen member page."""
 from __future__ import annotations
 
 import hashlib
@@ -46,12 +46,10 @@ def _validate_response(response, cards, items, allow_create):
 
 def organize(request, call=None):
     data = request.input.data
-    if data.get('protocol_version') != 3:
-        raise ValueError('unsupported organizer protocol')
     if request.mode != 'llm' or request.tools or request.skills or request.input.files:
         raise ValueError('invalid task config')
     identity = hashlib.sha256(json.dumps([
-        3, engine.ALGORITHM_VERSION, engine.SYSTEM_PROMPT, data['snapshot_hash'],
+        engine.SYSTEM_PROMPT, data['snapshot_hash'],
         request.llm_config.get('llm'),
     ], sort_keys=True, ensure_ascii=False).encode()).hexdigest()
     if data.get('identity') and data['identity'] != identity:

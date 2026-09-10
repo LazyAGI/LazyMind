@@ -435,7 +435,6 @@ var errorCatalog = map[string]*AppError{
 	"conversation organizer run cannot be retried before reviewing the current result": NewAppError(http.StatusConflict, 2002731, "Review the current organizer result before retrying"),
 	"proposal contains invalid unassigned reason":                                      NewAppError(http.StatusBadGateway, 2002732, "Organizer proposal contains an invalid unassigned reason"),
 	"opening preparer is not registered":                                               NewAppError(http.StatusInternalServerError, 2002733, "Conversation opening preparer is not registered"),
-	"unsupported organizer preparation version":                                        NewAppError(http.StatusInternalServerError, 2002734, "Unsupported organizer preparation version"),
 	"previous organizer execution has not confirmed termination":                       NewAppError(http.StatusConflict, 2002735, "Previous organizer execution has not confirmed termination"),
 }
 

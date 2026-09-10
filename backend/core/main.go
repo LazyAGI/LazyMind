@@ -511,9 +511,6 @@ func run(ctx context.Context) error {
 	evalset.RegisterAsyncJobs()
 	chat.RegisterConversationOpeningJobs(store.DB())
 	conversationgroup.RegisterOpeningPreparer(chat.OrganizerOpeningPreparer{})
-	if err := conversationgroup.RecoverLegacyRuns(ctx, store.DB()); err != nil {
-		return &startupError{msg: "recover legacy organizer runs", err: err}
-	}
 	conversationgroup.RegisterAsyncJobs()
 	knowledge_market.RegisterAsyncJobs()
 	workflow.RegisterWorkflowDraftGenerateJob()

@@ -13,7 +13,7 @@ from lazymind.chat.api import llm_task_routes
 def _request(conversations, groups=None, cap=64_000, **data):
     return LLMTaskRequest(
         task_type='conversation.organize_step',
-        input={'data': {'protocol_version': 2, 'task_id': 'task-1', 'snapshot_id': 'snap-1',
+        input={'data': {'task_id': 'task-1', 'snapshot_id': 'snap-1',
                         'snapshot_hash': 'frozen-snapshot', 'cursor': 0, 'phase': 'batch',
                         'conversations': conversations, 'directory': groups or [], **data}},
         llm_config={'llm': {'max_input_tokens': cap}},
@@ -43,7 +43,7 @@ def test_prompt_declares_complete_response_protocol():
     assert set(schema['assignments']['items']) == {'id', 'group_id'}
     assert schema['example']['candidate_operations'][0]['op'] == 'create'
     assert {item['group_id'] for item in schema['example']['assignments']} == {
-        'cand_example_task', 'free'}
+        'new_1', 'free'}
 
 
 def test_bad_ids_fail_atomically_after_two_repairs():
@@ -107,7 +107,8 @@ def test_oversized_directory_is_sharded():
         payload = _payload(prompt)
         modes.append(payload['mode'])
         return _response(payload['conversations'], group_id='free')
-    groups = [{'id': f'g{i}', 'name': f'组{i}', 'scope': '范围', 'version': 1, 'examples': []}
+    groups = [{'id': f'group-{i}', 'short_id': f'g{i}', 'kind': 'existing',
+               'name': f'组{i}', 'scope': '范围', 'version': 1, 'examples': []}
               for i in range(51)]
     output, _ = organize_step(_request([{'id': 'c1'}], groups=groups), call=model)
     assert output['assignments'] == [{'id': 'c1', 'group_id': 'free'}]
@@ -124,13 +125,6 @@ def test_size_failure_is_returned_to_core_for_batch_reduction(code):
     with pytest.raises(LLMTaskCallError, match=code):
         organize_step(_request([{'id': 'c1'}]), call=model)
     assert len(calls) == 1
-
-
-@pytest.mark.parametrize('protocol', [None, 1, 999])
-def test_old_or_unknown_protocol_cannot_execute(protocol):
-    with pytest.raises(LLMTaskCallError, match='invalid_output'):
-        organize_step(_request([{'id': 'c1'}], protocol_version=protocol),
-                      call=lambda *_a, **_k: pytest.fail('unsupported protocol called the model'))
 
 
 @pytest.mark.parametrize('verdict,accepted', [

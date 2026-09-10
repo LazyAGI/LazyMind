@@ -52,7 +52,6 @@ type ConversationGroupState struct {
 func (ConversationGroupState) TableName() string { return "conversation_group_states" }
 
 type ConversationOrganizerRun struct {
-	ProtocolVersion int             `gorm:"column:protocol_version;not null;default:1"`
 	ID              string          `gorm:"column:id;type:varchar(64);primaryKey"`
 	UserID          string          `gorm:"column:user_id;type:varchar(255);not null;index"`
 	Status          string          `gorm:"column:status;type:varchar(16);not null;index"`

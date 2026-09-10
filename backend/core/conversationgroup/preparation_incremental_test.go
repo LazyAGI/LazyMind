@@ -44,8 +44,8 @@ func TestPreparationBatchRollbackAndResume(t *testing.T) {
 	if err := db.Create(&orm.AsyncJob{ID: "j", Status: "running", JobType: organizerJobType, AttemptCount: 1, LockUntil: &until, NextRunAt: now}).Error; err != nil {
 		t.Fatal(err)
 	}
-	raw, _ := json.Marshal(organizerPreparation{Version: 2, Total: 21})
-	run := orm.ConversationOrganizerRun{ID: "r", UserID: "u", ProtocolVersion: 2, Status: "running", Stage: "preparing", JobID: "j", PreparationJSON: raw, SnapshotJSON: json.RawMessage(`{"id":"r","conversations":[],"groups":[]}`), ModelConfigJSON: json.RawMessage(`{}`)}
+	raw, _ := json.Marshal(organizerPreparation{Total: 21})
+	run := orm.ConversationOrganizerRun{ID: "r", UserID: "u", Status: "running", Stage: "preparing", JobID: "j", PreparationJSON: raw, SnapshotJSON: json.RawMessage(`{"id":"r","conversations":[],"groups":[]}`), ModelConfigJSON: json.RawMessage(`{}`)}
 	if err := db.Create(&run).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -119,8 +119,8 @@ func TestPreparationWritesScaleAndResume(t *testing.T) {
 			if err := db.Create(&orm.AsyncJob{ID: "j", Status: "running", JobType: organizerJobType, AttemptCount: 1, LockUntil: &until, NextRunAt: now}).Error; err != nil {
 				t.Fatal(err)
 			}
-			raw, _ := json.Marshal(organizerPreparation{Version: 2, Total: n, Current: 1})
-			run := orm.ConversationOrganizerRun{ID: "r", UserID: "u", ProtocolVersion: 2, Status: "running", JobID: "j", PreparationJSON: raw, SnapshotJSON: json.RawMessage(`{"id":"r","conversations":[],"groups":[]}`), ModelConfigJSON: json.RawMessage(`{}`)}
+			raw, _ := json.Marshal(organizerPreparation{Total: n, Current: 1})
+			run := orm.ConversationOrganizerRun{ID: "r", UserID: "u", Status: "running", JobID: "j", PreparationJSON: raw, SnapshotJSON: json.RawMessage(`{"id":"r","conversations":[],"groups":[]}`), ModelConfigJSON: json.RawMessage(`{}`)}
 			if err := db.Create(&run).Error; err != nil {
 				t.Fatal(err)
 			}

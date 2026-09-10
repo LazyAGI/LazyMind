@@ -1577,7 +1577,6 @@ CREATE TABLE conversation_group_states (
 CREATE INDEX idx_conversation_group_states_user ON conversation_group_states(user_id);
 CREATE INDEX idx_conversation_group_states_run ON conversation_group_states(source_run_id);
 CREATE TABLE conversation_organizer_runs (
- protocol_version INTEGER NOT NULL DEFAULT 1,
  id VARCHAR(64) PRIMARY KEY, user_id VARCHAR(255) NOT NULL, status VARCHAR(16) NOT NULL,
  stage VARCHAR(32) NOT NULL DEFAULT 'snapshot', snapshot_json JSON NOT NULL, snapshot_hash VARCHAR(64) NOT NULL,
  model_config_json JSON NOT NULL, preparation_json JSON, stream_json JSON, checkpoint_json JSON, proposal_json JSON, result_json JSON,
