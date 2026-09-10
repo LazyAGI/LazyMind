@@ -1234,6 +1234,7 @@ export interface ConversationOrganizerLatestResponse {
     'run': ConversationOrganizerRun | null;
 }
 export interface ConversationOrganizerRun {
+    'steps'?: Array<ConversationOrganizerRunStepsInner>;
     'can_cancel': boolean;
     'can_retry': boolean;
     'can_undo': boolean;
@@ -1290,6 +1291,33 @@ export interface ConversationOrganizerRunProgress {
 export interface ConversationOrganizerRunResponse {
     'run': ConversationOrganizerRun;
 }
+export interface ConversationOrganizerRunStepsInner {
+    'id': ConversationOrganizerRunStepsInnerIdEnum;
+    'status': ConversationOrganizerRunStepsInnerStatusEnum;
+    'detail'?: string;
+    'current': number;
+    'total': number;
+    'completed': number;
+}
+
+export const ConversationOrganizerRunStepsInnerIdEnum = {
+    Preparation: 'preparation',
+    Organization: 'organization',
+    Review: 'review',
+    Application: 'application'
+} as const;
+
+export type ConversationOrganizerRunStepsInnerIdEnum = typeof ConversationOrganizerRunStepsInnerIdEnum[keyof typeof ConversationOrganizerRunStepsInnerIdEnum];
+export const ConversationOrganizerRunStepsInnerStatusEnum = {
+    Pending: 'pending',
+    Active: 'active',
+    Completed: 'completed',
+    Failed: 'failed',
+    Canceled: 'canceled'
+} as const;
+
+export type ConversationOrganizerRunStepsInnerStatusEnum = typeof ConversationOrganizerRunStepsInnerStatusEnum[keyof typeof ConversationOrganizerRunStepsInnerStatusEnum];
+
 export interface ConversationPinResponse {
     'conversation_id': string;
     'is_pinned': boolean;

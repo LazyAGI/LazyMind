@@ -305,6 +305,10 @@ func runIncrementalStep(ctx context.Context, db *gorm.DB, run *orm.ConversationO
 		originalCards[id] = string(raw)
 	}
 	if cp.Cursor == len(snapshot.Conversations) {
+		if err := ownedRunUpdate(ctx, db, run.ID, job, "running", map[string]any{"stage": "final"}); err != nil {
+			return nil, err
+		}
+		run.Stage = "final"
 		p, err := incrementalProposal(db, *run, snapshot, cards)
 		return &p, err
 	}

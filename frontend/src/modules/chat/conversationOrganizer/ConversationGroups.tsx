@@ -5,7 +5,8 @@ import {
   LoadingOutlined,
   UndoOutlined,
 } from "@ant-design/icons";
-import { Button, Drawer, Form, Modal, Progress, Select, Spin, Tooltip, message } from "antd";
+import { Button, Drawer, Form, Modal, Select, Spin, Tooltip, message } from "antd";
+import OrganizerSteps from "./OrganizerSteps";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -292,10 +293,9 @@ export default function ConversationGroups({ onChanged, onNewChatInGroup, mode =
     </Modal>
 
     <Drawer open={drawerOpen} width={480} className="conversation-organizer-drawer" title={<div className="organizer-drawer-title"><span>{run && activeStatuses.has(run.status) ? <LoadingOutlined /> : run?.status === "failed" ? <CloseCircleOutlined /> : <CheckCircleOutlined />}</span><div><strong>{run?.status === "succeeded" ? t("conversationOrganizer.done") : t("conversationOrganizer.title")}</strong><small>{t("conversationOrganizer.resultSubtitle")}</small></div></div>} onClose={closeResult} footer={run?.status === "succeeded" ? <div className="organizer-drawer-footer">{run.can_undo && <Button icon={<UndoOutlined />} onClick={() => confirmResultAction("undo")}>{t("conversationOrganizer.undo")}</Button>}<Button type="primary" onClick={() => confirmResultAction("confirm")}>{t("conversationOrganizer.confirmResult")}</Button></div> : null}>
+      {run && <OrganizerSteps run={run} />}
       {!run ? <div className="organizer-empty">{resultLoadFailed ? <><p>{t("conversationOrganizer.loadFailed")}</p><Button onClick={() => void openLatest()}>{t("conversationOrganizer.retryLoad")}</Button></> : resultLoading ? <Spin /> : t("conversationOrganizer.noResult")}</div> : activeStatuses.has(run.status) ? <div className="organizer-progress">
-        <Spin size="large" />
-        <h3>{progressLabel(run)}</h3>
-        <Progress showInfo={false} status="active" percent={run.stage === "preparing" ? Math.floor(100 * (run.progress.preparation_batch_completed || 0) / Math.max(1, run.progress.preparation_batch_total || 0)) : Math.floor(100 * run.progress.current / Math.max(1, run.progress.total))} />
+        {!run.steps?.length && <h3>{progressLabel(run)}</h3>}
         <p>{t("conversationOrganizer.progressHint")}</p>
         {run.can_cancel && <Button loading={canceling} disabled={canceling} onClick={() => confirmCancel(() => act("cancel"))}>{t("conversationOrganizer.cancelRun")}</Button>}
       </div> : run.status === "failed" ? <div className="organizer-state"><CloseCircleOutlined /><h3>{t("conversationOrganizer.failed")}</h3><p>{run.error?.code ? t(`conversationOrganizer.callError.${run.error.code}`, { defaultValue: run.error.message || t("conversationOrganizer.failedHint") }) : t("conversationOrganizer.failedHint")}</p>{run.can_retry && <Button type="primary" onClick={() => void act("retry")}>{t("conversationOrganizer.retry")}</Button>}</div> : run.status === "canceled" ? <div className="organizer-state"><CloseCircleOutlined /><h3>{t("conversationOrganizer.canceled")}</h3><p>{t("conversationOrganizer.canceledHint")}</p><Button loading={starting} disabled={freeCount === 0} onClick={() => void beginOrganize()}>{t("conversationOrganizer.organize")}</Button></div> : <>

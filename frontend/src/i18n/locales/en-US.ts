@@ -8034,6 +8034,12 @@ const enUS = {
     searchGroups: "Search groups",
     groupPickerLabel: "Group", freeConversation: "Ungrouped",
     callError: { first_response_timeout: "No model content received within 300 seconds", stream_idle_timeout: "No new model content for 120 seconds", connection_timeout: "Model connection timed out", connection_error: "Model connection failed or interrupted", response_timeout: "Model response timed out", cancellation_unconfirmed: "Previous execution termination is unconfirmed; retry has not started" },
+    steps: {
+      label: "Organization workflow", preparation: "Prepare conversation summaries", organization: "Organize conversation groups", review: "Review results", application: "Apply results",
+      preparationDetail: "Preparing summaries", organizationDetail: "Matching and organizing groups", reviewDetail: "Checking result completeness", applicationDetail: "Checking and saving group assignments",
+      batch: "Processing batch {{current}}/{{total}}", completed: "Completed", pending: "Waiting", failed: "Failed", canceled: "Canceled",
+      reused: "No additional summaries needed", snapshot: "Locking conversations for this run", auditing: "Reviewing group scope", canceling: "Canceling; waiting for the current call to exit",
+    },
     preparationProgress: "Preparing conversation summaries, batch {{current}}/{{total}}",
     unassignedReason: { no_matching_group: "Ungrouped: no matching group", below_min_group_size: "Ungrouped: fewer than 3 conversations in the candidate group", no_messages: "Ungrouped: no messages", no_task_intent: "Ungrouped: greetings or no clear task", summary_failed: "Ungrouped: summary preparation failed", unsupported_conversation: "Ungrouped: unsupported conversation type" },
     summaryError: { default: "Unable to generate a summary; retry on the next organization", request_timeout: "Summary generation timed out", transport_error: "Model connection failed", invalid_output: "Model returned an invalid summary", token_limit: "Model capacity exceeded", input_too_large: "Input exceeds model capacity", output_too_large: "Model output was incomplete", model_configuration: "Model configuration unavailable", model_failed: "Model call failed" },

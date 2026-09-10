@@ -1390,6 +1390,29 @@ components:
             type: object
         ConversationOrganizerRun:
             properties:
+                steps:
+                    type: array
+                    items:
+                        type: object
+                        required: [id, status, current, total, completed]
+                        properties:
+                            id:
+                                type: string
+                                enum: [preparation, organization, review, application]
+                            status:
+                                type: string
+                                enum: [pending, active, completed, failed, canceled]
+                            detail:
+                                type: string
+                            current:
+                                type: integer
+                                format: int64
+                            total:
+                                type: integer
+                                format: int64
+                            completed:
+                                type: integer
+                                format: int64
                 can_cancel:
                     type: boolean
                 can_retry:

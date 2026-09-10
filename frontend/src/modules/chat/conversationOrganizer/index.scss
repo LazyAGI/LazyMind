@@ -24,7 +24,7 @@
 .conversation-organizer-start.ant-btn:disabled { color: #aab2bf; }
 .organizer-unread-dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
 .record-header-top .list-title { display: flex; flex: 1; min-width: 0; align-items: center; gap: 6px; }
-.organizer-progress, .organizer-state { padding: 64px 12px; text-align: center; }
+.organizer-progress, .organizer-state { padding: 20px 12px; text-align: center; }
 .organizer-state > .anticon { color: #d44444; font-size: 30px; }
 .organizer-progress h3, .organizer-state h3 { font-size: 16px; }
 .organizer-progress p, .organizer-state p { color: #89919f; font-size: 12px; margin: 14px 0 28px; }
@@ -60,3 +60,7 @@
   &:focus { outline: none; }
   &:focus-visible { outline: 2px solid #91b5ef; outline-offset: -2px; }
 }
+
+.organizer-steps { padding: 8px 4px 16px; border-bottom: 1px solid #eef0f3; margin-bottom: 20px; }
+.organizer-steps .ant-steps-item-description { padding-bottom: 16px; font-size: 12px; }
+.organizer-steps .ant-progress { max-width: 300px; }
