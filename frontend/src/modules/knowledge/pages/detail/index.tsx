@@ -7,6 +7,7 @@ import {
   Dropdown,
   Tooltip,
   Input,
+  Select,
 } from "antd";
 import { axiosInstance, BASE_URL } from "@/components/request";
 import { AgentAppsAuth } from "@/components/auth";
@@ -72,11 +73,21 @@ import {
 
 import { DetailPageHeader } from "@/components/ui";
 import KnowledgeBaseSyncNow from "@/modules/knowledge/components/KnowledgeBaseSyncNow";
+import {
+  effectiveProcessingLevel,
+  isProcessingLevelDowngrade,
+  PROCESSING_LEVEL_ORDER,
+  type ProcessingLevel,
+} from "@/modules/knowledge/utils/processingLevel";
 
 import "./index.scss";
 
 type DatasetWithDataSourceFlag = Dataset & {
   created_by_data_source?: boolean;
+};
+
+type DatasetWithProcessingLevel = DatasetWithDataSourceFlag & {
+  processing_level?: ProcessingLevel;
 };
 
 function isDatasetCreatedByDataSource(dataset?: DatasetWithDataSourceFlag) {
@@ -129,7 +140,8 @@ const Detail = () => {
   const confirmRef = useRef<TypedConfirmModalRef>(null);
   const createUpdateRef = useRef<UpdateImperativeProps>(null);
 
-  const [detail, setDetail] = useState<Dataset>();
+  const [detail, setDetail] = useState<DatasetWithProcessingLevel>();
+  const [processingLevelUpdating, setProcessingLevelUpdating] = useState(false);
   const [runningTotal, setRunningTotal] = useState(0);
   const [developerActive, setDeveloperActive] = useState(isDeveloperModeActive);
   const [embeddingReady, setEmbeddingReady] = useState<boolean | null>(null);
@@ -151,7 +163,7 @@ const Detail = () => {
     KnowledgeBaseServiceApi()
       .datasetServiceGetDataset({ dataset: id })
       .then((res) => {
-        const dataset = res.data as unknown as Dataset;
+        const dataset = res.data as unknown as DatasetWithProcessingLevel;
         setDetail(dataset);
         setCurrentDataset(dataset);
       });
@@ -425,6 +437,55 @@ const Detail = () => {
     knowledgeListRef.current?.refresh(value);
   }
 
+  function updateProcessingLevel(nextLevel: ProcessingLevel) {
+    const currentLevel = effectiveProcessingLevel(detail?.processing_level);
+    if (nextLevel === currentLevel) return;
+
+    const isDowngrade = isProcessingLevelDowngrade(currentLevel, nextLevel);
+    Modal.confirm({
+      title: t(
+        isDowngrade
+          ? "knowledge.processingDowngradeTitle"
+          : "knowledge.processingUpgradeTitle",
+      ),
+      content: t(
+        isDowngrade
+          ? "knowledge.processingDowngradeConfirm"
+          : "knowledge.processingUpgradeConfirm",
+        {
+          from: processingLevelLabel(currentLevel),
+          to: processingLevelLabel(nextLevel),
+        },
+      ),
+      okText: t("common.confirm"),
+      cancelText: t("common.cancel"),
+      onOk: async () => {
+        setProcessingLevelUpdating(true);
+        try {
+          await axiosInstance.patch(
+            `${BASE_URL}/api/core/datasets/${encodeURIComponent(id)}/processing-level`,
+            { processing_level: nextLevel },
+          );
+          message.success(t("knowledge.processingLevelUpdateSuccess"));
+          getDetail();
+        } finally {
+          setProcessingLevelUpdating(false);
+        }
+      },
+    });
+  }
+
+  function processingLevelLabel(level: ProcessingLevel) {
+    return t(
+      {
+        stored: "knowledge.processingStored",
+        parsed: "knowledge.processingParsed",
+        chunked: "knowledge.processingChunked",
+        indexed: "knowledge.processingIndexed",
+      }[level],
+    );
+  }
+
   const hasWritePermission = useDatasetPermissionStore((state) =>
     state.hasWritePermission(),
   );
@@ -500,6 +561,22 @@ const Detail = () => {
         settingsMenu={
           detail?.acl?.includes(DatasetAclEnum.DatasetWrite) && (
             <div>
+              <span className="knowledge-processing-level-control">
+                <span>{t("knowledge.processingLevel")}</span>
+                <Select<ProcessingLevel>
+                  aria-label={t("knowledge.processingLevel")}
+                  value={detail.processing_level || "indexed"}
+                  loading={processingLevelUpdating}
+                  disabled={processingLevelUpdating}
+                  onChange={updateProcessingLevel}
+                  options={PROCESSING_LEVEL_ORDER.map((level) => ({
+                    value: level,
+                    label: processingLevelLabel(level),
+                    disabled: level === "indexed" && embeddingReady === false,
+                  }))}
+                  popupMatchSelectWidth={false}
+                />
+              </span>
               <Button
                 icon={<EditOutlined />}
                 onClick={() => {

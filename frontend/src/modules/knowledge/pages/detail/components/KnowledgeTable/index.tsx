@@ -109,7 +109,9 @@ export interface BatchMoveDocument {
 }
 
 interface Props {
-  detail: Dataset;
+  detail: Dataset & {
+    processing_level?: "stored" | "parsed" | "chunked" | "indexed";
+  };
   documentParsingEnabled: boolean | null;
   onImportKnowledge: (data: { p_id?: string; targetPath?: string }) => void;
   getImportingTotal: () => void;
@@ -899,10 +901,19 @@ const KnowledgeTable = forwardRef<IKnowledgeListRef, Props>((props, ref) => {
       },
     },
     {
-      title: t("knowledge.parseStatus"),
+      title:
+        detail.processing_level === "stored"
+          ? t("knowledge.storageStatus")
+          : t("knowledge.parseStatus"),
       dataIndex: "document_stage",
       width: 100,
       render: (document_stage: string, record: TreeNode) => {
+        if (
+          detail.processing_level === "stored" &&
+          record.type !== DocTypeEnum.Folder
+        ) {
+          return <Tag color="success">{t("knowledge.stageStored")}</Tag>;
+        }
         const text =
           (DocumentStageEnum[document_stage as keyof typeof DocumentStageEnum]
             ? t(

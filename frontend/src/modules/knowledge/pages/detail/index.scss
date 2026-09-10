@@ -103,6 +103,18 @@
       gap: 8px;
     }
 
+    .knowledge-processing-level-control {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--color-text-description);
+      font-size: 13px;
+
+      .ant-select {
+        min-width: 150px;
+      }
+    }
+
     .settings-menu button {
       width: auto !important;
       height: 30px !important;
