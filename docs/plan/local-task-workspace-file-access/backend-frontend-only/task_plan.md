@@ -523,5 +523,5 @@ Core最终全量83包通过（另5包无测试），算法P1修复与Workflow广
 
 ### 冻结提交
 
-- 自动化工作冻结提交：`8f279db3`（树 `$(git rev-parse 8f279db3^{tree})`）。
+- 自动化工作冻结提交：`8f279db3`（树 `9209e6f5fcad87e01d94d0d0b08b81d699626d4a`）。
 - 关键生产文件 SHA-256 见 `IMPLEMENTATION_PLAN.md`；后续不再修改冻结文件，除非用户明确批准新的 Review 批次。

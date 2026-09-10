@@ -611,8 +611,8 @@ Core最终全量83包通过（另5包无测试），算法P1修复与Workflow广
 
 ### 冻结记录（代码提交后）
 
-- 功能与自动化改动冻结提交：`8f279db3`（完整提交：`$(git rev-parse 8f279db3)`）。提交后不再修改已验证生产文件。
-- 代码树：`$(git rev-parse 8f279db3^{tree})`。
+- 功能与自动化改动冻结提交：`8f279db3`（完整提交：`8f279db34b8a4b12b2b06abb7f172221ebbe766e`）。提交后不再修改已验证生产文件。
+- 代码树：`9209e6f5fcad87e01d94d0d0b08b81d699626d4a`。
 - 关键生产文件 SHA-256：
   - `algorithm/lazymind/chat/engine/agent_runtime/executor.py` `3186a2fa2231d8d630e534fc4dfe135c4c9ac4b40b5ce84ee6a3a6c33173f51d`
   - `algorithm/lazymind/chat/engine/agent_runtime/tool_call_guard.py` `f65e0c8e40b823282ae8c3f8800b376fdca881eecf65637a254a0ce15e2c965d`
