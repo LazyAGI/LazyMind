@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"lazymind/core/asyncjob"
 	"lazymind/core/common/orm"
@@ -33,7 +34,7 @@ func TestOrganizerRecoveryAndRetryEndpoint(t *testing.T) {
 	} {
 		t.Run(tc.code+tc.config, func(t *testing.T) {
 			now := time.Now().UTC()
-			run := orm.ConversationOrganizerRun{ID: t.Name(), UserID: t.Name(), Status: "failed", ErrorCode: tc.code, ModelConfigJSON: json.RawMessage(tc.config), SnapshotJSON: json.RawMessage(`{}`), CheckpointJSON: json.RawMessage(`{"cursor":50,"stage":"organizing"}`), ProgressCurrent: 50, CreatedAt: now, UpdatedAt: now}
+			run := orm.ConversationOrganizerRun{ID: uuid.NewString(), UserID: t.Name(), Status: "failed", ErrorCode: tc.code, ModelConfigJSON: json.RawMessage(tc.config), SnapshotJSON: json.RawMessage(`{}`), CheckpointJSON: json.RawMessage(`{"cursor":50,"stage":"organizing"}`), ProgressCurrent: 50, CreatedAt: now, UpdatedAt: now}
 			if err := db.Create(&run).Error; err != nil {
 				t.Fatal(err)
 			}
