@@ -3123,6 +3123,7 @@ const zhCN = {
     knowledgeSquare: "知识广场",
     knowledgeSquareDescription: "点击卡片查看详情或直接在线查询，安装后系统将自动完成文档切片与向量化入库",
     backgroundTasks: "后台任务",
+    parseFailureReasonUnavailable: "未记录解析失败原因",
     backgroundTasksCount: "后台任务，{{count}} 个任务进行中",
     marketTaskAdded: "已加入后台任务",
     marketTaskAddedDescription: "{{name}} 将在后台完成下载、切片和向量化。",

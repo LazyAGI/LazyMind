@@ -3196,6 +3196,7 @@ const enUS = {
     knowledgeSquare: "Knowledge Square",
     knowledgeSquareDescription: "View details or query online, then install a collection for local parsing and indexing",
     backgroundTasks: "Background Tasks",
+    parseFailureReasonUnavailable: "No parsing failure reason was recorded",
     backgroundTasksCount: "Background tasks, {{count}} in progress",
     marketTaskAdded: "Added to background tasks",
     marketTaskAddedDescription: "{{name}} will be downloaded, chunked, and vectorized in the background.",
