@@ -14,6 +14,8 @@ import (
 )
 
 type organizerStream struct {
+	ErrorCode       string `json:"error_code,omitempty"`
+	Retryable       *bool  `json:"retryable,omitempty"`
 	FirstResponseAt string `json:"first_response_at"`
 	LastActivityAt  string `json:"last_activity_at"`
 	ExecutionID     string `json:"execution_id"`
@@ -102,6 +104,8 @@ func callOrganizerStream(ctx context.Context, db *gorm.DB, run *orm.Conversation
 	// A terminal frame confirms worker settlement even if its business output is invalid.
 	state.Settled = true
 	state.State = "completed"
+	state.ErrorCode = result.ErrorCode
+	state.Retryable = &result.Retryable
 	if err := save(); err != nil {
 		return out, err
 	}
@@ -110,4 +114,18 @@ func callOrganizerStream(ctx context.Context, db *gorm.DB, run *orm.Conversation
 		err = json.Unmarshal(result.Output, &out.Output)
 	}
 	return out, err
+}
+
+// Persist successful settlement so later recovery decisions do not use a stale fence.
+func settledOrganizerStream(raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 {
+		return raw
+	}
+	var state organizerStream
+	if json.Unmarshal(raw, &state) != nil {
+		return raw
+	}
+	state.Settled = true
+	settled, _ := json.Marshal(state)
+	return settled
 }

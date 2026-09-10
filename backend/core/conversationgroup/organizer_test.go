@@ -159,11 +159,11 @@ func TestInvalidProposalIsAtomicAndOldAttemptIsFenced(t *testing.T) {
 }
 
 func TestRetryOrganizerConflictsWithAnotherActiveRun(t *testing.T) {
-	db := orm.MigrateTestDB(t, &orm.AsyncJob{}, &orm.ConversationOrganizerRun{})
+	db := orm.MigrateTestDB(t, &orm.AsyncJob{}, &orm.ConversationOrganizerRun{}, &orm.UserSelectedModel{}, &orm.UserModelProviderGroup{}, &orm.UserModelProviderGroupModel{})
 	store.Init(db.DB, nil, nil)
 	now := time.Now().UTC()
 	const uid = "retry-user"
-	failed := orm.ConversationOrganizerRun{ID: "failed", UserID: uid, Status: "failed", SnapshotJSON: json.RawMessage(`{}`), SnapshotHash: "hash", ModelConfigJSON: json.RawMessage(`{}`), CreatedAt: now.Add(-time.Minute), UpdatedAt: now}
+	failed := orm.ConversationOrganizerRun{ID: "failed", UserID: uid, Status: "failed", ErrorCode: "connection_error", SnapshotJSON: json.RawMessage(`{}`), SnapshotHash: "hash", ModelConfigJSON: json.RawMessage(`{}`), CreatedAt: now.Add(-time.Minute), UpdatedAt: now}
 	active := orm.ConversationOrganizerRun{ID: "active", UserID: uid, Status: "running", SnapshotJSON: json.RawMessage(`{}`), SnapshotHash: "hash", ModelConfigJSON: json.RawMessage(`{}`), CreatedAt: now, UpdatedAt: now}
 	if err := db.Create(&failed).Error; err != nil {
 		t.Fatal(err)

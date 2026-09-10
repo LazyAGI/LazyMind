@@ -8044,12 +8044,12 @@ const enUS = {
 
     searchGroups: "Search groups",
     groupPickerLabel: "Group", freeConversation: "Ungrouped",
-    callError: { first_response_timeout: "No model content received within 300 seconds", stream_idle_timeout: "No new model content for 120 seconds", connection_timeout: "Model connection timed out", connection_error: "Model connection failed or interrupted", response_timeout: "Model response timed out", cancellation_unconfirmed: "Previous execution termination is unconfirmed; retry has not started" },
+    callError: { model_config_changed: "Model configuration changed; start a new run", invalid_snapshot: "The conversation snapshot is invalid; start a new run", model_config: "Unable to load model configuration", authentication_failed: "Model authentication failed; check the API key", permission_denied: "Model access denied; check permissions", input_too_large: "A single input exceeds model capacity; adjust the model configuration", output_too_large: "Output exceeds the limit at the smallest batch size; adjust the model configuration", token_limit: "Model token quota or capacity exceeded; check the model configuration", rate_limited: "Model rate limit reached; retry later", transport_error: "Model connection failed; retry later", request_timeout: "Model request timed out; retry later", first_response_timeout: "No model content received within 300 seconds", stream_idle_timeout: "No new model content for 120 seconds", connection_timeout: "Model connection timed out", connection_error: "Model connection failed or interrupted", response_timeout: "Model response timed out", cancellation_unconfirmed: "Previous execution termination is unconfirmed; retry has not started" },
     steps: {
       label: "Organization workflow", preparation: "Prepare conversation summaries", organization: "Organize conversation groups", review: "Review results", application: "Apply results",
       preparationDetail: "Preparing summaries", organizationDetail: "Matching and organizing groups", reviewDetail: "Checking result completeness", applicationDetail: "Checking and saving group assignments",
       batch: "Processing batch {{current}}/{{total}}", completed: "Completed", pending: "Waiting", failed: "Failed", canceled: "Canceled",
-      reused: "No additional summaries needed", snapshot: "Locking conversations for this run", auditing: "Reviewing group scope", canceling: "Canceling; waiting for the current call to exit",
+      reused: "No additional summaries needed", snapshot: "Lock conversations", snapshotLocked: "Conversation scope locked for this run", auditing: "Reviewing group scope", canceling: "Canceling; waiting for the current call to exit",
     },
     preparationProgress: "Preparing conversation summaries, batch {{current}}/{{total}}",
     unassignedReason: { no_matching_group: "Ungrouped: no matching group", below_min_group_size: "Ungrouped: fewer than 3 conversations in the candidate group", no_messages: "Ungrouped: no messages", no_task_intent: "Ungrouped: greetings or no clear task", summary_failed: "Ungrouped: summary preparation failed", unsupported_conversation: "Ungrouped: unsupported conversation type" },
@@ -8061,7 +8061,7 @@ const enUS = {
     removeFromGroup: "Remove from group", newAndMove: "Create group and move", organize: "Organize free conversations",
     recentResult: "Recent result", title: "Conversation organization", noResult: "No organization result yet",
     assigned: "Grouped", free: "Not grouped", keepFree: "Keep ungrouped", done: "Organization complete",
-    undone: "Organization undone", retry: "Organize free conversations", cancelRun: "Cancel", canceled: "Organization canceled",
+    undone: "Organization undone", retry: "Retry this run", restart: "Start over", retryHint: "Retry from saved progress, confirming any previous call has stopped first.", restartAlternativeHint: "If retrying did not complete the run, you can also start over with the current configuration.", restartHint: "This run cannot continue. Resolve any configuration, quota, or capacity issue shown above, then start over with the current configuration.", blockedHint: "Retry is unavailable for this error. Check the model configuration or ask an administrator to resolve it before starting a new run.", cancelRun: "Cancel", canceled: "Organization canceled",
     failed: "Organization failed", count: "{{count}} conversations", empty: "No conversations in this group",
     retryLoad: "Reload", loadFailed: "Unable to load this group", finish: "Done",
     starting: "Starting organization",

@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"sort"
 	"strings"
 
@@ -373,7 +372,7 @@ func runIncrementalStep(ctx context.Context, db *gorm.DB, run *orm.ConversationO
 						return nil, e
 					}
 					if result.Status != "succeeded" {
-						return nil, fmt.Errorf("scope audit failed: %s", result.ErrorCode)
+						return nil, failedOrganizerCall(result)
 					}
 					if result.Output.Identity != cp.Identity || result.Output.Processed != len(audit) {
 						return nil, errors.New("invalid scope audit identity")
@@ -463,7 +462,7 @@ func runIncrementalStep(ctx context.Context, db *gorm.DB, run *orm.ConversationO
 			cp.BatchSize /= 2
 			return nil, saveIncremental(ctx, db, run, job, cp, nil)
 		}
-		return nil, fmt.Errorf("organizer failed: %s", result.ErrorCode)
+		return nil, failedOrganizerCall(result)
 	}
 	if result.Output.Identity == "" || (cp.Identity != "" && cp.Identity != result.Output.Identity) || result.Output.Processed != len(rows) || len(result.Output.Assignments) != len(rows) {
 		return nil, errors.New("invalid incremental identity or length")

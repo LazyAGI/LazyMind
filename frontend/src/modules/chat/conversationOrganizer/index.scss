@@ -25,6 +25,7 @@
 .organizer-unread-dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
 .record-header-top .list-title { display: flex; flex: 1; min-width: 0; align-items: center; gap: 6px; }
 .organizer-progress, .organizer-state { padding: 20px 12px; text-align: center; }
+.organizer-state > .ant-btn + .ant-btn { margin-left: 8px; }
 .organizer-state > .anticon { color: #d44444; font-size: 30px; }
 .organizer-progress h3, .organizer-state h3 { font-size: 16px; }
 .organizer-progress p, .organizer-state p { color: #89919f; font-size: 12px; margin: 14px 0 28px; }

@@ -1422,6 +1422,8 @@ components:
             properties:
                 can_cancel:
                     type: boolean
+                can_restart:
+                    type: boolean
                 can_retry:
                     type: boolean
                 can_undo:

@@ -73,3 +73,39 @@ describe("organizer entry", () => {
  });
 
 });
+
+it.each([
+  { retry: false, restart: true, button: "restart", startsNew: true },
+  { retry: true, restart: false, button: "retry", startsNew: false },
+  { retry: true, restart: true, button: "restart", startsNew: true },
+  { retry: true, restart: true, button: "retry", startsNew: false },
+])("routes recovery $button with retry=$retry restart=$restart", async ({ retry, restart, button, startsNew }) => {
+  const failed: api.OrganizerRun = { ...running, status: "failed", can_cancel: false, can_retry: retry, can_restart: restart };
+  vi.mocked(api.getLatestOrganizerState).mockResolvedValue({ run: failed, latest_successful_run_id: null, free_conversation_count: 2 });
+  vi.mocked(api.startOrganizerRun).mockResolvedValue({ ...running, id: "new-run" });
+  vi.mocked(api.runAction).mockResolvedValue(running);
+  const { unmount } = render(<ConversationGroups mode="organizer" />);
+  fireEvent.click(await screen.findByRole("button", { name: /failedEntry/ }));
+  fireEvent.click(await screen.findByRole("button", { name: `conversationOrganizer.${button}` }));
+  await waitFor(() => {
+    if (startsNew) {
+      expect(api.startOrganizerRun).toHaveBeenCalledTimes(1);
+      expect(api.runAction).not.toHaveBeenCalled();
+    } else {
+      expect(api.runAction).toHaveBeenCalledWith("r", "retry");
+      expect(api.startOrganizerRun).not.toHaveBeenCalled();
+    }
+  });
+  unmount();
+});
+
+it("does not offer retry or restart for an unresolved error", async () => {
+  const failed: api.OrganizerRun = { ...running, status: "failed", can_retry: false, can_restart: false };
+  vi.mocked(api.getLatestOrganizerState).mockResolvedValue({ run: failed, latest_successful_run_id: null, free_conversation_count: 2 });
+  const { unmount } = render(<ConversationGroups mode="organizer" />);
+  fireEvent.click(await screen.findByRole("button", { name: /failedEntry/ }));
+  expect(await screen.findByText("conversationOrganizer.blockedHint")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "conversationOrganizer.retry" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "conversationOrganizer.restart" })).toBeNull();
+  unmount();
+});

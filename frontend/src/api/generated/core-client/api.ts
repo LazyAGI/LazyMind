@@ -1243,6 +1243,7 @@ export interface ConversationOrganizerLatestResponse {
 }
 export interface ConversationOrganizerRun {
     'can_cancel': boolean;
+    'can_restart'?: boolean;
     'can_retry': boolean;
     'can_undo': boolean;
     'created_at': string;

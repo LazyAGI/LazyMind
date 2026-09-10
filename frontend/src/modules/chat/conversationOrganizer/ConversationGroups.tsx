@@ -190,15 +190,16 @@ export default function ConversationGroups({ onChanged, onNewChatInGroup, mode =
     },
   });
 
-  const beginOrganize = async () => {
+  const beginOrganize = async (previous = activeRun, restart = false) => {
+    if (previous?.status === "failed" && (restart ? !previous.can_restart : !previous.can_retry && !previous.can_restart)) return;
     if (startingRef.current || (activeRun && activeStatuses.has(activeRun.status))) return;
     startingRef.current = true;
     const generation = ++pollGenerationRef.current;
     window.clearTimeout(pollRef.current);
     setStarting(true);
     try {
-      const next = activeRun?.status === "failed" && activeRun.can_retry
-        ? await runAction(activeRun.id, "retry")
+      const next = !restart && previous && (previous.status === "failed" || previous.status === "canceled") && previous.can_retry
+        ? await runAction(previous.id, "retry")
         : await startOrganizerRun();
       if (generation !== pollGenerationRef.current) return;
       setActiveRun(next);
@@ -207,7 +208,10 @@ export default function ConversationGroups({ onChanged, onNewChatInGroup, mode =
       if (next.status === "succeeded") setHasRecentResult(true);
       onChangedRef.current?.();
       void refreshActiveRun(next.id, generation);
-    } catch { /* The shared request interceptor displays the API error. */ }
+    } catch {
+      // Refresh capabilities if the configuration changed after the drawer opened.
+      if (previous) void refreshActiveRun(previous.id, generation);
+    }
     finally { startingRef.current = false; setStarting(false); }
   };
 
@@ -247,14 +251,14 @@ export default function ConversationGroups({ onChanged, onNewChatInGroup, mode =
     });
   };
 
-  const act = async (action: "cancel" | "retry" | "undo" | "confirm") => {
+  const act = async (action: "cancel" | "undo" | "confirm") => {
     if (!run) return;
     if (action === "cancel") setCanceling(true);
     let next: OrganizerRun;
     try { next = await runAction(run.id, action); } finally { setCanceling(false); }
     setRun(next);
     if (action === "undo" || action === "confirm") { setDrawerOpen(false); setHasRecentResult(false); setActiveRun(null); emitConversationGroupsChanged(); }
-    if (action === "retry" || activeStatuses.has(next.status)) { setActiveRun(next); const generation = ++pollGenerationRef.current; void refreshActiveRun(next.id, generation); }
+    if (activeStatuses.has(next.status)) { setActiveRun(next); const generation = ++pollGenerationRef.current; void refreshActiveRun(next.id, generation); }
     else { await refreshGroups(); onChanged?.(); }
   };
 
@@ -304,7 +308,7 @@ export default function ConversationGroups({ onChanged, onNewChatInGroup, mode =
         {!run.steps?.length && <h3>{progressLabel(run)}</h3>}
         <p>{t("conversationOrganizer.progressHint")}</p>
         {run.can_cancel && <Button loading={canceling} disabled={canceling} onClick={() => confirmCancel(() => act("cancel"))}>{t("conversationOrganizer.cancelRun")}</Button>}
-      </div> : run.status === "failed" ? <div className="organizer-state"><CloseCircleOutlined /><h3>{t("conversationOrganizer.failed")}</h3><p>{run.error?.code ? t(`conversationOrganizer.callError.${run.error.code}`, { defaultValue: run.error.message || t("conversationOrganizer.failedHint") }) : t("conversationOrganizer.failedHint")}</p>{run.can_retry && <Button type="primary" onClick={() => void act("retry")}>{t("conversationOrganizer.retry")}</Button>}</div> : run.status === "canceled" ? <div className="organizer-state"><CloseCircleOutlined /><h3>{t("conversationOrganizer.canceled")}</h3><p>{t("conversationOrganizer.canceledHint")}</p><Button loading={starting} disabled={freeCount === 0} onClick={() => void beginOrganize()}>{t("conversationOrganizer.organize")}</Button></div> : <>
+      </div> : run.status === "failed" ? <div className="organizer-state"><CloseCircleOutlined /><h3>{t("conversationOrganizer.failed")}</h3><p>{run.error?.code ? t(`conversationOrganizer.callError.${run.error.code}`, { defaultValue: run.error.message || t("conversationOrganizer.failedHint") }) : t("conversationOrganizer.failedHint")}</p><p>{t(run.can_retry ? "conversationOrganizer.retryHint" : run.can_restart ? "conversationOrganizer.restartHint" : "conversationOrganizer.blockedHint")}</p>{run.can_retry && run.can_restart && <p>{t("conversationOrganizer.restartAlternativeHint")}</p>}{run.can_retry && <Button type="primary" loading={starting} disabled={starting} onClick={() => void beginOrganize(run)}>{t("conversationOrganizer.retry")}</Button>}{run.can_restart && <Button type={run.can_retry ? "default" : "primary"} loading={starting} disabled={starting || freeCount === 0} onClick={() => void beginOrganize(run, true)}>{t("conversationOrganizer.restart")}</Button>}</div> : run.status === "canceled" ? <div className="organizer-state"><CloseCircleOutlined /><h3>{t("conversationOrganizer.canceled")}</h3><p>{t("conversationOrganizer.canceledHint")}</p><Button loading={starting} disabled={freeCount === 0} onClick={() => void beginOrganize(run)}>{t("conversationOrganizer.organize")}</Button></div> : <>
         <div className="organizer-result-notice">{t("conversationOrganizer.resultNotice")}</div>
         <div className="organizer-result-summary" aria-label={t("conversationOrganizer.resultSummaryLabel")}>
           <div><strong>{resultItems.length}</strong><span>{t("conversationOrganizer.resultStats.included")}</span></div>

@@ -144,6 +144,15 @@ func StartOrganizer(w http.ResponseWriter, r *http.Request) {
 			run = previous
 			return nil
 		}
+		// A new snapshot must also settle any previous terminal execution.
+		var terminal orm.ConversationOrganizerRun
+		err = tx.Where("user_id=? AND status IN ?", uid, []string{"failed", "canceled"}).Order("created_at DESC").Take(&terminal).Error
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		if err == nil && !settleOrganizerStream(r.Context(), terminal.StreamJSON) {
+			return errCancellationUnconfirmed
+		}
 		now := time.Now().UTC()
 		run = orm.ConversationOrganizerRun{ID: uuid.NewString(), UserID: uid, Status: "pending", Stage: "snapshot", Version: 1, ModelConfigJSON: modelRaw, CreatedAt: now, UpdatedAt: now}
 		snapshot, items, err := buildSnapshot(r.Context(), tx, run.ID, uid)
@@ -199,7 +208,7 @@ func StartOrganizer(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		status := 500
-		if err.Error() == "no free conversations to organize" {
+		if err.Error() == "no free conversations to organize" || errors.Is(err, errCancellationUnconfirmed) {
 			status = 409
 		}
 		common.ReplyErr(w, err.Error(), status)
@@ -291,7 +300,7 @@ func RetryOrganizer(w http.ResponseWriter, r *http.Request) {
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id=? AND user_id=?", id, uid).Take(&row).Error; err != nil {
 			return err
 		}
-		if row.Status != "failed" && row.Status != "canceled" {
+		if organizerRecovery(r.Context(), tx, row) != recoveryRetry {
 			return errors.New("conversation organizer run cannot be retried")
 		}
 		previous, err := latestOrganizerResult(tx, uid)

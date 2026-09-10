@@ -66,7 +66,7 @@ func ReconcileTerminalJobs(ctx context.Context, db *gorm.DB) error {
 		}
 		res := db.WithContext(ctx).Model(&orm.ConversationOrganizerRun{}).
 			Where("id=? AND job_id=? AND status IN ?", row.RunID, row.JobID, []string{"pending", "running", "applying"}).
-			Updates(map[string]any{"status": status, "stage": stage, "error_code": row.ErrorCode, "error_message": row.ErrorMessage, "finished_at": now, "updated_at": now, "version": gorm.Expr("version + 1")})
+			Updates(map[string]any{"status": status, "stage": stage, "error_code": row.ErrorCode, "error_message": row.ErrorMessage, "stream_json": settledOrganizerStream(row.StreamJSON), "finished_at": now, "updated_at": now, "version": gorm.Expr("version + 1")})
 		if res.Error != nil {
 			return res.Error
 		}
@@ -118,12 +118,17 @@ func handleOrganizerJob(ctx context.Context, job asyncjob.Job, reporter asyncjob
 		_ = ownedRunUpdate(ctx, db, run.ID, job, "running", map[string]any{"stage": "canceling"})
 		return asyncjob.Result{Permanent: true, ErrorCode: "cancellation_unconfirmed"}, errCancellationUnconfirmed
 	}
+	if len(run.StreamJSON) > 0 {
+		run.StreamJSON = settledOrganizerStream(run.StreamJSON)
+		if err := ownedRunUpdate(ctx, db, run.ID, job, "running", map[string]any{"stream_json": run.StreamJSON}); err != nil {
+			return asyncjob.Result{ErrorCode: "lease_lost"}, err
+		}
+	}
 	llmConfig, err := modelconfig.LoadLLMConfig(ctx, db, run.UserID)
 	if err != nil {
 		return failRun(ctx, db, run, job, "model_config", err)
 	}
-	currentSanitized, _ := json.Marshal(sanitizeModelConfig(llmConfig))
-	if string(currentSanitized) != string(run.ModelConfigJSON) {
+	if !sameOrganizerModelConfig(llmConfig, run.ModelConfigJSON) {
 		return failRun(ctx, db, run, job, "model_config_changed", errors.New("conversation organizer model config changed"))
 	}
 	if err := prepareOrganizer(ctx, db, &run, job, llmConfig); err != nil {
@@ -231,8 +236,9 @@ func failRun(ctx context.Context, db *gorm.DB, run orm.ConversationOrganizerRun,
 	return asyncjob.Result{Permanent: true, ErrorCode: code}, err
 }
 func retryOrFailRun(ctx context.Context, db *gorm.DB, run orm.ConversationOrganizerRun, job asyncjob.Job, code string, err error) (asyncjob.Result, error) {
+	code, retryable := organizerFailure(code, err)
 	var row orm.AsyncJob
-	if e := db.WithContext(ctx).Where("id=?", job.ID).Take(&row).Error; e == nil && job.AttemptCount < row.MaxAttempts {
+	if e := db.WithContext(ctx).Where("id=?", job.ID).Take(&row).Error; retryable && e == nil && job.AttemptCount < row.MaxAttempts {
 		return asyncjob.Result{ErrorCode: code}, err
 	}
 	return failRun(ctx, db, run, job, code, err)
