@@ -5,7 +5,10 @@ import (
 	"strings"
 )
 
-const defaultLLMMaxInputTokens = "128K"
+const (
+	defaultLLMMaxInputTokens = "128K"
+	maxInputTokensMaxLen     = 16
+)
 
 func supportsUserMaxInputTokens(modelType string) bool {
 	return strings.EqualFold(strings.TrimSpace(modelType), "llm")
@@ -13,7 +16,7 @@ func supportsUserMaxInputTokens(modelType string) bool {
 
 func parseMaxInputTokens(raw string) (string, error) {
 	value := strings.ToUpper(strings.TrimSpace(raw))
-	if !maxInputTokensPattern.MatchString(value) {
+	if len(value) == 0 || len(value) > maxInputTokensMaxLen || !maxInputTokensPattern.MatchString(value) {
 		return "", errors.New("model max_input_tokens must be a positive integer or use a K or M suffix, for example 512, 128K, or 1M")
 	}
 	return value, nil
@@ -54,6 +57,20 @@ func resolveUserMaxInputTokens(modelType string, raw *string) (*string, error) {
 		trimmed = defaultLLMMaxInputTokens
 	}
 	normalized, err := parseMaxInputTokens(trimmed)
+	if err != nil {
+		return nil, err
+	}
+	return &normalized, nil
+}
+
+func resolveRequiredUserMaxInputTokens(modelType string, raw *string) (*string, error) {
+	if raw == nil || strings.TrimSpace(*raw) == "" {
+		return nil, errors.New("max_input_tokens is required")
+	}
+	if !supportsUserMaxInputTokens(modelType) {
+		return nil, errors.New("model max_input_tokens is only supported for llm or vlm models")
+	}
+	normalized, err := parseMaxInputTokens(*raw)
 	if err != nil {
 		return nil, err
 	}

@@ -582,7 +582,7 @@ const enUS = {
     modelNamePlaceholder: "Example: qwen-max-latest",
     modelType: "Model Type",
     maxInputTokensLabel: "Context length",
-    maxInputTokensExtra: "Use 512, 128K, or 1M. Catalog values are used when available; otherwise the default is 128K.",
+    maxInputTokensExtra: "Only custom LLMs can be edited. Use 512, 128K, or 1M (max 16 characters). Defaults to 128K when omitted.",
     maxInputTokensPlaceholder: "128K",
     providerDescriptionFallback: "Built-in model provider. Configure a connection group before use.",
     providerDescriptions: {

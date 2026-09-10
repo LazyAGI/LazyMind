@@ -740,6 +740,8 @@ func init() {
 	registerAdditionalErrorPattern("AnkiConnect queue flush failed: %s", "AnkiConnect queue flush failed", http.StatusBadGateway, 2002405)
 	registerAdditionalErrorAlias("AnkiConnect queue flush failed", "AnkiConnect queue flush failed", http.StatusBadGateway, 2002405)
 	registerAdditionalError("update model failed", http.StatusInternalServerError, 2002626)
+	registerAdditionalError("max_input_tokens is required", http.StatusBadRequest, 2002627)
+	registerAdditionalError("catalog model max_input_tokens cannot be updated", http.StatusBadRequest, 2002628)
 }
 
 func registerAdditionalError(message string, status, code int) {

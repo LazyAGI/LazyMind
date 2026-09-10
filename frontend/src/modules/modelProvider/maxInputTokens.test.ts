@@ -16,5 +16,6 @@ describe("llm max input tokens", () => {
   it("rejects invalid values", () => {
     expect(parseLlmMaxInputTokens("128KB")).toBeNull();
     expect(parseLlmMaxInputTokens("0K")).toBeNull();
+    expect(parseLlmMaxInputTokens("999999999999999999999999K")).toBeNull();
   });
 });

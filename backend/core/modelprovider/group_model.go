@@ -306,13 +306,14 @@ func UpdateGroupModel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	maxInputTokens, err := resolveUserMaxInputTokens(row.ModelType, req.MaxInputTokens)
-	if err != nil {
-		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+	if row.IsDefault {
+		common.ReplyErr(w, "catalog model max_input_tokens cannot be updated", http.StatusBadRequest)
 		return
 	}
-	if maxInputTokens == nil {
-		common.ReplyErr(w, "model max_input_tokens is only supported for llm or vlm models", http.StatusBadRequest)
+
+	maxInputTokens, err := resolveRequiredUserMaxInputTokens(row.ModelType, req.MaxInputTokens)
+	if err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 

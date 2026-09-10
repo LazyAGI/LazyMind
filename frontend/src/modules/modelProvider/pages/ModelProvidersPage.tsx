@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button, Empty, Form, Input, Modal, Popconfirm, Select, Tag, Tooltip, message } from "antd";
 import type { InputRef } from "antd";
 import { useTranslation } from "react-i18next";
-import { localizeErrorCode } from "@/components/request";
+import { getLocalizedErrorMessage, localizeErrorCode } from "@/components/request";
 import {
   CheckCircleFilled,
   DeleteOutlined,
@@ -16,7 +16,13 @@ import {
 } from "@ant-design/icons";
 import { modelProvidersApi, patchGroupModelMaxInputTokens, unwrapModelProviderData } from "../api";
 import { getProviderLogoUrl } from "../providerBranding";
-import { DEFAULT_LLM_MAX_INPUT_TOKENS, isLlmChatCapability, parseLlmMaxInputTokens, resolveLlmMaxInputTokens } from "../maxInputTokens";
+import {
+  DEFAULT_LLM_MAX_INPUT_TOKENS,
+  LLM_MAX_INPUT_TOKENS_MAX_LENGTH,
+  isLlmChatCapability,
+  parseLlmMaxInputTokens,
+  resolveLlmMaxInputTokens,
+} from "../maxInputTokens";
 import "../index.scss";
 
 export type ModelCapability =
@@ -622,6 +628,7 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
 
   const [providerOptions, setProviderOptions] = useState<ProviderOption[]>(builtInProviders);
   const [addedProviderList, setAddedProviderList] = useState<AddedProvider[]>([]);
+  const [draftMaxInputTokens, setDraftMaxInputTokens] = useState<Record<string, string>>({});
   const [configModal, setConfigModal] = useState<ProviderConfigModalState | null>(null);
   const [customModelModal, setCustomModelModal] = useState<CustomModelModalState | null>(null);
   const [verifyGroupModal, setVerifyGroupModal] = useState<VerifyGroupModalState | null>(null);
@@ -1285,12 +1292,15 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
     model: ProviderModel,
     rawValue?: string,
   ) => {
+    const persistedValue = resolveLlmMaxInputTokens(model.maxInputTokens);
     const nextValue = parseLlmMaxInputTokens(rawValue);
     if (!nextValue) {
       message.error(t("modelProvider.validation.maxInputTokensInvalid"));
+      setDraftMaxInputTokens((current) => ({ ...current, [model.id]: persistedValue }));
       return;
     }
-    if (resolveLlmMaxInputTokens(model.maxInputTokens) === nextValue && model.maxInputTokens?.trim()) {
+    if (nextValue === persistedValue && model.maxInputTokens?.trim()) {
+      setDraftMaxInputTokens((current) => ({ ...current, [model.id]: persistedValue }));
       return;
     }
     try {
@@ -1319,9 +1329,12 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
             : provider
         )
       );
+      setDraftMaxInputTokens((current) => ({ ...current, [model.id]: nextValue }));
       message.success(t("modelProvider.message.maxInputTokensSaved"));
       void onConfigurationChanged?.();
     } catch (error) {
+      message.error(getLocalizedErrorMessage(error));
+      setDraftMaxInputTokens((current) => ({ ...current, [model.id]: persistedValue }));
     }
   };
 
@@ -1490,13 +1503,16 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
                                               <strong>{model.name}</strong>
                                               <CapabilityTag label={getCapabilityLabel(model.capability)} />
                                               {model.builtIn ? null : <Tag className="model-provider-custom-tag">{t("modelProvider.custom")}</Tag>}
-                                              {isLlmChatCapability(model.capability) ? (
+                                              {isLlmChatCapability(model.capability) && !model.builtIn ? (
                                                 <Input
                                                   aria-label={t("modelProvider.maxInputTokensLabel")}
                                                   className="model-provider-model-max-input-tokens"
-                                                  defaultValue={resolveLlmMaxInputTokens(model.maxInputTokens)}
-                                                  key={`${model.id}:${resolveLlmMaxInputTokens(model.maxInputTokens)}`}
+                                                  maxLength={LLM_MAX_INPUT_TOKENS_MAX_LENGTH}
                                                   placeholder={t("modelProvider.maxInputTokensPlaceholder")}
+                                                  value={
+                                                    draftMaxInputTokens[model.id] ??
+                                                    resolveLlmMaxInputTokens(model.maxInputTokens)
+                                                  }
                                                   onBlur={(event) =>
                                                     void saveModelMaxInputTokens(
                                                       provider.id,
@@ -1505,7 +1521,20 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
                                                       event.target.value,
                                                     )
                                                   }
+                                                  onChange={(event) =>
+                                                    setDraftMaxInputTokens((current) => ({
+                                                      ...current,
+                                                      [model.id]: event.target.value,
+                                                    }))
+                                                  }
                                                 />
+                                              ) : isLlmChatCapability(model.capability) &&
+                                                model.maxInputTokens?.trim() ? (
+                                                <span className="model-provider-model-max-input-tokens is-readonly">
+                                                  {t("modelProvider.maxInputTokens", {
+                                                    value: resolveLlmMaxInputTokens(model.maxInputTokens),
+                                                  })}
+                                                </span>
                                               ) : null}
                                             </div>
 
@@ -1879,7 +1908,7 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
                 },
               ]}
             >
-              <Input maxLength={16} placeholder={t("modelProvider.maxInputTokensPlaceholder")} />
+              <Input maxLength={LLM_MAX_INPUT_TOKENS_MAX_LENGTH} placeholder={t("modelProvider.maxInputTokensPlaceholder")} />
             </Form.Item>
           ) : null}
         </Form>

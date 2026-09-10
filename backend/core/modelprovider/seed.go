@@ -243,18 +243,13 @@ func syncDefaultModelToUserGroups(
 		"free_auto_select_base_urls": freeAutoSelectBaseURLs,
 		"updated_at":                 now,
 	}
+	if maxInputTokens != nil {
+		updates["max_input_tokens"] = *maxInputTokens
+	}
 	if err := tx.Model(&orm.UserModelProviderGroupModel{}).
 		Where("is_default = ? AND name = ? AND user_model_provider_id IN (?) AND deleted_at IS NULL", true, modelName, providerIDs).
 		Updates(updates).Error; err != nil {
 		return err
-	}
-	if maxInputTokens != nil {
-		if err := tx.Model(&orm.UserModelProviderGroupModel{}).
-			Where("is_default = ? AND name = ? AND user_model_provider_id IN (?) AND deleted_at IS NULL", true, modelName, providerIDs).
-			Where("max_input_tokens IS NULL OR max_input_tokens = ?", "").
-			Update("max_input_tokens", *maxInputTokens).Error; err != nil {
-			return err
-		}
 	}
 
 	var catalog orm.DefaultModelProvider

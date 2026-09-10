@@ -1,4 +1,5 @@
 export const DEFAULT_LLM_MAX_INPUT_TOKENS = "128K";
+export const LLM_MAX_INPUT_TOKENS_MAX_LENGTH = 16;
 
 const MAX_INPUT_TOKENS_PATTERN = /^[1-9]\d*([KkMm])?$/;
 
@@ -13,5 +14,8 @@ export function resolveLlmMaxInputTokens(value?: string | null) {
 
 export function parseLlmMaxInputTokens(value?: string | null) {
   const normalized = resolveLlmMaxInputTokens(value);
+  if (normalized.length > LLM_MAX_INPUT_TOKENS_MAX_LENGTH) {
+    return null;
+  }
   return MAX_INPUT_TOKENS_PATTERN.test(normalized) ? normalized : null;
 }

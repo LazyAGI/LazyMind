@@ -1573,5 +1573,7 @@
   "2002623": { "en-US": "The review session has no previewed questions", "zh-CN": "复习会话中没有已预览的题目" },
   "2002624": { "en-US": "The review item has already been answered", "zh-CN": "该复习题已经作答" },
   "2002625": { "en-US": "The review session still has remaining questions", "zh-CN": "复习会话仍有未完成的题目" },
-  "2002626": { "en-US": "Failed to update the model", "zh-CN": "更新模型失败" }
+  "2002626": { "en-US": "Failed to update the model", "zh-CN": "更新模型失败" },
+  "2002627": { "en-US": "max_input_tokens is required", "zh-CN": "必须提供 max_input_tokens" },
+  "2002628": { "en-US": "Catalog model context length cannot be updated", "zh-CN": "目录模型的上下文长度不可修改" }
 }

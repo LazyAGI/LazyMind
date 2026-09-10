@@ -16,6 +16,7 @@ import {
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { AgentAppsAuth } from "@/components/auth";
+import { getLocalizedErrorMessage } from "@/components/request";
 import { useModelFeatures } from "@/hooks/useModelFeatures";
 import { runtimeFeatures } from "@/runtime/features";
 import {
@@ -26,7 +27,12 @@ import {
   withModelProviderJsonOptions,
 } from "../api";
 import { getProviderLogoUrl } from "../providerBranding";
-import { isLlmChatCapability, parseLlmMaxInputTokens, resolveLlmMaxInputTokens } from "../maxInputTokens";
+import {
+  LLM_MAX_INPUT_TOKENS_MAX_LENGTH,
+  isLlmChatCapability,
+  parseLlmMaxInputTokens,
+  resolveLlmMaxInputTokens,
+} from "../maxInputTokens";
 
 export type SetupAvailabilityState = "loading" | "ready" | "empty" | "error";
 
@@ -112,6 +118,7 @@ interface ApiModel {
 interface SelectedModelApiItem {
   base_url?: string;
   group_name: string;
+  is_default?: boolean;
   is_editable?: boolean;
   max_input_tokens?: string;
   model_id: string;
@@ -602,6 +609,7 @@ export default function DefaultModelConfigPanel({
   const [selectedModels, setSelectedModels] = useState<SelectedModels>({});
   const [selectedModelMaxInputTokens, setSelectedModelMaxInputTokens] =
     useState<SelectedModelMaxInputTokens>({});
+  const [draftLlmMaxInputTokens, setDraftLlmMaxInputTokens] = useState("");
   const [selectedCloudServices, setSelectedCloudServices] =
     useState<SelectedCloudServices>({});
   const [cloudServiceShareStatus, setCloudServiceShareStatus] = useState<
@@ -707,7 +715,7 @@ export default function DefaultModelConfigPanel({
           id: selection.model_id,
           name: selection.name,
           capability,
-          builtIn: true,
+          builtIn: Boolean(selection.is_default),
           enabled: true,
           maxInputTokens: selection.max_input_tokens,
         };
@@ -737,6 +745,7 @@ export default function DefaultModelConfigPanel({
 
       setSelectedModels(nextSelectedModels);
       setSelectedModelMaxInputTokens(nextSelectedModelMaxInputTokens);
+      setDraftLlmMaxInputTokens(nextSelectedModelMaxInputTokens.llm ?? "");
       setModuleModelOptions((current) => ({ ...selectedOptions, ...current }));
 
       const nextShareStatus: Partial<Record<ModelCapability, boolean>> = {};
@@ -1081,15 +1090,19 @@ export default function DefaultModelConfigPanel({
       ...current,
       [capability]: value,
     }));
+    const nextMaxInputTokens =
+      capability === "llm" && value
+        ? resolveLlmMaxInputTokens(maxInputTokens)
+        : maxInputTokens?.trim()
+          ? maxInputTokens
+          : undefined;
     setSelectedModelMaxInputTokens((current) => ({
       ...current,
-      [capability]:
-        capability === "llm" && value
-          ? resolveLlmMaxInputTokens(maxInputTokens)
-          : maxInputTokens?.trim()
-            ? maxInputTokens
-            : undefined,
+      [capability]: nextMaxInputTokens,
     }));
+    if (capability === "llm") {
+      setDraftLlmMaxInputTokens(nextMaxInputTokens ?? "");
+    }
     if (!value) {
       setShareStatus((current) => ({ ...current, [capability]: false }));
     }
@@ -1108,15 +1121,19 @@ export default function DefaultModelConfigPanel({
             ...current,
             [selectedCapability]: !!selection.share,
           }));
+          const persisted =
+            selectedCapability === "llm"
+              ? resolveLlmMaxInputTokens(selection.max_input_tokens)
+              : selection.max_input_tokens?.trim()
+                ? selection.max_input_tokens
+                : undefined;
           setSelectedModelMaxInputTokens((current) => ({
             ...current,
-            [selectedCapability]:
-              selectedCapability === "llm"
-                ? resolveLlmMaxInputTokens(selection.max_input_tokens)
-                : selection.max_input_tokens?.trim()
-                  ? selection.max_input_tokens
-                  : undefined,
+            [selectedCapability]: persisted,
           }));
+          if (selectedCapability === "llm") {
+            setDraftLlmMaxInputTokens(persisted ?? "");
+          }
         });
         void onModelSelectionChanged();
       })
@@ -1128,13 +1145,15 @@ export default function DefaultModelConfigPanel({
     if (!selectedValue) {
       return;
     }
+    const persistedValue = resolveLlmMaxInputTokens(selectedModelMaxInputTokens.llm);
     const nextValue = parseLlmMaxInputTokens(rawValue);
     if (!nextValue) {
       message.error(t("modelProvider.validation.maxInputTokensInvalid"));
-      setSelectedModelMaxInputTokens((current) => ({
-        ...current,
-        llm: resolveLlmMaxInputTokens(current.llm),
-      }));
+      setDraftLlmMaxInputTokens(persistedValue);
+      return;
+    }
+    if (nextValue === persistedValue) {
+      setDraftLlmMaxInputTokens(persistedValue);
       return;
     }
     const { providerId, groupId, modelId } = parseModelValue(selectedValue);
@@ -1152,6 +1171,7 @@ export default function DefaultModelConfigPanel({
         ...current,
         llm: nextValue,
       }));
+      setDraftLlmMaxInputTokens(nextValue);
       setModuleModelOptions((current) => ({
         ...current,
         llm: (current.llm || []).map((option) =>
@@ -1168,7 +1188,9 @@ export default function DefaultModelConfigPanel({
       }));
       message.success(t("modelProvider.message.maxInputTokensSaved"));
       void onModelSelectionChanged();
-    } catch {
+    } catch (error) {
+      message.error(getLocalizedErrorMessage(error));
+      setDraftLlmMaxInputTokens(persistedValue);
     }
   };
 
@@ -1407,8 +1429,13 @@ export default function DefaultModelConfigPanel({
           const moduleTitle = t(module.titleKey);
           const moduleSubtitle = t(module.subtitleKey);
           const maxInputTokens = selectedModelMaxInputTokens[module.key];
+          const selectedLlmOption = (moduleModelOptions.llm || []).find(
+            (option) => option.value === selectedModels.llm,
+          );
           const shouldEditLlmMaxInputTokens =
-            isLlmChatCapability(module.key) && Boolean(selectedModels[module.key]);
+            isLlmChatCapability(module.key) &&
+            Boolean(selectedModels.llm) &&
+            Boolean(selectedLlmOption && !selectedLlmOption.model.builtIn);
           const shouldShowMaxInputTokens =
             !shouldEditLlmMaxInputTokens && Boolean(maxInputTokens?.trim());
 
@@ -1431,15 +1458,11 @@ export default function DefaultModelConfigPanel({
                   <Input
                     aria-label={t("modelProvider.maxInputTokensLabel")}
                     className="model-provider-max-input-tokens-input"
+                    maxLength={LLM_MAX_INPUT_TOKENS_MAX_LENGTH}
                     placeholder={t("modelProvider.maxInputTokensPlaceholder")}
-                    value={maxInputTokens ?? ""}
+                    value={draftLlmMaxInputTokens}
                     onBlur={(event) => void saveLlmMaxInputTokens(event.target.value)}
-                    onChange={(event) =>
-                      setSelectedModelMaxInputTokens((current) => ({
-                        ...current,
-                        llm: event.target.value,
-                      }))
-                    }
+                    onChange={(event) => setDraftLlmMaxInputTokens(event.target.value)}
                   />
                 ) : shouldShowMaxInputTokens ? (
                   <span className="model-provider-max-input-tokens">

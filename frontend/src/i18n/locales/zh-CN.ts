@@ -567,7 +567,7 @@ const zhCN = {
     modelNamePlaceholder: "例如 qwen-max-latest",
     modelType: "模型类型",
     maxInputTokensLabel: "上下文长度",
-    maxInputTokensExtra: "可填写 512、128K 或 1M。能从配置读到时使用配置值，否则默认 128K。",
+    maxInputTokensExtra: "仅自定义大模型可修改。请填写 512、128K 或 1M，最多 16 个字符。未填写时默认为 128K。",
     maxInputTokensPlaceholder: "128K",
     providerDescriptionFallback: "系统内置模型供应商，可配置连接分组后使用。",
     providerDescriptions: {

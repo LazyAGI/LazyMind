@@ -119,7 +119,7 @@ func TestUpdateGroupModelMaxInputTokens(t *testing.T) {
 		Name:                     "gpt-test",
 		ModelType:                "llm",
 		MaxInputTokens:           &tokens,
-		IsDefault:                true,
+		IsDefault:                false,
 		BaseModel: orm.BaseModel{
 			CreateUserID: "user-1",
 			CreatedAt:    now,
@@ -149,5 +149,89 @@ func TestUpdateGroupModelMaxInputTokens(t *testing.T) {
 	}
 	if stored.MaxInputTokens == nil || *stored.MaxInputTokens != "1M" {
 		t.Fatalf("stored max_input_tokens = %v, want 1M", stored.MaxInputTokens)
+	}
+}
+
+func TestUpdateGroupModelRejectsMissingMaxInputTokens(t *testing.T) {
+	seedGroupModelFixture(t)
+
+	now := time.Now().UTC()
+	tokens := "128K"
+	row := orm.UserModelProviderGroupModel{
+		ID:                       "model-llm-required",
+		UserModelProviderID:      "provider-openai",
+		UserModelProviderGroupID: "group-openai",
+		ProviderName:             "OpenAI",
+		Name:                     "gpt-custom",
+		ModelType:                "llm",
+		MaxInputTokens:           &tokens,
+		IsDefault:                false,
+		BaseModel: orm.BaseModel{
+			CreateUserID: "user-1",
+			CreatedAt:    now,
+			UpdatedAt:    now,
+		},
+	}
+	if err := store.DB().Create(&row).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPatch, "/model_providers/provider-openai/groups/group-openai/models/model-llm-required", strings.NewReader(`{}`))
+	req.Header.Set("X-User-Id", "user-1")
+	req = mux.SetURLVars(req, map[string]string{
+		"model_provider_id": "provider-openai",
+		"group_id":          "group-openai",
+		"model_id":          "model-llm-required",
+	})
+	rec := httptest.NewRecorder()
+	UpdateGroupModel(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var stored orm.UserModelProviderGroupModel
+	if err := store.DB().Take(&stored, "id = ?", row.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if stored.MaxInputTokens == nil || *stored.MaxInputTokens != "128K" {
+		t.Fatalf("stored max_input_tokens = %v, want 128K", stored.MaxInputTokens)
+	}
+}
+
+func TestUpdateGroupModelRejectsCatalogMaxInputTokens(t *testing.T) {
+	seedGroupModelFixture(t)
+
+	now := time.Now().UTC()
+	tokens := "128K"
+	row := orm.UserModelProviderGroupModel{
+		ID:                       "model-llm-catalog",
+		UserModelProviderID:      "provider-openai",
+		UserModelProviderGroupID: "group-openai",
+		ProviderName:             "OpenAI",
+		Name:                     "gpt-catalog",
+		ModelType:                "llm",
+		MaxInputTokens:           &tokens,
+		IsDefault:                true,
+		BaseModel: orm.BaseModel{
+			CreateUserID: "user-1",
+			CreatedAt:    now,
+			UpdatedAt:    now,
+		},
+	}
+	if err := store.DB().Create(&row).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPatch, "/model_providers/provider-openai/groups/group-openai/models/model-llm-catalog", strings.NewReader(`{"max_input_tokens":"1m"}`))
+	req.Header.Set("X-User-Id", "user-1")
+	req = mux.SetURLVars(req, map[string]string{
+		"model_provider_id": "provider-openai",
+		"group_id":          "group-openai",
+		"model_id":          "model-llm-catalog",
+	})
+	rec := httptest.NewRecorder()
+	UpdateGroupModel(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
 	}
 }

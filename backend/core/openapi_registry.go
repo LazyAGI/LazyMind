@@ -1054,6 +1054,7 @@ type selectedModelOpenAPIItem struct {
 	ProviderName             string  `json:"provider_name"`
 	GroupName                string  `json:"group_name"`
 	BaseURL                  string  `json:"base_url"`
+	IsDefault                bool    `json:"is_default" desc:"True when the selection was copied from catalog YAML"`
 	IsEditable               bool    `json:"is_editable" desc:"Whether the selected model supports image editing"`
 	MaxInputTokens           *string `json:"max_input_tokens" desc:"Maximum selected catalog LLM, VLM, or embedding-model input context window, for example 512, 128K, or 1M; null for other, custom, or unknown models" nullable:"true"`
 }
@@ -3865,7 +3866,7 @@ func registeredCoreOperations() []openAPIOperation {
 			Method:      "PATCH",
 			Path:        "/model_providers/{model_provider_id}/groups/{group_id}/models/{model_id}",
 			Summary:     "Update a connection group model",
-			Description: "Updates the stored max_input_tokens for an LLM under the group. Values use a positive integer or K/M suffix such as 512, 128K, or 1M. Other model types cannot set this field.",
+			Description: "Updates max_input_tokens for a custom (non-catalog) LLM. The field is required. Values use a positive integer or K/M suffix such as 512, 128K, or 1M and must be at most 16 characters. Catalog models keep the YAML value and cannot be patched.",
 			Tags:        []string{"model_providers"},
 			PathParams:  modelProviderGroupModelPathParams{},
 			RequestBody: jsonBodyOf(updateModelProviderGroupModelOpenAPIRequest{}, true),

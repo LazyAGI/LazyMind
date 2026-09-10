@@ -69,4 +69,29 @@ func TestResolveUserMaxInputTokens(t *testing.T) {
 	if got != nil {
 		t.Fatalf("omitted embed = %v, want nil", got)
 	}
+
+	tooLong := "999999999999999999999999K"
+	if _, err := parseMaxInputTokens(tooLong); err == nil {
+		t.Fatal("expected over-length max_input_tokens to fail")
+	}
+}
+
+func TestResolveRequiredUserMaxInputTokens(t *testing.T) {
+	t.Parallel()
+
+	if _, err := resolveRequiredUserMaxInputTokens("llm", nil); err == nil {
+		t.Fatal("expected missing max_input_tokens to fail")
+	}
+	empty := "  "
+	if _, err := resolveRequiredUserMaxInputTokens("llm", &empty); err == nil {
+		t.Fatal("expected blank max_input_tokens to fail")
+	}
+	raw := "1m"
+	got, err := resolveRequiredUserMaxInputTokens("llm", &raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || *got != "1M" {
+		t.Fatalf("required llm = %v, want 1M", got)
+	}
 }
