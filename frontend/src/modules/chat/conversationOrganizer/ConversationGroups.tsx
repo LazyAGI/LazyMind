@@ -92,6 +92,9 @@ export default function ConversationGroups({ onChanged, onNewChatInGroup, mode =
       : label;
   };
   const skipReasonLabel = (reason?: string) => reason ? t(`conversationOrganizer.skipReason.${reason}`, { defaultValue: reason }) : "";
+  const resultItems = run?.items || [];
+  const groupedResultCount = resultItems.filter((item) => item.group_id).length;
+  const freeResultCount = resultItems.length - groupedResultCount;
 
   const refreshGroups = useCallback(async () => {
     try {
@@ -113,7 +116,7 @@ export default function ConversationGroups({ onChanged, onNewChatInGroup, mode =
         window.clearTimeout(pollRef.current);
         pollRef.current = window.setTimeout(() => void refreshActiveRun(runId, generation), 1200);
       } else {
-        if (next.status === "succeeded") { setHasRecentResult(true); message.success(t("conversationOrganizer.done")); }
+        if (next.status === "succeeded") setHasRecentResult(true);
         void refreshGroups();
         onChangedRef.current?.();
       }
@@ -303,6 +306,11 @@ export default function ConversationGroups({ onChanged, onNewChatInGroup, mode =
         {run.can_cancel && <Button loading={canceling} disabled={canceling} onClick={() => confirmCancel(() => act("cancel"))}>{t("conversationOrganizer.cancelRun")}</Button>}
       </div> : run.status === "failed" ? <div className="organizer-state"><CloseCircleOutlined /><h3>{t("conversationOrganizer.failed")}</h3><p>{run.error?.code ? t(`conversationOrganizer.callError.${run.error.code}`, { defaultValue: run.error.message || t("conversationOrganizer.failedHint") }) : t("conversationOrganizer.failedHint")}</p>{run.can_retry && <Button type="primary" onClick={() => void act("retry")}>{t("conversationOrganizer.retry")}</Button>}</div> : run.status === "canceled" ? <div className="organizer-state"><CloseCircleOutlined /><h3>{t("conversationOrganizer.canceled")}</h3><p>{t("conversationOrganizer.canceledHint")}</p><Button loading={starting} disabled={freeCount === 0} onClick={() => void beginOrganize()}>{t("conversationOrganizer.organize")}</Button></div> : <>
         <div className="organizer-result-notice">{t("conversationOrganizer.resultNotice")}</div>
+        <div className="organizer-result-summary" aria-label={t("conversationOrganizer.resultSummaryLabel")}>
+          <div><strong>{resultItems.length}</strong><span>{t("conversationOrganizer.resultStats.included")}</span></div>
+          <div><strong>{groupedResultCount}</strong><span>{t("conversationOrganizer.resultStats.assigned")}</span></div>
+          <div><strong>{freeResultCount}</strong><span>{t("conversationOrganizer.resultStats.free")}</span></div>
+        </div>
         {([[t('conversationOrganizer.assigned'), (run.items || []).filter((item) => item.group_id)], [t('conversationOrganizer.free'), (run.items || []).filter((item) => !item.group_id)]] as const).map(([heading, items]) => items.length > 0 && <section className="organizer-result-section" key={heading}><h4>{heading}</h4>{items.map((item) => <div className="organizer-result" key={item.conversation_id}>
           <strong>{item.title || item.conversation_id}{item.corrected ? <em className="organizer-corrected">{t("conversationOrganizer.corrected")}</em> : null}</strong><small>{skipReasonLabel(item.skip_reason) || unassignedReasonLabel(item.unassigned_reason, item.summary_error_code) || item.summary}</small>
           <div className="organizer-result-actions"><span>{t("conversationOrganizer.assignment")}</span><Select disabled={run.status !== "succeeded" || lockedConversationIds.has(item.conversation_id)} value={item.group_id || "free"} onChange={(value: string) => void correct(item.conversation_id, value === "free" ? null : value)} options={[{ value: "free", label: t("conversationOrganizer.keepFree") }, ...groups.map((group) => ({ value: group.id, label: group.name }))]} />{item.group_id && groups.some((group) => group.id === item.group_id && group.created_run_id === run.id) ? <Button type="link" disabled={run.status !== "succeeded"} onClick={() => { const group = groups.find((candidate) => candidate.id === item.group_id)!; showEditor(group); setEditingFromRun(true); }}>{t("conversationOrganizer.editGroupShort")}</Button> : null}<Button type="link" disabled={namesLocked || run.status !== "succeeded" || lockedConversationIds.has(item.conversation_id)} onClick={() => { correctionForm.resetFields(); setCorrectingItemId(item.conversation_id); }}>{t("conversationOrganizer.newAndMove")}</Button></div>

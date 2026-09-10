@@ -44,13 +44,21 @@ describe("organizer entry", () => {
   expect(await screen.findByRole("dialog")).toBeTruthy();
   expect(api.startOrganizerRun).toHaveBeenCalledTimes(1);
   unmount();
-  const result: api.OrganizerRun = { ...running, status: "succeeded", can_cancel: false, can_undo: true };
+  const result: api.OrganizerRun = { ...running, status: "succeeded", can_cancel: false, can_undo: true, items: [
+    { conversation_id: "grouped", title: "Grouped conversation", summary: "", group_id: "g", state: "grouped", corrected: false },
+    { conversation_id: "free", title: "Free conversation", summary: "", group_id: null, state: "free", corrected: false },
+  ] };
   vi.mocked(api.getLatestOrganizerState).mockResolvedValue({ run: result, latest_successful_run_id: "r", free_conversation_count: 2 });
   vi.mocked(api.getLatestSuccessfulOrganizerRun).mockResolvedValue(result);
   const second = render(<ConversationGroups mode="organizer" />);
   fireEvent.click(await screen.findByRole("button", { name: /viewResult/ }));
   expect(await screen.findByRole("button", { name: "conversationOrganizer.confirmResult" })).toBeTruthy();
   expect(screen.getByText("conversationOrganizer.resultSubtitle")).toBeTruthy();
+  const summary = screen.getByLabelText("conversationOrganizer.resultSummaryLabel");
+  expect(summary.textContent).toContain("2");
+  expect(summary.textContent).toContain("conversationOrganizer.resultStats.included");
+  expect(summary.textContent).toContain("conversationOrganizer.resultStats.assigned");
+  expect(summary.textContent).toContain("conversationOrganizer.resultStats.free");
   expect(api.startOrganizerRun).toHaveBeenCalledTimes(1); second.unmount();
  });
  it("shows failure on the entry and opens the failure details without restarting", async () => {

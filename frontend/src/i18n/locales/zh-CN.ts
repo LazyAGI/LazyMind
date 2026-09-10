@@ -7811,7 +7811,7 @@ const zhCN = {
     starting: "正在启动整理",
     openGroup: "进入对话组", viewMore: "查看更多 {{count}} 条", viewResult: "查看整理结果",
     runningSubtitle: "正在整理历史会话，你可以关闭面板，稍后查看进度。", cancelingSubtitle: "正在停止整理，请稍候。", failedSubtitle: "整理未完成，请查看下方失败原因。", canceledSubtitle: "整理已取消，你可以重新发起整理。",
-    resultSubtitle: "整理结果已应用，你可以继续调整每段对话的归属。", resultNotice: "整理结果已自动应用。确认保留或撤销后，才能开始下一次整理。关闭面板不会处理本次结果。撤销包含面板内的调整，但会保留对话页面上的手动调整。", assignment: "归属",
+    resultSubtitle: "整理结果已应用，你可以继续调整每段对话的归属。", resultNotice: "整理结果已自动应用。确认保留或撤销后，才能开始下一次整理。关闭面板不会处理本次结果。撤销包含面板内的调整，但会保留对话页面上的手动调整。", resultSummaryLabel: "整理结果统计", resultStats: { included: "纳入整理", assigned: "已归组", free: "未归组" }, assignment: "归属",
     home: "快速问答", independentContexts: "相关对话集中管理，上下文各自独立", groupComposerHint: "新对话将自动归入「{{name}}」", groupConversations: "组内对话", fillScope: "填写收录范围",
     deleteLocked: "整理期间，开始整理时已有的自由会话暂不可删除、归档或移动分组；仍可查看和继续聊天，新建会话不受影响。",
     namesLocked: "整理期间暂不可新建或重命名分组",

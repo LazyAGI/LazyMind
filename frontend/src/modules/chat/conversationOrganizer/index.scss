@@ -34,6 +34,10 @@
 .organizer-drawer-title small { font-size: 12px; font-weight: 400; color: #89919f; margin-top: 7px; }
 .conversation-organizer-drawer .ant-drawer-body { padding: 20px 24px; }
 .organizer-result-notice { padding: 12px; margin-bottom: 20px; font-size: 12px; line-height: 1.8; color: #7d8999; background: #f8f9fb; border-radius: 8px; }
+.organizer-result-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 22px; }
+.organizer-result-summary > div { display: flex; flex-direction: column; gap: 4px; padding: 12px 10px; background: #f8f9fb; border-radius: 8px; text-align: center; }
+.organizer-result-summary strong { color: #202938; font-size: 20px; line-height: 1.2; }
+.organizer-result-summary span { color: #7d8999; font-size: 12px; }
 .organizer-result-section h4 { margin: 22px 0 10px; font-size: 13px; }
 .organizer-result { display: grid; gap: 7px; padding: 14px 0; border-bottom: 1px solid #e9ecf1; }
 .organizer-result > strong { font-size: 13px; font-weight: 500; }
