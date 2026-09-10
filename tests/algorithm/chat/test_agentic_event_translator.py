@@ -8,6 +8,7 @@ from lazymind.chat.service.utils.citations import (
     CITATION_REFS_KEY,
     annotate_citations,
     register_external_search_result,
+    upsert_external_source,
 )
 
 
@@ -105,6 +106,25 @@ def test_translator_merges_searched_and_cited_sources_with_roles():
         ('Second', ['searched']),
     ]
     assert 'searched_sources' not in frames[-1]
+
+
+def test_translator_appends_repaired_citations_after_uncited_stream():
+    translator = AgentEventFrameTranslator(query='q')
+    upsert_external_source({
+        'title': 'Python notes',
+        'url': 'https://example.test/python',
+        'content': (
+            'The Python Software Foundation announced that Python 3.14 will add a '
+            'free-threaded build in October 2025 for testers and package authors.'
+        ),
+    }, translator.citation_state, roles={'fetched'})
+    answer = 'Python 3.14 will add a free-threaded build in October 2025 for testers.'
+    translator.feed({'tag': 'text', 'delta': answer})
+
+    frames = translator.finish(answer)
+    streamed = ''.join(frame.get('text') or '' for frame in frames)
+    assert '[1](#source-1.1' in streamed
+    assert frames[-1]['sources'][0]['source_roles'] == ['cited', 'fetched']
 
 
 def test_final_sources_preserve_distinct_citation_indices_for_same_url():

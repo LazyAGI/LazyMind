@@ -7,6 +7,10 @@ from typing import Any, Optional
 from lazymind.config import config as _cfg
 from lazymind.chat.runtime_events import RunAccumulator, RunOutcome
 from lazymind.chat.service.run_metrics import RunMetricsTracker
+from lazymind.chat.service.utils.citation_repair import (
+    added_citation_markers,
+    attach_missing_citations,
+)
 from lazymind.chat.service.utils import (
     build_stream_citation_scanner,
     materialize_source_views,
@@ -290,6 +294,11 @@ class AgentEventFrameTranslator:
             )
             for chunk in _iter_text_chunks(final_text, chunk_size):
                 frames.append(_stream_frame(text=chunk))
+        else:
+            suffix = str(output.get('citation_suffix') or '')
+            if suffix:
+                for chunk in _iter_text_chunks(suffix, chunk_size):
+                    frames.append(_stream_frame(text=chunk))
 
         sources = materialize_source_views(
             self.citation_state,
@@ -344,10 +353,20 @@ def _format_final_result(result: Any, config: dict) -> dict[str, Any]:
     register_existing_sources(config, existing_sources)
     think, body = _split_think_and_body(raw_text, existing_think)
     body = rewrite_markdown_image_urls(body, config=config)
+    original_body = body
+    body = attach_missing_citations(body, config)
     text, cited_sources = rewrite_citations(body, config)
+    suffix_markers = added_citation_markers(original_body, body)
+    citation_suffix = ''
+    if suffix_markers:
+        citation_suffix, extra_cited = rewrite_citations(suffix_markers, config)
+        for source in extra_cited:
+            if source not in cited_sources:
+                cited_sources.append(source)
     return {
         'think': think,
         'text': text.strip(),
+        'citation_suffix': citation_suffix,
         'source_views': [
             *(existing_sources if isinstance(existing_sources, list) else []),
             *cited_sources,

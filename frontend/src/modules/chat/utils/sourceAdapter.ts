@@ -11,7 +11,7 @@ interface BaseChatSource {
   dataset_id?: string;
   group_name?: string;
   segment_number?: number;
-  source_roles?: Array<"cited" | "searched">;
+  source_roles?: Array<"cited" | "fetched" | "searched">;
 }
 
 export interface ExternalChatSource extends BaseChatSource {
@@ -110,17 +110,40 @@ export function getCitationSources(sources: ChatSourceCollection = []) {
   return sourceValues(sources);
 }
 
+const SOURCE_ROLE_ORDER = ["cited", "fetched", "searched"] as const;
+
+function orderedSourceRoles(roles: Iterable<string>) {
+  const present = new Set(roles);
+  return SOURCE_ROLE_ORDER.filter((role) => present.has(role));
+}
+
+function sourceRank(source: ChatSource) {
+  const roles = source.source_roles || [];
+  if (roles.includes("cited")) return 0;
+  if (roles.includes("fetched")) return 1;
+  if (roles.includes("searched")) return 2;
+  return 0;
+}
+
 export function getDisplaySources(
   sources: ChatSourceCollection = [],
 ) {
   const merged = new Map<string, ChatSource>();
-  const add = (source: ChatSource, fallbackRole: "cited" | "searched", index: number) => {
+  const add = (
+    source: ChatSource,
+    fallbackRole: "cited" | "fetched" | "searched",
+    index: number,
+  ) => {
     const key = getSourceDedupKey(source, index);
     const current = merged.get(key);
     const roles = new Set(current?.source_roles || []);
     (source.source_roles?.length ? source.source_roles : [fallbackRole])
       .forEach((role) => roles.add(role));
-    merged.set(key, { ...source, ...current, source_roles: [...roles] });
+    merged.set(key, {
+      ...source,
+      ...current,
+      source_roles: orderedSourceRoles(roles),
+    });
   };
   const cited = sourceValues(sources);
   cited.forEach((source, index) => add(source, "cited", index));
@@ -128,10 +151,9 @@ export function getDisplaySources(
 }
 
 export function getSearchSources(sources: ChatSourceCollection = []) {
-  const displaySources = getDisplaySources(sources);
-  if (!sourceValues(sources).some((source) => source.source_roles?.length)) return displaySources;
-  const searchedSources = displaySources.filter((source) => source.source_roles?.includes("searched"));
-  return searchedSources;
+  return [...getDisplaySources(sources)].sort((left, right) => (
+    sourceRank(left) - sourceRank(right)
+  ));
 }
 
 export function getSourceHref(source: ChatSource) {

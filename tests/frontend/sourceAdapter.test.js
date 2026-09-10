@@ -59,27 +59,37 @@ describe('chat source adapter', () => {
     ]);
   });
 
-  it('deduplicates unified roles, filters searched sources, and supports legacy maps', () => {
+  it('deduplicates unified roles, keeps every hit, and sorts cited before fetched before searched', () => {
     const searchedOnly = {
       source_type: 'external',
       title: 'Search result',
       url: 'https://search.example/result',
       source_roles: ['searched'],
     };
+    const fetchedOnly = {
+      source_type: 'external',
+      title: 'Fetched page',
+      url: 'https://fetched.example/page',
+      source_roles: ['fetched'],
+    };
 
     const sources = [
+      searchedOnly,
+      fetchedOnly,
       { ...external, source_roles: ['cited'] },
       { ...external, index: '3.2', source_roles: ['searched'] },
       { ...knowledge, source_roles: ['cited'] },
-      searchedOnly,
     ];
     expect(getDisplaySources(sources)).toEqual([
+      searchedOnly,
+      fetchedOnly,
       { ...external, source_roles: ['cited', 'searched'] },
       { ...knowledge, source_roles: ['cited'] },
-      searchedOnly,
     ]);
     expect(getSearchSources(sources)).toEqual([
       { ...external, source_roles: ['cited', 'searched'] },
+      { ...knowledge, source_roles: ['cited'] },
+      fetchedOnly,
       searchedOnly,
     ]);
     expect(getDisplaySources({ '3.1': { ...external, index: undefined } })).toEqual([

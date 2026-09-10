@@ -25,6 +25,7 @@ CITATION_NEXT_DOC_KEY = '_citation_next_doc_index'
 CITATION_DOC_CHUNK_NEXT_KEY = '_citation_next_chunk_index_map'
 EXTERNAL_SOURCE_KEY_MAP_KEY = '_external_source_key_map'
 SEARCHED_SOURCE_INDICES_KEY = '_searched_source_indices'
+FETCHED_SOURCE_INDICES_KEY = '_fetched_source_indices'
 CITED_SOURCE_INDICES_KEY = '_cited_source_indices'
 CITATION_INDEX_PATTERN = r'\d+\.\d+'
 CITATION_PATTERN = re.compile(r'\[\[(' + CITATION_INDEX_PATTERN + r')\]\]')
@@ -35,9 +36,10 @@ _TRACKING_QUERY_KEYS = {
 }
 _SOURCE_ROLE_KEYS = {
     'cited': CITED_SOURCE_INDICES_KEY,
+    'fetched': FETCHED_SOURCE_INDICES_KEY,
     'searched': SEARCHED_SOURCE_INDICES_KEY,
 }
-_SOURCE_ROLE_ORDER = ('cited', 'searched')
+_SOURCE_ROLE_ORDER = ('cited', 'fetched', 'searched')
 CITATION_LOCK_KEY = '_citation_state_lock'
 _LOCK_INIT = threading.Lock()
 
@@ -545,6 +547,7 @@ def reset_citation_state(config: dict[str, Any]) -> None:
     config[CITATION_DOC_CHUNK_NEXT_KEY] = {}
     config[EXTERNAL_SOURCE_KEY_MAP_KEY] = {}
     config[SEARCHED_SOURCE_INDICES_KEY] = []
+    config[FETCHED_SOURCE_INDICES_KEY] = []
     config[CITED_SOURCE_INDICES_KEY] = []
     config[IMAGE_URL_REGISTRY_KEY] = {}
 

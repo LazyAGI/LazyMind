@@ -118,3 +118,32 @@ def test_external_search_aliases_support_doi_and_provider_document_ids(
 
     assert first['citation_index'] == duplicate['citation_index'] == '1.1'
     assert state[CITATION_REFS_KEY]['1.1']['url'] == expected_url
+
+
+def test_attach_missing_citations_uses_fetched_overlap_and_skips_unrelated_text():
+    from lazymind.chat.service.utils.citation_repair import attach_missing_citations
+
+    state = _state()
+    upsert_external_source({
+        'title': 'Python notes',
+        'url': 'https://example.test/python',
+        'content': (
+            'The Python Software Foundation announced that Python 3.14 will add a '
+            'free-threaded build in October 2025 for testers and package authors.'
+        ),
+    }, state, roles={'fetched'})
+    register_external_search_result({
+        'title': 'Unrelated weather',
+        'url': 'https://example.test/weather',
+        'snippet': 'A short weather blurb',
+    }, state, roles={'searched'})
+
+    repaired = attach_missing_citations(
+        'Python 3.14 will add a free-threaded build in October 2025 for testers.',
+        state,
+    )
+    assert repaired.endswith('[[1.1]]')
+    assert '[[2.1]]' not in attach_missing_citations(
+        'The weather in Shanghai stayed rainy all afternoon.',
+        state,
+    )

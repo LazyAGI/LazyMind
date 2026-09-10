@@ -116,8 +116,13 @@ def _video_generator_prompt_appendix() -> SystemPromptAppendix:
 RETRIEVAL_CITATION_OUTPUT_APPENDIX: SystemPromptAppendix = {
     'output_contract': (
         '# Retrieval evidence citation rules (mandatory)\n'
-        'For any used retrieval result containing `ref`, copy that `ref` exactly after its supported claim. '
-        'Never invent or rewrite refs. If relevant knowledge-base and external results both contain `ref`, '
+        'If this turn used retrieval or page-fetch results that contain `ref`, the final answer must '
+        'copy at least one of those `ref` values exactly. '
+        'For any used retrieval result containing `ref`, copy that `ref` exactly after each claim it '
+        'supports. Never invent or rewrite refs, and never replace them with markdown footnotes or '
+        'raw URLs. Do not cite a result that was not used. Prefer `ref` values from pages whose full '
+        'content was fetched over unused search snippets. '
+        'If relevant knowledge-base and external results both contain `ref`, '
         'cite at least one result from each category.',
     ),
 }
