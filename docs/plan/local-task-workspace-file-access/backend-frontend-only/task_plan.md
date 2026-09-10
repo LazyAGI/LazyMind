@@ -1,5 +1,7 @@
 # 工作区工具授权任务与验收
 
+> 2026-09-10 状态更正：尚未完成全部非人工工作。最新全量前端检查为 134 项类型错误/64 文件，错误提示检查失败；状态存储 Get/SetNX 故障、提交后进程中断与实际任务入口仍有自动化缺口。已经通过的局部测试不等于完整验收，具体分项见末尾“限制分类与完成状态更正”。
+
 > 2026-09-09 最新：用户确认的R3–R7生产及统一自动化测试已完成，结果/实际代码量/兼容限制见末尾“最终生产/自动化结果”；实际运行验收仍未完成。开发起点7bc81ffa，本轮相关代码与文档同批提交，未推送远端。
 
 主方案：IMPLEMENTATION_PLAN.md，第 14 节为最新执行范围。用户已改为剩余功能全部生产完成后统一测试，原逐批 RED/人工 Review 顺序为历史记录；原超量 Review 和冻结边界继续有效。A2-R2 已提交 69e4809e。本轮生产/测试 diff 为 0，等待整体规模 Review。
@@ -429,7 +431,7 @@ NODE_OPTIONS=--no-experimental-webstorage pnpm run build
 - `tests/algorithm/chat/test_workspace_authorization_contract.py`：HTTP 联调无 fixture 时先跳过，异常时先取消后台调用，避免测试退出等待挂死。
 - `backend/core/chat/run_decision_test.go`：HTTP fixture 的子任务、Workflow revision/session/attempt 使用会话唯一前缀并清理专属 Redis key；并发审批仅接受成功或预期冲突。
 
-本批生产增量为 25 行净增（`workspace.py` 13、`mail.py` 5、既有 registry 13/-1；按文件实际 diff 统计），测试增量 174 行左右；没有新增生产文件、依赖、服务或表，也未修改 Local/Desktop、`algorithm/lazyllm` 或 gitlink。
+本批生产增量为 31 行净增（`workspace.py` 13、`mail.py` 5、`tool_registry.py` 13；按实际 diff 统计），测试四文件净增579行；没有新增生产文件、依赖、服务或表，也未修改 Local/Desktop、`algorithm/lazyllm` 或 gitlink。
 
 本次新鲜验证：
 
@@ -437,10 +439,25 @@ NODE_OPTIONS=--no-experimental-webstorage pnpm run build
 - Core 全量：`go test ./... -count=1` 通过；重点包 `chat/localworkspace/subagent/workflow` 通过。
 - Core↔算法真实 HTTP：`TestWorkspacePythonCoreHTTP` 的 main、subagent、workflow 三个叶子均通过（SQLite 临时数据库、临时目录，不调用模型或登录服务）。
 - 前端工作区用例：6 个文件、68 tests 通过；生产构建通过。
-- 前端完整 `tsc --noEmit` 仍有仓库既有错误（canonical 依赖后约 573 项，集中在旧生成客户端和非工作区页面）；`check:error-prompts` 仍有既有全局违规。没有用排除配置掩盖。
+- 前端完整 `tsc --noEmit` 仍有仓库既有错误（2026-09-10重新执行为134项/64文件，涉及生成客户端和多个页面；成因与影响待逐项核实）；`check:error-prompts` 仍有既有全局违规。没有用排除配置掩盖。
 - PostgreSQL+Redis 专属临时实例验证已重新运行并通过：localworkspace 全套通过，chat 的 main identity、workflow identity、并发 prepare/approve/execute、16 槽容量、撤销围栏和跨进程单次消费均通过；实例和数据目录已销毁，未连接用户数据库。
 
-仍未宣称完成的自动化/运行态边界：真实登录、模型驱动的主流式/非流式/双回复身份注册、真实 FastAPI 子任务启动、Windows/打包 Desktop、用户目录选择和跨平台符号链接/外部编辑器并发。这些属于人工或平台验收，不能由当前 HTTP fixture 代替。工作区文件二进制传输、任意脚本/shell/MCP 宿主执行以及旧 Writer/media 全量注册仍保持拒绝或待专项设计；没有通过提示词或 trusted 绕过。
+仍未宣称完成的自动化/运行态边界：真实登录、模型驱动的主流式/非流式/双回复身份注册、真实 FastAPI 子任务启动、Windows/打包 Desktop、用户目录选择和跨平台符号链接/外部编辑器并发。其中实际任务入口可继续补自动验证；目录选择及平台行为须按真实环境验收，均不能由当前HTTP fixture代替。工作区文件二进制传输、任意脚本/shell/MCP 宿主执行以及旧 Writer/media 全量注册仍保持拒绝或待专项设计；没有通过提示词或 trusted 绕过。
 
 
 本批冻结记录（提交 `a2f1d558c3d70253450a1fa7b299f660e31dc966`，冻结基线：Local/Desktop `ec4676e0d0fb290d81b3160a56e798849ea2d4e4`，LazyLLM `2e3d00ac3ae4ae983cb7d0ca4bd231c1a56ebfc0`）：涉及文件 SHA-256 已核对为 `workspace.py=056b0f112c3e5f11528baa9cc5bca141a08fa5b4cf5aa60cddf8db100aa027c8`、`mail.py=5217a4e8de2e5599a1477e83e4b6ab0b34b8c56321642073c34f668e2d326da2`、`tool_registry.py=cab5e28bf6d11511a6a6079bb9264e41a6fbfcc59d470fb5aa6d8994db82d4f5`、`run_decision_test.go=cb9b186804243e49383c5289424910260bd9a110a42129ad4330bddd52566619`、`test_mail_toolkit.py=5be3d5c188d391a0ecc0b5de37c84039ec9defc96ca29cb4a7893bc92160c732`、`test_tool_registry.py=4726ca2171481bae9c89bf3a33181472eff75f753b2ebee618dd1e0c0e3d0295`、`test_workspace_authorization_contract.py=03600fc7a0033a6691231624d07145e78b63e59c04e3ea94254ef755f62a8b0d`。
+
+
+## 2026-09-10 限制分类与完成状态更正
+
+用户询问这些限制能否修复。重新核对后，前次“非人工工作已完成”的结论不成立，不能把可自动化补齐的项目移交为人工验收。
+
+| 类别 | 当前事实 | 后续处理 |
+|---|---|---|
+| 工程检查问题 | 本次实际运行 `pnpm exec tsc --noEmit`：退出2，134项/64文件；`pnpm run check:error-prompts`：退出1。此前573项数字已过时 | 核实成因和影响，功能相关问题继续修复；跨模块修复先报告范围，不削弱检查或删除失败覆盖 |
+| 自动验证缺口 | 已有真实HTTP使用fixture播种身份；缺少部分实际主流式/非流式/双回复和子任务入口的完整贯通验证；Get/SetNX故障与提交后进程退出测试尚未补齐 | 应在既有测试文件补齐；多进程正常消费成功不能代替进程中断恢复验证 |
+| 兼容性未完成 | 部分Writer/media/skill读取方法在绑定工作区后仍受限 | 优先复用原工具并逐项校验路径，不能直接扩大准入；需要额外代码量时遵守已批准预算和Review门槛 |
+| 新权限/能力设计 | 本机二进制文件经Core传递到图片/PDF等工具、任意脚本/shell/custom MCP宿主执行不属于当前已验证文本文件通路 | 可研究扩展，但不能声称仅加注册字段就安全；不修改冻结层、不依赖trusted或注入绕过 |
+| 平台和人工验收 | 真实目录选择、打包Desktop、Windows行为、跨平台外部编辑器竞争未验证 | 按实际环境验证；未验证不等于已知无法实现，也不等于测试通过 |
+
+本次只核对、纠正文档，未实施新生产修复。此前功能提交 `a2f1d558` 实际生产三文件 +39/-8，净增31行；测试四文件 +584/-5，净增579行（其中Python净增173行），更正旧记录的25/174统计。Core/算法HTTP及数据库测试原通过结果保留其明确范围；不将有限路径检查表述为已经解决外部进程竞争。
