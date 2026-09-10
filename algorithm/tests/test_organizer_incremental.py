@@ -15,7 +15,7 @@ from lazymind.chat.service import organizer_stream as supervisor
 
 def request(**data):
     return LLMTaskRequest(task_type='conversation.organize_step', input={'data': {
-        'protocol_version': 2, 'snapshot_id': 'run', 'snapshot_hash': 'hash',
+        'protocol_version': 3, 'snapshot_id': 'run', 'snapshot_hash': 'hash',
         'cursor': 0, 'phase': 'batch', 'directory': [],
         'conversations': [{'id': 'c1', 'summary': '工作'}], **data,
     }}, options={'execution_issued_at': time.time()})
@@ -23,11 +23,11 @@ def request(**data):
 
 def test_incremental_decision_and_audit():
     def model(*args, **kwargs):
-        return json.dumps({'candidate_operations': [{'op': 'create', 'id': 'cand_work', 'name': '工作', 'scope': '工作任务'}],
-                           'assignments': [{'id': 'c1', 'group_id': 'cand_work'}]})
+        return json.dumps({'candidate_operations': [{'op': 'create', 'id': 'new_1', 'name': '工作', 'scope': '工作任务'}],
+                           'assignments': [{'id': 'c1', 'group_id': 'new_1'}]})
     result, _ = organize_step(request(), call=model)
     assert result['processed'] == 1
-    assert result['assignments'] == [{'id': 'c1', 'group_id': 'cand_work'}]
+    assert result['assignments'] == [{'id': 'c1', 'group_id': 'new_1'}]
     audited, _ = organize_step(request(phase='audit', scope='工作任务', identity=result['identity']),
                               call=lambda *args, **kwargs: '{"keep":["c1"],"reject":[]}')
     assert audited['accepted']
@@ -191,3 +191,64 @@ time.sleep(120)
             if child.status() != psutil.STATUS_ZOMBIE: child.kill()
         except psutil.NoSuchProcess:
             pass
+
+
+def test_compact_directory_multishard_repair_and_final_creation():
+    cards = [{'id': f'internal-uuid-{i}', 'short_id': f'g{i + 1}',
+              'name': f'组{i}', 'scope': '' if i == 0 else '收录范围',
+              'kind': 'candidate' if i % 2 else 'existing', 'count': 123,
+              'version': 7, 'alias': '', 'examples': [{'id': 'secret-example', 'summary': 'secret-summary'}]}
+             for i in range(101)]
+    payloads = []
+
+    def model(req, prompt, **kwargs):
+        payload = json.loads(prompt.split('输入：\n', 1)[1])
+        payloads.append(payload)
+        assert 'internal-uuid' not in prompt and 'secret-example' not in prompt and 'secret-summary' not in prompt
+        for key in ('existing_groups', 'candidate_groups'):
+            assert all(set(card) == {'id', 'name', 'scope'} for card in payload[key])
+        operations = []
+        target = 'free'
+        if len(payloads) == 1:
+            target = 'g99999'  # Invalid output must repair, not enter the reduction prompt.
+        elif payload['mode'] == 'directory_scan':
+            assert len(payload['existing_groups']) + len(payload['candidate_groups']) <= 50
+            if any(card['id'] == 'g1' for card in payload['existing_groups']):
+                assert payload['existing_groups'][0]['scope'] == ''
+                target = 'g1'
+        else:
+            if '本次是最终归并' in payload['instruction']:
+                operations = [{'op': 'create', 'id': 'new_1', 'name': '新场景', 'scope': '新场景任务'}]
+                target = 'new_1'
+            else:
+                target = 'g1'
+        return json.dumps({'candidate_operations': operations, 'assignments': [{'id': 'c1', 'group_id': target}]})
+
+    result, _ = organize_step(request(directory=cards), call=model)
+    assert len(payloads) == 6  # One rejected output, three scans, two reductions.
+    assert result['assignments'][0]['group_id'] == 'new_1'
+    assert result['operations'][0]['id'] == 'new_1'
+
+
+def test_compact_directory_candidate_operations_and_audit_evidence():
+    cards = [{'id': 'internal-a', 'short_id': 'g1', 'kind': 'candidate', 'name': '邮件', 'scope': '阅读邮件'},
+             {'id': 'internal-b', 'short_id': 'g2', 'kind': 'candidate', 'name': '发邮件', 'scope': '发送邮件'}]
+    operations = [{'op': 'merge', 'source_ids': ['g1', 'g2'], 'target_id': 'g1', 'name': '邮件处理', 'scope': '收发邮件'}]
+    result, _ = organize_step(request(directory=cards), call=lambda *a, **k: json.dumps({
+        'candidate_operations': operations, 'assignments': [{'id': 'c1', 'group_id': 'g1'}]}))
+    assert result['operations'] == operations
+
+    def audit(req, prompt, **kwargs):
+        payload = json.loads(prompt.split('输入：\n', 1)[1])
+        assert payload['items'] == [{'id': 'c1', 'title': '', 'summary': '工作'}]
+        assert 'existing_groups' not in payload and 'candidate_groups' not in payload
+        return '{"keep":["c1"],"reject":[]}'
+
+    assert organize_step(request(phase='audit', scope='工作'), call=audit)[0]['accepted']
+
+
+def test_legacy_directory_protocol_is_rejected_without_model_call():
+    def model(*args, **kwargs):
+        pytest.fail('old protocol reached model')
+    with pytest.raises(Exception, match='invalid_output'):
+        organize_step(request(protocol_version=2), call=model)

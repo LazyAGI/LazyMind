@@ -39,14 +39,7 @@ func buildSnapshot(ctx context.Context, tx *gorm.DB, runID, uid string) (organiz
 		return organizerSnapshot{}, nil, err
 	}
 	for _, group := range groups {
-		sg := snapshotGroup{ID: group.ID, Name: group.Name, Scope: group.Scope, Version: group.Version, Examples: make([]snapshotConversation, 0)}
-		var examples []snapshotConversation
-		if err := tx.Table("conversation_group_members m").Select("c.id,c.display_name AS title,COALESCE(o.summary,'') AS summary").Joins("JOIN conversations c ON c.id=m.conversation_id").Joins("LEFT JOIN conversation_opening_metadata o ON o.conversation_id=c.id").Where("m.group_id=? AND c.deleted_at IS NULL AND c.archived_at IS NULL", group.ID).Order("c.updated_at DESC").Limit(3).Scan(&examples).Error; err != nil {
-			return organizerSnapshot{}, nil, err
-		}
-		if examples != nil {
-			sg.Examples = examples
-		}
+		sg := snapshotGroup{ID: group.ID, Name: group.Name, Scope: group.Scope, Version: group.Version}
 		snap.Groups = append(snap.Groups, sg)
 	}
 	return snap, items, nil

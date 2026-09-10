@@ -176,7 +176,7 @@ func applyProposal(ctx context.Context, db *gorm.DB, run orm.ConversationOrganiz
 			if err := json.Unmarshal(run.PreparationJSON, &prep); err != nil {
 				return err
 			}
-			if run.ProtocolVersion == 2 {
+			if run.ProtocolVersion >= 2 {
 				var rows []orm.ConversationOrganizerSnapshotItem
 				if err := tx.Select("conversation_id,preparation_reason,preparation_error").Where("run_id=?", run.ID).Find(&rows).Error; err != nil {
 					return err

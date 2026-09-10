@@ -48,12 +48,12 @@ func runDTO(ctx context.Context, db *gorm.DB, row orm.ConversationOrganizerRun, 
 		db.WithContext(ctx).Table("conversation_organizer_snapshot_items s").Joins("JOIN conversation_group_members m ON m.conversation_id=s.conversation_id").Where("s.run_id=?", row.ID).Count(&grouped)
 		counts.OrganizedCount = int(grouped)
 		total := int64(len(preparation.Items))
-		if row.ProtocolVersion == 2 {
+		if row.ProtocolVersion >= 2 {
 			db.Model(&orm.ConversationOrganizerSnapshotItem{}).Where("run_id=?", row.ID).Count(&total)
 		}
 		counts.FreeCount = int(total - grouped)
 	}
-	dto := map[string]any{"id": row.ID, "status": row.Status, "stage": row.Stage, "progress": map[string]any{"current": row.ProgressCurrent, "total": row.ProgressTotal, "batch_current": batchCurrent, "batch_total": batchTotal, "preparation_current": preparation.Current, "preparation_total": preparation.Total, "preparation_batch_current": preparationBatchCurrent, "preparation_batch_completed": preparation.BatchCurrent, "preparation_batch_total": preparationBatchTotal}, "organized_count": counts.OrganizedCount, "free_count": counts.FreeCount, "skipped_count": counts.SkippedCount, "can_cancel": (row.Status == "pending" || row.Status == "running") && row.Stage != "canceling", "can_retry": row.ProtocolVersion == 2 && (row.Status == "failed" || row.Status == "canceled"), "can_undo": row.Status == "succeeded" && row.ID == latestID, "created_at": row.CreatedAt, "updated_at": row.UpdatedAt}
+	dto := map[string]any{"id": row.ID, "status": row.Status, "stage": row.Stage, "progress": map[string]any{"current": row.ProgressCurrent, "total": row.ProgressTotal, "batch_current": batchCurrent, "batch_total": batchTotal, "preparation_current": preparation.Current, "preparation_total": preparation.Total, "preparation_batch_current": preparationBatchCurrent, "preparation_batch_completed": preparation.BatchCurrent, "preparation_batch_total": preparationBatchTotal}, "organized_count": counts.OrganizedCount, "free_count": counts.FreeCount, "skipped_count": counts.SkippedCount, "can_cancel": (row.Status == "pending" || row.Status == "running") && row.Stage != "canceling", "can_retry": row.ProtocolVersion == organizerProtocolVersion && (row.Status == "failed" || row.Status == "canceled"), "can_undo": row.Status == "succeeded" && row.ID == latestID, "created_at": row.CreatedAt, "updated_at": row.UpdatedAt}
 	var streaming organizerStream
 	dto["steps"] = organizerSteps(row)
 	if json.Unmarshal(row.StreamJSON, &streaming) == nil {
@@ -82,7 +82,7 @@ func runDTO(ctx context.Context, db *gorm.DB, row orm.ConversationOrganizerRun, 
 			query = query.Where("s.conversation_id IN ?", snapshot.conversationIDs())
 		}
 		query.Scan(&items)
-		if row.ProtocolVersion == 2 {
+		if row.ProtocolVersion >= 2 {
 			var rows []orm.ConversationOrganizerSnapshotItem
 			db.Select("conversation_id,preparation_reason,preparation_error").Where("run_id=?", row.ID).Find(&rows)
 			for _, row := range rows {

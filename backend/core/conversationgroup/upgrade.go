@@ -10,11 +10,13 @@ import (
 	"lazymind/core/common/orm"
 )
 
+const organizerProtocolVersion = 3
+
 // RecoverLegacyRuns runs after migrations, before this process starts job workers.
 // Deployment must stop the old Core/Chat processes before starting the new pair.
 func RecoverLegacyRuns(ctx context.Context, db *gorm.DB) error {
 	var rows []orm.ConversationOrganizerRun
-	if err := db.WithContext(ctx).Where("protocol_version<2 AND status IN ?", []string{"pending", "running", "applying"}).Find(&rows).Error; err != nil {
+	if err := db.WithContext(ctx).Where("protocol_version<? AND status IN ?", organizerProtocolVersion, []string{"pending", "running", "applying"}).Find(&rows).Error; err != nil {
 		return err
 	}
 	for _, run := range rows {
@@ -26,7 +28,7 @@ func RecoverLegacyRuns(ctx context.Context, db *gorm.DB) error {
 			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id=?", run.ID).Take(&current).Error; err != nil {
 				return err
 			}
-			if current.ProtocolVersion >= 2 || current.Status == "succeeded" || current.Status == "confirmed" || current.Status == "undone" || current.Status == "canceled" {
+			if current.ProtocolVersion >= organizerProtocolVersion || current.Status == "succeeded" || current.Status == "confirmed" || current.Status == "undone" || current.Status == "canceled" {
 				return nil
 			}
 			if string(current.StreamJSON) != string(run.StreamJSON) {

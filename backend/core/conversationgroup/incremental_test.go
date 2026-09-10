@@ -30,7 +30,7 @@ func TestIncrementalBatchAuditResumeAndPartition(t *testing.T) {
 		}
 	}
 	raw, _ := json.Marshal(snapshot)
-	run := orm.ConversationOrganizerRun{ID: "r", ProtocolVersion: 2, Status: "running", JobID: "j", SnapshotHash: "hash", SnapshotJSON: raw, ModelConfigJSON: json.RawMessage(`{}`)}
+	run := orm.ConversationOrganizerRun{ID: "r", ProtocolVersion: organizerProtocolVersion, Status: "running", JobID: "j", SnapshotHash: "hash", SnapshotJSON: raw, ModelConfigJSON: json.RawMessage(`{}`)}
 	if err := db.Create(&run).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -64,20 +64,27 @@ func TestIncrementalBatchAuditResumeAndPartition(t *testing.T) {
 			}
 		} else {
 			batchCalls++
+			if batchCalls == 1 {
+				for _, item := range input.Conversations {
+					out.Assignments = append(out.Assignments, incrementalAssignment{ID: item.ID, GroupID: "g999"})
+				}
+				json.NewEncoder(w).Encode(map[string]any{"type": "result", "result": organizerTaskResult{Status: "succeeded", Output: out}})
+				return
+			}
 			if input.Cursor == 0 {
-				out.Operations = []candidateOperation{{Op: "create", ID: "cand_work", Name: "工作", Scope: "处理工作"}}
+				out.Operations = []candidateOperation{{Op: "create", ID: "new_1", Name: "工作", Scope: "处理工作"}}
 			} else if input.Cursor == 50 {
-				out.Operations = []candidateOperation{{Op: "create", ID: "cand_more", Name: "其他工作", Scope: "更多工作"}}
+				out.Operations = []candidateOperation{{Op: "create", ID: "new_1", Name: "其他工作", Scope: "更多工作"}}
 			} else {
 				out.Operations = []candidateOperation{
-					{Op: "merge", SourceIDs: []string{"cand_work", "cand_more"}, TargetID: "cand_work", Name: "工作", Scope: "所有工作"},
-					{Op: "update", ID: "cand_work", Scope: "处理各类工作"},
+					{Op: "merge", SourceIDs: []string{"g1", "g2"}, TargetID: "g1", Name: "工作", Scope: "所有工作"},
+					{Op: "update", ID: "g1", Scope: "处理各类工作"},
 				}
 			}
 			for _, item := range input.Conversations {
-				target := "cand_work"
-				if input.Cursor == 50 {
-					target = "cand_more"
+				target := "g1"
+				if input.Cursor < 100 {
+					target = "new_1"
 				}
 				out.Assignments = append(out.Assignments, incrementalAssignment{ID: item.ID, GroupID: target})
 			}
@@ -87,7 +94,7 @@ func TestIncrementalBatchAuditResumeAndPartition(t *testing.T) {
 	defer server.Close()
 	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", server.URL)
 	var proposal *organizerProposal
-	for i := 0; i < 12 && proposal == nil; i++ {
+	for i := 0; i < 14 && proposal == nil; i++ {
 		// Reload from the database on every turn to exercise recovery, not in-memory continuity.
 		if err := db.Where("id=?", run.ID).Take(&run).Error; err != nil {
 			t.Fatal(err)
@@ -98,11 +105,11 @@ func TestIncrementalBatchAuditResumeAndPartition(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if proposal == nil || len(proposal.NewGroups) != 1 || len(proposal.NewGroups[0].ConversationIDs) != 103 || batchCalls != 3 || auditCalls != 4 {
+	if proposal == nil || len(proposal.NewGroups) != 1 || len(proposal.NewGroups[0].ConversationIDs) != 103 || batchCalls != 4 || auditCalls != 4 {
 		t.Fatalf("incomplete: proposal=%+v batches=%d audits=%d", proposal, batchCalls, auditCalls)
 	}
 	var oldAssignments int64
-	db.Model(&orm.ConversationOrganizerSnapshotItem{}).Where("run_id=? AND assignment=?", run.ID, "cand_more").Count(&oldAssignments)
+	db.Model(&orm.ConversationOrganizerSnapshotItem{}).Where("run_id=? AND assignment=?", run.ID, secondCandidateID(run.CheckpointJSON)).Count(&oldAssignments)
 	if oldAssignments != 50 {
 		t.Fatalf("merge rewrote old assignment buckets: %d", oldAssignments)
 	}
@@ -153,7 +160,7 @@ func TestIncrementalTransferScalesWithConversationCount(t *testing.T) {
 				t.Fatal(err)
 			}
 			raw, _ := json.Marshal(snapshot)
-			run := orm.ConversationOrganizerRun{ID: "r", ProtocolVersion: 2, Status: "running", JobID: "j", SnapshotHash: "hash", SnapshotJSON: raw, ModelConfigJSON: json.RawMessage(`{}`)}
+			run := orm.ConversationOrganizerRun{ID: "r", ProtocolVersion: organizerProtocolVersion, Status: "running", JobID: "j", SnapshotHash: "hash", SnapshotJSON: raw, ModelConfigJSON: json.RawMessage(`{}`)}
 			if err := db.Create(&run).Error; err != nil {
 				t.Fatal(err)
 			}
@@ -211,32 +218,36 @@ func TestIncrementalTransferScalesWithConversationCount(t *testing.T) {
 }
 
 func TestLegacyUpgradeKeepsCompletedRuns(t *testing.T) {
-	db := orm.MigrateTestDB(t, &orm.ConversationOrganizerRun{}, &orm.AsyncJob{})
-	for _, status := range []string{"pending", "running", "applying", "succeeded", "confirmed", "undone"} {
-		run := orm.ConversationOrganizerRun{ID: status, UserID: status, ProtocolVersion: 1, Status: status, JobID: status, SnapshotJSON: json.RawMessage(`{}`), ModelConfigJSON: json.RawMessage(`{}`)}
-		if err := db.Create(&run).Error; err != nil {
-			t.Fatal(err)
-		}
-		if err := db.Create(&orm.AsyncJob{ID: status, Status: "pending", JobType: organizerJobType}).Error; err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := RecoverLegacyRuns(t.Context(), db.DB); err != nil {
-		t.Fatal(err)
-	}
-	if err := RecoverLegacyRuns(t.Context(), db.DB); err != nil {
-		t.Fatal(err)
-	}
-	for _, status := range []string{"pending", "running", "applying", "succeeded", "confirmed", "undone"} {
-		var run orm.ConversationOrganizerRun
-		db.Where("id=?", status).Take(&run)
-		expected := status
-		if status == "pending" || status == "running" || status == "applying" {
-			expected = "canceled"
-		}
-		if run.Status != expected {
-			t.Fatalf("%s became %s", status, run.Status)
-		}
+	for _, version := range []int{1, 2} {
+		t.Run(fmt.Sprint(version), func(t *testing.T) {
+			db := orm.MigrateTestDB(t, &orm.ConversationOrganizerRun{}, &orm.AsyncJob{})
+			for _, status := range []string{"pending", "running", "applying", "succeeded", "confirmed", "undone"} {
+				run := orm.ConversationOrganizerRun{ID: status, UserID: status, ProtocolVersion: version, Status: status, JobID: status, SnapshotJSON: json.RawMessage(`{}`), ModelConfigJSON: json.RawMessage(`{}`)}
+				if err := db.Create(&run).Error; err != nil {
+					t.Fatal(err)
+				}
+				if err := db.Create(&orm.AsyncJob{ID: status, Status: "pending", JobType: organizerJobType}).Error; err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := RecoverLegacyRuns(t.Context(), db.DB); err != nil {
+				t.Fatal(err)
+			}
+			if err := RecoverLegacyRuns(t.Context(), db.DB); err != nil {
+				t.Fatal(err)
+			}
+			for _, status := range []string{"pending", "running", "applying", "succeeded", "confirmed", "undone"} {
+				var run orm.ConversationOrganizerRun
+				db.Where("id=?", status).Take(&run)
+				expected := status
+				if status == "pending" || status == "running" || status == "applying" {
+					expected = "canceled"
+				}
+				if run.Status != expected {
+					t.Fatalf("%s became %s", status, run.Status)
+				}
+			}
+		})
 	}
 }
 
@@ -259,4 +270,15 @@ func TestCandidateOperationsProtectFormalGroupsAndNames(t *testing.T) {
 			}
 		})
 	}
+}
+
+func secondCandidateID(raw json.RawMessage) string {
+	var cp incrementalCheckpoint
+	_ = json.Unmarshal(raw, &cp)
+	for id, short := range cp.GroupIDs {
+		if short == "g2" {
+			return id
+		}
+	}
+	return ""
 }

@@ -40,7 +40,7 @@ type snapshotGroup struct {
 	Name     string                 `json:"name"`
 	Scope    string                 `json:"scope"`
 	Version  int64                  `json:"version"`
-	Examples []snapshotConversation `json:"examples"`
+	Examples []snapshotConversation `json:"examples,omitempty"`
 }
 type organizerSnapshot struct {
 	ID            string                 `json:"id"`
@@ -146,7 +146,7 @@ func StartOrganizer(w http.ResponseWriter, r *http.Request) {
 			return nil
 		}
 		now := time.Now().UTC()
-		run = orm.ConversationOrganizerRun{ProtocolVersion: 2, ID: uuid.NewString(), UserID: uid, Status: "pending", Stage: "snapshot", Version: 1, ModelConfigJSON: modelRaw, CreatedAt: now, UpdatedAt: now}
+		run = orm.ConversationOrganizerRun{ProtocolVersion: organizerProtocolVersion, ID: uuid.NewString(), UserID: uid, Status: "pending", Stage: "snapshot", Version: 1, ModelConfigJSON: modelRaw, CreatedAt: now, UpdatedAt: now}
 		snapshot, items, err := buildSnapshot(r.Context(), tx, run.ID, uid)
 		if err != nil {
 			return err
@@ -294,7 +294,7 @@ func RetryOrganizer(w http.ResponseWriter, r *http.Request) {
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id=? AND user_id=?", id, uid).Take(&row).Error; err != nil {
 			return err
 		}
-		if row.ProtocolVersion != 2 {
+		if row.ProtocolVersion != organizerProtocolVersion {
 			return errOrganizerProtocol
 		}
 		if row.Status != "failed" && row.Status != "canceled" {

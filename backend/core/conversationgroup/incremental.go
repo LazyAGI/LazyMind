@@ -17,11 +17,12 @@ import (
 
 type directoryCard struct {
 	ID       string                 `json:"id"`
+	ShortID  string                 `json:"short_id"`
 	Name     string                 `json:"name"`
 	Scope    string                 `json:"scope"`
 	Kind     string                 `json:"kind"`
 	Count    int                    `json:"count"`
-	Examples []snapshotConversation `json:"examples"`
+	Examples []snapshotConversation `json:"examples,omitempty"`
 	Alias    string                 `json:"alias,omitempty"`
 	Version  int64                  `json:"version"`
 }
@@ -65,14 +66,16 @@ func (op *candidateOperation) UnmarshalJSON(raw []byte) error {
 }
 
 type incrementalCheckpoint struct {
-	NextOrdinal int                 `json:"next_ordinal"`
-	Cursor      int                 `json:"cursor"`
-	Version     int                 `json:"version"`
-	Identity    string              `json:"identity"`
-	Stage       string              `json:"stage"`
-	Pending     *incrementalPending `json:"pending,omitempty"`
-	Repair      int                 `json:"repair"`
-	BatchSize   int                 `json:"batch_size"`
+	GroupIDs        map[string]string   `json:"group_ids"`
+	NextGroupNumber int                 `json:"next_group_number"`
+	NextOrdinal     int                 `json:"next_ordinal"`
+	Cursor          int                 `json:"cursor"`
+	Version         int                 `json:"version"`
+	Identity        string              `json:"identity"`
+	Stage           string              `json:"stage"`
+	Pending         *incrementalPending `json:"pending,omitempty"`
+	Repair          int                 `json:"repair"`
+	BatchSize       int                 `json:"batch_size"`
 }
 type incrementalPending struct {
 	Operations   []candidateOperation    `json:"operations"`
@@ -99,7 +102,7 @@ func directoryTarget(cards map[string]directoryCard, id string) (string, error) 
 func loadDirectory(db *gorm.DB, runID string, snapshot organizerSnapshot) (map[string]directoryCard, error) {
 	cards := map[string]directoryCard{}
 	for _, g := range snapshot.Groups {
-		cards[g.ID] = directoryCard{ID: g.ID, Name: g.Name, Scope: g.Scope, Kind: "existing", Examples: g.Examples, Version: g.Version}
+		cards[g.ID] = directoryCard{ID: g.ID, Name: g.Name, Scope: g.Scope, Kind: "existing", Version: g.Version}
 	}
 	var rows []orm.ConversationOrganizerCandidate
 	if err := db.Where("run_id=?", runID).Find(&rows).Error; err != nil {
@@ -149,7 +152,7 @@ func applyCandidateOperation(cards map[string]directoryCard, op candidateOperati
 		if _, exists := cards[id]; exists || !strings.HasPrefix(id, "cand_") || len(id) > 255 {
 			return bad()
 		}
-		card = directoryCard{ID: id, Kind: "candidate", Examples: []snapshotConversation{}}
+		card = directoryCard{ID: id, Kind: "candidate"}
 		card.Name, card.Scope = op.Name, op.Scope
 	case "rename":
 		card.Name = op.Name
@@ -162,7 +165,6 @@ func applyCandidateOperation(cards map[string]directoryCard, op candidateOperati
 		}
 		seen := map[string]bool{}
 		card.Count = 0
-		card.Examples = []snapshotConversation{}
 		for _, source := range op.SourceIDs {
 			target, err := directoryTarget(cards, source)
 			if err != nil || seen[target] || cards[target].Kind != "candidate" {
@@ -172,11 +174,6 @@ func applyCandidateOperation(cards map[string]directoryCard, op candidateOperati
 			affected = append(affected, target)
 			old := cards[target]
 			card.Count += old.Count
-			for _, example := range old.Examples {
-				if len(card.Examples) < 2 {
-					card.Examples = append(card.Examples, example)
-				}
-			}
 		}
 		if !seen[id] {
 			return bad()
@@ -299,6 +296,11 @@ func runIncrementalStep(ctx context.Context, db *gorm.DB, run *orm.ConversationO
 	if err != nil {
 		return nil, err
 	}
+	if ensureGroupIDs(&cp, cards) {
+		if err := saveIncremental(ctx, db, run, job, cp, nil); err != nil {
+			return nil, err
+		}
+	}
 	originalCards := map[string]string{}
 	for id, card := range cards {
 		raw, _ := json.Marshal(card)
@@ -319,7 +321,7 @@ func runIncrementalStep(ctx context.Context, db *gorm.DB, run *orm.ConversationO
 	if len(rows) == 0 {
 		return nil, errors.New("missing incremental batch")
 	}
-	input := map[string]any{"protocol_version": 2, "task_id": run.ID, "snapshot_id": run.ID, "snapshot_hash": run.SnapshotHash, "identity": cp.Identity, "cursor": cp.Cursor, "repair": cp.Repair, "phase": "batch", "conversations": itemConversations(rows), "directory": sortedCards(cards)}
+	input := map[string]any{"protocol_version": organizerProtocolVersion, "task_id": run.ID, "snapshot_id": run.ID, "snapshot_hash": run.SnapshotHash, "identity": cp.Identity, "cursor": cp.Cursor, "repair": cp.Repair, "phase": "batch", "conversations": itemConversations(rows), "directory": mappedDirectory(cards, cp)}
 	// Rebuild tentative operations from the committed directory. Only audit progress persists.
 	if cp.Pending != nil {
 		pending := cp.Pending
@@ -404,7 +406,7 @@ func runIncrementalStep(ctx context.Context, db *gorm.DB, run *orm.ConversationO
 			expected[item.ID] = item
 		}
 		for _, assignment := range assignments {
-			item, ok := expected[assignment.ID]
+			_, ok := expected[assignment.ID]
 			if !ok {
 				return nil, errors.New("invalid or duplicate assignment")
 			}
@@ -416,9 +418,6 @@ func runIncrementalStep(ctx context.Context, db *gorm.DB, run *orm.ConversationO
 			if target != "free" {
 				card := cards[target]
 				card.Count++
-				if len(card.Examples) < 2 {
-					card.Examples = append(card.Examples, item)
-				}
 				cards[target] = card
 			}
 		}
@@ -470,6 +469,14 @@ func runIncrementalStep(ctx context.Context, db *gorm.DB, run *orm.ConversationO
 		return nil, errors.New("invalid incremental identity or length")
 	}
 	cp.Identity = result.Output.Identity
+	groupIDs, nextNumber, mapErr := decodeGroupIDs(&result.Output, cp, cards)
+	if mapErr != nil {
+		cp.Repair++
+		if cp.Repair >= 3 {
+			return nil, mapErr
+		}
+		return nil, saveIncremental(ctx, db, run, job, cp, nil)
+	}
 	// Validate the whole tentative directory before spending calls on audits.
 	for _, op := range result.Output.Operations {
 		if _, err := applyCandidateOperation(cards, op); err != nil {
@@ -495,6 +502,7 @@ func runIncrementalStep(ctx context.Context, db *gorm.DB, run *orm.ConversationO
 		}
 		delete(expected, assignment.ID)
 	}
+	cp.GroupIDs, cp.NextGroupNumber = groupIDs, nextNumber
 	cp.Pending = &incrementalPending{Operations: result.Output.Operations, Assignments: result.Output.Assignments, AuditOrdinal: -1}
 	return nil, saveIncremental(ctx, db, run, job, cp, nil)
 }

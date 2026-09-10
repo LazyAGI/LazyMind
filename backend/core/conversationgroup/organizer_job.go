@@ -90,7 +90,7 @@ func handleOrganizerJob(ctx context.Context, job asyncjob.Job, reporter asyncjob
 		raw, _ := json.Marshal(map[string]any{"run_id": run.ID, "status": run.Status})
 		return asyncjob.Result{ResultJSON: raw}, nil
 	}
-	if run.ProtocolVersion != 2 {
+	if run.ProtocolVersion != organizerProtocolVersion {
 		return asyncjob.Result{Permanent: true, ErrorCode: "organizer_protocol_upgraded"}, errOrganizerProtocol
 	}
 	ctx, cancel := organizerContext(ctx, db, run, job)
