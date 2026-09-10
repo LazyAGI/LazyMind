@@ -1,6 +1,29 @@
 import base64
+import os
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 
-from lazymind.chat.engine.subagent.runner import _materialize_workflow_package
+from lazymind.workflow_toolkit import _materialize_workflow_package
+
+
+def test_concurrent_materialization_keeps_independent_temporary_files(monkeypatch, tmp_path):
+    monkeypatch.setattr('tempfile.gettempdir', lambda: str(tmp_path))
+    ready = Barrier(2)
+    replace = os.replace
+
+    def concurrent_replace(source, destination):
+        ready.wait(timeout=5)
+        replace(source, destination)
+
+    monkeypatch.setattr(os, 'replace', concurrent_replace)
+    files = {'scripts/tools.py': b'def run(): return "pinned"\n'}
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first, second = [pool.submit(_materialize_workflow_package, 'workflow', 'revision', 'abc', files)
+                         for _ in range(2)]
+        root = first.result()
+        assert second.result() == root
+    assert (root / 'scripts/tools.py').read_bytes() == files['scripts/tools.py']
+    assert not list(root.rglob('*.tmp'))
 
 
 def test_materialize_workflow_package_preserves_sibling_runtime(monkeypatch, tmp_path):

@@ -10,6 +10,8 @@ func TestAdmissionSeparatesReviewExecutionAndLifecycle(t *testing.T) {
 		begin bool
 	}{
 		{"automatic", Facts{Status: "active"}, "continue", true},
+		{"native executor", Facts{Status: "active", ActiveAttempts: 1, NativeAttempts: 1}, "awaiting_executor", false},
+		{"native review drain", Facts{Status: "active", PendingReviews: 1, ActiveAttempts: 1, NativeAttempts: 1}, "draining", false},
 		{"human", Facts{Status: "waiting", PendingReviews: 1}, "awaiting_user", false},
 		{"parallel drain", Facts{Status: "active", PendingReviews: 2, ActiveAttempts: 1}, "draining", false},
 		{"last step review", Facts{Status: "completed", PendingReviews: 1}, "awaiting_user", false},

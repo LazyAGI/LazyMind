@@ -1769,8 +1769,10 @@ export interface EvalSetResponse {
     'updated_at': string;
 }
 export interface Execution {
+    'attempt_status'?: string;
     'execution_handle'?: string;
     'execution_id': string;
+    'executor_host'?: string;
     'lease_expires_at': string;
     'review_after_submit': boolean;
     'step_contract': AttemptContext;
@@ -3472,6 +3474,7 @@ export interface Snapshot {
     'binding': BindingView;
     'continuation': string;
     'delivery'?: WorkflowHostAction;
+    'native_execution_ids'?: Array<string>;
     'protocol': string;
     'reviews'?: Array<WorkflowReviewCheckpoint>;
     'session_id': string;

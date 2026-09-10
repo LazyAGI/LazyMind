@@ -311,3 +311,66 @@ func TestResolveAdvanceOperationFromEffectiveAttempt(t *testing.T) {
 		}
 	}
 }
+
+func TestControlledDeclaredToolsUseNativeExecutorAndReturnAttemptID(t *testing.T) {
+	for _, requirement := range []string{"declared_tools", "tools_only", "post_step_check"} {
+		t.Run(requirement, func(t *testing.T) {
+			db, _ := setupBatchTransitionSession(t)
+			if err := db.AutoMigrate(&orm.WorkflowReviewCheckpoint{}, &orm.WorkflowHostAction{}, &orm.WorkflowCommand{}, &orm.WorkflowRevisionEntry{}, &orm.WorkflowBlob{}); err != nil {
+				t.Fatal(err)
+			}
+			var revision orm.WorkflowRevision
+			db.First(&revision, "id = ?", "batch-revision")
+			var graph graphengine.CompiledStateGraph
+			if err := json.Unmarshal(revision.CompiledGraph, &graph); err != nil {
+				t.Fatal(err)
+			}
+			node := graph.Nodes["branch_b"]
+			switch requirement {
+			case "declared_tools":
+				node.LegacyTools = []string{"package_tool"}
+			case "tools_only":
+				node.ToolsOnly = true
+			case "post_step_check":
+				graph.Runtime.PostStepChecks = []graphengine.PostStepCheck{{StepID: "branch_b", Tool: "check_ready"}}
+			}
+			graph.Nodes["branch_b"] = node
+			if err := db.Model(&revision).Update("compiled_graph", graph.JSON()).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Model(&orm.WorkflowSession{}).Where("id = ?", "batch-session").Updates(map[string]any{"control_protocol": "workflow.control.v1", "controller_host": "external-agent"}).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Create(&orm.WorkflowSessionStep{ID: "prior-native", SessionID: "batch-session", StepID: "branch_c", TaskID: "prior-task", Status: "succeeded", ExecutorHost: "lazymind"}).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Create(&orm.WorkflowHostAction{ID: "prior-notification", SessionID: "batch-session", Kind: "continue", ExecutionID: "prior-native", Status: "accepted"}).Error; err != nil {
+				t.Fatal(err)
+			}
+			result, err := (WorkflowControlService{DB: db.DB}).Execute(context.Background(), "batch-user", "batch-session", WorkflowControlCommand{CommandID: "native-begin", Kind: "begin", StepID: "branch_b", StateVersion: 4})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var notification orm.WorkflowHostAction
+			if err := db.First(&notification, "id = ?", "prior-notification").Error; err != nil || notification.ConsumedAt == nil {
+				t.Fatalf("advancing did not consume native completion: %+v %v", notification, err)
+			}
+			var execution orm.WorkflowSessionStep
+			if err := db.First(&execution, "id = ?", result.Receipt.ExecutionID).Error; err != nil {
+				t.Fatal("receipt must identify the execution, not its SubAgent task", err)
+			}
+			var task orm.SubAgentTask
+			if err := db.First(&task, "id = ?", execution.TaskID).Error; err != nil {
+				t.Fatal(err)
+			}
+			if execution.ExecutorHost != "lazymind" || result.Control.Continuation != "awaiting_executor" {
+				t.Fatalf("wrong dispatch: %+v %+v", execution, result.Control)
+			}
+			var params map[string]any
+			json.Unmarshal(task.Params, &params)
+			if params["session_id"] != "batch-session" || params["step_id"] != "branch_b" {
+				t.Fatalf("native runtime context missing: %+v", params)
+			}
+		})
+	}
+}

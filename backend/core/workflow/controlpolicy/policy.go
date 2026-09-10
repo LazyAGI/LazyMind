@@ -8,6 +8,7 @@ type Facts struct {
 	Dismissed       bool
 	PendingReviews  int64
 	ActiveAttempts  int64
+	NativeAttempts  int64
 	BindingRequired bool
 	Bound           bool
 }
@@ -35,6 +36,9 @@ func Decide(f Facts) (continuation string, admission Admission) {
 	}
 	if f.Status == "failed" {
 		return "failed", Admission{Reason: "recovery_required"}
+	}
+	if f.NativeAttempts > 0 {
+		return "awaiting_executor", Admission{Reason: "native_execution_active"}
 	}
 	return "continue", Admission{CanBegin: true}
 }

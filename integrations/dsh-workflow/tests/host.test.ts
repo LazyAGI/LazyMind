@@ -17,7 +17,7 @@ const publicName = (name: string) => name.startsWith('mcp__lazymind__workflow_')
 const cleanup: Array<() => Promise<unknown>> = []
 afterEach(async () => { for (const dispose of cleanup.splice(0).reverse()) await dispose() })
 
-async function fixture(seedPTC = false) {
+async function fixture(seedPTC = false, native = false, laterManualInput = false) {
   const ctx = new Context()
   const prompt = ctx.plugin(SystemPrompt)
   await prompt.await(); cleanup.push(() => prompt.dispose())
@@ -57,12 +57,15 @@ async function fixture(seedPTC = false) {
     name: publicName(name), description: name, parameters: { type: 'object', properties: {} },
     output: { schema: { type: 'object' }, render: () => [{ type: 'text', text: 'ok' }] }, execute,
   })
+  ctx.tools.register(definition('mcp__lazymind__workflow_state', async () => ({ structuredContent: {
+    session_id: 'unrelated-run', interaction_url: 'http://localhost:8090/workflow-runs/unrelated-run',
+  } })))
   ctx.tools.register(definition('mcp__lazymind__workflow_start', async () => ({ structuredContent: {
     session_id: 'run-1', interaction_url: 'http://localhost:8090/workflow-runs/run-1', control,
   } })))
   ctx.tools.register(definition('mcp__lazymind__workflow_step_begin', async () => {
-    control = { ...control, state_version: 2, active_execution_ids: ['attempt-1'], active_executions: 1 }
-    return { structuredContent: { execution: { execution_id: 'attempt-1' }, state: { control } } }
+    control = { ...control, state_version: 2, active_execution_ids: ['attempt-1'], active_executions: 1, ...(native ? { native_execution_ids: ['attempt-1'], continuation: 'awaiting_executor', admission: { can_begin: false } } : {}) }
+    return { structuredContent: { execution: { execution_id: 'attempt-1', executor_host: native ? 'lazymind' : 'external-agent' }, state: { control } } }
   }))
   ctx.tools.register(definition('mcp__lazymind__workflow_step_submit', async () => {
     control = { ...control, state_version: 3, active_execution_ids: [], active_executions: 0,
@@ -83,6 +86,10 @@ async function fixture(seedPTC = false) {
       }})}],
     })
   }
+  if (laterManualInput) root.session.append('user/message', {
+    id: 'unrelated-input', source: { kind: 'user', rpcId: 'unrelated-input' },
+    content: [{ type: 'text', text: 'Work on something else' }],
+  } as unknown as UserMessage, { surfaceOp: 'append' })
   const installed = ctx.inject(['tools', 'agents'], injected => {
     const dispose = installHost(injected, bridge, { serverName: 'lazymind', webUrl: 'http://localhost:8090' }, 'instance-1')
     injected.effect(() => dispose)
@@ -167,4 +174,52 @@ it('lets a child return its committed result even when the subsequent Bridge rea
   const submitted=await f.execute('mcp__lazymind__workflow_step_submit',f.child,{session_id:'run-1',execution_id:'attempt-1'})
   expect(submitted.isError).toBe(false)
   expect((await f.execute('structured_output', f.child)).isError).toBe(false)
+})
+
+
+it('yields native tool steps without granting DSH permission to imitate their tools', async () => {
+  const f = await fixture(false, true)
+  await f.execute('mcp__lazymind__workflow_start')
+  expect(await f.execute('mcp__lazymind__workflow_step_begin', f.root, { session_id: 'run-1' })).toMatchObject({ isError: false, concludesTurn: true })
+  expect((await f.execute('shell')).isError).toBe(true)
+  expect(f.shell).not.toHaveBeenCalled()
+  expect((await f.execute('shell', f.unrelated)).isError).toBe(false)
+})
+
+
+it('does not bind historical discovery reads to the current driver', async () => {
+  const f = await fixture()
+  vi.mocked(f.bridge.state).mockRejectedValue(new Error('legacy run has no control binding'))
+  expect((await f.execute('mcp__lazymind__workflow_state', f.root, { session_id: 'unrelated-run' })).isError).toBe(false)
+  expect(f.bridge.state).not.toHaveBeenCalled()
+  expect((await f.execute('mcp__lazymind__workflow_start')).isError).toBe(false)
+})
+
+it.each([
+  { granted: false, restored: false, manual: false },
+  { granted: true, restored: false, manual: false },
+  { granted: false, restored: true, manual: false },
+  { granted: false, restored: true, manual: true },
+])('panel continuation preserves ownership and grants: %j', async ({granted, restored, manual}) => {
+  const f = await fixture(restored, false, manual)
+  if (!restored) await f.execute('mcp__lazymind__workflow_start')
+  if (granted) await f.execute('mcp__lazymind__workflow_step_begin', f.root, { session_id: 'run-1' })
+  const control = await f.bridge.state('run-1', new AbortController().signal)
+  const cancel = vi.fn()
+  const prompt = vi.fn(async (_input: { content: Array<{text: string}> }) => ({}))
+  f.ctx.provide('sessionController', { resolveAgent: async () => ({ agent: f.root }), cancel, prompt })
+  const action = { id: 'panel-continue', session_id: 'run-1', kind: 'continue' as const,
+    native_session_id: f.root.session.id, binding_generation: 1, status: 'pending' }
+  const claim = { action: { ...action, status: 'dispatching' }, dispatch_token: 'dispatch', control }
+  vi.mocked(f.bridge.claim).mockResolvedValue(claim)
+  vi.mocked(f.bridge.action).mockResolvedValue(claim)
+  vi.mocked(f.bridge.settle).mockResolvedValue(undefined)
+  vi.mocked(f.bridge.actions).mockResolvedValueOnce({ actions: [action] })
+  await vi.waitFor(() => expect(prompt).toHaveBeenCalledOnce(), { timeout: 2500 })
+  expect(prompt.mock.calls[0][0].content[0].text).toContain('requires review AFTER execution')
+  if (granted || manual) expect(cancel).not.toHaveBeenCalled()
+  else {
+    expect(cancel).toHaveBeenCalledWith({ sessionId: f.root.session.id })
+    expect(cancel.mock.invocationCallOrder[0]).toBeLessThan(prompt.mock.invocationCallOrder[0])
+  }
 })

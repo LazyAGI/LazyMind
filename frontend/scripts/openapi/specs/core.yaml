@@ -2670,9 +2670,13 @@ components:
             type: object
         Execution:
             properties:
+                attempt_status:
+                    type: string
                 execution_handle:
                     type: string
                 execution_id:
+                    type: string
+                executor_host:
                     type: string
                 lease_expires_at:
                     format: date-time
@@ -4440,6 +4444,10 @@ components:
                     type: string
                 delivery:
                     $ref: '#/components/schemas/WorkflowHostAction'
+                native_execution_ids:
+                    items:
+                        type: string
+                    type: array
                 protocol:
                     type: string
                 reviews:

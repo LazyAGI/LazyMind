@@ -1046,7 +1046,7 @@ const enUS = {
       raccoon_desktop_initialized: { ready: "SenseTime Raccoon Desktop completed its first launch", missing: "SenseTime Raccoon Desktop has not completed its first launch" },
       trae_work_desktop: { ready: "TRAE Work Desktop is installed", missing: "TRAE Work Desktop is not installed" },
       trae_work_desktop_initialized: { ready: "TRAE Work Desktop completed its first launch", missing: "TRAE Work Desktop has not completed its first launch" },
-      dsh_web_profile: { ready: "DeepSeek Harness Web is initialized", missing: "DeepSeek Harness Web is not initialized" },
+      dsh_cli: { ready: "Existing DeepSeek Harness found", missing: "DSH was not found; select the installed executable" },
     },
     guides: {
       codex: {

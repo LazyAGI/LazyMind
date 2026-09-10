@@ -32,6 +32,8 @@ type Service struct {
 }
 
 type Execution struct {
+	ExecutorHost      string                  `json:"executor_host,omitempty"`
+	AttemptStatus     string                  `json:"attempt_status,omitempty"`
 	ReviewAfterSubmit bool                    `json:"review_after_submit"`
 	ExecutionHandle   string                  `json:"execution_handle,omitempty"`
 	ExecutionID       string                  `json:"execution_id"`
@@ -171,6 +173,16 @@ func validateArtifacts(contract executor.AttemptContext, values []executor.Artif
 }
 
 func (s *Service) Submit(ctx context.Context, owner, sessionID, attemptID string, submission Submission) (SubmissionResult, error) {
+	if err := s.Store.AuthorizeSession(ctx, sessionID, owner); err != nil {
+		return SubmissionResult{}, err
+	}
+	row, err := s.Attempts.Attempt(ctx, attemptID)
+	if err != nil || row.SessionID != sessionID {
+		return SubmissionResult{}, &ProtocolError{Code: "EXECUTION_NOT_FOUND", Message: "execution was not found", Cause: err}
+	}
+	if row.ExecutorHost == "lazymind" {
+		return SubmissionResult{}, controlstore.Reject("EXECUTOR_MISMATCH", "LazyMind owns this execution; read its state instead of submitting")
+	}
 	var session orm.WorkflowSession
 	if err := s.DB.WithContext(ctx).Where("id = ?", sessionID).First(&session).Error; err != nil {
 		return SubmissionResult{}, err

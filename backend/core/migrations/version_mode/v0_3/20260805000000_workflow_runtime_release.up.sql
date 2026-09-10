@@ -1609,6 +1609,7 @@ ALTER TABLE plugin_sessions ADD COLUMN control_protocol VARCHAR(32) NOT NULL DEF
 ALTER TABLE plugin_sessions ADD COLUMN control_binding_json TEXT NOT NULL DEFAULT '{}';
 ALTER TABLE plugin_session_steps ADD COLUMN review_required BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE plugin_session_steps ADD COLUMN submission_hash VARCHAR(64) NOT NULL DEFAULT '';
+ALTER TABLE plugin_session_steps ADD COLUMN executor_host VARCHAR(32) NOT NULL DEFAULT '';
 CREATE TABLE workflow_review_checkpoints (
     id VARCHAR(36) PRIMARY KEY,
     session_id VARCHAR(36) NOT NULL,

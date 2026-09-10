@@ -180,7 +180,8 @@ class RemoteWorkflowExecutor:
                     await self.runtime.task_event(client, task_id, lease, {
                         **event, 'value': artifact['value'],
                     })
-                    await self.runtime.artifact(client, attempt_id, lease, artifact)
+                    if not metadata.get('control_protocol'):
+                        await self.runtime.artifact(client, attempt_id, lease, artifact)
                     artifacts.append(artifact)
                 elif kind not in {'done', 'error'}:
                     await self.runtime.task_event(client, task_id, lease, event)
@@ -232,9 +233,22 @@ class RemoteWorkflowExecutor:
         except httpx.HTTPStatusError as exc:
             # A Runtime completion validation error is a terminal execution
             # failure, not a reason to leave the Attempt running until expiry.
-            if exc.response.status_code in {401, 409}:
+            if exc.response.status_code == 401:
                 return
+            if exc.response.status_code == 409:
+                # A conflict can also be a rejected result. Only abandon it when
+                # Runtime confirms that this worker has actually lost its lease.
+                try:
+                    await self.runtime.heartbeat(client, attempt_id, lease)
+                except httpx.HTTPStatusError:
+                    return
             failure = str(exc)
+            try:
+                rejected = exc.response.json().get('error', {})
+                if isinstance(rejected, dict) and rejected.get('message'):
+                    failure = str(rejected['message'])
+            except (ValueError, AttributeError):
+                pass
             await self.runtime.fail(client, attempt_id, lease, failure)
             terminal_event = {'type': 'error', 'status': 'failed', 'message': failure}
         if terminal_event is not None:
@@ -557,21 +571,21 @@ class RemoteWorkflowExecutor:
             for raw in values:
                 raw_text = str(raw)
                 if raw_text.startswith((
-                    'http://', 'https://', '/static-files/', '/api/core/static-files/',
+                    'http://', 'https://', 'data:', '/static-files/', '/api/core/static-files/',
                 )):
                     persisted.append(raw_text)
                     continue
                 path = pathlib.Path(raw_text)
                 if not path.is_absolute():
                     path = pathlib.Path(workspace) / path
+                resolved = path.resolve(strict=True)
                 try:
-                    resolved = path.resolve(strict=True)
                     resolved.relative_to(pathlib.Path(workspace).resolve())
-                    stable_path = await self.runtime.upload_artifact_file(
-                        client, attempt, lease, resolved.name, resolved.read_bytes())
-                    persisted.append(stable_path)
-                except (OSError, ValueError):
-                    persisted.append('')
+                except ValueError as exc:
+                    raise ValueError(f'Workflow artifact must be inside the execution workspace: {resolved}') from exc
+                stable_path = await self.runtime.upload_artifact_file(
+                    client, attempt, lease, resolved.name, resolved.read_bytes())
+                persisted.append(stable_path)
             result[key] = persisted[0] if scalar and persisted else persisted
         return result
 

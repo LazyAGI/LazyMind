@@ -18,7 +18,23 @@ def _load_tools():
     return module
 
 
-def test_smoke_tools_cover_json_types_rewrite_and_list():
+@pytest.fixture
+def workflow_workspace(tmp_path):
+    from lazymind.chat.engine.subagent.context import SubAgentContext, get_context, set_context
+
+    previous = get_context()
+    set_context(SubAgentContext(
+        task_id='smoke-test', conversation_id='smoke-test', agent_type='workflow',
+        objective='', params={}, workspace_path=str(tmp_path), input_slots=[],
+        output_slots=[], db=None, emit=lambda _event: None,
+    ))
+    try:
+        yield tmp_path
+    finally:
+        set_context(previous)
+
+
+def test_smoke_tools_cover_json_types_rewrite_and_list(workflow_workspace):
     tools = _load_tools()
 
     metadata = tools.build_test_metadata('hello')
@@ -41,6 +57,8 @@ def test_smoke_tools_cover_json_types_rewrite_and_list():
     assert [Path(path).name for path in listed] == ['list-1.txt', 'list-2.txt']
     assert result['status'] == 'Workflow smoke test passed'
     assert Path(result['report_path']).is_file()
+    for path in [typed['text_path'], rewritten, *listed, result['report_path']]:
+        assert Path(path).is_relative_to(workflow_workspace)
 
 
 class _ArtifactStore:
@@ -89,7 +107,7 @@ class _FixedModel:
         return outputs[step]
 
 
-def test_complete_smoke_workflow_with_fixed_model_io():
+def test_complete_smoke_workflow_with_fixed_model_io(workflow_workspace):
     tools = _load_tools()
     root = Path(__file__).resolve().parents[3]
     plugin = yaml.safe_load(

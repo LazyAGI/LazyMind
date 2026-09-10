@@ -1003,7 +1003,7 @@ const zhCN = {
     locateCLI: "定位 CLI",
     enterExecutablePath: "输入本机路径",
     executablePathTitle: "配置本机程序路径",
-    executablePathDescription: "输入运行 Docker 的主机上的完整程序路径；macOS 桌面应用可选择 `.app`。LazyMind 会在本机验证该路径，不会保存到服务端数据库。",
+    executablePathDescription: "输入当前电脑上已安装程序的完整路径；macOS 桌面应用可选择 `.app`。LazyMind 会在本机验证该路径，不会保存到服务端数据库。",
     executablePathPlaceholder: "例如 C:\\Program Files\\Cursor\\Cursor.exe",
     restoreAutoDetection: "恢复自动检测",
     executableBindingSaved: "已保存本机程序路径。",
@@ -1019,7 +1019,7 @@ const zhCN = {
       raccoon_desktop_initialized: { ready: "商汤小浣熊桌面版已完成首次启动", missing: "商汤小浣熊桌面版尚未完成首次启动" },
       trae_work_desktop: { ready: "TRAE Work 桌面版已安装", missing: "TRAE Work 桌面版未安装" },
       trae_work_desktop_initialized: { ready: "TRAE Work 桌面版已完成首次启动", missing: "TRAE Work 桌面版尚未完成首次启动" },
-      dsh_web_profile: { ready: "DeepSeek Harness Web 已初始化", missing: "DeepSeek Harness Web 未初始化" },
+      dsh_cli: { ready: "已找到现有 DeepSeek Harness", missing: "未找到 DSH，请选择已安装的程序路径" },
     },
     guides: {
       codex: {

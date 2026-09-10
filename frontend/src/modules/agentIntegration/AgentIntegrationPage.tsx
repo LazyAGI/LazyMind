@@ -84,6 +84,7 @@ const AGENTS: AgentDefinition[] = [
   {
     id: "deepseek-harness", name: "DeepSeek Harness", icon: "/assistant-icons/deepseek.png",
     installURL: "https://github.com/deepseek-ai/deepseek-harness",
+    mcpBindingTarget: "deepseek-harness-cli",
   },
 ];
 

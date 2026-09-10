@@ -65,6 +65,21 @@ func TestMaterializeRejectsMismatchedSize(t *testing.T) {
 	}
 }
 
+func TestSnapshotPreservesPublicReferencesWithoutReadingFiles(t *testing.T) {
+	for _, path := range []string{
+		"https://placehold.co/640x360/png", "http://example.com/image.png",
+		"data:image/png;base64,eA==", "/static-files/image.png", "/api/core/static-files/image.png",
+	} {
+		t.Run(path, func(t *testing.T) {
+			raw, _ := json.Marshal(map[string]any{"path": path, "caption": "image"})
+			value, directory, err := Snapshot("run", "image", "image", raw)
+			if err != nil || directory != "" || string(value) != string(raw) {
+				t.Fatalf("reference changed: value=%s directory=%q err=%v", value, directory, err)
+			}
+		})
+	}
+}
+
 func TestSnapshotSealsUploadedFileBytesAndRejectsOutsidePaths(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("LAZYMIND_UPLOAD_ROOT", root)

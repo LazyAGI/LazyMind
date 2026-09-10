@@ -11,8 +11,11 @@ from urllib.parse import unquote_to_bytes
 
 
 def _root() -> Path:
-    """Create an isolated temporary directory for smoke-test fixtures."""
-    return Path(tempfile.mkdtemp(prefix='workflow-smoke-')).resolve()
+    """Create fixtures inside the existing workflow execution workspace."""
+    from lazymind.chat.engine.subagent.context import require_context
+    context = require_context()
+    context.ensure_workspace()
+    return Path(tempfile.mkdtemp(prefix='workflow-smoke-', dir=context.workspace_path)).resolve()
 
 
 def build_test_metadata(summary: str) -> Dict[str, Any]:

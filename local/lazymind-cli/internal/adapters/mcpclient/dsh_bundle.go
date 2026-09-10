@@ -9,11 +9,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"gopkg.in/yaml.v3"
+	"lazymind/agentconnector/internal/agentexec"
 	"lazymind/agentconnector/internal/coreapi"
 	"lazymind/agentconnector/internal/credentials"
 	"lazymind/agentconnector/internal/workflowhost"
@@ -58,113 +58,40 @@ func dshModuleVersion(profile, module string) (string, error) {
 	return "", os.ErrNotExist
 }
 
+func dshExecutable() (string, error) {
+	return agentexec.FindBoundExecutable("", "LAZYMIND_DSH_PATH", agentexec.DeepSeekHarnessCLI, []string{"dsh"})
+}
+
 func runDSHPlugin(ctx context.Context, profile string, args ...string) error {
-	dir := filepath.Join(dshHome(), "profiles", profile)
-	if !pathExists(filepath.Join(dir, "package.json")) {
-		return errors.New("DeepSeek Harness is not initialized. Start DSH once, then enable this switch to install the LazyMind plugin")
-	}
-	pnpm, err := exec.LookPath("pnpm")
+	dsh, err := dshExecutable()
 	if err != nil {
-		return errors.New("pnpm is required to install the LazyMind plugin into the existing DSH profile")
+		return errors.New("DeepSeek Harness was not found; select your existing DSH executable in LazyMind settings")
 	}
-	command := exec.CommandContext(ctx, pnpm, args...)
-	command.Dir = dir
-	command.Env = append(os.Environ(), "DSH_HOME="+dshHome())
-	output, err := command.CombinedOutput()
-	if err != nil {
-		message := strings.TrimSpace(string(output))
-		if len(message) > 2048 {
-			message = message[len(message)-2048:]
-		}
-		return fmt.Errorf("install DSH workflow bundle: %w: %s", err, message)
-	}
-	return reconcileProfileBundles(dir)
-}
-
-func hasDSHBundlePatch(profileDir, packageName string) bool {
-	for _, parent := range []string{profileDir, filepath.Dir(profileDir), filepath.Join(profileDir, "node_modules", ".pnpm")} {
-		body, err := os.ReadFile(filepath.Join(parent, "node_modules", filepath.FromSlash(packageName), "package.json"))
+	binary := dsh
+	arguments := append([]string{"plugin", "--profile", profile}, args...)
+	if _, err := agentexec.FindExecutable("", []string{"pnpm"}); err != nil {
+		// Supply only DSH's package manager dependency. Never download another DSH.
+		npx, err := agentexec.FindExecutable("", []string{"npx"})
 		if err != nil {
-			continue
+			return errors.New("pnpm or Node.js/npm is required to install the LazyMind plugin into DSH")
 		}
-		var manifest struct {
-			DSH struct {
-				Bundle struct {
-					Patch string `json:"patch"`
-				} `json:"bundle"`
-			} `json:"dsh"`
+		binary = npx
+		arguments = append([]string{"--yes", "--package=pnpm@10.0.0", "--", dsh}, arguments...)
+	}
+	var output strings.Builder
+	err = (agentexec.StreamCommand{Binary: binary, Arguments: arguments,
+		Environment: agentexec.SafeEnvironment("DSH_HOME=" + dshHome()),
+	}).Run(ctx, func(line []byte) error {
+		if output.Len() < 2048 {
+			output.Write(line)
+			output.WriteByte('\n')
 		}
-		if json.Unmarshal(body, &manifest) == nil && manifest.DSH.Bundle.Patch != "" {
-			return true
-		}
-	}
-	return false
-}
-
-func reconcileProfileBundles(profileDir string) error {
-	path := filepath.Join(profileDir, "package.json")
-	body, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
-	var manifest map[string]any
-	if err := json.Unmarshal(body, &manifest); err != nil {
-		return err
-	}
-	deps, _ := manifest["dependencies"].(map[string]any)
-	dsh, _ := manifest["dsh"].(map[string]any)
-	if dsh == nil {
-		dsh = map[string]any{}
-		manifest["dsh"] = dsh
-	}
-	profile, _ := dsh["profile"].(map[string]any)
-	if profile == nil {
-		profile = map[string]any{}
-		dsh["profile"] = profile
-	}
-	bundles := jsonStrings(profile["bundles"])
-	changed := false
-	for name := range deps {
-		if !hasDSHBundlePatch(profileDir, name) || containsString(bundles, name) {
-			continue
-		}
-		bundles = append(bundles, name)
-		changed = true
-	}
-	if !changed {
 		return nil
-	}
-	profile["bundles"] = bundles
-	out, err := json.MarshalIndent(manifest, "", "  ")
+	})
 	if err != nil {
-		return err
+		return fmt.Errorf("install LazyMind plugin into DSH: %w (%s)", err, strings.TrimSpace(output.String()))
 	}
-	return os.WriteFile(path, append(out, '\n'), 0o644)
-}
-
-func jsonStrings(value any) []string {
-	items, ok := value.([]any)
-	if !ok {
-		return nil
-	}
-	out := make([]string, 0, len(items))
-	for _, item := range items {
-		name, ok := item.(string)
-		if !ok {
-			continue
-		}
-		out = append(out, name)
-	}
-	return out
-}
-
-func containsString(items []string, want string) bool {
-	for _, item := range items {
-		if item == want {
-			return true
-		}
-	}
-	return false
+	return nil
 }
 
 func configureDSHWorkflow(path, pairingFile, webURL, bridgeURL string, disabled bool) error {
@@ -236,6 +163,23 @@ func (a *Adapter) dshWorkflowConfigured() bool {
 
 func (a *Adapter) installDSHWorkflow(ctx context.Context) (bool, error) {
 	profile := filepath.Dir(configPath(DeepSeekHarness))
+	version, err := dshModuleVersion(profile, "@deepseek-ai/dsh-session")
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return false, err
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		// A new official profile inherits its base from the launching CLI and has no
+		// local SDK dependencies. Install our MCP dependency through the supported CLI.
+		binary, findErr := dshExecutable()
+		if findErr != nil {
+			return false, findErr
+		}
+		output, probeErr := agentexec.Run(ctx, binary, "--version")
+		if probeErr != nil {
+			return false, probeErr
+		}
+		version = strings.TrimPrefix(strings.TrimSpace(output), "v")
+	}
 	store, err := credentials.NewStore(a.home, "")
 	if err != nil {
 		return false, err
@@ -284,7 +228,7 @@ func (a *Adapter) installDSHWorkflow(ctx context.Context) (bool, error) {
 	if run == nil {
 		run = runDSHPlugin
 	}
-	if err := run(ctx, dshProfileName(), "add", "--workspace-root", archive); err != nil {
+	if err := run(ctx, dshProfileName(), "add", "--workspace-root", "@deepseek-ai/dsh-mcp-client@"+version, archive); err != nil {
 		return false, err
 	}
 	pairingFile := filepath.Join(a.home, "workflow-hosts", pair.ConnectorID+".json")

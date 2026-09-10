@@ -86,7 +86,12 @@ func Start(ctx context.Context, address string) (map[string]any, error) {
 		if err := validateBridgeIdentity(status, self); err != nil {
 			return nil, err
 		}
-		return status, nil
+		if status["version"] == "v2" {
+			return status, nil
+		}
+		if err := Stop(ctx, address); err != nil {
+			return nil, err
+		}
 	}
 	home, err := assistantHome()
 	if err != nil {
@@ -254,7 +259,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /v1/health", func(writer http.ResponseWriter, _ *http.Request) {
 		executable, _ := os.Executable()
 		writeJSON(writer, http.StatusOK, map[string]any{
-			"ok": true, "pid": os.Getpid(), "version": "v1",
+			"ok": true, "pid": os.Getpid(), "version": "v2",
 			"platform": runtime.GOOS, "executable": executable,
 		})
 	})

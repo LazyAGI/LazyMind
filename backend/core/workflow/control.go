@@ -105,13 +105,12 @@ func (s WorkflowControlService) Execute(ctx context.Context, owner, sessionID st
 				return controlstore.Reject("BEGIN_REJECTED", "step did not create one execution")
 			}
 			*session = updated
-			result.Receipt.ExecutionID = tasks[0]
-			if err := tx.Model(&orm.WorkflowHostAction{}).Where("session_id = ? AND kind = 'continue' AND execution_id = '' AND status IN ? AND consumed_at IS NULL", session.ID, []string{"accepted", "dispatching", "unknown"}).
-				Update("consumed_at", time.Now().UTC()).Error; err != nil {
+			var execution orm.WorkflowSessionStep
+			if err := tx.Select("id").Where("task_id = ?", tasks[0]).First(&execution).Error; err != nil {
 				return err
 			}
-			if err := tx.Model(&orm.WorkflowHostAction{}).Where("session_id = ? AND kind = 'continue' AND execution_id = '' AND status = 'pending' AND consumed_at IS NULL", session.ID).
-				Updates(map[string]any{"consumed_at": time.Now().UTC(), "status": "superseded"}).Error; err != nil {
+			result.Receipt.ExecutionID = execution.ID
+			if err := controlstore.ConsumeContinuation(tx, session.ID, ""); err != nil {
 				return err
 			}
 
@@ -139,6 +138,14 @@ func (s WorkflowControlService) Execute(ctx context.Context, owner, sessionID st
 				return err
 			}
 			if err := ensureNoActiveAttempts(tx, session.ID); err != nil {
+				return err
+			}
+			// This explicit user action supersedes completed-execution notifications,
+			// but must not replay an earlier user continuation with an unknown outcome.
+			settled := tx.Model(&orm.WorkflowSessionStep{}).Select("id").Where("session_id = ? AND status IN ?", session.ID,
+				[]string{"succeeded", "failed", "cancelled", "interrupted"})
+			if err := tx.Model(&orm.WorkflowHostAction{}).Where("session_id = ? AND kind = 'continue' AND execution_id IN (?) AND consumed_at IS NULL", session.ID, settled).
+				Updates(map[string]any{"consumed_at": time.Now().UTC(), "status": gorm.Expr("CASE WHEN status = 'pending' THEN 'superseded' ELSE status END")}).Error; err != nil {
 				return err
 			}
 			result.Receipt.ActionID, err = controlstore.EnqueueHostAction(tx, *session, command.CommandID, "continue", "")
@@ -172,8 +179,15 @@ func (s WorkflowControlService) Execute(ctx context.Context, owner, sessionID st
 				Updates(map[string]any{"status": "superseded", "decision_command_id": command.CommandID, "updated_at": time.Now().UTC()}).Error; err != nil {
 				return err
 			}
-			result.Receipt.ExecutionID = tasks[0]
-			result.Receipt.ActionID, err = controlstore.EnqueueHostAction(tx, *session, command.CommandID, "continue", tasks[0])
+			var execution orm.WorkflowSessionStep
+			if err := tx.Select("id").Where("task_id = ?", tasks[0]).First(&execution).Error; err != nil {
+				return err
+			}
+			result.Receipt.ExecutionID = execution.ID
+			if err := controlstore.ConsumeContinuation(tx, session.ID, ""); err != nil {
+				return err
+			}
+			result.Receipt.ActionID, err = controlstore.EnqueueHostAction(tx, *session, command.CommandID, "continue", result.Receipt.ExecutionID)
 			if err != nil {
 				return err
 			}

@@ -94,6 +94,7 @@ const runtimeOwnershipHandoffTimeoutMs = 30 * 1000;
 const agentHostRestartMaxDelayMs = 30 * 1000;
 const agentHostStableAfterMs = 60 * 1000;
 const agentConnectorActionTimeoutMs = 15 * 1000;
+const agentConnectorInstallTimeoutMs = 120 * 1000;
 const agentConnectorBindingTimeoutMs = 30 * 1000;
 const macInstallationWarmupMarker = macWarmupMarkerPath(app.getPath("userData"));
 const startupMetricsHistoryPath = path.join(desktopLogsDir, "startup-metrics.jsonl");
@@ -548,10 +549,16 @@ function runAgentConnector(agent, action) {
   if (action === "login") {
     return startAgentLogin(agent);
   }
-  return runConnectorJSON(
+  const installWorkflow = agent === "deepseek-harness" && action === "connect";
+  const run = () => runConnectorJSON(
     ["internal", "agent", agent, action],
-    agentConnectorActionTimeoutMs,
+    installWorkflow ? agentConnectorInstallTimeoutMs : agentConnectorActionTimeoutMs,
   );
+  if (installWorkflow) {
+    const address = new URL(process.env.LAZYMIND_ASSISTANT_BRIDGE_URL || "http://127.0.0.1:19091").host;
+    return runConnectorJSON(["assistant", "start", "--listen", address], agentConnectorActionTimeoutMs).then(run);
+  }
+  return run();
 }
 
 function startAgentLogin(agent) {
@@ -604,7 +611,7 @@ async function runExecutorConnector(provider, action) {
 
 const agentBindingTargets = new Set([
   "codex-cli", "codex-desktop", "cursor-cli", "codebuddy-cli", "cursor-desktop",
-  "workbuddy-desktop", "raccoon-desktop", "traework-desktop",
+  "workbuddy-desktop", "raccoon-desktop", "traework-desktop", "deepseek-harness-cli",
 ]);
 const agentBindingActions = new Set(["status", "set", "clear"]);
 
@@ -617,7 +624,7 @@ async function runAgentBinding(target, action, executablePath = "") {
     args.push("--path", executablePath);
   }
   const result = await runConnectorJSON(args, agentConnectorBindingTimeoutMs);
-  if (action !== "status" && target.endsWith("-cli")) {
+  if (action !== "status" && target.endsWith("-cli") && target !== "deepseek-harness-cli") {
     restartAgentHost();
   }
   return result;

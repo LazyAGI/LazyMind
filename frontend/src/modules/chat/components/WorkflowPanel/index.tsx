@@ -36,6 +36,7 @@ import type {
   InnerTabsNode,
 } from '@/modules/chat/store/workflowPanel';
 import {
+  resolveWorkflowControlScope,
   resolveWorkflowTabStepId,
   workflowSlotMatchesTabScope,
 } from './workflowTabScope';
@@ -1867,7 +1868,7 @@ export function WorkflowPanel({
     ? Math.min(activeTabIdx, tabs.length - 1)
     : 0;
   const controlTab = tabs[visibleActiveTabIdx];
-  const controlStepId = (controlTab ? getTabStepId(controlTab) : undefined) ?? session.current_step_id;
+  const { stepId: controlStepId, stepIds: controlStepIds } = resolveWorkflowControlScope(controlTab, session);
   const hasIntent = true;
   const showActions =
     session.status === 'waiting' ||
@@ -2277,7 +2278,7 @@ export function WorkflowPanel({
           {controlled ? (control && onControl ? <WorkflowControlActions control={control} act={onControl} context={{
             session,
             stepId: controlStepId,
-            stepIds: controlTab?.status_step_ids ?? [controlStepId],
+            stepIds: controlStepIds,
             pending: actionPending,
             runAction: runControlledAction,
           }} /> : <span role='status'>{t('chat.workflowControlLegacy')}</span>) : <>

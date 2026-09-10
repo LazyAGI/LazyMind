@@ -107,7 +107,7 @@ func Register(server *mcp.Server, client *Client) {
 			return nil, value, err
 		})
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.get", Title: "Get a LazyMind Workflow",
-		Description: "Read a published Workflow package, compiled graph, immutable revision and execution contract.", Annotations: readOnly},
+		Description: "Optionally inspect a published Workflow package and its pinned contract. This read does not register tools and is not required before execution; workflow.step.begin automatically prepares declared script tools in the LazyMind runtime.", Annotations: readOnly},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input GetInput) (*mcp.CallToolResult, map[string]any, error) {
 			value, err := client.Get(ctx, input.WorkflowID, input.RevisionID)
 			return nil, value, err
@@ -137,19 +137,19 @@ func Register(server *mcp.Server, client *Client) {
 			return nil, InputGetResult{Resource: resource}, nil
 		})
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.start", Title: "Start a LazyMind Workflow",
-		Description: "Create a durable Workflow session in the current external-Agent conversation. A prior completed, failed, or stopped session is archived atomically; if one is active or waiting, list and stop that current session before retrying. LazyMind pins the revision and owns all subsequent state and versions.", Annotations: write},
+		Description: "Create a durable Workflow session and pin its revision. This creates NO step execution: when control.continuation is continue, call workflow.step.begin for a ready step, including auto steps. Do not wait for steps to launch themselves. A prior terminal session in this same conversation is archived atomically; a conflicting active session must be handled explicitly. Other conversations are independent.", Annotations: write},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input StartInput) (*mcp.CallToolResult, StartResult, error) {
 			value, err := client.Start(ctx, input)
 			return nil, value, err
 		})
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.state", Title: "Read LazyMind Workflow state",
-		Description: "Read authoritative Workflow readiness, attempts and completion state. Use this before choosing the next step.", Annotations: readOnly},
+		Description: "Read authoritative Workflow readiness, attempts and completion state. With continuation=continue and admission.can_begin=true, call workflow.step.begin for a ready step, including human steps: human/requires_approval means review AFTER execution, not another confirmation before begin. With awaiting_executor, LazyMind is executing the granted step. With awaiting_user, yield for panel review.", Annotations: readOnly},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input StateInput) (*mcp.CallToolResult, Projection, error) {
 			value, err := client.State(ctx, input.SessionID)
 			return nil, value, err
 		})
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.session.list", Title: "List external-Agent Workflow sessions",
-		Description: "List durable Workflow sessions for the current external-Agent conversation. Use after an Agent restart to recover that conversation's session ID, then call workflow.state.", Annotations: readOnly},
+		Description: "List this user's external-Agent Workflow sessions, scoped to the conversation when the host supplies its identity. Results may include other conversations: check the binding before controlling a run. Use after restart to recover a session ID, then read workflow.state.", Annotations: readOnly},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input SessionListInput) (*mcp.CallToolResult, SessionPage, error) {
 			value, err := client.ListSessions(ctx, input.Status, input.PageSize, input.PageToken)
 			return nil, value, err
@@ -167,19 +167,19 @@ func Register(server *mcp.Server, client *Client) {
 			return nil, value, err
 		})
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.step.begin", Title: "Begin a LazyMind Workflow step",
-		Description: "Reserve one currently ready step and return its immutable execution contract. Execute that contract now with your native Agent tools and call workflow.step.submit. Names in step_contract.legacy_tools are LazyMind Host scripts, not MCP tools; still produce required_outputs and submit.", Annotations: write},
+		Description: "Start one ready step, including auto steps. Check execution.executor_host: lazymind dispatches the original LazyMind runtime and returns status without an execution_handle; yield while awaiting_executor and never imitate or submit its private tools. Otherwise execute the returned step_contract and submit with its execution_handle. Human review occurs after successful execution.", Annotations: write},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input BeginInput) (*mcp.CallToolResult, BeginResult, error) {
 			value, err := client.Begin(ctx, input)
 			return nil, value, err
 		})
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.step.claim", Title: "Claim a prepared Workflow execution",
-		Description: "Claim the execution_id returned by a user recovery action. This does not create a new step. Execute the returned contract and submit with its execution_handle.", Annotations: write},
+		Description: "Inspect or claim an existing execution_id without creating another step. If executor_host is lazymind, only observe its attempt_status and the current workflow state; no execution_handle is issued. Otherwise execute the granted contract and submit with its execution_handle.", Annotations: write},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input ResumeInput) (*mcp.CallToolResult, BeginResult, error) {
 			value, err := client.Claim(ctx, input)
 			return nil, value, err
 		})
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.step.resume", Title: "Resume a LazyMind Workflow step",
-		Description: "Reclaim the same in-progress external execution after an Agent or connector restart and return the unchanged step contract.", Annotations: write},
+		Description: "Reclaim the same in-progress external execution after restart and return its contract with a new execution_handle. For executor_host=lazymind this only reads its status; it cannot take over or restart the native worker.", Annotations: write},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input ResumeInput) (*mcp.CallToolResult, BeginResult, error) {
 			value, err := client.Resume(ctx, input)
 			return nil, value, err

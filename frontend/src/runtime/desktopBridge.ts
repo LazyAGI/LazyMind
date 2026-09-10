@@ -95,7 +95,8 @@ export type DesktopAgentBindingTarget =
   | "cursor-desktop"
   | "workbuddy-desktop"
   | "raccoon-desktop"
-  | "traework-desktop";
+  | "traework-desktop"
+  | "deepseek-harness-cli";
 
 export interface DesktopExecutorPolicy {
   provider: DesktopExecutorProvider;
@@ -310,7 +311,7 @@ export async function agentIntegrationAction(agent: DesktopAgent, action: Deskto
     return callLocalAssistantBridge(
       `/agents/${encodeURIComponent(agent)}/${action}`,
       { method: "POST" },
-      action === "login" ? LOGIN_TIMEOUT_MS : ACTION_TIMEOUT_MS,
+      action === "login" ? LOGIN_TIMEOUT_MS : agent === "deepseek-harness" && action === "connect" ? INSTALL_TIMEOUT_MS : ACTION_TIMEOUT_MS,
     );
   } catch (error) {
     return localBridgeFailure(error);
@@ -421,6 +422,7 @@ async function changeAgentExecutable(
 
 const STATUS_TIMEOUT_MS = 10_000;
 const ACTION_TIMEOUT_MS = 15_000;
+const INSTALL_TIMEOUT_MS = 120_000;
 const BINDING_TIMEOUT_MS = 30_000;
 const LOGIN_TIMEOUT_MS = 125_000;
 

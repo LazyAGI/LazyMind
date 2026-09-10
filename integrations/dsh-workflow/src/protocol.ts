@@ -7,6 +7,7 @@ export interface WorkflowControl {
   state_version: number
   continuation: string
   admission: { can_begin: boolean; reason?: string }
+  native_execution_ids?: string[]
   active_execution_ids?: string[]
   active_executions?: number
   binding?: { provider?: string; connector_id?: string; driver_session_id?: string; generation: number; bound: boolean }

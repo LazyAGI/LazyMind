@@ -8,7 +8,7 @@ export interface WorkflowControlView extends Pick<Snapshot, 'session_id' | 'stat
   protocol: 'workflow.control.v1';
   reviews: WorkflowReview[];
   active_execution_ids: string[];
-  delivery: Pick<WorkflowHostAction, 'id' | 'kind' | 'status' | 'consumed_at' | 'last_error'> | null;
+  delivery: Pick<WorkflowHostAction, 'id' | 'kind' | 'status' | 'execution_id' | 'consumed_at' | 'last_error'> | null;
   available_actions: string[];
 }
 
@@ -28,7 +28,9 @@ export class ReviewRefreshRequired extends Error {}
 
 export function deliveryPending(control: WorkflowControlView): boolean {
   const delivery = control.delivery;
-  return !!delivery && !delivery.consumed_at && (['pending', 'dispatching', 'unknown'].includes(delivery.status) || delivery.status === 'accepted' && delivery.kind === 'continue');
+  if (!delivery || delivery.consumed_at) return false;
+  if (delivery.status === 'accepted' && delivery.execution_id && !control.active_execution_ids.includes(delivery.execution_id)) return false;
+  return ['pending', 'dispatching', 'unknown'].includes(delivery.status) || delivery.status === 'accepted' && delivery.kind === 'continue';
 }
 
 /** One user operation retains its exact command after uncertain delivery. */

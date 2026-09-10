@@ -150,6 +150,8 @@ type StepContract struct {
 }
 
 type Execution struct {
+	ExecutorHost      string       `json:"executor_host,omitempty"`
+	AttemptStatus     string       `json:"attempt_status,omitempty"`
 	ReviewAfterSubmit bool         `json:"review_after_submit"`
 	ExecutionHandle   string       `json:"execution_handle,omitempty"`
 	ExecutionID       string       `json:"execution_id"`

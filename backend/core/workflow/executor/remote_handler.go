@@ -20,7 +20,9 @@ import (
 
 	"lazymind/core/common/orm"
 	"lazymind/core/doc"
+	"lazymind/core/workflow/artifactfile"
 	"lazymind/core/workflow/attempt"
+	"lazymind/core/workflow/controlstore"
 )
 
 var unsafeArtifactFilename = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)
@@ -34,22 +36,14 @@ func safeArtifactPathPart(value string) string {
 	return value
 }
 
-func isPublicArtifactReference(value string) bool {
-	value = strings.TrimSpace(value)
-	return strings.HasPrefix(value, "http://") ||
-		strings.HasPrefix(value, "https://") ||
-		strings.HasPrefix(value, "data:") ||
-		strings.HasPrefix(value, "/static-files/") ||
-		strings.HasPrefix(value, "/api/core/static-files/")
-}
-
 // RemoteHandler is the wire boundary used by out-of-process Host Executors.
 // It deliberately exposes no database handles or Host model configuration.
 type RemoteHandler struct {
-	DB        *gorm.DB
-	Attempts  *attempt.Service
-	Contexts  ContextLoader
-	Artifacts ArtifactSink
+	DB               *gorm.DB
+	Attempts         *attempt.Service
+	Contexts         ContextLoader
+	Artifacts        ArtifactSink
+	SettleControlled func(context.Context, string, string, string, string, json.RawMessage) error
 }
 
 type remoteEnvelope struct {
@@ -189,7 +183,7 @@ func (h RemoteHandler) readAttemptInput(ctx context.Context, materialID string, 
 			// so the Host can use the public URL without Core performing an unsafe
 			// server-side download. Core-owned uploaded files still take the binary
 			// materialization path below.
-			if isPublicArtifactReference(file.Path) {
+			if artifactfile.IsPublicReference(file.Path) {
 				return map[string]any{"material_id": materialID,
 					"resource_id": revision.ID, "revision": revision.Revision, "name": revision.Slot + ".json",
 					"mime_type": "application/json", "size": len(artifact.Value),
@@ -243,6 +237,10 @@ func (h RemoteHandler) SaveArtifact(w http.ResponseWriter, r *http.Request) {
 	ctx, err := h.Contexts.LoadAttemptContext(r.Context(), mux.Vars(r)["attempt_id"])
 	if err != nil {
 		remoteReply(w, 503, nil, "ATTEMPT_CONTEXT_FAILED", err.Error())
+		return
+	}
+	if ctx.Metadata["control_protocol"] != "" {
+		remoteReply(w, 409, nil, "CONTROL_FINALIZATION_REQUIRED", "submit controlled artifacts atomically with the terminal result")
 		return
 	}
 	ctx.ExecutionHandle = token
@@ -347,32 +345,81 @@ func (h RemoteHandler) UploadArtifactFile(w http.ResponseWriter, r *http.Request
 type remoteTerminalRequest struct {
 	LeaseToken string          `json:"lease_token"`
 	Result     json.RawMessage `json:"result"`
+	ErrorCode  string          `json:"error_code"`
 }
 
 func (h RemoteHandler) Complete(w http.ResponseWriter, r *http.Request) {
-	if _, ok := h.authorize(w, r); !ok {
+	h.terminal(w, r, "succeeded")
+}
+func (h RemoteHandler) Fail(w http.ResponseWriter, r *http.Request)   { h.terminal(w, r, "failed") }
+func (h RemoteHandler) Cancel(w http.ResponseWriter, r *http.Request) { h.terminal(w, r, "cancelled") }
+
+func (h RemoteHandler) terminal(w http.ResponseWriter, r *http.Request, status string) {
+	if !remoteTokenOK(r) {
+		remoteReply(w, 401, nil, "EXECUTOR_UNAUTHORIZED", "invalid Executor credential")
 		return
 	}
 	var body remoteTerminalRequest
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		remoteReply(w, 422, nil, "INVALID_REQUEST", "invalid completion result")
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 32<<20)).Decode(&body); err != nil {
+		remoteReply(w, 422, nil, "INVALID_REQUEST", "invalid terminal result")
 		return
 	}
-	ctx, err := h.Contexts.LoadAttemptContext(r.Context(), mux.Vars(r)["attempt_id"])
+	id := mux.Vars(r)["attempt_id"]
+	row, err := h.Attempts.Attempt(r.Context(), id)
 	if err != nil {
-		remoteReply(w, 503, nil, "ATTEMPT_CONTEXT_FAILED", err.Error())
+		remoteReply(w, 404, nil, attempt.CodeNotFound, "attempt was not found")
 		return
 	}
-	if err := h.ValidateCompletion(ctx); err != nil {
-		remoteReply(w, 422, nil, "REQUIRED_OUTPUT_MISSING", err.Error())
+	var session orm.WorkflowSession
+	if err := h.DB.WithContext(r.Context()).First(&session, "id = ?", row.SessionID).Error; err != nil {
+		remoteReply(w, 503, nil, "SESSION_UNAVAILABLE", err.Error())
 		return
 	}
 	lease := r.Header.Get("X-Workflow-Lease-Token")
-	if err := h.Attempts.Complete(r.Context(), ctx.AttemptID, lease, body.Result); err != nil {
-		remoteReply(w, 409, nil, "ATTEMPT_TERMINAL_REJECTED", err.Error())
+	if lease == "" {
+		lease = body.LeaseToken
+	}
+	if len(body.Result) == 0 {
+		body.Result = json.RawMessage(`{}`)
+	}
+	if controlstore.Controlled(session) {
+		if h.SettleControlled == nil {
+			remoteReply(w, 503, nil, "CONTROL_FINALIZATION_REQUIRED", "controlled executor finalization is unavailable")
+			return
+		}
+		err = h.SettleControlled(r.Context(), id, lease, status, body.ErrorCode, body.Result)
+	} else {
+		if _, ok := h.authorize(w, r); !ok {
+			return
+		}
+		if status == "succeeded" {
+			ctx, loadErr := h.Contexts.LoadAttemptContext(r.Context(), id)
+			if loadErr != nil {
+				remoteReply(w, 503, nil, "ATTEMPT_CONTEXT_FAILED", loadErr.Error())
+				return
+			}
+			if err := h.ValidateCompletion(ctx); err != nil {
+				remoteReply(w, 422, nil, "REQUIRED_OUTPUT_MISSING", err.Error())
+				return
+			}
+		}
+		err = h.Attempts.Terminal(r.Context(), id, lease, status, body.ErrorCode, body.Result)
+	}
+	if err != nil {
+		httpStatus, code := http.StatusServiceUnavailable, "ATTEMPT_TERMINAL_REJECTED"
+		var rejection *controlstore.Error
+		if errors.As(err, &rejection) {
+			code, httpStatus = rejection.Code, http.StatusConflict
+			if code == "REQUIRED_OUTPUT_MISSING" || code == "OUTPUT_SLOT_UNDECLARED" || code == "DUPLICATE_ARTIFACT" || code == "INVALID_ARTIFACT" || code == "TOO_MANY_ARTIFACTS" {
+				httpStatus = http.StatusUnprocessableEntity
+			}
+		} else if errors.Is(err, attempt.ErrLeaseLost) || errors.Is(err, attempt.ErrAlreadyTerminal) {
+			httpStatus = http.StatusConflict
+		}
+		remoteReply(w, httpStatus, nil, code, err.Error())
 		return
 	}
-	remoteReply(w, 200, map[string]any{"attempt_status": "succeeded"}, "", "")
+	remoteReply(w, 200, map[string]any{"attempt_status": status}, "", "")
 }
 
 // ValidateCompletion is called by the terminal handler before accepting a

@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -254,5 +255,52 @@ func TestNativeChatStopUsesControlledLifecycle(t *testing.T) {
 	var attempt orm.WorkflowSessionStep
 	if err := svc.DB.First(&attempt, "id = ?", "active-attempt").Error; err != nil || attempt.Status != "cancelled" || attempt.LeaseToken != "" {
 		t.Fatalf("chat stop did not fence the attempt: %+v %v", attempt, err)
+	}
+}
+
+func TestStopFencesNativeExecutorAndUpdatesOriginalTask(t *testing.T) {
+	svc, _ := hostControlFixture(t)
+	expires := time.Now().Add(time.Minute)
+	if err := svc.DB.Create(&orm.SubAgentTask{ID: "native-task", Status: "running", InputSlots: json.RawMessage(`[]`), OutputSlots: json.RawMessage(`[]`)}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.DB.Create(&orm.WorkflowSessionStep{ID: "native-attempt", SessionID: "run", StepID: "write", TaskID: "native-task", ExecutorHost: "lazymind", Status: "running", LeaseToken: "old-handle", LeaseExpiresAt: &expires}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Execute(context.Background(), "owner", "run", WorkflowControlCommand{CommandID: "stop-native", Kind: "stop"}); err != nil {
+		t.Fatal(err)
+	}
+	var task orm.SubAgentTask
+	if err := svc.DB.First(&task, "id = ?", "native-task").Error; err != nil || task.Status != "interrupted" {
+		t.Fatalf("original task still running: %+v %v", task, err)
+	}
+	if err := workflowattempt.New(svc.DB, workflowattempt.Config{}).ValidateLease(context.Background(), "native-attempt", "old-handle"); err == nil {
+		t.Fatal("stopped native executor retained its lease")
+	}
+}
+
+func TestPanelContinueConsumesDeliveredNativeResult(t *testing.T) {
+	svc, _ := hostControlFixture(t)
+	var session orm.WorkflowSession
+	if err := svc.DB.First(&session, "id = ?", "run").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.DB.Create(&orm.WorkflowSessionStep{ID: "native-done", SessionID: "run", StepID: "outline", TaskID: "native-task", ExecutorHost: "lazymind", Status: "succeeded"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	previous, err := controlstore.EnqueueHostAction(svc.DB, session, "submit:native-done", "continue", "native-done")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.DB.Model(&orm.WorkflowHostAction{}).Where("id = ?", previous).Update("status", "accepted").Error; err != nil {
+		t.Fatal(err)
+	}
+	result, err := svc.Execute(context.Background(), "owner", "run", WorkflowControlCommand{CommandID: "panel-continue", Kind: "continue", StateVersion: session.StateVersion})
+	if err != nil || result.Receipt.ActionID == previous {
+		t.Fatalf("panel continuation blocked by delivered result: %+v %v", result, err)
+	}
+	var old orm.WorkflowHostAction
+	if err := svc.DB.First(&old, "id = ?", previous).Error; err != nil || old.ConsumedAt == nil {
+		t.Fatalf("old notification was not consumed: %+v %v", old, err)
 	}
 }

@@ -44,6 +44,19 @@ func ApplyLifecycle(tx *gorm.DB, session *orm.WorkflowSession, commandID string,
 					"fencing_generation": gorm.Expr("fencing_generation + 1"), "updated_at": now}
 				binding.Generation++
 			}
+			if controlled {
+				var taskIDs []string
+				if err := tx.Model(&orm.WorkflowSessionStep{}).Where("session_id = ? AND executor_host = 'lazymind' AND validity = 'effective' AND status IN ?", session.ID,
+					[]string{"queued", "pending", "claimed", "running"}).Pluck("task_id", &taskIDs).Error; err != nil {
+					return "", false, err
+				}
+				if len(taskIDs) > 0 {
+					if err := tx.Model(&orm.SubAgentTask{}).Where("id IN ? AND status IN ?", taskIDs, []string{"pending", "running"}).
+						Updates(map[string]any{"status": "interrupted", "updated_at": now}).Error; err != nil {
+						return "", false, err
+					}
+				}
+			}
 			if err := attempts.Updates(updates).Error; err != nil {
 				return "", false, err
 			}
@@ -127,4 +140,22 @@ func EnqueueHostAction(tx *gorm.DB, session orm.WorkflowSession, commandID, kind
 		BindingGeneration: binding.Generation, ConnectorID: binding.ConnectorID, NativeSessionID: binding.DriverSession,
 		ExecutionID: executionID, Status: "pending", CreatedAt: now, UpdatedAt: now}
 	return action.ID, tx.Create(&action).Error
+}
+
+// ConsumeContinuation records receipt of an execution notification. An empty
+// execution ID means the driver has advanced, consuming notifications for settled
+// executions as well as the ordinary user continuation.
+func ConsumeContinuation(tx *gorm.DB, sessionID, executionID string) error {
+	query := tx.Model(&orm.WorkflowHostAction{}).Where("session_id = ? AND kind = 'continue' AND status IN ?", sessionID,
+		[]string{"pending", "dispatching", "accepted", "unknown"})
+	if executionID != "" {
+		query = query.Where("execution_id = ?", executionID)
+	} else {
+		settled := tx.Model(&orm.WorkflowSessionStep{}).Select("id").Where("session_id = ? AND status IN ?", sessionID,
+			[]string{"succeeded", "failed", "cancelled", "interrupted"})
+		query = query.Where("execution_id = '' OR execution_id IN (?)", settled)
+	}
+	return query.Where("consumed_at IS NULL").Updates(map[string]any{
+		"consumed_at": time.Now().UTC(), "status": gorm.Expr("CASE WHEN status = 'pending' THEN 'superseded' ELSE status END"),
+	}).Error
 }

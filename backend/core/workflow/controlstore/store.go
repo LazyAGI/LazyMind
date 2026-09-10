@@ -52,6 +52,7 @@ type Snapshot struct {
 	Binding            BindingView                    `json:"binding"`
 	Delivery           *orm.WorkflowHostAction        `json:"delivery"`
 	ActiveExecutions   int64                          `json:"active_executions"`
+	NativeExecutionIDs []string                       `json:"native_execution_ids"`
 	ActiveExecutionIDs []string                       `json:"active_execution_ids"`
 	AvailableActions   []string                       `json:"available_actions"`
 }
@@ -134,9 +135,13 @@ func Read(tx *gorm.DB, session orm.WorkflowSession) (*Snapshot, error) {
 		session.ID, []string{"queued", "pending", "claimed", "running"}).Order("id ASC").Pluck("id", &result.ActiveExecutionIDs).Error; err != nil {
 		return nil, err
 	}
+	result.NativeExecutionIDs = []string{}
+	if err := tx.Model(&orm.WorkflowSessionStep{}).Where("id IN ? AND executor_host = ?", result.ActiveExecutionIDs, "lazymind").Order("id ASC").Pluck("id", &result.NativeExecutionIDs).Error; err != nil {
+		return nil, err
+	}
 	result.ActiveExecutions = int64(len(result.ActiveExecutionIDs))
 	result.Continuation, result.Admission = controlpolicy.Decide(controlpolicy.Facts{Status: session.Status,
-		Dismissed: session.Dismissed, PendingReviews: pending, ActiveAttempts: result.ActiveExecutions,
+		Dismissed: session.Dismissed, PendingReviews: pending, ActiveAttempts: result.ActiveExecutions, NativeAttempts: int64(len(result.NativeExecutionIDs)),
 		BindingRequired: binding.Required, Bound: result.Binding.Bound})
 	var action orm.WorkflowHostAction
 	err = tx.Where("session_id = ? AND binding_generation = ?", session.ID, binding.Generation).Order("created_at DESC, id DESC").First(&action).Error

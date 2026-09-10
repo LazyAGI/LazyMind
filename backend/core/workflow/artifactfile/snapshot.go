@@ -12,6 +12,14 @@ import (
 	"lazymind/core/doc"
 )
 
+// IsPublicReference identifies stored URLs that must not be read as host files.
+func IsPublicReference(value string) bool {
+	value = strings.TrimSpace(value)
+	return strings.HasPrefix(value, "http://") || strings.HasPrefix(value, "https://") ||
+		strings.HasPrefix(value, "data:") || strings.HasPrefix(value, "/static-files/") ||
+		strings.HasPrefix(value, "/api/core/static-files/")
+}
+
 // Snapshot copies a local file into a new managed artifact before publishing it.
 // Editors may replace their upload or working file later without altering a
 // confirmed revision. Remote URLs remain references; no remote bytes are fetched.
@@ -24,7 +32,7 @@ func Snapshot(sessionID, artifactID, contentType string, raw json.RawMessage) (j
 		return Materialize(sessionID, artifactID, raw)
 	}
 	source := strings.TrimSpace(stringField(value, "path"))
-	if source == "" || contentType == "json" || contentType == "application/json" || contentType == "text" || strings.HasPrefix(contentType, "text/") {
+	if source == "" || IsPublicReference(source) || contentType == "json" || contentType == "application/json" || contentType == "text" || strings.HasPrefix(contentType, "text/") {
 		return clone(raw), "", nil
 	}
 	// Reuse the Core storage boundary after resolving symlinks. Never snapshot an

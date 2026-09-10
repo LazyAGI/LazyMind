@@ -767,4 +767,18 @@ describe("AgentIntegrationPage", () => {
       expect(mocks.executors).toHaveBeenCalledTimes(2);
     });
   });
+  it("reuses the existing executable picker for DSH", async () => {
+    mocks.statuses.mockResolvedValue({ ok: true, data: { "deepseek-harness": {
+      agent: "deepseek-harness", display_name: "DeepSeek Harness", state: "requirements_missing",
+      requirements: [{ id: "dsh_cli", description: "DSH missing", satisfied: false }],
+    } } });
+    mocks.selectExecutable.mockResolvedValue("D:\\Tools\\dsh.cmd");
+    mocks.bind.mockResolvedValue({ ok: true, data: {} });
+    render(<AgentIntegrationPage />);
+    await screen.findByText("外部 Agent 集成");
+    const dsh = expandAgent("deepseek-harness");
+    fireEvent.click(within(dsh).getByRole("button", { name: /定位 CLI/ }));
+    await waitFor(() => expect(mocks.bind).toHaveBeenCalledWith("deepseek-harness-cli", "D:\\Tools\\dsh.cmd"));
+  });
+
 });

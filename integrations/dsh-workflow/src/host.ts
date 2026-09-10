@@ -12,7 +12,7 @@ import { workflowTool } from './tool'
 
 const READS = new Set(['list', 'get', 'input_get', 'state', 'session_list', 'artifact_list', 'artifact_get'])
 const ACQUIRE = new Set(['step_begin', 'step_claim', 'step_resume'])
-const PAUSED = new Set(['awaiting_user', 'draining', 'stopped', 'binding_required'])
+const PAUSED = new Set(['awaiting_user', 'awaiting_executor', 'draining', 'stopped', 'binding_required'])
 const STRUCTURED_OUTPUT = 'structured_output' // Published DSH 0.1.2 subagent completion contract.
 
 interface Scope {
@@ -77,7 +77,7 @@ export function installHost(ctx: Context, bridge: HostTransport, config: HostCon
       if (scope.control && scope.control.state_version > control.state_version) continue
       scope.control = control
       if (control.active_execution_ids) {
-        for (const id of scope.grants) if (!control.active_execution_ids.includes(id)) scope.grants.delete(id)
+        for (const id of scope.grants) if (!control.active_execution_ids.includes(id) || control.native_execution_ids?.includes(id)) scope.grants.delete(id)
       }
     }
   }
@@ -93,7 +93,7 @@ export function installHost(ctx: Context, bridge: HostTransport, config: HostCon
     const goal = goals.get(scope.agent)
     if (goal?.phase === 'active' && goal.activation === 'armed' && (!scope.goalId || scope.goalId === goal.id)) {
       goals.block(scope.agent, goal, { code: goalReason(scope.runId, goal.revision + 1, scope.control?.continuation === 'stopped'),
-        message: 'This LazyMind workflow needs user action before automatic work can continue.' })
+        message: scope.control.continuation === 'awaiting_executor' ? 'LazyMind is executing this workflow step.' : 'This LazyMind workflow needs user action before automatic work can continue.' })
     }
   }
 
@@ -107,14 +107,21 @@ export function installHost(ctx: Context, bridge: HostTransport, config: HostCon
     const root = driver(scope.agent)
     const finished = new Set<string>()
     let ownedAt = 0
+    let ownedSeq = -1
+    let latestInputSeq = -1
     for (const event of [...scope.agent.session.ownEvents()].reverse()) {
+      if (event.type === 'user/message' && latestInputSeq < 0) latestInputSeq = event.seq
       const run = eventRun(event, config.serverName)
       if (!run || run.hostSessionId !== root.session.id || !run.operation || !['start', 'step_begin', 'step_claim', 'step_resume', 'step_submit'].includes(run.operation)) continue
-      if (!scope.runId) { scope.runId = run.runId; scope.automatic = true; ownedAt = event.time }
+      if (!scope.runId) { scope.runId = run.runId; scope.automatic = true; ownedAt = event.time; ownedSeq = event.seq }
       if (run.runId !== scope.runId || !run.executionId) continue
       if (run.operation === 'step_submit') finished.add(run.executionId)
       else if (ACQUIRE.has(run.operation) && !finished.has(run.executionId)) scope.grants.add(run.executionId)
     }
+    // Restore ownership of a still-running workflow turn after plugin reload.
+    // A later explicit user message belongs to the user, not this workflow.
+    if (latestInputSeq > ownedSeq) scope.automatic = false
+    scope.activeOwned = scope.agent.status === 'running' && scope.automatic
     if (!scope.runId && root !== scope.agent) scope.runId = ensure(root).runId
     const goal = goals?.get(root)
     if (goal && ownedAt && goal.createdAt <= ownedAt) scope.goalId = goal.id
@@ -185,10 +192,12 @@ export function installHost(ctx: Context, bridge: HostTransport, config: HostCon
       url: new URL(`/workflow-runs/${encodeURIComponent(returned.session_id)}`, config.webUrl).href } : null)
     const runId = returned?.session_id ?? run?.runId
     if (!runId) return null
+    // Reading another run is discovery, not ownership of its driver session.
+    if (operation && READS.has(operation) && runId !== scope.runId && runId !== rootScope.runId) return returned
     const execution = object(fields?.execution)
     if (operation && ACQUIRE.has(operation) && typeof execution?.execution_id === 'string') {
-      scope.grants.add(execution.execution_id)
-      scope.returnPending = false
+      if (execution.executor_host !== 'lazymind') scope.grants.add(execution.execution_id)
+      scope.returnPending = execution.executor_host === 'lazymind'
       scope.activeOwned = scope.automatic = true
       scope.manual = false
     }
@@ -243,7 +252,7 @@ export function installHost(ctx: Context, bridge: HostTransport, config: HostCon
       const definition = workflowTool(original, { trustedOrigin: config.webUrl, hostSessionId: driver(scope.agent).session.id,
         operation,
         afterResult: (value, exec) => own(afterResult(value, exec)),
-        shouldConclude: (control) => scope.activeOwned && !completion(scope) && (scope.unknown || !!scope.runId && control?.continuation === 'awaiting_user'),
+        shouldConclude: (control) => scope.activeOwned && !completion(scope) && (scope.unknown || !!scope.runId && ['awaiting_user', 'awaiting_executor'].includes(control?.continuation ?? '')),
       })
       scope.wrappers.set(schema.name, { original, dispose: registration.tools.register(definition) })
     }
@@ -396,11 +405,16 @@ export function installHost(ctx: Context, bridge: HostTransport, config: HostCon
         if (scope.runId === action.session_id && (scope.activeOwned || scope.grants.size > 0)) ctx.sessionController.cancel({ sessionId: resolved.agent.session.id })
         if (scope.runId === action.session_id) suspendGoal(scope)
       } else {
+        // An explicit panel continuation may replace this workflow's pending
+        // question/planning turn, while preserving unrelated work and granted executions.
+        if (!action.execution_id && scope.runId === action.session_id && scope.activeOwned && scope.grants.size === 0) {
+          ctx.sessionController.cancel({ sessionId: resolved.agent.session.id })
+        }
         // A queued input gains scope only in pre-step, when that exact input runs.
         await ctx.sessionController.prompt({ sessionId: resolved.agent.session.id, requestId: action.id as Parameters<typeof ctx.sessionController.prompt>[0]['requestId'],
           mode: 'queue', content: [{ type: 'text', text: action.execution_id
-            ? `The user authorized recovery of LazyMind workflow ${action.session_id}. Call workflow.step.claim with execution_id=${action.execution_id}, execute that existing contract, and submit its result with execution_handle. Do not create another execution or workflow.`
-            : `The user confirmed LazyMind workflow ${action.session_id}. Read its latest state through MCP and continue the ready steps. Use execution_handle on each submit and honor control.continuation. Do not create a new workflow.` }],
+            ? `LazyMind workflow ${action.session_id} has an execution update. Call workflow.step.claim with execution_id=${action.execution_id} to inspect or acquire it. If executor_host is lazymind, it is managed by LazyMind: read the latest state and continue only ready steps when permitted; do not execute or submit it. Otherwise execute the granted contract and submit with execution_handle. Do not create a new workflow.`
+            : `The user clicked Continue in the LazyMind panel for workflow ${action.session_id} and has finished the current review. Call workflow.state, then workflow.step.begin for a ready step when control.continuation=continue and admission.can_begin=true. A human step requires review AFTER execution; its mode or requires_approval flag does not require another confirmation before begin. Continue until awaiting_user, awaiting_executor, stopped, or completed. For executor_host=lazymind, let LazyMind execute its tools; otherwise submit using execution_handle. Do not ask the user to confirm the review again or create a new workflow.` }],
         }, signal())
         if (scope.runId === action.session_id) resumeGoal(scope)
       }
