@@ -54,3 +54,30 @@ func TestUserName(t *testing.T) {
 		})
 	}
 }
+
+func TestUserRole(t *testing.T) {
+	req, _ := http.NewRequest("GET", "/", nil)
+	req.Header.Set("X-User-Role", "  system-admin  ")
+	if got := UserRole(req); got != "system-admin" {
+		t.Fatalf("UserRole() = %q, want system-admin", got)
+	}
+}
+
+func TestRoleIsAdmin(t *testing.T) {
+	tests := []struct {
+		role string
+		want bool
+	}{
+		{"admin", true},
+		{"system-admin", true},
+		{"system_admin", true},
+		{"tenant.admin", true},
+		{"user", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		if got := RoleIsAdmin(tt.role); got != tt.want {
+			t.Fatalf("RoleIsAdmin(%q) = %v, want %v", tt.role, got, tt.want)
+		}
+	}
+}

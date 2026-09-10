@@ -14,6 +14,7 @@ import (
 	"gorm.io/gorm/clause"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/modelconfig"
 	"lazymind/core/store"
 	"lazymind/core/subagent"
 	"lazymind/core/workflow/attempt"
@@ -321,8 +322,8 @@ func StartWorkflowSession(w http.ResponseWriter, r *http.Request) {
 		req.TaskID = uuid.NewString()
 	}
 	handOff := req.HandOff
-	params := WorkflowStepParams{WorkflowID: req.WorkflowID, WorkflowRef: req.WorkflowRef, RevisionID: req.WorkflowRevisionID, RevisionNo: req.WorkflowRevisionNo, TreeHash: req.WorkflowTreeHash, RemoteRoot: req.WorkflowRemoteRoot, StepID: req.TargetStepID, UserInput: req.UserInput, IsColdStart: true, HandOff: &handOff, PreflightID: req.PreflightID, ChatSessionID: req.ChatSessionID, TraceID: req.TraceID, ParentSpanID: req.ParentSpanID, WorkflowMode: req.WorkflowMode, UserID: req.UserID, HistoryFilesPerTurn: req.HistoryFilesPerTurn, Filters: req.Filters, ParentAgenticConfig: req.ParentAgenticConfig, RequiredOutputs: graph.Nodes[req.TargetStepID].RequiredOutputs, LegacyTools: graph.Nodes[req.TargetStepID].LegacyTools, TerminalTools: graph.Nodes[req.TargetStepID].TerminalTools, ToolsOnly: graph.Nodes[req.TargetStepID].ToolsOnly, StreamHeartbeat: graph.Nodes[req.TargetStepID].StreamHeartbeat, Runtime: graph.Runtime}
 	nodeDef := graph.Nodes[req.TargetStepID]
+	params := WorkflowStepParams{WorkflowID: req.WorkflowID, WorkflowRef: req.WorkflowRef, RevisionID: req.WorkflowRevisionID, RevisionNo: req.WorkflowRevisionNo, TreeHash: req.WorkflowTreeHash, RemoteRoot: req.WorkflowRemoteRoot, StepID: req.TargetStepID, UserInput: req.UserInput, IsColdStart: true, HandOff: &handOff, PreflightID: req.PreflightID, ChatSessionID: req.ChatSessionID, TraceID: req.TraceID, ParentSpanID: req.ParentSpanID, WorkflowMode: req.WorkflowMode, UserID: req.UserID, HistoryFilesPerTurn: req.HistoryFilesPerTurn, Filters: req.Filters, ParentAgenticConfig: req.ParentAgenticConfig, RequiredOutputs: nodeDef.RequiredOutputs, Capabilities: nodeDef.Capabilities, LegacyTools: nodeDef.LegacyTools, TerminalTools: nodeDef.TerminalTools, ToolsOnly: nodeDef.ToolsOnly, StreamHeartbeat: nodeDef.StreamHeartbeat, Runtime: graph.Runtime}
 	inputKeys := graphengine.Materials(nodeDef.Input)
 	for _, optional := range nodeDef.OptionalInputs {
 		inputKeys = append(inputKeys, optional.Material)
@@ -332,7 +333,11 @@ func StartWorkflowSession(w http.ResponseWriter, r *http.Request) {
 	launchErr := common.TransactionWithSQLiteBusyRetry(r.Context(), store.DB(), func(tx *gorm.DB) error {
 		var err error
 		stepObjective := workflowStepObjective(nodeDef.Prompt, req.Objective, req.UserInput)
-		sessionID, taskID, _, err = launchWorkflowAttempt(r.Context(), tx, store.State(), req.ConversationID, req.TriggerHistoryID, req.UserID, req.TaskID, req.WorkflowID+":"+req.TargetStepID, stepObjective, params, inputKeys, nodeDef.Outputs, req.LLMConfig, req.ToolConfig, false, false)
+		toolConfig, toolErr := workflowNodeToolConfig(r.Context(), tx, req.UserID, req.ToolConfig, nodeDef.Capabilities, nodeDef.LegacyTools)
+		if toolErr != nil {
+			return toolErr
+		}
+		sessionID, taskID, _, err = launchWorkflowAttempt(r.Context(), tx, store.State(), req.ConversationID, req.TriggerHistoryID, req.UserID, req.TaskID, req.WorkflowID+":"+req.TargetStepID, stepObjective, params, inputKeys, nodeDef.Outputs, req.LLMConfig, toolConfig, false, false)
 		if err != nil {
 			return err
 		}
@@ -693,10 +698,14 @@ func TransitionWorkflowSession(w http.ResponseWriter, r *http.Request) {
 				for _, optional := range nodeDef.OptionalInputs {
 					inputKeys = append(inputKeys, optional.Material)
 				}
-				params := WorkflowStepParams{WorkflowID: session.WorkflowID, WorkflowRef: session.WorkflowRef, RevisionID: session.WorkflowRevisionID, RevisionNo: session.WorkflowRevisionNo, TreeHash: session.WorkflowTreeHash, RemoteRoot: session.WorkflowRemoteRoot, StepID: target.TargetStepID, SessionID: session.ID, UserInput: target.UserInput, HandOff: &handOff, ChatSessionID: req.ChatSessionID, TraceID: req.TraceID, ParentSpanID: req.ParentSpanID, WorkflowMode: req.WorkflowMode, RetryHint: target.RuntimeInstruction, PartialIndices: target.PartialIndices, HistoryFilesPerTurn: req.HistoryFilesPerTurn, Filters: req.Filters, ParentAgenticConfig: req.ParentAgenticConfig, UserID: session.CreateUserID, RequiredOutputs: nodeDef.RequiredOutputs, LegacyTools: nodeDef.LegacyTools, TerminalTools: nodeDef.TerminalTools, ToolsOnly: nodeDef.ToolsOnly, StreamHeartbeat: nodeDef.StreamHeartbeat, Runtime: graph.Runtime}
+				params := WorkflowStepParams{WorkflowID: session.WorkflowID, WorkflowRef: session.WorkflowRef, RevisionID: session.WorkflowRevisionID, RevisionNo: session.WorkflowRevisionNo, TreeHash: session.WorkflowTreeHash, RemoteRoot: session.WorkflowRemoteRoot, StepID: target.TargetStepID, SessionID: session.ID, UserInput: target.UserInput, HandOff: &handOff, ChatSessionID: req.ChatSessionID, TraceID: req.TraceID, ParentSpanID: req.ParentSpanID, WorkflowMode: req.WorkflowMode, RetryHint: target.RuntimeInstruction, PartialIndices: target.PartialIndices, HistoryFilesPerTurn: req.HistoryFilesPerTurn, Filters: req.Filters, ParentAgenticConfig: req.ParentAgenticConfig, UserID: session.CreateUserID, RequiredOutputs: nodeDef.RequiredOutputs, Capabilities: nodeDef.Capabilities, LegacyTools: nodeDef.LegacyTools, TerminalTools: nodeDef.TerminalTools, ToolsOnly: nodeDef.ToolsOnly, StreamHeartbeat: nodeDef.StreamHeartbeat, Runtime: graph.Runtime}
 				var launchErr error
 				stepObjective := workflowStepObjective(nodeDef.Prompt, target.Objective, target.UserInput)
-				_, taskID, _, launchErr = launchWorkflowAttempt(r.Context(), tx, store.State(), session.ConversationID, session.TriggerHistoryID, session.CreateUserID, target.TaskID, session.WorkflowID+":"+target.TargetStepID, stepObjective, params, inputKeys, nodeDef.Outputs, req.LLMConfig, req.ToolConfig, false, false)
+				toolConfig, toolErr := workflowNodeToolConfig(r.Context(), tx, session.CreateUserID, req.ToolConfig, nodeDef.Capabilities, nodeDef.LegacyTools)
+				if toolErr != nil {
+					return toolErr
+				}
+				_, taskID, _, launchErr = launchWorkflowAttempt(r.Context(), tx, store.State(), session.ConversationID, session.TriggerHistoryID, session.CreateUserID, target.TaskID, session.WorkflowID+":"+target.TargetStepID, stepObjective, params, inputKeys, nodeDef.Outputs, req.LLMConfig, toolConfig, false, false)
 				if launchErr != nil {
 					return launchErr
 				}
@@ -808,6 +817,28 @@ func queueHostAttempt(ctx context.Context, tx *gorm.DB, session orm.WorkflowSess
 	}
 	return tx.Create(&orm.WorkflowOutbox{ID: uuid.NewString(), AttemptID: row.ID, SessionID: session.ID,
 		PayloadJSON: payload, Status: "pending", CreatedAt: now, UpdatedAt: now}).Error
+}
+
+func workflowNodeToolConfig(ctx context.Context, db *gorm.DB, userID string, base map[string]any, capabilities, legacyTools []string) (map[string]any, error) {
+	extra, err := modelconfig.LoadToolConfigForCapabilities(ctx, db, userID, workflowConfigCapabilityNames(capabilities, legacyTools))
+	if err != nil {
+		return nil, err
+	}
+	if len(base) == 0 {
+		return extra, nil
+	}
+	merged := map[string]any{}
+	for key, value := range base {
+		merged[key] = value
+	}
+	for key, value := range extra {
+		merged[key] = value
+	}
+	return merged, nil
+}
+
+func workflowConfigCapabilityNames(capabilities, legacyTools []string) []string {
+	return uniqueSortedStrings(append(append([]string{}, capabilities...), legacyTools...))
 }
 
 // workflowStepObjective makes the immutable workflow step prompt authoritative.

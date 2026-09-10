@@ -176,6 +176,46 @@ func TestEnqueueReusesCanceledJob(t *testing.T) {
 	}
 }
 
+func TestCancelResourceJobsCancelsActiveJobs(t *testing.T) {
+	db := orm.MigrateTestDB(t, &orm.AsyncJob{}).DB
+	now := time.Now().UTC()
+	lockUntil := now.Add(time.Minute)
+	rows := []orm.AsyncJob{
+		{ID: "job_pending", JobType: "test.cancel", Status: string(StatusPending), ResourceType: "draft", ResourceID: "d1", MaxAttempts: 3, NextRunAt: now, CreatedAt: now, UpdatedAt: now},
+		{ID: "job_running", JobType: "test.cancel", Status: string(StatusRunning), ResourceType: "draft", ResourceID: "d1", MaxAttempts: 3, NextRunAt: now, LockedBy: "worker", LockUntil: &lockUntil, CreatedAt: now, UpdatedAt: now},
+		{ID: "job_other", JobType: "test.cancel", Status: string(StatusPending), ResourceType: "draft", ResourceID: "d2", MaxAttempts: 3, NextRunAt: now, CreatedAt: now, UpdatedAt: now},
+	}
+	for i := range rows {
+		if err := db.Create(&rows[i]).Error; err != nil {
+			t.Fatalf("create job %s: %v", rows[i].ID, err)
+		}
+	}
+
+	affected, err := CancelResourceJobs(context.Background(), db, "test.cancel", "draft", "d1", "user stopped")
+	if err != nil {
+		t.Fatalf("cancel resource jobs: %v", err)
+	}
+	if affected != 2 {
+		t.Fatalf("affected = %d, want 2", affected)
+	}
+	for _, id := range []string{"job_pending", "job_running"} {
+		var got orm.AsyncJob
+		if err := db.First(&got, "id = ?", id).Error; err != nil {
+			t.Fatalf("load job %s: %v", id, err)
+		}
+		if got.Status != string(StatusCanceled) || got.ErrorCode != ErrorCodeCanceled || got.ErrorMessage != "user stopped" || got.LockedBy != "" || got.LockUntil != nil || got.FinishedAt == nil {
+			t.Fatalf("job %s not canceled cleanly: %+v", id, got)
+		}
+	}
+	var other orm.AsyncJob
+	if err := db.First(&other, "id = ?", "job_other").Error; err != nil {
+		t.Fatalf("load other job: %v", err)
+	}
+	if other.Status != string(StatusPending) {
+		t.Fatalf("other job should stay pending: %+v", other)
+	}
+}
+
 func TestEnqueueCreatesNewJobWhenKeyFree(t *testing.T) {
 	db := orm.MigrateTestDB(t, &orm.AsyncJob{}).DB
 	seed := seedStaleJob(t, db, "test.retry", "key-other", string(StatusFailed))

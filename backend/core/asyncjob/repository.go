@@ -150,6 +150,25 @@ func Get(ctx context.Context, db *gorm.DB, id string) (*orm.AsyncJob, error) {
 	return &row, nil
 }
 
+func CancelResourceJobs(ctx context.Context, db *gorm.DB, jobType, resourceType, resourceID, reason string) (int64, error) {
+	now := time.Now().UTC()
+	if reason == "" {
+		reason = "job canceled by user"
+	}
+	result := db.WithContext(ctx).Model(&orm.AsyncJob{}).
+		Where("job_type = ? AND resource_type = ? AND resource_id = ? AND status IN ?", jobType, resourceType, resourceID, activeReusableStatuses).
+		Updates(map[string]any{
+			"status":        string(StatusCanceled),
+			"error_code":    ErrorCodeCanceled,
+			"error_message": reason,
+			"locked_by":     "",
+			"lock_until":    nil,
+			"finished_at":   now,
+			"updated_at":    now,
+		})
+	return result.RowsAffected, result.Error
+}
+
 func findReusableJob(ctx context.Context, db *gorm.DB, jobType, idempotencyKey string, lock, skipSucceeded bool) (*orm.AsyncJob, error) {
 	statuses := reusableStatuses
 	if skipSucceeded {

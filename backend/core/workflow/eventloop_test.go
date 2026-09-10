@@ -46,7 +46,7 @@ func TestLaunchWorkflowAttemptCreatesTaskCenterRowAtomically(t *testing.T) {
 		"fallback title", "analyze requirements",
 		WorkflowStepParams{
 			WorkflowID: "ppt-workflow", StepID: "analyze_requirements",
-			IsColdStart: true, WorkflowMode: "dynamic",
+			IsColdStart: true, WorkflowMode: "dynamic", Capabilities: []string{"web_search"},
 		},
 		nil, nil, nil, nil, false, false,
 	)
@@ -63,6 +63,18 @@ func TestLaunchWorkflowAttemptCreatesTaskCenterRowAtomically(t *testing.T) {
 	}
 	if task.TaskType != "workflow_run" || task.Status != "running" || task.Title == nil || *task.Title != "赛博朋克 PPT" {
 		t.Fatalf("unexpected task-center workflow run: %#v", task)
+	}
+	var subTask orm.SubAgentTask
+	if err := db.Where("id = ?", taskID).First(&subTask).Error; err != nil {
+		t.Fatalf("load sub-agent task: %v", err)
+	}
+	var params map[string]any
+	if err := json.Unmarshal(subTask.Params, &params); err != nil {
+		t.Fatalf("decode params: %v", err)
+	}
+	capabilities, _ := params["capabilities"].([]any)
+	if len(capabilities) != 1 || capabilities[0] != "web_search" {
+		t.Fatalf("capabilities not persisted: %#v", params)
 	}
 }
 

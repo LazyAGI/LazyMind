@@ -82,6 +82,7 @@ type WorkflowStepParams struct {
 	// RequiredOutputs is compiled by Go. Outputs not listed here are valid
 	// conditional products but do not gate attempt success.
 	RequiredOutputs []string `json:"required_outputs,omitempty"`
+	Capabilities    []string `json:"capabilities,omitempty"`
 
 	// LegacyTools are immutable script-tool names compiled from the selected
 	// Workflow revision. They are resolved by the LazyMind Host when building
@@ -147,6 +148,9 @@ func (p WorkflowStepParams) asMap() map[string]any {
 	}
 	if len(p.LegacyTools) > 0 {
 		m["legacy_tools"] = p.LegacyTools
+	}
+	if len(p.Capabilities) > 0 {
+		m["capabilities"] = p.Capabilities
 	}
 	if len(p.TerminalTools) > 0 {
 		m["terminal_tools"] = p.TerminalTools
@@ -561,6 +565,9 @@ func launchWorkflowAttempt(
 		// Compiled graph outputs are material guarantees. A v2 attempt cannot
 		// succeed unless every declared output was actually persisted.
 		rawParamsMap["required_output_artifact_keys"] = params.RequiredOutputs
+	}
+	if len(params.Capabilities) > 0 {
+		rawParamsMap["capabilities"] = params.Capabilities
 	}
 	if len(params.LegacyTools) > 0 {
 		rawParamsMap["legacy_tools"] = params.LegacyTools

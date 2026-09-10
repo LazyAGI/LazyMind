@@ -13,4 +13,25 @@
     color: #262626;
     margin: 0 0 12px 0;
   }
+
+  .pce-section-desc {
+    font-size: 12px;
+    line-height: 18px;
+    color: #8c8c8c;
+    margin: -4px 0 12px;
+  }
+
+  .pce-runtime-section {
+    padding-top: 8px;
+    border-top: 1px solid #f0f0f0;
+  }
+
+  .pce-runtime-field {
+    padding: 10px 0 2px;
+    border-bottom: 1px solid #f5f5f5;
+
+    &:last-child {
+      border-bottom: 0;
+    }
+  }
 }

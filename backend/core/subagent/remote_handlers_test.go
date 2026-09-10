@@ -181,6 +181,28 @@ func TestRemoteExecutionSpecReturnsTaskParamsAndDurableSteps(t *testing.T) {
 	}
 }
 
+func TestRemoteExecutionSpecLoadsCapabilityToolConfig(t *testing.T) {
+	db := remoteSubagentFixture(t)
+	seedRemoteSearchProvider(t, db)
+	if err := db.Model(&orm.SubAgentTask{}).Where("id = ?", "task-remote").Update("params",
+		json.RawMessage(`{"operation":"execute","capabilities":["web_search"]}`)).Error; err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/internal/subagent/tasks/task-remote/execution-spec", nil)
+	req = mux.SetURLVars(req, map[string]string{"task_id": "task-remote"})
+	req.Header.Set("Authorization", "Bearer executor-secret")
+	req.Header.Set("X-Workflow-Lease-Token", "lease-live")
+	rec := httptest.NewRecorder()
+	InternalGetExecutionSpec(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	toolConfig := getData(rec.Body.Bytes())["tool_config"].(map[string]any)
+	if toolConfig["tavily"] != "workflow-search-token" {
+		t.Fatalf("tool_config=%#v", toolConfig)
+	}
+}
+
 func TestRemoteExecutionSpecLoadsOnlyDeclaredAcademicSearchConfig(t *testing.T) {
 	db := remoteSubagentFixture(t)
 	seedRemoteSearchProvider(t, db)

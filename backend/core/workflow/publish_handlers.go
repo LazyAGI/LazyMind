@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -135,7 +136,11 @@ func PublishWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "not found", http.StatusNotFound)
 		return
 	}
-	diagnostics := authoringDiagnosticsForDraft(store.DB(), d)
+	if err := syncSkillCapabilitiesBeforePublish(r.Context(), store.DB(), &d); err != nil {
+		common.ReplyErr(w, "sync workflow capabilities failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	diagnostics := authoringDiagnosticsForRequest(store.DB(), d, r)
 	if !diagnostics.Valid {
 		status := http.StatusUnprocessableEntity
 		message := "plugin validation failed"
@@ -146,11 +151,17 @@ func PublishWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 			case "FRAMEWORK_TOOL_UNAVAILABLE":
 				status, message = http.StatusConflict, "framework tool unavailable"
 			case "SCRIPT_APPROVAL_REQUIRED":
-				status, message = http.StatusForbidden, "custom plugin scripts require the administrator publishing workflow"
+				status, message = http.StatusForbidden, "custom workflow scripts require administrator permission or a matching deterministic audit"
 			}
 		}
 		common.ReplyErrWithData(w, message, diagnostics, status)
 		return
+	}
+	var diagnosticWarnings []authoringDiagnostic
+	for _, diagnostic := range diagnostics.Diagnostics {
+		if diagnostic.Severity == "warning" {
+			diagnosticWarnings = append(diagnosticWarnings, diagnostic)
+		}
 	}
 	files, err := workflowFiles(d)
 	if err != nil {
@@ -182,7 +193,7 @@ func PublishWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 		var resource orm.WorkflowResource
 		err := tx.Where("plugin_ref = ?", ref).First(&resource).Error
 		if err == gorm.ErrRecordNotFound {
-			resource = orm.WorkflowResource{ID: uuid.NewString(), WorkflowRef: ref, WorkflowID: pid, OwnerUserID: userID, OwnerScope: scope, SourceType: d.SourceType, RelativeRoot: "workflows/" + scope + "/" + pid, Name: d.Name, Status: "active", CreatedAt: now, UpdatedAt: now}
+			resource = orm.WorkflowResource{ID: uuid.NewString(), WorkflowRef: ref, WorkflowID: pid, OwnerUserID: userID, OwnerScope: scope, SourceType: d.SourceType, SourceSkillID: d.SourceSkillID, SourceSkillName: d.SourceSkillName, SourceSkillRevisionID: d.SourceSkillRevisionID, SourceSkillRevisionNo: d.SourceSkillRevisionNo, SourceSkillTreeHash: d.SourceSkillTreeHash, SourceDraftID: d.ID, RelativeRoot: "workflows/" + scope + "/" + pid, Name: d.Name, Status: "active", CreatedAt: now, UpdatedAt: now}
 			if resource.SourceType == "" {
 				resource.SourceType = "user"
 			}
@@ -227,7 +238,10 @@ func PublishWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 		if err := tx.Create(&entries).Error; err != nil {
 			return err
 		}
-		updates := map[string]any{"head_revision_id": revID, "version": next, "updated_at": now, "name": d.Name, "description": yamlScalar(d.WorkflowYAMLContent, "description"), "when_to_use": yamlScalar(d.WorkflowYAMLContent, "when_to_use"), "contains_scripts": workflowContainsScripts(files)}
+		updates := map[string]any{"head_revision_id": revID, "version": next, "updated_at": now, "name": d.Name, "description": yamlScalar(d.WorkflowYAMLContent, "description"), "when_to_use": yamlScalar(d.WorkflowYAMLContent, "when_to_use"), "contains_scripts": workflowContainsScripts(files), "status": "active", "source_type": d.SourceType, "source_skill_id": d.SourceSkillID, "source_skill_name": d.SourceSkillName, "source_skill_revision_id": d.SourceSkillRevisionID, "source_skill_revision_no": d.SourceSkillRevisionNo, "source_skill_tree_hash": d.SourceSkillTreeHash, "source_draft_id": d.ID}
+		if updates["source_type"] == "" {
+			updates["source_type"] = "user"
+		}
 		if err := tx.Model(&resource).Updates(updates).Error; err != nil {
 			return err
 		}
@@ -247,7 +261,61 @@ func PublishWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 	}
 	var setting orm.UserWorkflowSetting
 	enabled := store.DB().Where("user_id=? AND plugin_ref=?", userID, out.WorkflowRef).First(&setting).Error == nil && setting.Enabled
-	common.ReplyOK(w, map[string]any{"workflow_ref": out.WorkflowRef, "revision_id": out.HeadRevisionID, "revision_no": out.Version, "remote_root": "remote://" + out.RelativeRoot, "enabled": enabled})
+	common.ReplyOK(w, map[string]any{"workflow_ref": out.WorkflowRef, "revision_id": out.HeadRevisionID, "revision_no": out.Version, "remote_root": "remote://" + out.RelativeRoot, "enabled": enabled, "warnings": diagnosticWarnings})
+}
+
+func syncSkillCapabilitiesBeforePublish(ctx context.Context, db *gorm.DB, draft *orm.WorkflowDraft) error {
+	if draft == nil || draft.SourceAnalysisID == "" {
+		return nil
+	}
+	var analysis orm.WorkflowGenerationAnalysis
+	if err := db.Where("id=? AND draft_id=?", draft.SourceAnalysisID, draft.ID).First(&analysis).Error; err != nil {
+		return nil
+	}
+	var mappings map[string]any
+	if json.Unmarshal([]byte(analysis.ToolMappingReportJSON), &mappings) != nil {
+		return nil
+	}
+	if detected := redetectSkillCapabilitiesForDraft(ctx, db, draft); len(detected) > 0 {
+		mappings = reconcileDetectedCapabilityMappings(mappings, detected)
+		if nextJSON, err := json.Marshal(mappings); err == nil && string(nextJSON) != analysis.ToolMappingReportJSON {
+			_ = db.Model(&analysis).Update("tool_mapping_report_json", string(nextJSON)).Error
+		}
+	}
+	workflowYAML, stateYAML, injected := injectSkillCapabilitiesIntoWorkflow(draft.WorkflowYAMLContent, draft.StateYAMLContent, mappings)
+	if len(injected) == 0 {
+		return nil
+	}
+	updates := map[string]any{
+		"state_yaml_content": stateYAML,
+		"version":            gorm.Expr("version + 1"),
+		"updated_at":         time.Now().UTC(),
+	}
+	setWorkflowYAMLUpdate(updates, workflowYAML)
+	if err := db.Model(&orm.WorkflowDraft{}).Where("id=? AND created_by=?", draft.ID, draft.CreatedBy).Updates(updates).Error; err != nil {
+		return err
+	}
+	draft.WorkflowYAMLContent = workflowYAML
+	draft.StateYAMLContent = stateYAML
+	draft.Version++
+	return nil
+}
+
+func redetectSkillCapabilitiesForDraft(ctx context.Context, db *gorm.DB, draft *orm.WorkflowDraft) []skillCapabilityRequirement {
+	if draft == nil || draft.SourceType != "skill" || draft.SourceSkillID == "" || draft.SourceSkillRevisionID == "" {
+		return nil
+	}
+	var snapshot workflowSourceSkillSnapshot
+	var err error
+	if strings.HasPrefix(draft.SourceSkillRevisionID, "builtin:") {
+		snapshot, err = loadWorkflowBuiltinSkillPackage(draft.SourceSkillID)
+	} else {
+		snapshot, err = loadWorkflowSourceSkillRevision(ctx, db, draft.CreatedBy, draft.SourceSkillID, draft.SourceSkillRevisionID)
+	}
+	if err != nil || snapshot.TreeHash != draft.SourceSkillTreeHash {
+		return nil
+	}
+	return detectSkillCapabilityRequirementsFromSnapshot(snapshot)
 }
 
 func scriptsApprovedForPublish(db *gorm.DB, draft orm.WorkflowDraft) bool {
@@ -258,16 +326,13 @@ func scriptsApprovedForPublish(db *gorm.DB, draft orm.WorkflowDraft) bool {
 	if db.Where("id=? AND draft_id=?", draft.SourceAnalysisID, draft.ID).First(&analysis).Error != nil {
 		return false
 	}
-	var report map[string]struct {
-		Classification string `json:"classification"`
-		SHA256         string `json:"sha256"`
-	}
+	var report map[string]workflowScriptAuditEntry
 	var scripts map[string]string
 	if json.Unmarshal([]byte(analysis.ScriptReportJSON), &report) != nil || json.Unmarshal([]byte(draft.ScriptsContent), &scripts) != nil {
 		return false
 	}
 	for path, source := range scripts {
-		item, ok := report[path]
+		item, ok := workflowScriptAuditEntryForPath(report, path)
 		if !ok || (item.Classification != "importable_tool" && item.Classification != "wrappable_command") {
 			return false
 		}
@@ -279,6 +344,18 @@ func scriptsApprovedForPublish(db *gorm.DB, draft orm.WorkflowDraft) bool {
 	return len(scripts) > 0
 }
 
+func workflowScriptAuditEntryForPath(report map[string]workflowScriptAuditEntry, path string) (workflowScriptAuditEntry, bool) {
+	if item, ok := report[path]; ok {
+		return item, true
+	}
+	normalized := normalizedWorkflowScriptPath(path)
+	if normalized == "" {
+		return workflowScriptAuditEntry{}, false
+	}
+	item, ok := report[normalized]
+	return item, ok
+}
+
 func frameworkToolsAvailableForPublish(db *gorm.DB, draft orm.WorkflowDraft) bool {
 	if draft.SourceAnalysisID == "" {
 		return true
@@ -287,11 +364,15 @@ func frameworkToolsAvailableForPublish(db *gorm.DB, draft orm.WorkflowDraft) boo
 	if db.Where("id=? AND draft_id=?", draft.SourceAnalysisID, draft.ID).First(&analysis).Error != nil {
 		return false
 	}
-	var mappings map[string]map[string]any
+	var mappings map[string]any
 	if json.Unmarshal([]byte(analysis.ToolMappingReportJSON), &mappings) != nil {
 		return false
 	}
-	for _, mapping := range mappings {
+	for _, raw := range mappings {
+		mapping, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
 		if mapping["action"] == "replace" {
 			available, ok := mapping["available"].(bool)
 			if !ok || !available {
