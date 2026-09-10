@@ -960,8 +960,29 @@ export default function WorkflowDetailPage() {
       {draft.generate_status === 'rejected' && (
         <Alert className="workflow-detail-banner" type="error" showIcon message={t('selfEvolutionRun.workflowWorkflowRejected')} description={localizeErrorCode('2000509')} />
       )}
+      {isStillGenerating && !isRepairing && generationProgressHidden && !repairModalOpen && (
+        <div className="workflow-generation-background-banner">
+          <div className="workflow-generation-background-main">
+            <SyncOutlined spin className="workflow-generation-background-icon" />
+            <span className="workflow-generation-background-title">
+              {t('selfEvolutionRun.workflowDetailGenerationBackgroundBannerTitle')}
+            </span>
+            <span className="workflow-generation-background-meta">
+              {generateProgressText}
+            </span>
+          </div>
+          <Space size={8}>
+            <Button type="primary" size="small" onClick={() => setGenerationProgressHidden(false)}>
+              {t('selfEvolutionRun.workflowDetailGenerationView')}
+            </Button>
+            <Button danger size="small" loading={cancelingGeneration} onClick={() => setGenerationCloseModalOpen(true)}>
+              {t('selfEvolutionRun.workflowDetailGenerationStopShort')}
+            </Button>
+          </Space>
+        </div>
+      )}
       {/* Generation progress banner — shown while Phase 3 is still running (editor already ready) */}
-      {isPhase3Running && !repairModalOpen && (
+      {isPhase3Running && !generationProgressHidden && !repairModalOpen && (
         <Alert
           className="workflow-detail-banner"
           type="info"
