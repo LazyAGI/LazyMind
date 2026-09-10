@@ -1570,6 +1570,29 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
     getTableData(newPagination.current, newPagination.pageSize);
   }
 
+  const backgroundTasksButton = (
+    <Button
+      className="knowledge-background-tasks-button"
+      icon={<HistoryOutlined />}
+      aria-label={t("knowledge.backgroundTasksCount", {
+        count: activeMarketTaskCount,
+      })}
+      aria-haspopup="dialog"
+      aria-expanded={marketTaskModalOpen}
+      onClick={() => setMarketTaskModalOpen(true)}
+    >
+      {t("knowledge.backgroundTasks")}
+      {activeMarketTaskCount > 0 ? (
+        <Badge
+          className="knowledge-task-count"
+          count={activeMarketTaskCount}
+          overflowCount={Infinity}
+          size="small"
+        />
+      ) : null}
+    </Button>
+  );
+
   return (
     <div className="knowledge-list-page">
       {taskNotificationHolder}
@@ -1603,25 +1626,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
               </span>
             </Tooltip>
           ) : null}
-          <Button
-            icon={<HistoryOutlined />}
-            aria-label={t("knowledge.backgroundTasksCount", {
-              count: activeMarketTaskCount,
-            })}
-            aria-haspopup="dialog"
-            aria-expanded={marketTaskModalOpen}
-            onClick={() => setMarketTaskModalOpen(true)}
-          >
-            {t("knowledge.backgroundTasks")}
-            {activeMarketTaskCount > 0 ? (
-              <Badge
-                className="knowledge-task-count"
-                count={activeMarketTaskCount}
-                overflowCount={Infinity}
-                size="small"
-              />
-            ) : null}
-          </Button>
+          {activeView === "square" ? backgroundTasksButton : null}
         </div>
       </div>
 
@@ -1723,27 +1728,30 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
         />
       ) : (
         <div className="knowledge-mine-view">
-          <div className="knowledge-source-tabs" role="tablist" aria-label={t("knowledge.sourceCategory")}>
-            {([
-              ["local", t("knowledge.localUpload")],
-              ["cloudArchive", t("knowledge.cloudArchiveCreated")],
-              ["official", t("knowledge.installedOfficialKnowledge")],
-            ] as Array<[SourceCategory, string]>).map(([value, label]) => (
-              <button
-                key={value}
-                type="button"
-                role="tab"
-                className={sourceCategory === value ? "is-active" : ""}
-                aria-selected={sourceCategory === value}
-                onClick={() => {
-                  setMineFilterOpen(false);
-                  if (value !== sourceCategory && value !== "official") initData();
-                  setSourceCategory(value);
-                }}
-              >
-                {label}
-              </button>
-            ))}
+          <div className="knowledge-source-tabs-row">
+            <div className="knowledge-source-tabs" role="tablist" aria-label={t("knowledge.sourceCategory")}>
+              {([
+                ["local", t("knowledge.localUpload")],
+                ["cloudArchive", t("knowledge.cloudArchiveCreated")],
+                ["official", t("knowledge.installedOfficialKnowledge")],
+              ] as Array<[SourceCategory, string]>).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  role="tab"
+                  className={sourceCategory === value ? "is-active" : ""}
+                  aria-selected={sourceCategory === value}
+                  onClick={() => {
+                    setMineFilterOpen(false);
+                    if (value !== sourceCategory && value !== "official") initData();
+                    setSourceCategory(value);
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {backgroundTasksButton}
           </div>
 
           <div
