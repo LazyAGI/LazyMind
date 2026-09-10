@@ -24,7 +24,9 @@ const (
 	// app ctx mid-job, the interrupted job can still be returned to a retryable
 	// state and have its lease cleared — otherwise the row stays in `running`
 	// with an unexpired lock_until until the next startup's RecoverStaleJobs.
-	defaultFinalizeTimeout = 30 * time.Second
+	defaultFinalizeTimeout  = 30 * time.Second
+	defaultFinalizeAttempts = 3
+	defaultFinalizeBackoff  = 200 * time.Millisecond
 )
 
 type Runner struct {
@@ -223,15 +225,11 @@ func (r *Runner) claimOne(ctx context.Context, now time.Time) (*orm.AsyncJob, er
 
 func (r *Runner) runJob(ctx context.Context, row orm.AsyncJob) error {
 	handler, ok := lookupHandler(row.JobType)
-	// The outcome writes below use a detached, bounded finalize context so an
-	// interrupted job is still recorded and its lease cleared even when the app
-	// ctx is already cancelled at shutdown; the handler itself still runs under
-	// the app ctx so it can react to cancellation.
-	finCtx, finCancel := context.WithTimeout(context.Background(), defaultFinalizeTimeout)
-	defer finCancel()
 
 	if !ok {
-		return r.markHandlerNotFound(finCtx, row.ID)
+		return r.finalizeJob(func(finCtx context.Context) error {
+			return r.markHandlerNotFound(finCtx, row.ID)
+		})
 	}
 
 	reporter := &jobReporter{
@@ -242,9 +240,34 @@ func (r *Runner) runJob(ctx context.Context, row orm.AsyncJob) error {
 	}
 	result, err := handler(ctx, toJob(row), reporter)
 	if err == nil {
-		return r.markSucceeded(finCtx, row.ID, result)
+		return r.finalizeJob(func(finCtx context.Context) error {
+			return r.markSucceeded(finCtx, row.ID, result)
+		})
 	}
-	return r.markFailedAttempt(finCtx, row, result, err)
+	return r.finalizeJob(func(finCtx context.Context) error {
+		return r.markFailedAttempt(finCtx, row, result, err)
+	})
+}
+
+func (r *Runner) finalizeJob(finalize func(context.Context) error) error {
+	var lastErr error
+	for attempt := 0; attempt < defaultFinalizeAttempts; attempt++ {
+		// The outcome writes use a detached, bounded finalize context so an
+		// interrupted job is still recorded and its lease cleared even when the
+		// app ctx is already cancelled at shutdown; the handler itself still runs
+		// under the app ctx so it can react to cancellation.
+		finCtx, finCancel := context.WithTimeout(context.Background(), defaultFinalizeTimeout)
+		err := finalize(finCtx)
+		finCancel()
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		if attempt+1 < defaultFinalizeAttempts {
+			time.Sleep(defaultFinalizeBackoff * time.Duration(attempt+1))
+		}
+	}
+	return lastErr
 }
 
 func toJob(row orm.AsyncJob) Job {

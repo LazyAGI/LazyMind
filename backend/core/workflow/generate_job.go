@@ -29,8 +29,15 @@ type generatedWorkflowSkeleton struct {
 		ID string `yaml:"id"`
 	} `yaml:"slots"`
 	Steps []struct {
-		ID string `yaml:"id"`
+		ID    string `yaml:"id"`
+		Label string `yaml:"label"`
 	} `yaml:"steps"`
+}
+
+type workflowStepTabCandidate struct {
+	ID      string
+	Label   string
+	Outputs []string
 }
 
 func repairDiagnosticsPayload(items []repairDiagnostic) []map[string]any {
@@ -128,6 +135,13 @@ func handleWorkflowDraftGenerateJob(ctx context.Context, job asyncjob.Job, repor
 	if err := ensureGenerateJobActive(ctx, db, job); err != nil {
 		return asyncjob.Result{ErrorCode: generateErrCanceled}, err
 	}
+
+	progressTotal := int64(4)
+	if strings.TrimSpace(draft.GenerateStatus) == generateStatusDone {
+		reportGenerateProgress(reporter, progressTotal, progressTotal)
+		return asyncjob.Result{}, nil
+	}
+
 	startPhase := normalizeGenerateStartPhase(payload.StartPhase)
 	if job.AttemptCount > 1 {
 		startPhase = bestGenerateResumePhase(draft, startPhase)
@@ -141,7 +155,6 @@ func handleWorkflowDraftGenerateJob(ctx context.Context, job asyncjob.Job, repor
 		llmConfig = map[string]any{}
 	}
 
-	progressTotal := int64(4)
 	progress := generateProgressBase(startPhase)
 	if startPhase == generatePhaseDesignBrief && len(payload.SkillPackage) > 0 && payload.SelectedCandidateJSON == "" {
 		progressTotal = 5
@@ -327,8 +340,9 @@ func handleWorkflowDraftGenerateJob(ctx context.Context, job asyncjob.Job, repor
 			stateResp.Warnings = append(stateResp.Warnings, "已根据 Skill 依赖补齐 Workflow 工具/能力声明: "+strings.Join(injected, ", "))
 		}
 	}
-	if withBoundaries, changed := injectExecutionBoundariesIntoStateSteps(stateResp.StateYAML); changed {
-		stateResp.StateYAML = withBoundaries
+	if alignedWorkflowYAML, changed, alignErr := alignWorkflowUITabsWithStateSteps(finalWorkflowYAML, stateResp.StateYAML); alignErr == nil && changed {
+		finalWorkflowYAML = alignedWorkflowYAML
+		stateResp.Warnings = append(stateResp.Warnings, "已补齐 Workflow 步骤页签，使界面步骤与实际执行步骤一致")
 	}
 	if err := validateGeneratedWorkflowSkeleton(finalWorkflowYAML); err != nil {
 		_ = markGenerateFailedForAttempt(db, payload.DraftID, job, fmt.Sprintf("phase2 workflow invalid: %s", err))
@@ -353,6 +367,9 @@ func handleWorkflowDraftGenerateJob(ctx context.Context, job asyncjob.Job, repor
 			}
 			if repairResp.StateYAML != "" {
 				stateResp.StateYAML = repairResp.StateYAML
+			}
+			if alignedWorkflowYAML, changed, alignErr := alignWorkflowUITabsWithStateSteps(finalWorkflowYAML, stateResp.StateYAML); alignErr == nil && changed {
+				finalWorkflowYAML = alignedWorkflowYAML
 			}
 			stateDiagnostics = diagnoseWorkflowWithProfile(finalWorkflowYAML, stateResp.StateYAML, "", "{}", graphengine.ProfileGenerationPhase)
 		}
@@ -429,6 +446,12 @@ func handleWorkflowDraftGenerateJob(ctx context.Context, job asyncjob.Job, repor
 			scriptsJSON = string(b)
 		}
 	}
+	if withBoundaries, changed := injectExecutionBoundariesIntoStateSteps(stateResp.StateYAML); changed {
+		stateResp.StateYAML = withBoundaries
+	}
+	if alignedWorkflowYAML, changed, alignErr := alignWorkflowUITabsWithStateSteps(finalWorkflowYAML, stateResp.StateYAML); alignErr == nil && changed {
+		finalWorkflowYAML = alignedWorkflowYAML
+	}
 	finalDiagnostics := diagnoseWorkflowWithProfile(finalWorkflowYAML, stateResp.StateYAML, scenarioResp.ScenarioMD, scriptsJSON, graphengine.ProfilePublish)
 	if hasDiagnosticErrors(finalDiagnostics) {
 		var issues []string
@@ -463,6 +486,12 @@ func handleWorkflowDraftGenerateJob(ctx context.Context, job asyncjob.Job, repor
 			}
 			if repairResp.WorkflowYAML != "" {
 				finalWorkflowYAML = repairResp.WorkflowYAML
+			}
+			if withBoundaries, changed := injectExecutionBoundariesIntoStateSteps(stateResp.StateYAML); changed {
+				stateResp.StateYAML = withBoundaries
+			}
+			if alignedWorkflowYAML, changed, alignErr := alignWorkflowUITabsWithStateSteps(finalWorkflowYAML, stateResp.StateYAML); alignErr == nil && changed {
+				finalWorkflowYAML = alignedWorkflowYAML
 			}
 			finalDiagnostics = diagnoseWorkflowWithProfile(finalWorkflowYAML, stateResp.StateYAML, scenarioResp.ScenarioMD, scriptsJSON, graphengine.ProfilePublish)
 		}
@@ -650,6 +679,327 @@ func validateGeneratedWorkflowSkeleton(workflowYAML string) error {
 		}
 	}
 	return nil
+}
+
+func alignWorkflowUITabsWithStateSteps(workflowYAML, stateYAML string) (string, bool, error) {
+	if strings.TrimSpace(workflowYAML) == "" || strings.TrimSpace(stateYAML) == "" {
+		return workflowYAML, false, nil
+	}
+	var workflowDoc map[string]any
+	if err := yaml.Unmarshal([]byte(workflowYAML), &workflowDoc); err != nil {
+		return workflowYAML, false, err
+	}
+	steps := workflowStepTabCandidates(workflowDoc, stateYAML)
+	if len(steps) <= 1 {
+		return workflowYAML, false, nil
+	}
+	slotDefs := workflowSlotDefsByID(workflowDoc["slots"])
+	fallbackSlots := workflowFallbackUISlots(steps, slotDefs)
+	if len(fallbackSlots) == 0 {
+		return workflowYAML, false, nil
+	}
+	ui := mapValue(workflowDoc["ui"])
+	if ui == nil {
+		ui = map[string]any{}
+	}
+	existingTabs := listValue(ui["tabs"])
+	nextTabs := make([]any, 0, len(steps))
+	usedExisting := map[int]bool{}
+	for _, step := range steps {
+		tab, index := findExistingTabForStep(existingTabs, step, usedExisting)
+		if tab == nil {
+			tab = map[string]any{}
+		} else {
+			usedExisting[index] = true
+		}
+		tab["id"] = step.ID
+		tab["step_id"] = step.ID
+		if strings.TrimSpace(scalarAny(tab["label"])) == "" {
+			tab["label"] = step.Label
+		}
+		if strings.TrimSpace(scalarAny(tab["layout"])) == "" {
+			tab["layout"] = "vertical"
+		}
+		slotIDs := step.Outputs
+		if len(slotIDs) == 0 {
+			slotIDs = materialIDsFromList(tab["slots"])
+		}
+		if len(slotIDs) == 0 {
+			slotIDs = fallbackSlots
+		}
+		tab["slots"] = workflowTabSlotDefs(slotIDs, slotDefs)
+		nextTabs = append(nextTabs, tab)
+	}
+	oldTabsYAML, _ := yaml.Marshal(existingTabs)
+	nextTabsYAML, _ := yaml.Marshal(nextTabs)
+	if string(oldTabsYAML) == string(nextTabsYAML) {
+		return workflowYAML, false, nil
+	}
+	ui["tabs"] = nextTabs
+	workflowDoc["ui"] = ui
+	out, err := yaml.Marshal(workflowDoc)
+	if err != nil {
+		return workflowYAML, false, err
+	}
+	return string(out), true, nil
+}
+
+func workflowStepTabCandidates(workflowDoc map[string]any, stateYAML string) []workflowStepTabCandidate {
+	stateOutputs := stateStepOutputsByID(stateYAML)
+	stepsRaw := listValue(workflowDoc["steps"])
+	steps := make([]workflowStepTabCandidate, 0, len(stepsRaw))
+	for _, raw := range stepsRaw {
+		stepMap := mapValue(raw)
+		if stepMap == nil {
+			continue
+		}
+		id := strings.TrimSpace(scalarAny(stepMap["id"]))
+		if id == "" {
+			continue
+		}
+		label := strings.TrimSpace(scalarAny(stepMap["label"]))
+		if label == "" {
+			label = humanizeWorkflowID(id)
+		}
+		steps = append(steps, workflowStepTabCandidate{
+			ID:      id,
+			Label:   label,
+			Outputs: stateOutputs[id],
+		})
+	}
+	return steps
+}
+
+func stateStepOutputsByID(stateYAML string) map[string][]string {
+	var stateDoc map[string]any
+	if err := yaml.Unmarshal([]byte(stateYAML), &stateDoc); err != nil {
+		return nil
+	}
+	out := map[string][]string{}
+	switch rawSteps := stateDoc["steps"].(type) {
+	case map[string]any:
+		for stepID, raw := range rawSteps {
+			out[stepID] = materialIDsFromList(mapValue(raw)["outputs"])
+		}
+	case []any:
+		for _, raw := range rawSteps {
+			stepMap := mapValue(raw)
+			stepID := strings.TrimSpace(scalarAny(stepMap["id"]))
+			if stepID != "" {
+				out[stepID] = materialIDsFromList(stepMap["outputs"])
+			}
+		}
+	}
+	return out
+}
+
+func workflowSlotDefsByID(raw any) map[string]map[string]any {
+	out := map[string]map[string]any{}
+	for _, item := range listValue(raw) {
+		slotMap := mapValue(item)
+		if slotMap == nil {
+			continue
+		}
+		id := strings.TrimSpace(scalarAny(slotMap["id"]))
+		if id == "" {
+			continue
+		}
+		copyMap := map[string]any{}
+		for key, value := range slotMap {
+			copyMap[key] = value
+		}
+		if strings.TrimSpace(scalarAny(copyMap["label"])) == "" {
+			copyMap["label"] = humanizeWorkflowID(id)
+		}
+		if strings.TrimSpace(scalarAny(copyMap["type"])) == "" {
+			copyMap["type"] = "text"
+		}
+		out[id] = copyMap
+	}
+	return out
+}
+
+func workflowFallbackUISlots(steps []workflowStepTabCandidate, slotDefs map[string]map[string]any) []string {
+	for i := len(steps) - 1; i >= 0; i-- {
+		if len(steps[i].Outputs) > 0 {
+			return steps[i].Outputs
+		}
+	}
+	keys := make([]string, 0, len(slotDefs))
+	for key := range slotDefs {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func workflowTabSlotDefs(slotIDs []string, slotDefs map[string]map[string]any) []any {
+	seen := map[string]bool{}
+	out := make([]any, 0, len(slotIDs))
+	for _, id := range slotIDs {
+		id = strings.TrimSpace(id)
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		slot := map[string]any{"id": id, "label": humanizeWorkflowID(id), "type": "text"}
+		if def := slotDefs[id]; def != nil {
+			slot = map[string]any{}
+			for key, value := range def {
+				slot[key] = value
+			}
+			slot["id"] = id
+			if strings.TrimSpace(scalarAny(slot["label"])) == "" {
+				slot["label"] = humanizeWorkflowID(id)
+			}
+			if strings.TrimSpace(scalarAny(slot["type"])) == "" {
+				slot["type"] = "text"
+			}
+		}
+		out = append(out, slot)
+	}
+	return out
+}
+
+func findExistingTabForStep(tabs []any, step workflowStepTabCandidate, used map[int]bool) (map[string]any, int) {
+	for i, raw := range tabs {
+		if used[i] {
+			continue
+		}
+		tab := mapValue(raw)
+		if tab == nil {
+			continue
+		}
+		if scalarAny(tab["step_id"]) == step.ID || scalarAny(tab["id"]) == step.ID {
+			return tab, i
+		}
+	}
+	if len(step.Outputs) == 0 {
+		return nil, -1
+	}
+	want := strings.Join(uniqueStrings(step.Outputs), "\x00")
+	for i, raw := range tabs {
+		if used[i] {
+			continue
+		}
+		tab := mapValue(raw)
+		if tab == nil {
+			continue
+		}
+		if strings.Join(uniqueStrings(materialIDsFromList(tab["slots"])), "\x00") == want {
+			return tab, i
+		}
+	}
+	return nil, -1
+}
+
+func materialIDsFromList(raw any) []string {
+	items := listValue(raw)
+	if len(items) == 0 {
+		if text := strings.TrimSpace(scalarAny(raw)); text != "" {
+			return []string{text}
+		}
+		return nil
+	}
+	var out []string
+	for _, item := range items {
+		switch v := item.(type) {
+		case string:
+			if text := strings.TrimSpace(v); text != "" {
+				out = append(out, text)
+			}
+		default:
+			itemMap := mapValue(v)
+			id := strings.TrimSpace(scalarAny(firstNonNilAny(itemMap["material"], itemMap["slot"], itemMap["id"])))
+			if id != "" {
+				out = append(out, id)
+			}
+		}
+	}
+	return uniqueStrings(out)
+}
+
+func mapValue(raw any) map[string]any {
+	if raw == nil {
+		return nil
+	}
+	if out, ok := raw.(map[string]any); ok {
+		return out
+	}
+	data, err := yaml.Marshal(raw)
+	if err != nil {
+		return nil
+	}
+	var out map[string]any
+	if yaml.Unmarshal(data, &out) != nil {
+		return nil
+	}
+	return out
+}
+
+func listValue(raw any) []any {
+	if raw == nil {
+		return nil
+	}
+	if out, ok := raw.([]any); ok {
+		return out
+	}
+	data, err := yaml.Marshal(raw)
+	if err != nil {
+		return nil
+	}
+	var out []any
+	if yaml.Unmarshal(data, &out) != nil {
+		return nil
+	}
+	return out
+}
+
+func scalarAny(v any) string {
+	if v == nil {
+		return ""
+	}
+	return strings.TrimSpace(fmt.Sprint(v))
+}
+
+func firstNonNilAny(values ...any) any {
+	for _, value := range values {
+		if value != nil {
+			return value
+		}
+	}
+	return nil
+}
+
+func uniqueStrings(values []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	return out
+}
+
+func humanizeWorkflowID(id string) string {
+	parts := strings.FieldsFunc(id, func(r rune) bool {
+		return r == '_' || r == '-' || r == '.'
+	})
+	for i, part := range parts {
+		if part == "" {
+			continue
+		}
+		parts[i] = strings.ToUpper(part[:1]) + part[1:]
+	}
+	label := strings.Join(parts, " ")
+	if label == "" {
+		return id
+	}
+	return label
 }
 
 func validateGeneratedScenarioContent(scenarioMD, stateYAML string) error {

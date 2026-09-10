@@ -270,6 +270,25 @@ func TestRunnerFinalizeDoesNotOverrideCanceledJob(t *testing.T) {
 	}
 }
 
+func TestRunnerFinalizeRetriesTransientFailure(t *testing.T) {
+	runner := newTestRunner(newTestDB(t))
+	attempts := 0
+
+	err := runner.finalizeJob(func(ctx context.Context) error {
+		attempts++
+		if attempts < 3 {
+			return context.DeadlineExceeded
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("expected finalize retry to succeed, got %v", err)
+	}
+	if attempts != 3 {
+		t.Fatalf("expected 3 finalize attempts, got %d", attempts)
+	}
+}
+
 func TestRunnerMarksUnregisteredHandlerFailed(t *testing.T) {
 	db := newTestDB(t)
 	resetRegistryForTest()

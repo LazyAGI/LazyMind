@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"gopkg.in/yaml.v3"
+
 	"lazymind/core/asyncjob"
 	"lazymind/core/common/orm"
 	"lazymind/core/workflow/graphengine"
@@ -131,6 +133,102 @@ steps:
 	}
 	if err := validateGenerateResumePoint(draft, generatePhaseScenarioScripts); err != nil {
 		t.Fatalf("scenario_scripts resume should not be blocked by UI-only errors: %v", err)
+	}
+}
+
+func TestAlignWorkflowUITabsWithStateStepsExpandsSingleResultTab(t *testing.T) {
+	workflowYAML := `
+id: find-skill-skillhub
+name: Find Skill on SkillHub
+slots:
+  - id: query_text
+    type: text
+    external: true
+    label: 需求描述
+  - id: search_plan
+    type: json
+    label: 搜索计划
+  - id: raw_search_results
+    type: json
+    label: 原始搜索结果
+  - id: ranked_skills
+    type: json
+    label: 排序结果
+  - id: recommendation_report
+    type: text
+    exposed: true
+    label: 推荐报告
+steps:
+  - id: parse_query
+  - id: search_skills
+  - id: rank_results
+  - id: generate_report
+ui:
+  tabs:
+    - id: results
+      label: Results
+      layout: vertical
+      slots:
+        - id: recommendation_report
+`
+	stateYAML := `
+steps:
+  parse_query:
+    inputs: [query_text]
+    outputs: [search_plan]
+  search_skills:
+    inputs: [search_plan]
+    outputs: [raw_search_results]
+  rank_results:
+    inputs: [raw_search_results]
+    outputs: [ranked_skills]
+  generate_report:
+    inputs: [ranked_skills]
+    outputs: [recommendation_report]
+transitions:
+  __start__: [{to: parse_query}]
+  parse_query: [{to: search_skills}]
+  search_skills: [{to: rank_results}]
+  rank_results: [{to: generate_report}]
+  generate_report: [{to: __end__}]
+`
+	aligned, changed, err := alignWorkflowUITabsWithStateSteps(workflowYAML, stateYAML)
+	if err != nil {
+		t.Fatalf("alignWorkflowUITabsWithStateSteps returned error: %v", err)
+	}
+	if !changed {
+		t.Fatal("expected tabs to be expanded")
+	}
+	var doc struct {
+		UI struct {
+			Tabs []struct {
+				ID     string `yaml:"id"`
+				StepID string `yaml:"step_id"`
+				Label  string `yaml:"label"`
+				Slots  []struct {
+					ID string `yaml:"id"`
+				} `yaml:"slots"`
+			} `yaml:"tabs"`
+		} `yaml:"ui"`
+	}
+	if err := yaml.Unmarshal([]byte(aligned), &doc); err != nil {
+		t.Fatalf("aligned workflow yaml invalid: %v", err)
+	}
+	if got := len(doc.UI.Tabs); got != 4 {
+		t.Fatalf("tabs len = %d, want 4\n%s", got, aligned)
+	}
+	wantStepIDs := []string{"parse_query", "search_skills", "rank_results", "generate_report"}
+	wantSlots := []string{"search_plan", "raw_search_results", "ranked_skills", "recommendation_report"}
+	for i, tab := range doc.UI.Tabs {
+		if tab.ID != wantStepIDs[i] || tab.StepID != wantStepIDs[i] {
+			t.Fatalf("tab[%d] = id:%q step_id:%q, want %q", i, tab.ID, tab.StepID, wantStepIDs[i])
+		}
+		if len(tab.Slots) != 1 || tab.Slots[0].ID != wantSlots[i] {
+			t.Fatalf("tab[%d] slots = %#v, want %q", i, tab.Slots, wantSlots[i])
+		}
+	}
+	if doc.UI.Tabs[3].Label != "Results" {
+		t.Fatalf("last tab label = %q, want existing Results label", doc.UI.Tabs[3].Label)
 	}
 }
 

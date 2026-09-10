@@ -1109,11 +1109,29 @@
 
   &__text {
     margin: 0;
+    max-height: 520px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-right: 6px;
+    scrollbar-gutter: stable;
     font-size: 13px;
     line-height: 1.6;
     color: #374151;
     white-space: pre-wrap;
     word-break: break-word;
+
+    &::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    &::-webkit-scrollbar-thumb {
+      background: #dbe2ea;
+      border-radius: 999px;
+    }
+
+    &::-webkit-scrollbar-track {
+      background: transparent;
+    }
 
     &--editable {
       cursor: text;
