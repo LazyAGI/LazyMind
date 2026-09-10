@@ -1,6 +1,9 @@
 package workflow
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestWorkflowStepObjectiveUsesPromptAndFirstTurnInput(t *testing.T) {
 	got := workflowStepObjective("Summarize {{user_input}} and save it.", "", "hello")
@@ -14,6 +17,28 @@ func TestWorkflowStepObjectiveKeepsRuntimeRefinement(t *testing.T) {
 	want := "Create the artifact.\n\nRuntime objective:\nUse the concise format."
 	if got != want {
 		t.Fatalf("unexpected objective: %q", got)
+	}
+}
+
+func TestWorkflowStepObjectiveWithRuntimeBoundariesForOpenToolStep(t *testing.T) {
+	got := workflowStepObjectiveWithRuntimeBoundaries(
+		"Search the API and save results.",
+		"Find five useful candidates.",
+		"",
+		[]string{"http_request"},
+		[]string{"url_fetch"},
+		nil,
+	)
+	if !containsAll(got, workflowExecutionBoundaryMarker, "HTTP/API budget", "Stop as soon as") {
+		t.Fatalf("runtime boundaries missing: %q", got)
+	}
+}
+
+func TestWorkflowStepObjectiveWithRuntimeBoundariesDoesNotDuplicate(t *testing.T) {
+	prompt := "Search the API.\n\n" + workflowExecutionBoundaryPrompt([]workflowExecutionBoundaryKind{workflowBoundaryHTTP})
+	got := workflowStepObjectiveWithRuntimeBoundaries(prompt, "", "", []string{"http_request"}, []string{"url_fetch"}, nil)
+	if strings.Count(got, workflowExecutionBoundaryMarker) != 1 {
+		t.Fatalf("runtime boundaries duplicated: %q", got)
 	}
 }
 
@@ -49,4 +74,13 @@ func TestApplyRecoveryIntentDoesNotDuplicateLaunchRequest(t *testing.T) {
 	if target.UserInput != "原始请求" || target.RuntimeInstruction != "" {
 		t.Fatalf("unexpected target: %#v", target)
 	}
+}
+
+func containsAll(text string, needles ...string) bool {
+	for _, needle := range needles {
+		if !strings.Contains(text, needle) {
+			return false
+		}
+	}
+	return true
 }

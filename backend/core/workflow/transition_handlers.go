@@ -332,7 +332,7 @@ func StartWorkflowSession(w http.ResponseWriter, r *http.Request) {
 	var response transitionCommandResponse
 	launchErr := common.TransactionWithSQLiteBusyRetry(r.Context(), store.DB(), func(tx *gorm.DB) error {
 		var err error
-		stepObjective := workflowStepObjective(nodeDef.Prompt, req.Objective, req.UserInput)
+		stepObjective := workflowStepObjectiveWithRuntimeBoundaries(nodeDef.Prompt, req.Objective, req.UserInput, nodeDef.Capabilities, nodeDef.LegacyTools, nodeDef.TerminalTools)
 		toolConfig, toolErr := workflowNodeToolConfig(r.Context(), tx, req.UserID, req.ToolConfig, nodeDef.Capabilities, nodeDef.LegacyTools)
 		if toolErr != nil {
 			return toolErr
@@ -700,7 +700,7 @@ func TransitionWorkflowSession(w http.ResponseWriter, r *http.Request) {
 				}
 				params := WorkflowStepParams{WorkflowID: session.WorkflowID, WorkflowRef: session.WorkflowRef, RevisionID: session.WorkflowRevisionID, RevisionNo: session.WorkflowRevisionNo, TreeHash: session.WorkflowTreeHash, RemoteRoot: session.WorkflowRemoteRoot, StepID: target.TargetStepID, SessionID: session.ID, UserInput: target.UserInput, HandOff: &handOff, ChatSessionID: req.ChatSessionID, TraceID: req.TraceID, ParentSpanID: req.ParentSpanID, WorkflowMode: req.WorkflowMode, RetryHint: target.RuntimeInstruction, PartialIndices: target.PartialIndices, HistoryFilesPerTurn: req.HistoryFilesPerTurn, Filters: req.Filters, ParentAgenticConfig: req.ParentAgenticConfig, UserID: session.CreateUserID, RequiredOutputs: nodeDef.RequiredOutputs, Capabilities: nodeDef.Capabilities, LegacyTools: nodeDef.LegacyTools, TerminalTools: nodeDef.TerminalTools, ToolsOnly: nodeDef.ToolsOnly, StreamHeartbeat: nodeDef.StreamHeartbeat, Runtime: graph.Runtime}
 				var launchErr error
-				stepObjective := workflowStepObjective(nodeDef.Prompt, target.Objective, target.UserInput)
+				stepObjective := workflowStepObjectiveWithRuntimeBoundaries(nodeDef.Prompt, target.Objective, target.UserInput, nodeDef.Capabilities, nodeDef.LegacyTools, nodeDef.TerminalTools)
 				toolConfig, toolErr := workflowNodeToolConfig(r.Context(), tx, session.CreateUserID, req.ToolConfig, nodeDef.Capabilities, nodeDef.LegacyTools)
 				if toolErr != nil {
 					return toolErr
@@ -788,7 +788,7 @@ func applyRecoveryIntent(intentContext string, target *transitionTarget) {
 
 func queueHostAttempt(ctx context.Context, tx *gorm.DB, session orm.WorkflowSession, target transitionTarget,
 	node graphengine.CompiledNode, now time.Time) error {
-	objective := workflowStepObjective(node.Prompt, target.Objective, target.UserInput)
+	objective := workflowStepObjectiveWithRuntimeBoundaries(node.Prompt, target.Objective, target.UserInput, node.Capabilities, node.LegacyTools, node.TerminalTools)
 	refOrID := session.WorkflowRef
 	if refOrID == "" {
 		refOrID = session.WorkflowID
@@ -853,6 +853,15 @@ func workflowStepObjective(prompt, objective, userInput string) string {
 		return prompt
 	}
 	return prompt + "\n\nRuntime objective:\n" + objective
+}
+
+func workflowStepObjectiveWithRuntimeBoundaries(prompt, objective, userInput string, capabilities, legacyTools, terminalTools []string) string {
+	base := workflowStepObjective(prompt, objective, userInput)
+	kinds := workflowExecutionBoundaryKinds("", prompt+"\n"+objective, capabilities, legacyTools, terminalTools)
+	if len(kinds) == 0 || strings.Contains(base, workflowExecutionBoundaryMarker) {
+		return base
+	}
+	return appendWorkflowExecutionBoundaryPrompt(base, kinds)
 }
 
 func attemptInputBindingFromWitness(tx *gorm.DB, sessionID, attemptID string,

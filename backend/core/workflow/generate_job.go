@@ -327,6 +327,9 @@ func handleWorkflowDraftGenerateJob(ctx context.Context, job asyncjob.Job, repor
 			stateResp.Warnings = append(stateResp.Warnings, "已根据 Skill 依赖补齐 Workflow 工具/能力声明: "+strings.Join(injected, ", "))
 		}
 	}
+	if withBoundaries, changed := injectExecutionBoundariesIntoStateSteps(stateResp.StateYAML); changed {
+		stateResp.StateYAML = withBoundaries
+	}
 	if err := validateGeneratedWorkflowSkeleton(finalWorkflowYAML); err != nil {
 		_ = markGenerateFailedForAttempt(db, payload.DraftID, job, fmt.Sprintf("phase2 workflow invalid: %s", err))
 		return asyncjob.Result{ErrorCode: "generation_skeleton_invalid"}, fmt.Errorf("phase2 workflow invalid: %w", err)

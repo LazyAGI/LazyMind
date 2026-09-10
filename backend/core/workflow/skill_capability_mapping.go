@@ -435,13 +435,16 @@ func injectSkillCapabilitiesIntoWorkflow(workflowYAML, stateYAML string, mapping
 	}
 	capabilities = uniqueSortedStrings(capabilities)
 	tools = uniqueSortedStrings(tools)
-	if len(capabilities) == 0 && len(tools) == 0 {
-		return workflowYAML, stateYAML, nil
-	}
 	nextWorkflow, workflowChanged := workflowYAML, false
 	if withCredentialFields, changed := injectCredentialClarificationFields(nextWorkflow, requirements); changed {
 		nextWorkflow = withCredentialFields
 		workflowChanged = true
+	}
+	if len(capabilities) == 0 && len(tools) == 0 {
+		if !workflowChanged {
+			return workflowYAML, stateYAML, nil
+		}
+		return nextWorkflow, stateYAML, capabilities
 	}
 	stepTools := stepWorkflowToolsFromMappings(mappings, requirements)
 	nextState, stateChanged := injectCapabilitiesIntoStateSteps(stateYAML, capabilities)
@@ -653,6 +656,258 @@ func injectToolsIntoStateSteps(content string, fallbackTools []string, stepTools
 		return content, false
 	}
 	return string(out), true
+}
+
+const workflowExecutionBoundaryMarker = "Workflow execution boundaries:"
+
+type workflowExecutionBoundaryKind string
+
+const (
+	workflowBoundarySearch    workflowExecutionBoundaryKind = "search"
+	workflowBoundaryHTTP      workflowExecutionBoundaryKind = "http"
+	workflowBoundaryFile      workflowExecutionBoundaryKind = "file"
+	workflowBoundaryImage     workflowExecutionBoundaryKind = "image"
+	workflowBoundaryCode      workflowExecutionBoundaryKind = "code"
+	workflowBoundaryKnowledge workflowExecutionBoundaryKind = "knowledge"
+	workflowBoundaryPlatform  workflowExecutionBoundaryKind = "platform"
+)
+
+func injectExecutionBoundariesIntoStateSteps(content string) (string, bool) {
+	var doc map[string]any
+	if yaml.Unmarshal([]byte(content), &doc) != nil || doc == nil {
+		return content, false
+	}
+	rawSteps, ok := doc["steps"]
+	if !ok {
+		return content, false
+	}
+	changed := false
+	switch steps := rawSteps.(type) {
+	case map[string]any:
+		for stepID, raw := range steps {
+			step, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			if appendExecutionBoundariesToStep(stepID, step) {
+				changed = true
+			}
+		}
+	case []any:
+		for _, raw := range steps {
+			step, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			if appendExecutionBoundariesToStep(stringAny(step["id"]), step) {
+				changed = true
+			}
+		}
+	}
+	if !changed {
+		return content, false
+	}
+	out, err := yaml.Marshal(doc)
+	if err != nil {
+		return content, false
+	}
+	return string(out), true
+}
+
+func appendExecutionBoundariesToStep(stepID string, step map[string]any) bool {
+	kinds := workflowExecutionBoundaryKinds(stepID, stringAny(step["prompt"]), stringSliceAny(step["capabilities"]), stringSliceAny(step["tools"]), stringSliceAny(step["terminal_tools"]))
+	if len(kinds) == 0 {
+		return false
+	}
+	prompt := strings.TrimSpace(stringAny(step["prompt"]))
+	if strings.Contains(prompt, workflowExecutionBoundaryMarker) {
+		return false
+	}
+	step["prompt"] = appendWorkflowExecutionBoundaryPrompt(prompt, kinds)
+	return true
+}
+
+func appendWorkflowExecutionBoundaryPrompt(prompt string, kinds []workflowExecutionBoundaryKind) string {
+	block := workflowExecutionBoundaryPrompt(kinds)
+	if strings.TrimSpace(prompt) == "" {
+		return block
+	}
+	return strings.TrimSpace(prompt) + "\n\n" + block
+}
+
+func workflowExecutionBoundaryPrompt(kinds []workflowExecutionBoundaryKind) string {
+	kinds = uniqueWorkflowBoundaryKinds(kinds)
+	lines := []string{
+		workflowExecutionBoundaryMarker,
+		"- Treat explicitly provided user inputs and upstream artifacts as the required scope; do not truncate them because of default exploration limits.",
+		"- Limit only extra exploration such as search, pagination, discovery, parameter probing, generated alternatives, and retries.",
+		"- Stop as soon as the declared output has enough valid results for the requested target count or quality threshold.",
+		"- Do not keep calling tools only to make the result more exhaustive after the target is satisfied.",
+		"- If the budget is exhausted or some items fail, save the best available partial result with skipped items and failure reasons.",
+		"- Before finishing this step, write every declared output artifact, even when the result is partial or empty.",
+	}
+	if containsWorkflowBoundaryKind(kinds, workflowBoundarySearch) {
+		lines = append(lines,
+			"- Search budget: use at most 6 search calls. Try the strongest query first, then at most 2 additional query variants only if the target is not met.",
+		)
+	}
+	if containsWorkflowBoundaryKind(kinds, workflowBoundaryHTTP) {
+		lines = append(lines,
+			"- HTTP/API budget: use at most 12 extra HTTP calls. Fetch at most 2 pages per query or endpoint, and try at most 1 fallback parameter strategy before moving on.",
+		)
+	}
+	if containsWorkflowBoundaryKind(kinds, workflowBoundaryFile) {
+		lines = append(lines,
+			"- File budget: process all explicitly provided files or upstream file artifacts. Do not recursively discover extra files beyond the stated task unless required.",
+		)
+	}
+	if containsWorkflowBoundaryKind(kinds, workflowBoundaryImage) {
+		lines = append(lines,
+			"- Image budget: process all explicitly provided images or upstream image artifacts. Retry a failed image operation at most once, then record the failure and continue.",
+		)
+	}
+	if containsWorkflowBoundaryKind(kinds, workflowBoundaryCode) {
+		lines = append(lines,
+			"- Code/script budget: run commands at most 3 times and attempt at most 2 fixes. If still failing, save diagnostics instead of continuing to patch/run indefinitely.",
+		)
+	}
+	if containsWorkflowBoundaryKind(kinds, workflowBoundaryKnowledge) {
+		lines = append(lines,
+			"- Retrieval budget: use at most 4 retrieval rounds with focused queries. Stop when enough evidence is available for the declared output.",
+		)
+	}
+	if containsWorkflowBoundaryKind(kinds, workflowBoundaryPlatform) {
+		lines = append(lines,
+			"- Platform-tool budget: use at most 10 extra platform queries and at most 3 pages. Stop immediately on permission or credential failures and save an actionable limitation.",
+		)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func workflowExecutionBoundaryKinds(stepID, prompt string, capabilities, tools, terminalTools []string) []workflowExecutionBoundaryKind {
+	stepText := strings.ToLower(strings.Join([]string{stepID, prompt}, "\n"))
+	toolParts := append([]string{}, capabilities...)
+	toolParts = append(toolParts, tools...)
+	toolParts = append(toolParts, terminalTools...)
+	toolText := strings.ToLower(strings.Join(toolParts, "\n"))
+	added := map[workflowExecutionBoundaryKind]bool{}
+	var out []workflowExecutionBoundaryKind
+	add := func(kind workflowExecutionBoundaryKind) {
+		if !added[kind] {
+			added[kind] = true
+			out = append(out, kind)
+		}
+	}
+	addFromText := func(text string) {
+		if containsAnyBoundaryToken(text, "web_search", "academic_search", "search", "搜索", "检索", "查找", "全网", "实时信息", "scholar", "pubmed", "arxiv") {
+			add(workflowBoundarySearch)
+		}
+		if containsAnyBoundaryToken(text, "url_fetch", "http_request", "credentialed_http_request", "http://", "https://", "api", "endpoint", "fetch", "curl", "分页", "page", "抓取", "访问网页", "读取网页", "接口") {
+			add(workflowBoundaryHTTP)
+		}
+		if containsAnyBoundaryToken(text, "cloud_files", "read_file", "write_file", "file", "document", "文件", "文档", "目录", "附件") {
+			add(workflowBoundaryFile)
+		}
+		if containsAnyBoundaryToken(text, "vlm", "multimodal", "image_generator", "image_editor", "text2image", "image_editing", "image", "ocr", "图片", "图像", "识图", "看图", "文生图", "改图") {
+			add(workflowBoundaryImage)
+		}
+		if containsAnyBoundaryToken(text, "run_script", "terminal", "python", "shell", "script_runtime", "script", "command", "test", "build", "脚本", "命令", "运行", "测试", "修复") {
+			add(workflowBoundaryCode)
+		}
+		if containsAnyBoundaryToken(text, "knowledge", "knowledge_search", "kb", "rag", "知识库", "召回", "证据", "检索资料") {
+			add(workflowBoundaryKnowledge)
+		}
+		if containsAnyBoundaryToken(text, "feishu", "notion", "googledrive", "google drive", "tencent", "meeting", "calendar", "platform", "云文档", "网盘", "飞书", "腾讯", "会议") {
+			add(workflowBoundaryPlatform)
+		}
+	}
+	addFromText(stepText)
+	if strings.TrimSpace(toolText) == "" || !workflowStepSuggestsOpenToolUse(stepText) {
+		return out
+	}
+	if containsAnyBoundaryToken(toolText, "web_search", "academic_search", "search", "scholar", "pubmed", "arxiv") {
+		add(workflowBoundarySearch)
+	}
+	if containsAnyBoundaryToken(toolText, "url_fetch", "http_request", "credentialed_http_request", "api", "fetch", "curl") {
+		add(workflowBoundaryHTTP)
+	}
+	if containsAnyBoundaryToken(toolText, "cloud_files", "read_file", "write_file", "file", "document") {
+		add(workflowBoundaryFile)
+	}
+	if containsAnyBoundaryToken(toolText, "vlm", "multimodal", "image_generator", "image_editor", "text2image", "image_editing", "image", "ocr") {
+		add(workflowBoundaryImage)
+	}
+	if containsAnyBoundaryToken(toolText, "run_script", "terminal", "python", "shell", "script_runtime", "script", "command", "test", "build") {
+		add(workflowBoundaryCode)
+	}
+	if containsAnyBoundaryToken(toolText, "knowledge", "knowledge_search", "kb", "rag") {
+		add(workflowBoundaryKnowledge)
+	}
+	if containsAnyBoundaryToken(toolText, "feishu", "notion", "googledrive", "google drive", "tencent", "meeting", "calendar", "platform") {
+		add(workflowBoundaryPlatform)
+	}
+	return out
+}
+
+func workflowStepSuggestsOpenToolUse(text string) bool {
+	return strings.TrimSpace(text) == "" || containsAnyBoundaryToken(text,
+		"search", "find", "lookup", "fetch", "get", "collect", "gather", "crawl", "scrape", "retrieve", "query", "call", "request", "download",
+		"analyze", "inspect", "process", "extract", "read", "write", "generate", "create", "edit", "convert", "run", "execute", "test", "build", "repair",
+		"搜索", "检索", "查找", "获取", "抓取", "访问", "调用", "请求", "下载", "分析", "解析", "处理", "提取", "读取", "写入", "生成", "创建", "编辑", "转换", "运行", "执行", "测试", "修复",
+	)
+}
+
+func containsAnyBoundaryToken(text string, tokens ...string) bool {
+	for _, token := range tokens {
+		if boundaryTokenMatches(text, token) {
+			return true
+		}
+	}
+	return false
+}
+
+func boundaryTokenMatches(text, token string) bool {
+	token = strings.ToLower(strings.TrimSpace(token))
+	if token == "" {
+		return false
+	}
+	if asciiWordToken(token) {
+		pattern := `(^|[^a-z0-9_])` + regexp.QuoteMeta(token) + `([^a-z0-9_]|$)`
+		return regexp.MustCompile(pattern).FindStringIndex(text) != nil
+	}
+	return strings.Contains(text, token)
+}
+
+func asciiWordToken(token string) bool {
+	for _, r := range token {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func uniqueWorkflowBoundaryKinds(kinds []workflowExecutionBoundaryKind) []workflowExecutionBoundaryKind {
+	seen := map[workflowExecutionBoundaryKind]bool{}
+	var out []workflowExecutionBoundaryKind
+	for _, kind := range kinds {
+		if kind == "" || seen[kind] {
+			continue
+		}
+		seen[kind] = true
+		out = append(out, kind)
+	}
+	return out
+}
+
+func containsWorkflowBoundaryKind(kinds []workflowExecutionBoundaryKind, want workflowExecutionBoundaryKind) bool {
+	for _, kind := range kinds {
+		if kind == want {
+			return true
+		}
+	}
+	return false
 }
 
 func mergeStringListAny(existing any, values []string) []any {

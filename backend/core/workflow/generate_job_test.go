@@ -459,6 +459,80 @@ transitions:
 	}
 }
 
+func TestInjectExecutionBoundariesIntoOpenEndedToolSteps(t *testing.T) {
+	stateYAML := `
+steps:
+  fetch:
+    prompt: Search the API for matching skills and save raw results.
+    outputs: [raw]
+    tools: [url_fetch]
+  rank:
+    prompt: Rank the collected candidates.
+    inputs: [{slot: raw, required: true}]
+    outputs: [answer]
+    tools: [url_fetch]
+transitions:
+  __start__: [{to: fetch}]
+  fetch: [{to: rank}]
+  rank: [{to: __end__}]
+`
+	next, changed := injectExecutionBoundariesIntoStateSteps(stateYAML)
+	if !changed {
+		t.Fatal("expected open-ended fetch step to receive execution boundaries")
+	}
+	if !strings.Contains(next, workflowExecutionBoundaryMarker) || !strings.Contains(next, "HTTP/API budget") || !strings.Contains(next, "Stop as soon as") {
+		t.Fatalf("boundary prompt missing expected safeguards:\n%s", next)
+	}
+	if strings.Count(next, workflowExecutionBoundaryMarker) != 1 {
+		t.Fatalf("expected only one boundary block, got:\n%s", next)
+	}
+	nextAgain, changedAgain := injectExecutionBoundariesIntoStateSteps(next)
+	if changedAgain || strings.Count(nextAgain, workflowExecutionBoundaryMarker) != 1 {
+		t.Fatalf("boundary injection must be idempotent:\n%s", nextAgain)
+	}
+	workflowYAML := `
+id: demo
+name: Demo
+slots:
+  - id: raw
+  - id: answer
+steps:
+  - id: fetch
+  - id: rank
+`
+	compiled := graphengine.Compile(workflowYAML, next, "", graphengine.ProfilePublish)
+	if !compiled.Valid {
+		t.Fatalf("compiled invalid after boundary injection: %#v", compiled.Diagnostics)
+	}
+	if strings.Contains(compiled.Graph.Nodes["rank"].Prompt, workflowExecutionBoundaryMarker) {
+		t.Fatalf("plain ranking step should not receive tool exploration boundaries: %q", compiled.Graph.Nodes["rank"].Prompt)
+	}
+}
+
+func TestInjectExecutionBoundariesPreservesExplicitImageScope(t *testing.T) {
+	stateYAML := `
+steps:
+  inspect_images:
+    prompt: Analyze all images from the upstream image list.
+    inputs: [{slot: images, required: true}]
+    outputs: [image_report]
+    capabilities: [vlm]
+transitions:
+  __start__: [{to: inspect_images}]
+  inspect_images: [{to: __end__}]
+`
+	next, changed := injectExecutionBoundariesIntoStateSteps(stateYAML)
+	if !changed {
+		t.Fatal("expected image step to receive boundaries")
+	}
+	if !strings.Contains(next, "process all explicitly provided images") {
+		t.Fatalf("image boundary must preserve explicit upstream input scope:\n%s", next)
+	}
+	if strings.Contains(next, "at most 10") {
+		t.Fatalf("image boundary must not hard-code a low absolute image limit:\n%s", next)
+	}
+}
+
 func TestReconcileDetectedCapabilityMappingsPrunesStaleCapabilityEntries(t *testing.T) {
 	mappings := reconcileDetectedCapabilityMappings(map[string]any{
 		"capability:image_editing": map[string]any{
