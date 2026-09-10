@@ -3096,6 +3096,7 @@ const zhCN = {
 	processingUpgradeConfirm: "将知识库从“{{from}}”升级到“{{to}}”。确认继续吗？",
 	processingDowngradeConfirm: "将知识库从“{{from}}”降级到“{{to}}”。已有解析、切片和向量产物会保留，不会自动释放空间。确认继续吗？",
 	processingLevelUpdateSuccess: "知识库处理级别已更新",
+	processingLevelSaveHint: "修改将在点击保存后生效；降低级别不会删除已有产物。",
     list: "知识库列表",
     askPdfSelection: "向 LazyMind 提问",
     translateSelection: "翻译",

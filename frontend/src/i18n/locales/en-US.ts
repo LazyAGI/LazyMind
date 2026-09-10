@@ -3169,6 +3169,7 @@ const enUS = {
 	processingUpgradeConfirm: "Upgrade the knowledge base from “{{from}}” to “{{to}}”?",
 	processingDowngradeConfirm: "Downgrade the knowledge base from “{{from}}” to “{{to}}”? Existing parsed content, chunks, and vectors will be retained and storage will not be released automatically.",
 	processingLevelUpdateSuccess: "Knowledge base processing level updated",
+	processingLevelSaveHint: "Changes take effect after saving. Downgrading retains existing artifacts.",
     list: "Knowledge Base List",
     askPdfSelection: "Ask LazyMind",
     translateSelection: "Translate",

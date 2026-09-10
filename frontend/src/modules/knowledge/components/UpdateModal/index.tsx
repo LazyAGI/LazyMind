@@ -15,12 +15,18 @@ import {
   KNOWLEDGE_BASE_NAME_PATTERN,
 } from "@/modules/knowledge/constants/validation";
 import TagSelect from "../TagSelect";
+import {
+  effectiveProcessingLevel,
+  PROCESSING_LEVEL_ORDER,
+  type ProcessingLevel,
+} from "@/modules/knowledge/utils/processingLevel";
 
 const { TextArea } = Input;
 const KNOWLEDGE_TAG_MAX_LENGTH = 20;
 
 export interface ForwardProps {
-  onUpdate: (dataset: Dataset) => Promise<void>;
+  onUpdate: (dataset: Dataset & { processing_level?: ProcessingLevel }) => Promise<void>;
+  embeddingReady?: boolean | null;
 }
 
 export interface UpdateImperativeProps {
@@ -28,7 +34,7 @@ export interface UpdateImperativeProps {
 }
 
 const UpdateAppModel = forwardRef<UpdateImperativeProps, ForwardProps>(
-  ({ onUpdate }, ref) => {
+  ({ onUpdate, embeddingReady }, ref) => {
     const { t } = useTranslation();
     const [visible, setVisible] = useState(false);
     const [loading, setLoading] = useState(false);
@@ -88,6 +94,10 @@ const UpdateAppModel = forwardRef<UpdateImperativeProps, ForwardProps>(
       if (sourceData) {
         form.setFieldsValue({
           ...sourceData,
+          processing_level: effectiveProcessingLevel(
+            (sourceData as Dataset & { processing_level?: ProcessingLevel })
+              .processing_level,
+          ),
           algo_id: sourceData?.algo?.algo_id,
           industry: sourceData?.industry,
         });
@@ -195,6 +205,19 @@ const UpdateAppModel = forwardRef<UpdateImperativeProps, ForwardProps>(
               showCount
               maxLength={300}
               autoSize={{ minRows: 2, maxRows: 6 }}
+            />
+          </Form.Item>
+          <Form.Item
+            name="processing_level"
+            label={t("knowledge.processingLevel")}
+            extra={t("knowledge.processingLevelSaveHint")}
+          >
+            <Select
+              options={PROCESSING_LEVEL_ORDER.map((level) => ({
+                value: level,
+                label: t(`knowledge.processing${level[0].toUpperCase()}${level.slice(1)}`),
+                disabled: level === "indexed" && embeddingReady === false,
+              }))}
             />
           </Form.Item>
           {algorithm.length !== 1 && (

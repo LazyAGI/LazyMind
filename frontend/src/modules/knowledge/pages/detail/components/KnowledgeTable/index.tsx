@@ -912,7 +912,15 @@ const KnowledgeTable = forwardRef<IKnowledgeListRef, Props>((props, ref) => {
           detail.processing_level === "stored" &&
           record.type !== DocTypeEnum.Folder
         ) {
-          return <Tag color="success">{t("knowledge.stageStored")}</Tag>;
+          const parsed = [
+            DocDocumentStageEnum.DocumentParseSuccessfully,
+            "SUCCESS",
+          ].includes(document_stage);
+          return (
+            <Tag color="success">
+              {t(parsed ? "knowledge.stageParsed" : "knowledge.stageStored")}
+            </Tag>
+          );
         }
         const text =
           (DocumentStageEnum[document_stage as keyof typeof DocumentStageEnum]

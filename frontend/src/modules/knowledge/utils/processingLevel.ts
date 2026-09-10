@@ -26,3 +26,12 @@ export function isProcessingLevelDowngrade(
 export function processingLevelSupportsSegments(level?: ProcessingLevel) {
   return ["chunked", "indexed"].includes(effectiveProcessingLevel(level));
 }
+
+export function highestSupportedProcessingLevel(
+  documentParsingEnabled: boolean | null,
+  embeddingReady: boolean | null | undefined,
+): ProcessingLevel {
+  if (documentParsingEnabled === false) return "stored";
+  if (embeddingReady === true) return "indexed";
+  return "chunked";
+}

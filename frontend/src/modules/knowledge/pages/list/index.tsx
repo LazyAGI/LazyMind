@@ -60,6 +60,10 @@ import {
 } from "@/api/generated/knowledge-client";
 import KnowledgeTag from "@/modules/knowledge/components/KnowledgeTag";
 import FileUtils from "@/modules/knowledge/utils/file";
+import {
+  effectiveProcessingLevel,
+  type ProcessingLevel,
+} from "@/modules/knowledge/utils/processingLevel";
 
 import { ListPageTable } from "@/components/ui";
 import { useTranslation } from "react-i18next";
@@ -1529,14 +1533,29 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
       });
   }
 
-  function onUpdate(data: Dataset): Promise<void> {
+  async function onUpdate(
+    data: Dataset & { processing_level?: ProcessingLevel },
+  ): Promise<void> {
     setLoading(true);
     try {
       if (data.dataset_id) {
+        const { processing_level: nextLevel, ...dataset } = data;
+        const current = dataSource.find(
+          (item) => item.dataset_id === data.dataset_id,
+        ) as (Dataset & { processing_level?: ProcessingLevel }) | undefined;
+        if (
+          nextLevel &&
+          nextLevel !== effectiveProcessingLevel(current?.processing_level)
+        ) {
+          await axiosInstance.patch(
+            `${BASE_URL}/api/core/datasets/${encodeURIComponent(data.dataset_id)}/processing-level`,
+            { processing_level: nextLevel },
+          );
+        }
         return KnowledgeBaseServiceApi()
           .datasetServiceUpdateDataset({
             dataset: data.dataset_id,
-            dataset2: data,
+            dataset2: dataset,
           })
           .then(() => {
             message.success(t("knowledge.editSuccess"));
@@ -1871,7 +1890,15 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
 
       <TypedConfirmModal ref={confirmRef} onClick={onDelete} />
 
-      <CreateUpdateModal ref={createUpdateRef} onUpdate={onUpdate} />
+      <CreateUpdateModal
+        ref={createUpdateRef}
+        onUpdate={onUpdate}
+        embeddingReady={
+          embeddingReady === false || multimodalEmbeddingReady === false
+            ? false
+            : embeddingReady
+        }
+      />
       <CreateKnowledgeBaseModal
         ref={createKnowledgeRef}
         syncCreateVm={syncCreateVm}

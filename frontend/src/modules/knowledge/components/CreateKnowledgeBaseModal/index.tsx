@@ -17,6 +17,11 @@ import {
 import DataSourceProviderPicker from "@/modules/dataSource/components/management/DataSourceProviderPicker";
 import type { SyncKnowledgeBaseCreationVm } from "@/modules/knowledge/hooks/useSyncKnowledgeBaseCreation";
 import TagSelect from "../TagSelect";
+import { fetchUserUiPreferences } from "@/modules/user/uiPreferencesApi";
+import {
+  highestSupportedProcessingLevel,
+  PROCESSING_LEVEL_ORDER,
+} from "@/modules/knowledge/utils/processingLevel";
 import "@/modules/dataSource/index.scss";
 import "./index.scss";
 
@@ -113,7 +118,7 @@ const CreateKnowledgeBaseModal = forwardRef<
         setTags(res.data.tags || []);
       });
 
-    return KnowledgeBaseServiceApi()
+    const algorithmsRequest = KnowledgeBaseServiceApi()
       .datasetServiceListAlgos()
       .then((res) => {
         const list = res.data.algos;
@@ -125,6 +130,21 @@ const CreateKnowledgeBaseModal = forwardRef<
       .catch((err) => {
         console.error("Failed to load algorithm list:", err);
       });
+
+    const preferencesRequest = fetchUserUiPreferences({ silentError: true } as never)
+      .then((preferences) => preferences.document_parsing_enabled)
+      .catch(() => null);
+
+    return Promise.all([algorithmsRequest, preferencesRequest]).then(
+      ([, documentParsingEnabled]) => {
+        form.setFieldsValue({
+          processing_level: highestSupportedProcessingLevel(
+            documentParsingEnabled,
+            embeddingReady,
+          ),
+        });
+      },
+    );
   }
 
   function onOpen(tab: CreateTab = "direct") {
@@ -232,15 +252,13 @@ const CreateKnowledgeBaseModal = forwardRef<
 				<Form.Item
 				  name="processing_level"
 				  label={t("knowledge.processingLevel")}
-				  initialValue="indexed"
 				  extra={t("knowledge.processingLevelHint")}
 				>
-				  <Select options={[
-				    { value: "stored", label: t("knowledge.processingStored") },
-				    { value: "parsed", label: t("knowledge.processingParsed") },
-				    { value: "chunked", label: t("knowledge.processingChunked") },
-				    { value: "indexed", label: t("knowledge.processingIndexed"), disabled: embeddingReady === false },
-				  ]} />
+				  <Select options={PROCESSING_LEVEL_ORDER.map((level) => ({
+				    value: level,
+				    label: t(`knowledge.processing${level[0].toUpperCase()}${level.slice(1)}`),
+				    disabled: level === "indexed" && embeddingReady !== true,
+				  }))} />
 				</Form.Item>
                 <Form.Item
                   name="display_name"
