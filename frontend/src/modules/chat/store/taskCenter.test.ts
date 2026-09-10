@@ -227,7 +227,7 @@ describe("task center workflow events", () => {
     );
   });
 
-  it("refreshes workflow slots when a task publishes an artifact before completion", async () => {
+  it("does not refresh workflow slots from a task artifact before the session stream rings", async () => {
     useTaskCenterStore.getState().subscribeConvEvents("conversation-1");
     emitConversationEvent({
       type: "task_created",
@@ -253,9 +253,7 @@ describe("task center workflow events", () => {
     } as unknown as CustomEvent);
     await vi.advanceTimersByTimeAsync(100);
 
-    expect(workflowState.loadActiveSession).toHaveBeenCalledWith("conversation-1", {
-      silentError: true,
-    });
+    expect(workflowState.loadActiveSession).not.toHaveBeenCalled();
   });
 
   it("merges consecutive token deltas into one execution-log entry", () => {
@@ -457,6 +455,16 @@ describe("task center workflow events", () => {
     });
     expect(dispatchSpy.mock.calls.map(([event]) => event.type)).toContain("workflow-graph-refresh");
     dispatchSpy.mockRestore();
+  });
+
+  it("does not refresh the Panel from conversation runtime events", async () => {
+    useTaskCenterStore.getState().subscribeConvEvents("conversation-1");
+    emitConversationEvent({
+      type: "workflow_runtime_updated",
+      payload: { task_id: "workflow-task-1", change: "artifact" },
+    });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(workflowState.loadActiveSession).not.toHaveBeenCalled();
   });
 
   it("does not run a delayed workflow refresh after switching conversations", async () => {

@@ -29,7 +29,7 @@ export default function WorkflowRunPage({ embedded = false }: { embedded?: boole
     const current = lifetime.current;
     if (!current || current.key !== key) throw new DOMException('Run page closed', 'AbortError');
     const sequence = ++request.current;
-    const value = await loadWorkflowRunSnapshot(sessionId, api, current.controller.signal);
+    const value = await loadWorkflowRunSnapshot(sessionId, api, { signal: current.controller.signal });
     if (current.controller.signal.aborted || lifetime.current !== current) throw new DOMException('Run page closed', 'AbortError');
     const older = value.control && latest.current?.control && value.control.state_version < latest.current.control.state_version;
     if (!older && sequence === request.current) {

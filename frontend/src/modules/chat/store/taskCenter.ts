@@ -579,10 +579,6 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
               value: event.value,
             };
             void get().loadArtifactStreamContent(conversationId, taskId, artifact);
-            // Workflow publishers can emit list items while a long tool call is
-            // still running (notably PPT pages). Reconcile the durable slot as
-            // soon as each task artifact arrives instead of waiting for done.
-            scheduleWorkflowSessionRefresh(conversationId);
           }
           if (event.type === "done" || event.type === "error") {
             get().unsubscribeTask(taskId);
@@ -887,14 +883,8 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
           const replayed = event.replayed === true;
           if (type === 'task_created' && payload?.task_id) {
             if (replayed) {
-              if (payload.agent_type === 'workflow_step') {
-                scheduleWorkflowSessionRefresh(conversationId);
-              }
               void get().loadConversationTasks(conversationId);
               return;
-            }
-            if (payload.agent_type === 'workflow_step') {
-              scheduleWorkflowSessionRefresh(conversationId);
             }
             // Keep workflow steps in the shared task store. Ordinary mode
             // aggregates them, while developer mode renders every attempt.
@@ -990,30 +980,18 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
               );
               useWorkflowStore.getState().setAutoRunning(conversationId, false);
             }
-            // Completion can be emitted just before its artifact transaction is
-            // visible. Delay that one refresh instead of issuing an immediate
-            // request followed by a second reconciliation request.
-            scheduleWorkflowSessionRefresh(
-              conversationId,
-              type === 'workflow_completed' ? 800 : 100,
-            );
           } else if (type === 'step_partial_done') {
-            if (replayed) {
-              scheduleWorkflowSessionRefresh(conversationId);
-            } else {
+            if (!replayed) {
               window.dispatchEvent(
                 new CustomEvent(WORKFLOW_GRAPH_REFRESH_EVENT, { detail: { conversationId } }),
               );
             }
-          } else if (type === 'intent_updated') {
-            scheduleWorkflowSessionRefresh(conversationId);
           } else if (type === 'workflow_artifact_updated') {
             if (!replayed) {
               window.dispatchEvent(
                 new CustomEvent(WORKFLOW_GRAPH_REFRESH_EVENT, { detail: { conversationId } }),
               );
             }
-            scheduleWorkflowSessionRefresh(conversationId);
           } else if (type === 'workflow_session_created') {
             if (!replayed) {
               window.dispatchEvent(
@@ -1029,13 +1007,8 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
               detail: { conversationId, driverMessage: '', phase: 'resume' },
             }));
           } else if (type === 'max_retries_exceeded' || type === 'driver_fallback') {
-            if (replayed) {
-              scheduleWorkflowSessionRefresh(conversationId);
-              return;
-            }
-            const workflowState = useWorkflowStore.getState();
-            workflowState.setAutoRunning(conversationId, false);
-            scheduleWorkflowSessionRefresh(conversationId);
+            if (replayed) return;
+            useWorkflowStore.getState().setAutoRunning(conversationId, false);
           } else if (type === 'auto_chat_started') {
             if (replayed) return;
             useWorkflowStore.getState().setAutoRunning(conversationId, true);

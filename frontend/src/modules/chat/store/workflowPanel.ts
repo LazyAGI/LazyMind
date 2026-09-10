@@ -3,7 +3,10 @@ import { WorkflowInfoApi, WorkflowSessionApi, TempUploadServiceApi } from "@/mod
 import i18n from "@/i18n";
 import type { ChatConfig } from "@/modules/chat/components/ChatConfigs";
 import { extractErrorCode, getLocalizedErrorMessage } from "@/components/request";
-import { reconcileWorkflowSessionStatus } from '@/modules/chat/store/workflowStatus';
+import {
+  loadWorkflowRunSnapshot,
+  watchWorkflowRun,
+} from '@/modules/chat/utils/loadWorkflowRun';
 
 export function buildWorkflowSearchConfig(
   chatConfig?: Pick<ChatConfig, "knowledgeBaseId" | "creators" | "tags">,
@@ -38,6 +41,44 @@ const _drafts = new Map<string, DraftEntry>();
 // so the selected artifact eventually converges to the new provider_sync revision.
 const _activeSessionLoads = new Map<string, Promise<void>>();
 const _queuedActiveSessionLoads = new Map<string, { silentError?: boolean }>();
+const _runWatches = new Map<string, { sessionId: string; stop: () => void }>();
+
+function syncConversationRunWatch(
+  conversationId: string,
+  sessionId: string | undefined,
+): void {
+  for (const [id, watch] of _runWatches) {
+    if (id !== conversationId) {
+      watch.stop();
+      _runWatches.delete(id);
+    }
+  }
+  const current = _runWatches.get(conversationId);
+  if (!sessionId) {
+    current?.stop();
+    _runWatches.delete(conversationId);
+    return;
+  }
+  if (current?.sessionId === sessionId) return;
+  current?.stop();
+  _runWatches.set(conversationId, {
+    sessionId,
+    stop: watchWorkflowRun(sessionId, () => {
+      void reloadConversationRun(conversationId, sessionId);
+    }),
+  });
+}
+
+async function reloadConversationRun(conversationId: string, sessionId: string): Promise<void> {
+  if (_runWatches.get(conversationId)?.sessionId !== sessionId) return;
+  try {
+    const snapshot = await loadWorkflowRunSnapshot(sessionId, WorkflowSessionApi(), { silentError: true });
+    if (_runWatches.get(conversationId)?.sessionId !== sessionId) return;
+    useWorkflowStore.getState().setSession(conversationId, snapshot.session);
+  } catch {
+    // Keep the last good snapshot; the next bell retries.
+  }
+}
 
 function _draftKey(sessionId: string, slotId: string, listIndex: number): string {
   return `${sessionId}:${slotId}:${listIndex}`;
@@ -631,39 +672,46 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
       }));
       try {
         const requestOptions = options?.silentError
-          ? ({ silentError: true } as never)
+          ? { silentError: true }
           : undefined;
         const res = await WorkflowSessionApi().getLatestSession(
           conversationId,
-          requestOptions,
+          requestOptions as never,
         );
-        const session: WorkflowSession | null = res?.data?.data?.session ?? null;
-        // Runtime controls and rollback candidates come from Go's projection.
-        // Steps are attempt history only; they never define Past/Ready locally.
-        if (session?.session_id) {
-          try {
-            const [stepsRes, projectionRes] = await Promise.all([
-              WorkflowSessionApi().getSteps(session.session_id, requestOptions),
-              WorkflowSessionApi().getProjection(
-                session.session_id,
-                { silentError: true } as never,
-              ),
-            ]);
-            const rawSteps = stepsRes?.data?.data?.steps ?? [];
-            session.steps = rawSteps.filter((s: WorkflowSessionStep) => s.step_id !== '__end__');
-            session.projection = projectionRes?.data?.data?.projection ?? {};
-            session.status = reconcileWorkflowSessionStatus(session.status, session.projection);
-          } catch (error) {
-            session.steps = [];
-            session.projection = {};
-            const errorCode = extractErrorCode(error);
-            if (errorCode === "WORKFLOW_DEFINITION_CHANGED") {
-              session.runtime_error_code = errorCode;
-              session.runtime_error_message = getLocalizedErrorMessage(error);
-            }
-          }
+        const latest: WorkflowSession | null = res?.data?.data?.session ?? null;
+        if (!latest?.session_id) {
+          get().setSession(conversationId, null);
+          syncConversationRunWatch(conversationId, undefined);
+          return;
         }
-        get().setSession(conversationId, session);
+        const bound = _runWatches.get(conversationId);
+        if (bound && bound.sessionId !== latest.session_id) {
+          bound.stop();
+          _runWatches.delete(conversationId);
+        }
+        try {
+          const snapshot = await loadWorkflowRunSnapshot(
+            latest.session_id,
+            WorkflowSessionApi(),
+            requestOptions,
+          );
+          get().setSession(conversationId, snapshot.session);
+          syncConversationRunWatch(conversationId, snapshot.session.session_id);
+        } catch (error) {
+          const errorCode = extractErrorCode(error);
+          get().setSession(conversationId, {
+            ...latest,
+            steps: latest.steps ?? [],
+            projection: latest.projection ?? {},
+            ...(errorCode === 'WORKFLOW_DEFINITION_CHANGED'
+              ? {
+                  runtime_error_code: errorCode,
+                  runtime_error_message: getLocalizedErrorMessage(error),
+                }
+              : {}),
+          });
+          syncConversationRunWatch(conversationId, latest.session_id);
+        }
         // Also refresh dismissed sessions so the restore button appears immediately on load.
         get().fetchDismissedSessions(conversationId);
       } catch {
