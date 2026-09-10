@@ -35,6 +35,12 @@ func SignArtifactValue(contentType string, raw json.RawMessage, workspacePath st
 	return raw
 }
 
+// ResolveArtifactSnapshotPaths applies the same storage containment checks as
+// downloads, without generating a temporary signed URL for a durable snapshot.
+func ResolveArtifactSnapshotPaths(raw json.RawMessage, workspacePath string) json.RawMessage {
+	return resolveArtifactPaths(raw, workspacePath)
+}
+
 func resolveArtifactPaths(raw json.RawMessage, workspacePath string) json.RawMessage {
 	workspacePath = strings.TrimSpace(workspacePath)
 	if workspacePath == "" || len(raw) == 0 {

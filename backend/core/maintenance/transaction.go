@@ -12,6 +12,7 @@ import (
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+	"lazymind/core/common"
 	"lazymind/core/common/orm"
 )
 
@@ -43,26 +44,7 @@ func RequestContext(r *http.Request) context.Context {
 // Callbacks must not perform network IO or open nested transactions.
 func UserTransaction(ctx context.Context, db *gorm.DB, userID string, fn func(*gorm.DB) error) error {
 	if db.Dialector.Name() == "sqlite" {
-		return db.WithContext(ctx).Connection(func(conn *gorm.DB) error {
-			if err := conn.Exec("BEGIN IMMEDIATE").Error; err != nil {
-				return err
-			}
-			committed := false
-			defer func() {
-				if !committed {
-					conn.WithContext(context.WithoutCancel(ctx)).Exec("ROLLBACK")
-				}
-			}()
-			tx := conn.Session(&gorm.Session{SkipDefaultTransaction: true})
-			if err := fn(tx); err != nil {
-				return err
-			}
-			if err := tx.Exec("COMMIT").Error; err != nil {
-				return err
-			}
-			committed = true
-			return nil
-		})
+		return common.ImmediateTransactionWithSQLiteBusyRetry(ctx, db, fn)
 	}
 	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		sum := sha256.Sum256([]byte("memory-maintenance:" + strings.TrimSpace(userID)))

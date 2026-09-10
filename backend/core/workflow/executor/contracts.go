@@ -32,6 +32,7 @@ type AttemptContext struct {
 	LegacyTools             []string          `json:"legacy_tools,omitempty"`
 	TerminalTools           []string          `json:"terminal_tools,omitempty"`
 	ToolsOnly               bool              `json:"tools_only,omitempty"`
+	TerminalToolsOnly       bool              `json:"terminal_tools_only,omitempty"`
 	Metadata                map[string]string `json:"metadata,omitempty"`
 }
 

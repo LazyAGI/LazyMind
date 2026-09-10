@@ -23,8 +23,8 @@ from lazyllm.tools.agent import ToolExecutionError
 from lazyllm.tools.agent.base import _write_agent_data
 
 
-_OTHER_OPTION = '其他'
-_BOOLEAN_CHOICES = ['是', '否']
+_OTHER_OPTION = '__ask_user_other__'
+_BOOLEAN_CHOICES = ['__ask_user_yes__', '__ask_user_no__']
 _VALID_TYPES = {'boolean', 'single', 'multiple', 'text'}
 
 

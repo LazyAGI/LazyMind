@@ -56,6 +56,8 @@ import MentionEditor, {
   type MentionEditorRef,
 } from "./MentionEditor";
 import ContextUsageButton from "./ContextUsageButton";
+import PerformanceStatsBar from "./PerformanceStatsBar";
+import type { SessionPerformanceStats } from "../../utils/performanceStats";
 import { buildCitedMessageText } from "../newChatContainer/utils/citeMessage";
 import ChatModelSelector from "../ChatModelSelector";
 import {
@@ -470,6 +472,8 @@ interface ChatInputProps {
   /** Reports persisted model-selection saves so sibling retry actions can share the lock. */
   onModelSelectionSavingChange?: (saving: boolean) => void;
   fixedThinkingDepth?: ThinkingDepth;
+  performanceStats?: SessionPerformanceStats;
+  showPerformanceStats?: boolean;
   /** Controlled thinking depth for embedded chat surfaces such as side chat. */
   thinkingDepth?: ThinkingDepth;
   onThinkingDepthChange?: (thinkingDepth: ThinkingDepth) => void;
@@ -683,6 +687,8 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       modelSelectorBusy = false,
       onModelSelectionSavingChange,
       fixedThinkingDepth,
+      performanceStats,
+      showPerformanceStats = false,
       thinkingDepth: controlledThinkingDepth,
       onThinkingDepthChange,
     } = props;
@@ -809,7 +815,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     const knowledgeBaseSelectable =
       allowKnowledgeBaseSelection && knowledgeBaseEnabled;
     const knowledgeBaseDisabledReason = allowKnowledgeBaseSelection
-      ? "知识库检索已在设置中停用"
+      ? t("chat.knowledgeSearchDisabled")
       : t("chat.sideChat.knowledgeInheritedOnly");
     const uploadTypes = allowedUploadTypes;
 
@@ -1829,6 +1835,9 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
             </div>
           ) : null}
         </div>
+        {showPerformanceStats ? (
+          <PerformanceStatsBar stats={performanceStats} running={isStreaming} />
+        ) : null}
         <PromptModal
           ref={promptRef}
           onSelectPrompt={(prompt) => onChange(appendPromptToDraft(text, prompt))}

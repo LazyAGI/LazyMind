@@ -1,4 +1,4 @@
-import { Button, Divider, Flex, message, Spin, Tooltip } from "antd";
+import { Button, Divider, Flex, message, Modal, Spin, Tooltip } from "antd";
 import { trim, debounce } from "lodash";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { KeyboardEvent, MouseEvent } from "react";
@@ -7,6 +7,7 @@ import { useTranslation } from "react-i18next";
 import "./index.scss";
 import {
   CopyOutlined,
+  BranchesOutlined,
   CloseOutlined,
   DislikeFilled,
   DislikeOutlined,
@@ -51,6 +52,19 @@ import {
   openSource,
 } from "@/modules/chat/utils/sourceAdapter";
 import { IdentityAvatar } from "@/modules/identityAvatar";
+import {
+  getTranslationStatus,
+  isSingleEnglishWord,
+  translateSelectionText,
+  TranslationUnavailableError,
+} from "@/modules/knowledge/api/translation";
+
+let translationStatusRequest: Promise<boolean> | undefined;
+
+function loadTranslationStatus() {
+  translationStatusRequest ??= getTranslationStatus().catch(() => false);
+  return translationStatusRequest;
+}
 
 const SOURCE_ICON_TONES = 6;
 
@@ -438,6 +452,10 @@ const AssistantMessage = (props: any) => {
   } = props;
   const selectionActionsRef = useRef<HTMLDivElement | null>(null);
   const citeSelectionTextRef = useRef("");
+  const translationConfiguredRef = useRef(false);
+  const [translationSource, setTranslationSource] = useState("");
+  const [translationResult, setTranslationResult] = useState("");
+  const [translationLoading, setTranslationLoading] = useState(false);
   const onCiteMessageRef = useRef(onCiteMessage);
   onCiteMessageRef.current = onCiteMessage;
   const onOpenSideChatRef = useRef(onOpenSideChat);
@@ -518,6 +536,28 @@ const AssistantMessage = (props: any) => {
   const handleOpenSideChatRef = useRef(handleOpenSideChat);
   handleOpenSideChatRef.current = handleOpenSideChat;
 
+  const handleTranslateSelectedText = useCallback(async () => {
+    const selectedText = citeSelectionTextRef.current.trim();
+    if (!selectedText) return;
+    setTranslationSource(selectedText);
+    setTranslationResult("");
+    setTranslationLoading(true);
+    window.getSelection()?.removeAllRanges();
+    hideCiteButton();
+    try {
+      const result = await translateSelectionText(selectedText);
+      setTranslationResult(result.translated_text);
+    } catch (error) {
+      if(error instanceof TranslationUnavailableError&&error.reason==="service_not_configured")window.location.href="/settings?section=knowledge&tool=translation";
+      else message.error(error instanceof TranslationUnavailableError?t("knowledge.dictionaryNotFound"):t("knowledge.translationFailed"));
+    } finally {
+      setTranslationLoading(false);
+    }
+  }, [hideCiteButton, t]);
+
+  const handleTranslateSelectedTextRef = useRef(handleTranslateSelectedText);
+  handleTranslateSelectedTextRef.current = handleTranslateSelectedText;
+
   const showCiteButton = useCallback(
     (text: string, top: number, left: number) => {
       let actions = selectionActionsRef.current;
@@ -556,6 +596,17 @@ const AssistantMessage = (props: any) => {
           actions.appendChild(sideChatButton);
         }
 
+        const translateButton = document.createElement("button");
+        translateButton.type = "button";
+        translateButton.className = "chat-selection-action is-translation-disabled";
+        translateButton.dataset.action = "translate";
+        translateButton.setAttribute("aria-disabled", "true");
+        translateButton.addEventListener("click", (event) => {
+          event.stopPropagation();
+          handleTranslateSelectedTextRef.current();
+        });
+        actions.appendChild(translateButton);
+
         document.body.appendChild(actions);
         selectionActionsRef.current = actions;
       }
@@ -572,6 +623,25 @@ const AssistantMessage = (props: any) => {
       );
       if (sideChatButton) {
         sideChatButton.textContent = t("chat.sideChat.askFromSelection");
+      }
+      const translateButton = actions.querySelector<HTMLButtonElement>(
+        '[data-action="translate"]',
+      );
+      if (translateButton) {
+        translateButton.textContent = t("knowledge.translateSelection");
+        const wordSelection=isSingleEnglishWord(text);
+        translateButton.classList.toggle("is-translation-disabled", !wordSelection);
+        translateButton.setAttribute("aria-disabled", String(!wordSelection));
+        translateButton.title = wordSelection?t("knowledge.translateSelection"):t("knowledge.translationConfigureTip");
+        void loadTranslationStatus().then((configured) => {
+          translationConfiguredRef.current = configured;
+          const disabled=!configured&&!isSingleEnglishWord(text);
+          translateButton.classList.toggle("is-translation-disabled", disabled);
+          translateButton.setAttribute("aria-disabled", String(disabled));
+          translateButton.title = !disabled
+            ? t("knowledge.translateSelection")
+            : `${t("knowledge.translationConfigureTip")} · ${t("knowledge.translationConfigureAction")}`;
+        });
       }
       actions.style.top = `${top}px`;
       actions.style.left = `${left}px`;
@@ -662,6 +732,29 @@ const AssistantMessage = (props: any) => {
     if (!event.shiftKey && !selectsAll) return;
     showSelectionActions(event.currentTarget);
   };
+
+  const translationModal = (
+    <Modal
+      open={Boolean(translationSource)}
+      title={t("knowledge.translationTitle")}
+      footer={null}
+      onCancel={() => {
+        if (!translationLoading) {
+          setTranslationSource("");
+          setTranslationResult("");
+        }
+      }}
+    >
+      <div className="chat-translation-block">
+        <div className="chat-translation-label">{t("knowledge.translationOriginal")}</div>
+        <div className="chat-translation-text">{translationSource}</div>
+      </div>
+      <div className="chat-translation-block">
+        <div className="chat-translation-label">{t("knowledge.translationResult")}</div>
+        {translationLoading ? <Spin size="small" /> : <div className="chat-translation-text">{translationResult}</div>}
+      </div>
+    </Modal>
+  );
 
   function renderLoading() {
     return (
@@ -1055,6 +1148,31 @@ const AssistantMessage = (props: any) => {
     );
   }
 
+  function renderForkAction() {
+    if (!props.onFork || item.archived_failure || !item.history_id) return null;
+    if (!runCompleted) return null;
+    const candidate =
+      item.answers?.length >= 2 && item.selected_answer_index == null;
+    const disabled = candidate || props.forkPending;
+    const tooltip = candidate
+      ? "chat.fork.selectAnswerFirst"
+      : "chat.fork.title";
+
+    return (
+      <Tooltip title={t(tooltip)} trigger={["hover", "focus"]}>
+        <span className="chat-fork-action" tabIndex={disabled ? 0 : undefined}>
+          <Button
+            className="tool-btn"
+            aria-label={t("chat.fork.title")}
+            icon={<BranchesOutlined aria-hidden="true" />}
+            disabled={disabled}
+            onClick={() => props.onFork?.(item.history_id)}
+          />
+        </span>
+      </Tooltip>
+    );
+  }
+
   function renderFooter() {
     const currentFeedback = getCurrentFeedback();
 
@@ -1086,6 +1204,7 @@ const AssistantMessage = (props: any) => {
               </Tooltip>
             )}
             {renderSourceButton(item.sources)}
+            {renderForkAction()}
           </div>
           <Flex>
             {currentFeedback ===
@@ -1366,8 +1485,9 @@ const AssistantMessage = (props: any) => {
                   ChatConversationsResponseFinishReasonEnum.FinishReasonUnspecified
               }
             />
+            {renderForkAction()}
           </div>
-          {(item.ask_pending || index === length - 1) && renderBottom()}
+          {!item.fork_read_only && (item.ask_pending || index === length - 1) && renderBottom()}
           {index === length - 1 && workflowSession && sessionId && (
             <WorkflowPanel
               key={sessionId}
@@ -1385,6 +1505,7 @@ const AssistantMessage = (props: any) => {
           initialReason={modalFeedbackRecord?.reason}
           initialComment={modalFeedbackRecord?.expected_answer}
         />
+        {translationModal}
       </div>
     );
   }
@@ -1417,8 +1538,9 @@ const AssistantMessage = (props: any) => {
 
           {}
           {runCompleted && !item.onboardingInfo && renderFooter()}
+          {item.fork_read_only && !item.delta && <span>{t("chat.fork.emptyTerminal")}</span>}
         </div>
-        {(item.ask_pending || index === length - 1) && renderBottom()}
+        {!item.fork_read_only && (item.ask_pending || index === length - 1) && renderBottom()}
         {index === length - 1 && workflowSession && sessionId && (
           <WorkflowPanel
             key={sessionId}
@@ -1436,6 +1558,7 @@ const AssistantMessage = (props: any) => {
         initialReason={modalFeedbackRecord?.reason}
         initialComment={modalFeedbackRecord?.expected_answer}
       />
+      {translationModal}
     </div>
   );
 };

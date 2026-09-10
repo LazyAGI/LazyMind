@@ -42,6 +42,9 @@ def _load_writer_tools():
         'lazyllm.tools.writer.numbering': _stub_module(
             'lazyllm.tools.writer.numbering', materialize_markdown=lambda value: value,
         ),
+        'lazyllm.tools.writer.provider': _stub_module(
+            'lazyllm.tools.writer.provider', match_writer_provider=lambda value: None,
+        ),
         'lazyllm.tools.writer.utils': _stub_module(
             'lazyllm.tools.writer.utils',
             render_block_markdown=lambda value, **kwargs: str(value),

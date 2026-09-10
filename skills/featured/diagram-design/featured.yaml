@@ -1,0 +1,136 @@
+schema_version: 2
+id: diagram-design
+type: chat
+version: 1.0.0
+status: published
+default_locale: zh-CN
+provider: GitHub
+
+skill:
+  source_url: https://github.com/cathrynlavery/diagram-design/tree/2724fd2efd8c6737f6fa704fbf5da52d67375497/skills/diagram-design
+  category: design
+
+placement:
+  home: true
+  gallery: true
+  order: 30
+
+classification:
+  category: 设计工具
+  tags:
+    - 图示设计
+    - 架构图
+    - 流程图
+    - 时序图
+
+assets:
+  cover:
+    file: assets/cover.png
+    role: cover
+  diagram_system_architecture_demo:
+    file: assets/diagram-system-architecture-demo.html
+    role: result
+  diagram_knowledge_search_flow_demo:
+    file: assets/diagram-knowledge-search-flow-demo.html
+    role: result
+  diagram_oauth_sequence_demo:
+    file: assets/diagram-oauth-sequence-demo.html
+    role: result
+
+presentation:
+  card:
+    title: 图示设计助手
+    description: 把架构、流程、时序、数据模型和业务关系等复杂信息设计成清晰、可交互的 HTML 或 SVG 图示
+    output_type: web
+    output_label: 可交互图示
+    cover_asset: cover
+    result_summary: 查看同一团队知识库系统如何用架构图、流程图和 OAuth 时序图表达结构、过程与交互
+  detail:
+    title: 图示设计助手
+    description: 将复杂信息设计成结构清晰的 HTML 或独立 SVG 图示，覆盖架构、流程、时序、数据模型、时间线、泳道、组织关系等类型，并支持 Mermaid 和 Draw.io 重绘。来源：cathrynlavery/diagram-design，经 LazyMind 适配；没有提供的信息会标注为假设或待确认，不会被当成系统事实。
+    attachment_hint: 系统说明、业务流程、接口关系、数据结构或 Mermaid/Draw.io 文件
+
+tasks:
+  - id: system-architecture
+    selector:
+      title: 设计系统架构图
+      description: 把系统组件、边界和数据关系画清楚
+      output_label: 系统架构图
+    launch:
+      prompt_short: 帮我画一张团队知识库系统的架构图。
+      prompt: >-
+        直接为下面的团队知识库系统设计一张系统架构图，不用先问我补充信息。请输出可预览的 HTML 和独立 SVG；用清晰的组件、数据流和边界表达系统结构。只使用我提供的事实，没有提供的部署方式、技术选型或性能指标标成“待确认”，不要自行补全。
+
+        系统背景：用户通过 Web 前端搜索团队资料。API 服务负责接收请求，并调用认证服务确认用户身份；搜索服务根据用户权限检索文档；结构化数据保存在数据库，原始文件保存在对象存储。请标出 Web、API、认证、搜索、数据库和对象存储之间的主要关系，并区分用户请求、权限信息和文档数据流。
+    replay:
+      steps:
+        - title: 识别系统边界
+          description: 区分用户入口、应用服务、外部依赖和数据存储
+        - title: 整理组件关系
+          description: 根据已提供的信息安排组件位置并连接主要调用关系
+        - title: 标注数据流
+          description: 区分用户请求、权限信息和文档数据，不虚构未提供的协议或部署方式
+        - title: 输出可复用图示
+          description: 同时提供 HTML 预览和独立 SVG，并保留待确认边界
+    result:
+      template: html_preview_v1
+      eyebrow: 系统架构图
+      title: 团队知识库系统架构
+      summary: 查看 Web、API、认证、搜索和数据存储如何被组织成一张可复核的系统图。
+      html_asset: diagram_system_architecture_demo
+
+  - id: knowledge-search-flow
+    selector:
+      title: 梳理业务流程图
+      description: 把用户搜索、权限校验和异常分支画成可执行流程
+      output_label: 业务流程图
+    launch:
+      prompt_short: 帮我画出团队知识库的文档搜索流程。
+      prompt: >-
+        直接把下面的团队知识库文档搜索过程整理成业务流程图，不用先问我补充信息。请输出可预览的 HTML 和独立 SVG；主流程要能从用户输入搜索词一直走到结果展示，并单独标出无权限和没有搜索结果的分支。只使用下面的信息，没有提供的错误码、重试策略或人工处理规则标成“待确认”。
+
+        已知流程：用户先登录，然后在 Web 前端输入搜索词；API 服务把请求交给认证服务确认身份和权限；通过后由搜索服务检索用户可以访问的文档；有结果时返回文档列表和引用来源，没有结果时返回空结果提示；权限不足时返回无权限提示。请让每个分支都有明确的下一步或结束状态。
+    replay:
+      steps:
+        - title: 提取流程节点
+          description: 把登录、输入、权限校验、检索和结果展示拆成可读节点
+        - title: 确定判断分支
+          description: 保留权限不足和没有结果两个已知分支，不新增未经提供的处理逻辑
+        - title: 检查流程闭环
+          description: 确保每个判断都有下一步或明确结束状态
+        - title: 输出 HTML 与 SVG
+          description: 交付可预览、可下载和便于后续修改的流程图
+    result:
+      template: html_preview_v1
+      eyebrow: 业务流程图
+      title: 团队知识库文档搜索流程
+      summary: 查看登录、权限校验、检索和异常分支如何被放进一条可执行流程。
+      html_asset: diagram_knowledge_search_flow_demo
+
+  - id: oauth-sequence
+    selector:
+      title: 设计 OAuth 时序图
+      description: 把授权码登录中的参与方和消息顺序画清楚
+      output_label: OAuth 时序图
+    launch:
+      prompt_short: 帮我画一张团队知识库 OAuth 登录时序图。
+      prompt: >-
+        直接为下面的团队知识库 OAuth 登录过程设计一张时序图，不用先问我补充信息。请输出可预览的 HTML 和独立 SVG；清楚展示授权码、回调、Token 交换和资源请求的顺序。只使用提供的参与方和步骤，没有提供的 Token 生命周期、刷新策略或错误处理标成“待确认”，不要补写实现细节。
+
+        参与方：浏览器、知识库客户端、OAuth 服务、资源服务。流程：浏览器访问知识库客户端；客户端把浏览器重定向到 OAuth 服务；用户完成授权后，OAuth 服务把授权码回调给客户端；客户端用授权码向 OAuth 服务交换 Token；客户端携带 Token 请求资源服务；资源服务返回用户有权限访问的知识库内容。请标出参与方之间的请求和响应方向。
+    replay:
+      steps:
+        - title: 确认参与方
+          description: 按输入保留浏览器、客户端、OAuth 服务和资源服务四个生命线
+        - title: 排列消息顺序
+          description: 依次表达重定向、授权回调、Token 交换和资源请求
+        - title: 标记实现边界
+          description: 将 Token 生命周期、刷新策略和错误处理保留为待确认项
+        - title: 生成时序图
+          description: 输出带有方向、顺序和说明的 HTML 预览与独立 SVG
+    result:
+      template: html_preview_v1
+      eyebrow: OAuth 时序图
+      title: 团队知识库 OAuth 登录时序
+      summary: 查看浏览器、客户端、OAuth 服务和资源服务之间的授权码流程。
+      html_asset: diagram_oauth_sequence_demo

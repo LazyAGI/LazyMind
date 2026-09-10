@@ -19,6 +19,10 @@ from lazymind.model_config import get_dynamic_role_slot_map
 from lazymind.config import EMBED_IMAGE, EMBED_INDEX_KWARGS, EMBED_KEYS, EMBED_MAIN, config as _cfg
 from lazymind.parsing.engine.readers import ImageEmbReader, VideoReader
 from lazymind.parsing.engine.transform import GeneralParser, LineSplitter, NodeParser
+from lazymind.common.database.postgres import create_database_engine
+from lazymind.common.database.sqlite_proxy import install_lazyllm_sqlite_proxy
+
+install_lazyllm_sqlite_proxy()
 
 ALGO_ID = 'general_algo'
 _CODE_CHUNK_SIZE = 512
@@ -270,7 +274,7 @@ def drop_lazyllm_tables() -> None:
     sa_url = db_url.replace('postgresql+psycopg://', 'postgresql+psycopg2://', 1)
     try:
         import sqlalchemy
-        engine = sqlalchemy.create_engine(sa_url)
+        engine = create_database_engine(sa_url)
         cascade = '' if engine.dialect.name == 'sqlite' else ' CASCADE'
         with engine.connect() as conn:
             for table in _LAZYLLM_TABLES:

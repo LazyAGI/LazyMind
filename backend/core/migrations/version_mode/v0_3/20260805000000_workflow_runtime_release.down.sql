@@ -1,3 +1,8 @@
+DROP TABLE IF EXISTS conversation_fork_requests;
+DROP TABLE IF EXISTS conversation_fork_origins;
+DROP INDEX IF EXISTS idx_vocabulary_review_session_word;
+DROP INDEX IF EXISTS idx_vocabulary_review_sessions_active;
+
 -- +migrate Dialect postgres
 DROP TABLE IF EXISTS public.workflow_approval_preferences;
 ALTER TABLE public.task_center_tasks DROP CONSTRAINT IF EXISTS chk_tct_task_type;
@@ -58,6 +63,7 @@ ALTER TABLE conversations
     DROP COLUMN IF EXISTS thinking_depth,
     DROP COLUMN IF EXISTS chat_executor;
 ALTER TABLE user_ui_preferences
+    DROP COLUMN IF EXISTS performance_stats_enabled,
     DROP COLUMN IF EXISTS sensitive_word_filter_enabled,
     DROP COLUMN IF EXISTS document_parsing_enabled,
     DROP COLUMN IF EXISTS workflows_enabled,
@@ -65,6 +71,7 @@ ALTER TABLE user_ui_preferences
     DROP COLUMN IF EXISTS skills_enabled,
     DROP COLUMN IF EXISTS schedules_enabled,
     DROP COLUMN IF EXISTS task_center_enabled;
+ALTER TABLE sub_agent_tasks DROP COLUMN IF EXISTS writing_subtasks;
 ALTER TABLE sub_agent_tasks DROP COLUMN IF EXISTS sources;
 ALTER TABLE plugin_transition_commands DROP COLUMN IF EXISTS retry_origin;
 DROP TABLE IF EXISTS external_agent_operations;
@@ -105,6 +112,7 @@ ALTER TABLE conversations DROP COLUMN IF EXISTS chat_model_version;
 ALTER TABLE conversations DROP COLUMN IF EXISTS chat_model_snapshot;
 ALTER TABLE conversations DROP COLUMN IF EXISTS chat_model_id;
 ALTER TABLE conversations DROP COLUMN IF EXISTS chat_model_mode;
+ALTER TABLE conversations DROP COLUMN IF EXISTS history_order;
 ALTER TABLE conversations DROP COLUMN IF EXISTS pinned_at;
 ALTER TABLE conversations DROP COLUMN IF EXISTS source_display_name;
 ALTER TABLE conversations DROP COLUMN IF EXISTS source_document_id;
@@ -221,6 +229,7 @@ DROP INDEX IF EXISTS idx_chat_histories_conversation_seq;
 DROP TABLE IF EXISTS agent_invocations;
 ALTER TABLE conversations DROP COLUMN thinking_depth;
 ALTER TABLE conversations DROP COLUMN chat_executor;
+ALTER TABLE user_ui_preferences DROP COLUMN performance_stats_enabled;
 ALTER TABLE user_ui_preferences DROP COLUMN sensitive_word_filter_enabled;
 ALTER TABLE user_ui_preferences DROP COLUMN document_parsing_enabled;
 ALTER TABLE user_ui_preferences DROP COLUMN workflows_enabled;
@@ -228,6 +237,7 @@ ALTER TABLE user_ui_preferences DROP COLUMN mcp_enabled;
 ALTER TABLE user_ui_preferences DROP COLUMN skills_enabled;
 ALTER TABLE user_ui_preferences DROP COLUMN schedules_enabled;
 ALTER TABLE user_ui_preferences DROP COLUMN task_center_enabled;
+ALTER TABLE sub_agent_tasks DROP COLUMN writing_subtasks;
 ALTER TABLE sub_agent_tasks DROP COLUMN sources;
 ALTER TABLE plugin_transition_commands DROP COLUMN retry_origin;
 DROP TABLE IF EXISTS external_agent_operations;
@@ -267,6 +277,7 @@ ALTER TABLE conversations DROP COLUMN chat_model_version;
 ALTER TABLE conversations DROP COLUMN chat_model_snapshot;
 ALTER TABLE conversations DROP COLUMN chat_model_id;
 ALTER TABLE conversations DROP COLUMN chat_model_mode;
+ALTER TABLE conversations DROP COLUMN history_order;
 ALTER TABLE conversations DROP COLUMN pinned_at;
 ALTER TABLE conversations DROP COLUMN source_display_name;
 ALTER TABLE conversations DROP COLUMN source_document_id;
@@ -426,3 +437,66 @@ ALTER TABLE resource_update_tasks DROP COLUMN lane_priority;
 ALTER TABLE resource_update_tasks DROP COLUMN run_id;
 ALTER TABLE resource_update_tasks DROP COLUMN lane_key;
 ALTER TABLE resource_update_tasks DROP COLUMN result_json;
+
+-- Conversation opening metadata
+-- +migrate Dialect postgres
+DELETE FROM async_jobs WHERE job_type IN ('conversation.opening', 'conversation.opening.backfill');
+DROP TABLE IF EXISTS conversation_opening_metadata;
+DROP TABLE IF EXISTS conversation_opening_backfills;
+ALTER TABLE conversations DROP COLUMN title_revision;
+ALTER TABLE conversations DROP COLUMN title_source;
+DELETE FROM user_selected_models WHERE model_type = 'conversation_metadata';
+
+-- +migrate Dialect sqlite
+DELETE FROM async_jobs WHERE job_type IN ('conversation.opening', 'conversation.opening.backfill');
+DROP TABLE IF EXISTS conversation_opening_metadata;
+DROP TABLE IF EXISTS conversation_opening_backfills;
+ALTER TABLE conversations DROP COLUMN title_revision;
+ALTER TABLE conversations DROP COLUMN title_source;
+DELETE FROM user_selected_models WHERE model_type = 'conversation_metadata';
+
+-- +migrate Dialect postgres
+DROP TABLE IF EXISTS chat_run_performance;
+DROP TABLE IF EXISTS vocabulary_review_session_answers;
+DROP TABLE IF EXISTS vocabulary_review_session_items;
+DROP TABLE IF EXISTS vocabulary_review_sessions;
+DROP TABLE IF EXISTS vocabulary_provider_operations;
+DROP TABLE IF EXISTS vocabulary_fsrs_profiles;
+DROP TABLE IF EXISTS vocabulary_dictionary_examples;
+DROP TABLE IF EXISTS vocabulary_dictionary_senses;
+DROP TABLE IF EXISTS vocabulary_dictionary_entries;
+DROP TABLE IF EXISTS vocabulary_dictionary_imports;
+DROP TABLE IF EXISTS vocabulary_example_tags;
+DROP TABLE IF EXISTS vocabulary_word_tags;
+DROP TABLE IF EXISTS vocabulary_tags;
+DROP TABLE IF EXISTS vocabulary_wordbook_entries;
+DROP TABLE IF EXISTS vocabulary_wordbooks;
+DROP TABLE IF EXISTS vocabulary_review_logs;
+DROP TABLE IF EXISTS vocabulary_review_cards;
+DROP TABLE IF EXISTS vocabulary_source_refs;
+DROP TABLE IF EXISTS vocabulary_examples;
+DROP TABLE IF EXISTS vocabulary_words;
+DROP TABLE IF EXISTS vocabulary_provider_settings;
+
+-- +migrate Dialect sqlite
+DROP TABLE IF EXISTS chat_run_performance;
+DROP TABLE IF EXISTS vocabulary_provider_operations;
+DROP TABLE IF EXISTS vocabulary_fsrs_profiles;
+DROP TABLE IF EXISTS vocabulary_dictionary_examples;
+DROP TABLE IF EXISTS vocabulary_dictionary_senses;
+DROP TABLE IF EXISTS vocabulary_dictionary_entries;
+DROP TABLE IF EXISTS vocabulary_dictionary_imports;
+DROP TABLE IF EXISTS vocabulary_example_tags;
+DROP TABLE IF EXISTS vocabulary_word_tags;
+DROP TABLE IF EXISTS vocabulary_tags;
+DROP TABLE IF EXISTS vocabulary_wordbook_entries;
+DROP TABLE IF EXISTS vocabulary_wordbooks;
+DROP TABLE IF EXISTS vocabulary_review_logs;
+DROP TABLE IF EXISTS vocabulary_review_cards;
+DROP TABLE IF EXISTS vocabulary_source_refs;
+DROP TABLE IF EXISTS vocabulary_examples;
+DROP TABLE IF EXISTS vocabulary_words;
+DROP TABLE IF EXISTS vocabulary_provider_settings;
+DROP TABLE IF EXISTS vocabulary_review_session_answers;
+DROP TABLE IF EXISTS vocabulary_review_session_items;
+DROP TABLE IF EXISTS vocabulary_review_sessions;

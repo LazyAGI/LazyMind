@@ -8,6 +8,11 @@ home:
     - novel-generator
     - chat-eq-reply
     - xiaohongshu-copywriter
+    - summarize-meeting
+    - document-refinement
+    - doc-coauthoring
+    - tailored-resume-generator
+    - diagram-design
   work:
     - ppt-workflow
     - image-workflow

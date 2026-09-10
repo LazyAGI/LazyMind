@@ -1,3 +1,4 @@
+import type { ConversationForkOrigin } from "@/api/generated/core-client";
 import type { Conversation } from "@/api/generated/chatbot-client";
 
 export const CONVERSATION_RELATION_SIDECHAT = "sidechat";
@@ -8,6 +9,7 @@ export type ConversationRelationType =
   | typeof CONVERSATION_RELATION_FORK;
 
 export interface ConversationRelationFields {
+  fork_origin?: ConversationForkOrigin | null;
   parent_conversation_id?: string | null;
   relation_type?: string | null;
   source_history_id?: string | null;
@@ -21,6 +23,9 @@ export type ConversationWithRelation =
 type ConversationRelationInput = ConversationRelationFields | Conversation;
 
 export interface ConversationRelation {
+  sourceHistoryId?: string;
+  sourceStatus?: string;
+  canLocate?: boolean;
   parentConversationId: string;
   parentDisplayName: string;
   relationType: ConversationRelationType | null;
@@ -43,6 +48,8 @@ export function getConversationRelation(
   conversation?: ConversationRelationInput | null,
 ): ConversationRelation | null {
   const relationFields = conversation as ConversationRelationFields | undefined;
+  const origin = relationFields?.fork_origin;
+  if (origin) return { parentConversationId: origin.source_conversation_id, parentDisplayName: origin.source_title_snapshot || "", relationType: CONVERSATION_RELATION_FORK, sourceHistoryId: origin.source_history_id, sourceStatus: origin.source_status, canLocate: origin.can_locate };
   const parentConversationId = relationFields?.parent_conversation_id?.trim();
   if (!parentConversationId) {
     return null;

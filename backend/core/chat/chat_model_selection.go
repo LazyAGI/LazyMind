@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -989,6 +990,14 @@ func applyConversationChatModelConfig(ctx context.Context, db *gorm.DB, userID s
 				}
 			}
 			if model == nil {
+				if inherited := forkConfigForConversation(conversation); inherited != nil && inherited.Model != nil && conversation.ChatModelVersion == 1 {
+					model = findAvailableChatModel(usable, inherited.Model.ModelID)
+					if model != nil {
+						reason = "fork_selection"
+					}
+				}
+			}
+			if model == nil {
 				defaultModel, defaultErr := resolveDefaultChatModel(ctx, db, userID, usable)
 				if defaultErr != nil {
 					return defaultErr
@@ -1016,6 +1025,17 @@ func applyConversationChatModelConfig(ctx context.Context, db *gorm.DB, userID s
 	fixedLLM, err := buildChatLLMConfig(model)
 	if err != nil {
 		return err
+	}
+	if inherited := forkConfigForConversation(conversation); inherited != nil && inherited.Model != nil && inherited.Model.ModelID == model.ID && conversation.ChatModelVersion == 1 {
+		if limit, err := strconv.ParseInt(inherited.MaxInputTokens, 10, 64); err == nil && limit > 0 {
+			if cfg, ok := fixedLLM.(map[string]any); ok {
+				current, _ := cfg["max_input_tokens"].(string)
+				currentLimit, _ := strconv.ParseInt(current, 10, 64)
+				if currentLimit <= 0 || limit < currentLimit {
+					cfg["max_input_tokens"] = inherited.MaxInputTokens
+				}
+			}
+		}
 	}
 	config, _ := body["llm_config"].(map[string]any)
 	if config == nil {

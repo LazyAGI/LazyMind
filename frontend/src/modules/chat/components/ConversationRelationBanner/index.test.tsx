@@ -10,7 +10,7 @@ vi.mock("react-i18next", () => ({
       ({
         "chat.conversationRelationBannerLabel": "子会话来源",
         "chat.conversationSourceFrom": `来源：${params?.parent}`,
-        "chat.conversationForkedFrom": `Fork自：${params?.parent}`,
+        "chat.conversationForkedFrom": `分支来源：${params?.parent}`,
         "chat.returnToParentConversation": "返回主会话",
       })[key] || key,
   }),
@@ -52,6 +52,15 @@ describe("ConversationRelationBanner", () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByText("Fork自：技术讨论")).toBeInTheDocument();
+    expect(screen.getByText("分支来源：技术讨论")).toBeInTheDocument();
   });
+});
+
+it("locates an exact source reply and disables navigation after source deletion", () => {
+  const relation = { parentConversationId: "source", parentDisplayName: "Source", relationType: "fork" as const, sourceHistoryId: "h/40", canLocate: true, sourceStatus: "available" };
+  const { rerender } = render(<MemoryRouter><ConversationRelationBanner relation={relation} /></MemoryRouter>);
+  expect(screen.getByRole("link", { name: "chat.fork.locateSource" })).toHaveAttribute("href", "/agent/chat/home/source?anchor_history_id=h%2F40");
+  rerender(<MemoryRouter><ConversationRelationBanner relation={{ ...relation, canLocate: false, sourceStatus: "deleted" }} /></MemoryRouter>);
+  expect(screen.queryByRole("link")).not.toBeInTheDocument();
+  expect(screen.getByText("chat.fork.source.deleted")).toBeInTheDocument();
 });

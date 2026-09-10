@@ -2,6 +2,7 @@ package taskcenter
 
 import (
 	"context"
+	"time"
 
 	"gorm.io/gorm"
 	"lazymind/core/common/orm"
@@ -50,6 +51,23 @@ func EnsureWorkflowTask(ctx context.Context, db *gorm.DB, session orm.WorkflowSe
 	})
 }
 
+// HistoricalWorkflowMatches groups unclaimed sessions within each persisted
+// task's execution window. Ambiguous matches never replace the task's status.
+// Callers select either the task ID or the unique session ID.
+func HistoricalWorkflowMatches(db *gorm.DB) *gorm.DB {
+	return db.Table("plugin_sessions").
+		Joins("JOIN task_center_tasks ON task_center_tasks.conversation_id = plugin_sessions.conversation_id AND task_center_tasks.user_id = plugin_sessions.create_user_id").
+		Where("task_center_tasks.archived_at IS NULL AND task_center_tasks.status <> ? AND task_center_tasks.task_type IN ?", "canceled", []string{"background_chat", "scheduled"}).
+		Where("task_center_tasks.created_at <> ? AND plugin_sessions.created_at >= task_center_tasks.created_at", time.Time{}).                                                      // workflow-naming: persistence
+		Where("task_center_tasks.finished_at IS NULL OR plugin_sessions.created_at <= task_center_tasks.finished_at").                                                               // workflow-naming: persistence
+		Where("task_center_tasks.finished_at IS NOT NULL OR task_center_tasks.status NOT IN ? OR plugin_sessions.created_at <= task_center_tasks.updated_at", terminalTaskStatuses). // workflow-naming: persistence
+		Where("NOT EXISTS (SELECT 1 FROM task_center_tasks linked WHERE linked.plugin_session_id = plugin_sessions.id)").
+		Where(`NOT EXISTS (SELECT 1 FROM task_center_tasks later WHERE later.user_id = task_center_tasks.user_id
+			AND later.conversation_id = task_center_tasks.conversation_id AND later.id <> task_center_tasks.id
+			AND later.created_at > task_center_tasks.created_at AND later.created_at <= plugin_sessions.created_at)`).
+		Group("task_center_tasks.id").Having("COUNT(*) = 1")
+}
+
 func workflowForTask(ctx context.Context, db *gorm.DB, task orm.TaskCenterTask) *orm.WorkflowSession {
 	query := db.WithContext(ctx).Model(&orm.WorkflowSession{})
 	if task.WorkflowSessionID != nil && *task.WorkflowSessionID != "" {
@@ -59,26 +77,14 @@ func workflowForTask(ctx context.Context, db *gorm.DB, task orm.TaskCenterTask) 
 		}
 		return nil
 	}
-	if task.ArchivedAt != nil || task.Status == "canceled" || task.CreatedAt.IsZero() ||
-		(task.TaskType != "background_chat" && task.TaskType != "scheduled") {
+	matches := HistoricalWorkflowMatches(db.WithContext(ctx)).
+		Where("task_center_tasks.id = ?", task.ID).Select("MIN(plugin_sessions.id)")
+	var session orm.WorkflowSession
+	result := query.Where("id IN (?)", matches).Find(&session)
+	if result.Error != nil || result.RowsAffected == 0 {
 		return nil
 	}
-	// Older facade sessions were never registered with TaskCenter. Match only an
-	// unclaimed session created during this execution, not a later chat turn.
-	query = query.Where("create_user_id = ? AND conversation_id = ? AND created_at >= ?", task.UserID, task.ConversationID, task.CreatedAt)
-	if task.FinishedAt != nil {
-		query = query.Where("created_at <= ?", *task.FinishedAt)
-	} else if isTerminal(task.Status) {
-		query = query.Where("created_at <= ?", task.UpdatedAt)
-	}
-	query = query.Where(`NOT EXISTS (SELECT 1 FROM task_center_tasks linked WHERE linked.plugin_session_id = plugin_sessions.id)`).
-		Where(`NOT EXISTS (SELECT 1 FROM task_center_tasks later WHERE later.user_id = ? AND later.conversation_id = ? AND later.id <> ? AND later.created_at > ? AND later.created_at <= plugin_sessions.created_at)`,
-			task.UserID, task.ConversationID, task.ID, task.CreatedAt)
-	var sessions []orm.WorkflowSession
-	if err := query.Limit(2).Find(&sessions).Error; err != nil || len(sessions) != 1 {
-		return nil
-	}
-	return &sessions[0]
+	return &session
 }
 
 func workflowTaskStatus(status string) string {

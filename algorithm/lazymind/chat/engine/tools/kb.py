@@ -278,7 +278,8 @@ def _bounded_page_size(value: int, default: int = 20) -> int:
 class KBToolkit:
     """Knowledge-base discovery, inspection, search, and navigation tools.
 
-    Use this Toolkit when the user selects or @mentions a knowledge base, or
+    “资料库” is the user-facing alias of “知识库”; treat both as a knowledge
+    base. Use this Toolkit when the user selects or @mentions a knowledge base, or
     explicitly asks to discover, inspect, or search knowledge bases. If only the
     gateway is visible and you decide this Toolkit is relevant, activate the
     gateway before calling its methods. Do not activate it for unrelated requests.
@@ -298,7 +299,7 @@ class KBToolkit:
         'kb_get_parent_node', 'kb_get_window_nodes', 'kb_keyword_search',
     ]
     __tool_auto_activate__ = [
-        r'知识库|(?<!\w)knowledge[\s_-]+bases?(?!\w)',
+        r'知识库|资料库|(?<!\w)knowledge[\s_-]+bases?(?!\w)',
     ]
 
     def __init__(self, kb_scope: Optional[List[str]] = None):

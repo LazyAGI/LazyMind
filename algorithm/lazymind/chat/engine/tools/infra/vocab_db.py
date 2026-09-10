@@ -20,10 +20,11 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import urlsplit, urlunsplit
 
 from lazyllm import LOG
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 from sqlalchemy.engine import URL, Engine
 
 from lazymind.config import config as _cfg
+from lazymind.common.database.postgres import create_database_engine
 
 VOCAB_SCHEMA = 'public'
 VOCAB_TABLE = 'words'
@@ -104,7 +105,7 @@ def _get_engine(*, url: Optional[str] = None, dsn: Optional[str] = None) -> Engi
     with _engine_cache_lock:
         engine = _engine_cache.get(engine_url)
         if engine is None:
-            engine = create_engine(engine_url, future=True, pool_pre_ping=True)
+            engine = create_database_engine(engine_url, future=True, pool_pre_ping=True)
             _engine_cache[engine_url] = engine
     return engine
 

@@ -36,6 +36,9 @@ const (
 	localProxyChannelHostPortEnvVar  = "LAZYMIND_LOCAL_PROXY_CHANNEL_GATEWAY_HOST_PORT"
 	localProxyEvoHostPortEnvVar      = "LAZYMIND_LOCAL_PROXY_EVO_HOST_PORT"
 	localFileWatcherPortEnvVar       = "LAZYMIND_LOCAL_FILE_WATCHER_PORT"
+	localSQLiteServerPortEnvVar      = "LAZYMIND_LOCAL_SQLITE_SERVER_PORT"
+	sqliteServerURLEnvVar            = "LAZYMIND_SQLITE_SERVER_URL"
+	sqliteServerTokenFileEnvVar      = "LAZYMIND_SQLITE_SERVER_TOKEN_FILE"
 	localPostgresPortEnvVar          = "LAZYMIND_LOCAL_POSTGRES_PORT"
 	localCorePortEnvVar              = "LAZYMIND_LOCAL_CORE_PORT"
 	localDocPortEnvVar               = "LAZYMIND_LOCAL_DOC_PORT"
@@ -81,6 +84,7 @@ const (
 	defaultLocalProxyChannelHostPort = 18085
 	defaultLocalProxyEvoHostPort     = 18047
 	defaultLocalFileWatcherPort      = 19090
+	defaultLocalSQLiteServerPort     = 19081
 	defaultLocalPostgresPort         = 15432
 	defaultLocalDocPort              = 18002
 	defaultLocalProcessorPort        = 18003
@@ -117,6 +121,7 @@ const (
 	coreProcessName                  = "core"
 	scanControlPlaneProcessName      = "scan-control-plane"
 	fileWatcherProcessName           = "file-watcher"
+	sqliteServerProcessName          = "sqlite-server"
 	frontendProcessName              = "frontend"
 	docServerProcessName             = "lazyllm-doc-server"
 	processorServerProcessName       = "lazyllm-parse-server"
@@ -194,6 +199,8 @@ type RuntimePaths struct {
 	FileWatcherPIDFile       string
 	FileWatcherBin           string
 	FileWatcherBaseRoot      string
+	SQLiteServerLog          string
+	SQLiteServerPIDFile      string
 	FrontendLog              string
 	FrontendPIDFile          string
 	DocServerLog             string
@@ -234,6 +241,7 @@ type RuntimeConfig struct {
 	RuntimeRoot        string
 	ModeProfile        RuntimeModeProfileConfig
 	ProcessComposePort int
+	SQLiteServerPort   int
 	FrontendPort       int
 	NetworkProfile     string
 	LocalProxy         LocalProxyConfig
@@ -883,6 +891,8 @@ func NewRuntimeConfigWithOptions(opts RuntimeConfigOptions) (RuntimeConfig, Runt
 		FileWatcherPIDFile:       filepath.Join(runtimeRoot, "run", fileWatcherProcessName+".pid"),
 		FileWatcherBin:           executablePath(filepath.Join(buildRoot, "bin"), fileWatcherProcessName),
 		FileWatcherBaseRoot:      defaultFileWatcherBaseRoot(runtimeRoot),
+		SQLiteServerLog:          filepath.Join(logsRoot, sqliteServerProcessName+".log"),
+		SQLiteServerPIDFile:      filepath.Join(runtimeRoot, "run", sqliteServerProcessName+".pid"),
 		FrontendLog:              filepath.Join(logsRoot, frontendLogFileName),
 		FrontendPIDFile:          filepath.Join(runtimeRoot, "run", frontendProcessName+".pid"),
 		DocServerLog:             filepath.Join(logsRoot, docServerProcessName+".log"),
@@ -931,6 +941,7 @@ func NewRuntimeConfigWithOptions(opts RuntimeConfigOptions) (RuntimeConfig, Runt
 	scanHostPort := ports.resolvedPort("scan-control-plane", []string{localProxyScanHostPortEnvVar}, defaultLocalProxyScanHostPort)
 	channelHostPort := ports.resolvedPort(channelGatewayProcessName, []string{localProxyChannelHostPortEnvVar}, defaultLocalProxyChannelHostPort)
 	fileWatcherPort := ports.resolvedPort("file-watcher", []string{localFileWatcherPortEnvVar}, defaultLocalFileWatcherPort)
+	sqliteServerPort := ports.resolvedPort(sqliteServerProcessName, []string{localSQLiteServerPortEnvVar}, defaultLocalSQLiteServerPort)
 	postgresPort := ports.resolvedPort("postgres", []string{localPostgresPortEnvVar}, defaultLocalPostgresPort)
 	docPort := ports.resolvedPort("document-service", []string{localDocPortEnvVar}, defaultLocalDocPort)
 	processorPort := ports.resolvedPort("processor-server", []string{localProcessorPortEnvVar}, defaultLocalProcessorPort)
@@ -995,6 +1006,7 @@ func NewRuntimeConfigWithOptions(opts RuntimeConfigOptions) (RuntimeConfig, Runt
 		RuntimeRoot:        runtimeRoot,
 		ModeProfile:        localRuntimeModeProfile(milvusPort, milvusLiteDBPath),
 		ProcessComposePort: processComposePort,
+		SQLiteServerPort:   sqliteServerPort,
 		FrontendPort:       frontendPort,
 		NetworkProfile:     networkProfile,
 		CaddyVersion:       envText(caddyVersionEnvVar, defaultCaddyVersion),
@@ -1251,6 +1263,7 @@ func (p RuntimePaths) EnsureAllDirs() error {
 		p.ScanControlPlaneStateDir,
 		p.ScanControlPlaneTempDir,
 		p.FileWatcherBaseRoot,
+		filepath.Dir(p.SQLiteServerPIDFile),
 		p.AlgorithmHome,
 		p.AlgorithmPIDDir,
 		p.MilvusLiteDBPath,

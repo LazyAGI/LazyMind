@@ -17,17 +17,18 @@ import (
 
 // Allowed keys match runtime_models.yaml role keys (selection slot types).
 var allowedSelectionModelTypes = map[string]struct{}{
-	"llm":           {},
-	"evo_llm":       {},
-	"vlm":           {},
-	"text2image":    {},
-	"text2video":    {},
-	"embed_main":    {},
-	"tts":           {},
-	"image_editing": {},
-	"stt":           {},
-	"reranker":      {},
-	"embed_image":   {},
+	"llm":                   {},
+	"conversation_metadata": {},
+	"evo_llm":               {},
+	"vlm":                   {},
+	"text2image":            {},
+	"text2video":            {},
+	"embed_main":            {},
+	"tts":                   {},
+	"image_editing":         {},
+	"stt":                   {},
+	"reranker":              {},
+	"embed_image":           {},
 }
 
 // autoShareModelTypes are set share=true when an admin saves a selection so other users can use them.
@@ -651,7 +652,7 @@ func IsModelReady(ctx context.Context, db *gorm.DB, userID, modelType string) (b
 }
 
 func requiresDynamicSelection(ctx context.Context, modelType string) (bool, error) {
-	if modelType == EvoModelKey {
+	if modelType == EvoModelKey || modelType == "conversation_metadata" {
 		return true, nil
 	}
 	return FetchRoleIsDynamic(ctx, modelType)

@@ -1,10 +1,15 @@
 import {
-  assistantBridgeFetch,
+  ASSISTANT_BRIDGE_PLATFORM_MISMATCH,
+  assistantBridgeJSON,
+  isAssistantBridgePlatformMismatch,
   syncLocalAssistantSession,
   type LocalAssistantSession,
 } from "./assistantSession";
 
-export type DesktopBridgeUnavailableReason = "unavailable" | "failed";
+export type DesktopBridgeUnavailableReason =
+  | "unavailable"
+  | "failed"
+  | typeof ASSISTANT_BRIDGE_PLATFORM_MISMATCH;
 
 export type DesktopBridgeResult =
   | { ok: true }
@@ -160,6 +165,8 @@ interface LazyMindDesktopBridge {
   agentIntegrationAction?: (agent: DesktopAgent, action: DesktopAgentIntegrationAction) => Promise<unknown> | unknown;
   executorIntegrationPolicies?: () => Promise<unknown> | unknown;
   executorIntegrationAction?: (provider: DesktopExecutorProvider, action: DesktopExecutorPolicyAction) => Promise<unknown> | unknown;
+  ankiIntegrationStatus?: () => Promise<unknown> | unknown;
+  openAnki?: () => Promise<unknown> | unknown;
   agentExecutableBindings?: () => Promise<unknown> | unknown;
   agentExecutableBind?: (target: DesktopAgentBindingTarget, path: string) => Promise<unknown> | unknown;
   agentExecutableClear?: (target: DesktopAgentBindingTarget) => Promise<unknown> | unknown;
@@ -192,6 +199,14 @@ function getDesktopBridge(): LazyMindDesktopBridge | undefined {
 
   return (window as Window & { lazymindDesktop?: LazyMindDesktopBridge })
     .lazymindDesktop;
+}
+
+function localBridgeFailure(error: unknown, fallback: "unavailable" | "failed" = "unavailable") {
+  return {
+    ok: false as const,
+    reason: isAssistantBridgePlatformMismatch(error) ? ASSISTANT_BRIDGE_PLATFORM_MISMATCH : fallback,
+    error,
+  };
 }
 
 export function hasDesktopFileBridge(): boolean {
@@ -278,15 +293,12 @@ export async function agentIntegrationStatuses(): Promise<DesktopAgentIntegratio
       };
       return { ok: true, data: payload?.agents || {} };
     }
-    const response = await assistantBridgeFetch("/agents", undefined, STATUS_TIMEOUT_MS);
-    const payload = await response.json().catch(() => ({})) as {
+    const payload = await assistantBridgeJSON<{
       agents?: Partial<Record<DesktopAgent, DesktopAgentIntegrationStatus>>;
-      error?: string;
-    };
-    if (!response.ok) throw new Error(payload.error || `Assistant Bridge returned HTTP ${response.status}`);
+    }>("/agents", undefined, STATUS_TIMEOUT_MS);
     return { ok: true, data: payload.agents || {} };
   } catch (error) {
-    return { ok: false, reason: "unavailable", error };
+    return localBridgeFailure(error);
   }
 }
 
@@ -303,7 +315,7 @@ export async function agentIntegrationAction(agent: DesktopAgent, action: Deskto
       action === "login" ? LOGIN_TIMEOUT_MS : ACTION_TIMEOUT_MS,
     );
   } catch (error) {
-    return { ok: false, reason: "unavailable", error };
+    return localBridgeFailure(error);
   }
 }
 
@@ -316,15 +328,12 @@ export async function executorIntegrationPolicies(): Promise<DesktopExecutorPoli
       };
       return { ok: true, data: payload.executors || {} };
     }
-    const response = await assistantBridgeFetch("/executors", undefined, ACTION_TIMEOUT_MS);
-    const payload = await response.json().catch(() => ({})) as {
+    const payload = await assistantBridgeJSON<{
       executors?: Partial<Record<DesktopExecutorProvider, DesktopExecutorPolicy>>;
-      error?: string;
-    };
-    if (!response.ok) throw new Error(payload.error || `Assistant Bridge returned HTTP ${response.status}`);
+    }>("/executors", undefined, ACTION_TIMEOUT_MS);
     return { ok: true, data: payload.executors || {} };
   } catch (error) {
-    return { ok: false, reason: "unavailable", error };
+    return localBridgeFailure(error);
   }
 }
 
@@ -339,21 +348,35 @@ export async function executorIntegrationAction(
     if (bridge?.executorIntegrationAction) {
       payload = await bridge.executorIntegrationAction(provider, action);
     } else {
-      const response = await assistantBridgeFetch(
+      payload = await assistantBridgeJSON(
         `/executors/${encodeURIComponent(provider)}/${action}`,
         { method: "POST" },
         ACTION_TIMEOUT_MS,
       );
-      payload = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        const error = (payload as { error?: string }).error;
-        throw new Error(error || `Assistant Bridge returned HTTP ${response.status}`);
-      }
     }
     return { ok: true, data: payload as DesktopExecutorPolicy };
   } catch (error) {
-    return { ok: false, reason: "unavailable", error };
+    return localBridgeFailure(error);
   }
+}
+
+export interface DesktopAnkiStatus {
+  installed: boolean;
+  executable_path: string;
+  connect_installed: boolean;
+  addon_code: string;
+}
+
+export async function ankiIntegrationStatus(): Promise<DesktopAnkiStatus | null> {
+  const bridge = getDesktopBridge();
+  if (bridge?.ankiIntegrationStatus) return bridge.ankiIntegrationStatus() as Promise<DesktopAnkiStatus>;
+  return assistantBridgeJSON<DesktopAnkiStatus>("/anki/status", undefined, STATUS_TIMEOUT_MS);
+}
+
+export async function openAnki(): Promise<void> {
+  const bridge = getDesktopBridge();
+  if (bridge?.openAnki) { await bridge.openAnki(); return; }
+  await assistantBridgeJSON("/anki/open", { method: "POST" }, ACTION_TIMEOUT_MS);
 }
 
 export async function agentExecutableBindings(): Promise<DesktopAgentExecutableBindingsResult> {
@@ -363,16 +386,14 @@ export async function agentExecutableBindings(): Promise<DesktopAgentExecutableB
     if (bridge?.agentExecutableBindings) {
       payload = await bridge.agentExecutableBindings();
     } else {
-      const response = await assistantBridgeFetch("/bindings", undefined, ACTION_TIMEOUT_MS);
-      payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(`Assistant Bridge returned HTTP ${response.status}`);
+      payload = await assistantBridgeJSON("/bindings", undefined, ACTION_TIMEOUT_MS);
     }
     const bindings = (payload as {
       bindings?: Partial<Record<DesktopAgentBindingTarget, string>>;
     }).bindings;
     return { ok: true, data: bindings || {} };
   } catch (error) {
-    return { ok: false, reason: "unavailable", error };
+    return localBridgeFailure(error);
   }
 }
 
@@ -401,7 +422,7 @@ async function changeAgentExecutable(
     } else if (path === undefined && bridge?.agentExecutableClear) {
       payload = await bridge.agentExecutableClear(target);
     } else {
-      const response = await assistantBridgeFetch(
+      payload = await assistantBridgeJSON(
         `/bindings/${encodeURIComponent(target)}`,
         path === undefined
           ? { method: "DELETE" }
@@ -412,12 +433,10 @@ async function changeAgentExecutable(
           },
         BINDING_TIMEOUT_MS,
       );
-      payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error((payload as { error?: string }).error || `Assistant Bridge returned HTTP ${response.status}`);
     }
     return { ok: true, data: payload as DesktopAgentExecutableBinding };
   } catch (error) {
-    return { ok: false, reason: "failed", error };
+    return localBridgeFailure(error, "failed");
   }
 }
 
@@ -432,12 +451,10 @@ async function callLocalAssistantBridge(
   timeoutMs = ACTION_TIMEOUT_MS,
 ): Promise<DesktopAgentIntegrationResult> {
   try {
-    const response = await assistantBridgeFetch(path, init, timeoutMs);
-    const payload = await response.json().catch(() => ({})) as DesktopAgentIntegrationStatus & { error?: string };
-    if (!response.ok) throw new Error(payload.error || `Assistant Bridge returned HTTP ${response.status}`);
+    const payload = await assistantBridgeJSON<DesktopAgentIntegrationStatus>(path, init, timeoutMs);
     return { ok: true, data: payload };
   } catch (error) {
-    return { ok: false, reason: "unavailable", error };
+    return localBridgeFailure(error);
   }
 }
 

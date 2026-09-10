@@ -37,6 +37,8 @@ type Job struct {
 }
 
 type Result struct {
+	Permanent bool
+
 	ResultJSON       json.RawMessage
 	ErrorCode        string
 	ErrorDetailsJSON json.RawMessage
@@ -67,6 +69,11 @@ type EnqueueRequest struct {
 }
 
 type Options struct {
+	SerializeResources bool
+	JobTypes           []string
+	ExcludeJobTypes    []string
+	YieldToJobTypes    []string
+
 	WorkerID     string
 	Concurrency  int
 	PollInterval time.Duration
