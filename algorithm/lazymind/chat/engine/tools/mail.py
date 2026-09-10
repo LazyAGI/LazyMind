@@ -1614,13 +1614,14 @@ def _pending_to_cc(draft: dict[str, Any]) -> tuple[list[str], list[str]]:
     ]
     to_addrs = [str(addr).strip() for addr in (draft.get('to') or []) if str(addr).strip()]
     cc_addrs = [str(addr).strip() for addr in (draft.get('cc') or []) if str(addr).strip()]
-    if not pending:
-        return to_addrs, cc_addrs
-    pending_set = {addr.lower() for addr in pending}
-    to_out = [addr for addr in to_addrs if addr.lower() in pending_set]
-    cc_out = [addr for addr in cc_addrs if addr.lower() in pending_set]
-    used = {addr.lower() for addr in to_out + cc_out}
-    to_out.extend(addr for addr in pending if addr.lower() not in used)
+    if pending:
+        pending_set = {addr.lower() for addr in pending}
+        to_out = [addr for addr in to_addrs if addr.lower() in pending_set]
+        cc_out = [addr for addr in cc_addrs if addr.lower() in pending_set]
+        used = {addr.lower() for addr in to_out + cc_out}
+        to_out.extend(addr for addr in pending if addr.lower() not in used)
+    else:
+        to_out, cc_out = to_addrs, cc_addrs
     accepted = _address_set(draft.get('accepted_recipients'))
     if accepted:
         to_out = [addr for addr in to_out if addr.lower() not in accepted]
