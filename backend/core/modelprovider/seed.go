@@ -134,19 +134,14 @@ func upsertDefaultModel(tx *gorm.DB, now time.Time, providerID, providerName str
 	if name == "" || modelType == "" {
 		return errors.New("model name and type are required")
 	}
-	if item.MaxInputTokens != nil {
-		if modelType != "llm" && modelType != "vlm" && modelType != "embed" {
-			return errors.New("model max_input_tokens is only supported for llm, vlm, or embed models")
-		}
-		maxInputTokens := strings.ToUpper(strings.TrimSpace(*item.MaxInputTokens))
-		if !maxInputTokensPattern.MatchString(maxInputTokens) {
-			return errors.New("model max_input_tokens must be a positive integer or use a K or M suffix, for example 512, 128K, or 1M")
-		}
-		item.MaxInputTokens = &maxInputTokens
+	maxInputTokens, err := applyCatalogMaxInputTokens(modelType, item.MaxInputTokens)
+	if err != nil {
+		return err
 	}
+	item.MaxInputTokens = maxInputTokens
 
 	var row orm.DefaultModel
-	err := tx.Where("default_model_provider_id = ? AND name = ?", providerID, name).Take(&row).Error
+	err = tx.Where("default_model_provider_id = ? AND name = ?", providerID, name).Take(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		row = orm.DefaultModel{
 			ID:                     common.GenerateID(),
@@ -195,14 +190,21 @@ func syncDefaultModelToUserGroups(
 		Where("default_model_provider_id = ? AND deleted_at IS NULL", providerID)
 
 	updates := map[string]any{
-		"model_type":       modelType,
-		"max_input_tokens": maxInputTokens,
-		"updated_at":       now,
+		"model_type": modelType,
+		"updated_at": now,
 	}
 	if err := tx.Model(&orm.UserModelProviderGroupModel{}).
 		Where("is_default = ? AND name = ? AND user_model_provider_id IN (?) AND deleted_at IS NULL", true, modelName, providerIDs).
 		Updates(updates).Error; err != nil {
 		return err
+	}
+	if maxInputTokens != nil {
+		if err := tx.Model(&orm.UserModelProviderGroupModel{}).
+			Where("is_default = ? AND name = ? AND user_model_provider_id IN (?) AND deleted_at IS NULL", true, modelName, providerIDs).
+			Where("max_input_tokens IS NULL OR max_input_tokens = ?", "").
+			Update("max_input_tokens", *maxInputTokens).Error; err != nil {
+			return err
+		}
 	}
 
 	var catalog orm.DefaultModelProvider

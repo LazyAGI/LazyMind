@@ -895,20 +895,26 @@ type deleteModelProviderGroupOpenAPIResponse struct {
 }
 
 type addModelProviderGroupModelOpenAPIRequest struct {
-	Name      string `json:"name"`
-	ModelType string `json:"model_type"`
+	Name           string  `json:"name"`
+	ModelType      string  `json:"model_type"`
+	MaxInputTokens *string `json:"max_input_tokens,omitempty" desc:"LLM input context window, for example 512, 128K, or 1M. Defaults to 128K for llm models."`
 }
 
 type addModelProviderGroupModelOpenAPIResponse struct {
-	ID                       string `json:"id"`
-	UserModelProviderID      string `json:"user_model_provider_id"`
-	UserModelProviderGroupID string `json:"user_model_provider_group_id"`
-	Name                     string `json:"name"`
-	ModelType                string `json:"model_type"`
-	ProviderName             string `json:"provider_name"`
-	GroupName                string `json:"group_name"`
-	BaseURL                  string `json:"base_url"`
-	IsDefault                bool   `json:"is_default"`
+	ID                       string  `json:"id"`
+	UserModelProviderID      string  `json:"user_model_provider_id"`
+	UserModelProviderGroupID string  `json:"user_model_provider_group_id"`
+	Name                     string  `json:"name"`
+	ModelType                string  `json:"model_type"`
+	ProviderName             string  `json:"provider_name"`
+	GroupName                string  `json:"group_name"`
+	BaseURL                  string  `json:"base_url"`
+	IsDefault                bool    `json:"is_default"`
+	MaxInputTokens           *string `json:"max_input_tokens,omitempty" desc:"Stored LLM input context window, for example 512, 128K, or 1M" nullable:"true"`
+}
+
+type updateModelProviderGroupModelOpenAPIRequest struct {
+	MaxInputTokens string `json:"max_input_tokens" desc:"LLM input context window, for example 512, 128K, or 1M"`
 }
 
 type listModelProviderGroupModelsOpenAPIItem struct {
@@ -3722,6 +3728,16 @@ func registeredCoreOperations() []openAPIOperation {
 			PathParams:  modelProviderGroupByIDPathParams{},
 			RequestBody: jsonBodyOf(addModelProviderGroupModelOpenAPIRequest{}, true),
 			Responses:   map[int]openAPIResponse{200: resp("Created group model", addModelProviderGroupModelOpenAPIResponse{})},
+		},
+		{
+			Method:      "PATCH",
+			Path:        "/model_providers/{model_provider_id}/groups/{group_id}/models/{model_id}",
+			Summary:     "Update a connection group model",
+			Description: "Updates the stored max_input_tokens for an LLM under the group. Values use a positive integer or K/M suffix such as 512, 128K, or 1M. Other model types cannot set this field.",
+			Tags:        []string{"model_providers"},
+			PathParams:  modelProviderGroupModelPathParams{},
+			RequestBody: jsonBodyOf(updateModelProviderGroupModelOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Updated group model", listModelProviderGroupModelsOpenAPIItem{})},
 		},
 		{
 			Method:      "DELETE",

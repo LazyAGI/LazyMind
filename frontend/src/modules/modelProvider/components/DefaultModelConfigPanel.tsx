@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Alert, Button, Modal, Select, Skeleton, Switch, Tag, Tooltip, message } from "antd";
+import { Alert, Button, Input, Modal, Select, Skeleton, Switch, Tag, Tooltip, message } from "antd";
 import {
   ApiOutlined,
   CheckCircleOutlined,
@@ -21,9 +21,11 @@ import { runtimeFeatures } from "@/runtime/features";
 import {
   modelProvidersApi,
   modelProvidersDefaultApi,
+  patchGroupModelMaxInputTokens,
   unwrapModelProviderData,
   withModelProviderJsonOptions,
 } from "../api";
+import { isLlmChatCapability, parseLlmMaxInputTokens, resolveLlmMaxInputTokens } from "../maxInputTokens";
 
 const SENSENOVA_LOGO_URL = "https://www.sensenova.ai/images/logo.png";
 
@@ -731,7 +733,11 @@ export default function DefaultModelConfigPanel({
           isEditable,
         };
         nextSelectedModels[capability] = option.value;
-        if (selection.max_input_tokens?.trim()) {
+        if (capability === "llm") {
+          nextSelectedModelMaxInputTokens[capability] = resolveLlmMaxInputTokens(
+            selection.max_input_tokens,
+          );
+        } else if (selection.max_input_tokens?.trim()) {
           nextSelectedModelMaxInputTokens[capability] =
             selection.max_input_tokens;
         }
@@ -1091,7 +1097,12 @@ export default function DefaultModelConfigPanel({
     }));
     setSelectedModelMaxInputTokens((current) => ({
       ...current,
-      [capability]: maxInputTokens?.trim() ? maxInputTokens : undefined,
+      [capability]:
+        capability === "llm" && value
+          ? resolveLlmMaxInputTokens(maxInputTokens)
+          : maxInputTokens?.trim()
+            ? maxInputTokens
+            : undefined,
     }));
     if (!value) {
       setShareStatus((current) => ({ ...current, [capability]: false }));
@@ -1114,14 +1125,65 @@ export default function DefaultModelConfigPanel({
           setSelectedModelMaxInputTokens((current) => ({
             ...current,
             [selectedCapability]:
-              selection.max_input_tokens?.trim()
-                ? selection.max_input_tokens
-                : undefined,
+              selectedCapability === "llm"
+                ? resolveLlmMaxInputTokens(selection.max_input_tokens)
+                : selection.max_input_tokens?.trim()
+                  ? selection.max_input_tokens
+                  : undefined,
           }));
         });
         void onModelSelectionChanged();
       })
       .catch(() => {});
+  };
+
+  const saveLlmMaxInputTokens = async (rawValue?: string) => {
+    const selectedValue = selectedModels.llm;
+    if (!selectedValue) {
+      return;
+    }
+    const nextValue = parseLlmMaxInputTokens(rawValue);
+    if (!nextValue) {
+      message.error(t("modelProvider.validation.maxInputTokensInvalid"));
+      setSelectedModelMaxInputTokens((current) => ({
+        ...current,
+        llm: resolveLlmMaxInputTokens(current.llm),
+      }));
+      return;
+    }
+    const { providerId, groupId, modelId } = parseModelValue(selectedValue);
+    if (!providerId || !groupId || !modelId) {
+      return;
+    }
+    try {
+      await patchGroupModelMaxInputTokens({
+        modelProviderId: providerId,
+        groupId,
+        modelId,
+        maxInputTokens: nextValue,
+      });
+      setSelectedModelMaxInputTokens((current) => ({
+        ...current,
+        llm: nextValue,
+      }));
+      setModuleModelOptions((current) => ({
+        ...current,
+        llm: (current.llm || []).map((option) =>
+          option.value === selectedValue
+            ? {
+                ...option,
+                model: {
+                  ...option.model,
+                  maxInputTokens: nextValue,
+                },
+              }
+            : option
+        ),
+      }));
+      message.success(t("modelProvider.message.maxInputTokensSaved"));
+      void onModelSelectionChanged();
+    } catch {
+    }
   };
 
   const handleModelSelection = (
@@ -1359,7 +1421,10 @@ export default function DefaultModelConfigPanel({
           const moduleTitle = t(module.titleKey);
           const moduleSubtitle = t(module.subtitleKey);
           const maxInputTokens = selectedModelMaxInputTokens[module.key];
-          const shouldShowMaxInputTokens = Boolean(maxInputTokens?.trim());
+          const shouldEditLlmMaxInputTokens =
+            isLlmChatCapability(module.key) && Boolean(selectedModels[module.key]);
+          const shouldShowMaxInputTokens =
+            !shouldEditLlmMaxInputTokens && Boolean(maxInputTokens?.trim());
 
           return (
             <div
@@ -1376,7 +1441,21 @@ export default function DefaultModelConfigPanel({
                   ) : null}
                   <span>{moduleTitle}</span>
                 </label>
-                {shouldShowMaxInputTokens ? (
+                {shouldEditLlmMaxInputTokens ? (
+                  <Input
+                    aria-label={t("modelProvider.maxInputTokensLabel")}
+                    className="model-provider-max-input-tokens-input"
+                    placeholder={t("modelProvider.maxInputTokensPlaceholder")}
+                    value={maxInputTokens ?? ""}
+                    onBlur={(event) => void saveLlmMaxInputTokens(event.target.value)}
+                    onChange={(event) =>
+                      setSelectedModelMaxInputTokens((current) => ({
+                        ...current,
+                        llm: event.target.value,
+                      }))
+                    }
+                  />
+                ) : shouldShowMaxInputTokens ? (
                   <span className="model-provider-max-input-tokens">
                     {t("modelProvider.maxInputTokens", {
                       value: maxInputTokens,

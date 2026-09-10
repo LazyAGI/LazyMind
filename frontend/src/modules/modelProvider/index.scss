@@ -312,6 +312,19 @@
   white-space: nowrap;
 }
 
+.model-provider-max-input-tokens-input.ant-input,
+.model-provider-model-max-input-tokens.ant-input {
+  width: 96px;
+  height: 28px;
+  padding: 0 8px;
+  font-size: 12px;
+  border-radius: 8px;
+}
+
+.model-provider-model-max-input-tokens.ant-input {
+  margin-left: 8px;
+}
+
 .model-provider-model-select .ant-select-selector {
   min-height: 42px !important;
   padding: 4px 12px !important;
