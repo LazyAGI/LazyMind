@@ -566,6 +566,9 @@ const zhCN = {
     modelName: "模型名称",
     modelNamePlaceholder: "例如 qwen-max-latest",
     modelType: "模型类型",
+    maxInputTokensLabel: "上下文长度",
+    maxInputTokensExtra: "可填写 512、128K 或 1M。能从配置读到时使用配置值，否则默认 128K。",
+    maxInputTokensPlaceholder: "128K",
     providerDescriptionFallback: "系统内置模型供应商，可配置连接分组后使用。",
     providerDescriptions: {
       claude: "Anthropic 的 Claude 模型，擅长复杂推理、编码与多模态任务。\n\n获取 API Key：\nhttps://console.anthropic.com/settings/keys",
@@ -604,6 +607,8 @@ const zhCN = {
       modelNameMax: "模型名称不能超过 120 个字符",
       modelNamePattern: "仅支持字母、数字、下划线、点和短横线",
       modelTypeRequired: "请选择模型类型",
+      maxInputTokensRequired: "请输入上下文长度",
+      maxInputTokensInvalid: "请使用正整数或 K/M 后缀，例如 512、128K、1M",
     },
     message: {
       groupSaved: "{{name}} 已保存",
@@ -615,6 +620,7 @@ const zhCN = {
       groupRemoved: "{{name}} 已移除",
       providerRemoved: "{{name}} 已移除",
       modelAdded: "模型已添加",
+      maxInputTokensSaved: "上下文长度已保存",
       modelDeleted: "模型已删除",
     },
     autoSelection: {

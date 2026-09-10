@@ -42,3 +42,20 @@ export function unwrapModelProviderData<T>(payload: unknown): T {
   }
   return payload as T;
 }
+
+export function patchGroupModelMaxInputTokens(params: {
+  modelProviderId: string;
+  groupId: string;
+  modelId: string;
+  maxInputTokens: string;
+}) {
+  return axiosInstance.patch(
+    `${BASE_URL}/api/core/model_providers/${params.modelProviderId}/groups/${params.groupId}/models/${params.modelId}`,
+    { max_input_tokens: params.maxInputTokens },
+    {
+      headers: {
+        "Content-Type": "application/json",
+      },
+    },
+  );
+}

@@ -14,8 +14,9 @@ import {
   SearchOutlined,
   UpOutlined,
 } from "@ant-design/icons";
-import { modelProvidersApi, unwrapModelProviderData } from "../api";
+import { modelProvidersApi, patchGroupModelMaxInputTokens, unwrapModelProviderData } from "../api";
 import { getProviderLogoUrl } from "../providerBranding";
+import { DEFAULT_LLM_MAX_INPUT_TOKENS, isLlmChatCapability, parseLlmMaxInputTokens, resolveLlmMaxInputTokens } from "../maxInputTokens";
 import "../index.scss";
 
 export type ModelCapability =
@@ -37,6 +38,7 @@ interface ProviderModel {
   capability: ModelCapability;
   builtIn: boolean;
   enabled: boolean;
+  maxInputTokens?: string;
 }
 
 interface ProviderOption {
@@ -105,6 +107,7 @@ interface CustomModelFormValues {
   groupId: string;
   name: string;
   capability: ModelCapability;
+  maxInputTokens?: string;
 }
 
 const capabilityLabelKeys: Record<ModelCapability, string> = {
@@ -448,6 +451,7 @@ interface ApiModel {
   name: string;
   model_type?: string;
   is_default?: boolean;
+  max_input_tokens?: string;
 }
 
 function mapApiProvider(provider: ApiProvider, fallbacks: ModelProviderFallbacks): ProviderOption {
@@ -502,6 +506,7 @@ function mapApiGroup(
       capability: mapModelTypeToCapability(model.model_type),
       builtIn: Boolean(model.is_default),
       enabled: true,
+      maxInputTokens: model.max_input_tokens,
     })),
   });
 }
@@ -631,6 +636,7 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
   const [sensenovaBaseUrlPreset, setSensenovaBaseUrlPreset] = useState<string>("");
   const watchedProviderBaseUrl = Form.useWatch("baseUrl", providerConfigForm);
   const watchedProviderApiKey = Form.useWatch("apiKey", providerConfigForm);
+  const watchedCustomCapability = Form.useWatch("capability", customModelForm);
   const providerApiKeyInputRef = useRef<InputRef>(null);
   const verifyApiKeyInputRef = useRef<InputRef>(null);
   const providerSearchRequestIdRef = useRef(0);
@@ -1195,6 +1201,7 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
       groupId: group.id,
       capability: provider.capabilities[0] || "LLM_CHAT",
       name: "",
+      maxInputTokens: DEFAULT_LLM_MAX_INPUT_TOKENS,
     });
   };
 
@@ -1219,13 +1226,24 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
     }
 
     try {
+      const maxInputTokens = isLlmChatCapability(values.capability)
+        ? parseLlmMaxInputTokens(values.maxInputTokens)
+        : undefined;
+      if (isLlmChatCapability(values.capability) && !maxInputTokens) {
+        customModelForm.setFields([{
+          name: "maxInputTokens",
+          errors: [t("modelProvider.validation.maxInputTokensInvalid")],
+        }]);
+        return;
+      }
       const createdModel = unwrapModelProviderData<ApiModel>((await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsPost({
         modelProviderId: provider.id,
         groupId: group.id,
         addModelProviderGroupModelOpenAPIRequest: {
           name: values.name.trim(),
           model_type: getModelTypeForCapability(values.capability),
-        },
+          ...(maxInputTokens ? { max_input_tokens: maxInputTokens } : {}),
+        } as { name: string; model_type: string; max_input_tokens?: string },
       })).data);
       const nextModel: ProviderModel = {
         id: createdModel.id,
@@ -1235,6 +1253,7 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
         ),
         builtIn: Boolean(createdModel.is_default),
         enabled: true,
+        maxInputTokens: createdModel.max_input_tokens || maxInputTokens,
       };
       setAddedProviderList((current) =>
         current.map((item) =>
@@ -1256,6 +1275,52 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
       message.success(t("modelProvider.message.modelAdded"));
       void onConfigurationChanged?.();
       closeCustomModelModal();
+    } catch (error) {
+    }
+  };
+
+  const saveModelMaxInputTokens = async (
+    providerId: string,
+    groupId: string,
+    model: ProviderModel,
+    rawValue?: string,
+  ) => {
+    const nextValue = parseLlmMaxInputTokens(rawValue);
+    if (!nextValue) {
+      message.error(t("modelProvider.validation.maxInputTokensInvalid"));
+      return;
+    }
+    if (resolveLlmMaxInputTokens(model.maxInputTokens) === nextValue && model.maxInputTokens?.trim()) {
+      return;
+    }
+    try {
+      await patchGroupModelMaxInputTokens({
+        modelProviderId: providerId,
+        groupId,
+        modelId: model.id,
+        maxInputTokens: nextValue,
+      });
+      setAddedProviderList((current) =>
+        current.map((provider) =>
+          provider.id === providerId
+            ? {
+                ...provider,
+                groups: provider.groups.map((group) =>
+                  group.id === groupId
+                    ? {
+                        ...group,
+                        models: group.models.map((item) =>
+                          item.id === model.id ? { ...item, maxInputTokens: nextValue } : item
+                        ),
+                      }
+                    : group
+                ),
+              }
+            : provider
+        )
+      );
+      message.success(t("modelProvider.message.maxInputTokensSaved"));
+      void onConfigurationChanged?.();
     } catch (error) {
     }
   };
@@ -1425,6 +1490,23 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
                                               <strong>{model.name}</strong>
                                               <CapabilityTag label={getCapabilityLabel(model.capability)} />
                                               {model.builtIn ? null : <Tag className="model-provider-custom-tag">{t("modelProvider.custom")}</Tag>}
+                                              {isLlmChatCapability(model.capability) ? (
+                                                <Input
+                                                  aria-label={t("modelProvider.maxInputTokensLabel")}
+                                                  className="model-provider-model-max-input-tokens"
+                                                  defaultValue={resolveLlmMaxInputTokens(model.maxInputTokens)}
+                                                  key={`${model.id}:${resolveLlmMaxInputTokens(model.maxInputTokens)}`}
+                                                  placeholder={t("modelProvider.maxInputTokensPlaceholder")}
+                                                  onBlur={(event) =>
+                                                    void saveModelMaxInputTokens(
+                                                      provider.id,
+                                                      group.id,
+                                                      model,
+                                                      event.target.value,
+                                                    )
+                                                  }
+                                                />
+                                              ) : null}
                                             </div>
 
                                             <div className="model-provider-model-actions">
@@ -1766,7 +1848,13 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
           </Form.Item>
 
           <Form.Item label={t("modelProvider.modelType")} name="capability" rules={[{ required: true, message: t("modelProvider.validation.modelTypeRequired") }]}>
-            <Select>
+            <Select
+              onChange={(value) => {
+                if (isLlmChatCapability(value) && !customModelForm.getFieldValue("maxInputTokens")) {
+                  customModelForm.setFieldValue("maxInputTokens", DEFAULT_LLM_MAX_INPUT_TOKENS);
+                }
+              }}
+            >
               {customModelModal?.provider.capabilities.map((capability) => (
                 <Select.Option key={capability} value={capability}>
                   {getCapabilityLabel(capability)}
@@ -1774,6 +1862,26 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
               ))}
             </Select>
           </Form.Item>
+
+          {isLlmChatCapability(watchedCustomCapability) ? (
+            <Form.Item
+              extra={t("modelProvider.maxInputTokensExtra")}
+              label={t("modelProvider.maxInputTokensLabel")}
+              name="maxInputTokens"
+              normalize={(value: string | undefined) => value?.trim()}
+              rules={[
+                { required: true, message: t("modelProvider.validation.maxInputTokensRequired") },
+                {
+                  validator: (_, value?: string) =>
+                    parseLlmMaxInputTokens(value)
+                      ? Promise.resolve()
+                      : Promise.reject(new Error(t("modelProvider.validation.maxInputTokensInvalid"))),
+                },
+              ]}
+            >
+              <Input maxLength={16} placeholder={t("modelProvider.maxInputTokensPlaceholder")} />
+            </Form.Item>
+          ) : null}
         </Form>
       </Modal>
     </div>

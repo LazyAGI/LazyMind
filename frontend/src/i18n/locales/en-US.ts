@@ -581,6 +581,9 @@ const enUS = {
     modelName: "Model Name",
     modelNamePlaceholder: "Example: qwen-max-latest",
     modelType: "Model Type",
+    maxInputTokensLabel: "Context length",
+    maxInputTokensExtra: "Use 512, 128K, or 1M. Catalog values are used when available; otherwise the default is 128K.",
+    maxInputTokensPlaceholder: "128K",
     providerDescriptionFallback: "Built-in model provider. Configure a connection group before use.",
     providerDescriptions: {
       claude:
@@ -630,6 +633,8 @@ const enUS = {
       modelNameMax: "Model name cannot exceed 120 characters",
       modelNamePattern: "Only letters, numbers, underscores, dots, and hyphens are supported",
       modelTypeRequired: "Select model type",
+      maxInputTokensRequired: "Enter context length",
+      maxInputTokensInvalid: "Use a positive integer or a K/M suffix, for example 512, 128K, or 1M",
     },
     message: {
       groupSaved: "{{name}} saved",
@@ -641,6 +646,7 @@ const enUS = {
       groupRemoved: "{{name}} removed",
       providerRemoved: "{{name}} removed",
       modelAdded: "Model added",
+      maxInputTokensSaved: "Context length saved",
       modelDeleted: "Model deleted",
     },
     autoSelection: {

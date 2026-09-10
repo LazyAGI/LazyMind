@@ -136,16 +136,11 @@ func upsertDefaultModel(tx *gorm.DB, now time.Time, providerID, providerName str
 	if name == "" || modelType == "" {
 		return errors.New("model name and type are required")
 	}
-	if item.MaxInputTokens != nil {
-		if modelType != "llm" && modelType != "vlm" && modelType != "embed" {
-			return errors.New("model max_input_tokens is only supported for llm, vlm, or embed models")
-		}
-		maxInputTokens := strings.ToUpper(strings.TrimSpace(*item.MaxInputTokens))
-		if !maxInputTokensPattern.MatchString(maxInputTokens) {
-			return errors.New("model max_input_tokens must be a positive integer or use a K or M suffix, for example 512, 128K, or 1M")
-		}
-		item.MaxInputTokens = &maxInputTokens
+	maxInputTokens, err := applyCatalogMaxInputTokens(modelType, item.MaxInputTokens)
+	if err != nil {
+		return err
 	}
+	item.MaxInputTokens = maxInputTokens
 	if item.FreeAutoSelectPriority < 0 {
 		return errors.New("model free_auto_select_priority must not be negative")
 	}
@@ -244,7 +239,6 @@ func syncDefaultModelToUserGroups(
 
 	updates := map[string]any{
 		"model_type":                 modelType,
-		"max_input_tokens":           maxInputTokens,
 		"free_auto_select_priority":  freeAutoSelectPriority,
 		"free_auto_select_base_urls": freeAutoSelectBaseURLs,
 		"updated_at":                 now,
@@ -253,6 +247,14 @@ func syncDefaultModelToUserGroups(
 		Where("is_default = ? AND name = ? AND user_model_provider_id IN (?) AND deleted_at IS NULL", true, modelName, providerIDs).
 		Updates(updates).Error; err != nil {
 		return err
+	}
+	if maxInputTokens != nil {
+		if err := tx.Model(&orm.UserModelProviderGroupModel{}).
+			Where("is_default = ? AND name = ? AND user_model_provider_id IN (?) AND deleted_at IS NULL", true, modelName, providerIDs).
+			Where("max_input_tokens IS NULL OR max_input_tokens = ?", "").
+			Update("max_input_tokens", *maxInputTokens).Error; err != nil {
+			return err
+		}
 	}
 
 	var catalog orm.DefaultModelProvider
