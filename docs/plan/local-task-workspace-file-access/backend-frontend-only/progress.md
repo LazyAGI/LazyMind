@@ -421,3 +421,6 @@ NODE_OPTIONS=--no-experimental-webstorage pnpm run build
 - PostgreSQL+Redis 专属临时实例验证已重新运行并通过：localworkspace 全套通过，chat 的 main identity、workflow identity、并发 prepare/approve/execute、16 槽容量、撤销围栏和跨进程单次消费均通过；实例和数据目录已销毁，未连接用户数据库。
 
 仍未宣称完成的自动化/运行态边界：真实登录、模型驱动的主流式/非流式/双回复身份注册、真实 FastAPI 子任务启动、Windows/打包 Desktop、用户目录选择和跨平台符号链接/外部编辑器并发。这些属于人工或平台验收，不能由当前 HTTP fixture 代替。工作区文件二进制传输、任意脚本/shell/MCP 宿主执行以及旧 Writer/media 全量注册仍保持拒绝或待专项设计；没有通过提示词或 trusted 绕过。
+
+
+本批冻结记录（提交 `a2f1d558c3d70253450a1fa7b299f660e31dc966`，冻结基线：Local/Desktop `ec4676e0d0fb290d81b3160a56e798849ea2d4e4`，LazyLLM `2e3d00ac3ae4ae983cb7d0ca4bd231c1a56ebfc0`）：涉及文件 SHA-256 已核对为 `workspace.py=056b0f112c3e5f11528baa9cc5bca141a08fa5b4cf5aa60cddf8db100aa027c8`、`mail.py=5217a4e8de2e5599a1477e83e4b6ab0b34b8c56321642073c34f668e2d326da2`、`tool_registry.py=cab5e28bf6d11511a6a6079bb9264e41a6fbfcc59d470fb5aa6d8994db82d4f5`、`run_decision_test.go=cb9b186804243e49383c5289424910260bd9a110a42129ad4330bddd52566619`、`test_mail_toolkit.py=5be3d5c188d391a0ecc0b5de37c84039ec9defc96ca29cb4a7893bc92160c732`、`test_tool_registry.py=4726ca2171481bae9c89bf3a33181472eff75f753b2ebee618dd1e0c0e3d0295`、`test_workspace_authorization_contract.py=03600fc7a0033a6691231624d07145e78b63e59c04e3ea94254ef755f62a8b0d`。
