@@ -22,7 +22,7 @@ func TestIncrementalBatchAuditResumeAndPartition(t *testing.T) {
 		t.Fatal(err)
 	}
 	snapshot := organizerSnapshot{ID: "r", Conversations: []snapshotConversation{}, Groups: []snapshotGroup{}}
-	for i := 0; i < 53; i++ {
+	for i := 0; i < 103; i++ {
 		id := fmt.Sprintf("c%03d", i)
 		snapshot.Conversations = append(snapshot.Conversations, snapshotConversation{ID: id, Summary: "工作"})
 		if err := db.Create(&orm.ConversationOrganizerSnapshotItem{RunID: "r", ConversationID: id, Ordinal: i, Summary: "工作", PreparationStatus: "done"}).Error; err != nil {
@@ -66,11 +66,20 @@ func TestIncrementalBatchAuditResumeAndPartition(t *testing.T) {
 			batchCalls++
 			if input.Cursor == 0 {
 				out.Operations = []candidateOperation{{Op: "create", ID: "cand_work", Name: "工作", Scope: "处理工作"}}
+			} else if input.Cursor == 50 {
+				out.Operations = []candidateOperation{{Op: "create", ID: "cand_more", Name: "其他工作", Scope: "更多工作"}}
 			} else {
-				out.Operations = []candidateOperation{{Op: "update", ID: "cand_work", Scope: "处理各类工作"}}
+				out.Operations = []candidateOperation{
+					{Op: "merge", SourceIDs: []string{"cand_work", "cand_more"}, TargetID: "cand_work", Name: "工作", Scope: "所有工作"},
+					{Op: "update", ID: "cand_work", Scope: "处理各类工作"},
+				}
 			}
 			for _, item := range input.Conversations {
-				out.Assignments = append(out.Assignments, incrementalAssignment{ID: item.ID, GroupID: "cand_work"})
+				target := "cand_work"
+				if input.Cursor == 50 {
+					target = "cand_more"
+				}
+				out.Assignments = append(out.Assignments, incrementalAssignment{ID: item.ID, GroupID: target})
 			}
 		}
 		json.NewEncoder(w).Encode(map[string]any{"type": "result", "result": organizerTaskResult{Status: "succeeded", Output: out}})
@@ -89,8 +98,13 @@ func TestIncrementalBatchAuditResumeAndPartition(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if proposal == nil || len(proposal.NewGroups) != 1 || len(proposal.NewGroups[0].ConversationIDs) != 53 || batchCalls != 2 || auditCalls != 1 {
+	if proposal == nil || len(proposal.NewGroups) != 1 || len(proposal.NewGroups[0].ConversationIDs) != 103 || batchCalls != 3 || auditCalls != 4 {
 		t.Fatalf("incomplete: proposal=%+v batches=%d audits=%d", proposal, batchCalls, auditCalls)
+	}
+	var oldAssignments int64
+	db.Model(&orm.ConversationOrganizerSnapshotItem{}).Where("run_id=? AND assignment=?", run.ID, "cand_more").Count(&oldAssignments)
+	if oldAssignments != 50 {
+		t.Fatalf("merge rewrote old assignment buckets: %d", oldAssignments)
 	}
 	var cp map[string]any
 	json.Unmarshal(run.CheckpointJSON, &cp)
@@ -223,5 +237,26 @@ func TestLegacyUpgradeKeepsCompletedRuns(t *testing.T) {
 		if run.Status != expected {
 			t.Fatalf("%s became %s", status, run.Status)
 		}
+	}
+}
+
+func TestCandidateOperationsProtectFormalGroupsAndNames(t *testing.T) {
+	for _, op := range []candidateOperation{
+		{Op: "rename", ID: "g1", Name: "changed"},
+		{Op: "update", ID: "g1", Scope: "changed"},
+		{Op: "merge", SourceIDs: []string{"g1", "cand_a"}, TargetID: "cand_a", Name: "merged", Scope: "merged"},
+		{Op: "create", ID: "cand_new", Name: " Formal ", Scope: "work"},
+		{Op: "rename", ID: "cand_a", Name: " beta "},
+	} {
+		t.Run(op.Op+op.ID, func(t *testing.T) {
+			cards := map[string]directoryCard{
+				"g1":     {ID: "g1", Kind: "existing", Name: "Formal", Scope: "work", Version: 1},
+				"cand_a": {ID: "cand_a", Kind: "candidate", Name: "Alpha", Scope: "work", Version: 1},
+				"cand_b": {ID: "cand_b", Kind: "candidate", Name: "Beta", Scope: "work", Version: 1},
+			}
+			if _, err := applyCandidateOperation(cards, op); err == nil {
+				t.Fatalf("accepted invalid operation: %+v", op)
+			}
+		})
 	}
 }

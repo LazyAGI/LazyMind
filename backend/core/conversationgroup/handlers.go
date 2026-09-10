@@ -321,12 +321,9 @@ func DeleteGroup(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		for _, cid := range memberIDs {
-			if _, err := advanceGroupState(tx, uid, cid, nil, ""); err != nil {
+			if _, err := moveMembershipTx(tx, uid, cid, nil, CreatedByUser, ""); err != nil {
 				return err
 			}
-		}
-		if err := tx.Where("group_id=? AND user_id=?", id, uid).Delete(&orm.ConversationGroupMember{}).Error; err != nil {
-			return err
 		}
 		return tx.Model(&group).Updates(map[string]any{"deleted_at": now, "normalized_name": group.NormalizedName + "#deleted#" + group.ID, "updated_at": now, "version": gorm.Expr("version + 1")}).Error
 	})
@@ -369,15 +366,15 @@ func RemoveMember(w http.ResponseWriter, r *http.Request) {
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id=? AND user_id=? AND deleted_at IS NULL", gid, uid).Take(&group).Error; err != nil {
 			return err
 		}
-		if _, err := advanceGroupState(tx, uid, cid, nil, ""); err != nil {
+		var member orm.ConversationGroupMember
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("conversation_id=? AND user_id=? AND group_id=?", cid, uid, gid).Take(&member).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errors.New("conversation membership changed")
+			}
 			return err
 		}
-		res := tx.Where("conversation_id=? AND user_id=? AND group_id=?", cid, uid, gid).Delete(&orm.ConversationGroupMember{})
-		if res.Error != nil {
-			return res.Error
-		}
-		if res.RowsAffected != 1 {
-			return errors.New("conversation membership changed")
+		if _, err := moveMembershipTx(tx, uid, cid, nil, CreatedByUser, ""); err != nil {
+			return err
 		}
 		return nil
 	})
@@ -400,35 +397,14 @@ func MoveConversation(ctx context.Context, db *gorm.DB, uid, conversationID, gro
 		if err := RequireOrganizerUnlocked(ctx, tx, uid, []string{conversationID}, runID); err != nil {
 			return err
 		}
-		if groupID == "" {
-			if _, err := advanceGroupState(tx, uid, conversationID, nil, runID); err != nil {
+		if groupID != "" {
+			var group orm.ConversationGroup
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id=? AND user_id=? AND deleted_at IS NULL", groupID, uid).Take(&group).Error; err != nil {
 				return err
 			}
-			if err := tx.Where("conversation_id=? AND user_id=?", conversationID, uid).Delete(&orm.ConversationGroupMember{}).Error; err != nil {
-				return err
-			}
-			return nil
 		}
-		var group orm.ConversationGroup
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id=? AND user_id=? AND deleted_at IS NULL", groupID, uid).Take(&group).Error; err != nil {
-			return err
-		}
-		if _, err := advanceGroupState(tx, uid, conversationID, &groupID, runID); err != nil {
-			return err
-		}
-		var old orm.ConversationGroupMember
-		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("conversation_id=?", conversationID).Take(&old).Error
-		now := time.Now().UTC()
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			if err := tx.Create(&orm.ConversationGroupMember{ConversationID: conversationID, GroupID: groupID, UserID: uid, Revision: 1, Source: source, SourceRunID: runID, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
-				return err
-			}
-		} else if err != nil {
-			return err
-		} else if err := tx.Model(&old).Updates(map[string]any{"group_id": groupID, "revision": gorm.Expr("revision + 1"), "source": source, "source_run_id": runID, "updated_at": now}).Error; err != nil {
-			return err
-		}
-		return nil
+		_, err := moveMembershipTx(tx, uid, conversationID, groupIDOrNil(groupID), source, runID)
+		return err
 	})
 }
 
@@ -442,32 +418,11 @@ func AttachNewConversation(ctx context.Context, tx *gorm.DB, uid, conversationID
 		}
 		return err
 	}
-	now := time.Now().UTC()
-	if err := tx.Create(&orm.ConversationGroupMember{ConversationID: conversationID, GroupID: groupID, UserID: uid, Revision: 1, Source: CreatedByUser, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
-		return err
-	}
-	_, err := advanceGroupState(tx, uid, conversationID, &groupID, "")
+	_, err := moveMembershipTx(tx, uid, conversationID, &groupID, CreatedByUser, "")
 	return err
 }
 
 type ConversationGroupLookup struct{ ID string }
-
-func advanceGroupState(tx *gorm.DB, uid, cid string, groupID *string, runID string) (int64, error) {
-	var state orm.ConversationGroupState
-	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("conversation_id=? AND user_id=?", cid, uid).Take(&state).Error
-	now := time.Now().UTC()
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		state = orm.ConversationGroupState{ConversationID: cid, UserID: uid, GroupID: groupID, Revision: 1, SourceRunID: runID, UpdatedAt: now}
-		return 1, tx.Create(&state).Error
-	}
-	if err != nil {
-		return 0, err
-	}
-	state.Revision++
-	state.GroupID = groupID
-	state.SourceRunID = runID
-	return state.Revision, tx.Model(&state).Updates(map[string]any{"group_id": groupID, "revision": state.Revision, "source_run_id": runID, "updated_at": now}).Error
-}
 
 func IsDeleteLocked(ctx context.Context, tx *gorm.DB, uid string, ids []string) (bool, error) {
 	return isOrganizerLocked(ctx, tx, uid, ids, "")

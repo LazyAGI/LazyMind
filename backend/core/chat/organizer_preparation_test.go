@@ -20,6 +20,10 @@ func TestOrganizerFreezeRejectsStaleProvisionalAndPreservesClosedOpening(t *test
 	if err := s.db.Create(&meta).Error; err != nil {
 		t.Fatal(err)
 	}
+	out, err := (OrganizerOpeningPreparer{}).Freeze(t.Context(), s.db, conv)
+	if err != nil || out.Summary != "旧摘要" || out.Reason != "" {
+		t.Fatalf("matching provisional must remain eligible: %+v %v", out, err)
+	}
 	openingTestInput(t, s, "h2", conv.ID, "是 LazyMind 的本地文件检索", 2)
 	current, err := loadOrganizerOpeningSnapshot(s.db, conv)
 	if err != nil {
@@ -28,7 +32,7 @@ func TestOrganizerFreezeRejectsStaleProvisionalAndPreservesClosedOpening(t *test
 	if err := s.db.Model(&meta).Updates(map[string]any{"status": "pending", "source_hash": current.Hash, "seed_revision": 2, "job_id": "new-job"}).Error; err != nil {
 		t.Fatal(err)
 	}
-	out, err := (OrganizerOpeningPreparer{}).Freeze(t.Context(), s.db, conv)
+	out, err = (OrganizerOpeningPreparer{}).Freeze(t.Context(), s.db, conv)
 	if err != nil {
 		t.Fatal(err)
 	}

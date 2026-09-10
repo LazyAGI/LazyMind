@@ -33,10 +33,7 @@ func TestGroupRemovalSerializesNewMembersWithoutBlockingOtherUsers(t *testing.T)
 		inserted <- UserTransaction(t.Context(), db.DB, "one", func(tx *gorm.DB) error {
 			close(locked)
 			<-release
-			if err := tx.Create(&orm.ConversationGroupMember{ConversationID: conv.ID, GroupID: group.ID, UserID: "one", Revision: 1, Source: CreatedByUser, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
-				return err
-			}
-			_, err := advanceGroupState(tx, "one", conv.ID, &group.ID, "")
+			_, err := moveMembershipTx(tx, "one", conv.ID, &group.ID, CreatedByUser, "")
 			return err
 		})
 	}()

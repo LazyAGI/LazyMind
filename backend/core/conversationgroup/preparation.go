@@ -15,6 +15,8 @@ import (
 )
 
 // OpeningPreparation keeps the chat-specific evidence format out of the organizer.
+// Preparation alone decides eligibility: a non-empty summary without a skip reason
+// is usable, including provisional intent whose frozen input still matches.
 type OpeningPreparation struct {
 	Frozen  json.RawMessage `json:"frozen,omitempty"`
 	Title   string          `json:"title"`

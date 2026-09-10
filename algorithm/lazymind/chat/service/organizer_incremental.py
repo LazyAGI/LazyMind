@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-from types import SimpleNamespace
 
 from . import conversation_organizer as engine
 
@@ -39,16 +38,14 @@ def organize(request, call=None):
         return {'identity': identity, 'accepted': not reject, 'processed': len(items)}, engine._usage(1)
     cards = data['directory']
     # Directory cards have bounded examples; assignments from earlier batches never enter here.
-    wrapper = SimpleNamespace(snapshot=SimpleNamespace(id=data['snapshot_id']))
-    state = {'cursor': data['cursor']}
     last = None
     for repair in range(3):
         try:
             shards = [cards[i:i + engine.MAX_BATCH_SIZE] for i in range(0, len(cards), engine.MAX_BATCH_SIZE)] or [[]]
             responses = []
             for shard in shards:
-                payload = engine._batch_payload(wrapper, state, items, shard,
-                                                'organize' if len(shards) == 1 else 'directory_scan')
+                payload = {'mode': 'organize' if len(shards) == 1 else 'directory_scan',
+                           'groups': shard, 'conversations': [item.model_dump() for item in items]}
                 if data.get('repair') or repair:
                     payload['repair_instruction'] = '上次提案或范围审核失败，重新处理本批；不得将旧成员排除在新scope之外。'
                 if len(shards) > 1:

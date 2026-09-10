@@ -109,3 +109,16 @@ run 标记 protocol_version=2；snapshot-item 保存 ordinal、冻结输入（�
 - 前端分组相关四个文件、12 项测试通过，生产构建通过；OpenAPI 新鲜度与错误码翻译同步检查通过。全量 tsc 仍有生成客户端、desktopBridge 等其他文件的错误；未以本轮局部验证宣称全量类型检查通过。
 
 复现接口验收：启动 `algorithm/tests/fixtures/organizer_provider.py`，设置 `ORGANIZER_TEST_PROVIDER_URL`、`ORGANIZER_TEST_CONTROL_URL`、`LAZYMIND_CHAT_SERVICE_URL` 后，在 Core 容器运行 `go test ./chat -run '^TestOrganizerProductPath$' -v`。provider URL 是 Chat 可访问的地址，control URL 是测试进程可访问的地址；全部使用专用测试数据及占位凭据。
+
+
+## PR #701 冗余清理（2026-09-10）
+
+`buildSnapshot` 只锁定本轮自由会话并捕获正式组目录；可用性统一由 preparation 决定，不再预先计算随后被覆盖的 ready-only eligibility。保持既有业务语义：输入一致的有效 provisional 摘要也可参与整理，empty 和失败结果分别保留跳过原因，不把本次代码整理变成意图准入规则变更。
+
+所有归属写入通过 `moveMembershipTx` 同时维护 member 和持久化 state。普通移动、移出、删除组、新会话入组、自动应用、结果纠正与撤销共用它；调用方仍负责事务、会话锁、权限和各自的冲突判断。显式移动到相同组也递增 state revision，阻止旧任务撤销覆盖人工操作；未分组后再入组不会重置持久化 fence。保留双表和历史记录，无数据库迁移。
+
+Python 只接受协议 v2，删除 v1 checkpoint 执行、final 阶段及旧 snapshot hash 代码；提示词只携带一份 operation schema。已完成结果的读取、纠正、撤销在 Core 保持兼容。旧 Python 测试迁为 v2 请求、分片、审核、错误和协议拒绝验证；候选操作与分批审核状态的验证放在实际持有状态的 Core。
+
+Core 的任务执行/lease、快照、proposal 应用、结果查询分别放入 `organizer_job.go`、`organizer_snapshot.go`、`organizer_apply.go`、`organizer_result.go`。清理 apply 中被覆盖的计数、重复去重和未使用的旧协议响应字段，不改 Chat lifespan，不引入通用执行器或新基类。
+
+本轮 Docker 验证：Python 算法/协议 14 项及 worker 8 项通过，Core SQLite conversationgroup/chat/common 回归、PostgreSQL conversationgroup/chat 回归和主程序编译通过；真实 Docker Chat + 可控 provider 接口验收通过分批整理、补摘要、应用、纠正、撤销、取消与重试。新增归属回滚/版本连续性检查，以及 103 条会话跨批候选合并后两轮分页范围审核的恢复验证。未新增浏览器、原生 Windows 或真实模型语义质量验收。

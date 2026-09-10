@@ -19,7 +19,7 @@ func (preparationFixture) Freeze(context.Context, *gorm.DB, orm.Conversation) (O
 	return OpeningPreparation{}, nil
 }
 func (preparationFixture) Resolve(context.Context, *gorm.DB, string, json.RawMessage, map[string]any) (algo.OpeningTaskResult, error) {
-	return algo.OpeningTaskResult{Status: "succeeded", Output: algo.OpeningDescription{Summary: "处理工作", IntentStatus: "ready"}}, nil
+	return algo.OpeningTaskResult{Status: "succeeded", Output: algo.OpeningDescription{Summary: "处理工作", IntentStatus: "provisional"}}, nil
 }
 func (preparationFixture) Persist(context.Context, *gorm.DB, orm.Conversation, json.RawMessage, algo.OpeningTaskResult) error {
 	return nil
