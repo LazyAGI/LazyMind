@@ -136,7 +136,7 @@ export default function NewWorkflowModal({ open, onCancel, onCreated }: NewWorkf
     }
   };
 
-  const handleSkillChange = (val: string, option: { label: string; value: string } | { label: string; value: string }[]) => {
+  const handleSkillChange = (val: string, option?: { label: string; value: string } | { label: string; value: string }[]) => {
     setSkillId(val);
     const opt = Array.isArray(option) ? option[0] : option;
     setSkillName(opt?.label ?? '');
