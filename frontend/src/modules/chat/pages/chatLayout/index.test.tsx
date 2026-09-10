@@ -41,7 +41,7 @@ vi.mock("react-i18next", () => ({
         return `来源：${params?.parent}`;
       }
       if (key === "chat.conversationForkedFrom") {
-        return `Fork自：${params?.parent}`;
+        return `分支来源：${params?.parent}`;
       }
       return key;
     },
@@ -634,7 +634,7 @@ describe("ChatLayout conversation loading", () => {
       />,
     );
 
-    expect(await screen.findByText("Fork自：主会话标题")).toBeInTheDocument();
+    expect(await screen.findByText("分支来源：主会话标题")).toBeInTheDocument();
     expect(mocks.latestChatContainerProps.showConversationConfig).toBe(true);
     expect(mocks.latestChatContainerProps.showSkillDeposit).toBe(true);
     expect(mocks.latestChatContainerProps.allowKnowledgeBaseSelection).toBe(true);

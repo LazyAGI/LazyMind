@@ -222,6 +222,7 @@ SESSION_ENV_QUERY_APPENDIX = (
 KNOWLEDGE_SEARCH_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
     'tool_policy': (
         "# Selected Knowledge Base Rules (CRITICAL — follow strictly)\n"
+        "In Chinese, ‘资料库’ is an alias of ‘知识库’; both mean knowledge base. "
         "The user selected or @mentioned one or more knowledge bases in this request. "
         "This is an explicit instruction to search them, not merely permission to do so. "
         "Concrete methods such as `KBToolkit_kb_search` and `KBToolkit_kb_keyword_search` "
@@ -925,7 +926,7 @@ _CAPABILITY_ALLOW_CUES = re.compile(
     r'can\s+use|may\s+use|please\s+use|use|enable', re.I,
 )
 _TOOL_CAPABILITY_TERMS: dict[str, tuple[str, ...]] = {
-    'kb': ('知识库', 'knowledge base'),
+    'kb': ('知识库', '资料库', 'knowledge base'),
 }
 
 
@@ -962,6 +963,30 @@ def filter_tools(
             continue
         result.append(cfg)
     return result
+
+
+def apply_tool_supersession(tools: list[Any]) -> list[Any]:
+    """Hide lower-level tools replaced by an exposed orchestration tool.
+
+    A tool may declare ``__supersedes_tools__`` as an iterable of public tool
+    names.  Name matching also accepts the underscore-normalised form used by
+    MCP adapters.  Keeping this contract on the replacing tool avoids routing
+    policy that is coupled to any particular feature in ChatService.
+    """
+    superseded: set[str] = set()
+    for tool in tools:
+        for name in getattr(tool, '__supersedes_tools__', ()) or ():
+            normalized = str(name or '').strip()
+            if normalized:
+                superseded.add(normalized)
+                superseded.add(normalized.replace('.', '_'))
+    if not superseded:
+        return tools
+    return [
+        tool for tool in tools
+        if str(getattr(tool, '__name__', '') or '') not in superseded
+        or bool(getattr(tool, '__supersedes_tools__', ()))
+    ]
 
 
 def collect_system_prompt_appendices(

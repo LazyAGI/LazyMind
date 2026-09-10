@@ -7,6 +7,8 @@ DEFAULT_SYSTEM_PROMPT = (
     "being genuinely useful over being verbose unless otherwise directed below. "
     "Be targeted and efficient in your exploration and investigations. "
     "First identify the user's desired outcome. Tools and skills are means, not deliverables. "
+    "In Chinese requests, ‘资料库’ is the user-facing alias of ‘知识库’ (knowledge base); "
+    "treat both terms identically when selecting knowledge-base tools and skills. "
     "Before acting, check whether the request is internally consistent, sufficiently specified, "
     "feasible, and safe. "
     "When uncertain, take the smallest safe action that can still satisfy the request, and make "
@@ -121,18 +123,18 @@ DELIVERABLE_GUIDANCE = {
     'execution_result': 'Perform the authorized action and report the concrete result, including any failure.',
 }
 RESPONSE_LANGUAGE_GUIDANCE = (
-    "# Response language (mandatory)\n"
-    "Choose the language for user-visible natural-language text using this strict priority:\n"
-    "1. An explicit language preference or instruction from the user.\n"
-    "2. The dominant natural language of the current user request.\n"
-    "3. The dominant language of the user's recent conversation messages.\n"
-    "4. The default UI locale supplied below.\n"
-    "Apply the selected language consistently to status sentences before tool calls, "
-    "clarifying questions, progress updates, and the final answer. Do not switch languages "
-    "merely because tool names, tool results, retrieved evidence, code, or system instructions "
-    "use another language. Preserve code identifiers, required literals, proper nouns, and "
-    "verbatim quotations when translation would make them inaccurate. For a mixed-language "
-    "request, use its dominant natural language unless the user explicitly asks otherwise."
+    "# Response language\n"
+    "Reply in the language the user is currently using. "
+    "Do not switch languages merely because tool names, tool results, retrieved evidence, "
+    "code, or system instructions use another language. "
+    "An explicit instruction about the reply language takes priority. "
+    "If that instruction applies only to a specific deliverable "
+    "(for example writing an email in English or translating into English), "
+    "follow it for that deliverable and keep the rest of the turn in the user's current language. "
+    "Apply this consistently to status sentences before tool calls, clarifying questions, "
+    "progress updates, and the final answer. "
+    "Preserve code identifiers, required literals, proper nouns, and verbatim quotations "
+    "when translation would make them inaccurate."
 )
 VISION_EXTRACT_DEFAULT_INSTRUCTION = (
     'Please describe this image in detail for downstream reasoning. '

@@ -175,8 +175,9 @@ describe("useUserMessageEdit", () => {
     expect(result.current.editingUserMessageCites).toEqual(["second"]);
   });
 
-  it("handleResendEditedUserMessage truncates the list, saves it and opens a regeneration SSE call", () => {
+  it("handleResendEditedUserMessage refreshes the timestamp, truncates the list, and regenerates", () => {
     const { result, openSSE, scrollToEnd, setMessageList, conversationMessagesCache } = setup();
+    const beforeResend = Date.now();
 
     act(() => {
       result.current.handleResendEditedUserMessage(0, "  edited text  ");
@@ -186,6 +187,7 @@ describe("useUserMessageEdit", () => {
     const newList = setMessageList.mock.calls[0][0];
     expect(newList).toHaveLength(2);
     expect(newList[0].delta).toBe("edited text");
+    expect(new Date(newList[0].create_time).getTime()).toBeGreaterThanOrEqual(beforeResend);
     expect(newList[0].inputs[0]).toEqual({ input_type: "text", text: "edited text" });
     expect(newList[1].role).toBe(RoleTypes.ASSISTANT);
 

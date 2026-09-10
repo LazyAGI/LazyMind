@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 
@@ -104,6 +105,9 @@ func TestForkConcurrentIdempotencyAndIndependentNewOperation(t *testing.T) {
 	}
 	id := ""
 	for result := range results {
+		if result.Conversation["display_name"] != "Source（1）" {
+			t.Fatalf("unexpected replayed title: %v", result.Conversation["display_name"])
+		}
 		next := result.Conversation["conversation_id"].(string)
 		if id != "" && id != next {
 			t.Fatal("duplicate fork")
@@ -117,6 +121,83 @@ func TestForkConcurrentIdempotencyAndIndependentNewOperation(t *testing.T) {
 	newResult, err := createConversationFork(context.Background(), db, doc.DatasetCatalogCaller{UserID: "u1"}, c.ID, "another-operation", request)
 	if err != nil || newResult.Conversation["conversation_id"] == id {
 		t.Fatalf("new operation did not create: %v", err)
+	}
+	if newResult.Conversation["display_name"] != "Source（2）" {
+		t.Fatalf("unexpected new operation title: %v", newResult.Conversation["display_name"])
+	}
+}
+
+func TestForkConcurrentOperationsHaveNumberedTitles(t *testing.T) {
+	db, source, _, request := forkFixture(t, 1)
+	const workers = 3
+	results := make(chan *forkResult, workers)
+	failures := make(chan error, workers)
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			result, err := createConversationFork(t.Context(), db, doc.DatasetCatalogCaller{UserID: "u1"}, source.ID, fmt.Sprintf("numbered-%d", i), request)
+			if err != nil {
+				failures <- err
+				return
+			}
+			results <- result
+		}(i)
+	}
+	wg.Wait()
+	close(results)
+	close(failures)
+	for err := range failures {
+		t.Error(err)
+	}
+	titles := map[string]bool{}
+	for result := range results {
+		titles[result.Conversation["display_name"].(string)] = true
+	}
+	for i := 1; i <= workers; i++ {
+		if !titles[fmt.Sprintf("Source（%d）", i)] {
+			t.Fatalf("missing branch number %d: %v", i, titles)
+		}
+	}
+}
+
+func TestForkNumberedTitlePreservesLengthLimitAndDeletedBranchNumber(t *testing.T) {
+	db, source, _, request := forkFixture(t, 1)
+	if err := db.Model(&source).Update("display_name", strings.Repeat("题", maxConversationDisplayNameLength)).Error; err != nil {
+		t.Fatal(err)
+	}
+	caller := doc.DatasetCatalogCaller{UserID: "u1"}
+	for i := 1; i <= 10; i++ {
+		result, err := createConversationFork(t.Context(), db, caller, source.ID, fmt.Sprintf("long-title-%d", i), request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		suffix := fmt.Sprintf("（%d）", i)
+		want := strings.Repeat("题", maxConversationDisplayNameLength-len([]rune(suffix))) + suffix
+		if result.Conversation["display_name"] != want {
+			t.Fatalf("unexpected numbered title: %v, want %s", result.Conversation["display_name"], want)
+		}
+		if err := db.Where("id = ?", result.Conversation["conversation_id"]).Delete(&orm.Conversation{}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestForkNumberedTitleDropsLegacyAutomaticSuffix(t *testing.T) {
+	db, source, _, request := forkFixture(t, 1)
+	if err := db.Model(&source).Update("display_name", "方案 · Fork · Fork").Error; err != nil {
+		t.Fatal(err)
+	}
+	result, err := createConversationFork(t.Context(), db, doc.DatasetCatalogCaller{UserID: "u1"}, source.ID, "legacy-title", request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Conversation["display_name"] != "方案（1）" {
+		t.Fatalf("legacy suffix leaked into new title: %v", result.Conversation["display_name"])
+	}
+	if err := db.First(&source, "id = ?", source.ID).Error; err != nil || source.DisplayName != "方案 · Fork · Fork" {
+		t.Fatalf("source title changed: %s, error: %v", source.DisplayName, err)
 	}
 }
 

@@ -30,7 +30,8 @@ vi.mock("@/modules/identityAvatar", () => ({
 
 vi.mock("@/modules/knowledge/api/translation", () => ({
   getTranslationStatus: vi.fn().mockResolvedValue(true),
-  translateText: vi.fn().mockResolvedValue({
+  isSingleEnglishWord: (text:string) => /^[A-Za-z]+$/.test(text),
+  translateSelectionText: vi.fn().mockResolvedValue({
     translated_text: "已翻译内容",
     source: "en",
     target: "zh",

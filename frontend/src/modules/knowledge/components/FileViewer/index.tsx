@@ -26,6 +26,7 @@ import {
   type PdfTextSelection,
 } from "@/components/ui";
 import { normalizeProxyableUrl } from "@/modules/knowledge/utils/request";
+import { isSingleEnglishWord } from "@/modules/knowledge/api/translation";
 
 import "./index.scss";
 
@@ -40,6 +41,7 @@ interface FileViewerProps {
   onExportReadyChange?: (ready: boolean) => void;
   onPdfSelection?: (selection: PdfTextSelection) => void;
   onPdfTranslateSelection?: (selection: PdfTextSelection) => void;
+  onAddVocabularySelection?: (selection: PdfTextSelection) => void;
   translationConfigured?: boolean;
 }
 
@@ -299,6 +301,8 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
             onAskSelection={props.onPdfSelection}
             askSelectionLabel={t("knowledge.askPdfSelection")}
             onTranslateSelection={props.onPdfTranslateSelection}
+            onAddVocabularySelection={props.onAddVocabularySelection}
+            addVocabularySelectionLabel="加入生词"
             translateSelectionLabel={t("knowledge.translateSelection")}
             translateSelectionDisabled={!props.translationConfigured}
             translateSelectionDisabledTip={t("knowledge.translationConfigureTip")}
@@ -432,12 +436,12 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
           <span
             className="file-viewer-selection-translate-wrap"
             style={{ left: textSelectionAction.left, top: textSelectionAction.top }}
-            title={!props.translationConfigured ? t("knowledge.translationConfigureTip") : undefined}
+            title={!props.translationConfigured&&!isSingleEnglishWord(textSelectionAction.text) ? t("knowledge.translationConfigureTip") : undefined}
           >
             <button
               type="button"
               className="file-viewer-selection-translate"
-              disabled={!props.translationConfigured}
+              disabled={!props.translationConfigured&&!isSingleEnglishWord(textSelectionAction.text)}
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => {
                 props.onPdfTranslateSelection?.({ text: textSelectionAction.text, page: 1 });
@@ -447,6 +451,20 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
             >
               {t("knowledge.translateSelection")}
             </button>
+            {props.onAddVocabularySelection ? <button
+              type="button"
+              className="file-viewer-selection-translate"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={(event) => {
+                props.onAddVocabularySelection?.({
+                  text: textSelectionAction.text,
+                  page: 1,
+                  context: event.currentTarget.closest(".file-viewer")?.textContent?.trim() || textSelectionAction.text,
+                });
+                window.getSelection()?.removeAllRanges();
+                setTextSelectionAction(null);
+              }}
+            >加入生词</button> : null}
           </span>
         ) : null}
         {loading && renderLoading}

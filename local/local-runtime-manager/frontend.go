@@ -148,7 +148,10 @@ func frontendBuildEnv() []string {
 	if mode == "" {
 		mode = "local"
 	}
-	env := []string{"VITE_LAZYMIND_MODE=" + mode}
+	env := []string{
+		"VITE_LAZYMIND_MODE=" + mode,
+		"VITE_VOCABULARY_ENABLED=" + envText("VITE_VOCABULARY_ENABLED", "true"),
+	}
 	for _, key := range []string{"VITE_HIDE_EVO", "VITE_API_BASE_URL", "VITE_APP_LOGO", "VITE_APP_CHAT_TITLE"} {
 		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
 			env = append(env, key+"="+value)

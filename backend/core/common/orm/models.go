@@ -176,6 +176,7 @@ type Conversation struct {
 	SourceSelectedText   string          `gorm:"column:source_selected_text;type:text;not null;default:''"`
 	SourceContext        json.RawMessage `gorm:"column:source_context;type:json"`
 	PinnedAt             *time.Time      `gorm:"column:pinned_at"`
+	HistoryOrder         *int64          `gorm:"column:history_order"`
 	ArchivedAt           *time.Time      `gorm:"column:archived_at"`
 	ArchiveFolderID      *string         `gorm:"column:archive_folder_id;type:varchar(36)"`
 	TrashExpiresAt       *time.Time      `gorm:"column:trash_expires_at"`

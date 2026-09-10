@@ -732,6 +732,28 @@ components:
                         type: string
                     type: array
             type: object
+        ConversationBatchStatusRequest:
+            properties:
+                conversation_ids:
+                    items:
+                        maxLength: 64
+                        minLength: 1
+                        type: string
+                    maxItems: 100
+                    minItems: 1
+                    type: array
+            required:
+                - conversation_ids
+            type: object
+        ConversationBatchStatusResponse:
+            properties:
+                statuses:
+                    items:
+                        $ref: '#/components/schemas/ConversationRunningStatusItem'
+                    type: array
+            required:
+                - statuses
+            type: object
         ConversationChatGroupRequest:
             additionalProperties: true
             description: Existing chat payload with optional group_id for the initial message of a new conversation. Creation and membership are atomic. A stale group is rejected.
@@ -784,6 +806,10 @@ components:
                     nullable: true
                 has_fork_descendants:
                     type: boolean
+                history_order:
+                    format: int64
+                    nullable: true
+                    type: integer
                 is_pinned:
                     type: boolean
                 metadata_pending:
@@ -1202,6 +1228,10 @@ components:
                     type: string
                 has_fork_descendants:
                     type: boolean
+                history_order:
+                    format: int64
+                    nullable: true
+                    type: integer
                 is_pinned:
                     type: boolean
                 metadata_pending:
@@ -1390,29 +1420,6 @@ components:
             type: object
         ConversationOrganizerRun:
             properties:
-                steps:
-                    type: array
-                    items:
-                        type: object
-                        required: [id, status, current, total, completed]
-                        properties:
-                            id:
-                                type: string
-                                enum: [preparation, organization, review, application]
-                            status:
-                                type: string
-                                enum: [pending, active, completed, failed, canceled]
-                            detail:
-                                type: string
-                            current:
-                                type: integer
-                                format: int64
-                            total:
-                                type: integer
-                                format: int64
-                            completed:
-                                type: integer
-                                format: int64
                 can_cancel:
                     type: boolean
                 can_retry:
@@ -1478,16 +1485,16 @@ components:
                         current:
                             format: int64
                             type: integer
-                        preparation_current:
+                        preparation_batch_completed:
                             format: int64
                             type: integer
                         preparation_batch_current:
                             format: int64
                             type: integer
-                        preparation_batch_completed:
+                        preparation_batch_total:
                             format: int64
                             type: integer
-                        preparation_batch_total:
+                        preparation_current:
                             format: int64
                             type: integer
                         preparation_total:
@@ -1516,6 +1523,43 @@ components:
                         - undone
                         - confirmed
                     type: string
+                steps:
+                    items:
+                        properties:
+                            completed:
+                                format: int64
+                                type: integer
+                            current:
+                                format: int64
+                                type: integer
+                            detail:
+                                type: string
+                            id:
+                                enum:
+                                    - preparation
+                                    - organization
+                                    - review
+                                    - application
+                                type: string
+                            status:
+                                enum:
+                                    - pending
+                                    - active
+                                    - completed
+                                    - failed
+                                    - canceled
+                                type: string
+                            total:
+                                format: int64
+                                type: integer
+                        required:
+                            - id
+                            - status
+                            - current
+                            - total
+                            - completed
+                        type: object
+                    type: array
                 updated_at:
                     format: date-time
                     type: string
@@ -1544,8 +1588,25 @@ components:
             properties:
                 conversation_id:
                     type: string
+                history_order:
+                    format: int64
+                    nullable: true
+                    type: integer
                 is_pinned:
                     type: boolean
+                order_updates:
+                    items:
+                        properties:
+                            conversation_id:
+                                type: string
+                            history_order:
+                                format: int64
+                                type: integer
+                        required:
+                            - conversation_id
+                            - history_order
+                        type: object
+                    type: array
                 pinned_at:
                     format: date-time
                     nullable: true
@@ -1611,6 +1672,19 @@ components:
                 - page
                 - page_size
             type: object
+        ConversationReorderRequest:
+            properties:
+                position:
+                    enum:
+                        - before
+                        - after
+                    type: string
+                target_conversation_id:
+                    type: string
+            required:
+                - target_conversation_id
+                - position
+            type: object
         ConversationResumeRequest:
             properties:
                 conversation_id:
@@ -1619,6 +1693,20 @@ components:
                     type: string
             required:
                 - conversation_id
+            type: object
+        ConversationRunningStatusItem:
+            properties:
+                conversation_id:
+                    type: string
+                status:
+                    enum:
+                        - running
+                        - idle
+                        - unknown
+                    type: string
+            required:
+                - conversation_id
+                - status
             type: object
         ConversationSetHistoryRequest:
             properties:
@@ -4288,10 +4376,10 @@ components:
                 cache_hit_rate:
                     format: double
                     type: number
-                cached_tokens:
+                cache_input_tokens:
                     format: int64
                     type: integer
-                cache_input_tokens:
+                cached_tokens:
                     format: int64
                     type: integer
                 context_input_tokens:
@@ -8561,6 +8649,35 @@ components:
                 - disabled
                 - name
             type: object
+        translationOpenAPIRequest:
+            properties:
+                target:
+                    type: string
+                text:
+                    type: string
+            required:
+                - text
+            type: object
+        translationOpenAPIResponse:
+            properties:
+                source:
+                    type: string
+                target:
+                    type: string
+                translated_text:
+                    type: string
+            required:
+                - source
+                - target
+                - translated_text
+            type: object
+        translationStatusOpenAPIResponse:
+            properties:
+                configured:
+                    type: boolean
+            required:
+                - configured
+            type: object
         updateModelProviderGroupOpenAPIRequest:
             properties:
                 api_key:
@@ -11013,6 +11130,28 @@ paths:
                                 $ref: '#/components/schemas/EmptyObject'
                     description: Conversation permanently deleted
             summary: Permanently delete a trashed conversation
+    /api/core/conversations/{conversation_id}:reorder:
+        post:
+            parameters:
+                - in: path
+                  name: conversation_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ConversationReorderRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ConversationPinResponse'
+                    description: Conversation reordered
+            summary: Move a conversation within its pinned or ordinary history
     /api/core/conversations/{conversation_id}:restore:
         post:
             parameters:
@@ -11409,6 +11548,22 @@ paths:
                                 $ref: '#/components/schemas/ConversationBatchDeleteResponse'
                     description: Batch deleted conversations
             summary: Batch delete conversations
+    /api/core/conversations:batchStatus:
+        post:
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ConversationBatchStatusRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ConversationBatchStatusResponse'
+                    description: Running, idle, or unknown; inaccessible conversations are omitted
+            summary: Get a content-free status snapshot for up to 100 accessible conversations (32 KiB request limit)
     /api/core/conversations:chat:
         post:
             requestBody:
@@ -17674,6 +17829,38 @@ paths:
             summary: Enable tool
             tags:
                 - tools
+    /api/core/translation/status:
+        get:
+            description: Reports whether the current user has a selected translation provider with credentials. Secrets are never returned.
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/translationStatusOpenAPIResponse'
+                    description: Translation configuration status
+            summary: Get translation configuration status
+            tags:
+                - translation
+    /api/core/translation:translate:
+        post:
+            description: Translates up to 5000 characters with the current user's server-side translation credential.
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/translationOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/translationOpenAPIResponse'
+                    description: Translated text
+            summary: Translate selected document text
+            tags:
+                - translation
     /api/core/upload_files:
         post:
             responses:
@@ -18771,7 +18958,7 @@ paths:
                                 additionalProperties: true
                                 type: object
                     description: WriterDocument sync result
-            summary: Sync an edited WriterDocument to Feishu
+            summary: Sync an edited WriterDocument to its cloud provider
             tags:
                 - workflow
                 - writer
@@ -18878,7 +19065,7 @@ paths:
                                 additionalProperties: true
                                 type: object
                     description: WriterDocument write-back result
-            summary: Write the active WriterDocument back to Feishu
+            summary: Write the active WriterDocument back to its cloud provider
             tags:
                 - workflow
                 - writer

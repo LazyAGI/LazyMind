@@ -1,1 +1,0 @@
-ALTER TABLE conversation_organizer_runs DROP COLUMN preparation_json;

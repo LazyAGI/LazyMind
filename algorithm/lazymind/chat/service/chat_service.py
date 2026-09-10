@@ -46,6 +46,7 @@ from lazymind.chat.service.component import (
     DEFAULT_TOOLS,
     USER_ATTACHMENT_TOOL_CONFIGS,
     collect_query_appendices,
+    apply_tool_supersession,
     collect_system_prompt_appendices,
     filter_tools,
     is_workflow_rewind_action,
@@ -333,8 +334,11 @@ def _active_skills_from_history(
     activated = set()
     for message in history:
         for tool_call in message.get('tool_calls') or []:
-            function = tool_call.get('function') if isinstance(tool_call, dict) else None
-            if not isinstance(function, dict) or function.get('name') != 'get_skill':
+            if not isinstance(tool_call, dict):
+                continue
+            function = tool_call.get('function')
+            function = function if isinstance(function, dict) else tool_call
+            if function.get('name') != 'get_skill':
                 continue
             arguments = function.get('arguments', {})
             if isinstance(arguments, str):
@@ -344,7 +348,10 @@ def _active_skills_from_history(
                     continue
             if isinstance(arguments, dict) and isinstance(arguments.get('name'), str):
                 activated.add(arguments['name'].strip())
-    return [skill for skill in available if skill in activated]
+    return [
+        skill for skill in available
+        if skill in activated or skill.rsplit('/', 1)[-1] in activated
+    ]
 
 
 def check_sensitive_content(query: str) -> Optional[SensitiveMatch]:
@@ -381,11 +388,16 @@ def _load_mcp_server_tools(server: Dict[str, Any]) -> list:
             LOG.info(f"[MCP] reused cached tools from {server.get('name')}")
             return list(cached[1])
     try:
+        transport = server.get('transport', 'auto')
+        # Compatibility with older Core payloads. The MCP client otherwise
+        # treats the generic value as legacy SSE and sends an incompatible GET.
+        if transport == 'http':
+            transport = 'streamable-http'
         client = MCPClient(
             command_or_url=url,
             headers=server.get('headers'),
             timeout=server.get('timeout', 5),
-            transport=server.get('transport', 'auto'),
+            transport=transport,
         )
         allowed = server.get('allowed_tools') or None
         mcp_tools = client.get_tools(allowed_tools=allowed)
@@ -1287,6 +1299,15 @@ async def _handle_chat_impl(
             await _build_mcp_tools(runtime.mcp_config)
             if runtime.mcp_config and not workflow_turn_is_bound else []
         )
+        from lazymind.chat.engine.tools.vocabulary_review import (
+            ask_words,
+            get_review_words,
+            register_review_words,
+        )
+        vocabulary_review_tools = (
+            [] if workflow_turn_is_bound
+            else [get_review_words, ask_words, register_review_words]
+        )
         # User attachment tools are only meaningful when the user has uploaded files.
         attachment_tools = (
             [] if workflow_turn_is_bound else _build_user_attachment_tools(bool(files_map))
@@ -1349,7 +1370,8 @@ async def _handle_chat_impl(
         intent_tools = [] if workflow_turn_is_bound else [intentwriter]
         all_tools = (intent_tools + agent_tools + artifact_tools + subagent_tools + attachment_tools
                      + skill_listing_tools + session_env_tools + ask_user_tools
-                     + workflow_tools + mcp_tools)
+                     + vocabulary_review_tools + workflow_tools + mcp_tools)
+        all_tools = apply_tool_supersession(all_tools)
         active_workflow_tool_isolation = bool(
             isinstance(effective_workflow_context, dict)
             and effective_workflow_context.get('session_id')
@@ -1394,6 +1416,12 @@ async def _handle_chat_impl(
                 *_active_skills_from_history(agent_history, agent.available_skills),
                 *(selected_skills or []),
             ]))
+            excluded_skill_names = set(task_profile.excluded_resources.skill_names)
+            if excluded_skill_names:
+                selected_skills = [
+                    skill for skill in selected_skills
+                    if skill not in excluded_skill_names
+                ]
             skill_config = selected_skills or False
         # create_subagent snapshots these trusted Host selections into its task. The
         # SubAgent then enables only this bounded list, not the whole installed catalog.
@@ -1629,6 +1657,21 @@ async def _handle_chat_impl(
         '\n\n'.join(collect_query_appendices(active_tool_configs, 'before')),
         'tool.registry', priority=90, authoritative=True, content_kind='instruction',
     )
+    domain_ask_tools = [
+        getattr(tool, '__name__', '') for tool in all_tools
+        if str(getattr(tool, '__name__', '')).startswith('ask_')
+        and getattr(tool, '__name__', '') != 'ask_user'
+    ]
+    prompt_builder.runtime(
+        'chat_domain_ask_preference', 'Interactive Tool Routing',
+        'When a user-facing interaction belongs to a domain for which a specialized ask_* '
+        'tool is available, use that specialized tool. The generic ask_user tool is only for '
+        'clarification when no domain-specific interaction tool applies. Specialized tools '
+        'own their validation, persistence, grading hooks, and continuation protocol. '
+        f'Available specialized interaction tools: {", ".join(domain_ask_tools)}.',
+        'tool.registry', priority=95, authoritative=True, content_kind='instruction',
+        skip_if=lambda: not domain_ask_tools,
+    )
     prompt_builder.runtime(
         'chat_tool_query_appendices_after', 'Active Tool Instructions',
         '\n\n'.join(collect_query_appendices(active_tool_configs, 'after')),
@@ -1646,6 +1689,8 @@ async def _handle_chat_impl(
     stop_tools = list(workflow_contribution.stop_tools)
     if allow_ask_user and 'ask_user' not in stop_tools:
         stop_tools.append('ask_user')
+    if any(getattr(tool, '__name__', '') == 'ask_words' for tool in all_tools):
+        stop_tools.append('ask_words')
 
     plan = AgentRunPlan(
         role=AgentRole.CHAT,

@@ -856,6 +856,12 @@ export interface ConversationBatchDeleteResponse {
     'deleted_count'?: number;
     'deleted_ids'?: Array<string>;
 }
+export interface ConversationBatchStatusRequest {
+    'conversation_ids': Array<string>;
+}
+export interface ConversationBatchStatusResponse {
+    'statuses': Array<ConversationRunningStatusItem>;
+}
 /**
  * Existing chat payload with optional group_id for the initial message of a new conversation. Creation and membership are atomic. A stale group is rejected.
  */
@@ -880,6 +886,7 @@ export interface ConversationDetailItem {
     'fork_capability'?: ConversationForkCapability;
     'fork_origin'?: ConversationForkOrigin | null;
     'has_fork_descendants'?: boolean;
+    'history_order'?: number | null;
     'is_pinned'?: boolean;
     'metadata_pending'?: boolean;
     'models'?: Array<string>;
@@ -1106,6 +1113,7 @@ export interface ConversationItem {
     'fork_origin'?: ConversationForkOrigin | null;
     'group_id'?: string | null;
     'has_fork_descendants'?: boolean;
+    'history_order'?: number | null;
     'is_pinned'?: boolean;
     'metadata_pending'?: boolean;
     'models'?: Array<string>;
@@ -1234,7 +1242,6 @@ export interface ConversationOrganizerLatestResponse {
     'run': ConversationOrganizerRun | null;
 }
 export interface ConversationOrganizerRun {
-    'steps'?: Array<ConversationOrganizerRunStepsInner>;
     'can_cancel': boolean;
     'can_retry': boolean;
     'can_undo': boolean;
@@ -1249,6 +1256,7 @@ export interface ConversationOrganizerRun {
     'skipped_count': number;
     'stage': string;
     'status': ConversationOrganizerRunStatusEnum;
+    'steps'?: Array<ConversationOrganizerRunStepsInner>;
     'updated_at': string;
 }
 
@@ -1281,10 +1289,10 @@ export interface ConversationOrganizerRunProgress {
     'batch_current'?: number;
     'batch_total'?: number;
     'current': number;
-    'preparation_current'?: number;
-    'preparation_batch_current'?: number;
     'preparation_batch_completed'?: number;
+    'preparation_batch_current'?: number;
     'preparation_batch_total'?: number;
+    'preparation_current'?: number;
     'preparation_total'?: number;
     'total': number;
 }
@@ -1292,12 +1300,12 @@ export interface ConversationOrganizerRunResponse {
     'run': ConversationOrganizerRun;
 }
 export interface ConversationOrganizerRunStepsInner {
+    'completed': number;
+    'current': number;
+    'detail'?: string;
     'id': ConversationOrganizerRunStepsInnerIdEnum;
     'status': ConversationOrganizerRunStepsInnerStatusEnum;
-    'detail'?: string;
-    'current': number;
     'total': number;
-    'completed': number;
 }
 
 export const ConversationOrganizerRunStepsInnerIdEnum = {
@@ -1320,8 +1328,14 @@ export type ConversationOrganizerRunStepsInnerStatusEnum = typeof ConversationOr
 
 export interface ConversationPinResponse {
     'conversation_id': string;
+    'history_order'?: number | null;
     'is_pinned': boolean;
+    'order_updates'?: Array<ConversationPinResponseOrderUpdatesInner>;
     'pinned_at'?: string | null;
+}
+export interface ConversationPinResponseOrderUpdatesInner {
+    'conversation_id': string;
+    'history_order': number;
 }
 export interface ConversationRecoveryItem {
     'archive_folder_name'?: string;
@@ -1349,10 +1363,35 @@ export interface ConversationRecoveryListResponse {
     'page_size': number;
     'total': number;
 }
+export interface ConversationReorderRequest {
+    'position': ConversationReorderRequestPositionEnum;
+    'target_conversation_id': string;
+}
+
+export const ConversationReorderRequestPositionEnum = {
+    Before: 'before',
+    After: 'after'
+} as const;
+
+export type ConversationReorderRequestPositionEnum = typeof ConversationReorderRequestPositionEnum[keyof typeof ConversationReorderRequestPositionEnum];
+
 export interface ConversationResumeRequest {
     'conversation_id': string;
     'history_id'?: string;
 }
+export interface ConversationRunningStatusItem {
+    'conversation_id': string;
+    'status': ConversationRunningStatusItemStatusEnum;
+}
+
+export const ConversationRunningStatusItemStatusEnum = {
+    Running: 'running',
+    Idle: 'idle',
+    Unknown: 'unknown'
+} as const;
+
+export type ConversationRunningStatusItemStatusEnum = typeof ConversationRunningStatusItemStatusEnum[keyof typeof ConversationRunningStatusItemStatusEnum];
+
 export interface ConversationSearchConfigOpenAPIRequest {
     /**
      * Optional. Replace document creator filters; omit to preserve them.
@@ -2953,8 +2992,8 @@ export interface RouterTrafficSummary {
 }
 export interface RunPerformanceMetrics {
     'cache_hit_rate'?: number;
-    'cached_tokens'?: number;
     'cache_input_tokens'?: number;
+    'cached_tokens'?: number;
     'context_input_tokens'?: number;
     'context_ratio'?: number;
     'input_tokens'?: number;
@@ -3890,6 +3929,18 @@ export interface TransferBinding {
     'stored_path'?: string;
     'target_document_id'?: string;
     'target_lazy_doc_id'?: string;
+}
+export interface TranslationOpenAPIRequest {
+    'target'?: string;
+    'text': string;
+}
+export interface TranslationOpenAPIResponse {
+    'source': string;
+    'target': string;
+    'translated_text': string;
+}
+export interface TranslationStatusOpenAPIResponse {
+    'configured': boolean;
 }
 export interface UnsetDefaultDatasetRequest {
     'name': string;
@@ -10887,6 +10938,41 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
+         * @summary Get a content-free status snapshot for up to 100 accessible conversations (32 KiB request limit)
+         * @param {ConversationBatchStatusRequest} conversationBatchStatusRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsBatchStatusPost: async (conversationBatchStatusRequest: ConversationBatchStatusRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'conversationBatchStatusRequest' is not null or undefined
+            assertParamExists('apiCoreConversationsBatchStatusPost', 'conversationBatchStatusRequest', conversationBatchStatusRequest)
+            const localVarPath = `/api/core/conversations:batchStatus`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(conversationBatchStatusRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary Chat; optional group_id atomically assigns a newly created conversation
          * @param {ConversationChatGroupRequest} conversationChatGroupRequest
          * @param {*} [options] Override http request option.
@@ -11153,6 +11239,45 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
             localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Move a conversation within its pinned or ordinary history
+         * @param {string} conversationId
+         * @param {ConversationReorderRequest} conversationReorderRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsConversationIdReorderPost: async (conversationId: string, conversationReorderRequest: ConversationReorderRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'conversationId' is not null or undefined
+            assertParamExists('apiCoreConversationsConversationIdReorderPost', 'conversationId', conversationId)
+            // verify required parameter 'conversationReorderRequest' is not null or undefined
+            assertParamExists('apiCoreConversationsConversationIdReorderPost', 'conversationReorderRequest', conversationReorderRequest)
+            const localVarPath = `/api/core/conversations/{conversation_id}:reorder`
+                .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(conversationReorderRequest, localVarRequestOptions, configuration)
 
             return {
                 url: toPathString(localVarUrlObj),
@@ -18984,6 +19109,19 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary Get a content-free status snapshot for up to 100 accessible conversations (32 KiB request limit)
+         * @param {ConversationBatchStatusRequest} conversationBatchStatusRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreConversationsBatchStatusPost(conversationBatchStatusRequest: ConversationBatchStatusRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationBatchStatusResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsBatchStatusPost(conversationBatchStatusRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsBatchStatusPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary Chat; optional group_id atomically assigns a newly created conversation
          * @param {ConversationChatGroupRequest} conversationChatGroupRequest
          * @param {*} [options] Override http request option.
@@ -19085,6 +19223,20 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsConversationIdPurgeDelete(conversationId, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsConversationIdPurgeDelete']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Move a conversation within its pinned or ordinary history
+         * @param {string} conversationId
+         * @param {ConversationReorderRequest} conversationReorderRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreConversationsConversationIdReorderPost(conversationId: string, conversationReorderRequest: ConversationReorderRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationPinResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsConversationIdReorderPost(conversationId, conversationReorderRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsConversationIdReorderPost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -22181,6 +22333,16 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
+         * @summary Get a content-free status snapshot for up to 100 accessible conversations (32 KiB request limit)
+         * @param {DefaultApiApiCoreConversationsBatchStatusPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsBatchStatusPost(requestParameters: DefaultApiApiCoreConversationsBatchStatusPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ConversationBatchStatusResponse> {
+            return localVarFp.apiCoreConversationsBatchStatusPost(requestParameters.conversationBatchStatusRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary Chat; optional group_id atomically assigns a newly created conversation
          * @param {DefaultApiApiCoreConversationsChatPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -22258,6 +22420,16 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          */
         apiCoreConversationsConversationIdPurgeDelete(requestParameters: DefaultApiApiCoreConversationsConversationIdPurgeDeleteRequest, options?: RawAxiosRequestConfig): AxiosPromise<object> {
             return localVarFp.apiCoreConversationsConversationIdPurgeDelete(requestParameters.conversationId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Move a conversation within its pinned or ordinary history
+         * @param {DefaultApiApiCoreConversationsConversationIdReorderPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsConversationIdReorderPost(requestParameters: DefaultApiApiCoreConversationsConversationIdReorderPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ConversationPinResponse> {
+            return localVarFp.apiCoreConversationsConversationIdReorderPost(requestParameters.conversationId, requestParameters.conversationReorderRequest, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -24483,6 +24655,13 @@ export interface DefaultApiApiCoreConversationsBatchDeletePostRequest {
 }
 
 /**
+ * Request parameters for apiCoreConversationsBatchStatusPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreConversationsBatchStatusPostRequest {
+    readonly conversationBatchStatusRequest: ConversationBatchStatusRequest
+}
+
+/**
  * Request parameters for apiCoreConversationsChatPost operation in DefaultApi.
  */
 export interface DefaultApiApiCoreConversationsChatPostRequest {
@@ -24538,6 +24717,15 @@ export interface DefaultApiApiCoreConversationsConversationIdPromotePostRequest 
  */
 export interface DefaultApiApiCoreConversationsConversationIdPurgeDeleteRequest {
     readonly conversationId: string
+}
+
+/**
+ * Request parameters for apiCoreConversationsConversationIdReorderPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreConversationsConversationIdReorderPostRequest {
+    readonly conversationId: string
+
+    readonly conversationReorderRequest: ConversationReorderRequest
 }
 
 /**
@@ -26113,6 +26301,17 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
+     * @summary Get a content-free status snapshot for up to 100 accessible conversations (32 KiB request limit)
+     * @param {DefaultApiApiCoreConversationsBatchStatusPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreConversationsBatchStatusPost(requestParameters: DefaultApiApiCoreConversationsBatchStatusPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreConversationsBatchStatusPost(requestParameters.conversationBatchStatusRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
      * @summary Chat; optional group_id atomically assigns a newly created conversation
      * @param {DefaultApiApiCoreConversationsChatPostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -26197,6 +26396,17 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreConversationsConversationIdPurgeDelete(requestParameters: DefaultApiApiCoreConversationsConversationIdPurgeDeleteRequest, options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreConversationsConversationIdPurgeDelete(requestParameters.conversationId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Move a conversation within its pinned or ordinary history
+     * @param {DefaultApiApiCoreConversationsConversationIdReorderPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreConversationsConversationIdReorderPost(requestParameters: DefaultApiApiCoreConversationsConversationIdReorderPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreConversationsConversationIdReorderPost(requestParameters.conversationId, requestParameters.conversationReorderRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -42829,6 +43039,176 @@ export class ToolsApi extends BaseAPI {
 
 
 /**
+ * TranslationApi - axios parameter creator
+ */
+export const TranslationApiAxiosParamCreator = function (configuration?: Configuration) {
+    return {
+        /**
+         * Reports whether the current user has a selected translation provider with credentials. Secrets are never returned.
+         * @summary Get translation configuration status
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreTranslationStatusGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/translation/status`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Translates up to 5000 characters with the current user\'s server-side translation credential.
+         * @summary Translate selected document text
+         * @param {TranslationOpenAPIRequest} translationOpenAPIRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreTranslationTranslatePost: async (translationOpenAPIRequest: TranslationOpenAPIRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'translationOpenAPIRequest' is not null or undefined
+            assertParamExists('apiCoreTranslationTranslatePost', 'translationOpenAPIRequest', translationOpenAPIRequest)
+            const localVarPath = `/api/core/translation:translate`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(translationOpenAPIRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+    }
+};
+
+/**
+ * TranslationApi - functional programming interface
+ */
+export const TranslationApiFp = function(configuration?: Configuration) {
+    const localVarAxiosParamCreator = TranslationApiAxiosParamCreator(configuration)
+    return {
+        /**
+         * Reports whether the current user has a selected translation provider with credentials. Secrets are never returned.
+         * @summary Get translation configuration status
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreTranslationStatusGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<TranslationStatusOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreTranslationStatusGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['TranslationApi.apiCoreTranslationStatusGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Translates up to 5000 characters with the current user\'s server-side translation credential.
+         * @summary Translate selected document text
+         * @param {TranslationOpenAPIRequest} translationOpenAPIRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreTranslationTranslatePost(translationOpenAPIRequest: TranslationOpenAPIRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<TranslationOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreTranslationTranslatePost(translationOpenAPIRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['TranslationApi.apiCoreTranslationTranslatePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+    }
+};
+
+/**
+ * TranslationApi - factory interface
+ */
+export const TranslationApiFactory = function (configuration?: Configuration, basePath?: string, axios?: AxiosInstance) {
+    const localVarFp = TranslationApiFp(configuration)
+    return {
+        /**
+         * Reports whether the current user has a selected translation provider with credentials. Secrets are never returned.
+         * @summary Get translation configuration status
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreTranslationStatusGet(options?: RawAxiosRequestConfig): AxiosPromise<TranslationStatusOpenAPIResponse> {
+            return localVarFp.apiCoreTranslationStatusGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Translates up to 5000 characters with the current user\'s server-side translation credential.
+         * @summary Translate selected document text
+         * @param {TranslationApiApiCoreTranslationTranslatePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreTranslationTranslatePost(requestParameters: TranslationApiApiCoreTranslationTranslatePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<TranslationOpenAPIResponse> {
+            return localVarFp.apiCoreTranslationTranslatePost(requestParameters.translationOpenAPIRequest, options).then((request) => request(axios, basePath));
+        },
+    };
+};
+
+/**
+ * Request parameters for apiCoreTranslationTranslatePost operation in TranslationApi.
+ */
+export interface TranslationApiApiCoreTranslationTranslatePostRequest {
+    readonly translationOpenAPIRequest: TranslationOpenAPIRequest
+}
+
+/**
+ * TranslationApi - object-oriented interface
+ */
+export class TranslationApi extends BaseAPI {
+    /**
+     * Reports whether the current user has a selected translation provider with credentials. Secrets are never returned.
+     * @summary Get translation configuration status
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreTranslationStatusGet(options?: RawAxiosRequestConfig) {
+        return TranslationApiFp(this.configuration).apiCoreTranslationStatusGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Translates up to 5000 characters with the current user\'s server-side translation credential.
+     * @summary Translate selected document text
+     * @param {TranslationApiApiCoreTranslationTranslatePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreTranslationTranslatePost(requestParameters: TranslationApiApiCoreTranslationTranslatePostRequest, options?: RawAxiosRequestConfig) {
+        return TranslationApiFp(this.configuration).apiCoreTranslationTranslatePost(requestParameters.translationOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+}
+
+
+
+/**
  * UploadsApi - axios parameter creator
  */
 export const UploadsApiAxiosParamCreator = function (configuration?: Configuration) {
@@ -44736,7 +45116,7 @@ export const WorkflowApiAxiosParamCreator = function (configuration?: Configurat
         },
         /**
          *
-         * @summary Sync an edited WriterDocument to Feishu
+         * @summary Sync an edited WriterDocument to its cloud provider
          * @param {string} sessionId
          * @param {string} slotId
          * @param {number} listIndex
@@ -44783,7 +45163,7 @@ export const WorkflowApiAxiosParamCreator = function (configuration?: Configurat
         },
         /**
          *
-         * @summary Write the active WriterDocument back to Feishu
+         * @summary Write the active WriterDocument back to its cloud provider
          * @param {string} sessionId
          * @param {WriterDocumentWriteBackOpenAPIRequest} writerDocumentWriteBackOpenAPIRequest
          * @param {*} [options] Override http request option.
@@ -44847,7 +45227,7 @@ export const WorkflowApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary Sync an edited WriterDocument to Feishu
+         * @summary Sync an edited WriterDocument to its cloud provider
          * @param {string} sessionId
          * @param {string} slotId
          * @param {number} listIndex
@@ -44863,7 +45243,7 @@ export const WorkflowApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary Write the active WriterDocument back to Feishu
+         * @summary Write the active WriterDocument back to its cloud provider
          * @param {string} sessionId
          * @param {WriterDocumentWriteBackOpenAPIRequest} writerDocumentWriteBackOpenAPIRequest
          * @param {*} [options] Override http request option.
@@ -44896,7 +45276,7 @@ export const WorkflowApiFactory = function (configuration?: Configuration, baseP
         },
         /**
          *
-         * @summary Sync an edited WriterDocument to Feishu
+         * @summary Sync an edited WriterDocument to its cloud provider
          * @param {WorkflowApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexSyncWriterDocumentPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -44906,7 +45286,7 @@ export const WorkflowApiFactory = function (configuration?: Configuration, baseP
         },
         /**
          *
-         * @summary Write the active WriterDocument back to Feishu
+         * @summary Write the active WriterDocument back to its cloud provider
          * @param {WorkflowApiApiCoreWorkflowSessionsSessionIdWriterDocumentWriteBackPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -44969,7 +45349,7 @@ export class WorkflowApi extends BaseAPI {
 
     /**
      *
-     * @summary Sync an edited WriterDocument to Feishu
+     * @summary Sync an edited WriterDocument to its cloud provider
      * @param {WorkflowApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexSyncWriterDocumentPostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
@@ -44980,7 +45360,7 @@ export class WorkflowApi extends BaseAPI {
 
     /**
      *
-     * @summary Write the active WriterDocument back to Feishu
+     * @summary Write the active WriterDocument back to its cloud provider
      * @param {WorkflowApiApiCoreWorkflowSessionsSessionIdWriterDocumentWriteBackPostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
@@ -44999,7 +45379,7 @@ export const WriterApiAxiosParamCreator = function (configuration?: Configuratio
     return {
         /**
          *
-         * @summary Sync an edited WriterDocument to Feishu
+         * @summary Sync an edited WriterDocument to its cloud provider
          * @param {string} sessionId
          * @param {string} slotId
          * @param {number} listIndex
@@ -45046,7 +45426,7 @@ export const WriterApiAxiosParamCreator = function (configuration?: Configuratio
         },
         /**
          *
-         * @summary Write the active WriterDocument back to Feishu
+         * @summary Write the active WriterDocument back to its cloud provider
          * @param {string} sessionId
          * @param {WriterDocumentWriteBackOpenAPIRequest} writerDocumentWriteBackOpenAPIRequest
          * @param {*} [options] Override http request option.
@@ -45094,7 +45474,7 @@ export const WriterApiFp = function(configuration?: Configuration) {
     return {
         /**
          *
-         * @summary Sync an edited WriterDocument to Feishu
+         * @summary Sync an edited WriterDocument to its cloud provider
          * @param {string} sessionId
          * @param {string} slotId
          * @param {number} listIndex
@@ -45110,7 +45490,7 @@ export const WriterApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary Write the active WriterDocument back to Feishu
+         * @summary Write the active WriterDocument back to its cloud provider
          * @param {string} sessionId
          * @param {WriterDocumentWriteBackOpenAPIRequest} writerDocumentWriteBackOpenAPIRequest
          * @param {*} [options] Override http request option.
@@ -45133,7 +45513,7 @@ export const WriterApiFactory = function (configuration?: Configuration, basePat
     return {
         /**
          *
-         * @summary Sync an edited WriterDocument to Feishu
+         * @summary Sync an edited WriterDocument to its cloud provider
          * @param {WriterApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexSyncWriterDocumentPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -45143,7 +45523,7 @@ export const WriterApiFactory = function (configuration?: Configuration, basePat
         },
         /**
          *
-         * @summary Write the active WriterDocument back to Feishu
+         * @summary Write the active WriterDocument back to its cloud provider
          * @param {WriterApiApiCoreWorkflowSessionsSessionIdWriterDocumentWriteBackPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -45182,7 +45562,7 @@ export interface WriterApiApiCoreWorkflowSessionsSessionIdWriterDocumentWriteBac
 export class WriterApi extends BaseAPI {
     /**
      *
-     * @summary Sync an edited WriterDocument to Feishu
+     * @summary Sync an edited WriterDocument to its cloud provider
      * @param {WriterApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexSyncWriterDocumentPostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
@@ -45193,7 +45573,7 @@ export class WriterApi extends BaseAPI {
 
     /**
      *
-     * @summary Write the active WriterDocument back to Feishu
+     * @summary Write the active WriterDocument back to its cloud provider
      * @param {WriterApiApiCoreWorkflowSessionsSessionIdWriterDocumentWriteBackPostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}

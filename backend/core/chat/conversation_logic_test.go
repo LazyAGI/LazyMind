@@ -18,6 +18,7 @@ import (
 	"lazymind/core/externalcontext"
 	"lazymind/core/state"
 	"lazymind/core/store"
+	"lazymind/core/vocabulary"
 )
 
 func TestResolveMailDraftConfirmIDFromDraftCard(t *testing.T) {
@@ -894,6 +895,61 @@ func TestReplaceAskUserToolResultSupportsJSONCarrier(t *testing.T) {
 	}
 }
 
+func TestBuildAskUserToolResultIncludesMandatoryLLMReviewProtocol(t *testing.T) {
+	pending := map[string]any{
+		"review_hook": map[string]any{
+			"kind":       "vocabulary_review_llm",
+			"session_id": "session-1",
+			"items": []any{map[string]any{
+				"question_index": 0, "review_item_id": "item-1",
+				"weight": 3.0, "grading_criteria": "answer conveys the core meaning",
+			}},
+		},
+	}
+	structured := &askAnswersStructuredPayload{Questions: []askAnsweredQuestionItem{{
+		Text: "meaning?", Type: "text", Answer: json.RawMessage(`{"value":"多样的"}`),
+	}}}
+
+	got := buildAskUserToolResultContent(pending, structured, nil)
+	for _, required := range []string{"MANDATORY_REVIEW_GRADING", "register_review_words", "item-1", `"weight":3`} {
+		if !strings.Contains(got, required) {
+			t.Fatalf("result missing %q: %s", required, got)
+		}
+	}
+}
+
+func TestBuildAskUserToolResultHidesObjectiveReviewAnswer(t *testing.T) {
+	pending := map[string]any{
+		"review_hook": map[string]any{"kind": "vocabulary_review_objective"},
+	}
+	structured := &askAnswersStructuredPayload{Questions: []askAnsweredQuestionItem{{
+		Text: "diverse 的中文含义？", Type: "single", Answer: json.RawMessage(`{"value":"各；不一样"}`),
+	}}}
+
+	got := buildAskUserToolResultContent(pending, structured, nil)
+	for _, hidden := range []string{"diverse", "各；不一样", "Answer:"} {
+		if strings.Contains(got, hidden) {
+			t.Fatalf("objective result leaked %q: %s", hidden, got)
+		}
+	}
+	if !strings.Contains(got, "backend graded and registered") {
+		t.Fatalf("objective result did not explain backend registration: %s", got)
+	}
+}
+
+func TestFormatVocabularyReviewReportUsesBackendValues(t *testing.T) {
+	got := formatVocabularyReviewReport(vocabulary.ReviewSessionReport{
+		Total: 4, Correct: 3, Incorrect: 1, Accuracy: 0.75,
+		AverageIntervalBefore: 2, AverageIntervalAfter: 6.5,
+		DifficultWords: []string{"diverse"},
+	})
+	for _, required := range []string{"Reviewed 4 words", "75.0% accuracy", "2.0 days", "6.5 days", "diverse"} {
+		if !strings.Contains(got, required) {
+			t.Fatalf("report missing %q: %s", required, got)
+		}
+	}
+}
+
 func TestBuildChatRequestBodySkipsMemoryAndPreferenceWhenPersonalizationDisabled(t *testing.T) {
 	ctx := &evolution.ChatResourceContext{
 		DisabledTools:      []string{},
@@ -1139,7 +1195,7 @@ func TestChatHistoryResponseIncludesMentions(t *testing.T) {
 	}
 }
 
-func TestChatHistoryResponseOmitsAnsweredAskPending(t *testing.T) {
+func TestChatHistoryResponseKeepsAnsweredAskPendingReadOnly(t *testing.T) {
 	item := chatHistoryToResponseItem(orm.ChatHistory{
 		Ext: json.RawMessage(`{
 			"ask_pending":{"ask_id":"ask-1","questions":[]},
@@ -1147,11 +1203,25 @@ func TestChatHistoryResponseOmitsAnsweredAskPending(t *testing.T) {
 			"ask_saved_answers":{"0":{"type":"text","value":"done"}}
 		}`),
 	})
-	if _, exists := item["ask_pending"]; exists {
-		t.Fatalf("answered ask_pending leaked into history response: %#v", item)
+	if _, exists := item["ask_pending"]; !exists {
+		t.Fatalf("answered ask_pending missing from history response: %#v", item)
 	}
-	if _, exists := item["ask_saved_answers"]; exists {
-		t.Fatalf("answered ask_saved_answers leaked into history response: %#v", item)
+	if answered, _ := item["ask_answered"].(bool); !answered {
+		t.Fatalf("answered marker missing from history response: %#v", item)
+	}
+	if _, exists := item["ask_saved_answers"]; !exists {
+		t.Fatalf("answered ask_saved_answers missing from history response: %#v", item)
+	}
+}
+
+func TestSubmittedAskAnswersPreservesQuestionIndexes(t *testing.T) {
+	answers := submittedAskAnswers(map[string]any{"questions": []any{
+		map[string]any{"answer": map[string]any{"type": "single", "value": "A"}},
+		map[string]any{"answer": nil},
+		map[string]any{"answer": map[string]any{"type": "text", "value": "word"}},
+	}})
+	if len(answers) != 2 || answers["0"] == nil || answers["2"] == nil {
+		t.Fatalf("submitted answers were not preserved by index: %#v", answers)
 	}
 }
 

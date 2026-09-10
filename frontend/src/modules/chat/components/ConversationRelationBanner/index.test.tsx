@@ -10,7 +10,7 @@ vi.mock("react-i18next", () => ({
       ({
         "chat.conversationRelationBannerLabel": "子会话来源",
         "chat.conversationSourceFrom": `来源：${params?.parent}`,
-        "chat.conversationForkedFrom": `Fork自：${params?.parent}`,
+        "chat.conversationForkedFrom": `分支来源：${params?.parent}`,
         "chat.returnToParentConversation": "返回主会话",
       })[key] || key,
   }),
@@ -52,7 +52,7 @@ describe("ConversationRelationBanner", () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByText("Fork自：技术讨论")).toBeInTheDocument();
+    expect(screen.getByText("分支来源：技术讨论")).toBeInTheDocument();
   });
 });
 

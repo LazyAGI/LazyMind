@@ -4,8 +4,11 @@
   border-radius: 12px;
   width: 100%;
   max-width: 720px;
+  max-height: min(760px, calc(100vh - 160px));
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 
   &--disabled {
     opacity: 0.75;
@@ -13,6 +16,7 @@
 
   // ── Header ──────────────────────────────────────────────
   &__header {
+    flex: 0 0 auto;
     background: #f7f9ff;
     padding: 16px 20px 12px;
     border-bottom: 1px solid #e8edf8;
@@ -73,6 +77,11 @@
   // ── Body ────────────────────────────────────────────────
   &__body {
     padding: 20px 20px 16px;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
   }
 
   &__question-label {
@@ -184,6 +193,7 @@
 
   // ── Footer ──────────────────────────────────────────────
   &__footer {
+    flex: 0 0 auto;
     display: flex;
     align-items: center;
     justify-content: space-between;

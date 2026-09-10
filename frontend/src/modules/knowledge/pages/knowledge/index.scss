@@ -94,6 +94,13 @@
   width: 220px;
 }
 
+.knowledge-preview-options-popover {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 220px;
+}
+
 .knowledge-preview-sequence {
   flex: none;
   gap: 8px;

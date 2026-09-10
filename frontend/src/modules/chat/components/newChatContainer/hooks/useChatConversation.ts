@@ -1,6 +1,7 @@
 import { createElement, useEffect, useRef, useState, type RefObject } from "react";
 import { Button, message, Modal } from "antd";
 import { useNavigate } from "react-router-dom";
+import { requestConversationStatusRefresh } from "@/modules/chat/utils/conversationStatusEvents";
 import {
   ChatConversationsRequestActionEnum,
   ChatConversationsResponseFinishReasonEnum,
@@ -912,6 +913,9 @@ export function useChatConversation({
         result.finish_reason !==
           ChatConversationsResponseFinishReasonEnum.FinishReasonUnspecified,
     );
+    if (runTerminal || legacyTerminal || result.runtime_event?.type === "model_call_started" || isFirstTimeReceivingId) {
+      requestConversationStatusRefresh(messageConversationId || currentConversationIdAtStart);
+    }
     const allRunsFinished = Boolean(
       (runTerminal || legacyTerminal) &&
         (messageConversationId || currentConversationIdAtStart) &&

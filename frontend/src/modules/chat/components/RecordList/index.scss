@@ -1,4 +1,20 @@
 .record-container {
+  .record-running-indicator {
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+    margin-left: 4px;
+    font-size: 12px;
+    color: var(--ant-color-primary, #1677ff);
+
+    &--unknown { color: var(--color-text-secondary, #666); }
+    &:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; border-radius: 2px; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .record-running-indicator .anticon-loading { animation: none; }
+  }
+
   display: flex;
   flex-direction: column;
   flex-grow: 1;
@@ -231,6 +247,53 @@
         flex: 1;
       }
     }
+  }
+
+  .record-sortable {
+    position: relative;
+    width: 100%;
+
+    > .ant-col > .record {
+      padding-left: 20px;
+    }
+
+    &--dragging {
+      z-index: 2;
+      background: var(--color-primary-bg);
+      border-radius: 4px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+    }
+
+    &:hover > .record-drag-handle,
+    &:focus-within > .record-drag-handle {
+      opacity: 1;
+    }
+
+    &:hover > .ant-col > .record.selected::before,
+    &:focus-within > .ant-col > .record.selected::before {
+      visibility: hidden;
+    }
+  }
+
+  .record-drag-handle {
+    position: absolute;
+    top: 5px;
+    left: 0;
+    z-index: 1;
+    width: 18px;
+    height: 24px;
+    padding: 0;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: #94a3b8;
+    cursor: grab;
+    touch-action: none;
+    opacity: 0;
+
+    &:active { cursor: grabbing; }
+    &[aria-disabled="true"] { cursor: default; }
+    &:focus-visible { outline: 2px solid #74a0ff; }
   }
 
   .record-empty {

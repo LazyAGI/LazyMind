@@ -179,6 +179,7 @@ func coreServiceEnv(cfg RuntimeConfig, paths RuntimePaths) []string {
 	coreURL := "sqliteproxy://core"
 	return []string{
 		"LAZYMIND_RUNTIME_MODE=local",
+		"LAZYMIND_VOCABULARY_ENABLED=" + envText("LAZYMIND_VOCABULARY_ENABLED", "true"),
 		"LAZYMIND_CORE_HOST=127.0.0.1",
 		"LAZYMIND_CORE_PORT=" + strconv.Itoa(cfg.LocalProxy.CoreHostPort),
 		"ACL_DB_DRIVER=sqlite",

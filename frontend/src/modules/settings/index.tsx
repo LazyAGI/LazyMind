@@ -39,7 +39,7 @@ import SettingsScheduleList from "@/modules/taskCenter/SettingsScheduleList";
 import TaskEntryDefaults from "@/modules/taskCenter/TaskEntryDefaults";
 import { fetchUserUiPreferences, patchUserUiPreferences } from "@/modules/user/uiPreferencesApi";
 import { runtimeFeatures } from "@/runtime/features";
-import { isDesktopRuntime, isLocalRuntime } from "@/runtime/mode";
+import { isDesktopRuntime, isLocalRuntime, isVocabularyEnabled } from "@/runtime/mode";
 import { setDeveloperModeActive } from "@/utils/developerMode";
 import { setSensitiveWordFilterEnabled } from "@/utils/sensitiveWordFilter";
 import { setPerformanceStatsEnabled as cachePerformanceStatsEnabled } from "@/utils/performanceStatsPreference";
@@ -48,6 +48,7 @@ import KnowledgeDataSettings from "./KnowledgeDataSettings";
 import KnowledgeToolSettings, { isKnowledgeToolView } from "./KnowledgeToolSettings";
 import QuickModelSettings from "./QuickModelSettings";
 import RecoverySettings from "./RecoverySettings";
+import VocabularySettings from "@/modules/vocabulary/VocabularySettings";
 import UserSkillWorkflowSettings, { type ResourceTab } from "./UserSkillWorkflowSettings";
 import { resolveMcpReadinessStatus } from "./mcpReadinessStatus";
 import { resolveModelNavigationStatus } from "./modelNavigationStatus";
@@ -70,6 +71,7 @@ type SectionID =
   | "tasks"
   | "knowledge"
   | "memory"
+  | "external_apps"
   | "skills"
   | "system_tools"
   | "mcp"
@@ -142,6 +144,7 @@ function baseNavigation(isAdmin: boolean, t: Translate): NavigationGroup[] {
         { id: "system_tools", label: t("settingsPage.sections.systemTools"), keywords: t("settingsPage.sectionKeywords.systemTools"), icon: <ToolOutlined /> },
         { id: "mcp", label: t("settingsPage.sections.mcp"), keywords: t("settingsPage.sectionKeywords.mcp"), icon: <ToolOutlined /> },
         { id: "assistants", label: t("settingsPage.sections.assistants"), keywords: t("settingsPage.sectionKeywords.assistants"), icon: <RobotOutlined /> },
+        ...(isVocabularyEnabled() ? [{ id: "external_apps" as const, label: "外部应用", keywords: "Anki AnkiConnect 外部应用 词汇表", icon: <UnorderedListOutlined /> }] : []),
         { id: "channels", label: t("settingsPage.sections.channels"), keywords: t("settingsPage.sectionKeywords.channels"), icon: <LinkOutlined />, status: t("settingsPage.sectionStatus.connect") },
       ],
     },
@@ -816,6 +819,11 @@ export default function SettingsPage() {
       );
     } else if (section === "memory") {
       content = <MemoryCapabilitySettings headingRef={headingRef} />;
+    } else if (section === "external_apps" && isVocabularyEnabled()) {
+      content = <>
+        {integratedHeader("外部应用", "查看并连接 LazyMind 可以配合使用的外部应用。")}
+        <VocabularySettings />
+      </>;
     } else if (section === "skills") {
       content = <UserSkillWorkflowSettings
         skillsEnabled={Boolean(overview?.controls.skills_enabled)}

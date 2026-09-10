@@ -44,10 +44,10 @@ describe("isAskPendingReadOnly", () => {
 });
 
 describe("shouldRenderAskPending", () => {
-  it("renders only the current unanswered Ask card", () => {
+  it("keeps answered and superseded Ask cards in the transcript", () => {
     expect(shouldRenderAskPending(false, true)).toBe(true);
-    expect(shouldRenderAskPending(true, true)).toBe(false);
-    expect(shouldRenderAskPending(false, false, true)).toBe(false);
+    expect(shouldRenderAskPending(true, true)).toBe(true);
+    expect(shouldRenderAskPending(false, false, true)).toBe(true);
   });
 
   it("keeps a resumable Ask when only an assistant placeholder follows it", () => {

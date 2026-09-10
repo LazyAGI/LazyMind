@@ -587,11 +587,23 @@ func manualSchemas() map[string]any {
 		"ConversationSwitchStatusRequest":  objReq([]string{"status"}, prop("status", intSchema())),
 		"ConversationSwitchStatusResponse": obj(prop("status", intSchema())),
 		"ConversationChatStatusResponse":   obj(prop("is_generating", boolSchema())),
-		"ConversationItem":                 conversationItemSchema(false),
-		"ConversationDetailItem":           conversationItemSchema(true),
+		"ConversationRunningStatusItem": objReq([]string{"conversation_id", "status"},
+			prop("conversation_id", strSchema()), prop("status", enumStringSchema("running", "idle", "unknown"))),
+		"ConversationBatchStatusRequest": objReq([]string{"conversation_ids"}, prop("conversation_ids", map[string]any{
+			"type": "array", "minItems": 1, "maxItems": 100, "items": map[string]any{"type": "string", "minLength": 1, "maxLength": 64},
+		})),
+		"ConversationBatchStatusResponse": objReq([]string{"statuses"}, prop("statuses", array(refSchema("ConversationRunningStatusItem")))),
+		"ConversationItem":                conversationItemSchema(false),
+		"ConversationDetailItem":          conversationItemSchema(true),
 		"ConversationPinResponse": objReq(
 			[]string{"conversation_id", "is_pinned"},
 			prop("conversation_id", strSchema()), prop("is_pinned", boolSchema()), prop("pinned_at", nullableSchema(dateTimeSchema())),
+			prop("history_order", nullableSchema(int64Schema())),
+			prop("order_updates", array(objReq([]string{"conversation_id", "history_order"}, prop("conversation_id", strSchema()), prop("history_order", int64Schema())))),
+		),
+		"ConversationReorderRequest": objReq(
+			[]string{"target_conversation_id", "position"},
+			prop("target_conversation_id", strSchema()), prop("position", enumStringSchema("before", "after")),
 		),
 		"ExternalExecutionInvocation": obj(
 			prop("total", intSchema()), prop("running", intSchema()), prop("succeeded", intSchema()),
@@ -757,6 +769,7 @@ func conversationItemSchema(includeSourceContext bool) map[string]any {
 		prop("update_time", strSchema()),
 		prop("pinned_at", nullableSchema(dateTimeSchema())),
 		prop("is_pinned", boolSchema()),
+		prop("history_order", nullableSchema(int64Schema())),
 		prop("models", array(strSchema())),
 		prop("chat_executor", enumStringSchema("lazymind", "codex", "cursor", "workbuddy")),
 		prop("thinking_depth", enumStringSchema("low", "medium", "high", "max")),
@@ -941,6 +954,10 @@ func manualPaths() map[string]any {
 		)},
 		"/conversations/{conversation_id}:unpin": map[string]any{"post": op(
 			"Unpin a conversation", queryParams(param("path", "conversation_id", true, strSchema())), nil, response(200, "Conversation unpinned", refSchema("ConversationPinResponse")),
+		)},
+		"/conversations/{conversation_id}:reorder": map[string]any{"post": op(
+			"Move a conversation within its pinned or ordinary history", queryParams(param("path", "conversation_id", true, strSchema())), jsonBody(refSchema("ConversationReorderRequest"), true),
+			response(200, "Conversation reordered", refSchema("ConversationPinResponse")),
 		)},
 		"/conversations/{conversation_id}:restore": map[string]any{"post": op(
 			"Restore a trashed conversation", queryParams(param("path", "conversation_id", true, strSchema())), nil, response(200, "Conversation restored", refSchema("EmptyObject")),
@@ -1154,6 +1171,7 @@ func manualPaths() map[string]any {
 		},
 		"/conversations:setChatHistory":      map[string]any{"post": op("Set conversation history", nil, jsonBody(refSchema("ConversationSetHistoryRequest"), true), response(200, "Set result", refSchema("SetChatHistoryResponse")))},
 		"/conversations:batchDelete":         map[string]any{"post": op("Batch delete conversations", nil, jsonBody(refSchema("ConversationBatchDeleteRequest"), true), response(200, "Batch deleted conversations", refSchema("ConversationBatchDeleteResponse")))},
+		"/conversations:batchStatus":         map[string]any{"post": op("Get a content-free status snapshot for up to 100 accessible conversations (32 KiB request limit)", nil, jsonBody(refSchema("ConversationBatchStatusRequest"), true), response(200, "Running, idle, or unknown; inaccessible conversations are omitted", refSchema("ConversationBatchStatusResponse")))},
 		"/conversations:feedBackChatHistory": map[string]any{"post": op("Feedback conversation history", nil, jsonBody(refSchema("ConversationFeedbackRequest"), true), response(200, "Feedback succeeded", refSchema("EmptyObject")))},
 		"/conversation:switchStatus": map[string]any{
 			"get":  op("Get multi-answer switch status", nil, nil, response(200, "Multi-answer switch status", refSchema("ConversationSwitchStatusResponse"))),

@@ -35,6 +35,7 @@ import (
 	"lazymind/core/taskcenter"
 	"lazymind/core/translation"
 	"lazymind/core/userprefs"
+	"lazymind/core/vocabulary"
 	"lazymind/core/wordgroup"
 	"lazymind/core/workflow"
 	workflowattempt "lazymind/core/workflow/attempt"
@@ -301,6 +302,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/conversations/{conversation_id}:promote", []string{"qa.write"}, chat.PromoteConversation)
 	handleAPI(r, "POST", "/conversations/{conversation_id}:pin", []string{"qa.write"}, chat.PinConversation)
 	handleAPI(r, "POST", "/conversations/{conversation_id}:unpin", []string{"qa.write"}, chat.UnpinConversation)
+	handleAPI(r, "POST", "/conversations/{conversation_id}:reorder", []string{"qa.write"}, chat.ReorderConversation)
 	handleAPI(r, "GET", "/chat/executors", []string{"qa.read"}, chat.ListChatExecutors)
 	handleAPI(r, "GET", "/external-chat/hosts/{provider}/status", []string{"qa.read"}, chat.ExternalChatHostStatus)
 	handleAPI(r, "GET", "/external-chat/providers/{provider}/sessions", []string{"qa.read"}, chat.ListExternalAgentSessions)
@@ -642,6 +644,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/conversation-organizer-runs/{run_id}:confirm", []string{"qa.write"}, conversationgroup.ConfirmOrganizer)
 	handleAPI(r, "POST", "/conversation-organizer-runs/{run_id}:undo", []string{"qa.write"}, conversationgroup.UndoOrganizer)
 	handleAPI(r, "PATCH", "/conversation-organizer-runs/{run_id}/items/{conversation_id}", []string{"qa.write"}, conversationgroup.CorrectOrganizerItem)
+	handleAPI(r, "POST", "/conversations:batchStatus", []string{"qa.read"}, chat.BatchConversationStatus)
 	handleAPI(r, "GET", "/conversations", []string{"qa.read"}, chat.ListConversations)
 	handleAPI(r, "POST", "/conversations:setChatHistory", []string{"qa.write"}, chat.SetChatHistory)
 	handleAPI(r, "POST", "/conversations:feedBackChatHistory", []string{"qa.write"}, chat.FeedBackChatHistory)
@@ -698,6 +701,58 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "DELETE", "/model_providers/{model_provider_id}/groups/{group_id}/keys", []string{"model.write"}, modelprovider.RemoveKey)
 	handleAPI(r, "GET", "/translation/status", []string{"document.read"}, translation.Status)
 	handleAPI(r, "POST", "/translation:translate", []string{"document.read"}, translation.Translate)
+
+	// ----- Vocabulary / Anki provider -----
+	if vocabulary.Enabled() {
+		handleAPI(r, "GET", "/vocabulary/provider", []string{"document.read"}, vocabulary.GetProvider)
+		handleAPI(r, "PUT", "/vocabulary/provider", []string{"document.write"}, vocabulary.PutProvider)
+		handleAPI(r, "GET", "/vocabulary/providers/anki/status", []string{"document.read"}, vocabulary.Status)
+		handleAPI(r, "POST", "/vocabulary/providers/anki:request-permission", []string{"document.write"}, vocabulary.RequestPermission)
+		handleAPI(r, "POST", "/vocabulary/providers/anki:initialize", []string{"document.write"}, vocabulary.Initialize)
+		handleAPI(r, "POST", "/vocabulary/providers/anki:sync", []string{"document.write"}, vocabulary.Sync)
+		handleAPI(r, "GET", "/vocabulary/providers/anki/decks", []string{"document.read"}, vocabulary.ListAnkiDecks)
+		handleAPI(r, "POST", "/vocabulary/providers/anki/decks", []string{"document.write"}, vocabulary.CreateAnkiDeck)
+		handleAPI(r, "DELETE", "/vocabulary/providers/anki/decks/{name}", []string{"document.write"}, vocabulary.DeleteAnkiDeck)
+		handleAPI(r, "POST", "/vocabulary/words", []string{"document.write"}, vocabulary.AddWord)
+		handleAPI(r, "GET", "/vocabulary/documents/{document_id}/words", []string{"document.read"}, vocabulary.ListDocumentWords)
+		handleAPI(r, "GET", "/vocabulary/words", []string{"document.read"}, vocabulary.ListWords)
+		handleAPI(r, "GET", "/vocabulary/review/next", []string{"document.read"}, vocabulary.NextReview)
+		handleAPI(r, "POST", "/vocabulary/review/sessions", []string{"document.write"}, vocabulary.StartReviewSession)
+		handleAPI(r, "GET", "/vocabulary/review/sessions/active/candidates", []string{"document.read"}, vocabulary.PreviewReviewSession)
+		handleAPI(r, "GET", "/vocabulary/review/sessions/active", []string{"document.read"}, vocabulary.GetActiveReviewSession)
+		handleAPI(r, "POST", "/vocabulary/review/sessions/active/words:issue", []string{"document.write"}, vocabulary.IssueReviewSessionWords)
+		handleAPI(r, "GET", "/vocabulary/review/sessions/{session_id}/questions:next", []string{"document.read"}, vocabulary.NextReviewSessionQuestions)
+		handleAPI(r, "POST", "/vocabulary/review/sessions/{session_id}/questions:prepare", []string{"document.write"}, vocabulary.PrepareReviewSessionQuestions)
+		handleAPI(r, "POST", "/vocabulary/review/sessions/{session_id}/answers", []string{"document.write"}, vocabulary.SubmitSessionReview)
+		handleAPI(r, "POST", "/vocabulary/review/sessions/{session_id}/answers:register", []string{"document.write"}, vocabulary.RegisterSessionReview)
+		handleAPI(r, "POST", "/vocabulary/review/sessions/{session_id}:complete", []string{"document.write"}, vocabulary.CompleteReviewSession)
+		handleAPI(r, "POST", "/vocabulary/words/{word_id}:review", []string{"document.write"}, vocabulary.SubmitReview)
+		handleAPI(r, "POST", "/vocabulary/words/{word_id}:master", []string{"document.write"}, vocabulary.MasterWord)
+		handleAPI(r, "DELETE", "/vocabulary/words/{word_id}", []string{"document.write"}, vocabulary.DeleteVocabularyWord)
+		handleAPI(r, "GET", "/vocabulary/wordbooks", []string{"document.read"}, vocabulary.ListWordbooks)
+		handleAPI(r, "POST", "/vocabulary/wordbooks", []string{"document.write"}, vocabulary.CreateWordbook)
+		handleAPI(r, "PATCH", "/vocabulary/wordbooks/{id}", []string{"document.write"}, vocabulary.UpdateWordbook)
+		handleAPI(r, "DELETE", "/vocabulary/wordbooks/{id}", []string{"document.write"}, vocabulary.DeleteWordbook)
+		handleAPI(r, "GET", "/vocabulary/words/{id}", []string{"document.read"}, vocabulary.GetWord)
+		handleAPI(r, "PATCH", "/vocabulary/words/{id}", []string{"document.write"}, vocabulary.UpdateWord)
+		handleAPI(r, "POST", "/vocabulary/words/{id}:resume", []string{"document.write"}, vocabulary.ResumeWord)
+		handleAPI(r, "POST", "/vocabulary/words/{id}:reset", []string{"document.write"}, vocabulary.ResetWord)
+		handleAPI(r, "POST", "/vocabulary/words:reset", []string{"document.write"}, vocabulary.ResetWords)
+		handleAPI(r, "POST", "/vocabulary/selection:resolve", []string{"document.read"}, vocabulary.ResolveSelection)
+		handleAPI(r, "DELETE", "/vocabulary/documents/{document_id}/words/{word_id}", []string{"document.write"}, vocabulary.RemoveDocumentSource)
+		handleAPI(r, "DELETE", "/vocabulary/documents/{document_id}/words/{word_id}/word", []string{"document.write"}, vocabulary.DeleteDocumentWord)
+		handleAPI(r, "GET", "/vocabulary/dictionary:lookup", []string{"document.read"}, vocabulary.DictionaryLookup)
+		handleAPI(r, "GET", "/vocabulary/stats", []string{"document.read"}, vocabulary.ReviewStatsHandler)
+		handleAPI(r, "GET", "/vocabulary/fsrs/profile", []string{"document.read"}, vocabulary.GetFSRSProfile)
+		handleAPI(r, "PUT", "/vocabulary/fsrs/profile", []string{"document.write"}, vocabulary.PutFSRSProfile)
+		handleAPI(r, "GET", "/vocabulary/review/logs:export", []string{"document.read"}, vocabulary.ExportReviewLogs)
+		handleAPI(r, "GET", "/vocabulary/words/{id}/review-history", []string{"document.read"}, vocabulary.ReviewHistory)
+		handleAPI(r, "POST", "/vocabulary/words/{id}/examples", []string{"document.write"}, vocabulary.AddExample)
+		handleAPI(r, "PATCH", "/vocabulary/examples/{id}", []string{"document.write"}, vocabulary.UpdateExample)
+		handleAPI(r, "DELETE", "/vocabulary/examples/{id}", []string{"document.write"}, vocabulary.DeleteExample)
+		handleAPI(r, "POST", "/vocabulary/words/{id}/tags", []string{"document.write"}, vocabulary.AddWordTags)
+		handleAPI(r, "DELETE", "/vocabulary/words/{id}/tags/{tag}", []string{"document.write"}, vocabulary.RemoveWordTag)
+	}
 
 	// ----- Prompttext -----
 	handleAPI(r, "POST", "/prompts", []string{"document.write"}, chat.CreatePrompt)

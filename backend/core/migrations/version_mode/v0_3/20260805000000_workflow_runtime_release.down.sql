@@ -1,5 +1,7 @@
 DROP TABLE IF EXISTS conversation_fork_requests;
 DROP TABLE IF EXISTS conversation_fork_origins;
+DROP INDEX IF EXISTS idx_vocabulary_review_session_word;
+DROP INDEX IF EXISTS idx_vocabulary_review_sessions_active;
 
 -- +migrate Dialect postgres
 DROP TABLE IF EXISTS conversation_organizer_changes;
@@ -117,6 +119,7 @@ ALTER TABLE conversations DROP COLUMN IF EXISTS chat_model_version;
 ALTER TABLE conversations DROP COLUMN IF EXISTS chat_model_snapshot;
 ALTER TABLE conversations DROP COLUMN IF EXISTS chat_model_id;
 ALTER TABLE conversations DROP COLUMN IF EXISTS chat_model_mode;
+ALTER TABLE conversations DROP COLUMN IF EXISTS history_order;
 ALTER TABLE conversations DROP COLUMN IF EXISTS pinned_at;
 ALTER TABLE conversations DROP COLUMN IF EXISTS source_display_name;
 ALTER TABLE conversations DROP COLUMN IF EXISTS source_document_id;
@@ -281,6 +284,7 @@ ALTER TABLE conversations DROP COLUMN chat_model_version;
 ALTER TABLE conversations DROP COLUMN chat_model_snapshot;
 ALTER TABLE conversations DROP COLUMN chat_model_id;
 ALTER TABLE conversations DROP COLUMN chat_model_mode;
+ALTER TABLE conversations DROP COLUMN history_order;
 ALTER TABLE conversations DROP COLUMN pinned_at;
 ALTER TABLE conversations DROP COLUMN source_display_name;
 ALTER TABLE conversations DROP COLUMN source_document_id;
@@ -467,6 +471,46 @@ DELETE FROM user_selected_models WHERE model_type = 'conversation_metadata';
 
 -- +migrate Dialect postgres
 DROP TABLE IF EXISTS chat_run_performance;
+DROP TABLE IF EXISTS vocabulary_review_session_answers;
+DROP TABLE IF EXISTS vocabulary_review_session_items;
+DROP TABLE IF EXISTS vocabulary_review_sessions;
+DROP TABLE IF EXISTS vocabulary_provider_operations;
+DROP TABLE IF EXISTS vocabulary_fsrs_profiles;
+DROP TABLE IF EXISTS vocabulary_dictionary_examples;
+DROP TABLE IF EXISTS vocabulary_dictionary_senses;
+DROP TABLE IF EXISTS vocabulary_dictionary_entries;
+DROP TABLE IF EXISTS vocabulary_dictionary_imports;
+DROP TABLE IF EXISTS vocabulary_example_tags;
+DROP TABLE IF EXISTS vocabulary_word_tags;
+DROP TABLE IF EXISTS vocabulary_tags;
+DROP TABLE IF EXISTS vocabulary_wordbook_entries;
+DROP TABLE IF EXISTS vocabulary_wordbooks;
+DROP TABLE IF EXISTS vocabulary_review_logs;
+DROP TABLE IF EXISTS vocabulary_review_cards;
+DROP TABLE IF EXISTS vocabulary_source_refs;
+DROP TABLE IF EXISTS vocabulary_examples;
+DROP TABLE IF EXISTS vocabulary_words;
+DROP TABLE IF EXISTS vocabulary_provider_settings;
 
 -- +migrate Dialect sqlite
 DROP TABLE IF EXISTS chat_run_performance;
+DROP TABLE IF EXISTS vocabulary_provider_operations;
+DROP TABLE IF EXISTS vocabulary_fsrs_profiles;
+DROP TABLE IF EXISTS vocabulary_dictionary_examples;
+DROP TABLE IF EXISTS vocabulary_dictionary_senses;
+DROP TABLE IF EXISTS vocabulary_dictionary_entries;
+DROP TABLE IF EXISTS vocabulary_dictionary_imports;
+DROP TABLE IF EXISTS vocabulary_example_tags;
+DROP TABLE IF EXISTS vocabulary_word_tags;
+DROP TABLE IF EXISTS vocabulary_tags;
+DROP TABLE IF EXISTS vocabulary_wordbook_entries;
+DROP TABLE IF EXISTS vocabulary_wordbooks;
+DROP TABLE IF EXISTS vocabulary_review_logs;
+DROP TABLE IF EXISTS vocabulary_review_cards;
+DROP TABLE IF EXISTS vocabulary_source_refs;
+DROP TABLE IF EXISTS vocabulary_examples;
+DROP TABLE IF EXISTS vocabulary_words;
+DROP TABLE IF EXISTS vocabulary_provider_settings;
+DROP TABLE IF EXISTS vocabulary_review_session_answers;
+DROP TABLE IF EXISTS vocabulary_review_session_items;
+DROP TABLE IF EXISTS vocabulary_review_sessions;
