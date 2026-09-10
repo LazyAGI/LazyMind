@@ -5,8 +5,17 @@ package common
 import "net/http"
 
 func init() {
+	registerAdditionalErrorAlias("invalid title", "Invalid request", http.StatusBadRequest, 2000103)
+	registerAdditionalErrorAlias("conversation changed", "Conflict", http.StatusConflict, 2000107)
+	registerAdditionalErrorAlias("update backfill failed", "Internal server error", http.StatusInternalServerError, 2000000)
+	registerAdditionalErrorAlias("reconcile metadata state failed", "Internal server error", http.StatusInternalServerError, 2000000)
+	registerAdditionalErrorAlias("rename conversation failed", "Internal server error", http.StatusInternalServerError, 2000000)
+	registerAdditionalErrorAlias("opening call budget exhausted or seed replaced", "Conflict", http.StatusConflict, 2000107)
+	registerAdditionalErrorAlias("retry with default model", "Internal server error", http.StatusInternalServerError, 2000000)
+	registerAdditionalErrorAlias("conversation opening model failed", "Internal server error", http.StatusInternalServerError, 2000000)
 	registerAdditionalErrorAlias("invalid chat model selection", "Invalid request", http.StatusBadRequest, 2000103)
 	registerAdditionalErrorAlias("conversation model selection changed", "Conflict", http.StatusConflict, 2000107)
+	registerAdditionalErrorAlias("conversation order changed", "Conflict", http.StatusConflict, 2000107)
 	registerAdditionalErrorAlias("conversation is busy", "Conflict", http.StatusConflict, 2000107)
 	registerAdditionalErrorAlias("save conversation model failed", "Internal server error", http.StatusInternalServerError, 2000000)
 	registerAdditionalErrorPattern("%w; fallback parser chunks failed", "Primary and fallback document parsing failed", http.StatusInternalServerError, 2001601)
@@ -487,6 +496,8 @@ func init() {
 		"invalid writer download conversion request", "invalid writer download source format",
 		"invalid writer download target format", "writer download conversion failed",
 		"unsupported writer document provider",
+		"invalid conversation status request", "provide between 1 and 100 conversation ids",
+		"invalid conversation id",
 	} {
 		registerAdditionalErrorAlias(source, "Invalid request", http.StatusBadRequest, 2000103)
 	}
@@ -542,6 +553,7 @@ func init() {
 		"open writer download conversion failed", "read writer download conversion failed",
 		"save writer download conversion failed", "index writer download conversion failed",
 		"encode writer download conversion request failed",
+		"state unavailable",
 	} {
 		registerAdditionalErrorAlias(source, "Internal server error", http.StatusInternalServerError, 2000000)
 	}
@@ -557,6 +569,7 @@ func init() {
 	}
 	registerAdditionalErrorPattern("chat service returned status %d", "Upstream service error", http.StatusBadGateway, 2000110)
 	registerAdditionalErrorAlias("record chat cancellation failed", "Upstream service error", http.StatusServiceUnavailable, 2000110)
+	registerAdditionalErrorAlias("unable to query conversation status", "Internal server error", http.StatusServiceUnavailable, 2000000)
 	registerAdditionalErrorPattern("migrate model provider credential %s", "Internal server error", http.StatusInternalServerError, 2000000)
 	registerAdditionalErrorPattern("load workflow head revision %s", "Internal server error", http.StatusInternalServerError, 2000000)
 	registerAdditionalErrorPattern("session_ids must belong to user %q and must not contain plugin conversations", "Invalid request", http.StatusBadRequest, 2000103)
@@ -578,6 +591,8 @@ func init() {
 	registerAdditionalErrorPattern("update task progress task=%s", "Internal server error", http.StatusInternalServerError, 2000000)
 	registerAdditionalErrorPattern("complete task=%s", "Internal server error", http.StatusInternalServerError, 2000000)
 	registerAdditionalErrorPattern("fail task=%s", "Internal server error", http.StatusInternalServerError, 2000000)
+	registerAdditionalErrorPattern("prepare subagent run task=%s", "Internal server error", http.StatusInternalServerError, 2000000)
+	registerAdditionalErrorPattern("append task step task=%s role=%s", "Internal server error", http.StatusInternalServerError, 2000000)
 	registerAdditionalErrorPattern("invalid sources snapshot", "Internal server error", http.StatusInternalServerError, 2000000)
 	registerAdditionalErrorPattern("save writing subtasks task=%s", "Internal server error", http.StatusInternalServerError, 2000000)
 	registerAdditionalErrorPattern("invalid writing subtasks snapshot", "Internal server error", http.StatusInternalServerError, 2000000)
@@ -633,4 +648,5 @@ func init() {
 	registerAdditionalError("create preference organizer task failed", http.StatusInternalServerError, 2002362)
 	registerAdditionalError("query preference organizer task failed", http.StatusInternalServerError, 2002363)
 	registerAdditionalError("preference organizer task lease was lost", http.StatusInternalServerError, 2002364)
+	registerAdditionalError("async job lease lost", http.StatusInternalServerError, 2002503)
 }

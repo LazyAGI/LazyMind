@@ -118,6 +118,9 @@ func FetchRoleIsDynamic(ctx context.Context, modelType string) (bool, error) {
 // If the algorithm service returns 404 (role not in yaml) or an error, the original
 // roleKey is returned unchanged so the caller can still query the DB directly.
 func resolveModelType(ctx context.Context, roleKey string) string {
+	if roleKey == "conversation_metadata" {
+		return "llm"
+	}
 	info, err := fetchRoleTypeInfo(ctx, roleKey)
 	if err != nil {
 		log.Logger.Warn().Err(err).Str("role", roleKey).

@@ -204,6 +204,7 @@ type AskPendingEvent struct {
 	Description string           `json:"description,omitempty"`
 	MailDraft   map[string]any   `json:"mail_draft,omitempty"`
 	MailDrafts  []map[string]any `json:"mail_drafts,omitempty"`
+	ReviewHook  map[string]any   `json:"review_hook,omitempty"`
 }
 
 type ToolLimitPendingEvent struct {

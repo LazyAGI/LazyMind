@@ -12,7 +12,7 @@ import (
 func TestOwnedChatHistoryRejectsLateRunWrite(t *testing.T) {
 	_, db := newExternalChatTestApplication(t)
 	ctx := context.Background()
-	now := time.Now()
+	now := time.Now().Add(-time.Minute)
 	if err := db.Create(&orm.ChatHistory{
 		ID: "history-owned", ConversationID: "conversation-1", Seq: 1,
 		RunID: "run-old", RunStatus: "generating",
@@ -22,6 +22,13 @@ func TestOwnedChatHistoryRejectsLateRunWrite(t *testing.T) {
 	}
 	if err := claimChatHistoryRun(ctx, db, "history-owned", "run-new"); err != nil {
 		t.Fatalf("claim new run: %v", err)
+	}
+	var claimed orm.ChatHistory
+	if err := db.First(&claimed, "id = ?", "history-owned").Error; err != nil {
+		t.Fatalf("load claimed history: %v", err)
+	}
+	if !claimed.CreateTime.After(now) {
+		t.Fatalf("regeneration did not refresh create_time: %v", claimed.CreateTime)
 	}
 	if updated, err := updateOwnedChatHistory(ctx, db, "history-owned", "run-old", map[string]any{
 		"run_status": "failed",

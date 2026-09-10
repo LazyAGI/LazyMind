@@ -45,6 +45,11 @@ func (m *CoreServiceManager) Run(ctx context.Context, cfg RuntimeConfig, paths R
 	if err := m.buildCore(ctx, cfg, paths); err != nil {
 		return err
 	}
+	if cfg.SQLiteServerPort > 0 {
+		if err := waitForHTTPOnly(ctx, cfg.SQLiteServerPort, sqliteServerHealthPath, sqliteServerProcessName, 5*time.Minute); err != nil {
+			return err
+		}
+	}
 	if err := m.waitForCoreDatabase(ctx, cfg, paths); err != nil {
 		return err
 	}
@@ -170,15 +175,18 @@ func (m *CoreServiceManager) Down(ctx context.Context, cfg RuntimeConfig, paths 
 
 func coreServiceEnv(cfg RuntimeConfig, paths RuntimePaths) []string {
 	endpoints := serviceEndpointsFromConfig(cfg)
-	coreDSN := sqliteDSN(paths.CoreDBPath)
-	coreURL := sqliteURL(paths.CoreDBPath)
+	coreDSN := "sqliteproxy://core"
+	coreURL := "sqliteproxy://core"
 	return []string{
 		"LAZYMIND_RUNTIME_MODE=local",
+		"LAZYMIND_VOCABULARY_ENABLED=" + envText("LAZYMIND_VOCABULARY_ENABLED", "true"),
 		"LAZYMIND_CORE_HOST=127.0.0.1",
 		"LAZYMIND_CORE_PORT=" + strconv.Itoa(cfg.LocalProxy.CoreHostPort),
 		"ACL_DB_DRIVER=sqlite",
 		"ACL_DB_DSN=" + coreDSN,
 		"LAZYMIND_CORE_DATABASE_URL=" + coreURL,
+		sqliteServerURLEnvVar + "=http://127.0.0.1:" + strconv.Itoa(cfg.SQLiteServerPort),
+		sqliteServerTokenFileEnvVar + "=" + paths.RunDirTokenFile,
 		"MIGRATIONS_DIR=" + filepath.Join(paths.RepoRoot, coreSourceDirName, "migrations"),
 		"LAZYMIND_REDIS_URL=",
 		"LAZYMIND_STATE_BACKEND=sqlite",
@@ -208,10 +216,9 @@ func coreServiceEnv(cfg RuntimeConfig, paths RuntimePaths) []string {
 		"LAZYMIND_OFFICE_CONVERT_URL=" + endpoints.Host.OfficeConvertURL,
 		"LAZYMIND_OFFICE_CONVERT_WORKERS=" + envText("LAZYMIND_OFFICE_CONVERT_WORKERS", "4"),
 		"LAZYMIND_SUBAGENT_WORKSPACE=" + paths.SubagentDataDir,
-		"LAZYMIND_SUBAGENT_DB_DSN=" + coreURL,
 		"LAZYMIND_READONLY_VALIDATE=0",
 		"LAZYMIND_READONLY_DB_DRIVER=sqlite",
-		"LAZYMIND_READONLY_DB_DSN=" + paths.LazyLLMDBPath,
+		"LAZYMIND_READONLY_DB_DSN=sqliteproxy://lazyllm",
 		"LAZYMIND_READONLY_SCHEMA=",
 		"LAZYMIND_READONLY_TABLES=lazyllm_documents,lazyllm_doc_service_tasks,lazyllm_kb_documents",
 		"LAZYMIND_RESOURCE_UPDATE_ENABLED=" + envText("LAZYMIND_RESOURCE_UPDATE_ENABLED", "true"),

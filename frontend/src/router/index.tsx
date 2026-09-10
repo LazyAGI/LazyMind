@@ -12,6 +12,7 @@ import Home from "@/modules/chat/pages/home";
 import { getAntdLocale } from "@/i18n/antdLocale";
 import { runtimeFeatures } from "@/runtime/features";
 import { isLocalSessionEnabled } from "@/runtime/localSession";
+import { isVocabularyEnabled } from "@/runtime/mode";
 import UserAgreementPage from "@/pages/UserAgreementPage";
 import SettingsPage from "@/modules/settings";
 
@@ -22,6 +23,7 @@ const KnowledgeList = lazy(() => import("@/modules/knowledge/pages/list"));
 const KnowledgeAuth = lazy(() => import("@/modules/knowledge/pages/auth"));
 const KnowledgeDetail = lazy(() => import("@/modules/knowledge/pages/detail"));
 const Knowledge = lazy(() => import("@/modules/knowledge/pages/knowledge"));
+const VocabularyPage = lazy(() => import("@/modules/vocabulary/VocabularyPage"));
 const AdminLayout = lazy(() => import("@/modules/admin/AdminLayout"));
 const TaskCenterPage = lazy(() => import("@/modules/taskCenter"));
 const UserManagement = lazy(() => import("@/modules/admin/pages/user"));
@@ -159,6 +161,7 @@ export default function AppRouter() {
             />
           </Route>
           <Route path="dataset-management" element={<DatasetListPage />} />
+          {isVocabularyEnabled() ? <Route path="lib/vocabulary" element={<VocabularyPage />} /> : null}
           <Route
             path="dataset-management/:datasetId"
             element={<DatasetDetailPage />}

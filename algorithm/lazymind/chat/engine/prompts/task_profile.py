@@ -124,7 +124,7 @@ _SIGNALS: tuple[tuple[Outcome, re.Pattern[str]], ...] = (
     )),
     ('learn', re.compile(
         r'教我|带我(?:学|做)|手把手|一步一步教|入门|学会|从零(?:到一|开始)|'
-        r'零基础|教程|辅导我|陪练|考考我|给我出题|从哪里开始|前置知识|'
+        r'零基础|教程|辅导我|陪练|考考我|(?:给我)?出题|(?:开始|今天|现在|要)?复习|从哪里开始|前置知识|'
         r'how\s+to|teach\s+me|'
         r'help\s+me\s+learn|guide\s+me\s+through|learn', re.I,
     )),
@@ -204,6 +204,11 @@ _SKILL_EXPLICIT = re.compile(
     r'(?:skill|技能包|SKILL\.md).{0,16}(?:使用|调用|启用|创建|修改|编辑|开发|管理)|'
     r'\$[a-z0-9][\w./-]*', re.I,
 )
+_SKILL_SUPPRESS_EXPLICIT = re.compile(
+    r'(?:不要|不准|禁止).{0,8}(?:任何|全部|所有)?(?:skill|技能包?|工具)|'
+    r'(?:without|do\s+not\s+use|don[\x27’]?t\s+use)\s+(?:any\s+)?(?:skills?|tools?)',
+    re.I,
+)
 _OPEN_ENDED = re.compile(
     r'如何|怎么|有哪些|帮我看看|给我.*方案|'
     r'我(?:现在|目前)?想(?:搞|做|弄|了解|看看).{0,20}(?:相关|方面|方向|东西|内容)|'
@@ -213,9 +218,9 @@ _OPEN_ENDED = re.compile(
 _SIMPLE_FACT = re.compile(r'^(?:什么是|解释一下|定义|谁是|多少|what\s+is|define)', re.I)
 _PLATFORM_CAPABILITY_QUERY = re.compile(
     r'(?:你|你们|平台|系统|LazyMind).{0,12}(?:有|支持|具备|提供|能做).{0,12}'
-    r'(?:能力|功能|资源|技能|skill|知识库|文档|数据集|数据库|db|工具)?|'
+    r'(?:能力|功能|资源|技能|skill|知识库|资料库|文档|数据集|数据库|db|工具)?|'
     r'(?:有哪些|有什么|支持哪些).{0,8}'
-    r'(?:能力|功能|资源|技能|skill|知识库|文档|数据集|数据库|db|工具)|'
+    r'(?:能力|功能|资源|技能|skill|知识库|资料库|文档|数据集|数据库|db|工具)|'
     r'what\s+(?:can\s+you\s+do|skills|capabilities|resources).{0,12}',
     re.I,
 )
@@ -373,7 +378,7 @@ def _subject_and_input(text: str, has_attachments: bool) -> tuple[str, str]:
     input_signals = sum((
         bool(has_attachments),
         bool(re.search(r'https?://|www\.', text, re.I)),
-        bool(re.search(r'知识库|knowledge\s*base', text, re.I)),
+        bool(re.search(r'知识库|资料库|knowledge\s*base', text, re.I)),
         bool(re.search(r'以下|这段|如下|```|<[^>]+>', text, re.I)),
     ))
     if input_signals > 1:
@@ -382,7 +387,7 @@ def _subject_and_input(text: str, has_attachments: bool) -> tuple[str, str]:
         input_mode = 'attachment'
     elif re.search(r'https?://|www\.', text, re.I):
         input_mode = 'url'
-    elif re.search(r'知识库|knowledge\s*base', text, re.I):
+    elif re.search(r'知识库|资料库|knowledge\s*base', text, re.I):
         input_mode = 'knowledge_base'
     elif re.search(r'以下|这段|如下|```|<[^>]+>', text, re.I):
         input_mode = 'inline_content'
@@ -498,6 +503,7 @@ def _rule_profile(query: str, *, has_attachments: bool = False) -> tuple[TaskPro
     text = str(query or '').strip()
     platform_capability_query = bool(_PLATFORM_CAPABILITY_QUERY.search(text))
     explicit_skill = bool(_SKILL_EXPLICIT.search(text))
+    explicit_skill_suppression = bool(_SKILL_SUPPRESS_EXPLICIT.search(text))
     current = bool(_CURRENT.search(text) or _EXPLICIT_WEB.search(text))
     # Fast-moving AI product/how-to requests require current evidence even without "latest".
     ai_how_to = bool(re.search(
@@ -530,8 +536,13 @@ def _rule_profile(query: str, *, has_attachments: bool = False) -> tuple[TaskPro
     deliverable = _DELIVERABLE_BY_OUTCOME[primary]
     secondary_deliverables = tuple(_DELIVERABLE_BY_OUTCOME[item] for item in secondary)
     research_required = current or 'research' in matches
-    skill_mode: SkillMode = 'explicit' if explicit_skill else (
-        'suppress' if primary in {'learn', 'transform'} or is_simple_fact else 'candidates'
+    # Keep the full Skill catalog available for normal requests so the model can
+    # apply each Skill's own when-to-use guidance. Only explicit selection and
+    # narrowly-defined trivial inputs should bypass that model-level decision.
+    skill_mode: SkillMode = (
+        'suppress' if explicit_skill_suppression
+        else 'explicit' if explicit_skill
+        else 'candidates'
     )
     subject_kind, input_mode = _subject_and_input(text, has_attachments)
     source_strategy = (
@@ -723,8 +734,8 @@ def _apply_explicit_resources(
     if resources.skill_names:
         updates['skill_mode'] = 'explicit'
         reasons.append('explicit skill selection')
-    elif excluded.skill_names:
-        updates['skill_mode'] = 'suppress'
+    elif excluded.skill_names and profile.skill_mode != 'suppress':
+        updates['skill_mode'] = 'candidates'
     if resources.knowledge_base_ids:
         updates['source_strategy'] = 'mixed' if _EXPLICIT_WEB.search(query) else 'knowledge_base'
         reasons.append('explicit knowledge-base selection')
@@ -879,6 +890,12 @@ def _validate_llm_profile(
         freshness = 'current'
     if rule.skill_mode == 'explicit':
         skill_mode = 'explicit'
+    elif rule.skill_mode == 'suppress':
+        skill_mode = 'suppress'
+    elif skill_mode == 'suppress':
+        # The classifier may rank/select Skills, but cannot hide the complete
+        # catalog unless a deterministic, explicit suppression rule matched.
+        skill_mode = 'candidates'
     primary_subtype = (
         rule.outcome_subtype if primary == rule.primary_outcome else _outcome_subtype(primary, query)
     )
@@ -931,6 +948,7 @@ def resolve_task_profile(
     if trivial_input:
         return replace(
             rule,
+            skill_mode='suppress',
             freshness='stable',
             confidence=1.0,
             routing_review_required=False,
@@ -988,7 +1006,7 @@ def resolve_task_profile(
     except Exception as exc:
         return replace(
             rule,
-            skill_mode='explicit' if rule.skill_mode == 'explicit' else 'suppress',
+            skill_mode='explicit' if rule.skill_mode == 'explicit' else 'candidates',
             source='fallback',
             router_latency_ms=int((time.monotonic() - started) * 1000),
             router_error=f'{type(exc).__name__}: {exc}'[:240],
@@ -1046,28 +1064,6 @@ def selected_prompt_modules(profile: TaskProfile) -> list[str]:
     return list(dict.fromkeys(modules))
 
 
-_SKILL_OUTCOME_TERMS: dict[Outcome, tuple[str, ...]] = {
-    'research': ('research', 'review', 'search', '调研', '研究'),
-    'analyze': ('analysis', 'review', 'critique', '分析', '审查'),
-    'transform': ('transform', 'rewrite', 'translate', 'summary', '转换', '改写'),
-    'decide': ('decision', 'comparison', 'compare', '决策', '对比'),
-    'plan': ('planning', 'plan', 'roadmap', '规划', '计划'),
-    'create': ('create', 'writing', 'generation', '创作', '生成'),
-    'execute': ('automation', 'operation', 'deploy', '执行', '自动化'),
-    'diagnose': ('diagnose', 'debug', 'review', '排障', '诊断'),
-    'answer': ('answer',),
-    'learn': ('learning', 'tutorial'),
-}
-
-
-def _selection_tokens(value: str) -> set[str]:
-    text = str(value or '').lower()
-    latin = re.findall(r'[a-z0-9][a-z0-9_-]{1,}', text)
-    cjk = re.findall(r'[\u3400-\u9fff]{2,}', text)
-    bigrams = [token[index:index + 2] for token in cjk for index in range(len(token) - 1)]
-    return set(latin + cjk + bigrams)
-
-
 def select_skill_candidates(
     available_skills: list[str] | None,
     query: str,
@@ -1083,12 +1079,7 @@ def select_skill_candidates(
             return available_skills
         available = set(available_skills or [])
         return [skill for skill in selected if skill in available]
-    available = [str(item) for item in (available_skills or []) if str(item).strip()]
-    query_tokens = _selection_tokens(query)
-    query_tokens.update(_SKILL_OUTCOME_TERMS[profile.primary_outcome])
-    ranked = []
-    for index, skill in enumerate(available):
-        score = len(query_tokens & _selection_tokens(skill))
-        ranked.append((score, index, skill))
-    ranked.sort(key=lambda item: (-item[0], item[1]))
-    return [skill for score, _, skill in ranked if score > 0][:max(1, min(limit, 5))]
+    # `candidates` means that the model, using Skill descriptions/when-to-use,
+    # owns the final choice. Name-token prefiltering hid relevant Skills before
+    # the model could inspect them, so preserve the complete ordered catalog.
+    return [str(item) for item in (available_skills or []) if str(item).strip()]

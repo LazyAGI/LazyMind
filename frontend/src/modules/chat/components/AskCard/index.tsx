@@ -16,6 +16,8 @@ export interface AskPending {
   questions: AskQuestion[];
   /** Optional group title shown at the top of the card */
   title?: string;
+  /** Translation key used when the producer supplies a fixed application title. */
+  title_i18n_key?: string;
   /** Optional subtitle / description shown below the title */
   description?: string;
   mail_draft?: import("@/modules/chat/components/MailDraftCard").MailDraftPreview;
@@ -60,7 +62,7 @@ export type AnswerState =
   | { type: "text"; value: string };
 
 // Must match algorithm/lazymind/chat/engine/tools/ask_user.py::_OTHER_OPTION.
-const OTHER_OPTION = "其他";
+const OTHER_OPTION = "__ask_user_other__";
 
 function initAnswer(q: AskQuestion): AnswerState {
   switch (q.type) {
@@ -143,8 +145,20 @@ export default function AskCard({
   const { t } = useTranslation();
   const otherOption = OTHER_OPTION;
   const otherOptionLabel = t("chat.askCardOtherOption");
+  const displayChoice = (value: string) => {
+    if (value === OTHER_OPTION) return otherOptionLabel;
+    if (value === "__ask_user_yes__") return t("common.yes");
+    if (value === "__ask_user_no__") return t("common.no");
+    return value;
+  };
   const answerSeparator = t("chat.askCardAnswerSeparator");
-  const { questions, title, description } = askPending;
+  const {
+    questions,
+    title,
+    title_i18n_key: titleI18nKey,
+    description,
+  } = askPending;
+  const displayTitle = title || (titleI18nKey ? t(titleI18nKey) : "");
   const total = questions.length;
 
   const [answers, setAnswers] = useState<AnswerState[]>(() =>
@@ -155,9 +169,8 @@ export default function AskCard({
   const isReadOnly = disabled || submitted;
 
   // Preserve the structured payload shape expected by the backend.
-  const [customChoices] = useState<Record<number, string[]>>(
-    () =>
-      Object.fromEntries(questions.map((q, i) => [i, [...(q.choices ?? [])]])),
+  const [customChoices] = useState<Record<number, string[]>>(() =>
+    Object.fromEntries(questions.map((q, i) => [i, [...(q.choices ?? [])]])),
   );
 
   useEffect(() => {
@@ -171,7 +184,9 @@ export default function AskCard({
   const currentChoices = customChoices[currentIndex] ?? currentQ.choices ?? [];
 
   const progressPercent = Math.round(
-    (answers.filter((answer) => isAnswered(answer, otherOption)).length / total) * 100,
+    (answers.filter((answer) => isAnswered(answer, otherOption)).length /
+      total) *
+      100,
   );
 
   const updateAnswer = (
@@ -231,7 +246,9 @@ export default function AskCard({
       <div className="ask-wizard__header">
         <div className="ask-wizard__header-top">
           <div className="ask-wizard__title-area">
-            {title && <h3 className="ask-wizard__title">{title}</h3>}
+            {displayTitle && (
+              <h3 className="ask-wizard__title">{displayTitle}</h3>
+            )}
             {description && (
               <p className="ask-wizard__description">{description}</p>
             )}
@@ -268,30 +285,28 @@ export default function AskCard({
               {(currentChoices.length > 0
                 ? currentChoices
                 : [t("common.yes"), t("common.no")]
-              ).map(
-                (c, ci) => (
-                  <Button
-                    key={ci}
-                    type={
-                      currentAns.type === "boolean" &&
-                      currentAns.value === (currentQ.choices?.[ci] ?? c)
-                        ? "primary"
-                        : "default"
-                    }
-                    disabled={isReadOnly}
-                    onClick={() =>
-                      updateAnswer(
-                        currentIndex,
-                        { type: "boolean", value: currentQ.choices?.[ci] ?? c },
-                        true,
-                      )
-                    }
-                    className="ask-wizard__bool-btn"
-                  >
-                    {c}
-                  </Button>
-                ),
-              )}
+              ).map((c, ci) => (
+                <Button
+                  key={ci}
+                  type={
+                    currentAns.type === "boolean" &&
+                    currentAns.value === (currentQ.choices?.[ci] ?? c)
+                      ? "primary"
+                      : "default"
+                  }
+                  disabled={isReadOnly}
+                  onClick={() =>
+                    updateAnswer(
+                      currentIndex,
+                      { type: "boolean", value: currentQ.choices?.[ci] ?? c },
+                      true,
+                    )
+                  }
+                  className="ask-wizard__bool-btn"
+                >
+                  {displayChoice(c)}
+                </Button>
+              ))}
             </div>
           )}
 
@@ -323,11 +338,7 @@ export default function AskCard({
                     className="ask-wizard__choice"
                   >
                     <ChoiceLabel
-                      value={
-                        origVal === otherOption
-                          ? otherOptionLabel
-                          : (currentChoices[ci] ?? origVal)
-                      }
+                      value={displayChoice(currentChoices[ci] ?? origVal)}
                     />
                   </Radio>
                 ))}
@@ -374,11 +385,7 @@ export default function AskCard({
                     className="ask-wizard__choice"
                   >
                     <ChoiceLabel
-                      value={
-                        origVal === otherOption
-                          ? otherOptionLabel
-                          : (currentChoices[ci] ?? origVal)
-                      }
+                      value={displayChoice(currentChoices[ci] ?? origVal)}
                     />
                   </Checkbox>
                 ))}

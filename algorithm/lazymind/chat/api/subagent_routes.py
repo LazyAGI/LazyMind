@@ -11,7 +11,7 @@ router = APIRouter()
 @router.post('/api/subagent/run', summary='Execute a SubAgent task (streaming)')
 async def run_subagent(
     task_id: Annotated[str, Body(description='Task ID; also used as the request sid (queue bucket)')],
-    db_dsn: Annotated[str, Body(description='Core database DSN, used to persist steps and read/write artifacts')],
+    task_spec: Annotated[Dict[str, Any], Body(description='Core-owned immutable task snapshot')],
     agent_type: Annotated[Optional[str], Body(description='Agent type')] = None,
     objective: Annotated[Optional[str], Body(description='Task objective')] = None,
     params: Annotated[Optional[Dict[str, Any]], Body(description='Task parameters')] = None,
@@ -28,18 +28,23 @@ async def run_subagent(
     resume: Annotated[Optional[bool], Body(description='Resume from persisted steps when true')] = False,
     llm_config: Annotated[Optional[Dict[str, Any]], Body(description='Per-request model config')] = None,
     tool_config: Annotated[Optional[Dict[str, Any]], Body(description='Per-request tool credentials (API keys)')] = None,
+    initial_steps: Annotated[
+        Optional[List[Dict[str, Any]]],
+        Body(description='Core-owned durable step snapshot used for resume'),
+    ] = None,
 ):
     from lazymind.chat.engine.subagent.runner import run_subagent_stream
 
     return StreamingResponse(
         run_subagent_stream(
             task_id=task_id,
-            db_dsn=db_dsn,
             resume=bool(resume),
             model_config=llm_config,
             tool_config=tool_config,
             agent_type=agent_type,
             tools=tools,
+            task_spec=task_spec,
+            initial_steps=initial_steps,
         ),
         media_type='text/event-stream',
     )

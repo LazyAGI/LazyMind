@@ -264,6 +264,8 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /v1/executors", s.handleExecutorPolicies)
 	mux.HandleFunc("POST /v1/executors/{provider}/{action}", s.handleExecutorPolicyAction)
 	mux.HandleFunc("GET /v1/bindings", s.handleExecutableBindings)
+	mux.HandleFunc("GET /v1/anki/status", s.handleAnkiStatus)
+	mux.HandleFunc("POST /v1/anki/open", s.handleOpenAnki)
 	mux.HandleFunc("PUT /v1/bindings/{target}", s.handleExecutableBinding)
 	mux.HandleFunc("DELETE /v1/bindings/{target}", s.handleExecutableBinding)
 	mux.HandleFunc("POST /v1/session", s.handleSession)
@@ -273,6 +275,77 @@ func (s *Server) routes() http.Handler {
 		go s.stop()
 	})
 	return s.allowLocalBrowser(mux)
+}
+
+func ankiExecutableCandidates() []string {
+	home, _ := os.UserHomeDir()
+	switch runtime.GOOS {
+	case "darwin":
+		return []string{"/Applications/Anki.app", filepath.Join(home, "Applications", "Anki.app")}
+	case "windows":
+		return []string{filepath.Join(os.Getenv("LOCALAPPDATA"), "Programs", "Anki", "anki.exe"), filepath.Join(os.Getenv("ProgramFiles"), "Anki", "anki.exe")}
+	default:
+		return []string{"/usr/bin/anki", "/usr/local/bin/anki"}
+	}
+}
+
+func findAnkiExecutable() string {
+	for _, candidate := range ankiExecutableCandidates() {
+		if candidate != "" {
+			if _, err := os.Stat(candidate); err == nil {
+				return candidate
+			}
+		}
+	}
+	return ""
+}
+
+func ankiConnectAddonCandidates() []string {
+	home, _ := os.UserHomeDir()
+	switch runtime.GOOS {
+	case "darwin":
+		return []string{filepath.Join(home, "Library", "Application Support", "Anki2", "addons21", "2055492159")}
+	case "windows":
+		return []string{filepath.Join(os.Getenv("APPDATA"), "Anki2", "addons21", "2055492159")}
+	default:
+		return []string{filepath.Join(home, ".local", "share", "Anki2", "addons21", "2055492159")}
+	}
+}
+
+func isAnkiConnectInstalled() bool {
+	for _, candidate := range ankiConnectAddonCandidates() {
+		if candidate != "" {
+			if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (s *Server) handleAnkiStatus(writer http.ResponseWriter, _ *http.Request) {
+	path := findAnkiExecutable()
+	writeJSON(writer, http.StatusOK, map[string]any{"installed": path != "", "executable_path": path, "connect_installed": isAnkiConnectInstalled(), "addon_code": "2055492159"})
+}
+
+func (s *Server) handleOpenAnki(writer http.ResponseWriter, _ *http.Request) {
+	path := findAnkiExecutable()
+	if path == "" {
+		writeJSON(writer, http.StatusNotFound, map[string]string{"error": "Anki is not installed"})
+		return
+	}
+	var command *exec.Cmd
+	if runtime.GOOS == "darwin" {
+		command = exec.Command("open", path)
+	} else {
+		command = exec.Command(path)
+	}
+	if err := command.Start(); err != nil {
+		writeError(writer, err)
+		return
+	}
+	_ = command.Process.Release()
+	writeJSON(writer, http.StatusOK, map[string]bool{"opened": true})
 }
 
 func (s *Server) handleExecutableBindings(writer http.ResponseWriter, _ *http.Request) {

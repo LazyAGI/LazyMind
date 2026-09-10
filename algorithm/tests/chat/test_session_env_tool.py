@@ -200,6 +200,31 @@ def test_session_env_arguments_are_redacted_in_tool_call_frames():
     assert preview == 'REDFOX_API_KEY'
 
 
+def test_ask_words_cloze_answers_are_redacted_in_tool_call_frames():
+    arguments = {
+        'session_id': 'session-1',
+        'mode': 'create',
+        'type': 'cloze',
+        'questions': [{
+            'text': 'A ____ team.',
+            'correct_answer': 'diverse',
+            'grading_criteria': 'must equal diverse',
+        }],
+    }
+    redacted = redact_session_env_arguments('ask_words', arguments)
+    call_text, _ = _tool_call_frame_text({
+        'id': 'call-cloze-1',
+        'function': {'name': 'ask_words', 'arguments': arguments},
+    }, 'en')
+
+    assert redacted['questions'] == [{
+        'text': 'A ____ team.',
+        'correct_answer': '<redacted>',
+    }]
+    assert 'diverse' not in call_text
+    assert 'grading_criteria' not in call_text
+
+
 def test_normalize_history_redacts_session_env_tool_arguments():
     import json
     from lazymind.chat.service.component.history import normalize_history_for_agent

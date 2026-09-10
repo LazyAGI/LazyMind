@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -26,6 +26,16 @@ vi.mock("@/modules/chat/components/WorkflowPanel", () => ({
 
 vi.mock("@/modules/identityAvatar", () => ({
   IdentityAvatar: () => null,
+}));
+
+vi.mock("@/modules/knowledge/api/translation", () => ({
+  getTranslationStatus: vi.fn().mockResolvedValue(true),
+  isSingleEnglishWord: (text:string) => /^[A-Za-z]+$/.test(text),
+  translateSelectionText: vi.fn().mockResolvedValue({
+    translated_text: "已翻译内容",
+    source: "en",
+    target: "zh",
+  }),
 }));
 
 describe("AssistantMessage cancellation", () => {
@@ -286,6 +296,52 @@ describe("AssistantMessage cancellation", () => {
       historyId: "history-keyboard",
       sequence: 8,
     });
+  });
+
+  it("translates selected assistant text", async () => {
+    render(
+      <AssistantMessage
+        item={{
+          id: "assistant-translation",
+          history_id: "history-translation",
+          seq: 9,
+          role: "assistant",
+          delta: "text to translate",
+          finish_reason:
+            ChatConversationsResponseFinishReasonEnum.FinishReasonStop,
+        }}
+        index={0}
+        length={1}
+        sendMessage={vi.fn()}
+        regenerate={vi.fn()}
+        regenerateDisabled={false}
+        stopGeneration={vi.fn()}
+        renderText={() => <span>text to translate</span>}
+        updateMessage={vi.fn()}
+      />,
+    );
+
+    const selected = screen.getByText("text to translate");
+    const range = document.createRange();
+    range.selectNodeContents(selected);
+    Object.defineProperty(range, "getClientRects", {
+      value: () => [
+        { top: 80, left: 100, right: 220, width: 120, height: 20 },
+      ],
+    });
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+
+    fireEvent.mouseUp(selected);
+    const translateButton = screen.getByRole("button", {
+      name: "knowledge.translateSelection",
+    });
+    await waitFor(() => expect(translateButton).toHaveAttribute("aria-disabled", "false"));
+    fireEvent.click(translateButton);
+
+    expect(await screen.findByText("已翻译内容")).toBeInTheDocument();
+    expect(screen.getByText("knowledge.translationTitle")).toBeInTheDocument();
   });
 });
 

@@ -2377,6 +2377,21 @@ type artifactActionPreviewOpenAPIRequest struct {
 	Input        map[string]any `json:"input"`
 }
 
+type translationOpenAPIRequest struct {
+	Text   string `json:"text"`
+	Target string `json:"target,omitempty"`
+}
+
+type translationOpenAPIResponse struct {
+	TranslatedText string `json:"translated_text"`
+	Source         string `json:"source"`
+	Target         string `json:"target"`
+}
+
+type translationStatusOpenAPIResponse struct {
+	Configured bool `json:"configured"`
+}
+
 func registeredCoreOperations() []openAPIOperation {
 	jsonBodyOf := func(v any, required bool) *openAPIBody {
 		return &openAPIBody{Required: required, ContentType: "application/json", Schema: schemaSource{Type: v}}
@@ -3848,6 +3863,23 @@ func registeredCoreOperations() []openAPIOperation {
 			Tags:        []string{"model_providers"},
 			PathParams:  modelProviderGroupModelPathParams{},
 			Responses:   map[int]openAPIResponse{200: resp("Deleted group model", deleteModelProviderGroupModelOpenAPIResponse{})},
+		},
+		{
+			Method:      "GET",
+			Path:        "/translation/status",
+			Summary:     "Get translation configuration status",
+			Description: "Reports whether the current user has a selected translation provider with credentials. Secrets are never returned.",
+			Tags:        []string{"translation"},
+			Responses:   map[int]openAPIResponse{200: resp("Translation configuration status", translationStatusOpenAPIResponse{})},
+		},
+		{
+			Method:      "POST",
+			Path:        "/translation:translate",
+			Summary:     "Translate selected document text",
+			Description: "Translates up to 5000 characters with the current user's server-side translation credential.",
+			Tags:        []string{"translation"},
+			RequestBody: jsonBodyOf(translationOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Translated text", translationOpenAPIResponse{})},
 		},
 		{
 			Method:    "GET",

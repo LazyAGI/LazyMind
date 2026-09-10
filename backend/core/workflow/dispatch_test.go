@@ -45,7 +45,7 @@ func seedDispatchStep(t *testing.T, db *gorm.DB, id string) {
 }
 
 func requestFor(id string) subagent.RunRequest {
-	return subagent.RunRequest{TaskID: "task-" + id, AgentType: "workflow_step", WorkspacePath: "/host/private", DBDSN: "secret", LLMConfig: map[string]any{"api_key": "secret"}, Params: map[string]any{"operation": "execute", "objective": "make report"}}
+	return subagent.RunRequest{TaskID: "task-" + id, AgentType: "workflow_step", WorkspacePath: "/host/private", LLMConfig: map[string]any{"api_key": "secret"}, Params: map[string]any{"operation": "execute", "objective": "make report"}}
 }
 
 func TestCanonicalQueueContainsNeutralContext(t *testing.T) {

@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 
 	"lazymind/core/common"
@@ -25,6 +26,7 @@ import (
 	"lazymind/core/store"
 	"lazymind/core/subagent"
 	"lazymind/core/taskcenter"
+	"lazymind/core/vocabulary"
 	"lazymind/core/workflow"
 )
 
@@ -285,6 +287,7 @@ func ensureConversation(ctx context.Context, db *gorm.DB, convID, displayName st
 	c = orm.Conversation{
 		ID:           convID,
 		DisplayName:  displayName,
+		TitleSource:  "default",
 		ChannelID:    "default",
 		SearchConfig: searchConfig,
 		Models:       models,
@@ -301,6 +304,9 @@ func ensureConversation(ctx context.Context, db *gorm.DB, convID, displayName st
 		return nil, 0, err
 	}
 	applyResolvedChatModelBinding(&c, modelBinding)
+	if title, _ := conversationSettings["display_name"].(string); strings.TrimSpace(title) != "" {
+		c.TitleSource = "user"
+	}
 	if ephemeral, _ := conversationSettings["ephemeral"].(bool); ephemeral {
 		c.IsEphemeral = true
 		if persistent, _ := conversationSettings["persistent_ephemeral"].(bool); !persistent {
@@ -418,6 +424,9 @@ func buildAskUserToolResultContent(
 	questionsRaw, _ := askPendingData["questions"].([]any)
 
 	if askStructured != nil {
+		if hook, ok := askPendingData["review_hook"].(map[string]any); ok && hook["kind"] == "vocabulary_review_objective" {
+			return "The user submitted the previous objective review batch. The backend graded and registered it. Do not inspect, repeat, or re-grade those answers. The current user input contains either the next candidates or the final backend report; continue using only that information."
+		}
 		lines := []string{"Questions were shown via an interactive card. The user submitted the form; some answers may be omitted.", ""}
 		for i, sq := range askStructured.Questions {
 			prefix := fmt.Sprintf("Q%d: %s", i+1, sq.Text)
@@ -449,6 +458,11 @@ func buildAskUserToolResultContent(
 			lines = append(lines, "  Answer: "+answerStr)
 			lines = append(lines, "")
 		}
+		if hook, ok := askPendingData["review_hook"].(map[string]any); ok && hook["kind"] == "vocabulary_review_llm" {
+			if encoded, err := json.Marshal(hook); err == nil {
+				lines = append(lines, "", "MANDATORY_REVIEW_GRADING: Evaluate every submitted answer using the criteria below, then call register_review_words with every question result and its exact word_id and weight. That tool registers the results and returns either the next batch or, when complete=true and remaining=0, the backend-generated report. Do not call get_review_words again. If report is present, present it faithfully without recalculating or inventing values.", string(encoded))
+			}
+		}
 		return strings.Join(lines, "\n")
 	}
 
@@ -467,7 +481,7 @@ func buildAskUserToolResultContent(
 			if _, hasAns := askSavedAnswers[idxKey]; hasAns {
 				lines = append(lines, "  Answer: [partial answer saved]")
 			} else {
-				lines = append(lines, "  Answer: [未填写]")
+				lines = append(lines, "  Answer: [not provided]")
 			}
 			lines = append(lines, "")
 		}
@@ -1480,7 +1494,6 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 	}
 	// Propagate workflow_context so Python ChatAgent receives the active session info.
 	// Merge workflow_ui_state (focused_tab, focused_sort_order) from the request body.
-	// Python reads artifact state directly from the DB via _build_session_artifact_section.
 	if pc, ok := raw["workflow_context"].(map[string]any); ok && len(pc) > 0 {
 		mergedPC := make(map[string]any, len(pc)+4)
 		for k, v := range pc {
@@ -2595,6 +2608,7 @@ func persistImmediateRunTerminal(
 	if db == nil || terminal == nil {
 		return false
 	}
+	defer notifyConversationOpening(db, convID)
 	ctx, cancel := terminalWriteContext(ctx)
 	defer cancel()
 	now := time.Now()
@@ -3154,6 +3168,7 @@ dualPersist:
 }
 
 func recordConversationIdleActivity(ctx context.Context, db *gorm.DB, stateStore state.Store, conversationID, userID, historyID, userContent, assistantText string, now time.Time) {
+	notifyConversationOpening(db, conversationID)
 	if db == nil || stateStore == nil || strings.TrimSpace(conversationID) == "" || strings.TrimSpace(userID) == "" || strings.TrimSpace(historyID) == "" {
 		return
 	}
@@ -3219,7 +3234,6 @@ func handleTaskCreated(
 				Params:        ev.Params,
 				WorkspacePath: existing.WorkspacePath,
 				Tools:         ev.Tools,
-				DBDSN:         subagent.DBDSN(),
 				Resume:        true,
 				LLMConfig:     llmConfig,
 				ToolConfig:    toolConfig,
@@ -3266,7 +3280,6 @@ func handleTaskCreated(
 		Params:        ev.Params,
 		WorkspacePath: workspacePath,
 		Tools:         ev.Tools,
-		DBDSN:         subagent.DBDSN(),
 		Resume:        false,
 		LLMConfig:     llmConfig,
 		ToolConfig:    toolConfig,
@@ -3705,10 +3718,129 @@ func mergeAskPendingIntoExt(ext json.RawMessage, askPending any) json.RawMessage
 	return b
 }
 
+func submittedAskAnswers(structured any) map[string]any {
+	payload, ok := structured.(map[string]any)
+	if !ok {
+		return nil
+	}
+	questions, ok := payload["questions"].([]any)
+	if !ok {
+		return nil
+	}
+	answers := make(map[string]any, len(questions))
+	for index, value := range questions {
+		question, _ := value.(map[string]any)
+		if answer := question["answer"]; answer != nil {
+			answers[strconv.Itoa(index)] = answer
+		}
+	}
+	return answers
+}
+
+func submitObjectiveVocabularyAnswers(ctx context.Context, db *gorm.DB, owner string, histories []orm.ChatHistory, structured any) (string, error) {
+	payload, ok := structured.(map[string]any)
+	if !ok {
+		return "", nil
+	}
+	for index := len(histories) - 1; index >= 0; index-- {
+		var ext map[string]any
+		if len(histories[index].Ext) == 0 || json.Unmarshal(histories[index].Ext, &ext) != nil {
+			continue
+		}
+		pending, _ := ext["ask_pending"].(map[string]any)
+		if pending == nil {
+			continue
+		}
+		hook, _ := pending["review_hook"].(map[string]any)
+		if hook == nil || hook["kind"] != "vocabulary_review_objective" {
+			return "", nil
+		}
+		if fmt.Sprint(payload["ask_id"]) != fmt.Sprint(pending["ask_id"]) {
+			return "", errors.New("vocabulary review answer does not match the pending card")
+		}
+		questions, _ := payload["questions"].([]any)
+		items, _ := hook["items"].([]any)
+		sessionID := strings.TrimSpace(fmt.Sprint(hook["session_id"]))
+		service := vocabulary.New(db)
+		for _, rawItem := range items {
+			itemMap, _ := rawItem.(map[string]any)
+			questionIndex, _ := strconv.Atoi(fmt.Sprint(itemMap["question_index"]))
+			if questionIndex < 0 || questionIndex >= len(questions) {
+				return "", errors.New("vocabulary review answer is incomplete")
+			}
+			question, _ := questions[questionIndex].(map[string]any)
+			answer, _ := question["answer"].(map[string]any)
+			response := strings.TrimSpace(fmt.Sprint(answer["value"]))
+			if response == "" || response == "<nil>" {
+				return "", errors.New("vocabulary review answer is incomplete")
+			}
+			wordID := strings.TrimSpace(fmt.Sprint(itemMap["word_id"]))
+			var item vocabulary.ReviewSessionItem
+			var err error
+			if wordID != "" && wordID != "<nil>" {
+				var active vocabulary.ReviewSession
+				active, item, err = service.ActiveSessionItemByWord(ctx, owner, wordID)
+				if err == nil && active.ID != sessionID {
+					err = errors.New("vocabulary review answer does not match the active session")
+				}
+			} else {
+				// Backward compatibility for cards created before word-based hooks.
+				itemID := strings.TrimSpace(fmt.Sprint(itemMap["review_item_id"]))
+				item, err = service.SessionItem(ctx, owner, sessionID, itemID)
+			}
+			if err != nil {
+				return "", err
+			}
+			err = service.RecordSessionAnswer(ctx, owner, sessionID, item.WordID, item.Term, vocabulary.ReviewRequest{CardID: item.CardID, Response: response, RowVersion: item.RowVersion, PreviewedAt: item.PreviewedAt, IdempotencyKey: uuid.NewString()})
+			if err != nil {
+				return "", err
+			}
+		}
+		next, err := service.PreviewReviewSession(ctx, owner, 5)
+		if err != nil {
+			return "", err
+		}
+		if next.Session.ID != sessionID {
+			return "", errors.New("vocabulary review session changed while recording answers")
+		}
+		if len(next.Questions) > 0 {
+			lines := []string{
+				"The user answered the previous review batch. The backend graded and registered it. Do not repeat, re-grade, or ask about the previous batch again.",
+				"The backend returned the following candidates for the next batch. Select suitable words and a question type, then call ask_words to continue:",
+			}
+			for _, question := range next.Questions {
+				lines = append(lines, fmt.Sprintf("- %s：%s", question.Word.Term, question.Word.Meaning))
+			}
+			lines = append(lines, "These words are candidates only. A word is issued for this batch only when it is passed to ask_words.")
+			return strings.Join(lines, "\n"), nil
+		}
+		report, err := service.CompleteReviewSession(ctx, owner, sessionID)
+		if err != nil {
+			return "", err
+		}
+		return formatVocabularyReviewReport(report), nil
+	}
+	return "", nil
+}
+
+func formatVocabularyReviewReport(report vocabulary.ReviewSessionReport) string {
+	lines := []string{
+		"This review session is complete. The following is the final report generated by the backend. Present it faithfully in natural language. Do not ask more questions or recalculate or alter the data.",
+		fmt.Sprintf("Reviewed %d words: %d correct, %d incorrect, with %.1f%% accuracy.", report.Total, report.Correct, report.Incorrect, report.Accuracy*100),
+		fmt.Sprintf("The average review interval changed from %.1f days to %.1f days.", report.AverageIntervalBefore, report.AverageIntervalAfter),
+	}
+	if len(report.DifficultWords) > 0 {
+		lines = append(lines, "Words requiring additional practice: "+strings.Join(report.DifficultWords, ", ")+".")
+	} else {
+		lines = append(lines, "No difficult words require additional attention in this session.")
+	}
+	return strings.Join(lines, "\n")
+}
+
 // markLastAskPendingAnswered finds the most recent history entry that has
-// ask_pending in ext, sets ask_answered=true in its ext, and clears
-// ask_saved_answers so the AskCard shows as submitted on next page load.
-func markLastAskPendingAnswered(ctx context.Context, db *gorm.DB, histories []orm.ChatHistory) {
+// ask_pending in ext, sets ask_answered=true, and stores the submitted answers
+// so the complete question/answer card remains visible after page reload.
+func markLastAskPendingAnswered(ctx context.Context, db *gorm.DB, histories []orm.ChatHistory, structured any) {
 	if db == nil {
 		return
 	}
@@ -3728,7 +3860,9 @@ func markLastAskPendingAnswered(ctx context.Context, db *gorm.DB, histories []or
 			break
 		}
 		m["ask_answered"] = true
-		delete(m, "ask_saved_answers")
+		if answers := submittedAskAnswers(structured); answers != nil {
+			m["ask_saved_answers"] = answers
+		}
 		updated, err := json.Marshal(m)
 		if err != nil {
 			break

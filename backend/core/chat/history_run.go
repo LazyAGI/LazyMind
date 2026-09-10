@@ -23,8 +23,10 @@ func claimChatHistoryRun(ctx context.Context, db *gorm.DB, historyID, runID stri
 		return err
 	}
 	return conversationCheckpoint(ctx, db, history.ConversationID, func(tx *gorm.DB) error {
+		now := time.Now()
 		return tx.Model(&orm.ChatHistory{}).Where("id = ?", historyID).Updates(map[string]any{
-			"run_id": runID, "run_status": "generating", "run_terminal": nil, "update_time": time.Now(),
+			"run_id": runID, "run_status": "generating", "run_terminal": nil,
+			"create_time": now, "update_time": now,
 		}).Error
 	})
 }

@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
+import { Tooltip } from "antd";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
+import { isSingleEnglishWord } from "@/modules/knowledge/api/translation";
 
 pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
@@ -17,11 +19,20 @@ interface RenderPdfProps {
   gapBackground?: string;
   onAskSelection?: (selection: PdfTextSelection) => void;
   askSelectionLabel?: string;
+  onTranslateSelection?: (selection: PdfTextSelection) => void;
+  onAddVocabularySelection?: (selection: PdfTextSelection) => void;
+  addVocabularySelectionLabel?: string;
+  translateSelectionLabel?: string;
+  translateSelectionDisabled?: boolean;
+  translateSelectionDisabledTip?: string;
+  translateSelectionConfigureLabel?: string;
+  translateSelectionConfigureUrl?: string;
 }
 
 export interface PdfTextSelection {
   text: string;
   page: number;
+  context?: string;
   bbox?: [number, number, number, number];
 }
 
@@ -49,6 +60,14 @@ export default function RenderPdf({
   style,
   onAskSelection,
   askSelectionLabel = "向 LazyMind 提问",
+  onTranslateSelection,
+  onAddVocabularySelection,
+  addVocabularySelectionLabel = "加入生词",
+  translateSelectionLabel = "翻译",
+  translateSelectionDisabled = false,
+  translateSelectionDisabledTip,
+  translateSelectionConfigureLabel = "去配置",
+  translateSelectionConfigureUrl,
 }: RenderPdfProps) {
   const [numPages, setNumPages] = useState(1);
   const [pdfLoaded, setPdfLoaded] = useState(false);
@@ -116,7 +135,7 @@ export default function RenderPdf({
   };
 
   const updateSelectionAction = () => {
-    if (!onAskSelection || !containerRef.current) {
+    if ((!onAskSelection && !onTranslateSelection) || !containerRef.current) {
       return;
     }
     const selection = window.getSelection();
@@ -151,7 +170,12 @@ export default function RenderPdf({
     }
     const containerRect = containerRef.current.getBoundingClientRect();
     setSelectionAction({
-      selection: { text, page: selectedPageIndex + 1, bbox },
+      selection: {
+        text,
+        page: selectedPageIndex + 1,
+        context: pageElement?.innerText?.trim() || text,
+        bbox,
+      },
       left: containerRef.current.scrollLeft + Math.min(
         Math.max(selectionRect.left - containerRect.left + selectionRect.width / 2, 72),
         containerRect.width - 72,
@@ -463,7 +487,7 @@ export default function RenderPdf({
         <Page
           pageNumber={index + 1}
           width={pageWidthPx}
-          renderTextLayer={Boolean(onAskSelection)}
+          renderTextLayer={Boolean(onAskSelection || onTranslateSelection)}
           renderAnnotationLayer={false}
           onRenderSuccess={() => {
             tryHighlightAfterRender(index);
@@ -512,6 +536,7 @@ export default function RenderPdf({
     (pageHeightsPx.reduce((s, h) => s + h, 0) || pageSlotHeight * numPages) +
     GAP * Math.max(0, numPages - 1);
 
+  const translationUnavailable=translateSelectionDisabled&&!isSingleEnglishWord(selectionAction?.selection.text||"");
   return (
     <div
       className={className}
@@ -527,34 +552,100 @@ export default function RenderPdf({
       }}
     >
       {selectionAction ? (
-        <button
-          type="button"
-          aria-label={askSelectionLabel}
-          onMouseDown={(event) => event.preventDefault()}
-          onClick={() => {
-            onAskSelection?.(selectionAction.selection);
-            window.getSelection()?.removeAllRanges();
-            setSelectionAction(null);
-          }}
+        <div
           style={{
             position: "absolute",
             zIndex: 30,
             left: selectionAction.left,
             top: selectionAction.top,
             transform: "translateX(-50%)",
-            border: 0,
             borderRadius: 8,
-            padding: "8px 12px",
-            background: "#1677ff",
-            color: "#fff",
+            padding: 4,
+            background: "#fff",
             boxShadow: "0 4px 16px rgba(0, 0, 0, 0.2)",
-            cursor: "pointer",
             fontSize: 13,
             whiteSpace: "nowrap",
+            display: "flex",
+            gap: 4,
           }}
         >
-          {askSelectionLabel}
-        </button>
+          {onAskSelection ? (
+            <button
+              type="button"
+              aria-label={askSelectionLabel}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => {
+                onAskSelection(selectionAction.selection);
+                window.getSelection()?.removeAllRanges();
+                setSelectionAction(null);
+              }}
+              style={{ border: 0, borderRadius: 6, padding: "6px 10px", background: "#1677ff", color: "#fff", cursor: "pointer" }}
+            >
+              {askSelectionLabel}
+            </button>
+          ) : null}
+          {onTranslateSelection ? (
+            <Tooltip
+              mouseEnterDelay={0}
+              title={translationUnavailable ? (
+                <span>
+                  {translateSelectionDisabledTip}
+                  {translateSelectionConfigureUrl ? (
+                    <>
+                      {" · "}
+                      <a
+                        href={translateSelectionConfigureUrl}
+                        onMouseDown={(event) => event.stopPropagation()}
+                      >
+                        {translateSelectionConfigureLabel}
+                      </a>
+                    </>
+                  ) : null}
+                </span>
+              ) : undefined}
+            >
+              <span style={{ display: "inline-flex" }}>
+                <button
+                  type="button"
+                  aria-label={translateSelectionLabel}
+                  disabled={translationUnavailable}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => {
+                    onTranslateSelection(selectionAction.selection);
+                    window.getSelection()?.removeAllRanges();
+                    setSelectionAction(null);
+                  }}
+                  style={{
+                    border: "1px solid #d9d9d9",
+                    borderRadius: 6,
+                    padding: "5px 10px",
+                    background: translationUnavailable ? "#f5f5f5" : "#fff",
+                    color: translationUnavailable ? "rgba(0,0,0,.25)" : "#1677ff",
+                    cursor: translationUnavailable ? "not-allowed" : "pointer",
+                    pointerEvents: translationUnavailable ? "none" : "auto",
+                  }}
+                >
+                  {translateSelectionLabel}
+                </button>
+              </span>
+            </Tooltip>
+          ) : null}
+          {onAddVocabularySelection ? (
+            <button
+              type="button"
+              aria-label={addVocabularySelectionLabel}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => {
+                onAddVocabularySelection(selectionAction.selection);
+                window.getSelection()?.removeAllRanges();
+                setSelectionAction(null);
+              }}
+              style={{ border: "1px solid #d9d9d9", borderRadius: 6, padding: "5px 10px", background: "#fff", color: "#1677ff", cursor: "pointer" }}
+            >
+              {addVocabularySelectionLabel}
+            </button>
+          ) : null}
+        </div>
       ) : null}
       <Document
         file={fileData}

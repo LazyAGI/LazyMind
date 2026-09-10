@@ -133,6 +133,8 @@ type MultiAnswersSwitch struct {
 func (MultiAnswersSwitch) TableName() string { return "multi_answers_switches" }
 
 type Conversation struct {
+	TitleSource   string          `gorm:"column:title_source;type:varchar(16);not null;default:unknown"`
+	TitleRevision int64           `gorm:"column:title_revision;not null;default:0"`
 	ID            string          `gorm:"column:id;type:varchar(36);primaryKey"`
 	DisplayName   string          `gorm:"column:display_name;type:varchar(255)"`
 	ChannelID     string          `gorm:"column:channel_id;type:varchar(36);not null;default:default"`
@@ -174,6 +176,7 @@ type Conversation struct {
 	SourceSelectedText   string          `gorm:"column:source_selected_text;type:text;not null;default:''"`
 	SourceContext        json.RawMessage `gorm:"column:source_context;type:json"`
 	PinnedAt             *time.Time      `gorm:"column:pinned_at"`
+	HistoryOrder         *int64          `gorm:"column:history_order"`
 	ArchivedAt           *time.Time      `gorm:"column:archived_at"`
 	ArchiveFolderID      *string         `gorm:"column:archive_folder_id;type:varchar(36)"`
 	TrashExpiresAt       *time.Time      `gorm:"column:trash_expires_at"`

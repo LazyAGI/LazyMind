@@ -135,6 +135,7 @@ func pidFileRecords(paths RuntimePaths, cfg RuntimeConfig) []LocalProcessRecord 
 		ports   []int
 	}{
 		{processComposeServiceName, paths.ProcessComposePIDFile, []int{cfg.ProcessComposePort}},
+		{sqliteServerProcessName, paths.SQLiteServerPIDFile, []int{cfg.SQLiteServerPort}},
 		{authServiceProcessName, paths.AuthServicePIDFile, []int{cfg.AuthService.Port}},
 		{channelGatewayProcessName, paths.ChannelGatewayPIDFile, []int{cfg.ChannelGateway.Port}},
 		{coreProcessName, paths.CorePIDFile, []int{cfg.LocalProxy.CoreHostPort}},

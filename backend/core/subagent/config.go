@@ -6,16 +6,6 @@ import (
 	"strings"
 )
 
-// DBDSN returns the core database DSN (libpq key=value format) passed down to the
-// algorithm layer so the SubAgent framework can persist steps and read/write artifacts.
-// The Python side normalizes it via normalize_postgres_connection_url; it is never logged.
-func DBDSN() string {
-	if dsn := strings.TrimSpace(os.Getenv("LAZYMIND_SUBAGENT_DB_DSN")); dsn != "" {
-		return dsn
-	}
-	return strings.TrimSpace(os.Getenv("ACL_DB_DSN"))
-}
-
 // WorkspaceRoot is the base directory under which per-task workspaces live.
 func WorkspaceRoot() string {
 	if root := strings.TrimSpace(os.Getenv("LAZYMIND_SUBAGENT_WORKSPACE")); root != "" {
