@@ -219,7 +219,7 @@ function getDesktopBridge(): LazyMindDesktopBridge | undefined {
     .lazymindDesktop;
 }
 
-function localBridgeFailure(error: unknown, fallback: "unavailable" | "failed" = "unavailable") {
+function localBridgeFailure(error: unknown, fallback: "unavailable" | "failed" = "unavailable"): Extract<DesktopBridgeResult, { ok: false }> {
   return {
     ok: false as const,
     reason: isAssistantBridgePlatformMismatch(error) ? ASSISTANT_BRIDGE_PLATFORM_MISMATCH : fallback,

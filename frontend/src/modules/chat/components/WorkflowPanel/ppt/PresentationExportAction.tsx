@@ -74,7 +74,7 @@ async function loadHtmlArtifact(raw: unknown): Promise<string> {
     ? direct
     : await resolveMarkdownImageUrlAsync(path);
   const response = await fetch(url);
-  if (!response.ok) throw new Error(`Failed to load export input (${response.status})`);
+  if (!response.ok) throw Object.assign(new Error("Failed to load export input"), { response });
   return response.text();
 }
 

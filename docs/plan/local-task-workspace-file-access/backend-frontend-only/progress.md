@@ -441,3 +441,57 @@ NODE_OPTIONS=--no-experimental-webstorage pnpm run build
 | 平台和人工验收 | 真实目录选择、打包Desktop、Windows行为、跨平台外部编辑器竞争未验证 | 按实际环境验证；未验证不等于已知无法实现，也不等于测试通过 |
 
 本次只核对、纠正文档，未实施新生产修复。此前功能提交 `a2f1d558` 实际生产三文件 +39/-8，净增31行；测试四文件 +584/-5，净增579行（其中Python净增173行），更正旧记录的25/174统计。Core/算法HTTP及数据库测试原通过结果保留其明确范围；不将有限路径检查表述为已经解决外部进程竞争。
+
+
+## 2026-09-10 一次性补齐非人工工作：进行中
+
+用户明确要求剩余非人工工作连续做完；本轮起点 `3a5181e4`、工作区干净，只使用现有仓库和分支。持续推进代码/测试，不重复请求测试顺序批准；不改变Local/Desktop/LazyLLM冻结，也不放开未设计的任意宿主执行。
+
+- [x] 错误提示扫描修复：`frontend/scripts/i18n/check-error-prompts.mjs` 使用现有TypeScript解析器识别真实catch范围，保留失败提示规则；对应新测试 `frontend/scripts/i18n/check-error-prompts.test.mjs` 3项通过，覆盖嵌套catch、字符串括号及目录错误/客户端校验提示。
+- [x] 前端真实请求catch改用现有 `components/request.ts#getLocalizedErrorMessage`；fetch失败保留response结构供HTTP状态映射，不把状态拼进用户错误文字；Channel错误列和Workflow生成失败说明改用错误目录，保留阶段/结构化路径。`node frontend/scripts/i18n/check-error-prompts.mjs` 通过。
+- [ ] 类型错误134项/64文件正在处理；优先修类型、删除已核实未使用代码，不加any、排除路径或生产依赖。与错误提示修改按hunk协调。
+- [ ] Core Get/SetNX故障、提交后进程中断防重放、多进程启动屏障及实际任务入口测试正在补齐，未将编译或skip计作验收。
+- [ ] Writer/media/skill兼容性最小方案只读核查中，先确认原内部资源路径可复用，再统计精确增量。
+- [ ] 完成整合后重新运行数据库/HTTP/Python/前端/构建与边界检查，独立Review、提交与推送。
+
+当前修改尚未提交，规模随类型收尾变化；本轮无算法生产修改、无新生产文件/依赖/服务/表，测试新增文件1个。扫描器修复不等于全前端验收，后续需完整tsc及页面回归。历史临时日志不是交付依赖，复现命令已按仓库路径记载。
+
+
+### 本轮Core与算法启动验证完成节点
+
+- `backend/core/localworkspace/operations_test.go`：4类Get/SetNX故障注入已验证；使用唯一29字符会话ID，修正首次PG运行因测试ID超出varchar(36)而失败的问题（测试夹具问题，不修改数据库schema）。
+- `backend/core/chat/run_decision_test.go`：真实handleNonStreamChat/handleStreamChat单流/双回复入口验证上游收到请求前运行身份已经注册；结束后prepared、receipt、新prepare均失效。`TestWorkspaceExecutionProcesses` 的六进程增加ready/start屏障和有界超时，另注入completed回执保存前进程退出73；先确认文件已append，再恢复临时文件到原期望版本后重放仍被拒绝，避免版本冲突掩盖消费保护。
+- 独立Review提出的“旧版本可掩盖重放保护”缺口已修复并回看通过。SQLite定向9子场景三遍通过；root使用专属临时PG/Redis执行 `go test -race ./localworkspace -count=1 -timeout=180s` 及 `go test -race ./chat -run '^TestWorkspace(ChatEntrypointsRegisterAndFinishRuns|MainIdentityRequiresRegisteredLiveRun|WorkflowIdentityRequiresCurrentOwnedLease|BackendIntegration|ExecutionProcesses)$' -count=1 -timeout=180s -v` 均通过。实例和临时目录已删除，无用户库改动。
+- `tests/algorithm/chat/test_subagent_runner.py` 新增FastAPI ASGI请求实际进入runner，校验初次/恢复/缺身份请求以本次私有身份为准，不继承parent/已持久化后代次；私有字段不进入提示词或SSE。使用已有FakeDB和确定性executor，不调用远端模型，不称为真实模型验收。
+- `algorithm/tests/chat/workflows/test_remote_executor.py` 增补断言Core claim的task/attempt/generation/lease原样私下传给runner，未放入模型params。标准 `.venv/bin/python -m pytest tests/algorithm/chat/test_subagent_runner.py algorithm/tests/chat/workflows/test_remote_executor.py -q`：43通过。
+- 初次FastAPI导入因现有本机环境缺少仓库已声明的RAG测试依赖失败；已用uv补齐 `tests/algorithm/requirements-test.txt` 与runtime声明的pandas/openpyxl/docx/pptx等，遵守冻结LazyLLM既有spacy/bm25s约束及setuptools<80。仅测试venv变更，没有新增生产依赖声明或修改冻结层。
+
+剩余类型/兼容整合与全量前端测试仍在进行；当前通过的本节点不代表全目标完成。
+
+
+### 类型、兼容与广回归节点（仍在执行）
+
+- 全量前端 `pnpm exec tsc --noEmit` 已退出0，原134项已清除；未关闭strict/排除检查、未添加生产依赖。清理真实未用MarkdownEditor、批量上传旧类/store及其专属test alias/mock；消息事件使用收到的e而非浏览器全局event；侧栏复用SidebarConversationNode保持缺父节点占位行为。
+- OpenAPI源头补齐：Core既有技能list/detail实际返回的auto_evo、is_enabled两项；通过 `go run . --export-openapi-to <repo>/frontend/scripts/openapi/specs/core.yaml` 与现有generator更新client。Scan复用已有Compensation响应schema并补源码缺失的JobError schema；新增schema引用解析与技能字段类型契约通过。四套OpenAPI fresh、1908错误码同步检查通过。
+- 错误提示Review提出的Promise.catch漏检及Workflow误用通用字典已修复：catch扫描覆盖arrow/function/expression，4项Node测试通过；Workflow共用专用diagnostic翻译helper，保留结构化标识并补齐中英文30码，与当前compiler集合匹配。6项语言回归中首次用UNKNOWN作未知码夹具失败（UNKNOWN实际已在目录中），已改为真正不存在的码并6项通过。
+- 算法兼容初稿9个生产文件净+124、无新生产文件：纯生成/媒体输入/Writer/资源profile/skill reader复用原实现，manifest路径及绑定身份收敛。独立安全Review又发现data包装规范化和factory捕获对象两项P1，正在修复；未将初稿通过测试作为安全完成结论。
+- root广回归 `pytest tests/algorithm/chat algorithm/tests/chat/workflows` 首轮：1961通过、21失败、1skip、1error。新增executor测试首次建立globals键后pytest删除键的清理不兼容已修；pipeline FakeAgent补真实manager/skill属性，文本合并测试固定其模块时钟排除调度抖动；相关51项通过，保留2秒启动门槛。其余Workflow失败正在区分旧合同与平台字体夹具，不删除有效失败断言。
+- 全前端首轮7套失败/126通过；修复模拟浏览器API、partial i18n mock和Writer现行参数/响应夹具后，第二轮133套通过，仅RecordList错误翻译mock重置问题失败。该问题正在收尾，未宣称全量通过。
+- Core全量83包通过、5无测试、vet通过；Scan全量通过。生产构建通过。整合/安全Review未结束，尚未提交。
+
+
+### 前端完整回归通过节点
+
+完整 `NODE_OPTIONS=--no-experimental-webstorage pnpm exec vitest run --maxWorkers=4 --minWorkers=1`：134套、856项全部通过，无未处理异常。`pnpm exec tsc --noEmit`、项目 `pnpm run typecheck`、4项Node错误扫描回归、OpenAPI fresh、1908错误目录检查、错误提示检查与生产构建均通过。降低测试进程并发仅用于本机整合验证，不修改仓库性能/类型/行为门槛。
+
+RecordList错误目录mock在每次mockReset后恢复返回值；新增成功置顶不误报失败断言，并复用测试环境补齐DOM scrollTo。SkillInstalledView装饰图标加aria-hidden，使按钮可访问名称保持其文字而不是加入图标名字；保留原“至少两项才能提交”的断言。
+
+Core最终全量83包通过（另5包无测试），算法P1修复与Workflow广回归仍未完成。此处仅标记前端节点，不作为全目标完成。
+
+### 2026-09-10 非人工工作完成节点
+
+本次继续执行已完成自动化收尾：Python `1999 passed, 1 skipped`；前端 `134 files / 856 tests passed`；Core、Scan、vet、关键 race、Core↔算法 HTTP、Windows/Linux 交叉编译、TypeScript、OpenAPI、错误目录和生产构建均通过。独立只读安全 Review 无 Critical/Important。
+
+未改 Local/Desktop、`algorithm/lazyllm` 或 gitlink；没有新增服务、依赖或数据库表。工作区相对 `3a5181e4` 的整体差异为 `146 files, +2125/-1195`，算法生产为 `10 files, +248/-67`，净增 `181`。旧无调用者 MarkdownEditor、批量上传旧实现和专属测试替身已删除。
+
+当前只剩人工/真实环境验收：真实目录选择、登录、模型交互、打包 Desktop、跨平台实机/符号链接/外部编辑器竞争。任意 shell/custom MCP、二进制宿主传输和完整旧 Writer/media 注册仍未作为已完成能力声明。

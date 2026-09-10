@@ -410,7 +410,7 @@ export default function PreferenceMemorySection() {
           refreshError,
         );
         message.warning(
-          t("admin.memoryPreferenceRefreshAfterDeleteFailed"),
+          getLocalizedErrorMessage(refreshError),
         );
       }
     } catch (error) {

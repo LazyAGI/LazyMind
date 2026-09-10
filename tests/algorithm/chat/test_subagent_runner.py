@@ -476,6 +476,9 @@ def test_run_subagent_stream_text_think_events(monkeypatch):
 
 
 def test_run_subagent_stream_coalesces_tiny_text_deltas(monkeypatch):
+    from types import SimpleNamespace
+    # Exercise byte coalescing independently from scheduler pauses under load.
+    monkeypatch.setattr(runner_mod, 'time', SimpleNamespace(time=runner_mod.time.time, monotonic=lambda: 0.0))
     db = _install_fake_db(monkeypatch)
     _install_fake_lazyllm(monkeypatch)
     _install_fake_build(monkeypatch)
@@ -692,3 +695,51 @@ def test_rebuild_history_no_steps_returns_empty():
     db = FakeDB()
     history = runner_mod._rebuild_history_from_steps(db, 't1')
     assert history == []
+
+
+@pytest.mark.parametrize('resume,identity', [
+    (False, {'task_id': _DEFAULT_TASK_ID, 'generation': 'launch-1'}),
+    (True, {'task_id': _DEFAULT_TASK_ID, 'generation': 'launch-2'}),
+    (True, None),
+])
+def test_fastapi_subagent_launch_identity_reaches_runner_privately(monkeypatch, tmp_path, resume, identity):
+    import httpx
+    from fastapi import FastAPI
+    from lazymind.chat.api.subagent_routes import router
+
+    task = {**_DEFAULT_TASK, 'workspace_path': str(tmp_path), 'output_slots': [], 'params': {
+        'user_id': 'owner', '_workspace_execution': {'generation': 'later-persisted'},
+        'parent_agentic_config': {'run_id': 'parent-run', '_workspace_execution': {'generation': 'parent'}},
+    }}
+    _install_fake_db(monkeypatch, task)
+    _install_fake_lazyllm(monkeypatch)
+    _install_fake_translator(monkeypatch)
+    monkeypatch.setattr(runner_mod, '_resolve_runtime_tools', lambda *_: [])
+    monkeypatch.setattr(runner_mod, '_build_subagent_tools', lambda *_, **__: [])
+    configs, prompts = [], []
+    runner_mod.lazyllm.globals.__setitem__.side_effect = lambda key, value: configs.append(value) if key == 'agentic_config' else None
+
+    class Executor:
+        async def stream(self, _llm, plan):
+            prompts.append(plan.prompt.system_prompt + plan.prompt.current_input)
+            yield 'final', 'done'
+
+    monkeypatch.setattr(runner_mod, 'AgentExecutor', Executor)
+    app = FastAPI()
+    app.include_router(router)
+
+    async def request():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as client:
+            return await client.post('/api/subagent/run', json={
+                'task_id': _DEFAULT_TASK_ID, 'db_dsn': 'fixture', 'resume': resume,
+                'workspace_execution': identity,
+                'params': {'_workspace_execution': {'generation': 'body-params'}},
+            })
+
+    response = asyncio.run(request())
+    assert response.status_code == 200
+    assert any(item.get('status') == 'succeeded' for item in _sse_to_events(response.text))
+    assert len(configs) == len(prompts) == 1
+    assert configs[0]['_workspace_execution'] == (identity or {})
+    for private in ['launch-1', 'launch-2', 'later-persisted', 'parent-run', 'body-params']:
+        assert private not in prompts[0] and private not in response.text

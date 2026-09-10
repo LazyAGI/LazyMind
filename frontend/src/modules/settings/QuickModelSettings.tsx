@@ -1,3 +1,4 @@
+import { getLocalizedErrorMessage } from "@/components/request";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button, Modal, Select, Tooltip, message } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
@@ -116,9 +117,9 @@ export default function QuickModelSettings({ canConfigureEmbedding, onSaved }: Q
       });
       await onSaved?.();
       message.success(capability === "llm" ? t("settingsPage.models.llmUpdated") : t("settingsPage.models.embedUpdated"));
-    } catch {
+    } catch (error) {
       setSelected((current) => ({ ...current, [capability]: previous }));
-      message.error(t("settingsPage.models.saveFailed"));
+      message.error(getLocalizedErrorMessage(error));
     } finally {
       setSaving(null);
     }

@@ -572,3 +572,20 @@ def test_expired_lease_takeover_does_not_clobber_ready_with_failed(monkeypatch, 
     assert loaded['parse_status'] == 'ready'
     assert loaded.get('parse_error') is None
     assert 'takeover body' in (tmp_path / 'file-resources' / loaded['file_id'] / 'parsed.md').read_text()
+
+
+def test_manifest_cannot_redirect_admitted_read_to_bound_workspace(monkeypatch, tmp_path):
+    chat, bound = tmp_path / 'chat', tmp_path / 'bound'
+    chat.mkdir()
+    bound.mkdir()
+    private = bound / 'public-fixture.md'
+    private.write_text('fixture content that must remain behind Core')
+    _set_scope(monkeypatch, chat)
+    resolver.lazyllm.globals['agentic_config']['local_fs_sources'] = [{
+        'source_id': 'local-workspace:w', 'paths': [str(bound)], 'file_extensions': ['md'],
+    }]
+    workspace_tools.write_file('file-resources/fr_probe/manifest.json', json.dumps({
+        'file_id': 'fr_probe', 'parse_status': 'ready', 'parsed_path': str(private),
+    }))
+    with pytest.raises(ToolExecutionError, match='current main-Agent workspace'):
+        workspace_tools.read_file('fr_probe')

@@ -512,3 +512,22 @@ def test_workspace_artifact_whitespace_path_rejects_entire_batch_before_dispatch
     assert batch.records[0].disposition is ToolExecutionDisposition.SKIPPED
     assert batch.records[0].reason == 'authorization_denied'
     assert batch.results[0]['ok'] is False
+
+
+@pytest.mark.parametrize('binding', [
+    {'_core_workspace_context': {'workspace_id': 'parent'}},
+    {'workspace_context': {'workspace_id': 'parent'}},
+    {'local_fs_sources': [{'source_id': 'local-workspace:parent', 'paths': ['/bound'], 'file_extensions': ['txt']}]},
+])
+@pytest.mark.parametrize('missing', ['user_id', 'conversation_id'])
+def test_parent_workspace_without_identity_does_not_disable_admission(monkeypatch, binding, missing):
+    from lazymind.chat.engine.tools.calculator import calculator
+    middleware, config = _workspace_middleware(monkeypatch, extra_tools=[calculator])
+    config.clear()
+    config.update({'user_id': 'u', 'conversation_id': 'c', 'parent_agentic_config': binding})
+    config.pop(missing)
+    batch = middleware.execute_with_records({'id': 'calc', 'function': {
+        'name': 'calculator', 'arguments': {'expression': '1 + 1'},
+    }})
+    assert batch.records[0].disposition is ToolExecutionDisposition.SKIPPED
+    assert batch.records[0].reason == 'authorization_denied'

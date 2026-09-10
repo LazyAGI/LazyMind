@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { Tooltip } from 'antd';
 import { ExclamationCircleOutlined, CloseCircleOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
-import type { ValidationError } from '../core/validator';
+import { getWorkflowDiagnosticMessage, type ValidationError } from '../core/validator';
 import './index.scss';
 
 interface Props {
@@ -35,13 +35,7 @@ export default function ValidationPanel({ errors, getTargetNodeId, onSelectNode 
         {[...grouped.entries()].map(([groupKey, groupErrors]) =>
           groupErrors.map((err, index) => {
             const targetNodeId = getTargetNodeId?.(err) ?? err.nodeId ?? null;
-            const message = t(`selfEvolutionRun.validationErrors.${err.code}`, {
-              defaultValue: err.message,
-              node: err.nodeId ?? '',
-              edge: err.edgeKey ?? '',
-              material: err.materialId ?? '',
-              producer: String(err.details?.producer_step_id ?? ''),
-            });
+            const message = getWorkflowDiagnosticMessage(t, err);
             return (
             <li key={`${groupKey}-${err.code}-${index}`} className="validation-panel-item">
               <CloseCircleOutlined className="validation-panel-item-icon" />

@@ -4,7 +4,7 @@ import { forwardRef, Ref, useImperativeHandle, useRef, useState } from "react";
 import ImportTaskList from "../ImportTaskList";
 
 export interface IImportTaskManageRef {
-  handleOpen: (data: any) => void;
+  handleOpen: (data?: { dataset_id?: string }) => void;
 }
 
 interface IProps {
@@ -12,18 +12,18 @@ interface IProps {
 }
 
 const ImportTaskManage = (props: IProps, ref: Ref<unknown> | undefined) => {
-  const [data, setData] = useState({});
+  const [data, setData] = useState<{ dataset_id?: string }>({});
   const [visible, setVisible] = useState(false);
   const hasSuspendedRef = useRef(false);
   const { onClose } = props;
 
-  const handleOpen = (data: any) => {
+  const handleOpen = (data: { dataset_id?: string } = {}) => {
     setData(data);
     setVisible(true);
     hasSuspendedRef.current = false;
   };
 
-  const handleClose = (hasSuspended?: boolean) => {
+  const handleClose = () => {
     setData({});
     setVisible(false);
     onClose(hasSuspendedRef.current);
@@ -44,7 +44,7 @@ const ImportTaskManage = (props: IProps, ref: Ref<unknown> | undefined) => {
       onClose={handleClose}
     >
       <ImportTaskList
-        datasetId={data.dataset_id}
+        datasetId={data.dataset_id ?? ""}
         onClose={handleClose}
         onSuspendSuccess={() => {
           hasSuspendedRef.current = true;

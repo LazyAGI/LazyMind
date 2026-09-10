@@ -58,11 +58,11 @@ def _normalize_caption(caption: Optional[str]) -> Optional[str]:
 
 def _current_artifact_scope() -> tuple[str, str]:
     config = lazyllm.globals.get('agentic_config') or {}
-    user_id = str(config.get('user_id') or '0').strip()
+    user_id = str(config.get('user_id') or '').strip()
     conversation_id = str(config.get('conversation_id') or '').strip()
-    if not conversation_id:
+    if not user_id or not conversation_id:
         raise ToolExecutionError(
-            'conversation_id is required to publish a chat file; conversation context is unavailable.'
+            'user_id and conversation_id are required to access chat files; conversation context is unavailable.'
         )
     return user_id, conversation_id
 
@@ -139,19 +139,7 @@ def _workspace_file_resource(arguments: Dict[str, Any], key: str = 'path'):
 
 
 def _file_tool_root(workspace: str) -> Optional[str]:
-    # A bound workspace never inherits the legacy unrestricted host-file mode.
-    tools = LocalFileToolkit()
-    agentic = lazyllm.globals.get('agentic_config') or {}
-    parent = agentic.get('parent_agentic_config')
-    bound = tools._workspace_context() is not None or tools._has_workspace_source()
-    if not bound and isinstance(parent, dict):
-        parent_context = parent.get('_core_workspace_context') or parent.get('workspace_context')
-        bound = isinstance(parent_context, dict) and bool(parent_context.get('workspace_id'))
-        bound = bound or any(
-            isinstance(item, dict) and str(item.get('source_id') or '').startswith('local-workspace:')
-            for item in parent.get('local_fs_sources') or []
-        )
-    return None if _cfg['trusted_local_mode'] and not bound else workspace
+    return None if _cfg['trusted_local_mode'] and LocalFileToolkit._workspace_binding() is None else workspace
 
 
 def _resolve_source_file(path: str, user_id: str, conversation_id: str) -> str:

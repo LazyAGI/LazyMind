@@ -1,3 +1,4 @@
+import { getLocalizedErrorMessage } from "@/components/request";
 import { createElement, useEffect, useRef, useState, type RefObject } from "react";
 import { Button, message, Modal } from "antd";
 import { useNavigate } from "react-router-dom";
@@ -320,7 +321,7 @@ export function useChatConversation({
       return true;
     } catch (error) {
       if ((error as Error)?.name !== "AbortError") {
-        message.error(t("runtime.initializationFailed"));
+        message.error(getLocalizedErrorMessage(error));
       }
       return false;
     } finally {
@@ -870,7 +871,7 @@ export function useChatConversation({
             result.conversation_id,
             sseRef.current,
             streamCallbacks,
-            event,
+            e,
             { allowConcurrent: concurrentStream },
           );
 

@@ -31,7 +31,7 @@ func operationFixture(t *testing.T, mode string) (*orm.DB, PublicWorkspace, stat
 	t.Cleanup(func() { SetValidateOperationRunFunc(previous) })
 	db, grant := workspaceFixture(t)
 	now := time.Now().UTC()
-	conversationID := "operation-task-" + mode
+	conversationID := fmt.Sprintf("operation-%d", time.Now().UnixNano())
 	conversation := orm.Conversation{ID: conversationID, IsTaskConv: true,
 		BaseModel: orm.BaseModel{CreateUserID: "owner", CreatedAt: now, UpdatedAt: now}}
 	if err := db.Create(&conversation).Error; err != nil {
@@ -40,7 +40,13 @@ func operationFixture(t *testing.T, mode string) (*orm.DB, PublicWorkspace, stat
 	if err := db.Create(&orm.ConversationWorkspaceBinding{ConversationID: conversation.ID, WorkspaceID: grant.WorkspaceID, PermissionMode: mode, PermissionVersion: 1, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
 		t.Fatal(err)
 	}
-	stateStore, err := state.NewSQLiteStore(filepath.Join(t.TempDir(), "state.db"))
+	var stateStore state.Store
+	var err error
+	if redisURL := os.Getenv("TEST_WORKSPACE_REDIS_URL"); redisURL != "" {
+		stateStore, err = state.NewRedisStoreFromURL(redisURL)
+	} else {
+		stateStore, err = state.NewSQLiteStore(filepath.Join(t.TempDir(), "state.db"))
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -560,6 +566,98 @@ func TestWorkspaceClaimInvalidExecutionDoesNotConsumeApproval(t *testing.T) {
 			result, err := ExecuteOperation(ctx, db.DB, stateStore, prepared.OperationID, req)
 			if err != nil || result.Content != "seed" {
 				t.Fatalf("invalid request consumed valid approval: result=%+v err=%v", result, err)
+			}
+		})
+	}
+}
+
+// Fail one state call before delegating; subsequent calls use the real store.
+type onceOperationStateFailure struct {
+	state.Store
+	getRemaining, setNXRemaining int
+	err                          error
+}
+
+func (s *onceOperationStateFailure) Get(ctx context.Context, key string) ([]byte, error) {
+	if s.getRemaining > 0 {
+		s.getRemaining--
+		if s.getRemaining == 0 {
+			return nil, s.err
+		}
+	}
+	return s.Store.Get(ctx, key)
+}
+
+func (s *onceOperationStateFailure) SetNX(ctx context.Context, key string, value []byte, ttl time.Duration) (bool, error) {
+	if s.setNXRemaining > 0 {
+		s.setNXRemaining--
+		if s.setNXRemaining == 0 {
+			return false, s.err
+		}
+	}
+	return s.Store.SetNX(ctx, key, value, ttl)
+}
+
+func TestWorkspaceOperationStateReadAndClaimFailures(t *testing.T) {
+	for _, test := range []struct {
+		name                   string
+		prepare, claimConsumed bool
+		getCall, setNXCall     int
+	}{
+		{name: "prepare SetNX", prepare: true, setNXCall: 1},
+		{name: "execute lock SetNX", setNXCall: 1},
+		{name: "execute first Get", getCall: 1},
+		{name: "execute Get after claim", getCall: 2, claimConsumed: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			db, grant, ss, conversationID := operationFixture(t, PermissionAllowAll)
+			ctx := t.Context()
+			req := OperationRequest{HistoryID: "history", RunID: "run", UserID: "owner", ConversationID: conversationID,
+				WorkspaceID: grant.WorkspaceID, Operation: OperationAppend, Path: "notes.txt", Content: "!",
+				ExpectedVersion: digestString("seed"), CallID: operationTestCallID("state-call")}
+			path := filepath.Join(grant.Path, req.Path)
+			if err := os.WriteFile(path, []byte("seed"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			var prepared OperationResult
+			var err error
+			if !test.prepare {
+				prepared, err = PrepareOperation(ctx, db.DB, ss, req)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			failure := errors.New("injected state read/claim failure")
+			failing := &onceOperationStateFailure{Store: ss, getRemaining: test.getCall, setNXRemaining: test.setNXCall, err: failure}
+			if test.prepare {
+				_, err = PrepareOperation(ctx, db.DB, failing, req)
+			} else {
+				_, err = ExecuteOperation(ctx, db.DB, failing, prepared.OperationID, req)
+			}
+			if !errors.Is(err, failure) || failing.getRemaining != 0 || failing.setNXRemaining != 0 {
+				t.Fatalf("fault was not surfaced at its call: err=%v remaining Get/SetNX=%d/%d", err, failing.getRemaining, failing.setNXRemaining)
+			}
+			if content, err := os.ReadFile(path); err != nil || string(content) != "seed" {
+				t.Fatalf("failed call changed file: %q, %v", content, err)
+			}
+			recovered, err := PrepareOperation(ctx, db.DB, failing, req)
+			if err != nil || (!test.prepare && recovered.OperationID != prepared.OperationID) {
+				t.Fatalf("prepare recovery: %+v, %v", recovered, err)
+			}
+			for attempt := 0; attempt < 2; attempt++ {
+				result, err := ExecuteOperation(ctx, db.DB, failing, recovered.OperationID, req)
+				if test.claimConsumed {
+					requireWorkspaceReason(t, err, 409, "conflict", "binding_conflict")
+				} else if err != nil || result.Status != operationCompleted {
+					t.Fatalf("recovered execute %d: %+v, %v", attempt, result, err)
+				}
+			}
+			want := "seed!"
+			if test.claimConsumed {
+				want = "seed"
+			}
+			if content, err := os.ReadFile(path); err != nil || string(content) != want {
+				t.Fatalf("recovery/replay content=%q, want %q, err=%v", content, want, err)
 			}
 		})
 	}

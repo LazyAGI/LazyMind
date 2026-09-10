@@ -1,3 +1,4 @@
+import { getLocalizedErrorMessage } from "@/components/request";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode, RefObject } from "react";
 import { Alert, Button, Empty, Skeleton, Switch, Tag, message } from "antd";
@@ -160,8 +161,8 @@ export default function KnowledgeDataSettings({
         name: tool.name,
         state: enabled ? t("settingsPage.confirm.enableState") : t("settingsPage.confirm.disableState"),
       }));
-    } catch {
-      message.error(t("settingsPage.knowledge.toggleFailed", { name: tool.name }));
+    } catch (error) {
+      message.error(getLocalizedErrorMessage(error));
     } finally {
       setPendingTools((current) => {
         const next = new Set(current);

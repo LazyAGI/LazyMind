@@ -1207,7 +1207,7 @@ const KnowledgeTable = forwardRef<IKnowledgeListRef, Props>((props, ref) => {
         searchDocumentsRequest: searchParams,
       });
 
-      const documents = res.data.documents.map((doc: Doc) => ({
+      const documents = (res.data.documents ?? []).map((doc) => ({
         ...doc,
         level: level,
         isLeaf: doc.type !== DocTypeEnum.Folder,

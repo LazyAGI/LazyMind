@@ -414,3 +414,11 @@ def test_mail_outputs_reject_existing_external_symlinks(mail_auth, tmp_path, tar
             with pytest.raises(ToolExecutionError, match='workspace'):
                 MailToolkit().read_attachment('message', 'linked.txt')
     assert list(outside.iterdir()) == [] if outside.is_dir() else outside.read_text() == 'unchanged'
+
+
+@pytest.mark.parametrize('missing', ['user_id', 'conversation_id'])
+def test_mail_internal_drafts_require_full_identity(mail_auth, missing):
+    from lazymind.chat.engine.tools.mail import _draft_dir
+    lazyllm.globals['agentic_config'].pop(missing)
+    with pytest.raises(ToolExecutionError, match='user_id.*conversation_id'):
+        _draft_dir()

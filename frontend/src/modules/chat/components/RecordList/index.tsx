@@ -1,3 +1,4 @@
+import { getLocalizedErrorMessage } from "@/components/request";
 import {
   CloudDownloadOutlined,
   DeleteOutlined,
@@ -292,7 +293,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
         childrenByParent.set(relation.parentConversationId, children);
         nestedChildIds.add(itemId);
       });
-      const nodes = historyList
+      const nodes: SidebarConversationNode[] = historyList
         .filter((item) => !nestedChildIds.has(item.conversation_id || ""))
         .map((conversation) => ({
           conversation,
@@ -611,8 +612,8 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
           );
           document.getElementById(scrollableTargetId)?.scrollTo({ top: 0 });
         })
-        .catch(() => {
-          message.error(t("chat.pinConversationFailed"));
+        .catch((error) => {
+          message.error(getLocalizedErrorMessage(error));
         })
         .finally(() => {
           pinningConversationRef.current = false;
@@ -648,7 +649,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
                   message.success(t("settingsPage.recovery.unarchived"));
                   getHistory({ isFirst: true });
                 })
-                .catch(() => message.error(t("settingsPage.recovery.operationFailed")));
+                .catch((error) => message.error(getLocalizedErrorMessage(error)));
             }}>{t("settingsPage.recovery.undo")}</Button>
             <Button type="link" size="small" onClick={() => navigate(RECOVERY_ARCHIVE_PATH)}>{t("settingsPage.recovery.viewArchived")}</Button>
           </span>

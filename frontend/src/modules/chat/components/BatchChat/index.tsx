@@ -24,10 +24,9 @@ import Upload, { RcFile } from "antd/es/upload";
 import {
   ChatFileServiceApi,
   ChatServiceApi,
-  DatabaseBaseServiceApi,
   KnowledgeBaseServiceApi,
 } from "@/modules/chat/utils/request";
-import { Dataset, UserDatabaseSummary } from "@/api/generated/knowledge-client";
+import { Dataset } from "@/api/generated/knowledge-client";
 import {
   BatchChatJob,
   BatchChatJobResultItem,
@@ -70,22 +69,10 @@ const BatchChatComponent = forwardRef<BatchChatImperativeProps, ForwardProps>(
     const [loading, setLoading] = useState(false);
     const [dataSource, setDataSource] = useState<BatchChatJobResultItem[]>([]);
     const [knowledgeBaseList, setKnowledgeBaseList] = useState<Dataset[]>([]);
-    const [databaseBaseList, setDatabaseBaseList] = useState<
-      UserDatabaseSummary[]
-    >([]);
     const [uploadFile, setUploadFile] = useState<RcFile>();
     const [fileId, setFileId] = useState("");
     const [batchChatTaskResult, setBatchChatTaskResult] =
       useState<BatchChatJob>({} as BatchChatJob);
-
-    function getDatabaseBaseList() {
-      // DatabaseBaseServiceApi()
-      //   .databaseServiceGetUserDatabaseSummaries({})
-      //   .then((res) => {
-      //     setDatabaseBaseList((res.data as UserDatabaseSummary[]) || []);
-      //   });
-      setDatabaseBaseList([]);
-    }
 
     function getKnowledgeBaseList() {
       KnowledgeBaseServiceApi()
@@ -161,7 +148,6 @@ const BatchChatComponent = forwardRef<BatchChatImperativeProps, ForwardProps>(
 
     useEffect(() => {
       getKnowledgeBaseList();
-      getDatabaseBaseList();
     }, []);
 
     const columns = [

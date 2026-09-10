@@ -1,3 +1,4 @@
+import { getLocalizedErrorMessage } from "@/components/request";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button, Input, message, Modal, Select, Tooltip } from "antd";
 import { AppstoreOutlined, SearchOutlined } from "@ant-design/icons";
@@ -652,7 +653,7 @@ export default function SkillManagementSection() {
           message.success(t("admin.memorySkillMarketDeleteSuccess"));
         } catch (error) {
           console.error("Delete market skill failed:", error);
-          message.error(t("admin.memorySkillMarketDeleteFailed"));
+          message.error(getLocalizedErrorMessage(error));
           throw error;
         } finally {
           setMarketDeletingId(undefined);

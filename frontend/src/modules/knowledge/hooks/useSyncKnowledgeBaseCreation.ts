@@ -133,7 +133,7 @@ export function useSyncKnowledgeBaseCreation(options: UseSyncKnowledgeBaseCreati
   const isNotionAuthValid = validNotionAccounts.length > 0;
 
   const getPreferredLocalAgentId = () => {
-    const selectedAgent = pickScanAgent(scanAgents, validatedAgentId);
+    const selectedAgent = pickScanAgent(scanAgents, validatedAgentId ?? undefined);
     return selectedAgent?.agent_id || validatedAgentId || "";
   };
 

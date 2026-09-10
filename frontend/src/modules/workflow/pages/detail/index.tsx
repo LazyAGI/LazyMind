@@ -9,7 +9,8 @@ import type { WorkflowDraftRecord } from '../../workflowDraftApi';
 import type { WorkflowVersionSummary, WorkflowVersionContent, WorkflowGenerationAnalysis, RepairPreview, WorkflowGenerateStartPhase } from '../../workflowDraftApi';
 import StateGraphEditor from '../../components/StateGraphEditor';
 import type { SavePayload, RepairTarget } from '../../components/StateGraphEditor';
-import type { ValidationError } from '../../components/StateGraphEditor/core/validator';
+import { getWorkflowDiagnosticMessage, type ValidationError } from '../../components/StateGraphEditor/core/validator';
+import type { WorkflowDiagnostic } from '../../workflowDraftApi';
 import './index.scss';
 
 const POLL_INTERVAL_MS = 3000;
@@ -34,12 +35,7 @@ type RegeneratePhaseOption = {
   statusLabel: string;
 };
 
-type GenerationDiagnostic = {
-  code?: string;
-  path?: string;
-  message?: string;
-  severity?: string;
-};
+type GenerationDiagnostic = Partial<WorkflowDiagnostic>;
 
 function generationPhaseLabel(raw: string): string {
   if (/phase-?1 analysis/i.test(raw)) return '技能分析阶段';
@@ -64,13 +60,6 @@ function stripGenerationPrefix(raw: string): string {
     .trim();
 }
 
-function splitGenerationLines(raw: string): string[] {
-  return raw
-    .split(/\n+|;\s+/)
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
 function parseGenerationDiagnostics(raw: string): { summary: string; diagnostics: GenerationDiagnostic[] } {
   const compact = stripGenerationPrefix(raw);
   const jsonStart = compact.indexOf('[');
@@ -89,6 +78,10 @@ function parseGenerationDiagnostics(raw: string): { summary: string; diagnostics
               path: String(item.path ?? item.Path ?? ''),
               message: String(item.message ?? item.Message ?? ''),
               severity: String(item.severity ?? item.Severity ?? ''),
+              node_id: String(item.node_id ?? item.NodeID ?? ''),
+              edge_id: String(item.edge_id ?? item.EdgeID ?? ''),
+              material_id: String(item.material_id ?? item.MaterialID ?? ''),
+              details: item.details && typeof item.details === 'object' ? item.details as Record<string, unknown> : undefined,
             })),
         };
       }
@@ -281,18 +274,15 @@ export default function WorkflowDetailPage() {
     if (!trimmed) return localizeErrorCode('2000509');
     const parsed = parseGenerationDiagnostics(trimmed);
     const diagnosticItems = parsed.diagnostics.filter((item) => item.severity !== 'warning');
-    const textLines = diagnosticItems.length > 0 ? [] : splitGenerationLines(parsed.summary || trimmed);
+    const fallback = localizeErrorCode('2000509');
     return (
       <div className="workflow-generation-issue-details">
         <div className="workflow-generation-issue-phase">失败位置：{generationPhaseLabel(trimmed)}</div>
-        {parsed.summary && diagnosticItems.length > 0 && (
-          <div className="workflow-generation-issue-summary">{parsed.summary}</div>
-        )}
-        {(diagnosticItems.length > 0 || textLines.length > 0) && (
+        {diagnosticItems.length === 0 && <div className="workflow-generation-issue-summary">{fallback}</div>}
+        {diagnosticItems.length > 0 && (
           <ul className="workflow-generation-issue-list">
             {diagnosticItems.slice(0, 8).map((item, index) => {
-              const localized = item.code ? localizeErrorCode(item.code, item.message || item.code) : '';
-              const messageText = item.message || localized || item.code || localizeErrorCode('2000509');
+              const messageText = getWorkflowDiagnosticMessage(t, item);
               return (
                 <li key={`${item.code}:${item.path}:${index}`}>
                   {item.path ? <strong>{item.path}：</strong> : null}
@@ -300,7 +290,6 @@ export default function WorkflowDetailPage() {
                 </li>
               );
             })}
-            {textLines.slice(0, 8).map((line, index) => <li key={`${line}:${index}`}>{line}</li>)}
           </ul>
         )}
         {diagnosticItems.length > 8 && (
@@ -308,9 +297,10 @@ export default function WorkflowDetailPage() {
         )}
       </div>
     );
-  }, []);
+  }, [t]);
   const renderGenerationWarningDetails = useCallback((raw: string, repairDetails: string[] = []) => {
-    const lines = repairDetails.length > 0 ? repairDetails : splitGenerationLines(raw.replace(/^\[修复失败\]\s*/, ''));
+    const lines = repairDetails.length > 0 ? repairDetails : parseGenerationDiagnostics(raw).diagnostics
+      .map((item) => getWorkflowDiagnosticMessage(t, item));
     if (lines.length === 0) return localizeErrorCode('2000509');
     return (
       <div className="workflow-generation-issue-details">
@@ -325,7 +315,14 @@ export default function WorkflowDetailPage() {
         )}
       </div>
     );
-  }, []);
+  }, [t]);
+  const generationErrorDetails = draft?.generate_error ? renderGenerationErrorDetails(draft.generate_error) : undefined;
+  const generationWarningDetails = draft?.generate_warning
+    ? renderGenerationWarningDetails(draft.generate_warning, repairFailureDetails) : undefined;
+  const repairFailed = draft?.generate_warning?.startsWith('[修复失败]');
+  const generationWarningKey = draft?.generate_warning ? `generate_warning:${contentKey(draft.generate_warning)}` : '';
+  const showGenerationWarning = draft?.generate_status === 'done' && Boolean(draft.generate_warning)
+    && !dismissedBanners.has(generationWarningKey) && !repairModalOpen;
   const [editingName, setEditingName] = useState(false);
   const [nameValue, setNameValue] = useState('');
   // true = show empty-canvas hint; false = user already has experience (≥1 non-empty workflow)
@@ -386,7 +383,7 @@ export default function WorkflowDetailPage() {
                 repairDetails = Array.isArray(run.diagnostics_after)
                   ? run.diagnostics_after
                     .filter((item) => item.severity === 'error')
-                    .map((item) => `${item.path}: ${localizeErrorCode(item.code, localizeErrorCode('2000509'))}`)
+                    .map((item) => `${item.path}: ${getWorkflowDiagnosticMessage(t, item)}`)
                   : [];
                 repairFailed = run.status !== 'succeeded' || repairDetails.length > 0;
               } catch {
@@ -423,7 +420,7 @@ export default function WorkflowDetailPage() {
         // ignore polling errors
       }
     }, POLL_INTERVAL_MS);
-  }, [workflowId]);
+  }, [workflowId, t]);
 
   useEffect(() => {
     void loadDraft();
@@ -796,7 +793,7 @@ export default function WorkflowDetailPage() {
           closable
           onClose={() => dismissBanner('failed')}
           message={t('selfEvolutionRun.workflowDetailFailedBanner')}
-          description={renderGenerationErrorDetails(draft.generate_error)}
+          description={generationErrorDetails}
           action={
             <Button size="small" loading={isRegenerating} disabled={isRepairing} onClick={openRegenerateModal}>
               {t('selfEvolutionRun.workflowDetailRegenerate')}
@@ -813,19 +810,19 @@ export default function WorkflowDetailPage() {
           closable
           onClose={() => dismissBanner('generate_error')}
           message={t('selfEvolutionRun.workflowDetailGenerateWarningBanner')}
-          description={renderGenerationErrorDetails(draft.generate_error)}
+          description={generationErrorDetails}
         />
       )}
 
-      {draft.generate_status === 'done' && draft.generate_warning && !dismissedBanners.has(`generate_warning:${contentKey(draft.generate_warning)}`) && !repairModalOpen && (
+      {showGenerationWarning && (
         <Alert
           className="workflow-detail-banner"
-          type={draft.generate_warning.startsWith('[修复失败]') ? 'error' : 'warning'}
+          type={repairFailed ? 'error' : 'warning'}
           showIcon
           closable
-          onClose={() => dismissBanner(`generate_warning:${contentKey(draft.generate_warning)}`)}
-          message={draft.generate_warning.startsWith('[修复失败]') ? t('selfEvolutionRun.workflowDetailRepairFailedBanner') : t('selfEvolutionRun.workflowDetailPartialContentBanner')}
-          description={renderGenerationWarningDetails(draft.generate_warning, repairFailureDetails)}
+          onClose={() => dismissBanner(generationWarningKey)}
+          message={repairFailed ? t('selfEvolutionRun.workflowDetailRepairFailedBanner') : t('selfEvolutionRun.workflowDetailPartialContentBanner')}
+          description={generationWarningDetails}
         />
       )}
 
@@ -1063,7 +1060,7 @@ export default function WorkflowDetailPage() {
                         {(repairPreview.diagnostics ?? []).map((item) => (
                           <li key={`${item.code}:${item.path}`}>
                             <strong>{describeDiagnosticLocation(item.path)}：</strong>
-                            {item.message || localizeErrorCode(item.code, localizeErrorCode('2000509'))}
+                            {getWorkflowDiagnosticMessage(t, item)}
                           </li>
                         ))}
                       </ul>

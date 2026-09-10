@@ -2970,7 +2970,7 @@ function SlotWriterDocument({
       }
       setError(null);
       setLoading(false);
-    }).catch((renderError: unknown) => {
+    }).catch(() => {
       if (!active || controller.signal.aborted) return;
       setError(localizeErrorCode('2000509'));
       setLoading(false);
@@ -4227,7 +4227,6 @@ function SlotMarkdownFile({
   const [reloadToken, setReloadToken] = useState(0);
   const { url, resolving, hasSource } = useArtifactFileUrl(raw, `${slot.revision}:${reloadToken}`);
   const originalRaw = originalFileSlot?.artifact_value;
-  const originalName: string = originalRaw?.filename ?? originalRaw?.name ?? 'final_document.lmd';
   const { url: originalUrl } = useArtifactFileUrl(originalRaw);
   const { patchSlotItemValue } = useWorkflowStore();
   const [loading, setLoading] = useState(true);

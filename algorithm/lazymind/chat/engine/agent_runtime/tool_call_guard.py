@@ -355,7 +355,7 @@ class ToolExecutionMiddleware:
         def select(prepared):
             nonlocal prepared_calls, decision, authorization_reasons, started_at
             prepared_calls = list(prepared)
-            workspace_active = LocalFileToolkit()._has_workspace_source() or LocalFileToolkit._workspace_context() is not None
+            workspace_active = LocalFileToolkit._workspace_binding() is not None
             workspace_indices = {
                 index for index, item in enumerate(prepared_calls)
                 if workspace_active and item.ready and item.tool_name in self._workspace_tools
@@ -371,7 +371,8 @@ class ToolExecutionMiddleware:
                     continue
                 try:
                     outcome = self._authorization_gate(item) if self._authorization_gate is not None else 'allow'
-                    if workspace_active and item.tool_name not in self._workspace_tools:
+                    if workspace_active and (LocalFileToolkit._workspace_context() is None
+                                             or item.tool_name not in self._workspace_tools):
                         outcome = 'deny'
                     admission = self._workspace_tools.get(item.tool_name)
                     if workspace_active and admission and admission[3] is not None and not admission[3](item.validated_arguments):

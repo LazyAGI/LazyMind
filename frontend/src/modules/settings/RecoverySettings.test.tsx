@@ -22,7 +22,8 @@ const mocks = vi.hoisted(() => ({
   unarchiveConversation: vi.fn(),
 }));
 
-vi.mock("react-i18next", () => ({
+vi.mock("react-i18next", async (importOriginal) => ({
+  ...await importOriginal<typeof import("react-i18next")>(),
   useTranslation: () => ({
     i18n: { language: "zh-CN" },
     t: (key: string, values?: Record<string, unknown>) => {
@@ -316,8 +317,9 @@ describe("RecoverySettings", () => {
     });
     const nowSpy = vi.spyOn(Date, "now").mockReturnValue(new Date("2026-08-25T00:00:00Z").getTime());
     let refreshRetention: (() => void) | undefined;
-    const intervalSpy = vi.spyOn(window, "setInterval").mockImplementation((handler: TimerHandler, timeout?: number) => {
-      if (timeout === 60_000) refreshRetention = handler as () => void;
+    const browserTimers: Window = window;
+    const intervalSpy = vi.spyOn(browserTimers, "setInterval").mockImplementation((handler, timeout) => {
+      if (timeout === 60_000 && typeof handler === "function") refreshRetention = () => handler();
       return 1;
     });
     const view = renderRecoverySettings();

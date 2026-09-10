@@ -1,5 +1,4 @@
 import { useEffect } from "react";
-import { diffChars } from "diff";
 
 export function useAutoImageFigure() {
   useEffect(() => {
@@ -30,13 +29,6 @@ export function useAutoImageFigure() {
     });
   });
 }
-
-type DiffEntry = {
-  count: number;
-  added?: boolean;
-  removed?: boolean;
-  value: string;
-};
 
 // function formatDiffArray(arr: DiffEntry[]): string {
 //   if (!Array.isArray(arr)) {

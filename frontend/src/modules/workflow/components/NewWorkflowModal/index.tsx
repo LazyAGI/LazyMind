@@ -94,7 +94,7 @@ export default function NewWorkflowModal({ open, onCancel, onCreated }: NewWorkf
   const handleSkillSearch = async (keyword: string) => {
     setSkillLoading(true);
     try {
-      const result = await listSkillAssetsPage({ keyword, page: 1, pageSize: 20, excludeBuiltinTemplates: true });
+      const result = await listSkillAssetsPage({ keyword, page: 1, pageSize: 20 });
       setSkillOptions(result.records.map((r) => ({ label: r.name, value: r.id })));
     } catch {
       // ignore
@@ -103,7 +103,7 @@ export default function NewWorkflowModal({ open, onCancel, onCreated }: NewWorkf
     }
   };
 
-  const handleSkillChange = (val: string, option: { label: string; value: string } | { label: string; value: string }[]) => {
+  const handleSkillChange = (val: string, option?: { label: string; value: string } | { label: string; value: string }[]) => {
     setSkillId(val);
     const opt = Array.isArray(option) ? option[0] : option;
     setSkillName(opt?.label ?? '');

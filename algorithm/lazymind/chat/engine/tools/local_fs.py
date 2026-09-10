@@ -79,30 +79,55 @@ class LocalFileToolkit:
         return self._get_scopes()
 
     @staticmethod
+    def _workspace_binding() -> Optional[Dict[str, Any]]:
+        config = lazyllm.globals.get('agentic_config') or {}
+        configs = [cfg for cfg in (config, config.get('parent_agentic_config')) if isinstance(cfg, dict)]
+        for cfg in configs:
+            for key in ('_core_workspace_context', 'workspace_context'):
+                context = cfg.get(key)
+                if isinstance(context, dict) and context.get('workspace_id'):
+                    return context
+        for cfg in configs:
+            for source in cfg.get('local_fs_sources') or []:
+                source_id = str(source.get('source_id') or '') if isinstance(source, dict) else ''
+                if source_id.startswith('local-workspace:'):
+                    return {'workspace_id': source_id.removeprefix('local-workspace:')}
+        return None
+
+    @staticmethod
     def _workspace_context() -> Optional[Dict[str, Any]]:
         config = lazyllm.globals.get('agentic_config') or {}
-        context = config.get('_core_workspace_context') or config.get('workspace_context')
-        if not isinstance(context, dict) or not context.get('workspace_id'):
-            parent = config.get('parent_agentic_config')
-            context = parent.get('_core_workspace_context') if isinstance(parent, dict) else None
-        workspace_id = str(context.get('workspace_id') or '').strip() if isinstance(context, dict) else ''
-        if not workspace_id:
-            for source in config.get('local_fs_sources') or []:
-                source_id = str(source.get('source_id') or '').strip() if isinstance(source, dict) else ''
-                if source_id.startswith('local-workspace:'):
-                    workspace_id = source_id.removeprefix('local-workspace:').strip()
-                    break
+        context = LocalFileToolkit._workspace_binding() or {}
+        workspace_id = str(context.get('workspace_id') or '').strip()
         user_id = str(config.get('user_id') or '').strip()
         conversation_id = str(config.get('conversation_id') or '').strip()
         if not workspace_id or not user_id or not conversation_id:
             return None
         return {
             'workspace_id': workspace_id,
-            'permission_mode': str(context.get('permission_mode') or '').strip() if isinstance(context, dict) else '',
-            'permission_version': context.get('permission_version') if isinstance(context, dict) else None,
+            'permission_mode': str(context.get('permission_mode') or '').strip(),
+            'permission_version': context.get('permission_version'),
             'user_id': user_id,
             'conversation_id': conversation_id,
         }
+
+    @staticmethod
+    def workspace_path_allowed(path: str, roots: Any) -> bool:
+        if not os.path.isabs(path):
+            return False
+        config = lazyllm.globals.get('agentic_config') or {}
+        controlled = [root for cfg in (config, config.get('parent_agentic_config')) if isinstance(cfg, dict)
+                      for source in cfg.get('local_fs_sources') or [] if isinstance(source, dict)
+                      and str(source.get('source_id') or '').startswith('local-workspace:')
+                      for root in source.get('paths') or [] if isinstance(root, str)]
+        resolved = os.path.realpath(path)
+        try:
+            return (not any(os.path.commonpath((os.path.realpath(root), resolved)) == os.path.realpath(root)
+                            for root in controlled)
+                    and any(os.path.commonpath((os.path.realpath(root), resolved)) == os.path.realpath(root)
+                            for root in roots))
+        except (ValueError, OSError):
+            return False
 
     def _has_workspace_source(self) -> bool:
         return any(self._workspace_scope(scope) for scope in self._get_scopes())

@@ -34,7 +34,8 @@ def test_handle_chat_constructs_react_agent_from_runtime_context(monkeypatch):
     class FakeAgent:
         def __init__(self, llm, tools, **kwargs):
             agent_calls.append({'llm': llm, 'tools': tools, 'kwargs': kwargs})
-            self._tools_manager = object()
+            self._tools_manager = SimpleNamespace(tools_info={})
+            self._skill_manager = None
 
         def forward(self, query, llm_chat_history=None):
             agent_queries.append(query)

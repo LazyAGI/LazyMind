@@ -18,10 +18,10 @@ import type { AxiosPromise, AxiosInstance, RawAxiosRequestConfig } from 'axios';
 import globalAxios from 'axios';
 // Some imports not used depending on template conditions
 // @ts-ignore
-import { DUMMY_BASE_URL, assertParamExists, setApiKeyToObject, setBasicAuthToObject, setBearerAuthToObject, setOAuthToObject, setSearchParams, serializeDataIfNeeded, toPathString, createRequestFunction, replaceWithSerializableTypeIfNeeded } from './common';
+import { DUMMY_BASE_URL, assertParamExists, setSearchParams, serializeDataIfNeeded, toPathString, createRequestFunction } from './common';
 import type { RequestArgs } from './base';
 // @ts-ignore
-import { BASE_PATH, COLLECTION_FORMATS, BaseAPI, RequiredError, operationServerMap } from './base';
+import { BASE_PATH, BaseAPI, operationServerMap } from './base';
 
 export interface ACLApiResponse {
     'code'?: number;
@@ -3024,12 +3024,14 @@ export interface SkillDeleteOpenAPIResponse {
     'deleted': boolean;
 }
 export interface SkillDetailOpenAPIResponse {
+    'auto_evo': boolean;
     'category': string;
     'description': string;
     'draft': SkillDraftSummaryOpenAPIResponse;
     'file_content'?: string;
     'head_revision_id': string;
     'id': string;
+    'is_enabled': boolean;
     'latest_version_change'?: LatestVersionChangeOpenAPIResponse;
     'name': string;
     'skill_id': string;
@@ -3151,6 +3153,7 @@ export interface SkillGenerateOpenAPIResponse {
     'outdated': boolean;
 }
 export interface SkillListItemOpenAPIResponse {
+    'auto_evo': boolean;
     'category': string;
     'deleted_at'?: string;
     'deleted_by'?: string;
@@ -3159,6 +3162,7 @@ export interface SkillListItemOpenAPIResponse {
     'file_content'?: string;
     'head_revision_id': string;
     'id': string;
+    'is_enabled': boolean;
     'latest_version_change'?: LatestVersionChangeOpenAPIResponse;
     'name': string;
     'skill_id': string;
@@ -9796,6 +9800,76 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             }
 
             const localVarRequestOptions = { method: 'PATCH', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /conversations/{conversation_id}:workspace-approvals
+         * @param {string} conversationId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsConversationIdWorkspaceApprovalsGet: async (conversationId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'conversationId' is not null or undefined
+            assertParamExists('apiCoreConversationsConversationIdWorkspaceApprovalsGet', 'conversationId', conversationId)
+            const localVarPath = `/api/core/conversations/{conversation_id}:workspace-approvals`
+                .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /conversations/{conversation_id}/workspace-approvals/{operation_id}:decide
+         * @param {string} conversationId
+         * @param {string} operationId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsConversationIdWorkspaceApprovalsOperationIdDecidePost: async (conversationId: string, operationId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'conversationId' is not null or undefined
+            assertParamExists('apiCoreConversationsConversationIdWorkspaceApprovalsOperationIdDecidePost', 'conversationId', conversationId)
+            // verify required parameter 'operationId' is not null or undefined
+            assertParamExists('apiCoreConversationsConversationIdWorkspaceApprovalsOperationIdDecidePost', 'operationId', operationId)
+            const localVarPath = `/api/core/conversations/{conversation_id}/workspace-approvals/{operation_id}:decide`
+                .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)))
+                .replace(`{${"operation_id"}}`, encodeURIComponent(String(operationId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
@@ -17521,6 +17595,33 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary GET /conversations/{conversation_id}:workspace-approvals
+         * @param {string} conversationId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreConversationsConversationIdWorkspaceApprovalsGet(conversationId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsConversationIdWorkspaceApprovalsGet(conversationId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsConversationIdWorkspaceApprovalsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /conversations/{conversation_id}/workspace-approvals/{operation_id}:decide
+         * @param {string} conversationId
+         * @param {string} operationId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreConversationsConversationIdWorkspaceApprovalsOperationIdDecidePost(conversationId: string, operationId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsConversationIdWorkspaceApprovalsOperationIdDecidePost(conversationId, operationId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsConversationIdWorkspaceApprovalsOperationIdDecidePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary Get conversation workspace binding
          * @param {string} conversationId
          * @param {*} [options] Override http request option.
@@ -20668,6 +20769,26 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
+         * @summary GET /conversations/{conversation_id}:workspace-approvals
+         * @param {DefaultApiApiCoreConversationsConversationIdWorkspaceApprovalsGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsConversationIdWorkspaceApprovalsGet(requestParameters: DefaultApiApiCoreConversationsConversationIdWorkspaceApprovalsGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreConversationsConversationIdWorkspaceApprovalsGet(requestParameters.conversationId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /conversations/{conversation_id}/workspace-approvals/{operation_id}:decide
+         * @param {DefaultApiApiCoreConversationsConversationIdWorkspaceApprovalsOperationIdDecidePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsConversationIdWorkspaceApprovalsOperationIdDecidePost(requestParameters: DefaultApiApiCoreConversationsConversationIdWorkspaceApprovalsOperationIdDecidePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreConversationsConversationIdWorkspaceApprovalsOperationIdDecidePost(requestParameters.conversationId, requestParameters.operationId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary Get conversation workspace binding
          * @param {DefaultApiApiCoreConversationsConversationIdWorkspaceGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -22915,6 +23036,22 @@ export interface DefaultApiApiCoreConversationsConversationIdWorkflowSettingsPat
 }
 
 /**
+ * Request parameters for apiCoreConversationsConversationIdWorkspaceApprovalsGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreConversationsConversationIdWorkspaceApprovalsGetRequest {
+    readonly conversationId: string
+}
+
+/**
+ * Request parameters for apiCoreConversationsConversationIdWorkspaceApprovalsOperationIdDecidePost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreConversationsConversationIdWorkspaceApprovalsOperationIdDecidePostRequest {
+    readonly conversationId: string
+
+    readonly operationId: string
+}
+
+/**
  * Request parameters for apiCoreConversationsConversationIdWorkspaceGet operation in DefaultApi.
  */
 export interface DefaultApiApiCoreConversationsConversationIdWorkspaceGetRequest {
@@ -24623,6 +24760,28 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreConversationsConversationIdWorkflowSettingsPatch(requestParameters: DefaultApiApiCoreConversationsConversationIdWorkflowSettingsPatchRequest, options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreConversationsConversationIdWorkflowSettingsPatch(requestParameters.conversationId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /conversations/{conversation_id}:workspace-approvals
+     * @param {DefaultApiApiCoreConversationsConversationIdWorkspaceApprovalsGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreConversationsConversationIdWorkspaceApprovalsGet(requestParameters: DefaultApiApiCoreConversationsConversationIdWorkspaceApprovalsGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreConversationsConversationIdWorkspaceApprovalsGet(requestParameters.conversationId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /conversations/{conversation_id}/workspace-approvals/{operation_id}:decide
+     * @param {DefaultApiApiCoreConversationsConversationIdWorkspaceApprovalsOperationIdDecidePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreConversationsConversationIdWorkspaceApprovalsOperationIdDecidePost(requestParameters: DefaultApiApiCoreConversationsConversationIdWorkspaceApprovalsOperationIdDecidePostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreConversationsConversationIdWorkspaceApprovalsOperationIdDecidePost(requestParameters.conversationId, requestParameters.operationId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

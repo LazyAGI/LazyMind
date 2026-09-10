@@ -6996,6 +6996,8 @@ components:
             type: object
         skillDetailOpenAPIResponse:
             properties:
+                auto_evo:
+                    type: boolean
                 category:
                     type: string
                 description:
@@ -7008,6 +7010,8 @@ components:
                     type: string
                 id:
                     type: string
+                is_enabled:
+                    type: boolean
                 latest_version_change:
                     $ref: '#/components/schemas/latestVersionChangeOpenAPIResponse'
                 name:
@@ -7021,11 +7025,13 @@ components:
                         type: string
                     type: array
             required:
+                - auto_evo
                 - category
                 - description
                 - draft
                 - head_revision_id
                 - id
+                - is_enabled
                 - name
                 - skill_id
             type: object
@@ -7315,6 +7321,8 @@ components:
             type: object
         skillListItemOpenAPIResponse:
             properties:
+                auto_evo:
+                    type: boolean
                 category:
                     type: string
                 deleted_at:
@@ -7331,6 +7339,8 @@ components:
                     type: string
                 id:
                     type: string
+                is_enabled:
+                    type: boolean
                 latest_version_change:
                     $ref: '#/components/schemas/latestVersionChangeOpenAPIResponse'
                 name:
@@ -7344,11 +7354,13 @@ components:
                         type: string
                     type: array
             required:
+                - auto_evo
                 - category
                 - description
                 - draft
                 - head_revision_id
                 - id
+                - is_enabled
                 - name
                 - skill_id
             type: object
@@ -9585,6 +9597,23 @@ paths:
                 "200":
                     description: OK
             summary: PATCH /conversations/{conversation_id}/workflow-settings
+    /api/core/conversations/{conversation_id}/workspace-approvals/{operation_id}:decide:
+        post:
+            parameters:
+                - in: path
+                  name: conversation_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: operation_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /conversations/{conversation_id}/workspace-approvals/{operation_id}:decide
     /api/core/conversations/{conversation_id}:archive:
         post:
             parameters:
@@ -9759,6 +9788,18 @@ paths:
                                 $ref: '#/components/schemas/LocalWorkspaceBindingResponse'
                     description: Workspace binding
             summary: Get conversation workspace binding
+    /api/core/conversations/{conversation_id}:workspace-approvals:
+        get:
+            parameters:
+                - in: path
+                  name: conversation_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /conversations/{conversation_id}:workspace-approvals
     /api/core/conversations/{conversation_id}:workspace-permission:
         put:
             parameters:

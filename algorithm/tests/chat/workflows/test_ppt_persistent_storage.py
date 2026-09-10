@@ -63,9 +63,10 @@ def test_find_deck_survives_disposable_attempt_removal(monkeypatch, tmp_path):
 
     result = tools.ppt_find_deck()
 
-    assert result['success'] is True
-    assert result['result']['deck_id'] == 'deck-1'
-    assert result['result']['deck_dir'] == str(deck.resolve())
+    assert result['page_count'] == 1
+    assert result['html_count'] == 0
+    assert result['deck_id'] == 'deck-1'
+    assert result['deck_dir'] == str(deck.resolve())
 
 
 def test_legacy_tmp_deck_is_copied_without_overwriting_persistent_state(

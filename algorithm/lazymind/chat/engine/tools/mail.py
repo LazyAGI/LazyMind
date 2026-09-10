@@ -28,6 +28,7 @@ from lazymind.chat.engine.attachment_reader import parse_attachment_content
 from lazymind.chat.engine.tools.local_file.workspace import (
     chat_agent_workspace,
     _resolve_workspace_path,
+    _current_artifact_scope,
 )
 
 
@@ -278,9 +279,7 @@ def _resolve_attachment_paths(attachment_paths: Any) -> list[str]:
     requested = _coerce_path_list(attachment_paths)
     if not requested:
         return []
-    cfg = _agentic_config()
-    user_id = str(cfg.get('user_id') or '0')
-    conversation_id = str(cfg.get('conversation_id') or 'default')
+    user_id, conversation_id = _current_artifact_scope()
     resolved: list[str] = []
     missing: list[str] = []
     for raw_path in requested:
@@ -312,10 +311,8 @@ def _iso(dt: datetime | None) -> str:
 
 
 def _draft_dir() -> str:
-    cfg = _agentic_config()
-    root = chat_agent_workspace(str(cfg.get('user_id') or '0'), str(cfg.get('conversation_id') or 'default'))
-    _, path = _resolve_workspace_path(os.path.join(root, '.mail_drafts'),
-        str(cfg.get('user_id') or '0'), str(cfg.get('conversation_id') or 'default'))
+    user_id, conversation_id = _current_artifact_scope()
+    _, path = _resolve_workspace_path('.mail_drafts', user_id, conversation_id)
     os.makedirs(path, exist_ok=True)
     return path
 
@@ -324,9 +321,7 @@ def _draft_path(draft_id: str) -> str:
     safe = re.sub(r'[^A-Za-z0-9_-]', '', str(draft_id or ''))
     if not safe:
         raise ToolExecutionError('draft_id is required')
-    cfg = _agentic_config()
-    return _resolve_workspace_path(os.path.join(_draft_dir(), f'{safe}.json'),
-        str(cfg.get('user_id') or '0'), str(cfg.get('conversation_id') or 'default'))[1]
+    return _resolve_workspace_path(os.path.join(_draft_dir(), f'{safe}.json'), *_current_artifact_scope())[1]
 
 
 def _load_draft(draft_id: str) -> dict[str, Any]:

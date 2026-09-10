@@ -24,7 +24,7 @@ export function ChatMessageStream({
 }: ChatMessageStreamProps) {
   const { t } = useTranslation();
   const visibleMessages = messages
-    .map((item) => ({ ...item, content: item.content.replaceAll(legacyPlanningThinkingText, "").trim() }))
+    .map((item) => ({ ...item, content: item.content.split(legacyPlanningThinkingText).join("").trim() }))
     .filter((item) => item.content && !hiddenStatusMessagePrefixes.some((prefix) => item.content.startsWith(prefix)));
   return (
     <div

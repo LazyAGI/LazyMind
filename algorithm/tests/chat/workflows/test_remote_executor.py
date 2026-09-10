@@ -513,6 +513,7 @@ async def test_remote_executor_keeps_workflow_inputs_out_of_user_attachments(
 ):
     worker = RemoteWorkflowExecutor()
     captured = {}
+    execution = {}
 
     class Runtime:
         async def context(self, *_):
@@ -547,14 +548,18 @@ async def test_remote_executor_keeps_workflow_inputs_out_of_user_attachments(
 
     async def stream(**kwargs):
         captured.update(kwargs['task_spec']['params'])
+        execution.update(kwargs['workspace_execution'])
         yield 'data: {"type":"done","status":"succeeded","summary":"done"}\n\n'
 
     from lazymind.chat.engine.subagent import runner
     worker.runtime = Runtime()
     monkeypatch.setattr(runner, 'run_subagent_stream', stream)
 
-    await worker._run_claim(object(), {'attempt_id': 'attempt-1', 'lease_token': 'lease-1'})
+    await worker._run_claim(object(), {'attempt_id': 'attempt-1', 'lease_token': 'lease-1', 'fencing_generation': 7})
 
+    assert execution == {'task_id': 'task-1', 'attempt_id': 'attempt-1', 'generation': '7', 'lease_token': 'lease-1'}
+    assert '_workspace_execution' not in captured
+    assert 'lease_token' not in captured
     assert captured['remote_inputs']['brief'] == 'hello'
     assert captured['remote_input_types'] == {'brief': 'text'}
     assert captured['remote_input_transports'] == {'brief': 'value'}

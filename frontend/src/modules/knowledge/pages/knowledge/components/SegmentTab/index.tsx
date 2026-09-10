@@ -275,16 +275,6 @@ const SegmentTab = (props: SegmentTabProps) => {
     ],
   );
 
-  const onSplitTypeChanged = useCallback(
-    (newType: string) => {
-      setCurrentType(newType);
-      setNextPageToken("");
-      setHasMore(false);
-      loadSegmentsData(segments.length || CARD_PAGE_SIZE, newType);
-    },
-    [segments.length, loadSegmentsData],
-  );
-
   const onUpdateSegmentStatus = useCallback(
     (targetSegmentId: string, isActive: boolean, apiPromise: Promise<void>) => {
       setSegments((draft) => {

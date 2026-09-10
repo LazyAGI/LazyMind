@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button, message } from "antd";
 import { CloseOutlined, MessageOutlined, PlusOutlined, SaveOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
@@ -18,6 +18,7 @@ import { emitConversationActivity } from "@/modules/chat/utils/conversationActiv
 import { buildChatMessageListFromHistory } from "@/modules/chat/utils/message";
 import "./index.scss";
 import type { DocumentChatSelection } from "./types";
+import type { ChatConfig } from "@/modules/chat/components/ChatConfigs";
 
 interface PdfTemporaryChatProps {
   datasetId: string;
@@ -32,7 +33,7 @@ interface PdfTemporaryChatProps {
 
 function newPreviewConversationId() {
   const suffix = typeof crypto.randomUUID === "function"
-    ? crypto.randomUUID().replaceAll("-", "")
+    ? crypto.randomUUID().replace(/-/g, "")
     : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   return `pdf-${suffix}`.slice(0, 36);
 }
@@ -57,7 +58,7 @@ export default function PdfTemporaryChat({
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [restartKey, setRestartKey] = useState(0);
-  const [chatConfig, setChatConfig] = useState({ knowledgeBaseId: [datasetId] });
+  const [chatConfig, setChatConfig] = useState<ChatConfig>({ knowledgeBaseId: [datasetId] });
 
   useEffect(() => {
     conversationIdRef.current = conversationId;

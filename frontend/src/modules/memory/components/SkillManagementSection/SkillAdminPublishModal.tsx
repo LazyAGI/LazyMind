@@ -1,3 +1,4 @@
+import { getLocalizedErrorMessage } from "@/components/request";
 import { useState } from "react";
 import { Button, Input, Modal, Tabs, Upload, message } from "antd";
 import { DeleteOutlined, InboxOutlined, PaperClipOutlined } from "@ant-design/icons";
@@ -98,7 +99,7 @@ export default function SkillAdminPublishModal({
       if ((error as { response?: { status?: number } })?.response?.status === 409) {
         message.error(t("admin.memorySkillAdminPublishDuplicate"));
       } else {
-        message.error(t("admin.memorySkillAdminPublishFailed"));
+        message.error(getLocalizedErrorMessage(error));
       }
     } finally {
       setSubmitting(false);

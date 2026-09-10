@@ -30,15 +30,21 @@ def test_chat_has_no_private_workflow_runtime_modules_or_imports():
     chat_root = Path(__file__).parents[3] / 'lazymind' / 'chat'
     removed = {
         'workflow_loader.py', 'persistence_compat.py', 'decision_policy.py',
-        'driver_agent.py', 'compat.py',
+        'compat.py',
     }
     assert not any((chat_root / 'workflow' / name).exists() for name in removed)
-    forbidden = ('workflow_loader', 'persistence_compat', 'decision_policy', 'driver_agent')
+    forbidden = ('workflow_loader', 'persistence_compat', 'decision_policy')
     violations = [
         str(path.relative_to(chat_root)) for path in chat_root.rglob('*.py')
         if any(token in path.read_text() for token in forbidden)
     ]
     assert violations == []
+    driver = (chat_root / 'workflow/driver_agent.py').read_text()
+    assert 'role=AgentRole.DRIVER' in driver
+    assert 'tools=[]' in driver
+    assert 'WorkflowClient' not in driver
+    assert 'advance_step(' not in driver
+    assert 'rewind_workflow(' not in driver
 
 
 def test_workflow_manager_is_a_public_sdk_and_handoff_adapter():
@@ -68,6 +74,6 @@ def test_frontend_refreshes_panel_only_for_runtime_state_invalidation():
     workflow_stream = (repository / 'frontend/src/modules/chat/utils/workflowEventStream.ts').read_text()
     assert "type === 'workflow_runtime_updated'" in task_center
     assert 'get().loadConversationTasks(conversationId)' in task_center
-    assert 'PLUGIN_GRAPH_REFRESH_EVENT' in task_center
+    assert 'WORKFLOW_GRAPH_REFRESH_EVENT' in task_center
     assert "'artifact.upsert'" in workflow_stream
     assert "'attempt.progress'" in workflow_stream

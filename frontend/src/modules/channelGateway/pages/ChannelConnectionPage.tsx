@@ -1,3 +1,4 @@
+import { getLocalizedErrorMessage } from "@/components/request";
 import { useCallback, useEffect, useState, type ChangeEvent } from 'react';
 import {
   Button,
@@ -375,8 +376,8 @@ export function TerminalConnectionPage() {
             dayjs(right.updated_at).valueOf() - dayjs(left.updated_at).valueOf()
           )),
       );
-    } catch {
-      message.error(t('channelGateway.terminal.loadAccountsFailed'));
+    } catch (error) {
+      message.error(getLocalizedErrorMessage(error));
     } finally {
       setAccountsLoading(false);
     }
@@ -403,8 +404,8 @@ export function TerminalConnectionPage() {
       await disconnectChannelAccount(account.id);
       message.success(t('channelGateway.terminal.disconnectSuccess'));
       await loadAccounts();
-    } catch {
-      message.error(t('channelGateway.terminal.disconnectFailed'));
+    } catch (error) {
+      message.error(getLocalizedErrorMessage(error));
     } finally {
       setDisconnectingAccountId(null);
     }
@@ -493,14 +494,14 @@ export function TerminalConnectionPage() {
     },
     {
       title: t('channelGateway.terminal.lastError'),
-      dataIndex: 'last_error',
+      // The column renders catalog text; backend diagnostics stay out of the tooltip.
       key: 'last_error',
       width: 220,
       ellipsis: true,
-      render: (value: string | null) =>
-        value ? (
-          <Tooltip title={value} placement="top" overlayStyle={{ maxWidth: 360 }}>
-            <span className="wechat-error-cell">{value}</span>
+      render: (_value: unknown, account) =>
+        account.last_error ? (
+          <Tooltip title={getLocalizedErrorMessage({ code: account.last_error })} placement="top" overlayStyle={{ maxWidth: 360 }}>
+            <span className="wechat-error-cell">{getLocalizedErrorMessage({ code: account.last_error })}</span>
           </Tooltip>
         ) : '-',
     },

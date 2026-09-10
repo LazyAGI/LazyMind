@@ -358,6 +358,8 @@ describe('WriterIRDocumentEditor numbering sidecar', () => {
           entries: { 'sec-1': { label: '1.', mode: 'ordered' } },
         }}
         ariaLabel='Writer document'
+        onFocus={vi.fn()}
+        onBlur={vi.fn()}
         onChange={onChange}
       />,
     );
@@ -380,7 +382,7 @@ describe('WriterIRDocumentEditor numbering sidecar', () => {
     fireEvent.input(heading!);
 
     await waitFor(() => expect(onChange).toHaveBeenCalled());
-    const updated = onChange.mock.calls.at(-1)?.[0] as WriterDocument;
+    const updated = onChange.mock.calls[onChange.mock.calls.length - 1]?.[0] as WriterDocument;
     expect(updated.blocks[0].content).toBe('Renamed section');
   });
 });

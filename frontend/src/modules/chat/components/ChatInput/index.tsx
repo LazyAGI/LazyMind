@@ -1,3 +1,4 @@
+import { getLocalizedErrorMessage } from "@/components/request";
 import {
   useState,
   useRef,
@@ -299,7 +300,7 @@ async function markdownImageToFile(source: string): Promise<File> {
 
   const response = await fetch(url, { credentials: "same-origin" });
   if (!response.ok) {
-    throw new Error(`Failed to fetch pasted image: ${response.status}`);
+    throw Object.assign(new Error("Failed to fetch pasted image"), { response });
   }
 
   const blob = await response.blob();
@@ -1267,8 +1268,8 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                   document.execCommand("insertText", false, remainingText);
                 }
               })
-              .catch(() => {
-                message.error(t("chat.fileUploadFailedRetry"));
+              .catch((error) => {
+                message.error(getLocalizedErrorMessage(error));
                 document.execCommand("insertText", false, plainText);
               });
             return;

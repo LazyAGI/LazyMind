@@ -56,15 +56,26 @@ def test_ppt_analysis_and_material_summary_share_markdown_widget():
     }
 
 
-def test_ppt_analysis_has_one_deterministic_kb_first_collection_route():
+def test_ppt_analysis_only_skips_collection_for_self_contained_requests():
     state = yaml.safe_load(
         (_repo_root() / 'workflows' / 'ppt-workflow' / 'scenario' / 'state.yml').read_text(
             encoding='utf-8'))
 
-    assert state['transitions']['analyze_requirements'] == [
-        {'to': 'collect_materials'},
-    ]
-    assert state['steps']['analyze_requirements'].get('route') is None
+    routes = {item['to']: ' '.join(item['when'].split())
+              for item in state['transitions']['analyze_requirements']}
+    assert set(routes) == {'collect_materials', 'plan_background_prompts', 'build_outline'}
+    assert routes['collect_materials'].startswith('skip_material_collection was not saved')
+    assert 'knowledge-base/web research' in routes['collect_materials']
+    for target, flag in [('plan_background_prompts', 'enabled'), ('build_outline', 'disabled')]:
+        assert routes[target] == (
+            'skip_material_collection was saved and ppt_capability_requirements is '
+            f'exactly AI_BACKGROUND_IMAGES: {flag}.')
+    analysis = state['steps']['analyze_requirements']['prompt']
+    assert 'when ALL of these are true' in analysis
+    assert 'there is no uploaded source, selected/mentioned knowledge base' in analysis
+    assert 'Do not save this' in analysis
+    assert 'marker for research/report/product/case-study decks' in analysis
+    assert state['steps']['analyze_requirements']['route'] == 'choice'
 
     prompt = state['steps']['collect_materials']['prompt']
     assert 'KB-first gate (mandatory)' in prompt
@@ -131,13 +142,15 @@ def test_register_material_images_publishes_one_previewable_image_per_new_file(
         {'url': 'https://example.com/two.png', 'caption': '杆塔基础', 'source': 'web'},
     ])
 
-    assert result['success'] is True
+    assert result['count'] == 2
+    assert result['errors'] is None
+    assert result['ui_errors'] is None
     assert staged_indices == [1, 2]
     assert [item['content_type'] for item in saved] == ['image', 'image']
     assert [item['key'] for item in saved] == ['material_images', 'material_images']
     assert [item['caption'] for item in saved] == ['基础示意图', '杆塔基础']
     assert [item['sort_order'] for item in saved] == [None, None]
-    assert result['result']['ui_published'] == 2
+    assert result['ui_published'] == 2
 
 
 def test_replace_material_images_overwrites_cards_and_removes_stale_tail(
@@ -173,7 +186,9 @@ def test_replace_material_images_overwrites_cards_and_removes_stale_tail(
         {'url': 'https://example.com/two.png', 'caption': 'two'},
     ], replace=True)
 
-    assert result['success'] is True
+    assert result['count'] == 2
+    assert result['errors'] is None
+    assert result['ui_errors'] is None
     assert deleted == [4, 3]
     assert [item['sort_order'] for item in saved] == [1, 2]
-    assert result['result']['ui_deleted'] == [{'ok': True}, {'ok': True}]
+    assert result['ui_deleted'] == [{'ok': True}, {'ok': True}]

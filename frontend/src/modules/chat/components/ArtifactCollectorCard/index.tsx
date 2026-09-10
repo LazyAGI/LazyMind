@@ -1,3 +1,4 @@
+import { getLocalizedErrorMessage } from "@/components/request";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { Button, Checkbox, Tabs, message } from "antd";
 import {
@@ -259,8 +260,8 @@ export default function ArtifactCollectorCard({
           t("chat.artifactCollectorPartialFailed", { count: failed.length }),
         );
       }
-    } catch {
-      message.error(t("chat.artifactCollectorBatchFailed"));
+    } catch (error) {
+      message.error(getLocalizedErrorMessage(error));
     } finally {
       setDownloading(false);
     }

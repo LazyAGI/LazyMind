@@ -40,16 +40,17 @@ def build_report(title: str) -> str:
     assert tools['build_report']('demo') == 'report:demo'
 
 
-def test_rejects_script_path_outside_workflow_scripts_directory():
+@pytest.mark.parametrize('script_path', ['../unsafe.py', 'scripts/../unsafe.py'])
+def test_rejects_script_path_outside_workflow_scripts_directory(script_path):
     package = {
         'revision_id': 'revision-1',
         'files': {
-            'workflow.yaml': _encoded('''
+            'workflow.yaml': _encoded(f'''
 tool_scripts:
-  - path: ../unsafe.py
+  - path: {script_path}
     functions: [unsafe]
 '''),
-            '../unsafe.py': _encoded('def unsafe(): return True'),
+            script_path: _encoded('def unsafe(): return True'),
         },
     }
 
@@ -75,6 +76,16 @@ tool_scripts:
     }
 
     with pytest.raises(ValueError, match='multiple scripts'):
+        load_workflow_package_tools(package, ['run'], 'workflow-1', 'revision-1')
+
+
+def test_rejects_invalid_declarations_instead_of_loading_every_script():
+    package = {'files': {
+        'workflow.yaml': _encoded('tool_scripts: invalid'),
+        'scripts/tools.py': _encoded('def run(): return True'),
+    }}
+
+    with pytest.raises(ValueError, match='tool_scripts must be a list'):
         load_workflow_package_tools(package, ['run'], 'workflow-1', 'revision-1')
 
 

@@ -755,7 +755,7 @@ function CanvasInner({ model, errors, onModelChange, workflowModel, scenarioData
     [setNodes, stableResizeEnd, stableResizeDrag, stableGetZoom],
   );
 
-  const openCreateMenu=useCallback((event:React.MouseEvent)=>{
+  const openCreateMenu=useCallback((event:MouseEvent | React.MouseEvent)=>{
     if(readonly||!event.ctrlKey)return false;
     event.preventDefault();
     const flow=screenToFlowPosition({x:event.clientX,y:event.clientY});
@@ -766,13 +766,13 @@ function CanvasInner({ model, errors, onModelChange, workflowModel, scenarioData
     return true;
   },[readonly,screenToFlowPosition]);
 
-  const handlePaneClick=useCallback((event:React.MouseEvent)=>{
+  const handlePaneClick=useCallback((event:MouseEvent | React.MouseEvent)=>{
     if(openCreateMenu(event))return;
     setCreateAt(null);
     setSelectedNodeId(null);setSelectedNodeIds(new Set());setSelectedEdgeId(null);
   },[openCreateMenu]);
 
-  const handlePaneContextMenu=useCallback((event:React.MouseEvent)=>{
+  const handlePaneContextMenu=useCallback((event:MouseEvent | React.MouseEvent)=>{
     if(event.ctrlKey)openCreateMenu(event);
   },[openCreateMenu]);
 

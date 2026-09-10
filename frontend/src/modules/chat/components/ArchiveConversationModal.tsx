@@ -1,6 +1,6 @@
+import { getLocalizedErrorMessage } from "@/components/request";
 import { useEffect, useState } from "react";
 import { message } from "antd";
-import { useTranslation } from "react-i18next";
 
 import type { ConversationArchiveFolder } from "@/api/generated/core-client";
 import ArchiveFolderPickerModal from "@/components/ui/ArchiveFolderPickerModal";
@@ -27,7 +27,6 @@ export default function ArchiveConversationModal({
   onCancel,
   onArchived,
 }: ArchiveConversationModalProps) {
-  const { t } = useTranslation();
   const [folders, setFolders] = useState<ConversationArchiveFolder[]>([]);
   const [unfiledTotalCount, setUnfiledTotalCount] = useState(0);
   const [folderId, setFolderId] = useState("unfiled");
@@ -71,8 +70,8 @@ export default function ArchiveConversationModal({
     try {
       await archiveConversation(conversationId, folderId === "unfiled" ? null : folderId);
       onArchived();
-    } catch {
-      message.error(t("settingsPage.recovery.operationFailed"));
+    } catch (error) {
+      message.error(getLocalizedErrorMessage(error));
     } finally {
       setLoading(false);
     }

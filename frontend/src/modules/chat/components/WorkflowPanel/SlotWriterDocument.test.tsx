@@ -116,6 +116,7 @@ describe('SlotWriterDocument render refresh', () => {
           representation: 'markdown',
           document: '# Edited draft',
           revision: 3,
+          numbering: { ordered_style: 'hierarchical', entries: {} },
         },
       },
     });
@@ -138,6 +139,7 @@ describe('SlotWriterDocument render refresh', () => {
         '# Edited draft',
         'draft_document',
         'draft',
+        undefined,
         { silentError: true },
       );
     });
@@ -158,6 +160,7 @@ describe('SlotWriterDocument render refresh', () => {
           representation: 'markdown',
           document: '# Edited draft',
           revision: 3,
+          numbering: { ordered_style: 'hierarchical', entries: {} },
         },
       },
     });
@@ -213,6 +216,7 @@ describe('SlotWriterDocument render refresh', () => {
         '# Edited draft',
         'draft_document',
         'draft',
+        undefined,
         { silentError: true },
       );
     });

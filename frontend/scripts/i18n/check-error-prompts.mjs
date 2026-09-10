@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import ts from "typescript";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -81,17 +82,26 @@ function collectUserVisibleErrorFieldMatches(source) {
   return matches;
 }
 
-function collectCatchHardcodedMatches(source) {
+export function collectCatchHardcodedMatches(source, filePath) {
   const matches = [];
+  const tree = ts.createSourceFile(filePath, source, ts.ScriptTarget.Latest, true);
+  const catches = [];
+  function visit(node) {
+    if (ts.isCatchClause(node)) catches.push([node.block.getStart(tree), node.block.end]);
+    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)
+        && node.expression.name.text === "catch") {
+      const callback = node.arguments[0];
+      if (callback && (ts.isArrowFunction(callback) || ts.isFunctionExpression(callback))) {
+        catches.push([callback.body.getStart(tree), callback.body.end]);
+      }
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(tree);
+  const inCatch = (index) => catches.some(([start, end]) => start <= index && index < end);
   const visibleLiteral = /(?:message\.(?:error|warning|info)|set[A-Z]\w*(?:Error|Message))\(\s*(["'`])[^"'`]*(?:failed|failure|error|失败|错误|出错|异常)[^"'`]*\1/gi;
   for (const match of source.matchAll(visibleLiteral)) {
-    const prefix = source.slice(0, match.index);
-    const catchIndex = prefix.lastIndexOf("catch");
-    if (catchIndex < 0) continue;
-    const between = prefix.slice(catchIndex, match.index);
-    const opens = (between.match(/\{/g) || []).length;
-    const closes = (between.match(/\}/g) || []).length;
-    if (opens <= closes) continue;
+    if (!inCatch(match.index)) continue;
     matches.push({ index: match.index, label: "hardcoded failure text in an interface catch" });
   }
 
@@ -102,14 +112,8 @@ function collectCatchHardcodedMatches(source) {
   const frontendOnlyKey = /(?:copyFailed|Error(?:Empty|Invalid)|Invalid|TypeError|unsupported|parseFailed(?:$|\.)|fileFormat|noFile|noRows|memoryUploadSkillFailed|memoryPreferenceDraftPreviewFailed|template\.downloadFailed)/i;
   for (const match of source.matchAll(translatedLiteral)) {
     if (!/(?:failed|failure|error|失败|错误|出错|异常)/i.test(match[2])) continue;
-    if (frontendOnlyKey.test(match[2])) continue;
-    const prefix = source.slice(0, match.index);
-    const catchIndex = prefix.lastIndexOf("catch");
-    if (catchIndex < 0) continue;
-    const between = prefix.slice(catchIndex, match.index);
-    const opens = (between.match(/\{/g) || []).length;
-    const closes = (between.match(/\}/g) || []).length;
-    if (opens <= closes) continue;
+    if (frontendOnlyKey.test(match[2]) || /^errors\.\d+$/.test(match[2])) continue;
+    if (!inCatch(match.index)) continue;
     matches.push({ index: match.index, label: "custom translated failure text in an interface catch" });
   }
   return matches;
@@ -125,29 +129,31 @@ function sourceFiles(directory) {
   });
 }
 
-const failures = [];
-for (const filePath of sourceFiles(sourceDir)) {
-  const source = fs.readFileSync(filePath, "utf8");
-  for (const { label, pattern } of forbiddenPatterns) {
-    for (const match of source.matchAll(pattern)) {
-      const line = source.slice(0, match.index).split("\n").length;
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  const failures = [];
+  for (const filePath of sourceFiles(sourceDir)) {
+    const source = fs.readFileSync(filePath, "utf8");
+    for (const { label, pattern } of forbiddenPatterns) {
+      for (const match of source.matchAll(pattern)) {
+        const line = source.slice(0, match.index).split("\n").length;
+        failures.push(`${path.relative(sourceDir, filePath)}:${line} ${label}`);
+      }
+    }
+    for (const { index, label } of collectUserVisibleErrorFieldMatches(source)) {
+      const line = source.slice(0, index).split("\n").length;
+      failures.push(`${path.relative(sourceDir, filePath)}:${line} ${label}`);
+    }
+    for (const { index, label } of collectCatchHardcodedMatches(source, filePath)) {
+      const line = source.slice(0, index).split("\n").length;
       failures.push(`${path.relative(sourceDir, filePath)}:${line} ${label}`);
     }
   }
-  for (const { index, label } of collectUserVisibleErrorFieldMatches(source)) {
-    const line = source.slice(0, index).split("\n").length;
-    failures.push(`${path.relative(sourceDir, filePath)}:${line} ${label}`);
-  }
-  for (const { index, label } of collectCatchHardcodedMatches(source)) {
-    const line = source.slice(0, index).split("\n").length;
-    failures.push(`${path.relative(sourceDir, filePath)}:${line} ${label}`);
-  }
-}
 
-if (failures.length > 0) {
-  console.error(failures.join("\n"));
-  console.error("Interface errors must be resolved through i18n/errors.");
-  process.exit(1);
-}
+  if (failures.length > 0) {
+    console.error(failures.join("\n"));
+    console.error("Interface errors must be resolved through i18n/errors.");
+    process.exit(1);
+  }
 
-console.log("Interface error prompts do not expose raw backend messages.");
+  console.log("Interface error prompts do not expose raw backend messages.");
+}

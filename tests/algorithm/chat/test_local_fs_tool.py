@@ -455,3 +455,14 @@ def test_mixed_parent_grep_prunes_controlled_subtree_before_open(monkeypatch, tm
     result = _prepared_workspace_call(LocalFileToolkit(), 'grep', {'pattern': 'needle'})
     assert [match['content'] for match in result['matches']] == ['needle public']
     assert str(secret) not in opened
+
+
+def test_workspace_binding_preserves_parent_private_permission_snapshot(monkeypatch):
+    monkeypatch.setattr(local_fs_mod.lazyllm, 'globals', {'agentic_config': {
+        'user_id': 'u', 'conversation_id': 'c',
+        'local_fs_sources': [_source('local-workspace:w', ['/bound'], ['txt'])],
+        'parent_agentic_config': {'_core_workspace_context': {
+            'workspace_id': 'w', 'permission_mode': 'always_ask', 'permission_version': 7,
+        }},
+    }})
+    assert LocalFileToolkit._workspace_context()['permission_version'] == 7

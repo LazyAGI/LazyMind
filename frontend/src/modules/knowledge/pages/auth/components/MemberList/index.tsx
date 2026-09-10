@@ -3,8 +3,9 @@ import type { SelectProps } from "antd";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import moment from "moment";
-import { Dataset, DatasetAclEnum } from "@/api/generated/knowledge-client";
+import { DatasetAclEnum } from "@/api/generated/knowledge-client";
 import type {
+  Dataset,
   DatasetMember as CoreDatasetMember,
   DatasetRole as CoreDatasetRole,
 } from "@/api/generated/core-client";
@@ -288,7 +289,7 @@ const MemberList = (props: IProps) => {
     KnowledgeBaseServiceApi()
       .datasetServiceGetDataset({ dataset: currentDetail?.dataset_id || "" })
       .then((res) => {
-        const nextDetail = res.data as unknown as Dataset;
+        const nextDetail = res.data;
         setCurrentDetail(nextDetail);
         getTableData(nextDetail);
       })

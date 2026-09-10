@@ -32,11 +32,12 @@ export function findLastUserMessageIndex(list: any[]): number {
 export function getCiteMessages(message?: {
   cite_message?: string;
   cite_messages?: string[];
+  inputs?: { input_type?: string; text?: string }[];
 }) {
   if (Array.isArray(message?.cite_messages)) {
     return message.cite_messages.map((item) => item.trim()).filter(Boolean);
   }
-  const textInput = (message as any)?.inputs?.find((input: any) => {
+  const textInput = message?.inputs?.find((input) => {
     const inputType = input?.input_type || "text";
     return inputType === "text" && typeof input?.text === "string";
   });
