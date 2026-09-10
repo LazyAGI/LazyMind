@@ -1713,9 +1713,9 @@ CREATE INDEX IF NOT EXISTS idx_vocabulary_review_sessions_active ON vocabulary_r
 CREATE UNIQUE INDEX IF NOT EXISTS idx_vocabulary_review_session_word ON vocabulary_review_session_items(session_id,word_id);
 
 -- Knowledge-base processing levels
-ALTER TABLE datasets ADD COLUMN processing_level TEXT NOT NULL DEFAULT 'indexed';
-ALTER TABLE datasets ADD COLUMN processing_revision INTEGER NOT NULL DEFAULT 1;
-ALTER TABLE datasets ADD COLUMN transition_status TEXT NOT NULL DEFAULT 'idle';
+ALTER TABLE datasets ADD COLUMN processing_level VARCHAR(16) NOT NULL DEFAULT 'indexed';
+ALTER TABLE datasets ADD COLUMN processing_revision BIGINT NOT NULL DEFAULT 1;
+ALTER TABLE datasets ADD COLUMN transition_status VARCHAR(32) NOT NULL DEFAULT 'idle';
 ALTER TABLE datasets ADD COLUMN reader_fallback_accepted BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE datasets ADD COLUMN processing_config JSON;
 CREATE INDEX IF NOT EXISTS idx_datasets_processing_level ON datasets(processing_level);
