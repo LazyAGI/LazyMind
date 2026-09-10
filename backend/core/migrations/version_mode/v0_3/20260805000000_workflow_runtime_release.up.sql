@@ -197,6 +197,16 @@ ALTER TABLE plugin_sessions ADD COLUMN IF NOT EXISTS controller_host VARCHAR(32)
 ALTER TABLE plugin_sessions ADD COLUMN IF NOT EXISTS workflow_mode VARCHAR(16) NOT NULL DEFAULT 'dynamic';
 CREATE INDEX IF NOT EXISTS idx_plugin_sessions_origin ON plugin_sessions(origin_host, origin_ref);
 
+ALTER TABLE plugins
+    ADD COLUMN IF NOT EXISTS source_skill_id VARCHAR(36) NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS source_skill_name VARCHAR(255) NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS source_skill_revision_id VARCHAR(36) NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS source_skill_revision_no BIGINT NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS source_skill_tree_hash VARCHAR(64) NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS source_draft_id VARCHAR(36) NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS idx_plugins_source_skill
+    ON plugins(source_skill_id);
+
 -- +migrate Dialect sqlite
 ALTER TABLE user_plugin_settings ADD COLUMN call_mode varchar(16) NOT NULL DEFAULT 'disabled';
 UPDATE user_plugin_settings
@@ -289,6 +299,15 @@ ALTER TABLE plugin_sessions ADD COLUMN origin_ref varchar(255) NOT NULL DEFAULT 
 ALTER TABLE plugin_sessions ADD COLUMN controller_host varchar(32) NOT NULL DEFAULT 'lazymind';
 ALTER TABLE plugin_sessions ADD COLUMN workflow_mode varchar(16) NOT NULL DEFAULT 'dynamic';
 CREATE INDEX IF NOT EXISTS idx_plugin_sessions_origin ON plugin_sessions(origin_host, origin_ref);
+
+ALTER TABLE plugins ADD COLUMN source_skill_id VARCHAR(36) NOT NULL DEFAULT '';
+ALTER TABLE plugins ADD COLUMN source_skill_name VARCHAR(255) NOT NULL DEFAULT '';
+ALTER TABLE plugins ADD COLUMN source_skill_revision_id VARCHAR(36) NOT NULL DEFAULT '';
+ALTER TABLE plugins ADD COLUMN source_skill_revision_no BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE plugins ADD COLUMN source_skill_tree_hash VARCHAR(64) NOT NULL DEFAULT '';
+ALTER TABLE plugins ADD COLUMN source_draft_id VARCHAR(36) NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS idx_plugins_source_skill
+    ON plugins(source_skill_id);
 
 -- +migrate Dialect postgres
 -- Expand-only Workflow v1 facade persistence. Legacy plugin_* Runtime tables

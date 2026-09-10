@@ -145,6 +145,14 @@ ALTER TABLE plugin_session_steps
 DROP TABLE IF EXISTS workflow_events;
 DROP TABLE IF EXISTS workflow_commands;
 DROP TABLE IF EXISTS workflow_preparations;
+DROP INDEX IF EXISTS idx_plugins_source_skill;
+ALTER TABLE plugins
+    DROP COLUMN IF EXISTS source_draft_id,
+    DROP COLUMN IF EXISTS source_skill_tree_hash,
+    DROP COLUMN IF EXISTS source_skill_revision_no,
+    DROP COLUMN IF EXISTS source_skill_revision_id,
+    DROP COLUMN IF EXISTS source_skill_name,
+    DROP COLUMN IF EXISTS source_skill_id;
 DROP INDEX IF EXISTS idx_plugin_sessions_origin;
 ALTER TABLE plugin_sessions
     DROP COLUMN IF EXISTS workflow_mode,
@@ -308,6 +316,13 @@ ALTER TABLE plugin_session_steps DROP COLUMN lease_owner;
 DROP TABLE IF EXISTS workflow_events;
 DROP TABLE IF EXISTS workflow_commands;
 DROP TABLE IF EXISTS workflow_preparations;
+DROP INDEX IF EXISTS idx_plugins_source_skill;
+ALTER TABLE plugins DROP COLUMN source_draft_id;
+ALTER TABLE plugins DROP COLUMN source_skill_tree_hash;
+ALTER TABLE plugins DROP COLUMN source_skill_revision_no;
+ALTER TABLE plugins DROP COLUMN source_skill_revision_id;
+ALTER TABLE plugins DROP COLUMN source_skill_name;
+ALTER TABLE plugins DROP COLUMN source_skill_id;
 DROP INDEX IF EXISTS idx_plugin_sessions_origin;
 ALTER TABLE plugin_sessions DROP COLUMN workflow_mode;
 ALTER TABLE plugin_sessions DROP COLUMN controller_host;
