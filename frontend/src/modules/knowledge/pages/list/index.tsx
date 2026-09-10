@@ -1592,6 +1592,20 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
       ) : null}
     </Button>
   );
+  const createKnowledgeButton = (
+    <Tooltip title={createActionDisabled ? createActionDisabledTooltip : undefined}>
+      <span>
+        <Button
+          type="primary"
+          icon={<PlusOutlined />}
+          disabled={createActionDisabled}
+          onClick={() => createKnowledgeRef.current?.onOpen()}
+        >
+          {t("knowledge.createKnowledgeBase")}
+        </Button>
+      </span>
+    </Tooltip>
+  );
 
   return (
     <div className="knowledge-list-page">
@@ -1611,23 +1625,11 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
           <h1>{t("layout.knowledgeBase")}</h1>
           <p>{t("knowledge.pageDescription")}</p>
         </div>
-        <div className="knowledge-page-header-actions">
-          {activeView === "mine" ? (
-            <Tooltip title={createActionDisabled ? createActionDisabledTooltip : undefined}>
-              <span>
-                <Button
-                  type="primary"
-                  icon={<PlusOutlined />}
-                  disabled={createActionDisabled}
-                  onClick={() => createKnowledgeRef.current?.onOpen()}
-                >
-                  {t("knowledge.createKnowledgeBase")}
-                </Button>
-              </span>
-            </Tooltip>
-          ) : null}
-          {activeView === "square" ? backgroundTasksButton : null}
-        </div>
+        {activeView === "square" ? (
+          <div className="knowledge-page-header-actions">
+            {backgroundTasksButton}
+          </div>
+        ) : null}
       </div>
 
       {embeddingReady === false ? (
@@ -1751,7 +1753,10 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
                 </button>
               ))}
             </div>
-            {backgroundTasksButton}
+            <div className="knowledge-source-actions">
+              {backgroundTasksButton}
+              {createKnowledgeButton}
+            </div>
           </div>
 
           <div

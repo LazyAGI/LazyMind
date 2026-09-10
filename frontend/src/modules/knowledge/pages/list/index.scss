@@ -256,6 +256,18 @@
   border-radius: 6px;
 }
 
+.knowledge-source-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  .ant-btn {
+    height: 32px;
+    border-radius: 6px;
+  }
+}
+
 .knowledge-square-toolbar,
 .knowledge-mine-toolbar {
   display: grid;
@@ -904,7 +916,7 @@
     gap: 12px;
   }
   .knowledge-source-tabs { gap: 16px; overflow-x: auto; }
-  .knowledge-background-tasks-button.ant-btn { margin-bottom: 7px; }
+  .knowledge-source-actions { margin-bottom: 7px; }
   .knowledge-square-grid { grid-template-columns: 1fr; }
   .knowledge-square-toolbar { grid-template-columns: 1fr 1fr; }
   .knowledge-square-toolbar > .ant-input-affix-wrapper { grid-column: 1 / -1; }
