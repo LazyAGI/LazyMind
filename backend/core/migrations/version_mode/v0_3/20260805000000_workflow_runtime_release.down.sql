@@ -112,6 +112,7 @@ ALTER TABLE conversations DROP COLUMN IF EXISTS chat_model_version;
 ALTER TABLE conversations DROP COLUMN IF EXISTS chat_model_snapshot;
 ALTER TABLE conversations DROP COLUMN IF EXISTS chat_model_id;
 ALTER TABLE conversations DROP COLUMN IF EXISTS chat_model_mode;
+ALTER TABLE conversations DROP COLUMN IF EXISTS history_order;
 ALTER TABLE conversations DROP COLUMN IF EXISTS pinned_at;
 ALTER TABLE conversations DROP COLUMN IF EXISTS source_display_name;
 ALTER TABLE conversations DROP COLUMN IF EXISTS source_document_id;
@@ -276,6 +277,7 @@ ALTER TABLE conversations DROP COLUMN chat_model_version;
 ALTER TABLE conversations DROP COLUMN chat_model_snapshot;
 ALTER TABLE conversations DROP COLUMN chat_model_id;
 ALTER TABLE conversations DROP COLUMN chat_model_mode;
+ALTER TABLE conversations DROP COLUMN history_order;
 ALTER TABLE conversations DROP COLUMN pinned_at;
 ALTER TABLE conversations DROP COLUMN source_display_name;
 ALTER TABLE conversations DROP COLUMN source_document_id;
@@ -435,6 +437,23 @@ ALTER TABLE resource_update_tasks DROP COLUMN lane_priority;
 ALTER TABLE resource_update_tasks DROP COLUMN run_id;
 ALTER TABLE resource_update_tasks DROP COLUMN lane_key;
 ALTER TABLE resource_update_tasks DROP COLUMN result_json;
+
+-- Conversation opening metadata
+-- +migrate Dialect postgres
+DELETE FROM async_jobs WHERE job_type IN ('conversation.opening', 'conversation.opening.backfill');
+DROP TABLE IF EXISTS conversation_opening_metadata;
+DROP TABLE IF EXISTS conversation_opening_backfills;
+ALTER TABLE conversations DROP COLUMN title_revision;
+ALTER TABLE conversations DROP COLUMN title_source;
+DELETE FROM user_selected_models WHERE model_type = 'conversation_metadata';
+
+-- +migrate Dialect sqlite
+DELETE FROM async_jobs WHERE job_type IN ('conversation.opening', 'conversation.opening.backfill');
+DROP TABLE IF EXISTS conversation_opening_metadata;
+DROP TABLE IF EXISTS conversation_opening_backfills;
+ALTER TABLE conversations DROP COLUMN title_revision;
+ALTER TABLE conversations DROP COLUMN title_source;
+DELETE FROM user_selected_models WHERE model_type = 'conversation_metadata';
 
 -- +migrate Dialect postgres
 DROP TABLE IF EXISTS chat_run_performance;

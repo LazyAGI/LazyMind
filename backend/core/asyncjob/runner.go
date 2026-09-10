@@ -40,8 +40,22 @@ func Start(ctx context.Context, db *gorm.DB, opts Options) *Runner {
 }
 
 func RecoverStaleJobs(ctx context.Context, db *gorm.DB, now time.Time) error {
+	return recoverStaleJobs(ctx, db, now, nil, nil)
+}
+
+func recoverStaleJobs(ctx context.Context, db *gorm.DB, now time.Time, jobTypes, excludeJobTypes []string) error {
 	now = now.UTC()
 	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		staleJobs := func() *gorm.DB {
+			query := tx.Model(&orm.AsyncJob{}).Where("status = ? AND lock_until < ?", StatusRunning, now)
+			if len(jobTypes) > 0 {
+				query = query.Where("job_type IN ?", jobTypes)
+			}
+			if len(excludeJobTypes) > 0 {
+				query = query.Where("job_type NOT IN ?", excludeJobTypes)
+			}
+			return query
+		}
 		commonValues := map[string]any{
 			"locked_by":  "",
 			"lock_until": nil,
@@ -55,8 +69,8 @@ func RecoverStaleJobs(ctx context.Context, db *gorm.DB, now time.Time) error {
 		for key, value := range commonValues {
 			pendingValues[key] = value
 		}
-		if err := tx.Model(&orm.AsyncJob{}).
-			Where("status = ? AND lock_until < ? AND attempt_count < max_attempts", StatusRunning, now).
+		if err := staleJobs().
+			Where("attempt_count < max_attempts").
 			Updates(pendingValues).Error; err != nil {
 			return err
 		}
@@ -70,8 +84,8 @@ func RecoverStaleJobs(ctx context.Context, db *gorm.DB, now time.Time) error {
 		for key, value := range commonValues {
 			failedValues[key] = value
 		}
-		return tx.Model(&orm.AsyncJob{}).
-			Where("status = ? AND lock_until < ? AND attempt_count >= max_attempts", StatusRunning, now).
+		return staleJobs().
+			Where("attempt_count >= max_attempts").
 			Updates(failedValues).Error
 	})
 }
@@ -108,11 +122,27 @@ func normalizeOptions(opts Options) Options {
 func (r *Runner) run(ctx context.Context) {
 	defer close(r.done)
 
-	if err := RecoverStaleJobs(ctx, r.db, time.Now().UTC()); err != nil {
+	if err := r.recoverStaleJobs(ctx, time.Now().UTC()); err != nil {
 		log.Logger.Warn().Err(err).Msg("asyncjob: recover stale jobs failed")
 	}
 
 	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		ticker := time.NewTicker(r.opts.LockTTL / 2)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case now := <-ticker.C:
+				if err := r.recoverStaleJobs(ctx, now); err != nil {
+					log.Logger.Warn().Err(err).Msg("asyncjob: recover stale jobs failed")
+				}
+			}
+		}
+	}()
 	for i := 0; i < r.opts.Concurrency; i++ {
 		wg.Add(1)
 		go func() {
@@ -121,6 +151,10 @@ func (r *Runner) run(ctx context.Context) {
 		}()
 	}
 	wg.Wait()
+}
+
+func (r *Runner) recoverStaleJobs(ctx context.Context, now time.Time) error {
+	return recoverStaleJobs(ctx, r.db, now, r.opts.JobTypes, r.opts.ExcludeJobTypes)
 }
 
 func (r *Runner) Done() <-chan struct{} {
@@ -169,7 +203,20 @@ func (r *Runner) claimOne(ctx context.Context, now time.Time) (*orm.AsyncJob, er
 
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var row orm.AsyncJob
-		err := withClaimLock(tx).
+		query := withClaimLock(tx)
+		if len(r.opts.JobTypes) > 0 {
+			query = query.Where("job_type IN ?", r.opts.JobTypes)
+		}
+		if len(r.opts.ExcludeJobTypes) > 0 {
+			query = query.Where("job_type NOT IN ?", r.opts.ExcludeJobTypes)
+		}
+		if len(r.opts.YieldToJobTypes) > 0 {
+			query = query.Where("NOT EXISTS (?)", tx.Model(&orm.AsyncJob{}).Select("1").Where("job_type IN ? AND status = ? AND next_run_at <= ?", r.opts.YieldToJobTypes, StatusPending, now))
+		}
+		if r.opts.SerializeResources {
+			query = query.Where("NOT EXISTS (SELECT 1 FROM async_jobs active WHERE active.resource_type = async_jobs.resource_type AND active.resource_id = async_jobs.resource_id AND active.status = ?)", StatusRunning)
+		}
+		err := query.
 			Where("status = ? AND next_run_at <= ?", StatusPending, now).
 			Order("created_at ASC").
 			First(&row).Error
@@ -178,6 +225,25 @@ func (r *Runner) claimOne(ctx context.Context, now time.Time) (*orm.AsyncJob, er
 				return nil
 			}
 			return err
+		}
+
+		if r.opts.SerializeResources {
+			if tx.Dialector.Name() == "postgres" {
+				var acquired bool
+				if err := tx.Raw("SELECT pg_try_advisory_xact_lock(hashtextextended(?, 0))", row.ResourceType+":"+row.ResourceID).Scan(&acquired).Error; err != nil {
+					return err
+				}
+				if !acquired {
+					return nil
+				}
+			}
+			var active int64
+			if err := tx.Model(&orm.AsyncJob{}).Where("resource_type = ? AND resource_id = ? AND status = ?", row.ResourceType, row.ResourceID, StatusRunning).Count(&active).Error; err != nil {
+				return err
+			}
+			if active > 0 {
+				return nil
+			}
 		}
 
 		values := map[string]any{
@@ -219,28 +285,61 @@ func (r *Runner) claimOne(ctx context.Context, now time.Time) (*orm.AsyncJob, er
 
 func (r *Runner) runJob(ctx context.Context, row orm.AsyncJob) error {
 	handler, ok := lookupHandler(row.JobType)
-	// The outcome writes below use a detached, bounded finalize context so an
-	// interrupted job is still recorded and its lease cleared even when the app
-	// ctx is already cancelled at shutdown; the handler itself still runs under
-	// the app ctx so it can react to cancellation.
+	reporter := &jobReporter{
+		db:           r.db,
+		jobID:        row.ID,
+		workerID:     r.opts.WorkerID,
+		attemptCount: row.AttemptCount,
+		lockTTL:      r.opts.LockTTL,
+	}
+	var result Result
+	var err error
+	if ok {
+		handlerCtx, cancelHandler := context.WithCancel(ctx)
+		stopHeartbeat := make(chan struct{})
+		heartbeatDone := make(chan struct{})
+		go r.heartbeatLoop(handlerCtx, cancelHandler, reporter, stopHeartbeat, heartbeatDone)
+		result, err = handler(handlerCtx, toJob(row), reporter)
+		close(stopHeartbeat)
+		<-heartbeatDone
+		cancelHandler()
+	}
+	// Start the finalization deadline after the handler, including long model calls.
 	finCtx, finCancel := context.WithTimeout(context.Background(), defaultFinalizeTimeout)
 	defer finCancel()
-
 	if !ok {
-		return r.markHandlerNotFound(finCtx, row.ID)
+		return r.markHandlerNotFound(finCtx, row)
 	}
-
-	reporter := &jobReporter{
-		db:       r.db,
-		jobID:    row.ID,
-		workerID: r.opts.WorkerID,
-		lockTTL:  r.opts.LockTTL,
-	}
-	result, err := handler(ctx, toJob(row), reporter)
 	if err == nil {
-		return r.markSucceeded(finCtx, row.ID, result)
+		return r.markSucceeded(finCtx, row, result)
 	}
 	return r.markFailedAttempt(finCtx, row, result, err)
+}
+
+func (r *Runner) heartbeatLoop(ctx context.Context, cancelHandler context.CancelFunc, reporter *jobReporter, stop <-chan struct{}, done chan<- struct{}) {
+	defer close(done)
+	interval := r.opts.LockTTL / 3
+	if interval <= 0 {
+		interval = time.Nanosecond
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-stop:
+			return
+		case <-ticker.C:
+			if err := reporter.Heartbeat(ctx); err != nil {
+				if errors.Is(err, errJobLeaseLost) {
+					cancelHandler()
+					return
+				}
+				log.Logger.Warn().Err(err).Str("job_id", reporter.jobID).Msg("asyncjob: renew job lease failed")
+			}
+		}
+	}
 }
 
 func toJob(row orm.AsyncJob) Job {
@@ -256,10 +355,10 @@ func toJob(row orm.AsyncJob) Job {
 	}
 }
 
-func (r *Runner) markHandlerNotFound(ctx context.Context, jobID string) error {
+func (r *Runner) markHandlerNotFound(ctx context.Context, row orm.AsyncJob) error {
 	now := time.Now().UTC()
 	return r.db.WithContext(ctx).Model(&orm.AsyncJob{}).
-		Where("id = ?", jobID).
+		Where("id = ? AND status = ? AND attempt_count = ? AND locked_by = ?", row.ID, StatusRunning, row.AttemptCount, row.LockedBy).
 		Updates(map[string]any{
 			"status":        string(StatusFailed),
 			"error_code":    ErrorCodeHandlerNotFound,
@@ -271,33 +370,11 @@ func (r *Runner) markHandlerNotFound(ctx context.Context, jobID string) error {
 		}).Error
 }
 
-func (r *Runner) markSucceeded(ctx context.Context, jobID string, result Result) error {
+func (r *Runner) markSucceeded(ctx context.Context, row orm.AsyncJob, result Result) error {
 	now := time.Now().UTC()
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var existing orm.AsyncJob
-		if err := withUpdateLock(tx).
-			Where("id = ?", jobID).
-			First(&existing).Error; err != nil {
-			return err
-		}
-		if existing.Status == string(StatusSucceeded) {
-			return nil
-		}
-		return tx.Model(&orm.AsyncJob{}).
-			Where("id = ?", jobID).
-			Updates(map[string]any{
-				"status":             string(StatusSucceeded),
-				"result_json":        result.ResultJSON,
-				"error_code":         "",
-				"error_message":      "",
-				"error_details_json": nil,
-				"progress_current":   gorm.Expr("progress_total"),
-				"locked_by":          "",
-				"lock_until":         nil,
-				"finished_at":        now,
-				"updated_at":         now,
-			}).Error
-	})
+	return r.db.WithContext(ctx).Model(&orm.AsyncJob{}).
+		Where("id = ? AND status = ? AND attempt_count = ? AND locked_by = ?", row.ID, StatusRunning, row.AttemptCount, row.LockedBy).
+		Updates(map[string]any{"status": string(StatusSucceeded), "result_json": result.ResultJSON, "error_code": "", "error_message": "", "error_details_json": nil, "progress_current": gorm.Expr("progress_total"), "locked_by": "", "lock_until": nil, "finished_at": now, "updated_at": now}).Error
 }
 
 func (r *Runner) markFailedAttempt(ctx context.Context, row orm.AsyncJob, result Result, handlerErr error) error {
@@ -305,9 +382,9 @@ func (r *Runner) markFailedAttempt(ctx context.Context, row orm.AsyncJob, result
 	errorCode := stringsOrDefault(result.ErrorCode, ErrorCodeHandlerFailed)
 	errorMessage := handlerErr.Error()
 
-	if row.AttemptCount < row.MaxAttempts {
+	if !result.Permanent && row.AttemptCount < row.MaxAttempts {
 		return r.db.WithContext(ctx).Model(&orm.AsyncJob{}).
-			Where("id = ?", row.ID).
+			Where("id = ? AND status = ? AND attempt_count = ? AND locked_by = ?", row.ID, StatusRunning, row.AttemptCount, row.LockedBy).
 			Updates(map[string]any{
 				"status":             string(StatusPending),
 				"next_run_at":        now.Add(backoffForAttempt(row.AttemptCount)),
@@ -321,7 +398,7 @@ func (r *Runner) markFailedAttempt(ctx context.Context, row orm.AsyncJob, result
 	}
 
 	return r.db.WithContext(ctx).Model(&orm.AsyncJob{}).
-		Where("id = ?", row.ID).
+		Where("id = ? AND status = ? AND attempt_count = ? AND locked_by = ?", row.ID, StatusRunning, row.AttemptCount, row.LockedBy).
 		Updates(map[string]any{
 			"status":             string(StatusFailed),
 			"error_code":         errorCode,
@@ -353,29 +430,46 @@ func stringsOrDefault(value, fallback string) string {
 }
 
 type jobReporter struct {
-	db       *gorm.DB
-	jobID    string
-	workerID string
-	lockTTL  time.Duration
+	db           *gorm.DB
+	jobID        string
+	workerID     string
+	attemptCount int
+	lockTTL      time.Duration
 }
 
+var errJobLeaseLost = errors.New("async job lease lost")
+
 func (r *jobReporter) SetProgress(ctx context.Context, current, total int64) error {
-	return r.db.WithContext(ctx).Model(&orm.AsyncJob{}).
-		Where("id = ? AND status = ? AND locked_by = ?", r.jobID, StatusRunning, r.workerID).
+	result := r.db.WithContext(ctx).Model(&orm.AsyncJob{}).
+		Where("id = ? AND status = ? AND locked_by = ? AND attempt_count = ?", r.jobID, StatusRunning, r.workerID, r.attemptCount).
 		Updates(map[string]any{
 			"progress_current": current,
 			"progress_total":   total,
 			"updated_at":       time.Now().UTC(),
-		}).Error
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return errJobLeaseLost
+	}
+	return nil
 }
 
 func (r *jobReporter) Heartbeat(ctx context.Context) error {
 	now := time.Now().UTC()
-	return r.db.WithContext(ctx).Model(&orm.AsyncJob{}).
-		Where("id = ? AND status = ? AND locked_by = ?", r.jobID, StatusRunning, r.workerID).
+	result := r.db.WithContext(ctx).Model(&orm.AsyncJob{}).
+		Where("id = ? AND status = ? AND locked_by = ? AND attempt_count = ?", r.jobID, StatusRunning, r.workerID, r.attemptCount).
 		Updates(map[string]any{
 			"heartbeat_at": now,
 			"lock_until":   now.Add(r.lockTTL),
 			"updated_at":   now,
-		}).Error
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return errJobLeaseLost
+	}
+	return nil
 }

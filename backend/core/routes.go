@@ -280,6 +280,9 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/agent/router/traffic-stats", []string{"user.admin"}, agent.GetRouterTrafficStats)
 
 	// ----- Conversation -----
+	handleAPI(r, "GET", "/conversations/metadata-backfill", []string{"qa.read"}, chat.OpeningBackfill)
+	handleAPI(r, "POST", "/conversations/metadata-backfill", []string{"qa.write"}, chat.OpeningBackfill)
+	handleAPI(r, "PATCH", "/conversations/{name}/title", []string{"qa.write"}, chat.RenameConversation)
 	handleAPI(r, "POST", "/conversations:chat", []string{"qa.write"}, chat.ChatConversations)
 	handleAPI(r, "POST", "/conversations:estimateContextUsage", []string{"qa.read"}, chat.EstimateContextUsage)
 	handleAPI(r, "POST", "/conversations:exportContextPrompt", []string{"qa.read"}, chat.ExportContextPrompt)
@@ -298,6 +301,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/conversations/{conversation_id}:promote", []string{"qa.write"}, chat.PromoteConversation)
 	handleAPI(r, "POST", "/conversations/{conversation_id}:pin", []string{"qa.write"}, chat.PinConversation)
 	handleAPI(r, "POST", "/conversations/{conversation_id}:unpin", []string{"qa.write"}, chat.UnpinConversation)
+	handleAPI(r, "POST", "/conversations/{conversation_id}:reorder", []string{"qa.write"}, chat.ReorderConversation)
 	handleAPI(r, "GET", "/chat/executors", []string{"qa.read"}, chat.ListChatExecutors)
 	handleAPI(r, "GET", "/external-chat/hosts/{provider}/status", []string{"qa.read"}, chat.ExternalChatHostStatus)
 	handleAPI(r, "GET", "/external-chat/providers/{provider}/sessions", []string{"qa.read"}, chat.ListExternalAgentSessions)
@@ -319,6 +323,9 @@ func registerAllRoutes(r *mux.Router) {
 	// Internal endpoint for algorithm service auto polling; no request-level RBAC.
 	handleAPI(r, "GET", "/internal/subagent/tasks/{task_id}", nil, subagent.InternalGetTaskStatus)
 	handleAPI(r, "GET", "/internal/subagent/tasks/{task_id}/events", nil, subagent.InternalGetTaskEvents)
+	handleAPI(r, "GET", "/internal/subagent/conversations/{conversation_id}/tasks", nil, subagent.InternalListConversationTasks)
+	handleAPI(r, "GET", "/internal/subagent/artifacts", nil, subagent.InternalGetTaskArtifactsBatch)
+	handleAPI(r, "GET", "/internal/subagent/tasks/{task_id}/artifacts", nil, subagent.InternalGetTaskArtifacts)
 	handleAPI(r, "GET", "/internal/subagent/tasks/{task_id}/execution-spec", nil, subagent.InternalGetExecutionSpec)
 	handleAPI(r, "POST", "/internal/subagent/tasks/{task_id}/events", nil, subagent.InternalIngestTaskEvent)
 
@@ -620,6 +627,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/conversations/{name}", []string{"qa.read"}, chat.GetConversation)
 	handleAPI(r, "DELETE", "/conversations/{name}", []string{"qa.write"}, chat.DeleteConversation)
 	handleAPI(r, "POST", "/conversations:batchDelete", []string{"qa.write"}, chat.BatchDeleteConversations)
+	handleAPI(r, "POST", "/conversations:batchStatus", []string{"qa.read"}, chat.BatchConversationStatus)
 	handleAPI(r, "GET", "/conversations", []string{"qa.read"}, chat.ListConversations)
 	handleAPI(r, "POST", "/conversations:setChatHistory", []string{"qa.write"}, chat.SetChatHistory)
 	handleAPI(r, "POST", "/conversations:feedBackChatHistory", []string{"qa.write"}, chat.FeedBackChatHistory)

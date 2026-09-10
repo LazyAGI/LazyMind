@@ -287,6 +287,7 @@ func ensureConversation(ctx context.Context, db *gorm.DB, convID, displayName st
 	c = orm.Conversation{
 		ID:           convID,
 		DisplayName:  displayName,
+		TitleSource:  "default",
 		ChannelID:    "default",
 		SearchConfig: searchConfig,
 		Models:       models,
@@ -303,6 +304,9 @@ func ensureConversation(ctx context.Context, db *gorm.DB, convID, displayName st
 		return nil, 0, err
 	}
 	applyResolvedChatModelBinding(&c, modelBinding)
+	if title, _ := conversationSettings["display_name"].(string); strings.TrimSpace(title) != "" {
+		c.TitleSource = "user"
+	}
 	if ephemeral, _ := conversationSettings["ephemeral"].(bool); ephemeral {
 		c.IsEphemeral = true
 		if persistent, _ := conversationSettings["persistent_ephemeral"].(bool); !persistent {
@@ -1397,7 +1401,6 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 	}
 	// Propagate workflow_context so Python ChatAgent receives the active session info.
 	// Merge workflow_ui_state (focused_tab, focused_sort_order) from the request body.
-	// Python reads artifact state directly from the DB via _build_session_artifact_section.
 	if pc, ok := raw["workflow_context"].(map[string]any); ok && len(pc) > 0 {
 		mergedPC := make(map[string]any, len(pc)+4)
 		for k, v := range pc {
@@ -2512,6 +2515,7 @@ func persistImmediateRunTerminal(
 	if db == nil || terminal == nil {
 		return false
 	}
+	defer notifyConversationOpening(db, convID)
 	ctx, cancel := terminalWriteContext(ctx)
 	defer cancel()
 	now := time.Now()
@@ -3071,6 +3075,7 @@ dualPersist:
 }
 
 func recordConversationIdleActivity(ctx context.Context, db *gorm.DB, stateStore state.Store, conversationID, userID, historyID, userContent, assistantText string, now time.Time) {
+	notifyConversationOpening(db, conversationID)
 	if db == nil || stateStore == nil || strings.TrimSpace(conversationID) == "" || strings.TrimSpace(userID) == "" || strings.TrimSpace(historyID) == "" {
 		return
 	}
@@ -3136,7 +3141,6 @@ func handleTaskCreated(
 				Params:        ev.Params,
 				WorkspacePath: existing.WorkspacePath,
 				Tools:         ev.Tools,
-				DBDSN:         subagent.DBDSN(),
 				Resume:        true,
 				LLMConfig:     llmConfig,
 				ToolConfig:    toolConfig,
@@ -3183,7 +3187,6 @@ func handleTaskCreated(
 		Params:        ev.Params,
 		WorkspacePath: workspacePath,
 		Tools:         ev.Tools,
-		DBDSN:         subagent.DBDSN(),
 		Resume:        false,
 		LLMConfig:     llmConfig,
 		ToolConfig:    toolConfig,

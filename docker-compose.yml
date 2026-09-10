@@ -417,7 +417,6 @@ services:
       MIGRATIONS_DIR: /migrations
       LAZYMIND_ALGO_SERVICE_URL: http://lazyllm-doc-server:8000
       LAZYMIND_SUBAGENT_WORKSPACE: /data/subagent
-      LAZYMIND_SUBAGENT_DB_DSN: ${ACL_DB_DSN}
       LAZYMIND_READONLY_VALIDATE: "0"
       LAZYMIND_READONLY_DB_DRIVER: postgres
       LAZYMIND_READONLY_DB_DSN: "host=db user=app password=app dbname=app port=5432 sslmode=disable TimeZone=UTC"

@@ -14,6 +14,7 @@ import (
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
 
+	"lazymind/core/common/sqliteproxy"
 	"lazymind/core/log"
 )
 
@@ -21,6 +22,14 @@ import (
 type DB struct {
 	*gorm.DB
 }
+
+// sqliteProxyDialector keeps the SQLite dialect while providing a durable
+// marker that survives GORM Session/WithContext clones.
+type sqliteProxyDialector struct {
+	sqlite.Dialector
+}
+
+func (sqliteProxyDialector) IsSQLiteProxy() bool { return true }
 
 // Connect text
 const (
@@ -32,11 +41,21 @@ const (
 // Connect text。driver: postgres / sqlite / mysql，dsn text。
 func Connect(driver, dsn string) (*DB, error) {
 	var dialector gorm.Dialector
+	usesSQLiteProxy := false
 	switch driver {
 	case DriverPostgres:
 		dialector = postgres.Open(dsn)
 	case DriverSQLite:
-		dialector = sqlite.Open(dsn)
+		if strings.HasPrefix(strings.TrimSpace(dsn), "sqliteproxy://") {
+			usesSQLiteProxy = true
+			sqlDB, err := sqliteproxy.Open(dsn)
+			if err != nil {
+				return nil, err
+			}
+			dialector = sqliteProxyDialector{Dialector: sqlite.Dialector{Conn: sqlDB}}
+		} else {
+			dialector = sqlite.Open(dsn)
+		}
 	case DriverMySQL:
 		dialector = mysql.Open(dsn)
 	default:
@@ -51,15 +70,23 @@ func Connect(driver, dsn string) (*DB, error) {
 		if err != nil {
 			return nil, err
 		}
+		// Keep enough connections for legacy transaction callbacks that perform a
+		// nested read through the root DB. Contended write paths are serialized by
+		// TransactionWithSQLiteBusyRetry instead of constraining the whole pool.
 		sqlDB.SetMaxOpenConns(4)
-		for _, stmt := range []string{
-			"PRAGMA busy_timeout=30000",
-			"PRAGMA journal_mode=WAL",
-			"PRAGMA synchronous=NORMAL",
-			"PRAGMA foreign_keys=ON",
-		} {
-			if _, err := sqlDB.Exec(stmt); err != nil && !strings.Contains(strings.ToLower(err.Error()), "database is locked") {
-				return nil, err
+		// The proxy server owns connection-level SQLite configuration. Repeating
+		// these PRAGMAs through the proxy adds traffic and can itself contend with
+		// an active server-side transaction.
+		if !usesSQLiteProxy {
+			for _, stmt := range []string{
+				"PRAGMA busy_timeout=30000",
+				"PRAGMA journal_mode=WAL",
+				"PRAGMA synchronous=NORMAL",
+				"PRAGMA foreign_keys=ON",
+			} {
+				if _, err := sqlDB.Exec(stmt); err != nil && !strings.Contains(strings.ToLower(err.Error()), "database is locked") {
+					return nil, err
+				}
 			}
 		}
 	}

@@ -41,6 +41,7 @@ type RuntimeConfigSnapshot struct {
 	Algorithm          AlgorithmConfig           `json:"algorithm,omitempty"`
 	FileWatcher        FileWatcherConfigSnapshot `json:"fileWatcher,omitempty"`
 	ProcessComposePort int                       `json:"processComposePort,omitempty"`
+	SQLiteServerPort   int                       `json:"sqliteServerPort,omitempty"`
 	PortResolutions    []PortResolution          `json:"portResolutions,omitempty"`
 }
 
@@ -136,6 +137,7 @@ func snapshotRuntimeConfig(cfg RuntimeConfig) RuntimeConfigSnapshot {
 			HostPathStyle: cfg.FileWatcher.HostPathStyle,
 		},
 		ProcessComposePort: cfg.ProcessComposePort,
+		SQLiteServerPort:   cfg.SQLiteServerPort,
 		PortResolutions:    append([]PortResolution(nil), cfg.PortResolutions...),
 	}
 }
@@ -146,6 +148,9 @@ func applyStateConfig(cfg RuntimeConfig, state RuntimeState) RuntimeConfig {
 	}
 	if state.Config.ProcessComposePort > 0 {
 		cfg.ProcessComposePort = state.Config.ProcessComposePort
+	}
+	if state.Config.SQLiteServerPort > 0 {
+		cfg.SQLiteServerPort = state.Config.SQLiteServerPort
 	}
 	if state.Config.FrontendPort > 0 {
 		cfg.FrontendPort = state.Config.FrontendPort

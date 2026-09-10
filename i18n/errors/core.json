@@ -1545,5 +1545,6 @@
   "2002406": { "en-US": "Vocabulary feature is disabled", "zh-CN": "生词表功能未启用" },
   "2002500": { "en-US": "The review session has no answers", "zh-CN": "本次复习尚无作答记录" },
   "2002501": { "en-US": "The default wordbook cannot be deleted", "zh-CN": "默认单词本不能删除" },
-  "2002502": { "en-US": "The destination must be a different wordbook", "zh-CN": "请选择其他单词本作为移动目标" }
+  "2002502": { "en-US": "The destination must be a different wordbook", "zh-CN": "请选择其他单词本作为移动目标" },
+  "2002503": { "en-US": "The async job lease was lost", "zh-CN": "异步任务租约已丢失" }
 }
