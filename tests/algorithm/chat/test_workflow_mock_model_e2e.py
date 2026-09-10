@@ -1,7 +1,9 @@
 import json
 from dataclasses import dataclass
+
 import httpx
 import lazyllm
+
 from lazymind.chat.workflow.workflow_manager import resolve_workflow_injection
 from lazymind.workflow_sdk import WorkflowClient
 
