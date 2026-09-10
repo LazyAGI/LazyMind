@@ -102,8 +102,7 @@ func preflightCapabilityChecks(requirements []skillCapabilityRequirement) []skil
 		severity := "warning"
 		suggestion := "转换时会尝试把该能力声明到 Workflow 步骤中；转换后请确认对应步骤可正常执行。"
 		if !req.Supported {
-			severity = "error"
-			suggestion = "当前 LazyMind Workflow 尚未提供该能力的自动映射，请继续使用原 Skill，或转换后手动改造 Workflow。"
+			suggestion = "当前 LazyMind Workflow 尚未提供该能力的自动映射；仍可先生成草稿，发布或运行前会继续提示不可用原因。"
 		}
 		checks = append(checks, skillConversionCheck{
 			Code:       "REQUIRED_WORKFLOW_CAPABILITY",
@@ -196,6 +195,7 @@ func preflightSkillSnapshot(snapshot workflowSourceSkillSnapshot) []skillConvers
 	seenMissing := map[string]bool{}
 	for _, match := range skillDependencyRefPattern.FindAllStringSubmatch(skillMD, -1) {
 		ref := cleanSkillDependencyRef(match[1])
+		ref = resolveSkillDependencyRef(ref, byPath)
 		if ref == "" || seenMissing[ref] {
 			continue
 		}
@@ -203,10 +203,10 @@ func preflightSkillSnapshot(snapshot workflowSourceSkillSnapshot) []skillConvers
 			seenMissing[ref] = true
 			checks = append(checks, skillConversionCheck{
 				Code:       "DEPENDENCY_RESOURCE_MISSING",
-				Severity:   "error",
+				Severity:   "warning",
 				Path:       ref,
 				Message:    "SKILL.md 引用了包内不存在的依赖资源。",
-				Suggestion: "请补齐该资源，或删除/改正 SKILL.md 中的引用。",
+				Suggestion: "仍可先生成 Workflow 草稿；缺失资源相关内容可能被忽略，建议转换后检查并补齐。",
 			})
 		}
 	}
@@ -250,6 +250,31 @@ func cleanSkillDependencyRef(raw string) string {
 		}
 	}
 	return strings.TrimSpace(value)
+}
+
+func resolveSkillDependencyRef(ref string, byPath map[string]skillPackageFile) string {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return ""
+	}
+	if _, ok := byPath[ref]; ok {
+		return ref
+	}
+	paths := make([]string, 0, len(byPath))
+	for path := range byPath {
+		paths = append(paths, path)
+	}
+	sort.Slice(paths, func(i, j int) bool { return len(paths[i]) > len(paths[j]) })
+	for _, path := range paths {
+		if strings.HasPrefix(ref, path+" ") || strings.HasPrefix(ref, path+"\t") {
+			return path
+		}
+	}
+	fields := strings.Fields(ref)
+	if len(fields) == 0 {
+		return ref
+	}
+	return strings.Trim(fields[0], "`'\".,;:，。；：）)]}>")
 }
 
 func ListSkillLinkedWorkflows(w http.ResponseWriter, r *http.Request) {

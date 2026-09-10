@@ -110,6 +110,25 @@ func seedSkillForWorkflowConversion(t *testing.T, db *orm.DB, userID, skillID, s
 	}
 }
 
+func addSkillRevisionFileForWorkflowConversion(t *testing.T, db *orm.DB, revisionID, path, content, fileType string) {
+	t.Helper()
+	now := time.Now().UTC()
+	hash := sha256.Sum256([]byte(content))
+	blobHash := hex.EncodeToString(hash[:])
+	if err := db.Create(&orm.SkillV2Blob{
+		Hash: blobHash, Size: int64(len(content)), Mime: "text/plain", FileType: fileType,
+		StorageBackend: "database", Content: []byte(content), CreatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.SkillV2RevisionEntry{
+		RevisionID: revisionID, Path: path, EntryType: "file", BlobHash: &blobHash,
+		Size: int64(len(content)), Mime: "text/plain", FileType: fileType, Mode: 0o644,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestWorkflowRefPathVarPreservesUserWorkflowID(t *testing.T) {
 	ref := "user:user-1:ppt-workflow-copy"
 	req := httptest.NewRequest(http.MethodGet, "/published-workflows/"+ref+"/versions", nil)
@@ -201,7 +220,7 @@ func TestValidateWorkflowDraft_ValidDraft(t *testing.T) {
 	}
 }
 
-func TestPreflightSkillWorkflowConversionDetectsMissingDependency(t *testing.T) {
+func TestPreflightSkillWorkflowConversionWarnsOnMissingDependency(t *testing.T) {
 	db := newHandlerTestDB(t)
 	seedSkillForWorkflowConversion(t, db, "user-1", "skill-1", "# Demo Skill\n请根据 references/missing.md 的规则完成写作，并使用 {{topic}} 作为主题。")
 	req := httptest.NewRequest(http.MethodPost, "/workflow-conversions:preflight", strings.NewReader(`{"skill_id":"skill-1"}`))
@@ -223,12 +242,12 @@ func TestPreflightSkillWorkflowConversionDetectsMissingDependency(t *testing.T) 
 	if err := json.Unmarshal(rec.Body.Bytes(), &envelope); err != nil {
 		t.Fatal(err)
 	}
-	if envelope.Data.Status != "blocked" {
+	if envelope.Data.Status != "warning" {
 		t.Fatalf("status=%q checks=%#v", envelope.Data.Status, envelope.Data.Checks)
 	}
 	foundMissing, foundParam := false, false
 	for _, check := range envelope.Data.Checks {
-		if check.Code == "DEPENDENCY_RESOURCE_MISSING" && check.Severity == "error" {
+		if check.Code == "DEPENDENCY_RESOURCE_MISSING" && check.Severity == "warning" {
 			foundMissing = true
 		}
 		if check.Code == "REQUIRED_PARAMETER_PLACEHOLDER" && check.Severity == "warning" {
@@ -237,6 +256,38 @@ func TestPreflightSkillWorkflowConversionDetectsMissingDependency(t *testing.T) 
 	}
 	if !foundMissing || !foundParam {
 		t.Fatalf("expected dependency and parameter checks, got %#v", envelope.Data.Checks)
+	}
+}
+
+func TestPreflightSkillWorkflowConversionDoesNotTreatScriptArgsAsMissingPath(t *testing.T) {
+	db := newHandlerTestDB(t)
+	seedSkillForWorkflowConversion(t, db, "user-1", "skill-1", "# Demo Skill\n运行 scripts/fetch_covers.py --keyword {{keyword}}，并根据 references/report_template.html ./ 输出报告。")
+	addSkillRevisionFileForWorkflowConversion(t, db, "skill-1-rev", "scripts/fetch_covers.py", "print('ok')", "python")
+	addSkillRevisionFileForWorkflowConversion(t, db, "skill-1-rev", "references/report_template.html", "<html></html>", "html")
+	req := httptest.NewRequest(http.MethodPost, "/workflow-conversions:preflight", strings.NewReader(`{"skill_id":"skill-1"}`))
+	req.Header.Set("X-User-Id", "user-1")
+	rec := httptest.NewRecorder()
+	PreflightSkillWorkflowConversion(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("preflight status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var envelope struct {
+		Data struct {
+			Status string `json:"status"`
+			Checks []struct {
+				Code     string `json:"code"`
+				Severity string `json:"severity"`
+				Path     string `json:"path"`
+			} `json:"checks"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	for _, check := range envelope.Data.Checks {
+		if check.Code == "DEPENDENCY_RESOURCE_MISSING" {
+			t.Fatalf("dependency with CLI args should resolve to packaged file, got %#v", check)
+		}
 	}
 }
 
