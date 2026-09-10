@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 
 	"lazymind/core/common"
@@ -25,6 +26,7 @@ import (
 	"lazymind/core/store"
 	"lazymind/core/subagent"
 	"lazymind/core/taskcenter"
+	"lazymind/core/vocabulary"
 	"lazymind/core/workflow"
 )
 
@@ -418,6 +420,9 @@ func buildAskUserToolResultContent(
 	questionsRaw, _ := askPendingData["questions"].([]any)
 
 	if askStructured != nil {
+		if hook, ok := askPendingData["review_hook"].(map[string]any); ok && hook["kind"] == "vocabulary_review_objective" {
+			return "用户已经提交上一批客观复习题。答案已由后端判定并登记；不要查看、复述或重新判断上一批答案。后端会在当前用户输入中提供下一批候选词或最终学习报告，请只据此继续。"
+		}
 		lines := []string{"Questions were shown via an interactive card. The user submitted the form; some answers may be omitted.", ""}
 		for i, sq := range askStructured.Questions {
 			prefix := fmt.Sprintf("Q%d: %s", i+1, sq.Text)
@@ -448,6 +453,11 @@ func buildAskUserToolResultContent(
 			}
 			lines = append(lines, "  Answer: "+answerStr)
 			lines = append(lines, "")
+		}
+		if hook, ok := askPendingData["review_hook"].(map[string]any); ok && hook["kind"] == "vocabulary_review_llm" {
+			if encoded, err := json.Marshal(hook); err == nil {
+				lines = append(lines, "", "MANDATORY_REVIEW_GRADING: Evaluate every submitted answer using the criteria below, then call register_review_words with every question result and its exact word_id and weight. That tool registers the results and returns either the next batch or, when complete=true and remaining=0, the backend-generated report. Do not call get_review_words again. If report is present, present it faithfully without recalculating or inventing values.", string(encoded))
+			}
 		}
 		return strings.Join(lines, "\n")
 	}
@@ -3612,10 +3622,129 @@ func mergeAskPendingIntoExt(ext json.RawMessage, askPending any) json.RawMessage
 	return b
 }
 
+func submittedAskAnswers(structured any) map[string]any {
+	payload, ok := structured.(map[string]any)
+	if !ok {
+		return nil
+	}
+	questions, ok := payload["questions"].([]any)
+	if !ok {
+		return nil
+	}
+	answers := make(map[string]any, len(questions))
+	for index, value := range questions {
+		question, _ := value.(map[string]any)
+		if answer := question["answer"]; answer != nil {
+			answers[strconv.Itoa(index)] = answer
+		}
+	}
+	return answers
+}
+
+func submitObjectiveVocabularyAnswers(ctx context.Context, db *gorm.DB, owner string, histories []orm.ChatHistory, structured any) (string, error) {
+	payload, ok := structured.(map[string]any)
+	if !ok {
+		return "", nil
+	}
+	for index := len(histories) - 1; index >= 0; index-- {
+		var ext map[string]any
+		if len(histories[index].Ext) == 0 || json.Unmarshal(histories[index].Ext, &ext) != nil {
+			continue
+		}
+		pending, _ := ext["ask_pending"].(map[string]any)
+		if pending == nil {
+			continue
+		}
+		hook, _ := pending["review_hook"].(map[string]any)
+		if hook == nil || hook["kind"] != "vocabulary_review_objective" {
+			return "", nil
+		}
+		if fmt.Sprint(payload["ask_id"]) != fmt.Sprint(pending["ask_id"]) {
+			return "", errors.New("vocabulary review answer does not match the pending card")
+		}
+		questions, _ := payload["questions"].([]any)
+		items, _ := hook["items"].([]any)
+		sessionID := strings.TrimSpace(fmt.Sprint(hook["session_id"]))
+		service := vocabulary.New(db)
+		for _, rawItem := range items {
+			itemMap, _ := rawItem.(map[string]any)
+			questionIndex, _ := strconv.Atoi(fmt.Sprint(itemMap["question_index"]))
+			if questionIndex < 0 || questionIndex >= len(questions) {
+				return "", errors.New("vocabulary review answer is incomplete")
+			}
+			question, _ := questions[questionIndex].(map[string]any)
+			answer, _ := question["answer"].(map[string]any)
+			response := strings.TrimSpace(fmt.Sprint(answer["value"]))
+			if response == "" || response == "<nil>" {
+				return "", errors.New("vocabulary review answer is incomplete")
+			}
+			wordID := strings.TrimSpace(fmt.Sprint(itemMap["word_id"]))
+			var item vocabulary.ReviewSessionItem
+			var err error
+			if wordID != "" && wordID != "<nil>" {
+				var active vocabulary.ReviewSession
+				active, item, err = service.ActiveSessionItemByWord(ctx, owner, wordID)
+				if err == nil && active.ID != sessionID {
+					err = errors.New("vocabulary review answer does not match the active session")
+				}
+			} else {
+				// Backward compatibility for cards created before word-based hooks.
+				itemID := strings.TrimSpace(fmt.Sprint(itemMap["review_item_id"]))
+				item, err = service.SessionItem(ctx, owner, sessionID, itemID)
+			}
+			if err != nil {
+				return "", err
+			}
+			err = service.RecordSessionAnswer(ctx, owner, sessionID, item.WordID, item.Term, vocabulary.ReviewRequest{CardID: item.CardID, Response: response, RowVersion: item.RowVersion, PreviewedAt: item.PreviewedAt, IdempotencyKey: uuid.NewString()})
+			if err != nil {
+				return "", err
+			}
+		}
+		next, err := service.PreviewReviewSession(ctx, owner, 5)
+		if err != nil {
+			return "", err
+		}
+		if next.Session.ID != sessionID {
+			return "", errors.New("vocabulary review session changed while recording answers")
+		}
+		if len(next.Questions) > 0 {
+			lines := []string{
+				"用户已经回答上一批复习题，后端已完成判定和登记。不要复述、重新判断或再次询问上一批内容。",
+				"后端返回了以下下一批候选词，请根据学习需要选择题型和单词，并调用 ask_words 继续出题：",
+			}
+			for _, question := range next.Questions {
+				lines = append(lines, fmt.Sprintf("- %s：%s", question.Word.Term, question.Word.Meaning))
+			}
+			lines = append(lines, "这些词目前只是候选；只有交给 ask_words 的词才算本批正式使用。")
+			return strings.Join(lines, "\n"), nil
+		}
+		report, err := service.CompleteReviewSession(ctx, owner, sessionID)
+		if err != nil {
+			return "", err
+		}
+		return formatVocabularyReviewReport(report), nil
+	}
+	return "", nil
+}
+
+func formatVocabularyReviewReport(report vocabulary.ReviewSessionReport) string {
+	lines := []string{
+		"本次复习已全部完成。下面是后端生成的最终学习报告；请直接用自然语言忠实呈现，不要再出题，也不要自行重算或改写数据。",
+		fmt.Sprintf("共复习 %d 个单词，正确 %d 个，错误 %d 个，正确率 %.1f%%。", report.Total, report.Correct, report.Incorrect, report.Accuracy*100),
+		fmt.Sprintf("平均复习间隔由 %.1f 天调整为 %.1f 天。", report.AverageIntervalBefore, report.AverageIntervalAfter),
+	}
+	if len(report.DifficultWords) > 0 {
+		lines = append(lines, "需要重点巩固的单词："+strings.Join(report.DifficultWords, "、")+"。")
+	} else {
+		lines = append(lines, "本次没有需要额外标记的困难单词。")
+	}
+	return strings.Join(lines, "\n")
+}
+
 // markLastAskPendingAnswered finds the most recent history entry that has
-// ask_pending in ext, sets ask_answered=true in its ext, and clears
-// ask_saved_answers so the AskCard shows as submitted on next page load.
-func markLastAskPendingAnswered(ctx context.Context, db *gorm.DB, histories []orm.ChatHistory) {
+// ask_pending in ext, sets ask_answered=true, and stores the submitted answers
+// so the complete question/answer card remains visible after page reload.
+func markLastAskPendingAnswered(ctx context.Context, db *gorm.DB, histories []orm.ChatHistory, structured any) {
 	if db == nil {
 		return
 	}
@@ -3635,7 +3764,9 @@ func markLastAskPendingAnswered(ctx context.Context, db *gorm.DB, histories []or
 			break
 		}
 		m["ask_answered"] = true
-		delete(m, "ask_saved_answers")
+		if answers := submittedAskAnswers(structured); answers != nil {
+			m["ask_saved_answers"] = answers
+		}
 		updated, err := json.Marshal(m)
 		if err != nil {
 			break

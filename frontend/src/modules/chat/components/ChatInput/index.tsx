@@ -769,7 +769,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     const knowledgeBaseSelectable =
       allowKnowledgeBaseSelection && knowledgeBaseEnabled;
     const knowledgeBaseDisabledReason = allowKnowledgeBaseSelection
-      ? "知识库检索已在设置中停用"
+      ? t("chat.knowledgeSearchDisabled")
       : t("chat.sideChat.knowledgeInheritedOnly");
     const uploadTypes = allowedUploadTypes;
 

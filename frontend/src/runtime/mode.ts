@@ -2,6 +2,7 @@ export type RuntimeMode = "cloud" | "local" | "desktop";
 
 export interface RuntimeEnv {
   VITE_LAZYMIND_MODE?: string;
+  VITE_VOCABULARY_ENABLED?: string;
 }
 
 const RUNTIME_MODES = new Set<RuntimeMode>(["cloud", "local", "desktop"]);
@@ -40,4 +41,10 @@ export function isLocalRuntime(): boolean {
 
 export function isDesktopRuntime(): boolean {
   return getRuntimeMode() === "desktop";
+}
+
+export function isVocabularyEnabled(env: RuntimeEnv = readRuntimeEnv()): boolean {
+  return ["1", "true", "yes", "on"].includes(
+    String(env.VITE_VOCABULARY_ENABLED || "").trim().toLowerCase(),
+  );
 }

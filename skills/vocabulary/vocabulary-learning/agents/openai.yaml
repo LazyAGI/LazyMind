@@ -1,0 +1,6 @@
+interface:
+  display_name: "生词学习"
+  short_description: "查询单词本并在对话中进行复习训练"
+  default_prompt: "使用 $vocabulary-learning 查询我的生词表或开始一次单词复习。"
+policy:
+  allow_implicit_invocation: true

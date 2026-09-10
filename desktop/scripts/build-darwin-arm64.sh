@@ -167,8 +167,8 @@ GOBIN="${RUNTIME_ROOT}/bin" "${GO_BIN}" install "${GO_INSTALL_FLAGS[@]}" github.
 GOBIN="${RUNTIME_ROOT}/bin" "${GO_BIN}" install "${GO_INSTALL_FLAGS[@]}" github.com/caddyserver/caddy/v2/cmd/caddy@v2.10.2
 
 echo "==> Building frontend desktop dist"
-(cd "${ROOT}/frontend" && CI=true VITE_LAZYMIND_MODE=desktop "${PNPM_BIN}" install --frozen-lockfile --prefer-offline)
-(cd "${ROOT}/frontend" && VITE_LAZYMIND_MODE=desktop "${PNPM_BIN}" build)
+(cd "${ROOT}/frontend" && CI=true VITE_LAZYMIND_MODE=desktop VITE_VOCABULARY_ENABLED=true "${PNPM_BIN}" install --frozen-lockfile --prefer-offline)
+(cd "${ROOT}/frontend" && VITE_LAZYMIND_MODE=desktop VITE_VOCABULARY_ENABLED=true "${PNPM_BIN}" build)
 
 if [[ "${RELEASE_BUILD}" != "true" && ! -d "${ROOT}/algorithm/lazyllm/lazyllm" ]]; then
   echo "==> Ensuring LazyLLM submodule source"

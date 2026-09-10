@@ -1621,6 +1621,7 @@ const zhCN = {
   },
 
   chat: {
+    knowledgeSearchDisabled: "知识库检索已在设置中停用",
     fork: {
       title: "Fork 为新会话", selectAnswerFirst: "请先选定回答，再 Fork",
       creating: "正在创建 Fork 会话…", retryCreate: "重试 Fork", noModels: "暂无可用模型，请配置模型后重新读取。",
@@ -3083,6 +3084,7 @@ const zhCN = {
     translationOriginal: "原文",
     translationResult: "译文",
     translationFailed: "翻译失败，请检查腾讯翻译凭据和服务状态",
+    dictionaryNotFound: "内置词典中未找到该单词，且尚未配置翻译服务",
     askWholeSegment: "对该切片提问",
     askSelectedSegmentText: "询问选中内容",
     pdfChatPanelLabel: "文档临时对话",
@@ -7757,6 +7759,7 @@ const zhCN = {
     },
   },
 
+  vocabulary: { cardTypes: { wordToMeaning: "看词选义", meaningToWord: "看义回忆单词", sentenceCloze: "例句填空", anki: "Anki 卡片" } },
   errors: zhCNErrorMessages,
 };
 

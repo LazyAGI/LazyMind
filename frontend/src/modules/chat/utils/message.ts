@@ -50,15 +50,13 @@ export function isAskPendingReadOnly(
 }
 
 export function shouldRenderAskPending(
-  askAnswered: boolean | undefined,
-  isLatestMessage: boolean,
-  hasLaterUserMessage = false,
+  _askAnswered: boolean | undefined,
+  _isLatestMessage: boolean,
+  _hasLaterUserMessage = false,
 ) {
-  return !isAskPendingReadOnly(
-    askAnswered,
-    isLatestMessage,
-    hasLaterUserMessage,
-  );
+  // Answered and older cards remain part of the transcript; the renderer uses
+  // isAskPendingReadOnly to prevent them from being submitted again.
+  return true;
 }
 
 interface ChatUserMessageLike {

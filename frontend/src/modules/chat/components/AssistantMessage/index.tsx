@@ -54,7 +54,9 @@ import {
 import { IdentityAvatar } from "@/modules/identityAvatar";
 import {
   getTranslationStatus,
-  translateText,
+  isSingleEnglishWord,
+  translateSelectionText,
+  TranslationUnavailableError,
 } from "@/modules/knowledge/api/translation";
 
 let translationStatusRequest: Promise<boolean> | undefined;
@@ -536,10 +538,6 @@ const AssistantMessage = (props: any) => {
 
   const handleTranslateSelectedText = useCallback(async () => {
     const selectedText = citeSelectionTextRef.current.trim();
-    if (!translationConfiguredRef.current) {
-      window.location.href = "/settings?section=knowledge&tool=translation";
-      return;
-    }
     if (!selectedText) return;
     setTranslationSource(selectedText);
     setTranslationResult("");
@@ -547,10 +545,11 @@ const AssistantMessage = (props: any) => {
     window.getSelection()?.removeAllRanges();
     hideCiteButton();
     try {
-      const result = await translateText(selectedText);
+      const result = await translateSelectionText(selectedText);
       setTranslationResult(result.translated_text);
-    } catch {
-      message.error(t("knowledge.translationFailed"));
+    } catch (error) {
+      if(error instanceof TranslationUnavailableError&&error.reason==="service_not_configured")window.location.href="/settings?section=knowledge&tool=translation";
+      else message.error(error instanceof TranslationUnavailableError?t("knowledge.dictionaryNotFound"):t("knowledge.translationFailed"));
     } finally {
       setTranslationLoading(false);
     }
@@ -630,12 +629,16 @@ const AssistantMessage = (props: any) => {
       );
       if (translateButton) {
         translateButton.textContent = t("knowledge.translateSelection");
-        translateButton.title = t("knowledge.translationConfigureTip");
+        const wordSelection=isSingleEnglishWord(text);
+        translateButton.classList.toggle("is-translation-disabled", !wordSelection);
+        translateButton.setAttribute("aria-disabled", String(!wordSelection));
+        translateButton.title = wordSelection?t("knowledge.translateSelection"):t("knowledge.translationConfigureTip");
         void loadTranslationStatus().then((configured) => {
           translationConfiguredRef.current = configured;
-          translateButton.classList.toggle("is-translation-disabled", !configured);
-          translateButton.setAttribute("aria-disabled", String(!configured));
-          translateButton.title = configured
+          const disabled=!configured&&!isSingleEnglishWord(text);
+          translateButton.classList.toggle("is-translation-disabled", disabled);
+          translateButton.setAttribute("aria-disabled", String(disabled));
+          translateButton.title = !disabled
             ? t("knowledge.translateSelection")
             : `${t("knowledge.translationConfigureTip")} · ${t("knowledge.translationConfigureAction")}`;
         });

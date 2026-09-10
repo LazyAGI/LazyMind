@@ -1,4 +1,4 @@
-import { Button, message, Modal, Spin, Tag, Tooltip, Row, Col, Select, Switch, Tabs } from "antd";
+import { Button, message, Modal, Popover, Spin, Tag, Tooltip, Row, Col, Select, Switch, Tabs } from "antd";
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
@@ -8,6 +8,8 @@ import {
   DoubleLeftOutlined,
   DoubleRightOutlined,
   FileImageOutlined,
+  HistoryOutlined,
+  SettingOutlined,
 } from "@ant-design/icons";
 import moment from "moment";
 import { Doc } from "@/api/generated/core-client";
@@ -37,7 +39,10 @@ import type { DocumentChatSelection } from "@/modules/knowledge/components/PdfTe
 import PdfTemporaryChat from "@/modules/knowledge/components/PdfTemporaryChat";
 import { localizeErrorCode } from "@/components/request";
 import { ChatServiceApi } from "@/modules/chat/utils/request";
-import { getTranslationStatus, translateText } from "@/modules/knowledge/api/translation";
+import { getTranslationStatus, translateSelectionText, TranslationUnavailableError } from "@/modules/knowledge/api/translation";
+import AddVocabularyModal from "@/modules/vocabulary/AddVocabularyModal";
+import DocumentVocabularyPanel from "@/modules/vocabulary/DocumentVocabularyPanel";
+import { isVocabularyEnabled } from "@/runtime/mode";
 import "./index.scss";
 
 type KnowledgeDetail = Doc & {
@@ -109,20 +114,28 @@ const Detail = () => {
   const [translationLoading, setTranslationLoading] = useState(false);
   const [translationSource, setTranslationSource] = useState("");
   const [translationResult, setTranslationResult] = useState("");
+  const [vocabularySelection, setVocabularySelection] = useState<PdfTextSelection | null>(null);
+  const [vocabularyRefreshToken, setVocabularyRefreshToken] = useState(0);
 
   useEffect(() => {
     getTranslationStatus().then(setTranslationConfigured).catch(() => setTranslationConfigured(false));
   }, []);
+
+  useEffect(() => {
+    if (!developerActive && previewSideTab === "segments") {
+      setPreviewSideTab("chat");
+    }
+  }, [developerActive, previewSideTab]);
 
   const translatePdfSelection = useCallback(async (selection: PdfTextSelection) => {
     setTranslationSource(selection.text);
     setTranslationResult("");
     setTranslationLoading(true);
     try {
-      const result = await translateText(selection.text);
+      const result = await translateSelectionText(selection.text);
       setTranslationResult(result.translated_text);
-    } catch {
-      message.error(t("knowledge.translationFailed"));
+    } catch (error) {
+      message.error(error instanceof TranslationUnavailableError&&error.reason==="dictionary_not_found"?t("knowledge.dictionaryNotFound"):error instanceof TranslationUnavailableError?t("knowledge.translationConfigureTip"):t("knowledge.translationFailed"));
     } finally {
       setTranslationLoading(false);
     }
@@ -463,6 +476,7 @@ const Detail = () => {
             onExportReadyChange={setCanExportImagePdf}
             onPdfSelection={askPdfSelection}
             onPdfTranslateSelection={translatePdfSelection}
+            onAddVocabularySelection={isVocabularyEnabled() ? (selection) => setVocabularySelection(selection) : undefined}
             translationConfigured={translationConfigured}
           />
         </Col>
@@ -489,7 +503,10 @@ const Detail = () => {
                     tabBarExtraContent={(
                       <div className="knowledge-preview-toolbar">
                         {previewSideTab === "segments" ? (
-                          <>
+                          <Popover
+                            trigger="click"
+                            placement="bottomRight"
+                            content={<div className="knowledge-preview-options-popover">
                             <Select
                               className="knowledge-preview-segment-select"
                               value={segmentViewKey || undefined}
@@ -504,20 +521,30 @@ const Detail = () => {
                                 onChange={setShowSegmentSequence}
                               />
                             </div>
-                          </>
-                        ) : (
-                          <Select
-                            allowClear
-                            className="knowledge-preview-chat-history-select"
-                            placeholder={t("knowledge.pdfChatHistoryPlaceholder")}
-                            value={selectedDocumentConversation}
-                            options={documentChatHistory.map((conversation) => ({
-                              value: conversation.conversation_id || "",
-                              label: `${conversation.display_name || t("knowledge.pdfChatPanelLabel")} · ${moment(conversation.update_time).format("MM-DD HH:mm")}`,
-                            })).filter((option) => Boolean(option.value))}
-                            onChange={(value) => setSelectedDocumentConversation(value || undefined)}
-                          />
-                        )}
+                            </div>}
+                          >
+                            <Button type="text" icon={<SettingOutlined />} aria-label="切片显示选项" title="切片显示选项" />
+                          </Popover>
+                        ) : previewSideTab === "chat" ? (
+                          <Popover
+                            trigger="click"
+                            placement="bottomRight"
+                            content={<Select
+                              allowClear
+                              open
+                              className="knowledge-preview-chat-history-select"
+                              placeholder={t("knowledge.pdfChatHistoryPlaceholder")}
+                              value={selectedDocumentConversation}
+                              options={documentChatHistory.map((conversation) => ({
+                                value: conversation.conversation_id || "",
+                                label: `${conversation.display_name || t("knowledge.pdfChatPanelLabel")} · ${moment(conversation.update_time).format("MM-DD HH:mm")}`,
+                              })).filter((option) => Boolean(option.value))}
+                              onChange={(value: string | undefined) => setSelectedDocumentConversation(value || undefined)}
+                            />}
+                          >
+                            <Button type="text" icon={<HistoryOutlined />} aria-label="选择历史对话" title="选择历史对话" />
+                          </Popover>
+                        ) : null}
                         <Button
                           type="text"
                           icon={<DoubleRightOutlined />}
@@ -542,12 +569,12 @@ const Detail = () => {
                             onHistoryChange={refreshDocumentChatHistory}
                             onClose={() => {
                               setDocumentChatSelection(null);
-                              setPreviewSideTab("segments");
+                              setPreviewSideTab(developerActive ? "segments" : "chat");
                             }}
                           />
                         ),
                       },
-                      {
+                      ...(developerActive ? [{
                         key: "segments",
                         label: t("knowledge.segmentPreviewTab"),
                         children: (
@@ -561,7 +588,12 @@ const Detail = () => {
                             showSequence={showSegmentSequence}
                           />
                         ),
-                      },
+                      }] : []),
+                      ...(isVocabularyEnabled() ? [{
+                        key: "vocabulary",
+                        label: "生词",
+                        children: <DocumentVocabularyPanel documentId={knowledgeId} refreshToken={vocabularyRefreshToken} />,
+                      }] : []),
                     ]}
                   />
                 </div>
@@ -601,6 +633,15 @@ const Detail = () => {
           {translationLoading ? <Spin size="small" /> : <div className="knowledge-translation-text">{translationResult}</div>}
         </div>
       </Modal>
+      {isVocabularyEnabled() ? <AddVocabularyModal
+        selection={vocabularySelection}
+        datasetId={knowledgeBaseId}
+        documentId={knowledgeId}
+        segmentId={segmentDetail?.segment_id}
+        context={vocabularySelection?.context || segmentDetail?.content || vocabularySelection?.text || undefined}
+        onClose={() => setVocabularySelection(null)}
+        onAdded={() => { setVocabularyRefreshToken((value) => value + 1); setPreviewSideTab("vocabulary"); setPreviewSideCollapsed(false); }}
+      /> : null}
     </div>
   );
 };

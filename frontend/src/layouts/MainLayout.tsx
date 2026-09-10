@@ -37,6 +37,7 @@ import { validatePassword } from "@/modules/signin/utils/formRules";
 import logoImage from "@/public/Lazy.png";
 import { useTranslation } from "react-i18next";
 import LanguageSwitcher from "@/components/LanguageSwitcher";
+import { isVocabularyEnabled } from "@/runtime/mode";
 import {
 	DEVELOPER_ACTIVE_EVENT,
   isDeveloperModeActive,
@@ -198,20 +199,24 @@ export default function MainLayout() {
       icon: <AppstoreOutlined />,
     },
     {
-      key: "/dataset-management",
-      label: t("layout.datasetManagement"),
-      icon: <DatabaseOutlined />,
-    },
-    {
       key: "/cloud-documents",
       label: t("layout.cloudDocuments"),
       icon: <CloudOutlined />,
     },
-    {
+    ...(isVocabularyEnabled() ? [{
+      key: "/lib/vocabulary",
+      label: "生词表",
+      icon: <BookOutlined />,
+    }] : []),
+    ...(developerActive ? [{
+      key: "/dataset-management",
+      label: t("layout.datasetManagement"),
+      icon: <DatabaseOutlined />,
+    }, {
       key: "/databases",
       label: t("layout.database"),
       icon: <DatabaseOutlined />,
-    },
+    }] : []),
   ];
   const hideEvo = runtimeFeatures.hideEvo;
   const canAccessSelfEvolution = !hideEvo && developerActive && isAdminUser;

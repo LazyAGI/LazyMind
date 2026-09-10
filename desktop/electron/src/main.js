@@ -230,6 +230,8 @@ function sidecarEnv() {
     LAZYMIND_NODE_EXECUTABLE: process.execPath,
     LAZYMIND_NODE_RUN_AS_NODE: "true",
     VITE_LAZYMIND_MODE: "desktop",
+    VITE_VOCABULARY_ENABLED: "true",
+    LAZYMIND_VOCABULARY_ENABLED: "true",
     PYTHONDONTWRITEBYTECODE: "1",
     LAZYMIND_FILE_WATCHER_EXTRA_ALLOWED_ROOTS_JSON: JSON.stringify(localFolderAccess.allowedRoots),
   };
@@ -1986,6 +1988,30 @@ ipcMain.handle("lazymind:agentIntegrationStatuses", () => runAgentConnector("all
 ipcMain.handle("lazymind:agentIntegrationAction", (_event, agent, action) => runAgentConnector(agent, action));
 ipcMain.handle("lazymind:executorIntegrationPolicies", () => runExecutorConnector("all", "status"));
 ipcMain.handle("lazymind:executorIntegrationAction", (_event, provider, action) => runExecutorConnector(provider, action));
+ipcMain.handle("lazymind:ankiIntegrationStatus", async () => {
+  const candidates = isMac
+    ? ["/Applications/Anki.app", path.join(app.getPath("home"), "Applications", "Anki.app")]
+    : isWindows
+      ? [path.join(process.env.LOCALAPPDATA || "", "Programs", "Anki", "anki.exe"), path.join(process.env.PROGRAMFILES || "", "Anki", "anki.exe")]
+      : ["/usr/bin/anki", "/usr/local/bin/anki"];
+  const executablePath = candidates.find((candidate) => candidate && fs.existsSync(candidate)) || "";
+  return { installed: Boolean(executablePath), executable_path: executablePath, addon_code: "2055492159" };
+});
+ipcMain.handle("lazymind:openAnki", async () => {
+  const candidates = isMac
+    ? ["/Applications/Anki.app", path.join(app.getPath("home"), "Applications", "Anki.app")]
+    : isWindows
+      ? [path.join(process.env.LOCALAPPDATA || "", "Programs", "Anki", "anki.exe"), path.join(process.env.PROGRAMFILES || "", "Anki", "anki.exe")]
+      : ["/usr/bin/anki", "/usr/local/bin/anki"];
+  const target = candidates.find((candidate) => candidate && fs.existsSync(candidate));
+  if (!target) {
+    await shell.openExternal("https://apps.ankiweb.net/");
+    return { opened: false, download_page: true };
+  }
+  if (isMac) await shell.openPath(target);
+  else spawn(target, [], { detached: true, stdio: "ignore", windowsHide: isWindows }).unref();
+  return { opened: true };
+});
 ipcMain.handle("lazymind:agentExecutableBindings", () => readAgentBindings());
 ipcMain.handle("lazymind:agentExecutableBind", (_event, target, executablePath) => runAgentBinding(target, "set", executablePath));
 ipcMain.handle("lazymind:agentExecutableClear", (_event, target) => runAgentBinding(target, "clear"));

@@ -534,7 +534,7 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "load chat runtime config failed", err), http.StatusInternalServerError)
 		return
 	}
-	applyMCPRuntimeConfig(r.Context(), db, userID, reqBody)
+	applyMCPRuntimeConfig(r.Context(), db, userID, r.Header.Get("Authorization"), reqBody)
 	if basicChatOnly {
 		applyBasicChatOnlyPolicy(reqBody)
 	} else {
@@ -735,8 +735,17 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 	// meaning the user actually submitted the AskCard. If the user ignored the card or
 	// only partially filled it, we do NOT mark it answered so the card stays interactive.
 	if !target.IsRegeneration {
-		if _, hasStructured := raw["ask_answers_structured"]; hasStructured {
-			markLastAskPendingAnswered(r.Context(), db, histories)
+		if structured, hasStructured := raw["ask_answers_structured"]; hasStructured {
+			continuation, err := submitObjectiveVocabularyAnswers(r.Context(), db, userID, histories, structured)
+			if err != nil {
+				common.ReplyErr(w, err.Error(), http.StatusConflict)
+				return
+			}
+			if continuation != "" {
+				reqBody["query"] = continuation
+				reqBody["user_query"] = continuation
+			}
+			markLastAskPendingAnswered(r.Context(), db, histories, structured)
 		}
 	}
 
@@ -1634,12 +1643,11 @@ func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
 		}
 	}
 	if askPending != nil {
-		// ask_pending is an interaction request, not durable transcript content.
-		// Once answered, do not send it back and reopen a guide card in history.
-		if !askAnswered {
-			item["ask_pending"] = askPending
-		}
-		if askSavedAnswers != nil && !askAnswered {
+		// Ask cards are durable transcript content. Answered cards are returned as
+		// read-only cards together with their submitted answers.
+		item["ask_pending"] = askPending
+		item["ask_answered"] = askAnswered
+		if askSavedAnswers != nil {
 			item["ask_saved_answers"] = askSavedAnswers
 		}
 	}

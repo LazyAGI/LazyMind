@@ -1666,6 +1666,7 @@ const enUS = {
 
   // Chat
   chat: {
+    knowledgeSearchDisabled: "Knowledge-base search is disabled in settings",
     fork: {
       title: "Fork into a new conversation", selectAnswerFirst: "Select an answer before forking",
       creating: "Creating a Fork conversation…", retryCreate: "Retry Fork", noModels: "No models are available. Configure a model, then reload.",
@@ -3156,6 +3157,7 @@ const enUS = {
     translationOriginal: "Original",
     translationResult: "Translation",
     translationFailed: "Translation failed. Check the Tencent Translation credentials and service status.",
+    dictionaryNotFound: "The word was not found in the built-in dictionary, and no translation service is configured.",
     askWholeSegment: "Ask about this segment",
     askSelectedSegmentText: "Ask about selection",
     pdfChatPanelLabel: "Temporary document chat",
@@ -8002,6 +8004,7 @@ const enUS = {
     },
   },
 
+  vocabulary: { cardTypes: { wordToMeaning: "Word to meaning", meaningToWord: "Meaning to word", sentenceCloze: "Sentence cloze", anki: "Anki card" } },
   errors: enUSErrorMessages,
 };
 

@@ -8,6 +8,8 @@ function createDesktopBridge(ipcRenderer) {
     agentIntegrationAction: (agent, action) => ipcRenderer.invoke("lazymind:agentIntegrationAction", agent, action),
     executorIntegrationPolicies: () => ipcRenderer.invoke("lazymind:executorIntegrationPolicies"),
     executorIntegrationAction: (provider, action) => ipcRenderer.invoke("lazymind:executorIntegrationAction", provider, action),
+    ankiIntegrationStatus: () => ipcRenderer.invoke("lazymind:ankiIntegrationStatus"),
+    openAnki: () => ipcRenderer.invoke("lazymind:openAnki"),
     agentExecutableBindings: () => ipcRenderer.invoke("lazymind:agentExecutableBindings"),
     agentExecutableBind: (target, executablePath) => ipcRenderer.invoke("lazymind:agentExecutableBind", target, executablePath),
     agentExecutableClear: (target) => ipcRenderer.invoke("lazymind:agentExecutableClear", target),

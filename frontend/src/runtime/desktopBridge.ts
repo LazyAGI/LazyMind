@@ -165,6 +165,8 @@ interface LazyMindDesktopBridge {
   agentIntegrationAction?: (agent: DesktopAgent, action: DesktopAgentIntegrationAction) => Promise<unknown> | unknown;
   executorIntegrationPolicies?: () => Promise<unknown> | unknown;
   executorIntegrationAction?: (provider: DesktopExecutorProvider, action: DesktopExecutorPolicyAction) => Promise<unknown> | unknown;
+  ankiIntegrationStatus?: () => Promise<unknown> | unknown;
+  openAnki?: () => Promise<unknown> | unknown;
   agentExecutableBindings?: () => Promise<unknown> | unknown;
   agentExecutableBind?: (target: DesktopAgentBindingTarget, path: string) => Promise<unknown> | unknown;
   agentExecutableClear?: (target: DesktopAgentBindingTarget) => Promise<unknown> | unknown;
@@ -356,6 +358,25 @@ export async function executorIntegrationAction(
   } catch (error) {
     return localBridgeFailure(error);
   }
+}
+
+export interface DesktopAnkiStatus {
+  installed: boolean;
+  executable_path: string;
+  connect_installed: boolean;
+  addon_code: string;
+}
+
+export async function ankiIntegrationStatus(): Promise<DesktopAnkiStatus | null> {
+  const bridge = getDesktopBridge();
+  if (bridge?.ankiIntegrationStatus) return bridge.ankiIntegrationStatus() as Promise<DesktopAnkiStatus>;
+  return assistantBridgeJSON<DesktopAnkiStatus>("/anki/status", undefined, STATUS_TIMEOUT_MS);
+}
+
+export async function openAnki(): Promise<void> {
+  const bridge = getDesktopBridge();
+  if (bridge?.openAnki) { await bridge.openAnki(); return; }
+  await assistantBridgeJSON("/anki/open", { method: "POST" }, ACTION_TIMEOUT_MS);
 }
 
 export async function agentExecutableBindings(): Promise<DesktopAgentExecutableBindingsResult> {

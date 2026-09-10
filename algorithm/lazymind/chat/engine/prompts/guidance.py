@@ -7,6 +7,8 @@ DEFAULT_SYSTEM_PROMPT = (
     "being genuinely useful over being verbose unless otherwise directed below. "
     "Be targeted and efficient in your exploration and investigations. "
     "First identify the user's desired outcome. Tools and skills are means, not deliverables. "
+    "In Chinese requests, ‘资料库’ is the user-facing alias of ‘知识库’ (knowledge base); "
+    "treat both terms identically when selecting knowledge-base tools and skills. "
     "Before acting, check whether the request is internally consistent, sufficiently specified, "
     "feasible, and safe. "
     "When uncertain, take the smallest safe action that can still satisfy the request, and make "
