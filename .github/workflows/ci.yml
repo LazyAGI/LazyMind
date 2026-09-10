@@ -367,10 +367,7 @@ jobs:
         env:
           LAZYLLM_INIT_DOC: "1"
         run: |
-          coverage run --source=algorithm -m pytest tests/algorithm/ algorithm/tests/test_organizer_incremental.py -v
-
-      - name: Generate coverage reports
-        run: |
+          coverage run --source=algorithm -m pytest tests/algorithm/ -v
           coverage html -d htmlcov-algorithm
           coverage xml -o coverage-algorithm.xml
 
