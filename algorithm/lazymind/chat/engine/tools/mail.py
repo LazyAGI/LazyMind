@@ -389,6 +389,10 @@ def _split_addresses(value: Any) -> list[str]:
     return [item for item in items if item]
 
 
+def _address_set(value: Any) -> set[str]:
+    return {addr.lower() for addr in _split_addresses(value)}
+
+
 def _coerce_path_list(value: Any) -> list[str]:
     if value is None:
         return []
@@ -424,6 +428,34 @@ def _outgoing_dir() -> str:
     path = os.path.join(_mail_workspace(), 'mail_outgoing')
     os.makedirs(path, exist_ok=True)
     return path
+
+
+def _cached_incoming_attachment(cred: dict[str, str], message_id: str, wanted: str) -> tuple[str, str]:
+    filename = os.path.basename(_decode_header_value(wanted)) or ''
+    probe = _incoming_attachment_path(cred, message_id, filename or 'attachment.bin')
+    folder = os.path.dirname(probe)
+    if not os.path.isdir(folder):
+        return '', filename or 'attachment.bin'
+    names = os.listdir(folder)
+    candidates: list[str] = []
+    for name in names:
+        if name == wanted or (filename and name == filename):
+            candidates.append(name)
+        elif wanted and name.startswith(f'{wanted}-'):
+            candidates.append(name)
+        elif filename and name.endswith(f'-{filename}'):
+            candidates.append(name)
+    for name in candidates:
+        path = os.path.join(folder, name)
+        if not os.path.isfile(path):
+            continue
+        display = filename or name
+        if wanted and name.startswith(f'{wanted}-'):
+            display = name[len(wanted) + 1:] or display
+        elif filename and name.endswith(f'-{filename}'):
+            display = filename
+        return path, display
+    return '', filename or 'attachment.bin'
 
 
 def _incoming_attachment_path(cred: dict[str, str], message_id: str, filename: str) -> str:
@@ -581,7 +613,8 @@ def _write_outgoing_attachments(items: Any) -> list[str]:
         if not raw_b64:
             _fail(f'Uploaded mail attachment {filename} is empty.')
         try:
-            data = base64.b64decode(raw_b64, validate=False)
+            padded = raw_b64 + '=' * ((4 - len(raw_b64) % 4) % 4)
+            data = base64.b64decode(padded, validate=True)
         except Exception as orig:
             raise ToolExecutionError(f'Uploaded mail attachment {filename} is not valid base64.') from orig
         if len(data) > _MAX_CARD_ATTACHMENT_BYTES:
@@ -989,9 +1022,15 @@ def _apply_confirm_patch(draft: dict[str, Any]) -> dict[str, Any]:
     if not patch:
         return draft
     if 'to' in patch:
-        draft['to'] = _split_addresses(patch.get('to'))
+        new_to = _split_addresses(patch.get('to'))
+        if _address_set(new_to) != _address_set(draft.get('to')):
+            draft['pending_recipients'] = []
+        draft['to'] = new_to
     if 'cc' in patch:
-        draft['cc'] = _split_addresses(patch.get('cc'))
+        new_cc = _split_addresses(patch.get('cc'))
+        if _address_set(new_cc) != _address_set(draft.get('cc')):
+            draft['pending_recipients'] = []
+        draft['cc'] = new_cc
     if 'subject' in patch:
         draft['subject'] = str(patch.get('subject') or '').strip()
     if 'body' in patch:
@@ -1115,19 +1154,35 @@ def _attachments_from_bodystructure(raw: str) -> list[dict[str, Any]]:
     return _walk_bodystructure(parsed)
 
 
+def _mime_section_parts(
+    msg: email.message.Message,
+    prefix: str = '',
+) -> list[tuple[str, email.message.Message]]:
+    """Walk MIME parts using IMAP BODYSTRUCTURE section numbers."""
+    if msg.is_multipart():
+        found: list[tuple[str, email.message.Message]] = []
+        children = msg.get_payload()
+        if not isinstance(children, list):
+            return found
+        for index, child in enumerate(children, start=1):
+            if not isinstance(child, email.message.Message):
+                continue
+            section = str(index) if not prefix else f'{prefix}.{index}'
+            found.extend(_mime_section_parts(child, section))
+        return found
+    return [(prefix or '1', msg)]
+
+
 def _named_mime_parts(msg: email.message.Message) -> list[tuple[str, str, email.message.Message, bytes]]:
     parts: list[tuple[str, str, email.message.Message, bytes]] = []
-    index = 0
-    for part in msg.walk():
+    for section, part in _mime_section_parts(msg):
         filename = part.get_filename() or ''
         if not filename:
             continue
         payload = part.get_payload(decode=True)
         if payload is None:
             continue
-        index += 1
-        decoded = _decode_header_value(filename)
-        parts.append((str(index), decoded, part, payload))
+        parts.append((section, _decode_header_value(filename), part, payload))
     return parts
 
 
@@ -1326,18 +1381,22 @@ class _IMAPBackend:
         attachments = []
         body_parts = []
         html_parts = []
+        seen_parts: set[int] = set()
+        for section, filename, part, _payload in _named_mime_parts(msg):
+            seen_parts.add(id(part))
+            disposition = str(part.get('Content-Disposition') or '')
+            match = re.search(r'size\s*=\s*(\d+)', disposition, re.I)
+            attachments.append({
+                'attachment_id': section,
+                'filename': filename,
+                'mime_type': part.get_content_type(),
+                'size': int(match.group(1)) if match else 0,
+            })
         for part in msg.walk():
+            if id(part) in seen_parts:
+                continue
             filename = part.get_filename()
             if filename:
-                decoded = _decode_header_value(filename)
-                disposition = str(part.get('Content-Disposition') or '')
-                match = re.search(r'size\s*=\s*(\d+)', disposition, re.I)
-                attachments.append({
-                    'attachment_id': str(len(attachments) + 1),
-                    'filename': decoded,
-                    'mime_type': part.get_content_type(),
-                    'size': int(match.group(1)) if match else 0,
-                })
                 continue
             payload = part.get_payload(decode=True) or b''
             charset = part.get_content_charset() or 'utf-8'
@@ -1549,13 +1608,29 @@ def _backend(cred: dict[str, str]):
     )
 
 
-def _build_message(draft: dict[str, Any], mailbox: str) -> EmailMessage:
-    message = EmailMessage()
+def _pending_to_cc(draft: dict[str, Any]) -> tuple[list[str], list[str]]:
     pending = [
         str(addr).strip() for addr in (draft.get('pending_recipients') or []) if str(addr).strip()
     ]
-    to_addrs = pending or list(draft.get('to') or [])
-    cc_addrs = [] if pending else list(draft.get('cc') or [])
+    to_addrs = [str(addr).strip() for addr in (draft.get('to') or []) if str(addr).strip()]
+    cc_addrs = [str(addr).strip() for addr in (draft.get('cc') or []) if str(addr).strip()]
+    if not pending:
+        return to_addrs, cc_addrs
+    pending_set = {addr.lower() for addr in pending}
+    to_out = [addr for addr in to_addrs if addr.lower() in pending_set]
+    cc_out = [addr for addr in cc_addrs if addr.lower() in pending_set]
+    used = {addr.lower() for addr in to_out + cc_out}
+    to_out.extend(addr for addr in pending if addr.lower() not in used)
+    accepted = _address_set(draft.get('accepted_recipients'))
+    if accepted:
+        to_out = [addr for addr in to_out if addr.lower() not in accepted]
+        cc_out = [addr for addr in cc_out if addr.lower() not in accepted]
+    return to_out, cc_out
+
+
+def _build_message(draft: dict[str, Any], mailbox: str) -> EmailMessage:
+    message = EmailMessage()
+    to_addrs, cc_addrs = _pending_to_cc(draft)
     message['From'] = mailbox
     message['To'] = ', '.join(to_addrs)
     if cc_addrs:
@@ -1797,10 +1872,9 @@ class MailToolkit:
             if _TRANSFER_URL_RE.search(wanted):
                 _fail(_TRANSFER_NOTE)
             mid = str(message_id).strip()
-            filename = os.path.basename(_decode_header_value(wanted)) or 'attachment.bin'
+            target, filename = _cached_incoming_attachment(cred, mid, wanted)
             save_name = filename
-            target = _incoming_attachment_path(cred, mid, save_name)
-            if not os.path.isfile(target):
+            if not target:
                 result = _backend(cred).read_attachments(mid)
                 if not isinstance(result, dict):
                     result = {}
@@ -2080,11 +2154,8 @@ class MailToolkit:
                 'Confirm the latest preview card; do not send from an older card.'
             )
         _apply_confirm_patch(draft)
-        recipients = [
-            str(addr).strip()
-            for addr in (draft.get('pending_recipients') or draft.get('to') or [])
-            if str(addr).strip()
-        ]
+        to_addrs, cc_addrs = _pending_to_cc(draft)
+        recipients = to_addrs + cc_addrs
         if not recipients:
             draft['status'] = 'failed'
             draft['last_error'] = 'No recipients. Add at least one address in To, then confirm again.'

@@ -102,7 +102,11 @@ interface MessageListProps {
   forkPending?: boolean;
   messageList: any[];
   initialCard?: React.ReactNode;
-  sendMessage: (text: string, clearInput?: boolean, extras?: Record<string, unknown>) => void;
+  sendMessage: (
+    text: string,
+    clearInput?: boolean,
+    extras?: Record<string, unknown>,
+  ) => void | Promise<boolean | void>;
   regenerate: () => void;
   regenerateDisabled?: boolean;
   stopGeneration: () => void;

@@ -1506,7 +1506,7 @@ export function useChatConversation({
       if (disabledReason) {
         message.warning(disabledReason);
       }
-      return;
+      return false;
     }
     if (
       activeStreamRef.current ||
@@ -1515,7 +1515,7 @@ export function useChatConversation({
       isModelSelectionSaving?.() ||
       !normalizedText
     ) {
-      return;
+      return false;
     }
     const normalizedCiteMessages =
       paramsCiteMessages
@@ -1644,7 +1644,7 @@ export function useChatConversation({
       },
     );
     if (!opened) {
-      return;
+      return false;
     }
 
     const currentId = currentConversationIdRef.current;
@@ -1655,6 +1655,7 @@ export function useChatConversation({
         emitConversationActivity({ conversationId: currentId });
       }
     }
+    return true;
   }
 
   const mergeHistoryPage: ChatImperativeProps["mergeHistoryPage"] = (id, history) => {

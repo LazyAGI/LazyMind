@@ -18,6 +18,8 @@ from lazymind.chat.engine.tools.mail import (
     _IMAPBackend,
     _apply_confirm_patch,
     _attachments_from_bodystructure,
+    _build_message,
+    _named_mime_parts,
     _display_mail_date,
     _encode_imap_utf7,
     _extract_transfer_links,
@@ -724,13 +726,13 @@ def test_imap_read_attachments_walks_message_once():
     })
     with patch.object(backend, '_fetch_message', return_value=msg):
         result = backend.read_attachments('INBOX::1')
-    assert result['files']['a.pdf'] == b'pdf-bytes'
-    assert result['files']['b.zip'] == b'zip-bytes'
-    assert [part['attachment_id'] for part in result['parts']] == ['1', '2']
-    assert result['transfer'] is False
-    with patch.object(backend, '_fetch_message', return_value=msg) as fetch:
+        assert result['files']['a.pdf'] == b'pdf-bytes'
+        assert result['files']['b.zip'] == b'zip-bytes'
+        assert [part['attachment_id'] for part in result['parts']] == ['2', '3']
+        assert result['files']['2'] == b'pdf-bytes'
+        assert backend.read_attachment('INBOX::1', '2') == b'pdf-bytes'
+        assert result['transfer'] is False
         assert backend.read_attachment('INBOX::1', 'b.zip') == b'zip-bytes'
-        fetch.assert_called_once()
 
 
 def test_read_attachment_fetches_message_once_and_reuses_workspace(mail_auth):
@@ -770,6 +772,38 @@ def test_read_attachment_fetches_message_once_and_reuses_workspace(mail_auth):
     assert parse_calls == [pdf['path']]
     workspace = chat_agent_workspace('u1', 'c1')
     assert list(Path(workspace).glob('attachment-text-cache/*/parsed.txt'))
+
+
+def test_read_attachment_reuses_cache_for_section_id(mail_auth):
+    calls = {'n': 0}
+
+    class FakeBackend:
+        def read_attachments(self, message_id):
+            calls['n'] += 1
+            return {
+                'files': {'2': b'%PDF-invoice', 'invoice.pdf': b'%PDF-invoice'},
+                'parts': [{
+                    'attachment_id': '2',
+                    'filename': 'invoice.pdf',
+                    'data': b'%PDF-invoice',
+                }],
+                'transfer': False,
+            }
+
+    with patch('lazymind.chat.engine.tools.mail._backend', return_value=FakeBackend()):
+        with patch(
+            'lazymind.chat.engine.tools.local_file.resolver.parse_attachment_content',
+            return_value='invoice text',
+        ):
+            first = MailToolkit().read_attachment('INBOX::9', '2')
+            again = MailToolkit().read_attachment('INBOX::9', '2')
+            by_name = MailToolkit().read_attachment('INBOX::9', 'invoice.pdf')
+
+    assert calls['n'] == 1
+    assert first['parse_status'] == 'parsed'
+    assert again['path'] == first['path']
+    assert by_name['path'] == first['path']
+    assert os.path.basename(first['path']).startswith('2-')
 
 
 def test_imap_folder_fallback_decodes_modified_utf7(mail_auth):
@@ -904,6 +938,11 @@ def test_card_upload_rejects_too_many_files(mail_auth):
         _write_outgoing_attachments(items)
 
 
+def test_card_upload_rejects_malformed_base64(mail_auth):
+    with pytest.raises(ToolExecutionError, match='not valid base64'):
+        _write_outgoing_attachments([{'filename': 'bad.txt', 'content_base64': '@@@'}])
+
+
 def test_partial_send_retries_only_refused_recipients(mail_auth):
     draft = {
         'draft_id': 'draft_partial',
@@ -942,3 +981,84 @@ def test_partial_send_retries_only_refused_recipients(mail_auth):
     assert second['status'] == 'sent'
     assert seen[0] == ['ok@b.com', 'bad@b.com']
     assert seen[1] == ['bad@b.com']
+
+
+def test_confirm_patch_clears_pending_recipients_when_to_or_cc_changes(mail_auth):
+    draft = {
+        'to': ['ok@b.com', 'bad@b.com'],
+        'cc': ['cc@b.com'],
+        'pending_recipients': ['bad@b.com'],
+        'subject': 'hi',
+        'body': 'body',
+        'attachment_paths': [],
+    }
+    lazyllm.globals['agentic_config']['mail_draft_patch'] = {
+        'to': 'ok@b.com, bad@b.com',
+        'cc': 'cc@b.com',
+        'subject': 'hi',
+    }
+    _apply_confirm_patch(draft)
+    assert draft['pending_recipients'] == ['bad@b.com']
+
+    lazyllm.globals['agentic_config']['mail_draft_patch'] = {'to': 'new@b.com'}
+    _apply_confirm_patch(draft)
+    assert draft['to'] == ['new@b.com']
+    assert draft['pending_recipients'] == []
+
+    draft['pending_recipients'] = ['bad@b.com']
+    lazyllm.globals['agentic_config']['mail_draft_patch'] = {'cc': 'other@b.com'}
+    _apply_confirm_patch(draft)
+    assert draft['cc'] == ['other@b.com']
+    assert draft['pending_recipients'] == []
+
+    draft['pending_recipients'] = ['bad@b.com']
+    lazyllm.globals['agentic_config']['mail_draft_patch'] = {'subject': 'new subject'}
+    _apply_confirm_patch(draft)
+    assert draft['pending_recipients'] == ['bad@b.com']
+
+
+def test_named_mime_parts_use_bodystructure_section_ids():
+    from email.message import EmailMessage
+
+    msg = EmailMessage()
+    msg.set_content('body')
+    msg.add_attachment(b'pdf-bytes', maintype='application', subtype='pdf', filename='a.pdf')
+    msg.add_attachment(b'zip-bytes', maintype='application', subtype='zip', filename='b.zip')
+    parts = _named_mime_parts(msg)
+    assert [section for section, _name, _part, _payload in parts] == ['2', '3']
+    raw = (
+        '1 (UID 12 BODYSTRUCTURE (('
+        '"TEXT" "PLAIN" ("CHARSET" "UTF-8") NIL NIL "7BIT" 12 1)'
+        '("APPLICATION" "PDF" ("NAME" "a.pdf") NIL NIL "BASE64" 100 NIL '
+        '("ATTACHMENT" ("FILENAME" "a.pdf")) NIL)'
+        '("APPLICATION" "ZIP" ("NAME" "b.zip") NIL NIL "BASE64" 80 NIL '
+        '("ATTACHMENT" ("FILENAME" "b.zip")) NIL) "MIXED"))'
+    )
+    items = _attachments_from_bodystructure(raw)
+    assert [row['attachment_id'] for row in items] == ['2', '3']
+
+
+def test_build_message_keeps_refused_cc_as_cc():
+    message = _build_message({
+        'to': ['ok@b.com'],
+        'cc': ['cc@b.com', 'badcc@b.com'],
+        'pending_recipients': ['badcc@b.com'],
+        'subject': 'hi',
+        'body': 'body',
+        'attachment_paths': [],
+    }, 'user@qq.com')
+    assert (message['To'] or '') == ''
+    assert (message['Cc'] or '') == 'badcc@b.com'
+
+
+def test_build_message_excludes_accepted_recipients_after_to_edit():
+    message = _build_message({
+        'to': ['ok@b.com', 'new@b.com'],
+        'cc': [],
+        'pending_recipients': [],
+        'accepted_recipients': ['ok@b.com'],
+        'subject': 'hi',
+        'body': 'body',
+        'attachment_paths': [],
+    }, 'user@qq.com')
+    assert (message['To'] or '') == 'new@b.com'

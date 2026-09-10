@@ -27,6 +27,8 @@ import { AgentAppsAuth } from "@/components/auth";
 import {
   isAskPendingReadOnly,
   shouldRenderAskPending,
+  mailDraftCardsReadOnly,
+  unansweredMailDrafts,
 } from "@/modules/chat/utils/message";
 import type { ExternalExecutionProjection } from "@/modules/chat/utils/message";
 import { ChatServiceApi, decideToolLimit } from "@/modules/chat/utils/request";
@@ -1203,7 +1205,6 @@ const AssistantMessage = (props: any) => {
         index === length - 1,
         !!hasLaterUserMessage,
       );
-      if (!showAskCard) return null;
       if (askPending.mail_draft || (askPending.mail_drafts && askPending.mail_drafts.length)) {
         const drafts =
           askPending.mail_drafts && askPending.mail_drafts.length
@@ -1211,22 +1212,42 @@ const AssistantMessage = (props: any) => {
             : askPending.mail_draft
               ? [askPending.mail_draft]
               : [];
+        const remainingDrafts = unansweredMailDrafts(
+          { mail_drafts: drafts },
+          item.answered_mail_draft_ids,
+        );
+        if (!remainingDrafts.length) return null;
+        const mailReadOnly = mailDraftCardsReadOnly(
+          disabled,
+          item.ask_answered,
+        );
+        const markDraftAnswered = (confirmedId: string) => {
+          const nextAnswered = Array.from(
+            new Set([
+              ...(item.answered_mail_draft_ids || []),
+              String(confirmedId || "").trim(),
+            ]),
+          ).filter(Boolean);
+          updateMessage({
+            ...item,
+            answered_mail_draft_ids: nextAnswered,
+            ask_answered:
+              unansweredMailDrafts({ mail_drafts: drafts }, nextAnswered)
+                .length === 0,
+          });
+        };
         return (
           <div className="mail-draft-card-list" key={askPending.ask_id}>
-            {drafts.map((draft) => {
+            {remainingDrafts.map((draft) => {
               const draftId = String(draft.draft_id || "").trim();
               if (String(draft.status || "") === "needs_mailbox") {
                 return (
                   <MailMailboxCard
                     key={draftId || askPending.ask_id}
                     draft={draft}
-                    disabled={isReadOnly}
-                    onConfirm={(mailbox, confirmedId) => {
-                      updateMessage({
-                        ...item,
-                        ask_answered: true,
-                      });
-                      props.sendMessage?.(
+                    disabled={mailReadOnly}
+                    onConfirm={async (mailbox, confirmedId) => {
+                      const started = await props.sendMessage?.(
                         t("chat.mailMailbox.confirmQuery", { mailbox }),
                         undefined,
                         {
@@ -1234,6 +1255,9 @@ const AssistantMessage = (props: any) => {
                           mail_mailbox_confirm_draft_id: confirmedId,
                         },
                       );
+                      if (started) {
+                        markDraftAnswered(confirmedId);
+                      }
                     }}
                   />
                 );
@@ -1242,18 +1266,21 @@ const AssistantMessage = (props: any) => {
                 <MailDraftCard
                   key={draftId || askPending.ask_id}
                   draft={draft}
-                  disabled={isReadOnly}
+                  disabled={mailReadOnly}
                   conversationFiles={conversationFiles}
-                  onConfirm={(confirmedId, revision, patch) => {
-                    updateMessage({
-                      ...item,
-                      ask_answered: true,
-                    });
-                    props.sendMessage?.(t("chat.mailDraft.confirmQuery"), undefined, {
-                      mail_draft_confirm_id: confirmedId,
-                      mail_draft_confirm_revision: revision,
-                      ...(patch ? { mail_draft_patch: patch } : {}),
-                    });
+                  onConfirm={async (confirmedId, revision, patch) => {
+                    const started = await props.sendMessage?.(
+                      t("chat.mailDraft.confirmQuery"),
+                      undefined,
+                      {
+                        mail_draft_confirm_id: confirmedId,
+                        mail_draft_confirm_revision: revision,
+                        ...(patch ? { mail_draft_patch: patch } : {}),
+                      },
+                    );
+                    if (started) {
+                      markDraftAnswered(confirmedId);
+                    }
                   }}
                 />
               );
@@ -1261,6 +1288,7 @@ const AssistantMessage = (props: any) => {
           </div>
         );
       }
+      if (!showAskCard) return null;
       return (
         <AskCard
           key={askPending.ask_id}

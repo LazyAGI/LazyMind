@@ -15,7 +15,7 @@ export interface ChatImperativeProps {
   replaceMessageList: (id: string, data: any[], preserveScroll?: boolean) => void;
   mergeHistoryPage: (id: string, history: ConversationHistoryItem[]) => void;
   createNewChat: () => void;
-  sendMessage: (params: SendMessageParams) => void;
+  sendMessage: (params: SendMessageParams) => Promise<boolean>;
   prepareMessage: (
     params: Pick<SendMessageParams, "text" | "citeMessage" | "citeMessages"> & {
       appendCitations?: boolean;
@@ -198,5 +198,6 @@ export interface ChatMessage {
     mail_drafts?: import("@/modules/chat/components/MailDraftCard").MailDraftPreview[];
   };
   ask_answered?: boolean;
+  answered_mail_draft_ids?: string[];
   ask_saved_answers?: Record<number, unknown>;
 }

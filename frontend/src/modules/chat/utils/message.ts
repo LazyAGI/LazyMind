@@ -61,6 +61,30 @@ export function shouldRenderAskPending(
   );
 }
 
+export function mailDraftCardsReadOnly(
+  disabled: boolean | undefined,
+  askAnswered: boolean | undefined,
+) {
+  return !!disabled || !!askAnswered;
+}
+
+export function unansweredMailDrafts(
+  askPending: any,
+  answeredIds: string[] | undefined,
+) {
+  const drafts = mailDraftsFromAskPending(askPending);
+  const answered = new Set(
+    (answeredIds || []).map((id) => String(id).trim()).filter(Boolean),
+  );
+  return drafts.filter((draft) => {
+    const id = String(draft.draft_id || "").trim();
+    if (!id || answered.has(id)) {
+      return false;
+    }
+    return String(draft.status || "") !== "sent";
+  });
+}
+
 function mailDraftsFromAskPending(askPending: any): any[] {
   if (!askPending || typeof askPending !== "object") {
     return [];
@@ -386,6 +410,13 @@ export function buildChatMessageListFromHistory(
       // Mark as answered so the card is disabled when the user already replied.
       if ((record as any).ask_answered) {
         assistantMessage.ask_answered = true;
+      }
+      if (Array.isArray((record as any).answered_mail_draft_ids)) {
+        assistantMessage.answered_mail_draft_ids = (
+          record as any
+        ).answered_mail_draft_ids
+          .map((id: unknown) => String(id || "").trim())
+          .filter(Boolean);
       }
     }
 

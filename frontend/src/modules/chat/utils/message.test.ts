@@ -13,6 +13,8 @@ import {
   normalizeMessageInputs,
   normalizeImportedUserText,
   shouldRenderAskPending,
+  unansweredMailDrafts,
+  mailDraftCardsReadOnly,
   stripAskUserReceipt,
   stripCitationFromText,
 } from "./message";
@@ -55,6 +57,31 @@ describe("shouldRenderAskPending", () => {
 
   it("keeps a resumable Ask when only an assistant placeholder follows it", () => {
     expect(shouldRenderAskPending(false, false, false)).toBe(true);
+  });
+});
+
+describe("unansweredMailDrafts", () => {
+  it("keeps sibling drafts after one confirmation", () => {
+    const remaining = unansweredMailDrafts(
+      {
+        mail_drafts: [
+          { draft_id: "draft_one", status: "draft" },
+          { draft_id: "draft_two", status: "draft" },
+        ],
+      },
+      ["draft_one"],
+    );
+    expect(remaining.map((item) => item.draft_id)).toEqual(["draft_two"]);
+  });
+});
+
+describe("mailDraftCardsReadOnly", () => {
+  it("keeps remaining drafts editable after a later user turn", () => {
+    expect(mailDraftCardsReadOnly(false, false)).toBe(false);
+  });
+
+  it("locks cards only after the whole ask is answered", () => {
+    expect(mailDraftCardsReadOnly(false, true)).toBe(true);
   });
 });
 
