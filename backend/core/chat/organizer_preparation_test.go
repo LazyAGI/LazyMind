@@ -2,10 +2,69 @@ package chat
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"reflect"
 	"testing"
 
+	"lazymind/core/algo"
 	"lazymind/core/common/orm"
 )
+
+func TestOrganizerBatchReusesSummaryAndSplitsInvalidIDs(t *testing.T) {
+	s := openingTestService(t)
+	meta := orm.ConversationOpening{ConversationID: "cached", UserID: "u", Status: "done", SourceHash: "h", IntentStatus: "ready", Summary: "已有摘要", InputJSON: json.RawMessage(`{}`), SourceHistoryIDs: json.RawMessage(`[]`)}
+	if err := s.db.Create(&meta).Error; err != nil {
+		t.Fatal(err)
+	}
+	var sizes []int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			TaskType string `json:"task_type"`
+			Input    struct {
+				Data struct {
+					Items []algo.OpeningBatchInput `json:"items"`
+				} `json:"data"`
+			} `json:"input"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+			w.WriteHeader(400)
+			return
+		}
+		if request.TaskType != "conversation.describe_opening_batch" {
+			t.Errorf("unexpected task %s", request.TaskType)
+		}
+		items := request.Input.Data.Items
+		sizes = append(sizes, len(items))
+		result := algo.OpeningBatchResult{Status: "succeeded"}
+		for _, input := range items {
+			id := input.ID
+			if len(items) > 1 {
+				id = items[0].ID
+			} // A whole invalid batch must be rejected before any mapping is accepted.
+			result.Output.Items = append(result.Output.Items, algo.OpeningBatchItem{ID: id, OpeningDescription: algo.OpeningDescription{Title: "标题" + input.ID, Summary: "摘要" + input.ID, IntentStatus: "ready"}})
+		}
+		_ = json.NewEncoder(w).Encode(result)
+	}))
+	defer server.Close()
+	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", server.URL)
+	var inputs []json.RawMessage
+	for _, id := range []string{"cached", "new1", "new2"} {
+		raw, err := json.Marshal(frozenOrganizerOpening{ConversationID: id, Snapshot: openingSnapshot{Hash: "h", Input: json.RawMessage(`{"messages":[{"role":"user","content":"发邮件"}]}`)}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		inputs = append(inputs, raw)
+	}
+	results, err := (OrganizerOpeningPreparer{}).ResolveBatch(t.Context(), s.db, "u", inputs, map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(sizes, []int{2, 1, 1}) || len(results) != 3 || results[0].Output.Summary != "已有摘要" || results[1].Output.Summary != "摘要1" || results[2].Output.Summary != "摘要2" {
+		t.Fatalf("batch mapping/reuse failed: sizes=%v results=%+v", sizes, results)
+	}
+}
 
 func TestOrganizerFreezeRejectsStaleProvisionalAndPreservesClosedOpening(t *testing.T) {
 	s := openingTestService(t)

@@ -31,6 +31,9 @@ class Handler(BaseHTTPRequestHandler):
                 result = {'candidate_operations': operations, 'assignments': [{'id': x['id'], 'group_id': target or 'cand_work'} for x in payload['conversations']]}
         else:
             result = {'title': '处理工作邮件', 'initial_intent_summary': '处理日常邮件和工作任务', 'intent_status': 'ready', 'missing_context': []}
+            if '批量处理彼此独立的会话' in text:
+                inputs = json.loads(text.rsplit('开场资料：\n', 1)[1])
+                result = {'items': [{'id': item['id'], **result} for item in inputs]}
         content = json.dumps(result, ensure_ascii=False)
         self.send_response(200)
         self.send_header('Content-Type', 'text/event-stream' if body.get('stream') else 'application/json')

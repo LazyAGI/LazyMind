@@ -21,7 +21,9 @@ _logger = logging.getLogger(__name__)
 )
 async def llm_task_run(request: LLMTaskRequest) -> LLMTaskResult:
     result = await asyncio.to_thread(run_llm_task, request)
-    structured_failures = {'conversation.describe_opening', 'conversation.organize_step'}
+    structured_failures = {
+        'conversation.describe_opening', 'conversation.describe_opening_batch', 'conversation.organize_step',
+    }
     if result.status == 'failed' and request.task_type not in structured_failures:
         _logger.warning(
             'llm_task_failed task_type=%s task_id=%s error=%s',

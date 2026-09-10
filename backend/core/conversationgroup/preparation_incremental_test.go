@@ -3,6 +3,7 @@ package conversationgroup
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -13,13 +14,92 @@ import (
 	"lazymind/core/common/orm"
 )
 
+type interruptedPreparation struct {
+	preparationFixture
+	fail  bool
+	sizes []int
+}
+
+func (p *interruptedPreparation) ResolveBatch(ctx context.Context, db *gorm.DB, uid string, inputs []json.RawMessage, config map[string]any) ([]algo.OpeningTaskResult, error) {
+	p.sizes = append(p.sizes, len(inputs))
+	return p.preparationFixture.ResolveBatch(ctx, db, uid, inputs, config)
+}
+
+func (p *interruptedPreparation) Persist(_ context.Context, _ *gorm.DB, conv orm.Conversation, _ json.RawMessage, _ algo.OpeningTaskResult) error {
+	if p.fail && conv.ID == "c01" {
+		return errors.New("injected persistence failure")
+	}
+	return nil
+}
+
+func TestPreparationBatchRollbackAndResume(t *testing.T) {
+	previous := openingPreparer
+	fixture := &interruptedPreparation{fail: true}
+	openingPreparer = fixture
+	t.Cleanup(func() { openingPreparer = previous })
+	db := orm.MigrateTestDB(t, &orm.Conversation{}, &orm.ConversationOrganizerRun{}, &orm.ConversationOrganizerSnapshotItem{}, &orm.AsyncJob{}, &orm.ConversationGroupMember{})
+	now := time.Now().UTC()
+	until := now.Add(time.Hour)
+	job := asyncjob.Job{ID: "j", AttemptCount: 1}
+	if err := db.Create(&orm.AsyncJob{ID: "j", Status: "running", JobType: organizerJobType, AttemptCount: 1, LockUntil: &until, NextRunAt: now}).Error; err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(organizerPreparation{Version: 2, Total: 21})
+	run := orm.ConversationOrganizerRun{ID: "r", UserID: "u", ProtocolVersion: 2, Status: "running", Stage: "preparing", JobID: "j", PreparationJSON: raw, SnapshotJSON: json.RawMessage(`{"id":"r","conversations":[],"groups":[]}`), ModelConfigJSON: json.RawMessage(`{}`)}
+	if err := db.Create(&run).Error; err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 21; i++ {
+		id := fmt.Sprintf("c%02d", i)
+		if err := db.Create(&orm.Conversation{ID: id, BaseModel: orm.BaseModel{CreateUserID: "u"}}).Error; err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Create(&orm.ConversationOrganizerSnapshotItem{RunID: "r", UserID: "u", ConversationID: id, Ordinal: i, PreparationStatus: "pending", FrozenInput: json.RawMessage(`{}`)}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := prepareOrganizer(t.Context(), db.DB, &run, job, nil); err == nil {
+		t.Fatal("expected persistence failure")
+	}
+	var done int64
+	db.Model(&orm.ConversationOrganizerSnapshotItem{}).Where("run_id=? AND preparation_status=?", run.ID, "done").Count(&done)
+	if done != 0 {
+		t.Fatalf("partial batch escaped rollback: %d", done)
+	}
+	if err := db.First(&run, "id=?", run.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	progress := runDTO(t.Context(), db.DB, run, false)["progress"].(map[string]any)
+	if progress["preparation_batch_current"] != 1 || progress["preparation_batch_completed"] != 0 || progress["preparation_batch_total"] != 2 {
+		t.Fatalf("incorrect pending progress: %v", progress)
+	}
+	fixture.fail = false
+	if err := prepareOrganizer(t.Context(), db.DB, &run, job, nil); err != nil {
+		t.Fatal(err)
+	}
+	var preparation organizerPreparation
+	if err := json.Unmarshal(run.PreparationJSON, &preparation); err != nil {
+		t.Fatal(err)
+	}
+	if preparation.Current != 21 || preparation.BatchCurrent != 2 || preparation.BatchTotal != 2 || !preparation.Sealed || fmt.Sprint(fixture.sizes) != "[20 20 1]" {
+		t.Fatalf("invalid resumed progress: %+v sizes=%v", preparation, fixture.sizes)
+	}
+}
+
 type preparationFixture struct{}
 
 func (preparationFixture) Freeze(context.Context, *gorm.DB, orm.Conversation) (OpeningPreparation, error) {
 	return OpeningPreparation{}, nil
 }
-func (preparationFixture) Resolve(context.Context, *gorm.DB, string, json.RawMessage, map[string]any) (algo.OpeningTaskResult, error) {
-	return algo.OpeningTaskResult{Status: "succeeded", Output: algo.OpeningDescription{Summary: "处理工作", IntentStatus: "provisional"}}, nil
+func (preparationFixture) ResolveBatch(_ context.Context, _ *gorm.DB, _ string, inputs []json.RawMessage, _ map[string]any) ([]algo.OpeningTaskResult, error) {
+	if len(inputs) > 20 {
+		return nil, fmt.Errorf("oversized batch: %d", len(inputs))
+	}
+	results := make([]algo.OpeningTaskResult, len(inputs))
+	for i := range results {
+		results[i] = algo.OpeningTaskResult{Status: "succeeded", Output: algo.OpeningDescription{Summary: "处理工作", IntentStatus: "provisional"}}
+	}
+	return results, nil
 }
 func (preparationFixture) Persist(context.Context, *gorm.DB, orm.Conversation, json.RawMessage, algo.OpeningTaskResult) error {
 	return nil
@@ -80,14 +160,15 @@ func TestPreparationWritesScaleAndResume(t *testing.T) {
 			if err := json.Unmarshal(run.SnapshotJSON, &snapshot); err != nil {
 				t.Fatal(err)
 			}
-			if len(snapshot.Conversations) != n || snapshot.Conversations[0].Summary != "已完成摘要" || updates != n {
+			expectedWrites := (n-1+19)/20 + 1
+			if len(snapshot.Conversations) != n || snapshot.Conversations[0].Summary != "已完成摘要" || updates != expectedWrites {
 				t.Fatalf("resume lost data: items=%d writes=%d", len(snapshot.Conversations), updates)
 			}
 			// Re-enter after sealing: no model work or checkpoint writes are repeated.
 			if err := prepareOrganizer(t.Context(), db.DB, &run, job, map[string]any{}); err != nil {
 				t.Fatal(err)
 			}
-			if updates != n {
+			if updates != expectedWrites {
 				t.Fatal("sealed preparation repeated")
 			}
 			measurements = append(measurements, totalBytes)

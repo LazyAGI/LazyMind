@@ -1281,6 +1281,9 @@ export interface ConversationOrganizerRunProgress {
     'batch_total'?: number;
     'current': number;
     'preparation_current'?: number;
+    'preparation_batch_current'?: number;
+    'preparation_batch_completed'?: number;
+    'preparation_batch_total'?: number;
     'preparation_total'?: number;
     'total': number;
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"strings"
 	"time"
 
@@ -95,11 +96,7 @@ func (OrganizerOpeningPreparer) Freeze(ctx context.Context, tx *gorm.DB, conv or
 	return out, err
 }
 
-func (OrganizerOpeningPreparer) Resolve(ctx context.Context, db *gorm.DB, uid string, raw json.RawMessage, config map[string]any) (algo.OpeningTaskResult, error) {
-	var frozen frozenOrganizerOpening
-	if err := json.Unmarshal(raw, &frozen); err != nil {
-		return algo.OpeningTaskResult{}, err
-	}
+func reuseOrganizerOpening(ctx context.Context, db *gorm.DB, uid string, frozen frozenOrganizerOpening) (algo.OpeningTaskResult, error) {
 	if frozen.JobID == "" {
 		var current orm.ConversationOpening
 		err := db.WithContext(ctx).Where("conversation_id=? AND user_id=? AND source_hash=?", frozen.ConversationID, uid, frozen.Snapshot.Hash).Take(&current).Error
@@ -157,6 +154,49 @@ func (OrganizerOpeningPreparer) Resolve(ctx context.Context, db *gorm.DB, uid st
 			}
 		}
 	}
+	return algo.OpeningTaskResult{}, nil
+}
+
+func (OrganizerOpeningPreparer) ResolveBatch(ctx context.Context, db *gorm.DB, uid string, inputs []json.RawMessage, config map[string]any) ([]algo.OpeningTaskResult, error) {
+	results := make([]algo.OpeningTaskResult, len(inputs))
+	var pending []algo.OpeningBatchInput
+	for i, raw := range inputs {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		var frozen frozenOrganizerOpening
+		if err := json.Unmarshal(raw, &frozen); err != nil {
+			return nil, err
+		}
+		result, err := reuseOrganizerOpening(ctx, db, uid, frozen)
+		if err != nil {
+			return nil, err
+		}
+		if result.Status != "" {
+			results[i] = result
+		} else {
+			// Short request-local IDs avoid asking the model to copy UUIDs.
+			pending = append(pending, algo.OpeningBatchInput{ID: strconv.Itoa(i), Input: frozen.Snapshot.Input})
+		}
+	}
+	if len(pending) == 0 {
+		return results, nil
+	}
+	generated, err := generateOrganizerOpenings(ctx, pending, config)
+	if err != nil {
+		return nil, err
+	}
+	for _, input := range pending {
+		i, _ := strconv.Atoi(input.ID)
+		results[i] = generated[input.ID]
+	}
+	return results, nil
+}
+
+func generateOrganizerOpenings(ctx context.Context, inputs []algo.OpeningBatchInput, config map[string]any) (map[string]algo.OpeningTaskResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	selected, aux := config["conversation_metadata"]
 	if !aux {
 		selected = config["llm"]
@@ -165,11 +205,64 @@ func (OrganizerOpeningPreparer) Resolve(ctx context.Context, db *gorm.DB, uid st
 	if selected != nil {
 		requestConfig["llm"] = selected
 	}
-	result, err := algo.DescribeConversationOpening(ctx, frozen.Snapshot.Input, requestConfig, openingOption("LAZYMIND_OPENING_TIMEOUT_SECONDS", 60))
+	// Match the platform model-call default; allow extra time for provider queueing.
+	timeout := openingOption("LAZYMIND_ORGANIZER_OPENING_BATCH_TIMEOUT_SECONDS", 600)
+	result, err := algo.DescribeConversationOpeningBatch(ctx, inputs, requestConfig, timeout)
 	if err == nil && result.Status != "succeeded" && result.ErrorCode == "token_limit" && aux {
-		result, err = algo.DescribeConversationOpening(ctx, frozen.Snapshot.Input, map[string]any{"llm": config["llm"]}, openingOption("LAZYMIND_OPENING_TIMEOUT_SECONDS", 60))
+		result, err = algo.DescribeConversationOpeningBatch(ctx, inputs, map[string]any{"llm": config["llm"]}, timeout)
 	}
-	return result, err
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	out := make(map[string]algo.OpeningTaskResult, len(inputs))
+	if err != nil {
+		result.Status, result.ErrorCode = "failed", "transport_error"
+	}
+	if result.Status == "succeeded" {
+		expected := make(map[string]bool, len(inputs))
+		for _, input := range inputs {
+			expected[input.ID] = true
+		}
+		for _, item := range result.Output.Items {
+			if !expected[item.ID] || out[item.ID].Status != "" {
+				result.Status, result.ErrorCode = "failed", "invalid_output"
+				break
+			}
+			out[item.ID] = algo.OpeningTaskResult{Status: "succeeded", Output: item.OpeningDescription}
+		}
+		if len(out) != len(inputs) {
+			result.Status, result.ErrorCode = "failed", "invalid_output"
+		}
+		if result.Status == "succeeded" {
+			// Attribute the provider call once, rather than multiplying its usage by batch size.
+			first := out[inputs[0].ID]
+			first.Usage = result.Usage
+			out[inputs[0].ID] = first
+			return out, nil
+		}
+	}
+	if len(inputs) > 1 && (result.ErrorCode == "token_limit" || result.ErrorCode == "output_too_large" || result.ErrorCode == "invalid_output") {
+		mid := len(inputs) / 2
+		left, err := generateOrganizerOpenings(ctx, inputs[:mid], config)
+		if err != nil {
+			return nil, err
+		}
+		right, err := generateOrganizerOpenings(ctx, inputs[mid:], config)
+		if err != nil {
+			return nil, err
+		}
+		for id, value := range right {
+			left[id] = value
+		}
+		return left, nil
+	}
+	if result.ErrorCode == "" {
+		result.ErrorCode = "model_failed"
+	}
+	for _, input := range inputs {
+		out[input.ID] = algo.OpeningTaskResult{Status: "failed", ErrorCode: result.ErrorCode}
+	}
+	return out, nil
 }
 
 func (OrganizerOpeningPreparer) Persist(ctx context.Context, tx *gorm.DB, conv orm.Conversation, raw json.RawMessage, result algo.OpeningTaskResult) error {

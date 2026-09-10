@@ -1458,6 +1458,15 @@ components:
                         preparation_current:
                             format: int64
                             type: integer
+                        preparation_batch_current:
+                            format: int64
+                            type: integer
+                        preparation_batch_completed:
+                            format: int64
+                            type: integer
+                        preparation_batch_total:
+                            format: int64
+                            type: integer
                         preparation_total:
                             format: int64
                             type: integer

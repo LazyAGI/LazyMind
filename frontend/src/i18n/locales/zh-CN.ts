@@ -7789,7 +7789,7 @@ const zhCN = {
     searchGroups: "搜索对话组",
     groupPickerLabel: "所属分组", freeConversation: "自由会话",
     callError: { first_response_timeout: "模型在 300 秒内未返回有效内容", stream_idle_timeout: "模型流已连续 120 秒没有新内容", connection_timeout: "连接模型服务超时", connection_error: "模型服务连接失败或中断", response_timeout: "等待模型响应超时", cancellation_unconfirmed: "尚未确认旧调用已退出，未发起重试" },
-    preparationProgress: "正在准备会话摘要 {{current}}/{{total}}",
+    preparationProgress: "正在准备会话摘要，第 {{current}}/{{total}} 批",
     unassignedReason: { no_matching_group: "未归组：没有匹配组", below_min_group_size: "未归组：候选组不足 3 条", no_messages: "未归组：暂无消息", no_task_intent: "未归组：仅问候等，无明确任务", summary_failed: "未归组：摘要准备失败", unsupported_conversation: "未归组：暂不支持此会话类型" },
     summaryError: { default: "暂时无法生成摘要，下次整理可重试", request_timeout: "摘要生成超时", transport_error: "模型连接异常", invalid_output: "模型未返回有效摘要", token_limit: "模型容量不足", input_too_large: "输入超出模型容量", output_too_large: "模型输出未完成", model_configuration: "模型配置不可用", model_failed: "模型调用失败" },
     batchProgress: "正在整理第 {{current}}/{{total}} 批",

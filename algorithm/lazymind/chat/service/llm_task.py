@@ -117,6 +117,10 @@ def run_llm_task(request: LLMTaskRequest) -> LLMTaskResult:
             from .conversation_opening import OpeningDescription, opening_prompt
             output, usage = _call_structured(request, opening_prompt(request), OpeningDescription)
             text, files = json.dumps(output, ensure_ascii=False), []
+        elif request.task_type == 'conversation.describe_opening_batch':
+            from .conversation_opening import describe_opening_batch
+            output, usage = describe_opening_batch(request)
+            text, files = json.dumps(output, ensure_ascii=False), []
         elif request.task_type == 'conversation.organize_step':
             from .conversation_organizer import organize_step
             output, usage = organize_step(request)

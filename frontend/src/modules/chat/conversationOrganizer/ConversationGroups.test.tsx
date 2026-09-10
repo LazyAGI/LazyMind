@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import ConversationGroups from "./ConversationGroups";
 import * as api from "./api";
-const tr = (key: string) => key;
+const tr = (key: string, options?: { current?: number; total?: number }) => key.endsWith("preparationProgress") ? `${key} ${options?.current}/${options?.total}` : key;
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: tr }) }));
 vi.mock("./SidebarGroups", () => ({ default: () => null }));
 vi.mock("./api", () => ({
@@ -12,6 +12,14 @@ vi.mock("./api", () => ({
 const running: api.OrganizerRun = { created_at: "2026-09-09T00:00:00Z", updated_at: "2026-09-09T00:00:00Z", free_count: 2, organized_count: 0, skipped_count: 0, id: "r", status: "running", stage: "organizing", progress: { current: 0, total: 2, batch_current: 1, batch_total: 1 }, can_cancel: true, can_retry: false, can_undo: false, items: [] };
 beforeEach(() => { vi.clearAllMocks(); vi.mocked(api.getLatestOrganizerState).mockResolvedValue({ run: null, latest_successful_run_id: null, free_conversation_count: 2 }); vi.mocked(api.getOrganizerRun).mockResolvedValue(running); });
 describe("organizer entry", () => {
+ it("shows preparation batches rather than conversation counts", async () => {
+  const preparing: api.OrganizerRun = { ...running, stage: "preparing", progress: { current: 0, total: 41, preparation_current: 20, preparation_total: 41, preparation_batch_current: 2, preparation_batch_completed: 1, preparation_batch_total: 3 } };
+  vi.mocked(api.getOrganizerRun).mockResolvedValue(preparing);
+  vi.mocked(api.getLatestOrganizerState).mockResolvedValue({ run: preparing, latest_successful_run_id: null, free_conversation_count: 41 });
+  const { unmount } = render(<ConversationGroups mode="organizer" />);
+  expect(await screen.findByRole("button", { name: /preparationProgress 2\/3/ })).toBeTruthy();
+  unmount();
+ });
  it("opens active progress without treating the entry click or close as cancellation", async () => {
   vi.mocked(api.getLatestOrganizerState).mockResolvedValue({ run: running, latest_successful_run_id: null, free_conversation_count: 2 });
   const { unmount } = render(<ConversationGroups mode="organizer" />);

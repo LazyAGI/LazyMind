@@ -21,7 +21,7 @@ import (
 	"lazymind/core/modelconfig"
 )
 
-const openingGeneratorVersion = "v1"
+const openingGeneratorVersion = "v2"
 const openingJobType = "conversation.opening"
 const openingBackfillJobType = "conversation.opening.backfill"
 

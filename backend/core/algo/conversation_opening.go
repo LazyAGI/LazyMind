@@ -22,6 +22,36 @@ type OpeningTaskResult struct {
 	Usage     json.RawMessage    `json:"usage"`
 }
 
+type OpeningBatchInput struct {
+	ID    string          `json:"id"`
+	Input json.RawMessage `json:"input"`
+}
+
+type OpeningBatchItem struct {
+	ID string `json:"id"`
+	OpeningDescription
+}
+
+type OpeningBatchResult struct {
+	Status string `json:"status"`
+	Output struct {
+		Items []OpeningBatchItem `json:"items"`
+	} `json:"output"`
+	ErrorCode string          `json:"error_code"`
+	Usage     json.RawMessage `json:"usage"`
+}
+
+func DescribeConversationOpeningBatch(ctx context.Context, inputs []OpeningBatchInput, llmConfig map[string]any, timeoutSeconds int) (OpeningBatchResult, error) {
+	request := map[string]any{
+		"mode": "llm", "task_type": "conversation.describe_opening_batch",
+		"input":      map[string]any{"data": map[string]any{"items": inputs}},
+		"llm_config": llmConfig, "options": map[string]any{"timeout_seconds": timeoutSeconds, "max_retries": 1},
+	}
+	var result OpeningBatchResult
+	err := common.ApiPost(ctx, common.JoinURL(common.ChatServiceEndpoint(), llmTaskRunPath), request, nil, &result, time.Duration(timeoutSeconds+5)*time.Second)
+	return result, err
+}
+
 func DescribeConversationOpening(ctx context.Context, input json.RawMessage, llmConfig map[string]any, timeoutSeconds int) (OpeningTaskResult, error) {
 	request := map[string]any{
 		"mode": "llm", "task_type": "conversation.describe_opening", "input": input,

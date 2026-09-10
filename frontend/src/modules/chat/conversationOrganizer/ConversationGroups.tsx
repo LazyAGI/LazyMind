@@ -73,8 +73,8 @@ export default function ConversationGroups({ onChanged, onNewChatInGroup, mode =
   }, [activeRun, correctingItemId, t]);
   const stageLabel = (stage?: string) => t(`conversationOrganizer.stage.${stage || "default"}`, { defaultValue: t("conversationOrganizer.stage.default") });
   const progressLabel = (value: OrganizerRun) => {
-    const label = value.stage === "preparing" && value.progress.preparation_total
-      ? t("conversationOrganizer.preparationProgress", { current: value.progress.preparation_current || 0, total: value.progress.preparation_total })
+    const label = value.stage === "preparing" && value.progress.preparation_batch_total
+      ? t("conversationOrganizer.preparationProgress", { current: value.progress.preparation_batch_current || 1, total: value.progress.preparation_batch_total })
       : ["organizing", "batch"].includes(value.stage) && value.progress.batch_total
         ? t("conversationOrganizer.batchProgress", { current: value.progress.batch_current, total: value.progress.batch_total })
         : stageLabel(value.stage);
@@ -295,7 +295,7 @@ export default function ConversationGroups({ onChanged, onNewChatInGroup, mode =
       {!run ? <div className="organizer-empty">{resultLoadFailed ? <><p>{t("conversationOrganizer.loadFailed")}</p><Button onClick={() => void openLatest()}>{t("conversationOrganizer.retryLoad")}</Button></> : resultLoading ? <Spin /> : t("conversationOrganizer.noResult")}</div> : activeStatuses.has(run.status) ? <div className="organizer-progress">
         <Spin size="large" />
         <h3>{progressLabel(run)}</h3>
-        <Progress showInfo={false} status="active" percent={run.stage === "preparing" ? Math.floor(100 * (run.progress.preparation_current || 0) / Math.max(1, run.progress.preparation_total || 0)) : Math.floor(100 * run.progress.current / Math.max(1, run.progress.total))} />
+        <Progress showInfo={false} status="active" percent={run.stage === "preparing" ? Math.floor(100 * (run.progress.preparation_batch_completed || 0) / Math.max(1, run.progress.preparation_batch_total || 0)) : Math.floor(100 * run.progress.current / Math.max(1, run.progress.total))} />
         <p>{t("conversationOrganizer.progressHint")}</p>
         {run.can_cancel && <Button loading={canceling} disabled={canceling} onClick={() => confirmCancel(() => act("cancel"))}>{t("conversationOrganizer.cancelRun")}</Button>}
       </div> : run.status === "failed" ? <div className="organizer-state"><CloseCircleOutlined /><h3>{t("conversationOrganizer.failed")}</h3><p>{run.error?.code ? t(`conversationOrganizer.callError.${run.error.code}`, { defaultValue: run.error.message || t("conversationOrganizer.failedHint") }) : t("conversationOrganizer.failedHint")}</p>{run.can_retry && <Button type="primary" onClick={() => void act("retry")}>{t("conversationOrganizer.retry")}</Button>}</div> : run.status === "canceled" ? <div className="organizer-state"><CloseCircleOutlined /><h3>{t("conversationOrganizer.canceled")}</h3><p>{t("conversationOrganizer.canceledHint")}</p><Button loading={starting} disabled={freeCount === 0} onClick={() => void beginOrganize()}>{t("conversationOrganizer.organize")}</Button></div> : <>

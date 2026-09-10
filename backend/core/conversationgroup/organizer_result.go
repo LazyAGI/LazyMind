@@ -38,6 +38,11 @@ func runDTO(ctx context.Context, db *gorm.DB, row orm.ConversationOrganizerRun, 
 	if len(row.PreparationJSON) > 0 {
 		_ = json.Unmarshal(row.PreparationJSON, &preparation)
 	}
+	preparationBatchTotal := preparation.BatchTotal
+	if preparationBatchTotal == 0 && preparation.Total > 0 {
+		preparationBatchTotal = (preparation.Total + openingPreparationBatchSize - 1) / openingPreparationBatchSize
+	}
+	preparationBatchCurrent := min(preparation.BatchCurrent+1, preparationBatchTotal)
 	if len(row.PreparationJSON) > 0 && (row.Status == "succeeded" || row.Status == "undone") {
 		var grouped int64
 		db.WithContext(ctx).Table("conversation_organizer_snapshot_items s").Joins("JOIN conversation_group_members m ON m.conversation_id=s.conversation_id").Where("s.run_id=?", row.ID).Count(&grouped)
@@ -48,7 +53,7 @@ func runDTO(ctx context.Context, db *gorm.DB, row orm.ConversationOrganizerRun, 
 		}
 		counts.FreeCount = int(total - grouped)
 	}
-	dto := map[string]any{"id": row.ID, "status": row.Status, "stage": row.Stage, "progress": map[string]any{"current": row.ProgressCurrent, "total": row.ProgressTotal, "batch_current": batchCurrent, "batch_total": batchTotal, "preparation_current": preparation.Current, "preparation_total": preparation.Total}, "organized_count": counts.OrganizedCount, "free_count": counts.FreeCount, "skipped_count": counts.SkippedCount, "can_cancel": (row.Status == "pending" || row.Status == "running") && row.Stage != "canceling", "can_retry": row.ProtocolVersion == 2 && (row.Status == "failed" || row.Status == "canceled"), "can_undo": row.Status == "succeeded" && row.ID == latestID, "created_at": row.CreatedAt, "updated_at": row.UpdatedAt}
+	dto := map[string]any{"id": row.ID, "status": row.Status, "stage": row.Stage, "progress": map[string]any{"current": row.ProgressCurrent, "total": row.ProgressTotal, "batch_current": batchCurrent, "batch_total": batchTotal, "preparation_current": preparation.Current, "preparation_total": preparation.Total, "preparation_batch_current": preparationBatchCurrent, "preparation_batch_completed": preparation.BatchCurrent, "preparation_batch_total": preparationBatchTotal}, "organized_count": counts.OrganizedCount, "free_count": counts.FreeCount, "skipped_count": counts.SkippedCount, "can_cancel": (row.Status == "pending" || row.Status == "running") && row.Stage != "canceling", "can_retry": row.ProtocolVersion == 2 && (row.Status == "failed" || row.Status == "canceled"), "can_undo": row.Status == "succeeded" && row.ID == latestID, "created_at": row.CreatedAt, "updated_at": row.UpdatedAt}
 	var streaming organizerStream
 	if json.Unmarshal(row.StreamJSON, &streaming) == nil {
 		dto["model_progress"] = map[string]any{"state": streaming.State, "received_chars": streaming.ReceivedChars, "elapsed_seconds": streaming.ElapsedSeconds, "idle_seconds": streaming.IdleSeconds, "first_response_at": streaming.FirstResponseAt, "last_activity_at": streaming.LastActivityAt}

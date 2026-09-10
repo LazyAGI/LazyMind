@@ -26,11 +26,13 @@ type OpeningPreparation struct {
 
 type OpeningPreparer interface {
 	Freeze(context.Context, *gorm.DB, orm.Conversation) (OpeningPreparation, error)
-	Resolve(context.Context, *gorm.DB, string, json.RawMessage, map[string]any) (algo.OpeningTaskResult, error)
+	ResolveBatch(context.Context, *gorm.DB, string, []json.RawMessage, map[string]any) ([]algo.OpeningTaskResult, error)
 	Persist(context.Context, *gorm.DB, orm.Conversation, json.RawMessage, algo.OpeningTaskResult) error
 }
 
 var openingPreparer OpeningPreparer
+
+const openingPreparationBatchSize = 20
 
 func RegisterOpeningPreparer(p OpeningPreparer) { openingPreparer = p }
 
@@ -43,11 +45,13 @@ type preparationItem struct {
 	ErrorCode        string               `json:"error_code,omitempty"`
 }
 type organizerPreparation struct {
-	Version int               `json:"version"`
-	Items   []preparationItem `json:"items"`
-	Current int               `json:"current"`
-	Total   int               `json:"total"`
-	Sealed  bool              `json:"sealed"`
+	Version      int               `json:"version"`
+	Items        []preparationItem `json:"items"`
+	Current      int               `json:"current"`
+	Total        int               `json:"total"`
+	Sealed       bool              `json:"sealed"`
+	BatchCurrent int               `json:"batch_current,omitempty"`
+	BatchTotal   int               `json:"batch_total,omitempty"`
 }
 
 func freezePreparation(ctx context.Context, tx *gorm.DB, snapshot *organizerSnapshot, locks []orm.ConversationOrganizerSnapshotItem) (organizerPreparation, error) {
@@ -137,61 +141,84 @@ func prepareOrganizer(ctx context.Context, db *gorm.DB, run *orm.ConversationOrg
 			p.Items = append(p.Items, preparationItem{Conversation: snapshotConversation{ID: row.ConversationID, Title: row.Title, Summary: row.Summary, TitleRevision: row.TitleRevision, MetadataRevision: row.MetadataRevision}, Frozen: row.FrozenInput, NeedsPreparation: true})
 		}
 	}
+	pending := make([]int, 0, len(p.Items))
 	for i := range p.Items {
-		item := &p.Items[i]
-		if item.Done {
-			continue
+		if !p.Items[i].Done {
+			pending = append(pending, i)
 		}
+	}
+	p.BatchTotal = p.BatchCurrent + (len(pending)+openingPreparationBatchSize-1)/openingPreparationBatchSize
+	for start := 0; start < len(pending); start += openingPreparationBatchSize {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		result, err := openingPreparer.Resolve(ctx, db, run.UserID, item.Frozen, config)
+		indices := pending[start:min(start+openingPreparationBatchSize, len(pending))]
+		inputs := make([]json.RawMessage, 0, len(indices))
+		for _, i := range indices {
+			inputs = append(inputs, p.Items[i].Frozen)
+		}
+		results, err := openingPreparer.ResolveBatch(ctx, db, run.UserID, inputs, config)
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		item.Done = true
-		switch {
-		case err != nil:
-			item.Reason = "summary_failed"
-			item.ErrorCode = "transport_error"
-		case result.Status != "succeeded":
-			item.Reason = "summary_failed"
-			item.ErrorCode = result.ErrorCode
-			if item.ErrorCode == "" {
-				item.ErrorCode = "model_failed"
-			}
-		case result.Output.IntentStatus == "empty":
-			item.Reason = "no_task_intent"
-		case strings.TrimSpace(result.Output.Summary) == "":
-			item.Reason = "summary_failed"
-			item.ErrorCode = "invalid_output"
-		default:
-			item.Conversation.Summary = result.Output.Summary
-			if strings.TrimSpace(result.Output.Title) != "" {
-				item.Conversation.Title = result.Output.Title
+		if err != nil {
+			return err
+		}
+		if len(results) != len(indices) {
+			return errors.New("invalid opening batch result count")
+		}
+		for position, i := range indices {
+			item, result := &p.Items[i], results[position]
+			item.Done = true
+			switch {
+			case result.Status != "succeeded":
+				item.Reason, item.ErrorCode = "summary_failed", result.ErrorCode
+				if item.ErrorCode == "" {
+					item.ErrorCode = "model_failed"
+				}
+			case result.Output.IntentStatus == "empty":
+				item.Reason = "no_task_intent"
+			case strings.TrimSpace(result.Output.Summary) == "":
+				item.Reason, item.ErrorCode = "summary_failed", "invalid_output"
+			default:
+				item.Conversation.Summary = result.Output.Summary
+				if strings.TrimSpace(result.Output.Title) != "" {
+					item.Conversation.Title = result.Output.Title
+				}
 			}
 		}
-		p.Current++
-		raw, _ := preparationJSON(p)
+		p.Current += len(indices)
+		p.BatchCurrent++
+		raw, err := preparationJSON(p)
+		if err != nil {
+			return err
+		}
 		if err := UserTransaction(ctx, db, run.UserID, func(tx *gorm.DB) error {
 			if err := ownedRunUpdate(ctx, tx, run.ID, job, "running", map[string]any{"preparation_json": raw}); err != nil {
 				return err
 			}
-			if result.Status == "succeeded" && item.Reason != "summary_failed" {
-				var conv orm.Conversation
-				if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id=? AND create_user_id=?", item.Conversation.ID, run.UserID).Take(&conv).Error; err != nil {
-					return err
+			for position, i := range indices {
+				item, result := &p.Items[i], results[position]
+				if result.Status == "succeeded" && item.Reason != "summary_failed" {
+					var conv orm.Conversation
+					if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id=? AND create_user_id=?", item.Conversation.ID, run.UserID).Take(&conv).Error; err != nil {
+						return err
+					}
+					if err := openingPreparer.Persist(ctx, tx, conv, item.Frozen, result); err != nil {
+						return err
+					}
 				}
-				if err := openingPreparer.Persist(ctx, tx, conv, item.Frozen, result); err != nil {
+				if err := tx.Model(&orm.ConversationOrganizerSnapshotItem{}).Where("run_id=? AND conversation_id=?", run.ID, item.Conversation.ID).Updates(map[string]any{"title": item.Conversation.Title, "summary": item.Conversation.Summary, "preparation_status": "done", "preparation_reason": item.Reason, "preparation_error": item.ErrorCode}).Error; err != nil {
 					return err
 				}
 			}
-			return tx.Model(&orm.ConversationOrganizerSnapshotItem{}).Where("run_id=? AND conversation_id=?", run.ID, item.Conversation.ID).Updates(map[string]any{"title": item.Conversation.Title, "summary": item.Conversation.Summary, "preparation_status": "done", "preparation_reason": item.Reason, "preparation_error": item.ErrorCode}).Error
+			return nil
 		}); err != nil {
 			return err
 		}
 		run.PreparationJSON = raw
 	}
+
 	var snapshot organizerSnapshot
 	if err := json.Unmarshal(run.SnapshotJSON, &snapshot); err != nil {
 		return err
