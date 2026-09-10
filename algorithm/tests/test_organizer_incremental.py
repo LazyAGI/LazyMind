@@ -8,7 +8,7 @@ import uuid
 
 import pytest
 
-from lazymind.chat.service.llm_task import LLMTaskRequest
+from lazymind.chat.service.llm_task import LLMTaskCallError, LLMTaskRequest
 from lazymind.chat.service.conversation_organizer import organize_step
 from lazymind.chat.service import organizer_stream as supervisor
 
@@ -29,9 +29,9 @@ def test_incremental_decision_and_audit():
     assert result['processed'] == 1
     assert result['assignments'] == [{'id': 'c1', 'group_id': 'new_1'}]
     audited, _ = organize_step(request(phase='audit', scope='工作任务', identity=result['identity']),
-                              call=lambda *args, **kwargs: '{"keep":["c1"],"reject":[]}')
+                               call=lambda *args, **kwargs: '{"keep":["c1"],"reject":[]}')
     assert audited['accepted']
-    with pytest.raises(Exception):
+    with pytest.raises(LLMTaskCallError):
         organize_step(request(phase='audit', scope='工作任务', identity='wrong'), call=model)
 
 
@@ -42,7 +42,8 @@ def test_cancel_before_start_and_expired_requests():
         with pytest.raises(Exception) as canceled:
             await supervisor.stream_execution(execution, request())
         assert canceled.value.status_code == 409
-        expired = request(); expired.options['execution_issued_at'] = time.time() - 400
+        expired = request()
+        expired.options['execution_issued_at'] = time.time() - 400
         with pytest.raises(Exception) as rejected:
             await supervisor.stream_execution(str(uuid.uuid4()), expired)
         assert rejected.value.status_code == 409
@@ -126,7 +127,8 @@ def test_parent_pipe_eof_terminates_worker(tmp_path):
     # Hold execution in a controlled model task, while running the real worker entrypoint.
     from lazymind.chat.service import organizer_worker
     package = tmp_path / 'fixture_worker'
-    package.mkdir(); (package / '__init__.py').write_text('')
+    package.mkdir()
+    (package / '__init__.py').write_text('')
     (package / 'worker.py').write_text(open(organizer_worker.__file__).read())
     (package / 'llm_task.py').write_text('''import time
 class LLMTaskRequest:
@@ -135,25 +137,31 @@ class LLMTaskRequest:
 def run_llm_task(request):
     time.sleep(120)
 ''')
-    (package / 'conversation_organizer.py').write_text('from contextvars import ContextVar\n_STREAM_SINK = ContextVar("sink")\n')
+    (package / 'conversation_organizer.py').write_text(
+        'from contextvars import ContextVar\n_STREAM_SINK = ContextVar("sink")\n')
     env = {**os.environ, 'PYTHONPATH': str(tmp_path)}
     proc = subprocess.Popen([sys.executable, '-m', 'fixture_worker.worker', str(os.getpid())],
                             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
     try:
-        proc.stdin.write(b'{}\n'); proc.stdin.flush()
+        proc.stdin.write(b'{}\n')
+        proc.stdin.flush()
         # EOF is produced by both parent death and closing the parent's sole write descriptor.
         proc.stdin.close()
         assert proc.wait(timeout=10) != 0
     finally:
-        if proc.poll() is None: proc.kill(); proc.wait()
-        proc.stdout.close(); proc.stderr.close()
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+        proc.stdout.close()
+        proc.stderr.close()
 
 
 def test_parent_crash_reaps_worker(tmp_path):
     import psutil
     from lazymind.chat.service import organizer_worker
     package = tmp_path / 'fixture_worker'
-    package.mkdir(); (package / '__init__.py').write_text('')
+    package.mkdir()
+    (package / '__init__.py').write_text('')
     (package / 'worker.py').write_text(open(organizer_worker.__file__).read())
     (package / 'llm_task.py').write_text('''import time
 class LLMTaskRequest:
@@ -161,7 +169,8 @@ class LLMTaskRequest:
     def model_validate_json(raw): return raw
 def run_llm_task(request): time.sleep(120)
 ''')
-    (package / 'conversation_organizer.py').write_text('from contextvars import ContextVar\n_STREAM_SINK = ContextVar("sink")\n')
+    (package / 'conversation_organizer.py').write_text(
+        'from contextvars import ContextVar\n_STREAM_SINK = ContextVar("sink")\n')
     script = '''import subprocess,sys,os,time
 worker=subprocess.Popen([sys.executable,'-m','fixture_worker.worker',str(os.getpid())],stdin=subprocess.PIPE,stdout=subprocess.DEVNULL)
 worker.stdin.write(b'{}\\n');worker.stdin.flush()
@@ -172,7 +181,8 @@ time.sleep(120)
                               env={**os.environ, 'PYTHONPATH': str(tmp_path)}, text=True)
     pid = int(parent.stdout.readline())
     try:
-        parent.kill(); parent.wait(timeout=5)
+        parent.kill()
+        parent.wait(timeout=5)
         deadline = time.monotonic() + 10
         while time.monotonic() < deadline:
             try:
@@ -184,7 +194,9 @@ time.sleep(120)
         else:
             pytest.fail('worker survived parent crash')
     finally:
-        if parent.poll() is None: parent.kill(); parent.wait()
+        if parent.poll() is None:
+            parent.kill()
+            parent.wait()
         parent.stdout.close()
         try:
             child = psutil.Process(pid)

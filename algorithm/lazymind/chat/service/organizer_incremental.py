@@ -28,12 +28,15 @@ def _validate_response(response, cards, items, allow_create):
                 or any(not isinstance(v, str) for k, v in op.items() if k != 'source_ids')):
             raise ValueError('invalid candidate operation')
         if op['op'] == 'create':
-            if not allow_create or not isinstance(op['id'], str) or not re.fullmatch(r'new_[1-9][0-9]*', op['id']) or op['id'] in known:
+            if (not allow_create or not isinstance(op['id'], str)
+                    or not re.fullmatch(r'new_[1-9][0-9]*', op['id']) or op['id'] in known):
                 raise ValueError('invalid temporary candidate ID')
             known.add(op['id'])
             candidates.add(op['id'])
         elif op['op'] == 'merge':
-            if not isinstance(op['source_ids'], list) or any(not isinstance(x, str) or x not in candidates for x in op['source_ids']) or op['target_id'] not in candidates:
+            if (not isinstance(op['source_ids'], list)
+                    or any(not isinstance(x, str) or x not in candidates for x in op['source_ids'])
+                    or op['target_id'] not in candidates):
                 raise ValueError('unknown or formal candidate target')
         elif op['id'] not in candidates:
             raise ValueError('unknown or formal candidate target')
@@ -96,9 +99,11 @@ def organize(request, call=None):
                         reduced.append(pair[0])
                         continue
                     reduced.append(engine._model_json(request, {
-                        'mode': 'compare_directory_shards', **engine._model_directory(engine._referenced_cards(cards, pair)),
+                        'mode': 'compare_directory_shards',
+                        **engine._model_directory(engine._referenced_cards(cards, pair)),
                         'conversations': [item.model_dump() for item in items], 'shard_proposals': pair,
-                        'instruction': '综合分块，保留准确匹配，完整输出本批assignments。' + ('本次是最终归并，可以统一创建候选。' if len(responses) == 2 else '本次不是最终归并，不得create。'),
+                        'instruction': '综合分块，保留准确匹配，完整输出本批assignments。' + (
+                            '本次是最终归并，可以统一创建候选。' if len(responses) == 2 else '本次不是最终归并，不得create。'),
                     }, call=call))
                     calls += 1
                     _validate_response(reduced[-1], engine._referenced_cards(cards, pair), items, len(responses) == 2)
