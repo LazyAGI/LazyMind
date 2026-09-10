@@ -1572,5 +1572,6 @@
   "2002622": { "en-US": "e2c only supports choice questions", "zh-CN": "英译中仅支持选择题" },
   "2002623": { "en-US": "The review session has no previewed questions", "zh-CN": "复习会话中没有已预览的题目" },
   "2002624": { "en-US": "The review item has already been answered", "zh-CN": "该复习题已经作答" },
-  "2002625": { "en-US": "The review session still has remaining questions", "zh-CN": "复习会话仍有未完成的题目" }
+  "2002625": { "en-US": "The review session still has remaining questions", "zh-CN": "复习会话仍有未完成的题目" },
+  "2002626": { "en-US": "Failed to update the model", "zh-CN": "更新模型失败" }
 }
