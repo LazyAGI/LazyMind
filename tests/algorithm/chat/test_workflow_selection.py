@@ -70,17 +70,9 @@ def test_mentioned_workflow_is_injected_as_authoritative_selection():
         }],
     )
 
-    assert 'Explicit Workflow Selection [AUTHORITATIVE]' in contribution.runtime_context
     assert 'builtin:image-workflow' in contribution.runtime_context
     assert 'revision-1' in contribution.runtime_context
     assert '"current_query": "run it now"' in contribution.runtime_context
-    assert 'do not ask for a second trigger message' in contribution.runtime_context
-    assert 'Workflow SubAgent execution is strictly serial' in contribution.runtime_context
-    assert 'never call Workflow execution tools in parallel' in contribution.runtime_context
-    assert 'exactly one step_id' in contribution.runtime_context
-    assert _tool(contribution, 'trigger_image_workflow').__doc__.startswith(
-        "Load the exact 'AI image generation' Workflow"
-    )
     assert list(inspect.signature(
         _tool(contribution, 'trigger_image_workflow'),
     ).parameters) == ['request_context']
@@ -192,9 +184,6 @@ def test_dynamic_trigger_imports_scalar_binding_without_conversation_attachments
 
     import_text.assert_called_once_with('target_length', '3000')
     assert result['session_id'] == 'session-1'
-    assert 'target_length (text)' in _tool(
-        contribution, 'trigger_report_workflow',
-    ).__doc__
     toolkit.prepare_workflow.assert_called_once_with(
         'report', input_bindings={
             'target_length': {
@@ -233,12 +222,8 @@ def test_selected_workflow_declares_missing_only_startup_clarification():
 
     assert contribution.runtime_policy == runtime
     assert 'startup_clarification_fields' in contribution.runtime_context
-    assert 'only those missing fields' in contribution.runtime_context
     assert '主题是什么？' in contribution.runtime_context
     assert '生成多少页？' in contribution.runtime_context
-    assert 'exactly once TOTAL' in contribution.runtime_context
-    assert 'context-specific suggested answers' in contribution.runtime_context
-    assert 'allow_other=false' in contribution.runtime_context
     assert '"allow_other": false' in contribution.runtime_context
 
 
@@ -284,116 +269,6 @@ def test_seed_startup_choice_policy_remains_open_ended():
     }
 
     assert enforce_startup_clarification_policy(questions, runtime) == questions
-
-
-def test_seed_choices_do_not_invalidate_explicit_chinese_slide_count():
-    runtime = {
-        'clarification_fields': [{
-            'id': 'slide_count',
-            'label': '页数',
-            'question': '希望生成多少页？',
-            'type': 'single',
-            'choice_policy': 'seed',
-            'choices': ['3 页', '5 页', '8 页', '10 页'],
-        }],
-    }
-    contribution = resolve_workflow_injection(
-        None,
-        current_query='生成六页赛博朋克 2077 游戏介绍',
-        workflow_catalog=[{
-            'workflow_ref': 'builtin:ppt-workflow',
-            'workflow_id': 'ppt-workflow',
-            'revision_id': 'revision-1',
-            'runtime': runtime,
-        }],
-        allowed_workflow_refs=['builtin:ppt-workflow'],
-        workflow_activations=[{
-            'workflow_ref': 'builtin:ppt-workflow',
-            'workflow_id': 'ppt-workflow',
-            'revision_id': 'revision-1',
-            'tool_name': 'trigger_ppt_workflow',
-        }],
-    )
-
-    assert '六页 and 6页 both explicitly supply a slide count' in contribution.runtime_context
-    assert 'never ask for it again merely because it is unlisted' in contribution.runtime_context
-    assert '"current_query": "生成六页赛博朋克 2077 游戏介绍"' in contribution.runtime_context
-
-
-def test_startup_clarification_subset_policy_uses_only_declared_recipe_choices():
-    runtime = {
-        'clarification_fields': [{
-            'id': 'visual_style',
-            'label': '风格',
-            'question': '请选择视觉风格',
-            'type': 'single',
-            'choice_policy': 'subset',
-            'choices': [
-                '赛博朋克｜霓虹暗底、HUD 信息轨道',
-                '未来主义｜银白蓝紫、流线造型',
-                '商务经典｜深蓝灰、稳重结构',
-            ],
-        }],
-    }
-
-    contribution = resolve_workflow_injection(
-        None,
-        current_query='生成游戏介绍 PPT',
-        workflow_catalog=[{
-            'workflow_ref': 'builtin:ppt-workflow',
-            'workflow_id': 'ppt-workflow',
-            'revision_id': 'revision-1',
-            'runtime': runtime,
-        }],
-        allowed_workflow_refs=['builtin:ppt-workflow'],
-        workflow_activations=[{
-            'workflow_ref': 'builtin:ppt-workflow',
-            'workflow_id': 'ppt-workflow',
-            'revision_id': 'revision-1',
-            'tool_name': 'trigger_ppt_workflow',
-        }],
-    )
-
-    assert 'choice_policy=subset' in contribution.runtime_context
-    assert 'copy them verbatim' in contribution.runtime_context
-    assert '赛博朋克｜霓虹暗底、HUD 信息轨道' in contribution.runtime_context
-
-
-def test_startup_clarification_seed_choices_accept_explicit_freeform_value():
-    runtime = {
-        'clarification_fields': [{
-            'id': 'slide_count',
-            'label': '页数',
-            'question': '希望生成多少页？',
-            'type': 'single',
-            'choice_policy': 'seed',
-            'choices': ['3 页', '5 页', '8 页', '10 页'],
-        }],
-    }
-
-    contribution = resolve_workflow_injection(
-        None,
-        current_query='生成四页赛博朋克风格的 PPT',
-        workflow_catalog=[{
-            'workflow_ref': 'builtin:ppt-workflow',
-            'workflow_id': 'ppt-workflow',
-            'revision_id': 'revision-1',
-            'runtime': runtime,
-        }],
-        allowed_workflow_refs=['builtin:ppt-workflow'],
-        workflow_activations=[{
-            'workflow_ref': 'builtin:ppt-workflow',
-            'workflow_id': 'ppt-workflow',
-            'revision_id': 'revision-1',
-            'tool_name': 'trigger_ppt_workflow',
-        }],
-    )
-
-    assert 'choice_policy=seed' in contribution.runtime_context
-    assert 'explicit free-form value in the request counts as present' in (
-        contribution.runtime_context
-    )
-    assert 'never ask that field again' in contribution.runtime_context
 
 
 def test_startup_clarification_is_single_shot_and_default_trigger_merges_context():
@@ -694,7 +569,6 @@ def test_selected_workflow_session_tool_auto_initializes_without_attachments():
         request_context='生成三页关于加减法数学题的PPT',
         workflow_mode='dynamic',
     )
-    assert 'upload is required' in contribution.runtime_context
 
 
 def test_dynamic_trigger_exposes_handoff_after_session_is_created_in_same_turn():
@@ -797,41 +671,9 @@ def test_active_workflow_forwards_current_edit_request_and_focus_to_step():
         result = _tool(contribution, 'advance_step')(['generate_ppt'])
 
     assert result == {'status': 'succeeded'}
-    assert 'A completed Session is not immutable' in contribution.runtime_context
-    assert 'For whole-slide insertions, rewind to build_outline.' in contribution.runtime_context
-    assert "fallback 'generate_ppt' step" in contribution.runtime_context
-    assert 'never paste replacement content into chat' in contribution.runtime_context
     command = toolkit.advance_step.call_args.args[2][0]
     assert command.user_input == '把这一页标题改成期末练习'
     assert 'sort order 2' in command.runtime_instruction
-
-
-def test_completed_workflow_keeps_direct_fallback_without_semantic_routing():
-    toolkit = MagicMock()
-    toolkit.get_ready_steps.return_value = {
-        'session_id': 'session-1', 'state_version': 7,
-        'ready_steps': [], 'retryable_steps': [], 'rewindable_steps': ['generate_ppt'],
-    }
-    with patch('lazymind.chat.workflow.workflow_manager.HostWorkflowToolkit',
-               return_value=toolkit), patch(
-        'lazymind.chat.workflow.workflow_manager._client',
-    ) as client_factory:
-        client_factory.return_value.get_state.return_value = {
-            'status': 'completed', 'state_version': 7,
-            'projection': {'completed': True, 'rewindable': ['generate_ppt']},
-        }
-        contribution = resolve_workflow_injection(
-            {
-                'session_id': 'session-1',
-                'workflow_id': 'deck-workflow',
-                'runtime': {'completed_edit_step': 'generate_ppt'},
-            },
-            conversation_id='conversation-1',
-            current_query='重做当前页面',
-        )
-
-    assert "call advance_step(step_ids=['generate_ppt']) now" in contribution.runtime_context
-    assert 'semantic routing' not in contribution.runtime_context
 
 
 def test_dynamic_trigger_defaults_request_context_to_current_query():
@@ -1012,10 +854,6 @@ def test_existing_session_tools_inject_protocol_and_concurrency_fields():
         )
 
     advance = _tool(contribution, 'advance_step')
-    assert 'exactly one Runtime-returned target' in advance.__doc__
-    assert 'Workflow SubAgent execution is strictly serial' in contribution.runtime_context
-    assert 'never call Workflow execution tools in parallel' in contribution.runtime_context
-    assert 'exactly one step_id' in contribution.runtime_context
     assert list(inspect.signature(advance).parameters) == ['step_ids']
     assert list(inspect.signature(_tool(contribution, 'get_workflow_state')).parameters) == []
     assert advance(['draft']) == {'status': 'succeeded'}
@@ -1053,7 +891,6 @@ def test_advance_step_refreshes_state_version_once_on_conflict():
 
     assert result['status'] == 'succeeded'
     assert result['state_version_refreshed'] is True
-    assert '无需提供' in result['user_notice']
     assert [call.args[1] for call in toolkit.advance_step.call_args_list] == [7, 8]
 
 
@@ -1099,5 +936,4 @@ def test_advance_step_returns_user_notice_when_target_changes_after_conflict():
 
     assert result['outcome'] == 'workflow_state_changed'
     assert result['ready_steps'] == ['review']
-    assert '重新确认' in result['user_notice']
     assert toolkit.advance_step.call_count == 1

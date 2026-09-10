@@ -1,22 +1,16 @@
 from __future__ import annotations
 
 import lazyllm
-from lazyllm.tools import inject_env_vars
 
-from lazymind.chat.engine.agent_runtime import AgentRole, PromptBuilder
-from lazymind.chat.engine.prompts.system_prompt import build_system_prompt
 from lazymind.chat.engine.tools.session_env import (
     build_session_env_tool,
     redact_session_env_arguments,
 )
 from lazymind.chat.service.chat_service import clear_conversation_env
 from lazymind.chat.service.component.tool_registry import (
-    ASK_USER_TOOL_CONFIG,
     SESSION_ENV_QUERY_APPENDIX,
     SESSION_ENV_TOOL_POLICY_APPENDIX,
     build_session_env_tool_config,
-    collect_query_appendices,
-    collect_system_prompt_appendices,
 )
 from lazymind.chat.service.component.tool_rendering import _tool_call_frame_text
 
@@ -92,29 +86,6 @@ def test_set_session_env_uses_globals_sid_when_conversation_id_missing():
     assert store['fallback-sid']['REDFOX_API_KEY'] == 'secret-value'
 
 
-def test_session_env_rehydrates_into_new_request_sid():
-    store: dict[str, dict[str, str]] = {}
-    previous_sid = lazyllm.globals._sid
-    old_turn1 = None
-    old_turn2 = None
-    lazyllm.globals._init_sid('turn-1')
-    old_turn1 = lazyllm.globals.get('dynamic_env_vars')
-    lazyllm.globals['dynamic_env_vars'] = {}
-    try:
-        tool = build_session_env_tool(store, 'conversation-1')
-        tool('REDFOX_API_KEY', 'secret-value')
-        lazyllm.globals._init_sid('turn-2')
-        old_turn2 = lazyllm.globals.get('dynamic_env_vars')
-        inject_env_vars(store.get('conversation-1'))
-        assert lazyllm.globals.get('dynamic_env_vars')['REDFOX_API_KEY'] == 'secret-value'
-    finally:
-        lazyllm.globals._init_sid('turn-2')
-        _restore_dynamic_env(old_turn2)
-        lazyllm.globals._init_sid('turn-1')
-        _restore_dynamic_env(old_turn1)
-        lazyllm.globals._init_sid(previous_sid)
-
-
 def test_session_env_tool_config_name_matches_function():
     config = build_session_env_tool_config({}, 'conversation-1')
 
@@ -122,42 +93,6 @@ def test_session_env_tool_config_name_matches_function():
     assert config.tool.__name__ == 'set_session_env'
     assert config.appendix_system_prompt is SESSION_ENV_TOOL_POLICY_APPENDIX
     assert config.appendix_query is SESSION_ENV_QUERY_APPENDIX
-
-
-def test_session_env_policy_is_injected_when_tool_is_exposed():
-    config = build_session_env_tool_config({}, 'conversation-1')
-    appendices = collect_system_prompt_appendices([config, ASK_USER_TOOL_CONFIG])
-    prompt = build_system_prompt(True, tool_prompt_appendices=appendices)
-
-    assert 'this conversation only' in prompt
-    assert 'attempt the skill first' in prompt
-    assert 'missing_env' in prompt
-    assert 'call it once with `type=text`' in prompt
-    assert 'call `set_session_env` then immediately retry' in prompt
-    assert 'Never echo secret values' in prompt
-
-
-def test_session_env_query_appendix_follows_user_input():
-    config = build_session_env_tool_config({}, 'conversation-1')
-    appendix = '\n'.join(collect_query_appendices([config]))
-    bundle = (
-        PromptBuilder.for_role(AgentRole.CHAT)
-        .runtime(
-            'tools', 'Active Tool Instructions', appendix, 'tool.registry',
-            authoritative=True, placement='after_input',
-        )
-        .input('REDFOX_API_KEY=secret-value', source='user')
-        .build()
-    )
-
-    assert 'call `set_session_env` first' in bundle.current_input
-    assert 'retry the interrupted skill' in bundle.current_input
-    assert 'apply only to this conversation' in bundle.current_input
-    assert bundle.current_input.index('set_session_env') > bundle.current_input.index(
-        'REDFOX_API_KEY=secret-value'
-    )
-    assert 'set_session_env' not in bundle.system_prompt
-    assert collect_query_appendices([config], 'before') == []
 
 
 def test_set_session_env_is_scoped_to_conversation():

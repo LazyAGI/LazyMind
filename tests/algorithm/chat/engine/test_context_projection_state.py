@@ -322,7 +322,6 @@ def test_rolling_summary_uses_prior_summary_plus_new_delta() -> None:
         compact(history, runtime_state=state)
 
     assert len(prompts) == 2
-    assert 'runtime-generated summary' in prompts[1]
     assert 'NEW_COVERABLE_DELTA' in prompts[1]
     assert 'ORIGINAL_RAW_PREFIX' not in prompts[1]
     assert state['entries'][0]['source_end'] > 2

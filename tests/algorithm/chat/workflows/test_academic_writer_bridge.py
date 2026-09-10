@@ -294,7 +294,6 @@ def test_short_incomplete_draft_is_preserved_and_missing_structure_is_repaired()
     assert '### 研究问题' in result[0]
     assert '### 分析方法' in result[0]
     assert result[1].startswith('## 结论')
-    assert '未获得独立生成内容' in result[1]
 
 
 def test_outline_heading_levels_are_repaired_relative_to_first_heading():

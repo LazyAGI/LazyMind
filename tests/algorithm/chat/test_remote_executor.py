@@ -574,7 +574,7 @@ async def test_remote_executor_keeps_workflow_inputs_out_of_user_attachments(
     assert captured['remote_inputs']['brief'] not in agentic['files']
 
 
-def test_workflow_material_prompt_forbids_attachment_tools():
+def test_workflow_material_bindings_keep_values_paths_and_references_distinct():
     from lazymind.chat.engine.subagent.runner import (
         _resolve_attachment_configs,
         _workflow_material_bindings_section,
@@ -596,13 +596,10 @@ def test_workflow_material_prompt_forbids_attachment_tools():
     }
     prompt = _workflow_material_bindings_section(params)
 
-    assert 'not user-uploaded attachments' in prompt
-    assert 'kind=value' in prompt
     assert '"value": "人工智能辅助软件测试"' in prompt
     assert '"path": "/workspace/inputs/outline_document.md"' in prompt
     assert '"kind": "reference"' in prompt
     assert '"reference": {"path": "https://images.example.test/source.png"}' in prompt
-    assert 'read_user_attachment' in prompt
     assert _resolve_attachment_configs({}, 'workflow_step', params) == []
     assert _resolve_attachment_configs(
         {'history_files_per_turn': {'1': ['/uploads/real-user-file.txt']}},

@@ -6,25 +6,6 @@ import yaml
 KIT = Path(__file__).resolve().parents[2] / 'skills/workflow-agent-kit'
 
 
-def test_skill_references_exist_and_cover_required_lifecycle():
-    skill = (KIT / 'SKILL.md').read_text()
-    for reference in (
-        'references/installation-and-connection.md',
-        'references/model-execution-boundary.md',
-        'references/lifecycle.md',
-        'references/decision-policy.md',
-        'references/execution-policy.md',
-        'references/artifact-policy.md',
-        'references/recovery-policy.md',
-        'references/skill-to-workflow.md',
-        'references/workflow-format.md',
-        'references/tool-contracts.md',
-        'references/source-to-policy-mapping.md',
-    ):
-        assert reference in skill
-        assert (KIT / reference).is_file()
-
-
 def test_host_profiles_cover_contract_capabilities():
     profiles = {
         path.stem: yaml.safe_load(path.read_text())

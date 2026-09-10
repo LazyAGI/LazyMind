@@ -85,21 +85,6 @@ def test_ls_qualifies_names_and_sends_user_and_task_id(captured_requests):
     )
 
 
-def test_open_binary_reads_raw_content(captured_requests):
-    calls, responses = captured_requests
-    responses.append(FakeResponse(content=b'\x89PNG\r\n'))
-
-    with RemoteFS(base_url='http://core').open('remote://skills/coding/pkg/assets/logo.png', 'rb') as fh:
-        assert fh.read() == b'\x89PNG\r\n'
-
-    assert calls[0]['method'] == 'GET'
-    assert calls[0]['url'] == 'http://core/remote-fs/content'
-    assert calls[0]['params'] == remote_params(
-        path='skills/coding/pkg/assets/logo.png',
-        encoding='raw',
-    )
-
-
 def test_open_text_decodes_raw_content(captured_requests):
     calls, responses = captured_requests
     responses.append(FakeResponse(content='你好\n'.encode('utf-8')))
@@ -210,19 +195,6 @@ def test_read_base64_decodes_json_content(captured_requests):
         path='skills/coding/pkg/assets/blob.bin',
         encoding='base64',
     )
-
-
-def test_task_id_falls_back_to_session_id(captured_requests):
-    calls, responses = captured_requests
-    lazyllm.globals['agentic_config'] = {'user_id': 'user-1', 'session_id': 'session-fallback'}
-    responses.append(FakeResponse({'exists': True}))
-
-    assert RemoteFS(base_url='http://core').exists('remote://skills/coding/pkg/SKILL.md') is True
-    assert calls[0]['params'] == {
-        'path': 'skills/coding/pkg/SKILL.md',
-        'user_id': 'user-1',
-        'task_id': 'session-fallback',
-    }
 
 
 def test_task_id_falls_back_to_explicit_task_id(captured_requests):

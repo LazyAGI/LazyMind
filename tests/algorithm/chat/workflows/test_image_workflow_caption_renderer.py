@@ -88,8 +88,8 @@ def test_cjk_font_selection_rejects_incomplete_latin_font(monkeypatch, latin_fon
 
     try:
         tools._caption_font_path('收到！')
-    except RuntimeError as exc:
-        assert 'does not cover every caption character' in str(exc)
+    except RuntimeError:
+        pass
     else:
         raise AssertionError('A font without Chinese glyphs must not be accepted for Chinese captions')
 

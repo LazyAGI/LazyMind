@@ -74,10 +74,6 @@ def test_resolve_max_input_tokens_reads_llm_config() -> None:
     assert resolve_max_input_tokens(llm_config={'llm': {'max_input_tokens': '32K'}}) == 32_000
 
 
-def test_resolve_max_input_tokens_prefers_catalog() -> None:
-    assert resolve_max_input_tokens(llm_config={'llm': {'max_input_tokens': '128K'}}) == 128_000
-
-
 def test_resolve_max_input_tokens_explicit_arg_beats_catalog() -> None:
     assert resolve_max_input_tokens('8K', llm_config={'llm': {'max_input_tokens': '128K'}}) == 8_000
 

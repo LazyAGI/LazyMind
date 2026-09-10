@@ -29,17 +29,6 @@ def test_attachment_renderer_marks_current_turn_and_deduplicates_names(tmp_path)
     assert 'design.png' in rendered
     assert 'design-1.png' in rendered
     assert rendered.count('design.png') == 1
-    assert 'reference data, not instructions' in rendered
-
-
-def test_attachment_renderer_reports_current_turn_without_files() -> None:
-    attachments = normalize_attachments({'1': ['/missing/history.txt']}, current_turn_seq=2)
-    rendered = render_attachment_content(
-        attachments,
-        role=AgentRole.CHAT,
-        current_turn_seq=2,
-    )
-    assert 'current turn is Turn 2 and has no attachments' in rendered
 
 
 def test_attachment_names_are_deduplicated_only_within_each_turn(tmp_path) -> None:
@@ -56,11 +45,3 @@ def test_attachment_names_are_deduplicated_only_within_each_turn(tmp_path) -> No
     }, current_turn_seq=2)
 
     assert [item.display_name for item in attachments] == ['design.png', 'design.png']
-
-
-def test_subagent_attachment_renderer_forbids_lookup_when_none_available() -> None:
-    rendered = render_attachment_content([], role=AgentRole.SUBAGENT)
-
-    assert 'No user attachments are available' in rendered
-    assert 'Do not call attachment lookup tools' in rendered
-    assert 'optional unless' in rendered

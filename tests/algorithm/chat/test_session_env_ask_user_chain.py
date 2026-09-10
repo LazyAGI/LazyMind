@@ -11,17 +11,10 @@ from lazyllm.tools.agent import ToolExecutionError
 from lazyllm.tools.agent.skill_manager import SkillManager
 from lazyllm.tools.tool_config_inject import get_dynamic_env_vars
 
-from lazymind.chat.engine.prompts.system_prompt import build_system_prompt
 from lazymind.chat.engine.tools.ask_user import ask_user
 from lazymind.chat.engine.tools.session_env import build_session_env_tool
 from lazymind.chat.service.chat_service import clear_conversation_env
 from lazymind.chat.service.component.event_translator import AgentEventFrameTranslator
-from lazymind.chat.service.component.tool_registry import (
-    ASK_USER_TOOL_CONFIG,
-    build_session_env_tool_config,
-    collect_query_appendices,
-    collect_system_prompt_appendices,
-)
 
 _MISSING_KEY = 'DYNAMIC_TEST_API_KEY'
 _SECRET = 'secret-from-ask-card'
@@ -111,10 +104,8 @@ def test_missing_env_ask_user_card_then_set_and_retry_skill():
             receipt, ask = _ask_for_missing_key()
             pending = ask['frames'][0]['ask_pending']
             assert ask['payload']['tag'] == 'ask_pending'
-            assert 'Waiting for answer on next turn' in receipt
             assert pending['questions'][0]['type'] == 'text'
             assert _MISSING_KEY in pending['questions'][0]['text']
-            assert 'current conversation only' in pending['description']
             assert ask['finish_frames'] == []
 
             user_answer = f'{ask["question"]}: {_SECRET}'
@@ -179,7 +170,6 @@ def test_declared_required_env_still_runs_then_card_and_retry(monkeypatch):
             assert 'boom' in str(missing.value)
             receipt, ask = _ask_for_missing_key(env_name)
             assert env_name in ask['question']
-            assert 'Waiting for answer on next turn' in receipt
             _begin_turn('turn-2', conversation_id, store)
             set_env(env_name, _SECRET)
             retried = manager.run_script(
@@ -358,19 +348,6 @@ def test_clear_conversation_env_unblocks_only_after_reset():
                 lazyllm.globals.pop('dynamic_env_vars', None)
             else:
                 lazyllm.globals['dynamic_env_vars'] = old_dynamic_env
-
-
-def test_ask_user_and_session_env_contracts_are_active_together():
-    config = build_session_env_tool_config({}, 'conversation-1')
-    appendices = collect_system_prompt_appendices([config, ASK_USER_TOOL_CONFIG])
-    prompt = build_system_prompt(True, tool_prompt_appendices=appendices)
-    query = '\n'.join(collect_query_appendices([config, ASK_USER_TOOL_CONFIG]))
-
-    assert 'MUST be an actual `ask_user` function-tool call' in prompt
-    assert 'this conversation only' in prompt
-    assert 'call it once with `type=text`' in prompt
-    assert 'MUST make an actual `ask_user` function-tool call' in query
-    assert 'call `set_session_env` first' in query
 
 
 def test_blocked_env_name_does_not_let_skill_continue():

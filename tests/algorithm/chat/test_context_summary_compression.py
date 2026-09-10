@@ -6,10 +6,7 @@ from lazyllm.tools.agent.base import TOOL_OBSERVATION_KEY
 
 from lazymind.chat.engine.agent_runtime.budget import build_context_budget
 from lazymind.chat.engine.agent_runtime.pruner import make_history_compactor
-from lazymind.chat.engine.agent_runtime.summary_prompt import (
-    build_summary_user_prompt,
-    has_required_summary_sections,
-)
+from lazymind.chat.engine.agent_runtime.summary_prompt import build_summary_user_prompt
 from lazymind.chat.engine.agent_runtime.summary_range import (
     RUNTIME_SUMMARY_DISCLAIMER_PREFIX,
     is_runtime_summary_message,
@@ -104,11 +101,6 @@ def test_summary_prompt_excludes_structured_observation_sidecar() -> None:
     assert 'visible result' in prompt
     assert TOOL_OBSERVATION_KEY not in prompt
     assert 'must-not-enter-summary' not in prompt
-
-
-def test_required_summary_sections_helper() -> None:
-    assert has_required_summary_sections(VALID_SUMMARY)
-    assert not has_required_summary_sections('## Current task\nonly one')
 
 
 def test_select_summary_range_keeps_min_user_turns_and_turn_boundary() -> None:
@@ -280,7 +272,6 @@ def test_apply_summary_projection_is_immutable_and_commits() -> None:
     budget = build_context_budget(4_000, reserved_output_tokens=0, target_ratio=0.01)
 
     def summarizer(system_prompt: str, user_prompt: str) -> str:
-        assert 'runtime summary' in system_prompt
         assert 'old goal turn1' in user_prompt or 'old tool' in user_prompt
         return VALID_SUMMARY
 

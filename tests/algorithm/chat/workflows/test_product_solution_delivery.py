@@ -1,6 +1,7 @@
+import yaml
+
 import importlib.util
 import json
-import re
 import sys
 import types
 from pathlib import Path
@@ -626,29 +627,18 @@ def test_non_writer_stage_loader_accepts_inline_scalar_materials(tmp_path):
 
 
 def test_product_workflow_keeps_scalar_inputs_as_values_and_files_as_paths():
-    root = Path(__file__).resolve().parents[4]
-    workflow_root = root / 'workflows' / 'product_solution_delivery'
-    state = (workflow_root / 'scenario' / 'state.yml').read_text(encoding='utf-8')
-    workflow = (workflow_root / 'workflow.yaml').read_text(encoding='utf-8')
-    slot_types = dict(re.findall(
-        r'^  - \{id: ([a-z][a-z0-9_]*), .* type: ([a-z_]+),',
-        workflow, flags=re.MULTILINE,
-    ))
-
-    for material, attributes in re.findall(
-        r'^      - \{material: ([a-z][a-z0-9_]*)([^}]*)\}',
-        state, flags=re.MULTILINE,
-    ):
-        transport_match = re.search(r'\btransport:\s*([a-z]+)', attributes)
-        transport = transport_match.group(1) if transport_match else 'auto'
-        if slot_types[material] in {'text', 'json'}:
-            assert transport in {'auto', 'value'}, (
-                f'{material} must remain an inline scalar for the product adapters'
-            )
+    root = Path(__file__).resolve().parents[4] / 'workflows' / 'product_solution_delivery'
+    state = yaml.safe_load((root / 'scenario/state.yml').read_text(encoding='utf-8'))
+    workflow = yaml.safe_load((root / 'workflow.yaml').read_text(encoding='utf-8'))
+    slot_types = {slot['id']: slot['type'] for slot in workflow['slots']}
+    bindings = [item for step in state['steps'].values() for item in step.get('inputs', [])]
+    assert bindings
+    for item in bindings:
+        transport = item.get('transport', 'auto')
+        if slot_types[item['material']] in {'text', 'json'}:
+            assert transport in {'auto', 'value'}
         else:
-            assert transport in {'auto', 'path'}, (
-                f'{material} must remain a file path for the product adapters'
-            )
+            assert transport in {'auto', 'path'}
 
 
 def test_delivery_loader_returns_metadata_without_large_document_bodies(tmp_path):

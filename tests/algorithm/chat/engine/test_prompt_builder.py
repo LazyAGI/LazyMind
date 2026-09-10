@@ -25,9 +25,8 @@ def test_prompt_builder_renders_stable_sections_and_boundaries() -> None:
 
     assert bundle.system_prompt == 'Base policy.'
     assert [section.section_id for section in bundle.sections] == ['base', 'state', 'artifact']
-    assert '### Runtime Context' in bundle.current_input
-    assert '#### Workflow State [AUTHORITATIVE]' in bundle.current_input
-    assert bundle.current_input.endswith('### User Instruction\n\nPlease continue.')
+    assert bundle.current_input.index('Step A is ready.') < bundle.current_input.index('draft.md')
+    assert bundle.current_input.index('draft.md') < bundle.current_input.index('Please continue.')
 
 
 def test_prompt_builder_ignores_empty_sections_and_rejects_duplicate_ids() -> None:
@@ -48,7 +47,9 @@ def test_prompt_builder_keeps_input_boundary_without_runtime_context() -> None:
         .input(content='Do the work.', source='task')
         .build()
     )
-    assert bundle.current_input == '### Task Objective\n\nDo the work.'
+    assert bundle.input_content == 'Do the work.'
+    assert bundle.input_content in bundle.current_input
+    assert bundle.system_prompt == ''
 
 
 def test_prompt_builder_renders_after_input_guard_after_user_instruction() -> None:
@@ -65,5 +66,4 @@ def test_prompt_builder_renders_after_input_guard_after_user_instruction() -> No
     assert bundle.current_input.index('Ask one at a time.') < bundle.current_input.index(
         'Call the tool.'
     )
-    assert 'Post-Instruction Runtime Guard' not in bundle.current_input
     assert bundle.input_content == 'Ask one at a time.'

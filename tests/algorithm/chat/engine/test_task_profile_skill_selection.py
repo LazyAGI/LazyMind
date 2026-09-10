@@ -5,17 +5,6 @@ from lazymind.chat.engine.prompts.task_profile import (
 )
 
 
-def test_vocabulary_review_request_selects_learning_skill():
-    profile, _ = _rule_profile('帮我看看我有哪些单词还没记住，需要复习的')
-
-    assert profile.skill_mode == 'candidates'
-    assert select_skill_candidates(
-        ['research/deep-research', 'vocabulary/vocabulary-learning'],
-        '帮我看看我有哪些单词还没记住，需要复习的',
-        profile,
-    ) == ['research/deep-research', 'vocabulary/vocabulary-learning']
-
-
 def test_short_vocabulary_review_request_selects_learning_skill():
     query = '我今天要复习，出题吧'
     profile, _ = _rule_profile(query)

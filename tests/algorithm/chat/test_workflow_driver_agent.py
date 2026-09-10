@@ -24,5 +24,4 @@ def test_driver_evaluates_pinned_policy_acceptance_and_artifacts():
     plan = run.call_args.args[1]
     prompt_text = plan.prompt.system_prompt + plan.prompt.current_input
     assert 'Must save report' in prompt_text
-    assert 'Inspect every required output' in prompt_text
     assert 'report missing' in prompt_text

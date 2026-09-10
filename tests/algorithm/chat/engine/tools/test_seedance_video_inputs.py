@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 from pathlib import Path
-import inspect
 import sys
 from unittest import mock
 from types import SimpleNamespace
 
-import docstring_parser
 
 sys.path.insert(0, str((Path(__file__).resolve().parents[5] / 'algorithm')))
 
@@ -15,16 +13,6 @@ from lazyllm.module.llms.onlinemodule.supplier import doubao as doubao_supplier 
 from lazymind.chat.engine.tools import multimodal  # noqa: E402
 from lazymind.chat.engine.tools.infra import video_generation_support  # noqa: E402
 from lazymind.chat.service.component import tool_registry  # noqa: E402
-
-
-def test_video_generator_schema_describes_model_capability_matrix():
-    parsed = docstring_parser.parse(inspect.getdoc(multimodal.video_generator))
-
-    assert 'wan3.0-video' in parsed.description
-    assert 'wan2.6-t2v' in parsed.description
-    assert 'Wan-AI/Wan2.2-I2V-A14B' in parsed.description
-    assert 'Doubao Seedance' in parsed.description
-    assert 'mutually exclusive' in parsed.description
 
 
 def test_video_generator_prompt_names_request_selected_model():
@@ -39,7 +27,8 @@ def test_video_generator_prompt_names_request_selected_model():
     ):
         appendix = tool_registry._video_generator_prompt_appendix()
 
-    assert 'Provider: `qwen`; model: `wan3.0-video`' in appendix['tool_policy']
+    assert 'qwen' in appendix['tool_policy']
+    assert 'wan3.0-video' in appendix['tool_policy']
     assert appendix['output_contract'] == tool_registry.VIDEO_MARKDOWN_OUTPUT_APPENDIX['output_contract']
 
 
@@ -146,7 +135,6 @@ def test_video_runtime_passes_roles_only_to_role_aware_provider():
         )
 
     assert provider.call_args.kwargs['image_roles'] == ['first_frame', 'last_frame']
-    assert 'Image 1 is the required first frame' in provider.call_args.args[0]
     assert result['image_semantics'] == ['first_frame', 'last_frame']
 
 

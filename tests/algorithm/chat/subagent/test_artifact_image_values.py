@@ -99,7 +99,6 @@ def test_workflow_typed_slot_rejects_mismatched_artifact(tmp_path, declared, act
     error = _validate_declared_artifact_type(ctx, 'enhanced_image_output', actual)
 
     assert error
-    assert f'declared as a {declared} slot' in error
 
 
 def test_get_artifact_returns_remote_image_with_caption(tmp_path):

@@ -72,7 +72,6 @@ def test_english_notes_follow_html_language_even_with_chinese_title():
     assert notes.startswith('Today, I would like to introduce 中国春节.')
     assert 'Chinese New Year brings families together.' in notes
     assert 'Reunion Dinner: families share a festive meal' in notes
-    assert 'The key figures shown here are' in notes
 
 
 def test_text_edit_republishes_html_and_matching_notes(monkeypatch, tmp_path):

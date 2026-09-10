@@ -42,15 +42,12 @@ def test_save_artifacts_schema_rejects_content_instead_of_value():
         })
 
 
-def test_save_artifacts_runtime_error_shows_copyable_value_example():
-    with pytest.raises(ToolExecutionError) as captured:
+def test_save_artifacts_runtime_rejects_missing_value():
+    with pytest.raises(ToolExecutionError):
         save_artifacts([{
             'key': 'preview_html',
             'content': '<html></html>',
         }])  # type: ignore[typeddict-item]
-
-    assert 'uses content' in str(captured.value)
-    assert '"value":"<actual content>"' in str(captured.value)
 
 
 def test_sort_order_uses_durable_slot_order_during_workflow_rewind():

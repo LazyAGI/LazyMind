@@ -1,6 +1,7 @@
+import yaml
+
 import importlib.util
 import json
-import re
 from pathlib import Path
 
 
@@ -25,36 +26,17 @@ def _load_document_builder():
 
 
 def test_workflow_feedback_path_bindings_use_path_transport():
-    root = Path(__file__).resolve().parents[4]
-    workflow_root = root / 'workflows' / 'academic_research_pipeline'
-    state = (workflow_root / 'scenario' / 'state.yml').read_text(encoding='utf-8')
-    workflow = (workflow_root / 'workflow.yaml').read_text(encoding='utf-8')
-    step_blocks = dict(re.findall(
-        r'^  ([a-z][a-z0-9_]*):\n(.*?)(?=^  [a-z][a-z0-9_]*:\n|\Z)',
-        state, flags=re.MULTILINE | re.DOTALL,
-    ))
-
-    checked = set()
-    for step_id, block in step_blocks.items():
-        for material in re.findall(
-            r'\bfeedback_path\s*=\s*([a-z][a-z0-9_]*)', block,
-        ):
-            assert re.search(
-                rf'- \{{id: {re.escape(material)}, .* type: text,', workflow,
-            )
-            assert re.search(
-                rf'- \{{material: {re.escape(material)}, [^}}]*transport: path[^}}]*\}}',
-                block,
-            ), (
-                f'{step_id}.{material} is passed to a feedback_path argument and must be '
-                'materialized as a Workflow path'
-            )
-            checked.add((step_id, material))
-
-    assert checked == {
-        ('revise_paper', 'revision_roadmap'),
-        ('second_revision', 're_review_report'),
-    }
+    root = Path(__file__).resolve().parents[4] / 'workflows' / 'academic_research_pipeline'
+    state = yaml.safe_load((root / 'scenario/state.yml').read_text(encoding='utf-8'))
+    workflow = yaml.safe_load((root / 'workflow.yaml').read_text(encoding='utf-8'))
+    slot_types = {slot['id']: slot['type'] for slot in workflow['slots']}
+    for step_id, material in (
+        ('revise_paper', 'revision_roadmap'), ('second_revision', 're_review_report'),
+    ):
+        bindings = {item['material']: item for item in state['steps'][step_id]['inputs']}
+        assert slot_types[material] == 'text'
+        assert bindings[material]['transport'] == 'path'
+        assert bindings[material]['required'] is True
 
 
 def test_normalize_academic_parameters_preserves_explicit_preflight_values():

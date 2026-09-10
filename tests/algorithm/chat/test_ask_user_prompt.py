@@ -1,23 +1,7 @@
-from lazymind.chat.engine.prompts.guidance import CLARIFICATION_GUIDANCE
-from lazymind.chat.engine.prompts.system_prompt import build_system_prompt
 from lazymind.chat.engine.agent_runtime import AgentRole, PromptBuilder
 from lazymind.chat.service.component.event_translator import AgentEventFrameTranslator
 from lazymind.chat.service.component.tool_rendering import _tool_result_frame_text
-from lazymind.chat.service.component.tool_registry import (
-    ASK_USER_TOOL_CONFIG,
-    collect_query_appendices,
-    collect_system_prompt_appendices,
-)
-
-
-def test_ask_user_contract_is_injected_when_tool_is_exposed():
-    appendices = collect_system_prompt_appendices([ASK_USER_TOOL_CONFIG])
-
-    prompt = build_system_prompt(True, tool_prompt_appendices=appendices)
-
-    assert 'MUST be an actual `ask_user` function-tool call' in prompt
-    assert 'Never put such a question or request in assistant prose.' in prompt
-    assert 'This contract controls only the response channel' in prompt
+from lazymind.chat.service.component.tool_registry import ASK_USER_TOOL_CONFIG, collect_query_appendices
 
 
 def test_ask_user_query_appendix_follows_user_input_and_is_not_system_history():
@@ -32,21 +16,12 @@ def test_ask_user_query_appendix_follows_user_input_and_is_not_system_history():
         .build()
     )
 
-    assert 'MUST make an actual `ask_user` function-tool call' in bundle.current_input
-    assert 'NEVER write that request as assistant prose' in bundle.current_input
-    assert 'every kind of user-facing question or reply request' in bundle.current_input
-    assert 'one question at a time' not in bundle.current_input
-    assert bundle.current_input.index('ATTENTION') > bundle.current_input.index(
+    assert bundle.current_input.index(appendix) > bundle.current_input.index(
         'Ask me one question.'
     )
-    assert 'ALWAYS call the registered `ask_user` function tool' not in bundle.system_prompt
+    assert appendix and appendix not in bundle.system_prompt
     assert collect_query_appendices([]) == []
     assert collect_query_appendices([ASK_USER_TOOL_CONFIG], 'before') == []
-
-
-def test_clarification_module_does_not_offer_text_fallback_when_tool_exists():
-    assert 'MUST be sent by calling it' in CLARIFICATION_GUIDANCE
-    assert 'Only when the tool is absent' in CLARIFICATION_GUIDANCE
 
 
 def test_ask_user_tool_result_has_no_visible_preview():

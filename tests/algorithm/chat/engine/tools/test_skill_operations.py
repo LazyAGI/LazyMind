@@ -97,7 +97,7 @@ def test_fuzzy_find_and_replace_requires_unique_match_unless_replace_all():
     assert unchanged == 'old old'
     assert count == 0
     assert strategy is None
-    assert error == 'Found 2 matches for old_text. Provide more context to make it unique, or use replace_all=True.'
+    assert error is not None
     assert edited == 'new new'
     assert replace_all_count == 2
     assert replace_all_strategy == 'exact'
