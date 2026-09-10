@@ -314,7 +314,8 @@ def _iso(dt: datetime | None) -> str:
 def _draft_dir() -> str:
     cfg = _agentic_config()
     root = chat_agent_workspace(str(cfg.get('user_id') or '0'), str(cfg.get('conversation_id') or 'default'))
-    path = os.path.join(root, '.mail_drafts')
+    _, path = _resolve_workspace_path(os.path.join(root, '.mail_drafts'),
+        str(cfg.get('user_id') or '0'), str(cfg.get('conversation_id') or 'default'))
     os.makedirs(path, exist_ok=True)
     return path
 
@@ -323,7 +324,9 @@ def _draft_path(draft_id: str) -> str:
     safe = re.sub(r'[^A-Za-z0-9_-]', '', str(draft_id or ''))
     if not safe:
         raise ToolExecutionError('draft_id is required')
-    return os.path.join(_draft_dir(), f'{safe}.json')
+    cfg = _agentic_config()
+    return _resolve_workspace_path(os.path.join(_draft_dir(), f'{safe}.json'),
+        str(cfg.get('user_id') or '0'), str(cfg.get('conversation_id') or 'default'))[1]
 
 
 def _load_draft(draft_id: str) -> dict[str, Any]:
@@ -809,9 +812,10 @@ class MailToolkit:
                 str(cfg.get('user_id') or '0'),
                 str(cfg.get('conversation_id') or 'default'),
             )
-            folder = os.path.join(workspace, 'mail_attachments')
-            os.makedirs(folder, exist_ok=True)
-            target = os.path.join(folder, filename)
+            _, target = _resolve_workspace_path(
+                os.path.join(workspace, 'mail_attachments', filename),
+                str(cfg.get('user_id') or '0'), str(cfg.get('conversation_id') or 'default'))
+            os.makedirs(os.path.dirname(target), exist_ok=True)
             with open(target, 'wb') as handle:
                 handle.write(raw)
             parsed = ''
@@ -966,6 +970,7 @@ class MailToolkit:
                 f'This preview is stale. The draft is now revision {expected_revision}. '
                 'Confirm the latest preview card; do not send from an older card.'
             )
+        draft['attachment_paths'] = _resolve_attachment_paths(draft.get('attachment_paths'))
         message = _build_message(draft, cred['email'])
         try:
             result = _backend(cred).send(message)

@@ -2,17 +2,26 @@ package chat
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/gorilla/mux"
 	"gorm.io/gorm"
 
+	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/localworkspace"
 	"lazymind/core/state"
@@ -272,7 +281,21 @@ func workspaceIdentityFixture(t *testing.T) (*gorm.DB, state.Store, localworkspa
 	t.Helper()
 	t.Setenv("LAZYMIND_RUNTIME_MODE", "local")
 	db := orm.MigrateAllModelsForTest(t)
-	stateStore := newRunDecisionTestStore(t)
+	// TEST_DB_DRIVER/TEST_DB_DSN already select an isolated PostgreSQL schema.
+	// An explicitly supplied Redis URL selects a disposable integration server;
+	// unique conversation IDs avoid clearing or depending on existing Redis keys.
+	var stateStore state.Store
+	if raw := os.Getenv("TEST_WORKSPACE_REDIS_URL"); raw != "" {
+		redisStore, err := state.NewRedisStoreFromURL(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		stateStore = redisStore
+		t.Cleanup(func() { _ = stateStore.Close() })
+	} else {
+		stateStore = newRunDecisionTestStore(t)
+	}
+	conversationID := fmt.Sprintf("identity-%d", time.Now().UnixNano())
 	corestore.Init(db.DB, nil, stateStore)
 	localworkspace.SetValidateOperationRunFunc(func(ctx context.Context, db *gorm.DB, ss state.Store, request localworkspace.OperationRequest) error {
 		if request.TaskID != "" {
@@ -292,13 +315,13 @@ func workspaceIdentityFixture(t *testing.T) (*gorm.DB, state.Store, localworkspa
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Create(&orm.Conversation{ID: "identity-conversation", IsTaskConv: true, BaseModel: orm.BaseModel{CreateUserID: "owner"}}).Error; err != nil {
+	if err := db.Create(&orm.Conversation{ID: conversationID, IsTaskConv: true, BaseModel: orm.BaseModel{CreateUserID: "owner"}}).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Create(&orm.ConversationWorkspaceBinding{ConversationID: "identity-conversation", WorkspaceID: grant.WorkspaceID, PermissionMode: localworkspace.PermissionAllowAll, PermissionVersion: 1}).Error; err != nil {
+	if err := db.Create(&orm.ConversationWorkspaceBinding{ConversationID: conversationID, WorkspaceID: grant.WorkspaceID, PermissionMode: localworkspace.PermissionAllowAll, PermissionVersion: 1}).Error; err != nil {
 		t.Fatal(err)
 	}
-	return db.DB, stateStore, localworkspace.OperationRequest{UserID: "owner", ConversationID: "identity-conversation", WorkspaceID: grant.WorkspaceID, Operation: localworkspace.OperationRead, Path: "read.txt", CallID: fmt.Sprintf("%d/call", time.Now().UnixMilli())}
+	return db.DB, stateStore, localworkspace.OperationRequest{UserID: "owner", ConversationID: conversationID, WorkspaceID: grant.WorkspaceID, Operation: localworkspace.OperationRead, Path: "read.txt", CallID: fmt.Sprintf("%d/call", time.Now().UnixMilli())}
 }
 
 func TestWorkspaceMainIdentityRequiresRegisteredLiveRun(t *testing.T) {
@@ -401,6 +424,389 @@ func TestWorkspaceWorkflowIdentityRequiresCurrentOwnedLease(t *testing.T) {
 			bad.CallID = fmt.Sprintf("%d/%s", time.Now().UnixMilli(), tc.name)
 			if _, err := localworkspace.PrepareOperation(t.Context(), db, ss, bad); err == nil {
 				t.Fatal("invalid workflow identity accepted")
+			}
+		})
+	}
+}
+
+// Reproduce against dedicated disposable backends with TEST_DB_DRIVER=postgres,
+// TEST_DB_DSN and TEST_WORKSPACE_REDIS_URL. No Redis database is flushed by tests.
+func workspaceConflict(err error) bool {
+	var app *common.AppError
+	return errors.As(err, &app) && app.HTTPStatus == http.StatusConflict
+}
+
+func TestWorkspaceBackendIntegration(t *testing.T) {
+	if os.Getenv("TEST_DB_DRIVER") != "postgres" && os.Getenv("TEST_WORKSPACE_REDIS_URL") == "" {
+		t.Skip("requires an explicit PostgreSQL or Redis integration backend")
+	}
+	setup := func(t *testing.T) (*gorm.DB, state.Store, localworkspace.OperationRequest, string) {
+		db, ss, req := workspaceIdentityFixture(t)
+		req.HistoryID, req.RunID = "backend-history", "backend-run"
+		if err := setChatRuntimeStatus(t.Context(), ss, req.ConversationID, req.HistoryID, "generating", "", req.RunID, nil); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Model(&orm.ConversationWorkspaceBinding{}).Where("conversation_id = ?", req.ConversationID).Update("permission_mode", localworkspace.PermissionAlwaysAsk).Error; err != nil {
+			t.Fatal(err)
+		}
+		var workspace orm.LocalWorkspace
+		if err := db.Where("id = ?", req.WorkspaceID).First(&workspace).Error; err != nil {
+			t.Fatal(err)
+		}
+		return db, ss, req, workspace.CanonicalPath
+	}
+	t.Run("concurrent prepare approve execute", func(t *testing.T) {
+		db, ss, req, root := setup(t)
+		req.Operation, req.Content = localworkspace.OperationAppend, "!"
+		// Hash the exact observed content rather than inventing a file version.
+		req.ExpectedVersion = fmt.Sprintf("%x", sha256.Sum256([]byte("content")))
+		results := make(chan localworkspace.OperationResult, 12)
+		errors := make(chan error, 12)
+		var workers sync.WaitGroup
+		for i := 0; i < 12; i++ {
+			workers.Add(1)
+			go func() {
+				defer workers.Done()
+				result, err := localworkspace.PrepareOperation(t.Context(), db, ss, req)
+				results <- result
+				errors <- err
+			}()
+		}
+		workers.Wait()
+		close(results)
+		close(errors)
+		for err := range errors {
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		id := ""
+		for result := range results {
+			if id == "" {
+				id = result.OperationID
+			}
+			if result.OperationID != id {
+				t.Fatal("concurrent prepare created different operations")
+			}
+		}
+		ready, err := localworkspace.PrepareOperation(t.Context(), db, ss, req)
+		if err != nil || ready.Status != "pending" {
+			t.Fatalf("prepare: %+v %v", ready, err)
+		}
+		if _, err := localworkspace.DecideOperation(t.Context(), db, ss, id, "allow_once", "other-owner"); err == nil {
+			t.Fatal("cross-owner approval accepted")
+		}
+		decisions := make(chan error, 12)
+		for i := 0; i < 12; i++ {
+			workers.Add(1)
+			go func() {
+				defer workers.Done()
+				_, err := localworkspace.DecideOperation(t.Context(), db, ss, id, "allow_once", req.UserID)
+				decisions <- err
+			}()
+		}
+		workers.Wait()
+		close(decisions)
+		winners := 0
+		for err := range decisions {
+			if err != nil && !workspaceConflict(err) {
+				t.Fatalf("concurrent approval: %v", err)
+			}
+			if err == nil {
+				winners++
+			}
+		}
+		if winners != 1 {
+			t.Fatalf("approval winners=%d", winners)
+		}
+		completed := make(chan localworkspace.OperationResult, 12)
+		executions := make(chan error, 12)
+		for i := 0; i < 12; i++ {
+			workers.Add(1)
+			go func() {
+				defer workers.Done()
+				result, err := localworkspace.ExecuteOperation(t.Context(), db, ss, id, req)
+				completed <- result
+				executions <- err
+			}()
+		}
+		workers.Wait()
+		close(completed)
+		close(executions)
+		for err := range executions {
+			if err != nil && !workspaceConflict(err) {
+				t.Fatalf("concurrent execution: %v", err)
+			}
+		}
+		winners = 0
+		for result := range completed {
+			if result.Status == "completed" {
+				winners++
+			}
+		}
+		data, err := os.ReadFile(filepath.Join(root, req.Path))
+		if err != nil || string(data) != "content!" || winners < 1 {
+			t.Fatalf("append=%q completed=%d err=%v", data, winners, err)
+		}
+		if _, err := localworkspace.ExecuteOperation(t.Context(), db, ss, id, req); err != nil {
+			t.Fatal(err)
+		}
+		data, _ = os.ReadFile(filepath.Join(root, req.Path))
+		if string(data) != "content!" {
+			t.Fatalf("receipt retry replayed append: %q", data)
+		}
+	})
+	t.Run("shared approval capacity", func(t *testing.T) {
+		db, ss, base, _ := setup(t)
+		base.Operation, base.Path, base.Content = localworkspace.OperationCreate, "new.txt", "new"
+		results := make(chan localworkspace.OperationResult, 24)
+		errors := make(chan error, 24)
+		var workers sync.WaitGroup
+		for i := 0; i < 24; i++ {
+			workers.Add(1)
+			go func(i int) {
+				defer workers.Done()
+				req := base
+				req.CallID = fmt.Sprintf("%d/capacity-%d", time.Now().UnixMilli(), i)
+				result, err := localworkspace.PrepareOperation(t.Context(), db, ss, req)
+				results <- result
+				errors <- err
+			}(i)
+		}
+		workers.Wait()
+		close(results)
+		close(errors)
+		for err := range errors {
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		pending, full := 0, 0
+		for result := range results {
+			if result.Status == "pending" {
+				pending++
+			}
+			if result.Reason == "approval_capacity" {
+				full++
+			}
+		}
+		if pending != 16 || full != 8 {
+			t.Fatalf("pending=%d full=%d", pending, full)
+		}
+	})
+	t.Run("revoke fences approved run", func(t *testing.T) {
+		db, ss, req, root := setup(t)
+		notifications := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
+		t.Cleanup(notifications.Close)
+		t.Setenv("LAZYMIND_CHAT_SERVICE_URL", notifications.URL)
+		localworkspace.SetStopConversationFunc(func(ctx context.Context, owner, conversation string) error {
+			return StopConversationExecution(ctx, db, ss, owner, conversation, "", "stopped by user")
+		})
+		t.Cleanup(func() { localworkspace.SetStopConversationFunc(nil) })
+		req.Operation, req.Path, req.Content = localworkspace.OperationCreate, "revoked.txt", "never"
+		prepared, err := localworkspace.PrepareOperation(t.Context(), db, ss, req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := localworkspace.DecideOperation(t.Context(), db, ss, prepared.OperationID, "allow_once", req.UserID); err != nil {
+			t.Fatal(err)
+		}
+		r := httptest.NewRequest(http.MethodPost, "/local-workspaces/"+req.WorkspaceID+":revoke", strings.NewReader(`{"version":1}`))
+		r.Header.Set("X-User-Id", req.UserID)
+		r = mux.SetURLVars(r, map[string]string{"workspace_id": req.WorkspaceID})
+		w := httptest.NewRecorder()
+		localworkspace.Revoke(w, r)
+		if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"stop_failed_count":0`) {
+			t.Fatalf("revoke=%d %s", w.Code, w.Body.String())
+		}
+		if _, err := localworkspace.ExecuteOperation(t.Context(), db, ss, prepared.OperationID, req); err == nil {
+			t.Fatal("approved operation survived revoke")
+		}
+		if _, err := os.Stat(filepath.Join(root, req.Path)); !os.IsNotExist(err) {
+			t.Fatalf("revoked file exists: %v", err)
+		}
+		if err := ValidateWorkspaceRun(t.Context(), ss, req); err == nil {
+			t.Fatal("run survived explicit revoke cancellation")
+		}
+	})
+	t.Run("separate processes consume one operation", func(t *testing.T) {
+		if os.Getenv("TEST_DB_DRIVER") != "postgres" || os.Getenv("TEST_WORKSPACE_REDIS_URL") == "" {
+			t.Skip("requires both PostgreSQL and Redis")
+		}
+		db, ss, req, root := setup(t)
+		req.Operation, req.Content, req.ExpectedVersion = localworkspace.OperationAppend, "!", fmt.Sprintf("%x", sha256.Sum256([]byte("content")))
+		prepared, err := localworkspace.PrepareOperation(t.Context(), db, ss, req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := localworkspace.DecideOperation(t.Context(), db, ss, prepared.OperationID, "allow_once", req.UserID); err != nil {
+			t.Fatal(err)
+		}
+		var schema string
+		if err := db.Raw("SELECT current_schema()").Scan(&schema).Error; err != nil {
+			t.Fatal(err)
+		}
+		u, err := url.Parse(os.Getenv("TEST_DB_DSN"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		q := u.Query()
+		q.Set("search_path", schema)
+		u.RawQuery = q.Encode()
+		spec, _ := json.Marshal(struct {
+			Request     localworkspace.OperationRequest
+			OperationID string
+		}{req, prepared.OperationID})
+		binary, err := os.Executable()
+		if err != nil {
+			t.Fatal(err)
+		}
+		commands := make([]*exec.Cmd, 6)
+		for i := range commands {
+			commands[i] = exec.CommandContext(t.Context(), binary, "-test.run=^TestWorkspaceBackendExecutionWorker$", "-test.v")
+			commands[i].Env = append(os.Environ(), "TEST_WORKSPACE_WORKER_SPEC="+string(spec), "TEST_WORKSPACE_WORKER_DSN="+u.String())
+		}
+		outputs := make(chan error, len(commands))
+		var workers sync.WaitGroup
+		for _, command := range commands {
+			workers.Add(1)
+			go func(command *exec.Cmd) {
+				defer workers.Done()
+				output, err := command.CombinedOutput()
+				if err != nil {
+					outputs <- fmt.Errorf("worker failed: %v: %s", err, output)
+				} else {
+					outputs <- nil
+				}
+			}(command)
+		}
+		workers.Wait()
+		close(outputs)
+		for err := range outputs {
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		data, err := os.ReadFile(filepath.Join(root, req.Path))
+		if err != nil || string(data) != "content!" {
+			t.Fatalf("multiprocess append=%q err=%v", data, err)
+		}
+		result, err := localworkspace.ExecuteOperation(t.Context(), db, ss, prepared.OperationID, req)
+		if err != nil || result.Status != "completed" {
+			t.Fatalf("receipt=%+v %v", result, err)
+		}
+	})
+}
+
+func TestWorkspaceBackendExecutionWorker(t *testing.T) {
+	raw := os.Getenv("TEST_WORKSPACE_WORKER_SPEC")
+	if raw == "" {
+		t.Skip("subprocess helper")
+	}
+	var spec struct {
+		Request     localworkspace.OperationRequest
+		OperationID string
+	}
+	if err := json.Unmarshal([]byte(raw), &spec); err != nil {
+		t.Fatal(err)
+	}
+	db, err := orm.Connect(orm.DriverPostgres, os.Getenv("TEST_WORKSPACE_WORKER_DSN"))
+	if err != nil {
+		t.Fatal("worker database unavailable")
+	}
+	sqlDB, _ := db.DB.DB()
+	defer sqlDB.Close()
+	ss, err := state.NewRedisStoreFromURL(os.Getenv("TEST_WORKSPACE_REDIS_URL"))
+	if err != nil {
+		t.Fatal("worker state unavailable")
+	}
+	defer ss.Close()
+	corestore.Init(db.DB, nil, ss)
+	localworkspace.SetValidateOperationRunFunc(func(ctx context.Context, _ *gorm.DB, ss state.Store, req localworkspace.OperationRequest) error {
+		return ValidateWorkspaceRun(ctx, ss, req)
+	})
+	if _, err := localworkspace.ExecuteOperation(t.Context(), db.DB, ss, spec.OperationID, spec.Request); err != nil && !workspaceConflict(err) {
+		t.Fatal(err)
+	}
+}
+
+// Opt-in cross-language HTTP integration uses only temporary DBs and file trees.
+// It does not invoke a model, auth-service login, or the user's running Local stack.
+func TestWorkspacePythonCoreHTTP(t *testing.T) {
+	python := os.Getenv("LAZYMIND_WORKSPACE_E2E_PYTHON")
+	if python == "" {
+		t.Skip("set LAZYMIND_WORKSPACE_E2E_PYTHON to the existing test interpreter")
+	}
+	root, err := filepath.Abs("../../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, actor := range []string{"main", "subagent", "workflow"} {
+		t.Run(actor, func(t *testing.T) {
+			db, ss, request := workspaceIdentityFixture(t)
+			if err := db.Model(&orm.ConversationWorkspaceBinding{}).Where("conversation_id = ?", request.ConversationID).Update("permission_mode", localworkspace.PermissionAlwaysAsk).Error; err != nil {
+				t.Fatal(err)
+			}
+			identity := map[string]string{}
+			if actor == "main" {
+				identity = map[string]string{"history_id": "http-history", "run_id": "http-run"}
+				if err := setChatRuntimeStatus(t.Context(), ss, request.ConversationID, identity["history_id"], "generating", "", identity["run_id"], nil); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				kind := "research"
+				if actor == "workflow" {
+					kind = "workflow_step"
+				}
+				task := orm.SubAgentTask{ID: request.ConversationID + "-child", ConversationID: request.ConversationID, CreateUserID: "owner", AgentType: kind, Status: "running", Mode: "auto", InputSlots: json.RawMessage(`[]`), OutputSlots: json.RawMessage(`[]`)}
+				if err := db.Create(&task).Error; err != nil {
+					t.Fatal(err)
+				}
+				identity = map[string]string{"task_id": task.ID, "generation": "1"}
+				if actor == "subagent" {
+					key := "rag/subagent/execution:" + task.ID
+					if err := ss.Set(t.Context(), key, []byte("1"), time.Hour); err != nil {
+						t.Fatal(err)
+					}
+					t.Cleanup(func() { _ = ss.Del(context.Background(), key) })
+				} else {
+					expiry := time.Now().Add(time.Hour)
+					revision := orm.WorkflowRevision{ID: request.ConversationID + "-revision", CompiledGraph: json.RawMessage(`{"nodes":{"step":{"legacy_tools":["local_fs"]}}}`)}
+					session := orm.WorkflowSession{ID: request.ConversationID + "-session", WorkflowRevisionID: revision.ID, ConversationID: request.ConversationID, CreateUserID: "owner", Status: "active"}
+					step := orm.WorkflowSessionStep{ID: request.ConversationID + "-attempt", SessionID: session.ID, TaskID: task.ID, StepID: "step", Status: "running", Validity: "effective", FencingGeneration: 1, LeaseToken: "http-lease", LeaseExpiresAt: &expiry}
+					for _, row := range []any{&revision, &session, &step} {
+						if err := db.Create(row).Error; err != nil {
+							t.Fatal(err)
+						}
+					}
+					identity["attempt_id"], identity["lease_token"] = step.ID, step.LeaseToken
+				}
+			}
+			t.Setenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN", "isolated-http-test")
+			router := mux.NewRouter()
+			router.HandleFunc("/internal/conversations/{conversation_id}/workspace-operations:prepare", localworkspace.InternalPrepareOperation).Methods("POST")
+			router.HandleFunc("/internal/conversations/{conversation_id}/workspace-operations/{operation_id}", localworkspace.InternalOperationStatus).Methods("GET")
+			router.HandleFunc("/internal/conversations/{conversation_id}/workspace-operations/{operation_id}:execute", localworkspace.InternalExecuteOperation).Methods("POST")
+			router.HandleFunc("/conversations/{conversation_id}:workspace-approvals", localworkspace.ListOperationApprovals).Methods("GET")
+			router.HandleFunc("/conversations/{conversation_id}/workspace-approvals/{operation_id}:decide", localworkspace.DecideOperationHandler).Methods("POST")
+			server := httptest.NewServer(router)
+			defer server.Close()
+			snapshot, err := localworkspace.ResolveForConversation(t.Context(), db, "owner", request.ConversationID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fixture, _ := json.Marshal(map[string]any{"url": server.URL, "token": "isolated-http-test", "conversation": request.ConversationID, "workspace": request.WorkspaceID, "root": snapshot.Root, "identity": identity})
+			ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, python, "-m", "pytest", "tests/algorithm/chat/test_workspace_authorization_contract.py::test_workspace_real_core_http_roundtrip", "-q")
+			cmd.Dir = root
+			cmd.Env = append(os.Environ(), "PYTHONPATH="+filepath.Join(root, "algorithm")+string(os.PathListSeparator)+filepath.Join(root, "algorithm/lazyllm"), "LAZYMIND_WORKSPACE_HTTP_FIXTURE="+string(fixture))
+			output, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("%s HTTP integration: %v\n%s", actor, err, output)
+			}
+			if !strings.Contains(string(output), "1 passed") {
+				t.Fatalf("Python test not executed: %s", output)
 			}
 		})
 	}

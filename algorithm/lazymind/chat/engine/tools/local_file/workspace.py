@@ -21,6 +21,7 @@ from lazyllm.tools.agent.file_tool import (
 )
 
 from lazymind.config import config as _cfg
+from lazymind.chat.engine.tools.local_fs import LocalFileToolkit
 
 from .resolver import resolve_text_target
 from .window import (
@@ -118,7 +119,7 @@ def _resolve_workspace_path(path: str, user_id: str, conversation_id: str) -> tu
     workspace = os.path.realpath(chat_agent_workspace(user_id, conversation_id))
     candidate = path if os.path.isabs(path) else os.path.join(workspace, path)
     resolved = os.path.realpath(candidate)
-    if _cfg['trusted_local_mode']:
+    if _file_tool_root(workspace) is None:
         return workspace, resolved
     try:
         inside_workspace = os.path.commonpath((workspace, resolved)) == workspace
@@ -138,7 +139,19 @@ def _workspace_file_resource(arguments: Dict[str, Any], key: str = 'path'):
 
 
 def _file_tool_root(workspace: str) -> Optional[str]:
-    return None if _cfg['trusted_local_mode'] else workspace
+    # A bound workspace never inherits the legacy unrestricted host-file mode.
+    tools = LocalFileToolkit()
+    agentic = lazyllm.globals.get('agentic_config') or {}
+    parent = agentic.get('parent_agentic_config')
+    bound = tools._workspace_context() is not None or tools._has_workspace_source()
+    if not bound and isinstance(parent, dict):
+        parent_context = parent.get('_core_workspace_context') or parent.get('workspace_context')
+        bound = isinstance(parent_context, dict) and bool(parent_context.get('workspace_id'))
+        bound = bound or any(
+            isinstance(item, dict) and str(item.get('source_id') or '').startswith('local-workspace:')
+            for item in parent.get('local_fs_sources') or []
+        )
+    return None if _cfg['trusted_local_mode'] and not bound else workspace
 
 
 def _resolve_source_file(path: str, user_id: str, conversation_id: str) -> str:

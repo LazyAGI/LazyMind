@@ -940,6 +940,7 @@ def workspace_tool_metadata(tools_info: dict[str, Any], configs: list[ToolConfig
     from lazymind.chat.engine.tools import subagent_chat_tools as tasks
     from lazymind.chat.engine.subagent import tools as task_artifacts
     from lazymind.chat.engine.tools.calculator import calculator as arithmetic
+    from lazymind.chat.engine.tools.vocab_learn import vocab_learn as vocabulary
     from lazymind.chat.engine.tools.writer import WriterCreateToolkit, WriterRevisionToolkit
     from lazymind.chat.engine.tools.intent_writer import build_intentwrite_tool
     from lazymind.chat.engine.tools.skill_listing import build_list_skills_tool
@@ -948,7 +949,7 @@ def workspace_tool_metadata(tools_info: dict[str, Any], configs: list[ToolConfig
     # These exact implementations use internal artifacts, scoped remote sources,
     # arithmetic, or Core orchestration. Registration alone is not admission.
     audited = {
-        arithmetic, list_data_sources, kb_tmp_search, url_fetch, ask_user,
+        arithmetic, vocabulary, list_data_sources, kb_tmp_search, url_fetch, ask_user,
         artifacts.read_file, artifacts.grep, artifacts.write_file, artifacts.list_dir,
         artifacts.save_chat_artifact, read_user_attachment, find_user_attachment, string_replace,
         tasks.create_subagent, tasks.list_subagents, tasks.get_subagent_status,
@@ -956,6 +957,14 @@ def workspace_tool_metadata(tools_info: dict[str, Any], configs: list[ToolConfig
         task_artifacts.get_artifact, task_artifacts.patch_artifact, task_artifacts.discard_draft,
         task_artifacts.list_artifacts, task_artifacts.find_artifact, task_artifacts.list_knowledge_bases,
     }
+    # These saved registrations keep Core RemoteFS/provider authentication and
+    # mail's revision-bound confirmation; they do not grant host-path access.
+    scoped_instances = list(_CLOUD_FILE_TOOLKIT['tools'])
+    for config in DEFAULT_TOOLS:
+        if config.name in {'external_db', 'memory', 'skill_editor', 'mail'}:
+            scoped_instances.append(_registration_target(config.tool))
+        elif config.name == 'schedule':
+            audited.update(_registration_target(config.tool)['tools'])
     factories = [
         ToolGroup.make_gateway_tool, artifacts.build_resource_read_tools,
         build_intentwrite_tool, build_list_skills_tool, build_session_env_tool,
@@ -978,6 +987,10 @@ def workspace_tool_metadata(tools_info: dict[str, Any], configs: list[ToolConfig
                 if instance is target and authorization and method in authorization:
                     matched[name] = (instance, method, authorization, None)
                     break
+            continue
+        if (any(instance is target for target in scoped_instances)
+                and method in getattr(instance, '__public_apis__', ())):
+            matched[name] = (instance, method, None, None)
             continue
         if type(instance) is KBToolkit and method in KBToolkit.__public_apis__:
             matched[name] = (instance, method, None, None)

@@ -363,7 +363,7 @@ def test_workspace_admission_restores_scoped_search_and_internal_writer_methods(
     assert any(name.endswith('SciverseSearch_meta_search') for name in admitted)
     assert 'WriterCreateToolkit_profile_resources' not in admitted
     assert 'WriterCreateToolkit_generate_draft_section' not in admitted
-    assert not any(name.startswith('MailToolkit_') for name in admitted)
+    assert any(name == 'MailToolkit_send_draft' for name in admitted)
     check = admitted['WriterRevisionToolkit_apply_patch'][3]
     assert check({'writer_document_json': '{"document_id":"safe"}'})
     assert not check({'writer_document_json': '{"document_id":"../../escape"}'})
@@ -402,3 +402,25 @@ def test_workspace_artifact_admission_prevalidates_scoped_files_and_remote_image
     (task / 'alias.txt').symlink_to(workspace / 'secret.txt')
     assert not _workspace_artifact_arguments({'artifacts': [item(str(task / 'alias.txt'))]})
     assert not _workspace_writer_arguments({'task_id': '..'})
+
+
+def test_bound_workspace_admits_exact_scoped_service_registrations_and_rejects_lookalikes():
+    from lazyllm.tools.agent import ToolManager
+    from lazymind.chat.service.component.tool_registry import workspace_tool_metadata
+    selected = {'external_db', 'memory', 'skill_editor', 'cloud_files', 'mail', 'vocab_learn', 'schedule'}
+    for config in DEFAULT_TOOLS:
+        if config.name not in selected:
+            continue
+        manager = ToolManager([config.tool])
+        admitted = workspace_tool_metadata(manager.tools_info)
+        assert set(manager.tools_info) <= set(admitted), config.name
+
+    class Lookalike:
+        __public_apis__ = ['read']
+        def read(self, path: str) -> str:
+            """Read a lookalike path."""
+            return path
+
+    manager = ToolManager([Lookalike()])
+    admitted = workspace_tool_metadata(manager.tools_info)
+    assert not any(name.endswith('_read') for name in admitted)

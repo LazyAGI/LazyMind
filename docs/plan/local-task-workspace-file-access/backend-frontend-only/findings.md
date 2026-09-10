@@ -435,3 +435,40 @@ NODE_OPTIONS=--no-experimental-webstorage pnpm run build
 提交前最后验收对照：Core补充Workflow固定版本compiled_graph当前step必须声明local_fs，未声明/无版本则拒绝；新增真实版本fixture和未声明拒绝合同通过。该增量纳入上表，仍无新生产文件；执行时的Python声明检查不再是唯一约束。
 
 最终提交检查（2026-09-09）：Workflow声明校验独立Review无新增问题；全Core83包/5无测试与全vet最新重跑通过；根agent再次执行算法标准129项与前端六文件68项通过，diff检查/冻结检查通过。最终生产28文件+1907/-556净1351（算法312）；所有变更均本功能相关。提交后继续保留实机与兼容限制，不把本批提交称为完整产品验收。
+
+## 2026-09-10 非人工工作收尾：执行中
+
+用户要求完成除人工验收外的其他工作，覆盖自动联调、可自动验证的数据库环境、受限工具兼容核查/补齐、工程检查及远端交付。起点752a6a76、工作区干净；fetch确认远端无新提交，本地领先9个。只用现有仓库，不改Local/Desktop或LazyLLM。沿用每批约200净增/新文件门槛，发现超量或产品/安全规则改变时先报告具体差异再Review；旧1400预算不能作为任意工具恢复的无限授权。
+
+- [ ] 核对前端完整tsc真实错误及根因，制定最小正确修复范围。
+- [ ] 核对剩余受限工具，区分可复用安全路径与必须改变授权/文件访问设计的部分。
+- [ ] 补现有pytest-asyncio测试依赖到本机venv，用标准命令运行Workflow协程测试，取消临时适配依赖。
+- [ ] 启动隔离临时Redis/PostgreSQL验证现有Core行为，测试落现有测试文件，可复现且不碰用户库。
+- [ ] 自动Core↔算法HTTP/批准链路联调，测试资源隔离；实际模型/运行态需要核实可用配置，不能用mock冒充。
+- [ ] 汇总验证/限制/实际文件代码量，提交相关改动并安全同步远端。
+
+本机已有Local服务进程启动于9月7日（旧二进制），不能直接当作752a6a76运行证据。存在redis-server/PostgreSQL命令；.venv有pytest9.1.1但没有pip和pytest-asyncio，使用已有uv安装仓库已声明测试依赖，不修改生产依赖。当前派发独立只读兼容/类型排查和数据库自动验证；主任务处理环境与跨语言联调。
+
+
+## 2026-09-10 继续执行记录（非人工部分）
+
+本次继续工作完成了邮件附件边界收紧、测试夹具隔离和自动化回归。新增生产改动仅在算法既有文件：
+
+- `algorithm/lazymind/chat/engine/tools/local_file/workspace.py`：绑定 Core 工作区时，即使历史 `trusted_local_mode` 已开启，内部产物与附件路径仍使用工作区根；兼容子任务的 `parent_agentic_config` 身份。
+- `algorithm/lazymind/chat/engine/tools/mail.py`：草稿/附件输出先经过同一工作区 resolver；发送旧草稿前重新校验持久化附件，避免历史绝对路径越界；不改变邮箱确认卡和发送流程。
+- `tests/algorithm/chat/test_mail_toolkit.py`：新增绑定工作区、历史附件、已有外部符号链接的边界覆盖。
+- `tests/algorithm/chat/test_workspace_authorization_contract.py`：HTTP 联调无 fixture 时先跳过，异常时先取消后台调用，避免测试退出等待挂死。
+- `backend/core/chat/run_decision_test.go`：HTTP fixture 的子任务、Workflow revision/session/attempt 使用会话唯一前缀并清理专属 Redis key；并发审批仅接受成功或预期冲突。
+
+本批生产增量为 25 行净增（`workspace.py` 13、`mail.py` 5、既有 registry 13/-1；按文件实际 diff 统计），测试增量 174 行左右；没有新增生产文件、依赖、服务或表，也未修改 Local/Desktop、`algorithm/lazyllm` 或 gitlink。
+
+本次新鲜验证：
+
+- Python 重点集合：`174 passed, 1 skipped, 13 warnings`；skip 是未提供真实 HTTP fixture 的可选测试。
+- Core 全量：`go test ./... -count=1` 通过；重点包 `chat/localworkspace/subagent/workflow` 通过。
+- Core↔算法真实 HTTP：`TestWorkspacePythonCoreHTTP` 的 main、subagent、workflow 三个叶子均通过（SQLite 临时数据库、临时目录，不调用模型或登录服务）。
+- 前端工作区用例：6 个文件、68 tests 通过；生产构建通过。
+- 前端完整 `tsc --noEmit` 仍有仓库既有错误（canonical 依赖后约 573 项，集中在旧生成客户端和非工作区页面）；`check:error-prompts` 仍有既有全局违规。没有用排除配置掩盖。
+- PostgreSQL+Redis 专属临时实例验证已重新运行并通过：localworkspace 全套通过，chat 的 main identity、workflow identity、并发 prepare/approve/execute、16 槽容量、撤销围栏和跨进程单次消费均通过；实例和数据目录已销毁，未连接用户数据库。
+
+仍未宣称完成的自动化/运行态边界：真实登录、模型驱动的主流式/非流式/双回复身份注册、真实 FastAPI 子任务启动、Windows/打包 Desktop、用户目录选择和跨平台符号链接/外部编辑器并发。这些属于人工或平台验收，不能由当前 HTTP fixture 代替。工作区文件二进制传输、任意脚本/shell/MCP 宿主执行以及旧 Writer/media 全量注册仍保持拒绝或待专项设计；没有通过提示词或 trusted 绕过。
