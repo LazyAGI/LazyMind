@@ -25,6 +25,7 @@ CITATION_NEXT_DOC_KEY = '_citation_next_doc_index'
 CITATION_DOC_CHUNK_NEXT_KEY = '_citation_next_chunk_index_map'
 EXTERNAL_SOURCE_KEY_MAP_KEY = '_external_source_key_map'
 SEARCHED_SOURCE_INDICES_KEY = '_searched_source_indices'
+FETCHED_SOURCE_INDICES_KEY = '_fetched_source_indices'
 CITED_SOURCE_INDICES_KEY = '_cited_source_indices'
 CITATION_INDEX_PATTERN = r'\d+\.\d+'
 CITATION_PATTERN = re.compile(r'\[\[(' + CITATION_INDEX_PATTERN + r')\]\]')
@@ -35,9 +36,10 @@ _TRACKING_QUERY_KEYS = {
 }
 _SOURCE_ROLE_KEYS = {
     'cited': CITED_SOURCE_INDICES_KEY,
+    'fetched': FETCHED_SOURCE_INDICES_KEY,
     'searched': SEARCHED_SOURCE_INDICES_KEY,
 }
-_SOURCE_ROLE_ORDER = ('cited', 'searched')
+_SOURCE_ROLE_ORDER = ('cited', 'fetched', 'searched')
 CITATION_LOCK_KEY = '_citation_state_lock'
 _LOCK_INIT = threading.Lock()
 
@@ -545,6 +547,7 @@ def reset_citation_state(config: dict[str, Any]) -> None:
     config[CITATION_DOC_CHUNK_NEXT_KEY] = {}
     config[EXTERNAL_SOURCE_KEY_MAP_KEY] = {}
     config[SEARCHED_SOURCE_INDICES_KEY] = []
+    config[FETCHED_SOURCE_INDICES_KEY] = []
     config[CITED_SOURCE_INDICES_KEY] = []
     config[IMAGE_URL_REGISTRY_KEY] = {}
 
@@ -579,16 +582,228 @@ class CitationDisplayMapper:
         return mapped_source
 
 
+_FENCE_OPEN_PATTERN = re.compile(r'^(```|~~~)')
+_INLINE_CODE_PATTERN = re.compile(r'`[^`\n]+`')
+_SOURCE_MARKER_IN_TEXT = re.compile(
+    r'\[(\d+)\]\(#(?:user-content-)?source-(' + CITATION_INDEX_PATTERN + r')(?:\s+"[^"]*")?\)',
+)
+
+
+_TABLE_DELIMITER_CELL = re.compile(r'^:?-+:?$')
+
+
+def _is_gfm_table_delimiter(line: str) -> bool:
+    stripped = line.strip()
+    if '|' not in stripped:
+        return False
+    body = stripped[1:] if stripped.startswith('|') else stripped
+    if body.endswith('|'):
+        body = body[:-1]
+    cells = [cell.strip() for cell in body.split('|')]
+    return bool(cells) and all(_TABLE_DELIMITER_CELL.match(cell) for cell in cells)
+
+
+def _is_pipe_table_row(line: str) -> bool:
+    stripped = line.strip()
+    return stripped.startswith('|') and stripped.endswith('|') and stripped.count('|') >= 2
+
+
+def _is_gfm_table_block(block: str) -> bool:
+    lines = [line for line in block.split('\n') if line.strip()]
+    if any(_is_gfm_table_delimiter(line) for line in lines):
+        return True
+    return sum(1 for line in lines if _is_pipe_table_row(line)) >= 2
+
+
+def _insert_markers_before_trailing_pipes(line: str, markers: list[str]) -> str:
+    match = re.search(r'(\s*\|+\s*)$', line)
+    joined = ''.join(markers)
+    if not match:
+        return f'{line.rstrip()}{joined}'
+    core = line[: match.start()].rstrip()
+    return f'{core} {joined}{match.group(1)}'
+
+
+def _relocate_markers_in_table_row(line: str) -> str:
+    if _is_gfm_table_delimiter(line):
+        return line
+    if '|' not in line:
+        return _relocate_markers_in_block(line)
+    markers: list[str] = []
+    seen: set[str] = set()
+
+    def _take(match: re.Match[str]) -> str:
+        citation_id = match.group(2)
+        if citation_id not in seen:
+            seen.add(citation_id)
+            markers.append(match.group(0))
+        return ''
+
+    stripped = _SOURCE_MARKER_IN_TEXT.sub(_take, line)
+    if not markers:
+        return line
+    cleaned = re.sub(r'[ \t]+([。．，,、；;：:!！?？])', r'\1', stripped)
+    cleaned = re.sub(r'[ \t]{2,}', ' ', cleaned)
+    cleaned = re.sub(r'[ \t]+\n', '\n', cleaned)
+    return _insert_markers_before_trailing_pipes(cleaned, markers)
+
+
+def _relocate_markers_in_block(block: str) -> str:
+    markers: list[str] = []
+    seen: set[str] = set()
+
+    def _take(match: re.Match[str]) -> str:
+        citation_id = match.group(2)
+        if citation_id not in seen:
+            seen.add(citation_id)
+            markers.append(match.group(0))
+        return ''
+
+    stripped = _SOURCE_MARKER_IN_TEXT.sub(_take, block)
+    if not markers:
+        return block
+    cleaned = re.sub(r'[ \t]+([。．，,、；;：:!！?？])', r'\1', stripped)
+    cleaned = re.sub(r'[ \t]{2,}', ' ', cleaned)
+    cleaned = re.sub(r'[ \t]+\n', '\n', cleaned)
+    trailing = re.search(r'\s*$', cleaned)
+    trailing_text = trailing.group(0) if trailing else ''
+    core = cleaned[: len(cleaned) - len(trailing_text)]
+    return f'{core}{"".join(markers)}{trailing_text}'
+
+
+def _relocate_markers_in_prose(text: str) -> str:
+    parts = re.split(r'(\n{2,})', text)
+    relocated: list[str] = []
+    for index, block in enumerate(parts):
+        if index % 2 == 1 or not block.strip():
+            relocated.append(block)
+            continue
+        if _is_gfm_table_block(block):
+            relocated.append('\n'.join(
+                _relocate_markers_in_table_row(line) for line in block.split('\n')
+            ))
+            continue
+        lines = block.split('\n')
+
+        def is_list_line(line: str) -> bool:
+            return bool(re.match(r'\s*(?:[-*+]|\d+[.)])\s+', line))
+
+        has_list = any(is_list_line(line) for line in lines if line.strip())
+        simple_list = all((not line.strip() or is_list_line(line)) for line in lines)
+        if simple_list:
+            relocated.append('\n'.join(_relocate_markers_in_block(line) for line in lines))
+        elif has_list:
+            # Nested or continuation lists: keep the model's original citation sites.
+            relocated.append(block)
+        else:
+            relocated.append(_relocate_markers_in_block(block))
+    return ''.join(relocated)
+
+
+def _transform_outside_fences(content: str, transform: Any) -> str:
+    output: list[str] = []
+    in_fence = False
+    fence_marker = ''
+    prose: list[str] = []
+
+    def flush_prose() -> None:
+        if prose:
+            output.append(transform('\n'.join(prose)))
+            prose.clear()
+
+    for line in content.split('\n'):
+        fence = _FENCE_OPEN_PATTERN.match(line)
+        if fence:
+            if not in_fence:
+                flush_prose()
+                in_fence = True
+                fence_marker = fence.group(1)
+                output.append(line)
+                continue
+            if line.startswith(fence_marker):
+                output.append(line)
+                in_fence = False
+                fence_marker = ''
+                continue
+        if in_fence:
+            output.append(line)
+        else:
+            prose.append(line)
+    flush_prose()
+    return '\n'.join(output)
+
+
+def relocate_source_markers_to_paragraph_end(content: str) -> str:
+    """Move citation markers to the end of each paragraph or list item.
+
+    This is intentional for ordinary paragraphs and simple one-line list items.
+    Nested or continuation lists keep the original marker positions. Streaming
+    paragraphs may therefore look like ``Fact A. Fact B. [1][2]``.
+    GFM table rows keep their pipes and move citations to the last cell.
+    Fenced code is left unchanged.
+    """
+    return _transform_outside_fences(content, _relocate_markers_in_prose)
+
+
+def _map_skipping_inline_code(text: str, transform: Any) -> str:
+    held: list[str] = []
+
+    def _stash(match: re.Match[str]) -> str:
+        held.append(match.group(0))
+        return f'\x00I{len(held) - 1}\x00'
+
+    rewritten = transform(_INLINE_CODE_PATTERN.sub(_stash, text))
+    return re.sub(r'\x00I(\d+)\x00', lambda match: held[int(match.group(1))], rewritten)
+
+
+def citation_indices_in_text(text: str) -> list[str]:
+    found: list[str] = []
+    seen: set[str] = set()
+
+    def _collect(prose: str) -> str:
+        scanned = _INLINE_CODE_PATTERN.sub(' ', prose)
+
+        def _add(index: str) -> None:
+            if index and index not in seen:
+                seen.add(index)
+                found.append(index)
+
+        for match in CITATION_PATTERN.finditer(scanned):
+            _add(match.group(1))
+        for match in SOURCE_LINK_PATTERN.finditer(scanned):
+            _add(match.group(2))
+        return prose
+
+    _transform_outside_fences(text or '', _collect)
+    return found
+
+
+def added_citation_markers(original: str, repaired: str) -> str:
+    original_indices = set(citation_indices_in_text(original))
+    added = [
+        index for index in citation_indices_in_text(repaired)
+        if index not in original_indices
+    ]
+    return ''.join(f'[[{index}]]' for index in added)
+
+
 def citation_link(index: str, source: dict[str, Any], display_index: Any = None) -> str:
     document_index, _ = split_citation_index(index)
     display_index = display_index or source.get('display_index') or source.get('document_index') or document_index
-    title = escape(str(source.get('file_name') or source.get('title') or 'title'), quote=True)
+    title = escape(
+        str(source.get('file_name') or source.get('title') or 'title').replace('|', '/'),
+        quote=True,
+    )
     return f'[{display_index}](#source-{index} "{title}")'
 
 
-def rewrite_citations(text: str, config: dict[str, Any]) -> tuple[str, list[dict[str, Any]]]:
+def rewrite_citations(
+    text: str,
+    config: dict[str, Any],
+    display_mapper: CitationDisplayMapper | None = None,
+) -> tuple[str, list[dict[str, Any]]]:
     collected: OrderedDict[str, dict[str, Any]] = OrderedDict()
-    display_mapper = CitationDisplayMapper()
+    display_mapper = display_mapper or CitationDisplayMapper()
 
     def _collect(index: str, source: dict[str, Any]) -> dict[str, Any]:
         mark_source_roles(config, index, 'cited')
@@ -604,8 +819,6 @@ def rewrite_citations(text: str, config: dict[str, Any]) -> tuple[str, list[dict
         mapped_source = _collect(index, source)
         return citation_link(index, source, display_index=mapped_source['display_index'])
 
-    rewritten = CITATION_PATTERN.sub(_replace, text)
-
     def _replace_link(match: re.Match) -> str:
         index = match.group(2)
         source = citation_source(config, index)
@@ -614,7 +827,15 @@ def rewrite_citations(text: str, config: dict[str, Any]) -> tuple[str, list[dict
         mapped_source = _collect(index, source)
         return citation_link(index, source, display_index=mapped_source['display_index'])
 
-    rewritten = SOURCE_LINK_PATTERN.sub(_replace_link, rewritten)
+    def _rewrite_prose(prose: str) -> str:
+        def _rewrite(inner: str) -> str:
+            rewritten_prose = CITATION_PATTERN.sub(_replace, inner)
+            return SOURCE_LINK_PATTERN.sub(_replace_link, rewritten_prose)
+        return _map_skipping_inline_code(prose, _rewrite)
+
+    rewritten = relocate_source_markers_to_paragraph_end(
+        _transform_outside_fences(text, _rewrite_prose),
+    )
 
     return rewritten, list(collected.values())
 
@@ -660,6 +881,10 @@ class ConfigCitationPlugin(BasePlugin):
 
     def collect(self) -> list[dict[str, Any]]:
         return list(self._collected.values())
+
+    @property
+    def display_mapper(self) -> CitationDisplayMapper:
+        return self._display_mapper
 
     def last_incomplete_pos(self, buf: str) -> int | None:
         last_double = buf.rfind('[[')

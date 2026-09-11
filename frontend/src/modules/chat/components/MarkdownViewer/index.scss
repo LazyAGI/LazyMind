@@ -43,30 +43,25 @@
 }
 
 .md-source-chip {
-  display: inline-flex;
-  max-width: min(240px, calc(100% - 8px));
+  display: inline-block;
+  max-width: min(220px, calc(100% - 8px));
   box-sizing: border-box;
-  border: 1px solid #e1e9f2;
-  border-radius: 999px;
-  padding: 2px 7px 2px 4px;
-  color: #5f6f84;
-  background-color: #f5f7fa;
-  justify-content: center;
-  align-items: center;
-  gap: 4px;
-  vertical-align: middle;
-  margin: 0 3px;
+  border: 0;
+  border-radius: 4px;
+  padding: 1px 6px;
+  color: #5c6570;
+  background-color: #eceff3;
+  vertical-align: baseline;
+  margin: 0 0 0 4px;
   font-size: 12px;
-  line-height: 18px;
+  line-height: 1.5;
   overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .md-source-chip-label {
-  min-width: 0;
-  overflow: hidden;
-  font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-weight: 400;
 }
 
 .md-source-chip-icon {
@@ -97,12 +92,21 @@
 
 .md-source-chip--clickable {
   cursor: pointer;
+  text-decoration: none;
 
   &:hover {
-    border-color: #aac8eb;
-    color: #2d6eaf;
-    background-color: #edf5ff;
+    color: #4a5562;
+    background-color: #e4e8ee;
   }
+}
+
+.rag-markdown table .md-source-chip {
+  display: inline;
+  max-width: none;
+  margin: 0 0 0 4px;
+  padding: 0 5px;
+  vertical-align: middle;
+  white-space: nowrap;
 }
 
 .md-source-popover {

@@ -68,6 +68,7 @@ import {
   getSourceLabel,
   getSourceSubtitle,
   isExternalSource,
+  moveSourceMarkersToParagraphEnd,
   normalizeSourceMarkers,
   stripRedundantSourceUrls,
 } from "@/modules/chat/utils/sourceAdapter";
@@ -106,6 +107,19 @@ const MarkdownRenderContext = createContext<{
   markSources: [],
   artifacts: EMPTY_CONVERSATION_ARTIFACTS,
 });
+
+const InTableCellContext = createContext(false);
+
+function TableCellComponent(Tag: "td" | "th") {
+  return function Cell(props: any) {
+    const { node: _node, children, ...rest } = props;
+    return (
+      <InTableCellContext.Provider value={true}>
+        <Tag {...rest}>{children}</Tag>
+      </InTableCellContext.Provider>
+    );
+  };
+}
 
 const SOURCE_PREVIEW_TEXT_LIMIT = 280;
 
@@ -200,7 +214,9 @@ function normalizeMarkdownForDisplay(content: string) {
     normalizeBoldBareUrls(
       normalizeBareUrls(
         normalizeArtifactFileLinks(
-          stripRedundantSourceUrls(normalizeSourceMarkers(fragment)),
+          moveSourceMarkersToParagraphEnd(
+            stripRedundantSourceUrls(normalizeSourceMarkers(fragment)),
+          ),
         ),
       ),
     );
@@ -464,6 +480,7 @@ const LinkComponent = (props: any) => {
   const { isStreaming, markSources, artifacts } = useContext(
     MarkdownRenderContext,
   );
+  const inTableCell = useContext(InTableCellContext);
   const href = typeof props.href === "string" ? props.href : "";
   const managedFile = href.includes("/static-files/");
   const artifactFileId = getFileIdFromHref(href);
@@ -551,18 +568,11 @@ const LinkComponent = (props: any) => {
   if (sourceIndex) {
     const source = findSourceByCitationId(markSources, sourceIndex);
     const sourceHref = source ? getSourceHref(source) : "";
-    const label = source
-      ? getSourceLabel(source)
-      : typeof props.title === "string" && props.title
-        ? props.title
-        : "Source";
-    const chipContent = source ? (
-      <>
-        <SourceBrandIcon source={source} />
-        <span className="md-source-chip-label">{getSourceBrandName(source)}</span>
-      </>
-    ) : (
-      <span className="md-source-chip-label">{label}</span>
+    const chipLabel = source
+      ? getSourceBrandName(source)
+      : "Source";
+    const chipContent = (
+      <span className="md-source-chip-label">{chipLabel}</span>
     );
     const chip = source ? (
       <a
@@ -573,8 +583,8 @@ const LinkComponent = (props: any) => {
         href={sourceHref}
         target="_blank"
         rel="noopener noreferrer"
-        aria-label={label}
-        title={label}
+        aria-label={chipLabel}
+        title={chipLabel}
       >
         {chipContent}
       </a>
@@ -584,7 +594,7 @@ const LinkComponent = (props: any) => {
       </span>
     );
 
-    if (isStreaming || !source) {
+    if (isStreaming || !source || inTableCell) {
       return chip;
     }
 
@@ -675,6 +685,8 @@ const defaultMarkdownComponents = {
   img: ImageComponent,
   pre: PreComponent,
   code: CodeComponent,
+  td: TableCellComponent("td"),
+  th: TableCellComponent("th"),
 };
 
 const MarkdownViewer = memo((props: any) => {

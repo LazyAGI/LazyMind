@@ -118,3 +118,148 @@ def test_external_search_aliases_support_doi_and_provider_document_ids(
 
     assert first['citation_index'] == duplicate['citation_index'] == '1.1'
     assert state[CITATION_REFS_KEY]['1.1']['url'] == expected_url
+
+
+def test_rewrite_citations_moves_refs_to_paragraph_end():
+    from lazymind.chat.service.utils.citations import rewrite_citations
+
+    state = _state()
+    first = register_external_search_result({
+        'title': '美国大都会博物馆',
+        'url': 'https://www.metmuseum.org/',
+        'snippet': 'museum',
+    }, state)
+    second = register_external_search_result({
+        'title': 'Louvre',
+        'url': 'https://www.louvre.fr/',
+        'snippet': 'museum',
+    }, state)
+    rewritten, _ = rewrite_citations(
+        f'第一句{first["ref"]}。第二句{second["ref"]}。\n\n下一段。',
+        state,
+    )
+    assert rewritten == (
+        '第一句。第二句。[1](#source-1.1 "美国大都会博物馆")'
+        '[2](#source-2.1 "Louvre")\n\n下一段。'
+    )
+
+
+def test_rewrite_citations_keeps_markers_in_multiline_lists():
+    from lazymind.chat.service.utils.citations import rewrite_citations
+
+    state = _state()
+    first = register_external_search_result({
+        'title': '美国大都会博物馆',
+        'url': 'https://www.metmuseum.org/',
+        'snippet': 'museum',
+    }, state)
+    second = register_external_search_result({
+        'title': 'Louvre',
+        'url': 'https://www.louvre.fr/',
+        'snippet': 'museum',
+    }, state)
+    simple, _ = rewrite_citations(
+        f'- A {first["ref"]}\n- B {second["ref"]}',
+        state,
+    )
+    assert simple == (
+        '- A[1](#source-1.1 "美国大都会博物馆") \n'
+        '- B[2](#source-2.1 "Louvre") '
+    )
+    continued = (
+        f'- A {first["ref"]}\n'
+        '  continuation\n'
+        f'- B {second["ref"]}'
+    )
+    rewritten, _ = rewrite_citations(continued, state)
+    assert rewritten == (
+        '- A [1](#source-1.1 "美国大都会博物馆")\n'
+        '  continuation\n'
+        '- B [2](#source-2.1 "Louvre")'
+    )
+
+
+def test_rewrite_citations_keeps_markers_in_gfm_tables():
+    from lazymind.chat.service.utils.citations import (
+        relocate_source_markers_to_paragraph_end,
+        rewrite_citations,
+    )
+
+    state = _state()
+    first = register_external_search_result({
+        'title': '美国大都会博物馆',
+        'url': 'https://www.metmuseum.org/',
+        'snippet': 'museum',
+    }, state)
+    second = register_external_search_result({
+        'title': 'Louvre',
+        'url': 'https://www.louvre.fr/',
+        'snippet': 'museum',
+    }, state)
+    table = (
+        '| 模型 | 价格 |\n'
+        '|---|---|\n'
+        f'| A {first["ref"]} | $1 |\n'
+        f'| B {second["ref"]} | $2 |'
+    )
+    rewritten, _ = rewrite_citations(table, state)
+    expected = (
+        '| 模型 | 价格 |\n'
+        '|---|---|\n'
+        '| A | $1 [1](#source-1.1 "美国大都会博物馆") |\n'
+        '| B | $2 [2](#source-2.1 "Louvre") |'
+    )
+    assert rewritten == expected
+    assert relocate_source_markers_to_paragraph_end(expected) == expected
+    paragraph = f'第一句{first["ref"]}。第二句{second["ref"]}。'
+    mixed, _ = rewrite_citations(f'{table}\n\n{paragraph}', state)
+    assert mixed == (
+        f'{expected}\n\n'
+        '第一句。第二句。[1](#source-1.1 "美国大都会博物馆")'
+        '[2](#source-2.1 "Louvre")'
+    )
+
+
+def test_rewrite_citations_does_not_rewrite_fenced_code():
+    from lazymind.chat.service.utils.citations import rewrite_citations
+
+    state = _state()
+    first = register_external_search_result({
+        'title': 'docs',
+        'url': 'https://docs.python.org/',
+        'snippet': 'python',
+    }, state)
+    rewritten, _ = rewrite_citations(
+        f'```python\nsome copied code {first["ref"]}\n```\n\n正文{first["ref"]}。',
+        state,
+    )
+    assert f'some copied code {first["ref"]}' in rewritten
+    assert rewritten.endswith('[1](#source-1.1 "docs")')
+    assert '```python' in rewritten
+
+
+def test_citation_indices_skip_fenced_and_inline_code():
+    from lazymind.chat.service.utils.citations import (
+        added_citation_markers,
+        citation_indices_in_text,
+    )
+
+    state = _state()
+    first = register_external_search_result({
+        'title': 'docs',
+        'url': 'https://docs.python.org/',
+        'snippet': 'python',
+    }, state)
+    second = register_external_search_result({
+        'title': 'other',
+        'url': 'https://example.test/other',
+        'snippet': 'other',
+    }, state)
+    streamed = f'Hello {first["ref"]}'
+    finish = (
+        f'Hello {first["ref"]}\n```python\n{second["ref"]}\n```\n'
+        f'and `{second["ref"]}`.'
+    )
+    assert citation_indices_in_text(streamed) == ['1.1']
+    assert citation_indices_in_text(finish) == ['1.1']
+    assert added_citation_markers(streamed, finish) == ''

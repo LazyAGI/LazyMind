@@ -73,7 +73,7 @@ def test_url_fetch_registers_sources_and_follows_exact_target_url(monkeypatch, r
     }]
     assert len(reset_web_tool_state[CITATION_REFS_KEY]) == 2
     assert [source['source_roles'] for source in materialize_source_views(reset_web_tool_state)] == [
-        ['searched'], ['searched'],
+        ['fetched', 'searched'], ['fetched'],
     ]
 
 

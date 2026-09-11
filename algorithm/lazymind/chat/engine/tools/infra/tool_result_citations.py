@@ -26,6 +26,7 @@ _KNOWLEDGE_SEARCH_METHODS = {
 }
 _KNOWLEDGE_FUNCTIONS: set[str] = set()
 _PAGE_FUNCTIONS = {'url_fetch'}
+_CONTENT_METHODS = {'get_content', 'get_contents'}
 
 
 def _citation_state() -> dict[str, Any]:
@@ -34,21 +35,21 @@ def _citation_state() -> dict[str, Any]:
     return state if isinstance(state, dict) else {}
 
 
-def _annotate_external_item(item: Any, state: dict[str, Any]) -> Any:
+def _annotate_external_item(item: Any, state: dict[str, Any], roles: Any) -> Any:
     if not isinstance(item, dict):
         return item
     annotated = dict(item)
-    register_external_search_result(annotated, state, roles={'searched'})
+    register_external_search_result(annotated, state, roles=roles)
     return annotated
 
 
-def _annotate_external_results(value: Any, state: dict[str, Any]) -> Any:
+def _annotate_external_results(value: Any, state: dict[str, Any], roles: Any) -> Any:
     if isinstance(value, list):
-        return [_annotate_external_item(item, state) for item in value]
+        return [_annotate_external_item(item, state, roles) for item in value]
     if isinstance(value, dict) and isinstance(value.get('items'), list):
         annotated = dict(value)
         annotated['items'] = [
-            _annotate_external_item(item, state)
+            _annotate_external_item(item, state, roles)
             for item in value['items']
         ]
         return annotated
@@ -56,14 +57,14 @@ def _annotate_external_results(value: Any, state: dict[str, Any]) -> Any:
         key in value
         for key in ('url', 'doi', 'doc_id', 'document_id', 'source', 'provider')
     ):
-        return _annotate_external_item(value, state)
+        return _annotate_external_item(value, state, roles)
     return value
 
 
 def _annotate_page_results(value: Any, state: dict[str, Any]) -> Any:
     annotated = copy.deepcopy(value)
     if isinstance(annotated, dict):
-        upsert_external_source(annotated, state, roles={'searched'})
+        upsert_external_source(annotated, state, roles={'fetched'})
     return annotated
 
 
@@ -108,8 +109,11 @@ class CitationResultMiddleware:
         if kind is None:
             return result
         value = result.get('value')
+        tool = (getattr(self._manager, 'tools_info', None) or {}).get(name)
+        method = str(getattr(tool, '_method_name', '') or '')
         if kind == 'external_search':
-            processed = _annotate_external_results(value, state)
+            roles = {'fetched'} if method in _CONTENT_METHODS else {'searched'}
+            processed = _annotate_external_results(value, state, roles)
         elif kind == 'knowledge_base':
             processed = copy.deepcopy(value)
             annotate_citations(processed, state, roles={'searched'})

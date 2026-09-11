@@ -6,6 +6,7 @@ import {
   getDisplaySources,
   getSearchSources,
   getSourceHref,
+  moveSourceMarkersToParagraphEnd,
   normalizeSourceMarkers,
   openSource,
   stripRedundantSourceUrls,
@@ -59,27 +60,37 @@ describe('chat source adapter', () => {
     ]);
   });
 
-  it('deduplicates unified roles, filters searched sources, and supports legacy maps', () => {
+  it('deduplicates unified roles, keeps every hit, and sorts cited before fetched before searched', () => {
     const searchedOnly = {
       source_type: 'external',
       title: 'Search result',
       url: 'https://search.example/result',
       source_roles: ['searched'],
     };
+    const fetchedOnly = {
+      source_type: 'external',
+      title: 'Fetched page',
+      url: 'https://fetched.example/page',
+      source_roles: ['fetched'],
+    };
 
     const sources = [
+      searchedOnly,
+      fetchedOnly,
       { ...external, source_roles: ['cited'] },
       { ...external, index: '3.2', source_roles: ['searched'] },
       { ...knowledge, source_roles: ['cited'] },
-      searchedOnly,
     ];
     expect(getDisplaySources(sources)).toEqual([
+      searchedOnly,
+      fetchedOnly,
       { ...external, source_roles: ['cited', 'searched'] },
       { ...knowledge, source_roles: ['cited'] },
-      searchedOnly,
     ]);
     expect(getSearchSources(sources)).toEqual([
       { ...external, source_roles: ['cited', 'searched'] },
+      { ...knowledge, source_roles: ['cited'] },
+      fetchedOnly,
       searchedOnly,
     ]);
     expect(getDisplaySources({ '3.1': { ...external, index: undefined } })).toEqual([
@@ -113,5 +124,42 @@ describe('chat source adapter', () => {
     );
     const source = '[2](#source-2.3 "NeurIPS-2024-hipporag.pdf")';
     expect(normalizeSourceMarkers(`${source}(${source})`)).toBe('[2](#source-2.3)');
+  });
+
+  it('moves inline source markers to the end of each paragraph', () => {
+    const first = '[1](#source-1.1)';
+    const second = '[2](#source-2.1)';
+    expect(moveSourceMarkersToParagraphEnd(
+      `第一句${first}。第二句${second}。\n\n下一段${first}。`,
+    )).toBe(`第一句。第二句。${first}${second}\n\n下一段。${first}`);
+    expect(moveSourceMarkersToParagraphEnd(
+      `\`\`\`\ncode ${first}\n\`\`\`\n\n正文${first}。继续。`,
+    )).toBe(`\`\`\`\ncode ${first}\n\`\`\`\n\n正文。继续。${first}`);
+    expect(moveSourceMarkersToParagraphEnd(
+      `- A ${first}\n- B ${second}`,
+    )).toBe(`- A${first} \n- B${second} `);
+    const continued = `- A ${first}\n  continuation\n- B ${second}`;
+    expect(moveSourceMarkersToParagraphEnd(continued)).toBe(continued);
+  });
+
+  it('moves GFM table citations to the last cell of each row', () => {
+    const first = '[1](#source-1.1)';
+    const second = '[2](#source-2.1)';
+    const table = [
+      '| 模型 | 价格 |',
+      '|---|---|',
+      `| A ${first} | $1 |`,
+      `| B ${second} | $2 |`,
+    ].join('\n');
+    const relocatedTable = [
+      '| 模型 | 价格 |',
+      '|---|---|',
+      `| A | $1 ${first} |`,
+      `| B | $2 ${second} |`,
+    ].join('\n');
+    expect(moveSourceMarkersToParagraphEnd(table)).toBe(relocatedTable);
+    expect(moveSourceMarkersToParagraphEnd(
+      `${table}\n\n第一句${first}。第二句${second}。`,
+    )).toBe(`${relocatedTable}\n\n第一句。第二句。${first}${second}`);
   });
 });

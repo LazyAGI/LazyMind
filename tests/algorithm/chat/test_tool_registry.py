@@ -283,9 +283,11 @@ def test_mixed_kb_and_web_tools_share_one_citation_output_contract():
     ]
     assert citation_contracts == list(RETRIEVAL_CITATION_OUTPUT_APPENDIX['output_contract'])
     contract = '\n'.join(citation_contracts)
-    assert 'copy that `ref` exactly' in contract
+    assert 'cite the supporting `ref` exactly once at the end of the paragraph' in contract
+    assert 'do not add a citation merely because' in contract
     assert '[[document.chunk]]' not in contract
-    assert 'cite at least one result from each category' in contract
+    assert 'the final answer must copy at least one of those `ref` values exactly' not in contract
+    assert 'cite at least one result from each category' not in contract
 
     policy = '\n'.join(collected['tool_policy'])
     assert 'cite at least one result from each category' not in policy
