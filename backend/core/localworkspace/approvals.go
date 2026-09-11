@@ -35,9 +35,6 @@ func DecideOperation(ctx context.Context, db *gorm.DB, stateStore state.Store, o
 	if err := validateLiveOperation(ctx, db, stateStore, value); err != nil {
 		return OperationResult{}, err
 	}
-	if value.Status != operationPending {
-		return OperationResult{}, Error("binding_conflict", 409, "conflict")
-	}
 	var decision Decision
 	var nextStatus string
 	switch strings.ToLower(strings.TrimSpace(action)) {
@@ -48,13 +45,25 @@ func DecideOperation(ctx context.Context, db *gorm.DB, stateStore state.Store, o
 	default:
 		return OperationResult{}, Error("invalid_selection", 400, "invalid request")
 	}
+	if value.Status == nextStatus && value.Decision == decision {
+		return operationResult(value), nil
+	}
+	if value.Status != operationPending {
+		return OperationResult{}, Error("binding_conflict", 409, "conflict")
+	}
+	action = strings.ToLower(strings.TrimSpace(action))
 	decisionKey := operationDecisionKey(operationID)
-	claimed, err := stateStore.SetNX(ctx, decisionKey, []byte(userID), operationClaimTTL)
+	claimValue := decisionClaimValue(userID, action)
+	claimed, err := stateStore.SetNX(ctx, decisionKey, []byte(claimValue), operationClaimTTL)
 	if err != nil {
 		return OperationResult{}, err
 	}
 	if !claimed {
-		return OperationResult{}, Error("binding_conflict", 409, "conflict")
+		existingClaim, claimErr := stateStore.Get(ctx, decisionKey)
+		if claimErr != nil || string(existingClaim) != claimValue {
+			return OperationResult{}, Error("binding_conflict", 409, "conflict")
+		}
+		claimed = true
 	}
 	value, err = loadOperationState(ctx, stateStore, operationID)
 	if err != nil {
@@ -71,6 +80,10 @@ func DecideOperation(ctx context.Context, db *gorm.DB, stateStore state.Store, o
 		return OperationResult{}, err
 	}
 	return operationResult(value), nil
+}
+
+func decisionClaimValue(userID, action string) string {
+	return userID + "\x00" + action
 }
 
 // InternalPrepareOperation prepares one operation for the authenticated algorithm host.

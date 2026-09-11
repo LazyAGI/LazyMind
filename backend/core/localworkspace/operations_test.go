@@ -589,6 +589,7 @@ func TestWorkspaceClaimInvalidExecutionDoesNotConsumeApproval(t *testing.T) {
 // Fail one state call before delegating; subsequent calls use the real store.
 type onceOperationStateFailure struct {
 	state.Store
+	state.CompareAndDeleteStore
 	getRemaining, setNXRemaining int
 	err                          error
 }
@@ -615,14 +616,14 @@ func (s *onceOperationStateFailure) SetNX(ctx context.Context, key string, value
 
 func TestWorkspaceOperationStateReadAndClaimFailures(t *testing.T) {
 	for _, test := range []struct {
-		name                   string
-		prepare, claimConsumed bool
-		getCall, setNXCall     int
+		name               string
+		prepare            bool
+		getCall, setNXCall int
 	}{
 		{name: "prepare SetNX", prepare: true, setNXCall: 1},
 		{name: "execute lock SetNX", setNXCall: 1},
 		{name: "execute first Get", getCall: 1},
-		{name: "execute Get after claim", getCall: 2, claimConsumed: true},
+		{name: "execute Get after claim", getCall: 2},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			db, grant, ss, conversationID := operationFixture(t, PermissionAllowAll)
@@ -643,7 +644,7 @@ func TestWorkspaceOperationStateReadAndClaimFailures(t *testing.T) {
 				}
 			}
 			failure := errors.New("injected state read/claim failure")
-			failing := &onceOperationStateFailure{Store: ss, getRemaining: test.getCall, setNXRemaining: test.setNXCall, err: failure}
+			failing := &onceOperationStateFailure{Store: ss, CompareAndDeleteStore: ss.(state.CompareAndDeleteStore), getRemaining: test.getCall, setNXRemaining: test.setNXCall, err: failure}
 			if test.prepare {
 				_, err = PrepareOperation(ctx, db.DB, failing, req)
 			} else {
@@ -661,16 +662,11 @@ func TestWorkspaceOperationStateReadAndClaimFailures(t *testing.T) {
 			}
 			for attempt := 0; attempt < 2; attempt++ {
 				result, err := ExecuteOperation(ctx, db.DB, failing, recovered.OperationID, req)
-				if test.claimConsumed {
-					requireWorkspaceReason(t, err, 409, "conflict", "binding_conflict")
-				} else if err != nil || result.Status != operationCompleted {
+				if err != nil || result.Status != operationCompleted {
 					t.Fatalf("recovered execute %d: %+v, %v", attempt, result, err)
 				}
 			}
 			want := "seed!"
-			if test.claimConsumed {
-				want = "seed"
-			}
 			if content, err := os.ReadFile(path); err != nil || string(content) != want {
 				t.Fatalf("recovery/replay content=%q, want %q, err=%v", content, want, err)
 			}
@@ -680,8 +676,53 @@ func TestWorkspaceOperationStateReadAndClaimFailures(t *testing.T) {
 
 type failedOperationWriteStore struct {
 	state.Store
+	state.CompareAndDeleteStore
 	key string
 	err error
+}
+
+type failedOperationIndexWriteStore struct {
+	state.Store
+	fail bool
+	err  error
+}
+
+func (s *failedOperationIndexWriteStore) HSet(ctx context.Context, key string, fields map[string]any, ttl time.Duration) error {
+	if s.fail && strings.HasPrefix(key, "local-workspace-operation-index:") {
+		s.fail = false
+		return s.err
+	}
+	return s.Store.HSet(ctx, key, fields, ttl)
+}
+
+func TestWorkspacePrepareClaimRecoversAfterIndexWriteFailure(t *testing.T) {
+	db, grant, stateStore, conversationID := operationFixture(t, PermissionAlwaysAsk)
+	req := OperationRequest{HistoryID: "history", RunID: "run", UserID: "owner", ConversationID: conversationID,
+		WorkspaceID: grant.WorkspaceID, Operation: OperationCreate, Path: "recovered.txt", Content: "seed", CallID: operationTestCallID("prepare-recovery")}
+	failing := &failedOperationIndexWriteStore{Store: stateStore, fail: true, err: errors.New("index unavailable")}
+	if _, err := PrepareOperation(t.Context(), db.DB, failing, req); !errors.Is(err, failing.err) {
+		t.Fatalf("expected index failure, got %v", err)
+	}
+	recovered, err := PrepareOperation(t.Context(), db.DB, failing, req)
+	if err != nil || recovered.Decision != DecisionPending || recovered.OperationID == "" {
+		t.Fatalf("prepare did not recover: %+v, %v", recovered, err)
+	}
+}
+
+func TestMkdirFailureDoesNotMarkOperationTouched(t *testing.T) {
+	root, err := os.OpenRoot(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	if err := root.Mkdir("already-exists", 0o700); err != nil {
+		t.Fatal(err)
+	}
+	touched := false
+	_, err = executeFileOperation(t.Context(), root, "already-exists", nil, OperationRequest{Operation: OperationMkdir}, "allow_all", &touched, func() error { return nil })
+	if err == nil || touched {
+		t.Fatalf("mkdir failure touched=%v err=%v", touched, err)
+	}
 }
 
 func (s *failedOperationWriteStore) Set(ctx context.Context, key string, value []byte, ttl time.Duration) error {
@@ -691,7 +732,7 @@ func (s *failedOperationWriteStore) Set(ctx context.Context, key string, value [
 	return s.Store.Set(ctx, key, value, ttl)
 }
 
-func TestWorkspaceClaimStateFailureDoesNotPermitRetry(t *testing.T) {
+func TestWorkspaceClaimStateFailureCanRecoverForSameOwner(t *testing.T) {
 	for _, action := range []string{"execute", "decide"} {
 		t.Run(action, func(t *testing.T) {
 			db, grant, stateStore, conversationID := operationFixture(t, PermissionAlwaysAsk)
@@ -703,7 +744,7 @@ func TestWorkspaceClaimStateFailureDoesNotPermitRetry(t *testing.T) {
 				t.Fatal(err)
 			}
 			failure := errors.New("operation state write unavailable")
-			failing := &failedOperationWriteStore{Store: stateStore,
+			failing := &failedOperationWriteStore{Store: stateStore, CompareAndDeleteStore: stateStore.(state.CompareAndDeleteStore),
 				key: operationKey(prepared.OperationID), err: failure}
 			if action == "execute" {
 				if _, err := DecideOperation(ctx, db.DB, stateStore, prepared.OperationID, "allow_once", "owner"); err != nil {
@@ -719,16 +760,23 @@ func TestWorkspaceClaimStateFailureDoesNotPermitRetry(t *testing.T) {
 			if _, err := os.Stat(filepath.Join(grant.Path, req.Path)); !os.IsNotExist(err) {
 				t.Fatalf("file exists after state failure: %v", err)
 			}
-			// Recovery of the store does not prove that the original attempt is safe to retry.
+			// A same-owner retry resumes the half-completed claim.
 			if action == "execute" {
 				_, err = ExecuteOperation(ctx, db.DB, stateStore, prepared.OperationID, req)
+				if err != nil {
+					t.Fatalf("execute recovery failed: %v", err)
+				}
 			} else {
 				_, err = DecideOperation(ctx, db.DB, stateStore, prepared.OperationID, "allow_once", "owner")
+				if err != nil {
+					t.Fatalf("decision recovery failed: %v", err)
+				}
 			}
-			if _, statErr := os.Stat(filepath.Join(grant.Path, req.Path)); !os.IsNotExist(statErr) {
-				t.Errorf("retry changed the filesystem: %v", statErr)
+			if action == "execute" {
+				if _, statErr := os.Stat(filepath.Join(grant.Path, req.Path)); statErr != nil {
+					t.Errorf("recovered execution did not create the file: %v", statErr)
+				}
 			}
-			requireWorkspaceReason(t, err, 409, "conflict", "binding_conflict")
 		})
 	}
 }

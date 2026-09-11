@@ -30,6 +30,7 @@ type workspaceCandidate struct {
 	userID    string
 	info      os.FileInfo
 	expiresAt time.Time
+	consuming bool
 }
 
 type workspaceCandidateStore struct {
@@ -63,14 +64,34 @@ func (s *workspaceCandidateStore) consume(token, userID string) (workspaceCandid
 	if !ok {
 		return workspaceCandidate{}, "invalid"
 	}
-	delete(s.items, token)
 	if !s.now().Before(candidate.expiresAt) {
+		delete(s.items, token)
 		return workspaceCandidate{}, "expired"
 	}
 	if candidate.userID == "" || candidate.userID != userID {
 		return workspaceCandidate{}, "invalid"
 	}
+	if candidate.consuming {
+		return workspaceCandidate{}, "in_progress"
+	}
+	candidate.consuming = true
+	s.items[token] = candidate
 	return candidate, ""
+}
+
+func (s *workspaceCandidateStore) release(token string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if candidate, ok := s.items[token]; ok {
+		candidate.consuming = false
+		s.items[token] = candidate
+	}
+}
+
+func (s *workspaceCandidateStore) commit(token string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.items, token)
 }
 
 func (s *workspaceCandidateStore) state(token string) string {
@@ -197,8 +218,14 @@ func (h *workspaceHandler) authorizeWorkspace(w http.ResponseWriter, r *http.Req
 		workspaceError(w, http.StatusBadRequest, "LOCAL_WORKSPACE_SELECTION_INVALID")
 		return
 	}
+	committed := false
+	defer func() {
+		if !committed {
+			h.store.release(token)
+		}
+	}()
 	canonicalPath, displayName, info, err := validateWorkspaceDirectory(candidate.path)
-	if err != nil || canonicalPath != candidate.path || candidate.info == nil || !os.SameFile(candidate.info, info) {
+	if err != nil || candidate.info == nil || !sameWorkspaceDirectory(candidate.info, info) {
 		workspaceError(w, http.StatusBadRequest, "LOCAL_WORKSPACE_PATH_INVALID")
 		return
 	}
@@ -209,6 +236,8 @@ func (h *workspaceHandler) authorizeWorkspace(w http.ResponseWriter, r *http.Req
 		workspaceError(w, http.StatusServiceUnavailable, "LOCAL_WORKSPACE_SELECTION_INVALID")
 		return
 	}
+	h.store.commit(token)
+	committed = true
 	writeJSON(w, http.StatusOK, workspace)
 }
 
@@ -249,7 +278,8 @@ func (h *workspaceHandler) reauthorizeWorkspace(w http.ResponseWriter, r *http.R
 		return
 	}
 	canonicalPath, displayName, info, err := validateWorkspaceDirectory(selected)
-	if err != nil || canonicalPath != textValue(candidate["canonical_path"]) {
+	_, _, storedInfo, storedErr := validateWorkspaceDirectory(textValue(candidate["canonical_path"]))
+	if err != nil || storedErr != nil || !sameWorkspaceDirectory(storedInfo, info) {
 		workspaceError(w, http.StatusBadRequest, "LOCAL_WORKSPACE_PATH_INVALID")
 		return
 	}
@@ -265,6 +295,10 @@ func (h *workspaceHandler) reauthorizeWorkspace(w http.ResponseWriter, r *http.R
 		"display_name": displayName, "path": canonicalPath,
 		"expires_in_seconds": int(workspaceCandidateTTL.Seconds()),
 	})
+}
+
+func sameWorkspaceDirectory(expected, selected os.FileInfo) bool {
+	return expected != nil && selected != nil && os.SameFile(expected, selected)
 }
 
 func (h *workspaceHandler) requestBoundaryError(r *http.Request) string {

@@ -150,6 +150,9 @@ func PrepareOperation(ctx context.Context, db *gorm.DB, stateStore state.Store, 
 		if err := validateLiveOperation(ctx, db, stateStore, value); err != nil {
 			return OperationResult{}, err
 		}
+		if value.Status == "preparing" {
+			return completePreparingOperation(ctx, stateStore, value)
+		}
 		return operationResult(value), nil
 	}
 	// The immutable invocation timestamp prevents reissuing a call after its
@@ -195,36 +198,80 @@ func PrepareOperation(ctx context.Context, db *gorm.DB, stateStore state.Store, 
 		if !matchesOperation(existing, req) {
 			return OperationResult{}, Error("binding_conflict", 409, "conflict")
 		}
+		if existing.Status == "preparing" {
+			return completePreparingOperation(ctx, stateStore, existing)
+		}
 		return operationResult(existing), nil
 	}
-	// Sixteen independent atomic slots enforce capacity without a read/count/write race.
-	for slot := 0; slot < 16; slot++ {
-		if err := cleanOperationSlot(ctx, stateStore, req.ConversationID, slot); err != nil {
-			return OperationResult{}, err
-		}
-		claimed, err = stateStore.SetNX(ctx, operationSlotKey(req.ConversationID, slot), []byte(operationID), operationClaimTTL)
+	return completePreparingOperation(ctx, stateStore, value)
+}
+
+// completePreparingOperation makes a claimed preparing operation recoverable.
+// Redis and SQLite do not share a cross-key transaction, so a retry by the
+// same operation owner resumes the slot/index/state sequence.
+func completePreparingOperation(ctx context.Context, store state.Store, value operationState) (OperationResult, error) {
+	if value.Slot < 0 {
+		var err error
+		value.Slot, err = findOperationSlot(ctx, store, value.Request.ConversationID, value.OperationID)
 		if err != nil {
 			return OperationResult{}, err
 		}
-		if claimed {
-			value.Slot = slot
-			break
+	}
+	if value.Slot < 0 {
+		for slot := 0; slot < 16; slot++ {
+			if err := cleanOperationSlot(ctx, store, value.Request.ConversationID, slot); err != nil {
+				return OperationResult{}, err
+			}
+			claimed, err := store.SetNX(ctx, operationSlotKey(value.Request.ConversationID, slot), []byte(value.OperationID), operationClaimTTL)
+			if err != nil {
+				return OperationResult{}, err
+			}
+			if claimed {
+				value.Slot = slot
+				break
+			}
+			value.Slot, err = findOperationSlot(ctx, store, value.Request.ConversationID, value.OperationID)
+			if err != nil {
+				return OperationResult{}, err
+			}
+			if value.Slot >= 0 {
+				break
+			}
 		}
 	}
 	if value.Slot < 0 {
 		value.Status, value.Result.Reason = operationFailed, "approval_capacity"
 	} else {
-		value.Status = decisionStatus(decision)
-	}
-	if value.Slot >= 0 {
-		if err := stateStore.HSet(ctx, "local-workspace-operation-index:"+req.ConversationID, map[string]any{fmt.Sprint(value.Slot): operationID}, operationClaimTTL); err != nil {
+		value.Status = decisionStatus(value.Decision)
+		if err := store.HSet(ctx, "local-workspace-operation-index:"+value.Request.ConversationID, map[string]any{fmt.Sprint(value.Slot): value.OperationID}, operationClaimTTL); err != nil {
 			return OperationResult{}, err
 		}
 	}
-	if err := saveOperationState(ctx, stateStore, value); err != nil {
+	if err := saveOperationState(ctx, store, value); err != nil {
 		return OperationResult{}, err
 	}
 	return operationResult(value), nil
+}
+
+func findOperationSlot(ctx context.Context, store state.Store, conversation, operationID string) (int, error) {
+	for slot := 0; slot < 16; slot++ {
+		key := operationSlotKey(conversation, slot)
+		exists, err := store.Exists(ctx, key)
+		if err != nil {
+			return -1, err
+		}
+		if !exists {
+			continue
+		}
+		id, err := store.Get(ctx, key)
+		if err != nil {
+			return -1, err
+		}
+		if string(id) == operationID {
+			return slot, nil
+		}
+	}
+	return -1, nil
 }
 
 func ExecuteOperation(ctx context.Context, db *gorm.DB, stateStore state.Store, operationID string, req OperationRequest) (OperationResult, error) {
@@ -247,6 +294,9 @@ func ExecuteOperation(ctx context.Context, db *gorm.DB, stateStore state.Store, 
 	if value.Decision != DecisionAllowed {
 		return operationResult(value), Error("selection_forbidden", 403, "forbidden")
 	}
+	// An executing operation has already crossed the mutation boundary. A
+	// retry cannot safely infer whether the filesystem mutation happened, so it
+	// must not replay it merely because the lock owner has the same CallID.
 	if value.Status != operationAllowed {
 		return operationResult(value), Error("binding_conflict", 409, "conflict")
 	}
@@ -254,6 +304,12 @@ func ExecuteOperation(ctx context.Context, db *gorm.DB, stateStore state.Store, 
 	if err != nil {
 		return OperationResult{}, err
 	}
+	claimHeld := claimed
+	defer func() {
+		if claimHeld {
+			releaseOperationClaim(ctx, stateStore, operationID, req.CallID)
+		}
+	}()
 	value, err = loadOperationState(ctx, stateStore, operationID)
 	if err != nil {
 		return OperationResult{}, err
@@ -268,6 +324,11 @@ func ExecuteOperation(ctx context.Context, db *gorm.DB, stateStore state.Store, 
 	if err := saveOperationState(ctx, stateStore, value); err != nil {
 		return OperationResult{}, err
 	}
+	// Once executing is persisted, retain the claim. If that write failed, the
+	// deferred compare-and-delete lets a retry reclaim only when the operation
+	// is still in the allowed state; an ambiguous persisted executing state is
+	// intentionally treated as non-replayable by the guard above.
+	claimHeld = false
 	var result OperationResult
 	touched := false
 	err = db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -346,6 +407,14 @@ func ExecuteOperation(ctx context.Context, db *gorm.DB, stateStore state.Store, 
 		return OperationResult{}, err
 	}
 	return result, nil
+}
+
+func releaseOperationClaim(ctx context.Context, store state.Store, operationID, owner string) {
+	atomic, ok := store.(state.CompareAndDeleteStore)
+	if !ok {
+		return
+	}
+	_, _ = atomic.CompareAndDelete(ctx, operationLockKey(operationID), []byte(owner))
 }
 
 func resolveOperation(ctx context.Context, db *gorm.DB, req OperationRequest, runSnapshot *ContextSnapshot) (*ContextSnapshot, error) {
@@ -500,8 +569,11 @@ func executeFileOperation(ctx context.Context, root *os.Root, name string, info 
 		if err := revalidate(); err != nil {
 			return OperationResult{}, err
 		}
-		*touched = true
-		return OperationResult{}, root.Mkdir(name, 0o700)
+		err := root.Mkdir(name, 0o700)
+		if err == nil {
+			*touched = true
+		}
+		return OperationResult{}, err
 	}
 	var old []byte
 	var err error
@@ -543,8 +615,11 @@ func executeFileOperation(ctx context.Context, root *os.Root, name string, info 
 		if digestBytes(check) != version {
 			return OperationResult{}, Error("binding_conflict", 409, "conflict")
 		}
-		*touched = true
-		return OperationResult{Version: version}, root.Remove(name)
+		err = root.Remove(name)
+		if err == nil {
+			*touched = true
+		}
+		return OperationResult{Version: version}, err
 	}
 	content := req.Content
 	switch req.Operation {
@@ -620,7 +695,6 @@ func executeFileOperation(ctx context.Context, root *os.Root, name string, info 
 	if err := revalidate(); err != nil {
 		return OperationResult{}, err
 	}
-	*touched = true
 	if req.Operation == OperationCreate {
 		err = root.Link(temp, name)
 	} else {
@@ -629,6 +703,7 @@ func executeFileOperation(ctx context.Context, root *os.Root, name string, info 
 	if err != nil {
 		return OperationResult{}, err
 	}
+	*touched = true
 	return OperationResult{Content: content, Version: digestBytes([]byte(content))}, nil
 }
 

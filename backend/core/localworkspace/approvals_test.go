@@ -2,6 +2,7 @@ package localworkspace
 
 import (
 	"context"
+	"errors"
 	"github.com/gorilla/mux"
 	"lazymind/core/common/orm"
 	"lazymind/core/store"
@@ -49,14 +50,35 @@ func TestWorkspaceApprovalAllowsOnceAndRejectsSecondDecision(t *testing.T) {
 	if _, err := DecideOperation(context.Background(), db.DB, stateStore, prepared.OperationID, "allow_once", "owner"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := DecideOperation(context.Background(), db.DB, stateStore, prepared.OperationID, "allow_once", "owner"); err == nil {
-		t.Fatal("second decision unexpectedly succeeded")
+	if result, err := DecideOperation(context.Background(), db.DB, stateStore, prepared.OperationID, "allow_once", "owner"); err != nil || result.Decision != DecisionAllowed {
+		t.Fatalf("same decision was not idempotent: %+v, %v", result, err)
+	}
+	if _, err := DecideOperation(context.Background(), db.DB, stateStore, prepared.OperationID, "reject", "owner"); err == nil {
+		t.Fatal("conflicting second decision unexpectedly succeeded")
 	}
 	if _, err := ExecuteOperation(context.Background(), db.DB, stateStore, prepared.OperationID, OperationRequest{HistoryID: "history", RunID: "run",
 		UserID: "owner", ConversationID: conversationID, WorkspaceID: grant.WorkspaceID,
 		Operation: OperationCreate, Path: "approved.txt", Content: "ok", CallID: callID,
 	}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestWorkspaceDecisionClaimCanRecoverAfterStateWriteFailure(t *testing.T) {
+	db, grant, stateStore, conversationID := operationFixture(t, PermissionAlwaysAsk)
+	prepared, err := PrepareOperation(t.Context(), db.DB, stateStore, OperationRequest{HistoryID: "history", RunID: "run",
+		UserID: "owner", ConversationID: conversationID, WorkspaceID: grant.WorkspaceID,
+		Operation: OperationCreate, Path: "decision-recovery.txt", Content: "ok", CallID: operationTestCallID("decision-recovery")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failure := errors.New("state write unavailable")
+	failing := &failedOperationWriteStore{Store: stateStore, CompareAndDeleteStore: stateStore.(state.CompareAndDeleteStore), key: operationKey(prepared.OperationID), err: failure}
+	if _, err := DecideOperation(t.Context(), db.DB, failing, prepared.OperationID, "allow_once", "owner"); !errors.Is(err, failure) {
+		t.Fatalf("expected state write failure, got %v", err)
+	}
+	if result, err := DecideOperation(t.Context(), db.DB, stateStore, prepared.OperationID, "allow_once", "owner"); err != nil || result.Decision != DecisionAllowed {
+		t.Fatalf("decision did not recover: %+v, %v", result, err)
 	}
 }
 

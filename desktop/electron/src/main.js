@@ -2261,8 +2261,9 @@ ipcMain.handle("lazymind:reauthorizeLocalWorkspace", async (event, workspaceId) 
     properties: ["openDirectory"],
   });
   if (selected.canceled || selected.filePaths.length !== 1) return { canceled: true };
-  const { canonicalPath, proof } = await resolveLocalWorkspaceDirectory(selected.filePaths[0]);
-  if (canonicalPath !== data.canonical_path) {
+  const { proof } = await resolveLocalWorkspaceDirectory(selected.filePaths[0]);
+  const storedDirectory = await resolveLocalWorkspaceDirectory(data.canonical_path);
+  if (proof !== storedDirectory.proof) {
     throw Object.assign(new Error("Selected workspace is unavailable"), {
       code: "LOCAL_WORKSPACE_PATH_INVALID",
     });

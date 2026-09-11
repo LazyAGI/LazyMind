@@ -235,9 +235,10 @@ func TestWorkspaceCandidateExpiresIsSingleUseAndOwnerBound(t *testing.T) {
 	if _, state := store.consume(token, "u-2"); state != "invalid" {
 		t.Fatalf("cross-user state=%q", state)
 	}
-	if _, state := store.consume(token, "u-1"); state != "invalid" {
-		t.Fatalf("cross-user attempt did not consume token: %q", state)
+	if _, state := store.consume(token, "u-1"); state != "" {
+		t.Fatalf("cross-user attempt consumed token: %q", state)
 	}
+	store.commit(token)
 	token, err = store.put(workspaceCandidate{path: "/tmp/project", name: "project", userID: "u-1"})
 	if err != nil {
 		t.Fatal(err)
@@ -253,8 +254,47 @@ func TestWorkspaceCandidateExpiresIsSingleUseAndOwnerBound(t *testing.T) {
 	if _, state := store.consume(token, "u-1"); state != "" {
 		t.Fatalf("first consume=%q", state)
 	}
+	store.commit(token)
 	if _, state := store.consume(token, "u-1"); state != "invalid" {
 		t.Fatalf("replay state=%q", state)
+	}
+}
+
+func TestWorkspaceCandidateCanBeReleasedForSameAuthorizationRetry(t *testing.T) {
+	store := newWorkspaceCandidateStore()
+	token, err := store.put(workspaceCandidate{path: "/tmp/project", name: "project", userID: "u-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, state := store.consume(token, "u-1"); state != "" {
+		t.Fatalf("first consume=%q", state)
+	}
+	store.release(token)
+	if _, state := store.consume(token, "u-1"); state != "" {
+		t.Fatalf("retry consume=%q", state)
+	}
+	store.commit(token)
+	if _, state := store.consume(token, "u-1"); state != "invalid" {
+		t.Fatalf("committed token replay state=%q", state)
+	}
+}
+
+func TestWorkspaceDirectoryIdentityAcceptsDifferentPathRepresentations(t *testing.T) {
+	root := t.TempDir()
+	alias := filepath.Join(t.TempDir(), "alias")
+	if err := os.Symlink(root, alias); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	_, _, expected, err := validateWorkspaceDirectory(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, selected, err := validateWorkspaceDirectory(alias)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sameWorkspaceDirectory(expected, selected) {
+		t.Fatal("same filesystem directory was rejected")
 	}
 }
 
@@ -297,6 +337,39 @@ func TestWorkspaceAuthorizationRechecksDirectoryAndSanitizesCoreFailure(t *testi
 	handler.authorizeWorkspace(response, workspaceContractRequest(http.MethodPost, workspaceAuthorizePath,
 		`{"selection_token":"`+token+`"}`, "127.0.0.1:50000", "http://localhost:8090"))
 	requireWorkspaceContractError(t, response, http.StatusBadRequest, "LOCAL_WORKSPACE_PATH_INVALID")
+}
+
+func TestWorkspaceAuthorizationReleasesTokenAfterCoreFailure(t *testing.T) {
+	root, _, rootInfo, err := validateWorkspaceDirectory(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	coreCalls := 0
+	core := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		coreCalls++
+		if coreCalls == 1 {
+			http.Error(w, "temporary failure", http.StatusServiceUnavailable)
+			return
+		}
+		_, _ = w.Write([]byte(`{"code":0,"data":{"workspace_id":"grant"}}`))
+	})
+	handler := workspaceTestHandler(t, core)
+	token, err := handler.store.put(workspaceCandidate{path: root, name: filepath.Base(root), userID: "u-1", info: rootInfo})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := workspaceContractRequest(http.MethodPost, workspaceAuthorizePath,
+		`{"selection_token":"`+token+`"}`, "127.0.0.1:50000", "http://localhost:8090")
+	first := httptest.NewRecorder()
+	handler.authorizeWorkspace(first, request)
+	requireWorkspaceContractError(t, first, http.StatusServiceUnavailable, "LOCAL_WORKSPACE_SELECTION_INVALID")
+	second := httptest.NewRecorder()
+	secondRequest := workspaceContractRequest(http.MethodPost, workspaceAuthorizePath,
+		`{"selection_token":"`+token+`"}`, "127.0.0.1:50000", "http://localhost:8090")
+	handler.authorizeWorkspace(second, secondRequest)
+	if second.Code != http.StatusOK || !strings.Contains(second.Body.String(), `"workspace_id":"grant"`) {
+		t.Fatalf("retry=%d %s", second.Code, second.Body.String())
+	}
 }
 
 func TestWorkspaceReauthorizationRequiresPickerAndExactStoredDirectory(t *testing.T) {
