@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -312,6 +313,61 @@ func TestRunAcceptsRemoteSourceMappingWithCategoryAndProvider(t *testing.T) {
 	opts.FrozenLockfile = true
 	if err := run(context.Background(), opts, http.DefaultClient); err != nil {
 		t.Fatalf("frozen provider build failed: %v", err)
+	}
+}
+
+func TestBuiltinSourceManifestIncludesSelectedSkillHubAndGitHubSources(t *testing.T) {
+	_, testFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("failed to locate test file")
+	}
+	sourcesPath := filepath.Join(filepath.Dir(testFile), "../../../../skills/builtin-sources.yaml")
+	sources, err := loadSources(sourcesPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected := []struct {
+		url      string
+		provider string
+	}{
+		{"https://skillhub.cn/skills/clawhub_ide-rea/baidu-search", "SkillHub"},
+		{"https://skillhub.cn/skills/org-whlskj/lskj-recommend", "SkillHub"},
+		{"https://skillhub.cn/skills/org-mbvufw6y/bid-query-analysis-workbench", "SkillHub"},
+		{"https://skillhub.cn/skills/clawhub_ivangdavila/code", "SkillHub"},
+		{"https://skillhub.cn/skills/clawhub_jk-0001/copywriting", "SkillHub"},
+		{"https://skillhub.cn/skills/clawhub_michaelmonetized/frontend-design-3", "SkillHub"},
+		{"https://skillhub.cn/skills/user_2ecc1bb2/gongwenformat-pro", "SkillHub"},
+		{"https://skillhub.cn/skills/beatra-ai/hot-topic-content-maker", "SkillHub"},
+		{"https://skillhub.cn/skills/user_741dc82b/luban-skill-pro", "SkillHub"},
+		{"https://skillhub.cn/skills/clawhub_ivangdavila/market-research", "SkillHub"},
+		{"https://skillhub.cn/skills/clawhub_hopyky/self-reflection", "SkillHub"},
+		{"https://skillhub.cn/skills/clawhub_zlc000190/using-superpowers", "SkillHub"},
+		{"https://skillhub.cn/skills/user_5f9c21aa/gzh-explosive-content-detector", "SkillHub"},
+		{"https://skillhub.cn/skills/sbkj-bid/official-project", "SkillHub"},
+		{"https://github.com/AvdLee/Swift-Testing-Agent-Skill/tree/798e9b1a2bcac164d4f0c781908199e754f0bab6/swift-testing-expert", "GitHub"},
+		{"https://github.com/Yuzzyuk/marketing-os/tree/bb67dff5f04b390e861ee11433166e4519e7f4c0/skills/marketing-os", "GitHub"},
+		{"https://github.com/liyupi/yupi-skill/archive/b6157f3ca72a0c4dee0f873ad974cb61e4610c8f.zip", "GitHub"},
+		{"https://github.com/mixelpixx/Konnect/tree/f58b222a196883793a5e2b237ac40f09096a3819/crates/konnect/assets/skills/konnect", "GitHub"},
+		{"https://github.com/tt-a1i/simplify-codebase/archive/5da55efcb52db690e7406f06f827a23b15da2706.zip", "GitHub"},
+		{"https://github.com/limingrui679-design/high-stakes-analytics-decision-lab/tree/af98eecf347f0d15182fc68a2349d0dabaec1de4/skills/high-stakes-analytics-decision-lab", "GitHub"},
+		{"https://github.com/Meet-Miyani/compose-skill/archive/982c240e47718b3b0525c5bbe85bf19ff0bb7bec.zip", "GitHub"},
+		{"https://github.com/ckelsoe/prompt-architect/tree/6c7a2c7b5a15cbb918828c7878c226a592985702/skills/prompt-architect", "GitHub"},
+		{"https://github.com/bevibing/socrates-skill/archive/becb2e51fe7ed063f5f3304cccf8da03aacef6cf.zip", "GitHub"},
+		{"https://github.com/CosmoBlk/email-marketing-bible/archive/b6dd8b49c7d09ea3ca57db84b1de803c07783876.zip", "GitHub"},
+		{"https://github.com/leopiney/linus-torvalds-skills/tree/792d1625c776d4ebbd223fdb13e562973ab7d0bb/skills/torvalds-doctrine", "GitHub"},
+		{"https://github.com/tigerless-labs/design-harness/tree/9aca84e8c4721d4e7623df5f4d67153477ec40a5/plugins/design-harness/skills/design-harness", "GitHub"},
+		{"https://github.com/arvindrk/extract-design-system/tree/1873741ba8dea755e35e6e15134f7918cd58e036/skills/extract-design-system", "GitHub"},
+		{"https://github.com/PabloNAX/ultracode-skill/tree/bfa2d92488171651c6c9379a8b98f8a07d996d3c/ultracode", "GitHub"},
+		{"https://github.com/smixs/skill-conductor/tree/3c21d2f19c336d3a3333bfe4f45eee041bd13beb/skills/skill-conductor", "GitHub"},
+	}
+	if len(sources.Skills) != len(expected)+1 {
+		t.Fatalf("remote source count = %d, want %d", len(sources.Skills), len(expected)+1)
+	}
+	for index, want := range expected {
+		got := sources.Skills[index+1]
+		if got.SourceURL != want.url || got.Provider != want.provider {
+			t.Fatalf("source[%d] = %#v, want URL %q/provider %q", index+1, got, want.url, want.provider)
+		}
 	}
 }
 
