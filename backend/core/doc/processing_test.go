@@ -2,6 +2,25 @@ package doc
 
 import "testing"
 
+func TestResolveReparseStrategyRespectsProcessingLevel(t *testing.T) {
+	tests := []struct {
+		level, mode, want string
+		wantErr           bool
+	}{
+		{ProcessingLevelStored, "slice_missing", "rebuild", false},
+		{ProcessingLevelParsed, "slice_missing", "rebuild", false},
+		{ProcessingLevelChunked, "slice_missing", "slice_missing", false},
+		{ProcessingLevelChunked, "slice_and_embed", "", true},
+		{ProcessingLevelIndexed, "slice_and_embed", "reembed", false},
+	}
+	for _, tt := range tests {
+		got, err := resolveReparseStrategy(tt.level, tt.mode)
+		if (err != nil) != tt.wantErr || got != tt.want {
+			t.Fatalf("resolveReparseStrategy(%q, %q) = %q, %v; want %q, error=%v", tt.level, tt.mode, got, err, tt.want, tt.wantErr)
+		}
+	}
+}
+
 func TestNormalizeProcessingLevelDefaultsToIndexed(t *testing.T) {
 	got, err := normalizeProcessingLevel("")
 	if err != nil || got != ProcessingLevelIndexed {

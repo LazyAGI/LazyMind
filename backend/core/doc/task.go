@@ -1477,6 +1477,10 @@ func startParseTasksInternal(r *http.Request, datasetID string, taskIDs []string
 	if kbID == "" {
 		return nil, fmt.Errorf("dataset kb mapping not found")
 	}
+	var dataset orm.Dataset
+	if err := store.DB().WithContext(r.Context()).Where("id = ? AND deleted_at IS NULL", datasetID).Take(&dataset).Error; err != nil {
+		return nil, fmt.Errorf("dataset not found")
+	}
 	userID := common.UserID(r)
 	llmConfig, err := modelconfig.LoadLLMConfig(r.Context(), store.DB(), userID)
 	if err != nil {
@@ -1561,7 +1565,7 @@ func startParseTasksInternal(r *http.Request, datasetID string, taskIDs []string
 			items = append(items, buildAddFileItem(datasetID, candidate.task, candidate.doc, candidate.docExt, parsePath))
 		}
 		if len(baseTasks) > 0 {
-			extResults, err := callExternalAddDocs(r, addRequest{Items: items, KbID: kbID, SourceType: "EXTERNAL", IdempotencyKey: newTaskID(), ModelConfig: llmConfig, OCRConfig: ocrConfig})
+			extResults, err := callExternalAddDocs(r, addRequest{Items: items, KbID: kbID, SourceType: "EXTERNAL", IdempotencyKey: newTaskID(), ModelConfig: llmConfig, OCRConfig: ocrConfig, ProcessingLevel: effectiveProcessingLevel(dataset.ProcessingLevel)})
 			if err != nil {
 				for i, taskRow := range baseTasks {
 					resolved := common.ResolveAppError(err.Error(), http.StatusBadGateway)
@@ -1617,7 +1621,7 @@ func startParseTasksInternal(r *http.Request, datasetID string, taskIDs []string
 					return
 				}
 				item := buildAddFileItem(datasetID, candidate.task, candidate.doc, dExt, parsePath)
-				extResults, err := callExternalAddDocs(r, addRequest{Items: []addFileItem{item}, KbID: kbID, SourceType: "EXTERNAL", IdempotencyKey: newTaskID(), ModelConfig: llmConfig, OCRConfig: ocrConfig})
+				extResults, err := callExternalAddDocs(r, addRequest{Items: []addFileItem{item}, KbID: kbID, SourceType: "EXTERNAL", IdempotencyKey: newTaskID(), ModelConfig: llmConfig, OCRConfig: ocrConfig, ProcessingLevel: effectiveProcessingLevel(dataset.ProcessingLevel)})
 				if err != nil {
 					resolved := common.ResolveAppError(err.Error(), http.StatusBadGateway)
 					outcomes[idx] = officeOutcome{task: candidate.task, doc: candidate.doc, docExt: dExt, result: StartTaskResult{TaskID: candidate.task.ID, DocumentID: candidate.doc.ID, DisplayName: candidate.doc.DisplayName, Status: "FAILED", SubmitStatus: "FAILED", Message: resolved.Message, Detail: fmt.Sprint(resolved.Detail)}}
@@ -2783,6 +2787,11 @@ func createTaskFromExistingDocument(r *http.Request, datasetID, userID, userName
 
 func startReparseTasksInternal(r *http.Request, datasetID string, taskIDs []string) ([]StartTaskResult, error) {
 	kbID := datasetKbIDByID(datasetID)
+	var dataset orm.Dataset
+	if err := store.DB().WithContext(r.Context()).Where("id = ? AND deleted_at IS NULL", datasetID).Take(&dataset).Error; err != nil {
+		return nil, fmt.Errorf("dataset not found")
+	}
+	processingLevel := effectiveProcessingLevel(dataset.ProcessingLevel)
 	results := make([]StartTaskResult, 0, len(taskIDs))
 	userID := common.UserID(r)
 	applog.Logger.Info().
@@ -2858,9 +2867,9 @@ func startReparseTasksInternal(r *http.Request, datasetID string, taskIDs []stri
 	}
 	// Pass reparse_mode through as the strategy string; only
 	// "slice_and_embed" is renamed to "reembed" for the algorithm.
-	strategy := reparseMode
-	if reparseMode == "slice_and_embed" {
-		strategy = "reembed"
+	strategy, err := resolveReparseStrategy(processingLevel, reparseMode)
+	if err != nil {
+		return results, err
 	}
 	applog.Logger.Info().
 		Str("handler", "StartReparseTask").
@@ -2872,7 +2881,7 @@ func startReparseTasksInternal(r *http.Request, datasetID string, taskIDs []stri
 		Str("reparse_mode", reparseMode).
 		Str("strategy", strategy).
 		Msg("submitting reparse batch to doc service")
-	lazyllmTaskIDs, err := callExternalReparseDocs(r, reparseRequest{DocIDs: docIDs, KbID: kbID, NgNames: ngNames, Strategy: strategy, IdempotencyKey: newTaskID(), ModelConfig: llmConfig, OCRConfig: ocrConfig})
+	lazyllmTaskIDs, err := callExternalReparseDocs(r, reparseRequest{DocIDs: docIDs, KbID: kbID, NgNames: ngNames, Strategy: strategy, IdempotencyKey: newTaskID(), ModelConfig: llmConfig, OCRConfig: ocrConfig, ProcessingLevel: processingLevel})
 	if err != nil {
 		errMsg := common.ResolveAppError(err.Error(), http.StatusBadGateway).Message
 		applog.Logger.Error().
@@ -2918,6 +2927,24 @@ func startReparseTasksInternal(r *http.Request, datasetID string, taskIDs []stri
 		Strs("ng_names", ngNames).
 		Msg("reparse tasks submitted")
 	return results, nil
+}
+
+func resolveReparseStrategy(processingLevel, reparseMode string) (string, error) {
+	level := effectiveProcessingLevel(processingLevel)
+	mode := strings.TrimSpace(reparseMode)
+	if mode == "" {
+		mode = "slice_missing"
+	}
+	if mode == "slice_and_embed" {
+		if level != ProcessingLevelIndexed {
+			return "", fmt.Errorf("vector rebuild requires indexed processing level")
+		}
+		return "reembed", nil
+	}
+	if level == ProcessingLevelStored || level == ProcessingLevelParsed {
+		return "rebuild", nil
+	}
+	return mode, nil
 }
 
 func normalizeParsingLLMConfig(cfg map[string]any) map[string]any {

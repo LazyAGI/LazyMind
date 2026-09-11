@@ -1209,6 +1209,7 @@ const KnowledgeTable = forwardRef<IKnowledgeListRef, Props>((props, ref) => {
           dataset: record?.dataset_id || "",
           ids: [record?.document_id || ""],
           names: [record?.display_name || ""],
+          processingLevel: detail.processing_level,
         });
         break;
       case "import": {
@@ -1376,6 +1377,7 @@ const KnowledgeTable = forwardRef<IKnowledgeListRef, Props>((props, ref) => {
       dataset: detail.dataset_id!,
       ids: records.map((record) => record.document_id || ""),
       names: records.map((record) => record.display_name || ""),
+      processingLevel: detail.processing_level,
     });
   };
 
