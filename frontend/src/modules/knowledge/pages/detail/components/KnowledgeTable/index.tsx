@@ -16,6 +16,7 @@ import {
 import {
   DocumentServiceApi,
   JobServiceApi,
+  TaskServiceApi,
   normalizeProxyableUrl,
 } from "@/modules/knowledge/utils/request";
 import { localizeErrorCode } from "@/components/request";
@@ -108,7 +109,9 @@ export interface BatchMoveDocument {
 }
 
 interface Props {
-  detail: Dataset;
+  detail: Dataset & {
+    processing_level?: "stored" | "parsed" | "chunked" | "indexed";
+  };
   documentParsingEnabled: boolean | null;
   onImportKnowledge: (data: { p_id?: string; targetPath?: string }) => void;
   getImportingTotal: () => void;
@@ -185,6 +188,7 @@ const KnowledgeTable = forwardRef<IKnowledgeListRef, Props>((props, ref) => {
   const [action, setAction] = useState<"copy" | "move">("move");
   const [showTagEditModal, setShowTagEditModal] = useState(false);
   const [tagEditRecord, setTagEditRecord] = useState<TreeNode | null>(null);
+  const [parseFailureReasons, setParseFailureReasons] = useState<Record<string, string>>({});
 
   const [batchTagEditState, setBatchTagEditState] = useState({
     showModal: false,
@@ -208,6 +212,44 @@ const KnowledgeTable = forwardRef<IKnowledgeListRef, Props>((props, ref) => {
     state.hasUploadPermission(),
   );
   const isDocumentParsingUnavailable = documentParsingEnabled !== true;
+
+  useEffect(() => {
+    const datasetId = detail.dataset_id;
+    if (!datasetId) return;
+
+    let cancelled = false;
+    TaskServiceApi()
+      .listTasks(
+        datasetId,
+        { taskStatus: "failed", pageSize: 1000 },
+        { silentError: true } as never,
+      )
+      .then(({ data }) => {
+        if (cancelled) return;
+        const reasons: Record<string, string> = {};
+        for (const task of data.tasks || []) {
+          const reason = String(task.err_msg || task.convert_error || "").trim();
+          if (!reason) continue;
+          const documentIds = new Set<string>();
+          if (task.document_id) documentIds.add(task.document_id);
+          for (const document of task.document_info || []) {
+            if (document.document_id) documentIds.add(document.document_id);
+          }
+          for (const documentId of documentIds) {
+            // Tasks are returned newest first, so preserve the latest failure.
+            if (!reasons[documentId]) reasons[documentId] = reason;
+          }
+        }
+        setParseFailureReasons(reasons);
+      })
+      .catch(() => {
+        if (!cancelled) setParseFailureReasons({});
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [detail.dataset_id]);
 
   const notifyDocumentParsingPaused = () => {
     message.warning(documentParsingEnabled === false
@@ -859,10 +901,27 @@ const KnowledgeTable = forwardRef<IKnowledgeListRef, Props>((props, ref) => {
       },
     },
     {
-      title: t("knowledge.parseStatus"),
+      title:
+        detail.processing_level === "stored"
+          ? t("knowledge.storageStatus")
+          : t("knowledge.parseStatus"),
       dataIndex: "document_stage",
       width: 100,
-      render: (document_stage: string) => {
+      render: (document_stage: string, record: TreeNode) => {
+        if (
+          detail.processing_level === "stored" &&
+          record.type !== DocTypeEnum.Folder
+        ) {
+          const parsed = [
+            DocDocumentStageEnum.DocumentParseSuccessfully,
+            "SUCCESS",
+          ].includes(document_stage);
+          return (
+            <Tag color="success">
+              {t(parsed ? "knowledge.stageParsed" : "knowledge.stageStored")}
+            </Tag>
+          );
+        }
         const text =
           (DocumentStageEnum[document_stage as keyof typeof DocumentStageEnum]
             ? t(
@@ -877,7 +936,26 @@ const KnowledgeTable = forwardRef<IKnowledgeListRef, Props>((props, ref) => {
             document_stage as keyof typeof DocumentStageTagColorMap
           ] || "default";
 
-        return <Tag color={color}>{text}</Tag>;
+        const isFailed = [
+          DocDocumentStageEnum.DocumentParsingFailed,
+          DocDocumentStageEnum.DocumentCrawlingFailed,
+          DocDocumentStageEnum.DocumentFailed,
+          "FAILED",
+        ].includes(document_stage);
+        const tag = <Tag color={color}>{text}</Tag>;
+        if (!isFailed) return tag;
+
+        const reason = record.document_id
+          ? parseFailureReasons[record.document_id]
+          : "";
+        return (
+          <Tooltip
+            title={reason || t("knowledge.parseFailureReasonUnavailable")}
+            placement="top"
+          >
+            <span>{tag}</span>
+          </Tooltip>
+        );
       },
     },
     {
@@ -1131,6 +1209,7 @@ const KnowledgeTable = forwardRef<IKnowledgeListRef, Props>((props, ref) => {
           dataset: record?.dataset_id || "",
           ids: [record?.document_id || ""],
           names: [record?.display_name || ""],
+          processingLevel: detail.processing_level,
         });
         break;
       case "import": {
@@ -1298,6 +1377,7 @@ const KnowledgeTable = forwardRef<IKnowledgeListRef, Props>((props, ref) => {
       dataset: detail.dataset_id!,
       ids: records.map((record) => record.document_id || ""),
       names: records.map((record) => record.display_name || ""),
+      processingLevel: detail.processing_level,
     });
   };
 

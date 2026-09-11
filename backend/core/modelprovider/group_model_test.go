@@ -289,6 +289,72 @@ func TestAddGroupModelRestoresSoftDeletedCustomModel(t *testing.T) {
 	}
 }
 
+func TestDeleteEmbeddingModelRequiresConfirmationAndDowngradesIndexedDatasets(t *testing.T) {
+	db := setupListProviderTestDB(t)
+	if err := db.AutoMigrate(&orm.UserSelectedModel{}, &orm.Dataset{}, &orm.DocumentProcessingState{}); err != nil {
+		t.Fatal(err)
+	}
+	store.Init(db, db, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+
+	now := time.Now().UTC()
+	provider := orm.UserModelProvider{ID: "provider", Capabilities: "has_models", BaseModel: orm.BaseModel{CreateUserID: "user-1", CreatedAt: now, UpdatedAt: now}}
+	group := orm.UserModelProviderGroup{ID: "group", UserModelProviderID: provider.ID, BaseModel: orm.BaseModel{CreateUserID: "user-1", CreatedAt: now, UpdatedAt: now}}
+	model := orm.UserModelProviderGroupModel{ID: "embed-model", UserModelProviderID: provider.ID, UserModelProviderGroupID: group.ID, ModelType: "embed", BaseModel: orm.BaseModel{CreateUserID: "user-1", CreatedAt: now, UpdatedAt: now}}
+	ownerDataset := orm.Dataset{ID: "owner-indexed", KbID: "owner-indexed", ProcessingLevel: "indexed", ProcessingRevision: 4, BaseModel: orm.BaseModel{CreateUserID: "user-1", CreatedAt: now, UpdatedAt: now}}
+	otherDataset := orm.Dataset{ID: "other-indexed", KbID: "other-indexed", ProcessingLevel: "indexed", ProcessingRevision: 2, BaseModel: orm.BaseModel{CreateUserID: "user-2", CreatedAt: now, UpdatedAt: now}}
+	artifact := orm.DocumentProcessingState{DatasetID: ownerDataset.ID, DocumentID: "doc-1", IndexStatus: "succeeded", IndexArtifactRef: "vector-index-v1", UpdatedAt: now}
+	for _, row := range []any{&provider, &group, &model, &ownerDataset, &otherDataset, &artifact} {
+		if err := db.Create(row).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	deleteRequest := func(confirmed bool) *httptest.ResponseRecorder {
+		path := "/api/core/model_providers/provider/groups/group/models/embed-model"
+		if confirmed {
+			path += "?confirm_indexed_downgrade=true"
+		}
+		req := httptest.NewRequest(http.MethodDelete, path, nil)
+		req.Header.Set("X-User-Id", "user-1")
+		req = mux.SetURLVars(req, map[string]string{"model_provider_id": provider.ID, "group_id": group.ID, "model_id": model.ID})
+		rec := httptest.NewRecorder()
+		DeleteGroupModel(rec, req)
+		return rec
+	}
+
+	if rec := deleteRequest(false); rec.Code != http.StatusConflict {
+		t.Fatalf("unconfirmed status = %d, want 409: %s", rec.Code, rec.Body.String())
+	}
+	var stillPresent orm.UserModelProviderGroupModel
+	if err := db.Where("id = ? AND deleted_at IS NULL", model.ID).Take(&stillPresent).Error; err != nil {
+		t.Fatal("model was deleted without confirmation")
+	}
+
+	if rec := deleteRequest(true); rec.Code != http.StatusOK {
+		t.Fatalf("confirmed status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	for id, wantLevel := range map[string]string{ownerDataset.ID: "chunked", otherDataset.ID: "indexed"} {
+		var dataset orm.Dataset
+		if err := db.Take(&dataset, "id = ?", id).Error; err != nil {
+			t.Fatal(err)
+		}
+		if dataset.ProcessingLevel != wantLevel {
+			t.Errorf("dataset %s level = %q, want %q", id, dataset.ProcessingLevel, wantLevel)
+		}
+		if id == ownerDataset.ID && dataset.ProcessingRevision != 5 {
+			t.Errorf("revision = %d, want 5", dataset.ProcessingRevision)
+		}
+	}
+	var retained orm.DocumentProcessingState
+	if err := db.Take(&retained, "dataset_id = ? AND document_id = ?", ownerDataset.ID, "doc-1").Error; err != nil {
+		t.Fatal(err)
+	}
+	if retained.IndexArtifactRef != "vector-index-v1" || retained.IndexStatus != "succeeded" {
+		t.Fatalf("index artifact was changed: %#v", retained)
+	}
+}
+
 func TestListUserModelsWithoutTypeReturnsAnyVerifiedModel(t *testing.T) {
 	db := setupListProviderTestDB(t)
 	store.Init(db, db, nil)

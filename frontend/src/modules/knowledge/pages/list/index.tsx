@@ -60,6 +60,10 @@ import {
 } from "@/api/generated/knowledge-client";
 import KnowledgeTag from "@/modules/knowledge/components/KnowledgeTag";
 import FileUtils from "@/modules/knowledge/utils/file";
+import {
+  effectiveProcessingLevel,
+  type ProcessingLevel,
+} from "@/modules/knowledge/utils/processingLevel";
 
 import { ListPageTable } from "@/components/ui";
 import { useTranslation } from "react-i18next";
@@ -218,8 +222,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
   const marketTaskRefreshKey = Object.keys(trackedMarketJobs).sort().join(",");
   const isCloudArchiveView = sourceCategory === "cloudArchive";
   const isOfficialView = sourceCategory === "official";
-  const createActionDisabled =
-    embeddingReady === false || multimodalEmbeddingReady === false;
+  const createActionDisabled = false;
   const createActionDisabledTooltip = isAdmin ? (
     <span>
       {embeddingReady === false
@@ -1530,14 +1533,29 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
       });
   }
 
-  function onUpdate(data: Dataset): Promise<void> {
+  async function onUpdate(
+    data: Dataset & { processing_level?: ProcessingLevel },
+  ): Promise<void> {
     setLoading(true);
     try {
       if (data.dataset_id) {
+        const { processing_level: nextLevel, ...dataset } = data;
+        const current = dataSource.find(
+          (item) => item.dataset_id === data.dataset_id,
+        ) as (Dataset & { processing_level?: ProcessingLevel }) | undefined;
+        if (
+          nextLevel &&
+          nextLevel !== effectiveProcessingLevel(current?.processing_level)
+        ) {
+          await axiosInstance.patch(
+            `${BASE_URL}/api/core/datasets/${encodeURIComponent(data.dataset_id)}/processing-level`,
+            { processing_level: nextLevel },
+          );
+        }
         return KnowledgeBaseServiceApi()
           .datasetServiceUpdateDataset({
             dataset: data.dataset_id,
-            dataset2: data,
+            dataset2: dataset,
           })
           .then(() => {
             message.success(t("knowledge.editSuccess"));
@@ -1571,6 +1589,43 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
     getTableData(newPagination.current, newPagination.pageSize);
   }
 
+  const backgroundTasksButton = (
+    <Button
+      className="knowledge-background-tasks-button"
+      icon={<HistoryOutlined />}
+      aria-label={t("knowledge.backgroundTasksCount", {
+        count: activeMarketTaskCount,
+      })}
+      aria-haspopup="dialog"
+      aria-expanded={marketTaskModalOpen}
+      onClick={() => setMarketTaskModalOpen(true)}
+    >
+      {t("knowledge.backgroundTasks")}
+      {activeMarketTaskCount > 0 ? (
+        <Badge
+          className="knowledge-task-count"
+          count={activeMarketTaskCount}
+          overflowCount={Infinity}
+          size="small"
+        />
+      ) : null}
+    </Button>
+  );
+  const createKnowledgeButton = (
+    <Tooltip title={createActionDisabled ? createActionDisabledTooltip : undefined}>
+      <span>
+        <Button
+          type="primary"
+          icon={<PlusOutlined />}
+          disabled={createActionDisabled}
+          onClick={() => createKnowledgeRef.current?.onOpen()}
+        >
+          {t("knowledge.createKnowledgeBase")}
+        </Button>
+      </span>
+    </Tooltip>
+  );
+
   return (
     <div className="knowledge-list-page">
       {taskNotificationHolder}
@@ -1589,41 +1644,11 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
           <h1>{t("layout.knowledgeBase")}</h1>
           <p>{t("knowledge.pageDescription")}</p>
         </div>
-        <div className="knowledge-page-header-actions">
-          {activeView === "mine" ? (
-            <Tooltip title={createActionDisabled ? createActionDisabledTooltip : undefined}>
-              <span>
-                <Button
-                  type="primary"
-                  icon={<PlusOutlined />}
-                  disabled={createActionDisabled}
-                  onClick={() => createKnowledgeRef.current?.onOpen()}
-                >
-                  {t("knowledge.createKnowledgeBase")}
-                </Button>
-              </span>
-            </Tooltip>
-          ) : null}
-          <Button
-            icon={<HistoryOutlined />}
-            aria-label={t("knowledge.backgroundTasksCount", {
-              count: activeMarketTaskCount,
-            })}
-            aria-haspopup="dialog"
-            aria-expanded={marketTaskModalOpen}
-            onClick={() => setMarketTaskModalOpen(true)}
-          >
-            {t("knowledge.backgroundTasks")}
-            {activeMarketTaskCount > 0 ? (
-              <Badge
-                className="knowledge-task-count"
-                count={activeMarketTaskCount}
-                overflowCount={Infinity}
-                size="small"
-              />
-            ) : null}
-          </Button>
-        </div>
+        {activeView === "square" ? (
+          <div className="knowledge-page-header-actions">
+            {backgroundTasksButton}
+          </div>
+        ) : null}
       </div>
 
       {embeddingReady === false ? (
@@ -1724,27 +1749,33 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
         />
       ) : (
         <div className="knowledge-mine-view">
-          <div className="knowledge-source-tabs" role="tablist" aria-label={t("knowledge.sourceCategory")}>
-            {([
-              ["local", t("knowledge.localUpload")],
-              ["cloudArchive", t("knowledge.cloudArchiveCreated")],
-              ["official", t("knowledge.installedOfficialKnowledge")],
-            ] as Array<[SourceCategory, string]>).map(([value, label]) => (
-              <button
-                key={value}
-                type="button"
-                role="tab"
-                className={sourceCategory === value ? "is-active" : ""}
-                aria-selected={sourceCategory === value}
-                onClick={() => {
-                  setMineFilterOpen(false);
-                  if (value !== sourceCategory && value !== "official") initData();
-                  setSourceCategory(value);
-                }}
-              >
-                {label}
-              </button>
-            ))}
+          <div className="knowledge-source-tabs-row">
+            <div className="knowledge-source-tabs" role="tablist" aria-label={t("knowledge.sourceCategory")}>
+              {([
+                ["local", t("knowledge.localUpload")],
+                ["cloudArchive", t("knowledge.cloudArchiveCreated")],
+                ["official", t("knowledge.installedOfficialKnowledge")],
+              ] as Array<[SourceCategory, string]>).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  role="tab"
+                  className={sourceCategory === value ? "is-active" : ""}
+                  aria-selected={sourceCategory === value}
+                  onClick={() => {
+                    setMineFilterOpen(false);
+                    if (value !== sourceCategory && value !== "official") initData();
+                    setSourceCategory(value);
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="knowledge-source-actions">
+              {backgroundTasksButton}
+              {createKnowledgeButton}
+            </div>
           </div>
 
           <div
@@ -1859,10 +1890,19 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
 
       <TypedConfirmModal ref={confirmRef} onClick={onDelete} />
 
-      <CreateUpdateModal ref={createUpdateRef} onUpdate={onUpdate} />
+      <CreateUpdateModal
+        ref={createUpdateRef}
+        onUpdate={onUpdate}
+        embeddingReady={
+          embeddingReady === false || multimodalEmbeddingReady === false
+            ? false
+            : embeddingReady
+        }
+      />
       <CreateKnowledgeBaseModal
         ref={createKnowledgeRef}
         syncCreateVm={syncCreateVm}
+        embeddingReady={embeddingReady === false || multimodalEmbeddingReady === false ? false : embeddingReady}
         onCreate={onUpdate}
       />
       <SyncKnowledgeBaseCreationFlow vm={syncCreateVm} hideProviderModal />

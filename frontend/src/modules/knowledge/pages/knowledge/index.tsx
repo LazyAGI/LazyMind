@@ -43,11 +43,19 @@ import { getTranslationStatus, translateSelectionText, TranslationUnavailableErr
 import AddVocabularyModal from "@/modules/vocabulary/AddVocabularyModal";
 import DocumentVocabularyPanel from "@/modules/vocabulary/DocumentVocabularyPanel";
 import { isVocabularyEnabled } from "@/runtime/mode";
+import {
+  processingLevelSupportsSegments,
+  type ProcessingLevel,
+} from "@/modules/knowledge/utils/processingLevel";
 import "./index.scss";
 
 type KnowledgeDetail = Doc & {
   file_url?: string;
   download_file_url?: string;
+};
+
+type KnowledgeDatasetWithProcessingLevel = KnowledgeDataset & {
+  processing_level?: ProcessingLevel;
 };
 
 async function writeTextToClipboard(text: string) {
@@ -116,16 +124,20 @@ const Detail = () => {
   const [translationResult, setTranslationResult] = useState("");
   const [vocabularySelection, setVocabularySelection] = useState<PdfTextSelection | null>(null);
   const [vocabularyRefreshToken, setVocabularyRefreshToken] = useState(0);
+  const [processingLevel, setProcessingLevel] =
+    useState<ProcessingLevel>("indexed");
+  const canShowSegments =
+    developerActive && processingLevelSupportsSegments(processingLevel);
 
   useEffect(() => {
     getTranslationStatus().then(setTranslationConfigured).catch(() => setTranslationConfigured(false));
   }, []);
 
   useEffect(() => {
-    if (!developerActive && previewSideTab === "segments") {
+    if (!canShowSegments && previewSideTab === "segments") {
       setPreviewSideTab("chat");
     }
-  }, [developerActive, previewSideTab]);
+  }, [canShowSegments, previewSideTab]);
 
   const translatePdfSelection = useCallback(async (selection: PdfTextSelection) => {
     setTranslationSource(selection.text);
@@ -239,7 +251,9 @@ const Detail = () => {
     KnowledgeBaseServiceApi()
       .datasetServiceGetDataset({ dataset: knowledgeBaseId })
       .then((res) => {
-        setCurrentDataset(res.data as unknown as KnowledgeDataset);
+        const dataset = res.data as unknown as KnowledgeDatasetWithProcessingLevel;
+        setCurrentDataset(dataset);
+        setProcessingLevel(dataset.processing_level || "indexed");
       });
   }, [knowledgeBaseId, setCurrentDataset]);
 
@@ -569,12 +583,12 @@ const Detail = () => {
                             onHistoryChange={refreshDocumentChatHistory}
                             onClose={() => {
                               setDocumentChatSelection(null);
-                              setPreviewSideTab(developerActive ? "segments" : "chat");
+                              setPreviewSideTab(canShowSegments ? "segments" : "chat");
                             }}
                           />
                         ),
                       },
-                      ...(developerActive ? [{
+                      ...(canShowSegments ? [{
                         key: "segments",
                         label: t("knowledge.segmentPreviewTab"),
                         children: (

@@ -321,7 +321,7 @@ func BatchUploadTasks(w http.ResponseWriter, r *http.Request) {
 		replyDatasetForbidden(w)
 		return
 	}
-	if replyEmbedNotReady(w, r, userID) {
+	if datasetRequiresEmbedding(ds) && replyEmbedNotReady(w, r, userID) {
 		return
 	}
 	if err := r.ParseMultipartForm(512 << 20); err != nil {
@@ -375,7 +375,7 @@ func UploadFile(w http.ResponseWriter, r *http.Request) {
 		replyDatasetForbidden(w)
 		return
 	}
-	if replyEmbedNotReady(w, r, userID) {
+	if datasetRequiresEmbedding(ds) && replyEmbedNotReady(w, r, userID) {
 		return
 	}
 	if err := r.ParseMultipartForm(512 << 20); err != nil {
@@ -657,7 +657,7 @@ func CreateTask(w http.ResponseWriter, r *http.Request) {
 		replyDatasetForbidden(w)
 		return
 	}
-	if replyEmbedNotReady(w, r, userID) {
+	if datasetRequiresEmbedding(ds) && replyEmbedNotReady(w, r, userID) {
 		return
 	}
 
@@ -1369,6 +1369,9 @@ func startTasksInternal(r *http.Request, datasetID string, taskIDs []string) ([]
 	reparseTaskIDs := make([]string, 0, len(taskIDs))
 	copyTaskIDs := make([]string, 0, len(taskIDs))
 	moveTaskIDs := make([]string, 0, len(taskIDs))
+	var dataset orm.Dataset
+	_ = store.DB().WithContext(r.Context()).Where("id = ? AND deleted_at IS NULL", datasetID).Take(&dataset).Error
+	storeOnly := effectiveProcessingLevel(dataset.ProcessingLevel) == ProcessingLevelStored
 
 	for _, rawTaskID := range taskIDs {
 		taskID := strings.TrimSpace(rawTaskID)
@@ -1389,6 +1392,17 @@ func startTasksInternal(r *http.Request, datasetID string, taskIDs []string) ([]
 
 		switch TaskType(strings.TrimSpace(taskRow.TaskType)) {
 		case TaskTypeParse, TaskTypeParseUploaded:
+			if storeOnly {
+				var ext taskExt
+				_ = json.Unmarshal(taskRow.Ext, &ext)
+				ext.TaskState = string(TaskStateSucceeded)
+				if err := store.DB().WithContext(r.Context()).Model(&orm.Task{}).Where("id = ? AND dataset_id = ?", taskID, datasetID).Update("ext", mustJSON(ext)).Error; err != nil {
+					resultsByTaskID[taskID] = StartTaskResult{TaskID: taskID, DocumentID: taskRow.DocID, DisplayName: taskRow.DisplayName, Status: "FAILED", SubmitStatus: "REJECTED", Message: "store document task failed"}
+				} else {
+					resultsByTaskID[taskID] = StartTaskResult{TaskID: taskID, DocumentID: taskRow.DocID, DisplayName: taskRow.DisplayName, Status: "STARTED", SubmitStatus: "ACCEPTED", Message: "document stored without parsing"}
+				}
+				continue
+			}
 			parseTaskIDs = append(parseTaskIDs, taskID)
 		case TaskTypeReparse:
 			reparseTaskIDs = append(reparseTaskIDs, taskID)
@@ -1462,6 +1476,10 @@ func startParseTasksInternal(r *http.Request, datasetID string, taskIDs []string
 	kbID := datasetKbIDByID(datasetID)
 	if kbID == "" {
 		return nil, fmt.Errorf("dataset kb mapping not found")
+	}
+	var dataset orm.Dataset
+	if err := store.DB().WithContext(r.Context()).Where("id = ? AND deleted_at IS NULL", datasetID).Take(&dataset).Error; err != nil {
+		return nil, fmt.Errorf("dataset not found")
 	}
 	userID := common.UserID(r)
 	llmConfig, err := modelconfig.LoadLLMConfig(r.Context(), store.DB(), userID)
@@ -1547,7 +1565,7 @@ func startParseTasksInternal(r *http.Request, datasetID string, taskIDs []string
 			items = append(items, buildAddFileItem(datasetID, candidate.task, candidate.doc, candidate.docExt, parsePath))
 		}
 		if len(baseTasks) > 0 {
-			extResults, err := callExternalAddDocs(r, addRequest{Items: items, KbID: kbID, SourceType: "EXTERNAL", IdempotencyKey: newTaskID(), ModelConfig: llmConfig, OCRConfig: ocrConfig})
+			extResults, err := callExternalAddDocs(r, addRequest{Items: items, KbID: kbID, SourceType: "EXTERNAL", IdempotencyKey: newTaskID(), ModelConfig: llmConfig, OCRConfig: ocrConfig, ProcessingLevel: effectiveProcessingLevel(dataset.ProcessingLevel)})
 			if err != nil {
 				for i, taskRow := range baseTasks {
 					resolved := common.ResolveAppError(err.Error(), http.StatusBadGateway)
@@ -1603,7 +1621,7 @@ func startParseTasksInternal(r *http.Request, datasetID string, taskIDs []string
 					return
 				}
 				item := buildAddFileItem(datasetID, candidate.task, candidate.doc, dExt, parsePath)
-				extResults, err := callExternalAddDocs(r, addRequest{Items: []addFileItem{item}, KbID: kbID, SourceType: "EXTERNAL", IdempotencyKey: newTaskID(), ModelConfig: llmConfig, OCRConfig: ocrConfig})
+				extResults, err := callExternalAddDocs(r, addRequest{Items: []addFileItem{item}, KbID: kbID, SourceType: "EXTERNAL", IdempotencyKey: newTaskID(), ModelConfig: llmConfig, OCRConfig: ocrConfig, ProcessingLevel: effectiveProcessingLevel(dataset.ProcessingLevel)})
 				if err != nil {
 					resolved := common.ResolveAppError(err.Error(), http.StatusBadGateway)
 					outcomes[idx] = officeOutcome{task: candidate.task, doc: candidate.doc, docExt: dExt, result: StartTaskResult{TaskID: candidate.task.ID, DocumentID: candidate.doc.ID, DisplayName: candidate.doc.DisplayName, Status: "FAILED", SubmitStatus: "FAILED", Message: resolved.Message, Detail: fmt.Sprint(resolved.Detail)}}
@@ -2285,6 +2303,9 @@ func createUploadedTaskAndDocument(r *http.Request, ds *orm.Dataset, datasetID, 
 		if err := tx.Create(&docRow).Error; err != nil {
 			return err
 		}
+		if err := createDocumentProcessingState(tx, datasetID, documentID, now); err != nil {
+			return err
+		}
 		if err := tx.Create(&taskRow).Error; err != nil {
 			return err
 		}
@@ -2512,6 +2533,9 @@ func createTaskFromUploadedFile(r *http.Request, datasetID, userID, userName str
 		taskRow := orm.Task{ID: taskID, LazyllmTaskID: "", DocID: documentID, KbID: datasetID, AlgoID: datasetAlgoIDByID(datasetID), DatasetID: datasetID, TaskType: tType, DocumentPID: documentPID, TargetPID: strings.TrimSpace(item.Task.TargetPID), TargetDatasetID: strings.TrimSpace(item.Task.TargetDatasetID), DisplayName: displayName, Ext: mustJSON(tExt), BaseModel: orm.BaseModel{CreateUserID: userID, CreateUserName: userName, CreatedAt: now, UpdatedAt: now}}
 		if err := tx.Create(&docRow).Error; err != nil {
 			return fmt.Errorf("create document failed")
+		}
+		if err := createDocumentProcessingState(tx, datasetID, documentID, now); err != nil {
+			return fmt.Errorf("create document processing state failed")
 		}
 		if err := tx.Create(&taskRow).Error; err != nil {
 			return fmt.Errorf("create task failed")
@@ -2763,6 +2787,11 @@ func createTaskFromExistingDocument(r *http.Request, datasetID, userID, userName
 
 func startReparseTasksInternal(r *http.Request, datasetID string, taskIDs []string) ([]StartTaskResult, error) {
 	kbID := datasetKbIDByID(datasetID)
+	var dataset orm.Dataset
+	if err := store.DB().WithContext(r.Context()).Where("id = ? AND deleted_at IS NULL", datasetID).Take(&dataset).Error; err != nil {
+		return nil, fmt.Errorf("dataset not found")
+	}
+	processingLevel := effectiveProcessingLevel(dataset.ProcessingLevel)
 	results := make([]StartTaskResult, 0, len(taskIDs))
 	userID := common.UserID(r)
 	applog.Logger.Info().
@@ -2806,6 +2835,20 @@ func startReparseTasksInternal(r *http.Request, datasetID string, taskIDs []stri
 			results = append(results, StartTaskResult{TaskID: taskID, DocumentID: docRow.ID, DisplayName: docRow.DisplayName, Status: "FAILED", SubmitStatus: "REJECTED", Message: "folder document cannot be reparsed"})
 			continue
 		}
+		if !shouldSubmitReparseToLazyLLM(processingLevel) {
+			var ext taskExt
+			_ = json.Unmarshal(taskRow.Ext, &ext)
+			ext.TaskState = string(TaskStateSucceeded)
+			now := time.Now().UTC()
+			if err := store.DB().WithContext(r.Context()).Model(&orm.Task{}).
+				Where("id = ? AND dataset_id = ? AND deleted_at IS NULL", taskRow.ID, datasetID).
+				Updates(map[string]any{"ext": mustJSON(ext), "updated_at": now}).Error; err != nil {
+				results = append(results, StartTaskResult{TaskID: taskRow.ID, DocumentID: docRow.ID, DisplayName: docRow.DisplayName, Status: "FAILED", SubmitStatus: "FAILED", Message: "store document task failed"})
+				continue
+			}
+			results = append(results, StartTaskResult{TaskID: taskRow.ID, DocumentID: docRow.ID, DisplayName: docRow.DisplayName, Status: "STARTED", SubmitStatus: "ACCEPTED", Message: "document already stored; parsing was not requested"})
+			continue
+		}
 		if strings.TrimSpace(docRow.LazyllmDocID) == "" {
 			applog.Logger.Warn().Str("handler", "StartReparseTask").Str("task_id", taskID).Str("doc_id", docRow.ID).Msg("lazyllm doc id is empty")
 			markTaskStartFailed(r.Context(), datasetID, taskRow, "lazyllm doc id is empty")
@@ -2815,6 +2858,9 @@ func startReparseTasksInternal(r *http.Request, datasetID string, taskIDs []stri
 		docIDs = append(docIDs, strings.TrimSpace(docRow.LazyllmDocID))
 		taskRows = append(taskRows, taskRow)
 		docRows = append(docRows, docRow)
+	}
+	if !shouldSubmitReparseToLazyLLM(processingLevel) {
+		return results, nil
 	}
 	if len(taskRows) == 0 {
 		return results, fmt.Errorf("no valid tasks to start")
@@ -2838,9 +2884,9 @@ func startReparseTasksInternal(r *http.Request, datasetID string, taskIDs []stri
 	}
 	// Pass reparse_mode through as the strategy string; only
 	// "slice_and_embed" is renamed to "reembed" for the algorithm.
-	strategy := reparseMode
-	if reparseMode == "slice_and_embed" {
-		strategy = "reembed"
+	strategy, err := resolveReparseStrategy(processingLevel, reparseMode)
+	if err != nil {
+		return results, err
 	}
 	applog.Logger.Info().
 		Str("handler", "StartReparseTask").
@@ -2852,7 +2898,7 @@ func startReparseTasksInternal(r *http.Request, datasetID string, taskIDs []stri
 		Str("reparse_mode", reparseMode).
 		Str("strategy", strategy).
 		Msg("submitting reparse batch to doc service")
-	lazyllmTaskIDs, err := callExternalReparseDocs(r, reparseRequest{DocIDs: docIDs, KbID: kbID, NgNames: ngNames, Strategy: strategy, IdempotencyKey: newTaskID(), ModelConfig: llmConfig, OCRConfig: ocrConfig})
+	lazyllmTaskIDs, err := callExternalReparseDocs(r, reparseRequest{DocIDs: docIDs, KbID: kbID, NgNames: ngNames, Strategy: strategy, IdempotencyKey: newTaskID(), ModelConfig: llmConfig, OCRConfig: ocrConfig, ProcessingLevel: processingLevel})
 	if err != nil {
 		errMsg := common.ResolveAppError(err.Error(), http.StatusBadGateway).Message
 		applog.Logger.Error().
@@ -2898,6 +2944,28 @@ func startReparseTasksInternal(r *http.Request, datasetID string, taskIDs []stri
 		Strs("ng_names", ngNames).
 		Msg("reparse tasks submitted")
 	return results, nil
+}
+
+func shouldSubmitReparseToLazyLLM(processingLevel string) bool {
+	return effectiveProcessingLevel(processingLevel) != ProcessingLevelStored
+}
+
+func resolveReparseStrategy(processingLevel, reparseMode string) (string, error) {
+	level := effectiveProcessingLevel(processingLevel)
+	mode := strings.TrimSpace(reparseMode)
+	if mode == "" {
+		mode = "slice_missing"
+	}
+	if mode == "slice_and_embed" {
+		if level != ProcessingLevelIndexed {
+			return "", fmt.Errorf("vector rebuild requires indexed processing level")
+		}
+		return "reembed", nil
+	}
+	if level == ProcessingLevelStored || level == ProcessingLevelParsed {
+		return "rebuild", nil
+	}
+	return mode, nil
 }
 
 func normalizeParsingLLMConfig(cfg map[string]any) map[string]any {

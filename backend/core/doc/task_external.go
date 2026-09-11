@@ -26,22 +26,24 @@ type addFileItem struct {
 }
 
 type addRequest struct {
-	Items          []addFileItem  `json:"items"`
-	KbID           string         `json:"kb_id,omitempty"`
-	SourceType     string         `json:"source_type,omitempty"`
-	IdempotencyKey string         `json:"idempotency_key,omitempty"`
-	ModelConfig    map[string]any `json:"llm_config,omitempty"`
-	OCRConfig      map[string]any `json:"ocr_config,omitempty"`
+	Items           []addFileItem  `json:"items"`
+	KbID            string         `json:"kb_id,omitempty"`
+	SourceType      string         `json:"source_type,omitempty"`
+	IdempotencyKey  string         `json:"idempotency_key,omitempty"`
+	ModelConfig     map[string]any `json:"llm_config,omitempty"`
+	OCRConfig       map[string]any `json:"ocr_config,omitempty"`
+	ProcessingLevel string         `json:"processing_level,omitempty"`
 }
 
 type reparseRequest struct {
-	DocIDs         []string       `json:"doc_ids"`
-	KbID           string         `json:"kb_id,omitempty"`
-	NgNames        []string       `json:"ng_names,omitempty"`
-	Strategy       string         `json:"strategy,omitempty"`
-	IdempotencyKey string         `json:"idempotency_key,omitempty"`
-	ModelConfig    map[string]any `json:"llm_config,omitempty"`
-	OCRConfig      map[string]any `json:"ocr_config,omitempty"`
+	DocIDs          []string       `json:"doc_ids"`
+	KbID            string         `json:"kb_id,omitempty"`
+	NgNames         []string       `json:"ng_names,omitempty"`
+	Strategy        string         `json:"strategy,omitempty"`
+	IdempotencyKey  string         `json:"idempotency_key,omitempty"`
+	ModelConfig     map[string]any `json:"llm_config,omitempty"`
+	OCRConfig       map[string]any `json:"ocr_config,omitempty"`
+	ProcessingLevel string         `json:"processing_level,omitempty"`
 }
 
 // transferItem no longer carries source/target algo IDs after the node-group
