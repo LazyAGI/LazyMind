@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 import { bumpConversationToTop } from "@/modules/chat/utils/conversationActivity";
 import { applyConversationOrder, sortConversationHistory, type SidebarConversation } from "./conversationHistory";
 
@@ -13,6 +13,7 @@ const ids = (items: SidebarConversation[]) => items.map((item) => item.conversat
 
 describe("conversation history ordering", () => {
   it("keeps manually ordered pinned and normal rows ahead of activity sorting", () => {
+    expectTypeOf(bumpConversationToTop(rows, "a")).toEqualTypeOf<SidebarConversation[]>();
     expect(ids(sortConversationHistory(rows))).toEqual(["q", "p", "b", "a"]);
     expect(ids(sortConversationHistory(bumpConversationToTop(rows, "a")))).toEqual(["q", "p", "b", "a"]);
     expect(ids(sortConversationHistory([...rows, { search_config: searchConfig, conversation_id: "new", update_time: new Date().toISOString() }]))).toEqual(["q", "p", "new", "b", "a"]);

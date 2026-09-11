@@ -28,6 +28,16 @@ type ActivityConversation = Omit<Conversation, "search_config"> & {
   search_config?: Conversation["search_config"];
 };
 
+// Without a display name no placeholder can be inserted, so preserve the row type.
+export function bumpConversationToTop<T extends ActivityConversation>(
+  list: T[],
+  conversationId: string,
+): T[];
+export function bumpConversationToTop(
+  list: ActivityConversation[],
+  conversationId: string,
+  options?: { displayName?: string },
+): ActivityConversation[];
 export function bumpConversationToTop(
   list: ActivityConversation[],
   conversationId: string,
