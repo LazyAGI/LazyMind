@@ -223,7 +223,7 @@ export default function StateGraphEditor({
   onClose,
   showEmptyHint = true,
   readonly = false,
-  defaultShowArtifacts = false,
+  defaultShowArtifacts = true,
   onRepair,
   onArtifactsChange,
   designBriefContent,
@@ -577,6 +577,28 @@ export default function StateGraphEditor({
 
   const slotCount = Object.keys(model.slots).length;
   const scriptFiles = parseScriptFiles(scriptsContent);
+  const activeUiTab = workflowModel.ui?.tabs.find((tab) => tab.id === uiActiveTabId)
+    ?? workflowModel.ui?.tabs[0];
+  const contextTitle = viewMode === 'code'
+    ? t('selfEvolutionRun.sgeCodeContextTitle')
+    : viewMode === 'brief'
+      ? t('selfEvolutionRun.sgeBriefContextTitle')
+      : contentTab === 'statemachine'
+        ? t('selfEvolutionRun.sgeFlowContextTitle')
+        : contentTab === 'ui'
+          ? t('selfEvolutionRun.sgeUiContextTitle')
+          : t('selfEvolutionRun.sgeScenarioContextTitle');
+  const contextHint = viewMode === 'code'
+    ? t('selfEvolutionRun.sgeCodeContextHint')
+    : viewMode === 'brief'
+      ? t('selfEvolutionRun.sgeBriefContextHint')
+      : contentTab === 'statemachine'
+        ? t(readonly ? 'selfEvolutionRun.sgeFlowReadonlyHint' : 'selfEvolutionRun.sgeFlowContextHint')
+        : contentTab === 'ui'
+          ? t('selfEvolutionRun.sgeUiContextHint', {
+              step: activeUiTab?.label || t('selfEvolutionRun.sgeCurrentStep'),
+            })
+          : t('selfEvolutionRun.sgeScenarioContextHint');
 
   // Derive yaml text for code view of state.yml (x-layout is internal, not shown to users)
   const stateYamlForCode = readonly
@@ -632,7 +654,7 @@ export default function StateGraphEditor({
 
 
   return (
-    <div ref={editorRootRef} className="state-graph-editor" aria-label={t('selfEvolutionRun.sgeEditorAriaLabel')}>
+    <div ref={editorRootRef} className="state-graph-editor sge-authoring-editor" aria-label={t('selfEvolutionRun.sgeEditorAriaLabel')}>
       {/* ── Row 1: back/breadcrumb left, save status + workflow config right ── */}
       <div className="sge-topbar">
         <div className="sge-topbar-left">
@@ -671,6 +693,7 @@ export default function StateGraphEditor({
                 key={tab}
                 className={`sge-seg-btn${contentTab === tab ? ' sge-seg-btn--active' : ''}${(viewMode === 'code' || viewMode === 'brief') ? ' sge-seg-btn--disabled' : ''}`}
                 onClick={() => { if (viewMode !== 'code' && viewMode !== 'brief') setContentTab(tab); }}
+                aria-pressed={contentTab === tab}
                 disabled={viewMode === 'code' || viewMode === 'brief'}
                 aria-disabled={viewMode === 'code' || viewMode === 'brief'}
               >
@@ -690,12 +713,14 @@ export default function StateGraphEditor({
             <button
               className={`sge-seg-btn${viewMode === 'preview' ? ' sge-seg-btn--active' : ''}`}
               onClick={handleExitCode}
+              aria-pressed={viewMode === 'preview'}
             >
               {t('selfEvolutionRun.sgeViewPreview')}
             </button>
             <button
               className={`sge-seg-btn${viewMode === 'code' ? ' sge-seg-btn--active' : ''}`}
               onClick={handleEnterCode}
+              aria-pressed={viewMode === 'code'}
             >
               {t('selfEvolutionRun.sgeViewCode')}
             </button>
@@ -703,6 +728,7 @@ export default function StateGraphEditor({
               <button
                 className={`sge-seg-btn${viewMode === 'brief' ? ' sge-seg-btn--active' : ''}`}
                 onClick={() => setViewMode('brief')}
+                aria-pressed={viewMode === 'brief'}
               >
                 {t('selfEvolutionRun.sgeViewBrief')}
               </button>
@@ -722,6 +748,7 @@ export default function StateGraphEditor({
                 icon={<AppstoreOutlined />}
                 onClick={() => toggleArtifacts()}
                 type={showArtifacts ? 'primary' : 'default'}
+                aria-expanded={showArtifacts}
               >
                 {t('selfEvolutionRun.sgeArtifactsBtn')}{slotCount > 0 && <span className="sge-artifact-count">{slotCount}</span>}
               </Button>
@@ -736,6 +763,7 @@ export default function StateGraphEditor({
               icon={<AppstoreOutlined />}
               onClick={() => toggleArtifacts()}
               type={showArtifacts ? 'primary' : 'default'}
+              aria-expanded={showArtifacts}
             >
               {t('selfEvolutionRun.sgeArtifactsBtn')}{slotCount > 0 && <span className="sge-artifact-count">{slotCount}</span>}
             </Button>
@@ -753,44 +781,68 @@ export default function StateGraphEditor({
         </div>
       </div>
 
+      <div className="sge-context-bar">
+        <div className="sge-context-copy">
+          <h2>{contextTitle}</h2>
+          <p>{contextHint}</p>
+        </div>
+        {viewMode === 'preview' && contentTab === 'statemachine' && model.nodes.length > 0 && (
+          <nav className="sge-step-shortcuts" aria-label={t('selfEvolutionRun.sgeQuickLocate')}>
+            <span>{t('selfEvolutionRun.sgeQuickLocate')}</span>
+            {model.nodes.map((node, index) => (
+              <button type="button" key={node.id} onClick={() => handleSelectNode(node.id)}>
+                {index + 1} · {node.label || node.id}
+              </button>
+            ))}
+          </nav>
+        )}
+      </div>
+
       {/* ── Content area ── */}
       <div className="sge-body">
         {viewMode === 'preview' && contentTab === 'statemachine' && (
           <div className="sge-statemachine-panel">
             <div className="sge-content">
-              <GraphCanvas
-                model={model}
-                errors={displayErrors}
-                onModelChange={readonly ? () => {} : updateModel}
-                workflowModel={workflowModel}
-                scenarioData={scenarioData}
-                onScenarioChange={readonly ? undefined : handleScenarioChange}
-                canvasRef={canvasRef}
-                readonly={readonly}
-                onCreateArtifact={() => { setShowArtifacts(true); setArtifactAddRequest((value) => value + 1); }}
-              />
-              {model.nodes.length === 0 && showEmptyHint && (
-                <div className="sge-empty-state" aria-hidden="true">
-                  <div className="sge-empty-state-content">
-                    <p className="sge-empty-state-title">{t('selfEvolutionRun.sgeEmptyStateTitle')}</p>
-                    <ol className="sge-empty-state-list">
-                      <li>{t('selfEvolutionRun.sgeEmptyStateStep1')}</li>
-                      <li>{t('selfEvolutionRun.sgeEmptyStateStep2')}</li>
-                      <li>{t('selfEvolutionRun.sgeEmptyStateStep3')}</li>
-                    </ol>
-                    <p className="sge-empty-state-hint">{t('selfEvolutionRun.sgeEmptyStateHint')}</p>
-                  </div>
-                </div>
-              )}
               {showArtifacts && (
                 <ArtifactPanel
                   model={model}
+                  workflowModel={workflowModel}
                   onClose={() => closeArtifacts()}
                   onModelChange={readonly ? () => {} : updateModelFromUpdater}
                   readonly={readonly}
                   startAddingToken={artifactAddRequest}
                 />
               )}
+              <div className="sge-canvas-region">
+                <GraphCanvas
+                  model={model}
+                  errors={displayErrors}
+                  onModelChange={readonly ? () => {} : updateModel}
+                  workflowModel={workflowModel}
+                  scenarioData={scenarioData}
+                  onScenarioChange={readonly ? undefined : handleScenarioChange}
+                  canvasRef={canvasRef}
+                  readonly={readonly}
+                  onCreateArtifact={() => {
+                    setShowArtifacts(true);
+                    onArtifactsChange?.(true);
+                    setArtifactAddRequest((value) => value + 1);
+                  }}
+                />
+                {model.nodes.length === 0 && showEmptyHint && (
+                  <div className="sge-empty-state" aria-hidden="true">
+                    <div className="sge-empty-state-content">
+                      <p className="sge-empty-state-title">{t('selfEvolutionRun.sgeEmptyStateTitle')}</p>
+                      <ol className="sge-empty-state-list">
+                        <li>{t('selfEvolutionRun.sgeEmptyStateStep1')}</li>
+                        <li>{t('selfEvolutionRun.sgeEmptyStateStep2')}</li>
+                        <li>{t('selfEvolutionRun.sgeEmptyStateStep3')}</li>
+                      </ol>
+                      <p className="sge-empty-state-hint">{t('selfEvolutionRun.sgeEmptyStateHint')}</p>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
             <ValidationPanel
               errors={displayErrors}

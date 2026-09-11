@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useId } from 'react';
 import { Button, Checkbox, Input, Select, Tooltip } from 'antd';
 import { useTranslation } from 'react-i18next';
 import {
@@ -83,7 +83,7 @@ function Section({ title, defaultOpen = true, children }: SectionProps) {
   const [open, setOpen] = useState(defaultOpen);
   return (
     <div className="npp-section">
-      <button className="npp-section-header" onClick={() => setOpen((v) => !v)}>
+      <button className="npp-section-header" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
         <span className="npp-section-title">{title}</span>
         {open ? <DownOutlined className="npp-section-icon" /> : <RightOutlined className="npp-section-icon" />}
       </button>
@@ -122,7 +122,9 @@ export default function NodePropertiesPanel({ node, model, workflowModel, scenar
   const [idDraft, setIdDraft] = useState<string>(isHiddenId(node.id) ? '' : node.id);
   // Set when the upstream rejects the id (e.g. duplicate).
   const [idConflict, setIdConflict] = useState(false);
-  const [activeTab, setActiveTab] = useState<'step' | 'visual'>('step');
+  const [activeTab, setActiveTab] = useState<'step' | 'materials' | 'flow' | 'visual'>('step');
+  const tabsId = useId();
+  const tabs = ['step', 'materials', 'flow', 'visual'] as const;
 
   const [systemTools, setSystemTools] = useState<Array<{ label: string; name: string }>>(_cachedSystemTools ?? []);
 
@@ -180,7 +182,7 @@ export default function NodePropertiesPanel({ node, model, workflowModel, scenar
        ? [{ label: t('selfEvolutionRun.nodePropsSelectedTools'), options: (node.tools ?? []).map((t: string) => ({ label: t, value: t })) }]
       : [];
 
-  const update = (patch: Partial<StepNode>) => onChange({ ...node, ...patch });
+  const update = (patch: Partial<StepNode>) => !readonly && onChange({ ...node, ...patch });
 
   // Commit the id draft upstream; revert and show conflict if rejected.
   const commitIdDraft = () => {
@@ -212,6 +214,7 @@ export default function NodePropertiesPanel({ node, model, workflowModel, scenar
                 <div key={idx} className="npp-transition-row">
                   <Select
                     value={tr.to || undefined}
+                    disabled={readonly}
                     options={model.nodes.filter((n) => n.id !== VIRTUAL_END).map((n) => ({ label: n.label || n.id, value: n.id }))}
                     onChange={(val) => {
                       const next = [...node.transitions];
@@ -240,6 +243,7 @@ export default function NodePropertiesPanel({ node, model, workflowModel, scenar
                     danger
                     size="small"
                     icon={<CloseOutlined />}
+                    disabled={readonly}
                     onClick={() => update({ transitions: node.transitions.filter((_, i) => i !== idx) })}
                   />
                 </div>
@@ -249,6 +253,7 @@ export default function NodePropertiesPanel({ node, model, workflowModel, scenar
                 size="small"
                 icon={<PlusOutlined />}
                 block
+                disabled={readonly}
                 onClick={() => update({ transitions: [...node.transitions, { to: '' }] })}
               >
                 {t('selfEvolutionRun.stateGraphAddBranch')}
@@ -258,6 +263,7 @@ export default function NodePropertiesPanel({ node, model, workflowModel, scenar
               <FieldRow label={t('selfEvolutionRun.stateGraphRouteMode')} tip={t('selfEvolutionRun.stateGraphRouteModeTip')}>
                 <Select
                   value={node.route ?? 'all'}
+                  disabled={readonly}
                   options={[
                     { label: t('selfEvolutionRun.stateGraphRouteModeAll'), value: 'all' },
                     { label: t('selfEvolutionRun.stateGraphRouteModeChoice'), value: 'choice' },
@@ -274,52 +280,68 @@ export default function NodePropertiesPanel({ node, model, workflowModel, scenar
     );
   }
 
+  const previousSteps = [
+    ...(model.startTransitions.some((transition) => transition.to === node.id) ? [t('selfEvolutionRun.stepNodeStart')] : []),
+    ...model.nodes.filter((item) => item.transitions.some((transition) => transition.to === node.id))
+      .map((item) => item.label || item.id),
+  ];
+  const nextSteps = node.transitions.map((transition) => transition.to === VIRTUAL_END
+    ? t('selfEvolutionRun.stepNodeEnd')
+    : model.nodes.find((item) => item.id === transition.to)?.label || transition.to || t('selfEvolutionRun.sgeNoNextStep'));
+
   return (
     <div className="node-props-panel" role="complementary" aria-label={t('selfEvolutionRun.stateGraphPanelTitle')} onDoubleClick={(e) => e.stopPropagation()}>
       {/* header */}
       <div className="node-props-panel-header">
-        <div className="node-props-tabs"><button className={activeTab === 'step' ? 'active' : ''} onClick={() => setActiveTab('step')}>步骤设置</button><button className={activeTab === 'visual' ? 'active' : ''} onClick={() => setActiveTab('visual')}>视觉效果</button></div>
-        <Button type="text" icon={<CloseOutlined />} size="small" onClick={onClose} aria-label={t('selfEvolutionRun.stateGraphPanelTitle')} />
+        <div className="npp-selected-heading">
+          <small>{t(readonly ? 'selfEvolutionRun.sgeViewingStep' : 'selfEvolutionRun.sgeEditingStep', { number: model.nodes.findIndex((item) => item.id === node.id) + 1 })}</small>
+          <strong>{node.label || t('selfEvolutionRun.sgeUnnamedStep')}</strong>
+        </div>
+        <Button type="text" icon={<CloseOutlined />} size="small" onClick={onClose} aria-label={t('selfEvolutionRun.nodePropsCloseAriaLabel')} />
       </div>
 
+      <div className="node-props-tabs" role="tablist" aria-label={t('selfEvolutionRun.sgeStepSettings')}>
+        {tabs.map((tab) => (
+          <button
+            key={tab}
+            type="button"
+            role="tab"
+            id={`${tabsId}-${tab}`}
+            aria-controls={`${tabsId}-panel`}
+            aria-selected={activeTab === tab}
+            tabIndex={activeTab === tab ? 0 : -1}
+            className={activeTab === tab ? 'active' : ''}
+            onClick={() => setActiveTab(tab)}
+            onKeyDown={(event) => {
+              const current = tabs.indexOf(tab);
+              const next = event.key === 'ArrowRight' ? (current + 1) % tabs.length
+                : event.key === 'ArrowLeft' ? (current + tabs.length - 1) % tabs.length
+                : event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : null;
+              if (next === null) return;
+              event.preventDefault();
+              setActiveTab(tabs[next]);
+              event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next]?.focus();
+            }}
+          >
+            {t(`selfEvolutionRun.sgeStepTab${tab[0].toUpperCase()}${tab.slice(1)}`)}
+          </button>
+        ))}
+      </div>
+      <div className="npp-step-context">
+        <span>{previousSteps.join(' / ') || t('selfEvolutionRun.sgeNoPreviousStep')}</span>
+        <b> → {node.label || t('selfEvolutionRun.sgeUnnamedStep')} → </b>
+        <span>{nextSteps.join(' / ') || t('selfEvolutionRun.sgeNoNextStep')}</span>
+      </div>
+      <div className="npp-tab-content" role="tabpanel" id={`${tabsId}-panel`} aria-labelledby={`${tabsId}-${activeTab}`}>
       {/* body */}
       {activeTab === 'visual' ? visualContent : <><div className="node-props-panel-body">
         {/* ── 分组一：基本信息 ── */}
+        {activeTab === 'step' && (
         <Section title={t('selfEvolutionRun.stateGraphBasicInfo')}>
-          <FieldRow label={t('selfEvolutionRun.stateGraphFieldStepId')} tip={t('selfEvolutionRun.stateGraphFieldStepIdTip')}>
-            <Input
-              value={idDraft}
-              status={stepIdError ? 'error' : undefined}
-              readOnly={readonly}
-              onChange={(e) => {
-                if (readonly) return;
-                setIdDraft(e.target.value);
-                setIdConflict(false);
-              }}
-              onFocus={() => setIdFocused(true)}
-              onBlur={() => {
-                setIdFocused(false);
-                if (!readonly) commitIdDraft();
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !readonly) commitIdDraft();
-              }}
-              placeholder={t('selfEvolutionRun.stateGraphFieldStepIdPlaceholder')}
-              size="small"
-            />
-            {stepIdError && (
-              <span className="npp-field-error">
-                {idConflict
-                  ? t('selfEvolutionRun.stateGraphFieldStepIdConflict')
-                  : idDraft.startsWith('.hid')
-                  ? t('selfEvolutionRun.stateGraphFieldStepIdHidPrefix')
-                  : t('selfEvolutionRun.stateGraphFieldStepIdInvalid')}
-              </span>
-            )}
-          </FieldRow>
           <FieldRow label={t('selfEvolutionRun.stateGraphFieldLabel')} tip={t('selfEvolutionRun.stateGraphFieldLabelTip')}>
             <Input
               value={node.label}
+              aria-label={t('selfEvolutionRun.stateGraphFieldLabel')}
               readOnly={readonly}
               onChange={(e) => { if (!readonly) update({ label: e.target.value }); }}
               placeholder={t('selfEvolutionRun.stateGraphFieldLabelPlaceholder')}
@@ -329,6 +351,7 @@ export default function NodePropertiesPanel({ node, model, workflowModel, scenar
           <FieldRow label={t('selfEvolutionRun.stateGraphFieldDesc')} tip={t('selfEvolutionRun.stateGraphFieldDescTip')}>
             <Input.TextArea
               value={scenarioData?.stepDescriptions[node.id] ?? ''}
+              aria-label={t('selfEvolutionRun.stateGraphFieldDesc')}
               readOnly={readonly}
               onChange={(e) => {
                 if (readonly) return;
@@ -358,10 +381,49 @@ export default function NodePropertiesPanel({ node, model, workflowModel, scenar
               style={{ width: '100%' }}
             />
           </FieldRow>
+          <details className="npp-advanced" open={stepIdError ? true : undefined}>
+            <summary>{t('selfEvolutionRun.sgeAdvancedStepId')}</summary>
+            <p>{t('selfEvolutionRun.sgeAdvancedStepIdHelp')}</p>
+          <FieldRow label={t('selfEvolutionRun.stateGraphFieldStepId')} tip={t('selfEvolutionRun.stateGraphFieldStepIdTip')}>
+            <Input
+              value={idDraft}
+              aria-label={t('selfEvolutionRun.stateGraphFieldStepId')}
+              status={stepIdError ? 'error' : undefined}
+              readOnly={readonly}
+              onChange={(e) => {
+                if (readonly) return;
+                setIdDraft(e.target.value);
+                setIdConflict(false);
+              }}
+              onFocus={() => setIdFocused(true)}
+              onBlur={() => {
+                setIdFocused(false);
+                if (!readonly) commitIdDraft();
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !readonly) commitIdDraft();
+              }}
+              placeholder={t('selfEvolutionRun.stateGraphFieldStepIdPlaceholder')}
+              size="small"
+            />
+            {stepIdError && (
+              <span className="npp-field-error">
+                {idConflict
+                  ? t('selfEvolutionRun.stateGraphFieldStepIdConflict')
+                  : idDraft.startsWith('.hid')
+                  ? t('selfEvolutionRun.stateGraphFieldStepIdHidPrefix')
+                  : t('selfEvolutionRun.stateGraphFieldStepIdInvalid')}
+              </span>
+            )}
+          </FieldRow>
+          </details>
         </Section>
+        )}
 
         {/* ── 分组二：素材 ── */}
+        {activeTab === 'materials' && (
         <Section title={t('selfEvolutionRun.stateGraphSectionMaterials')}>
+          <p className="npp-authoring-help">{t('selfEvolutionRun.sgeStepMaterialsHelp')}</p>
           <div className="npp-field-block">
             <InputMaterialsEditor
               inputs={node.inputs}
@@ -398,6 +460,7 @@ export default function NodePropertiesPanel({ node, model, workflowModel, scenar
                   <Tooltip title={slotLabel} placement="top">
                     <Select
                       value={ref.material}
+                      disabled={readonly}
                       options={slotOptions}
                       optionRender={(opt) => (
                         <Tooltip title={String(opt.label)} placement="left" mouseEnterDelay={0.3}>
@@ -428,9 +491,12 @@ export default function NodePropertiesPanel({ node, model, workflowModel, scenar
             })}
           </div>
         </Section>
+        )}
 
         {/* ── 分组三：执行流程 ── */}
+        {activeTab === 'flow' && (
         <Section title={t('selfEvolutionRun.stateGraphSectionFlow')}>
+          <p className="npp-authoring-help">{t('selfEvolutionRun.sgeStepFlowHelp')}</p>
           <div className="npp-field-block">
             <div className="npp-transitions-header-row">
               <LabelWithTip label={t('selfEvolutionRun.stateGraphFlowNext')} tip={t('selfEvolutionRun.stateGraphFlowNextTip')} />
@@ -448,6 +514,7 @@ export default function NodePropertiesPanel({ node, model, workflowModel, scenar
                 <div key={idx} className="node-props-transition-row">
                   <Select
                     value={tr.to}
+                    disabled={readonly}
                     options={transitionOptions}
                     optionRender={(opt) => (
                       <Tooltip title={String(opt.label)} placement="left" mouseEnterDelay={0.3}>
@@ -481,6 +548,7 @@ export default function NodePropertiesPanel({ node, model, workflowModel, scenar
                     danger
                     size="small"
                     icon={<CloseOutlined />}
+                    disabled={readonly}
                     onClick={() => update({ transitions: node.transitions.filter((_, i) => i !== idx) })}
                     aria-label={t('selfEvolutionRun.stateGraphAddBranch')}
                   />
@@ -492,7 +560,7 @@ export default function NodePropertiesPanel({ node, model, workflowModel, scenar
                   size="small"
                   icon={<PlusOutlined />}
                   block
-                  disabled={disableAddTransition}
+                  disabled={readonly || disableAddTransition}
                   onClick={() => update({ transitions: [...node.transitions, { to: '' }] })}
                 >
                   {t('selfEvolutionRun.stateGraphAddBranch')}
@@ -505,6 +573,7 @@ export default function NodePropertiesPanel({ node, model, workflowModel, scenar
             <FieldRow label={t('selfEvolutionRun.stateGraphRouteMode')} tip={t('selfEvolutionRun.stateGraphRouteModeTip')}>
               <Select
                 value={node.route ?? 'all'}
+                disabled={readonly}
                 options={[
                   { label: t('selfEvolutionRun.stateGraphRouteModeAll'), value: 'all' },
                   { label: t('selfEvolutionRun.stateGraphRouteModeChoice'), value: 'choice' },
@@ -519,6 +588,7 @@ export default function NodePropertiesPanel({ node, model, workflowModel, scenar
           <div className="npp-skip-section">
             <Checkbox
               checked={allowSkip}
+              disabled={readonly}
               onChange={(e) => {
                 if (!e.target.checked) {
                   update({ skipIf: undefined, legacySkipIf: undefined });
@@ -547,8 +617,10 @@ export default function NodePropertiesPanel({ node, model, workflowModel, scenar
             )}
           </div>
         </Section>
+        )}
 
         {/* ── 分组四：执行逻辑 ── */}
+        {activeTab === 'step' && (
         <Section title={t('selfEvolutionRun.stateGraphSectionLogic')}>
           <div className="npp-field-block">
             <LabelWithTip label={t('selfEvolutionRun.stateGraphFieldPrompt')} tip={t('selfEvolutionRun.stateGraphFieldPromptTip')} />
@@ -583,6 +655,7 @@ export default function NodePropertiesPanel({ node, model, workflowModel, scenar
             />
           </div>
         </Section>
+        )}
       </div>
 
       {/* footer */}
@@ -594,6 +667,7 @@ export default function NodePropertiesPanel({ node, model, workflowModel, scenar
         )}
       </div>
       </>}
+      </div>
     </div>
   );
 }

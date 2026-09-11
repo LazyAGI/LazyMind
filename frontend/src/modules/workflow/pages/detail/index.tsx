@@ -276,7 +276,7 @@ export default function WorkflowDetailPage() {
   const saveConflictRef = useRef(false);
   // Persist artifacts panel open/close state across version remounts.
   // Default false — user explicitly opens the panel by clicking the 素材 button.
-  const showArtifactsRef = useRef(false);
+  const showArtifactsRef = useRef(true);
   const [loading, setLoading] = useState(true);
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [regenerateModalOpen, setRegenerateModalOpen] = useState(false);

@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
+import { v4 as uuidv4 } from 'uuid';
 import { Button, Checkbox, Input, InputNumber, Select, Tooltip, Empty, Dropdown, Popconfirm } from 'antd';
-import { PlusOutlined, CloseOutlined, CheckOutlined, DownOutlined } from '@ant-design/icons';
+import { PlusOutlined, CloseOutlined, CheckOutlined, DownOutlined, DeleteOutlined, UserOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import type { SlotDef, GraphModel } from '../core/model';
 import { removeMaterialFromExpression } from '../core/model';
@@ -312,90 +313,97 @@ interface EditFormProps {
 
 function EditForm({ draft, isNew, onChange, onSave, onCancel, saveLabel }: EditFormProps) {
   const { t } = useTranslation();
+  const fieldId = useId();
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  useEffect(() => { if (draft.idError) setAdvancedOpen(true); }, [draft.idError]);
   const typeOptions = TYPE_VALUES.map((v) => ({ label: t(TYPE_LABEL_KEYS[v]), value: v }));
   const resolvedSaveLabel = saveLabel ?? t('selfEvolutionRun.artifactPanelSave');
   return (
-    <div className="artifact-edit-form">
+    <div className="artifact-edit-form artifact-material-form">
+      <strong>{t(isNew ? 'selfEvolutionRun.sgeMaterialAddTitle' : 'selfEvolutionRun.sgeMaterialEditTitle')}</strong>
+      <p>{t('selfEvolutionRun.sgeMaterialFormHint')}</p>
       <div className="artifact-edit-row">
-        <span className="artifact-edit-field-label">{t('selfEvolutionRun.artifactPanelFieldId')}</span>
-        {isNew ? (
-          <div className="artifact-edit-field-value">
-            <Input
-              size="small"
-              value={draft.id}
-              onChange={(e) => onChange({ id: e.target.value, idError: undefined })}
-              placeholder={t('selfEvolutionRun.artifactPanelFieldIdPlaceholder')}
-              status={draft.idError ? 'error' : ''}
-              onPressEnter={onSave}
-              autoFocus
-            />
-            {draft.idError && <div className="artifact-id-error">{draft.idError}</div>}
-          </div>
-        ) : (
-          <span className="artifact-edit-id-readonly">{draft.id}</span>
-        )}
-      </div>
-      <div className="artifact-edit-row">
-        <span className="artifact-edit-field-label">{t('selfEvolutionRun.artifactPanelFieldLabel')}</span>
+        <label htmlFor={`${fieldId}-name`}>{t('selfEvolutionRun.sgeMaterialName')}</label>
         <Input
-          size="small"
+          id={`${fieldId}-name`}
           value={draft.label}
+          autoFocus
           onChange={(e) => onChange({ label: e.target.value })}
-          placeholder={t('selfEvolutionRun.artifactPanelFieldLabelPlaceholder')}
-          className="artifact-edit-field-value"
+          placeholder={t('selfEvolutionRun.sgeMaterialNamePlaceholder')}
+          onPressEnter={onSave}
         />
       </div>
       <div className="artifact-edit-row">
-        <span className="artifact-edit-field-label">{t('selfEvolutionRun.artifactPanelFieldType')}</span>
+        <label htmlFor={`${fieldId}-source`}>{t('selfEvolutionRun.sgeMaterialSource')}</label>
         <Select
-          size="small"
+          id={`${fieldId}-source`}
+          value={draft.external ? 'user' : 'step'}
+          onChange={(value) => onChange({ external: value === 'user' })}
+          options={[
+            { value: 'user', label: t('selfEvolutionRun.sgeMaterialSourceUser') },
+            { value: 'step', label: t('selfEvolutionRun.sgeMaterialSourceStep') },
+          ]}
+        />
+      </div>
+      <div className="artifact-edit-row">
+        <label htmlFor={`${fieldId}-type`}>{t('selfEvolutionRun.sgeMaterialContentType')}</label>
+        <Select
+          id={`${fieldId}-type`}
           value={draft.type}
           options={typeOptions}
-          onChange={(val) => onChange({ type: val })}
-          className="artifact-edit-type-select"
+          onChange={(type) => onChange({ type })}
         />
-      </div>
-      <div className="artifact-edit-row artifact-edit-row--flags">
-        <Checkbox
-          checked={draft.external}
-          onChange={(e) => onChange({ external: e.target.checked })}
-        >
-          外部输入
-        </Checkbox>
-        <Checkbox
-          checked={draft.cardinality === 'list'}
-          onChange={(e) => onChange({ cardinality: e.target.checked ? 'list' : 'single' })}
-        >
-          {t('selfEvolutionRun.artifactPanelFieldIsList')}
-        </Checkbox>
-        {draft.cardinality === 'list' && (
-          <>
-            <Checkbox
-              checked={draft.ordered}
-              onChange={(e) => onChange({ ordered: e.target.checked })}
-            >
-              {t('selfEvolutionRun.artifactPanelFieldOrdered')}
-            </Checkbox>
-            <Checkbox
-              checked={draft.allow_manual_add}
-              onChange={(e) => onChange({ allow_manual_add: e.target.checked })}
-            >
-              {t('selfEvolutionRun.artifactPanelFieldAllowManualAdd')}
-            </Checkbox>
-          </>
-        )}
       </div>
       <div className="artifact-edit-row">
-        <span className="artifact-edit-field-label">{t('selfEvolutionRun.artifactPanelFieldSummaryMax')}</span>
-        <InputNumber
-          size="small"
-          min={0}
-          value={draft.summary_max_chars ? parseInt(draft.summary_max_chars, 10) : null}
-          onChange={(val) => onChange({ summary_max_chars: val != null ? String(val) : '' })}
-          placeholder={t('selfEvolutionRun.artifactPanelFieldSummaryMaxPlaceholder')}
-          className="artifact-edit-summary-input"
+        <label htmlFor={`${fieldId}-quantity`}>{t('selfEvolutionRun.sgeMaterialQuantity')}</label>
+        <Select
+          id={`${fieldId}-quantity`}
+          value={draft.cardinality}
+          onChange={(cardinality) => onChange({ cardinality })}
+          options={[
+            { value: 'single', label: t('selfEvolutionRun.sgeMaterialSingle') },
+            { value: 'list', label: t('selfEvolutionRun.sgeMaterialList') },
+          ]}
         />
       </div>
+      {draft.cardinality === 'list' && (
+        <div className="artifact-edit-row artifact-edit-row--flags">
+          <Checkbox checked={draft.ordered} onChange={(e) => onChange({ ordered: e.target.checked })}>
+            {t('selfEvolutionRun.sgeMaterialOrdered')}
+          </Checkbox>
+          <Checkbox checked={draft.allow_manual_add} onChange={(e) => onChange({ allow_manual_add: e.target.checked })}>
+            {t('selfEvolutionRun.sgeMaterialManualAdd')}
+          </Checkbox>
+        </div>
+      )}
+      <details className="artifact-edit-advanced" open={advancedOpen} onToggle={(e) => setAdvancedOpen(e.currentTarget.open)}>
+        <summary>{t('selfEvolutionRun.sgeMaterialAdvanced')}</summary>
+        <div className="artifact-edit-row">
+          <label htmlFor={`${fieldId}-id`}>{t('selfEvolutionRun.sgeMaterialInternalId')}</label>
+          <Input
+            id={`${fieldId}-id`}
+            value={draft.id}
+            readOnly={!isNew}
+            onChange={(e) => onChange({ id: e.target.value, idError: undefined })}
+            placeholder={t('selfEvolutionRun.sgeMaterialIdPlaceholder')}
+            status={draft.idError ? 'error' : undefined}
+            aria-invalid={!!draft.idError}
+            aria-describedby={draft.idError ? `${fieldId}-id-error` : undefined}
+            onPressEnter={onSave}
+          />
+          {draft.idError && <div id={`${fieldId}-id-error`} role="alert" className="artifact-id-error">{draft.idError}</div>}
+        </div>
+        <div className="artifact-edit-row">
+          <label htmlFor={`${fieldId}-summary`}>{t('selfEvolutionRun.sgeMaterialSummaryLimit')}</label>
+          <InputNumber
+            id={`${fieldId}-summary`}
+            min={0}
+            value={draft.summary_max_chars ? parseInt(draft.summary_max_chars, 10) : null}
+            onChange={(value) => onChange({ summary_max_chars: value != null ? String(value) : '' })}
+            placeholder={t('selfEvolutionRun.artifactPanelFieldSummaryMaxPlaceholder')}
+          />
+        </div>
+      </details>
       <div className="artifact-edit-actions">
         <Button size="small" type="primary" onClick={onSave}>{resolvedSaveLabel}</Button>
         <Button size="small" onClick={onCancel}>{t('selfEvolutionRun.artifactPanelCancel')}</Button>
@@ -468,13 +476,25 @@ function ArtifactRow({ art, model, uiMode, tabs, uiSlots, slotMap, onUpdate, onD
 
   const typeLabel = t(TYPE_LABEL_KEYS[art.type] ?? 'selfEvolutionRun.stateGraphArtifactTypeText');
   const cardinalityLabel = art.cardinality === 'list' ? `(${t('selfEvolutionRun.artifactPanelFieldIsList')})` : '';
-  const displayName = art.label || art.id;
-  const idLabel = art.label ? `(${art.id})` : '';
+  const displayName = art.label || t('selfEvolutionRun.sgeMaterialUnnamed');
+  const producers = model.nodes.filter((node) => node.outputs.some((output) => output.material === art.id));
+  const consumers = model.nodes.filter((node) => node.inputs.some((input) => input.material === art.id || input.alternatives?.includes(art.id)));
+  const stepNames = (nodes: GraphModel['nodes']) => nodes.map((node) => node.label || t('selfEvolutionRun.sgeMaterialUnnamedStep')).join(t('selfEvolutionRun.sgeMaterialNameSeparator'));
+  const sourceNames = [
+    ...(art.external ? [t('selfEvolutionRun.sgeMaterialUserInput')] : []),
+    ...(producers.length > 0 ? [stepNames(producers)] : []),
+  ];
+  const sourceLabel = sourceNames.join(t('selfEvolutionRun.sgeMaterialNameSeparator')) || t('selfEvolutionRun.sgeMaterialNoProducer');
+  const usageLabel = consumers.length > 0
+    ? stepNames(consumers)
+    : currentLocation
+      ? t('selfEvolutionRun.sgeMaterialPage', { name: formatLocation(currentLocation) })
+      : t('selfEvolutionRun.sgeMaterialUnused');
   const resolvedAllowManualAdd = art.cardinality === 'list'
     ? (art.allow_manual_add !== undefined ? art.allow_manual_add : isUsedAsInput(model, art.id))
     : false;
 
-  if (editing) {
+  if (editing && !readonly) {
     return (
       <div className="artifact-item artifact-item--editing">
         <EditForm
@@ -502,16 +522,14 @@ function ArtifactRow({ art, model, uiMode, tabs, uiSlots, slotMap, onUpdate, onD
   return (
     <div
       className="artifact-item"
-      draggable={uiMode}
-      onDragStart={uiMode ? handleDragStart : undefined}
+      draggable={!!uiMode && !readonly}
+      onDragStart={uiMode && !readonly ? handleDragStart : undefined}
     >
       <div className="artifact-item-line1">
         {resolvedAllowManualAdd && (
-          <span className="artifact-item-icon" title={t('selfEvolutionRun.artifactPanelAllowManualAddTitle')}>👤</span>
+          <span className="artifact-item-icon" title={t('selfEvolutionRun.artifactPanelAllowManualAddTitle')}><UserOutlined /></span>
         )}
         <span className="artifact-item-name">{displayName}</span>
-        {idLabel && <span className="artifact-item-id">{idLabel}</span>}
-        <span className="artifact-item-sep">,</span>
         <span className="artifact-item-type">
           {typeLabel}
           {cardinalityLabel && <span className="artifact-item-cardinality">{cardinalityLabel}</span>}
@@ -524,7 +542,7 @@ function ArtifactRow({ art, model, uiMode, tabs, uiSlots, slotMap, onUpdate, onD
           )}
           {!uiMode && !readonly && (
             <Popconfirm
-              title={t('selfEvolutionRun.artifactPanelDeleteConfirm', { id: art.id })}
+              title={t('selfEvolutionRun.artifactPanelDeleteConfirm', { id: displayName })}
               onConfirm={() => onDelete(art.id)}
               okText={t('selfEvolutionRun.artifactPanelDeleteOk')}
               cancelText={t('selfEvolutionRun.artifactPanelDeleteCancel')}
@@ -538,16 +556,19 @@ function ArtifactRow({ art, model, uiMode, tabs, uiSlots, slotMap, onUpdate, onD
                   className="artifact-item-delete-btn"
                   aria-label={t('selfEvolutionRun.artifactPanelDeleteTooltip')}
                 >
-                  🗑️
+                  <DeleteOutlined />
                 </Button>
               </Tooltip>
             </Popconfirm>
           )}
         </div>
       </div>
+      <div className="artifact-material-path">
+        <span>{sourceLabel}</span><span aria-hidden="true"> → </span><span>{usageLabel}</span>
+      </div>
       {uiMode && (
         <div className="artifact-item-line2">
-          {compatibleWidgets.length > 1 && !currentLocation && (
+          {compatibleWidgets.length > 1 && !readonly && !currentLocation && (
             <WidgetSelector
               slotType={art.type}
               cardinality={art.cardinality}
@@ -556,7 +577,7 @@ function ArtifactRow({ art, model, uiMode, tabs, uiSlots, slotMap, onUpdate, onD
               size="small"
             />
           )}
-          {compatibleWidgets.length > 1 && currentLocation && (
+          {compatibleWidgets.length > 1 && !readonly && currentLocation && (
             <WidgetSelector
               slotType={art.type}
               cardinality={art.cardinality}
@@ -576,25 +597,27 @@ function ArtifactRow({ art, model, uiMode, tabs, uiSlots, slotMap, onUpdate, onD
                 <CheckOutlined className="artifact-row-joined-check" />
                 {t('selfEvolutionRun.artifactJoinedLabel', { location: formatLocation(currentLocation) })}
               </button>
-              <Popconfirm
-              title={t('selfEvolutionRun.artifactRemoveTitle')}
-                description={t('selfEvolutionRun.artifactRemoveDesc')}
-                onConfirm={() => onRemoveFromUi(art.id)}
-                okText={t('selfEvolutionRun.artifactRemoveOk')}
-                cancelText={t('selfEvolutionRun.artifactRemoveCancel')}
-                okButtonProps={{ danger: true }}
-                placement="left"
-              >
-                <Button
-                  size="small"
-                  type="text"
-                  icon={<CloseOutlined />}
-                  className="artifact-row-joined-remove"
-                  title={t('selfEvolutionRun.artifactRemoveTooltip')}
-                />
-              </Popconfirm>
+              {!readonly && (
+                <Popconfirm
+                  title={t('selfEvolutionRun.artifactRemoveTitle')}
+                  description={t('selfEvolutionRun.artifactRemoveDesc')}
+                  onConfirm={() => onRemoveFromUi(art.id)}
+                  okText={t('selfEvolutionRun.artifactRemoveOk')}
+                  cancelText={t('selfEvolutionRun.artifactRemoveCancel')}
+                  okButtonProps={{ danger: true }}
+                  placement="left"
+                >
+                  <Button
+                    size="small"
+                    type="text"
+                    icon={<CloseOutlined />}
+                    className="artifact-row-joined-remove"
+                    title={t('selfEvolutionRun.artifactRemoveTooltip')}
+                  />
+                </Popconfirm>
+              )}
             </div>
-          ) : (
+          ) : !readonly ? (
             <Dropdown
               menu={{
                 items: assignTargets.map((target) => {
@@ -627,7 +650,7 @@ function ArtifactRow({ art, model, uiMode, tabs, uiSlots, slotMap, onUpdate, onD
                 {t('selfEvolutionRun.artifactJoinMenuLabel')} <DownOutlined />
               </Button>
             </Dropdown>
-          )}
+          ) : null}
         </div>
       )}
     </div>
@@ -642,6 +665,10 @@ export default function ArtifactPanel({ model, onClose, onModelChange, uiMode, i
   useEffect(() => { if (startAddingToken > 0 && !readonly) setAdding(true); }, [startAddingToken, readonly]);
 
   const artifacts = Object.values(model.slots);
+  const artifactGroups = [
+    { key: 'external', title: 'selfEvolutionRun.sgeMaterialExternalGroup', items: artifacts.filter((art) => art.external) },
+    { key: 'generated', title: 'selfEvolutionRun.sgeMaterialGeneratedGroup', items: artifacts.filter((art) => !art.external) },
+  ];
   const tabs: WorkflowUiTab[] = workflowModel?.ui?.tabs ?? [];
   const uiSlots: Record<string, WidgetConfig> = (workflowModel?.ui?.slots ?? {}) as Record<string, WidgetConfig>;
   const slotMap: Record<string, SlotDef> = model.slots;
@@ -654,7 +681,8 @@ export default function ArtifactPanel({ model, onClose, onModelChange, uiMode, i
   };
 
   const handleAdd = () => {
-    const idError = validateId(newDraft.id);
+    const id = newDraft.id.trim() ? newDraft.id : `material_${uuidv4().replace(/-/g, '')}`;
+    const idError = newDraft.id.trim() ? validateId(id) : undefined;
     if (idError) {
       setNewDraft((d) => ({ ...d, idError }));
       return;
@@ -662,7 +690,7 @@ export default function ArtifactPanel({ model, onClose, onModelChange, uiMode, i
     const isList = newDraft.cardinality === 'list';
     const maxChars = parseInt(newDraft.summary_max_chars, 10);
     const newSlot: SlotDef = {
-      id: newDraft.id,
+      id,
       type: newDraft.type,
       label: newDraft.label || undefined,
       cardinality: isList ? 'list' : undefined,
@@ -671,7 +699,14 @@ export default function ArtifactPanel({ model, onClose, onModelChange, uiMode, i
       external: newDraft.external || undefined,
       summary_max_chars: (!isNaN(maxChars) && maxChars > 0) ? maxChars : undefined,
     };
-    onModelChange((prev) => ({ ...prev, slots: { ...prev.slots, [newDraft.id]: newSlot } }));
+    onModelChange((prev) => {
+      // Check the latest model too: a custom ID must never replace an existing slot.
+      if (newDraft.id.trim() && prev.slots[id]) return prev;
+      let uniqueId = id;
+      let suffix = 1;
+      while (prev.slots[uniqueId]) uniqueId = `${id}_${suffix++}`;
+      return { ...prev, slots: { ...prev.slots, [uniqueId]: { ...newSlot, id: uniqueId } } };
+    });
     setNewDraft(EMPTY_DRAFT);
     setAdding(false);
   };
@@ -786,26 +821,31 @@ export default function ArtifactPanel({ model, onClose, onModelChange, uiMode, i
           />
         )}
 
-        {artifacts.map((art) => (
-          <ArtifactRow
-            key={art.id}
-            art={art}
-            model={model}
-            uiMode={uiMode}
-            tabs={tabs}
-            uiSlots={uiSlots}
-            slotMap={slotMap}
-            onUpdate={updateArtifact}
-            onDelete={handleDelete}
-            onAssign={assignSlot}
-            onRemoveFromUi={removeSlotFromUi}
-            onWidgetChange={updateWidget}
-            onTabNavigate={onTabNavigate}
-            readonly={readonly}
-          />
+        {artifactGroups.filter((group) => group.items.length > 0).map((group) => (
+          <section className="artifact-material-group" key={group.key} aria-label={t(group.title)}>
+            <h4>{t(group.title)}</h4>
+            {group.items.map((art) => (
+              <ArtifactRow
+                key={art.id}
+                art={art}
+                model={model}
+                uiMode={uiMode}
+                tabs={tabs}
+                uiSlots={uiSlots}
+                slotMap={slotMap}
+                onUpdate={updateArtifact}
+                onDelete={handleDelete}
+                onAssign={assignSlot}
+                onRemoveFromUi={removeSlotFromUi}
+                onWidgetChange={updateWidget}
+                onTabNavigate={onTabNavigate}
+                readonly={readonly}
+              />
+            ))}
+          </section>
         ))}
 
-        {adding && (
+        {adding && !readonly && (
           <div className="artifact-item artifact-item--new">
             <EditForm
               draft={newDraft}

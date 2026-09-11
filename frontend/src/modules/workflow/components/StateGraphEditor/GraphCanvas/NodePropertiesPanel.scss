@@ -584,3 +584,148 @@
   color: #8c8c8c;
   font-size: 12px;
 }
+
+.sge-authoring-editor .node-props-panel {
+  .node-props-panel-header {
+    min-height: 76px;
+    padding: 14px 18px;
+    align-items: flex-start;
+    border-bottom: 0;
+  }
+
+  .npp-selected-heading {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+
+    small {
+      color: #8c8c8c;
+      font-size: 12px;
+    }
+
+    strong {
+      color: #262626;
+      font-size: 18px;
+      font-weight: 600;
+      overflow-wrap: anywhere;
+    }
+  }
+
+  .node-props-tabs {
+    flex-shrink: 0;
+    gap: 6px;
+    padding: 0 16px;
+    border-bottom: 1px solid #f0f0f0;
+
+    button {
+      flex: 1;
+      min-width: 0;
+      padding: 10px 4px;
+      font-size: 13px;
+    }
+  }
+
+  .npp-step-context {
+    flex-shrink: 0;
+    padding: 10px 18px;
+    border-bottom: 1px solid #f0f0f0;
+    background: #fafbfc;
+    color: #8c8c8c;
+    font-size: 11px;
+    line-height: 1.7;
+    overflow-wrap: anywhere;
+
+    b {
+      color: #595959;
+      font-weight: 400;
+    }
+  }
+
+  .npp-tab-content {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  .node-props-panel-body {
+    min-height: 0;
+  }
+
+  .npp-section {
+    border-bottom: 1px solid #f0f0f0;
+  }
+
+  .npp-section-header {
+    padding: 14px 18px;
+    background: #fff;
+    font-size: 13px;
+  }
+
+  .npp-section-body {
+    padding: 0 18px 18px;
+  }
+
+  .node-props-panel-body .npp-field-row {
+    display: block;
+    margin-bottom: 14px;
+  }
+
+  .node-props-panel-body .npp-field-row > .npp-field-label {
+    display: block;
+    width: auto;
+    margin-bottom: 6px;
+    color: #595959;
+    font-size: 12px;
+  }
+
+  .node-props-panel-body .npp-field-control {
+    width: 100%;
+  }
+
+  .npp-section-body .ant-input-sm,
+  .npp-section-body .ant-select-single.ant-select-sm {
+    min-height: 30px;
+    font-size: 13px;
+  }
+
+  .npp-authoring-help {
+    margin: 0 0 14px;
+    color: #8c8c8c;
+    font-size: 12px;
+    line-height: 1.75;
+  }
+
+  .npp-advanced {
+    margin-top: 16px;
+    padding-top: 12px;
+    border-top: 1px dashed #e5e5e5;
+    font-size: 12px;
+
+    summary {
+      margin-bottom: 10px;
+      color: #8c8c8c;
+      cursor: pointer;
+    }
+
+    p {
+      color: #8c8c8c;
+      font-size: 11px;
+      line-height: 1.6;
+    }
+  }
+
+  .node-props-panel-footer {
+    padding: 10px 18px;
+    background: #fff;
+
+    > .ant-btn {
+      width: auto;
+      padding: 0;
+      border: 0;
+      font-size: 12px;
+    }
+  }
+}

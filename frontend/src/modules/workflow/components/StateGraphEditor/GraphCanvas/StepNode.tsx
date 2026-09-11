@@ -10,13 +10,14 @@ import type { MaterialExpression, NodeLayout } from '../core/model';
 import { NODE_MIN_HEIGHT } from '../core/layout';
 
 export const NODE_MIN_WIDTH = 90;  // 148 * ~0.6
-export const NODE_DEFAULT_WIDTH = 148;
+export const NODE_DEFAULT_WIDTH = 240;
 
 export interface StepNodeData extends Record<string, unknown> {
   id: string;
   label: string;
   mode: 'human' | 'auto';
   inputs: string[];
+  inputLabels?: string[];
   outputs: string[];
   transitions: { to: string; when?: string; condition?: MaterialExpression }[];
   route?: 'all' | 'choice';
@@ -218,10 +219,17 @@ function StepNodeComponent({ data, selected }: NodeProps) {
               className="step-node-mode-tag"
               icon={mode === 'auto' ? <RobotOutlined /> : <UserOutlined />}
               color={mode === 'auto' ? 'blue' : 'orange'}
-            />}
+            >{mode === 'auto' ? t('selfEvolutionRun.sgeNodeAutoContinue') : t('selfEvolutionRun.sgeNodeUserConfirm')}</Tag>}
           </div>
         </div>
         {visibility.label !== false && <div className="step-node-label">{String(label)}</div>}
+        {visibility.outputs !== false && (
+          <div className="step-node-input-summary" title={nodeData.inputLabels?.join('、')}>
+            {nodeData.inputLabels?.length
+              ? t('selfEvolutionRun.sgeNodeInputs', { inputs: nodeData.inputLabels.join('、') })
+              : t('selfEvolutionRun.sgeNodeNoInputs')}
+          </div>
+        )}
         {visibility.outputs !== false && <OutputChips outputs={outputs} outputLabels={outputLabels} containerWidth={innerWidth} />}
 
         <Handle type="source" position={Position.Right} className="step-node-handle" />
