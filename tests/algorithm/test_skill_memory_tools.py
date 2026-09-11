@@ -310,3 +310,16 @@ def test_skill_editor_patch_resolves_unique_name_and_requires_full_key_when_ambi
     assert exact_result['status'] == 'patched'
     assert 'Before shared.' in store.packages[('internal', 'shared')]['SKILL.md']
     assert 'After external.' in store.packages[('external', 'shared')]['SKILL.md']
+
+
+def test_create_skill_rejects_invalid_document_before_store_write():
+    store = FakeSkillStore()
+    toolkit = skill_editor_mod.SkillManagementToolkit(store=store, installer=object())
+
+    with pytest.raises(ToolExecutionError, match="field 'description' must be a string"):
+        toolkit.create_skill(
+            'example',
+            content='---\nname: example\ndescription: 123\n---\nBody.\n',
+        )
+    assert store.calls == []
+    assert store.packages == {}

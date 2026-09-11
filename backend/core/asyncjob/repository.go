@@ -42,6 +42,17 @@ var staleStatuses = []string{
 }
 
 func Enqueue(ctx context.Context, db *gorm.DB, req EnqueueRequest) (*orm.AsyncJob, error) {
+	return enqueue(ctx, db, req, false)
+}
+
+// EnqueueInTransaction participates in the caller's transaction. In particular,
+// a SQLite BEGIN IMMEDIATE connection cannot start another database/sql transaction.
+// The caller owns commit/rollback and retry of unique conflicts.
+func EnqueueInTransaction(ctx context.Context, tx *gorm.DB, req EnqueueRequest) (*orm.AsyncJob, error) {
+	return enqueue(ctx, tx, req, true)
+}
+
+func enqueue(ctx context.Context, db *gorm.DB, req EnqueueRequest, inTransaction bool) (*orm.AsyncJob, error) {
 	req.JobType = strings.TrimSpace(req.JobType)
 	req.IdempotencyKey = strings.TrimSpace(req.IdempotencyKey)
 	if req.JobType == "" {
@@ -64,7 +75,7 @@ func Enqueue(ctx context.Context, db *gorm.DB, req EnqueueRequest) (*orm.AsyncJo
 	}
 
 	var created *orm.AsyncJob
-	err = db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	write := func(tx *gorm.DB) error {
 		if req.IdempotencyKey != "" {
 			existing, err := findReusableJob(ctx, tx, req.JobType, req.IdempotencyKey, true, req.SkipSucceeded)
 			if err != nil {
@@ -129,8 +140,13 @@ func Enqueue(ctx context.Context, db *gorm.DB, req EnqueueRequest) (*orm.AsyncJo
 		}
 		created = row
 		return nil
-	})
-	if err != nil && req.IdempotencyKey != "" && isUniqueConflict(err) {
+	}
+	if inTransaction {
+		err = write(db.WithContext(ctx))
+	} else {
+		err = db.WithContext(ctx).Transaction(write)
+	}
+	if !inTransaction && err != nil && req.IdempotencyKey != "" && isUniqueConflict(err) {
 		existing, findErr := findReusableJob(ctx, db, req.JobType, req.IdempotencyKey, false, req.SkipSucceeded)
 		if findErr == nil && existing != nil {
 			return existing, nil

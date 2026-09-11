@@ -21,6 +21,7 @@ import (
 	"lazymind/core/acl"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/conversationgroup"
 	"lazymind/core/evolution"
 	"lazymind/core/log"
 	"lazymind/core/modelconfig"
@@ -295,7 +296,32 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 	runInBackground, _ := raw["run_in_background"].(bool)
 	requestedThinkingDepth, _ := raw["thinking_depth"].(string)
 
-	conversationRecord, seq, err := ensureConversation(r.Context(), db, convID, displayName, searchConfigJSON, modelsJSON, userID, userName, runInBackground, requestedThinkingDepth, initialConversationSettings, initialModelSelection)
+	requestedGroupID, _ := raw["group_id"].(string)
+	requestedGroupID = strings.TrimSpace(requestedGroupID)
+	var conversationRecord *orm.Conversation
+	var seq int
+	if requestedGroupID != "" {
+		err = conversationgroup.UserTransaction(r.Context(), db, userID, func(tx *gorm.DB) error {
+			var existing int64
+			if e := tx.Model(&orm.Conversation{}).Where("id=?", convID).Count(&existing).Error; e != nil {
+				return e
+			}
+			if existing > 0 {
+				return errors.New("group_id is only valid when creating a conversation")
+			}
+			record, next, e := ensureConversation(r.Context(), tx, convID, displayName, searchConfigJSON, modelsJSON, userID, userName, runInBackground, requestedThinkingDepth, initialConversationSettings, initialModelSelection)
+			if e != nil {
+				return e
+			}
+			if e = conversationgroup.AttachNewConversation(r.Context(), tx, userID, convID, requestedGroupID); e != nil {
+				return e
+			}
+			conversationRecord, seq = record, next
+			return nil
+		})
+	} else {
+		conversationRecord, seq, err = ensureConversation(r.Context(), db, convID, displayName, searchConfigJSON, modelsJSON, userID, userName, runInBackground, requestedThinkingDepth, initialConversationSettings, initialModelSelection)
+	}
 
 	if err != nil {
 		if errors.Is(err, errConversationUnavailable) {
@@ -308,6 +334,14 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		}
 		if errors.Is(err, errChatModelUnavailable) {
 			common.ReplyErr(w, err.Error(), http.StatusServiceUnavailable)
+			return
+		}
+		if errors.Is(err, conversationgroup.ErrConversationGroupNotFound) {
+			common.ReplyErr(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		if strings.Contains(err.Error(), "group_id is only valid") {
+			common.ReplyErr(w, err.Error(), http.StatusConflict)
 			return
 		}
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "failed to ensure conversation", err), http.StatusInternalServerError)
@@ -1794,6 +1828,39 @@ func filterConversationSearchConfigDatasetList(ctx context.Context, db *gorm.DB,
 	return sc
 }
 
+func conversationGroupState(ctx context.Context, db *gorm.DB, userID string, conversationIDs []string) (map[string]string, map[string]string, error) {
+	groupIDs := map[string]string{}
+	lockRunIDs := map[string]string{}
+	if len(conversationIDs) > 0 && db.Migrator().HasTable(&orm.ConversationGroupMember{}) {
+		var memberships []struct {
+			ConversationID string `gorm:"column:conversation_id"`
+			GroupID        string `gorm:"column:group_id"`
+		}
+		err := db.WithContext(ctx).Model(&orm.ConversationGroupMember{}).Select("conversation_id,group_id").Where("conversation_id IN ? AND user_id=?", conversationIDs, userID).Scan(&memberships).Error
+		if err != nil {
+			return nil, nil, err
+		}
+		for _, m := range memberships {
+			groupIDs[m.ConversationID] = m.GroupID
+		}
+		if db.Migrator().HasTable(&orm.ConversationOrganizerSnapshotItem{}) {
+			var locks []struct {
+				ConversationID string `gorm:"column:conversation_id"`
+				RunID          string `gorm:"column:run_id"`
+			}
+			err := db.WithContext(ctx).Table("conversation_organizer_snapshot_items s").Select("s.conversation_id,s.run_id").Joins("JOIN conversation_organizer_runs r ON r.id=s.run_id").Where("s.conversation_id IN ? AND s.user_id=? AND r.status IN ?", conversationIDs, userID, []string{"pending", "running", "applying"}).Scan(&locks).Error
+			if err != nil {
+				return nil, nil, err
+			}
+			for _, l := range locks {
+				lockRunIDs[l.ConversationID] = l.RunID
+			}
+		}
+	}
+
+	return groupIDs, lockRunIDs, nil
+}
+
 // GetConversationDetail text GET /api/v1/conversations/{name}:detail
 func GetConversationDetail(w http.ResponseWriter, r *http.Request) {
 	name := conversationNameFromPath(r)
@@ -1834,7 +1901,15 @@ func GetConversationDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	groupIDs, lockRunIDs, err := conversationGroupState(r.Context(), db, userID, []string{c.ID})
+	if err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	conversationItem := map[string]any{
+		"group_id":              groupIDs[c.ID],
+		"organizing_run_id":     lockRunIDs[c.ID],
+		"is_task_conv":          c.IsTaskConv,
 		"name":                  "conversations/" + c.ID,
 		"conversation_id":       c.ID,
 		"display_name":          c.DisplayName,
@@ -1965,6 +2040,10 @@ func DeleteConversation(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "conversation not found", http.StatusNotFound)
 		return
 	} else if err != nil {
+		if errors.Is(err, conversationgroup.ErrConversationOrganizing) {
+			common.ReplyErr(w, err.Error(), http.StatusConflict)
+			return
+		}
 		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -2050,7 +2129,7 @@ func archiveConversation(
 ) error {
 	now := time.Now().UTC()
 	expiresAt := now.Add(30 * 24 * time.Hour)
-	return conversationCheckpoint(ctx, db, conversationID, func(tx *gorm.DB) error {
+	return conversationgroup.UserTransaction(ctx, db, userID, func(tx *gorm.DB) error {
 		var root orm.Conversation
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id").Where(
 			"id = ? AND create_user_id = ? AND deleted_at IS NULL", conversationID, userID,
@@ -2059,6 +2138,9 @@ func archiveConversation(
 		}
 		conversationIDs, err := ownedConversationFamilyIDs(ctx, tx, userID, conversationID)
 		if err != nil {
+			return err
+		}
+		if err := conversationgroup.RequireOrganizerUnlocked(ctx, tx, userID, conversationIDs, ""); err != nil {
 			return err
 		}
 		res := tx.Model(&orm.Conversation{}).
@@ -2125,7 +2207,7 @@ func BatchDeleteConversations(w http.ResponseWriter, r *http.Request) {
 	db := store.DB()
 
 	var ownedIDs []string
-	err := conversationCheckpoint(r.Context(), db, "", func(tx *gorm.DB) error {
+	err := conversationgroup.UserTransaction(r.Context(), db, userID, func(tx *gorm.DB) error {
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Model(&orm.Conversation{}).
 			Where("id IN ? AND create_user_id = ? AND deleted_at IS NULL", uniqueIDs, userID).
 			Order("id").Pluck("id", &ownedIDs).Error; err != nil {
@@ -2139,6 +2221,9 @@ func BatchDeleteConversations(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		ownedIDs = expandedIDs
+		if err := conversationgroup.RequireOrganizerUnlocked(r.Context(), tx, userID, ownedIDs, ""); err != nil {
+			return err
+		}
 		now := time.Now().UTC()
 		expiresAt := now.Add(30 * 24 * time.Hour)
 		if err := tx.Model(&orm.Conversation{}).Where("id IN ? AND deleted_at IS NULL", ownedIDs).
@@ -2155,6 +2240,10 @@ func BatchDeleteConversations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
+		if errors.Is(err, conversationgroup.ErrConversationOrganizing) {
+			common.ReplyErr(w, err.Error(), http.StatusConflict)
+			return
+		}
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "batch delete conversations failed", err), http.StatusInternalServerError)
 		return
 	}
@@ -2311,6 +2400,11 @@ func ListConversations(w http.ResponseWriter, r *http.Request) {
 		metadataPending[id] = true
 	}
 	parentNames := parentDisplayNames(r.Context(), db, userID, list)
+	groupIDs, lockRunIDs, err := conversationGroupState(r.Context(), db, userID, conversationIDs)
+	if err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 
 	items := make([]map[string]any, 0, len(list))
 	for _, c := range list {
@@ -2358,6 +2452,14 @@ func ListConversations(w http.ResponseWriter, r *http.Request) {
 			"assistant":             sources[c.ID].Assistant,
 			"project_key":           sources[c.ID].ProjectKey,
 			"project_name":          sources[c.ID].ProjectName,
+			"group_id":              nil,
+			"organizing_run_id":     nil,
+		}
+		if id := groupIDs[c.ID]; id != "" {
+			item["group_id"] = id
+		}
+		if id := lockRunIDs[c.ID]; id != "" {
+			item["organizing_run_id"] = id
 		}
 		parentName := ""
 		if c.ParentConversationID != nil {
@@ -2490,7 +2592,7 @@ func SetChatHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	defer notifyConversationOpening(db, selected.ConversationID)
+	defer notifyConversationTitle(db, selected.ConversationID)
 
 	writeConversationJSON(w, http.StatusOK, map[string]any{"history_id": body.SetHistoryID})
 }

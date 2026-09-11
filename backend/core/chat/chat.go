@@ -115,6 +115,9 @@ type ChatRuntimeOptions struct {
 	SkipSensitiveFilter           bool           `json:"skip_sensitive_filter,omitempty"`
 	MailDraftConfirmID            string         `json:"mail_draft_confirm_id,omitempty"`
 	MailDraftConfirmRevision      int            `json:"mail_draft_confirm_revision,omitempty"`
+	MailDraftPatch                map[string]any `json:"mail_draft_patch,omitempty"`
+	MailMailboxConfirm            string         `json:"mail_mailbox_confirm,omitempty"`
+	MailMailboxConfirmDraftID     string         `json:"mail_mailbox_confirm_draft_id,omitempty"`
 }
 
 type ChatPersonalizationOptions struct {
@@ -150,6 +153,7 @@ type LazyChatData struct {
 	IntentUpdated            *IntentUpdatedEvent            `json:"intent_updated,omitempty"`
 	WorkflowPreflightUpdated *WorkflowPreflightUpdatedEvent `json:"workflow_preflight_updated,omitempty"`
 	ModelContextUpdated      *ModelContextUpdatedEvent      `json:"model_context_updated,omitempty"`
+	CapabilityDependency     map[string]any                 `json:"capability_dependency,omitempty"`
 	Heartbeat                bool                           `json:"heartbeat,omitempty"`
 	ToolCallTurns            int64                          `json:"tool_call_turns"`
 	RuntimeEvent             *ChatRuntimeEvent              `json:"runtime_event,omitempty"`
@@ -195,12 +199,13 @@ type AskQuestion struct {
 // The frontend renders a clarification UI; the user's answers are sent as plain text
 // in the next chat turn's query — no special ask_response parameter is needed.
 type AskPendingEvent struct {
-	AskID       string         `json:"ask_id"`
-	Questions   []AskQuestion  `json:"questions"`
-	Title       string         `json:"title,omitempty"`
-	Description string         `json:"description,omitempty"`
-	MailDraft   map[string]any `json:"mail_draft,omitempty"`
-	ReviewHook  map[string]any `json:"review_hook,omitempty"`
+	AskID       string           `json:"ask_id"`
+	Questions   []AskQuestion    `json:"questions"`
+	Title       string           `json:"title,omitempty"`
+	Description string           `json:"description,omitempty"`
+	MailDraft   map[string]any   `json:"mail_draft,omitempty"`
+	MailDrafts  []map[string]any `json:"mail_drafts,omitempty"`
+	ReviewHook  map[string]any   `json:"review_hook,omitempty"`
 }
 
 type ToolLimitPendingEvent struct {
@@ -390,6 +395,7 @@ type UpstreamStreamChunk struct {
 	IntentUpdated            *IntentUpdatedEvent            `json:"intent_updated,omitempty"`
 	WorkflowPreflightUpdated *WorkflowPreflightUpdatedEvent `json:"workflow_preflight_updated,omitempty"`
 	ModelContextUpdated      *ModelContextUpdatedEvent      `json:"model_context_updated,omitempty"`
+	CapabilityDependency     map[string]any                 `json:"capability_dependency,omitempty"`
 	Heartbeat                bool                           `json:"heartbeat,omitempty"`
 	ToolCallTurns            int64                          `json:"tool_call_turns"`
 	ExternalEventSequence    int64                          `json:"external_event_sequence,omitempty"`
@@ -500,6 +506,15 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 	}
 	if revision := mailDraftConfirmRevision(body["mail_draft_confirm_revision"]); revision > 0 {
 		req.Runtime.MailDraftConfirmRevision = revision
+	}
+	if patch, ok := body["mail_draft_patch"].(map[string]any); ok && len(patch) > 0 {
+		req.Runtime.MailDraftPatch = patch
+	}
+	if mailbox, ok := body["mail_mailbox_confirm"].(string); ok {
+		req.Runtime.MailMailboxConfirm = strings.TrimSpace(mailbox)
+	}
+	if draftID, ok := body["mail_mailbox_confirm_draft_id"].(string); ok {
+		req.Runtime.MailMailboxConfirmDraftID = strings.TrimSpace(draftID)
 	}
 	if llmConfig, ok := body["llm_config"].(map[string]any); ok {
 		req.Runtime.LLMConfig = llmConfig
@@ -968,6 +983,7 @@ func upstreamStreamChunkFromData(data LazyChatData) UpstreamStreamChunk {
 		IntentUpdated:            data.IntentUpdated,
 		WorkflowPreflightUpdated: data.WorkflowPreflightUpdated,
 		ModelContextUpdated:      data.ModelContextUpdated,
+		CapabilityDependency:     data.CapabilityDependency,
 		Heartbeat:                data.Heartbeat,
 		ToolCallTurns:            data.ToolCallTurns,
 		RuntimeEvent:             data.RuntimeEvent,

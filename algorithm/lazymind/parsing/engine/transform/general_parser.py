@@ -32,7 +32,7 @@ def _parse_token_limit(value) -> int | None:
         return None
     amount = int(match.group(1))
     suffix = match.group(2)
-    return amount * {'K': 1_000, 'M': 1_000_000}.get(suffix, 1)
+    return amount * {'K': 1024, 'M': 1024 * 1024}.get(suffix, 1)
 
 
 def _runtime_embed_max_input_tokens() -> int | None:

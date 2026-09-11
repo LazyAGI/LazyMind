@@ -532,3 +532,14 @@
     }
   }
 }
+
+.record-container.compact.grouped-sidebar {
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: #c9ced6 transparent;
+  > * { flex-shrink: 0; }
+  > .record-list { flex: 0 0 auto; overflow: visible; }
+  &::-webkit-scrollbar { width: 6px; }
+  &::-webkit-scrollbar-thumb { background: #c9ced6; border-radius: 3px; }
+}

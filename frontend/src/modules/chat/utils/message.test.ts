@@ -7,11 +7,14 @@ import {
   getCitationsFromText,
   getRegenerationInputs,
   isAskPendingReadOnly,
+  mergeAskPending,
   mergeChatMessageLists,
   mergeConversationTrailIntoMessageList,
   normalizeMessageInputs,
   normalizeImportedUserText,
   shouldRenderAskPending,
+  unansweredMailDrafts,
+  mailDraftCardsReadOnly,
   stripAskUserReceipt,
   stripCitationFromText,
 } from "./message";
@@ -43,6 +46,8 @@ describe("isAskPendingReadOnly", () => {
   });
 });
 
+});
+
 describe("shouldRenderAskPending", () => {
   it("keeps answered and superseded Ask cards in the transcript", () => {
     expect(shouldRenderAskPending(false, true)).toBe(true);
@@ -52,6 +57,44 @@ describe("shouldRenderAskPending", () => {
 
   it("keeps a resumable Ask when only an assistant placeholder follows it", () => {
     expect(shouldRenderAskPending(false, false, false)).toBe(true);
+  });
+});
+
+describe("unansweredMailDrafts", () => {
+  it("keeps sibling drafts after one confirmation", () => {
+    const remaining = unansweredMailDrafts(
+      {
+        mail_drafts: [
+          { draft_id: "draft_one", status: "draft" },
+          { draft_id: "draft_two", status: "draft" },
+        ],
+      },
+      ["draft_one"],
+    );
+    expect(remaining.map((item) => item.draft_id)).toEqual(["draft_two"]);
+  });
+});
+
+describe("mailDraftCardsReadOnly", () => {
+  it("keeps remaining drafts editable after a later user turn", () => {
+    expect(mailDraftCardsReadOnly(false, false)).toBe(false);
+  });
+
+  it("locks cards only after the whole ask is answered", () => {
+    expect(mailDraftCardsReadOnly(false, true)).toBe(true);
+  });
+});
+
+describe("mergeAskPending", () => {
+  it("keeps every mail draft card from later stream frames", () => {
+    const merged = mergeAskPending(
+      { ask_id: "a1", mail_draft: { draft_id: "draft_one", subject: "one" } },
+      { ask_id: "a2", mail_draft: { draft_id: "draft_two", subject: "two" } },
+    );
+    expect(merged.mail_drafts.map((item: { draft_id: string }) => item.draft_id)).toEqual([
+      "draft_one",
+      "draft_two",
+    ]);
   });
 });
 

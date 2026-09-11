@@ -102,8 +102,8 @@ func TestRepositoryStructuredMigrationCatalogLoads(t *testing.T) {
 		v03.Aggregate == nil || v03.Aggregate.Version != 20260805000000 {
 		t.Fatalf("unexpected v0_3 mode: %#v", v03)
 	}
-	if len(v03.Dev) != 66 {
-		t.Fatalf("v0_3 dev migration count=%d, want 66", len(v03.Dev))
+	if len(v03.Dev) != 67 {
+		t.Fatalf("v0_3 dev migration count=%d, want 67", len(v03.Dev))
 	}
 	if !containsMigrationFileVersion(v03.Dev, 20260908090000) {
 		t.Fatal("v0_3 dev migrations are missing vocabulary Anki tables")
@@ -130,6 +130,9 @@ func TestRepositoryStructuredMigrationCatalogLoads(t *testing.T) {
 		if !containsMigrationFileVersion(v03.Dev, version) {
 			t.Fatalf("v0_3 dev migrations are missing %d", version)
 		}
+	}
+	if !containsMigrationFileVersion(v03.Dev, 20260910050131) {
+		t.Fatal("v0_3 dev migrations are missing conversation groups")
 	}
 	v03Up, err := os.ReadFile(v03.Aggregate.UpPath)
 	if err != nil {

@@ -1000,21 +1000,40 @@ type deleteModelProviderGroupOpenAPIResponse struct {
 	ID string `json:"id"`
 }
 
+type listRemoteGroupModelsOpenAPIItem struct {
+	ID             string  `json:"id"`
+	Name           string  `json:"name"`
+	ModelType      string  `json:"model_type"`
+	MaxInputTokens *string `json:"max_input_tokens,omitempty"`
+	Added          bool    `json:"added"`
+}
+
+type listRemoteGroupModelsOpenAPIResponse struct {
+	URL    string                             `json:"url"`
+	Models []listRemoteGroupModelsOpenAPIItem `json:"models"`
+}
+
 type addModelProviderGroupModelOpenAPIRequest struct {
-	Name      string `json:"name"`
-	ModelType string `json:"model_type"`
+	Name           string  `json:"name"`
+	ModelType      string  `json:"model_type"`
+	MaxInputTokens *string `json:"max_input_tokens,omitempty" desc:"Optional override. When omitted, LLM/VLM windows are resolved from config/model_context_windows.yaml by model name and unknown names fall back to 128K."`
 }
 
 type addModelProviderGroupModelOpenAPIResponse struct {
-	ID                       string `json:"id"`
-	UserModelProviderID      string `json:"user_model_provider_id"`
-	UserModelProviderGroupID string `json:"user_model_provider_group_id"`
-	Name                     string `json:"name"`
-	ModelType                string `json:"model_type"`
-	ProviderName             string `json:"provider_name"`
-	GroupName                string `json:"group_name"`
-	BaseURL                  string `json:"base_url"`
-	IsDefault                bool   `json:"is_default"`
+	ID                       string  `json:"id"`
+	UserModelProviderID      string  `json:"user_model_provider_id"`
+	UserModelProviderGroupID string  `json:"user_model_provider_group_id"`
+	Name                     string  `json:"name"`
+	ModelType                string  `json:"model_type"`
+	ProviderName             string  `json:"provider_name"`
+	GroupName                string  `json:"group_name"`
+	BaseURL                  string  `json:"base_url"`
+	IsDefault                bool    `json:"is_default"`
+	MaxInputTokens           *string `json:"max_input_tokens,omitempty" desc:"Stored LLM input context window, for example 512, 128K, or 1M" nullable:"true"`
+}
+
+type updateModelProviderGroupModelOpenAPIRequest struct {
+	MaxInputTokens string `json:"max_input_tokens" desc:"LLM input context window, for example 512, 128K, or 1M"`
 }
 
 type listModelProviderGroupModelsOpenAPIItem struct {
@@ -1048,6 +1067,7 @@ type selectedModelOpenAPIItem struct {
 	ProviderName             string  `json:"provider_name"`
 	GroupName                string  `json:"group_name"`
 	BaseURL                  string  `json:"base_url"`
+	IsDefault                bool    `json:"is_default" desc:"True when the selection was copied from catalog YAML"`
 	IsEditable               bool    `json:"is_editable" desc:"Whether the selected model supports image editing"`
 	MaxInputTokens           *string `json:"max_input_tokens" desc:"Maximum selected catalog LLM, VLM, or embedding-model input context window, for example 512, 128K, or 1M; null for other, custom, or unknown models" nullable:"true"`
 }
@@ -3838,6 +3858,15 @@ func registeredCoreOperations() []openAPIOperation {
 		},
 		{
 			Method:      "GET",
+			Path:        "/model_providers/{model_provider_id}/groups/{group_id}/remote_models",
+			Summary:     "List models advertised by a connection group",
+			Description: "Calls the group's OpenAI-compatible /v1/models endpoint using the stored Base URL and API key. Each item includes an inferred model_type and whether it is already added to the group.",
+			Tags:        []string{"model_providers"},
+			PathParams:  modelProviderGroupByIDPathParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Remote models list", listRemoteGroupModelsOpenAPIResponse{})},
+		},
+		{
+			Method:      "GET",
 			Path:        "/model_providers/{model_provider_id}/groups/{group_id}/models",
 			Summary:     "List models under a connection group",
 			Description: "Lists non-deleted user_model_provider_group_models for the group. Each item includes is_default (true when copied from default_models seeding; false for user-added models) and nullable max_input_tokens, the catalog model's maximum input context window expressed as a string such as 512, 128K, or 1M. Custom or unknown models return null.",
@@ -3849,11 +3878,21 @@ func registeredCoreOperations() []openAPIOperation {
 			Method:      "POST",
 			Path:        "/model_providers/{model_provider_id}/groups/{group_id}/models",
 			Summary:     "Add custom model under a connection group",
-			Description: "Creates a user_model_provider_group_models row with is_default false (custom model name and model_type). Name must be unique within the group among active rows. provider_name and base_url are taken from the user provider and group. Response group_name is user_model_provider_groups.name (not stored on the model row).",
+			Description: "Creates a user_model_provider_group_models row with is_default false (custom model name and model_type). Name must be unique within the group among active rows. For llm and vlm, max_input_tokens from the request is stored when provided; otherwise it is resolved from config/model_context_windows.yaml by model name and unknown names fall back to 128K. provider_name and base_url are taken from the user provider and group. Response group_name is user_model_provider_groups.name (not stored on the model row).",
 			Tags:        []string{"model_providers"},
 			PathParams:  modelProviderGroupByIDPathParams{},
 			RequestBody: jsonBodyOf(addModelProviderGroupModelOpenAPIRequest{}, true),
 			Responses:   map[int]openAPIResponse{200: resp("Created group model", addModelProviderGroupModelOpenAPIResponse{})},
+		},
+		{
+			Method:      "PATCH",
+			Path:        "/model_providers/{model_provider_id}/groups/{group_id}/models/{model_id}",
+			Summary:     "Update a connection group model",
+			Description: "Updates max_input_tokens for a custom (non-catalog) LLM. The field is required. Values use a positive integer or K/M suffix such as 512, 128K, or 1M and must be at most 16 characters. Catalog models keep the YAML value and cannot be patched.",
+			Tags:        []string{"model_providers"},
+			PathParams:  modelProviderGroupModelPathParams{},
+			RequestBody: jsonBodyOf(updateModelProviderGroupModelOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Updated group model", listModelProviderGroupModelsOpenAPIItem{})},
 		},
 		{
 			Method:      "DELETE",

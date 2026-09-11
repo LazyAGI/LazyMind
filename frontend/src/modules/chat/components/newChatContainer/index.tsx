@@ -27,6 +27,7 @@ import ChatMessageContent from "./components/ChatMessageContent";
 import ScrollToBottomButton from "./components/ScrollToBottomButton";
 import ConversationTrail from "./components/ConversationTrail";
 import StreamRecoveryBanner from "./components/StreamRecoveryBanner";
+import CapabilityConfigCard from "../CapabilityConfigCard";
 import { useChatConversation } from "./hooks/useChatConversation";
 import { useCiteMessagesInput } from "./hooks/useCiteMessagesInput";
 import { useThinkingCollapse } from "./hooks/useThinkingCollapse";
@@ -355,10 +356,10 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
     const sendMessage = useCallback(
       (params: Parameters<typeof conversation.sendMessage>[0]) => {
         if (modelSelectionSavingRef.current) {
-          return;
+          return Promise.resolve(false);
         }
         collapseAllThinking();
-        conversation.sendMessage(params);
+        return conversation.sendMessage(params);
       },
       [collapseAllThinking, conversation.sendMessage],
     );
@@ -520,8 +521,26 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
               forkPending={props.forkPending}
               messageList={conversation.messageList}
               initialCard={initialCard}
+              suppressAskPending={Boolean(conversation.mediaCapabilityDependency)}
+              capabilityConfigCard={(
+                <CapabilityConfigCard
+                  detail={conversation.mediaCapabilityDependency}
+                  continueDisabled={
+                    !canChat ||
+                    conversation.loading ||
+                    conversation.isStreaming ||
+                    conversation.runtimeWaiting ||
+                    modelSelectionSaving
+                  }
+                  continueLoading={conversation.mediaCapabilityChecking}
+                  onContinue={() => {
+                    setSourcePanelSources([]);
+                    void conversation.continueAfterMediaCapabilityConfiguration();
+                  }}
+                />
+              )}
               sendMessage={(text, clearInput, extras) => {
-                sendMessage({ text, clearInput, ...(extras ?? {}) });
+                return sendMessage({ text, clearInput, ...(extras ?? {}) });
               }}
               regenerate={handleRegenerate}
               regenerateDisabled={

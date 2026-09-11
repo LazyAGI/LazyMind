@@ -41,6 +41,45 @@ func TestResolveMailDraftConfirmIDFromDraftCard(t *testing.T) {
 	if withRevision["mail_draft_confirm_revision"] != 2 {
 		t.Fatalf("expected draft-card confirm revision, got %#v", withRevision["mail_draft_confirm_revision"])
 	}
+
+	withPatch := buildChatRequestBody(context.TODO(), nil, "conv-1", "", "确认发送", nil, map[string]any{
+		"mail_draft_confirm_id": "draft_ac38c2afeac34780",
+		"mail_draft_patch": map[string]any{
+			"subject":          "edited",
+			"ignored":          "nope",
+			"attachment_paths": []any{"report.pdf"},
+			"attachments": []any{
+				map[string]any{"filename": "card.txt", "content_base64": "aGVsbG8="},
+				map[string]any{"filename": "skip.txt"},
+			},
+		},
+	}, nil, "", 1)
+	patch, ok := withPatch["mail_draft_patch"].(map[string]any)
+	if !ok || patch["subject"] != "edited" {
+		t.Fatalf("expected draft patch subject, got %#v", withPatch["mail_draft_patch"])
+	}
+	if _, exists := patch["ignored"]; exists {
+		t.Fatalf("did not expect unknown patch fields: %#v", patch)
+	}
+	paths, _ := patch["attachment_paths"].([]string)
+	if len(paths) != 1 || paths[0] != "report.pdf" {
+		t.Fatalf("expected conversation attachment paths, got %#v", patch["attachment_paths"])
+	}
+	uploads, _ := patch["attachments"].([]map[string]any)
+	if len(uploads) != 1 || uploads[0]["filename"] != "card.txt" || uploads[0]["content_base64"] != "aGVsbG8=" {
+		t.Fatalf("expected card upload attachments, got %#v", patch["attachments"])
+	}
+
+	withMailbox := buildChatRequestBody(context.TODO(), nil, "conv-1", "", "确认发件邮箱", nil, map[string]any{
+		"mail_mailbox_confirm":          "a@qq.com",
+		"mail_mailbox_confirm_draft_id": "draft_ac38c2afeac34780",
+	}, nil, "", 1)
+	if withMailbox["mail_mailbox_confirm"] != "a@qq.com" {
+		t.Fatalf("expected mailbox confirm, got %#v", withMailbox["mail_mailbox_confirm"])
+	}
+	if withMailbox["mail_mailbox_confirm_draft_id"] != "draft_ac38c2afeac34780" {
+		t.Fatalf("expected mailbox confirm draft id, got %#v", withMailbox["mail_mailbox_confirm_draft_id"])
+	}
 }
 
 func TestBuildChatRequestBodyUsesConversationIDDerivedSessionID(t *testing.T) {
@@ -1874,6 +1913,9 @@ func TestBuildLLMConfigFromSelectedModels(t *testing.T) {
 
 	if chatCfg["source"] != "openai" || chatCfg["model"] != "gpt-4o" || chatCfg["api_key"] != "sk-from-db" {
 		t.Fatalf("unexpected llm config: %#v", chatCfg)
+	}
+	if chatCfg["max_input_tokens"] != "128K" {
+		t.Fatalf("llm max_input_tokens = %#v, want 128K fallback", chatCfg["max_input_tokens"])
 	}
 	if evoCfg["model"] != "gpt-4o-mini" {
 		t.Fatalf("unexpected evo_llm config: %#v", evoCfg)

@@ -6,6 +6,14 @@ import (
 	"lazymind/core/common/orm"
 )
 
+func TestApplyCatalogWindowIfMissingDefaultsTo128K(t *testing.T) {
+	report := &ContextUsageResponse{EstimatedTokens: 3200}
+	applyCatalogWindowIfMissing(t.Context(), nil, "user-1", report)
+	if report.MaxInputTokens == nil || *report.MaxInputTokens != 131072 {
+		t.Fatalf("MaxInputTokens = %v, want 131072", report.MaxInputTokens)
+	}
+}
+
 func TestApplyCatalogWindowIfMissingKeepsPythonBudget(t *testing.T) {
 	pythonBudget := int64(64000)
 	report := &ContextUsageResponse{
@@ -31,9 +39,9 @@ func TestApplyCatalogWindowIfMissingKeepsPythonBudget(t *testing.T) {
 
 func TestParseMaxInputTokens(t *testing.T) {
 	tests := map[string]int64{
-		"128K": 128000,
-		"200k": 200000,
-		"1M":   1000000,
+		"128K": 131072,
+		"200k": 204800,
+		"1M":   1048576,
 		"32":   32,
 	}
 	for input, expected := range tests {
@@ -84,12 +92,12 @@ func TestParseMaxInputTokens_EdgeCases(t *testing.T) {
 		input string
 		want  *int64
 	}{
-		{"0.5K", int64Ptr(500)},
-		{"1.5M", int64Ptr(1500000)},
-		{"1k", int64Ptr(1000)},
-		{"1m", int64Ptr(1000000)},
+		{"0.5K", int64Ptr(512)},
+		{"1.5M", int64Ptr(1572864)},
+		{"1k", int64Ptr(1024)},
+		{"1m", int64Ptr(1048576)},
 		{"2048", int64Ptr(2048)},
-		{" 128k ", int64Ptr(128000)},
+		{" 128k ", int64Ptr(131072)},
 		{"", nil},
 		{"nope", nil},
 		{"0", nil},

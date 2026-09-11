@@ -84,6 +84,7 @@ import {
   useChatThinkStore,
   type ThinkingDepth,
 } from "@/modules/chat/store/chatThink";
+import { CHAT_SUBMIT_INPUT_EVENT } from "@/modules/chat/constants/chat";
 import { useChatNewMessageStore } from "@/modules/chat/store/chatNewMessage";
 import { useTranslation } from "react-i18next";
 import { PromptServiceApi } from "@/modules/chat/utils/request";
@@ -1135,6 +1136,12 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       setText("");
       onClearCiteMessage?.();
     };
+
+    useEffect(() => {
+      const submit = () => handleSend();
+      window.addEventListener(CHAT_SUBMIT_INPUT_EVENT, submit);
+      return () => window.removeEventListener(CHAT_SUBMIT_INPUT_EVENT, submit);
+    }, [handleSend]);
 
     const handleSkillDeposit = () => {
       if (isSkillDepositDisabled) {

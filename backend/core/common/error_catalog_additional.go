@@ -739,6 +739,22 @@ func init() {
 	registerAdditionalErrorAlias("unsupported queued Anki operation", "Unsupported queued Anki operation", http.StatusBadRequest, 2002404)
 	registerAdditionalErrorPattern("AnkiConnect queue flush failed: %s", "AnkiConnect queue flush failed", http.StatusBadGateway, 2002405)
 	registerAdditionalErrorAlias("AnkiConnect queue flush failed", "AnkiConnect queue flush failed", http.StatusBadGateway, 2002405)
+	registerAdditionalError("update model failed", http.StatusInternalServerError, 2002626)
+	registerAdditionalError("max_input_tokens is required", http.StatusBadRequest, 2002627)
+	registerAdditionalError("catalog model max_input_tokens cannot be updated", http.StatusBadRequest, 2002628)
+	registerAdditionalError("decode api key failed", http.StatusInternalServerError, 2002629)
+	registerAdditionalError("group base_url host is not allowed", http.StatusBadRequest, 2002630)
+	registerAdditionalError("build remote models request failed", http.StatusInternalServerError, 2002631)
+	registerAdditionalError("list remote models failed", http.StatusBadGateway, 2002632)
+	registerAdditionalError("read context windows", http.StatusInternalServerError, 2002633)
+	registerAdditionalError("parse context windows", http.StatusInternalServerError, 2002634)
+	registerAdditionalError("context windows entry is missing a model type", http.StatusInternalServerError, 2002635)
+	registerAdditionalErrorPattern("context windows %s entry is missing a model name", "context windows entry is missing a model name", http.StatusInternalServerError, 2002636)
+	registerAdditionalErrorPattern("context windows %s %q", "invalid context windows entry", http.StatusInternalServerError, 2002637)
+	registerAdditionalErrorPattern("context windows has conflicting %s values for %q", "context windows has conflicting values", http.StatusInternalServerError, 2002638)
+	registerAdditionalError("invalid group base_url", http.StatusBadRequest, 2002639)
+	registerAdditionalError("group base_url must use http or https", http.StatusBadRequest, 2002640)
+	registerAdditionalError("group base_url must not include credentials", http.StatusBadRequest, 2002641)
 }
 
 func registerAdditionalError(message string, status, code int) {

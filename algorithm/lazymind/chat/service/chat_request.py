@@ -49,6 +49,9 @@ class ChatRuntimeOptions(BaseModel):
     skip_sensitive_filter: bool = False
     mail_draft_confirm_id: Optional[str] = None
     mail_draft_confirm_revision: Optional[int] = None
+    mail_draft_patch: Optional[Dict[str, Any]] = None
+    mail_mailbox_confirm: Optional[str] = None
+    mail_mailbox_confirm_draft_id: Optional[str] = None
 
 
 class ChatPersonalizationOptions(BaseModel):

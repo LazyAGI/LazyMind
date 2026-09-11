@@ -24,7 +24,7 @@ def parse_token_limit(value: Any) -> Optional[int]:
         return None
     amount = float(match.group(1))
     suffix = (match.group(2) or '').upper()
-    multiplier = {'K': 1_000, 'M': 1_000_000}.get(suffix, 1)
+    multiplier = {'K': 1024, 'M': 1024 * 1024}.get(suffix, 1)
     parsed = int(amount * multiplier)
     return parsed if parsed > 0 else None
 

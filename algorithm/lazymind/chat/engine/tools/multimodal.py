@@ -27,6 +27,63 @@ from lazymind.chat.engine.tools.infra.video_generation_support import (
     run_video_to_gif,
 )
 from lazymind.common.ffmpeg_deps import resolve_ffmpeg_binaries
+from lazymind.model_config import is_model_role_available
+
+
+_MEDIA_MODEL_DEPENDENCIES = {
+    'image_generator': {
+        'label': '文生图模型',
+        'settings_url': '/settings?section=models&target=image_generator',
+        'reason': '当前任务需要生成图片，但尚未配置可用的文生图模型。',
+    },
+    'image_editor': {
+        'label': '图片编辑模型',
+        'settings_url': '/settings?section=models&target=image_editor',
+        'reason': '当前任务需要编辑图片，但尚未配置可用的图片编辑模型。',
+    },
+    'video_generator': {
+        'label': '视频生成模型',
+        'settings_url': '/settings?section=models&target=video_generator',
+        'reason': '当前任务需要生成视频，但尚未配置可用的视频生成模型。',
+    },
+}
+
+
+def _missing_media_model_result(role: str) -> Optional[Dict[str, Any]]:
+    # This guard is authoritative only after Chat has injected the current
+    # request's model configuration. Direct library calls and focused unit
+    # tests have no request context and must remain usable independently.
+    dynamic_configs = lazyllm.globals['config'].get('dynamic_model_configs')
+    if dynamic_configs is None:
+        return None
+    if is_model_role_available(role):
+        return None
+    metadata = _MEDIA_MODEL_DEPENDENCIES[role]
+    missing = {
+        'id': role,
+        'label': metadata['label'],
+        'available': False,
+        'settings_url': metadata['settings_url'],
+        'reason': metadata['reason'],
+    }
+    payload = {
+        'status': 'blocked',
+        'workflow': 'DIRECT_CHAT',
+        'required': [role],
+        'missing': [missing],
+        'message': f"当前任务缺少：{metadata['label']}。",
+    }
+    marker = (
+        'MEDIA_CAPABILITY_DEPENDENCY_MISSING '
+        + json.dumps(payload, ensure_ascii=False, separators=(',', ':'))
+    )
+    return {
+        **payload,
+        '_agent_control': {
+            'stop': True,
+            'final_text': marker,
+        },
+    }
 
 
 def _coerce_url_list(urls: Optional[Union[str, List[str]]]) -> Optional[List[str]]:
@@ -134,6 +191,8 @@ def image_generator(
         Copy ``image_markdown`` verbatim when answering; never rewrite signed
         ``/static-files/`` paths or expose bare local filesystem paths.
     """
+    if missing := _missing_media_model_result('image_generator'):
+        return missing
     return run_image_model(
         'image_generator',
         prompt,
@@ -166,6 +225,8 @@ def image_editor(
         Same shape and rendering contract as ``image_generator``; copy
         ``image_markdown`` verbatim when it is present.
     """
+    if missing := _missing_media_model_result('image_editor'):
+        return missing
     source_files = _resolve_source_image_paths(urls)
     return run_image_model(
         'image_editor',
@@ -244,6 +305,8 @@ def video_generator(
         ``video_url`` if markdown is absent); do not invent or rewrite
         ``/static-files/`` paths.
     """
+    if missing := _missing_media_model_result('video_generator'):
+        return missing
     normalized_references = _coerce_url_list(reference_urls) or []
     normalized_legacy = _coerce_url_list(urls) or []
     has_first_frame = bool(str(first_frame_url or '').strip())

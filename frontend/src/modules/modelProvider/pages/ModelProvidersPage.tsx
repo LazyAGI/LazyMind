@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Button, Empty, Form, Input, Modal, Popconfirm, Select, Tag, Tooltip, message } from "antd";
+import { AutoComplete, Button, Empty, Form, Input, Modal, Popconfirm, Select, Tag, Tooltip, message } from "antd";
 import type { InputRef } from "antd";
 import { useTranslation } from "react-i18next";
 import { localizeErrorCode } from "@/components/request";
@@ -11,11 +11,18 @@ import {
   KeyOutlined,
   LoadingOutlined,
   PlusCircleOutlined,
+  RightOutlined,
   SearchOutlined,
   UpOutlined,
 } from "@ant-design/icons";
-import { modelProvidersApi, unwrapModelProviderData } from "../api";
+import { listRemoteGroupModels, modelProvidersApi, unwrapModelProviderData, updateGroupModelMaxInputTokens, type RemoteGroupModel } from "../api";
 import { getProviderLogoUrl } from "../providerBranding";
+import {
+  LLM_MAX_INPUT_TOKENS_MAX_LENGTH,
+  isLlmChatCapability,
+  parseLlmMaxInputTokens,
+  resolveLlmMaxInputTokens,
+} from "../maxInputTokens";
 import "../index.scss";
 
 export type ModelCapability =
@@ -37,6 +44,7 @@ interface ProviderModel {
   capability: ModelCapability;
   builtIn: boolean;
   enabled: boolean;
+  maxInputTokens?: string;
 }
 
 interface ProviderOption {
@@ -100,11 +108,22 @@ interface CustomModelModalState {
   group: ProviderConnectionGroup;
 }
 
+interface EditModelWindowModalState {
+  provider: AddedProvider;
+  group: ProviderConnectionGroup;
+  model: ProviderModel;
+}
+
+interface EditModelWindowFormValues {
+  maxInputTokens: string;
+}
+
 interface CustomModelFormValues {
   providerId: string;
   groupId: string;
   name: string;
   capability: ModelCapability;
+  maxInputTokens?: string;
 }
 
 const capabilityLabelKeys: Record<ModelCapability, string> = {
@@ -448,6 +467,7 @@ interface ApiModel {
   name: string;
   model_type?: string;
   is_default?: boolean;
+  max_input_tokens?: string;
 }
 
 function mapApiProvider(provider: ApiProvider, fallbacks: ModelProviderFallbacks): ProviderOption {
@@ -502,6 +522,7 @@ function mapApiGroup(
       capability: mapModelTypeToCapability(model.model_type),
       builtIn: Boolean(model.is_default),
       enabled: true,
+      maxInputTokens: model.max_input_tokens,
     })),
   });
 }
@@ -606,19 +627,28 @@ export function shouldRedirectCustomBaseUrlToOpenAI(
 
 interface ModelProviderPageProps {
   onConfigurationChanged?: () => void | Promise<void>;
+  highlightProviderId?: string;
 }
 
-export default function ModelProviderPage({ onConfigurationChanged }: ModelProviderPageProps) {
+export default function ModelProviderPage({
+  onConfigurationChanged,
+  highlightProviderId,
+}: ModelProviderPageProps) {
   const { t, i18n } = useTranslation();
   const currentLanguage = i18n.resolvedLanguage || i18n.language || "zh-CN";
   const [providerConfigForm] = Form.useForm<ProviderConfigFormValues>();
   const [customModelForm] = Form.useForm<CustomModelFormValues>();
+  const [editModelWindowForm] = Form.useForm<EditModelWindowFormValues>();
   const [verifyGroupForm] = Form.useForm<VerifyGroupFormValues>();
 
   const [providerOptions, setProviderOptions] = useState<ProviderOption[]>(builtInProviders);
   const [addedProviderList, setAddedProviderList] = useState<AddedProvider[]>([]);
   const [configModal, setConfigModal] = useState<ProviderConfigModalState | null>(null);
   const [customModelModal, setCustomModelModal] = useState<CustomModelModalState | null>(null);
+  const [editModelWindowModal, setEditModelWindowModal] = useState<EditModelWindowModalState | null>(null);
+  const [remoteModels, setRemoteModels] = useState<RemoteGroupModel[]>([]);
+  const [remoteModelsLoading, setRemoteModelsLoading] = useState(false);
+  const [contextWindowMode, setContextWindowMode] = useState<"auto" | "manual">("auto");
   const [verifyGroupModal, setVerifyGroupModal] = useState<VerifyGroupModalState | null>(null);
   const [expandedProviderIds, setExpandedProviderIds] = useState<Record<string, boolean>>({});
   const [keyword, setKeyword] = useState("");
@@ -629,12 +659,18 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
   const [expandedGroupIds, setExpandedGroupIds] = useState<Record<string, boolean>>({});
   const [loadingGroupModelIds, setLoadingGroupModelIds] = useState<Record<string, boolean>>({});
   const [sensenovaBaseUrlPreset, setSensenovaBaseUrlPreset] = useState<string>("");
+  const [contextWindowExpanded, setContextWindowExpanded] = useState(false);
   const watchedProviderBaseUrl = Form.useWatch("baseUrl", providerConfigForm);
   const watchedProviderApiKey = Form.useWatch("apiKey", providerConfigForm);
+  const watchedCustomCapability = Form.useWatch("capability", customModelForm);
   const providerApiKeyInputRef = useRef<InputRef>(null);
   const verifyApiKeyInputRef = useRef<InputRef>(null);
   const providerSearchRequestIdRef = useRef(0);
   const initialProvidersLoadedRef = useRef(false);
+  const addedProviderListRef = useRef<AddedProvider[]>([]);
+  addedProviderListRef.current = addedProviderList;
+  const highlightedProviderRef = useRef<HTMLElement | null>(null);
+  const focusedProviderHighlightRef = useRef<string | null>(null);
   const localizedFallbacks = useMemo(() => createModelProviderFallbacks(t), [i18n.language, t]);
   const getCapabilityLabel = useCallback((capability: ModelCapability) => t(capabilityLabelKeys[capability]), [t]);
   const configProvider = configModal?.provider || null;
@@ -685,7 +721,10 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
   );
 
   const loadModelProviders = useCallback(async () => {
-    setLoading(true);
+    const isFirstLoad = !initialProvidersLoadedRef.current;
+    if (isFirstLoad) {
+      setLoading(true);
+    }
     try {
       const providers = await fetchProviderOptions();
       setProviderOptions(providers);
@@ -693,6 +732,14 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
       const withGroupsResponse = await modelProvidersApi.apiCoreModelProvidersWithGroupsGet();
       const withGroupsData = unwrapModelProviderData<{ providers?: ApiProvider[] }>(withGroupsResponse.data);
       const addedIds = new Set((withGroupsData.providers || []).map((provider) => provider.id));
+      const previousModelsByGroupId = new Map<string, ProviderModel[]>();
+      for (const item of addedProviderListRef.current) {
+        for (const group of item.groups) {
+          if (group.models.length) {
+            previousModelsByGroupId.set(group.id, group.models);
+          }
+        }
+      }
       const addedProviders = await Promise.all(
         providers
           .filter((provider) => addedIds.has(provider.id))
@@ -701,7 +748,9 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
               modelProviderId: provider.id,
             });
             const groupData = unwrapModelProviderData<{ groups?: ApiGroup[] }>(groupResponse.data);
-            const groups = (groupData.groups || []).map((group) => mapApiGroup(provider, group, []));
+            const groups = (groupData.groups || []).map((group) =>
+              mapApiGroup(provider, group, previousModelsByGroupId.get(group.id) || [])
+            );
             return { ...provider, groups };
           })
       );
@@ -712,11 +761,21 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
       initialProvidersLoadedRef.current = true;
       setLoading(false);
     }
-  }, [currentLanguage, fetchProviderOptions, t]);
+  }, [fetchProviderOptions]);
 
   useEffect(() => {
     void loadModelProviders();
-  }, [loadModelProviders]);
+    // Group models are fetched on expand. Re-running this on i18n identity
+    // changes (tab blur/focus) used to wipe them and show an empty list.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!initialProvidersLoadedRef.current) {
+      return;
+    }
+    void fetchProviderOptions().then(setProviderOptions);
+  }, [currentLanguage, fetchProviderOptions]);
 
   useEffect(() => {
     if (!initialProvidersLoadedRef.current) {
@@ -742,6 +801,48 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
     ),
     [addedProviderList, t]
   );
+
+  useEffect(() => {
+    if (!highlightProviderId) {
+      return;
+    }
+
+    const targetSectionKeys = addedProviderSections
+      .filter(({ provider }) => provider.id === highlightProviderId)
+      .map(({ key }) => key);
+    if (targetSectionKeys.length === 0) {
+      return;
+    }
+
+    setExpandedProviderIds((current) => {
+      if (targetSectionKeys.every((key) => current[key])) {
+        return current;
+      }
+      return targetSectionKeys.reduce<Record<string, boolean>>(
+        (next, key) => ({ ...next, [key]: true }),
+        current
+      );
+    });
+  }, [addedProviderSections, highlightProviderId]);
+
+  useEffect(() => {
+    if (
+      !highlightProviderId ||
+      !highlightedProviderRef.current ||
+      focusedProviderHighlightRef.current === highlightProviderId
+    ) {
+      return;
+    }
+    focusedProviderHighlightRef.current = highlightProviderId;
+    const frame = window.requestAnimationFrame(() => {
+      highlightedProviderRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+      highlightedProviderRef.current?.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [addedProviderSections, highlightProviderId]);
 
   const visibleProviders = [...providerOptions].sort((a, b) => b.name.localeCompare(a.name));
 
@@ -1188,19 +1289,130 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
     }));
   };
 
+  const toggleContextWindow = () => {
+    setContextWindowExpanded((current) => !current);
+  };
+
+  const markContextWindowManual = () => {
+    setContextWindowMode("manual");
+  };
+
+  const loadRemoteModelNames = async () => {
+    const provider = customModelModal?.provider;
+    const group = customModelModal?.group;
+    if (!provider || !group || remoteModelsLoading) {
+      return;
+    }
+    setRemoteModelsLoading(true);
+    try {
+      const data = await listRemoteGroupModels(provider.id, group.id);
+      setRemoteModels(data.models || []);
+    } catch {
+      setRemoteModels([]);
+      message.error(t("modelProvider.error.loadRemoteModelsFailed"));
+    } finally {
+      setRemoteModelsLoading(false);
+    }
+  };
+
+  const appendGroupModel = (providerId: string, groupId: string, nextModel: ProviderModel) => {
+    setAddedProviderList((current) =>
+      current.map((item) =>
+        item.id === providerId
+          ? {
+              ...item,
+              groups: item.groups.map((candidate) =>
+                candidate.id === groupId
+                  ? { ...candidate, models: [...candidate.models, nextModel] }
+                  : candidate
+              ),
+            }
+          : item
+      )
+    );
+  };
+
   const openCustomModelModal = (provider: AddedProvider, group: ProviderConnectionGroup) => {
+    setContextWindowExpanded(false);
+    setContextWindowMode("auto");
+    setRemoteModels([]);
     setCustomModelModal({ provider, group });
     customModelForm.setFieldsValue({
       providerId: provider.id,
       groupId: group.id,
       capability: provider.capabilities[0] || "LLM_CHAT",
       name: "",
+      maxInputTokens: undefined,
     });
   };
 
   const closeCustomModelModal = () => {
+    setContextWindowExpanded(false);
+    setContextWindowMode("auto");
+    setRemoteModels([]);
     setCustomModelModal(null);
     customModelForm.resetFields();
+  };
+
+  const openEditModelWindowModal = (provider: AddedProvider, group: ProviderConnectionGroup, model: ProviderModel) => {
+    setEditModelWindowModal({ provider, group, model });
+    editModelWindowForm.setFieldsValue({
+      maxInputTokens: resolveLlmMaxInputTokens(model.maxInputTokens),
+    });
+  };
+
+  const closeEditModelWindowModal = () => {
+    setEditModelWindowModal(null);
+    editModelWindowForm.resetFields();
+  };
+
+  const saveEditModelWindow = async (values: EditModelWindowFormValues) => {
+    const target = editModelWindowModal;
+    if (!target) {
+      return;
+    }
+    const maxInputTokens = parseLlmMaxInputTokens(values.maxInputTokens);
+    if (!maxInputTokens) {
+      editModelWindowForm.setFields([{
+        name: "maxInputTokens",
+        errors: [t("modelProvider.validation.maxInputTokensInvalid")],
+      }]);
+      return;
+    }
+    try {
+      const updated = await updateGroupModelMaxInputTokens(
+        target.provider.id,
+        target.group.id,
+        target.model.id,
+        maxInputTokens,
+      );
+      setAddedProviderList((current) =>
+        current.map((provider) =>
+          provider.id === target.provider.id
+            ? {
+                ...provider,
+                groups: provider.groups.map((group) =>
+                  group.id === target.group.id
+                    ? {
+                        ...group,
+                        models: group.models.map((model) =>
+                          model.id === target.model.id
+                            ? { ...model, maxInputTokens: updated.max_input_tokens || maxInputTokens }
+                            : model
+                        ),
+                      }
+                    : group
+                ),
+              }
+            : provider
+        )
+      );
+      message.success(t("modelProvider.message.modelWindowUpdated"));
+      void onConfigurationChanged?.();
+      closeEditModelWindowModal();
+    } catch {
+      message.error(t("modelProvider.error.updateModelFailed"));
+    }
   };
 
   const addCustomModel = async (values: CustomModelFormValues) => {
@@ -1219,12 +1431,24 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
     }
 
     try {
+      let maxInputTokens: string | undefined;
+      if (isLlmChatCapability(values.capability) && contextWindowMode === "manual") {
+        maxInputTokens = parseLlmMaxInputTokens(values.maxInputTokens);
+        if (!maxInputTokens) {
+          customModelForm.setFields([{
+            name: "maxInputTokens",
+            errors: [t("modelProvider.validation.maxInputTokensInvalid")],
+          }]);
+          return;
+        }
+      }
       const createdModel = unwrapModelProviderData<ApiModel>((await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsPost({
         modelProviderId: provider.id,
         groupId: group.id,
         addModelProviderGroupModelOpenAPIRequest: {
           name: values.name.trim(),
           model_type: getModelTypeForCapability(values.capability),
+          ...(maxInputTokens ? { max_input_tokens: maxInputTokens } : {}),
         },
       })).data);
       const nextModel: ProviderModel = {
@@ -1235,24 +1459,9 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
         ),
         builtIn: Boolean(createdModel.is_default),
         enabled: true,
+        maxInputTokens: createdModel.max_input_tokens || maxInputTokens,
       };
-      setAddedProviderList((current) =>
-        current.map((item) =>
-          item.id === provider.id
-            ? {
-                ...item,
-                groups: item.groups.map((candidate) =>
-                  candidate.id === group.id
-                    ? {
-                        ...candidate,
-                        models: [...candidate.models, nextModel],
-                      }
-                    : candidate
-                ),
-              }
-            : item
-        )
-      );
+      appendGroupModel(provider.id, group.id, nextModel);
       message.success(t("modelProvider.message.modelAdded"));
       void onConfigurationChanged?.();
       closeCustomModelModal();
@@ -1309,8 +1518,10 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
 
                   return (
                     <article
-                      className={`model-provider-added-card${isExpanded ? " is-expanded" : ""}`}
+                      ref={provider.id === highlightProviderId ? highlightedProviderRef : undefined}
+                      className={`model-provider-added-card${isExpanded ? " is-expanded" : ""}${provider.id === highlightProviderId ? " is-config-highlighted" : ""}`}
                       key={section.key}
+                      tabIndex={provider.id === highlightProviderId ? -1 : undefined}
                     >
                       <div className="model-provider-added-summary">
                         <div className="model-provider-added-brand">
@@ -1389,8 +1600,8 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
                                         {expandedGroupIds[`${provider.id}:${group.id}`] ? t("modelProvider.collapseModels") : t("modelProvider.expandModels")}
                                         {expandedGroupIds[`${provider.id}:${group.id}`] ? <UpOutlined /> : <DownOutlined />}
                                       </Button>
-                                      <Button icon={<PlusCircleOutlined />} onClick={() => openCustomModelModal(provider, group)}>
-                                        {t("modelProvider.addModel")}
+                                      <Button onClick={() => openCustomModelModal(provider, group)}>
+                                        {t("modelProvider.customModel")}
                                       </Button>
                                       <Button icon={<EditOutlined />} onClick={() => openProviderConfig(provider, group)}>
                                         {t("common.edit")}
@@ -1425,22 +1636,38 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
                                               <strong>{model.name}</strong>
                                               <CapabilityTag label={getCapabilityLabel(model.capability)} />
                                               {model.builtIn ? null : <Tag className="model-provider-custom-tag">{t("modelProvider.custom")}</Tag>}
+                                              {isLlmChatCapability(model.capability) ? (
+                                                <span className="model-provider-model-max-input-tokens">
+                                                  {t("modelProvider.maxInputTokens", {
+                                                    value: resolveLlmMaxInputTokens(model.maxInputTokens),
+                                                  })}
+                                                </span>
+                                              ) : null}
                                             </div>
 
                                             <div className="model-provider-model-actions">
                                               {model.builtIn ? (
                                                 <span>{t("modelProvider.cannotDelete")}</span>
                                               ) : (
-                                                <Popconfirm
-                                                  cancelText={t("common.cancel")}
-                                                  okButtonProps={{ danger: true }}
-                                                  okText={t("common.delete")}
-                                                  title={t("modelProvider.confirmDeleteModel", { name: model.name })}
-                                                  description={t("modelProvider.confirmDeleteModelDesc")}
-                                                  onConfirm={() => deleteCustomModel(provider.id, group.id, model)}
-                                                >
-                                                  <Button aria-label={t("modelProvider.deleteModelAria", { name: model.name })} icon={<DeleteOutlined />} />
-                                                </Popconfirm>
+                                                <>
+                                                  {isLlmChatCapability(model.capability) ? (
+                                                    <Button
+                                                      aria-label={t("modelProvider.editModelWindowAria", { name: model.name })}
+                                                      icon={<EditOutlined />}
+                                                      onClick={() => openEditModelWindowModal(provider, group, model)}
+                                                    />
+                                                  ) : null}
+                                                  <Popconfirm
+                                                    cancelText={t("common.cancel")}
+                                                    okButtonProps={{ danger: true }}
+                                                    okText={t("common.delete")}
+                                                    title={t("modelProvider.confirmDeleteModel", { name: model.name })}
+                                                    description={t("modelProvider.confirmDeleteModelDesc")}
+                                                    onConfirm={() => deleteCustomModel(provider.id, group.id, model)}
+                                                  >
+                                                    <Button aria-label={t("modelProvider.deleteModelAria", { name: model.name })} icon={<DeleteOutlined />} />
+                                                  </Popconfirm>
+                                                </>
                                               )}
                                             </div>
                                           </div>
@@ -1723,6 +1950,46 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
       <Modal
         centered
         destroyOnHidden
+        okText={t("common.save")}
+        open={!!editModelWindowModal}
+        title={t("modelProvider.editModelWindowTitle", { name: editModelWindowModal?.model.name || "" })}
+        width={420}
+        onCancel={closeEditModelWindowModal}
+        onOk={() => editModelWindowForm.submit()}
+      >
+        <Form<EditModelWindowFormValues>
+          autoComplete="off"
+          className="model-provider-form"
+          form={editModelWindowForm}
+          layout="vertical"
+          onFinish={saveEditModelWindow}
+        >
+          <Form.Item
+            label={t("modelProvider.maxInputTokensLabel")}
+            name="maxInputTokens"
+            normalize={(value: string | undefined) => value?.trim()}
+            rules={[
+              { required: true, message: t("modelProvider.validation.maxInputTokensRequired") },
+              {
+                validator: (_, value?: string) =>
+                  parseLlmMaxInputTokens(value)
+                    ? Promise.resolve()
+                    : Promise.reject(new Error(t("modelProvider.validation.maxInputTokensInvalid"))),
+              },
+            ]}
+          >
+            <Input
+              autoComplete="off"
+              maxLength={LLM_MAX_INPUT_TOKENS_MAX_LENGTH}
+              placeholder={t("modelProvider.maxInputTokensPlaceholder")}
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        centered
+        destroyOnHidden
         okText={t("modelProvider.add")}
         open={!!customModelModal}
         title={t("modelProvider.addCustomModelTitle", { name: customModelModal?.group.name || "" })}
@@ -1731,6 +1998,7 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
         onOk={() => customModelForm.submit()}
       >
         <Form<CustomModelFormValues>
+          autoComplete="off"
           className="model-provider-form"
           form={customModelForm}
           layout="vertical"
@@ -1762,11 +2030,43 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
               { max: 120, message: t("modelProvider.validation.modelNameMax") },
             ]}
           >
-            <Input maxLength={120} placeholder={t("modelProvider.modelNamePlaceholder")} />
+            <AutoComplete
+              allowClear
+              options={remoteModels.map((item) => ({ value: item.name }))}
+              filterOption={(input, option) =>
+                String(option?.value || "").toLowerCase().includes(input.trim().toLowerCase())
+              }
+            >
+              <Input
+                autoComplete="off"
+                autoCorrect="off"
+                maxLength={120}
+                placeholder={t("modelProvider.modelNamePlaceholder")}
+                spellCheck={false}
+                addonAfter={(
+                  <Button
+                    aria-label={t("modelProvider.fetchAvailableModels")}
+                    loading={remoteModelsLoading}
+                    size="small"
+                    type="text"
+                    icon={<SearchOutlined />}
+                    onClick={() => void loadRemoteModelNames()}
+                  />
+                )}
+              />
+            </AutoComplete>
           </Form.Item>
 
           <Form.Item label={t("modelProvider.modelType")} name="capability" rules={[{ required: true, message: t("modelProvider.validation.modelTypeRequired") }]}>
-            <Select>
+            <Select
+              onChange={(value) => {
+                if (!isLlmChatCapability(value)) {
+                  setContextWindowExpanded(false);
+                  setContextWindowMode("auto");
+                  customModelForm.setFieldValue("maxInputTokens", undefined);
+                }
+              }}
+            >
               {customModelModal?.provider.capabilities.map((capability) => (
                 <Select.Option key={capability} value={capability}>
                   {getCapabilityLabel(capability)}
@@ -1774,6 +2074,43 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
               ))}
             </Select>
           </Form.Item>
+
+          {isLlmChatCapability(watchedCustomCapability) ? (
+            <div className="model-provider-context-window">
+              <button
+                aria-expanded={contextWindowExpanded}
+                aria-label={contextWindowExpanded ? t("modelProvider.maxInputTokensCollapse") : t("modelProvider.maxInputTokensExpand")}
+                className="model-provider-context-window-toggle"
+                type="button"
+                onClick={toggleContextWindow}
+              >
+                <span>{t("modelProvider.maxInputTokensLabel")}</span>
+                <RightOutlined className={contextWindowExpanded ? "is-expanded" : undefined} />
+              </button>
+              <Form.Item
+                hidden={!contextWindowExpanded}
+                name="maxInputTokens"
+                normalize={(value: string | undefined) => value?.trim()}
+                rules={contextWindowMode === "manual" ? [
+                  { required: true, message: t("modelProvider.validation.maxInputTokensRequired") },
+                  {
+                    validator: (_, value?: string) =>
+                      parseLlmMaxInputTokens(value)
+                        ? Promise.resolve()
+                        : Promise.reject(new Error(t("modelProvider.validation.maxInputTokensInvalid"))),
+                  },
+                ] : []}
+              >
+                <Input
+                  autoComplete="off"
+                  className="model-provider-context-window-input"
+                  maxLength={LLM_MAX_INPUT_TOKENS_MAX_LENGTH}
+                  placeholder={t("modelProvider.maxInputTokensAutoPlaceholder")}
+                  onChange={markContextWindowManual}
+                />
+              </Form.Item>
+            </div>
+          ) : null}
         </Form>
       </Modal>
     </div>

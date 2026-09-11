@@ -59,6 +59,9 @@ func TestBuildLLMConfigNormalizesOnlyOpenAIBaseURLForLazyLLM(t *testing.T) {
 	if llm["base_url"] != "http://127.0.0.1:8000/v1/" {
 		t.Fatalf("OpenAI base_url = %q", llm["base_url"])
 	}
+	if llm["max_input_tokens"] != modelprovider.DefaultLLMMaxInputTokens {
+		t.Fatalf("llm max_input_tokens = %#v, want %s", llm["max_input_tokens"], modelprovider.DefaultLLMMaxInputTokens)
+	}
 	vlm := config["vlm"].(map[string]any)
 	if vlm["source"] != "qwen" {
 		t.Fatalf("proxied Qwen source = %q", vlm["source"])
