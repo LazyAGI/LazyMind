@@ -2,9 +2,11 @@ import {
   Configuration,
   DefaultApiFactory,
   ModelProvidersApiFactory,
+  type LookupContextWindowOpenAPIResponse,
 } from "@/api/generated/core-client";
 import { BASE_URL, axiosInstance } from "@/components/request";
 import type { RawAxiosRequestConfig } from "axios";
+import { DEFAULT_LLM_MAX_INPUT_TOKENS } from "./maxInputTokens";
 
 interface ApiEnvelope<T> {
   data?: T;
@@ -43,19 +45,12 @@ export function unwrapModelProviderData<T>(payload: unknown): T {
   return payload as T;
 }
 
-export function patchGroupModelMaxInputTokens(params: {
-  modelProviderId: string;
-  groupId: string;
-  modelId: string;
-  maxInputTokens: string;
-}) {
-  return axiosInstance.patch(
-    `${BASE_URL}/api/core/model_providers/${params.modelProviderId}/groups/${params.groupId}/models/${params.modelId}`,
-    { max_input_tokens: params.maxInputTokens },
-    {
-      headers: {
-        "Content-Type": "application/json",
-      },
-    },
-  );
+export async function lookupModelContextWindow(name: string): Promise<string> {
+  const trimmed = name.trim();
+  if (!trimmed) {
+    return DEFAULT_LLM_MAX_INPUT_TOKENS;
+  }
+  const response = await modelProvidersApi.apiCoreModelProvidersContextWindowsGet({ name: trimmed });
+  const data = unwrapModelProviderData<LookupContextWindowOpenAPIResponse>(response.data);
+  return data.max_input_tokens || DEFAULT_LLM_MAX_INPUT_TOKENS;
 }

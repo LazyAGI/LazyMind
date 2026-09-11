@@ -340,27 +340,27 @@ model_providers:
           free_auto_select_priority: 1
         - name: GLM-4.7
           type: llm
-          max_input_tokens: "198K"
+          max_input_tokens: "200K"
         - name: GLM-4.7-Flash
           type: llm
-          max_input_tokens: "198K"
+          max_input_tokens: "200K"
           free_auto_select_priority: 1
         - name: GLM-4.7-FlashX
           type: llm
-          max_input_tokens: "198K"
+          max_input_tokens: "200K"
         - name: GLM-4V-Flash
           type: vlm
           max_input_tokens: "16K"
           free_auto_select_priority: 3
         - name: GLM-5
           type: llm
-          max_input_tokens: "198K"
+          max_input_tokens: "200K"
         - name: GLM-5-Turbo
           type: llm
-          max_input_tokens: "198K"
+          max_input_tokens: "200K"
         - name: GLM-5.1
           type: llm
-          max_input_tokens: "198K"
+          max_input_tokens: "200K"
         - name: GLM-5V-Turbo
           type: vlm
           max_input_tokens: "200K"
@@ -480,16 +480,16 @@ model_providers:
           max_input_tokens: "64K"
         - name: MiniMax-M2.5
           type: llm
-          max_input_tokens: "192K"
+          max_input_tokens: "204800"
         - name: MiniMax-M2.5-highspeed
           type: llm
-          max_input_tokens: "192K"
+          max_input_tokens: "204800"
         - name: MiniMax-M2.7
           type: llm
-          max_input_tokens: "192K"
+          max_input_tokens: "204800"
         - name: MiniMax-M2.7-highspeed
           type: llm
-          max_input_tokens: "192K"
+          max_input_tokens: "204800"
         - name: Speech-02-HD
           type: tts
         - name: Speech-02-Turbo
@@ -573,7 +573,7 @@ model_providers:
           max_input_tokens: "400K"
         - name: gpt-5.4
           type: vlm
-          max_input_tokens: "1M"
+          max_input_tokens: "1050000"
         - name: gpt-5.4-mini
           type: vlm
           max_input_tokens: "400K"
@@ -582,13 +582,13 @@ model_providers:
           max_input_tokens: "400K"
         - name: gpt-5.4-pro
           type: vlm
-          max_input_tokens: "1M"
+          max_input_tokens: "1050000"
         - name: gpt-5.5
           type: vlm
-          max_input_tokens: "1M"
+          max_input_tokens: "1050000"
         - name: gpt-5.5-pro
           type: vlm
-          max_input_tokens: "1M"
+          max_input_tokens: "1050000"
         - name: gpt-image-1.5
           type: image_editing
         - name: gpt-image-2
@@ -1262,16 +1262,16 @@ model_providers:
           max_input_tokens: "256K"
         - name: Pro/zai-org/GLM-5.1
           type: llm
-          max_input_tokens: "198K"
+          max_input_tokens: "200K"
         - name: MiniMaxAI/MiniMax-M2.5
           type: llm
-          max_input_tokens: "192K"
+          max_input_tokens: "204800"
         - name: Pro/MiniMaxAI/MiniMax-M2.5
           type: llm
-          max_input_tokens: "192K"
+          max_input_tokens: "204800"
         - name: Pro/zai-org/GLM-5
           type: llm
-          max_input_tokens: "198K"
+          max_input_tokens: "200K"
         - name: Pro/deepseek-ai/DeepSeek-V3.2
           type: llm
           max_input_tokens: "128K"
@@ -1280,7 +1280,7 @@ model_providers:
           max_input_tokens: "256K"
         - name: Pro/zai-org/GLM-4.7
           type: llm
-          max_input_tokens: "198K"
+          max_input_tokens: "200K"
         - name: deepseek-ai/DeepSeek-V3.2
           type: llm
           max_input_tokens: "128K"
@@ -1298,16 +1298,16 @@ model_providers:
           max_input_tokens: "256K"
         - name: Qwen/Qwen3.5-397B-A17B
           type: vlm
-          max_input_tokens: "32K"
+          max_input_tokens: "262144"
         - name: Qwen/Qwen3.5-122B-A10B
           type: vlm
-          max_input_tokens: "32K"
+          max_input_tokens: "262144"
         - name: Qwen/Qwen3.5-35B-A3B
           type: vlm
-          max_input_tokens: "32K"
+          max_input_tokens: "262144"
         - name: Qwen/Qwen3.5-27B
           type: vlm
-          max_input_tokens: "32K"
+          max_input_tokens: "262144"
         - name: Qwen/Qwen3.5-9B
           type: vlm
           max_input_tokens: "32K"

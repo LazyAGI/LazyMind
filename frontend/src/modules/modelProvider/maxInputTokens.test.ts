@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseLlmMaxInputTokens, resolveLlmMaxInputTokens } from "./maxInputTokens";
+import { isDefaultLlmMaxInputTokens, parseLlmMaxInputTokens, resolveLlmMaxInputTokens } from "./maxInputTokens";
 
 describe("llm max input tokens", () => {
   it("defaults missing catalog values to 128K", () => {
@@ -11,6 +11,11 @@ describe("llm max input tokens", () => {
     expect(parseLlmMaxInputTokens("200k")).toBe("200K");
     expect(parseLlmMaxInputTokens("1m")).toBe("1M");
     expect(parseLlmMaxInputTokens("512")).toBe("512");
+  });
+
+  it("treats 128K as the unresolved default", () => {
+    expect(isDefaultLlmMaxInputTokens("128k")).toBe(true);
+    expect(isDefaultLlmMaxInputTokens("1M")).toBe(false);
   });
 
   it("rejects invalid values", () => {

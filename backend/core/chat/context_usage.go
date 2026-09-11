@@ -149,9 +149,9 @@ func parseMaxInputTokens(raw string) *int64 {
 	}
 	multiplier := float64(1)
 	if strings.HasSuffix(value, "K") {
-		multiplier, value = 1000, strings.TrimSuffix(value, "K")
+		multiplier, value = 1024, strings.TrimSuffix(value, "K")
 	} else if strings.HasSuffix(value, "M") {
-		multiplier, value = 1000000, strings.TrimSuffix(value, "M")
+		multiplier, value = 1024 * 1024, strings.TrimSuffix(value, "M")
 	}
 	number, err := strconv.ParseFloat(value, 64)
 	if err != nil || number <= 0 {

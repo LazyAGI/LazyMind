@@ -90,7 +90,94 @@ func TestAddGroupModelDefaultsLLMMaxInputTokens(t *testing.T) {
 	}
 }
 
-func TestAddGroupModelRejectsMaxInputTokensForEmbed(t *testing.T) {
+func TestAddGroupModelPrefersRequestMaxInputTokensOverContextWindows(t *testing.T) {
+	seedGroupModelFixture(t)
+	if err := LoadContextWindows("../config/model_context_windows.yaml"); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/model_providers/provider-openai/groups/group-openai/models", strings.NewReader(`{"name":"qwen-plus","model_type":"llm","max_input_tokens":"8K"}`))
+	req.Header.Set("X-User-Id", "user-1")
+	req = mux.SetURLVars(req, map[string]string{
+		"model_provider_id": "provider-openai",
+		"group_id":          "group-openai",
+	})
+	rec := httptest.NewRecorder()
+	AddGroupModel(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var payload struct {
+		Data addGroupModelResponse `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Data.MaxInputTokens == nil || *payload.Data.MaxInputTokens != "8K" {
+		t.Fatalf("max_input_tokens = %v, want 8K from request", payload.Data.MaxInputTokens)
+	}
+}
+
+func TestAddGroupModelLooksUpContextWindowsWhenBodyIsDefaultSentinel(t *testing.T) {
+	seedGroupModelFixture(t)
+	if err := LoadContextWindows("../config/model_context_windows.yaml"); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/model_providers/provider-openai/groups/group-openai/models", strings.NewReader(`{"name":"qwen-plus","model_type":"llm","max_input_tokens":"128K"}`))
+	req.Header.Set("X-User-Id", "user-1")
+	req = mux.SetURLVars(req, map[string]string{
+		"model_provider_id": "provider-openai",
+		"group_id":          "group-openai",
+	})
+	rec := httptest.NewRecorder()
+	AddGroupModel(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var payload struct {
+		Data addGroupModelResponse `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Data.MaxInputTokens == nil || *payload.Data.MaxInputTokens != "1M" {
+		t.Fatalf("max_input_tokens = %v, want 1M from context windows", payload.Data.MaxInputTokens)
+	}
+}
+
+func TestAddGroupModelLooksUpContextWindowsWhenBodyOmitsTokens(t *testing.T) {
+	seedGroupModelFixture(t)
+	if err := LoadContextWindows("../config/model_context_windows.yaml"); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/model_providers/provider-openai/groups/group-openai/models", strings.NewReader(`{"name":"qwen-plus","model_type":"llm"}`))
+	req.Header.Set("X-User-Id", "user-1")
+	req = mux.SetURLVars(req, map[string]string{
+		"model_provider_id": "provider-openai",
+		"group_id":          "group-openai",
+	})
+	rec := httptest.NewRecorder()
+	AddGroupModel(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var payload struct {
+		Data addGroupModelResponse `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Data.MaxInputTokens == nil || *payload.Data.MaxInputTokens != "1M" {
+		t.Fatalf("max_input_tokens = %v, want 1M from context windows", payload.Data.MaxInputTokens)
+	}
+}
+
+func TestAddGroupModelIgnoresMaxInputTokensForEmbed(t *testing.T) {
 	seedGroupModelFixture(t)
 
 	req := httptest.NewRequest(http.MethodPost, "/model_providers/provider-openai/groups/group-openai/models", strings.NewReader(`{"name":"custom-embed","model_type":"embed","max_input_tokens":"8K"}`))
@@ -101,8 +188,18 @@ func TestAddGroupModelRejectsMaxInputTokensForEmbed(t *testing.T) {
 	})
 	rec := httptest.NewRecorder()
 	AddGroupModel(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var payload struct {
+		Data addGroupModelResponse `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Data.MaxInputTokens != nil {
+		t.Fatalf("embed max_input_tokens = %v, want nil", payload.Data.MaxInputTokens)
 	}
 }
 

@@ -5113,6 +5113,9 @@ components:
             type: object
         addModelProviderGroupModelOpenAPIRequest:
             properties:
+                max_input_tokens:
+                    description: Optional override. When omitted, LLM/VLM windows are resolved from config/model_context_windows.yaml by model name and unknown names fall back to 128K.
+                    type: string
                 model_type:
                     type: string
                 name:
@@ -5131,6 +5134,9 @@ components:
                     type: string
                 is_default:
                     type: boolean
+                max_input_tokens:
+                    description: Stored LLM input context window, for example 512, 128K, or 1M
+                    type: string
                 model_type:
                     type: string
                 name:
@@ -5151,6 +5157,20 @@ components:
                 - provider_name
                 - user_model_provider_group_id
                 - user_model_provider_id
+            type: object
+        lookupContextWindowOpenAPIResponse:
+            properties:
+                matched:
+                    description: True when the name was found in config/model_context_windows.yaml
+                    type: boolean
+                max_input_tokens:
+                    type: string
+                name:
+                    type: string
+            required:
+                - matched
+                - max_input_tokens
+                - name
             type: object
         agentRouterABAudit:
             properties:
@@ -14147,7 +14167,7 @@ paths:
             tags:
                 - model_providers
         post:
-            description: Creates a user_model_provider_group_models row with is_default false (custom model name and model_type). Name must be unique within the group among active rows. provider_name and base_url are taken from the user provider and group. Response group_name is user_model_provider_groups.name (not stored on the model row).
+            description: Creates a user_model_provider_group_models row with is_default false (custom model name and model_type). Name must be unique within the group among active rows. For llm and vlm, max_input_tokens from the request is stored when provided; otherwise it is resolved from config/model_context_windows.yaml by model name and unknown names fall back to 128K. provider_name and base_url are taken from the user provider and group. Response group_name is user_model_provider_groups.name (not stored on the model row).
             parameters:
                 - in: path
                   name: model_provider_id
@@ -14245,6 +14265,25 @@ paths:
                                 $ref: '#/components/schemas/ModelFeaturesResponse'
                     description: Feature flags
             summary: Get model feature flags
+            tags:
+                - model_providers
+    /api/core/model_providers/context_windows:
+        get:
+            description: Resolves max_input_tokens from config/model_context_windows.yaml by model name. Unknown names return 128K with matched=false.
+            parameters:
+                - in: query
+                  name: name
+                  required: false
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/lookupContextWindowOpenAPIResponse'
+                    description: Context window lookup
+            summary: Look up a common model context window
             tags:
                 - model_providers
     /api/core/model_providers/models:

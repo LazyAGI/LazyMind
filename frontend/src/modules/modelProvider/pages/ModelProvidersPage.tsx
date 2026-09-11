@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button, Empty, Form, Input, Modal, Popconfirm, Select, Tag, Tooltip, message } from "antd";
 import type { InputRef } from "antd";
 import { useTranslation } from "react-i18next";
-import { getLocalizedErrorMessage, localizeErrorCode } from "@/components/request";
+import { localizeErrorCode } from "@/components/request";
 import {
   CheckCircleFilled,
   DeleteOutlined,
@@ -11,14 +11,16 @@ import {
   KeyOutlined,
   LoadingOutlined,
   PlusCircleOutlined,
+  RightOutlined,
   SearchOutlined,
   UpOutlined,
 } from "@ant-design/icons";
-import { modelProvidersApi, patchGroupModelMaxInputTokens, unwrapModelProviderData } from "../api";
+import { lookupModelContextWindow, modelProvidersApi, unwrapModelProviderData } from "../api";
 import { getProviderLogoUrl } from "../providerBranding";
 import {
   DEFAULT_LLM_MAX_INPUT_TOKENS,
   LLM_MAX_INPUT_TOKENS_MAX_LENGTH,
+  isDefaultLlmMaxInputTokens,
   isLlmChatCapability,
   parseLlmMaxInputTokens,
   resolveLlmMaxInputTokens,
@@ -628,7 +630,6 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
 
   const [providerOptions, setProviderOptions] = useState<ProviderOption[]>(builtInProviders);
   const [addedProviderList, setAddedProviderList] = useState<AddedProvider[]>([]);
-  const [draftMaxInputTokens, setDraftMaxInputTokens] = useState<Record<string, string>>({});
   const [configModal, setConfigModal] = useState<ProviderConfigModalState | null>(null);
   const [customModelModal, setCustomModelModal] = useState<CustomModelModalState | null>(null);
   const [verifyGroupModal, setVerifyGroupModal] = useState<VerifyGroupModalState | null>(null);
@@ -641,6 +642,8 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
   const [expandedGroupIds, setExpandedGroupIds] = useState<Record<string, boolean>>({});
   const [loadingGroupModelIds, setLoadingGroupModelIds] = useState<Record<string, boolean>>({});
   const [sensenovaBaseUrlPreset, setSensenovaBaseUrlPreset] = useState<string>("");
+  const [contextWindowExpanded, setContextWindowExpanded] = useState(false);
+  const [contextWindowLookingUp, setContextWindowLookingUp] = useState(false);
   const watchedProviderBaseUrl = Form.useWatch("baseUrl", providerConfigForm);
   const watchedProviderApiKey = Form.useWatch("apiKey", providerConfigForm);
   const watchedCustomCapability = Form.useWatch("capability", customModelForm);
@@ -1201,7 +1204,30 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
     }));
   };
 
+  const fillContextWindowFromName = async (name: string) => {
+    setContextWindowLookingUp(true);
+    try {
+      const tokens = await lookupModelContextWindow(name);
+      customModelForm.setFieldValue("maxInputTokens", tokens);
+    } catch {
+      customModelForm.setFieldValue("maxInputTokens", DEFAULT_LLM_MAX_INPUT_TOKENS);
+    } finally {
+      setContextWindowLookingUp(false);
+    }
+  };
+
+  const toggleContextWindow = () => {
+    if (contextWindowExpanded) {
+      setContextWindowExpanded(false);
+      return;
+    }
+    setContextWindowExpanded(true);
+    void fillContextWindowFromName(String(customModelForm.getFieldValue("name") || ""));
+  };
+
   const openCustomModelModal = (provider: AddedProvider, group: ProviderConnectionGroup) => {
+    setContextWindowExpanded(false);
+    setContextWindowLookingUp(false);
     setCustomModelModal({ provider, group });
     customModelForm.setFieldsValue({
       providerId: provider.id,
@@ -1213,6 +1239,8 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
   };
 
   const closeCustomModelModal = () => {
+    setContextWindowExpanded(false);
+    setContextWindowLookingUp(false);
     setCustomModelModal(null);
     customModelForm.resetFields();
   };
@@ -1233,7 +1261,7 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
     }
 
     try {
-      const maxInputTokens = isLlmChatCapability(values.capability)
+      let maxInputTokens = isLlmChatCapability(values.capability)
         ? parseLlmMaxInputTokens(values.maxInputTokens)
         : undefined;
       if (isLlmChatCapability(values.capability) && !maxInputTokens) {
@@ -1243,6 +1271,9 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
         }]);
         return;
       }
+      if (isLlmChatCapability(values.capability) && isDefaultLlmMaxInputTokens(maxInputTokens)) {
+        maxInputTokens = parseLlmMaxInputTokens(await lookupModelContextWindow(values.name));
+      }
       const createdModel = unwrapModelProviderData<ApiModel>((await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsPost({
         modelProviderId: provider.id,
         groupId: group.id,
@@ -1250,7 +1281,7 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
           name: values.name.trim(),
           model_type: getModelTypeForCapability(values.capability),
           ...(maxInputTokens ? { max_input_tokens: maxInputTokens } : {}),
-        } as { name: string; model_type: string; max_input_tokens?: string },
+        },
       })).data);
       const nextModel: ProviderModel = {
         id: createdModel.id,
@@ -1283,58 +1314,6 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
       void onConfigurationChanged?.();
       closeCustomModelModal();
     } catch (error) {
-    }
-  };
-
-  const saveModelMaxInputTokens = async (
-    providerId: string,
-    groupId: string,
-    model: ProviderModel,
-    rawValue?: string,
-  ) => {
-    const persistedValue = resolveLlmMaxInputTokens(model.maxInputTokens);
-    const nextValue = parseLlmMaxInputTokens(rawValue);
-    if (!nextValue) {
-      message.error(t("modelProvider.validation.maxInputTokensInvalid"));
-      setDraftMaxInputTokens((current) => ({ ...current, [model.id]: persistedValue }));
-      return;
-    }
-    if (nextValue === persistedValue && model.maxInputTokens?.trim()) {
-      setDraftMaxInputTokens((current) => ({ ...current, [model.id]: persistedValue }));
-      return;
-    }
-    try {
-      await patchGroupModelMaxInputTokens({
-        modelProviderId: providerId,
-        groupId,
-        modelId: model.id,
-        maxInputTokens: nextValue,
-      });
-      setAddedProviderList((current) =>
-        current.map((provider) =>
-          provider.id === providerId
-            ? {
-                ...provider,
-                groups: provider.groups.map((group) =>
-                  group.id === groupId
-                    ? {
-                        ...group,
-                        models: group.models.map((item) =>
-                          item.id === model.id ? { ...item, maxInputTokens: nextValue } : item
-                        ),
-                      }
-                    : group
-                ),
-              }
-            : provider
-        )
-      );
-      setDraftMaxInputTokens((current) => ({ ...current, [model.id]: nextValue }));
-      message.success(t("modelProvider.message.maxInputTokensSaved"));
-      void onConfigurationChanged?.();
-    } catch (error) {
-      message.error(getLocalizedErrorMessage(error));
-      setDraftMaxInputTokens((current) => ({ ...current, [model.id]: persistedValue }));
     }
   };
 
@@ -1503,34 +1482,8 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
                                               <strong>{model.name}</strong>
                                               <CapabilityTag label={getCapabilityLabel(model.capability)} />
                                               {model.builtIn ? null : <Tag className="model-provider-custom-tag">{t("modelProvider.custom")}</Tag>}
-                                              {isLlmChatCapability(model.capability) && !model.builtIn ? (
-                                                <Input
-                                                  aria-label={t("modelProvider.maxInputTokensLabel")}
-                                                  className="model-provider-model-max-input-tokens"
-                                                  maxLength={LLM_MAX_INPUT_TOKENS_MAX_LENGTH}
-                                                  placeholder={t("modelProvider.maxInputTokensPlaceholder")}
-                                                  value={
-                                                    draftMaxInputTokens[model.id] ??
-                                                    resolveLlmMaxInputTokens(model.maxInputTokens)
-                                                  }
-                                                  onBlur={(event) =>
-                                                    void saveModelMaxInputTokens(
-                                                      provider.id,
-                                                      group.id,
-                                                      model,
-                                                      event.target.value,
-                                                    )
-                                                  }
-                                                  onChange={(event) =>
-                                                    setDraftMaxInputTokens((current) => ({
-                                                      ...current,
-                                                      [model.id]: event.target.value,
-                                                    }))
-                                                  }
-                                                />
-                                              ) : isLlmChatCapability(model.capability) &&
-                                                model.maxInputTokens?.trim() ? (
-                                                <span className="model-provider-model-max-input-tokens is-readonly">
+                                              {isLlmChatCapability(model.capability) ? (
+                                                <span className="model-provider-model-max-input-tokens">
                                                   {t("modelProvider.maxInputTokens", {
                                                     value: resolveLlmMaxInputTokens(model.maxInputTokens),
                                                   })}
@@ -1873,7 +1826,10 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
               { max: 120, message: t("modelProvider.validation.modelNameMax") },
             ]}
           >
-            <Input maxLength={120} placeholder={t("modelProvider.modelNamePlaceholder")} />
+            <Input
+              maxLength={120}
+              placeholder={t("modelProvider.modelNamePlaceholder")}
+            />
           </Form.Item>
 
           <Form.Item label={t("modelProvider.modelType")} name="capability" rules={[{ required: true, message: t("modelProvider.validation.modelTypeRequired") }]}>
@@ -1881,6 +1837,9 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
               onChange={(value) => {
                 if (isLlmChatCapability(value) && !customModelForm.getFieldValue("maxInputTokens")) {
                   customModelForm.setFieldValue("maxInputTokens", DEFAULT_LLM_MAX_INPUT_TOKENS);
+                }
+                if (!isLlmChatCapability(value)) {
+                  setContextWindowExpanded(false);
                 }
               }}
             >
@@ -1893,23 +1852,42 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
           </Form.Item>
 
           {isLlmChatCapability(watchedCustomCapability) ? (
-            <Form.Item
-              extra={t("modelProvider.maxInputTokensExtra")}
-              label={t("modelProvider.maxInputTokensLabel")}
-              name="maxInputTokens"
-              normalize={(value: string | undefined) => value?.trim()}
-              rules={[
-                { required: true, message: t("modelProvider.validation.maxInputTokensRequired") },
-                {
-                  validator: (_, value?: string) =>
-                    parseLlmMaxInputTokens(value)
-                      ? Promise.resolve()
-                      : Promise.reject(new Error(t("modelProvider.validation.maxInputTokensInvalid"))),
-                },
-              ]}
-            >
-              <Input maxLength={LLM_MAX_INPUT_TOKENS_MAX_LENGTH} placeholder={t("modelProvider.maxInputTokensPlaceholder")} />
-            </Form.Item>
+            <div className="model-provider-context-window">
+              <button
+                aria-expanded={contextWindowExpanded}
+                aria-label={contextWindowExpanded ? t("modelProvider.maxInputTokensCollapse") : t("modelProvider.maxInputTokensExpand")}
+                className="model-provider-context-window-toggle"
+                type="button"
+                onClick={toggleContextWindow}
+              >
+                <span>{t("modelProvider.maxInputTokensLabel")}</span>
+                {contextWindowLookingUp ? (
+                  <LoadingOutlined />
+                ) : (
+                  <RightOutlined className={contextWindowExpanded ? "is-expanded" : undefined} />
+                )}
+              </button>
+              <Form.Item
+                hidden={!contextWindowExpanded}
+                name="maxInputTokens"
+                normalize={(value: string | undefined) => value?.trim()}
+                rules={[
+                  { required: true, message: t("modelProvider.validation.maxInputTokensRequired") },
+                  {
+                    validator: (_, value?: string) =>
+                      parseLlmMaxInputTokens(value)
+                        ? Promise.resolve()
+                        : Promise.reject(new Error(t("modelProvider.validation.maxInputTokensInvalid"))),
+                  },
+                ]}
+              >
+                <Input
+                  className="model-provider-context-window-input"
+                  maxLength={LLM_MAX_INPUT_TOKENS_MAX_LENGTH}
+                  placeholder={t("modelProvider.maxInputTokensPlaceholder")}
+                />
+              </Form.Item>
+            </div>
           ) : null}
         </Form>
       </Modal>

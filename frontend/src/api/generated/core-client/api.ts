@@ -55,6 +55,10 @@ export interface AddACLRequest {
     'permission': string;
 }
 export interface AddModelProviderGroupModelOpenAPIRequest {
+    /**
+     * Optional override. When omitted, LLM/VLM windows are resolved from config/model_context_windows.yaml by model name and unknown names fall back to 128K.
+     */
+    'max_input_tokens'?: string;
     'model_type': string;
     'name': string;
 }
@@ -63,6 +67,10 @@ export interface AddModelProviderGroupModelOpenAPIResponse {
     'group_name': string;
     'id': string;
     'is_default': boolean;
+    /**
+     * Stored LLM input context window, for example 512, 128K, or 1M
+     */
+    'max_input_tokens'?: string;
     'model_type': string;
     'name': string;
     'provider_name': string;
@@ -2329,6 +2337,14 @@ export interface LocalFSChatSettingOpenAPIRequest {
 }
 export interface LocalFSChatSettingOpenAPIResponse {
     'enabled': boolean;
+}
+export interface LookupContextWindowOpenAPIResponse {
+    /**
+     * True when the name was found in config/model_context_windows.yaml
+     */
+    'matched': boolean;
+    'max_input_tokens': string;
+    'name': string;
 }
 export interface MarketDeleteOpenAPIResponse {
     'deleted': boolean;
@@ -31309,6 +31325,41 @@ export class McpServersApi extends BaseAPI {
 export const ModelProvidersApiAxiosParamCreator = function (configuration?: Configuration) {
     return {
         /**
+         * Resolves max_input_tokens from config/model_context_windows.yaml by model name. Unknown names return 128K with matched=false.
+         * @summary Look up a common model context window
+         * @param {string} [name]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersContextWindowsGet: async (name?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/model_providers/context_windows`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (name !== undefined) {
+                localVarQueryParameter['name'] = name;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
          * Returns feature flags derived from the algorithm service runtime_models.yaml. Result is permanently cached after the first successful fetch. image_embed_enabled is true when a cross_modal_embed role is configured.
          * @summary Get model feature flags
          * @param {*} [options] Override http request option.
@@ -31583,7 +31634,7 @@ export const ModelProvidersApiAxiosParamCreator = function (configuration?: Conf
             };
         },
         /**
-         * Creates a user_model_provider_group_models row with is_default false (custom model name and model_type). Name must be unique within the group among active rows. provider_name and base_url are taken from the user provider and group. Response group_name is user_model_provider_groups.name (not stored on the model row).
+         * Creates a user_model_provider_group_models row with is_default false (custom model name and model_type). Name must be unique within the group among active rows. For llm and vlm, max_input_tokens from the request is stored when provided; otherwise it is resolved from config/model_context_windows.yaml by model name and unknown names fall back to 128K. provider_name and base_url are taken from the user provider and group. Response group_name is user_model_provider_groups.name (not stored on the model row).
          * @summary Add custom model under a connection group
          * @param {string} modelProviderId
          * @param {string} groupId
@@ -32021,6 +32072,19 @@ export const ModelProvidersApiFp = function(configuration?: Configuration) {
     const localVarAxiosParamCreator = ModelProvidersApiAxiosParamCreator(configuration)
     return {
         /**
+         * Resolves max_input_tokens from config/model_context_windows.yaml by model name. Unknown names return 128K with matched=false.
+         * @summary Look up a common model context window
+         * @param {string} [name]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreModelProvidersContextWindowsGet(name?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<LookupContextWindowOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreModelProvidersContextWindowsGet(name, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ModelProvidersApi.apiCoreModelProvidersContextWindowsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * Returns feature flags derived from the algorithm service runtime_models.yaml. Result is permanently cached after the first successful fetch. image_embed_enabled is true when a cross_modal_embed role is configured.
          * @summary Get model feature flags
          * @param {*} [options] Override http request option.
@@ -32120,7 +32184,7 @@ export const ModelProvidersApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Creates a user_model_provider_group_models row with is_default false (custom model name and model_type). Name must be unique within the group among active rows. provider_name and base_url are taken from the user provider and group. Response group_name is user_model_provider_groups.name (not stored on the model row).
+         * Creates a user_model_provider_group_models row with is_default false (custom model name and model_type). Name must be unique within the group among active rows. For llm and vlm, max_input_tokens from the request is stored when provided; otherwise it is resolved from config/model_context_windows.yaml by model name and unknown names fall back to 128K. provider_name and base_url are taken from the user provider and group. Response group_name is user_model_provider_groups.name (not stored on the model row).
          * @summary Add custom model under a connection group
          * @param {string} modelProviderId
          * @param {string} groupId
@@ -32288,6 +32352,16 @@ export const ModelProvidersApiFactory = function (configuration?: Configuration,
     const localVarFp = ModelProvidersApiFp(configuration)
     return {
         /**
+         * Resolves max_input_tokens from config/model_context_windows.yaml by model name. Unknown names return 128K with matched=false.
+         * @summary Look up a common model context window
+         * @param {ModelProvidersApiApiCoreModelProvidersContextWindowsGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersContextWindowsGet(requestParameters: ModelProvidersApiApiCoreModelProvidersContextWindowsGetRequest = {}, options?: RawAxiosRequestConfig): AxiosPromise<LookupContextWindowOpenAPIResponse> {
+            return localVarFp.apiCoreModelProvidersContextWindowsGet(requestParameters.name, options).then((request) => request(axios, basePath));
+        },
+        /**
          * Returns feature flags derived from the algorithm service runtime_models.yaml. Result is permanently cached after the first successful fetch. image_embed_enabled is true when a cross_modal_embed role is configured.
          * @summary Get model feature flags
          * @param {*} [options] Override http request option.
@@ -32357,7 +32431,7 @@ export const ModelProvidersApiFactory = function (configuration?: Configuration,
             return localVarFp.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdDelete(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.modelId, options).then((request) => request(axios, basePath));
         },
         /**
-         * Creates a user_model_provider_group_models row with is_default false (custom model name and model_type). Name must be unique within the group among active rows. provider_name and base_url are taken from the user provider and group. Response group_name is user_model_provider_groups.name (not stored on the model row).
+         * Creates a user_model_provider_group_models row with is_default false (custom model name and model_type). Name must be unique within the group among active rows. For llm and vlm, max_input_tokens from the request is stored when provided; otherwise it is resolved from config/model_context_windows.yaml by model name and unknown names fall back to 128K. provider_name and base_url are taken from the user provider and group. Response group_name is user_model_provider_groups.name (not stored on the model row).
          * @summary Add custom model under a connection group
          * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -32476,6 +32550,13 @@ export const ModelProvidersApiFactory = function (configuration?: Configuration,
         },
     };
 };
+
+/**
+ * Request parameters for apiCoreModelProvidersContextWindowsGet operation in ModelProvidersApi.
+ */
+export interface ModelProvidersApiApiCoreModelProvidersContextWindowsGetRequest {
+    readonly name?: string
+}
 
 /**
  * Request parameters for apiCoreModelProvidersGet operation in ModelProvidersApi.
@@ -32628,6 +32709,17 @@ export interface ModelProvidersApiApiCoreModelProvidersWithGroupsGetRequest {
  */
 export class ModelProvidersApi extends BaseAPI {
     /**
+     * Resolves max_input_tokens from config/model_context_windows.yaml by model name. Unknown names return 128K with matched=false.
+     * @summary Look up a common model context window
+     * @param {ModelProvidersApiApiCoreModelProvidersContextWindowsGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreModelProvidersContextWindowsGet(requestParameters: ModelProvidersApiApiCoreModelProvidersContextWindowsGetRequest = {}, options?: RawAxiosRequestConfig) {
+        return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersContextWindowsGet(requestParameters.name, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
      * Returns feature flags derived from the algorithm service runtime_models.yaml. Result is permanently cached after the first successful fetch. image_embed_enabled is true when a cross_modal_embed role is configured.
      * @summary Get model feature flags
      * @param {*} [options] Override http request option.
@@ -32704,7 +32796,7 @@ export class ModelProvidersApi extends BaseAPI {
     }
 
     /**
-     * Creates a user_model_provider_group_models row with is_default false (custom model name and model_type). Name must be unique within the group among active rows. provider_name and base_url are taken from the user provider and group. Response group_name is user_model_provider_groups.name (not stored on the model row).
+     * Creates a user_model_provider_group_models row with is_default false (custom model name and model_type). Name must be unique within the group among active rows. For llm and vlm, max_input_tokens from the request is stored when provided; otherwise it is resolved from config/model_context_windows.yaml by model name and unknown names fall back to 128K. provider_name and base_url are taken from the user provider and group. Response group_name is user_model_provider_groups.name (not stored on the model row).
      * @summary Add custom model under a connection group
      * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsPostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.

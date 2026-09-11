@@ -1003,7 +1003,7 @@ type deleteModelProviderGroupOpenAPIResponse struct {
 type addModelProviderGroupModelOpenAPIRequest struct {
 	Name           string  `json:"name"`
 	ModelType      string  `json:"model_type"`
-	MaxInputTokens *string `json:"max_input_tokens,omitempty" desc:"LLM input context window, for example 512, 128K, or 1M. Defaults to 128K for llm models."`
+	MaxInputTokens *string `json:"max_input_tokens,omitempty" desc:"Optional override. When omitted, LLM/VLM windows are resolved from config/model_context_windows.yaml by model name and unknown names fall back to 128K."`
 }
 
 type addModelProviderGroupModelOpenAPIResponse struct {
@@ -1043,6 +1043,16 @@ type listModelProviderGroupModelsOpenAPIResponse struct {
 
 type listUserModelsByModelTypeQueryParams struct {
 	ModelType string `query:"model_type"`
+}
+
+type lookupContextWindowQueryParams struct {
+	Name string `query:"name"`
+}
+
+type lookupContextWindowOpenAPIResponse struct {
+	Name           string `json:"name"`
+	MaxInputTokens string `json:"max_input_tokens"`
+	Matched        bool   `json:"matched" desc:"True when the name was found in config/model_context_windows.yaml"`
 }
 
 type selectedModelOpenAPIItem struct {
@@ -3781,6 +3791,15 @@ func registeredCoreOperations() []openAPIOperation {
 		},
 		{
 			Method:      "GET",
+			Path:        "/model_providers/context_windows",
+			Summary:     "Look up a common model context window",
+			Description: "Resolves max_input_tokens from config/model_context_windows.yaml by model name. Unknown names return 128K with matched=false.",
+			Tags:        []string{"model_providers"},
+			QueryParams: lookupContextWindowQueryParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Context window lookup", lookupContextWindowOpenAPIResponse{})},
+		},
+		{
+			Method:      "GET",
 			Path:        "/model_providers/models",
 			Summary:     "List current user's available models",
 			Description: "Optionally filters by query model_type (e.g. llm, vlm, or embed). When omitted, returns every non-deleted model in the current user's verified provider groups. Each item includes nullable max_input_tokens, the catalog model's maximum input context window expressed as a string such as 512, 128K, or 1M; custom or unknown models return null. Ordered by user_model_provider_id, group id, then name. Same items as GET .../groups/{group_id}/models.",
@@ -3856,7 +3875,7 @@ func registeredCoreOperations() []openAPIOperation {
 			Method:      "POST",
 			Path:        "/model_providers/{model_provider_id}/groups/{group_id}/models",
 			Summary:     "Add custom model under a connection group",
-			Description: "Creates a user_model_provider_group_models row with is_default false (custom model name and model_type). Name must be unique within the group among active rows. provider_name and base_url are taken from the user provider and group. Response group_name is user_model_provider_groups.name (not stored on the model row).",
+			Description: "Creates a user_model_provider_group_models row with is_default false (custom model name and model_type). Name must be unique within the group among active rows. For llm and vlm, max_input_tokens from the request is stored when provided; otherwise it is resolved from config/model_context_windows.yaml by model name and unknown names fall back to 128K. provider_name and base_url are taken from the user provider and group. Response group_name is user_model_provider_groups.name (not stored on the model row).",
 			Tags:        []string{"model_providers"},
 			PathParams:  modelProviderGroupByIDPathParams{},
 			RequestBody: jsonBodyOf(addModelProviderGroupModelOpenAPIRequest{}, true),

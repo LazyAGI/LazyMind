@@ -14,6 +14,15 @@ func supportsUserMaxInputTokens(modelType string) bool {
 	return strings.EqualFold(strings.TrimSpace(modelType), "llm")
 }
 
+func supportsLookupMaxInputTokens(modelType string) bool {
+	switch strings.ToLower(strings.TrimSpace(modelType)) {
+	case "llm", "vlm":
+		return true
+	default:
+		return false
+	}
+}
+
 func parseMaxInputTokens(raw string) (string, error) {
 	value := strings.ToUpper(strings.TrimSpace(raw))
 	if len(value) == 0 || len(value) > maxInputTokensMaxLen || !maxInputTokensPattern.MatchString(value) {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Alert, Button, Input, Modal, Select, Skeleton, Switch, Tag, Tooltip, message } from "antd";
+import { Alert, Button, Modal, Select, Skeleton, Switch, Tag, Tooltip, message } from "antd";
 import {
   ApiOutlined,
   CheckCircleOutlined,
@@ -16,23 +16,15 @@ import {
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { AgentAppsAuth } from "@/components/auth";
-import { getLocalizedErrorMessage } from "@/components/request";
 import { useModelFeatures } from "@/hooks/useModelFeatures";
 import { runtimeFeatures } from "@/runtime/features";
 import {
   modelProvidersApi,
   modelProvidersDefaultApi,
-  patchGroupModelMaxInputTokens,
   unwrapModelProviderData,
   withModelProviderJsonOptions,
 } from "../api";
 import { getProviderLogoUrl } from "../providerBranding";
-import {
-  LLM_MAX_INPUT_TOKENS_MAX_LENGTH,
-  isLlmChatCapability,
-  parseLlmMaxInputTokens,
-  resolveLlmMaxInputTokens,
-} from "../maxInputTokens";
 
 export type SetupAvailabilityState = "loading" | "ready" | "empty" | "error";
 
@@ -65,7 +57,6 @@ interface ProviderModel {
   capability: ModelCapability;
   builtIn: boolean;
   enabled: boolean;
-  maxInputTokens?: string;
 }
 
 interface ProviderOption {
@@ -112,7 +103,6 @@ interface ApiModel {
   name: string;
   model_type?: string;
   is_default?: boolean;
-  max_input_tokens?: string;
 }
 
 interface SelectedModelApiItem {
@@ -120,7 +110,6 @@ interface SelectedModelApiItem {
   group_name: string;
   is_default?: boolean;
   is_editable?: boolean;
-  max_input_tokens?: string;
   model_id: string;
   model_key: string;
   name: string;
@@ -131,9 +120,6 @@ interface SelectedModelApiItem {
 }
 
 type SelectedModels = Partial<Record<ModelCapability, string>>;
-type SelectedModelMaxInputTokens = Partial<
-  Record<ModelCapability, string>
->;
 
 export type CloudServiceSlotKey = "cloudParsing" | "searchEngine";
 type CloudServiceCategory = "ocr" | "search";
@@ -607,9 +593,6 @@ export default function DefaultModelConfigPanel({
   const currentLanguage = i18n.resolvedLanguage || i18n.language || "zh-CN";
   const [providerOptions, setProviderOptions] = useState<ProviderOption[]>([]);
   const [selectedModels, setSelectedModels] = useState<SelectedModels>({});
-  const [selectedModelMaxInputTokens, setSelectedModelMaxInputTokens] =
-    useState<SelectedModelMaxInputTokens>({});
-  const [draftLlmMaxInputTokens, setDraftLlmMaxInputTokens] = useState("");
   const [selectedCloudServices, setSelectedCloudServices] =
     useState<SelectedCloudServices>({});
   const [cloudServiceShareStatus, setCloudServiceShareStatus] = useState<
@@ -670,7 +653,6 @@ export default function DefaultModelConfigPanel({
       const selectedResponse = await modelProvidersApi.apiCoreModelProvidersSelectedModelsGet();
       const selectedData = unwrapModelProviderData<{ selections?: SelectedModelApiItem[] }>(selectedResponse.data);
       const nextSelectedModels: SelectedModels = {};
-      const nextSelectedModelMaxInputTokens: SelectedModelMaxInputTokens = {};
       const selectedOptions: Partial<
         Record<ModelCapability, ModelOptionItem[]>
       > = {};
@@ -717,7 +699,6 @@ export default function DefaultModelConfigPanel({
           capability,
           builtIn: Boolean(selection.is_default),
           enabled: true,
-          maxInputTokens: selection.max_input_tokens,
         };
         const option: ModelOptionItem = {
           provider,
@@ -727,14 +708,6 @@ export default function DefaultModelConfigPanel({
           isEditable,
         };
         nextSelectedModels[capability] = option.value;
-        if (capability === "llm") {
-          nextSelectedModelMaxInputTokens[capability] = resolveLlmMaxInputTokens(
-            selection.max_input_tokens,
-          );
-        } else if (selection.max_input_tokens?.trim()) {
-          nextSelectedModelMaxInputTokens[capability] =
-            selection.max_input_tokens;
-        }
         selectedOptions[capability] = [
           option,
           ...(selectedOptions[capability] || []).filter(
@@ -744,8 +717,6 @@ export default function DefaultModelConfigPanel({
       });
 
       setSelectedModels(nextSelectedModels);
-      setSelectedModelMaxInputTokens(nextSelectedModelMaxInputTokens);
-      setDraftLlmMaxInputTokens(nextSelectedModelMaxInputTokens.llm ?? "");
       setModuleModelOptions((current) => ({ ...selectedOptions, ...current }));
 
       const nextShareStatus: Partial<Record<ModelCapability, boolean>> = {};
@@ -937,7 +908,6 @@ export default function DefaultModelConfigPanel({
               capability,
               builtIn: Boolean(model.is_default),
               enabled: true,
-              maxInputTokens: model.max_input_tokens,
             };
             const value = getModelValue(
               provider.id,
@@ -1081,28 +1051,10 @@ export default function DefaultModelConfigPanel({
   };
 
   const applyModelSelection = (capability: ModelCapability, value?: string) => {
-    const maxInputTokens = value
-      ? moduleModelOptions[capability]?.find(
-          (option) => option.value === value,
-        )?.model.maxInputTokens
-      : undefined;
     setSelectedModels((current) => ({
       ...current,
       [capability]: value,
     }));
-    const nextMaxInputTokens =
-      capability === "llm" && value
-        ? resolveLlmMaxInputTokens(maxInputTokens)
-        : maxInputTokens?.trim()
-          ? maxInputTokens
-          : undefined;
-    setSelectedModelMaxInputTokens((current) => ({
-      ...current,
-      [capability]: nextMaxInputTokens,
-    }));
-    if (capability === "llm") {
-      setDraftLlmMaxInputTokens(nextMaxInputTokens ?? "");
-    }
     if (!value) {
       setShareStatus((current) => ({ ...current, [capability]: false }));
     }
@@ -1121,77 +1073,10 @@ export default function DefaultModelConfigPanel({
             ...current,
             [selectedCapability]: !!selection.share,
           }));
-          const persisted =
-            selectedCapability === "llm"
-              ? resolveLlmMaxInputTokens(selection.max_input_tokens)
-              : selection.max_input_tokens?.trim()
-                ? selection.max_input_tokens
-                : undefined;
-          setSelectedModelMaxInputTokens((current) => ({
-            ...current,
-            [selectedCapability]: persisted,
-          }));
-          if (selectedCapability === "llm") {
-            setDraftLlmMaxInputTokens(persisted ?? "");
-          }
         });
         void onModelSelectionChanged();
       })
       .catch(() => {});
-  };
-
-  const saveLlmMaxInputTokens = async (rawValue?: string) => {
-    const selectedValue = selectedModels.llm;
-    if (!selectedValue) {
-      return;
-    }
-    const persistedValue = resolveLlmMaxInputTokens(selectedModelMaxInputTokens.llm);
-    const nextValue = parseLlmMaxInputTokens(rawValue);
-    if (!nextValue) {
-      message.error(t("modelProvider.validation.maxInputTokensInvalid"));
-      setDraftLlmMaxInputTokens(persistedValue);
-      return;
-    }
-    if (nextValue === persistedValue) {
-      setDraftLlmMaxInputTokens(persistedValue);
-      return;
-    }
-    const { providerId, groupId, modelId } = parseModelValue(selectedValue);
-    if (!providerId || !groupId || !modelId) {
-      return;
-    }
-    try {
-      await patchGroupModelMaxInputTokens({
-        modelProviderId: providerId,
-        groupId,
-        modelId,
-        maxInputTokens: nextValue,
-      });
-      setSelectedModelMaxInputTokens((current) => ({
-        ...current,
-        llm: nextValue,
-      }));
-      setDraftLlmMaxInputTokens(nextValue);
-      setModuleModelOptions((current) => ({
-        ...current,
-        llm: (current.llm || []).map((option) =>
-          option.value === selectedValue
-            ? {
-                ...option,
-                model: {
-                  ...option.model,
-                  maxInputTokens: nextValue,
-                },
-              }
-            : option
-        ),
-      }));
-      message.success(t("modelProvider.message.maxInputTokensSaved"));
-      void onModelSelectionChanged();
-    } catch (error) {
-      message.error(getLocalizedErrorMessage(error));
-      setDraftLlmMaxInputTokens(persistedValue);
-    }
   };
 
   const handleModelSelection = (
@@ -1428,16 +1313,6 @@ export default function DefaultModelConfigPanel({
           const optionLoading = Boolean(moduleModelLoading[module.key]);
           const moduleTitle = t(module.titleKey);
           const moduleSubtitle = t(module.subtitleKey);
-          const maxInputTokens = selectedModelMaxInputTokens[module.key];
-          const selectedLlmOption = (moduleModelOptions.llm || []).find(
-            (option) => option.value === selectedModels.llm,
-          );
-          const shouldEditLlmMaxInputTokens =
-            isLlmChatCapability(module.key) &&
-            Boolean(selectedModels.llm) &&
-            Boolean(selectedLlmOption && !selectedLlmOption.model.builtIn);
-          const shouldShowMaxInputTokens =
-            !shouldEditLlmMaxInputTokens && Boolean(maxInputTokens?.trim());
 
           return (
             <div
@@ -1454,23 +1329,6 @@ export default function DefaultModelConfigPanel({
                   ) : null}
                   <span>{moduleTitle}</span>
                 </label>
-                {shouldEditLlmMaxInputTokens ? (
-                  <Input
-                    aria-label={t("modelProvider.maxInputTokensLabel")}
-                    className="model-provider-max-input-tokens-input"
-                    maxLength={LLM_MAX_INPUT_TOKENS_MAX_LENGTH}
-                    placeholder={t("modelProvider.maxInputTokensPlaceholder")}
-                    value={draftLlmMaxInputTokens}
-                    onBlur={(event) => void saveLlmMaxInputTokens(event.target.value)}
-                    onChange={(event) => setDraftLlmMaxInputTokens(event.target.value)}
-                  />
-                ) : shouldShowMaxInputTokens ? (
-                  <span className="model-provider-max-input-tokens">
-                    {t("modelProvider.maxInputTokens", {
-                      value: maxInputTokens,
-                    })}
-                  </span>
-                ) : null}
                 <Tooltip placement="top" title={moduleSubtitle}>
                   <button
                     aria-label={t("modelProvider.moduleHelpAria", {

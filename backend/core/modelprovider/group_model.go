@@ -114,7 +114,7 @@ func AddGroupModel(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "name and model_type are required", http.StatusBadRequest)
 		return
 	}
-	maxInputTokens, err := resolveUserMaxInputTokens(modelType, req.MaxInputTokens)
+	maxInputTokens, err := resolveAddModelMaxInputTokens(modelType, name, req.MaxInputTokens)
 	if err != nil {
 		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
 		return

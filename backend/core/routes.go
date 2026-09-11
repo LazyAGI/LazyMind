@@ -660,6 +660,7 @@ func registerAllRoutes(r *mux.Router) {
 
 	// ----- Model provider -----
 	handleAPI(r, "GET", "/model_providers/features", []string{"model.read"}, modelprovider.GetModelFeatures)
+	handleAPI(r, "GET", "/model_providers/context_windows", []string{"model.read"}, modelprovider.LookupContextWindowHTTP)
 	handleAPI(r, "GET", "/model_providers", []string{"model.read"}, modelprovider.ListUserProviders)
 	handleAPI(r, "GET", "/model_providers:with_groups", []string{"model.read"}, modelprovider.ListUserProvidersWithGroups)
 	handleAPI(r, "POST", "/model_providers/{model_provider_id}/groups/{group_id}:check", []string{"model.write"}, modelprovider.CheckGroup)
