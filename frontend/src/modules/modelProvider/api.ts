@@ -2,11 +2,9 @@ import {
   Configuration,
   DefaultApiFactory,
   ModelProvidersApiFactory,
-  type LookupContextWindowOpenAPIResponse,
 } from "@/api/generated/core-client";
 import { BASE_URL, axiosInstance } from "@/components/request";
 import type { RawAxiosRequestConfig } from "axios";
-import { DEFAULT_LLM_MAX_INPUT_TOKENS } from "./maxInputTokens";
 
 interface ApiEnvelope<T> {
   data?: T;
@@ -45,19 +43,6 @@ export function unwrapModelProviderData<T>(payload: unknown): T {
   return payload as T;
 }
 
-export async function lookupModelContextWindow(name: string, modelType?: string): Promise<string> {
-  const trimmed = name.trim();
-  if (!trimmed) {
-    return DEFAULT_LLM_MAX_INPUT_TOKENS;
-  }
-  const response = await modelProvidersApi.apiCoreModelProvidersContextWindowsGet(
-    { name: trimmed },
-    modelType?.trim() ? { params: { model_type: modelType.trim() } } : undefined,
-  );
-  const data = unwrapModelProviderData<LookupContextWindowOpenAPIResponse>(response.data);
-  return data.max_input_tokens || DEFAULT_LLM_MAX_INPUT_TOKENS;
-}
-
 export interface RemoteGroupModel {
   id: string;
   name: string;
@@ -67,8 +52,24 @@ export interface RemoteGroupModel {
 }
 
 export async function listRemoteGroupModels(providerId: string, groupId: string) {
-  const response = await axiosInstance.get(
-    `${BASE_URL}/api/core/model_providers/${encodeURIComponent(providerId)}/groups/${encodeURIComponent(groupId)}/remote_models`,
-  );
+  const response = await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdRemoteModelsGet({
+    modelProviderId: providerId,
+    groupId,
+  });
   return unwrapModelProviderData<{ url?: string; models?: RemoteGroupModel[] }>(response.data);
+}
+
+export async function updateGroupModelMaxInputTokens(
+  providerId: string,
+  groupId: string,
+  modelId: string,
+  maxInputTokens: string,
+) {
+  const response = await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdPatch({
+    modelProviderId: providerId,
+    groupId,
+    modelId,
+    updateModelProviderGroupModelOpenAPIRequest: { max_input_tokens: maxInputTokens },
+  });
+  return unwrapModelProviderData<{ max_input_tokens?: string }>(response.data);
 }

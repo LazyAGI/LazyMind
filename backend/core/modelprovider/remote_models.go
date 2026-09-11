@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"sort"
@@ -21,7 +22,15 @@ import (
 
 const remoteModelsTimeout = 20 * time.Second
 
-var remoteModelsHTTPClient = &http.Client{Timeout: remoteModelsTimeout}
+var remoteModelsHTTPClient = &http.Client{
+	Timeout: remoteModelsTimeout,
+	CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	},
+}
+
+// remoteModelsAllowPrivateHosts is test-only so httptest.Server (loopback) can run.
+var remoteModelsAllowPrivateHosts bool
 
 type remoteGroupModelItem struct {
 	ID             string  `json:"id"`
@@ -78,16 +87,73 @@ func modelsListURL(baseURL string) (string, error) {
 	parsed.RawQuery = ""
 	parsed.ForceQuery = false
 	parsed.Fragment = ""
+	if err := validateRemoteModelsURL(parsed, false); err != nil {
+		return "", err
+	}
 	return parsed.String(), nil
+}
+
+func validateRemoteModelsURL(parsed *url.URL, resolveHost bool) error {
+	scheme := strings.ToLower(parsed.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return errors.New("group base_url must use http or https")
+	}
+	if parsed.User != nil {
+		return errors.New("group base_url must not include credentials")
+	}
+	host := strings.TrimSpace(parsed.Hostname())
+	if host == "" {
+		return errors.New("invalid group base_url")
+	}
+	if isBlockedRemoteModelsHost(host, resolveHost) {
+		return errors.New("group base_url host is not allowed")
+	}
+	return nil
+}
+
+func isBlockedRemoteModelsHost(host string, resolveHost bool) bool {
+	lower := strings.ToLower(host)
+	if lower == "metadata.google.internal" || strings.HasSuffix(lower, ".metadata.google.internal") {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return isBlockedRemoteModelsIP(ip)
+	}
+	if !resolveHost {
+		return false
+	}
+	ips, err := net.LookupIP(host)
+	if err != nil {
+		return true
+	}
+	for _, ip := range ips {
+		if isBlockedRemoteModelsIP(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+func isBlockedRemoteModelsIP(ip net.IP) bool {
+	if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified() {
+		return true
+	}
+	if ip.IsLoopback() || ip.IsPrivate() {
+		return !remoteModelsAllowPrivateHosts
+	}
+	if ip4 := ip.To4(); ip4 != nil && ip4[0] == 169 && ip4[1] == 254 {
+		return true
+	}
+	return ip.Equal(net.ParseIP("fd00:ec2::254"))
 }
 
 func inferRemoteModelType(name string) string {
 	for _, modelType := range []string{"llm", "vlm", "embed"} {
-		if _, ok := LookupContextWindow(name, modelType); ok {
+		if _, ok := lookupMaxInputTokens(name, modelType); ok {
 			return modelType
 		}
 	}
-	return "llm"
+	return ""
 }
 
 func parseRemoteModelIDs(raw []byte) []string {
@@ -207,6 +273,11 @@ func ListRemoteGroupModels(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	parsedListURL, err := url.Parse(listURL)
+	if err != nil || validateRemoteModelsURL(parsedListURL, true) != nil {
+		common.ReplyErr(w, "group base_url host is not allowed", http.StatusBadRequest)
+		return
+	}
 
 	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, listURL, nil)
 	if err != nil {
@@ -255,7 +326,7 @@ func ListRemoteGroupModels(w http.ResponseWriter, r *http.Request) {
 		if _, ok := added[strings.ToLower(id)]; ok {
 			item.Added = true
 		}
-		if tokens, ok := LookupContextWindow(id, modelType); ok {
+		if tokens, ok := lookupMaxInputTokens(id, modelType); ok {
 			item.MaxInputTokens = &tokens
 		}
 		models = append(models, item)

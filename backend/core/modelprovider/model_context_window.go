@@ -2,7 +2,6 @@ package modelprovider
 
 import (
 	"fmt"
-	"net/http"
 	"os"
 	"sort"
 	"strings"
@@ -10,7 +9,6 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"lazymind/core/common"
 	"lazymind/core/log"
 )
 
@@ -136,9 +134,9 @@ func MustLoadContextWindows(yamlPath string) {
 	log.Logger.Info().Str("path", yamlPath).Int("models", count).Strs("types", types).Msg("model context windows loaded from YAML")
 }
 
-// LookupContextWindow returns max_input_tokens from model_context_windows.yaml.
+// lookupMaxInputTokens returns the YAML max_input_tokens for a model name.
 // An empty modelType searches llm, vlm, embed, then any other typed sections.
-func LookupContextWindow(name, modelType string) (string, bool) {
+func lookupMaxInputTokens(name, modelType string) (string, bool) {
 	contextWindowsMu.RLock()
 	defer contextWindowsMu.RUnlock()
 	if len(contextWindowsByType) == 0 {
@@ -164,11 +162,9 @@ func resolveAddModelMaxInputTokens(modelType, modelName string, raw *string) (*s
 		if err != nil {
 			return nil, err
 		}
-		if normalized != defaultLLMMaxInputTokens {
-			return &normalized, nil
-		}
+		return &normalized, nil
 	}
-	if lookedUp, ok := LookupContextWindow(modelName, modelType); ok {
+	if lookedUp, ok := lookupMaxInputTokens(modelName, modelType); ok {
 		return &lookedUp, nil
 	}
 	value := defaultLLMMaxInputTokens
@@ -176,7 +172,7 @@ func resolveAddModelMaxInputTokens(modelType, modelName string, raw *string) (*s
 }
 
 func resolveSeededMaxInputTokens(modelType, modelName string) (*string, error) {
-	if lookedUp, ok := LookupContextWindow(modelName, modelType); ok {
+	if lookedUp, ok := lookupMaxInputTokens(modelName, modelType); ok {
 		return &lookedUp, nil
 	}
 	if supportsUserMaxInputTokens(modelType) {
@@ -184,29 +180,4 @@ func resolveSeededMaxInputTokens(modelType, modelName string) (*string, error) {
 		return &value, nil
 	}
 	return nil, nil
-}
-
-type lookupContextWindowResponse struct {
-	Name           string `json:"name"`
-	MaxInputTokens string `json:"max_input_tokens"`
-	Matched        bool   `json:"matched"`
-}
-
-// LookupContextWindowHTTP returns the YAML context window for a model name.
-func LookupContextWindowHTTP(w http.ResponseWriter, r *http.Request) {
-	name := strings.TrimSpace(r.URL.Query().Get("name"))
-	if name == "" {
-		common.ReplyErr(w, "name is required", http.StatusBadRequest)
-		return
-	}
-	modelType := strings.TrimSpace(r.URL.Query().Get("model_type"))
-	tokens, matched := LookupContextWindow(name, modelType)
-	if !matched {
-		tokens = defaultLLMMaxInputTokens
-	}
-	common.ReplyOK(w, lookupContextWindowResponse{
-		Name:           name,
-		MaxInputTokens: tokens,
-		Matched:        matched,
-	})
 }

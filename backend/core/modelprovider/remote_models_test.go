@@ -13,6 +13,18 @@ import (
 	"lazymind/core/store"
 )
 
+func TestInferRemoteModelTypeUnknownIsEmpty(t *testing.T) {
+	if err := LoadContextWindows("../config/model_context_windows.yaml"); err != nil {
+		t.Fatal(err)
+	}
+	if got := inferRemoteModelType("definitely-not-a-catalog-model"); got != "" {
+		t.Fatalf("unknown remote type = %q, want empty", got)
+	}
+	if got := inferRemoteModelType("qwen-plus"); got != "llm" {
+		t.Fatalf("qwen-plus type = %q, want llm", got)
+	}
+}
+
 func TestModelsListURL(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -34,9 +46,25 @@ func TestModelsListURL(t *testing.T) {
 			t.Fatalf("modelsListURL(%q) = %q, want %q", tt.in, got, tt.want)
 		}
 	}
+
+	blocked := []string{
+		"file:///etc/passwd",
+		"http://127.0.0.1/v1",
+		"http://10.0.0.8/v1",
+		"http://169.254.169.254/latest/meta-data",
+		"https://user:pass@api.openai.com/v1",
+	}
+	for _, in := range blocked {
+		if _, err := modelsListURL(in); err == nil {
+			t.Fatalf("modelsListURL(%q) succeeded, want error", in)
+		}
+	}
 }
 
 func TestListRemoteGroupModels(t *testing.T) {
+	remoteModelsAllowPrivateHosts = true
+	t.Cleanup(func() { remoteModelsAllowPrivateHosts = false })
+
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/models" {
 			http.NotFound(w, r)
@@ -118,5 +146,11 @@ func TestListRemoteGroupModels(t *testing.T) {
 	}
 	if byName["deepseek-chat"].Added {
 		t.Fatal("expected deepseek-chat not to be added")
+	}
+	if byName["deepseek-chat"].ModelType != "" {
+		t.Fatalf("unknown remote model type = %q, want empty", byName["deepseek-chat"].ModelType)
+	}
+	if byName["qwen-plus"].ModelType != "llm" {
+		t.Fatalf("qwen-plus type = %q, want llm", byName["qwen-plus"].ModelType)
 	}
 }

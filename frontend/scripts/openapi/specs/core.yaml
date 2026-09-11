@@ -3953,10 +3953,10 @@ components:
                 cache_hit_rate:
                     format: double
                     type: number
-                cached_tokens:
+                cache_input_tokens:
                     format: int64
                     type: integer
-                cache_input_tokens:
+                cached_tokens:
                     format: int64
                     type: integer
                 context_input_tokens:
@@ -5136,6 +5136,7 @@ components:
                     type: boolean
                 max_input_tokens:
                     description: Stored LLM input context window, for example 512, 128K, or 1M
+                    nullable: true
                     type: string
                 model_type:
                     type: string
@@ -5157,20 +5158,6 @@ components:
                 - provider_name
                 - user_model_provider_group_id
                 - user_model_provider_id
-            type: object
-        lookupContextWindowOpenAPIResponse:
-            properties:
-                matched:
-                    description: True when the name was found in config/model_context_windows.yaml
-                    type: boolean
-                max_input_tokens:
-                    type: string
-                name:
-                    type: string
-            required:
-                - matched
-                - max_input_tokens
-                - name
             type: object
         agentRouterABAudit:
             properties:
@@ -6483,6 +6470,35 @@ components:
                         $ref: '#/components/schemas/listModelProviderGroupsOpenAPIItem'
                     type: array
             type: object
+        listRemoteGroupModelsOpenAPIItem:
+            properties:
+                added:
+                    type: boolean
+                id:
+                    type: string
+                max_input_tokens:
+                    type: string
+                model_type:
+                    type: string
+                name:
+                    type: string
+            required:
+                - added
+                - id
+                - model_type
+                - name
+            type: object
+        listRemoteGroupModelsOpenAPIResponse:
+            properties:
+                models:
+                    items:
+                        $ref: '#/components/schemas/listRemoteGroupModelsOpenAPIItem'
+                    type: array
+                url:
+                    type: string
+            required:
+                - url
+            type: object
         listSelectedModelsOpenAPIResponse:
             properties:
                 selections:
@@ -6903,6 +6919,9 @@ components:
                     type: string
                 group_name:
                     type: string
+                is_default:
+                    description: True when the selection was copied from catalog YAML
+                    type: boolean
                 is_editable:
                     description: Whether the selected model supports image editing
                     type: boolean
@@ -6925,6 +6944,7 @@ components:
             required:
                 - base_url
                 - group_name
+                - is_default
                 - is_editable
                 - model_id
                 - model_key
@@ -8246,6 +8266,43 @@ components:
                 - disabled
                 - name
             type: object
+        translationOpenAPIRequest:
+            properties:
+                target:
+                    type: string
+                text:
+                    type: string
+            required:
+                - text
+            type: object
+        translationOpenAPIResponse:
+            properties:
+                source:
+                    type: string
+                target:
+                    type: string
+                translated_text:
+                    type: string
+            required:
+                - source
+                - target
+                - translated_text
+            type: object
+        translationStatusOpenAPIResponse:
+            properties:
+                configured:
+                    type: boolean
+            required:
+                - configured
+            type: object
+        updateModelProviderGroupModelOpenAPIRequest:
+            properties:
+                max_input_tokens:
+                    description: LLM input context window, for example 512, 128K, or 1M
+                    type: string
+            required:
+                - max_input_tokens
+            type: object
         updateModelProviderGroupOpenAPIRequest:
             properties:
                 api_key:
@@ -8475,12 +8532,6 @@ paths:
                 "200":
                     description: OK
             summary: POST /add_files_to_group
-    /api/core/admin:
-        get:
-            responses:
-                "200":
-                    description: OK
-            summary: GET /admin
     /api/core/admin/skill-market:
         post:
             requestBody:
@@ -12591,18 +12642,6 @@ paths:
                 "200":
                     description: OK
             summary: POST /external-chat/runs/{run_id}:heartbeat
-    /api/core/health:
-        get:
-            responses:
-                "200":
-                    description: OK
-            summary: GET /health
-    /api/core/hello:
-        get:
-            responses:
-                "200":
-                    description: OK
-            summary: GET /hello
     /api/core/inner/word_group:apply:
         post:
             requestBody:
@@ -14224,6 +14263,64 @@ paths:
             summary: Delete model under a connection group
             tags:
                 - model_providers
+        patch:
+            description: Updates max_input_tokens for a custom (non-catalog) LLM. The field is required. Values use a positive integer or K/M suffix such as 512, 128K, or 1M and must be at most 16 characters. Catalog models keep the YAML value and cannot be patched.
+            parameters:
+                - in: path
+                  name: model_provider_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: group_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: model_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/updateModelProviderGroupModelOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/listModelProviderGroupModelsOpenAPIItem'
+                    description: Updated group model
+            summary: Update a connection group model
+            tags:
+                - model_providers
+    /api/core/model_providers/{model_provider_id}/groups/{group_id}/remote_models:
+        get:
+            description: Calls the group's OpenAI-compatible /v1/models endpoint using the stored Base URL and API key. Each item includes an inferred model_type and whether it is already added to the group.
+            parameters:
+                - in: path
+                  name: model_provider_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: group_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/listRemoteGroupModelsOpenAPIResponse'
+                    description: Remote models list
+            summary: List models advertised by a connection group
+            tags:
+                - model_providers
     /api/core/model_providers/{model_provider_id}/groups/{group_id}:check:
         post:
             description: Validates credentials. Model providers are proxied to the algorithm check endpoint; OCR cloud services use the same provider API/key request shape as the OCR readers. The current user identity is injected by the auth gateway from the token.
@@ -14265,25 +14362,6 @@ paths:
                                 $ref: '#/components/schemas/ModelFeaturesResponse'
                     description: Feature flags
             summary: Get model feature flags
-            tags:
-                - model_providers
-    /api/core/model_providers/context_windows:
-        get:
-            description: Resolves max_input_tokens from config/model_context_windows.yaml by model name. Unknown names return 128K with matched=false.
-            parameters:
-                - in: query
-                  name: name
-                  required: false
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/lookupContextWindowOpenAPIResponse'
-                    description: Context window lookup
-            summary: Look up a common model context window
             tags:
                 - model_providers
     /api/core/model_providers/models:
@@ -16780,6 +16858,38 @@ paths:
             summary: Enable tool
             tags:
                 - tools
+    /api/core/translation/status:
+        get:
+            description: Reports whether the current user has a selected translation provider with credentials. Secrets are never returned.
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/translationStatusOpenAPIResponse'
+                    description: Translation configuration status
+            summary: Get translation configuration status
+            tags:
+                - translation
+    /api/core/translation:translate:
+        post:
+            description: Translates up to 5000 characters with the current user's server-side translation credential.
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/translationOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/translationOpenAPIResponse'
+                    description: Translated text
+            summary: Translate selected document text
+            tags:
+                - translation
     /api/core/upload_files:
         post:
             responses:
@@ -17877,7 +17987,7 @@ paths:
                                 additionalProperties: true
                                 type: object
                     description: WriterDocument sync result
-            summary: Sync an edited WriterDocument to Feishu
+            summary: Sync an edited WriterDocument to its cloud provider
             tags:
                 - workflow
                 - writer
@@ -17984,7 +18094,7 @@ paths:
                                 additionalProperties: true
                                 type: object
                     description: WriterDocument write-back result
-            summary: Write the active WriterDocument back to Feishu
+            summary: Write the active WriterDocument back to its cloud provider
             tags:
                 - workflow
                 - writer
@@ -18156,3 +18266,4 @@ paths:
 servers:
     - description: same origin; see paths with /api/core prefix
       url: /
+

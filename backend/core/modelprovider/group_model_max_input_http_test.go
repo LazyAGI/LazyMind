@@ -119,7 +119,7 @@ func TestAddGroupModelPrefersRequestMaxInputTokensOverContextWindows(t *testing.
 	}
 }
 
-func TestAddGroupModelLooksUpContextWindowsWhenBodyIsDefaultSentinel(t *testing.T) {
+func TestAddGroupModelKeepsExplicitMaxInputTokens(t *testing.T) {
 	seedGroupModelFixture(t)
 	if err := LoadContextWindows("../config/model_context_windows.yaml"); err != nil {
 		t.Fatal(err)
@@ -143,8 +143,8 @@ func TestAddGroupModelLooksUpContextWindowsWhenBodyIsDefaultSentinel(t *testing.
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload.Data.MaxInputTokens == nil || *payload.Data.MaxInputTokens != "1M" {
-		t.Fatalf("max_input_tokens = %v, want 1M from context windows", payload.Data.MaxInputTokens)
+	if payload.Data.MaxInputTokens == nil || *payload.Data.MaxInputTokens != "128K" {
+		t.Fatalf("max_input_tokens = %v, want explicit 128K", payload.Data.MaxInputTokens)
 	}
 }
 

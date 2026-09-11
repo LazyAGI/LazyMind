@@ -1058,17 +1058,6 @@ type listUserModelsByModelTypeQueryParams struct {
 	ModelType string `query:"model_type"`
 }
 
-type lookupContextWindowQueryParams struct {
-	Name      string `query:"name"`
-	ModelType string `query:"model_type"`
-}
-
-type lookupContextWindowOpenAPIResponse struct {
-	Name           string `json:"name"`
-	MaxInputTokens string `json:"max_input_tokens"`
-	Matched        bool   `json:"matched" desc:"True when the name was found in config/model_context_windows.yaml"`
-}
-
 type selectedModelOpenAPIItem struct {
 	ModelKey                 string  `json:"model_key"`
 	ModelID                  string  `json:"model_id"`
@@ -3802,15 +3791,6 @@ func registeredCoreOperations() []openAPIOperation {
 			Description: "Returns feature flags derived from the algorithm service runtime_models.yaml. Result is permanently cached after the first successful fetch. image_embed_enabled is true when a cross_modal_embed role is configured.",
 			Tags:        []string{"model_providers"},
 			Responses:   map[int]openAPIResponse{200: resp("Feature flags", modelprovider.ModelFeaturesResponse{})},
-		},
-		{
-			Method:      "GET",
-			Path:        "/model_providers/context_windows",
-			Summary:     "Look up a common model context window",
-			Description: "Resolves max_input_tokens from config/model_context_windows.yaml by model name and optional model_type (llm, vlm, embed). Unknown names return 128K with matched=false. model_catalog.yaml is not consulted.",
-			Tags:        []string{"model_providers"},
-			QueryParams: lookupContextWindowQueryParams{},
-			Responses:   map[int]openAPIResponse{200: resp("Context window lookup", lookupContextWindowOpenAPIResponse{})},
 		},
 		{
 			Method:      "GET",
