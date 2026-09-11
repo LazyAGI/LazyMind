@@ -121,6 +121,8 @@ class IncrementalScanner:
         self.plugins = plugins
         self.state = initial_state
         self.buf = ''
+        self.inline_ticks = 0
+        self.fence_ticks = 0
 
     # ---------------- helpers ----------------
     @staticmethod
@@ -159,6 +161,30 @@ class IncrementalScanner:
                 self.state = 'BODY'
                 continue
 
+            # ---- markdown code: skip plugins inside inline/fenced spans ----
+            if self.buf[i] == '`':
+                n = 0
+                while i + n < len(self.buf) and self.buf[i + n] == '`':
+                    n += 1
+                if i + n == len(self.buf):
+                    break
+                at_line_start = i == 0 or self.buf[i - 1] == '\n'
+                if self.fence_ticks:
+                    if at_line_start and n >= self.fence_ticks:
+                        self.fence_ticks = 0
+                elif self.inline_ticks:
+                    if n == self.inline_ticks:
+                        self.inline_ticks = 0
+                elif at_line_start and n >= 3:
+                    self.fence_ticks = n
+                else:
+                    self.inline_ticks = n
+                i += n
+                continue
+            if self.fence_ticks or self.inline_ticks:
+                i += 1
+                continue
+
             # ---- plugin match attempt ----
             handled = False
             for pl in self.plugins:
@@ -186,6 +212,13 @@ class IncrementalScanner:
         for tag in (_THINK_OPEN, _THINK_CLOSE):
             pos = self._partial_tag_start(self.buf, tag)
             if pos is not None and pos >= seg_start and pos < cut:
+                cut = pos
+        # 3) trailing backticks may grow into a longer run on the next chunk
+        if self.buf.endswith('`'):
+            pos = len(self.buf)
+            while pos > 0 and self.buf[pos - 1] == '`':
+                pos -= 1
+            if pos >= seg_start and pos < cut:
                 cut = pos
 
         if cut > seg_start:

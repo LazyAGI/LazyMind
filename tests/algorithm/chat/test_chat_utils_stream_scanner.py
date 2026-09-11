@@ -84,3 +84,34 @@ def test_citation_plugin_display_numbers_start_from_first_streamed_source():
     assert plugin.collect()[0]['display_index'] == 1
     assert plugin.collect()[2]['index'] == '5.1'
     assert plugin.collect()[2]['display_index'] == 2
+
+
+def _source_scanner():
+    config = {
+        CITATION_REFS_KEY: {
+            '1.1': {
+                'file_name': 'Source.md',
+            },
+        },
+    }
+    return IncrementalScanner([ConfigCitationPlugin(config)], initial_state='BODY')
+
+
+def test_incremental_scanner_does_not_rewrite_citations_in_inline_code():
+    scanner = _source_scanner()
+    text = ''.join(part for _, part in scanner.feed('see `[[1.1]]` done'))
+    assert text == 'see `[[1.1]]` done'
+
+
+def test_incremental_scanner_does_not_rewrite_citations_in_fenced_code():
+    scanner = _source_scanner()
+    text = ''.join(part for _, part in scanner.feed('```python\n[[1.1]]\n```\n'))
+    assert '[[1.1]]' in text
+    assert '#source-' not in text
+
+
+def test_incremental_scanner_rewrites_citations_after_fenced_code():
+    scanner = _source_scanner()
+    text = ''.join(part for _, part in scanner.feed('```\n[[1.1]]\n```\nsee [[1.1]]'))
+    assert '```\n[[1.1]]\n```' in text
+    assert '[1](#source-1.1 "Source.md")' in text
