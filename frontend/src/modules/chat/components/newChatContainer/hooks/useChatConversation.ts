@@ -29,6 +29,7 @@ import {
   buildChatMessageListFromHistory,
   getRegenerationInputs,
   mergeChatMessageLists,
+  mergeAskPending,
   stripAskUserReceipt,
 } from "@/modules/chat/utils/message";
 import { mergeChatStreamDelta } from "@/modules/chat/utils/streamDelta";
@@ -1089,6 +1090,10 @@ export function useChatConversation({
           result.sources && result.sources.length > 0
             ? result.sources
             : assistantMessage.sources,
+        ask_pending: mergeAskPending(
+          assistantMessage.ask_pending,
+          result.ask_pending,
+        ),
       };
 
       newList[assistantMessageIndex] = assistantMessage;
@@ -1505,7 +1510,7 @@ export function useChatConversation({
       if (disabledReason) {
         message.warning(disabledReason);
       }
-      return;
+      return false;
     }
     if (
       activeStreamRef.current ||
@@ -1514,7 +1519,7 @@ export function useChatConversation({
       isModelSelectionSaving?.() ||
       !normalizedText
     ) {
-      return;
+      return false;
     }
     const normalizedCiteMessages =
       paramsCiteMessages
@@ -1631,10 +1636,19 @@ export function useChatConversation({
         params.mail_draft_confirm_revision > 0
           ? { mail_draft_confirm_revision: params.mail_draft_confirm_revision }
           : {}),
+        ...(params.mail_draft_patch && Object.keys(params.mail_draft_patch).length
+          ? { mail_draft_patch: params.mail_draft_patch }
+          : {}),
+        ...(params.mail_mailbox_confirm
+          ? { mail_mailbox_confirm: params.mail_mailbox_confirm }
+          : {}),
+        ...(params.mail_mailbox_confirm_draft_id
+          ? { mail_mailbox_confirm_draft_id: params.mail_mailbox_confirm_draft_id }
+          : {}),
       },
     );
     if (!opened) {
-      return;
+      return false;
     }
 
     const currentId = currentConversationIdRef.current;
@@ -1645,6 +1659,7 @@ export function useChatConversation({
         emitConversationActivity({ conversationId: currentId });
       }
     }
+    return true;
   }
 
   const mergeHistoryPage: ChatImperativeProps["mergeHistoryPage"] = (id, history) => {

@@ -139,4 +139,35 @@
     font-size: 13px;
     line-height: 1.6;
   }
+
+  .mail-account-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+
+  .mail-account-rows-title {
+    color: #334155;
+    font-size: 13px;
+    font-weight: 650;
+  }
+
+  .mail-account-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 12px;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    background: #f8fafc;
+  }
+
+  .mail-account-row-email {
+    flex: 1;
+    min-width: 0;
+    color: #0f172a;
+    font-size: 13px;
+    word-break: break-all;
+  }
 }

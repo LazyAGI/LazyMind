@@ -846,7 +846,7 @@ func RetainSidechat(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "retain sidechat failed", http.StatusInternalServerError)
 		return
 	}
-	notifyConversationOpening(db, childID)
+	notifyConversationTitle(db, childID)
 
 	writeConversationJSON(w, http.StatusOK, map[string]any{
 		"conversation": sidechatConversationPayload(child, loadParentDisplayName(r.Context(), db, child, userID)),

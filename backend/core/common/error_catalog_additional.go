@@ -741,14 +741,14 @@ func init() {
 	registerAdditionalErrorAlias("unsupported queued Anki operation", "Unsupported queued Anki operation", http.StatusBadRequest, 2002404)
 	registerAdditionalErrorPattern("AnkiConnect queue flush failed: %s", "AnkiConnect queue flush failed", http.StatusBadGateway, 2002405)
 	registerAdditionalErrorAlias("AnkiConnect queue flush failed", "AnkiConnect queue flush failed", http.StatusBadGateway, 2002405)
-	registerAdditionalError("skill conversion preflight failed", http.StatusInternalServerError, 2002700)
-	registerAdditionalError("cancel generation failed", http.StatusInternalServerError, 2002701)
-	registerAdditionalError("workflow draft generation canceled", http.StatusConflict, 2002702)
-	registerAdditionalError("repair returned empty workflow_yaml", http.StatusBadGateway, 2002703)
-	registerAdditionalError("repair returned empty scenario.md", http.StatusBadGateway, 2002704)
-	registerAdditionalError("save generated script audit", http.StatusInternalServerError, 2002705)
-	registerAdditionalError("save repaired script audit", http.StatusInternalServerError, 2002706)
-	registerAdditionalError("sync workflow capabilities failed", http.StatusInternalServerError, 2002707)
+	registerAdditionalError("skill conversion preflight failed", http.StatusInternalServerError, 2002800)
+	registerAdditionalError("cancel generation failed", http.StatusInternalServerError, 2002801)
+	registerAdditionalError("workflow draft generation canceled", http.StatusConflict, 2002802)
+	registerAdditionalError("repair returned empty workflow_yaml", http.StatusBadGateway, 2002803)
+	registerAdditionalError("repair returned empty scenario.md", http.StatusBadGateway, 2002804)
+	registerAdditionalError("save generated script audit", http.StatusInternalServerError, 2002805)
+	registerAdditionalError("save repaired script audit", http.StatusInternalServerError, 2002806)
+	registerAdditionalError("sync workflow capabilities failed", http.StatusInternalServerError, 2002807)
 }
 
 func registerAdditionalError(message string, status, code int) {

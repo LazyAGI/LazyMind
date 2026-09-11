@@ -45,6 +45,7 @@ import {
 import { allowedUploadTypes } from "@/modules/chat/components/ImageUpload";
 import {
   CHAT_CONVERSATION_LIST_REFRESH_EVENT,
+  CHAT_PENDING_CONVERSATION_GROUP_KEY,
   CHAT_SELECT_CONVERSATION_EVENT,
   WORKFLOW_PANEL_EXPANDED_EVENT,
   WORKFLOW_PANEL_EXPANDED_STORAGE_PREFIX,
@@ -452,6 +453,9 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
   ) {
     const requestConversationId =
       sessionId || pendingClientConversationIdRef.current || uuidv4();
+    const pendingGroupId = !sessionId
+      ? sessionStorage.getItem(CHAT_PENDING_CONVERSATION_GROUP_KEY)?.trim() || ""
+      : "";
     if (!sessionId) {
       pendingClientConversationIdRef.current = requestConversationId;
       const prepareClientConversationId =
@@ -547,6 +551,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
             tags: effectiveChatConfig?.tags,
           },
         },
+        ...(pendingGroupId ? { group_id: pendingGroupId } : {}),
         models: [t("chat.lazyMindModel")],
         thinking_depth:
           extras?.thinking_depth ?? forkThinkingDepth ?? useChatThinkStore.getState().thinkingDepth,
@@ -581,6 +586,18 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         Number.isFinite(extras.mail_draft_confirm_revision) &&
         extras.mail_draft_confirm_revision > 0
           ? { mail_draft_confirm_revision: extras.mail_draft_confirm_revision }
+          : {}),
+        ...(extras?.mail_draft_patch &&
+        typeof extras.mail_draft_patch === "object" &&
+        !Array.isArray(extras.mail_draft_patch)
+          ? { mail_draft_patch: extras.mail_draft_patch }
+          : {}),
+        ...(typeof extras?.mail_mailbox_confirm === "string" && extras.mail_mailbox_confirm
+          ? { mail_mailbox_confirm: extras.mail_mailbox_confirm }
+          : {}),
+        ...(typeof extras?.mail_mailbox_confirm_draft_id === "string" &&
+        extras.mail_mailbox_confirm_draft_id
+          ? { mail_mailbox_confirm_draft_id: extras.mail_mailbox_confirm_draft_id }
           : {}),
         // If the user changed workflow settings before a conversation was created,
         // carry them in the first request so Go can persist them on ensureConversation.
@@ -626,6 +643,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     pendingClientConversationIdRef.current = "";
     sessionIdRef.current = id;
     setSessionId(id);
+    sessionStorage.removeItem(CHAT_PENDING_CONVERSATION_GROUP_KEY);
     window.dispatchEvent(
       new CustomEvent(CHAT_SELECT_CONVERSATION_EVENT, {
         detail: { conversationId: id, source: "chat" },

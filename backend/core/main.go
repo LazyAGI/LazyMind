@@ -23,6 +23,7 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/common/readonlyorm"
+	"lazymind/core/conversationgroup"
 	"lazymind/core/currentmemory"
 	"lazymind/core/episode"
 	"lazymind/core/evalset"
@@ -508,7 +509,9 @@ func run(ctx context.Context) error {
 		return &startupError{msg: "inject bundled history", err: err}
 	}
 	evalset.RegisterAsyncJobs()
-	chat.RegisterConversationOpeningJobs(store.DB())
+	chat.RegisterConversationTitleJobs(store.DB())
+	conversationgroup.RegisterTitlePreparer(chat.OrganizerTitlePreparer{})
+	conversationgroup.RegisterAsyncJobs()
 	knowledge_market.RegisterAsyncJobs()
 	workflow.RegisterWorkflowDraftGenerateJob()
 	workflowHosts := workflowexecutor.DefaultHostRegistry
@@ -541,12 +544,13 @@ func run(ctx context.Context) error {
 		asyncConfig := evalset.LoadAsyncJobRuntimeConfigFromEnv()
 		runner = asyncjob.Start(runtimeCtx, store.DB(), asyncjob.Options{
 			Concurrency:     asyncConfig.Concurrency,
-			ExcludeJobTypes: chat.ConversationOpeningJobTypes,
+			ExcludeJobTypes: chat.ConversationTitleJobTypes,
 			PollInterval:    asyncConfig.PollInterval,
 			LockTTL:         asyncConfig.LockTTL,
 		})
 		backgroundDone = append(backgroundDone, runner.Done())
-		backgroundDone = append(backgroundDone, chat.StartConversationOpening(runtimeCtx, store.DB())...)
+		backgroundDone = append(backgroundDone, conversationgroup.StartTerminalJobReconciler(runtimeCtx, store.DB(), 2*time.Second))
+		backgroundDone = append(backgroundDone, chat.StartConversationTitle(runtimeCtx, store.DB())...)
 
 		importConfig := evalset.LoadImportRuntimeConfigFromEnv()
 		backgroundDone = append(backgroundDone,

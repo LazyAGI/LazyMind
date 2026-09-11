@@ -1,7 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import type { CloudDocumentProvidersVm } from "../hooks/useCloudDocumentProviders";
 import CloudDocumentProviderPanel from "./CloudDocumentProviderPanel";
 
 const labels: Record<string, string> = {
@@ -10,31 +9,29 @@ const labels: Record<string, string> = {
   "modelProvider.cloudDocuments.authPending": "待授权",
 };
 
-function createVm(
-  overrides: Partial<CloudDocumentProvidersVm> = {},
-): CloudDocumentProvidersVm {
+function createVm(overrides: Record<string, unknown> = {}) {
   return {
-    t: ((key: string) => labels[key] || key) as CloudDocumentProvidersVm["t"],
+    t: (key: string) => labels[key] || key,
     loading: false,
     canCreateLocalSource: false,
     localSourceCount: 0,
     isFeishuAuthValid: false,
     isNotionAuthValid: false,
     isGoogleDriveAuthValid: false,
-    isMailConnected: false,
-    mailConnectionLabel: "",
     isFeishuSetupReady: true,
     isNotionSetupReady: true,
     validFeishuAccounts: [],
     notionOauthConnection: null,
     googleDriveConnection: null,
+    isMailAuthValid: false,
+    mailAccounts: [],
     handleManageFeishuAuth: vi.fn(),
     handleManageLocalSource: vi.fn(),
     handleManageGoogleDrive: vi.fn(),
     handleManageMail: vi.fn(),
     handleOpenNotionSetup: vi.fn(),
     ...overrides,
-  } as unknown as CloudDocumentProvidersVm;
+  } as never;
 }
 
 describe("CloudDocumentProviderPanel", () => {
@@ -63,7 +60,7 @@ describe("CloudDocumentProviderPanel", () => {
           isFeishuAuthValid: true,
           isNotionAuthValid: true,
           isGoogleDriveAuthValid: true,
-          isMailConnected: true,
+          isMailAuthValid: true,
         })}
       />,
     );

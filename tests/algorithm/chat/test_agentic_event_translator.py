@@ -395,3 +395,23 @@ def test_unified_grep_rendering_uses_target_and_distinguishes_zero_hits():
     assert 'papers.pdf' not in call_text.split('</tp>', 1)[0]
     assert '文件中没有找到匹配行' in result_text
     assert '已找到' not in result_text
+
+
+def test_translator_accumulates_mail_draft_cards():
+    translator = AgentEventFrameTranslator(query='send two mails')
+    first = translator.feed({
+        'tag': 'ask_pending',
+        'ask_id': 'a1',
+        'questions': [{'text': '确认发送这封邮件？', 'type': 'boolean', 'choices': ['是', '否']}],
+        'mail_draft': {'draft_id': 'draft_one', 'subject': 'one'},
+    })
+    second = translator.feed({
+        'tag': 'ask_pending',
+        'ask_id': 'a2',
+        'questions': [{'text': '确认发送这封邮件？', 'type': 'boolean', 'choices': ['是', '否']}],
+        'mail_draft': {'draft_id': 'draft_two', 'subject': 'two'},
+    })
+    assert len(first[0]['ask_pending']['mail_drafts']) == 1
+    drafts = second[0]['ask_pending']['mail_drafts']
+    assert [item['draft_id'] for item in drafts] == ['draft_one', 'draft_two']
+    assert second[0]['ask_pending']['mail_draft']['draft_id'] == 'draft_two'

@@ -355,10 +355,10 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
     const sendMessage = useCallback(
       (params: Parameters<typeof conversation.sendMessage>[0]) => {
         if (modelSelectionSavingRef.current) {
-          return;
+          return Promise.resolve(false);
         }
         collapseAllThinking();
-        conversation.sendMessage(params);
+        return conversation.sendMessage(params);
       },
       [collapseAllThinking, conversation.sendMessage],
     );
@@ -521,7 +521,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
               messageList={conversation.messageList}
               initialCard={initialCard}
               sendMessage={(text, clearInput, extras) => {
-                sendMessage({ text, clearInput, ...(extras ?? {}) });
+                return sendMessage({ text, clearInput, ...(extras ?? {}) });
               }}
               regenerate={handleRegenerate}
               regenerateDisabled={

@@ -10,6 +10,9 @@ export type SidebarConversation = ConversationWithRelation & {
   history_order?: number | null;
   source_type?: string;
   source_display_name?: string;
+  is_task_conv?: boolean;
+  group_id?: string | null;
+  organizing_run_id?: string | null;
 };
 
 export function isConversationPinned(conversation: SidebarConversation) {
