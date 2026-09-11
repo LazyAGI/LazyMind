@@ -46,6 +46,14 @@ func setWorkflowYAMLUpdate(updates map[string]any, yamlContent string) {
 	updates["plugin_id"] = extractWorkflowID(yamlContent) // workflow-naming: persistence
 }
 
+var generatingStatusesForResponse = map[string]bool{
+	generateStatusAnalyzing:    true,
+	generateStatusGenerating:   true,
+	generateStatusBriefDone:    true,
+	generateStatusSkeletonDone: true,
+	generateStatusStateDone:    true,
+}
+
 // isBuiltinWorkflowID returns true when id does not look like a UUID.
 // Built-in plugin IDs are human-readable strings (e.g. "image-workflow"),
 // while user draft IDs are always UUID v4 strings generated on creation.
@@ -90,6 +98,11 @@ type draftResponse struct {
 	BaseRevisionID        string `json:"base_revision_id"`
 	DraftDirty            bool   `json:"draft_dirty"`
 	LastRepairRunID       string `json:"last_repair_run_id"`
+	GenerateJobStatus     string `json:"generate_job_status"`
+	GenerateProgress      int64  `json:"generate_progress"`
+	GenerateProgressTotal int64  `json:"generate_progress_total"`
+	GenerateAttemptCount  int    `json:"generate_attempt_count"`
+	GenerateMaxAttempts   int    `json:"generate_max_attempts"`
 }
 
 func toDraftResponse(d orm.WorkflowDraft) draftResponse {
@@ -127,6 +140,18 @@ func toEnrichedDraftResponse(db *gorm.DB, d orm.WorkflowDraft) draftResponse {
 	var repairRun orm.WorkflowRepairRun
 	if db.Where("draft_id=?", d.ID).Order("created_at DESC").First(&repairRun).Error == nil {
 		resp.LastRepairRunID = repairRun.ID
+	}
+	if generatingStatusesForResponse[d.GenerateStatus] {
+		var job orm.AsyncJob
+		if db.Where("resource_type=? AND resource_id=? AND job_type=? AND status IN ?", "workflow_draft", d.ID, workflowDraftGenerateJobType, []string{string(asyncjob.StatusPending), string(asyncjob.StatusRunning)}).
+			Order("updated_at DESC").
+			First(&job).Error == nil {
+			resp.GenerateJobStatus = job.Status
+			resp.GenerateProgress = job.ProgressCurrent
+			resp.GenerateProgressTotal = job.ProgressTotal
+			resp.GenerateAttemptCount = job.AttemptCount
+			resp.GenerateMaxAttempts = job.MaxAttempts
+		}
 	}
 	if d.WorkflowID != "" {
 		var p orm.WorkflowResource
@@ -698,6 +723,12 @@ func AIGenerateWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 			clone.UpdatedAt = now
 			packageJSON, _ := json.Marshal(manifestOnlySkillPackage(skillPackage))
 			clone.SourcePackageJSON = string(packageJSON)
+			var cachedMappings map[string]any
+			_ = json.Unmarshal([]byte(clone.ToolMappingReportJSON), &cachedMappings)
+			cachedMappings = reconcileDetectedCapabilityMappings(cachedMappings, detectSkillCapabilityRequirementsFromSnapshot(skillSnapshot))
+			if mappingsJSON, marshalErr := json.Marshal(cachedMappings); marshalErr == nil {
+				clone.ToolMappingReportJSON = string(mappingsJSON)
+			}
 			if err := db.Create(&clone).Error; err == nil {
 				draftStatus := clone.Status
 				if draftStatus == "generatable" {
@@ -730,12 +761,13 @@ func AIGenerateWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 			ReusableScripts:       reusableScripts,
 			UserID:                userID,
 		},
-		MaxAttempts:  1,
+		MaxAttempts:  3,
 		CreateUserID: userID,
 	})
 	if err != nil {
 		_ = db.Model(&draft).Updates(map[string]any{
 			"generate_status": generateStatusFailed,
+			"generate_error":  generationFailureJSON("enqueue", "GENERATION_ENQUEUE_FAILED", err.Error(), true),
 			"updated_at":      time.Now().UTC(),
 		}).Error
 		common.ReplyErr(w, "enqueue failed", http.StatusInternalServerError)
@@ -743,6 +775,61 @@ func AIGenerateWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 	}
 
 	common.ReplyOK(w, toEnrichedDraftResponse(store.DB(), draft))
+}
+
+func CancelWorkflowDraftGeneration(w http.ResponseWriter, r *http.Request) {
+	draftID := common.PathVar(r, "draft_id")
+	userID := common.UserID(r)
+	if draftID == "" || userID == "" {
+		common.ReplyErr(w, "not found", http.StatusNotFound)
+		return
+	}
+	if isBuiltinWorkflowID(draftID) {
+		common.ReplyErr(w, "built-in workflows cannot be modified", http.StatusForbidden)
+		return
+	}
+
+	db := store.DB()
+	var draft orm.WorkflowDraft
+	if err := db.Where("id = ? AND created_by = ? AND deleted_at IS NULL", draftID, userID).First(&draft).Error; err != nil {
+		common.ReplyErr(w, "not found", http.StatusNotFound)
+		return
+	}
+
+	now := time.Now().UTC()
+	if _, err := asyncjob.CancelResourceJobs(r.Context(), db, workflowDraftGenerateJobType, "workflow_draft", draftID, "workflow draft generation canceled by user"); err != nil {
+		common.ReplyErr(w, "cancel generation failed", http.StatusInternalServerError)
+		return
+	}
+	updates := map[string]any{
+		"generate_status":  generateStatusFailed,
+		"generate_error":   workflowDraftGenerationCanceledJSON(),
+		"generate_warning": "",
+		"updated_at":       now,
+	}
+	if err := db.Model(&draft).Where("id = ? AND created_by = ? AND deleted_at IS NULL", draftID, userID).Updates(updates).Error; err != nil {
+		common.ReplyErr(w, "cancel generation failed", http.StatusInternalServerError)
+		return
+	}
+	if err := db.Where("id = ? AND created_by = ? AND deleted_at IS NULL", draftID, userID).First(&draft).Error; err != nil {
+		common.ReplyErr(w, "not found", http.StatusNotFound)
+		return
+	}
+	common.ReplyOK(w, toEnrichedDraftResponse(db, draft))
+}
+
+func workflowDraftGenerationCanceledJSON() string {
+	body, err := json.Marshal(map[string]any{
+		"phase":       "canceled",
+		"code":        "GENERATION_CANCELED",
+		"recoverable": false,
+		"message":     "用户已停止本次 Workflow 转换任务。",
+		"suggestions": []string{"可以稍后重新发起转换，已生成的草稿内容会保留。"},
+	})
+	if err != nil {
+		return "用户已停止本次 Workflow 转换任务。"
+	}
+	return string(body)
 }
 
 // PolishWorkflowDraftInfo handles POST /workflow-drafts:polish-info

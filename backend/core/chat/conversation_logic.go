@@ -3518,6 +3518,13 @@ func workflowStepParamsFromEventParams(raw map[string]any) workflow.WorkflowStep
 	if uid, ok := raw["user_id"].(string); ok && uid != "" {
 		params.UserID = uid
 	}
+	if caps, ok := raw["capabilities"].([]any); ok {
+		for _, cap := range caps {
+			if value, ok := cap.(string); ok && strings.TrimSpace(value) != "" {
+				params.Capabilities = append(params.Capabilities, strings.TrimSpace(value))
+			}
+		}
+	}
 	return params
 }
 

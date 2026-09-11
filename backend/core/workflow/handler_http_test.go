@@ -13,8 +13,10 @@ import (
 
 	"github.com/gorilla/mux"
 
+	"lazymind/core/asyncjob"
 	"lazymind/core/common/orm"
 	"lazymind/core/store"
+	"lazymind/core/workflow/graphengine"
 )
 
 // newHandlerTestDB creates a SQLite DB with all models needed by HTTP handlers.
@@ -28,8 +30,14 @@ func newHandlerTestDB(t *testing.T) *orm.DB {
 		&orm.WorkflowRevisionEntry{},
 		&orm.WorkflowBlob{},
 		&orm.UserWorkflowSetting{},
+		&orm.AsyncJob{},
 		&orm.WorkflowGenerationAnalysis{},
 		&orm.WorkflowRepairRun{},
+		&orm.SkillV2Skill{},
+		&orm.SkillV2Revision{},
+		&orm.SkillV2RevisionEntry{},
+		&orm.SkillV2Blob{},
+		&orm.UserUIPreferences{},
 	); err != nil {
 		t.Fatalf("auto migrate handler models: %v", err)
 	}
@@ -68,6 +76,57 @@ func seedWorkflowResource(t *testing.T, db *orm.DB, workflowRef, workflowID, use
 // jsonBody returns an io.Reader for a JSON string.
 func jsonBody(s string) io.Reader {
 	return strings.NewReader(s)
+}
+
+func seedSkillForWorkflowConversion(t *testing.T, db *orm.DB, userID, skillID, skillMD string) {
+	t.Helper()
+	now := time.Now().UTC()
+	revisionID := skillID + "-rev"
+	hash := sha256.Sum256([]byte(skillMD))
+	blobHash := hex.EncodeToString(hash[:])
+	if err := db.Create(&orm.SkillV2Skill{
+		ID: skillID, OwnerUserID: userID, CreateUserID: userID,
+		Category: "writing", SkillName: "demo-skill", RelativeRoot: "skills/writing/demo-skill",
+		HeadRevisionID: &revisionID, Version: 1, CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.SkillV2Revision{
+		ID: revisionID, SkillID: skillID, RevisionNo: 1, TreeHash: "tree-" + skillID, CreatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.SkillV2Blob{
+		Hash: blobHash, Size: int64(len(skillMD)), Mime: "text/markdown", FileType: "markdown",
+		StorageBackend: "database", Content: []byte(skillMD), CreatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.SkillV2RevisionEntry{
+		RevisionID: revisionID, Path: "SKILL.md", EntryType: "file", BlobHash: &blobHash,
+		Size: int64(len(skillMD)), Mime: "text/markdown", FileType: "markdown", Mode: 0o644,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func addSkillRevisionFileForWorkflowConversion(t *testing.T, db *orm.DB, revisionID, path, content, fileType string) {
+	t.Helper()
+	now := time.Now().UTC()
+	hash := sha256.Sum256([]byte(content))
+	blobHash := hex.EncodeToString(hash[:])
+	if err := db.Create(&orm.SkillV2Blob{
+		Hash: blobHash, Size: int64(len(content)), Mime: "text/plain", FileType: fileType,
+		StorageBackend: "database", Content: []byte(content), CreatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.SkillV2RevisionEntry{
+		RevisionID: revisionID, Path: path, EntryType: "file", BlobHash: &blobHash,
+		Size: int64(len(content)), Mime: "text/plain", FileType: fileType, Mode: 0o644,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestWorkflowRefPathVarPreservesUserWorkflowID(t *testing.T) {
@@ -158,6 +217,363 @@ func TestValidateWorkflowDraft_ValidDraft(t *testing.T) {
 	data, _ := resp["data"].(map[string]any)
 	if data == nil || data["valid"] == nil {
 		t.Fatalf("expected valid field in response: %s", rec.Body.String())
+	}
+}
+
+func TestPreflightSkillWorkflowConversionWarnsOnMissingDependency(t *testing.T) {
+	db := newHandlerTestDB(t)
+	seedSkillForWorkflowConversion(t, db, "user-1", "skill-1", "# Demo Skill\n请根据 references/missing.md 的规则完成写作，并使用 {{topic}} 作为主题。")
+	req := httptest.NewRequest(http.MethodPost, "/workflow-conversions:preflight", strings.NewReader(`{"skill_id":"skill-1"}`))
+	req.Header.Set("X-User-Id", "user-1")
+	rec := httptest.NewRecorder()
+	PreflightSkillWorkflowConversion(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("preflight status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var envelope struct {
+		Data struct {
+			Status string `json:"status"`
+			Checks []struct {
+				Code     string `json:"code"`
+				Severity string `json:"severity"`
+			} `json:"checks"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Data.Status != "warning" {
+		t.Fatalf("status=%q checks=%#v", envelope.Data.Status, envelope.Data.Checks)
+	}
+	foundMissing, foundParam := false, false
+	for _, check := range envelope.Data.Checks {
+		if check.Code == "DEPENDENCY_RESOURCE_MISSING" && check.Severity == "warning" {
+			foundMissing = true
+		}
+		if check.Code == "REQUIRED_PARAMETER_PLACEHOLDER" && check.Severity == "warning" {
+			foundParam = true
+		}
+	}
+	if !foundMissing || !foundParam {
+		t.Fatalf("expected dependency and parameter checks, got %#v", envelope.Data.Checks)
+	}
+}
+
+func TestPreflightSkillWorkflowConversionDoesNotTreatScriptArgsAsMissingPath(t *testing.T) {
+	db := newHandlerTestDB(t)
+	seedSkillForWorkflowConversion(t, db, "user-1", "skill-1", "# Demo Skill\n运行 scripts/fetch_covers.py --keyword {{keyword}}，并根据 references/report_template.html ./ 输出报告。")
+	addSkillRevisionFileForWorkflowConversion(t, db, "skill-1-rev", "scripts/fetch_covers.py", "print('ok')", "python")
+	addSkillRevisionFileForWorkflowConversion(t, db, "skill-1-rev", "references/report_template.html", "<html></html>", "html")
+	req := httptest.NewRequest(http.MethodPost, "/workflow-conversions:preflight", strings.NewReader(`{"skill_id":"skill-1"}`))
+	req.Header.Set("X-User-Id", "user-1")
+	rec := httptest.NewRecorder()
+	PreflightSkillWorkflowConversion(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("preflight status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var envelope struct {
+		Data struct {
+			Status string `json:"status"`
+			Checks []struct {
+				Code     string `json:"code"`
+				Severity string `json:"severity"`
+				Path     string `json:"path"`
+			} `json:"checks"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	for _, check := range envelope.Data.Checks {
+		if check.Code == "DEPENDENCY_RESOURCE_MISSING" {
+			t.Fatalf("dependency with CLI args should resolve to packaged file, got %#v", check)
+		}
+	}
+}
+
+func TestListSkillLinkedWorkflowsReturnsOnlyAvailableWhenEnabled(t *testing.T) {
+	db := newHandlerTestDB(t)
+	seedSkillForWorkflowConversion(t, db, "user-1", "skill-1", "# Demo Skill\n请生成结构化交付内容，包含输入、处理和输出。")
+	now := time.Now().UTC()
+	if err := db.Create(&orm.UserUIPreferences{UserID: "user-1", SkillsEnabled: true, WorkflowsEnabled: true, MCPEnabled: true, TaskCenterEnabled: true, SchedulesEnabled: true, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.WorkflowResource{
+		ID: "wf-resource-1", WorkflowRef: "user:user-1:demo-workflow", WorkflowID: "demo-workflow",
+		OwnerUserID: "user-1", OwnerScope: "u_user_1", SourceType: "skill",
+		SourceSkillID: "skill-1", SourceSkillName: "demo-skill", SourceSkillRevisionID: "skill-1-rev",
+		SourceSkillRevisionNo: 1, SourceSkillTreeHash: "tree-skill-1", SourceDraftID: "draft-1",
+		RelativeRoot: "workflows/u_user_1/demo-workflow", Name: "Demo Workflow",
+		HeadRevisionID: "wf-rev-1", Version: 1, Status: "active", CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.WorkflowRevision{ID: "wf-rev-1", WorkflowResourceID: "wf-resource-1", RevisionNo: 1, TreeHash: "wf-tree", CreatedAt: now}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.UserWorkflowSetting{UserID: "user-1", WorkflowRef: "user:user-1:demo-workflow", Enabled: true, CallMode: WorkflowCallModeManual, UpdatedAt: now}).Error; err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/skills/skill-1/linked-workflows", nil)
+	req = mux.SetURLVars(req, map[string]string{"skill_id": "skill-1"})
+	req.Header.Set("X-User-Id", "user-1")
+	rec := httptest.NewRecorder()
+	ListSkillLinkedWorkflows(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("linked status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var envelope struct {
+		Data struct {
+			Workflows []struct {
+				WorkflowRef string `json:"workflow_ref"`
+				Available   bool   `json:"available"`
+				CallMode    string `json:"call_mode"`
+			} `json:"workflows"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if len(envelope.Data.Workflows) != 1 || !envelope.Data.Workflows[0].Available || envelope.Data.Workflows[0].CallMode != WorkflowCallModeManual {
+		t.Fatalf("linked workflows=%#v", envelope.Data.Workflows)
+	}
+}
+
+func TestListSkillLinkedWorkflowsRejectsMissingRequiredCapability(t *testing.T) {
+	db := newHandlerTestDB(t)
+	seedSkillForWorkflowConversion(t, db, "user-1", "skill-1", "# Demo Skill\n请联网搜索 SkillHub 并返回匹配技能。")
+	now := time.Now().UTC()
+	if err := db.Create(&orm.UserUIPreferences{UserID: "user-1", SkillsEnabled: true, WorkflowsEnabled: true, MCPEnabled: true, TaskCenterEnabled: true, SchedulesEnabled: true, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.WorkflowGenerationAnalysis{
+		ID:                    "analysis-cap-linked",
+		DraftID:               "draft-cap-linked",
+		UserID:                "user-1",
+		SourceType:            "skill",
+		SourceSkillID:         "skill-1",
+		SourceSkillRevisionID: "skill-1-rev",
+		Status:                "generatable",
+		ToolMappingReportJSON: `{"capability:web_search":{"action":"require","required":true,"workflow_capability":"web_search","framework_tool":"web_search","available":true,"label":"网页搜索"}}`,
+		CreatedAt:             now,
+		UpdatedAt:             now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.WorkflowResource{
+		ID: "wf-resource-cap", WorkflowRef: "user:user-1:demo-cap-workflow", WorkflowID: "demo-cap-workflow",
+		OwnerUserID: "user-1", OwnerScope: "u_user_1", SourceType: "skill",
+		SourceSkillID: "skill-1", SourceSkillName: "demo-skill", SourceDraftID: "draft-cap-linked",
+		RelativeRoot: "workflows/u_user_1/demo-cap-workflow", Name: "Demo Cap Workflow",
+		HeadRevisionID: "wf-rev-cap", Version: 1, Status: "active", CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	compiled := graphengine.Compile(
+		"id: demo-cap-workflow\nname: Demo\nslots:\n  - id: result\nsteps:\n  - id: collect\n",
+		"steps:\n  collect:\n    outputs: [result]\ntransitions:\n  __start__: [{to: collect}]\n  collect: [{to: __end__}]\n",
+		"# Scenario\n\n### collect\n\nCollect result.\n",
+		graphengine.ProfilePublish,
+	)
+	graphJSON, _ := json.Marshal(compiled.Graph)
+	if err := db.Create(&orm.WorkflowRevision{ID: "wf-rev-cap", WorkflowResourceID: "wf-resource-cap", RevisionNo: 1, TreeHash: "wf-tree", CompiledGraph: graphJSON, GraphHash: compiled.GraphHash, GraphSchemaVersion: graphengine.SchemaVersion, CreatedAt: now}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.UserWorkflowSetting{UserID: "user-1", WorkflowRef: "user:user-1:demo-cap-workflow", Enabled: true, CallMode: WorkflowCallModeManual, UpdatedAt: now}).Error; err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/skills/skill-1/linked-workflows", nil)
+	req = mux.SetURLVars(req, map[string]string{"skill_id": "skill-1"})
+	req.Header.Set("X-User-Id", "user-1")
+	rec := httptest.NewRecorder()
+	ListSkillLinkedWorkflows(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("linked status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var envelope struct {
+		Data struct {
+			Workflows []struct {
+				Available         bool   `json:"available"`
+				UnavailableReason string `json:"unavailable_reason"`
+			} `json:"workflows"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if len(envelope.Data.Workflows) != 1 || envelope.Data.Workflows[0].Available || envelope.Data.Workflows[0].UnavailableReason != "required_capability_missing" {
+		t.Fatalf("linked workflows=%#v", envelope.Data.Workflows)
+	}
+}
+
+func TestPublishWorkflowDraftPersistsSourceSkillBinding(t *testing.T) {
+	db := newHandlerTestDB(t)
+	seedSkillForWorkflowConversion(t, db, "user-1", "skill-1", "# Demo Skill\n请生成结构化交付内容，包含输入、处理和输出，并保留异常恢复建议。")
+	now := time.Now().UTC()
+	draft := orm.WorkflowDraft{
+		ID: "draft-source-skill", WorkflowID: "skill-workflow", Name: "Skill Workflow",
+		CreatedBy: "user-1", Version: 1, SourceType: "skill", SourceSkillID: "skill-1",
+		SourceSkillName: "demo-skill", SourceSkillRevisionID: "skill-1-rev",
+		SourceSkillRevisionNo: 1, SourceSkillTreeHash: "tree-skill-1",
+		WorkflowYAMLContent: "id: skill-workflow\nname: Skill Workflow\ndescription: From skill\nwhen_to_use: Use for demos\nslots:\n  - id: result\n    type: text\nsteps:\n  - id: collect\n    label: Collect\nui:\n  tabs:\n    - id: result\n      label: Result\n      layout: vertical\n      slots:\n        - id: result\n",
+		StateYAMLContent:    "initial: __start__\nsteps:\n  collect:\n    prompt: collect\n    outputs: [result]\ntransitions:\n  __start__:\n    - to: collect\n  collect:\n    - to: __end__\n",
+		ScenarioContent:     "# Scenario\n\n### collect\nCollect the skill inputs, produce the result slot, and preserve recovery guidance for the user.\n",
+		ScriptsContent:      "{}",
+		CreatedAt:           now, UpdatedAt: now,
+	}
+	if err := db.Create(&draft).Error; err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/workflow-drafts/draft-source-skill:publish", nil)
+	req = mux.SetURLVars(req, map[string]string{"draft_id": draft.ID})
+	req.Header.Set("X-User-Id", "user-1")
+	rec := httptest.NewRecorder()
+	PublishWorkflowDraft(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("publish status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var resource orm.WorkflowResource
+	if err := db.Where("plugin_ref = ?", "user:user-1:skill-workflow").Take(&resource).Error; err != nil {
+		t.Fatal(err)
+	}
+	if resource.SourceType != "skill" || resource.SourceSkillID != "skill-1" ||
+		resource.SourceSkillRevisionID != "skill-1-rev" || resource.SourceSkillTreeHash != "tree-skill-1" ||
+		resource.SourceDraftID != draft.ID {
+		t.Fatalf("source binding not persisted: %#v", resource)
+	}
+}
+
+func TestPublishWorkflowDraftReactivatesArchivedWorkflow(t *testing.T) {
+	db := newHandlerTestDB(t)
+	seedSkillForWorkflowConversion(t, db, "user-1", "skill-1", "# Demo Skill\n请生成结构化交付内容，包含输入、处理和输出，并保留异常恢复建议。")
+	now := time.Now().UTC()
+	if err := db.Create(&orm.WorkflowResource{
+		ID: "wf-resource-archived", WorkflowRef: "user:user-1:skill-workflow", WorkflowID: "skill-workflow",
+		OwnerUserID: "user-1", OwnerScope: "u_user_1", SourceType: "skill",
+		SourceSkillID: "skill-1", SourceSkillName: "demo-skill", SourceDraftID: "old-draft",
+		RelativeRoot: "workflows/u_user_1/skill-workflow", Name: "Old Workflow",
+		HeadRevisionID: "old-rev", Version: 1, Status: "archived", CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.WorkflowRevision{ID: "old-rev", WorkflowResourceID: "wf-resource-archived", RevisionNo: 1, TreeHash: "old-tree", CreatedAt: now}).Error; err != nil {
+		t.Fatal(err)
+	}
+	draft := orm.WorkflowDraft{
+		ID: "draft-reactivate", WorkflowID: "skill-workflow", Name: "Skill Workflow",
+		CreatedBy: "user-1", Version: 1, SourceType: "skill", SourceSkillID: "skill-1",
+		SourceSkillName: "demo-skill", SourceSkillRevisionID: "skill-1-rev",
+		SourceSkillRevisionNo: 1, SourceSkillTreeHash: "tree-skill-1",
+		WorkflowYAMLContent: "id: skill-workflow\nname: Skill Workflow\ndescription: From skill\nwhen_to_use: Use for demos\nslots:\n  - id: result\n    type: text\nsteps:\n  - id: collect\n    label: Collect\nui:\n  tabs:\n    - id: result\n      label: Result\n      layout: vertical\n      slots:\n        - id: result\n",
+		StateYAMLContent:    "initial: __start__\nsteps:\n  collect:\n    prompt: collect\n    outputs: [result]\ntransitions:\n  __start__:\n    - to: collect\n  collect:\n    - to: __end__\n",
+		ScenarioContent:     "# Scenario\n\n### collect\nCollect the skill inputs and produce the result slot.\n",
+		ScriptsContent:      "{}",
+		CreatedAt:           now, UpdatedAt: now,
+	}
+	if err := db.Create(&draft).Error; err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/workflow-drafts/draft-reactivate:publish", nil)
+	req = mux.SetURLVars(req, map[string]string{"draft_id": draft.ID})
+	req.Header.Set("X-User-Id", "user-1")
+	rec := httptest.NewRecorder()
+	PublishWorkflowDraft(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("publish status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var resource orm.WorkflowResource
+	if err := db.Where("plugin_ref = ?", "user:user-1:skill-workflow").Take(&resource).Error; err != nil {
+		t.Fatal(err)
+	}
+	if resource.Status != "active" || resource.SourceDraftID != draft.ID || resource.HeadRevisionID == "old-rev" {
+		t.Fatalf("workflow was not reactivated from publish: %#v", resource)
+	}
+}
+
+func TestGenerateFailureKeepsDraftGeneratingWhenRetryRemains(t *testing.T) {
+	db := newHandlerTestDB(t)
+	now := time.Now().UTC()
+	draft := orm.WorkflowDraft{
+		ID: "draft-retry", WorkflowID: "retry-workflow", Name: "Retry Workflow",
+		CreatedBy: "user-1", Version: 1,
+		DesignBriefContent: "Brief is already available.",
+		CreatedAt:          now, UpdatedAt: now,
+	}
+	if err := db.Create(&draft).Error; err != nil {
+		t.Fatal(err)
+	}
+	jobRow := orm.AsyncJob{
+		ID: "job-retry", JobType: workflowDraftGenerateJobType, Status: "running",
+		ResourceType: "workflow_draft", ResourceID: draft.ID, AttemptCount: 1, MaxAttempts: 3,
+		NextRunAt: now, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := db.Create(&jobRow).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := markGenerateFailedForAttempt(db.DB, draft.ID, asyncjob.Job{ID: jobRow.ID, AttemptCount: 1}, "phase1 skeleton: temporary upstream timeout"); err != nil {
+		t.Fatal(err)
+	}
+	var updated orm.WorkflowDraft
+	if err := db.Where("id=?", draft.ID).First(&updated).Error; err != nil {
+		t.Fatal(err)
+	}
+	if updated.GenerateStatus != generateStatusBriefDone || updated.GenerateError != "" || !strings.Contains(updated.GenerateWarning, "自动重试") {
+		t.Fatalf("draft retry status not preserved: status=%q error=%q warning=%q", updated.GenerateStatus, updated.GenerateError, updated.GenerateWarning)
+	}
+}
+
+func TestCancelWorkflowDraftGenerationCancelsActiveJob(t *testing.T) {
+	db := newHandlerTestDB(t)
+	now := time.Now().UTC()
+	draft := orm.WorkflowDraft{
+		ID: "11111111-1111-4111-8111-111111111111", Name: "Cancel Workflow", CreatedBy: "user-1",
+		GenerateStatus: generateStatusBriefDone, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := db.Create(&draft).Error; err != nil {
+		t.Fatal(err)
+	}
+	lockUntil := now.Add(time.Minute)
+	jobRow := orm.AsyncJob{
+		ID: "job-cancel", JobType: workflowDraftGenerateJobType, Status: string(asyncjob.StatusRunning),
+		ResourceType: "workflow_draft", ResourceID: draft.ID, AttemptCount: 1, MaxAttempts: 3,
+		NextRunAt: now, LockedBy: "worker", LockUntil: &lockUntil, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := db.Create(&jobRow).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/workflow-drafts/"+draft.ID+":cancel-generation", nil)
+	req = mux.SetURLVars(req, map[string]string{"draft_id": draft.ID})
+	req.Header.Set("X-User-Id", "user-1")
+	rec := httptest.NewRecorder()
+	CancelWorkflowDraftGeneration(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("cancel status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var updated orm.WorkflowDraft
+	if err := db.Where("id=?", draft.ID).First(&updated).Error; err != nil {
+		t.Fatal(err)
+	}
+	if updated.GenerateStatus != generateStatusFailed || !strings.Contains(updated.GenerateError, "GENERATION_CANCELED") {
+		t.Fatalf("draft not marked canceled: status=%q error=%q", updated.GenerateStatus, updated.GenerateError)
+	}
+	var job orm.AsyncJob
+	if err := db.Where("id=?", jobRow.ID).First(&job).Error; err != nil {
+		t.Fatal(err)
+	}
+	if job.Status != string(asyncjob.StatusCanceled) || job.LockedBy != "" || job.LockUntil != nil {
+		t.Fatalf("job not canceled cleanly: %+v", job)
+	}
+}
+
+func TestBestGenerateResumePhaseUsesExistingArtifactsOnRetry(t *testing.T) {
+	draft := orm.WorkflowDraft{
+		DesignBriefContent:  "Brief is ready.",
+		WorkflowYAMLContent: "id: retry_workflow\nname: Retry Workflow\nslots:\n  - id: result\n    type: text\nsteps:\n  - id: collect\n    label: Collect\nui:\n  tabs:\n    - id: result\n      label: Result\n      layout: vertical\n      slots:\n        - id: result\n",
+		StateYAMLContent:    "initial: __start__\nsteps:\n  collect:\n    prompt: collect\n    outputs: [result]\ntransitions:\n  __start__:\n    - to: collect\n  collect:\n    - to: __end__\n",
+	}
+	if got := bestGenerateResumePhase(draft, generatePhaseDesignBrief); got != generatePhaseScenarioScripts {
+		t.Fatalf("resume phase=%q, want %q", got, generatePhaseScenarioScripts)
 	}
 }
 

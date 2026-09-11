@@ -433,7 +433,7 @@
   "2001344": { "en-US": "Create upstream thread failed", "zh-CN": "创建上游线程失败" },
   "2001345": { "en-US": "Create word group from conflict failed", "zh-CN": "根据冲突创建词组失败" },
   "2001346": { "en-US": "Cron_expr and prompt_template are required", "zh-CN": "缺少 cron_expr 或 prompt_template" },
-  "2001347": { "en-US": "Custom workflow scripts require the administrator publishing workflow", "zh-CN": "包含自定义脚本的工作流必须通过管理员发布流程" },
+  "2001347": { "en-US": "Custom workflow scripts require administrator permission or a matching script audit", "zh-CN": "包含自定义脚本的工作流需要管理员权限或匹配的脚本审计" },
   "2001348": { "en-US": "Database connection not found", "zh-CN": "数据库连接不存在" },
   "2001349": { "en-US": "Dataset_ids required", "zh-CN": "缺少 dataset_ids" },
   "2001350": { "en-US": "Db unavailable", "zh-CN": "数据库不可用" },
@@ -1637,5 +1637,13 @@
   "2002747": {"en-US": "Organizer failed", "zh-CN": "整理执行状态无效，请重新整理"},
   "2002748": {"en-US": "Invalid incremental identity or length", "zh-CN": "整理执行状态无效，请重新整理"},
   "2002750": {"en-US": "Conversation organizer group names are locked", "zh-CN": "整理期间暂不可新建或重命名分组"},
-  "2002751": {"en-US": "Invalid opening batch result count", "zh-CN": "会话摘要批量结果数量不匹配"}
+  "2002751": {"en-US": "Invalid opening batch result count", "zh-CN": "会话摘要批量结果数量不匹配"},
+  "2002800": {"en-US": "Skill to Workflow preflight failed", "zh-CN": "Skill 转 Workflow 前置检查失败"},
+  "2002801": {"en-US": "Failed to cancel generation", "zh-CN": "取消生成任务失败"},
+  "2002802": {"en-US": "Workflow draft generation was canceled", "zh-CN": "工作流草稿生成已取消"},
+  "2002803": {"en-US": "Auto repair returned empty workflow.yaml", "zh-CN": "自动修复未返回 workflow.yaml"},
+  "2002804": {"en-US": "Auto repair returned empty scenario.md", "zh-CN": "自动修复未返回 scenario.md"},
+  "2002805": {"en-US": "Failed to save generated script audit", "zh-CN": "保存生成脚本审计失败"},
+  "2002806": {"en-US": "Failed to save repaired script audit", "zh-CN": "保存修复脚本审计失败"},
+  "2002807": {"en-US": "Failed to sync Workflow capabilities", "zh-CN": "同步 Workflow 能力声明失败"}
 }

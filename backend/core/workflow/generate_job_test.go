@@ -1,8 +1,15 @@
 package workflow
 
 import (
+	"context"
+	"errors"
+	"strings"
 	"testing"
+	"time"
 
+	"gopkg.in/yaml.v3"
+
+	"lazymind/core/asyncjob"
 	"lazymind/core/common/orm"
 	"lazymind/core/workflow/graphengine"
 )
@@ -129,6 +136,102 @@ steps:
 	}
 }
 
+func TestAlignWorkflowUITabsWithStateStepsExpandsSingleResultTab(t *testing.T) {
+	workflowYAML := `
+id: find-skill-skillhub
+name: Find Skill on SkillHub
+slots:
+  - id: query_text
+    type: text
+    external: true
+    label: 需求描述
+  - id: search_plan
+    type: json
+    label: 搜索计划
+  - id: raw_search_results
+    type: json
+    label: 原始搜索结果
+  - id: ranked_skills
+    type: json
+    label: 排序结果
+  - id: recommendation_report
+    type: text
+    exposed: true
+    label: 推荐报告
+steps:
+  - id: parse_query
+  - id: search_skills
+  - id: rank_results
+  - id: generate_report
+ui:
+  tabs:
+    - id: results
+      label: Results
+      layout: vertical
+      slots:
+        - id: recommendation_report
+`
+	stateYAML := `
+steps:
+  parse_query:
+    inputs: [query_text]
+    outputs: [search_plan]
+  search_skills:
+    inputs: [search_plan]
+    outputs: [raw_search_results]
+  rank_results:
+    inputs: [raw_search_results]
+    outputs: [ranked_skills]
+  generate_report:
+    inputs: [ranked_skills]
+    outputs: [recommendation_report]
+transitions:
+  __start__: [{to: parse_query}]
+  parse_query: [{to: search_skills}]
+  search_skills: [{to: rank_results}]
+  rank_results: [{to: generate_report}]
+  generate_report: [{to: __end__}]
+`
+	aligned, changed, err := alignWorkflowUITabsWithStateSteps(workflowYAML, stateYAML)
+	if err != nil {
+		t.Fatalf("alignWorkflowUITabsWithStateSteps returned error: %v", err)
+	}
+	if !changed {
+		t.Fatal("expected tabs to be expanded")
+	}
+	var doc struct {
+		UI struct {
+			Tabs []struct {
+				ID     string `yaml:"id"`
+				StepID string `yaml:"step_id"`
+				Label  string `yaml:"label"`
+				Slots  []struct {
+					ID string `yaml:"id"`
+				} `yaml:"slots"`
+			} `yaml:"tabs"`
+		} `yaml:"ui"`
+	}
+	if err := yaml.Unmarshal([]byte(aligned), &doc); err != nil {
+		t.Fatalf("aligned workflow yaml invalid: %v", err)
+	}
+	if got := len(doc.UI.Tabs); got != 4 {
+		t.Fatalf("tabs len = %d, want 4\n%s", got, aligned)
+	}
+	wantStepIDs := []string{"parse_query", "search_skills", "rank_results", "generate_report"}
+	wantSlots := []string{"search_plan", "raw_search_results", "ranked_skills", "recommendation_report"}
+	for i, tab := range doc.UI.Tabs {
+		if tab.ID != wantStepIDs[i] || tab.StepID != wantStepIDs[i] {
+			t.Fatalf("tab[%d] = id:%q step_id:%q, want %q", i, tab.ID, tab.StepID, wantStepIDs[i])
+		}
+		if len(tab.Slots) != 1 || tab.Slots[0].ID != wantSlots[i] {
+			t.Fatalf("tab[%d] slots = %#v, want %q", i, tab.Slots, wantSlots[i])
+		}
+	}
+	if doc.UI.Tabs[3].Label != "Results" {
+		t.Fatalf("last tab label = %q, want existing Results label", doc.UI.Tabs[3].Label)
+	}
+}
+
 func TestValidateGeneratedScenarioContentRejectsPlaceholders(t *testing.T) {
 	stateYAML := `
 steps:
@@ -203,4 +306,458 @@ func TestReusableSkillScriptsKeepsOnlyOriginalScriptFiles(t *testing.T) {
 	if _, ok := scripts["scripts/generated/synthesis_checklist.js"]; ok {
 		t.Fatalf("inline analysis code should not be stored as an original script: %#v", scripts)
 	}
+}
+
+func TestDetectSkillCapabilityRequirementsFindsGenericExternalNeeds(t *testing.T) {
+	requirements := detectSkillCapabilityRequirements(`
+# Find Skill
+
+Use SkillHub to search skill packages for the user. If the user asks for poster
+assets, generate images from text prompts and inspect uploaded images.
+`)
+	got := map[string]bool{}
+	for _, req := range requirements {
+		got[req.WorkflowCapability] = true
+	}
+	for _, want := range []string{"http_request", "text2image", "vlm"} {
+		if !got[want] {
+			t.Fatalf("missing capability %q in %#v", want, requirements)
+		}
+	}
+	if got["web_search"] {
+		t.Fatalf("SkillHub lookup should map to http_request, not web_search: %#v", requirements)
+	}
+}
+
+func TestDetectSkillCapabilityRequirementsFromSnapshotIgnoresReferenceTaxonomy(t *testing.T) {
+	requirements := detectSkillCapabilityRequirementsFromSnapshot(workflowSourceSkillSnapshot{Files: []skillPackageFile{
+		{Path: "SKILL.md", Content: `
+# Find SkillHub Skill
+
+Use SkillHub to search skill packages through https://api.skillhub.cn/api/skills.
+Open category references only to map the user's search intent.
+`},
+		{Path: "references/design-media.md", Content: `
+| key | name | english |
+| --- | --- | --- |
+| design-image-gen | 图片生成 | Image Generation |
+| design-image-edit | 图片编辑 | Image Editing |
+`},
+	}})
+	got := map[string]bool{}
+	for _, req := range requirements {
+		got[req.WorkflowCapability] = true
+	}
+	if !got["http_request"] {
+		t.Fatalf("missing http_request in %#v", requirements)
+	}
+	if got["web_search"] {
+		t.Fatalf("explicit SkillHub API access should not require search-engine config: %#v", requirements)
+	}
+	for _, unwanted := range []string{"text2image", "image_editing"} {
+		if _, ok := got[unwanted]; ok {
+			t.Fatalf("reference taxonomy should not require %q: %#v", unwanted, requirements)
+		}
+	}
+}
+
+func TestDetectSkillCapabilityRequirementsDetectsCredentialedAPI(t *testing.T) {
+	requirements := detectSkillCapabilityRequirements(`
+# CRM Sync Skill
+
+Call https://api.example.com/v1/customers with an API key in the Authorization header.
+`)
+	got := map[string]skillCapabilityRequirement{}
+	for _, req := range requirements {
+		got[req.WorkflowCapability] = req
+	}
+	if !got["http_request"].Supported {
+		t.Fatalf("missing http_request in %#v", requirements)
+	}
+	credential := got["credentialed_http_request"]
+	if !credential.Configurable || !credential.ConfigWarning || credential.CredentialKind != "api_key" {
+		t.Fatalf("missing configurable credential requirement in %#v", requirements)
+	}
+	for _, unwanted := range []string{"text2image", "image_editing"} {
+		if _, ok := got[unwanted]; ok {
+			t.Fatalf("reference taxonomy should not require %q: %#v", unwanted, requirements)
+		}
+	}
+}
+
+func TestDetectSkillCapabilityRequirementsIgnoresCredentialTaxonomyFields(t *testing.T) {
+	requirements := detectSkillCapabilityRequirements(`
+# Public SkillHub API
+
+Call https://api.skillhub.cn/api/skills. This endpoint is public and 无需鉴权.
+The response labels include requires_api_key so users can filter skills that need their own key.
+`)
+	got := map[string]bool{}
+	for _, req := range requirements {
+		got[req.WorkflowCapability] = true
+	}
+	if !got["http_request"] {
+		t.Fatalf("missing http_request in %#v", requirements)
+	}
+	if got["credentialed_http_request"] {
+		t.Fatalf("requires_api_key taxonomy field should not require credentials: %#v", requirements)
+	}
+}
+
+func TestDetectSkillCapabilityRequirementsFromSnapshotReadsExecutableReferences(t *testing.T) {
+	requirements := detectSkillCapabilityRequirementsFromSnapshot(workflowSourceSkillSnapshot{Files: []skillPackageFile{
+		{Path: "SKILL.md", Content: `
+# Poster Skill
+
+Follow references/render.md for the rendering implementation.
+`},
+		{Path: "references/render.md", Content: `
+调用文生图工具生成图片，并在需要时执行图片编辑工具修图。
+`},
+	}})
+	got := map[string]bool{}
+	for _, req := range requirements {
+		got[req.WorkflowCapability] = true
+	}
+	for _, want := range []string{"text2image", "image_editing"} {
+		if !got[want] {
+			t.Fatalf("missing capability %q in %#v", want, requirements)
+		}
+	}
+}
+
+func TestInjectSkillCapabilitiesIntoWorkflowDeclaresRequiredCapabilities(t *testing.T) {
+	workflowYAML := `
+id: demo
+name: Demo
+slots:
+  - id: query
+    type: text
+    external: true
+  - id: result
+    type: text
+steps:
+  - id: search
+    label: Search
+`
+	stateYAML := `
+start_route: all
+steps:
+  search:
+    inputs: [{slot: query, required: true}]
+    outputs: [result]
+transitions:
+  __start__: [{to: search}]
+  search: [{to: __end__}]
+`
+	mappings := mergeDetectedCapabilityMappings(nil, []skillCapabilityRequirement{{
+		ID: "web_search", Label: "网页搜索", WorkflowCapability: "web_search", FrameworkTool: "web_search", Supported: true, Required: true,
+	}})
+	nextWorkflow, nextState, injected := injectSkillCapabilitiesIntoWorkflow(workflowYAML, stateYAML, mappings)
+	if len(injected) != 1 || injected[0] != "web_search" {
+		t.Fatalf("injected = %#v", injected)
+	}
+	compiled := graphengine.Compile(nextWorkflow, nextState, "", graphengine.ProfilePublish)
+	if !compiled.Valid {
+		t.Fatalf("compiled invalid: %#v", compiled.Diagnostics)
+	}
+	if !stringSliceContains(compiled.Graph.Nodes["search"].Capabilities, "web_search") {
+		t.Fatalf("node capabilities missing web_search: %#v", compiled.Graph.Nodes["search"].Capabilities)
+	}
+	if !stringSliceContains(compiled.Graph.Nodes["search"].LegacyTools, "web_search") {
+		t.Fatalf("node tools missing web_search: %#v", compiled.Graph.Nodes["search"].LegacyTools)
+	}
+}
+
+func TestInjectSkillCapabilitiesIntoWorkflowAddsCredentialClarification(t *testing.T) {
+	workflowYAML := `
+id: demo
+name: Demo
+slots:
+  - id: query
+    type: text
+    external: true
+  - id: result
+    type: text
+steps:
+  - id: fetch
+    label: Fetch
+`
+	stateYAML := `
+steps:
+  fetch:
+    inputs: [{slot: query, required: true}]
+    outputs: [result]
+transitions:
+  __start__: [{to: fetch}]
+  fetch: [{to: __end__}]
+`
+	mappings := mergeDetectedCapabilityMappings(nil, []skillCapabilityRequirement{{
+		ID: "authenticated_api_access", Label: "凭证型 API 访问", WorkflowCapability: "credentialed_http_request", Supported: true, Required: true, Configurable: true, ConfigWarning: true, CredentialKind: "api_key",
+	}})
+	nextWorkflow, nextState, injected := injectSkillCapabilitiesIntoWorkflow(workflowYAML, stateYAML, mappings)
+	if len(injected) != 1 || injected[0] != "credentialed_http_request" {
+		t.Fatalf("injected = %#v", injected)
+	}
+	if !strings.Contains(nextWorkflow, "clarification_fields") || !strings.Contains(nextWorkflow, "authenticated_api_access_credential") {
+		t.Fatalf("credential clarification field missing:\n%s", nextWorkflow)
+	}
+	compiled := graphengine.Compile(nextWorkflow, nextState, "", graphengine.ProfilePublish)
+	if !compiled.Valid {
+		t.Fatalf("compiled invalid: %#v", compiled.Diagnostics)
+	}
+	if !stringSliceContains(compiled.Graph.Nodes["fetch"].LegacyTools, "url_fetch") {
+		t.Fatalf("credentialed API access should map to url_fetch tool: %#v", compiled.Graph.Nodes["fetch"].LegacyTools)
+	}
+}
+
+func TestInjectSkillCapabilitiesIntoWorkflowUsesStepToolMappings(t *testing.T) {
+	workflowYAML := `
+id: demo
+name: Demo
+slots:
+  - id: query
+    external: true
+  - id: raw
+  - id: answer
+steps:
+  - id: fetch
+  - id: summarize
+`
+	stateYAML := `
+steps:
+  fetch:
+    inputs: [{slot: query, required: true}]
+    outputs: [raw]
+  summarize:
+    inputs: [{slot: raw, required: true}]
+    outputs: [answer]
+transitions:
+  __start__: [{to: fetch}]
+  fetch: [{to: summarize}]
+  summarize: [{to: __end__}]
+`
+	mappings := mergeDetectedCapabilityMappings(map[string]any{
+		"fetch": map[string]any{
+			"workflow_capability": "http_request",
+		},
+	}, []skillCapabilityRequirement{{
+		ID: "public_api_access", Label: "公开 API 访问", WorkflowCapability: "http_request", WorkflowTools: []string{"url_fetch"}, Supported: true, Required: true,
+	}})
+	nextWorkflow, nextState, _ := injectSkillCapabilitiesIntoWorkflow(workflowYAML, stateYAML, mappings)
+	compiled := graphengine.Compile(nextWorkflow, nextState, "", graphengine.ProfilePublish)
+	if !compiled.Valid {
+		t.Fatalf("compiled invalid: %#v", compiled.Diagnostics)
+	}
+	if !stringSliceContains(compiled.Graph.Nodes["fetch"].LegacyTools, "url_fetch") {
+		t.Fatalf("fetch node tools missing url_fetch: %#v", compiled.Graph.Nodes["fetch"].LegacyTools)
+	}
+	if stringSliceContains(compiled.Graph.Nodes["summarize"].LegacyTools, "url_fetch") {
+		t.Fatalf("summarize node should not inherit step-specific fetch tool: %#v", compiled.Graph.Nodes["summarize"].LegacyTools)
+	}
+}
+
+func TestInjectSkillCapabilitiesIntoWorkflowMatchesNearStepToolMappings(t *testing.T) {
+	workflowYAML := `
+id: demo
+name: Demo
+slots:
+  - id: query
+    external: true
+  - id: raw
+steps:
+  - id: search_skill
+`
+	stateYAML := `
+steps:
+  search_skill:
+    prompt: Search SkillHub for matching skills.
+    inputs: [{slot: query, required: true}]
+    outputs: [raw]
+transitions:
+  __start__: [{to: search_skill}]
+  search_skill: [{to: __end__}]
+`
+	mappings := mergeDetectedCapabilityMappings(map[string]any{
+		"search_skills": map[string]any{
+			"workflow_capability": "http_request",
+		},
+	}, []skillCapabilityRequirement{{
+		ID: "skillhub_search", Label: "SkillHub 搜索", WorkflowCapability: "http_request", WorkflowTools: []string{"url_fetch"}, Supported: true, Required: true,
+	}})
+	nextWorkflow, nextState, _ := injectSkillCapabilitiesIntoWorkflow(workflowYAML, stateYAML, mappings)
+	compiled := graphengine.Compile(nextWorkflow, nextState, "", graphengine.ProfilePublish)
+	if !compiled.Valid {
+		t.Fatalf("compiled invalid: %#v", compiled.Diagnostics)
+	}
+	if !stringSliceContains(compiled.Graph.Nodes["search_skill"].LegacyTools, "url_fetch") {
+		t.Fatalf("search_skill node tools missing url_fetch: %#v", compiled.Graph.Nodes["search_skill"].LegacyTools)
+	}
+}
+
+func TestInjectExecutionBoundariesIntoOpenEndedToolSteps(t *testing.T) {
+	stateYAML := `
+steps:
+  fetch:
+    prompt: Search the API for matching skills and save raw results.
+    outputs: [raw]
+    tools: [url_fetch]
+  rank:
+    prompt: Rank the collected candidates.
+    inputs: [{slot: raw, required: true}]
+    outputs: [answer]
+    tools: [url_fetch]
+transitions:
+  __start__: [{to: fetch}]
+  fetch: [{to: rank}]
+  rank: [{to: __end__}]
+`
+	next, changed := injectExecutionBoundariesIntoStateSteps(stateYAML)
+	if !changed {
+		t.Fatal("expected open-ended fetch step to receive execution boundaries")
+	}
+	if !strings.Contains(next, workflowExecutionBoundaryMarker) || !strings.Contains(next, "HTTP/API budget") || !strings.Contains(next, "Stop as soon as") {
+		t.Fatalf("boundary prompt missing expected safeguards:\n%s", next)
+	}
+	if strings.Count(next, workflowExecutionBoundaryMarker) != 1 {
+		t.Fatalf("expected only one boundary block, got:\n%s", next)
+	}
+	nextAgain, changedAgain := injectExecutionBoundariesIntoStateSteps(next)
+	if changedAgain || strings.Count(nextAgain, workflowExecutionBoundaryMarker) != 1 {
+		t.Fatalf("boundary injection must be idempotent:\n%s", nextAgain)
+	}
+	workflowYAML := `
+id: demo
+name: Demo
+slots:
+  - id: raw
+  - id: answer
+steps:
+  - id: fetch
+  - id: rank
+`
+	compiled := graphengine.Compile(workflowYAML, next, "", graphengine.ProfilePublish)
+	if !compiled.Valid {
+		t.Fatalf("compiled invalid after boundary injection: %#v", compiled.Diagnostics)
+	}
+	if strings.Contains(compiled.Graph.Nodes["rank"].Prompt, workflowExecutionBoundaryMarker) {
+		t.Fatalf("plain ranking step should not receive tool exploration boundaries: %q", compiled.Graph.Nodes["rank"].Prompt)
+	}
+}
+
+func TestInjectExecutionBoundariesPreservesExplicitImageScope(t *testing.T) {
+	stateYAML := `
+steps:
+  inspect_images:
+    prompt: Analyze all images from the upstream image list.
+    inputs: [{slot: images, required: true}]
+    outputs: [image_report]
+    capabilities: [vlm]
+transitions:
+  __start__: [{to: inspect_images}]
+  inspect_images: [{to: __end__}]
+`
+	next, changed := injectExecutionBoundariesIntoStateSteps(stateYAML)
+	if !changed {
+		t.Fatal("expected image step to receive boundaries")
+	}
+	if !strings.Contains(next, "process all explicitly provided images") {
+		t.Fatalf("image boundary must preserve explicit upstream input scope:\n%s", next)
+	}
+	if strings.Contains(next, "at most 10") {
+		t.Fatalf("image boundary must not hard-code a low absolute image limit:\n%s", next)
+	}
+}
+
+func TestReconcileDetectedCapabilityMappingsPrunesStaleCapabilityEntries(t *testing.T) {
+	mappings := reconcileDetectedCapabilityMappings(map[string]any{
+		"capability:image_editing": map[string]any{
+			"action":              "require",
+			"required":            true,
+			"workflow_capability": "image_editing",
+			"source":              "deterministic_skill_capability_scan",
+		},
+		"capability:web_search": map[string]any{
+			"action":              "require",
+			"required":            true,
+			"workflow_capability": "web_search",
+			"source":              "deterministic_skill_capability_scan",
+		},
+		"llm-text2image": map[string]any{
+			"action":              "require",
+			"required":            true,
+			"workflow_capability": "text2image",
+		},
+		"script:search": map[string]any{
+			"action":         "replace",
+			"framework_tool": "web_search",
+			"available":      true,
+		},
+	}, []skillCapabilityRequirement{{
+		ID: "web_search", Label: "网页搜索", WorkflowCapability: "web_search", FrameworkTool: "web_search", Supported: true, Required: true,
+	}})
+	if _, ok := mappings["capability:image_editing"]; ok {
+		t.Fatalf("stale image_editing capability was not pruned: %#v", mappings)
+	}
+	if _, ok := mappings["llm-text2image"]; ok {
+		t.Fatalf("stale text2image capability was not pruned: %#v", mappings)
+	}
+	if _, ok := mappings["capability:web_search"]; !ok {
+		t.Fatalf("web_search capability was pruned: %#v", mappings)
+	}
+	if _, ok := mappings["script:search"]; !ok {
+		t.Fatalf("non-capability mapping should be preserved: %#v", mappings)
+	}
+}
+
+func TestSaveGeneratedDraftUpdatesDoesNotWriteCanceledJob(t *testing.T) {
+	db := newHandlerTestDB(t)
+	now := time.Now().UTC()
+	draft := orm.WorkflowDraft{
+		ID:             "22222222-2222-4222-8222-222222222222",
+		Name:           "Canceled Draft",
+		CreatedBy:      "user-1",
+		GenerateStatus: generateStatusBriefDone,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}
+	if err := db.Create(&draft).Error; err != nil {
+		t.Fatal(err)
+	}
+	jobRow := orm.AsyncJob{
+		ID:           "job-save-canceled",
+		JobType:      workflowDraftGenerateJobType,
+		Status:       string(asyncjob.StatusCanceled),
+		ResourceType: "workflow_draft",
+		ResourceID:   draft.ID,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+	if err := db.Create(&jobRow).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	err := saveGeneratedDraftUpdates(context.Background(), db.DB, draft.ID, asyncjob.Job{ID: jobRow.ID}, map[string]any{
+		"generate_status": generateStatusDone,
+		"updated_at":      time.Now().UTC(),
+	})
+	if !errors.Is(err, errWorkflowDraftGenerationCanceled) {
+		t.Fatalf("save err=%v, want canceled", err)
+	}
+	var updated orm.WorkflowDraft
+	if err := db.Where("id=?", draft.ID).First(&updated).Error; err != nil {
+		t.Fatal(err)
+	}
+	if updated.GenerateStatus != generateStatusBriefDone {
+		t.Fatalf("draft status changed after canceled save: %q", updated.GenerateStatus)
+	}
+}
+
+func stringSliceContains(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }

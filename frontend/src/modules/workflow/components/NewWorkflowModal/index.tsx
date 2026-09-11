@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Modal, Input, Button, Select, Tooltip, message } from 'antd';
+import { Modal, Input, Button, Select, Tooltip, message, Alert, Spin } from 'antd';
 import { FileTextOutlined, ThunderboltOutlined, BulbOutlined, QuestionCircleOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
-import { createWorkflowDraft, aiGenerateWorkflowDraft, updateWorkflowDraftContent, deleteWorkflowDraft } from '../../workflowDraftApi';
+import { createWorkflowDraft, aiGenerateWorkflowDraft, updateWorkflowDraftContent, preflightSkillWorkflowConversion } from '../../workflowDraftApi';
+import type { SkillWorkflowPreflightResponse } from '../../workflowDraftApi';
 import { listSkillAssetsPage } from '@/modules/memory/skillApi';
 import { serializeWorkflowModel } from '../StateGraphEditor/core/workflowSerializer';
 import { createEmptyWorkflowModel } from '../StateGraphEditor/core/workflowModel';
@@ -57,6 +58,9 @@ export default function NewWorkflowModal({ open, onCancel, onCreated }: NewWorkf
   const [description, setDescription] = useState('');
 
   const [creating, setCreating] = useState(false);
+  const [preflightLoading, setPreflightLoading] = useState(false);
+  const [preflight, setPreflight] = useState<SkillWorkflowPreflightResponse | null>(null);
+  const [preflightError, setPreflightError] = useState('');
 
   // For skill mode: fields appear only after skill is chosen
   const skillSelected = mode === 'skill' && !!skillId;
@@ -71,6 +75,9 @@ export default function NewWorkflowModal({ open, onCancel, onCreated }: NewWorkf
     setIdError('');
     setName('');
     setDescription('');
+    setPreflight(null);
+    setPreflightError('');
+    setPreflightLoading(false);
   };
 
   // When a skill is selected, auto-fill workflowId with a slugified skill name
@@ -85,6 +92,32 @@ export default function NewWorkflowModal({ open, onCancel, onCreated }: NewWorkf
       setIdError('');
     }
   }, [skillId, skillName]);
+
+  useEffect(() => {
+    if (mode !== 'skill' || !skillId) {
+      setPreflight(null);
+      setPreflightError('');
+      setPreflightLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setPreflightLoading(true);
+    setPreflight(null);
+    setPreflightError('');
+    preflightSkillWorkflowConversion(skillId)
+      .then((result) => {
+        if (!cancelled) setPreflight(result);
+      })
+      .catch(() => {
+        if (!cancelled) setPreflightError(t('selfEvolutionRun.newWorkflowPreflightFailed'));
+      })
+      .finally(() => {
+        if (!cancelled) setPreflightLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [mode, skillId, t]);
 
   const handleCancel = () => {
     reset();
@@ -103,10 +136,12 @@ export default function NewWorkflowModal({ open, onCancel, onCreated }: NewWorkf
     }
   };
 
-  const handleSkillChange = (val: string, option: { label: string; value: string } | { label: string; value: string }[]) => {
+  const handleSkillChange = (val: string, option?: { label: string; value: string } | { label: string; value: string }[]) => {
     setSkillId(val);
     const opt = Array.isArray(option) ? option[0] : option;
     setSkillName(opt?.label ?? '');
+    setPreflight(null);
+    setPreflightError('');
   };
 
   const handleModeChange = (newMode: CreateMode) => {
@@ -118,6 +153,9 @@ export default function NewWorkflowModal({ open, onCancel, onCreated }: NewWorkf
     setIdError('');
     setName('');
     setDescription('');
+    setPreflight(null);
+    setPreflightError('');
+    setPreflightLoading(false);
   };
 
   const handleCreate = async () => {
@@ -136,6 +174,14 @@ export default function NewWorkflowModal({ open, onCancel, onCreated }: NewWorkf
     }
     if (mode === 'skill' && !skillId) {
       message.warning(t('selfEvolutionRun.newWorkflowSkillRequired'));
+      return;
+    }
+    if (mode === 'skill' && preflightLoading) {
+      message.warning(t('selfEvolutionRun.newWorkflowPreflightRunning'));
+      return;
+    }
+    if (mode === 'skill' && preflight?.status === 'blocked') {
+      message.warning(t('selfEvolutionRun.newWorkflowPreflightBlocked'));
       return;
     }
 
@@ -162,14 +208,20 @@ export default function NewWorkflowModal({ open, onCancel, onCreated }: NewWorkf
       onCreated(draft.id);
     } catch {
       if (draftId) {
-        deleteWorkflowDraft(draftId).catch(() => {});
+        message.warning(t('selfEvolutionRun.workflowDetailFailedBanner'));
+        onCreated(draftId);
+        draftId = undefined;
       }
     } finally {
       setCreating(false);
     }
   };
 
-  const canCreate = showFields && workflowId.trim() !== '' && !idError;
+  const preflightBlocked = mode === 'skill' && preflight?.status === 'blocked';
+  const canCreate = showFields && workflowId.trim() !== '' && !idError && !preflightLoading && !preflightBlocked;
+  const preflightIssues = preflight?.checks?.filter((check) => check.severity === 'error' || check.severity === 'warning') ?? [];
+  const preflightErrors = preflightIssues.filter((check) => check.severity === 'error').length;
+  const preflightWarnings = preflightIssues.filter((check) => check.severity === 'warning').length;
 
   return (
     <Modal
@@ -222,6 +274,54 @@ export default function NewWorkflowModal({ open, onCancel, onCreated }: NewWorkf
               style={{ width: '100%' }}
               onFocus={() => skillOptions.length === 0 && void handleSkillSearch('')}
             />
+            {preflightLoading && (
+              <div className="npm-preflight npm-preflight--loading">
+                <Spin size="small" />
+                <span>{t('selfEvolutionRun.newWorkflowPreflightLoading')}</span>
+              </div>
+            )}
+            {!preflightLoading && preflightError && (
+              <Alert
+                type="warning"
+                showIcon
+                className="npm-preflight-alert"
+                message={preflightError}
+                description={t('selfEvolutionRun.newWorkflowPreflightFallback')}
+              />
+            )}
+            {!preflightLoading && preflight && (
+              <Alert
+                type={preflight.status === 'blocked' ? 'error' : preflight.status === 'warning' ? 'warning' : 'success'}
+                showIcon
+                className="npm-preflight-alert"
+                message={
+                  preflight.status === 'blocked'
+                    ? t('selfEvolutionRun.newWorkflowPreflightBlockedTitle', { errors: preflightErrors })
+                    : preflight.status === 'warning'
+                      ? t('selfEvolutionRun.newWorkflowPreflightWarningTitle', { warnings: preflightWarnings })
+                      : t('selfEvolutionRun.newWorkflowPreflightPassedTitle')
+                }
+                description={(
+                  <div className="npm-preflight-detail">
+                    <div>{preflight.summary}</div>
+                    {preflightIssues.length > 0 && (
+                      <ul>
+                        {preflightIssues.slice(0, 4).map((check, index) => (
+                          <li key={`${check.code}:${check.path}:${index}`}>
+                            {check.path ? `${check.path}：` : ''}{check.message}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {preflightIssues.length > 4 && (
+                      <div className="npm-preflight-more">
+                        {t('selfEvolutionRun.newWorkflowPreflightMore', { count: preflightIssues.length - 4 })}
+                      </div>
+                    )}
+                  </div>
+                )}
+              />
+            )}
           </div>
         )}
 
