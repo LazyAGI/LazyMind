@@ -486,3 +486,21 @@ def test_workspace_binding_preserves_parent_private_permission_snapshot(monkeypa
         }},
     }})
     assert LocalFileToolkit._workspace_context()['permission_version'] == 7
+def test_save_chat_artifact_emits_downloadable_event(monkeypatch):
+    from lazymind.chat.engine.tools.local_file import workspace as chat_artifact
+
+    emitted = []
+    monkeypatch.setattr(
+        chat_artifact,
+        '_write_agent_data',
+        lambda tag, **payload: emitted.append({'tag': tag, **payload}),
+    )
+
+    result = chat_artifact.save_chat_artifact('hello.txt', '你好')
+
+    artifact_id = result['artifact_id']
+    assert result['file_markdown'] == f'[hello.txt](file_id:{artifact_id})'
+    assert emitted[0]['artifact_id'] == artifact_id
+    assert emitted[0]['tag'] == 'artifact_created'
+    assert emitted[0]['filename'] == 'hello.txt'
+    assert emitted[0]['value'] == {'text': '你好'}

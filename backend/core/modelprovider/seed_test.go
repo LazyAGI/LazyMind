@@ -13,6 +13,16 @@ import (
 	"lazymind/core/common/orm"
 )
 
+func TestModelCatalogHasNoMaxInputTokens(t *testing.T) {
+	yamlBytes, err := os.ReadFile("../config/model_catalog.yaml")
+	if err != nil {
+		t.Fatalf("read model catalog: %v", err)
+	}
+	if strings.Contains(string(yamlBytes), "max_input_tokens") {
+		t.Fatal("model_catalog.yaml must not define max_input_tokens; use model_context_windows.yaml")
+	}
+}
+
 func TestModelCatalogIncludesOpenRouter(t *testing.T) {
 	yamlBytes, err := os.ReadFile("../config/model_catalog.yaml")
 	if err != nil {
@@ -86,11 +96,11 @@ func TestModelCatalogIncludesOpenRouter(t *testing.T) {
 			}
 		}
 		freeModel := modelsByName["z-ai/glm-5.3-flash"]
-		if freeModel.Type != "llm" || freeModel.MaxInputTokens == nil || *freeModel.MaxInputTokens != "1310720" || freeModel.FreeAutoSelectPriority != 1 {
+		if freeModel.Type != "llm" || freeModel.FreeAutoSelectPriority != 1 {
 			t.Fatalf("unexpected free OpenRouter model config: %+v", freeModel)
 		}
 		freeVLM := modelsByName["openrouter/free"]
-		if freeVLM.Type != "vlm" || freeVLM.MaxInputTokens == nil || *freeVLM.MaxInputTokens != "200K" || freeVLM.FreeAutoSelectPriority != 1 {
+		if freeVLM.Type != "vlm" || freeVLM.FreeAutoSelectPriority != 1 {
 			t.Fatalf("unexpected free OpenRouter VLM config: %+v", freeVLM)
 		}
 		if modelsByName["liquid/lfm-2.5-embedding-350m:free"].FreeAutoSelectPriority != 1 {

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import time
 from typing import Any, Optional
@@ -22,6 +23,41 @@ from lazymind.chat.service.component.tool_rendering import (
 )
 
 _STREAM_CHUNK_SIZE = 24
+_CAPABILITY_DEPENDENCY_MARKER = 'MEDIA_CAPABILITY_DEPENDENCY_MISSING'
+
+
+def _capability_dependency_from_value(value: Any, depth: int = 0) -> Optional[dict[str, Any]]:
+    if depth > 6 or value is None:
+        return None
+    if isinstance(value, dict):
+        if value.get('status') == 'blocked' and isinstance(value.get('missing'), list):
+            return dict(value)
+        for nested in value.values():
+            dependency = _capability_dependency_from_value(nested, depth + 1)
+            if dependency is not None:
+                return dependency
+        return None
+    if isinstance(value, (list, tuple)):
+        for nested in value:
+            dependency = _capability_dependency_from_value(nested, depth + 1)
+            if dependency is not None:
+                return dependency
+        return None
+    if not isinstance(value, str):
+        return None
+    marker_index = value.find(_CAPABILITY_DEPENDENCY_MARKER)
+    if marker_index < 0:
+        return None
+    payload_text = value[marker_index + len(_CAPABILITY_DEPENDENCY_MARKER):].lstrip()
+    try:
+        payload, _ = json.JSONDecoder().raw_decode(payload_text)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    if payload.get('status') != 'blocked' or not isinstance(payload.get('missing'), list):
+        return None
+    return payload
 
 
 def _stream_frame(
@@ -82,8 +118,10 @@ class AgentEventFrameTranslator:
         reset_citation_state(self.citation_state)
         self.language = _preview_language(query)
         self._pending_previews: dict[str, str] = {}
+        self._mail_drafts: dict[str, dict[str, Any]] = {}
         self.streamed_text = False
         self.ask_pending_emitted = False
+        self.capability_dependency_emitted = False
         self.tool_call_turns = 0
         self.metrics = RunMetricsTracker(clock or time.monotonic, started_at=started_at)
         self.model_events: list[dict[str, Any]] = []
@@ -132,7 +170,21 @@ class AgentEventFrameTranslator:
             frames.append(_stream_frame(extra={'artifact_created': artifact}))
             return frames
         if event_type == 'ask_pending':
+            if self.capability_dependency_emitted:
+                return frames
             ask_data = {k: v for k, v in event.items() if k != 'tag'}
+            mail_draft = ask_data.get('mail_draft')
+            if isinstance(mail_draft, dict) and mail_draft.get('draft_id'):
+                self._mail_drafts[str(mail_draft['draft_id'])] = mail_draft
+            extra_drafts = ask_data.get('mail_drafts')
+            if isinstance(extra_drafts, list):
+                for item in extra_drafts:
+                    if isinstance(item, dict) and item.get('draft_id'):
+                        self._mail_drafts[str(item['draft_id'])] = item
+            if self._mail_drafts:
+                drafts = list(self._mail_drafts.values())
+                ask_data['mail_drafts'] = drafts
+                ask_data['mail_draft'] = drafts[-1]
             self.ask_pending_emitted = True
             self.run.ask_pending = True
             frames.append(_stream_frame(extra={'ask_pending': ask_data}))
@@ -211,7 +263,16 @@ class AgentEventFrameTranslator:
                     )
                     for tr in tool_results
                 ]
-                frames.append(_stream_frame(text=''.join(parts)))
+                dependency = _capability_dependency_from_value(tool_results)
+                if dependency is not None:
+                    self.capability_dependency_emitted = True
+                frames.append(_stream_frame(
+                    text=''.join(parts),
+                    extra=(
+                        {'capability_dependency': dependency}
+                        if dependency is not None else None
+                    ),
+                ))
 
         if event_type == 'subagent_think':
             think = str(event.get('think') or '')
@@ -273,7 +334,7 @@ class AgentEventFrameTranslator:
         # ask_user is a stop tool. Its return value is an internal execution
         # receipt, while the preceding ask_pending event is the user-facing
         # response. Never stream that receipt as ordinary assistant text.
-        if self.ask_pending_emitted:
+        if self.ask_pending_emitted or self.capability_dependency_emitted:
             return frames
         output = _format_final_result(final_result, self.citation_state)
         chunk_size = int(_cfg['agentic_stream_chunk_size'] or _STREAM_CHUNK_SIZE)

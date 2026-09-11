@@ -12,6 +12,7 @@ import (
 	"lazymind/core/agent"
 	"lazymind/core/agentinvocation"
 	"lazymind/core/chat"
+	"lazymind/core/conversationgroup"
 	"lazymind/core/currentmemory"
 	"lazymind/core/datasource"
 	"lazymind/core/doc"
@@ -292,8 +293,8 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/agent/router/traffic-stats", []string{"user.admin"}, agent.GetRouterTrafficStats)
 
 	// ----- Conversation -----
-	handleAPI(r, "GET", "/conversations/metadata-backfill", []string{"qa.read"}, chat.OpeningBackfill)
-	handleAPI(r, "POST", "/conversations/metadata-backfill", []string{"qa.write"}, chat.OpeningBackfill)
+	handleAPI(r, "GET", "/conversations/metadata-backfill", []string{"qa.read"}, chat.ConversationTitleBackfill)
+	handleAPI(r, "POST", "/conversations/metadata-backfill", []string{"qa.write"}, chat.ConversationTitleBackfill)
 	handleAPI(r, "PATCH", "/conversations/{name}/title", []string{"qa.write"}, chat.RenameConversation)
 	handleAPI(r, "POST", "/conversations:chat", []string{"qa.write"}, chat.ChatConversations)
 	handleAPI(r, "POST", "/conversations:estimateContextUsage", []string{"qa.read"}, chat.EstimateContextUsage)
@@ -359,11 +360,13 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/workflow-drafts:trash", []string{"qa.read"}, workflow.ListWorkflowDraftTrash)
 	handleAPI(r, "DELETE", "/workflow-drafts:trash", []string{"qa.write"}, workflow.EmptyWorkflowDraftTrash)
 	handleAPI(r, "POST", "/workflow-drafts:polish-info", []string{"qa.write"}, workflow.PolishWorkflowDraftInfo)
+	handleAPI(r, "POST", "/workflow-conversions:preflight", []string{"qa.read"}, workflow.PreflightSkillWorkflowConversion)
 	handleAPI(r, "GET", "/workflow-drafts/{draft_id}", []string{"qa.read"}, workflow.GetWorkflowDraft)
 	handleAPI(r, "POST", "/workflow-drafts/{draft_id}:copy", []string{"qa.write"}, workflow.CopyWorkflowDraft)
 	handleAPI(r, "POST", "/workflow-drafts/{draft_id}:save", []string{"qa.write"}, workflow.SaveWorkflowDraft)
 	handleAPI(r, "POST", "/workflow-drafts/{draft_id}:validate", []string{"qa.read"}, workflow.ValidateWorkflowDraft)
 	handleAPI(r, "POST", "/workflow-drafts/{draft_id}:ai-generate", []string{"qa.write"}, workflow.AIGenerateWorkflowDraft)
+	handleAPI(r, "POST", "/workflow-drafts/{draft_id}:cancel-generation", []string{"qa.write"}, workflow.CancelWorkflowDraftGeneration)
 	handleAPI(r, "POST", "/workflow-drafts/{draft_id}:ai-repair", []string{"qa.write"}, workflow.AIRepairWorkflowDraft)
 	handleAPI(r, "GET", "/workflow-drafts/{draft_id}/generation-analysis", []string{"qa.read"}, workflow.GetWorkflowGenerationAnalysis)
 	handleAPI(r, "POST", "/workflow-drafts/{draft_id}:confirm-workflow", []string{"qa.write"}, workflow.ConfirmWorkflowWorkflow)
@@ -375,6 +378,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "DELETE", "/workflow-drafts/{draft_id}", []string{"qa.write"}, workflow.DeleteWorkflowDraft)
 	handleAPI(r, "GET", "/chat/settings/workflows", []string{"qa.read"}, workflow.ListUserWorkflowSettings)
 	handleAPI(r, "PATCH", "/chat/settings/workflows/{workflow_ref:.+}", []string{"qa.write"}, workflow.PatchUserWorkflowSetting)
+	handleAPI(r, "GET", "/skills/{skill_id}/linked-workflows", []string{"qa.read"}, workflow.ListSkillLinkedWorkflows)
 	handleAPI(r, "POST", "/published-workflows/{workflow_ref:.+}:rollback", []string{"qa.write"}, workflow.RollbackWorkflow)
 	handleAPI(r, "POST", "/published-workflows/{workflow_ref:.+}:archive", []string{"qa.write"}, workflow.ArchiveWorkflow)
 	handleAPI(r, "POST", "/published-workflows/{workflow_ref:.+}:restore", []string{"qa.write"}, workflow.RestoreWorkflow)
@@ -639,6 +643,22 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/conversations/{name}", []string{"qa.read"}, chat.GetConversation)
 	handleAPI(r, "DELETE", "/conversations/{name}", []string{"qa.write"}, chat.DeleteConversation)
 	handleAPI(r, "POST", "/conversations:batchDelete", []string{"qa.write"}, chat.BatchDeleteConversations)
+	handleAPI(r, "GET", "/conversation-groups", []string{"qa.read"}, conversationgroup.ListGroups)
+	handleAPI(r, "POST", "/conversation-groups", []string{"qa.write"}, conversationgroup.CreateGroup)
+	handleAPI(r, "GET", "/conversation-groups/{group_id}", []string{"qa.read"}, conversationgroup.GetGroup)
+	handleAPI(r, "PATCH", "/conversation-groups/{group_id}/placement", []string{"qa.write"}, conversationgroup.UpdateGroupPlacement)
+	handleAPI(r, "PATCH", "/conversation-groups/{group_id}", []string{"qa.write"}, conversationgroup.UpdateGroup)
+	handleAPI(r, "DELETE", "/conversation-groups/{group_id}", []string{"qa.write"}, conversationgroup.DeleteGroup)
+	handleAPI(r, "POST", "/conversation-groups/{group_id}/conversations", []string{"qa.write"}, conversationgroup.AddMember)
+	handleAPI(r, "DELETE", "/conversation-groups/{group_id}/conversations/{conversation_id}", []string{"qa.write"}, conversationgroup.RemoveMember)
+	handleAPI(r, "POST", "/conversation-organizer-runs", []string{"qa.write"}, conversationgroup.StartOrganizer)
+	handleAPI(r, "GET", "/conversation-organizer-runs:latest", []string{"qa.read"}, conversationgroup.GetLatestOrganizer)
+	handleAPI(r, "GET", "/conversation-organizer-runs/{run_id}", []string{"qa.read"}, conversationgroup.GetOrganizer)
+	handleAPI(r, "POST", "/conversation-organizer-runs/{run_id}:cancel", []string{"qa.write"}, conversationgroup.CancelOrganizer)
+	handleAPI(r, "POST", "/conversation-organizer-runs/{run_id}:retry", []string{"qa.write"}, conversationgroup.RetryOrganizer)
+	handleAPI(r, "POST", "/conversation-organizer-runs/{run_id}:confirm", []string{"qa.write"}, conversationgroup.ConfirmOrganizer)
+	handleAPI(r, "POST", "/conversation-organizer-runs/{run_id}:undo", []string{"qa.write"}, conversationgroup.UndoOrganizer)
+	handleAPI(r, "PATCH", "/conversation-organizer-runs/{run_id}/items/{conversation_id}", []string{"qa.write"}, conversationgroup.CorrectOrganizerItem)
 	handleAPI(r, "POST", "/conversations:batchStatus", []string{"qa.read"}, chat.BatchConversationStatus)
 	handleAPI(r, "GET", "/conversations", []string{"qa.read"}, chat.ListConversations)
 	handleAPI(r, "POST", "/conversations:setChatHistory", []string{"qa.write"}, chat.SetChatHistory)
@@ -689,8 +709,10 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/model_providers/{model_provider_id}/groups", []string{"model.write"}, modelprovider.CreateGroup)
 	handleAPI(r, "PATCH", "/model_providers/{model_provider_id}/groups/{group_id}", []string{"model.write"}, modelprovider.UpdateGroup)
 	handleAPI(r, "DELETE", "/model_providers/{model_provider_id}/groups/{group_id}", []string{"model.write"}, modelprovider.DeleteGroup)
+	handleAPI(r, "GET", "/model_providers/{model_provider_id}/groups/{group_id}/remote_models", []string{"model.read"}, modelprovider.ListRemoteGroupModels)
 	handleAPI(r, "GET", "/model_providers/{model_provider_id}/groups/{group_id}/models", []string{"model.read"}, modelprovider.ListGroupModels)
 	handleAPI(r, "POST", "/model_providers/{model_provider_id}/groups/{group_id}/models", []string{"model.write"}, modelprovider.AddGroupModel)
+	handleAPI(r, "PATCH", "/model_providers/{model_provider_id}/groups/{group_id}/models/{model_id}", []string{"model.write"}, modelprovider.UpdateGroupModel)
 	handleAPI(r, "DELETE", "/model_providers/{model_provider_id}/groups/{group_id}/models/{model_id}", []string{"model.write"}, modelprovider.DeleteGroupModel)
 	handleAPI(r, "POST", "/model_providers/{model_provider_id}/groups/{group_id}/keys", []string{"model.write"}, modelprovider.AddKey)
 	handleAPI(r, "DELETE", "/model_providers/{model_provider_id}/groups/{group_id}/keys", []string{"model.write"}, modelprovider.RemoveKey)

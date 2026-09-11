@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate, useOutletContext } from 'react-router-dom';
-import { Alert, Breadcrumb, Button, Modal, Input, Spin, Select, Space, Tag, message } from 'antd';
+import { Alert, Breadcrumb, Button, Modal, Input, Spin, Select, Space, Tag, message, Progress } from 'antd';
 import { SyncOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { localizeErrorCode } from '@/components/request';
-import { getWorkflowDraft, listWorkflowDrafts, updateWorkflowDraftContent, aiGenerateWorkflowDraft, repairWorkflowDraft, publishWorkflowDraft, listWorkflowVersions, getWorkflowVersion, editWorkflowVersion, getWorkflowGenerationAnalysis, confirmWorkflowWorkflow, previewWorkflowRepair, getWorkflowRepairRun, validateWorkflowDraft } from '../../workflowDraftApi';
+import { getWorkflowDraft, listWorkflowDrafts, updateWorkflowDraftContent, aiGenerateWorkflowDraft, cancelWorkflowDraftGeneration, repairWorkflowDraft, publishWorkflowDraft, listWorkflowVersions, getWorkflowVersion, editWorkflowVersion, getWorkflowGenerationAnalysis, confirmWorkflowWorkflow, previewWorkflowRepair, getWorkflowRepairRun, validateWorkflowDraft } from '../../workflowDraftApi';
 import type { WorkflowDraftRecord } from '../../workflowDraftApi';
 import type { WorkflowVersionSummary, WorkflowVersionContent, WorkflowGenerationAnalysis, RepairPreview, WorkflowGenerateStartPhase } from '../../workflowDraftApi';
 import StateGraphEditor from '../../components/StateGraphEditor';
@@ -22,9 +22,12 @@ const GENERATING_STATUSES = new Set(['analyzing', 'generating', 'brief_done', 's
 // state_done means workflow.yaml + state.yml are ready even though Phase 3 is still running.
 const EDITOR_READY_STATUSES = new Set(['state_done', 'done']);
 
-type GeneratePhase = 'brief' | 'skeleton' | 'scenario_scripts' | 'repairing' | 'done' | 'failed' | 'idle';
+type GeneratePhase = 'analysis' | 'brief' | 'skeleton' | 'state_machine' | 'scenario_scripts' | 'repairing' | 'done' | 'failed' | 'idle';
 
 const GENERATE_START_PHASES: WorkflowGenerateStartPhase[] = ['design_brief', 'skeleton', 'state_machine', 'scenario_scripts'];
+const SKILL_GENERATE_DISPLAY_PHASES: GeneratePhase[] = ['analysis', 'brief', 'skeleton', 'state_machine', 'scenario_scripts'];
+const DEFAULT_GENERATE_DISPLAY_PHASES: GeneratePhase[] = ['brief', 'skeleton', 'state_machine', 'scenario_scripts'];
+const GENERATE_PHASE_SOFT_CAP_OFFSET = 2;
 
 type RegeneratePhaseOption = {
   value: WorkflowGenerateStartPhase;
@@ -36,6 +39,14 @@ type RegeneratePhaseOption = {
 };
 
 type GenerationDiagnostic = Partial<WorkflowDiagnostic>;
+
+type GenerationFailurePayload = {
+  phase?: string;
+  code?: string;
+  recoverable?: boolean;
+  message?: string;
+  suggestions?: string[];
+};
 
 function generationPhaseLabel(raw: string): string {
   if (/phase-?1 analysis/i.test(raw)) return '技能分析阶段';
@@ -90,6 +101,48 @@ function parseGenerationDiagnostics(raw: string): { summary: string; diagnostics
     }
   }
   return { summary: compact, diagnostics: [] };
+}
+
+function parseGenerationFailurePayload(raw: string): GenerationFailurePayload | null {
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    if (!('message' in parsed) && !('code' in parsed) && !('phase' in parsed)) return null;
+    return {
+      phase: typeof parsed.phase === 'string' ? parsed.phase : undefined,
+      code: typeof parsed.code === 'string' ? parsed.code : undefined,
+      recoverable: typeof parsed.recoverable === 'boolean' ? parsed.recoverable : undefined,
+      message: typeof parsed.message === 'string' ? parsed.message : undefined,
+      suggestions: Array.isArray(parsed.suggestions)
+        ? parsed.suggestions.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+        : undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function generationFailurePhaseLabel(phase: string): string {
+  switch (phase) {
+    case 'analysis':
+      return '技能分析阶段';
+    case 'design_brief':
+      return '设计草稿阶段';
+    case 'skeleton':
+      return '工作流骨架阶段';
+    case 'state_machine':
+      return '执行流程阶段';
+    case 'scenario_scripts':
+      return '说明与调试材料阶段';
+    case 'validation':
+      return '最终校验阶段';
+    case 'resume':
+      return '断点续跑检查';
+    case 'enqueue':
+      return '任务排队阶段';
+    default:
+      return '生成过程';
+  }
 }
 
 function describeRepairFile(path: string): string {
@@ -154,11 +207,14 @@ function describeDiagnosticLocation(path: string): string {
 
 function resolvePhase(status: string): GeneratePhase {
   switch (status) {
+    case 'analyzing':
+      return 'analysis';
     case 'generating':
-    case 'brief_done':
       return 'brief';
-    case 'skeleton_done':
+    case 'brief_done':
       return 'skeleton';
+    case 'skeleton_done':
+      return 'state_machine';
     case 'state_done':
       return 'scenario_scripts';
     case 'repairing':
@@ -186,8 +242,10 @@ export default function WorkflowDetailPage() {
 
   const getPhaseMessage = (phase: GeneratePhase): string => {
     const map: Record<GeneratePhase, string> = {
+      analysis: t('selfEvolutionRun.workflowDetailPhaseAnalysis'),
       brief: t('selfEvolutionRun.workflowDetailPhaseBrief'),
       skeleton: t('selfEvolutionRun.workflowDetailPhaseSkeleton'),
+      state_machine: t('selfEvolutionRun.workflowDetailPhaseStateMachine'),
       scenario_scripts: t('selfEvolutionRun.workflowDetailPhaseScenarioScripts'),
       repairing: t('selfEvolutionRun.workflowDetailPhaseRepairing'),
       done: '',
@@ -232,6 +290,9 @@ export default function WorkflowDetailPage() {
   const [confirmingCandidate, setConfirmingCandidate] = useState('');
   const [repairPreview, setRepairPreview] = useState<RepairPreview | null>(null);
   const [repairFailureDetails, setRepairFailureDetails] = useState<string[]>([]);
+  const [generationProgressHidden, setGenerationProgressHidden] = useState(false);
+  const [generationCloseModalOpen, setGenerationCloseModalOpen] = useState(false);
+  const [cancelingGeneration, setCancelingGeneration] = useState(false);
   const repairPreviewRequestRef = useRef(0);
   const prevStatusRef = useRef<string>('');
   // Per-banner dismissed state. Each banner has a unique key; dismissed keys are stored
@@ -272,6 +333,28 @@ export default function WorkflowDetailPage() {
   const renderGenerationErrorDetails = useCallback((raw: string) => {
     const trimmed = raw.trim();
     if (!trimmed) return localizeErrorCode('2000509');
+    const failurePayload = parseGenerationFailurePayload(trimmed);
+    if (failurePayload) {
+      const detailLines = splitGenerationLines(failurePayload.message || failurePayload.code || localizeErrorCode('2000509'));
+      const suggestionLines = failurePayload.suggestions || [];
+      return (
+        <div className="workflow-generation-issue-details">
+          <div className="workflow-generation-issue-phase">
+            失败位置：{generationFailurePhaseLabel(failurePayload.phase || '')}
+            {failurePayload.recoverable !== undefined ? `（${failurePayload.recoverable ? '可重试/续跑' : '需先处理后重试'}）` : ''}
+          </div>
+          {failurePayload.code && (
+            <div className="workflow-generation-issue-summary">{failurePayload.code}</div>
+          )}
+          {(detailLines.length > 0 || suggestionLines.length > 0) && (
+            <ul className="workflow-generation-issue-list">
+              {detailLines.slice(0, 5).map((line, index) => <li key={`detail:${line}:${index}`}>{line}</li>)}
+              {suggestionLines.slice(0, 4).map((line, index) => <li key={`suggestion:${line}:${index}`}>{line}</li>)}
+            </ul>
+          )}
+        </div>
+      );
+    }
     const parsed = parseGenerationDiagnostics(trimmed);
     const diagnosticItems = parsed.diagnostics.filter((item) => item.severity !== 'warning');
     const fallback = localizeErrorCode('2000509');
@@ -328,6 +411,9 @@ export default function WorkflowDetailPage() {
   // true = show empty-canvas hint; false = user already has experience (≥1 non-empty workflow)
   const [showEmptyHint, setShowEmptyHint] = useState(true);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [generationPhaseElapsedMs, setGenerationPhaseElapsedMs] = useState(0);
+  const generationPhaseStartedAtRef = useRef(Date.now());
+  const generationVisualPhaseRef = useRef<GeneratePhase>('idle');
 
   const loadDraft = useCallback(async () => {
     if (!workflowId) return;
@@ -432,8 +518,25 @@ export default function WorkflowDetailPage() {
       startPolling();
     } else {
       if (pollRef.current) clearInterval(pollRef.current);
+      setGenerationProgressHidden(false);
+      setGenerationCloseModalOpen(false);
     }
   }, [draft?.generate_status, startPolling]);
+
+  useEffect(() => {
+    const nextPhase = resolvePhase(draft?.generate_status || '');
+    const generating = Boolean(draft?.generate_status && GENERATING_STATUSES.has(draft.generate_status));
+    if (generationVisualPhaseRef.current !== nextPhase || !generating) {
+      generationVisualPhaseRef.current = nextPhase;
+      generationPhaseStartedAtRef.current = Date.now();
+      setGenerationPhaseElapsedMs(0);
+    }
+    if (!generating || nextPhase === 'repairing') return undefined;
+    const timer = setInterval(() => {
+      setGenerationPhaseElapsedMs(Date.now() - generationPhaseStartedAtRef.current);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [draft?.generate_status]);
 
   const handleRegenerate = useCallback(async (startPhase?: WorkflowGenerateStartPhase) => {
     if (!workflowId || !draft) return;
@@ -444,6 +547,7 @@ export default function WorkflowDetailPage() {
         start_phase: startPhase ?? regenerateStartPhase,
       });
       setDraft(updated);
+      setGenerationProgressHidden(false);
       setRegenerateModalOpen(false);
       // Clear all dismissed banners so the new generation result is fully visible.
       setDismissedBanners(new Set());
@@ -457,6 +561,32 @@ export default function WorkflowDetailPage() {
       setIsRegenerating(false);
     }
   }, [workflowId, draft, regenerateStartPhase, startPolling]);
+
+  const handleContinueGenerationInBackground = useCallback(() => {
+    setGenerationProgressHidden(true);
+    setGenerationCloseModalOpen(false);
+    message.info(t('selfEvolutionRun.workflowDetailGenerationBackgroundToast'));
+  }, [t]);
+
+  const handleCancelGeneration = useCallback(async () => {
+    if (!workflowId) return;
+    setCancelingGeneration(true);
+    try {
+      const updated = await cancelWorkflowDraftGeneration(workflowId);
+      setDraft(updated);
+      setGenerationProgressHidden(false);
+      setGenerationCloseModalOpen(false);
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
+      message.success(t('selfEvolutionRun.workflowDetailGenerationCanceledToast'));
+    } catch {
+      // API errors are reported by the shared request interceptor.
+    } finally {
+      setCancelingGeneration(false);
+    }
+  }, [workflowId, t]);
 
   const handleRepair = useCallback(async () => {
     if (!workflowId) return;
@@ -612,7 +742,10 @@ export default function WorkflowDetailPage() {
     setPublishing(true);
     try {
       const result = await publishWorkflowDraft(draft.id);
-      message.success(`Workflow 已发布为版本 ${result.revision_no}，默认关闭`);
+      message.success(t('selfEvolutionRun.workflowDetailPublishSuccess', { version: result.revision_no }));
+      if (result.warnings?.some((item) => item.code === 'WORKFLOW_CREDENTIAL_CONFIGURATION_RECOMMENDED')) {
+        message.warning(t('selfEvolutionRun.workflowDetailCredentialPublishWarning'));
+      }
       setVersions(await listWorkflowVersions(result.workflow_ref));
       setDraft(await getWorkflowDraft(draft.id));
     } catch {
@@ -620,7 +753,7 @@ export default function WorkflowDetailPage() {
     } finally {
       setPublishing(false);
     }
-  }, [draft]);
+  }, [draft, t]);
 
   useEffect(() => {
     if (!draft?.published_workflow_ref) { setVersions([]); return; }
@@ -730,6 +863,57 @@ export default function WorkflowDetailPage() {
   ];
   const repairTargetMeta = repairTargetOptions.find((option) => option.value === repairTarget) ?? repairTargetOptions[0];
   const repairScope = repairScopeForTarget(repairTarget, repairPreview?.planned_files ?? []);
+  const generationDisplayPhases = draft.source_type === 'skill'
+    ? SKILL_GENERATE_DISPLAY_PHASES
+    : DEFAULT_GENERATE_DISPLAY_PHASES;
+  const generationDisplayTotal = generationDisplayPhases.length;
+  const currentGenerationPhaseIndex = generationDisplayPhases.indexOf(phase);
+  const generationStepState = (step: GeneratePhase) => {
+    const index = generationDisplayPhases.indexOf(step);
+    if (phase === 'done' || (currentGenerationPhaseIndex >= 0 && index < currentGenerationPhaseIndex)) return 'done';
+    if (index === currentGenerationPhaseIndex) return 'active';
+    return 'pending';
+  };
+  const generationStepIcon = (step: GeneratePhase) => {
+    const state = generationStepState(step);
+    if (state === 'active') return <SyncOutlined spin />;
+    if (state === 'done') return <CheckCircleOutlined />;
+    return null;
+  };
+  const generateProgressText = (() => {
+    const backendCompleted = phase !== 'analysis' && draft.generate_progress_total && draft.generate_progress_total > 0
+      ? Math.min(generationDisplayTotal, Math.min(draft.generate_progress ?? 0, draft.generate_progress_total))
+      : 0;
+    const completed = phase === 'done'
+      ? generationDisplayTotal
+      : Math.max(0, currentGenerationPhaseIndex, backendCompleted);
+    const attempt = draft.generate_max_attempts && draft.generate_max_attempts > 1
+      ? t('selfEvolutionRun.workflowDetailGenerateProgressAttempt', {
+        current: Math.max(draft.generate_attempt_count ?? 1, 1),
+        total: draft.generate_max_attempts,
+      })
+      : '';
+    return t('selfEvolutionRun.workflowDetailGenerateProgress', {
+      current: completed,
+      total: generationDisplayTotal,
+      attempt,
+    });
+  })();
+  const generateProgressPercent = (() => {
+    const backendCompleted = phase !== 'analysis' && draft.generate_progress_total && draft.generate_progress_total > 0
+      ? Math.min(generationDisplayTotal, Math.min(draft.generate_progress ?? 0, draft.generate_progress_total))
+      : 0;
+    const completed = phase === 'done'
+      ? generationDisplayTotal
+      : Math.max(0, currentGenerationPhaseIndex, backendCompleted);
+    const basePercent = (completed / generationDisplayTotal) * 100;
+    if (!isStillGenerating || currentGenerationPhaseIndex < 0) return Math.round(basePercent);
+    const nextBoundary = ((completed + 1) / generationDisplayTotal) * 100;
+    const softCap = Math.max(basePercent, nextBoundary - GENERATE_PHASE_SOFT_CAP_OFFSET);
+    const elapsedRatio = 1 - Math.exp(-generationPhaseElapsedMs / 45000);
+    const easedPercent = basePercent + (softCap - basePercent) * elapsedRatio;
+    return Math.round(Math.max(basePercent, Math.min(easedPercent, softCap)));
+  })();
 
   // Determine which YAML content to use
   // state_layout_content stores x-layout JSON separately; merge it into stateYaml
@@ -773,8 +957,29 @@ export default function WorkflowDetailPage() {
       {draft.generate_status === 'rejected' && (
         <Alert className="workflow-detail-banner" type="error" showIcon message={t('selfEvolutionRun.workflowWorkflowRejected')} description={localizeErrorCode('2000509')} />
       )}
+      {isStillGenerating && !isRepairing && generationProgressHidden && !repairModalOpen && (
+        <div className="workflow-generation-background-banner">
+          <div className="workflow-generation-background-main">
+            <SyncOutlined spin className="workflow-generation-background-icon" />
+            <span className="workflow-generation-background-title">
+              {t('selfEvolutionRun.workflowDetailGenerationBackgroundBannerTitle')}
+            </span>
+            <span className="workflow-generation-background-meta">
+              {generateProgressText}
+            </span>
+          </div>
+          <Space size={8}>
+            <Button type="primary" size="small" onClick={() => setGenerationProgressHidden(false)}>
+              {t('selfEvolutionRun.workflowDetailGenerationView')}
+            </Button>
+            <Button danger size="small" loading={cancelingGeneration} onClick={() => setGenerationCloseModalOpen(true)}>
+              {t('selfEvolutionRun.workflowDetailGenerationStopShort')}
+            </Button>
+          </Space>
+        </div>
+      )}
       {/* Generation progress banner — shown while Phase 3 is still running (editor already ready) */}
-      {isPhase3Running && !repairModalOpen && (
+      {isPhase3Running && !generationProgressHidden && !repairModalOpen && (
         <Alert
           className="workflow-detail-banner"
           type="info"
@@ -826,11 +1031,12 @@ export default function WorkflowDetailPage() {
         />
       )}
 
-      {/* AI generation progress Modal — shown during Phase 0/1/2/3, not closable */}
+      {/* AI generation progress Modal — users may close it to keep work running in the background or stop the job. */}
       <Modal
-        open={isStillGenerating && !isRepairing}
-        closable={false}
+        open={isStillGenerating && !isRepairing && !generationProgressHidden}
+        closable
         maskClosable={false}
+        onCancel={() => setGenerationCloseModalOpen(true)}
         footer={null}
         width={480}
         centered
@@ -840,25 +1046,59 @@ export default function WorkflowDetailPage() {
           <Spin size="large" />
           <p className="workflow-generate-progress-title">{getPhaseMessage(phase)}</p>
           <div className="workflow-generate-phase-steps">
-            <div className={`phase-step ${phase === 'brief' ? 'active' : phase === 'skeleton' || phase === 'scenario_scripts' || phase === 'done' ? 'done' : ''}`}>
-              {phase === 'brief' ? <SyncOutlined spin /> : <CheckCircleOutlined />}
+            {generationDisplayPhases.includes('analysis') && (
+              <div className={`phase-step ${generationStepState('analysis')}`}>
+                {generationStepIcon('analysis')}
+                {' '}{t('selfEvolutionRun.workflowDetailGeneratePhaseAnalysis')}
+              </div>
+            )}
+            <div className={`phase-step ${generationStepState('brief')}`}>
+              {generationStepIcon('brief')}
               {' '}{t('selfEvolutionRun.workflowDetailGeneratePhase0')}
             </div>
-            <div className={`phase-step ${phase === 'skeleton' ? 'active' : phase === 'scenario_scripts' || phase === 'done' ? 'done' : ''}`}>
-              {phase === 'skeleton' ? <SyncOutlined spin /> : phase === 'scenario_scripts' || phase === 'done' ? <CheckCircleOutlined /> : null}
+            <div className={`phase-step ${generationStepState('skeleton')}`}>
+              {generationStepIcon('skeleton')}
               {' '}{t('selfEvolutionRun.workflowDetailGeneratePhase1')}
             </div>
-            <div className={`phase-step ${phase === 'scenario_scripts' ? 'active' : phase === 'done' ? 'done' : ''}`}>
-              {phase === 'scenario_scripts' ? <SyncOutlined spin /> : phase === 'done' ? <CheckCircleOutlined /> : null}
+            <div className={`phase-step ${generationStepState('state_machine')}`}>
+              {generationStepIcon('state_machine')}
               {' '}{t('selfEvolutionRun.workflowDetailGeneratePhase2')}
             </div>
-            <div className={`phase-step ${phase === 'scenario_scripts' ? 'active' : phase === 'done' ? 'done' : ''}`}>
-              {phase === 'scenario_scripts' ? <SyncOutlined spin /> : phase === 'done' ? <CheckCircleOutlined /> : null}
+            <div className={`phase-step ${generationStepState('scenario_scripts')}`}>
+              {generationStepIcon('scenario_scripts')}
               {' '}{t('selfEvolutionRun.workflowDetailGeneratePhase3')}
             </div>
           </div>
-          <p className="workflow-generate-progress-hint">{t('selfEvolutionRun.workflowDetailGenerateHint')}</p>
+          <Progress
+            percent={generateProgressPercent}
+            showInfo={false}
+            status={isStillGenerating ? 'active' : 'normal'}
+            className="workflow-generate-progress-bar"
+          />
+          <p className="workflow-generate-progress-hint">
+            {generateProgressText || t('selfEvolutionRun.workflowDetailGenerateHint')}
+          </p>
         </div>
+      </Modal>
+      <Modal
+        open={generationCloseModalOpen}
+        title={t('selfEvolutionRun.workflowDetailGenerationCloseTitle')}
+        onCancel={() => setGenerationCloseModalOpen(false)}
+        footer={[
+          <Button key="stop" danger loading={cancelingGeneration} onClick={() => void handleCancelGeneration()}>
+            {t('selfEvolutionRun.workflowDetailGenerationStop')}
+          </Button>,
+          <Button key="background" type="primary" onClick={handleContinueGenerationInBackground}>
+            {t('selfEvolutionRun.workflowDetailGenerationBackground')}
+          </Button>,
+        ]}
+        centered
+        width={420}
+        maskClosable={false}
+      >
+        <p className="workflow-generate-close-copy">
+          {t('selfEvolutionRun.workflowDetailGenerationCloseDescription')}
+        </p>
       </Modal>
 
       {/* Editor area — always rendered so it's ready when generation completes */}

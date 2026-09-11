@@ -102,7 +102,13 @@ interface MessageListProps {
   forkPending?: boolean;
   messageList: any[];
   initialCard?: React.ReactNode;
-  sendMessage: (text: string, clearInput?: boolean, extras?: Record<string, unknown>) => void;
+  capabilityConfigCard?: React.ReactNode;
+  suppressAskPending?: boolean;
+  sendMessage: (
+    text: string,
+    clearInput?: boolean,
+    extras?: Record<string, unknown>,
+  ) => void | Promise<boolean | void>;
   regenerate: () => void;
   regenerateDisabled?: boolean;
   stopGeneration: () => void;
@@ -259,6 +265,8 @@ const MessageList: React.FC<MessageListProps> = ({
   forkPending,
   messageList,
   initialCard,
+  capabilityConfigCard,
+  suppressAskPending = false,
   sendMessage,
   regenerate,
   regenerateDisabled = false,
@@ -288,6 +296,22 @@ const MessageList: React.FC<MessageListProps> = ({
   const editComposeRef = useRef(false);
 
   const contentRef = chatContentRef || scrollContainerRef;
+  const conversationFiles = useMemo(() => {
+    const seen = new Set<string>();
+    const files: Array<{ name: string }> = [];
+    for (const msg of messageList) {
+      for (const file of msg.files || []) {
+        const name = String(file?.name || "").trim();
+        if (!name || seen.has(name)) {
+          continue;
+        }
+        seen.add(name);
+        files.push({ name });
+      }
+    }
+    return files;
+  }, [messageList]);
+
   const lastUserIndex = useMemo(
     () =>
       messageList.reduce(
@@ -490,6 +514,12 @@ const MessageList: React.FC<MessageListProps> = ({
       {messageList.length > 0 &&
         messageList.map((item, index) => {
           const historyId = item.history_id || item.id;
+          const visibleItem =
+            suppressAskPending &&
+            item.role === RoleTypes.ASSISTANT &&
+            item.ask_pending
+              ? { ...item, ask_pending: undefined }
+              : item;
           return (
             <div
               className="chat-item"
@@ -502,7 +532,7 @@ const MessageList: React.FC<MessageListProps> = ({
                 <AssistantMessage
                   onFork={onFork}
                   forkPending={forkPending}
-                  item={item}
+                  item={visibleItem}
                   index={index}
                   length={messageList.length}
                   sendMessage={sendMessage}
@@ -514,6 +544,7 @@ const MessageList: React.FC<MessageListProps> = ({
                     updateAssistantMessage(msg, msg.id || msg.history_id, index)
                   }
                   sessionId={sessionId}
+                  conversationFiles={conversationFiles}
                   onPreferenceSelect={onPreferenceSelect}
                   onCiteMessage={(text: string) =>
                     onCiteMessage?.(text, item.history_id || item.id)
@@ -542,6 +573,8 @@ const MessageList: React.FC<MessageListProps> = ({
             </div>
           );
         })}
+
+      {capabilityConfigCard}
 
       {messageList.length === 0 && initialCard}
       {footer}

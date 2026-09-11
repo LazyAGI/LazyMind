@@ -24,7 +24,9 @@ const (
 	// app ctx mid-job, the interrupted job can still be returned to a retryable
 	// state and have its lease cleared — otherwise the row stays in `running`
 	// with an unexpired lock_until until the next startup's RecoverStaleJobs.
-	defaultFinalizeTimeout = 30 * time.Second
+	defaultFinalizeTimeout  = 30 * time.Second
+	defaultFinalizeAttempts = 3
+	defaultFinalizeBackoff  = 200 * time.Millisecond
 )
 
 type Runner struct {
@@ -190,7 +192,11 @@ func (r *Runner) workerLoop(ctx context.Context) {
 }
 
 func (r *Runner) runOnce(ctx context.Context) (bool, error) {
-	job, err := r.claimOne(ctx, time.Now().UTC())
+	now := time.Now().UTC()
+	if err := RecoverStaleJobs(ctx, r.db, now); err != nil {
+		return false, err
+	}
+	job, err := r.claimOne(ctx, now)
 	if err != nil {
 		return false, err
 	}
@@ -308,16 +314,36 @@ func (r *Runner) runJob(ctx context.Context, row orm.AsyncJob) error {
 		<-heartbeatDone
 		cancelHandler()
 	}
-	// Start the finalization deadline after the handler, including long model calls.
-	finCtx, finCancel := context.WithTimeout(context.Background(), defaultFinalizeTimeout)
-	defer finCancel()
-	if !ok {
-		return r.markHandlerNotFound(finCtx, row)
+	return r.finalizeJob(func(finCtx context.Context) error {
+		if !ok {
+			return r.markHandlerNotFound(finCtx, row)
+		}
+		if err == nil {
+			return r.markSucceeded(finCtx, row, result)
+		}
+		return r.markFailedAttempt(finCtx, row, result, err)
+	})
+}
+
+func (r *Runner) finalizeJob(finalize func(context.Context) error) error {
+	var lastErr error
+	for attempt := 0; attempt < defaultFinalizeAttempts; attempt++ {
+		// The outcome writes use a detached, bounded finalize context so an
+		// interrupted job is still recorded and its lease cleared even when the
+		// app ctx is already cancelled at shutdown; the handler itself still runs
+		// under the app ctx so it can react to cancellation.
+		finCtx, finCancel := context.WithTimeout(context.Background(), defaultFinalizeTimeout)
+		err := finalize(finCtx)
+		finCancel()
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		if attempt+1 < defaultFinalizeAttempts {
+			time.Sleep(defaultFinalizeBackoff * time.Duration(attempt+1))
+		}
 	}
-	if err == nil {
-		return r.markSucceeded(finCtx, row, result)
-	}
-	return r.markFailedAttempt(finCtx, row, result, err)
+	return lastErr
 }
 
 func (r *Runner) heartbeatLoop(ctx context.Context, cancelHandler context.CancelFunc, reporter *jobReporter, stop <-chan struct{}, done chan<- struct{}) {
@@ -376,9 +402,34 @@ func (r *Runner) markHandlerNotFound(ctx context.Context, row orm.AsyncJob) erro
 
 func (r *Runner) markSucceeded(ctx context.Context, row orm.AsyncJob, result Result) error {
 	now := time.Now().UTC()
-	return r.db.WithContext(ctx).Model(&orm.AsyncJob{}).
-		Where("id = ? AND status = ? AND attempt_count = ? AND locked_by = ?", row.ID, StatusRunning, row.AttemptCount, row.LockedBy).
-		Updates(map[string]any{"status": string(StatusSucceeded), "result_json": result.ResultJSON, "error_code": "", "error_message": "", "error_details_json": nil, "progress_current": gorm.Expr("progress_total"), "locked_by": "", "lock_until": nil, "finished_at": now, "updated_at": now}).Error
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var existing orm.AsyncJob
+		if err := withUpdateLock(tx).
+			Where("id = ?", row.ID).
+			First(&existing).Error; err != nil {
+			return err
+		}
+		if existing.Status == string(StatusSucceeded) || existing.Status == string(StatusCanceled) {
+			return nil
+		}
+		if existing.Status != string(StatusRunning) || existing.AttemptCount != row.AttemptCount || existing.LockedBy != row.LockedBy {
+			return nil
+		}
+		return tx.Model(&orm.AsyncJob{}).
+			Where("id = ? AND status = ? AND attempt_count = ? AND locked_by = ?", row.ID, StatusRunning, row.AttemptCount, row.LockedBy).
+			Updates(map[string]any{
+				"status":             string(StatusSucceeded),
+				"result_json":        result.ResultJSON,
+				"error_code":         "",
+				"error_message":      "",
+				"error_details_json": nil,
+				"progress_current":   gorm.Expr("progress_total"),
+				"locked_by":          "",
+				"lock_until":         nil,
+				"finished_at":        now,
+				"updated_at":         now,
+			}).Error
+	})
 }
 
 func (r *Runner) markFailedAttempt(ctx context.Context, row orm.AsyncJob, result Result, handlerErr error) error {
@@ -386,33 +437,38 @@ func (r *Runner) markFailedAttempt(ctx context.Context, row orm.AsyncJob, result
 	errorCode := stringsOrDefault(result.ErrorCode, ErrorCodeHandlerFailed)
 	errorMessage := handlerErr.Error()
 
-	if !result.Permanent && row.AttemptCount < row.MaxAttempts {
-		return r.db.WithContext(ctx).Model(&orm.AsyncJob{}).
-			Where("id = ? AND status = ? AND attempt_count = ? AND locked_by = ?", row.ID, StatusRunning, row.AttemptCount, row.LockedBy).
-			Updates(map[string]any{
-				"status":             string(StatusPending),
-				"next_run_at":        now.Add(backoffForAttempt(row.AttemptCount)),
-				"error_code":         errorCode,
-				"error_message":      errorMessage,
-				"error_details_json": result.ErrorDetailsJSON,
-				"locked_by":          "",
-				"lock_until":         nil,
-				"updated_at":         now,
-			}).Error
-	}
-
-	return r.db.WithContext(ctx).Model(&orm.AsyncJob{}).
-		Where("id = ? AND status = ? AND attempt_count = ? AND locked_by = ?", row.ID, StatusRunning, row.AttemptCount, row.LockedBy).
-		Updates(map[string]any{
-			"status":             string(StatusFailed),
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var existing orm.AsyncJob
+		if err := withUpdateLock(tx).Where("id = ?", row.ID).First(&existing).Error; err != nil {
+			return err
+		}
+		if existing.Status == string(StatusCanceled) {
+			return nil
+		}
+		if existing.Status != string(StatusRunning) || existing.AttemptCount != row.AttemptCount || existing.LockedBy != row.LockedBy {
+			return nil
+		}
+		updates := map[string]any{
 			"error_code":         errorCode,
 			"error_message":      errorMessage,
 			"error_details_json": result.ErrorDetailsJSON,
 			"locked_by":          "",
 			"lock_until":         nil,
-			"finished_at":        now,
 			"updated_at":         now,
-		}).Error
+		}
+		if !result.Permanent && row.AttemptCount < row.MaxAttempts {
+			updates["status"] = string(StatusPending)
+			updates["next_run_at"] = now.Add(backoffForAttempt(row.AttemptCount))
+			return tx.Model(&orm.AsyncJob{}).
+				Where("id = ? AND status = ? AND attempt_count = ? AND locked_by = ?", row.ID, StatusRunning, row.AttemptCount, row.LockedBy).
+				Updates(updates).Error
+		}
+		updates["status"] = string(StatusFailed)
+		updates["finished_at"] = now
+		return tx.Model(&orm.AsyncJob{}).
+			Where("id = ? AND status = ? AND attempt_count = ? AND locked_by = ?", row.ID, StatusRunning, row.AttemptCount, row.LockedBy).
+			Updates(updates).Error
+	})
 }
 
 func backoffForAttempt(attempt int) time.Duration {

@@ -3,6 +3,7 @@ import pytest
 import lazyllm
 from lazymind.chat.service.component.tool_registry import (
     DEFAULT_TOOLS,
+    IMAGE_GENERATION_PROMPT_APPENDIX,
     IMAGE_MARKDOWN_OUTPUT_APPENDIX,
     RETRIEVAL_CITATION_OUTPUT_APPENDIX,
     SKILL_TOOL_CONFIG,
@@ -195,7 +196,14 @@ def test_shared_prompt_appendix_is_reused_and_deduplicated():
     ]
 
     assert len(configs) == 3
-    assert all(cfg.appendix_system_prompt is IMAGE_MARKDOWN_OUTPUT_APPENDIX for cfg in configs)
+    assert all(
+        cfg.appendix_system_prompt is IMAGE_GENERATION_PROMPT_APPENDIX
+        for cfg in configs
+        if cfg.name != 'video_to_gif'
+    )
+    assert next(
+        cfg for cfg in configs if cfg.name == 'video_to_gif'
+    ).appendix_system_prompt is IMAGE_MARKDOWN_OUTPUT_APPENDIX
     collected = collect_system_prompt_appendices(configs)
     assert collected['output_contract'] == list(
         IMAGE_MARKDOWN_OUTPUT_APPENDIX['output_contract']

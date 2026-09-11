@@ -73,6 +73,7 @@ export function serializeModel(model: GraphModel, includeLayout = false): string
     else if (node.legacySkipIf?.trim()) step.skip_if = node.legacySkipIf;
     if (node.prompt?.trim()) step.prompt = node.prompt;
     if (node.tools && node.tools.length > 0) step.tools = node.tools;
+    if (node.capabilities && node.capabilities.length > 0) step.capabilities = node.capabilities;
     if (node.acceptanceCriteria?.trim()) step.acceptance_criteria = node.acceptanceCriteria;
     if (node.inputs.length > 0) {
       step.inputs = node.inputs.map((input) => ({

@@ -29,6 +29,37 @@ func TestUpstreamStreamChunkPreservesToolLimitPending(t *testing.T) {
 	}
 }
 
+func TestUpstreamStreamChunkPreservesCapabilityDependency(t *testing.T) {
+	dependency := map[string]any{
+		"status":  "blocked",
+		"missing": []any{map[string]any{"id": "image_generator"}},
+	}
+
+	chunk := upstreamStreamChunkFromData(LazyChatData{CapabilityDependency: dependency})
+
+	if chunk.CapabilityDependency["status"] != "blocked" {
+		t.Fatalf("capability dependency was dropped during upstream conversion: %#v", chunk)
+	}
+}
+
+func TestPublishCapabilityDependencyWritesStructuredChatChunk(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	dependency := map[string]any{
+		"status":  "blocked",
+		"missing": []any{map[string]any{"id": "image_generator"}},
+	}
+
+	publishCapabilityDependency(
+		context.Background(), context.Background(), recorder, recorder, nil,
+		"conversation-1", "history-1", 1, dependency, true,
+	)
+
+	body := recorder.Body.String()
+	if !strings.Contains(body, `"capability_dependency":{"missing":[{"id":"image_generator"}],"status":"blocked"}`) {
+		t.Fatalf("structured capability dependency missing from chat chunk: %s", body)
+	}
+}
+
 func TestConsumeRuntimeChunkPrefersError(t *testing.T) {
 	terminal := runFinishedEvent("run-1", RunTerminal{
 		Status:        "completed",
@@ -266,5 +297,26 @@ func TestStreamChatUpstreamForwardsToolLimitPending(t *testing.T) {
 	}
 	if chunk.ToolLimitPending.DecisionID != "decision-2" {
 		t.Fatalf("unexpected decision id: %#v", chunk.ToolLimitPending)
+	}
+}
+
+func TestStreamChatUpstreamForwardsCapabilityDependency(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("X-Algorithm-Id", "candidate-a")
+		_, _ = fmt.Fprintln(w, `{"code":200,"msg":"success","data":{"capability_dependency":{"status":"blocked","missing":[{"id":"image_generator"}]}}}`)
+	}))
+	defer server.Close()
+
+	stream, _, err := StreamChatUpstream(context.Background(), server.URL, map[string]any{"query": "test"})
+	if err != nil {
+		t.Fatalf("start upstream stream: %v", err)
+	}
+	chunk, ok := <-stream
+	if !ok || chunk.CapabilityDependency == nil {
+		t.Fatalf("capability dependency was not forwarded: %#v", chunk)
+	}
+	if chunk.CapabilityDependency["status"] != "blocked" {
+		t.Fatalf("unexpected capability dependency: %#v", chunk.CapabilityDependency)
 	}
 }

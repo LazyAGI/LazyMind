@@ -21,6 +21,7 @@ export interface AskPending {
   /** Optional subtitle / description shown below the title */
   description?: string;
   mail_draft?: import("@/modules/chat/components/MailDraftCard").MailDraftPreview;
+  mail_drafts?: import("@/modules/chat/components/MailDraftCard").MailDraftPreview[];
 }
 
 export interface AskAnsweredQuestion {

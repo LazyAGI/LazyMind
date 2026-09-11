@@ -149,7 +149,7 @@ func ConfirmWorkflowWorkflow(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "update failed", http.StatusInternalServerError)
 		return
 	}
-	_, err := asyncjob.Enqueue(r.Context(), db, asyncjob.EnqueueRequest{JobType: workflowDraftGenerateJobType, ResourceType: "workflow_draft", ResourceID: draftID, Payload: workflowDraftGeneratePayload{DraftID: draftID, Name: draft.Name, UserID: userID, SkillContent: skillPackageSkillMD(skillPackage), SkillPackage: skillPackage, SourceSkillRevisionID: analysis.SourceSkillRevisionID, SelectedCandidateJSON: string(selectedJSON), ReusableScripts: reusableSkillScriptsJSON(skillPackage, analysis.ScriptReportJSON)}, MaxAttempts: 1, CreateUserID: userID})
+	_, err := asyncjob.Enqueue(r.Context(), db, asyncjob.EnqueueRequest{JobType: workflowDraftGenerateJobType, ResourceType: "workflow_draft", ResourceID: draftID, Payload: workflowDraftGeneratePayload{DraftID: draftID, Name: draft.Name, UserID: userID, SkillContent: skillPackageSkillMD(skillPackage), SkillPackage: skillPackage, SourceSkillRevisionID: analysis.SourceSkillRevisionID, SelectedCandidateJSON: string(selectedJSON), ReusableScripts: reusableSkillScriptsJSON(skillPackage, analysis.ScriptReportJSON)}, MaxAttempts: 3, CreateUserID: userID})
 	if err != nil {
 		common.ReplyErr(w, "enqueue failed", http.StatusInternalServerError)
 		return

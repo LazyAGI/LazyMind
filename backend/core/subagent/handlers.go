@@ -88,7 +88,8 @@ func InternalGetExecutionSpec(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var runtimeParams struct {
-		LegacyTools []string `json:"legacy_tools"`
+		Capabilities []string `json:"capabilities"`
+		LegacyTools  []string `json:"legacy_tools"`
 	}
 	if len(task.Params) > 0 {
 		if err := json.Unmarshal(task.Params, &runtimeParams); err != nil {
@@ -97,7 +98,7 @@ func InternalGetExecutionSpec(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	toolConfig, err := modelconfig.LoadToolConfigForCapabilities(
-		r.Context(), store.DB(), task.CreateUserID, runtimeParams.LegacyTools,
+		r.Context(), store.DB(), task.CreateUserID, workflowToolConfigCapabilities(runtimeParams.Capabilities, runtimeParams.LegacyTools),
 	)
 	if err != nil {
 		common.ReplyErr(w, "tool config unavailable", http.StatusServiceUnavailable)
@@ -118,6 +119,20 @@ func InternalGetExecutionSpec(w http.ResponseWriter, r *http.Request) {
 	common.ReplyOK(w, map[string]any{"task": privateTask, "params": params,
 		"steps": stepDTOs, "create_user_id": task.CreateUserID, "llm_config": config,
 		"tool_config": toolConfig, "workspace_path": task.WorkspacePath})
+}
+
+func workflowToolConfigCapabilities(capabilities, legacyTools []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(capabilities)+len(legacyTools))
+	for _, value := range append(capabilities, legacyTools...) {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	return out
 }
 
 // InternalIngestTaskEvent preserves the ordinary LazyMind SubAgent task stream

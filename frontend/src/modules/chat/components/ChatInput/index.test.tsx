@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   NEW_CHAT_MODEL_SELECTION_KEY,
@@ -126,7 +126,7 @@ describe("ChatInput model switch save lock", () => {
     useModelSelectionStore.getState().resetForNewChat();
   });
 
-  it("blocks button, keyboard, and send handling until the workspace PUT settles", () => {
+  it("blocks button, keyboard, and send handling until the workspace PUT settles", async () => {
     const onSend = vi.fn();
     const onSkillDeposit = vi.fn();
     render(
@@ -167,10 +167,10 @@ describe("ChatInput model switch save lock", () => {
     expect(sendButton).toBeEnabled();
     expect(skillDepositButton).toHaveAttribute("aria-disabled", "false");
     fireEvent.click(sendButton);
-    expect(onSend).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
   });
 
-  it("blocks button, keyboard, and send handling until the model PATCH settles", () => {
+  it("blocks button, keyboard, and send handling until the model PATCH settles", async () => {
     const onSend = vi.fn();
     const onSkillDeposit = vi.fn();
     render(
@@ -211,7 +211,7 @@ describe("ChatInput model switch save lock", () => {
     expect(sendButton).toBeEnabled();
     expect(skillDepositButton).toHaveAttribute("aria-disabled", "false");
     fireEvent.click(sendButton);
-    expect(onSend).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
   });
 
   it.each<{
@@ -231,7 +231,7 @@ describe("ChatInput model switch save lock", () => {
     },
   ])(
     "reads the latest $label selection from the new-chat store when sending",
-    ({ stored, expected }) => {
+    async ({ stored, expected }) => {
       useModelSelectionStore
         .getState()
         .setSelection(NEW_CHAT_MODEL_SELECTION_KEY, stored);
@@ -253,9 +253,9 @@ describe("ChatInput model switch save lock", () => {
 
       fireEvent.click(screen.getByRole("button", { name: "chat.send" }));
 
-      expect(onSend).toHaveBeenCalledWith(
-        expect.objectContaining({ initial_model_selection: expected }),
-      );
+      await waitFor(() => expect(onSend).toHaveBeenCalledWith(
+          expect.objectContaining({ initial_model_selection: expected }),
+        ));
     },
   );
 
@@ -282,7 +282,7 @@ describe("ChatInput model switch save lock", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("clears workspace request fields when a reused draft is reset", () => {
+  it("clears workspace request fields when a reused draft is reset", async () => {
     const onSend = vi.fn();
     const baseProps = {
       value: "hello", onChange: vi.fn(), onSend, isChatContent: true, runInBackground: true,
@@ -292,12 +292,13 @@ describe("ChatInput model switch save lock", () => {
     const { rerender } = render(<ChatInput {...baseProps} configResetKey={1} />);
     fireEvent.click(screen.getByRole("button", { name: "select workspace" }));
     fireEvent.click(screen.getByRole("button", { name: "chat.send" }));
-    expect(onSend).toHaveBeenLastCalledWith(expect.objectContaining({
-      workspace_id: "grant-alpha", workspace_permission_mode: "allow_all",
-    }));
+    await waitFor(() => expect(onSend).toHaveBeenLastCalledWith(expect.objectContaining({
+        workspace_id: "grant-alpha", workspace_permission_mode: "allow_all",
+      })));
 
     rerender(<ChatInput {...baseProps} configResetKey={2} />);
     fireEvent.click(screen.getByRole("button", { name: "chat.send" }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
     const resetPayload = onSend.mock.calls[onSend.mock.calls.length - 1]?.[0];
     expect(resetPayload).not.toHaveProperty("workspace_id");
     expect(resetPayload).not.toHaveProperty("workspace_permission_mode");

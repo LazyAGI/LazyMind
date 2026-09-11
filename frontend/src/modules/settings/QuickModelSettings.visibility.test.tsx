@@ -119,10 +119,10 @@ describe("QuickModelSettings collaboration visibility", () => {
     renderSettings();
 
     const selects = await screen.findAllByRole("combobox");
-    await waitFor(() => expect(selects[1]).toHaveValue(
+    await waitFor(() => expect(selects[2]).toHaveValue(
       "provider-1:group-1:embedding-current",
     ));
-    fireEvent.change(selects[1], {
+    fireEvent.change(selects[2], {
       target: { value: "provider-1:group-1:embedding-next" },
     });
 
@@ -135,10 +135,10 @@ describe("QuickModelSettings collaboration visibility", () => {
     renderSettings();
 
     const selects = await screen.findAllByRole("combobox");
-    await waitFor(() => expect(selects[1]).toHaveValue(
+    await waitFor(() => expect(selects[2]).toHaveValue(
       "provider-1:group-1:embedding-current",
     ));
-    fireEvent.change(selects[1], {
+    fireEvent.change(selects[2], {
       target: { value: "provider-1:group-1:embedding-next" },
     });
 

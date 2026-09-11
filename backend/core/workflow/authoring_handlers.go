@@ -37,7 +37,25 @@ type authoringDiagnostics struct {
 	Diagnostics           []authoringDiagnostic `json:"diagnostics"`
 }
 
+type authoringDiagnosticsOptions struct {
+	AllowUnauditedScripts bool
+}
+
 func authoringDiagnosticsForDraft(db *gorm.DB, draft orm.WorkflowDraft) authoringDiagnostics {
+	return authoringDiagnosticsForDraftWithOptions(db, draft, authoringDiagnosticsOptions{})
+}
+
+func authoringDiagnosticsForRequest(db *gorm.DB, draft orm.WorkflowDraft, r *http.Request) authoringDiagnostics {
+	allowUnauditedScripts := false
+	if files, err := workflowFiles(draft); err == nil && len(files) > 3 {
+		allowUnauditedScripts = common.RequestUserIsAdmin(r)
+	}
+	return authoringDiagnosticsForDraftWithOptions(db, draft, authoringDiagnosticsOptions{
+		AllowUnauditedScripts: allowUnauditedScripts,
+	})
+}
+
+func authoringDiagnosticsForDraftWithOptions(db *gorm.DB, draft orm.WorkflowDraft, options authoringDiagnosticsOptions) authoringDiagnostics {
 	out := authoringDiagnostics{ContractVersion: AuthoringContractVersion, DraftVersion: draft.Version, SourceSkillRevisionID: draft.SourceSkillRevisionID, SourceSkillTreeHash: draft.SourceSkillTreeHash, Diagnostics: []authoringDiagnostic{}}
 	if draft.SourceType == "skill" {
 		if draft.SourceSkillRevisionID == "" || draft.SourceSkillTreeHash == "" {
@@ -64,9 +82,16 @@ func authoringDiagnosticsForDraft(db *gorm.DB, draft orm.WorkflowDraft) authorin
 	if !frameworkToolsAvailableForPublish(db, draft) {
 		out.Diagnostics = append(out.Diagnostics, authoringDiagnostic{Code: "FRAMEWORK_TOOL_UNAVAILABLE", Severity: "error", Message: "a mapped framework tool is unavailable"})
 	}
+	out.Diagnostics = append(out.Diagnostics, requiredCapabilityPublishDiagnostics(db, draft, compiled)...)
 	files, _ := workflowFiles(draft)
-	if len(files) > 3 && !scriptsApprovedForPublish(db, draft) {
-		out.Diagnostics = append(out.Diagnostics, authoringDiagnostic{Code: "SCRIPT_APPROVAL_REQUIRED", Severity: "error", Message: "custom scripts require a matching deterministic audit"})
+	if len(files) > 3 {
+		switch {
+		case scriptsApprovedForPublish(db, draft):
+		case options.AllowUnauditedScripts:
+			out.Diagnostics = append(out.Diagnostics, authoringDiagnostic{Code: "SCRIPT_ADMIN_APPROVED", Severity: "warning", Message: "custom scripts will be published with administrator permission"})
+		default:
+			out.Diagnostics = append(out.Diagnostics, authoringDiagnostic{Code: "SCRIPT_APPROVAL_REQUIRED", Severity: "error", Message: "custom scripts require administrator permission or a matching deterministic audit"})
+		}
 	}
 	sort.SliceStable(out.Diagnostics, func(i, j int) bool {
 		if out.Diagnostics[i].Code == out.Diagnostics[j].Code {
@@ -74,6 +99,12 @@ func authoringDiagnosticsForDraft(db *gorm.DB, draft orm.WorkflowDraft) authorin
 		}
 		return out.Diagnostics[i].Code < out.Diagnostics[j].Code
 	})
+	for _, diagnostic := range out.Diagnostics {
+		if diagnostic.Severity == "error" {
+			blocking = true
+			break
+		}
+	}
 	out.Valid = compiled.Valid && !blocking
 	return out
 }
@@ -230,7 +261,7 @@ func GetAuthoringWorkflowDiagnostics(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "not found", 404)
 		return
 	}
-	common.ReplyOK(w, authoringDiagnosticsForDraft(store.DB(), draft))
+	common.ReplyOK(w, authoringDiagnosticsForRequest(store.DB(), draft, r))
 }
 
 func PublishAuthoringWorkflow(w http.ResponseWriter, r *http.Request) {
@@ -239,7 +270,7 @@ func PublishAuthoringWorkflow(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "not found", 404)
 		return
 	}
-	diagnostics := authoringDiagnosticsForDraft(store.DB(), draft)
+	diagnostics := authoringDiagnosticsForRequest(store.DB(), draft, r)
 	if !diagnostics.Valid {
 		common.ReplyErrWithData(w, "plugin validation failed", diagnostics, http.StatusUnprocessableEntity)
 		return

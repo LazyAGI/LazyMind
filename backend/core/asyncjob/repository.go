@@ -42,6 +42,17 @@ var staleStatuses = []string{
 }
 
 func Enqueue(ctx context.Context, db *gorm.DB, req EnqueueRequest) (*orm.AsyncJob, error) {
+	return enqueue(ctx, db, req, false)
+}
+
+// EnqueueInTransaction participates in the caller's transaction. In particular,
+// a SQLite BEGIN IMMEDIATE connection cannot start another database/sql transaction.
+// The caller owns commit/rollback and retry of unique conflicts.
+func EnqueueInTransaction(ctx context.Context, tx *gorm.DB, req EnqueueRequest) (*orm.AsyncJob, error) {
+	return enqueue(ctx, tx, req, true)
+}
+
+func enqueue(ctx context.Context, db *gorm.DB, req EnqueueRequest, inTransaction bool) (*orm.AsyncJob, error) {
 	req.JobType = strings.TrimSpace(req.JobType)
 	req.IdempotencyKey = strings.TrimSpace(req.IdempotencyKey)
 	if req.JobType == "" {
@@ -64,7 +75,7 @@ func Enqueue(ctx context.Context, db *gorm.DB, req EnqueueRequest) (*orm.AsyncJo
 	}
 
 	var created *orm.AsyncJob
-	err = db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	write := func(tx *gorm.DB) error {
 		if req.IdempotencyKey != "" {
 			existing, err := findReusableJob(ctx, tx, req.JobType, req.IdempotencyKey, true, req.SkipSucceeded)
 			if err != nil {
@@ -129,8 +140,13 @@ func Enqueue(ctx context.Context, db *gorm.DB, req EnqueueRequest) (*orm.AsyncJo
 		}
 		created = row
 		return nil
-	})
-	if err != nil && req.IdempotencyKey != "" && isUniqueConflict(err) {
+	}
+	if inTransaction {
+		err = write(db.WithContext(ctx))
+	} else {
+		err = db.WithContext(ctx).Transaction(write)
+	}
+	if !inTransaction && err != nil && req.IdempotencyKey != "" && isUniqueConflict(err) {
 		existing, findErr := findReusableJob(ctx, db, req.JobType, req.IdempotencyKey, false, req.SkipSucceeded)
 		if findErr == nil && existing != nil {
 			return existing, nil
@@ -148,6 +164,25 @@ func Get(ctx context.Context, db *gorm.DB, id string) (*orm.AsyncJob, error) {
 		return nil, err
 	}
 	return &row, nil
+}
+
+func CancelResourceJobs(ctx context.Context, db *gorm.DB, jobType, resourceType, resourceID, reason string) (int64, error) {
+	now := time.Now().UTC()
+	if reason == "" {
+		reason = "job canceled by user"
+	}
+	result := db.WithContext(ctx).Model(&orm.AsyncJob{}).
+		Where("job_type = ? AND resource_type = ? AND resource_id = ? AND status IN ?", jobType, resourceType, resourceID, activeReusableStatuses).
+		Updates(map[string]any{
+			"status":        string(StatusCanceled),
+			"error_code":    ErrorCodeCanceled,
+			"error_message": reason,
+			"locked_by":     "",
+			"lock_until":    nil,
+			"finished_at":   now,
+			"updated_at":    now,
+		})
+	return result.RowsAffected, result.Error
 }
 
 func findReusableJob(ctx context.Context, db *gorm.DB, jobType, idempotencyKey string, lock, skipSucceeded bool) (*orm.AsyncJob, error) {

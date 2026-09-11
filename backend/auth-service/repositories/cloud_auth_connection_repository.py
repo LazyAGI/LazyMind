@@ -124,6 +124,11 @@ class CloudAuthConnectionRepository:
         return row
 
     @classmethod
+    def delete(cls, session: Session, row: CloudAuthConnection) -> None:
+        session.delete(row)
+        session.commit()
+
+    @classmethod
     def list_for_owner(
         cls,
         session: Session,

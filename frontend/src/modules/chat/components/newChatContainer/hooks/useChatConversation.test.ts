@@ -1,7 +1,7 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { createRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { Modal } from "antd";
+import { message, Modal } from "antd";
 import {
   ChatConversationsRequestActionEnum,
   ChatConversationsResponseFinishReasonEnum,
@@ -14,13 +14,22 @@ import { useTaskCenterStore } from "@/modules/chat/store/taskCenter";
 import { buildChatMessageListFromHistory } from "@/modules/chat/utils/message";
 import { streamManager } from "@/modules/chat/utils/StreamManager";
 
-const { listConversationsMock, waitForRuntimeCapabilityMock } = vi.hoisted(() => ({
+const {
+  listConversationsMock,
+  listToolAssetsMock,
+  waitForRuntimeCapabilityMock,
+} = vi.hoisted(() => ({
   listConversationsMock: vi.fn(),
+  listToolAssetsMock: vi.fn(),
   waitForRuntimeCapabilityMock: vi.fn(),
 }));
 
 vi.mock("@/runtime/readiness", () => ({
   waitForRuntimeCapability: waitForRuntimeCapabilityMock,
+}));
+
+vi.mock("@/modules/memory/toolApi", () => ({
+  listToolAssets: listToolAssetsMock,
 }));
 
 vi.mock("antd", () => ({
@@ -118,6 +127,11 @@ describe("useChatConversation regeneration recovery", () => {
     sessionStorage.clear();
     listConversationsMock.mockReset();
     listConversationsMock.mockResolvedValue({ data: { conversations: [] } });
+    listToolAssetsMock.mockReset();
+    listToolAssetsMock.mockResolvedValue([{
+      id: "image_generator",
+      isAvailable: true,
+    }]);
     waitForRuntimeCapabilityMock.mockReset();
     waitForRuntimeCapabilityMock.mockResolvedValue(undefined);
     vi.mocked(Modal.confirm).mockClear();
@@ -356,8 +370,8 @@ describe("useChatConversation regeneration recovery", () => {
     await waitFor(() => expect(onOpenSSE).toHaveBeenCalledTimes(2));
   });
 
-  it("shows a setup card when a persisted workflow task contains a capability failure", async () => {
-    renderHook(() =>
+  it("exposes a persistent setup card when a workflow task contains a capability failure", async () => {
+    const { result } = renderHook(() =>
       useChatConversation({
         canChat: true,
         onOpenSSE: vi.fn(),
@@ -402,9 +416,177 @@ describe("useChatConversation regeneration recovery", () => {
       });
     });
 
-    await waitFor(() => expect(Modal.confirm).toHaveBeenCalledTimes(1));
-    expect(vi.mocked(Modal.confirm).mock.calls[0]?.[0]?.title)
-      .toBe("chat.mediaCapabilitiesRequiredTitle");
+    await waitFor(() => {
+      expect(result.current.mediaCapabilityDependency).toMatchObject({
+        failure_id: "task-capability",
+        conversation_id: "conversation-capability",
+        missing: [expect.objectContaining({ id: "video_generator" })],
+      });
+    });
+  });
+
+  it("shows a setup card from the structured direct-chat stream field", async () => {
+    const { stream, listeners } = createMockStream();
+    const { result } = renderConversation({ onOpenSSE: vi.fn(() => stream) });
+    await act(async () => {
+      await result.current.sendMessage({ text: "生成一张柯基犬" });
+    });
+
+    act(() => listeners.get("message")?.({
+      data: JSON.stringify({
+        result: {
+          conversation_id: "conversation-capability",
+          capability_dependency: {
+            status: "blocked",
+            workflow: "DIRECT_CHAT",
+            required: ["image_generator"],
+            missing: [{
+              id: "image_generator",
+              label: "文生图模型",
+              available: false,
+              settings_url: "/settings?section=models&target=image_generator",
+              reason: "尚未配置文生图模型。",
+            }],
+            message: "当前任务缺少：文生图模型。",
+          },
+        },
+      }),
+    }));
+
+    expect(result.current.mediaCapabilityDependency).toMatchObject({
+      conversation_id: "conversation-capability",
+      workflow: "DIRECT_CHAT",
+      missing: [expect.objectContaining({ id: "image_generator" })],
+    });
+  });
+
+  it("only retries a capability-blocked turn after the user continues", async () => {
+    const { stream } = createMockStream();
+    const onOpenSSE = vi.fn(() => stream);
+    const firstRender = renderConversation({ onOpenSSE });
+    act(() => {
+      firstRender.result.current.replaceMessageList("conversation-capability", [
+        {
+          role: RoleTypes.USER,
+          delta: "生成一张小狗的照片",
+          inputs: [{ input_type: "text", text: "生成一张小狗的照片" }],
+        },
+        {
+          role: RoleTypes.ASSISTANT,
+          delta: "尚未配置文生图模型。",
+          finish_reason:
+            ChatConversationsResponseFinishReasonEnum.FinishReasonStop,
+        },
+      ]);
+      window.dispatchEvent(new CustomEvent(
+        "lazymind:chat-media-capability-missing",
+        {
+          detail: {
+            status: "blocked",
+            workflow: "CREATE_NEW",
+            required: ["image_generator"],
+            missing: [{
+              id: "image_generator",
+              label: "文生图模型",
+              available: false,
+              settings_url: "/settings?section=models",
+              reason: "尚未配置文生图模型。",
+            }],
+            message: "缺少文生图模型。",
+            conversation_id: "conversation-capability",
+            failure_id: "task-capability",
+          },
+        },
+      ));
+    });
+
+    await waitFor(() => {
+      expect(firstRender.result.current.mediaCapabilityDependency).not.toBeNull();
+    });
+    expect(onOpenSSE).not.toHaveBeenCalled();
+    firstRender.unmount();
+
+    const { result } = renderConversation({ onOpenSSE });
+    act(() => {
+      result.current.replaceMessageList("conversation-capability", [
+        {
+          role: RoleTypes.USER,
+          delta: "生成一张小狗的照片",
+          inputs: [{ input_type: "text", text: "生成一张小狗的照片" }],
+        },
+      ]);
+    });
+    expect(result.current.mediaCapabilityDependency).toMatchObject({
+      failure_id: "task-capability",
+      conversation_id: "conversation-capability",
+    });
+
+    await act(async () => {
+      await result.current.continueAfterMediaCapabilityConfiguration();
+    });
+
+    expect(listToolAssetsMock).toHaveBeenCalledWith({ silentError: true });
+    expect(onOpenSSE).toHaveBeenCalledWith(
+      [{ input_type: "text", text: "生成一张小狗的照片" }],
+      ChatConversationsRequestActionEnum.ChatActionRegeneration,
+      {},
+      expect.objectContaining({
+        __prepareClientConversationId: expect.any(Function),
+      }),
+    );
+    expect(result.current.mediaCapabilityDependency).toBeNull();
+    expect(sessionStorage.getItem("chat-capability-pending:conversation-capability"))
+      .toBeNull();
+  });
+
+  it("keeps the setup card blocked when Continue finds configuration still missing", async () => {
+    const onOpenSSE = vi.fn();
+    const { result } = renderConversation({ onOpenSSE });
+    listToolAssetsMock.mockResolvedValueOnce([{
+      id: "image_generator",
+      isAvailable: false,
+    }]);
+
+    act(() => {
+      result.current.replaceMessageList("conversation-capability", [{
+        role: RoleTypes.USER,
+        delta: "生成一张小狗的照片",
+        inputs: [{ input_type: "text", text: "生成一张小狗的照片" }],
+      }]);
+      window.dispatchEvent(new CustomEvent(
+        "lazymind:chat-media-capability-missing",
+        {
+          detail: {
+            status: "blocked",
+            workflow: "DIRECT_CHAT",
+            required: ["image_generator"],
+            missing: [{
+              id: "image_generator",
+              label: "文生图模型",
+              available: false,
+              settings_url: "/settings?section=models&target=image_generator",
+              reason: "尚未配置文生图模型。",
+            }],
+            message: "缺少文生图模型。",
+            conversation_id: "conversation-capability",
+          },
+        },
+      ));
+    });
+
+    await act(async () => {
+      expect(await result.current.continueAfterMediaCapabilityConfiguration())
+        .toBe(false);
+    });
+
+    expect(onOpenSSE).not.toHaveBeenCalled();
+    expect(result.current.mediaCapabilityDependency).not.toBeNull();
+    expect(message.warning).toHaveBeenCalledWith(
+      "chat.mediaCapabilityStillMissing",
+    );
+    expect(sessionStorage.getItem(
+      "chat-capability-pending:conversation-capability",
+    )).not.toBeNull();
   });
 
   it("does not open parallel regeneration requests", async () => {
@@ -436,7 +618,7 @@ describe("useChatConversation regeneration recovery", () => {
       result.current.replaceMessageList("conversation-1", messages);
     });
 
-    let firstRequest: Promise<void> | undefined;
+    let firstRequest: Promise<boolean> | undefined;
     act(() => {
       firstRequest = result.current.regenerate();
       void result.current.regenerate();
