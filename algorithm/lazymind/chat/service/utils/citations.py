@@ -684,7 +684,10 @@ def _relocate_markers_in_prose(text: str) -> str:
             ))
             continue
         lines = block.split('\n')
-        is_list_line = lambda line: bool(re.match(r'\s*(?:[-*+]|\d+[.)])\s+', line))
+
+        def is_list_line(line: str) -> bool:
+            return bool(re.match(r'\s*(?:[-*+]|\d+[.)])\s+', line))
+
         has_list = any(is_list_line(line) for line in lines if line.strip())
         simple_list = all((not line.strip() or is_list_line(line)) for line in lines)
         if simple_list:
