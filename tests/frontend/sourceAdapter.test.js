@@ -141,4 +141,19 @@ describe('chat source adapter', () => {
     const continued = `- A ${first}\n  continuation\n- B ${second}`;
     expect(moveSourceMarkersToParagraphEnd(continued)).toBe(continued);
   });
+
+  it('leaves GFM table citations in their cells', () => {
+    const first = '[1](#source-1.1)';
+    const second = '[2](#source-2.1)';
+    const table = [
+      '| 模型 | 价格 |',
+      '|---|---|',
+      `| A ${first} | $1 |`,
+      `| B ${second} | $2 |`,
+    ].join('\n');
+    expect(moveSourceMarkersToParagraphEnd(table)).toBe(table);
+    expect(moveSourceMarkersToParagraphEnd(
+      `${table}\n\n第一句${first}。第二句${second}。`,
+    )).toBe(`${table}\n\n第一句。第二句。${first}${second}`);
+  });
 });

@@ -231,9 +231,40 @@ function relocateMarkersInBlock(block: string) {
   return `${core}${markers.join("")}${trailingWhitespace}`;
 }
 
+const TABLE_DELIMITER_CELL = /^:?-+:?$/;
+
+function isGfmTableDelimiter(line: string) {
+  const stripped = line.trim();
+  if (!stripped.includes("|")) {
+    return false;
+  }
+  let body = stripped.startsWith("|") ? stripped.slice(1) : stripped;
+  if (body.endsWith("|")) {
+    body = body.slice(0, -1);
+  }
+  const cells = body.split("|").map((cell) => cell.trim());
+  return cells.length > 0 && cells.every((cell) => TABLE_DELIMITER_CELL.test(cell));
+}
+
+function isPipeTableRow(line: string) {
+  const stripped = line.trim();
+  return stripped.startsWith("|") && stripped.endsWith("|") && (stripped.match(/\|/g)?.length ?? 0) >= 2;
+}
+
+function isGfmTableBlock(block: string) {
+  const lines = block.split("\n").filter((line) => line.trim());
+  if (lines.some(isGfmTableDelimiter)) {
+    return true;
+  }
+  return lines.filter(isPipeTableRow).length >= 2;
+}
+
 function relocateMarkersInProse(text: string) {
   return text.split(/(\n{2,})/).map((block, index) => {
     if (index % 2 === 1 || !block.trim()) {
+      return block;
+    }
+    if (isGfmTableBlock(block)) {
       return block;
     }
     const lines = block.split("\n");
@@ -253,6 +284,7 @@ function relocateMarkersInProse(text: string) {
 // Intentionally cluster citations at the paragraph (or list-item) end instead
 // of after each sentence. Streaming therefore looks like:
 // "Fact A. Fact B. [1][2]" rather than "Fact A [1]. Fact B [2]."
+// GFM tables keep in-cell markers so pipe rows stay valid.
 export function moveSourceMarkersToParagraphEnd(content: string) {
   const lines = content.split("\n");
   const output: string[] = [];

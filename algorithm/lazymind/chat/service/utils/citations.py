@@ -589,6 +589,32 @@ _SOURCE_MARKER_IN_TEXT = re.compile(
 )
 
 
+_TABLE_DELIMITER_CELL = re.compile(r'^:?-+:?$')
+
+
+def _is_gfm_table_delimiter(line: str) -> bool:
+    stripped = line.strip()
+    if '|' not in stripped:
+        return False
+    body = stripped[1:] if stripped.startswith('|') else stripped
+    if body.endswith('|'):
+        body = body[:-1]
+    cells = [cell.strip() for cell in body.split('|')]
+    return bool(cells) and all(_TABLE_DELIMITER_CELL.match(cell) for cell in cells)
+
+
+def _is_pipe_table_row(line: str) -> bool:
+    stripped = line.strip()
+    return stripped.startswith('|') and stripped.endswith('|') and stripped.count('|') >= 2
+
+
+def _is_gfm_table_block(block: str) -> bool:
+    lines = [line for line in block.split('\n') if line.strip()]
+    if any(_is_gfm_table_delimiter(line) for line in lines):
+        return True
+    return sum(1 for line in lines if _is_pipe_table_row(line)) >= 2
+
+
 def _relocate_markers_in_block(block: str) -> str:
     markers: list[str] = []
     seen: set[str] = set()
@@ -617,6 +643,10 @@ def _relocate_markers_in_prose(text: str) -> str:
     relocated: list[str] = []
     for index, block in enumerate(parts):
         if index % 2 == 1 or not block.strip():
+            relocated.append(block)
+            continue
+        if _is_gfm_table_block(block):
+            # Keep in-cell citations; moving them would break GFM table pipes.
             relocated.append(block)
             continue
         lines = block.split('\n')
@@ -672,7 +702,7 @@ def relocate_source_markers_to_paragraph_end(content: str) -> str:
     This is intentional for ordinary paragraphs and simple one-line list items.
     Nested or continuation lists keep the original marker positions. Streaming
     paragraphs may therefore look like ``Fact A. Fact B. [1][2]``.
-    Fenced code is left unchanged.
+    GFM tables and fenced code are left unchanged.
     """
     return _transform_outside_fences(content, _relocate_markers_in_prose)
 

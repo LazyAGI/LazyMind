@@ -179,6 +179,47 @@ def test_rewrite_citations_keeps_markers_in_multiline_lists():
     )
 
 
+def test_rewrite_citations_keeps_markers_in_gfm_tables():
+    from lazymind.chat.service.utils.citations import (
+        relocate_source_markers_to_paragraph_end,
+        rewrite_citations,
+    )
+
+    state = _state()
+    first = register_external_search_result({
+        'title': '美国大都会博物馆',
+        'url': 'https://www.metmuseum.org/',
+        'snippet': 'museum',
+    }, state)
+    second = register_external_search_result({
+        'title': 'Louvre',
+        'url': 'https://www.louvre.fr/',
+        'snippet': 'museum',
+    }, state)
+    table = (
+        '| 模型 | 价格 |\n'
+        '|---|---|\n'
+        f'| A {first["ref"]} | $1 |\n'
+        f'| B {second["ref"]} | $2 |'
+    )
+    rewritten, _ = rewrite_citations(table, state)
+    expected = (
+        '| 模型 | 价格 |\n'
+        '|---|---|\n'
+        '| A [1](#source-1.1 "美国大都会博物馆") | $1 |\n'
+        '| B [2](#source-2.1 "Louvre") | $2 |'
+    )
+    assert rewritten == expected
+    assert relocate_source_markers_to_paragraph_end(expected) == expected
+    paragraph = f'第一句{first["ref"]}。第二句{second["ref"]}。'
+    mixed, _ = rewrite_citations(f'{table}\n\n{paragraph}', state)
+    assert mixed == (
+        f'{expected}\n\n'
+        '第一句。第二句。[1](#source-1.1 "美国大都会博物馆")'
+        '[2](#source-2.1 "Louvre")'
+    )
+
+
 def test_rewrite_citations_does_not_rewrite_fenced_code():
     from lazymind.chat.service.utils.citations import rewrite_citations
 
