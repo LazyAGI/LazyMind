@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 
@@ -13,14 +14,19 @@ import (
 	"lazymind/core/log"
 )
 
-type contextWindowsFile struct {
-	Models map[string]string `yaml:"models"`
-}
-
 var (
-	contextWindowsMu    sync.RWMutex
-	contextWindowsByKey map[string]string
+	contextWindowsMu       sync.RWMutex
+	contextWindowsByType   map[string]map[string]string
+	contextWindowTypeOrder []string
 )
+
+func normalizeModelType(modelType string) string {
+	value := strings.ToLower(strings.TrimSpace(modelType))
+	if value == "embedding" {
+		return "embed"
+	}
+	return value
+}
 
 func normalizeContextWindowKey(name string) string {
 	return strings.ToLower(strings.TrimSpace(name))
@@ -44,34 +50,73 @@ func contextWindowLookupKeys(name string) []string {
 	return keys
 }
 
-// LoadContextWindows loads model name → max_input_tokens mappings used when adding custom models.
+func lookupInType(byKey map[string]string, name string) (string, bool) {
+	if len(byKey) == 0 {
+		return "", false
+	}
+	for _, key := range contextWindowLookupKeys(name) {
+		if tokens, ok := byKey[key]; ok {
+			return tokens, true
+		}
+	}
+	return "", false
+}
+
+// LoadContextWindows loads typed model-name → max_input_tokens mappings.
 func LoadContextWindows(yamlPath string) error {
 	raw, err := os.ReadFile(yamlPath)
 	if err != nil {
 		return fmt.Errorf("read context windows: %w", err)
 	}
-	var file contextWindowsFile
+	var file map[string]map[string]string
 	if err := yaml.Unmarshal(raw, &file); err != nil {
 		return fmt.Errorf("parse context windows: %w", err)
 	}
-	next := make(map[string]string, len(file.Models))
-	for name, tokens := range file.Models {
-		key := normalizeContextWindowKey(name)
-		if key == "" {
-			return fmt.Errorf("context windows entry is missing a model name")
+	next := make(map[string]map[string]string, len(file))
+	for section, models := range file {
+		modelType := normalizeModelType(section)
+		if modelType == "" {
+			return fmt.Errorf("context windows entry is missing a model type")
 		}
-		normalized, err := parseMaxInputTokens(tokens)
-		if err != nil {
-			return fmt.Errorf("context windows %q: %w", name, err)
+		bucket := next[modelType]
+		if bucket == nil {
+			bucket = make(map[string]string, len(models))
+			next[modelType] = bucket
 		}
-		if prev, ok := next[key]; ok && prev != normalized {
-			return fmt.Errorf("context windows has conflicting values for %q: %s and %s", key, prev, normalized)
+		for name, tokens := range models {
+			key := normalizeContextWindowKey(name)
+			if key == "" {
+				return fmt.Errorf("context windows %s entry is missing a model name", modelType)
+			}
+			normalized, err := parseMaxInputTokens(tokens)
+			if err != nil {
+				return fmt.Errorf("context windows %s %q: %w", modelType, name, err)
+			}
+			if prev, ok := bucket[key]; ok && prev != normalized {
+				return fmt.Errorf("context windows has conflicting %s values for %q: %s and %s", modelType, key, prev, normalized)
+			}
+			bucket[key] = normalized
 		}
-		next[key] = normalized
 	}
 
+	order := make([]string, 0, len(next))
+	for _, preferred := range []string{"llm", "vlm", "embed"} {
+		if _, ok := next[preferred]; ok {
+			order = append(order, preferred)
+		}
+	}
+	rest := make([]string, 0, len(next))
+	for modelType := range next {
+		if modelType != "llm" && modelType != "vlm" && modelType != "embed" {
+			rest = append(rest, modelType)
+		}
+	}
+	sort.Strings(rest)
+	order = append(order, rest...)
+
 	contextWindowsMu.Lock()
-	contextWindowsByKey = next
+	contextWindowsByType = next
+	contextWindowTypeOrder = order
 	contextWindowsMu.Unlock()
 	return nil
 }
@@ -82,20 +127,28 @@ func MustLoadContextWindows(yamlPath string) {
 		log.Logger.Fatal().Err(err).Str("path", yamlPath).Msg("load model context windows failed")
 	}
 	contextWindowsMu.RLock()
-	count := len(contextWindowsByKey)
+	count := 0
+	for _, bucket := range contextWindowsByType {
+		count += len(bucket)
+	}
+	types := append([]string(nil), contextWindowTypeOrder...)
 	contextWindowsMu.RUnlock()
-	log.Logger.Info().Str("path", yamlPath).Int("models", count).Msg("model context windows loaded from YAML")
+	log.Logger.Info().Str("path", yamlPath).Int("models", count).Strs("types", types).Msg("model context windows loaded from YAML")
 }
 
-// LookupContextWindow returns the catalogued max_input_tokens for a model name.
-func LookupContextWindow(name string) (string, bool) {
+// LookupContextWindow returns max_input_tokens from model_context_windows.yaml.
+// An empty modelType searches llm, vlm, embed, then any other typed sections.
+func LookupContextWindow(name, modelType string) (string, bool) {
 	contextWindowsMu.RLock()
 	defer contextWindowsMu.RUnlock()
-	if len(contextWindowsByKey) == 0 {
+	if len(contextWindowsByType) == 0 {
 		return "", false
 	}
-	for _, key := range contextWindowLookupKeys(name) {
-		if tokens, ok := contextWindowsByKey[key]; ok {
+	if wanted := normalizeModelType(modelType); wanted != "" {
+		return lookupInType(contextWindowsByType[wanted], name)
+	}
+	for _, section := range contextWindowTypeOrder {
+		if tokens, ok := lookupInType(contextWindowsByType[section], name); ok {
 			return tokens, true
 		}
 	}
@@ -115,11 +168,22 @@ func resolveAddModelMaxInputTokens(modelType, modelName string, raw *string) (*s
 			return &normalized, nil
 		}
 	}
-	if lookedUp, ok := LookupContextWindow(modelName); ok {
+	if lookedUp, ok := LookupContextWindow(modelName, modelType); ok {
 		return &lookedUp, nil
 	}
 	value := defaultLLMMaxInputTokens
 	return &value, nil
+}
+
+func resolveSeededMaxInputTokens(modelType, modelName string) (*string, error) {
+	if lookedUp, ok := LookupContextWindow(modelName, modelType); ok {
+		return &lookedUp, nil
+	}
+	if supportsUserMaxInputTokens(modelType) {
+		value := defaultLLMMaxInputTokens
+		return &value, nil
+	}
+	return nil, nil
 }
 
 type lookupContextWindowResponse struct {
@@ -135,7 +199,8 @@ func LookupContextWindowHTTP(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "name is required", http.StatusBadRequest)
 		return
 	}
-	tokens, matched := LookupContextWindow(name)
+	modelType := strings.TrimSpace(r.URL.Query().Get("model_type"))
+	tokens, matched := LookupContextWindow(name, modelType)
 	if !matched {
 		tokens = defaultLLMMaxInputTokens
 	}

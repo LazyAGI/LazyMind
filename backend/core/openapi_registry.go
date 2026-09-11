@@ -1000,6 +1000,19 @@ type deleteModelProviderGroupOpenAPIResponse struct {
 	ID string `json:"id"`
 }
 
+type listRemoteGroupModelsOpenAPIItem struct {
+	ID             string  `json:"id"`
+	Name           string  `json:"name"`
+	ModelType      string  `json:"model_type"`
+	MaxInputTokens *string `json:"max_input_tokens,omitempty"`
+	Added          bool    `json:"added"`
+}
+
+type listRemoteGroupModelsOpenAPIResponse struct {
+	URL    string                             `json:"url"`
+	Models []listRemoteGroupModelsOpenAPIItem `json:"models"`
+}
+
 type addModelProviderGroupModelOpenAPIRequest struct {
 	Name           string  `json:"name"`
 	ModelType      string  `json:"model_type"`
@@ -1046,7 +1059,8 @@ type listUserModelsByModelTypeQueryParams struct {
 }
 
 type lookupContextWindowQueryParams struct {
-	Name string `query:"name"`
+	Name      string `query:"name"`
+	ModelType string `query:"model_type"`
 }
 
 type lookupContextWindowOpenAPIResponse struct {
@@ -3793,7 +3807,7 @@ func registeredCoreOperations() []openAPIOperation {
 			Method:      "GET",
 			Path:        "/model_providers/context_windows",
 			Summary:     "Look up a common model context window",
-			Description: "Resolves max_input_tokens from config/model_context_windows.yaml by model name. Unknown names return 128K with matched=false.",
+			Description: "Resolves max_input_tokens from config/model_context_windows.yaml by model name and optional model_type (llm, vlm, embed). Unknown names return 128K with matched=false. model_catalog.yaml is not consulted.",
 			Tags:        []string{"model_providers"},
 			QueryParams: lookupContextWindowQueryParams{},
 			Responses:   map[int]openAPIResponse{200: resp("Context window lookup", lookupContextWindowOpenAPIResponse{})},
@@ -3861,6 +3875,15 @@ func registeredCoreOperations() []openAPIOperation {
 			Tags:        []string{"model_providers"},
 			PathParams:  modelProviderGroupByIDPathParams{},
 			Responses:   map[int]openAPIResponse{200: resp("Deleted group", deleteModelProviderGroupOpenAPIResponse{})},
+		},
+		{
+			Method:      "GET",
+			Path:        "/model_providers/{model_provider_id}/groups/{group_id}/remote_models",
+			Summary:     "List models advertised by a connection group",
+			Description: "Calls the group's OpenAI-compatible /v1/models endpoint using the stored Base URL and API key. Each item includes an inferred model_type and whether it is already added to the group.",
+			Tags:        []string{"model_providers"},
+			PathParams:  modelProviderGroupByIDPathParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Remote models list", listRemoteGroupModelsOpenAPIResponse{})},
 		},
 		{
 			Method:      "GET",

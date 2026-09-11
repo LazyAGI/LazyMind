@@ -31,26 +31,6 @@ func parseMaxInputTokens(raw string) (string, error) {
 	return value, nil
 }
 
-func applyCatalogMaxInputTokens(modelType string, raw *string) (*string, error) {
-	if raw != nil && strings.TrimSpace(*raw) != "" {
-		switch strings.TrimSpace(modelType) {
-		case "llm", "vlm", "embed":
-		default:
-			return nil, errors.New("model max_input_tokens is only supported for llm, vlm, or embed models")
-		}
-		normalized, err := parseMaxInputTokens(*raw)
-		if err != nil {
-			return nil, err
-		}
-		return &normalized, nil
-	}
-	if supportsUserMaxInputTokens(modelType) {
-		value := defaultLLMMaxInputTokens
-		return &value, nil
-	}
-	return nil, nil
-}
-
 func resolveUserMaxInputTokens(modelType string, raw *string) (*string, error) {
 	trimmed := ""
 	if raw != nil {

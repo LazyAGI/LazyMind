@@ -11,11 +11,12 @@ import {
   KeyOutlined,
   LoadingOutlined,
   PlusCircleOutlined,
+  PlusOutlined,
   RightOutlined,
   SearchOutlined,
   UpOutlined,
 } from "@ant-design/icons";
-import { lookupModelContextWindow, modelProvidersApi, unwrapModelProviderData } from "../api";
+import { listRemoteGroupModels, lookupModelContextWindow, modelProvidersApi, unwrapModelProviderData, type RemoteGroupModel } from "../api";
 import { getProviderLogoUrl } from "../providerBranding";
 import {
   DEFAULT_LLM_MAX_INPUT_TOKENS,
@@ -106,6 +107,11 @@ interface VerifyGroupFormValues {
 }
 
 interface CustomModelModalState {
+  provider: AddedProvider;
+  group: ProviderConnectionGroup;
+}
+
+interface RemoteModelsModalState {
   provider: AddedProvider;
   group: ProviderConnectionGroup;
 }
@@ -632,6 +638,11 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
   const [addedProviderList, setAddedProviderList] = useState<AddedProvider[]>([]);
   const [configModal, setConfigModal] = useState<ProviderConfigModalState | null>(null);
   const [customModelModal, setCustomModelModal] = useState<CustomModelModalState | null>(null);
+  const [remoteModelsModal, setRemoteModelsModal] = useState<RemoteModelsModalState | null>(null);
+  const [remoteModels, setRemoteModels] = useState<RemoteGroupModel[]>([]);
+  const [remoteModelsKeyword, setRemoteModelsKeyword] = useState("");
+  const [remoteModelsLoading, setRemoteModelsLoading] = useState(false);
+  const [addingRemoteModelIds, setAddingRemoteModelIds] = useState<Record<string, boolean>>({});
   const [verifyGroupModal, setVerifyGroupModal] = useState<VerifyGroupModalState | null>(null);
   const [expandedProviderIds, setExpandedProviderIds] = useState<Record<string, boolean>>({});
   const [keyword, setKeyword] = useState("");
@@ -651,6 +662,8 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
   const verifyApiKeyInputRef = useRef<InputRef>(null);
   const providerSearchRequestIdRef = useRef(0);
   const initialProvidersLoadedRef = useRef(false);
+  const addedProviderListRef = useRef<AddedProvider[]>([]);
+  addedProviderListRef.current = addedProviderList;
   const localizedFallbacks = useMemo(() => createModelProviderFallbacks(t), [i18n.language, t]);
   const getCapabilityLabel = useCallback((capability: ModelCapability) => t(capabilityLabelKeys[capability]), [t]);
   const configProvider = configModal?.provider || null;
@@ -701,7 +714,10 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
   );
 
   const loadModelProviders = useCallback(async () => {
-    setLoading(true);
+    const isFirstLoad = !initialProvidersLoadedRef.current;
+    if (isFirstLoad) {
+      setLoading(true);
+    }
     try {
       const providers = await fetchProviderOptions();
       setProviderOptions(providers);
@@ -709,6 +725,14 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
       const withGroupsResponse = await modelProvidersApi.apiCoreModelProvidersWithGroupsGet();
       const withGroupsData = unwrapModelProviderData<{ providers?: ApiProvider[] }>(withGroupsResponse.data);
       const addedIds = new Set((withGroupsData.providers || []).map((provider) => provider.id));
+      const previousModelsByGroupId = new Map<string, ProviderModel[]>();
+      for (const item of addedProviderListRef.current) {
+        for (const group of item.groups) {
+          if (group.models.length) {
+            previousModelsByGroupId.set(group.id, group.models);
+          }
+        }
+      }
       const addedProviders = await Promise.all(
         providers
           .filter((provider) => addedIds.has(provider.id))
@@ -717,7 +741,9 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
               modelProviderId: provider.id,
             });
             const groupData = unwrapModelProviderData<{ groups?: ApiGroup[] }>(groupResponse.data);
-            const groups = (groupData.groups || []).map((group) => mapApiGroup(provider, group, []));
+            const groups = (groupData.groups || []).map((group) =>
+              mapApiGroup(provider, group, previousModelsByGroupId.get(group.id) || [])
+            );
             return { ...provider, groups };
           })
       );
@@ -728,11 +754,21 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
       initialProvidersLoadedRef.current = true;
       setLoading(false);
     }
-  }, [currentLanguage, fetchProviderOptions, t]);
+  }, [fetchProviderOptions]);
 
   useEffect(() => {
     void loadModelProviders();
-  }, [loadModelProviders]);
+    // Group models are fetched on expand. Re-running this on i18n identity
+    // changes (tab blur/focus) used to wipe them and show an empty list.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!initialProvidersLoadedRef.current) {
+      return;
+    }
+    void fetchProviderOptions().then(setProviderOptions);
+  }, [currentLanguage, fetchProviderOptions]);
 
   useEffect(() => {
     if (!initialProvidersLoadedRef.current) {
@@ -1207,7 +1243,8 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
   const fillContextWindowFromName = async (name: string) => {
     setContextWindowLookingUp(true);
     try {
-      const tokens = await lookupModelContextWindow(name);
+      const capability = String(customModelForm.getFieldValue("capability") || "");
+      const tokens = await lookupModelContextWindow(name, getModelTypeForCapability(capability as ModelCapability));
       customModelForm.setFieldValue("maxInputTokens", tokens);
     } catch {
       customModelForm.setFieldValue("maxInputTokens", DEFAULT_LLM_MAX_INPUT_TOKENS);
@@ -1223,6 +1260,101 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
     }
     setContextWindowExpanded(true);
     void fillContextWindowFromName(String(customModelForm.getFieldValue("name") || ""));
+  };
+
+  const appendGroupModel = (providerId: string, groupId: string, nextModel: ProviderModel) => {
+    setAddedProviderList((current) =>
+      current.map((item) =>
+        item.id === providerId
+          ? {
+              ...item,
+              groups: item.groups.map((candidate) =>
+                candidate.id === groupId
+                  ? { ...candidate, models: [...candidate.models, nextModel] }
+                  : candidate
+              ),
+            }
+          : item
+      )
+    );
+  };
+
+  const openRemoteModelsModal = async (provider: AddedProvider, group: ProviderConnectionGroup) => {
+    setRemoteModelsModal({ provider, group });
+    setRemoteModels([]);
+    setRemoteModelsKeyword("");
+    setRemoteModelsLoading(true);
+    try {
+      const data = await listRemoteGroupModels(provider.id, group.id);
+      setRemoteModels(data.models || []);
+    } catch {
+      setRemoteModels([]);
+      message.error(t("modelProvider.error.loadRemoteModelsFailed"));
+    } finally {
+      setRemoteModelsLoading(false);
+    }
+  };
+
+  const closeRemoteModelsModal = () => {
+    setRemoteModelsModal(null);
+    setRemoteModels([]);
+    setRemoteModelsKeyword("");
+    setAddingRemoteModelIds({});
+  };
+
+  const filteredRemoteModels = useMemo(() => {
+    const query = remoteModelsKeyword.trim().toLowerCase();
+    if (!query) {
+      return remoteModels;
+    }
+    return remoteModels.filter((item) => {
+      const name = item.name.toLowerCase();
+      const id = item.id.toLowerCase();
+      return name.includes(query) || id.includes(query);
+    });
+  }, [remoteModels, remoteModelsKeyword]);
+
+  const addRemoteModel = async (item: RemoteGroupModel) => {
+    const provider = remoteModelsModal?.provider;
+    const group = remoteModelsModal?.group;
+    if (!provider || !group || item.added || addingRemoteModelIds[item.id]) {
+      return;
+    }
+    const capability = mapModelTypeToCapability(item.model_type);
+    setAddingRemoteModelIds((current) => ({ ...current, [item.id]: true }));
+    try {
+      const createdModel = unwrapModelProviderData<ApiModel>((await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsPost({
+        modelProviderId: provider.id,
+        groupId: group.id,
+        addModelProviderGroupModelOpenAPIRequest: {
+          name: item.name,
+          model_type: item.model_type || getModelTypeForCapability(capability),
+        },
+      })).data);
+      const nextModel: ProviderModel = {
+        id: createdModel.id,
+        name: createdModel.name,
+        capability: mapModelTypeToCapability(createdModel.model_type || item.model_type),
+        builtIn: Boolean(createdModel.is_default),
+        enabled: true,
+        maxInputTokens: createdModel.max_input_tokens || item.max_input_tokens,
+      };
+      appendGroupModel(provider.id, group.id, nextModel);
+      setRemoteModels((current) =>
+        current.map((candidate) => (candidate.id === item.id ? { ...candidate, added: true } : candidate))
+      );
+      setExpandedGroupIds((current) => ({ ...current, [`${provider.id}:${group.id}`]: true }));
+      message.success(t("modelProvider.message.modelAdded"));
+      void onConfigurationChanged?.();
+    } catch {
+      message.error(t("modelProvider.error.addModelFailed"));
+    } finally {
+      setAddingRemoteModelIds((current) => {
+        const next = { ...current };
+        delete next[item.id];
+        return next;
+      });
+    }
   };
 
   const openCustomModelModal = (provider: AddedProvider, group: ProviderConnectionGroup) => {
@@ -1272,7 +1404,9 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
         return;
       }
       if (isLlmChatCapability(values.capability) && isDefaultLlmMaxInputTokens(maxInputTokens)) {
-        maxInputTokens = parseLlmMaxInputTokens(await lookupModelContextWindow(values.name));
+        maxInputTokens = parseLlmMaxInputTokens(
+          await lookupModelContextWindow(values.name, getModelTypeForCapability(values.capability)),
+        );
       }
       const createdModel = unwrapModelProviderData<ApiModel>((await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsPost({
         modelProviderId: provider.id,
@@ -1293,23 +1427,7 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
         enabled: true,
         maxInputTokens: createdModel.max_input_tokens || maxInputTokens,
       };
-      setAddedProviderList((current) =>
-        current.map((item) =>
-          item.id === provider.id
-            ? {
-                ...item,
-                groups: item.groups.map((candidate) =>
-                  candidate.id === group.id
-                    ? {
-                        ...candidate,
-                        models: [...candidate.models, nextModel],
-                      }
-                    : candidate
-                ),
-              }
-            : item
-        )
-      );
+      appendGroupModel(provider.id, group.id, nextModel);
       message.success(t("modelProvider.message.modelAdded"));
       void onConfigurationChanged?.();
       closeCustomModelModal();
@@ -1446,8 +1564,11 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
                                         {expandedGroupIds[`${provider.id}:${group.id}`] ? t("modelProvider.collapseModels") : t("modelProvider.expandModels")}
                                         {expandedGroupIds[`${provider.id}:${group.id}`] ? <UpOutlined /> : <DownOutlined />}
                                       </Button>
-                                      <Button icon={<PlusCircleOutlined />} onClick={() => openCustomModelModal(provider, group)}>
-                                        {t("modelProvider.addModel")}
+                                      <Button icon={<PlusCircleOutlined />} onClick={() => void openRemoteModelsModal(provider, group)}>
+                                        {t("modelProvider.fetchAvailableModels")}
+                                      </Button>
+                                      <Button onClick={() => openCustomModelModal(provider, group)}>
+                                        {t("modelProvider.customModel")}
                                       </Button>
                                       <Button icon={<EditOutlined />} onClick={() => openProviderConfig(provider, group)}>
                                         {t("common.edit")}
@@ -1782,6 +1903,63 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
             />
           </Form.Item>
         </Form>
+      </Modal>
+
+      <Modal
+        centered
+        destroyOnHidden
+        footer={null}
+        open={!!remoteModelsModal}
+        title={t("modelProvider.fetchAvailableModelsTitle", { name: remoteModelsModal?.group.name || "" })}
+        width={560}
+        onCancel={closeRemoteModelsModal}
+      >
+        {remoteModelsLoading ? (
+          <div className="model-provider-remote-models-status">
+            <LoadingOutlined />
+            <span>{t("modelProvider.fetchAvailableModelsLoading")}</span>
+          </div>
+        ) : remoteModels.length ? (
+          <div className="model-provider-remote-models">
+            <Input
+              allowClear
+              aria-label={t("modelProvider.searchRemoteModelsAria")}
+              className="model-provider-remote-models-search"
+              placeholder={t("modelProvider.searchRemoteModelsPlaceholder")}
+              prefix={<SearchOutlined />}
+              value={remoteModelsKeyword}
+              onChange={(event) => setRemoteModelsKeyword(event.target.value)}
+            />
+            {filteredRemoteModels.length ? filteredRemoteModels.map((item) => (
+              <div className="model-provider-remote-model-row" key={item.id}>
+                <div className="model-provider-remote-model-meta">
+                  <strong>{item.name}</strong>
+                  <Tag>{getCapabilityLabel(mapModelTypeToCapability(item.model_type))}</Tag>
+                  {item.max_input_tokens ? (
+                    <span className="model-provider-model-max-input-tokens">
+                      {t("modelProvider.maxInputTokens", { value: resolveLlmMaxInputTokens(item.max_input_tokens) })}
+                    </span>
+                  ) : null}
+                </div>
+                {item.added ? (
+                  <span className="model-provider-remote-model-added">{t("modelProvider.alreadyAdded")}</span>
+                ) : (
+                  <Button
+                    aria-label={t("modelProvider.addRemoteModelAria", { name: item.name })}
+                    icon={<PlusOutlined />}
+                    loading={!!addingRemoteModelIds[item.id]}
+                    type="text"
+                    onClick={() => void addRemoteModel(item)}
+                  />
+                )}
+              </div>
+            )) : (
+              <Empty description={t("modelProvider.noRemoteModelsMatch")} image={Empty.PRESENTED_IMAGE_SIMPLE} />
+            )}
+          </div>
+        ) : (
+          <Empty description={t("modelProvider.noRemoteModels")} image={Empty.PRESENTED_IMAGE_SIMPLE} />
+        )}
       </Modal>
 
       <Modal

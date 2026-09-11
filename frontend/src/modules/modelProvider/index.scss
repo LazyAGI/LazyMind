@@ -629,6 +629,57 @@
   }
 }
 
+.model-provider-remote-models {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 480px;
+  overflow: auto;
+}
+
+.model-provider-remote-models-search {
+  margin-bottom: 4px;
+}
+
+.model-provider-remote-models-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 120px;
+  color: #64748b;
+}
+
+.model-provider-remote-model-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.model-provider-remote-model-meta {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+
+  strong {
+    color: #0f172a;
+    font-size: 14px;
+  }
+}
+
+.model-provider-remote-model-added {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .model-provider-group-actions {
   flex: 0 0 auto;
   display: inline-flex;

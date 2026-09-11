@@ -45,12 +45,30 @@ export function unwrapModelProviderData<T>(payload: unknown): T {
   return payload as T;
 }
 
-export async function lookupModelContextWindow(name: string): Promise<string> {
+export async function lookupModelContextWindow(name: string, modelType?: string): Promise<string> {
   const trimmed = name.trim();
   if (!trimmed) {
     return DEFAULT_LLM_MAX_INPUT_TOKENS;
   }
-  const response = await modelProvidersApi.apiCoreModelProvidersContextWindowsGet({ name: trimmed });
+  const response = await modelProvidersApi.apiCoreModelProvidersContextWindowsGet(
+    { name: trimmed },
+    modelType?.trim() ? { params: { model_type: modelType.trim() } } : undefined,
+  );
   const data = unwrapModelProviderData<LookupContextWindowOpenAPIResponse>(response.data);
   return data.max_input_tokens || DEFAULT_LLM_MAX_INPUT_TOKENS;
+}
+
+export interface RemoteGroupModel {
+  id: string;
+  name: string;
+  model_type: string;
+  max_input_tokens?: string;
+  added: boolean;
+}
+
+export async function listRemoteGroupModels(providerId: string, groupId: string) {
+  const response = await axiosInstance.get(
+    `${BASE_URL}/api/core/model_providers/${encodeURIComponent(providerId)}/groups/${encodeURIComponent(groupId)}/remote_models`,
+  );
+  return unwrapModelProviderData<{ url?: string; models?: RemoteGroupModel[] }>(response.data);
 }

@@ -4,37 +4,49 @@ import (
 	"testing"
 )
 
-func TestApplyCatalogMaxInputTokens(t *testing.T) {
-	t.Parallel()
+func TestResolveSeededMaxInputTokens(t *testing.T) {
+	if err := LoadContextWindows("../config/model_context_windows.yaml"); err != nil {
+		t.Fatal(err)
+	}
 
-	catalog := "200k"
-	got, err := applyCatalogMaxInputTokens("llm", &catalog)
+	got, err := resolveSeededMaxInputTokens("llm", "qwen-plus")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got == nil || *got != "200K" {
-		t.Fatalf("catalog llm = %v, want 200K", got)
+	if got == nil || *got != "1M" {
+		t.Fatalf("seeded llm = %v, want 1M", got)
 	}
 
-	got, err = applyCatalogMaxInputTokens("llm", nil)
+	got, err = resolveSeededMaxInputTokens("llm", "unknown-seeded-llm")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got == nil || *got != defaultLLMMaxInputTokens {
-		t.Fatalf("missing catalog llm = %v, want %s", got, defaultLLMMaxInputTokens)
+		t.Fatalf("missing window llm = %v, want %s", got, defaultLLMMaxInputTokens)
 	}
 
-	got, err = applyCatalogMaxInputTokens("embed", nil)
+	got, err = resolveSeededMaxInputTokens("embed", "text-embedding-3-large")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || *got != "8192" {
+		t.Fatalf("seeded embed = %v, want 8192", got)
+	}
+
+	got, err = resolveSeededMaxInputTokens("embed", "unknown-embed")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got != nil {
-		t.Fatalf("missing catalog embed = %v, want nil", got)
+		t.Fatalf("missing window embed = %v, want nil", got)
 	}
 
-	invalidType := "128K"
-	if _, err := applyCatalogMaxInputTokens("tts", &invalidType); err == nil {
-		t.Fatal("expected tts catalog max_input_tokens to fail")
+	got, err = resolveSeededMaxInputTokens("tts", "any-tts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != nil {
+		t.Fatalf("tts = %v, want nil", got)
 	}
 }
 
