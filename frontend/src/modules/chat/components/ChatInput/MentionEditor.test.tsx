@@ -165,4 +165,81 @@ describe("MentionEditor", () => {
     expect(await screen.findByRole("option", { name: "AI PPT 规划 副本" })).toBeInTheDocument();
     expect(mocks.axiosGet).toHaveBeenCalledTimes(2);
   });
+
+  it("resets the mention menu scroll when the query changes", async () => {
+    mocks.listSkillAssetsPage.mockResolvedValue({
+      records: [{ id: "skill-find", name: "find-skill-skillhub" }],
+    });
+
+    render(
+      <MentionEditor
+        value=""
+        placeholder="message"
+        onChange={vi.fn()}
+        onMentionsChange={vi.fn()}
+        onPaste={vi.fn()}
+        onSend={vi.fn()}
+        onCompositionChange={vi.fn()}
+      />,
+    );
+
+    const editor = screen.getByRole("textbox");
+    editor.textContent = "@find";
+    let textNode = editor.firstChild;
+    if (!textNode) throw new Error("Mention editor did not create a text node");
+    let range = document.createRange();
+    range.setStart(textNode, textNode.textContent?.length || 0);
+    range.collapse(true);
+    window.getSelection()?.removeAllRanges();
+    window.getSelection()?.addRange(range);
+    fireEvent.input(editor);
+
+    expect(await screen.findByRole("option", { name: "find-skill-skillhub" })).toBeInTheDocument();
+    await waitFor(() => expect(scrollablePrototype.scrollTo).toHaveBeenCalledWith({ top: 0 }));
+    vi.mocked(scrollablePrototype.scrollTo).mockClear();
+
+    editor.textContent = "@find-skill";
+    textNode = editor.firstChild;
+    if (!textNode) throw new Error("Mention editor did not create a text node");
+    range = document.createRange();
+    range.setStart(textNode, textNode.textContent?.length || 0);
+    range.collapse(true);
+    window.getSelection()?.removeAllRanges();
+    window.getSelection()?.addRange(range);
+    fireEvent.input(editor);
+
+    await waitFor(() => expect(scrollablePrototype.scrollTo).toHaveBeenCalledWith({ top: 0 }));
+  });
+
+  it("renders each mention group as soon as that group finishes loading", async () => {
+    mocks.listSkillAssetsPage.mockResolvedValue({
+      records: [{ id: "skill-find", name: "find-skill-skillhub" }],
+    });
+    mocks.listConversations.mockReturnValue(new Promise(() => undefined));
+
+    render(
+      <MentionEditor
+        value=""
+        placeholder="message"
+        onChange={vi.fn()}
+        onMentionsChange={vi.fn()}
+        onPaste={vi.fn()}
+        onSend={vi.fn()}
+        onCompositionChange={vi.fn()}
+      />,
+    );
+
+    const editor = screen.getByRole("textbox");
+    editor.textContent = "@find";
+    const textNode = editor.firstChild;
+    if (!textNode) throw new Error("Mention editor did not create a text node");
+    const range = document.createRange();
+    range.setStart(textNode, textNode.textContent?.length || 0);
+    range.collapse(true);
+    window.getSelection()?.removeAllRanges();
+    window.getSelection()?.addRange(range);
+    fireEvent.input(editor);
+
+    expect(await screen.findByRole("option", { name: "find-skill-skillhub" })).toBeInTheDocument();
+  });
 });

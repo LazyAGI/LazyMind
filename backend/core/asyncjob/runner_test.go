@@ -194,6 +194,102 @@ func TestRecoverStaleJobsRestoresPendingAndFailsExhausted(t *testing.T) {
 	}
 }
 
+func TestRunnerRunOnceRecoversExpiredRunningJobBeforeClaim(t *testing.T) {
+	db := newTestDB(t)
+	resetRegistryForTest()
+	defer resetRegistryForTest()
+
+	Register("test.stale.retry", func(ctx context.Context, job Job, reporter Reporter) (Result, error) {
+		if job.AttemptCount != 2 {
+			t.Fatalf("expected resumed attempt 2, got %d", job.AttemptCount)
+		}
+		return Result{ResultJSON: json.RawMessage(`{"resumed":true}`)}, nil
+	})
+
+	now := time.Now().UTC()
+	expired := now.Add(-time.Minute)
+	job := orm.AsyncJob{
+		ID:           "job_expired_running",
+		JobType:      "test.stale.retry",
+		Status:       string(StatusRunning),
+		AttemptCount: 1,
+		MaxAttempts:  3,
+		NextRunAt:    now.Add(-time.Hour),
+		LockedBy:     "dead-worker",
+		LockUntil:    &expired,
+		CreatedAt:    now.Add(-time.Hour),
+		UpdatedAt:    now.Add(-time.Hour),
+	}
+	if err := db.Create(&job).Error; err != nil {
+		t.Fatalf("create stale running job: %v", err)
+	}
+
+	runner := newTestRunner(db)
+	ran, err := runner.runOnce(context.Background())
+	if err != nil {
+		t.Fatalf("run once: %v", err)
+	}
+	if !ran {
+		t.Fatalf("expected runner to recover and process the stale job")
+	}
+
+	got := getTestJob(t, db, job.ID)
+	if got.Status != string(StatusSucceeded) || got.AttemptCount != 2 {
+		t.Fatalf("expected recovered job to succeed on attempt 2, got %+v", got)
+	}
+	if got.LockedBy != "" || got.LockUntil != nil {
+		t.Fatalf("expected lock cleared after success, got %+v", got)
+	}
+}
+
+func TestRunnerFinalizeDoesNotOverrideCanceledJob(t *testing.T) {
+	db := newTestDB(t)
+	runner := newTestRunner(db)
+	now := time.Now().UTC()
+	job := orm.AsyncJob{
+		ID: "job_canceled_finalize", JobType: "test", Status: string(StatusCanceled),
+		AttemptCount: 1, MaxAttempts: 3, NextRunAt: now, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := db.Create(&job).Error; err != nil {
+		t.Fatalf("create canceled job: %v", err)
+	}
+
+	if err := runner.markSucceeded(context.Background(), job, Result{ResultJSON: json.RawMessage(`{"ok":true}`)}); err != nil {
+		t.Fatalf("mark succeeded: %v", err)
+	}
+	got := getTestJob(t, db, job.ID)
+	if got.Status != string(StatusCanceled) || got.ResultJSON != nil {
+		t.Fatalf("succeeded finalizer should not override canceled job: %+v", got)
+	}
+
+	if err := runner.markFailedAttempt(context.Background(), job, Result{ErrorCode: "boom"}, errors.New("late failure")); err != nil {
+		t.Fatalf("mark failed attempt: %v", err)
+	}
+	got = getTestJob(t, db, job.ID)
+	if got.Status != string(StatusCanceled) || got.ErrorCode != "" || got.ErrorMessage != "" {
+		t.Fatalf("failed finalizer should not override canceled job: %+v", got)
+	}
+}
+
+func TestRunnerFinalizeRetriesTransientFailure(t *testing.T) {
+	runner := newTestRunner(newTestDB(t))
+	attempts := 0
+
+	err := runner.finalizeJob(func(ctx context.Context) error {
+		attempts++
+		if attempts < 3 {
+			return context.DeadlineExceeded
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("expected finalize retry to succeed, got %v", err)
+	}
+	if attempts != 3 {
+		t.Fatalf("expected 3 finalize attempts, got %d", attempts)
+	}
+}
+
 func TestRunnerMarksUnregisteredHandlerFailed(t *testing.T) {
 	db := newTestDB(t)
 	resetRegistryForTest()
@@ -342,7 +438,7 @@ func TestRunnerRecoversLeaseThatExpiresAfterStartup(t *testing.T) {
 		return Result{}, nil
 	})
 	job := enqueueTestJob(t, db, "test.recover-later", 3)
-	until := time.Now().Add(200 * time.Millisecond)
+	until := time.Now().UTC().Add(200 * time.Millisecond)
 	if err := db.Model(&orm.AsyncJob{}).Where("id = ?", job.ID).Updates(map[string]any{"status": StatusRunning, "lock_until": until, "locked_by": "previous-process", "attempt_count": 1}).Error; err != nil {
 		t.Fatal(err)
 	}

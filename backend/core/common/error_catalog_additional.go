@@ -88,7 +88,8 @@ func init() {
 	registerAdditionalError("create upstream thread failed", http.StatusBadGateway, 2001344)
 	registerAdditionalError("create word group from conflict failed", http.StatusInternalServerError, 2001345)
 	registerAdditionalError("cron_expr and prompt_template are required", http.StatusBadRequest, 2001346)
-	registerAdditionalError("custom plugin scripts require the administrator publishing workflow", http.StatusForbidden, 2001347)
+	registerAdditionalError("custom workflow scripts require administrator permission or a matching deterministic audit", http.StatusForbidden, 2001347)
+	registerAdditionalErrorAlias("custom plugin scripts require the administrator publishing workflow", "custom workflow scripts require administrator permission or a matching deterministic audit", http.StatusForbidden, 2001347)
 	registerAdditionalError("database connection not found", http.StatusNotFound, 2001348)
 	registerAdditionalError("dataset_ids required", http.StatusBadRequest, 2001349)
 	registerAdditionalError("db unavailable", http.StatusInternalServerError, 2001350)
@@ -696,6 +697,7 @@ func init() {
 	registerAdditionalErrorAlias("invalid external Agent attachment content", "invalid external Agent attachment", http.StatusBadRequest, 2002367)
 	registerAdditionalError("create external Agent attachment reference", http.StatusInternalServerError, 2002368)
 	registerAdditionalError("external Agent attachment event conflicts with existing content", http.StatusConflict, 2002369)
+	registerAdditionalErrorAlias("skill_id required", "missing skill_id", http.StatusBadRequest, 2000854)
 	registerAdditionalError("invalid history selection", http.StatusBadRequest, 2002370)
 	registerAdditionalError("failed to start history run", http.StatusConflict, 2002371)
 	registerAdditionalError("editable block unavailable or changed; refresh and retry", http.StatusConflict, 2002372)
@@ -755,6 +757,14 @@ func init() {
 	registerAdditionalError("invalid group base_url", http.StatusBadRequest, 2002639)
 	registerAdditionalError("group base_url must use http or https", http.StatusBadRequest, 2002640)
 	registerAdditionalError("group base_url must not include credentials", http.StatusBadRequest, 2002641)
+	registerAdditionalError("skill conversion preflight failed", http.StatusInternalServerError, 2002800)
+	registerAdditionalError("cancel generation failed", http.StatusInternalServerError, 2002801)
+	registerAdditionalError("workflow draft generation canceled", http.StatusConflict, 2002802)
+	registerAdditionalError("repair returned empty workflow_yaml", http.StatusBadGateway, 2002803)
+	registerAdditionalError("repair returned empty scenario.md", http.StatusBadGateway, 2002804)
+	registerAdditionalError("save generated script audit", http.StatusInternalServerError, 2002805)
+	registerAdditionalError("save repaired script audit", http.StatusInternalServerError, 2002806)
+	registerAdditionalError("sync workflow capabilities failed", http.StatusInternalServerError, 2002807)
 }
 
 func registerAdditionalError(message string, status, code int) {

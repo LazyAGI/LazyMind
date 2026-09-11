@@ -10,7 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import { RcFile } from "antd/es/upload";
-import { Button, message, Popover, Select, Spin, Tag, Tooltip } from "antd";
+import { Button, message, Modal, Popover, Select, Spin, Tag, Tooltip } from "antd";
 import {
   AppstoreOutlined,
   BookOutlined,
@@ -67,6 +67,10 @@ import {
   type ChatModelSelectionRequest,
 } from "@/modules/chat/store/modelSelection";
 import { useTaskCenterStore } from "@/modules/chat/store/taskCenter";
+import {
+  listSkillLinkedWorkflows,
+  type SkillLinkedWorkflow,
+} from "@/modules/workflow/workflowDraftApi";
 
 // Stable empty array reference — must NOT be inline `?? []` in a zustand selector
 // because a new array on every call triggers useSyncExternalStore to fire React error #185.
@@ -77,6 +81,47 @@ const THINKING_DEPTH_LABEL_KEYS: Record<ThinkingDepth, string> = {
   high: "chat.thinkingDepthHigh",
   max: "chat.thinkingDepthMax",
 };
+
+function linkedWorkflowUnavailableReasonKey(reason?: string): string {
+  const normalized = (reason || "").trim();
+  if (normalized.startsWith("required_capability_config_missing:")) {
+    const capability = normalized.split(":")[1] || "";
+    switch (capability) {
+      case "web_search":
+        return "chat.skillLinkedWorkflowUnavailableReasonWebSearch";
+      case "academic_search":
+        return "chat.skillLinkedWorkflowUnavailableReasonAcademicSearch";
+      case "cloud_files":
+        return "chat.skillLinkedWorkflowUnavailableReasonCloudFiles";
+      case "vlm":
+      case "text2image":
+      case "image_editing":
+        return "chat.skillLinkedWorkflowUnavailableReasonModelCapability";
+      default:
+        return "chat.skillLinkedWorkflowUnavailableReasonCapabilityConfig";
+    }
+  }
+  switch (normalized) {
+    case "workflow_disabled":
+      return "chat.skillLinkedWorkflowUnavailableReasonDisabled";
+    case "workflows_paused":
+      return "chat.skillLinkedWorkflowUnavailableReasonPaused";
+    case "workflow_unpublished":
+      return "chat.skillLinkedWorkflowUnavailableReasonUnpublished";
+    case "required_capability_missing":
+      return "chat.skillLinkedWorkflowUnavailableReasonCapabilityMissing";
+    case "required_capability_unsupported":
+      return "chat.skillLinkedWorkflowUnavailableReasonCapabilityUnsupported";
+    case "workflow_projection_unavailable":
+      return "chat.skillLinkedWorkflowUnavailableReasonProjection";
+    default:
+      return "chat.skillLinkedWorkflowUnavailableReasonUnknown";
+  }
+}
+
+function firstUnavailableLinkedWorkflow(workflows: SkillLinkedWorkflow[]): SkillLinkedWorkflow | undefined {
+  return workflows.find((item) => !item.available) ?? workflows[0];
+}
 import ShowChatFileList from "../ShowChatFileList";
 import { formatFileSize } from "@/modules/chat/utils";
 import {
@@ -557,7 +602,7 @@ interface SendButtonProps {
   disabled: boolean;
   sendLabel: string;
   stopLabel: string;
-  onSend: () => void;
+  onSend: () => void | Promise<void>;
   onStop?: () => void;
 }
 const SendButton: React.FC<SendButtonProps> = ({
@@ -669,6 +714,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     const { t } = useTranslation();
     const [text, setText] = useState("");
     const [mentions, setMentions] = useState<ChatMention[]>([]);
+    const [resolvingSkillWorkflow, setResolvingSkillWorkflow] = useState(false);
     const effectiveMentions = useMemo(() => {
       const merged = new Map<string, ChatMention>();
       for (const mention of [...boundMentions, ...mentions]) {
@@ -1002,6 +1048,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       disabled ||
       isPromptPolishing ||
       modelSelectionSaving ||
+      resolvingSkillWorkflow ||
       !value?.trim() ||
       isUploading;
     const shouldShowPromptSuggestions =
@@ -1067,7 +1114,61 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       setTimeout(() => onHeightChange?.(), 0);
     }, [onHeightChange, shouldShowPromptSuggestions]);
 
-    const handleSend = () => {
+    const resolveSkillWorkflowMentions = useCallback(async (
+      originalMentions: ChatMention[],
+    ): Promise<ChatMention[]> => {
+      if (originalMentions.some((mention) => mention.type === "workflow")) {
+        return originalMentions;
+      }
+      const skillMention = originalMentions.find((mention) => mention.type === "skill");
+      if (!skillMention) {
+        return originalMentions;
+      }
+      try {
+        const linked = await listSkillLinkedWorkflows(skillMention.resource_id);
+        const workflows = linked.workflows || [];
+        const workflow = workflows.find((item) => item.available);
+        if (!workflow) {
+          const unavailableWorkflow = firstUnavailableLinkedWorkflow(workflows);
+          if (unavailableWorkflow) {
+            message.info(t("chat.skillLinkedWorkflowUnavailableNotice", {
+              reason: t(linkedWorkflowUnavailableReasonKey(unavailableWorkflow.unavailable_reason)),
+            }));
+          }
+          return originalMentions;
+        }
+        const useWorkflow = await new Promise<boolean>((resolve) => {
+          Modal.confirm({
+            title: t("chat.skillLinkedWorkflowConfirmTitle"),
+            content: workflow.name
+              ? t("chat.skillLinkedWorkflowConfirmContent", { name: workflow.name })
+              : undefined,
+            okText: t("chat.skillLinkedWorkflowUseWorkflow"),
+            cancelText: t("chat.skillLinkedWorkflowUseSkill"),
+            onOk: () => resolve(true),
+            onCancel: () => resolve(false),
+          });
+        });
+        if (!useWorkflow) {
+          return originalMentions;
+        }
+        return [
+          ...originalMentions.filter((mention) => (
+            mention.type !== "skill" || mention.resource_id !== skillMention.resource_id
+          )),
+          {
+            mention_id: crypto.randomUUID(),
+            type: "workflow",
+            resource_id: workflow.workflow_ref,
+            display_name: workflow.name || workflow.workflow_id || workflow.workflow_ref,
+          },
+        ];
+      } catch {
+        return originalMentions;
+      }
+    }, [t]);
+
+    const handleSend = async () => {
       if (disabled) {
         if (disabledReason) {
           message.warning(disabledReason);
@@ -1077,10 +1178,17 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       if (modelSelectionSaving) {
         return;
       }
-      if (isStreaming || isSendDisabled) {
+      if (isStreaming || isSendDisabled || resolvingSkillWorkflow) {
         return;
       }
       const normalizedText = value.trim();
+      setResolvingSkillWorkflow(true);
+      let resolvedMentions = effectiveMentions;
+      try {
+        resolvedMentions = await resolveSkillWorkflowMentions(effectiveMentions);
+      } finally {
+        setResolvingSkillWorkflow(false);
+      }
       const storedInitialModelSelection = !sessionId
         ? toChatModelSelectionRequest(
             useModelSelectionStore.getState().selections[
@@ -1100,7 +1208,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
           databaseBaseId: chatConfig?.databaseBaseId,
         },
         thinking_depth: effectiveThinkingDepth,
-        mentions: effectiveMentions,
+        mentions: resolvedMentions,
         citeMessage: normalizedCiteMessages.join("\n\n"),
         citeMessages: normalizedCiteMessages,
         citeHistoryIds: citeHistoryIds?.filter(
@@ -1399,7 +1507,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                     modelSelectionSaving ||
                     isStreaming
                   ) return;
-                  handleSend();
+                  void handleSend();
                   setNewMessage(false);
                 }}
                 disabled={disabled || isPromptPolishing}

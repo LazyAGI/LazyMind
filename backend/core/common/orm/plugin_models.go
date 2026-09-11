@@ -349,22 +349,28 @@ type WorkflowRepairRun struct {
 func (WorkflowRepairRun) TableName() string { return "plugin_repair_runs" }
 
 type WorkflowResource struct {
-	ID              string    `gorm:"column:id;type:varchar(36);primaryKey"`
-	WorkflowRef     string    `gorm:"column:plugin_ref;type:varchar(512);not null;uniqueIndex"`
-	WorkflowID      string    `gorm:"column:plugin_id;type:varchar(255);not null"`
-	OwnerUserID     string    `gorm:"column:owner_user_id;type:varchar(255);not null;index:idx_plugins_owner,priority:1"`
-	OwnerScope      string    `gorm:"column:owner_scope;type:varchar(128);not null"`
-	SourceType      string    `gorm:"column:source_type;type:varchar(16);not null;default:'user'"`
-	RelativeRoot    string    `gorm:"column:relative_root;type:varchar(1024);not null;uniqueIndex"`
-	Name            string    `gorm:"column:name;type:varchar(255);not null;default:''"`
-	Description     string    `gorm:"column:description;type:text;not null;default:''"`
-	WhenToUse       string    `gorm:"column:when_to_use;type:text;not null;default:''"`
-	HeadRevisionID  string    `gorm:"column:head_revision_id;type:varchar(36)"`
-	Version         int64     `gorm:"column:version;not null;default:0"`
-	Status          string    `gorm:"column:status;type:varchar(16);not null;default:'active';index:idx_plugins_owner,priority:2"`
-	ContainsScripts bool      `gorm:"column:contains_scripts;not null;default:false"`
-	CreatedAt       time.Time `gorm:"column:created_at;not null"`
-	UpdatedAt       time.Time `gorm:"column:updated_at;not null"`
+	ID                    string    `gorm:"column:id;type:varchar(36);primaryKey"`
+	WorkflowRef           string    `gorm:"column:plugin_ref;type:varchar(512);not null;uniqueIndex"`
+	WorkflowID            string    `gorm:"column:plugin_id;type:varchar(255);not null"`
+	OwnerUserID           string    `gorm:"column:owner_user_id;type:varchar(255);not null;index:idx_plugins_owner,priority:1"`
+	OwnerScope            string    `gorm:"column:owner_scope;type:varchar(128);not null"`
+	SourceType            string    `gorm:"column:source_type;type:varchar(16);not null;default:'user'"`
+	SourceSkillID         string    `gorm:"column:source_skill_id;type:varchar(36);not null;default:'';index:idx_plugins_source_skill"`
+	SourceSkillName       string    `gorm:"column:source_skill_name;type:varchar(255);not null;default:''"`
+	SourceSkillRevisionID string    `gorm:"column:source_skill_revision_id;type:varchar(36);not null;default:''"`
+	SourceSkillRevisionNo int64     `gorm:"column:source_skill_revision_no;not null;default:0"`
+	SourceSkillTreeHash   string    `gorm:"column:source_skill_tree_hash;type:varchar(64);not null;default:''"`
+	SourceDraftID         string    `gorm:"column:source_draft_id;type:varchar(36);not null;default:''"`
+	RelativeRoot          string    `gorm:"column:relative_root;type:varchar(1024);not null;uniqueIndex"`
+	Name                  string    `gorm:"column:name;type:varchar(255);not null;default:''"`
+	Description           string    `gorm:"column:description;type:text;not null;default:''"`
+	WhenToUse             string    `gorm:"column:when_to_use;type:text;not null;default:''"`
+	HeadRevisionID        string    `gorm:"column:head_revision_id;type:varchar(36)"`
+	Version               int64     `gorm:"column:version;not null;default:0"`
+	Status                string    `gorm:"column:status;type:varchar(16);not null;default:'active';index:idx_plugins_owner,priority:2"`
+	ContainsScripts       bool      `gorm:"column:contains_scripts;not null;default:false"`
+	CreatedAt             time.Time `gorm:"column:created_at;not null"`
+	UpdatedAt             time.Time `gorm:"column:updated_at;not null"`
 }
 
 func (WorkflowResource) TableName() string { return "plugins" }
