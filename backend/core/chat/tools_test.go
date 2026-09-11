@@ -41,6 +41,29 @@ func startChatToolsTestServer(t *testing.T, handler http.Handler) string {
 	return fmt.Sprintf("http://%s", listener.Addr().String())
 }
 
+func TestApplyMCPRuntimeConfigRegistersVocabularyTools(t *testing.T) {
+	db := newToolsTestDB(t)
+	t.Setenv("LAZYMIND_VOCABULARY_ENABLED", "true")
+	t.Setenv("LAZYMIND_CORE_MCP_URL", "http://core.test/mcp/capabilities/v1")
+	body := map[string]any{}
+	applyMCPRuntimeConfig(context.Background(), db.DB, "u1", "Bearer user-token", body)
+	configs, ok := body["mcp_config"].([]any)
+	if !ok || len(configs) != 1 {
+		t.Fatalf("mcp_config = %#v", body["mcp_config"])
+	}
+	config, _ := configs[0].(map[string]any)
+	if config["url"] != "http://core.test/mcp/capabilities/v1" {
+		t.Fatalf("vocabulary MCP URL = %#v", config["url"])
+	}
+	if config["transport"] != "streamable-http" {
+		t.Fatalf("vocabulary MCP transport = %#v", config["transport"])
+	}
+	headers, _ := config["headers"].(map[string]any)
+	if headers["Authorization"] != "Bearer user-token" {
+		t.Fatalf("vocabulary MCP headers = %#v", headers)
+	}
+}
+
 func seedRuntimeModelConfig(t *testing.T, db *orm.DB, userID string) {
 	t.Helper()
 	now := time.Now()

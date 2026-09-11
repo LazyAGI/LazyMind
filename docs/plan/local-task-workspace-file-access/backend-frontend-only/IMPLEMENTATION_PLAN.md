@@ -670,3 +670,13 @@ Workflow 创建任务时复用 `RebuildSubagentParams` 持久化同一快照，�
 最终提交仅包含工作区授权、执行权限快照、受控文件工具、前端权限与批准窗口、对应自动化测试及本目录四份交接文档。`algorithm/Dockerfile` 的 OpenCode 下载修复已从分支移除；临时验收文件和独立 Review 报告不进入仓库。
 
 远端交接状态：功能提交 `1339da97` 已于 2026-09-11 推送至 `origin/feature/newWorkZone`，后续由用户手动创建 PR。
+
+## 2026-09-11 官方 main 同步与合并门禁
+
+按用户要求新增 `upstream=https://github.com/LazyAGI/LazyMind.git`，本地 `main` 已快进并跟踪 `upstream/main` 的 `2163dae182869d043cb90206260e3d92da8a329d`，随后以普通 merge 合入 `feature/newWorkZone`。官方 main 带入的 Local/Desktop 变更保持官方内容，不作为本功能继续开发；冲突处理只整合工作区功能与官方新合同。
+
+LazyLLM 以官方 main 为准：gitlink 和子模块工作树均为 `2cc07741ca6531715d5c55f9ac083f635614188a`。此前文档中的 `2e3d00ac...` 是合并前冻结记录，已由本次明确要求取代。
+
+合并兼容修正限于既有文件：保留 Core 工作区快照与官方会话 fork/opening、SubAgent task spec/initial steps、Workflow 运行合同；重新导出 Core OpenAPI 并生成客户端；修复 SQLite 聚合迁移语法；再生成时即使没有状态存储也必须先接管数据库 run；SQLite 异步任务租约按时间值比较以兼容非 UTC 本机。没有为这些修正新增服务、数据库表、生产依赖、manager、facade 或重复 DTO。
+
+最终自动门禁：Core `go test -count=1 ./...` 与 `go vet ./...` 通过；租约恢复用例连续 5 次通过；工作区 Chat/SubAgent/Migrate 定向测试通过；算法工作区与远端执行回归 `109 passed`；前端 `pnpm run typecheck`、Local 生产构建和四套 OpenAPI fresh 检查通过；冲突标记和 `git diff --check` 通过。真实登录、真实模型、原生目录选择器与打包 Desktop 仍属于人工验收。

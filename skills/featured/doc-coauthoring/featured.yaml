@@ -1,0 +1,151 @@
+schema_version: 2
+id: doc-coauthoring
+type: chat
+version: 1.0.0
+status: published
+default_locale: zh-CN
+provider: GitHub
+
+skill:
+  source_url: https://github.com/anthropics/skills/tree/41bbe19d1a1a7eaab5e7bb9050a417e5c6cffc8f/skills/doc-coauthoring
+  category: writing
+
+placement:
+  home: true
+  gallery: true
+  order: 28
+
+classification:
+  category: 文档协作
+  tags:
+    - 文档共创
+    - 方案写作
+    - 技术文档
+    - 决策记录
+
+assets:
+  cover:
+    file: assets/cover.png
+    role: cover
+  coauthor_product_proposal_demo:
+    file: assets/coauthor-product-proposal-demo.html
+    role: result
+  coauthor_technical_spec_demo:
+    file: assets/coauthor-technical-spec-demo.html
+    role: result
+  coauthor_decision_doc_demo:
+    file: assets/coauthor-decision-doc-demo.html
+    role: result
+  product_proposal_scene:
+    file: assets/product-proposal-scene.png
+    role: result
+  technical_plan_scene:
+    file: assets/technical-plan-scene.png
+    role: result
+  decision_record_scene:
+    file: assets/decision-record-scene.png
+    role: result
+
+presentation:
+  card:
+    title: 方案共创助手
+    description: 和你一起从背景、结构到读者测试，把方案和技术文档逐步写清楚
+    output_type: report
+    output_label: 文档共创结果
+    cover_asset: cover
+    result_summary: 查看一份产品方案、技术方案和决策文档如何被共同梳理出来
+  detail:
+    title: 方案共创助手
+    description: 适合共同起草产品方案、技术方案和决策文档。先了解文档类型、读者、目标和约束，再一起确定结构、逐段讨论和起草，最后从读者角度检查是否清楚。不会在背景不完整时擅自补齐关键事实。来源：anthropics/skills，经 LazyMind 适配。
+    attachment_hint: 想共同起草的方案、技术文档、决策记录，或已有模板和背景材料
+
+tasks:
+  - id: coauthor-product-proposal
+    selector:
+      title: 一起写产品方案
+      description: 从问题和目标开始，逐步写出面向团队的产品方案
+      output_label: 产品方案
+    launch:
+      prompt_short: 我想写一份产品方案，能陪我一步步梳理吗？
+      prompt: >-
+        直接和我一起起草下面这份团队知识库搜索产品方案，不用先问我补充信息。先基于已知内容给出背景、目标用户、核心问题、第一版范围、建议章节和一版可修改草稿；一次先推进一部分，不要把缺失信息写成事实，把它们列为“待确认”。
+
+        已知信息：读者是产品、设计和工程团队；目标是让新人更快找到项目资料；现在新人经常依赖口头询问；最常见的资料类型和搜索成功标准还没有确定。
+    replay:
+      steps:
+        - title: 对齐背景和目标
+          description: 先确认文档要解决的问题、面向谁，以及希望读者看完后做什么
+        - title: 收集现有信息
+          description: 整理已有材料、约束和待确认的问题，不替用户补写没有依据的事实
+        - title: 确定文档结构
+          description: 根据读者和目标讨论章节顺序，并说明每一部分要回答的问题
+        - title: 逐段共同起草
+          description: 一次推进一个部分，先讨论取舍，再形成可以继续修改的文字
+        - title: 做读者测试
+          description: 从不了解背景的读者角度检查方案是否容易理解、执行和评估
+    result:
+      template: html_preview_v1
+      eyebrow: 产品方案
+      title: 团队知识库搜索方案
+      summary: 查看如何从背景、目标和读者出发，逐段形成一份可讨论的产品方案。
+      html_asset: coauthor_product_proposal_demo
+
+  - id: coauthor-technical-spec
+    selector:
+      title: 一起写技术方案
+      description: 把背景、约束、方案取舍和落地步骤写成技术文档
+      output_label: 技术方案
+    launch:
+      prompt_short: 我需要写一份技术方案，帮我一起把它写清楚。
+      prompt: >-
+        直接和我一起起草下面这份客服知识库接入工作台的技术方案，不用先问我补充信息。先基于已知内容整理系统背景、目标、约束、候选方案、取舍和章节结构，再给出一版可修改的初稿；未提供的接口稳定性、权限同步和失败降级方式标为“待确认”，不要自行补全。
+
+        已知信息：现有系统是客服工作台和知识库服务；目标是在当前工作台内检索知识；不能绕过现有权限，首期时间有限；需要进一步确认接口稳定性、权限同步和失败降级方式。
+    replay:
+      steps:
+        - title: 了解系统背景
+          description: 确认现有系统、使用者、技术目标和需要解决的实际问题
+        - title: 梳理约束和选项
+          description: 把性能、权限、兼容性、时间等约束与候选方案分开记录
+        - title: 讨论章节和取舍
+          description: 共同确定技术方案需要覆盖的内容，并逐项说明为什么这样选择
+        - title: 分段完成初稿
+          description: 先写清楚已经确定的部分，对未决定的内容保留明确的问题
+        - title: 检查读者可执行性
+          description: 从实现者和评审者角度检查方案是否缺少上下文、依据或下一步
+    result:
+      template: html_preview_v1
+      eyebrow: 技术方案
+      title: 客服知识库接入工作台
+      summary: 查看系统背景、约束、方案取舍和待确认事项如何逐步形成技术方案。
+      html_asset: coauthor_technical_spec_demo
+
+  - id: coauthor-decision-doc
+    selector:
+      title: 整理决策文档
+      description: 把选项、依据、取舍和结论整理成方便回看的决策记录
+      output_label: 决策文档
+    launch:
+      prompt_short: 帮我把这次技术选型整理成一份决策文档。
+      prompt: >-
+        直接和我一起整理下面这次搜索技术选型的决策文档，不用先问我补充信息。先基于已知内容写出决策背景、评估标准、候选方案、证据和取舍，再给出一版可修改的记录；把数据量、长期成本、供应商依赖和最终结论标为“待确认”，不要把暂时判断写成已确认决定。
+
+        已知信息：候选方案是自建搜索和托管搜索；团队维护能力有限，上线时间也有限；文档读者可能没有参加本次讨论，需要能看懂为什么做这个选择，以及之后何时重新评估。
+    replay:
+      steps:
+        - title: 确认决策背景
+          description: 了解要做什么决定、为什么现在要决定，以及文档的读者
+        - title: 补齐事实和约束
+          description: 询问团队、数据、时间和风险等影响决策的关键信息
+        - title: 组织候选方案
+          description: 把选项、评估标准、证据和取舍放进清晰的结构中
+        - title: 共同写出结论
+          description: 区分已确认的决定、暂时的判断和仍需验证的内容
+        - title: 检查可读性
+          description: 模拟不了解讨论过程的读者，找出难以理解或无法复盘的地方
+    result:
+      template: html_preview_v1
+      eyebrow: 决策文档
+      title: 搜索方案技术选型记录
+      summary: 查看候选方案、评估依据、取舍和结论如何被整理成可复盘的记录。
+      html_asset: coauthor_decision_doc_demo

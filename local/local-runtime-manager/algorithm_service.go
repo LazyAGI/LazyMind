@@ -460,6 +460,17 @@ func acquireAlgorithmPythonLock(ctx context.Context, paths RuntimePaths) (func()
 }
 
 func (m *AlgorithmServiceManager) waitForDependencies(ctx context.Context, cfg RuntimeConfig, service string) error {
+	if cfg.SQLiteServerPort > 0 {
+		if err := waitForHTTPOnly(
+			ctx,
+			cfg.SQLiteServerPort,
+			sqliteServerHealthPath,
+			sqliteServerProcessName,
+			5*time.Minute,
+		); err != nil {
+			return err
+		}
+	}
 	switch service {
 	case processorServerProcessName:
 		return nil
@@ -514,11 +525,19 @@ func localSegmentStorePath(paths RuntimePaths) string {
 	return filepath.Join(paths.AlgorithmHome, "sqlite", "segment-store.db")
 }
 
+func localSegmentStoreBackingPath(paths RuntimePaths) string {
+	configured := strings.TrimSpace(os.Getenv("LAZYMIND_SEGMENT_STORE_URI_OR_PATH"))
+	if configured == "" || strings.HasPrefix(configured, "sqliteproxy://") {
+		return localSegmentStorePath(paths)
+	}
+	return configured
+}
+
 func localSegmentStoreURIOrPath(cfg RuntimeConfig, paths RuntimePaths) string {
 	if strings.EqualFold(localSegmentStoreType(), "opensearch") {
 		return envText("LAZYMIND_SEGMENT_STORE_URI_OR_PATH", fmt.Sprintf("https://127.0.0.1:%d", cfg.Algorithm.OpenSearchPort))
 	}
-	return envText("LAZYMIND_SEGMENT_STORE_URI_OR_PATH", localSegmentStorePath(paths))
+	return "sqliteproxy://segments"
 }
 
 func ensureAlgorithmDataDirs(paths RuntimePaths) error {
@@ -584,8 +603,8 @@ func algorithmServiceEnv(cfg RuntimeConfig, paths RuntimePaths, service string) 
 		pythonPaths = append([]string{lazyLLMSource}, pythonPaths...)
 	}
 	pythonPath := strings.Join(pythonPaths, string(os.PathListSeparator))
-	lazyLLMDBURL := sqliteURL(paths.LazyLLMDBPath)
-	coreDBURL := sqliteURL(paths.CoreDBPath)
+	lazyLLMDBURL := "sqliteproxy://lazyllm"
+	coreDBURL := "sqliteproxy://core"
 	noProxy := envText("no_proxy", "127.0.0.1,localhost,::1,core,chat,evo-api,doc-server,lazyllm-algo,parsing,milvus,opensearch,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16")
 	noProxyUpper := envText("NO_PROXY", noProxy)
 	routerPoolStart, routerPoolEnd := localRouterPortPool(cfg)
@@ -600,6 +619,8 @@ func algorithmServiceEnv(cfg RuntimeConfig, paths RuntimePaths, service string) 
 		"LAZYMIND_DATABASE_URL=" + lazyLLMDBURL,
 		"LAZYMIND_CORE_DATABASE_URL=" + coreDBURL,
 		"LAZYMIND_ACL_DB_DSN=" + coreDBURL,
+		sqliteServerURLEnvVar + "=http://127.0.0.1:" + strconv.Itoa(cfg.SQLiteServerPort),
+		sqliteServerTokenFileEnvVar + "=" + paths.RunDirTokenFile,
 		"LAZYMIND_SHARED_UPLOAD_DIR=" + paths.UploadRoot,
 		"LAZYMIND_UPLOAD_DIR=" + paths.UploadRoot,
 		"LAZYMIND_UPLOAD_ROOT=" + paths.UploadRoot,

@@ -53,7 +53,7 @@ import { SlotHtmlSlide } from './ppt/SlotHtmlSlide';
 import { SlotJsonSlide } from './ppt/SlotJsonSlide';
 import { isSlideSpecArtifact } from './ppt/slideSchema';
 import type { TaskArtifactStream } from '@/modules/chat/store/taskCenter';
-import { Modal, Radio, type RadioChangeEvent } from 'antd';
+import { Image as AntImage, Modal, Radio, type RadioChangeEvent } from 'antd';
 import { WechatOutlined } from '@ant-design/icons';
 import { cloudProviderOptions } from '@/modules/modelProvider/constants/cloudProviderOptions';
 import { isVideoArtifactValue } from './artifactMedia';
@@ -1473,7 +1473,12 @@ export function SlotImage({
   const [captionEditing, setCaptionEditing] = useState(false);
   const [captionDraft, setCaptionDraft] = useState('');
   const [uploading, setUploading] = useState(false);
+  const [previewVisible, setPreviewVisible] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setPreviewVisible(false);
+  }, [url]);
 
   // Reset editing state when a different slot item is mapped to this component instance
   // (e.g. after delete+reorder, the same React node may receive a new slot via props).
@@ -1555,6 +1560,27 @@ export function SlotImage({
 
   const hasActions = Boolean(sessionId && slotId && slot.list_index !== undefined) && !readOnly;
   const showMutationActions = hasActions && !hideMutationActions;
+  const imagePreview = (
+    <AntImage
+      src={url}
+      alt={alt}
+      className={cardMode ? 'workflow-slot__image-card-img' : 'workflow-slot__image'}
+      wrapperClassName='workflow-slot__image-preview'
+      loading='lazy'
+      preview={{ visible: previewVisible, onVisibleChange: setPreviewVisible }}
+      role='button'
+      tabIndex={0}
+      aria-label={alt ? `${tr('chat.previewImage')}：${alt}` : tr('chat.previewImage')}
+      onClick={(event: React.MouseEvent<HTMLElement>) => event.stopPropagation()}
+      onKeyDown={(event: React.KeyboardEvent<HTMLElement>) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          event.stopPropagation();
+          setPreviewVisible(true);
+        }
+      }}
+    />
+  );
   const downloadName = String(raw?.name ?? raw?.filename ?? 'workflow-image.png');
   const downloadUrl = url ? `${url}${url.includes('?') ? '&' : '?'}download=1` : '';
   const downloadControl = downloadEnabled && downloadUrl ? (
@@ -1645,7 +1671,7 @@ export function SlotImage({
     return (
       <div className='workflow-slot workflow-slot--image-card-wrap'>
         <div className='workflow-slot workflow-slot--image-card'>
-          <img src={url} alt={alt} className='workflow-slot__image-card-img' loading='lazy' />
+          {imagePreview}
           {alt && <div className='workflow-slot__image-card-caption'>{alt}</div>}
           {overlays}
           {downloadControl}
@@ -1693,7 +1719,7 @@ export function SlotImage({
   }
   return (
     <div className='workflow-slot workflow-slot--image'>
-      <img src={url} alt={alt} className='workflow-slot__image' loading='lazy' />
+      {imagePreview}
       {overlays}
       {downloadControl}
       {hasActions && (

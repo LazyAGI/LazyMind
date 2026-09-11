@@ -60,7 +60,7 @@ from . import (
 )
 from . import tools as subagent_tools
 from .context import LARGE_TOOL_RESULT_THRESHOLD, SubAgentContext, set_context
-from .db import MemorySubAgentStore, SubAgentDB
+from .db import MemorySubAgentStore
 
 DRAFT_STREAM_EVENT_TYPES = frozenset({
     'artifact_stream_start',
@@ -530,7 +530,7 @@ def _build_agentic_config(
 
 def _build_subagent_plan(
     ctx: SubAgentContext,
-    db: Optional['SubAgentDB'],
+    db: Any,
     *,
     tools: List[Any],
     tool_prompt_appendices: Dict[str, List[str]],
@@ -838,7 +838,10 @@ def _commit_prompt_only_text_output(
     return True
 
 
-def _persist_step(ctx: SubAgentContext, seq: int, event: Dict[str, Any]) -> None:
+def _persist_step(
+    ctx: SubAgentContext, seq: int, event: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    """Store and return the resume-safe representation of a tool step."""
     tag = event.get('tag')
     if tag == 'tool_calls':
         tool_calls = []
@@ -850,7 +853,9 @@ def _persist_step(ctx: SubAgentContext, seq: int, event: Dict[str, Any]) -> None
                 'name': tc.get('name') or (tc.get('function') or {}).get('name', ''),
                 'args': tc.get('args') or (tc.get('function') or {}).get('arguments', {}),
             })
-        ctx.db.append_step(ctx.task_id, seq, 'assistant', {'text': '', 'tool_calls': tool_calls})
+        content = {'text': '', 'tool_calls': tool_calls}
+        ctx.db.append_step(ctx.task_id, seq, 'assistant', content)
+        return content
     elif tag == 'tool_results':
         results = []
         for tr in event.get('tool_results', []) or []:
@@ -863,7 +868,10 @@ def _persist_step(ctx: SubAgentContext, seq: int, event: Dict[str, Any]) -> None
                 'name': tool_name,
                 'result': _truncate_tool_result(ctx, raw_result, tool_name),
             })
-        ctx.db.append_step(ctx.task_id, seq, 'tool', {'tool_results': results})
+        content = {'tool_results': results}
+        ctx.db.append_step(ctx.task_id, seq, 'tool', content)
+        return content
+    return None
 
 
 def _workflow_control_from_tool_results(
@@ -935,7 +943,6 @@ def _signal_task_cancel(task_id: str) -> bool:
 
 async def run_subagent_stream(
     task_id: str,
-    db_dsn: str = '',
     resume: bool = False,
     model_config: Optional[Dict[str, Any]] = None,
     tool_config: Optional[Dict[str, Any]] = None,
@@ -954,7 +961,7 @@ async def run_subagent_stream(
     # Copy only the launch argument; Params may already belong to a later resume.
     execution_identity = dict(workspace_execution or {})
     start_time = time.time()
-    db: Optional[SubAgentDB] = None
+    db: Optional[MemorySubAgentStore] = None
     emitted: List[Dict[str, Any]] = []
     stream_events: asyncio.Queue[Dict[str, Any]] = asyncio.Queue()
     loop = asyncio.get_running_loop()
@@ -1030,8 +1037,9 @@ async def run_subagent_stream(
         return 'data: ' + json.dumps(ev, ensure_ascii=False, default=str) + '\n\n'
 
     try:
-        db = (MemorySubAgentStore(task_spec, initial_steps)
-              if task_spec is not None else SubAgentDB(db_dsn))
+        if task_spec is None:
+            raise ValueError('task_spec is required; Core owns SubAgent persistence')
+        db = MemorySubAgentStore(task_spec, initial_steps, task_spec.get('artifacts'))
         task = db.load_task(task_id)
         if not task:
             yield _sse({'type': 'error', 'status': 'failed', 'message': f'task {task_id} not found'})
@@ -1221,7 +1229,7 @@ async def run_subagent_stream(
                         ctx.db.append_step(task_id, step_seq, 'text', {'content': _pending_text})
                         step_seq += 1
                         _pending_text = ''
-                    _persist_step(ctx, step_seq, item)
+                    durable_step = _persist_step(ctx, step_seq, item)
                     step_seq += 1
                     if effective_agent_type == 'workflow_step' and tag == 'tool_results':
                         terminal_error = _terminal_tool_failure(
@@ -1267,7 +1275,17 @@ async def run_subagent_stream(
                             if isinstance(tr, dict)
                         ]
                         if results:
-                            yield _sse({'type': 'tool_results', 'task_id': task_id, 'tool_results': results})
+                            # Keep the small result for live UI rendering and send
+                            # Core the separately bounded/offloaded representation
+                            # used to reconstruct a resumed agent conversation.
+                            yield _sse({
+                                'type': 'tool_results',
+                                'task_id': task_id,
+                                'tool_results': results,
+                                'durable_tool_results': (
+                                    (durable_step or {}).get('tool_results') or []
+                                ),
+                            })
                         workflow_tool_in_flight = False
                         source_event = _sources_event()
                         if source_event is not None:
@@ -1424,7 +1442,7 @@ async def run_subagent_stream(
             db.dispose()
 
 
-def _auto_flush_drafts(ctx: 'SubAgentContext', db: 'SubAgentDB') -> None:
+def _auto_flush_drafts(ctx: 'SubAgentContext', db: Any) -> None:
     """Commit any pending draft files as new artifact revisions before the step ends.
 
     This is a safety net: if the model called patch_artifact but forgot to call
@@ -1625,7 +1643,7 @@ def _evaluate_completion(
         return False, f'执行中断，已完成步骤数：{len(steps)}，缺少产出：{missing_str}'
 
 
-def _rebuild_history_from_steps(db: SubAgentDB, task_id: str) -> List[Dict[str, Any]]:
+def _rebuild_history_from_steps(db: Any, task_id: str) -> List[Dict[str, Any]]:
     """Rebuild LLM chat history from persisted steps for resume.
 
     Validates tool_call_id pairing: every assistant tool_call must have a matching tool result.

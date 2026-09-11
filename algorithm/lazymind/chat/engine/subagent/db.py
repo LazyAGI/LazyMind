@@ -1,132 +1,23 @@
-"""Persistence for ordinary LazyMind SubAgent tasks.
-
-Workflow state and Artifacts are intentionally absent; Workflow-aware callers
-must use the public Workflow SDK.
-"""
+"""In-memory execution state and Core API queries for LazyMind SubAgents."""
 from __future__ import annotations
 
 import json
-import uuid
-from contextlib import contextmanager
-from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
-
-from sqlalchemy import create_engine, text
-from sqlalchemy.engine import Engine
-from sqlalchemy.sql import bindparam
-
-from lazymind.common.database.postgres import normalize_postgres_connection_url
-from lazymind.config import config
-
-
-def _decode(raw: Any, default: Any = None) -> Any:
-    if raw is None:
-        return default
-    if isinstance(raw, (bytes, bytearray)):
-        raw = raw.decode('utf-8')
-    if isinstance(raw, str):
-        try:
-            return json.loads(raw)
-        except ValueError:
-            return default
-    return raw
-
-
-class SubAgentDB:
-    def __init__(self, dsn: str) -> None:
-        self._engine: Engine = create_engine(
-            normalize_postgres_connection_url(dsn=dsn), pool_pre_ping=True, future=True,
-        )
-
-    def dispose(self) -> None:
-        self._engine.dispose()
-
-    @contextmanager
-    def _conn(self):
-        with self._engine.begin() as conn:
-            yield conn
-
-    def load_task(self, task_id: str) -> Optional[Dict[str, Any]]:
-        with self._conn() as conn:
-            row = conn.execute(text(
-                'SELECT id, conversation_id, agent_type, title, objective, params, mode, '
-                'status, workspace_path, input_slots, output_slots, sources, create_user_id '
-                'FROM sub_agent_tasks WHERE id = :id'
-            ), {'id': task_id}).mappings().first()
-        if not row:
-            return None
-        task = dict(row)
-        task['sources'] = _decode(task.get('sources'), [])
-        return task
-
-    def append_step(self, task_id: str, seq: int, role: str, content: Dict[str, Any]) -> None:
-        with self._conn() as conn:
-            conn.execute(text(
-                'INSERT INTO sub_agent_steps (id, task_id, seq, role, content, created_at) '
-                'VALUES (:id, :task_id, :seq, :role, :content, :created_at)'
-            ), {'id': 'sas_' + uuid.uuid4().hex, 'task_id': task_id, 'seq': seq, 'role': role,
-                'content': json.dumps(content, ensure_ascii=False, default=str),
-                'created_at': datetime.now(timezone.utc)})
-
-    def load_steps(self, task_id: str) -> List[Dict[str, Any]]:
-        with self._conn() as conn:
-            rows = conn.execute(text(
-                'SELECT seq, role, content FROM sub_agent_steps '
-                'WHERE task_id = :task_id ORDER BY seq ASC'
-            ), {'task_id': task_id}).mappings().all()
-        return [{'seq': row['seq'], 'role': row['role'],
-                 'content': _decode(row['content'], {})} for row in rows]
-
-    def max_step_seq(self, task_id: str) -> int:
-        with self._conn() as conn:
-            row = conn.execute(text(
-                'SELECT COALESCE(MAX(seq), -1) AS value FROM sub_agent_steps WHERE task_id = :id'
-            ), {'id': task_id}).mappings().first()
-        return int(row['value']) if row else -1
-
-    def next_artifact_seq(self, task_id: str, key: str) -> int:
-        with self._conn() as conn:
-            row = conn.execute(text(
-                'SELECT COALESCE(MAX(seq), 0) AS value FROM sub_agent_artifacts '
-                'WHERE task_id = :id AND slot = :slot'
-            ), {'id': task_id, 'slot': key}).mappings().first()
-        return int(row['value'] if row else 0) + 1
-
-    def load_artifacts(self, task_id: str, keys: Optional[List[str]] = None) -> List[Dict[str, Any]]:
-        statement = 'SELECT slot, content_type, value, seq FROM sub_agent_artifacts WHERE task_id = :id'
-        params: Dict[str, Any] = {'id': task_id}
-        query = text(statement)
-        if keys:
-            query = text(statement + ' AND slot IN :keys').bindparams(bindparam('keys', expanding=True))
-            params['keys'] = tuple(keys)
-        with self._conn() as conn:
-            rows = conn.execute(query, params).mappings().all()
-        return [{'slot': row['slot'], 'content_type': row['content_type'],
-                 'value': _decode(row['value'], {}), 'seq': row['seq']} for row in rows]
-
-    def load_artifacts_for_tasks(self, task_ids: List[str]) -> List[Dict[str, Any]]:
-        if not task_ids:
-            return []
-        with self._conn() as conn:
-            rows = conn.execute(text(
-                'SELECT task_id, slot, content_type, value, seq FROM sub_agent_artifacts '
-                'WHERE task_id IN :ids AND hidden = FALSE ORDER BY task_id, slot, seq'
-            ).bindparams(bindparam('ids', expanding=True)), {'ids': task_ids}).mappings().all()
-        return [{'task_id': row['task_id'], 'slot': row['slot'],
-                 'content_type': row['content_type'], 'value': _decode(row['value'], {}),
-                 'seq': row['seq']} for row in rows]
-
-    def format_task_artifacts(self, task_ids: List[str]) -> List[str]:
-        rows = self.load_artifacts_for_tasks(task_ids)
-        return [json.dumps(row, ensure_ascii=False, default=str) for row in rows]
+from urllib.parse import quote
 
 
 class MemorySubAgentStore:
     """Per-execution state for remote hosts that must not connect to Core DB."""
 
-    def __init__(self, task: Dict[str, Any], steps: Optional[List[Dict[str, Any]]] = None) -> None:
+    def __init__(
+        self,
+        task: Dict[str, Any],
+        steps: Optional[List[Dict[str, Any]]] = None,
+        artifacts: Optional[List[Dict[str, Any]]] = None,
+    ) -> None:
         self._task = dict(task)
         self._steps = [dict(step) for step in (steps or [])]
+        self._artifacts = [dict(artifact) for artifact in (artifacts or [])]
 
     def load_task(self, task_id: str) -> Optional[Dict[str, Any]]:
         return dict(self._task) if str(self._task.get('id')) == task_id else None
@@ -141,56 +32,49 @@ class MemorySubAgentStore:
         return max((int(step['seq']) for step in self._steps), default=-1)
 
     def next_artifact_seq(self, task_id: str, key: str) -> int:
-        return 1
+        return max(
+            (int(artifact.get('seq') or 0) for artifact in self._artifacts
+             if artifact.get('slot') == key),
+            default=0,
+        ) + 1
 
     def load_artifacts(self, task_id: str, keys: Optional[List[str]] = None) -> List[Dict[str, Any]]:
-        return []
+        keyset = set(keys or [])
+        return [
+            dict(artifact)
+            for artifact in self._artifacts
+            if not keyset or artifact.get('slot') in keyset
+        ]
 
     def dispose(self) -> None:
         pass
 
 
-_query_engine: Optional[Engine] = None
-
-
-def _engine() -> Engine:
-    global _query_engine
-    if _query_engine is None:
-        core_url = str(config['core_database_url'] or '').strip()
-        acl_dsn = str(config['acl_db_dsn'] or '').strip()
-        _query_engine = create_engine(
-            normalize_postgres_connection_url(url=core_url or None, dsn=acl_dsn or None),
-            pool_pre_ping=True, future=True,
-        )
-    return _query_engine
-
-
 class TaskQueryDB:
-    @contextmanager
-    def _conn(self):
-        with _engine().connect() as conn:
-            yield conn
+    """Read ordinary task state through Core, the sole owner of core.db."""
+
+    @staticmethod
+    def _get(path: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        from lazymind.chat.engine.tools.infra.core_api_client import get_core_api
+        return get_core_api(path, params=params)
 
     def get_task_status(self, task_id: str) -> Optional[Dict[str, Any]]:
         try:
-            with self._conn() as conn:
-                row = conn.execute(text(
-                    'SELECT id, status, progress_pct, current_phase, summary '
-                    'FROM sub_agent_tasks WHERE id = :id'
-                ), {'id': task_id}).mappings().first()
-            return dict(row) if row else None
+            row = self._get(f'/internal/subagent/tasks/{quote(task_id, safe="")}', None)
+            if not row:
+                return None
+            row['id'] = row.get('id') or row.get('task_id')
+            row['progress_pct'] = row.get('progress_pct', row.get('progress', 0))
+            return row
         except Exception:
             return None
 
     def list_tasks_by_conversation(self, conversation_id: str) -> List[Dict[str, Any]]:
         try:
-            with self._conn() as conn:
-                rows = conn.execute(text(
-                    'SELECT id, title, agent_type, status, progress_pct, current_phase, summary, '
-                    'seq_in_conversation FROM sub_agent_tasks WHERE conversation_id = :id '
-                    'ORDER BY seq_in_conversation'
-                ), {'id': conversation_id}).mappings().all()
-            return [dict(row) for row in rows]
+            encoded = quote(conversation_id, safe='')
+            data = self._get(f'/internal/subagent/conversations/{encoded}/tasks', None)
+            rows = data.get('tasks') or []
+            return [dict(row, id=row.get('id') or row.get('task_id')) for row in rows]
         except Exception:
             return []
 
@@ -198,14 +82,11 @@ class TaskQueryDB:
         """Read visible artifacts for ordinary LazyMind tasks."""
         if not task_ids:
             return []
-        with self._conn() as conn:
-            rows = conn.execute(text(
-                'SELECT task_id, slot, content_type, value, seq FROM sub_agent_artifacts '
-                'WHERE task_id IN :ids AND hidden = FALSE ORDER BY task_id, slot, seq'
-            ).bindparams(bindparam('ids', expanding=True)), {'ids': task_ids}).mappings().all()
-        return [{'task_id': row['task_id'], 'slot': row['slot'],
-                 'content_type': row['content_type'], 'value': _decode(row['value'], {}),
-                 'seq': row['seq']} for row in rows]
+        try:
+            data = self._get('/internal/subagent/artifacts', {'task_id': task_ids[:100]})
+            return [dict(row) for row in (data.get('artifacts') or [])]
+        except Exception:
+            return []
 
     def format_task_artifacts(self, task_ids: List[str]) -> List[str]:
         """Render ordinary task artifacts for the parent ChatAgent context."""

@@ -31,6 +31,118 @@ type InvocationContext struct {
 	Principal Principal
 }
 
+type ListVocabularyWordbooksInput struct{}
+type VocabularyWordbook struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Provider string `json:"provider"`
+}
+type ListVocabularyWordbooksResult struct {
+	Provider string               `json:"provider"`
+	Items    []VocabularyWordbook `json:"items"`
+	Total    int                  `json:"total"`
+}
+type ListVocabularyWordsInput struct {
+	WordbookID string `json:"wordbook_id,omitempty" jsonschema:"wordbook ID or Anki deck name; omit to use the current wordbook"`
+	Search     string `json:"search,omitempty" jsonschema:"optional word or meaning keyword"`
+	DueOnly    bool   `json:"due_only,omitempty" jsonschema:"return only words that the scheduler says are due now"`
+}
+type VocabularyWord struct {
+	ID           string   `json:"id"`
+	Term         string   `json:"term"`
+	Meaning      string   `json:"meaning"`
+	PartOfSpeech string   `json:"part_of_speech,omitempty"`
+	State        string   `json:"state,omitempty"`
+	ReviewCount  uint64   `json:"review_count,omitempty"`
+	Lapses       uint64   `json:"lapses,omitempty"`
+	Tags         []string `json:"tags,omitempty"`
+}
+type ListVocabularyWordsResult struct {
+	Provider string           `json:"provider"`
+	Items    []VocabularyWord `json:"items"`
+	Total    int              `json:"total"`
+}
+type NextVocabularyReviewInput struct {
+	SessionID string `json:"session_id,omitempty" jsonschema:"review session ID returned by vocabulary.review.start; required for session-driven review"`
+	Count     int    `json:"count,omitempty" jsonschema:"maximum questions to issue in this batch; defaults to 5 and is capped at 5"`
+}
+type NextVocabularyReviewResult struct {
+	Available    bool                       `json:"available"`
+	Completed    bool                       `json:"completed"`
+	ReviewItemID string                     `json:"review_item_id,omitempty"`
+	Provider     string                     `json:"provider"`
+	CardID       string                     `json:"card_id,omitempty"`
+	WordID       string                     `json:"word_id,omitempty"`
+	Prompt       string                     `json:"prompt,omitempty"`
+	Term         string                     `json:"term,omitempty"`
+	Meaning      string                     `json:"meaning,omitempty"`
+	CardType     string                     `json:"card_type,omitempty"`
+	Answer       string                     `json:"answer,omitempty"`
+	Interaction  string                     `json:"interaction,omitempty"`
+	Choices      []string                   `json:"choices,omitempty"`
+	Remaining    int64                      `json:"remaining"`
+	RowVersion   int64                      `json:"row_version,omitempty"`
+	PreviewedAt  time.Time                  `json:"previewed_at,omitempty"`
+	Questions    []VocabularyReviewQuestion `json:"questions,omitempty"`
+}
+type VocabularyReviewQuestion struct {
+	ReviewItemID string    `json:"review_item_id"`
+	CardID       string    `json:"card_id"`
+	WordID       string    `json:"word_id,omitempty"`
+	Prompt       string    `json:"prompt"`
+	Term         string    `json:"term"`
+	Meaning      string    `json:"meaning"`
+	CardType     string    `json:"card_type"`
+	Interaction  string    `json:"interaction"`
+	Choices      []string  `json:"choices"`
+	RowVersion   int64     `json:"row_version,omitempty"`
+	PreviewedAt  time.Time `json:"previewed_at,omitempty"`
+}
+type StartVocabularyReviewInput struct {
+	Count int `json:"count,omitempty" jsonschema:"number of questions from 1 to 20; defaults to 5"`
+}
+type StartVocabularyReviewResult struct {
+	SessionID    string                       `json:"session_id"`
+	Provider     string                       `json:"provider"`
+	WordbookName string                       `json:"wordbook_name"`
+	Questions    []NextVocabularyReviewResult `json:"questions"`
+	Total        int                          `json:"total"`
+	Remaining    int                          `json:"remaining"`
+}
+type AnswerVocabularyReviewInput struct {
+	SessionID    string    `json:"session_id,omitempty" jsonschema:"review session ID returned by vocabulary.review.start"`
+	ReviewItemID string    `json:"review_item_id,omitempty" jsonschema:"opaque review item ID returned by vocabulary.review.next"`
+	Provider     string    `json:"provider,omitempty" jsonschema:"provider returned by vocabulary.review.start or vocabulary.review.next"`
+	CardID       string    `json:"card_id,omitempty" jsonschema:"legacy card ID returned by vocabulary.review.next"`
+	WordID       string    `json:"word_id,omitempty" jsonschema:"word ID returned by vocabulary.review.next; empty for Anki"`
+	Rating       string    `json:"rating,omitempty" jsonschema:"legacy self-assessment rating; do not use for objective session questions"`
+	RowVersion   int64     `json:"row_version,omitempty"`
+	PreviewedAt  time.Time `json:"previewed_at,omitempty"`
+	Term         string    `json:"term,omitempty" jsonschema:"term associated with the question"`
+	Response     string    `json:"response,omitempty" jsonschema:"user's raw answer; the backend determines correctness for objective questions"`
+}
+type AnswerVocabularyReviewResult struct {
+	Accepted  bool  `json:"accepted"`
+	Correct   bool  `json:"correct"`
+	Remaining int64 `json:"remaining"`
+}
+type VocabularyReviewReportInput struct {
+	SessionID string `json:"session_id"`
+}
+type VocabularyReviewReportResult struct {
+	SessionID             string         `json:"session_id"`
+	Provider              string         `json:"provider"`
+	WordbookName          string         `json:"wordbook_name"`
+	Total                 int            `json:"total"`
+	Correct               int            `json:"correct"`
+	Incorrect             int            `json:"incorrect"`
+	Accuracy              float64        `json:"accuracy"`
+	RatingCounts          map[string]int `json:"rating_counts"`
+	AverageIntervalBefore float64        `json:"average_interval_before_days"`
+	AverageIntervalAfter  float64        `json:"average_interval_after_days"`
+	DifficultWords        []string       `json:"difficult_words"`
+}
+
 type PageRequest struct {
 	PageSize  int    `json:"page_size,omitempty" jsonschema:"page size, from 1 to 100"`
 	PageToken string `json:"page_token,omitempty" jsonschema:"opaque continuation token returned by the previous call"`

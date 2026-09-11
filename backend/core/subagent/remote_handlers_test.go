@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -400,5 +401,47 @@ func TestRemoteWorkspaceExecutionSpecUsesOneAuthoritativeSnapshotAndRejectsRevok
 	InternalGetExecutionSpec(response, request)
 	if response.Code != 409 {
 		t.Fatalf("revoked spec=%d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestAppendRemoteStepSerializesConcurrentSQLiteWriters(t *testing.T) {
+	db := remoteSubagentFixture(t)
+	if db.Dialector.Name() != "sqlite" {
+		t.Skip("SQLite-specific writer contention test")
+	}
+
+	const writers = 32
+	start := make(chan struct{})
+	errs := make(chan error, writers)
+	var wg sync.WaitGroup
+	for i := 0; i < writers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			errs <- AppendRemoteStep(context.Background(), db.DB, "task-remote", "text",
+				json.RawMessage(`{"content":"concurrent"}`))
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("append concurrent step: %v", err)
+		}
+	}
+	steps, err := LoadSteps(context.Background(), db.DB, "task-remote")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(steps) != writers {
+		t.Fatalf("got %d steps, want %d", len(steps), writers)
+	}
+	for i, step := range steps {
+		if step.Seq != i {
+			t.Fatalf("step[%d].seq=%d, want %d", i, step.Seq, i)
+		}
 	}
 }

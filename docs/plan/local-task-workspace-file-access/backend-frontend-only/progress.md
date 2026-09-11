@@ -566,3 +566,20 @@ Core最终全量83包通过（另5包无测试），算法P1修复与Workflow广
 提交前重新验证：Backend 四包通过；Frontend 35 项通过、typecheck 与 Local 生产构建通过；Algorithm 正确 Python 3.11/LazyLLM 环境为 65 passed、1 skipped；`git diff --check` 与冻结边界通过。提交范围为 18 个生产文件、13 个测试文件和四份交接文档，不包含 `algorithm/Dockerfile`、临时验收文件或独立 Review 报告。
 
 - 2026-09-11：`1339da97 fix(workspace): finalize authorization and approval flows` 已推送到 `origin/feature/newWorkZone`；等待用户手动创建 PR。
+
+## 2026-09-11 官方 main 合并进度
+
+- [x] 添加并 fetch `upstream=https://github.com/LazyAGI/LazyMind.git`。
+- [x] 本地 `main` 跟踪并对齐 `upstream/main@2163dae182869d043cb90206260e3d92da8a329d`。
+- [x] 在 `feature/newWorkZone` 执行普通 merge，逐文件处理 17 个文本冲突，没有 reset、stash、rebase、强制覆盖或第二 worktree。
+- [x] LazyLLM gitlink与工作树对齐官方 `2cc07741ca6531715d5c55f9ac083f635614188a`。
+- [x] Core OpenAPI 从合并代码重新导出，Core/Scan 客户端重新生成，`node scripts/openapi/check-stale.mjs` 四项 fresh。
+- [x] `go test -count=1 ./...` 通过；`go vet ./...` 通过。
+- [x] `go test -count=5 ./asyncjob -run TestRunnerRecoversLeaseThatExpiresAfterStartup` 通过。
+- [x] Chat regeneration/workspace/fork、SubAgent、Migrate 定向回归通过。
+- [x] 算法定向回归：`109 passed, 3 warnings`。
+- [x] 前端 `pnpm run typecheck`、`VITE_LAZYMIND_MODE=local pnpm run build` 通过。
+- [x] 冲突标记扫描、暂存区/工作树 `git diff --check` 通过。
+- [x] 完成 merge commit并推送 `origin/feature/newWorkZone`；提交后以 `git rev-parse` 核对本地与远端分支一致。
+
+自动化未覆盖真实登录、真实模型、native picker、打包 Desktop 和跨平台实机；这些继续列为人工验收，不阻塞本次官方 main 代码同步。

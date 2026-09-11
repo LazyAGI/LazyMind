@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { requestConversationStatusRefresh } from "@/modules/chat/utils/conversationStatusEvents";
 import { AgentAppsAuth } from "@/components/auth";
 import { axiosInstance, localizeErrorCode } from "@/components/request";
 import { Method, SSE } from "@/modules/chat/utils/sse";
@@ -337,6 +338,9 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
   },
 
   applyTaskEvent: (conversationId, taskId, event) => {
+    if (["task_start", "done", "error", "cancelled", "canceled"].includes(event.type)) {
+      requestConversationStatusRefresh(conversationId);
+    }
     set((state) => {
       const list = state.tasksByConversation[conversationId] ?? [];
       const idx = list.findIndex((t) => t.task_id === taskId);
@@ -884,6 +888,9 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
           const event = UIUtils.jsonParser(raw);
           if (!event || !event.type) return;
           const { type, payload } = event;
+          if (["task_created", "workflow_completed", "workflow_error", "step_waiting", "workflow_step_feedback", "auto_chat_started", "driver_input", "driver_fallback"].includes(type)) {
+            requestConversationStatusRefresh(conversationId);
+          }
           const replayed = event.replayed === true;
           if (type === 'task_created' && payload?.task_id) {
             if (replayed) {

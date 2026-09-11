@@ -608,6 +608,42 @@ func TestOpenAPISpecChatChunkDeltaModeValues(t *testing.T) {
 	}
 }
 
+func TestOpenAPISpecIncludesChatPerformanceMetrics(t *testing.T) {
+	router := mux.NewRouter()
+	registerCoreRoutes(router)
+
+	specJSON, err := buildOpenAPISpecFromRouter(router)
+	if err != nil {
+		t.Fatalf("build openapi spec: %v", err)
+	}
+	var spec map[string]any
+	if err := json.Unmarshal(specJSON, &spec); err != nil {
+		t.Fatalf("decode openapi spec: %v", err)
+	}
+	schemas := spec["components"].(map[string]any)["schemas"].(map[string]any)
+	metrics := schemaPropertiesForTest(t, schemas, "RunPerformanceMetrics")
+	for _, field := range []string{
+		"schema_version", "turn_seq", "model_steps", "tool_steps", "wall_ms", "model_ms", "tool_ms",
+		"ttft_ms", "input_tokens", "output_tokens", "total_tokens", "cached_tokens", "cache_input_tokens", "reasoning_tokens",
+		"max_input_tokens", "context_input_tokens", "cache_hit_rate", "tok_s", "context_ratio",
+	} {
+		if _, ok := metrics[field]; !ok {
+			t.Fatalf("RunPerformanceMetrics is missing %q", field)
+		}
+	}
+	for _, schemaName := range []string{"ChatChunkResponse", "ConversationHistoryItem"} {
+		properties := schemaPropertiesForTest(t, schemas, schemaName)
+		performance, ok := properties["performance_metrics"].(map[string]any)
+		if !ok || performance["$ref"] != "#/components/schemas/RunPerformanceMetrics" {
+			t.Fatalf("%s performance_metrics property = %#v", schemaName, properties["performance_metrics"])
+		}
+	}
+	runTerminal := schemaPropertiesForTest(t, schemas, "RunTerminal")
+	if _, leaked := runTerminal["performance_metrics"]; leaked {
+		t.Fatal("RunTerminal must not contain performance_metrics")
+	}
+}
+
 func TestOpenAPISpecRevisionSchemasIncludeHeadMarker(t *testing.T) {
 	r := mux.NewRouter()
 	registerCoreRoutes(r)

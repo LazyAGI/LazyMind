@@ -94,6 +94,13 @@
   width: 220px;
 }
 
+.knowledge-preview-options-popover {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 220px;
+}
+
 .knowledge-preview-sequence {
   flex: none;
   gap: 8px;
@@ -106,4 +113,20 @@
   align-items: flex-start;
   justify-content: center;
   padding-top: 8px;
+}
+
+.knowledge-translation-block + .knowledge-translation-block {
+  margin-top: 18px;
+}
+
+.knowledge-translation-label {
+  margin-bottom: 6px;
+  color: var(--color-text-description);
+  font-size: 12px;
+}
+
+.knowledge-translation-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.7;
 }

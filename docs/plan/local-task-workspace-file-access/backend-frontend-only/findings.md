@@ -603,3 +603,12 @@ Core最终全量83包通过（另5包无测试），算法P1修复与Workflow广
 - Backend `localworkspace/chat/subagent/workflow` 全部通过；Frontend 工作区 35 项、typecheck 和 Local 生产构建通过。`algorithm/Dockerfile`、临时 `hello1.txt` 与未跟踪 Review 报告均已排除。
 
 - 2026-09-11：功能提交 `1339da97` 已推送；远端未包含 `algorithm/Dockerfile`、临时验收文件或独立 Review 报告。
+
+## 2026-09-11 与官方 main 合并发现
+
+- 官方仓库为 `LazyAGI/LazyMind`；本地 `main` 与 `upstream/main` 已对齐 `2163dae182869d043cb90206260e3d92da8a329d`。
+- 用户明确要求 LazyLLM 跟随官方，本次 gitlink和子模块工作树均对齐 `2cc07741ca6531715d5c55f9ac083f635614188a`；历史 `2e3d00ac...` 只描述合并前状态。
+- 官方会话 fork/opening 会预先登记可分叉 history run；工作区状态存储是权限决策所需，但数据库 run ownership 不能因 state store 为空而跳过，否则再生成结果会被旧 run fence 拒绝。
+- 官方异步任务恢复测试在 Asia/Shanghai 稳定失败。原因是 SQLite 将带 `+08:00` 的 `lock_until` 与 UTC 参数按字符串比较；`julianday` 按时间值比较后连续 5 次通过，PostgreSQL 仍使用原生时间比较。
+- version-mode 聚合 SQL 的 SQLite 段不支持 `ADD COLUMN IF NOT EXISTS`；只修正聚合迁移中的 SQLite 语句，独立 dev 迁移与 PostgreSQL 段保持原合同。
+- 合并后 Core 全量、vet、前端类型/构建/OpenAPI、算法工作区与 remote executor 回归均通过；未把历史探针或旧测试结果计作本次通过。

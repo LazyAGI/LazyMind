@@ -2396,7 +2396,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
 
     const trimmedUrl = skillUrlImportDraft.trim();
     if (!trimmedUrl) {
-      message.warning(t("admin.memorySkillUploadRepoPlaceholder"));
+      message.warning(t("admin.memorySkillCreateImportPlaceholder"));
       return;
     }
 
@@ -4948,7 +4948,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
       >
         <Input
           value={skillUrlImportDraft}
-          placeholder={t("admin.memorySkillUploadRepoPlaceholder")}
+          placeholder={t("admin.memorySkillCreateImportPlaceholder")}
           onChange={(event) => setSkillUrlImportDraft(event.target.value)}
           onPressEnter={handleConfirmSkillUrlImport}
         />

@@ -83,6 +83,7 @@ type ChatChunkResponse struct {
 	ToolLimitPending      *ToolLimitPendingEvent       `json:"tool_limit_pending,omitempty"`
 	IntentUpdated         *IntentUpdatedEvent          `json:"intent_updated,omitempty"`
 	RuntimeEvent          *ChatRuntimeEvent            `json:"runtime_event,omitempty"`
+	PerformanceMetrics    *RunPerformanceMetrics       `json:"performance_metrics,omitempty"`
 }
 
 // TaskCreatedNotice notifies the frontend that an independent SubAgent task exists.

@@ -452,6 +452,7 @@ function Build-Desktop([ValidateSet('zip', 'installer')][string]$PackageKind = '
 
     Write-Host '==> Building frontend desktop dist'
     $env:VITE_LAZYMIND_MODE = 'desktop'
+    $env:VITE_VOCABULARY_ENABLED = 'true'
     Invoke-NativeWithRetry 'Frontend dependency install' 'pnpm.cmd' @('install', '--frozen-lockfile', '--prefer-offline') (Join-Path $repoRoot 'frontend')
     Invoke-Native 'pnpm.cmd' @('build') (Join-Path $repoRoot 'frontend')
 

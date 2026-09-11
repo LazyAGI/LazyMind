@@ -486,6 +486,7 @@ class ToolExecutionMiddleware:
         batch = ToolExecutionBatch(
             results=lazyllm.package(results),
             records=tuple(completed_records),
+            duration_ms=round(max(0.0, elapsed * 1000.0)),
         )
         if self._repeat_monitor is not None and self._notice_buffer is not None:
             notice = self._repeat_monitor.after_tool_batch(completed_records)
@@ -498,4 +499,4 @@ class ToolExecutionMiddleware:
             tools,
             verbose=verbose,
             allowed_tool_names=allowed_tool_names,
-        ).results
+        ).stamped_results()

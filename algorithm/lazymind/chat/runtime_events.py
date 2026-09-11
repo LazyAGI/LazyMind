@@ -6,7 +6,12 @@ from typing import Any, Dict, Optional
 from uuid import uuid4
 
 
-RUNTIME_EVENT_TYPES = frozenset({'model_retry_scheduled', 'model_call_finished', 'run_finished'})
+RUNTIME_EVENT_TYPES = frozenset({
+    'model_call_started',
+    'model_retry_scheduled',
+    'model_call_finished',
+    'run_finished',
+})
 INCOMPLETE_MODEL_FINISHES = frozenset({
     'length',
     'content_filter',

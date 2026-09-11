@@ -18,6 +18,7 @@ import (
 	"lazymind/core/externalcontext"
 	"lazymind/core/state"
 	"lazymind/core/store"
+	"lazymind/core/vocabulary"
 )
 
 func TestResolveMailDraftConfirmIDFromDraftCard(t *testing.T) {
@@ -129,6 +130,62 @@ func TestEphemeralConversationIsHiddenUntilPromoted(t *testing.T) {
 	if got := list(); len(got) != 1 || got[0]["conversation_id"] != "preview-chat" ||
 		got[0]["source_type"] != "pdf_preview" || got[0]["source_document_id"] != "doc-1" {
 		t.Fatalf("promoted conversation missing from history: %#v", got)
+	}
+}
+
+func TestSetChatHistoryRemovesRejectedAnswerPerformance(t *testing.T) {
+	database := newPromptTestDB(t)
+	db := database.DB
+	store.Init(db, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+
+	now := time.Now().UTC()
+	if err := db.Create(&orm.Conversation{
+		ID: "conv-multi", DisplayName: "Multi answer",
+		BaseModel: orm.BaseModel{
+			CreateUserID: "u1", CreateUserName: "User 1", CreatedAt: now, UpdatedAt: now,
+		},
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, history := range []orm.MultiAnswersChatHistory{
+		{ID: "history-selected", Seq: 1, ConversationID: "conv-multi", Result: "selected answer", RunID: "run-selected", RunStatus: "completed"},
+		{ID: "history-rejected", Seq: 1, ConversationID: "conv-multi", Result: "rejected answer", RunID: "run-rejected", RunStatus: "completed"},
+	} {
+		if err := db.Create(&history).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, metric := range []orm.ChatRunPerformance{
+		{RunID: "run-selected", ConversationID: "conv-multi", HistoryID: "history-selected", UserID: "u1", SchemaVersion: 1, Status: "completed", ObservedAt: now, CreatedAt: now, UpdatedAt: now},
+		{RunID: "run-rejected", ConversationID: "conv-multi", HistoryID: "history-rejected", UserID: "u1", SchemaVersion: 1, Status: "completed", ObservedAt: now, CreatedAt: now, UpdatedAt: now},
+	} {
+		if err := db.Create(&metric).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/core/conversations:setChatHistory",
+		strings.NewReader(`{"set_history_id":"history-selected","deleted_history_id":"history-rejected"}`),
+	)
+	req.Header.Set("X-User-Id", "u1")
+	rec := httptest.NewRecorder()
+	SetChatHistory(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("set chat history status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	var selectedCount, rejectedCount int64
+	if err := db.Model(&orm.ChatRunPerformance{}).Where("run_id = ?", "run-selected").Count(&selectedCount).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&orm.ChatRunPerformance{}).Where("run_id = ?", "run-rejected").Count(&rejectedCount).Error; err != nil {
+		t.Fatal(err)
+	}
+	if selectedCount != 1 || rejectedCount != 0 {
+		t.Fatalf("performance lifecycle mismatch: selected=%d rejected=%d", selectedCount, rejectedCount)
 	}
 }
 
@@ -838,6 +895,61 @@ func TestReplaceAskUserToolResultSupportsJSONCarrier(t *testing.T) {
 	}
 }
 
+func TestBuildAskUserToolResultIncludesMandatoryLLMReviewProtocol(t *testing.T) {
+	pending := map[string]any{
+		"review_hook": map[string]any{
+			"kind":       "vocabulary_review_llm",
+			"session_id": "session-1",
+			"items": []any{map[string]any{
+				"question_index": 0, "review_item_id": "item-1",
+				"weight": 3.0, "grading_criteria": "answer conveys the core meaning",
+			}},
+		},
+	}
+	structured := &askAnswersStructuredPayload{Questions: []askAnsweredQuestionItem{{
+		Text: "meaning?", Type: "text", Answer: json.RawMessage(`{"value":"多样的"}`),
+	}}}
+
+	got := buildAskUserToolResultContent(pending, structured, nil)
+	for _, required := range []string{"MANDATORY_REVIEW_GRADING", "register_review_words", "item-1", `"weight":3`} {
+		if !strings.Contains(got, required) {
+			t.Fatalf("result missing %q: %s", required, got)
+		}
+	}
+}
+
+func TestBuildAskUserToolResultHidesObjectiveReviewAnswer(t *testing.T) {
+	pending := map[string]any{
+		"review_hook": map[string]any{"kind": "vocabulary_review_objective"},
+	}
+	structured := &askAnswersStructuredPayload{Questions: []askAnsweredQuestionItem{{
+		Text: "diverse 的中文含义？", Type: "single", Answer: json.RawMessage(`{"value":"各；不一样"}`),
+	}}}
+
+	got := buildAskUserToolResultContent(pending, structured, nil)
+	for _, hidden := range []string{"diverse", "各；不一样", "Answer:"} {
+		if strings.Contains(got, hidden) {
+			t.Fatalf("objective result leaked %q: %s", hidden, got)
+		}
+	}
+	if !strings.Contains(got, "backend graded and registered") {
+		t.Fatalf("objective result did not explain backend registration: %s", got)
+	}
+}
+
+func TestFormatVocabularyReviewReportUsesBackendValues(t *testing.T) {
+	got := formatVocabularyReviewReport(vocabulary.ReviewSessionReport{
+		Total: 4, Correct: 3, Incorrect: 1, Accuracy: 0.75,
+		AverageIntervalBefore: 2, AverageIntervalAfter: 6.5,
+		DifficultWords: []string{"diverse"},
+	})
+	for _, required := range []string{"Reviewed 4 words", "75.0% accuracy", "2.0 days", "6.5 days", "diverse"} {
+		if !strings.Contains(got, required) {
+			t.Fatalf("report missing %q: %s", required, got)
+		}
+	}
+}
+
 func TestBuildChatRequestBodySkipsMemoryAndPreferenceWhenPersonalizationDisabled(t *testing.T) {
 	ctx := &evolution.ChatResourceContext{
 		DisabledTools:      []string{},
@@ -998,7 +1110,7 @@ func TestCollectedInputsForConversationReturnsSnapshotAndSummary(t *testing.T) {
 }
 
 func TestGetConversationDetailReturnsStoredMultimodalInput(t *testing.T) {
-	db := orm.MigrateTestDB(t, &orm.Conversation{}, &orm.ChatHistory{}, &orm.ExternalAgentBinding{})
+	db := orm.MigrateTestDB(t, &orm.Conversation{}, &orm.ConversationOpening{}, &orm.ChatHistory{}, &orm.ExternalAgentBinding{}, &orm.ConversationForkOrigin{})
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 
@@ -1083,7 +1195,7 @@ func TestChatHistoryResponseIncludesMentions(t *testing.T) {
 	}
 }
 
-func TestChatHistoryResponseOmitsAnsweredAskPending(t *testing.T) {
+func TestChatHistoryResponseKeepsAnsweredAskPendingReadOnly(t *testing.T) {
 	item := chatHistoryToResponseItem(orm.ChatHistory{
 		Ext: json.RawMessage(`{
 			"ask_pending":{"ask_id":"ask-1","questions":[]},
@@ -1091,11 +1203,25 @@ func TestChatHistoryResponseOmitsAnsweredAskPending(t *testing.T) {
 			"ask_saved_answers":{"0":{"type":"text","value":"done"}}
 		}`),
 	})
-	if _, exists := item["ask_pending"]; exists {
-		t.Fatalf("answered ask_pending leaked into history response: %#v", item)
+	if _, exists := item["ask_pending"]; !exists {
+		t.Fatalf("answered ask_pending missing from history response: %#v", item)
 	}
-	if _, exists := item["ask_saved_answers"]; exists {
-		t.Fatalf("answered ask_saved_answers leaked into history response: %#v", item)
+	if answered, _ := item["ask_answered"].(bool); !answered {
+		t.Fatalf("answered marker missing from history response: %#v", item)
+	}
+	if _, exists := item["ask_saved_answers"]; !exists {
+		t.Fatalf("answered ask_saved_answers missing from history response: %#v", item)
+	}
+}
+
+func TestSubmittedAskAnswersPreservesQuestionIndexes(t *testing.T) {
+	answers := submittedAskAnswers(map[string]any{"questions": []any{
+		map[string]any{"answer": map[string]any{"type": "single", "value": "A"}},
+		map[string]any{"answer": nil},
+		map[string]any{"answer": map[string]any{"type": "text", "value": "word"}},
+	}})
+	if len(answers) != 2 || answers["0"] == nil || answers["2"] == nil {
+		t.Fatalf("submitted answers were not preserved by index: %#v", answers)
 	}
 }
 
@@ -1268,7 +1394,7 @@ func TestElapsedThinkingSecondsRoundsUp(t *testing.T) {
 }
 
 func TestGetConversationDetailFiltersMissingDatasets(t *testing.T) {
-	db := orm.MigrateTestDB(t, &orm.Conversation{}, &orm.ChatHistory{}, &orm.Dataset{}, &orm.ExternalAgentBinding{})
+	db := orm.MigrateTestDB(t, &orm.Conversation{}, &orm.ConversationOpening{}, &orm.ChatHistory{}, &orm.Dataset{}, &orm.ExternalAgentBinding{}, &orm.ConversationForkOrigin{})
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 
@@ -1352,7 +1478,7 @@ func TestGetConversationDetailFiltersMissingDatasets(t *testing.T) {
 }
 
 func TestGetConversationHistoryReturnsStoredMultimodalInput(t *testing.T) {
-	db := orm.MigrateTestDB(t, &orm.Conversation{}, &orm.ChatHistory{})
+	db := orm.MigrateTestDB(t, &orm.Conversation{}, &orm.ConversationOpening{}, &orm.ChatHistory{}, &orm.ChatRunPerformance{})
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 
@@ -1388,11 +1514,20 @@ func TestGetConversationHistoryReturnsStoredMultimodalInput(t *testing.T) {
 		RawContent:     "记住这个是王牌超",
 		Content:        "记住这个是王牌超",
 		Result:         "好的",
+		RunID:          "run-history-performance",
 		ToolCallTurns:  8,
 		Ext:            ext,
 		TimeMixin:      orm.TimeMixin{CreateTime: now, UpdateTime: now},
 	}).Error; err != nil {
 		t.Fatalf("create history: %v", err)
+	}
+	if err := persistRunPerformance(context.Background(), db.DB, runPerformanceRecord{
+		RunID: "run-history-performance", ConversationID: "conv-1", HistoryID: "h_1", UserID: "u1",
+		Status: "completed", Metrics: &RunPerformanceMetrics{
+			SchemaVersion: 1, ModelSteps: 1, ModelMS: metricInt64(500), OutputTokens: metricInt64(10),
+		},
+	}); err != nil {
+		t.Fatalf("create performance history: %v", err)
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/core/conversations/conv-1:history", nil)
@@ -1408,8 +1543,9 @@ func TestGetConversationHistoryReturnsStoredMultimodalInput(t *testing.T) {
 	var resp struct {
 		ConversationID string `json:"conversation_id"`
 		History        []struct {
-			Input         []map[string]any `json:"input"`
-			ToolCallTurns int              `json:"tool_call_turns"`
+			Input              []map[string]any      `json:"input"`
+			ToolCallTurns      int                   `json:"tool_call_turns"`
+			PerformanceMetrics RunPerformanceMetrics `json:"performance_metrics"`
 		} `json:"history"`
 		TotalSize int `json:"total_size"`
 	}
@@ -1433,6 +1569,10 @@ func TestGetConversationHistoryReturnsStoredMultimodalInput(t *testing.T) {
 	}
 	if got := resp.History[0].ToolCallTurns; got != 8 {
 		t.Fatalf("expected tool_call_turns 8, got %d", got)
+	}
+	if resp.History[0].PerformanceMetrics.ModelMS == nil || *resp.History[0].PerformanceMetrics.ModelMS != 500 ||
+		resp.History[0].PerformanceMetrics.TokS == nil || *resp.History[0].PerformanceMetrics.TokS != 20 {
+		t.Fatalf("expected restored performance metrics, got %#v", resp.History[0].PerformanceMetrics)
 	}
 }
 

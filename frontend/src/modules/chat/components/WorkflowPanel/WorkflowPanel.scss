@@ -478,8 +478,10 @@
     background: #fff;
     border-bottom: 1px solid #f0f1f3;
     overflow-x: auto;
-    scrollbar-width: none;
-    &::-webkit-scrollbar { display: none; }
+    scrollbar-width: thin;
+    scrollbar-color: #d1d5db transparent;
+    &::-webkit-scrollbar { height: 6px; }
+    &::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 4px; }
   }
 
   // Connector line between steps
@@ -2322,6 +2324,16 @@
     &:hover { background: #e5e7eb; }
   }
 
+  &__image-preview {
+    display: block;
+    width: 100%;
+
+    img:focus-visible {
+      outline: 2px solid #2563eb;
+      outline-offset: -2px;
+    }
+  }
+
   &__image {
     display: block;
     max-width: 100%;
@@ -2348,6 +2360,7 @@
 
   &__image-card-caption {
     position: absolute;
+    pointer-events: none;
     bottom: 0;
     left: 0;
     right: 0;

@@ -1,23 +1,28 @@
-from lazymind.chat.engine.prompts.system_prompt import build_system_prompt
+from lazymind.chat.engine.prompts.system_prompt import (
+    build_standard_prompt_bundle,
+    build_system_prompt,
+)
 
 
-def test_response_language_policy_uses_ui_locale_as_last_resort():
-    prompt = build_system_prompt(False, environment_context={'locale': 'en-US'})
+def test_response_language_policy_follows_user_language_not_tool_results():
+    bundle = build_standard_prompt_bundle(False, environment_context={'locale': 'en-US'})
 
-    assert '# Response language (mandatory)' in prompt
-    assert '1. An explicit language preference or instruction from the user.' in prompt
-    assert '2. The dominant natural language of the current user request.' in prompt
-    assert "3. The dominant language of the user's recent conversation messages." in prompt
-    assert '4. The default UI locale supplied below.' in prompt
-    assert 'Default UI locale for this request: en-US.' in prompt
-    assert 'Selected response language for this turn: English (default UI locale en-US).' in prompt
+    assert '# Response language' in bundle.system_prompt
+    assert 'Reply in the language the user is currently using.' in bundle.system_prompt
+    assert 'Do not switch languages merely because tool names, tool results' in bundle.system_prompt
+    assert 'An explicit instruction about the reply language takes priority.' in bundle.system_prompt
+    assert 'writing an email in English or translating into English' in bundle.system_prompt
+    assert 'Selected response language' not in bundle.system_prompt
+    assert 'Selected response language' not in bundle.current_input
+    assert 'Session default response language' not in bundle.system_prompt
+    assert 'UI locale: en-US' in bundle.system_prompt
 
 
-def test_response_language_policy_defaults_to_product_locale():
-    prompt = build_system_prompt(False)
+def test_response_language_policy_defaults_include_product_locale():
+    bundle = build_standard_prompt_bundle(False)
 
-    assert 'Default UI locale for this request: zh-CN.' in prompt
-    assert 'Selected response language for this turn: Chinese (default UI locale zh-CN).' in prompt
+    assert 'UI locale: zh-CN' in bundle.system_prompt
+    assert 'Selected response language' not in bundle.current_input
 
 
 def test_response_language_policy_covers_entire_tool_call_chain():
@@ -30,79 +35,7 @@ def test_response_language_policy_covers_entire_tool_call_chain():
     assert 'Do not switch languages merely because tool names, tool results' in prompt
 
 
-def test_current_request_language_beats_opposite_ui_locale():
-    chinese_prompt = build_system_prompt(
-        False,
-        current_query='请简短解释 API rate limit 是什么。',
-        environment_context={'locale': 'en-US'},
-    )
-    english_prompt = build_system_prompt(
-        False,
-        current_query='Explain why leaves look green.',
-        environment_context={'locale': 'zh-CN'},
-    )
-
-    assert 'Selected response language for this turn: Chinese' in chinese_prompt
-    assert 'Selected response language for this turn: English' in english_prompt
-
-
-def test_explicit_switch_beats_conversation_language():
-    prompt = build_system_prompt(
-        False,
-        current_query='Please answer this turn in English: what was the result?',
-        conversation_history=[{'role': 'user', 'content': '请用中文回答之前的问题。'}],
-        environment_context={'locale': 'zh-CN'},
-    )
-
-    assert 'Selected response language for this turn: English (explicit instruction' in prompt
-
-
-def test_common_explicit_language_phrasings_are_recognized():
-    cases = (
-        ('use English', 'English'),
-        ('in English', 'English'),
-        ('English please', 'English'),
-        ('请用 English 回答', 'English'),
-        ('use Mandarin', 'Chinese'),
-        ('Mandarin please', 'Chinese'),
-        ('请用 Chinese 回答', 'Chinese'),
-    )
-
-    for query, expected_language in cases:
-        prompt = build_system_prompt(
-            False,
-            current_query=query,
-            environment_context={'locale': 'zh-CN' if expected_language == 'English' else 'en-US'},
-        )
-
-        assert (
-            f'Selected response language for this turn: {expected_language} '
-            '(explicit instruction in the current request)' in prompt
-        )
-
-
-def test_dominant_language_detection_only_samples_first_2000_characters():
-    prompt = build_system_prompt(
-        False,
-        current_query='?' * 2000 + ' This English text is outside the detection sample.',
-        environment_context={'locale': 'zh-CN'},
-    )
-
-    assert 'Selected response language for this turn: Chinese (default UI locale zh-CN).' in prompt
-
-
-def test_recent_user_language_beats_ui_locale_for_ambiguous_follow_up():
-    prompt = build_system_prompt(
-        False,
-        current_query='👍',
-        conversation_history=[{'role': 'user', 'content': '请介绍一下这个功能。'}],
-        environment_context={'locale': 'en-US'},
-    )
-
-    assert 'Selected response language for this turn: Chinese' in prompt
-
-
-def test_saved_language_preference_beats_current_request_language():
+def test_profile_languages_are_not_treated_as_selected_reply_language():
     profile = (
         '---\n'
         'schema_version: 1\n'
@@ -110,14 +43,17 @@ def test_saved_language_preference_beats_current_request_language():
         '  languages: ["zh-CN"]\n'
         '---\n'
     )
-    prompt = build_system_prompt(
+    bundle = build_standard_prompt_bundle(
         False,
         current_query='Explain the result briefly.',
         profile=profile,
         environment_context={'locale': 'en-US'},
     )
 
-    assert 'Selected response language for this turn: Chinese (profile locale.languages)' in prompt
+    assert 'Selected response language' not in bundle.current_input
+    assert 'profile locale.languages' not in bundle.current_input
+    assert 'profile locale.languages' not in bundle.system_prompt
+    assert 'languages: ["zh-CN"]' in bundle.system_prompt
 
 
 def test_system_prompt_injects_soul_profile_preference():
@@ -142,3 +78,61 @@ def test_system_prompt_injects_soul_profile_preference():
     assert '`read_memory_reference`' in prompt
     assert '## Agent Working Memory' not in prompt
     assert 'agent_persona' not in prompt
+
+
+def test_same_calendar_day_keeps_stable_environment_system_prefix():
+    morning = build_system_prompt(
+        False,
+        environment_context={
+            'locale': 'zh-CN',
+            'time': {'now': '2026-05-11T01:15:30.000Z', 'timezone': 'Asia/Shanghai'},
+        },
+    )
+    evening = build_system_prompt(
+        False,
+        environment_context={
+            'locale': 'zh-CN',
+            'time': {'now': '2026-05-11T15:48:00.000Z', 'timezone': 'Asia/Shanghai'},
+        },
+    )
+
+    assert morning == evening
+    assert 'Current user date: 2026-05-11 (Asia/Shanghai)' in morning
+    assert '19:48:00' not in morning
+    assert '09:15:30' not in morning
+
+
+def test_precise_current_time_lives_in_runtime_context():
+    morning = build_standard_prompt_bundle(
+        False,
+        environment_context={
+            'locale': 'zh-CN',
+            'time': {'now': '2026-05-11T01:15:30.000Z', 'timezone': 'Asia/Shanghai'},
+        },
+    )
+    evening = build_standard_prompt_bundle(
+        False,
+        environment_context={
+            'locale': 'zh-CN',
+            'time': {'now': '2026-05-11T15:48:00.000Z', 'timezone': 'Asia/Shanghai'},
+        },
+    )
+
+    assert morning.system_prompt == evening.system_prompt
+    assert 'Current user time: 09:15:30 (Asia/Shanghai)' in morning.current_input
+    assert 'Current user time: 23:48:00 (Asia/Shanghai)' in evening.current_input
+    assert 'Current user time:' not in morning.system_prompt
+
+
+def test_unparseable_time_is_omitted_from_system_and_kept_in_runtime():
+    bundle = build_standard_prompt_bundle(
+        False,
+        environment_context={
+            'locale': 'zh-CN',
+            'time': {'now': 'Monday morning', 'timezone': 'Asia/Shanghai'},
+        },
+    )
+
+    assert 'Current user date:' not in bundle.system_prompt
+    assert 'Monday morning' not in bundle.system_prompt
+    assert 'Current user time: Monday morning' in bundle.current_input

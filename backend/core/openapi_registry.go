@@ -2226,6 +2226,7 @@ type userUIPreferencesPatchOpenAPIRequest struct {
 	WorkflowsEnabled              *bool   `json:"workflows_enabled,omitempty"`
 	MCPEnabled                    *bool   `json:"mcp_enabled,omitempty"`
 	DocumentParsingEnabled        *bool   `json:"document_parsing_enabled,omitempty"`
+	PerformanceStatsEnabled       *bool   `json:"performance_stats_enabled,omitempty"`
 }
 
 type userUIPreferencesOpenAPIResponse struct {
@@ -2239,6 +2240,7 @@ type userUIPreferencesOpenAPIResponse struct {
 	WorkflowsEnabled              bool   `json:"workflows_enabled"`
 	MCPEnabled                    bool   `json:"mcp_enabled"`
 	DocumentParsingEnabled        bool   `json:"document_parsing_enabled"`
+	PerformanceStatsEnabled       bool   `json:"performance_stats_enabled"`
 	UserPreferenceConfigured      bool   `json:"user_preference_configured"`
 	UpdatedAt                     string `json:"updated_at"`
 }
@@ -2377,6 +2379,21 @@ type artifactActionPreviewOpenAPIRequest struct {
 	Action       string         `json:"action"`
 	BaseRevision int            `json:"base_revision"`
 	Input        map[string]any `json:"input"`
+}
+
+type translationOpenAPIRequest struct {
+	Text   string `json:"text"`
+	Target string `json:"target,omitempty"`
+}
+
+type translationOpenAPIResponse struct {
+	TranslatedText string `json:"translated_text"`
+	Source         string `json:"source"`
+	Target         string `json:"target"`
+}
+
+type translationStatusOpenAPIResponse struct {
+	Configured bool `json:"configured"`
 }
 
 func registeredCoreOperations() []openAPIOperation {
@@ -3850,6 +3867,23 @@ func registeredCoreOperations() []openAPIOperation {
 			Tags:        []string{"model_providers"},
 			PathParams:  modelProviderGroupModelPathParams{},
 			Responses:   map[int]openAPIResponse{200: resp("Deleted group model", deleteModelProviderGroupModelOpenAPIResponse{})},
+		},
+		{
+			Method:      "GET",
+			Path:        "/translation/status",
+			Summary:     "Get translation configuration status",
+			Description: "Reports whether the current user has a selected translation provider with credentials. Secrets are never returned.",
+			Tags:        []string{"translation"},
+			Responses:   map[int]openAPIResponse{200: resp("Translation configuration status", translationStatusOpenAPIResponse{})},
+		},
+		{
+			Method:      "POST",
+			Path:        "/translation:translate",
+			Summary:     "Translate selected document text",
+			Description: "Translates up to 5000 characters with the current user's server-side translation credential.",
+			Tags:        []string{"translation"},
+			RequestBody: jsonBodyOf(translationOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Translated text", translationOpenAPIResponse{})},
 		},
 		{
 			Method:    "GET",

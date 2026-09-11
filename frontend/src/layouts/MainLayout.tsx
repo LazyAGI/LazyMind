@@ -37,6 +37,7 @@ import { validatePassword } from "@/modules/signin/utils/formRules";
 import logoImage from "@/public/Lazy.png";
 import { useTranslation } from "react-i18next";
 import LanguageSwitcher from "@/components/LanguageSwitcher";
+import { isVocabularyEnabled } from "@/runtime/mode";
 import {
 	DEVELOPER_ACTIVE_EVENT,
   isDeveloperModeActive,
@@ -46,6 +47,7 @@ import { syncSensitiveWordFilterFromServer } from "@/utils/sensitiveWordFilter";
 import RecordList, {
   type RecordListImperativeProps,
 } from "@/modules/chat/components/RecordList";
+import { useConversationRunningSync } from "@/modules/chat/store/conversationRunning";
 import {
   CHAT_CONVERSATION_FILTER_EVENT,
   CHAT_CONVERSATION_FILTER_KEY,
@@ -64,6 +66,7 @@ import UserAgreementConsentModal, {
   useUserAgreementConsentGate,
 } from "@/components/UserAgreementConsentModal";
 import TerminalConnectionQuickPanel from "@/modules/channelGateway/components/TerminalConnectionQuickPanel";
+import { useConversationOpening } from "@/modules/chat/hooks/useConversationOpening";
 import "./index.scss";
 
 const { Content, Sider } = Layout;
@@ -133,6 +136,7 @@ export default function MainLayout() {
 
   const [userInfo, setUserInfo] = useState(() => AgentAppsAuth.getUserInfo());
   const isLoggedIn = Boolean(userInfo?.token);
+  useConversationRunningSync(isLoggedIn ? userInfo?.userId || userInfo?.username || "" : "", routeConversationId);
   const userName = userInfo?.username || "";
   const isAdminUser = isAdminRole(userInfo?.role);
   const hideLocalUserControls = shouldHideLocalUserControls();
@@ -147,6 +151,8 @@ export default function MainLayout() {
     currentSidebarConversationId,
   );
   const recordListRef = useRef<RecordListImperativeProps>(null);
+  const refreshOpeningTitles = useCallback(() => { recordListRef.current?.refresh(); }, []);
+  useConversationOpening(isLoggedIn ? userName : "", refreshOpeningTitles);
   currentSidebarConversationIdRef.current = currentSidebarConversationId;
   const [profileModalOpen, setProfileModalOpen] = useState(false);
   const [profileLoading, setProfileLoading] = useState(false);
@@ -198,20 +204,24 @@ export default function MainLayout() {
       icon: <AppstoreOutlined />,
     },
     {
-      key: "/dataset-management",
-      label: t("layout.datasetManagement"),
-      icon: <DatabaseOutlined />,
-    },
-    {
       key: "/cloud-documents",
       label: t("layout.cloudDocuments"),
       icon: <CloudOutlined />,
     },
-    {
+    ...(isVocabularyEnabled() ? [{
+      key: "/lib/vocabulary",
+      label: "生词表",
+      icon: <BookOutlined />,
+    }] : []),
+    ...(developerActive ? [{
+      key: "/dataset-management",
+      label: t("layout.datasetManagement"),
+      icon: <DatabaseOutlined />,
+    }, {
       key: "/databases",
       label: t("layout.database"),
       icon: <DatabaseOutlined />,
-    },
+    }] : []),
   ];
   const hideEvo = runtimeFeatures.hideEvo;
   const canAccessSelfEvolution = !hideEvo && developerActive && isAdminUser;

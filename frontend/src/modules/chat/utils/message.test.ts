@@ -44,10 +44,10 @@ describe("isAskPendingReadOnly", () => {
 });
 
 describe("shouldRenderAskPending", () => {
-  it("renders only the current unanswered Ask card", () => {
+  it("keeps answered and superseded Ask cards in the transcript", () => {
     expect(shouldRenderAskPending(false, true)).toBe(true);
-    expect(shouldRenderAskPending(true, true)).toBe(false);
-    expect(shouldRenderAskPending(false, false, true)).toBe(false);
+    expect(shouldRenderAskPending(true, true)).toBe(true);
+    expect(shouldRenderAskPending(false, false, true)).toBe(true);
   });
 
   it("keeps a resumable Ask when only an assistant placeholder follows it", () => {
@@ -299,6 +299,34 @@ describe("buildChatMessageListFromHistory", () => {
     expect(assistantMessage.ask_answered).toBe(true);
   });
 
+  it("restores performance metrics onto the assistant message", () => {
+    const metrics = {
+      schema_version: 1,
+      steps: 2,
+      wall_ms: 1000,
+      model_ms: 800,
+      input_tokens: 100,
+      output_tokens: 20,
+      cached_tokens: 40,
+    };
+    const list = buildChatMessageListFromHistory([
+      {
+        id: "h1",
+        seq: 3,
+        query: "q1",
+        result: "a1",
+        run_id: "run-1",
+        performance_metrics: metrics,
+      },
+    ] as any);
+
+    expect(list[1]).toMatchObject({
+      role: RoleTypes.ASSISTANT,
+      run_id: "run-1",
+      performance_metrics: metrics,
+    });
+  });
+
   it("restores archived failure attempts before the latest answer", () => {
     const failedTerminal = {
       status: "failed",
@@ -496,4 +524,13 @@ describe("mergeChatMessageLists", () => {
 
     expect(mergeChatMessageLists(api, cached)).toEqual(api);
   });
+});
+
+it("renders unavailable inherited attachments as named placeholders", () => {
+  const list = buildChatMessageListFromHistory([{ id: "h", query: "read file", result: "stored answer", input: [
+    { input_type: "image", filename: "diagram.png", file_id: "img", fork_unavailable: true },
+    { input_type: "file", filename: "report.pdf", file_id: "file", fork_unavailable: true },
+  ] }]);
+  expect(list[0].images).toEqual([]);
+  expect(list[0].files).toEqual([{ name: "diagram.png", uid: "img", unavailable: true }, { name: "report.pdf", uid: "file", unavailable: true }]);
 });

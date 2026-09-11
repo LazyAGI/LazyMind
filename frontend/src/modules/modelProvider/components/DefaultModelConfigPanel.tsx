@@ -39,6 +39,7 @@ interface DefaultModelConfigPanelProps {
 
 type ModelCapability =
   | "llm"
+  | "conversation_metadata"
   | "embed_main"
   | "vlm"
   | "reranker"
@@ -210,6 +211,7 @@ type CloudServiceReadyStatus = Partial<
 >;
 
 const moduleConfigs: ModuleConfig[] = [
+  {key: "conversation_metadata", titleKey: "settingsPage.models.metadataTitle", subtitleKey: "settingsPage.models.metadataDesc"},
   {
     key: "llm",
     titleKey: "modelProvider.module.llmChatTitle",
@@ -862,7 +864,7 @@ export default function DefaultModelConfigPanel({
       const modelTypes =
         capability === "image_generator"
           ? ["text2image", "image_editing"]
-          : [getModelTypeByCapability(capability)];
+          : [capability === "conversation_metadata" ? "llm" : getModelTypeByCapability(capability)];
 
       const fetchedLists = await Promise.all(
         modelTypes.map(async (modelType) => {

@@ -33,7 +33,9 @@ import (
 	"lazymind/core/subagent"
 	"lazymind/core/systemdeps"
 	"lazymind/core/taskcenter"
+	"lazymind/core/translation"
 	"lazymind/core/userprefs"
+	"lazymind/core/vocabulary"
 	"lazymind/core/wordgroup"
 	"lazymind/core/workflow"
 	workflowattempt "lazymind/core/workflow/attempt"
@@ -290,6 +292,9 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/agent/router/traffic-stats", []string{"user.admin"}, agent.GetRouterTrafficStats)
 
 	// ----- Conversation -----
+	handleAPI(r, "GET", "/conversations/metadata-backfill", []string{"qa.read"}, chat.OpeningBackfill)
+	handleAPI(r, "POST", "/conversations/metadata-backfill", []string{"qa.write"}, chat.OpeningBackfill)
+	handleAPI(r, "PATCH", "/conversations/{name}/title", []string{"qa.write"}, chat.RenameConversation)
 	handleAPI(r, "POST", "/conversations:chat", []string{"qa.write"}, chat.ChatConversations)
 	handleAPI(r, "POST", "/conversations:estimateContextUsage", []string{"qa.read"}, chat.EstimateContextUsage)
 	handleAPI(r, "POST", "/conversations:exportContextPrompt", []string{"qa.read"}, chat.ExportContextPrompt)
@@ -300,12 +305,15 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/conversations/{conversation_id}:status", []string{"qa.read"}, chat.GetChatStatus)
 	handleAPI(r, "GET", "/chat/models", []string{"qa.read"}, chat.ListChatModels)
 	handleAPI(r, "PATCH", "/conversations/{conversation_id}/model", []string{"qa.write"}, chat.PatchConversationModel)
+	handleAPI(r, "POST", "/conversations/{conversation_id}/fork-preview", []string{"qa.read"}, chat.PreviewConversationFork)
+	handleAPI(r, "POST", "/conversations/{conversation_id}/forks", []string{"qa.write"}, chat.CreateConversationFork)
 	handleAPI(r, "POST", "/conversations/{parent_id}/sidechat", []string{"qa.write"}, chat.CreateSidechat)
 	handleAPI(r, "POST", "/conversations/{child_id}/retain", []string{"qa.write"}, chat.RetainSidechat)
 	handleAPI(r, "DELETE", "/conversations/{child_id}/sidechat", []string{"qa.write"}, chat.DiscardSidechat)
 	handleAPI(r, "POST", "/conversations/{conversation_id}:promote", []string{"qa.write"}, chat.PromoteConversation)
 	handleAPI(r, "POST", "/conversations/{conversation_id}:pin", []string{"qa.write"}, chat.PinConversation)
 	handleAPI(r, "POST", "/conversations/{conversation_id}:unpin", []string{"qa.write"}, chat.UnpinConversation)
+	handleAPI(r, "POST", "/conversations/{conversation_id}:reorder", []string{"qa.write"}, chat.ReorderConversation)
 	handleAPI(r, "GET", "/chat/executors", []string{"qa.read"}, chat.ListChatExecutors)
 	handleAPI(r, "GET", "/external-chat/hosts/{provider}/status", []string{"qa.read"}, chat.ExternalChatHostStatus)
 	handleAPI(r, "GET", "/external-chat/providers/{provider}/sessions", []string{"qa.read"}, chat.ListExternalAgentSessions)
@@ -327,6 +335,9 @@ func registerAllRoutes(r *mux.Router) {
 	// Internal endpoint for algorithm service auto polling; no request-level RBAC.
 	handleAPI(r, "GET", "/internal/subagent/tasks/{task_id}", nil, subagent.InternalGetTaskStatus)
 	handleAPI(r, "GET", "/internal/subagent/tasks/{task_id}/events", nil, subagent.InternalGetTaskEvents)
+	handleAPI(r, "GET", "/internal/subagent/conversations/{conversation_id}/tasks", nil, subagent.InternalListConversationTasks)
+	handleAPI(r, "GET", "/internal/subagent/artifacts", nil, subagent.InternalGetTaskArtifactsBatch)
+	handleAPI(r, "GET", "/internal/subagent/tasks/{task_id}/artifacts", nil, subagent.InternalGetTaskArtifacts)
 	handleAPI(r, "GET", "/internal/subagent/tasks/{task_id}/execution-spec", nil, subagent.InternalGetExecutionSpec)
 	handleAPI(r, "POST", "/internal/subagent/tasks/{task_id}/events", nil, subagent.InternalIngestTaskEvent)
 
@@ -628,6 +639,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/conversations/{name}", []string{"qa.read"}, chat.GetConversation)
 	handleAPI(r, "DELETE", "/conversations/{name}", []string{"qa.write"}, chat.DeleteConversation)
 	handleAPI(r, "POST", "/conversations:batchDelete", []string{"qa.write"}, chat.BatchDeleteConversations)
+	handleAPI(r, "POST", "/conversations:batchStatus", []string{"qa.read"}, chat.BatchConversationStatus)
 	handleAPI(r, "GET", "/conversations", []string{"qa.read"}, chat.ListConversations)
 	handleAPI(r, "POST", "/conversations:setChatHistory", []string{"qa.write"}, chat.SetChatHistory)
 	handleAPI(r, "POST", "/conversations:feedBackChatHistory", []string{"qa.write"}, chat.FeedBackChatHistory)
@@ -682,6 +694,60 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "DELETE", "/model_providers/{model_provider_id}/groups/{group_id}/models/{model_id}", []string{"model.write"}, modelprovider.DeleteGroupModel)
 	handleAPI(r, "POST", "/model_providers/{model_provider_id}/groups/{group_id}/keys", []string{"model.write"}, modelprovider.AddKey)
 	handleAPI(r, "DELETE", "/model_providers/{model_provider_id}/groups/{group_id}/keys", []string{"model.write"}, modelprovider.RemoveKey)
+	handleAPI(r, "GET", "/translation/status", []string{"document.read"}, translation.Status)
+	handleAPI(r, "POST", "/translation:translate", []string{"document.read"}, translation.Translate)
+
+	// ----- Vocabulary / Anki provider -----
+	if vocabulary.Enabled() {
+		handleAPI(r, "GET", "/vocabulary/provider", []string{"document.read"}, vocabulary.GetProvider)
+		handleAPI(r, "PUT", "/vocabulary/provider", []string{"document.write"}, vocabulary.PutProvider)
+		handleAPI(r, "GET", "/vocabulary/providers/anki/status", []string{"document.read"}, vocabulary.Status)
+		handleAPI(r, "POST", "/vocabulary/providers/anki:request-permission", []string{"document.write"}, vocabulary.RequestPermission)
+		handleAPI(r, "POST", "/vocabulary/providers/anki:initialize", []string{"document.write"}, vocabulary.Initialize)
+		handleAPI(r, "POST", "/vocabulary/providers/anki:sync", []string{"document.write"}, vocabulary.Sync)
+		handleAPI(r, "GET", "/vocabulary/providers/anki/decks", []string{"document.read"}, vocabulary.ListAnkiDecks)
+		handleAPI(r, "POST", "/vocabulary/providers/anki/decks", []string{"document.write"}, vocabulary.CreateAnkiDeck)
+		handleAPI(r, "DELETE", "/vocabulary/providers/anki/decks/{name}", []string{"document.write"}, vocabulary.DeleteAnkiDeck)
+		handleAPI(r, "POST", "/vocabulary/words", []string{"document.write"}, vocabulary.AddWord)
+		handleAPI(r, "GET", "/vocabulary/documents/{document_id}/words", []string{"document.read"}, vocabulary.ListDocumentWords)
+		handleAPI(r, "GET", "/vocabulary/words", []string{"document.read"}, vocabulary.ListWords)
+		handleAPI(r, "GET", "/vocabulary/review/next", []string{"document.read"}, vocabulary.NextReview)
+		handleAPI(r, "POST", "/vocabulary/review/sessions", []string{"document.write"}, vocabulary.StartReviewSession)
+		handleAPI(r, "GET", "/vocabulary/review/sessions/active/candidates", []string{"document.read"}, vocabulary.PreviewReviewSession)
+		handleAPI(r, "GET", "/vocabulary/review/sessions/active", []string{"document.read"}, vocabulary.GetActiveReviewSession)
+		handleAPI(r, "POST", "/vocabulary/review/sessions/active/words:issue", []string{"document.write"}, vocabulary.IssueReviewSessionWords)
+		handleAPI(r, "GET", "/vocabulary/review/sessions/{session_id}/questions:next", []string{"document.read"}, vocabulary.NextReviewSessionQuestions)
+		handleAPI(r, "POST", "/vocabulary/review/sessions/{session_id}/questions:prepare", []string{"document.write"}, vocabulary.PrepareReviewSessionQuestions)
+		handleAPI(r, "POST", "/vocabulary/review/sessions/{session_id}/answers", []string{"document.write"}, vocabulary.SubmitSessionReview)
+		handleAPI(r, "POST", "/vocabulary/review/sessions/{session_id}/answers:register", []string{"document.write"}, vocabulary.RegisterSessionReview)
+		handleAPI(r, "POST", "/vocabulary/review/sessions/{session_id}:complete", []string{"document.write"}, vocabulary.CompleteReviewSession)
+		handleAPI(r, "POST", "/vocabulary/words/{word_id}:review", []string{"document.write"}, vocabulary.SubmitReview)
+		handleAPI(r, "POST", "/vocabulary/words/{word_id}:master", []string{"document.write"}, vocabulary.MasterWord)
+		handleAPI(r, "DELETE", "/vocabulary/words/{word_id}", []string{"document.write"}, vocabulary.DeleteVocabularyWord)
+		handleAPI(r, "GET", "/vocabulary/wordbooks", []string{"document.read"}, vocabulary.ListWordbooks)
+		handleAPI(r, "POST", "/vocabulary/wordbooks", []string{"document.write"}, vocabulary.CreateWordbook)
+		handleAPI(r, "PATCH", "/vocabulary/wordbooks/{id}", []string{"document.write"}, vocabulary.UpdateWordbook)
+		handleAPI(r, "DELETE", "/vocabulary/wordbooks/{id}", []string{"document.write"}, vocabulary.DeleteWordbook)
+		handleAPI(r, "GET", "/vocabulary/words/{id}", []string{"document.read"}, vocabulary.GetWord)
+		handleAPI(r, "PATCH", "/vocabulary/words/{id}", []string{"document.write"}, vocabulary.UpdateWord)
+		handleAPI(r, "POST", "/vocabulary/words/{id}:resume", []string{"document.write"}, vocabulary.ResumeWord)
+		handleAPI(r, "POST", "/vocabulary/words/{id}:reset", []string{"document.write"}, vocabulary.ResetWord)
+		handleAPI(r, "POST", "/vocabulary/words:reset", []string{"document.write"}, vocabulary.ResetWords)
+		handleAPI(r, "POST", "/vocabulary/selection:resolve", []string{"document.read"}, vocabulary.ResolveSelection)
+		handleAPI(r, "DELETE", "/vocabulary/documents/{document_id}/words/{word_id}", []string{"document.write"}, vocabulary.RemoveDocumentSource)
+		handleAPI(r, "DELETE", "/vocabulary/documents/{document_id}/words/{word_id}/word", []string{"document.write"}, vocabulary.DeleteDocumentWord)
+		handleAPI(r, "GET", "/vocabulary/dictionary:lookup", []string{"document.read"}, vocabulary.DictionaryLookup)
+		handleAPI(r, "GET", "/vocabulary/stats", []string{"document.read"}, vocabulary.ReviewStatsHandler)
+		handleAPI(r, "GET", "/vocabulary/fsrs/profile", []string{"document.read"}, vocabulary.GetFSRSProfile)
+		handleAPI(r, "PUT", "/vocabulary/fsrs/profile", []string{"document.write"}, vocabulary.PutFSRSProfile)
+		handleAPI(r, "GET", "/vocabulary/review/logs:export", []string{"document.read"}, vocabulary.ExportReviewLogs)
+		handleAPI(r, "GET", "/vocabulary/words/{id}/review-history", []string{"document.read"}, vocabulary.ReviewHistory)
+		handleAPI(r, "POST", "/vocabulary/words/{id}/examples", []string{"document.write"}, vocabulary.AddExample)
+		handleAPI(r, "PATCH", "/vocabulary/examples/{id}", []string{"document.write"}, vocabulary.UpdateExample)
+		handleAPI(r, "DELETE", "/vocabulary/examples/{id}", []string{"document.write"}, vocabulary.DeleteExample)
+		handleAPI(r, "POST", "/vocabulary/words/{id}/tags", []string{"document.write"}, vocabulary.AddWordTags)
+		handleAPI(r, "DELETE", "/vocabulary/words/{id}/tags/{tag}", []string{"document.write"}, vocabulary.RemoveWordTag)
+	}
 
 	// ----- Prompttext -----
 	handleAPI(r, "POST", "/prompts", []string{"document.write"}, chat.CreatePrompt)

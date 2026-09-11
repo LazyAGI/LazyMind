@@ -1,5 +1,14 @@
 import { getLocalizedErrorMessage } from "@/components/request";
 import {
+  DndContext, PointerSensor, KeyboardSensor, closestCenter, useSensor, useSensors,
+  type DragEndEvent, type DragStartEvent, type DragOverEvent, type CollisionDetection,
+} from "@dnd-kit/core";
+import { SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import SortableConversationRow from "./SortableConversationRow";
+import ConversationRunningIndicator from "./ConversationRunningIndicator";
+import { useConversationRunningStore } from "@/modules/chat/store/conversationRunning";
+import { applyConversationOrder, isConversationPinned, sortConversationHistory, type SidebarConversation } from "./conversationHistory";
+import {
   CloudDownloadOutlined,
   DeleteOutlined,
   DownOutlined,
@@ -38,9 +47,9 @@ import {
   useEffect,
   useMemo,
   useRef,
+  useId,
   forwardRef,
   useImperativeHandle,
-  Fragment,
 } from "react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -76,7 +85,6 @@ import {
   CONVERSATION_RELATION_FORK,
   getConversationRelation,
   isChildConversation,
-  type ConversationWithRelation,
 } from "@/modules/chat/utils/conversationRelation";
 
 const EXPORT_FILE_TYPE_XLSX = "EXPORT_FILE_TYPE_XLSX";
@@ -126,47 +134,13 @@ export interface RecordListImperativeProps {
 
 const { Search } = Input;
 
-type SidebarConversation = ConversationWithRelation & {
-  pinned_at?: string | null;
-  is_pinned?: boolean;
-  source_type?: string;
-  source_display_name?: string;
-};
-
-type ConversationGroup = "pinned" | "today" | "recentWeek" | "earlier";
+type ConversationGroup = "pinned" | "today" | "recentWeek" | "earlier" | "history";
 
 type SidebarConversationNode = {
   conversation: SidebarConversation;
   children: SidebarConversation[];
   isPlaceholderParent?: boolean;
 };
-
-function isConversationPinned(conversation: SidebarConversation) {
-  return conversation.is_pinned === true || Boolean(conversation.pinned_at);
-}
-
-function conversationTime(value?: string | null) {
-  const parsed = dayjs(value);
-  return parsed.isValid() ? parsed.valueOf() : 0;
-}
-
-function sortConversationHistory(conversations: SidebarConversation[]) {
-  return [...conversations].sort((left, right) => {
-    const leftPinned = isConversationPinned(left);
-    const rightPinned = isConversationPinned(right);
-    if (leftPinned !== rightPinned) {
-      return leftPinned ? -1 : 1;
-    }
-    if (leftPinned) {
-      return (
-        conversationTime(right.pinned_at) - conversationTime(left.pinned_at)
-      );
-    }
-    return (
-      conversationTime(right.update_time) - conversationTime(left.update_time)
-    );
-  });
-}
 
 function getConversationGroup(updateTime?: string): ConversationGroup {
   const parsedTime = dayjs(updateTime);
@@ -199,8 +173,16 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
       title,
     } = props;
     const [historyList, setHistoryList] = useState<SidebarConversation[]>([]);
+    const statusWatcherId = useId();
+    useEffect(() => {
+      useConversationRunningStore.getState().watch(statusWatcherId, historyList.flatMap((item) => [
+        item.conversation_id || "", getConversationRelation(item)?.parentConversationId || "",
+      ]));
+    }, [historyList, statusWatcherId]);
+    useEffect(() => () => useConversationRunningStore.getState().unwatch(statusWatcherId), [statusWatcherId]);
     const [keyword, setKeyword] = useState("");
     const [pageToken, setPageToken] = useState("");
+    const [historyRevision, setHistoryRevision] = useState(0);
     const [checkedList, setCheckedList] = useState<string[]>([]);
     const [showBatchExport, setShowBatchExport] = useState(false);
     const [isHistoryLoading, setIsHistoryLoading] = useState(true);
@@ -232,6 +214,20 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
     const deleteHistoryLastInvokeRef = useRef(0);
     const batchDeleteInFlightRef = useRef(false);
     const pinningConversationRef = useRef(false);
+    const historyRequestRef = useRef(0);
+    const historyRefreshRequiredRef = useRef(false);
+    const [reorderingConversationId, setReorderingConversationId] = useState("");
+    const reorderingConversationRef = useRef(false);
+    const sensors = useSensors(
+      useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+      useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+    );
+    const sameSectionCollision: CollisionDetection = (args) => closestCenter({
+      ...args,
+      droppableContainers: args.droppableContainers.filter((container) =>
+        container.data.current?.pinned === args.active.data.current?.pinned,
+      ),
+    });
     const { setThink } = useChatThinkStore();
     const { setNewMessage } = useChatNewMessageStore();
 
@@ -353,19 +349,28 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
         today: [],
         recentWeek: [],
         earlier: [],
+        history: [],
       };
+      const hasManualHistory = conversationTree.some((node) =>
+        !isConversationPinned(node.conversation) && node.conversation.history_order != null,
+      );
       conversationTree.forEach((node) => {
         if (isConversationPinned(node.conversation)) {
           groups.pinned.push(node);
           return;
         }
-        groups[getConversationGroup(node.conversation.update_time)].push(node);
+        groups[hasManualHistory ? "history" : getConversationGroup(node.conversation.update_time)].push(node);
       });
       return [
         {
           key: "pinned" as const,
           title: t("chat.conversationGroupPinned"),
           items: groups.pinned,
+        },
+        {
+          key: "history" as const,
+          title: t("chat.chatHistory"),
+          items: groups.history,
         },
         {
           key: "today" as const,
@@ -454,12 +459,14 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
           const next = bumpConversationToTop(prev, conversationId, {
             displayName: detail.displayName,
           }) as SidebarConversation[];
-          window.requestAnimationFrame(() => {
-            document.getElementById(scrollableTargetId)?.scrollTo({
-              top: 0,
-              behavior: "smooth",
+          if (prev.find((item) => item.conversation_id === conversationId)?.history_order == null) {
+            window.requestAnimationFrame(() => {
+              document.getElementById(scrollableTargetId)?.scrollTo({
+                top: 0,
+                behavior: "smooth",
+              });
             });
-          });
+          }
           return sortConversationHistory(next);
         });
       };
@@ -495,6 +502,9 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
     }) {
       const { isMore = false, isFirst = false, searchText, filterOverride } = params ?? {};
       const activeFilter = filterOverride ?? convTypeFilter;
+      const requestId = ++historyRequestRef.current;
+      const replaceHistory = isFirst || historyRefreshRequiredRef.current;
+      if (replaceHistory) historyRefreshRequiredRef.current = true;
       setIsHistoryLoading(true);
 
       // Determine is_task_conv query param based on active filter selection.
@@ -514,7 +524,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
         .conversationServiceListConversations(
           {
             keyword: searchText ?? keyword,
-            pageToken: isFirst ? "" : pageToken,
+            pageToken: replaceHistory ? "" : pageToken,
             pageSize: 50,
           },
           {
@@ -522,10 +532,10 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
               ...(isTaskConvParam !== undefined
                 ? { is_task_conv: isTaskConvParam }
                 : {}),
-              ...(selectedAgents.length > 0
+              ...(hasNormal || selectedAgents.length > 0
                 ? {
                     assistants: [
-                      ...(hasNormal || hasTask ? ["lazymind"] : []),
+                      ...(hasNormal ? ["lazymind"] : []),
                       ...selectedAgents,
                     ].join(","),
                   }
@@ -536,17 +546,24 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
         .then((res) => {
           const conversations: SidebarConversation[] =
             res?.data?.conversations ?? [];
-          setHistoryList(
-            sortConversationHistory(
-              isMore
-                ? [...(historyList || []), ...(conversations || [])]
-                : conversations,
-            ),
-          );
+          if (requestId !== historyRequestRef.current) return;
+          setHistoryList((previous) => sortConversationHistory(
+            [...new Map((isMore && !replaceHistory ? [...previous, ...conversations] : conversations)
+              .map((item) => [item.conversation_id, item])).values()],
+          ));
           setPageToken(res.data.next_page_token || "");
+          historyRefreshRequiredRef.current = false;
+          if (replaceHistory) setHistoryRevision((revision) => revision + 1);
+        })
+        .catch(() => {
+          if (requestId !== historyRequestRef.current) return;
+          message.error(t("chat.fork.historyLoadFailed"));
+          // Reset InfiniteScroll's pending-load latch even when the row count
+          // stays the same, so a failed refresh can retry from the first page.
+          setHistoryRevision((revision) => revision + 1);
         })
         .finally(() => {
-          setIsHistoryLoading(false);
+          if (requestId === historyRequestRef.current) setIsHistoryLoading(false);
         });
     }
 
@@ -579,7 +596,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
       conversation: SidebarConversation,
       pinned: boolean,
     ) {
-      if (pinningConversationRef.current) {
+      if (pinningConversationRef.current || reorderingConversationRef.current) {
         return;
       }
       const conversationId = conversation.conversation_id || "";
@@ -587,22 +604,19 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
         return;
       }
       pinningConversationRef.current = true;
+      ++historyRequestRef.current;
+      setIsHistoryLoading(false);
       setPinningConversationId(conversationId);
       return ChatServiceApi()
         .conversationServiceSetPinned(conversationId, pinned)
         .then((res) => {
-          const pinnedAt = pinned
-            ? res.data?.pinned_at || new Date().toISOString()
-            : null;
-          setHistoryList((previous) =>
-            sortConversationHistory(
-              previous.map((item) =>
-                item.conversation_id === conversationId
-                  ? { ...item, is_pinned: pinned, pinned_at: pinnedAt }
-                  : item,
-              ),
-            ),
-          );
+          setHistoryList((previous) => applyConversationOrder(previous, {
+            ...res.data,
+            conversation_id: conversationId,
+            is_pinned: pinned,
+            pinned_at: pinned ? res.data?.pinned_at : null,
+          }));
+          getHistory({ isFirst: true });
           message.success(
             t(
               pinned
@@ -621,10 +635,40 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
         });
     }
 
-    function confirmDeleteHistory(data: Conversation) {
+    async function handleReorder({ active, over }: DragEndEvent) {
+      if (!over || active.id === over.id || reorderingConversationRef.current || pinningConversationRef.current) return;
+      const moved = historyList.find((item) => item.conversation_id === active.id);
+      const target = historyList.find((item) => item.conversation_id === over.id);
+      if (!moved || !target || isConversationPinned(moved) !== isConversationPinned(target)) return;
+      const sourceIndex = historyList.indexOf(moved);
+      const targetIndex = historyList.indexOf(target);
+      reorderingConversationRef.current = true;
+      ++historyRequestRef.current;
+      setIsHistoryLoading(false);
+      setReorderingConversationId(String(active.id));
+      try {
+        const response = await ChatServiceApi().conversationServiceReorder(
+          String(active.id), String(over.id), sourceIndex < targetIndex ? "after" : "before",
+        );
+        setHistoryList((previous) => applyConversationOrder(previous, response.data));
+        getHistory({ isFirst: true });
+      } catch {
+        message.error(t("chat.reorderConversationFailed"));
+      } finally {
+        reorderingConversationRef.current = false;
+        setReorderingConversationId("");
+      }
+    }
+
+    async function confirmDeleteHistory(data: Conversation) {
+      let hasForks = false;
+      try {
+        const response = await ChatServiceApi().conversationServiceGetConversationDetail({ conversation: data.conversation_id || "" });
+        hasForks = Boolean((response.data.conversation as { has_fork_descendants?: boolean })?.has_fork_descendants);
+      } catch { message.error(t("chat.fork.historyLoadFailed")); return; }
       Modal.confirm({
         title: t("settingsPage.recovery.moveToTrashTitle", { name: data.display_name }),
-        content: t("settingsPage.recovery.moveToTrashDescription"),
+        content: t("settingsPage.recovery.moveToTrashDescription") + (hasForks ? " " + t("chat.fork.deleteNotice") : ""),
         okText: t("settingsPage.recovery.moveToTrash"),
         cancelText: t("common.cancel"),
         okButtonProps: { danger: true },
@@ -669,7 +713,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
         title: t("chat.batchDeleteConversationTitle", {
           count: checkedList.length,
         }),
-        content: t("chat.batchDeleteConversationContent"),
+        content: t("chat.batchDeleteConversationContent") + " " + t("chat.fork.deleteNotice"),
         okText: t("common.delete"),
         cancelText: t("common.cancel"),
         okButtonProps: { danger: true },
@@ -808,7 +852,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
               label: t(
                 pinned ? "chat.unpinConversation" : "chat.pinConversation",
               ),
-              disabled: Boolean(pinningConversationId),
+              disabled: Boolean(pinningConversationId || reorderingConversationId),
               onClick: () => setConversationPinned(item, !pinned),
             },
             {
@@ -826,6 +870,8 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
       };
       return (
         <div
+          aria-busy={item.metadata_pending || undefined}
+          data-title-revision={item.title_revision}
           className={classnames("record", {
             selected,
             "record-child": isChild,
@@ -914,6 +960,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
           >
             <span className="title">{conversationTitle}</span>
           </Popover>
+          <ConversationRunningIndicator conversationId={conversationId} />
           {source.source_type === "pdf_preview" ? (
             <Tooltip title={source.source_display_name || t("knowledge.pdfChatSavedSource")}>
               <FilePdfOutlined className="record-source-icon" aria-label={t("knowledge.pdfChatSavedSource")} />
@@ -983,7 +1030,13 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
           })
         );
         return (
-          <Fragment key={conversationId}>
+          <SortableConversationRow
+            key={conversationId}
+            id={conversationId}
+            title={item.display_name || conversationId}
+            pinned={isConversationPinned(item)}
+            disabled={showBatchExport || isHistoryLoading || Boolean(pinningConversationId || reorderingConversationId) || Boolean(node.isPlaceholderParent)}
+          >
             <Col span={24}>{record}</Col>
             {childrenExpanded && node.children.length > 0 ? (
               <Col span={24}>
@@ -1022,12 +1075,11 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
                 </div>
               </Col>
             ) : null}
-          </Fragment>
+          </SortableConversationRow>
         );
       };
 
-      if (compact) {
-        return (
+      const content = compact ? (
           <div className="record-groups">
             {groupedHistoryList.map((group) => (
               <div className="record-group" key={group.key}>
@@ -1038,12 +1090,30 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
               </div>
             ))}
           </div>
-        );
-      }
+      ) : <Row>{conversationTree.map((node) => renderNode(node))}</Row>;
       return (
-        <Row>
-          {conversationTree.map((node) => renderNode(node))}
-        </Row>
+        <DndContext
+          sensors={sensors}
+          collisionDetection={sameSectionCollision}
+          onDragEnd={handleReorder}
+          accessibility={{
+            screenReaderInstructions: { draggable: t("chat.reorderConversationHint") },
+            announcements: {
+              onDragStart: ({ active }: DragStartEvent) => t("chat.reorderConversationStarted", {
+                name: historyList.find((item) => item.conversation_id === active.id)?.display_name,
+              }),
+              onDragOver: ({ over }: DragOverEvent) => over ? t("chat.reorderConversationOver", {
+                name: historyList.find((item) => item.conversation_id === over.id)?.display_name,
+              }) : undefined,
+              onDragEnd: () => t("chat.reorderConversationEnded"),
+              onDragCancel: () => t("chat.reorderConversationCanceled"),
+            },
+          }}
+        >
+          <SortableContext items={conversationTree.map((node) => node.conversation.conversation_id || "")} strategy={verticalListSortingStrategy}>
+            {content}
+          </SortableContext>
+        </DndContext>
       );
     }
 
@@ -1198,6 +1268,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
             </div>
           ) : (
             <InfiniteScroll
+              key={historyRevision}
               dataLength={historyList?.length || 0}
               next={() => getHistory({ isMore: true })}
               hasMore={!!pageToken}

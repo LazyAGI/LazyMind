@@ -579,3 +579,14 @@ Core最终全量83包通过（另5包无测试），算法P1修复与Workflow广
 - [x] 排除与工作区功能无关的 `algorithm/Dockerfile` 启动修复。
 - [x] 重新执行 Backend、Frontend、Algorithm 定向验证、typecheck、生产构建和冻结边界检查。
 - [x] 提交并推送 `feature/newWorkZone`，由用户手动创建 PR；功能提交为 `1339da97`。
+
+## 2026-09-11 官方 main 合并任务
+
+- [x] 确认官方父仓库并添加 `upstream`。
+- [x] 将本地 `main` 安全更新到 `upstream/main@2163dae182869d043cb90206260e3d92da8a329d`。
+- [x] 合入功能分支并逐项整合工作区合同与官方会话、SubAgent、迁移及 OpenAPI 变更。
+- [x] LazyLLM 使用官方 gitlink `2cc07741ca6531715d5c55f9ac083f635614188a`。
+- [x] 修复合并后再生成 run ownership、SQLite 非 UTC 租约比较和聚合迁移兼容问题。
+- [x] 完成 Core 全量/vet、算法定向、前端 typecheck/build/OpenAPI 与 diff 健康检查。
+- [x] 创建 merge commit并推送功能分支，提交后核对远端引用。
+- [ ] 人工验收真实登录、模型、目录选择和 Desktop 打包。
