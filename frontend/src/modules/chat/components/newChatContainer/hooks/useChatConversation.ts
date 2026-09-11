@@ -1,5 +1,5 @@
-import { createElement, useEffect, useRef, useState, type RefObject } from "react";
-import { Button, message, Modal } from "antd";
+import { useEffect, useRef, useState, type RefObject } from "react";
+import { message, Modal } from "antd";
 import { useNavigate } from "react-router-dom";
 import { requestConversationStatusRefresh } from "@/modules/chat/utils/conversationStatusEvents";
 import {
@@ -57,11 +57,14 @@ import {
   type StreamRecoveryViewState,
 } from "@/modules/chat/utils/streamRecovery";
 import {
+  MEDIA_CAPABILITY_DEPENDENCY_MISSING,
+  mediaCapabilityDependencySignature,
   parseMediaCapabilityDependency,
   type MediaCapabilityDependencyDetail,
 } from "@/modules/chat/utils/mediaCapabilityDependency";
 import { useTaskCenterStore } from "@/modules/chat/store/taskCenter";
 import { useWorkflowStore } from "@/modules/chat/store/workflowPanel";
+import { listToolAssets } from "@/modules/memory/toolApi";
 import {
   applyChatStreamFailure,
   parseCoreChatStreamError,
@@ -69,6 +72,12 @@ import {
 
 type UserEditApi = ReturnType<typeof useUserMessageEdit>;
 type RuntimeWaitingOperation = "chat" | "workflow";
+
+const MEDIA_CAPABILITY_PENDING_STORAGE_PREFIX = "chat-capability-pending:";
+
+function pendingMediaCapabilityStorageKey(conversationId: string): string {
+  return `${MEDIA_CAPABILITY_PENDING_STORAGE_PREFIX}${conversationId}`;
+}
 
 interface UseChatConversationOptions {
   canChat: boolean;
@@ -115,11 +124,11 @@ export function useChatConversation({
   const conversationMessagesCache = useRef<Map<string, any[]>>(new Map());
   const ffmpegErrorBufferRef = useRef("");
   const ffmpegPromptOpenRef = useRef(false);
-  const mediaCapabilityPromptOpenRef = useRef(false);
-  const mediaCapabilityPromptSignaturesRef = useRef<Set<string>>(new Set());
+  const continuedMediaCapabilityFailuresRef = useRef<Set<string>>(new Set());
   const runtimeWaitAbortRef = useRef<AbortController | null>(null);
   const runtimeWaitInProgressRef = useRef(false);
   const regenerateInProgressRef = useRef(false);
+  const mediaCapabilityCheckInProgressRef = useRef(false);
   const pendingClientConversationIdRef = useRef("");
   const streamRecoveryRegistryRef = useRef(new StreamRecoveryRegistry());
   const streamRecoverySuccessTimerRef = useRef<
@@ -136,6 +145,9 @@ export function useChatConversation({
     useState<RuntimeWaitingOperation>("chat");
   const [streamRecovery, setStreamRecovery] =
     useState<StreamRecoveryViewState>(idleStreamRecoveryState());
+  const [mediaCapabilityDependency, setMediaCapabilityDependency] =
+    useState<MediaCapabilityDependencyDetail | null>(null);
+  const [mediaCapabilityChecking, setMediaCapabilityChecking] = useState(false);
 
   const scroll = useChatScroll({
     chatInputRef,
@@ -162,62 +174,60 @@ export function useChatConversation({
   }
 
   function showMediaCapabilityPrompt(detail: MediaCapabilityDependencyDetail) {
-    const conversationId = useTaskCenterStore.getState().activeConversationId;
-    const signature = [
-      conversationId,
-      detail.workflow,
-      ...detail.missing.map((item) => item.id).sort(),
-    ].join("|");
-    if (
-      mediaCapabilityPromptOpenRef.current ||
-      detail.missing.length === 0 ||
-      mediaCapabilityPromptSignaturesRef.current.has(signature)
-    ) {
+    if (detail.missing.length === 0) return;
+    const conversationId = detail.conversation_id
+      || currentConversationIdRef.current
+      || useTaskCenterStore.getState().activeConversationId;
+    const normalizedDetail = conversationId
+      ? { ...detail, conversation_id: conversationId }
+      : detail;
+    const signature = mediaCapabilityDependencySignature(normalizedDetail);
+    if (normalizedDetail.failure_id) {
+      if (continuedMediaCapabilityFailuresRef.current.has(signature)) return;
+      try {
+        if (sessionStorage.getItem(`chat-capability-continued:${signature}`)) return;
+      } catch {
+        // A live in-memory card still works when session storage is unavailable.
+      }
+    }
+    setMediaCapabilityDependency((current) =>
+      current && mediaCapabilityDependencySignature(current) === signature
+        ? current
+        : normalizedDetail,
+    );
+    if (conversationId) {
+      try {
+        sessionStorage.setItem(
+          pendingMediaCapabilityStorageKey(conversationId),
+          `${MEDIA_CAPABILITY_DEPENDENCY_MISSING} ${JSON.stringify(normalizedDetail)}`,
+        );
+      } catch {
+        // The card remains available for the current page lifetime.
+      }
+    }
+  }
+
+  function restorePendingMediaCapability(conversationId: string) {
+    if (!conversationId) {
+      setMediaCapabilityDependency(null);
       return;
     }
-    mediaCapabilityPromptSignaturesRef.current.add(signature);
-    mediaCapabilityPromptOpenRef.current = true;
-    const firstTarget = detail.missing[0]?.settings_url || "/settings?section=models";
-    Modal.confirm({
-      title: t("chat.mediaCapabilitiesRequiredTitle"),
-      content: createElement(
-        "div",
-        { className: "chat-media-capability-prompt" },
-        createElement("p", null, detail.message || t("chat.mediaCapabilitiesRequiredDesc")),
-        ...detail.missing.map((item) =>
-          createElement(
-            "div",
-            {
-              key: item.id,
-              style: {
-                border: "1px solid #e5e7eb",
-                borderRadius: 8,
-                marginTop: 8,
-                padding: "10px 12px",
-              },
-            },
-            createElement("strong", null, item.label),
-            createElement("p", { style: { margin: "6px 0" } }, item.reason),
-            createElement(
-              Button,
-              {
-                size: "small",
-                type: "link",
-                style: { padding: 0 },
-                onClick: () => navigate(item.settings_url),
-              },
-              t("chat.configureThisCapability"),
-            ),
-          ),
-        ),
-      ),
-      okText: t("chat.configureRequiredCapability"),
-      cancelText: t("common.close"),
-      onOk: () => navigate(firstTarget),
-      afterClose: () => {
-        mediaCapabilityPromptOpenRef.current = false;
-      },
-    });
+    try {
+      const restored = parseMediaCapabilityDependency(
+        sessionStorage.getItem(pendingMediaCapabilityStorageKey(conversationId)),
+      );
+      if (restored) {
+        showMediaCapabilityPrompt({ ...restored, conversation_id: conversationId });
+        return;
+      }
+    } catch {
+      // Invalid or unavailable session storage should not interrupt chat.
+    }
+    setMediaCapabilityDependency((current) =>
+      current?.conversation_id && current.conversation_id !== conversationId
+        ? null
+        : current,
+    );
   }
 
   useEffect(() => {
@@ -254,7 +264,11 @@ export function useChatConversation({
       for (const task of tasks) {
         const detail = parseMediaCapabilityDependency(task);
         if (!detail) continue;
-        showMediaCapabilityPrompt(detail);
+        showMediaCapabilityPrompt({
+          ...detail,
+          conversation_id: conversationId,
+          failure_id: task.task_id,
+        });
         break;
       }
     };
@@ -778,7 +792,14 @@ export function useChatConversation({
       return;
     }
     const mediaDependency = parseMediaCapabilityDependency(result);
-    if (mediaDependency) showMediaCapabilityPrompt(mediaDependency);
+    if (mediaDependency) {
+      showMediaCapabilityPrompt({
+        ...mediaDependency,
+        conversation_id: String(
+          result.conversation_id || currentConversationIdRef.current || "",
+        ) || undefined,
+      });
+    }
     ffmpegErrorBufferRef.current = (
       ffmpegErrorBufferRef.current + JSON.stringify(result)
     ).slice(-8192);
@@ -1744,6 +1765,7 @@ export function useChatConversation({
 
     currentConversationIdRef.current = id;
     pendingClientConversationIdRef.current = "";
+    restorePendingMediaCapability(id);
     const selectedRecovery = streamRecoveryRegistryRef.current.get(id);
     setStreamRecovery(
       selectedRecovery
@@ -1815,6 +1837,7 @@ export function useChatConversation({
 
     currentConversationIdRef.current = "";
     pendingClientConversationIdRef.current = "";
+    setMediaCapabilityDependency(null);
     streamRecoveryRegistryRef.current.clearAll();
     setStreamRecovery(idleStreamRecoveryState());
     setMessageList([]);
@@ -1849,7 +1872,7 @@ export function useChatConversation({
       if (disabledReason) {
         message.warning(disabledReason);
       }
-      return;
+      return false;
     }
     if (
       activeStreamRef.current ||
@@ -1858,7 +1881,7 @@ export function useChatConversation({
       regenerateInProgressRef.current ||
       isModelSelectionSaving?.()
     ) {
-      return;
+      return false;
     }
     const userMessage = messageListRef.current.findLast(
       (item: any) => item.role === RoleTypes.USER,
@@ -1866,7 +1889,7 @@ export function useChatConversation({
     const regenerationInputs = getRegenerationInputs(userMessage);
     if (regenerationInputs.length < 1) {
       message.error(t("chat.regenerateInputMissing"));
-      return;
+      return false;
     }
 
     regenerateInProgressRef.current = true;
@@ -1942,8 +1965,62 @@ export function useChatConversation({
           streamManager.saveMessageList(currentId, previousMessageList);
         }
       }
+      return opened;
     } finally {
       regenerateInProgressRef.current = false;
+    }
+  }
+
+  async function continueAfterMediaCapabilityConfiguration() {
+    const dependency = mediaCapabilityDependency;
+    if (!dependency || mediaCapabilityCheckInProgressRef.current) return false;
+
+    mediaCapabilityCheckInProgressRef.current = true;
+    setMediaCapabilityChecking(true);
+    try {
+      // The tools endpoint reloads the user's current model configuration from
+      // Core before asking the chat service for live capability availability.
+      const tools = await listToolAssets({ silentError: true });
+      const availability = new Map(
+        tools.map((tool) => [tool.id, tool.isAvailable]),
+      );
+      const isStillMissing = dependency.missing.some(
+        (item) => availability.get(item.id) !== true,
+      );
+      if (isStillMissing) {
+        message.warning(t("chat.mediaCapabilityStillMissing"));
+        return false;
+      }
+
+      const signature = mediaCapabilityDependencySignature(dependency);
+      const started = await regenerate();
+      if (!started) return false;
+
+      if (dependency.failure_id) {
+        continuedMediaCapabilityFailuresRef.current.add(signature);
+        try {
+          sessionStorage.setItem(`chat-capability-continued:${signature}`, "1");
+        } catch {
+          // The in-memory guard is sufficient for this page lifetime.
+        }
+      }
+      if (dependency.conversation_id) {
+        try {
+          sessionStorage.removeItem(
+            pendingMediaCapabilityStorageKey(dependency.conversation_id),
+          );
+        } catch {
+          // The in-memory card can still be cleared below.
+        }
+      }
+      setMediaCapabilityDependency(null);
+      return true;
+    } catch {
+      message.error(t("chat.mediaCapabilityCheckFailed"));
+      return false;
+    } finally {
+      mediaCapabilityCheckInProgressRef.current = false;
+      setMediaCapabilityChecking(false);
     }
   }
 
@@ -1989,6 +2066,9 @@ export function useChatConversation({
     createNewChat,
     stopGeneration,
     regenerate,
+    mediaCapabilityDependency,
+    mediaCapabilityChecking,
+    continueAfterMediaCapabilityConfiguration,
     retryStreamRecovery,
     updateAssistantMessage,
     openSSE,

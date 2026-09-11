@@ -97,17 +97,17 @@ _MEDIA_CAPABILITY_IDS = frozenset({
 _MEDIA_CAPABILITY_METADATA = {
     'image_generator': {
         'label': '文生图模型',
-        'settings_url': '/settings?section=models',
+        'settings_url': '/settings?section=models&target=image_generator',
         'missing_reason': '当前任务需要先生成基础图，但尚未配置可用的文生图模型。',
     },
     'image_editor': {
         'label': '图片编辑模型',
-        'settings_url': '/settings?section=models',
+        'settings_url': '/settings?section=models&target=image_editor',
         'missing_reason': '当前任务需要修改已有图片，但尚未配置可用的图片编辑模型。',
     },
     'video_generator': {
         'label': '视频生成模型',
-        'settings_url': '/settings?section=models',
+        'settings_url': '/settings?section=models&target=video_generator',
         'missing_reason': '当前任务需要把基础图生成视频，但尚未配置可用的视频生成模型。',
     },
     'ffmpeg': {

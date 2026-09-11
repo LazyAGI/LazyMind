@@ -627,9 +627,13 @@ export function shouldRedirectCustomBaseUrlToOpenAI(
 
 interface ModelProviderPageProps {
   onConfigurationChanged?: () => void | Promise<void>;
+  highlightProviderId?: string;
 }
 
-export default function ModelProviderPage({ onConfigurationChanged }: ModelProviderPageProps) {
+export default function ModelProviderPage({
+  onConfigurationChanged,
+  highlightProviderId,
+}: ModelProviderPageProps) {
   const { t, i18n } = useTranslation();
   const currentLanguage = i18n.resolvedLanguage || i18n.language || "zh-CN";
   const [providerConfigForm] = Form.useForm<ProviderConfigFormValues>();
@@ -665,6 +669,8 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
   const initialProvidersLoadedRef = useRef(false);
   const addedProviderListRef = useRef<AddedProvider[]>([]);
   addedProviderListRef.current = addedProviderList;
+  const highlightedProviderRef = useRef<HTMLElement | null>(null);
+  const focusedProviderHighlightRef = useRef<string | null>(null);
   const localizedFallbacks = useMemo(() => createModelProviderFallbacks(t), [i18n.language, t]);
   const getCapabilityLabel = useCallback((capability: ModelCapability) => t(capabilityLabelKeys[capability]), [t]);
   const configProvider = configModal?.provider || null;
@@ -795,6 +801,48 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
     ),
     [addedProviderList, t]
   );
+
+  useEffect(() => {
+    if (!highlightProviderId) {
+      return;
+    }
+
+    const targetSectionKeys = addedProviderSections
+      .filter(({ provider }) => provider.id === highlightProviderId)
+      .map(({ key }) => key);
+    if (targetSectionKeys.length === 0) {
+      return;
+    }
+
+    setExpandedProviderIds((current) => {
+      if (targetSectionKeys.every((key) => current[key])) {
+        return current;
+      }
+      return targetSectionKeys.reduce<Record<string, boolean>>(
+        (next, key) => ({ ...next, [key]: true }),
+        current
+      );
+    });
+  }, [addedProviderSections, highlightProviderId]);
+
+  useEffect(() => {
+    if (
+      !highlightProviderId ||
+      !highlightedProviderRef.current ||
+      focusedProviderHighlightRef.current === highlightProviderId
+    ) {
+      return;
+    }
+    focusedProviderHighlightRef.current = highlightProviderId;
+    const frame = window.requestAnimationFrame(() => {
+      highlightedProviderRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+      highlightedProviderRef.current?.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [addedProviderSections, highlightProviderId]);
 
   const visibleProviders = [...providerOptions].sort((a, b) => b.name.localeCompare(a.name));
 
@@ -1470,8 +1518,10 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
 
                   return (
                     <article
-                      className={`model-provider-added-card${isExpanded ? " is-expanded" : ""}`}
+                      ref={provider.id === highlightProviderId ? highlightedProviderRef : undefined}
+                      className={`model-provider-added-card${isExpanded ? " is-expanded" : ""}${provider.id === highlightProviderId ? " is-config-highlighted" : ""}`}
                       key={section.key}
+                      tabIndex={provider.id === highlightProviderId ? -1 : undefined}
                     >
                       <div className="model-provider-added-summary">
                         <div className="model-provider-added-brand">

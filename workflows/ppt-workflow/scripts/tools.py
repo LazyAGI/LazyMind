@@ -128,7 +128,7 @@ def check_ppt_workflow_capabilities(capability_requirements: str) -> dict[str, A
         'id': 'image_generator',
         'label': '文生图模型',
         'available': available,
-        'settings_url': '/settings?section=models',
+        'settings_url': '/settings?section=models&target=image_generator',
         'reason': (
             '' if available else
             '已启用 PPT AI 底图，但尚未配置可用的文生图模型。'

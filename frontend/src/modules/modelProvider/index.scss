@@ -153,6 +153,35 @@
   }
 }
 
+@keyframes model-provider-config-highlight {
+  0%, 100% {
+    border-color: #f2bd55;
+    box-shadow: 0 0 0 0 rgb(245 158 11 / 16%);
+  }
+
+  50% {
+    border-color: #d48806;
+    box-shadow: 0 0 0 7px rgb(245 158 11 / 12%);
+  }
+}
+
+.model-provider-default-row.is-config-highlighted,
+.model-provider-setup-state.is-config-highlighted,
+.model-provider-added-card.is-config-highlighted {
+  animation: model-provider-config-highlight 1.4s ease-in-out 3;
+  border-color: #d48806;
+  outline: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .model-provider-default-row.is-config-highlighted,
+  .model-provider-setup-state.is-config-highlighted,
+  .model-provider-added-card.is-config-highlighted {
+    animation: none;
+    background: #fff8e6;
+  }
+}
+
 .model-provider-default-meta {
   width: 100%;
   min-width: 0;

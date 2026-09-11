@@ -27,8 +27,10 @@ def test_video_generator_prompt_names_request_selected_model():
     ):
         appendix = tool_registry._video_generator_prompt_appendix()
 
-    assert 'qwen' in appendix['tool_policy']
-    assert 'wan3.0-video' in appendix['tool_policy']
+    tool_policy = appendix['tool_policy']
+    rendered_policy = '\n'.join(tool_policy) if isinstance(tool_policy, tuple) else tool_policy
+    assert 'qwen' in rendered_policy
+    assert 'wan3.0-video' in rendered_policy
     assert appendix['output_contract'] == tool_registry.VIDEO_MARKDOWN_OUTPUT_APPENDIX['output_contract']
 
 
