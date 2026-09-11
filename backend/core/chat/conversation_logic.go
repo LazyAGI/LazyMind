@@ -2088,6 +2088,33 @@ func publishRuntimeChunk(
 	}
 }
 
+func publishCapabilityDependency(
+	reqCtx, storeCtx context.Context,
+	w http.ResponseWriter,
+	flusher http.Flusher,
+	stateStore state.Store,
+	convID, historyID string,
+	seq int,
+	dependency map[string]any,
+	writeClient bool,
+) {
+	if dependency == nil {
+		return
+	}
+	chunk := &ChatChunkResponse{
+		ConversationID:       convID,
+		Seq:                  int32(seq),
+		HistoryID:            historyID,
+		CapabilityDependency: dependency,
+	}
+	if writeClient && reqCtx.Err() == nil {
+		writeSSEChunk(w, flusher, chunk)
+	}
+	if stateStore != nil {
+		_ = appendChatChunk(storeCtx, stateStore, convID, historyID, chunk)
+	}
+}
+
 func streamSingleAnswer(
 	chatCtx, reqCtx context.Context,
 	w http.ResponseWriter,
@@ -2256,6 +2283,13 @@ func streamSingleAnswer(
 			persistAndPublishConversationArtifact(
 				chatCtx, reqCtx, w, flusher, db, stateStore, reqBody,
 				convID, historyID, seq, d.ArtifactCreated,
+			)
+			continue
+		}
+		if d.CapabilityDependency != nil {
+			publishCapabilityDependency(
+				reqCtx, chatCtx, w, flusher, stateStore, convID, historyID, seq,
+				d.CapabilityDependency, true,
 			)
 			continue
 		}
@@ -2871,6 +2905,13 @@ func streamDualAnswer(
 				)
 				continue
 			}
+			if d.CapabilityDependency != nil {
+				publishCapabilityDependency(
+					reqCtx, chatCtx, w, flusher, stateStore, convID, historyID, seq,
+					d.CapabilityDependency, true,
+				)
+				continue
+			}
 			if next := nonNegativeToolCallTurns(d.ToolCallTurns); next > primaryToolCallTurns {
 				primaryToolCallTurns = next
 			}
@@ -2905,6 +2946,13 @@ func streamDualAnswer(
 				persistAndPublishConversationArtifact(
 					chatCtx, reqCtx, w, flusher, db, stateStore, reqBody,
 					convID, secondaryHistoryID, seq, d.ArtifactCreated,
+				)
+				continue
+			}
+			if d.CapabilityDependency != nil {
+				publishCapabilityDependency(
+					reqCtx, chatCtx, w, flusher, stateStore, convID, secondaryHistoryID, seq,
+					d.CapabilityDependency, true,
 				)
 				continue
 			}
@@ -2948,6 +2996,13 @@ func streamDualAnswer(
 							persistAndPublishConversationArtifact(
 								bg, reqCtx, w, flusher, db, stateStore, reqBody,
 								convID, historyID, seq, d.ArtifactCreated,
+							)
+							continue
+						}
+						if d.CapabilityDependency != nil {
+							publishCapabilityDependency(
+								reqCtx, bg, w, flusher, stateStore, convID, historyID, seq,
+								d.CapabilityDependency, false,
 							)
 							continue
 						}
@@ -3009,6 +3064,13 @@ func streamDualAnswer(
 							persistAndPublishConversationArtifact(
 								bg, reqCtx, w, flusher, db, stateStore, reqBody,
 								convID, secondaryHistoryID, seq, d.ArtifactCreated,
+							)
+							continue
+						}
+						if d.CapabilityDependency != nil {
+							publishCapabilityDependency(
+								reqCtx, bg, w, flusher, stateStore, convID, secondaryHistoryID, seq,
+								d.CapabilityDependency, false,
 							)
 							continue
 						}

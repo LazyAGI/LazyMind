@@ -21,7 +21,6 @@ import (
 type catalogModel struct {
 	Name                   string   `yaml:"name"`
 	Type                   string   `yaml:"type"`
-	MaxInputTokens         *string  `yaml:"max_input_tokens"`
 	FreeAutoSelectPriority int      `yaml:"free_auto_select_priority"`
 	FreeAutoSelectBaseURLs []string `yaml:"free_auto_select_base_urls"`
 }
@@ -136,15 +135,9 @@ func upsertDefaultModel(tx *gorm.DB, now time.Time, providerID, providerName str
 	if name == "" || modelType == "" {
 		return errors.New("model name and type are required")
 	}
-	if item.MaxInputTokens != nil {
-		if modelType != "llm" && modelType != "vlm" && modelType != "embed" {
-			return errors.New("model max_input_tokens is only supported for llm, vlm, or embed models")
-		}
-		maxInputTokens := strings.ToUpper(strings.TrimSpace(*item.MaxInputTokens))
-		if !maxInputTokensPattern.MatchString(maxInputTokens) {
-			return errors.New("model max_input_tokens must be a positive integer or use a K or M suffix, for example 512, 128K, or 1M")
-		}
-		item.MaxInputTokens = &maxInputTokens
+	maxInputTokens, err := resolveSeededMaxInputTokens(modelType, name)
+	if err != nil {
+		return err
 	}
 	if item.FreeAutoSelectPriority < 0 {
 		return errors.New("model free_auto_select_priority must not be negative")
@@ -166,7 +159,7 @@ func upsertDefaultModel(tx *gorm.DB, now time.Time, providerID, providerName str
 			ProviderName:           providerName,
 			Name:                   name,
 			ModelType:              modelType,
-			MaxInputTokens:         item.MaxInputTokens,
+			MaxInputTokens:         maxInputTokens,
 			FreeAutoSelectPriority: item.FreeAutoSelectPriority,
 			FreeAutoSelectBaseURLs: freeAutoSelectBaseURLs,
 			CreatedAt:              now,
@@ -176,7 +169,7 @@ func upsertDefaultModel(tx *gorm.DB, now time.Time, providerID, providerName str
 			return err
 		}
 		return syncDefaultModelToUserGroups(
-			tx, now, providerID, providerName, name, modelType, item.MaxInputTokens,
+			tx, now, providerID, providerName, name, modelType, maxInputTokens,
 			item.FreeAutoSelectPriority, freeAutoSelectBaseURLs,
 		)
 	}
@@ -189,7 +182,7 @@ func upsertDefaultModel(tx *gorm.DB, now time.Time, providerID, providerName str
 		Updates(map[string]any{
 			"provider_name":              providerName,
 			"model_type":                 modelType,
-			"max_input_tokens":           item.MaxInputTokens,
+			"max_input_tokens":           maxInputTokens,
 			"free_auto_select_priority":  item.FreeAutoSelectPriority,
 			"free_auto_select_base_urls": freeAutoSelectBaseURLs,
 			"updated_at":                 now,
@@ -198,7 +191,7 @@ func upsertDefaultModel(tx *gorm.DB, now time.Time, providerID, providerName str
 		return err
 	}
 	return syncDefaultModelToUserGroups(
-		tx, now, providerID, providerName, name, modelType, item.MaxInputTokens,
+		tx, now, providerID, providerName, name, modelType, maxInputTokens,
 		item.FreeAutoSelectPriority, freeAutoSelectBaseURLs,
 	)
 }
@@ -244,10 +237,12 @@ func syncDefaultModelToUserGroups(
 
 	updates := map[string]any{
 		"model_type":                 modelType,
-		"max_input_tokens":           maxInputTokens,
 		"free_auto_select_priority":  freeAutoSelectPriority,
 		"free_auto_select_base_urls": freeAutoSelectBaseURLs,
 		"updated_at":                 now,
+	}
+	if maxInputTokens != nil {
+		updates["max_input_tokens"] = *maxInputTokens
 	}
 	if err := tx.Model(&orm.UserModelProviderGroupModel{}).
 		Where("is_default = ? AND name = ? AND user_model_provider_id IN (?) AND deleted_at IS NULL", true, modelName, providerIDs).

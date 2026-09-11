@@ -89,6 +89,7 @@ vi.mock("./components/ChatMessageContent", () => ({ default: () => null }));
 vi.mock("./components/ScrollToBottomButton", () => ({ default: () => null }));
 vi.mock("./components/ConversationTrail", () => ({ default: () => null }));
 vi.mock("./components/StreamRecoveryBanner", () => ({ default: () => null }));
+vi.mock("../CapabilityConfigCard", () => ({ default: () => null }));
 
 vi.mock("./hooks/useChatConversation", () => ({
   useChatConversation: (options: any) => {
@@ -109,6 +110,9 @@ vi.mock("./hooks/useChatConversation", () => ({
     openResumeSSE: vi.fn(),
     openSSE: vi.fn(),
     regenerate: mocks.regenerate,
+    mediaCapabilityDependency: null,
+    mediaCapabilityChecking: false,
+    continueAfterMediaCapabilityConfiguration: vi.fn(),
     replaceMessageList: vi.fn(),
     retryStreamRecovery: vi.fn(),
     runtimeWaiting: false,

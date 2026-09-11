@@ -153,6 +153,7 @@ type LazyChatData struct {
 	IntentUpdated            *IntentUpdatedEvent            `json:"intent_updated,omitempty"`
 	WorkflowPreflightUpdated *WorkflowPreflightUpdatedEvent `json:"workflow_preflight_updated,omitempty"`
 	ModelContextUpdated      *ModelContextUpdatedEvent      `json:"model_context_updated,omitempty"`
+	CapabilityDependency     map[string]any                 `json:"capability_dependency,omitempty"`
 	Heartbeat                bool                           `json:"heartbeat,omitempty"`
 	ToolCallTurns            int64                          `json:"tool_call_turns"`
 	RuntimeEvent             *ChatRuntimeEvent              `json:"runtime_event,omitempty"`
@@ -394,6 +395,7 @@ type UpstreamStreamChunk struct {
 	IntentUpdated            *IntentUpdatedEvent            `json:"intent_updated,omitempty"`
 	WorkflowPreflightUpdated *WorkflowPreflightUpdatedEvent `json:"workflow_preflight_updated,omitempty"`
 	ModelContextUpdated      *ModelContextUpdatedEvent      `json:"model_context_updated,omitempty"`
+	CapabilityDependency     map[string]any                 `json:"capability_dependency,omitempty"`
 	Heartbeat                bool                           `json:"heartbeat,omitempty"`
 	ToolCallTurns            int64                          `json:"tool_call_turns"`
 	ExternalEventSequence    int64                          `json:"external_event_sequence,omitempty"`
@@ -981,6 +983,7 @@ func upstreamStreamChunkFromData(data LazyChatData) UpstreamStreamChunk {
 		IntentUpdated:            data.IntentUpdated,
 		WorkflowPreflightUpdated: data.WorkflowPreflightUpdated,
 		ModelContextUpdated:      data.ModelContextUpdated,
+		CapabilityDependency:     data.CapabilityDependency,
 		Heartbeat:                data.Heartbeat,
 		ToolCallTurns:            data.ToolCallTurns,
 		RuntimeEvent:             data.RuntimeEvent,

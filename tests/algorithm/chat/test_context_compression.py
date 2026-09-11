@@ -38,8 +38,8 @@ def _projected(result):
 
 
 def test_parse_token_limit_supports_k_m_suffixes() -> None:
-    assert parse_token_limit('128K') == 128_000
-    assert parse_token_limit('1M') == 1_000_000
+    assert parse_token_limit('128K') == 131_072
+    assert parse_token_limit('1M') == 1_048_576
     assert parse_token_limit(4096) == 4096
     assert parse_token_limit('bad') is None
 
@@ -71,11 +71,15 @@ def test_build_context_budget_caps_reserved_on_small_windows() -> None:
 
 
 def test_resolve_max_input_tokens_reads_llm_config() -> None:
-    assert resolve_max_input_tokens(llm_config={'llm': {'max_input_tokens': '32K'}}) == 32_000
+    assert resolve_max_input_tokens(llm_config={'llm': {'max_input_tokens': '32K'}}) == 32_768
+
+
+def test_resolve_max_input_tokens_prefers_catalog() -> None:
+    assert resolve_max_input_tokens(llm_config={'llm': {'max_input_tokens': '128K'}}) == 131_072
 
 
 def test_resolve_max_input_tokens_explicit_arg_beats_catalog() -> None:
-    assert resolve_max_input_tokens('8K', llm_config={'llm': {'max_input_tokens': '128K'}}) == 8_000
+    assert resolve_max_input_tokens('8K', llm_config={'llm': {'max_input_tokens': '128K'}}) == 8_192
 
 
 def test_resolve_max_input_tokens_uses_64k_fallback() -> None:
@@ -85,6 +89,10 @@ def test_resolve_max_input_tokens_uses_64k_fallback() -> None:
         budget = build_context_budget(llm_config={'llm': {'max_input_tokens': None}})
     assert budget.max_input_tokens == 64_000
     assert budget.source == 'fallback'
+
+
+def test_resolve_max_input_tokens_defaults_to_128k() -> None:
+    assert resolve_max_input_tokens(llm_config={'llm': {'max_input_tokens': None}}) == 131_072
 
 
 def test_enrich_role_types_preserves_catalog_window(monkeypatch) -> None:

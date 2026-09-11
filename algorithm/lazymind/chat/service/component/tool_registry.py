@@ -94,6 +94,27 @@ VIDEO_MARKDOWN_OUTPUT_APPENDIX: SystemPromptAppendix = {
     ),
 }
 
+MEDIA_GENERATION_NO_FALLBACK_POLICY = (
+    '# Explicit media generation requests (mandatory, no fallback)\n'
+    'When the user explicitly requests an image, an image edit, or a video as the final '
+    'deliverable, you MUST call the corresponding `image_generator`, `image_editor`, or '
+    '`video_generator` tool. Treat that tool itself as the authoritative availability check; '
+    'do not use skill discovery, workspace inspection, web search, or another media tool to '
+    'guess whether the requested capability is configured. For a text-only video request, '
+    'when the configured video provider or model is `unknown`, call `video_generator` directly '
+    'before calling any other tool.\n'
+    'If the requested media tool returns `MEDIA_CAPABILITY_DEPENDENCY_MISSING`, stop immediately. '
+    'Do not call another tool, do not call `ask_user`, and do not replace the requested result '
+    'with still images, keyframes, a GIF, a script, search results, links, or any other fallback. '
+    'The host application will show the configuration card. Resume only after the user completes '
+    'configuration and explicitly chooses Continue or retries the task. Only offer a different '
+    'deliverable when the user explicitly asks for that alternative in a later turn.'
+)
+IMAGE_GENERATION_PROMPT_APPENDIX: SystemPromptAppendix = {
+    'tool_policy': MEDIA_GENERATION_NO_FALLBACK_POLICY,
+    **IMAGE_MARKDOWN_OUTPUT_APPENDIX,
+}
+
 
 def _video_generator_prompt_appendix() -> SystemPromptAppendix:
     identity = get_model_role_runtime_identity('video_generator')
@@ -101,13 +122,16 @@ def _video_generator_prompt_appendix() -> SystemPromptAppendix:
     model = identity.get('model') or 'unknown'
     return {
         'tool_policy': (
-            '# Configured video generator (authoritative for this request)\n'
-            f'Provider: `{source}`; model: `{model}`. Apply the capability matrix in the '
-            '`video_generator` tool description before choosing text-only, first-frame, '
-            'first+last-frame, or ordinary-reference inputs. If either value is `unknown`, '
-            'do not assume advanced image-conditioning support. Never repeat an identical '
-            'call after an unsupported-capability error; explain which configured model and '
-            'requested input mode are incompatible.'
+            MEDIA_GENERATION_NO_FALLBACK_POLICY,
+            (
+                '# Configured video generator (authoritative for this request)\n'
+                f'Provider: `{source}`; model: `{model}`. Apply the capability matrix in the '
+                '`video_generator` tool description before choosing text-only, first-frame, '
+                'first+last-frame, or ordinary-reference inputs. If either value is `unknown`, '
+                'do not assume advanced image-conditioning support. Never repeat an identical '
+                'call after an unsupported-capability error; explain which configured model and '
+                'requested input mode are incompatible.'
+            ),
         ),
         **VIDEO_MARKDOWN_OUTPUT_APPENDIX,
     }
@@ -686,7 +710,7 @@ DEFAULT_TOOLS: list[ToolConfig] = [
         model_role='image_generator',
         capability_id='image_generation',
         input_schema={'prompt': 'string'}, output_schema={'image': 'file'}, required_config=['image_generator_model'],
-        appendix_system_prompt=IMAGE_MARKDOWN_OUTPUT_APPENDIX,
+        appendix_system_prompt=IMAGE_GENERATION_PROMPT_APPENDIX,
     ),
     ToolConfig(
         name='image_editor',
@@ -697,7 +721,7 @@ DEFAULT_TOOLS: list[ToolConfig] = [
         description_en='Edit reference images using text instructions.',
         model_role='image_editor',
         capability_id='image_editing',
-        appendix_system_prompt=IMAGE_MARKDOWN_OUTPUT_APPENDIX,
+        appendix_system_prompt=IMAGE_GENERATION_PROMPT_APPENDIX,
     ),
     ToolConfig(
         name='video_generator',
@@ -931,23 +955,80 @@ _CAPABILITY_ALLOW_CUES = re.compile(
 )
 _TOOL_CAPABILITY_TERMS: dict[str, tuple[str, ...]] = {
     'kb': ('知识库', '资料库', 'knowledge base'),
+    'image_generator': (
+        '生成图片', '生成一张', '生成照片', '画一张', '绘图', '文生图',
+        'generate an image', 'generate a photo', 'create an image', 'draw a',
+    ),
+    'image_editor': (
+        '编辑图片', '修改图片', '改图', '图片编辑',
+        'edit an image', 'edit the image', 'modify the image',
+    ),
+    'video_generator': (
+        '生成视频', '文生视频', '做一个视频',
+        'generate a video', 'create a video',
+    ),
+}
+_TOOL_CAPABILITY_REQUEST_PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {
+    'video_generator': (
+        re.compile(
+            r'(?:生成|制作|创建|产出|帮我(?:生成|制作|创建|做)|'
+            r'给我(?:生成|制作|创建|做)|做一个|做一段).{0,48}(?:视频|短片|动画)',
+            re.I,
+        ),
+        re.compile(
+            r'\b(?:generate|create|make|produce)\b.{0,64}'
+            r'\b(?:video|clip|animation)\b',
+            re.I,
+        ),
+    ),
 }
 
+_ON_DEMAND_MODEL_TOOLS = frozenset({
+    'image_generator',
+    'image_editor',
+    'video_generator',
+})
 
-def _capability_is_denied(query: str, terms: tuple[str, ...]) -> bool:
+
+def _capability_matches(
+    query: str,
+    terms: tuple[str, ...],
+    patterns: tuple[re.Pattern[str], ...] = (),
+) -> list[tuple[int, int]]:
+    lowered = query.lower()
+    matches = [
+        match.span()
+        for term in terms
+        for match in re.finditer(re.escape(term.lower()), lowered)
+    ]
+    matches.extend(match.span() for pattern in patterns for match in pattern.finditer(query))
+    return matches
+
+
+def _capability_is_mentioned(
+    query: str,
+    terms: tuple[str, ...],
+    patterns: tuple[re.Pattern[str], ...] = (),
+) -> bool:
+    return bool(_capability_matches(query, terms, patterns))
+
+
+def _capability_is_denied(
+    query: str,
+    terms: tuple[str, ...],
+    patterns: tuple[re.Pattern[str], ...] = (),
+) -> bool:
     """Return true only when every locally qualified occurrence is denied."""
     decisions = []
-    lowered = query.lower()
-    for term in terms:
-        for match in re.finditer(re.escape(term.lower()), lowered):
-            prefix = query[max(0, match.start() - 40):match.start()]
-            prefix = re.split(r'[，,。；;！？!?\n]|但是|不过|然而|但', prefix)[-1]
-            denies = list(_CAPABILITY_DENY_CUES.finditer(prefix))
-            allows = list(_CAPABILITY_ALLOW_CUES.finditer(prefix))
-            if denies or allows:
-                decisions.append(
-                    bool(denies) and (not allows or denies[-1].end() >= allows[-1].end())
-                )
+    for start, _end in _capability_matches(query, terms, patterns):
+        prefix = query[max(0, start - 40):start]
+        prefix = re.split(r'[，,。；;！？!?\n]|但是|不过|然而|但', prefix)[-1]
+        denies = list(_CAPABILITY_DENY_CUES.finditer(prefix))
+        allows = list(_CAPABILITY_ALLOW_CUES.finditer(prefix))
+        if denies or allows:
+            decisions.append(
+                bool(denies) and (not allows or denies[-1].end() >= allows[-1].end())
+            )
     return bool(decisions) and all(decisions)
 
 
@@ -961,10 +1042,16 @@ def filter_tools(
         if available_tools is not None and cfg.name not in available_tools:
             continue
         terms = _TOOL_CAPABILITY_TERMS.get(cfg.name)
-        if terms and user_query and _capability_is_denied(user_query, terms):
+        patterns = _TOOL_CAPABILITY_REQUEST_PATTERNS.get(cfg.name, ())
+        if terms and user_query and _capability_is_denied(user_query, terms, patterns):
             continue
         if not tool_is_active(cfg):
-            continue
+            if not (
+                cfg.name in _ON_DEMAND_MODEL_TOOLS
+                and terms
+                and _capability_is_mentioned(user_query, terms, patterns)
+            ):
+                continue
         result.append(cfg)
     return result
 

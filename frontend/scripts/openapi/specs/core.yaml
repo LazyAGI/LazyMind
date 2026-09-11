@@ -5538,6 +5538,9 @@ components:
             type: object
         addModelProviderGroupModelOpenAPIRequest:
             properties:
+                max_input_tokens:
+                    description: Optional override. When omitted, LLM/VLM windows are resolved from config/model_context_windows.yaml by model name and unknown names fall back to 128K.
+                    type: string
                 model_type:
                     type: string
                 name:
@@ -5556,6 +5559,10 @@ components:
                     type: string
                 is_default:
                     type: boolean
+                max_input_tokens:
+                    description: Stored LLM input context window, for example 512, 128K, or 1M
+                    nullable: true
+                    type: string
                 model_type:
                     type: string
                 name:
@@ -6888,6 +6895,35 @@ components:
                         $ref: '#/components/schemas/listModelProviderGroupsOpenAPIItem'
                     type: array
             type: object
+        listRemoteGroupModelsOpenAPIItem:
+            properties:
+                added:
+                    type: boolean
+                id:
+                    type: string
+                max_input_tokens:
+                    type: string
+                model_type:
+                    type: string
+                name:
+                    type: string
+            required:
+                - added
+                - id
+                - model_type
+                - name
+            type: object
+        listRemoteGroupModelsOpenAPIResponse:
+            properties:
+                models:
+                    items:
+                        $ref: '#/components/schemas/listRemoteGroupModelsOpenAPIItem'
+                    type: array
+                url:
+                    type: string
+            required:
+                - url
+            type: object
         listSelectedModelsOpenAPIResponse:
             properties:
                 selections:
@@ -7308,6 +7344,9 @@ components:
                     type: string
                 group_name:
                     type: string
+                is_default:
+                    description: True when the selection was copied from catalog YAML
+                    type: boolean
                 is_editable:
                     description: Whether the selected model supports image editing
                     type: boolean
@@ -7330,6 +7369,7 @@ components:
             required:
                 - base_url
                 - group_name
+                - is_default
                 - is_editable
                 - model_id
                 - model_key
@@ -8680,6 +8720,14 @@ components:
             required:
                 - configured
             type: object
+        updateModelProviderGroupModelOpenAPIRequest:
+            properties:
+                max_input_tokens:
+                    description: LLM input context window, for example 512, 128K, or 1M
+                    type: string
+            required:
+                - max_input_tokens
+            type: object
         updateModelProviderGroupOpenAPIRequest:
             properties:
                 api_key:
@@ -8909,12 +8957,6 @@ paths:
                 "200":
                     description: OK
             summary: POST /add_files_to_group
-    /api/core/admin:
-        get:
-            responses:
-                "200":
-                    description: OK
-            summary: GET /admin
     /api/core/admin/skill-market:
         post:
             requestBody:
@@ -13661,18 +13703,6 @@ paths:
                 "200":
                     description: OK
             summary: POST /external-chat/runs/{run_id}:heartbeat
-    /api/core/health:
-        get:
-            responses:
-                "200":
-                    description: OK
-            summary: GET /health
-    /api/core/hello:
-        get:
-            responses:
-                "200":
-                    description: OK
-            summary: GET /hello
     /api/core/inner/word_group:apply:
         post:
             requestBody:
@@ -15237,7 +15267,7 @@ paths:
             tags:
                 - model_providers
         post:
-            description: Creates a user_model_provider_group_models row with is_default false (custom model name and model_type). Name must be unique within the group among active rows. provider_name and base_url are taken from the user provider and group. Response group_name is user_model_provider_groups.name (not stored on the model row).
+            description: Creates a user_model_provider_group_models row with is_default false (custom model name and model_type). Name must be unique within the group among active rows. For llm and vlm, max_input_tokens from the request is stored when provided; otherwise it is resolved from config/model_context_windows.yaml by model name and unknown names fall back to 128K. provider_name and base_url are taken from the user provider and group. Response group_name is user_model_provider_groups.name (not stored on the model row).
             parameters:
                 - in: path
                   name: model_provider_id
@@ -15292,6 +15322,64 @@ paths:
                                 $ref: '#/components/schemas/deleteModelProviderGroupModelOpenAPIResponse'
                     description: Deleted group model
             summary: Delete model under a connection group
+            tags:
+                - model_providers
+        patch:
+            description: Updates max_input_tokens for a custom (non-catalog) LLM. The field is required. Values use a positive integer or K/M suffix such as 512, 128K, or 1M and must be at most 16 characters. Catalog models keep the YAML value and cannot be patched.
+            parameters:
+                - in: path
+                  name: model_provider_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: group_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: model_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/updateModelProviderGroupModelOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/listModelProviderGroupModelsOpenAPIItem'
+                    description: Updated group model
+            summary: Update a connection group model
+            tags:
+                - model_providers
+    /api/core/model_providers/{model_provider_id}/groups/{group_id}/remote_models:
+        get:
+            description: Calls the group's OpenAI-compatible /v1/models endpoint using the stored Base URL and API key. Each item includes an inferred model_type and whether it is already added to the group.
+            parameters:
+                - in: path
+                  name: model_provider_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: group_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/listRemoteGroupModelsOpenAPIResponse'
+                    description: Remote models list
+            summary: List models advertised by a connection group
             tags:
                 - model_providers
     /api/core/model_providers/{model_provider_id}/groups/{group_id}:check:
@@ -19239,3 +19327,4 @@ paths:
 servers:
     - description: same origin; see paths with /api/core prefix
       url: /
+

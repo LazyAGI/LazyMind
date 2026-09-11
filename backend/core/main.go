@@ -454,6 +454,7 @@ func run(ctx context.Context) error {
 	if err := modelprovider.MigrateLegacyAPIKeys(db.DB); err != nil {
 		return &startupError{msg: "migrate model provider credentials", err: err}
 	}
+	modelprovider.MustLoadContextWindows(filepath.Join(".", "config", "model_context_windows.yaml"))
 	catalogPath := filepath.Join(".", "config", "model_catalog.yaml")
 	modelprovider.MustSeedModelCatalog(ctx, db.DB, catalogPath)
 	datasourceCatalogPath := filepath.Join(".", "config", "datasource_catalog.yaml")

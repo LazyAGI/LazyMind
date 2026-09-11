@@ -206,5 +206,5 @@ def test_context_report_uses_final_agent_history_description() -> None:
 
 def test_attach_window_budget_uses_resolved_max_input_tokens() -> None:
     payload = attach_window_budget({'estimated_tokens': 6_400}, llm_config={'llm': {'max_input_tokens': '128K'}})
-    assert payload['max_input_tokens'] == 128_000
-    assert abs(payload['estimated_ratio'] - 0.05) < 1e-9
+    assert payload['max_input_tokens'] == 131_072
+    assert abs(payload['estimated_ratio'] - (6_400 / 131_072)) < 1e-9

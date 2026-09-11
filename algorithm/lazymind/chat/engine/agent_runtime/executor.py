@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import types
 import uuid
 from typing import Any, AsyncIterator, Optional, Tuple
@@ -13,6 +14,11 @@ from lazymind.config import config as _cfg
 
 from .context_estimator import estimate_non_history_tokens
 from .models import AgentRole, AgentRunPlan
+from .model_availability import (
+    is_model_failure_event,
+    refine_unavailable_model_event,
+    refine_unavailable_model_terminal,
+)
 from .pruner import estimate_history_tokens, make_history_compactor
 from .telemetry import (
     append_event,
@@ -237,10 +243,18 @@ class AgentExecutor:
             )
         helper = _sh.StreamCallHelper(agent, init_sid=False)
         kwargs = {'llm_chat_history': history} if history is not None else {}
+        execution_options = getattr(plan, 'execution_options', None)
+        llm_config = getattr(execution_options, 'llm_config', None)
         finished_model_calls: set[str] = set()
         failed = False
         try:
             async for item in helper.astream(plan.prompt.current_input, **kwargs):
+                if is_model_failure_event(item):
+                    item = await asyncio.to_thread(
+                        refine_unavailable_model_event,
+                        item,
+                        llm_config,
+                    )
                 self._record_finished_model_call(item, finished_model_calls)
                 yield 'event', item
             try:
@@ -250,6 +264,11 @@ class AgentExecutor:
                 terminal = self._find_model_terminal(exc)
                 model_call_id = str((terminal or {}).get('model_call_id') or '')
                 if terminal and model_call_id not in finished_model_calls:
+                    terminal = await asyncio.to_thread(
+                        refine_unavailable_model_terminal,
+                        terminal,
+                        llm_config,
+                    )
                     yield 'event', {
                         'tag': 'runtime_event',
                         'runtime_event': {

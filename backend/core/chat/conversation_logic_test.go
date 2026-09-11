@@ -1914,6 +1914,9 @@ func TestBuildLLMConfigFromSelectedModels(t *testing.T) {
 	if chatCfg["source"] != "openai" || chatCfg["model"] != "gpt-4o" || chatCfg["api_key"] != "sk-from-db" {
 		t.Fatalf("unexpected llm config: %#v", chatCfg)
 	}
+	if chatCfg["max_input_tokens"] != "128K" {
+		t.Fatalf("llm max_input_tokens = %#v, want 128K fallback", chatCfg["max_input_tokens"])
+	}
 	if evoCfg["model"] != "gpt-4o-mini" {
 		t.Fatalf("unexpected evo_llm config: %#v", evoCfg)
 	}
