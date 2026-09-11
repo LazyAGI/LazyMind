@@ -364,6 +364,86 @@ def _spill_filename(tool_name: str, content: str) -> str:
     return f'{safe or "tool"}_{digest}.txt'
 
 
+def _is_browser_tool(tool_name: str) -> bool:
+    normalized = str(tool_name or '').strip().lower()
+    return normalized.startswith('browser_') or normalized.startswith('browser.')
+
+
+def _browser_json_envelope(text: str) -> tuple[str, Any, str] | None:
+    """Parse the JSON object embedded in an MCP browser text response."""
+    if not text:
+        return None
+    start = text.find('{')
+    if start < 0:
+        return None
+    try:
+        payload, consumed = json.JSONDecoder().raw_decode(text[start:])
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    return text[:start], payload, text[start + consumed:]
+
+
+def _format_browser_spill_text(tool_name: str, text: str) -> str:
+    """Make browser snapshots searchable without changing their information."""
+    if not _is_browser_tool(tool_name):
+        return text
+    envelope = _browser_json_envelope(text)
+    if envelope is None:
+        return text
+    prefix, payload, suffix = envelope
+
+    def render(value: Any, depth: int = 0) -> str:
+        indent = '  ' * depth
+        if isinstance(value, dict):
+            entries = [
+                f'{indent}  {json.dumps(key)}: {render(item, depth + 1)}'
+                for key, item in value.items()
+            ]
+            return '{\n' + ',\n'.join(entries) + '\n' + indent + '}'
+        if isinstance(value, list):
+            # Keep each AX element (name + ref + role) on one searchable line.
+            return '[\n' + ',\n'.join(
+                indent + '  ' + json.dumps(item, ensure_ascii=False, separators=(',', ':'), default=str)
+                for item in value
+            ) + '\n' + indent + ']'
+        return json.dumps(value, ensure_ascii=False, default=str)
+
+    rendered = render(payload)
+    return f'{prefix}{rendered}{suffix}'
+
+
+def _browser_spill_metadata(tool_name: str, content: Any) -> list[str]:
+    if not _is_browser_tool(tool_name):
+        return []
+    envelope = _browser_json_envelope(_as_text(content))
+    if envelope is None:
+        return []
+    _prefix, payload, _suffix = envelope
+    result = payload.get('result') if isinstance(payload.get('result'), dict) else payload
+    if not isinstance(result, dict):
+        return []
+    lines = ['Browser result metadata:']
+    for key in ('session_id', 'revision', 'url', 'title'):
+        value = result.get(key)
+        if value not in (None, ''):
+            lines.append(f'- {key}: {value}')
+    elements = result.get('elements')
+    if isinstance(elements, list):
+        lines.append(f'- element_count: {len(elements)}')
+    for key in ('scroll', 'limitations'):
+        if result.get(key):
+            lines.append(f'- {key}: {json.dumps(result[key], ensure_ascii=False, default=str)}')
+    page_state = result.get('page_state')
+    if isinstance(page_state, dict):
+        compact_state = json.dumps(
+            page_state, ensure_ascii=False, separators=(',', ':'), default=str,
+        )
+        lines.append(f'- page_state: {compact_state}')
+    return lines if len(lines) > 1 else []
+
+
 def _spill_text_and_name(
     workspace: str,
     tool_name: str,
@@ -388,6 +468,7 @@ def _spill_text_and_name(
                 full = ''
             if full:
                 return full, f'{file_id}.txt'
+    text = _format_browser_spill_text(tool_name, text)
     return text, _spill_filename(tool_name, text)
 
 
@@ -432,15 +513,19 @@ def format_spilled_tool_notice(
     size_bytes: int,
 ) -> str:
     size_kb = size_bytes / 1024
-    return '\n'.join([
+    lines = [
         '[Large tool result offloaded to workspace]',
         f'Tool: {tool_name or "tool"}',
         f'File path (relative to workspace): {rel_path}',
         f'Size: {size_kb:.1f} KB',
         'Use read_file on this path if you need more than the excerpt below.',
+    ]
+    lines.extend(_browser_spill_metadata(tool_name, content))
+    lines.extend([
         'Excerpt:',
         _head_tail(_as_text(content), head=500, tail=300),
     ])
+    return '\n'.join(lines)
 
 
 def compact_or_spill_tool_result(

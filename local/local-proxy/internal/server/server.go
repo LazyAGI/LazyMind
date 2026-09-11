@@ -62,13 +62,21 @@ func (h *apiProxyHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	if _, authErr := h.rbac.AuthorizeAndInjectIdentity(req.Context(), req); authErr != nil {
-		payload := authErr.Body()
-		if len(payload) == 0 {
-			payload = map[string]string{"error": authErr.Error()}
+	if match.Route.Public {
+		// Never forward caller-supplied identity across an unauthenticated route.
+		req.Header.Del("X-User-Id")
+		req.Header.Del("X-User-Name")
+		req.Header.Del("X-Tenant-Id")
+		req.Header.Del("X-User-Role")
+	} else {
+		if _, authErr := h.rbac.AuthorizeAndInjectIdentity(req.Context(), req); authErr != nil {
+			payload := authErr.Body()
+			if len(payload) == 0 {
+				payload = map[string]string{"error": authErr.Error()}
+			}
+			writeJSON(w, authErr.Status, payload)
+			return
 		}
-		writeJSON(w, authErr.Status, payload)
-		return
 	}
 
 	target, err := url.Parse(match.Upstream)

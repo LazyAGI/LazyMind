@@ -8,6 +8,7 @@
   "type": "commonjs",
   "scripts": {
     "start": "electron .",
+    "dev": "node scripts/dev-runner.js",
     "pack:mac:arm64": "electron-builder --config electron-builder.config.cjs --mac --arm64 --dir",
     "dist:mac:arm64": "electron-builder --config electron-builder.config.cjs --mac dmg --arm64 --publish never",
     "dist:mac:arm64:prepackaged": "electron-builder --config electron-builder.config.cjs --mac dmg --arm64 --prepackaged ../dist/mac-arm64 --publish never",

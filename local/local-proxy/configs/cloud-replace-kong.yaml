@@ -55,6 +55,13 @@ routes:
     enabled: true
     optional: true
     healthPath: "/healthz"
+  - name: "browser-extension-route"
+    prefix: "/api/browser/v1"
+    upstream: "http://127.0.0.1:${LAZYMIND_LOCAL_PROXY_CORE_HOST_PORT}/browser/extension"
+    stripPath: true
+    public: true
+    enabled: true
+    optional: false
   - name: "core-route"
     prefix: "/api/core"
     upstream: "http://127.0.0.1:${LAZYMIND_LOCAL_PROXY_CORE_HOST_PORT}"

@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>LazyMind Browser</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <h1>LazyMind Browser</h1>
+          <p><span id="browserName">Chromium</span> · 当前页只读 · 受管页面可控</p>
+        </div>
+        <span id="state" class="state">加载中</span>
+      </header>
+
+      <label for="gateway">LazyMind 地址</label>
+      <div class="row">
+        <input id="gateway" type="url" placeholder="http://127.0.0.1:8090">
+        <button id="saveGateway" class="secondary">保存</button>
+      </div>
+
+      <section id="pairing">
+        <label for="pairingCode">配对码</label>
+        <div class="row">
+          <input id="pairingCode" autocomplete="one-time-code" placeholder="ABCD-EFGH">
+          <button id="pair">配对</button>
+        </div>
+        <p class="hint">
+          在 LazyMind 中打开“设置 → 系统工具 → 依赖安装”，找到“浏览器控制扩展”并点击“配置”；
+          选择 <span id="pairingBrowserName">当前浏览器</span> 后点击“生成配对码”。配对码 5 分钟内有效，请复制并粘贴到这里。
+        </p>
+      </section>
+
+      <section id="connected" hidden>
+        <div class="device"><span>设备</span><code id="deviceId"></code></div>
+        <div class="actions">
+          <button id="grant">开启网页读取</button>
+          <button id="revokeSite" class="danger" hidden>关闭网页读取授权</button>
+          <button id="capture" class="secondary">测试抓取</button>
+          <button id="reconnect" class="secondary">重新连接</button>
+          <button id="disconnect" class="danger">断开并清除凭证</button>
+        </div>
+        <p class="hint">网页读取只需首次明确授权一次，之后默认开启；可随时在这里撤销。对话里提供 URL 时，LazyMind 会自动打开受管窗口，无需逐站点授权。</p>
+      </section>
+
+      <output id="message" aria-live="polite"></output>
+    </main>
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

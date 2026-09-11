@@ -5,6 +5,8 @@ import {
   Empty,
   Input,
   Modal,
+  Popconfirm,
+  Segmented,
   Space,
   Spin,
   Tag,
@@ -13,7 +15,10 @@ import {
 } from "antd";
 import {
   DownloadOutlined,
+  CopyOutlined,
+  DeleteOutlined,
   FolderOpenOutlined,
+  GlobalOutlined,
   RightOutlined,
   SearchOutlined,
   SettingOutlined,
@@ -24,17 +29,31 @@ import { useLocation } from "react-router-dom";
 import {
   checkFFmpegDependency,
   checkEditablePPTDependency,
+  checkBrowserExtensionDependency,
+  createBrowserPairingCode,
+  getBrowserDevices,
   getFFmpegDependencyStatus,
   getEditablePPTDependencyStatus,
+  getBrowserExtensionDependencyStatus,
   installFFmpegDependency,
   installEditablePPTDependency,
+  installBrowserExtensionDependency,
+  revokeBrowserDevice,
   updateFFmpegDependency,
   type EditablePPTDependencyStatus,
+  type BrowserExtensionDependencyStatus,
+  type BrowserDeviceInfo,
+  type BrowserPairingCode,
   type FFmpegDependencyStatus,
 } from "../api/systemDependencies";
 import { getLocalizedErrorMessage } from "@/components/request";
 import { isDesktopRuntime, isLocalRuntime } from "@/runtime/mode";
-import { selectExecutable } from "@/runtime/desktopBridge";
+import { openBrowserExtensionDir, selectExecutable } from "@/runtime/desktopBridge";
+import {
+  detectPreferredBrowserExtensionTarget,
+  resolveBrowserExtensionTargets,
+  type BrowserExtensionTargetID,
+} from "../utils/browserExtensionTarget";
 
 
 const DEPENDENCY_ICON_DATA_URL =
@@ -47,27 +66,49 @@ export default function DependencyInstallSection() {
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<FFmpegDependencyStatus | null>(null);
   const [pptStatus, setPptStatus] = useState<EditablePPTDependencyStatus | null>(null);
+  const [browserStatus, setBrowserStatus] = useState<BrowserExtensionDependencyStatus | null>(null);
   const [loadError, setLoadError] = useState("");
   const [modalOpen, setModalOpen] = useState(false);
   const [pptModalOpen, setPptModalOpen] = useState(false);
+  const [browserModalOpen, setBrowserModalOpen] = useState(false);
   const [customPath, setCustomPath] = useState("");
   const [saving, setSaving] = useState(false);
   const [installing, setInstalling] = useState(false);
   const [checking, setChecking] = useState(false);
   const [pptInstalling, setPptInstalling] = useState(false);
   const [pptChecking, setPptChecking] = useState(false);
+  const [browserInstalling, setBrowserInstalling] = useState(false);
+  const [browserChecking, setBrowserChecking] = useState(false);
+  const [browserPairing, setBrowserPairing] = useState<BrowserPairingCode | null>(null);
+  const [browserPairingCreating, setBrowserPairingCreating] = useState(false);
+  const [browserDevices, setBrowserDevices] = useState<BrowserDeviceInfo[]>([]);
+  const [browserDevicesLoading, setBrowserDevicesLoading] = useState(false);
+  const [browserDevicesError, setBrowserDevicesError] = useState("");
+  const [browserDeviceRevoking, setBrowserDeviceRevoking] = useState("");
+  const [browserTargetID, setBrowserTargetID] = useState<BrowserExtensionTargetID>(
+    detectPreferredBrowserExtensionTarget,
+  );
   const [searchValue, setSearchValue] = useState("");
+
+  const browserTargets = useMemo(
+    () => resolveBrowserExtensionTargets(browserStatus?.supportedBrowsers),
+    [browserStatus?.supportedBrowsers],
+  );
+  const browserTarget = browserTargets.find((target) => target.id === browserTargetID)
+    || browserTargets[0];
 
   const refresh = useCallback(async () => {
     setLoading(true);
     setLoadError("");
     try {
-      const [next, nextPpt] = await Promise.all([
+      const [next, nextPpt, nextBrowser] = await Promise.all([
         getFFmpegDependencyStatus(),
         getEditablePPTDependencyStatus(),
+        getBrowserExtensionDependencyStatus(),
       ]);
       setStatus(next);
       setPptStatus(nextPpt);
+      setBrowserStatus(nextBrowser);
       setCustomPath(next.customPath || "");
     } catch (error) {
       setLoadError(getLocalizedErrorMessage(error) || t("modelProvider.external.dependencyLoadFailed"));
@@ -88,11 +129,14 @@ export default function DependencyInstallSection() {
     }
     const dependencyId = location.hash === "#editable-ppt-dependency"
       ? "editable-ppt-dependency"
-      : location.hash === "#ffmpeg-dependency"
-        ? "ffmpeg-dependency"
-        : "";
+      : location.hash === "#browser-extension-dependency"
+        ? "browser-extension-dependency"
+        : location.hash === "#ffmpeg-dependency"
+          ? "ffmpeg-dependency"
+          : "";
     if (!dependencyId) return;
     if (dependencyId === "editable-ppt-dependency") setPptModalOpen(true);
+    else if (dependencyId === "browser-extension-dependency") setBrowserModalOpen(true);
     else setModalOpen(true);
     requestAnimationFrame(() => {
       document
@@ -120,6 +164,11 @@ export default function DependencyInstallSection() {
     if (!normalizedSearchValue) return true;
     return t("modelProvider.external.dependencyEditablePptTitle").toLowerCase().includes(normalizedSearchValue)
       || t("modelProvider.external.dependencyEditablePptSummary").toLowerCase().includes(normalizedSearchValue);
+  }, [normalizedSearchValue, t]);
+  const shouldShowBrowserCard = useMemo(() => {
+    if (!normalizedSearchValue) return true;
+    return t("modelProvider.external.dependencyBrowserExtensionTitle").toLowerCase().includes(normalizedSearchValue)
+      || t("modelProvider.external.dependencyBrowserExtensionSummary").toLowerCase().includes(normalizedSearchValue);
   }, [normalizedSearchValue, t]);
 
   const handleSaveCustomPath = async () => {
@@ -203,6 +252,109 @@ export default function DependencyInstallSection() {
       message.error(getLocalizedErrorMessage(error) || t("modelProvider.external.dependencyLoadFailed"));
     } finally {
       setPptChecking(false);
+    }
+  };
+
+  const handleInstallBrowserExtension = async () => {
+    setBrowserInstalling(true);
+    try {
+      const next = await installBrowserExtensionDependency();
+      setBrowserStatus(next);
+      message.success(t("modelProvider.external.dependencyBrowserExtensionInstallSuccess"));
+    } catch (error) {
+      message.error(getLocalizedErrorMessage(error) || t("modelProvider.external.dependencyBrowserExtensionInstallFailed"));
+    } finally {
+      setBrowserInstalling(false);
+    }
+  };
+
+  const handleRecheckBrowserExtension = async () => {
+    setBrowserChecking(true);
+    try {
+      const next = await checkBrowserExtensionDependency();
+      setBrowserStatus(next);
+      message.success(next.installed
+        ? t("modelProvider.external.dependencyCheckReady")
+        : t("modelProvider.external.dependencyCheckMissing"));
+    } catch (error) {
+      message.error(getLocalizedErrorMessage(error) || t("modelProvider.external.dependencyLoadFailed"));
+    } finally {
+      setBrowserChecking(false);
+    }
+  };
+
+  const handleRevealBrowserExtension = async () => {
+    const result = await openBrowserExtensionDir();
+    if (!result.ok) {
+      message.error(t("modelProvider.external.dependencyBrowserExtensionRevealFailed"));
+    }
+  };
+
+  const handleCreateBrowserPairing = async () => {
+    setBrowserPairingCreating(true);
+    try {
+      const pairing = await createBrowserPairingCode();
+      setBrowserPairing(pairing);
+      message.success(t("modelProvider.external.dependencyBrowserPairingCreated"));
+    } catch (error) {
+      message.error(getLocalizedErrorMessage(error) || t("modelProvider.external.dependencyBrowserPairingFailed"));
+    } finally {
+      setBrowserPairingCreating(false);
+    }
+  };
+
+  const handleCopyBrowserPairing = async () => {
+    if (!browserPairing?.code) return;
+    try {
+      await navigator.clipboard.writeText(browserPairing.code);
+      message.success(t("modelProvider.external.dependencyBrowserPairingCopied"));
+    } catch {
+      message.error(t("modelProvider.external.dependencyBrowserPairingCopyFailed"));
+    }
+  };
+
+  const handleCopyBrowserSettingsURL = async () => {
+    if (!browserTarget?.settingsUrl) return;
+    try {
+      await navigator.clipboard.writeText(browserTarget.settingsUrl);
+      message.success(t("modelProvider.external.dependencyBrowserSettingsCopied", {
+        browser: browserTarget.name,
+      }));
+    } catch {
+      message.error(t("modelProvider.external.dependencyBrowserSettingsCopyFailed"));
+    }
+  };
+
+  const refreshBrowserDevices = useCallback(async () => {
+    setBrowserDevicesLoading(true);
+    setBrowserDevicesError("");
+    try {
+      setBrowserDevices(await getBrowserDevices());
+    } catch (error) {
+      setBrowserDevicesError(
+        getLocalizedErrorMessage(error) || t("modelProvider.external.dependencyBrowserDevicesLoadFailed"),
+      );
+    } finally {
+      setBrowserDevicesLoading(false);
+    }
+  }, [t]);
+
+  useEffect(() => {
+    if (browserModalOpen) void refreshBrowserDevices();
+  }, [browserModalOpen, refreshBrowserDevices]);
+
+  const handleRevokeBrowserDevice = async (deviceID: string) => {
+    setBrowserDeviceRevoking(deviceID);
+    try {
+      await revokeBrowserDevice(deviceID);
+      setBrowserDevices((devices) => devices.filter((device) => device.id !== deviceID));
+      message.success(t("modelProvider.external.dependencyBrowserDeviceRevoked"));
+    } catch (error) {
+      message.error(
+        getLocalizedErrorMessage(error) || t("modelProvider.external.dependencyBrowserDeviceRevokeFailed"),
+      );
+    } finally {
+      setBrowserDeviceRevoking("");
     }
   };
 
@@ -311,8 +463,34 @@ export default function DependencyInstallSection() {
                 <span className="model-provider-service-card-arrow" aria-hidden="true"><RightOutlined /></span>
               </button>
             ) : null}
+            {shouldShowBrowserCard ? (
+              <button
+                className="model-provider-service-card tone-blue"
+                id="browser-extension-dependency"
+                onClick={() => setBrowserModalOpen(true)}
+                type="button"
+              >
+                <span className="model-provider-service-logo" aria-hidden="true">
+                  <GlobalOutlined />
+                </span>
+                <div className="model-provider-service-card-copy">
+                  <div className="model-provider-service-title-row">
+                    <h4>{t("modelProvider.external.dependencyBrowserExtensionTitle")}</h4>
+                    <Tag className="model-provider-service-status" color={browserStatus?.installed ? "success" : "default"}>
+                      {t(`modelProvider.external.status.${browserStatus?.installed ? "configured" : "missing"}`)}
+                    </Tag>
+                  </div>
+                  <Tooltip placement="topLeft" title={t("modelProvider.external.dependencyBrowserExtensionSummary")}>
+                    <span className="model-provider-service-summary-wrap">
+                      <p className="model-provider-service-summary">{t("modelProvider.external.dependencyBrowserExtensionSummary")}</p>
+                    </span>
+                  </Tooltip>
+                </div>
+                <span className="model-provider-service-card-arrow" aria-hidden="true"><RightOutlined /></span>
+              </button>
+            ) : null}
           </div>
-          {!loading && !loadError && !shouldShowFFmpegCard && !shouldShowPptCard ? (
+          {!loading && !loadError && !shouldShowFFmpegCard && !shouldShowPptCard && !shouldShowBrowserCard ? (
             <div className="model-provider-category-empty">
               <Empty description={t("modelProvider.external.noMatchedServices")} image={Empty.PRESENTED_IMAGE_SIMPLE} />
             </div>
@@ -439,6 +617,223 @@ export default function DependencyInstallSection() {
                 {t("modelProvider.external.dependencyRecheckAction")}
               </Button>
             </Space>
+          </div>
+        </Space>
+      </Modal>
+
+      <Modal
+        className="model-provider-service-config-modal"
+        destroyOnClose
+        footer={null}
+        onCancel={() => {
+          setBrowserModalOpen(false);
+          setBrowserPairing(null);
+        }}
+        open={browserModalOpen}
+        title={t("modelProvider.external.dependencyBrowserExtensionModalTitle")}
+        width={640}
+      >
+        <Space direction="vertical" size={16} style={{ width: "100%" }}>
+          <Alert
+            message={t("modelProvider.external.dependencyBrowserExtensionImpact", {
+              browser: browserTarget.name,
+            })}
+            showIcon
+            type="info"
+          />
+          <div>
+            <h4>{t("modelProvider.external.dependencyBrowserSelectTitle")}</h4>
+            <Segmented
+              onChange={(value) => setBrowserTargetID(value as BrowserExtensionTargetID)}
+              options={browserTargets.map((target) => ({ label: target.name, value: target.id }))}
+              value={browserTarget.id}
+            />
+          </div>
+          {browserStatus?.message && !browserStatus.installed
+            ? <Alert message={browserStatus.message} showIcon type="warning" />
+            : null}
+          {browserStatus?.installed ? (
+            <>
+              <Alert
+                message={t("modelProvider.external.dependencyBrowserExtensionDetected", {
+                  path: browserStatus.installDir || "-",
+                  version: browserStatus.version || "-",
+                })}
+                showIcon
+                type="success"
+              />
+              <Alert
+                message={t("modelProvider.external.dependencyBrowserExtensionApproval", {
+                  browser: browserTarget.name,
+                  settingsUrl: browserTarget.settingsUrl,
+                })}
+                showIcon
+                type="warning"
+              />
+            </>
+          ) : null}
+          <div>
+            <h4>{t("modelProvider.external.dependencyInstallBundledTitle")}</h4>
+            <p>{t("modelProvider.external.dependencyBrowserExtensionInstallDesc")}</p>
+            <Space>
+              <Button
+                disabled={!browserStatus?.installSupported}
+                icon={<DownloadOutlined />}
+                loading={browserInstalling}
+                onClick={() => void handleInstallBrowserExtension()}
+                type="primary"
+              >
+                {browserStatus?.installed
+                  ? t(browserStatus.updateAvailable
+                    ? "modelProvider.external.dependencyBrowserExtensionUpdateAction"
+                    : "modelProvider.external.dependencyBrowserExtensionReinstallAction")
+                  : t("modelProvider.external.dependencyInstallAction")}
+              </Button>
+              <Button
+                icon={<SyncOutlined />}
+                loading={browserChecking}
+                onClick={() => void handleRecheckBrowserExtension()}
+              >
+                {t("modelProvider.external.dependencyRecheckAction")}
+              </Button>
+              {browserStatus?.installed && isDesktopRuntime() ? (
+                <Button icon={<FolderOpenOutlined />} onClick={() => void handleRevealBrowserExtension()}>
+                  {t("modelProvider.external.dependencyOpenInstallDirAction")}
+                </Button>
+              ) : null}
+            </Space>
+          </div>
+          <div>
+            <h4>{t("modelProvider.external.dependencyBrowserSettingsTitle", {
+              browser: browserTarget.name,
+            })}</h4>
+            <p>{t("modelProvider.external.dependencyBrowserSettingsDesc", {
+              browser: browserTarget.name,
+            })}</p>
+            <Space.Compact style={{ width: "100%" }}>
+              <Input readOnly value={browserTarget.settingsUrl} />
+              <Button icon={<CopyOutlined />} onClick={() => void handleCopyBrowserSettingsURL()}>
+                {t("modelProvider.external.dependencyBrowserSettingsCopyAction")}
+              </Button>
+            </Space.Compact>
+          </div>
+          <div>
+            <h4>{t("modelProvider.external.dependencyBrowserPairingTitle", {
+              browser: browserTarget.name,
+            })}</h4>
+            <p>{t("modelProvider.external.dependencyBrowserPairingDesc")}</p>
+            {browserPairing?.code ? (
+              <Space.Compact style={{ width: "100%", marginBottom: 12 }}>
+                <Input readOnly value={browserPairing.code} />
+                <Button onClick={() => void handleCopyBrowserPairing()}>
+                  {t("modelProvider.external.dependencyBrowserPairingCopyAction")}
+                </Button>
+              </Space.Compact>
+            ) : null}
+            <Button
+              loading={browserPairingCreating}
+              onClick={() => void handleCreateBrowserPairing()}
+              type="primary"
+            >
+              {t("modelProvider.external.dependencyBrowserPairingCreateAction")}
+            </Button>
+          </div>
+          <div>
+            <Space align="center" style={{ display: "flex", justifyContent: "space-between" }}>
+              <div>
+                <h4 style={{ marginBottom: 4 }}>
+                  {t("modelProvider.external.dependencyBrowserDevicesTitle")}
+                </h4>
+                <p style={{ marginBottom: 0 }}>
+                  {t("modelProvider.external.dependencyBrowserDevicesDesc")}
+                </p>
+              </div>
+              <Button
+                icon={<SyncOutlined />}
+                loading={browserDevicesLoading}
+                onClick={() => void refreshBrowserDevices()}
+                size="small"
+              >
+                {t("common.refresh")}
+              </Button>
+            </Space>
+            {browserDevicesError ? (
+              <Alert
+                action={(
+                  <Button onClick={() => void refreshBrowserDevices()} size="small">
+                    {t("common.retry")}
+                  </Button>
+                )}
+                message={browserDevicesError}
+                showIcon
+                style={{ marginTop: 12 }}
+                type="error"
+              />
+            ) : null}
+            <Spin spinning={browserDevicesLoading}>
+              {!browserDevicesLoading && browserDevices.length === 0 ? (
+                <Empty
+                  description={t("modelProvider.external.dependencyBrowserDevicesEmpty")}
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                  style={{ marginBlock: 16 }}
+                />
+              ) : (
+                <Space direction="vertical" size={8} style={{ marginTop: 12, width: "100%" }}>
+                  {browserDevices.map((device) => (
+                    <div
+                      key={device.id}
+                      style={{
+                        alignItems: "center",
+                        border: "1px solid var(--ant-color-border-secondary, #f0f0f0)",
+                        borderRadius: 8,
+                        display: "flex",
+                        gap: 12,
+                        justifyContent: "space-between",
+                        padding: "10px 12px",
+                      }}
+                    >
+                      <div style={{ minWidth: 0 }}>
+                        <Space size={8} wrap>
+                          <strong>{device.name || device.browser || t("modelProvider.external.dependencyBrowserDeviceFallback")}</strong>
+                          <Tag color={device.online ? "success" : "default"}>
+                            {t(device.online
+                              ? "modelProvider.external.dependencyBrowserDeviceOnline"
+                              : "modelProvider.external.dependencyBrowserDeviceOffline")}
+                          </Tag>
+                        </Space>
+                        <div style={{ color: "var(--ant-color-text-secondary, #8c8c8c)", fontSize: 12 }}>
+                          {[device.browser, device.browser_version, device.extension_version && `Extension ${device.extension_version}`]
+                            .filter(Boolean)
+                            .join(" · ")}
+                        </div>
+                        <div style={{ color: "var(--ant-color-text-tertiary, #bfbfbf)", fontSize: 12 }}>
+                          {t("modelProvider.external.dependencyBrowserDeviceLastSeen", {
+                            time: new Date(device.last_seen_at).toLocaleString(),
+                          })}
+                        </div>
+                      </div>
+                      <Popconfirm
+                        cancelText={t("common.cancel")}
+                        description={t("modelProvider.external.dependencyBrowserDeviceRevokeConfirm")}
+                        okButtonProps={{ danger: true }}
+                        okText={t("modelProvider.external.dependencyBrowserDeviceRevokeAction")}
+                        onConfirm={() => void handleRevokeBrowserDevice(device.id)}
+                        title={t("modelProvider.external.dependencyBrowserDeviceRevokeTitle")}
+                      >
+                        <Button
+                          danger
+                          icon={<DeleteOutlined />}
+                          loading={browserDeviceRevoking === device.id}
+                          size="small"
+                        >
+                          {t("modelProvider.external.dependencyBrowserDeviceRevokeAction")}
+                        </Button>
+                      </Popconfirm>
+                    </div>
+                  ))}
+                </Space>
+              )}
+            </Spin>
           </div>
         </Space>
       </Modal>

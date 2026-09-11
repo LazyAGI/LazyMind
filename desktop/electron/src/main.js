@@ -27,6 +27,11 @@ const { clearFrontendCaches } = require("./frontend-cache");
 const { installExternalNavigationHandler } = require("./external-navigation");
 const { waitForRendererWithRuntimeRecovery } = require("./renderer-recovery");
 const {
+  desktopDevRendererURL,
+  desktopDevRuntimeStatus,
+  normalizeLoopbackURL,
+} = require("./desktop-dev");
+const {
   collapseRoots,
   containsPath,
   discoverRecommendedFolders,
@@ -57,6 +62,16 @@ if (windowsDesktopPaths) {
 }
 
 const isPackaged = app.isPackaged;
+const desktopDevURL = !isPackaged
+  ? normalizeLoopbackURL(process.env.LAZYMIND_DESKTOP_DEV_URL, "LAZYMIND_DESKTOP_DEV_URL")
+  : "";
+const externalRuntimeURL = desktopDevURL
+  ? normalizeLoopbackURL(
+    process.env.LAZYMIND_DESKTOP_EXTERNAL_RUNTIME_URL || "http://127.0.0.1:8090",
+    "LAZYMIND_DESKTOP_EXTERNAL_RUNTIME_URL",
+  )
+  : "";
+const isExternalRuntimeDev = Boolean(desktopDevURL && externalRuntimeURL);
 const desktopTarget = isWindows ? "windows-x64" : "darwin-arm64";
 const ownerToken = randomUUID();
 const runtimeResourcesRoot = process.env.LAZYMIND_DESKTOP_RESOURCES_ROOT ||
@@ -981,6 +996,10 @@ function spawnDetachedShutdownHelper(reason) {
 }
 
 async function readStatus() {
+  if (isExternalRuntimeDev) {
+    currentStatus = desktopDevRuntimeStatus(externalRuntimeURL);
+    return currentStatus;
+  }
   const stdout = await runSidecar("status", ["--json"]);
   currentStatus = JSON.parse(stdout);
   startupMetricsRecorder.observeStatus(currentStatus);
@@ -1090,6 +1109,9 @@ function logStartupContext() {
 }
 
 function startRuntime() {
+  if (isExternalRuntimeDev) {
+    return;
+  }
   if (runtimeProcess) {
     return;
   }
@@ -1744,6 +1766,9 @@ function ensureWindowsTray() {
 }
 
 function attachManagedClose(window) {
+  if (isExternalRuntimeDev) {
+    return;
+  }
   window.on("close", (event) => {
     if (allowWindowClose) {
       return;
@@ -1890,7 +1915,49 @@ function createHiddenRendererAttempt(frontendPort) {
   };
 }
 
+async function createDesktopDevWindow() {
+  const window = new BrowserWindow(browserWindowOptions(false));
+  attachExternalNavigationHandler(window);
+  mainWindow = window;
+  window.once("closed", () => {
+    if (mainWindow === window) {
+      mainWindow = undefined;
+    }
+  });
+  startupMetricsRecorder.mark("mainWindowCreated");
+  attachManagedClose(window);
+  const readyWait = createRendererReadyWait(window);
+  rendererReadyWait = readyWait;
+  startupMetricsRecorder.mark("frontendLoadStarted");
+  appendStartupLog("desktop", `loading Desktop development renderer: ${desktopDevURL}`);
+  appendStartupLog("desktop", `reusing external Local Runtime: ${externalRuntimeURL}`);
+  try {
+    await Promise.all([
+      window.loadURL(desktopDevRendererURL(desktopDevURL)),
+      readyWait.promise,
+    ]);
+    if (isQuitting || window.isDestroyed()) return;
+    readyWait.cancel();
+    if (rendererReadyWait === readyWait) rendererReadyWait = undefined;
+    currentStatus = desktopDevRuntimeStatus(externalRuntimeURL);
+    updateStartupState({ status: "ready", phase: "Ready", message: "Desktop development mode is ready." });
+    window.show();
+    window.focus();
+    appendStartupLog("desktop", "Desktop development renderer ready");
+    finishStartupMetrics("success");
+  } catch (error) {
+    readyWait.cancel();
+    if (rendererReadyWait === readyWait) rendererReadyWait = undefined;
+    if (!window.isDestroyed()) window.destroy();
+    if (mainWindow === window) mainWindow = undefined;
+    throw error;
+  }
+}
+
 async function createWindow() {
+  if (isExternalRuntimeDev) {
+    return createDesktopDevWindow();
+  }
   const nextStartupWindow = new BrowserWindow(browserWindowOptions(true));
   let latestRendererAttempt;
   startupWindow = nextStartupWindow;
@@ -2044,6 +2111,21 @@ ipcMain.handle("lazymind:openDataDir", async () => {
   }
   fs.mkdirSync(target, { recursive: true });
   await shell.openPath(target);
+});
+ipcMain.handle("lazymind:openBrowserExtensionDir", async () => {
+  await readStatus();
+  const runtimeRoot = currentRuntimeRoot();
+  if (!runtimeRoot) {
+    throw new Error("LazyMind runtime root is not available");
+  }
+  const target = path.join(runtimeRoot, "deps", "browser-extension");
+  const manifest = path.join(target, "manifest.json");
+  const info = await fs.promises.stat(manifest).catch(() => null);
+  if (!info?.isFile()) {
+    throw new Error("LazyMind Browser extension is not installed");
+  }
+  await shell.openPath(target);
+  return { ok: true, path: target };
 });
 ipcMain.handle("lazymind:localFolderAccessStatus", () => localFolderAccessSnapshot());
 ipcMain.handle("lazymind:chooseLocalDiscoveryRoots", async () => {
@@ -2404,11 +2486,14 @@ if (!hasSingleInstanceLock) {
     );
   });
   app.on("window-all-closed", () => {
+    if (isExternalRuntimeDev) {
+      app.quit();
+    }
     // Normal Desktop sessions stay resident without renderer processes.
     // Installer warmup owns its explicit app.exit lifecycle.
   });
   app.on("before-quit", (event) => {
-    if (isInstallerWarmup) {
+    if (isInstallerWarmup || isExternalRuntimeDev) {
       return;
     }
     if (!isQuitting) {

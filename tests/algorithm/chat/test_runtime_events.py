@@ -105,6 +105,39 @@ def test_run_accumulator_only_propagates_public_failure_fields():
     }
 
 
+def test_run_accumulator_repairs_generic_http_429_classification():
+    accumulator = RunAccumulator(run_id='run-1', last_model_terminal={
+        'model_call_id': 'call-1',
+        'kind': 'failure',
+        'has_semantic_output': False,
+        'failure': {
+            'origin': 'http',
+            'code': 'invalid_request',
+            'provider_http_status': 429,
+        },
+    })
+
+    data = accumulator.finish(outcome=RunOutcome.FAILED)['data']
+
+    assert data['status'] == 'failed'
+    assert data['reason'] == 'model_failure'
+    assert data['code'] == 'rate_limited'
+
+
+def test_run_accumulator_keeps_specific_http_429_classification():
+    accumulator = RunAccumulator(run_id='run-1', last_model_terminal={
+        'kind': 'failure',
+        'has_semantic_output': False,
+        'failure': {
+            'origin': 'http',
+            'code': 'quota_exhausted',
+            'provider_http_status': 429,
+        },
+    })
+
+    assert accumulator.finish(outcome=RunOutcome.FAILED)['data']['code'] == 'quota_exhausted'
+
+
 def test_run_accumulator_awaiting_user_input_is_completed():
     accumulator = RunAccumulator(run_id='run-1', ask_pending=True, semantic_output=True)
     event = accumulator.finish(outcome=RunOutcome.SUCCEEDED)

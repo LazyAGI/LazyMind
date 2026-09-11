@@ -254,6 +254,43 @@ def test_summary_is_stable_until_context_reaches_trigger_again() -> None:
     assert '_lazymind_meta' not in first[0]
 
 
+def test_context_safety_overrides_summary_hysteresis() -> None:
+    from lazymind.chat.engine.agent_runtime.projection_state import projection_tokens
+
+    history = [
+        {'role': 'user', 'content': 'old request ' * 1300},
+        {'role': 'assistant', 'content': 'old response ' * 1300},
+        {'role': 'user', 'content': 'current request'},
+    ]
+    state: dict[str, object] = {}
+    reconcile_projection(history, state)
+    # A previous accepted compression has rearmed above the hard input budget.
+    state['next_pressure_tokens'] = projection_tokens(state['entries']) + 4000
+    history.append({'role': 'assistant', 'content': 'current details ' * 850})
+    reconcile_projection(history, state)
+    before = projection_tokens(state['entries'])
+    assert 10_000 < before < state['next_pressure_tokens']
+    calls = []
+
+    def summarize(_system: str, user: str) -> str:
+        calls.append(user)
+        return VALID_SUMMARY
+
+    with config.temp('context_compression_enabled', True), \
+            config.temp('context_summary_compression_enabled', True), \
+            config.temp('context_compression_reserved_output_tokens', 0), \
+            config.temp('context_compression_trigger_ratio', 0.90), \
+            config.temp('context_compression_target_ratio', 0.50), \
+            config.temp('context_summary_keep_recent_ratio', 0.05):
+        compact = make_history_compactor(
+            max_input_tokens=10_000, keep_recent=0, summarizer=summarize,
+        )
+        compact(history, runtime_state=state)
+
+    assert len(calls) == 1
+    assert projection_tokens(state['entries']) < 10_000
+
+
 def test_split_projection_keeps_spanning_summary_in_prior() -> None:
     entries = [
         {'source_start': 0, 'source_end': 4, 'message': {'role': 'user', 'content': 'summary'}},

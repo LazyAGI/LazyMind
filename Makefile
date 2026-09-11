@@ -1,5 +1,5 @@
 # Code style: Python (flake8) + Go (gofmt). Mirrors algorithm/lazyllm Makefile pattern.
-.PHONY: help lint install-flake8 install-golangci-lint lint-python lint-go lint-state-backend-boundary lint-workflow-naming lint-migration-immutability lint-test-locations test test-hermetic test-hermetic-setup test-hermetic-check featured-check skills-build skills-materialize skills-verify-lock build up up-build local-runtime-manager-build lazymind-cli-build assistant-bridge-start assistant-bridge-stop local-up local-up-lan local-down local-clean local-reset local-win-doctor local-win-build local-win-up local-win-up-lan local-win-down local-win-status local-win-clean local-win-reset down clear reset-kb reset-all fresh-start compose-host-permissions file-watcher-dirs file-watcher-build file-watcher-run file-watcher-start file-watcher-stop desktop-darwin-arm64 desktop-darwin-arm64-dmg desktop-darwin-arm64-clean desktop-windows-x64 desktop-windows-x64-installer desktop-windows-x64-clean desktop-cache-clean desktop-clean
+.PHONY: help lint install-flake8 install-golangci-lint lint-python lint-go lint-state-backend-boundary lint-workflow-naming lint-migration-immutability lint-test-locations test test-hermetic test-hermetic-setup test-hermetic-check featured-check skills-build skills-materialize skills-verify-lock build up up-build local-runtime-manager-build lazymind-cli-build assistant-bridge-start assistant-bridge-stop local-up local-up-lan local-down local-clean local-reset local-win-doctor local-win-build local-win-up local-win-up-lan local-win-down local-win-status local-win-clean local-win-reset down clear reset-kb reset-all fresh-start compose-host-permissions file-watcher-dirs file-watcher-build file-watcher-run file-watcher-start file-watcher-stop desktop-dev desktop-dev-down desktop-darwin-arm64 desktop-darwin-arm64-dmg desktop-darwin-arm64-clean desktop-windows-x64 desktop-windows-x64-installer desktop-windows-x64-clean desktop-cache-clean desktop-clean
 .DEFAULT_GOAL := help
 
 LOCAL_CONFIG_ENV ?= local/config.env
@@ -237,6 +237,8 @@ help:
 	@echo "                    Use SERVICES=svc1,svc2 to target specific services"
 	@echo "  make local-up - Build/start local LazyMind without containers"
 	@echo "  make local-up-lan - Build/start local LazyMind for LAN access with local admin auto-login enabled"
+	@echo "  make desktop-dev - Start source Electron + Desktop Vite HMR against a running make local-up"
+	@echo "  make desktop-dev-down - Stop Desktop dev processes without stopping Local Runtime"
 	@echo "  make desktop-darwin-arm64 - Build Darwin arm64 Desktop app"
 	@echo "  make desktop-darwin-arm64-dmg - Build a Developer ID-signed Darwin arm64 DMG"
 	@echo "  make desktop-darwin-arm64-clean - Remove Darwin arm64 Desktop build outputs"
@@ -562,6 +564,12 @@ else
 		"$(LAZYMIND_CLI_BIN)" assistant stop >/dev/null || true; \
 	fi
 endif
+
+desktop-dev:
+	@bash desktop/scripts/desktop-dev.sh start
+
+desktop-dev-down:
+	@bash desktop/scripts/desktop-dev.sh stop
 
 desktop-darwin-arm64:
 	@bash desktop/scripts/build-darwin-arm64.sh

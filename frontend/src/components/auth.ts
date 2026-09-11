@@ -3,7 +3,7 @@
  * Compatible with AuthServiceApi login (token stored after username/password login).
  */
 import axios from "axios";
-import { authServiceApiUrl } from "@/runtime/apiBase";
+import { authServiceApiUrl, coreApiUrl } from "@/runtime/apiBase";
 import i18n from "@/i18n";
 import { clearLocalAssistantSession } from "@/runtime/assistantSession";
 
@@ -138,6 +138,18 @@ export const AgentAppsAuth = {
   },
 
   async logout(redirectUrl?: string) {
+    const accessToken = this.getAccessToken();
+    if (accessToken) {
+      try {
+        await fetch(coreApiUrl("browser/manage/devices"), {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${accessToken}` },
+          credentials: "include",
+        });
+      } catch {
+        // Browser pairing cleanup is best effort when the server is unavailable.
+      }
+    }
     try {
       const { logoutFromServer } = await import("@/modules/signin/utils/request");
       await logoutFromServer();

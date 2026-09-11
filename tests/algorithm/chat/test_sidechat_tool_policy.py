@@ -75,6 +75,7 @@ def test_sidechat_final_tools_remain_readonly_after_lazy_activation(monkeypatch,
             'tool_policy': 'sidechat_readonly', 'source_reference': reference,
             'tool_config': {'bing': 'test-key', 'sciverse': 'test-key'},
             'mcp_config': [{'name': 'dangerous', 'transport': 'stdio', 'command': 'dangerous'}],
+            'system_mcp_config': [{'name': 'lazymind-browser', 'url': 'http://browser.invalid/mcp'}],
         },
         # These flags and inherited resources are authoritative Host inputs.
         personalization={'use_memory': False},
@@ -91,6 +92,8 @@ def test_sidechat_final_tools_remain_readonly_after_lazy_activation(monkeypatch,
     assert agent._skill_manager is None
     assert agent._enable_builtin_tools is False
     assert plan.stop_tools == []
+    assert all(section.section_id != 'browser_ui_execution' for section in plan.prompt.sections)
+    assert plan.execution_options.max_retries == chat_service._cfg['agentic_max_rounds_medium']
     names = set(manager.tools_info)
     assert {
         'read_file', 'grep', 'kb_tmp_search', 'read_user_attachment', 'find_user_attachment',

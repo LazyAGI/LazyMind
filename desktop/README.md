@@ -13,6 +13,25 @@ Desktop packages bundle the Go services, process-compose, Caddy, the compiled fr
 
 Release history samples are not stored in Git. Windows and macOS build entrypoints download the URL pinned in `desktop/history-injection-package.json`, verify its size and SHA-256, and include the outer archive as `resources/runtime/history-injection.zip`. Installer/first-launch warmup verifies it again, extracts only its `history-injection/` subtree into the mutable user runtime, and then starts Core so the conversations and artifacts are injected. The signed macOS application bundle is never modified during this process.
 
+## Fast Desktop development
+
+Use the source Electron shell for browser/UI development instead of rebuilding an installer:
+
+```bash
+make local-up
+make desktop-dev
+```
+
+`desktop-dev` starts a Desktop-mode Vite renderer on `127.0.0.1:5173`, proxies API and Browser WebSocket traffic to the existing Local Runtime on `127.0.0.1:8090`, and launches Electron directly from `desktop/electron`. React/CSS changes use Vite HMR. Changes to `desktop/electron/src/*.js` automatically restart only Electron.
+
+Stop the development shell without stopping Local Runtime:
+
+```bash
+make desktop-dev-down
+```
+
+Logs are written under `local/build/desktop-dev/`. Override the defaults with `LAZYMIND_DESKTOP_DEV_PORT` and `LAZYMIND_DESKTOP_EXTERNAL_RUNTIME_URL`. Both renderer and runtime URLs are restricted to loopback hosts because the renderer receives the privileged Desktop preload bridge. Browser actions use the same external Chrome/Edge extension as Docker and Local, opening an independent visible window.
+
 Platform-maintained Skill directories and installable Skill links are declared together in `skills/builtin-sources.yaml`; curated experiences keep their schema, locales, and images under `skills/featured/<id>/`. Desktop builds package or download every source into the same locked ZIP catalog under `resources/runtime/builtin-skills`, and compile the curated catalog plus content-hashed assets under `resources/runtime/featured-skills`. Bundled Caddy serves those assets through `/showcase-assets/` on both macOS and Windows. Release builds use the lock in frozen mode; users only unpack a Skill into their personal revision store when they click Install or Try.
 
 The frontend dependency tree is installed while building, but raw `frontend/node_modules` is not distributed. Vite compiles browser dependencies into `frontend/dist`, and Desktop serves that static output through bundled Caddy.

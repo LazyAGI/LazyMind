@@ -35,8 +35,8 @@ func TestLoadUsesDefaults(t *testing.T) {
 		t.Fatalf("allowedOrigins = %#v, want %#v", cfg.CORS.AllowedOrigins, wantOrigins)
 	}
 
-	if len(cfg.Routes) != 6 {
-		t.Fatalf("routes = %d, want 6", len(cfg.Routes))
+	if len(cfg.Routes) != 7 {
+		t.Fatalf("routes = %d, want 7", len(cfg.Routes))
 	}
 
 	routesByName := map[string]RouteConfig{}
@@ -73,6 +73,10 @@ func TestLoadUsesDefaults(t *testing.T) {
 	wantRoute("channel-gateway-route", "/api/channel-gateway", "http://127.0.0.1:8085", "/readyz", false, false)
 	wantRoute("chat-route", "/api/chat", "http://127.0.0.1:8046", "/health", false, false)
 	wantRoute("scan-route", "/api/scan", "http://127.0.0.1:18080", "/health", false, true)
+	wantRoute("browser-extension-route", "/api/browser/v1", "http://127.0.0.1:8001/browser/extension", "", true, false)
+	if !routesByName["browser-extension-route"].Public {
+		t.Fatal("browser extension route must be public")
+	}
 	wantRoute("core-route", "/api/core", "http://127.0.0.1:8001", "/health", true, false)
 	wantRoute("evo-route", "/api/evo", "http://127.0.0.1:8047", "/health", true, true)
 }
@@ -259,6 +263,10 @@ func TestLoadCloudReplaceKongConfigFile(t *testing.T) {
 	wantRoute("channel-gateway-route", "/api/channel-gateway", "http://127.0.0.1:18085", "/readyz", false, false)
 	wantRoute("chat-route", "/api/chat", "http://127.0.0.1:18046", "/health", false, false)
 	wantRoute("scan-route", "/api/scan", "http://127.0.0.1:18080", "/healthz", false, true)
+	wantRoute("browser-extension-route", "/api/browser/v1", "http://127.0.0.1:18001/browser/extension", "", true, false)
+	if !routesByName["browser-extension-route"].Public {
+		t.Fatal("browser extension route must be public")
+	}
 	wantRoute("core-route", "/api/core", "http://127.0.0.1:18001", "/health", true, false)
 	wantRoute("evo-route", "/api/evo", "http://127.0.0.1:18047", "/healthz", true, true)
 }

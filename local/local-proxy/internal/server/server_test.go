@@ -464,6 +464,23 @@ func TestCORS_RejectsDisallowedOrigin(t *testing.T) {
 	}
 }
 
+func TestCORSBrowserExtensionOriginIsLimitedToBrowserRoute(t *testing.T) {
+	for _, origin := range []string{
+		"chrome-extension://abcdefghijklmnop",
+		"edge-extension://abcdefghijklmnop",
+	} {
+		if !browserExtensionOriginAllowed("/api/browser/v1/connect", origin) {
+			t.Fatalf("browser extension origin should be allowed on browser route: %s", origin)
+		}
+		if browserExtensionOriginAllowed("/api/core/conversations", origin) {
+			t.Fatalf("browser extension origin leaked to authenticated core route: %s", origin)
+		}
+	}
+	if browserExtensionOriginAllowed("/api/browser/v1/connect", "https://attacker.example") {
+		t.Fatal("web origin should not be accepted as a browser extension")
+	}
+}
+
 func TestCORS_AllowsRequestWithoutOrigin(t *testing.T) {
 	t.Parallel()
 
@@ -981,6 +998,47 @@ func TestAPIProxy_AuthorizationFailureStopsBeforeUpstream(t *testing.T) {
 	}
 	if upstreamCalls != 0 {
 		t.Fatalf("expected upstream to be skipped, got %d", upstreamCalls)
+	}
+}
+
+func TestAPIProxy_PublicBrowserRouteSkipsAuthAndStripsSpoofedIdentity(t *testing.T) {
+	t.Parallel()
+	authCalls := 0
+	var seenPath string
+	var seenHeaders http.Header
+	rt := &roundTripper{handlers: map[string]http.Handler{
+		"auth": http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			authCalls++
+			w.WriteHeader(http.StatusUnauthorized)
+		}),
+		"upstream": http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			seenPath = r.URL.Path
+			seenHeaders = r.Header.Clone()
+			w.WriteHeader(http.StatusOK)
+		}),
+	}}
+	cfg := config.Config{
+		Auth: config.AuthConfig{Mode: "local-rbac", AuthServiceURL: "http://auth"},
+		Routes: []config.RouteConfig{{
+			Name: "browser", Prefix: "/api/browser/v1", Upstream: "http://upstream/browser/extension",
+			StripPath: true, Public: true, Enabled: true,
+		}},
+	}
+	handler := newAPIProxyHandler(cfg, rt)
+	request := httptest.NewRequest(http.MethodPost, "/api/browser/v1/pair", strings.NewReader("{}"))
+	request.Header.Set("X-User-Id", "spoofed")
+	request.Header.Set("X-User-Role", "admin")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK || authCalls != 0 {
+		t.Fatalf("status=%d authCalls=%d", response.Code, authCalls)
+	}
+	if seenPath != "/browser/extension/pair" {
+		t.Fatalf("upstream path = %q", seenPath)
+	}
+	if seenHeaders.Get("X-User-Id") != "" || seenHeaders.Get("X-User-Role") != "" {
+		t.Fatalf("spoofed identity reached upstream: %#v", seenHeaders)
 	}
 }
 

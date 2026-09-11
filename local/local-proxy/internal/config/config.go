@@ -53,6 +53,7 @@ type RouteConfig struct {
 	Prefix     string `yaml:"prefix"`
 	Upstream   string `yaml:"upstream"`
 	StripPath  bool   `yaml:"stripPath"`
+	Public     bool   `yaml:"public"`
 	Enabled    bool   `yaml:"enabled"`
 	Optional   bool   `yaml:"optional"`
 	HealthPath string `yaml:"healthPath"`
@@ -152,6 +153,16 @@ func defaultRoutes() []RouteConfig {
 			Enabled:    true,
 			Optional:   true,
 			HealthPath: "/health",
+		},
+		{
+			Name:       "browser-extension-route",
+			Prefix:     "/api/browser/v1",
+			Upstream:   "http://127.0.0.1:8001/browser/extension",
+			StripPath:  true,
+			Public:     true,
+			Enabled:    true,
+			Optional:   false,
+			HealthPath: "",
 		},
 		{
 			Name:       "core-route",
@@ -278,6 +289,9 @@ func (c Config) Validate() error {
 		}
 		if strings.TrimSpace(route.Upstream) == "" {
 			return fmt.Errorf("route %q upstream is required", route.Name)
+		}
+		if route.Public && prefix != "/api/browser/v1" {
+			return fmt.Errorf("public route %q is not allowlisted", route.Name)
 		}
 		healthPath := strings.TrimSpace(route.HealthPath)
 		if healthPath != "" && !strings.HasPrefix(healthPath, "/") {
