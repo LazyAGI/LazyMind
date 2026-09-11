@@ -16,6 +16,7 @@ import (
 	"lazymind/core/common/orm"
 	"lazymind/core/evolution"
 	"lazymind/core/modelconfig"
+	"lazymind/core/modelprovider"
 	"lazymind/core/store"
 	"lazymind/core/subagent"
 	"lazymind/core/workflow"
@@ -166,9 +167,14 @@ func applyCatalogWindowIfMissing(ctx context.Context, db *gorm.DB, userID string
 		return
 	}
 	if report.MaxInputTokens == nil || *report.MaxInputTokens <= 0 {
-		if configured, err := modelconfig.LoadMaxInputTokens(ctx, db, userID, "llm"); err == nil && configured != nil {
-			report.MaxInputTokens = parseMaxInputTokens(*configured)
+		if db != nil {
+			if configured, err := modelconfig.LoadMaxInputTokens(ctx, db, userID, "llm"); err == nil && configured != nil {
+				report.MaxInputTokens = parseMaxInputTokens(*configured)
+			}
 		}
+	}
+	if report.MaxInputTokens == nil || *report.MaxInputTokens <= 0 {
+		report.MaxInputTokens = parseMaxInputTokens(modelprovider.DefaultLLMMaxInputTokens)
 	}
 	if report.MaxInputTokens != nil && *report.MaxInputTokens > 0 {
 		ratio := float64(report.EstimatedTokens) / float64(*report.MaxInputTokens)

@@ -119,21 +119,21 @@ func TestResolveAddModelMaxInputTokensUsesContextWindows(t *testing.T) {
 		t.Fatalf("qwen-plus override = %v, want 8K", got)
 	}
 
-	explicitDefault := defaultLLMMaxInputTokens
+	explicitDefault := DefaultLLMMaxInputTokens
 	got, err = resolveAddModelMaxInputTokens("llm", "qwen-plus", &explicitDefault)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got == nil || *got != defaultLLMMaxInputTokens {
-		t.Fatalf("qwen-plus explicit 128K = %v, want %s", got, defaultLLMMaxInputTokens)
+	if got == nil || *got != DefaultLLMMaxInputTokens {
+		t.Fatalf("qwen-plus explicit 128K = %v, want %s", got, DefaultLLMMaxInputTokens)
 	}
 
 	got, err = resolveAddModelMaxInputTokens("llm", "custom-unknown-llm", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got == nil || *got != defaultLLMMaxInputTokens {
-		t.Fatalf("unknown llm = %v, want %s", got, defaultLLMMaxInputTokens)
+	if got == nil || *got != DefaultLLMMaxInputTokens {
+		t.Fatalf("unknown llm = %v, want %s", got, DefaultLLMMaxInputTokens)
 	}
 
 	got, err = resolveAddModelMaxInputTokens("embed", "qwen-plus", nil)

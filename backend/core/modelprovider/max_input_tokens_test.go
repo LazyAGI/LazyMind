@@ -21,8 +21,8 @@ func TestResolveSeededMaxInputTokens(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got == nil || *got != defaultLLMMaxInputTokens {
-		t.Fatalf("missing window llm = %v, want %s", got, defaultLLMMaxInputTokens)
+	if got == nil || *got != DefaultLLMMaxInputTokens {
+		t.Fatalf("missing window llm = %v, want %s", got, DefaultLLMMaxInputTokens)
 	}
 
 	got, err = resolveSeededMaxInputTokens("embed", "text-embedding-3-large")
@@ -57,8 +57,8 @@ func TestResolveUserMaxInputTokens(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got == nil || *got != defaultLLMMaxInputTokens {
-		t.Fatalf("default llm = %v, want %s", got, defaultLLMMaxInputTokens)
+	if got == nil || *got != DefaultLLMMaxInputTokens {
+		t.Fatalf("default llm = %v, want %s", got, DefaultLLMMaxInputTokens)
 	}
 
 	raw := "1m"
@@ -85,6 +85,22 @@ func TestResolveUserMaxInputTokens(t *testing.T) {
 	tooLong := "999999999999999999999999K"
 	if _, err := parseMaxInputTokens(tooLong); err == nil {
 		t.Fatal("expected over-length max_input_tokens to fail")
+	}
+}
+
+func TestFallbackMaxInputTokens(t *testing.T) {
+	stored := "8K"
+	if got := FallbackMaxInputTokens("llm", &stored); got == nil || *got != "8K" {
+		t.Fatalf("stored llm = %v, want 8K", got)
+	}
+	if got := FallbackMaxInputTokens("llm", nil); got == nil || *got != DefaultLLMMaxInputTokens {
+		t.Fatalf("missing llm = %v, want %s", got, DefaultLLMMaxInputTokens)
+	}
+	if got := FallbackMaxInputTokens("vlm", nil); got == nil || *got != DefaultLLMMaxInputTokens {
+		t.Fatalf("missing vlm = %v, want %s", got, DefaultLLMMaxInputTokens)
+	}
+	if got := FallbackMaxInputTokens("embed", nil); got != nil {
+		t.Fatalf("embed = %v, want nil", got)
 	}
 }
 

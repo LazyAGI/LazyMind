@@ -6,6 +6,14 @@ import (
 	"lazymind/core/common/orm"
 )
 
+func TestApplyCatalogWindowIfMissingDefaultsTo128K(t *testing.T) {
+	report := &ContextUsageResponse{EstimatedTokens: 3200}
+	applyCatalogWindowIfMissing(t.Context(), nil, "user-1", report)
+	if report.MaxInputTokens == nil || *report.MaxInputTokens != 131072 {
+		t.Fatalf("MaxInputTokens = %v, want 131072", report.MaxInputTokens)
+	}
+}
+
 func TestApplyCatalogWindowIfMissingKeepsPythonBudget(t *testing.T) {
 	pythonBudget := int64(64000)
 	report := &ContextUsageResponse{

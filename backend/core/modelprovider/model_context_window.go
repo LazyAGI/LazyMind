@@ -167,7 +167,7 @@ func resolveAddModelMaxInputTokens(modelType, modelName string, raw *string) (*s
 	if lookedUp, ok := lookupMaxInputTokens(modelName, modelType); ok {
 		return &lookedUp, nil
 	}
-	value := defaultLLMMaxInputTokens
+	value := DefaultLLMMaxInputTokens
 	return &value, nil
 }
 
@@ -176,7 +176,7 @@ func resolveSeededMaxInputTokens(modelType, modelName string) (*string, error) {
 		return &lookedUp, nil
 	}
 	if supportsUserMaxInputTokens(modelType) {
-		value := defaultLLMMaxInputTokens
+		value := DefaultLLMMaxInputTokens
 		return &value, nil
 	}
 	return nil, nil

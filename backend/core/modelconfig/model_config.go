@@ -698,8 +698,8 @@ func BuildLLMConfig(rows []SelectedRuntimeModel) map[string]any {
 			"base_url": modelprovider.LazyLLMBaseURL(row.ProviderName, row.BaseURL),
 			"api_key":  row.APIKey,
 		}
-		if row.MaxInputTokens != nil {
-			cfg["max_input_tokens"] = *row.MaxInputTokens
+		if tokens := modelprovider.FallbackMaxInputTokens(role, row.MaxInputTokens); tokens != nil {
+			cfg["max_input_tokens"] = *tokens
 		}
 		if role == modelprovider.EvoModelKey {
 			descriptor, ok := openCodeDescriptor(row)

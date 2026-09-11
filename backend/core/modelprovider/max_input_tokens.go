@@ -6,7 +6,7 @@ import (
 )
 
 const (
-	defaultLLMMaxInputTokens = "128K"
+	DefaultLLMMaxInputTokens = "128K"
 	maxInputTokensMaxLen     = 16
 )
 
@@ -43,7 +43,7 @@ func resolveUserMaxInputTokens(modelType string, raw *string) (*string, error) {
 		return nil, nil
 	}
 	if trimmed == "" {
-		trimmed = defaultLLMMaxInputTokens
+		trimmed = DefaultLLMMaxInputTokens
 	}
 	normalized, err := parseMaxInputTokens(trimmed)
 	if err != nil {
@@ -64,4 +64,16 @@ func resolveRequiredUserMaxInputTokens(modelType string, raw *string) (*string, 
 		return nil, err
 	}
 	return &normalized, nil
+}
+
+// FallbackMaxInputTokens returns the stored window, or 128K for llm/vlm when unset.
+func FallbackMaxInputTokens(modelType string, stored *string) *string {
+	if stored != nil && strings.TrimSpace(*stored) != "" {
+		return stored
+	}
+	if supportsLookupMaxInputTokens(modelType) {
+		value := DefaultLLMMaxInputTokens
+		return &value
+	}
+	return nil
 }

@@ -77,16 +77,16 @@ func TestAddGroupModelDefaultsLLMMaxInputTokens(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload.Data.MaxInputTokens == nil || *payload.Data.MaxInputTokens != defaultLLMMaxInputTokens {
-		t.Fatalf("max_input_tokens = %v, want %s", payload.Data.MaxInputTokens, defaultLLMMaxInputTokens)
+	if payload.Data.MaxInputTokens == nil || *payload.Data.MaxInputTokens != DefaultLLMMaxInputTokens {
+		t.Fatalf("max_input_tokens = %v, want %s", payload.Data.MaxInputTokens, DefaultLLMMaxInputTokens)
 	}
 
 	var stored orm.UserModelProviderGroupModel
 	if err := store.DB().Take(&stored, "id = ?", payload.Data.ID).Error; err != nil {
 		t.Fatal(err)
 	}
-	if stored.MaxInputTokens == nil || *stored.MaxInputTokens != defaultLLMMaxInputTokens {
-		t.Fatalf("stored max_input_tokens = %v, want %s", stored.MaxInputTokens, defaultLLMMaxInputTokens)
+	if stored.MaxInputTokens == nil || *stored.MaxInputTokens != DefaultLLMMaxInputTokens {
+		t.Fatalf("stored max_input_tokens = %v, want %s", stored.MaxInputTokens, DefaultLLMMaxInputTokens)
 	}
 }
 

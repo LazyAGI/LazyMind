@@ -91,6 +91,10 @@ def test_resolve_max_input_tokens_uses_64k_fallback() -> None:
     assert budget.source == 'fallback'
 
 
+def test_resolve_max_input_tokens_defaults_to_128k() -> None:
+    assert resolve_max_input_tokens(llm_config={'llm': {'max_input_tokens': None}}) == 131_072
+
+
 def test_enrich_role_types_preserves_catalog_window(monkeypatch) -> None:
     from lazymind.model_config import _enrich_role_types
 

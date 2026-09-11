@@ -1,6 +1,7 @@
 package modelprovider
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,15 +23,82 @@ import (
 
 const remoteModelsTimeout = 20 * time.Second
 
-var remoteModelsHTTPClient = &http.Client{
-	Timeout: remoteModelsTimeout,
-	CheckRedirect: func(*http.Request, []*http.Request) error {
-		return http.ErrUseLastResponse
-	},
+var (
+	errRemoteModelsHostNotAllowed = errors.New("group base_url host is not allowed")
+	remoteModelsDialer            = &net.Dialer{Timeout: 10 * time.Second}
+	remoteModelsLookupIP          = lookupRemoteModelsIPs
+	remoteModelsDialContext       = defaultRemoteModelsDial
+	remoteModelsHTTPClient        = newRemoteModelsHTTPClient()
+)
+
+func defaultRemoteModelsDial(ctx context.Context, network, address string) (net.Conn, error) {
+	return remoteModelsDialer.DialContext(ctx, network, address)
 }
 
 // remoteModelsAllowPrivateHosts is test-only so httptest.Server (loopback) can run.
 var remoteModelsAllowPrivateHosts bool
+
+func lookupRemoteModelsIPs(ctx context.Context, host string) ([]net.IP, error) {
+	return net.DefaultResolver.LookupIP(ctx, "ip", host)
+}
+
+func newRemoteModelsHTTPClient() *http.Client {
+	return &http.Client{
+		Timeout: remoteModelsTimeout,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+		Transport: &http.Transport{
+			DialContext: dialRemoteModels,
+		},
+	}
+}
+
+func dialRemoteModels(ctx context.Context, network, addr string) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, err
+	}
+	ips, err := resolveRemoteModelsDialIPs(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+	var lastErr error
+	for _, ip := range ips {
+		conn, err := remoteModelsDialContext(ctx, network, net.JoinHostPort(ip.String(), port))
+		if err == nil {
+			return conn, nil
+		}
+		lastErr = err
+	}
+	if lastErr == nil {
+		return nil, errRemoteModelsHostNotAllowed
+	}
+	return nil, lastErr
+}
+
+func resolveRemoteModelsDialIPs(ctx context.Context, host string) ([]net.IP, error) {
+	if ip := net.ParseIP(host); ip != nil {
+		if isBlockedRemoteModelsIP(ip) {
+			return nil, errRemoteModelsHostNotAllowed
+		}
+		return []net.IP{ip}, nil
+	}
+	ips, err := remoteModelsLookupIP(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+	allowed := make([]net.IP, 0, len(ips))
+	for _, ip := range ips {
+		if !isBlockedRemoteModelsIP(ip) {
+			allowed = append(allowed, ip)
+		}
+	}
+	if len(allowed) == 0 {
+		return nil, errRemoteModelsHostNotAllowed
+	}
+	return allowed, nil
+}
 
 type remoteGroupModelItem struct {
 	ID             string  `json:"id"`
@@ -79,21 +147,23 @@ func modelsListURL(baseURL string) (string, error) {
 		}
 		if v1Index >= 0 {
 			parsed.Path = "/" + strings.Join(segments[:v1Index+1], "/") + "/models"
-		} else {
+		} else if len(segments) == 0 {
 			parsed.Path = "/v1/models"
+		} else {
+			parsed.Path = "/" + strings.Join(segments, "/") + "/v1/models"
 		}
 	}
 	parsed.RawPath = ""
 	parsed.RawQuery = ""
 	parsed.ForceQuery = false
 	parsed.Fragment = ""
-	if err := validateRemoteModelsURL(parsed, false); err != nil {
+	if err := validateRemoteModelsURL(parsed); err != nil {
 		return "", err
 	}
 	return parsed.String(), nil
 }
 
-func validateRemoteModelsURL(parsed *url.URL, resolveHost bool) error {
+func validateRemoteModelsURL(parsed *url.URL) error {
 	scheme := strings.ToLower(parsed.Scheme)
 	if scheme != "http" && scheme != "https" {
 		return errors.New("group base_url must use http or https")
@@ -105,31 +175,19 @@ func validateRemoteModelsURL(parsed *url.URL, resolveHost bool) error {
 	if host == "" {
 		return errors.New("invalid group base_url")
 	}
-	if isBlockedRemoteModelsHost(host, resolveHost) {
-		return errors.New("group base_url host is not allowed")
+	if isBlockedRemoteModelsHost(host) {
+		return errRemoteModelsHostNotAllowed
 	}
 	return nil
 }
 
-func isBlockedRemoteModelsHost(host string, resolveHost bool) bool {
+func isBlockedRemoteModelsHost(host string) bool {
 	lower := strings.ToLower(host)
 	if lower == "metadata.google.internal" || strings.HasSuffix(lower, ".metadata.google.internal") {
 		return true
 	}
 	if ip := net.ParseIP(host); ip != nil {
 		return isBlockedRemoteModelsIP(ip)
-	}
-	if !resolveHost {
-		return false
-	}
-	ips, err := net.LookupIP(host)
-	if err != nil {
-		return true
-	}
-	for _, ip := range ips {
-		if isBlockedRemoteModelsIP(ip) {
-			return true
-		}
 	}
 	return false
 }
@@ -274,8 +332,8 @@ func ListRemoteGroupModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	parsedListURL, err := url.Parse(listURL)
-	if err != nil || validateRemoteModelsURL(parsedListURL, true) != nil {
-		common.ReplyErr(w, "group base_url host is not allowed", http.StatusBadRequest)
+	if err != nil || validateRemoteModelsURL(parsedListURL) != nil {
+		common.ReplyErr(w, errRemoteModelsHostNotAllowed.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -291,6 +349,10 @@ func ListRemoteGroupModels(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := remoteModelsHTTPClient.Do(req)
 	if err != nil {
+		if errors.Is(err, errRemoteModelsHostNotAllowed) {
+			common.ReplyErr(w, errRemoteModelsHostNotAllowed.Error(), http.StatusBadRequest)
+			return
+		}
 		common.ReplyErr(w, "list remote models failed", http.StatusBadGateway)
 		return
 	}
