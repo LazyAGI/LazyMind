@@ -22,11 +22,20 @@ func operationFixture(t *testing.T, mode string) (*orm.DB, PublicWorkspace, stat
 	operationRunValidator.RLock()
 	previous := operationRunValidator.fn
 	operationRunValidator.RUnlock()
-	SetValidateOperationRunFunc(func(_ context.Context, _ *gorm.DB, _ state.Store, request OperationRequest) error {
+	var runSnapshot *ContextSnapshot
+	SetValidateOperationRunFunc(func(ctx context.Context, db *gorm.DB, _ state.Store, request OperationRequest) (*ContextSnapshot, error) {
 		if request.HistoryID != "history" || request.RunID != "run" {
-			return Error("execution_inactive", 409, "conflict")
+			return nil, Error("execution_inactive", 409, "conflict")
 		}
-		return nil
+		if runSnapshot == nil {
+			var err error
+			runSnapshot, err = ResolveForConversation(ctx, db, request.UserID, request.ConversationID)
+			if err != nil {
+				return nil, err
+			}
+		}
+		copy := *runSnapshot
+		return &copy, nil
 	})
 	t.Cleanup(func() { SetValidateOperationRunFunc(previous) })
 	db, grant := workspaceFixture(t)
@@ -178,7 +187,7 @@ func TestWorkspaceOperationRejectsSensitiveMutationEvenWhenAllAllowed(t *testing
 	}
 }
 
-func TestWorkspaceOperationRechecksPermissionBeforeExecution(t *testing.T) {
+func TestWorkspaceOperationKeepsRunPermissionSnapshotUntilNextExecution(t *testing.T) {
 	db, grant, stateStore, conversationID := operationFixture(t, PermissionAllowAll)
 	req := OperationRequest{HistoryID: "history", RunID: "run", UserID: "owner", ConversationID: conversationID, WorkspaceID: grant.WorkspaceID, Operation: OperationCreate, Path: "permission.txt", Content: "ok", CallID: operationTestCallID("permission-call")}
 	prepared, err := PrepareOperation(context.Background(), db.DB, stateStore, req)
@@ -188,11 +197,17 @@ func TestWorkspaceOperationRechecksPermissionBeforeExecution(t *testing.T) {
 	if err := db.Model(&orm.ConversationWorkspaceBinding{}).Where("conversation_id = ?", conversationID).Updates(map[string]any{"permission_mode": PermissionAlwaysAsk, "permission_version": 2}).Error; err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ExecuteOperation(context.Background(), db.DB, stateStore, prepared.OperationID, req); err == nil {
-		t.Fatal("operation executed after permission tightened")
+	if _, err := ExecuteOperation(context.Background(), db.DB, stateStore, prepared.OperationID, req); err != nil {
+		t.Fatalf("same run lost its permission snapshot: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(grant.Path, "permission.txt")); !os.IsNotExist(err) {
-		t.Fatalf("file stat=%v", err)
+	if data, err := os.ReadFile(filepath.Join(grant.Path, "permission.txt")); err != nil || string(data) != "ok" {
+		t.Fatalf("file=%q err=%v", data, err)
+	}
+	second := req
+	second.Path, second.Content, second.CallID = "same-run.txt", "still allowed", operationTestCallID("same-run")
+	prepared, err = PrepareOperation(context.Background(), db.DB, stateStore, second)
+	if err != nil || prepared.Decision != DecisionAllowed {
+		t.Fatalf("same run used updated permission: result=%+v err=%v", prepared, err)
 	}
 }
 
@@ -935,6 +950,35 @@ func TestWorkspaceCompletionFailureIsUncertainAndCannotReplay(t *testing.T) {
 	data, _ := os.ReadFile(file)
 	if string(data) != "seed+one" {
 		t.Fatalf("data %q", data)
+	}
+}
+
+func TestWorkspaceDeleteRechecksFileAfterLifecycleValidation(t *testing.T) {
+	db, grant, _, conversation := operationFixture(t, PermissionAllowAll)
+	ctx := context.Background()
+	snapshot, err := ResolveForConversation(ctx, db.DB, "owner", conversation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(grant.Path, "delete.txt")
+	if err := os.WriteFile(target, []byte("approved"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	parent, name, info, err := openOperationPath(snapshot, "delete.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer parent.Close()
+	touched := false
+	req := OperationRequest{Operation: OperationDelete, ExpectedVersion: digestString("approved")}
+	_, err = executeFileOperation(ctx, parent, name, info, req, PermissionAllowAll, &touched, func() error {
+		return os.WriteFile(target, []byte("replacement"), 0o600)
+	})
+	if err == nil {
+		t.Fatal("delete removed a file changed after validation")
+	}
+	if data, readErr := os.ReadFile(target); readErr != nil || string(data) != "replacement" {
+		t.Fatalf("replacement=%q err=%v", data, readErr)
 	}
 }
 

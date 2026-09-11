@@ -34,6 +34,7 @@ from lazymind.chat.engine.agent_runtime import (
 )
 from lazymind.chat.engine.prompts import add_standard_system_sections
 from lazymind.chat.engine.tools.local_file.workspace import grep, read_file
+from lazymind.chat.engine.tools.local_fs import LocalFileToolkit
 from lazymind.chat.service.component.event_translator import AgentEventFrameTranslator
 from lazymind.chat.service.component.tool_registry import (
     ATTACHMENT_EDIT_TOOL_CONFIG,
@@ -192,11 +193,7 @@ def _materialize_workflow_package(
 
 def _validate_workflow_workspace_package(params: Dict[str, Any], names: List[str], files: Dict[str, Any]) -> None:
     """Reject executable Workflow packages until Core supplies a trusted admission proof."""
-    parent = params.get('parent_agentic_config')
-    context = params.get('_core_workspace_context') or params.get('workspace_context')
-    if not isinstance(context, dict) or not context:
-        context = parent.get('_core_workspace_context') if isinstance(parent, dict) else None
-    if not isinstance(context, dict) or not context:
+    if LocalFileToolkit._workspace_binding_from_config(params) is None:
         return
     declared = {str(name).strip() for name in names if str(name).strip()}
     scripts = {str(path) for path in files if str(path).startswith('scripts/') and str(path).endswith('.py')}

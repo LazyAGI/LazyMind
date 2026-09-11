@@ -68,6 +68,7 @@ from lazymind.chat.engine.agent_runtime import (
     render_attachment_content,
 )
 from lazymind.chat.engine.tools.local_file.workspace import build_resource_read_tools, chat_agent_workspace
+from lazymind.chat.engine.tools.local_fs import LocalFileToolkit
 from lazymind.chat.engine.tools.intent_writer import (
     build_intentwrite_tool,
     render_intent_section,
@@ -425,7 +426,7 @@ def _build_chat_workspace_read_tools() -> list:
     return [grep, read_file]
 
 
-def _build_chat_artifact_tools() -> list:
+def _build_chat_artifact_tools(*, bound_local_workspace: bool = False) -> list:
     """Workspace and artifact tools for the main ChatAgent."""
     from lazymind.chat.engine.tools.local_file.workspace import (
         list_dir,
@@ -433,7 +434,8 @@ def _build_chat_artifact_tools() -> list:
         write_file,
     )
     grep, read_file = _build_chat_workspace_read_tools()
-    return [save_chat_artifact, grep, read_file, write_file, list_dir]
+    tools = [save_chat_artifact, grep, read_file, write_file, list_dir]
+    return [tool for tool in tools if not bound_local_workspace or tool is not write_file]
 
 
 def _build_user_attachment_tools(has_files: bool) -> list:
@@ -1202,6 +1204,7 @@ async def _handle_chat_impl(
 
     disabled = set(agent.disabled_tools or [])
     workspace = chat_agent_workspace(user_id or '0', conversation_id)
+    bound_local_workspace = LocalFileToolkit._workspace_binding_from_config(agentic_config) is not None
     if sidechat_readonly:
         active_configs = build_sidechat_tool_configs(
             [cfg for cfg in [*DEFAULT_TOOLS, *(USER_ATTACHMENT_TOOL_CONFIGS if files_map else ())]
@@ -1314,7 +1317,8 @@ async def _handle_chat_impl(
         # so compacted tool results and referenced attachments can still be inspected.
         workspace_read_tools = _build_chat_workspace_read_tools()
         artifact_tools = (
-            workspace_read_tools if workflow_turn_is_bound else _build_chat_artifact_tools()
+            workspace_read_tools if workflow_turn_is_bound
+            else _build_chat_artifact_tools(bound_local_workspace=bound_local_workspace)
         )
         skill_listing_tools = (
             [] if workflow_turn_is_bound
@@ -1507,6 +1511,14 @@ async def _handle_chat_impl(
             'its outputs only through the injected Workflow session tools. Do not '
             'create a generic chat artifact or claim that a workspace file updates '
             'the Workflow preview.'
+        )
+    elif bound_local_workspace:
+        workspace_policy = (
+            'This turn is bound to a user-authorized local workspace. Use LocalFileToolkit for every '
+            'read, create, modify, append, delete, list, and search operation in that workspace; Core '
+            'enforces the selected permission mode and may wait for user approval. The generic chat '
+            'write_file tool is unavailable because it writes only to an internal artifact staging '
+            'directory. Use save_chat_artifact only when the user also needs a downloadable chat artifact.'
         )
     elif _cfg['trusted_local_mode']:
         workspace_policy = (

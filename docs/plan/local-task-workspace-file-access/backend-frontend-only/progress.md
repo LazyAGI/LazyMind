@@ -499,3 +499,68 @@ Core最终全量83包通过（另5包无测试），算法P1修复与Workflow广
 ### 冻结点
 
 代码与测试冻结提交为 `8f279db3`（树 `9209e6f5fcad87e01d94d0d0b08b81d699626d4a`）。关键生产文件的 SHA-256 已写入 `IMPLEMENTATION_PLAN.md`；冻结后只允许文档记录或用户明确批准的新批次。
+
+## 2026-09-10 新建对话工作区入口批次
+
+- 需求最终澄清：目录选择只出现在新建对话草稿；正式会话不显示工作区名称或路径，但已绑定会话持续显示权限按钮并允许修改。
+- 当前验证：ChatInput 6 项通过；按飞书 HTML 原型重排后的 LocalWorkspaceControl 32 项通过。
+- 本次布局修正后的类型检查、生产构建与页面核对待执行。
+- 边界：`git diff --check` 通过；`local/`、`desktop/` 对冻结点 `ec4676e0` 无差异；LazyLLM 对官方基线无差异且子模块干净。
+- 生产范围为现有 ChatInput、LocalWorkspaceControl、样式和中英文文案；复用现有 Core API、目录授权弹窗和权限状态，不新增服务、依赖或数据表。
+- 待验证：真实绑定会话中的权限按钮和下一次执行生效提示。
+
+### 新建对话工作区 UI 收尾
+
+按最终产品澄清，新建任务草稿提供目录选择；正式会话查询 Core 绑定，绑定存在时仅显示可修改的权限按钮。菜单复用现有目录授权、最近授权目录、管理授权和 native picker。定向矩阵为 `LocalWorkspaceControl` 32 项、`ChatInput` 6 项全部通过；`pnpm run typecheck` 与生产构建通过。前端生产差异 5 个既有文件及 2 个文案文件 `+369/-54`，测试 `+59/-10`，文案 2 个既有文件；无新增生产文件。Local/Desktop 与 LazyLLM 冻结边界通过。
+
+- 视觉修正：工作区与权限控件统一为 28px 高、12px 常规字重、灰蓝文字和 6px 圆角；下拉固定向下展开。使用 `VITE_LAZYMIND_MODE=local` 构建后在 8090 新建任务页完成浏览器核对。
+
+### 参考图菜单与会话权限修正
+
+工作区菜单补齐图标底板、分组和搜索样式；首次授权改为目录卡片弹窗；权限下拉改为三档图标、说明和选中标记；“全部允许”使用分项风险确认。安全文案严格限定为已授权工作区文件操作，不宣称任意命令、互联网或 trusted 能力。所有正式会话查询 Core 绑定，只有已绑定会话显示权限按钮，不显示工作区名称或路径。定向测试 38 项、类型检查和 Local 生产构建通过。
+
+- 按产品反馈永久删除输入栏“工作区请求（数量）”标识；保留底层审批轮询与决定能力，确有 pending 操作时直接弹出审批窗口。删除只服务于旧常驻入口的冗余 UI 测试，新增“pending 也不显示计数标识、直接弹窗”合同。最终定向测试 29 项通过，类型检查和 Local 生产构建通过。
+
+
+## 2026-09-10 独立精简 Review 完成（未实施修复）
+
+- 新建 `CODE_REVIEW.md`，并仅在 findings/progress 末尾追加摘要；保留原有 11 个未提交修改，不提交、不推送。
+- 审查覆盖 Core 操作/身份/迁移、Algorithm 工具准入与私有上下文、前端未提交生命周期和 UI；逐项按 A–E 给出调用者、方案、生产行数收益、风险和补测。
+- 结论：4 项 Important 阻止直接提交，另列 Minor 与未确认风险。优先修合同/正确性，再分前端旧文案（6 行）、Core 局部 helper（5–7 行）、Algorithm 检测/整形（3–9 行）三个批次精简。
+- 本次实跑：Core 去缓存四包通过、vet 通过；Python 160 passed/1 skipped；pnpm typecheck 通过但全量 tsc 失败（450 条/103 文件）。Vitest 因只读保护下 Vite 需要写配置而未执行，PostgreSQL 无测试 DSN 跳过。Local/Desktop、LazyLLM 内容与 gitlink 冻结核验通过。
+- 命令错误：首次从 `frontend` 运行前端测试写入脚本时误用了 `frontend/...` 路径，Python 报 FileNotFoundError；随后只重跑原 29 项测试并通过，没有写入改动。后续编辑统一从仓库根执行。
+
+## 2026-09-10 Code Review 建议修复完成
+
+- 已处理 I1–I4、M1–M4、A1–A3、B1–B3、E1；E2 与无视觉证据的 SCSS 删除未实施。
+- 生产修改：Backend 10 文件 `+164/-78`、净 `+86`；Algorithm 2 文件 `+19/-16`、净 `+3`；Frontend 按 Review 前后同口径净 `+23`；无新增生产文件，总净增约 `112`。
+- 复用点：ChatInput ext、SubAgent task params、`RebuildSubagentParams`、现有 run/generation/attempt/lease 校验、workspace version/directory identity、`readOperationFile`/digest、`configResetKey`、Ant Design Modal、现有 approval polling 与 LocalFileToolkit binding detector。
+- 红灯确认：执行中权限变化原测试返回 forbidden；delete 在 revalidate 中替换文件后仍删除；草稿 reset 后 payload 保留旧 workspace；`ls()` 调用序列为 `info, info`；全量 tsc 在本功能文件报 5 项错误。实现后对应回归全部通过。
+- Core：`go test -count=1 ./...` 通过，`go vet ./...` 通过；`go test -race -count=1 ./localworkspace ./chat` 通过（localworkspace 61.519s、chat 151.243s）；Linux/Windows amd64 localworkspace 交叉编译通过。
+- Algorithm：指定 7 文件 `163 passed, 1 skipped, 3 warnings`；变更文件 `py_compile` 通过。测试使用仓库 3.11 业务环境和临时只暴露 pytest 纯 Python 包的 runner，没有修改依赖或仓库缓存。
+- Frontend：LocalWorkspaceControl/ChatInput `33 passed`；`pnpm run typecheck`、变更文件 ESLint、OpenAPI fresh 和 `VITE_LAZYMIND_MODE=local ... pnpm run build` 通过。Vitest 仍输出仓库既有 React `act(...)` 与 Sass legacy API 警告。全量 `tsc --noEmit` 仍 exit 2、468 行仓库既有诊断，本功能文件 0 诊断。
+- 边界复核：`git diff --check` 通过；Local/Desktop 对 `ec4676e0d0fb290d81b3160a56e798849ea2d4e4` 无差异；`algorithm/lazyllm` 对官方基线无差异且子模块工作树为空。
+- 未验证：真实登录/模型/native picker、打包 Desktop、真实 PostgreSQL、跨平台实机、外部编辑器在最后一次版本复核与 Remove 之间的不可消除竞态。未提交、未推送。
+
+## 2026-09-11 always_ask 旁路修复
+
+- 生产日志定位：会话绑定确为 `always_ask`，但模型调用旧 `write_file`，成功写入内部 Chat artifact staging 目录；未进入 Core workspace prepare/approval 链路。真正的 `LocalFileToolkit_delete/read` 调用失败，证明 Core 审批并未被绕过。
+- 修复文件：`algorithm/lazymind/chat/service/chat_service.py`；绑定 `local-workspace:*` source 时从主 ChatAgent 工具表移除旧 `write_file`，保留 `save_chat_artifact`；新增系统提示解释两者边界。未绑定对话行为保持不变。
+- 新增回归：`tests/algorithm/chat/test_file_resource.py` 验证 bound/unbound 工具集合；`tests/algorithm/chat/test_episode_memory_injection.py` 验证最终 Agent plan 不暴露旧 writer 且提示要求 `LocalFileToolkit`。
+- 测试：相关工具和 Chat prompt 回归 `150 passed, 1 skipped, 3 warnings`；`py_compile`、`git diff --check`、Local/Desktop 和 LazyLLM 冻结检查通过。
+- 本次生产新增 `+15/-3`；测试新增 `+38`；`chat_service.py` SHA-256=`44b207937ade58ccf9bc0324b8b59f5df6ef02c0356ce789a0ae1105248db173`。
+- 仍需人工重启 `make local-up` 后复现确认：绑定工作区下创建/修改文件应只出现 Core pending 审批；内部下载产物仍可用 `save_chat_artifact`。
+
+### 2026-09-11 批准窗口成功后关闭修复
+
+- 复现并定位：`LocalWorkspaceControl` 在批准/拒绝接口成功后只更新 operation 状态，没有关闭 `approvalsOpen`；随后轮询短暂返回旧 `pending` 时还会重新打开窗口。
+- 最小修复仅修改 `frontend/src/modules/chat/components/ChatInput/LocalWorkspaceControl.tsx`：决定成功后将 operation 加入现有 dismissed 集合；若没有其他 pending operation，立即关闭批准窗口；仍有其他 pending 时保持窗口打开。复用现有轮询、dismissed operation 去重和 Core decide API，没有新增生产文件、依赖或抽象。
+- 测试先行：新增“最后一个 pending 批准后关闭且旧轮询结果不重开”和“仍有其他 pending 时保持打开”两项回归。第一项在修复前按预期失败，修复后组件全量定向测试 `27 passed`。
+- 当前未验证：前端类型检查、生产构建和真实 Local 页面操作将在本批次后续完成；本轮未修改 backend、algorithm、Local/Desktop 或 LazyLLM。
+
+- 本批次最终自动验证：`NODE_OPTIONS=--no-experimental-webstorage pnpm exec vitest run src/modules/chat/components/ChatInput/LocalWorkspaceControl.test.tsx src/modules/chat/components/ChatInput/index.test.tsx` 为 35 passed；`pnpm run typecheck` 通过；变更组件 ESLint 通过；`VITE_LAZYMIND_MODE=local NODE_OPTIONS=--no-experimental-webstorage pnpm run build` 通过。构建仅保留仓库既有警告。
+- `git diff --check` 通过；本批次没有修改 `local/`、`desktop/`、LazyLLM 内容或 gitlink。真实页面仍需重启 Local 服务后触发一次 always-ask operation，确认批准成功时窗口关闭。
+
+### 2026-09-11 提交与推送批次
+
+提交前重新验证：Backend 四包通过；Frontend 35 项通过、typecheck 与 Local 生产构建通过；Algorithm 正确 Python 3.11/LazyLLM 环境为 65 passed、1 skipped；`git diff --check` 与冻结边界通过。提交范围为 18 个生产文件、13 个测试文件和四份交接文档，不包含 `algorithm/Dockerfile`、临时验收文件或独立 Review 报告。

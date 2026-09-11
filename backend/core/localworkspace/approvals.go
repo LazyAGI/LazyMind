@@ -177,14 +177,15 @@ func requireOperationServiceToken(w http.ResponseWriter, r *http.Request) bool {
 }
 
 func validateLiveOperation(ctx context.Context, db *gorm.DB, stateStore state.Store, value operationState) error {
-	if err := validateOperationRun(ctx, db, stateStore, value.Request); err != nil {
-		return err
-	}
-	snapshot, err := resolveOperation(ctx, db, value.Request)
+	runSnapshot, err := validateOperationRun(ctx, db, stateStore, value.Request)
 	if err != nil {
 		return err
 	}
-	if snapshot.WorkspaceVersion != value.WorkspaceVersion || snapshot.PermissionVersion != value.PermissionVersion {
+	snapshot, err := resolveOperation(ctx, db, value.Request, runSnapshot)
+	if err != nil {
+		return err
+	}
+	if snapshot.WorkspaceVersion != value.WorkspaceVersion {
 		return Error("selection_forbidden", 403, "forbidden")
 	}
 	return nil

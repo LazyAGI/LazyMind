@@ -129,7 +129,8 @@ func PrepareOperation(ctx context.Context, db *gorm.DB, stateStore state.Store, 
 	if err := validateOperationRequest(req); err != nil {
 		return OperationResult{}, err
 	}
-	if err := validateOperationRun(ctx, db, stateStore, req); err != nil {
+	runSnapshot, err := validateOperationRun(ctx, db, stateStore, req)
+	if err != nil {
 		return OperationResult{}, err
 	}
 	identity, _ := json.Marshal([]string{req.UserID, req.ConversationID, req.RunID, req.HistoryID, req.TaskID, req.Generation, req.AttemptID, req.LeaseToken, req.CallID})
@@ -159,7 +160,7 @@ func PrepareOperation(ctx context.Context, db *gorm.DB, stateStore state.Store, 
 	if !ok || parseErr != nil || age < -5000 || age >= operationStateTTL.Milliseconds() {
 		return OperationResult{}, Error("selection_expired", 409, "conflict")
 	}
-	snapshot, err := resolveOperation(ctx, db, req)
+	snapshot, err := resolveOperation(ctx, db, req, runSnapshot)
 	if err != nil {
 		return OperationResult{}, err
 	}
@@ -237,7 +238,7 @@ func ExecuteOperation(ctx context.Context, db *gorm.DB, stateStore state.Store, 
 	if !matchesOperation(value, req) {
 		return OperationResult{}, Error("binding_conflict", 409, "conflict")
 	}
-	if err := validateOperationRun(ctx, db, stateStore, req); err != nil {
+	if _, err := validateOperationRun(ctx, db, stateStore, req); err != nil {
 		return OperationResult{}, err
 	}
 	if value.Status == operationCompleted {
@@ -287,11 +288,15 @@ func ExecuteOperation(ctx context.Context, db *gorm.DB, stateStore state.Store, 
 				return err
 			}
 		}
-		snapshot, err := resolveOperation(ctx, tx, req)
+		runSnapshot, err := validateOperationRun(ctx, tx, stateStore, req)
 		if err != nil {
 			return err
 		}
-		if snapshot.WorkspaceVersion != value.WorkspaceVersion || snapshot.PermissionVersion != value.PermissionVersion || snapshot.PermissionMode != value.PermissionMode {
+		snapshot, err := resolveOperation(ctx, tx, req, runSnapshot)
+		if err != nil {
+			return err
+		}
+		if snapshot.WorkspaceVersion != value.WorkspaceVersion {
 			return Error("selection_forbidden", 403, "forbidden")
 		}
 		parent, name, info, err := openOperationPath(snapshot, req.Path)
@@ -305,9 +310,6 @@ func ExecuteOperation(ctx context.Context, db *gorm.DB, stateStore state.Store, 
 		if time.Now().UnixMilli() >= value.ExpiresAt {
 			return Error("selection_expired", 409, "conflict")
 		}
-		if err := validateOperationRun(ctx, tx, stateStore, req); err != nil {
-			return err
-		}
 		revalidate := func() error {
 			if err := ctx.Err(); err != nil {
 				return err
@@ -315,7 +317,8 @@ func ExecuteOperation(ctx context.Context, db *gorm.DB, stateStore state.Store, 
 			if time.Now().UnixMilli() >= value.ExpiresAt {
 				return Error("selection_expired", 409, "conflict")
 			}
-			return validateOperationRun(ctx, tx, stateStore, req)
+			_, err := validateOperationRun(ctx, tx, stateStore, req)
+			return err
 		}
 		result, err = executeFileOperation(ctx, parent, name, info, req, snapshot.PermissionMode, &touched, revalidate)
 		return err
@@ -345,15 +348,22 @@ func ExecuteOperation(ctx context.Context, db *gorm.DB, stateStore state.Store, 
 	return result, nil
 }
 
-func resolveOperation(ctx context.Context, db *gorm.DB, req OperationRequest) (*ContextSnapshot, error) {
-	snapshot, err := ResolveForConversation(ctx, db, req.UserID, req.ConversationID)
+func resolveOperation(ctx context.Context, db *gorm.DB, req OperationRequest, runSnapshot *ContextSnapshot) (*ContextSnapshot, error) {
+	live, err := ResolveForConversation(ctx, db, req.UserID, req.ConversationID)
 	if err != nil {
 		return nil, err
 	}
-	if snapshot == nil || snapshot.WorkspaceID != req.WorkspaceID {
+	if live == nil || live.WorkspaceID != req.WorkspaceID {
 		return nil, Error("workspace_not_found", 404, "resource not found")
 	}
-	return snapshot, nil
+	if runSnapshot == nil {
+		runSnapshot = live
+	}
+	if runSnapshot.WorkspaceID != req.WorkspaceID || live.WorkspaceVersion != runSnapshot.WorkspaceVersion {
+		return nil, Error("selection_forbidden", 403, "forbidden")
+	}
+	runSnapshot.Root, runSnapshot.DirectoryIdentity, runSnapshot.Sources = live.Root, live.DirectoryIdentity, live.Sources
+	return runSnapshot, nil
 }
 
 func readOperation(op OperationKind) bool {
@@ -522,6 +532,17 @@ func executeFileOperation(ctx context.Context, root *os.Root, name string, info 
 		if err := revalidate(); err != nil {
 			return OperationResult{}, err
 		}
+		current, err := root.Lstat(name)
+		if err != nil || !os.SameFile(info, current) {
+			return OperationResult{}, Error("binding_conflict", 409, "conflict")
+		}
+		check, err := readOperationFile(root, name, current)
+		if err != nil {
+			return OperationResult{}, err
+		}
+		if digestBytes(check) != version {
+			return OperationResult{}, Error("binding_conflict", 409, "conflict")
+		}
 		*touched = true
 		return OperationResult{Version: version}, root.Remove(name)
 	}
@@ -648,12 +669,9 @@ func isSensitivePath(path string) bool {
 	return strings.Contains(base, "credentials") || strings.HasPrefix(base, "service-account")
 }
 
-func sameOperationCall(expected, actual OperationRequest) bool {
-	return requestWithoutContent(expected) == requestWithoutContent(actual)
-}
-
 func matchesOperation(value operationState, req OperationRequest) bool {
-	return sameOperationCall(value.Request, req) && value.ContentDigest == digestString(req.Content) && value.OldContentDigest == digestString(req.OldContent)
+	return requestWithoutContent(value.Request) == requestWithoutContent(req) &&
+		value.ContentDigest == digestString(req.Content) && value.OldContentDigest == digestString(req.OldContent)
 }
 
 func requestWithoutContent(req OperationRequest) OperationRequest {

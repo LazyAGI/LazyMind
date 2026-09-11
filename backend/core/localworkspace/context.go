@@ -12,13 +12,31 @@ import (
 )
 
 type ContextSnapshot struct {
-	WorkspaceID       string
-	Root              string
-	DirectoryIdentity string
-	WorkspaceVersion  int64
-	PermissionMode    string
-	PermissionVersion int64
-	Sources           []map[string]any
+	WorkspaceID       string           `json:"workspace_id"`
+	Root              string           `json:"root,omitempty"`
+	DirectoryIdentity string           `json:"directory_identity,omitempty"`
+	WorkspaceVersion  int64            `json:"workspace_version"`
+	PermissionMode    string           `json:"permission_mode"`
+	PermissionVersion int64            `json:"permission_version"`
+	Sources           []map[string]any `json:"sources,omitempty"`
+}
+
+func SnapshotFromMetadata(value any) *ContextSnapshot {
+	body, err := json.Marshal(value)
+	if err != nil {
+		return nil
+	}
+	var snapshot ContextSnapshot
+	if json.Unmarshal(body, &snapshot) != nil || snapshot.WorkspaceID == "" || snapshot.WorkspaceVersion < 1 ||
+		!ValidPermissionMode(snapshot.PermissionMode) || snapshot.PermissionVersion < 1 {
+		return nil
+	}
+	return &snapshot
+}
+
+func SnapshotFromParams(params map[string]any) *ContextSnapshot {
+	parent, _ := params["parent_agentic_config"].(map[string]any)
+	return SnapshotFromMetadata(parent[coreWorkspaceContextKey])
 }
 
 func ResolveForConversation(ctx context.Context, db *gorm.DB, userID, conversationID string) (*ContextSnapshot, error) {
@@ -69,20 +87,15 @@ func snapshot(workspace orm.LocalWorkspace, mode string, version int64) *Context
 	if version < 1 {
 		version = 1
 	}
-	value := snapshotForValues(workspace.ID, workspace.CanonicalPath, workspace.Version, mode, version)
-	value.DirectoryIdentity = workspace.DirectoryIdentity
-	return value
-}
-
-func snapshotForValues(id, root string, workspaceVersion int64, mode string, permissionVersion int64) *ContextSnapshot {
-	return &ContextSnapshot{WorkspaceID: id, Root: root, WorkspaceVersion: workspaceVersion,
-		PermissionMode: mode, PermissionVersion: permissionVersion,
-		Sources: []map[string]any{{"source_id": "local-workspace:" + id,
-			"paths": []string{root}, "file_extensions": common.TextFileExtensions()}},
+	return &ContextSnapshot{WorkspaceID: workspace.ID, Root: workspace.CanonicalPath,
+		DirectoryIdentity: workspace.DirectoryIdentity, WorkspaceVersion: workspace.Version,
+		PermissionMode: mode, PermissionVersion: version,
+		Sources: []map[string]any{{"source_id": "local-workspace:" + workspace.ID,
+			"paths": []string{workspace.CanonicalPath}, "file_extensions": common.TextFileExtensions()}},
 	}
 }
 
-func ModelNotice(snapshot ContextSnapshot, actor string) string {
+func ModelNotice(snapshot ContextSnapshot) string {
 	data, _ := json.Marshal(map[string]any{"root": snapshot.Root,
 		"permission_mode": snapshot.PermissionMode, "permission_version": snapshot.PermissionVersion})
 	return "本任务的工作区：" + string(data) +
@@ -94,5 +107,5 @@ func BuildRequestQuery(original string, snapshot *ContextSnapshot) string {
 	if snapshot == nil {
 		return original
 	}
-	return ModelNotice(*snapshot, "main") + "\n\n" + original
+	return ModelNotice(*snapshot) + "\n\n" + original
 }

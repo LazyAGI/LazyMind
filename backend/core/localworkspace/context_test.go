@@ -3,6 +3,8 @@ package localworkspace
 import (
 	"strings"
 	"testing"
+
+	"lazymind/core/common/orm"
 )
 
 func TestBuildRequestQueryKeepsOriginalAndAddsWorkspace(t *testing.T) {
@@ -21,7 +23,7 @@ func TestBuildRequestQueryKeepsOriginalAndAddsWorkspace(t *testing.T) {
 }
 
 func TestSnapshotUsesExistingLocalFSContract(t *testing.T) {
-	snapshot := snapshotForValues("grant", "/tmp/project", 2, PermissionAllowAll, 4)
+	snapshot := snapshot(orm.LocalWorkspace{ID: "grant", CanonicalPath: "/tmp/project", Version: 2}, PermissionAllowAll, 4)
 	if len(snapshot.Sources) != 1 {
 		t.Fatalf("sources=%v", snapshot.Sources)
 	}

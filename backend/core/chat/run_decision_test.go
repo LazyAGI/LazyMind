@@ -297,7 +297,7 @@ func workspaceIdentityFixture(t *testing.T) (*gorm.DB, state.Store, localworkspa
 	}
 	conversationID := fmt.Sprintf("identity-%d", time.Now().UnixNano())
 	corestore.Init(db.DB, nil, stateStore)
-	localworkspace.SetValidateOperationRunFunc(func(ctx context.Context, db *gorm.DB, ss state.Store, request localworkspace.OperationRequest) error {
+	localworkspace.SetValidateOperationRunFunc(func(ctx context.Context, db *gorm.DB, ss state.Store, request localworkspace.OperationRequest) (*localworkspace.ContextSnapshot, error) {
 		if request.TaskID != "" {
 			return subagent.ValidateWorkspaceRun(ctx, db, ss, request)
 		}
@@ -322,6 +322,17 @@ func workspaceIdentityFixture(t *testing.T) (*gorm.DB, state.Store, localworkspa
 		t.Fatal(err)
 	}
 	return db.DB, stateStore, localworkspace.OperationRequest{UserID: "owner", ConversationID: conversationID, WorkspaceID: grant.WorkspaceID, Operation: localworkspace.OperationRead, Path: "read.txt", CallID: fmt.Sprintf("%d/call", time.Now().UnixMilli())}
+}
+
+func setWorkspaceRunInput(t *testing.T, db *gorm.DB, stateStore state.Store, req localworkspace.OperationRequest) {
+	t.Helper()
+	snapshot, err := localworkspace.ResolveForConversation(t.Context(), db, req.UserID, req.ConversationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := setChatInput(t.Context(), stateStore, req.ConversationID, req.HistoryID, "workspace", 1, mergeWorkspaceContextIntoExt(nil, snapshot)); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestWorkspaceChatEntrypointsRegisterAndFinishRuns(t *testing.T) {
@@ -380,7 +391,11 @@ func TestWorkspaceChatEntrypointsRegisterAndFinishRuns(t *testing.T) {
 			if err := applyConversationChatModelConfig(t.Context(), db, base.UserID, body); err != nil {
 				t.Fatal(err)
 			}
-			ext := mergeChatModelRouteIntoExt(nil, body)
+			snapshot, err := localworkspace.ResolveForConversation(t.Context(), db, base.UserID, base.ConversationID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ext := mergeWorkspaceContextIntoExt(mergeChatModelRouteIntoExt(nil, body), snapshot)
 			target := chatPersistTarget{Seq: 1, HistoryID: "entry-history"}
 			recorder := httptest.NewRecorder()
 			if mode == "nonstream" {
@@ -433,6 +448,16 @@ func TestWorkspaceMainIdentityRequiresRegisteredLiveRun(t *testing.T) {
 	if err := setChatRuntimeStatus(t.Context(), ss, req.ConversationID, req.HistoryID, "generating", "", req.RunID, nil); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := localworkspace.PrepareOperation(t.Context(), db, ss, req); err == nil {
+		t.Fatal("registered run without a Core workspace snapshot was accepted")
+	}
+	snapshot, err := localworkspace.ResolveForConversation(t.Context(), db, req.UserID, req.ConversationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := setChatInput(t.Context(), ss, req.ConversationID, req.HistoryID, "read", 1, mergeWorkspaceContextIntoExt(nil, snapshot)); err != nil {
+		t.Fatal(err)
+	}
 	prepared, err := localworkspace.PrepareOperation(t.Context(), db, ss, req)
 	if err != nil {
 		t.Fatalf("fresh registered run: %v", err)
@@ -478,10 +503,44 @@ func TestWorkspaceMainIdentityRequiresRegisteredLiveRun(t *testing.T) {
 	}
 }
 
+func TestWorkspacePermissionChangeAppliesToNextChatRun(t *testing.T) {
+	db, ss, req := workspaceIdentityFixture(t)
+	req.HistoryID, req.RunID = "permission-history-1", "permission-run-1"
+	if err := setChatRuntimeStatus(t.Context(), ss, req.ConversationID, req.HistoryID, "generating", "", req.RunID, nil); err != nil {
+		t.Fatal(err)
+	}
+	setWorkspaceRunInput(t, db, ss, req)
+	if err := db.Model(&orm.ConversationWorkspaceBinding{}).Where("conversation_id = ?", req.ConversationID).
+		Updates(map[string]any{"permission_mode": localworkspace.PermissionAlwaysAsk, "permission_version": 2}).Error; err != nil {
+		t.Fatal(err)
+	}
+	req.Operation, req.Path, req.CallID = localworkspace.OperationCreate, "same-run.txt", fmt.Sprintf("%d/same-run", time.Now().UnixMilli())
+	prepared, err := localworkspace.PrepareOperation(t.Context(), db, ss, req)
+	if err != nil || prepared.Decision != localworkspace.DecisionAllowed {
+		t.Fatalf("same run decision=%s err=%v", prepared.Decision, err)
+	}
+	finishRegisteredChatRun(t.Context(), ss, req.ConversationID, req.HistoryID, req.RunID)
+
+	req.HistoryID, req.RunID, req.Path, req.CallID = "permission-history-2", "permission-run-2", "next-run.txt", fmt.Sprintf("%d/next-run", time.Now().UnixMilli())
+	if err := setChatRuntimeStatus(t.Context(), ss, req.ConversationID, req.HistoryID, "generating", "", req.RunID, nil); err != nil {
+		t.Fatal(err)
+	}
+	setWorkspaceRunInput(t, db, ss, req)
+	prepared, err = localworkspace.PrepareOperation(t.Context(), db, ss, req)
+	if err != nil || prepared.Decision != localworkspace.DecisionPending {
+		t.Fatalf("next run decision=%s err=%v", prepared.Decision, err)
+	}
+}
+
 func TestWorkspaceWorkflowIdentityRequiresCurrentOwnedLease(t *testing.T) {
 	db, ss, req := workspaceIdentityFixture(t)
 	expires := time.Now().UTC().Add(time.Hour)
-	task := orm.SubAgentTask{ID: "workflow-task", ConversationID: req.ConversationID, CreateUserID: req.UserID, AgentType: "workflow_step", Status: "running", Mode: "auto", InputSlots: json.RawMessage(`[]`), OutputSlots: json.RawMessage(`[]`)}
+	params, err := localworkspace.RebuildSubagentParams(t.Context(), db, req.UserID, req.ConversationID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	paramsJSON, _ := json.Marshal(params)
+	task := orm.SubAgentTask{ID: "workflow-task", ConversationID: req.ConversationID, CreateUserID: req.UserID, AgentType: "workflow_step", Status: "running", Mode: "auto", Params: paramsJSON, InputSlots: json.RawMessage(`[]`), OutputSlots: json.RawMessage(`[]`)}
 	revision := orm.WorkflowRevision{ID: "workspace-revision", CompiledGraph: json.RawMessage(`{"nodes":{"step":{"legacy_tools":["local_fs"]}}}`)}
 	session := orm.WorkflowSession{WorkflowRevisionID: revision.ID, ID: "workflow-session", ConversationID: req.ConversationID, CreateUserID: req.UserID, Status: "active"}
 	step := orm.WorkflowSessionStep{ID: "workflow-attempt", SessionID: session.ID, TaskID: task.ID, StepID: "step", Status: "running", Validity: "effective", FencingGeneration: 2, LeaseToken: "current-lease", LeaseExpiresAt: &expires}
@@ -549,6 +608,7 @@ func TestWorkspaceBackendIntegration(t *testing.T) {
 		if err := db.Model(&orm.ConversationWorkspaceBinding{}).Where("conversation_id = ?", req.ConversationID).Update("permission_mode", localworkspace.PermissionAlwaysAsk).Error; err != nil {
 			t.Fatal(err)
 		}
+		setWorkspaceRunInput(t, db, ss, req)
 		var workspace orm.LocalWorkspace
 		if err := db.Where("id = ?", req.WorkspaceID).First(&workspace).Error; err != nil {
 			t.Fatal(err)
@@ -725,7 +785,7 @@ func TestWorkspaceBackendIntegration(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(root, req.Path)); !os.IsNotExist(err) {
 			t.Fatalf("revoked file exists: %v", err)
 		}
-		if err := ValidateWorkspaceRun(t.Context(), ss, req); err == nil {
+		if _, err := ValidateWorkspaceRun(t.Context(), ss, req); err == nil {
 			t.Fatal("run survived explicit revoke cancellation")
 		}
 	})
@@ -799,6 +859,7 @@ func TestWorkspaceExecutionProcesses(t *testing.T) {
 			if err := db.Model(&orm.ConversationWorkspaceBinding{}).Where("conversation_id = ?", req.ConversationID).Update("permission_mode", localworkspace.PermissionAlwaysAsk).Error; err != nil {
 				t.Fatal(err)
 			}
+			setWorkspaceRunInput(t, db, ss, req)
 			req.Operation, req.Content, req.ExpectedVersion = localworkspace.OperationAppend, "!", fmt.Sprintf("%x", sha256.Sum256([]byte("content")))
 			prepared, err := localworkspace.PrepareOperation(t.Context(), db, ss, req)
 			if err != nil {
@@ -946,7 +1007,7 @@ func TestWorkspaceBackendExecutionWorker(t *testing.T) {
 		ss = crashBeforeWorkspaceCompletedStore{Store: ss}
 	}
 	corestore.Init(db.DB, nil, ss)
-	localworkspace.SetValidateOperationRunFunc(func(ctx context.Context, _ *gorm.DB, ss state.Store, req localworkspace.OperationRequest) error {
+	localworkspace.SetValidateOperationRunFunc(func(ctx context.Context, _ *gorm.DB, ss state.Store, req localworkspace.OperationRequest) (*localworkspace.ContextSnapshot, error) {
 		return ValidateWorkspaceRun(ctx, ss, req)
 	})
 	if err := os.WriteFile(filepath.Join(spec.SyncDir, "ready-"+spec.WorkerID), nil, 0600); err != nil {
@@ -996,12 +1057,19 @@ func TestWorkspacePythonCoreHTTP(t *testing.T) {
 				if err := setChatRuntimeStatus(t.Context(), ss, request.ConversationID, identity["history_id"], "generating", "", identity["run_id"], nil); err != nil {
 					t.Fatal(err)
 				}
+				request.HistoryID, request.RunID = identity["history_id"], identity["run_id"]
+				setWorkspaceRunInput(t, db, ss, request)
 			} else {
 				kind := "research"
 				if actor == "workflow" {
 					kind = "workflow_step"
 				}
-				task := orm.SubAgentTask{ID: request.ConversationID + "-child", ConversationID: request.ConversationID, CreateUserID: "owner", AgentType: kind, Status: "running", Mode: "auto", InputSlots: json.RawMessage(`[]`), OutputSlots: json.RawMessage(`[]`)}
+				params, err := localworkspace.RebuildSubagentParams(t.Context(), db, request.UserID, request.ConversationID, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				paramsJSON, _ := json.Marshal(params)
+				task := orm.SubAgentTask{ID: request.ConversationID + "-child", ConversationID: request.ConversationID, CreateUserID: "owner", AgentType: kind, Status: "running", Mode: "auto", Params: paramsJSON, InputSlots: json.RawMessage(`[]`), OutputSlots: json.RawMessage(`[]`)}
 				if err := db.Create(&task).Error; err != nil {
 					t.Fatal(err)
 				}

@@ -1612,20 +1612,19 @@ const zhCN = {
 
   chat: {
     workspace: {
-      select: "选择工作区", recent: "最近目录", authorizeTitle: "允许访问此工作区？", authorize: "允许访问",
-      scope: "LazyMind 将把该目录作为当前任务的本地文件范围。", chooseFailed: "无法选择工作区", authorizeFailed: "授权失败",
-      everyAsk: "每次询问", askAsNeeded: "需要时询问", allowAll: "允许执行", allowAllTitle: "允许工作区内操作？",
-      allowAllRisk: "可能修改文件、运行命令、联网或操作已连接应用。", savedNext: "已保存，下次执行生效", saveFailed: "保存失败",
+      select: "选择工作区", searchShort: "搜索工作区", openFolder: "打开本地文件夹", none: "不使用本地工作区", authorizeTitle: "首次使用时需要授权", authorize: "允许访问", authorizeQuestion: "允许 LazyMind 访问“{{name}}”工作区？",
+      scope: "授权仅适用于该文件夹及其子目录，默认为修改文件前询问。", chooseFailed: "无法选择工作区", authorizeFailed: "授权失败",
+      everyAsk: "始终询问", askAsNeeded: "按需确认", allowAll: "全部允许", allowAllTitle: "要开启“全部允许”吗？",
+      everyAskDescription: "修改工作区文件前始终询问", askAsNeededDescription: "只针对有风险的文件操作进行询问", allowAllDescription: "允许工作区内的全部文件操作",
+      allowAllIntro: "开启后，LazyMind 可在不经你逐次确认的情况下执行以下工作区操作：", allowAllFiles: "文件和文件夹", allowAllFilesDescription: "读取、创建和修改授权目录中的文件", allowAllProtected: "受保护文件", allowAllProtectedDescription: "访问工作区内通常需要确认的敏感路径", allowAllDestructive: "删除和覆盖", allowAllDestructiveDescription: "删除、覆盖或替换工作区文件", allowAllConfirm: "确认开启",
+      allowAllRisk: "可能带来工作区内的数据丢失或敏感信息泄露风险。", savedNext: "已保存，下次执行生效", saveFailed: "保存失败",
       revoke: "撤销", revokeTitle: "撤销目录授权？", revokeAffected: "将影响 {{count}} 个任务。", revoked: "授权已撤销",
       revokedStopFailed: "授权已撤销，部分任务停止请求失败", revokeFailed: "撤销失败",
       manage: "管理授权", manageTitle: "工作区授权", search: "搜索名称或路径", loadFailed: "加载授权失败", reauthorize: "重新授权",
       approval: {
-        loading: "正在加载工作区请求…", open: "工作区请求（{{count}}）", title: "工作区请求", empty: "暂无工作区请求。",
+        title: "工作区请求",
         notice: "允许后原工具调用将继续执行；只有状态显示“已完成”才表示执行完成。",
         allowOnce: "允许一次", reject: "拒绝", loadFailed: "无法刷新请求", decisionFailed: "保存决定失败",
-        version: "文件版本", digest: "内容摘要", expires: "批准有效期至",
-        uncertain: "执行结果未知，请先核对文件，再决定是否重新操作。",
-        source: { main: "主任务", subagent: "子任务", workflow: "工作流" },
         operation: { read: "读取", create: "创建", append: "追加", replace: "替换", delete: "删除", overwrite: "覆盖", mkdir: "创建目录", ls: "列出目录", glob: "查找文件", grep: "搜索内容", info: "文件信息" },
         status: { preparing: "准备请求中", unknown: "状态暂不可用", pending: "等待批准", allowed: "已批准，等待执行", executing: "执行中", completed: "已完成", failed: "失败", rejected: "已拒绝", expired: "已过期", uncertain: "结果未知" },
       },

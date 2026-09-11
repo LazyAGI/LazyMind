@@ -431,27 +431,48 @@ func workspaceRunKey(taskID string) string { return "rag/subagent/execution:" + 
 
 // ValidateWorkspaceRun is independent of the parent Chat run: detached tasks
 // survive normal parent completion, but not interruption or a later launch.
-func ValidateWorkspaceRun(ctx context.Context, db *gorm.DB, stateStore state.Store, req localworkspace.OperationRequest) error {
+func ValidateWorkspaceRun(ctx context.Context, db *gorm.DB, stateStore state.Store, req localworkspace.OperationRequest) (*localworkspace.ContextSnapshot, error) {
 	invalid := localworkspace.Error("binding_conflict", 409, "conflict")
 	if stateStore == nil || req.TaskID == "" || req.Generation == "" || req.RunID != "" || req.HistoryID != "" {
-		return invalid
+		return nil, invalid
 	}
 	task, err := GetTask(ctx, db, req.TaskID)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if task.CreateUserID != req.UserID || task.ConversationID != req.ConversationID || task.AgentType == "workflow_step" ||
+	if task.CreateUserID != req.UserID || task.ConversationID != req.ConversationID ||
 		(task.Status != StatusPending && task.Status != StatusRunning) {
-		return invalid
+		return nil, invalid
 	}
-	generation, err := stateStore.Get(ctx, workspaceRunKey(req.TaskID))
-	if err != nil {
-		return err
+	if req.AttemptID == "" {
+		if task.AgentType == "workflow_step" {
+			return nil, invalid
+		}
+		generation, err := stateStore.Get(ctx, workspaceRunKey(req.TaskID))
+		if err != nil {
+			return nil, err
+		}
+		if string(generation) != req.Generation {
+			return nil, invalid
+		}
+	} else if task.AgentType != "workflow_step" {
+		return nil, invalid
 	}
-	if string(generation) != req.Generation {
-		return invalid
+	params := map[string]any{}
+	if len(task.Params) > 0 && json.Unmarshal(task.Params, &params) != nil {
+		return nil, invalid
 	}
-	return nil
+	snapshot := localworkspace.SnapshotFromParams(params)
+	if snapshot == nil {
+		if req.WorkspaceID == "" {
+			return nil, nil
+		}
+		return nil, invalid
+	}
+	if snapshot.WorkspaceID != req.WorkspaceID {
+		return nil, invalid
+	}
+	return snapshot, nil
 }
 
 func withWorkspaceRunUpdate(ctx context.Context, db *gorm.DB, taskID string, update func(*gorm.DB) error) error {

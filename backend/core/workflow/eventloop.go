@@ -17,6 +17,7 @@ import (
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/localworkspace"
 	"lazymind/core/modelconfig"
 	"lazymind/core/state"
 	"lazymind/core/store"
@@ -628,6 +629,11 @@ func launchWorkflowAttempt(
 	if params.UserID != "" {
 		rawParamsMap["user_id"] = params.UserID
 	}
+	rawParamsMap, err = localworkspace.RebuildSubagentParams(ctx, db, userID, convID,
+		localworkspace.StripUntrustedWorkspaceMetadata(rawParamsMap))
+	if err != nil {
+		return sessionID, "", false, err
+	}
 	rawParams, _ := json.Marshal(rawParamsMap)
 	inputJSON, _ := json.Marshal(inputKeys)
 	outputJSON, _ := json.Marshal(outputKeys)
@@ -674,8 +680,8 @@ func launchWorkflowAttempt(
 	if len(params.HistoryFilesPerTurn) > 0 {
 		runParams["history_files_per_turn"] = params.HistoryFilesPerTurn
 	}
-	if len(params.ParentAgenticConfig) > 0 {
-		runParams["parent_agentic_config"] = params.ParentAgenticConfig
+	if parent, ok := rawParamsMap["parent_agentic_config"].(map[string]any); ok && len(parent) > 0 {
+		runParams["parent_agentic_config"] = parent
 	}
 	runRequest := subagent.RunRequest{
 		TaskID: task.ID, AgentType: "workflow_step", WorkspacePath: task.WorkspacePath,

@@ -42,7 +42,8 @@ func RebuildSubagentParams(ctx context.Context, db *gorm.DB, userID, conversatio
 	parent["local_fs_sources"] = snapshot.Sources
 	parent[coreWorkspaceContextKey] = map[string]any{
 		"runtime_instruction": base, "workspace_id": snapshot.WorkspaceID,
-		"workspace_version": snapshot.WorkspaceVersion, "permission_version": snapshot.PermissionVersion,
+		"workspace_version": snapshot.WorkspaceVersion, "permission_mode": snapshot.PermissionMode,
+		"permission_version": snapshot.PermissionVersion,
 	}
 	params["user_id"] = userID
 	params["conversation_id"] = conversationID
@@ -52,7 +53,7 @@ func RebuildSubagentParams(ctx context.Context, db *gorm.DB, userID, conversatio
 	attachment["conversation_id"] = conversationID
 	params["attachment_context"] = attachment
 	params["parent_agentic_config"] = parent
-	notice := ModelNotice(*snapshot, "subagent")
+	notice := ModelNotice(*snapshot)
 	if strings.TrimSpace(base) == "" {
 		params["runtime_instruction"] = notice
 	} else {

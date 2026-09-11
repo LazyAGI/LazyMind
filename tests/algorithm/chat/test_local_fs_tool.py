@@ -352,6 +352,26 @@ def test_workspace_mixed_discovery_keeps_ordinary_sources_and_core_filter(monkey
     assert not workspace.exists()
 
 
+def test_workspace_root_info_path_can_be_listed_on_the_next_call(monkeypatch, tmp_path):
+    _set_bound_workspace(monkeypatch, tmp_path / 'only-on-core')
+    operations = []
+    def post(path, payload):
+        if path.endswith(':prepare'):
+            operations.append(payload['operation'])
+            return {'operation_id': f'op-{len(operations)}', 'decision': 'allowed', 'status': 'allowed'}
+        operation = operations[-1]
+        data = {'path': '.', 'type': 'directory'} if operation == 'info' else {
+            'path': '.', 'entries': [{'path': 'notes.txt', 'type': 'file'}],
+        }
+        return {'operation_id': f'op-{len(operations)}', 'status': 'completed', 'data': data}
+    monkeypatch.setattr(local_fs_mod, 'post_core_api', post)
+    toolkit = LocalFileToolkit()
+    root = _prepared_workspace_call(toolkit, 'ls', {})
+    listing = _prepared_workspace_call(toolkit, 'ls', {'path': root['entries'][0]['path']})
+    assert operations == ['info', 'ls']
+    assert listing['entries'][0]['path'] == 'notes.txt'
+
+
 @pytest.mark.parametrize('method, arguments', [('ls', {'path': '/only-on-core'}), ('glob', {'pattern': '*.txt'}),
                                                 ('grep', {'pattern': 'needle'}), ('info', {'path': '/only-on-core'})])
 def test_workspace_discovery_never_reads_python_files(monkeypatch, method, arguments):

@@ -1657,20 +1657,19 @@ const enUS = {
   // Chat
   chat: {
     workspace: {
-      select: "Select workspace", recent: "Recent folders", authorizeTitle: "Allow access to this workspace?", authorize: "Allow access",
-      scope: "LazyMind will use this folder as the local file scope for the current Work.", chooseFailed: "Unable to select workspace", authorizeFailed: "Authorization failed",
-      everyAsk: "Ask every time", askAsNeeded: "Ask when needed", allowAll: "Allow actions", allowAllTitle: "Allow workspace actions?",
-      allowAllRisk: "This may modify files, run commands, access the network, or use connected apps.", savedNext: "Saved. Applies to the next run.", saveFailed: "Save failed",
+      select: "Select workspace", searchShort: "Search workspaces", openFolder: "Open local folder", none: "Don't use a local workspace", authorizeTitle: "Authorization required for first use", authorize: "Allow access", authorizeQuestion: "Allow LazyMind to access the “{{name}}” workspace?",
+      scope: "Access applies only to this folder and its subfolders. File changes require confirmation by default.", chooseFailed: "Unable to select workspace", authorizeFailed: "Authorization failed",
+      everyAsk: "Always ask", askAsNeeded: "Confirm as needed", allowAll: "Allow all", allowAllTitle: "Turn on Allow all?",
+      everyAskDescription: "Always ask before modifying workspace files", askAsNeededDescription: "Ask only for risky file operations", allowAllDescription: "Allow every file operation inside the workspace",
+      allowAllIntro: "Once enabled, LazyMind may perform these workspace operations without asking each time:", allowAllFiles: "Files and folders", allowAllFilesDescription: "Read, create, and modify files inside the authorized folder", allowAllProtected: "Protected files", allowAllProtectedDescription: "Access sensitive paths inside the workspace that normally require confirmation", allowAllDestructive: "Delete and overwrite", allowAllDestructiveDescription: "Delete, overwrite, or replace workspace files", allowAllConfirm: "Turn on",
+      allowAllRisk: "This may cause data loss or expose sensitive information from the workspace.", savedNext: "Saved. Applies to the next run.", saveFailed: "Save failed",
       revoke: "Revoke", revokeTitle: "Revoke folder access?", revokeAffected: "This affects {{count}} Work items.", revoked: "Access revoked",
       revokedStopFailed: "Access revoked, but some stop requests failed", revokeFailed: "Revoke failed",
       manage: "Manage access", manageTitle: "Workspace access", search: "Search name or path", loadFailed: "Failed to load access", reauthorize: "Reauthorize",
       approval: {
-        loading: "Loading workspace requests…", open: "Workspace requests ({{count}})", title: "Workspace requests", empty: "No workspace requests.",
+        title: "Workspace requests",
         notice: "Allowing a request lets the original tool call continue. Only a Completed status confirms completion.",
         allowOnce: "Allow once", reject: "Reject", loadFailed: "Unable to refresh requests", decisionFailed: "Unable to save decision",
-        version: "File version", digest: "Content digest", expires: "Approval expires",
-        uncertain: "The result is unknown. Check the file before trying the operation again.",
-        source: { main: "Main task", subagent: "Subtask", workflow: "Workflow" },
         operation: { read: "Read", create: "Create", append: "Append", replace: "Replace", delete: "Delete", overwrite: "Overwrite", mkdir: "Create folder", ls: "List folder", glob: "Find files", grep: "Search content", info: "File information" },
         status: { preparing: "Preparing request", unknown: "Status unavailable", pending: "Awaiting approval", allowed: "Approved · awaiting execution", executing: "Executing", completed: "Completed", failed: "Failed", rejected: "Rejected", expired: "Expired", uncertain: "Result unknown" },
       },

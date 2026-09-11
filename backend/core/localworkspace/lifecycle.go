@@ -42,7 +42,7 @@ func requestConversationStop(ctx context.Context, userID, conversationID string)
 // ValidateOperationRunFunc is implemented by chat/subagent/workflow owners. It
 // deliberately lives behind a callback so localworkspace does not import the
 // packages that own run lifecycle state (and create an import cycle).
-type ValidateOperationRunFunc func(context.Context, *gorm.DB, state.Store, OperationRequest) error
+type ValidateOperationRunFunc func(context.Context, *gorm.DB, state.Store, OperationRequest) (*ContextSnapshot, error)
 
 var operationRunValidator struct {
 	sync.RWMutex
@@ -59,32 +59,32 @@ func SetValidateOperationRunFunc(fn ValidateOperationRunFunc) {
 }
 
 // validateOperationRun rejects unregistered execution, including missing wiring.
-func validateOperationRun(ctx context.Context, db *gorm.DB, stateStore state.Store, req OperationRequest) error {
+func validateOperationRun(ctx context.Context, db *gorm.DB, stateStore state.Store, req OperationRequest) (*ContextSnapshot, error) {
 	invalid := Error("binding_conflict", 409, "conflict")
 	if db == nil || stateStore == nil || strings.TrimSpace(req.UserID) == "" || strings.TrimSpace(req.ConversationID) == "" {
-		return invalid
+		return nil, invalid
 	}
 	var count int64
 	if err := db.WithContext(ctx).Model(&orm.Conversation{}).
 		Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", req.ConversationID, req.UserID).Count(&count).Error; err != nil {
-		return err
+		return nil, err
 	}
 	if count != 1 {
-		return invalid
+		return nil, invalid
 	}
 	operationRunValidator.RLock()
 	fn := operationRunValidator.fn
 	operationRunValidator.RUnlock()
 	if fn == nil {
-		return invalid
+		return nil, invalid
 	}
 	if req.AttemptID != "" {
 		generation, err := strconv.ParseInt(req.Generation, 10, 64)
 		if err != nil || generation <= 0 || req.TaskID == "" || req.LeaseToken == "" || req.RunID != "" || req.HistoryID != "" {
-			return invalid
+			return nil, invalid
 		}
 		if err := attempt.New(db, attempt.Config{}).ValidateLease(ctx, req.AttemptID, req.LeaseToken); err != nil {
-			return invalid
+			return nil, invalid
 		}
 		query := db.WithContext(ctx).Model(&orm.WorkflowSessionStep{}).
 			Joins("JOIN plugin_sessions ws ON ws.id = plugin_session_steps.session_id").
@@ -93,10 +93,10 @@ func validateOperationRun(ctx context.Context, db *gorm.DB, stateStore state.Sto
 			Where("ws.conversation_id = ? AND ws.create_user_id = ? AND ws.dismissed = ? AND ws.status IN ?", req.ConversationID, req.UserID, false, []string{"active", "waiting"}).
 			Where("task.conversation_id = ? AND task.create_user_id = ? AND task.agent_type = 'workflow_step' AND task.status IN ?", req.ConversationID, req.UserID, []string{"pending", "running"})
 		if err := query.Count(&count).Error; err != nil {
-			return err
+			return nil, err
 		}
 		if count != 1 {
-			return invalid
+			return nil, invalid
 		}
 		// The pinned graph, rather than model-supplied tool names, grants the toolkit.
 		var declaration struct {
@@ -109,16 +109,16 @@ func validateOperationRun(ctx context.Context, db *gorm.DB, stateStore state.Sto
 			Joins("JOIN plugin_revisions revision ON revision.id = session.plugin_revision_id").
 			Where("step.id = ?", req.AttemptID).Scan(&declaration).Error
 		if err != nil {
-			return err
+			return nil, err
 		}
 		var graph graphengine.CompiledStateGraph
 		if json.Unmarshal(declaration.CompiledGraph, &graph) != nil || !slices.Contains(graph.Nodes[declaration.StepID].LegacyTools, "local_fs") {
-			return invalid
+			return nil, invalid
 		}
-		return nil
+		return fn(ctx, db, stateStore, req)
 	}
 	if req.LeaseToken != "" {
-		return invalid
+		return nil, invalid
 	}
 	return fn(ctx, db, stateStore, req)
 }

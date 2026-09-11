@@ -525,3 +525,57 @@ Core最终全量83包通过（另5包无测试），算法P1修复与Workflow广
 
 - 自动化工作冻结提交：`8f279db3`（树 `9209e6f5fcad87e01d94d0d0b08b81d699626d4a`）。
 - 关键生产文件 SHA-256 见 `IMPLEMENTATION_PLAN.md`；后续不再修改冻结文件，除非用户明确批准新的 Review 批次。
+
+## 2026-09-10 对话中权限入口验收补项
+
+- [x] 工作区目录选择仅在新建对话草稿显示；正式会话隐藏工作区名称和路径，已绑定会话保留可修改权限按钮。
+- [x] 已绑定会话保留三档权限修改，并在输入区禁用时仍可提交；沿用 Core `permission_version` 和 next-request 语义。
+- [ ] 完成飞书 HTML 原型布局修正后的定向测试、类型检查、生产构建、diff 与冻结边界检查。
+- [ ] 人工核对真实 Local 页面视觉和三档权限操作。
+
+### 新建对话 UI 批次完成
+
+- [x] 按参考 HTML 合并工作区入口，保留搜索、最近目录、打开目录、不使用与管理授权。
+- [x] 默认“按需确认”紧邻工作区入口。
+- [x] 正式对话开始后不渲染工作区标识或权限控件。
+- [x] 32+6 项定向测试、类型检查、生产构建和冻结边界通过。
+
+- [x] 删除会话输入区“工作区请求（数量）”标识；保留实际 pending 操作所需的自动审批弹窗和可修改权限按钮。
+
+## 2026-09-10 Code Review 修复批次
+
+- [x] I1：主任务、普通子任务、Workflow 使用 Core 持久化的执行级权限快照；缺失快照 fail closed；live grant/identity/stop/generation/lease 保持实时。
+- [x] I2/I3：`configResetKey` 清除父子工作区状态；修复本功能 TypeScript 诊断。
+- [x] I4：delete 在提交前复核文件 identity 和 expected version。
+- [x] M1/M2：审批关闭只屏蔽同一 pending ID；撤销确认受组件生命周期约束。
+- [x] M3/E1：显式根 `.` 可继续列目录；统一 Workflow loader/runtime binding 检测。
+- [x] A/B/C 精简：删除旧 locale 叶子，收敛 Core helper/快照构造和算法截断重复。
+- [x] Core 全量、vet、关键 race、Linux/Windows 交叉编译。
+- [x] Algorithm 163 passed/1 skipped；Frontend 33 passed、typecheck、ESLint、生产构建。
+- [x] 更新 `CODE_REVIEW.md`、`IMPLEMENTATION_PLAN.md`、`findings.md`、`progress.md`、`task_plan.md`。
+- [ ] 人工验收：真实 Local/Desktop 页面、真实模型与目录选择、打包及跨平台实机。
+- [ ] 提交后回填冻结提交 SHA；当前未提交、未推送。
+
+## 2026-09-11 生产复现补充
+
+- [x] 从本机 Core binding、ChatHistory ext、Chat 日志和实际文件路径确认 `always_ask` 旁路根因。
+- [x] 绑定本机工作区时隐藏旧 Chat artifact `write_file`，保留 `save_chat_artifact`。
+- [x] 补充 helper 和最终 Agent plan 两层回归。
+- [x] 运行 150 项相关算法/工具测试，py_compile，冻结边界和 diff 检查。
+- [ ] 重启本地服务后人工确认授权目录 create/append/replace/delete 都出现 Core pending。
+
+### 2026-09-11 小批次：批准后关闭窗口
+
+- [x] 读取现有批准状态流并确认根因位于前端受控 Modal 状态。
+- [x] 先新增最后一个 pending 批准后应关闭的失败测试并确认 RED。
+- [x] 最小修改 `LocalWorkspaceControl.tsx`，复用 dismissed operation 去重，避免旧轮询快照重开。
+- [x] 增加多 pending 保持窗口打开的回归测试；组件定向测试 27 项通过。
+- [x] 完成前端类型检查、生产构建、diff/冻结边界检查，并记录最终结果。
+- [ ] 重启 Local 后由真实页面验证批准窗口关闭行为。
+
+### 2026-09-11 最终提交批次
+
+- [x] 删除临时验收文件与不交付的独立 Review 报告。
+- [x] 排除与工作区功能无关的 `algorithm/Dockerfile` 启动修复。
+- [x] 重新执行 Backend、Frontend、Algorithm 定向验证、typecheck、生产构建和冻结边界检查。
+- [ ] 提交并推送 `feature/newWorkZone`，由用户手动创建 PR。

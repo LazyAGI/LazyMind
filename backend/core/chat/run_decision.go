@@ -161,26 +161,41 @@ func resolveRunTerminal(
 
 // ValidateWorkspaceRun uses the pre-dispatch run registration; a ChatHistory
 // row need not exist yet. A cancellation/terminal decision always fences it.
-func ValidateWorkspaceRun(ctx context.Context, stateStore state.Store, req localworkspace.OperationRequest) error {
+func ValidateWorkspaceRun(ctx context.Context, stateStore state.Store, req localworkspace.OperationRequest) (*localworkspace.ContextSnapshot, error) {
 	invalid := localworkspace.Error("binding_conflict", 409, "conflict")
 	if stateStore == nil || req.RunID == "" || req.HistoryID == "" || req.TaskID != "" || req.Generation != "" {
-		return invalid
+		return nil, invalid
 	}
 	current, err := getChatStatus(ctx, stateStore, req.ConversationID, req.HistoryID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if current.RunID != req.RunID || current.Status != "generating" || current.RunTerminal != nil {
-		return invalid
+		return nil, invalid
 	}
 	decided, err := stateStore.Exists(ctx, runDecisionKey(req.ConversationID, req.HistoryID, req.RunID))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if decided {
-		return invalid
+		return nil, invalid
 	}
-	return nil
+	input, err := getChatInput(ctx, stateStore, req.ConversationID, req.HistoryID)
+	if err != nil || len(input.Ext) == 0 {
+		return nil, invalid
+	}
+	ext := map[string]any{}
+	if json.Unmarshal(input.Ext, &ext) != nil {
+		return nil, invalid
+	}
+	snapshot := localworkspace.SnapshotFromMetadata(ext["workspace_context"])
+	if snapshot == nil {
+		return nil, invalid
+	}
+	if snapshot.WorkspaceID != req.WorkspaceID {
+		return nil, invalid
+	}
+	return snapshot, nil
 }
 
 // Serialize state-backed run transitions with file commits using the existing

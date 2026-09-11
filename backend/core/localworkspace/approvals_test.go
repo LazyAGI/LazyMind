@@ -13,6 +13,26 @@ import (
 	"lazymind/core/state"
 )
 
+func TestWorkspacePendingApprovalSurvivesPermissionChangeWithinRun(t *testing.T) {
+	db, grant, stateStore, conversationID := operationFixture(t, PermissionAlwaysAsk)
+	req := OperationRequest{HistoryID: "history", RunID: "run", UserID: "owner", ConversationID: conversationID,
+		WorkspaceID: grant.WorkspaceID, Operation: OperationCreate, Path: "approved.txt", Content: "ok", CallID: operationTestCallID("permission-change")}
+	prepared, err := PrepareOperation(t.Context(), db.DB, stateStore, req)
+	if err != nil || prepared.Decision != DecisionPending {
+		t.Fatalf("prepare=%+v err=%v", prepared, err)
+	}
+	if err := db.Model(&orm.ConversationWorkspaceBinding{}).Where("conversation_id = ?", conversationID).
+		Updates(map[string]any{"permission_mode": PermissionAllowAll, "permission_version": 2}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := DecideOperation(t.Context(), db.DB, stateStore, prepared.OperationID, "allow_once", "owner"); err != nil {
+		t.Fatalf("permission update invalidated pending operation: %v", err)
+	}
+	if _, err := ExecuteOperation(t.Context(), db.DB, stateStore, prepared.OperationID, req); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestWorkspaceApprovalAllowsOnceAndRejectsSecondDecision(t *testing.T) {
 	db, grant, stateStore, conversationID := operationFixture(t, PermissionAlwaysAsk)
 	callID := operationTestCallID("call-1")

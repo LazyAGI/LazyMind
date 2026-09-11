@@ -49,7 +49,18 @@ func InternalGetExecutionSpec(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "request failed", http.StatusServiceUnavailable)
 		return
 	}
-	params, err = localworkspace.RebuildSubagentParams(r.Context(), store.DB(), task.CreateUserID, task.ConversationID, params)
+	snapshot := localworkspace.SnapshotFromParams(params)
+	if snapshot == nil {
+		params, err = localworkspace.RebuildSubagentParams(r.Context(), store.DB(), task.CreateUserID, task.ConversationID, params)
+		snapshot = localworkspace.SnapshotFromParams(params)
+	}
+	if err == nil && snapshot != nil {
+		var live *localworkspace.ContextSnapshot
+		live, err = localworkspace.ResolveForConversation(r.Context(), store.DB(), task.CreateUserID, task.ConversationID)
+		if err == nil && (live == nil || live.WorkspaceID != snapshot.WorkspaceID || live.WorkspaceVersion != snapshot.WorkspaceVersion) {
+			err = localworkspace.Error("binding_conflict", http.StatusConflict, "conflict")
+		}
+	}
 	if err != nil {
 		var appErr *common.AppError
 		if errors.As(err, &appErr) {

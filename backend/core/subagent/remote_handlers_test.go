@@ -337,7 +337,13 @@ func TestRemoteWorkspaceExecutionSpecUsesOneAuthoritativeSnapshotAndRejectsRevok
 	if err := db.Create(&orm.ConversationWorkspaceBinding{ConversationID: "conversation-1", WorkspaceID: grant.WorkspaceID, PermissionMode: localworkspace.PermissionAlwaysAsk, PermissionVersion: 3, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Model(&orm.SubAgentTask{}).Where("id = ?", "task-remote").Update("params", json.RawMessage(`{"runtime_instruction":"keep","files":{"1":["a.txt"]}}`)).Error; err != nil {
+	persisted, err := localworkspace.RebuildSubagentParams(t.Context(), db.DB, "user-1", "conversation-1",
+		map[string]any{"runtime_instruction": "keep", "files": map[string]any{"1": []string{"a.txt"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	paramsJSON, _ := json.Marshal(persisted)
+	if err := db.Model(&orm.SubAgentTask{}).Where("id = ?", "task-remote").Update("params", paramsJSON).Error; err != nil {
 		t.Fatal(err)
 	}
 
@@ -362,6 +368,25 @@ func TestRemoteWorkspaceExecutionSpecUsesOneAuthoritativeSnapshotAndRejectsRevok
 	}
 	if data["workspace_path"] != "/core/path/must-not-be-used" {
 		t.Fatalf("workspace_path=%v", data["workspace_path"])
+	}
+	if err := db.Model(&orm.ConversationWorkspaceBinding{}).Where("conversation_id = ?", "conversation-1").
+		Updates(map[string]any{"permission_mode": localworkspace.PermissionAllowAll, "permission_version": 4}).Error; err != nil {
+		t.Fatal(err)
+	}
+	request = httptest.NewRequest(http.MethodGet, "/internal/subagent/tasks/task-remote/execution-spec", nil)
+	request = mux.SetURLVars(request, map[string]string{"task_id": "task-remote"})
+	request.Header.Set("Authorization", "Bearer executor-secret")
+	request.Header.Set("X-Workflow-Lease-Token", "lease-live")
+	response = httptest.NewRecorder()
+	InternalGetExecutionSpec(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("updated permission spec=%d %s", response.Code, response.Body.String())
+	}
+	retained := getData(response.Body.Bytes())["params"].(map[string]any)
+	parent := retained["parent_agentic_config"].(map[string]any)
+	metadata := parent["_core_workspace_context"].(map[string]any)
+	if metadata["permission_mode"] != localworkspace.PermissionAlwaysAsk || metadata["permission_version"] != float64(3) {
+		t.Fatalf("running attempt permission changed: %v", metadata)
 	}
 
 	if err := db.Model(&orm.LocalWorkspace{}).Where("id = ?", grant.WorkspaceID).Updates(map[string]any{"status": localworkspace.StatusRevoked, "version": 2}).Error; err != nil {

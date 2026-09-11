@@ -79,8 +79,9 @@ class LocalFileToolkit:
         return self._get_scopes()
 
     @staticmethod
-    def _workspace_binding() -> Optional[Dict[str, Any]]:
-        config = lazyllm.globals.get('agentic_config') or {}
+    def _workspace_binding_from_config(config: Any) -> Optional[Dict[str, Any]]:
+        if not isinstance(config, dict):
+            return None
         configs = [cfg for cfg in (config, config.get('parent_agentic_config')) if isinstance(cfg, dict)]
         for cfg in configs:
             for key in ('_core_workspace_context', 'workspace_context'):
@@ -93,6 +94,12 @@ class LocalFileToolkit:
                 if source_id.startswith('local-workspace:'):
                     return {'workspace_id': source_id.removeprefix('local-workspace:')}
         return None
+
+    @staticmethod
+    def _workspace_binding() -> Optional[Dict[str, Any]]:
+        return LocalFileToolkit._workspace_binding_from_config(
+            lazyllm.globals.get('agentic_config') or {}
+        )
 
     @staticmethod
     def _workspace_context() -> Optional[Dict[str, Any]]:
@@ -287,7 +294,7 @@ class LocalFileToolkit:
         workspace = [scope for scope in scopes if self._workspace_scope(scope)]
         if not workspace:
             return None
-        all_roots = path is None or str(path).strip() in ('', '.')
+        all_roots = path is None or str(path).strip() == ''
         if not all_roots:
             resolved, scope = self._resolve_with_scope(str(path))
             if not self._workspace_scope(scope):
@@ -318,16 +325,15 @@ class LocalFileToolkit:
             local._scope_override = ordinary
             local._excluded_workspace = workspace
             combined[field].extend(getattr(local, method)(path=path, **arguments).get(field, []))
+        limit_key = 'max_results' if field == 'matches' else 'max_entries'
+        limit = max(1, arguments.get(limit_key, 200))
+        count = min(len(combined[field]), limit)
+        combined['truncated'] = combined.get('truncated', False) or len(combined[field]) > limit
+        combined[field] = combined[field][:limit]
         if field == 'matches':
-            limit = max(1, arguments.get('max_results', 200))
-            combined.update(pattern=arguments.get('pattern', ''), match_count=min(len(combined[field]), limit),
-                            truncated=combined.get('truncated', False) or len(combined[field]) > limit)
-            combined[field] = combined[field][:limit]
+            combined.update(pattern=arguments.get('pattern', ''), match_count=count)
         else:
-            limit = max(1, arguments.get('max_entries', 200))
-            combined.update(entry_count=min(len(combined[field]), limit), max_entries=limit,
-                            truncated=combined.get('truncated', False) or len(combined[field]) > limit)
-            combined[field] = combined[field][:limit]
+            combined.update(entry_count=count, max_entries=limit)
         return combined
 
     @staticmethod

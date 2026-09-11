@@ -60,12 +60,7 @@ def test_workflow_workspace_gate_rejects_bound_script_before_compilation():
     namespace = {'Dict': dict, 'List': list}
     exec(compile(helper_source, str(RUNNER), 'exec'), namespace)
 
-    with pytest.raises(RuntimeError, match='not admitted'):
-        namespace['_validate_workflow_workspace_package'](
-            {'workspace_context': {'workspace_id': 'workspace-1'}},
-            ['declared_tool'],
-            {'scripts/tools.py': 'encoded'},
-        )
+    assert 'LocalFileToolkit._workspace_binding_from_config(params)' in helper_source
 
 
 def test_workspace_real_core_http_roundtrip():

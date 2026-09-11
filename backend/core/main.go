@@ -537,7 +537,7 @@ func run(ctx context.Context) error {
 
 	// text/PrompttextInitialize（DB + Redis）。DB text ACL text；Redis textConversationtext/text/text。
 	store.Init(db.DB, readonlyDB.DB, store.MustStateFromEnv())
-	localworkspace.SetValidateOperationRunFunc(func(ctx context.Context, db *gorm.DB, stateStore state.Store, req localworkspace.OperationRequest) error {
+	localworkspace.SetValidateOperationRunFunc(func(ctx context.Context, db *gorm.DB, stateStore state.Store, req localworkspace.OperationRequest) (*localworkspace.ContextSnapshot, error) {
 		if req.TaskID != "" {
 			return subagent.ValidateWorkspaceRun(ctx, db, stateStore, req)
 		}

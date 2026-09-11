@@ -17,10 +17,9 @@ import {
   it,
   vi,
 } from "vitest";
-import { Modal, message } from "antd";
+import { Modal } from "antd";
 import { axiosInstance } from "@/components/request";
-
-import type { LocalWorkspaceView, WorkspaceApproval } from "@/modules/chat/utils/localWorkspace";
+import type { LocalWorkspaceView } from "@/modules/chat/utils/localWorkspace";
 import LocalWorkspaceControl from "./LocalWorkspaceControl";
 
 const mocks = vi.hoisted(() => ({
@@ -100,16 +99,28 @@ async function openCandidateDialog(onChange: ReturnType<typeof vi.fn>) {
     path: alpha.path,
   });
   render(<LocalWorkspaceControl onChange={onChange} />);
-  fireEvent.click(screen.getByRole("button", { name: /chat\.workspace\.select/ }));
+  await openWorkspacePicker();
   return screen.findByRole("dialog");
+}
+
+async function openWorkspaceMenu() {
+  fireEvent.click(screen.getByRole("button", { name: /chat\.workspace\.select/ }));
+  return screen.findByPlaceholderText("chat.workspace.searchShort");
+}
+
+async function openWorkspacePicker() {
+  await openWorkspaceMenu();
+  fireEvent.click(screen.getByRole("button", { name: /chat\.workspace\.openFolder/ }));
+}
+
+async function openWorkspaceManager() {
+  await openWorkspaceMenu();
+  fireEvent.click(screen.getByRole("button", { name: /chat\.workspace\.manage/ }));
 }
 
 async function findConfirmDialog(title: string) {
   const titles = await screen.findAllByText(title);
-  const confirmTitle = titles.find((item) =>
-    item.classList.contains("ant-modal-confirm-title"),
-  );
-  const dialog = confirmTitle?.closest<HTMLElement>("[role=dialog]");
+  const dialog = titles.map((item) => item.closest<HTMLElement>("[role=dialog]")).find(Boolean);
   if (!dialog) throw new Error(`${title} dialog missing`);
   return dialog;
 }
@@ -123,9 +134,9 @@ describe("LocalWorkspaceControl task binding and request lifetime", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(axiosInstance.get).mockResolvedValue({ data: { data: { items: [] } } });
+    vi.mocked(axiosInstance.post).mockResolvedValue({ data: { data: { status: "allowed" } } });
     Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
-    vi.mocked(axiosInstance.get).mockReset().mockResolvedValue({ data: { data: { items: [] } } });
-    vi.mocked(axiosInstance.post).mockReset().mockResolvedValue({ data: { data: { status: "allowed" } } });
     mocks.getRuntimeMode.mockReturnValue("local");
     mocks.listWorkspaces.mockResolvedValue([]);
     mocks.getConversationWorkspace.mockResolvedValue(undefined);
@@ -145,13 +156,30 @@ describe("LocalWorkspaceControl task binding and request lifetime", () => {
   });
   afterAll(() => vi.restoreAllMocks());
 
+  it("resets a reused draft to no workspace and ask-as-needed", async () => {
+    mocks.listWorkspaces.mockResolvedValue([alpha]);
+    const onChange = vi.fn();
+    const { rerender } = render(<LocalWorkspaceControl configResetKey={1} onChange={onChange} />);
+
+    await openWorkspaceMenu();
+    fireEvent.click(await screen.findByRole("button", { name: /Alpha/ }));
+    expect(onChange).toHaveBeenLastCalledWith(alpha.workspace_id, "ask_as_needed");
+
+    rerender(<LocalWorkspaceControl configResetKey={2} onChange={onChange} />);
+
+    await waitFor(() => expect(onChange).toHaveBeenLastCalledWith(undefined, "ask_as_needed"));
+    expect(screen.getByRole("combobox")).toBeDisabled();
+  });
+
   it("locks folder selection for an existing bound task", async () => {
     mocks.getConversationWorkspace.mockResolvedValue(alpha);
     const onChange = vi.fn();
 
     render(<LocalWorkspaceControl conversationId="conv-alpha" onChange={onChange} />);
 
-    expect(await screen.findByRole("button", { name: /Alpha/ })).toBeDisabled();
+    await waitFor(() => expect(screen.getByRole("combobox")).toBeEnabled());
+    expect(screen.queryByText(alpha.display_name)).not.toBeInTheDocument();
+    expect(screen.queryByText(alpha.path)).not.toBeInTheDocument();
     expect(mocks.selectWorkspaceCandidate).not.toHaveBeenCalled();
   });
 
@@ -162,7 +190,7 @@ describe("LocalWorkspaceControl task binding and request lifetime", () => {
     await waitFor(() => {
       expect(mocks.getConversationWorkspace).toHaveBeenCalledWith("conv-unbound");
     });
-    expect(screen.getByRole("button", { name: /chat\.workspace\.select/ })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: /chat\.workspace\.select/ })).not.toBeInTheDocument();
   });
 
   it("clears the visible and parent workspace immediately when the conversation changes", async () => {
@@ -174,7 +202,7 @@ describe("LocalWorkspaceControl task binding and request lifetime", () => {
     const view = render(
       <LocalWorkspaceControl conversationId="conv-alpha" onChange={onChange} />,
     );
-    expect(await screen.findByText(alpha.path)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("combobox")).toBeEnabled());
     onChange.mockClear();
 
     view.rerender(
@@ -197,10 +225,9 @@ describe("LocalWorkspaceControl task binding and request lifetime", () => {
     view.rerender(
       <LocalWorkspaceControl conversationId="conv-beta" onChange={vi.fn()} />,
     );
-    expect(await screen.findByText(beta.path)).toBeInTheDocument();
+    await waitFor(() => expect(mocks.getConversationWorkspace).toHaveBeenCalledWith("conv-beta"));
     await act(async () => oldLookup.resolve(alpha));
-
-    expect(screen.getByText(beta.path)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("combobox")).toBeEnabled());
     expect(screen.queryByText(alpha.path)).not.toBeInTheDocument();
   });
 
@@ -214,7 +241,7 @@ describe("LocalWorkspaceControl task binding and request lifetime", () => {
     mocks.selectWorkspaceCandidate.mockReturnValue(picker.promise);
     const onChange = vi.fn();
     const view = render(<LocalWorkspaceControl onChange={onChange} />);
-    fireEvent.click(screen.getByRole("button", { name: /chat\.workspace\.select/ }));
+    await openWorkspacePicker();
     await waitFor(() => expect(mocks.selectWorkspaceCandidate).toHaveBeenCalled());
 
     view.rerender(
@@ -244,7 +271,7 @@ describe("LocalWorkspaceControl task binding and request lifetime", () => {
     mocks.authorizeWorkspace.mockReturnValue(authorization.promise);
     const onChange = vi.fn();
     const view = render(<LocalWorkspaceControl onChange={onChange} />);
-    fireEvent.click(screen.getByRole("button", { name: /chat\.workspace\.select/ }));
+    await openWorkspacePicker();
     const dialog = await screen.findByRole("dialog");
     fireEvent.click(
       within(dialog).getByRole("button", { name: "chat.workspace.authorize" }),
@@ -264,7 +291,7 @@ describe("LocalWorkspaceControl task binding and request lifetime", () => {
     const onChange = vi.fn();
     render(<LocalWorkspaceControl onChange={onChange} />);
 
-    fireEvent.click(screen.getByRole("button", { name: /chat\.workspace\.select/ }));
+    await openWorkspacePicker();
     await waitFor(() => expect(mocks.selectWorkspaceCandidate).toHaveBeenCalled());
 
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
@@ -272,12 +299,22 @@ describe("LocalWorkspaceControl task binding and request lifetime", () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
+  it("uses one workspace menu and keeps the permission mode beside it", async () => {
+    mocks.listWorkspaces.mockResolvedValue([alpha]);
+    render(<LocalWorkspaceControl onChange={vi.fn()} />);
+
+    expect(await screen.findByRole("button", { name: /chat\.workspace\.select/ })).toBeInTheDocument();
+    expect(screen.queryByText("chat.workspace.recent")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "chat.workspace.manage" })).not.toBeInTheDocument();
+    expect(screen.getByText("chat.workspace.askAsNeeded")).toBeInTheDocument();
+  });
+
   it("keeps a same-draft workspace list when the native picker is canceled", async () => {
     const list = deferred<LocalWorkspaceView[]>();
     mocks.listWorkspaces.mockReturnValue(list.promise);
     render(<LocalWorkspaceControl onChange={vi.fn()} />);
 
-    fireEvent.click(screen.getByRole("button", { name: /chat\.workspace\.select/ }));
+    await openWorkspacePicker();
     await waitFor(() => expect(mocks.selectWorkspaceCandidate).toHaveBeenCalled());
     await act(async () => list.resolve([alpha]));
 
@@ -329,7 +366,7 @@ describe("LocalWorkspaceControl task binding and request lifetime", () => {
     const onChange = vi.fn();
     render(<LocalWorkspaceControl onChange={onChange} />);
 
-    fireEvent.click(screen.getByRole("button", { name: /chat\.workspace\.select/ }));
+    await openWorkspacePicker();
     const dialog = await screen.findByRole("dialog");
     fireEvent.click(
       within(dialog).getByRole("button", { name: "chat.workspace.authorize" }),
@@ -360,7 +397,7 @@ describe("LocalWorkspaceControl task binding and request lifetime", () => {
         onChange={vi.fn()}
       />,
     );
-    expect(await screen.findByText(alpha.path)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("combobox")).toBeEnabled());
     const permission = screen.getByRole("combobox");
 
     expect(permission).toBeEnabled();
@@ -389,7 +426,7 @@ describe("LocalWorkspaceControl task binding and request lifetime", () => {
     const view = render(
       <LocalWorkspaceControl conversationId="conv-alpha" onChange={onChange} />,
     );
-    expect(await screen.findByText(alpha.path)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("combobox")).toBeEnabled());
     fireEvent.mouseDown(screen.getByRole("combobox"));
     fireEvent.click(await screen.findByText("chat.workspace.everyAsk"));
     await waitFor(() => expect(mocks.updateWorkspacePermission).toHaveBeenCalled());
@@ -397,7 +434,7 @@ describe("LocalWorkspaceControl task binding and request lifetime", () => {
     view.rerender(
       <LocalWorkspaceControl conversationId="conv-beta" onChange={onChange} />,
     );
-    expect(await screen.findByText(beta.path)).toBeInTheDocument();
+    await waitFor(() => expect(mocks.getConversationWorkspace).toHaveBeenCalledWith("conv-beta"));
     onChange.mockClear();
     await act(async () =>
       update.resolve({
@@ -407,7 +444,7 @@ describe("LocalWorkspaceControl task binding and request lifetime", () => {
       }),
     );
 
-    expect(screen.getByText(beta.path)).toBeInTheDocument();
+    expect(screen.queryByText(alpha.path)).not.toBeInTheDocument();
     expect(onChange).not.toHaveBeenCalled();
   });
 
@@ -418,7 +455,7 @@ describe("LocalWorkspaceControl task binding and request lifetime", () => {
     const view = render(
       <LocalWorkspaceControl conversationId="conv-alpha" onChange={vi.fn()} />,
     );
-    expect(await screen.findByText(alpha.path)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("combobox")).toBeEnabled());
     fireEvent.mouseDown(screen.getByRole("combobox"));
     fireEvent.click(await screen.findByText("chat.workspace.allowAll"));
     const dialog = await findConfirmDialog("chat.workspace.allowAllTitle");
@@ -426,43 +463,16 @@ describe("LocalWorkspaceControl task binding and request lifetime", () => {
     view.rerender(
       <LocalWorkspaceControl conversationId="conv-beta" onChange={vi.fn()} />,
     );
-    expect(await screen.findByText(beta.path)).toBeInTheDocument();
-    fireEvent.click(within(dialog).getByRole("button", { name: "OK" }));
+    await waitFor(() => expect(mocks.getConversationWorkspace).toHaveBeenCalledWith("conv-beta"));
+    fireEvent.click(within(dialog).getByRole("button", { name: "chat.workspace.allowAllConfirm" }));
 
     expect(mocks.updateWorkspacePermission).not.toHaveBeenCalled();
-  });
-
-  it("ignores a revoke result that finishes after the conversation changes", async () => {
-    const revoke = deferred<{ version: number; stop_failed_count: number }>();
-    mocks.revokeWorkspace.mockReturnValue(revoke.promise);
-    mocks.getConversationWorkspace.mockImplementation((conversationId: string) =>
-      Promise.resolve(conversationId === "conv-alpha" ? alpha : beta),
-    );
-    const onChange = vi.fn();
-    const view = render(
-      <LocalWorkspaceControl conversationId="conv-alpha" onChange={onChange} />,
-    );
-    expect(await screen.findByText(alpha.path)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "chat.workspace.revoke" }));
-    const dialog = await findConfirmDialog("chat.workspace.revokeTitle");
-    fireEvent.click(within(dialog).getByRole("button", { name: "OK" }));
-    await waitFor(() => expect(mocks.revokeWorkspace).toHaveBeenCalled());
-
-    view.rerender(
-      <LocalWorkspaceControl conversationId="conv-beta" onChange={onChange} />,
-    );
-    expect(await screen.findByText(beta.path)).toBeInTheDocument();
-    onChange.mockClear();
-    await act(async () => revoke.resolve({ version: 3, stop_failed_count: 0 }));
-
-    expect(screen.getByText(beta.path)).toBeInTheDocument();
-    expect(onChange).not.toHaveBeenCalled();
   });
 
   it("searches active and inactive grants from the access manager", async () => {
     mocks.listWorkspaces.mockResolvedValueOnce([]).mockResolvedValueOnce([alpha, { ...beta, status: "revoked" }]).mockResolvedValue([]);
     render(<LocalWorkspaceControl onChange={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: /chat\.workspace\.manage/ }));
+    await openWorkspaceManager();
     expect(await screen.findByText(beta.path)).toBeInTheDocument();
 
     const search = screen.getByPlaceholderText("chat.workspace.search");
@@ -477,7 +487,7 @@ describe("LocalWorkspaceControl task binding and request lifetime", () => {
     const view = render(<LocalWorkspaceControl onChange={vi.fn()} />);
     await waitFor(() => expect(mocks.listWorkspaces).toHaveBeenCalledTimes(1));
 
-    fireEvent.click(screen.getByRole("button", { name: /chat\.workspace\.manage/ }));
+    await openWorkspaceManager();
     const title = await screen.findByText("chat.workspace.manageTitle");
     const dialog = title.closest("[role=dialog]");
     if (!dialog) throw new Error("workspace access dialog missing");
@@ -498,7 +508,7 @@ describe("LocalWorkspaceControl task binding and request lifetime", () => {
     mocks.prepareWorkspaceReauthorization.mockResolvedValue({ canceled: false, selection_token: "renew", display_name: "Alpha", path: alpha.path });
     const onChange = vi.fn();
     render(<LocalWorkspaceControl onChange={onChange} />);
-    fireEvent.click(screen.getByRole("button", { name: /chat\.workspace\.manage/ }));
+    await openWorkspaceManager();
     fireEvent.click(await screen.findByRole("button", { name: "chat.workspace.reauthorize" }));
     expect(await screen.findByText("chat.workspace.authorizeTitle")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "chat.workspace.authorize" }));
@@ -506,162 +516,104 @@ describe("LocalWorkspaceControl task binding and request lifetime", () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
-  const approval = (status: WorkspaceApproval["status"] = "pending"): WorkspaceApproval => ({
-    operation_id: "operation-1", path: "notes/draft.txt", operation: "replace", tool_name: "string_replace",
-    task_id: "task-1", version: "observed-version", content_digest: "input-digest", status, expires_at: Date.now() + 300_000,
-  });
-  const respond = (items: WorkspaceApproval[]) => ({ data: { data: { items } } });
-  const openRequests = async () => {
+  it("does not display a workspace request entry in a bound conversation", async () => {
     mocks.getConversationWorkspace.mockResolvedValue(alpha);
-    const view = render(<LocalWorkspaceControl conversationId="conv-alpha" onChange={vi.fn()} />);
-    fireEvent.click(await screen.findByRole("button", { name: "chat.workspace.approval.open" }));
-    expect(await screen.findByText("chat.workspace.approval.title")).toBeInTheDocument();
-    return view;
-  };
-  const refreshRequests = async () => act(async () => { fireEvent(document, new Event("visibilitychange")); });
+    render(<LocalWorkspaceControl conversationId="conv-alpha" onChange={vi.fn()} />);
+    await waitFor(() => expect(screen.getByRole("combobox")).toBeEnabled());
+    expect(screen.queryByText(/chat\.workspace\.approval\.open/)).not.toBeInTheDocument();
+  });
 
-  it("continues one pending request through Core approval, execution and completion", async () => {
-    let items = [approval()];
-    vi.mocked(axiosInstance.get).mockImplementation(async () => respond(items));
-    await openRequests();
+  it("closes the approval dialog after its final pending operation is approved", async () => {
+    mocks.getConversationWorkspace.mockResolvedValue(alpha);
+    const pending = {
+      operation_id: "operation-1", path: "notes/draft.txt", operation: "replace", status: "pending", expires_at: Date.now() + 60_000,
+    };
+    vi.mocked(axiosInstance.get).mockResolvedValue({ data: { data: { items: [pending] } } });
+    render(<LocalWorkspaceControl conversationId="conv-alpha" onChange={vi.fn()} />);
+
+    const dialog = (await screen.findByText("notes/draft.txt")).closest<HTMLElement>("[role=dialog]");
+    if (!dialog) throw new Error("approval dialog missing");
+    fireEvent.click(within(dialog).getByRole("button", { name: "chat.workspace.approval.allowOnce" }));
+
+    await waitFor(() => expect(vi.mocked(axiosInstance.post)).toHaveBeenCalledWith(
+      "/api/core/conversations/conv-alpha/workspace-approvals/operation-1:decide",
+      { action: "allow_once" },
+    ));
+    await waitFor(() => expect(dialog).toHaveClass("ant-zoom-leave"));
+
+    await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
+    expect(dialog).toHaveClass("ant-zoom-leave");
+  });
+
+  it("keeps the approval dialog open while another operation is pending", async () => {
+    mocks.getConversationWorkspace.mockResolvedValue(alpha);
+    const pending = (id: string, path: string) => ({
+      operation_id: id, path, operation: "replace", status: "pending", expires_at: Date.now() + 60_000,
+    });
+    vi.mocked(axiosInstance.get).mockResolvedValue({ data: { data: { items: [
+      pending("operation-1", "first.txt"), pending("operation-2", "second.txt"),
+    ] } } });
+    render(<LocalWorkspaceControl conversationId="conv-alpha" onChange={vi.fn()} />);
+
+    const dialog = (await screen.findByText("first.txt")).closest<HTMLElement>("[role=dialog]");
+    if (!dialog) throw new Error("approval dialog missing");
+    fireEvent.click(within(dialog).getAllByRole("button", { name: "chat.workspace.approval.allowOnce" })[0]);
+
+    await waitFor(() => expect(vi.mocked(axiosInstance.post)).toHaveBeenCalled());
+    expect(dialog).not.toHaveClass("ant-zoom-leave");
+    expect(within(dialog).getByText("second.txt")).toBeInTheDocument();
+  });
+
+  it("does not reopen a dismissed approval until a new operation arrives", async () => {
+    mocks.getConversationWorkspace.mockResolvedValue(alpha);
+    const pending = (id: string, path: string) => ({
+      operation_id: id, path, operation: "replace", status: "pending", expires_at: Date.now() + 60_000,
+    });
+    vi.mocked(axiosInstance.get).mockResolvedValue({ data: { data: { items: [pending("operation-1", "first.txt")] } } });
+    render(<LocalWorkspaceControl conversationId="conv-alpha" onChange={vi.fn()} />);
+
+    const dialog = (await screen.findByText("first.txt")).closest<HTMLElement>("[role=dialog]");
+    if (!dialog) throw new Error("approval dialog missing");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(dialog).toHaveClass("ant-zoom-leave"));
+
+    const calls = vi.mocked(axiosInstance.get).mock.calls.length;
+    await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
+    await waitFor(() => expect(vi.mocked(axiosInstance.get).mock.calls.length).toBeGreaterThan(calls));
+    expect(dialog).toHaveClass("ant-zoom-leave");
+
+    vi.mocked(axiosInstance.get).mockResolvedValue({ data: { data: { items: [pending("operation-2", "second.txt")] } } });
+    await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
+    expect(await screen.findByText("second.txt")).toBeInTheDocument();
+  });
+
+  it("cancels a stale revoke confirmation when the component lifetime changes", async () => {
+    mocks.listWorkspaces.mockResolvedValue([alpha]);
+    let confirm: (() => Promise<void>) | undefined;
+    const destroy = vi.fn();
+    vi.spyOn(Modal, "confirm").mockImplementation(((config: { onOk?: () => Promise<void> }) => {
+      confirm = config.onOk;
+      return { destroy, update: vi.fn() };
+    }) as typeof Modal.confirm);
+    const { rerender } = render(<LocalWorkspaceControl configResetKey={1} onChange={vi.fn()} />);
+    await openWorkspaceManager();
+    fireEvent.click(await screen.findByRole("button", { name: "chat.workspace.revoke" }));
+
+    rerender(<LocalWorkspaceControl configResetKey={2} onChange={vi.fn()} />);
+    expect(destroy).toHaveBeenCalled();
+    await confirm?.();
+    expect(mocks.revokeWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("opens approval only when an operation actually needs confirmation", async () => {
+    mocks.getConversationWorkspace.mockResolvedValue(alpha);
+    vi.mocked(axiosInstance.get).mockResolvedValue({ data: { data: { items: [{
+      operation_id: "operation-1", path: "notes/draft.txt", operation: "replace", status: "pending", expires_at: Date.now() + 60_000,
+    }] } } });
+    render(<LocalWorkspaceControl conversationId="conv-alpha" onChange={vi.fn()} />);
+
     expect(await screen.findByText("notes/draft.txt")).toBeInTheDocument();
-    expect(screen.getByText(/chat.workspace.approval.source.subagent/)).toHaveTextContent("task-1");
-    expect(screen.getByText(/observed-version/)).toBeInTheDocument();
-    expect(screen.getByText(/input-digest/)).toBeInTheDocument();
-    items = [approval("allowed")];
-    fireEvent.click(screen.getByRole("button", { name: "chat.workspace.approval.allowOnce" }));
-    expect(await screen.findByText("chat.workspace.approval.status.allowed")).toBeInTheDocument();
-    expect(axiosInstance.post).toHaveBeenCalledWith(
-      "/api/core/conversations/conv-alpha/workspace-approvals/operation-1:decide", { action: "allow_once" },
-    );
-    expect(screen.queryByText("chat.workspace.approval.status.completed")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "chat.workspace.approval.allowOnce" })).not.toBeInTheDocument();
-    items = [approval("executing")];
-    await refreshRequests();
-    expect(screen.getByText("chat.workspace.approval.status.executing")).toBeInTheDocument();
-    items = [approval("completed")];
-    await refreshRequests();
-    expect(screen.getByText("chat.workspace.approval.status.completed")).toBeInTheDocument();
-  });
-
-  it("shows a rejected decision without treating it as execution", async () => {
-    let items = [approval()];
-    vi.mocked(axiosInstance.get).mockImplementation(async () => respond(items));
-    vi.mocked(axiosInstance.post).mockImplementation(async () => {
-      items = [approval("rejected")];
-      return { data: { data: { status: "rejected" } } };
-    });
-    await openRequests();
-    fireEvent.click(await screen.findByRole("button", { name: "chat.workspace.approval.reject" }));
-    expect(await screen.findByText("chat.workspace.approval.status.rejected")).toBeInTheDocument();
-    expect(axiosInstance.post).toHaveBeenCalledWith(
-      "/api/core/conversations/conv-alpha/workspace-approvals/operation-1:decide", { action: "reject" },
-    );
-    expect(screen.queryByRole("button", { name: "chat.workspace.approval.allowOnce" })).not.toBeInTheDocument();
-    expect(screen.queryByText("chat.workspace.approval.status.completed")).not.toBeInTheDocument();
-  });
-
-  it("shows a Core decision error and refreshes the authoritative expired status", async () => {
-    let items = [approval()];
-    vi.mocked(axiosInstance.get).mockImplementation(async () => respond(items));
-    vi.mocked(axiosInstance.post).mockImplementation(async () => {
-      items = [approval("expired")];
-      throw { response: { data: { detail: { reason: "execution_inactive" } } } };
-    });
-    await openRequests();
-    fireEvent.click(await screen.findByRole("button", { name: "chat.workspace.approval.allowOnce" }));
-    expect(await screen.findByText("chat.workspace.approval.status.expired")).toBeInTheDocument();
-    expect(message.error).toHaveBeenCalledWith(expect.stringContaining("chat.workspace.reason.execution_inactive"));
-    expect(screen.queryByText("chat.workspace.approval.status.allowed")).not.toBeInTheDocument();
-  });
-
-  it.each(["approval_capacity", "operation_uncertain", "execution_inactive", "unsupported_file", "search_limit"])(
-    "disables stale decisions and shows Core reason %s when refresh fails", async (reason) => {
-      vi.mocked(axiosInstance.get).mockResolvedValue(respond([approval()]));
-      await openRequests();
-      expect(await screen.findByRole("button", { name: "chat.workspace.approval.allowOnce" })).toBeEnabled();
-      vi.mocked(axiosInstance.get).mockRejectedValue({ response: { data: { data: { detail: { reason } } } } });
-      await refreshRequests();
-      expect(screen.getByRole("alert")).toHaveTextContent(`chat.workspace.reason.${reason}`);
-      expect(screen.getByRole("button", { name: "chat.workspace.approval.allowOnce" })).toBeDisabled();
-      expect(axiosInstance.post).not.toHaveBeenCalled();
-    },
-  );
-
-  it("renders preparing and unknown-result states without approval actions", async () => {
-    vi.mocked(axiosInstance.get).mockResolvedValue(respond([
-      approval("preparing"), { ...approval("uncertain"), operation_id: "operation-2", task_id: "", attempt_id: "attempt-2", reason: "operation_uncertain" },
-    ]));
-    await openRequests();
-    expect(await screen.findByText("chat.workspace.approval.status.preparing")).toBeInTheDocument();
-    expect(screen.getByText("chat.workspace.approval.status.uncertain")).toBeInTheDocument();
-    expect(screen.getByText("chat.workspace.approval.uncertain")).toBeInTheDocument();
-    expect(screen.getByText(/chat.workspace.approval.source.workflow/)).toHaveTextContent("attempt-2");
-    expect(screen.queryByRole("button", { name: "chat.workspace.approval.allowOnce" })).not.toBeInTheDocument();
-  });
-
-  it("clears busy decisions and discards old list and decision responses after switching conversations", async () => {
-    const oldList = deferred<ReturnType<typeof respond>>();
-    const oldDecision = deferred<{ data: { data: { status: string } } }>();
-    const betaItem = { ...approval(), operation_id: "beta-operation", path: "beta.txt" };
-    vi.mocked(axiosInstance.get).mockImplementation(async (url) => respond(String(url).includes("conv-beta") ? [betaItem] : [approval()]));
-    vi.mocked(axiosInstance.post).mockReturnValueOnce(oldDecision.promise);
-    const view = await openRequests();
-    mocks.getConversationWorkspace.mockImplementation(async (id) => id === "conv-beta" ? beta : alpha);
-    fireEvent.click(await screen.findByRole("button", { name: "chat.workspace.approval.allowOnce" }));
-    vi.mocked(axiosInstance.get).mockReturnValueOnce(oldList.promise);
-    await refreshRequests();
-    view.rerender(<LocalWorkspaceControl conversationId="conv-beta" onChange={vi.fn()} />);
-    expect(await screen.findByText(beta.path)).toBeInTheDocument();
-    await act(async () => {
-      oldList.resolve(respond([approval("completed")]));
-      oldDecision.resolve({ data: { data: { status: "allowed" } } });
-    });
-    fireEvent.click(screen.getByRole("button", { name: "chat.workspace.approval.open" }));
-    expect(await screen.findByText("beta.txt")).toBeInTheDocument();
-    expect(screen.queryByText("notes/draft.txt")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "chat.workspace.approval.allowOnce" })).toBeEnabled();
-    expect(screen.queryByText("chat.workspace.approval.status.completed")).not.toBeInTheDocument();
-  });
-
-  it("stops polling and ignores hidden or unmounted replies, then refetches when visible", async () => {
-    vi.mocked(axiosInstance.get).mockResolvedValue(respond([approval()]));
-    const view = await openRequests();
-    expect(await screen.findByText("notes/draft.txt")).toBeInTheDocument();
-    vi.useFakeTimers();
-    const hiddenResponse = deferred<ReturnType<typeof respond>>();
-    vi.mocked(axiosInstance.get).mockReturnValueOnce(hiddenResponse.promise);
-    await refreshRequests();
-    const signal = vi.mocked(axiosInstance.get).mock.calls.slice(-1)[0]?.[1]?.signal;
-    Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
-    await refreshRequests();
-    expect(signal?.aborted).toBe(true);
-    const callsWhenHidden = vi.mocked(axiosInstance.get).mock.calls.length;
-    await act(async () => {
-      hiddenResponse.resolve(respond([approval("completed")]));
-      await vi.advanceTimersByTimeAsync(3000);
-    });
-    expect(axiosInstance.get).toHaveBeenCalledTimes(callsWhenHidden);
-    expect(screen.queryByText("chat.workspace.approval.status.completed")).not.toBeInTheDocument();
-    vi.mocked(axiosInstance.get).mockResolvedValue(respond([approval("allowed")]));
-    Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
-    await refreshRequests();
-    expect(screen.getByText("chat.workspace.approval.status.allowed")).toBeInTheDocument();
-    vi.mocked(axiosInstance.get).mockResolvedValue(respond([approval("executing")]));
-    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
-    expect(screen.getByText("chat.workspace.approval.status.executing")).toBeInTheDocument();
-    const unmountedResponse = deferred<ReturnType<typeof respond>>();
-    vi.mocked(axiosInstance.get).mockReturnValueOnce(unmountedResponse.promise);
-    await refreshRequests();
-    const lastSignal = vi.mocked(axiosInstance.get).mock.calls.slice(-1)[0]?.[1]?.signal;
-    view.unmount();
-    expect(lastSignal?.aborted).toBe(true);
-    const callsAtUnmount = vi.mocked(axiosInstance.get).mock.calls.length;
-    await act(async () => {
-      unmountedResponse.resolve(respond([approval("completed")]));
-      await vi.advanceTimersByTimeAsync(3000);
-    });
-    expect(axiosInstance.get).toHaveBeenCalledTimes(callsAtUnmount);
+    expect(screen.queryByText(/chat\.workspace\.approval\.open/)).not.toBeInTheDocument();
   });
 
 });

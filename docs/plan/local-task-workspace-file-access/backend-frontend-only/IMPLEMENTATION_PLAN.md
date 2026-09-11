@@ -630,3 +630,41 @@ Core最终全量83包通过（另5包无测试），算法P1修复与Workflow广
   - `frontend/scripts/openapi/generated-client-utils.mjs` `bb6631d650bb41bea7036de2bcab72affe8f7724e8faa3e1f7ab1d3b308e9352`
   - `frontend/scripts/openapi/specs/core.yaml` `6df2140d76fc6d7ed2a13fe33f04177af6241e843880013c49c38afcea3e2d5c`
   - `frontend/scripts/openapi/specs/scan.yaml` `f26bd2b462f1e95a130bbff6ab4148a2bbdd1dfd873156dad076e4f6ae0af389`
+
+## 2026-09-10 新建对话工作区入口修正
+
+- 新建对话/工作模式草稿继续显示工作区选择、名称和路径。
+- 正式会话不显示工作区名称或路径；所有正式会话查询 Core 绑定，存在绑定时保留权限选择；输入栏永不显示“工作区请求（数量）”标识，确有待确认操作时直接弹出审批窗口，修改权限从下一次执行生效。新建对话草稿按飞书 HTML 原型提供工作区菜单和默认“按需确认”。
+- 权限修改继续复用现有 `PUT /api/core/conversations/{conversation_id}:workspace-permission` 和 `permission_version` 乐观锁；成功后从下一次执行生效，不追溯改变运行中的请求。
+- 生产仅修改 1 个既有前端文件，合计 `+1/-1`、净增 0 行；无新增生产文件、依赖、服务、表或协议。
+- 自动验收重新执行中：ChatInput 已通过 6 项，LocalWorkspaceControl 已通过 32 项；类型检查、生产构建和真实页面核对待本批完成。
+
+### 新建对话 UI 最终实现记录
+
+最终行为以产品澄清为准：工作区目录选择是发送前配置；正式对话不显示工作区名称或路径，但已绑定会话持续显示可修改的权限按钮。新建任务草稿复用现有 `LocalWorkspaceControl`，以单一工作区菜单呈现搜索、授权目录、打开本地文件夹、不使用本地工作区和管理授权，默认权限为“按需确认”。生产修改 5 个既有文件及 2 个文案文件 `+369/-54`，无新增生产文件；测试修改 2 个既有文件 `+59/-10`。关键 SHA-256：`LocalWorkspaceControl.tsx=a9da05e15194980a719e1c8906814d0b922f34a91ac63cfead1845d03d57bd2c`、`ChatInput/index.tsx=ce5adea0fd81eb3367ef03347e45cf87293a76a25be246ecba9a0fff398b9a08`、`ChatInput/index.scss=0da0a8194d618d676430a6a57d46ed64fe7f3bf0fa20a8966d2c077f5fd41811`。定向测试 38 项、类型检查和生产构建通过；Local/Desktop 与 LazyLLM 保持冻结。
+
+## 2026-09-10 Code Review 修复批次
+
+按 `CODE_REVIEW.md` 修复执行级权限冻结、草稿复用泄漏、确定的 TypeScript 错误、delete 提交前复核，以及审批窗/撤销确认生命周期和工作区根 `ls`。Core 仍是唯一业务权威：执行快照只从 Core 保存的 ChatInput ext 或 task params 读取，算法请求不能自报权限；缺少 Core 快照时 fail closed。权限修改只影响下一次主任务、普通子任务或 Workflow 执行，当前执行的 pending/allowed 操作保持启动时权限；grant、目录身份、停止、generation 和 lease 实时校验不放宽。
+
+Workflow 创建任务时复用 `RebuildSubagentParams` 持久化同一快照，远端 execution-spec 在保留权限快照的同时重新验证 live grant/workspace version。delete 复用现有 `Lstat`、`SameFile`、`readOperationFile` 和 digest，不新增文件操作框架；最后检查与任意外部进程删除之间仍不是原子 CAS。
+
+本批无新增生产文件。Backend `+164/-78`、净 `+86`；Algorithm `+19/-16`、净 `+3`；Frontend 按 Review 前后同一统计口径净增 `+23`；生产总净增约 `112`，低于 200 行门槛。没有新增服务、表、依赖、manager、facade、重复 DTO 或 trusted 路径。E2 loader 合并未做，原因是 manifest 过滤、资源文件与 materialized `__file__` 行为尚无等价证明。
+
+关键工作树 SHA-256：`context.go=770f076d464aeb7c97bcf6f1fa26f55ecbca76b613e9de748ed0f3c2ddccf197`、`lifecycle.go=a5326a7b258d28ba6c264f7ca85c2f6c4a8f15d0848a9be4aece45f19b138243`、`operations.go=de832641f1398db2e1029f6f76e65c554f090ec426a0ac49b23b2229d30ee485`、`approvals.go=8505e0f6ac06a8448e375c31425d4a93103ab265e1b403f9e7b35b80ee954e9c`、`chat/run_decision.go=70669f48872405692dac974580dea8e348e777e36ac5bc91592ef387f48761d3`、`subagent/runner.go=619a75ea45b9283abe102e03bbf390edf677df8c7cf7518911fa1ab97cb44326`、`subagent/handlers.go=25cec06aaa3895a6a28a25aea42c6bc2dd870580d7cfe12d3e0adefff6420318`、`workflow/eventloop.go=e02eefa9198988db6c76be56e4a916bf095206333c70b03fce40c80373792e06`、`local_fs.py=8e80db484fe94cc9f1cbd5fa2859f1f8a398a83de13e97a8cc23b1cf90aee303`、`algorithm runner.py=71f0a8819a29d79f1d8718b89820fefa82190616eb12a2fc18e940aee0c82c6b`、`LocalWorkspaceControl.tsx=5848950e543d2548a6dec98a5ca1fb14548d60072f4c9a71f32e33d7535e2219`、`ChatInput/index.tsx=a3fcbf958cd987b99e8c0e3a38ecff69e78a70d0a51ba0c168e86ef36dd404cc`、`index.scss=0da0a8194d618d676430a6a57d46ed64fe7f3bf0fa20a8966d2c077f5fd41811`。冻结提交点待本批提交后记录。
+
+## 2026-09-11 always_ask 工具面修复
+
+生产验证发现：绑定本机工作区时，主 ChatAgent 仍同时注册旧 `write_file` 和受控 `LocalFileToolkit`。旧 `write_file` 只写内部 Chat artifact staging 目录，不读取 Core permission，因此模型在 `always_ask` 下可直接生成内部 artifact，造成用户误以为授权目录文件已被无审批修改。
+
+修复保持边界清晰：检测到 `local-workspace:*` source 时移除旧 `write_file`，保留 `save_chat_artifact` 作为明确的下载产物发布能力；所有授权目录文件操作必须调用 `LocalFileToolkit` 并经过 Core prepare/approval/execute。未绑定会话保留原有 artifact 工具，避免破坏普通 Chat 生成文件能力。服务层合同测试验证最终 Agent plan 不含 `write_file`。
+
+### 2026-09-11 批准窗口收敛补充
+
+批准/拒绝 workspace operation 成功后，前端必须立即反映决定结果。最后一个 pending operation 完成决定时关闭批准窗口，并在 Core 查询结果收敛前抑制同一 operation 触发重复自动打开；若还有其他 pending operation，窗口继续保持打开。实现复用 `LocalWorkspaceControl` 现有 dismissed operation 集合与轮询，不改变 Core API、权限权威或冻结层。
+
+验收补充：最后一个 pending 批准后 Modal 关闭；紧接着读取到旧 pending 快照不会重开；多个 pending 中只处理一个时 Modal 不关闭；接口失败时保留窗口并显示既有错误反馈。
+
+### 2026-09-11 提交范围确认
+
+最终提交仅包含工作区授权、执行权限快照、受控文件工具、前端权限与批准窗口、对应自动化测试及本目录四份交接文档。`algorithm/Dockerfile` 的 OpenCode 下载修复已从分支移除；临时验收文件和独立 Review 报告不进入仓库。

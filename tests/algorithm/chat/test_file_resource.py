@@ -275,6 +275,18 @@ def test_main_agent_always_registers_unified_read_tools():
     assert {'grep', 'read_file'}.isdisjoint(optional)
 
 
+def test_bound_local_workspace_hides_ambiguous_chat_workspace_writer():
+    from lazymind.chat.service.chat_service import _build_chat_artifact_tools
+
+    unbound = {tool.__name__ for tool in _build_chat_artifact_tools()}
+    bound = {tool.__name__ for tool in _build_chat_artifact_tools(bound_local_workspace=True)}
+
+    assert 'write_file' in unbound
+    assert 'write_file' not in bound
+    assert 'save_chat_artifact' in bound
+    assert {'grep', 'read_file', 'list_dir'} <= bound
+
+
 def test_migrated_tools_use_single_toolmanager_envelope(monkeypatch, tmp_path):
     import lazyllm
     from lazyllm.tools import ToolManager

@@ -551,3 +551,53 @@ Core最终全量83包通过（另5包无测试），算法P1修复与Workflow广
 
 - 自动化改动冻结提交：`8f279db3`，提交树：`9209e6f5fcad87e01d94d0d0b08b81d699626d4a`。
 - 关键生产文件 SHA-256 已在 `IMPLEMENTATION_PLAN.md` 同步记录；提交后不再修改这些文件。
+
+## 2026-09-10 对话中工作区 UI 核对
+
+- `LocalWorkspaceControl` 已具备会话绑定查询和中途权限更新能力；缺口来自 `ChatInput` 只在 `runInBackground` 为真时挂载该控件。
+- 产品要求最终澄清为：工作区目录选择只在新建对话草稿显示；正式对话不显示工作区名称或路径，已绑定会话必须保留可修改的权限按钮。
+- 直接运行 `pnpm exec tsc --noEmit` 会使用不适用的默认工程配置并产生大量既有第三方/隐式 any 错误；仓库声明的 `pnpm run typecheck`（`tsconfig.mcp.json`）通过。未修改或规避类型配置。
+
+### 新建对话 UI 最终口径
+
+工作区目录选择属于发送前配置；权限档位属于会话绑定，正式对话开始后仍可修改并从下一次执行生效。参考 HTML 的工作区入口是单一弹出菜单，包含搜索、已授权目录、打开本地文件夹和不使用本地工作区；默认权限为“按需确认”。现有 Core 授权、原生目录选择和管理能力可直接复用，无需新增状态服务。
+
+- 会话输入区永不展示“工作区请求（数量）”计数标识。为保证“始终询问/按需确认”仍可完成批准，绑定会话保留底层轮询；只有实际出现 pending 操作时才直接弹出审批窗口。Core 审批状态机仍保持业务权威，本批未修改后端。
+
+
+## 2026-09-10 独立代码 Review（仅文档）
+
+- 以官方基线 `245bc26d` 到实际 HEAD `b4880c4a` 加全部未提交前端差异为准；完整报告见同目录 `CODE_REVIEW.md`。没有修改生产代码、测试或 Git 状态。
+- 未确认 Critical；确认 Important：权限按操作而非执行冻结、欢迎页新草稿继承工作区/allow_all、未提交 visible helper 展开引入 TS2367、delete 缺少提交前文件身份/版本复核。不建议当前代码直接提交。
+- Minor：相同 pending 反复重开审批窗、过期 revoke 静态确认仍能发请求、ls 返回根路径 `.` 后仍循环 info、旧请求计数翻译残留。Workflow binding 表示差异列为待确认入口，未冒充正常 Core 路径的已证实旁路。
+- 实际生产净增 Backend 3271、Algorithm 806、Frontend 1194；保守可精简 14–22 行，不含修复成本。安全/幂等/平台/兼容和有效测试不得为减行删除。
+- 本次 Core 四包去缓存测试及 vet 通过；Python 六文件 160 passed/1 skipped；窄 typecheck 通过，但全量 tsc 有 450 条诊断/103 文件。前端 Vitest 被禁止写文件的保护阻止启动；真实 PostgreSQL 子项因无 DSN 跳过。冻结检查通过。历史“全部通过/无 Important”不能替代本次结论。
+
+## 2026-09-10 Review 修复结论
+
+- 权限要满足“下一次执行生效”，不能只把 mode/version 存在 operation 上；同一 run 的第二个 prepare 也必须使用启动快照。主会话已有 ChatInput ext，SubAgent 已有 task params，Workflow 创建链可复用相同 task params，无需新表或算法自报字段。
+- live 校验须拆开：permission mode/version 随执行冻结；workspace grant/version、目录 identity、run stop、SubAgent generation、Workflow attempt/lease 继续实时检查。绑定执行缺少 Core 快照应拒绝，不能回退 live permission。
+- delete 的 expected_version 初检不足以覆盖 revalidate 回调期间的外部替换；最终 Remove 前需再次确认 `SameFile` 与 digest。该复核缩小竞态窗口，但不是宿主文件系统 CAS。
+- 草稿父状态和 LocalWorkspaceControl 子状态必须同时响应 `configResetKey`；只 remount 子组件无法保证发送 payload 清除。
+- pending 自动弹窗需要记住用户已关闭的 operation ID；轮询同一 ID 不重开，ID 消失后清理，出现新 ID 再打开。静态 `Modal.confirm` 必须归属组件生命周期。
+- 工作区 discovery 中省略 path 与显式 `.` 语义不同：前者枚举根，后者列工作区根目录。Workflow loader 和 runtime 必须共用同一纯 binding detector，避免某种 context/source 表示只在执行期被识别。
+- Review 建议中 E2 未实施：两套 Workflow loader 的过滤和资源语义不同，当前没有安全等价证据。SCSS 也没有基于文本猜测删除。
+
+## 2026-09-11 生产验证：always_ask 被旧 write_file 旁路
+
+- 用户复现会话 `569486dc-559e-4686-a4d0-c18f7ff0014e` 的 Core binding 为 `always_ask`、`permission_version=1`，ChatHistory ext 也保存了同一快照。
+- 10:39:19 和 10:39:48 成功调用的是算法旧工具 `write_file`，不是 `LocalFileToolkit_*`。该工具由 `algorithm/lazymind/chat/engine/tools/local_file/workspace.py` 提供，写入 `chat_agent_workspace` 下的内部 `chat-artifacts/<user>/<conversation>` 目录；实际路径为 `~/Library/Application Support/LazyMind/data/homes/lazymind/agent_workspace/chat-artifacts/.../hello.txt`，授权工作区 `/Users/theone/Downloads/lazymind/hello.txt` 并未被创建。
+- 因此 Core `permissionDecision(always_ask)` 没有机会返回 pending；真正走 Core 的 `LocalFileToolkit_delete/read` 后续调用均未直接成功。问题不是 Core 把 pending 错判为 allowed，而是主 ChatAgent 同时看到了内部 artifact writer 和受控本机工作区 writer，模型选择了错误工具。
+- 修复：当 `agentic_config.local_fs_sources` 含 `local-workspace:*` source 时，主 ChatAgent 不再注册旧 `write_file`；保留 `save_chat_artifact` 用于明确的下载产物发布，未绑定会话的旧 artifact writer 行为不变。系统提示明确要求本机工作区的读取、创建、修改、追加、删除、列举和搜索统一使用 `LocalFileToolkit`，Core 负责 `always_ask` 审批。
+- 验证：服务层 prompt/tool-plan 合同、旧 helper 兼容和工作区 Core 工具回归共 `150 passed, 1 skipped, 3 warnings`；Python 编译、冻结边界和 `git diff --check` 通过。
+
+### 2026-09-11 批准窗口未关闭根因
+
+- Core decide 请求成功且返回终态并不是问题来源；前端 `decideApproval` 原实现只替换列表条目的 `status`，受控 Modal 的打开条件 `approvalsOpen === conversationId` 始终为真。
+- 单纯关闭 Modal 仍不足：1 秒轮询可能在 Core 列表收敛前再次读到同一 operation 的旧 `pending`。现有 `dismissedApprovalIdsRef` 已能抑制重复自动打开，因此决定成功后复用该集合，直到轮询确认 operation 不再 pending 并自动清理。
+- 多请求语义：处理最后一个 pending 后关闭；若列表还有其他 pending，则继续展示以便逐项处理。
+
+### 2026-09-11 提交前核对
+
+- 正确仓库 Python 3.11 与固定 LazyLLM gitlink环境下，四个 Algorithm 定向文件为 65 passed、1 skipped、3 warnings；根目录 `.venv` 是不适用的 Python 3.12 环境，其 collection error 不属于代码失败。
+- Backend `localworkspace/chat/subagent/workflow` 全部通过；Frontend 工作区 35 项、typecheck 和 Local 生产构建通过。`algorithm/Dockerfile`、临时 `hello1.txt` 与未跟踪 Review 报告均已排除。

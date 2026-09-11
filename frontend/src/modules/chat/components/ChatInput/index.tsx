@@ -698,6 +698,8 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     }, [onModelSelectionSavingChange]);
     useEffect(() => {
       setInitialModelSelection(undefined);
+      setWorkspaceId(undefined);
+      setWorkspacePermissionMode("ask_as_needed");
     }, [configResetKey, sessionId]);
     const workflowBlocksModelSwitch = useWorkflowStore((state) => {
       if (!sessionId) return false;
@@ -1400,14 +1402,6 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
 
               <div className="input-bottom-actions">
                 <div className="input-bottom-actions-left">
-                  {runInBackground && <LocalWorkspaceControl
-                    conversationId={sessionId && !sessionId.startsWith("temp_") ? sessionId : undefined}
-                    disabled={disabled || isStreaming}
-                    onChange={(id, permissionMode) => {
-                      setWorkspaceId(id);
-                      setWorkspacePermissionMode(permissionMode);
-                    }}
-                  />}
                   <div className="chat-add-resource">
                     <Popover
                       trigger="click"
@@ -1517,6 +1511,15 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                       />
                     </div>
                   </div>
+                  {(runInBackground || Boolean(sessionId && !sessionId.startsWith("temp_"))) && <LocalWorkspaceControl
+                    conversationId={sessionId && !sessionId.startsWith("temp_") ? sessionId : undefined}
+                    configResetKey={configResetKey}
+                    disabled={disabled || isStreaming}
+                    onChange={(id, permissionMode) => {
+                      setWorkspaceId(id);
+                      setWorkspacePermissionMode(permissionMode);
+                    }}
+                  />}
                   {showcaseSelection ? (
                     <div className="chat-showcase-selection" data-testid="showcase-selection">
                       <ShowcaseSelectButton

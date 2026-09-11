@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react";
-import { Button, Input, Modal, Select, Space, Tag, message } from "antd";
-import { FolderOpenOutlined, SettingOutlined } from "@ant-design/icons";
+import { useEffect, useRef, useState, type ChangeEvent } from "react";
+import { Button, Input, Modal, Popover, Select, Space, Tag, message, type SelectProps } from "antd";
+import { CheckOutlined, CloseOutlined, DownOutlined, ExclamationCircleOutlined, FolderOpenOutlined, SafetyCertificateOutlined, SettingOutlined, StopOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { getRuntimeMode } from "@/runtime/mode";
 import {
@@ -15,26 +15,36 @@ import {
   updateWorkspacePermission,
   workspaceReason,
   type LocalWorkspaceView,
-  type WorkspacePermissionMode,
   type WorkspaceApproval,
+  type WorkspacePermissionMode,
 } from "@/modules/chat/utils/localWorkspace";
 
 interface Props {
   conversationId?: string;
+  configResetKey?: number | string;
   disabled?: boolean;
   onChange: (workspaceId: string | undefined, mode: WorkspacePermissionMode) => void;
 }
-export default function LocalWorkspaceControl({ conversationId, disabled, onChange }: Props) {
+export default function LocalWorkspaceControl({ conversationId, configResetKey, disabled, onChange }: Props) {
   const { t } = useTranslation();
   const runtime = getRuntimeMode();
   const labels: Record<WorkspacePermissionMode, string> = {
     always_ask: t("chat.workspace.everyAsk"), ask_as_needed: t("chat.workspace.askAsNeeded"), allow_all: t("chat.workspace.allowAll"),
+  };
+  const permissionDescriptions: Record<WorkspacePermissionMode, string> = {
+    always_ask: t("chat.workspace.everyAskDescription"),
+    ask_as_needed: t("chat.workspace.askAsNeededDescription"),
+    allow_all: t("chat.workspace.allowAllDescription"),
   };
   const [items, setItems] = useState<LocalWorkspaceView[]>([]);
   const [selected, setSelected] = useState<LocalWorkspaceView>();
   const [mode, setMode] = useState<WorkspacePermissionMode>("ask_as_needed");
   const [candidate, setCandidate] = useState<{ token: string; name?: string; path?: string; reauthorization?: boolean; conversationId?: string }>();
   const [manageOpen, setManageOpen] = useState(false);
+  const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
+  const [allowAllOpen, setAllowAllOpen] = useState(false);
+  const [allowAllRequest, setAllowAllRequest] = useState<number>();
+  const [workspaceQuery, setWorkspaceQuery] = useState("");
   const [managedItems, setManagedItems] = useState<LocalWorkspaceView[]>([]);
   const [busy, setBusy] = useState(false);
   const [approvals, setApprovals] = useState<{ conversationId: string; items: WorkspaceApproval[] }>();
@@ -42,14 +52,18 @@ export default function LocalWorkspaceControl({ conversationId, disabled, onChan
   const [approvalBusy, setApprovalBusy] = useState<string>();
   const [approvalError, setApprovalError] = useState<string>();
   const approvalRequestRef = useRef(0);
+  const dismissedApprovalIdsRef = useRef(new Set<string>());
+  const revokeConfirmRef = useRef<ReturnType<typeof Modal.confirm>>();
   const refreshApprovalsRef = useRef(() => {});
   const onChangeRef = useRef(onChange);
   const selectedRef = useRef<LocalWorkspaceView>();
   const requestRef = useRef(0);
   const listRequestRef = useRef(0);
   const conversationRef = useRef(conversationId);
-  if (conversationRef.current !== conversationId) {
+  const resetKeyRef = useRef(configResetKey);
+  if (conversationRef.current !== conversationId || resetKeyRef.current !== configResetKey) {
     conversationRef.current = conversationId;
+    resetKeyRef.current = configResetKey;
     requestRef.current += 1;
   }
   useEffect(() => { onChangeRef.current = onChange; }, [onChange]);
@@ -66,8 +80,15 @@ export default function LocalWorkspaceControl({ conversationId, disabled, onChan
     setCandidate(undefined);
     listRequestRef.current += 1;
     setManageOpen(false);
+    setWorkspaceMenuOpen(false);
+    setAllowAllOpen(false);
+    setAllowAllRequest(undefined);
+    setWorkspaceQuery("");
     setManagedItems([]);
     setBusy(false);
+    dismissedApprovalIdsRef.current.clear();
+    revokeConfirmRef.current?.destroy();
+    revokeConfirmRef.current = undefined;
     if (hadSelection) onChangeRef.current(undefined, "ask_as_needed");
     void (conversationId
       ? getConversationWorkspace(conversationId).then((workspace) => workspace ? [workspace] : [])
@@ -82,8 +103,14 @@ export default function LocalWorkspaceControl({ conversationId, disabled, onChan
         onChangeRef.current(values[0].workspace_id, values[0].permission_mode ?? "ask_as_needed");
       }
     }).catch(() => undefined);
-    return () => { active = false; requestRef.current += 1; listRequestRef.current += 1; };
-  }, [conversationId]);
+    return () => {
+      active = false;
+      requestRef.current += 1;
+      listRequestRef.current += 1;
+      revokeConfirmRef.current?.destroy();
+      revokeConfirmRef.current = undefined;
+    };
+  }, [conversationId, configResetKey]);
 
   useEffect(() => {
     setApprovals(undefined);
@@ -105,6 +132,11 @@ export default function LocalWorkspaceControl({ conversationId, disabled, onChan
         const values = await listWorkspaceApprovals(conversationId, controller.signal);
         if (!active || request !== approvalRequestRef.current || conversationId !== conversationRef.current) return;
         setApprovals({ conversationId, items: values });
+        const pendingIds = new Set(values.filter((item) => item.status === "pending").map((item) => item.operation_id));
+        for (const id of dismissedApprovalIdsRef.current) {
+          if (!pendingIds.has(id)) dismissedApprovalIdsRef.current.delete(id);
+        }
+        if ([...pendingIds].some((id) => !dismissedApprovalIdsRef.current.has(id))) setApprovalsOpen(conversationId);
         setApprovalError(undefined);
       } catch (error) {
         if (active && request === approvalRequestRef.current && conversationId === conversationRef.current && !controller.signal.aborted) setApprovalError(workspaceReason(error));
@@ -214,10 +246,8 @@ export default function LocalWorkspaceControl({ conversationId, disabled, onChan
   };
   const changeMode = async (next: WorkspacePermissionMode) => {
     if (next === "allow_all") {
-      const request = requestRef.current;
-      Modal.confirm({ title: t("chat.workspace.allowAllTitle"), content: t("chat.workspace.allowAllRisk"), onOk: () => {
-        if (request === requestRef.current) void applyMode(next);
-      } });
+      setAllowAllRequest(requestRef.current);
+      setAllowAllOpen(true);
       return;
     }
     await applyMode(next);
@@ -251,8 +281,10 @@ export default function LocalWorkspaceControl({ conversationId, disabled, onChan
 
   const revoke = (target = selected) => {
     if (!target?.version) return;
-    Modal.confirm({ title: t("chat.workspace.revokeTitle"), content: t("chat.workspace.revokeAffected", { count: target.affected_task_count ?? 0 }), okButtonProps: { danger: true }, onOk: async () => {
-      const request = requestRef.current;
+    const request = requestRef.current;
+    revokeConfirmRef.current?.destroy();
+    revokeConfirmRef.current = Modal.confirm({ title: t("chat.workspace.revokeTitle"), content: t("chat.workspace.revokeAffected", { count: target.affected_task_count ?? 0 }), okButtonProps: { danger: true }, onOk: async () => {
+      if (request !== requestRef.current) return;
       setBusy(true);
       try {
         const result = await revokeWorkspace(target.workspace_id, target.version);
@@ -284,58 +316,92 @@ export default function LocalWorkspaceControl({ conversationId, disabled, onChan
     setApprovalBusy(item.operation_id);
     try {
       const result = await decideWorkspaceApproval(conversationId, item.operation_id, action);
-      if (request === requestRef.current) setApprovals((current) => current && current.conversationId === conversationId
-        ? { ...current, items: current.items.map((value) => value.operation_id === item.operation_id ? { ...value, status: result.status } : value) } : current);
+      if (request === requestRef.current) {
+        dismissedApprovalIdsRef.current.add(item.operation_id);
+        setApprovals((current) => current && current.conversationId === conversationId
+          ? { ...current, items: current.items.map((value) => value.operation_id === item.operation_id ? { ...value, status: result.status } : value) }
+          : current);
+        if (!currentApprovals.some((value) => value.operation_id !== item.operation_id && value.status === "pending")) {
+          setApprovalsOpen(undefined);
+        }
+      }
     } catch (error) {
       if (request === requestRef.current) message.error(`${t("chat.workspace.approval.decisionFailed")}：${reasonText(error)}`);
     } finally {
       if (request === requestRef.current) { setApprovalBusy(undefined); refreshApprovalsRef.current(); }
     }
   };
+
   const currentApprovals = approvals && approvals.conversationId === conversationId ? approvals.items : [];
-  const pendingCount = currentApprovals.filter((item) => item.status === "pending").length;
-  const folderLocked = Boolean(conversationId && (!selected || selected.status === "active"));
   const currentCandidate = candidate?.conversationId === conversationId ? candidate : undefined;
+  const visibleItems = items.filter((item) => {
+    const query = workspaceQuery.trim().toLowerCase();
+    return !query || item.display_name.toLowerCase().includes(query) || item.path.toLowerCase().includes(query);
+  });
+  const selectDraftWorkspace = (workspace?: LocalWorkspaceView) => {
+    selectedRef.current = workspace;
+    setSelected(workspace);
+    setWorkspaceMenuOpen(false);
+    onChangeRef.current(workspace?.workspace_id, mode);
+  };
 
   return <>
-    <Space size={6} wrap>
-      <Button size="small" icon={<FolderOpenOutlined />} disabled={disabled || busy || folderLocked} loading={busy} onClick={() => void choose()}>
-        {selected?.display_name ?? t("chat.workspace.select")}
-      </Button>
-      {items.length > 0 && !conversationId && <Select size="small" allowClear placeholder={t("chat.workspace.recent")} value={selected?.workspace_id}
-        disabled={disabled || busy}
-        options={items.map((item) => ({ value: item.workspace_id, label: item.display_name, disabled: item.status !== "active" }))}
-        onChange={(id: string | undefined) => { const workspace = items.find((item) => item.workspace_id === id); selectedRef.current = workspace; setSelected(workspace); onChangeRef.current(id, mode); }} />}
-      {!conversationId && <Button size="small" icon={<SettingOutlined />} disabled={disabled || busy} onClick={() => { setManageOpen(true); void loadManagedItems(); }}>
-        {t("chat.workspace.manage")}
-      </Button>}
-      {conversationId && selected && <Button size="small" onClick={() => { setApprovalsOpen(conversationId); refreshApprovalsRef.current(); }}>
-        {t("chat.workspace.approval.open", { count: pendingCount })}
-      </Button>}
-      {selected && <><Tag color={selected.status === "active" ? undefined : "error"}>{selected.path}</Tag><Select size="small" value={mode} disabled={busy || selected.status !== "active"}
+    <Space className="local-workspace-control" size={6} wrap>
+      {!conversationId && <Popover trigger="click" placement="bottomLeft" autoAdjustOverflow={false} open={workspaceMenuOpen} onOpenChange={setWorkspaceMenuOpen}
+        content={<div className="local-workspace-menu">
+          <Input.Search allowClear value={workspaceQuery} placeholder={t("chat.workspace.searchShort")} onChange={(event: ChangeEvent<HTMLInputElement>) => setWorkspaceQuery(event.target.value)} />
+          <div className="local-workspace-menu-list">
+            {visibleItems.map((item) => <button type="button" key={item.workspace_id} disabled={item.status !== "active"} onClick={() => selectDraftWorkspace(item)}>
+              <span className="local-workspace-menu-icon"><FolderOpenOutlined /></span><span><strong>{item.display_name}</strong><small>{item.path}</small></span>
+            </button>)}
+          </div>
+          <div className="local-workspace-menu-actions">
+            <button type="button" onClick={() => { setWorkspaceMenuOpen(false); void choose(); }}><span className="local-workspace-menu-icon"><FolderOpenOutlined /></span>{t("chat.workspace.openFolder")}</button>
+            <button type="button" onClick={() => selectDraftWorkspace()}><span className="local-workspace-menu-icon"><CloseOutlined /></span>{t("chat.workspace.none")}</button>
+            <button type="button" onClick={() => { setWorkspaceMenuOpen(false); setManageOpen(true); void loadManagedItems(); }}><span className="local-workspace-menu-icon"><SettingOutlined /></span>{t("chat.workspace.manage")}</button>
+          </div>
+        </div>}>
+        <Button className="local-workspace-trigger" size="small" icon={<FolderOpenOutlined />} disabled={disabled || busy} loading={busy}>
+          {selected?.display_name ?? t("chat.workspace.select")} <DownOutlined />
+        </Button>
+      </Popover>}
+      {(!conversationId || selected) && <><Select className="local-workspace-permission" size="small" value={mode} disabled={busy || !selected || Boolean(!conversationId && disabled) || selected.status !== "active"}
+        classNames={{ popup: { root: "local-workspace-permission-menu" } }}
         options={Object.entries(labels).map(([value, label]) => ({ value, label }))}
+        labelRender={(({ value }) => <Space size={6}><SafetyCertificateOutlined />{labels[value as WorkspacePermissionMode]}</Space>) as NonNullable<SelectProps<WorkspacePermissionMode>["labelRender"]>}
+        optionRender={((option) => { const value = option.value as WorkspacePermissionMode; return <div className="local-workspace-permission-option">
+          <span className="local-workspace-permission-icon">{value === "always_ask" ? <StopOutlined /> : value === "ask_as_needed" ? <SafetyCertificateOutlined /> : <ExclamationCircleOutlined />}</span>
+          <span><strong>{labels[value]}</strong><small>{permissionDescriptions[value]}</small></span>
+          {mode === value && <CheckOutlined className="local-workspace-permission-check" />}
+        </div>; }) as NonNullable<SelectProps<WorkspacePermissionMode>["optionRender"]>}
         onChange={(value: WorkspacePermissionMode) => void changeMode(value)} />
-        {conversationId && selected.status === "active" && <Button size="small" danger disabled={busy} onClick={() => revoke()}>{t("chat.workspace.revoke")}</Button>}
       </>}
     </Space>
-    {(!candidate || currentCandidate) && <Modal open={Boolean(currentCandidate)} title={t("chat.workspace.authorizeTitle")} confirmLoading={busy} onCancel={() => setCandidate(undefined)} onOk={() => void allow()} okText={t("chat.workspace.authorize")}>
-      <p>{currentCandidate?.name}</p><p style={{ wordBreak: "break-all" }}>{currentCandidate?.path}</p>
-      <p>{t("chat.workspace.scope")}</p>
+    {(!candidate || currentCandidate) && <Modal className="local-workspace-authorize-modal" open={Boolean(currentCandidate)} title={t("chat.workspace.authorizeTitle")} confirmLoading={busy} onCancel={() => setCandidate(undefined)} onOk={() => void allow()} okText={t("chat.workspace.authorize")}>
+      <p className="local-workspace-authorize-question">{t("chat.workspace.authorizeQuestion", { name: currentCandidate?.name })}</p>
+      <div className="local-workspace-authorize-folder"><FolderOpenOutlined /><span><strong>{currentCandidate?.name}</strong><small>{currentCandidate?.path}</small></span></div>
+      <p className="local-workspace-authorize-scope">{t("chat.workspace.scope")}</p>
     </Modal>}
-    <Modal open={Boolean(conversationId && approvalsOpen === conversationId && selected)} title={t("chat.workspace.approval.title")} footer={null} onCancel={() => setApprovalsOpen(undefined)}>
+    <Modal className="local-workspace-allow-all-modal" open={allowAllOpen} title={t("chat.workspace.allowAllTitle")} okText={t("chat.workspace.allowAllConfirm")}
+      okButtonProps={{ danger: true }} onCancel={() => setAllowAllOpen(false)} onOk={() => { setAllowAllOpen(false); if (allowAllRequest === requestRef.current) void applyMode("allow_all"); }}>
+      <p>{t("chat.workspace.allowAllIntro")}</p>
+      <div className="local-workspace-risk-list">
+        <div><FolderOpenOutlined /><span><strong>{t("chat.workspace.allowAllFiles")}</strong><small>{t("chat.workspace.allowAllFilesDescription")}</small></span></div>
+        <div><SafetyCertificateOutlined /><span><strong>{t("chat.workspace.allowAllProtected")}</strong><small>{t("chat.workspace.allowAllProtectedDescription")}</small></span></div>
+        <div><StopOutlined /><span><strong>{t("chat.workspace.allowAllDestructive")}</strong><small>{t("chat.workspace.allowAllDestructiveDescription")}</small></span></div>
+      </div>
+      <p className="local-workspace-risk-warning"><ExclamationCircleOutlined />{t("chat.workspace.allowAllRisk")}</p>
+    </Modal>
+    <Modal open={Boolean(conversationId && approvalsOpen === conversationId && selected)} title={t("chat.workspace.approval.title")} footer={null} onCancel={() => {
+      for (const item of currentApprovals) if (item.status === "pending") dismissedApprovalIdsRef.current.add(item.operation_id);
+      setApprovalsOpen(undefined);
+    }}>
       <p>{t("chat.workspace.approval.notice")}</p>
       {approvalError && <p role="alert">{t("chat.workspace.approval.loadFailed")}：{t(`chat.workspace.reason.${approvalError}`, { defaultValue: t("chat.workspace.reason.unknown") })}</p>}
-      {!approvalError && currentApprovals.length === 0 && <p>{t(approvals?.conversationId === conversationId ? "chat.workspace.approval.empty" : "chat.workspace.approval.loading")}</p>}
       <Space direction="vertical" style={{ width: "100%" }}>
         {currentApprovals.map((item) => <section key={item.operation_id} style={{ width: "100%", padding: "12px 0", borderTop: "1px solid var(--ant-color-border-secondary, #d9d9d9)", overflowWrap: "anywhere" }}>
           <Space wrap><strong>{t(`chat.workspace.approval.operation.${item.operation}`, { defaultValue: item.operation })}</strong><Tag>{t(`chat.workspace.approval.status.${item.status}`, { defaultValue: t("chat.workspace.approval.status.unknown") })}</Tag></Space>
           <p>{item.path}</p>
-          <p>{t(`chat.workspace.approval.source.${item.attempt_id ? "workflow" : item.task_id ? "subagent" : "main"}`)}{(item.attempt_id || item.task_id) && ` · ${item.attempt_id || item.task_id}`}{item.tool_name && ` · ${item.tool_name}`}</p>
-          {item.version && <p><small>{t("chat.workspace.approval.version")}：{item.version}</small></p>}
-          {item.content_digest && <p><small>{t("chat.workspace.approval.digest")}：{item.content_digest}</small></p>}
-          <p><small>{t("chat.workspace.approval.expires")}：{new Date(item.expires_at).toLocaleString()}</small></p>
-          {item.reason && <p>{t(`chat.workspace.reason.${item.reason}`, { defaultValue: t("chat.workspace.reason.unknown") })}</p>}
-          {item.status === "uncertain" && <p role="alert">{t("chat.workspace.approval.uncertain")}</p>}
           {item.status === "pending" && <Space>
             <Button type="primary" loading={approvalBusy === item.operation_id} disabled={Boolean(approvalBusy || approvalError) || item.expires_at <= Date.now()} onClick={() => void decideApproval(item, "allow_once")}>{t("chat.workspace.approval.allowOnce")}</Button>
             <Button danger disabled={Boolean(approvalBusy || approvalError) || item.expires_at <= Date.now()} onClick={() => void decideApproval(item, "reject")}>{t("chat.workspace.approval.reject")}</Button>

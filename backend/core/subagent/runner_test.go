@@ -34,15 +34,20 @@ func TestWorkspaceSubagentGenerationFencesOldEventsAndSurvivesParentCompletion(t
 		t.Fatal(err)
 	}
 	// A detached task authorizes using its own live state, with no parent run.
-	if err := ValidateWorkspaceRun(t.Context(), db.DB, ss, req); err != nil {
+	if _, err := ValidateWorkspaceRun(t.Context(), db.DB, ss, req); err != nil {
 		t.Fatal(err)
+	}
+	boundWithoutSnapshot := req
+	boundWithoutSnapshot.WorkspaceID = "workspace"
+	if _, err := ValidateWorkspaceRun(t.Context(), db.DB, ss, boundWithoutSnapshot); err == nil {
+		t.Fatal("bound subagent without a Core workspace snapshot was accepted")
 	}
 	for _, bad := range []localworkspace.OperationRequest{
 		{UserID: "other", ConversationID: req.ConversationID, TaskID: task.ID, Generation: req.Generation},
 		{UserID: req.UserID, ConversationID: "other", TaskID: task.ID, Generation: req.Generation},
 		{UserID: req.UserID, ConversationID: req.ConversationID, TaskID: task.ID, Generation: "old"},
 	} {
-		if err := ValidateWorkspaceRun(t.Context(), db.DB, ss, bad); err == nil {
+		if _, err := ValidateWorkspaceRun(t.Context(), db.DB, ss, bad); err == nil {
 			t.Fatal("wrong task identity accepted")
 		}
 	}
@@ -63,17 +68,17 @@ func TestWorkspaceSubagentGenerationFencesOldEventsAndSurvivesParentCompletion(t
 	if err != nil || current.Status != StatusRunning {
 		t.Fatalf("new run changed: %v %v", current, err)
 	}
-	if err := ValidateWorkspaceRun(t.Context(), db.DB, ss, req); err == nil {
+	if _, err := ValidateWorkspaceRun(t.Context(), db.DB, ss, req); err == nil {
 		t.Fatal("old generation authorized")
 	}
 	req.Generation = "launch-2"
-	if err := ValidateWorkspaceRun(t.Context(), db.DB, ss, req); err != nil {
+	if _, err := ValidateWorkspaceRun(t.Context(), db.DB, ss, req); err != nil {
 		t.Fatal(err)
 	}
 	if err := UpdateStatus(t.Context(), db.DB, task.ID, StatusInterrupted); err != nil {
 		t.Fatal(err)
 	}
-	if err := ValidateWorkspaceRun(t.Context(), db.DB, ss, req); err == nil {
+	if _, err := ValidateWorkspaceRun(t.Context(), db.DB, ss, req); err == nil {
 		t.Fatal("interrupted child authorized")
 	}
 }
