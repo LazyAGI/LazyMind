@@ -4,9 +4,11 @@ import { MemoryRouter } from "react-router-dom";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import RecordList from "./index";
+vi.mock("../../conversationOrganizer/api", () => ({ listConversationGroups: vi.fn().mockResolvedValue([]), removeConversation: vi.fn(), emitConversationGroupsChanged: vi.fn(), CONVERSATION_GROUPS_CHANGED_EVENT: "groups-changed" }));
 import { emitConversationActivity } from "@/modules/chat/utils/conversationActivity";
 import { CHAT_CONVERSATION_FILTER_KEY } from "@/modules/chat/constants/chat";
 import { useConversationRunningStore } from "@/modules/chat/store/conversationRunning";
+import { CONVERSATION_DRAG } from "../../conversationOrganizer/drag";
 
 const drag = vi.hoisted(() => ({ end: (_event: DragEndEvent): Promise<void> | void => {} }));
 vi.mock("@dnd-kit/core", async () => {
@@ -179,6 +181,24 @@ describe("RecordList conversation pinning", () => {
     mocks.listChatExecutors.mockResolvedValue({
       data: { data: { executors: [] } },
     });
+  });
+
+  it.each([false, true])("preserves group dragging and the sorting handle with organizer lock=%s", async (locked) => {
+    mocks.listConversations.mockResolvedValue({ data: { conversations: [{
+      ...newerConversation, group_id: null, organizing_run_id: locked ? "run" : null,
+    }], next_page_token: "" } });
+    renderRecordList();
+    const title = await screen.findByText(newerConversation.display_name);
+    const row = title.closest(".ant-col")!;
+    await waitFor(() => expect(screen.getByRole("button", { name: "chat.reorderConversation" }))
+      .toHaveAttribute("aria-disabled", String(locked)));
+    expect(row).toHaveAttribute("draggable", String(!locked));
+    if (!locked) {
+      const dataTransfer = { setData: vi.fn(), effectAllowed: "" };
+      fireEvent.dragStart(row, { dataTransfer });
+      expect(dataTransfer.setData).toHaveBeenCalledWith(CONVERSATION_DRAG, JSON.stringify({ id: "newer", groupId: null }));
+      expect(mocks.reorder).not.toHaveBeenCalled();
+    }
   });
 
   it.each(["normal", "task"])("saves manual order in %s mode and preserves it after activity and reload", async (mode: string) => {

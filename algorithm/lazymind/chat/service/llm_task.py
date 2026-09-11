@@ -7,13 +7,11 @@ from typing import Any, Literal
 from uuid import uuid4
 
 import lazyllm
-import requests
 from json_repair import repair_json
 from lazyllm import AutoModel, LOG
-from lazyllm.module.llms.onlinemodule.base import ModelCallError, ModelFinish
 from pydantic import BaseModel, Field
 
-from lazymind.model_config import get_model_role_runtime_identity, inject_model_config
+from lazymind.model_config import inject_model_config
 
 
 TaskMode = Literal['llm', 'agent']
@@ -104,6 +102,9 @@ _WORKFLOW_TASKS = {
 
 def run_llm_task(request: LLMTaskRequest) -> LLMTaskResult:
     task_id = str(uuid4())
+    if request.task_type.startswith('conversation.'):
+        return LLMTaskResult(status='failed', task_id=task_id, error='unsupported_task_type',
+                             error_code='unsupported_task_type')
     lazyllm.globals._init_sid(sid=f'llm_task_{task_id}')
     lazyllm.locals._init_sid(sid=f'llm_task_{task_id}')
     try:
@@ -113,13 +114,8 @@ def run_llm_task(request: LLMTaskRequest) -> LLMTaskResult:
         return LLMTaskResult(status='failed', task_id=task_id, error='model_configuration',
                              error_code='model_configuration', usage={'model_calls': 0})
     try:
-        if request.task_type == 'conversation.describe_opening':
-            from .conversation_opening import OpeningDescription, opening_prompt
-            output, usage = _call_structured(request, opening_prompt(request), OpeningDescription)
-            text, files = json.dumps(output, ensure_ascii=False), []
-        else:
-            output, text, files = _run_task(request)
-            usage = {'input_chars': len(_prompt_for_log(request)), 'output_chars': len(text)}
+        output, text, files = _run_task(request)
+        usage = {'input_chars': len(_prompt_for_log(request)), 'output_chars': len(text)}
         return LLMTaskResult(status='succeeded', task_id=task_id, output=output, text=text, files=files, usage=usage)
     except LLMTaskCallError as exc:
         return LLMTaskResult(status='failed', task_id=task_id, error=str(exc),
@@ -145,47 +141,6 @@ def _call_model(request: LLMTaskRequest, prompt: str, *, stream_output: bool = T
         raise LLMTaskCallError('model_configuration') from exc
     return model(prompt, stream_output=stream_output, temperature=request.options.get('temperature', 0),
                  timeout=timeout, **options)
-
-
-def _task_call_error(exc: Exception) -> LLMTaskCallError:
-    current = exc
-    while current is not None:
-        if isinstance(current, LLMTaskCallError):
-            return current
-        if isinstance(current, ModelCallError):
-            if current.terminal.finish == ModelFinish.LENGTH:
-                return LLMTaskCallError('output_too_large', calls=1)
-            failure = current.terminal.failure
-            code = failure.code.value if failure else 'model_failed'
-            status = failure.provider_http_status if failure else None
-            retryable = status in (408, 429, 500, 502, 503, 504) or code in ('request_timeout', 'transport_error')
-            return LLMTaskCallError(code, retryable=retryable, calls=1)
-        if isinstance(current, (requests.Timeout, requests.ConnectionError)):
-            return LLMTaskCallError('transport_error', retryable=True, calls=1)
-        current = current.__cause__ or current.__context__
-    code = 'invalid_output' if isinstance(exc, ValueError) else 'model_failed'
-    return LLMTaskCallError(code, calls=1)
-
-
-def _call_structured(request: LLMTaskRequest, prompt: str,
-                     schema: type[BaseModel]) -> tuple[dict[str, Any], dict[str, Any]]:
-    selected = request.llm_config.get('llm')
-    identity = ({'role': 'llm', 'source': selected.get('source', ''), 'model': selected.get('model', '')}
-                if selected else get_model_role_runtime_identity('llm'))
-    usage = {'model_id': identity, 'truncated': False}
-    try:
-        raw = _call_model(request, prompt, response_format={'type': 'json_object'},
-                          stream_output=False, default_timeout=60, max_retries=1)
-        # Strict tasks leave retries to the caller and never repair incomplete JSON.
-        output = schema.model_validate_json(raw).model_dump()
-    except LLMTaskCallError as exc:
-        exc.usage = usage
-        raise
-    except Exception as exc:
-        error = _task_call_error(exc)
-        error.usage = usage
-        raise error from exc
-    return output, {**usage, 'model_calls': 1, 'provider_usage': dict(lazyllm.globals['usage'])}
 
 
 def _run_task(request: LLMTaskRequest) -> tuple[dict[str, Any], str, list[LLMTaskFile]]:

@@ -57,13 +57,30 @@ func TestModelsListURL(t *testing.T) {
 	blocked := []string{
 		"file:///etc/passwd",
 		"http://127.0.0.1/v1",
-		"http://10.0.0.8/v1",
 		"http://169.254.169.254/latest/meta-data",
 		"https://user:pass@api.openai.com/v1",
 	}
 	for _, in := range blocked {
 		if _, err := modelsListURL(in); err == nil {
 			t.Fatalf("modelsListURL(%q) succeeded, want error", in)
+		}
+	}
+
+	allowedPrivate := []struct {
+		in   string
+		want string
+	}{
+		{"http://10.0.0.8/v1", "http://10.0.0.8/v1/models"},
+		{"http://172.16.1.4/openai", "http://172.16.1.4/openai/v1/models"},
+		{"http://192.168.1.10/", "http://192.168.1.10/v1/models"},
+	}
+	for _, tt := range allowedPrivate {
+		got, err := modelsListURL(tt.in)
+		if err != nil {
+			t.Fatalf("modelsListURL(%q) error: %v", tt.in, err)
+		}
+		if got != tt.want {
+			t.Fatalf("modelsListURL(%q) = %q, want %q", tt.in, got, tt.want)
 		}
 	}
 }
@@ -225,6 +242,33 @@ func TestDialRemoteModelsPinsResolvedIP(t *testing.T) {
 	}
 	if dialed != net.JoinHostPort("203.0.113.10", "443") {
 		t.Fatalf("dialed = %q, want pinned IP", dialed)
+	}
+}
+
+func TestDialRemoteModelsAllowsRFC1918(t *testing.T) {
+	var dialed string
+	remoteModelsLookupIP = func(ctx context.Context, host string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("10.1.2.3")}, nil
+	}
+	remoteModelsDialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+		dialed = address
+		return nil, errors.New("stop after pin")
+	}
+	t.Cleanup(func() {
+		remoteModelsLookupIP = lookupRemoteModelsIPs
+		remoteModelsDialContext = defaultRemoteModelsDial
+	})
+
+	req, err := http.NewRequest(http.MethodGet, "https://intranet.example/v1/models", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = remoteModelsHTTPClient.Do(req)
+	if err == nil {
+		t.Fatal("expected dial error")
+	}
+	if dialed != net.JoinHostPort("10.1.2.3", "443") {
+		t.Fatalf("dialed = %q, want RFC1918 IP", dialed)
 	}
 }
 

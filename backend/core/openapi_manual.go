@@ -1,11 +1,21 @@
 package main
 
 func manualOpenAPISpec() map[string]any {
+	schemas, paths := manualSchemas(), manualPaths()
+	for name, schema := range conversationGroupSchemas() {
+		schemas[name] = schema
+	}
+	for path, operations := range conversationGroupPaths() {
+		paths[path] = operations
+	}
+	conversation := schemas["ConversationItem"].(map[string]any)["properties"].(map[string]any)
+	conversation["group_id"] = nullableSchema(strSchema())
+	conversation["organizing_run_id"] = nullableSchema(strSchema())
 	return map[string]any{
 		"components": map[string]any{
-			"schemas": forkOpenAPISchemas(manualSchemas()),
+			"schemas": forkOpenAPISchemas(schemas),
 		},
-		"paths": forkOpenAPIPaths(manualPaths()),
+		"paths": forkOpenAPIPaths(paths),
 	}
 }
 

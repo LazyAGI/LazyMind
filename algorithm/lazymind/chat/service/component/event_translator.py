@@ -82,6 +82,7 @@ class AgentEventFrameTranslator:
         reset_citation_state(self.citation_state)
         self.language = _preview_language(query)
         self._pending_previews: dict[str, str] = {}
+        self._mail_drafts: dict[str, dict[str, Any]] = {}
         self.streamed_text = False
         self.ask_pending_emitted = False
         self.tool_call_turns = 0
@@ -133,6 +134,18 @@ class AgentEventFrameTranslator:
             return frames
         if event_type == 'ask_pending':
             ask_data = {k: v for k, v in event.items() if k != 'tag'}
+            mail_draft = ask_data.get('mail_draft')
+            if isinstance(mail_draft, dict) and mail_draft.get('draft_id'):
+                self._mail_drafts[str(mail_draft['draft_id'])] = mail_draft
+            extra_drafts = ask_data.get('mail_drafts')
+            if isinstance(extra_drafts, list):
+                for item in extra_drafts:
+                    if isinstance(item, dict) and item.get('draft_id'):
+                        self._mail_drafts[str(item['draft_id'])] = item
+            if self._mail_drafts:
+                drafts = list(self._mail_drafts.values())
+                ask_data['mail_drafts'] = drafts
+                ask_data['mail_draft'] = drafts[-1]
             self.ask_pending_emitted = True
             self.run.ask_pending = True
             frames.append(_stream_frame(extra={'ask_pending': ask_data}))

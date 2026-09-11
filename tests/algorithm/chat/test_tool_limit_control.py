@@ -64,3 +64,24 @@ def test_tool_limit_coordinator_continues_same_invocation() -> None:
     assert not thread.is_alive()
     assert result['limit'] == 200
     assert coordinator.submit(sid, decision_id, 'continue') is False
+
+
+def test_user_cancel_during_tool_limit_wait_uses_domain_cancellation(monkeypatch):
+    import pytest
+    from lazymind.chat.engine.agent_runtime.cancellation import UserCancelledError
+
+    from lazymind.chat.engine.agent_runtime import tool_limit_control
+
+    class FakeQueue:
+        def __init__(self, *, klass):
+            self.klass = klass
+
+        def dequeue(self):
+            if self.klass == 'cancel':
+                return [json.dumps({'tag': 'cancel'})]
+            return []
+
+    monkeypatch.setattr(tool_limit_control, 'FileSystemQueue', FakeQueue)
+
+    with pytest.raises(UserCancelledError, match='stopped by user'):
+        tool_limit_control.ToolLimitDecisionCoordinator()._wait_for_action('decision-1', 0.2)

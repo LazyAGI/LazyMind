@@ -35,6 +35,16 @@ export interface SendMessageParams {
   ask_answers_structured?: import("@/modules/chat/components/AskCard").AskAnswersStructured;
   mail_draft_confirm_id?: string;
   mail_draft_confirm_revision?: number;
+  mail_draft_patch?: {
+    to?: string;
+    cc?: string;
+    subject?: string;
+    body?: string;
+    attachment_paths?: string[];
+    attachments?: Array<{ filename: string; content_base64: string }>;
+  };
+  mail_mailbox_confirm?: string;
+  mail_mailbox_confirm_draft_id?: string;
 }
 
 export interface ChatInputImperativeProps {

@@ -9,6 +9,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"lazymind/core/common"
 	"lazymind/core/common/orm"
 )
 
@@ -292,5 +293,34 @@ func TestEnqueueSkipSucceededStillReusesActiveJob(t *testing.T) {
 	}
 	if job.ID != seed.ID {
 		t.Fatalf("expected the active job to be reused, got %s", job.ID)
+	}
+}
+
+func TestEnqueueParticipatesInImmediateTransaction(t *testing.T) {
+	db := orm.MigrateTestDB(t, &orm.AsyncJob{}).DB
+	rollback := errors.New("test rollback")
+	err := common.ImmediateTransactionWithSQLiteBusyRetry(t.Context(), db, func(tx *gorm.DB) error {
+		first, err := EnqueueInTransaction(t.Context(), tx, EnqueueRequest{JobType: "fixture", IdempotencyKey: "same", Payload: map[string]any{}})
+		if err != nil {
+			return err
+		}
+		second, err := EnqueueInTransaction(t.Context(), tx, EnqueueRequest{JobType: "fixture", IdempotencyKey: "same", Payload: map[string]any{}})
+		if err != nil {
+			return err
+		}
+		if first.ID != second.ID {
+			t.Fatal("transactional enqueue lost idempotency")
+		}
+		return rollback
+	})
+	if !errors.Is(err, rollback) {
+		t.Fatalf("transaction failed before deliberate rollback: %v", err)
+	}
+	var count int64
+	if err := db.Model(&orm.AsyncJob{}).Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatal("enqueue escaped caller rollback")
 	}
 }

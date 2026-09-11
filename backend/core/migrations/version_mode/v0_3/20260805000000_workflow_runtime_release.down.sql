@@ -4,6 +4,13 @@ DROP INDEX IF EXISTS idx_vocabulary_review_session_word;
 DROP INDEX IF EXISTS idx_vocabulary_review_sessions_active;
 
 -- +migrate Dialect postgres
+DROP TABLE IF EXISTS conversation_organizer_changes;
+DROP TABLE IF EXISTS conversation_organizer_candidates;
+DROP TABLE IF EXISTS conversation_organizer_snapshot_items;
+DROP TABLE IF EXISTS conversation_organizer_runs;
+DROP TABLE IF EXISTS conversation_group_states;
+DROP TABLE IF EXISTS conversation_group_members;
+DROP TABLE IF EXISTS conversation_groups;
 DROP TABLE IF EXISTS public.workflow_approval_preferences;
 ALTER TABLE public.task_center_tasks DROP CONSTRAINT IF EXISTS chk_tct_task_type;
 UPDATE public.task_center_tasks SET task_type = 'plugin_run' WHERE task_type = 'workflow_run';
@@ -449,6 +456,13 @@ DELETE FROM user_selected_models WHERE model_type = 'conversation_metadata';
 
 -- +migrate Dialect sqlite
 DELETE FROM async_jobs WHERE job_type IN ('conversation.opening', 'conversation.opening.backfill');
+DROP TABLE IF EXISTS conversation_organizer_changes;
+DROP TABLE IF EXISTS conversation_organizer_candidates;
+DROP TABLE IF EXISTS conversation_organizer_snapshot_items;
+DROP TABLE IF EXISTS conversation_organizer_runs;
+DROP TABLE IF EXISTS conversation_group_states;
+DROP TABLE IF EXISTS conversation_group_members;
+DROP TABLE IF EXISTS conversation_groups;
 DROP TABLE IF EXISTS conversation_opening_metadata;
 DROP TABLE IF EXISTS conversation_opening_backfills;
 ALTER TABLE conversations DROP COLUMN title_revision;

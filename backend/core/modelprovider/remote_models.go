@@ -196,7 +196,7 @@ func isBlockedRemoteModelsIP(ip net.IP) bool {
 	if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified() {
 		return true
 	}
-	if ip.IsLoopback() || ip.IsPrivate() {
+	if ip.IsLoopback() {
 		return !remoteModelsAllowPrivateHosts
 	}
 	if ip4 := ip.To4(); ip4 != nil && ip4[0] == 169 && ip4[1] == 254 {

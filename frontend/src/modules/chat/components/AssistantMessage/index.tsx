@@ -27,6 +27,8 @@ import { AgentAppsAuth } from "@/components/auth";
 import {
   isAskPendingReadOnly,
   shouldRenderAskPending,
+  mailDraftCardsReadOnly,
+  unansweredMailDrafts,
 } from "@/modules/chat/utils/message";
 import type { ExternalExecutionProjection } from "@/modules/chat/utils/message";
 import { ChatServiceApi, decideToolLimit } from "@/modules/chat/utils/request";
@@ -36,6 +38,7 @@ import MultiAnswerDisplay, { type PreferenceType } from "../MultiAnswerDisplay";
 import FeedbackModal from "../FeedbackModal";
 import AskCard from "@/modules/chat/components/AskCard";
 import MailDraftCard from "@/modules/chat/components/MailDraftCard";
+import MailMailboxCard from "@/modules/chat/components/MailDraftCard/MailMailboxCard";
 import ToolLimitCard from "@/modules/chat/components/ToolLimitCard";
 import ArtifactDownloadButton from "@/modules/chat/components/ArtifactCollectorCard/ArtifactDownloadButton";
 import RunStatusCard from "@/modules/chat/components/RunStatusCard";
@@ -443,6 +446,7 @@ const AssistantMessage = (props: any) => {
     renderText,
     updateMessage,
     sessionId,
+    conversationFiles,
     onPreferenceSelect,
     isLatestDualAnswer,
     onCiteMessage,
@@ -1293,26 +1297,90 @@ const AssistantMessage = (props: any) => {
         index === length - 1,
         !!hasLaterUserMessage,
       );
-      if (!showAskCard) return null;
-      if (askPending.mail_draft) {
+      if (askPending.mail_draft || (askPending.mail_drafts && askPending.mail_drafts.length)) {
+        const drafts =
+          askPending.mail_drafts && askPending.mail_drafts.length
+            ? askPending.mail_drafts
+            : askPending.mail_draft
+              ? [askPending.mail_draft]
+              : [];
+        const remainingDrafts = unansweredMailDrafts(
+          { mail_drafts: drafts },
+          item.answered_mail_draft_ids,
+        );
+        if (!remainingDrafts.length) return null;
+        const mailReadOnly = mailDraftCardsReadOnly(
+          disabled,
+          item.ask_answered,
+        );
+        const markDraftAnswered = (confirmedId: string) => {
+          const nextAnswered = Array.from(
+            new Set([
+              ...(item.answered_mail_draft_ids || []),
+              String(confirmedId || "").trim(),
+            ]),
+          ).filter(Boolean);
+          updateMessage({
+            ...item,
+            answered_mail_draft_ids: nextAnswered,
+            ask_answered:
+              unansweredMailDrafts({ mail_drafts: drafts }, nextAnswered)
+                .length === 0,
+          });
+        };
         return (
-          <MailDraftCard
-            key={askPending.ask_id}
-            draft={askPending.mail_draft}
-            disabled={isReadOnly}
-            onConfirm={(draftId, revision) => {
-              updateMessage({
-                ...item,
-                ask_answered: true,
-              });
-              props.sendMessage?.(t("chat.mailDraft.confirmQuery"), undefined, {
-                mail_draft_confirm_id: draftId,
-                mail_draft_confirm_revision: revision,
-              });
-            }}
-          />
+          <div className="mail-draft-card-list" key={askPending.ask_id}>
+            {remainingDrafts.map((draft) => {
+              const draftId = String(draft.draft_id || "").trim();
+              if (String(draft.status || "") === "needs_mailbox") {
+                return (
+                  <MailMailboxCard
+                    key={draftId || askPending.ask_id}
+                    draft={draft}
+                    disabled={mailReadOnly}
+                    onConfirm={async (mailbox, confirmedId) => {
+                      const started = await props.sendMessage?.(
+                        t("chat.mailMailbox.confirmQuery", { mailbox }),
+                        undefined,
+                        {
+                          mail_mailbox_confirm: mailbox,
+                          mail_mailbox_confirm_draft_id: confirmedId,
+                        },
+                      );
+                      if (started) {
+                        markDraftAnswered(confirmedId);
+                      }
+                    }}
+                  />
+                );
+              }
+              return (
+                <MailDraftCard
+                  key={draftId || askPending.ask_id}
+                  draft={draft}
+                  disabled={mailReadOnly}
+                  conversationFiles={conversationFiles}
+                  onConfirm={async (confirmedId, revision, patch) => {
+                    const started = await props.sendMessage?.(
+                      t("chat.mailDraft.confirmQuery"),
+                      undefined,
+                      {
+                        mail_draft_confirm_id: confirmedId,
+                        mail_draft_confirm_revision: revision,
+                        ...(patch ? { mail_draft_patch: patch } : {}),
+                      },
+                    );
+                    if (started) {
+                      markDraftAnswered(confirmedId);
+                    }
+                  }}
+                />
+              );
+            })}
+          </div>
         );
       }
+      if (!showAskCard) return null;
       return (
         <AskCard
           key={askPending.ask_id}
