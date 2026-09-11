@@ -986,7 +986,7 @@ def workspace_tool_metadata(tools_info: dict[str, Any], configs: list[ToolConfig
     from lazyllm.common.registry import bind_to_instance
     from lazyllm.tools.agent.toolsManager import ToolGroup
     from lazyllm.tools.agent.skill_manager import SkillManager
-    from lazymind.common.integrations.remote_fs import WorkspaceSkillFS
+    from lazymind.chat.engine.tools.local_fs import WorkspaceSkillFS
     from lazymind.chat.engine.tools.local_file import workspace as artifacts
     from lazymind.chat.engine.tools import subagent_chat_tools as tasks
     from lazymind.chat.engine.subagent import tools as task_artifacts

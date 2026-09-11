@@ -680,3 +680,7 @@ LazyLLM 以官方 main 为准：gitlink 和子模块工作树均为 `2cc07741ca6
 合并兼容修正限于既有文件：保留 Core 工作区快照与官方会话 fork/opening、SubAgent task spec/initial steps、Workflow 运行合同；重新导出 Core OpenAPI 并生成客户端；修复 SQLite 聚合迁移语法；再生成时即使没有状态存储也必须先接管数据库 run；SQLite 异步任务租约按时间值比较以兼容非 UTC 本机。没有为这些修正新增服务、数据库表、生产依赖、manager、facade 或重复 DTO。
 
 最终自动门禁：Core `go test -count=1 ./...` 与 `go vet ./...` 通过；租约恢复用例连续 5 次通过；工作区 Chat/SubAgent/Migrate 定向测试通过；算法工作区与远端执行回归 `109 passed`；前端 `pnpm run typecheck`、Local 生产构建和四套 OpenAPI fresh 检查通过；冲突标记和 `git diff --check` 通过。真实登录、真实模型、原生目录选择器与打包 Desktop 仍属于人工验收。
+
+## 2026-09-11 算法 Review 精简
+
+按 PR Review 收窄算法提交：恢复 `algorithm/tests/chat/workflows/` 下 9 个既有文件到官方 main，PR 不再包含 PPT、图片或通用 Workflow 测试改动；工作区 Skill 只读路由从 `common/integrations/remote_fs.py` 移至 `chat/engine/tools/local_fs.py`，使 `RemoteFS` 恢复官方实现。`history_id` 保留为主会话 Core 执行身份的一部分，并补充字段注释；它与 `run_id` 成对标识当前 ChatHistory run，防止旧轮次或再生成请求复用授权。

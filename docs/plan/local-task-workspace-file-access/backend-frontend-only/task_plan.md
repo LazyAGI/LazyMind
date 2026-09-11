@@ -590,3 +590,11 @@ Core最终全量83包通过（另5包无测试），算法P1修复与Workflow广
 - [x] 完成 Core 全量/vet、算法定向、前端 typecheck/build/OpenAPI 与 diff 健康检查。
 - [x] 创建 merge commit并推送功能分支，提交后核对远端引用。
 - [ ] 人工验收真实登录、模型、目录选择和 Desktop 打包。
+
+## 2026-09-11 算法 Review 收敛任务
+
+- [x] 移除 PPT、image 和通用 Workflow 测试的无关 diff。
+- [x] 将工作区 Skill 文件边界实现归入 `local_fs.py`，恢复官方 `remote_fs.py`。
+- [x] 说明并保留主会话 `history_id + run_id` 执行身份。
+- [x] 完成算法定向回归。
+- [x] 提交并推送 Review 修复。

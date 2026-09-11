@@ -583,3 +583,11 @@ Core最终全量83包通过（另5包无测试），算法P1修复与Workflow广
 - [x] 完成 merge commit并推送 `origin/feature/newWorkZone`；提交后以 `git rev-parse` 核对本地与远端分支一致。
 
 自动化未覆盖真实登录、真实模型、native picker、打包 Desktop 和跨平台实机；这些继续列为人工验收，不阻塞本次官方 main 代码同步。
+
+## 2026-09-11 算法 Review 修复进度
+
+- [x] 恢复 `algorithm/tests/chat/workflows/` 9 个无关测试文件，确认该目录相对 main 无差异。
+- [x] 将 `WorkspaceSkillFS` 移至 `chat/engine/tools/local_fs.py`，确认 `common/integrations/remote_fs.py` 相对 main 无差异。
+- [x] 为 `ChatConversationOptions.history_id` 补充用途注释。
+- [x] 工作区工具注册、Skill FS、主会话/SubAgent 执行相关定向回归：`146 passed, 3 warnings`。
+- [x] 提交并推送 Review 修复，供 PR 更新。

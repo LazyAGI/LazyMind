@@ -243,7 +243,7 @@ def test_executor_supplies_guarded_skill_fs_before_skill_indexing(monkeypatch, t
     import lazyllm
     from lazyllm.tools.agent.skill_manager import SkillManager
     from lazyllm.tools.fs.client import FS
-    from lazymind.common.integrations.remote_fs import WorkspaceSkillFS
+    from lazymind.chat.engine.tools.local_fs import WorkspaceSkillFS
     skill_dir = tmp_path / 'skills' / 'visible'
     skill_dir.mkdir(parents=True)
     (skill_dir / 'SKILL.md').write_text('---\nname: visible\ndescription: Executor fixture\n---\n# Visible')

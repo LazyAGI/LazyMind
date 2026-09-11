@@ -18,6 +18,7 @@ class ChatMessageOptions(BaseModel):
 class ChatConversationOptions(BaseModel):
     session_id: str = 'session_id'
     run_id: Optional[str] = None
+    # Core history row paired with run_id to authorize the active main-chat run.
     history_id: Optional[str] = None
     conversation_id: Optional[str] = None
     user_id: Optional[str] = None

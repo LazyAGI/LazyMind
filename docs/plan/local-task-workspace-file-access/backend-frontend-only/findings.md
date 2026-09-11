@@ -612,3 +612,10 @@ Core最终全量83包通过（另5包无测试），算法P1修复与Workflow广
 - 官方异步任务恢复测试在 Asia/Shanghai 稳定失败。原因是 SQLite 将带 `+08:00` 的 `lock_until` 与 UTC 参数按字符串比较；`julianday` 按时间值比较后连续 5 次通过，PostgreSQL 仍使用原生时间比较。
 - version-mode 聚合 SQL 的 SQLite 段不支持 `ADD COLUMN IF NOT EXISTS`；只修正聚合迁移中的 SQLite 语句，独立 dev 迁移与 PostgreSQL 段保持原合同。
 - 合并后 Core 全量、vet、前端类型/构建/OpenAPI、算法工作区与 remote executor 回归均通过；未把历史探针或旧测试结果计作本次通过。
+
+## 2026-09-11 算法 Review 核对
+
+- `algorithm/tests/chat/workflows/` 为官方仓库已有目录，但本功能不应修改其中 PPT、图片及通用 Workflow 用例；9 个文件已全部恢复到 main。
+- 本功能没有修改 PPT 或 image workflow 生产实现。
+- `WorkspaceSkillFS` 用于绑定本机工作区时限制 SkillManager 只能只读已配置 skill 根和 Core `remote://skills`，防止 skill 引用借普通 `file://` 读取授权工作区；实现属于工作区工具边界，已移至 `local_fs.py`，`remote_fs.py` 与 main 无差异。
+- `history_id + run_id` 是主会话操作身份；SubAgent/Workflow 使用 `task_id + generation`。仅有 conversation/session ID 无法区分同一会话的并发、停止与再生成 run。

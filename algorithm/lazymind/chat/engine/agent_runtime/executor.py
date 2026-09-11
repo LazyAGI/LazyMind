@@ -153,9 +153,8 @@ class AgentExecutor:
             'model_context_provider': notice_buffer.take,
         }
         kwargs.update({key: value for key, value in optional.items() if value is not None})
-        from lazymind.chat.engine.tools.local_fs import LocalFileToolkit
+        from lazymind.chat.engine.tools.local_fs import LocalFileToolkit, WorkspaceSkillFS
         if options.skills and LocalFileToolkit._workspace_binding() is not None:
-            from lazymind.common.integrations.remote_fs import WorkspaceSkillFS
             kwargs['fs'] = WorkspaceSkillFS(options.fs, options.skills_dir)
         tools = _sanitize_tools(_deduplicate_tools(plan.tools))
         ensure_lazyllm_tool_docs(tools)

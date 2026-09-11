@@ -473,7 +473,7 @@ def test_workspace_skill_reader_uses_exact_manager_and_checks_before_indexing(tm
     from lazyllm.tools.agent import ToolManager, ToolExecutionError
     from lazyllm.tools.agent.skill_manager import SkillManager
     from lazyllm.tools.fs.client import FS
-    from lazymind.common.integrations.remote_fs import WorkspaceSkillFS
+    from lazymind.chat.engine.tools.local_fs import WorkspaceSkillFS
     from lazymind.chat.service.component.tool_registry import workspace_tool_metadata
     root, bound = tmp_path / 'skills', tmp_path / 'bound'
     skill = root / 'visible'
@@ -557,7 +557,7 @@ def test_workspace_remote_skill_reader_keeps_core_http_auth(monkeypatch, tmp_pat
     from lazyllm.tools.agent.skill_manager import SkillManager
     from lazyllm.tools.fs.client import FS
     from lazymind.config import config
-    from lazymind.common.integrations.remote_fs import WorkspaceSkillFS
+    from lazymind.chat.engine.tools.local_fs import WorkspaceSkillFS
     from lazymind.chat.engine.agent_runtime.tool_call_guard import ToolExecutionMiddleware
     from lazymind.chat.service.component.tool_registry import workspace_tool_metadata
     files = {'skills/system/demo/SKILL.md': b'---\nname: demo\ndescription: Remote fixture\n---\n# Demo',

@@ -274,8 +274,8 @@ def test_generate_exposes_only_present_seedance_frame_and_reference_materials():
         'generated_base_image',
     ]
     assert enhance_tab['composite_behavior']['mutually_exclusive'][1]['prefer'][:2] == [
-        'gif_output',
         'video_output',
+        'gif_output',
     ]
     collect_tab = tabs['collect_materials']
     assert collect_tab['composite_behavior']['hide_empty_columns'] is True

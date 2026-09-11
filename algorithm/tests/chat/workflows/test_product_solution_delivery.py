@@ -483,30 +483,17 @@ def test_document_pipeline_uses_bound_inputs_without_agent_file_plumbing(monkeyp
         lambda *args: calls.append(('context', args)) or '/out/context.json',
     )
 
-    published = []
-    monkeypatch.setattr(bridge, '_save_artifact', lambda **kwargs: published.append(kwargs))
-
     result = bridge.product_writer_generate_document_from_inputs('not-the-runtime-stage')
 
     assert [name for name, _ in calls] == ['plan', 'write', 'assemble', 'context']
     assert calls[0][1] == (str(task), str(outline), str(context_file))
     assert result == {
         'section_plan': '/out/plan.json',
-        'chapter_count': 1,
-        'chapter_publish': {
-            'slot': 'direction_chapters', 'expected_count': 1, 'published_count': 1,
-            'complete': True, 'warnings': [],
-        },
+        'chapter_files': ['/out/chapters/one.md'],
         'document': '/out/document.md',
         'writing_context': '/out/context.json',
         'warnings': [],
     }
-    assert published == [{
-        'key': 'direction_chapters', 'value': '/out/chapters/one.md',
-        'content_type': 'file', 'source_tool': 'product_writer_generate_document_from_inputs',
-        'caption': f'{bridge.ARTIFACT_TITLES["direction"]} · 第 1 章',
-        'internal_publish': True, 'publisher_list_index': 0,
-    }]
 
 
 def test_outline_pipeline_keeps_bound_input_plumbing_inside_bridge(monkeypatch, tmp_path):

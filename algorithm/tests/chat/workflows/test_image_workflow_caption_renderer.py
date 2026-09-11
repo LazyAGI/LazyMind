@@ -16,18 +16,12 @@ def _load_tools():
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    module._LATIN_FONT_CANDIDATES = (_latin_font(),)
     return module
 
 
-def _latin_font() -> str:
-    candidates = (
-        Path('/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'),
-        Path('/System/Library/Fonts/Supplemental/Arial Bold.ttf'),
-        Path('C:/Windows/Fonts/arialbd.ttf'),
-    )
-    path = next((candidate for candidate in candidates if candidate.is_file()), None)
-    assert path is not None, 'A system Latin font is required for caption tests'
+def _dejavu_font() -> str:
+    path = Path('/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf')
+    assert path.is_file()
     return str(path)
 
 
@@ -36,7 +30,7 @@ def test_caption_layout_centers_text_in_default_normalized_box():
     layout = tools._caption_layout(
         (1000, 1000),
         'WOOF',
-        font_path=_latin_font(),
+        font_path=_dejavu_font(),
     )
 
     assert layout['caption_box_px'] == (150, 750, 850, 930)
@@ -54,7 +48,7 @@ def test_caption_layout_wraps_long_text_and_stays_inside_box():
         (600, 600),
         'WOOF WOOF WOOF WOOF',
         [0.2, 0.7, 0.8, 0.95],
-        _latin_font(),
+        _dejavu_font(),
     )
 
     box_left, box_top, box_right, box_bottom = layout['caption_box_px']
@@ -69,7 +63,7 @@ def test_caption_layout_uses_requested_stroke_ratio():
     layout = tools._caption_layout(
         (600, 600),
         'WOOF',
-        font_path=_latin_font(),
+        font_path=_dejavu_font(),
         stroke_width_ratio=0.14,
     )
 
@@ -80,21 +74,21 @@ def test_caption_layout_uses_requested_stroke_ratio():
 def test_caption_font_detection_rejects_missing_cjk_glyph_boxes():
     tools = _load_tools()
 
-    missing = tools._font_missing_characters(_latin_font(), '收到！')
+    missing = tools._font_missing_characters(_dejavu_font(), '收到！')
 
     assert missing == ['收', '到', '！']
 
 
-def test_cjk_font_selection_never_falls_back_to_latin_only_font(monkeypatch):
+def test_cjk_font_selection_never_falls_back_to_dejavu(monkeypatch):
     tools = _load_tools()
-    monkeypatch.setattr(tools, '_CJK_FONT_CANDIDATES', (_latin_font(),))
+    monkeypatch.setattr(tools, '_CJK_FONT_CANDIDATES', (_dejavu_font(),))
 
     try:
         tools._caption_font_path('收到！')
     except RuntimeError as exc:
         assert 'does not cover every caption character' in str(exc)
     else:
-        raise AssertionError('A Latin-only font must not be accepted for Chinese captions')
+        raise AssertionError('DejaVu must not be accepted for Chinese captions')
 
 
 def test_caption_renderer_changes_only_pixels_inside_layout_box(tmp_path, monkeypatch):

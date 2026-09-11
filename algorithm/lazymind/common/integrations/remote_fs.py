@@ -2,14 +2,12 @@ import base64
 import os
 from io import BytesIO, TextIOWrapper
 from typing import Any, Dict, List, Optional
-from urllib.parse import unquote, urlparse
+from urllib.parse import urlparse
 
 import lazyllm
 import requests
 
 from lazyllm.tools.fs import LazyLLMFSBase
-from lazyllm.tools.fs.client import FS, _FSRouter
-from lazyllm.tools.agent import ToolExecutionError
 from lazymind.config import config as _cfg
 
 
@@ -343,31 +341,3 @@ class RemoteFS(LazyLLMFSBase):
             'file_count': len(files),
             'files': sorted(files),
         }
-
-
-class WorkspaceSkillFS(_FSRouter):
-    """Read configured skills without exposing the bound host workspace."""
-
-    def __init__(self, fs: Any, directories: Optional[str]):
-        from lazyllm.tools.agent.skill_manager import SkillManager
-        if fs is not None and fs is not FS:
-            raise ToolExecutionError('workspace skills require the known filesystem router')
-        super().__init__()
-        self._roots = [FS._parse(path)[2] for path in SkillManager._parse_dirs(
-            directories or lazyllm.config['skills_dir'], fs=self) if FS._parse(path)[0] == 'file']
-        self._remote = RemoteFS(base_url=str(_cfg['core_api_url'] or '').strip(), dynamic_auth=True)
-
-    def _dispatch(self, method: str, path: str, *args, **kwargs):
-        from lazymind.chat.engine.tools.local_fs import LocalFileToolkit
-        if method not in {'ls', 'info', 'open'} or (method == 'open' and args and args[0] not in {'r', 'rt', 'rb'}):
-            raise ToolExecutionError('workspace skill filesystem is read-only')
-        if LocalFileToolkit._workspace_context() is None:
-            raise ToolExecutionError('workspace skill scope requires user and conversation identity')
-        protocol, space, real_path = FS._parse(path)
-        if protocol == 'file' and LocalFileToolkit.workspace_path_allowed(real_path, self._roots):
-            return super()._dispatch(method, path, *args, **kwargs)
-        parts = unquote(real_path).replace('\\', '/').strip('/').split('/')
-        if (protocol != 'remote' or space is not None or parts[0] != 'skills'
-                or any(part in {'', '.', '..'} for part in parts)):
-            raise ToolExecutionError('path is outside the workspace skill scope')
-        return getattr(self._remote, method)(real_path, *args, **kwargs)
