@@ -220,6 +220,8 @@ interface WorkflowPanelProps {
   onStop?: () => void;
   /** Called after a session is successfully dismissed. */
   onDismissed?: () => void;
+  /** Fill the host iframe (DSH overlay) and pin the footer to the visual bottom. */
+  embedded?: boolean;
 }
 
 /**
@@ -1655,6 +1657,7 @@ export function WorkflowPanel({
   onStop,
   onDismissed,
   onRefresh,
+  embedded = false,
 }: WorkflowPanelProps) {
   const { t, i18n } = useTranslation();
   const { session, loading, refresh: refreshConversation } = useWorkflowSession(conversationId);
@@ -1996,7 +1999,7 @@ export function WorkflowPanel({
       registerFooterAction,
     }}>
     <div
-      className={`workflow-panel workflow-panel--${displayStatus}${collapsed ? ' workflow-panel--collapsed' : ''}${expanded ? ' workflow-panel--expanded' : ''}`}
+      className={`workflow-panel workflow-panel--${displayStatus}${collapsed ? ' workflow-panel--collapsed' : ''}${expanded && !embedded ? ' workflow-panel--expanded' : ''}${embedded && !collapsed ? ' workflow-panel--embedded' : ''}`}
       data-session-id={session.session_id}
       aria-label={t('chat.workflowPanelTitle')}
     >
@@ -2043,16 +2046,18 @@ export function WorkflowPanel({
               )}
             </div>
           )}
-          <button
-            type='button'
-            className='workflow-panel__expand-btn'
-            onClick={() => setExpandedMode(!expanded)}
-            aria-label={t(expanded ? 'chat.workflowPanelShrink' : 'chat.workflowPanelExpand')}
-            title={t(expanded ? 'chat.workflowPanelShrink' : 'chat.workflowPanelExpand')}
-          >
-            {expanded ? <FullscreenExitOutlined /> : <FullscreenOutlined />}
-            <span>{t(expanded ? 'chat.workflowPanelShrinkShort' : 'chat.workflowPanelExpandShort')}</span>
-          </button>
+          {!embedded && (
+            <button
+              type='button'
+              className='workflow-panel__expand-btn'
+              onClick={() => setExpandedMode(!expanded)}
+              aria-label={t(expanded ? 'chat.workflowPanelShrink' : 'chat.workflowPanelExpand')}
+              title={t(expanded ? 'chat.workflowPanelShrink' : 'chat.workflowPanelExpand')}
+            >
+              {expanded ? <FullscreenExitOutlined /> : <FullscreenOutlined />}
+              <span>{t(expanded ? 'chat.workflowPanelShrinkShort' : 'chat.workflowPanelExpandShort')}</span>
+            </button>
+          )}
           {!expanded && (
             <Tooltip
               title={anySlotEditing ? t('chat.workflowFinishEditingFirst') : undefined}

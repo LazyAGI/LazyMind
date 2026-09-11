@@ -110,6 +110,155 @@ function eventRun(event, serverName) {
 }
 
 //#endregion
+//#region src/client/window-geometry.ts
+const RESIZE_EDGES = [
+	"n",
+	"s",
+	"e",
+	"w",
+	"ne",
+	"nw",
+	"se",
+	"sw"
+];
+const DEFAULT_WINDOW_SIZE = {
+	width: 960,
+	height: 720
+};
+const MIN_WINDOW_SIZE = {
+	width: 480,
+	height: 360
+};
+const MARGIN = 20;
+function clamp(value, min, max) {
+	return Math.min(Math.max(value, min), Math.max(min, max));
+}
+function sizeBounds(viewport) {
+	return {
+		minWidth: Math.min(MIN_WINDOW_SIZE.width, viewport.width),
+		minHeight: Math.min(MIN_WINDOW_SIZE.height, viewport.height)
+	};
+}
+function clampRect(rect, viewport) {
+	const { minWidth, minHeight } = sizeBounds(viewport);
+	const width = clamp(rect.width, minWidth, viewport.width);
+	const height = clamp(rect.height, minHeight, viewport.height);
+	return {
+		left: clamp(rect.left, 0, Math.max(0, viewport.width - width)),
+		top: clamp(rect.top, 0, Math.max(0, viewport.height - height)),
+		width,
+		height
+	};
+}
+function defaultWindowRect(viewport) {
+	const width = Math.min(DEFAULT_WINDOW_SIZE.width, Math.max(0, viewport.width - MARGIN * 2));
+	const height = Math.min(DEFAULT_WINDOW_SIZE.height, Math.max(0, viewport.height - MARGIN * 2));
+	return clampRect({
+		left: viewport.width - width - MARGIN,
+		top: Math.round((viewport.height - height) / 2),
+		width,
+		height
+	}, viewport);
+}
+function moveRect(start, left, top, viewport) {
+	return clampRect({
+		...start,
+		left,
+		top
+	}, viewport);
+}
+function resizeRect(start, edge, delta, viewport) {
+	const { minWidth, minHeight } = sizeBounds(viewport);
+	let left = start.left;
+	let top = start.top;
+	let right = start.left + start.width;
+	let bottom = start.top + start.height;
+	if (edge.includes("e")) right = clamp(start.left + start.width + delta.x, left + minWidth, viewport.width);
+	if (edge.includes("s")) bottom = clamp(start.top + start.height + delta.y, top + minHeight, viewport.height);
+	if (edge.includes("w")) left = clamp(start.left + delta.x, 0, right - minWidth);
+	if (edge.includes("n")) top = clamp(start.top + delta.y, 0, bottom - minHeight);
+	return {
+		left,
+		top,
+		width: right - left,
+		height: bottom - top
+	};
+}
+function resizeHandleStyle(edge) {
+	const base = {
+		position: "absolute",
+		zIndex: 2,
+		touchAction: "none"
+	};
+	const edgeSize = 6;
+	const corner = 14;
+	if (edge === "n") return {
+		...base,
+		top: 0,
+		left: corner,
+		right: corner,
+		height: edgeSize,
+		cursor: "ns-resize"
+	};
+	if (edge === "s") return {
+		...base,
+		bottom: 0,
+		left: corner,
+		right: corner,
+		height: edgeSize,
+		cursor: "ns-resize"
+	};
+	if (edge === "e") return {
+		...base,
+		top: corner,
+		right: 0,
+		bottom: corner,
+		width: edgeSize,
+		cursor: "ew-resize"
+	};
+	if (edge === "w") return {
+		...base,
+		top: corner,
+		left: 0,
+		bottom: corner,
+		width: edgeSize,
+		cursor: "ew-resize"
+	};
+	if (edge === "ne") return {
+		...base,
+		top: 0,
+		right: 0,
+		width: corner,
+		height: corner,
+		cursor: "nesw-resize"
+	};
+	if (edge === "nw") return {
+		...base,
+		top: 0,
+		left: 0,
+		width: corner,
+		height: corner,
+		cursor: "nwse-resize"
+	};
+	if (edge === "sw") return {
+		...base,
+		bottom: 0,
+		left: 0,
+		width: corner,
+		height: corner,
+		cursor: "nesw-resize"
+	};
+	return {
+		...base,
+		bottom: 0,
+		right: 0,
+		width: corner,
+		height: corner,
+		cursor: "nwse-resize"
+	};
+}
+
+//#endregion
 //#region src/client/window-store.ts
 function runKey(run) {
 	return `${run.hostSessionId}\0${new URL(run.url).origin}\0${run.runId}`;
@@ -156,16 +305,20 @@ function windowStore() {
 					[run.hostSessionId]: {
 						run,
 						minimized: false,
-						anchor
+						anchor,
+						layout: current?.layout
 					}
 				} : state.entries
 			});
 		},
 		open(run, anchor) {
-			if (run.hostSessionId) update(run.hostSessionId, {
+			if (!run.hostSessionId) return;
+			const prev = state.entries[run.hostSessionId];
+			update(run.hostSessionId, {
 				run,
 				minimized: false,
-				anchor
+				anchor,
+				layout: prev?.layout
 			});
 		},
 		minimize(id) {
@@ -175,11 +328,11 @@ function windowStore() {
 				minimized: true
 			});
 		},
-		position(id, position) {
+		place(id, layout) {
 			const entry = state.entries[id];
 			if (entry) update(id, {
 				...entry,
-				position
+				layout
 			});
 		},
 		dispose() {
@@ -266,6 +419,7 @@ function apply(ctx, config = {}) {
 		const current = sessionId ? state.entries[sessionId] : void 0;
 		const panel = (0, react.useRef)(null);
 		const drag = (0, react.useRef)();
+		const resize = (0, react.useRef)();
 		if (!current || !sessionId) return null;
 		if (current.minimized) return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 			style: {
@@ -278,43 +432,80 @@ function apply(ctx, config = {}) {
 			onClick: () => windows.open(current.run, current.anchor),
 			children: "Open LazyMind Workflow"
 		});
+		const viewport = () => ({
+			width: window.innerWidth,
+			height: window.innerHeight
+		});
+		const measured = () => {
+			const box = panel.current?.getBoundingClientRect();
+			return clampRect(box ? {
+				left: box.left,
+				top: box.top,
+				width: box.width,
+				height: box.height
+			} : current.layout ?? defaultWindowRect(viewport()), viewport());
+		};
 		const move = (event) => {
-			if (!drag.current || !panel.current) return;
-			windows.position(sessionId, {
-				left: Math.max(0, Math.min(window.innerWidth - panel.current.offsetWidth, event.clientX - drag.current.offsetX)),
-				top: Math.max(0, Math.min(window.innerHeight - panel.current.offsetHeight, event.clientY - drag.current.offsetY))
-			});
+			if (!drag.current) return;
+			windows.place(sessionId, moveRect(drag.current.start, event.clientX - drag.current.offsetX, event.clientY - drag.current.offsetY, viewport()));
 		};
 		const beginDrag = (event) => {
 			if (!panel.current || event.target instanceof HTMLButtonElement) return;
-			const rect = panel.current.getBoundingClientRect();
+			const start = measured();
 			drag.current = {
-				offsetX: event.clientX - rect.left,
-				offsetY: event.clientY - rect.top
+				offsetX: event.clientX - start.left,
+				offsetY: event.clientY - start.top,
+				start
 			};
-			windows.position(sessionId, {
-				left: rect.left,
-				top: rect.top
-			});
+			windows.place(sessionId, start);
 			event.currentTarget.setPointerCapture(event.pointerId);
 		};
 		const endDrag = () => {
 			drag.current = void 0;
 		};
+		const moveResize = (event) => {
+			if (!resize.current) return;
+			windows.place(sessionId, resizeRect(resize.current.start, resize.current.edge, {
+				x: event.clientX - resize.current.originX,
+				y: event.clientY - resize.current.originY
+			}, viewport()));
+		};
+		const beginResize = (edge, event) => {
+			event.stopPropagation();
+			const start = measured();
+			resize.current = {
+				edge,
+				originX: event.clientX,
+				originY: event.clientY,
+				start
+			};
+			windows.place(sessionId, start);
+			event.currentTarget.setPointerCapture(event.pointerId);
+		};
+		const endResize = () => {
+			resize.current = void 0;
+		};
 		const url = new URL(`/workflow-runs/${encodeURIComponent(current.run.runId)}/embed`, new URL(current.run.url).origin).href;
+		const layoutStyle = current.layout ? {
+			left: current.layout.left,
+			top: current.layout.top,
+			width: current.layout.width,
+			height: current.layout.height
+		} : {
+			right: 20,
+			top: "50%",
+			transform: "translateY(-50%)",
+			width: "min(960px, calc(100vw - 40px))",
+			height: "min(720px, calc(100vh - 40px))"
+		};
 		return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("section", {
 			ref: panel,
 			role: "dialog",
 			"aria-label": "LazyMind Workflow",
 			style: {
 				position: "absolute",
-				...current.position ?? {
-					right: 20,
-					top: "50%",
-					transform: "translateY(-50%)"
-				},
-				width: "min(760px, calc(100vw - 40px))",
-				height: "min(560px, calc(100vh - 40px))",
+				...layoutStyle,
+				boxSizing: "border-box",
 				background: "#fff",
 				color: "#111",
 				border: "1px solid #d9d9d9",
@@ -326,41 +517,66 @@ function apply(ctx, config = {}) {
 				pointerEvents: "auto",
 				zIndex: 1
 			},
-			children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("header", {
-				onPointerDown: beginDrag,
-				onPointerMove: move,
-				onPointerUp: endDrag,
-				onPointerCancel: endDrag,
-				style: {
-					display: "flex",
-					alignItems: "center",
-					justifyContent: "space-between",
-					gap: 12,
-					padding: 12,
-					borderBottom: "1px solid #d9d9d9",
-					cursor: "grab",
-					touchAction: "none",
-					userSelect: "none"
-				},
-				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("strong", { children: "LazyMind Workflow" }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-					onPointerDown: (event) => event.stopPropagation(),
-					onClick: () => windows.minimize(sessionId),
-					children: "Minimize"
-				}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-					style: { marginLeft: 8 },
-					onPointerDown: (event) => event.stopPropagation(),
-					onClick: () => windows.minimize(sessionId),
-					children: "Close"
-				})] })]
-			}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("iframe", {
-				title: "LazyMind Workflow",
-				src: url,
-				style: {
-					width: "100%",
-					flex: 1,
-					border: 0
-				}
-			})]
+			children: [
+				/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("header", {
+					onPointerDown: beginDrag,
+					onPointerMove: move,
+					onPointerUp: endDrag,
+					onPointerCancel: endDrag,
+					style: {
+						display: "flex",
+						alignItems: "center",
+						justifyContent: "space-between",
+						gap: 12,
+						padding: 12,
+						borderBottom: "1px solid #d9d9d9",
+						cursor: "grab",
+						touchAction: "none",
+						userSelect: "none",
+						flexShrink: 0
+					},
+					children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("strong", { children: "LazyMind Workflow" }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						onPointerDown: (event) => event.stopPropagation(),
+						onClick: () => windows.minimize(sessionId),
+						children: "Minimize"
+					}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						style: { marginLeft: 8 },
+						onPointerDown: (event) => event.stopPropagation(),
+						onClick: () => windows.minimize(sessionId),
+						children: "Close"
+					})] })]
+				}),
+				/* @__PURE__ */ (0, react_jsx_runtime.jsx)("iframe", {
+					title: "LazyMind Workflow",
+					src: url,
+					style: {
+						width: "100%",
+						flex: 1,
+						minHeight: 0,
+						border: 0
+					}
+				}),
+				RESIZE_EDGES.map((edge) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					"aria-label": edge === "se" ? "Resize workflow window" : void 0,
+					onPointerDown: (event) => beginResize(edge, event),
+					onPointerMove: moveResize,
+					onPointerUp: endResize,
+					onPointerCancel: endResize,
+					style: resizeHandleStyle(edge),
+					children: edge === "se" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						"aria-hidden": "true",
+						style: {
+							position: "absolute",
+							right: 4,
+							bottom: 4,
+							width: 8,
+							height: 8,
+							borderRight: "2px solid #8c8c8c",
+							borderBottom: "2px solid #8c8c8c"
+						}
+					}) : null
+				}, edge))
+			]
 		});
 	}
 	ctx.uiConversation.events.register(definition);

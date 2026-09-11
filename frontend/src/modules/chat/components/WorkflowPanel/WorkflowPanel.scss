@@ -9,6 +9,15 @@
   // Only border color; never animate inset/width/height on expand.
   transition: border-color 0.2s;
 
+  // Host iframe (DSH overlay): fill the frame so leftover height goes into the
+  // workspace above the footer instead of a blank band below the buttons.
+  &--embedded {
+    height: 100%;
+    min-height: 0;
+    flex: 1 1 auto;
+    overflow: hidden;
+  }
+
   &--expanded {
     // Keep the expanded panel inside the viewport. Individual artifact content
     // owns scrolling so the middle workspace never becomes a scroll container.
@@ -21,7 +30,10 @@
     border-radius: 12px;
     box-shadow: 0 8px 28px rgba(15, 23, 42, 0.1);
     transition: border-color 0.2s;
+  }
 
+  &--expanded,
+  &--embedded {
     .workflow-panel__header,
     .workflow-panel__tabs,
     .workflow-panel__footer {
@@ -166,6 +178,65 @@
     }
   }
 
+  // Paged image/video tabs in the overlay: grow/shrink with the window so the
+  // footer stays pinned and extra height lands on the preview, not empty padding.
+  &--embedded {
+    .composite-shell--paged {
+      flex: 1 1 0;
+      min-height: 0;
+      height: auto;
+    }
+
+    .composite-with-pagebar,
+    .composite-main,
+    .composite-grid--paged,
+    .composite-grid__tree--root {
+      flex: 1 1 0;
+      min-height: 0;
+    }
+
+    .composite-main {
+      overflow: hidden;
+    }
+
+    .composite-grid--paged > .composite-grid__row {
+      flex: 1 1 0;
+      min-height: 0;
+    }
+
+    .composite-grid--paged > .composite-grid__row--stack .composite-grid__cell:first-child,
+    .composite-grid--paged .composite-grid__cell {
+      flex: 1 1 0;
+      min-height: 0;
+      max-width: 100%;
+      height: auto;
+    }
+
+    .composite-grid--paged .workflow-slot--image,
+    .composite-grid--paged .workflow-slot--video {
+      display: flex;
+      flex: 1 1 0;
+      min-height: 0;
+      flex-direction: column;
+      height: 100%;
+      max-width: 100%;
+    }
+
+    .composite-grid--paged .workflow-slot__image,
+    .composite-grid--paged .workflow-slot__video {
+      flex: 1 1 0;
+      min-height: 0;
+      width: 100%;
+      height: 100%;
+      max-height: none;
+      object-fit: contain;
+    }
+
+    .composite-grid--paged .workflow-slot__caption {
+      flex-shrink: 0;
+    }
+  }
+
   &--active  { border-color: #d0e4ff; }
   &--completed { border-color: #d0f0e0; }
   &--waiting { border-color: #ffe8c0; }
@@ -193,6 +264,7 @@
     padding: 10px 16px;
     border-bottom: 1px solid #f0f1f3;
     background: #fafafa;
+    flex-shrink: 0;
   }
 
   &__header-left {
@@ -479,6 +551,7 @@
     border-bottom: 1px solid #f0f1f3;
     overflow-x: auto;
     scrollbar-width: none;
+    flex-shrink: 0;
     &::-webkit-scrollbar { display: none; }
   }
 
@@ -645,7 +718,7 @@
 
   // A compact single-document preview keeps controls visible and delegates
   // scrolling to the document surface instead of the whole workflow body.
-  &:not(.workflow-panel--expanded) {
+  &:not(.workflow-panel--expanded):not(.workflow-panel--embedded) {
     .workflow-panel__body > .workflow-panel__auto-grid,
     .workflow-panel__body > [role='tabpanel']:not([hidden]) > .composite-grid:not(.composite-grid--paged) {
       flex: 1 1 auto;
@@ -935,6 +1008,7 @@
     padding: 12px 16px;
     border-top: 1px solid #f0f1f3;
     background: #fff;
+    flex-shrink: 0;
   }
 
   &__approval-bar {

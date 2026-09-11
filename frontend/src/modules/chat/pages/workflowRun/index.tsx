@@ -8,6 +8,7 @@ import { useWorkflowStore } from '@/modules/chat/store/workflowPanel';
 import { WorkflowSessionApi } from '@/modules/chat/utils/request';
 import { controlActions, ReviewRefreshRequired, type WorkflowActionIntent } from '@/modules/chat/utils/workflowControl';
 import { loadWorkflowRunSnapshot, watchWorkflowRun, controlStatusKey, type WorkflowRunSnapshot } from './loadRun';
+import './index.scss';
 
 /** Shared run workbench: user intent goes to Core, never to an interpreted chat prompt. */
 export default function WorkflowRunPage({ embedded = false }: { embedded?: boolean }) {
@@ -51,6 +52,12 @@ export default function WorkflowRunPage({ embedded = false }: { embedded?: boole
   }), [api, sessionId, key, refresh]);
 
   useEffect(() => {
+    if (!embedded) return;
+    document.documentElement.classList.add('workflow-run-embed');
+    return () => document.documentElement.classList.remove('workflow-run-embed');
+  }, [embedded]);
+
+  useEffect(() => {
     const current = { key, controller: new AbortController() };
     lifetime.current = current;
     latest.current = undefined;
@@ -87,7 +94,8 @@ export default function WorkflowRunPage({ embedded = false }: { embedded?: boole
   const deliveryLabel = delivery && !delivery.consumed_at ? ({ pending: 'chat.workflowControlDeliveryPending', dispatching: 'chat.workflowControlDeliveryPending',
     accepted: delivery.kind === 'cancel' ? 'chat.workflowControlCancellationAccepted' : 'chat.workflowControlDeliveryAccepted', unknown: 'chat.workflowControlDeliveryUnknown', failed: 'chat.workflowControlDeliveryFailed' } as Record<string, string>)[delivery.status] : undefined;
 
-  return <main style={embedded ? { height: '100%', overflow: 'auto', padding: 12 } : { maxWidth: 1200, margin: '24px auto', padding: 24 }}>
+  return <main className={embedded ? 'workflow-run workflow-run--embedded' : 'workflow-run'}
+    style={embedded ? undefined : { maxWidth: 1200, margin: '24px auto', padding: 24 }}>
     {!embedded && <h1>{t('chat.workflowPanelTitle')}</h1>}
     {error && <Alert type='error' showIcon message={error} />}
     {notice && <Alert type='info' showIcon message={notice} />}
@@ -96,6 +104,7 @@ export default function WorkflowRunPage({ embedded = false }: { embedded?: boole
     {snapshot && <>
       {!embedded && <Button onClick={() => { void refresh().catch(reason => setError(String(reason))); }}>{t('chat.workflowRunRefresh')}</Button>}
       <WorkflowPanel conversationId={key} onRefresh={() => refresh().then(() => {})}
+        embedded={embedded}
         controlled control={control} onControl={act} statusLabel={control ? t(controlStatusKey(control)) : undefined} />
     </>}
   </main>;
