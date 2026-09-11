@@ -45,3 +45,61 @@ skills:
   - source_url: https://skillhub.cn/skills/user_290ac21c/find-skill-skillhub
     category: search
     provider: SkillHub
+  - source_url: https://skillhub.cn/skills/clawhub_ide-rea/baidu-search
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/org-whlskj/lskj-recommend
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/org-mbvufw6y/bid-query-analysis-workbench
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/clawhub_ivangdavila/code
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/clawhub_jk-0001/copywriting
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/clawhub_michaelmonetized/frontend-design-3
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/user_2ecc1bb2/gongwenformat-pro
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/beatra-ai/hot-topic-content-maker
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/user_741dc82b/luban-skill-pro
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/clawhub_ivangdavila/market-research
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/clawhub_hopyky/self-reflection
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/clawhub_zlc000190/using-superpowers
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/user_5f9c21aa/gzh-explosive-content-detector
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/sbkj-bid/official-project
+    provider: SkillHub
+  - source_url: https://github.com/AvdLee/Swift-Testing-Agent-Skill/tree/798e9b1a2bcac164d4f0c781908199e754f0bab6/swift-testing-expert
+    provider: GitHub
+  - source_url: https://github.com/Yuzzyuk/marketing-os/tree/bb67dff5f04b390e861ee11433166e4519e7f4c0/skills/marketing-os
+    provider: GitHub
+  - source_url: https://github.com/liyupi/yupi-skill/archive/b6157f3ca72a0c4dee0f873ad974cb61e4610c8f.zip
+    provider: GitHub
+  - source_url: https://github.com/mixelpixx/Konnect/tree/f58b222a196883793a5e2b237ac40f09096a3819/crates/konnect/assets/skills/konnect
+    provider: GitHub
+  - source_url: https://github.com/tt-a1i/simplify-codebase/archive/5da55efcb52db690e7406f06f827a23b15da2706.zip
+    provider: GitHub
+  - source_url: https://github.com/limingrui679-design/high-stakes-analytics-decision-lab/tree/af98eecf347f0d15182fc68a2349d0dabaec1de4/skills/high-stakes-analytics-decision-lab
+    provider: GitHub
+  - source_url: https://github.com/Meet-Miyani/compose-skill/archive/982c240e47718b3b0525c5bbe85bf19ff0bb7bec.zip
+    provider: GitHub
+  - source_url: https://github.com/ckelsoe/prompt-architect/tree/6c7a2c7b5a15cbb918828c7878c226a592985702/skills/prompt-architect
+    provider: GitHub
+  - source_url: https://github.com/bevibing/socrates-skill/archive/becb2e51fe7ed063f5f3304cccf8da03aacef6cf.zip
+    provider: GitHub
+  - source_url: https://github.com/CosmoBlk/email-marketing-bible/archive/b6dd8b49c7d09ea3ca57db84b1de803c07783876.zip
+    provider: GitHub
+  - source_url: https://github.com/leopiney/linus-torvalds-skills/tree/792d1625c776d4ebbd223fdb13e562973ab7d0bb/skills/torvalds-doctrine
+    provider: GitHub
+  - source_url: https://github.com/tigerless-labs/design-harness/tree/9aca84e8c4721d4e7623df5f4d67153477ec40a5/plugins/design-harness/skills/design-harness
+    provider: GitHub
+  - source_url: https://github.com/arvindrk/extract-design-system/tree/1873741ba8dea755e35e6e15134f7918cd58e036/skills/extract-design-system
+    provider: GitHub
+  - source_url: https://github.com/PabloNAX/ultracode-skill/tree/bfa2d92488171651c6c9379a8b98f8a07d996d3c/ultracode
+    provider: GitHub
+  - source_url: https://github.com/smixs/skill-conductor/tree/3c21d2f19c336d3a3333bfe4f45eee041bd13beb/skills/skill-conductor
+    provider: GitHub
