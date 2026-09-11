@@ -225,8 +225,7 @@ function relocateMarkersInBlock(block: string) {
   const cleaned = stripped
     .replace(/[ \t]+([。．，,、；;：:!！?？])/g, "$1")
     .replace(/[ \t]{2,}/g, " ")
-    .replace(/[ \t]+\n/g, "\n")
-    .replace(/\n[ \t]+/g, "\n");
+    .replace(/[ \t]+\n/g, "\n");
   const trailingWhitespace = cleaned.match(/\s*$/)?.[0] ?? "";
   const core = cleaned.slice(0, cleaned.length - trailingWhitespace.length);
   return `${core}${markers.join("")}${trailingWhitespace}`;
@@ -238,11 +237,14 @@ function relocateMarkersInProse(text: string) {
       return block;
     }
     const lines = block.split("\n");
-    const listLike = lines.every((line) => (
-      !line.trim() || /^\s*(?:[-*+]|\d+[.)])\s+/.test(line)
-    ));
-    if (listLike) {
+    const isListLine = (line: string) => /^\s*(?:[-*+]|\d+[.)])\s+/.test(line);
+    const hasList = lines.some((line) => line.trim() && isListLine(line));
+    const simpleList = lines.every((line) => !line.trim() || isListLine(line));
+    if (simpleList) {
       return lines.map(relocateMarkersInBlock).join("\n");
+    }
+    if (hasList) {
+      return block;
     }
     return relocateMarkersInBlock(block);
   }).join("");

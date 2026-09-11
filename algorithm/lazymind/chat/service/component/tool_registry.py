@@ -140,15 +140,16 @@ def _video_generator_prompt_appendix() -> SystemPromptAppendix:
 RETRIEVAL_CITATION_OUTPUT_APPENDIX: SystemPromptAppendix = {
     'output_contract': (
         '# Retrieval evidence citation rules (mandatory)\n'
-        'If this turn used retrieval or page-fetch results that contain `ref`, the final answer must '
-        'copy at least one of those `ref` values exactly. '
-        'For any used retrieval result containing `ref`, copy that `ref` exactly once at the end of '
-        'the paragraph that uses it. Do not insert a ref after every sentence. Never invent or rewrite '
+        'For every claim in the final answer that relies on retrieval or page-fetch evidence, '
+        'cite the supporting `ref` exactly once at the end of the paragraph that uses it. '
+        'Do not insert a ref after every sentence. Never invent or rewrite '
         'refs, and never replace them with markdown footnotes or '
         'raw URLs. Do not cite a result that was not used. Prefer `ref` values from pages whose full '
         'content was fetched over unused search snippets. '
-        'If relevant knowledge-base and external results both contain `ref`, '
-        'cite at least one result from each category.',
+        'If the answer does not rely on retrieval evidence, do not add a citation merely because '
+        'search or fetch tools ran. '
+        'When a claim uses both knowledge-base and external evidence, cite a supporting `ref` from '
+        'each of those categories that was actually used.',
     ),
 }
 EXTERNAL_SEARCH_CONTENT_APPENDIX: SystemPromptAppendix = {

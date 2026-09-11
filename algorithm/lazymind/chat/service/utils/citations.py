@@ -606,7 +606,6 @@ def _relocate_markers_in_block(block: str) -> str:
     cleaned = re.sub(r'[ \t]+([。．，,、；;：:!！?？])', r'\1', stripped)
     cleaned = re.sub(r'[ \t]{2,}', ' ', cleaned)
     cleaned = re.sub(r'[ \t]+\n', '\n', cleaned)
-    cleaned = re.sub(r'\n[ \t]+', '\n', cleaned)
     trailing = re.search(r'\s*$', cleaned)
     trailing_text = trailing.group(0) if trailing else ''
     core = cleaned[: len(cleaned) - len(trailing_text)]
@@ -621,9 +620,14 @@ def _relocate_markers_in_prose(text: str) -> str:
             relocated.append(block)
             continue
         lines = block.split('\n')
-        list_like = all((not line.strip() or re.match(r'\s*(?:[-*+]|\d+[.)])\s+', line)) for line in lines)
-        if list_like:
+        is_list_line = lambda line: bool(re.match(r'\s*(?:[-*+]|\d+[.)])\s+', line))
+        has_list = any(is_list_line(line) for line in lines if line.strip())
+        simple_list = all((not line.strip() or is_list_line(line)) for line in lines)
+        if simple_list:
             relocated.append('\n'.join(_relocate_markers_in_block(line) for line in lines))
+        elif has_list:
+            # Nested or continuation lists: keep the model's original citation sites.
+            relocated.append(block)
         else:
             relocated.append(_relocate_markers_in_block(block))
     return ''.join(relocated)
@@ -665,8 +669,9 @@ def _transform_outside_fences(content: str, transform: Any) -> str:
 def relocate_source_markers_to_paragraph_end(content: str) -> str:
     """Move citation markers to the end of each paragraph or list item.
 
-    This is intentional: one paragraph keeps its refs together, so streaming
-    may show ``Fact A. Fact B. [1][2]`` instead of ``Fact A [1]. Fact B [2]``.
+    This is intentional for ordinary paragraphs and simple one-line list items.
+    Nested or continuation lists keep the original marker positions. Streaming
+    paragraphs may therefore look like ``Fact A. Fact B. [1][2]``.
     Fenced code is left unchanged.
     """
     return _transform_outside_fences(content, _relocate_markers_in_prose)

@@ -135,5 +135,10 @@ describe('chat source adapter', () => {
     expect(moveSourceMarkersToParagraphEnd(
       `\`\`\`\ncode ${first}\n\`\`\`\n\n正文${first}。继续。`,
     )).toBe(`\`\`\`\ncode ${first}\n\`\`\`\n\n正文。继续。${first}`);
+    expect(moveSourceMarkersToParagraphEnd(
+      `- A ${first}\n- B ${second}`,
+    )).toBe(`- A${first} \n- B${second} `);
+    const continued = `- A ${first}\n  continuation\n- B ${second}`;
+    expect(moveSourceMarkersToParagraphEnd(continued)).toBe(continued);
   });
 });

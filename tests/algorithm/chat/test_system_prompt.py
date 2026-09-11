@@ -122,9 +122,9 @@ def test_tool_output_contract_keeps_detailed_image_and_citation_guards() -> None
 
     assert 'NEVER invent hosts or prefixes' in prompt
     assert 'Do not paste bare filesystem paths' in prompt
-    assert 'For any used retrieval result containing `ref`' in prompt
-    assert 'the final answer must copy at least one of those `ref` values exactly' in prompt
-    assert 'cite at least one result from each category' in prompt
+    assert 'For every claim in the final answer that relies on retrieval' in prompt
+    assert 'the final answer must copy at least one of those `ref` values exactly' not in prompt
+    assert 'cite at least one result from each category' not in prompt
     assert 'Never invent or rewrite refs' in prompt
 
 
