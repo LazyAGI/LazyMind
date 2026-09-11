@@ -595,6 +595,9 @@ func stepWorkflowToolsFromMappings(mappings map[string]any, requirements []skill
 		}
 		if len(tools) > 0 {
 			out[stepID] = uniqueSortedStrings(append(out[stepID], tools...))
+			if normalized := normalizedWorkflowStepID(stepID); normalized != "" && normalized != stepID {
+				out[normalized] = uniqueSortedStrings(append(out[normalized], tools...))
+			}
 		}
 	}
 	if len(out) == 0 {
@@ -612,9 +615,15 @@ func injectToolsIntoStateSteps(content string, fallbackTools []string, stepTools
 	if !ok {
 		return content, false
 	}
-	toolsForStep := func(stepID string) []string {
+	toolsForStep := func(stepID string, step map[string]any) []string {
 		if len(stepTools) > 0 {
-			return stepTools[stepID]
+			if tools := stepTools[stepID]; len(tools) > 0 {
+				return tools
+			}
+			if tools := stepTools[normalizedWorkflowStepID(stepID)]; len(tools) > 0 {
+				return tools
+			}
+			return inferWorkflowToolsForStep(stepID, step, fallbackTools)
 		}
 		return fallbackTools
 	}
@@ -622,12 +631,12 @@ func injectToolsIntoStateSteps(content string, fallbackTools []string, stepTools
 	switch steps := rawSteps.(type) {
 	case map[string]any:
 		for stepID, raw := range steps {
-			tools := toolsForStep(stepID)
-			if len(tools) == 0 {
-				continue
-			}
 			step, ok := raw.(map[string]any)
 			if !ok {
+				continue
+			}
+			tools := toolsForStep(stepID, step)
+			if len(tools) == 0 {
 				continue
 			}
 			step["tools"] = mergeStringListAny(step["tools"], tools)
@@ -640,7 +649,7 @@ func injectToolsIntoStateSteps(content string, fallbackTools []string, stepTools
 				continue
 			}
 			stepID := stringAny(step["id"])
-			tools := toolsForStep(stepID)
+			tools := toolsForStep(stepID, step)
 			if len(tools) == 0 {
 				continue
 			}
@@ -656,6 +665,63 @@ func injectToolsIntoStateSteps(content string, fallbackTools []string, stepTools
 		return content, false
 	}
 	return string(out), true
+}
+
+func normalizedWorkflowStepID(stepID string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(strings.TrimSpace(stepID)) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		}
+	}
+	return strings.TrimSuffix(b.String(), "s")
+}
+
+func inferWorkflowToolsForStep(stepID string, step map[string]any, fallbackTools []string) []string {
+	if len(fallbackTools) == 0 {
+		return nil
+	}
+	text := strings.ToLower(strings.Join([]string{
+		stepID,
+		stringAny(step["name"]),
+		stringAny(step["title"]),
+		stringAny(step["description"]),
+		stringAny(step["prompt"]),
+	}, "\n"))
+	var out []string
+	for _, tool := range fallbackTools {
+		switch strings.TrimSpace(tool) {
+		case "url_fetch":
+			if containsAnyBoundaryToken(text, "url_fetch", "http_request", "credentialed_http_request", "http://", "https://", "api", "endpoint", "fetch", "curl", "skillhub", "访问网页", "读取网页", "抓取", "接口") {
+				out = append(out, tool)
+			}
+		case "web_search":
+			if containsAnyBoundaryToken(text, "web_search", "search", "lookup", "google", "bing", "bocha", "tavily", "搜索", "检索", "全网", "实时") {
+				out = append(out, tool)
+			}
+		case "academic_search":
+			if containsAnyBoundaryToken(text, "academic_search", "scholar", "pubmed", "arxiv", "paper", "论文", "学术", "文献") {
+				out = append(out, tool)
+			}
+		case "cloud_files":
+			if containsAnyBoundaryToken(text, "cloud_files", "google drive", "googledrive", "notion", "feishu", "file", "document", "云文档", "网盘", "飞书", "文件", "文档") {
+				out = append(out, tool)
+			}
+		case "multimodal":
+			if containsAnyBoundaryToken(text, "multimodal", "vlm", "vision", "ocr", "image", "图片", "图像", "识图", "看图") {
+				out = append(out, tool)
+			}
+		case "image_generator":
+			if containsAnyBoundaryToken(text, "image_generator", "text2image", "generate image", "image generation", "文生图", "生成图片", "生成图像") {
+				out = append(out, tool)
+			}
+		case "image_editor":
+			if containsAnyBoundaryToken(text, "image_editor", "image_editing", "edit image", "图片编辑", "编辑图片", "改图", "修图") {
+				out = append(out, tool)
+			}
+		}
+	}
+	return uniqueSortedStrings(out)
 }
 
 const workflowExecutionBoundaryMarker = "Workflow execution boundaries:"

@@ -557,6 +557,44 @@ transitions:
 	}
 }
 
+func TestInjectSkillCapabilitiesIntoWorkflowMatchesNearStepToolMappings(t *testing.T) {
+	workflowYAML := `
+id: demo
+name: Demo
+slots:
+  - id: query
+    external: true
+  - id: raw
+steps:
+  - id: search_skill
+`
+	stateYAML := `
+steps:
+  search_skill:
+    prompt: Search SkillHub for matching skills.
+    inputs: [{slot: query, required: true}]
+    outputs: [raw]
+transitions:
+  __start__: [{to: search_skill}]
+  search_skill: [{to: __end__}]
+`
+	mappings := mergeDetectedCapabilityMappings(map[string]any{
+		"search_skills": map[string]any{
+			"workflow_capability": "http_request",
+		},
+	}, []skillCapabilityRequirement{{
+		ID: "skillhub_search", Label: "SkillHub 搜索", WorkflowCapability: "http_request", WorkflowTools: []string{"url_fetch"}, Supported: true, Required: true,
+	}})
+	nextWorkflow, nextState, _ := injectSkillCapabilitiesIntoWorkflow(workflowYAML, stateYAML, mappings)
+	compiled := graphengine.Compile(nextWorkflow, nextState, "", graphengine.ProfilePublish)
+	if !compiled.Valid {
+		t.Fatalf("compiled invalid: %#v", compiled.Diagnostics)
+	}
+	if !stringSliceContains(compiled.Graph.Nodes["search_skill"].LegacyTools, "url_fetch") {
+		t.Fatalf("search_skill node tools missing url_fetch: %#v", compiled.Graph.Nodes["search_skill"].LegacyTools)
+	}
+}
+
 func TestInjectExecutionBoundariesIntoOpenEndedToolSteps(t *testing.T) {
 	stateYAML := `
 steps:

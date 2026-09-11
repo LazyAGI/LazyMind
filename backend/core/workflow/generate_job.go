@@ -333,7 +333,9 @@ func handleWorkflowDraftGenerateJob(ctx context.Context, job asyncjob.Job, repor
 	if stateResp.WorkflowYAML != "" {
 		finalWorkflowYAML = stateResp.WorkflowYAML
 	}
+	var skillCapabilityMappings map[string]any
 	if mappings := requiredCapabilityMappingsForDraft(db, draft.ID, draft.SourceAnalysisID); mappings != nil {
+		skillCapabilityMappings = mappings
 		var injected []string
 		finalWorkflowYAML, stateResp.StateYAML, injected = injectSkillCapabilitiesIntoWorkflow(finalWorkflowYAML, stateResp.StateYAML, mappings)
 		if len(injected) > 0 {
@@ -449,6 +451,13 @@ func handleWorkflowDraftGenerateJob(ctx context.Context, job asyncjob.Job, repor
 	if withBoundaries, changed := injectExecutionBoundariesIntoStateSteps(stateResp.StateYAML); changed {
 		stateResp.StateYAML = withBoundaries
 	}
+	if skillCapabilityMappings != nil {
+		var injected []string
+		finalWorkflowYAML, stateResp.StateYAML, injected = injectSkillCapabilitiesIntoWorkflow(finalWorkflowYAML, stateResp.StateYAML, skillCapabilityMappings)
+		if len(injected) > 0 {
+			scenarioResp.Warnings = append(scenarioResp.Warnings, "已在最终校验前补齐 Skill 依赖工具/能力声明: "+strings.Join(injected, ", "))
+		}
+	}
 	if alignedWorkflowYAML, changed, alignErr := alignWorkflowUITabsWithStateSteps(finalWorkflowYAML, stateResp.StateYAML); alignErr == nil && changed {
 		finalWorkflowYAML = alignedWorkflowYAML
 	}
@@ -489,6 +498,9 @@ func handleWorkflowDraftGenerateJob(ctx context.Context, job asyncjob.Job, repor
 			}
 			if withBoundaries, changed := injectExecutionBoundariesIntoStateSteps(stateResp.StateYAML); changed {
 				stateResp.StateYAML = withBoundaries
+			}
+			if skillCapabilityMappings != nil {
+				finalWorkflowYAML, stateResp.StateYAML, _ = injectSkillCapabilitiesIntoWorkflow(finalWorkflowYAML, stateResp.StateYAML, skillCapabilityMappings)
 			}
 			if alignedWorkflowYAML, changed, alignErr := alignWorkflowUITabsWithStateSteps(finalWorkflowYAML, stateResp.StateYAML); alignErr == nil && changed {
 				finalWorkflowYAML = alignedWorkflowYAML
