@@ -2835,6 +2835,20 @@ func startReparseTasksInternal(r *http.Request, datasetID string, taskIDs []stri
 			results = append(results, StartTaskResult{TaskID: taskID, DocumentID: docRow.ID, DisplayName: docRow.DisplayName, Status: "FAILED", SubmitStatus: "REJECTED", Message: "folder document cannot be reparsed"})
 			continue
 		}
+		if !shouldSubmitReparseToLazyLLM(processingLevel) {
+			var ext taskExt
+			_ = json.Unmarshal(taskRow.Ext, &ext)
+			ext.TaskState = string(TaskStateSucceeded)
+			now := time.Now().UTC()
+			if err := store.DB().WithContext(r.Context()).Model(&orm.Task{}).
+				Where("id = ? AND dataset_id = ? AND deleted_at IS NULL", taskRow.ID, datasetID).
+				Updates(map[string]any{"ext": mustJSON(ext), "updated_at": now}).Error; err != nil {
+				results = append(results, StartTaskResult{TaskID: taskRow.ID, DocumentID: docRow.ID, DisplayName: docRow.DisplayName, Status: "FAILED", SubmitStatus: "FAILED", Message: "store document task failed"})
+				continue
+			}
+			results = append(results, StartTaskResult{TaskID: taskRow.ID, DocumentID: docRow.ID, DisplayName: docRow.DisplayName, Status: "STARTED", SubmitStatus: "ACCEPTED", Message: "document already stored; parsing was not requested"})
+			continue
+		}
 		if strings.TrimSpace(docRow.LazyllmDocID) == "" {
 			applog.Logger.Warn().Str("handler", "StartReparseTask").Str("task_id", taskID).Str("doc_id", docRow.ID).Msg("lazyllm doc id is empty")
 			markTaskStartFailed(r.Context(), datasetID, taskRow, "lazyllm doc id is empty")
@@ -2844,6 +2858,9 @@ func startReparseTasksInternal(r *http.Request, datasetID string, taskIDs []stri
 		docIDs = append(docIDs, strings.TrimSpace(docRow.LazyllmDocID))
 		taskRows = append(taskRows, taskRow)
 		docRows = append(docRows, docRow)
+	}
+	if !shouldSubmitReparseToLazyLLM(processingLevel) {
+		return results, nil
 	}
 	if len(taskRows) == 0 {
 		return results, fmt.Errorf("no valid tasks to start")
@@ -2927,6 +2944,10 @@ func startReparseTasksInternal(r *http.Request, datasetID string, taskIDs []stri
 		Strs("ng_names", ngNames).
 		Msg("reparse tasks submitted")
 	return results, nil
+}
+
+func shouldSubmitReparseToLazyLLM(processingLevel string) bool {
+	return effectiveProcessingLevel(processingLevel) != ProcessingLevelStored
 }
 
 func resolveReparseStrategy(processingLevel, reparseMode string) (string, error) {

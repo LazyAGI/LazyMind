@@ -7,7 +7,6 @@ func TestResolveReparseStrategyRespectsProcessingLevel(t *testing.T) {
 		level, mode, want string
 		wantErr           bool
 	}{
-		{ProcessingLevelStored, "slice_missing", "rebuild", false},
 		{ProcessingLevelParsed, "slice_missing", "rebuild", false},
 		{ProcessingLevelChunked, "slice_missing", "slice_missing", false},
 		{ProcessingLevelChunked, "slice_and_embed", "", true},
@@ -17,6 +16,17 @@ func TestResolveReparseStrategyRespectsProcessingLevel(t *testing.T) {
 		got, err := resolveReparseStrategy(tt.level, tt.mode)
 		if (err != nil) != tt.wantErr || got != tt.want {
 			t.Fatalf("resolveReparseStrategy(%q, %q) = %q, %v; want %q, error=%v", tt.level, tt.mode, got, err, tt.want, tt.wantErr)
+		}
+	}
+}
+
+func TestStoredReparseStaysInsideLazyMind(t *testing.T) {
+	if shouldSubmitReparseToLazyLLM(ProcessingLevelStored) {
+		t.Fatal("stored reparse must not be submitted to LazyLLM")
+	}
+	for _, level := range []string{ProcessingLevelParsed, ProcessingLevelChunked, ProcessingLevelIndexed} {
+		if !shouldSubmitReparseToLazyLLM(level) {
+			t.Fatalf("%s reparse must be submitted to LazyLLM", level)
 		}
 	}
 }
