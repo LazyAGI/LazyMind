@@ -1667,6 +1667,7 @@ const enUS = {
   // Chat
   chat: {
     workspace: {
+      retry: "Retry",
       select: "Select workspace", searchShort: "Search workspaces", openFolder: "Open local folder", none: "Don't use a local workspace", authorizeTitle: "Authorization required for first use", authorize: "Allow access", authorizeQuestion: "Allow LazyMind to access the “{{name}}” workspace?",
       scope: "Access applies only to this folder and its subfolders. File changes require confirmation by default.", chooseFailed: "Unable to select workspace", authorizeFailed: "Authorization failed",
       everyAsk: "Always ask", askAsNeeded: "Confirm as needed", allowAll: "Allow all", allowAllTitle: "Turn on Allow all?",
@@ -1677,6 +1678,7 @@ const enUS = {
       revokedStopFailed: "Access revoked, but some stop requests failed", revokeFailed: "Revoke failed",
       manage: "Manage access", manageTitle: "Workspace access", search: "Search name or path", loadFailed: "Failed to load access", reauthorize: "Reauthorize",
       approval: {
+        open: "Pending approvals",
         title: "Workspace requests",
         notice: "Allowing a request lets the original tool call continue. Only a Completed status confirms completion.",
         allowOnce: "Allow once", reject: "Reject", loadFailed: "Unable to refresh requests", decisionFailed: "Unable to save decision",

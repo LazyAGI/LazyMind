@@ -104,9 +104,11 @@ vi.mock("../BatchChat", async () => {
 vi.mock("../ShowChatFileList", () => ({ default: () => null }));
 vi.mock("./ContextUsageButton", () => ({ default: () => null }));
 vi.mock("./LocalWorkspaceControl", () => ({
-  default: ({ conversationId, onChange }: { conversationId?: string; onChange: (id: string | undefined, mode: "ask_as_needed" | "allow_all") => void }) => (
+  default: ({ conversationId, onChange, onSavingChange }: { onSavingChange?: (saving: boolean) => void; conversationId?: string; onChange: (id: string | undefined, mode: "ask_as_needed" | "allow_all") => void }) => (
     <div data-testid="local-workspace-control">
       {conversationId ?? "draft"}
+      <button onClick={() => onSavingChange?.(true)}>begin workspace save</button>
+      <button onClick={() => onSavingChange?.(false)}>finish workspace save</button>
       <button type="button" onClick={() => onChange("grant-alpha", "allow_all")}>select workspace</button>
     </div>
   ),
@@ -122,6 +124,50 @@ describe("ChatInput model switch save lock", () => {
   afterEach(() => {
     vi.clearAllMocks();
     useModelSelectionStore.getState().resetForNewChat();
+  });
+
+  it("blocks button, keyboard, and send handling until the workspace PUT settles", () => {
+    const onSend = vi.fn();
+    const onSkillDeposit = vi.fn();
+    render(
+      <ChatInput
+        value="hello"
+        onChange={vi.fn()}
+        onSend={onSend}
+        isChatContent
+        sessionId="conversation-1"
+        showConversationConfig={false}
+        showHistoryButton={false}
+        showPromptSuggestions={false}
+        skillDepositStats={{ userTurns: 3, toolCallTurns: 8 }}
+        onSkillDeposit={onSkillDeposit}
+        showThinkingDepth={false}
+      />,
+    );
+
+    const sendButton = screen.getByRole("button", { name: "chat.send" });
+    const skillDepositButton = screen.getByRole("button", {
+      name: /chat\.skillDeposit/,
+    });
+    expect(sendButton).toBeEnabled();
+    expect(skillDepositButton).toHaveAttribute("aria-disabled", "false");
+
+    fireEvent.click(screen.getByRole("button", { name: "begin workspace save" }));
+    expect(sendButton).toBeDisabled();
+    expect(skillDepositButton).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(sendButton);
+    fireEvent.click(skillDepositButton);
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "message editor" }), {
+      key: "Enter",
+    });
+    expect(onSend).not.toHaveBeenCalled();
+    expect(onSkillDeposit).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "finish workspace save" }));
+    expect(sendButton).toBeEnabled();
+    expect(skillDepositButton).toHaveAttribute("aria-disabled", "false");
+    fireEvent.click(sendButton);
+    expect(onSend).toHaveBeenCalledTimes(1);
   });
 
   it("blocks button, keyboard, and send handling until the model PATCH settles", () => {

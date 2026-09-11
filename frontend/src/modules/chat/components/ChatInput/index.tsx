@@ -691,6 +691,12 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     const hasSentMessageRef = useRef(false);
     const [initialModelSelection, setInitialModelSelection] =
       useState<ChatModelSelectionRequest>();
+    const [workspacePermissionSaving, setWorkspacePermissionSaving] = useState(false);
+    const workspacePermissionSavingRef = useRef(false);
+    const handleWorkspaceSavingChange = useCallback((saving: boolean) => {
+      workspacePermissionSavingRef.current = saving;
+      setWorkspacePermissionSaving(saving);
+    }, []);
     const [modelSelectionSaving, setModelSelectionSaving] = useState(false);
     const handleModelSelectionChange = useCallback(
       (selection: ChatModelSelectionRequest) => {
@@ -1008,6 +1014,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       disabled ||
       isPromptPolishing ||
       modelSelectionSaving ||
+      workspacePermissionSaving ||
       !value?.trim() ||
       isUploading;
     const shouldShowPromptSuggestions =
@@ -1035,6 +1042,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       disabled ||
       isPromptPolishing ||
       modelSelectionSaving ||
+      workspacePermissionSaving ||
       isStreaming ||
       !onSkillDeposit;
     const skillDepositTooltip = useMemo(() => {
@@ -1080,7 +1088,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
         }
         return;
       }
-      if (modelSelectionSaving) {
+      if (modelSelectionSaving || workspacePermissionSavingRef.current) {
         return;
       }
       if (isStreaming || isSendDisabled) {
@@ -1398,6 +1406,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                     disabled ||
                     isPromptPolishing ||
                     modelSelectionSaving ||
+                    workspacePermissionSaving ||
                     isStreaming
                   ) return;
                   handleSend();
@@ -1520,6 +1529,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                   {(runInBackground || Boolean(sessionId && !sessionId.startsWith("temp_"))) && <LocalWorkspaceControl
                     conversationId={sessionId && !sessionId.startsWith("temp_") ? sessionId : undefined}
                     configResetKey={configResetKey}
+                    onSavingChange={handleWorkspaceSavingChange}
                     disabled={disabled || isStreaming}
                     onChange={(id, permissionMode) => {
                       setWorkspaceId(id);

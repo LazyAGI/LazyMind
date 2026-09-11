@@ -1622,6 +1622,7 @@ const zhCN = {
 
   chat: {
     workspace: {
+      retry: "重试",
       select: "选择工作区", searchShort: "搜索工作区", openFolder: "打开本地文件夹", none: "不使用本地工作区", authorizeTitle: "首次使用时需要授权", authorize: "允许访问", authorizeQuestion: "允许 LazyMind 访问“{{name}}”工作区？",
       scope: "授权仅适用于该文件夹及其子目录，默认为修改文件前询问。", chooseFailed: "无法选择工作区", authorizeFailed: "授权失败",
       everyAsk: "始终询问", askAsNeeded: "按需确认", allowAll: "全部允许", allowAllTitle: "要开启“全部允许”吗？",
@@ -1632,6 +1633,7 @@ const zhCN = {
       revokedStopFailed: "授权已撤销，部分任务停止请求失败", revokeFailed: "撤销失败",
       manage: "管理授权", manageTitle: "工作区授权", search: "搜索名称或路径", loadFailed: "加载授权失败", reauthorize: "重新授权",
       approval: {
+        open: "待审批",
         title: "工作区请求",
         notice: "允许后原工具调用将继续执行；只有状态显示“已完成”才表示执行完成。",
         allowOnce: "允许一次", reject: "拒绝", loadFailed: "无法刷新请求", decisionFailed: "保存决定失败",
