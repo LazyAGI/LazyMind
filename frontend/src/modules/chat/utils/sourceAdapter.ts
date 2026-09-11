@@ -204,3 +204,91 @@ export function normalizeSourceMarkers(content: string) {
 export function stripRedundantSourceUrls(content: string) {
   return content.replace(REDUNDANT_SOURCE_URL_PATTERN, "$1");
 }
+
+const COMPLETE_SOURCE_MARKER = new RegExp(COMPLETE_SOURCE_MARKER_PATTERN.source, "g");
+const FENCE_OPEN_PATTERN = /^(```|~~~)/;
+
+function relocateMarkersInBlock(block: string) {
+  const markers: string[] = [];
+  const seen = new Set<string>();
+  COMPLETE_SOURCE_MARKER.lastIndex = 0;
+  const stripped = block.replace(COMPLETE_SOURCE_MARKER, (_match, displayIndex, citationId) => {
+    if (!seen.has(citationId)) {
+      seen.add(citationId);
+      markers.push(`[${displayIndex}](#source-${citationId})`);
+    }
+    return "";
+  });
+  if (!markers.length) {
+    return block;
+  }
+  const cleaned = stripped
+    .replace(/[ \t]+([。．，,、；;：:!！?？])/g, "$1")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n[ \t]+/g, "\n");
+  const trailingWhitespace = cleaned.match(/\s*$/)?.[0] ?? "";
+  const core = cleaned.slice(0, cleaned.length - trailingWhitespace.length);
+  return `${core}${markers.join("")}${trailingWhitespace}`;
+}
+
+function relocateMarkersInProse(text: string) {
+  return text.split(/(\n{2,})/).map((block, index) => {
+    if (index % 2 === 1 || !block.trim()) {
+      return block;
+    }
+    const lines = block.split("\n");
+    const listLike = lines.every((line) => (
+      !line.trim() || /^\s*(?:[-*+]|\d+[.)])\s+/.test(line)
+    ));
+    if (listLike) {
+      return lines.map(relocateMarkersInBlock).join("\n");
+    }
+    return relocateMarkersInBlock(block);
+  }).join("");
+}
+
+// Intentionally cluster citations at the paragraph (or list-item) end instead
+// of after each sentence. Streaming therefore looks like:
+// "Fact A. Fact B. [1][2]" rather than "Fact A [1]. Fact B [2]."
+export function moveSourceMarkersToParagraphEnd(content: string) {
+  const lines = content.split("\n");
+  const output: string[] = [];
+  let inFence = false;
+  let fenceMarker = "";
+  let prose: string[] = [];
+
+  const flushProse = () => {
+    if (!prose.length) {
+      return;
+    }
+    output.push(relocateMarkersInProse(prose.join("\n")));
+    prose = [];
+  };
+
+  for (const line of lines) {
+    const fence = line.match(FENCE_OPEN_PATTERN);
+    if (fence) {
+      if (!inFence) {
+        flushProse();
+        inFence = true;
+        fenceMarker = fence[1];
+        output.push(line);
+        continue;
+      }
+      if (line.startsWith(fenceMarker)) {
+        output.push(line);
+        inFence = false;
+        fenceMarker = "";
+        continue;
+      }
+    }
+    if (inFence) {
+      output.push(line);
+    } else {
+      prose.push(line);
+    }
+  }
+  flushProse();
+  return output.join("\n");
+}

@@ -467,7 +467,7 @@ describe('MarkdownArtifactEditor rewrite selection highlight', () => {
           citationId: '4.1',
           faviconUrl: 'https://www.google.com/s2/favicons?domain=docs.python.org&sz=64',
           href: 'https://docs.python.org/3/',
-          label: 'docs.python.org',
+          label: 'Python documentation',
           title: 'Python documentation',
         }]}
       />,
@@ -482,10 +482,10 @@ describe('MarkdownArtifactEditor rewrite selection highlight', () => {
     expect(sourceLink).toHaveAttribute('contenteditable', 'false');
     expect(sourceLink).toHaveAttribute('role', 'button');
     expect(sourceLink).toHaveAttribute('tabindex', '0');
-    expect(sourceLink).toHaveAttribute('data-writer-source-label', 'docs.python.org');
-    expect(sourceLink).toHaveAttribute('data-writer-source-initial', 'D');
+    expect(sourceLink).toHaveAttribute('data-writer-source-label', 'Python documentation');
+    expect(sourceLink).toHaveAttribute('data-writer-source-initial', 'P');
     expect(sourceLink).toHaveAttribute('data-writer-source-has-icon', 'true');
-    expect(sourceLink).toHaveAttribute('aria-label', 'chat.references docs.python.org');
+    expect(sourceLink).toHaveAttribute('aria-label', 'chat.references Python documentation');
     expect(sourceLink).not.toHaveAttribute('title');
     expect(sourceLink?.style.getPropertyValue('--writer-source-icon'))
       .toContain('docs.python.org');

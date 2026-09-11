@@ -16,6 +16,7 @@ from lazymind.chat.service.utils import (
     rewrite_markdown_image_urls,
     rewrite_citations,
 )
+from lazymind.chat.service.utils.citations import added_citation_markers
 from lazymind.chat.service.component.tool_rendering import (
     _preview_language,
     _tool_call_frame_text,
@@ -91,15 +92,19 @@ def _iter_text_chunks(text: str, chunk_size: int = _STREAM_CHUNK_SIZE):
 def _iter_scanned_text_frames(
     scanned_segments: Any,
     citation_state: dict[str, Any],
+    citation_plugin: Any = None,
 ):
+    collected = citation_plugin.collect() if citation_plugin is not None else None
     for field, seg in scanned_segments:
         if not seg:
             continue
         if field == 'think':
             yield False, _stream_frame(think=seg)
             continue
+        text = rewrite_markdown_image_urls(seg, config=citation_state)
         yield True, _stream_frame(
-            text=rewrite_markdown_image_urls(seg, config=citation_state),
+            text=text,
+            sources=collected if collected and '#source-' in text else None,
         )
 
 
@@ -120,6 +125,7 @@ class AgentEventFrameTranslator:
         self._pending_previews: dict[str, str] = {}
         self._mail_drafts: dict[str, dict[str, Any]] = {}
         self.streamed_text = False
+        self._streamed_display_text = ''
         self.ask_pending_emitted = False
         self.capability_dependency_emitted = False
         self.tool_call_turns = 0
@@ -224,9 +230,13 @@ class AgentEventFrameTranslator:
             self.run.semantic_output = True
             self.metrics.mark_output()
             for has_text, frame in _iter_scanned_text_frames(
-                self.text_scanner.feed(delta), self.citation_state,
+                self.text_scanner.feed(delta),
+                self.citation_state,
+                self.citation_plugin,
             ):
                 self.streamed_text = self.streamed_text or has_text
+                if has_text:
+                    self._streamed_display_text += str(frame.get('text') or '')
                 frames.append(frame)
             return frames
 
@@ -320,9 +330,13 @@ class AgentEventFrameTranslator:
     def flush(self) -> list[dict[str, Any]]:
         frames: list[dict[str, Any]] = []
         for has_text, frame in _iter_scanned_text_frames(
-            self.text_scanner.flush(), self.citation_state,
+            self.text_scanner.flush(),
+            self.citation_state,
+            self.citation_plugin,
         ):
             self.streamed_text = self.streamed_text or has_text
+            if has_text:
+                self._streamed_display_text += str(frame.get('text') or '')
             frames.append(frame)
         return frames
 
@@ -340,6 +354,7 @@ class AgentEventFrameTranslator:
             final_result,
             self.citation_state,
             display_mapper=self.citation_plugin.display_mapper,
+            streamed_text=self._streamed_display_text,
         )
         chunk_size = int(_cfg['agentic_stream_chunk_size'] or _STREAM_CHUNK_SIZE)
 
@@ -355,6 +370,11 @@ class AgentEventFrameTranslator:
             )
             for chunk in _iter_text_chunks(final_text, chunk_size):
                 frames.append(_stream_frame(text=chunk))
+        else:
+            suffix = str(output.get('citation_suffix') or '')
+            if suffix:
+                for chunk in _iter_text_chunks(suffix, chunk_size):
+                    frames.append(_stream_frame(text=chunk))
 
         sources = materialize_source_views(
             self.citation_state,
@@ -400,6 +420,7 @@ def _format_final_result(
     result: Any,
     config: dict,
     display_mapper: Any = None,
+    streamed_text: str = '',
 ) -> dict[str, Any]:
     if isinstance(result, dict):
         raw_text = str(result.get('text') or result.get('message') or '')
@@ -414,11 +435,20 @@ def _format_final_result(
     think, body = _split_think_and_body(raw_text, existing_think)
     body = rewrite_markdown_image_urls(body, config=config)
     text, cited_sources = rewrite_citations(body, config, display_mapper=display_mapper)
+    suffix_markers = added_citation_markers(streamed_text, body)
+    citation_suffix = ''
+    extra_cited: list[dict[str, Any]] = []
+    if suffix_markers:
+        citation_suffix, extra_cited = rewrite_citations(
+            suffix_markers, config, display_mapper=display_mapper,
+        )
     return {
         'think': think,
         'text': text.strip(),
+        'citation_suffix': citation_suffix,
         'source_views': [
             *(existing_sources if isinstance(existing_sources, list) else []),
             *cited_sources,
+            *extra_cited,
         ],
     }

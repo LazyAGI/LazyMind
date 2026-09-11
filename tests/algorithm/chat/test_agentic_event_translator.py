@@ -49,6 +49,9 @@ def test_translator_rewrites_citations_registered_by_tools():
 
     frames = translator.feed({'tag': 'text', 'delta': 'Use [[1.1]].'})
     assert ''.join(frame['text'] for frame in frames) == 'Use [1](#source-1.1 "doc.md").'
+    streamed_sources = next(frame['sources'] for frame in frames if frame.get('sources'))
+    assert streamed_sources[0]['index'] == '1.1'
+    assert streamed_sources[0]['file_name'] == 'doc.md'
 
     final_frames = translator.finish('')
     assert final_frames[-1]['sources'][0]['index'] == '1.1'
@@ -127,13 +130,70 @@ def test_translator_reuses_stream_display_indices_on_finish():
     assert '[1](#source-2.1' in streamed
 
     frames = translator.finish(f'Use {first["ref"]} and {second["ref"]}.')
+    finish_text = ''.join(frame.get('text') or '' for frame in frames)
     by_index = {
         source['index']: source['display_index']
         for source in frames[-1]['sources']
     }
     assert by_index['2.1'] == 1
     assert by_index['1.1'] == 2
-    assert '[1](#source-1.1' not in ''.join(frame.get('text') or '' for frame in frames)
+    assert '[2](#source-1.1' in finish_text
+    assert '[1](#source-1.1' not in finish_text
+
+
+def test_stream_then_finish_citation_continues_display_index():
+    translator = AgentEventFrameTranslator(query='q')
+    first = register_external_search_result({
+        'title': 'First',
+        'url': 'https://example.test/first',
+    }, translator.citation_state)
+    second = register_external_search_result({
+        'title': 'Second',
+        'url': 'https://example.test/second',
+    }, translator.citation_state)
+
+    streamed = ''.join(
+        frame.get('text') or ''
+        for frame in translator.feed({'tag': 'text', 'delta': f'A {first["ref"]}'})
+    )
+    assert '[1](#source-1.1' in streamed
+
+    frames = translator.finish(f'A {first["ref"]}\nB {second["ref"]}')
+    finish_text = ''.join(frame.get('text') or '' for frame in frames)
+    by_index = {
+        source['index']: source['display_index']
+        for source in frames[-1]['sources']
+    }
+    assert by_index['1.1'] == 1
+    assert by_index['2.1'] == 2
+    assert '[1](#source-1.1' in streamed
+    assert '[2](#source-2.1' in finish_text
+    assert finish_text.count('[1](#source-2.1') == 0
+
+
+def test_finish_does_not_cite_refs_inside_fenced_or_inline_code():
+    translator = AgentEventFrameTranslator(query='q')
+    first = register_external_search_result({
+        'title': 'First',
+        'url': 'https://example.test/first',
+    }, translator.citation_state)
+    second = register_external_search_result({
+        'title': 'Second',
+        'url': 'https://example.test/second',
+    }, translator.citation_state)
+
+    translator.feed({'tag': 'text', 'delta': f'A {first["ref"]}'})
+    frames = translator.finish(
+        f'A {first["ref"]}\n```python\nclient.responses.create(...) {second["ref"]}\n```\n'
+        f'and `{second["ref"]}` stays code.',
+    )
+    finish_text = ''.join(frame.get('text') or '' for frame in frames)
+    assert '[2](#source-2.1' not in finish_text
+    roles = {
+        source['index']: source['source_roles']
+        for source in frames[-1]['sources']
+    }
+    assert 'cited' not in (roles.get('2.1') or [])
 
 
 def test_final_sources_preserve_distinct_citation_indices_for_same_url():

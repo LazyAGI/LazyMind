@@ -6,6 +6,7 @@ import {
   getDisplaySources,
   getSearchSources,
   getSourceHref,
+  moveSourceMarkersToParagraphEnd,
   normalizeSourceMarkers,
   openSource,
   stripRedundantSourceUrls,
@@ -123,5 +124,16 @@ describe('chat source adapter', () => {
     );
     const source = '[2](#source-2.3 "NeurIPS-2024-hipporag.pdf")';
     expect(normalizeSourceMarkers(`${source}(${source})`)).toBe('[2](#source-2.3)');
+  });
+
+  it('moves inline source markers to the end of each paragraph', () => {
+    const first = '[1](#source-1.1)';
+    const second = '[2](#source-2.1)';
+    expect(moveSourceMarkersToParagraphEnd(
+      `第一句${first}。第二句${second}。\n\n下一段${first}。`,
+    )).toBe(`第一句。第二句。${first}${second}\n\n下一段。${first}`);
+    expect(moveSourceMarkersToParagraphEnd(
+      `\`\`\`\ncode ${first}\n\`\`\`\n\n正文${first}。继续。`,
+    )).toBe(`\`\`\`\ncode ${first}\n\`\`\`\n\n正文。继续。${first}`);
   });
 });
