@@ -8,7 +8,6 @@ from lazymind.chat.service.utils.citations import (
     CITATION_REFS_KEY,
     annotate_citations,
     register_external_search_result,
-    upsert_external_source,
 )
 
 
@@ -108,23 +107,31 @@ def test_translator_merges_searched_and_cited_sources_with_roles():
     assert 'searched_sources' not in frames[-1]
 
 
-def test_translator_appends_repaired_citations_after_uncited_stream():
+def test_translator_reuses_stream_display_indices_on_finish():
     translator = AgentEventFrameTranslator(query='q')
-    upsert_external_source({
-        'title': 'Python notes',
-        'url': 'https://example.test/python',
-        'content': (
-            'The Python Software Foundation announced that Python 3.14 will add a '
-            'free-threaded build in October 2025 for testers and package authors.'
-        ),
-    }, translator.citation_state, roles={'fetched'})
-    answer = 'Python 3.14 will add a free-threaded build in October 2025 for testers.'
-    translator.feed({'tag': 'text', 'delta': answer})
+    first = register_external_search_result({
+        'title': 'First',
+        'url': 'https://example.test/first',
+    }, translator.citation_state)
+    second = register_external_search_result({
+        'title': 'Second',
+        'url': 'https://example.test/second',
+    }, translator.citation_state)
 
-    frames = translator.finish(answer)
-    streamed = ''.join(frame.get('text') or '' for frame in frames)
-    assert '[1](#source-1.1' in streamed
-    assert frames[-1]['sources'][0]['source_roles'] == ['cited', 'fetched']
+    streamed = ''.join(
+        frame.get('text') or ''
+        for frame in translator.feed({'tag': 'text', 'delta': f'Use {second["ref"]}.'})
+    )
+    assert '[1](#source-2.1' in streamed
+
+    frames = translator.finish(f'Use {first["ref"]} and {second["ref"]}.')
+    by_index = {
+        source['index']: source['display_index']
+        for source in frames[-1]['sources']
+    }
+    assert by_index['2.1'] == 1
+    assert by_index['1.1'] == 2
+    assert '[1](#source-1.1' not in ''.join(frame.get('text') or '' for frame in frames)
 
 
 def test_final_sources_preserve_distinct_citation_indices_for_same_url():

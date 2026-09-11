@@ -7,10 +7,6 @@ from typing import Any, Optional
 from lazymind.config import config as _cfg
 from lazymind.chat.runtime_events import RunAccumulator, RunOutcome
 from lazymind.chat.service.run_metrics import RunMetricsTracker
-from lazymind.chat.service.utils.citation_repair import (
-    added_citation_markers,
-    attach_missing_citations,
-)
 from lazymind.chat.service.utils import (
     build_stream_citation_scanner,
     materialize_source_views,
@@ -279,7 +275,11 @@ class AgentEventFrameTranslator:
         # response. Never stream that receipt as ordinary assistant text.
         if self.ask_pending_emitted:
             return frames
-        output = _format_final_result(final_result, self.citation_state)
+        output = _format_final_result(
+            final_result,
+            self.citation_state,
+            display_mapper=self.citation_plugin.display_mapper,
+        )
         chunk_size = int(_cfg['agentic_stream_chunk_size'] or _STREAM_CHUNK_SIZE)
 
         if not self.streamed_text:
@@ -294,11 +294,6 @@ class AgentEventFrameTranslator:
             )
             for chunk in _iter_text_chunks(final_text, chunk_size):
                 frames.append(_stream_frame(text=chunk))
-        else:
-            suffix = str(output.get('citation_suffix') or '')
-            if suffix:
-                for chunk in _iter_text_chunks(suffix, chunk_size):
-                    frames.append(_stream_frame(text=chunk))
 
         sources = materialize_source_views(
             self.citation_state,
@@ -340,7 +335,11 @@ def _split_think_and_body(raw_text: str, existing_think: Any = '') -> tuple[str,
     return think.strip(), body
 
 
-def _format_final_result(result: Any, config: dict) -> dict[str, Any]:
+def _format_final_result(
+    result: Any,
+    config: dict,
+    display_mapper: Any = None,
+) -> dict[str, Any]:
     if isinstance(result, dict):
         raw_text = str(result.get('text') or result.get('message') or '')
         existing_think = result.get('think') or result.get('reasoning_content') or ''
@@ -353,20 +352,10 @@ def _format_final_result(result: Any, config: dict) -> dict[str, Any]:
     register_existing_sources(config, existing_sources)
     think, body = _split_think_and_body(raw_text, existing_think)
     body = rewrite_markdown_image_urls(body, config=config)
-    original_body = body
-    body = attach_missing_citations(body, config)
-    text, cited_sources = rewrite_citations(body, config)
-    suffix_markers = added_citation_markers(original_body, body)
-    citation_suffix = ''
-    if suffix_markers:
-        citation_suffix, extra_cited = rewrite_citations(suffix_markers, config)
-        for source in extra_cited:
-            if source not in cited_sources:
-                cited_sources.append(source)
+    text, cited_sources = rewrite_citations(body, config, display_mapper=display_mapper)
     return {
         'think': think,
         'text': text.strip(),
-        'citation_suffix': citation_suffix,
         'source_views': [
             *(existing_sources if isinstance(existing_sources, list) else []),
             *cited_sources,

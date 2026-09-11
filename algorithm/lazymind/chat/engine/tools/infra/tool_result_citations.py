@@ -24,10 +24,6 @@ _KNOWLEDGE_SEARCH_METHODS = {
     'kb_get_window_nodes',
     'kb_keyword_search',
 }
-_KNOWLEDGE_FETCH_METHODS = {
-    'kb_get_parent_node',
-    'kb_get_window_nodes',
-}
 _KNOWLEDGE_FUNCTIONS: set[str] = set()
 _PAGE_FUNCTIONS = {'url_fetch'}
 _CONTENT_METHODS = {'get_content', 'get_contents'}
@@ -120,8 +116,7 @@ class CitationResultMiddleware:
             processed = _annotate_external_results(value, state, roles)
         elif kind == 'knowledge_base':
             processed = copy.deepcopy(value)
-            roles = {'fetched'} if method in _KNOWLEDGE_FETCH_METHODS else {'searched'}
-            annotate_citations(processed, state, roles=roles)
+            annotate_citations(processed, state, roles={'searched'})
         else:
             processed = _annotate_page_results(value, state)
         if collect_only:

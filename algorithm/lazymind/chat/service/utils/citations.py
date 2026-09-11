@@ -589,9 +589,13 @@ def citation_link(index: str, source: dict[str, Any], display_index: Any = None)
     return f'[{display_index}](#source-{index} "{title}")'
 
 
-def rewrite_citations(text: str, config: dict[str, Any]) -> tuple[str, list[dict[str, Any]]]:
+def rewrite_citations(
+    text: str,
+    config: dict[str, Any],
+    display_mapper: CitationDisplayMapper | None = None,
+) -> tuple[str, list[dict[str, Any]]]:
     collected: OrderedDict[str, dict[str, Any]] = OrderedDict()
-    display_mapper = CitationDisplayMapper()
+    display_mapper = display_mapper or CitationDisplayMapper()
 
     def _collect(index: str, source: dict[str, Any]) -> dict[str, Any]:
         mark_source_roles(config, index, 'cited')
@@ -663,6 +667,10 @@ class ConfigCitationPlugin(BasePlugin):
 
     def collect(self) -> list[dict[str, Any]]:
         return list(self._collected.values())
+
+    @property
+    def display_mapper(self) -> CitationDisplayMapper:
+        return self._display_mapper
 
     def last_incomplete_pos(self, buf: str) -> int | None:
         last_double = buf.rfind('[[')
