@@ -206,8 +206,8 @@ def test_rewrite_citations_keeps_markers_in_gfm_tables():
     expected = (
         '| 模型 | 价格 |\n'
         '|---|---|\n'
-        '| A [1](#source-1.1 "美国大都会博物馆") | $1 |\n'
-        '| B [2](#source-2.1 "Louvre") | $2 |'
+        '| A | $1 [1](#source-1.1 "美国大都会博物馆") |\n'
+        '| B | $2 [2](#source-2.1 "Louvre") |'
     )
     assert rewritten == expected
     assert relocate_source_markers_to_paragraph_end(expected) == expected

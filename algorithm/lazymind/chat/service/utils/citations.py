@@ -615,6 +615,39 @@ def _is_gfm_table_block(block: str) -> bool:
     return sum(1 for line in lines if _is_pipe_table_row(line)) >= 2
 
 
+def _insert_markers_before_trailing_pipes(line: str, markers: list[str]) -> str:
+    match = re.search(r'(\s*\|+\s*)$', line)
+    joined = ''.join(markers)
+    if not match:
+        return f'{line.rstrip()}{joined}'
+    core = line[: match.start()].rstrip()
+    return f'{core} {joined}{match.group(1)}'
+
+
+def _relocate_markers_in_table_row(line: str) -> str:
+    if _is_gfm_table_delimiter(line):
+        return line
+    if '|' not in line:
+        return _relocate_markers_in_block(line)
+    markers: list[str] = []
+    seen: set[str] = set()
+
+    def _take(match: re.Match[str]) -> str:
+        citation_id = match.group(2)
+        if citation_id not in seen:
+            seen.add(citation_id)
+            markers.append(match.group(0))
+        return ''
+
+    stripped = _SOURCE_MARKER_IN_TEXT.sub(_take, line)
+    if not markers:
+        return line
+    cleaned = re.sub(r'[ \t]+([。．，,、；;：:!！?？])', r'\1', stripped)
+    cleaned = re.sub(r'[ \t]{2,}', ' ', cleaned)
+    cleaned = re.sub(r'[ \t]+\n', '\n', cleaned)
+    return _insert_markers_before_trailing_pipes(cleaned, markers)
+
+
 def _relocate_markers_in_block(block: str) -> str:
     markers: list[str] = []
     seen: set[str] = set()
@@ -646,8 +679,9 @@ def _relocate_markers_in_prose(text: str) -> str:
             relocated.append(block)
             continue
         if _is_gfm_table_block(block):
-            # Keep in-cell citations; moving them would break GFM table pipes.
-            relocated.append(block)
+            relocated.append('\n'.join(
+                _relocate_markers_in_table_row(line) for line in block.split('\n')
+            ))
             continue
         lines = block.split('\n')
         is_list_line = lambda line: bool(re.match(r'\s*(?:[-*+]|\d+[.)])\s+', line))
@@ -702,7 +736,8 @@ def relocate_source_markers_to_paragraph_end(content: str) -> str:
     This is intentional for ordinary paragraphs and simple one-line list items.
     Nested or continuation lists keep the original marker positions. Streaming
     paragraphs may therefore look like ``Fact A. Fact B. [1][2]``.
-    GFM tables and fenced code are left unchanged.
+    GFM table rows keep their pipes and move citations to the last cell.
+    Fenced code is left unchanged.
     """
     return _transform_outside_fences(content, _relocate_markers_in_prose)
 
@@ -752,7 +787,10 @@ def added_citation_markers(original: str, repaired: str) -> str:
 def citation_link(index: str, source: dict[str, Any], display_index: Any = None) -> str:
     document_index, _ = split_citation_index(index)
     display_index = display_index or source.get('display_index') or source.get('document_index') or document_index
-    title = escape(str(source.get('file_name') or source.get('title') or 'title'), quote=True)
+    title = escape(
+        str(source.get('file_name') or source.get('title') or 'title').replace('|', '/'),
+        quote=True,
+    )
     return f'[{display_index}](#source-{index} "{title}")'
 
 

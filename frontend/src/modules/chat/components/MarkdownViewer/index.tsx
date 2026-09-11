@@ -108,6 +108,19 @@ const MarkdownRenderContext = createContext<{
   artifacts: EMPTY_CONVERSATION_ARTIFACTS,
 });
 
+const InTableCellContext = createContext(false);
+
+function TableCellComponent(Tag: "td" | "th") {
+  return function Cell(props: any) {
+    const { node: _node, children, ...rest } = props;
+    return (
+      <InTableCellContext.Provider value={true}>
+        <Tag {...rest}>{children}</Tag>
+      </InTableCellContext.Provider>
+    );
+  };
+}
+
 const SOURCE_PREVIEW_TEXT_LIMIT = 280;
 
 function getSourceBrandName(source: ChatSource) {
@@ -467,6 +480,7 @@ const LinkComponent = (props: any) => {
   const { isStreaming, markSources, artifacts } = useContext(
     MarkdownRenderContext,
   );
+  const inTableCell = useContext(InTableCellContext);
   const href = typeof props.href === "string" ? props.href : "";
   const managedFile = href.includes("/static-files/");
   const artifactFileId = getFileIdFromHref(href);
@@ -580,7 +594,7 @@ const LinkComponent = (props: any) => {
       </span>
     );
 
-    if (isStreaming || !source) {
+    if (isStreaming || !source || inTableCell) {
       return chip;
     }
 
@@ -671,6 +685,8 @@ const defaultMarkdownComponents = {
   img: ImageComponent,
   pre: PreComponent,
   code: CodeComponent,
+  td: TableCellComponent("td"),
+  th: TableCellComponent("th"),
 };
 
 const MarkdownViewer = memo((props: any) => {

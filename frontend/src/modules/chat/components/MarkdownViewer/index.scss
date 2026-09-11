@@ -100,6 +100,15 @@
   }
 }
 
+.rag-markdown table .md-source-chip {
+  display: inline;
+  max-width: none;
+  margin: 0 0 0 4px;
+  padding: 0 5px;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
 .md-source-popover {
   pointer-events: none;
 

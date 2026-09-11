@@ -259,13 +259,50 @@ function isGfmTableBlock(block: string) {
   return lines.filter(isPipeTableRow).length >= 2;
 }
 
+function insertMarkersBeforeTrailingPipes(line: string, markers: string[]) {
+  const match = line.match(/(\s*\|+\s*)$/);
+  const joined = markers.join("");
+  if (!match) {
+    return `${line.trimEnd()}${joined}`;
+  }
+  const core = line.slice(0, line.length - match[1].length).trimEnd();
+  return `${core} ${joined}${match[1]}`;
+}
+
+function relocateMarkersInTableRow(line: string) {
+  if (isGfmTableDelimiter(line)) {
+    return line;
+  }
+  if (!line.includes("|")) {
+    return relocateMarkersInBlock(line);
+  }
+  const markers: string[] = [];
+  const seen = new Set<string>();
+  COMPLETE_SOURCE_MARKER.lastIndex = 0;
+  const stripped = line.replace(COMPLETE_SOURCE_MARKER, (_match, displayIndex, citationId) => {
+    if (!seen.has(citationId)) {
+      seen.add(citationId);
+      markers.push(`[${displayIndex}](#source-${citationId})`);
+    }
+    return "";
+  });
+  if (!markers.length) {
+    return line;
+  }
+  const cleaned = stripped
+    .replace(/[ \t]+([。．，,、；;：:!！?？])/g, "$1")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/[ \t]+\n/g, "\n");
+  return insertMarkersBeforeTrailingPipes(cleaned, markers);
+}
+
 function relocateMarkersInProse(text: string) {
   return text.split(/(\n{2,})/).map((block, index) => {
     if (index % 2 === 1 || !block.trim()) {
       return block;
     }
     if (isGfmTableBlock(block)) {
-      return block;
+      return block.split("\n").map(relocateMarkersInTableRow).join("\n");
     }
     const lines = block.split("\n");
     const isListLine = (line: string) => /^\s*(?:[-*+]|\d+[.)])\s+/.test(line);
@@ -284,7 +321,7 @@ function relocateMarkersInProse(text: string) {
 // Intentionally cluster citations at the paragraph (or list-item) end instead
 // of after each sentence. Streaming therefore looks like:
 // "Fact A. Fact B. [1][2]" rather than "Fact A [1]. Fact B [2]."
-// GFM tables keep in-cell markers so pipe rows stay valid.
+// GFM table rows keep their pipes and move citations to the last cell.
 export function moveSourceMarkersToParagraphEnd(content: string) {
   const lines = content.split("\n");
   const output: string[] = [];
