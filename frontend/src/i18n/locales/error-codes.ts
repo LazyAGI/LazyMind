@@ -1669,7 +1669,7 @@ export const zhCNErrorMessages = {
   "2002747": "整理执行状态无效，请重新整理",
   "2002748": "整理执行状态无效，请重新整理",
   "2002750": "整理期间暂不可新建或重命名分组",
-  "2002751": "会话摘要批量结果数量不匹配",>>>>>>> origin/main
+  "2002751": "会话摘要批量结果数量不匹配",
   "400": "请求参数无效",
   "404": "资源不存在",
   "405": "请求方法不允许",
@@ -3715,7 +3715,7 @@ export const enUSErrorMessages = {
   "2002747": "Organizer failed",
   "2002748": "Invalid incremental identity or length",
   "2002750": "Conversation organizer group names are locked",
-  "2002751": "Invalid opening batch result count",>>>>>>> origin/main
+  "2002751": "Invalid opening batch result count",
   "400": "Invalid request parameters",
   "404": "Resource not found",
   "405": "Method not allowed",
