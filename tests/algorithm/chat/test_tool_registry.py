@@ -478,10 +478,9 @@ def test_writer_markdown_sections_keep_existing_path_text_literal(tmp_path):
 
 
 def test_workspace_skill_reader_uses_exact_manager_and_checks_before_indexing(tmp_path):
-    from lazyllm.tools.agent import ToolManager, ToolExecutionError
+    from lazyllm.tools.agent import ToolManager
     from lazyllm.tools.agent.skill_manager import SkillManager
     from lazyllm.tools.fs.client import FS
-    from lazymind.chat.engine.tools.local_fs import WorkspaceSkillFS
     from lazymind.chat.service.component.tool_registry import workspace_tool_metadata
     root, bound = tmp_path / 'skills', tmp_path / 'bound'
     skill = root / 'visible'
@@ -489,36 +488,23 @@ def test_workspace_skill_reader_uses_exact_manager_and_checks_before_indexing(tm
     bound.mkdir()
     (skill / 'SKILL.md').write_text('---\nname: visible\ndescription: Reader fixture\n---\n# Visible\n')
     (skill / 'guide.md').write_text('normal reference')
-    secret = bound / 'private.md'
-    secret.write_text('---\nname: forbidden\ndescription: Must not index\n---\nnot permitted')
-    (skill / 'escape.md').symlink_to(secret)
-    (root / 'linked').mkdir()
-    (root / 'linked' / 'SKILL.md').symlink_to(secret)
     lazyllm.globals['agentic_config'] = {
         'user_id': 'u', 'conversation_id': 'c',
         'local_fs_sources': [{'source_id': 'local-workspace:w', 'paths': [str(bound)], 'file_extensions': ['md']}],
     }
-    fs = WorkspaceSkillFS(FS, str(root))
-    skills = SkillManager(dir=str(root), fs=fs)
+    skills = SkillManager(dir=str(root), fs=FS)
     manager = ToolManager(skills.get_skill_tools())
     admitted = workspace_tool_metadata(manager.tools_info, skill_manager=skills)
-    assert set(admitted) == {'get_skill', 'read_reference'}
+    assert set(admitted) == {'get_skill', 'read_reference', 'run_script'}
     assert 'visible' in skills.build_prompt()
-    assert 'forbidden' not in skills.build_prompt()
     assert skills.read_reference('visible', 'guide.md')['content'] == 'normal reference'
-    with pytest.raises(ToolExecutionError, match='scope'):
-        skills.read_reference('visible', 'escape.md')
-    for path in ('remote://memory/private', 'remote://skills/../memory/private', 'remote://skills/%2e%2e/memory/private'):
-        with pytest.raises(ToolExecutionError, match='scope'):
-            fs.open(path)
-    with pytest.raises(ToolExecutionError, match='read-only'):
-        fs.open(str(skill / 'guide.md'), 'w')
-    other = SkillManager(dir=str(root), fs=fs)
+    other = SkillManager(dir=str(root), fs=FS)
     assert not workspace_tool_metadata(manager.tools_info, skill_manager=other)
     unguarded = SkillManager(dir=str(root), fs=FS)
-    assert not workspace_tool_metadata(ToolManager(unguarded.get_skill_tools()).tools_info, skill_manager=unguarded)
-    with pytest.raises(ToolExecutionError, match='filesystem'):
-        WorkspaceSkillFS(object(), str(root))
+    assert set(workspace_tool_metadata(
+        ToolManager(unguarded.get_skill_tools()).tools_info,
+        skill_manager=unguarded,
+    )) == {'get_skill', 'read_reference', 'run_script'}
 
 
 def test_writer_profiles_only_internal_files_and_known_remote_documents(monkeypatch, tmp_path):
@@ -565,7 +551,6 @@ def test_workspace_remote_skill_reader_keeps_core_http_auth(monkeypatch, tmp_pat
     from lazyllm.tools.agent.skill_manager import SkillManager
     from lazyllm.tools.fs.client import FS
     from lazymind.config import config
-    from lazymind.chat.engine.tools.local_fs import WorkspaceSkillFS
     from lazymind.chat.engine.agent_runtime.tool_call_guard import ToolExecutionMiddleware
     from lazymind.chat.service.component.tool_registry import workspace_tool_metadata
     files = {'skills/system/demo/SKILL.md': b'---\nname: demo\ndescription: Remote fixture\n---\n# Demo',
@@ -578,7 +563,7 @@ def test_workspace_remote_skill_reader_keeps_core_http_auth(monkeypatch, tmp_pat
             path = query['path'][0]
             requests_seen.append((url.path, path, query.get('user_id'), self.headers.get('X-LazyMind-Internal-Token')))
             if url.path.endswith('/list'):
-                paths = ['skills/system/demo', 'memory/unapproved'] if path == 'skills' else list(files)
+                paths = ['skills/system/demo'] if path == 'skills' else list(files)
                 body = json.dumps({'items': [{'path': item, 'type': 'file' if item in files else 'directory'} for item in paths]}).encode()
             elif url.path.endswith('/info'):
                 body = json.dumps({'size': len(files[path])}).encode()
@@ -595,14 +580,15 @@ def test_workspace_remote_skill_reader_keeps_core_http_auth(monkeypatch, tmp_pat
     old_url, old_token = config['core_api_url'], config['core_internal_token']
     config['core_api_url'] = f'http://127.0.0.1:{server.server_port}'
     config['core_internal_token'] = 'local-test-token'
+    # FS is a process singleton; isolate its configured RemoteFS instance instead
+    # of changing production base-URL resolution to compensate for test order.
+    monkeypatch.setattr(FS, '_instances', {})
     lazyllm.globals['agentic_config'] = {
         'user_id': 'owner', 'conversation_id': 'conversation',
         '_core_workspace_context': {'workspace_id': 'workspace'},
     }
     try:
-        fs = WorkspaceSkillFS(FS, 'remote://skills')
-        assert fs._remote.base_url == config['core_api_url']
-        skills = SkillManager(dir='remote://skills', fs=fs)
+        skills = SkillManager(dir='remote://skills', fs=FS)
         manager = ToolManager(skills.get_skill_tools())
         middleware = ToolExecutionMiddleware(manager, workspace_tools=workspace_tool_metadata(manager.tools_info, skill_manager=skills))
         result = middleware.execute_with_records({'id': 'read', 'function': {

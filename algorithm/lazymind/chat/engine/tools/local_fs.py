@@ -13,29 +13,59 @@ rg is the primary path and Python is a best-effort fallback.
 """
 from __future__ import annotations
 
-import copy
 import datetime
 from dataclasses import dataclass
 import fnmatch
 import glob as _glob
 import json
+import inspect
 import os
 import re
 import shutil
 import subprocess
-import time
+from functools import wraps
 from typing import Any, Dict, List, Optional
-from urllib.parse import unquote
 
 import lazyllm
-from lazyllm.tools.agent import ToolExecutionError
-from lazyllm.tools.fs.client import FS, _FSRouter
+from lazyllm.tools.agent import ToolExecutionError, fc_register
 
 from lazymind.chat.engine.tools.text_edit import replace_exact_text_file
-from lazymind.chat.engine.tools.infra.core_api_client import get_core_api, post_core_api
 
 _RG_BINARY = shutil.which('rg') or ''
 _RG_TIMEOUT = 30
+_MODEL_INTERNAL_FIELDS = frozenset({'source_id', 'workspace_id', 'permission_version'})
+
+
+def _strip_model_internal_fields(value: Any) -> Any:
+    """Remove runtime routing identifiers before a local-file result reaches the model."""
+    if isinstance(value, dict):
+        return {
+            key: _strip_model_internal_fields(item)
+            for key, item in value.items()
+            if key not in _MODEL_INTERNAL_FIELDS
+        }
+    if isinstance(value, list):
+        return [_strip_model_internal_fields(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_strip_model_internal_fields(item) for item in value)
+    return value
+
+
+def _model_facing_result(func):
+    """Keep source routing metadata private while preserving the tool signature and docs."""
+    @wraps(func)
+    def wrapped(*args, **kwargs):
+        access = getattr(args[0], '_local_access', None)
+        if access is not None:
+            bound = inspect.signature(func).bind(*args, **kwargs)
+            bound.apply_defaults()
+            arguments = {key: value for key, value in bound.arguments.items() if key != 'self'}
+            return _strip_model_internal_fields(access.execute(func.__name__, arguments))
+        if args[0]._workspace_binding() is not None:
+            raise ToolExecutionError('workspace authorization unavailable')
+        return _strip_model_internal_fields(func(*args, **kwargs))
+
+    return wrapped
 
 
 @dataclass(frozen=True)
@@ -49,14 +79,17 @@ class LocalFileToolkit:
     """Tools for listing, searching, reading, and safely editing local text files.
 
     The tools can access only the local files and directories made available
-    for the current request.
+    for the current request. Authorization is supplied by the runtime;
+    this toolkit only performs local IO.
     """
 
-    __public_apis__ = ['ls', 'glob', 'grep', 'read', 'string_replace', 'create', 'overwrite', 'append', 'delete', 'mkdir', 'info']
+    __public_apis__ = [
+        'ls', 'glob', 'grep', 'read', 'string_replace', 'create', 'overwrite',
+        'append', 'delete', 'mkdir', 'info',
+    ]
+    __host_file_access__ = 'DECLARED'
 
     def _get_scopes(self) -> List[LocalFSScope]:
-        if hasattr(self, '_scope_override'):
-            return self._scope_override
         config = lazyllm.globals.get('agentic_config') or {}
         sources = config.get('local_fs_sources') or []
         if not isinstance(sources, list):
@@ -138,140 +171,18 @@ class LocalFileToolkit:
         except (ValueError, OSError):
             return False
 
-    def _has_workspace_source(self) -> bool:
-        return any(self._workspace_scope(scope) for scope in self._get_scopes())
-
-    @staticmethod
-    def _workspace_scope(scope: LocalFSScope) -> bool:
-        return scope.source_id.startswith('local-workspace:')
-
-    def execute_workspace_call(self, method: str, arguments: Dict[str, Any], *,
-                               call_id: str, tool_name: str, identity: Dict[str, Any],
-                               cancel_check: Any, versions: Dict[str, str]) -> Any:
-        # Registry instances are shared. Keep this invocation's identity out of them.
-        invocation = copy.copy(self)
-        invocation._workspace_call = (call_id, tool_name, dict(identity), cancel_check)
-        invocation._observed_versions = versions
-        invocation._operation_sequence = 0
-        invocation._execution_started = False
-        try:
-            return getattr(invocation, method)(**arguments)
-        except Exception as error:
-            error.workspace_execution_started = invocation._execution_started
-            raise
-
-    def _core_path(self, filepath: str, scope: LocalFSScope) -> str:
-        target, selected = self._resolve_with_scope(filepath)
-        if selected != scope or not self._workspace_scope(scope):
-            raise ToolExecutionError('path is not within the selected workspace source')
-        for root in scope.roots:
-            relative = os.path.relpath(target, os.path.abspath(root))
-            if relative != os.pardir and not relative.startswith(os.pardir + os.sep):
-                return relative.replace(os.sep, '/')
-        raise ToolExecutionError('path is not within the selected workspace source')
-
-    @staticmethod
-    def _core_result(response: Dict[str, Any]) -> Dict[str, Any]:
-        envelope = response.get('response') if isinstance(response, dict) else None
-        body = envelope if isinstance(envelope, dict) else response
-        if not isinstance(body, dict):
-            return {}
-        data = body if 'operation_id' in body else body.get('data', body)
-        return data if isinstance(data, dict) else {}
-
-    def _core_operation(self, scope: LocalFSScope, operation: str, path: str, **parameters: Any) -> Dict[str, Any]:
-        context = self._workspace_context()
-        invocation = getattr(self, '_workspace_call', None)
-        if context is None or invocation is None:
-            raise ToolExecutionError('workspace operation requires the prepared execution context')
-        call_id, tool_name, identity, cancel_check = invocation
-        if not ((identity.get('history_id') and identity.get('run_id'))
-                or (identity.get('task_id') and identity.get('generation'))):
-            raise ToolExecutionError('workspace run identity is unavailable')
-        relative = self._core_path(path, scope)
-        version_key = scope.source_id + ':' + relative
-        if operation in {'replace', 'overwrite', 'append', 'delete'} and not parameters.get('expected_version'):
-            parameters['expected_version'] = self._observed_versions.get(version_key, '')
-            if not parameters['expected_version']:
-                raise ToolExecutionError('read the file before editing it, or supply its observed expected_version')
-        self._operation_sequence += 1
-        payload = {
-            **context, **identity, **parameters,
-            'call_id': f'{int(time.time() * 1000)}/{call_id}:{self._operation_sequence}',
-            'tool_name': tool_name, 'operation': operation, 'path': relative,
-        }
-        base = f"internal/conversations/{context['conversation_id']}/workspace-operations"
-        if cancel_check is not None:
-            cancel_check(None)
-        prepared = self._core_result(post_core_api(base + ':prepare', payload))
-        operation_id = str(prepared.get('operation_id') or '').strip()
-        if not operation_id:
-            raise ToolExecutionError('Core did not return an operation id')
-        deadline = float(prepared.get('expires_at') or 0) / 1000
-        while prepared.get('status') == 'preparing' or (prepared.get('decision') == 'pending' and prepared.get('status') == 'pending'):
-            if cancel_check is not None:
-                cancel_check(None)
-            if not deadline or time.time() >= deadline:
-                raise ToolExecutionError('workspace approval expired')
-            time.sleep(min(1.0, max(0.0, deadline - time.time())))
-            if cancel_check is not None:
-                cancel_check(None)
-            prepared = self._core_result(get_core_api(base + '/' + operation_id, {key: value for key, value in identity.items() if key != 'lease_token'}))
-        if prepared.get('decision') != 'allowed' or prepared.get('status') not in {'allowed', 'completed'}:
-            raise ToolExecutionError(f'workspace operation {prepared.get("status") or "denied"}')
-        if cancel_check is not None:
-            cancel_check(None)
-        self._execution_started = True
-        executed = self._core_result(post_core_api(base + '/' + operation_id + ':execute', payload))
-        if executed.get('status') != 'completed':
-            raise ToolExecutionError(f'workspace execution {executed.get("status") or "unavailable"}')
-        receipt = executed.get('receipt') is True
-        if receipt and operation in {'read', 'ls', 'glob', 'grep', 'info'}:
-            raise ToolExecutionError('workspace observation already completed; its content is not replayed')
-        if operation == 'delete':
-            self._observed_versions.pop(version_key, None)
-        elif operation in {'read', 'create', 'replace', 'overwrite', 'append'} and executed.get('version'):
-            self._observed_versions[version_key] = str(executed['version'])
-        return executed
-
-    def _bound_scope_for_file(self, filepath: str) -> Optional[LocalFSScope]:
-        if not self._has_workspace_source():
-            return None
-        _, scope = self._resolve_with_scope(filepath)
-        return scope if self._workspace_scope(scope) else None
-
     def _resolve_with_scope(self, target: str) -> tuple[str, LocalFSScope]:
         scopes = self._get_scopes()
         if not scopes:
             raise ToolExecutionError('No local filesystem paths are configured')
-        workspace_scopes = [scope for scope in scopes if self._workspace_scope(scope)]
-        excluded_workspace = getattr(self, '_excluded_workspace', ())
-        if workspace_scopes and not os.path.isabs(target) and os.pardir in target.replace('\\', '/').split('/'):
-            raise ToolExecutionError('workspace paths cannot contain parent traversal')
-        # Workspace paths are lexical: Core alone resolves links and touches the disk.
-        for scope in workspace_scopes:
-            for root in scope.roots:
-                base = os.path.abspath(root)
-                candidate = os.path.abspath(target if os.path.isabs(target) else os.path.join(base, target))
-                try:
-                    if os.path.commonpath([base, candidate]) == base:
-                        return candidate, scope
-                except ValueError:
-                    continue
-        if all(self._workspace_scope(scope) for scope in scopes):
-            raise ToolExecutionError('path is outside the selected workspace')
+        if self._workspace_binding() is not None:
+            raise ToolExecutionError('workspace authorization unavailable')
         target = os.path.realpath(target)
         for scope in scopes:
-            if self._workspace_scope(scope):
-                continue
             for root in scope.roots:
                 base = os.path.realpath(root)
                 try:
                     if os.path.commonpath([base, target]) == base:
-                        # An ordinary-source alias must not become a workspace bypass.
-                        if any(os.path.commonpath([os.path.abspath(r), target]) == os.path.abspath(r)
-                               for ws in [*workspace_scopes, *excluded_workspace] for r in ws.roots):
-                            raise ToolExecutionError('workspace aliases require a workspace path')
                         return target, scope
                 except ValueError:
                     continue
@@ -279,8 +190,6 @@ class LocalFileToolkit:
 
     def _resolve_dir(self, path: str) -> tuple[str, LocalFSScope]:
         resolved, scope = self._resolve_with_scope(path)
-        if self._workspace_scope(scope):
-            raise ToolExecutionError('workspace directories must be queried through Core')
         if not os.path.isdir(resolved):
             raise ToolExecutionError(f'Path is not a directory: {path}')
         return resolved, scope
@@ -289,61 +198,14 @@ class LocalFileToolkit:
         if path is not None and str(path).strip() not in ('', '.'):
             return [self._resolve_dir(str(path))]
         return [(os.path.realpath(root), scope) for scope in self._get_scopes()
-                if not self._workspace_scope(scope) for root in scope.roots if os.path.isdir(root)]
-
-    def _workspace_discovery(self, method: str, path: Optional[str], **arguments: Any) -> Optional[Dict[str, Any]]:
-        scopes = self._get_scopes()
-        workspace = [scope for scope in scopes if self._workspace_scope(scope)]
-        if not workspace:
-            return None
-        all_roots = path is None or str(path).strip() == ''
-        if not all_roots:
-            resolved, scope = self._resolve_with_scope(str(path))
-            if not self._workspace_scope(scope):
-                return None
-            targets = [(resolved, scope)]
-        else:
-            targets = [(root, scope) for scope in workspace for root in scope.roots]
-        field = 'entries' if method in {'ls', 'info'} else 'matches'
-        combined: Dict[str, Any] = {'path': path, field: []}
-        for target, scope in targets:
-            operation = 'info' if all_roots and method in {'ls', 'info'} else method
-            result = self._core_operation(scope, operation, target,
-                                          pattern=arguments.get('pattern', ''), glob=arguments.get('glob', '*'),
-                                          limit=arguments.get('max_entries', arguments.get('max_results', 200)))
-            data = result.get('data') if isinstance(result.get('data'), dict) else result
-            if method == 'info' and not all_roots:
-                return {**data, 'source_id': scope.source_id}
-            combined.setdefault('skipped', []).extend(data.get('skipped', []))
-            combined['truncated'] = combined.get('truncated', False) or bool(data.get('truncated'))
-            values = [data] if operation == 'info' else data.get(field, [])
-            for value in values:
-                if isinstance(value, dict):
-                    value = {**value, 'source_id': scope.source_id}
-                combined[field].append(value)
-        ordinary = [scope for scope in scopes if not self._workspace_scope(scope)]
-        if all_roots and ordinary:
-            local = copy.copy(self)
-            local._scope_override = ordinary
-            local._excluded_workspace = workspace
-            combined[field].extend(getattr(local, method)(path=path, **arguments).get(field, []))
-        limit_key = 'max_results' if field == 'matches' else 'max_entries'
-        limit = max(1, arguments.get(limit_key, 200))
-        count = min(len(combined[field]), limit)
-        combined['truncated'] = combined.get('truncated', False) or len(combined[field]) > limit
-        combined[field] = combined[field][:limit]
-        if field == 'matches':
-            combined.update(pattern=arguments.get('pattern', ''), match_count=count)
-        else:
-            combined.update(entry_count=count, max_entries=limit)
-        return combined
+                for root in scope.roots if os.path.isdir(root)]
 
     @staticmethod
     def _file_extension(path: str) -> str:
         return os.path.splitext(path)[1].lower().lstrip('.')
 
     def _is_visible_file(self, scope: LocalFSScope, path: str) -> bool:
-        return self._file_extension(path) in scope.file_extensions
+        return '*' in scope.file_extensions or self._file_extension(path) in scope.file_extensions
 
     def _ensure_visible_file(self, scope: LocalFSScope, path: str) -> None:
         if not self._is_visible_file(scope, path):
@@ -352,8 +214,6 @@ class LocalFileToolkit:
     def _resolve_visible_file(self, path: str) -> Optional[tuple[str, LocalFSScope]]:
         try:
             resolved, scope = self._resolve_with_scope(path)
-            if self._workspace_scope(scope):
-                return None
             if os.path.isfile(resolved) and self._is_visible_file(scope, resolved):
                 return resolved, scope
         except (OSError, ToolExecutionError):
@@ -365,13 +225,11 @@ class LocalFileToolkit:
         if not visible:
             return None
         resolved, resolved_scope = visible
-        if resolved_scope != scope or self._workspace_scope(resolved_scope):
+        if resolved_scope != scope:
             return None
         return resolved
 
     def _entry(self, path: str, scope: LocalFSScope) -> Dict[str, Any]:
-        if self._workspace_scope(scope):
-            raise ToolExecutionError('workspace metadata must be queried through Core')
         st = os.stat(path)
         return {
             'name': os.path.basename(path),
@@ -393,6 +251,8 @@ class LocalFileToolkit:
             capture_output=True, text=True, timeout=_RG_TIMEOUT, cwd=cwd,
         )
 
+    @_model_facing_result
+    @fc_register(exclusive=True)
     def ls(self, path: Optional[str] = None, max_entries: int = 200) -> Dict[str, Any]:
         """List available local directories or one directory level.
 
@@ -404,9 +264,6 @@ class LocalFileToolkit:
             A directory listing with entry paths, types, sizes, update times,
             and pagination metadata.
         """
-        remote = self._workspace_discovery('ls', path, max_entries=max_entries)
-        if remote is not None:
-            return remote
         entries: List[Dict[str, Any]] = []
         limit = max(1, max_entries)
 
@@ -446,6 +303,8 @@ class LocalFileToolkit:
             'entries': entries,
         }
 
+    @_model_facing_result
+    @fc_register(exclusive=True)
     def glob(self, pattern: str, path: Optional[str] = None) -> Dict[str, Any]:
         """Find local files whose names match a glob pattern.
 
@@ -457,9 +316,6 @@ class LocalFileToolkit:
         Returns:
             A list of matching local file paths.
         """
-        remote = self._workspace_discovery('glob', path, pattern=pattern)
-        if remote is not None:
-            return remote
         matches: List[str] = []
         for safe_dir, scope in self._iter_roots(path):
             if self._has_rg():
@@ -484,6 +340,8 @@ class LocalFileToolkit:
             'matches': matches[:200],
         }
 
+    @_model_facing_result
+    @fc_register(exclusive=True)
     def grep(
         self,
         pattern: str,
@@ -503,12 +361,9 @@ class LocalFileToolkit:
         Returns:
             Matching lines with file path, line number, and text snippet.
         """
-        remote = self._workspace_discovery('grep', path, pattern=pattern, glob=glob, max_results=max_results)
-        if remote is not None:
-            return remote
         matches: List[Dict[str, Any]] = []
         for safe_dir, scope in self._iter_roots(path):
-            if self._has_rg() and not (self._has_workspace_source() or getattr(self, '_excluded_workspace', ())):
+            if self._has_rg():
                 result = self._grep_rg(pattern, safe_dir, scope, glob, max_results - len(matches))
             else:
                 result = self._grep_py(pattern, safe_dir, scope, glob, max_results - len(matches))
@@ -584,12 +439,7 @@ class LocalFileToolkit:
             raise ToolExecutionError(f'Invalid regex: {exc}') from exc
 
         matches: List[Dict[str, Any]] = []
-        excluded = [*getattr(self, '_excluded_workspace', ()),
-                    *(scope for scope in self._get_scopes() if self._workspace_scope(scope))]
-        for root, dirs, files in os.walk(safe_dir):
-            dirs[:] = [name for name in dirs if not any(
-                os.path.commonpath([os.path.abspath(base), os.path.realpath(os.path.join(root, name))]) == os.path.abspath(base)
-                for workspace in excluded for base in workspace.roots)]
+        for root, _, files in os.walk(safe_dir):
             for fn in files:
                 if not fnmatch.fnmatch(fn, glob_filter):
                     continue
@@ -623,6 +473,8 @@ class LocalFileToolkit:
             'matches': matches,
         }
 
+    @_model_facing_result
+    @fc_register(exclusive=True)
     def read(
         self,
         filepath: str,
@@ -639,22 +491,6 @@ class LocalFileToolkit:
         Returns:
             File content plus line range and total line count metadata.
         """
-        bound_scope = self._bound_scope_for_file(filepath)
-        if bound_scope is not None:
-            result = self._core_operation(bound_scope, 'read', filepath)
-            content = str(result.get('content') or '')
-            lines = content.splitlines(keepends=True)
-            selected = lines[start_line:start_line + max_lines]
-            return {
-                'filepath': result.get('path') or self._core_path(filepath, bound_scope),
-                'source_id': bound_scope.source_id,
-                'total_lines': len(lines),
-                'start_line': start_line,
-                'end_line': start_line + len(selected),
-                'content': ''.join(selected),
-                'version': result.get('version') or '',
-            }
-
         safe_path, scope = self._resolve_with_scope(filepath)
         if not os.path.isfile(safe_path):
             raise ToolExecutionError(f'File not found: {filepath}')
@@ -680,6 +516,8 @@ class LocalFileToolkit:
             'content': ''.join(chunk),
         }
 
+    @_model_facing_result
+    @fc_register(exclusive=True)
     def string_replace(
         self,
         filepath: str,
@@ -707,25 +545,6 @@ class LocalFileToolkit:
             Replacement count and updated file metadata. On mismatch or any
             error, the original file remains unchanged.
         """
-        bound_scope = self._bound_scope_for_file(filepath)
-        if bound_scope is not None:
-            if type(expected_replacements) is not int or not 1 <= expected_replacements <= 100 or not old_string:
-                raise ToolExecutionError('old_string must be non-empty and expected_replacements must be between 1 and 100')
-            if encoding.lower().replace('_', '-') != 'utf-8':
-                raise ToolExecutionError('workspace files require UTF-8 encoding')
-            result = self._core_operation(
-                bound_scope, 'replace', filepath, content=new_string, old_content=old_string,
-                expected_version=expected_version, expected_replacements=expected_replacements,
-            )
-            return {
-                'filepath': result.get('path') or self._core_path(filepath, bound_scope),
-                'source_id': bound_scope.source_id,
-                'replacements': expected_replacements,
-                'encoding': encoding,
-                'bytes': len(str(result.get('content') or '').encode(encoding)),
-                'version': result.get('version') or '',
-            }
-
         safe_path, scope = self._resolve_with_scope(filepath)
         if not os.path.isfile(safe_path):
             raise ToolExecutionError(f'File not found: {filepath}')
@@ -750,67 +569,40 @@ class LocalFileToolkit:
             'bytes': len(replacement.content),
         }
 
+    @_model_facing_result
+    @fc_register(exclusive=True)
     def create(self, filepath: str, content: str = '', encoding: str = 'utf-8') -> Dict[str, Any]:
-        """Create one new text file in the bound workspace."""
-        bound_scope = self._bound_scope_for_file(filepath)
-        if bound_scope is None:
-            raise ToolExecutionError('file creation requires a bound workspace')
-        if encoding.lower().replace('_', '-') != 'utf-8':
-            raise ToolExecutionError('workspace files require UTF-8 encoding')
-        result = self._core_operation(bound_scope, 'create', filepath, content=content)
-        return {
-            'filepath': result.get('path') or self._core_path(filepath, bound_scope),
-            'source_id': bound_scope.source_id,
-            'bytes': len(content.encode(encoding)),
-            'version': result.get('version') or '',
-        }
+        """Create one UTF-8 file after request-level authorization."""
+        raise ToolExecutionError('file creation requires explicit authorization')
 
+    @_model_facing_result
+    @fc_register(exclusive=True)
     def append(self, filepath: str, content: str, expected_version: str = '', encoding: str = 'utf-8') -> Dict[str, Any]:
-        """Append text to one file in the bound workspace using a version fence."""
-        bound_scope = self._bound_scope_for_file(filepath)
-        if bound_scope is None:
-            raise ToolExecutionError('file append requires a bound workspace')
-        if encoding.lower().replace('_', '-') != 'utf-8':
-            raise ToolExecutionError('workspace files require UTF-8 encoding')
-        result = self._core_operation(bound_scope, 'append', filepath, content=content, expected_version=expected_version)
-        return {
-            'filepath': result.get('path') or self._core_path(filepath, bound_scope),
-            'source_id': bound_scope.source_id,
-            'bytes': len(str(result.get('content') or '').encode(encoding)),
-            'version': result.get('version') or '',
-        }
+        """Append UTF-8 text to the observed version of an authorized file."""
+        raise ToolExecutionError('file append requires explicit authorization')
 
+    @_model_facing_result
+    @fc_register(exclusive=True)
     def delete(self, filepath: str, expected_version: str = '') -> Dict[str, Any]:
-        """Delete one regular file in the bound workspace using a version fence."""
-        bound_scope = self._bound_scope_for_file(filepath)
-        if bound_scope is None:
-            raise ToolExecutionError('file deletion requires a bound workspace')
-        result = self._core_operation(bound_scope, 'delete', filepath, expected_version=expected_version)
-        return {
-            'filepath': result.get('path') or self._core_path(filepath, bound_scope),
-            'source_id': bound_scope.source_id,
-            'version': result.get('version') or expected_version,
-        }
+        """Delete one authorized regular file at its observed version."""
+        raise ToolExecutionError('file deletion requires explicit authorization')
 
-    def overwrite(self, filepath: str, content: str, expected_version: str = '', encoding: str = 'utf-8') -> Dict[str, Any]:
-        """Replace a workspace file with UTF-8 text using a previously observed version."""
-        scope = self._bound_scope_for_file(filepath)
-        if scope is None:
-            raise ToolExecutionError('file overwrite requires a bound workspace')
-        if encoding.lower().replace('_', '-') != 'utf-8':
-            raise ToolExecutionError('workspace files require UTF-8 encoding')
-        result = self._core_operation(scope, 'overwrite', filepath, content=content, expected_version=expected_version)
-        return {'filepath': result.get('path'), 'source_id': scope.source_id,
-                'bytes': len(content.encode('utf-8')), 'version': result.get('version', '')}
+    @_model_facing_result
+    @fc_register(exclusive=True)
+    def overwrite(
+        self, filepath: str, content: str, expected_version: str = '', encoding: str = 'utf-8',
+    ) -> Dict[str, Any]:
+        """Atomically replace the observed version of one authorized UTF-8 file."""
+        raise ToolExecutionError('file overwrite requires explicit authorization')
 
+    @_model_facing_result
+    @fc_register(exclusive=True)
     def mkdir(self, path: str) -> Dict[str, Any]:
-        """Create one directory in the selected workspace; its parent must already exist."""
-        scope = self._bound_scope_for_file(path)
-        if scope is None:
-            raise ToolExecutionError('directory creation requires a bound workspace')
-        result = self._core_operation(scope, 'mkdir', path)
-        return {'path': result.get('path'), 'source_id': scope.source_id, 'type': 'directory'}
+        """Create one authorized directory."""
+        raise ToolExecutionError('directory creation requires explicit authorization')
 
+    @_model_facing_result
+    @fc_register(exclusive=True)
     def info(self, path: Optional[str] = None) -> Dict[str, Any]:
         """Get metadata for an available local file or directory.
 
@@ -821,9 +613,6 @@ class LocalFileToolkit:
         Returns:
             File or directory metadata such as path, type, size, and update time.
         """
-        remote = self._workspace_discovery('info', path)
-        if remote is not None:
-            return remote
         if path is None or str(path).strip() in ('', '.'):
             entries = [self._entry(root, scope) for root, scope in self._iter_roots(None)]
             return {'path': None, 'entries': entries}
@@ -844,33 +633,3 @@ class LocalFileToolkit:
             'size': st.st_size,
             'mtime': datetime.datetime.fromtimestamp(st.st_mtime).isoformat(),
         }
-
-
-class WorkspaceSkillFS(_FSRouter):
-    """Read configured skills without exposing the bound host workspace."""
-
-    def __init__(self, fs: Any, directories: Optional[str]):
-        from lazyllm.tools.agent.skill_manager import SkillManager
-        from lazymind.common.integrations.remote_fs import RemoteFS
-        from lazymind.config import config
-
-        if fs is not None and fs is not FS:
-            raise ToolExecutionError('workspace skills require the known filesystem router')
-        super().__init__()
-        self._roots = [FS._parse(path)[2] for path in SkillManager._parse_dirs(
-            directories or lazyllm.config['skills_dir'], fs=self) if FS._parse(path)[0] == 'file']
-        self._remote = RemoteFS(base_url=str(config['core_api_url'] or '').strip(), dynamic_auth=True)
-
-    def _dispatch(self, method: str, path: str, *args, **kwargs):
-        if method not in {'ls', 'info', 'open'} or (method == 'open' and args and args[0] not in {'r', 'rt', 'rb'}):
-            raise ToolExecutionError('workspace skill filesystem is read-only')
-        if LocalFileToolkit._workspace_context() is None:
-            raise ToolExecutionError('workspace skill scope requires user and conversation identity')
-        protocol, space, real_path = FS._parse(path)
-        if protocol == 'file' and LocalFileToolkit.workspace_path_allowed(real_path, self._roots):
-            return super()._dispatch(method, path, *args, **kwargs)
-        parts = unquote(real_path).replace('\\', '/').strip('/').split('/')
-        if (protocol != 'remote' or space is not None or parts[0] != 'skills'
-                or any(part in {'', '.', '..'} for part in parts)):
-            raise ToolExecutionError('path is outside the workspace skill scope')
-        return getattr(self._remote, method)(real_path, *args, **kwargs)

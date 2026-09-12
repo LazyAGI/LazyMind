@@ -92,6 +92,8 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/internal/conversations/{conversation_id}/workspace-operations:prepare", nil, localworkspace.InternalPrepareOperation)
 	handleAPI(r, "GET", "/internal/conversations/{conversation_id}/workspace-operations/{operation_id}", nil, localworkspace.InternalOperationStatus)
 	handleAPI(r, "POST", "/internal/conversations/{conversation_id}/workspace-operations/{operation_id}:execute", nil, localworkspace.InternalExecuteOperation)
+	handleAPI(r, "POST", "/internal/conversations/{conversation_id}/workspace-operations/{operation_id}:claim", nil, localworkspace.InternalClaimLocalOperation)
+	handleAPI(r, "POST", "/internal/conversations/{conversation_id}/workspace-operations/{operation_id}:complete", nil, localworkspace.InternalCompleteLocalOperation)
 	handleAPI(r, "GET", "/conversations/{conversation_id}:workspace-approvals", []string{"qa.write"}, localworkspace.ListOperationApprovals)
 	handleAPI(r, "POST", "/conversations/{conversation_id}/workspace-approvals/{operation_id}:decide", []string{"qa.write"}, localworkspace.DecideOperationHandler)
 	invocationHandler := agentinvocation.Handler{Service: agentinvocation.New(corestore.DB())}

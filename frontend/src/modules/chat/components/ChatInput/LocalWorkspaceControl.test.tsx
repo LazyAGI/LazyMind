@@ -134,6 +134,7 @@ describe("LocalWorkspaceControl task binding and request lifetime", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    Object.values(mocks).forEach((mock) => mock.mockReset());
     vi.mocked(axiosInstance.get).mockResolvedValue({ data: { data: { items: [] } } });
     vi.mocked(axiosInstance.post).mockResolvedValue({ data: { data: { status: "allowed" } } });
     Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
@@ -585,6 +586,41 @@ describe("LocalWorkspaceControl task binding and request lifetime", () => {
     expect(await screen.findByRole("combobox")).toBeEnabled();
     expect(await screen.findByText("recovered.txt")).toBeInTheDocument();
     expect(mocks.getConversationWorkspace).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the existing binding when a conflict refresh fails, then retries in place", async () => {
+    mocks.getConversationWorkspace.mockResolvedValue(alpha);
+    mocks.updateWorkspacePermission.mockRejectedValueOnce({
+      response: { data: { code: "binding_conflict" } },
+    });
+    mocks.getConversationWorkspace
+      .mockResolvedValueOnce(alpha)
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValueOnce({ ...alpha, permission_mode: "always_ask", permission_version: 4 });
+
+    const onChange = vi.fn();
+    render(<LocalWorkspaceControl conversationId="conv-alpha" onChange={onChange} />);
+    await waitFor(() => expect(screen.getByRole("combobox")).toBeEnabled());
+    onChange.mockClear();
+
+    fireEvent.mouseDown(screen.getByRole("combobox"));
+    fireEvent.click(await screen.findByText("chat.workspace.everyAsk"));
+
+    await waitFor(() => expect(mocks.updateWorkspacePermission).toHaveBeenCalled());
+    expect(await screen.findByRole("button", { name: "chat.workspace.retry" })).toBeInTheDocument();
+    expect(screen.getByRole("combobox")).toBeEnabled();
+    expect(onChange).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "chat.workspace.retry" }));
+
+    await waitFor(() => expect(onChange).toHaveBeenLastCalledWith(alpha.workspace_id, "always_ask"));
+    expect(screen.queryByRole("button", { name: "chat.workspace.retry" })).not.toBeInTheDocument();
+    expect(mocks.getConversationWorkspace).toHaveBeenCalledTimes(3);
+    vi.mocked(axiosInstance.get).mockResolvedValue({ data: { data: { items: [{
+      operation_id: "conflict-retry-op", path: "recovered.txt", operation: "replace", status: "pending", expires_at: Date.now() + 60_000,
+    }] } } });
+    await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
+    expect(await screen.findByText("recovered.txt")).toBeInTheDocument();
   });
 
   it("reports saving until a delayed allow_all to always_ask update settles", async () => {

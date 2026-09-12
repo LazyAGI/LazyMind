@@ -63,6 +63,11 @@ const (
 )
 
 type OperationRequest struct {
+	ExecutionMode        string        `json:"execution_mode,omitempty"`
+	ArgumentsDigest      string        `json:"arguments_digest,omitempty"`
+	ParentIdentity       string        `json:"parent_identity,omitempty"`
+	TargetIdentity       string        `json:"target_identity,omitempty"`
+	DependsOn            string        `json:"depends_on,omitempty"`
 	UserID               string        `json:"user_id"`
 	ConversationID       string        `json:"conversation_id"`
 	WorkspaceID          string        `json:"workspace_id"`
@@ -88,16 +93,19 @@ type OperationRequest struct {
 }
 
 type OperationResult struct {
-	Receipt     bool           `json:"receipt,omitempty"`
-	OperationID string         `json:"operation_id,omitempty"`
-	Path        string         `json:"path"`
-	Content     string         `json:"content,omitempty"`
-	Version     string         `json:"version,omitempty"`
-	Decision    Decision       `json:"decision,omitempty"`
-	Status      string         `json:"status,omitempty"`
-	Reason      string         `json:"reason,omitempty"`
-	ExpiresAt   int64          `json:"expires_at,omitempty"`
-	Data        map[string]any `json:"data,omitempty"`
+	ExecuteAllowed bool           `json:"execute_allowed,omitempty"`
+	TargetIdentity string         `json:"target_identity,omitempty"`
+	PermissionMode string         `json:"permission_mode,omitempty"`
+	Receipt        bool           `json:"receipt,omitempty"`
+	OperationID    string         `json:"operation_id,omitempty"`
+	Path           string         `json:"path"`
+	Content        string         `json:"content,omitempty"`
+	Version        string         `json:"version,omitempty"`
+	Decision       Decision       `json:"decision,omitempty"`
+	Status         string         `json:"status,omitempty"`
+	Reason         string         `json:"reason,omitempty"`
+	ExpiresAt      int64          `json:"expires_at,omitempty"`
+	Data           map[string]any `json:"data,omitempty"`
 }
 
 type operationState struct {
@@ -168,15 +176,24 @@ func PrepareOperation(ctx context.Context, db *gorm.DB, stateStore state.Store, 
 		return OperationResult{}, err
 	}
 	// Preparing never reads file content, including hashes of files awaiting approval.
-	parent, _, info, err := openOperationPath(snapshot, req.Path)
-	if err != nil {
-		return OperationResult{}, err
-	}
-	defer parent.Close()
-	if err := validateOperationTarget(req, info); err != nil {
-		return OperationResult{}, err
-	}
 	decision := permissionDecision(snapshot.PermissionMode, req.Operation, req.Path)
+	if req.ExecutionMode == localExecutionMode {
+		if err := validateLocalTarget(req, req.TargetIdentity); err != nil {
+			return OperationResult{}, err
+		}
+		if !pathWithin(snapshot.Root, req.Path) {
+			decision = DecisionPending
+		}
+	} else {
+		parent, _, info, err := openOperationPath(snapshot, req.Path)
+		if err != nil {
+			return OperationResult{}, err
+		}
+		defer parent.Close()
+		if err := validateOperationTarget(req, info); err != nil {
+			return OperationResult{}, err
+		}
+	}
 	value := operationState{OperationID: operationID, Request: requestWithoutContent(req),
 		ContentDigest: digestString(req.Content), OldContentDigest: digestString(req.OldContent),
 		Decision: decision, Status: "preparing", Version: req.ExpectedVersion, Slot: -1,
@@ -275,6 +292,9 @@ func findOperationSlot(ctx context.Context, store state.Store, conversation, ope
 }
 
 func ExecuteOperation(ctx context.Context, db *gorm.DB, stateStore state.Store, operationID string, req OperationRequest) (OperationResult, error) {
+	if req.ExecutionMode != "" {
+		return OperationResult{}, Error("selection_forbidden", 403, "forbidden")
+	}
 	if stateStore == nil || db == nil {
 		return OperationResult{}, errors.New("store not initialized")
 	}
@@ -440,12 +460,27 @@ func readOperation(op OperationKind) bool {
 }
 
 func validateOperationRequest(req OperationRequest) error {
+	local := req.ExecutionMode == localExecutionMode
+	validPath := fs.ValidPath(req.Path) && !strings.ContainsAny(req.Path, "\\:\x00")
+	if local {
+		if !Enabled() {
+			return ModeError()
+		}
+		validPath = filepath.IsAbs(req.Path) && filepath.Clean(req.Path) == req.Path && !strings.ContainsRune(req.Path, 0)
+		if len(req.Path) > 4096 || !validDigest(req.ArgumentsDigest) || len(req.ParentIdentity) > 160 ||
+			len(req.TargetIdentity) > 160 || req.ParentIdentity == "" || req.TargetIdentity == "" ||
+			(req.DependsOn != "" && !validDigest(req.DependsOn)) {
+			return Error("invalid_selection", 400, "invalid request")
+		}
+	} else if req.ExecutionMode != "" || req.ArgumentsDigest != "" || req.ParentIdentity != "" || req.TargetIdentity != "" || req.DependsOn != "" {
+		return Error("invalid_selection", 400, "invalid request")
+	}
 	if req.UserID == "" || req.ConversationID == "" || req.WorkspaceID == "" || req.CallID == "" || len(req.CallID) > 512 ||
-		req.Path == "" || !fs.ValidPath(req.Path) || strings.ContainsAny(req.Path, "\\:\x00") ||
+		req.Path == "" || !validPath ||
 		len(req.Content) > maxOperationBytes || len(req.OldContent) > maxOperationBytes || !utf8.ValidString(req.Content) || strings.ContainsRune(req.Content, 0) {
 		return Error("invalid_selection", 400, "invalid request")
 	}
-	for _, part := range strings.Split(req.Path, "/") {
+	for _, part := range strings.Split(filepath.ToSlash(req.Path), "/") {
 		if strings.EqualFold(part, ".git") || (part != "." && strings.HasSuffix(part, ".")) || strings.HasSuffix(part, " ") {
 			return Error("path_invalid", 400, "invalid request")
 		}
@@ -775,6 +810,9 @@ func operationSlotKey(conversation string, slot int) string {
 
 func operationResult(value operationState) OperationResult {
 	result := value.Result
+	if value.Request.ExecutionMode == localExecutionMode {
+		result.PermissionMode = value.PermissionMode
+	}
 	result.Receipt = value.Status == operationCompleted
 	result.OperationID, result.Path, result.Version = value.OperationID, value.Request.Path, value.Version
 	result.Status, result.Decision, result.ExpiresAt = value.Status, value.Decision, value.ExpiresAt

@@ -475,6 +475,8 @@ interface ChatInputProps {
   modelSelectorBusy?: boolean;
   /** Reports persisted model-selection saves so sibling retry actions can share the lock. */
   onModelSelectionSavingChange?: (saving: boolean) => void;
+  /** Reports persisted workspace-permission saves so every session execution entry point shares the lock. */
+  onWorkspacePermissionSavingChange?: (saving: boolean) => void;
   fixedThinkingDepth?: ThinkingDepth;
   performanceStats?: SessionPerformanceStats;
   showPerformanceStats?: boolean;
@@ -690,6 +692,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       showModelSelector = true,
       modelSelectorBusy = false,
       onModelSelectionSavingChange,
+      onWorkspacePermissionSavingChange,
       fixedThinkingDepth,
       performanceStats,
       showPerformanceStats = false,
@@ -743,7 +746,8 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     const handleWorkspaceSavingChange = useCallback((saving: boolean) => {
       workspacePermissionSavingRef.current = saving;
       setWorkspacePermissionSaving(saving);
-    }, []);
+      onWorkspacePermissionSavingChange?.(saving);
+    }, [onWorkspacePermissionSavingChange]);
     const [modelSelectionSaving, setModelSelectionSaving] = useState(false);
     const handleModelSelectionChange = useCallback(
       (selection: ChatModelSelectionRequest) => {

@@ -168,6 +168,12 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
       modelSelectionSavingRef.current = saving;
       setModelSelectionSaving(saving);
     }, []);
+    const workspacePermissionSavingRef = useRef(false);
+    const [workspacePermissionSaving, setWorkspacePermissionSaving] = useState(false);
+    const handleWorkspacePermissionSavingChange = useCallback((saving: boolean) => {
+      workspacePermissionSavingRef.current = saving;
+      setWorkspacePermissionSaving(saving);
+    }, []);
     const [sourcePanelSources, setSourcePanelSources] = useState<ChatSource[]>([]);
     const skillDepositWasReadyRef = useRef(false);
     const skillDepositMessageCountRef = useRef(0);
@@ -242,6 +248,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
       thinkingCollapseMap,
       getUserEdit: () => userEditRef.current,
       isModelSelectionSaving: () => modelSelectionSavingRef.current,
+      isWorkspacePermissionSaving: () => workspacePermissionSavingRef.current,
       concurrentStream,
       onRequestPendingChange,
       t,
@@ -255,7 +262,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
     }, [conversation.isStreaming, onRequestPendingChange, onStreamingChange]);
 
     const handleRegenerate = useCallback(() => {
-      if (modelSelectionSavingRef.current) {
+      if (modelSelectionSavingRef.current || workspacePermissionSavingRef.current) {
         return;
       }
       setSourcePanelSources([]);
@@ -339,11 +346,13 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
     ]);
 
     const userEdit = useUserMessageEdit({
-      canChat: canChat && !modelSelectionSaving,
-      disabledReason: modelSelectionSaving
-        ? t("chat.modelSelectorSwitching")
+      canChat: canChat && !modelSelectionSaving && !workspacePermissionSaving,
+      disabledReason: modelSelectionSaving || workspacePermissionSaving
+        ? modelSelectionSaving
+          ? t("chat.modelSelectorSwitching")
+          : t("chat.workspace.saving")
         : disabledReason,
-      loading: conversation.loading || modelSelectionSaving,
+      loading: conversation.loading || modelSelectionSaving || workspacePermissionSaving,
       activeStreamRef: conversation.activeStreamRef,
       messageList: conversation.messageList,
       messageListRef: conversation.messageListRef,
@@ -356,7 +365,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
 
     const sendMessage = useCallback(
       (params: Parameters<typeof conversation.sendMessage>[0]) => {
-        if (modelSelectionSavingRef.current) {
+        if (modelSelectionSavingRef.current || workspacePermissionSavingRef.current) {
           return Promise.resolve(false);
         }
         collapseAllThinking();
@@ -531,7 +540,8 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
                     conversation.loading ||
                     conversation.isStreaming ||
                     conversation.runtimeWaiting ||
-                    modelSelectionSaving
+                    modelSelectionSaving ||
+                    workspacePermissionSaving
                   }
                   continueLoading={conversation.mediaCapabilityChecking}
                   onContinue={() => {
@@ -549,7 +559,8 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
                 conversation.loading ||
                 conversation.isStreaming ||
                 conversation.runtimeWaiting ||
-                modelSelectionSaving
+                modelSelectionSaving ||
+                workspacePermissionSaving
               }
               stopGeneration={conversation.stopGeneration}
               renderText={renderText}
@@ -636,6 +647,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
               showModelSelector={showModelSelector}
               modelSelectorBusy={conversation.runtimeWaiting}
               onModelSelectionSavingChange={handleModelSelectionSavingChange}
+              onWorkspacePermissionSavingChange={handleWorkspacePermissionSavingChange}
               fixedThinkingDepth={fixedThinkingDepth}
               showPerformanceStats={developerModeActive && performanceStatsEnabled}
               performanceStats={performanceStats}

@@ -48,7 +48,6 @@ export default function LocalWorkspaceControl({ conversationId, configResetKey, 
   const [workspaceQuery, setWorkspaceQuery] = useState("");
   const [managedItems, setManagedItems] = useState<LocalWorkspaceView[]>([]);
   const [initializationError, setInitializationError] = useState(false);
-  const [retryKey, setRetryKey] = useState(0);
   const onSavingChangeRef = useRef(onSavingChange);
   onSavingChangeRef.current = onSavingChange;
   const [busy, setBusy] = useState(false);
@@ -63,6 +62,7 @@ export default function LocalWorkspaceControl({ conversationId, configResetKey, 
   const onChangeRef = useRef(onChange);
   const selectedRef = useRef<LocalWorkspaceView>();
   const requestRef = useRef(0);
+  const workspaceLoadRequestRef = useRef(0);
   const listRequestRef = useRef(0);
   const conversationRef = useRef(conversationId);
   const resetKeyRef = useRef(configResetKey);
@@ -75,8 +75,6 @@ export default function LocalWorkspaceControl({ conversationId, configResetKey, 
   useEffect(() => { selectedRef.current = selected; }, [selected]);
 
   useEffect(() => {
-    const request = requestRef.current;
-    let active = true;
     const hadSelection = Boolean(selectedRef.current);
     selectedRef.current = undefined;
     setItems([]);
@@ -98,30 +96,15 @@ export default function LocalWorkspaceControl({ conversationId, configResetKey, 
     revokeConfirmRef.current = undefined;
     if (hadSelection) onChangeRef.current(undefined, "ask_as_needed");
     if (runtime !== "local" && runtime !== "desktop") return;
-    void (conversationId
-      ? getConversationWorkspace(conversationId).then((workspace) => workspace ? [workspace] : [])
-      : listWorkspaces()
-    ).then((values) => {
-      if (!active || request !== requestRef.current) return;
-      setItems(values);
-      if (values.length === 1 && conversationId) {
-        selectedRef.current = values[0];
-        setSelected(values[0]);
-        setMode(values[0].permission_mode ?? "ask_as_needed");
-        onChangeRef.current(values[0].workspace_id, values[0].permission_mode ?? "ask_as_needed");
-      }
-    }).catch(() => {
-      if (active && request === requestRef.current) setInitializationError(true);
-    });
+    void refreshWorkspaceState();
     return () => {
-      active = false;
       onSavingChangeRef.current?.(false);
       requestRef.current += 1;
       listRequestRef.current += 1;
       revokeConfirmRef.current?.destroy();
       revokeConfirmRef.current = undefined;
     };
-  }, [conversationId, configResetKey, runtime, retryKey]);
+  }, [conversationId, configResetKey, runtime]);
 
   useEffect(() => {
     setApprovals(undefined);
@@ -177,30 +160,44 @@ export default function LocalWorkspaceControl({ conversationId, configResetKey, 
   };
   const refreshWorkspaceState = async () => {
     const request = requestRef.current;
-    if (conversationId) {
-      const workspace = await getConversationWorkspace(conversationId).catch(() => undefined);
-      if (request !== requestRef.current) return;
-      selectedRef.current = workspace;
-      setSelected(workspace);
-      setItems(workspace ? [workspace] : []);
-      const nextMode = workspace?.permission_mode ?? "ask_as_needed";
-      setMode(nextMode);
-      onChangeRef.current(workspace?.status === "active" ? workspace.workspace_id : undefined, nextMode);
-      return;
-    }
-    const values = await listWorkspaces().catch(() => []);
-    if (request !== requestRef.current) return;
-    setItems(values);
-    if (selectedRef.current && !values.some((item) => item.workspace_id === selectedRef.current?.workspace_id)) {
-      selectedRef.current = undefined;
-      setSelected(undefined);
-      onChangeRef.current(undefined, mode);
+    const loadRequest = ++workspaceLoadRequestRef.current;
+    try {
+      if (conversationId) {
+        const workspace = await getConversationWorkspace(conversationId);
+        if (request !== requestRef.current || loadRequest !== workspaceLoadRequestRef.current) return;
+        const hadSelection = Boolean(selectedRef.current);
+        setInitializationError(false);
+        selectedRef.current = workspace;
+        setSelected(workspace);
+        setItems(workspace ? [workspace] : []);
+        const nextMode = workspace?.permission_mode ?? "ask_as_needed";
+        setMode(nextMode);
+        if (workspace || hadSelection) {
+          onChangeRef.current(workspace?.status === "active" ? workspace.workspace_id : undefined, nextMode);
+        }
+        return;
+      }
+      const values = await listWorkspaces();
+      if (request !== requestRef.current || loadRequest !== workspaceLoadRequestRef.current) return;
+      setInitializationError(false);
+      setItems(values);
+      if (selectedRef.current && !values.some((item) => item.workspace_id === selectedRef.current?.workspace_id)) {
+        selectedRef.current = undefined;
+        setSelected(undefined);
+        onChangeRef.current(undefined, mode);
+      }
+    } catch {
+      if (request !== requestRef.current || loadRequest !== workspaceLoadRequestRef.current) return;
+      setInitializationError(true);
     }
   };
   const refreshOnConflict = (error: unknown) => {
     if (["binding_conflict", "workspace_not_found", "revoked", "path_unavailable"].includes(workspaceReason(error))) {
       void refreshWorkspaceState();
     }
+  };
+  const retryWorkspaceState = () => {
+    void refreshWorkspaceState();
   };
   const loadManagedItems = async (query = "") => {
     const request = ++listRequestRef.current;
@@ -271,6 +268,8 @@ export default function LocalWorkspaceControl({ conversationId, configResetKey, 
       try {
         const result = await updateWorkspacePermission(conversationId, next, selected.permission_version);
         if (request !== requestRef.current) return;
+        workspaceLoadRequestRef.current += 1;
+        setInitializationError(false);
         const workspace = { ...selected, permission_mode: result.permission_mode, permission_version: result.permission_version };
         selectedRef.current = workspace;
         setSelected(workspace);
@@ -365,7 +364,7 @@ export default function LocalWorkspaceControl({ conversationId, configResetKey, 
     <Space className="local-workspace-control" size={6} wrap>
       {initializationError && <Space>
         <span role="alert">{t("chat.workspace.loadFailed")}</span>
-        <Button size="small" onClick={() => setRetryKey((key) => key + 1)}>{t("chat.workspace.retry")}</Button>
+        <Button size="small" disabled={busy} onClick={retryWorkspaceState}>{t("chat.workspace.retry")}</Button>
       </Space>}
       {conversationId && selected && pendingApprovalCount > 0 && <Button size="small" onClick={() => setApprovalsOpen(conversationId)}>
         {t("chat.workspace.approval.open")} ({pendingApprovalCount})

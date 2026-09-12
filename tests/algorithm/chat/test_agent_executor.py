@@ -239,11 +239,10 @@ def test_stream_agent_clears_repeat_state_on_every_exit(monkeypatch, mode) -> No
     assert buffer.clear.call_count == 2
 
 
-def test_executor_supplies_guarded_skill_fs_before_skill_indexing(monkeypatch, tmp_path):
+def test_executor_keeps_the_configured_fs_for_skill_indexing(monkeypatch, tmp_path):
     import lazyllm
     from lazyllm.tools.agent.skill_manager import SkillManager
     from lazyllm.tools.fs.client import FS
-    from lazymind.chat.engine.tools.local_fs import WorkspaceSkillFS
     skill_dir = tmp_path / 'skills' / 'visible'
     skill_dir.mkdir(parents=True)
     (skill_dir / 'SKILL.md').write_text('---\nname: visible\ndescription: Executor fixture\n---\n# Visible')
@@ -252,7 +251,7 @@ def test_executor_supplies_guarded_skill_fs_before_skill_indexing(monkeypatch, t
         'user_id': 'u', 'conversation_id': 'c', '_core_workspace_context': {'workspace_id': 'bound'},
     })
     def construct(**kwargs):
-        assert type(kwargs['fs']) is WorkspaceSkillFS
+        assert kwargs['fs'] is FS
         skills = SkillManager(dir=kwargs['skills_dir'], skills=kwargs['skills'], fs=kwargs['fs'])
         assert 'visible' in skills.build_prompt()
         agent = MagicMock()
@@ -261,4 +260,4 @@ def test_executor_supplies_guarded_skill_fs_before_skill_indexing(monkeypatch, t
         return agent
     monkeypatch.setattr(executor_mod._agent_mod, 'ReactAgent', construct)
     agent = AgentExecutor().create_agent('llm', _plan(skills=['visible'], fs=FS, skills_dir=str(skill_dir.parent)))
-    assert set(agent._tools_manager._workspace_tools) == {'get_skill', 'read_reference'}
+    assert set(agent._tools_manager._workspace_tools) == {'get_skill', 'read_reference', 'run_script'}

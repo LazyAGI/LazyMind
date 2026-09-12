@@ -1591,8 +1591,9 @@ async def _handle_chat_impl(
     elif bound_local_workspace:
         workspace_policy = (
             'This turn is bound to a user-authorized local workspace. Use LocalFileToolkit for every '
-            'read, create, modify, append, delete, list, and search operation in that workspace; Core '
-            'enforces the selected permission mode and may wait for user approval. The generic chat '
+            'read, create, modify, append, delete, list, and search operation. Relative paths use the '
+            'workspace as the working directory; absolute paths outside it require user approval. '
+            'Core authorizes the whole tool batch before LocalFileToolkit performs local IO. The generic chat '
             'write_file tool is unavailable because it writes only to an internal artifact staging '
             'directory. Use save_chat_artifact only when the user also needs a downloadable chat artifact.'
         )

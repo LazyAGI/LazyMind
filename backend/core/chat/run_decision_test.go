@@ -1098,6 +1098,8 @@ func TestWorkspacePythonCoreHTTP(t *testing.T) {
 			router.HandleFunc("/internal/conversations/{conversation_id}/workspace-operations:prepare", localworkspace.InternalPrepareOperation).Methods("POST")
 			router.HandleFunc("/internal/conversations/{conversation_id}/workspace-operations/{operation_id}", localworkspace.InternalOperationStatus).Methods("GET")
 			router.HandleFunc("/internal/conversations/{conversation_id}/workspace-operations/{operation_id}:execute", localworkspace.InternalExecuteOperation).Methods("POST")
+			router.HandleFunc("/internal/conversations/{conversation_id}/workspace-operations/{operation_id}:claim", localworkspace.InternalClaimLocalOperation).Methods("POST")
+			router.HandleFunc("/internal/conversations/{conversation_id}/workspace-operations/{operation_id}:complete", localworkspace.InternalCompleteLocalOperation).Methods("POST")
 			router.HandleFunc("/conversations/{conversation_id}:workspace-approvals", localworkspace.ListOperationApprovals).Methods("GET")
 			router.HandleFunc("/conversations/{conversation_id}/workspace-approvals/{operation_id}:decide", localworkspace.DecideOperationHandler).Methods("POST")
 			server := httptest.NewServer(router)

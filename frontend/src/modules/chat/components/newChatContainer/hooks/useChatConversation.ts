@@ -93,6 +93,7 @@ interface UseChatConversationOptions {
   thinkingCollapseMap: Map<string, boolean>;
   getUserEdit: () => UserEditApi | undefined;
   isModelSelectionSaving?: () => boolean;
+  isWorkspacePermissionSaving?: () => boolean;
   concurrentStream?: boolean;
   onRequestPendingChange?: (pending: boolean) => void;
   t: (key: string) => string;
@@ -111,6 +112,7 @@ export function useChatConversation({
   thinkingCollapseMap,
   getUserEdit,
   isModelSelectionSaving,
+  isWorkspacePermissionSaving,
   concurrentStream = false,
   onRequestPendingChange,
   t,
@@ -1156,6 +1158,9 @@ export function useChatConversation({
     action: ChatConversationsRequestActionEnum,
     extras?: Record<string, unknown>,
   ) => {
+    if (isModelSelectionSaving?.() || isWorkspacePermissionSaving?.()) {
+      return false;
+    }
     let conversationId = currentConversationIdRef.current;
     if (!conversationId) {
       conversationId = `temp_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
@@ -1172,6 +1177,11 @@ export function useChatConversation({
           "service_unavailable",
         );
       }
+      onRequestPendingChange?.(false);
+      return false;
+    }
+
+    if (isModelSelectionSaving?.() || isWorkspacePermissionSaving?.()) {
       onRequestPendingChange?.(false);
       return false;
     }
@@ -1272,7 +1282,11 @@ export function useChatConversation({
     conversationId: string,
     isRecoveryCycle = false,
   ): Promise<boolean> {
-    if (!onOpenResumeSSE) {
+    if (
+      !onOpenResumeSSE ||
+      isModelSelectionSaving?.() ||
+      isWorkspacePermissionSaving?.()
+    ) {
       return false;
     }
     onRequestPendingChange?.(true);
@@ -1280,6 +1294,10 @@ export function useChatConversation({
       if (!isRecoveryCycle) {
         void handleStreamRecoveryFailure(conversationId, 0);
       }
+      onRequestPendingChange?.(false);
+      return false;
+    }
+    if (isModelSelectionSaving?.() || isWorkspacePermissionSaving?.()) {
       onRequestPendingChange?.(false);
       return false;
     }
@@ -1539,6 +1557,7 @@ export function useChatConversation({
       runtimeWaitInProgressRef.current ||
       loading ||
       isModelSelectionSaving?.() ||
+      isWorkspacePermissionSaving?.() ||
       !normalizedText
     ) {
       return false;
@@ -1881,7 +1900,8 @@ export function useChatConversation({
       loading ||
       runtimeWaitInProgressRef.current ||
       regenerateInProgressRef.current ||
-      isModelSelectionSaving?.()
+      isModelSelectionSaving?.() ||
+      isWorkspacePermissionSaving?.()
     ) {
       return false;
     }
@@ -1975,7 +1995,12 @@ export function useChatConversation({
 
   async function continueAfterMediaCapabilityConfiguration() {
     const dependency = mediaCapabilityDependency;
-    if (!dependency || mediaCapabilityCheckInProgressRef.current) return false;
+    if (
+      !dependency ||
+      mediaCapabilityCheckInProgressRef.current ||
+      isModelSelectionSaving?.() ||
+      isWorkspacePermissionSaving?.()
+    ) return false;
 
     mediaCapabilityCheckInProgressRef.current = true;
     setMediaCapabilityChecking(true);

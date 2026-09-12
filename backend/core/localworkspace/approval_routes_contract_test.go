@@ -17,6 +17,8 @@ func TestWorkspaceOperationRoutesAreRegisteredWithInternalAndUserAuth(t *testing
 		"workspace-operations:prepare",
 		"workspace-operations/{operation_id}",
 		"workspace-operations/{operation_id}:execute",
+		"workspace-operations/{operation_id}:claim",
+		"workspace-operations/{operation_id}:complete",
 		"workspace-approvals/{operation_id}:decide",
 	} {
 		if !strings.Contains(source, route) {

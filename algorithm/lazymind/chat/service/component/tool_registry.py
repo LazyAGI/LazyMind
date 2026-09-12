@@ -427,6 +427,32 @@ class ToolConfig:
                 )
 
 
+@dataclass(frozen=True)
+class WorkspaceToolAdmission:
+    """Explicit host-file capability attached to one exposed tool method.
+
+    The first four fields intentionally retain the existing tuple-compatible
+    admission shape used by the runtime. ``host_file_access`` is kept separate
+    from business authorization so a tool cannot gain host-path access merely
+    by appearing in an allowlist.
+    """
+
+    instance: Any
+    method: str
+    authorization: dict[str, str] | None
+    resolver: Callable | None
+    host_file_access: Literal['NONE', 'DECLARED', 'OPAQUE'] = 'NONE'
+
+    def __iter__(self):
+        yield self.instance
+        yield self.method
+        yield self.authorization
+        yield self.resolver
+
+    def __getitem__(self, index: int):
+        return (self.instance, self.method, self.authorization, self.resolver)[index]
+
+
 _WEB_SEARCH_ENGINE_INSTANCES: list = [
     GoogleSearch(),
     BingSearch(),
@@ -1014,7 +1040,6 @@ def workspace_tool_metadata(tools_info: dict[str, Any], configs: list[ToolConfig
     from lazyllm.common.registry import bind_to_instance
     from lazyllm.tools.agent.toolsManager import ToolGroup
     from lazyllm.tools.agent.skill_manager import SkillManager
-    from lazymind.chat.engine.tools.local_fs import WorkspaceSkillFS
     from lazymind.chat.engine.tools.local_file import workspace as artifacts
     from lazymind.chat.engine.tools import subagent_chat_tools as tasks
     from lazymind.chat.engine.subagent import tools as task_artifacts
@@ -1083,7 +1108,11 @@ def workspace_tool_metadata(tools_info: dict[str, Any], configs: list[ToolConfig
                     and safe_factory_value(value.__kwdefaults__, depth + 1)
                     and all(safe_factory_value(cell.cell_contents, depth + 1) for cell in value.__closure__ or ()))
         return False
-    skill_codes = {code for factory in (SkillManager._build_get_skill_tool, SkillManager._build_read_reference_tool)
+    skill_codes = {code for factory in (
+        SkillManager._build_get_skill_tool,
+        SkillManager._build_read_reference_tool,
+        SkillManager._build_run_script_tool,
+    )
                    for code in factory.__code__.co_consts if isinstance(code, types.CodeType)}
     binding_code = bind_to_instance(lambda: None).__code__
     registrations = []
@@ -1097,7 +1126,13 @@ def workspace_tool_metadata(tools_info: dict[str, Any], configs: list[ToolConfig
         if isinstance(instance, LocalFileToolkit):
             for target, authorization in registrations:
                 if instance is target and authorization and method in authorization:
-                    matched[name] = (instance, method, authorization, None)
+                    matched[name] = WorkspaceToolAdmission(
+                        instance,
+                        method,
+                        authorization,
+                        None,
+                        host_file_access=getattr(instance, '__host_file_access__', 'NONE'),
+                    )
                     break
             continue
         if (any(instance is target for target in scoped_instances)
@@ -1134,8 +1169,16 @@ def workspace_tool_metadata(tools_info: dict[str, Any], configs: list[ToolConfig
             original = cells['func'].cell_contents if 'func' in cells else None
         if getattr(original, '__code__', None) in skill_codes and type(skill_manager) is SkillManager:
             cells = dict(zip(original.__code__.co_freevars, original.__closure__ or ()))
-            if cells['self'].cell_contents is skill_manager and type(skill_manager._fs) is WorkspaceSkillFS:
-                matched[name] = (None, '', None, None)
+            if cells.get('self') and cells['self'].cell_contents is skill_manager:
+                # Skills are isolated by SkillManager's own validated relative paths and
+                # configured FS. They are not part of the user's workspace permission scope.
+                matched[name] = WorkspaceToolAdmission(
+                    None,
+                    '',
+                    None,
+                    None,
+                    host_file_access='OPAQUE' if name == 'run_script' else 'NONE',
+                )
             continue
         if original is task_artifacts.save_artifacts:
             matched[name] = (None, '', None, _workspace_artifact_arguments)
@@ -1146,7 +1189,14 @@ def workspace_tool_metadata(tools_info: dict[str, Any], configs: list[ToolConfig
         elif (any(original is item for item in audited)
                 or (getattr(original, '__code__', None) in tool_codes and safe_factory_value(original))):
             matched[name] = (instance, method, None, None)
-    return matched
+    # Keep one explicit capability record for every admitted exposed tool. The
+    # runtime still supports the historical tuple indexing/iteration contract,
+    # but no tool silently falls back to an unclassified host-file boundary.
+    return {
+        name: admission if isinstance(admission, WorkspaceToolAdmission)
+        else WorkspaceToolAdmission(*admission)
+        for name, admission in matched.items()
+    }
 
 
 def tool_is_active(cfg: ToolConfig) -> bool:

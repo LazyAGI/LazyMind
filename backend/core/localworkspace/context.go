@@ -97,10 +97,10 @@ func snapshot(workspace orm.LocalWorkspace, mode string, version int64) *Context
 
 func ModelNotice(snapshot ContextSnapshot) string {
 	data, _ := json.Marshal(map[string]any{"root": snapshot.Root,
-		"permission_mode": snapshot.PermissionMode, "permission_version": snapshot.PermissionVersion})
+		"permission_mode": snapshot.PermissionMode})
 	return "本任务的工作区：" + string(data) +
-		"\n相对路径以工作区为基准。使用 local_fs 读取、创建、修改、追加或删除文件；Core 负责权限检查，需要批准时工具会等待用户决定。" +
-		"\n只根据工具实际结果报告成功。拒绝、冲突或结果未知时说明原因，不使用其他工具绕过。工作区之外的目录不在本任务授权范围。"
+		"\n相对路径以工作区为基准。使用 local_fs 读取、创建、修改、追加或删除文件；Core 负责权限检查，需要批准时整批工具会等待用户决定，然后由本地文件工具执行。" +
+		"\n工作区外的绝对路径需要用户批准本次操作。只根据工具实际结果报告成功。拒绝、冲突或结果未知时说明原因，不使用其他工具绕过。"
 }
 
 func BuildRequestQuery(original string, snapshot *ContextSnapshot) string {

@@ -1653,7 +1653,7 @@ const zhCN = {
       everyAsk: "始终询问", askAsNeeded: "按需确认", allowAll: "全部允许", allowAllTitle: "要开启“全部允许”吗？",
       everyAskDescription: "修改工作区文件前始终询问", askAsNeededDescription: "只针对有风险的文件操作进行询问", allowAllDescription: "允许工作区内的全部文件操作",
       allowAllIntro: "开启后，LazyMind 可在不经你逐次确认的情况下执行以下工作区操作：", allowAllFiles: "文件和文件夹", allowAllFilesDescription: "读取、创建和修改授权目录中的文件", allowAllProtected: "受保护文件", allowAllProtectedDescription: "访问工作区内通常需要确认的敏感路径", allowAllDestructive: "删除和覆盖", allowAllDestructiveDescription: "删除、覆盖或替换工作区文件", allowAllConfirm: "确认开启",
-      allowAllRisk: "可能带来工作区内的数据丢失或敏感信息泄露风险。", savedNext: "已保存，下次执行生效", saveFailed: "保存失败",
+      allowAllRisk: "可能带来工作区内的数据丢失或敏感信息泄露风险。", savedNext: "已保存，下次执行生效", saving: "正在保存工作区权限…", saveFailed: "保存失败",
       revoke: "撤销", revokeTitle: "撤销目录授权？", revokeAffected: "将影响 {{count}} 个任务。", revoked: "授权已撤销",
       revokedStopFailed: "授权已撤销，部分任务停止请求失败", revokeFailed: "撤销失败",
       manage: "管理授权", manageTitle: "工作区授权", search: "搜索名称或路径", loadFailed: "加载授权失败", reauthorize: "重新授权",

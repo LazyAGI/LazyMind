@@ -1698,7 +1698,7 @@ const enUS = {
       everyAsk: "Always ask", askAsNeeded: "Confirm as needed", allowAll: "Allow all", allowAllTitle: "Turn on Allow all?",
       everyAskDescription: "Always ask before modifying workspace files", askAsNeededDescription: "Ask only for risky file operations", allowAllDescription: "Allow every file operation inside the workspace",
       allowAllIntro: "Once enabled, LazyMind may perform these workspace operations without asking each time:", allowAllFiles: "Files and folders", allowAllFilesDescription: "Read, create, and modify files inside the authorized folder", allowAllProtected: "Protected files", allowAllProtectedDescription: "Access sensitive paths inside the workspace that normally require confirmation", allowAllDestructive: "Delete and overwrite", allowAllDestructiveDescription: "Delete, overwrite, or replace workspace files", allowAllConfirm: "Turn on",
-      allowAllRisk: "This may cause data loss or expose sensitive information from the workspace.", savedNext: "Saved. Applies to the next run.", saveFailed: "Save failed",
+      allowAllRisk: "This may cause data loss or expose sensitive information from the workspace.", savedNext: "Saved. Applies to the next run.", saving: "Saving workspace permission…", saveFailed: "Save failed",
       revoke: "Revoke", revokeTitle: "Revoke folder access?", revokeAffected: "This affects {{count}} Work items.", revoked: "Access revoked",
       revokedStopFailed: "Access revoked, but some stop requests failed", revokeFailed: "Revoke failed",
       manage: "Manage access", manageTitle: "Workspace access", search: "Search name or path", loadFailed: "Failed to load access", reauthorize: "Reauthorize",

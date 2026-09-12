@@ -159,9 +159,6 @@ class AgentExecutor:
             'model_context_provider': notice_buffer.take,
         }
         kwargs.update({key: value for key, value in optional.items() if value is not None})
-        from lazymind.chat.engine.tools.local_fs import LocalFileToolkit, WorkspaceSkillFS
-        if options.skills and LocalFileToolkit._workspace_binding() is not None:
-            kwargs['fs'] = WorkspaceSkillFS(options.fs, options.skills_dir)
         tools = _sanitize_tools(_deduplicate_tools(plan.tools))
         ensure_lazyllm_tool_docs(tools)
         agent = _agent_mod.ReactAgent(
@@ -179,7 +176,8 @@ class AgentExecutor:
             notice_buffer=notice_buffer,
             authorization_gate=options.authorization_gate,
             workspace_tools=workspace_tool_metadata(
-                agent._tools_manager.tools_info, options.tool_configs, skill_manager=agent._skill_manager),
+                getattr(agent._tools_manager, 'tools_info', {}), options.tool_configs,
+                skill_manager=getattr(agent, '_skill_manager', None)),
         )
         agent._agent_lab_run_id = run_id
         agent._runtime_llm = llm
