@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { v4 as uuidv4 } from 'uuid';
 import { Modal, Input, Button, Select, Tooltip, message, Alert, Spin } from 'antd';
 import { FileTextOutlined, ThunderboltOutlined, BulbOutlined, QuestionCircleOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
@@ -11,16 +12,23 @@ import './index.scss';
 
 const WORKFLOW_ID_REGEX = /^[a-zA-Z][a-zA-Z0-9-_]*$/;
 
+function skillNameSlug(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48);
+}
+
 type CreateMode = 'blank' | 'ai' | 'skill';
 
 interface NewWorkflowModalProps {
   open: boolean;
   onCancel: () => void;
   onCreated: (draftId: string) => void;
+  initialSkill?: { id: string; name: string };
 }
 
-export default function NewWorkflowModal({ open, onCancel, onCreated }: NewWorkflowModalProps) {
+export default function NewWorkflowModal({ open, onCancel, onCreated, initialSkill }: NewWorkflowModalProps) {
   const { t } = useTranslation();
+  const session = useRef(0);
+  const skillRequest = useRef(0);
 
   const MODE_CARDS: { mode: CreateMode; icon: React.ReactNode; title: string; desc: string; badge?: string }[] = [
     {
@@ -66,58 +74,67 @@ export default function NewWorkflowModal({ open, onCancel, onCreated }: NewWorkf
   const skillSelected = mode === 'skill' && !!skillId;
   const showFields = mode === 'ai' || mode === 'blank' || skillSelected;
 
-  const reset = () => {
-    setMode('ai');
-    setSkillId(undefined);
-    setSkillName('');
-    setSkillOptions([]);
-    setWorkflowId('');
+  const reset = useCallback((preset?: NewWorkflowModalProps['initialSkill'], nextMode: CreateMode = 'ai') => {
+    session.current += 1;
+    skillRequest.current += 1;
+    setMode(preset ? 'skill' : nextMode);
+    setSkillId(preset?.id);
+    setSkillName(preset?.name ?? '');
+    setSkillOptions(preset ? [{ label: preset.name, value: preset.id }] : []);
+    setSkillLoading(false);
+    if (preset) {
+      const slug = skillNameSlug(preset.name) || 'workflow';
+      const prefix = /^[a-z]/.test(slug) ? slug : `workflow-${slug}`;
+      setWorkflowId(`${prefix}-${uuidv4().slice(0, 8)}`);
+    } else {
+      setWorkflowId('');
+    }
     setIdError('');
-    setName('');
+    setName(preset?.name ?? '');
     setDescription('');
+    setCreating(false);
     setPreflight(null);
     setPreflightError('');
     setPreflightLoading(false);
-  };
+  }, []);
 
-  // When a skill is selected, auto-fill workflowId with a slugified skill name
+  const initialSkillId = initialSkill?.id;
+  const initialSkillName = initialSkill?.name;
   useEffect(() => {
-    if (skillId && skillName) {
-      const slug = skillName
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-+|-+$/g, '')
-        .slice(0, 48);
-      setWorkflowId(slug || '');
-      setIdError('');
-    }
-  }, [skillId, skillName]);
+    reset(open && initialSkillId ? { id: initialSkillId, name: initialSkillName ?? '' } : undefined);
+    return () => {
+      session.current += 1;
+      skillRequest.current += 1;
+    };
+  }, [open, initialSkillId, initialSkillName, reset]);
 
   useEffect(() => {
-    if (mode !== 'skill' || !skillId) {
+    if (!open || mode !== 'skill' || !skillId) {
       setPreflight(null);
       setPreflightError('');
       setPreflightLoading(false);
       return;
     }
     let cancelled = false;
+    const activeSession = session.current;
+    const isCurrent = () => !cancelled && session.current === activeSession;
     setPreflightLoading(true);
     setPreflight(null);
     setPreflightError('');
     preflightSkillWorkflowConversion(skillId)
       .then((result) => {
-        if (!cancelled) setPreflight(result);
+        if (isCurrent()) setPreflight(result);
       })
       .catch(() => {
-        if (!cancelled) setPreflightError(t('selfEvolutionRun.newWorkflowPreflightFailed'));
+        if (isCurrent()) setPreflightError(t('selfEvolutionRun.newWorkflowPreflightFailed'));
       })
       .finally(() => {
-        if (!cancelled) setPreflightLoading(false);
+        if (isCurrent()) setPreflightLoading(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [mode, skillId, t]);
+  }, [open, mode, skillId, initialSkillId, initialSkillName, t]);
 
   const handleCancel = () => {
     reset();
@@ -125,14 +142,17 @@ export default function NewWorkflowModal({ open, onCancel, onCreated }: NewWorkf
   };
 
   const handleSkillSearch = async (keyword: string) => {
+    const requestId = ++skillRequest.current;
     setSkillLoading(true);
     try {
       const result = await listSkillAssetsPage({ keyword, page: 1, pageSize: 20, excludeBuiltinTemplates: true });
-      setSkillOptions(result.records.map((r) => ({ label: r.name, value: r.id })));
+      if (requestId === skillRequest.current) {
+        setSkillOptions(result.records.map((r) => ({ label: r.name, value: r.id })));
+      }
     } catch {
       // ignore
     } finally {
-      setSkillLoading(false);
+      if (requestId === skillRequest.current) setSkillLoading(false);
     }
   };
 
@@ -140,25 +160,20 @@ export default function NewWorkflowModal({ open, onCancel, onCreated }: NewWorkf
     setSkillId(val);
     const opt = Array.isArray(option) ? option[0] : option;
     setSkillName(opt?.label ?? '');
+    if (val && opt?.label) {
+      setWorkflowId(skillNameSlug(opt.label));
+      setIdError('');
+    }
     setPreflight(null);
     setPreflightError('');
   };
 
   const handleModeChange = (newMode: CreateMode) => {
-    setMode(newMode);
-    // Reset detail fields when switching mode
-    setSkillId(undefined);
-    setSkillName('');
-    setWorkflowId('');
-    setIdError('');
-    setName('');
-    setDescription('');
-    setPreflight(null);
-    setPreflightError('');
-    setPreflightLoading(false);
+    reset(undefined, newMode);
   };
 
   const handleCreate = async () => {
+    if (!open || creating) return;
     const trimmedId = workflowId.trim();
     if (!trimmedId) {
       setIdError(t('selfEvolutionRun.newWorkflowIdErrorEmpty'));
@@ -189,31 +204,37 @@ export default function NewWorkflowModal({ open, onCancel, onCreated }: NewWorkf
     const effectiveName = name.trim() || trimmedId;
 
     setCreating(true);
+    const activeSession = session.current;
+    const isCurrent = () => session.current === activeSession;
     let draftId: string | undefined;
     try {
       const draft = await createWorkflowDraft({ name: effectiveName, source_type: mode });
+      if (!isCurrent()) return;
       draftId = draft.id;
       const pm = { ...createEmptyWorkflowModel(), id: trimmedId, name: effectiveName };
       await updateWorkflowDraftContent(draft.id, {
         workflow_yaml_content: serializeWorkflowModel(pm),
         version: draft.version,
       });
+      if (!isCurrent()) return;
       if (mode === 'ai') {
         await aiGenerateWorkflowDraft(draft.id, { description: description.trim() });
       } else if (mode === 'skill' && skillId) {
         await aiGenerateWorkflowDraft(draft.id, { skill_id: skillId });
       }
+      if (!isCurrent()) return;
       draftId = undefined;
       reset();
       onCreated(draft.id);
     } catch {
+      if (!isCurrent()) return;
       if (draftId) {
         message.warning(t('selfEvolutionRun.workflowDetailFailedBanner'));
         onCreated(draftId);
         draftId = undefined;
       }
     } finally {
-      setCreating(false);
+      if (isCurrent()) setCreating(false);
     }
   };
 
@@ -269,7 +290,9 @@ export default function NewWorkflowModal({ open, onCancel, onCreated }: NewWorkf
               onChange={handleSkillChange}
               onSearch={handleSkillSearch}
               loading={skillLoading}
-              options={skillOptions}
+              options={skillId && !skillOptions.some((option) => option.value === skillId)
+                ? [{ label: skillName || skillId, value: skillId }, ...skillOptions]
+                : skillOptions}
               filterOption={false}
               style={{ width: '100%' }}
               onFocus={() => skillOptions.length === 0 && void handleSkillSearch('')}

@@ -1,0 +1,25 @@
+.workflow-linked-skill-modal {
+  .ant-descriptions-item-content {
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+  }
+
+  .workflow-linked-skill-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    min-height: 160px;
+  }
+
+  .workflow-linked-skill-workflows {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+
+    > div { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+    .ant-btn-link { height: auto; padding: 0; white-space: normal; text-align: left; }
+  }
+
+  .workflow-linked-skill-hint { color: #737373; font-size: 12px; }
+}
