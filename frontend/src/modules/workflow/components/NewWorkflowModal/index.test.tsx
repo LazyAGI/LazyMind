@@ -1,7 +1,8 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render as renderComponent, screen, waitFor, within } from '@testing-library/react';
+import type { ReactElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { load } from 'js-yaml';
-import { message } from 'antd';
+import { ConfigProvider, message } from 'antd';
 import NewWorkflowModal from './index';
 import type { SkillWorkflowPreflightResponse } from '../../workflowDraftApi';
 
@@ -10,21 +11,37 @@ const api = vi.hoisted(() => ({
   aiGenerateWorkflowDraft: vi.fn(),
   updateWorkflowDraftContent: vi.fn(),
   preflightSkillWorkflowConversion: vi.fn(),
+  listWorkflowDrafts: vi.fn(),
 }));
-const { listSkillAssetsPage, translate } = vi.hoisted(() => ({
+const { listSkillAssetsPage, navigate, translate } = vi.hoisted(() => ({
   listSkillAssetsPage: vi.fn(),
-  translate: (key: string) => key.replace('selfEvolutionRun.', ''),
+  navigate: vi.fn(),
+  translate: (key: string, values?: { name?: string; number?: number; count?: number }) => {
+    if (key === 'selfEvolutionRun.newWorkflowSuggestedName') return `${values?.name} Workflow`;
+    if (key === 'selfEvolutionRun.newWorkflowSuggestedNameCopy') return `（${values?.number}）`;
+    if (key === 'selfEvolutionRun.newWorkflowViewLinked') return `newWorkflowViewLinked ${values?.count}`;
+    return key.replace('selfEvolutionRun.', '');
+  },
 }));
 
 vi.mock('../../workflowDraftApi', () => api);
 vi.mock('@/modules/memory/skillApi', () => ({ listSkillAssetsPage }));
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: translate }) }));
+vi.mock('react-router-dom', async (importOriginal) => ({
+  ...await importOriginal<typeof import('react-router-dom')>(),
+  useNavigate: () => navigate,
+}));
 
 const initialSkill = { id: 'source_skill', name: 'Source Skill' };
 const getComputedStyle = window.getComputedStyle.bind(window);
 function preflight(skillId = initialSkill.id, status = 'pass'): SkillWorkflowPreflightResponse {
-  return { skill_id: skillId, skill_name: skillId, revision_id: 'test_revision', revision_no: 1, tree_hash: 'test_hash', status, summary: `${skillId}: ${status}`, checks: [], file_count: 1, skill_md_len: 30 };
+  return { skill_id: skillId, skill_name: skillId, revision_id: 'test_revision', revision_no: 1, tree_hash: 'test_hash', status, summary: `${skillId}: ${status}`, checks: [], file_count: 1, skill_md_len: 160 };
 }
+
+function linkedDraft(id: string, name: string, sourceSkillId = initialSkill.id) {
+  return { id, name, source_type: 'skill', source_skill_id: sourceSkillId, source_skill_name: sourceSkillId, published: false, published_workflow_ref: '', generate_status: 'done' };
+}
+type DraftList = { records: ReturnType<typeof linkedDraft>[]; total: number };
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -32,9 +49,21 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-function getId() { return screen.getByPlaceholderText('newWorkflowFieldWorkflowIdPlaceholder'); }
-function getName() { return screen.getByPlaceholderText('newWorkflowFieldDisplayNamePlaceholderWithId'); }
-function createButton() { return screen.getByRole('button', { name: 'newWorkflowCreateBtn' }); }
+function render(component: ReactElement) {
+  return renderComponent(component, {
+    // jsdom does not complete CSS animations; retain the real Modal and its visibility semantics.
+    wrapper: ({ children }) => <ConfigProvider theme={{ token: { motion: false } }}>{children}</ConfigProvider>,
+  });
+}
+
+function getId() {
+  const input = screen.getByPlaceholderText('newWorkflowFieldWorkflowIdPlaceholder');
+  const details = input.closest('details');
+  if (details && !details.open) fireEvent.click(details.querySelector('summary')!);
+  return input;
+}
+function getName() { return screen.getByRole('textbox', { name: /^newWorkflowFieldDisplayName/ }); }
+function createButton() { return screen.getByRole('button', { name: /^(newWorkflowCreateBtn|newWorkflowStartConversion|linkedSkillReconvert)$/ }); }
 
 beforeEach(() => {
   vi.spyOn(window, 'getComputedStyle').mockImplementation((element) => getComputedStyle(element));
@@ -43,26 +72,29 @@ beforeEach(() => {
   api.updateWorkflowDraftContent.mockReset().mockResolvedValue({});
   api.aiGenerateWorkflowDraft.mockReset().mockResolvedValue({});
   api.preflightSkillWorkflowConversion.mockReset().mockImplementation(async (id: string) => preflight(id));
+  api.listWorkflowDrafts.mockReset().mockResolvedValue({ records: [], total: 0 });
   listSkillAssetsPage.mockReset().mockResolvedValue({ records: [], total: 0 });
+  navigate.mockReset();
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 describe('NewWorkflowModal initial skill', () => {
-  it('suggests a stable new ID for each initial-skill session and only runs preflight', async () => {
+  it('suggests a stable new ID for each initial-skill session and only performs reads', async () => {
     const props = { onCancel: vi.fn(), onCreated: vi.fn() };
     const { rerender } = render(<NewWorkflowModal open initialSkill={initialSkill} {...props} />);
     expect(screen.getByText('Source Skill')).toBeInTheDocument();
     expect(screen.getByText('newWorkflowModeSkillTitle').closest('button')).toHaveClass('npm-mode-card--active');
     const suggestedId = (getId() as HTMLInputElement).value;
     expect(suggestedId).toMatch(/^source-skill-[a-f0-9]{8}$/);
-    expect(getName()).toHaveValue('Source Skill');
+    expect(getName()).toHaveValue('Source Skill Workflow');
     expect(screen.queryByPlaceholderText('newWorkflowAiPlaceholder')).not.toBeInTheDocument();
     await waitFor(() => expect(api.preflightSkillWorkflowConversion).toHaveBeenCalledWith('source_skill'));
+    expect(api.listWorkflowDrafts).toHaveBeenCalledWith(expect.objectContaining({ page: 1, pageSize: 100 }));
     rerender(<NewWorkflowModal open initialSkill={{ ...initialSkill }} {...props} />);
     expect(getId()).toHaveValue(suggestedId);
-    rerender(<NewWorkflowModal open initialSkill={{ id: 'chinese_skill', name: '中文技能' }} {...props} />);
+    rerender(<NewWorkflowModal open initialSkill={{ id: 'chinese_skill', name: '中文技能助手' }} {...props} />);
     expect((getId() as HTMLInputElement).value).toMatch(/^workflow-[a-f0-9]{8}$/);
-    expect(getName()).toHaveValue('中文技能');
+    expect(getName()).toHaveValue('中文技能 Workflow');
     await screen.findByText('chinese_skill: pass');
     rerender(<NewWorkflowModal open initialSkill={{ id: 'numeric_skill', name: '123 Tasks' }} {...props} />);
     expect((getId() as HTMLInputElement).value).toMatch(/^workflow-123-tasks-[a-f0-9]{8}$/);
@@ -78,6 +110,7 @@ describe('NewWorkflowModal initial skill', () => {
     expect(screen.getByText('newWorkflowModeAiTitle').closest('button')).toHaveClass('npm-mode-card--active');
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
     expect(api.preflightSkillWorkflowConversion).not.toHaveBeenCalled();
+    expect(api.listWorkflowDrafts).not.toHaveBeenCalled();
     fireEvent.change(getId(), { target: { value: 'new-ai-workflow' } });
     fireEvent.change(screen.getByPlaceholderText('newWorkflowAiPlaceholder'), { target: { value: 'Create a reporting workflow' } });
     fireEvent.click(createButton());
@@ -100,11 +133,11 @@ describe('NewWorkflowModal initial skill', () => {
     rerender(<NewWorkflowModal open initialSkill={initialSkill} onCancel={onCancel} onCreated={onCreated} />);
     expect((getId() as HTMLInputElement).value).toMatch(/^source-skill-[a-f0-9]{8}$/);
     expect(getId()).not.toHaveValue(originalSuggestedId);
-    expect(getName()).toHaveValue('Source Skill');
+    expect(getName()).toHaveValue('Source Skill Workflow');
 
     rerender(<NewWorkflowModal open initialSkill={{ id: 'another_skill', name: 'Another Skill' }} onCancel={onCancel} onCreated={onCreated} />);
     expect((getId() as HTMLInputElement).value).toMatch(/^another-skill-[a-f0-9]{8}$/);
-    expect(getName()).toHaveValue('Another Skill');
+    expect(getName()).toHaveValue('Another Skill Workflow');
     await screen.findByText('another_skill: pass');
     expect(api.createWorkflowDraft).not.toHaveBeenCalled();
   });
@@ -130,7 +163,7 @@ describe('NewWorkflowModal initial skill', () => {
     await screen.findByText('source_skill: pass');
     rerender(<NewWorkflowModal open initialSkill={{ id: initialSkill.id, name: 'Renamed Skill' }} {...props} />);
     expect((getId() as HTMLInputElement).value).toMatch(/^renamed-skill-[a-f0-9]{8}$/);
-    expect(getName()).toHaveValue('Renamed Skill');
+    expect(getName()).toHaveValue('Renamed Skill Workflow');
     await waitFor(() => expect(createButton()).toBeEnabled());
     expect(api.createWorkflowDraft).not.toHaveBeenCalled();
   });
@@ -153,7 +186,8 @@ describe('NewWorkflowModal initial skill', () => {
     expect(screen.getByText('New option')).toBeInTheDocument();
     expect(screen.getAllByText('New Skill').length).toBeGreaterThan(0);
     await act(async () => { fireEvent.click(screen.getByText('New option')); });
-    expect(getId()).toHaveValue('new-option');
+    expect((getId() as HTMLInputElement).value).toMatch(/^new-option-[a-f0-9]{8}$/);
+    expect(getName()).toHaveValue('New option Workflow');
   });
 
   it('blocks creation after a blocked preflight, including submission with Enter', async () => {
@@ -175,11 +209,11 @@ describe('NewWorkflowModal initial skill', () => {
     fireEvent.click(createButton());
     await waitFor(() => expect(onCreated).toHaveBeenCalledWith('new_draft'));
     expect(api.createWorkflowDraft).toHaveBeenCalledTimes(1);
-    expect(api.createWorkflowDraft).toHaveBeenCalledWith({ name: 'Source Skill', source_type: 'skill' });
+    expect(api.createWorkflowDraft).toHaveBeenCalledWith({ name: 'Source Skill Workflow', source_type: 'skill' });
     expect(api.updateWorkflowDraftContent).toHaveBeenCalledTimes(1);
     expect(api.updateWorkflowDraftContent).toHaveBeenCalledWith('new_draft', expect.objectContaining({ version: 4 }));
     const content = api.updateWorkflowDraftContent.mock.calls[0][1].workflow_yaml_content as string;
-    expect(load(content)).toMatchObject({ id: suggestedId, name: 'Source Skill' });
+    expect(load(content)).toMatchObject({ id: suggestedId, name: 'Source Skill Workflow' });
     expect(api.aiGenerateWorkflowDraft).toHaveBeenCalledWith('new_draft', { skill_id: 'source_skill' });
   });
 
@@ -218,6 +252,219 @@ describe('NewWorkflowModal initial skill', () => {
     expect(api.updateWorkflowDraftContent).not.toHaveBeenCalled();
     expect(api.aiGenerateWorkflowDraft).not.toHaveBeenCalled();
     expect(props.onCreated).not.toHaveBeenCalled();
-    expect(getName()).toHaveValue('New Skill');
+    expect(getName()).toHaveValue('New Skill Workflow');
+  });
+
+  it('keeps blank mode creating an empty draft with the workflow ID as its fallback name', async () => {
+    const onCreated = vi.fn();
+    render(<NewWorkflowModal open onCancel={vi.fn()} onCreated={onCreated} />);
+    fireEvent.click(screen.getByText('newWorkflowModeBlankTitle').closest('button')!);
+    fireEvent.change(getId(), { target: { value: 'blank-workflow' } });
+    fireEvent.click(screen.getByRole('button', { name: 'newWorkflowCreateBtn' }));
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith('new_draft'));
+    expect(api.createWorkflowDraft).toHaveBeenCalledWith({ name: 'blank-workflow', source_type: 'blank' });
+    expect(api.updateWorkflowDraftContent).toHaveBeenCalledWith('new_draft', expect.objectContaining({ version: 4 }));
+    expect(api.aiGenerateWorkflowDraft).not.toHaveBeenCalled();
+    expect(api.preflightSkillWorkflowConversion).not.toHaveBeenCalled();
+    expect(api.listWorkflowDrafts).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['empty', ''],
+    ['whitespace', '   '],
+    ['over 60 characters', 'A'.repeat(61)],
+  ])('blocks a Skill workflow name that is %s, including submission with Enter', async (_label, value) => {
+    render(<NewWorkflowModal open initialSkill={initialSkill} onCancel={vi.fn()} onCreated={vi.fn()} />);
+    await waitFor(() => expect(createButton()).toBeEnabled());
+    expect(getName()).toHaveAttribute('maxlength', '60');
+    fireEvent.change(getName(), { target: { value } });
+    expect(createButton()).toBeDisabled();
+    fireEvent.keyDown(getName(), { key: 'Enter', keyCode: 13 });
+    fireEvent.keyDown(getId(), { key: 'Enter', keyCode: 13 });
+    expect(api.createWorkflowDraft).not.toHaveBeenCalled();
+    expect(api.updateWorkflowDraftContent).not.toHaveBeenCalled();
+    expect(api.aiGenerateWorkflowDraft).not.toHaveBeenCalled();
+  });
+
+  it('shows an existing unpublished linked draft using its real draft ID and suggests a distinct name', async () => {
+    api.listWorkflowDrafts.mockResolvedValue({
+      records: [linkedDraft('actual_draft_uuid', 'Source Skill Workflow')], total: 1,
+    });
+    render(<NewWorkflowModal open initialSkill={initialSkill} onCancel={vi.fn()} onCreated={vi.fn()} />);
+    await screen.findByText('newWorkflowAlreadyLinked');
+    expect(getName()).toHaveValue('Source Skill Workflow（2）');
+    expect(screen.getByRole('link')).toHaveAttribute('href', '/memory-management/workflows/actual_draft_uuid');
+    expect(screen.getByRole('button', { name: 'linkedSkillReconvert' })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: 'newWorkflowStartConversion' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('link'));
+    expect(navigate).toHaveBeenCalledTimes(1);
+    expect(navigate).toHaveBeenCalledWith('/memory-management/workflows/actual_draft_uuid');
+    expect(api.createWorkflowDraft).not.toHaveBeenCalled();
+    expect(api.updateWorkflowDraftContent).not.toHaveBeenCalled();
+    expect(api.aiGenerateWorkflowDraft).not.toHaveBeenCalled();
+  });
+
+  it('waits for linked drafts before allowing conversion and uses the resolved duplicate-name suffix', async () => {
+    const pendingList = deferred<DraftList>();
+    api.listWorkflowDrafts.mockReturnValue(pendingList.promise);
+    const onCreated = vi.fn();
+    render(<NewWorkflowModal open initialSkill={initialSkill} onCancel={vi.fn()} onCreated={onCreated} />);
+    await screen.findByText('source_skill: pass');
+    expect(getName()).toHaveValue('Source Skill Workflow');
+    expect(createButton()).toBeDisabled();
+    fireEvent.keyDown(getName(), { key: 'Enter', keyCode: 13 });
+    fireEvent.keyDown(getId(), { key: 'Enter', keyCode: 13 });
+    expect(api.createWorkflowDraft).not.toHaveBeenCalled();
+    expect(api.updateWorkflowDraftContent).not.toHaveBeenCalled();
+    expect(api.aiGenerateWorkflowDraft).not.toHaveBeenCalled();
+
+    await act(async () => {
+      pendingList.resolve({ records: [linkedDraft('existing_draft', 'Source Skill Workflow')], total: 1 });
+    });
+    expect(getName()).toHaveValue('Source Skill Workflow（2）');
+    expect(createButton()).toBeEnabled();
+    fireEvent.click(createButton());
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith('new_draft'));
+    expect(api.createWorkflowDraft).toHaveBeenCalledTimes(1);
+    expect(api.createWorkflowDraft).toHaveBeenCalledWith({ name: 'Source Skill Workflow（2）', source_type: 'skill' });
+    const content = api.updateWorkflowDraftContent.mock.calls[0][1].workflow_yaml_content as string;
+    expect(load(content)).toMatchObject({ name: 'Source Skill Workflow（2）' });
+    expect(api.aiGenerateWorkflowDraft).toHaveBeenCalledWith('new_draft', { skill_id: 'source_skill' });
+  });
+
+  it('reads all draft pages before deriving linked workflows and duplicate-name suffixes', async () => {
+    const unrelated = Array.from({ length: 99 }, (_, index) => linkedDraft(`other_${index}`, `Other ${index}`, 'another_skill'));
+    api.listWorkflowDrafts.mockImplementation(({ page }: { page: number }) => Promise.resolve({
+      records: page === 1
+        ? [...unrelated, linkedDraft('linked_first', 'Source Skill Workflow')]
+        : [linkedDraft('linked_second', 'Source Skill Workflow（2）')],
+      total: 101,
+    }));
+    render(<NewWorkflowModal open initialSkill={initialSkill} onCancel={vi.fn()} onCreated={vi.fn()} />);
+    await waitFor(() => expect(getName()).toHaveValue('Source Skill Workflow（3）'));
+    expect(api.listWorkflowDrafts).toHaveBeenCalledTimes(2);
+    expect(api.listWorkflowDrafts).toHaveBeenNthCalledWith(1, { page: 1, pageSize: 100 });
+    expect(api.listWorkflowDrafts).toHaveBeenNthCalledWith(2, { page: 2, pageSize: 100 });
+    fireEvent.click(screen.getByRole('button', { name: 'newWorkflowViewLinked 2' }));
+    expect(screen.getByRole('link', { name: 'Source Skill Workflow' })).toHaveAttribute('href', '/memory-management/workflows/linked_first');
+    expect(screen.getByRole('link', { name: 'Source Skill Workflow（2）' })).toHaveAttribute('href', '/memory-management/workflows/linked_second');
+    expect(screen.queryByRole('link', { name: 'Other 0' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('link', { name: 'Source Skill Workflow（2）' }));
+    expect(navigate).toHaveBeenCalledTimes(1);
+    expect(navigate).toHaveBeenCalledWith('/memory-management/workflows/linked_second');
+    expect(api.createWorkflowDraft).not.toHaveBeenCalled();
+    expect(api.updateWorkflowDraftContent).not.toHaveBeenCalled();
+    expect(api.aiGenerateWorkflowDraft).not.toHaveBeenCalled();
+  });
+
+  it('ignores an old draft-list response after selecting another skill', async () => {
+    const previousList = deferred<DraftList>();
+    api.listWorkflowDrafts.mockReturnValueOnce(previousList.promise).mockResolvedValue({ records: [], total: 0 });
+    listSkillAssetsPage.mockResolvedValue({ records: [{ id: 'new_skill', name: 'New Skill' }], total: 1 });
+    const props = { onCancel: vi.fn(), onCreated: vi.fn() };
+    render(<NewWorkflowModal open initialSkill={initialSkill} {...props} />);
+    await waitFor(() => expect(api.listWorkflowDrafts).toHaveBeenCalledTimes(1));
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'New' } });
+    fireEvent.click(await screen.findByText('New Skill'));
+    await waitFor(() => expect(api.listWorkflowDrafts).toHaveBeenCalledTimes(2));
+    await screen.findByText('new_skill: pass');
+    await act(async () => {
+      previousList.resolve({ records: [linkedDraft('stale_draft', 'New Skill Workflow', 'new_skill')], total: 1 });
+    });
+    expect(getName()).toHaveValue('New Skill Workflow');
+    expect(screen.queryByText('newWorkflowAlreadyLinked')).not.toBeInTheDocument();
+    expect(screen.queryByRole('link')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'newWorkflowStartConversion' })).toBeEnabled();
+    expect(api.createWorkflowDraft).not.toHaveBeenCalled();
+  });
+
+  it('preserves a name the user entered while the draft list was loading', async () => {
+    const pendingList = deferred<DraftList>();
+    api.listWorkflowDrafts.mockReturnValue(pendingList.promise);
+    render(<NewWorkflowModal open initialSkill={initialSkill} onCancel={vi.fn()} onCreated={vi.fn()} />);
+    fireEvent.change(getName(), { target: { value: 'My chosen workflow' } });
+    await act(async () => {
+      pendingList.resolve({ records: [linkedDraft('linked_draft', 'Source Skill Workflow')], total: 1 });
+    });
+    await screen.findByText('newWorkflowAlreadyLinked');
+    expect(getName()).toHaveValue('My chosen workflow');
+    expect(api.createWorkflowDraft).not.toHaveBeenCalled();
+  });
+
+  it('shows real preflight warnings, toggles their details, and still permits conversion', async () => {
+    api.preflightSkillWorkflowConversion.mockResolvedValue({
+      ...preflight(initialSkill.id, 'warning'),
+      summary: 'A referenced resource needs attention.',
+      checks: [{
+        code: 'DEPENDENCY_RESOURCE_MISSING', severity: 'warning',
+        message: 'The referenced file is missing.', path: 'references/input.md',
+        suggestion: 'Review this reference after conversion.',
+      }],
+    });
+    const onCreated = vi.fn();
+    render(<NewWorkflowModal open initialSkill={initialSkill} onCancel={vi.fn()} onCreated={onCreated} />);
+    await waitFor(() => expect(screen.getByText('A referenced resource needs attention.')).toBeVisible());
+    expect(createButton()).toBeEnabled();
+    expect(screen.getByText('The referenced file is missing.')).toBeVisible();
+    expect(screen.queryByRole('region', { name: 'newWorkflowCheckDetails' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /^newWorkflowShowChecks/ }));
+    const details = screen.getByRole('region', { name: 'newWorkflowCheckDetails' });
+    expect(within(details).getByText('The referenced file is missing.')).toBeVisible();
+    expect(within(details).getByText('Review this reference after conversion.')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: /^newWorkflowHideChecks/ }));
+    expect(details).not.toBeVisible();
+    expect(screen.getByRole('button', { name: /^newWorkflowShowChecks/ })).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(createButton());
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith('new_draft'));
+    expect(api.aiGenerateWorkflowDraft).toHaveBeenCalledWith('new_draft', { skill_id: 'source_skill' });
+  });
+
+  it('keeps a blocked response with missing optional summary and count fields visible and non-submittable', async () => {
+    api.preflightSkillWorkflowConversion.mockResolvedValue({
+      skill_id: initialSkill.id, status: 'blocked',
+      checks: [{ code: 'SKILL_NOT_AVAILABLE', severity: 'error', message: 'The selected Skill is unavailable.', suggestion: 'Choose a published Skill.' }],
+    });
+    render(<NewWorkflowModal open initialSkill={initialSkill} onCancel={vi.fn()} onCreated={vi.fn()} />);
+    await waitFor(() => expect(screen.getByText('The selected Skill is unavailable.')).toBeVisible());
+    expect(createButton()).toBeDisabled();
+    fireEvent.keyDown(getName(), { key: 'Enter', keyCode: 13 });
+    expect(api.createWorkflowDraft).not.toHaveBeenCalled();
+    expect(api.aiGenerateWorkflowDraft).not.toHaveBeenCalled();
+  });
+
+  it('accepts a successful preflight with null checks and keeps details collapsed initially', async () => {
+    api.preflightSkillWorkflowConversion.mockResolvedValue({
+      ...preflight(), summary: 'The selected Skill is ready for conversion.', checks: null,
+    });
+    render(<NewWorkflowModal open initialSkill={initialSkill} onCancel={vi.fn()} onCreated={vi.fn()} />);
+    await waitFor(() => expect(screen.getByText('newWorkflowPreflightPassedTitle')).toBeVisible());
+    expect(screen.getByText('The selected Skill is ready for conversion.')).toBeVisible();
+    expect(screen.queryByRole('region', { name: 'newWorkflowCheckDetails' })).not.toBeInTheDocument();
+    const showChecks = screen.getByRole('button', { name: /^newWorkflowShowChecks/ });
+    expect(showChecks).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(showChecks);
+    expect(screen.getByRole('button', { name: /^newWorkflowHideChecks/ })).toHaveAttribute('aria-expanded', 'true');
+    const details = screen.getByRole('region', { name: 'newWorkflowCheckDetails' });
+    expect(within(details).getByText('The selected Skill is ready for conversion.')).toBeVisible();
+    expect(createButton()).toBeEnabled();
+  });
+
+  it('offers a retry after preflight transport failure while preserving the option to convert', async () => {
+    const retryResult = deferred<SkillWorkflowPreflightResponse>();
+    api.preflightSkillWorkflowConversion.mockRejectedValueOnce(new Error('test preflight unavailable')).mockReturnValueOnce(retryResult.promise);
+    const onCreated = vi.fn();
+    render(<NewWorkflowModal open initialSkill={initialSkill} onCancel={vi.fn()} onCreated={onCreated} />);
+    await screen.findByText('newWorkflowPreflightFailed');
+    expect(createButton()).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'common.retry' }));
+    await waitFor(() => expect(api.preflightSkillWorkflowConversion).toHaveBeenCalledTimes(2));
+    expect(api.preflightSkillWorkflowConversion).toHaveBeenNthCalledWith(2, initialSkill.id);
+    expect(createButton()).toBeDisabled();
+    await act(async () => { retryResult.resolve(preflight()); });
+    await screen.findByText('source_skill: pass');
+    expect(screen.queryByText('newWorkflowPreflightFailed')).not.toBeInTheDocument();
+    fireEvent.click(createButton());
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith('new_draft'));
+    expect(api.aiGenerateWorkflowDraft).toHaveBeenCalledWith('new_draft', { skill_id: 'source_skill' });
   });
 });
