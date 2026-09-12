@@ -24,7 +24,10 @@ import {
 import { streamManager } from "@/modules/chat/utils/StreamManager";
 import { ChatServiceApi } from "@/modules/chat/utils/request";
 import UIUtils from "@/modules/chat/utils/ui";
-import { emitConversationActivity } from "@/modules/chat/utils/conversationActivity";
+import {
+  emitConversationActivity,
+  emitConversationListRefresh,
+} from "@/modules/chat/utils/conversationActivity";
 import {
   buildChatMessageListFromHistory,
   getRegenerationInputs,
@@ -912,18 +915,11 @@ export function useChatConversation({
         }
       }
 
-      const firstUserMessage = messageListRef.current.find(
-        (item) => item.role === RoleTypes.USER,
-      );
-      const initialDisplayName = (
-        firstUserMessage?.display_delta ||
-        firstUserMessage?.delta ||
-        ""
-      ).trim();
-      emitConversationActivity({
-        conversationId: result.conversation_id,
-        displayName: initialDisplayName || undefined,
-      });
+      // Fetch persisted relation/group metadata before adding a new history row.
+      // An embedded sidechat remains ephemeral until the explicit retain action.
+      if (!concurrentStream) {
+        emitConversationListRefresh();
+      }
     }
 
     const runTerminal =
@@ -1676,7 +1672,7 @@ export function useChatConversation({
     if (currentId) {
       conversationMessagesCache.current.set(currentId, newMessageList);
       streamManager.saveMessageList(currentId, newMessageList);
-      if (!currentId.startsWith("temp_")) {
+      if (!concurrentStream && !currentId.startsWith("temp_")) {
         emitConversationActivity({ conversationId: currentId });
       }
     }

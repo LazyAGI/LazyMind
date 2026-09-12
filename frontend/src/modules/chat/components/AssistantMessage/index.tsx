@@ -831,8 +831,7 @@ const AssistantMessage = (props: any) => {
     const resolvedHistoryId = historyId || item?.history_id;
     if (
       resolvedHistoryId &&
-      feedbackState.localFeedbackHistoryId === resolvedHistoryId &&
-      feedbackState.localFeedbackType
+      feedbackState.localFeedbackHistoryId === resolvedHistoryId
     ) {
       return feedbackState.localFeedbackType;
     }
@@ -978,7 +977,11 @@ const AssistantMessage = (props: any) => {
       return;
     }
 
-    if (AgentAppsAuth.getUserInfo()?.chatUnlikeSwitch === true) {
+    if (
+      getCurrentFeedback(historyId) !==
+        FeedBackChatHistoryRequestTypeEnum.FeedBackTypeUnlike &&
+      AgentAppsAuth.getUserInfo()?.chatUnlikeSwitch === true
+    ) {
       dispatch({ type: "OPEN_MODAL", historyId: targetHistoryId });
       return;
     }

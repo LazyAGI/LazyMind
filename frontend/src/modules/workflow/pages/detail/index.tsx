@@ -8,6 +8,7 @@ import { getWorkflowDraft, listWorkflowDrafts, updateWorkflowDraftContent, aiGen
 import type { WorkflowDraftRecord } from '../../workflowDraftApi';
 import type { WorkflowVersionSummary, WorkflowVersionContent, WorkflowGenerationAnalysis, RepairPreview, WorkflowGenerateStartPhase } from '../../workflowDraftApi';
 import StateGraphEditor from '../../components/StateGraphEditor';
+import LinkedSkillButton from '../../components/LinkedSkillButton';
 import type { SavePayload, RepairTarget } from '../../components/StateGraphEditor';
 import type { ValidationError } from '../../components/StateGraphEditor/core/validator';
 import './index.scss';
@@ -276,7 +277,7 @@ export default function WorkflowDetailPage() {
   const saveConflictRef = useRef(false);
   // Persist artifacts panel open/close state across version remounts.
   // Default false — user explicitly opens the panel by clicking the 素材 button.
-  const showArtifactsRef = useRef(false);
+  const showArtifactsRef = useRef(true);
   const [loading, setLoading] = useState(true);
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [regenerateModalOpen, setRegenerateModalOpen] = useState(false);
@@ -1178,11 +1179,19 @@ export default function WorkflowDetailPage() {
               </Space>
             }
             topbarExtra={draft.published ? <Tag color="success" icon={<CheckCircleOutlined />}>线上：v{draft.current_revision_no}</Tag> : <Tag>未发布</Tag>}
-            topbarActions={viewingHistory ? (
-              <Button onClick={() => void handleEditHistoricalVersion()}>编辑此版本</Button>
-            ) : editorReady ? (
-              <Button type="primary" loading={publishing} disabled={hasAuthoritativeErrors || (draft.published && !draft.draft_dirty) || isRepairing || isStillGenerating} title={hasAuthoritativeErrors ? '请先修复 Go 校验返回的错误' : draft.published && !draft.draft_dirty ? '草稿相对于基础版本没有变更' : undefined} onClick={handlePublish}>发布插件</Button>
-            ) : null}
+            topbarActions={<>
+              <LinkedSkillButton
+                key={draft.id}
+                draft={draft}
+                conversionDisabled={viewingHistory || isRepairing || repairModalOpen || isStillGenerating}
+                onCreated={(draftId) => navigate(`/memory-management/workflows/${draftId}`)}
+              />
+              {viewingHistory ? (
+                <Button onClick={() => void handleEditHistoricalVersion()}>编辑此版本</Button>
+              ) : editorReady ? (
+                <Button type="primary" loading={publishing} disabled={hasAuthoritativeErrors || (draft.published && !draft.draft_dirty) || isRepairing || isStillGenerating} title={hasAuthoritativeErrors ? '请先修复 Go 校验返回的错误' : draft.published && !draft.draft_dirty ? '草稿相对于基础版本没有变更' : undefined} onClick={handlePublish}>发布插件</Button>
+              ) : null}
+            </>}
             onSave={handleSave}
             onValidate={handleValidate}
             onClose={() => navigate('/memory-management/workflows')}

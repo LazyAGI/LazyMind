@@ -38,6 +38,7 @@ interface KnowledgeSquareProps {
   domains: Record<KnowledgeSquareType, string[]>;
   loading: boolean;
   progressByItem: Record<string, number>;
+  activeJobTypeByItem: Record<string, "install" | "update">;
   onInstall: (item: OfficialKnowledgeBase) => void;
   onUpdate: (item: OfficialKnowledgeBase) => void;
   onOpen: (item: OfficialKnowledgeBase) => void;
@@ -72,6 +73,7 @@ export default function KnowledgeSquare({
   domains,
   loading,
   progressByItem,
+  activeJobTypeByItem,
   onInstall,
   onUpdate,
   onOpen,
@@ -86,6 +88,23 @@ export default function KnowledgeSquare({
   const [detailItem, setDetailItem] = useState<OfficialKnowledgeBase | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const detailRequestRef = useRef(0);
+  const detailActive = Boolean(
+    detailItem && (detailItem.active || progressByItem[detailItem.id] !== undefined),
+  );
+
+  const actionLabel = (item: OfficialKnowledgeBase, active: boolean) => {
+    if (active) {
+      const jobType = activeJobTypeByItem[item.id];
+      return t(
+        jobType === "update"
+          ? "knowledge.updating"
+          : jobType === "install"
+            ? "knowledge.installing"
+            : "knowledge.processing",
+      );
+    }
+    return item.installed ? t("knowledge.checkForUpdates") : t("common.install");
+  };
 
   const visibleItems = useMemo(
     () =>
@@ -302,9 +321,7 @@ export default function KnowledgeSquare({
                         else onInstall(item);
                       }}
                     >
-                      {item.installed
-                        ? t("knowledge.checkForUpdates")
-                        : t("common.install")}
+                      {actionLabel(item, active)}
                     </Button>
                   </div>
                 </div>
@@ -342,17 +359,15 @@ export default function KnowledgeSquare({
               ) : null}
               <Button
                 type="primary"
-                loading={detailItem.active}
-                disabled={detailItem.active}
+                loading={detailActive}
+                disabled={detailActive}
                 onClick={() => {
                   if (detailItem.installed) onUpdate(detailItem);
                   else onInstall(detailItem);
                   closeDetail();
                 }}
               >
-                {detailItem.installed
-                  ? t("knowledge.checkForUpdates")
-                  : t("common.install")}
+                {actionLabel(detailItem, detailActive)}
               </Button>
             </>
           ) : null

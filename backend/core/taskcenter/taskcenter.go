@@ -401,6 +401,9 @@ func resolveTaskForResponse(ctx context.Context, db *gorm.DB, t orm.TaskCenterTa
 		if session := workflowForTask(ctx, db, t); session != nil {
 			t.WorkflowSessionID = &session.ID
 			if status := workflowTaskStatus(session.Status); status != "" {
+				if status == "waiting" && WorkflowWasStopped(ctx, db, session.ID) {
+					status = "canceled"
+				}
 				t.Status = status
 				t.FinishedAt = nil
 				if isTerminal(status) {

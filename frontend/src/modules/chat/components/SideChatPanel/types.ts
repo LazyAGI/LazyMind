@@ -33,6 +33,8 @@ export interface SideChatConversation {
 
 export interface SideChatPanelProps {
   open: boolean;
+  /** Hide the drawer during navigation without discarding its conversation. */
+  visible?: boolean;
   parentConversationId: string;
   source?: SideChatSource | null;
   onClose: () => void;

@@ -156,9 +156,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
   const [conversationSettings, setConversationSettings] = useState<ConversationRuntimeSettings | undefined>(undefined);
   const [conversationRelation, setConversationRelation] =
     useState<ConversationRelation | null>(null);
-  const [sideChatOpen, setSideChatOpen] = useState(false);
-  const [sideChatSource, setSideChatSource] =
-    useState<SideChatSource | null>(null);
+  const [sideChats, setSideChats] = useState<Record<string, SideChatSource>>({});
   const [knowledgeRefreshKey, setKnowledgeRefreshKey] = useState(0);
   const [isTaskPanelCollapsed, setIsTaskPanelCollapsed] = useState(false);
   const [panelWidth, setPanelWidth] = useState<number>(0); // 0 = use CSS default
@@ -651,11 +649,6 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     );
   }, []);
 
-  useEffect(() => {
-    setSideChatOpen(false);
-    setSideChatSource(null);
-  }, [routeConversationId, sessionId]);
-
   const handleOpenSideChat = useCallback((source: SideChatSource = {}) => {
     if (!sessionIdRef.current) return;
     sideChatReturnFocusRef.current =
@@ -663,8 +656,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
       document.activeElement !== document.body
         ? document.activeElement
         : null;
-    setSideChatSource(source);
-    setSideChatOpen(true);
+    setSideChats((current) => ({ ...current, [sessionIdRef.current]: source }));
   }, []);
 
   const handleSideChatRetained = useCallback(
@@ -972,6 +964,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
           showSkillDeposit={!isRetainedSidechat}
           allowKnowledgeBaseSelection={!isRetainedSidechat}
           onOpenSideChat={canOpenSideChat ? handleOpenSideChat : undefined}
+          sourcePanelOverlay={Boolean(sideChats[sessionId]) && canOpenSideChat}
           setIsChatContent={setIsChatContent}
           chatConfig={chatConfig}
           setChatConfig={setChatConfig}
@@ -1008,28 +1001,31 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
           }
         />
       </div>
-      <SideChatPanel
-        open={sideChatOpen && canOpenSideChat}
-        parentConversationId={sessionId}
-        source={sideChatSource}
-        onClose={() => {
-          setSideChatOpen(false);
-          setSideChatSource(null);
-          if (!sideChatReturnFocusRef.current) {
-            requestAnimationFrame(() => chatRef.current?.focusInput?.());
-          }
-        }}
-        initialConversationSettings={conversationSettings}
-        hasWorkflowSession={hasWorkflowSession}
-        lockedWorkflowMode={workflowSession?.workflow_mode}
-        knowledgeRefreshKey={knowledgeRefreshKey}
-        onRetained={handleSideChatRetained}
-        canChat={canChat}
-        embeddingReady={embeddingReady}
-        multimodalEmbeddingReady={multimodalEmbeddingReady}
-        rerankReady={rerankReady}
-        returnFocusRef={sideChatReturnFocusRef}
-      />
+      {Object.entries(sideChats).map(([parentId, source]) => (
+        <SideChatPanel
+          key={parentId}
+          open
+          visible={parentId === sessionId && parentId === routeConversationId && canOpenSideChat}
+          parentConversationId={parentId}
+          source={source}
+          onClose={() => {
+            setSideChats((current) => {
+              const next = { ...current };
+              delete next[parentId];
+              return next;
+            });
+            if (!sideChatReturnFocusRef.current) {
+              requestAnimationFrame(() => chatRef.current?.focusInput?.());
+            }
+          }}
+          onRetained={handleSideChatRetained}
+          canChat={canChat}
+          embeddingReady={embeddingReady}
+          multimodalEmbeddingReady={multimodalEmbeddingReady}
+          rerankReady={rerankReady}
+          returnFocusRef={sideChatReturnFocusRef}
+        />
+      ))}
       {isTaskPanelRestoreVisible && (
         <button
           type="button"

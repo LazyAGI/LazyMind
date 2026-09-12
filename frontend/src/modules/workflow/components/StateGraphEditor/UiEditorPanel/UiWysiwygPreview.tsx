@@ -10,12 +10,12 @@ import WidgetPlaceholder from './WidgetPlaceholder';
 import UiEditorCanvas from './UiEditorCanvas';
 import './UiWysiwygPreview.scss';
 
-const LAYOUT_LABELS: Record<string, string> = {
-  vertical: 'Vertical',
-  list: 'Vertical (legacy)',
-  grid: 'Grid',
-  horizontal: 'Horizontal',
-  composite: 'Composite',
+const LAYOUT_LABEL_KEYS: Record<string, string> = {
+  vertical: 'selfEvolutionRun.wcpLayoutVertical',
+  list: 'selfEvolutionRun.uiLayoutLabelVerticalOld',
+  grid: 'selfEvolutionRun.uiLayoutLabelGrid',
+  horizontal: 'selfEvolutionRun.wcpLayoutHorizontal',
+  composite: 'selfEvolutionRun.uiLayoutLabelComposite',
 };
 
 function resolveSlot(
@@ -274,7 +274,7 @@ export default function UiWysiwygPreview({
 
   const layoutMenuItems = (['vertical', 'grid', 'horizontal', 'composite'] as const).map((l) => ({
     key: l,
-    label: LAYOUT_LABELS[l],
+    label: t(LAYOUT_LABEL_KEYS[l]),
     onClick: () => onLayoutChange?.(l),
   }));
 
@@ -358,7 +358,7 @@ export default function UiWysiwygPreview({
           {onLayoutChange && (
             <Dropdown menu={{ items: layoutMenuItems }} trigger={['click']}>
               <Button size="small" className="wywp-layout-btn">
-                {t('selfEvolutionRun.uiWysiwygLayoutLabel', { layout: LAYOUT_LABELS[activeLayout ?? 'vertical'] })}
+                {t('selfEvolutionRun.uiWysiwygLayoutLabel', { layout: t(LAYOUT_LABEL_KEYS[activeLayout ?? 'vertical']) })}
               </Button>
             </Dropdown>
           )}

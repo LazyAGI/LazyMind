@@ -588,7 +588,9 @@ func manualSchemas() map[string]any {
 		"ConversationSwitchStatusResponse": obj(prop("status", intSchema())),
 		"ConversationChatStatusResponse":   obj(prop("is_generating", boolSchema())),
 		"ConversationRunningStatusItem": objReq([]string{"conversation_id", "status"},
-			prop("conversation_id", strSchema()), prop("status", enumStringSchema("running", "idle", "unknown"))),
+			prop("conversation_id", strSchema()), prop("status", enumStringSchema("running", "idle", "unknown")),
+			prop("terminal_status", enumStringSchema("completed", "failed", "canceled")),
+			prop("terminal_version", strSchema())),
 		"ConversationBatchStatusRequest": objReq([]string{"conversation_ids"}, prop("conversation_ids", map[string]any{
 			"type": "array", "minItems": 1, "maxItems": 100, "items": map[string]any{"type": "string", "minLength": 1, "maxLength": 64},
 		})),

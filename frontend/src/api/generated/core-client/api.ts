@@ -135,7 +135,7 @@ export const AgentRouterActionRequestActionEnum = {
     Healthcheck: 'healthcheck',
     Start: 'start',
     Restart: 'restart',
-    Stop: 'stop',
+    Stop: 'stop'
 } as const;
 
 export type AgentRouterActionRequestActionEnum = typeof AgentRouterActionRequestActionEnum[keyof typeof AgentRouterActionRequestActionEnum];
@@ -151,14 +151,14 @@ export const AgentRouterActionResponseActionEnum = {
     Healthcheck: 'healthcheck',
     Start: 'start',
     Restart: 'restart',
-    Stop: 'stop',
+    Stop: 'stop'
 } as const;
 
 export type AgentRouterActionResponseActionEnum = typeof AgentRouterActionResponseActionEnum[keyof typeof AgentRouterActionResponseActionEnum];
 export const AgentRouterActionResponseStatusEnum = {
     Passed: 'passed',
     Failed: 'failed',
-    Stopped: 'stopped',
+    Stopped: 'stopped'
 } as const;
 
 export type AgentRouterActionResponseStatusEnum = typeof AgentRouterActionResponseStatusEnum[keyof typeof AgentRouterActionResponseStatusEnum];
@@ -177,7 +177,7 @@ export const AgentRouterAlgorithmStatusEnum = {
     Starting: 'starting',
     Active: 'active',
     Disabled: 'disabled',
-    Missing: 'missing',
+    Missing: 'missing'
 } as const;
 
 export type AgentRouterAlgorithmStatusEnum = typeof AgentRouterAlgorithmStatusEnum[keyof typeof AgentRouterAlgorithmStatusEnum];
@@ -198,12 +198,12 @@ export interface AgentRouterDeleteResponse {
 
 export const AgentRouterDeleteResponseRouterStatusEnum = {
     Missing: 'missing',
-    Disabled: 'disabled',
+    Disabled: 'disabled'
 } as const;
 
 export type AgentRouterDeleteResponseRouterStatusEnum = typeof AgentRouterDeleteResponseRouterStatusEnum[keyof typeof AgentRouterDeleteResponseRouterStatusEnum];
 export const AgentRouterDeleteResponseStatusEnum = {
-    Deleted: 'deleted',
+    Deleted: 'deleted'
 } as const;
 
 export type AgentRouterDeleteResponseStatusEnum = typeof AgentRouterDeleteResponseStatusEnum[keyof typeof AgentRouterDeleteResponseStatusEnum];
@@ -211,7 +211,7 @@ export const AgentRouterDeleteResponseWorkspaceEnum = {
     Deleted: 'deleted',
     Missing: 'missing',
     RetainedExternal: 'retained_external',
-    RetainedShared: 'retained_shared',
+    RetainedShared: 'retained_shared'
 } as const;
 
 export type AgentRouterDeleteResponseWorkspaceEnum = typeof AgentRouterDeleteResponseWorkspaceEnum[keyof typeof AgentRouterDeleteResponseWorkspaceEnum];
@@ -234,14 +234,14 @@ export const AgentRouterHealthAlgorithmStatusEnum = {
     Starting: 'starting',
     Active: 'active',
     Disabled: 'disabled',
-    Missing: 'missing',
+    Missing: 'missing'
 } as const;
 
 export type AgentRouterHealthAlgorithmStatusEnum = typeof AgentRouterHealthAlgorithmStatusEnum[keyof typeof AgentRouterHealthAlgorithmStatusEnum];
 export const AgentRouterHealthStatusEnum = {
     Passed: 'passed',
     Failed: 'failed',
-    Stopped: 'stopped',
+    Stopped: 'stopped'
 } as const;
 
 export type AgentRouterHealthStatusEnum = typeof AgentRouterHealthStatusEnum[keyof typeof AgentRouterHealthStatusEnum];
@@ -262,7 +262,7 @@ export interface AgentRouterMutationResponse {
 }
 
 export const AgentRouterMutationResponseStatusEnum = {
-    Cleared: 'cleared',
+    Cleared: 'cleared'
 } as const;
 
 export type AgentRouterMutationResponseStatusEnum = typeof AgentRouterMutationResponseStatusEnum[keyof typeof AgentRouterMutationResponseStatusEnum];
@@ -290,7 +290,7 @@ export interface AgentRouterStatusResponse {
 }
 
 export const AgentRouterStatusResponseStatusEnum = {
-    Ok: 'ok',
+    Ok: 'ok'
 } as const;
 
 export type AgentRouterStatusResponseStatusEnum = typeof AgentRouterStatusResponseStatusEnum[keyof typeof AgentRouterStatusResponseStatusEnum];
@@ -354,7 +354,7 @@ export const ApiCoreConversationsMetadataBackfillPostRequestActionEnum = {
     Start: 'start',
     Pause: 'pause',
     Resume: 'resume',
-    Retry: 'retry',
+    Retry: 'retry'
 } as const;
 
 export type ApiCoreConversationsMetadataBackfillPostRequestActionEnum = typeof ApiCoreConversationsMetadataBackfillPostRequestActionEnum[keyof typeof ApiCoreConversationsMetadataBackfillPostRequestActionEnum];
@@ -534,6 +534,7 @@ export interface CanResult {
     'allowed'?: boolean;
 }
 export interface ChatChunkResponse {
+    'capability_dependency'?: object;
     'conversation_id'?: string;
     'delta'?: string;
     'delta_mode'?: ChatChunkResponseDeltaModeEnum;
@@ -552,7 +553,7 @@ export interface ChatChunkResponse {
 
 export const ChatChunkResponseDeltaModeEnum = {
     Append: 'append',
-    Replace: 'replace',
+    Replace: 'replace'
 } as const;
 
 export type ChatChunkResponseDeltaModeEnum = typeof ChatChunkResponseDeltaModeEnum[keyof typeof ChatChunkResponseDeltaModeEnum];
@@ -568,13 +569,13 @@ export const ChatConversationDefaultsOpenAPIChatExecutorEnum = {
     Lazymind: 'lazymind',
     Codex: 'codex',
     Cursor: 'cursor',
-    Workbuddy: 'workbuddy',
+    Workbuddy: 'workbuddy'
 } as const;
 
 export type ChatConversationDefaultsOpenAPIChatExecutorEnum = typeof ChatConversationDefaultsOpenAPIChatExecutorEnum[keyof typeof ChatConversationDefaultsOpenAPIChatExecutorEnum];
 export const ChatConversationDefaultsOpenAPIWorkflowModeEnum = {
     Auto: 'auto',
-    Dynamic: 'dynamic',
+    Dynamic: 'dynamic'
 } as const;
 
 export type ChatConversationDefaultsOpenAPIWorkflowModeEnum = typeof ChatConversationDefaultsOpenAPIWorkflowModeEnum[keyof typeof ChatConversationDefaultsOpenAPIWorkflowModeEnum];
@@ -590,13 +591,13 @@ export const ChatConversationDefaultsPatchOpenAPIRequestChatExecutorEnum = {
     Lazymind: 'lazymind',
     Codex: 'codex',
     Cursor: 'cursor',
-    Workbuddy: 'workbuddy',
+    Workbuddy: 'workbuddy'
 } as const;
 
 export type ChatConversationDefaultsPatchOpenAPIRequestChatExecutorEnum = typeof ChatConversationDefaultsPatchOpenAPIRequestChatExecutorEnum[keyof typeof ChatConversationDefaultsPatchOpenAPIRequestChatExecutorEnum];
 export const ChatConversationDefaultsPatchOpenAPIRequestWorkflowModeEnum = {
     Auto: 'auto',
-    Dynamic: 'dynamic',
+    Dynamic: 'dynamic'
 } as const;
 
 export type ChatConversationDefaultsPatchOpenAPIRequestWorkflowModeEnum = typeof ChatConversationDefaultsPatchOpenAPIRequestWorkflowModeEnum[keyof typeof ChatConversationDefaultsPatchOpenAPIRequestWorkflowModeEnum];
@@ -610,7 +611,7 @@ export const ChatEntryDefaultsOpenAPIThinkingDepthEnum = {
     Low: 'low',
     Medium: 'medium',
     High: 'high',
-    Max: 'max',
+    Max: 'max'
 } as const;
 
 export type ChatEntryDefaultsOpenAPIThinkingDepthEnum = typeof ChatEntryDefaultsOpenAPIThinkingDepthEnum[keyof typeof ChatEntryDefaultsOpenAPIThinkingDepthEnum];
@@ -624,7 +625,7 @@ export const ChatEntryDefaultsPatchOpenAPIRequestThinkingDepthEnum = {
     Low: 'low',
     Medium: 'medium',
     High: 'high',
-    Max: 'max',
+    Max: 'max'
 } as const;
 
 export type ChatEntryDefaultsPatchOpenAPIRequestThinkingDepthEnum = typeof ChatEntryDefaultsPatchOpenAPIRequestThinkingDepthEnum[keyof typeof ChatEntryDefaultsPatchOpenAPIRequestThinkingDepthEnum];
@@ -645,13 +646,13 @@ export interface ChatModelListOpenAPIItem {
 
 export const ChatModelListOpenAPIItemAvailabilityEnum = {
     Available: 'available',
-    Unavailable: 'unavailable',
+    Unavailable: 'unavailable'
 } as const;
 
 export type ChatModelListOpenAPIItemAvailabilityEnum = typeof ChatModelListOpenAPIItemAvailabilityEnum[keyof typeof ChatModelListOpenAPIItemAvailabilityEnum];
 export const ChatModelListOpenAPIItemSourceEnum = {
     Own: 'own',
-    Shared: 'shared',
+    Shared: 'shared'
 } as const;
 
 export type ChatModelListOpenAPIItemSourceEnum = typeof ChatModelListOpenAPIItemSourceEnum[keyof typeof ChatModelListOpenAPIItemSourceEnum];
@@ -665,7 +666,7 @@ export interface ChatModelProviderOpenAPIItem {
 
 export const ChatModelProviderOpenAPIItemSourceEnum = {
     Own: 'own',
-    Shared: 'shared',
+    Shared: 'shared'
 } as const;
 
 export type ChatModelProviderOpenAPIItemSourceEnum = typeof ChatModelProviderOpenAPIItemSourceEnum[keyof typeof ChatModelProviderOpenAPIItemSourceEnum];
@@ -685,7 +686,7 @@ export interface ChatModelRoute {
 
 export const ChatModelRouteModeEnum = {
     Auto: 'auto',
-    Fixed: 'fixed',
+    Fixed: 'fixed'
 } as const;
 
 export type ChatModelRouteModeEnum = typeof ChatModelRouteModeEnum[keyof typeof ChatModelRouteModeEnum];
@@ -698,13 +699,13 @@ export const ChatModelRouteReasonEnum = {
     RetrySameModel: 'retry_same_model',
     Fixed: 'fixed',
     InitialSelection: 'initial_selection',
-    ModelUnavailable: 'model_unavailable',
+    ModelUnavailable: 'model_unavailable'
 } as const;
 
 export type ChatModelRouteReasonEnum = typeof ChatModelRouteReasonEnum[keyof typeof ChatModelRouteReasonEnum];
 export const ChatModelRouteSourceEnum = {
     Own: 'own',
-    Shared: 'shared',
+    Shared: 'shared'
 } as const;
 
 export type ChatModelRouteSourceEnum = typeof ChatModelRouteSourceEnum[keyof typeof ChatModelRouteSourceEnum];
@@ -714,7 +715,7 @@ export const ChatModelRouteTaskClassEnum = {
     Complex: 'complex',
     LongContext: 'long_context',
     Fixed: 'fixed',
-    Auto: 'auto',
+    Auto: 'auto'
 } as const;
 
 export type ChatModelRouteTaskClassEnum = typeof ChatModelRouteTaskClassEnum[keyof typeof ChatModelRouteTaskClassEnum];
@@ -734,19 +735,19 @@ export interface ChatModelSelectionOpenAPI {
 
 export const ChatModelSelectionOpenAPIAvailabilityEnum = {
     Available: 'available',
-    Unavailable: 'unavailable',
+    Unavailable: 'unavailable'
 } as const;
 
 export type ChatModelSelectionOpenAPIAvailabilityEnum = typeof ChatModelSelectionOpenAPIAvailabilityEnum[keyof typeof ChatModelSelectionOpenAPIAvailabilityEnum];
 export const ChatModelSelectionOpenAPIModeEnum = {
     Fixed: 'fixed',
-    Auto: 'auto',
+    Auto: 'auto'
 } as const;
 
 export type ChatModelSelectionOpenAPIModeEnum = typeof ChatModelSelectionOpenAPIModeEnum[keyof typeof ChatModelSelectionOpenAPIModeEnum];
 export const ChatModelSelectionOpenAPISourceEnum = {
     Own: 'own',
-    Shared: 'shared',
+    Shared: 'shared'
 } as const;
 
 export type ChatModelSelectionOpenAPISourceEnum = typeof ChatModelSelectionOpenAPISourceEnum[keyof typeof ChatModelSelectionOpenAPISourceEnum];
@@ -763,7 +764,7 @@ export interface ChatModelsOpenAPIResponse {
 export const ChatModelsOpenAPIResponseSwitchBlockedReasonEnum = {
     Generating: 'generating',
     WorkflowRunning: 'workflow_running',
-    BackgroundTaskRunning: 'background_task_running',
+    BackgroundTaskRunning: 'background_task_running'
 } as const;
 
 export type ChatModelsOpenAPIResponseSwitchBlockedReasonEnum = typeof ChatModelsOpenAPIResponseSwitchBlockedReasonEnum[keyof typeof ChatModelsOpenAPIResponseSwitchBlockedReasonEnum];
@@ -922,7 +923,7 @@ export const ConversationDetailItemAssistantEnum = {
     Lazymind: 'lazymind',
     Codex: 'codex',
     Cursor: 'cursor',
-    Workbuddy: 'workbuddy',
+    Workbuddy: 'workbuddy'
 } as const;
 
 export type ConversationDetailItemAssistantEnum = typeof ConversationDetailItemAssistantEnum[keyof typeof ConversationDetailItemAssistantEnum];
@@ -930,14 +931,14 @@ export const ConversationDetailItemChatExecutorEnum = {
     Lazymind: 'lazymind',
     Codex: 'codex',
     Cursor: 'cursor',
-    Workbuddy: 'workbuddy',
+    Workbuddy: 'workbuddy'
 } as const;
 
 export type ConversationDetailItemChatExecutorEnum = typeof ConversationDetailItemChatExecutorEnum[keyof typeof ConversationDetailItemChatExecutorEnum];
 export const ConversationDetailItemRelationTypeEnum = {
     Empty: '',
     Sidechat: 'sidechat',
-    Fork: 'fork',
+    Fork: 'fork'
 } as const;
 
 export type ConversationDetailItemRelationTypeEnum = typeof ConversationDetailItemRelationTypeEnum[keyof typeof ConversationDetailItemRelationTypeEnum];
@@ -945,7 +946,7 @@ export const ConversationDetailItemThinkingDepthEnum = {
     Low: 'low',
     Medium: 'medium',
     High: 'high',
-    Max: 'max',
+    Max: 'max'
 } as const;
 
 export type ConversationDetailItemThinkingDepthEnum = typeof ConversationDetailItemThinkingDepthEnum[keyof typeof ConversationDetailItemThinkingDepthEnum];
@@ -990,7 +991,7 @@ export const ConversationForkOriginSourceStatusEnum = {
     Changed: 'changed',
     Deleted: 'deleted',
     NodeDeleted: 'node_deleted',
-    Unavailable: 'unavailable',
+    Unavailable: 'unavailable'
 } as const;
 
 export type ConversationForkOriginSourceStatusEnum = typeof ConversationForkOriginSourceStatusEnum[keyof typeof ConversationForkOriginSourceStatusEnum];
@@ -1146,7 +1147,7 @@ export const ConversationItemAssistantEnum = {
     Lazymind: 'lazymind',
     Codex: 'codex',
     Cursor: 'cursor',
-    Workbuddy: 'workbuddy',
+    Workbuddy: 'workbuddy'
 } as const;
 
 export type ConversationItemAssistantEnum = typeof ConversationItemAssistantEnum[keyof typeof ConversationItemAssistantEnum];
@@ -1154,14 +1155,14 @@ export const ConversationItemChatExecutorEnum = {
     Lazymind: 'lazymind',
     Codex: 'codex',
     Cursor: 'cursor',
-    Workbuddy: 'workbuddy',
+    Workbuddy: 'workbuddy'
 } as const;
 
 export type ConversationItemChatExecutorEnum = typeof ConversationItemChatExecutorEnum[keyof typeof ConversationItemChatExecutorEnum];
 export const ConversationItemRelationTypeEnum = {
     Empty: '',
     Sidechat: 'sidechat',
-    Fork: 'fork',
+    Fork: 'fork'
 } as const;
 
 export type ConversationItemRelationTypeEnum = typeof ConversationItemRelationTypeEnum[keyof typeof ConversationItemRelationTypeEnum];
@@ -1169,7 +1170,7 @@ export const ConversationItemThinkingDepthEnum = {
     Low: 'low',
     Medium: 'medium',
     High: 'high',
-    Max: 'max',
+    Max: 'max'
 } as const;
 
 export type ConversationItemThinkingDepthEnum = typeof ConversationItemThinkingDepthEnum[keyof typeof ConversationItemThinkingDepthEnum];
@@ -1200,7 +1201,7 @@ export const ConversationOpeningStateBatchStatusEnum = {
     Running: 'running',
     Paused: 'paused',
     Done: 'done',
-    Failed: 'failed',
+    Failed: 'failed'
 } as const;
 
 export type ConversationOpeningStateBatchStatusEnum = typeof ConversationOpeningStateBatchStatusEnum[keyof typeof ConversationOpeningStateBatchStatusEnum];
@@ -1361,7 +1362,7 @@ export interface ConversationRecoveryItem {
 
 export const ConversationRecoveryItemKindEnum = {
     Dialog: 'dialog',
-    Task: 'task',
+    Task: 'task'
 } as const;
 
 export type ConversationRecoveryItemKindEnum = typeof ConversationRecoveryItemKindEnum[keyof typeof ConversationRecoveryItemKindEnum];
@@ -1379,7 +1380,7 @@ export interface ConversationReorderRequest {
 
 export const ConversationReorderRequestPositionEnum = {
     Before: 'before',
-    After: 'after',
+    After: 'after'
 } as const;
 
 export type ConversationReorderRequestPositionEnum = typeof ConversationReorderRequestPositionEnum[keyof typeof ConversationReorderRequestPositionEnum];
@@ -1391,15 +1392,24 @@ export interface ConversationResumeRequest {
 export interface ConversationRunningStatusItem {
     'conversation_id': string;
     'status': ConversationRunningStatusItemStatusEnum;
+    'terminal_status'?: ConversationRunningStatusItemTerminalStatusEnum;
+    'terminal_version'?: string;
 }
 
 export const ConversationRunningStatusItemStatusEnum = {
     Running: 'running',
     Idle: 'idle',
-    Unknown: 'unknown',
+    Unknown: 'unknown'
 } as const;
 
 export type ConversationRunningStatusItemStatusEnum = typeof ConversationRunningStatusItemStatusEnum[keyof typeof ConversationRunningStatusItemStatusEnum];
+export const ConversationRunningStatusItemTerminalStatusEnum = {
+    Completed: 'completed',
+    Failed: 'failed',
+    Canceled: 'canceled'
+} as const;
+
+export type ConversationRunningStatusItemTerminalStatusEnum = typeof ConversationRunningStatusItemTerminalStatusEnum[keyof typeof ConversationRunningStatusItemTerminalStatusEnum];
 
 export interface ConversationSearchConfigOpenAPIRequest {
     /**
@@ -1518,7 +1528,7 @@ export const CreateSidechatOpenAPIRequestThinkingDepthEnum = {
     Low: 'low',
     Medium: 'medium',
     High: 'high',
-    Max: 'max',
+    Max: 'max'
 } as const;
 
 export type CreateSidechatOpenAPIRequestThinkingDepthEnum = typeof CreateSidechatOpenAPIRequestThinkingDepthEnum[keyof typeof CreateSidechatOpenAPIRequestThinkingDepthEnum];
@@ -1585,13 +1595,13 @@ export interface CurrentMemoryAvatarData {
 export const CurrentMemoryAvatarDataContentTypeEnum = {
     ImagePng: 'image/png',
     ImageJpeg: 'image/jpeg',
-    ImageWebp: 'image/webp',
+    ImageWebp: 'image/webp'
 } as const;
 
 export type CurrentMemoryAvatarDataContentTypeEnum = typeof CurrentMemoryAvatarDataContentTypeEnum[keyof typeof CurrentMemoryAvatarDataContentTypeEnum];
 export const CurrentMemoryAvatarDataKindEnum = {
     Soul: 'soul',
-    Profile: 'profile',
+    Profile: 'profile'
 } as const;
 
 export type CurrentMemoryAvatarDataKindEnum = typeof CurrentMemoryAvatarDataKindEnum[keyof typeof CurrentMemoryAvatarDataKindEnum];
@@ -1624,7 +1634,7 @@ export const CurrentMemoryOperationOpEnum = {
     Set: 'set',
     Clear: 'clear',
     Add: 'add',
-    Remove: 'remove',
+    Remove: 'remove'
 } as const;
 
 export type CurrentMemoryOperationOpEnum = typeof CurrentMemoryOperationOpEnum[keyof typeof CurrentMemoryOperationOpEnum];
@@ -1640,7 +1650,7 @@ export interface CurrentMemoryPreferenceDetailData {
 
 export const CurrentMemoryPreferenceDetailDataReferenceStatusEnum = {
     Available: 'available',
-    Missing: 'missing',
+    Missing: 'missing'
 } as const;
 
 export type CurrentMemoryPreferenceDetailDataReferenceStatusEnum = typeof CurrentMemoryPreferenceDetailDataReferenceStatusEnum[keyof typeof CurrentMemoryPreferenceDetailDataReferenceStatusEnum];
@@ -1695,7 +1705,7 @@ export const CurrentMemoryPresentationFieldSummaryRoleEnum = {
     Subtitle: 'subtitle',
     Description: 'description',
     Tag: 'tag',
-    None: 'none',
+    None: 'none'
 } as const;
 
 export type CurrentMemoryPresentationFieldSummaryRoleEnum = typeof CurrentMemoryPresentationFieldSummaryRoleEnum[keyof typeof CurrentMemoryPresentationFieldSummaryRoleEnum];
@@ -1733,7 +1743,7 @@ export interface CurrentMemoryReferenceSource {
 
 export const CurrentMemoryReferenceSourceKindEnum = {
     MemoryReview: 'memory_review',
-    ChatExplicit: 'chat_explicit',
+    ChatExplicit: 'chat_explicit'
 } as const;
 
 export type CurrentMemoryReferenceSourceKindEnum = typeof CurrentMemoryReferenceSourceKindEnum[keyof typeof CurrentMemoryReferenceSourceKindEnum];
@@ -1954,13 +1964,13 @@ export const EpisodeMemoryEpisodeTypeEnum = {
     Progress: 'progress',
     Result: 'result',
     Blocker: 'blocker',
-    Event: 'event',
+    Event: 'event'
 } as const;
 
 export type EpisodeMemoryEpisodeTypeEnum = typeof EpisodeMemoryEpisodeTypeEnum[keyof typeof EpisodeMemoryEpisodeTypeEnum];
 export const EpisodeMemorySourceKindEnum = {
     ChatExplicit: 'chat_explicit',
-    MemoryReview: 'memory_review',
+    MemoryReview: 'memory_review'
 } as const;
 
 export type EpisodeMemorySourceKindEnum = typeof EpisodeMemorySourceKindEnum[keyof typeof EpisodeMemorySourceKindEnum];
@@ -2093,7 +2103,7 @@ export const ExternalExecutionProjectionStatusEnum = {
     Running: 'running',
     Completed: 'completed',
     Failed: 'failed',
-    Stopped: 'stopped',
+    Stopped: 'stopped'
 } as const;
 
 export type ExternalExecutionProjectionStatusEnum = typeof ExternalExecutionProjectionStatusEnum[keyof typeof ExternalExecutionProjectionStatusEnum];
@@ -2118,7 +2128,7 @@ export interface FailedRunAttempt {
 
 export const FailedRunAttemptRunStatusEnum = {
     Failed: 'failed',
-    Interrupted: 'interrupted',
+    Interrupted: 'interrupted'
 } as const;
 
 export type FailedRunAttemptRunStatusEnum = typeof FailedRunAttemptRunStatusEnum[keyof typeof FailedRunAttemptRunStatusEnum];
@@ -2132,7 +2142,7 @@ export interface ForkAttachment {
 
 export const ForkAttachmentStatusEnum = {
     Available: 'available',
-    Unavailable: 'unavailable',
+    Unavailable: 'unavailable'
 } as const;
 
 export type ForkAttachmentStatusEnum = typeof ForkAttachmentStatusEnum[keyof typeof ForkAttachmentStatusEnum];
@@ -2186,7 +2196,7 @@ export const ForkErrorCodeEnum = {
     ForkResultUnavailable: 'FORK_RESULT_UNAVAILABLE',
     ForkTooLarge: 'FORK_TOO_LARGE',
     InvalidRequest: 'INVALID_REQUEST',
-    ForkFailed: 'FORK_FAILED',
+    ForkFailed: 'FORK_FAILED'
 } as const;
 
 export type ForkErrorCodeEnum = typeof ForkErrorCodeEnum[keyof typeof ForkErrorCodeEnum];
@@ -2198,7 +2208,7 @@ export interface ForkModelSelection {
 
 export const ForkModelSelectionModeEnum = {
     Fixed: 'fixed',
-    Auto: 'auto',
+    Auto: 'auto'
 } as const;
 
 export type ForkModelSelectionModeEnum = typeof ForkModelSelectionModeEnum[keyof typeof ForkModelSelectionModeEnum];
@@ -2683,7 +2693,7 @@ export interface PatchConversationModelOpenAPIRequest {
 
 export const PatchConversationModelOpenAPIRequestModeEnum = {
     Fixed: 'fixed',
-    Auto: 'auto',
+    Auto: 'auto'
 } as const;
 
 export type PatchConversationModelOpenAPIRequestModeEnum = typeof PatchConversationModelOpenAPIRequestModeEnum[keyof typeof PatchConversationModelOpenAPIRequestModeEnum];
@@ -2734,7 +2744,7 @@ export interface PreferenceOrganizerReceipt {
 export const PreferenceOrganizerReceiptActionEnum = {
     Merge: 'merge',
     MoveToEpisode: 'move_to_episode',
-    Delete: 'delete',
+    Delete: 'delete'
 } as const;
 
 export type PreferenceOrganizerReceiptActionEnum = typeof PreferenceOrganizerReceiptActionEnum[keyof typeof PreferenceOrganizerReceiptActionEnum];
@@ -2744,7 +2754,7 @@ export const PreferenceOrganizerReceiptStatusEnum = {
     Idempotent: 'idempotent',
     Partial: 'partial',
     Failed: 'failed',
-    Unknown: 'unknown',
+    Unknown: 'unknown'
 } as const;
 
 export type PreferenceOrganizerReceiptStatusEnum = typeof PreferenceOrganizerReceiptStatusEnum[keyof typeof PreferenceOrganizerReceiptStatusEnum];
@@ -2766,7 +2776,7 @@ export const PreferenceOrganizerResultOutcomeEnum = {
     BudgetExhausted: 'budget_exhausted',
     StaleState: 'stale_state',
     Partial: 'partial',
-    Failed: 'failed',
+    Failed: 'failed'
 } as const;
 
 export type PreferenceOrganizerResultOutcomeEnum = typeof PreferenceOrganizerResultOutcomeEnum[keyof typeof PreferenceOrganizerResultOutcomeEnum];
@@ -2796,13 +2806,13 @@ export const PreferenceOrganizerTaskDataStatusEnum = {
     Running: 'running',
     Done: 'done',
     Failed: 'failed',
-    Skipped: 'skipped',
+    Skipped: 'skipped'
 } as const;
 
 export type PreferenceOrganizerTaskDataStatusEnum = typeof PreferenceOrganizerTaskDataStatusEnum[keyof typeof PreferenceOrganizerTaskDataStatusEnum];
 export const PreferenceOrganizerTaskDataWaitingReasonEnum = {
     MemoryReview: 'memory_review',
-    Resources: 'resources',
+    Resources: 'resources'
 } as const;
 
 export type PreferenceOrganizerTaskDataWaitingReasonEnum = typeof PreferenceOrganizerTaskDataWaitingReasonEnum[keyof typeof PreferenceOrganizerTaskDataWaitingReasonEnum];
@@ -2991,7 +3001,7 @@ export interface RouterTrafficRange {
 
 export const RouterTrafficRangeGranularityEnum = {
     Hour: 'hour',
-    Day: 'day',
+    Day: 'day'
 } as const;
 
 export type RouterTrafficRangeGranularityEnum = typeof RouterTrafficRangeGranularityEnum[keyof typeof RouterTrafficRangeGranularityEnum];
@@ -3049,7 +3059,7 @@ export const RunTerminalReasonEnum = {
     ModelIncomplete: 'model_incomplete',
     ModelFailure: 'model_failure',
     RuntimeFailure: 'runtime_failure',
-    UserCancelled: 'user_cancelled',
+    UserCancelled: 'user_cancelled'
 } as const;
 
 export type RunTerminalReasonEnum = typeof RunTerminalReasonEnum[keyof typeof RunTerminalReasonEnum];
@@ -3057,7 +3067,7 @@ export const RunTerminalStatusEnum = {
     Completed: 'completed',
     Interrupted: 'interrupted',
     Failed: 'failed',
-    Cancelled: 'cancelled',
+    Cancelled: 'cancelled'
 } as const;
 
 export type RunTerminalStatusEnum = typeof RunTerminalStatusEnum[keyof typeof RunTerminalStatusEnum];
@@ -3321,13 +3331,13 @@ export interface SidechatConversationOpenAPI {
 
 export const SidechatConversationOpenAPIChatModelModeEnum = {
     Fixed: 'fixed',
-    Auto: 'auto',
+    Auto: 'auto'
 } as const;
 
 export type SidechatConversationOpenAPIChatModelModeEnum = typeof SidechatConversationOpenAPIChatModelModeEnum[keyof typeof SidechatConversationOpenAPIChatModelModeEnum];
 export const SidechatConversationOpenAPIRelationTypeEnum = {
     Sidechat: 'sidechat',
-    Fork: 'fork',
+    Fork: 'fork'
 } as const;
 
 export type SidechatConversationOpenAPIRelationTypeEnum = typeof SidechatConversationOpenAPIRelationTypeEnum[keyof typeof SidechatConversationOpenAPIRelationTypeEnum];
@@ -3335,7 +3345,7 @@ export const SidechatConversationOpenAPIThinkingDepthEnum = {
     Low: 'low',
     Medium: 'medium',
     High: 'high',
-    Max: 'max',
+    Max: 'max'
 } as const;
 
 export type SidechatConversationOpenAPIThinkingDepthEnum = typeof SidechatConversationOpenAPIThinkingDepthEnum[keyof typeof SidechatConversationOpenAPIThinkingDepthEnum];
@@ -3821,7 +3831,7 @@ export const TaskCenterTaskResponseConversationStateEnum = {
     Active: 'active',
     Archived: 'archived',
     Trash: 'trash',
-    Missing: 'missing',
+    Missing: 'missing'
 } as const;
 
 export type TaskCenterTaskResponseConversationStateEnum = typeof TaskCenterTaskResponseConversationStateEnum[keyof typeof TaskCenterTaskResponseConversationStateEnum];
@@ -4208,7 +4218,7 @@ export const AgentApiAxiosParamCreator = function (configuration?: Configuration
             // verify required parameter 'candidateId' is not null or undefined
             assertParamExists('apiCoreAgentCandidatesCandidateIdGet', 'candidateId', candidateId)
             const localVarPath = `/api/core/agent/candidates/{candidate_id:.*}`
-                .replace('{candidate_id:.*}', encodeURIComponent(String(candidateId)));
+                .replace(`{${"candidate_id:.*"}}`, encodeURIComponent(String(candidateId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -4374,7 +4384,7 @@ export const AgentApiAxiosParamCreator = function (configuration?: Configuration
             // verify required parameter 'agentRouterActionRequest' is not null or undefined
             assertParamExists('apiCoreAgentRouterAlgorithmsAlgorithmIdActionPost', 'agentRouterActionRequest', agentRouterActionRequest)
             const localVarPath = `/api/core/agent/router/algorithms/{algorithm_id}/action`
-                .replace('{algorithm_id}', encodeURIComponent(String(algorithmId)));
+                .replace(`{${"algorithm_id"}}`, encodeURIComponent(String(algorithmId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -4420,7 +4430,7 @@ export const AgentApiAxiosParamCreator = function (configuration?: Configuration
             // verify required parameter 'algorithmId' is not null or undefined
             assertParamExists('apiCoreAgentRouterAlgorithmsAlgorithmIdDelete', 'algorithmId', algorithmId)
             const localVarPath = `/api/core/agent/router/algorithms/{algorithm_id}`
-                .replace('{algorithm_id}', encodeURIComponent(String(algorithmId)));
+                .replace(`{${"algorithm_id"}}`, encodeURIComponent(String(algorithmId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -4684,7 +4694,7 @@ export const AgentApiAxiosParamCreator = function (configuration?: Configuration
             // verify required parameter 'threadId' is not null or undefined
             assertParamExists('apiCoreAgentThreadsThreadIdCancelPost', 'threadId', threadId)
             const localVarPath = `/api/core/agent/threads/{thread_id}/cancel`
-                .replace('{thread_id}', encodeURIComponent(String(threadId)));
+                .replace(`{${"thread_id"}}`, encodeURIComponent(String(threadId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -4721,7 +4731,7 @@ export const AgentApiAxiosParamCreator = function (configuration?: Configuration
             // verify required parameter 'threadId' is not null or undefined
             assertParamExists('apiCoreAgentThreadsThreadIdContinuePost', 'threadId', threadId)
             const localVarPath = `/api/core/agent/threads/{thread_id}/continue`
-                .replace('{thread_id}', encodeURIComponent(String(threadId)));
+                .replace(`{${"thread_id"}}`, encodeURIComponent(String(threadId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -4757,7 +4767,7 @@ export const AgentApiAxiosParamCreator = function (configuration?: Configuration
             // verify required parameter 'threadId' is not null or undefined
             assertParamExists('apiCoreAgentThreadsThreadIdDelete', 'threadId', threadId)
             const localVarPath = `/api/core/agent/threads/{thread_id}`
-                .replace('{thread_id}', encodeURIComponent(String(threadId)));
+                .replace(`{${"thread_id"}}`, encodeURIComponent(String(threadId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -4794,7 +4804,7 @@ export const AgentApiAxiosParamCreator = function (configuration?: Configuration
             // verify required parameter 'stepId' is not null or undefined
             assertParamExists('apiCoreAgentThreadsThreadIdEventTraceStreamGet', 'stepId', stepId)
             const localVarPath = `/api/core/agent/threads/{thread_id}/event-trace:stream`
-                .replace('{thread_id}', encodeURIComponent(String(threadId)));
+                .replace(`{${"thread_id"}}`, encodeURIComponent(String(threadId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -4833,7 +4843,7 @@ export const AgentApiAxiosParamCreator = function (configuration?: Configuration
             // verify required parameter 'threadId' is not null or undefined
             assertParamExists('apiCoreAgentThreadsThreadIdEventsStreamGet', 'threadId', threadId)
             const localVarPath = `/api/core/agent/threads/{thread_id}/events:stream`
-                .replace('{thread_id}', encodeURIComponent(String(threadId)));
+                .replace(`{${"thread_id"}}`, encodeURIComponent(String(threadId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -4878,8 +4888,8 @@ export const AgentApiAxiosParamCreator = function (configuration?: Configuration
             // verify required parameter 'version' is not null or undefined
             assertParamExists('apiCoreAgentThreadsThreadIdGatesAbtestVersionsVersionCaseDetailsGet', 'version', version)
             const localVarPath = `/api/core/agent/threads/{thread_id}/gates/abtest/versions/{version}/case-details`
-                .replace('{thread_id}', encodeURIComponent(String(threadId)))
-                .replace('{version}', encodeURIComponent(String(version)));
+                .replace(`{${"thread_id"}}`, encodeURIComponent(String(threadId)))
+                .replace(`{${"version"}}`, encodeURIComponent(String(version)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -4929,7 +4939,7 @@ export const AgentApiAxiosParamCreator = function (configuration?: Configuration
             // verify required parameter 'threadId' is not null or undefined
             assertParamExists('apiCoreAgentThreadsThreadIdGatesGet', 'threadId', threadId)
             const localVarPath = `/api/core/agent/threads/{thread_id}/gates`
-                .replace('{thread_id}', encodeURIComponent(String(threadId)));
+                .replace(`{${"thread_id"}}`, encodeURIComponent(String(threadId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -4970,9 +4980,9 @@ export const AgentApiAxiosParamCreator = function (configuration?: Configuration
             // verify required parameter 'version' is not null or undefined
             assertParamExists('apiCoreAgentThreadsThreadIdGatesStepVersionsVersionDownloadGet', 'version', version)
             const localVarPath = `/api/core/agent/threads/{thread_id}/gates/{step}/versions/{version}:download`
-                .replace('{thread_id}', encodeURIComponent(String(threadId)))
-                .replace('{step}', encodeURIComponent(String(step)))
-                .replace('{version}', encodeURIComponent(String(version)));
+                .replace(`{${"thread_id"}}`, encodeURIComponent(String(threadId)))
+                .replace(`{${"step"}}`, encodeURIComponent(String(step)))
+                .replace(`{${"version"}}`, encodeURIComponent(String(version)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -5016,9 +5026,9 @@ export const AgentApiAxiosParamCreator = function (configuration?: Configuration
             // verify required parameter 'version' is not null or undefined
             assertParamExists('apiCoreAgentThreadsThreadIdGatesStepVersionsVersionGet', 'version', version)
             const localVarPath = `/api/core/agent/threads/{thread_id}/gates/{step}/versions/{version}`
-                .replace('{thread_id}', encodeURIComponent(String(threadId)))
-                .replace('{step}', encodeURIComponent(String(step)))
-                .replace('{version}', encodeURIComponent(String(version)));
+                .replace(`{${"thread_id"}}`, encodeURIComponent(String(threadId)))
+                .replace(`{${"step"}}`, encodeURIComponent(String(step)))
+                .replace(`{${"version"}}`, encodeURIComponent(String(version)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -5052,7 +5062,7 @@ export const AgentApiAxiosParamCreator = function (configuration?: Configuration
             // verify required parameter 'threadId' is not null or undefined
             assertParamExists('apiCoreAgentThreadsThreadIdGet', 'threadId', threadId)
             const localVarPath = `/api/core/agent/threads/{thread_id}`
-                .replace('{thread_id}', encodeURIComponent(String(threadId)));
+                .replace(`{${"thread_id"}}`, encodeURIComponent(String(threadId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -5088,7 +5098,7 @@ export const AgentApiAxiosParamCreator = function (configuration?: Configuration
             // verify required parameter 'threadId' is not null or undefined
             assertParamExists('apiCoreAgentThreadsThreadIdMessagesGet', 'threadId', threadId)
             const localVarPath = `/api/core/agent/threads/{thread_id}/messages`
-                .replace('{thread_id}', encodeURIComponent(String(threadId)));
+                .replace(`{${"thread_id"}}`, encodeURIComponent(String(threadId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -5133,7 +5143,7 @@ export const AgentApiAxiosParamCreator = function (configuration?: Configuration
             // verify required parameter 'requestBody' is not null or undefined
             assertParamExists('apiCoreAgentThreadsThreadIdMessagesPost', 'requestBody', requestBody)
             const localVarPath = `/api/core/agent/threads/{thread_id}/messages`
-                .replace('{thread_id}', encodeURIComponent(String(threadId)));
+                .replace(`{${"thread_id"}}`, encodeURIComponent(String(threadId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -5170,7 +5180,7 @@ export const AgentApiAxiosParamCreator = function (configuration?: Configuration
             // verify required parameter 'threadId' is not null or undefined
             assertParamExists('apiCoreAgentThreadsThreadIdPausePost', 'threadId', threadId)
             const localVarPath = `/api/core/agent/threads/{thread_id}/pause`
-                .replace('{thread_id}', encodeURIComponent(String(threadId)));
+                .replace(`{${"thread_id"}}`, encodeURIComponent(String(threadId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -5212,7 +5222,7 @@ export const AgentApiAxiosParamCreator = function (configuration?: Configuration
             // verify required parameter 'b' is not null or undefined
             assertParamExists('apiCoreAgentThreadsThreadIdResultsTracesCompareGet', 'b', b)
             const localVarPath = `/api/core/agent/threads/{thread_id}/results/traces:compare`
-                .replace('{thread_id}', encodeURIComponent(String(threadId)));
+                .replace(`{${"thread_id"}}`, encodeURIComponent(String(threadId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -5257,8 +5267,8 @@ export const AgentApiAxiosParamCreator = function (configuration?: Configuration
             // verify required parameter 'traceId' is not null or undefined
             assertParamExists('apiCoreAgentThreadsThreadIdResultsTracesTraceIdGet', 'traceId', traceId)
             const localVarPath = `/api/core/agent/threads/{thread_id}/results/traces/{trace_id}`
-                .replace('{thread_id}', encodeURIComponent(String(threadId)))
-                .replace('{trace_id}', encodeURIComponent(String(traceId)));
+                .replace(`{${"thread_id"}}`, encodeURIComponent(String(threadId)))
+                .replace(`{${"trace_id"}}`, encodeURIComponent(String(traceId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -5293,7 +5303,7 @@ export const AgentApiAxiosParamCreator = function (configuration?: Configuration
             // verify required parameter 'threadId' is not null or undefined
             assertParamExists('apiCoreAgentThreadsThreadIdRetryPost', 'threadId', threadId)
             const localVarPath = `/api/core/agent/threads/{thread_id}/retry`
-                .replace('{thread_id}', encodeURIComponent(String(threadId)));
+                .replace(`{${"thread_id"}}`, encodeURIComponent(String(threadId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -5330,7 +5340,7 @@ export const AgentApiAxiosParamCreator = function (configuration?: Configuration
             // verify required parameter 'threadId' is not null or undefined
             assertParamExists('apiCoreAgentThreadsThreadIdStartPost', 'threadId', threadId)
             const localVarPath = `/api/core/agent/threads/{thread_id}/start`
-                .replace('{thread_id}', encodeURIComponent(String(threadId)));
+                .replace(`{${"thread_id"}}`, encodeURIComponent(String(threadId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -5366,7 +5376,7 @@ export const AgentApiAxiosParamCreator = function (configuration?: Configuration
             // verify required parameter 'threadId' is not null or undefined
             assertParamExists('apiCoreAgentThreadsThreadIdStepsGet', 'threadId', threadId)
             const localVarPath = `/api/core/agent/threads/{thread_id}/steps`
-                .replace('{thread_id}', encodeURIComponent(String(threadId)));
+                .replace(`{${"thread_id"}}`, encodeURIComponent(String(threadId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -6774,16 +6784,16 @@ export const ApiCoreAgentRouterAlgorithmsGetStatusEnum = {
     Starting: 'starting',
     Active: 'active',
     Disabled: 'disabled',
-    Missing: 'missing',
+    Missing: 'missing'
 } as const;
 export type ApiCoreAgentRouterAlgorithmsGetStatusEnum = typeof ApiCoreAgentRouterAlgorithmsGetStatusEnum[keyof typeof ApiCoreAgentRouterAlgorithmsGetStatusEnum];
 export const ApiCoreAgentRouterTrafficStatsGetGranularityEnum = {
     Hour: 'hour',
-    Day: 'day',
+    Day: 'day'
 } as const;
 export type ApiCoreAgentRouterTrafficStatsGetGranularityEnum = typeof ApiCoreAgentRouterTrafficStatsGetGranularityEnum[keyof typeof ApiCoreAgentRouterTrafficStatsGetGranularityEnum];
 export const ApiCoreAgentThreadsThreadIdGatesStepVersionsVersionDownloadGetFormatEnum = {
-    Json: 'json',
+    Json: 'json'
 } as const;
 export type ApiCoreAgentThreadsThreadIdGatesStepVersionsVersionDownloadGetFormatEnum = typeof ApiCoreAgentThreadsThreadIdGatesStepVersionsVersionDownloadGetFormatEnum[keyof typeof ApiCoreAgentThreadsThreadIdGatesStepVersionsVersionDownloadGetFormatEnum];
 
@@ -8193,7 +8203,7 @@ export const ConversationsApiAxiosParamCreator = function (configuration?: Confi
             // verify required parameter 'fileId' is not null or undefined
             assertParamExists('apiCoreConversationExportFilesFileIdGet', 'fileId', fileId)
             const localVarPath = `/api/core/conversation:export/files/{file_id}`
-                .replace('{file_id}', encodeURIComponent(String(fileId)));
+                .replace(`{${"file_id"}}`, encodeURIComponent(String(fileId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -8262,7 +8272,7 @@ export const ConversationsApiAxiosParamCreator = function (configuration?: Confi
             // verify required parameter 'childId' is not null or undefined
             assertParamExists('apiCoreConversationsChildIdRetainPost', 'childId', childId)
             const localVarPath = `/api/core/conversations/{child_id}/retain`
-                .replace('{child_id}', encodeURIComponent(String(childId)));
+                .replace(`{${"child_id"}}`, encodeURIComponent(String(childId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -8296,7 +8306,7 @@ export const ConversationsApiAxiosParamCreator = function (configuration?: Confi
             // verify required parameter 'childId' is not null or undefined
             assertParamExists('apiCoreConversationsChildIdSidechatDelete', 'childId', childId)
             const localVarPath = `/api/core/conversations/{child_id}/sidechat`
-                .replace('{child_id}', encodeURIComponent(String(childId)));
+                .replace(`{${"child_id"}}`, encodeURIComponent(String(childId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -8332,7 +8342,7 @@ export const ConversationsApiAxiosParamCreator = function (configuration?: Confi
             // verify required parameter 'patchConversationModelOpenAPIRequest' is not null or undefined
             assertParamExists('apiCoreConversationsConversationIdModelPatch', 'patchConversationModelOpenAPIRequest', patchConversationModelOpenAPIRequest)
             const localVarPath = `/api/core/conversations/{conversation_id}/model`
-                .replace('{conversation_id}', encodeURIComponent(String(conversationId)));
+                .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -8371,7 +8381,7 @@ export const ConversationsApiAxiosParamCreator = function (configuration?: Confi
             // verify required parameter 'conversationSearchConfigOpenAPIRequest' is not null or undefined
             assertParamExists('apiCoreConversationsNameSearchConfigPatch', 'conversationSearchConfigOpenAPIRequest', conversationSearchConfigOpenAPIRequest)
             const localVarPath = `/api/core/conversations/{name}:search-config`
-                .replace('{name}', encodeURIComponent(String(name)));
+                .replace(`{${"name"}}`, encodeURIComponent(String(name)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -8408,7 +8418,7 @@ export const ConversationsApiAxiosParamCreator = function (configuration?: Confi
             // verify required parameter 'parentId' is not null or undefined
             assertParamExists('apiCoreConversationsParentIdSidechatPost', 'parentId', parentId)
             const localVarPath = `/api/core/conversations/{parent_id}/sidechat`
-                .replace('{parent_id}', encodeURIComponent(String(parentId)));
+                .replace(`{${"parent_id"}}`, encodeURIComponent(String(parentId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -8450,7 +8460,7 @@ export const ConversationsApiAxiosParamCreator = function (configuration?: Confi
             // verify required parameter 'forkCreateRequest' is not null or undefined
             assertParamExists('createConversationFork', 'forkCreateRequest', forkCreateRequest)
             const localVarPath = `/api/core/conversations/{conversation_id}/forks`
-                .replace('{conversation_id}', encodeURIComponent(String(conversationId)));
+                .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -8492,7 +8502,7 @@ export const ConversationsApiAxiosParamCreator = function (configuration?: Confi
             // verify required parameter 'forkPreviewRequest' is not null or undefined
             assertParamExists('previewConversationFork', 'forkPreviewRequest', forkPreviewRequest)
             const localVarPath = `/api/core/conversations/{conversation_id}/fork-preview`
-                .replace('{conversation_id}', encodeURIComponent(String(conversationId)));
+                .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -8948,7 +8958,7 @@ export const DataSourcesApiAxiosParamCreator = function (configuration?: Configu
             // verify required parameter 'connection' is not null or undefined
             assertParamExists('apiCoreDataSourcesDatabaseConnectionsConnectionCheckPost', 'connection', connection)
             const localVarPath = `/api/core/data-sources/database-connections/{connection}:check`
-                .replace('{connection}', encodeURIComponent(String(connection)));
+                .replace(`{${"connection"}}`, encodeURIComponent(String(connection)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -8982,7 +8992,7 @@ export const DataSourcesApiAxiosParamCreator = function (configuration?: Configu
             // verify required parameter 'connection' is not null or undefined
             assertParamExists('apiCoreDataSourcesDatabaseConnectionsConnectionDelete', 'connection', connection)
             const localVarPath = `/api/core/data-sources/database-connections/{connection}`
-                .replace('{connection}', encodeURIComponent(String(connection)));
+                .replace(`{${"connection"}}`, encodeURIComponent(String(connection)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -9016,7 +9026,7 @@ export const DataSourcesApiAxiosParamCreator = function (configuration?: Configu
             // verify required parameter 'connection' is not null or undefined
             assertParamExists('apiCoreDataSourcesDatabaseConnectionsConnectionGet', 'connection', connection)
             const localVarPath = `/api/core/data-sources/database-connections/{connection}`
-                .replace('{connection}', encodeURIComponent(String(connection)));
+                .replace(`{${"connection"}}`, encodeURIComponent(String(connection)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -9053,7 +9063,7 @@ export const DataSourcesApiAxiosParamCreator = function (configuration?: Configu
             // verify required parameter 'updateDatabaseConnectionRequest' is not null or undefined
             assertParamExists('apiCoreDataSourcesDatabaseConnectionsConnectionPatch', 'updateDatabaseConnectionRequest', updateDatabaseConnectionRequest)
             const localVarPath = `/api/core/data-sources/database-connections/{connection}`
-                .replace('{connection}', encodeURIComponent(String(connection)));
+                .replace(`{${"connection"}}`, encodeURIComponent(String(connection)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -9089,7 +9099,7 @@ export const DataSourcesApiAxiosParamCreator = function (configuration?: Configu
             // verify required parameter 'connection' is not null or undefined
             assertParamExists('apiCoreDataSourcesDatabaseConnectionsConnectionSecretGet', 'connection', connection)
             const localVarPath = `/api/core/data-sources/database-connections/{connection}:secret`
-                .replace('{connection}', encodeURIComponent(String(connection)));
+                .replace(`{${"connection"}}`, encodeURIComponent(String(connection)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -9638,7 +9648,7 @@ export const DatasetsApiAxiosParamCreator = function (configuration?: Configurat
             // verify required parameter 'dataset' is not null or undefined
             assertParamExists('apiCoreDatasetsDatasetDelete', 'dataset', dataset)
             const localVarPath = `/api/core/datasets/{dataset}`
-                .replace('{dataset}', encodeURIComponent(String(dataset)));
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -9672,7 +9682,7 @@ export const DatasetsApiAxiosParamCreator = function (configuration?: Configurat
             // verify required parameter 'dataset' is not null or undefined
             assertParamExists('apiCoreDatasetsDatasetGet', 'dataset', dataset)
             const localVarPath = `/api/core/datasets/{dataset}`
-                .replace('{dataset}', encodeURIComponent(String(dataset)));
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -9707,7 +9717,7 @@ export const DatasetsApiAxiosParamCreator = function (configuration?: Configurat
             // verify required parameter 'dataset' is not null or undefined
             assertParamExists('apiCoreDatasetsDatasetPatch', 'dataset', dataset)
             const localVarPath = `/api/core/datasets/{dataset}`
-                .replace('{dataset}', encodeURIComponent(String(dataset)));
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -9746,7 +9756,7 @@ export const DatasetsApiAxiosParamCreator = function (configuration?: Configurat
             // verify required parameter 'setDefaultDatasetRequest' is not null or undefined
             assertParamExists('apiCoreDatasetsDatasetSetDefaultPost', 'setDefaultDatasetRequest', setDefaultDatasetRequest)
             const localVarPath = `/api/core/datasets/{dataset}:setDefault`
-                .replace('{dataset}', encodeURIComponent(String(dataset)));
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -9785,7 +9795,7 @@ export const DatasetsApiAxiosParamCreator = function (configuration?: Configurat
             // verify required parameter 'unsetDefaultDatasetRequest' is not null or undefined
             assertParamExists('apiCoreDatasetsDatasetUnsetDefaultPost', 'unsetDefaultDatasetRequest', unsetDefaultDatasetRequest)
             const localVarPath = `/api/core/datasets/{dataset}:unsetDefault`
-                .replace('{dataset}', encodeURIComponent(String(dataset)));
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -10257,13 +10267,13 @@ export class DatasetsApi extends BaseAPI {
 export const ApiCoreDatasetsGetOrderByEnum = {
     LatestUpdated: 'latest_updated',
     MostUsed: 'most_used',
-    RecentUsed: 'recent_used',
+    RecentUsed: 'recent_used'
 } as const;
 export type ApiCoreDatasetsGetOrderByEnum = typeof ApiCoreDatasetsGetOrderByEnum[keyof typeof ApiCoreDatasetsGetOrderByEnum];
 export const ApiCoreDatasetsGetSourceEnum = {
     Manual: 'manual',
     Cloud: 'cloud',
-    OfficialInstalled: 'official_installed',
+    OfficialInstalled: 'official_installed'
 } as const;
 export type ApiCoreDatasetsGetSourceEnum = typeof ApiCoreDatasetsGetSourceEnum[keyof typeof ApiCoreDatasetsGetSourceEnum];
 
@@ -10289,6 +10299,35 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             }
 
             const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /admin
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAdminGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/admin`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
@@ -10342,7 +10381,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'invocationId' is not null or undefined
             assertParamExists('apiCoreAgentInvocationsInvocationIdFinishPost', 'invocationId', invocationId)
             const localVarPath = `/api/core/agent-invocations/{invocation_id}:finish`
-                .replace('{invocation_id}', encodeURIComponent(String(invocationId)));
+                .replace(`{${"invocation_id"}}`, encodeURIComponent(String(invocationId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -10375,7 +10414,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'invocationId' is not null or undefined
             assertParamExists('apiCoreAgentInvocationsInvocationIdStartPost', 'invocationId', invocationId)
             const localVarPath = `/api/core/agent-invocations/{invocation_id}:start`
-                .replace('{invocation_id}', encodeURIComponent(String(invocationId)));
+                .replace(`{${"invocation_id"}}`, encodeURIComponent(String(invocationId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -10466,7 +10505,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'groupId' is not null or undefined
             assertParamExists('apiCoreAutomationGroupsGroupIdDelete', 'groupId', groupId)
             const localVarPath = `/api/core/automation-groups/{group_id}`
-                .replace('{group_id}', encodeURIComponent(String(groupId)));
+                .replace(`{${"group_id"}}`, encodeURIComponent(String(groupId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -10615,7 +10654,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'workflowRef' is not null or undefined
             assertParamExists('apiCoreChatSettingsWorkflowsWorkflowRefPatch', 'workflowRef', workflowRef)
             const localVarPath = `/api/core/chat/settings/workflows/{workflow_ref:.+}`
-                .replace('{workflow_ref:.+}', encodeURIComponent(String(workflowRef)));
+                .replace(`{${"workflow_ref:.+"}}`, encodeURIComponent(String(workflowRef)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -10649,7 +10688,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'folderId' is not null or undefined
             assertParamExists('apiCoreConversationArchiveFoldersFolderIdDelete', 'folderId', folderId)
             const localVarPath = `/api/core/conversation-archive-folders/{folder_id}`
-                .replace('{folder_id}', encodeURIComponent(String(folderId)));
+                .replace(`{${"folder_id"}}`, encodeURIComponent(String(folderId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -10690,7 +10729,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'conversationArchiveFolderRequest' is not null or undefined
             assertParamExists('apiCoreConversationArchiveFoldersFolderIdPatch', 'conversationArchiveFolderRequest', conversationArchiveFolderRequest)
             const localVarPath = `/api/core/conversation-archive-folders/{folder_id}`
-                .replace('{folder_id}', encodeURIComponent(String(folderId)));
+                .replace(`{${"folder_id"}}`, encodeURIComponent(String(folderId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -11021,7 +11060,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'conversationArchiveRequest' is not null or undefined
             assertParamExists('apiCoreConversationsConversationIdArchivePost', 'conversationArchiveRequest', conversationArchiveRequest)
             const localVarPath = `/api/core/conversations/{conversation_id}:archive`
-                .replace('{conversation_id}', encodeURIComponent(String(conversationId)));
+                .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -11057,7 +11096,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'conversationId' is not null or undefined
             assertParamExists('apiCoreConversationsConversationIdArtifactsGet', 'conversationId', conversationId)
             const localVarPath = `/api/core/conversations/{conversation_id}/artifacts`
-                .replace('{conversation_id}', encodeURIComponent(String(conversationId)));
+                .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -11090,7 +11129,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'conversationId' is not null or undefined
             assertParamExists('apiCoreConversationsConversationIdDismissedWorkflowSessionsGet', 'conversationId', conversationId)
             const localVarPath = `/api/core/conversations/{conversation_id}/dismissed-workflow-sessions`
-                .replace('{conversation_id}', encodeURIComponent(String(conversationId)));
+                .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -11123,7 +11162,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'conversationId' is not null or undefined
             assertParamExists('apiCoreConversationsConversationIdEventsGet', 'conversationId', conversationId)
             const localVarPath = `/api/core/conversations/{conversation_id}/events`
-                .replace('{conversation_id}', encodeURIComponent(String(conversationId)));
+                .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -11156,7 +11195,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'conversationId' is not null or undefined
             assertParamExists('apiCoreConversationsConversationIdPinPost', 'conversationId', conversationId)
             const localVarPath = `/api/core/conversations/{conversation_id}:pin`
-                .replace('{conversation_id}', encodeURIComponent(String(conversationId)));
+                .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -11190,7 +11229,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'conversationId' is not null or undefined
             assertParamExists('apiCoreConversationsConversationIdPromotePost', 'conversationId', conversationId)
             const localVarPath = `/api/core/conversations/{conversation_id}:promote`
-                .replace('{conversation_id}', encodeURIComponent(String(conversationId)));
+                .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -11223,7 +11262,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'conversationId' is not null or undefined
             assertParamExists('apiCoreConversationsConversationIdPurgeDelete', 'conversationId', conversationId)
             const localVarPath = `/api/core/conversations/{conversation_id}:purge`
-                .replace('{conversation_id}', encodeURIComponent(String(conversationId)));
+                .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -11260,7 +11299,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'conversationReorderRequest' is not null or undefined
             assertParamExists('apiCoreConversationsConversationIdReorderPost', 'conversationReorderRequest', conversationReorderRequest)
             const localVarPath = `/api/core/conversations/{conversation_id}:reorder`
-                .replace('{conversation_id}', encodeURIComponent(String(conversationId)));
+                .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -11296,7 +11335,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'conversationId' is not null or undefined
             assertParamExists('apiCoreConversationsConversationIdRestorePost', 'conversationId', conversationId)
             const localVarPath = `/api/core/conversations/{conversation_id}:restore`
-                .replace('{conversation_id}', encodeURIComponent(String(conversationId)));
+                .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -11330,7 +11369,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'conversationId' is not null or undefined
             assertParamExists('apiCoreConversationsConversationIdSettingsPatch', 'conversationId', conversationId)
             const localVarPath = `/api/core/conversations/{conversation_id}/settings`
-                .replace('{conversation_id}', encodeURIComponent(String(conversationId)));
+                .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -11363,7 +11402,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'conversationId' is not null or undefined
             assertParamExists('apiCoreConversationsConversationIdStatusGet', 'conversationId', conversationId)
             const localVarPath = `/api/core/conversations/{conversation_id}:status`
-                .replace('{conversation_id}', encodeURIComponent(String(conversationId)));
+                .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -11397,7 +11436,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'conversationId' is not null or undefined
             assertParamExists('apiCoreConversationsConversationIdStopPost', 'conversationId', conversationId)
             const localVarPath = `/api/core/conversations/{conversation_id}:stop`
-                .replace('{conversation_id}', encodeURIComponent(String(conversationId)));
+                .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -11430,7 +11469,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'conversationId' is not null or undefined
             assertParamExists('apiCoreConversationsConversationIdTasksGet', 'conversationId', conversationId)
             const localVarPath = `/api/core/conversations/{conversation_id}/tasks`
-                .replace('{conversation_id}', encodeURIComponent(String(conversationId)));
+                .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -11463,7 +11502,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'conversationId' is not null or undefined
             assertParamExists('apiCoreConversationsConversationIdToolLimitDecisionPost', 'conversationId', conversationId)
             const localVarPath = `/api/core/conversations/{conversation_id}:toolLimitDecision`
-                .replace('{conversation_id}', encodeURIComponent(String(conversationId)));
+                .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -11497,7 +11536,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'conversationId' is not null or undefined
             assertParamExists('apiCoreConversationsConversationIdUnarchivePost', 'conversationId', conversationId)
             const localVarPath = `/api/core/conversations/{conversation_id}:unarchive`
-                .replace('{conversation_id}', encodeURIComponent(String(conversationId)));
+                .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -11531,7 +11570,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'conversationId' is not null or undefined
             assertParamExists('apiCoreConversationsConversationIdUnpinPost', 'conversationId', conversationId)
             const localVarPath = `/api/core/conversations/{conversation_id}:unpin`
-                .replace('{conversation_id}', encodeURIComponent(String(conversationId)));
+                .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -11565,7 +11604,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'conversationId' is not null or undefined
             assertParamExists('apiCoreConversationsConversationIdWorkflowSessionsActiveGet', 'conversationId', conversationId)
             const localVarPath = `/api/core/conversations/{conversation_id}/workflow-sessions:active`
-                .replace('{conversation_id}', encodeURIComponent(String(conversationId)));
+                .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -11598,7 +11637,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'conversationId' is not null or undefined
             assertParamExists('apiCoreConversationsConversationIdWorkflowSessionsGet', 'conversationId', conversationId)
             const localVarPath = `/api/core/conversations/{conversation_id}/workflow-sessions`
-                .replace('{conversation_id}', encodeURIComponent(String(conversationId)));
+                .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -11631,7 +11670,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'conversationId' is not null or undefined
             assertParamExists('apiCoreConversationsConversationIdWorkflowSessionsLatestGet', 'conversationId', conversationId)
             const localVarPath = `/api/core/conversations/{conversation_id}/workflow-sessions:latest`
-                .replace('{conversation_id}', encodeURIComponent(String(conversationId)));
+                .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -11664,7 +11703,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'conversationId' is not null or undefined
             assertParamExists('apiCoreConversationsConversationIdWorkflowSettingsPatch', 'conversationId', conversationId)
             const localVarPath = `/api/core/conversations/{conversation_id}/workflow-settings`
-                .replace('{conversation_id}', encodeURIComponent(String(conversationId)));
+                .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -11934,7 +11973,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'name' is not null or undefined
             assertParamExists('apiCoreConversationsNameAskAnswersPatch', 'name', name)
             const localVarPath = `/api/core/conversations/{name}:ask-answers`
-                .replace('{name}', encodeURIComponent(String(name)));
+                .replace(`{${"name"}}`, encodeURIComponent(String(name)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -11967,7 +12006,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'name' is not null or undefined
             assertParamExists('apiCoreConversationsNameDelete', 'name', name)
             const localVarPath = `/api/core/conversations/{name}`
-                .replace('{name}', encodeURIComponent(String(name)));
+                .replace(`{${"name"}}`, encodeURIComponent(String(name)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -12001,7 +12040,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'name' is not null or undefined
             assertParamExists('apiCoreConversationsNameDetailGet', 'name', name)
             const localVarPath = `/api/core/conversations/{name}:detail`
-                .replace('{name}', encodeURIComponent(String(name)));
+                .replace(`{${"name"}}`, encodeURIComponent(String(name)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -12035,7 +12074,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'name' is not null or undefined
             assertParamExists('apiCoreConversationsNameGet', 'name', name)
             const localVarPath = `/api/core/conversations/{name}`
-                .replace('{name}', encodeURIComponent(String(name)));
+                .replace(`{${"name"}}`, encodeURIComponent(String(name)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -12073,7 +12112,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'name' is not null or undefined
             assertParamExists('apiCoreConversationsNameHistoryGet', 'name', name)
             const localVarPath = `/api/core/conversations/{name}:history`
-                .replace('{name}', encodeURIComponent(String(name)));
+                .replace(`{${"name"}}`, encodeURIComponent(String(name)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -12126,7 +12165,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'apiCoreConversationsNameTitlePatchRequest' is not null or undefined
             assertParamExists('apiCoreConversationsNameTitlePatch', 'apiCoreConversationsNameTitlePatchRequest', apiCoreConversationsNameTitlePatchRequest)
             const localVarPath = `/api/core/conversations/{name}/title`
-                .replace('{name}', encodeURIComponent(String(name)));
+                .replace(`{${"name"}}`, encodeURIComponent(String(name)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -12164,7 +12203,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'name' is not null or undefined
             assertParamExists('apiCoreConversationsNameTrailGet', 'name', name)
             const localVarPath = `/api/core/conversations/{name}:trail`
-                .replace('{name}', encodeURIComponent(String(name)));
+                .replace(`{${"name"}}`, encodeURIComponent(String(name)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -12468,7 +12507,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'batchAddDatasetMemberRequest' is not null or undefined
             assertParamExists('apiCoreDatasetsDatasetBatchAddMemberPost', 'batchAddDatasetMemberRequest', batchAddDatasetMemberRequest)
             const localVarPath = `/api/core/datasets/{dataset}:batchAddMember`
-                .replace('{dataset}', encodeURIComponent(String(dataset)));
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -12504,7 +12543,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'dataset' is not null or undefined
             assertParamExists('apiCoreDatasetsDatasetDocumentsBatchUpdateTagsPost', 'dataset', dataset)
             const localVarPath = `/api/core/datasets/{dataset}/documents:batchUpdateTags`
-                .replace('{dataset}', encodeURIComponent(String(dataset)));
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -12540,8 +12579,8 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'document' is not null or undefined
             assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentContentGet', 'document', document)
             const localVarPath = `/api/core/datasets/{dataset}/documents/{document}:content`
-                .replace('{dataset}', encodeURIComponent(String(dataset)))
-                .replace('{document}', encodeURIComponent(String(document)));
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"document"}}`, encodeURIComponent(String(document)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -12578,8 +12617,8 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'document' is not null or undefined
             assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentDownloadGet', 'document', document)
             const localVarPath = `/api/core/datasets/{dataset}/documents/{document}:download`
-                .replace('{dataset}', encodeURIComponent(String(dataset)))
-                .replace('{document}', encodeURIComponent(String(document)));
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"document"}}`, encodeURIComponent(String(document)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -12616,8 +12655,8 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'document' is not null or undefined
             assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentSegmentsGet', 'document', document)
             const localVarPath = `/api/core/datasets/{dataset}/documents/{document}/segments`
-                .replace('{dataset}', encodeURIComponent(String(dataset)))
-                .replace('{document}', encodeURIComponent(String(document)));
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"document"}}`, encodeURIComponent(String(document)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -12653,8 +12692,8 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'document' is not null or undefined
             assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentSegmentsSearchPost', 'document', document)
             const localVarPath = `/api/core/datasets/{dataset}/documents/{document}/segments:search`
-                .replace('{dataset}', encodeURIComponent(String(dataset)))
-                .replace('{document}', encodeURIComponent(String(document)));
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"document"}}`, encodeURIComponent(String(document)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -12693,9 +12732,9 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'segment' is not null or undefined
             assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentSegmentsSegmentGet', 'segment', segment)
             const localVarPath = `/api/core/datasets/{dataset}/documents/{document}/segments/{segment}`
-                .replace('{dataset}', encodeURIComponent(String(dataset)))
-                .replace('{document}', encodeURIComponent(String(document)))
-                .replace('{segment}', encodeURIComponent(String(segment)));
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"document"}}`, encodeURIComponent(String(document)))
+                .replace(`{${"segment"}}`, encodeURIComponent(String(segment)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -12728,7 +12767,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'dataset' is not null or undefined
             assertParamExists('apiCoreDatasetsDatasetMembersGet', 'dataset', dataset)
             const localVarPath = `/api/core/datasets/{dataset}/members`
-                .replace('{dataset}', encodeURIComponent(String(dataset)));
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -12765,8 +12804,8 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'groupId' is not null or undefined
             assertParamExists('apiCoreDatasetsDatasetMembersGroupsGroupIdDelete', 'groupId', groupId)
             const localVarPath = `/api/core/datasets/{dataset}/members/groups/{group_id}`
-                .replace('{dataset}', encodeURIComponent(String(dataset)))
-                .replace('{group_id}', encodeURIComponent(String(groupId)));
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"group_id"}}`, encodeURIComponent(String(groupId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -12806,8 +12845,8 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'updateDatasetMemberRequest' is not null or undefined
             assertParamExists('apiCoreDatasetsDatasetMembersGroupsGroupIdPatch', 'updateDatasetMemberRequest', updateDatasetMemberRequest)
             const localVarPath = `/api/core/datasets/{dataset}/members/groups/{group_id}`
-                .replace('{dataset}', encodeURIComponent(String(dataset)))
-                .replace('{group_id}', encodeURIComponent(String(groupId)));
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"group_id"}}`, encodeURIComponent(String(groupId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -12845,7 +12884,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'dataset' is not null or undefined
             assertParamExists('apiCoreDatasetsDatasetMembersSearchPost', 'dataset', dataset)
             const localVarPath = `/api/core/datasets/{dataset}/members:search`
-                .replace('{dataset}', encodeURIComponent(String(dataset)));
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -12888,8 +12927,8 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'userId' is not null or undefined
             assertParamExists('apiCoreDatasetsDatasetMembersUserIdDelete', 'userId', userId)
             const localVarPath = `/api/core/datasets/{dataset}/members/{user_id}`
-                .replace('{dataset}', encodeURIComponent(String(dataset)))
-                .replace('{user_id}', encodeURIComponent(String(userId)));
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"user_id"}}`, encodeURIComponent(String(userId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -12926,8 +12965,8 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'userId' is not null or undefined
             assertParamExists('apiCoreDatasetsDatasetMembersUserIdGet', 'userId', userId)
             const localVarPath = `/api/core/datasets/{dataset}/members/{user_id}`
-                .replace('{dataset}', encodeURIComponent(String(dataset)))
-                .replace('{user_id}', encodeURIComponent(String(userId)));
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"user_id"}}`, encodeURIComponent(String(userId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -12967,8 +13006,8 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'updateDatasetMemberRequest' is not null or undefined
             assertParamExists('apiCoreDatasetsDatasetMembersUserIdPatch', 'updateDatasetMemberRequest', updateDatasetMemberRequest)
             const localVarPath = `/api/core/datasets/{dataset}/members/{user_id}`
-                .replace('{dataset}', encodeURIComponent(String(dataset)))
-                .replace('{user_id}', encodeURIComponent(String(userId)));
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"user_id"}}`, encodeURIComponent(String(userId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -13008,7 +13047,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'dataset' is not null or undefined
             assertParamExists('apiCoreDatasetsDatasetTasksBatchUploadPost', 'dataset', dataset)
             const localVarPath = `/api/core/datasets/{dataset}/tasks:batchUpload`
-                .replace('{dataset}', encodeURIComponent(String(dataset)));
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -13067,7 +13106,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'dataset' is not null or undefined
             assertParamExists('apiCoreDatasetsDatasetUploadsPost', 'dataset', dataset)
             const localVarPath = `/api/core/datasets/{dataset}/uploads`
-                .replace('{dataset}', encodeURIComponent(String(dataset)));
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -13125,8 +13164,8 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'uploadFileId' is not null or undefined
             assertParamExists('apiCoreDatasetsDatasetUploadsUploadFileIdContentGet', 'uploadFileId', uploadFileId)
             const localVarPath = `/api/core/datasets/{dataset}/uploads/{upload_file_id}:content`
-                .replace('{dataset}', encodeURIComponent(String(dataset)))
-                .replace('{upload_file_id}', encodeURIComponent(String(uploadFileId)));
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"upload_file_id"}}`, encodeURIComponent(String(uploadFileId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -13163,8 +13202,8 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'uploadFileId' is not null or undefined
             assertParamExists('apiCoreDatasetsDatasetUploadsUploadFileIdDownloadGet', 'uploadFileId', uploadFileId)
             const localVarPath = `/api/core/datasets/{dataset}/uploads/{upload_file_id}:download`
-                .replace('{dataset}', encodeURIComponent(String(dataset)))
-                .replace('{upload_file_id}', encodeURIComponent(String(uploadFileId)));
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"upload_file_id"}}`, encodeURIComponent(String(uploadFileId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -13258,7 +13297,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'providerId' is not null or undefined
             assertParamExists('apiCoreExportersProviderIdCapabilitiesGet', 'providerId', providerId)
             const localVarPath = `/api/core/exporters/{provider_id}:capabilities`
-                .replace('{provider_id}', encodeURIComponent(String(providerId)));
+                .replace(`{${"provider_id"}}`, encodeURIComponent(String(providerId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -13291,7 +13330,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'providerId' is not null or undefined
             assertParamExists('apiCoreExportersProviderIdExportPost', 'providerId', providerId)
             const localVarPath = `/api/core/exporters/{provider_id}:export`
-                .replace('{provider_id}', encodeURIComponent(String(providerId)));
+                .replace(`{${"provider_id"}}`, encodeURIComponent(String(providerId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -13324,7 +13363,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'provider' is not null or undefined
             assertParamExists('apiCoreExternalChatHostsProviderClaimPost', 'provider', provider)
             const localVarPath = `/api/core/external-chat/hosts/{provider}/claim`
-                .replace('{provider}', encodeURIComponent(String(provider)));
+                .replace(`{${"provider"}}`, encodeURIComponent(String(provider)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -13357,7 +13396,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'provider' is not null or undefined
             assertParamExists('apiCoreExternalChatHostsProviderStatusGet', 'provider', provider)
             const localVarPath = `/api/core/external-chat/hosts/{provider}/status`
-                .replace('{provider}', encodeURIComponent(String(provider)));
+                .replace(`{${"provider"}}`, encodeURIComponent(String(provider)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -13390,7 +13429,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'provider' is not null or undefined
             assertParamExists('apiCoreExternalChatProvidersProviderSessionsGet', 'provider', provider)
             const localVarPath = `/api/core/external-chat/providers/{provider}/sessions`
-                .replace('{provider}', encodeURIComponent(String(provider)));
+                .replace(`{${"provider"}}`, encodeURIComponent(String(provider)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -13423,7 +13462,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'provider' is not null or undefined
             assertParamExists('apiCoreExternalChatProvidersProviderSessionsSyncPost', 'provider', provider)
             const localVarPath = `/api/core/external-chat/providers/{provider}/sessions:sync`
-                .replace('{provider}', encodeURIComponent(String(provider)));
+                .replace(`{${"provider"}}`, encodeURIComponent(String(provider)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -13459,8 +13498,8 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'threadId' is not null or undefined
             assertParamExists('apiCoreExternalChatProvidersProviderSessionsThreadIdBindingPost', 'threadId', threadId)
             const localVarPath = `/api/core/external-chat/providers/{provider}/sessions/{thread_id}/binding`
-                .replace('{provider}', encodeURIComponent(String(provider)))
-                .replace('{thread_id}', encodeURIComponent(String(threadId)));
+                .replace(`{${"provider"}}`, encodeURIComponent(String(provider)))
+                .replace(`{${"thread_id"}}`, encodeURIComponent(String(threadId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -13522,7 +13561,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'runId' is not null or undefined
             assertParamExists('apiCoreExternalChatRunsRunIdAttachmentPost', 'runId', runId)
             const localVarPath = `/api/core/external-chat/runs/{run_id}:attachment`
-                .replace('{run_id}', encodeURIComponent(String(runId)));
+                .replace(`{${"run_id"}}`, encodeURIComponent(String(runId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -13555,7 +13594,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'runId' is not null or undefined
             assertParamExists('apiCoreExternalChatRunsRunIdEventPost', 'runId', runId)
             const localVarPath = `/api/core/external-chat/runs/{run_id}:event`
-                .replace('{run_id}', encodeURIComponent(String(runId)));
+                .replace(`{${"run_id"}}`, encodeURIComponent(String(runId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -13588,7 +13627,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'runId' is not null or undefined
             assertParamExists('apiCoreExternalChatRunsRunIdHeartbeatPost', 'runId', runId)
             const localVarPath = `/api/core/external-chat/runs/{run_id}:heartbeat`
-                .replace('{run_id}', encodeURIComponent(String(runId)));
+                .replace(`{${"run_id"}}`, encodeURIComponent(String(runId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -13597,6 +13636,64 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             }
 
             const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /health
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreHealthGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/health`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /hello
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreHelloGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/hello`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
@@ -13654,8 +13751,8 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'aclId' is not null or undefined
             assertParamExists('apiCoreKbKbIdAclAclIdDelete', 'aclId', aclId)
             const localVarPath = `/api/core/kb/{kb_id}/acl/{acl_id}`
-                .replace('{kb_id}', encodeURIComponent(String(kbId)))
-                .replace('{acl_id}', encodeURIComponent(String(aclId)));
+                .replace(`{${"kb_id"}}`, encodeURIComponent(String(kbId)))
+                .replace(`{${"acl_id"}}`, encodeURIComponent(String(aclId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -13695,8 +13792,8 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'updateACLRequest' is not null or undefined
             assertParamExists('apiCoreKbKbIdAclAclIdPut', 'updateACLRequest', updateACLRequest)
             const localVarPath = `/api/core/kb/{kb_id}/acl/{acl_id}`
-                .replace('{kb_id}', encodeURIComponent(String(kbId)))
-                .replace('{acl_id}', encodeURIComponent(String(aclId)));
+                .replace(`{${"kb_id"}}`, encodeURIComponent(String(kbId)))
+                .replace(`{${"acl_id"}}`, encodeURIComponent(String(aclId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -13735,7 +13832,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'batchAddACLRequest' is not null or undefined
             assertParamExists('apiCoreKbKbIdAclBatchPost', 'batchAddACLRequest', batchAddACLRequest)
             const localVarPath = `/api/core/kb/{kb_id}/acl/batch`
-                .replace('{kb_id}', encodeURIComponent(String(kbId)));
+                .replace(`{${"kb_id"}}`, encodeURIComponent(String(kbId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -13772,7 +13869,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'kbId' is not null or undefined
             assertParamExists('apiCoreKbKbIdAclGet', 'kbId', kbId)
             const localVarPath = `/api/core/kb/{kb_id}/acl`
-                .replace('{kb_id}', encodeURIComponent(String(kbId)));
+                .replace(`{${"kb_id"}}`, encodeURIComponent(String(kbId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -13813,7 +13910,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'addACLRequest' is not null or undefined
             assertParamExists('apiCoreKbKbIdAclPost', 'addACLRequest', addACLRequest)
             const localVarPath = `/api/core/kb/{kb_id}/acl`
-                .replace('{kb_id}', encodeURIComponent(String(kbId)));
+                .replace(`{${"kb_id"}}`, encodeURIComponent(String(kbId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -13849,7 +13946,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'kbId' is not null or undefined
             assertParamExists('apiCoreKbKbIdAuthorizationGet', 'kbId', kbId)
             const localVarPath = `/api/core/kb/{kb_id}/authorization`
-                .replace('{kb_id}', encodeURIComponent(String(kbId)));
+                .replace(`{${"kb_id"}}`, encodeURIComponent(String(kbId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -13886,7 +13983,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'setKBAuthorizationRequest' is not null or undefined
             assertParamExists('apiCoreKbKbIdAuthorizationPost', 'setKBAuthorizationRequest', setKBAuthorizationRequest)
             const localVarPath = `/api/core/kb/{kb_id}/authorization`
-                .replace('{kb_id}', encodeURIComponent(String(kbId)));
+                .replace(`{${"kb_id"}}`, encodeURIComponent(String(kbId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -13925,7 +14022,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'kbId' is not null or undefined
             assertParamExists('apiCoreKbKbIdCanGet', 'kbId', kbId)
             const localVarPath = `/api/core/kb/{kb_id}/can`
-                .replace('{kb_id}', encodeURIComponent(String(kbId)));
+                .replace(`{${"kb_id"}}`, encodeURIComponent(String(kbId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -13963,7 +14060,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'kbId' is not null or undefined
             assertParamExists('apiCoreKbKbIdPermissionGet', 'kbId', kbId)
             const localVarPath = `/api/core/kb/{kb_id}/permission`
-                .replace('{kb_id}', encodeURIComponent(String(kbId)));
+                .replace(`{${"kb_id"}}`, encodeURIComponent(String(kbId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -14169,7 +14266,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'episodeId' is not null or undefined
             assertParamExists('apiCoreMemoryEpisodesEpisodeIdDelete', 'episodeId', episodeId)
             const localVarPath = `/api/core/memory/episodes/{episode_id}`
-                .replace('{episode_id}', encodeURIComponent(String(episodeId)));
+                .replace(`{${"episode_id"}}`, encodeURIComponent(String(episodeId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -14203,7 +14300,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'episodeId' is not null or undefined
             assertParamExists('apiCoreMemoryEpisodesEpisodeIdGet', 'episodeId', episodeId)
             const localVarPath = `/api/core/memory/episodes/{episode_id}`
-                .replace('{episode_id}', encodeURIComponent(String(episodeId)));
+                .replace(`{${"episode_id"}}`, encodeURIComponent(String(episodeId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -14307,7 +14404,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'name' is not null or undefined
             assertParamExists('apiCoreMemoryPreferencesNameDelete', 'name', name)
             const localVarPath = `/api/core/memory/preferences/{name}`
-                .replace('{name}', encodeURIComponent(String(name)));
+                .replace(`{${"name"}}`, encodeURIComponent(String(name)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -14341,7 +14438,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'name' is not null or undefined
             assertParamExists('apiCoreMemoryPreferencesNameGet', 'name', name)
             const localVarPath = `/api/core/memory/preferences/{name}`
-                .replace('{name}', encodeURIComponent(String(name)));
+                .replace(`{${"name"}}`, encodeURIComponent(String(name)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -14470,7 +14567,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'taskId' is not null or undefined
             assertParamExists('apiCoreMemoryPreferencesOrganizeTaskIdGet', 'taskId', taskId)
             const localVarPath = `/api/core/memory/preferences:organize/{task_id}`
-                .replace('{task_id}', encodeURIComponent(String(taskId)));
+                .replace(`{${"task_id"}}`, encodeURIComponent(String(taskId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -14837,8 +14934,8 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'groupId' is not null or undefined
             assertParamExists('apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysDelete', 'groupId', groupId)
             const localVarPath = `/api/core/model_providers/{model_provider_id}/groups/{group_id}/keys`
-                .replace('{model_provider_id}', encodeURIComponent(String(modelProviderId)))
-                .replace('{group_id}', encodeURIComponent(String(groupId)));
+                .replace(`{${"model_provider_id"}}`, encodeURIComponent(String(modelProviderId)))
+                .replace(`{${"group_id"}}`, encodeURIComponent(String(groupId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -14874,8 +14971,8 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'groupId' is not null or undefined
             assertParamExists('apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysPost', 'groupId', groupId)
             const localVarPath = `/api/core/model_providers/{model_provider_id}/groups/{group_id}/keys`
-                .replace('{model_provider_id}', encodeURIComponent(String(modelProviderId)))
-                .replace('{group_id}', encodeURIComponent(String(groupId)));
+                .replace(`{${"model_provider_id"}}`, encodeURIComponent(String(modelProviderId)))
+                .replace(`{${"group_id"}}`, encodeURIComponent(String(groupId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -14966,7 +15063,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'workflowRef' is not null or undefined
             assertParamExists('apiCorePublishedWorkflowsWorkflowRefArchivePost', 'workflowRef', workflowRef)
             const localVarPath = `/api/core/published-workflows/{workflow_ref:.+}:archive`
-                .replace('{workflow_ref:.+}', encodeURIComponent(String(workflowRef)));
+                .replace(`{${"workflow_ref:.+"}}`, encodeURIComponent(String(workflowRef)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -14999,7 +15096,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'workflowRef' is not null or undefined
             assertParamExists('apiCorePublishedWorkflowsWorkflowRefRestorePost', 'workflowRef', workflowRef)
             const localVarPath = `/api/core/published-workflows/{workflow_ref:.+}:restore`
-                .replace('{workflow_ref:.+}', encodeURIComponent(String(workflowRef)));
+                .replace(`{${"workflow_ref:.+"}}`, encodeURIComponent(String(workflowRef)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -15032,7 +15129,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'workflowRef' is not null or undefined
             assertParamExists('apiCorePublishedWorkflowsWorkflowRefRollbackPost', 'workflowRef', workflowRef)
             const localVarPath = `/api/core/published-workflows/{workflow_ref:.+}:rollback`
-                .replace('{workflow_ref:.+}', encodeURIComponent(String(workflowRef)));
+                .replace(`{${"workflow_ref:.+"}}`, encodeURIComponent(String(workflowRef)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -15065,7 +15162,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'workflowRef' is not null or undefined
             assertParamExists('apiCorePublishedWorkflowsWorkflowRefVersionsGet', 'workflowRef', workflowRef)
             const localVarPath = `/api/core/published-workflows/{workflow_ref:.+}/versions`
-                .replace('{workflow_ref:.+}', encodeURIComponent(String(workflowRef)));
+                .replace(`{${"workflow_ref:.+"}}`, encodeURIComponent(String(workflowRef)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -15101,8 +15198,8 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'revisionId' is not null or undefined
             assertParamExists('apiCorePublishedWorkflowsWorkflowRefVersionsRevisionIdEditPost', 'revisionId', revisionId)
             const localVarPath = `/api/core/published-workflows/{workflow_ref:.+}/versions/{revision_id}:edit`
-                .replace('{workflow_ref:.+}', encodeURIComponent(String(workflowRef)))
-                .replace('{revision_id}', encodeURIComponent(String(revisionId)));
+                .replace(`{${"workflow_ref:.+"}}`, encodeURIComponent(String(workflowRef)))
+                .replace(`{${"revision_id"}}`, encodeURIComponent(String(revisionId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -15138,8 +15235,8 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'revisionId' is not null or undefined
             assertParamExists('apiCorePublishedWorkflowsWorkflowRefVersionsRevisionIdGet', 'revisionId', revisionId)
             const localVarPath = `/api/core/published-workflows/{workflow_ref:.+}/versions/{revision_id}`
-                .replace('{workflow_ref:.+}', encodeURIComponent(String(workflowRef)))
-                .replace('{revision_id}', encodeURIComponent(String(revisionId)));
+                .replace(`{${"workflow_ref:.+"}}`, encodeURIComponent(String(workflowRef)))
+                .replace(`{${"revision_id"}}`, encodeURIComponent(String(revisionId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -15230,7 +15327,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'scheduleId' is not null or undefined
             assertParamExists('apiCoreSchedulesScheduleIdCancelPost', 'scheduleId', scheduleId)
             const localVarPath = `/api/core/schedules/{schedule_id}:cancel`
-                .replace('{schedule_id}', encodeURIComponent(String(scheduleId)));
+                .replace(`{${"schedule_id"}}`, encodeURIComponent(String(scheduleId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -15263,7 +15360,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'scheduleId' is not null or undefined
             assertParamExists('apiCoreSchedulesScheduleIdDelete', 'scheduleId', scheduleId)
             const localVarPath = `/api/core/schedules/{schedule_id}`
-                .replace('{schedule_id}', encodeURIComponent(String(scheduleId)));
+                .replace(`{${"schedule_id"}}`, encodeURIComponent(String(scheduleId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -15296,7 +15393,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'scheduleId' is not null or undefined
             assertParamExists('apiCoreSchedulesScheduleIdEnablePost', 'scheduleId', scheduleId)
             const localVarPath = `/api/core/schedules/{schedule_id}:enable`
-                .replace('{schedule_id}', encodeURIComponent(String(scheduleId)));
+                .replace(`{${"schedule_id"}}`, encodeURIComponent(String(scheduleId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -15329,7 +15426,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'scheduleId' is not null or undefined
             assertParamExists('apiCoreSchedulesScheduleIdMovePost', 'scheduleId', scheduleId)
             const localVarPath = `/api/core/schedules/{schedule_id}:move`
-                .replace('{schedule_id}', encodeURIComponent(String(scheduleId)));
+                .replace(`{${"schedule_id"}}`, encodeURIComponent(String(scheduleId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -15362,7 +15459,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'scheduleId' is not null or undefined
             assertParamExists('apiCoreSchedulesScheduleIdPut', 'scheduleId', scheduleId)
             const localVarPath = `/api/core/schedules/{schedule_id}`
-                .replace('{schedule_id}', encodeURIComponent(String(scheduleId)));
+                .replace(`{${"schedule_id"}}`, encodeURIComponent(String(scheduleId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -15395,7 +15492,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'scheduleId' is not null or undefined
             assertParamExists('apiCoreSchedulesScheduleIdRunNowPost', 'scheduleId', scheduleId)
             const localVarPath = `/api/core/schedules/{schedule_id}:run-now`
-                .replace('{schedule_id}', encodeURIComponent(String(scheduleId)));
+                .replace(`{${"schedule_id"}}`, encodeURIComponent(String(scheduleId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -15518,8 +15615,8 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'reviewId' is not null or undefined
             assertParamExists('apiCoreSkillsSkillIdDraftReviewReviewIdActionsPost', 'reviewId', reviewId)
             const localVarPath = `/api/core/skills/{skill_id}/draft-review/{review_id}/actions`
-                .replace('{skill_id}', encodeURIComponent(String(skillId)))
-                .replace('{review_id}', encodeURIComponent(String(reviewId)));
+                .replace(`{${"skill_id"}}`, encodeURIComponent(String(skillId)))
+                .replace(`{${"review_id"}}`, encodeURIComponent(String(reviewId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -15555,8 +15652,8 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'reviewId' is not null or undefined
             assertParamExists('apiCoreSkillsSkillIdDraftReviewReviewIdCommitPost', 'reviewId', reviewId)
             const localVarPath = `/api/core/skills/{skill_id}/draft-review/{review_id}:commit`
-                .replace('{skill_id}', encodeURIComponent(String(skillId)))
-                .replace('{review_id}', encodeURIComponent(String(reviewId)));
+                .replace(`{${"skill_id"}}`, encodeURIComponent(String(skillId)))
+                .replace(`{${"review_id"}}`, encodeURIComponent(String(reviewId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -15592,8 +15689,8 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'reviewId' is not null or undefined
             assertParamExists('apiCoreSkillsSkillIdDraftReviewReviewIdUndoPost', 'reviewId', reviewId)
             const localVarPath = `/api/core/skills/{skill_id}/draft-review/{review_id}:undo`
-                .replace('{skill_id}', encodeURIComponent(String(skillId)))
-                .replace('{review_id}', encodeURIComponent(String(reviewId)));
+                .replace(`{${"skill_id"}}`, encodeURIComponent(String(skillId)))
+                .replace(`{${"review_id"}}`, encodeURIComponent(String(reviewId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -15602,6 +15699,39 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             }
 
             const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /skills/{skill_id}/linked-workflows
+         * @param {string} skillId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreSkillsSkillIdLinkedWorkflowsGet: async (skillId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'skillId' is not null or undefined
+            assertParamExists('apiCoreSkillsSkillIdLinkedWorkflowsGet', 'skillId', skillId)
+            const localVarPath = `/api/core/skills/{skill_id}/linked-workflows`
+                .replace(`{${"skill_id"}}`, encodeURIComponent(String(skillId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
@@ -15626,7 +15756,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'path' is not null or undefined
             assertParamExists('apiCoreStaticFilesPathGet', 'path', path)
             const localVarPath = `/api/core/static-files/{path:.*}`
-                .replace('{path:.*}', encodeURIComponent(String(path)));
+                .replace(`{${"path:.*"}}`, encodeURIComponent(String(path)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -15893,7 +16023,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'scheduleId' is not null or undefined
             assertParamExists('apiCoreTaskCenterSchedulesScheduleIdTasksGet', 'scheduleId', scheduleId)
             const localVarPath = `/api/core/task-center/schedules/{schedule_id}/tasks`
-                .replace('{schedule_id}', encodeURIComponent(String(scheduleId)));
+                .replace(`{${"schedule_id"}}`, encodeURIComponent(String(scheduleId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -15990,7 +16120,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'taskId' is not null or undefined
             assertParamExists('apiCoreTaskCenterTasksTaskIdCancelPost', 'taskId', taskId)
             const localVarPath = `/api/core/task-center/tasks/{task_id}:cancel`
-                .replace('{task_id}', encodeURIComponent(String(taskId)));
+                .replace(`{${"task_id"}}`, encodeURIComponent(String(taskId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -16023,7 +16153,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'taskId' is not null or undefined
             assertParamExists('apiCoreTaskCenterTasksTaskIdGet', 'taskId', taskId)
             const localVarPath = `/api/core/task-center/tasks/{task_id}`
-                .replace('{task_id}', encodeURIComponent(String(taskId)));
+                .replace(`{${"task_id"}}`, encodeURIComponent(String(taskId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -16057,7 +16187,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'taskId' is not null or undefined
             assertParamExists('apiCoreTaskCenterTasksTaskIdRemovePost', 'taskId', taskId)
             const localVarPath = `/api/core/task-center/tasks/{task_id}:remove`
-                .replace('{task_id}', encodeURIComponent(String(taskId)));
+                .replace(`{${"task_id"}}`, encodeURIComponent(String(taskId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -16090,7 +16220,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'taskId' is not null or undefined
             assertParamExists('apiCoreTasksTaskIdArtifactsGet', 'taskId', taskId)
             const localVarPath = `/api/core/tasks/{task_id}/artifacts`
-                .replace('{task_id}', encodeURIComponent(String(taskId)));
+                .replace(`{${"task_id"}}`, encodeURIComponent(String(taskId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -16123,7 +16253,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'taskId' is not null or undefined
             assertParamExists('apiCoreTasksTaskIdGet', 'taskId', taskId)
             const localVarPath = `/api/core/tasks/{task_id}`
-                .replace('{task_id}', encodeURIComponent(String(taskId)));
+                .replace(`{${"task_id"}}`, encodeURIComponent(String(taskId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -16156,7 +16286,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'taskId' is not null or undefined
             assertParamExists('apiCoreTasksTaskIdStreamGet', 'taskId', taskId)
             const localVarPath = `/api/core/tasks/{task_id}:stream`
-                .replace('{task_id}', encodeURIComponent(String(taskId)));
+                .replace(`{${"task_id"}}`, encodeURIComponent(String(taskId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -16258,7 +16388,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'artifactId' is not null or undefined
             assertParamExists('apiCoreWorkflowArtifactsArtifactIdDelete', 'artifactId', artifactId)
             const localVarPath = `/api/core/workflow-artifacts/{artifact_id}`
-                .replace('{artifact_id}', encodeURIComponent(String(artifactId)));
+                .replace(`{${"artifact_id"}}`, encodeURIComponent(String(artifactId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -16291,7 +16421,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'artifactId' is not null or undefined
             assertParamExists('apiCoreWorkflowArtifactsArtifactIdGet', 'artifactId', artifactId)
             const localVarPath = `/api/core/workflow-artifacts/{artifact_id}`
-                .replace('{artifact_id}', encodeURIComponent(String(artifactId)));
+                .replace(`{${"artifact_id"}}`, encodeURIComponent(String(artifactId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -16324,7 +16454,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'artifactId' is not null or undefined
             assertParamExists('apiCoreWorkflowArtifactsArtifactIdPatch', 'artifactId', artifactId)
             const localVarPath = `/api/core/workflow-artifacts/{artifact_id}`
-                .replace('{artifact_id}', encodeURIComponent(String(artifactId)));
+                .replace(`{${"artifact_id"}}`, encodeURIComponent(String(artifactId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -16357,7 +16487,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'draftId' is not null or undefined
             assertParamExists('apiCoreWorkflowAuthoringV1DraftsDraftIdDiagnosticsGet', 'draftId', draftId)
             const localVarPath = `/api/core/workflow-authoring/v1/drafts/{draft_id}/diagnostics`
-                .replace('{draft_id}', encodeURIComponent(String(draftId)));
+                .replace(`{${"draft_id"}}`, encodeURIComponent(String(draftId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -16390,7 +16520,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'draftId' is not null or undefined
             assertParamExists('apiCoreWorkflowAuthoringV1DraftsDraftIdFilesPut', 'draftId', draftId)
             const localVarPath = `/api/core/workflow-authoring/v1/drafts/{draft_id}/files`
-                .replace('{draft_id}', encodeURIComponent(String(draftId)));
+                .replace(`{${"draft_id"}}`, encodeURIComponent(String(draftId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -16423,7 +16553,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'draftId' is not null or undefined
             assertParamExists('apiCoreWorkflowAuthoringV1DraftsDraftIdPublishPost', 'draftId', draftId)
             const localVarPath = `/api/core/workflow-authoring/v1/drafts/{draft_id}:publish`
-                .replace('{draft_id}', encodeURIComponent(String(draftId)));
+                .replace(`{${"draft_id"}}`, encodeURIComponent(String(draftId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -16543,7 +16673,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'commandId' is not null or undefined
             assertParamExists('apiCoreWorkflowCommandsCommandIdGet', 'commandId', commandId)
             const localVarPath = `/api/core/workflow-commands/{command_id}`
-                .replace('{command_id}', encodeURIComponent(String(commandId)));
+                .replace(`{${"command_id"}}`, encodeURIComponent(String(commandId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -16552,6 +16682,35 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             }
 
             const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /workflow-conversions:preflight
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowConversionsPreflightPost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/workflow-conversions:preflight`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
@@ -16576,7 +16735,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'draftId' is not null or undefined
             assertParamExists('apiCoreWorkflowDraftsDraftIdAiGeneratePost', 'draftId', draftId)
             const localVarPath = `/api/core/workflow-drafts/{draft_id}:ai-generate`
-                .replace('{draft_id}', encodeURIComponent(String(draftId)));
+                .replace(`{${"draft_id"}}`, encodeURIComponent(String(draftId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -16609,7 +16768,40 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'draftId' is not null or undefined
             assertParamExists('apiCoreWorkflowDraftsDraftIdAiRepairPost', 'draftId', draftId)
             const localVarPath = `/api/core/workflow-drafts/{draft_id}:ai-repair`
-                .replace('{draft_id}', encodeURIComponent(String(draftId)));
+                .replace(`{${"draft_id"}}`, encodeURIComponent(String(draftId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /workflow-drafts/{draft_id}:cancel-generation
+         * @param {string} draftId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowDraftsDraftIdCancelGenerationPost: async (draftId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'draftId' is not null or undefined
+            assertParamExists('apiCoreWorkflowDraftsDraftIdCancelGenerationPost', 'draftId', draftId)
+            const localVarPath = `/api/core/workflow-drafts/{draft_id}:cancel-generation`
+                .replace(`{${"draft_id"}}`, encodeURIComponent(String(draftId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -16642,7 +16834,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'draftId' is not null or undefined
             assertParamExists('apiCoreWorkflowDraftsDraftIdConfirmWorkflowPost', 'draftId', draftId)
             const localVarPath = `/api/core/workflow-drafts/{draft_id}:confirm-workflow`
-                .replace('{draft_id}', encodeURIComponent(String(draftId)));
+                .replace(`{${"draft_id"}}`, encodeURIComponent(String(draftId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -16675,7 +16867,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'draftId' is not null or undefined
             assertParamExists('apiCoreWorkflowDraftsDraftIdCopyPost', 'draftId', draftId)
             const localVarPath = `/api/core/workflow-drafts/{draft_id}:copy`
-                .replace('{draft_id}', encodeURIComponent(String(draftId)));
+                .replace(`{${"draft_id"}}`, encodeURIComponent(String(draftId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -16708,7 +16900,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'draftId' is not null or undefined
             assertParamExists('apiCoreWorkflowDraftsDraftIdDelete', 'draftId', draftId)
             const localVarPath = `/api/core/workflow-drafts/{draft_id}`
-                .replace('{draft_id}', encodeURIComponent(String(draftId)));
+                .replace(`{${"draft_id"}}`, encodeURIComponent(String(draftId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -16741,7 +16933,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'draftId' is not null or undefined
             assertParamExists('apiCoreWorkflowDraftsDraftIdGenerationAnalysisGet', 'draftId', draftId)
             const localVarPath = `/api/core/workflow-drafts/{draft_id}/generation-analysis`
-                .replace('{draft_id}', encodeURIComponent(String(draftId)));
+                .replace(`{${"draft_id"}}`, encodeURIComponent(String(draftId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -16774,7 +16966,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'draftId' is not null or undefined
             assertParamExists('apiCoreWorkflowDraftsDraftIdGet', 'draftId', draftId)
             const localVarPath = `/api/core/workflow-drafts/{draft_id}`
-                .replace('{draft_id}', encodeURIComponent(String(draftId)));
+                .replace(`{${"draft_id"}}`, encodeURIComponent(String(draftId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -16807,7 +16999,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'draftId' is not null or undefined
             assertParamExists('apiCoreWorkflowDraftsDraftIdPublishPost', 'draftId', draftId)
             const localVarPath = `/api/core/workflow-drafts/{draft_id}:publish`
-                .replace('{draft_id}', encodeURIComponent(String(draftId)));
+                .replace(`{${"draft_id"}}`, encodeURIComponent(String(draftId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -16840,7 +17032,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'draftId' is not null or undefined
             assertParamExists('apiCoreWorkflowDraftsDraftIdPurgeDelete', 'draftId', draftId)
             const localVarPath = `/api/core/workflow-drafts/{draft_id}:purge`
-                .replace('{draft_id}', encodeURIComponent(String(draftId)));
+                .replace(`{${"draft_id"}}`, encodeURIComponent(String(draftId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -16874,7 +17066,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'draftId' is not null or undefined
             assertParamExists('apiCoreWorkflowDraftsDraftIdRepairPreviewPost', 'draftId', draftId)
             const localVarPath = `/api/core/workflow-drafts/{draft_id}:repair-preview`
-                .replace('{draft_id}', encodeURIComponent(String(draftId)));
+                .replace(`{${"draft_id"}}`, encodeURIComponent(String(draftId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -16910,8 +17102,8 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'repairId' is not null or undefined
             assertParamExists('apiCoreWorkflowDraftsDraftIdRepairRunsRepairIdGet', 'repairId', repairId)
             const localVarPath = `/api/core/workflow-drafts/{draft_id}/repair-runs/{repair_id}`
-                .replace('{draft_id}', encodeURIComponent(String(draftId)))
-                .replace('{repair_id}', encodeURIComponent(String(repairId)));
+                .replace(`{${"draft_id"}}`, encodeURIComponent(String(draftId)))
+                .replace(`{${"repair_id"}}`, encodeURIComponent(String(repairId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -16944,7 +17136,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'draftId' is not null or undefined
             assertParamExists('apiCoreWorkflowDraftsDraftIdRestorePost', 'draftId', draftId)
             const localVarPath = `/api/core/workflow-drafts/{draft_id}:restore`
-                .replace('{draft_id}', encodeURIComponent(String(draftId)));
+                .replace(`{${"draft_id"}}`, encodeURIComponent(String(draftId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -16978,7 +17170,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'draftId' is not null or undefined
             assertParamExists('apiCoreWorkflowDraftsDraftIdSavePost', 'draftId', draftId)
             const localVarPath = `/api/core/workflow-drafts/{draft_id}:save`
-                .replace('{draft_id}', encodeURIComponent(String(draftId)));
+                .replace(`{${"draft_id"}}`, encodeURIComponent(String(draftId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -17011,7 +17203,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'draftId' is not null or undefined
             assertParamExists('apiCoreWorkflowDraftsDraftIdValidatePost', 'draftId', draftId)
             const localVarPath = `/api/core/workflow-drafts/{draft_id}:validate`
-                .replace('{draft_id}', encodeURIComponent(String(draftId)));
+                .replace(`{${"draft_id"}}`, encodeURIComponent(String(draftId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -17235,7 +17427,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'resourceId' is not null or undefined
             assertParamExists('apiCoreWorkflowInputResourcesResourceIdGet', 'resourceId', resourceId)
             const localVarPath = `/api/core/workflow-input-resources/{resource_id}`
-                .replace('{resource_id}', encodeURIComponent(String(resourceId)));
+                .replace(`{${"resource_id"}}`, encodeURIComponent(String(resourceId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -17297,7 +17489,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'preparationId' is not null or undefined
             assertParamExists('apiCoreWorkflowPreparationsPreparationIdConsumePost', 'preparationId', preparationId)
             const localVarPath = `/api/core/workflow-preparations/{preparation_id}:consume`
-                .replace('{preparation_id}', encodeURIComponent(String(preparationId)));
+                .replace(`{${"preparation_id"}}`, encodeURIComponent(String(preparationId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -17359,7 +17551,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'workflowId' is not null or undefined
             assertParamExists('apiCoreWorkflowRuntimeV1WorkflowsWorkflowIdGet', 'workflowId', workflowId)
             const localVarPath = `/api/core/workflow-runtime/v1/workflows/{workflow_id}`
-                .replace('{workflow_id}', encodeURIComponent(String(workflowId)));
+                .replace(`{${"workflow_id"}}`, encodeURIComponent(String(workflowId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -17421,7 +17613,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'sessionId' is not null or undefined
             assertParamExists('apiCoreWorkflowSessionsSessionIdAdvanceStepAndHandOffPost', 'sessionId', sessionId)
             const localVarPath = `/api/core/workflow-sessions/{session_id}:advance-step-and-hand-off`
-                .replace('{session_id}', encodeURIComponent(String(sessionId)));
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -17454,7 +17646,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'sessionId' is not null or undefined
             assertParamExists('apiCoreWorkflowSessionsSessionIdAdvanceStepPost', 'sessionId', sessionId)
             const localVarPath = `/api/core/workflow-sessions/{session_id}:advance-step`
-                .replace('{session_id}', encodeURIComponent(String(sessionId)));
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -17487,7 +17679,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'sessionId' is not null or undefined
             assertParamExists('apiCoreWorkflowSessionsSessionIdApprovalPreferencePost', 'sessionId', sessionId)
             const localVarPath = `/api/core/workflow-sessions/{session_id}:approval-preference`
-                .replace('{session_id}', encodeURIComponent(String(sessionId)));
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -17520,7 +17712,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'sessionId' is not null or undefined
             assertParamExists('apiCoreWorkflowSessionsSessionIdArtifactsGet', 'sessionId', sessionId)
             const localVarPath = `/api/core/workflow-sessions/{session_id}/artifacts`
-                .replace('{session_id}', encodeURIComponent(String(sessionId)));
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -17553,7 +17745,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'sessionId' is not null or undefined
             assertParamExists('apiCoreWorkflowSessionsSessionIdArtifactsPost', 'sessionId', sessionId)
             const localVarPath = `/api/core/workflow-sessions/{session_id}/artifacts`
-                .replace('{session_id}', encodeURIComponent(String(sessionId)));
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -17586,7 +17778,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'sessionId' is not null or undefined
             assertParamExists('apiCoreWorkflowSessionsSessionIdDismissPost', 'sessionId', sessionId)
             const localVarPath = `/api/core/workflow-sessions/{session_id}:dismiss`
-                .replace('{session_id}', encodeURIComponent(String(sessionId)));
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -17619,7 +17811,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'sessionId' is not null or undefined
             assertParamExists('apiCoreWorkflowSessionsSessionIdEventsGet', 'sessionId', sessionId)
             const localVarPath = `/api/core/workflow-sessions/{session_id}/events`
-                .replace('{session_id}', encodeURIComponent(String(sessionId)));
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -17652,7 +17844,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'sessionId' is not null or undefined
             assertParamExists('apiCoreWorkflowSessionsSessionIdGet', 'sessionId', sessionId)
             const localVarPath = `/api/core/workflow-sessions/{session_id}`
-                .replace('{session_id}', encodeURIComponent(String(sessionId)));
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -17688,8 +17880,8 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'attemptId' is not null or undefined
             assertParamExists('apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdBeginPost', 'attemptId', attemptId)
             const localVarPath = `/api/core/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:begin`
-                .replace('{session_id}', encodeURIComponent(String(sessionId)))
-                .replace('{attempt_id}', encodeURIComponent(String(attemptId)));
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)))
+                .replace(`{${"attempt_id"}}`, encodeURIComponent(String(attemptId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -17725,8 +17917,8 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'attemptId' is not null or undefined
             assertParamExists('apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdResumePost', 'attemptId', attemptId)
             const localVarPath = `/api/core/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:resume`
-                .replace('{session_id}', encodeURIComponent(String(sessionId)))
-                .replace('{attempt_id}', encodeURIComponent(String(attemptId)));
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)))
+                .replace(`{${"attempt_id"}}`, encodeURIComponent(String(attemptId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -17762,8 +17954,8 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'attemptId' is not null or undefined
             assertParamExists('apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdSubmitPost', 'attemptId', attemptId)
             const localVarPath = `/api/core/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:submit`
-                .replace('{session_id}', encodeURIComponent(String(sessionId)))
-                .replace('{attempt_id}', encodeURIComponent(String(attemptId)));
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)))
+                .replace(`{${"attempt_id"}}`, encodeURIComponent(String(attemptId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -17796,7 +17988,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'sessionId' is not null or undefined
             assertParamExists('apiCoreWorkflowSessionsSessionIdInputBindingsGet', 'sessionId', sessionId)
             const localVarPath = `/api/core/workflow-sessions/{session_id}/input-bindings`
-                .replace('{session_id}', encodeURIComponent(String(sessionId)));
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -17829,7 +18021,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'sessionId' is not null or undefined
             assertParamExists('apiCoreWorkflowSessionsSessionIdInputBindingsPost', 'sessionId', sessionId)
             const localVarPath = `/api/core/workflow-sessions/{session_id}/input-bindings`
-                .replace('{session_id}', encodeURIComponent(String(sessionId)));
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -17862,7 +18054,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'sessionId' is not null or undefined
             assertParamExists('apiCoreWorkflowSessionsSessionIdProjectionGet', 'sessionId', sessionId)
             const localVarPath = `/api/core/workflow-sessions/{session_id}/projection`
-                .replace('{session_id}', encodeURIComponent(String(sessionId)));
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -17895,7 +18087,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'sessionId' is not null or undefined
             assertParamExists('apiCoreWorkflowSessionsSessionIdRestorePost', 'sessionId', sessionId)
             const localVarPath = `/api/core/workflow-sessions/{session_id}:restore`
-                .replace('{session_id}', encodeURIComponent(String(sessionId)));
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -17928,7 +18120,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'sessionId' is not null or undefined
             assertParamExists('apiCoreWorkflowSessionsSessionIdResumePost', 'sessionId', sessionId)
             const localVarPath = `/api/core/workflow-sessions/{session_id}:resume`
-                .replace('{session_id}', encodeURIComponent(String(sessionId)));
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -17961,7 +18153,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'sessionId' is not null or undefined
             assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsGet', 'sessionId', sessionId)
             const localVarPath = `/api/core/workflow-sessions/{session_id}/slots`
-                .replace('{session_id}', encodeURIComponent(String(sessionId)));
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -18000,9 +18192,9 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'listIndex' is not null or undefined
             assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexActionExecutePost', 'listIndex', listIndex)
             const localVarPath = `/api/core/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:action-execute`
-                .replace('{session_id}', encodeURIComponent(String(sessionId)))
-                .replace('{slot_id}', encodeURIComponent(String(slotId)))
-                .replace('{list_index}', encodeURIComponent(String(listIndex)));
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)))
+                .replace(`{${"slot_id"}}`, encodeURIComponent(String(slotId)))
+                .replace(`{${"list_index"}}`, encodeURIComponent(String(listIndex)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -18041,9 +18233,9 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'listIndex' is not null or undefined
             assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexCaptionPatch', 'listIndex', listIndex)
             const localVarPath = `/api/core/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/caption`
-                .replace('{session_id}', encodeURIComponent(String(sessionId)))
-                .replace('{slot_id}', encodeURIComponent(String(slotId)))
-                .replace('{list_index}', encodeURIComponent(String(listIndex)));
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)))
+                .replace(`{${"slot_id"}}`, encodeURIComponent(String(slotId)))
+                .replace(`{${"list_index"}}`, encodeURIComponent(String(listIndex)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -18082,9 +18274,9 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'listIndex' is not null or undefined
             assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexDelete', 'listIndex', listIndex)
             const localVarPath = `/api/core/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}`
-                .replace('{session_id}', encodeURIComponent(String(sessionId)))
-                .replace('{slot_id}', encodeURIComponent(String(slotId)))
-                .replace('{list_index}', encodeURIComponent(String(listIndex)));
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)))
+                .replace(`{${"slot_id"}}`, encodeURIComponent(String(slotId)))
+                .replace(`{${"list_index"}}`, encodeURIComponent(String(listIndex)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -18123,9 +18315,9 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'listIndex' is not null or undefined
             assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexPatch', 'listIndex', listIndex)
             const localVarPath = `/api/core/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}`
-                .replace('{session_id}', encodeURIComponent(String(sessionId)))
-                .replace('{slot_id}', encodeURIComponent(String(slotId)))
-                .replace('{list_index}', encodeURIComponent(String(listIndex)));
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)))
+                .replace(`{${"slot_id"}}`, encodeURIComponent(String(slotId)))
+                .replace(`{${"list_index"}}`, encodeURIComponent(String(listIndex)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -18164,9 +18356,9 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'listIndex' is not null or undefined
             assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexRollbackPost', 'listIndex', listIndex)
             const localVarPath = `/api/core/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/rollback`
-                .replace('{session_id}', encodeURIComponent(String(sessionId)))
-                .replace('{slot_id}', encodeURIComponent(String(slotId)))
-                .replace('{list_index}', encodeURIComponent(String(listIndex)));
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)))
+                .replace(`{${"slot_id"}}`, encodeURIComponent(String(slotId)))
+                .replace(`{${"list_index"}}`, encodeURIComponent(String(listIndex)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -18205,9 +18397,9 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'listIndex' is not null or undefined
             assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexVersionsGet', 'listIndex', listIndex)
             const localVarPath = `/api/core/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/versions`
-                .replace('{session_id}', encodeURIComponent(String(sessionId)))
-                .replace('{slot_id}', encodeURIComponent(String(slotId)))
-                .replace('{list_index}', encodeURIComponent(String(listIndex)));
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)))
+                .replace(`{${"slot_id"}}`, encodeURIComponent(String(slotId)))
+                .replace(`{${"list_index"}}`, encodeURIComponent(String(listIndex)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -18243,8 +18435,8 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'slotId' is not null or undefined
             assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsPost', 'slotId', slotId)
             const localVarPath = `/api/core/workflow-sessions/{session_id}/slots/{slot_id}/items`
-                .replace('{session_id}', encodeURIComponent(String(sessionId)))
-                .replace('{slot_id}', encodeURIComponent(String(slotId)));
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)))
+                .replace(`{${"slot_id"}}`, encodeURIComponent(String(slotId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -18280,8 +18472,8 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'slotId' is not null or undefined
             assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderGet', 'slotId', slotId)
             const localVarPath = `/api/core/workflow-sessions/{session_id}/slots/{slot_id}/order`
-                .replace('{session_id}', encodeURIComponent(String(sessionId)))
-                .replace('{slot_id}', encodeURIComponent(String(slotId)));
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)))
+                .replace(`{${"slot_id"}}`, encodeURIComponent(String(slotId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -18317,8 +18509,8 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'slotId' is not null or undefined
             assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderPatch', 'slotId', slotId)
             const localVarPath = `/api/core/workflow-sessions/{session_id}/slots/{slot_id}/order`
-                .replace('{session_id}', encodeURIComponent(String(sessionId)))
-                .replace('{slot_id}', encodeURIComponent(String(slotId)));
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)))
+                .replace(`{${"slot_id"}}`, encodeURIComponent(String(slotId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -18354,8 +18546,8 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'slotId' is not null or undefined
             assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdPatch', 'slotId', slotId)
             const localVarPath = `/api/core/workflow-sessions/{session_id}/slots/{slot_id}`
-                .replace('{session_id}', encodeURIComponent(String(sessionId)))
-                .replace('{slot_id}', encodeURIComponent(String(slotId)));
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)))
+                .replace(`{${"slot_id"}}`, encodeURIComponent(String(slotId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -18388,7 +18580,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'sessionId' is not null or undefined
             assertParamExists('apiCoreWorkflowSessionsSessionIdStateGraphGet', 'sessionId', sessionId)
             const localVarPath = `/api/core/workflow-sessions/{session_id}/state-graph`
-                .replace('{session_id}', encodeURIComponent(String(sessionId)));
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -18421,7 +18613,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'sessionId' is not null or undefined
             assertParamExists('apiCoreWorkflowSessionsSessionIdStepsGet', 'sessionId', sessionId)
             const localVarPath = `/api/core/workflow-sessions/{session_id}/steps`
-                .replace('{session_id}', encodeURIComponent(String(sessionId)));
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -18454,7 +18646,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'sessionId' is not null or undefined
             assertParamExists('apiCoreWorkflowSessionsSessionIdStopPost', 'sessionId', sessionId)
             const localVarPath = `/api/core/workflow-sessions/{session_id}:stop`
-                .replace('{session_id}', encodeURIComponent(String(sessionId)));
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -18487,7 +18679,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'sessionId' is not null or undefined
             assertParamExists('apiCoreWorkflowSessionsSessionIdSyncSearchConfigPost', 'sessionId', sessionId)
             const localVarPath = `/api/core/workflow-sessions/{session_id}:sync-search-config`
-                .replace('{session_id}', encodeURIComponent(String(sessionId)));
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -18520,7 +18712,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'sessionId' is not null or undefined
             assertParamExists('apiCoreWorkflowSessionsSessionIdWriterDocumentRenderPost', 'sessionId', sessionId)
             const localVarPath = `/api/core/workflow-sessions/{session_id}/writer-document:render`
-                .replace('{session_id}', encodeURIComponent(String(sessionId)));
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -18553,7 +18745,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'sessionId' is not null or undefined
             assertParamExists('apiCoreWorkflowSessionsSessionIdWriterDocumentSavePost', 'sessionId', sessionId)
             const localVarPath = `/api/core/workflow-sessions/{session_id}/writer-document:save`
-                .replace('{session_id}', encodeURIComponent(String(sessionId)));
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -18615,7 +18807,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'workflowId' is not null or undefined
             assertParamExists('apiCoreWorkflowsWorkflowIdCopyPost', 'workflowId', workflowId)
             const localVarPath = `/api/core/workflows/{workflow_id}:copy`
-                .replace('{workflow_id}', encodeURIComponent(String(workflowId)));
+                .replace(`{${"workflow_id"}}`, encodeURIComponent(String(workflowId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -18648,7 +18840,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'workflowId' is not null or undefined
             assertParamExists('apiCoreWorkflowsWorkflowIdGet', 'workflowId', workflowId)
             const localVarPath = `/api/core/workflows/{workflow_id}`
-                .replace('{workflow_id}', encodeURIComponent(String(workflowId)));
+                .replace(`{${"workflow_id"}}`, encodeURIComponent(String(workflowId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -18713,8 +18905,8 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'targetFormat' is not null or undefined
             assertParamExists('apiCoreWriterDownloadConversionsSourceHashTargetFormatGet', 'targetFormat', targetFormat)
             const localVarPath = `/api/core/writer-download-conversions/{source_hash}/{target_format}`
-                .replace('{source_hash}', encodeURIComponent(String(sourceHash)))
-                .replace('{target_format}', encodeURIComponent(String(targetFormat)));
+                .replace(`{${"source_hash"}}`, encodeURIComponent(String(sourceHash)))
+                .replace(`{${"target_format"}}`, encodeURIComponent(String(targetFormat)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -18750,8 +18942,8 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'targetFormat' is not null or undefined
             assertParamExists('apiCoreWriterDownloadConversionsSourceHashTargetFormatPut', 'targetFormat', targetFormat)
             const localVarPath = `/api/core/writer-download-conversions/{source_hash}/{target_format}`
-                .replace('{source_hash}', encodeURIComponent(String(sourceHash)))
-                .replace('{target_format}', encodeURIComponent(String(targetFormat)));
+                .replace(`{${"source_hash"}}`, encodeURIComponent(String(sourceHash)))
+                .replace(`{${"target_format"}}`, encodeURIComponent(String(targetFormat)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -18792,6 +18984,18 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAddFilesToGroupPost(options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreAddFilesToGroupPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary GET /admin
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAdminGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAdminGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreAdminGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -20036,6 +20240,30 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary GET /health
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreHealthGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreHealthGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreHealthGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary GET /hello
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreHelloGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreHelloGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreHelloGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary Get grantable principals
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -20802,6 +21030,19 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary GET /skills/{skill_id}/linked-workflows
+         * @param {string} skillId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreSkillsSkillIdLinkedWorkflowsGet(skillId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreSkillsSkillIdLinkedWorkflowsGet(skillId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreSkillsSkillIdLinkedWorkflowsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary GET /static-files/{path:.*}
          * @param {string} path
          * @param {*} [options] Override http request option.
@@ -21173,6 +21414,18 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary POST /workflow-conversions:preflight
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowConversionsPreflightPost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowConversionsPreflightPost(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowConversionsPreflightPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary POST /workflow-drafts/{draft_id}:ai-generate
          * @param {string} draftId
          * @param {*} [options] Override http request option.
@@ -21195,6 +21448,19 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowDraftsDraftIdAiRepairPost(draftId, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowDraftsDraftIdAiRepairPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /workflow-drafts/{draft_id}:cancel-generation
+         * @param {string} draftId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowDraftsDraftIdCancelGenerationPost(draftId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowDraftsDraftIdCancelGenerationPost(draftId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowDraftsDraftIdCancelGenerationPost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -22047,6 +22313,15 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          */
         apiCoreAddFilesToGroupPost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
             return localVarFp.apiCoreAddFilesToGroupPost(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary GET /admin
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAdminGet(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreAdminGet(options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -22963,6 +23238,24 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
+         * @summary GET /health
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreHealthGet(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreHealthGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary GET /hello
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreHelloGet(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreHelloGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary Get grantable principals
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -23533,6 +23826,16 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
+         * @summary GET /skills/{skill_id}/linked-workflows
+         * @param {DefaultApiApiCoreSkillsSkillIdLinkedWorkflowsGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreSkillsSkillIdLinkedWorkflowsGet(requestParameters: DefaultApiApiCoreSkillsSkillIdLinkedWorkflowsGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreSkillsSkillIdLinkedWorkflowsGet(requestParameters.skillId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary GET /static-files/{path:.*}
          * @param {DefaultApiApiCoreStaticFilesPathGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -23811,6 +24114,15 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
+         * @summary POST /workflow-conversions:preflight
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowConversionsPreflightPost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowConversionsPreflightPost(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary POST /workflow-drafts/{draft_id}:ai-generate
          * @param {DefaultApiApiCoreWorkflowDraftsDraftIdAiGeneratePostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -23828,6 +24140,16 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          */
         apiCoreWorkflowDraftsDraftIdAiRepairPost(requestParameters: DefaultApiApiCoreWorkflowDraftsDraftIdAiRepairPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
             return localVarFp.apiCoreWorkflowDraftsDraftIdAiRepairPost(requestParameters.draftId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /workflow-drafts/{draft_id}:cancel-generation
+         * @param {DefaultApiApiCoreWorkflowDraftsDraftIdCancelGenerationPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowDraftsDraftIdCancelGenerationPost(requestParameters: DefaultApiApiCoreWorkflowDraftsDraftIdCancelGenerationPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowDraftsDraftIdCancelGenerationPost(requestParameters.draftId, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -25392,6 +25714,13 @@ export interface DefaultApiApiCoreSkillsSkillIdDraftReviewReviewIdUndoPostReques
 }
 
 /**
+ * Request parameters for apiCoreSkillsSkillIdLinkedWorkflowsGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreSkillsSkillIdLinkedWorkflowsGetRequest {
+    readonly skillId: string
+}
+
+/**
  * Request parameters for apiCoreStaticFilesPathGet operation in DefaultApi.
  */
 export interface DefaultApiApiCoreStaticFilesPathGetRequest {
@@ -25533,6 +25862,13 @@ export interface DefaultApiApiCoreWorkflowDraftsDraftIdAiGeneratePostRequest {
  * Request parameters for apiCoreWorkflowDraftsDraftIdAiRepairPost operation in DefaultApi.
  */
 export interface DefaultApiApiCoreWorkflowDraftsDraftIdAiRepairPostRequest {
+    readonly draftId: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowDraftsDraftIdCancelGenerationPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreWorkflowDraftsDraftIdCancelGenerationPostRequest {
     readonly draftId: string
 }
 
@@ -25967,6 +26303,16 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreAddFilesToGroupPost(options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreAddFilesToGroupPost(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /admin
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAdminGet(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreAdminGet(options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -26977,6 +27323,26 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
+     * @summary GET /health
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreHealthGet(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreHealthGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /hello
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreHelloGet(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreHelloGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
      * @summary Get grantable principals
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
@@ -27606,6 +27972,17 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
+     * @summary GET /skills/{skill_id}/linked-workflows
+     * @param {DefaultApiApiCoreSkillsSkillIdLinkedWorkflowsGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreSkillsSkillIdLinkedWorkflowsGet(requestParameters: DefaultApiApiCoreSkillsSkillIdLinkedWorkflowsGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreSkillsSkillIdLinkedWorkflowsGet(requestParameters.skillId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
      * @summary GET /static-files/{path:.*}
      * @param {DefaultApiApiCoreStaticFilesPathGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -27913,6 +28290,16 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
+     * @summary POST /workflow-conversions:preflight
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowConversionsPreflightPost(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowConversionsPreflightPost(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
      * @summary POST /workflow-drafts/{draft_id}:ai-generate
      * @param {DefaultApiApiCoreWorkflowDraftsDraftIdAiGeneratePostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -27931,6 +28318,17 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreWorkflowDraftsDraftIdAiRepairPost(requestParameters: DefaultApiApiCoreWorkflowDraftsDraftIdAiRepairPostRequest, options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreWorkflowDraftsDraftIdAiRepairPost(requestParameters.draftId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /workflow-drafts/{draft_id}:cancel-generation
+     * @param {DefaultApiApiCoreWorkflowDraftsDraftIdCancelGenerationPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowDraftsDraftIdCancelGenerationPost(requestParameters: DefaultApiApiCoreWorkflowDraftsDraftIdCancelGenerationPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowDraftsDraftIdCancelGenerationPost(requestParameters.draftId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -28619,24 +29017,24 @@ export class DefaultApi extends BaseAPI {
 
 export const ApiCoreConversationsArchivedGetKindEnum = {
     Dialog: 'dialog',
-    Task: 'task',
+    Task: 'task'
 } as const;
 export type ApiCoreConversationsArchivedGetKindEnum = typeof ApiCoreConversationsArchivedGetKindEnum[keyof typeof ApiCoreConversationsArchivedGetKindEnum];
 export const ApiCoreConversationsGetAssistantEnum = {
     Lazymind: 'lazymind',
     Codex: 'codex',
     Cursor: 'cursor',
-    Workbuddy: 'workbuddy',
+    Workbuddy: 'workbuddy'
 } as const;
 export type ApiCoreConversationsGetAssistantEnum = typeof ApiCoreConversationsGetAssistantEnum[keyof typeof ApiCoreConversationsGetAssistantEnum];
 export const ApiCoreConversationsTrashDeleteKindEnum = {
     Dialog: 'dialog',
-    Task: 'task',
+    Task: 'task'
 } as const;
 export type ApiCoreConversationsTrashDeleteKindEnum = typeof ApiCoreConversationsTrashDeleteKindEnum[keyof typeof ApiCoreConversationsTrashDeleteKindEnum];
 export const ApiCoreConversationsTrashGetKindEnum = {
     Dialog: 'dialog',
-    Task: 'task',
+    Task: 'task'
 } as const;
 export type ApiCoreConversationsTrashGetKindEnum = typeof ApiCoreConversationsTrashGetKindEnum[keyof typeof ApiCoreConversationsTrashGetKindEnum];
 
@@ -28660,7 +29058,7 @@ export const DocumentsApiAxiosParamCreator = function (configuration?: Configura
             // verify required parameter 'batchDeleteDocumentRequest' is not null or undefined
             assertParamExists('apiCoreDatasetsDatasetBatchDeletePost', 'batchDeleteDocumentRequest', batchDeleteDocumentRequest)
             const localVarPath = `/api/core/datasets/{dataset}:batchDelete`
-                .replace('{dataset}', encodeURIComponent(String(dataset)));
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -28699,8 +29097,8 @@ export const DocumentsApiAxiosParamCreator = function (configuration?: Configura
             // verify required parameter 'document' is not null or undefined
             assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentDelete', 'document', document)
             const localVarPath = `/api/core/datasets/{dataset}/documents/{document}`
-                .replace('{dataset}', encodeURIComponent(String(dataset)))
-                .replace('{document}', encodeURIComponent(String(document)));
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"document"}}`, encodeURIComponent(String(document)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -28737,8 +29135,8 @@ export const DocumentsApiAxiosParamCreator = function (configuration?: Configura
             // verify required parameter 'document' is not null or undefined
             assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentGet', 'document', document)
             const localVarPath = `/api/core/datasets/{dataset}/documents/{document}`
-                .replace('{dataset}', encodeURIComponent(String(dataset)))
-                .replace('{document}', encodeURIComponent(String(document)));
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"document"}}`, encodeURIComponent(String(document)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -28776,8 +29174,8 @@ export const DocumentsApiAxiosParamCreator = function (configuration?: Configura
             // verify required parameter 'document' is not null or undefined
             assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPatch', 'document', document)
             const localVarPath = `/api/core/datasets/{dataset}/documents/{document}`
-                .replace('{dataset}', encodeURIComponent(String(dataset)))
-                .replace('{document}', encodeURIComponent(String(document)));
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"document"}}`, encodeURIComponent(String(document)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -28815,7 +29213,7 @@ export const DocumentsApiAxiosParamCreator = function (configuration?: Configura
             // verify required parameter 'dataset' is not null or undefined
             assertParamExists('apiCoreDatasetsDatasetDocumentsGet', 'dataset', dataset)
             const localVarPath = `/api/core/datasets/{dataset}/documents`
-                .replace('{dataset}', encodeURIComponent(String(dataset)));
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -28858,7 +29256,7 @@ export const DocumentsApiAxiosParamCreator = function (configuration?: Configura
             // verify required parameter 'dataset' is not null or undefined
             assertParamExists('apiCoreDatasetsDatasetDocumentsPost', 'dataset', dataset)
             const localVarPath = `/api/core/datasets/{dataset}/documents`
-                .replace('{dataset}', encodeURIComponent(String(dataset)));
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -28895,7 +29293,7 @@ export const DocumentsApiAxiosParamCreator = function (configuration?: Configura
             // verify required parameter 'dataset' is not null or undefined
             assertParamExists('apiCoreDatasetsDatasetDocumentsSearchPost', 'dataset', dataset)
             const localVarPath = `/api/core/datasets/{dataset}/documents:search`
-                .replace('{dataset}', encodeURIComponent(String(dataset)));
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -29502,7 +29900,7 @@ export const EvalSetImportsApiAxiosParamCreator = function (configuration?: Conf
             // verify required parameter 'taskId' is not null or undefined
             assertParamExists('apiCoreEvalSetImportTasksTaskIdGet', 'taskId', taskId)
             const localVarPath = `/api/core/eval-set-import-tasks/{task_id}`
-                .replace('{task_id}', encodeURIComponent(String(taskId)));
+                .replace(`{${"task_id"}}`, encodeURIComponent(String(taskId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -29536,7 +29934,7 @@ export const EvalSetImportsApiAxiosParamCreator = function (configuration?: Conf
             // verify required parameter 'fileType' is not null or undefined
             assertParamExists('apiCoreEvalSetImportTemplatesFileTypeGet', 'fileType', fileType)
             const localVarPath = `/api/core/eval-set-import-templates/{file_type}`
-                .replace('{file_type}', encodeURIComponent(String(fileType)));
+                .replace(`{${"file_type"}}`, encodeURIComponent(String(fileType)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -29573,7 +29971,7 @@ export const EvalSetImportsApiAxiosParamCreator = function (configuration?: Conf
             // verify required parameter 'appendEvalSetImportRequest' is not null or undefined
             assertParamExists('apiCoreEvalSetsEvalSetIdImportsPost', 'appendEvalSetImportRequest', appendEvalSetImportRequest)
             const localVarPath = `/api/core/eval-sets/{eval_set_id}/imports`
-                .replace('{eval_set_id}', encodeURIComponent(String(evalSetId)));
+                .replace(`{${"eval_set_id"}}`, encodeURIComponent(String(evalSetId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -29936,7 +30334,7 @@ export const EvalSetItemsApiAxiosParamCreator = function (configuration?: Config
             // verify required parameter 'batchDeleteEvalSetItemsRequest' is not null or undefined
             assertParamExists('apiCoreEvalSetsEvalSetIdItemsBatchDeletePost', 'batchDeleteEvalSetItemsRequest', batchDeleteEvalSetItemsRequest)
             const localVarPath = `/api/core/eval-sets/{eval_set_id}/items:batchDelete`
-                .replace('{eval_set_id}', encodeURIComponent(String(evalSetId)));
+                .replace(`{${"eval_set_id"}}`, encodeURIComponent(String(evalSetId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -29978,7 +30376,7 @@ export const EvalSetItemsApiAxiosParamCreator = function (configuration?: Config
             // verify required parameter 'evalSetId' is not null or undefined
             assertParamExists('apiCoreEvalSetsEvalSetIdItemsGet', 'evalSetId', evalSetId)
             const localVarPath = `/api/core/eval-sets/{eval_set_id}/items`
-                .replace('{eval_set_id}', encodeURIComponent(String(evalSetId)));
+                .replace(`{${"eval_set_id"}}`, encodeURIComponent(String(evalSetId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -30042,7 +30440,7 @@ export const EvalSetItemsApiAxiosParamCreator = function (configuration?: Config
             // verify required parameter 'evalSetId' is not null or undefined
             assertParamExists('apiCoreEvalSetsEvalSetIdItemsInvalidReferencesGet', 'evalSetId', evalSetId)
             const localVarPath = `/api/core/eval-sets/{eval_set_id}/items:invalidReferences`
-                .replace('{eval_set_id}', encodeURIComponent(String(evalSetId)));
+                .replace(`{${"eval_set_id"}}`, encodeURIComponent(String(evalSetId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -30103,8 +30501,8 @@ export const EvalSetItemsApiAxiosParamCreator = function (configuration?: Config
             // verify required parameter 'itemId' is not null or undefined
             assertParamExists('apiCoreEvalSetsEvalSetIdItemsItemIdDelete', 'itemId', itemId)
             const localVarPath = `/api/core/eval-sets/{eval_set_id}/items/{item_id}`
-                .replace('{eval_set_id}', encodeURIComponent(String(evalSetId)))
-                .replace('{item_id}', encodeURIComponent(String(itemId)));
+                .replace(`{${"eval_set_id"}}`, encodeURIComponent(String(evalSetId)))
+                .replace(`{${"item_id"}}`, encodeURIComponent(String(itemId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -30144,8 +30542,8 @@ export const EvalSetItemsApiAxiosParamCreator = function (configuration?: Config
             // verify required parameter 'updateEvalSetItemRequest' is not null or undefined
             assertParamExists('apiCoreEvalSetsEvalSetIdItemsItemIdPatch', 'updateEvalSetItemRequest', updateEvalSetItemRequest)
             const localVarPath = `/api/core/eval-sets/{eval_set_id}/items/{item_id}`
-                .replace('{eval_set_id}', encodeURIComponent(String(evalSetId)))
-                .replace('{item_id}', encodeURIComponent(String(itemId)));
+                .replace(`{${"eval_set_id"}}`, encodeURIComponent(String(evalSetId)))
+                .replace(`{${"item_id"}}`, encodeURIComponent(String(itemId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -30184,7 +30582,7 @@ export const EvalSetItemsApiAxiosParamCreator = function (configuration?: Config
             // verify required parameter 'createEvalSetItemRequest' is not null or undefined
             assertParamExists('apiCoreEvalSetsEvalSetIdItemsPost', 'createEvalSetItemRequest', createEvalSetItemRequest)
             const localVarPath = `/api/core/eval-sets/{eval_set_id}/items`
-                .replace('{eval_set_id}', encodeURIComponent(String(evalSetId)));
+                .replace(`{${"eval_set_id"}}`, encodeURIComponent(String(evalSetId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -30222,7 +30620,7 @@ export const EvalSetItemsApiAxiosParamCreator = function (configuration?: Config
             // verify required parameter 'evalSetId' is not null or undefined
             assertParamExists('apiCoreEvalSetsEvalSetIdQuestionTypesGet', 'evalSetId', evalSetId)
             const localVarPath = `/api/core/eval-sets/{eval_set_id}/question-types`
-                .replace('{eval_set_id}', encodeURIComponent(String(evalSetId)));
+                .replace(`{${"eval_set_id"}}`, encodeURIComponent(String(evalSetId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -30671,7 +31069,7 @@ export const EvalSetsApiAxiosParamCreator = function (configuration?: Configurat
             // verify required parameter 'evalSetId' is not null or undefined
             assertParamExists('apiCoreEvalSetsEvalSetIdDelete', 'evalSetId', evalSetId)
             const localVarPath = `/api/core/eval-sets/{eval_set_id}`
-                .replace('{eval_set_id}', encodeURIComponent(String(evalSetId)));
+                .replace(`{${"eval_set_id"}}`, encodeURIComponent(String(evalSetId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -30705,7 +31103,7 @@ export const EvalSetsApiAxiosParamCreator = function (configuration?: Configurat
             // verify required parameter 'evalSetId' is not null or undefined
             assertParamExists('apiCoreEvalSetsEvalSetIdGet', 'evalSetId', evalSetId)
             const localVarPath = `/api/core/eval-sets/{eval_set_id}`
-                .replace('{eval_set_id}', encodeURIComponent(String(evalSetId)));
+                .replace(`{${"eval_set_id"}}`, encodeURIComponent(String(evalSetId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -30742,7 +31140,7 @@ export const EvalSetsApiAxiosParamCreator = function (configuration?: Configurat
             // verify required parameter 'updateEvalSetRequest' is not null or undefined
             assertParamExists('apiCoreEvalSetsEvalSetIdPatch', 'updateEvalSetRequest', updateEvalSetRequest)
             const localVarPath = `/api/core/eval-sets/{eval_set_id}`
-                .replace('{eval_set_id}', encodeURIComponent(String(evalSetId)));
+                .replace(`{${"eval_set_id"}}`, encodeURIComponent(String(evalSetId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -31320,7 +31718,7 @@ export const KnowledgeMarketApiAxiosParamCreator = function (configuration?: Con
             // verify required parameter 'marketItemId' is not null or undefined
             assertParamExists('apiCoreKnowledgeMarketItemsMarketItemIdGet', 'marketItemId', marketItemId)
             const localVarPath = `/api/core/knowledge-market/items/{market_item_id}`
-                .replace('{market_item_id}', encodeURIComponent(String(marketItemId)));
+                .replace(`{${"market_item_id"}}`, encodeURIComponent(String(marketItemId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -31354,7 +31752,7 @@ export const KnowledgeMarketApiAxiosParamCreator = function (configuration?: Con
             // verify required parameter 'marketItemId' is not null or undefined
             assertParamExists('apiCoreKnowledgeMarketItemsMarketItemIdInstallPost', 'marketItemId', marketItemId)
             const localVarPath = `/api/core/knowledge-market/items/{market_item_id}:install`
-                .replace('{market_item_id}', encodeURIComponent(String(marketItemId)));
+                .replace(`{${"market_item_id"}}`, encodeURIComponent(String(marketItemId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -31388,7 +31786,7 @@ export const KnowledgeMarketApiAxiosParamCreator = function (configuration?: Con
             // verify required parameter 'marketItemId' is not null or undefined
             assertParamExists('apiCoreKnowledgeMarketItemsMarketItemIdUpdatePost', 'marketItemId', marketItemId)
             const localVarPath = `/api/core/knowledge-market/items/{market_item_id}:update`
-                .replace('{market_item_id}', encodeURIComponent(String(marketItemId)));
+                .replace(`{${"market_item_id"}}`, encodeURIComponent(String(marketItemId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -31472,7 +31870,7 @@ export const KnowledgeMarketApiAxiosParamCreator = function (configuration?: Con
             // verify required parameter 'jobId' is not null or undefined
             assertParamExists('apiCoreKnowledgeMarketTasksJobIdGet', 'jobId', jobId)
             const localVarPath = `/api/core/knowledge-market/tasks/{job_id}`
-                .replace('{job_id}', encodeURIComponent(String(jobId)));
+                .replace(`{${"job_id"}}`, encodeURIComponent(String(jobId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -31928,7 +32326,7 @@ export class KnowledgeMarketApi extends BaseAPI {
 
 export const ApiCoreKnowledgeMarketGetCategoryEnum = {
     Industry: 'industry',
-    Evaluation: 'evaluation',
+    Evaluation: 'evaluation'
 } as const;
 export type ApiCoreKnowledgeMarketGetCategoryEnum = typeof ApiCoreKnowledgeMarketGetCategoryEnum[keyof typeof ApiCoreKnowledgeMarketGetCategoryEnum];
 export const ApiCoreKnowledgeMarketTasksGetStatusEnum = {
@@ -31936,7 +32334,7 @@ export const ApiCoreKnowledgeMarketTasksGetStatusEnum = {
     Running: 'running',
     Succeeded: 'succeeded',
     Failed: 'failed',
-    Canceled: 'canceled',
+    Canceled: 'canceled'
 } as const;
 export type ApiCoreKnowledgeMarketTasksGetStatusEnum = typeof ApiCoreKnowledgeMarketTasksGetStatusEnum[keyof typeof ApiCoreKnowledgeMarketTasksGetStatusEnum];
 
@@ -32037,7 +32435,7 @@ export const McpServersApiAxiosParamCreator = function (configuration?: Configur
             // verify required parameter 'id' is not null or undefined
             assertParamExists('apiCoreMcpServersIdCheckPost', 'id', id)
             const localVarPath = `/api/core/mcp_servers/{id}:check`
-                .replace('{id}', encodeURIComponent(String(id)));
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -32071,7 +32469,7 @@ export const McpServersApiAxiosParamCreator = function (configuration?: Configur
             // verify required parameter 'id' is not null or undefined
             assertParamExists('apiCoreMcpServersIdDelete', 'id', id)
             const localVarPath = `/api/core/mcp_servers/{id}`
-                .replace('{id}', encodeURIComponent(String(id)));
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -32105,7 +32503,7 @@ export const McpServersApiAxiosParamCreator = function (configuration?: Configur
             // verify required parameter 'id' is not null or undefined
             assertParamExists('apiCoreMcpServersIdDiscoverPost', 'id', id)
             const localVarPath = `/api/core/mcp_servers/{id}:discover`
-                .replace('{id}', encodeURIComponent(String(id)));
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -32139,7 +32537,7 @@ export const McpServersApiAxiosParamCreator = function (configuration?: Configur
             // verify required parameter 'id' is not null or undefined
             assertParamExists('apiCoreMcpServersIdGet', 'id', id)
             const localVarPath = `/api/core/mcp_servers/{id}`
-                .replace('{id}', encodeURIComponent(String(id)));
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -32176,7 +32574,7 @@ export const McpServersApiAxiosParamCreator = function (configuration?: Configur
             // verify required parameter 'updateServerRequest' is not null or undefined
             assertParamExists('apiCoreMcpServersIdPatch', 'updateServerRequest', updateServerRequest)
             const localVarPath = `/api/core/mcp_servers/{id}`
-                .replace('{id}', encodeURIComponent(String(id)));
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -32215,7 +32613,7 @@ export const McpServersApiAxiosParamCreator = function (configuration?: Configur
             // verify required parameter 'updateToolsRequest' is not null or undefined
             assertParamExists('apiCoreMcpServersIdToolsPut', 'updateToolsRequest', updateToolsRequest)
             const localVarPath = `/api/core/mcp_servers/{id}/tools`
-                .replace('{id}', encodeURIComponent(String(id)));
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -32779,7 +33177,7 @@ export const ModelProvidersApiAxiosParamCreator = function (configuration?: Conf
             // verify required parameter 'modelProviderId' is not null or undefined
             assertParamExists('apiCoreModelProvidersModelProviderIdGroupsGet', 'modelProviderId', modelProviderId)
             const localVarPath = `/api/core/model_providers/{model_provider_id}/groups`
-                .replace('{model_provider_id}', encodeURIComponent(String(modelProviderId)));
+                .replace(`{${"model_provider_id"}}`, encodeURIComponent(String(modelProviderId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -32819,8 +33217,8 @@ export const ModelProvidersApiAxiosParamCreator = function (configuration?: Conf
             // verify required parameter 'checkModelProviderOpenAPIRequest' is not null or undefined
             assertParamExists('apiCoreModelProvidersModelProviderIdGroupsGroupIdCheckPost', 'checkModelProviderOpenAPIRequest', checkModelProviderOpenAPIRequest)
             const localVarPath = `/api/core/model_providers/{model_provider_id}/groups/{group_id}:check`
-                .replace('{model_provider_id}', encodeURIComponent(String(modelProviderId)))
-                .replace('{group_id}', encodeURIComponent(String(groupId)));
+                .replace(`{${"model_provider_id"}}`, encodeURIComponent(String(modelProviderId)))
+                .replace(`{${"group_id"}}`, encodeURIComponent(String(groupId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -32859,8 +33257,8 @@ export const ModelProvidersApiAxiosParamCreator = function (configuration?: Conf
             // verify required parameter 'groupId' is not null or undefined
             assertParamExists('apiCoreModelProvidersModelProviderIdGroupsGroupIdDelete', 'groupId', groupId)
             const localVarPath = `/api/core/model_providers/{model_provider_id}/groups/{group_id}`
-                .replace('{model_provider_id}', encodeURIComponent(String(modelProviderId)))
-                .replace('{group_id}', encodeURIComponent(String(groupId)));
+                .replace(`{${"model_provider_id"}}`, encodeURIComponent(String(modelProviderId)))
+                .replace(`{${"group_id"}}`, encodeURIComponent(String(groupId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -32897,8 +33295,8 @@ export const ModelProvidersApiAxiosParamCreator = function (configuration?: Conf
             // verify required parameter 'groupId' is not null or undefined
             assertParamExists('apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsGet', 'groupId', groupId)
             const localVarPath = `/api/core/model_providers/{model_provider_id}/groups/{group_id}/models`
-                .replace('{model_provider_id}', encodeURIComponent(String(modelProviderId)))
-                .replace('{group_id}', encodeURIComponent(String(groupId)));
+                .replace(`{${"model_provider_id"}}`, encodeURIComponent(String(modelProviderId)))
+                .replace(`{${"group_id"}}`, encodeURIComponent(String(groupId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -32938,9 +33336,9 @@ export const ModelProvidersApiAxiosParamCreator = function (configuration?: Conf
             // verify required parameter 'modelId' is not null or undefined
             assertParamExists('apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdDelete', 'modelId', modelId)
             const localVarPath = `/api/core/model_providers/{model_provider_id}/groups/{group_id}/models/{model_id}`
-                .replace('{model_provider_id}', encodeURIComponent(String(modelProviderId)))
-                .replace('{group_id}', encodeURIComponent(String(groupId)))
-                .replace('{model_id}', encodeURIComponent(String(modelId)));
+                .replace(`{${"model_provider_id"}}`, encodeURIComponent(String(modelProviderId)))
+                .replace(`{${"group_id"}}`, encodeURIComponent(String(groupId)))
+                .replace(`{${"model_id"}}`, encodeURIComponent(String(modelId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -32983,9 +33381,9 @@ export const ModelProvidersApiAxiosParamCreator = function (configuration?: Conf
             // verify required parameter 'updateModelProviderGroupModelOpenAPIRequest' is not null or undefined
             assertParamExists('apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdPatch', 'updateModelProviderGroupModelOpenAPIRequest', updateModelProviderGroupModelOpenAPIRequest)
             const localVarPath = `/api/core/model_providers/{model_provider_id}/groups/{group_id}/models/{model_id}`
-                .replace('{model_provider_id}', encodeURIComponent(String(modelProviderId)))
-                .replace('{group_id}', encodeURIComponent(String(groupId)))
-                .replace('{model_id}', encodeURIComponent(String(modelId)));
+                .replace(`{${"model_provider_id"}}`, encodeURIComponent(String(modelProviderId)))
+                .replace(`{${"group_id"}}`, encodeURIComponent(String(groupId)))
+                .replace(`{${"model_id"}}`, encodeURIComponent(String(modelId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -33027,8 +33425,8 @@ export const ModelProvidersApiAxiosParamCreator = function (configuration?: Conf
             // verify required parameter 'addModelProviderGroupModelOpenAPIRequest' is not null or undefined
             assertParamExists('apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsPost', 'addModelProviderGroupModelOpenAPIRequest', addModelProviderGroupModelOpenAPIRequest)
             const localVarPath = `/api/core/model_providers/{model_provider_id}/groups/{group_id}/models`
-                .replace('{model_provider_id}', encodeURIComponent(String(modelProviderId)))
-                .replace('{group_id}', encodeURIComponent(String(groupId)));
+                .replace(`{${"model_provider_id"}}`, encodeURIComponent(String(modelProviderId)))
+                .replace(`{${"group_id"}}`, encodeURIComponent(String(groupId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -33070,8 +33468,8 @@ export const ModelProvidersApiAxiosParamCreator = function (configuration?: Conf
             // verify required parameter 'updateModelProviderGroupOpenAPIRequest' is not null or undefined
             assertParamExists('apiCoreModelProvidersModelProviderIdGroupsGroupIdPatch', 'updateModelProviderGroupOpenAPIRequest', updateModelProviderGroupOpenAPIRequest)
             const localVarPath = `/api/core/model_providers/{model_provider_id}/groups/{group_id}`
-                .replace('{model_provider_id}', encodeURIComponent(String(modelProviderId)))
-                .replace('{group_id}', encodeURIComponent(String(groupId)));
+                .replace(`{${"model_provider_id"}}`, encodeURIComponent(String(modelProviderId)))
+                .replace(`{${"group_id"}}`, encodeURIComponent(String(groupId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -33110,8 +33508,8 @@ export const ModelProvidersApiAxiosParamCreator = function (configuration?: Conf
             // verify required parameter 'groupId' is not null or undefined
             assertParamExists('apiCoreModelProvidersModelProviderIdGroupsGroupIdRemoteModelsGet', 'groupId', groupId)
             const localVarPath = `/api/core/model_providers/{model_provider_id}/groups/{group_id}/remote_models`
-                .replace('{model_provider_id}', encodeURIComponent(String(modelProviderId)))
-                .replace('{group_id}', encodeURIComponent(String(groupId)));
+                .replace(`{${"model_provider_id"}}`, encodeURIComponent(String(modelProviderId)))
+                .replace(`{${"group_id"}}`, encodeURIComponent(String(groupId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -33148,7 +33546,7 @@ export const ModelProvidersApiAxiosParamCreator = function (configuration?: Conf
             // verify required parameter 'createModelProviderGroupOpenAPIRequest' is not null or undefined
             assertParamExists('apiCoreModelProvidersModelProviderIdGroupsPost', 'createModelProviderGroupOpenAPIRequest', createModelProviderGroupOpenAPIRequest)
             const localVarPath = `/api/core/model_providers/{model_provider_id}/groups`
-                .replace('{model_provider_id}', encodeURIComponent(String(modelProviderId)));
+                .replace(`{${"model_provider_id"}}`, encodeURIComponent(String(modelProviderId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -34612,7 +35010,7 @@ export const PromptsApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'name' is not null or undefined
             assertParamExists('apiCorePromptCategoriesNameDelete', 'name', name)
             const localVarPath = `/api/core/prompt_categories/{name}`
-                .replace('{name}', encodeURIComponent(String(name)));
+                .replace(`{${"name"}}`, encodeURIComponent(String(name)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -34746,7 +35144,7 @@ export const PromptsApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'name' is not null or undefined
             assertParamExists('apiCorePromptsNameDelete', 'name', name)
             const localVarPath = `/api/core/prompts/{name}`
-                .replace('{name}', encodeURIComponent(String(name)));
+                .replace(`{${"name"}}`, encodeURIComponent(String(name)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -34780,7 +35178,7 @@ export const PromptsApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'name' is not null or undefined
             assertParamExists('apiCorePromptsNameFavoritePost', 'name', name)
             const localVarPath = `/api/core/prompts/{name}:favorite`
-                .replace('{name}', encodeURIComponent(String(name)));
+                .replace(`{${"name"}}`, encodeURIComponent(String(name)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -34815,7 +35213,7 @@ export const PromptsApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'name' is not null or undefined
             assertParamExists('apiCorePromptsNameGet', 'name', name)
             const localVarPath = `/api/core/prompts/{name}`
-                .replace('{name}', encodeURIComponent(String(name)));
+                .replace(`{${"name"}}`, encodeURIComponent(String(name)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -34856,7 +35254,7 @@ export const PromptsApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'promptPatchOpenAPIRequest' is not null or undefined
             assertParamExists('apiCorePromptsNamePatch', 'promptPatchOpenAPIRequest', promptPatchOpenAPIRequest)
             const localVarPath = `/api/core/prompts/{name}`
-                .replace('{name}', encodeURIComponent(String(name)));
+                .replace(`{${"name"}}`, encodeURIComponent(String(name)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -34892,7 +35290,7 @@ export const PromptsApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'name' is not null or undefined
             assertParamExists('apiCorePromptsNameUnfavoritePost', 'name', name)
             const localVarPath = `/api/core/prompts/{name}:unfavorite`
-                .replace('{name}', encodeURIComponent(String(name)));
+                .replace(`{${"name"}}`, encodeURIComponent(String(name)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -34926,7 +35324,7 @@ export const PromptsApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'name' is not null or undefined
             assertParamExists('apiCorePromptsNameUsePost', 'name', name)
             const localVarPath = `/api/core/prompts/{name}:use`
-                .replace('{name}', encodeURIComponent(String(name)));
+                .replace(`{${"name"}}`, encodeURIComponent(String(name)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -35725,7 +36123,7 @@ export const ShowcaseApiAxiosParamCreator = function (configuration?: Configurat
             // verify required parameter 'caseId' is not null or undefined
             assertParamExists('apiCoreShowcaseCasesCaseIdGet', 'caseId', caseId)
             const localVarPath = `/api/core/showcase/cases/{case_id}`
-                .replace('{case_id}', encodeURIComponent(String(caseId)));
+                .replace(`{${"case_id"}}`, encodeURIComponent(String(caseId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -36121,7 +36519,7 @@ export const SkillDraftsApiAxiosParamCreator = function (configuration?: Configu
             // verify required parameter 'skillId' is not null or undefined
             assertParamExists('apiCoreSkillsSkillIdDraftExistsGet', 'skillId', skillId)
             const localVarPath = `/api/core/skills/{skill_id}/draft/exists`
-                .replace('{skill_id}', encodeURIComponent(String(skillId)));
+                .replace(`{${"skill_id"}}`, encodeURIComponent(String(skillId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -36158,7 +36556,7 @@ export const SkillDraftsApiAxiosParamCreator = function (configuration?: Configu
             // verify required parameter 'skillDraftMkdirOpenAPIRequest' is not null or undefined
             assertParamExists('apiCoreSkillsSkillIdDraftFsDirPost', 'skillDraftMkdirOpenAPIRequest', skillDraftMkdirOpenAPIRequest)
             const localVarPath = `/api/core/skills/{skill_id}/draft/fs/dir`
-                .replace('{skill_id}', encodeURIComponent(String(skillId)));
+                .replace(`{${"skill_id"}}`, encodeURIComponent(String(skillId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -36197,7 +36595,7 @@ export const SkillDraftsApiAxiosParamCreator = function (configuration?: Configu
             // verify required parameter 'skillDraftMoveOpenAPIRequest' is not null or undefined
             assertParamExists('apiCoreSkillsSkillIdDraftFsMovePost', 'skillDraftMoveOpenAPIRequest', skillDraftMoveOpenAPIRequest)
             const localVarPath = `/api/core/skills/{skill_id}/draft/fs/move`
-                .replace('{skill_id}', encodeURIComponent(String(skillId)));
+                .replace(`{${"skill_id"}}`, encodeURIComponent(String(skillId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -36235,7 +36633,7 @@ export const SkillDraftsApiAxiosParamCreator = function (configuration?: Configu
             // verify required parameter 'skillId' is not null or undefined
             assertParamExists('apiCoreSkillsSkillIdDraftFsPathDelete', 'skillId', skillId)
             const localVarPath = `/api/core/skills/{skill_id}/draft/fs/path`
-                .replace('{skill_id}', encodeURIComponent(String(skillId)));
+                .replace(`{${"skill_id"}}`, encodeURIComponent(String(skillId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -36278,7 +36676,7 @@ export const SkillDraftsApiAxiosParamCreator = function (configuration?: Configu
             // verify required parameter 'skillDraftWriteTextOpenAPIRequest' is not null or undefined
             assertParamExists('apiCoreSkillsSkillIdDraftFsTextPut', 'skillDraftWriteTextOpenAPIRequest', skillDraftWriteTextOpenAPIRequest)
             const localVarPath = `/api/core/skills/{skill_id}/draft/fs/text`
-                .replace('{skill_id}', encodeURIComponent(String(skillId)));
+                .replace(`{${"skill_id"}}`, encodeURIComponent(String(skillId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -36317,7 +36715,7 @@ export const SkillDraftsApiAxiosParamCreator = function (configuration?: Configu
             // verify required parameter 'skillDraftUploadOpenAPIRequest' is not null or undefined
             assertParamExists('apiCoreSkillsSkillIdDraftFsUploadPut', 'skillDraftUploadOpenAPIRequest', skillDraftUploadOpenAPIRequest)
             const localVarPath = `/api/core/skills/{skill_id}/draft/fs/upload`
-                .replace('{skill_id}', encodeURIComponent(String(skillId)));
+                .replace(`{${"skill_id"}}`, encodeURIComponent(String(skillId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -36353,7 +36751,7 @@ export const SkillDraftsApiAxiosParamCreator = function (configuration?: Configu
             // verify required parameter 'skillId' is not null or undefined
             assertParamExists('apiCoreSkillsSkillIdDraftStatusGet', 'skillId', skillId)
             const localVarPath = `/api/core/skills/{skill_id}/draft/status`
-                .replace('{skill_id}', encodeURIComponent(String(skillId)));
+                .replace(`{${"skill_id"}}`, encodeURIComponent(String(skillId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -36837,7 +37235,7 @@ export const SkillFsApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'path' is not null or undefined
             assertParamExists('apiCoreSkillsSkillIdFsContentGet', 'path', path)
             const localVarPath = `/api/core/skills/{skill_id}/fs/content`
-                .replace('{skill_id}', encodeURIComponent(String(skillId)));
+                .replace(`{${"skill_id"}}`, encodeURIComponent(String(skillId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -36878,7 +37276,7 @@ export const SkillFsApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'path' is not null or undefined
             assertParamExists('apiCoreSkillsSkillIdFsDownloadGet', 'path', path)
             const localVarPath = `/api/core/skills/{skill_id}/fs/download`
-                .replace('{skill_id}', encodeURIComponent(String(skillId)));
+                .replace(`{${"skill_id"}}`, encodeURIComponent(String(skillId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -36919,7 +37317,7 @@ export const SkillFsApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'path' is not null or undefined
             assertParamExists('apiCoreSkillsSkillIdFsExistsGet', 'path', path)
             const localVarPath = `/api/core/skills/{skill_id}/fs/exists`
-                .replace('{skill_id}', encodeURIComponent(String(skillId)));
+                .replace(`{${"skill_id"}}`, encodeURIComponent(String(skillId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -36960,7 +37358,7 @@ export const SkillFsApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'path' is not null or undefined
             assertParamExists('apiCoreSkillsSkillIdFsInfoGet', 'path', path)
             const localVarPath = `/api/core/skills/{skill_id}/fs/info`
-                .replace('{skill_id}', encodeURIComponent(String(skillId)));
+                .replace(`{${"skill_id"}}`, encodeURIComponent(String(skillId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -36999,7 +37397,7 @@ export const SkillFsApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'skillId' is not null or undefined
             assertParamExists('apiCoreSkillsSkillIdFsListGet', 'skillId', skillId)
             const localVarPath = `/api/core/skills/{skill_id}/fs/list`
-                .replace('{skill_id}', encodeURIComponent(String(skillId)));
+                .replace(`{${"skill_id"}}`, encodeURIComponent(String(skillId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -37290,7 +37688,7 @@ export const SkillMarketApiAxiosParamCreator = function (configuration?: Configu
             // verify required parameter 'marketItemId' is not null or undefined
             assertParamExists('apiCoreAdminSkillMarketMarketItemIdDelete', 'marketItemId', marketItemId)
             const localVarPath = `/api/core/admin/skill-market/{market_item_id}`
-                .replace('{market_item_id}', encodeURIComponent(String(marketItemId)));
+                .replace(`{${"market_item_id"}}`, encodeURIComponent(String(marketItemId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -37324,7 +37722,7 @@ export const SkillMarketApiAxiosParamCreator = function (configuration?: Configu
             // verify required parameter 'marketItemId' is not null or undefined
             assertParamExists('apiCoreAdminSkillMarketMarketItemIdOfflinePost', 'marketItemId', marketItemId)
             const localVarPath = `/api/core/admin/skill-market/{market_item_id}:offline`
-                .replace('{market_item_id}', encodeURIComponent(String(marketItemId)));
+                .replace(`{${"market_item_id"}}`, encodeURIComponent(String(marketItemId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -37361,7 +37759,7 @@ export const SkillMarketApiAxiosParamCreator = function (configuration?: Configu
             // verify required parameter 'marketEditOpenAPIRequest' is not null or undefined
             assertParamExists('apiCoreAdminSkillMarketMarketItemIdPatch', 'marketEditOpenAPIRequest', marketEditOpenAPIRequest)
             const localVarPath = `/api/core/admin/skill-market/{market_item_id}`
-                .replace('{market_item_id}', encodeURIComponent(String(marketItemId)));
+                .replace(`{${"market_item_id"}}`, encodeURIComponent(String(marketItemId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -37432,7 +37830,7 @@ export const SkillMarketApiAxiosParamCreator = function (configuration?: Configu
             // verify required parameter 'marketItemId' is not null or undefined
             assertParamExists('apiCoreSkillMarketAdminItemsMarketItemIdDelete', 'marketItemId', marketItemId)
             const localVarPath = `/api/core/skill-market/admin/items/{market_item_id}`
-                .replace('{market_item_id}', encodeURIComponent(String(marketItemId)));
+                .replace(`{${"market_item_id"}}`, encodeURIComponent(String(marketItemId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -37469,7 +37867,7 @@ export const SkillMarketApiAxiosParamCreator = function (configuration?: Configu
             // verify required parameter 'marketEditOpenAPIRequest' is not null or undefined
             assertParamExists('apiCoreSkillMarketAdminItemsMarketItemIdPatch', 'marketEditOpenAPIRequest', marketEditOpenAPIRequest)
             const localVarPath = `/api/core/skill-market/admin/items/{market_item_id}`
-                .replace('{market_item_id}', encodeURIComponent(String(marketItemId)));
+                .replace(`{${"market_item_id"}}`, encodeURIComponent(String(marketItemId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -37505,7 +37903,7 @@ export const SkillMarketApiAxiosParamCreator = function (configuration?: Configu
             // verify required parameter 'marketItemId' is not null or undefined
             assertParamExists('apiCoreSkillMarketAdminItemsMarketItemIdUnpublishPost', 'marketItemId', marketItemId)
             const localVarPath = `/api/core/skill-market/admin/items/{market_item_id}:unpublish`
-                .replace('{market_item_id}', encodeURIComponent(String(marketItemId)));
+                .replace(`{${"market_item_id"}}`, encodeURIComponent(String(marketItemId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -37664,7 +38062,7 @@ export const SkillMarketApiAxiosParamCreator = function (configuration?: Configu
             // verify required parameter 'marketItemId' is not null or undefined
             assertParamExists('apiCoreSkillMarketMarketItemIdGet', 'marketItemId', marketItemId)
             const localVarPath = `/api/core/skill-market/{market_item_id}`
-                .replace('{market_item_id}', encodeURIComponent(String(marketItemId)));
+                .replace(`{${"market_item_id"}}`, encodeURIComponent(String(marketItemId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -37698,7 +38096,7 @@ export const SkillMarketApiAxiosParamCreator = function (configuration?: Configu
             // verify required parameter 'marketItemId' is not null or undefined
             assertParamExists('apiCoreSkillMarketMarketItemIdInstallPost', 'marketItemId', marketItemId)
             const localVarPath = `/api/core/skill-market/{market_item_id}:install`
-                .replace('{market_item_id}', encodeURIComponent(String(marketItemId)));
+                .replace(`{${"market_item_id"}}`, encodeURIComponent(String(marketItemId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -38339,7 +38737,7 @@ export const SkillRevisionsApiAxiosParamCreator = function (configuration?: Conf
             // verify required parameter 'skillCommitOpenAPIRequest' is not null or undefined
             assertParamExists('apiCoreSkillsSkillIdCommitPost', 'skillCommitOpenAPIRequest', skillCommitOpenAPIRequest)
             const localVarPath = `/api/core/skills/{skill_id}/commit`
-                .replace('{skill_id}', encodeURIComponent(String(skillId)));
+                .replace(`{${"skill_id"}}`, encodeURIComponent(String(skillId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -38375,7 +38773,7 @@ export const SkillRevisionsApiAxiosParamCreator = function (configuration?: Conf
             // verify required parameter 'skillId' is not null or undefined
             assertParamExists('apiCoreSkillsSkillIdRevisionsGet', 'skillId', skillId)
             const localVarPath = `/api/core/skills/{skill_id}/revisions`
-                .replace('{skill_id}', encodeURIComponent(String(skillId)));
+                .replace(`{${"skill_id"}}`, encodeURIComponent(String(skillId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -38412,8 +38810,8 @@ export const SkillRevisionsApiAxiosParamCreator = function (configuration?: Conf
             // verify required parameter 'revisionId' is not null or undefined
             assertParamExists('apiCoreSkillsSkillIdRevisionsRevisionIdDelete', 'revisionId', revisionId)
             const localVarPath = `/api/core/skills/{skill_id}/revisions/{revision_id}`
-                .replace('{skill_id}', encodeURIComponent(String(skillId)))
-                .replace('{revision_id}', encodeURIComponent(String(revisionId)));
+                .replace(`{${"skill_id"}}`, encodeURIComponent(String(skillId)))
+                .replace(`{${"revision_id"}}`, encodeURIComponent(String(revisionId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -38453,8 +38851,8 @@ export const SkillRevisionsApiAxiosParamCreator = function (configuration?: Conf
             // verify required parameter 'path' is not null or undefined
             assertParamExists('apiCoreSkillsSkillIdRevisionsRevisionIdFileGet', 'path', path)
             const localVarPath = `/api/core/skills/{skill_id}/revisions/{revision_id}/file`
-                .replace('{skill_id}', encodeURIComponent(String(skillId)))
-                .replace('{revision_id}', encodeURIComponent(String(revisionId)));
+                .replace(`{${"skill_id"}}`, encodeURIComponent(String(skillId)))
+                .replace(`{${"revision_id"}}`, encodeURIComponent(String(revisionId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -38495,8 +38893,8 @@ export const SkillRevisionsApiAxiosParamCreator = function (configuration?: Conf
             // verify required parameter 'revisionId' is not null or undefined
             assertParamExists('apiCoreSkillsSkillIdRevisionsRevisionIdGet', 'revisionId', revisionId)
             const localVarPath = `/api/core/skills/{skill_id}/revisions/{revision_id}`
-                .replace('{skill_id}', encodeURIComponent(String(skillId)))
-                .replace('{revision_id}', encodeURIComponent(String(revisionId)));
+                .replace(`{${"skill_id"}}`, encodeURIComponent(String(skillId)))
+                .replace(`{${"revision_id"}}`, encodeURIComponent(String(revisionId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -38533,8 +38931,8 @@ export const SkillRevisionsApiAxiosParamCreator = function (configuration?: Conf
             // verify required parameter 'revisionId' is not null or undefined
             assertParamExists('apiCoreSkillsSkillIdRevisionsRevisionIdTreeGet', 'revisionId', revisionId)
             const localVarPath = `/api/core/skills/{skill_id}/revisions/{revision_id}/tree`
-                .replace('{skill_id}', encodeURIComponent(String(skillId)))
-                .replace('{revision_id}', encodeURIComponent(String(revisionId)));
+                .replace(`{${"skill_id"}}`, encodeURIComponent(String(skillId)))
+                .replace(`{${"revision_id"}}`, encodeURIComponent(String(revisionId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -38571,7 +38969,7 @@ export const SkillRevisionsApiAxiosParamCreator = function (configuration?: Conf
             // verify required parameter 'skillRollbackOpenAPIRequest' is not null or undefined
             assertParamExists('apiCoreSkillsSkillIdRollbackPost', 'skillRollbackOpenAPIRequest', skillRollbackOpenAPIRequest)
             const localVarPath = `/api/core/skills/{skill_id}/rollback`
-                .replace('{skill_id}', encodeURIComponent(String(skillId)));
+                .replace(`{${"skill_id"}}`, encodeURIComponent(String(skillId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -38610,7 +39008,7 @@ export const SkillRevisionsApiAxiosParamCreator = function (configuration?: Conf
             // verify required parameter 'skillRollbackOpenAPIRequest' is not null or undefined
             assertParamExists('apiCoreSkillsSkillIdRollbackPreviewPost', 'skillRollbackOpenAPIRequest', skillRollbackOpenAPIRequest)
             const localVarPath = `/api/core/skills/{skill_id}/rollback/preview`
-                .replace('{skill_id}', encodeURIComponent(String(skillId)));
+                .replace(`{${"skill_id"}}`, encodeURIComponent(String(skillId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -39121,7 +39519,7 @@ export const SkillSharesApiAxiosParamCreator = function (configuration?: Configu
             // verify required parameter 'shareItemId' is not null or undefined
             assertParamExists('apiCoreSkillSharesShareItemIdAcceptPost', 'shareItemId', shareItemId)
             const localVarPath = `/api/core/skill-shares/{share_item_id}:accept`
-                .replace('{share_item_id}', encodeURIComponent(String(shareItemId)));
+                .replace(`{${"share_item_id"}}`, encodeURIComponent(String(shareItemId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -39155,7 +39553,7 @@ export const SkillSharesApiAxiosParamCreator = function (configuration?: Configu
             // verify required parameter 'shareItemId' is not null or undefined
             assertParamExists('apiCoreSkillSharesShareItemIdGet', 'shareItemId', shareItemId)
             const localVarPath = `/api/core/skill-shares/{share_item_id}`
-                .replace('{share_item_id}', encodeURIComponent(String(shareItemId)));
+                .replace(`{${"share_item_id"}}`, encodeURIComponent(String(shareItemId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -39189,7 +39587,7 @@ export const SkillSharesApiAxiosParamCreator = function (configuration?: Configu
             // verify required parameter 'shareItemId' is not null or undefined
             assertParamExists('apiCoreSkillSharesShareItemIdRejectPost', 'shareItemId', shareItemId)
             const localVarPath = `/api/core/skill-shares/{share_item_id}:reject`
-                .replace('{share_item_id}', encodeURIComponent(String(shareItemId)));
+                .replace(`{${"share_item_id"}}`, encodeURIComponent(String(shareItemId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -39226,7 +39624,7 @@ export const SkillSharesApiAxiosParamCreator = function (configuration?: Configu
             // verify required parameter 'shareSkillOpenAPIRequest' is not null or undefined
             assertParamExists('apiCoreSkillsSkillIdSharePost', 'shareSkillOpenAPIRequest', shareSkillOpenAPIRequest)
             const localVarPath = `/api/core/skills/{skill_id}:share`
-                .replace('{skill_id}', encodeURIComponent(String(skillId)));
+                .replace(`{${"skill_id"}}`, encodeURIComponent(String(skillId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -39265,7 +39663,7 @@ export const SkillSharesApiAxiosParamCreator = function (configuration?: Configu
             // verify required parameter 'skillId' is not null or undefined
             assertParamExists('apiCoreSkillsSkillIdSharesGet', 'skillId', skillId)
             const localVarPath = `/api/core/skills/{skill_id}:shares`
-                .replace('{skill_id}', encodeURIComponent(String(skillId)));
+                .replace(`{${"skill_id"}}`, encodeURIComponent(String(skillId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -39655,7 +40053,7 @@ export const SkillsApiAxiosParamCreator = function (configuration?: Configuratio
             // verify required parameter 'builtinSkillUid' is not null or undefined
             assertParamExists('apiCoreBuiltinSkillsBuiltinSkillUidEnablePost', 'builtinSkillUid', builtinSkillUid)
             const localVarPath = `/api/core/builtin-skills/{builtin_skill_uid}:enable`
-                .replace('{builtin_skill_uid}', encodeURIComponent(String(builtinSkillUid)));
+                .replace(`{${"builtin_skill_uid"}}`, encodeURIComponent(String(builtinSkillUid)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -39954,7 +40352,7 @@ export const SkillsApiAxiosParamCreator = function (configuration?: Configuratio
             // verify required parameter 'skillId' is not null or undefined
             assertParamExists('apiCoreSkillsSkillIdConfirmPost', 'skillId', skillId)
             const localVarPath = `/api/core/skills/{skill_id}:confirm`
-                .replace('{skill_id}', encodeURIComponent(String(skillId)));
+                .replace(`{${"skill_id"}}`, encodeURIComponent(String(skillId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -39988,7 +40386,7 @@ export const SkillsApiAxiosParamCreator = function (configuration?: Configuratio
             // verify required parameter 'skillId' is not null or undefined
             assertParamExists('apiCoreSkillsSkillIdDelete', 'skillId', skillId)
             const localVarPath = `/api/core/skills/{skill_id}`
-                .replace('{skill_id}', encodeURIComponent(String(skillId)));
+                .replace(`{${"skill_id"}}`, encodeURIComponent(String(skillId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -40022,7 +40420,7 @@ export const SkillsApiAxiosParamCreator = function (configuration?: Configuratio
             // verify required parameter 'skillId' is not null or undefined
             assertParamExists('apiCoreSkillsSkillIdDiscardPost', 'skillId', skillId)
             const localVarPath = `/api/core/skills/{skill_id}:discard`
-                .replace('{skill_id}', encodeURIComponent(String(skillId)));
+                .replace(`{${"skill_id"}}`, encodeURIComponent(String(skillId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -40056,7 +40454,7 @@ export const SkillsApiAxiosParamCreator = function (configuration?: Configuratio
             // verify required parameter 'skillId' is not null or undefined
             assertParamExists('apiCoreSkillsSkillIdDistributionUpgradeGet', 'skillId', skillId)
             const localVarPath = `/api/core/skills/{skill_id}/distribution-upgrade`
-                .replace('{skill_id}', encodeURIComponent(String(skillId)));
+                .replace(`{${"skill_id"}}`, encodeURIComponent(String(skillId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -40090,7 +40488,7 @@ export const SkillsApiAxiosParamCreator = function (configuration?: Configuratio
             // verify required parameter 'skillId' is not null or undefined
             assertParamExists('apiCoreSkillsSkillIdDistributionUpgradePreparePost', 'skillId', skillId)
             const localVarPath = `/api/core/skills/{skill_id}/distribution-upgrade:prepare`
-                .replace('{skill_id}', encodeURIComponent(String(skillId)));
+                .replace(`{${"skill_id"}}`, encodeURIComponent(String(skillId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -40124,7 +40522,7 @@ export const SkillsApiAxiosParamCreator = function (configuration?: Configuratio
             // verify required parameter 'skillId' is not null or undefined
             assertParamExists('apiCoreSkillsSkillIdDraftPreviewGet', 'skillId', skillId)
             const localVarPath = `/api/core/skills/{skill_id}:draft-preview`
-                .replace('{skill_id}', encodeURIComponent(String(skillId)));
+                .replace(`{${"skill_id"}}`, encodeURIComponent(String(skillId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -40161,7 +40559,7 @@ export const SkillsApiAxiosParamCreator = function (configuration?: Configuratio
             // verify required parameter 'path' is not null or undefined
             assertParamExists('apiCoreSkillsSkillIdFileGet', 'path', path)
             const localVarPath = `/api/core/skills/{skill_id}/file`
-                .replace('{skill_id}', encodeURIComponent(String(skillId)));
+                .replace(`{${"skill_id"}}`, encodeURIComponent(String(skillId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -40202,7 +40600,7 @@ export const SkillsApiAxiosParamCreator = function (configuration?: Configuratio
             // verify required parameter 'skillGenerateOpenAPIRequest' is not null or undefined
             assertParamExists('apiCoreSkillsSkillIdGeneratePost', 'skillGenerateOpenAPIRequest', skillGenerateOpenAPIRequest)
             const localVarPath = `/api/core/skills/{skill_id}:generate`
-                .replace('{skill_id}', encodeURIComponent(String(skillId)));
+                .replace(`{${"skill_id"}}`, encodeURIComponent(String(skillId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -40238,7 +40636,7 @@ export const SkillsApiAxiosParamCreator = function (configuration?: Configuratio
             // verify required parameter 'skillId' is not null or undefined
             assertParamExists('apiCoreSkillsSkillIdGet', 'skillId', skillId)
             const localVarPath = `/api/core/skills/{skill_id}`
-                .replace('{skill_id}', encodeURIComponent(String(skillId)));
+                .replace(`{${"skill_id"}}`, encodeURIComponent(String(skillId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -40275,7 +40673,7 @@ export const SkillsApiAxiosParamCreator = function (configuration?: Configuratio
             // verify required parameter 'skillUpdateManagedOpenAPIRequest' is not null or undefined
             assertParamExists('apiCoreSkillsSkillIdPatch', 'skillUpdateManagedOpenAPIRequest', skillUpdateManagedOpenAPIRequest)
             const localVarPath = `/api/core/skills/{skill_id}`
-                .replace('{skill_id}', encodeURIComponent(String(skillId)));
+                .replace(`{${"skill_id"}}`, encodeURIComponent(String(skillId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -40311,7 +40709,7 @@ export const SkillsApiAxiosParamCreator = function (configuration?: Configuratio
             // verify required parameter 'skillId' is not null or undefined
             assertParamExists('apiCoreSkillsSkillIdPurgeDelete', 'skillId', skillId)
             const localVarPath = `/api/core/skills/{skill_id}:purge`
-                .replace('{skill_id}', encodeURIComponent(String(skillId)));
+                .replace(`{${"skill_id"}}`, encodeURIComponent(String(skillId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -40345,7 +40743,7 @@ export const SkillsApiAxiosParamCreator = function (configuration?: Configuratio
             // verify required parameter 'skillId' is not null or undefined
             assertParamExists('apiCoreSkillsSkillIdRestorePost', 'skillId', skillId)
             const localVarPath = `/api/core/skills/{skill_id}:restore`
-                .replace('{skill_id}', encodeURIComponent(String(skillId)));
+                .replace(`{${"skill_id"}}`, encodeURIComponent(String(skillId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -40379,7 +40777,7 @@ export const SkillsApiAxiosParamCreator = function (configuration?: Configuratio
             // verify required parameter 'skillId' is not null or undefined
             assertParamExists('apiCoreSkillsSkillIdTrashPost', 'skillId', skillId)
             const localVarPath = `/api/core/skills/{skill_id}:trash`
-                .replace('{skill_id}', encodeURIComponent(String(skillId)));
+                .replace(`{${"skill_id"}}`, encodeURIComponent(String(skillId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -40413,7 +40811,7 @@ export const SkillsApiAxiosParamCreator = function (configuration?: Configuratio
             // verify required parameter 'skillId' is not null or undefined
             assertParamExists('apiCoreSkillsSkillIdTreeGet', 'skillId', skillId)
             const localVarPath = `/api/core/skills/{skill_id}/tree`
-                .replace('{skill_id}', encodeURIComponent(String(skillId)));
+                .replace(`{${"skill_id"}}`, encodeURIComponent(String(skillId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -41618,7 +42016,7 @@ export const TasksApiAxiosParamCreator = function (configuration?: Configuration
             // verify required parameter 'dataset' is not null or undefined
             assertParamExists('apiCoreDatasetsDatasetTasksGet', 'dataset', dataset)
             const localVarPath = `/api/core/datasets/{dataset}/tasks`
-                .replace('{dataset}', encodeURIComponent(String(dataset)));
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -41679,7 +42077,7 @@ export const TasksApiAxiosParamCreator = function (configuration?: Configuration
             // verify required parameter 'createTaskRequest' is not null or undefined
             assertParamExists('apiCoreDatasetsDatasetTasksPost', 'createTaskRequest', createTaskRequest)
             const localVarPath = `/api/core/datasets/{dataset}/tasks`
-                .replace('{dataset}', encodeURIComponent(String(dataset)));
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -41718,7 +42116,7 @@ export const TasksApiAxiosParamCreator = function (configuration?: Configuration
             // verify required parameter 'searchTasksRequest' is not null or undefined
             assertParamExists('apiCoreDatasetsDatasetTasksSearchPost', 'searchTasksRequest', searchTasksRequest)
             const localVarPath = `/api/core/datasets/{dataset}/tasks:search`
-                .replace('{dataset}', encodeURIComponent(String(dataset)));
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -41757,7 +42155,7 @@ export const TasksApiAxiosParamCreator = function (configuration?: Configuration
             // verify required parameter 'startTaskRequest' is not null or undefined
             assertParamExists('apiCoreDatasetsDatasetTasksStartPost', 'startTaskRequest', startTaskRequest)
             const localVarPath = `/api/core/datasets/{dataset}/tasks:start`
-                .replace('{dataset}', encodeURIComponent(String(dataset)));
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -41796,8 +42194,8 @@ export const TasksApiAxiosParamCreator = function (configuration?: Configuration
             // verify required parameter 'task' is not null or undefined
             assertParamExists('apiCoreDatasetsDatasetTasksTaskDelete', 'task', task)
             const localVarPath = `/api/core/datasets/{dataset}/tasks/{task}`
-                .replace('{dataset}', encodeURIComponent(String(dataset)))
-                .replace('{task}', encodeURIComponent(String(task)));
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"task"}}`, encodeURIComponent(String(task)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -41834,8 +42232,8 @@ export const TasksApiAxiosParamCreator = function (configuration?: Configuration
             // verify required parameter 'task' is not null or undefined
             assertParamExists('apiCoreDatasetsDatasetTasksTaskGet', 'task', task)
             const localVarPath = `/api/core/datasets/{dataset}/tasks/{task}`
-                .replace('{dataset}', encodeURIComponent(String(dataset)))
-                .replace('{task}', encodeURIComponent(String(task)));
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"task"}}`, encodeURIComponent(String(task)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -41873,8 +42271,8 @@ export const TasksApiAxiosParamCreator = function (configuration?: Configuration
             // verify required parameter 'task' is not null or undefined
             assertParamExists('apiCoreDatasetsDatasetTasksTaskResumePost', 'task', task)
             const localVarPath = `/api/core/datasets/{dataset}/tasks/{task}:resume`
-                .replace('{dataset}', encodeURIComponent(String(dataset)))
-                .replace('{task}', encodeURIComponent(String(task)));
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"task"}}`, encodeURIComponent(String(task)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -41916,8 +42314,8 @@ export const TasksApiAxiosParamCreator = function (configuration?: Configuration
             // verify required parameter 'suspendJobRequest' is not null or undefined
             assertParamExists('apiCoreDatasetsDatasetTasksTaskSuspendPost', 'suspendJobRequest', suspendJobRequest)
             const localVarPath = `/api/core/datasets/{dataset}/tasks/{task}:suspend`
-                .replace('{dataset}', encodeURIComponent(String(dataset)))
-                .replace('{task}', encodeURIComponent(String(task)));
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"task"}}`, encodeURIComponent(String(task)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -41956,7 +42354,7 @@ export const TasksApiAxiosParamCreator = function (configuration?: Configuration
             // verify required parameter 'checkFileHashesRequest' is not null or undefined
             assertParamExists('apiCoreDatasetsDatasetUploadsCheckHashesPost', 'checkFileHashesRequest', checkFileHashesRequest)
             const localVarPath = `/api/core/datasets/{dataset}/uploads:checkHashes`
-                .replace('{dataset}', encodeURIComponent(String(dataset)));
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -41995,7 +42393,7 @@ export const TasksApiAxiosParamCreator = function (configuration?: Configuration
             // verify required parameter 'initUploadRequest' is not null or undefined
             assertParamExists('apiCoreDatasetsDatasetUploadsInitUploadPost', 'initUploadRequest', initUploadRequest)
             const localVarPath = `/api/core/datasets/{dataset}/uploads:initUpload`
-                .replace('{dataset}', encodeURIComponent(String(dataset)));
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -42035,8 +42433,8 @@ export const TasksApiAxiosParamCreator = function (configuration?: Configuration
             // verify required parameter 'uploadId' is not null or undefined
             assertParamExists('apiCoreDatasetsDatasetUploadsUploadIdAbortPost', 'uploadId', uploadId)
             const localVarPath = `/api/core/datasets/{dataset}/uploads/{upload_id}:abort`
-                .replace('{dataset}', encodeURIComponent(String(dataset)))
-                .replace('{upload_id}', encodeURIComponent(String(uploadId)));
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"upload_id"}}`, encodeURIComponent(String(uploadId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -42076,8 +42474,8 @@ export const TasksApiAxiosParamCreator = function (configuration?: Configuration
             // verify required parameter 'uploadId' is not null or undefined
             assertParamExists('apiCoreDatasetsDatasetUploadsUploadIdCompletePost', 'uploadId', uploadId)
             const localVarPath = `/api/core/datasets/{dataset}/uploads/{upload_id}:complete`
-                .replace('{dataset}', encodeURIComponent(String(dataset)))
-                .replace('{upload_id}', encodeURIComponent(String(uploadId)));
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"upload_id"}}`, encodeURIComponent(String(uploadId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -42122,9 +42520,9 @@ export const TasksApiAxiosParamCreator = function (configuration?: Configuration
             // verify required parameter 'body' is not null or undefined
             assertParamExists('apiCoreDatasetsDatasetUploadsUploadIdPartsPartNumberPut', 'body', body)
             const localVarPath = `/api/core/datasets/{dataset}/uploads/{upload_id}/parts/{part_number}`
-                .replace('{dataset}', encodeURIComponent(String(dataset)))
-                .replace('{upload_id}', encodeURIComponent(String(uploadId)))
-                .replace('{part_number}', encodeURIComponent(String(partNumber)));
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"upload_id"}}`, encodeURIComponent(String(uploadId)))
+                .replace(`{${"part_number"}}`, encodeURIComponent(String(partNumber)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -42847,7 +43245,7 @@ export const ToolsApiAxiosParamCreator = function (configuration?: Configuration
             // verify required parameter 'toolName' is not null or undefined
             assertParamExists('apiCoreToolsToolNameDisablePost', 'toolName', toolName)
             const localVarPath = `/api/core/tools/{tool_name}:disable`
-                .replace('{tool_name}', encodeURIComponent(String(toolName)));
+                .replace(`{${"tool_name"}}`, encodeURIComponent(String(toolName)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -42881,7 +43279,7 @@ export const ToolsApiAxiosParamCreator = function (configuration?: Configuration
             // verify required parameter 'toolName' is not null or undefined
             assertParamExists('apiCoreToolsToolNameEnablePost', 'toolName', toolName)
             const localVarPath = `/api/core/tools/{tool_name}:enable`
-                .replace('{tool_name}', encodeURIComponent(String(toolName)));
+                .replace(`{${"tool_name"}}`, encodeURIComponent(String(toolName)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -43289,7 +43687,7 @@ export const UploadsApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'uploadId' is not null or undefined
             assertParamExists('apiCoreTempUploadsUploadIdAbortPost', 'uploadId', uploadId)
             const localVarPath = `/api/core/temp/uploads/{upload_id}:abort`
-                .replace('{upload_id}', encodeURIComponent(String(uploadId)));
+                .replace(`{${"upload_id"}}`, encodeURIComponent(String(uploadId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -43326,7 +43724,7 @@ export const UploadsApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'uploadId' is not null or undefined
             assertParamExists('apiCoreTempUploadsUploadIdCompletePost', 'uploadId', uploadId)
             const localVarPath = `/api/core/temp/uploads/{upload_id}:complete`
-                .replace('{upload_id}', encodeURIComponent(String(uploadId)));
+                .replace(`{${"upload_id"}}`, encodeURIComponent(String(uploadId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -43368,8 +43766,8 @@ export const UploadsApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'body' is not null or undefined
             assertParamExists('apiCoreTempUploadsUploadIdPartsPartNumberPut', 'body', body)
             const localVarPath = `/api/core/temp/uploads/{upload_id}/parts/{part_number}`
-                .replace('{upload_id}', encodeURIComponent(String(uploadId)))
-                .replace('{part_number}', encodeURIComponent(String(partNumber)));
+                .replace(`{${"upload_id"}}`, encodeURIComponent(String(uploadId)))
+                .replace(`{${"part_number"}}`, encodeURIComponent(String(partNumber)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -44136,7 +44534,7 @@ export const WordGroupApiAxiosParamCreator = function (configuration?: Configura
             // verify required parameter 'id' is not null or undefined
             assertParamExists('apiCoreWordGroupConflictIdDelete', 'id', id)
             const localVarPath = `/api/core/word_group_conflict/{id}`
-                .replace('{id}', encodeURIComponent(String(id)));
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -44245,7 +44643,7 @@ export const WordGroupApiAxiosParamCreator = function (configuration?: Configura
             // verify required parameter 'groupId' is not null or undefined
             assertParamExists('apiCoreWordGroupGroupIdDelete', 'groupId', groupId)
             const localVarPath = `/api/core/word_group/{group_id}`
-                .replace('{group_id}', encodeURIComponent(String(groupId)));
+                .replace(`{${"group_id"}}`, encodeURIComponent(String(groupId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -44279,7 +44677,7 @@ export const WordGroupApiAxiosParamCreator = function (configuration?: Configura
             // verify required parameter 'groupId' is not null or undefined
             assertParamExists('apiCoreWordGroupGroupIdGet', 'groupId', groupId)
             const localVarPath = `/api/core/word_group/{group_id}`
-                .replace('{group_id}', encodeURIComponent(String(groupId)));
+                .replace(`{${"group_id"}}`, encodeURIComponent(String(groupId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -45116,9 +45514,9 @@ export const WorkflowApiAxiosParamCreator = function (configuration?: Configurat
             // verify required parameter 'artifactActionPreviewOpenAPIRequest' is not null or undefined
             assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexActionPreviewPost', 'artifactActionPreviewOpenAPIRequest', artifactActionPreviewOpenAPIRequest)
             const localVarPath = `/api/core/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:action-preview`
-                .replace('{session_id}', encodeURIComponent(String(sessionId)))
-                .replace('{slot_id}', encodeURIComponent(String(slotId)))
-                .replace('{list_index}', encodeURIComponent(String(listIndex)));
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)))
+                .replace(`{${"slot_id"}}`, encodeURIComponent(String(slotId)))
+                .replace(`{${"list_index"}}`, encodeURIComponent(String(listIndex)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -45163,9 +45561,9 @@ export const WorkflowApiAxiosParamCreator = function (configuration?: Configurat
             // verify required parameter 'writerDocumentSyncOpenAPIRequest' is not null or undefined
             assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexSyncWriterDocumentPost', 'writerDocumentSyncOpenAPIRequest', writerDocumentSyncOpenAPIRequest)
             const localVarPath = `/api/core/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:sync-writer-document`
-                .replace('{session_id}', encodeURIComponent(String(sessionId)))
-                .replace('{slot_id}', encodeURIComponent(String(slotId)))
-                .replace('{list_index}', encodeURIComponent(String(listIndex)));
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)))
+                .replace(`{${"slot_id"}}`, encodeURIComponent(String(slotId)))
+                .replace(`{${"list_index"}}`, encodeURIComponent(String(listIndex)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -45204,7 +45602,7 @@ export const WorkflowApiAxiosParamCreator = function (configuration?: Configurat
             // verify required parameter 'writerDocumentWriteBackOpenAPIRequest' is not null or undefined
             assertParamExists('apiCoreWorkflowSessionsSessionIdWriterDocumentWriteBackPost', 'writerDocumentWriteBackOpenAPIRequest', writerDocumentWriteBackOpenAPIRequest)
             const localVarPath = `/api/core/workflow-sessions/{session_id}/writer-document:write-back`
-                .replace('{session_id}', encodeURIComponent(String(sessionId)));
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -45426,9 +45824,9 @@ export const WriterApiAxiosParamCreator = function (configuration?: Configuratio
             // verify required parameter 'writerDocumentSyncOpenAPIRequest' is not null or undefined
             assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexSyncWriterDocumentPost', 'writerDocumentSyncOpenAPIRequest', writerDocumentSyncOpenAPIRequest)
             const localVarPath = `/api/core/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:sync-writer-document`
-                .replace('{session_id}', encodeURIComponent(String(sessionId)))
-                .replace('{slot_id}', encodeURIComponent(String(slotId)))
-                .replace('{list_index}', encodeURIComponent(String(listIndex)));
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)))
+                .replace(`{${"slot_id"}}`, encodeURIComponent(String(slotId)))
+                .replace(`{${"list_index"}}`, encodeURIComponent(String(listIndex)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -45467,7 +45865,7 @@ export const WriterApiAxiosParamCreator = function (configuration?: Configuratio
             // verify required parameter 'writerDocumentWriteBackOpenAPIRequest' is not null or undefined
             assertParamExists('apiCoreWorkflowSessionsSessionIdWriterDocumentWriteBackPost', 'writerDocumentWriteBackOpenAPIRequest', writerDocumentWriteBackOpenAPIRequest)
             const localVarPath = `/api/core/workflow-sessions/{session_id}/writer-document:write-back`
-                .replace('{session_id}', encodeURIComponent(String(sessionId)));
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;

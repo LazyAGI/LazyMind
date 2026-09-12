@@ -232,6 +232,10 @@
 
   .chat-model-selector-trigger {
     max-width: 148px;
+
+    &.is-combined {
+      max-width: 196px;
+    }
   }
 
   .conversation-trail {

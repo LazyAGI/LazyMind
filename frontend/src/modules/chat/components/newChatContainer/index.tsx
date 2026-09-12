@@ -10,7 +10,7 @@ import {
 import type { WheelEvent as ReactWheelEvent } from "react";
 import { useTranslation } from "react-i18next";
 import i18n from "@/i18n";
-import { message } from "antd";
+import { Drawer, message } from "antd";
 import { ChatConversationsResponseFinishReasonEnum } from "@/api/generated/chatbot-client";
 import { useChatMessageStore } from "@/modules/chat/store/chatMessage";
 import { RoleTypes } from "@/modules/chat/constants/common";
@@ -509,12 +509,19 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
       });
     }, [clearCiteMessages, sendMessage, t]);
 
+    const sourcePanel = sourcePanelSources.length > 0 ? (
+      <ChatSourcePanel
+        sources={sourcePanelSources}
+        onClose={() => setSourcePanelSources([])}
+      />
+    ) : null;
+
     return (
       <div
         className="chat-chat-container"
         onWheelCapture={handleConversationWheel}
       >
-        <div className={`chat-box${sourcePanelSources.length ? " has-source-panel" : ""}`}>
+        <div className={`chat-box${sourcePanelSources.length && !props.sourcePanelOverlay ? " has-source-panel" : ""}`}>
           <div className="chat-main-column">
             <MessageList
               onFork={props.onFork}
@@ -642,13 +649,20 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
               onThinkingDepthChange={onThinkingDepthChange}
             />
           </div>
-          {sourcePanelSources.length > 0 && (
-            <ChatSourcePanel
-              sources={sourcePanelSources}
-              onClose={() => setSourcePanelSources([])}
-            />
-          )}
+          {!props.sourcePanelOverlay && sourcePanel}
         </div>
+        <Drawer
+          open={Boolean(props.sourcePanelOverlay && sourcePanelSources.length)}
+          onClose={() => setSourcePanelSources([])}
+          closable={false}
+          mask={false}
+          width="min(360px, 100vw)"
+          zIndex={1100}
+          rootClassName="chat-source-drawer-root"
+          styles={{ body: { padding: 0, display: "flex" } }}
+        >
+          {props.sourcePanelOverlay && sourcePanel}
+        </Drawer>
         <ConversationTrail
           key={sessionId || "new-conversation"}
           items={conversationTrail.items}

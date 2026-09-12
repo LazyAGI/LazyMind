@@ -151,3 +151,82 @@ func TestLinkedTaskUsesWorkflowLifecycleWithoutRevivingCanceledTasks(t *testing.
 		})
 	}
 }
+
+func TestStoppedWorkflowIsCanceledUntilExplicitRetry(t *testing.T) {
+	db := orm.MigrateTestDB(t, &orm.TaskCenterTask{}, &orm.Conversation{}, &orm.UserSchedule{},
+		&orm.WorkflowSession{}, &orm.WorkflowSessionStep{}, &orm.SubAgentTask{}, &orm.SubAgentArtifact{})
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+	now := time.Now().UTC().Add(-time.Minute)
+	session := orm.WorkflowSession{ID: "stopped-workflow", ConversationID: "conv", CreateUserID: "owner", WorkflowID: "writer", Status: "waiting", CreatedAt: now, UpdatedAt: now}
+	task := orm.TaskCenterTask{ID: "stopped-task", UserID: "owner", ConversationID: "conv", TaskType: "workflow_run", WorkflowSessionID: &session.ID, Status: "running", CreatedAt: now, UpdatedAt: now}
+	conversation := orm.Conversation{ID: "conv", BaseModel: orm.BaseModel{CreateUserID: "owner"}}
+	stopped := orm.WorkflowSessionStep{ID: "stopped-attempt", SessionID: session.ID, StepID: "write", TaskID: "subtask", Attempt: 1, Status: "interrupted", TerminalCode: "WORKFLOW_STOPPED", CreatedAt: now, UpdatedAt: now}
+	for _, value := range []any{&session, &task, &conversation, &stopped} {
+		if err := db.Create(value).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, filter := range []string{"waiting", "canceled"} {
+		req := httptest.NewRequest(http.MethodGet, "/task-center/tasks?status="+filter, nil)
+		req.Header.Set("X-User-Id", "owner")
+		rec := httptest.NewRecorder()
+		ListTasks(rec, req)
+		var response struct {
+			Items  []taskResponse `json:"items"`
+			Counts map[string]int `json:"status_counts"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+			t.Fatal(err)
+		}
+		if rec.Code != http.StatusOK || response.Counts["waiting"] != 0 || response.Counts["canceled"] != 1 {
+			t.Fatalf("%s: %s", filter, rec.Body.String())
+		}
+		if filter == "waiting" && len(response.Items) != 0 {
+			t.Fatal("stopped workflow leaked into approvals")
+		}
+		if filter == "canceled" && (len(response.Items) != 1 || response.Items[0].FinishedAt == nil) {
+			t.Fatal("stopped workflow missing canceled result")
+		}
+	}
+	// Read-time status must not permanently cancel the resumable workflow task.
+	var persisted orm.TaskCenterTask
+	if err := db.First(&persisted, "id = ?", task.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Status != "running" {
+		t.Fatalf("read mutated stored task to %q", persisted.Status)
+	}
+	// An untouched parallel branch retains the earlier stop after retrying write.
+	stoppedBranch := stopped
+	stoppedBranch.ID, stoppedBranch.StepID, stoppedBranch.TaskID = "stopped-branch", "outline", "outline-task"
+	if err := db.Create(&stoppedBranch).Error; err != nil {
+		t.Fatal(err)
+	}
+	// Explicit retry creates a newer attempt; old cancellation must not mask it.
+	retry := stopped
+	retry.ID = "retry-attempt"
+	retry.TaskID = "retry-task"
+	retry.Attempt = 2
+	retry.Status = "running"
+	retry.TerminalCode = ""
+	retry.CreatedAt = now.Add(time.Second)
+	if err := db.Create(&retry).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&session).Update("status", "active").Error; err != nil {
+		t.Fatal(err)
+	}
+	if got := resolveTaskForResponse(t.Context(), db.DB, task); got.Status != "running" {
+		t.Fatalf("retry status=%s", got.Status)
+	}
+	if err := db.Model(&retry).Update("status", "succeeded").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&session).Update("status", "waiting").Error; err != nil {
+		t.Fatal(err)
+	}
+	if got := resolveTaskForResponse(t.Context(), db.DB, task); got.Status != "waiting" {
+		t.Fatalf("new approval status=%s", got.Status)
+	}
+}

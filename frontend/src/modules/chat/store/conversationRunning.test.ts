@@ -215,3 +215,15 @@ describe("conversation running status synchronization", () => {
     expect(post.mock.calls[0][2].signal.aborted).toBe(true);
   });
 });
+
+it('persists the supplied terminal status only while idle and clears it for the next run', async () => {
+  store.getState().watch('sidebar', ['a']);
+  post.mockResolvedValueOnce({data:{statuses:[{conversation_id:'a',status:'idle',terminal_status:'completed'}]}})
+    .mockResolvedValueOnce({data:{statuses:[{conversation_id:'a',status:'running',terminal_status:'completed'}]}})
+    .mockResolvedValue({data:{statuses:[{conversation_id:'a',status:'unknown',terminal_status:'completed'}]}});
+  stop=startConversationRunningSync(); await tick();
+  expect(store.getState().entries.a).toMatchObject({status:'idle',terminalStatus:'completed'});
+  await tick(5000); expect(store.getState().entries.a).toMatchObject({status:'running'});
+  expect(store.getState().entries.a).not.toHaveProperty('terminalStatus','completed');
+  await tick(5000); expect(store.getState().entries.a).not.toHaveProperty('terminalStatus','completed');
+});

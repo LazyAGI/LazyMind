@@ -39,7 +39,7 @@ var errConversationOrderConflict = errors.New("conversation order changed")
 func lockConversationHistory(tx *gorm.DB, userID string) ([]orm.Conversation, error) {
 	var rows []orm.Conversation
 	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-		Select("id", "pinned_at", "history_order", "updated_at").
+		Select("id", "pinned_at", "history_order", "unpinned_history_order", "updated_at").
 		Where("create_user_id = ? AND deleted_at IS NULL AND archived_at IS NULL AND is_ephemeral = ? AND (parent_conversation_id IS NULL OR parent_conversation_id = '')", userID, false).
 		Order("id ASC").Find(&rows).Error
 	sort.SliceStable(rows, func(i, j int) bool { return conversationHistoryLess(rows[i], rows[j]) })
@@ -66,10 +66,17 @@ func conversationHistoryLess(left, right orm.Conversation) bool {
 	return left.ID < right.ID
 }
 
-func saveConversationOrder(tx *gorm.DB, rows []orm.Conversation) ([]conversationOrderUpdate, error) {
+func saveConversationOrder(tx *gorm.DB, rows []orm.Conversation, includePinnedPlaceholders bool) ([]conversationOrderUpdate, error) {
 	updates := make([]conversationOrderUpdate, 0, len(rows))
 	for index := range rows {
 		order := int64(index + 1)
+		if includePinnedPlaceholders && rows[index].PinnedAt != nil {
+			if err := tx.Model(&orm.Conversation{}).Where("id = ?", rows[index].ID).UpdateColumn("unpinned_history_order", order).Error; err != nil {
+				return nil, err
+			}
+			rows[index].UnpinnedHistoryOrder = &order
+			continue
+		}
 		if rows[index].HistoryOrder == nil || *rows[index].HistoryOrder != order {
 			if err := tx.Model(&orm.Conversation{}).Where("id = ?", rows[index].ID).UpdateColumn("history_order", order).Error; err != nil {
 				return nil, err
@@ -134,9 +141,31 @@ func ReorderConversation(w http.ResponseWriter, r *http.Request) {
 		if pinned != (target.PinnedAt != nil) {
 			return errConversationOrderConflict
 		}
-		ordered := make([]orm.Conversation, 0, len(rows))
+		candidates := make([]orm.Conversation, 0, len(rows))
 		for _, row := range rows {
-			if (row.PinnedAt != nil) != pinned || row.ID == id {
+			if (pinned && row.PinnedAt == nil) || (!pinned && row.PinnedAt != nil && row.UnpinnedHistoryOrder == nil) {
+				continue
+			}
+			candidates = append(candidates, row)
+		}
+		if !pinned {
+			// Keep temporarily pinned rows as invisible placeholders in their
+			// original history positions when the user rearranges that history.
+			sort.SliceStable(candidates, func(i, j int) bool {
+				left, right := candidates[i], candidates[j]
+				if left.PinnedAt != nil {
+					left.HistoryOrder = left.UnpinnedHistoryOrder
+				}
+				if right.PinnedAt != nil {
+					right.HistoryOrder = right.UnpinnedHistoryOrder
+				}
+				left.PinnedAt, right.PinnedAt = nil, nil
+				return conversationHistoryLess(left, right)
+			})
+		}
+		ordered := make([]orm.Conversation, 0, len(candidates))
+		for _, row := range candidates {
+			if row.ID == id {
 				continue
 			}
 			if row.ID == body.TargetID && body.Position == "before" {
@@ -147,7 +176,7 @@ func ReorderConversation(w http.ResponseWriter, r *http.Request) {
 				ordered = append(ordered, *moved)
 			}
 		}
-		updates, err := saveConversationOrder(tx, ordered)
+		updates, err := saveConversationOrder(tx, ordered, !pinned)
 		if err != nil {
 			return err
 		}
@@ -191,13 +220,25 @@ func updateConversationPin(ctx context.Context, db *gorm.DB, userID, id string, 
 			return nil
 		}
 		moved.PinnedAt = nil
-		moved.HistoryOrder = nil
 		if pinned {
+			moved.UnpinnedHistoryOrder = moved.HistoryOrder
+			moved.HistoryOrder = nil
 			now := time.Now().UTC()
 			moved.PinnedAt = &now
+		} else {
+			moved.HistoryOrder = moved.UnpinnedHistoryOrder
+			moved.UnpinnedHistoryOrder = nil
 		}
-		if err := tx.Model(&orm.Conversation{}).Where("id = ?", id).UpdateColumns(map[string]any{"pinned_at": moved.PinnedAt, "history_order": nil}).Error; err != nil {
+		if err := tx.Model(&orm.Conversation{}).Where("id = ?", id).UpdateColumns(map[string]any{
+			"pinned_at": moved.PinnedAt, "history_order": moved.HistoryOrder,
+			"unpinned_history_order": moved.UnpinnedHistoryOrder,
+		}).Error; err != nil {
 			return err
+		}
+		if !pinned {
+			result.IsPinned = false
+			result.HistoryOrder = moved.HistoryOrder
+			return nil
 		}
 		ordered := make([]orm.Conversation, 0, len(rows))
 		manual := false
@@ -209,19 +250,10 @@ func updateConversationPin(ctx context.Context, db *gorm.DB, userID, id string, 
 		}
 		if manual {
 			at := 0
-			if !pinned {
-				// Use the conversation's chronological position, while preserving
-				// the relative order of every other manually arranged row.
-				for _, row := range ordered {
-					if row.UpdatedAt.After(moved.UpdatedAt) {
-						at++
-					}
-				}
-			}
 			ordered = append(ordered, orm.Conversation{})
 			copy(ordered[at+1:], ordered[at:])
 			ordered[at] = *moved
-			result.OrderUpdates, err = saveConversationOrder(tx, ordered)
+			result.OrderUpdates, err = saveConversationOrder(tx, ordered, false)
 			if err != nil {
 				return err
 			}
