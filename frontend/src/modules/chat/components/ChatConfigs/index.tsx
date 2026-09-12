@@ -6,7 +6,6 @@ import KnowledgeBaseConfigModal, {
   ConfigImperativeProps,
 } from "../KnowledgeBaseConfigModal";
 import {
-  DatabaseBaseServiceApi,
   KnowledgeBaseServiceApi,
 } from "@/modules/chat/utils/request";
 import { Dataset, UserDatabaseSummary } from "@/api/generated/knowledge-client";

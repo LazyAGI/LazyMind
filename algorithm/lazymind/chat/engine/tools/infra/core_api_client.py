@@ -51,6 +51,7 @@ def _current_user_headers() -> Dict[str, str]:
 def post_core_api(
     path: str,
     payload: Dict[str, Any],
+    *, user_id: str | None = None,
 ) -> Dict[str, Any]:
     base_url = str(_cfg['core_api_url'] or '').strip().rstrip('/')
     if not base_url:
@@ -60,7 +61,10 @@ def post_core_api(
     timeout = int(_cfg['core_api_timeout'])
     with requests.sessions.Session() as session:
         session.trust_env = False
-        response = session.post(url, json=payload, headers=_current_user_headers(), timeout=timeout)
+        headers = _current_user_headers()
+        if user_id is not None:
+            headers['X-User-Id'] = user_id
+        response = session.post(url, json=payload, headers=headers, timeout=timeout)
 
     try:
         body = response.json()
@@ -81,7 +85,7 @@ def post_core_api(
     }
 
 
-def get_core_api(path: str, params: Dict[str, Any] | None = None) -> Dict[str, Any]:
+def get_core_api(path: str, params: Dict[str, Any] | None = None, *, user_id: str | None = None) -> Dict[str, Any]:
     base_url = str(_cfg['core_api_url'] or '').strip().rstrip('/')
     if not base_url:
         raise RuntimeError("'core_api_url' is required in config.")
@@ -90,7 +94,10 @@ def get_core_api(path: str, params: Dict[str, Any] | None = None) -> Dict[str, A
     timeout = int(_cfg['core_api_timeout'])
     with requests.sessions.Session() as session:
         session.trust_env = False
-        response = session.get(url, params=params, headers=_current_user_headers(), timeout=timeout)
+        headers = _current_user_headers()
+        if user_id is not None:
+            headers['X-User-Id'] = user_id
+        response = session.get(url, params=params, headers=headers, timeout=timeout)
 
     try:
         body = response.json()

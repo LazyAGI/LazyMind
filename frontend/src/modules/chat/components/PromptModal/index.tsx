@@ -156,7 +156,14 @@ function PromptModalComponent(
         if (sequence !== requestSequence.current) return;
         setPrompts(response.data.prompts ?? []);
         setCustomCategories(response.data.custom_categories ?? []);
-        setFacets(response.data.facets ?? {});
+        const counts = (value?: object): Record<string, number> => Object.fromEntries(
+          Object.entries(value ?? {}).filter(([, count]) => typeof count === "number"),
+        );
+        setFacets({
+          ...response.data.facets,
+          scopes: counts(response.data.facets?.scopes),
+          categories: counts(response.data.facets?.categories),
+        });
         setTotal(response.data.total ?? 0);
       } catch {
         if (controller.signal.aborted || sequence !== requestSequence.current) return;

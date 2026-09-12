@@ -1442,6 +1442,79 @@ CREATE UNIQUE INDEX uk_skills_owner_relative_root
     WHERE deleted_at IS NULL;
 
 -- +migrate Dialect postgres
+CREATE TABLE IF NOT EXISTS public.local_workspaces (
+    id VARCHAR(64) PRIMARY KEY,
+    create_user_id VARCHAR(255) NOT NULL,
+    display_name VARCHAR(255) NOT NULL,
+    canonical_path TEXT NOT NULL,
+    directory_identity VARCHAR(512) NOT NULL,
+    status VARCHAR(32) NOT NULL,
+    version BIGINT NOT NULL DEFAULT 1,
+    source VARCHAR(32) NOT NULL,
+    read_policy VARCHAR(32) NOT NULL DEFAULT 'allow',
+    write_policy VARCHAR(32) NOT NULL DEFAULT 'allow',
+    authorized_at TIMESTAMP NOT NULL,
+    last_used_at TIMESTAMP NOT NULL,
+    revoked_at TIMESTAMP NULL,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL,
+    CONSTRAINT chk_local_workspaces_status CHECK (status IN ('active', 'revoked', 'path_unavailable')),
+    CONSTRAINT chk_local_workspaces_source CHECK (source IN ('local', 'desktop')),
+    CONSTRAINT chk_local_workspaces_read_policy CHECK (read_policy = 'allow'),
+    CONSTRAINT chk_local_workspaces_write_policy CHECK (write_policy = 'allow')
+);
+CREATE INDEX IF NOT EXISTS idx_local_workspaces_user_recent
+    ON public.local_workspaces(create_user_id, status, last_used_at DESC);
+CREATE TABLE IF NOT EXISTS public.conversation_workspace_bindings (
+    conversation_id VARCHAR(36) PRIMARY KEY,
+    workspace_id VARCHAR(64) NOT NULL,
+    permission_mode VARCHAR(32) NOT NULL DEFAULT 'ask_as_needed',
+    permission_version BIGINT NOT NULL DEFAULT 1,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT chk_conversation_workspace_permission_mode
+        CHECK (permission_mode IN ('always_ask', 'ask_as_needed', 'allow_all')),
+    CONSTRAINT fk_conversation_workspace_bindings_conversation
+        FOREIGN KEY (conversation_id) REFERENCES public.conversations(id) ON DELETE CASCADE,
+    CONSTRAINT fk_conversation_workspace_bindings_workspace
+        FOREIGN KEY (workspace_id) REFERENCES public.local_workspaces(id) ON DELETE RESTRICT
+);
+CREATE INDEX IF NOT EXISTS idx_conversation_workspace_bindings_workspace
+    ON public.conversation_workspace_bindings(workspace_id);
+
+-- +migrate Dialect sqlite
+CREATE TABLE IF NOT EXISTS local_workspaces (
+    id TEXT PRIMARY KEY,
+    create_user_id TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    canonical_path TEXT NOT NULL,
+    directory_identity TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('active', 'revoked', 'path_unavailable')),
+    version INTEGER NOT NULL DEFAULT 1,
+    source TEXT NOT NULL CHECK (source IN ('local', 'desktop')),
+    read_policy TEXT NOT NULL DEFAULT 'allow' CHECK (read_policy = 'allow'),
+    write_policy TEXT NOT NULL DEFAULT 'allow' CHECK (write_policy = 'allow'),
+    authorized_at DATETIME NOT NULL,
+    last_used_at DATETIME NOT NULL,
+    revoked_at DATETIME NULL,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_local_workspaces_user_recent
+    ON local_workspaces(create_user_id, status, last_used_at DESC);
+CREATE TABLE IF NOT EXISTS conversation_workspace_bindings (
+    conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
+    workspace_id TEXT NOT NULL REFERENCES local_workspaces(id) ON DELETE RESTRICT,
+    permission_mode TEXT NOT NULL DEFAULT 'ask_as_needed'
+        CHECK (permission_mode IN ('always_ask', 'ask_as_needed', 'allow_all')),
+    permission_version INTEGER NOT NULL DEFAULT 1,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_conversation_workspace_bindings_workspace
+    ON conversation_workspace_bindings(workspace_id);
+
+-- +migrate Dialect postgres
 CREATE TABLE IF NOT EXISTS public.workflow_approval_preferences (
     user_id VARCHAR(255) NOT NULL,
     workflow_id VARCHAR(64) NOT NULL,
@@ -1844,7 +1917,7 @@ CREATE INDEX IF NOT EXISTS idx_vocabulary_review_session_items_pending ON vocabu
 CREATE TABLE IF NOT EXISTS vocabulary_review_session_answers (id VARCHAR(64) PRIMARY KEY, session_id VARCHAR(64) NOT NULL, owner_id VARCHAR(64) NOT NULL, card_id VARCHAR(64) NOT NULL, word_id VARCHAR(64) NOT NULL DEFAULT '', term TEXT NOT NULL DEFAULT '', rating INTEGER NOT NULL, interval_before_days INTEGER NOT NULL DEFAULT 0, interval_after_days INTEGER NOT NULL DEFAULT 0, answered_at TIMESTAMP NOT NULL, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_vocabulary_review_session_answer_card ON vocabulary_review_session_answers(session_id,card_id);
 CREATE INDEX IF NOT EXISTS idx_vocabulary_review_session_answers ON vocabulary_review_session_answers(owner_id,session_id,answered_at);
-ALTER TABLE vocabulary_review_sessions ADD COLUMN IF NOT EXISTS status VARCHAR(16) NOT NULL DEFAULT 'active';
-ALTER TABLE vocabulary_review_sessions ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP;
+ALTER TABLE vocabulary_review_sessions ADD COLUMN status VARCHAR(16) NOT NULL DEFAULT 'active';
+ALTER TABLE vocabulary_review_sessions ADD COLUMN expires_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP;
 CREATE INDEX IF NOT EXISTS idx_vocabulary_review_sessions_active ON vocabulary_review_sessions(owner_id,provider,wordbook_id,completed_at,expires_at);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_vocabulary_review_session_word ON vocabulary_review_session_items(session_id,word_id);

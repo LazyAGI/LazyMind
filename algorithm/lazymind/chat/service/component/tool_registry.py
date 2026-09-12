@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import inspect
+import json
+import os
 import re
 from dataclasses import dataclass
 from typing import Any, Callable, Literal
@@ -391,11 +393,16 @@ class ToolConfig:
     input_schema: dict[str, Any] | None = None
     output_schema: dict[str, Any] | None = None
     required_config: list[str] | None = None
+    authorization: dict[str, Literal['read', 'write', 'delete', 'external']] | None = None
     appendix_system_prompt: SystemPromptAppendix | SystemPromptAppendixProvider | None = None
     appendix_query: str | QueryAppendixProvider | None = None
     appendix_query_position: QueryAppendixPosition = 'after'
 
     def __post_init__(self) -> None:
+        if self.authorization is not None:
+            invalid = set(self.authorization.values()) - {'read', 'write', 'delete', 'external'}
+            if invalid or any(not isinstance(name, str) or not name.strip() for name in self.authorization):
+                raise ValueError('authorization must map non-empty method names to known operation kinds')
         if not callable(self.appendix_system_prompt):
             self._validate_appendix(self.appendix_system_prompt)
         if self.appendix_query is not None and not (
@@ -418,6 +425,32 @@ class ToolConfig:
                 raise TypeError(
                     'appendix_system_prompt values must be a string or tuple of strings'
                 )
+
+
+@dataclass(frozen=True)
+class WorkspaceToolAdmission:
+    """Explicit host-file capability attached to one exposed tool method.
+
+    The first four fields intentionally retain the existing tuple-compatible
+    admission shape used by the runtime. ``host_file_access`` is kept separate
+    from business authorization so a tool cannot gain host-path access merely
+    by appearing in an allowlist.
+    """
+
+    instance: Any
+    method: str
+    authorization: dict[str, str] | None
+    resolver: Callable | None
+    host_file_access: Literal['NONE', 'DECLARED', 'OPAQUE'] = 'NONE'
+
+    def __iter__(self):
+        yield self.instance
+        yield self.method
+        yield self.authorization
+        yield self.resolver
+
+    def __getitem__(self, index: int):
+        return (self.instance, self.method, self.authorization, self.resolver)[index]
 
 
 _WEB_SEARCH_ENGINE_INSTANCES: list = [
@@ -785,6 +818,11 @@ DEFAULT_TOOLS: list[ToolConfig] = [
         tool=LocalFileToolkit(), module='data',
         label_en='Local Files',
         description_en='Glob, grep, read, and perform exact text replacements within configured local paths.',
+        authorization={
+            'ls': 'read', 'glob': 'read', 'grep': 'read', 'read': 'read', 'info': 'read',
+            'string_replace': 'write', 'create': 'write', 'overwrite': 'write', 'append': 'write',
+            'mkdir': 'write', 'delete': 'delete',
+        },
     ),
     ToolConfig(
         name='cloud_files', label='云文件', description='浏览、搜索和管理已连接的云文件系统',
@@ -882,6 +920,283 @@ def _registration_key_source(tool: Any) -> Callable[[], Any] | None:
     if isinstance(tool, tuple) and len(tool) == 2 and callable(tool[1]):
         return tool[1]
     return None
+
+
+def _workspace_internal_path(path: str) -> bool:
+    from lazymind.chat.engine.subagent.context import get_context
+    from lazymind.chat.engine.tools.local_file.workspace import chat_agent_workspace
+    from lazymind.chat.service.utils.static_file_url import _upload_root
+    context = get_context()
+    config = lazyllm.globals.get('agentic_config') or {}
+    roots = [_upload_root()]
+    if context and context.workspace_path:
+        roots.append(context.workspace_path)
+    if config.get('user_id') and config.get('conversation_id'):
+        roots.append(chat_agent_workspace(str(config['user_id']), str(config['conversation_id'])))
+    return LocalFileToolkit.workspace_path_allowed(path, roots)
+
+
+def _workspace_media_arguments(arguments: dict[str, Any], *, video: bool = False) -> bool:
+    from urllib.parse import urlsplit
+    from lazymind.chat.engine.tools.multimodal import _coerce_url_list
+    from lazymind.chat.engine.tools.infra.image_generation_support import resolve_tool_image_path
+    from lazymind.chat.engine.tools.infra.video_generation_support import resolve_tool_video_path
+    resolver = resolve_tool_video_path if video else resolve_tool_image_path
+    for key in ('url', 'urls', 'first_frame_url', 'last_frame_url', 'reference_urls'):
+        for value in _coerce_url_list(arguments.get(key)) or []:
+            resolved = resolver(value)
+            if not video and urlsplit(resolved).scheme in {'http', 'https'} and urlsplit(resolved).hostname:
+                continue
+            if not resolved or not _workspace_internal_path(resolved):
+                return False
+    return True
+
+
+def _workspace_writer_arguments(arguments: dict[str, Any]) -> bool:
+    from urllib.parse import urlsplit
+    from lazymind.chat.engine.tools.writer import _json_loads
+    if arguments.get('sync_provider'):
+        return False
+    def safe_ids(value: Any) -> bool:
+        if isinstance(value, dict):
+            return all((not key.endswith('_id') or not isinstance(item, str)
+                        or (item not in {'.', '..'} and not any(part in item for part in ('/', '\\', '\0'))))
+                       and safe_ids(item) for key, item in value.items())
+        return not isinstance(value, list) or all(safe_ids(item) for item in value)
+    for key, value in arguments.items():
+        if key.endswith('_json') and value:
+            try:
+                decoded = _json_loads(value)
+            except ValueError:
+                continue  # Writer's existing schema/Markdown parser reports invalid input.
+            if not safe_ids(decoded):
+                return False
+            if key == 'media_assets_json' and isinstance(decoded, dict):
+                for asset in (decoded.get('assets') or {}).values():
+                    path = str(asset.get('local_path') or asset.get('uri') or '')
+                    remote = not asset.get('local_path') and urlsplit(path).scheme in {'http', 'https'}
+                    if path and not remote and not _workspace_internal_path(path):
+                        return False
+            if key == 'resources_json' and isinstance(decoded, list):
+                from lazymind.chat.engine.tools.local_file.resolver import materialize_local_path
+                from lazyllm.tools.fs.client import FS
+                from lazymind.common.integrations.remote_fs import RemoteFS
+                from lazymind.config import config
+                for resource in decoded:
+                    if not isinstance(resource, dict):
+                        continue
+                    kind, uri = resource.get('resource_type'), str(resource.get('uri') or '')
+                    if (kind in {'file', 'table', 'slide'} and uri
+                            and not _workspace_internal_path(materialize_local_path(uri))):
+                        return False
+                    if kind == 'document':
+                        protocol, space, path = FS._parse(uri)
+                        expected = {'feishu': FeishuFS, 'notion': NotionFS,
+                                    'googledrive': GoogleDriveFS, 'remote': RemoteFS}
+                        if protocol not in expected:
+                            return False
+                        fs = FS._get_or_create_fs(protocol, space, path)
+                        if type(fs) is not expected[protocol]:
+                            return False
+                        if protocol == 'remote' and fs.base_url != str(config['core_api_url'] or '').strip().rstrip('/'):
+                            return False
+    return safe_ids(arguments)
+
+
+def _workspace_artifact_arguments(arguments: dict[str, Any]) -> bool:
+    from urllib.parse import urlsplit
+    from lazymind.chat.engine.subagent.context import get_context
+    from lazymind.chat.service.utils.static_file_url import local_path_from_static_file_url
+    context = get_context()
+    task_root = os.path.realpath(context.workspace_path) if context and context.workspace_path else ''
+    for item in arguments.get('artifacts', []):
+        kind, value = item.get('content_type', 'text'), item.get('value')
+        if kind in {'text', 'json'}:
+            continue
+        values = value if kind == 'file_list' and isinstance(value, list) else [value]
+        for value in values:
+            path = str(value.get('path') or value.get('image_url') or value.get('url') or '') if isinstance(value, dict) else str(value or '')
+            path = path.strip()
+            if kind == 'image' and urlsplit(path).scheme in {'http', 'https'} and urlsplit(path).hostname:
+                continue  # Existing saver keeps remote references; it does not fetch them.
+            if kind == 'image' and path.startswith('/static-files/'):
+                if _workspace_internal_path(local_path_from_static_file_url(path)):
+                    continue
+                return False
+            if not path or not task_root and not os.path.isabs(path):
+                return False
+            source = path if os.path.isabs(path) else os.path.join(task_root, path)
+            if kind == 'image':
+                source = local_path_from_static_file_url(path) or source
+            if not _workspace_internal_path(source):
+                return False
+    return True
+
+
+def workspace_tool_metadata(tools_info: dict[str, Any], configs: list[ToolConfig] | None = None,
+                            *, skill_manager: Any = None) -> dict[str, Any]:
+    """Index controlled methods and audited project callables by registered identity."""
+    import types
+    from lazyllm.common.registry import bind_to_instance
+    from lazyllm.tools.agent.toolsManager import ToolGroup
+    from lazyllm.tools.agent.skill_manager import SkillManager
+    from lazymind.chat.engine.tools.local_file import workspace as artifacts
+    from lazymind.chat.engine.tools import subagent_chat_tools as tasks
+    from lazymind.chat.engine.subagent import tools as task_artifacts
+    from lazymind.chat.engine.tools.calculator import calculator as arithmetic
+    from lazymind.chat.engine.tools.vocab_learn import vocab_learn as vocabulary
+    from lazymind.chat.engine.tools.writer import WriterCreateToolkit, WriterRevisionToolkit
+    from lazymind.chat.engine.tools.intent_writer import build_intentwrite_tool
+    from lazymind.chat.engine.tools.skill_listing import build_list_skills_tool
+    from lazymind.chat.workflow import workflow_manager as workflows
+
+    # These exact implementations use internal artifacts, scoped remote sources,
+    # arithmetic, or Core orchestration. Registration alone is not admission.
+    audited = {
+        arithmetic, vocabulary, list_data_sources, kb_tmp_search, url_fetch, ask_user,
+        image_generator,
+        artifacts.read_file, artifacts.grep, artifacts.write_file, artifacts.list_dir,
+        artifacts.save_chat_artifact, read_user_attachment, find_user_attachment, string_replace,
+        tasks.create_subagent, tasks.list_subagents, tasks.get_subagent_status,
+        tasks.list_subagent_artifacts, tasks.get_subagent_artifacts,
+        task_artifacts.get_artifact, task_artifacts.patch_artifact, task_artifacts.discard_draft,
+        task_artifacts.list_artifacts, task_artifacts.find_artifact, task_artifacts.list_knowledge_bases,
+    }
+    # These saved registrations keep Core RemoteFS/provider authentication and
+    # mail's revision-bound confirmation; they do not grant host-path access.
+    scoped_instances = list(_CLOUD_FILE_TOOLKIT['tools'])
+    for config in DEFAULT_TOOLS:
+        if config.name in {'external_db', 'memory', 'skill_editor', 'mail'}:
+            scoped_instances.append(_registration_target(config.tool))
+        elif config.name == 'schedule':
+            audited.update(_registration_target(config.tool)['tools'])
+    factories = [
+        ToolGroup.make_gateway_tool, artifacts.build_resource_read_tools,
+        build_intentwrite_tool, build_list_skills_tool, build_session_env_tool,
+        workflows._handoff_tool, workflows._safe_session_tools,
+        workflows._safe_authoring_tools, workflows._workflow_trigger_tools,
+    ]
+    factory_globals = {}
+    def index_factory(code, namespace):
+        for child in code.co_consts:
+            if isinstance(child, types.CodeType) and child.co_name != '<genexpr>':
+                factory_globals[child] = namespace
+                index_factory(child, namespace)
+    for factory in factories:
+        index_factory(factory.__code__, factory.__globals__)
+    tool_codes = set(factory_globals)
+    index_factory(workflows.resolve_workflow_injection.__code__, workflows.resolve_workflow_injection.__globals__)
+    workflow_methods = {name: method for name, method in vars(workflows.HostWorkflowToolkit).items()
+                        if isinstance(method, types.FunctionType)}
+    def safe_factory_value(value, depth=0):
+        if depth > 20:
+            return False
+        if type(value) in {str, int, float, bool, bytes, type(None)}:
+            return True
+        if type(value) is dict:
+            return all(safe_factory_value(item, depth + 1) for pair in value.items() for item in pair)
+        if type(value) in {list, tuple, set, frozenset}:
+            return all(safe_factory_value(item, depth + 1) for item in value)
+        if type(value) is workflows.HostWorkflowToolkit:
+            return (value._client_factory is workflows._client
+                    and all(getattr(getattr(value, name), '__func__', None) is method
+                            for name, method in workflow_methods.items())
+                    and safe_factory_value(value._origin_ref, depth + 1)
+                    and safe_factory_value(value._allowed_workflow_ids, depth + 1))
+        if type(value) is types.FunctionType and value.__globals__ is factory_globals.get(value.__code__):
+            return (safe_factory_value(value.__defaults__, depth + 1)
+                    and safe_factory_value(value.__kwdefaults__, depth + 1)
+                    and all(safe_factory_value(cell.cell_contents, depth + 1) for cell in value.__closure__ or ()))
+        return False
+    skill_codes = {code for factory in (
+        SkillManager._build_get_skill_tool,
+        SkillManager._build_read_reference_tool,
+        SkillManager._build_run_script_tool,
+    )
+                   for code in factory.__code__.co_consts if isinstance(code, types.CodeType)}
+    binding_code = bind_to_instance(lambda: None).__code__
+    registrations = []
+    for cfg in configs if configs is not None else DEFAULT_TOOLS:
+        target = _registration_target(cfg.tool)
+        targets = target.get('tools', []) if isinstance(target, dict) else [target]
+        registrations.extend((item, cfg.authorization) for item in targets)
+    matched = {}
+    for name, tool in tools_info.items():
+        instance, method = getattr(tool, '_instance', None), getattr(tool, '_method_name', '')
+        if isinstance(instance, LocalFileToolkit):
+            for target, authorization in registrations:
+                if instance is target and authorization and method in authorization:
+                    matched[name] = WorkspaceToolAdmission(
+                        instance,
+                        method,
+                        authorization,
+                        None,
+                        host_file_access=getattr(instance, '__host_file_access__', 'NONE'),
+                    )
+                    break
+            continue
+        if (any(instance is target for target in scoped_instances)
+                and method in getattr(instance, '__public_apis__', ())):
+            matched[name] = (instance, method, None, None)
+            continue
+        if type(instance) is KBToolkit and method in KBToolkit.__public_apis__:
+            matched[name] = (instance, method, None, None)
+            continue
+        if (any(instance is item for item in [*_WEB_SEARCH_ENGINE_INSTANCES, *_ACADEMIC_SEARCH_ENGINE_INSTANCES])
+                or type(instance) is WikipediaToolkit) and method in {
+                    'search', 'get_content', 'get_contents', 'meta_search', 'meta_catalog'}:
+            matched[name] = (instance, method, None, None)
+            continue
+        writer_methods = {
+            'build_writing_task', 'build_resources', 'create_writing_context', 'prepare_outline',
+            'generate_outline', 'generate_rewrite_outline', 'generate_rewrite_section_instructions',
+            'generate_section_instructions', 'generate_draft_document', 'update_writing_context',
+            'generate_draft_blocks', 'generate_draft_blocks_markdown', 'profile_resources',
+            'generate_draft_section', 'generate_draft_section_markdown', 'generate_draft_document_markdown',
+            'check_consistency', 'generate_final_document', 'render_markdown',
+            'build_revise_task', 'build_revision_task', 'locate_revision_target', 'generate_modify_plan',
+            'build_revision_visual_plan', 'generate_patch_set', 'generate_string_replace_set',
+            'plan_revision', 'validate_patch_set', 'apply_patch', 'apply_string_replace', 'apply_revision',
+        }
+        if type(instance) in {WriterCreateToolkit, WriterRevisionToolkit} and method in writer_methods:
+            matched[name] = (instance, method, None, _workspace_writer_arguments)
+            continue
+        apply = getattr(tool, 'apply', None)
+        original = getattr(apply, '__func__', apply)
+        # Unwrap only LazyLLM's known binding implementation, never arbitrary closures.
+        if getattr(original, '__code__', None) is binding_code:
+            cells = dict(zip(original.__code__.co_freevars, original.__closure__ or ()))
+            original = cells['func'].cell_contents if 'func' in cells else None
+        if getattr(original, '__code__', None) in skill_codes and type(skill_manager) is SkillManager:
+            cells = dict(zip(original.__code__.co_freevars, original.__closure__ or ()))
+            if cells.get('self') and cells['self'].cell_contents is skill_manager:
+                # Skills are isolated by SkillManager's own validated relative paths and
+                # configured FS. They are not part of the user's workspace permission scope.
+                matched[name] = WorkspaceToolAdmission(
+                    None,
+                    '',
+                    None,
+                    None,
+                    host_file_access='OPAQUE' if name == 'run_script' else 'NONE',
+                )
+            continue
+        if original is task_artifacts.save_artifacts:
+            matched[name] = (None, '', None, _workspace_artifact_arguments)
+        elif original is video_to_gif:
+            matched[name] = (None, '', None, lambda args: _workspace_media_arguments(args, video=True))
+        elif any(original is item for item in (vision_extractor, image_editor, video_generator)):
+            matched[name] = (None, '', None, _workspace_media_arguments)
+        elif (any(original is item for item in audited)
+                or (getattr(original, '__code__', None) in tool_codes and safe_factory_value(original))):
+            matched[name] = (instance, method, None, None)
+    # Keep one explicit capability record for every admitted exposed tool. The
+    # runtime still supports the historical tuple indexing/iteration contract,
+    # but no tool silently falls back to an unclassified host-file boundary.
+    return {
+        name: admission if isinstance(admission, WorkspaceToolAdmission)
+        else WorkspaceToolAdmission(*admission)
+        for name, admission in matched.items()
+    }
 
 
 def tool_is_active(cfg: ToolConfig) -> bool:

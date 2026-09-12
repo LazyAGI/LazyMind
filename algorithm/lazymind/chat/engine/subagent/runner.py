@@ -34,6 +34,7 @@ from lazymind.chat.engine.agent_runtime import (
 )
 from lazymind.chat.engine.prompts import add_standard_system_sections
 from lazymind.chat.engine.tools.local_file.workspace import grep, read_file
+from lazymind.chat.engine.tools.local_fs import LocalFileToolkit
 from lazymind.chat.service.component.event_translator import AgentEventFrameTranslator
 from lazymind.chat.service.component.tool_registry import (
     ATTACHMENT_EDIT_TOOL_CONFIG,
@@ -190,6 +191,16 @@ def _materialize_workflow_package(
     return root
 
 
+def _validate_workflow_workspace_package(params: Dict[str, Any], names: List[str], files: Dict[str, Any]) -> None:
+    """Reject executable Workflow packages until Core supplies a trusted admission proof."""
+    if LocalFileToolkit._workspace_binding_from_config(params) is None:
+        return
+    declared = {str(name).strip() for name in names if str(name).strip()}
+    scripts = {str(path) for path in files if str(path).startswith('scripts/') and str(path).endswith('.py')}
+    if declared and scripts:
+        raise RuntimeError('Workflow script tools are not admitted for a bound workspace')
+
+
 def load_workflow_tools(params: Dict[str, Any], names: List[str]) -> Dict[str, Any]:
     """Load declared callables from the exact published Workflow revision.
 
@@ -216,6 +227,7 @@ def load_workflow_tools(params: Dict[str, Any], names: List[str]) -> Dict[str, A
         if expected_hash and str(package.get('tree_hash') or '') != expected_hash:
             raise RuntimeError('Core returned a Workflow package with a different tree hash')
         files = package.get('files') if isinstance(package.get('files'), dict) else {}
+        _validate_workflow_workspace_package(params, names, files)
         package_root = _materialize_workflow_package(
             workflow_id,
             revision_id,
@@ -254,8 +266,7 @@ def load_workflow_tools(params: Dict[str, Any], names: List[str]) -> Dict[str, A
             )
         return resolved
     except Exception as exc:
-        LOG.warning('[SubAgent] failed to load pinned Workflow script tools: %s', exc)
-        return {}
+        raise RuntimeError(f'failed to load pinned Workflow script tools: {exc}') from exc
 
 
 def _resolve_runtime_tools(
@@ -413,6 +424,7 @@ _STRUCTURED_PARAM_KEYS = {
     'remote_root', 'step_id', 'session_id', 'user_input', 'hand_off',
     'chat_session_id', 'workflow_mode', 'user_id', 'preflight_id',
     'legacy_tools', 'terminal_tools_only', 'parent_agentic_config', 'filters',
+    '_workspace_execution', '_core_workspace_context', 'workspace_context',
     SUBAGENT_SKILLS_CONTEXT_KEY,
 }
 
@@ -465,6 +477,10 @@ def _build_agentic_config(
     """Restore the request context needed by tools inside every SubAgent."""
     parent = params.get('parent_agentic_config')
     agentic_config = dict(parent) if isinstance(parent, dict) else {}
+    agentic_config.pop('_workspace_execution', None)
+    context = params.get('_core_workspace_context') or agentic_config.get('_core_workspace_context')
+    if isinstance(context, dict):
+        agentic_config['_core_workspace_context'] = dict(context)
     attachment_context = _attachment_context(params)
     history_files_per_turn = (
         attachment_context.get('history_files_per_turn')
@@ -934,6 +950,7 @@ async def run_subagent_stream(
     tools: Optional[List[str]] = None,
     task_spec: Optional[Dict[str, Any]] = None,
     initial_steps: Optional[List[Dict[str, Any]]] = None,
+    workspace_execution: Optional[Dict[str, Any]] = None,
 ):
     """Async generator yielding Task SSE lines.
 
@@ -941,6 +958,8 @@ async def run_subagent_stream(
     text and think frames come from AgentEventFrameTranslator (same as ChatAgent),
     giving a unified LLM output representation across both agent types.
     """
+    # Copy only the launch argument; Params may already belong to a later resume.
+    execution_identity = dict(workspace_execution or {})
     start_time = time.time()
     db: Optional[MemorySubAgentStore] = None
     emitted: List[Dict[str, Any]] = []
@@ -1112,6 +1131,7 @@ async def run_subagent_stream(
         set_context(ctx)
 
         agentic_config = _build_agentic_config(task, params, effective_agent_type)
+        agentic_config['_workspace_execution'] = execution_identity
         agentic_config['citation_state'] = source_state
         agentic_config['citation_mode'] = 'collect_only'
         lazyllm.globals['agentic_config'] = agentic_config

@@ -3,6 +3,7 @@ package subagent
 import (
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"strconv"
@@ -11,6 +12,7 @@ import (
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/localworkspace"
 	"lazymind/core/modelconfig"
 	"lazymind/core/store"
 )
@@ -53,6 +55,33 @@ func InternalGetExecutionSpec(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "task not found", http.StatusNotFound)
 		return
 	}
+	params := map[string]any{}
+	if err := json.Unmarshal(task.Params, &params); err != nil {
+		common.ReplyErr(w, "request failed", http.StatusServiceUnavailable)
+		return
+	}
+	snapshot := localworkspace.SnapshotFromParams(params)
+	if snapshot == nil {
+		params, err = localworkspace.RebuildSubagentParams(r.Context(), store.DB(), task.CreateUserID, task.ConversationID, params)
+		snapshot = localworkspace.SnapshotFromParams(params)
+	}
+	if err == nil && snapshot != nil {
+		var live *localworkspace.ContextSnapshot
+		live, err = localworkspace.ResolveForConversation(r.Context(), store.DB(), task.CreateUserID, task.ConversationID)
+		if err == nil && (live == nil || live.WorkspaceID != snapshot.WorkspaceID || live.WorkspaceVersion != snapshot.WorkspaceVersion) {
+			err = localworkspace.Error("binding_conflict", http.StatusConflict, "conflict")
+		}
+	}
+	if err != nil {
+		var appErr *common.AppError
+		if errors.As(err, &appErr) {
+			common.ReplyAppErr(w, appErr)
+		} else {
+			common.ReplyErr(w, "request failed", http.StatusServiceUnavailable)
+		}
+		return
+	}
+	task.Params, _ = json.Marshal(params)
 	config, err := modelconfig.LoadLLMConfig(r.Context(), store.DB(), task.CreateUserID)
 	if err != nil {
 		common.ReplyErr(w, "model config unavailable", http.StatusServiceUnavailable)
@@ -83,7 +112,11 @@ func InternalGetExecutionSpec(w http.ResponseWriter, r *http.Request) {
 	for i := range steps {
 		stepDTOs = append(stepDTOs, toStepDTO(&steps[i]))
 	}
-	common.ReplyOK(w, map[string]any{"task": toTaskDTO(task), "params": task.Params,
+	privateTaskBody, _ := json.Marshal(toTaskDTO(task))
+	privateTask := map[string]any{}
+	_ = json.Unmarshal(privateTaskBody, &privateTask)
+	privateTask["params"] = params
+	common.ReplyOK(w, map[string]any{"task": privateTask, "params": params,
 		"steps": stepDTOs, "create_user_id": task.CreateUserID, "llm_config": config,
 		"tool_config": toolConfig, "workspace_path": task.WorkspacePath})
 }

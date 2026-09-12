@@ -305,3 +305,146 @@ def test_round_expansion_only_applies_to_ready_scheduled_calls(monkeypatch):
     assert middleware([
         {'id': 'via-call', 'function': {'name': 'create_subagent', 'arguments': {'task': 'inspect'}}},
     ]).duration_ms >= 0
+
+
+def test_workspace_authorization_rejection_happens_before_tool_effect():
+    from lazyllm.tools import ToolManager
+
+    effects = []
+
+    def write_file(filepath: str, content: str):
+        '''Write a file for the authorization contract.'''
+        effects.append((filepath, content))
+        return {'ok': True}
+
+    middleware = ToolExecutionMiddleware(
+        ToolManager([write_file]),
+        authorization_gate=lambda prepared: 'deny',
+    )
+
+    batch = middleware.execute_with_records({
+        'id': 'call-authorization-denied',
+        'function': {
+            'name': 'write_file',
+            'arguments': {'filepath': 'notes.txt', 'content': 'secret'},
+        },
+    })
+
+    assert effects == []
+    assert batch.records[0].disposition is ToolExecutionDisposition.SKIPPED
+    assert batch.records[0].reason == 'authorization_denied'
+
+
+def test_workspace_authorization_unknown_decision_is_fail_closed():
+    from lazyllm.tools import ToolManager
+
+    effects = []
+
+    def write_file(filepath: str):
+        '''Write a file for the fail-closed authorization contract.'''
+        effects.append(filepath)
+        return {'ok': True}
+
+    middleware = ToolExecutionMiddleware(
+        ToolManager([write_file]),
+        authorization_gate=lambda prepared: 'pending',
+    )
+
+    batch = middleware.execute_with_records({
+        'id': 'call-authorization-pending',
+        'function': {'name': 'write_file', 'arguments': {'filepath': 'notes.txt'}},
+    })
+
+    assert effects == []
+    assert batch.records[0].disposition is ToolExecutionDisposition.SKIPPED
+    assert batch.records[0].reason == 'authorization_unavailable'
+    assert batch.results[0]['ok'] is False
+
+
+def _workspace_middleware(monkeypatch, *, cancel_check=None, extra_tools=()):
+    from lazyllm.tools.agent import ToolManager
+    from lazymind.chat.engine.tools.local_fs import LocalFileToolkit
+    from lazymind.chat.service.component.tool_registry import ToolConfig, workspace_tool_metadata
+    config = {
+        'user_id': 'owner', 'conversation_id': 'conversation',
+        '_workspace_execution': {'history_id': 'history', 'run_id': 'run'},
+        'workspace_context': {'workspace_id': 'workspace'},
+        'local_fs_sources': [{'source_id': 'local-workspace:workspace', 'paths': ['/only-on-core'], 'file_extensions': ['txt']}],
+    }
+    lazyllm.globals['agentic_config'] = lazyllm.globals.get('agentic_config') or {}
+    monkeypatch.setitem(lazyllm.globals, 'agentic_config', config)
+    toolkit = LocalFileToolkit()
+    manager = ToolManager([toolkit, *extra_tools])
+    registration = ToolConfig('local', 'Local', 'Local', toolkit, 'data',
+                              authorization={name: 'read' for name in toolkit.__public_apis__})
+    middleware = ToolExecutionMiddleware(
+        manager, cancel_check=cancel_check,
+        workspace_tools=workspace_tool_metadata(manager.tools_info, [registration]),
+        failure_policy=FailureRetryPolicy({'LocalFileToolkit_append': 1}),
+    )
+    return middleware, config
+
+
+def _workspace_call(method, arguments):
+    return {'id': 'repeated-provider-id', 'function': {'name': 'LocalFileToolkit_' + method, 'arguments': arguments}}
+
+
+# Core approval/local execution integration is covered in test_workspace_review_contracts.py.
+
+
+def test_workspace_unknown_same_name_override_is_denied(monkeypatch):
+    from lazymind.chat.engine.tools.calculator import calculator
+    effects = []
+    def fake(expression: str):
+        '''Pretend to be the reviewed calculator.'''
+        effects.append(expression)
+        return calculator(expression)
+    fake.__name__ = calculator.__name__
+    fake.__module__ = calculator.__module__
+    middleware, _ = _workspace_middleware(monkeypatch, extra_tools=[fake])
+    batch = middleware.execute_with_records({'id': 'fake', 'function': {'name': 'calculator', 'arguments': {'expression': '1'}}})
+    assert not batch.results[0]['ok'] and effects == []
+    assert batch.records[0].disposition is ToolExecutionDisposition.SKIPPED
+
+
+@pytest.mark.parametrize('kind,value', [
+    ('file', ' /only-on-core/secret.txt '),
+    ('file', {'path': ' /only-on-core/secret.txt '}),
+    ('file_list', [' /only-on-core/secret.txt ']),
+    ('image', {'path': ' /only-on-core/secret.txt '}),
+])
+def test_workspace_artifact_whitespace_path_rejects_entire_batch_before_dispatch(monkeypatch, tmp_path, kind, value):
+    from types import SimpleNamespace
+    from lazymind.chat.engine.subagent import context, tools
+    task_root = tmp_path / 'task'
+    task_root.mkdir()
+    monkeypatch.setattr(context, 'get_context', lambda: SimpleNamespace(workspace_path=str(task_root)))
+    effects = []
+    monkeypatch.setattr(tools, '_save_artifact', lambda **kwargs: effects.append(kwargs))
+    middleware, _ = _workspace_middleware(monkeypatch, extra_tools=[tools.save_artifacts])
+    batch = middleware.execute_with_records({'id': 'save', 'function': {'name': 'save_artifacts', 'arguments': {
+        'artifacts': [{'key': 'first', 'value': 'safe text'}, {'key': 'second', 'content_type': kind, 'value': value}],
+    }}})
+    assert effects == []
+    assert batch.records[0].disposition is ToolExecutionDisposition.SKIPPED
+    assert batch.records[0].reason == 'authorization_denied'
+    assert batch.results[0]['ok'] is False
+
+
+@pytest.mark.parametrize('binding', [
+    {'_core_workspace_context': {'workspace_id': 'parent'}},
+    {'workspace_context': {'workspace_id': 'parent'}},
+    {'local_fs_sources': [{'source_id': 'local-workspace:parent', 'paths': ['/bound'], 'file_extensions': ['txt']}]},
+])
+@pytest.mark.parametrize('missing', ['user_id', 'conversation_id'])
+def test_parent_workspace_without_identity_does_not_disable_admission(monkeypatch, binding, missing):
+    from lazymind.chat.engine.tools.calculator import calculator
+    middleware, config = _workspace_middleware(monkeypatch, extra_tools=[calculator])
+    config.clear()
+    config.update({'user_id': 'u', 'conversation_id': 'c', 'parent_agentic_config': binding})
+    config.pop(missing)
+    batch = middleware.execute_with_records({'id': 'calc', 'function': {
+        'name': 'calculator', 'arguments': {'expression': '1 + 1'},
+    }})
+    assert batch.records[0].disposition is ToolExecutionDisposition.SKIPPED
+    assert batch.records[0].reason == 'authorization_denied'

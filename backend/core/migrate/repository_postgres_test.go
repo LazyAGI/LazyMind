@@ -1,7 +1,6 @@
 package migrate
 
 import (
-	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -348,16 +347,8 @@ func execMigrationFileForDriver(t *testing.T, db *sql.DB, path, driver string) {
 	if err != nil {
 		t.Fatalf("select %s dialect for migration %s: %v", driver, path, err)
 	}
-	tx, err := db.BeginTx(context.Background(), nil)
-	if err != nil {
-		t.Fatalf("begin migration %s: %v", path, err)
-	}
-	if err := execMigrationSQL(tx, driver, sqlBody); err != nil {
-		_ = tx.Rollback()
+	if err := runMigrationTransaction(db, driver, sqlBody, nil, nil); err != nil {
 		t.Fatalf("execute migration %s: %v", path, err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit migration %s: %v", path, err)
 	}
 }
 

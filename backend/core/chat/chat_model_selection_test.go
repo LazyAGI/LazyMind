@@ -501,9 +501,12 @@ func TestChatModelSuccessPersistsAcrossReplyModes(t *testing.T) {
 				recorder := httptest.NewRecorder()
 				target := chatPersistTarget{Seq: 1, HistoryID: "primary-history"}
 				ctx := context.Background()
+				stateStore := newRunDecisionTestStore(t)
+				store.Init(db, nil, stateStore)
+				t.Cleanup(func() { store.Init(nil, nil, nil) })
 				switch replyMode {
 				case "nonstream":
-					handleNonStreamChat(recorder, ctx, db, nil, server.URL, body, conversation.ID, "hello", target, ext)
+					handleNonStreamChat(recorder, ctx, db, stateStore, server.URL, body, conversation.ID, "hello", target, ext)
 				case "stream":
 					streamSingleAnswer(ctx, ctx, recorder, recorder, db, nil, server.URL, body, conversation.ID, "hello", target.HistoryID, target, ext)
 				case "dual":

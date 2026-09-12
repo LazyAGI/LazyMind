@@ -52,6 +52,8 @@ class AgentExecutionOptions:
     llm_config: Optional[dict[str, Any]] = None
     max_input_tokens: Optional[Any] = None
     history_compactor: Optional[Callable[..., list[dict[str, Any]]]] = None
+    authorization_gate: Optional[Callable[..., Any]] = None
+    tool_configs: Optional[list[Any]] = None
 
 
 CompressionTrigger = Literal['pre_turn', 'mid_turn']

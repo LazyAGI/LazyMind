@@ -127,7 +127,7 @@ export default function NewWorkflowModal({ open, onCancel, onCreated }: NewWorkf
   const handleSkillSearch = async (keyword: string) => {
     setSkillLoading(true);
     try {
-      const result = await listSkillAssetsPage({ keyword, page: 1, pageSize: 20, excludeBuiltinTemplates: true });
+      const result = await listSkillAssetsPage({ keyword, page: 1, pageSize: 20 });
       setSkillOptions(result.records.map((r) => ({ label: r.name, value: r.id })));
     } catch {
       // ignore

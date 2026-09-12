@@ -420,6 +420,10 @@ export async function previewWorkflowRepair(id:string,payload:{target:string;mod
       path: String(item.path ?? item.Path ?? ''),
       message: String(item.message ?? item.Message ?? ''),
       severity: String(item.severity ?? item.Severity ?? 'error'),
+      node_id: String(item.node_id ?? item.NodeID ?? ''),
+      edge_id: String(item.edge_id ?? item.EdgeID ?? ''),
+      material_id: String(item.material_id ?? item.MaterialID ?? ''),
+      details: item.details && typeof item.details === 'object' ? item.details as Record<string, unknown> : undefined,
     };
   }) : [];
   const appliesToTarget = (code: string, path: string) => {

@@ -38,6 +38,10 @@ func (h *corsHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 
 	if _, ok := h.allowedOrigin[origin]; !ok {
+		if strings.HasPrefix(req.URL.Path, "/_local/workspaces:") {
+			workspaceError(w, http.StatusForbidden, "LOCAL_WORKSPACE_SELECTION_FORBIDDEN")
+			return
+		}
 		writeJSON(w, http.StatusForbidden, map[string]string{
 			"error": "origin not allowed",
 		})

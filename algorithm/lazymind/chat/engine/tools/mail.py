@@ -36,6 +36,7 @@ from lazymind.chat.engine.tools.local_file.resolver import (
 from lazymind.chat.engine.tools.local_file.workspace import (
     chat_agent_workspace,
     _resolve_workspace_path,
+    _current_artifact_scope,
 )
 
 
@@ -417,10 +418,10 @@ def _coerce_path_list(value: Any) -> list[str]:
 
 
 def _mail_workspace() -> str:
-    cfg = _agentic_config()
+    user_id, conversation_id = _current_artifact_scope()
     return chat_agent_workspace(
-        str(cfg.get('user_id') or '0'),
-        str(cfg.get('conversation_id') or 'default'),
+        user_id,
+        conversation_id,
     )
 
 
@@ -547,9 +548,7 @@ def _resolve_one_attachment(raw_path: str, existing_paths: list[str] | None = No
         if previous == raw or os.path.basename(previous) == raw or os.path.basename(previous) == os.path.basename(raw):
             if os.path.isfile(previous):
                 return previous
-    cfg = _agentic_config()
-    user_id = str(cfg.get('user_id') or '0')
-    conversation_id = str(cfg.get('conversation_id') or 'default')
+    user_id, conversation_id = _current_artifact_scope()
     workspace = chat_agent_workspace(user_id, conversation_id)
     workspace_error: ToolExecutionError | None = None
     try:
@@ -676,9 +675,8 @@ def _iso(dt: datetime | None) -> str:
 
 
 def _draft_dir() -> str:
-    cfg = _agentic_config()
-    root = chat_agent_workspace(str(cfg.get('user_id') or '0'), str(cfg.get('conversation_id') or 'default'))
-    path = os.path.join(root, '.mail_drafts')
+    user_id, conversation_id = _current_artifact_scope()
+    _, path = _resolve_workspace_path('.mail_drafts', user_id, conversation_id)
     os.makedirs(path, exist_ok=True)
     return path
 
@@ -687,7 +685,7 @@ def _draft_path(draft_id: str) -> str:
     safe = re.sub(r'[^A-Za-z0-9_-]', '', str(draft_id or ''))
     if not safe:
         raise ToolExecutionError('draft_id is required')
-    return os.path.join(_draft_dir(), f'{safe}.json')
+    return _resolve_workspace_path(os.path.join(_draft_dir(), f'{safe}.json'), *_current_artifact_scope())[1]
 
 
 def _load_draft(draft_id: str) -> dict[str, Any]:
@@ -2155,6 +2153,7 @@ class MailToolkit:
                 'Confirm the latest preview card; do not send from an older card.'
             )
         _apply_confirm_patch(draft)
+        draft['attachment_paths'] = _resolve_attachment_paths(draft.get('attachment_paths'))
         to_addrs, cc_addrs = _pending_to_cc(draft)
         recipients = to_addrs + cc_addrs
         if not recipients:

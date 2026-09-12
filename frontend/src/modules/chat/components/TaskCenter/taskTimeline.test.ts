@@ -115,7 +115,7 @@ describe("buildOrdinaryTaskTimeline", () => {
 
     expect(timeline.groups).toHaveLength(2);
     expect(timeline.groups[0].mode).toBe("parallel");
-    expect(timeline.groups[0].items.map((item) => item.task.task_id)).toEqual([
+    expect(timeline.groups[0].items.map((item) => item.task?.task_id)).toEqual([
       "research-a",
       "research-b",
     ]);

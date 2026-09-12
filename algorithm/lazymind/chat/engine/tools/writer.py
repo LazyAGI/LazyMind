@@ -377,6 +377,14 @@ def _write_document_input(root: Path, name: str, value: str) -> str:
     return _write_input_artifact(root, f'{name}.lmd', content, WriterToolkitBase.WRITER_IR_SCHEMA)
 
 
+def _inline_draft_sections(root: Path, value: Any) -> Any:
+    if isinstance(value, str):
+        return _write_document_input(root, uuid.uuid4().hex, _json_dumps(value))
+    if isinstance(value, list):
+        return [_inline_draft_sections(root, item) for item in value]
+    return value
+
+
 def _primary_data(result: dict) -> Any:
     artifact_path = result.get('artifact_path')
     if not artifact_path:
@@ -883,6 +891,10 @@ class WriterToolkitBase:
         task_path = _write_input_artifact(
             root, 'writing_task.json', task_data, writer_schema('task.WritingTask'),
         )
+        from lazymind.chat.engine.tools.local_file.resolver import materialize_local_path
+        for item in resources:
+            if isinstance(item, dict) and item.get('resource_type') in {'file', 'table', 'slide'} and item.get('uri'):
+                item['uri'] = materialize_local_path(item['uri'])
         input_resources = [InputResource.model_validate(item) for item in resources]
         result = WriterResourceTools(
             llm=AutoModel(model='llm'),
@@ -1336,6 +1348,10 @@ class WriterToolkitBase:
         )
         instruction = SectionInstruction.model_validate(_json_loads(section_instruction_json, {}))
         previous_blocks = _json_loads(previous_blocks_json, [])
+        if WriterDraftingTools._instruction_representation(instruction) == 'markdown':
+            previous_blocks = _inline_draft_sections(root, previous_blocks)
+        elif isinstance(previous_blocks, str):
+            previous_blocks = [previous_blocks]
         visual_plan_path = None
         if visual_plan_json:
             visual_plan_path = _write_input_artifact(
@@ -1977,6 +1993,7 @@ class WriterToolkitBase:
         outline_path = None
         if outline_json:
             outline_path = _write_document_input(root, 'outline', outline_json)
+        blocks_data = _inline_draft_sections(root, blocks_data)
         result = WriterDraftingTools(llm=None, artifact_store=str(root)).generate_draft_document(
             draft_blocks=blocks_data,
             context=context_path,

@@ -78,7 +78,7 @@ export default function EditableBlock({
 
   const save = useCallback(async (nextMarkdown: string, baseRevision: number) => {
     if (!conversationId || !historyId) throw new Error("editable message identity unavailable");
-    const response = await ChatServiceApi().patchEditableBlock({
+    await ChatServiceApi().patchEditableBlock({
       conversation_id: conversationId,
       history_id: historyId,
       base_content: persistedMarkdownRef.current,

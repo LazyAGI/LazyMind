@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
 import time
+import uuid
 from collections import Counter
 from dataclasses import dataclass
 from typing import Any
@@ -15,6 +17,10 @@ from lazyllm.tools.agent import (
     ToolExecutionRecord,
 )
 from lazyllm.tools.agent.toolError import tool_failure
+from lazymind.chat.engine.tools.local_fs import LocalFileToolkit
+from lazymind.config import config as _cfg
+from .workspace_authorization import WorkspaceAuthorization
+from .cancellation import UserCancelledError
 
 from lazymind.chat.engine.tools.session_env import redact_session_env_arguments
 from .telemetry import append_event, emit_tool_call, emit_tool_result
@@ -154,7 +160,11 @@ class FailureRetryPolicy:
     def _blocked(name: str, message: str) -> dict[str, Any]:
         return tool_failure(f'[Repeated Tool Failure] {name}: {message}')
 
-    def decide(self, prepared_calls: list[PreparedToolCall]) -> _FailureBatchDecision:
+    def decide(
+        self,
+        prepared_calls: list[PreparedToolCall],
+        independent_indices: set[int] | None = None,
+    ) -> _FailureBatchDecision:
         pending_indices = []
         blocked_results: dict[int, Any] = {}
         duplicate_sources: dict[int, int] = {}
@@ -180,10 +190,11 @@ class FailureRetryPolicy:
                     'explain that the evidence is unavailable.',
                 )
                 continue
-            if signature in pending_signatures:
-                duplicate_sources[index] = pending_signatures[signature]
-                continue
-            pending_signatures[signature] = index
+            if index not in (independent_indices or ()):
+                if signature in pending_signatures:
+                    duplicate_sources[index] = pending_signatures[signature]
+                    continue
+                pending_signatures[signature] = index
             pending_indices.append(index)
         return _FailureBatchDecision(
             pending_indices=tuple(pending_indices),
@@ -308,13 +319,18 @@ class ToolExecutionMiddleware:
     def __init__(self, manager: Any, failure_policy: FailureRetryPolicy | None = None,
                  expanded_round_limit: int | None = None, cancel_check: Any = None,
                  repeat_monitor: ExactRepeatMonitor | None = None,
-                 notice_buffer: OneShotNoticeBuffer | None = None):
+                 notice_buffer: OneShotNoticeBuffer | None = None,
+                 authorization_gate: Any = None, workspace_tools: dict[str, Any] | None = None):
         self._manager = manager
         self._failure_policy = failure_policy or FailureRetryPolicy()
         self._expanded_round_limit = expanded_round_limit
         self._cancel_check = cancel_check
         self._repeat_monitor = repeat_monitor
         self._notice_buffer = notice_buffer
+        self._authorization_gate = authorization_gate
+        self._workspace_tools = workspace_tools or {}
+        self._workspace_versions: dict[int, dict[str, str]] = {}
+        self._execution_lock = threading.RLock()
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._manager, name)
@@ -336,28 +352,162 @@ class ToolExecutionMiddleware:
 
     def execute_with_records(self, tools: Any, verbose: bool = False,
                              allowed_tool_names: set[str] | None = None):
+        # A manager owns mutable tool bindings; never overlap request adapters.
+        with self._execution_lock:
+            return self._execute_with_records(tools, verbose, allowed_tool_names)
+
+    def _execute_with_records(self, tools: Any, verbose: bool = False,
+                              allowed_tool_names: set[str] | None = None):
         del verbose
         if self._cancel_check is not None:
             self._cancel_check(None)
         prepared_calls: list[PreparedToolCall] = []
         decision: _FailureBatchDecision | None = None
+        authorization_reasons: dict[int, str] = {}
         started_at = 0.0
+        workspace_execution_states: dict[int, bool] = {}
+        workspace_adapters = []
+        workspace_adapter_lock = threading.Lock()
+        invocation_id = uuid.uuid4().hex
+        queues = {}
+        config = lazyllm.globals.get('agentic_config') or {}
+        workspace_active = LocalFileToolkit._workspace_binding_from_config(config) is not None
+        coordinator = None
+        initialization_failed = False
+        if workspace_active:
+            try:
+                coordinator = WorkspaceAuthorization(config, self._cancel_check)
+                tools = coordinator.normalize(tools, self._workspace_tools)
+            except Exception:
+                initialization_failed = True
+
+        if coordinator is not None:
+            for tool_name, admission in self._workspace_tools.items():
+                if not isinstance(admission[0], LocalFileToolkit):
+                    continue
+                tool = self._manager.tools_info.get(tool_name)
+                if tool is None:
+                    continue
+                original_apply = tool.apply
+
+                def make_workspace_adapter(name):
+                    def apply_workspace_call(*args, **kwargs):
+                        arguments = dict(kwargs)
+                        if not arguments and len(args) == 1 and isinstance(args[0], dict):
+                            arguments = dict(args[0])
+                        key = (name, _stable_digest(arguments) or repr(arguments))
+                        with workspace_adapter_lock:
+                            pending_calls = queues.get(key)
+                            if not pending_calls:
+                                from lazyllm.tools.agent import ToolExecutionError
+                                raise ToolExecutionError('workspace authorization unavailable')
+                            index = pending_calls.pop(0)
+                        call = coordinator.calls[index]
+                        try:
+                            return coordinator.execute(
+                                index, self._workspace_versions.setdefault(id(call.toolkit), {}),
+                            )
+                        except Exception as error:
+                            workspace_execution_states[index] = bool(
+                                getattr(error, 'workspace_execution_started', False)
+                            )
+                            raise
+                    return apply_workspace_call
+
+                tool.apply = make_workspace_adapter(tool_name)
+                workspace_adapters.append((tool, original_apply))
 
         def select(prepared):
-            nonlocal prepared_calls, decision, started_at
+            nonlocal prepared_calls, decision, authorization_reasons, started_at
             prepared_calls = list(prepared)
-            decision = self._failure_policy.decide(prepared_calls)
+            workspace_indices = {
+                index for index, item in enumerate(prepared_calls)
+                if workspace_active and item.ready and item.tool_name in self._workspace_tools
+                and isinstance(self._workspace_tools[item.tool_name][0], LocalFileToolkit)
+            }
+            decision = self._failure_policy.decide(prepared_calls, workspace_indices)
+            blocked = dict(decision.blocked_results)
+            pending = list(decision.pending_indices)
+            authorization_reasons = {}
+            authorization_unavailable = initialization_failed and bool(workspace_indices)
+            if len(workspace_indices) > 16:
+                authorization_unavailable = True
+
+            def block(index, unavailable=False):
+                blocked[index] = tool_failure(
+                    'workspace authorization unavailable' if unavailable else 'workspace authorization denied'
+                )
+                authorization_reasons[index] = (
+                    'authorization_unavailable' if unavailable else 'authorization_denied'
+                )
+                if index in pending:
+                    pending.remove(index)
+
+            for index in tuple(pending):
+                item = prepared_calls[index]
+                if not item.ready:
+                    continue
+                try:
+                    outcome = self._authorization_gate(item) if self._authorization_gate is not None else 'allow'
+                    admission = self._workspace_tools.get(item.tool_name)
+                    if workspace_active:
+                        if (admission is None or LocalFileToolkit._workspace_context() is None
+                                or (initialization_failed and index in workspace_indices)):
+                            outcome = 'deny'
+                        elif admission[3] is not None and not admission[3](item.validated_arguments):
+                            outcome = 'deny'
+                        elif (getattr(admission, 'host_file_access', 'NONE') == 'OPAQUE'
+                              and not _cfg['trusted_local_mode']):
+                            outcome = 'deny'
+                        if index in workspace_indices and (
+                            not admission[2] or admission[1] not in admission[2]
+                        ):
+                            outcome = 'deny'
+                    if outcome not in (True, 'allow', 'allowed'):
+                        unavailable = outcome not in (False, 'deny', 'denied', 'rejected')
+                        authorization_unavailable |= unavailable and workspace_active
+                        block(index, unavailable)
+                    elif index in workspace_indices and not authorization_unavailable:
+                        coordinator.prepare(
+                            item, admission,
+                            self._workspace_versions.setdefault(id(admission[0]), {}),
+                        )
+                except UserCancelledError:
+                    raise
+                except Exception:
+                    # Core errors may contain paths/credentials. Expose only the
+                    # stable authorization failure, and fail the entire barrier.
+                    authorization_unavailable |= workspace_active
+                    block(index, True)
+            if coordinator is not None and not authorization_unavailable:
+                try:
+                    allowed = coordinator.wait()
+                    for index in workspace_indices.intersection(pending):
+                        if index not in allowed:
+                            block(index)
+                except UserCancelledError:
+                    raise
+                except Exception:
+                    authorization_unavailable = True
+            if authorization_unavailable:
+                for index in tuple(pending):
+                    block(index, True)
+            decision = _FailureBatchDecision(tuple(pending), blocked, decision.duplicate_sources)
             for index, item in enumerate(prepared_calls):
                 if index in decision.pending_indices and item.ready:
                     self._expand_round_limit(item.tool_name)
                 arguments = redact_session_env_arguments(item.tool_name, item.arguments)
                 if index in decision.blocked_results:
-                    emit_tool_call(item.tool_call, blocked=True, reason='failure_retry_policy')
+                    blocked_reason = authorization_reasons.get(index, 'failure_retry_policy')
+                    emit_tool_call(item.tool_call, blocked=True, reason=blocked_reason)
                     _log_tool_call(
                         'blocked', item.tool_name,
-                        reason='failure_retry_policy', args=arguments,
+                        reason=blocked_reason, args=arguments,
                     )
-                    append_event('failure_retry_blocked', name=item.tool_name, call_id=item.call_id)
+                    append_event(
+                        'authorization_blocked' if index in authorization_reasons else 'failure_retry_blocked',
+                        name=item.tool_name, call_id=f'{invocation_id}:{item.index}:{item.call_id}',
+                    )
                 elif index in decision.duplicate_sources:
                     emit_tool_call(item.tool_call, blocked=True, reason='duplicate_merged')
                     _log_tool_call('merged', item.tool_name, reason='duplicate_in_batch', args=arguments)
@@ -365,19 +515,47 @@ class ToolExecutionMiddleware:
                     emit_tool_call(item.tool_call)
                     _log_tool_call('start', item.tool_name, args=arguments)
             started_at = time.perf_counter()
-            return decision.pending_indices
+            # Admission only fills the request-local queue. LazyLLM still owns
+            # prepared-call execution and records through the adapters installed
+            # before the manager started.
+            for index in decision.pending_indices:
+                if index not in workspace_indices:
+                    continue
+                item = prepared_calls[index]
+                key = (
+                    item.tool_name,
+                    _stable_digest(item.validated_arguments) or repr(item.validated_arguments),
+                )
+                queues.setdefault(key, []).append(index)
+            return tuple(decision.pending_indices)
 
-        executed_batch = self._manager.execute_with_records(
-            tools,
-            allowed_tool_names=allowed_tool_names,
-            dispatch_selector=select,
-        )
+        try:
+            executed_batch = self._manager.execute_with_records(
+                tools,
+                allowed_tool_names=allowed_tool_names,
+                dispatch_selector=select,
+            )
+        finally:
+            for tool, original_apply in workspace_adapters:
+                tool.apply = original_apply
+            if coordinator is not None:
+                coordinator.close()
         if decision is None:
             return executed_batch
         elapsed = time.perf_counter() - started_at
         results: list[Any] = [None] * len(prepared_calls)
         records: list[ToolExecutionRecord | None] = [None] * len(prepared_calls)
-        for result, record in zip(executed_batch.results, executed_batch.records):
+        executed = zip(executed_batch.results, executed_batch.records)
+        for result, record in executed:
+            workspace_started = workspace_execution_states.get(record.index)
+            if record.index in workspace_execution_states:
+                record = ToolExecutionRecord(
+                    record.prepared,
+                    result,
+                    disposition=(ToolExecutionDisposition.EXECUTED
+                                 if workspace_started else ToolExecutionDisposition.SKIPPED),
+                    reason='workspace_operation',
+                )
             results[record.index] = result
             records[record.index] = record
             emit_tool_result(prepared_calls[record.index].tool_call, result)
@@ -393,7 +571,7 @@ class ToolExecutionMiddleware:
                 prepared_calls[index],
                 result,
                 disposition=ToolExecutionDisposition.SKIPPED,
-                reason='policy_blocked',
+                reason=authorization_reasons.get(index, 'policy_blocked'),
             )
             emit_tool_result(prepared_calls[index].tool_call, result)
         for index, source_index in decision.duplicate_sources.items():

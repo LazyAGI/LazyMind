@@ -41,14 +41,17 @@ describe('workflow tab artifact scope', () => {
       label: 'Page Prompts',
       slots: [],
     } as TabDef;
-    const unchangedPage = {
+    const unchangedPage: SlotRevision & { validity: string } = {
+      slot_id: 'slide-outline-0',
+      revision: 1,
+      created_at: '2026-01-01T00:00:00Z',
       slot: 'slide_outline',
       step_id: 'plan_page_prompts',
       selected: false,
       validity: 'stale',
       list_index: 0,
       sort_order: 1,
-    } as SlotRevision;
+    };
 
     expect(resolveWorkflowTabStepId(tab, steps)).toBe('plan_page_prompts');
     expect(workflowSlotMatchesTabScope(tab, steps, unchangedPage)).toBe(true);

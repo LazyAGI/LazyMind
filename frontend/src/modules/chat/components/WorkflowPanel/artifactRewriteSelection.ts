@@ -96,7 +96,7 @@ function adjacentBoundaryParagraph(
   const paragraphs = child.matches('p')
     ? [child as HTMLElement]
     : Array.from(child.querySelectorAll<HTMLElement>('p'));
-  return (edge === 'start' ? paragraphs[0] : paragraphs.at(-1)) ?? null;
+  return (edge === 'start' ? paragraphs[0] : paragraphs[paragraphs.length - 1]) ?? null;
 }
 
 function closestInternalReference(container: HTMLElement, node: Node): HTMLAnchorElement | null {
@@ -117,7 +117,7 @@ function adjacentBoundaryInternalReference(
     ? child as HTMLAnchorElement
     : edge === 'start'
       ? child.querySelector<HTMLAnchorElement>('a[href^="#block-"]')
-      : Array.from(child.querySelectorAll<HTMLAnchorElement>('a[href^="#block-"]')).at(-1) ?? null;
+      : Array.from(child.querySelectorAll<HTMLAnchorElement>('a[href^="#block-"]')).slice(-1)[0] ?? null;
   return link && container.contains(link) ? link : null;
 }
 

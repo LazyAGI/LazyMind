@@ -1275,3 +1275,28 @@ var _ tree.SourceTreeQueryEngine = (*serverSourceTreeStub)(nil)
 var _ tree.SourceDocumentQuery = (*serverDocumentQueryStub)(nil)
 var _ connector.SourceConnector = (*apiContractConnectorStub)(nil)
 var _ localfs.AgentClient = (*apiContractLocalAgentStub)(nil)
+
+func TestOpenAPISchemaReferencesResolve(t *testing.T) {
+	t.Parallel()
+	spec := OpenAPISpec()
+	schemas := spec["components"].(map[string]any)["schemas"].(map[string]any)
+	var visit func(any)
+	visit = func(value any) {
+		switch node := value.(type) {
+		case map[string]any:
+			if ref, ok := node["$ref"].(string); ok && strings.HasPrefix(ref, "#/components/schemas/") {
+				if _, exists := schemas[strings.TrimPrefix(ref, "#/components/schemas/")]; !exists {
+					t.Errorf("unresolved OpenAPI schema: %s", ref)
+				}
+			}
+			for _, child := range node {
+				visit(child)
+			}
+		case []any:
+			for _, child := range node {
+				visit(child)
+			}
+		}
+	}
+	visit(spec)
+}

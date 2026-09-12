@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"lazymind/core/common/orm"
+	"lazymind/core/localworkspace"
 	"lazymind/core/subagent"
 	"lazymind/core/workflow/graphengine"
 )
@@ -30,14 +32,28 @@ func makeSubAgentTask(t *testing.T, db interface {
 
 func TestLaunchWorkflowAttemptCreatesTaskCenterRowAtomically(t *testing.T) {
 	db := newTestDB(t)
-	if err := db.AutoMigrate(&orm.Conversation{}); err != nil {
+	if err := db.AutoMigrate(&orm.Conversation{}, &orm.LocalWorkspace{}, &orm.ConversationWorkspaceBinding{}); err != nil {
 		t.Fatalf("migrate conversation: %v", err)
 	}
 	if err := db.Create(&orm.Conversation{
-		ID: "conv-task-center", DisplayName: "赛博朋克 PPT",
+		ID: "conv-task-center", DisplayName: "赛博朋克 PPT", IsTaskConv: true,
 		BaseModel: orm.BaseModel{CreateUserID: "user-1", CreateUserName: "User 1"},
 	}).Error; err != nil {
 		t.Fatalf("create conversation: %v", err)
+	}
+	t.Setenv("LAZYMIND_RUNTIME_MODE", "local")
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	grant, err := localworkspace.Register(t.Context(), db.DB, "user-1", localworkspace.RegisterInput{DisplayName: "project", CanonicalPath: root, Source: "local"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	if err := db.Create(&orm.ConversationWorkspaceBinding{ConversationID: "conv-task-center", WorkspaceID: grant.WorkspaceID,
+		PermissionMode: localworkspace.PermissionAlwaysAsk, PermissionVersion: 3, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+		t.Fatal(err)
 	}
 
 	sessionID, taskID, completed, err := launchWorkflowAttempt(
@@ -75,6 +91,10 @@ func TestLaunchWorkflowAttemptCreatesTaskCenterRowAtomically(t *testing.T) {
 	capabilities, _ := params["capabilities"].([]any)
 	if len(capabilities) != 1 || capabilities[0] != "web_search" {
 		t.Fatalf("capabilities not persisted: %#v", params)
+	}
+	snapshot := localworkspace.SnapshotFromParams(params)
+	if snapshot == nil || snapshot.WorkspaceID != grant.WorkspaceID || snapshot.PermissionMode != localworkspace.PermissionAlwaysAsk || snapshot.PermissionVersion != 3 {
+		t.Fatalf("workflow snapshot=%+v", snapshot)
 	}
 }
 

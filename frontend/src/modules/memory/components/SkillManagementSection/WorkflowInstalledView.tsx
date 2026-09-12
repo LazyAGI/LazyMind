@@ -1,3 +1,4 @@
+import { getLocalizedErrorMessage } from "@/components/request";
 import { useState, useEffect, useCallback } from 'react';
 import { Button, Empty, Input, Popconfirm, Radio, Select, Table, Tag, Tooltip, message } from 'antd';
 import { CopyOutlined, DeleteOutlined, EditOutlined, EyeOutlined, PlusOutlined } from '@ant-design/icons';
@@ -134,9 +135,9 @@ export default function WorkflowInstalledView({
     try {
       await setUserWorkflowCallMode(workflowRef, callMode);
       message.success(t('admin.memoryWorkflowCallModeUpdated'));
-    } catch {
+    } catch (error) {
       setCallModeByRef((current) => ({ ...current, [workflowRef]: previous }));
-      message.error(t('admin.memoryWorkflowCallModeUpdateFailed'));
+      message.error(getLocalizedErrorMessage(error));
     } finally {
       setCallModePendingByRef((current) => ({ ...current, [workflowRef]: false }));
     }

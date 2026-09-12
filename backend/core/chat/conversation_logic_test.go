@@ -1650,7 +1650,7 @@ func TestLoadConversationHistoryPageUsesDatabasePaging(t *testing.T) {
 }
 
 func TestLoadConversationHistoryPageMergesGeneratingHistoryWithoutDuplicates(t *testing.T) {
-	db := orm.MigrateTestDB(t, &orm.ChatHistory{})
+	db := orm.MigrateTestDB(t, &orm.ChatHistory{}, &orm.Conversation{})
 	stateStore, err := state.NewSQLiteStore(t.TempDir() + "/state.db")
 	if err != nil {
 		t.Fatalf("open state store: %v", err)

@@ -12,7 +12,7 @@ import { useTranslation } from "react-i18next";
 import "./index.scss";
 import type { ParserConfig } from "@/api/generated/knowledge-client";
 import { TaskServiceApi } from "@/modules/knowledge/utils/request";
-import { localizeErrorCode } from "@/components/request";
+import { getLocalizedErrorMessage, localizeErrorCode } from "@/components/request";
 import {
   RuntimeReadinessError,
   waitForRuntimeCapability,
@@ -167,7 +167,7 @@ const RestartKnowledgeModal = (
       }
       console.error(error);
       if (error instanceof RuntimeReadinessError) {
-        message.error(t("runtime.initializationFailed"));
+        message.error(getLocalizedErrorMessage(error));
       }
     } finally {
       runtimeWaitAbortRef.current = null;

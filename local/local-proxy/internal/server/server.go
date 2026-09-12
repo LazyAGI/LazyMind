@@ -23,6 +23,13 @@ func NewServer(cfg config.Config) *http.Server {
 
 func NewHandler(cfg config.Config) http.Handler {
 	mux := http.NewServeMux()
+	transport := &http.Transport{
+		MaxConnsPerHost: 32, MaxIdleConnsPerHost: 32, IdleConnTimeout: 30 * time.Second,
+		TLSHandshakeTimeout: cfg.Timeouts.Connect, ResponseHeaderTimeout: cfg.Timeouts.Read,
+		ExpectContinueTimeout: cfg.Timeouts.Write, ForceAttemptHTTP2: true,
+	}
+	client := &http.Client{Transport: transport, Timeout: 15 * time.Second}
+	workspaces := newWorkspaceHandler(cfg, client)
 	mux.HandleFunc("/_local/healthz", healthz)
 	mux.HandleFunc("/_local/status", func(w http.ResponseWriter, r *http.Request) {
 		status(w, r, cfg)
@@ -31,18 +38,13 @@ func NewHandler(cfg config.Config) http.Handler {
 		cfg:     cfg,
 		manager: auth.NewAdminSessionManager(cfg.Auth.AuthServiceURL, nil),
 	})
+	mux.HandleFunc("/_local/workspaces:select", workspaces.selectWorkspace)
+	mux.HandleFunc("/_local/workspaces:authorize", workspaces.authorizeWorkspace)
+	mux.HandleFunc("/_local/workspaces:reauthorize", workspaces.reauthorizeWorkspace)
 	mux.Handle("/api/", &apiProxyHandler{
-		routes: cfg.Routes,
-		rbac:   auth.NewRBACAdapter(cfg.Auth.AuthServiceURL, nil),
-		transport: &http.Transport{
-			MaxConnsPerHost:       32,
-			MaxIdleConnsPerHost:   32,
-			IdleConnTimeout:       30 * time.Second,
-			TLSHandshakeTimeout:   cfg.Timeouts.Connect,
-			ResponseHeaderTimeout: cfg.Timeouts.Read,
-			ExpectContinueTimeout: cfg.Timeouts.Write,
-			ForceAttemptHTTP2:     true,
-		},
+		routes:    cfg.Routes,
+		rbac:      auth.NewRBACAdapter(cfg.Auth.AuthServiceURL, nil),
+		transport: transport,
 	})
 	return newCORSHandler(mux, cfg.CORS.AllowedOrigins)
 }

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AutoComplete, Button, Empty, Form, Input, Modal, Popconfirm, Select, Tag, Tooltip, message } from "antd";
 import type { InputRef } from "antd";
 import { useTranslation } from "react-i18next";
-import { localizeErrorCode } from "@/components/request";
+import { getLocalizedErrorMessage, localizeErrorCode } from "@/components/request";
 import {
   CheckCircleFilled,
   DeleteOutlined,
@@ -1046,9 +1046,9 @@ export default function ModelProviderPage({
       setConfigModal(null);
       providerConfigForm.resetFields();
       setSensenovaBaseUrlPreset("");
-    } catch {
+    } catch (error) {
       if (apiKey) {
-        message.error(t("modelProvider.message.groupVerifyFailed"));
+        message.error(getLocalizedErrorMessage(error));
       }
     } finally {
       closeVerificationNotice?.();

@@ -1,5 +1,3 @@
-import { JobJobStateEnum } from "@/api/generated/knowledge-client";
-
 // Knowledge base user type.
 export enum MemberType {
   USER = 1,

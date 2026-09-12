@@ -64,7 +64,6 @@ export default function DataSourceManagementModals({
     feishuSetupForm,
     cloudSetupProvider,
     feishuSetupModalOpen,
-    setFeishuSetupModalOpen,
     feishuSetupSubmitting,
     handleSaveFeishuSetup,
     handleCancelCloudSetup,

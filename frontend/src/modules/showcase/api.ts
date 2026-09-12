@@ -1,8 +1,8 @@
 import {
   Configuration,
   ShowcaseApiFactory,
-  type ShowcaseCase,
-  type ShowcaseCaseListResponse,
+  type ShowcaseCase as ApiShowcaseCase,
+  type ShowcaseCaseListResponse as ApiShowcaseCaseListResponse,
   type ShowcaseCaseResult,
   type ShowcaseCaseTask,
 } from "@/api/generated/core-client";
@@ -22,9 +22,12 @@ const showcaseApi = ShowcaseApiFactory(
   axiosInstance,
 );
 
+export type ShowcaseCase = Omit<ApiShowcaseCase, "tasks"> & { tasks: ShowcaseCaseTask[] };
+export type ShowcaseCaseListResponse = Omit<ApiShowcaseCaseListResponse, "cases"> & { cases?: ShowcaseCase[] };
+
+const normalizeCase = (item: ApiShowcaseCase): ShowcaseCase => ({ ...item, tasks: item.tasks ?? [] });
+
 export type {
-  ShowcaseCase,
-  ShowcaseCaseListResponse,
   ShowcaseCaseResult,
   ShowcaseCaseTask,
 };
@@ -40,7 +43,7 @@ export async function listShowcaseCases(
     },
     options,
   );
-  return response.data;
+  return { ...response.data, cases: response.data.cases?.map(normalizeCase) };
 }
 
 export async function getShowcaseCase(
@@ -51,5 +54,5 @@ export async function getShowcaseCase(
     { caseId },
     options,
   );
-  return response.data;
+  return normalizeCase(response.data);
 }

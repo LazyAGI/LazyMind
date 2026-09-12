@@ -34,7 +34,7 @@ vi.mock("react-i18next", () => ({
 }));
 
 vi.mock("@/i18n", () => ({
-  default: { language: "zh-CN", resolvedLanguage: "zh-CN" },
+  default: { language: "zh-CN", resolvedLanguage: "zh-CN", exists: (key: string) => key === "errors.2000509", t: (key: string) => key },
 }));
 
 vi.mock("antd", async (importOriginal) => {
@@ -353,7 +353,7 @@ describe("SideChatPanel", () => {
     });
     fireEvent.click(clearButtons[clearButtons.length - 1]);
 
-    expect(await screen.findByText("chat.sideChat.clearFailed")).toBeInTheDocument();
+    expect(await screen.findByText("errors.2000509")).toBeInTheDocument();
     expect(screen.getByTestId("side-chat-conversation")).toBeInTheDocument();
     expect(mocks.chatMounts).toBe(1);
     expect(mocks.chatUnmounts).toBe(0);

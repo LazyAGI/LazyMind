@@ -209,7 +209,7 @@ export function buildFeishuTargetSeedNodes(
   record: Pick<DataSourceItem, "targetLabels" | "targetTypes" | "targetType">,
 ): FeishuTargetTreeNode[] {
   return selectedValues
-    .map((value) => {
+    .map((value): FeishuTargetTreeNode | null => {
       const normalizedValue = `${value || ""}`.trim();
       if (!normalizedValue) {
         return null;

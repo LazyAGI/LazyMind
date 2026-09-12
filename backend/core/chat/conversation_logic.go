@@ -20,6 +20,7 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/evolution"
+	"lazymind/core/localworkspace"
 	"lazymind/core/log"
 	"lazymind/core/resourceupdate"
 	"lazymind/core/state"
@@ -1454,6 +1455,11 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 		"mode":             mode,
 		"intent_context":   loadConversationIntentContext(ctx, db, convID),
 	}
+	for _, key := range []string{"workspace_id", "workspace_permission_mode", "run_in_background"} {
+		if value, ok := raw[key]; ok {
+			body[key] = value
+		}
+	}
 	if modelCtx != nil {
 		body["model_context"] = map[string]any{
 			"summary_text":        modelCtx.SummaryText,
@@ -1757,13 +1763,29 @@ func handleNonStreamChat(
 	historyExt = archiveRegeneratedFailedRunAttempt(historyExt, target)
 	historyExt = archiveRegeneratedTrafficAttempt(historyExt, target)
 	runID := newID("run_")
-	reqBody["run_id"] = runID
 	historyID := target.HistoryID
 	if historyID == "" {
 		historyID = newID("h_")
 	}
+	reqBody["run_id"], reqBody["history_id"] = runID, historyID
 	historyExt = mergeConversationConfigSnapshot(historyExt, reqBody)
-	if err := registerForkableHistoryRun(reqCtx, db, convID, historyID, runID, query, target, historyExt); err != nil {
+	runCtx, cancel := context.WithCancel(reqCtx)
+	defer cancel()
+	workspaceBound, _ := reqBody["_workspace_bound"].(bool)
+	if stateStore == nil && workspaceBound {
+		common.ReplyErr(w, "store not initialized", http.StatusServiceUnavailable)
+		return
+	}
+	if stateStore != nil {
+		if err := setChatRuntimeStatus(runCtx, stateStore, convID, historyID, "generating", "", runID, nil); err != nil {
+			common.ReplyErr(w, "store not initialized", http.StatusServiceUnavailable)
+			return
+		}
+		defer finishRegisteredChatRun(runCtx, stateStore, convID, historyID, runID)
+		_ = setChatInput(runCtx, stateStore, convID, historyID, query, target.Seq, historyExt)
+		go cancelChatOnStop(runCtx, stateStore, convID, historyID, cancel)
+	}
+	if err := registerForkableHistoryRun(runCtx, db, convID, historyID, runID, query, target, historyExt); err != nil {
 		common.ReplyErr(w, "failed to start history run", http.StatusConflict)
 		return
 	}
@@ -1771,14 +1793,14 @@ func handleNonStreamChat(
 	defer func() {
 		if !finalized {
 			terminal := &RunTerminal{Status: "failed", Reason: "runtime_failure", Code: "upstream_request_failed"}
-			if reqCtx.Err() != nil {
+			if runCtx.Err() != nil {
 				terminal.Status = "cancelled"
 				terminal.Reason = "user_cancel"
 			}
-			persistImmediateRunTerminal(reqCtx, db, convID, historyID, query, runID, target, historyExt, terminal)
+			persistImmediateRunTerminal(runCtx, db, convID, historyID, query, runID, target, historyExt, terminal)
 		}
 	}()
-	chunks, _, err := StreamChatUpstream(reqCtx, baseURL, reqBody)
+	chunks, _, err := StreamChatUpstream(runCtx, baseURL, reqBody)
 	if err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "chat service unavailable", err), http.StatusBadGateway)
 		return
@@ -1830,6 +1852,8 @@ func handleNonStreamChat(
 		common.ReplyErr(w, "chat service returned no answer", http.StatusBadGateway)
 		return
 	}
+	runTerminal = resolveCandidateRunTerminal(runCtx, stateStore, convID, historyID, runID, runTerminal, "nonstream_terminal", stateStore != nil && requestUsesRunDecision(reqBody))
+	runEvent = runFinishedEvent(runID, *runTerminal)
 	now := time.Now()
 	retrievalResult := marshalRetrievalResult(sources)
 
@@ -1918,7 +1942,7 @@ func handleStreamChat(
 	if primaryRunID == "" {
 		primaryRunID = newID("run_")
 	}
-	reqBody["run_id"] = primaryRunID
+	reqBody["run_id"], reqBody["history_id"] = primaryRunID, historyID
 	secondaryRunID := ""
 	if dualReply {
 		secondaryHistoryID = newID("h_")
@@ -1927,6 +1951,10 @@ func handleStreamChat(
 	}
 	chatCtx, chatCancel := context.WithCancel(context.Background())
 	defer chatCancel()
+	if workspaceBound, _ := reqBody["_workspace_bound"].(bool); stateStore == nil && workspaceBound {
+		common.ReplyErr(w, "store not initialized", http.StatusServiceUnavailable)
+		return
+	}
 	if !dualReply && requestUsesRunDecision(reqBody) {
 		historyExt = mergeConversationConfigSnapshot(historyExt, reqBody)
 		if err := registerForkableHistoryRun(chatCtx, db, convID, historyID, primaryRunID, query, target, historyExt); err != nil {
@@ -1959,11 +1987,19 @@ func handleStreamChat(
 		}
 		_ = setChatInput(chatCtx, stateStore, convID, historyID, query, target.Seq, historyExt)
 		if requestUsesRunDecision(reqBody) {
-			_ = setChatRuntimeStatus(chatCtx, stateStore, convID, historyID, "generating", "", primaryRunID, nil)
+			if err := setChatRuntimeStatus(chatCtx, stateStore, convID, historyID, "generating", "", primaryRunID, nil); err != nil {
+				common.ReplyErr(w, "store not initialized", http.StatusServiceUnavailable)
+				return
+			}
+			defer finishRegisteredChatRun(chatCtx, stateStore, convID, historyID, primaryRunID)
 		}
 		if dualReply {
 			_ = setChatInput(chatCtx, stateStore, convID, secondaryHistoryID, query, target.Seq, historyExt)
-			_ = setChatRuntimeStatus(chatCtx, stateStore, convID, secondaryHistoryID, "generating", "", secondaryRunID, nil)
+			if err := setChatRuntimeStatus(chatCtx, stateStore, convID, secondaryHistoryID, "generating", "", secondaryRunID, nil); err != nil {
+				common.ReplyErr(w, "store not initialized", http.StatusServiceUnavailable)
+				return
+			}
+			defer finishRegisteredChatRun(chatCtx, stateStore, convID, secondaryHistoryID, secondaryRunID)
 			_ = setMultiAnswerInfo(chatCtx, stateStore, convID, historyID, secondaryHistoryID, target.Seq)
 		}
 		go cancelChatOnStop(chatCtx, stateStore, convID, historyID, chatCancel)
@@ -2139,8 +2175,9 @@ func streamSingleAnswer(
 	if snapshot := forkConfigFromHistory(orm.ChatHistory{Ext: historyExt}); snapshot.Version != 1 || snapshot.RunID != runID {
 		historyExt = mergeConversationConfigSnapshot(historyExt, reqBody)
 	}
-	useRunDecision := requestUsesRunDecision(reqBody)
-	if target.IsRegeneration && useRunDecision {
+	usesCoreRun := requestUsesRunDecision(reqBody)
+	useRunDecision := stateStore != nil && usesCoreRun
+	if target.IsRegeneration && usesCoreRun {
 		if err := claimChatHistoryRun(chatCtx, db, historyID, runID); err != nil {
 			log.Logger.Error().Err(err).Str("conversation_id", convID).Str("history_id", historyID).
 				Str("run_id", runID).Msg("failed to claim regenerated history for run")
@@ -2738,7 +2775,7 @@ func streamDualAnswer(
 	for k, v := range reqBody {
 		secondaryReq[k] = v
 	}
-	secondaryReq["run_id"] = secondaryRunID
+	secondaryReq["run_id"], secondaryReq["history_id"] = secondaryRunID, secondaryHistoryID
 	delete(secondaryReq, "secondary_run_id")
 	if sc, ok := secondaryReq["filters"].(map[string]any); ok {
 		copy := map[string]any{}
@@ -3277,7 +3314,12 @@ func handleTaskCreated(
 	if mode != "auto" && mode != "manual" {
 		mode = "auto"
 	}
-	paramsJSON, _ := json.Marshal(ev.Params)
+	params := localworkspace.StripUntrustedWorkspaceMetadata(ev.Params)
+	params, err := localworkspace.RebuildSubagentParams(chatCtx, db, userID, convID, params)
+	if err != nil {
+		return nil, err
+	}
+	paramsJSON, _ := json.Marshal(params)
 	inputKeysJSON, _ := json.Marshal(ev.InputSlots)
 	outputKeysJSON, _ := json.Marshal(ev.OutputSlots)
 	workspacePath := subagent.WorkspacePath(userID, ev.TaskID)
@@ -3286,6 +3328,23 @@ func handleTaskCreated(
 	if ev.Resume {
 		existing, getErr := subagent.GetTask(chatCtx, db, ev.TaskID)
 		if getErr == nil && existing != nil {
+			if existing.CreateUserID != strings.TrimSpace(userID) || existing.ConversationID != convID {
+				return nil, common.ResolveAppError("forbidden", http.StatusForbidden)
+			}
+			stored := map[string]any{}
+			if err := json.Unmarshal(existing.Params, &stored); err != nil {
+				return nil, common.ResolveAppError("invalid request", http.StatusBadRequest)
+			}
+			params, err = localworkspace.RebuildSubagentParams(chatCtx, db, userID, convID, stored)
+			if err != nil {
+				return nil, err
+			}
+			paramsJSON, _ = json.Marshal(params)
+			if err := db.WithContext(chatCtx).Model(&orm.SubAgentTask{}).Where("id = ? AND create_user_id = ? AND conversation_id = ?",
+				existing.ID, userID, convID).Updates(map[string]any{"params": paramsJSON, "updated_at": time.Now().UTC()}).Error; err != nil {
+				return nil, err
+			}
+			existing.Params = paramsJSON
 			_ = subagent.UpdateStatus(chatCtx, db, existing.ID, subagent.StatusRunning)
 			_ = subagent.WriteStatus(chatCtx, stateStore, existing.ID, map[string]any{
 				"status": subagent.StatusRunning, "progress": existing.ProgressPct,
@@ -3293,7 +3352,7 @@ func handleTaskCreated(
 			go subagent.Run(context.Background(), db, stateStore, subagent.RunRequest{
 				TaskID:        existing.ID,
 				AgentType:     existing.AgentType,
-				Params:        ev.Params,
+				Params:        params,
 				WorkspacePath: existing.WorkspacePath,
 				Tools:         ev.Tools,
 				Resume:        true,
@@ -3339,7 +3398,7 @@ func handleTaskCreated(
 	go subagent.Run(context.Background(), db, stateStore, subagent.RunRequest{
 		TaskID:        task.ID,
 		AgentType:     ev.AgentType,
-		Params:        ev.Params,
+		Params:        params,
 		WorkspacePath: workspacePath,
 		Tools:         ev.Tools,
 		Resume:        false,
@@ -4002,4 +4061,137 @@ func SaveAskAnswers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func validateWorkspaceAskSubmission(histories []orm.ChatHistory, raw map[string]any) error {
+	submission := askAnswersStructuredFromRaw(raw)
+	if submission == nil {
+		return nil
+	}
+	for i := len(histories) - 1; i >= 0; i-- {
+		ext := map[string]any{}
+		if json.Unmarshal(histories[i].Ext, &ext) != nil {
+			continue
+		}
+		if answered, _ := ext["ask_answered"].(bool); answered {
+			continue
+		}
+		pending, _ := ext["ask_pending"].(map[string]any)
+		if pending == nil {
+			continue
+		}
+		if validAskSubmission(pending, submission) {
+			return nil
+		}
+		return common.ResolveAppError("invalid request", http.StatusBadRequest)
+	}
+	return common.ResolveAppError("invalid request", http.StatusBadRequest)
+}
+
+func validAskSubmission(pending, submission map[string]any) bool {
+	pendingID, _ := pending["ask_id"].(string)
+	submittedID, _ := submission["ask_id"].(string)
+	if strings.TrimSpace(submittedID) == "" || strings.TrimSpace(submittedID) != strings.TrimSpace(pendingID) {
+		return false
+	}
+	body, err := json.Marshal(submission)
+	if err != nil {
+		return false
+	}
+	var submitted askAnswersStructuredPayload
+	if json.Unmarshal(body, &submitted) != nil {
+		return false
+	}
+	rawQuestions, exists := pending["questions"]
+	if !exists {
+		return len(submitted.Questions) == 0
+	}
+	questions, ok := rawQuestions.([]any)
+	if !ok || len(questions) != len(submitted.Questions) {
+		return false
+	}
+	for index, rawQuestion := range questions {
+		question, ok := rawQuestion.(map[string]any)
+		if !ok {
+			return false
+		}
+		text, _ := question["text"].(string)
+		kind, _ := question["type"].(string)
+		item := submitted.Questions[index]
+		choices := askStringSlice(question["choices"])
+		if strings.TrimSpace(item.Text) != strings.TrimSpace(text) || item.Type != kind || !sameStrings(item.Choices, choices) || len(item.CustomChoices) != len(choices) {
+			return false
+		}
+		if len(item.Answer) == 0 || string(item.Answer) == "null" {
+			continue
+		}
+		var answer struct {
+			Type  string `json:"type"`
+			Value any    `json:"value"`
+		}
+		if json.Unmarshal(item.Answer, &answer) != nil || answer.Type != kind || !validAskAnswerValue(kind, answer.Value) {
+			return false
+		}
+	}
+	return true
+}
+
+func askStringSlice(value any) []string {
+	if values, ok := value.([]string); ok {
+		return values
+	}
+	values, _ := value.([]any)
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		text, ok := value.(string)
+		if !ok {
+			return nil
+		}
+		result = append(result, text)
+	}
+	return result
+}
+
+func sameStrings(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
+}
+
+func validAskAnswerValue(kind string, value any) bool {
+	switch kind {
+	case "boolean", "single", "text":
+		_, ok := value.(string)
+		return ok
+	case "multiple":
+		values, ok := value.([]any)
+		if !ok {
+			return false
+		}
+		for _, value := range values {
+			if _, ok := value.(string); !ok {
+				return false
+			}
+		}
+		return true
+	default:
+		return false
+	}
+}
+
+func finishRegisteredChatRun(parent context.Context, stateStore state.Store, convID, historyID, runID string) {
+	ctx, cancel := terminalWriteContext(parent)
+	defer cancel()
+	current, err := getChatStatus(ctx, stateStore, convID, historyID)
+	if err == nil && (current.RunID != runID || current.Status != "generating") {
+		return
+	}
+	terminal := resolveRunTerminal(ctx, stateStore, convID, historyID, runID, nil, "request_closed")
+	_ = setChatRuntimeStatus(ctx, stateStore, convID, historyID, terminal.Status, "", runID, terminal)
 }

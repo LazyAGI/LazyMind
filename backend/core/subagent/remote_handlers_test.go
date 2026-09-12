@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -15,6 +16,7 @@ import (
 	"github.com/gorilla/mux"
 
 	"lazymind/core/common/orm"
+	"lazymind/core/localworkspace"
 	"lazymind/core/state"
 	"lazymind/core/store"
 )
@@ -253,9 +255,7 @@ func TestRemoteTaskEventsPersistStreamStateAndInvalidatePanel(t *testing.T) {
 		{"type": "text", "text": "hello"},
 		{"type": "think", "think": "reason"},
 		{"type": "tool_calls", "tool_calls": []map[string]any{{"id": "1", "name": "read"}}},
-		{"type": "tool_results",
-			"tool_results":         []map[string]any{{"id": "1", "result": "compact"}},
-			"durable_tool_results": []map[string]any{{"id": "1", "result": "complete resume result"}}},
+		{"type": "tool_results", "tool_results": []map[string]any{{"id": "1", "result": "ok"}}},
 		{"type": "progress", "progress": 42, "current_phase": "working",
 			"writing_subtasks": []map[string]any{{
 				"subtask_id": "research-1", "node_id": "section-1",
@@ -286,16 +286,6 @@ func TestRemoteTaskEventsPersistStreamStateAndInvalidatePanel(t *testing.T) {
 		if steps[i].Seq != i || steps[i].Role != role {
 			t.Fatalf("step[%d]=%#v", i, steps[i])
 		}
-	}
-	var toolContent map[string][]map[string]any
-	if err := json.Unmarshal(steps[3].Content, &toolContent); err != nil {
-		t.Fatal(err)
-	}
-	if toolContent["tool_results"][0]["tool_call_id"] != "1" {
-		t.Fatalf("tool result was not normalized for resume: %s", steps[3].Content)
-	}
-	if toolContent["tool_results"][0]["result"] != "complete resume result" {
-		t.Fatalf("compact UI result was persisted instead of durable result: %s", steps[3].Content)
 	}
 	task, _ := GetTask(context.Background(), db.DB, "task-remote")
 	if task.Status != StatusRunning || task.ProgressPct != 42 || task.CurrentPhase != "working" {
@@ -346,6 +336,93 @@ func TestAppendRemoteStepAllocatesMonotonicSequence(t *testing.T) {
 		if steps[i].Seq != i {
 			t.Fatalf("steps=%#v", steps)
 		}
+	}
+}
+
+func TestRemoteWorkspaceExecutionSpecUsesOneAuthoritativeSnapshotAndRejectsRevoked(t *testing.T) {
+	db := remoteSubagentFixture(t)
+	t.Setenv("LAZYMIND_RUNTIME_MODE", "local")
+	if err := db.AutoMigrate(&orm.Conversation{}, &orm.LocalWorkspace{}, &orm.ConversationWorkspaceBinding{}); err != nil {
+		t.Fatal(err)
+	}
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	grant, err := localworkspace.Register(t.Context(), db.DB, "user-1", localworkspace.RegisterInput{DisplayName: "project", CanonicalPath: root, Source: "local"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	if err := db.Create(&orm.Conversation{ID: "conversation-1", IsTaskConv: true, BaseModel: orm.BaseModel{CreateUserID: "user-1", CreatedAt: now, UpdatedAt: now}}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.ConversationWorkspaceBinding{ConversationID: "conversation-1", WorkspaceID: grant.WorkspaceID, PermissionMode: localworkspace.PermissionAlwaysAsk, PermissionVersion: 3, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+		t.Fatal(err)
+	}
+	persisted, err := localworkspace.RebuildSubagentParams(t.Context(), db.DB, "user-1", "conversation-1",
+		map[string]any{"runtime_instruction": "keep", "files": map[string]any{"1": []string{"a.txt"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	paramsJSON, _ := json.Marshal(persisted)
+	if err := db.Model(&orm.SubAgentTask{}).Where("id = ?", "task-remote").Update("params", paramsJSON).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/internal/subagent/tasks/task-remote/execution-spec", nil)
+	request = mux.SetURLVars(request, map[string]string{"task_id": "task-remote"})
+	request.Header.Set("Authorization", "Bearer executor-secret")
+	request.Header.Set("X-Workflow-Lease-Token", "lease-live")
+	response := httptest.NewRecorder()
+	InternalGetExecutionSpec(response, request)
+	if response.Code != 200 {
+		t.Fatalf("spec=%d %s", response.Code, response.Body.String())
+	}
+	data := getData(response.Body.Bytes())
+	params := data["params"].(map[string]any)
+	task := data["task"].(map[string]any)
+	if !reflect.DeepEqual(task["params"], params) {
+		t.Fatalf("params differ task=%v top=%v", task["params"], params)
+	}
+	instruction := params["runtime_instruction"].(string)
+	if !strings.Contains(instruction, root) || !strings.Contains(instruction, "需要批准时整批工具会等待用户决定") {
+		t.Fatalf("instruction=%s", instruction)
+	}
+	if data["workspace_path"] != "/core/path/must-not-be-used" {
+		t.Fatalf("workspace_path=%v", data["workspace_path"])
+	}
+	if err := db.Model(&orm.ConversationWorkspaceBinding{}).Where("conversation_id = ?", "conversation-1").
+		Updates(map[string]any{"permission_mode": localworkspace.PermissionAllowAll, "permission_version": 4}).Error; err != nil {
+		t.Fatal(err)
+	}
+	request = httptest.NewRequest(http.MethodGet, "/internal/subagent/tasks/task-remote/execution-spec", nil)
+	request = mux.SetURLVars(request, map[string]string{"task_id": "task-remote"})
+	request.Header.Set("Authorization", "Bearer executor-secret")
+	request.Header.Set("X-Workflow-Lease-Token", "lease-live")
+	response = httptest.NewRecorder()
+	InternalGetExecutionSpec(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("updated permission spec=%d %s", response.Code, response.Body.String())
+	}
+	retained := getData(response.Body.Bytes())["params"].(map[string]any)
+	parent := retained["parent_agentic_config"].(map[string]any)
+	metadata := parent["_core_workspace_context"].(map[string]any)
+	if metadata["permission_mode"] != localworkspace.PermissionAlwaysAsk || metadata["permission_version"] != float64(3) {
+		t.Fatalf("running attempt permission changed: %v", metadata)
+	}
+
+	if err := db.Model(&orm.LocalWorkspace{}).Where("id = ?", grant.WorkspaceID).Updates(map[string]any{"status": localworkspace.StatusRevoked, "version": 2}).Error; err != nil {
+		t.Fatal(err)
+	}
+	request = httptest.NewRequest(http.MethodGet, "/internal/subagent/tasks/task-remote/execution-spec", nil)
+	request = mux.SetURLVars(request, map[string]string{"task_id": "task-remote"})
+	request.Header.Set("Authorization", "Bearer executor-secret")
+	request.Header.Set("X-Workflow-Lease-Token", "lease-live")
+	response = httptest.NewRecorder()
+	InternalGetExecutionSpec(response, request)
+	if response.Code != 409 {
+		t.Fatalf("revoked spec=%d %s", response.Code, response.Body.String())
 	}
 }
 

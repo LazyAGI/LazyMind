@@ -30,6 +30,7 @@ import (
 	"lazymind/core/externallease"
 	"lazymind/core/historyinjection"
 	"lazymind/core/knowledge_market"
+	"lazymind/core/localworkspace"
 	"lazymind/core/log"
 	"lazymind/core/migrate"
 	"lazymind/core/modelprovider"
@@ -281,6 +282,32 @@ func exportRegisteredOpenAPIArtifacts() error {
 	return nil
 }
 
+func exportRegisteredOpenAPITo(outputPath string) error {
+	outputPath = strings.TrimSpace(outputPath)
+	if outputPath == "" {
+		return common.ResolveAppError("invalid path", http.StatusBadRequest)
+	}
+	router := mux.NewRouter()
+	router.UseEncodedPath()
+	registerCoreRoutes(router)
+	raw, err := buildOpenAPISpecFromRouter(router)
+	if err != nil {
+		return err
+	}
+	var spec map[string]any
+	if err := json.Unmarshal(raw, &spec); err != nil {
+		return err
+	}
+	body, err := yaml.Marshal(spec)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(outputPath, append(bytes.TrimRight(body, "\r\n"), '\n'), 0o644)
+}
+
 func validateStartupConfig() error {
 	if err := episode.ValidateInternalTokenConfig(); err != nil {
 		return err
@@ -292,6 +319,15 @@ func validateStartupConfig() error {
 func main() {
 	log.Init()
 
+	if len(os.Args) > 1 && os.Args[1] == "--export-openapi-to" {
+		if len(os.Args) != 3 || strings.TrimSpace(os.Args[2]) == "" {
+			log.Logger.Fatal().Msg("--export-openapi-to requires one output path")
+		}
+		if err := exportRegisteredOpenAPITo(os.Args[2]); err != nil {
+			log.Logger.Fatal().Err(err).Msg("export OpenAPI file failed")
+		}
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "--export-openapi" {
 		if err := exportRegisteredOpenAPIArtifacts(); err != nil {
 			log.Logger.Fatal().Err(err).Msg("export OpenAPI artifacts failed")
@@ -503,6 +539,15 @@ func run(ctx context.Context) error {
 
 	// text/PrompttextInitialize（DB + Redis）。DB text ACL text；Redis textConversationtext/text/text。
 	store.Init(db.DB, readonlyDB.DB, store.MustStateFromEnv())
+	localworkspace.SetValidateOperationRunFunc(func(ctx context.Context, db *gorm.DB, stateStore state.Store, req localworkspace.OperationRequest) (*localworkspace.ContextSnapshot, error) {
+		if req.TaskID != "" {
+			return subagent.ValidateWorkspaceRun(ctx, db, stateStore, req)
+		}
+		return chat.ValidateWorkspaceRun(ctx, stateStore, req)
+	})
+	localworkspace.SetStopConversationFunc(func(ctx context.Context, userID, conversationID string) error {
+		return chat.StopConversationExecution(ctx, db.DB, store.State(), userID, conversationID, "", "workspace authorization revoked")
+	})
 	if err := workflow.SeedBuiltinWorkflows(ctx, store.DB()); err != nil {
 		return &startupError{msg: "seed built-in workflows", err: err}
 	}

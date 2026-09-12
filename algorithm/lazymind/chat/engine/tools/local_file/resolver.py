@@ -314,7 +314,7 @@ def resolve_text_target(
                 f"file {manifest.get('file_id')} is not ready "
                 f"(parse_status={manifest.get('parse_status')}: {manifest.get('parse_error')})"
             )
-        parsed_path = str(manifest.get('parsed_path') or '')
+        _, parsed_path = _resolve_workspace_path(str(manifest.get('parsed_path') or ''), user_id, conversation_id)
         if not os.path.isfile(parsed_path):
             raise FileNotFoundError(f"parsed text missing for {manifest.get('file_id')}")
         return ResolvedTextResource(

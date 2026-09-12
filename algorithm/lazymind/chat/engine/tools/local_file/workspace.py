@@ -21,6 +21,7 @@ from lazyllm.tools.agent.file_tool import (
 )
 
 from lazymind.config import config as _cfg
+from lazymind.chat.engine.tools.local_fs import LocalFileToolkit
 
 from .resolver import resolve_text_target
 from .window import (
@@ -57,11 +58,11 @@ def _normalize_caption(caption: Optional[str]) -> Optional[str]:
 
 def _current_artifact_scope() -> tuple[str, str]:
     config = lazyllm.globals.get('agentic_config') or {}
-    user_id = str(config.get('user_id') or '0').strip()
+    user_id = str(config.get('user_id') or '').strip()
     conversation_id = str(config.get('conversation_id') or '').strip()
-    if not conversation_id:
+    if not user_id or not conversation_id:
         raise ToolExecutionError(
-            'conversation_id is required to publish a chat file; conversation context is unavailable.'
+            'user_id and conversation_id are required to access chat files; conversation context is unavailable.'
         )
     return user_id, conversation_id
 
@@ -118,7 +119,7 @@ def _resolve_workspace_path(path: str, user_id: str, conversation_id: str) -> tu
     workspace = os.path.realpath(chat_agent_workspace(user_id, conversation_id))
     candidate = path if os.path.isabs(path) else os.path.join(workspace, path)
     resolved = os.path.realpath(candidate)
-    if _cfg['trusted_local_mode']:
+    if _file_tool_root(workspace) is None:
         return workspace, resolved
     try:
         inside_workspace = os.path.commonpath((workspace, resolved)) == workspace
@@ -138,7 +139,7 @@ def _workspace_file_resource(arguments: Dict[str, Any], key: str = 'path'):
 
 
 def _file_tool_root(workspace: str) -> Optional[str]:
-    return None if _cfg['trusted_local_mode'] else workspace
+    return None if _cfg['trusted_local_mode'] and LocalFileToolkit._workspace_binding() is None else workspace
 
 
 def _resolve_source_file(path: str, user_id: str, conversation_id: str) -> str:

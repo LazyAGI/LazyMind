@@ -1,3 +1,4 @@
+import { getLocalizedErrorMessage } from "@/components/request";
 import {
   DndContext, PointerSensor, KeyboardSensor, closestCenter, useSensor, useSensors,
   type DragEndEvent, type DragStartEvent, type DragOverEvent, type CollisionDetection,
@@ -659,8 +660,8 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
           );
           document.getElementById(scrollableTargetId)?.scrollTo({ top: 0 });
         })
-        .catch(() => {
-          message.error(t("chat.pinConversationFailed"));
+        .catch((error) => {
+          message.error(getLocalizedErrorMessage(error));
         })
         .finally(() => {
           pinningConversationRef.current = false;
@@ -730,7 +731,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
                   message.success(t("settingsPage.recovery.unarchived"));
                   getHistory({ isFirst: true });
                 })
-                .catch(() => message.error(t("settingsPage.recovery.operationFailed")));
+                .catch((error) => message.error(getLocalizedErrorMessage(error)));
             }}>{t("settingsPage.recovery.undo")}</Button>
             <Button type="link" size="small" onClick={() => navigate(RECOVERY_ARCHIVE_PATH)}>{t("settingsPage.recovery.viewArchived")}</Button>
           </span>

@@ -14,7 +14,6 @@ import {
   DEFAULT_SCHEDULE_WEEKDAYS,
 } from "../../utils/schedule";
 import type {
-  DataSourceItem,
   SourceType,
 } from "../../constants/types";
 import { parseFeishuOAuthCallbackInput } from "../../utils/feishuAccount";

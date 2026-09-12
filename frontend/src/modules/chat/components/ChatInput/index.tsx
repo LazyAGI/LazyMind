@@ -1,3 +1,4 @@
+import { getLocalizedErrorMessage } from "@/components/request";
 import {
   useState,
   useRef,
@@ -43,6 +44,8 @@ import { resolveMarkdownImageUrlAsync } from "@/modules/knowledge/utils/imageUrl
 import "./index.scss";
 
 import { ChatConfig } from "../ChatConfigs";
+import LocalWorkspaceControl from "./LocalWorkspaceControl";
+import type { WorkspacePermissionMode } from "@/modules/chat/utils/localWorkspace";
 import ChatSelector, { type ChatSelectorImperativeProps } from "../ChatSelector";
 import PromptModal, { PromptImperativeProps } from "../PromptModal";
 import { appendPromptToDraft } from "../PromptModal/promptLibrary";
@@ -345,7 +348,7 @@ async function markdownImageToFile(source: string): Promise<File> {
 
   const response = await fetch(url, { credentials: "same-origin" });
   if (!response.ok) {
-    throw new Error(`Failed to fetch pasted image: ${response.status}`);
+    throw Object.assign(new Error("Failed to fetch pasted image"), { response });
   }
 
   const blob = await response.blob();
@@ -472,6 +475,8 @@ interface ChatInputProps {
   modelSelectorBusy?: boolean;
   /** Reports persisted model-selection saves so sibling retry actions can share the lock. */
   onModelSelectionSavingChange?: (saving: boolean) => void;
+  /** Reports persisted workspace-permission saves so every session execution entry point shares the lock. */
+  onWorkspacePermissionSavingChange?: (saving: boolean) => void;
   fixedThinkingDepth?: ThinkingDepth;
   performanceStats?: SessionPerformanceStats;
   showPerformanceStats?: boolean;
@@ -687,12 +692,15 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       showModelSelector = true,
       modelSelectorBusy = false,
       onModelSelectionSavingChange,
+      onWorkspacePermissionSavingChange,
       fixedThinkingDepth,
       performanceStats,
       showPerformanceStats = false,
       thinkingDepth: controlledThinkingDepth,
       onThinkingDepthChange,
     } = props;
+    const [workspaceId, setWorkspaceId] = useState<string>();
+    const [workspacePermissionMode, setWorkspacePermissionMode] = useState<WorkspacePermissionMode>("ask_as_needed");
     const fileListRef = useRef<ImageUploadImperativeProps | null>(null);
     const knowledgeSelectorRef = useRef<ChatSelectorImperativeProps | null>(null);
     const promptRef = useRef<PromptImperativeProps>(null);
@@ -733,6 +741,13 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     const hasSentMessageRef = useRef(false);
     const [initialModelSelection, setInitialModelSelection] =
       useState<ChatModelSelectionRequest>();
+    const [workspacePermissionSaving, setWorkspacePermissionSaving] = useState(false);
+    const workspacePermissionSavingRef = useRef(false);
+    const handleWorkspaceSavingChange = useCallback((saving: boolean) => {
+      workspacePermissionSavingRef.current = saving;
+      setWorkspacePermissionSaving(saving);
+      onWorkspacePermissionSavingChange?.(saving);
+    }, [onWorkspacePermissionSavingChange]);
     const [modelSelectionSaving, setModelSelectionSaving] = useState(false);
     const handleModelSelectionChange = useCallback(
       (selection: ChatModelSelectionRequest) => {
@@ -746,6 +761,8 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     }, [onModelSelectionSavingChange]);
     useEffect(() => {
       setInitialModelSelection(undefined);
+      setWorkspaceId(undefined);
+      setWorkspacePermissionMode("ask_as_needed");
     }, [configResetKey, sessionId]);
     const workflowBlocksModelSwitch = useWorkflowStore((state) => {
       if (!sessionId) return false;
@@ -1048,6 +1065,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       disabled ||
       isPromptPolishing ||
       modelSelectionSaving ||
+      workspacePermissionSaving ||
       resolvingSkillWorkflow ||
       !value?.trim() ||
       isUploading;
@@ -1076,6 +1094,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       disabled ||
       isPromptPolishing ||
       modelSelectionSaving ||
+      workspacePermissionSaving ||
       isStreaming ||
       !onSkillDeposit;
     const skillDepositTooltip = useMemo(() => {
@@ -1175,7 +1194,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
         }
         return;
       }
-      if (modelSelectionSaving) {
+      if (modelSelectionSaving || workspacePermissionSavingRef.current) {
         return;
       }
       if (isStreaming || isSendDisabled || resolvingSkillWorkflow) {
@@ -1219,6 +1238,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
         files: fileListRef.current?.getFiles(),
         create_time: new Date().toISOString(),
         ...(runInBackground ? { run_in_background: true } : {}),
+        ...(runInBackground && workspaceId ? { workspace_id: workspaceId, workspace_permission_mode: workspacePermissionMode } : {}),
         ...(!sessionId && effectiveInitialModelSelection
           ? { initial_model_selection: effectiveInitialModelSelection }
           : {}),
@@ -1383,8 +1403,8 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                   document.execCommand("insertText", false, remainingText);
                 }
               })
-              .catch(() => {
-                message.error(t("chat.fileUploadFailedRetry"));
+              .catch((error) => {
+                message.error(getLocalizedErrorMessage(error));
                 document.execCommand("insertText", false, plainText);
               });
             return;
@@ -1505,6 +1525,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                     disabled ||
                     isPromptPolishing ||
                     modelSelectionSaving ||
+                    workspacePermissionSaving ||
                     isStreaming
                   ) return;
                   void handleSend();
@@ -1624,6 +1645,16 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                       />
                     </div>
                   </div>
+                  {(runInBackground || Boolean(sessionId && !sessionId.startsWith("temp_"))) && <LocalWorkspaceControl
+                    conversationId={sessionId && !sessionId.startsWith("temp_") ? sessionId : undefined}
+                    configResetKey={configResetKey}
+                    onSavingChange={handleWorkspaceSavingChange}
+                    disabled={disabled || isStreaming}
+                    onChange={(id, permissionMode) => {
+                      setWorkspaceId(id);
+                      setWorkspacePermissionMode(permissionMode);
+                    }}
+                  />}
                   {showcaseSelection ? (
                     <div className="chat-showcase-selection" data-testid="showcase-selection">
                       <ShowcaseSelectButton
@@ -1753,6 +1784,8 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                         },
                         runtime: contextRuntimeSettings,
                         thinkingDepth: effectiveThinkingDepth,
+                        workspaceId,
+                        workspacePermissionMode,
                       })}
                       buildRequest={() => {
                         const files = fileListRef.current?.getFiles() ?? [];
@@ -1782,6 +1815,8 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                             tags: chatConfig?.tags ?? [],
                           },
                           thinking_depth: effectiveThinkingDepth,
+                          ...(runInBackground ? { run_in_background: true } : {}),
+                          ...(runInBackground && workspaceId ? { workspace_id: workspaceId, workspace_permission_mode: workspacePermissionMode } : {}),
                           ...contextRuntimeSettings,
                         };
                       }}

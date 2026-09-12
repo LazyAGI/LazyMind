@@ -3,7 +3,6 @@ import {
   Button,
   Descriptions,
   Drawer,
-  Dropdown,
   Empty,
   Form,
   Input,
@@ -20,8 +19,8 @@ import {
   message,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import type { InputNumberProps } from "antd";
-import type { MenuProps } from "antd";
+
+
 import {
   AppstoreOutlined,
   ArrowLeftOutlined,
@@ -29,7 +28,6 @@ import {
   BarChartOutlined,
   CopyOutlined,
   DeleteOutlined,
-  MoreOutlined,
   PauseCircleOutlined,
   PlayCircleOutlined,
   ReloadOutlined,

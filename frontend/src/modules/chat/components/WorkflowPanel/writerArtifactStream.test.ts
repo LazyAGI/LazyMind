@@ -23,6 +23,7 @@ function task(taskId: string, status: SubAgentTask['status'], streams: TaskArtif
     mode: 'auto',
     status,
     progress_pct: 50,
+    sources: [],
     artifacts: [],
     artifact_streams: streams,
     execution_log: [],

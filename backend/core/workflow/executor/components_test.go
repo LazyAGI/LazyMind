@@ -372,3 +372,16 @@ func TestDBArtifactSinkAppendsListSlotsAndReplacesOnlyExplicitIndex(t *testing.T
 }
 
 func ptr(value string) *string { return &value }
+
+func TestAttemptContextHasNoLocalWorkspaceRootContract(t *testing.T) {
+	body, err := json.Marshal(AttemptContext{Metadata: map[string]string{"safe": "value"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	for _, forbidden := range []string{"workspace_root", "canonical_path", "local_fs_sources"} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("public context contains %s: %s", forbidden, text)
+		}
+	}
+}

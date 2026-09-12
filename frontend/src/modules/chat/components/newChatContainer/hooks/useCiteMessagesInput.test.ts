@@ -1,5 +1,5 @@
 import { act, renderHook } from "@testing-library/react";
-import { createRef } from "react";
+import type { MutableRefObject } from "react";
 import { describe, expect, it, vi } from "vitest";
 import type { ChatInputImperativeProps } from "../../ChatInput";
 import { MAX_CITE_MESSAGE_COUNT } from "../utils/citeMessage";
@@ -21,8 +21,9 @@ vi.mock("react-i18next", () => ({
 }));
 
 function setup() {
-  const chatInputRef = createRef<ChatInputImperativeProps>();
-  chatInputRef.current = { focus: vi.fn() } as unknown as ChatInputImperativeProps;
+  const chatInputRef: MutableRefObject<ChatInputImperativeProps | null> = {
+    current: { focus: vi.fn(), clearFiles: vi.fn(), uploadFiles: vi.fn(), element: null },
+  };
   const { result } = renderHook(() => useCiteMessagesInput(chatInputRef));
   return { result, chatInputRef };
 }

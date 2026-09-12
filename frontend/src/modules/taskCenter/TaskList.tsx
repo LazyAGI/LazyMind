@@ -1,3 +1,4 @@
+import { getLocalizedErrorMessage } from "@/components/request";
 import { useCallback, useEffect, useState } from 'react';
 import { Button, Input, message, Progress, Segmented, Select, Table, Tooltip } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
@@ -128,8 +129,8 @@ export default function TaskList({ active, status, onStatusChange, page, onPageC
   const handleDelete = async (task: Task) => {
     try {
       await removeTask(task.id);
-    } catch {
-      message.error(t('taskCenter.taskRemoveFailed'));
+    } catch (error) {
+      message.error(getLocalizedErrorMessage(error));
       return;
     }
     setSelected(null);
@@ -156,7 +157,7 @@ export default function TaskList({ active, status, onStatusChange, page, onPageC
               message.success(t('settingsPage.recovery.unarchived'));
               void load();
             })
-            .catch(() => message.error(t('settingsPage.recovery.operationFailed')));
+            .catch((error) => message.error(getLocalizedErrorMessage(error)));
         }}>{t('settingsPage.recovery.undo')}</Button>
         <Button type='link' size='small' onClick={() => navigate(RECOVERY_ARCHIVE_PATH)}>{t('settingsPage.recovery.viewArchived')}</Button>
       </span>,

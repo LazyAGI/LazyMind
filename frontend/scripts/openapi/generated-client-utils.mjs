@@ -1,6 +1,7 @@
 import { createHash } from "crypto";
 import fs from "fs";
 import path from "path";
+import ts from "typescript";
 
 export const GENERATED_TYPESCRIPT_FILES = Object.freeze([
   "api.ts",
@@ -72,6 +73,36 @@ function patchNullableRecursiveMemoryValue(outputDir, cwdPath, logger) {
   }
 }
 
+export function removeUnusedGeneratedImports(outputDir) {
+  const apiPath = path.resolve(outputDir, "api.ts");
+  if (!fs.existsSync(apiPath)) return;
+  const original = fs.readFileSync(apiPath, "utf-8");
+  const source = ts.createSourceFile(apiPath, original, ts.ScriptTarget.Latest, true);
+  const usedNames = new Set();
+  const visit = (node) => {
+    if (ts.isImportDeclaration(node)) return;
+    if (ts.isIdentifier(node)) usedNames.add(node.text);
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  const edits = [];
+  for (const statement of source.statements) {
+    if (!ts.isImportDeclaration(statement)) continue;
+    const bindings = statement.importClause?.namedBindings;
+    if (!bindings || !ts.isNamedImports(bindings)) continue;
+    const retained = bindings.elements.filter((item) => usedNames.has(item.name.text));
+    if (retained.length === bindings.elements.length) continue;
+    edits.push(retained.length || statement.importClause.name
+      ? [bindings.getStart(source), bindings.end, `{ ${retained.map((item) => item.getText(source)).join(", ")} }`]
+      : [statement.getStart(source), statement.end, ""]);
+  }
+  let result = original;
+  for (const [start, end, replacement] of edits.reverse()) {
+    result = result.slice(0, start) + replacement + result.slice(end);
+  }
+  if (result !== original) fs.writeFileSync(apiPath, result, "utf-8");
+}
+
 function removeUnusedGeneratedFiles(outputDir, cwdPath, logger) {
   for (const filename of ["git_push.sh"]) {
     const filePath = path.resolve(outputDir, filename);
@@ -103,6 +134,7 @@ export function postProcessGeneratedClient(
 ) {
   patchBasePath(outputDir, cwdPath, logger);
   patchNullableRecursiveMemoryValue(outputDir, cwdPath, logger);
+  removeUnusedGeneratedImports(outputDir);
   removeUnusedGeneratedFiles(outputDir, cwdPath, logger);
   normalizeGeneratedTypeScript(outputDir);
 }

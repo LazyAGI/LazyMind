@@ -49,7 +49,11 @@ func recoverStaleJobs(ctx context.Context, db *gorm.DB, now time.Time, jobTypes,
 	now = now.UTC()
 	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		staleJobs := func() *gorm.DB {
-			query := tx.Model(&orm.AsyncJob{}).Where("status = ? AND lock_until < ?", StatusRunning, now)
+			condition := "status = ? AND lock_until < ?"
+			if tx.Dialector.Name() == "sqlite" {
+				condition = "status = ? AND julianday(lock_until) < julianday(?)"
+			}
+			query := tx.Model(&orm.AsyncJob{}).Where(condition, StatusRunning, now)
 			if len(jobTypes) > 0 {
 				query = query.Where("job_type IN ?", jobTypes)
 			}

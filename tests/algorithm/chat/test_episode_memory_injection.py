@@ -24,6 +24,8 @@ def _export_prompt(
     use_memory: bool = True,
     observed_configs: list[dict] | None = None,
     observed_tool_types: list[list[str]] | None = None,
+    observed_tool_names: list[list[str]] | None = None,
+    local_fs_sources: list[dict] | None = None,
     usage_preview: bool = False,
     current_turn_seq: int | None = None,
     plugin_context: dict | None = None,
@@ -45,6 +47,8 @@ def _export_prompt(
             observed_configs.append(dict(chat_service.lazyllm.globals['agentic_config']))
         if observed_tool_types is not None:
             observed_tool_types.append([type(tool).__name__ for tool in plan.tools])
+        if observed_tool_names is not None:
+            observed_tool_names.append([getattr(tool, '__name__', type(tool).__name__) for tool in plan.tools])
         return _ContextAgent()
 
     monkeypatch.setattr(
@@ -64,7 +68,7 @@ def _export_prompt(
             'conversation_id': 'episode-prompt-conversation',
             'user_id': user_id,
         },
-        retrieval={'filters': {}},
+        retrieval={'filters': {}, 'local_fs_sources': local_fs_sources or []},
         runtime={
             'llm_config': {},
             'context_prompt_export': not usage_preview,
@@ -77,6 +81,27 @@ def _export_prompt(
             'plugin_context': plugin_context,
         },
     )))
+
+
+def test_bound_local_workspace_plan_excludes_internal_writer(monkeypatch) -> None:
+    observed_tool_names: list[list[str]] = []
+    result = _export_prompt(
+        monkeypatch,
+        query='修改工作区文件',
+        history=[],
+        use_memory=False,
+        observed_tool_names=observed_tool_names,
+        local_fs_sources=[{
+            'source_id': 'local-workspace:workspace-1',
+            'paths': ['/authorized'],
+            'file_extensions': ['txt'],
+        }],
+    )
+
+    assert 'write_file' not in observed_tool_names[0]
+    assert 'save_chat_artifact' in observed_tool_names[0]
+    assert 'LocalFileToolkit' in result['prompt_markdown']
+    assert 'generic chat write_file tool is unavailable' in result['prompt_markdown']
 
 
 def test_episode_retrieval_uses_only_the_current_user_query(monkeypatch) -> None:

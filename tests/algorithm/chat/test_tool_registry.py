@@ -354,3 +354,419 @@ def test_tool_catalog_localizes_display_fields_without_changing_runtime_descript
     for group_config in [*DEFAULT_TOOLS, SKILL_TOOL_CONFIG]:
         assert group_config.label_en.strip()
         assert group_config.description_en.strip()
+
+
+def test_workspace_admission_restores_scoped_search_and_internal_writer_methods():
+    from lazyllm.tools.agent import ToolManager
+    from lazymind.chat.service.component.tool_registry import workspace_tool_metadata
+    tools = [cfg.tool for cfg in DEFAULT_TOOLS if cfg.name in {'web_search', 'academic_search', 'writer_create', 'writer_revision', 'mail'}]
+    from lazymind.chat.lazyllm_tool_docs import ensure_lazyllm_tool_docs
+    ensure_lazyllm_tool_docs(tools)
+    manager = ToolManager(tools)
+    admitted = workspace_tool_metadata(manager.tools_info)
+    assert 'WriterCreateToolkit_render_markdown' in admitted
+    assert 'WriterCreateToolkit_generate_outline' in admitted
+    assert 'WriterRevisionToolkit_apply_string_replace' in admitted
+    assert any(name.endswith('GoogleSearch_search') for name in admitted)
+    assert any(name.endswith('SciverseSearch_meta_search') for name in admitted)
+    assert 'WriterCreateToolkit_profile_resources' in admitted
+    assert 'WriterCreateToolkit_generate_draft_section' in admitted
+    assert any(name == 'MailToolkit_send_draft' for name in admitted)
+    check = admitted['WriterRevisionToolkit_apply_patch'][3]
+    assert check({'writer_document_json': '{"document_id":"safe"}'})
+    assert not check({'writer_document_json': '{"document_id":"../../escape"}'})
+    assert not check({'sync_provider': True})
+    assert not check({'media_assets_json': '{"assets":{"x":{"local_path":"/workspace/private"}}}'})
+
+
+def test_workspace_artifact_save_admission_allows_text_and_json_only():
+    from lazyllm.tools.agent import ToolManager
+    from lazymind.chat.engine.subagent.tools import save_artifacts
+    from lazymind.chat.service.component.tool_registry import workspace_tool_metadata
+    manager = ToolManager([save_artifacts])
+    check = workspace_tool_metadata(manager.tools_info)['save_artifacts'][3]
+    assert check({'artifacts': [{'key': 'text', 'value': 'content'}, {'key': 'json', 'value': {}, 'content_type': 'json'}]})
+    assert not check({'artifacts': [{'key': 'file', 'value': '/workspace/secret', 'content_type': 'file'}]})
+
+
+def test_workspace_artifact_admission_prevalidates_scoped_files_and_remote_images(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from lazymind.chat.engine.subagent import context
+    from lazymind.chat.service.component.tool_registry import _workspace_artifact_arguments, _workspace_writer_arguments
+    task, upload, workspace = tmp_path / 'task', tmp_path / 'uploads', tmp_path / 'workspace'
+    for root in (task, upload, workspace):
+        root.mkdir()
+    monkeypatch.setattr(context, 'get_context', lambda: SimpleNamespace(workspace_path=str(task)))
+    monkeypatch.setenv('LAZYMIND_UPLOAD_ROOT', str(upload))
+    monkeypatch.setattr(lazyllm, 'globals', {'agentic_config': {'local_fs_sources': [{
+        'source_id': 'local-workspace:w', 'paths': [str(workspace)], 'file_extensions': ['txt'],
+    }]}})
+    def item(path, kind='file'):
+        return {'key': 'output', 'content_type': kind, 'value': path}
+    assert _workspace_artifact_arguments({'artifacts': [item(str(task / 'output.txt')), item('https://example.com/image.png', 'image'), item('/static-files/picture.png?sig=x', 'image')]})
+    assert _workspace_artifact_arguments({'artifacts': [item(str(upload / 'picture.png'), 'image')]})
+    assert not _workspace_artifact_arguments({'artifacts': [item(str(task / 'good.txt')), item(str(workspace / 'secret.txt'))]})
+    assert not _workspace_artifact_arguments({'artifacts': [item('../../outside')]})
+    (task / 'alias.txt').symlink_to(workspace / 'secret.txt')
+    assert not _workspace_artifact_arguments({'artifacts': [item(str(task / 'alias.txt'))]})
+    assert not _workspace_writer_arguments({'task_id': '..'})
+
+
+def test_bound_workspace_admits_exact_scoped_service_registrations_and_rejects_lookalikes():
+    from lazyllm.tools.agent import ToolManager
+    from lazymind.chat.service.component.tool_registry import workspace_tool_metadata
+    selected = {'external_db', 'memory', 'skill_editor', 'cloud_files', 'mail', 'vocab_learn', 'schedule'}
+    for config in DEFAULT_TOOLS:
+        if config.name not in selected:
+            continue
+        manager = ToolManager([config.tool])
+        admitted = workspace_tool_metadata(manager.tools_info)
+        assert set(manager.tools_info) <= set(admitted), config.name
+
+    class Lookalike:
+        __public_apis__ = ['read']
+        def read(self, path: str) -> str:
+            """Read a lookalike path."""
+            return path
+
+    manager = ToolManager([Lookalike()])
+    admitted = workspace_tool_metadata(manager.tools_info)
+    assert not any(name.endswith('_read') for name in admitted)
+
+
+def test_workspace_media_admission_checks_resolved_paths(monkeypatch, tmp_path):
+    from lazyllm.tools.agent import ToolManager
+    from lazymind.chat.engine.tools.multimodal import image_generator, image_editor, video_generator, video_to_gif, vision_extractor
+    from lazymind.chat.service.component.tool_registry import workspace_tool_metadata
+    upload, bound = tmp_path / 'uploads', tmp_path / 'bound'
+    upload.mkdir()
+    bound.mkdir()
+    (bound / 'private.png').write_bytes(b'not an actual image')
+    (upload / 'generated.png').write_bytes(b'internal generated fixture')
+    (upload / 'alias.png').symlink_to(bound / 'private.png')
+    monkeypatch.setenv('LAZYMIND_UPLOAD_ROOT', str(upload))
+    lazyllm.globals['agentic_config'] = {
+        'user_id': 'owner', 'conversation_id': 'conversation',
+        'local_fs_sources': [{'source_id': 'local-workspace:w', 'paths': [str(bound)], 'file_extensions': ['png']}],
+    }
+    manager = ToolManager([image_generator, image_editor, video_generator, video_to_gif, vision_extractor])
+    admitted = workspace_tool_metadata(manager.tools_info)
+    assert set(manager.tools_info) <= set(admitted)
+    assert admitted['image_generator'][3] is None
+    for name, args in [('image_editor', {'urls': ['/static-files/generated.png']}),
+                       ('vision_extractor', {'url': str(upload / 'generated.png')}),
+                       ('video_generator', {'prompt': 'text only'}),
+                       ('video_generator', {'reference_urls': '["https://example.com/reference.png"]'})]:
+        assert admitted[name][3](args)
+    for value in (str(bound / 'private.png'), str(upload / 'alias.png'), '/static-files/alias.png',
+                  f'https://example.com{upload}/../bound/private.png'):
+        assert not admitted['vision_extractor'][3]({'url': value})
+        assert not admitted['video_generator'][3]({'first_frame_url': value})
+        assert not admitted['video_to_gif'][3]({'url': value})
+
+
+def test_writer_markdown_sections_keep_existing_path_text_literal(tmp_path):
+    from lazymind.chat.engine.tools.writer import _inline_draft_sections
+    from lazyllm.tools.writer.tools.base import WriterToolBase
+    private = tmp_path / 'private.md'
+    private.write_text('must not be read as drafting content')
+    artifacts = tmp_path / 'artifacts'
+    artifacts.mkdir()
+    normalized = _inline_draft_sections(artifacts, [str(private), '# Inline section'])
+    tools = WriterToolBase(llm=None, artifact_store=str(artifacts))
+    assert [tools._unified_section(item) for item in normalized] == [str(private), '# Inline section']
+
+
+def test_workspace_skill_reader_uses_exact_manager_and_checks_before_indexing(tmp_path):
+    from lazyllm.tools.agent import ToolManager
+    from lazyllm.tools.agent.skill_manager import SkillManager
+    from lazyllm.tools.fs.client import FS
+    from lazymind.chat.service.component.tool_registry import workspace_tool_metadata
+    root, bound = tmp_path / 'skills', tmp_path / 'bound'
+    skill = root / 'visible'
+    skill.mkdir(parents=True)
+    bound.mkdir()
+    (skill / 'SKILL.md').write_text('---\nname: visible\ndescription: Reader fixture\n---\n# Visible\n')
+    (skill / 'guide.md').write_text('normal reference')
+    lazyllm.globals['agentic_config'] = {
+        'user_id': 'u', 'conversation_id': 'c',
+        'local_fs_sources': [{'source_id': 'local-workspace:w', 'paths': [str(bound)], 'file_extensions': ['md']}],
+    }
+    skills = SkillManager(dir=str(root), fs=FS)
+    manager = ToolManager(skills.get_skill_tools())
+    admitted = workspace_tool_metadata(manager.tools_info, skill_manager=skills)
+    assert set(admitted) == {'get_skill', 'read_reference', 'run_script'}
+    assert 'visible' in skills.build_prompt()
+    assert skills.read_reference('visible', 'guide.md')['content'] == 'normal reference'
+    other = SkillManager(dir=str(root), fs=FS)
+    assert not workspace_tool_metadata(manager.tools_info, skill_manager=other)
+    unguarded = SkillManager(dir=str(root), fs=FS)
+    assert set(workspace_tool_metadata(
+        ToolManager(unguarded.get_skill_tools()).tools_info,
+        skill_manager=unguarded,
+    )) == {'get_skill', 'read_reference', 'run_script'}
+
+
+def test_writer_profiles_only_internal_files_and_known_remote_documents(monkeypatch, tmp_path):
+    import json
+    from lazyllm.tools.writer.data_models.task import InputResource
+    from lazyllm.tools.writer.tools.resource_tools import WriterResourceTools
+    from lazymind.chat.service.component.tool_registry import _workspace_writer_arguments
+    upload, bound = tmp_path / 'uploads', tmp_path / 'bound'
+    upload.mkdir()
+    bound.mkdir()
+    source = upload / 'material.txt'
+    source.write_text('Internal writing evidence')
+    private = bound / 'private.txt'
+    private.write_text('not admitted')
+    (upload / 'alias.txt').symlink_to(private)
+    monkeypatch.setenv('LAZYMIND_UPLOAD_ROOT', str(upload))
+    lazyllm.globals['agentic_config'] = {
+        'user_id': 'u', 'conversation_id': 'c',
+        'local_fs_sources': [{'source_id': 'local-workspace:w', 'paths': [str(bound)], 'file_extensions': ['txt']}],
+    }
+    def permitted(kind, uri):
+        return _workspace_writer_arguments({'resources_json': json.dumps([
+            {'resource_id': 'resource', 'resource_type': kind, 'uri': uri},
+        ])})
+    for kind in ('file', 'table', 'slide'):
+        assert permitted(kind, str(source))
+        assert permitted(kind, '/static-files/material.txt')
+        assert not permitted(kind, str(private))
+        assert not permitted(kind, str(upload / 'alias.txt'))
+    assert permitted('document', 'remote://skills/system/demo/SKILL.md')
+    assert not permitted('document', str(private))
+    assert not permitted('document', 'file://' + str(private))
+    assert not permitted('document', 'unknown://private')
+    resource = InputResource(resource_id='resource', resource_type='file', uri=str(source))
+    assert 'Internal writing evidence' in WriterResourceTools(llm=None)._read_resource_content(resource)
+
+
+def test_workspace_remote_skill_reader_keeps_core_http_auth(monkeypatch, tmp_path):
+    import json
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from urllib.parse import parse_qs, urlsplit
+    from lazyllm.tools.agent import ToolManager
+    from lazyllm.tools.agent.skill_manager import SkillManager
+    from lazyllm.tools.fs.client import FS
+    from lazymind.config import config
+    from lazymind.chat.engine.agent_runtime.tool_call_guard import ToolExecutionMiddleware
+    from lazymind.chat.service.component.tool_registry import workspace_tool_metadata
+    files = {'skills/system/demo/SKILL.md': b'---\nname: demo\ndescription: Remote fixture\n---\n# Demo',
+             'skills/system/demo/guide.md': b'Remote reference through Core'}
+    requests_seen = []
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            url = urlsplit(self.path)
+            query = parse_qs(url.query)
+            path = query['path'][0]
+            requests_seen.append((url.path, path, query.get('user_id'), self.headers.get('X-LazyMind-Internal-Token')))
+            if url.path.endswith('/list'):
+                paths = ['skills/system/demo'] if path == 'skills' else list(files)
+                body = json.dumps({'items': [{'path': item, 'type': 'file' if item in files else 'directory'} for item in paths]}).encode()
+            elif url.path.endswith('/info'):
+                body = json.dumps({'size': len(files[path])}).encode()
+            else:
+                body = files[path]
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(body)
+        def log_message(self, *_args):
+            pass
+    server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    old_url, old_token = config['core_api_url'], config['core_internal_token']
+    config['core_api_url'] = f'http://127.0.0.1:{server.server_port}'
+    config['core_internal_token'] = 'local-test-token'
+    # FS is a process singleton; isolate its configured RemoteFS instance instead
+    # of changing production base-URL resolution to compensate for test order.
+    monkeypatch.setattr(FS, '_instances', {})
+    lazyllm.globals['agentic_config'] = {
+        'user_id': 'owner', 'conversation_id': 'conversation',
+        '_core_workspace_context': {'workspace_id': 'workspace'},
+    }
+    try:
+        skills = SkillManager(dir='remote://skills', fs=FS)
+        manager = ToolManager(skills.get_skill_tools())
+        middleware = ToolExecutionMiddleware(manager, workspace_tools=workspace_tool_metadata(manager.tools_info, skill_manager=skills))
+        result = middleware.execute_with_records({'id': 'read', 'function': {
+            'name': 'read_reference', 'arguments': {'name': 'demo', 'rel_path': 'guide.md'},
+        }})
+        assert result.results[0]['ok'], (result.results, requests_seen)
+        assert result.results[0]['value']['content'] == 'Remote reference through Core'
+        assert requests_seen and all(item[2:] == (['owner'], 'local-test-token') for item in requests_seen)
+        assert all(item[1].startswith('skills') for item in requests_seen)
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
+        config['core_api_url'], config['core_internal_token'] = old_url, old_token
+
+
+def test_writer_media_library_accepts_internal_generated_assets(monkeypatch, tmp_path):
+    import json
+    from lazymind.chat.service.component.tool_registry import _workspace_writer_arguments
+    upload, bound = tmp_path / 'uploads', tmp_path / 'bound'
+    upload.mkdir()
+    bound.mkdir()
+    (upload / 'image.png').write_bytes(b'generated fixture')
+    (upload / 'alias.png').symlink_to(bound / 'image.png')
+    monkeypatch.setenv('LAZYMIND_UPLOAD_ROOT', str(upload))
+    lazyllm.globals['agentic_config'] = {
+        'user_id': 'u', 'conversation_id': 'c',
+        'local_fs_sources': [{'source_id': 'local-workspace:w', 'paths': [str(bound)], 'file_extensions': ['png']}],
+    }
+    def permitted(path):
+        return _workspace_writer_arguments({'media_assets_json': json.dumps({
+            'library_id': 'images', 'assets': {'image': {'media_asset_id': 'image',
+                'asset_type': 'generated_image', 'source_type': 'image_generation', 'local_path': str(path)}},
+        })})
+    assert permitted(upload / 'image.png')
+    assert not permitted(upload / 'alias.png')
+    assert not permitted(bound / 'image.png')
+
+
+@pytest.mark.parametrize('resource_type', ['file', 'table', 'slide', 'media'])
+def test_writer_data_envelopes_keep_the_same_workspace_boundary(monkeypatch, tmp_path, resource_type):
+    import json
+    from lazymind.chat.engine.tools.writer import _json_loads
+    from lazymind.chat.service.component.tool_registry import _workspace_writer_arguments
+    upload, bound = tmp_path / 'uploads', tmp_path / 'bound'
+    upload.mkdir()
+    bound.mkdir()
+    monkeypatch.setenv('LAZYMIND_UPLOAD_ROOT', str(upload))
+    lazyllm.globals['agentic_config'] = {
+        'user_id': 'u', 'conversation_id': 'c',
+        'local_fs_sources': [{'source_id': 'local-workspace:w', 'paths': [str(bound)], 'file_extensions': ['txt']}],
+    }
+    for root, permitted in [(bound, False), (upload, True)]:
+        path = root / 'fixture.txt'
+        path.write_text('Public fixture for scope regression')
+        if resource_type == 'media':
+            key = 'media_assets_json'
+            value = {'library_id': 'library', 'assets': {'asset': {'local_path': str(path)}}}
+        else:
+            key = 'resources_json'
+            value = [{'resource_id': 'resource', 'resource_type': resource_type, 'uri': str(path)}]
+        wrapped = json.dumps({'data': value})
+        assert _json_loads(wrapped) == value
+        assert _workspace_writer_arguments({key: wrapped}) is permitted
+
+
+@pytest.mark.parametrize('dependency', ['other_toolkit', 'overridden_method', 'client_factory', 'session_callback', 'env_store'])
+def test_factory_captured_dependencies_cannot_read_bound_files(tmp_path, dependency):
+    from lazyllm.tools.agent import ToolManager, ToolExecutionDisposition
+    from lazymind.chat.engine.agent_runtime.tool_call_guard import ToolExecutionMiddleware
+    from lazymind.chat.engine.tools.session_env import build_session_env_tool
+    from lazymind.chat.workflow import workflow_manager as workflows
+    from lazymind.chat.service.component.tool_registry import workspace_tool_metadata
+    marker = tmp_path / 'bound.txt'
+    marker.write_text('non-sensitive bound fixture')
+    effects = []
+    def read_host(*_args):
+        effects.append(marker.read_text())
+        return {'read': True}
+    class OtherToolkit:
+        get_workflow_state = staticmethod(read_host)
+    class OtherClient:
+        get_state = staticmethod(read_host)
+    class OtherStore(dict):
+        def setdefault(self, *_args):
+            read_host()
+            return {}
+    toolkit = workflows.HostWorkflowToolkit(workflows._client)
+    session = 'session'
+    if dependency == 'other_toolkit':
+        toolkit = OtherToolkit()
+    elif dependency == 'overridden_method':
+        toolkit.get_workflow_state = read_host
+    elif dependency == 'client_factory':
+        toolkit = workflows.HostWorkflowToolkit(lambda: OtherClient())
+    elif dependency == 'session_callback':
+        def session():
+            read_host()
+            raise ValueError('stop before any network request')
+    if dependency == 'env_store':
+        tool = build_session_env_tool(OtherStore(), 'conversation')
+        arguments = {'name': 'FIXTURE_TOKEN', 'value': 'fake'}
+    else:
+        tool = workflows._safe_session_tools(toolkit, session)[0]
+        arguments = {}
+    lazyllm.globals['agentic_config'] = {
+        'user_id': 'u', 'conversation_id': 'c', '_core_workspace_context': {'workspace_id': 'bound'},
+    }
+    manager = ToolManager([tool])
+    middleware = ToolExecutionMiddleware(manager, workspace_tools=workspace_tool_metadata(manager.tools_info))
+    result = middleware.execute_with_records({'id': 'read', 'function': {'name': tool.__name__, 'arguments': arguments}})
+    assert effects == []
+    assert result.records[0].disposition is ToolExecutionDisposition.SKIPPED
+
+
+def test_factory_code_with_foreign_globals_is_not_admitted(tmp_path):
+    import types
+    from lazyllm.tools.agent import ToolManager
+    from lazymind.chat.engine.tools.skill_listing import build_list_skills_tool
+    from lazymind.chat.service.component.tool_registry import workspace_tool_metadata
+    original = build_list_skills_tool(['known'])
+    foreign = types.FunctionType(original.__code__, {**original.__globals__, 'len': lambda _: 0},
+                                 original.__name__, original.__defaults__, original.__closure__)
+    foreign.__doc__, foreign.__annotations__ = original.__doc__, original.__annotations__
+    manager = ToolManager([foreign])
+    assert 'list_skills' not in workspace_tool_metadata(manager.tools_info)
+
+
+def test_all_real_project_factories_remain_admitted_with_known_dependencies():
+    from lazyllm.tools.agent import ToolManager
+    from lazymind.chat.engine.tools.local_file.workspace import build_resource_read_tools
+    from lazymind.chat.engine.tools.intent_writer import build_intentwrite_tool
+    from lazymind.chat.engine.tools.skill_listing import build_list_skills_tool
+    from lazymind.chat.engine.tools.session_env import build_session_env_tool
+    from lazymind.chat.engine.tools.calculator import calculator
+    from lazymind.chat.workflow import workflow_manager as workflows
+    from lazymind.chat.service.component.tool_registry import workspace_tool_metadata
+    lazyllm.globals['agentic_config'] = {
+        'user_id': 'u', 'conversation_id': 'c', '_core_workspace_context': {'workspace_id': 'bound'},
+    }
+    toolkit = workflows.HostWorkflowToolkit(workflows._client, origin_ref='c')
+    activation = {'workflow_id': 'demo', 'workflow_ref': 'demo', 'tool_name': 'trigger_demo_workflow'}
+    contribution = workflows.resolve_workflow_injection(
+        None, conversation_id='c', current_query='make a draft', workflow_activations=[activation],
+    )
+    groups = [
+        [{'name': 'fixture', 'desc': 'Known arithmetic tools', 'tools': [calculator], 'lazy': True}],
+        build_resource_read_tools(),
+        [build_intentwrite_tool(conversation_id='c', current_query='make a draft')],
+        [build_list_skills_tool(['known'])],
+        [build_session_env_tool({}, 'c')],
+        [workflows._handoff_tool('session', 'make a draft')],
+        workflows._safe_session_tools(toolkit, 'session'),
+        workflows._safe_authoring_tools(toolkit),
+        workflows._workflow_trigger_tools([activation], [], 'make a draft', 'c'),
+        contribution.tools,
+    ]
+    for tools in groups:
+        manager = ToolManager(tools)
+        admitted = workspace_tool_metadata(manager.tools_info)
+        assert set(manager.tools_info) <= set(admitted), sorted(set(manager.tools_info) - set(admitted))
+
+
+@pytest.mark.parametrize('callback_position', ['initialize_session', 'user_input', 'handoff_session', 'handoff_user_input'])
+def test_workflow_factory_rejects_unreviewed_callback_chains(callback_position):
+    from lazyllm.tools.agent import ToolManager
+    from lazymind.chat.workflow import workflow_manager as workflows
+    from lazymind.chat.service.component.tool_registry import workspace_tool_metadata
+    toolkit = workflows.HostWorkflowToolkit(workflows._client)
+    def unreviewed():
+        pytest.fail('an unreviewed callback must not execute')
+    if callback_position == 'initialize_session':
+        tool = workflows._safe_session_tools(toolkit, '', initialize_session=unreviewed)[0]
+    elif callback_position == 'user_input':
+        tool = workflows._safe_session_tools(toolkit, 'session', user_input=unreviewed)[2]
+    elif callback_position == 'handoff_session':
+        tool = workflows._handoff_tool(unreviewed)
+    else:
+        tool = workflows._handoff_tool('session', user_input=unreviewed)
+    manager = ToolManager([tool])
+    assert tool.__name__ not in workspace_tool_metadata(manager.tools_info)

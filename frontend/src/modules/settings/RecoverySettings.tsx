@@ -1,3 +1,4 @@
+import { getLocalizedErrorMessage } from "@/components/request";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, RefObject, ReactNode } from "react";
 import {
@@ -340,8 +341,8 @@ export default function RecoverySettings({ headingRef }: RecoverySettingsProps) 
       setFolderRevision((value) => value + 1);
       if (moveItem) setMoveFolderId(folder.id);
       message.success(t("settingsPage.recovery.folderCreated"));
-    } catch {
-      message.error(t("settingsPage.recovery.folderCreateFailed"));
+    } catch (error) {
+      message.error(getLocalizedErrorMessage(error));
     } finally {
       setFolderSaving(false);
     }
@@ -373,8 +374,8 @@ export default function RecoverySettings({ headingRef }: RecoverySettingsProps) 
       setEditingFolderId("");
       setFolderRevision((value) => value + 1);
       message.success(t("settingsPage.recovery.folderRenamed"));
-    } catch {
-      message.error(t("settingsPage.recovery.folderRenameFailed"));
+    } catch (error) {
+      message.error(getLocalizedErrorMessage(error));
     } finally {
       setFolderUpdatingId("");
     }
@@ -400,8 +401,8 @@ export default function RecoverySettings({ headingRef }: RecoverySettingsProps) 
       }
       reloadArchive();
       message.success(t("settingsPage.recovery.folderDeleted"));
-    } catch {
-      message.error(t("settingsPage.recovery.folderDeleteFailed"));
+    } catch (error) {
+      message.error(getLocalizedErrorMessage(error));
     } finally {
       setFolderDeleting(false);
     }
@@ -439,9 +440,9 @@ export default function RecoverySettings({ headingRef }: RecoverySettingsProps) 
       setMoveItem(null);
       reloadArchive();
       message.success(t("settingsPage.recovery.movedNamed", { name: itemName, folder: targetFolder.name }));
-    } catch {
+    } catch (error) {
       setFolderRevision((value) => value + 1);
-      message.error(t("settingsPage.recovery.operationFailed"));
+      message.error(getLocalizedErrorMessage(error));
     } finally {
       setBusyKey("");
     }
@@ -457,8 +458,8 @@ export default function RecoverySettings({ headingRef }: RecoverySettingsProps) 
       reloadArchive();
       if (action === "trash") reloadTrash();
       message.success(t(action === "unarchive" ? "settingsPage.recovery.unarchived" : "settingsPage.recovery.movedToTrash"));
-    } catch {
-      message.error(t("settingsPage.recovery.operationFailed"));
+    } catch (error) {
+      message.error(getLocalizedErrorMessage(error));
     } finally {
       setBusyKey("");
     }
@@ -574,8 +575,8 @@ export default function RecoverySettings({ headingRef }: RecoverySettingsProps) 
           reloadTrash();
           if (trashAsset === "conversations") reloadArchive();
           message.success(t("settingsPage.recovery.emptiedCount", { count }));
-        } catch {
-          message.error(t("settingsPage.recovery.operationFailed"));
+        } catch (error) {
+          message.error(getLocalizedErrorMessage(error));
         } finally {
           setBusyKey("");
         }

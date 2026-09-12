@@ -4,6 +4,10 @@ DROP INDEX IF EXISTS idx_vocabulary_review_session_word;
 DROP INDEX IF EXISTS idx_vocabulary_review_sessions_active;
 
 -- +migrate Dialect postgres
+DROP INDEX IF EXISTS public.idx_conversation_workspace_bindings_workspace;
+DROP TABLE IF EXISTS public.conversation_workspace_bindings;
+DROP INDEX IF EXISTS public.idx_local_workspaces_user_recent;
+DROP TABLE IF EXISTS public.local_workspaces;
 DROP TABLE IF EXISTS conversation_organizer_changes;
 DROP TABLE IF EXISTS conversation_organizer_candidates;
 DROP TABLE IF EXISTS conversation_organizer_snapshot_items;
@@ -198,6 +202,11 @@ BEGIN
 END $$;
 
 -- +migrate Dialect sqlite
+DROP INDEX IF EXISTS idx_conversation_workspace_bindings_workspace;
+DROP TABLE IF EXISTS conversation_workspace_bindings;
+DROP INDEX IF EXISTS idx_local_workspaces_user_recent;
+DROP TABLE IF EXISTS local_workspaces;
+
 DROP TABLE IF EXISTS workflow_approval_preferences;
 UPDATE task_center_tasks SET task_type = 'plugin_run' WHERE task_type = 'workflow_run';
 

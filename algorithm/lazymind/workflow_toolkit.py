@@ -66,6 +66,27 @@ def load_workflow_package_tools(
 ) -> Dict[str, Any]:
     """Load named callables from an already validated Workflow package."""
     files = package.get('files') if isinstance(package.get('files'), dict) else {}
+    declarations = _workflow_document(files).get('tool_scripts')
+    if declarations is not None and not isinstance(declarations, list):
+        raise ValueError('Workflow tool_scripts must be a list')
+    allowed: Optional[Dict[str, set[str]]] = None
+    if isinstance(declarations, list):
+        allowed = {}
+        owners: Dict[str, str] = {}
+        for declaration in declarations:
+            if not isinstance(declaration, dict):
+                continue
+            path = str(declaration.get('path') or '')
+            functions = declaration.get('functions')
+            if not isinstance(functions, list):
+                continue
+            for name in functions:
+                if not isinstance(name, str):
+                    continue
+                if name in owners and owners[name] != path:
+                    raise ValueError(f'Workflow tool {name!r} is declared in multiple scripts')
+                owners[name] = path
+                allowed.setdefault(path, set()).add(name)
     remaining = set(names)
     resolved: Dict[str, Any] = {}
     for path in sorted(files):
@@ -79,6 +100,9 @@ def load_workflow_package_tools(
             or not path.endswith('.py')
             or path.startswith('scripts/tests/')
             or '/__tests__/' in path
+            or '..' in path.split('/')
+            or '\\' in path
+            or (allowed is not None and path not in allowed)
         ):
             continue
         encoded = files[path]
@@ -89,6 +113,8 @@ def load_workflow_package_tools(
         module.__file__ = f'{workflow_id}@{revision_id}/{path}'
         exec(compile(source.decode('utf-8'), module.__file__, 'exec'), module.__dict__)
         for name in tuple(remaining):
+            if allowed is not None and name not in allowed[path]:
+                continue
             candidate = module.__dict__.get(name)
             if callable(candidate):
                 if not str(getattr(candidate, '__doc__', '') or '').strip():

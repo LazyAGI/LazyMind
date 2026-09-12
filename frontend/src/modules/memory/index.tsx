@@ -210,24 +210,6 @@ const isSkillReviewTaskTerminal = (status?: string) => {
   );
 };
 const MANUAL_SKILL_REVIEW_RUNNING_TASK_PAGE_SIZE = 1000;
-const waitManualSkillReviewRetry = () =>
-  new Promise((resolve) =>
-    window.setTimeout(resolve, MANUAL_SKILL_REVIEW_RETRY_DELAY_MS),
-  );
-const getManualSkillReviewCreatedSkillNames = (
-  results: SkillReviewResultRecord[],
-) =>
-  Array.from(
-    new Set(
-      results
-        .filter((item) => item.type.trim().toLowerCase() === "new")
-        .map((item) => item.skillName.trim())
-        .filter(Boolean),
-    ),
-  );
-const skillRecordNameMatches = (item: SkillAssetRecord, skillName: string) =>
-  item.name.trim().toLowerCase() === skillName.trim().toLowerCase();
-
 interface MemoryManagementProps {
   embeddedTab?: MemoryTab;
 }

@@ -45,7 +45,7 @@ def test_local_fs_ls_lists_roots_and_filters_directory_files(monkeypatch, tmp_pa
     roots = LocalFileToolkit().ls()
     listing = LocalFileToolkit().ls(str(source_a))
 
-    assert [entry['source_id'] for entry in roots['entries']] == ['source-a', 'source-b']
+    assert [entry['name'] for entry in roots['entries']] == ['source-a', 'source-b']
     assert [entry['name'] for entry in listing['entries']] == ['allowed.pdf', 'nested']
 
 
@@ -63,7 +63,7 @@ def test_local_fs_read_checks_source_extension(monkeypatch, tmp_path):
         LocalFileToolkit().read(str(hidden))
 
     assert ok['content'] == 'b\n'
-    assert ok['source_id'] == 'source-a'
+    assert 'source_id' not in ok
 
 
 def test_local_fs_string_replace_updates_one_exact_match_atomically(monkeypatch, tmp_path):
@@ -81,7 +81,7 @@ def test_local_fs_string_replace_updates_one_exact_match_atomically(monkeypatch,
     )
 
     assert result['replacements'] == 1
-    assert result['source_id'] == 'source-a'
+    assert 'source_id' not in result
     assert target.read_bytes() == b'heading\r\nnew value\r\ntail\r\n'
     assert os.stat(target).st_mode & 0o777 == 0o640
 
@@ -160,10 +160,7 @@ def test_local_fs_glob_and_grep_search_multiple_sources_with_extensions(monkeypa
     grepped = LocalFileToolkit().grep('needle')
 
     assert [path.split('/')[-1] for path in globbed['matches']] == ['a.pdf', 'b.csv']
-    assert [(entry['source_id'], entry['file'].split('/')[-1]) for entry in grepped['matches']] == [
-        ('source-a', 'a.pdf'),
-        ('source-b', 'b.csv'),
-    ]
+    assert [entry['file'].split('/')[-1] for entry in grepped['matches']] == ['a.pdf', 'b.csv']
 
 
 def test_local_fs_rg_includes_hidden_and_no_ignore_flags(monkeypatch, tmp_path):
@@ -195,6 +192,50 @@ def test_local_fs_rg_includes_hidden_and_no_ignore_flags(monkeypatch, tmp_path):
     assert LocalFileToolkit().glob('*.pdf')['match_count'] == 1
     assert LocalFileToolkit().grep('needle')['match_count'] == 1
     assert all('--no-ignore' in args and '--hidden' in args for args in calls)
+
+
+# The old Core-IO assertions moved to backend localworkspace tests. The
+# algorithm file tool now requires a prepared local IO grant; it must not call Core.
+@pytest.mark.parametrize('method,args', [
+    ('read', {'filepath': '/outside.txt'}),
+    ('create', {'filepath': '/outside.txt', 'content': 'x'}),
+    ('append', {'filepath': '/outside.txt', 'content': 'x'}),
+    ('delete', {'filepath': '/outside.txt'}),
+    ('overwrite', {'filepath': '/outside.txt', 'content': 'x'}),
+    ('mkdir', {'path': '/outside'}),
+    ('ls', {}), ('glob', {'pattern': '*'}), ('grep', {'pattern': 'secret'}), ('info', {}),
+    ('string_replace', {'filepath': '/outside.txt', 'old_string': 'a', 'new_string': 'b'}),
+])
+def test_bound_file_tool_never_bypasses_runtime_authorization(monkeypatch, method, args):
+    monkeypatch.setattr(local_fs_mod.lazyllm, 'globals', {'agentic_config': {
+        'user_id': 'owner', 'conversation_id': 'conversation',
+        'workspace_context': {'workspace_id': 'workspace'},
+        'local_fs_sources': [_source('ordinary', ['/'], ['*'])],
+    }})
+    with pytest.raises(ToolExecutionError, match='authorization unavailable'):
+        getattr(LocalFileToolkit(), method)(**args)
+    assert not hasattr(local_fs_mod, 'post_core_api')
+
+
+def test_workspace_context_uses_private_core_snapshot(monkeypatch):
+    monkeypatch.setattr(local_fs_mod.lazyllm, 'globals', {'agentic_config': {
+        'user_id': 'u', 'conversation_id': 'c',
+        '_core_workspace_context': {'workspace_id': 'private', 'permission_mode': 'always_ask'},
+        'workspace_context': {'workspace_id': 'public', 'permission_mode': 'allow_all'},
+    }})
+    assert LocalFileToolkit._workspace_context()['workspace_id'] == 'private'
+    assert LocalFileToolkit._workspace_context()['permission_mode'] == 'always_ask'
+
+
+def test_workspace_binding_preserves_parent_private_permission_snapshot(monkeypatch):
+    monkeypatch.setattr(local_fs_mod.lazyllm, 'globals', {'agentic_config': {
+        'user_id': 'u', 'conversation_id': 'c',
+        'local_fs_sources': [_source('local-workspace:w', ['/bound'], ['txt'])],
+        'parent_agentic_config': {'_core_workspace_context': {
+            'workspace_id': 'w', 'permission_mode': 'always_ask', 'permission_version': 7,
+        }},
+    }})
+    assert LocalFileToolkit._workspace_context()['permission_version'] == 7
 
 
 def test_save_chat_artifact_emits_downloadable_event(monkeypatch):

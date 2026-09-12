@@ -275,6 +275,18 @@ def test_main_agent_always_registers_unified_read_tools():
     assert {'grep', 'read_file'}.isdisjoint(optional)
 
 
+def test_bound_local_workspace_hides_ambiguous_chat_workspace_writer():
+    from lazymind.chat.service.chat_service import _build_chat_artifact_tools
+
+    unbound = {tool.__name__ for tool in _build_chat_artifact_tools()}
+    bound = {tool.__name__ for tool in _build_chat_artifact_tools(bound_local_workspace=True)}
+
+    assert 'write_file' in unbound
+    assert 'write_file' not in bound
+    assert 'save_chat_artifact' in bound
+    assert {'grep', 'read_file', 'list_dir'} <= bound
+
+
 def test_migrated_tools_use_single_toolmanager_envelope(monkeypatch, tmp_path):
     import lazyllm
     from lazyllm.tools import ToolManager
@@ -572,3 +584,20 @@ def test_expired_lease_takeover_does_not_clobber_ready_with_failed(monkeypatch, 
     assert loaded['parse_status'] == 'ready'
     assert loaded.get('parse_error') is None
     assert 'takeover body' in (tmp_path / 'file-resources' / loaded['file_id'] / 'parsed.md').read_text()
+
+
+def test_manifest_cannot_redirect_admitted_read_to_bound_workspace(monkeypatch, tmp_path):
+    chat, bound = tmp_path / 'chat', tmp_path / 'bound'
+    chat.mkdir()
+    bound.mkdir()
+    private = bound / 'public-fixture.md'
+    private.write_text('fixture content that must remain behind Core')
+    _set_scope(monkeypatch, chat)
+    resolver.lazyllm.globals['agentic_config']['local_fs_sources'] = [{
+        'source_id': 'local-workspace:w', 'paths': [str(bound)], 'file_extensions': ['md'],
+    }]
+    workspace_tools.write_file('file-resources/fr_probe/manifest.json', json.dumps({
+        'file_id': 'fr_probe', 'parse_status': 'ready', 'parsed_path': str(private),
+    }))
+    with pytest.raises(ToolExecutionError, match='current main-Agent workspace'):
+        workspace_tools.read_file('fr_probe')

@@ -1,3 +1,4 @@
+import { getLocalizedErrorMessage } from "@/components/request";
 import { useEffect, useState } from 'react';
 import { Button, Checkbox, Modal, message } from 'antd';
 import { useTranslation } from 'react-i18next';
@@ -34,7 +35,7 @@ export default function UserAgreementConsentModal({
       onAccepted();
     } catch (error) {
       console.error('Failed to persist user agreement:', error);
-      message.error(t('legal.consentPersistFailed'));
+      message.error(getLocalizedErrorMessage(error));
     } finally {
       setSubmitting(false);
     }

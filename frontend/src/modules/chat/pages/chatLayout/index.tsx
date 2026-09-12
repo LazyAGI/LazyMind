@@ -154,6 +154,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
   );
   // Workflow settings loaded from conversation detail (for existing conversations).
   const [conversationSettings, setConversationSettings] = useState<ConversationRuntimeSettings | undefined>(undefined);
+  const [isTaskConversation, setIsTaskConversation] = useState(false);
   const [conversationRelation, setConversationRelation] =
     useState<ConversationRelation | null>(null);
   const [sideChatOpen, setSideChatOpen] = useState(false);
@@ -235,6 +236,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         setConversationSettings(
           parseConversationRuntimeSettings(detailRes.data.conversation),
         );
+        setIsTaskConversation(Boolean((detailRes.data.conversation as { is_task_conv?: boolean })?.is_task_conv));
         setConversationRelation(
           getConversationRelation(detailRes.data.conversation),
         );
@@ -567,6 +569,10 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         ...(workflowUIState ? { workflow_ui_state: workflowUIState } : {}),
         ...(artifactRefs.length > 0 ? { artifact_refs: artifactRefs } : {}),
         ...(extras?.run_in_background ? { run_in_background: true } : {}),
+        ...(typeof extras?.workspace_id === "string" ? {
+          workspace_id: extras.workspace_id,
+          workspace_permission_mode: extras.workspace_permission_mode,
+        } : {}),
         ...(initialModelSelection
           ? { initial_model_selection: initialModelSelection }
           : {}),
@@ -727,6 +733,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
       setChatConfigFn(tempData);
       setKnowledgeRefreshKey((key) => key + 1);
       setConversationSettings(parseConversationRuntimeSettings(conversation));
+      setIsTaskConversation(Boolean((conversation as { is_task_conv?: boolean })?.is_task_conv));
       setConversationRelation(getConversationRelation(conversation));
       setConversationId(conversationId);
 
@@ -968,6 +975,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
           onConversationIdChange={handleConversationIdChange}
           parseErrorData={parseErrorData}
           showHistoryButton={false}
+          runInBackground={isTaskConversation}
           showConversationConfig={!isRetainedSidechat}
           showSkillDeposit={!isRetainedSidechat}
           allowKnowledgeBaseSelection={!isRetainedSidechat}
@@ -1019,10 +1027,6 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
             requestAnimationFrame(() => chatRef.current?.focusInput?.());
           }
         }}
-        initialConversationSettings={conversationSettings}
-        hasWorkflowSession={hasWorkflowSession}
-        lockedWorkflowMode={workflowSession?.workflow_mode}
-        knowledgeRefreshKey={knowledgeRefreshKey}
         onRetained={handleSideChatRetained}
         canChat={canChat}
         embeddingReady={embeddingReady}

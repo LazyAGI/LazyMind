@@ -85,6 +85,6 @@ export async function htmlWithInlinedEcharts(html: string): Promise<string> {
 /** @deprecated name kept for callers — now rewrites src, does not inline the bundle. */
 export async function getEchartsMinSource(): Promise<string> {
   const resp = await fetch(absoluteEchartsSrc());
-  if (!resp.ok) throw new Error(`failed to load echarts bundle: HTTP ${resp.status}`);
+  if (!resp.ok) throw Object.assign(new Error("Failed to load echarts bundle"), { response: resp });
   return resp.text();
 }

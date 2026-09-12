@@ -175,7 +175,6 @@ export function buildCaseProgressGroups(events: NormalizedThreadEvent[]): EvoCas
     }
   });
   const applyTerminalStageFailure = (
-    stage: EvoCaseProgressGroup["stage"],
     cases: Map<string, CaseProgressState>,
     steps: readonly string[],
     terminalStatus: StepStatus,
@@ -202,13 +201,13 @@ export function buildCaseProgressGroups(events: NormalizedThreadEvent[]): EvoCas
     }
     const stage = event.stage;
     if (stage === "dataset") {
-      applyTerminalStageFailure("dataset", datasetCases, datasetCaseSteps, terminalStatus, event.timestamp);
+      applyTerminalStageFailure(datasetCases, datasetCaseSteps, terminalStatus, event.timestamp);
     } else if (stage === "eval") {
-      applyTerminalStageFailure("eval", evalCases, evalCaseSteps, terminalStatus, event.timestamp);
+      applyTerminalStageFailure(evalCases, evalCaseSteps, terminalStatus, event.timestamp);
     } else if (stage === "analysis") {
-      applyTerminalStageFailure("analysis", analysisCases, analysisCaseSteps, terminalStatus, event.timestamp);
+      applyTerminalStageFailure(analysisCases, analysisCaseSteps, terminalStatus, event.timestamp);
     } else if (stage === "abtest") {
-      applyTerminalStageFailure("abtest", abtestCases, evalCaseSteps, terminalStatus, event.timestamp);
+      applyTerminalStageFailure(abtestCases, evalCaseSteps, terminalStatus, event.timestamp);
     }
   });
   const groups: EvoCaseProgressGroup[] = [

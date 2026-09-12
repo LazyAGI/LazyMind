@@ -55,6 +55,17 @@ def test_executor_creates_agent_with_shared_defaults(monkeypatch) -> None:
     agent.set_stop_tools.assert_called_once_with(['stop'])
 
 
+def test_executor_passes_authorization_gate_to_middleware(monkeypatch) -> None:
+    agent = MagicMock()
+    constructor = MagicMock(return_value=agent)
+    monkeypatch.setattr(executor_mod._agent_mod, 'ReactAgent', constructor)
+    gate = MagicMock(return_value='allow')
+
+    AgentExecutor().create_agent('llm', _plan(authorization_gate=gate))
+
+    assert agent._tools_manager._authorization_gate is gate
+
+
 def test_executor_passes_cancel_condition_to_chat_agent(monkeypatch) -> None:
     agent = MagicMock()
     constructor = MagicMock(return_value=agent)
@@ -226,3 +237,27 @@ def test_stream_agent_clears_repeat_state_on_every_exit(monkeypatch, mode) -> No
         assert asyncio.run(collect()) == [('final', 'done')]
     assert monitor.reset.call_count == 2
     assert buffer.clear.call_count == 2
+
+
+def test_executor_keeps_the_configured_fs_for_skill_indexing(monkeypatch, tmp_path):
+    import lazyllm
+    from lazyllm.tools.agent.skill_manager import SkillManager
+    from lazyllm.tools.fs.client import FS
+    skill_dir = tmp_path / 'skills' / 'visible'
+    skill_dir.mkdir(parents=True)
+    (skill_dir / 'SKILL.md').write_text('---\nname: visible\ndescription: Executor fixture\n---\n# Visible')
+    lazyllm.globals['agentic_config'] = lazyllm.globals.get('agentic_config') or {}
+    monkeypatch.setitem(lazyllm.globals, 'agentic_config', {
+        'user_id': 'u', 'conversation_id': 'c', '_core_workspace_context': {'workspace_id': 'bound'},
+    })
+    def construct(**kwargs):
+        assert kwargs['fs'] is FS
+        skills = SkillManager(dir=kwargs['skills_dir'], skills=kwargs['skills'], fs=kwargs['fs'])
+        assert 'visible' in skills.build_prompt()
+        agent = MagicMock()
+        agent._skill_manager = skills
+        agent._tools_manager = ToolManager(skills.get_skill_tools())
+        return agent
+    monkeypatch.setattr(executor_mod._agent_mod, 'ReactAgent', construct)
+    agent = AgentExecutor().create_agent('llm', _plan(skills=['visible'], fs=FS, skills_dir=str(skill_dir.parent)))
+    assert set(agent._tools_manager._workspace_tools) == {'get_skill', 'read_reference', 'run_script'}

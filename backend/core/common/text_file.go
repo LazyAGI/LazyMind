@@ -1,6 +1,9 @@
 package common
 
-import "strings"
+import (
+	"sort"
+	"strings"
+)
 
 var textFileExtensions = map[string]struct{}{
 	"txt": {}, "md": {}, "markdown": {}, "lmd": {}, "csv": {}, "tsv": {},
@@ -23,4 +26,13 @@ func IsTextFileExtension(extension string) bool {
 	extension = strings.TrimPrefix(strings.ToLower(strings.TrimSpace(extension)), ".")
 	_, ok := textFileExtensions[extension]
 	return ok
+}
+
+func TextFileExtensions() []string {
+	extensions := make([]string, 0, len(textFileExtensions))
+	for extension := range textFileExtensions {
+		extensions = append(extensions, extension)
+	}
+	sort.Strings(extensions)
+	return extensions
 }
