@@ -222,7 +222,17 @@ func TestConversationOrderRollsBackPinnedPlaceholderChanges(t *testing.T) {
 	if err := db.Order("id").Find(&before).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Exec(`CREATE TRIGGER reject_placeholder BEFORE UPDATE OF unpinned_history_order ON conversations WHEN OLD.id='b' BEGIN SELECT RAISE(FAIL,'injected order write failure'); END`).Error; err != nil {
+	triggerSQL := `CREATE TRIGGER reject_placeholder BEFORE UPDATE OF unpinned_history_order ON conversations WHEN OLD.id='b' BEGIN SELECT RAISE(FAIL,'injected order write failure'); END`
+	if db.Dialector.Name() == orm.DriverPostgres {
+		if err := db.Exec(`CREATE FUNCTION reject_placeholder() RETURNS trigger LANGUAGE plpgsql AS $$
+			BEGIN RAISE EXCEPTION 'injected order write failure'; END;
+		$$`).Error; err != nil {
+			t.Fatal(err)
+		}
+		triggerSQL = `CREATE TRIGGER reject_placeholder BEFORE UPDATE OF unpinned_history_order ON conversations
+			FOR EACH ROW WHEN (OLD.id='b') EXECUTE FUNCTION reject_placeholder()`
+	}
+	if err := db.Exec(triggerSQL).Error; err != nil {
 		t.Fatal(err)
 	}
 	if rec := callConversationOrder(t, "d", "a", "before"); rec.Code != http.StatusInternalServerError {

@@ -839,9 +839,15 @@ func TestOnSubAgentDone_ParallelStepsPartialDone(t *testing.T) {
 
 func TestStoppedStepKeepsItsFirstStopTimeOnRepeatedEvents(t *testing.T) {
 	db := newTestDB(t)
-	stoppedAt := time.Now().UTC().Add(-time.Minute)
+	stoppedAt := time.Date(2026, 9, 1, 0, 0, 0, 123456789, time.UTC)
 	step := orm.WorkflowSessionStep{ID: "stable-stop", SessionID: "session", StepID: "step", TaskID: "stable-stop-task", Status: StepStatusInterrupted, TerminalCode: "WORKFLOW_STOPPED", CreatedAt: stoppedAt, UpdatedAt: stoppedAt}
 	if err := db.Create(&step).Error; err != nil {
+		t.Fatal(err)
+	}
+	// Compare the persisted timestamp: PostgreSQL stores microseconds, while
+	// the input and SQLite can retain nanoseconds.
+	var before orm.WorkflowSessionStep
+	if err := db.First(&before, "id = ?", step.ID).Error; err != nil {
 		t.Fatal(err)
 	}
 	for _, status := range []string{StepStatusInterrupted, StepStatusRunning, StepStatusSucceeded, StepStatusFailed} {
@@ -853,7 +859,7 @@ func TestStoppedStepKeepsItsFirstStopTimeOnRepeatedEvents(t *testing.T) {
 	if err := db.First(&got, "id = ?", step.ID).Error; err != nil {
 		t.Fatal(err)
 	}
-	if got.Status != StepStatusInterrupted || !got.UpdatedAt.Equal(stoppedAt) {
+	if got.Status != StepStatusInterrupted || !got.UpdatedAt.Equal(before.UpdatedAt) {
 		t.Fatalf("stop changed after repeated events: %s %s", got.Status, got.UpdatedAt)
 	}
 }
