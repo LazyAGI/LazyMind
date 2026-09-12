@@ -1,4 +1,6 @@
 -- +migrate Dialect postgres
+ALTER TABLE plugin_sessions ADD COLUMN last_stopped_at TIMESTAMP WITH TIME ZONE NULL;
+
 CREATE TABLE IF NOT EXISTS plugin_step_intents (
     id VARCHAR(36) PRIMARY KEY,
     session_id VARCHAR(36) NOT NULL,
@@ -19,6 +21,8 @@ ALTER TABLE multi_answers_chat_histories ADD COLUMN IF NOT EXISTS run_terminal J
 CREATE INDEX IF NOT EXISTS idx_multi_answers_chat_histories_run_id ON multi_answers_chat_histories(run_id);
 
 -- +migrate Dialect sqlite
+ALTER TABLE plugin_sessions ADD COLUMN last_stopped_at DATETIME NULL;
+
 ALTER TABLE chat_histories ADD COLUMN run_id TEXT;
 ALTER TABLE chat_histories ADD COLUMN run_status TEXT;
 ALTER TABLE chat_histories ADD COLUMN run_terminal TEXT;
@@ -515,6 +519,7 @@ ALTER TABLE conversations ADD COLUMN IF NOT EXISTS source_document_id VARCHAR(25
 ALTER TABLE conversations ADD COLUMN IF NOT EXISTS source_display_name VARCHAR(255) NOT NULL DEFAULT '';
 ALTER TABLE conversations ADD COLUMN IF NOT EXISTS pinned_at TIMESTAMP NULL;
 ALTER TABLE conversations ADD COLUMN IF NOT EXISTS history_order BIGINT NULL;
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS unpinned_history_order BIGINT NULL;
 ALTER TABLE conversations ADD COLUMN IF NOT EXISTS chat_model_mode VARCHAR(16) NULL;
 ALTER TABLE conversations ADD COLUMN IF NOT EXISTS chat_model_id VARCHAR(64) NULL;
 ALTER TABLE conversations ADD COLUMN IF NOT EXISTS chat_model_snapshot JSON NULL;
@@ -582,6 +587,7 @@ ALTER TABLE conversations ADD COLUMN source_document_id VARCHAR(255) NOT NULL DE
 ALTER TABLE conversations ADD COLUMN source_display_name VARCHAR(255) NOT NULL DEFAULT '';
 ALTER TABLE conversations ADD COLUMN pinned_at DATETIME NULL;
 ALTER TABLE conversations ADD COLUMN history_order INTEGER NULL;
+ALTER TABLE conversations ADD COLUMN unpinned_history_order BIGINT NULL;
 ALTER TABLE conversations ADD COLUMN chat_model_mode VARCHAR(16) NULL;
 ALTER TABLE conversations ADD COLUMN chat_model_id VARCHAR(64) NULL;
 ALTER TABLE conversations ADD COLUMN chat_model_snapshot JSON NULL;

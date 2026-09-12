@@ -120,6 +120,94 @@ func sidechatRequest(method, target, userID, body string, vars map[string]string
 	return mux.SetURLVars(request, vars)
 }
 
+func TestCreateSidechatHTTPFromGeneratingSelection(t *testing.T) {
+	db := newSidechatTestDB(t)
+	parent := sidechatTestConversation(t, db, "live-http-parent", "user-1", "Parent")
+	sidechatTestHistory(t, db, "live-http-source", parent.ID, 1, "question", "partial answer", "running")
+	for _, tc := range []struct {
+		name, userID, body string
+		wantStatus         int
+	}{
+		{"selected live text", "user-1", `{"source_history_id":"live-http-source","source_seq":1,"selected_text":"partial answer"}`, http.StatusOK},
+		{"no selected text", "user-1", `{"source_history_id":"live-http-source","source_seq":1}`, http.StatusConflict},
+		{"another user", "user-2", `{"source_history_id":"live-http-source","source_seq":1,"selected_text":"partial answer"}`, http.StatusNotFound},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			request := sidechatRequest(http.MethodPost, "/api/core/conversations/"+parent.ID+"/sidechat", tc.userID, tc.body, map[string]string{"parent_id": parent.ID})
+			CreateSidechat(recorder, request)
+			if recorder.Code != tc.wantStatus {
+				t.Fatalf("status=%d want=%d body=%s", recorder.Code, tc.wantStatus, recorder.Body.String())
+			}
+			if tc.wantStatus == http.StatusOK {
+				var payload struct {
+					Conversation struct {
+						ID string `json:"id"`
+					} `json:"conversation"`
+				}
+				if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil || payload.Conversation.ID == "" {
+					t.Fatalf("missing created sidechat: %s", recorder.Body.String())
+				}
+				var child orm.Conversation
+				if err := db.First(&child, "id = ?", payload.Conversation.ID).Error; err != nil || child.SourceSelectedText != "partial answer" {
+					t.Fatalf("selected excerpt was not saved: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestCreateSidechatFromGeneratingSelectionFreezesOnlyTheExcerpt(t *testing.T) {
+	db := newSidechatTestDB(t)
+	parent := sidechatTestConversation(t, db, "running-parent", "user-1", "Parent")
+	sidechatTestHistory(t, db, "completed", parent.ID, 1, "earlier question", "earlier answer", "completed")
+	live := sidechatTestHistory(t, db, "running", parent.ID, 2, "live question", "partial answer", "running")
+	selected := "visible selected excerpt"
+	child, _, err := createSidechatConversation(context.Background(), db, "user-1", "User", parent.ID, createSidechatRequest{
+		SourceHistoryID: live.ID, SelectedText: selected,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if child.SourceHistoryID == nil || *child.SourceHistoryID != live.ID || child.SourceSeq == nil || *child.SourceSeq != 2 {
+		t.Fatalf("source not anchored: %#v", child)
+	}
+	if child.SourceSelectedText != selected {
+		t.Fatalf("excerpt=%q", child.SourceSelectedText)
+	}
+	snapshot := string(child.SourceContext)
+	if !strings.Contains(snapshot, "earlier answer") || strings.Contains(snapshot, "partial answer") || strings.Contains(snapshot, "live question") {
+		t.Fatalf("unexpected snapshot: %s", snapshot)
+	}
+	if err := db.Model(&orm.ChatHistory{}).Where("id = ?", live.ID).Updates(map[string]any{"result": "later completed answer", "run_status": "completed"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	var persisted orm.Conversation
+	if err := db.First(&persisted, "id = ?", child.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if persisted.SourceSelectedText != selected || string(persisted.SourceContext) != snapshot {
+		t.Fatal("live source rewrote frozen sidechat")
+	}
+}
+
+func TestGeneratingSidechatDoesNotInheritSummaryPastItsSource(t *testing.T) {
+	db := newSidechatTestDB(t)
+	parent := sidechatTestConversation(t, db, "regenerating-parent", "user-1", "Parent")
+	source := sidechatTestHistory(t, db, "first-running", parent.ID, 1, "first question", "partial answer", "running")
+	handleModelContextUpdated(context.Background(), db, parent.ID, &ModelContextUpdatedEvent{SummaryText: "later private summary", CoveredThroughSeq: 5, Version: 1})
+	child, _, err := createSidechatConversation(context.Background(), db, "user-1", "User", parent.ID, createSidechatRequest{SourceHistoryID: source.ID, SelectedText: "selected excerpt"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(child.SourceContext), "later private summary") {
+		t.Fatalf("summary passed source boundary: %s", child.SourceContext)
+	}
+	if len(child.SourceContext) != 0 {
+		t.Fatalf("unexpected inherited context: %s", child.SourceContext)
+	}
+}
+
 func TestResolveSidechatSourceCutsOffDuplicateSequenceByTimeAndID(t *testing.T) {
 	db := newSidechatTestDB(t)
 	parent := sidechatTestConversation(t, db, "parent-duplicate-seq", "user-1", "Parent")

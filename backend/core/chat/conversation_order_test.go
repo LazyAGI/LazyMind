@@ -107,10 +107,142 @@ func TestConversationManualOrder(t *testing.T) {
 				t.Fatalf("pinned order=%v", got)
 			}
 			pin("older", false)
-			if got := orderedConversationIDs(t, query); !reflect.DeepEqual(got, []string{"middle", "newer", "older"}) {
-				t.Fatalf("unpin did not use activity time: %v", got)
+			if got := orderedConversationIDs(t, query); !reflect.DeepEqual(got, []string{"middle", "older", "newer"}) {
+				t.Fatalf("unpin did not restore manual position: %v", got)
 			}
 		})
+	}
+}
+
+func TestConversationUnpinRestoresManualPosition(t *testing.T) {
+	db := newPromptTestDB(t).DB
+	store.Init(db, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+	base := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	for i, id := range []string{"old", "middle", "new"} {
+		if err := db.Create(&orm.Conversation{ID: id, DisplayName: id, BaseModel: orm.BaseModel{CreateUserID: "u1", CreatedAt: base, UpdatedAt: base.Add(time.Duration(i) * time.Hour)}}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if rec := callConversationOrder(t, "old", "new", "before"); rec.Code != http.StatusOK {
+		t.Fatal(rec.Body.String())
+	}
+	for round := 0; round < 2; round++ {
+		if _, err := updateConversationPin(context.Background(), db, "u1", "old", true); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := updateConversationPin(context.Background(), db, "u1", "old", true); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := updateConversationPin(context.Background(), db, "u1", "old", false); err != nil {
+			t.Fatal(err)
+		}
+		if got := orderedConversationIDs(t, ""); !reflect.DeepEqual(got, []string{"old", "new", "middle"}) {
+			t.Fatalf("unpin lost manual position: %v", got)
+		}
+	}
+}
+
+func TestConversationUnpinWithMultiplePinsAndNewHistory(t *testing.T) {
+	for _, rearrange := range []bool{false, true} {
+		t.Run(fmt.Sprint(rearrange), func(t *testing.T) {
+			db := newPromptTestDB(t).DB
+			store.Init(db, nil, nil)
+			t.Cleanup(func() { store.Init(nil, nil, nil) })
+			base := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+			for i, id := range []string{"a", "b", "c", "d"} {
+				order := int64(i + 1)
+				if err := db.Create(&orm.Conversation{ID: id, DisplayName: id, HistoryOrder: &order, BaseModel: orm.BaseModel{CreateUserID: "u1", CreatedAt: base, UpdatedAt: base.Add(time.Duration(i) * time.Hour)}}).Error; err != nil {
+					t.Fatal(err)
+				}
+			}
+			for _, id := range []string{"b", "c"} {
+				if _, err := updateConversationPin(context.Background(), db, "u1", id, true); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if rec := callConversationOrder(t, "b", "c", "before"); rec.Code != http.StatusOK {
+				t.Fatal(rec.Body.String())
+			}
+			if err := db.Create(&orm.Conversation{ID: "n", DisplayName: "n", BaseModel: orm.BaseModel{CreateUserID: "u1", CreatedAt: base.Add(24 * time.Hour), UpdatedAt: base.Add(24 * time.Hour)}}).Error; err != nil {
+				t.Fatal(err)
+			}
+			if _, err := updateConversationPin(context.Background(), db, "u1", "n", true); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := updateConversationPin(context.Background(), db, "u1", "n", false); err != nil {
+				t.Fatal(err)
+			}
+			if rearrange {
+				rec := callConversationOrder(t, "d", "a", "before")
+				if rec.Code != http.StatusOK {
+					t.Fatal(rec.Body.String())
+				}
+				var response conversationOrderResult
+				if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+					t.Fatal(err)
+				}
+				for _, update := range response.OrderUpdates {
+					if update.ConversationID == "b" || update.ConversationID == "c" {
+						t.Fatal("pinned placeholder leaked into active order updates")
+					}
+				}
+			}
+			for _, id := range []string{"b", "c"} {
+				if _, err := updateConversationPin(context.Background(), db, "u1", id, false); err != nil {
+					t.Fatal(err)
+				}
+			}
+			expected := []string{"n", "a", "b", "c", "d"}
+			if rearrange {
+				expected = []string{"n", "d", "a", "b", "c"}
+			}
+			if got := orderedConversationIDs(t, ""); !reflect.DeepEqual(got, expected) {
+				t.Fatalf("order=%v expected=%v", got, expected)
+			}
+		})
+	}
+}
+
+func TestConversationOrderRollsBackPinnedPlaceholderChanges(t *testing.T) {
+	db := newPromptTestDB(t).DB
+	store.Init(db, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+	base := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	for i, id := range []string{"a", "b", "c", "d"} {
+		order := int64(i + 1)
+		if err := db.Create(&orm.Conversation{ID: id, DisplayName: id, HistoryOrder: &order, BaseModel: orm.BaseModel{CreateUserID: "u1", CreatedAt: base, UpdatedAt: base}}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := updateConversationPin(context.Background(), db, "u1", "b", true); err != nil {
+		t.Fatal(err)
+	}
+	var before []orm.Conversation
+	if err := db.Order("id").Find(&before).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(`CREATE TRIGGER reject_placeholder BEFORE UPDATE OF unpinned_history_order ON conversations WHEN OLD.id='b' BEGIN SELECT RAISE(FAIL,'injected order write failure'); END`).Error; err != nil {
+		t.Fatal(err)
+	}
+	if rec := callConversationOrder(t, "d", "a", "before"); rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status=%d", rec.Code)
+	}
+	var after []orm.Conversation
+	if err := db.Order("id").Find(&after).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(before, after) {
+		t.Fatal("reorder partially committed before placeholder failure")
+	}
+	if _, err := updateConversationPin(context.Background(), db, "u1", "b", false); err == nil {
+		t.Fatal("expected injected unpin failure")
+	}
+	if err := db.Order("id").Find(&after).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(before, after) {
+		t.Fatal("unpin partially committed")
 	}
 }
 
@@ -233,8 +365,8 @@ func TestConversationOrderUnpinPreservesOtherManualPositions(t *testing.T) {
 	if _, err := updateConversationPin(context.Background(), db, "u1", "returning", false); err != nil {
 		t.Fatal(err)
 	}
-	if got := orderedConversationIDs(t, ""); !reflect.DeepEqual(got, []string{"oldest", "newest", "returning", "newer"}) {
-		t.Fatalf("unpin should use its chronological index and retain other manual positions: %v", got)
+	if got := orderedConversationIDs(t, ""); !reflect.DeepEqual(got, []string{"returning", "oldest", "newest", "newer"}) {
+		t.Fatalf("legacy unranked row should use automatic ordering without renumbering manual rows: %v", got)
 	}
 }
 

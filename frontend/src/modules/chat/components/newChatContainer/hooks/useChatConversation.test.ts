@@ -13,6 +13,7 @@ import { useChatConversation } from "./useChatConversation";
 import { useTaskCenterStore } from "@/modules/chat/store/taskCenter";
 import { buildChatMessageListFromHistory } from "@/modules/chat/utils/message";
 import { streamManager } from "@/modules/chat/utils/StreamManager";
+import { emitConversationActivity, emitConversationListRefresh } from "@/modules/chat/utils/conversationActivity";
 
 const {
   listConversationsMock,
@@ -57,6 +58,7 @@ vi.mock("@/modules/chat/utils/request", () => ({
 
 vi.mock("@/modules/chat/utils/conversationActivity", () => ({
   emitConversationActivity: vi.fn(),
+  emitConversationListRefresh: vi.fn(),
 }));
 
 vi.mock("./useChatScroll", () => ({
@@ -144,6 +146,32 @@ describe("useChatConversation regeneration recovery", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
+  });
+
+  it("loads authoritative group and parent metadata before showing a new conversation in history", async () => {
+    const { listeners, onOpenSSE } = createPreparedStream("new-in-group");
+    const { result } = renderConversation({ onOpenSSE });
+    vi.mocked(emitConversationActivity).mockClear();
+    vi.mocked(emitConversationListRefresh).mockClear();
+    await act(async () => { await result.current.sendMessage({ text: "new grouped chat" }); });
+    act(() => listeners.get("message")?.({ data: JSON.stringify({ result: {
+      conversation_id: "new-in-group", history_id: "h1", seq: 1, delta: "answer",
+    } }) }));
+    expect(emitConversationActivity).not.toHaveBeenCalledWith(expect.objectContaining({ displayName: expect.any(String) }));
+    expect(emitConversationListRefresh).toHaveBeenCalledOnce();
+  });
+
+  it("keeps unretained sidechat activity out of the main history", async () => {
+    const { listeners, onOpenSSE } = createPreparedStream("ephemeral-sidechat");
+    const { result } = renderConversation({ onOpenSSE, concurrentStream: true });
+    vi.mocked(emitConversationActivity).mockClear();
+    vi.mocked(emitConversationListRefresh).mockClear();
+    await act(async () => { await result.current.sendMessage({ text: "side question" }); });
+    act(() => listeners.get("message")?.({ data: JSON.stringify({ result: {
+      conversation_id: "ephemeral-sidechat", history_id: "side-h1", seq: 1, delta: "side answer",
+    } }) }));
+    expect(emitConversationActivity).not.toHaveBeenCalled();
+    expect(emitConversationListRefresh).not.toHaveBeenCalled();
   });
 
   it("uses freshly loaded history instead of a stale per-conversation cache", () => {

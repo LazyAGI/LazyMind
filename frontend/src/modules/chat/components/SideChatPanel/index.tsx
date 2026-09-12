@@ -85,6 +85,7 @@ async function wait(milliseconds: number) {
 
 export default function SideChatPanel({
   open,
+  visible = true,
   parentConversationId,
   source,
   onClose,
@@ -470,9 +471,8 @@ export default function SideChatPanel({
         className="side-chat-drawer"
         rootClassName="side-chat-drawer-root"
         width={420}
-        open={open}
+        open={open && visible}
         closable={false}
-        destroyOnHidden
         mask={false}
         keyboard={!busy}
         onClose={handleClose}
@@ -647,7 +647,7 @@ export default function SideChatPanel({
       </Drawer>
 
       <Modal
-        open={clearConfirmOpen}
+        open={open && visible && clearConfirmOpen}
         title={t("chat.sideChat.clearTitle")}
         okText={t("chat.sideChat.clear")}
         cancelText={t("common.cancel")}
@@ -660,7 +660,7 @@ export default function SideChatPanel({
       </Modal>
 
       <Modal
-        open={discardConfirmOpen}
+        open={open && visible && discardConfirmOpen}
         title={t("chat.sideChat.closeConfirmTitle")}
         okText={t("chat.sideChat.closeAndDiscard")}
         cancelText={t("chat.sideChat.continue")}

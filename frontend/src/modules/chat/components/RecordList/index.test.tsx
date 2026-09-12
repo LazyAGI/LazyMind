@@ -153,6 +153,21 @@ function moreActionsFor(title: string) {
 }
 
 describe("RecordList conversation pinning", () => {
+  it("includes conversations in custom groups when batch mode is enabled", async () => {
+    mocks.listConversations.mockResolvedValue({ data: { conversations: [
+      newerConversation, { ...olderConversation, group_id: "group-1" },
+    ] } });
+    render(<MemoryRouter><RecordList compact showBatchActions currentSessionId="" onSelected={vi.fn()} onRemove={vi.fn()} /></MemoryRouter>);
+    await screen.findByText(newerConversation.display_name);
+    expect(screen.queryByText(olderConversation.display_name)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText("批量"));
+    const groupedRow = await screen.findByText(olderConversation.display_name);
+    expect(groupedRow.closest(".export-checkbox-item")).not.toHaveClass("ant-checkbox-wrapper-disabled");
+    fireEvent.click(screen.getByText("全选"));
+    const checkboxes = screen.getAllByRole("checkbox");
+    expect(checkboxes.filter((item) => (item as HTMLInputElement).checked)).toHaveLength(3);
+  });
+
   beforeAll(() => {
     Object.defineProperty(window, "matchMedia", {
       writable: true,

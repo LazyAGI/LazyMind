@@ -419,6 +419,9 @@ components:
             type: object
         ChatChunkResponse:
             properties:
+                capability_dependency:
+                    properties: {}
+                    type: object
                 conversation_id:
                     type: string
                 delta:
@@ -1705,6 +1708,14 @@ components:
                         - running
                         - idle
                         - unknown
+                    type: string
+                terminal_status:
+                    enum:
+                        - completed
+                        - failed
+                        - canceled
+                    type: string
+                terminal_version:
                     type: string
             required:
                 - conversation_id
@@ -8957,6 +8968,12 @@ paths:
                 "200":
                     description: OK
             summary: POST /add_files_to_group
+    /api/core/admin:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /admin
     /api/core/admin/skill-market:
         post:
             requestBody:
@@ -13703,6 +13720,18 @@ paths:
                 "200":
                     description: OK
             summary: POST /external-chat/runs/{run_id}:heartbeat
+    /api/core/health:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /health
+    /api/core/hello:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /hello
     /api/core/inner/word_group:apply:
         post:
             requestBody:
@@ -17058,6 +17087,18 @@ paths:
             summary: List skill directory entries
             tags:
                 - skill-fs
+    /api/core/skills/{skill_id}/linked-workflows:
+        get:
+            parameters:
+                - in: path
+                  name: skill_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /skills/{skill_id}/linked-workflows
     /api/core/skills/{skill_id}/revisions:
         get:
             parameters:
@@ -18379,6 +18420,12 @@ paths:
                 "200":
                     description: OK
             summary: GET /workflow-commands/{command_id}
+    /api/core/workflow-conversions:preflight:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-conversions:preflight
     /api/core/workflow-drafts:
         get:
             responses:
@@ -18466,6 +18513,18 @@ paths:
                 "200":
                     description: OK
             summary: POST /workflow-drafts/{draft_id}:ai-repair
+    /api/core/workflow-drafts/{draft_id}:cancel-generation:
+        post:
+            parameters:
+                - in: path
+                  name: draft_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-drafts/{draft_id}:cancel-generation
     /api/core/workflow-drafts/{draft_id}:confirm-workflow:
         post:
             parameters:
@@ -19327,4 +19386,3 @@ paths:
 servers:
     - description: same origin; see paths with /api/core prefix
       url: /
-

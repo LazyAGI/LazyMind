@@ -199,6 +199,22 @@ class ImageWorkflowSearchValidationTests(unittest.TestCase):
         self.assertEqual(result['required'], [])
         self.assertEqual(result['checks'], [])
 
+    def test_animation_route_cannot_omit_video_and_ffmpeg_dependencies(self):
+        for route in ('CREATE_ANIMATED', 'ANIMATE_UPLOAD', 'CREATE_ANIMATED_MEME'):
+            for declared in ('none', 'image_generator'):
+                with self.subTest(route=route, declared=declared):
+                    with mock.patch.object(
+                        self.tools, '_media_capability_available',
+                        side_effect=lambda capability: capability == 'image_generator',
+                    ), self.assertRaisesRegex(
+                        Exception, 'MEDIA_CAPABILITY_DEPENDENCY_MISSING',
+                    ) as captured:
+                        self.tools.check_image_workflow_capabilities(
+                            f'WORKFLOW: {route}\nREQUIRES: {declared}',
+                        )
+                    self.assertIn('video_generator', str(captured.exception))
+                    self.assertIn('ffmpeg', str(captured.exception))
+
     def test_capability_preflight_returns_settings_cards_for_missing_dependencies(self):
         routing = (
             'WORKFLOW: CREATE_ANIMATED\n'

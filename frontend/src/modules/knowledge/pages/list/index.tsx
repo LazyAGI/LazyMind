@@ -216,6 +216,15 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
   const finishedMarketJobIds = useRef(new Set<string>());
   const activeMarketTaskCount = Object.keys(trackedMarketJobs).length;
   const marketTaskRefreshKey = Object.keys(trackedMarketJobs).sort().join(",");
+  const activeMarketJobTypes = useMemo(() => {
+    const types: Record<string, "install" | "update"> = {};
+    Object.values(trackedMarketJobs).forEach((job) => {
+      if (job.itemId && job.jobType !== "updateAll") {
+        types[job.itemId] = job.jobType;
+      }
+    });
+    return types;
+  }, [trackedMarketJobs]);
   const isCloudArchiveView = sourceCategory === "cloudArchive";
   const isOfficialView = sourceCategory === "official";
   const createActionDisabled =
@@ -1716,6 +1725,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
           domains={officialDomains}
           loading={officialLoading}
           progressByItem={marketProgress}
+          activeJobTypeByItem={activeMarketJobTypes}
           onInstall={handleOfficialInstall}
           onUpdate={handleOfficialUpdate}
           onOpen={handleOfficialOpen}

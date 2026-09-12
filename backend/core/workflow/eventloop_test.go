@@ -709,6 +709,11 @@ func TestStopActiveWorkflowSession_CancelsAllPendingAndRunningAttempts(t *testin
 		}
 	}
 
+	lease := time.Now().Add(time.Minute)
+	if err := db.Model(&orm.WorkflowSessionStep{}).Where("session_id = ?", "stop-sess-parallel").Update("lease_expires_at", lease).Error; err != nil {
+		t.Fatal(err)
+	}
+
 	var mu sync.Mutex
 	cancelled := map[string]bool{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -751,6 +756,12 @@ func TestStopActiveWorkflowSession_CancelsAllPendingAndRunningAttempts(t *testin
 		}
 		if step.Status != StepStatusInterrupted {
 			t.Errorf("step %s status = %q, want interrupted", taskID, step.Status)
+		}
+		if step.LeaseExpiresAt != nil {
+			t.Errorf("step %s retained a lease after stop", taskID)
+		}
+		if step.TerminalCode != "WORKFLOW_STOPPED" {
+			t.Errorf("step %s terminal code = %q, want WORKFLOW_STOPPED", taskID, step.TerminalCode)
 		}
 		mu.Lock()
 		wasCancelled := cancelled[taskID]
@@ -824,4 +835,25 @@ func TestOnSubAgentDone_ParallelStepsPartialDone(t *testing.T) {
 
 	// Only step completes — should not panic.
 	OnSubAgentDone(ctx, db.DB, nil, "par-task-only", "succeeded", "", onSSE, nil)
+}
+
+func TestStoppedStepKeepsItsFirstStopTimeOnRepeatedEvents(t *testing.T) {
+	db := newTestDB(t)
+	stoppedAt := time.Now().UTC().Add(-time.Minute)
+	step := orm.WorkflowSessionStep{ID: "stable-stop", SessionID: "session", StepID: "step", TaskID: "stable-stop-task", Status: StepStatusInterrupted, TerminalCode: "WORKFLOW_STOPPED", CreatedAt: stoppedAt, UpdatedAt: stoppedAt}
+	if err := db.Create(&step).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, status := range []string{StepStatusInterrupted, StepStatusRunning, StepStatusSucceeded, StepStatusFailed} {
+		if err := UpdateStepStatus(t.Context(), db.DB, step.TaskID, status); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var got orm.WorkflowSessionStep
+	if err := db.First(&got, "id = ?", step.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != StepStatusInterrupted || !got.UpdatedAt.Equal(stoppedAt) {
+		t.Fatalf("stop changed after repeated events: %s %s", got.Status, got.UpdatedAt)
+	}
 }

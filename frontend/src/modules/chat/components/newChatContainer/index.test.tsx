@@ -22,6 +22,11 @@ vi.mock("@/i18n", () => ({
 
 vi.mock("antd", () => ({
   message: { info: vi.fn() },
+  Drawer: ({ open, children, zIndex, onClose }: any) => open ? (
+    <div role="dialog" data-z-index={zIndex}>
+      <button onClick={onClose}>close sources drawer</button>{children}
+    </div>
+  ) : null,
 }));
 
 vi.mock("@/modules/chat/store/chatMessage", () => ({
@@ -58,10 +63,12 @@ vi.mock("./components/MessageList", () => ({
     chatContentRef,
     regenerate,
     regenerateDisabled,
+    onOpenSources,
   }: {
     chatContentRef: typeof mocks.chatContentRef;
     regenerate: () => void;
     regenerateDisabled: boolean;
+    onOpenSources?: (sources: any[]) => void;
   }) => (
     <>
       <div
@@ -74,6 +81,9 @@ vi.mock("./components/MessageList", () => ({
         data-testid="message-container"
       />
       <button
+        onClick={() => onOpenSources?.([{ title: "Source one", url: "https://example.com/source" }])}
+      >open sources</button>
+      <button
         type="button"
         disabled={regenerateDisabled}
         onClick={regenerate}
@@ -84,7 +94,9 @@ vi.mock("./components/MessageList", () => ({
   ),
 }));
 
-vi.mock("../AssistantMessage", () => ({ ChatSourcePanel: () => null }));
+vi.mock("../AssistantMessage", () => ({
+  ChatSourcePanel: ({ onClose }: any) => <aside aria-label="references"><button onClick={onClose}>close sources</button></aside>,
+}));
 vi.mock("./components/ChatMessageContent", () => ({ default: () => null }));
 vi.mock("./components/ScrollToBottomButton", () => ({ default: () => null }));
 vi.mock("./components/ConversationTrail", () => ({ default: () => null }));
@@ -184,6 +196,25 @@ describe("ChatContainerComponent wheel forwarding", () => {
     mocks.regenerate.mockReset();
     mocks.latestChatInputProps = null;
     mocks.latestConversationOptions = null;
+  });
+
+  it.each([false, true])("opens references with side-chat overlay=%s and closes only references", (overlay) => {
+    const { container } = render(<ChatContainerComponent
+      onOpenSSE={vi.fn()} parseErrorData={(data) => data} setIsChatContent={vi.fn()}
+      setChatConfigFn={vi.fn()} conversationTrailEnabled={false} sourcePanelOverlay={overlay}
+    />);
+    fireEvent.click(screen.getByRole("button", { name: "open sources" }));
+    expect(screen.getByRole("complementary", { name: "references" })).toBeInTheDocument();
+    if (overlay) {
+      expect(screen.getByRole("dialog")).toHaveAttribute("data-z-index", "1100");
+      expect(container.querySelector(".has-source-panel")).toBeNull();
+    } else {
+      expect(screen.queryByRole("dialog")).toBeNull();
+      expect(container.querySelector(".has-source-panel")).not.toBeNull();
+    }
+    fireEvent.click(screen.getByRole("button", { name: "close sources" }));
+    expect(screen.queryByRole("complementary", { name: "references" })).toBeNull();
+    expect(screen.getByTestId("message-container")).toBeInTheDocument();
   });
 
   it("does not scroll the conversation when the wheel starts inside the chat input", () => {

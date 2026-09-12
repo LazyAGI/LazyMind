@@ -262,3 +262,15 @@
   .ant-btn-link { height: auto; padding: 0; white-space: normal; text-align: left; }
   > div > span { color: #8c8c8c; font-size: 12px; white-space: nowrap; }
 }
+
+.npm-skill-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 6px 8px;
+  font-size: 12px;
+  color: #8c8c8c;
+
+  > span { display: flex; align-items: center; gap: 8px; }
+}

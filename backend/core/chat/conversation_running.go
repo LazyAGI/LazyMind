@@ -22,8 +22,10 @@ import (
 const conversationStatusBatchLimit = 100
 
 type conversationRunningStatus struct {
-	ConversationID string `json:"conversation_id"`
-	Status         string `json:"status"`
+	ConversationID  string `json:"conversation_id"`
+	Status          string `json:"status"`
+	TerminalStatus  string `json:"terminal_status,omitempty"`
+	TerminalVersion string `json:"terminal_version,omitempty"`
 }
 
 // BatchConversationStatus is a content-free snapshot, independent of chat resume.
@@ -258,9 +260,17 @@ func batchConversationRunningStatus(ctx context.Context, db *gorm.DB, cache stat
 			}
 		}
 	}
+	terminals, err := conversationTerminalStatuses(ctx, db, allowed)
+	if err != nil {
+		return nil, err
+	}
 	for _, id := range requested {
 		if status, ok := statuses[id]; ok {
-			result = append(result, conversationRunningStatus{ConversationID: id, Status: status})
+			terminal := conversationTerminalResult{}
+			if status == "idle" {
+				terminal = terminals[id]
+			}
+			result = append(result, conversationRunningStatus{ConversationID: id, Status: status, TerminalStatus: terminal.Status, TerminalVersion: terminal.Version})
 		}
 	}
 	return result, nil
