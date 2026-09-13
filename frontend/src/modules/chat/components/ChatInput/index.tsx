@@ -464,6 +464,7 @@ interface ChatInputProps {
   /** Send the next message as a background task. Used by the new-task entry point. */
   runInBackground?: boolean;
   showThinkingDepth?: boolean;
+  sideChatAction?: ReactNode;
   showSkillDeposit?: boolean;
   showConversationConfig?: boolean;
   /** Hide the main-chat model picker in specialized composers that own a separate model contract. */
@@ -682,6 +683,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       boundMentions = [],
       runInBackground = false,
       showThinkingDepth = true,
+      sideChatAction,
       showSkillDeposit = true,
       showConversationConfig = true,
       showModelSelector = true,
@@ -1695,6 +1697,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                       {t("chat.chatHistory")}
                     </div>
                   )}
+                  {sideChatAction}
                   {showSkillDeposit && isChatContent && (
                     <Tooltip title={skillDepositTooltip}>
                       <div

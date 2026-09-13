@@ -509,7 +509,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
       });
     }, [clearCiteMessages, sendMessage, t]);
 
-    const sourcePanel = sourcePanelSources.length > 0 ? (
+    const sourcePanel = !props.onOpenSources && sourcePanelSources.length > 0 ? (
       <ChatSourcePanel
         sources={sourcePanelSources}
         onClose={() => setSourcePanelSources([])}
@@ -521,7 +521,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
         className="chat-chat-container"
         onWheelCapture={handleConversationWheel}
       >
-        <div className={`chat-box${sourcePanelSources.length && !props.sourcePanelOverlay ? " has-source-panel" : ""}`}>
+        <div className={`chat-box${sourcePanelSources.length && !props.onOpenSources && !props.sourcePanelOverlay ? " has-source-panel" : ""}`}>
           <div className="chat-main-column">
             <MessageList
               onFork={props.onFork}
@@ -562,7 +562,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
               updateAssistantMessage={conversation.updateAssistantMessage}
               onCiteMessage={handleAddCiteMessage}
               onOpenSideChat={onOpenSideChat}
-              onOpenSources={setSourcePanelSources}
+              onOpenSources={props.onOpenSources ?? setSourcePanelSources}
               onScroll={conversation.scroll.handleScroll}
               chatContentRef={conversation.scroll.chatContentRef}
               sessionId={sessionId}
@@ -593,6 +593,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
             />
 
             <ChatInput
+              sideChatAction={props.sideChatAction}
               value={conversation.content}
               onChange={conversation.setContent}
               onSend={sendMessage}
