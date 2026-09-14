@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  clusterConsecutiveSourceMarkers,
   findSourceByCitationId,
   getCitationSources,
   getDisplaySources,
@@ -161,5 +162,36 @@ describe('chat source adapter', () => {
     expect(moveSourceMarkersToParagraphEnd(
       `${table}\n\n第一句${first}。第二句${second}。`,
     )).toBe(`${relocatedTable}\n\n第一句。第二句。${first}${second}`);
+  });
+
+  it('clusters consecutive paragraph-end source markers into one href', () => {
+    const first = '[1](#source-1.1)';
+    const second = '[2](#source-2.1)';
+    const third = '[3](#source-3.1)';
+    const clustered = '[1](#source-1.1,2.1)';
+    const clusteredThree = '[1](#source-1.1,2.1,3.1)';
+
+    expect(clusterConsecutiveSourceMarkers(
+      moveSourceMarkersToParagraphEnd(`第一句${first}。第二句${second}。`),
+    )).toBe(`第一句。第二句。${clustered}`);
+    expect(clusterConsecutiveSourceMarkers(`${first}${second}${third}`)).toBe(clusteredThree);
+    expect(clusterConsecutiveSourceMarkers(`${first} ${second}`)).toBe(clustered);
+    expect(clusterConsecutiveSourceMarkers(
+      `上一段${first}\n\n下一段${second}`,
+    )).toBe(`上一段${first}\n\n下一段${second}`);
+    expect(clusterConsecutiveSourceMarkers(
+      `\`\`\`\ncode ${first}${second}\n\`\`\`\n\n正文${first}${second}`,
+    )).toBe(`\`\`\`\ncode ${first}${second}\n\`\`\`\n\n正文${clustered}`);
+
+    const table = [
+      '| 模型 | 价格 |',
+      '|---|---|',
+      `| A ${first} | $1 ${second} |`,
+    ].join('\n');
+    expect(clusterConsecutiveSourceMarkers(moveSourceMarkersToParagraphEnd(table))).toBe([
+      '| 模型 | 价格 |',
+      '|---|---|',
+      `| A | $1 ${clustered} |`,
+    ].join('\n'));
   });
 });

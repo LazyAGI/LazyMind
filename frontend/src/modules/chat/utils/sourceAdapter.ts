@@ -322,6 +322,59 @@ function relocateMarkersInProse(text: string) {
 // of after each sentence. Streaming therefore looks like:
 // "Fact A. Fact B. [1][2]" rather than "Fact A [1]. Fact B [2]."
 // GFM table rows keep their pipes and move citations to the last cell.
+const CONSECUTIVE_SOURCE_MARKERS =
+  /(?:\[\d+\]\(#source-\d+\.\d+\))(?:[ \t]*\[\d+\]\(#source-\d+\.\d+\))+/g;
+const SINGLE_CLUSTER_SOURCE_MARKER = /\[(\d+)\]\(#source-(\d+\.\d+)\)/g;
+
+function clusterMarkersInText(text: string) {
+  return text.replace(CONSECUTIVE_SOURCE_MARKERS, (match) => {
+    const ids: string[] = [];
+    let displayIndex = '';
+    SINGLE_CLUSTER_SOURCE_MARKER.lastIndex = 0;
+    for (const part of match.matchAll(SINGLE_CLUSTER_SOURCE_MARKER)) {
+      if (!displayIndex) {
+        displayIndex = part[1];
+      }
+      if (!ids.includes(part[2])) {
+        ids.push(part[2]);
+      }
+    }
+    if (ids.length < 2) {
+      return match;
+    }
+    return `[${displayIndex}](#source-${ids.join(',')})`;
+  });
+}
+
+// Collapse adjacent paragraph-end citations into one marker so the viewer
+// can render the first source plus a +N overflow chip.
+export function clusterConsecutiveSourceMarkers(content: string) {
+  const lines = content.split('\n');
+  const output: string[] = [];
+  let inFence = false;
+  let fenceMarker = '';
+
+  for (const line of lines) {
+    const fence = line.match(FENCE_OPEN_PATTERN);
+    if (fence) {
+      if (!inFence) {
+        inFence = true;
+        fenceMarker = fence[1];
+        output.push(line);
+        continue;
+      }
+      if (line.startsWith(fenceMarker)) {
+        output.push(line);
+        inFence = false;
+        fenceMarker = '';
+        continue;
+      }
+    }
+    output.push(inFence ? line : clusterMarkersInText(line));
+  }
+  return output.join('\n');
+}
+
 export function moveSourceMarkersToParagraphEnd(content: string) {
   const lines = content.split("\n");
   const output: string[] = [];

@@ -61,6 +61,7 @@ import {
 } from "./syntaxHighlight";
 import {
   type ChatSource,
+  clusterConsecutiveSourceMarkers,
   findSourceByCitationId,
   getSourceEvidenceText,
   getSourceFaviconUrl,
@@ -177,12 +178,72 @@ function SourcePreviewCard({ source }: { source: ChatSource }) {
   );
 }
 
-function getSourceIndex(href: any) {
+function SourcePreviewCarousel({ sources }: { sources: ChatSource[] }) {
+  const [activeIndex, setActiveIndex] = useState(0);
+  const source = sources[activeIndex];
+  const sourceHref = getSourceHref(source);
+  const sourceUrl = isExternalSource(source) && /^https?:\/\//i.test(sourceHref)
+    ? sourceHref
+    : "";
+  const previewText = getSourcePreviewText(source);
+  const hasMultipleSources = sources.length > 1;
+
+  return (
+    <div className="md-source-preview">
+      <div className="md-source-preview-brand">
+        <span className="md-source-preview-brand-main">
+          <SourceBrandIcon source={source} />
+          <span>{getSourceBrandName(source)}</span>
+        </span>
+        {hasMultipleSources && (
+          <span className="md-source-preview-navigation">
+            <button
+              type="button"
+              aria-label="Previous source"
+              disabled={activeIndex === 0}
+              onClick={() => setActiveIndex((index) => Math.max(0, index - 1))}
+            >
+              ‹
+            </button>
+            <span>{activeIndex + 1}/{sources.length}</span>
+            <button
+              type="button"
+              aria-label="Next source"
+              disabled={activeIndex === sources.length - 1}
+              onClick={() => setActiveIndex((index) => Math.min(sources.length - 1, index + 1))}
+            >
+              ›
+            </button>
+          </span>
+        )}
+      </div>
+      <a
+        className="md-source-preview-link"
+        href={sourceHref}
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        <strong className="md-source-preview-title">{getSourceLabel(source)}</strong>
+        {previewText && <p className="md-source-preview-summary">{previewText}</p>}
+        {sourceUrl && <span className="md-source-preview-url">{sourceUrl}</span>}
+      </a>
+    </div>
+  );
+}
+
+function getSourceCitationIds(href: any) {
   if (typeof href !== "string") {
-    return "";
+    return [];
   }
   const prefix = SOURCE_PREFIXES.find((item) => href.startsWith(item));
-  return prefix ? href.slice(prefix.length) : "";
+  if (!prefix) {
+    return [];
+  }
+  return href
+    .slice(prefix.length)
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 function normalizeBoldBareUrls(content: string) {
@@ -214,8 +275,10 @@ function normalizeMarkdownForDisplay(content: string) {
     normalizeBoldBareUrls(
       normalizeBareUrls(
         normalizeArtifactFileLinks(
-          moveSourceMarkersToParagraphEnd(
-            stripRedundantSourceUrls(normalizeSourceMarkers(fragment)),
+          clusterConsecutiveSourceMarkers(
+            moveSourceMarkersToParagraphEnd(
+              stripRedundantSourceUrls(normalizeSourceMarkers(fragment)),
+            ),
           ),
         ),
       ),
@@ -563,16 +626,27 @@ const LinkComponent = (props: any) => {
     inlineText,
     inlineBlobType,
   ]);
-  const sourceIndex = getSourceIndex(href);
+  const sourceCitationIds = getSourceCitationIds(href);
 
-  if (sourceIndex) {
-    const source = findSourceByCitationId(markSources, sourceIndex);
+  if (sourceCitationIds.length) {
+    const sources = sourceCitationIds.map((citationId) =>
+      findSourceByCitationId(markSources, citationId),
+    );
+    const source = sources[0];
+    const resolvedSources = sources.filter((item): item is ChatSource => Boolean(item));
+    const overflowCount = sourceCitationIds.length - 1;
     const sourceHref = source ? getSourceHref(source) : "";
     const chipLabel = source
       ? getSourceBrandName(source)
       : "Source";
     const chipContent = (
-      <span className="md-source-chip-label">{chipLabel}</span>
+      <>
+        {source && <SourceBrandIcon source={source} />}
+        <span className="md-source-chip-label">{chipLabel}</span>
+        {overflowCount > 0 && (
+          <span className="md-source-chip-overflow">+{overflowCount}</span>
+        )}
+      </>
     );
     const chip = source ? (
       <a
@@ -602,8 +676,12 @@ const LinkComponent = (props: any) => {
       <Popover
         mouseEnterDelay={0.2}
         placement="top"
-        classNames={{ root: "md-source-popover" }}
-        content={<SourcePreviewCard source={source} />}
+        classNames={{ root: "md-source-popover md-source-popover--interactive" }}
+        content={(
+          resolvedSources.length > 1
+            ? <SourcePreviewCarousel sources={resolvedSources} />
+            : <SourcePreviewCard source={source} />
+        )}
       >
         {chip}
       </Popover>

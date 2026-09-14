@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { mergeChatStreamDelta } from "@/modules/chat/utils/streamDelta";
 import MarkdownViewer from "./index";
@@ -47,5 +47,46 @@ describe("MarkdownViewer streamed tables", () => {
     expect(screen.getAllByRole("columnheader")).toHaveLength(3);
     expect(screen.getAllByRole("cell")).toHaveLength(6);
     expect(screen.getAllByText("en.wikipedia.org")).toHaveLength(2);
+    expect(screen.queryByText("+1")).not.toBeInTheDocument();
+  });
+
+  it("shows one connected source capsule and pages through its sources", async () => {
+    render(
+      <MarkdownViewer
+        sources={[
+          {
+            source_type: "external",
+            index: "1.1",
+            title: "Yuan Shikai",
+            url: "https://en.wikipedia.org/wiki/Yuan_Shikai",
+          },
+          {
+            source_type: "external",
+            index: "2.1",
+            title: "Xinhai Revolution",
+            url: "https://en.wikipedia.org/wiki/Xinhai_Revolution",
+          },
+        ]}
+      >
+        {"袁世凯下台。[1](#source-1.1)[2](#source-2.1)"}
+      </MarkdownViewer>,
+    );
+
+    const capsule = screen.getByRole("link", { name: "en.wikipedia.org" });
+    expect(capsule).toHaveTextContent("en.wikipedia.org+1");
+    const icon = capsule.querySelector(".md-source-chip-icon");
+    const favicon = icon?.querySelector("img");
+    expect(favicon).toBeInTheDocument();
+    expect(getComputedStyle(capsule).height).toBe("18px");
+    expect(getComputedStyle(icon as Element).width).toBe("14px");
+    expect(getComputedStyle(favicon as Element).width).toBe("14px");
+
+    fireEvent.mouseEnter(capsule);
+    await waitFor(() => expect(screen.getByText("1/2")).toBeInTheDocument());
+    expect(screen.getByText("Yuan Shikai")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Next source" }));
+    expect(screen.getByText("2/2")).toBeInTheDocument();
+    expect(screen.getByText("Xinhai Revolution")).toBeInTheDocument();
   });
 });
