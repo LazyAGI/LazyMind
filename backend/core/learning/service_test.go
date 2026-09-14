@@ -313,6 +313,29 @@ func TestListPresetsExcludesDeletedRows(t *testing.T) {
 	}
 }
 
+func TestNormalizePreanalysisCandidateEnums(t *testing.T) {
+	if got := normalizePreanalysisLanguage("zh-CN", []string{"zh-Hans"}); got != "zh-Hans" {
+		t.Fatalf("language = %q", got)
+	}
+	if got := normalizePreanalysisSubjectKind("term", "急弯", []string{"character", "word"}); got != "word" {
+		t.Fatalf("subject kind = %q", got)
+	}
+	if got := normalizePreanalysisSubjectKind("", "学", []string{"character", "word"}); got != "character" {
+		t.Fatalf("single-character subject kind = %q", got)
+	}
+}
+
+func TestFallbackPreanalysisCandidatesUsesTermsFromPassage(t *testing.T) {
+	def, _ := CapabilityByKey("chinese_definition")
+	rows := fallbackPreanalysisCandidates(def, PreanalysisItem{Text: "通过铁路道口、急弯、窄路时应当减速。", SegmentID: "segment-1"})
+	if len(rows) == 0 || rows[0].Text != "通过铁路道口" || rows[0].Language != "zh-Hans" || rows[0].SubjectKind != "word" {
+		t.Fatalf("unexpected fallback candidates: %#v", rows)
+	}
+	if rows[0].Context == "" || rows[0].SegmentID != "segment-1" {
+		t.Fatalf("candidate lost document context: %#v", rows[0])
+	}
+}
+
 func TestCustomProfileRejectsUnknownCapability(t *testing.T) {
 	s := testService(t)
 	if _, err := s.CreateProfile(context.Background(), "u", "自定义", "", []CapabilityRef{{Key: "missing"}}); err == nil {

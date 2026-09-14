@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
 import * as api from "./api";
-import DocumentLearningPanel from "./DocumentLearningPanel";
+import DocumentLearningPanel, { displayPresetKey } from "./DocumentLearningPanel";
 
 vi.mock("./api",async()=>{
   const actual=await vi.importActual<typeof import("./api")>("./api");
@@ -14,6 +14,11 @@ beforeEach(()=>{
   vi.clearAllMocks();
   vi.mocked(api.listLearningPresets).mockResolvedValue([{id:"p1",scope_type:"document",scope_id:"doc",document_revision:"r1",capability_key:"chinese_definition",normalized_key:"安全距离",value_json:'{"meaning_in_context":"车辆安全行驶所需的间隔"}',origin:"user",status:"published",priority:0,user_edited:true}]);
   vi.mocked(api.putLearningPreset).mockResolvedValue({});
+});
+
+it("shows source text instead of an internal generated cache key",()=>{
+  expect(displayPresetKey("learning-v1\x1fchinese_definition\x1f1\x1f1\x1f急弯\x1fdafb5d8c130fea84")).toBe("急弯");
+  expect(displayPresetKey("安全距离")).toBe("安全距离");
 });
 
 it("shows existing answers first and creates schema fields without exposing JSON",async()=>{

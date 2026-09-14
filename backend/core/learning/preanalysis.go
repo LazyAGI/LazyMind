@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -146,18 +148,47 @@ func (s *Service) expandPreanalysisItem(ctx context.Context, owner, key string, 
 	if err != nil {
 		return nil, err
 	}
-	prompt := fmt.Sprintf("Extract up to 20 learning subjects for capability %s. Return JSON only as {\"items\":[{\"text\":\"...\",\"language\":\"...\",\"subject_kind\":\"character|word|phrase|sentence|passage\"}]}. Supported languages: %v; kinds: %v. Passage: %q", key, def.Languages, def.SubjectKinds, item.Text)
+	prompt := fmt.Sprintf(`You extract learning subjects from a document passage.
+
+CAPABILITY: %s
+ALLOWED_LANGUAGES: %s
+ALLOWED_SUBJECT_KINDS: %s
+
+Return exactly one valid JSON object and nothing else. Do not use Markdown fences or explanatory text.
+The exact schema is:
+{"items":[{"text":"non-empty text copied verbatim from the passage","language":"one exact value from ALLOWED_LANGUAGES","subject_kind":"one exact value from ALLOWED_SUBJECT_KINDS"}]}
+
+Rules:
+- Extract at most 20 useful, distinct subjects that genuinely occur in the passage.
+- Use only the exact enum strings listed above; never invent aliases such as zh-CN, term, idiom, or concept.
+- For Chinese word explanation, prefer meaningful terms of 2-8 Chinese characters rather than whole sentences.
+- If there is no suitable subject, return {"items":[]}.
+
+<PASSAGE>
+%s
+</PASSAGE>`, key, marshal(def.Languages), marshal(def.SubjectKinds), item.Text)
 	raw, err := algo.GenerateSkill(ctx, algo.SkillGenerateRequest{Content: item.Text, UserInstruct: prompt, LLMConfig: config})
 	if err != nil {
-		return nil, err
+		return fallbackPreanalysisCandidates(def, item), nil
 	}
 	obj, err := extractJSONObject(raw)
 	if err != nil {
-		return nil, err
+		repairPrompt := fmt.Sprintf(`Convert the response below into the required JSON object. Return JSON only.
+Required schema: {"items":[{"text":"...","language":"one of %s","subject_kind":"one of %s"}]}
+Invalid response:
+%s`, marshal(def.Languages), marshal(def.SubjectKinds), truncatePreanalysisResponse(raw))
+		raw, err = algo.GenerateSkill(ctx, algo.SkillGenerateRequest{Content: item.Text, UserInstruct: repairPrompt, LLMConfig: config})
+		if err != nil {
+			return fallbackPreanalysisCandidates(def, item), nil
+		}
+		obj, err = extractJSONObject(raw)
+		if err != nil {
+			return fallbackPreanalysisCandidates(def, item), nil
+		}
 	}
 	rows, ok := obj["items"].([]any)
 	if !ok {
-		return nil, errors.New("model returned invalid preanalysis schema")
+		return fallbackPreanalysisCandidates(def, item), nil
 	}
 	out := make([]PreanalysisItem, 0, len(rows))
 	for _, rawItem := range rows {
@@ -165,12 +196,100 @@ func (s *Service) expandPreanalysisItem(ctx context.Context, owner, key string, 
 		if !ok {
 			continue
 		}
-		candidate := PreanalysisItem{Text: strings.TrimSpace(fmt.Sprint(m["text"])), Language: strings.TrimSpace(fmt.Sprint(m["language"])), SubjectKind: strings.TrimSpace(fmt.Sprint(m["subject_kind"])), Context: item.Text, SegmentID: item.SegmentID, Page: item.Page}
+		candidate := PreanalysisItem{Text: strings.TrimSpace(fmt.Sprint(m["text"])), Language: normalizePreanalysisLanguage(strings.TrimSpace(fmt.Sprint(m["language"])), def.Languages), SubjectKind: normalizePreanalysisSubjectKind(strings.TrimSpace(fmt.Sprint(m["subject_kind"])), strings.TrimSpace(fmt.Sprint(m["text"])), def.SubjectKinds), Context: item.Text, SegmentID: item.SegmentID, Page: item.Page}
 		if candidate.Text != "" && contains(def.Languages, candidate.Language) && contains(def.SubjectKinds, candidate.SubjectKind) {
 			out = append(out, candidate)
 		}
 	}
+	if len(out) == 0 {
+		return fallbackPreanalysisCandidates(def, item), nil
+	}
 	return out, nil
+}
+
+var preanalysisTermPattern = regexp.MustCompile(`[\p{Han}]{2,8}|[A-Za-z][A-Za-z0-9_-]{2,31}`)
+
+func fallbackPreanalysisCandidates(def Capability, item PreanalysisItem) []PreanalysisItem {
+	language := ""
+	if contains(def.Languages, "zh-Hans") {
+		language = "zh-Hans"
+	} else if contains(def.Languages, "en") {
+		language = "en"
+	} else if len(def.Languages) > 0 {
+		language = def.Languages[0]
+	}
+	kind := ""
+	for _, candidate := range []string{"word", "phrase", "character"} {
+		if contains(def.SubjectKinds, candidate) {
+			kind = candidate
+			break
+		}
+	}
+	if language == "" || kind == "" {
+		return nil
+	}
+	seen := map[string]bool{}
+	out := make([]PreanalysisItem, 0, 5)
+	for _, match := range preanalysisTermPattern.FindAllString(item.Text, -1) {
+		text := strings.TrimSpace(match)
+		if text == "" || seen[text] {
+			continue
+		}
+		if language == "en" && strings.IndexFunc(text, func(r rune) bool { return unicode.Is(unicode.Han, r) }) >= 0 {
+			continue
+		}
+		seen[text] = true
+		out = append(out, PreanalysisItem{Text: text, Language: language, SubjectKind: kind, Context: item.Text, SegmentID: item.SegmentID, Page: item.Page})
+		if len(out) == 5 {
+			break
+		}
+	}
+	return out
+}
+
+func truncatePreanalysisResponse(raw string) string {
+	const limit = 4000
+	if len(raw) <= limit {
+		return raw
+	}
+	return raw[:limit]
+}
+
+func normalizePreanalysisLanguage(value string, allowed []string) string {
+	if contains(allowed, value) {
+		return value
+	}
+	lower := strings.ToLower(value)
+	if strings.HasPrefix(lower, "zh") && contains(allowed, "zh-Hans") {
+		return "zh-Hans"
+	}
+	if strings.HasPrefix(lower, "en") && contains(allowed, "en") {
+		return "en"
+	}
+	if value == "" && len(allowed) == 1 {
+		return allowed[0]
+	}
+	return value
+}
+
+func normalizePreanalysisSubjectKind(value, text string, allowed []string) string {
+	if contains(allowed, value) {
+		return value
+	}
+	aliases := map[string]string{"term": "word", "concept": "word", "idiom": "phrase", "词": "word", "词语": "word", "成语": "phrase"}
+	if normalized := aliases[strings.ToLower(value)]; contains(allowed, normalized) {
+		return normalized
+	}
+	if len(allowed) == 1 {
+		return allowed[0]
+	}
+	if len([]rune(text)) == 1 && contains(allowed, "character") {
+		return "character"
+	}
+	if contains(allowed, "word") {
+		return "word"
+	}
+	return value
 }
 
 func (s *Service) CreatePreanalysisTask(ctx context.Context, owner string, in PreanalysisRequest) (PreanalysisTask, error) {

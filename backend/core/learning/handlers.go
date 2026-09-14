@@ -438,19 +438,54 @@ func CreatePreanalysisTask(w http.ResponseWriter, r *http.Request) {
 			common.ReplyErr(w, err.Error(), 500)
 			return
 		}
-		pageToken := ""
-		for {
-			result, loadErr := documentService.ListDocumentChunks(r.Context(), doc.DocumentChunksRequest{UserID: store.UserID(r), DatasetID: in.DatasetID, DocumentID: in.DocumentID, PageToken: pageToken, PageSize: 1000})
-			if loadErr != nil {
-				common.ReplyErr(w, loadErr.Error(), 400)
+		chunkRequest := doc.DocumentChunksRequest{UserID: store.UserID(r), DatasetID: in.DatasetID, DocumentID: in.DocumentID, PageSize: 100, SegmentGroup: "block"}
+		loadChunks := func() error {
+			in.Items = nil
+			chunkRequest.PageToken = ""
+			for {
+				result, loadErr := documentService.ListDocumentChunks(r.Context(), chunkRequest)
+				if loadErr != nil {
+					return loadErr
+				}
+				for _, chunk := range result.Chunks {
+					in.Items = append(in.Items, PreanalysisItem{Text: chunk.Text, Context: chunk.Text, SegmentID: chunk.ID})
+				}
+				chunkRequest.PageToken = result.NextPageToken
+				if chunkRequest.PageToken == "" {
+					return nil
+				}
+			}
+		}
+		if loadErr := loadChunks(); loadErr != nil {
+			common.ReplyErr(w, loadErr.Error(), 400)
+			return
+		}
+		if len(in.Items) == 0 {
+			if ensureErr := documentService.EnsureDocumentChunks(r, chunkRequest); ensureErr != nil {
+				common.ReplyErr(w, ensureErr.Error(), 400)
 				return
 			}
-			for _, chunk := range result.Chunks {
-				in.Items = append(in.Items, PreanalysisItem{Text: chunk.Text, Context: chunk.Text, SegmentID: chunk.ID})
-			}
-			pageToken = result.NextPageToken
-			if pageToken == "" {
-				break
+			// Chunk generation is asynchronous. Wait briefly so one click can
+			// continue into analysis while the generated chunks are persisted for
+			// subsequent reads.
+			deadline := time.NewTimer(30 * time.Second)
+			ticker := time.NewTicker(time.Second)
+			defer deadline.Stop()
+			defer ticker.Stop()
+			for len(in.Items) == 0 {
+				select {
+				case <-r.Context().Done():
+					common.ReplyErr(w, "document chunk generation canceled", 408)
+					return
+				case <-deadline.C:
+					common.ReplyErr(w, "document chunks are still being generated; please retry shortly", 409)
+					return
+				case <-ticker.C:
+					if loadErr := loadChunks(); loadErr != nil {
+						common.ReplyErr(w, loadErr.Error(), 400)
+						return
+					}
+				}
 			}
 		}
 	}

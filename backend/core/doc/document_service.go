@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"mime"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -97,7 +98,10 @@ type DocumentChunksRequest struct {
 	DocumentID string
 	PageToken  string
 	PageSize   int
-	Caller     DatasetCatalogCaller
+	// SegmentGroup lets callers read the same group that is shown in the
+	// document UI. Empty keeps the historical auto-selected group.
+	SegmentGroup string
+	Caller       DatasetCatalogCaller
 }
 
 // DocumentReadRequest describes one document read and its optional expansions.
@@ -187,7 +191,38 @@ func (s *DocumentService) ListDocumentChunks(ctx context.Context, req DocumentCh
 	if err != nil {
 		return DocumentChunksResult{}, err
 	}
-	return listDocumentChunksFromRecord(ctx, rec, req.DatasetID, req.DocumentID, req.PageToken, req.PageSize)
+	return listDocumentChunksFromRecord(ctx, rec, req.DatasetID, req.DocumentID, req.PageToken, req.PageSize, req.SegmentGroup)
+}
+
+// EnsureDocumentChunks asks the parsing service to materialize and persist the
+// requested group. It is intended for documents created at a read-only
+// processing level, where the source has been parsed but derived chunks have
+// not been generated yet.
+func (s *DocumentService) EnsureDocumentChunks(r *http.Request, req DocumentChunksRequest) error {
+	rec, err := s.loadRecord(r.Context(), req.UserID, req.DatasetID, req.DocumentID, req.Caller)
+	if err != nil {
+		return err
+	}
+	kbID := strings.TrimSpace(rec.dataset.KbID)
+	if kbID == "" {
+		return &DocumentServiceError{Code: DocumentServiceInternal, Message: "knowledge backend id is empty"}
+	}
+	docID := strings.TrimSpace(rec.row.LazyllmDocID)
+	if docID == "" {
+		return &DocumentServiceError{Code: DocumentServiceNotFound, Message: "parsed document is not available"}
+	}
+	group := strings.TrimSpace(req.SegmentGroup)
+	if group == "" {
+		group = "block"
+	}
+	_, err = callExternalReparseDocs(r, reparseRequest{
+		DocIDs:         []string{docID},
+		KbID:           kbID,
+		NgNames:        []string{group},
+		Strategy:       "rebuild",
+		IdempotencyKey: "ensure-chunks-" + req.DatasetID + "-" + req.DocumentID + "-" + group,
+	})
+	return err
 }
 
 // GetDocument loads and authorizes the document once, then evaluates only the
@@ -206,7 +241,7 @@ func (s *DocumentService) GetDocument(ctx context.Context, req DocumentReadReque
 		result.Content = &content
 	}
 	if req.IncludeChunks {
-		chunks, err := listDocumentChunksFromRecord(ctx, rec, req.DatasetID, req.DocumentID, req.PageToken, req.PageSize)
+		chunks, err := listDocumentChunksFromRecord(ctx, rec, req.DatasetID, req.DocumentID, req.PageToken, req.PageSize, "")
 		if err != nil {
 			return DocumentReadResult{}, err
 		}
@@ -238,7 +273,7 @@ func readDocumentContentFromRecord(rec documentServiceRecord) (DocumentContent, 
 	return DocumentContent{Text: text, MIMEType: mimeType, Truncated: truncated}, nil
 }
 
-func listDocumentChunksFromRecord(ctx context.Context, rec documentServiceRecord, datasetID, documentID, pageToken string, requestedPageSize int) (DocumentChunksResult, error) {
+func listDocumentChunksFromRecord(ctx context.Context, rec documentServiceRecord, datasetID, documentID, pageToken string, requestedPageSize int, requestedGroup string) (DocumentChunksResult, error) {
 	lazyDocID := strings.TrimSpace(rec.row.LazyllmDocID)
 	if lazyDocID == "" {
 		return DocumentChunksResult{Chunks: []DocumentChunk{}, TotalSize: 0}, nil
@@ -257,7 +292,10 @@ func listDocumentChunksFromRecord(ctx context.Context, rec documentServiceRecord
 		return DocumentChunksResult{}, &DocumentServiceError{Code: DocumentServiceInternal, Message: "knowledge backend id is empty"}
 	}
 	algoID := parseDatasetAlgo(rec.dataset.Ext).AlgoID
-	group := resolveDefaultChunkSegmentGroup(ctx, algoID, "DocumentService.ListDocumentChunks")
+	group := strings.TrimSpace(requestedGroup)
+	if group == "" {
+		group = resolveDefaultChunkSegmentGroup(ctx, algoID, "DocumentService.ListDocumentChunks")
+	}
 	queryURL := buildChunksURL(kbID, algoID, lazyDocID, group, page, pageSize)
 	raw, err := fetchDocumentChunkPayload(ctx, queryURL)
 	if err != nil {
