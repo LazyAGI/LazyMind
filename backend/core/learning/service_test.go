@@ -293,6 +293,26 @@ func TestPresetPrecedenceAndIsolation(t *testing.T) {
 		t.Fatalf("owner isolation failed: %#v %v", row, err)
 	}
 }
+
+func TestListPresetsExcludesDeletedRows(t *testing.T) {
+	s := testService(t)
+	ctx := context.Background()
+	row, err := s.PutPreset(ctx, "u", PresetInput{ScopeType: "document", ScopeID: "doc", CapabilityKey: "general_translation", Key: "hello", Value: map[string]any{"translation": "你好", "target_language": "zh"}, Origin: "user"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeletePreset(ctx, "u", row.ID); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := s.ListPresets(ctx, "u", "document", "doc", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("deleted presets should be hidden, got %#v", rows)
+	}
+}
+
 func TestCustomProfileRejectsUnknownCapability(t *testing.T) {
 	s := testService(t)
 	if _, err := s.CreateProfile(context.Background(), "u", "自定义", "", []CapabilityRef{{Key: "missing"}}); err == nil {

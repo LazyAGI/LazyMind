@@ -30,10 +30,22 @@ export const archiveLearningBook = async (id:string) => (await axiosInstance.del
 export const createLearningReviewSession = async (bookId:string,locale:string,limit=20) => (await axiosInstance.post(`${root}/review/sessions`,{book_id:bookId,locale,limit})).data.data;
 export const answerLearningQuestion = async (sessionId:string,value:{question_id:string;response?:string;rating?:string;idempotency_key:string}) => (await axiosInstance.post(`${root}/review/sessions/${sessionId}/answers`,value)).data.data;
 export const putLearningPreset = async (value:Record<string,unknown>) => (await axiosInstance.put(`${root}/presets`,value)).data.data;
-export const createPreanalysisTask = async (value:{dataset_id:string;document_id:string;document_revision?:string;capability_keys:string[]}) => (await axiosInstance.post(`${root}/preanalysis/tasks`,value)).data.data as {id:string;status:string;total:number;completed:number;failed:number;result_json:string};
-export const runPreanalysisTask = async (id:string) => (await axiosInstance.post(`${root}/preanalysis/tasks/${id}:run`,{})).data.data as {id:string;status:string;total:number;completed:number;failed:number;result_json:string};
-export const getPreanalysisTask = async (id:string) => (await axiosInstance.get(`${root}/preanalysis/tasks/${id}`)).data.data as {id:string;status:string;total:number;completed:number;failed:number;result_json:string};
+export interface LearningPreset { id:string; scope_type:string; scope_id:string; document_revision:string; capability_key:string; normalized_key:string; value_json:string; origin:string; status:string; priority:number; user_edited:boolean }
+const normalizePreset=(row:Record<string,unknown>):LearningPreset=>({
+  id:String(row.id??row.ID??""),scope_type:String(row.scope_type??row.ScopeType??""),scope_id:String(row.scope_id??row.ScopeID??""),document_revision:String(row.document_revision??row.DocumentRevision??""),capability_key:String(row.capability_key??row.CapabilityKey??""),normalized_key:String(row.normalized_key??row.NormalizedKey??""),value_json:String(row.value_json??row.ValueJSON??"{}"),origin:String(row.origin??row.Origin??""),status:String(row.status??row.Status??""),priority:Number(row.priority??row.Priority??0),user_edited:Boolean(row.user_edited??row.UserEdited),
+});
+export const listLearningPresets = async (scopeType:string,scopeId:string) => {
+  const data=(await axiosInstance.get<Envelope<{items:Record<string,unknown>[] }>>(`${root}/presets`,{params:{scope_type:scopeType,scope_id:scopeId}})).data.data;
+  return (data.items||[]).map(normalizePreset);
+};
+export const updateLearningPreset = async (id:string,value:Record<string,unknown>,priority=0) => normalizePreset((await axiosInstance.patch(`${root}/presets/${id}`,{value,priority})).data.data);
+export const deleteLearningPreset = async (id:string) => (await axiosInstance.delete(`${root}/presets/${id}`)).data.data;
+export interface PreanalysisTask {id:string;status:string;total:number;completed:number;failed:number;result_json:string}
+const normalizeTask=(row:Record<string,unknown>):PreanalysisTask=>({id:String(row.id??row.ID??""),status:String(row.status??row.Status??""),total:Number(row.total??row.Total??0),completed:Number(row.completed??row.Completed??0),failed:Number(row.failed??row.Failed??0),result_json:String(row.result_json??row.ResultJSON??"")});
+export const createPreanalysisTask = async (value:{dataset_id:string;document_id:string;document_revision?:string;capability_keys:string[]}) => normalizeTask((await axiosInstance.post(`${root}/preanalysis/tasks`,value)).data.data);
+export const runPreanalysisTask = async (id:string) => normalizeTask((await axiosInstance.post(`${root}/preanalysis/tasks/${id}:run`,{})).data.data);
+export const getPreanalysisTask = async (id:string) => normalizeTask((await axiosInstance.get(`${root}/preanalysis/tasks/${id}`)).data.data);
 export const cancelPreanalysisTask = async (id:string) => (await axiosInstance.post(`${root}/preanalysis/tasks/${id}:cancel`,{})).data.data;
-export const listPreanalysisDrafts = async (id:string) => (await axiosInstance.get(`${root}/preanalysis/tasks/${id}/drafts`)).data.data as {presets:Array<{id:string;capability_key:string;normalized_key:string;value_json:string}>;contents:Array<{id:string;capability_key:string;content_json:string}>};
+export const listPreanalysisDrafts = async (id:string) => { const data=(await axiosInstance.get(`${root}/preanalysis/tasks/${id}/drafts`)).data.data as Record<string,unknown>; const presets=(data.presets??data.Presets??[]) as Array<Record<string,unknown>>; const contents=(data.contents??data.Contents??[]) as Array<Record<string,unknown>>; return {presets:presets.map(normalizePreset),contents}; };
 export const publishPreanalysisDrafts = async (id:string,documentRevision:string,presetIds:string[],contentIds:string[]) => (await axiosInstance.post(`${root}/preanalysis/tasks/${id}/drafts:publish`,{document_revision:documentRevision,preset_ids:presetIds,content_ids:contentIds})).data.data;
 export const importLearningDictionary = async (value:Record<string,unknown>) => (await axiosInstance.post(`${root}/dictionaries:import`,value)).data.data as {imported:number};

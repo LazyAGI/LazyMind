@@ -320,7 +320,7 @@ func (s *Service) ResolvePreset(ctx context.Context, owner, capability, key, dat
 }
 
 func (s *Service) ListPresets(ctx context.Context, owner, scopeType, scopeID, capability string) ([]Preset, error) {
-	q := s.db.WithContext(ctx).Where("owner_id = ?", owner)
+	q := s.db.WithContext(ctx).Where("owner_id = ? AND status = ?", owner, "published")
 	if scopeType != "" {
 		q = q.Where("scope_type = ?", scopeType)
 	}
