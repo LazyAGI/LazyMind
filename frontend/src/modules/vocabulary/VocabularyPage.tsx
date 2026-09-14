@@ -180,7 +180,7 @@ export default function VocabularyPage() {
   const [objectiveAnswer, setObjectiveAnswer] = useState("");
   const [form] = Form.useForm();
   const [newWordForm] = Form.useForm();
-  const load = useCallback(async () => {
+  const load = useCallback(async (preferredWordbookId?: string) => {
     const setting = await getVocabularyProvider();
     const active = setting.selected_provider;
     const [nextBooks, nextDecks, capabilityResult] = await Promise.all([
@@ -188,7 +188,7 @@ export default function VocabularyPage() {
       active === "anki" ? listAnkiDecks().catch(() => []) : Promise.resolve([]),
       desktop ? listLearningCapabilities().catch(() => ({ items: [], local_available: false })) : Promise.resolve({ items: [], local_available: false }),
     ]);
-    let selected = wordbookId || setting.local_default_wordbook_id || "";
+    let selected = preferredWordbookId || wordbookId || setting.local_default_wordbook_id || "";
     if (active === "local" && !nextBooks.some((book) => book.id === selected))
       selected =
         nextBooks.find((book) => book.name === "默认生词本")?.id ||
@@ -349,6 +349,8 @@ export default function VocabularyPage() {
             }),
           );
           setWordbookId(book.id);
+          await load(book.id);
+          return;
         }
         await load();
       },

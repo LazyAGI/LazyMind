@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import VocabularyPage from "./VocabularyPage";
-import { getActiveVocabularyReviewSession, startVocabularyReviewSession, submitVocabularySessionReview } from "./api";
+import { createWordbook, getActiveVocabularyReviewSession, listVocabulary, listWordbooks, saveVocabularyProvider, startVocabularyReviewSession, submitVocabularySessionReview } from "./api";
 
 vi.mock("@/runtime/mode", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/runtime/mode")>()), isVocabularyEnabled: () => true }));
 vi.mock("./api", () => ({
@@ -65,5 +65,18 @@ describe("VocabularyPage", () => {
     vi.mocked(getActiveVocabularyReviewSession).mockResolvedValueOnce({active:true,session:{id:"shared",provider:"local",wordbook_id:"default",wordbook_name:"默认生词本",status:"active",expires_at:new Date(Date.now()+3600000).toISOString()}});
     render(<VocabularyPage/>);
     expect(await screen.findByRole("button",{name:"继续复习"})).toBeTruthy();
+  });
+  it("keeps a newly created local wordbook selected while reloading", async () => {
+    vi.mocked(listWordbooks)
+      .mockResolvedValueOnce([{id:"default",name:"默认生词本",description:"",capability_key:"english_definition",question_types:[]}])
+      .mockResolvedValue([{id:"default",name:"默认生词本",description:"",capability_key:"english_definition",question_types:[]},{id:"new-book",name:"技术词汇",description:"",capability_key:"english_definition",question_types:["single_choice","text_input","cloze"]}]);
+    vi.mocked(createWordbook).mockResolvedValueOnce({id:"new-book",name:"技术词汇",description:"",capability_key:"english_definition",question_types:["single_choice","text_input","cloze"]});
+    render(<VocabularyPage/>);
+    fireEvent.click(await screen.findByRole("button",{name:"新建学习集"}));
+    fireEvent.change(await screen.findByPlaceholderText("输入名称"),{target:{value:"技术词汇"}});
+    fireEvent.click(screen.getByRole("button",{name:"OK"}));
+    await waitFor(()=>expect(saveVocabularyProvider).toHaveBeenCalledWith(expect.objectContaining({local_default_wordbook_id:"new-book"})));
+    await waitFor(()=>expect(listVocabulary).toHaveBeenLastCalledWith("local",expect.objectContaining({wordbook_id:"new-book"})));
+    expect(saveVocabularyProvider).not.toHaveBeenCalledWith(expect.objectContaining({local_default_wordbook_id:"default"}));
   });
 });
