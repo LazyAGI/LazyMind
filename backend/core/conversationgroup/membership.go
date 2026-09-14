@@ -26,16 +26,14 @@ func moveMembershipTx(tx *gorm.DB, uid, cid string, target *string, source, runI
 		return membershipChange{}, err
 	}
 	exists := err == nil
-	before := state.GroupID
-	if !exists {
-		// Older membership rows may predate the durable state table.
-		var member orm.ConversationGroupMember
-		err = tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("conversation_id=? AND user_id=?", cid, uid).Take(&member).Error
-		if err == nil {
-			before = groupIDOrNil(member.GroupID)
-		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-			return membershipChange{}, err
-		}
+	// Membership is authoritative for the previous group; state only carries the undo fence.
+	var before *string
+	var current orm.ConversationGroupMember
+	err = tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("conversation_id=? AND user_id=?", cid, uid).Take(&current).Error
+	if err == nil {
+		before = groupIDOrNil(current.GroupID)
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return membershipChange{}, err
 	}
 	now := time.Now().UTC()
 	change := membershipChange{BeforeGroupID: before, AfterGroupID: target, Revision: state.Revision + 1}

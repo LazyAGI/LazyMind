@@ -8003,7 +8003,7 @@ const zhCN = {
     showLess: "收起",
     noSearchResults: "未找到匹配的对话组",
     emptyGroups: "还没有对话组，为一个主题建个组吧",
-    failedEntry: "整理未完成",
+    failedEntry: "整理未完成", canceledEntry: "整理已取消",
     noFreeConversations: "暂无可整理的自由对话",
     belongsTo: "归属于「{{name}}」",
 
@@ -8018,7 +8018,8 @@ const zhCN = {
 
     searchGroups: "搜索对话组",
     groupPickerLabel: "所属分组", freeConversation: "自由会话",
-    callError: { model_config_changed: "模型配置已变化，需要重新整理", invalid_snapshot: "本次会话快照已失效，需要重新整理", model_config: "暂时无法读取模型配置", authentication_failed: "模型鉴权失败，请检查 API Key", permission_denied: "无权访问模型，请检查权限", input_too_large: "单条输入仍超出模型容量，请调整模型配置", output_too_large: "最小批次输出仍超出限制，请调整模型配置", token_limit: "模型 Token 额度或容量受限，请检查模型配置", rate_limited: "模型请求频率受限，请稍后重试", transport_error: "模型连接异常，请稍后重试", request_timeout: "模型请求超时，请稍后重试", first_response_timeout: "模型在 300 秒内未返回有效内容", stream_idle_timeout: "模型流已连续 120 秒没有新内容", connection_timeout: "连接模型服务超时", connection_error: "模型服务连接失败或中断", response_timeout: "等待模型响应超时", cancellation_unconfirmed: "尚未确认旧调用已退出，未发起重试", scope_audit_unresolved: "候选组多次调整后仍无法形成一致的收录范围，请重新整理。" },
+    failureReference: "错误码：{{code}} · 任务：{{id}}",
+    callError: { model_config_changed: "模型配置已变化，需要重新整理", invalid_snapshot: "本次会话快照已失效，需要重新整理", model_config: "暂时无法读取模型配置", authentication_failed: "模型鉴权失败，请检查 API Key", permission_denied: "无权访问模型，请检查权限", input_too_large: "单条输入仍超出模型容量，请调整模型配置", output_too_large: "最小批次输出仍超出限制，请调整模型配置", token_limit: "模型 Token 额度或容量受限，请检查模型配置", rate_limited: "模型请求频率受限，请稍后重试", transport_error: "模型连接异常，请稍后重试", request_timeout: "模型请求超时，请稍后重试", first_response_timeout: "模型在 300 秒内未返回有效内容", stream_idle_timeout: "模型流已连续 120 秒没有新内容", connection_timeout: "连接模型服务超时", connection_error: "模型服务连接失败或中断", response_timeout: "等待模型响应超时", cancellation_unconfirmed: "尚未确认旧调用已退出，未发起重试", scope_audit_unresolved: "本批分组范围修复未通过，重试将保留前序进度并从保守模式重新生成本批方案", quota_exhausted: "模型额度不足，请恢复额度后重试", balance_exhausted: "模型账户余额不足，请充值后重试", usage_limit_exceeded: "模型用量受限，请解除限制后重试", organization_spend_limit_exceeded: "组织模型预算已用尽，请调整预算后重试", project_spend_limit_exceeded: "项目模型预算已用尽，请调整预算后重试", invalid_output: "本次模型输出未通过校验，重试将重新生成失败步骤的结果", database_unavailable: "数据库暂时不可用，可保留进度重试", concurrency_limited: "模型并发受限，请稍后重试", provider_overloaded: "模型服务繁忙，请稍后重试", service_unavailable: "模型服务暂时不可用，请稍后重试", provider_internal_error: "模型服务内部错误，请稍后重试", lease_lost: "任务执行权已失效，重试将先确认旧调用退出", lock_expired: "任务执行锁已过期，可保留进度重试", model_configuration: "模型配置无效，请检查配置", invalid_task_config: "整理任务参数或协议异常，请检查服务配置", not_found: "模型或服务地址不存在，请检查配置", invalid_request: "模型请求参数不受支持，请检查配置", unprocessable_entity: "模型无法处理此请求，请检查输入与参数", input_filtered: "模型服务限制了本次输入，请检查内容", output_filtered: "模型服务限制了本次输出，请检查内容", protocol_error: "模型响应协议异常，请检查服务兼容性", conflict: "模型请求存在状态冲突，请检查服务状态", provider_rejected: "模型服务拒绝了请求，请检查失败原因", incremental_step_failed: "整理执行异常，请检查任务记录后恢复", preparation_failed: "整理执行异常，请检查任务记录后恢复", apply_failed: "整理执行异常，请检查任务记录后恢复", update_failed: "整理执行异常，请检查任务记录后恢复", model_failed: "整理执行异常，请检查任务记录后恢复", worker_failed: "整理执行异常，请检查任务记录后恢复", worker_exited: "整理执行异常，请检查任务记录后恢复", handler_failed: "整理执行异常，请检查任务记录后恢复", handler_not_found: "整理执行异常，请检查任务记录后恢复", invalid_payload: "整理执行异常，请检查任务记录后恢复", run_not_found: "整理执行异常，请检查任务记录后恢复", step_limit: "整理执行异常，请检查任务记录后恢复", },
     steps: {
       label: "整理流程", preparation: "准备会话摘要", organization: "整理会话分组", review: "复核整理结果", application: "应用整理结果",
       preparationDetail: "正在准备会话摘要", organizationDetail: "正在匹配并整理分组", reviewDetail: "正在校验整理结果的完整性", applicationDetail: "正在检查并保存分组结果",
@@ -8035,7 +8036,8 @@ const zhCN = {
     removeFromGroup: "移出组", newAndMove: "新建组并归入", organize: "整理会话",
     recentResult: "最近结果", title: "历史会话整理", noResult: "还没有整理结果",
     assigned: "已归组", free: "暂未归组", keepFree: "保持未归组", done: "整理完成",
-    undone: "已撤回本次整理", retry: "重试本次整理", restart: "重新整理", retryHint: "将保留本次进度重试；若旧调用尚未停止，会先确认其退出。", restartAlternativeHint: "重试后仍未完成，也可以使用当前配置从头重新整理。", restartHint: "本次任务无法继续。若提示配置、额度或容量问题，请先处理，再使用当前配置重新整理。", blockedHint: "此错误暂不支持重试。请先检查模型配置或联系管理员处理，再发起新的整理。", cancelRun: "取消整理", canceled: "整理已取消",
+    undoPartial: "本次撤销有 {{count}} 条变更未恢复，对应会话保持当前归属，请检查整理结果。",
+    undone: "已撤回本次整理", retry: "重试本次整理", restart: "重新整理", retryHint: "已保留 {{current}}/{{total}} 条进度。请先处理上述原因；重试前会确认旧调用已退出。", restartHint: "当前配置或会话快照已变化或失效，需要使用当前配置重新整理。", blockedHint: "当前无法安全恢复，请先处理上述原因并检查任务记录。", cancelRun: "取消整理", canceled: "整理已取消",
     failed: "整理未完成", count: "{{count}} 段对话", empty: "组内还没有对话",
     retryLoad: "重新加载", loadFailed: "暂时无法加载对话组", finish: "完成",
     starting: "正在启动整理",

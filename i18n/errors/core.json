@@ -1637,6 +1637,7 @@
   "2002747": {"en-US": "Organizer failed", "zh-CN": "整理执行状态无效，请重新整理"},
   "2002748": {"en-US": "Invalid incremental identity or length", "zh-CN": "整理执行状态无效，请重新整理"},
   "2002750": {"en-US": "Conversation organizer group names are locked", "zh-CN": "整理期间暂不可新建或重命名分组"},
+  "2002752": {"en-US": "This task cannot be restarted; check its recovery status", "zh-CN": "此任务当前不能重新整理，请检查恢复状态"},
   "2002751": {"en-US": "Invalid opening batch result count", "zh-CN": "会话摘要批量结果数量不匹配"},
   "2002800": {"en-US": "Skill to Workflow preflight failed", "zh-CN": "Skill 转 Workflow 前置检查失败"},
   "2002801": {"en-US": "Failed to cancel generation", "zh-CN": "取消生成任务失败"},

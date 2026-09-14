@@ -84,7 +84,11 @@ func handleOrganizerJob(ctx context.Context, job asyncjob.Job, reporter asyncjob
 	db := store.DB()
 	var run orm.ConversationOrganizerRun
 	if err := db.WithContext(ctx).Where("id=? AND user_id=?", payload.RunID, job.CreateUserID).Take(&run).Error; err != nil {
-		return asyncjob.Result{Permanent: true, ErrorCode: "run_not_found"}, err
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return asyncjob.Result{Permanent: true, ErrorCode: "run_not_found"}, err
+		}
+		code, retryable := organizerFailure("handler_failed", err)
+		return asyncjob.Result{Permanent: !retryable, ErrorCode: code}, err
 	}
 	if run.Status == "canceled" || run.Status == "succeeded" || run.Status == "undone" || run.Status == "confirmed" {
 		raw, _ := json.Marshal(map[string]any{"run_id": run.ID, "status": run.Status})
@@ -112,7 +116,8 @@ func handleOrganizerJob(ctx context.Context, job asyncjob.Job, reporter asyncjob
 		if err == errLeaseLost {
 			return asyncjob.Result{ErrorCode: "lease_lost"}, err
 		}
-		return asyncjob.Result{ErrorCode: "update_failed"}, err
+		code, retryable := organizerFailure("update_failed", err)
+		return asyncjob.Result{Permanent: !retryable, ErrorCode: code}, err
 	}
 	if !settleOrganizerStream(ctx, run.StreamJSON) {
 		_ = ownedRunUpdate(ctx, db, run.ID, job, "running", map[string]any{"stage": "canceling"})
@@ -145,7 +150,7 @@ func handleOrganizerJob(ctx context.Context, job asyncjob.Job, reporter asyncjob
 		proposal := organizerProposal{NewGroups: []proposedNewGroup{}, ExistingGroupAssignments: []proposedAssignment{}, FreeConversationIDs: []string{}}
 		raw, _ := json.Marshal(proposal)
 		if err := applyProposal(ctx, db, run, job, proposal, raw); err != nil {
-			return failRun(ctx, db, run, job, "apply_failed", err)
+			return retryOrFailRun(ctx, db, run, job, "apply_failed", err)
 		}
 		result, _ := json.Marshal(map[string]any{"run_id": run.ID, "status": "succeeded"})
 		return asyncjob.Result{ResultJSON: result}, nil
@@ -172,7 +177,7 @@ func handleOrganizerJob(ctx context.Context, job asyncjob.Job, reporter asyncjob
 		}
 		raw, _ := json.Marshal(proposal)
 		if err := applyProposal(ctx, db, run, job, *proposal, raw); err != nil {
-			return failRun(ctx, db, run, job, "apply_failed", err)
+			return retryOrFailRun(ctx, db, run, job, "apply_failed", err)
 		}
 		result, _ := json.Marshal(map[string]any{"run_id": run.ID, "status": "succeeded"})
 		return asyncjob.Result{ResultJSON: result}, nil

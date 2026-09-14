@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"sort"
 	"strings"
 
@@ -176,14 +177,14 @@ func applyCandidateOperation(cards map[string]directoryCard, op candidateOperati
 		affected = []string{id}
 		card.Scope = op.Scope
 	case "merge":
-		if len(op.SourceIDs) < 2 {
+		if len(op.SourceIDs) < 2 || len(op.SourceIDs) > 5 {
 			return bad()
 		}
 		seen := map[string]bool{}
 		card.Count = 0
 		for _, source := range op.SourceIDs {
 			target, err := directoryTarget(cards, source)
-			if err != nil || seen[target] || cards[target].Kind != "candidate" {
+			if err != nil || seen[target] || cards[target].Kind != "candidate" || cards[target].Count > 5 {
 				return bad()
 			}
 			seen[target] = true
@@ -323,6 +324,17 @@ func addScopeRepairNewMembers(evidence *incrementalScopeRepair, cards map[string
 	return nil
 }
 
+func scopeRepairForRows(repair incrementalScopeRepair, rows []orm.ConversationOrganizerSnapshotItem) incrementalScopeRepair {
+	current := map[string]bool{}
+	for _, row := range rows {
+		current[row.ConversationID] = true
+	}
+	repair.NewMembers = slices.DeleteFunc(slices.Clone(repair.NewMembers), func(item snapshotConversation) bool {
+		return !current[item.ID]
+	})
+	return repair
+}
+
 func validateScopeAudit(out organizerStepOutput, rows []orm.ConversationOrganizerSnapshotItem) ([]snapshotConversation, error) {
 	validReason := out.AuditReason == scopeAuditAccepted || out.AuditReason == scopeAuditCoverageGap || out.AuditReason == scopeAuditNoSharedScenario || out.AuditReason == scopeAuditBoundaryTooBroad
 	if !validReason || out.Accepted != (out.AuditReason == scopeAuditAccepted) || (out.Accepted && len(out.RejectedIDs) != 0) || (out.AuditReason == scopeAuditCoverageGap && len(out.RejectedIDs) == 0) {
@@ -387,7 +399,7 @@ func saveIncrementalRepair(ctx context.Context, db *gorm.DB, run *orm.Conversati
 		if cp.PreserveExistingCandidates {
 			return errScopeAuditUnresolved
 		}
-		return cause
+		return &organizerCallFailure{code: "invalid_output"}
 	}
 	return saveIncremental(ctx, db, run, job, *cp, nil)
 }
@@ -463,7 +475,7 @@ func runIncrementalStep(ctx context.Context, db *gorm.DB, run *orm.ConversationO
 	if err != nil {
 		return nil, err
 	}
-	if ensureGroupIDs(&cp, cards) {
+	if changed := ensureGroupIDs(&cp, cards); changed || len(run.CheckpointJSON) == 0 {
 		if err := saveIncremental(ctx, db, run, job, cp, nil); err != nil {
 			return nil, err
 		}
@@ -481,7 +493,11 @@ func runIncrementalStep(ctx context.Context, db *gorm.DB, run *orm.ConversationO
 		p, err := incrementalProposal(db, *run, snapshot, cards)
 		return &p, err
 	}
-	rows, err := incrementalItems(db, run.ID, cp.NextOrdinal, cp.BatchSize)
+	batchSize := cp.BatchSize
+	if cp.Pending != nil {
+		batchSize = len(cp.Pending.Assignments)
+	}
+	rows, err := incrementalItems(db, run.ID, cp.NextOrdinal, batchSize)
 	if err != nil {
 		return nil, err
 	}
@@ -490,7 +506,8 @@ func runIncrementalStep(ctx context.Context, db *gorm.DB, run *orm.ConversationO
 	}
 	input := map[string]any{"task_id": run.ID, "snapshot_id": run.ID, "snapshot_hash": run.SnapshotHash, "identity": cp.Identity, "cursor": cp.Cursor, "repair": cp.Repair, "phase": "batch", "conversations": itemConversations(rows), "directory": mappedDirectory(cards, cp)}
 	if cp.ScopeRepair != nil {
-		input["scope_repair"] = cp.ScopeRepair
+		repair := scopeRepairForRows(*cp.ScopeRepair, rows)
+		input["scope_repair"] = &repair
 	}
 	if cp.PreserveExistingCandidates {
 		input["preserve_existing_candidates"] = true
@@ -498,6 +515,12 @@ func runIncrementalStep(ctx context.Context, db *gorm.DB, run *orm.ConversationO
 	// Rebuild tentative operations from the committed directory. Only audit progress persists.
 	if cp.Pending != nil {
 		pending := cp.Pending
+		type operationAudit struct {
+			evidence incrementalScopeRepair
+			buckets  []string
+		}
+		audits := make([]operationAudit, len(pending.Operations))
+		// Preserve each operation's old-member evidence while building the complete directory.
 		for i, op := range pending.Operations {
 			var scopeChange incrementalScopeRepair
 			if op.Op == "update" || op.Op == "merge" {
@@ -536,9 +559,42 @@ func runIncrementalStep(ctx context.Context, db *gorm.DB, run *orm.ConversationO
 			if e != nil {
 				return nil, e
 			}
+			audits[i] = operationAudit{evidence: scopeChange, buckets: buckets}
+		}
+		// Resolve every assignment against the completed directory before auditing or writing.
+		assignments := pending.Assignments
+		if len(assignments) == 0 || len(assignments) > len(rows) {
+			return nil, errors.New("invalid batch partition")
+		}
+		expected := map[string]bool{}
+		for _, row := range rows[:len(assignments)] {
+			expected[row.ConversationID] = true
+		}
+		for _, assignment := range assignments {
+			if !expected[assignment.ID] {
+				return nil, errors.New("invalid or duplicate assignment")
+			}
+			delete(expected, assignment.ID)
+			if _, err := directoryTarget(cards, assignment.GroupID); err != nil {
+				return nil, err
+			}
+		}
+		for i, op := range pending.Operations {
+			buckets, scopeChange := audits[i].buckets, audits[i].evidence
 			if len(buckets) > 0 {
-				if e := addScopeRepairNewMembers(&scopeChange, cards, op, pending.Assignments, rows); e != nil {
-					return nil, e
+				targetID := op.ID
+				if op.Op == "merge" {
+					targetID = op.TargetID
+				}
+				target, err := directoryTarget(cards, targetID)
+				if err != nil {
+					return nil, err
+				}
+				// Later updates/merges may change the scope that these members will receive.
+				op.Scope = cards[target].Scope
+				scopeChange.Operation.Scope = op.Scope
+				if err := addScopeRepairNewMembers(&scopeChange, cards, op, assignments, rows); err != nil {
+					return nil, err
 				}
 			}
 			if i < pending.Operation {
@@ -546,7 +602,7 @@ func runIncrementalStep(ctx context.Context, db *gorm.DB, run *orm.ConversationO
 			}
 			if len(buckets) > 0 {
 				var audit []orm.ConversationOrganizerSnapshotItem
-				if e := db.Where("run_id=? AND assignment IN ? AND ordinal>?", run.ID, buckets, pending.AuditOrdinal).Order("ordinal").Limit(50).Find(&audit).Error; e != nil {
+				if e := db.Where("run_id=? AND assignment IN ? AND ordinal>?", run.ID, buckets, pending.AuditOrdinal).Order("ordinal").Limit(cp.BatchSize).Find(&audit).Error; e != nil {
 					return nil, e
 				}
 				if len(audit) > 0 {
@@ -560,14 +616,18 @@ func runIncrementalStep(ctx context.Context, db *gorm.DB, run *orm.ConversationO
 						return nil, e
 					}
 					if result.Status != "succeeded" {
+						if (result.ErrorCode == "input_too_large" || result.ErrorCode == "output_too_large") && cp.BatchSize > 1 {
+							cp.BatchSize /= 2
+							return nil, saveIncremental(ctx, db, run, job, cp, nil)
+						}
 						return nil, failedOrganizerCall(result)
 					}
 					if result.Output.Identity != cp.Identity || result.Output.Processed != len(audit) {
-						return nil, errors.New("invalid scope audit identity")
+						return nil, &organizerCallFailure{code: "invalid_task_config"}
 					}
 					rejected, auditErr := validateScopeAudit(result.Output, audit)
 					if auditErr != nil {
-						return nil, auditErr
+						return nil, &organizerCallFailure{code: "invalid_output"}
 					}
 					if !result.Output.Accepted {
 						recordScopeAuditRejection(&cp, pending, originalCards, scopeChange, result.Output.AuditReason, rejected)
@@ -582,21 +642,8 @@ func runIncrementalStep(ctx context.Context, db *gorm.DB, run *orm.ConversationO
 			pending.Operation = i + 1
 			pending.AuditOrdinal = -1
 		}
-		// All operations audited. Validate and commit exactly this prefix of the batch.
-		assignments := pending.Assignments
-		if len(assignments) == 0 || len(assignments) > len(rows) {
-			return nil, errors.New("invalid batch partition")
-		}
-		expected := map[string]snapshotConversation{}
-		for _, item := range itemConversations(rows[:len(assignments)]) {
-			expected[item.ID] = item
-		}
+		// All operations audited. Count and commit exactly this prefix of the batch.
 		for _, assignment := range assignments {
-			_, ok := expected[assignment.ID]
-			if !ok {
-				return nil, errors.New("invalid or duplicate assignment")
-			}
-			delete(expected, assignment.ID)
 			target, e := directoryTarget(cards, assignment.GroupID)
 			if e != nil {
 				return nil, e
@@ -658,7 +705,7 @@ func runIncrementalStep(ctx context.Context, db *gorm.DB, run *orm.ConversationO
 		return nil, failedOrganizerCall(result)
 	}
 	if result.Output.Identity == "" || (cp.Identity != "" && cp.Identity != result.Output.Identity) || result.Output.Processed != len(rows) || len(result.Output.Assignments) != len(rows) {
-		return nil, errors.New("invalid incremental identity or length")
+		return nil, &organizerCallFailure{code: "invalid_task_config"}
 	}
 	cp.Identity = result.Output.Identity
 	if preserveErr := validatePreservedCandidateOperations(cp.PreserveExistingCandidates, result.Output.Operations); preserveErr != nil {

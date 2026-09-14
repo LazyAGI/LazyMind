@@ -5,6 +5,7 @@ package common
 import "net/http"
 
 func init() {
+	registerAdditionalErrorAlias("conversation organizer run cannot be restarted", "This organizer task cannot be restarted; check its recovery status", http.StatusConflict, 2002752)
 	registerAdditionalErrorAlias("invalid opening batch result count", "Invalid opening batch result count", http.StatusBadGateway, 2002751)
 	registerAdditionalErrorAlias("unknown or cyclic candidate target", "Unknown or cyclic candidate target", http.StatusBadGateway, 2002737)
 	registerAdditionalErrorAlias("invalid candidate operation", "Invalid candidate operation", http.StatusBadGateway, 2002738)
