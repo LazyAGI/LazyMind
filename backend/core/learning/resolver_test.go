@@ -49,11 +49,34 @@ func TestBuildLLMPromptProvidesStrictTypedContract(t *testing.T) {
 		`"meaning_in_context":{"type":"string"}`,
 		`"examples":{"items":{"type":"string"},"type":"array"}`,
 		`REQUIRED: ["meaning_in_context"]`,
-		"解释所选汉字、词语或成语在上下文中的准确含义",
+		"给出所选汉字、词语或成语的拼音、准确语境义和简洁例句",
 		"<SELECTED_TEXT>\n安全距离\n</SELECTED_TEXT>",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("prompt does not contain %q:\n%s", want, prompt)
 		}
+	}
+}
+
+func TestChineseDefinitionPromptUsesCapabilityLanguageAndTemplate(t *testing.T) {
+	def, ok := CapabilityByKey("chinese_definition")
+	if !ok {
+		t.Fatal("chinese_definition capability missing")
+	}
+	prompt := buildLLMPrompt(def, ResolveContentRequest{Text: "急弯", Context: "前方有急弯。"}, nil)
+	for _, expected := range []string{"OUTPUT_LANGUAGE: zh-Hans", `REQUIRED: ["pinyin","meaning_in_context","examples"]`, "使用简体中文", "SKILL.md"} {
+		if !strings.Contains(prompt, expected) {
+			t.Fatalf("prompt does not contain %q:\n%s", expected, prompt)
+		}
+	}
+}
+
+func TestExtractLLMResultRejectsSkillMarkdownAndIncompleteDefinition(t *testing.T) {
+	def, _ := CapabilityByKey("chinese_definition")
+	if _, err := extractLLMResult(def, nil, "---\nname: skill\ndescription: SOP\n---"); err == nil {
+		t.Fatal("expected SKILL.md output to be rejected")
+	}
+	if _, err := extractLLMResult(def, nil, `{"meaning_in_context":"急转的弯道"}`); err == nil {
+		t.Fatal("expected definition missing pinyin and examples to be rejected")
 	}
 }

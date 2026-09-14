@@ -103,7 +103,7 @@ func (s *Service) dynamicQuestion(ctx context.Context, owner, questionType, loca
 	}
 	prompt := fmt.Sprintf("Return JSON only with payload and answer_spec. Create one %s learning question in locale %s from subject %q and verified content %s. answer_spec must contain grading (normalized_exact, semantic_or_self, or self_assessment), and never add unsupported facts.", questionType, locale, surface, marshal(value))
 	for attempt := 0; attempt < 2; attempt++ {
-		raw, generateErr := algo.GenerateSkill(ctx, algo.SkillGenerateRequest{Content: surface, UserInstruct: prompt, LLMConfig: config})
+		raw, generateErr := algo.GenerateLearning(ctx, algo.LearningGenerateRequest{Content: surface, UserInstruct: prompt, LLMConfig: config})
 		if generateErr != nil {
 			err = generateErr
 			continue

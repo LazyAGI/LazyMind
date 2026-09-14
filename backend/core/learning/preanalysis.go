@@ -147,26 +147,12 @@ func (s *Service) expandPreanalysisItem(ctx context.Context, owner, key string, 
 	if err != nil {
 		return nil, err
 	}
-	prompt := fmt.Sprintf(`You extract learning subjects from a document passage.
-
-CAPABILITY: %s
-TASK: %s
-ALLOWED_LANGUAGES: %s
-ALLOWED_SUBJECT_KINDS: %s
-
-Return exactly one valid JSON object and nothing else. Do not use Markdown fences or explanatory text.
-The exact schema is:
-{"items":[{"text":"non-empty text copied verbatim from the passage","language":"one exact value from ALLOWED_LANGUAGES","subject_kind":"one exact value from ALLOWED_SUBJECT_KINDS"}]}
-
-Rules:
-- Extract at most %d useful, distinct subjects that genuinely occur in the passage.
-- Use only the exact enum strings listed above; never invent aliases such as zh-CN, term, idiom, or concept.
-- If there is no suitable subject, return {"items":[]}.
-
-<PASSAGE>
-%s
-</PASSAGE>`, key, def.Analysis.Instruction, marshal(def.Languages), marshal(def.SubjectKinds), def.Analysis.MaxCandidates, item.Text)
-	raw, err := algo.GenerateSkill(ctx, algo.SkillGenerateRequest{Content: item.Text, UserInstruct: prompt, LLMConfig: config})
+	prompt := renderPrompt(def.Analysis.ExtractionPromptTemplate, map[string]string{
+		"capability": key, "instruction": def.Analysis.Instruction,
+		"languages": marshal(def.Languages), "subject_kinds": marshal(def.SubjectKinds),
+		"max_candidates": fmt.Sprint(def.Analysis.MaxCandidates), "text": item.Text,
+	})
+	raw, err := algo.GenerateLearning(ctx, algo.LearningGenerateRequest{Content: item.Text, UserInstruct: prompt, LLMConfig: config})
 	if err != nil {
 		return fallbackPreanalysisCandidates(def, item), nil
 	}
@@ -176,7 +162,7 @@ Rules:
 Required schema: {"items":[{"text":"...","language":"one of %s","subject_kind":"one of %s"}]}
 Invalid response:
 %s`, marshal(def.Languages), marshal(def.SubjectKinds), truncatePreanalysisResponse(raw))
-		raw, err = algo.GenerateSkill(ctx, algo.SkillGenerateRequest{Content: item.Text, UserInstruct: repairPrompt, LLMConfig: config})
+		raw, err = algo.GenerateLearning(ctx, algo.LearningGenerateRequest{Content: item.Text, UserInstruct: repairPrompt, LLMConfig: config})
 		if err != nil {
 			return fallbackPreanalysisCandidates(def, item), nil
 		}
@@ -308,6 +294,14 @@ func (s *Service) CreatePreanalysisTask(ctx context.Context, owner string, in Pr
 		}
 	}
 	now := time.Now().UTC()
+	// A new run supersedes unpublished machine-generated drafts for this exact
+	// document revision. User-edited and published answers remain untouched.
+	_ = s.db.WithContext(ctx).Model(&Preset{}).Where("owner_id = ? AND scope_type = ? AND scope_id = ? AND document_revision = ? AND origin = ? AND status = ? AND user_edited = ?", owner, "document", in.DocumentID, in.DocumentRevision, "llm_preanalysis", "draft", false).Update("status", "stale").Error
+	var currentOccurrenceIDs []string
+	s.db.WithContext(ctx).Model(&Occurrence{}).Where("owner_id = ? AND document_id = ? AND document_revision = ?", owner, in.DocumentID, in.DocumentRevision).Pluck("id", &currentOccurrenceIDs)
+	if len(currentOccurrenceIDs) > 0 {
+		_ = s.db.WithContext(ctx).Model(&Content{}).Where("owner_id = ? AND occurrence_id IN ? AND origin = ? AND status = ? AND user_edited = ?", owner, currentOccurrenceIDs, "llm_preanalysis", "draft", false).Update("status", "stale").Error
+	}
 	if in.DocumentRevision != "" {
 		_ = s.db.WithContext(ctx).Model(&Preset{}).Where("owner_id = ? AND scope_type = ? AND scope_id = ? AND document_revision <> ? AND origin = ? AND user_edited = ?", owner, "document", in.DocumentID, in.DocumentRevision, "llm_preanalysis", false).Update("status", "stale").Error
 		var occurrenceIDs []string
@@ -343,8 +337,14 @@ func (s *Service) RunPreanalysisTask(ctx context.Context, owner, id string) (Pre
 	task.Status = "running"
 	results := make([]ResolveContentResult, 0, task.Total)
 	completed, failed := 0, 0
+	seen := map[string]bool{}
+	capabilityCounts := map[string]int{}
 	for _, item := range in.Items {
 		for _, key := range in.CapabilityKeys {
+			def, _ := CapabilityByKey(key)
+			if limit := def.Analysis.MaxDocumentCandidates; limit > 0 && capabilityCounts[key] >= limit {
+				continue
+			}
 			var state string
 			_ = s.db.WithContext(ctx).Model(&PreanalysisTask{}).Select("status").Where("id = ? AND owner_id = ?", id, owner).Scan(&state).Error
 			if state == "canceled" {
@@ -361,6 +361,15 @@ func (s *Service) RunPreanalysisTask(ctx context.Context, owner, id string) (Pre
 				_ = s.db.WithContext(ctx).Model(&PreanalysisTask{}).Where("id = ?", id).Update("total", task.Total).Error
 			}
 			for _, candidate := range candidates {
+				candidateKey := key + "\x1f" + normalize(candidate.Text)
+				if seen[candidateKey] {
+					continue
+				}
+				if limit := def.Analysis.MaxDocumentCandidates; limit > 0 && capabilityCounts[key] >= limit {
+					break
+				}
+				seen[candidateKey] = true
+				capabilityCounts[key]++
 				result, err := s.ResolveContent(ctx, owner, ResolveContentRequest{CapabilityKey: key, Text: candidate.Text, Context: candidate.Context, Language: candidate.Language, SubjectKind: candidate.SubjectKind, DatasetID: in.DatasetID, DocumentID: in.DocumentID, DocumentRevision: in.DocumentRevision, SegmentID: candidate.SegmentID, Page: candidate.Page, StartOffset: candidate.StartOffset, EndOffset: candidate.EndOffset, Preanalysis: true})
 				if err != nil {
 					failed++
@@ -372,7 +381,6 @@ func (s *Service) RunPreanalysisTask(ctx context.Context, owner, id string) (Pre
 					continue
 				}
 				cacheKey := BuildCacheKey(key, candidate.Text, candidate.Language, "", candidate.Context, in.DocumentID, candidate.StartOffset, candidate.EndOffset)
-				def, _ := CapabilityByKey(key)
 				stamp := time.Now().UTC()
 				var preset Preset
 				presetErr := s.db.WithContext(ctx).Where("owner_id = ? AND scope_type = ? AND scope_id = ? AND capability_key = ? AND normalized_key = ? AND schema_version = ?", owner, "document", in.DocumentID, key, normalize(cacheKey), 1).First(&preset).Error
@@ -399,7 +407,7 @@ func (s *Service) RunPreanalysisTask(ctx context.Context, owner, id string) (Pre
 		message = "one or more items could not be analyzed"
 	}
 	finished := time.Now().UTC()
-	err := s.db.WithContext(ctx).Model(&task).Updates(map[string]any{"status": status, "completed": completed, "failed": failed, "result_json": marshal(results), "error_message": message, "completed_at": finished, "updated_at": finished}).Error
+	err := s.db.WithContext(ctx).Model(&task).Updates(map[string]any{"status": status, "total": completed + failed, "completed": completed, "failed": failed, "result_json": marshal(results), "error_message": message, "completed_at": finished, "updated_at": finished}).Error
 	if err == nil {
 		err = s.db.WithContext(ctx).Where("id = ?", id).First(&task).Error
 	}

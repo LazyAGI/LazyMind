@@ -15,7 +15,7 @@ try:
 except Exception:  # pragma: no cover - optional dependency
     _repair_json = None
 
-RewriteTaskType = Literal['skill', 'polish']
+RewriteTaskType = Literal['skill', 'polish', 'learning']
 
 _MAX_REWRITE_ATTEMPTS = 3
 _JSON_BLOCK_RE = re.compile(r'```json\s*(.*?)\s*```', re.DOTALL)
@@ -133,7 +133,7 @@ def _validate_generated_content(task_type: RewriteTaskType, content: Any) -> str
             raise UnprocessableContentError(
                 f'Generated SKILL.md is invalid: {exc}'
             ) from exc
-    elif task_type == 'polish' and not content.strip():
+    elif task_type in ('polish', 'learning') and not content.strip():
         raise UnprocessableContentError("Generated field 'content' must be a non-empty string.")
     return content
 
