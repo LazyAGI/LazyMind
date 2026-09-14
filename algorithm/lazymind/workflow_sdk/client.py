@@ -446,6 +446,12 @@ class WorkflowClient:
             query['revision_id'] = revision_id
         return self._read('/workflow-authoring/v1/skill-context?' + urlencode(query))
 
+    def preflight_skill_workflow_conversion(self, skill_id: str) -> WorkflowResponse:
+        return self._decode(self.transport.post(
+            self.base_url + '/workflow-conversions:preflight',
+            json={'skill_id': skill_id}, headers=self._headers(), timeout=self.timeout,
+        ))
+
     def list_skills(self) -> WorkflowResponse:
         return self._read('/skills')
 

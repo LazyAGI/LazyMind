@@ -1,5 +1,8 @@
 import json
+from pathlib import Path
 from unittest.mock import MagicMock
+
+import yaml
 
 from lazymind.workflow_mcp.server import TOOL_SCHEMAS, WorkflowMCPServer
 from lazymind.workflow_sdk import ConnectionInfo, discover_connection
@@ -42,6 +45,27 @@ def test_mcp_lists_only_real_public_tools():
         'update_workflow_draft_file', 'validate_workflow_draft',
         'get_workflow_diagnostics', 'publish_workflow',
     } <= names
+    assert 'preflight_skill_workflow_conversion' in names
+
+
+def test_agent_kit_profiles_declare_only_real_mcp_tools():
+    profiles = sorted((Path(__file__).resolve().parents[2]
+                       / 'skills/workflow-agent-kit/profiles').glob('*.yaml'))
+    assert profiles
+    conversion_tools = {
+        'list_skills', 'preflight_skill_workflow_conversion',
+        'get_skill_conversion_context', 'create_workflow_draft',
+        'update_workflow_draft_file', 'validate_workflow_draft',
+        'get_workflow_diagnostics', 'publish_workflow',
+    }
+    assert conversion_tools <= set(TOOL_SCHEMAS)
+    # Host-only transport tools; everything else a profile declares must exist as a
+    # real MCP tool so the Skill never instructs an Agent to call a missing one.
+    host_only = {'advance_step_and_hand_off', 'resume_workflow'}
+    for path in profiles:
+        declared = set(yaml.safe_load(path.read_text())['workflow_tools'])
+        assert conversion_tools <= declared, path.name
+        assert declared - set(TOOL_SCHEMAS) <= host_only, path.name
 
 
 def test_ready_steps_are_read_from_authoritative_projection():
@@ -85,7 +109,8 @@ def test_mcp_authoring_submits_agent_text_to_deterministic_sdk():
         'draft': {'id': 'd1', 'version': 1},
     })
     client.get_skill_conversion_context.return_value = MagicMock(result={
-        'revision_id': 'r1', 'tree_hash': 'sha256:tree',
+        'contract_version': 'workflow.authoring.v1',
+        'snapshot': {'revision_id': 'r1', 'tree_hash': 'sha256:tree'},
     })
     server = WorkflowMCPServer(lambda: client)
     files = {
@@ -102,6 +127,56 @@ def test_mcp_authoring_submits_agent_text_to_deterministic_sdk():
     )
 
 
+def test_mcp_authoring_uses_sdk_decoded_handler_skill_context():
+    from lazymind.workflow_sdk import WorkflowClient
+
+    transport = MagicMock()
+    transport.get.return_value = MagicMock(status_code=200, json=lambda: {
+        'ok': True,
+        'data': {
+            'contract_version': 'workflow.authoring.v1',
+            'snapshot': {
+                'skill_id': 's1',
+                'revision_id': 'r1',
+                'tree_hash': 'sha256:tree',
+                'files': [{'path': 'SKILL.md', 'content': '# Skill'}],
+            },
+        },
+    })
+    transport.post.return_value = MagicMock(status_code=200, json=lambda: {
+        'ok': True,
+        'data': {'draft': {'id': 'd1', 'version': 1}},
+    })
+    client = WorkflowClient('http://core/api/core', 'u1', transport=transport)
+    files = {
+        'workflow.yaml': 'id: report\n',
+        'scenario/state.yml': 'transitions: {}\n',
+        'scenario/scenario.md': '# Report\n',
+    }
+    result = WorkflowMCPServer(lambda: client).call_tool('create_workflow_draft', {
+        'name': 'Report', 'skill_id': 's1', 'files': files,
+    })
+
+    assert result['structuredContent']['draft']['id'] == 'd1'
+    assert transport.get.call_args.args[0].endswith(
+        '/workflow-authoring/v1/skill-context?skill_id=s1',
+    )
+    assert transport.post.call_args.kwargs['json']['revision_id'] == 'r1'
+    assert transport.post.call_args.kwargs['json']['tree_hash'] == 'sha256:tree'
+
+
+def test_mcp_exposes_preflight_skill_workflow_conversion():
+    client = MagicMock()
+    client.preflight_skill_workflow_conversion.return_value = MagicMock(result={
+        'skill_id': 's1', 'status': 'pass', 'checks': [],
+    })
+    result = WorkflowMCPServer(lambda: client).call_tool(
+        'preflight_skill_workflow_conversion', {'skill_id': 's1'},
+    )
+    assert result['structuredContent']['status'] == 'pass'
+    client.preflight_skill_workflow_conversion.assert_called_once_with('s1')
+
+
 def test_sdk_authoring_routes_do_not_use_generation_endpoints():
     transport = MagicMock()
     transport.get.return_value = MagicMock(
@@ -114,6 +189,24 @@ def test_sdk_authoring_routes_do_not_use_generation_endpoints():
     path = transport.get.call_args.args[0]
     assert path.endswith('/workflow-authoring/v1/drafts/d1/diagnostics')
     assert 'ai-' not in path
+
+
+def test_sdk_preflight_skill_workflow_conversion_route():
+    transport = MagicMock()
+    transport.post.return_value = MagicMock(
+        status_code=200,
+        json=lambda: {'ok': True, 'data': {'skill_id': 's1', 'status': 'pass'}},
+    )
+    from lazymind.workflow_sdk import WorkflowClient
+
+    result = WorkflowClient(
+        'http://core/api/core', 'u1', transport=transport,
+    ).preflight_skill_workflow_conversion('s1')
+
+    assert result.result['status'] == 'pass'
+    call = transport.post.call_args
+    assert call.args[0].endswith('/workflow-conversions:preflight')
+    assert call.kwargs['json'] == {'skill_id': 's1'}
 
 
 def test_sdk_delete_artifact_creates_public_tombstone_request():

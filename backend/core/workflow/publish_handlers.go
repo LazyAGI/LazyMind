@@ -136,11 +136,12 @@ func PublishWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "not found", http.StatusNotFound)
 		return
 	}
-	if err := syncSkillCapabilitiesBeforePublish(r.Context(), store.DB(), &d); err != nil {
+	final, err := finalizeAuthoringWorkflowDraft(r.Context(), store.DB(), &d)
+	if err != nil {
 		common.ReplyErr(w, "sync workflow capabilities failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	diagnostics := authoringDiagnosticsForRequest(store.DB(), d, r)
+	diagnostics := authoringDiagnosticsForRequest(store.DB(), d, r, &final.Capabilities)
 	if !diagnostics.Valid {
 		status := http.StatusUnprocessableEntity
 		message := "plugin validation failed"
@@ -157,6 +158,12 @@ func PublishWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErrWithData(w, message, diagnostics, status)
 		return
 	}
+	publishFinalizedWorkflowDraft(w, r, userID, d, diagnostics)
+}
+
+// publishFinalizedWorkflowDraft commits an already finalized and validated draft.
+// Both publish entrypoints share it so a single request finalizes and diagnoses once.
+func publishFinalizedWorkflowDraft(w http.ResponseWriter, r *http.Request, userID string, d orm.WorkflowDraft, diagnostics authoringDiagnostics) {
 	var diagnosticWarnings []authoringDiagnostic
 	for _, diagnostic := range diagnostics.Diagnostics {
 		if diagnostic.Severity == "warning" {
@@ -264,41 +271,71 @@ func PublishWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 	common.ReplyOK(w, map[string]any{"workflow_ref": out.WorkflowRef, "revision_id": out.HeadRevisionID, "revision_no": out.Version, "remote_root": "remote://" + out.RelativeRoot, "enabled": enabled, "warnings": diagnosticWarnings})
 }
 
-func syncSkillCapabilitiesBeforePublish(ctx context.Context, db *gorm.DB, draft *orm.WorkflowDraft) error {
-	if draft == nil || draft.SourceAnalysisID == "" {
-		return nil
+// authoringDraftFinalization is the deterministic post-processing shared by
+// validation, diagnostics, and publish. It never invokes a model, so an externally
+// authored draft reaches the same runtime invariants as the UI generation pipeline.
+type authoringDraftFinalization struct {
+	WorkflowYAML string
+	StateYAML    string
+	Capabilities draftCapabilityMappings
+	Changed      bool
+}
+
+func computeAuthoringDraftFinalization(ctx context.Context, db *gorm.DB, draft orm.WorkflowDraft) authoringDraftFinalization {
+	capabilities := resolveDraftCapabilityMappings(ctx, db, draft)
+	workflowYAML, stateYAML := draft.WorkflowYAMLContent, draft.StateYAMLContent
+	if len(capabilities.Mappings) > 0 {
+		workflowYAML, stateYAML, _ = injectSkillCapabilitiesIntoWorkflow(workflowYAML, stateYAML, capabilities.Mappings)
 	}
-	var analysis orm.WorkflowGenerationAnalysis
-	if err := db.Where("id=? AND draft_id=?", draft.SourceAnalysisID, draft.ID).First(&analysis).Error; err != nil {
-		return nil
+	if withBoundaries, changed := injectExecutionBoundariesIntoStateSteps(stateYAML); changed {
+		stateYAML = withBoundaries
 	}
-	var mappings map[string]any
-	if json.Unmarshal([]byte(analysis.ToolMappingReportJSON), &mappings) != nil {
-		return nil
+	if alignedWorkflowYAML, changed, alignErr := alignWorkflowUITabsWithStateSteps(workflowYAML, stateYAML); alignErr == nil && changed {
+		workflowYAML = alignedWorkflowYAML
 	}
-	if detected := redetectSkillCapabilitiesForDraft(ctx, db, draft); len(detected) > 0 {
-		mappings = reconcileDetectedCapabilityMappings(mappings, detected)
-		if nextJSON, err := json.Marshal(mappings); err == nil && string(nextJSON) != analysis.ToolMappingReportJSON {
-			_ = db.Model(&analysis).Update("tool_mapping_report_json", string(nextJSON)).Error
+	return authoringDraftFinalization{
+		WorkflowYAML: workflowYAML, StateYAML: stateYAML, Capabilities: capabilities,
+		Changed: workflowYAML != draft.WorkflowYAMLContent || stateYAML != draft.StateYAMLContent,
+	}
+}
+
+// finalizedAuthoringDraft returns an in-memory finalized copy. Read-only endpoints
+// use it so their diagnostics match publish without persisting a draft revision.
+func finalizedAuthoringDraft(ctx context.Context, db *gorm.DB, draft orm.WorkflowDraft) (orm.WorkflowDraft, authoringDraftFinalization) {
+	final := computeAuthoringDraftFinalization(ctx, db, draft)
+	draft.WorkflowYAMLContent, draft.StateYAMLContent = final.WorkflowYAML, final.StateYAML
+	return draft, final
+}
+
+// finalizeAuthoringWorkflowDraft persists finalization. Only write endpoints may
+// call it: it rewrites package files and advances the optimistic-lock version.
+func finalizeAuthoringWorkflowDraft(ctx context.Context, db *gorm.DB, draft *orm.WorkflowDraft) (authoringDraftFinalization, error) {
+	if draft == nil {
+		return authoringDraftFinalization{}, nil
+	}
+	final := computeAuthoringDraftFinalization(ctx, db, *draft)
+	if final.Capabilities.AnalysisID != "" && final.Capabilities.Rescanned {
+		if nextJSON, err := json.Marshal(final.Capabilities.Mappings); err == nil && string(nextJSON) != final.Capabilities.StoredJSON {
+			_ = db.Model(&orm.WorkflowGenerationAnalysis{}).Where("id=?", final.Capabilities.AnalysisID).
+				Update("tool_mapping_report_json", string(nextJSON)).Error
+			final.Capabilities.StoredJSON = string(nextJSON)
 		}
 	}
-	workflowYAML, stateYAML, injected := injectSkillCapabilitiesIntoWorkflow(draft.WorkflowYAMLContent, draft.StateYAMLContent, mappings)
-	if len(injected) == 0 {
-		return nil
+	if !final.Changed {
+		return final, nil
 	}
 	updates := map[string]any{
-		"state_yaml_content": stateYAML,
+		"state_yaml_content": final.StateYAML,
 		"version":            gorm.Expr("version + 1"),
 		"updated_at":         time.Now().UTC(),
 	}
-	setWorkflowYAMLUpdate(updates, workflowYAML)
+	setWorkflowYAMLUpdate(updates, final.WorkflowYAML)
 	if err := db.Model(&orm.WorkflowDraft{}).Where("id=? AND created_by=?", draft.ID, draft.CreatedBy).Updates(updates).Error; err != nil {
-		return err
+		return final, err
 	}
-	draft.WorkflowYAMLContent = workflowYAML
-	draft.StateYAMLContent = stateYAML
+	draft.WorkflowYAMLContent, draft.StateYAMLContent = final.WorkflowYAML, final.StateYAML
 	draft.Version++
-	return nil
+	return final, nil
 }
 
 func redetectSkillCapabilitiesForDraft(ctx context.Context, db *gorm.DB, draft *orm.WorkflowDraft) []skillCapabilityRequirement {
