@@ -18,6 +18,10 @@ from lazymind.chat.service.utils.citations import (
 )
 
 
+_EXTERNAL_SEARCH_METHODS = {
+    'search', 'meta_search', 'get_content', 'get_contents',
+}
+_FETCHED_METHODS = {'get_content', 'get_contents'}
 _KNOWLEDGE_SEARCH_METHODS = {
     'kb_search',
     'kb_get_parent_node',
@@ -26,7 +30,6 @@ _KNOWLEDGE_SEARCH_METHODS = {
 }
 _KNOWLEDGE_FUNCTIONS: set[str] = set()
 _PAGE_FUNCTIONS = {'url_fetch'}
-_CONTENT_METHODS = {'get_content', 'get_contents'}
 
 
 def _citation_state() -> dict[str, Any]:
@@ -61,10 +64,10 @@ def _annotate_external_results(value: Any, state: dict[str, Any], roles: Any) ->
     return value
 
 
-def _annotate_page_results(value: Any, state: dict[str, Any]) -> Any:
+def _annotate_page_results(value: Any, state: dict[str, Any], roles: Any) -> Any:
     annotated = copy.deepcopy(value)
     if isinstance(annotated, dict):
-        upsert_external_source(annotated, state, roles={'fetched'})
+        upsert_external_source(annotated, state, roles=roles)
     return annotated
 
 
@@ -77,20 +80,19 @@ class CitationResultMiddleware:
     def __getattr__(self, name: str) -> Any:
         return getattr(self._manager, name)
 
-    def _tool_kind(self, name: str) -> str | None:
+    def _resolve_tool(self, name: str) -> tuple[str, set[str]] | None:
         tool = (getattr(self._manager, 'tools_info', None) or {}).get(name)
         instance = getattr(tool, '_instance', None)
         method = str(getattr(tool, '_method_name', '') or '')
-        if isinstance(instance, SearchBase) and method in {
-            'search', 'meta_search', 'get_content', 'get_contents',
-        }:
-            return 'external_search'
+        if isinstance(instance, SearchBase) and method in _EXTERNAL_SEARCH_METHODS:
+            roles = {'fetched'} if method in _FETCHED_METHODS else {'searched'}
+            return 'external_search', roles
         if isinstance(instance, KBToolkit) and method in _KNOWLEDGE_SEARCH_METHODS:
-            return 'knowledge_base'
+            return 'knowledge_base', {'searched'}
         if name in _KNOWLEDGE_FUNCTIONS:
-            return 'knowledge_base'
+            return 'knowledge_base', {'searched'}
         if name in _PAGE_FUNCTIONS:
-            return 'external_page'
+            return 'external_page', {'fetched'}
         return None
 
     def _process_result(
@@ -105,20 +107,18 @@ class CitationResultMiddleware:
             return result
         function = tool_call.get('function') or {}
         name = str(function.get('name') or '')
-        kind = self._tool_kind(name)
-        if kind is None:
+        resolved = self._resolve_tool(name)
+        if resolved is None:
             return result
+        kind, roles = resolved
         value = result.get('value')
-        tool = (getattr(self._manager, 'tools_info', None) or {}).get(name)
-        method = str(getattr(tool, '_method_name', '') or '')
         if kind == 'external_search':
-            roles = {'fetched'} if method in _CONTENT_METHODS else {'searched'}
             processed = _annotate_external_results(value, state, roles)
         elif kind == 'knowledge_base':
             processed = copy.deepcopy(value)
-            annotate_citations(processed, state, roles={'searched'})
+            annotate_citations(processed, state, roles=roles)
         else:
-            processed = _annotate_page_results(value, state)
+            processed = _annotate_page_results(value, state, roles)
         if collect_only:
             return result
         return {**result, 'value': processed}

@@ -803,10 +803,6 @@
   user-select: none;
   transition: background-color 150ms ease, color 150ms ease;
 
-  &::before {
-    display: none;
-  }
-
   &::after {
     content: attr(data-writer-source-label);
     font-size: 12px;

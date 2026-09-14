@@ -4,7 +4,8 @@ import {
   findSourceByCitationId,
   getCitationSources,
   getDisplaySources,
-  getSearchSources,
+  getReferenceSources,
+  parseSourceCitationIds,
   getSourceHref,
   normalizeSourceMarkers,
   openSource,
@@ -86,7 +87,7 @@ describe('chat source adapter', () => {
       { ...external, source_roles: ['cited', 'searched'] },
       { ...knowledge, source_roles: ['cited'] },
     ]);
-    expect(getSearchSources(sources)).toEqual([
+    expect(getReferenceSources(sources)).toEqual([
       { ...external, source_roles: ['cited', 'searched'] },
       { ...knowledge, source_roles: ['cited'] },
       fetchedOnly,
@@ -95,9 +96,15 @@ describe('chat source adapter', () => {
     expect(getDisplaySources({ '3.1': { ...external, index: undefined } })).toEqual([
       { ...external, index: '3.1', source_roles: ['cited'] },
     ]);
-    expect(getSearchSources({ '3.1': { ...external, index: undefined } })).toEqual([
+    expect(getReferenceSources({ '3.1': { ...external, index: undefined } })).toEqual([
       { ...external, index: '3.1', source_roles: ['cited'] },
     ]);
+  });
+
+  it('parses single and aggregated source citation hrefs', () => {
+    expect(parseSourceCitationIds('#source-1.1')).toEqual(['1.1']);
+    expect(parseSourceCitationIds('#user-content-source-1.1,2.1')).toEqual(['1.1', '2.1']);
+    expect(parseSourceCitationIds('https://example.com')).toEqual([]);
   });
 
   it('removes only a redundant URL immediately following a source marker', () => {

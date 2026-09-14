@@ -67,19 +67,20 @@ describe("MarkdownViewer source citation AST transform", () => {
       .toBeInTheDocument();
   });
 
-  it("collects a table row's citations into its final cell", () => {
+  it("aggregates citations inside each table cell without moving them across cells", () => {
     const { container } = renderMarkdown(
       [
         "| 模型 | 价格 |",
         "|---|---|",
-        "| A [1](#source-1.1) | $1 [2](#source-2.1) |",
+        "| A [1](#source-1.1)[2](#source-2.1) | $1 [2](#source-2.1) |",
       ].join("\n"),
     );
 
     const cells = container.querySelectorAll("tbody td");
     expect(cells).toHaveLength(2);
-    expect(cells[0].querySelector(".md-source-chip")).not.toBeInTheDocument();
-    expect(cells[1].querySelector(".md-source-chip")).toHaveTextContent("+1");
+    expect(cells[0].querySelector(".md-source-chip")).toHaveTextContent("+1");
+    expect(cells[1].querySelector(".md-source-chip")).toHaveTextContent("second.example");
+    expect(cells[1].querySelector(".md-source-chip")).not.toHaveTextContent("+1");
   });
 
   it("does not turn fenced or inline code links into source chips", () => {

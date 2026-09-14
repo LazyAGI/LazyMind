@@ -89,4 +89,62 @@ describe("MarkdownViewer streamed tables", () => {
     expect(screen.getByText("2/2")).toBeInTheDocument();
     expect(screen.getByText("Xinhai Revolution")).toBeInTheDocument();
   });
+
+  it("aggregates citations inside each table cell and keeps other cells independent", async () => {
+    const markdown = [
+      "| 价格 | 参数 |",
+      "|---|---|",
+      "| $1 [1](#source-1.1)[2](#source-2.1) | 32GB [3](#source-3.1) |",
+    ].join("\n");
+
+    render(
+      <MarkdownViewer
+        sources={[
+          {
+            source_type: "external",
+            index: "1.1",
+            title: "Price list",
+            url: "https://price.example/list",
+          },
+          {
+            source_type: "external",
+            index: "2.1",
+            title: "Vendor page",
+            url: "https://vendor.example/page",
+          },
+          {
+            source_type: "external",
+            index: "3.1",
+            title: "Spec sheet",
+            url: "https://spec.example/sheet",
+          },
+        ]}
+      >
+        {markdown}
+      </MarkdownViewer>,
+    );
+
+    const cells = screen.getAllByRole("cell");
+    expect(cells).toHaveLength(2);
+    expect(cells[0].querySelectorAll("a.md-source-chip")).toHaveLength(1);
+    expect(cells[1].querySelectorAll("a.md-source-chip")).toHaveLength(1);
+
+    const priceChip = cells[0].querySelector("a.md-source-chip") as HTMLAnchorElement;
+    const specChip = cells[1].querySelector("a.md-source-chip") as HTMLAnchorElement;
+    expect(priceChip).toHaveTextContent("price.example+1");
+    expect(specChip).toHaveTextContent("spec.example");
+    expect(specChip).not.toHaveTextContent("+1");
+
+    fireEvent.mouseEnter(priceChip);
+    await waitFor(() => expect(screen.getByText("1/2")).toBeInTheDocument());
+    expect(screen.getByText("Price list")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Next source" }));
+    expect(screen.getByText("2/2")).toBeInTheDocument();
+    expect(screen.getByText("Vendor page")).toBeInTheDocument();
+
+    fireEvent.mouseLeave(priceChip);
+    fireEvent.mouseEnter(specChip);
+    await waitFor(() => expect(screen.getByText("Spec sheet")).toBeInTheDocument());
+    expect(screen.queryByText("1/2")).not.toBeInTheDocument();
+  });
 });

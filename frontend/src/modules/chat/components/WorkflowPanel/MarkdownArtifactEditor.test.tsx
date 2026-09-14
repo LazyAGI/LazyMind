@@ -483,12 +483,11 @@ describe('MarkdownArtifactEditor rewrite selection highlight', () => {
     expect(sourceLink).toHaveAttribute('role', 'button');
     expect(sourceLink).toHaveAttribute('tabindex', '0');
     expect(sourceLink).toHaveAttribute('data-writer-source-label', 'Python documentation');
-    expect(sourceLink).toHaveAttribute('data-writer-source-initial', 'P');
-    expect(sourceLink).toHaveAttribute('data-writer-source-has-icon', 'true');
+    expect(sourceLink).not.toHaveAttribute('data-writer-source-initial');
+    expect(sourceLink).not.toHaveAttribute('data-writer-source-has-icon');
     expect(sourceLink).toHaveAttribute('aria-label', 'chat.references Python documentation');
     expect(sourceLink).not.toHaveAttribute('title');
-    expect(sourceLink?.style.getPropertyValue('--writer-source-icon'))
-      .toContain('docs.python.org');
+    expect(sourceLink?.style.getPropertyValue('--writer-source-icon')).toBe('');
     editableRoot!.addEventListener('click', linkEditorClick);
 
     fireEvent.mouseOver(sourceLink!);

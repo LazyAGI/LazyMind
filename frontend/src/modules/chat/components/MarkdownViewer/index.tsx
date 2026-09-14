@@ -70,10 +70,9 @@ import {
   getSourceSubtitle,
   isExternalSource,
   normalizeSourceMarkers,
+  parseSourceCitationIds,
   stripRedundantSourceUrls,
 } from "@/modules/chat/utils/sourceAdapter";
-
-const SOURCE_PREFIXES = ["#source-", "#user-content-source-"];
 const EMPTY_CONVERSATION_ARTIFACTS: ConversationArtifact[] = [];
 const BOLD_BARE_URL_PATTERN = /\*\*((?:https?:\/\/|www\.)[^\s*<>()]+)\*\*/g;
 // Matches bare URLs that are NOT already inside Markdown link syntax [...](...)
@@ -112,19 +111,6 @@ const MarkdownRenderContext = createContext<{
   artifacts: EMPTY_CONVERSATION_ARTIFACTS,
 });
 
-const InTableCellContext = createContext(false);
-
-function TableCellComponent(Tag: "td" | "th") {
-  return function Cell(props: any) {
-    const { node: _node, children, ...rest } = props;
-    return (
-      <InTableCellContext.Provider value={true}>
-        <Tag {...rest}>{children}</Tag>
-      </InTableCellContext.Provider>
-    );
-  };
-}
-
 const SOURCE_PREVIEW_TEXT_LIMIT = 280;
 
 function getSourceBrandName(source: ChatSource) {
@@ -161,29 +147,12 @@ function SourceBrandIcon({ source }: { source: ChatSource }) {
   );
 }
 
-function SourcePreviewCard({ source }: { source: ChatSource }) {
-  const sourceHref = getSourceHref(source);
-  const sourceUrl = isExternalSource(source) && /^https?:\/\//i.test(sourceHref)
-    ? sourceHref
-    : "";
-  const previewText = getSourcePreviewText(source);
-
-  return (
-    <div className="md-source-preview">
-      <div className="md-source-preview-brand">
-        <SourceBrandIcon source={source} />
-        <span>{getSourceBrandName(source)}</span>
-      </div>
-      <strong className="md-source-preview-title">{getSourceLabel(source)}</strong>
-      {previewText && <p className="md-source-preview-summary">{previewText}</p>}
-      {sourceUrl && <span className="md-source-preview-url">{sourceUrl}</span>}
-    </div>
-  );
-}
-
-function SourcePreviewCarousel({ sources }: { sources: ChatSource[] }) {
+function SourcePreview({ sources }: { sources: ChatSource[] }) {
   const [activeIndex, setActiveIndex] = useState(0);
   const source = sources[activeIndex];
+  if (!source) {
+    return null;
+  }
   const sourceHref = getSourceHref(source);
   const sourceUrl = isExternalSource(source) && /^https?:\/\//i.test(sourceHref)
     ? sourceHref
@@ -232,21 +201,6 @@ function SourcePreviewCarousel({ sources }: { sources: ChatSource[] }) {
       </a>
     </div>
   );
-}
-
-function getSourceCitationIds(href: any) {
-  if (typeof href !== "string") {
-    return [];
-  }
-  const prefix = SOURCE_PREFIXES.find((item) => href.startsWith(item));
-  if (!prefix) {
-    return [];
-  }
-  return href
-    .slice(prefix.length)
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
 }
 
 function normalizeBoldBareUrls(content: string) {
@@ -542,7 +496,6 @@ const LinkComponent = (props: any) => {
   const { isStreaming, markSources, artifacts } = useContext(
     MarkdownRenderContext,
   );
-  const inTableCell = useContext(InTableCellContext);
   const href = typeof props.href === "string" ? props.href : "";
   const managedFile = href.includes("/static-files/");
   const artifactFileId = getFileIdFromHref(href);
@@ -625,7 +578,7 @@ const LinkComponent = (props: any) => {
     inlineText,
     inlineBlobType,
   ]);
-  const sourceCitationIds = getSourceCitationIds(href);
+  const sourceCitationIds = parseSourceCitationIds(href);
 
   if (sourceCitationIds.length) {
     const sources = sourceCitationIds.map((citationId) =>
@@ -667,7 +620,7 @@ const LinkComponent = (props: any) => {
       </span>
     );
 
-    if (isStreaming || !source || inTableCell) {
+    if (isStreaming || !source) {
       return chip;
     }
 
@@ -676,11 +629,7 @@ const LinkComponent = (props: any) => {
         mouseEnterDelay={0.2}
         placement="top"
         classNames={{ root: "md-source-popover md-source-popover--interactive" }}
-        content={(
-          resolvedSources.length > 1
-            ? <SourcePreviewCarousel sources={resolvedSources} />
-            : <SourcePreviewCard source={source} />
-        )}
+        content={<SourcePreview sources={resolvedSources} />}
       >
         {chip}
       </Popover>
@@ -762,8 +711,6 @@ const defaultMarkdownComponents = {
   img: ImageComponent,
   pre: PreComponent,
   code: CodeComponent,
-  td: TableCellComponent("td"),
-  th: TableCellComponent("th"),
 };
 
 const MarkdownViewer = memo((props: any) => {

@@ -1,3 +1,5 @@
+import { parseSourceCitationIds } from "@/modules/chat/utils/sourceAdapter";
+
 interface MarkdownNode {
   type: string;
   children?: MarkdownNode[];
@@ -10,17 +12,10 @@ interface CollectedCitation {
   link?: MarkdownNode;
 }
 
-const SOURCE_URL_PATTERN = /^#(?:user-content-)?source-(.+)$/;
 const LEADING_PUNCTUATION_PATTERN = /^[。．，,、；;：:!！?？]/;
 
 function sourceIds(node: MarkdownNode): string[] {
-  if (node.type !== "link" || typeof node.url !== "string") {
-    return [];
-  }
-  const match = SOURCE_URL_PATTERN.exec(node.url);
-  return match
-    ? match[1].split(",").map((id) => id.trim()).filter(Boolean)
-    : [];
+  return node.type === "link" ? parseSourceCitationIds(node.url) : [];
 }
 
 function cleanTextBoundary(left: MarkdownNode, right: MarkdownNode) {
@@ -80,13 +75,10 @@ function transformNode(node: MarkdownNode) {
     return;
   }
 
-  if (node.type === "tableRow") {
+  if (node.type === "tableCell") {
     const collected: CollectedCitation = { ids: [] };
     collectSourceLinks(node, collected);
-    const lastCell = node.children?.[node.children.length - 1];
-    if (lastCell) {
-      appendCollectedLink(lastCell, collected);
-    }
+    appendCollectedLink(node, collected);
     return;
   }
 

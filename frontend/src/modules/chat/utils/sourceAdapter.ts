@@ -150,7 +150,7 @@ export function getDisplaySources(
   return [...merged.values()];
 }
 
-export function getSearchSources(sources: ChatSourceCollection = []) {
+export function getReferenceSources(sources: ChatSourceCollection = []) {
   return [...getDisplaySources(sources)].sort((left, right) => (
     sourceRank(left) - sourceRank(right)
   ));
@@ -179,6 +179,24 @@ export function openSource(source: ChatSource) {
 
 export function findSourceByCitationId(sources: ChatSource[], citationId: string) {
   return sources.find((source) => getSourceCitationId(source) === citationId);
+}
+
+const SOURCE_HREF_PATTERN = /^#(?:user-content-)?source-(.+)$/;
+
+export function parseSourceCitationIds(href?: string | null): string[] {
+  if (!href) {
+    return [];
+  }
+  const match = SOURCE_HREF_PATTERN.exec(href);
+  return match
+    ? match[1].split(",").map((id) => {
+      try {
+        return decodeURIComponent(id.trim());
+      } catch {
+        return id.trim();
+      }
+    }).filter(Boolean)
+    : [];
 }
 
 const SOURCE_LINK_PATTERN =
