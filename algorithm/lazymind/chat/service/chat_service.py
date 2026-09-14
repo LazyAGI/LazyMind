@@ -38,6 +38,10 @@ from lazymind.common.memory import (
     load_memory_context,
 )
 from lazymind.chat.service.chat_request import ChatRequest
+from lazymind.chat.service.document_selection import (
+    render_document_selection,
+    resolve_document_selection_context,
+)
 from lazymind.chat.service.component.tool_policy import build_sidechat_tool_configs
 from lazymind.chat.service.component import (
     AgentEventFrameTranslator,
@@ -925,6 +929,16 @@ async def _handle_chat_impl(
     )
     if user_cited_context:
         cited_message_context = user_cited_context
+    document_context = request.document_context or {}
+    is_document_preview_chat = conversation.surface == 'knowledge_document_preview'
+    has_document_selection = bool(cited_message_context and document_context)
+    if has_document_selection:
+        selected_text = str(document_context.get('selected_text') or cited_message_context).strip()
+        resolved_context = resolve_document_selection_context(
+            document_context,
+            cited_message_context,
+        )
+        cited_message_context = render_document_selection(selected_text, resolved_context)
     language_query = user_input.strip()
     is_driver_turn = _should_skip_sensitive_filter(query, workflow.workflow_context)
     skip_sensitive_filter = (
@@ -1050,6 +1064,8 @@ async def _handle_chat_impl(
         'citation_state': translator.citation_state,
         'mode': conversation.mode if conversation.mode in ('auto', 'manual') else 'auto',
         'has_subagents': bool(agent.has_subagents),
+        'document_preview_chat': is_document_preview_chat,
+        'document_selection_context_available': has_document_selection,
         'conversation_id': conversation_id,
         'query': query or '',
         'mail_draft_confirm_id': (runtime.mail_draft_confirm_id or '').strip(),
@@ -1614,6 +1630,16 @@ async def _handle_chat_impl(
     prompt_builder.runtime(
         'chat_intent', 'Conversation Intent', conversation_intent_section,
         'database.intent', priority=30, content_kind='instruction',
+    )
+    prompt_builder.runtime(
+        'chat_document_selection_contract', 'Document Selection Contract', (
+            'The Selected text in Quoted Message is the exact target of the current user '
+            'instruction. Use the Surrounding passage only to disambiguate meaning. For direct '
+            'translation, transformation, explanation, definition, summary, or rewrite, answer '
+            'from this supplied content without searching the knowledge base.'
+        ),
+        'backend.document_selection', priority=39, authoritative=True,
+        content_kind='instruction', skip_if=lambda: not has_document_selection,
     )
     prompt_builder.runtime(
         'chat_quoted_message', 'Quoted Message', cited_message_context,

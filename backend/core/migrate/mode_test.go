@@ -102,8 +102,11 @@ func TestRepositoryStructuredMigrationCatalogLoads(t *testing.T) {
 		v03.Aggregate == nil || v03.Aggregate.Version != 20260805000000 {
 		t.Fatalf("unexpected v0_3 mode: %#v", v03)
 	}
-	if len(v03.Dev) != 70 {
-		t.Fatalf("v0_3 dev migration count=%d, want 70", len(v03.Dev))
+	if len(v03.Dev) != 71 {
+		t.Fatalf("v0_3 dev migration count=%d, want 71", len(v03.Dev))
+	}
+	if !containsMigrationFileVersion(v03.Dev, 20260910080000) {
+		t.Fatal("v0_3 dev migrations are missing knowledge-base processing levels")
 	}
 	if !containsMigrationFileVersion(v03.Dev, 20260908090000) {
 		t.Fatal("v0_3 dev migrations are missing vocabulary Anki tables")

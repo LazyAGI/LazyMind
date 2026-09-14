@@ -119,6 +119,18 @@
   margin-top: 18px;
 }
 
+.knowledge-translation-model-action {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 20px;
+
+  span {
+    color: var(--color-text-description);
+    font-size: 12px;
+  }
+}
+
 .knowledge-translation-label {
   margin-bottom: 6px;
   color: var(--color-text-description);

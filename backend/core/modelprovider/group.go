@@ -532,7 +532,8 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 }
 
 type deleteGroupResponse struct {
-	ID string `json:"id"`
+	ID                       string `json:"id"`
+	DowngradedKnowledgeBases int64  `json:"downgraded_knowledge_bases"`
 }
 
 // DeleteGroup soft-deletes a connection group and its user_model_provider_group_models rows.
@@ -592,16 +593,32 @@ func DeleteGroup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	hasMultimodal := false
+	hasTextEmbedding := false
 	modelIDs := make([]string, 0, len(groupModels))
 	for i := range groupModels {
 		modelIDs = append(modelIDs, groupModels[i].ID)
 		if isMultimodalEmbeddingModelType(groupModels[i].ModelType) {
 			hasMultimodal = true
 		}
+		if isTextEmbeddingModelType(groupModels[i].ModelType) {
+			hasTextEmbedding = true
+		}
+	}
+	if hasTextEmbedding && !indexedDowngradeConfirmed(r) {
+		common.ReplyErr(w, "removing an embedding model requires confirmation to downgrade all indexed knowledge bases to chunked", http.StatusConflict)
+		return
 	}
 
 	now := time.Now().UTC()
+	var downgradedKnowledgeBases int64
 	err = db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		if hasTextEmbedding {
+			count, err := downgradeIndexedDatasets(tx, userID, now)
+			if err != nil {
+				return err
+			}
+			downgradedKnowledgeBases = count
+		}
 		if len(modelIDs) > 0 {
 			if err := tx.Where("user_model_provider_group_model_id IN ?", modelIDs).
 				Delete(&orm.UserSelectedModel{}).Error; err != nil {
@@ -635,7 +652,7 @@ func DeleteGroup(w http.ResponseWriter, r *http.Request) {
 		maybeScheduleImageGroupLazyReset(r.Context(), db)
 	}
 
-	common.ReplyOK(w, deleteGroupResponse{ID: groupID})
+	common.ReplyOK(w, deleteGroupResponse{ID: groupID, DowngradedKnowledgeBases: downgradedKnowledgeBases})
 }
 
 func normalizeBaseURLForCompare(s string) string {
