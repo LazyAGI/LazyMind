@@ -3,8 +3,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import VocabularyPage from "./VocabularyPage";
 import { getActiveVocabularyReviewSession, startVocabularyReviewSession, submitVocabularySessionReview } from "./api";
 
-vi.mock("@/runtime/mode", () => ({ isVocabularyEnabled: () => true }));
+vi.mock("@/runtime/mode", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/runtime/mode")>()), isVocabularyEnabled: () => true }));
 vi.mock("./api", () => ({
+  listLearningCapabilities: vi.fn(async () => ({ items: [{ key: "english_definition", name_i18n_key: "vocabulary.capabilities.englishDefinition.name", description_i18n_key: "vocabulary.capabilities.englishDefinition.description", local_only: false, allowed_question_types: ["single_choice", "text_input", "cloze"], default_question_types: ["single_choice", "text_input", "cloze"] }], local_available: true })),
   listVocabulary: vi.fn(async () => [{ word: { id: "w1", term: "evidence", meaning: "证据", part_of_speech: "noun", provider: "local" }, state: "learning", tags: [], wordbooks: [], reps: 2, lapses: 1 }]),
   getAnkiStatus: vi.fn(async () => ({ connected: true, review_capability: "full" })),
   getVocabularyProvider: vi.fn(async () => ({ selected_provider: "local", anki_endpoint: "http://127.0.0.1:8765", anki_deck_name: "LazyMind Vocabulary" })),

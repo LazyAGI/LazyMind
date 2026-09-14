@@ -22,6 +22,7 @@ import (
 	"lazymind/core/exporter"
 	"lazymind/core/file"
 	"lazymind/core/knowledge_market"
+	"lazymind/core/learning"
 	"lazymind/core/mcp"
 	"lazymind/core/modelprovider"
 	"lazymind/core/remotefs"
@@ -711,7 +712,38 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/translation:translate", []string{"document.read"}, translation.Translate)
 
 	// ----- Vocabulary / Anki provider -----
+	handleAPI(r, "GET", "/learning/catalog", []string{"document.read"}, learning.Catalog)
+	handleAPI(r, "GET", "/learning/profiles", []string{"document.read"}, learning.ListProfiles)
+	handleAPI(r, "POST", "/learning/profiles", []string{"document.write"}, learning.CreateProfile)
+	handleAPI(r, "GET", "/learning/datasets/{dataset_id}/capabilities", []string{"document.read"}, learning.ListKBCapabilities)
+	handleAPI(r, "PUT", "/learning/datasets/{dataset_id}/capabilities", []string{"document.write"}, learning.PutKBCapabilities)
+	handleAPI(r, "PUT", "/learning/presets", []string{"document.write"}, learning.PutPreset)
+	handleAPI(r, "GET", "/learning/presets", []string{"document.read"}, learning.ListPresets)
+	handleAPI(r, "PATCH", "/learning/presets/{preset_id}", []string{"document.write"}, learning.UpdatePreset)
+	handleAPI(r, "DELETE", "/learning/presets/{preset_id}", []string{"document.write"}, learning.DeletePreset)
+	handleAPI(r, "GET", "/learning/presets:resolve", []string{"document.read"}, learning.ResolvePreset)
+	handleAPI(r, "POST", "/learning/selections:analyze", []string{"document.read"}, learning.AnalyzeSelection)
+	handleAPI(r, "POST", "/learning/content:resolve", []string{"document.write"}, learning.ResolveContent)
+	handleAPI(r, "POST", "/learning/content/{content_id}:confirm", []string{"document.write"}, learning.ConfirmContent)
+	handleAPI(r, "GET", "/learning/books", []string{"document.read"}, learning.ListBooks)
+	handleAPI(r, "POST", "/learning/books", []string{"document.write"}, learning.CreateBook)
+	handleAPI(r, "PATCH", "/learning/books/{book_id}", []string{"document.write"}, learning.UpdateBook)
+	handleAPI(r, "DELETE", "/learning/books/{book_id}", []string{"document.write"}, learning.ArchiveBook)
+	handleAPI(r, "POST", "/learning/books/{book_id}/entries", []string{"document.write"}, learning.AddBookEntries)
+	handleAPI(r, "GET", "/learning/dictionary:lookup", []string{"document.read"}, learning.DictionaryLookup)
+	handleAPI(r, "POST", "/learning/dictionaries:import", []string{"document.write"}, learning.ImportDictionary)
+	handleAPI(r, "POST", "/learning/review/sessions", []string{"document.write"}, learning.CreateReviewSession)
+	handleAPI(r, "GET", "/learning/review/sessions/{session_id}", []string{"document.read"}, learning.GetReviewSession)
+	handleAPI(r, "POST", "/learning/review/sessions/{session_id}:complete", []string{"document.write"}, learning.CompleteReviewSession)
+	handleAPI(r, "POST", "/learning/review/sessions/{session_id}/answers", []string{"document.write"}, learning.AnswerReviewQuestion)
+	handleAPI(r, "POST", "/learning/preanalysis/tasks", []string{"document.write"}, learning.CreatePreanalysisTask)
+	handleAPI(r, "GET", "/learning/preanalysis/tasks/{task_id}", []string{"document.read"}, learning.GetPreanalysisTask)
+	handleAPI(r, "POST", "/learning/preanalysis/tasks/{task_id}:run", []string{"document.write"}, learning.RunPreanalysisTask)
+	handleAPI(r, "POST", "/learning/preanalysis/tasks/{task_id}:cancel", []string{"document.write"}, learning.CancelPreanalysisTask)
+	handleAPI(r, "GET", "/learning/preanalysis/tasks/{task_id}/drafts", []string{"document.read"}, learning.ListPreanalysisDrafts)
+	handleAPI(r, "POST", "/learning/preanalysis/tasks/{task_id}/drafts:publish", []string{"document.write"}, learning.PublishPreanalysisDrafts)
 	if vocabulary.Enabled() {
+		handleAPI(r, "GET", "/vocabulary/capabilities", []string{"document.read"}, vocabulary.ListCapabilities)
 		handleAPI(r, "GET", "/vocabulary/provider", []string{"document.read"}, vocabulary.GetProvider)
 		handleAPI(r, "PUT", "/vocabulary/provider", []string{"document.write"}, vocabulary.PutProvider)
 		handleAPI(r, "GET", "/vocabulary/providers/anki/status", []string{"document.read"}, vocabulary.Status)

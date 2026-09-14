@@ -26,6 +26,7 @@ import {
   Table,
   Tabs,
   Tag,
+  Tooltip,
   Typography,
   message,
 } from "antd";
@@ -47,6 +48,7 @@ import {
   getVocabularyStats,
   listAnkiDecks,
   listReviewLogs,
+  listLearningCapabilities,
   listVocabulary,
   listWordbooks,
   masterVocabulary,
@@ -67,8 +69,10 @@ import {
   type VocabularyListItem,
   type VocabularyProviderSetting,
   type Wordbook,
+  type LearningCapability,
 } from "./api";
 import "./VocabularyPage.scss";
+import LearningCollectionsPanel from "@/modules/learning/LearningCollectionsPanel";
 
 const labels: Record<string, string> = {
   new: "新词",
@@ -123,6 +127,22 @@ const Panel = ({
   </section>
 );
 
+const LearningBookFields = ({ capabilities, t, onChange }: { capabilities: LearningCapability[]; t: (key: string) => string; onChange: (key: string, questions: string[]) => void }) => {
+  const [key, setKey] = useState("english_definition");
+  const definition = capabilities.find((item) => item.key === key);
+  const [questions, setQuestions] = useState<string[]>(definition?.default_question_types || ["single_choice", "text_input", "cloze"]);
+  const changeCapability = (next: string) => {
+    const defaults = capabilities.find((item) => item.key === next)?.default_question_types || [];
+    setKey(next); setQuestions(defaults); onChange(next, defaults);
+  };
+  return <>
+    <Typography.Text>{t("vocabulary.capabilityLabel")}</Typography.Text>
+    <Select style={{ width: "100%" }} value={key} options={capabilities.map((item) => ({ value: item.key, label: t(item.name_i18n_key) }))} onChange={changeCapability} />
+    <Typography.Text>{t("vocabulary.questionTypesLabel")}</Typography.Text>
+    <Select mode="multiple" style={{ width: "100%" }} value={questions} options={(definition?.allowed_question_types || []).map((value) => ({ value, label: t(`vocabulary.questionTypes.${value}`) }))} onChange={(next) => { setQuestions(next); onChange(key, next); }} />
+  </>;
+};
+
 export default function VocabularyPage() {
   const { t } = useTranslation();
   const desktop = isVocabularyEnabled();
@@ -140,6 +160,7 @@ export default function VocabularyPage() {
   const [anki, setAnki] = useState<AnkiProviderStatus | null>(null);
   const [stats, setStats] = useState<ReviewStats | null>(null);
   const [books, setBooks] = useState<Wordbook[]>([]);
+  const [capabilities, setCapabilities] = useState<LearningCapability[]>([]);
   const [ankiDecks, setAnkiDecks] = useState<AnkiDeck[]>([]);
   const [logs, setLogs] = useState<ReviewLog[]>([]);
   const [search, setSearch] = useState("");
@@ -162,9 +183,10 @@ export default function VocabularyPage() {
   const load = useCallback(async () => {
     const setting = await getVocabularyProvider();
     const active = setting.selected_provider;
-    const [nextBooks, nextDecks] = await Promise.all([
+    const [nextBooks, nextDecks, capabilityResult] = await Promise.all([
       desktop ? listWordbooks() : Promise.resolve([]),
       active === "anki" ? listAnkiDecks().catch(() => []) : Promise.resolve([]),
+      desktop ? listLearningCapabilities().catch(() => ({ items: [], local_available: false })) : Promise.resolve({ items: [], local_available: false }),
     ]);
     let selected = wordbookId || setting.local_default_wordbook_id || "";
     if (active === "local" && !nextBooks.some((book) => book.id === selected))
@@ -194,6 +216,7 @@ export default function VocabularyPage() {
     setItems(words);
     setAnki(status);
     setBooks(nextBooks);
+    setCapabilities(capabilityResult.items);
     setStats(nextStats);
     setAnkiDecks(nextDecks);
     setLogs(nextLogs);
@@ -297,16 +320,15 @@ export default function VocabularyPage() {
   };
   const createBook = () => {
     let name = "";
+    let capabilityKey = "english_definition";
+    let questionTypes = ["single_choice", "text_input", "cloze"];
     Modal.confirm({
-      title: "新建单词本",
+      title: provider === "anki" ? "新建 Anki 单词本" : "新建学习集",
       content: (
-        <Input
-          autoFocus
-          placeholder="输入单词本名称"
-          onChange={(event: ChangeEvent<HTMLInputElement>) => {
-            name = event.target.value;
-          }}
-        />
+        <Space direction="vertical" style={{ width: "100%" }}>
+          <Input autoFocus placeholder="输入名称" onChange={(event: ChangeEvent<HTMLInputElement>) => { name = event.target.value; }} />
+          {provider === "local" ? <LearningBookFields capabilities={capabilities} t={t} onChange={(key, questions) => { capabilityKey = key; questionTypes = questions; }} /> : <Alert type="info" showIcon message={t("vocabulary.localOnlyDesktop")} />}
+        </Space>
       ),
       onOk: async () => {
         if (!name.trim()) throw new Error("请输入名称");
@@ -319,7 +341,7 @@ export default function VocabularyPage() {
             }),
           );
         } else {
-          const book = await createWordbook({ name });
+          const book = await createWordbook({ name, capability_key: capabilityKey, question_types: questionTypes });
           setProviderSetting(
             await saveVocabularyProvider({
               ...providerSetting,
@@ -665,7 +687,12 @@ export default function VocabularyPage() {
             >
               {hasActiveReview ? "继续复习" : "开始复习"}
             </Button>
-            <Button onClick={createBook}>新建单词本</Button>
+            <Button onClick={createBook}>{provider === "anki" ? "新建 Anki 单词本" : "新建学习集"}</Button>
+            {provider === "anki" ? (
+              <Tooltip title={t("vocabulary.localOnlyDesktop")}>
+                <span><Button disabled>新建 Local 学习集</Button></span>
+              </Tooltip>
+            ) : null}
             {provider === "local" ? (
               <Dropdown
                 menu={{
@@ -864,6 +891,7 @@ export default function VocabularyPage() {
           onChange={setTab}
           items={[
             { key: "words", label: "生词表", children: wordsView },
+            { key: "collections", label: t("learning.learningCollections"), children: <LearningCollectionsPanel localAvailable={desktop}/> },
             { key: "history", label: "学习记录", children: historyView },
           ]}
         />

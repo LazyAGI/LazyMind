@@ -44,6 +44,9 @@ import { getTranslationStatus, translateSelectionText, TranslationUnavailableErr
 import AddVocabularyModal from "@/modules/vocabulary/AddVocabularyModal";
 import DocumentVocabularyPanel from "@/modules/vocabulary/DocumentVocabularyPanel";
 import { isVocabularyEnabled } from "@/runtime/mode";
+import AddLearningContentModal, { type LearningSelection } from "@/modules/learning/AddLearningContentModal";
+import { getKnowledgeBaseCapabilities, getLearningCatalog, type LearningCapability } from "@/modules/learning/api";
+import DocumentLearningPanel from "@/modules/learning/DocumentLearningPanel";
 import {
   processingLevelSupportsSegments,
   type ProcessingLevel,
@@ -128,6 +131,9 @@ const Detail = () => {
   const [translationResult, setTranslationResult] = useState("");
   const [vocabularySelection, setVocabularySelection] = useState<PdfTextSelection | null>(null);
   const [vocabularyRefreshToken, setVocabularyRefreshToken] = useState(0);
+  const [learningSelection,setLearningSelection]=useState<LearningSelection|null>(null);
+  const [learningCapabilities,setLearningCapabilities]=useState<LearningCapability[]>([]);
+  const [learningLocalAvailable,setLearningLocalAvailable]=useState(false);
   const [processingLevel, setProcessingLevel] =
     useState<ProcessingLevel>("indexed");
   const canShowSegments =
@@ -136,6 +142,8 @@ const Detail = () => {
   useEffect(() => {
     getTranslationStatus().then(setTranslationConfigured).catch(() => setTranslationConfigured(false));
   }, []);
+
+  useEffect(()=>{ if(!knowledgeBaseId)return; Promise.all([getLearningCatalog(),getKnowledgeBaseCapabilities(knowledgeBaseId)]).then(([catalog,configured])=>{const enabled=new Set(configured.filter(x=>x.enabled).map(x=>x.capability_key));setLearningCapabilities(catalog.capabilities.filter(x=>enabled.has(x.key)));setLearningLocalAvailable(catalog.local_available)}).catch(()=>setLearningCapabilities([])); },[knowledgeBaseId]);
 
   useEffect(() => {
     if (!canShowSegments && previewSideTab === "segments") {
@@ -513,6 +521,8 @@ const Detail = () => {
             onPdfTranslateSelection={translatePdfSelection}
             onAddVocabularySelection={isVocabularyEnabled() ? (selection) => setVocabularySelection(selection) : undefined}
             translationConfigured={translationConfigured}
+            learningSelectionActions={learningCapabilities.map(item=>({key:item.key,label:t(item.name_i18n_key),languages:item.languages,subjectKinds:item.subject_kinds,disabled:!learningLocalAvailable,disabledTip:t("vocabulary.localOnlyDesktop")}))}
+            onLearningSelection={(capabilityKey,selection)=>setLearningSelection({capabilityKey,selection})}
           />
         </Col>
         <Col
@@ -635,6 +645,7 @@ const Detail = () => {
                         label: "生词",
                         children: <DocumentVocabularyPanel documentId={knowledgeId} refreshToken={vocabularyRefreshToken} />,
                       }] : []),
+                      ...(learningCapabilities.length ? [{key:"learning",label:t("learning.documentLearning"),children:<DocumentLearningPanel datasetId={knowledgeBaseId} documentId={knowledgeId} revision={knowledgeDetail.update_time?.toString()} capabilities={learningCapabilities} localAvailable={learningLocalAvailable}/>}]:[]),
                     ]}
                   />
                 </div>
@@ -689,6 +700,7 @@ const Detail = () => {
         onClose={() => setVocabularySelection(null)}
         onAdded={() => { setVocabularyRefreshToken((value) => value + 1); setPreviewSideTab("vocabulary"); setPreviewSideCollapsed(false); }}
       /> : null}
+      <AddLearningContentModal value={learningSelection} datasetId={knowledgeBaseId} documentId={knowledgeId} segmentId={segmentDetail?.segment_id} context={learningSelection?.selection.context||segmentDetail?.content} onClose={()=>setLearningSelection(null)} onAdded={()=>{setVocabularyRefreshToken(v=>v+1);setPreviewSideCollapsed(false)}} />
     </div>
   );
 };

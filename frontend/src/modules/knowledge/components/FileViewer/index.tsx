@@ -23,6 +23,8 @@ import {
 import {
   RenderPdf,
   exportPdfAsImagePdf,
+  isLearningActionCompatible,
+  type LearningSelectionAction,
   type PdfTextSelection,
 } from "@/components/ui";
 import { normalizeProxyableUrl } from "@/modules/knowledge/utils/request";
@@ -43,6 +45,8 @@ interface FileViewerProps {
   onPdfTranslateSelection?: (selection: PdfTextSelection) => void;
   onAddVocabularySelection?: (selection: PdfTextSelection) => void;
   translationConfigured?: boolean;
+  learningSelectionActions?: LearningSelectionAction[];
+  onLearningSelection?: (key:string, selection:PdfTextSelection)=>void;
 }
 
 const IMAGE_FILE_TYPES = [
@@ -302,12 +306,14 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
             askSelectionLabel={t("knowledge.askPdfSelection")}
             onTranslateSelection={props.onPdfTranslateSelection}
             onAddVocabularySelection={props.onAddVocabularySelection}
-            addVocabularySelectionLabel="加入生词"
+            addVocabularySelectionLabel={t("learning.addToCollection")}
             translateSelectionLabel={t("knowledge.translateSelection")}
             translateSelectionDisabled={!props.translationConfigured}
             translateSelectionDisabledTip={t("knowledge.translationConfigureTip")}
             translateSelectionConfigureLabel={t("knowledge.translationConfigureAction")}
             translateSelectionConfigureUrl="/settings?section=knowledge&tool=translation"
+            learningSelectionActions={props.learningSelectionActions}
+            onLearningSelection={props.onLearningSelection}
           />
         ) : null;
       case "docx":
@@ -464,7 +470,24 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
                 window.getSelection()?.removeAllRanges();
                 setTextSelectionAction(null);
               }}
-            >加入生词</button> : null}
+            >{t("learning.addToCollection")}</button> : null}
+            {props.learningSelectionActions?.filter((action) => isLearningActionCompatible(action, textSelectionAction.text)).map((action) => <button
+              key={action.key}
+              type="button"
+              className="file-viewer-selection-translate"
+              disabled={action.disabled}
+              title={action.disabled ? action.disabledTip : undefined}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={(event) => {
+                props.onLearningSelection?.(action.key, {
+                  text: textSelectionAction.text,
+                  page: 1,
+                  context: event.currentTarget.closest(".file-viewer")?.textContent?.trim() || textSelectionAction.text,
+                });
+                window.getSelection()?.removeAllRanges();
+                setTextSelectionAction(null);
+              }}
+            >{action.label}</button>)}
           </span>
         ) : null}
         {loading && renderLoading}
