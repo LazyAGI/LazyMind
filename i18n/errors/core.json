@@ -1720,5 +1720,8 @@
   "2002966": {"en-US":"The dictionary checksum must be SHA-256","zh-CN":"词典校验和必须为 SHA-256"},
   "2002967": {"en-US":"This dictionary version conflicts with existing import metadata","zh-CN":"该词典版本与已有导入元数据冲突"},
   "2002968": {"en-US":"The review session is not active","zh-CN":"复习会话当前不可作答"},
-  "2002969": {"en-US":"The content is incompatible with the selected learning collection","zh-CN":"学习内容与所选学习集不兼容"}
+  "2002969": {"en-US":"The content is incompatible with the selected learning collection","zh-CN":"学习内容与所选学习集不兼容"},
+  "2002970": {"en-US":"Document chunk generation was canceled","zh-CN":"文档切分生成已取消"},
+  "2002971": {"en-US":"Document chunks are still being generated. Please retry shortly","zh-CN":"文档切分仍在生成，请稍后重试"},
+  "2002972": {"en-US":"The confirmed content is missing required fields","zh-CN":"确认的内容缺少必填字段"}
 }

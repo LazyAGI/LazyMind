@@ -841,6 +841,10 @@ func init() {
 	registerAdditionalError("dictionary import version metadata conflicts with existing import", http.StatusConflict, 2002967)
 	registerAdditionalError("review session is not active", http.StatusConflict, 2002968)
 	registerAdditionalError("content is incompatible with the selected learning collection", http.StatusBadRequest, 2002969)
+	registerAdditionalError("document chunk generation canceled", http.StatusRequestTimeout, 2002970)
+	registerAdditionalError("document chunks are still being generated; please retry shortly", http.StatusConflict, 2002971)
+	registerAdditionalErrorPattern("provided content misses required fields: %s", "provided content misses required fields", http.StatusBadRequest, 2002972)
+	registerAdditionalError("provided content misses required fields", http.StatusBadRequest, 2002972)
 }
 
 func registerAdditionalError(message string, status, code int) {
