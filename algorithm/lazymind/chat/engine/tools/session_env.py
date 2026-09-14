@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from lazyllm.tools import fc_register
+
 import re
 from typing import Any, MutableMapping
 
@@ -87,6 +89,12 @@ def build_session_env_tool(
 ) -> Any:
     """Build a ChatAgent-scoped tool for setting session environment variables."""
 
+    @fc_register(host_file_access=(
+        'NONE' if type(conversation_env_store) is dict
+        and all(type(key) is str and type(value) is dict
+                for key, value in conversation_env_store.items())
+        and type(conversation_id) is str else 'UNDECLARED'
+    ))
     def set_session_env(name: str, value: str) -> dict[str, Any]:
         """Set an environment variable for the current conversation only.
 

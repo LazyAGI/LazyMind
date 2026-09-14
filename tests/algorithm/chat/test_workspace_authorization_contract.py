@@ -19,18 +19,12 @@ def _source(path: Path) -> str:
     return path.read_text(encoding='utf-8')
 
 
-def test_tool_config_declares_authorization_metadata():
+def test_registry_does_not_duplicate_runtime_authorization_metadata():
     tree = ast.parse(_source(REGISTRY))
-    tool_config = next(
-        node for node in tree.body
-        if isinstance(node, ast.ClassDef) and node.name == 'ToolConfig'
-    )
-    fields = {
-        node.target.id
-        for node in tool_config.body
-        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
-    }
-    assert 'authorization' in fields
+    tool_config = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == 'ToolConfig')
+    assert not any(isinstance(node, ast.AnnAssign) and node.target.id == 'authorization'
+                   for node in tool_config.body)
+    assert 'workspace_tool_metadata' in _source(REGISTRY)
 
 
 def test_middleware_exposes_an_authorization_gate_before_manager_dispatch():
@@ -40,7 +34,7 @@ def test_middleware_exposes_an_authorization_gate_before_manager_dispatch():
     init_node = next(node for node in middleware.body if isinstance(node, ast.FunctionDef) and node.name == '__init__')
     init = ast.get_source_segment(source, init_node)
     assert init is not None and 'authorization_gate' in init
-    execute_pos = source.index('self._manager.execute_with_records(')
+    execute_pos = source.index('self._manager.execute_prepared(')
     gate_pos = source.index('authorization_gate', source.index('def execute_with_records'))
     assert gate_pos < execute_pos
 
@@ -80,7 +74,8 @@ def test_workspace_real_core_http_roundtrip():
     from lazyllm.tools.agent import ToolManager
     from lazymind.config import config
     from lazymind.chat.engine.agent_runtime.tool_call_guard import ToolExecutionMiddleware
-    from lazymind.chat.service.component.tool_registry import DEFAULT_TOOLS, workspace_tool_metadata
+    from lazymind.chat.service.component.tool_registry import DEFAULT_TOOLS
+    from lazymind.chat.engine.tools.workspace_context import WorkspacePermissionContext
 
     fixture = json.loads(raw)
     config['core_api_url'] = fixture['url']
@@ -99,7 +94,7 @@ def test_workspace_real_core_http_roundtrip():
         if cancelled.is_set():
             raise RuntimeError('cancelled')
     middleware = ToolExecutionMiddleware(manager, cancel_check=check_cancel,
-        workspace_tools=workspace_tool_metadata(manager.tools_info, [registration]))
+        workspace_permission=WorkspacePermissionContext.from_config(context, trusted_local=True))
     session = requests.Session()
     session.trust_env = False
     session.headers['X-User-Id'] = 'owner'

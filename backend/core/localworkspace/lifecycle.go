@@ -3,7 +3,6 @@ package localworkspace
 import (
 	"context"
 	"encoding/json"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -112,7 +111,7 @@ func validateOperationRun(ctx context.Context, db *gorm.DB, stateStore state.Sto
 			return nil, err
 		}
 		var graph graphengine.CompiledStateGraph
-		if json.Unmarshal(declaration.CompiledGraph, &graph) != nil || !slices.Contains(graph.Nodes[declaration.StepID].LegacyTools, "local_fs") {
+		if json.Unmarshal(declaration.CompiledGraph, &graph) != nil || !workflowOperationToolAllowed(graph.Nodes[declaration.StepID].LegacyTools, req) {
 			return nil, invalid
 		}
 		return fn(ctx, db, stateStore, req)

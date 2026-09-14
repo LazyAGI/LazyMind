@@ -536,6 +536,7 @@ def _build_subagent_plan(
     tool_prompt_appendices: Dict[str, List[str]],
     resume: bool = False,
     llm_config: Optional[Dict[str, Any]] = None,
+    workspace_permission=None,
 ) -> AgentRunPlan:
     builder = PromptBuilder.for_role(AgentRole.SUBAGENT)
     add_standard_system_sections(
@@ -762,6 +763,7 @@ def _build_subagent_plan(
         stop_tools=sorted(terminal_tool_names & available_tool_names),
         force_summarize_context=ctx.objective,
         execution_options=AgentExecutionOptions(
+            workspace_permission=workspace_permission,
             skills=inherited_skills or None,
             fs=FS if inherited_skills else None,
             skills_dir=skills_dir,
@@ -1132,6 +1134,7 @@ async def run_subagent_stream(
 
         agentic_config = _build_agentic_config(task, params, effective_agent_type)
         agentic_config['_workspace_execution'] = execution_identity
+        agentic_config['_subagent_workspace'] = ctx.workspace_path
         agentic_config['citation_state'] = source_state
         agentic_config['citation_mode'] = 'collect_only'
         lazyllm.globals['agentic_config'] = agentic_config
@@ -1153,6 +1156,8 @@ async def run_subagent_stream(
             include_artifact_writes=not _publisher_owns_outputs(ctx),
         )
         runtime_configs = _tool_configs_for_runtime_tools(visible_runtime_tools)
+        from lazymind.chat.engine.tools.workspace_context import WorkspacePermissionContext
+
         plan = _build_subagent_plan(
             ctx,
             db,
@@ -1162,6 +1167,8 @@ async def run_subagent_stream(
             ),
             resume=resume,
             llm_config=model_config,
+            workspace_permission=WorkspacePermissionContext.from_config(
+                agentic_config, trusted_local=bool(_cfg['trusted_local_mode'])),
         )
 
         step_seq = db.max_step_seq(task_id) + 1 if resume else 0

@@ -9,14 +9,14 @@ func localExecutionSchemas() map[string]any {
 		prop("workspace_id", strSchema()), prop("call_id", strSchema()), prop("tool_name", strSchema()),
 		prop("history_id", strSchema()), prop("run_id", strSchema()), prop("task_id", strSchema()),
 		prop("generation", strSchema()), prop("attempt_id", strSchema()), prop("lease_token", strSchema()),
-		prop("execution_mode", enumStringSchema("local")), prop("arguments_digest", strSchema()),
+		prop("execution_mode", enumStringSchema("local", "host_access")), prop("arguments_digest", strSchema()), prop("host_intent_id", strSchema()),
 		prop("parent_identity", strSchema()), prop("target_identity", strSchema()), prop("depends_on", strSchema()),
-		prop("operation", enumStringSchema("read", "create", "append", "replace", "delete", "overwrite", "mkdir", "ls", "glob", "grep", "info")),
+		prop("operation", enumStringSchema("read", "write", "create", "append", "replace", "delete", "overwrite", "mkdir", "ls", "glob", "grep", "info")),
 		prop("path", strSchema()), prop("content", strSchema()), prop("old_content", strSchema()),
 		prop("expected_version", strSchema()), prop("expected_replacements", intSchema()),
 		prop("pattern", strSchema()), prop("glob", strSchema()), prop("limit", intSchema()),
 		prop("offset", intSchema()), prop("max_lines", intSchema()))
-	request["description"] = "Omit execution_mode for the legacy relative-path Core executor. local requires canonical absolute path, parent/target identities and arguments_digest; external paths always require allow_once. Body identity never overrides authenticated user/conversation. Approval expires after five minutes."
+	request["description"] = "Omit execution_mode for the legacy relative-path Core executor. local requires canonical absolute path, parent/target identities and arguments_digest; external paths always require allow_once. Body identity never overrides authenticated user/conversation. host_access requires a host_intent_id, tool_name, arguments_digest and canonical absolute path, uses read/write/delete, and performs no Core filesystem checks. Approval expires after five minutes."
 	completion := objReq([]string{"status"}, prop("status", enumStringSchema("completed", "failed", "uncertain")),
 		prop("reason", strSchema()), prop("version", strSchema()), prop("result_identity", strSchema()))
 	result := obj(prop("operation_id", strSchema()), prop("path", strSchema()), prop("version", strSchema()),
@@ -25,8 +25,10 @@ func localExecutionSchemas() map[string]any {
 		prop("execute_allowed", boolSchema()), prop("target_identity", strSchema()), prop("permission_mode", strSchema()),
 		prop("content", strSchema()), prop("data", obj()))
 	return map[string]any{
-		"WorkspaceOperationRequest": request,
-		"LocalOperationCompletion":  map[string]any{"allOf": []any{refSchema("WorkspaceOperationRequest"), completion}},
+		"WorkspaceOperationRequest":       request,
+		"WorkspaceOperationBatchRequest":  objReq([]string{"calls"}, prop("calls", map[string]any{"type": "array", "minItems": 1, "maxItems": 16, "items": refSchema("WorkspaceOperationRequest")})),
+		"WorkspaceOperationBatchResponse": objReq([]string{"code", "message", "data"}, prop("code", intSchema()), prop("message", strSchema()), prop("data", objReq([]string{"operations"}, prop("operations", map[string]any{"type": "array", "items": result})))),
+		"LocalOperationCompletion":        map[string]any{"allOf": []any{refSchema("WorkspaceOperationRequest"), completion}},
 		"WorkspaceOperationResponse": objReq([]string{"code", "message", "data"}, prop("code", intSchema()),
 			prop("message", strSchema()), prop("data", result)),
 	}
@@ -35,11 +37,11 @@ func localExecutionSchemas() map[string]any {
 func localExecutionPaths() map[string]any {
 	base := "/internal/conversations/{conversation_id}/workspace-operations"
 	paths := map[string]any{}
-	for _, action := range []string{"prepare", "execute", "claim", "complete"} {
+	for _, action := range []string{"prepare", "prepare-batch", "execute", "claim", "complete"} {
 		path := base + "/{operation_id}:" + action
 		params := []map[string]any{param("path", "conversation_id", true, strSchema())}
-		if action == "prepare" {
-			path = base + ":prepare"
+		if action == "prepare" || action == "prepare-batch" {
+			path = base + ":" + action
 		} else {
 			params = append(params, param("path", "operation_id", true, strSchema()))
 		}
@@ -47,7 +49,11 @@ func localExecutionPaths() map[string]any {
 		if action == "complete" {
 			schema = "LocalOperationCompletion"
 		}
-		success := response(200, "Operation state; only the first successful claim grants execute_allowed", refSchema("WorkspaceOperationResponse"))
+		responseSchema := "WorkspaceOperationResponse"
+		if action == "prepare-batch" {
+			schema, responseSchema = "WorkspaceOperationBatchRequest", "WorkspaceOperationBatchResponse"
+		}
+		success := response(200, "Operation state; only the first successful claim grants execute_allowed", refSchema(responseSchema))
 		responses := map[string]any{"200": success}
 		for _, status := range []int{400, 401, 403, 404, 409} {
 			responses[strconv.Itoa(status)] = response(status, "Owner-scoped authorization or lifecycle error", refSchema("LocalWorkspaceErrorResponse"))

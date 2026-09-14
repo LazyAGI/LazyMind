@@ -1,6 +1,5 @@
 """Protocol fakes for unit tests; real Core round trips live in the Go integration test."""
 import copy
-import hashlib
 import os
 import time
 
@@ -14,20 +13,25 @@ def workspace_runtime(monkeypatch, tmp_path):
     from lazymind.chat.engine.agent_runtime import workspace_authorization as transport
     from lazymind.chat.engine.agent_runtime.tool_call_guard import ToolExecutionMiddleware, FailureRetryPolicy
     from lazymind.chat.engine.tools.local_fs import LocalFileToolkit
-    from lazymind.chat.service.component.tool_registry import ToolConfig, workspace_tool_metadata
+    from lazymind.chat.engine.tools.workspace_context import WorkspacePermissionContext
 
     class Core:
         def __init__(self):
             self.events, self.operations = [], {}
+            self.batch_requests = 0
             self.on_poll = self.on_claim = self.on_complete = None
 
         def post(self, path, payload, *, user_id):
             assert user_id == config['user_id']
             action = path.rsplit(':', 1)[-1]
             assert action != 'execute', 'the Core executor must not perform local IO'
-            assert payload['execution_mode'] == 'local' and os.path.isabs(payload['path'])
+            if action == 'prepare-batch':
+                self.batch_requests += 1
+                return {'operations': [self.post(path.replace(':prepare-batch', ':prepare'), request, user_id=user_id)
+                                       for request in payload['calls']]}
+            assert payload['execution_mode'] in {'local', 'host_access'} and os.path.isabs(payload['path'])
             if action == 'prepare':
-                identifier = hashlib.sha256(payload['call_id'].encode()).hexdigest()
+                identifier = transport.WorkspaceAuthorization._operation_id(payload)
                 self.operations[identifier] = {
                     'payload': copy.deepcopy(payload), 'operation_id': identifier,
                     'status': 'pending', 'decision': 'pending',
@@ -44,7 +48,7 @@ def workspace_runtime(monkeypatch, tmp_path):
                     self.on_claim(operation)
                 assert operation['status'] == 'allowed'
                 operation['status'] = 'executing'
-                version, identity = payload.get('expected_version', ''), payload['target_identity']
+                version, identity = payload.get('expected_version', ''), payload.get('target_identity', '')
                 if payload.get('depends_on'):
                     previous = self.operations[payload['depends_on']]
                     assert previous['status'] == 'completed'
@@ -69,14 +73,15 @@ def workspace_runtime(monkeypatch, tmp_path):
 
     config, mode = {}, 'always_ask'
 
-    def create(root=None, *, extra_tools=(), gate=None, cancel_check=None, permission_mode='always_ask'):
+    def create(root=None, *, extra_tools=(), gate=None, cancel_check=None, permission_mode='always_ask',
+               execution_identity=None, trusted_local=True):
         nonlocal config, mode
         root = root or tmp_path / 'workspace'
         root.mkdir(exist_ok=True)
         mode = permission_mode
         config = {
             'user_id': 'owner', 'conversation_id': 'conversation',
-            '_workspace_execution': {'history_id': 'history', 'run_id': 'run'},
+            '_workspace_execution': execution_identity or {'history_id': 'history', 'run_id': 'run'},
             'workspace_context': {'workspace_id': 'workspace', 'permission_mode': mode, 'permission_version': 1},
             'local_fs_sources': [{'source_id': 'local-workspace:workspace', 'paths': [str(root.resolve())],
                                   'file_extensions': ['txt', 'md']}],
@@ -84,17 +89,13 @@ def workspace_runtime(monkeypatch, tmp_path):
         lazyllm.globals['agentic_config'] = lazyllm.globals.get('agentic_config') or {}
         monkeypatch.setitem(lazyllm.globals, 'agentic_config', config)
         toolkit = LocalFileToolkit()
-        registration = ToolConfig('local', 'Local', 'Local', toolkit, 'data', authorization={
-            name: 'write' if name in {'create', 'append', 'delete', 'overwrite', 'mkdir', 'string_replace'} else 'read'
-            for name in toolkit.__public_apis__
-        })
         manager = ToolManager([toolkit, *extra_tools])
         core = Core()
         monkeypatch.setattr(transport, 'post_core_api', core.post)
         monkeypatch.setattr(transport, 'get_core_api', core.get)
         monkeypatch.setattr(transport.time, 'sleep', lambda _: None)
         middleware = ToolExecutionMiddleware(manager, authorization_gate=gate, cancel_check=cancel_check,
-                                             workspace_tools=workspace_tool_metadata(manager.tools_info, [registration]),
+                                             workspace_permission=WorkspacePermissionContext.from_config(config, trusted_local=trusted_local),
                                              failure_policy=FailureRetryPolicy({'LocalFileToolkit_append': 1}))
         return middleware, core, config
 

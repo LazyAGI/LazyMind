@@ -14,6 +14,8 @@ from typing import Any, Callable, Dict, List, Optional, Union
 
 import httpx
 import lazyllm
+from lazyllm.tools import fc_register
+from lazyllm.tools.agent.tool_runtime import HostFileAccess, _get_tool_runtime_metadata
 
 from lazymind.chat.engine.tools.intent_writer import enable_workflow_intent_scopes
 from lazymind.workflow_sdk import AdvanceRequest, StepCommand, WorkflowClient, WorkflowClientError
@@ -93,10 +95,34 @@ def _state(session_id: str) -> Dict[str, Any]:
         return {'error': {'code': exc.code, 'message': exc.message}}
 
 
+def _declared_workflow_callback(value: Any) -> bool:
+    if type(value) in {str, type(None)}:
+        return True
+    metadata = _get_tool_runtime_metadata(value) if callable(value) else None
+    return metadata is not None and metadata.host_file_access is HostFileAccess.NONE
+
+
+def _trusted_workflow_toolkit(toolkit: Any) -> bool:
+    # This factory accepts only the host SDK binding it constructs. An injected
+    # client or instance method override must carry its own boundary elsewhere.
+    return (
+        type(toolkit) is HostWorkflowToolkit
+        and set(vars(toolkit)) == {'_client_factory', '_origin_ref', '_allowed_workflow_ids'}
+        and toolkit._client_factory is _client
+        and type(toolkit._origin_ref) is str
+        and type(toolkit._allowed_workflow_ids) is frozenset
+        and all(type(value) is str for value in toolkit._allowed_workflow_ids)
+    )
+
+
 def _handoff_tool(
     session: Union[str, Callable[[], str]],
     user_input: Optional[Union[str, Callable[[], str]]] = None,
 ) -> Any:
+    capability = ('NONE' if all(_declared_workflow_callback(value)
+                                for value in (session, user_input)) else 'UNDECLARED')
+
+    @fc_register(host_file_access=capability)
     def advance_step_and_hand_off(step_id: str) -> str:
         """Execute one Ready Workflow step, then hand off for result approval."""
         selected_session_id = session() if callable(session) else session
@@ -274,6 +300,12 @@ def _safe_session_tools(
     user_input: Optional[Union[str, Callable[[], str]]] = None,
 ) -> List[Any]:
     """Model tools whose protocol and concurrency parameters are Host-injected."""
+    capability = (
+        'NONE' if _trusted_workflow_toolkit(toolkit)
+        and all(_declared_workflow_callback(value)
+                for value in (session, initialize_session, user_input)) else 'UNDECLARED'
+    )
+
     def session_id() -> str:
         value = session() if callable(session) else session
         selected = str(value or '').strip()
@@ -294,14 +326,17 @@ def _safe_session_tools(
             )
         return selected
 
+    @fc_register(host_file_access=capability)
     def get_workflow_state() -> Dict[str, Any]:
         """Read this conversation's authoritative Workflow state."""
         return toolkit.get_workflow_state(session_id())
 
+    @fc_register(host_file_access=capability)
     def get_ready_steps() -> Dict[str, Any]:
         """Read exact forward, retryable, and rewindable targets for this Session."""
         return toolkit.get_ready_steps(session_id())
 
+    @fc_register(host_file_access=capability)
     def advance_step(step_ids: List[str]) -> Dict[str, Any]:
         """Execute exactly one Runtime-returned target; never batch or parallelize steps."""
         requested = [str(value).strip() for value in step_ids if str(value).strip()]
@@ -378,19 +413,23 @@ def _safe_session_tools(
                 state_refreshed = True
         raise AssertionError('unreachable')
 
+    @fc_register(host_file_access=capability)
     def list_workflow_inputs() -> Dict[str, Any]:
         """List durable input bindings for this Session."""
         return toolkit.list_workflow_inputs(session_id())
 
+    @fc_register(host_file_access=capability)
     def list_artifacts() -> Dict[str, Any]:
         """List selected Artifacts for this Session."""
         return toolkit.list_artifacts(session_id())
 
+    @fc_register(host_file_access=capability)
     def read_artifact(artifact_ref: str) -> Dict[str, Any]:
         """Read a selected Artifact by exact slot handle such as report or images[0]."""
         artifact = _artifact_by_handle(toolkit, session_id(), artifact_ref)
         return toolkit.read_artifact(str(artifact.get('artifact_id') or artifact.get('id') or ''))
 
+    @fc_register(host_file_access=capability)
     def patch_artifact(artifact_ref: str, value: Any, caption: str = '') -> Dict[str, Any]:
         """Patch a selected Artifact; Host injects id, base revision, type, and command."""
         artifact = _artifact_by_handle(toolkit, session_id(), artifact_ref)
@@ -435,6 +474,7 @@ def _state_changed_result(frontier: Dict[str, Any], requested: List[str]) -> Dic
 
 def _safe_authoring_tools(toolkit: HostWorkflowToolkit) -> List[Any]:
     """Context-bound authoring tools; models author content, not concurrency metadata."""
+    capability = 'NONE' if _trusted_workflow_toolkit(toolkit) else 'UNDECLARED'
     cfg = _agentic_config()
 
     def _draft() -> Dict[str, Any]:
@@ -448,6 +488,7 @@ def _safe_authoring_tools(toolkit: HostWorkflowToolkit) -> List[Any]:
         cfg['workflow_authoring_draft_version'] = int(value.get('version') or 0)
         return value
 
+    @fc_register(host_file_access=capability)
     def create_workflow_draft(name: str, files: Dict[str, str]) -> Dict[str, Any]:
         """Create a draft from authored files; Host injects pinned Skill metadata."""
         skill = cfg.get('workflow_authoring_skill_context') or {}
@@ -460,10 +501,12 @@ def _safe_authoring_tools(toolkit: HostWorkflowToolkit) -> List[Any]:
         cfg['workflow_authoring_draft_version'] = int(value.get('version') or 0)
         return value
 
+    @fc_register(host_file_access=capability)
     def list_workflow_drafts() -> Dict[str, Any]:
         """List drafts available for exact selection."""
         return toolkit.list_workflow_drafts()
 
+    @fc_register(host_file_access=capability)
     def select_workflow_draft(draft_id: str) -> Dict[str, Any]:
         """Select one exact draft returned by list_workflow_drafts."""
         value = toolkit.get_workflow_draft(draft_id)
@@ -471,10 +514,12 @@ def _safe_authoring_tools(toolkit: HostWorkflowToolkit) -> List[Any]:
         cfg['workflow_authoring_draft_version'] = int(value.get('version') or 0)
         return value
 
+    @fc_register(host_file_access=capability)
     def get_workflow_draft() -> Dict[str, Any]:
         """Read the selected authoring draft."""
         return _draft()
 
+    @fc_register(host_file_access=capability)
     def update_workflow_draft_file(path: str, content: str) -> Dict[str, Any]:
         """Update one allowed package path; Host injects draft and optimistic version."""
         current = _draft()
@@ -485,16 +530,19 @@ def _safe_authoring_tools(toolkit: HostWorkflowToolkit) -> List[Any]:
         cfg['workflow_authoring_draft_version'] = int(value.get('version') or 0)
         return value
 
+    @fc_register(host_file_access=capability)
     def validate_workflow_draft() -> Dict[str, Any]:
         """Validate the selected draft."""
         _draft()
         return toolkit.validate_workflow_draft(str(cfg['workflow_authoring_draft_id']))
 
+    @fc_register(host_file_access=capability)
     def get_workflow_diagnostics() -> Dict[str, Any]:
         """Read diagnostics for the selected draft."""
         _draft()
         return toolkit.get_workflow_diagnostics(str(cfg['workflow_authoring_draft_id']))
 
+    @fc_register(host_file_access=capability)
     def publish_workflow() -> Dict[str, Any]:
         """Publish the selected validated draft."""
         _draft()
@@ -1222,6 +1270,7 @@ def _workflow_trigger_tools(
                     },
                 }
             if attachments_available:
+                @fc_register(host_file_access='NONE')
                 def bound_trigger(
                     input_bindings: Optional[Dict[str, str]] = None,
                     request_context: Optional[str] = None,
@@ -1229,6 +1278,7 @@ def _workflow_trigger_tools(
                     """Initialize with optional attachments and a merged clarified request."""
                     return run_trigger(input_bindings, request_context)
             elif supports_scalar_bindings:
+                @fc_register(host_file_access='NONE')
                 def bound_trigger(
                     input_bindings: Optional[Dict[str, str]] = None,
                     request_context: Optional[str] = None,
@@ -1236,6 +1286,7 @@ def _workflow_trigger_tools(
                     """Initialize with scalar bindings and a merged clarified request."""
                     return run_trigger(input_bindings, request_context)
             else:
+                @fc_register(host_file_access='NONE')
                 def bound_trigger(request_context: Optional[str] = None) -> Dict[str, Any]:
                     """Initialize with the current or merged clarified request context."""
                     return run_trigger(request_context=request_context)
@@ -1381,6 +1432,15 @@ def resolve_workflow_injection(
             ],
         ]
     session_holder: Dict[str, str] = {'session_id': session_id}
+
+    @fc_register(host_file_access='NONE')
+    def selected_session_id() -> str:
+        return session_holder.get('session_id', '')
+
+    @fc_register(host_file_access='NONE')
+    def selected_request_context() -> str:
+        return session_holder.get('request_context', '')
+
     trigger_tools = _workflow_trigger_tools(
         activations, allowed_refs, current_query, conversation_id, session_holder,
         conversation_history, mode,
@@ -1413,22 +1473,26 @@ def resolve_workflow_injection(
         # A ChatAgent tool set is fixed for the duration of one model turn. Expose
         # Host-bound Session tools up front and resolve their Session id only after
         # trigger_<workflow> creates it, so trigger -> advance works in the same turn.
-        initialize_selected_session = (
-            (lambda: trigger_tools[0]()) if len(trigger_tools) == 1 else None
-        )
+        @fc_register(host_file_access='NONE')
+        def initialize_selected_session():
+            return trigger_tools[0]()
 
+        if len(trigger_tools) != 1:
+            initialize_selected_session = None
+
+        @fc_register(host_file_access='NONE')
         def launch_user_input() -> str:
             return session_holder.get('request_context', '')
 
         handoff = _handoff_tool(
-            lambda: session_holder.get('session_id', ''),
+            selected_session_id,
             user_input=launch_user_input,
         )
         tools = [
             *[tool for tool in tools if _is_bound_workflow_trigger(tool.__name__)],
             *_safe_session_tools(
                 toolkit,
-                lambda: session_holder.get('session_id', ''),
+                selected_session_id,
                 initialize_session=initialize_selected_session,
                 user_input=launch_user_input,
             ),
@@ -1454,12 +1518,12 @@ def resolve_workflow_injection(
                 *trigger_entry_tools,
                 *_safe_session_tools(
                     toolkit,
-                    lambda: session_holder.get('session_id', ''),
-                    user_input=lambda: session_holder.get('request_context', ''),
+                    selected_session_id,
+                    user_input=selected_request_context,
                 ),
                 _handoff_tool(
-                    lambda: session_holder.get('session_id', ''),
-                    user_input=lambda: session_holder.get('request_context', ''),
+                    selected_session_id,
+                    user_input=selected_request_context,
                 ),
                 authoring_group,
             ]

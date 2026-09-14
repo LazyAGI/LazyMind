@@ -1727,6 +1727,8 @@ async def _handle_chat_impl(
     if any(getattr(tool, '__name__', '') == 'ask_words' for tool in all_tools):
         stop_tools.append('ask_words')
 
+    from lazymind.chat.engine.tools.workspace_context import WorkspacePermissionContext
+
     plan = AgentRunPlan(
         role=AgentRole.CHAT,
         prompt=prompt_bundle,
@@ -1735,6 +1737,8 @@ async def _handle_chat_impl(
         stop_tools=stop_tools,
         force_summarize_context=query,
         execution_options=AgentExecutionOptions(
+            workspace_permission=WorkspacePermissionContext.from_config(
+                agentic_config, trusted_local=bool(_cfg['trusted_local_mode'])),
             skills=skill_config,
             enable_builtin_tools=False if sidechat_readonly else None,
             workspace=workspace,

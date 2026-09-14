@@ -105,7 +105,6 @@ class AgentExecutor:
 
     def create_agent(self, llm: Any, plan: AgentRunPlan) -> Any:
         from lazymind.chat.lazyllm_tool_docs import ensure_lazyllm_tool_docs
-        from lazymind.chat.service.component.tool_registry import workspace_tool_metadata
 
         options = plan.execution_options
         keep_full_turns = options.keep_full_turns
@@ -175,9 +174,7 @@ class AgentExecutor:
             repeat_monitor=repeat_monitor,
             notice_buffer=notice_buffer,
             authorization_gate=options.authorization_gate,
-            workspace_tools=workspace_tool_metadata(
-                getattr(agent._tools_manager, 'tools_info', {}), options.tool_configs,
-                skill_manager=getattr(agent, '_skill_manager', None)),
+            workspace_permission=options.workspace_permission,
         )
         agent._agent_lab_run_id = run_id
         agent._runtime_llm = llm

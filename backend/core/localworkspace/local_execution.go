@@ -93,7 +93,7 @@ func ClaimLocalOperation(ctx context.Context, db *gorm.DB, stateStore state.Stor
 	if err := validateOperationRequest(req); err != nil {
 		return OperationResult{}, err
 	}
-	if req.ExecutionMode != localExecutionMode || stateStore == nil || db == nil {
+	if (req.ExecutionMode != localExecutionMode && req.ExecutionMode != hostAccessExecutionMode) || stateStore == nil || db == nil {
 		return OperationResult{}, Error("selection_forbidden", 403, "forbidden")
 	}
 	value, err := loadOperationState(ctx, stateStore, id)
@@ -138,15 +138,17 @@ func ClaimLocalOperation(ctx context.Context, db *gorm.DB, stateStore state.Stor
 		if value.Status != operationAllowed {
 			return Error("binding_conflict", 409, "conflict")
 		}
-		version, identity, err = localDependency(ctx, stateStore, req)
-		if err != nil {
-			return err
-		}
-		if err := validateLocalTarget(req, identity); err != nil {
-			return err
-		}
-		if !readOperation(req.Operation) && req.Operation != OperationCreate && req.Operation != OperationMkdir && !validDigest(version) {
-			return Error("binding_conflict", 409, "conflict")
+		if req.ExecutionMode == localExecutionMode {
+			version, identity, err = localDependency(ctx, stateStore, req)
+			if err != nil {
+				return err
+			}
+			if err := validateLocalTarget(req, identity); err != nil {
+				return err
+			}
+			if !readOperation(req.Operation) && req.Operation != OperationCreate && req.Operation != OperationMkdir && !validDigest(version) {
+				return Error("binding_conflict", 409, "conflict")
+			}
 		}
 		claimed, err := stateStore.SetNX(ctx, operationLockKey(id), []byte(req.CallID), operationClaimTTL)
 		if err != nil {
@@ -180,7 +182,7 @@ func CompleteLocalOperation(ctx context.Context, stateStore state.Store, id stri
 	if !Enabled() {
 		return OperationResult{}, ModeError()
 	}
-	if stateStore == nil || request.ExecutionMode != localExecutionMode ||
+	if stateStore == nil || (request.ExecutionMode != localExecutionMode && request.ExecutionMode != hostAccessExecutionMode) ||
 		(request.Status != operationCompleted && request.Status != operationFailed && request.Status != operationUncertain) ||
 		(request.Version != "" && !validDigest(request.Version)) || len(request.ResultIdentity) > 160 {
 		return OperationResult{}, Error("invalid_selection", 400, "invalid request")
@@ -196,7 +198,7 @@ func CompleteLocalOperation(ctx context.Context, stateStore state.Store, id stri
 	if !matchesOperation(value, request.OperationRequest) {
 		return OperationResult{}, Error("binding_conflict", 409, "conflict")
 	}
-	if request.Status == operationCompleted && (request.ResultIdentity == "" ||
+	if request.ExecutionMode == localExecutionMode && request.Status == operationCompleted && (request.ResultIdentity == "" ||
 		(!readOperation(request.Operation) && request.Operation != OperationMkdir && request.Operation != OperationDelete && request.Version == "")) {
 		return OperationResult{}, Error("invalid_selection", 400, "invalid request")
 	}

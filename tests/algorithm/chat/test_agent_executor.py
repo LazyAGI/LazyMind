@@ -260,4 +260,6 @@ def test_executor_keeps_the_configured_fs_for_skill_indexing(monkeypatch, tmp_pa
         return agent
     monkeypatch.setattr(executor_mod._agent_mod, 'ReactAgent', construct)
     agent = AgentExecutor().create_agent('llm', _plan(skills=['visible'], fs=FS, skills_dir=str(skill_dir.parent)))
-    assert set(agent._tools_manager._workspace_tools) == {'get_skill', 'read_reference', 'run_script'}
+    assert {name: tool.runtime_metadata.host_file_access.value for name, tool in agent._tools_manager.tools_info.items()} == {
+        'get_skill': 'NONE', 'read_reference': 'NONE', 'run_script': 'OPAQUE',
+    }

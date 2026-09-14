@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import threading
 import time
 import uuid
 from collections import Counter
@@ -11,15 +10,17 @@ from typing import Any
 
 import lazyllm
 from lazyllm.tools.agent import (
+    HostFileAccess,
     PreparedToolCall,
     ToolExecutionBatch,
     ToolExecutionDisposition,
     ToolExecutionRecord,
 )
 from lazyllm.tools.agent.toolError import tool_failure
-from lazymind.chat.engine.tools.local_fs import LocalFileToolkit
-from lazymind.config import config as _cfg
 from .workspace_authorization import WorkspaceAuthorization
+from lazymind.chat.engine.tools.workspace_context import (
+    WorkspacePermissionContext, workspace_permission_scope, thaw,
+)
 from .cancellation import UserCancelledError
 
 from lazymind.chat.engine.tools.session_env import redact_session_env_arguments
@@ -68,7 +69,7 @@ def _compact_json(value: Any, limit: int = _MAX_TOOL_LOG_CHARS) -> str:
 def _stable_digest(value: Any) -> str | None:
     try:
         normalized = json.dumps(
-            value,
+            thaw(value),
             ensure_ascii=False,
             sort_keys=True,
             separators=(',', ':'),
@@ -320,7 +321,8 @@ class ToolExecutionMiddleware:
                  expanded_round_limit: int | None = None, cancel_check: Any = None,
                  repeat_monitor: ExactRepeatMonitor | None = None,
                  notice_buffer: OneShotNoticeBuffer | None = None,
-                 authorization_gate: Any = None, workspace_tools: dict[str, Any] | None = None):
+                 authorization_gate: Any = None,
+                 workspace_permission=None):
         self._manager = manager
         self._failure_policy = failure_policy or FailureRetryPolicy()
         self._expanded_round_limit = expanded_round_limit
@@ -328,9 +330,9 @@ class ToolExecutionMiddleware:
         self._repeat_monitor = repeat_monitor
         self._notice_buffer = notice_buffer
         self._authorization_gate = authorization_gate
-        self._workspace_tools = workspace_tools or {}
-        self._workspace_versions: dict[int, dict[str, str]] = {}
-        self._execution_lock = threading.RLock()
+        # Capture once at run construction; no workspace authorization reads live globals later.
+        self._workspace_permission = workspace_permission or WorkspacePermissionContext.from_config({})
+        self._workspace_versions: dict[str, str] = {}
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._manager, name)
@@ -352,12 +354,6 @@ class ToolExecutionMiddleware:
 
     def execute_with_records(self, tools: Any, verbose: bool = False,
                              allowed_tool_names: set[str] | None = None):
-        # A manager owns mutable tool bindings; never overlap request adapters.
-        with self._execution_lock:
-            return self._execute_with_records(tools, verbose, allowed_tool_names)
-
-    def _execute_with_records(self, tools: Any, verbose: bool = False,
-                              allowed_tool_names: set[str] | None = None):
         del verbose
         if self._cancel_check is not None:
             self._cancel_check(None)
@@ -365,65 +361,27 @@ class ToolExecutionMiddleware:
         decision: _FailureBatchDecision | None = None
         authorization_reasons: dict[int, str] = {}
         started_at = 0.0
-        workspace_execution_states: dict[int, bool] = {}
-        workspace_adapters = []
-        workspace_adapter_lock = threading.Lock()
         invocation_id = uuid.uuid4().hex
-        queues = {}
-        config = lazyllm.globals.get('agentic_config') or {}
-        workspace_active = LocalFileToolkit._workspace_binding_from_config(config) is not None
+        permission = self._workspace_permission
+        workspace_active = permission.bound
         coordinator = None
         initialization_failed = False
         if workspace_active:
             try:
-                coordinator = WorkspaceAuthorization(config, self._cancel_check)
-                tools = coordinator.normalize(tools, self._workspace_tools)
+                coordinator = WorkspaceAuthorization(permission, self._cancel_check)
             except Exception:
                 initialization_failed = True
-
-        if coordinator is not None:
-            for tool_name, admission in self._workspace_tools.items():
-                if not isinstance(admission[0], LocalFileToolkit):
-                    continue
-                tool = self._manager.tools_info.get(tool_name)
-                if tool is None:
-                    continue
-                original_apply = tool.apply
-
-                def make_workspace_adapter(name):
-                    def apply_workspace_call(*args, **kwargs):
-                        arguments = dict(kwargs)
-                        if not arguments and len(args) == 1 and isinstance(args[0], dict):
-                            arguments = dict(args[0])
-                        key = (name, _stable_digest(arguments) or repr(arguments))
-                        with workspace_adapter_lock:
-                            pending_calls = queues.get(key)
-                            if not pending_calls:
-                                from lazyllm.tools.agent import ToolExecutionError
-                                raise ToolExecutionError('workspace authorization unavailable')
-                            index = pending_calls.pop(0)
-                        call = coordinator.calls[index]
-                        try:
-                            return coordinator.execute(
-                                index, self._workspace_versions.setdefault(id(call.toolkit), {}),
-                            )
-                        except Exception as error:
-                            workspace_execution_states[index] = bool(
-                                getattr(error, 'workspace_execution_started', False)
-                            )
-                            raise
-                    return apply_workspace_call
-
-                tool.apply = make_workspace_adapter(tool_name)
-                workspace_adapters.append((tool, original_apply))
+        with workspace_permission_scope(permission):
+            prepared_batch = self._manager.prepare_tool_calls(
+                tools, allowed_tool_names=allowed_tool_names, working_directory=permission.root or None)
 
         def select(prepared):
             nonlocal prepared_calls, decision, authorization_reasons, started_at
             prepared_calls = list(prepared)
             workspace_indices = {
                 index for index, item in enumerate(prepared_calls)
-                if workspace_active and item.ready and item.tool_name in self._workspace_tools
-                and isinstance(self._workspace_tools[item.tool_name][0], LocalFileToolkit)
+                if workspace_active and item.ready and item.host_file_access is HostFileAccess.DECLARED
+                and item.host_files
             }
             decision = self._failure_policy.decide(prepared_calls, workspace_indices)
             blocked = dict(decision.blocked_results)
@@ -449,29 +407,21 @@ class ToolExecutionMiddleware:
                     continue
                 try:
                     outcome = self._authorization_gate(item) if self._authorization_gate is not None else 'allow'
-                    admission = self._workspace_tools.get(item.tool_name)
                     if workspace_active:
-                        if (admission is None or LocalFileToolkit._workspace_context() is None
-                                or (initialization_failed and index in workspace_indices)):
+                        if initialization_failed or item.host_file_access is HostFileAccess.UNDECLARED:
                             outcome = 'deny'
-                        elif admission[3] is not None and not admission[3](item.validated_arguments):
-                            outcome = 'deny'
-                        elif (getattr(admission, 'host_file_access', 'NONE') == 'OPAQUE'
-                              and not _cfg['trusted_local_mode']):
-                            outcome = 'deny'
-                        if index in workspace_indices and (
-                            not admission[2] or admission[1] not in admission[2]
-                        ):
+                        elif item.host_file_access is HostFileAccess.OPAQUE and not permission.trusted_local:
                             outcome = 'deny'
                     if outcome not in (True, 'allow', 'allowed'):
                         unavailable = outcome not in (False, 'deny', 'denied', 'rejected')
                         authorization_unavailable |= unavailable and workspace_active
                         block(index, unavailable)
-                    elif index in workspace_indices and not authorization_unavailable:
-                        coordinator.prepare(
-                            item, admission,
-                            self._workspace_versions.setdefault(id(admission[0]), {}),
-                        )
+                    elif (workspace_active and item.host_file_access is HostFileAccess.DECLARED
+                          and not authorization_unavailable):
+                        if item.tool_name.startswith('LocalFileToolkit_'):
+                            coordinator.prepare(item, self._workspace_versions)
+                        else:
+                            coordinator.prepare_host(item)
                 except UserCancelledError:
                     raise
                 except Exception:
@@ -481,6 +431,7 @@ class ToolExecutionMiddleware:
                     block(index, True)
             if coordinator is not None and not authorization_unavailable:
                 try:
+                    coordinator.submit()
                     allowed = coordinator.wait()
                     for index in workspace_indices.intersection(pending):
                         if index not in allowed:
@@ -515,29 +466,18 @@ class ToolExecutionMiddleware:
                     emit_tool_call(item.tool_call)
                     _log_tool_call('start', item.tool_name, args=arguments)
             started_at = time.perf_counter()
-            # Admission only fills the request-local queue. LazyLLM still owns
-            # prepared-call execution and records through the adapters installed
-            # before the manager started.
-            for index in decision.pending_indices:
-                if index not in workspace_indices:
-                    continue
-                item = prepared_calls[index]
-                key = (
-                    item.tool_name,
-                    _stable_digest(item.validated_arguments) or repr(item.validated_arguments),
-                )
-                queues.setdefault(key, []).append(index)
             return tuple(decision.pending_indices)
 
         try:
-            executed_batch = self._manager.execute_with_records(
-                tools,
-                allowed_tool_names=allowed_tool_names,
-                dispatch_selector=select,
+            indices = select(prepared_batch)
+            executed_batch = self._manager.execute_prepared(
+                prepared_batch, selected_indices=indices,
+                execution_context=(
+                    (lambda item: coordinator.execution_context(item, self._workspace_versions))
+                    if coordinator is not None else (lambda item: workspace_permission_scope(permission))
+                ),
             )
         finally:
-            for tool, original_apply in workspace_adapters:
-                tool.apply = original_apply
             if coordinator is not None:
                 coordinator.close()
         if decision is None:
@@ -547,8 +487,11 @@ class ToolExecutionMiddleware:
         records: list[ToolExecutionRecord | None] = [None] * len(prepared_calls)
         executed = zip(executed_batch.results, executed_batch.records)
         for result, record in executed:
-            workspace_started = workspace_execution_states.get(record.index)
-            if record.index in workspace_execution_states:
+            if record.index in decision.blocked_results or record.index in decision.duplicate_sources:
+                continue
+            states = coordinator.execution_states if coordinator is not None else {}
+            workspace_started = states.get(record.index)
+            if record.index in states and record.prepared.ready:
                 record = ToolExecutionRecord(
                     record.prepared,
                     result,

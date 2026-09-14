@@ -54,6 +54,7 @@ class AgentExecutionOptions:
     history_compactor: Optional[Callable[..., list[dict[str, Any]]]] = None
     authorization_gate: Optional[Callable[..., Any]] = None
     tool_configs: Optional[list[Any]] = None
+    workspace_permission: Any = None
 
 
 CompressionTrigger = Literal['pre_turn', 'mid_turn']

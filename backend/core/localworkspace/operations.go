@@ -31,6 +31,7 @@ type OperationKind string
 
 const (
 	OperationRead      OperationKind = "read"
+	OperationWrite     OperationKind = "write"
 	OperationCreate    OperationKind = "create"
 	OperationAppend    OperationKind = "append"
 	OperationReplace   OperationKind = "replace"
@@ -63,6 +64,7 @@ const (
 )
 
 type OperationRequest struct {
+	HostIntentID         string        `json:"host_intent_id,omitempty"`
 	ExecutionMode        string        `json:"execution_mode,omitempty"`
 	ArgumentsDigest      string        `json:"arguments_digest,omitempty"`
 	ParentIdentity       string        `json:"parent_identity,omitempty"`
@@ -141,7 +143,11 @@ func PrepareOperation(ctx context.Context, db *gorm.DB, stateStore state.Store, 
 	if err != nil {
 		return OperationResult{}, err
 	}
-	identity, _ := json.Marshal([]string{req.UserID, req.ConversationID, req.RunID, req.HistoryID, req.TaskID, req.Generation, req.AttemptID, req.LeaseToken, req.CallID})
+	identityFields := []string{req.UserID, req.ConversationID, req.RunID, req.HistoryID, req.TaskID, req.Generation, req.AttemptID, req.LeaseToken, req.CallID}
+	if req.ExecutionMode == hostAccessExecutionMode {
+		identityFields = append(identityFields, hostAccessExecutionMode, req.HostIntentID)
+	}
+	identity, _ := json.Marshal(identityFields)
 	operationID := digestBytes(identity)
 	exists, err := stateStore.Exists(ctx, operationKey(operationID))
 	if err != nil {
@@ -177,7 +183,11 @@ func PrepareOperation(ctx context.Context, db *gorm.DB, stateStore state.Store, 
 	}
 	// Preparing never reads file content, including hashes of files awaiting approval.
 	decision := permissionDecision(snapshot.PermissionMode, req.Operation, req.Path)
-	if req.ExecutionMode == localExecutionMode {
+	if req.ExecutionMode == hostAccessExecutionMode {
+		if !pathWithin(snapshot.Root, req.Path) {
+			decision = DecisionPending
+		}
+	} else if req.ExecutionMode == localExecutionMode {
 		if err := validateLocalTarget(req, req.TargetIdentity); err != nil {
 			return OperationResult{}, err
 		}
@@ -438,12 +448,21 @@ func releaseOperationClaim(ctx context.Context, store state.Store, operationID, 
 }
 
 func resolveOperation(ctx context.Context, db *gorm.DB, req OperationRequest, runSnapshot *ContextSnapshot) (*ContextSnapshot, error) {
-	live, err := ResolveForConversation(ctx, db, req.UserID, req.ConversationID)
+	var live *ContextSnapshot
+	var err error
+	if req.ExecutionMode == hostAccessExecutionMode {
+		live, err = resolveHostAccessWorkspace(ctx, db, req.UserID, req.ConversationID)
+	} else {
+		live, err = ResolveForConversation(ctx, db, req.UserID, req.ConversationID)
+	}
 	if err != nil {
 		return nil, err
 	}
 	if live == nil || live.WorkspaceID != req.WorkspaceID {
 		return nil, Error("workspace_not_found", 404, "resource not found")
+	}
+	if runSnapshot == nil && req.ExecutionMode == hostAccessExecutionMode {
+		return nil, Error("selection_forbidden", 403, "forbidden")
 	}
 	if runSnapshot == nil {
 		runSnapshot = live
@@ -451,8 +470,9 @@ func resolveOperation(ctx context.Context, db *gorm.DB, req OperationRequest, ru
 	if runSnapshot.WorkspaceID != req.WorkspaceID || live.WorkspaceVersion != runSnapshot.WorkspaceVersion {
 		return nil, Error("selection_forbidden", 403, "forbidden")
 	}
-	runSnapshot.Root, runSnapshot.DirectoryIdentity, runSnapshot.Sources = live.Root, live.DirectoryIdentity, live.Sources
-	return runSnapshot, nil
+	resolved := *runSnapshot
+	resolved.Root, resolved.DirectoryIdentity, resolved.Sources = live.Root, live.DirectoryIdentity, live.Sources
+	return &resolved, nil
 }
 
 func readOperation(op OperationKind) bool {
@@ -462,7 +482,20 @@ func readOperation(op OperationKind) bool {
 func validateOperationRequest(req OperationRequest) error {
 	local := req.ExecutionMode == localExecutionMode
 	validPath := fs.ValidPath(req.Path) && !strings.ContainsAny(req.Path, "\\:\x00")
-	if local {
+	if req.ExecutionMode == hostAccessExecutionMode {
+		if !Enabled() {
+			return ModeError()
+		}
+		validPath = filepath.IsAbs(req.Path) && filepath.Clean(req.Path) == req.Path && !strings.ContainsRune(req.Path, 0)
+		if len(req.Path) > 4096 || !validDigest(req.ArgumentsDigest) || req.HostIntentID == "" || len(req.HostIntentID) > 256 ||
+			strings.TrimSpace(req.ToolName) == "" || len(req.ToolName) > 512 ||
+			req.ParentIdentity != "" || req.TargetIdentity != "" || req.DependsOn != "" ||
+			req.Content != "" || req.OldContent != "" || req.ExpectedVersion != "" || req.ExpectedReplacements != 0 ||
+			req.Pattern != "" || req.Glob != "" || req.Limit != 0 || req.Offset != 0 || req.MaxLines != 0 ||
+			(req.Operation != OperationRead && req.Operation != OperationWrite && req.Operation != OperationDelete) {
+			return Error("invalid_selection", 400, "invalid request")
+		}
+	} else if local {
 		if !Enabled() {
 			return ModeError()
 		}
@@ -473,6 +506,12 @@ func validateOperationRequest(req OperationRequest) error {
 			return Error("invalid_selection", 400, "invalid request")
 		}
 	} else if req.ExecutionMode != "" || req.ArgumentsDigest != "" || req.ParentIdentity != "" || req.TargetIdentity != "" || req.DependsOn != "" {
+		return Error("invalid_selection", 400, "invalid request")
+	}
+	if req.ExecutionMode != hostAccessExecutionMode && req.HostIntentID != "" {
+		return Error("invalid_selection", 400, "invalid request")
+	}
+	if req.Operation == OperationWrite && req.ExecutionMode != hostAccessExecutionMode {
 		return Error("invalid_selection", 400, "invalid request")
 	}
 	if req.UserID == "" || req.ConversationID == "" || req.WorkspaceID == "" || req.CallID == "" || len(req.CallID) > 512 ||
@@ -486,7 +525,7 @@ func validateOperationRequest(req OperationRequest) error {
 		}
 	}
 	switch req.Operation {
-	case OperationRead, OperationCreate, OperationAppend, OperationReplace, OperationDelete, OperationOverwrite, OperationMkdir, OperationList, OperationGlob, OperationGrep, OperationInfo:
+	case OperationRead, OperationWrite, OperationCreate, OperationAppend, OperationReplace, OperationDelete, OperationOverwrite, OperationMkdir, OperationList, OperationGlob, OperationGrep, OperationInfo:
 	default:
 		return Error("invalid_selection", 400, "invalid request")
 	}

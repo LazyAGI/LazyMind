@@ -27,7 +27,10 @@ from functools import wraps
 from typing import Any, Dict, List, Optional
 
 import lazyllm
-from lazyllm.tools.agent import ToolExecutionError, fc_register
+from lazyllm.tools.agent import ToolExecutionError, fc_register, HostFileIntent, HostFileResolution
+from .workspace_context import (
+    canonical_host_path, get_workspace_permission_context, get_local_access, thaw,
+)
 
 from lazymind.chat.engine.tools.text_edit import replace_exact_text_file
 
@@ -55,17 +58,43 @@ def _model_facing_result(func):
     """Keep source routing metadata private while preserving the tool signature and docs."""
     @wraps(func)
     def wrapped(*args, **kwargs):
-        access = getattr(args[0], '_local_access', None)
+        access = get_local_access()
         if access is not None:
             bound = inspect.signature(func).bind(*args, **kwargs)
             bound.apply_defaults()
             arguments = {key: value for key, value in bound.arguments.items() if key != 'self'}
             return _strip_model_internal_fields(access.execute(func.__name__, arguments))
-        if args[0]._workspace_binding() is not None:
+        context = get_workspace_permission_context()
+        if (context.bound if context is not None else args[0]._workspace_binding() is not None):
             raise ToolExecutionError('workspace authorization unavailable')
         return _strip_model_internal_fields(func(*args, **kwargs))
 
-    return wrapped
+    operation = 'delete' if func.__name__ == 'delete' else (
+        'write' if func.__name__ in {'create', 'append', 'overwrite', 'mkdir', 'string_replace'} else 'read')
+
+    def resolve(arguments):
+        context = get_workspace_permission_context()
+        key = 'path' if func.__name__ in {'ls', 'glob', 'grep', 'mkdir', 'info'} else 'filepath'
+        value = arguments.get(key)
+        if value is None and key == 'path' and func.__name__ != 'mkdir':
+            value = context.root if context and context.root else '.'
+        arguments[key] = canonical_host_path(value)
+        for name in ('expected_replacements', 'start_line', 'max_lines', 'max_results', 'max_entries'):
+            if name in arguments and (type(arguments[name]) is not int or arguments[name] < 0):
+                raise ToolExecutionError('invalid_selection')
+        if 'expected_replacements' in arguments and not 1 <= arguments['expected_replacements'] <= 100:
+            raise ToolExecutionError('invalid_selection')
+        return HostFileResolution(arguments, (HostFileIntent(arguments[key], operation),))
+
+    return fc_register(host_file_access='DECLARED', host_file_resolver=resolve)(wrapped)
+
+
+def _validate_local_arguments(arguments):
+    if isinstance(arguments, dict):
+        for name in ('expected_replacements', 'start_line', 'max_lines', 'max_results', 'max_entries'):
+            if name in arguments and type(arguments[name]) is not int:
+                raise ValueError('invalid_selection')
+    return arguments
 
 
 @dataclass(frozen=True)
@@ -87,10 +116,11 @@ class LocalFileToolkit:
         'ls', 'glob', 'grep', 'read', 'string_replace', 'create', 'overwrite',
         'append', 'delete', 'mkdir', 'info',
     ]
-    __host_file_access__ = 'DECLARED'
+    __tool_input_adapters__ = dict.fromkeys(__public_apis__, _validate_local_arguments)
 
     def _get_scopes(self) -> List[LocalFSScope]:
-        config = lazyllm.globals.get('agentic_config') or {}
+        context = get_workspace_permission_context()
+        config = thaw(context.config) if context is not None else (lazyllm.globals.get('agentic_config') or {})
         sources = config.get('local_fs_sources') or []
         if not isinstance(sources, list):
             return []
@@ -132,9 +162,9 @@ class LocalFileToolkit:
 
     @staticmethod
     def _workspace_binding() -> Optional[Dict[str, Any]]:
-        return LocalFileToolkit._workspace_binding_from_config(
-            lazyllm.globals.get('agentic_config') or {}
-        )
+        context = get_workspace_permission_context()
+        config = thaw(context.config) if context is not None else (lazyllm.globals.get('agentic_config') or {})
+        return LocalFileToolkit._workspace_binding_from_config(config)
 
     @staticmethod
     def _workspace_context() -> Optional[Dict[str, Any]]:
@@ -252,7 +282,6 @@ class LocalFileToolkit:
         )
 
     @_model_facing_result
-    @fc_register(exclusive=True)
     def ls(self, path: Optional[str] = None, max_entries: int = 200) -> Dict[str, Any]:
         """List available local directories or one directory level.
 
@@ -304,7 +333,6 @@ class LocalFileToolkit:
         }
 
     @_model_facing_result
-    @fc_register(exclusive=True)
     def glob(self, pattern: str, path: Optional[str] = None) -> Dict[str, Any]:
         """Find local files whose names match a glob pattern.
 
@@ -341,7 +369,6 @@ class LocalFileToolkit:
         }
 
     @_model_facing_result
-    @fc_register(exclusive=True)
     def grep(
         self,
         pattern: str,
@@ -474,7 +501,6 @@ class LocalFileToolkit:
         }
 
     @_model_facing_result
-    @fc_register(exclusive=True)
     def read(
         self,
         filepath: str,
@@ -517,7 +543,6 @@ class LocalFileToolkit:
         }
 
     @_model_facing_result
-    @fc_register(exclusive=True)
     def string_replace(
         self,
         filepath: str,
@@ -570,25 +595,21 @@ class LocalFileToolkit:
         }
 
     @_model_facing_result
-    @fc_register(exclusive=True)
     def create(self, filepath: str, content: str = '', encoding: str = 'utf-8') -> Dict[str, Any]:
         """Create one UTF-8 file after request-level authorization."""
         raise ToolExecutionError('file creation requires explicit authorization')
 
     @_model_facing_result
-    @fc_register(exclusive=True)
     def append(self, filepath: str, content: str, expected_version: str = '', encoding: str = 'utf-8') -> Dict[str, Any]:
         """Append UTF-8 text to the observed version of an authorized file."""
         raise ToolExecutionError('file append requires explicit authorization')
 
     @_model_facing_result
-    @fc_register(exclusive=True)
     def delete(self, filepath: str, expected_version: str = '') -> Dict[str, Any]:
         """Delete one authorized regular file at its observed version."""
         raise ToolExecutionError('file deletion requires explicit authorization')
 
     @_model_facing_result
-    @fc_register(exclusive=True)
     def overwrite(
         self, filepath: str, content: str, expected_version: str = '', encoding: str = 'utf-8',
     ) -> Dict[str, Any]:
@@ -596,13 +617,11 @@ class LocalFileToolkit:
         raise ToolExecutionError('file overwrite requires explicit authorization')
 
     @_model_facing_result
-    @fc_register(exclusive=True)
     def mkdir(self, path: str) -> Dict[str, Any]:
         """Create one authorized directory."""
         raise ToolExecutionError('directory creation requires explicit authorization')
 
     @_model_facing_result
-    @fc_register(exclusive=True)
     def info(self, path: Optional[str] = None) -> Dict[str, Any]:
         """Get metadata for an available local file or directory.
 

@@ -37,7 +37,7 @@ def fail(reason='binding_conflict'):
     raise ToolExecutionError(reason)
 
 
-def _windows_handle(path, directory):
+def _windows_handle(path, directory, *, access=None, creation=3, share=None):
     # Directory handles omit FILE_SHARE_DELETE, pinning every path component
     # until the operation finishes. OPEN_REPARSE_POINT never follows a link.
     import ctypes
@@ -47,8 +47,9 @@ def _windows_handle(path, directory):
     create.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p,
                        wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
     create.restype = wintypes.HANDLE
-    handle = create(path, 0 if directory else 0x80000000, 3 if directory else 7, None,
-                    3, 0x00200000 | (0x02000000 if directory else 0), None)
+    handle = create(path, (0 if directory else 0x80000000) if access is None else access,
+                    (3 if directory else 7) if share is None else share, None,
+                    creation, 0x00200000 | (0x02000000 if directory else 0), None)
     if handle == ctypes.c_void_p(-1).value:
         raise ctypes.WinError(ctypes.get_last_error())
     # FILE_ATTRIBUTE_TAG_INFO is two DWORDs; reject every reparse-point type.

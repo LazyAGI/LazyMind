@@ -1707,7 +1707,7 @@ const enUS = {
         title: "Workspace requests",
         notice: "Allowing a request lets the original tool call continue. Only a Completed status confirms completion.",
         allowOnce: "Allow once", reject: "Reject", loadFailed: "Unable to refresh requests", decisionFailed: "Unable to save decision",
-        operation: { read: "Read", create: "Create", append: "Append", replace: "Replace", delete: "Delete", overwrite: "Overwrite", mkdir: "Create folder", ls: "List folder", glob: "Find files", grep: "Search content", info: "File information" },
+        operation: { write: "Write", read: "Read", create: "Create", append: "Append", replace: "Replace", delete: "Delete", overwrite: "Overwrite", mkdir: "Create folder", ls: "List folder", glob: "Find files", grep: "Search content", info: "File information" },
         status: { preparing: "Preparing request", unknown: "Status unavailable", pending: "Awaiting approval", allowed: "Approved · awaiting execution", executing: "Executing", completed: "Completed", failed: "Failed", rejected: "Rejected", expired: "Expired", uncertain: "Result unknown" },
       },
       status: { active: "Available", revoked: "Revoked", path_unavailable: "Folder unavailable" },

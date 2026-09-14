@@ -7,10 +7,10 @@ from pathlib import Path
 
 import lazyllm
 import requests
-from lazyllm.tools.agent import ToolManager
+from lazyllm.tools.agent import ToolManager, HostFileIntent, HostFileResolution, fc_register
 
 from lazymind.config import config
-from lazymind.chat.service.component.tool_registry import ToolConfig, workspace_tool_metadata
+from lazymind.chat.engine.tools.workspace_context import WorkspacePermissionContext
 from lazymind.chat.engine.agent_runtime.tool_call_guard import ToolExecutionMiddleware
 from lazymind.chat.engine.tools.local_fs import LocalFileToolkit
 from lazymind.chat.engine.tools.calculator import calculator
@@ -36,12 +36,19 @@ def main():
                               'paths': [root], 'file_extensions': ['txt']}],
     }
     toolkit = LocalFileToolkit()
-    registration = ToolConfig('local', 'Local', 'Local', toolkit, 'data', authorization={
-        name: 'write' if name in {'create', 'append', 'delete', 'overwrite', 'mkdir', 'string_replace'} else 'read'
-        for name in toolkit.__public_apis__
-    })
-    manager = ToolManager([toolkit, calculator])
-    middleware = ToolExecutionMiddleware(manager, workspace_tools=workspace_tool_metadata(manager.tools_info, [registration]))
+    @fc_register(host_file_access='DECLARED', host_file_resolver=lambda args: HostFileResolution(
+        args, (HostFileIntent(args['path'], 'read'),)))
+    def declared_read(path: str):
+        """Read a host file with the declared generic lifecycle.
+
+        Args:
+            path: Absolute file path.
+        """
+        with HostFileResolution.open_read(path) as file:
+            return file.read().decode()
+
+    manager = ToolManager([toolkit, calculator, declared_read])
+    middleware = ToolExecutionMiddleware(manager, workspace_permission=WorkspacePermissionContext.from_config(lazyllm.globals['agentic_config'], trusted_local=True))
     ordinary_effects = []
     original = manager.tools_info['calculator'].apply
     def observed(*args, **kwargs):
@@ -49,7 +56,7 @@ def main():
         return original(*args, **kwargs)
     manager.tools_info['calculator'].apply = observed
 
-    def run_with_user_decision(calls, count, action):
+    def run_with_user_decision(calls, count, action, expected='seed', expected_ordinary=0):
         finished = threading.Event()
         errors = []
         def decide():
@@ -64,8 +71,8 @@ def main():
                         pending = [entry for entry in result.json()['data']['items'] if entry['status'] == 'pending']
                         if len(pending) == count:
                             if action == 'allow_once':
-                                assert target.read_text() == 'seed'
-                                assert ordinary_effects == []
+                                assert target.read_text() == expected
+                                assert len(ordinary_effects) == expected_ordinary
                             for entry in pending:
                                 response = session.post(base + '/workspace-approvals/' + entry['operation_id'] + ':decide',
                                                         json={'action': action}, headers=headers, timeout=5)
@@ -96,6 +103,13 @@ def main():
     denied = target.parent / 'denied.txt'
     result = run_with_user_decision([call('create', filepath=str(denied), content='must not appear')], 1, 'reject')
     assert not result.results[0]['ok'] and not denied.exists()
+    generic = run_with_user_decision([
+        {'function': {'name': 'declared_read', 'arguments': {'path': str(target)}}},
+        call('read', filepath=str(target)),
+    ], 2, 'allow_once', expected='seed++', expected_ordinary=1)
+    assert all(item['ok'] for item in generic.results), generic.results
+    assert generic.results[0]['value'] == 'seed++'
+    assert generic.results[1]['value']['content'] == 'seed++'
     print('CORE_LOCAL_IO_ROUNDTRIP_OK')
 
 

@@ -364,7 +364,7 @@ def test_workspace_authorization_unknown_decision_is_fail_closed():
 def _workspace_middleware(monkeypatch, *, cancel_check=None, extra_tools=()):
     from lazyllm.tools.agent import ToolManager
     from lazymind.chat.engine.tools.local_fs import LocalFileToolkit
-    from lazymind.chat.service.component.tool_registry import ToolConfig, workspace_tool_metadata
+    from lazymind.chat.engine.tools.workspace_context import WorkspacePermissionContext
     config = {
         'user_id': 'owner', 'conversation_id': 'conversation',
         '_workspace_execution': {'history_id': 'history', 'run_id': 'run'},
@@ -375,11 +375,9 @@ def _workspace_middleware(monkeypatch, *, cancel_check=None, extra_tools=()):
     monkeypatch.setitem(lazyllm.globals, 'agentic_config', config)
     toolkit = LocalFileToolkit()
     manager = ToolManager([toolkit, *extra_tools])
-    registration = ToolConfig('local', 'Local', 'Local', toolkit, 'data',
-                              authorization={name: 'read' for name in toolkit.__public_apis__})
     middleware = ToolExecutionMiddleware(
         manager, cancel_check=cancel_check,
-        workspace_tools=workspace_tool_metadata(manager.tools_info, [registration]),
+        workspace_permission=WorkspacePermissionContext.from_config(config, trusted_local=True),
         failure_policy=FailureRetryPolicy({'LocalFileToolkit_append': 1}),
     )
     return middleware, config
@@ -426,8 +424,7 @@ def test_workspace_artifact_whitespace_path_rejects_entire_batch_before_dispatch
         'artifacts': [{'key': 'first', 'value': 'safe text'}, {'key': 'second', 'content_type': kind, 'value': value}],
     }}})
     assert effects == []
-    assert batch.records[0].disposition is ToolExecutionDisposition.SKIPPED
-    assert batch.records[0].reason == 'authorization_denied'
+    assert batch.records[0].disposition is ToolExecutionDisposition.PREPARATION_FAILED
     assert batch.results[0]['ok'] is False
 
 
@@ -443,6 +440,8 @@ def test_parent_workspace_without_identity_does_not_disable_admission(monkeypatc
     config.clear()
     config.update({'user_id': 'u', 'conversation_id': 'c', 'parent_agentic_config': binding})
     config.pop(missing)
+    from lazymind.chat.engine.tools.workspace_context import WorkspacePermissionContext
+    middleware._workspace_permission = WorkspacePermissionContext.from_config(config)
     batch = middleware.execute_with_records({'id': 'calc', 'function': {
         'name': 'calculator', 'arguments': {'expression': '1 + 1'},
     }})

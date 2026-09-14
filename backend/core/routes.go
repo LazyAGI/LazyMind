@@ -89,6 +89,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "PUT", "/conversations/{conversation_id}:workspace-permission", []string{"qa.write"}, localworkspace.UpdateConversationPermission)
 	handleAPI(r, "POST", "/internal/local-workspaces", nil, localworkspace.InternalRegister)
 	handleAPI(r, "POST", "/internal/local-workspaces/{workspace_id}:select", nil, localworkspace.InternalPrepareReauthorization)
+	handleAPI(r, "POST", "/internal/conversations/{conversation_id}/workspace-operations:prepare-batch", nil, localworkspace.InternalPrepareOperationBatch)
 	handleAPI(r, "POST", "/internal/conversations/{conversation_id}/workspace-operations:prepare", nil, localworkspace.InternalPrepareOperation)
 	handleAPI(r, "GET", "/internal/conversations/{conversation_id}/workspace-operations/{operation_id}", nil, localworkspace.InternalOperationStatus)
 	handleAPI(r, "POST", "/internal/conversations/{conversation_id}/workspace-operations/{operation_id}:execute", nil, localworkspace.InternalExecuteOperation)

@@ -134,10 +134,9 @@ def test_approval_unavailable_and_cancel_block_whole_batch(workspace_runtime, tm
 
 
 def test_lease_is_bound_to_payload_and_absent_from_status_query(workspace_runtime):
-    middleware, core, config = workspace_runtime()
-    config['_workspace_execution'] = {
+    middleware, core, config = workspace_runtime(execution_identity={
         'task_id': 'task', 'generation': 'generation', 'attempt_id': 'attempt', 'lease_token': 'test-only-lease',
-    }
+    })
     result = middleware.execute_with_records(call('create', filepath='notes.txt', content='x'))
     assert result.results[0]['ok'], result.results
     assert next(iter(core.operations.values()))['payload']['lease_token'] == 'test-only-lease'
@@ -233,8 +232,60 @@ def test_normalization_keeps_original_provider_arguments_unchanged(workspace_run
 def test_toolkit_has_no_core_executor_or_skill_fs():
     from lazymind.chat.engine.tools.local_fs import LocalFileToolkit
     import lazymind.chat.engine.tools.local_fs as module
-    assert LocalFileToolkit.__host_file_access__ == 'DECLARED'
+    from lazyllm.tools.agent import ToolManager, HostFileAccess
+    declarations = {tool.name: tool.runtime_metadata.host_file_access
+                    for tool in ToolManager([LocalFileToolkit()]).all_tools}
+    for method in LocalFileToolkit.__public_apis__:
+        assert declarations['LocalFileToolkit_' + method] is HostFileAccess.DECLARED
+    assert all(capability is HostFileAccess.NONE for name, capability in declarations.items()
+               if not name.startswith('LocalFileToolkit_'))
     assert not hasattr(LocalFileToolkit, '_core_operation')
     assert not hasattr(module, 'WorkspaceSkillFS')
     source = (Path(__file__).resolve().parents[3] / 'algorithm/lazymind/chat/engine/agent_runtime/executor.py').read_text()
     assert 'WorkspaceSkillFS' not in source
+
+
+def test_run_permission_is_immutable_and_not_read_from_later_globals(workspace_runtime):
+    import lazyllm
+
+    middleware, core, config = workspace_runtime()
+    captured = middleware._workspace_permission
+    config['workspace_context']['workspace_id'] = 'forged'
+    config['_workspace_execution']['run_id'] = 'another-run'
+    lazyllm.globals['agentic_config'] = {'user_id': 'other-owner'}
+    result = middleware.execute_with_records(call('create', filepath='frozen.txt', content='ok'))
+    assert result.results[0]['ok'], result.results
+    payload = next(iter(core.operations.values()))['payload']
+    assert payload['workspace_id'] == 'workspace' and payload['run_id'] == 'run'
+    with pytest.raises(TypeError):
+        captured.config['workspace_context']['permission_mode'] = 'allow_all'
+
+
+def test_one_batch_request_and_original_tool_binding(workspace_runtime):
+    middleware, core, _ = workspace_runtime()
+    tool = middleware.tools_info['LocalFileToolkit_create']
+    apply = tool.apply
+    result = middleware.execute_with_records([
+        call('create', filepath='a.txt', content='one'), call('create', filepath='b.txt', content='two'),
+    ])
+    assert all(item['ok'] for item in result.results)
+    assert core.batch_requests == 1
+    assert tool.apply is apply
+
+
+def test_request_contexts_isolate_two_workspaces(workspace_runtime, tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    from lazymind.chat.engine.tools.workspace_context import workspace_permission_scope
+
+    first, _, _ = workspace_runtime(tmp_path / 'first')
+    second, _, _ = workspace_runtime(tmp_path / 'second')
+
+    def prepare(runtime):
+        with workspace_permission_scope(runtime._workspace_permission):
+            return runtime.prepare_tool_calls(call('create', filepath='same.txt', content='x'))[0]
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        calls = list(pool.map(prepare, [first, second]))
+    assert [item.host_files[0].path for item in calls] == [
+        str(tmp_path / 'first' / 'same.txt'), str(tmp_path / 'second' / 'same.txt'),
+    ]

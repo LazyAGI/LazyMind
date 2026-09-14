@@ -1662,7 +1662,7 @@ const zhCN = {
         title: "工作区请求",
         notice: "允许后原工具调用将继续执行；只有状态显示“已完成”才表示执行完成。",
         allowOnce: "允许一次", reject: "拒绝", loadFailed: "无法刷新请求", decisionFailed: "保存决定失败",
-        operation: { read: "读取", create: "创建", append: "追加", replace: "替换", delete: "删除", overwrite: "覆盖", mkdir: "创建目录", ls: "列出目录", glob: "查找文件", grep: "搜索内容", info: "文件信息" },
+        operation: { write: "写入", read: "读取", create: "创建", append: "追加", replace: "替换", delete: "删除", overwrite: "覆盖", mkdir: "创建目录", ls: "列出目录", glob: "查找文件", grep: "搜索内容", info: "文件信息" },
         status: { preparing: "准备请求中", unknown: "状态暂不可用", pending: "等待批准", allowed: "已批准，等待执行", executing: "执行中", completed: "已完成", failed: "失败", rejected: "已拒绝", expired: "已过期", uncertain: "结果未知" },
       },
       status: { active: "可用", revoked: "已撤销", path_unavailable: "目录不可用" },

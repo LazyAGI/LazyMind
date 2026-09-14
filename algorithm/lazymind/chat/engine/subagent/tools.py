@@ -6,6 +6,8 @@ from typing import Any, Dict, List, Literal, Optional
 from urllib.parse import urlparse
 
 from lazyllm.tools.agent import ToolExecutionError
+from lazyllm.tools import fc_register
+from lazymind.chat.engine.tools.host_file_resolution import FileResolution, validate_storage_id, copy_artifact_input
 from typing_extensions import NotRequired, TypedDict
 from lazymind.chat.engine.attachment_reader import (
     is_chat_attachment_file,
@@ -55,6 +57,8 @@ def _materialize_local_path(path: str) -> str:
         return raw
     if raw.lower().startswith(('http://', 'https://')):
         return raw
+    if os.path.isabs(raw) and not raw.startswith(('/static-files/', '/var/lib/lazymind/uploads/')):
+        return os.path.realpath(raw)
     resolved = resolve_local_image_path(raw) or local_path_from_static_file_url(raw)
     if resolved and (resolved == raw or os.path.exists(resolved) or not os.path.exists(raw)):
         return resolved
@@ -164,7 +168,7 @@ def _build_artifact_value(value: Any, content_type: str):
             return image_value(src), 'image'
         if os.path.isabs(src):
             # Copy into workspace; keep absolute path so Go core can sign a URL for it.
-            dst_rel = ctx.copy_into_workspace(src)
+            dst_rel = copy_artifact_input(src, ctx.workspace_path)
             dst_abs = os.path.join(ctx.workspace_path, dst_rel)
             return image_value(dst_abs), 'image'
         return image_value(src), 'image'
@@ -182,7 +186,7 @@ def _build_artifact_value(value: Any, content_type: str):
             source = os.path.realpath(source)
             if not os.path.isfile(source):
                 raise ToolExecutionError(f'File artifact does not exist: {source}')
-            rel = ctx.copy_into_workspace(source)
+            rel = copy_artifact_input(source, ctx.workspace_path)
             full = os.path.realpath(os.path.join(ctx.workspace_path, rel))
         else:
             full = os.path.realpath(os.path.join(ctx.workspace_path, source))
@@ -206,7 +210,7 @@ def _build_artifact_value(value: Any, content_type: str):
                 source = os.path.realpath(p)
                 if not os.path.isfile(source):
                     raise ToolExecutionError(f'File-list artifact does not exist: {source}')
-                rel = ctx.copy_into_workspace(source)
+                rel = copy_artifact_input(source, ctx.workspace_path)
                 paths.append(os.path.realpath(os.path.join(ctx.workspace_path, rel)))
                 continue
             resolved = os.path.realpath(os.path.join(ctx.workspace_path, p))
@@ -379,6 +383,43 @@ def _save_artifact(key: str, value: Any, content_type: str = 'text',
     return {'status': 'ok', 'message': msg}
 
 
+def resolve_artifact_files(arguments: dict) -> object:
+    """Resolve the complete batch before saving its first artifact."""
+    from copy import deepcopy
+
+    resolved = deepcopy(arguments)
+    from lazymind.chat.engine.tools.workspace_context import get_workspace_permission_context
+
+    request = get_workspace_permission_context()
+    workspace = request.config.get('_subagent_workspace') if request is not None else require_context().workspace_path
+    if not workspace:
+        raise ToolExecutionError('Artifact file resolution requires the captured task workspace.')
+    files = FileResolution(default_root=workspace)
+    for item in resolved.get('artifacts', []):
+        validate_storage_id(item.get('key'))
+        kind = item.get('content_type') or 'text'
+        if kind not in _CONTENT_TYPES:
+            raise ToolExecutionError(f'Unsupported artifact content type: {kind!r}.')
+        if kind in {'text', 'json'}:
+            continue
+        values = item.get('value')
+        values = values if kind == 'file_list' and isinstance(values, list) else [values]
+        normalized = []
+        for value in values:
+            field = next((key for key in ('path', 'image_url', 'url')
+                          if isinstance(value, dict) and value.get(key)), None)
+            source = value.get(field) if field else value
+            path = files.media(source) if kind == 'image' else files.local(source)
+            if os.path.isabs(path):
+                # The saver copies by basename. Include escaped destination symlinks
+                # as writes rather than assuming the task directory makes them safe.
+                files.local(os.path.join(workspace, os.path.basename(path)), 'write')
+            normalized.append({**value, field: path} if field and kind != 'file_list' else path)
+        item['value'] = normalized if kind == 'file_list' else normalized[0]
+    return files.finish(resolved)
+
+
+@fc_register(host_file_access='DECLARED', host_file_resolver=resolve_artifact_files)
 def save_artifacts(artifacts: List[ArtifactSaveItem]) -> Dict[str, Any]:
     """Save one or more output artifacts in one tool call.
 
@@ -393,6 +434,13 @@ def save_artifacts(artifacts: List[ArtifactSaveItem]) -> Dict[str, Any]:
         {"artifacts": [{"key": "result", "value": "Final output",
                         "content_type": "text", "caption": "Result"}]}
     """
+    from lazymind.chat.engine.tools.workspace_context import get_workspace_permission_context
+
+    request = get_workspace_permission_context()
+    if request is not None:
+        captured_workspace = request.config.get('_subagent_workspace')
+        if not captured_workspace or os.path.realpath(require_context().workspace_path) != os.path.realpath(captured_workspace):
+            raise ToolExecutionError('The artifact task workspace changed after file authorization.')
     if not isinstance(artifacts, list) or not artifacts:
         raise ToolExecutionError('artifacts must be a non-empty list.')
     if len(artifacts) > 50:
