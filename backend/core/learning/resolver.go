@@ -128,6 +128,30 @@ func extractJSONObject(raw string) (map[string]any, error) {
 	}
 	return out, nil
 }
+
+func extractLLMResult(def Capability, current map[string]any, raw string) (map[string]any, error) {
+	value, err := extractJSONObject(raw)
+	if err == nil {
+		return value, nil
+	}
+	// Some otherwise valid model responses ignore the JSON-only instruction and
+	// return plain text. When exactly one required field remains, preserve that
+	// answer as editable content instead of failing the whole dictionary lookup.
+	missing := requiredMissing(def, current)
+	plain := strings.TrimSpace(raw)
+	for _, prefix := range []string{"```text", "```markdown", "```"} {
+		if strings.HasPrefix(plain, prefix) {
+			plain = strings.TrimSpace(strings.TrimPrefix(plain, prefix))
+			break
+		}
+	}
+	plain = strings.TrimSpace(strings.TrimSuffix(plain, "```"))
+	if len(missing) == 1 && plain != "" && !strings.Contains(plain, "{") {
+		return map[string]any{missing[0]: plain}, nil
+	}
+	return nil, err
+}
+
 func (s *Service) resolveWithLLM(ctx context.Context, owner string, def Capability, in ResolveContentRequest, current map[string]any) (map[string]any, error) {
 	config, err := modelconfig.LoadLLMConfig(ctx, s.db, owner)
 	if err != nil {
@@ -139,7 +163,7 @@ func (s *Service) resolveWithLLM(ctx context.Context, owner string, def Capabili
 	if err != nil {
 		return nil, err
 	}
-	return extractJSONObject(raw)
+	return extractLLMResult(def, current, raw)
 }
 func (s *Service) ResolveContent(ctx context.Context, owner string, in ResolveContentRequest) (ResolveContentResult, error) {
 	if err := requireLocal(); err != nil {

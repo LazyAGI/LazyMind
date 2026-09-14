@@ -8351,9 +8351,10 @@ const enUS = {
     useCapabilityDefault: "Use capability default",
     capabilitySettingsHint: "These defaults apply only to this knowledge base and can be changed later.",
     advancedSettings: "Advanced settings",
+    action: { explain: "Explain" },
     scope: { user_global:"Global", knowledge_base:"Knowledge base", document:"Current document" },
     capability: {
-      englishDefinition: { name: "English definition", description: "Dictionary definitions, phonetics, and examples" }, chineseDefinition: { name: "Chinese definition", description: "Definitions for characters, words, and idioms" }, classicalDefinition: { name: "Classical Chinese definition", description: "Ancient senses and grammatical phenomena" }, generalTranslation: { name: "Translation", description: "Translate words and passages" }, classicalTranslation: { name: "Classical Chinese translation", description: "Contextual translation of classical passages" }, literaryAppreciation: { name: "Literary appreciation", description: "Analyze techniques, evidence, and effects" }, pinyin: { name: "Pinyin", description: "Pronunciation, tones, and polyphonic notes" },
+      englishDefinition: { name: "English definition", description: "Dictionary definitions, phonetics, and examples" }, chineseDefinition: { name: "Word explanation", description: "Definitions for characters, words, and idioms" }, classicalDefinition: { name: "Classical Chinese definition", description: "Ancient senses and grammatical phenomena" }, generalTranslation: { name: "Translation", description: "Translate words and passages" }, classicalTranslation: { name: "Classical Chinese translation", description: "Contextual translation of classical passages" }, literaryAppreciation: { name: "Literary appreciation", description: "Analyze techniques, evidence, and effects" }, pinyin: { name: "Pinyin", description: "Pronunciation, tones, and polyphonic notes" },
     },
     field: { phonetic:"Phonetic", pinyin:"Pinyin", polyphonicNote:"Polyphonic note", meaning:"Meaning", meaningInContext:"Meaning in context", examples:"Examples", phenomena:"Language phenomena", citations:"Citations", translation:"Translation", targetLanguage:"Target language", keyWords:"Key words", specialPatterns:"Special patterns", techniques:"Techniques", evidence:"Evidence", effects:"Effects" },
     questionType: { singleChoice:{name:"Multiple choice"}, textInput:{name:"Text input"}, cloze:{name:"Cloze"}, trueFalse:{name:"True or false"}, translationResponse:{name:"Translation response"}, shortAnswer:{name:"Short answer"}, rubricSelfAssessment:{name:"Rubric self-assessment"} },
@@ -8366,7 +8367,7 @@ const enUS = {
     questionTypesLabel: "Question types",
     capabilities: {
       englishDefinition: { name: "English definitions", description: "Learn words and phrases with an English dictionary" },
-      chineseDefinition: { name: "Chinese definitions", description: "Learn Chinese characters, words, and idioms" },
+      chineseDefinition: { name: "Word explanations", description: "Learn Chinese characters, words, and idioms" },
       classicalDefinition: { name: "Classical Chinese definitions", description: "Learn classical meanings and grammar" },
       generalTranslation: { name: "Translation", description: "Learn word and sentence translations" },
       classicalTranslation: { name: "Classical Chinese translation", description: "Learn translations of classical passages" },

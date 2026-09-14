@@ -11,7 +11,7 @@ it("renders the selected capability schema and confirms only compatible books",a
  vi.mocked(api.listLearningBooks).mockResolvedValue([{id:"good",name:"古文",description:"",capability_key:"classical_definition",question_types_json:"[]"},{id:"bad",name:"英语",description:"",capability_key:"english_definition",question_types_json:"[]"}]);
  vi.mocked(api.resolveLearningContent).mockResolvedValue({content:{id:"content"},value:{meaning_in_context:"跑"},source:"classical_chinese_dictionary"});vi.mocked(api.confirmLearningContent).mockResolvedValue({});
  render(<AddLearningContentModal value={{capabilityKey:"classical_definition",selection:{text:"走",page:1,context:"双兔傍地走"}}} datasetId="ds" documentId="doc" onClose={()=>{}} onAdded={()=>{}}/>);
- expect(await screen.findByDisplayValue("跑")).toBeInTheDocument();fireEvent.mouseDown(screen.getByRole("combobox",{name:"learning.learningCollections"}));expect((await screen.findAllByText("古文")).length).toBeGreaterThan(0);expect(screen.queryByText("英语")).not.toBeInTheDocument();fireEvent.click(screen.getByRole("button",{name:"learning.addToCollection"}));await waitFor(()=>expect(api.confirmLearningContent).toHaveBeenCalledWith("content",expect.objectContaining({meaning_in_context:"跑"}),["good"]));
+ expect(await screen.findByDisplayValue("跑")).toBeInTheDocument();fireEvent.mouseDown(screen.getByRole("combobox",{name:"学习集"}));expect((await screen.findAllByText("古文")).length).toBeGreaterThan(0);expect(screen.queryByText("英语")).not.toBeInTheDocument();fireEvent.click(screen.getByRole("button",{name:"加入学习集"}));await waitFor(()=>expect(api.confirmLearningContent).toHaveBeenCalledWith("content",expect.objectContaining({meaning_in_context:"跑"}),["good"]));
 });
 
 it("creates a compatible Chinese collection before confirming dictionary content",async()=>{
@@ -23,10 +23,10 @@ it("creates a compatible Chinese collection before confirming dictionary content
  vi.mocked(api.confirmLearningContent).mockResolvedValue({});
  render(<AddLearningContentModal value={{capabilityKey:"chinese_definition",selection:{text:"行",page:1,context:"行万里路"}}} datasetId="ds" documentId="doc" onClose={()=>{}} onAdded={()=>{}}/>);
  expect(await screen.findByDisplayValue("行走；行动。")).toBeInTheDocument();
- expect(screen.getByText("learning.contentSource")).toBeInTheDocument();
- fireEvent.change(screen.getByPlaceholderText("learning.newCompatibleCollectionName"),{target:{value:"汉语生词"}});
- fireEvent.click(screen.getByRole("button",{name:"learning.createCompatibleCollection"}));
+ expect(screen.getByText(/chinese_dictionary/)).toBeInTheDocument();
+ fireEvent.change(screen.getByPlaceholderText("新学习集名称"),{target:{value:"汉语生词"}});
+ fireEvent.click(screen.getByRole("button",{name:"创建兼容学习集"}));
  await waitFor(()=>expect(api.createLearningBook).toHaveBeenCalledWith({name:"汉语生词",capability_key:"chinese_definition",question_types:["text_input"]}));
- fireEvent.click(screen.getByRole("button",{name:"learning.addToCollection"}));
+ fireEvent.click(screen.getByRole("button",{name:"加入学习集"}));
  await waitFor(()=>expect(api.confirmLearningContent).toHaveBeenCalledWith("content-zh",expect.objectContaining({definition:"行走；行动。"}),["book-zh"]));
 });

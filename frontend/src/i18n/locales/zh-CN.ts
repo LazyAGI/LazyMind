@@ -8106,9 +8106,10 @@ const zhCN = {
     useCapabilityDefault: "使用能力默认值",
     capabilitySettingsHint: "这些默认设置仅作用于当前知识库，之后仍可修改。",
     advancedSettings: "高级设置",
+    action: { explain: "解释" },
     scope: { user_global:"全局", knowledge_base:"知识库", document:"当前文章" },
     capability: {
-      englishDefinition: { name: "英语释义", description: "英语词典释义、音标与例句" }, chineseDefinition: { name: "汉语解释", description: "汉字、词语和成语解释" }, classicalDefinition: { name: "文言文解释", description: "古义、通假与词类活用" }, generalTranslation: { name: "翻译", description: "词、句、段落翻译" }, classicalTranslation: { name: "文言文翻译", description: "结合语境翻译文言句段" }, literaryAppreciation: { name: "赏析", description: "分析手法、证据与表达效果" }, pinyin: { name: "拼音", description: "拼音、声调和多音字说明" },
+      englishDefinition: { name: "英语释义", description: "英语词典释义、音标与例句" }, chineseDefinition: { name: "词语解释", description: "汉字、词语和成语解释" }, classicalDefinition: { name: "文言文解释", description: "古义、通假与词类活用" }, generalTranslation: { name: "翻译", description: "词、句、段落翻译" }, classicalTranslation: { name: "文言文翻译", description: "结合语境翻译文言句段" }, literaryAppreciation: { name: "赏析", description: "分析手法、证据与表达效果" }, pinyin: { name: "拼音", description: "拼音、声调和多音字说明" },
     },
     field: { phonetic:"音标", pinyin:"拼音", polyphonicNote:"多音字说明", meaning:"释义", meaningInContext:"语境义", examples:"例句", phenomena:"语言现象", citations:"出处", translation:"译文", targetLanguage:"目标语言", keyWords:"关键词", specialPatterns:"特殊句式", techniques:"手法", evidence:"文本证据", effects:"表达效果" },
     questionType: { singleChoice:{name:"选择题"}, textInput:{name:"填空题"}, cloze:{name:"完形填空"}, trueFalse:{name:"判断题"}, translationResponse:{name:"翻译题"}, shortAnswer:{name:"简答题"}, rubricSelfAssessment:{name:"量规自评题"} },
@@ -8121,7 +8122,7 @@ const zhCN = {
     questionTypesLabel: "题目类型",
     capabilities: {
       englishDefinition: { name: "英语释义", description: "使用英语词典学习单词和短语" },
-      chineseDefinition: { name: "汉语解释", description: "学习汉字、词语和成语" },
+      chineseDefinition: { name: "词语解释", description: "学习汉字、词语和成语" },
       classicalDefinition: { name: "文言文解释", description: "学习文言实词、古义和语法现象" },
       generalTranslation: { name: "翻译", description: "学习词句翻译" },
       classicalTranslation: { name: "文言文翻译", description: "学习文言句段翻译" },

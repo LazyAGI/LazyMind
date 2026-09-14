@@ -521,7 +521,7 @@ const Detail = () => {
             onPdfTranslateSelection={translatePdfSelection}
             onAddVocabularySelection={isVocabularyEnabled() ? (selection) => setVocabularySelection(selection) : undefined}
             translationConfigured={translationConfigured}
-            learningSelectionActions={learningCapabilities.map(item=>({key:item.key,label:t(item.name_i18n_key),languages:item.languages,subjectKinds:item.subject_kinds,disabled:!learningLocalAvailable,disabledTip:t("vocabulary.localOnlyDesktop")}))}
+            learningSelectionActions={learningCapabilities.map(item=>({key:item.key,label:item.key==="chinese_definition"?t("learning.action.explain"):t(item.name_i18n_key),languages:item.languages,subjectKinds:item.subject_kinds,disabled:!learningLocalAvailable,disabledTip:t("vocabulary.localOnlyDesktop")}))}
             onLearningSelection={(capabilityKey,selection)=>setLearningSelection({capabilityKey,selection})}
           />
         </Col>
