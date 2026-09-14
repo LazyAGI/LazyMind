@@ -262,4 +262,18 @@ def test_citation_indices_skip_fenced_and_inline_code():
     )
     assert citation_indices_in_text(streamed) == ['1.1']
     assert citation_indices_in_text(finish) == ['1.1']
-    assert added_citation_markers(streamed, finish) == ''
+    assert added_citation_markers(['1.1'], finish) == ''
+
+
+def test_added_citation_markers_compares_occurrence_counts_in_text_order():
+    from lazymind.chat.service.utils.citations import (
+        added_citation_markers,
+        citation_indices_in_text,
+    )
+
+    final_text = 'First [[1.1]], then [2](#source-2.1 "Second"), and [[1.1]].'
+
+    assert citation_indices_in_text(final_text) == ['1.1', '2.1', '1.1']
+    assert added_citation_markers(['1.1'], final_text) == '[[2.1]][[1.1]]'
+    assert added_citation_markers(['1.1', '1.1', '2.1'], final_text) == ''
+    assert added_citation_markers(['2.1'], final_text) == '[[1.1]]'

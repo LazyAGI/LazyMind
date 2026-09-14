@@ -171,6 +171,31 @@ def test_stream_then_finish_citation_continues_display_index():
     assert finish_text.count('[1](#source-2.1') == 0
 
 
+def test_finish_repairs_late_repeated_citation_occurrence():
+    translator = AgentEventFrameTranslator(query='q')
+    first = register_external_search_result({
+        'title': 'First',
+        'url': 'https://example.test/first',
+    }, translator.citation_state)
+
+    streamed = ''.join(
+        frame.get('text') or ''
+        for frame in translator.feed({
+            'tag': 'text',
+            'delta': f'First paragraph {first["ref"]}\nSecond paragraph',
+        })
+    )
+    assert streamed.count('#source-1.1') == 1
+    assert translator.citation_plugin.streamed_indices == ('1.1',)
+
+    frames = translator.finish(
+        f'First paragraph {first["ref"]}\nSecond paragraph {first["ref"]}',
+    )
+    finish_text = ''.join(frame.get('text') or '' for frame in frames)
+
+    assert finish_text.count('#source-1.1') == 1
+
+
 def test_finish_does_not_cite_refs_inside_fenced_or_inline_code():
     translator = AgentEventFrameTranslator(query='q')
     first = register_external_search_result({

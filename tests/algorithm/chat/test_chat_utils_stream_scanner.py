@@ -84,6 +84,24 @@ def test_citation_plugin_display_numbers_start_from_first_streamed_source():
     assert plugin.collect()[0]['display_index'] == 1
     assert plugin.collect()[2]['index'] == '5.1'
     assert plugin.collect()[2]['display_index'] == 2
+    assert plugin.streamed_indices == ('3.1', '3.2', '5.1')
+
+
+def test_citation_plugin_records_every_output_occurrence_including_unknown_links():
+    config = {
+        CITATION_REFS_KEY: {
+            '1.1': {'file_name': 'Source.md'},
+        },
+    }
+    plugin = ConfigCitationPlugin(config)
+    scanner = IncrementalScanner([plugin], initial_state='BODY')
+
+    scanner.feed(
+        'first [[1.1]], repeated [[1.1]], '
+        'and [9](#source-9.1 "Not registered yet")',
+    )
+
+    assert plugin.streamed_indices == ('1.1', '1.1', '9.1')
 
 
 def _source_scanner():

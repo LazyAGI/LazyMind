@@ -125,7 +125,6 @@ class AgentEventFrameTranslator:
         self._pending_previews: dict[str, str] = {}
         self._mail_drafts: dict[str, dict[str, Any]] = {}
         self.streamed_text = False
-        self._streamed_display_text = ''
         self.ask_pending_emitted = False
         self.capability_dependency_emitted = False
         self.tool_call_turns = 0
@@ -235,8 +234,6 @@ class AgentEventFrameTranslator:
                 self.citation_plugin,
             ):
                 self.streamed_text = self.streamed_text or has_text
-                if has_text:
-                    self._streamed_display_text += str(frame.get('text') or '')
                 frames.append(frame)
             return frames
 
@@ -335,8 +332,6 @@ class AgentEventFrameTranslator:
             self.citation_plugin,
         ):
             self.streamed_text = self.streamed_text or has_text
-            if has_text:
-                self._streamed_display_text += str(frame.get('text') or '')
             frames.append(frame)
         return frames
 
@@ -354,7 +349,7 @@ class AgentEventFrameTranslator:
             final_result,
             self.citation_state,
             display_mapper=self.citation_plugin.display_mapper,
-            streamed_text=self._streamed_display_text,
+            streamed_citation_indices=self.citation_plugin.streamed_indices,
         )
         chunk_size = int(_cfg['agentic_stream_chunk_size'] or _STREAM_CHUNK_SIZE)
 
@@ -420,7 +415,7 @@ def _format_final_result(
     result: Any,
     config: dict,
     display_mapper: Any = None,
-    streamed_text: str = '',
+    streamed_citation_indices: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     if isinstance(result, dict):
         raw_text = str(result.get('text') or result.get('message') or '')
@@ -435,7 +430,7 @@ def _format_final_result(
     think, body = _split_think_and_body(raw_text, existing_think)
     body = rewrite_markdown_image_urls(body, config=config)
     text, cited_sources = rewrite_citations(body, config, display_mapper=display_mapper)
-    suffix_markers = added_citation_markers(streamed_text, body)
+    suffix_markers = added_citation_markers(streamed_citation_indices, body)
     citation_suffix = ''
     extra_cited: list[dict[str, Any]] = []
     if suffix_markers:

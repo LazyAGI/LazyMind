@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import re
 import threading
-from collections import OrderedDict
+from collections import Counter, OrderedDict
+from collections.abc import Iterable
 from html import escape
 from typing import Any, Optional
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -758,32 +759,30 @@ def _map_skipping_inline_code(text: str, transform: Any) -> str:
 
 def citation_indices_in_text(text: str) -> list[str]:
     found: list[str] = []
-    seen: set[str] = set()
 
     def _collect(prose: str) -> str:
         scanned = _INLINE_CODE_PATTERN.sub(' ', prose)
-
-        def _add(index: str) -> None:
-            if index and index not in seen:
-                seen.add(index)
-                found.append(index)
-
-        for match in CITATION_PATTERN.finditer(scanned):
-            _add(match.group(1))
-        for match in SOURCE_LINK_PATTERN.finditer(scanned):
-            _add(match.group(2))
+        matches = [
+            *((match.start(), match.group(1)) for match in CITATION_PATTERN.finditer(scanned)),
+            *((match.start(), match.group(2)) for match in SOURCE_LINK_PATTERN.finditer(scanned)),
+        ]
+        found.extend(index for _, index in sorted(matches))
         return prose
 
     _transform_outside_fences(text or '', _collect)
     return found
 
 
-def added_citation_markers(original: str, repaired: str) -> str:
-    original_indices = set(citation_indices_in_text(original))
-    added = [
-        index for index in citation_indices_in_text(repaired)
-        if index not in original_indices
-    ]
+def added_citation_markers(streamed_indices: Iterable[str], final_text: str) -> str:
+    streamed_counts = Counter(streamed_indices)
+    final_seen: Counter[str] = Counter()
+    added: list[str] = []
+    added_set: set[str] = set()
+    for index in citation_indices_in_text(final_text):
+        final_seen[index] += 1
+        if final_seen[index] > streamed_counts[index] and index not in added_set:
+            added.append(index)
+            added_set.add(index)
     return ''.join(f'[[{index}]]' for index in added)
 
 
@@ -849,6 +848,10 @@ class ConfigCitationPlugin(BasePlugin):
         self._config = config
         self._collected: OrderedDict[str, dict[str, Any]] = OrderedDict()
         self._display_mapper = CitationDisplayMapper()
+        self._streamed_indices: list[str] = []
+
+    def _record_streamed(self, index: str) -> None:
+        self._streamed_indices.append(index)
 
     def _collect(self, index: str, source: dict[str, Any]) -> dict[str, Any]:
         mark_source_roles(self._config, index, 'cited')
@@ -861,6 +864,7 @@ class ConfigCitationPlugin(BasePlugin):
         if link_match:
             index = link_match.group(2)
             source = citation_source(self._config, index)
+            self._record_streamed(index)
             if source:
                 mapped_source = self._collect(index, source)
                 return (
@@ -876,6 +880,7 @@ class ConfigCitationPlugin(BasePlugin):
         source = citation_source(self._config, index)
         if not source:
             return (match.end(), '')
+        self._record_streamed(index)
         mapped_source = self._collect(index, source)
         return (match.end(), citation_link(index, source, display_index=mapped_source['display_index']))
 
@@ -885,6 +890,10 @@ class ConfigCitationPlugin(BasePlugin):
     @property
     def display_mapper(self) -> CitationDisplayMapper:
         return self._display_mapper
+
+    @property
+    def streamed_indices(self) -> tuple[str, ...]:
+        return tuple(self._streamed_indices)
 
     def last_incomplete_pos(self, buf: str) -> int | None:
         last_double = buf.rfind('[[')
