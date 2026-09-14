@@ -38,6 +38,9 @@ TOOL_SCHEMAS = {
     'get_skill_conversion_context': _object({
         'skill_id': {'type': 'string'},
     }, ['skill_id']),
+    'preflight_skill_workflow_conversion': _object({
+        'skill_id': {'type': 'string'},
+    }, ['skill_id']),
     'list_skills': _object({}),
     'create_workflow_draft': _object({
         'name': {'type': 'string'},
@@ -68,6 +71,7 @@ TOOL_DESCRIPTIONS = {
     'patch_artifact': 'Create an Agent-authored immutable revision from a selected Artifact.',
     'advance_step': 'Synchronously request one or more Ready targets; Runtime resolves execute/retry/rewind.',
     'get_skill_conversion_context': 'Read a complete, immutable Skill revision snapshot; never invokes a model.',
+    'preflight_skill_workflow_conversion': 'Check whether a Skill snapshot is ready for deterministic conversion.',
     'list_skills': 'List Skills visible to the current user for deterministic Workflow conversion.',
     'create_workflow_draft': 'Store Agent-authored Workflow package files against a pinned Skill snapshot.',
     'list_workflow_drafts': 'List Workflow drafts owned by the current user.',
@@ -152,13 +156,17 @@ class WorkflowMCPServer:
         elif name == 'get_skill_conversion_context':
             result = client.get_skill_conversion_context(
                 arguments['skill_id']).result
+        elif name == 'preflight_skill_workflow_conversion':
+            result = client.preflight_skill_workflow_conversion(
+                arguments['skill_id']).result
         elif name == 'list_skills':
             result = client.list_skills().result
         elif name == 'create_workflow_draft':
             skill_id = arguments.get('skill_id', '')
             context = client.get_skill_conversion_context(skill_id).result if skill_id else {}
+            snapshot = context.get('snapshot') or {}
             draft_args = [arguments['name'], skill_id,
-                          context.get('revision_id', ''), context.get('tree_hash', ''),
+                          snapshot.get('revision_id', ''), snapshot.get('tree_hash', ''),
                           arguments['files']]
             draft_args.append('skill' if skill_id else 'blank')
             result = client.create_workflow_draft(*draft_args).result

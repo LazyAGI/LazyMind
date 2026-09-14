@@ -1010,19 +1010,11 @@ func mergeStringListAny(existing any, values []string) []any {
 	return result
 }
 
-func requiredCapabilityPublishDiagnostics(db *gorm.DB, draft orm.WorkflowDraft, compiled graphengine.CompileResult) []authoringDiagnostic {
-	if strings.TrimSpace(draft.SourceAnalysisID) == "" {
-		return nil
-	}
-	var analysis orm.WorkflowGenerationAnalysis
-	if err := db.Where("id = ? AND draft_id = ?", draft.SourceAnalysisID, draft.ID).First(&analysis).Error; err != nil {
-		return nil
-	}
-	var mappings map[string]any
-	if json.Unmarshal([]byte(analysis.ToolMappingReportJSON), &mappings) != nil {
+func requiredCapabilityPublishDiagnostics(resolved draftCapabilityMappings, compiled graphengine.CompileResult) []authoringDiagnostic {
+	if resolved.Invalid {
 		return []authoringDiagnostic{{Code: "SKILL_CAPABILITY_MAPPING_INVALID", Severity: "error", Message: "Skill capability mapping report is invalid"}}
 	}
-	requirements := detectedCapabilitiesFromMappings(mappings)
+	requirements := detectedCapabilitiesFromMappings(resolved.Mappings)
 	if len(requirements) == 0 {
 		return nil
 	}
@@ -1053,6 +1045,35 @@ func requiredCapabilityPublishDiagnostics(db *gorm.DB, draft orm.WorkflowDraft, 
 		}
 	}
 	return out
+}
+
+// draftCapabilityMappings is the single resolution of a draft's required Skill
+// capabilities. A stored generation analysis is optional: drafts authored through
+// the public MCP contract have none, so the pinned Skill snapshot is rescanned.
+type draftCapabilityMappings struct {
+	Mappings   map[string]any
+	Invalid    bool
+	AnalysisID string
+	StoredJSON string
+	Rescanned  bool
+}
+
+func resolveDraftCapabilityMappings(ctx context.Context, db *gorm.DB, draft orm.WorkflowDraft) draftCapabilityMappings {
+	resolved := draftCapabilityMappings{Mappings: map[string]any{}}
+	if strings.TrimSpace(draft.SourceAnalysisID) != "" {
+		var analysis orm.WorkflowGenerationAnalysis
+		if err := db.Where("id = ? AND draft_id = ?", draft.SourceAnalysisID, draft.ID).First(&analysis).Error; err == nil {
+			resolved.AnalysisID, resolved.StoredJSON = analysis.ID, analysis.ToolMappingReportJSON
+			if strings.TrimSpace(analysis.ToolMappingReportJSON) != "" && json.Unmarshal([]byte(analysis.ToolMappingReportJSON), &resolved.Mappings) != nil {
+				return draftCapabilityMappings{Invalid: true}
+			}
+		}
+	}
+	if detected := redetectSkillCapabilitiesForDraft(ctx, db, &draft); len(detected) > 0 {
+		resolved.Mappings = reconcileDetectedCapabilityMappings(resolved.Mappings, detected)
+		resolved.Rescanned = true
+	}
+	return resolved
 }
 
 func workflowRevisionCapabilityDiagnostics(compiledJSON []byte, mappings map[string]any) (bool, string) {
