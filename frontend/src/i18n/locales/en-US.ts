@@ -8322,7 +8322,7 @@ const enUS = {
   },
 
   learning: {
-    capabilityProfile: "Learning scenario",
+    capabilityProfile: "Scenario",
     customProfile: "Custom combination",
     customProfileName: "Combination name", customProfileNameRequired: "Enter a combination name",
     unsupportedCapability: "Unsupported learning capability",
@@ -8337,7 +8337,7 @@ const enUS = {
     importDictionary:"Import dictionary", dictionaryImported:"Imported {{count}} entries", dictionaryType:"Dictionary type", chineseDictionary:"Chinese dictionary", classicalDictionary:"Classical Chinese dictionary", sourceName:"Source name", sourceVersion:"Source version", license:"License", checksum:"Checksum", sourceUrl:"Source URL", dictionaryEntriesJson:"Entries JSON",
     createCollection: "Create collection", editCollection:"Edit collection", collectionCreated: "Learning collection created", collectionUpdated:"Learning collection updated", collectionArchived:"Learning collection archived", archiveCollectionConfirm:"Archive this collection? Review history will be preserved.", collectionName: "Collection name", startReview: "Start review", reviewCompleted: "Review completed", reviewProgress: "Review {{current}} / {{total}}", unsupportedQuestionType: "This client does not support question type: {{type}}", submitAnswer: "Submit answer", rating: { again:"Again", hard:"Hard", good:"Good", easy:"Easy" },
     documentLearning:"Document learning", preanalysis:"AI preanalysis", analyzeDocument:"Analyze entire document", preanalysisFinished:"Preanalysis completed", preanalysisStatus:"Status: {{status}}, completed {{completed}}, failed {{failed}}", preanalysisDrafts:"Draft preview", publishDrafts:"Publish all drafts", preanalysisPublished:"Preanalysis drafts published", presetContent:"Preset content", cacheScope:"Scope", scopeGlobal:"Global", scopeKnowledgeBase:"Knowledge base", scopeDocument:"Current document", presetKey:"Matching text", presetValue:"Structured content (JSON)", invalidJson:"Invalid JSON",
-    knowledgeBaseCapabilities: "Document learning capabilities",
+    knowledgeBaseCapabilities: "Required capabilities",
     knowledgeBaseCapabilitiesHint: "Controls the explanation, translation, pinyin, and appreciation actions available while reading.",
     knowledgeBaseCapabilitiesCreateHint: "New knowledge bases use translation by default; the combination can be edited after creation.",
     selectCapabilities: "Select capabilities",
@@ -8349,6 +8349,7 @@ const enUS = {
     maxSelectionLength: "Maximum selection length",
     useCapabilityDefault: "Use capability default",
     capabilitySettingsHint: "These defaults apply only to this knowledge base and can be changed later.",
+    advancedSettings: "Advanced settings",
     scope: { user_global:"Global", knowledge_base:"Knowledge base", document:"Current document" },
     capability: {
       englishDefinition: { name: "English definition", description: "Dictionary definitions, phonetics, and examples" }, chineseDefinition: { name: "Chinese definition", description: "Definitions for characters, words, and idioms" }, classicalDefinition: { name: "Classical Chinese definition", description: "Ancient senses and grammatical phenomena" }, generalTranslation: { name: "Translation", description: "Translate words and passages" }, classicalTranslation: { name: "Classical Chinese translation", description: "Contextual translation of classical passages" }, literaryAppreciation: { name: "Literary appreciation", description: "Analyze techniques, evidence, and effects" }, pinyin: { name: "Pinyin", description: "Pronunciation, tones, and polyphonic notes" },

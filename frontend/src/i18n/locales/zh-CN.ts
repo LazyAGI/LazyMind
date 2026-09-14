@@ -8077,7 +8077,7 @@ const zhCN = {
   },
 
   learning: {
-    capabilityProfile: "学习场景组合",
+    capabilityProfile: "场景",
     customProfile: "自定义组合",
     customProfileName: "组合名称", customProfileNameRequired: "请输入组合名称",
     unsupportedCapability: "不支持的学习能力",
@@ -8092,7 +8092,7 @@ const zhCN = {
     importDictionary:"导入词典", dictionaryImported:"已导入 {{count}} 个词条", dictionaryType:"词典类型", chineseDictionary:"汉语词典", classicalDictionary:"文言文词典", sourceName:"来源名称", sourceVersion:"来源版本", license:"许可协议", checksum:"校验和", sourceUrl:"来源地址", dictionaryEntriesJson:"词条 JSON",
     createCollection: "新建学习集", editCollection:"编辑学习集", collectionCreated: "学习集已创建", collectionUpdated:"学习集已更新", collectionArchived:"学习集已归档", archiveCollectionConfirm:"归档这个学习集吗？复习历史会保留。", collectionName: "学习集名称", startReview: "开始复习", reviewCompleted: "本轮复习完成", reviewProgress: "复习 {{current}} / {{total}}", unsupportedQuestionType: "当前客户端不支持题型：{{type}}", submitAnswer: "提交答案", rating: { again:"重来", hard:"困难", good:"良好", easy:"简单" },
     documentLearning:"文档学习", preanalysis:"大模型预分析", analyzeDocument:"分析整篇文档", preanalysisFinished:"预分析已完成", preanalysisStatus:"状态：{{status}}，成功 {{completed}}，失败 {{failed}}", preanalysisDrafts:"草稿预览", publishDrafts:"发布全部草稿", preanalysisPublished:"预分析草稿已发布", presetContent:"预置内容", cacheScope:"作用范围", scopeGlobal:"全局", scopeKnowledgeBase:"知识库", scopeDocument:"当前文章", presetKey:"匹配文本", presetValue:"结构化内容（JSON）", invalidJson:"JSON 格式无效",
-    knowledgeBaseCapabilities: "文档学习能力",
+    knowledgeBaseCapabilities: "依赖能力",
     knowledgeBaseCapabilitiesHint: "决定阅读文档时可用的解释、翻译、拼音和赏析按钮。",
     knowledgeBaseCapabilitiesCreateHint: "新知识库默认使用翻译；创建后可继续调整能力组合。",
     selectCapabilities: "选择能力（可多选）",
@@ -8104,6 +8104,7 @@ const zhCN = {
     maxSelectionLength: "最大选区长度",
     useCapabilityDefault: "使用能力默认值",
     capabilitySettingsHint: "这些默认设置仅作用于当前知识库，之后仍可修改。",
+    advancedSettings: "高级设置",
     scope: { user_global:"全局", knowledge_base:"知识库", document:"当前文章" },
     capability: {
       englishDefinition: { name: "英语释义", description: "英语词典释义、音标与例句" }, chineseDefinition: { name: "汉语解释", description: "汉字、词语和成语解释" }, classicalDefinition: { name: "文言文解释", description: "古义、通假与词类活用" }, generalTranslation: { name: "翻译", description: "词、句、段落翻译" }, classicalTranslation: { name: "文言文翻译", description: "结合语境翻译文言句段" }, literaryAppreciation: { name: "赏析", description: "分析手法、证据与表达效果" }, pinyin: { name: "拼音", description: "拼音、声调和多音字说明" },
