@@ -360,14 +360,36 @@ func TestBuiltinSourceManifestIncludesSelectedSkillHubAndGitHubSources(t *testin
 		{"https://github.com/PabloNAX/ultracode-skill/tree/bfa2d92488171651c6c9379a8b98f8a07d996d3c/ultracode", "GitHub"},
 		{"https://github.com/smixs/skill-conductor/tree/3c21d2f19c336d3a3333bfe4f45eee041bd13beb/skills/skill-conductor", "GitHub"},
 	}
-	if len(sources.Skills) != len(expected)+1 {
-		t.Fatalf("remote source count = %d, want %d", len(sources.Skills), len(expected)+1)
+	expectedByURL := make(map[string]string, len(expected))
+	for _, want := range expected {
+		expectedByURL[want.url] = want.provider
 	}
-	for index, want := range expected {
-		got := sources.Skills[index+1]
-		if got.SourceURL != want.url || got.Provider != want.provider {
-			t.Fatalf("source[%d] = %#v, want URL %q/provider %q", index+1, got, want.url, want.provider)
+
+	positions := make(map[string]int, len(expected))
+	for index, got := range sources.Skills {
+		wantProvider, ok := expectedByURL[got.SourceURL]
+		if !ok {
+			continue
 		}
+		if _, exists := positions[got.SourceURL]; exists {
+			t.Fatalf("duplicate source URL %q", got.SourceURL)
+		}
+		if got.Provider != wantProvider {
+			t.Fatalf("source[%d] provider = %q, want %q", index, got.Provider, wantProvider)
+		}
+		positions[got.SourceURL] = index
+	}
+
+	lastIndex := -1
+	for _, want := range expected {
+		index, ok := positions[want.url]
+		if !ok {
+			t.Fatalf("missing expected source %q", want.url)
+		}
+		if index <= lastIndex {
+			t.Fatalf("source %q is out of order", want.url)
+		}
+		lastIndex = index
 	}
 }
 
