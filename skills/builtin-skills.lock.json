@@ -295,22 +295,6 @@
       "package_file": "packages/bsk_EAD6F81DA8CB655426B1AC8A4111.zip"
     },
     {
-      "key": "laoxi/xiezuowenfengfukedashi",
-      "uid": "bsk_1C9322261C6D566B8D6FF239A237",
-      "source_url": "https://skillhub.cn/skills/laoxi/xiezuowenfengfukedashi",
-      "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40laoxi%2Fxiezuowenfengfukedashi",
-      "version": "1.0.0",
-      "name": "writing-style-replication-master",
-      "description": "从用户提供的多篇文本中，构建可复用的“思维与写作风格模型”，并生成独立的写作 Skill、风格提示词、适配模板与验证报告。 采用证据分级、跨文本一致性、类型分层、风格-任务解耦和生成后复检，避免把主观印象伪装成精确统计，也不依赖特定平台、应用或本地目录。",
-      "category": "writing",
-      "provider": "SkillHub",
-      "market_visible": true,
-      "archive_sha256": "b340fd1ca30d2ece7ba2becefd56c2bc59d1c69f99b77168d130b2bf520fc1cd",
-      "tree_sha256": "272264b44a078b46634f35900b33bf6a369810f145fb4847c880b260329ace0e",
-      "archive_size": 9463,
-      "package_file": "packages/bsk_1C9322261C6D566B8D6FF239A237.zip"
-    },
-    {
       "key": "clawhub_ivangdavila/translate",
       "uid": "bsk_BAF22BB7F313E02D4F06E78FF846",
       "source_url": "https://skillhub.cn/skills/clawhub_ivangdavila/translate",
