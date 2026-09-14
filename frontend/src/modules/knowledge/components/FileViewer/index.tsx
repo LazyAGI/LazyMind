@@ -457,7 +457,7 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
             >
               {t("knowledge.translateSelection")}
             </button>
-            {props.onAddVocabularySelection ? <button
+            {props.onAddVocabularySelection && isSingleEnglishWord(textSelectionAction.text) ? <button
               type="button"
               className="file-viewer-selection-translate"
               onMouseDown={(event) => event.preventDefault()}

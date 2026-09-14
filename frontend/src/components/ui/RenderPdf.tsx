@@ -637,7 +637,7 @@ export default function RenderPdf({
               </span>
             </Tooltip>
           ) : null}
-          {onAddVocabularySelection ? (
+          {onAddVocabularySelection && isSingleEnglishWord(selectionAction.selection.text) ? (
             <button
               type="button"
               aria-label={addVocabularySelectionLabel}
