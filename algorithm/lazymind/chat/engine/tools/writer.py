@@ -334,10 +334,10 @@ def _read_artifact_data(path: str) -> Any:
 
 
 def _temp_root() -> Path:
-    from lazymind.chat.engine.tools.workspace_context import get_workspace_permission_context
+    from lazymind.chat.engine.tools.workspace_context import get_tool_resolution_context
     from lazymind.chat.engine.tools.local_file.workspace import chat_agent_workspace
 
-    request = get_workspace_permission_context()
+    request = get_tool_resolution_context()
     config = request.config if request is not None else {}
     base = config.get('_writer_workspace') or config.get('_subagent_workspace')
     if not base and config.get('user_id') and config.get('conversation_id'):

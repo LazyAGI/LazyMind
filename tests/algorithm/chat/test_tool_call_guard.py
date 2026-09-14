@@ -368,8 +368,10 @@ def _workspace_middleware(monkeypatch, *, cancel_check=None, extra_tools=()):
     config = {
         'user_id': 'owner', 'conversation_id': 'conversation',
         '_workspace_execution': {'history_id': 'history', 'run_id': 'run'},
-        'workspace_context': {'workspace_id': 'workspace'},
-        'local_fs_sources': [{'source_id': 'local-workspace:workspace', 'paths': ['/only-on-core'], 'file_extensions': ['txt']}],
+        'workspace_context': {
+            'workspace_id': 'workspace', 'root': '/only-on-core', 'workspace_version': 1,
+            'permission_mode': 'always_ask', 'permission_version': 1,
+        },
     }
     lazyllm.globals['agentic_config'] = lazyllm.globals.get('agentic_config') or {}
     monkeypatch.setitem(lazyllm.globals, 'agentic_config', config)
@@ -378,6 +380,7 @@ def _workspace_middleware(monkeypatch, *, cancel_check=None, extra_tools=()):
     middleware = ToolExecutionMiddleware(
         manager, cancel_check=cancel_check,
         workspace_permission=WorkspacePermissionContext.from_config(config, trusted_local=True),
+        tool_context=config,
         failure_policy=FailureRetryPolicy({'LocalFileToolkit_append': 1}),
     )
     return middleware, config
@@ -431,7 +434,6 @@ def test_workspace_artifact_whitespace_path_rejects_entire_batch_before_dispatch
 @pytest.mark.parametrize('binding', [
     {'_core_workspace_context': {'workspace_id': 'parent'}},
     {'workspace_context': {'workspace_id': 'parent'}},
-    {'local_fs_sources': [{'source_id': 'local-workspace:parent', 'paths': ['/bound'], 'file_extensions': ['txt']}]},
 ])
 @pytest.mark.parametrize('missing', ['user_id', 'conversation_id'])
 def test_parent_workspace_without_identity_does_not_disable_admission(monkeypatch, binding, missing):
@@ -447,3 +449,15 @@ def test_parent_workspace_without_identity_does_not_disable_admission(monkeypatc
     }})
     assert batch.records[0].disposition is ToolExecutionDisposition.SKIPPED
     assert batch.records[0].reason == 'authorization_denied'
+
+
+def test_local_workspace_source_protocol_no_longer_creates_a_permission_binding():
+    from lazymind.chat.engine.tools.workspace_context import WorkspacePermissionContext
+
+    context = WorkspacePermissionContext.from_config({
+        'local_fs_sources': [{
+            'source_id': 'local-workspace:parent', 'paths': ['/bound'], 'file_extensions': ['txt'],
+        }],
+    })
+
+    assert not context.bound

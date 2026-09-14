@@ -39,9 +39,9 @@ func RebuildSubagentParams(ctx context.Context, db *gorm.DB, userID, conversatio
 	}
 	parent["user_id"] = userID
 	parent["conversation_id"] = conversationID
-	parent["local_fs_sources"] = snapshot.Sources
 	parent[coreWorkspaceContextKey] = map[string]any{
 		"runtime_instruction": base, "workspace_id": snapshot.WorkspaceID,
+		"root": snapshot.Root, "directory_identity": snapshot.DirectoryIdentity,
 		"workspace_version": snapshot.WorkspaceVersion, "permission_mode": snapshot.PermissionMode,
 		"permission_version": snapshot.PermissionVersion,
 	}

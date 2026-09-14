@@ -7,18 +7,16 @@ import (
 
 	"gorm.io/gorm"
 
-	"lazymind/core/common"
 	"lazymind/core/common/orm"
 )
 
 type ContextSnapshot struct {
-	WorkspaceID       string           `json:"workspace_id"`
-	Root              string           `json:"root,omitempty"`
-	DirectoryIdentity string           `json:"directory_identity,omitempty"`
-	WorkspaceVersion  int64            `json:"workspace_version"`
-	PermissionMode    string           `json:"permission_mode"`
-	PermissionVersion int64            `json:"permission_version"`
-	Sources           []map[string]any `json:"sources,omitempty"`
+	WorkspaceID       string `json:"workspace_id"`
+	Root              string `json:"root,omitempty"`
+	DirectoryIdentity string `json:"directory_identity,omitempty"`
+	WorkspaceVersion  int64  `json:"workspace_version"`
+	PermissionMode    string `json:"permission_mode"`
+	PermissionVersion int64  `json:"permission_version"`
 }
 
 func SnapshotFromMetadata(value any) *ContextSnapshot {
@@ -90,8 +88,6 @@ func snapshot(workspace orm.LocalWorkspace, mode string, version int64) *Context
 	return &ContextSnapshot{WorkspaceID: workspace.ID, Root: workspace.CanonicalPath,
 		DirectoryIdentity: workspace.DirectoryIdentity, WorkspaceVersion: workspace.Version,
 		PermissionMode: mode, PermissionVersion: version,
-		Sources: []map[string]any{{"source_id": "local-workspace:" + workspace.ID,
-			"paths": []string{workspace.CanonicalPath}, "file_extensions": common.TextFileExtensions()}},
 	}
 }
 

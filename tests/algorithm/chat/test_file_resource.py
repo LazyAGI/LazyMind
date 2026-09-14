@@ -593,9 +593,10 @@ def test_manifest_cannot_redirect_admitted_read_to_bound_workspace(monkeypatch, 
     private = bound / 'public-fixture.md'
     private.write_text('fixture content that must remain behind Core')
     _set_scope(monkeypatch, chat)
-    resolver.lazyllm.globals['agentic_config']['local_fs_sources'] = [{
-        'source_id': 'local-workspace:w', 'paths': [str(bound)], 'file_extensions': ['md'],
-    }]
+    resolver.lazyllm.globals['agentic_config']['workspace_context'] = {
+        'workspace_id': 'w', 'root': str(bound), 'workspace_version': 1,
+        'permission_mode': 'always_ask', 'permission_version': 1,
+    }
     workspace_tools.write_file('file-resources/fr_probe/manifest.json', json.dumps({
         'file_id': 'fr_probe', 'parse_status': 'ready', 'parsed_path': str(private),
     }))

@@ -54,4 +54,12 @@ func TestRebuildSubagentParamsUsesDBSnapshotWithoutAccumulatingNotice(t *testing
 	if _, ok := second["files"]; !ok {
 		t.Fatalf("files lost: %v", second)
 	}
+	if _, ok := second["local_fs_sources"]; ok {
+		t.Fatalf("workspace must not be represented as local_fs_sources: %v", second)
+	}
+	parent := second["parent_agentic_config"].(map[string]any)
+	workspace, ok := parent[coreWorkspaceContextKey].(map[string]any)
+	if !ok || workspace["workspace_id"] != grant.WorkspaceID || workspace["root"] != root || workspace["directory_identity"] == "" {
+		t.Fatalf("workspace context=%T %v", parent[coreWorkspaceContextKey], parent[coreWorkspaceContextKey])
+	}
 }

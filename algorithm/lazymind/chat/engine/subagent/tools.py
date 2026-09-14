@@ -388,9 +388,9 @@ def resolve_artifact_files(arguments: dict) -> object:
     from copy import deepcopy
 
     resolved = deepcopy(arguments)
-    from lazymind.chat.engine.tools.workspace_context import get_workspace_permission_context
+    from lazymind.chat.engine.tools.workspace_context import get_tool_resolution_context
 
-    request = get_workspace_permission_context()
+    request = get_tool_resolution_context()
     workspace = request.config.get('_subagent_workspace') if request is not None else require_context().workspace_path
     if not workspace:
         raise ToolExecutionError('Artifact file resolution requires the captured task workspace.')
@@ -434,9 +434,9 @@ def save_artifacts(artifacts: List[ArtifactSaveItem]) -> Dict[str, Any]:
         {"artifacts": [{"key": "result", "value": "Final output",
                         "content_type": "text", "caption": "Result"}]}
     """
-    from lazymind.chat.engine.tools.workspace_context import get_workspace_permission_context
+    from lazymind.chat.engine.tools.workspace_context import get_tool_resolution_context
 
-    request = get_workspace_permission_context()
+    request = get_tool_resolution_context()
     if request is not None:
         captured_workspace = request.config.get('_subagent_workspace')
         if not captured_workspace or os.path.realpath(require_context().workspace_path) != os.path.realpath(captured_workspace):

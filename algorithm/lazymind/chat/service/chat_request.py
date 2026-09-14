@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Literal, Optional, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from lazymind.chat.config import DEFAULT_CHAT_DATASET
 
@@ -83,6 +83,17 @@ class ExplicitResourceBindingsOptions(BaseModel):
     mentions: List[Dict[str, str]] = Field(default_factory=list)
 
 
+class WorkspaceContext(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    workspace_id: str
+    root: str
+    directory_identity: str = ''
+    workspace_version: int
+    permission_mode: Literal['always_ask', 'ask_as_needed', 'allow_all']
+    permission_version: int
+
+
 class ChatRequest(BaseModel):
     message: ChatMessageOptions
     conversation: ChatConversationOptions = Field(default_factory=ChatConversationOptions)
@@ -92,6 +103,7 @@ class ChatRequest(BaseModel):
     agent: ChatAgentOptions = Field(default_factory=ChatAgentOptions)
     workflow: ChatWorkflowOptions = Field(default_factory=ChatWorkflowOptions)
     model_context: Optional[Dict[str, Any]] = None
+    workspace_context: Optional[WorkspaceContext] = None
 
     explicit_resource_bindings: ExplicitResourceBindingsOptions = Field(
         default_factory=ExplicitResourceBindingsOptions,

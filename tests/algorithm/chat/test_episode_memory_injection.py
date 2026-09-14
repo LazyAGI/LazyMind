@@ -25,7 +25,7 @@ def _export_prompt(
     observed_configs: list[dict] | None = None,
     observed_tool_types: list[list[str]] | None = None,
     observed_tool_names: list[list[str]] | None = None,
-    local_fs_sources: list[dict] | None = None,
+    workspace_context: dict | None = None,
     usage_preview: bool = False,
     current_turn_seq: int | None = None,
     plugin_context: dict | None = None,
@@ -68,7 +68,8 @@ def _export_prompt(
             'conversation_id': 'episode-prompt-conversation',
             'user_id': user_id,
         },
-        retrieval={'filters': {}, 'local_fs_sources': local_fs_sources or []},
+        retrieval={'filters': {}},
+        workspace_context=workspace_context,
         runtime={
             'llm_config': {},
             'context_prompt_export': not usage_preview,
@@ -91,11 +92,10 @@ def test_bound_local_workspace_plan_excludes_internal_writer(monkeypatch) -> Non
         history=[],
         use_memory=False,
         observed_tool_names=observed_tool_names,
-        local_fs_sources=[{
-            'source_id': 'local-workspace:workspace-1',
-            'paths': ['/authorized'],
-            'file_extensions': ['txt'],
-        }],
+        workspace_context={
+            'workspace_id': 'workspace-1', 'root': '/authorized', 'workspace_version': 1,
+            'permission_mode': 'always_ask', 'permission_version': 1,
+        },
     )
 
     assert 'write_file' not in observed_tool_names[0]

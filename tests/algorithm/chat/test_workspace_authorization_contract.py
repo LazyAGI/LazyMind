@@ -83,9 +83,10 @@ def test_workspace_real_core_http_roundtrip():
     context = {
         'user_id': 'owner', 'conversation_id': fixture['conversation'],
         '_workspace_execution': fixture['identity'],
-        '_core_workspace_context': {'workspace_id': fixture['workspace']},
-        'local_fs_sources': [{'source_id': 'local-workspace:' + fixture['workspace'],
-                              'paths': [fixture['root']], 'file_extensions': ['txt']}],
+        '_core_workspace_context': {
+            'workspace_id': fixture['workspace'], 'root': fixture['root'],
+            'workspace_version': 1, 'permission_mode': 'always_ask', 'permission_version': 1,
+        },
     }
     registration = next(item for item in DEFAULT_TOOLS if item.name == 'local_fs')
     manager = ToolManager([registration.tool])
@@ -94,7 +95,8 @@ def test_workspace_real_core_http_roundtrip():
         if cancelled.is_set():
             raise RuntimeError('cancelled')
     middleware = ToolExecutionMiddleware(manager, cancel_check=check_cancel,
-        workspace_permission=WorkspacePermissionContext.from_config(context, trusted_local=True))
+        workspace_permission=WorkspacePermissionContext.from_config(context, trusted_local=True),
+        tool_context=context)
     session = requests.Session()
     session.trust_env = False
     session.headers['X-User-Id'] = 'owner'

@@ -1770,6 +1770,10 @@ func TestBuildLazyChatRequestMapsAllFields(t *testing.T) {
 		"local_fs_sources": []any{
 			map[string]any{"source_id": "src-1"},
 		},
+		"workspace_context": map[string]any{
+			"workspace_id": "workspace-1", "root": "/project", "directory_identity": "dir-1",
+			"workspace_version": 2, "permission_mode": "always_ask", "permission_version": 3,
+		},
 		"disabled_tools": []any{"bing"},
 		"available_skills": []any{
 			"coding/git-workflow",
@@ -1836,6 +1840,9 @@ func TestBuildLazyChatRequestMapsAllFields(t *testing.T) {
 	}
 	if len(req.Retrieval.Databases) != 1 || req.Retrieval.Dataset != "default" || len(req.Retrieval.LocalFSSources) != 1 {
 		t.Fatalf("unexpected retrieval: %#v", req.Retrieval)
+	}
+	if req.WorkspaceContext == nil || req.WorkspaceContext.WorkspaceID != "workspace-1" || req.WorkspaceContext.Root != "/project" {
+		t.Fatalf("unexpected workspace context: %#v", req.WorkspaceContext)
 	}
 	if req.Runtime.Reasoning {
 		t.Fatalf("expected reasoning to be false")

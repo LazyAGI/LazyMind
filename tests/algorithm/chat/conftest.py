@@ -74,7 +74,7 @@ def workspace_runtime(monkeypatch, tmp_path):
     config, mode = {}, 'always_ask'
 
     def create(root=None, *, extra_tools=(), gate=None, cancel_check=None, permission_mode='always_ask',
-               execution_identity=None, trusted_local=True):
+               execution_identity=None, trusted_local=True, trusted_opaque_tool_names=frozenset()):
         nonlocal config, mode
         root = root or tmp_path / 'workspace'
         root.mkdir(exist_ok=True)
@@ -82,9 +82,11 @@ def workspace_runtime(monkeypatch, tmp_path):
         config = {
             'user_id': 'owner', 'conversation_id': 'conversation',
             '_workspace_execution': execution_identity or {'history_id': 'history', 'run_id': 'run'},
-            'workspace_context': {'workspace_id': 'workspace', 'permission_mode': mode, 'permission_version': 1},
-            'local_fs_sources': [{'source_id': 'local-workspace:workspace', 'paths': [str(root.resolve())],
-                                  'file_extensions': ['txt', 'md']}],
+            'workspace_context': {
+                'workspace_id': 'workspace', 'root': str(root.resolve()),
+                'directory_identity': 'test-directory', 'workspace_version': 1,
+                'permission_mode': mode, 'permission_version': 1,
+            },
         }
         lazyllm.globals['agentic_config'] = lazyllm.globals.get('agentic_config') or {}
         monkeypatch.setitem(lazyllm.globals, 'agentic_config', config)
@@ -95,7 +97,18 @@ def workspace_runtime(monkeypatch, tmp_path):
         monkeypatch.setattr(transport, 'get_core_api', core.get)
         monkeypatch.setattr(transport.time, 'sleep', lambda _: None)
         middleware = ToolExecutionMiddleware(manager, authorization_gate=gate, cancel_check=cancel_check,
-                                             workspace_permission=WorkspacePermissionContext.from_config(config, trusted_local=trusted_local),
+                                             workspace_permission=WorkspacePermissionContext.from_snapshot(
+                                                 config['workspace_context'],
+                                                 user_id=config['user_id'],
+                                                 conversation_id=config['conversation_id'],
+                                                 execution=config['_workspace_execution'],
+                                                 trusted_local=trusted_local,
+                                             ),
+                                             tool_context=config,
+                                             trusted_opaque_tools=tuple(
+                                                 manager.tools_info[name]
+                                                 for name in trusted_opaque_tool_names
+                                             ),
                                              failure_policy=FailureRetryPolicy({'LocalFileToolkit_append': 1}))
         return middleware, core, config
 

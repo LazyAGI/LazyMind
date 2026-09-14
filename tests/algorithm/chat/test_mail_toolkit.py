@@ -634,10 +634,9 @@ def test_send_rechecks_persisted_attachment_before_read_or_delivery(mail_auth, t
     backend.assert_not_called()
 
 
-@pytest.mark.parametrize('target', ['.mail_drafts', '.mail_drafts/linked.json', 'mail_attachments', 'mail_attachments/linked.txt'])
-def test_mail_outputs_reject_existing_external_symlinks(mail_auth, tmp_path, target):
+@pytest.mark.parametrize('target', ['.mail_drafts', '.mail_drafts/linked.json'])
+def test_mail_draft_outputs_reject_existing_external_symlinks(mail_auth, tmp_path, target):
     from pathlib import Path
-    from lazymind.chat.engine.tools import mail
     lazyllm.globals['agentic_config']['_core_workspace_context'] = {'workspace_id': 'bound'}
     root = Path(chat_agent_workspace('u1', 'c1'))
     link = root / target
@@ -648,13 +647,37 @@ def test_mail_outputs_reject_existing_external_symlinks(mail_auth, tmp_path, tar
     else:
         outside.write_text('unchanged')
     link.symlink_to(outside, target_is_directory=outside.is_dir())
-    if target.startswith('.mail_drafts'):
-        with pytest.raises(ToolExecutionError, match='workspace'):
-            _save_draft({'draft_id': 'linked'})
+    with pytest.raises(ToolExecutionError, match='workspace'):
+        _save_draft({'draft_id': 'linked'})
+    assert list(outside.iterdir()) == [] if outside.is_dir() else outside.read_text() == 'unchanged'
+
+
+@pytest.mark.parametrize('target', ['mail_attachments', 'mail_attachments_file'])
+def test_mail_attachment_outputs_reject_existing_external_symlinks(mail_auth, tmp_path, target):
+    from pathlib import Path
+    from lazymind.chat.engine.tools import mail
+
+    lazyllm.globals['agentic_config']['_core_workspace_context'] = {'workspace_id': 'bound'}
+    root = Path(chat_agent_workspace('u1', 'c1'))
+    outside = tmp_path / 'outside'
+    if target == 'mail_attachments':
+        link = root / 'mail_attachments'
+        link.parent.mkdir(parents=True, exist_ok=True)
+        outside.mkdir()
     else:
-        with patch.object(mail._IMAPBackend, 'read_attachment', return_value=b'new'):
-            with pytest.raises(ToolExecutionError, match='workspace'):
-                MailToolkit().read_attachment('message', 'linked.txt')
+        cred = mail._lookup_accounts('qqmail')[0]
+        link = Path(mail._incoming_attachment_path(cred, '1', 'linked.txt'))
+        link.parent.mkdir(parents=True, exist_ok=True)
+        outside.write_text('unchanged')
+    link.symlink_to(outside, target_is_directory=outside.is_dir())
+
+    with patch.object(
+        mail._IMAPBackend,
+        'read_attachments',
+        return_value={'files': {'linked.txt': b'new'}, 'parts': [], 'transfer': False},
+    ):
+        with pytest.raises(ToolExecutionError, match='workspace'):
+            MailToolkit().read_attachment('1', 'linked.txt')
     assert list(outside.iterdir()) == [] if outside.is_dir() else outside.read_text() == 'unchanged'
 
 

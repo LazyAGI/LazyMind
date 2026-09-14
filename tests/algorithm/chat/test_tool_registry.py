@@ -425,7 +425,10 @@ def test_workspace_skill_capabilities_are_owned_by_skill_implementations(tmp_pat
     (skill / 'guide.md').write_text('normal reference')
     lazyllm.globals['agentic_config'] = {
         'user_id': 'u', 'conversation_id': 'c',
-        'local_fs_sources': [{'source_id': 'local-workspace:w', 'paths': [str(bound)], 'file_extensions': ['md']}],
+        'workspace_context': {
+            'workspace_id': 'w', 'root': str(bound), 'workspace_version': 1,
+            'permission_mode': 'always_ask', 'permission_version': 1,
+        },
     }
     skills = SkillManager(dir=str(root), fs=FS)
     manager = ToolManager(skills.get_skill_tools())

@@ -6,7 +6,7 @@ import os
 from collections.abc import Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
 
@@ -29,30 +29,77 @@ def thaw(value):
 
 @dataclass(frozen=True)
 class WorkspacePermissionContext:
-    config: Mapping
+    workspace_id: str = ''
     root: str = ''
-    bound: bool = False
+    directory_identity: str = ''
+    workspace_version: int = 0
+    permission_mode: str = ''
+    permission_version: int = 0
+    user_id: str = ''
+    conversation_id: str = ''
+    execution: Mapping = field(default_factory=lambda: MappingProxyType({}))
     trusted_local: bool = False
+
+    @property
+    def bound(self):
+        return bool(self.workspace_id)
+
+    @classmethod
+    def from_snapshot(cls, snapshot: Any, *, user_id='', conversation_id='', execution=None,
+                      trusted_local=False):
+        if hasattr(snapshot, 'model_dump'):
+            snapshot = snapshot.model_dump()
+        snapshot = snapshot if isinstance(snapshot, Mapping) else {}
+        raw_root = snapshot.get('root')
+        root = os.path.realpath(raw_root) if isinstance(raw_root, str) and os.path.isabs(raw_root) else ''
+        identity = execution if isinstance(execution, Mapping) else {}
+        identity = {key: identity[key] for key in (
+            'history_id', 'run_id', 'task_id', 'generation', 'attempt_id', 'lease_token',
+        ) if key in identity}
+        return cls(
+            workspace_id=str(snapshot.get('workspace_id') or ''),
+            root=root,
+            directory_identity=str(snapshot.get('directory_identity') or ''),
+            workspace_version=int(snapshot.get('workspace_version') or 0),
+            permission_mode=str(snapshot.get('permission_mode') or ''),
+            permission_version=int(snapshot.get('permission_version') or 0),
+            user_id=str(user_id or ''),
+            conversation_id=str(conversation_id or ''),
+            execution=freeze(identity),
+            trusted_local=bool(trusted_local),
+        )
 
     @classmethod
     def from_config(cls, config: Any, *, trusted_local=False):
+        """Compatibility constructor for trusted internal subagent configuration."""
         config = config if isinstance(config, Mapping) else {}
         parents = [item for item in (config, config.get('parent_agentic_config')) if isinstance(item, Mapping)]
-        bindings = [item.get(key) for item in parents for key in ('_core_workspace_context', 'workspace_context')
-                    if isinstance(item.get(key), Mapping) and item[key].get('workspace_id')]
-        sources = [source for item in parents for source in item.get('local_fs_sources', ())
-                   if isinstance(source, Mapping)]
-        workspace_id = str(bindings[0]['workspace_id']) if bindings else next(
-            (str(source.get('source_id', '')).removeprefix('local-workspace:') for source in sources
-             if str(source.get('source_id', '')).startswith('local-workspace:')), '')
-        roots = {os.path.realpath(path) for source in sources
-                 if source.get('source_id') == 'local-workspace:' + workspace_id
-                 for path in source.get('paths', ()) if isinstance(path, str) and os.path.isabs(path)}
-        return cls(freeze(config), next(iter(roots)) if len(roots) == 1 else '', bool(workspace_id), trusted_local)
+        snapshot = next((item.get(key) for item in parents for key in (
+            '_core_workspace_context', 'workspace_context',
+        ) if isinstance(item.get(key), Mapping) and item[key].get('workspace_id')), {})
+        return cls.from_snapshot(
+            snapshot,
+            user_id=config.get('user_id') or next((item.get('user_id') for item in parents if item.get('user_id')), ''),
+            conversation_id=(config.get('conversation_id')
+                             or next((item.get('conversation_id') for item in parents
+                                      if item.get('conversation_id')), '')),
+            execution=config.get('_workspace_execution'),
+            trusted_local=trusted_local,
+        )
+
+
+@dataclass(frozen=True)
+class ToolResolutionContext:
+    config: Mapping
+
+    @classmethod
+    def from_config(cls, config: Any):
+        return cls(freeze(config if isinstance(config, Mapping) else {}))
 
 
 _PERMISSION = ContextVar('workspace_permission_context', default=None)
 _LOCAL_ACCESS = ContextVar('workspace_local_access', default=None)
+_TOOL_RESOLUTION = ContextVar('tool_resolution_context', default=None)
 
 
 def get_workspace_permission_context():
@@ -61,6 +108,10 @@ def get_workspace_permission_context():
 
 def get_local_access():
     return _LOCAL_ACCESS.get()
+
+
+def get_tool_resolution_context():
+    return _TOOL_RESOLUTION.get()
 
 
 @contextmanager
@@ -79,6 +130,15 @@ def local_access_scope(access):
         yield
     finally:
         _LOCAL_ACCESS.reset(token)
+
+
+@contextmanager
+def tool_resolution_scope(context):
+    token = _TOOL_RESOLUTION.set(context)
+    try:
+        yield
+    finally:
+        _TOOL_RESOLUTION.reset(token)
 
 
 def canonical_host_path(value, default_root=None):

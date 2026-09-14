@@ -186,9 +186,8 @@ func TestApplyLocalFSPathsForBoundWorkSkipsGlobalScan(t *testing.T) {
 	if scans != 0 {
 		t.Fatalf("bound Work scanned %d global sources", scans)
 	}
-	sources, ok := body["local_fs_sources"].([]map[string]any)
-	if !ok || len(sources) != 1 || sources[0]["source_id"] != "local-workspace:"+grant.WorkspaceID {
-		t.Fatalf("sources=%T %v", body["local_fs_sources"], body["local_fs_sources"])
+	if _, exists := body["local_fs_sources"]; exists {
+		t.Fatalf("workspace must not be represented as local_fs_sources: %#v", body["local_fs_sources"])
 	}
 	snapshot, err := applyWorkspaceRequestContext(request.Context(), db.DB, "u1", body)
 	if err != nil || snapshot == nil {
@@ -196,6 +195,10 @@ func TestApplyLocalFSPathsForBoundWorkSkipsGlobalScan(t *testing.T) {
 	}
 	if body["user_query"] != "read notes" || !strings.Contains(body["query"].(string), root) {
 		t.Fatalf("body=%v", body)
+	}
+	workspace, ok := body["workspace_context"].(*localworkspace.ContextSnapshot)
+	if !ok || workspace.Root != root || workspace.WorkspaceID != grant.WorkspaceID {
+		t.Fatalf("workspace_context=%T %#v", body["workspace_context"], body["workspace_context"])
 	}
 }
 

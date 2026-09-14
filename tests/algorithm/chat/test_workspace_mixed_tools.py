@@ -3,7 +3,7 @@ import lazyllm
 
 from lazymind.chat.engine.subagent.context import SubAgentContext
 from lazymind.chat.engine.subagent.tools import save_artifacts
-from lazymind.chat.engine.tools.workspace_context import WorkspacePermissionContext
+from lazymind.chat.engine.tools.workspace_context import ToolResolutionContext, WorkspacePermissionContext
 
 
 def artifact_call(source):
@@ -22,8 +22,9 @@ def artifact_runtime(workspace_runtime, tmp_path, monkeypatch):
     lazyllm.globals['subagent_ctx'] = lazyllm.globals.get('subagent_ctx')
     monkeypatch.setitem(lazyllm.globals, 'subagent_ctx', context)
     middleware, core, config = workspace_runtime(extra_tools=[save_artifacts])
-    middleware._workspace_permission = WorkspacePermissionContext.from_config(
-        {**config, '_subagent_workspace': str(task)}, trusted_local=True)
+    tool_context = {**config, '_subagent_workspace': str(task)}
+    middleware._workspace_permission = WorkspacePermissionContext.from_config(tool_context, trusted_local=True)
+    middleware._tool_context = ToolResolutionContext.from_config(tool_context)
     return middleware, core, task, emitted
 
 

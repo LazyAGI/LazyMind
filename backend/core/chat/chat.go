@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"lazymind/core/localworkspace"
 	"lazymind/core/modelconfig"
 )
 
@@ -53,14 +54,15 @@ type DatasetFilters struct {
 }
 
 type LazyChatRequest struct {
-	Message         ChatMessageOptions         `json:"message"`
-	Conversation    ChatConversationOptions    `json:"conversation"`
-	Retrieval       ChatRetrievalOptions       `json:"retrieval,omitempty"`
-	Runtime         ChatRuntimeOptions         `json:"runtime,omitempty"`
-	Personalization ChatPersonalizationOptions `json:"personalization,omitempty"`
-	Agent           ChatAgentOptions           `json:"agent,omitempty"`
-	Workflow        ChatWorkflowOptions        `json:"workflow,omitempty"`
-	ModelContext    map[string]any             `json:"model_context,omitempty"`
+	Message          ChatMessageOptions              `json:"message"`
+	Conversation     ChatConversationOptions         `json:"conversation"`
+	Retrieval        ChatRetrievalOptions            `json:"retrieval,omitempty"`
+	Runtime          ChatRuntimeOptions              `json:"runtime,omitempty"`
+	Personalization  ChatPersonalizationOptions      `json:"personalization,omitempty"`
+	Agent            ChatAgentOptions                `json:"agent,omitempty"`
+	Workflow         ChatWorkflowOptions             `json:"workflow,omitempty"`
+	ModelContext     map[string]any                  `json:"model_context,omitempty"`
+	WorkspaceContext *localworkspace.ContextSnapshot `json:"workspace_context,omitempty"`
 
 	ExplicitResources ExplicitResourceBindings `json:"explicit_resource_bindings,omitempty"`
 }
@@ -455,6 +457,7 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 		req.Retrieval.Dataset = strings.TrimSpace(dataset)
 	}
 	req.Retrieval.LocalFSSources = anySlice(body["local_fs_sources"])
+	req.WorkspaceContext = localworkspace.SnapshotFromMetadata(body["workspace_context"])
 	req.Agent.DisabledTools = stringSlice(body["disabled_tools"])
 	req.Agent.AvailableSkills = stringSlice(body["available_skills"])
 	if useMemory, ok := body["use_memory"].(bool); ok {

@@ -537,6 +537,7 @@ def _build_subagent_plan(
     resume: bool = False,
     llm_config: Optional[Dict[str, Any]] = None,
     workspace_permission=None,
+    tool_context=None,
 ) -> AgentRunPlan:
     builder = PromptBuilder.for_role(AgentRole.SUBAGENT)
     add_standard_system_sections(
@@ -764,6 +765,7 @@ def _build_subagent_plan(
         force_summarize_context=ctx.objective,
         execution_options=AgentExecutionOptions(
             workspace_permission=workspace_permission,
+            tool_context=tool_context,
             skills=inherited_skills or None,
             fs=FS if inherited_skills else None,
             skills_dir=skills_dir,
@@ -1167,8 +1169,14 @@ async def run_subagent_stream(
             ),
             resume=resume,
             llm_config=model_config,
-            workspace_permission=WorkspacePermissionContext.from_config(
-                agentic_config, trusted_local=bool(_cfg['trusted_local_mode'])),
+            workspace_permission=WorkspacePermissionContext.from_snapshot(
+                agentic_config.get('_core_workspace_context'),
+                user_id=agentic_config.get('user_id'),
+                conversation_id=agentic_config.get('conversation_id'),
+                execution=agentic_config.get('_workspace_execution'),
+                trusted_local=bool(_cfg['trusted_local_mode']),
+            ),
+            tool_context=agentic_config,
         )
 
         step_seq = db.max_step_seq(task_id) + 1 if resume else 0

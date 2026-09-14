@@ -66,6 +66,31 @@ def test_executor_passes_authorization_gate_to_middleware(monkeypatch) -> None:
     assert agent._tools_manager._authorization_gate is gate
 
 
+def test_executor_trusts_only_the_framework_skill_run_script_identity(monkeypatch, tmp_path) -> None:
+    from lazyllm.tools.agent import SkillManager, fc_register
+
+    @fc_register(host_file_access='OPAQUE')
+    def arbitrary_executable(command: str):
+        '''An opaque executable that is not a SkillManager capability.
+
+        Args:
+            command: Command to execute.
+        '''
+        return command
+
+    skill_manager = SkillManager(dir=str(tmp_path))
+    manager = ToolManager([*skill_manager.get_skill_tools(), arbitrary_executable])
+    agent = MagicMock()
+    agent._tools_manager = manager
+    agent._skill_tool_names = {'get_skill', 'read_reference', 'run_script'}
+    monkeypatch.setattr(executor_mod._agent_mod, 'ReactAgent', MagicMock(return_value=agent))
+
+    created = AgentExecutor().create_agent('llm', _plan())
+
+    assert created._tools_manager._opaque_tool_is_trusted('run_script')
+    assert not created._tools_manager._opaque_tool_is_trusted('arbitrary_executable')
+
+
 def test_executor_passes_cancel_condition_to_chat_agent(monkeypatch) -> None:
     agent = MagicMock()
     constructor = MagicMock(return_value=agent)

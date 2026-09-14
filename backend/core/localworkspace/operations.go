@@ -471,7 +471,7 @@ func resolveOperation(ctx context.Context, db *gorm.DB, req OperationRequest, ru
 		return nil, Error("selection_forbidden", 403, "forbidden")
 	}
 	resolved := *runSnapshot
-	resolved.Root, resolved.DirectoryIdentity, resolved.Sources = live.Root, live.DirectoryIdentity, live.Sources
+	resolved.Root, resolved.DirectoryIdentity = live.Root, live.DirectoryIdentity
 	return &resolved, nil
 }
 
@@ -952,13 +952,12 @@ func cleanOperationSlot(ctx context.Context, store state.Store, conversation str
 }
 
 func discoverOperation(ctx context.Context, root *os.Root, name string, info os.FileInfo, req OperationRequest, mode string) (OperationResult, error) {
-	sourceID := "local-workspace:" + req.WorkspaceID
 	entry := func(relative string, info os.FileInfo) map[string]any {
 		kind := "file"
 		if info.IsDir() {
 			kind = "directory"
 		}
-		return map[string]any{"name": info.Name(), "path": relative, "type": kind, "source_id": sourceID, "size": info.Size(), "mtime": info.ModTime().UTC().Format(time.RFC3339)}
+		return map[string]any{"name": info.Name(), "path": relative, "type": kind, "size": info.Size(), "mtime": info.ModTime().UTC().Format(time.RFC3339)}
 	}
 	if req.Operation == OperationInfo {
 		return OperationResult{Data: entry(req.Path, info)}, nil
@@ -1079,7 +1078,7 @@ func discoverOperation(ctx context.Context, root *os.Root, name string, info os.
 			}
 			for line, text := range strings.Split(string(content), "\n") {
 				if regex.MatchString(text) {
-					matches = append(matches, map[string]any{"file": relativePath, "path": relativePath, "line": line + 1, "content": string([]rune(text)[:min(len([]rune(text)), 500)]), "source_id": sourceID})
+					matches = append(matches, map[string]any{"file": relativePath, "path": relativePath, "line": line + 1, "content": string([]rune(text)[:min(len([]rune(text)), 500)])})
 				}
 				if len(matches) >= limit {
 					break
@@ -1095,7 +1094,7 @@ func discoverOperation(ctx context.Context, root *os.Root, name string, info os.
 	if req.Operation == OperationList {
 		key, count = "entries", "entry_count"
 	}
-	return OperationResult{Data: map[string]any{key: matches, count: len(matches), "source_id": sourceID, "path": req.Path, "pattern": req.Pattern, "max_entries": limit, "truncated": len(matches) >= limit || scanned > 1000 || totalBytes > maxOperationBytes, "skipped": skipped}}, nil
+	return OperationResult{Data: map[string]any{key: matches, count: len(matches), "path": req.Path, "pattern": req.Pattern, "max_entries": limit, "truncated": len(matches) >= limit || scanned > 1000 || totalBytes > maxOperationBytes, "skipped": skipped}}, nil
 }
 
 // A complete ** segment consumes zero or more directories. Other segments use

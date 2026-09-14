@@ -26,6 +26,80 @@ def test_external_read_uses_core_approval_without_custom_gate(workspace_runtime,
     assert [action for action, _ in core.events] == ['prepare', 'approve', 'claim', 'complete']
 
 
+@pytest.mark.parametrize('mode,method,arguments,asks', [
+    ('always_ask', 'read', {'filepath': 'notes.txt'}, False),
+    ('always_ask', 'create', {'filepath': 'created.txt', 'content': 'x'}, True),
+    ('ask_as_needed', 'create', {'filepath': 'created.txt', 'content': 'x'}, False),
+    ('ask_as_needed', 'delete', {'filepath': 'notes.txt'}, True),
+    ('allow_all', 'delete', {'filepath': 'notes.txt'}, False),
+])
+def test_algorithm_snapshot_decides_workspace_policy_before_core(
+        workspace_runtime, tmp_path, mode, method, arguments, asks):
+    root = tmp_path / 'workspace'
+    root.mkdir()
+    (root / 'notes.txt').write_text('notes')
+    middleware, core, _ = workspace_runtime(root, permission_mode=mode)
+    if method == 'delete':
+        assert middleware.execute_with_records(call('read', filepath='notes.txt')).results[0]['ok']
+        core.events.clear()
+
+    result = middleware.execute_with_records(call(method, **arguments))
+
+    assert result.results[0]['ok'], result.results
+    assert bool(core.events) is asks
+
+
+@pytest.mark.parametrize('mode,asks', [
+    ('always_ask', True), ('ask_as_needed', True), ('allow_all', False),
+])
+def test_algorithm_snapshot_treats_sensitive_reads_by_mode(workspace_runtime, tmp_path, mode, asks):
+    root = tmp_path / 'workspace'
+    root.mkdir()
+    (root / '.env').write_text('SECRET=value')
+    middleware, core, _ = workspace_runtime(root, permission_mode=mode)
+
+    result = middleware.execute_with_records(call('read', filepath='.env'))
+
+    assert result.results[0]['ok'], result.results
+    assert bool(core.events) is asks
+
+
+def test_algorithm_policy_denies_git_metadata_before_core(workspace_runtime, tmp_path):
+    root = tmp_path / 'workspace'
+    (root / '.git').mkdir(parents=True)
+    (root / '.git' / 'config').write_text('private')
+    middleware, core, _ = workspace_runtime(root, permission_mode='allow_all')
+
+    result = middleware.execute_with_records(call('read', filepath='.git/config'))
+
+    assert not result.results[0]['ok']
+    assert core.events == []
+
+
+@pytest.mark.parametrize('mode', ['always_ask', 'ask_as_needed', 'allow_all'])
+@pytest.mark.parametrize('method', ['create', 'delete'])
+def test_algorithm_policy_denies_sensitive_mutations_before_core(
+        workspace_runtime, tmp_path, mode, method):
+    root = tmp_path / 'workspace'
+    root.mkdir()
+    target = root / '.env'
+    arguments = {'filepath': '.env'}
+    if method == 'create':
+        arguments['content'] = 'SECRET=new'
+    else:
+        target.write_text('SECRET=old')
+    middleware, core, _ = workspace_runtime(root, permission_mode=mode)
+
+    result = middleware.execute_with_records(call(method, **arguments))
+
+    assert not result.results[0]['ok']
+    assert core.events == []
+    if method == 'delete':
+        assert target.read_text() == 'SECRET=old'
+    else:
+        assert not target.exists()
+
+
 @pytest.mark.parametrize('mode', ['always_ask', 'ask_as_needed', 'allow_all'])
 def test_external_write_waits_for_decision_and_checks_version(workspace_runtime, tmp_path, mode):
     target = tmp_path / 'outside.txt'
@@ -108,7 +182,7 @@ def test_prepared_calls_keep_ids_order_and_sequential_versions(workspace_runtime
     assert [record.index for record in batch.records] == [0, 1, 2, 3]
     assert all(record.disposition is ToolExecutionDisposition.EXECUTED for record in batch.records)
     payloads = [operation['payload'] for operation in core.operations.values()]
-    assert len({payload['call_id'] for payload in payloads}) == 3
+    assert len({payload['call_id'] for payload in payloads}) == 2
     assert all(payload['path'] == str(target.resolve()) for payload in payloads)
     assert payloads[1]['depends_on'] in core.operations
     requests = len(core.events)
@@ -201,14 +275,14 @@ def test_failed_file_writes_are_not_exempt_from_failure_budget(workspace_runtime
     assert len(core.events) == requests
 
 
-def test_completed_claim_receipt_never_becomes_empty_success(workspace_runtime, tmp_path):
+def test_completed_claim_receipt_never_becomes_empty_success_for_asked_path(workspace_runtime, tmp_path):
     middleware, core, _ = workspace_runtime()
-    target = tmp_path / 'workspace' / 'empty.txt'
+    target = tmp_path / 'outside-empty.txt'
     target.write_text('')
-    first = middleware.execute_with_records(call('read', filepath='empty.txt'))
+    first = middleware.execute_with_records(call('read', filepath=str(target)))
     assert first.results[0]['ok'] and first.results[0]['value']['content'] == ''
     core.on_claim = lambda operation: operation.update(status='completed')
-    result = middleware.execute_with_records(call('read', filepath='empty.txt'))
+    result = middleware.execute_with_records(call('read', filepath=str(target)))
     assert not result.results[0]['ok']
 
 
@@ -257,8 +331,105 @@ def test_run_permission_is_immutable_and_not_read_from_later_globals(workspace_r
     assert result.results[0]['ok'], result.results
     payload = next(iter(core.operations.values()))['payload']
     assert payload['workspace_id'] == 'workspace' and payload['run_id'] == 'run'
-    with pytest.raises(TypeError):
-        captured.config['workspace_context']['permission_mode'] = 'allow_all'
+    assert not hasattr(captured, 'config')
+    with pytest.raises((AttributeError, TypeError)):
+        captured.permission_mode = 'allow_all'
+
+
+def test_permission_snapshot_is_typed_and_does_not_read_local_source_protocol(tmp_path):
+    from lazymind.chat.engine.tools.workspace_context import WorkspacePermissionContext
+
+    snapshot = WorkspacePermissionContext.from_snapshot(
+        {
+            'workspace_id': 'workspace',
+            'root': str(tmp_path),
+            'directory_identity': 'directory',
+            'workspace_version': 3,
+            'permission_mode': 'always_ask',
+            'permission_version': 7,
+        },
+        user_id='owner',
+        conversation_id='conversation',
+        execution={'history_id': 'history', 'run_id': 'run'},
+    )
+
+    assert snapshot.workspace_id == 'workspace'
+    assert snapshot.root == str(tmp_path.resolve())
+    assert snapshot.workspace_version == 3
+    assert snapshot.permission_mode == 'always_ask'
+    assert snapshot.permission_version == 7
+    assert snapshot.execution == {'history_id': 'history', 'run_id': 'run'}
+    assert not hasattr(snapshot, 'config')
+
+
+def test_uncalled_undeclared_tool_does_not_block_batch_but_invocation_fails_closed(workspace_runtime):
+    from lazyllm.tools.agent import fc_register
+
+    effects = []
+
+    @fc_register(host_file_access='NONE')
+    def safe(value: str):
+        '''Record a safe value.
+
+        Args:
+            value: Value to record.
+        '''
+        effects.append(('safe', value))
+        return value
+
+    def undeclared(value: str):
+        '''An undeclared replacement.
+
+        Args:
+            value: Value to record.
+        '''
+        effects.append(('undeclared', value))
+        return value
+
+    middleware, _, _ = workspace_runtime(extra_tools=[safe, undeclared])
+    allowed = middleware.execute_with_records({
+        'id': 'safe', 'function': {'name': 'safe', 'arguments': {'value': 'ok'}},
+    })
+    blocked = middleware.execute_with_records({
+        'id': 'undeclared', 'function': {'name': 'undeclared', 'arguments': {'value': 'no'}},
+    })
+
+    assert allowed.results[0]['ok']
+    assert not blocked.results[0]['ok']
+    assert effects == [('safe', 'ok')]
+
+
+def test_opaque_policy_uses_explicit_tool_identity_allowlist(workspace_runtime):
+    from lazyllm.tools.agent import fc_register
+
+    effects = []
+
+    @fc_register(host_file_access='OPAQUE')
+    def framework_skill_script(value: str):
+        '''Stand in for the framework-owned SkillManager tool.
+
+        Args:
+            value: Value to record.
+        '''
+        effects.append(value)
+        return value
+
+    denied, _, _ = workspace_runtime(extra_tools=[framework_skill_script], trusted_local=False)
+    denied_result = denied.execute_with_records({
+        'id': 'denied', 'function': {'name': 'framework_skill_script', 'arguments': {'value': 'no'}},
+    })
+    allowed, _, _ = workspace_runtime(
+        extra_tools=[framework_skill_script],
+        trusted_local=False,
+        trusted_opaque_tool_names={'framework_skill_script'},
+    )
+    allowed_result = allowed.execute_with_records({
+        'id': 'allowed', 'function': {'name': 'framework_skill_script', 'arguments': {'value': 'yes'}},
+    })
+
+    assert not denied_result.results[0]['ok']
+    assert allowed_result.results[0]['ok']
+    assert effects == ['yes']
 
 
 def test_one_batch_request_and_original_tool_binding(workspace_runtime):

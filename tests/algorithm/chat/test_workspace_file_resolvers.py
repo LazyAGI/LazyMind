@@ -104,16 +104,18 @@ def test_canonical_image_path_is_not_reinterpreted_as_upload(host_root, monkeypa
     assert images.resolve_tool_image_path(target) == target
 
 
-def test_permission_snapshot_does_not_use_mutable_subagent_workspace(tmp_path, monkeypatch):
+def test_tool_resolution_snapshot_does_not_use_mutable_subagent_workspace(tmp_path, monkeypatch):
     from lazymind.chat.engine.subagent import context as contexts
-    from lazymind.chat.engine.tools.workspace_context import WorkspacePermissionContext, workspace_permission_scope
+    from lazymind.chat.engine.tools.workspace_context import (
+        ToolResolutionContext, tool_resolution_scope,
+    )
 
     original, changed = tmp_path / 'captured', tmp_path / 'changed'
     original.mkdir()
     changed.mkdir()
     monkeypatch.setattr(contexts, 'get_context', lambda: SimpleNamespace(workspace_path=str(changed)))
-    request = WorkspacePermissionContext.from_config({'_subagent_workspace': str(original)})
-    with workspace_permission_scope(request):
+    request = ToolResolutionContext.from_config({'_subagent_workspace': str(original)})
+    with tool_resolution_scope(request):
         assert paths.managed_path(str(original / 'asset.png'))
         assert not paths.managed_path(str(changed / 'asset.png'))
         result = artifacts.resolve_artifact_files({'artifacts': [
@@ -175,7 +177,7 @@ def test_writer_output_store_rejects_existing_descendant_escape(host_root):
 def test_global_upload_and_writer_parents_do_not_exempt_other_users(tmp_path, monkeypatch):
     import tempfile
     from pathlib import Path
-    from lazymind.chat.engine.tools.workspace_context import WorkspacePermissionContext, workspace_permission_scope
+    from lazymind.chat.engine.tools.workspace_context import ToolResolutionContext, tool_resolution_scope
     from lazymind.chat.service.utils import static_file_url
 
     uploads = tmp_path / 'uploads'
@@ -185,8 +187,8 @@ def test_global_upload_and_writer_parents_do_not_exempt_other_users(tmp_path, mo
     own.write_text('attached')
     foreign.write_text('other user secret')
     monkeypatch.setattr(static_file_url, '_upload_root', lambda: str(uploads))
-    request = WorkspacePermissionContext.from_config({'files': [str(own)]})
-    with workspace_permission_scope(request):
+    request = ToolResolutionContext.from_config({'files': [str(own)]})
+    with tool_resolution_scope(request):
         assert paths.managed_path(str(own))
         assert not paths.managed_path(str(foreign))
         assert not paths.managed_path(str(Path(tempfile.gettempdir()) / 'lazymind-writer-tools' / 'foreign' / 'secret.txt'))
@@ -259,10 +261,10 @@ def test_writer_inputs_are_private_copies_of_guarded_reads(tmp_path):
 
 def test_writer_generated_temp_root_belongs_to_captured_task(tmp_path):
     from lazymind.chat.engine.tools import writer
-    from lazymind.chat.engine.tools.workspace_context import WorkspacePermissionContext, workspace_permission_scope
+    from lazymind.chat.engine.tools.workspace_context import ToolResolutionContext, tool_resolution_scope
 
-    request = WorkspacePermissionContext.from_config({'_subagent_workspace': str(tmp_path)})
-    with workspace_permission_scope(request):
+    request = ToolResolutionContext.from_config({'_subagent_workspace': str(tmp_path)})
+    with tool_resolution_scope(request):
         directory = writer._temp_root()
         assert directory.is_relative_to(tmp_path)
         assert paths.managed_path(str(directory / 'draft.json'))

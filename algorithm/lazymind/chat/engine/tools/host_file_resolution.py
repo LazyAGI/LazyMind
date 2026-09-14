@@ -14,7 +14,7 @@ from urllib.parse import unquote, urlsplit
 from lazyllm.tools.agent import HostFileIntent, HostFileResolution, ToolExecutionError
 
 from lazymind.chat.engine.tools.workspace_context import (
-    canonical_host_path, get_workspace_permission_context,
+    canonical_host_path, get_workspace_permission_context, get_tool_resolution_context,
 )
 
 
@@ -32,8 +32,9 @@ def managed_path(path: str) -> bool:
 
     roots = []
     request = get_workspace_permission_context()
-    config = request.config if request else {}
-    if request is not None:
+    resolution = get_tool_resolution_context()
+    config = resolution.config if resolution else {}
+    if resolution is not None:
         task_workspace = config.get('_subagent_workspace')
     else:
         context = get_context()
@@ -118,8 +119,8 @@ class FileResolution:
         from lazymind.chat.service.utils.static_file_url import local_path_from_static_file_url
 
         raw = str(value or '').strip()
-        request = get_workspace_permission_context()
-        citation = (request.config.get('citation_state') or {}) if request else _image_url_registry()
+        resolution = get_tool_resolution_context()
+        citation = (resolution.config.get('citation_state') or {}) if resolution else _image_url_registry()
         raw = str((citation.get('_image_url_registry') or {}).get(raw) or raw)
         # Reject malformed managed locators before the permissive legacy resolver can
         # reinterpret them as ordinary local paths (or HTTP references).
@@ -191,7 +192,8 @@ def stage_input_file(path: str) -> str:
     guard = _host_guard()
     if request is None or not request.bound and guard is None:
         return path
-    config = request.config
+    resolution = get_tool_resolution_context()
+    config = resolution.config if resolution else {}
     base = config.get('_writer_workspace') or config.get('_subagent_workspace')
     if not base and config.get('user_id') and config.get('conversation_id'):
         from lazymind.chat.engine.tools.local_file.workspace import chat_agent_workspace

@@ -230,9 +230,9 @@ def test_workspace_context_uses_private_core_snapshot(monkeypatch):
 def test_workspace_binding_preserves_parent_private_permission_snapshot(monkeypatch):
     monkeypatch.setattr(local_fs_mod.lazyllm, 'globals', {'agentic_config': {
         'user_id': 'u', 'conversation_id': 'c',
-        'local_fs_sources': [_source('local-workspace:w', ['/bound'], ['txt'])],
         'parent_agentic_config': {'_core_workspace_context': {
-            'workspace_id': 'w', 'permission_mode': 'always_ask', 'permission_version': 7,
+            'workspace_id': 'w', 'root': '/bound', 'workspace_version': 1,
+            'permission_mode': 'always_ask', 'permission_version': 7,
         }},
     }})
     assert LocalFileToolkit._workspace_context()['permission_version'] == 7

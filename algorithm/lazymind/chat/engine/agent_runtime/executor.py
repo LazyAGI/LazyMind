@@ -166,6 +166,10 @@ class AgentExecutor:
             prompt=plan.prompt.system_prompt,
             **kwargs,
         )
+        trusted_opaque_tools = tuple(
+            tool for name in (getattr(agent, '_skill_tool_names', set()) & {'run_script'})
+            if (tool := agent._tools_manager.tools_info.get(name)) is not None
+        )
         agent._tools_manager = ToolExecutionMiddleware(
             CitationResultMiddleware(agent._tools_manager),
             failure_policy=FailureRetryPolicy(options.tool_failure_limits),
@@ -175,6 +179,8 @@ class AgentExecutor:
             notice_buffer=notice_buffer,
             authorization_gate=options.authorization_gate,
             workspace_permission=options.workspace_permission,
+            tool_context=options.tool_context,
+            trusted_opaque_tools=trusted_opaque_tools,
         )
         agent._agent_lab_run_id = run_id
         agent._runtime_llm = llm

@@ -14,6 +14,7 @@ import os
 import re
 import smtplib
 import socket
+import stat
 import ssl
 import time
 import uuid
@@ -450,7 +451,13 @@ def _cached_incoming_attachment(cred: dict[str, str], message_id: str, wanted: s
             candidates.append(name)
     for name in candidates:
         path = os.path.join(folder, name)
-        if not os.path.isfile(path):
+        try:
+            info = os.lstat(path)
+        except FileNotFoundError:
+            continue
+        if stat.S_ISLNK(info.st_mode):
+            _fail('workspace path is not a safe attachment file')
+        if not stat.S_ISREG(info.st_mode):
             continue
         display = filename or name
         if wanted and name.startswith(f'{wanted}-'):
@@ -467,9 +474,54 @@ def _incoming_attachment_path(cred: dict[str, str], message_id: str, filename: s
     ).hexdigest()[:12]
     message_key = hashlib.sha256(str(message_id or '').encode()).hexdigest()[:12]
     safe_name = os.path.basename(str(filename or '').strip()) or 'attachment.bin'
-    folder = os.path.join(_mail_workspace(), 'mail_attachments', mailbox_key, message_key)
-    os.makedirs(folder, exist_ok=True)
-    return os.path.join(folder, safe_name)
+    workspace = _mail_workspace()
+    if os.path.islink(workspace):
+        _fail('workspace path is not a safe attachment directory')
+    folder = os.path.join(workspace, 'mail_attachments', mailbox_key, message_key)
+    _ensure_attachment_directory(folder)
+    path = os.path.join(folder, safe_name)
+    try:
+        info = os.lstat(path)
+    except FileNotFoundError:
+        return path
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+        _fail('workspace path is not a safe attachment file')
+    return path
+
+
+def _ensure_attachment_directory(path: str) -> None:
+    """Create an internal attachment directory without following symlinks."""
+    path = os.path.abspath(path)
+    parent = os.path.dirname(path)
+    if parent != path:
+        _ensure_attachment_directory(parent)
+    try:
+        info = os.lstat(path)
+    except FileNotFoundError:
+        try:
+            os.mkdir(path, 0o700)
+        except FileExistsError:
+            pass
+        info = os.lstat(path)
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+        _fail('workspace path is not a safe attachment directory')
+
+
+def _write_new_attachment(path: str, content: bytes) -> None:
+    """Create one attachment atomically and refuse symlink races."""
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, 'O_NOFOLLOW', 0)
+    try:
+        descriptor = os.open(path, flags, 0o600)
+    except FileExistsError:
+        try:
+            info = os.lstat(path)
+        except FileNotFoundError:
+            return _write_new_attachment(path, content)
+        if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+            _fail('workspace path is not a safe attachment file')
+        return
+    with os.fdopen(descriptor, 'wb') as handle:
+        handle.write(content)
 
 
 def _attachment_ext(filename: str) -> str:
@@ -1926,14 +1978,10 @@ class MailToolkit:
                     aid = str(part.get('attachment_id') or '').strip()
                     stored = f'{aid}-{part_name}' if aid else part_name
                     path = _incoming_attachment_path(cred, mid, stored)
-                    if os.path.isfile(path):
-                        continue
-                    with open(path, 'wb') as handle:
-                        handle.write(raw)
+                    _write_new_attachment(path, bytes(raw))
                 target = _incoming_attachment_path(cred, mid, save_name)
-                if not os.path.isfile(target) and isinstance(payload, (bytes, bytearray)):
-                    with open(target, 'wb') as handle:
-                        handle.write(payload)
+                if isinstance(payload, (bytes, bytearray)):
+                    _write_new_attachment(target, bytes(payload))
                 if not os.path.isfile(target):
                     _fail('Failed to read the email attachment.')
             ext = _attachment_ext(filename)

@@ -61,7 +61,7 @@ func applyLocalFSPathsForChat(ctx context.Context, r *http.Request, db *gorm.DB,
 		return err
 	}
 	if snapshot != nil {
-		reqBody["local_fs_sources"] = snapshot.Sources
+		delete(reqBody, "local_fs_sources")
 		return nil
 	}
 
@@ -112,7 +112,8 @@ func applyWorkspaceRequestContext(ctx context.Context, db *gorm.DB, userID strin
 	if err != nil || snapshot == nil {
 		return snapshot, err
 	}
-	body["local_fs_sources"] = snapshot.Sources
+	delete(body, "local_fs_sources")
+	body["workspace_context"] = snapshot
 	query, _ := body["query"].(string)
 	body["query"] = localworkspace.BuildRequestQuery(query, snapshot)
 	return snapshot, nil

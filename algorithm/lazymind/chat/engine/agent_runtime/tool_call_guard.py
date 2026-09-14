@@ -5,6 +5,7 @@ import json
 import time
 import uuid
 from collections import Counter
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any
 
@@ -18,8 +19,10 @@ from lazyllm.tools.agent import (
 )
 from lazyllm.tools.agent.toolError import tool_failure
 from .workspace_authorization import WorkspaceAuthorization
+from .workspace_policy import WorkspacePolicyDecision, decide_host_file_access
 from lazymind.chat.engine.tools.workspace_context import (
-    WorkspacePermissionContext, workspace_permission_scope, thaw,
+    ToolResolutionContext, WorkspacePermissionContext,
+    tool_resolution_scope, workspace_permission_scope, thaw,
 )
 from .cancellation import UserCancelledError
 
@@ -322,7 +325,8 @@ class ToolExecutionMiddleware:
                  repeat_monitor: ExactRepeatMonitor | None = None,
                  notice_buffer: OneShotNoticeBuffer | None = None,
                  authorization_gate: Any = None,
-                 workspace_permission=None):
+                 workspace_permission=None, tool_context=None,
+                 trusted_opaque_tools=()):
         self._manager = manager
         self._failure_policy = failure_policy or FailureRetryPolicy()
         self._expanded_round_limit = expanded_round_limit
@@ -332,10 +336,25 @@ class ToolExecutionMiddleware:
         self._authorization_gate = authorization_gate
         # Capture once at run construction; no workspace authorization reads live globals later.
         self._workspace_permission = workspace_permission or WorkspacePermissionContext.from_config({})
+        self._tool_context = ToolResolutionContext.from_config(tool_context)
+        self._trusted_opaque_tool_ids = frozenset(id(tool) for tool in trusted_opaque_tools)
         self._workspace_versions: dict[str, str] = {}
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._manager, name)
+
+    def _opaque_tool_is_trusted(self, tool_name: str) -> bool:
+        tool = self.tools_info.get(tool_name)
+        return tool is not None and id(tool) in self._trusted_opaque_tool_ids
+
+    @contextmanager
+    def _execution_scope(self, permission, coordinator, prepared):
+        execution = (
+            coordinator.execution_context(prepared, self._workspace_versions)
+            if coordinator is not None else workspace_permission_scope(permission)
+        )
+        with tool_resolution_scope(self._tool_context), execution:
+            yield
 
     def _expand_round_limit(self, tool_name: str) -> None:
         if not _requires_expanded_budget(tool_name):
@@ -371,7 +390,7 @@ class ToolExecutionMiddleware:
                 coordinator = WorkspaceAuthorization(permission, self._cancel_check)
             except Exception:
                 initialization_failed = True
-        with workspace_permission_scope(permission):
+        with tool_resolution_scope(self._tool_context), workspace_permission_scope(permission):
             prepared_batch = self._manager.prepare_tool_calls(
                 tools, allowed_tool_names=allowed_tool_names, working_directory=permission.root or None)
 
@@ -386,6 +405,7 @@ class ToolExecutionMiddleware:
             decision = self._failure_policy.decide(prepared_calls, workspace_indices)
             blocked = dict(decision.blocked_results)
             pending = list(decision.pending_indices)
+            approval_indices = set()
             authorization_reasons = {}
             authorization_unavailable = initialization_failed and bool(workspace_indices)
             if len(workspace_indices) > 16:
@@ -410,18 +430,29 @@ class ToolExecutionMiddleware:
                     if workspace_active:
                         if initialization_failed or item.host_file_access is HostFileAccess.UNDECLARED:
                             outcome = 'deny'
-                        elif item.host_file_access is HostFileAccess.OPAQUE and not permission.trusted_local:
+                        elif (item.host_file_access is HostFileAccess.OPAQUE
+                              and not permission.trusted_local
+                              and not self._opaque_tool_is_trusted(item.tool_name)):
                             outcome = 'deny'
+                        elif item.host_file_access is HostFileAccess.DECLARED and item.host_files:
+                            policy = decide_host_file_access(permission, item.host_files)
+                            if policy is WorkspacePolicyDecision.DENY:
+                                outcome = 'deny'
                     if outcome not in (True, 'allow', 'allowed'):
                         unavailable = outcome not in (False, 'deny', 'denied', 'rejected')
                         authorization_unavailable |= unavailable and workspace_active
                         block(index, unavailable)
                     elif (workspace_active and item.host_file_access is HostFileAccess.DECLARED
-                          and not authorization_unavailable):
+                          and item.host_files and not authorization_unavailable):
+                        require_approval = policy is WorkspacePolicyDecision.ASK
+                        if require_approval:
+                            approval_indices.add(index)
                         if item.tool_name.startswith('LocalFileToolkit_'):
-                            coordinator.prepare(item, self._workspace_versions)
+                            coordinator.prepare(
+                                item, self._workspace_versions, require_approval=require_approval,
+                            )
                         else:
-                            coordinator.prepare_host(item)
+                            coordinator.prepare_host(item, require_approval=require_approval)
                 except UserCancelledError:
                     raise
                 except Exception:
@@ -433,7 +464,7 @@ class ToolExecutionMiddleware:
                 try:
                     coordinator.submit()
                     allowed = coordinator.wait()
-                    for index in workspace_indices.intersection(pending):
+                    for index in approval_indices.intersection(pending):
                         if index not in allowed:
                             block(index)
                 except UserCancelledError:
@@ -472,10 +503,7 @@ class ToolExecutionMiddleware:
             indices = select(prepared_batch)
             executed_batch = self._manager.execute_prepared(
                 prepared_batch, selected_indices=indices,
-                execution_context=(
-                    (lambda item: coordinator.execution_context(item, self._workspace_versions))
-                    if coordinator is not None else (lambda item: workspace_permission_scope(permission))
-                ),
+                execution_context=lambda item: self._execution_scope(permission, coordinator, item),
             )
         finally:
             if coordinator is not None:

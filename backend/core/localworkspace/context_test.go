@@ -1,6 +1,7 @@
 package localworkspace
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -22,26 +23,13 @@ func TestBuildRequestQueryKeepsOriginalAndAddsWorkspace(t *testing.T) {
 	}
 }
 
-func TestSnapshotUsesExistingLocalFSContract(t *testing.T) {
+func TestSnapshotDoesNotUseLocalFSSourceProtocol(t *testing.T) {
 	snapshot := snapshot(orm.LocalWorkspace{ID: "grant", CanonicalPath: "/tmp/project", Version: 2}, PermissionAllowAll, 4)
-	if len(snapshot.Sources) != 1 {
-		t.Fatalf("sources=%v", snapshot.Sources)
+	encoded, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatal(err)
 	}
-	source := snapshot.Sources[0]
-	if source["source_id"] != "local-workspace:grant" {
-		t.Fatalf("source=%v", source)
-	}
-	paths, ok := source["paths"].([]string)
-	if !ok || len(paths) != 1 || paths[0] != "/tmp/project" {
-		t.Fatalf("paths=%T %v", source["paths"], source["paths"])
-	}
-	exts, ok := source["file_extensions"].([]string)
-	if !ok || len(exts) == 0 {
-		t.Fatalf("extensions=%T %v", source["file_extensions"], source["file_extensions"])
-	}
-	for i, ext := range exts {
-		if strings.HasPrefix(ext, "*") || (i > 0 && exts[i-1] >= ext) {
-			t.Fatalf("extensions not sorted/plain: %v", exts)
-		}
+	if strings.Contains(string(encoded), "sources") || strings.Contains(string(encoded), "local-workspace:") {
+		t.Fatalf("workspace snapshot must not use the source protocol: %s", encoded)
 	}
 }

@@ -145,18 +145,22 @@ def test_guarded_writer_collects_from_staged_input_into_external_store(tmp_path)
     from pathlib import Path
     from lazymind.chat.engine.tools import writer
     from lazymind.chat.engine.tools.host_access_guard import host_access_scope
-    from lazymind.chat.engine.tools.workspace_context import WorkspacePermissionContext, workspace_permission_scope
+    from lazymind.chat.engine.tools.workspace_context import (
+        ToolResolutionContext, WorkspacePermissionContext,
+        tool_resolution_scope, workspace_permission_scope,
+    )
 
     task = tmp_path / 'task'
     task.mkdir()
     source = tmp_path / 'input.png'
     Image.new('RGB', (2, 2), 'blue').save(source)
     output = tmp_path / 'output'
-    permission = WorkspacePermissionContext.from_config({
-        '_subagent_workspace': str(task), 'workspace_context': {'workspace_id': 'workspace'},
-        'local_fs_sources': [{'source_id': 'local-workspace:workspace', 'paths': [str(task)]}],
+    config = {'_subagent_workspace': str(task)}
+    permission = WorkspacePermissionContext.from_snapshot({
+        'workspace_id': 'workspace', 'root': str(task), 'workspace_version': 1,
+        'permission_mode': 'always_ask', 'permission_version': 1,
     })
-    with workspace_permission_scope(permission):
+    with tool_resolution_scope(ToolResolutionContext.from_config(config)), workspace_permission_scope(permission):
         resolved = writer.resolve_writer_files({
             'writing_task_json': '{"task_id":"task","query":"image","task_type":"write"}',
             'input_resources_json': json.dumps([{'resource_type': 'image', 'uri': str(source)}]),

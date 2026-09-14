@@ -31,9 +31,10 @@ def main():
     lazyllm.globals['agentic_config'] = {
         'user_id': 'owner', 'conversation_id': context['conversation_id'],
         '_workspace_execution': {'history_id': 'history', 'run_id': 'run'},
-        'workspace_context': {'workspace_id': context['workspace_id'], 'permission_mode': 'allow_all'},
-        'local_fs_sources': [{'source_id': 'local-workspace:' + context['workspace_id'],
-                              'paths': [root], 'file_extensions': ['txt']}],
+        'workspace_context': {
+            'workspace_id': context['workspace_id'], 'root': root, 'workspace_version': 1,
+            'permission_mode': 'allow_all', 'permission_version': 1,
+        },
     }
     toolkit = LocalFileToolkit()
     @fc_register(host_file_access='DECLARED', host_file_resolver=lambda args: HostFileResolution(
@@ -48,7 +49,13 @@ def main():
             return file.read().decode()
 
     manager = ToolManager([toolkit, calculator, declared_read])
-    middleware = ToolExecutionMiddleware(manager, workspace_permission=WorkspacePermissionContext.from_config(lazyllm.globals['agentic_config'], trusted_local=True))
+    middleware = ToolExecutionMiddleware(
+        manager,
+        workspace_permission=WorkspacePermissionContext.from_config(
+            lazyllm.globals['agentic_config'], trusted_local=True,
+        ),
+        tool_context=lazyllm.globals['agentic_config'],
+    )
     ordinary_effects = []
     original = manager.tools_info['calculator'].apply
     def observed(*args, **kwargs):

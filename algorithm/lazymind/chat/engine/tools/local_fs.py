@@ -29,7 +29,8 @@ from typing import Any, Dict, List, Optional
 import lazyllm
 from lazyllm.tools.agent import ToolExecutionError, fc_register, HostFileIntent, HostFileResolution
 from .workspace_context import (
-    canonical_host_path, get_workspace_permission_context, get_local_access, thaw,
+    canonical_host_path, get_workspace_permission_context, get_local_access,
+    get_tool_resolution_context,
 )
 
 from lazymind.chat.engine.tools.text_edit import replace_exact_text_file
@@ -119,8 +120,8 @@ class LocalFileToolkit:
     __tool_input_adapters__ = dict.fromkeys(__public_apis__, _validate_local_arguments)
 
     def _get_scopes(self) -> List[LocalFSScope]:
-        context = get_workspace_permission_context()
-        config = thaw(context.config) if context is not None else (lazyllm.globals.get('agentic_config') or {})
+        resolution = get_tool_resolution_context()
+        config = resolution.config if resolution is not None else (lazyllm.globals.get('agentic_config') or {})
         sources = config.get('local_fs_sources') or []
         if not isinstance(sources, list):
             return []
@@ -153,22 +154,26 @@ class LocalFileToolkit:
                 context = cfg.get(key)
                 if isinstance(context, dict) and context.get('workspace_id'):
                     return context
-        for cfg in configs:
-            for source in cfg.get('local_fs_sources') or []:
-                source_id = str(source.get('source_id') or '') if isinstance(source, dict) else ''
-                if source_id.startswith('local-workspace:'):
-                    return {'workspace_id': source_id.removeprefix('local-workspace:')}
         return None
 
     @staticmethod
     def _workspace_binding() -> Optional[Dict[str, Any]]:
         context = get_workspace_permission_context()
-        config = thaw(context.config) if context is not None else (lazyllm.globals.get('agentic_config') or {})
+        if context is not None and context.bound:
+            return {
+                'workspace_id': context.workspace_id,
+                'root': context.root,
+                'workspace_version': context.workspace_version,
+                'permission_mode': context.permission_mode,
+                'permission_version': context.permission_version,
+            }
+        config = lazyllm.globals.get('agentic_config') or {}
         return LocalFileToolkit._workspace_binding_from_config(config)
 
     @staticmethod
     def _workspace_context() -> Optional[Dict[str, Any]]:
-        config = lazyllm.globals.get('agentic_config') or {}
+        resolution = get_tool_resolution_context()
+        config = resolution.config if resolution is not None else (lazyllm.globals.get('agentic_config') or {})
         context = LocalFileToolkit._workspace_binding() or {}
         workspace_id = str(context.get('workspace_id') or '').strip()
         user_id = str(config.get('user_id') or '').strip()
@@ -187,11 +192,8 @@ class LocalFileToolkit:
     def workspace_path_allowed(path: str, roots: Any) -> bool:
         if not os.path.isabs(path):
             return False
-        config = lazyllm.globals.get('agentic_config') or {}
-        controlled = [root for cfg in (config, config.get('parent_agentic_config')) if isinstance(cfg, dict)
-                      for source in cfg.get('local_fs_sources') or [] if isinstance(source, dict)
-                      and str(source.get('source_id') or '').startswith('local-workspace:')
-                      for root in source.get('paths') or [] if isinstance(root, str)]
+        context = get_workspace_permission_context()
+        controlled = [context.root] if context is not None and context.root else []
         resolved = os.path.realpath(path)
         try:
             return (not any(os.path.commonpath((os.path.realpath(root), resolved)) == os.path.realpath(root)

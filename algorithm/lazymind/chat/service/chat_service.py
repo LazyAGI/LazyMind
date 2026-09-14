@@ -1064,6 +1064,8 @@ async def _handle_chat_impl(
         'mail_mailbox_confirm': (runtime.mail_mailbox_confirm or '').strip(),
         'mail_mailbox_confirm_draft_id': (runtime.mail_mailbox_confirm_draft_id or '').strip(),
     }
+    if request.workspace_context is not None:
+        agentic_config['workspace_context'] = request.workspace_context.model_dump()
     # Inject per-conversation workflow flags from Go (resolved from conversations table).
     # enable_workflow=None means "not set"; default to True so behaviour is unchanged
     # for callers that do not yet pass the field.
@@ -1264,7 +1266,7 @@ async def _handle_chat_impl(
 
     disabled = set(agent.disabled_tools or [])
     workspace = chat_agent_workspace(user_id or '0', conversation_id)
-    bound_local_workspace = LocalFileToolkit._workspace_binding_from_config(agentic_config) is not None
+    bound_local_workspace = request.workspace_context is not None
     if sidechat_readonly:
         active_configs = build_sidechat_tool_configs(
             [cfg for cfg in [*DEFAULT_TOOLS, *(USER_ATTACHMENT_TOOL_CONFIGS if files_map else ())]
@@ -1737,8 +1739,14 @@ async def _handle_chat_impl(
         stop_tools=stop_tools,
         force_summarize_context=query,
         execution_options=AgentExecutionOptions(
-            workspace_permission=WorkspacePermissionContext.from_config(
-                agentic_config, trusted_local=bool(_cfg['trusted_local_mode'])),
+            workspace_permission=WorkspacePermissionContext.from_snapshot(
+                request.workspace_context,
+                user_id=user_id or '',
+                conversation_id=conversation_id,
+                execution=agentic_config['_workspace_execution'],
+                trusted_local=bool(_cfg['trusted_local_mode']),
+            ),
+            tool_context=agentic_config,
             skills=skill_config,
             enable_builtin_tools=False if sidechat_readonly else None,
             workspace=workspace,
