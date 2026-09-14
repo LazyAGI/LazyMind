@@ -8,7 +8,6 @@ import (
 	"regexp"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -151,6 +150,7 @@ func (s *Service) expandPreanalysisItem(ctx context.Context, owner, key string, 
 	prompt := fmt.Sprintf(`You extract learning subjects from a document passage.
 
 CAPABILITY: %s
+TASK: %s
 ALLOWED_LANGUAGES: %s
 ALLOWED_SUBJECT_KINDS: %s
 
@@ -159,14 +159,13 @@ The exact schema is:
 {"items":[{"text":"non-empty text copied verbatim from the passage","language":"one exact value from ALLOWED_LANGUAGES","subject_kind":"one exact value from ALLOWED_SUBJECT_KINDS"}]}
 
 Rules:
-- Extract at most 20 useful, distinct subjects that genuinely occur in the passage.
+- Extract at most %d useful, distinct subjects that genuinely occur in the passage.
 - Use only the exact enum strings listed above; never invent aliases such as zh-CN, term, idiom, or concept.
-- For Chinese word explanation, prefer meaningful terms of 2-8 Chinese characters rather than whole sentences.
 - If there is no suitable subject, return {"items":[]}.
 
 <PASSAGE>
 %s
-</PASSAGE>`, key, marshal(def.Languages), marshal(def.SubjectKinds), item.Text)
+</PASSAGE>`, key, def.Analysis.Instruction, marshal(def.Languages), marshal(def.SubjectKinds), def.Analysis.MaxCandidates, item.Text)
 	raw, err := algo.GenerateSkill(ctx, algo.SkillGenerateRequest{Content: item.Text, UserInstruct: prompt, LLMConfig: config})
 	if err != nil {
 		return fallbackPreanalysisCandidates(def, item), nil
@@ -196,7 +195,7 @@ Invalid response:
 		if !ok {
 			continue
 		}
-		candidate := PreanalysisItem{Text: strings.TrimSpace(fmt.Sprint(m["text"])), Language: normalizePreanalysisLanguage(strings.TrimSpace(fmt.Sprint(m["language"])), def.Languages), SubjectKind: normalizePreanalysisSubjectKind(strings.TrimSpace(fmt.Sprint(m["subject_kind"])), strings.TrimSpace(fmt.Sprint(m["text"])), def.SubjectKinds), Context: item.Text, SegmentID: item.SegmentID, Page: item.Page}
+		candidate := PreanalysisItem{Text: strings.TrimSpace(fmt.Sprint(m["text"])), Language: normalizePreanalysisLanguage(strings.TrimSpace(fmt.Sprint(m["language"])), def), SubjectKind: normalizePreanalysisSubjectKind(strings.TrimSpace(fmt.Sprint(m["subject_kind"])), strings.TrimSpace(fmt.Sprint(m["text"])), def), Context: item.Text, SegmentID: item.SegmentID, Page: item.Page}
 		if candidate.Text != "" && contains(def.Languages, candidate.Language) && contains(def.SubjectKinds, candidate.SubjectKind) {
 			out = append(out, candidate)
 		}
@@ -206,8 +205,6 @@ Invalid response:
 	}
 	return out, nil
 }
-
-var preanalysisTermPattern = regexp.MustCompile(`[\p{Han}]{2,8}|[A-Za-z][A-Za-z0-9_-]{2,31}`)
 
 func fallbackPreanalysisCandidates(def Capability, item PreanalysisItem) []PreanalysisItem {
 	language := ""
@@ -219,7 +216,7 @@ func fallbackPreanalysisCandidates(def Capability, item PreanalysisItem) []Prean
 		language = def.Languages[0]
 	}
 	kind := ""
-	for _, candidate := range []string{"word", "phrase", "character"} {
+	for _, candidate := range def.Analysis.FallbackKinds {
 		if contains(def.SubjectKinds, candidate) {
 			kind = candidate
 			break
@@ -230,17 +227,18 @@ func fallbackPreanalysisCandidates(def Capability, item PreanalysisItem) []Prean
 	}
 	seen := map[string]bool{}
 	out := make([]PreanalysisItem, 0, 5)
-	for _, match := range preanalysisTermPattern.FindAllString(item.Text, -1) {
+	pattern, err := regexp.Compile(def.Analysis.FallbackPattern)
+	if err != nil || def.Analysis.MaxCandidates <= 0 {
+		return nil
+	}
+	for _, match := range pattern.FindAllString(item.Text, -1) {
 		text := strings.TrimSpace(match)
 		if text == "" || seen[text] {
 			continue
 		}
-		if language == "en" && strings.IndexFunc(text, func(r rune) bool { return unicode.Is(unicode.Han, r) }) >= 0 {
-			continue
-		}
 		seen[text] = true
 		out = append(out, PreanalysisItem{Text: text, Language: language, SubjectKind: kind, Context: item.Text, SegmentID: item.SegmentID, Page: item.Page})
-		if len(out) == 5 {
+		if len(out) == def.Analysis.MaxCandidates {
 			break
 		}
 	}
@@ -255,39 +253,36 @@ func truncatePreanalysisResponse(raw string) string {
 	return raw[:limit]
 }
 
-func normalizePreanalysisLanguage(value string, allowed []string) string {
-	if contains(allowed, value) {
+func normalizePreanalysisLanguage(value string, def Capability) string {
+	if contains(def.Languages, value) {
 		return value
 	}
-	lower := strings.ToLower(value)
-	if strings.HasPrefix(lower, "zh") && contains(allowed, "zh-Hans") {
-		return "zh-Hans"
+	if normalized := def.Analysis.LanguageAliases[strings.ToLower(value)]; contains(def.Languages, normalized) {
+		return normalized
 	}
-	if strings.HasPrefix(lower, "en") && contains(allowed, "en") {
-		return "en"
-	}
-	if value == "" && len(allowed) == 1 {
-		return allowed[0]
+	if value == "" && len(def.Languages) == 1 {
+		return def.Languages[0]
 	}
 	return value
 }
 
-func normalizePreanalysisSubjectKind(value, text string, allowed []string) string {
-	if contains(allowed, value) {
+func normalizePreanalysisSubjectKind(value, text string, def Capability) string {
+	if contains(def.SubjectKinds, value) {
 		return value
 	}
-	aliases := map[string]string{"term": "word", "concept": "word", "idiom": "phrase", "词": "word", "词语": "word", "成语": "phrase"}
-	if normalized := aliases[strings.ToLower(value)]; contains(allowed, normalized) {
+	if normalized := def.Analysis.SubjectKindAliases[strings.ToLower(value)]; contains(def.SubjectKinds, normalized) {
 		return normalized
 	}
-	if len(allowed) == 1 {
-		return allowed[0]
+	if len(def.SubjectKinds) == 1 {
+		return def.SubjectKinds[0]
 	}
-	if len([]rune(text)) == 1 && contains(allowed, "character") {
+	if len([]rune(text)) == 1 && contains(def.SubjectKinds, "character") {
 		return "character"
 	}
-	if contains(allowed, "word") {
-		return "word"
+	for _, kind := range def.Analysis.FallbackKinds {
+		if contains(def.SubjectKinds, kind) {
+			return kind
+		}
 	}
 	return value
 }

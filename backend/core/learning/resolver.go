@@ -31,6 +31,8 @@ type ResolveContentRequest struct {
 	StartOffset, EndOffset                                                                                       int
 	BookIDs                                                                                                      []string
 	Preanalysis                                                                                                  bool
+	Preview                                                                                                      bool
+	ProvidedValue                                                                                                map[string]any
 }
 type ResolveContentResult struct {
 	Content Content        `json:"content"`
@@ -146,31 +148,10 @@ func extractLLMResult(def Capability, current map[string]any, raw string) (map[s
 		}
 	}
 	plain = strings.TrimSpace(strings.TrimSuffix(plain, "```"))
-	if len(missing) == 1 && plain != "" && !strings.Contains(plain, "{") {
+	if def.Analysis.AllowPlainTextSingleField && len(missing) == 1 && plain != "" && !strings.Contains(plain, "{") {
 		return map[string]any{missing[0]: plain}, nil
 	}
 	return nil, err
-}
-
-func capabilityTask(key string) string {
-	switch key {
-	case "english_definition":
-		return "Explain the selected English word or phrase accurately."
-	case "chinese_definition":
-		return "解释所选汉字、词语或成语在上下文中的准确含义；优先给出语境义。"
-	case "classical_definition":
-		return "解释所选文言字词在上下文中的古义，并识别适用的语言现象。"
-	case "pinyin":
-		return "给出所选内容在上下文中的准确拼音和必要的多音字说明。"
-	case "general_translation":
-		return "Translate the selected content accurately into the requested target language."
-	case "classical_translation":
-		return "结合上下文将所选文言文准确翻译为现代汉语。"
-	case "literary_appreciation":
-		return "结合原文分析所选内容的表达手法、文本证据和表达效果。"
-	default:
-		return "Complete the requested learning capability accurately from the selected content and context."
-	}
 }
 
 func buildLLMPrompt(def Capability, in ResolveContentRequest, current map[string]any) string {
@@ -215,7 +196,7 @@ EXISTING_VALUES: %s
 %s
 </CONTEXT>
 
-Now return only the JSON object.`, capabilityTask(def.Key), def.Key, in.TargetLanguage, marshal(schema), marshal(required), marshal(example), marshal(current), in.Text, in.Context)
+Now return only the JSON object.`, def.Analysis.ResolutionInstruction, def.Key, in.TargetLanguage, marshal(schema), marshal(required), marshal(example), marshal(current), in.Text, in.Context)
 }
 
 func (s *Service) resolveWithLLM(ctx context.Context, owner string, def Capability, in ResolveContentRequest, current map[string]any) (map[string]any, error) {
@@ -280,11 +261,17 @@ func (s *Service) ResolveContent(ctx context.Context, owner string, in ResolveCo
 	}
 	if err != nil {
 		return ResolveContentResult{}, err
-	} else if preset != nil {
+	} else if preset != nil && len(in.ProvidedValue) == 0 {
 		var value map[string]any
 		if json.Unmarshal([]byte(preset.ValueJSON), &value) == nil && len(requiredMissing(def, value)) == 0 {
-			return s.persistResolved(ctx, owner, def, in, value, preset.Origin, true)
+			return s.finishResolved(ctx, owner, def, in, value, preset.Origin, true)
 		}
+	}
+	if len(in.ProvidedValue) > 0 {
+		if missing := requiredMissing(def, in.ProvidedValue); len(missing) > 0 {
+			return ResolveContentResult{}, fmt.Errorf("provided content misses required fields: %s", strings.Join(missing, ","))
+		}
+		return s.finishResolved(ctx, owner, def, in, in.ProvidedValue, "user_confirmed", false)
 	}
 	flightKey := strings.Join([]string{owner, def.Key, cacheKey, strings.Join(def.ProviderPipeline, ",")}, "\x1f")
 	raw, err, _ := providerResolveGroup.Do(flightKey, func() (any, error) {
@@ -316,10 +303,16 @@ func (s *Service) ResolveContent(ctx context.Context, owner string, in ResolveCo
 	if cacheScope == "knowledge_base" {
 		cacheID = in.DatasetID
 	}
-	if !in.Preanalysis && (cacheScope == "user_global" || cacheID != "") {
+	if !in.Preanalysis && !in.Preview && (cacheScope == "user_global" || cacheID != "") {
 		_, _ = s.PutPreset(ctx, owner, PresetInput{ScopeType: cacheScope, ScopeID: cacheID, DocumentRevision: in.DocumentRevision, CapabilityKey: def.Key, Key: cacheKey, Value: value, SchemaVersion: 1, Origin: source, Priority: 0})
 	}
-	return s.persistResolved(ctx, owner, def, in, value, source, false)
+	return s.finishResolved(ctx, owner, def, in, value, source, false)
+}
+func (s *Service) finishResolved(ctx context.Context, owner string, def Capability, in ResolveContentRequest, value map[string]any, source string, cached bool) (ResolveContentResult, error) {
+	if in.Preview {
+		return ResolveContentResult{Content: Content{CapabilityKey: def.Key, CapabilityVersion: def.Version, ContentJSON: marshal(value), Origin: source, Status: "preview"}, Value: value, Source: source, Cached: cached}, nil
+	}
+	return s.persistResolved(ctx, owner, def, in, value, source, cached)
 }
 func (s *Service) persistResolved(ctx context.Context, owner string, def Capability, in ResolveContentRequest, value map[string]any, source string, cached bool) (ResolveContentResult, error) {
 	var result ResolveContentResult

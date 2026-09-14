@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"testing"
 	"time"
 
@@ -314,14 +315,53 @@ func TestListPresetsExcludesDeletedRows(t *testing.T) {
 }
 
 func TestNormalizePreanalysisCandidateEnums(t *testing.T) {
-	if got := normalizePreanalysisLanguage("zh-CN", []string{"zh-Hans"}); got != "zh-Hans" {
+	def := Capability{Languages: []string{"zh-Hans"}, SubjectKinds: []string{"character", "word"}, Analysis: termAnalysis("", `x`, []string{"word", "character"})}
+	if got := normalizePreanalysisLanguage("zh-CN", def); got != "zh-Hans" {
 		t.Fatalf("language = %q", got)
 	}
-	if got := normalizePreanalysisSubjectKind("term", "急弯", []string{"character", "word"}); got != "word" {
+	if got := normalizePreanalysisSubjectKind("term", "急弯", def); got != "word" {
 		t.Fatalf("subject kind = %q", got)
 	}
-	if got := normalizePreanalysisSubjectKind("", "学", []string{"character", "word"}); got != "character" {
+	if got := normalizePreanalysisSubjectKind("", "学", def); got != "character" {
 		t.Fatalf("single-character subject kind = %q", got)
+	}
+}
+
+func TestResolvePreviewHasNoPersistenceUntilUserConfirms(t *testing.T) {
+	s := testService(t)
+	ctx := context.Background()
+	def, _ := CapabilityByKey("chinese_definition")
+	req := ResolveContentRequest{CapabilityKey: def.Key, Text: "急弯", Context: "通过急弯时应减速", Language: "zh-Hans", SubjectKind: "word", Preview: true}
+	key := BuildCacheKey(def.Key, req.Text, req.Language, req.TargetLanguage, req.Context, "", 0, 0)
+	if _, err := s.PutPreset(ctx, "u", PresetInput{ScopeType: "user_global", CapabilityKey: def.Key, Key: key, Value: map[string]any{"meaning_in_context": "道路方向急剧改变的弯道"}, Origin: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := s.ResolveContent(ctx, "u", req)
+	if err != nil || result.Content.ID != "" || result.Content.Status != "preview" {
+		t.Fatalf("preview result = %#v, err = %v", result, err)
+	}
+	var contentCount, subjectCount int64
+	s.db.Model(&Content{}).Count(&contentCount)
+	s.db.Model(&Subject{}).Count(&subjectCount)
+	if contentCount != 0 || subjectCount != 0 {
+		t.Fatalf("preview persisted content=%d subjects=%d", contentCount, subjectCount)
+	}
+	req.Preview = false
+	req.ProvidedValue = map[string]any{"meaning_in_context": "用户确认的释义"}
+	result, err = s.ResolveContent(ctx, "u", req)
+	if err != nil || result.Content.ID == "" || result.Content.Status != "published" {
+		t.Fatalf("confirmed result = %#v, err = %v", result, err)
+	}
+}
+
+func TestEveryCapabilityOwnsValidAnalysisRules(t *testing.T) {
+	for _, def := range capabilities {
+		if def.Analysis.Instruction == "" || def.Analysis.MaxCandidates <= 0 || def.Analysis.FallbackPattern == "" || len(def.Analysis.FallbackKinds) == 0 {
+			t.Fatalf("capability %s has incomplete analysis config: %#v", def.Key, def.Analysis)
+		}
+		if _, err := regexp.Compile(def.Analysis.FallbackPattern); err != nil {
+			t.Fatalf("capability %s has invalid fallback pattern: %v", def.Key, err)
+		}
 	}
 }
 

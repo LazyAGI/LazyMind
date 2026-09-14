@@ -5,7 +5,8 @@ const root = `${BASE_URL}/api/core/learning`;
 
 export interface SchemaField { key:string; type:string; label_i18n_key:string; help_i18n_key:string; required:boolean; editable:boolean }
 export interface CachePolicy { default_scope:string; allowed_scopes:string[]; context_sensitive:boolean }
-export interface LearningCapability { key:string; version:number; name_i18n_key:string; description_i18n_key:string; local_only:boolean; languages:string[]; subject_kinds:string[]; fields:SchemaField[]; provider_pipeline:string[]; allowed_question_types:string[]; default_question_types:string[]; cache_policy:CachePolicy }
+export interface AnalysisConfig { instruction:string; resolution_instruction:string; allow_plain_text_single_field:boolean; max_candidates:number; fallback_pattern:string; fallback_kinds:string[]; language_aliases:Record<string,string>; subject_kind_aliases:Record<string,string> }
+export interface LearningCapability { key:string; version:number; name_i18n_key:string; description_i18n_key:string; local_only:boolean; languages:string[]; subject_kinds:string[]; fields:SchemaField[]; provider_pipeline:string[]; allowed_question_types:string[]; default_question_types:string[]; cache_policy:CachePolicy; analysis?:AnalysisConfig }
 export interface CapabilityRef { key:string; version:number; enabled:boolean; display_order:number; settings?:Record<string,unknown> }
 export interface QuestionType { key:string; version:number; name_i18n_key:string; dynamic:boolean }
 export interface CapabilityProfile { key:string; name_i18n_key:string; description_i18n_key:string; capabilities:string[] }

@@ -160,27 +160,30 @@ func AnalyzeSelection(w http.ResponseWriter, r *http.Request) {
 
 func ResolveContent(w http.ResponseWriter, r *http.Request) {
 	var raw struct {
-		CapabilityKey    string   `json:"capability_key"`
-		Text             string   `json:"text"`
-		Context          string   `json:"context"`
-		Language         string   `json:"language"`
-		SubjectKind      string   `json:"subject_kind"`
-		DatasetID        string   `json:"dataset_id"`
-		DocumentID       string   `json:"document_id"`
-		DocumentRevision string   `json:"document_revision"`
-		TargetLanguage   string   `json:"target_language"`
-		SegmentID        string   `json:"segment_id"`
-		Page             *int     `json:"page"`
-		StartOffset      int      `json:"start_offset"`
-		EndOffset        int      `json:"end_offset"`
-		BookIDs          []string `json:"book_ids"`
-		Preanalysis      bool     `json:"-"`
+		CapabilityKey    string         `json:"capability_key"`
+		Text             string         `json:"text"`
+		Context          string         `json:"context"`
+		Language         string         `json:"language"`
+		SubjectKind      string         `json:"subject_kind"`
+		DatasetID        string         `json:"dataset_id"`
+		DocumentID       string         `json:"document_id"`
+		DocumentRevision string         `json:"document_revision"`
+		TargetLanguage   string         `json:"target_language"`
+		SegmentID        string         `json:"segment_id"`
+		Page             *int           `json:"page"`
+		StartOffset      int            `json:"start_offset"`
+		EndOffset        int            `json:"end_offset"`
+		BookIDs          []string       `json:"book_ids"`
+		Preview          bool           `json:"preview"`
+		Value            map[string]any `json:"value"`
+		Preanalysis      bool           `json:"-"`
 	}
 	if json.NewDecoder(r.Body).Decode(&raw) != nil {
 		common.ReplyErr(w, "invalid body", 400)
 		return
 	}
-	out, err := service().ResolveContent(r.Context(), store.UserID(r), ResolveContentRequest(raw))
+	request := ResolveContentRequest{CapabilityKey: raw.CapabilityKey, Text: raw.Text, Context: raw.Context, Language: raw.Language, SubjectKind: raw.SubjectKind, DatasetID: raw.DatasetID, DocumentID: raw.DocumentID, DocumentRevision: raw.DocumentRevision, TargetLanguage: raw.TargetLanguage, SegmentID: raw.SegmentID, Page: raw.Page, StartOffset: raw.StartOffset, EndOffset: raw.EndOffset, BookIDs: raw.BookIDs, Preview: raw.Preview, ProvidedValue: raw.Value}
+	out, err := service().ResolveContent(r.Context(), store.UserID(r), request)
 	if err != nil {
 		common.ReplyErr(w, err.Error(), 400)
 		return

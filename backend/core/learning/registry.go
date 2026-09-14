@@ -15,19 +15,30 @@ type CachePolicy struct {
 	AllowedScopes    []string `json:"allowed_scopes"`
 	ContextSensitive bool     `json:"context_sensitive"`
 }
+type AnalysisConfig struct {
+	Instruction               string            `json:"instruction"`
+	ResolutionInstruction     string            `json:"resolution_instruction"`
+	AllowPlainTextSingleField bool              `json:"allow_plain_text_single_field"`
+	MaxCandidates             int               `json:"max_candidates"`
+	FallbackPattern           string            `json:"fallback_pattern"`
+	FallbackKinds             []string          `json:"fallback_kinds"`
+	LanguageAliases           map[string]string `json:"language_aliases"`
+	SubjectKindAliases        map[string]string `json:"subject_kind_aliases"`
+}
 type Capability struct {
-	Key                  string      `json:"key"`
-	Version              int         `json:"version"`
-	NameI18nKey          string      `json:"name_i18n_key"`
-	DescriptionI18nKey   string      `json:"description_i18n_key"`
-	LocalOnly            bool        `json:"local_only"`
-	Languages            []string    `json:"languages"`
-	SubjectKinds         []string    `json:"subject_kinds"`
-	Fields               []Field     `json:"fields"`
-	ProviderPipeline     []string    `json:"provider_pipeline"`
-	AllowedQuestionTypes []string    `json:"allowed_question_types"`
-	DefaultQuestionTypes []string    `json:"default_question_types"`
-	CachePolicy          CachePolicy `json:"cache_policy"`
+	Key                  string         `json:"key"`
+	Version              int            `json:"version"`
+	NameI18nKey          string         `json:"name_i18n_key"`
+	DescriptionI18nKey   string         `json:"description_i18n_key"`
+	LocalOnly            bool           `json:"local_only"`
+	Languages            []string       `json:"languages"`
+	SubjectKinds         []string       `json:"subject_kinds"`
+	Fields               []Field        `json:"fields"`
+	ProviderPipeline     []string       `json:"provider_pipeline"`
+	AllowedQuestionTypes []string       `json:"allowed_question_types"`
+	DefaultQuestionTypes []string       `json:"default_question_types"`
+	CachePolicy          CachePolicy    `json:"cache_policy"`
+	Analysis             AnalysisConfig `json:"analysis"`
 }
 type QuestionType struct {
 	Key         string `json:"key"`
@@ -53,6 +64,40 @@ var capabilities = []Capability{
 }
 var questionTypes = []QuestionType{{"single_choice", 1, "learning.questionType.singleChoice.name", false}, {"text_input", 1, "learning.questionType.textInput.name", false}, {"cloze", 1, "learning.questionType.cloze.name", false}, {"true_false", 1, "learning.questionType.trueFalse.name", true}, {"translation_response", 1, "learning.questionType.translationResponse.name", true}, {"short_answer", 1, "learning.questionType.shortAnswer.name", true}, {"rubric_self_assessment", 1, "learning.questionType.rubricSelfAssessment.name", true}}
 var profiles = []ProfileDefinition{{"general", "learning.profile.general.name", "learning.profile.general.description", []string{"general_translation"}}, {"academic_papers", "learning.profile.academicPapers.name", "learning.profile.academicPapers.description", []string{"english_definition", "general_translation"}}, {"chinese_modern", "learning.profile.chineseModern.name", "learning.profile.chineseModern.description", []string{"chinese_definition", "pinyin", "literary_appreciation"}}, {"chinese_classical", "learning.profile.chineseClassical.name", "learning.profile.chineseClassical.description", []string{"classical_definition", "pinyin", "classical_translation", "literary_appreciation"}}, {"english_learning", "learning.profile.englishLearning.name", "learning.profile.englishLearning.description", []string{"english_definition", "general_translation"}}, {"legal", "learning.profile.legal.name", "learning.profile.legal.description", []string{"chinese_definition", "english_definition", "general_translation"}}}
+
+var analysisConfigs = map[string]AnalysisConfig{
+	"english_definition":    termAnalysis("Extract English words and phrases worth learning.", `[A-Za-z][A-Za-z0-9_-]{2,31}`, []string{"word", "phrase"}),
+	"chinese_definition":    termAnalysis("Extract modern Chinese words, idioms, and domain terms that need explanation. Prefer meaningful terms of 2-8 Chinese characters.", `[\p{Han}]{2,8}`, []string{"word", "idiom", "character"}),
+	"classical_definition":  termAnalysis("Extract classical Chinese characters, words, and phrases whose contextual meanings need explanation.", `[\p{Han}]{1,8}`, []string{"word", "phrase", "character"}),
+	"pinyin":                termAnalysis("Extract Chinese characters or terms whose pronunciation is useful to annotate.", `[\p{Han}]{1,8}`, []string{"word", "character", "idiom"}),
+	"general_translation":   termAnalysis("Extract sentences or passages that are useful translation units.", `[^。！？!?\n]{4,}[。！？!?]?`, []string{"sentence", "passage", "phrase"}),
+	"classical_translation": termAnalysis("Extract complete classical Chinese sentences or passages suitable for translation.", `[^。！？!?\n]{4,}[。！？!?]?`, []string{"sentence", "passage"}),
+	"literary_appreciation": termAnalysis("Extract representative sentences or passages suitable for literary appreciation, including technique, evidence, and effect.", `[^。！？!?\n]{6,}[。！？!?]?`, []string{"sentence", "passage", "document"}),
+}
+
+var resolutionInstructions = map[string]string{
+	"english_definition":    "Explain the selected English word or phrase accurately.",
+	"chinese_definition":    "解释所选汉字、词语或成语在上下文中的准确含义；优先给出语境义。",
+	"classical_definition":  "解释所选文言字词在上下文中的古义，并识别适用的语言现象。",
+	"pinyin":                "给出所选内容在上下文中的准确拼音和必要的多音字说明。",
+	"general_translation":   "Translate the selected content accurately into the requested target language.",
+	"classical_translation": "结合上下文将所选文言文准确翻译为现代汉语。",
+	"literary_appreciation": "结合原文分析所选内容的表达手法、文本证据和表达效果。",
+}
+
+func termAnalysis(instruction, pattern string, kinds []string) AnalysisConfig {
+	return AnalysisConfig{Instruction: instruction, MaxCandidates: 20, FallbackPattern: pattern, FallbackKinds: kinds,
+		LanguageAliases:    map[string]string{"zh": "zh-Hans", "zh-cn": "zh-Hans", "zh-hans": "zh-Hans", "en-us": "en", "en-gb": "en"},
+		SubjectKindAliases: map[string]string{"term": "word", "concept": "word", "词": "word", "词语": "word", "成语": "idiom"}}
+}
+
+func init() {
+	for i := range capabilities {
+		capabilities[i].Analysis = analysisConfigs[capabilities[i].Key]
+		capabilities[i].Analysis.ResolutionInstruction = resolutionInstructions[capabilities[i].Key]
+		capabilities[i].Analysis.AllowPlainTextSingleField = true
+	}
+}
 
 func CapabilityByKey(key string) (Capability, bool) {
 	for _, v := range capabilities {

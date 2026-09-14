@@ -6,7 +6,7 @@ import (
 )
 
 func TestExtractLLMResultAcceptsPlainTextForSingleMissingField(t *testing.T) {
-	def := Capability{Fields: []Field{{Key: "pinyin"}, {Key: "meaning_in_context", Required: true}}}
+	def := Capability{Fields: []Field{{Key: "pinyin"}, {Key: "meaning_in_context", Required: true}}, Analysis: AnalysisConfig{AllowPlainTextSingleField: true}}
 	value, err := extractLLMResult(def, map[string]any{}, "在这里指按照规定道路行驶。")
 	if err != nil {
 		t.Fatal(err)
@@ -17,7 +17,7 @@ func TestExtractLLMResultAcceptsPlainTextForSingleMissingField(t *testing.T) {
 }
 
 func TestExtractLLMResultStripsPlainTextFence(t *testing.T) {
-	def := Capability{Fields: []Field{{Key: "definition", Required: true}}}
+	def := Capability{Fields: []Field{{Key: "definition", Required: true}}, Analysis: AnalysisConfig{AllowPlainTextSingleField: true}}
 	value, err := extractLLMResult(def, map[string]any{}, "```\n道路交通中的安全距离。\n```")
 	if err != nil {
 		t.Fatal(err)
@@ -35,7 +35,8 @@ func TestExtractLLMResultRejectsAmbiguousPlainText(t *testing.T) {
 }
 
 func TestBuildLLMPromptProvidesStrictTypedContract(t *testing.T) {
-	def := Capability{Key: "chinese_definition", Fields: []Field{
+	registered, _ := CapabilityByKey("chinese_definition")
+	def := Capability{Key: "chinese_definition", Analysis: registered.Analysis, Fields: []Field{
 		{Key: "meaning_in_context", Type: "text", Required: true},
 		{Key: "examples", Type: "string_list"},
 	}}
