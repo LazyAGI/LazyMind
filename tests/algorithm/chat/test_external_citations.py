@@ -120,7 +120,7 @@ def test_external_search_aliases_support_doi_and_provider_document_ids(
     assert state[CITATION_REFS_KEY]['1.1']['url'] == expected_url
 
 
-def test_rewrite_citations_moves_refs_to_paragraph_end():
+def test_rewrite_citations_preserves_ref_positions():
     from lazymind.chat.service.utils.citations import rewrite_citations
 
     state = _state()
@@ -139,8 +139,8 @@ def test_rewrite_citations_moves_refs_to_paragraph_end():
         state,
     )
     assert rewritten == (
-        '第一句。第二句。[1](#source-1.1 "美国大都会博物馆")'
-        '[2](#source-2.1 "Louvre")\n\n下一段。'
+        '第一句[1](#source-1.1 "美国大都会博物馆")。'
+        '第二句[2](#source-2.1 "Louvre")。\n\n下一段。'
     )
 
 
@@ -163,8 +163,8 @@ def test_rewrite_citations_keeps_markers_in_multiline_lists():
         state,
     )
     assert simple == (
-        '- A[1](#source-1.1 "美国大都会博物馆") \n'
-        '- B[2](#source-2.1 "Louvre") '
+        '- A [1](#source-1.1 "美国大都会博物馆")\n'
+        '- B [2](#source-2.1 "Louvre")'
     )
     continued = (
         f'- A {first["ref"]}\n'
@@ -180,10 +180,7 @@ def test_rewrite_citations_keeps_markers_in_multiline_lists():
 
 
 def test_rewrite_citations_keeps_markers_in_gfm_tables():
-    from lazymind.chat.service.utils.citations import (
-        relocate_source_markers_to_paragraph_end,
-        rewrite_citations,
-    )
+    from lazymind.chat.service.utils.citations import rewrite_citations
 
     state = _state()
     first = register_external_search_result({
@@ -206,17 +203,16 @@ def test_rewrite_citations_keeps_markers_in_gfm_tables():
     expected = (
         '| 模型 | 价格 |\n'
         '|---|---|\n'
-        '| A | $1 [1](#source-1.1 "美国大都会博物馆") |\n'
-        '| B | $2 [2](#source-2.1 "Louvre") |'
+        '| A [1](#source-1.1 "美国大都会博物馆") | $1 |\n'
+        '| B [2](#source-2.1 "Louvre") | $2 |'
     )
     assert rewritten == expected
-    assert relocate_source_markers_to_paragraph_end(expected) == expected
     paragraph = f'第一句{first["ref"]}。第二句{second["ref"]}。'
     mixed, _ = rewrite_citations(f'{table}\n\n{paragraph}', state)
     assert mixed == (
         f'{expected}\n\n'
-        '第一句。第二句。[1](#source-1.1 "美国大都会博物馆")'
-        '[2](#source-2.1 "Louvre")'
+        '第一句[1](#source-1.1 "美国大都会博物馆")。'
+        '第二句[2](#source-2.1 "Louvre")。'
     )
 
 
@@ -234,8 +230,49 @@ def test_rewrite_citations_does_not_rewrite_fenced_code():
         state,
     )
     assert f'some copied code {first["ref"]}' in rewritten
-    assert rewritten.endswith('[1](#source-1.1 "docs")')
+    assert rewritten.endswith('[1](#source-1.1 "docs")。')
     assert '```python' in rewritten
+
+
+@pytest.mark.parametrize('code_template', [
+    '~~~python\n{ref}\n~~~',
+    '   ```python\n{ref}\n   ```',
+    'before ```{ref}```',
+])
+def test_rewrite_citations_uses_the_streaming_code_rules(code_template):
+    from lazymind.chat.service.utils.citations import rewrite_citations
+
+    state = _state()
+    source = register_external_search_result({
+        'title': 'docs',
+        'url': 'https://docs.python.org/',
+        'snippet': 'python',
+    }, state)
+    code = code_template.format(ref=source['ref'])
+
+    rewritten, collected = rewrite_citations(f'{code}\nafter {source["ref"]}', state)
+
+    assert code in rewritten
+    assert rewritten.endswith('[1](#source-1.1 "docs")')
+    assert [item['index'] for item in collected] == ['1.1']
+
+
+def test_rewrite_citations_does_not_register_sources_found_only_in_code():
+    from lazymind.chat.service.utils.citations import rewrite_citations
+
+    state = _state()
+    source = register_external_search_result({
+        'title': 'docs',
+        'url': 'https://docs.python.org/',
+        'snippet': 'python',
+    }, state)
+    text = f'~~~python\n{source["ref"]}\n~~~'
+
+    rewritten, collected = rewrite_citations(text, state)
+
+    assert rewritten == text
+    assert collected == []
+    assert 'cited' not in state[CITATION_REFS_KEY]['1.1'].get('source_roles', [])
 
 
 def test_citation_indices_skip_fenced_and_inline_code():

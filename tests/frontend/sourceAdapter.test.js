@@ -1,13 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import {
-  clusterConsecutiveSourceMarkers,
   findSourceByCitationId,
   getCitationSources,
   getDisplaySources,
   getSearchSources,
   getSourceHref,
-  moveSourceMarkersToParagraphEnd,
   normalizeSourceMarkers,
   openSource,
   stripRedundantSourceUrls,
@@ -125,73 +123,5 @@ describe('chat source adapter', () => {
     );
     const source = '[2](#source-2.3 "NeurIPS-2024-hipporag.pdf")';
     expect(normalizeSourceMarkers(`${source}(${source})`)).toBe('[2](#source-2.3)');
-  });
-
-  it('moves inline source markers to the end of each paragraph', () => {
-    const first = '[1](#source-1.1)';
-    const second = '[2](#source-2.1)';
-    expect(moveSourceMarkersToParagraphEnd(
-      `第一句${first}。第二句${second}。\n\n下一段${first}。`,
-    )).toBe(`第一句。第二句。${first}${second}\n\n下一段。${first}`);
-    expect(moveSourceMarkersToParagraphEnd(
-      `\`\`\`\ncode ${first}\n\`\`\`\n\n正文${first}。继续。`,
-    )).toBe(`\`\`\`\ncode ${first}\n\`\`\`\n\n正文。继续。${first}`);
-    expect(moveSourceMarkersToParagraphEnd(
-      `- A ${first}\n- B ${second}`,
-    )).toBe(`- A${first} \n- B${second} `);
-    const continued = `- A ${first}\n  continuation\n- B ${second}`;
-    expect(moveSourceMarkersToParagraphEnd(continued)).toBe(continued);
-  });
-
-  it('moves GFM table citations to the last cell of each row', () => {
-    const first = '[1](#source-1.1)';
-    const second = '[2](#source-2.1)';
-    const table = [
-      '| 模型 | 价格 |',
-      '|---|---|',
-      `| A ${first} | $1 |`,
-      `| B ${second} | $2 |`,
-    ].join('\n');
-    const relocatedTable = [
-      '| 模型 | 价格 |',
-      '|---|---|',
-      `| A | $1 ${first} |`,
-      `| B | $2 ${second} |`,
-    ].join('\n');
-    expect(moveSourceMarkersToParagraphEnd(table)).toBe(relocatedTable);
-    expect(moveSourceMarkersToParagraphEnd(
-      `${table}\n\n第一句${first}。第二句${second}。`,
-    )).toBe(`${relocatedTable}\n\n第一句。第二句。${first}${second}`);
-  });
-
-  it('clusters consecutive paragraph-end source markers into one href', () => {
-    const first = '[1](#source-1.1)';
-    const second = '[2](#source-2.1)';
-    const third = '[3](#source-3.1)';
-    const clustered = '[1](#source-1.1,2.1)';
-    const clusteredThree = '[1](#source-1.1,2.1,3.1)';
-
-    expect(clusterConsecutiveSourceMarkers(
-      moveSourceMarkersToParagraphEnd(`第一句${first}。第二句${second}。`),
-    )).toBe(`第一句。第二句。${clustered}`);
-    expect(clusterConsecutiveSourceMarkers(`${first}${second}${third}`)).toBe(clusteredThree);
-    expect(clusterConsecutiveSourceMarkers(`${first} ${second}`)).toBe(clustered);
-    expect(clusterConsecutiveSourceMarkers(
-      `上一段${first}\n\n下一段${second}`,
-    )).toBe(`上一段${first}\n\n下一段${second}`);
-    expect(clusterConsecutiveSourceMarkers(
-      `\`\`\`\ncode ${first}${second}\n\`\`\`\n\n正文${first}${second}`,
-    )).toBe(`\`\`\`\ncode ${first}${second}\n\`\`\`\n\n正文${clustered}`);
-
-    const table = [
-      '| 模型 | 价格 |',
-      '|---|---|',
-      `| A ${first} | $1 ${second} |`,
-    ].join('\n');
-    expect(clusterConsecutiveSourceMarkers(moveSourceMarkersToParagraphEnd(table))).toBe([
-      '| 模型 | 价格 |',
-      '|---|---|',
-      `| A | $1 ${clustered} |`,
-    ].join('\n'));
   });
 });

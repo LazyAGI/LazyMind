@@ -54,6 +54,7 @@ import { hasDesktopFileBridge } from "@/runtime/desktopBridge";
 import HtmlBlock from "./HtmlBlock";
 import MermaidBlock from "./MermaidBlock";
 import EditableBlock from "./EditableBlock";
+import remarkSourceCitations from "./remarkSourceCitations";
 import {
   getLanguageFromClassName,
   getRawLanguageFromClassName,
@@ -61,7 +62,6 @@ import {
 } from "./syntaxHighlight";
 import {
   type ChatSource,
-  clusterConsecutiveSourceMarkers,
   findSourceByCitationId,
   getSourceEvidenceText,
   getSourceFaviconUrl,
@@ -69,7 +69,6 @@ import {
   getSourceLabel,
   getSourceSubtitle,
   isExternalSource,
-  moveSourceMarkersToParagraphEnd,
   normalizeSourceMarkers,
   stripRedundantSourceUrls,
 } from "@/modules/chat/utils/sourceAdapter";
@@ -85,7 +84,11 @@ const TRAILING_FULLWIDTH_PUNCT = /[（）。，、；：！？…—\u3000-\u303
 const SAFE_INLINE_IMAGE_DATA = /^data:image\/(?:png|jpe?g|gif|webp|bmp);base64,/i;
 const EDITABLE_FENCE_PATTERN = /```editable[ \t]*\r?\n[\s\S]*?\r?\n```/g;
 
-const markdownRemarkWorkflows = [[remarkGfm, { singleTilde: false }], remarkMath];
+const markdownRemarkWorkflows = [
+  [remarkGfm, { singleTilde: false }],
+  remarkSourceCitations,
+  remarkMath,
+];
 const markdownRehypeWorkflows = [
   rehypeRaw,
   rehypeKatex,
@@ -275,11 +278,7 @@ function normalizeMarkdownForDisplay(content: string) {
     normalizeBoldBareUrls(
       normalizeBareUrls(
         normalizeArtifactFileLinks(
-          clusterConsecutiveSourceMarkers(
-            moveSourceMarkersToParagraphEnd(
-              stripRedundantSourceUrls(normalizeSourceMarkers(fragment)),
-            ),
-          ),
+          stripRedundantSourceUrls(normalizeSourceMarkers(fragment)),
         ),
       ),
     );
