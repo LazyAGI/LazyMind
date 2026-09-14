@@ -3189,6 +3189,8 @@ const zhCN = {
     translationTitle: "划词翻译",
     translationOriginal: "原文",
     translationResult: "译文",
+    translateWithModel: "大模型翻译",
+    translateWithModelHint: "对 API 翻译质量不满意，可以请求大模型翻译一次",
     translationFailed: "翻译失败，请检查腾讯翻译凭据和服务状态",
     dictionaryNotFound: "内置词典中未找到该单词，且尚未配置翻译服务",
     askWholeSegment: "对该切片提问",

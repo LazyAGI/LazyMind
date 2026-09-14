@@ -3262,6 +3262,8 @@ const enUS = {
     translationTitle: "Selection Translation",
     translationOriginal: "Original",
     translationResult: "Translation",
+    translateWithModel: "Translate with AI",
+    translateWithModelHint: "If the API translation is unsatisfactory, ask the language model to translate it once",
     translationFailed: "Translation failed. Check the Tencent Translation credentials and service status.",
     dictionaryNotFound: "The word was not found in the built-in dictionary, and no translation service is configured.",
     askWholeSegment: "Ask about this segment",

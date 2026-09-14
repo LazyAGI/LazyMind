@@ -48,6 +48,7 @@ func init() {
 	registerAdditionalError("update processing level failed", http.StatusInternalServerError, 2002643)
 	registerAdditionalError("create document processing state failed", http.StatusInternalServerError, 2002644)
 	registerAdditionalError("removing an embedding model requires confirmation to downgrade all indexed knowledge bases to chunked", http.StatusConflict, 2002645)
+	registerAdditionalError("vector rebuild requires indexed processing level", http.StatusBadRequest, 2002646)
 	registerAdditionalError("artifact sink requires a database, attempt and slot", http.StatusInternalServerError, 2001993)
 	registerAdditionalError("tool config unavailable", http.StatusServiceUnavailable, 2001994)
 	registerAdditionalError("advance, retry, and rewind require exactly one target", http.StatusUnprocessableEntity, 2001305)

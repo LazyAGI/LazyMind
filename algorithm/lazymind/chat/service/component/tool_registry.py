@@ -284,6 +284,21 @@ KNOWLEDGE_SEARCH_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
         "insufficient, prefer `AcademicSearchToolkit` over general web search tools.\n"
     ),
 }
+DOCUMENT_PREVIEW_CHAT_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
+    'tool_policy': (
+        '# Document Preview Chat Rules\n'
+        'This conversation is embedded in a knowledge-base document preview. The knowledge-base '
+        'filter identifies the open document; unlike an explicit knowledge-base selection in the '
+        'main Chat, it does not require a search on every turn. When the user selected text, for a '
+        'request that directly transforms, '
+        'translates, explains, defines, summarizes, or rewrites that selection, use the supplied '
+        'Selected text and Surrounding passage directly. Do not call a knowledge-base search tool '
+        'for such a request. The selected text is the operation target; the surrounding passage is '
+        'context only. Search the selected document only when the user explicitly asks for other '
+        'occurrences, broader document context, verification against the document, or information '
+        'that is not present in the supplied passage.'
+    ),
+}
 WEB_SEARCH_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
     'tool_policy': (
         '# Web Search Tool Rules\n'
@@ -485,7 +500,12 @@ def _kb_prompt_appendix() -> SystemPromptAppendix:
     }
     agentic_config = lazyllm.globals.get('agentic_config') or {}
     if (agentic_config.get('filters') or {}).get('kb_id'):
-        appendix['tool_policy'] = KNOWLEDGE_SEARCH_TOOL_POLICY_APPENDIX['tool_policy']
+        policy = (
+            DOCUMENT_PREVIEW_CHAT_TOOL_POLICY_APPENDIX
+            if agentic_config.get('document_preview_chat')
+            else KNOWLEDGE_SEARCH_TOOL_POLICY_APPENDIX
+        )
+        appendix['tool_policy'] = policy['tool_policy']
     return appendix
 
 
