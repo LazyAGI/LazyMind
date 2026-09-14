@@ -645,6 +645,7 @@ export default function SideChatPanel({
                 showConversationConfig={false}
                 showModelSelector
                 allowKnowledgeBaseSelection={false}
+                allowMentions={false}
                 conversationTrailEnabled={false}
                 chatConfig={chatConfig}
                 setChatConfigFn={() => undefined}

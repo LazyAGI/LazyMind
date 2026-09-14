@@ -125,6 +125,18 @@ function catalog(modelName = "DeepSeek-V3", version = 3): ChatModelCatalog {
 }
 
 describe("ChatModelSelector", () => {
+  it('shows the provider brand beside each model instead of the group heading', async () => {
+    fetchCatalogMock.mockResolvedValue(catalog());
+    render(<ChatModelSelector />);
+    fireEvent.click(await screen.findByRole('button', { name: '当前模型：DeepSeek · DeepSeek-V3' }));
+    const deepseekIcon = await screen.findByAltText('DeepSeek');
+    const openaiIcon = screen.getByAltText('OpenAI');
+    expect(deepseekIcon).toHaveAttribute('src', '/provider-icons/deepseek.svg');
+    expect(openaiIcon).toHaveAttribute('src', '/provider-icons/openai.svg');
+    expect(deepseekIcon.closest('button')).toHaveTextContent('DeepSeek-V3');
+    expect(openaiIcon.closest('button')).toHaveTextContent('GPT-4o');
+    expect(document.querySelector('.chat-model-provider-heading img')).toBeNull();
+  });
   afterEach(() => {
     useModelSelectionStore.setState({ selections: {} });
     vi.clearAllMocks();

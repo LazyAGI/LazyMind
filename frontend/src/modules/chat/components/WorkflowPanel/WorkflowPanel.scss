@@ -1803,12 +1803,15 @@
 
   &__version-label {
     display: flex;
+    flex-wrap: wrap;
+    white-space: nowrap;
     align-items: center;
     gap: 4px;
     color: #374151;
   }
 
   &__version-source-badge {
+    flex-shrink: 0;
     font-size: 10px;
     padding: 0 4px;
     border-radius: 4px;
@@ -1819,6 +1822,7 @@
   }
 
   &__version-current-tag {
+    flex-shrink: 0;
     font-size: 10px;
     background: #dcfce7;
     color: #166534;

@@ -48,6 +48,28 @@ vi.mock("@/modules/chat/utils/request", () => ({
 }));
 
 describe("MentionEditor", () => {
+  it('restores a saved mention chip with its resource identity', () => {
+    const onMentionsChange = vi.fn();
+    const mention = { mention_id: 'm1', type: 'skill' as const, resource_id: 'test-skill', display_name: '测试技能', start: 0, end: 4 };
+    render(<MentionEditor value="测试技能 请总结" initialMentions={[mention]} placeholder="message"
+      onChange={vi.fn()} onMentionsChange={onMentionsChange} onPaste={vi.fn()}
+      onSend={vi.fn()} onCompositionChange={vi.fn()} />);
+    const chip = screen.getByText('测试技能');
+    expect(chip).toHaveAttribute('data-resource-id', 'test-skill');
+    expect(chip).toHaveAttribute('contenteditable', 'false');
+    expect(onMentionsChange).toHaveBeenLastCalledWith([mention]);
+  });
+  it('keeps saved labels as text and discards stale mention offsets', () => {
+    const label = '<img src=x onerror=alert(1)>';
+    const onMentionsChange = vi.fn();
+    const mention = { mention_id: 'safe', type: 'skill' as const, resource_id: 'test-skill', display_name: label, start: 0, end: label.length };
+    const { container } = render(<MentionEditor value={label} initialMentions={[mention, { ...mention, mention_id: 'stale', start: 50, end: 55 }]}
+      placeholder="message" onChange={vi.fn()} onMentionsChange={onMentionsChange} onPaste={vi.fn()} onSend={vi.fn()} onCompositionChange={vi.fn()} />);
+    expect(container.querySelector('img')).toBeNull();
+    expect(screen.getByRole('textbox')).toHaveTextContent(label);
+    expect(onMentionsChange).toHaveBeenLastCalledWith([mention]);
+  });
+
   beforeEach(() => {
     Object.defineProperty(scrollablePrototype, "scrollTo", {
       configurable: true,
@@ -80,6 +102,61 @@ describe("MentionEditor", () => {
       Reflect.deleteProperty(scrollablePrototype, "scrollTo");
     }
     vi.restoreAllMocks();
+  });
+
+  it('omits knowledge bases when the composer does not allow selecting them', async () => {
+    render(<MentionEditor value="" placeholder="message" allowKnowledgeBaseSelection={false}
+      onChange={vi.fn()} onMentionsChange={vi.fn()} onPaste={vi.fn()}
+      onSend={vi.fn()} onCompositionChange={vi.fn()} />);
+    await waitFor(() => expect(mocks.listSkillAssetsPage).toHaveBeenCalled());
+    expect(mocks.listDatasets).not.toHaveBeenCalled();
+    const editor = screen.getByRole('textbox');
+    editor.textContent = '@kb:p2-side-chat';
+    const range = document.createRange();
+    range.setStart(editor.firstChild!, editor.textContent.length);
+    range.collapse(true);
+    window.getSelection()?.removeAllRanges();
+    window.getSelection()?.addRange(range);
+    fireEvent.input(editor);
+    expect(await screen.findByText('chat.mentionNoResults')).toBeVisible();
+    expect(screen.queryByText('chat.mentionKnowledgeBase')).not.toBeInTheDocument();
+    expect(mocks.listDatasets).not.toHaveBeenCalled();
+  });
+
+  it.each(['@', '@skill:', '@workflow:', '@tool:', '@kb:', '@chat:', '@prompt:'])(
+    'keeps %s as plain text without loading resources when mentions are unavailable',
+    (text) => {
+      const onSend = vi.fn();
+      render(<MentionEditor value="" placeholder="message" allowMentions={false}
+        onChange={vi.fn()} onMentionsChange={vi.fn()} onPaste={vi.fn()}
+        onSend={onSend} onCompositionChange={vi.fn()} />);
+      const editor = screen.getByRole('textbox');
+      editor.textContent = text;
+      const range = document.createRange();
+      range.setStart(editor.firstChild!, text.length);
+      range.collapse(true);
+      window.getSelection()?.removeAllRanges();
+      window.getSelection()?.addRange(range);
+      fireEvent.input(editor);
+      expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+      expect(editor).toHaveTextContent(text);
+      for (const load of Object.values(mocks)) expect(load).not.toHaveBeenCalled();
+      fireEvent.keyDown(editor, { key: 'Enter' });
+      expect(onSend).toHaveBeenCalledOnce();
+    },
+  );
+
+  it('preserves saved labels without restoring executable mentions in side chat', () => {
+    const onMentionsChange = vi.fn();
+    const mention = { mention_id: 'old-skill', type: 'skill' as const, resource_id: 'test-skill', display_name: '测试技能', start: 0, end: 4 };
+    const props = { value: '测试技能 请总结', initialMentions: [mention], placeholder: 'message',
+      onChange: vi.fn(), onMentionsChange, onPaste: vi.fn(), onSend: vi.fn(), onCompositionChange: vi.fn() };
+    const view = render(<MentionEditor {...props} />);
+    expect(view.container.querySelector('.chat-mention-chip')).not.toBeNull();
+    view.rerender(<MentionEditor {...props} allowMentions={false} />);
+    expect(view.container.querySelector('.chat-mention-chip')).toBeNull();
+    expect(screen.getByRole('textbox')).toHaveTextContent(props.value);
+    expect(onMentionsChange).toHaveBeenLastCalledWith([]);
   });
 
   it("reloads skills after a previously cached empty list", async () => {

@@ -1008,6 +1008,13 @@ components:
             properties:
                 conversation_id:
                     type: string
+                position:
+                    enum:
+                        - before
+                        - after
+                    type: string
+                target_conversation_id:
+                    type: string
             required:
                 - conversation_id
             type: object

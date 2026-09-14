@@ -4,6 +4,7 @@ import {
   useEffect,
   useImperativeHandle,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -267,6 +268,7 @@ function replaceCandidateGroup(current: Candidate[], type: CandidateType, items:
 
 const MentionEditor = forwardRef<MentionEditorRef, {
   value: string;
+  initialMentions?: ChatMention[];
   disabled?: boolean;
   placeholder: string;
   onChange: (value: string) => void;
@@ -275,8 +277,11 @@ const MentionEditor = forwardRef<MentionEditorRef, {
   onSend: () => void;
   onCompositionChange: (composing: boolean) => void;
   disabledMentionReasons?: Partial<Record<MentionType, string>>;
+  allowKnowledgeBaseSelection?: boolean;
+  allowMentions?: boolean;
 }>(({
   value,
+  initialMentions,
   disabled,
   placeholder,
   onChange,
@@ -285,8 +290,13 @@ const MentionEditor = forwardRef<MentionEditorRef, {
   onSend,
   onCompositionChange,
   disabledMentionReasons,
+  allowKnowledgeBaseSelection = true,
+  allowMentions = true,
 }, ref) => {
   const { t } = useTranslation();
+  const availableGroups = useMemo(() => allowMentions ? groups.filter((group) =>
+    allowKnowledgeBaseSelection || group.type !== 'knowledge_base',
+  ) : [], [allowKnowledgeBaseSelection, allowMentions]);
   const editorRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const emittedRef = useRef<string | null>(null);
@@ -329,29 +339,39 @@ const MentionEditor = forwardRef<MentionEditorRef, {
     const serialized = serializeEditor(editorRef.current);
     emittedRef.current = serialized.text;
     onChange(serialized.text);
-    onMentionsChange(serialized.mentions);
-  }, [onChange, onMentionsChange]);
+    onMentionsChange(allowMentions ? serialized.mentions : []);
+  }, [allowMentions, onChange, onMentionsChange]);
 
   useImperativeHandle(ref, () => ({
     focus: () => editorRef.current?.focus(),
-    getMentions: () => editorRef.current ? serializeEditor(editorRef.current).mentions : [],
-  }), []);
+    getMentions: () => allowMentions && editorRef.current ? serializeEditor(editorRef.current).mentions : [],
+  }), [allowMentions]);
 
   useEffect(() => {
     const editor = editorRef.current;
-    if (!editor || value === emittedRef.current) return;
-    editor.textContent = value;
+    if (!editor || (value === emittedRef.current && (allowMentions || !editor.querySelector('.chat-mention-chip')))) return;
+    let cursor = 0;
+    let html = '';
+    for (const mention of [...(allowMentions ? initialMentions || [] : [])].sort((a, b) => (a.start ?? 0) - (b.start ?? 0))) {
+      const { start, end } = mention;
+      if (start === undefined || end === undefined || !Number.isInteger(start) || !Number.isInteger(end)
+        || start < cursor || end <= start || end > value.length || value.slice(start, end) !== mention.display_name
+        || !groups.some((group) => group.type === mention.type)) continue;
+      html += escapeHtml(value.slice(cursor, start)) + mentionHtml(mention);
+      cursor = end;
+    }
+    editor.innerHTML = html + escapeHtml(value.slice(cursor));
     emittedRef.current = value;
-    onMentionsChange([]);
-  }, [onMentionsChange, value]);
+    onMentionsChange(serializeEditor(editor).mentions);
+  }, [allowMentions, initialMentions, onMentionsChange, value]);
 
   useEffect(() => {
     // Warm the session cache as soon as the composer mounts. Opening `@` can
     // then paint immediately while a background refresh keeps data current.
-    groups.forEach((group) => {
+    availableGroups.forEach((group) => {
       void loadAndCacheCandidates(group.type, "");
     });
-  }, []);
+  }, [availableGroups]);
 
   useEffect(() => {
     if (!query) {
@@ -359,7 +379,7 @@ const MentionEditor = forwardRef<MentionEditorRef, {
       return;
     }
     const requestId = ++requestRef.current;
-    const targetGroups = query.type ? groups.filter((item) => item.type === query.type) : groups;
+    const targetGroups = query.type ? availableGroups.filter((item) => item.type === query.type) : availableGroups;
     const warmCandidates = targetGroups.flatMap((item) =>
       cachedCandidates(item.type, query.keyword),
     );
@@ -390,7 +410,7 @@ const MentionEditor = forwardRef<MentionEditorRef, {
       });
     }, query.keyword ? 180 : 0);
     return () => window.clearTimeout(timer);
-  }, [query?.keyword, query?.type]);
+  }, [query?.keyword, query?.type, availableGroups]);
 
   useEffect(() => {
     if (!query) return;
@@ -411,12 +431,12 @@ const MentionEditor = forwardRef<MentionEditorRef, {
   }, [query, updateMenuPlacement]);
 
   const refreshQuery = useCallback(() => {
-    const next = editorRef.current ? queryAtCaret(editorRef.current) : null;
+    const next = allowMentions && editorRef.current ? queryAtCaret(editorRef.current) : null;
     queryRef.current = next;
     setQuery(next);
     setActiveIndex(-1);
     setExpandedTypes(new Set());
-  }, []);
+  }, [allowMentions]);
 
   const getDisabledReason = useCallback((candidate: Candidate) => (
     candidate.disabledReason || disabledMentionReasons?.[candidate.type as MentionType]
@@ -519,7 +539,7 @@ const MentionEditor = forwardRef<MentionEditorRef, {
           if (isImeComposingEvent(event)) {
             return;
           }
-          if (query) {
+          if (allowMentions && query) {
             if (event.key === "ArrowDown" || event.key === "ArrowUp") {
               event.preventDefault();
               moveActiveCandidate(event.key === "ArrowDown" ? 1 : -1);
@@ -543,7 +563,7 @@ const MentionEditor = forwardRef<MentionEditorRef, {
           }
         }}
       />
-      {query && (
+      {allowMentions && query && (
         <div
           ref={menuRef}
           className={`chat-mention-menu${menuPlacement.direction === "below" ? " is-below" : ""}`}
@@ -553,7 +573,7 @@ const MentionEditor = forwardRef<MentionEditorRef, {
         >
           {loading && candidates.length === 0 ? <div className="chat-mention-empty">{t("common.loading")}</div> : null}
           {!loading && candidates.length === 0 ? <div className="chat-mention-empty">{t("chat.mentionNoResults")}</div> : null}
-          {groups.filter((group) => !query.type || group.type === query.type).map((group) => {
+          {availableGroups.filter((group) => !query.type || group.type === query.type).map((group) => {
             const allItems = candidates.filter((item) => item.type === group.type);
             const isExpanded = expandedTypes.has(group.type);
             const items = isExpanded ? allItems : allItems.slice(0, 9);

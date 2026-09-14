@@ -67,6 +67,7 @@ export interface ChatContainerProps {
   setChatConfigFn: (chatConfig: ChatConfig) => void;
   knowledgeRefreshKey?: number | string;
   allowKnowledgeBaseSelection?: boolean;
+  allowMentions?: boolean;
   embeddingReady?: boolean | null;
   multimodalEmbeddingReady?: boolean | null;
   rerankReady?: boolean | null;

@@ -627,7 +627,7 @@ export function MarkdownArtifactEditor({
     () => collectWriterMarkdownOutline(materializedDraftMarkdown),
     [materializedDraftMarkdown],
   );
-  const hasOutline = Boolean(markdownOutline.title);
+  const hasOutline = Boolean(markdownOutline.title || markdownOutline.items.length);
   const referenceTargets = useMemo(
     () => collectWriterMarkdownReferenceTargets(materializedDraftMarkdown),
     [materializedDraftMarkdown],

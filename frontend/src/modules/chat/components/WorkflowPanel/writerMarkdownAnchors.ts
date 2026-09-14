@@ -581,7 +581,7 @@ export function collectWriterMarkdownOutline(markdown: string): WriterMarkdownOu
     const heading = trimmed.match(/^(#{1,6})[ \t]+(.+?)(?:[ \t]+#+[ \t]*)?$/);
     if (heading) {
       const label = heading[2].trim();
-      title ??= label;
+      if (!pendingAnchorId) title ??= label;
       if (pendingAnchorId) {
         items.push({
           anchorId: pendingAnchorId,

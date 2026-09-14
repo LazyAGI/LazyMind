@@ -429,6 +429,8 @@ interface ChatInputProps {
   knowledgeRefreshKey?: number | string;
   /** Prevent embedded child conversations from replacing inherited knowledge bases. */
   allowKnowledgeBaseSelection?: boolean;
+  /** Side-chat requests do not support resource mentions or skill-to-workflow resolution. */
+  allowMentions?: boolean;
   /** Bump to remount the chat config popover (e.g. when starting a fresh welcome-screen chat). */
   configResetKey?: number | string;
   sessionId?: string;
@@ -656,6 +658,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       setChatConfigFn,
       knowledgeRefreshKey,
       allowKnowledgeBaseSelection = true,
+      allowMentions = true,
       configResetKey,
       sessionId,
       isStreaming = false,
@@ -718,12 +721,13 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     const [mentions, setMentions] = useState<ChatMention[]>([]);
     const [resolvingSkillWorkflow, setResolvingSkillWorkflow] = useState(false);
     const effectiveMentions = useMemo(() => {
+      if (!allowMentions) return [];
       const merged = new Map<string, ChatMention>();
       for (const mention of [...boundMentions, ...mentions]) {
         merged.set(`${mention.type}:${mention.resource_id}`, mention);
       }
       return [...merged.values()];
-    }, [boundMentions, mentions]);
+    }, [allowMentions, boundMentions, mentions]);
     const [contextRuntimeSettings, setContextRuntimeSettings] = useState(initialConversationSettings);
     const [contextUsageReset, setContextUsageReset] = useState(0);
     const [addMenuOpen, setAddMenuOpen] = useState(false);
@@ -731,8 +735,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       kb: boolean | null;
     }>({ kb: null });
     const disabledNoticeId = useId();
-    const previousSessionIdRef = useRef<string | undefined>(undefined);
-    const hasSentMessageRef = useRef(false);
+    const draftRef = useRef<{ sessionId?: string; content: string; mentions: ChatMention[] }>({ content: value, mentions: [] });
     const [initialModelSelection, setInitialModelSelection] =
       useState<ChatModelSelectionRequest>();
     const [modelSelectionSaving, setModelSelectionSaving] = useState(false);
@@ -774,7 +777,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
 
     const [fileList, setFileList] = useState<ChatFileList[]>([]);
     const { setPendingMessage, clearPendingMessage } = useChatMessageStore();
-    const { saveInputContent, getInputContent, clearInputContent } =
+    const { saveInputContent, getInputContent, getInputMentions, clearInputContent } =
       useChatInputStore();
 
     const refreshKnowledgeToolAvailability = useCallback(async () => {
@@ -824,11 +827,11 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
 
     const debouncedSaveInput = useMemo(
       () =>
-        debounce((conversationId: string, content: string) => {
+        debounce((conversationId: string, content: string, draftMentions: ChatMention[]) => {
           if (!content || content.trim() === "") {
             clearInputContent(conversationId);
           } else {
-            saveInputContent(conversationId, content);
+            saveInputContent(conversationId, content, draftMentions);
           }
         }, 500),
       [saveInputContent, clearInputContent],
@@ -879,76 +882,38 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     );
 
     useEffect(() => {
-      if (
-        sessionId !== undefined &&
-        sessionId !== previousSessionIdRef.current
-      ) {
-        const previousId = previousSessionIdRef.current;
-
-        debouncedSaveInput.cancel();
-
-        if (previousId !== undefined) {
-          const previousValue = value || "";
-          if (!previousValue || previousValue.trim() === "") {
-            clearInputContent(previousId);
-          } else {
-            saveInputContent(previousId, previousValue);
-          }
-
-          if (
-            previousId.startsWith("temp_") &&
-            !sessionId.startsWith("temp_")
-          ) {
-            const tempContent = getInputContent(previousId);
-            if (tempContent) {
-              saveInputContent(sessionId, tempContent);
-              clearInputContent(previousId);
-            }
-          }
-        }
-
-        const savedContent = getInputContent(sessionId);
-        if (savedContent !== value) {
-          onChange(savedContent);
-        }
-
-        previousSessionIdRef.current = sessionId;
+      if (draftRef.current.sessionId === sessionId && draftRef.current.content !== value) {
+        draftRef.current = { sessionId, content: value, mentions: [] };
       }
-    }, [
-      sessionId,
-      saveInputContent,
-      getInputContent,
-      clearInputContent,
-      onChange,
-      value,
-      debouncedSaveInput,
-    ]);
+    }, [sessionId, value]);
 
     useEffect(() => {
-      return () => {
-        debouncedSaveInput.cancel();
-
-        if (hasSentMessageRef.current) {
-          hasSentMessageRef.current = false;
-          return;
+      if (sessionId === draftRef.current.sessionId) return;
+      debouncedSaveInput.cancel();
+      const previous = draftRef.current;
+      if (previous.sessionId !== undefined) {
+        if (previous.content.trim()) saveInputContent(previous.sessionId, previous.content, previous.mentions);
+        else clearInputContent(previous.sessionId);
+        if (previous.content.trim() && previous.sessionId.startsWith("temp_") && sessionId && !sessionId.startsWith("temp_")) {
+          saveInputContent(sessionId, previous.content, previous.mentions);
+          clearInputContent(previous.sessionId);
         }
+      }
+      const content = sessionId !== undefined ? getInputContent(sessionId) : value;
+      const savedMentions = sessionId !== undefined ? getInputMentions(sessionId) : [];
+      draftRef.current = { sessionId, content, mentions: savedMentions };
+      setMentions(savedMentions);
+      if (content !== value) onChange(content);
+    }, [sessionId, value, onChange, saveInputContent, getInputContent, getInputMentions, clearInputContent, debouncedSaveInput]);
 
-        if (sessionId !== undefined) {
-          const currentValue = value || "";
-          if (!currentValue || currentValue.trim() === "") {
-            clearInputContent(sessionId);
-          } else {
-            saveInputContent(sessionId, currentValue);
-          }
-        }
-      };
-    }, [
-      sessionId,
-      value,
-      saveInputContent,
-      clearInputContent,
-      debouncedSaveInput,
-    ]);
+    useEffect(() => () => {
+      debouncedSaveInput.cancel();
+      const draft = draftRef.current;
+      if (draft.sessionId !== undefined) {
+        if (draft.content.trim()) saveInputContent(draft.sessionId, draft.content, draft.mentions);
+        else clearInputContent(draft.sessionId);
+      }
+    }, [saveInputContent, clearInputContent, debouncedSaveInput]);
 
     useEffect(() => {
       const checkUploadStatus = () => {
@@ -1234,7 +1199,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
         clearMultiData();
       }
 
-      hasSentMessageRef.current = true;
+      draftRef.current = { sessionId, content: "", mentions: [] };
       setContextUsageReset((current) => current + 1);
 
       if (sessionId !== undefined) {
@@ -1261,12 +1226,18 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     };
 
     const handleInputChange = (text: string) => {
+      draftRef.current = { sessionId, content: text, mentions: [] };
       onChange(text);
       setText(text);
-      if (sessionId !== undefined) {
-        debouncedSaveInput(sessionId, text);
-      }
     };
+
+    const handleMentionsChange = useCallback((nextMentions: ChatMention[]) => {
+      setMentions(nextMentions);
+      const draft = draftRef.current;
+      if (draft.sessionId !== sessionId) return;
+      draft.mentions = nextMentions;
+      if (sessionId !== undefined) debouncedSaveInput(sessionId, draft.content, nextMentions);
+    }, [sessionId, debouncedSaveInput]);
 
     const handleApplyPromptSuggestion = async (
       suggestion: (typeof PROMPT_SUGGESTIONS)[number],
@@ -1488,11 +1459,15 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                 </div>
               )}
               <MentionEditor
+                key={sessionId}
                 ref={textAreaRef}
+                initialMentions={sessionId !== undefined ? getInputMentions(sessionId) : undefined}
                 placeholder={placeholder || t("chat.inputPlaceholder")}
                 value={value}
                 onChange={handleInputChange}
-                onMentionsChange={setMentions}
+                onMentionsChange={handleMentionsChange}
+                allowKnowledgeBaseSelection={allowKnowledgeBaseSelection}
+                allowMentions={allowMentions}
                 disabledMentionReasons={knowledgeBaseSelectable ? undefined : {
                   knowledge_base: knowledgeBaseDisabledReason,
                 }}
@@ -1585,7 +1560,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                         </div>
                       }
                     >
-                      <Tooltip title={t("chat.addResourceTooltip")}>
+                      <Tooltip title={t(allowKnowledgeBaseSelection ? "chat.addResourceTooltip" : "chat.addFileTooltip")}>
                         <div
                           className={`input-bottom-actions-left-item${addMenuOpen ? " selected" : ""}${disabled || isPromptPolishing ? " is-disabled" : ""}`}
                           role="button"

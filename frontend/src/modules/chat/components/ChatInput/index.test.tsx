@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   NEW_CHAT_MODEL_SELECTION_KEY,
@@ -7,6 +7,14 @@ import {
   type ChatModelSelectionRequest,
 } from "@/modules/chat/store/modelSelection";
 import ChatInput from ".";
+import { useState } from "react";
+import { useChatInputStore } from "../../store/chatInput";
+import type { ChatMention } from "./MentionEditor";
+import { listSkillLinkedWorkflows } from "@/modules/workflow/workflowDraftApi";
+
+vi.mock("@/modules/workflow/workflowDraftApi", () => ({
+  listSkillLinkedWorkflows: vi.fn().mockResolvedValue({ workflows: [] }),
+}));
 
 vi.mock("react-i18next", async (importOriginal) => ({
   ...(await importOriginal<typeof import("react-i18next")>()),
@@ -34,10 +42,11 @@ vi.mock("./MentionEditor", async () => {
   const React = await vi.importActual<typeof import("react")>("react");
   return {
     default: React.forwardRef(function MockMentionEditor(
-      props: { onSend?: () => void },
+      props: { onSend?: () => void; initialMentions?: ChatMention[]; onMentionsChange?: (mentions: ChatMention[]) => void },
       ref,
     ) {
       React.useImperativeHandle(ref, () => ({ focus: vi.fn() }));
+      React.useEffect(() => { if (props.initialMentions?.length) props.onMentionsChange?.(props.initialMentions); }, []);
       return (
         <textarea
           aria-label="message editor"
@@ -116,7 +125,7 @@ describe("ChatInput model switch save lock", () => {
     useModelSelectionStore.getState().resetForNewChat();
   });
 
-  it("blocks button, keyboard, and send handling until the model PATCH settles", () => {
+  it("blocks button, keyboard, and send handling until the model PATCH settles", async () => {
     const onSend = vi.fn();
     const onSkillDeposit = vi.fn();
     render(
@@ -157,7 +166,7 @@ describe("ChatInput model switch save lock", () => {
     expect(sendButton).toBeEnabled();
     expect(skillDepositButton).toHaveAttribute("aria-disabled", "false");
     fireEvent.click(sendButton);
-    expect(onSend).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
   });
 
   it.each<{
@@ -177,7 +186,7 @@ describe("ChatInput model switch save lock", () => {
     },
   ])(
     "reads the latest $label selection from the new-chat store when sending",
-    ({ stored, expected }) => {
+    async ({ stored, expected }) => {
       useModelSelectionStore
         .getState()
         .setSelection(NEW_CHAT_MODEL_SELECTION_KEY, stored);
@@ -199,9 +208,9 @@ describe("ChatInput model switch save lock", () => {
 
       fireEvent.click(screen.getByRole("button", { name: "chat.send" }));
 
-      expect(onSend).toHaveBeenCalledWith(
+      await waitFor(() => expect(onSend).toHaveBeenCalledWith(
         expect.objectContaining({ initial_model_selection: expected }),
-      );
+      ));
     },
   );
 
@@ -255,5 +264,50 @@ describe("ChatInput model switch save lock", () => {
     expect(
       screen.getByRole("button", { name: /chat\.promptTemplate/ }),
     ).toBeInTheDocument();
+  });
+});
+
+
+describe("ChatInput saved mentions", () => {
+  it("does not resolve or send stale resource mentions in side chat", async () => {
+    const mention: ChatMention = { mention_id: "old-side-skill", type: "skill", resource_id: "test-skill", display_name: "测试技能", start: 0, end: 4 };
+    useChatInputStore.getState().saveInputContent("side-mention-draft", "测试技能 请解释", [mention]);
+    const onSend = vi.fn();
+    function Composer() {
+      const [value, setValue] = useState("");
+      return <ChatInput value={value} onChange={setValue} onSend={onSend} sessionId="side-mention-draft"
+        allowMentions={false} boundMentions={[{ ...mention, type: "tool" }]}
+        isChatContent showConversationConfig={false} showHistoryButton={false} showPromptSuggestions={false} />;
+    }
+    render(<Composer />);
+    fireEvent.click(screen.getByRole("button", { name: "chat.send" }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith(expect.objectContaining({ mentions: [], text: "测试技能 请解释" })));
+    expect(listSkillLinkedWorkflows).not.toHaveBeenCalled();
+  });
+
+  it("keeps the destination draft when switching from an empty temporary conversation", () => {
+    useChatInputStore.getState().saveInputContent("saved-draft", "已有草稿");
+    const onChange = vi.fn();
+    const props = { value: "", onChange, isChatContent: true, showConversationConfig: false, showHistoryButton: false, showPromptSuggestions: false };
+    const view = render(<ChatInput {...props} sessionId="temp_empty" />);
+    view.rerender(<ChatInput {...props} sessionId="saved-draft" />);
+    expect(onChange).toHaveBeenCalledWith("已有草稿");
+    expect(useChatInputStore.getState().getInputContent("saved-draft")).toBe("已有草稿");
+  });
+
+  it("sends the restored resource identity and clears the sent draft", async () => {
+    const mention: ChatMention = { mention_id: "draft-tool", type: "tool", resource_id: "test-tool", display_name: "测试工具", start: 0, end: 4 };
+    useChatInputStore.getState().saveInputContent("mention-draft", "测试工具 请执行", [mention]);
+    const onSend = vi.fn();
+    function Composer() {
+      const [value, setValue] = useState("");
+      return <ChatInput value={value} onChange={setValue} onSend={onSend} sessionId="mention-draft" isChatContent showConversationConfig={false} showHistoryButton={false} showPromptSuggestions={false} />;
+    }
+    const view = render(<Composer />);
+    fireEvent.click(screen.getByRole("button", { name: "chat.send" }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith(expect.objectContaining({ mentions: [mention], text: "测试工具 请执行" })));
+    view.unmount();
+    expect(useChatInputStore.getState().getInputContent("mention-draft")).toBe("");
+    expect(useChatInputStore.getState().getInputMentions("mention-draft")).toEqual([]);
   });
 });

@@ -1,10 +1,26 @@
 package datasource
 
 import (
+	"strings"
 	"testing"
 
 	"lazymind/core/common/orm"
 )
+
+func TestDatabaseConnectionNameLength(t *testing.T) {
+	for _, char := range []string{"x", "名", "🧪"} {
+		for _, length := range []int{255, 256} {
+			name := strings.Repeat(char, length)
+			_, createErr := rowFromDatabaseConnectionRequest(DatabaseConnectionRequest{
+				DisplayName: name, DBType: "postgresql", Host: "db.example.invalid", DatabaseName: "demo", Username: "test",
+			}, "test-user", "test-user")
+			_, updateErr := databaseConnectionUpdates(UpdateDatabaseConnectionRequest{DisplayName: &name})
+			if (createErr != nil) != (length > 255) || (updateErr != nil) != (length > 255) {
+				t.Errorf("name length %d for %q: create=%v update=%v", length, char, createErr, updateErr)
+			}
+		}
+	}
+}
 
 // makeDBConn creates a minimal orm.ExternalDatabaseConnection for DSN tests.
 func makeDBConn(host string, port int, dbName, username string) orm.ExternalDatabaseConnection {
