@@ -116,6 +116,27 @@ func TestPreanalysisTaskCanBeCanceledBeforeRun(t *testing.T) {
 	}
 }
 
+func TestLatestPreanalysisTaskIsScopedToDocument(t *testing.T) {
+	s := testService(t)
+	now := time.Now().UTC()
+	rows := []PreanalysisTask{
+		{ID: "old", OwnerID: "u", DatasetID: "ds", DocumentID: "doc", Status: "completed", CreatedAt: now.Add(-time.Minute), UpdatedAt: now.Add(-time.Minute)},
+		{ID: "latest", OwnerID: "u", DatasetID: "ds", DocumentID: "doc", Status: "running", CreatedAt: now, UpdatedAt: now},
+		{ID: "other", OwnerID: "u", DatasetID: "ds", DocumentID: "other", Status: "running", CreatedAt: now.Add(time.Minute), UpdatedAt: now.Add(time.Minute)},
+	}
+	if err := s.db.Create(&rows).Error; err != nil {
+		t.Fatal(err)
+	}
+	task, err := s.LatestPreanalysisTask(context.Background(), "u", "ds", "doc")
+	if err != nil || task == nil || task.ID != "latest" {
+		t.Fatalf("latest task = %#v, err = %v", task, err)
+	}
+	missing, err := s.LatestPreanalysisTask(context.Background(), "u", "ds", "missing")
+	if err != nil || missing != nil {
+		t.Fatalf("missing task = %#v, err = %v", missing, err)
+	}
+}
+
 func TestContextualDictionaryCapabilitiesRequireDisambiguation(t *testing.T) {
 	definition, _ := CapabilityByKey("classical_definition")
 	if !needsContextDisambiguation(definition, ResolveContentRequest{Context: "双兔傍地走"}) {

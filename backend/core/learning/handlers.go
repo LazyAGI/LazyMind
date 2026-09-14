@@ -523,6 +523,14 @@ func GetPreanalysisTask(w http.ResponseWriter, r *http.Request) {
 	}
 	common.ReplyOK(w, task)
 }
+func GetLatestPreanalysisTask(w http.ResponseWriter, r *http.Request) {
+	task, err := service().LatestPreanalysisTask(r.Context(), store.UserID(r), r.URL.Query().Get("dataset_id"), r.URL.Query().Get("document_id"))
+	if err != nil {
+		common.ReplyErr(w, err.Error(), 400)
+		return
+	}
+	common.ReplyOK(w, task)
+}
 func CancelPreanalysisTask(w http.ResponseWriter, r *http.Request) {
 	task, err := service().CancelPreanalysisTask(r.Context(), store.UserID(r), mux.Vars(r)["task_id"])
 	if err != nil {

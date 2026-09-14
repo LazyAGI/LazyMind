@@ -737,6 +737,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/learning/review/sessions/{session_id}:complete", []string{"document.write"}, learning.CompleteReviewSession)
 	handleAPI(r, "POST", "/learning/review/sessions/{session_id}/answers", []string{"document.write"}, learning.AnswerReviewQuestion)
 	handleAPI(r, "POST", "/learning/preanalysis/tasks", []string{"document.write"}, learning.CreatePreanalysisTask)
+	handleAPI(r, "GET", "/learning/preanalysis/tasks/latest", []string{"document.read"}, learning.GetLatestPreanalysisTask)
 	handleAPI(r, "GET", "/learning/preanalysis/tasks/{task_id}", []string{"document.read"}, learning.GetPreanalysisTask)
 	handleAPI(r, "POST", "/learning/preanalysis/tasks/{task_id}:run", []string{"document.write"}, learning.RunPreanalysisTask)
 	handleAPI(r, "POST", "/learning/preanalysis/tasks/{task_id}:cancel", []string{"document.write"}, learning.CancelPreanalysisTask)

@@ -1723,5 +1723,6 @@
   "2002969": {"en-US":"The content is incompatible with the selected learning collection","zh-CN":"学习内容与所选学习集不兼容"},
   "2002970": {"en-US":"Document chunk generation was canceled","zh-CN":"文档切分生成已取消"},
   "2002971": {"en-US":"Document chunks are still being generated. Please retry shortly","zh-CN":"文档切分仍在生成，请稍后重试"},
-  "2002972": {"en-US":"The confirmed content is missing required fields","zh-CN":"确认的内容缺少必填字段"}
+  "2002972": {"en-US":"The confirmed content is missing required fields","zh-CN":"确认的内容缺少必填字段"},
+  "2002973": {"en-US":"Dataset ID and document ID are required","zh-CN":"知识库 ID 和文档 ID 不能为空"}
 }

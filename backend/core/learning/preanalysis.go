@@ -429,3 +429,15 @@ func (s *Service) GetPreanalysisTask(ctx context.Context, owner, id string) (Pre
 	err := s.db.WithContext(ctx).Where("id = ? AND owner_id = ?", id, owner).First(&task).Error
 	return task, err
 }
+
+func (s *Service) LatestPreanalysisTask(ctx context.Context, owner, datasetID, documentID string) (*PreanalysisTask, error) {
+	if strings.TrimSpace(datasetID) == "" || strings.TrimSpace(documentID) == "" {
+		return nil, errors.New("dataset_id and document_id are required")
+	}
+	var task PreanalysisTask
+	err := s.db.WithContext(ctx).Where("owner_id = ? AND dataset_id = ? AND document_id = ?", owner, datasetID, documentID).Order("created_at DESC").First(&task).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	return &task, err
+}

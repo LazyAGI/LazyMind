@@ -845,6 +845,7 @@ func init() {
 	registerAdditionalError("document chunks are still being generated; please retry shortly", http.StatusConflict, 2002971)
 	registerAdditionalErrorPattern("provided content misses required fields: %s", "provided content misses required fields", http.StatusBadRequest, 2002972)
 	registerAdditionalError("provided content misses required fields", http.StatusBadRequest, 2002972)
+	registerAdditionalError("dataset_id and document_id are required", http.StatusBadRequest, 2002973)
 }
 
 func registerAdditionalError(message string, status, code int) {
