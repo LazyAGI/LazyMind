@@ -111,6 +111,7 @@ func init() {
 	registerAdditionalError("disable tool failed", http.StatusInternalServerError, 2001361)
 	registerAdditionalError("dismiss failed", http.StatusInternalServerError, 2001362)
 	registerAdditionalError("display_name/content/category required", http.StatusBadRequest, 2001363)
+	registerAdditionalErrorAlias("display_name must be 255 characters or fewer", "Display name is too long", http.StatusBadRequest, 2000614)
 	registerAdditionalError("draft has no generated content to repair", http.StatusBadRequest, 2001364)
 	registerAdditionalError("draft_id required", http.StatusBadRequest, 2001365)
 	registerAdditionalError("draft_version required", http.StatusBadRequest, 2001366)
