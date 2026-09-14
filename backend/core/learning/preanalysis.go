@@ -158,10 +158,10 @@ func (s *Service) expandPreanalysisItem(ctx context.Context, owner, key string, 
 	}
 	obj, err := extractJSONObject(raw)
 	if err != nil {
-		repairPrompt := fmt.Sprintf(`Convert the response below into the required JSON object. Return JSON only.
-Required schema: {"items":[{"text":"...","language":"one of %s","subject_kind":"one of %s"}]}
-Invalid response:
-%s`, marshal(def.Languages), marshal(def.SubjectKinds), truncatePreanalysisResponse(raw))
+		repairPrompt := renderPrompt(def.Analysis.ExtractionRepairTemplate, map[string]string{
+			"languages": marshal(def.Languages), "subject_kinds": marshal(def.SubjectKinds),
+			"invalid_response": truncatePreanalysisResponse(raw),
+		})
 		raw, err = algo.GenerateLearning(ctx, algo.LearningGenerateRequest{Content: item.Text, UserInstruct: repairPrompt, LLMConfig: config})
 		if err != nil {
 			return fallbackPreanalysisCandidates(def, item), nil

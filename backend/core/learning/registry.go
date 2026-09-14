@@ -19,6 +19,7 @@ type AnalysisConfig struct {
 	Instruction               string            `json:"instruction"`
 	ResolutionInstruction     string            `json:"resolution_instruction"`
 	ExtractionPromptTemplate  string            `json:"extraction_prompt_template"`
+	ExtractionRepairTemplate  string            `json:"extraction_repair_template"`
 	ResolutionPromptTemplate  string            `json:"resolution_prompt_template"`
 	AllowPlainTextSingleField bool              `json:"allow_plain_text_single_field"`
 	MaxCandidates             int               `json:"max_candidates"`
@@ -78,6 +79,11 @@ EXISTING_VALUES: {{existing_values}}
 </CONTEXT>
 
 Now return only the JSON object.`
+
+const defaultExtractionRepairTemplate = `Convert the invalid response into the required JSON object. Return JSON only.
+Required schema: {"items":[{"text":"...","language":"one of {{languages}}","subject_kind":"one of {{subject_kinds}}"}]}
+Invalid response:
+{{invalid_response}}`
 
 type Capability struct {
 	Key                  string         `json:"key"`
@@ -140,7 +146,7 @@ var resolutionInstructions = map[string]string{
 }
 
 func termAnalysis(instruction, pattern string, kinds []string) AnalysisConfig {
-	return AnalysisConfig{Instruction: instruction, ExtractionPromptTemplate: defaultExtractionPromptTemplate, ResolutionPromptTemplate: defaultResolutionPromptTemplate, MaxCandidates: 8, MaxDocumentCandidates: 20, FallbackPattern: pattern, FallbackKinds: kinds,
+	return AnalysisConfig{Instruction: instruction, ExtractionPromptTemplate: defaultExtractionPromptTemplate, ExtractionRepairTemplate: defaultExtractionRepairTemplate, ResolutionPromptTemplate: defaultResolutionPromptTemplate, MaxCandidates: 8, MaxDocumentCandidates: 20, FallbackPattern: pattern, FallbackKinds: kinds,
 		LanguageAliases:    map[string]string{"zh": "zh-Hans", "zh-cn": "zh-Hans", "zh-hans": "zh-Hans", "en-us": "en", "en-gb": "en"},
 		SubjectKindAliases: map[string]string{"term": "word", "concept": "word", "词": "word", "词语": "word", "成语": "idiom"}}
 }
