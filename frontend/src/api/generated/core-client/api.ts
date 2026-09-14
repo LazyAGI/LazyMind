@@ -1025,7 +1025,17 @@ export type ConversationGroupCreatedByEnum = typeof ConversationGroupCreatedByEn
 
 export interface ConversationGroupAssignRequest {
     'conversation_id': string;
+    'position'?: ConversationGroupAssignRequestPositionEnum;
+    'target_conversation_id'?: string;
 }
+
+export const ConversationGroupAssignRequestPositionEnum = {
+    Before: 'before',
+    After: 'after'
+} as const;
+
+export type ConversationGroupAssignRequestPositionEnum = typeof ConversationGroupAssignRequestPositionEnum[keyof typeof ConversationGroupAssignRequestPositionEnum];
+
 export interface ConversationGroupCreateRequest {
     /**
      * Trimmed Unicode group name; unique ignoring case within the current user.

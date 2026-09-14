@@ -470,6 +470,14 @@
   }
 }
 
+.chat-model-provider-icon {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  object-fit: contain;
+  text-align: center;
+}
+
 .chat-model-option {
   display: flex;
   align-items: center;

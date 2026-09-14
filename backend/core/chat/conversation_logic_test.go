@@ -818,6 +818,26 @@ func TestBuildChatRequestBodyScopesDocumentPreviewRetrieval(t *testing.T) {
 	}
 }
 
+func TestBuildLazyChatRequestPreservesDocumentSelectionContext(t *testing.T) {
+	documentContext := map[string]any{
+		"dataset_id": "kb-1", "document_id": "doc-1",
+		"selected_text": "batch size tokens", "paragraph_text": "surrounding paragraph",
+	}
+	body := buildChatRequestBody(context.TODO(), nil, "conv-1", "", "translate", nil, map[string]any{
+		"document_context": documentContext,
+	}, nil, "", 1)
+	body["surface"] = "knowledge_document_preview"
+
+	req := buildLazyChatRequest(body)
+	if req.DocumentContext["selected_text"] != "batch size tokens" ||
+		req.DocumentContext["paragraph_text"] != "surrounding paragraph" {
+		t.Fatalf("document selection context was not forwarded: %#v", req.DocumentContext)
+	}
+	if req.Conversation.Surface != "knowledge_document_preview" {
+		t.Fatalf("conversation surface was not forwarded: %q", req.Conversation.Surface)
+	}
+}
+
 func TestBuildChatRequestBodyLoadsFiltersFromConversationDB(t *testing.T) {
 	db := orm.MigrateTestDB(t, &orm.Conversation{})
 	now := time.Now()

@@ -1175,7 +1175,9 @@ export default function ModelProviderPage({
       await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdDelete({
         modelProviderId: providerId,
         groupId: group.id,
-      });
+      }, group.models.some((model) => model.capability === "EMBEDDING")
+        ? { params: { confirm_indexed_downgrade: true } }
+        : undefined);
       setAddedProviderList((current) =>
         current
           .map((item) =>
@@ -1208,7 +1210,9 @@ export default function ModelProviderPage({
           modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdDelete({
             modelProviderId: provider.id,
             groupId: group.id,
-          })
+          }, group.models.some((model) => model.capability === "EMBEDDING")
+            ? { params: { confirm_indexed_downgrade: true } }
+            : undefined)
         )
       );
       setAddedProviderList((current) =>
@@ -1475,7 +1479,9 @@ export default function ModelProviderPage({
         modelProviderId: providerId,
         groupId,
         modelId: model.id,
-      });
+      }, model.capability === "EMBEDDING"
+        ? { params: { confirm_indexed_downgrade: true } }
+        : undefined);
       setAddedProviderList((current) =>
         current.map((provider) =>
           provider.id === providerId
@@ -1559,7 +1565,10 @@ export default function ModelProviderPage({
                             okButtonProps={{ danger: true }}
                             okText={t("modelProvider.remove")}
                             title={t("modelProvider.confirmRemoveProvider", { name: section.displayName })}
-                            description={t("modelProvider.confirmRemoveProviderDesc")}
+                            description={section.groups.some((group) =>
+                              group.models.some((model) => model.capability === "EMBEDDING"))
+                              ? t("modelProvider.confirmDeleteEmbeddingDesc")
+                              : t("modelProvider.confirmRemoveProviderDesc")}
                             onConfirm={() => deleteProviderSection(section)}
                           >
                             <Button aria-label={t("modelProvider.removeProviderAria", { name: section.displayName })} danger icon={<DeleteOutlined />} />
@@ -1619,7 +1628,9 @@ export default function ModelProviderPage({
                                         okButtonProps={{ danger: true }}
                                         okText={t("common.delete")}
                                         title={t("modelProvider.confirmDeleteGroup", { name: group.name })}
-                                        description={t("modelProvider.confirmDeleteGroupDesc")}
+                                        description={group.models.some((model) => model.capability === "EMBEDDING")
+                                          ? t("modelProvider.confirmDeleteEmbeddingDesc")
+                                          : t("modelProvider.confirmDeleteGroupDesc")}
                                         onConfirm={() => deleteProviderGroup(provider.id, group)}
                                       >
                                         <Button aria-label={t("modelProvider.deleteGroupAria", { name: group.name })} danger icon={<DeleteOutlined />} />
@@ -1662,7 +1673,9 @@ export default function ModelProviderPage({
                                                     okButtonProps={{ danger: true }}
                                                     okText={t("common.delete")}
                                                     title={t("modelProvider.confirmDeleteModel", { name: model.name })}
-                                                    description={t("modelProvider.confirmDeleteModelDesc")}
+                                                    description={model.capability === "EMBEDDING"
+                                                      ? t("modelProvider.confirmDeleteEmbeddingDesc")
+                                                      : t("modelProvider.confirmDeleteModelDesc")}
                                                     onConfirm={() => deleteCustomModel(provider.id, group.id, model)}
                                                   >
                                                     <Button aria-label={t("modelProvider.deleteModelAria", { name: model.name })} icon={<DeleteOutlined />} />

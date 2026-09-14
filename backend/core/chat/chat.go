@@ -61,6 +61,7 @@ type LazyChatRequest struct {
 	Agent           ChatAgentOptions           `json:"agent,omitempty"`
 	Workflow        ChatWorkflowOptions        `json:"workflow,omitempty"`
 	ModelContext    map[string]any             `json:"model_context,omitempty"`
+	DocumentContext map[string]any             `json:"document_context,omitempty"`
 
 	ExplicitResources ExplicitResourceBindings `json:"explicit_resource_bindings,omitempty"`
 }
@@ -86,6 +87,7 @@ type ChatConversationOptions struct {
 	ConversationID string         `json:"conversation_id,omitempty"`
 	UserID         string         `json:"user_id"`
 	Mode           string         `json:"mode,omitempty"`
+	Surface        string         `json:"surface,omitempty"`
 	IntentContext  map[string]any `json:"intent_context,omitempty"`
 }
 
@@ -426,8 +428,14 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 	if q, ok := body["user_query"].(string); ok {
 		req.Message.UserQuery = q
 	}
+	if context, ok := body["document_context"].(map[string]any); ok {
+		req.DocumentContext = context
+	}
 	if s, ok := body["session_id"].(string); ok {
 		req.Conversation.SessionID = s
+	}
+	if surface, ok := body["surface"].(string); ok {
+		req.Conversation.Surface = strings.TrimSpace(surface)
 	}
 	if runID, ok := body["run_id"].(string); ok {
 		req.Conversation.RunID = strings.TrimSpace(runID)

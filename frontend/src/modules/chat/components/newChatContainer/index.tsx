@@ -34,6 +34,7 @@ import { useThinkingCollapse } from "./hooks/useThinkingCollapse";
 import { useUserMessageEdit } from "./hooks/useUserMessageEdit";
 import type { ChatContainerProps, ChatImperativeProps } from "./types";
 import { useConversationTrail } from "./hooks/useConversationTrail";
+import { ChatServiceApi } from "@/modules/chat/utils/request";
 import { mergeConversationTrailIntoMessageList } from "@/modules/chat/utils/message";
 import type { ChatSource } from "@/modules/chat/utils/sourceAdapter";
 import { foldSessionPerformanceStats } from "@/modules/chat/utils/performanceStats";
@@ -133,6 +134,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
       setChatConfigFn,
       knowledgeRefreshKey,
       allowKnowledgeBaseSelection = true,
+      allowMentions = true,
       embeddingReady,
       multimodalEmbeddingReady,
       rerankReady,
@@ -308,6 +310,27 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
       },
       [chatContentRef],
     );
+
+    const trailLocateRequestRef = useRef(0);
+    useEffect(() => {
+      trailLocateRequestRef.current += 1;
+      return () => { trailLocateRequestRef.current += 1; };
+    }, [sessionId]);
+
+    const loadTrailHistory = async (historyId: string) => {
+      const id = conversation.currentConversationIdRef.current;
+      if (!id) return false;
+      const request = ++trailLocateRequestRef.current;
+      try {
+        const response = await ChatServiceApi().conversationServiceGetConversationHistory({ name: id, anchorHistoryId: historyId });
+        if (request !== trailLocateRequestRef.current || conversation.currentConversationIdRef.current !== id) return false;
+        conversation.mergeHistoryPage(id, response.data.history || []);
+        return true;
+      } catch {
+        if (request === trailLocateRequestRef.current) message.error(t("chat.fork.historyLoadFailed"));
+        return false;
+      }
+    };
 
     const trailRefreshKey = `${conversation.messageList.length}:${conversation.isStreaming ? "streaming" : "idle"}`;
     const conversationTrail = useConversationTrail({
@@ -509,7 +532,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
       });
     }, [clearCiteMessages, sendMessage, t]);
 
-    const sourcePanel = sourcePanelSources.length > 0 ? (
+    const sourcePanel = !props.onOpenSources && sourcePanelSources.length > 0 ? (
       <ChatSourcePanel
         sources={sourcePanelSources}
         onClose={() => setSourcePanelSources([])}
@@ -521,7 +544,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
         className="chat-chat-container"
         onWheelCapture={handleConversationWheel}
       >
-        <div className={`chat-box${sourcePanelSources.length && !props.sourcePanelOverlay ? " has-source-panel" : ""}`}>
+        <div className={`chat-box${sourcePanelSources.length && !props.onOpenSources && !props.sourcePanelOverlay ? " has-source-panel" : ""}`}>
           <div className="chat-main-column">
             <MessageList
               onFork={props.onFork}
@@ -562,7 +585,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
               updateAssistantMessage={conversation.updateAssistantMessage}
               onCiteMessage={handleAddCiteMessage}
               onOpenSideChat={onOpenSideChat}
-              onOpenSources={setSourcePanelSources}
+              onOpenSources={props.onOpenSources ?? setSourcePanelSources}
               onScroll={conversation.scroll.handleScroll}
               chatContentRef={conversation.scroll.chatContentRef}
               sessionId={sessionId}
@@ -593,6 +616,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
             />
 
             <ChatInput
+              sideChatAction={props.sideChatAction}
               value={conversation.content}
               onChange={conversation.setContent}
               onSend={sendMessage}
@@ -611,6 +635,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
               setChatConfigFn={setChatConfigFn}
               knowledgeRefreshKey={knowledgeRefreshKey}
               allowKnowledgeBaseSelection={allowKnowledgeBaseSelection}
+              allowMentions={allowMentions}
               embeddingReady={embeddingReady}
               multimodalEmbeddingReady={multimodalEmbeddingReady}
               rerankReady={rerankReady}
@@ -671,6 +696,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
           loading={conversationTrail.loading}
           error={conversationTrail.error}
           onRetry={conversationTrail.retry}
+          onLocate={loadTrailHistory}
         />
       </div>
     );
