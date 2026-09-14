@@ -16,6 +16,7 @@ from .stream_scanner import (
     BasePlugin,
     IncrementalScanner,
     MarkdownImageHoldPlugin,
+    transform_editable_fence_spans,
     transform_outside_markdown_code,
 )
 
@@ -656,7 +657,11 @@ def rewrite_citations(
         rewritten_prose = CITATION_PATTERN.sub(_replace, prose)
         return SOURCE_LINK_PATTERN.sub(_replace_link, rewritten_prose)
 
+    def _strip_markers(span: str) -> str:
+        return SOURCE_LINK_PATTERN.sub('', CITATION_PATTERN.sub('', span))
+
     rewritten = transform_outside_markdown_code(text, _rewrite_prose)
+    rewritten = transform_editable_fence_spans(rewritten, _strip_markers)
 
     return rewritten, list(collected.values())
 
@@ -728,6 +733,15 @@ class ConfigCitationPlugin(BasePlugin):
                 return open_bracket
         if buf.endswith('['):
             return len(buf) - 1
+        return None
+
+    def match_in_code(self, src: str, pos: int):
+        link_match = self._link_pat.match(src, pos)
+        if link_match:
+            return (link_match.end(), '')
+        match = self._pat.match(src, pos)
+        if match:
+            return (match.end(), '')
         return None
 
 

@@ -136,6 +136,23 @@ def test_incremental_scanner_does_not_rewrite_citations_in_fenced_code():
     assert '#source-' not in text
 
 
+def test_incremental_scanner_strips_citations_inside_editable_fences():
+    scanner, plugin = _source_scanner_with_plugin()
+    chunks = ['```edit', 'able\nDraft [[1.', '1]] and [1](#source-1.1 "Source.md")\n```\nsee [[1.1]]']
+    text = ''.join(
+        part
+        for chunk in chunks
+        for _, part in scanner.feed(chunk)
+    )
+    text += ''.join(part for _, part in scanner.flush())
+
+    assert '```editable\nDraft  and \n```' in text
+    assert '[[1.1]]' not in text.split('```')[1]
+    assert text.endswith('[1](#source-1.1 "Source.md")')
+    assert plugin.streamed_indices == ('1.1',)
+    assert plugin.collect()[0]['index'] == '1.1'
+
+
 def test_incremental_scanner_rewrites_citations_after_fenced_code():
     scanner = _source_scanner()
     text = ''.join(part for _, part in scanner.feed('```\n[[1.1]]\n```\nsee [[1.1]]'))

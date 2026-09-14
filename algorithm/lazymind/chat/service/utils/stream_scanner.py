@@ -24,6 +24,9 @@ class BasePlugin(ABC):
     def last_incomplete_pos(self, buf: str) -> int | None:
         return None
 
+    def match_in_code(self, src: str, pos: int) -> Tuple[int, str] | None:
+        return None
+
     def collect(self) -> List[Dict[str, str]]:
         return []
 
@@ -119,6 +122,11 @@ class MarkdownCodeScan:
     hold_from: int | None = None
 
 
+def fence_language(info: str) -> str:
+    token = info.strip().split(None, 1)
+    return token[0] if token else ''
+
+
 @dataclass
 class MarkdownCodeState:
     """Track Markdown fenced and inline code across incremental chunks."""
@@ -126,19 +134,30 @@ class MarkdownCodeState:
     inline_ticks: int = 0
     fence_char: str | None = None
     fence_len: int = 0
+    fence_info: str = ''
     line_prefix_spaces: int | None = 0
 
     @property
     def active(self) -> bool:
         return bool(self.inline_ticks or self.fence_char)
 
+    @property
+    def is_editable_fence(self) -> bool:
+        return bool(self.fence_char) and self.fence_info.casefold() == 'editable'
+
     def copy(self) -> 'MarkdownCodeState':
         return MarkdownCodeState(
             inline_ticks=self.inline_ticks,
             fence_char=self.fence_char,
             fence_len=self.fence_len,
+            fence_info=self.fence_info,
             line_prefix_spaces=self.line_prefix_spaces,
         )
+
+    def _clear_fence(self) -> None:
+        self.fence_char = None
+        self.fence_len = 0
+        self.fence_info = ''
 
     def _consume_char(self, char: str) -> None:
         if char == '\n':
@@ -188,8 +207,7 @@ class MarkdownCodeState:
                     if not suffix.strip(' \t'):
                         if line_end == -1 and not final:
                             return MarkdownCodeScan(in_code, states, hold_from=i)
-                        state.fence_char = None
-                        state.fence_len = 0
+                        state._clear_fence()
             elif state.inline_ticks:
                 if char == '`' and run_len == state.inline_ticks:
                     state.inline_ticks = 0
@@ -198,8 +216,14 @@ class MarkdownCodeState:
                 and run_len >= 3
                 and char in ('`', '~')
             ):
+                line_end = text.find('\n', run_end)
+                if line_end == -1 and not final:
+                    return MarkdownCodeScan(in_code, states, hold_from=i)
                 state.fence_char = char
                 state.fence_len = run_len
+                state.fence_info = fence_language(
+                    text[run_end:line_end if line_end != -1 else len(text)],
+                )
             elif char == '`':
                 state.inline_ticks = run_len
 
@@ -226,6 +250,26 @@ def transform_outside_markdown_code(content: str, transform) -> str:
             end += 1
         fragment = content[start:end]
         output.append(fragment if is_code else transform(fragment))
+        start = end
+    return ''.join(output)
+
+
+def transform_editable_fence_spans(content: str, transform) -> str:
+    """Apply ``transform`` only to `` ```editable `` / ``~~~editable`` spans."""
+
+    scan = MarkdownCodeState().scan(content, final=True)
+    output: list[str] = []
+    start = 0
+    while start < len(content):
+        is_code = scan.in_code[start]
+        end = start + 1
+        while end < len(content) and scan.in_code[end] == is_code:
+            end += 1
+        fragment = content[start:end]
+        editable = any(
+            state.is_editable_fence for state in scan.states[start + 1:end + 1]
+        )
+        output.append(transform(fragment) if is_code and editable else fragment)
         start = end
     return ''.join(output)
 
@@ -269,11 +313,16 @@ class IncrementalScanner:
         if not final:
             for pl in self.plugins:
                 pos = pl.last_incomplete_pos(self.buf)
-                if (
-                    pos is not None
-                    and pos < cut
-                    and (pos >= len(code_scan.in_code) or not code_scan.in_code[pos])
-                ):
+                if pos is None or pos >= cut:
+                    continue
+                in_code_at_pos = (
+                    pos < len(code_scan.in_code) and code_scan.in_code[pos]
+                )
+                editable_at_pos = (
+                    pos < len(code_scan.states)
+                    and code_scan.states[pos].is_editable_fence
+                )
+                if not in_code_at_pos or editable_at_pos:
                     cut = pos
             for tag in (_THINK_OPEN, _THINK_CLOSE):
                 pos = self._partial_tag_start(self.buf, tag)
@@ -304,8 +353,28 @@ class IncrementalScanner:
                 self.state = 'BODY'
                 continue
 
-            # ---- markdown code: skip plugins inside inline/fenced spans ----
+            # ---- markdown code: skip plugins, except dropping citations
+            # inside editable writing fences ----
             if in_code:
+                if code_scan.states[i].is_editable_fence:
+                    handled = False
+                    for pl in self.plugins:
+                        if self.buf[i] not in pl.prefix_set:
+                            continue
+                        res = pl.match_in_code(self.buf, i)
+                        if res:
+                            end, replacement = res
+                            if end > cut:
+                                i = cut
+                                break
+                            if i > seg_start:
+                                out.append((self._field(), self.buf[seg_start:i]))
+                            if replacement:
+                                out.append((self._field(), replacement))
+                            i, seg_start, handled = end, end, True
+                            break
+                    if handled:
+                        continue
                 i += 1
                 continue
 

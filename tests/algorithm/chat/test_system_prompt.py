@@ -60,6 +60,7 @@ def test_main_chat_prompt_describes_editable_writing_blocks() -> None:
     assert '# Editable writing blocks' in prompt
     assert '```editable' in prompt
     assert 'articles, marketing or sales copy' in prompt
+    assert 'Do not put citation refs or source links' in prompt
 
 
 def test_system_prompt_does_not_embed_tool_specific_web_guidance() -> None:

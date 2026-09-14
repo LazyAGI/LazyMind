@@ -216,6 +216,24 @@ def test_rewrite_citations_keeps_markers_in_gfm_tables():
     )
 
 
+def test_rewrite_citations_strips_markers_inside_editable_fences():
+    from lazymind.chat.service.utils.citations import rewrite_citations
+
+    state = _state()
+    first = register_external_search_result({
+        'title': 'docs',
+        'url': 'https://docs.python.org/',
+        'snippet': 'python',
+    }, state)
+    rewritten, collected = rewrite_citations(
+        f'```editable\nDraft {first["ref"]} and [1](#source-1.1 "docs")\n```\n\nSee {first["ref"]}.',
+        state,
+    )
+    assert '```editable\nDraft  and \n```' in rewritten
+    assert rewritten.endswith('[1](#source-1.1 "docs").')
+    assert [item['index'] for item in collected] == ['1.1']
+
+
 def test_rewrite_citations_does_not_rewrite_fenced_code():
     from lazymind.chat.service.utils.citations import rewrite_citations
 
