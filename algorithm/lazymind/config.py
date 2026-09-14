@@ -275,10 +275,11 @@ config.add(
         '(deterministic tool-result prune/compact and summary).'
     ),
 )
-config.add('context_compression_default_max_input_tokens', int, 64000,
+config.add('context_compression_default_max_input_tokens', int, 131072,
            'CONTEXT_COMPRESSION_DEFAULT_MAX_INPUT_TOKENS',
            description=(
-               'Fallback max input tokens when llm_config/catalog does not provide one.'
+               'Fallback max input tokens (128K) when llm_config does not provide one. '
+               'Must match backend DefaultLLMMaxInputTokens.'
            ))
 config.add('context_compression_trigger_ratio', float, 0.9, 'CONTEXT_COMPRESSION_TRIGGER_RATIO',
            description='Compress when estimated tokens reach this fraction of the effective input budget.')

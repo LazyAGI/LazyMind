@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from lazymind.common.integrations.remote_fs import RemoteFS
 
 
@@ -164,3 +166,78 @@ def test_remote_fs_write_mkdir_rm_and_trash_use_core_api(monkeypatch):
             {'path': 'skills/a/b'},
         ),
     ]
+
+
+@pytest.fixture
+def materialize_requests(monkeypatch):
+    import lazymind.common.integrations.remote_fs as remote_fs_module
+
+    calls, responses = [], []
+    monkeypatch.setattr(remote_fs_module.lazyllm, 'globals', {
+        'agentic_config': {'user_id': 'user-1', 'session_id': 'session-1'},
+    })
+
+    def request(method, url, **kwargs):
+        calls.append({'method': method, 'url': url, **kwargs})
+        assert responses, 'unexpected remote-fs request'
+        return responses.pop(0)
+
+    monkeypatch.setattr(remote_fs_module.requests, 'request', request)
+    RemoteFS.clear_instance_cache()
+    yield calls, responses
+    RemoteFS.clear_instance_cache()
+
+
+def test_materialize_dir_recursively_downloads_files(materialize_requests, tmp_path):
+    calls, responses = materialize_requests
+    responses.extend([
+        _Response({
+            'items': [
+                {'name': 'skills/coding/pkg/SKILL.md', 'type': 'file', 'size': 12},
+                {'name': 'skills/coding/pkg/scripts', 'type': 'directory', 'size': 0},
+            ],
+        }),
+        _Response(content=b'---\nname: pkg\n---\nBody\n'),
+        _Response({
+            'items': [
+                {'name': 'skills/coding/pkg/scripts/check.py', 'type': 'file', 'size': 12},
+            ],
+        }),
+        _Response(content=b'print("ok")\n'),
+    ])
+
+    result = RemoteFS(base_url='http://core').materialize_dir(
+        'remote://skills/coding/pkg',
+        str(tmp_path),
+    )
+
+    assert result['materialized'] is True
+    assert result['files'] == ['SKILL.md', 'scripts/check.py']
+    assert (tmp_path / 'SKILL.md').read_text(encoding='utf-8') == '---\nname: pkg\n---\nBody\n'
+    assert (tmp_path / 'scripts' / 'check.py').read_text(encoding='utf-8') == 'print("ok")\n'
+    assert [call['params']['path'] for call in calls] == [
+        'skills/coding/pkg',
+        'skills/coding/pkg/SKILL.md',
+        'skills/coding/pkg/scripts',
+        'skills/coding/pkg/scripts/check.py',
+    ]
+    assert (tmp_path / 'scripts').is_dir()
+
+
+def test_materialize_dir_rejects_paths_outside_local_dir(materialize_requests, tmp_path):
+    remote_name = 'skills/coding/pkg/../escape.py'
+    calls, responses = materialize_requests
+    responses.append(_Response({
+        'items': [
+            {'name': remote_name, 'type': 'file', 'size': 12},
+        ],
+    }))
+
+    with pytest.raises(RuntimeError, match='invalid relative path'):
+        RemoteFS(base_url='http://core').materialize_dir(
+            'remote://skills/coding/pkg',
+            str(tmp_path),
+        )
+
+    assert len(calls) == 1
+    assert not (tmp_path.parent / 'escape.py').exists()

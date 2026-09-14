@@ -1,3 +1,4 @@
+import { useChatMessageStore } from "@/modules/chat/store/chatMessage";
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import "./index.scss";
 import DisclaimerIcon from "../../assets/icons/disclaimer_icon.svg?react";
@@ -14,6 +15,8 @@ import {
   CHAT_NEW_RUN_IN_BACKGROUND_KEY,
   CHAT_SELECT_CONVERSATION_EVENT,
   selectChatConversationFilter,
+  CHAT_SUBMIT_INPUT_EVENT,
+  CHAT_PENDING_CONVERSATION_PROMPT_KEY,
 } from "@/modules/chat/constants/chat";
 import { allowedUploadTypes } from "@/modules/chat/components/ImageUpload";
 import { useTranslation } from "react-i18next";
@@ -93,10 +96,25 @@ const NewChatPage = () => {
     const currentHour = new Date().getHours();
     return currentHour < 12 ? t("chat.greetingMorning") : t("chat.greetingAfternoon");
   };
-  const [inputValue, setInputValue] = useState("");
+  const [inputValue, setInputValue] = useState(() => {
+    const pending = sessionStorage.getItem(CHAT_PENDING_CONVERSATION_PROMPT_KEY) || "";
+    sessionStorage.removeItem(CHAT_PENDING_CONVERSATION_PROMPT_KEY);
+    return pending;
+  });
+  const shouldAutoSendGroupPromptRef = useRef(Boolean(inputValue));
   const [isChatContent, setIsChatContent] = useState(
-    Boolean(routeConversationId),
+    Boolean(routeConversationId || useChatMessageStore.getState().pendingMessage),
   );
+
+  useEffect(() => {
+    if (!shouldAutoSendGroupPromptRef.current) return;
+    shouldAutoSendGroupPromptRef.current = false;
+    const timer = window.setTimeout(
+      () => window.dispatchEvent(new Event(CHAT_SUBMIT_INPUT_EVENT)),
+      0,
+    );
+    return () => window.clearTimeout(timer);
+  }, []);
   const [chatConfig, setChatConfig] = useState<ChatConfig>({});
   const requestedShowcaseEntry = parseShowcaseEntryType(
     searchParams.get(SHOWCASE_ENTRY_QUERY_PARAM),

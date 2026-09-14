@@ -89,6 +89,17 @@ function taskEntry(count: number) {
   return screen.getByRole("button", { name: `后台任务，${count} 个任务进行中` });
 }
 
+function mockActiveInstall(id: string) {
+  vi.mocked(marketApi.listKnowledgeMarketInstalls).mockResolvedValue({
+    total: 1,
+    items: [{
+      market_item_id: id, name: `知识库 ${id}`, active: true,
+      dataset_id: "dataset", domain: "测试", icon: "", install_state: "vectorizing",
+      installed_version: "1", updated_at: "2026-09-03",
+    }],
+  });
+}
+
 async function mountPage() {
   await act(async () => {
     render(
@@ -160,6 +171,47 @@ afterEach(() => {
 });
 
 describe("knowledge market background tasks", () => {
+  it.each([
+    ["install", "安装", "安装中"],
+    ["update", "检查更新", "更新中"],
+  ])("labels a submitted %s task in its card and detail", async (id, action, label) => {
+    await mountPage();
+    await click(screen.getByRole("tab", { name: /知识广场/ }));
+    const card = screen.getByRole("button", { name: `查看知识库 ${id}详情` });
+    mockActiveInstall(id);
+    await click(within(card).getByRole("button", { name: action }));
+    expect(within(card).getByRole("button", { name: new RegExp(`${label}$`) })).toBeDisabled();
+    vi.mocked(marketApi.getKnowledgeMarketItem).mockResolvedValue({
+      category: "industry", data_source: "官方", description: "测试知识库",
+      domain: "测试", icon: "", id, name: `知识库 ${id}`, sample_questions: [],
+      tags: [], updated_at: "2026-09-03", version: "2", version_date: "", version_note: "",
+      created_at: "2026-09-03", package_revision: "2", package_url: "", sort_order: 0,
+    });
+    await click(card);
+    expect(within(screen.getByRole("dialog")).getByRole("button", {
+      name: new RegExp(`${label}$`),
+    })).toBeDisabled();
+  });
+
+  it("restores the updating label while parsing continues after job success", async () => {
+    mockActiveInstall("update");
+    jobs.set("update", task("update", {
+      job_type: "knowledge_market_update", job_status: "succeeded",
+    }));
+    await mountPage();
+    await click(screen.getByRole("tab", { name: /知识广场/ }));
+    const card = screen.getByRole("button", { name: "查看知识库 update详情" });
+    expect(within(card).getByRole("button", { name: /更新中$/ })).toBeDisabled();
+  });
+
+  it("uses a neutral processing label when the active task type is unavailable", async () => {
+    mockActiveInstall("update");
+    await mountPage();
+    await click(screen.getByRole("tab", { name: /知识广场/ }));
+    const card = screen.getByRole("button", { name: "查看知识库 update详情" });
+    expect(within(card).getByRole("button", { name: /处理中$/ })).toBeDisabled();
+  });
+
   it("tracks install and update counts, shows task details, and announces completion at bottom right", async () => {
     await mountPage();
     expect(taskEntry(0).querySelector(".ant-badge-count")).toBeNull();

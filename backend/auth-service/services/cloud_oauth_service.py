@@ -10,7 +10,7 @@ from sqlalchemy.exc import IntegrityError
 
 from core.cloud_crypto import decrypt_json, encrypt_json
 from core.database import SessionLocal
-from core.errors import AppException, ErrorCodes, raise_error
+from core.errors import AppException, ErrorCodes, app_exception_from_exception, raise_error
 from repositories import CloudAuthConnectionRepository
 from services.cloud_oauth_provider import (
     CloudAccountProfile,
@@ -599,6 +599,15 @@ class CloudOAuthService:
         if is_mail_imap_provider(provider_impl.provider_name()):
             options.setdefault('chat_enabled', True)
             options.setdefault('chatEnabled', True)
+            existing_id = self._existing_connection_id_for_client(
+                owner_user_id=_normalize_owner_user_id(owner_user_id),
+                provider=provider_impl.provider_name(),
+                auth_mode=mode,
+                client_id=cid,
+            )
+            if existing_id:
+                # Login first so a bad auth code cannot overwrite a working mailbox.
+                self._imap_login_or_raise(provider_impl, cid, csec)
         connection_id = self._create_connection_record(
             provider=provider_impl.provider_name(),
             tenant_id=tid,
@@ -1571,6 +1580,67 @@ class CloudOAuthService:
         if (getattr(row, 'status', '') or '').strip().upper() != 'ACTIVE':
             raise_error(ErrorCodes.CLOUD_CONNECTION_NOT_FOUND)
 
+    def _existing_connection_id_for_client(
+        self,
+        *,
+        owner_user_id: str,
+        provider: str,
+        auth_mode: str,
+        client_id: str,
+    ) -> str:
+        normalized_owner = _normalize_owner_user_id(owner_user_id)
+        normalized_provider = (provider or '').strip().lower()
+        normalized_auth_mode = (auth_mode or '').strip().lower()
+        normalized_client_id = (client_id or '').strip()
+        with SessionLocal() as db:
+            row = CloudAuthConnectionRepository.find_by_client_identity(
+                db,
+                owner_user_id=normalized_owner,
+                provider=normalized_provider,
+                auth_mode=normalized_auth_mode,
+                client_id=normalized_client_id,
+            )
+            if row is not None:
+                return row.connection_id
+            legacy_rows = CloudAuthConnectionRepository.list_without_client_identity(
+                db,
+                owner_user_id=normalized_owner,
+                provider=normalized_provider,
+                auth_mode=normalized_auth_mode,
+            )
+            for candidate in legacy_rows:
+                try:
+                    saved_credential = self._decrypt_payload(
+                        candidate.credential_ciphertext,
+                        field_name='credential',
+                    )
+                except AppException:
+                    continue
+                if (saved_credential.get('client_id') or '').strip() == normalized_client_id:
+                    return candidate.connection_id
+        return ''
+
+    def _imap_login_or_raise(self, provider_impl: CloudOAuthProvider, email: str, secret: str):
+        try:
+            return provider_impl.acquire_tenant_access_token(client_id=email, client_secret=secret)
+        except Exception as exc:
+            if isinstance(exc, AppException):
+                raise
+            mapped = app_exception_from_exception(exc)
+            if mapped.code == ErrorCodes.INTERNAL_ERROR[1]:
+                raise_error(ErrorCodes.MAIL_IMAP_LOGIN_FAILED, extra_msg=_truncate_error(exc))
+            raise mapped
+
+    def _discard_failed_imap_connection(self, connection_id: str) -> None:
+        with SessionLocal() as db:
+            row = CloudAuthConnectionRepository.get_by_id(db, connection_id)
+            if row is None:
+                return
+            if (row.provider_account_id or '').strip():
+                return
+            CloudAuthConnectionRepository.delete(db, row)
+            self._cache_delete(connection_id)
+
     def _activate_imap_mail_connection(
         self,
         *,
@@ -1581,17 +1651,10 @@ class CloudOAuthService:
         secret: str,
     ) -> dict[str, Any]:
         try:
-            token = provider_impl.acquire_tenant_access_token(client_id=email, client_secret=secret)
-        except Exception as exc:
-            with SessionLocal() as db:
-                row = CloudAuthConnectionRepository.get_by_id(db, connection_id)
-                if row is not None:
-                    row.status = 'ERROR'
-                    row.last_error = _truncate_error(exc)
-                    CloudAuthConnectionRepository.save(db, row)
-            if isinstance(exc, AppException):
-                raise
-            raise_error(ErrorCodes.MAIL_IMAP_LOGIN_FAILED, extra_msg=_truncate_error(exc))
+            token = self._imap_login_or_raise(provider_impl, email, secret)
+        except Exception:
+            self._discard_failed_imap_connection(connection_id)
+            raise
         profile = CloudAccountProfile()
         if hasattr(provider_impl, 'account_profile_from_email'):
             profile = provider_impl.account_profile_from_email(email)

@@ -958,6 +958,21 @@ async def _handle_chat_impl(
         ), run_id=run_id)
     confirm_id = (runtime.mail_draft_confirm_id or '').strip()
     confirm_revision = runtime.mail_draft_confirm_revision
+    mailbox_confirm = (runtime.mail_mailbox_confirm or '').strip()
+    mailbox_confirm_draft_id = (runtime.mail_mailbox_confirm_draft_id or '').strip()
+    if mailbox_confirm:
+        draft_note = (
+            f' for draft {mailbox_confirm_draft_id}' if mailbox_confirm_draft_id else ''
+        )
+        notice = (
+            f'\n\n[system] The user selected sending mailbox {mailbox_confirm}'
+            f'{draft_note}. '
+            'Call MailToolkit_update_draft with that draft_id and mailbox now so the '
+            'send preview card appears. Do not compose a new draft and do not guess '
+            'another mailbox.'
+        )
+        query = f'{query}{notice}'
+        language_query = f'{language_query}{notice}'
     if confirm_id:
         revision_note = (
             f' revision {int(confirm_revision)}' if confirm_revision else ''
@@ -1039,6 +1054,9 @@ async def _handle_chat_impl(
         'query': query or '',
         'mail_draft_confirm_id': (runtime.mail_draft_confirm_id or '').strip(),
         'mail_draft_confirm_revision': runtime.mail_draft_confirm_revision,
+        'mail_draft_patch': runtime.mail_draft_patch or {},
+        'mail_mailbox_confirm': (runtime.mail_mailbox_confirm or '').strip(),
+        'mail_mailbox_confirm_draft_id': (runtime.mail_mailbox_confirm_draft_id or '').strip(),
     }
     # Inject per-conversation workflow flags from Go (resolved from conversations table).
     # enable_workflow=None means "not set"; default to True so behaviour is unchanged

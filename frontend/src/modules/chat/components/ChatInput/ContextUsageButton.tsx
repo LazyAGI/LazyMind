@@ -28,8 +28,8 @@ const COLORS = ["#777", "#9588d8", "#55a982", "#c58931", "#3f82ad", "#548994", "
 
 function formatTokens(value?: number) {
   const count = value ?? 0;
-  if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
-  if (count >= 1_000) return `${(count / 1_000).toFixed(1)}K`;
+  if (count >= 1024 * 1024) return `${(count / (1024 * 1024)).toFixed(1)}M`;
+  if (count >= 1024) return `${(count / 1024).toFixed(1)}K`;
   return String(count);
 }
 

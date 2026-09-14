@@ -20,6 +20,7 @@ const (
 	ErrorCodeHandlerNotFound = "handler_not_found"
 	ErrorCodeHandlerFailed   = "handler_failed"
 	ErrorCodeLockExpired     = "lock_expired"
+	ErrorCodeCanceled        = "canceled"
 )
 
 type Handler func(ctx context.Context, job Job, reporter Reporter) (Result, error)

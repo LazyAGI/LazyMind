@@ -533,7 +533,11 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
             if (mediaDependency) {
               window.dispatchEvent(
                 new CustomEvent(CHAT_MEDIA_CAPABILITY_MISSING_EVENT, {
-                  detail: mediaDependency,
+                  detail: {
+                    ...mediaDependency,
+                    conversation_id: conversationId,
+                    failure_id: taskId,
+                  },
                 }),
               );
             }

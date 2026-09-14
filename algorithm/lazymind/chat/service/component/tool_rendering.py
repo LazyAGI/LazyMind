@@ -399,6 +399,11 @@ def _tool_result_status(result: Any) -> str:
             return 'needs_approval'
         if result.get('ok') is False:
             return 'failed'
+        if result.get('status') == 'mailbox_not_enabled':
+            return 'failed'
+        payload = result.get('value')
+        if isinstance(payload, dict) and payload.get('status') == 'mailbox_not_enabled':
+            return 'failed'
     return 'ok'
 
 
@@ -541,6 +546,15 @@ def _tool_result_mapping(value: Any) -> dict[str, Any] | None:
 
 def _tool_result_count(value: Any) -> int | None:
     payload = _normalized_success_business_value(value)
+    if isinstance(payload, dict):
+        items = payload.get('items')
+        if isinstance(items, list):
+            return len(items)
+        for key in ('total', 'total_count', 'count'):
+            raw = payload.get(key)
+            if isinstance(raw, int):
+                return raw
+        return None
     if not isinstance(payload, list):
         return None
     return sum(

@@ -1,0 +1,22 @@
+.conversation-group-picker {
+  width: 260px;
+  .conversation-group-picker-search { padding: 8px; }
+  .conversation-group-picker-list {
+    max-height: 320px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+  }
+  .ant-btn {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    height: 32px;
+    padding: 4px 12px;
+    text-align: left;
+    > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  }
+  .conversation-group-picker-footer { border-top: 1px solid var(--ant-color-border-secondary, #f0f0f0); padding: 4px 0; }
+  .conversation-group-picker-empty { padding: 12px; color: var(--ant-color-text-tertiary, #8c8c8c); font-size: 12px; }
+}

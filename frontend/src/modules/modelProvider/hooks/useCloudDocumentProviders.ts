@@ -39,6 +39,8 @@ import {
 import { useLocalDataSourceSettings } from "./useLocalDataSourceSettings";
 import { markCloudDocumentConnectionSuccess } from "../utils/cloudDocumentOnboarding";
 
+const MAIL_PROVIDERS = ["gmailimap", "qqmail", "qqexmail", "netease163", "neteaseqiye"] as const;
+
 export function useCloudDocumentProviders() {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -66,9 +68,7 @@ export function useCloudDocumentProviders() {
   >([]);
   const [googleDriveConnection, setGoogleDriveConnection] =
     useState<ManagementContext["notionOauthConnection"]>(null);
-  const [mailConnections, setMailConnections] = useState<
-    NonNullable<ManagementContext["notionOauthConnection"]>[]
-  >([]);
+  const [mailAccounts, setMailAccounts] = useState<string[]>([]);
   const [oauthConnection, setOauthConnection] = useState<ManagementContext["oauthConnection"]>(null);
   const [oauthState, setOauthState] = useState<OAuthState>("pending");
   const [connectionVerified, setConnectionVerified] = useState(false);
@@ -100,12 +100,7 @@ export function useCloudDocumentProviders() {
   const isGoogleDriveAuthValid =
     googleDriveConnection?.status === "connected" &&
     Boolean(googleDriveConnection.connectionId);
-  const isMailConnected = mailConnections.length > 0;
-  const mailConnectionLabel = mailConnections
-    .map((item) => item.accountName)
-    .filter(Boolean)
-    .join("、");
-
+  const isMailAuthValid = mailAccounts.length > 0;
   const ctx = {} as ManagementContext;
   Object.assign(ctx, {
     t,
@@ -229,29 +224,6 @@ export function useCloudDocumentProviders() {
     }
   };
 
-  const refreshMailConnection = async () => {
-    try {
-      const connected: NonNullable<ManagementContext["notionOauthConnection"]>[] = [];
-      for (const provider of ["gmailimap", "qqmail", "qqexmail", "netease163", "neteaseqiye"] as const) {
-        const response =
-          await dataSourceCloudOauthApi.listConnectionsApiAuthserviceV1CloudConnectionsGet({
-            provider,
-            status: "ACTIVE",
-          });
-        for (const connection of getCloudConnectionItems(response.data)
-          .map((item) => mapCloudConnectionToDataSourceConnection(item, provider as never))
-          .filter(
-            (item) => item.status === "connected" && Boolean(item.connectionId),
-          )) {
-          connected.push(connection);
-        }
-      }
-      setMailConnections(connected);
-    } catch {
-      setMailConnections([]);
-    }
-  };
-
   const refreshGoogleDriveConnection = async () => {
     try {
       const response =
@@ -271,6 +243,28 @@ export function useCloudDocumentProviders() {
     }
   };
 
+  const refreshMailAccounts = async () => {
+    try {
+      const names: string[] = [];
+      for (const provider of MAIL_PROVIDERS) {
+        const response = await dataSourceCloudOauthApi.listConnectionsApiAuthserviceV1CloudConnectionsGet({
+          provider,
+          status: "ACTIVE",
+        });
+        const items = getCloudConnectionItems(response.data);
+        for (const item of items) {
+          const name = String(item.display_name || (item as { client_id?: string }).client_id || "").trim();
+          if (name) {
+            names.push(name);
+          }
+        }
+      }
+      setMailAccounts(names);
+    } catch {
+      setMailAccounts([]);
+    }
+  };
+
   const refreshPageData = async () => {
     setOauthLoading(true);
     try {
@@ -280,7 +274,7 @@ export function useCloudDocumentProviders() {
         ctx.refreshFeishuAuthAccounts(),
         ctx.refreshNotionAuthConnection(),
         refreshGoogleDriveConnection(),
-        refreshMailConnection(),
+        refreshMailAccounts(),
       ]);
     } finally {
       setOauthLoading(false);
@@ -461,13 +455,13 @@ export function useCloudDocumentProviders() {
     isFeishuAuthValid,
     isNotionAuthValid,
     isGoogleDriveAuthValid,
-    isMailConnected,
-    mailConnectionLabel,
+    isMailAuthValid,
     isFeishuSetupReady,
     isNotionSetupReady,
     validFeishuAccounts,
     notionOauthConnection,
     googleDriveConnection,
+    mailAccounts,
     handleManageFeishuAuth,
     handleManageLocalSource,
     handleManageGoogleDrive,

@@ -4,6 +4,14 @@ DROP INDEX IF EXISTS idx_vocabulary_review_session_word;
 DROP INDEX IF EXISTS idx_vocabulary_review_sessions_active;
 
 -- +migrate Dialect postgres
+ALTER TABLE plugin_sessions DROP COLUMN last_stopped_at;
+DROP TABLE IF EXISTS conversation_organizer_changes;
+DROP TABLE IF EXISTS conversation_organizer_candidates;
+DROP TABLE IF EXISTS conversation_organizer_snapshot_items;
+DROP TABLE IF EXISTS conversation_organizer_runs;
+DROP TABLE IF EXISTS conversation_group_states;
+DROP TABLE IF EXISTS conversation_group_members;
+DROP TABLE IF EXISTS conversation_groups;
 DROP TABLE IF EXISTS public.workflow_approval_preferences;
 ALTER TABLE public.task_center_tasks DROP CONSTRAINT IF EXISTS chk_tct_task_type;
 UPDATE public.task_center_tasks SET task_type = 'plugin_run' WHERE task_type = 'workflow_run';
@@ -112,6 +120,7 @@ ALTER TABLE conversations DROP COLUMN IF EXISTS chat_model_version;
 ALTER TABLE conversations DROP COLUMN IF EXISTS chat_model_snapshot;
 ALTER TABLE conversations DROP COLUMN IF EXISTS chat_model_id;
 ALTER TABLE conversations DROP COLUMN IF EXISTS chat_model_mode;
+ALTER TABLE conversations DROP COLUMN IF EXISTS unpinned_history_order;
 ALTER TABLE conversations DROP COLUMN IF EXISTS history_order;
 ALTER TABLE conversations DROP COLUMN IF EXISTS pinned_at;
 ALTER TABLE conversations DROP COLUMN IF EXISTS source_display_name;
@@ -145,6 +154,14 @@ ALTER TABLE plugin_session_steps
 DROP TABLE IF EXISTS workflow_events;
 DROP TABLE IF EXISTS workflow_commands;
 DROP TABLE IF EXISTS workflow_preparations;
+DROP INDEX IF EXISTS idx_plugins_source_skill;
+ALTER TABLE plugins
+    DROP COLUMN IF EXISTS source_draft_id,
+    DROP COLUMN IF EXISTS source_skill_tree_hash,
+    DROP COLUMN IF EXISTS source_skill_revision_no,
+    DROP COLUMN IF EXISTS source_skill_revision_id,
+    DROP COLUMN IF EXISTS source_skill_name,
+    DROP COLUMN IF EXISTS source_skill_id;
 DROP INDEX IF EXISTS idx_plugin_sessions_origin;
 ALTER TABLE plugin_sessions
     DROP COLUMN IF EXISTS workflow_mode,
@@ -183,6 +200,7 @@ BEGIN
 END $$;
 
 -- +migrate Dialect sqlite
+ALTER TABLE plugin_sessions DROP COLUMN last_stopped_at;
 DROP TABLE IF EXISTS workflow_approval_preferences;
 UPDATE task_center_tasks SET task_type = 'plugin_run' WHERE task_type = 'workflow_run';
 
@@ -277,6 +295,7 @@ ALTER TABLE conversations DROP COLUMN chat_model_version;
 ALTER TABLE conversations DROP COLUMN chat_model_snapshot;
 ALTER TABLE conversations DROP COLUMN chat_model_id;
 ALTER TABLE conversations DROP COLUMN chat_model_mode;
+ALTER TABLE conversations DROP COLUMN unpinned_history_order;
 ALTER TABLE conversations DROP COLUMN history_order;
 ALTER TABLE conversations DROP COLUMN pinned_at;
 ALTER TABLE conversations DROP COLUMN source_display_name;
@@ -308,6 +327,13 @@ ALTER TABLE plugin_session_steps DROP COLUMN lease_owner;
 DROP TABLE IF EXISTS workflow_events;
 DROP TABLE IF EXISTS workflow_commands;
 DROP TABLE IF EXISTS workflow_preparations;
+DROP INDEX IF EXISTS idx_plugins_source_skill;
+ALTER TABLE plugins DROP COLUMN source_draft_id;
+ALTER TABLE plugins DROP COLUMN source_skill_tree_hash;
+ALTER TABLE plugins DROP COLUMN source_skill_revision_no;
+ALTER TABLE plugins DROP COLUMN source_skill_revision_id;
+ALTER TABLE plugins DROP COLUMN source_skill_name;
+ALTER TABLE plugins DROP COLUMN source_skill_id;
 DROP INDEX IF EXISTS idx_plugin_sessions_origin;
 ALTER TABLE plugin_sessions DROP COLUMN workflow_mode;
 ALTER TABLE plugin_sessions DROP COLUMN controller_host;
@@ -449,6 +475,13 @@ DELETE FROM user_selected_models WHERE model_type = 'conversation_metadata';
 
 -- +migrate Dialect sqlite
 DELETE FROM async_jobs WHERE job_type IN ('conversation.opening', 'conversation.opening.backfill');
+DROP TABLE IF EXISTS conversation_organizer_changes;
+DROP TABLE IF EXISTS conversation_organizer_candidates;
+DROP TABLE IF EXISTS conversation_organizer_snapshot_items;
+DROP TABLE IF EXISTS conversation_organizer_runs;
+DROP TABLE IF EXISTS conversation_group_states;
+DROP TABLE IF EXISTS conversation_group_members;
+DROP TABLE IF EXISTS conversation_groups;
 DROP TABLE IF EXISTS conversation_opening_metadata;
 DROP TABLE IF EXISTS conversation_opening_backfills;
 ALTER TABLE conversations DROP COLUMN title_revision;

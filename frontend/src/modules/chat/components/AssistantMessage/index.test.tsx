@@ -196,7 +196,7 @@ describe("AssistantMessage cancellation", () => {
     expect(screen.getByText("chat.runStatus.providerError")).toBeInTheDocument();
   });
 
-  it("opens a side chat with the selected text and source position", () => {
+  it.each(["completed", "running"])("opens a side chat from a %s answer with the selected text and source position", (runStatus) => {
     const onOpenSideChat = vi.fn();
     render(
       <AssistantMessage
@@ -206,8 +206,10 @@ describe("AssistantMessage cancellation", () => {
           seq: 7,
           role: "assistant",
           delta: "selected answer",
-          finish_reason:
-            ChatConversationsResponseFinishReasonEnum.FinishReasonStop,
+          run_status: runStatus,
+          finish_reason: runStatus === "completed"
+            ? ChatConversationsResponseFinishReasonEnum.FinishReasonStop
+            : ChatConversationsResponseFinishReasonEnum.FinishReasonUnspecified,
         }}
         index={0}
         length={1}

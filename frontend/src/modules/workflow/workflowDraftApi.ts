@@ -76,8 +76,9 @@ export interface WorkflowDraftRecord {
   state_layout_content: string;
   scenario_content: string;
   scripts_content: string;
-  // '' | 'generating' | 'brief_done' | 'skeleton_done' | 'state_done' | 'done' | 'failed'
+  // '' | 'analyzing' | 'generating' | 'brief_done' | 'skeleton_done' | 'state_done' | 'done' | 'failed'
   //   ''              — AI generation never triggered
+  //   'analyzing'     — Skill analysis / conversion fit check in progress
   //   'generating'    — Phase 0 (design brief) in progress
   //   'brief_done'    — Phase 0 complete; Phase 1 (skeleton) running
   //   'skeleton_done' — Phase 1 complete; workflow_yaml_content available; Phase 2 running
@@ -89,6 +90,11 @@ export interface WorkflowDraftRecord {
   generate_error: string;
   // Non-empty when generate_status === 'done' but Phase 2 had non-fatal field warnings.
   generate_warning: string;
+  generate_job_status?: string;
+  generate_progress?: number;
+  generate_progress_total?: number;
+  generate_attempt_count?: number;
+  generate_max_attempts?: number;
   // Phase 0 design brief Markdown (migration 20260709140000). Empty for old drafts.
   design_brief_content: string;
   // Source tracking.
@@ -187,6 +193,7 @@ export interface PublishedWorkflowVersion {
   revision_no: number;
   remote_root: string;
   enabled: boolean;
+  warnings?: WorkflowDiagnostic[];
 }
 
 export async function publishWorkflowDraft(id: string): Promise<PublishedWorkflowVersion> {
@@ -233,6 +240,8 @@ export interface UserWorkflowSetting {
   when_to_use: string; source_type: string; revision_id: string;
   revision_no: number; remote_root: string; enabled: boolean;
   call_mode?: WorkflowCallMode; status: string;
+  source_skill_id?: string; source_skill_name?: string; source_skill_revision_id?: string;
+  source_skill_revision_no?: number; source_skill_tree_hash?: string;
 }
 
 export type WorkflowCallMode = 'auto' | 'manual' | 'disabled';
@@ -250,6 +259,81 @@ export async function setUserWorkflowCallMode(workflowRef: string, callMode: Wor
   await axiosInstance.patch(`${coreBasePath}/chat/settings/workflows/${encodeURIComponent(workflowRef)}`, { call_mode: callMode });
 }
 
+export interface SkillLinkedWorkflow {
+  workflow_ref: string;
+  workflow_id: string;
+  name: string;
+  description: string;
+  when_to_use: string;
+  status: string;
+  enabled: boolean;
+  call_mode: WorkflowCallMode;
+  revision_id: string;
+  revision_no: number;
+  tree_hash: string;
+  source_skill_id: string;
+  source_skill_name: string;
+  source_skill_revision_id: string;
+  source_skill_revision_no: number;
+  source_skill_tree_hash: string;
+  current_skill_revision_id: string;
+  current_skill_revision_no: number;
+  current_skill_tree_hash: string;
+  source_is_current: boolean;
+  available: boolean;
+  unavailable_reason: string;
+}
+
+export interface SkillLinkedWorkflowsResponse {
+  skill_id: string;
+  skill_name: string;
+  workflows: SkillLinkedWorkflow[];
+}
+
+export async function listSkillLinkedWorkflows(skillId: string): Promise<SkillLinkedWorkflowsResponse> {
+  const resp = await axiosInstance.get<CoreResponse<SkillLinkedWorkflowsResponse>>(
+    `${coreBasePath}/skills/${encodeURIComponent(skillId)}/linked-workflows`,
+    { silentError: true } as RawAxiosRequestConfig,
+  );
+  return resp.data.data;
+}
+
+export interface SkillWorkflowPreflightCheck {
+  code: string;
+  severity: 'error' | 'warning' | string;
+  message: string;
+  suggestion?: string;
+  path?: string;
+}
+
+export interface SkillWorkflowPreflightResponse {
+  skill_id: string;
+  skill_name: string;
+  revision_id: string;
+  revision_no: number;
+  tree_hash: string;
+  status: 'pass' | 'warning' | 'blocked' | string;
+  summary: string;
+  checks: SkillWorkflowPreflightCheck[];
+  file_count: number;
+  skill_md_len: number;
+}
+
+export async function preflightSkillWorkflowConversion(skillId: string): Promise<SkillWorkflowPreflightResponse> {
+  try {
+    const resp = await axiosInstance.post<CoreResponse<SkillWorkflowPreflightResponse>>(
+      `${coreBasePath}/workflow-conversions:preflight`,
+      { skill_id: skillId },
+      { silentError: true } as RawAxiosRequestConfig,
+    );
+    return resp.data.data;
+  } catch (error) {
+    const data = (error as { response?: { data?: CoreResponse<SkillWorkflowPreflightResponse> } })?.response?.data?.data;
+    if (data) return data;
+    throw error;
+  }
+}
+
 // Trigger AI generation for a workflow draft.
 // Returns immediately with generate_status == 'generating'; the job runs asynchronously.
 export async function aiGenerateWorkflowDraft(
@@ -259,6 +343,13 @@ export async function aiGenerateWorkflowDraft(
   const resp = await axiosInstance.post<CoreResponse<WorkflowDraftRecord>>(
     `${coreBasePath}/workflow-drafts/${id}:ai-generate`,
     payload,
+  );
+  return resp.data.data;
+}
+
+export async function cancelWorkflowDraftGeneration(id: string): Promise<WorkflowDraftRecord> {
+  const resp = await axiosInstance.post<CoreResponse<WorkflowDraftRecord>>(
+    `${coreBasePath}/workflow-drafts/${id}:cancel-generation`,
   );
   return resp.data.data;
 }

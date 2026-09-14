@@ -16,20 +16,26 @@ import (
 )
 
 type addGroupModelRequest struct {
-	Name      string `json:"name"`
-	ModelType string `json:"model_type"`
+	Name           string  `json:"name"`
+	ModelType      string  `json:"model_type"`
+	MaxInputTokens *string `json:"max_input_tokens"`
 }
 
 type addGroupModelResponse struct {
-	ID                       string `json:"id"`
-	UserModelProviderID      string `json:"user_model_provider_id"`
-	UserModelProviderGroupID string `json:"user_model_provider_group_id"`
-	Name                     string `json:"name"`
-	ModelType                string `json:"model_type"`
-	ProviderName             string `json:"provider_name"`
-	GroupName                string `json:"group_name"`
-	BaseURL                  string `json:"base_url"`
-	IsDefault                bool   `json:"is_default"`
+	ID                       string  `json:"id"`
+	UserModelProviderID      string  `json:"user_model_provider_id"`
+	UserModelProviderGroupID string  `json:"user_model_provider_group_id"`
+	Name                     string  `json:"name"`
+	ModelType                string  `json:"model_type"`
+	ProviderName             string  `json:"provider_name"`
+	GroupName                string  `json:"group_name"`
+	BaseURL                  string  `json:"base_url"`
+	IsDefault                bool    `json:"is_default"`
+	MaxInputTokens           *string `json:"max_input_tokens,omitempty"`
+}
+
+type updateGroupModelRequest struct {
+	MaxInputTokens *string `json:"max_input_tokens"`
 }
 
 type groupModelListItem struct {
@@ -108,9 +114,14 @@ func AddGroupModel(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "name and model_type are required", http.StatusBadRequest)
 		return
 	}
+	maxInputTokens, err := resolveAddModelMaxInputTokens(modelType, name, req.MaxInputTokens)
+	if err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 
 	var parent orm.UserModelProvider
-	err := db.WithContext(r.Context()).
+	err = db.WithContext(r.Context()).
 		Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", parentID, userID).
 		Take(&parent).Error
 	if err != nil {
@@ -165,6 +176,7 @@ func AddGroupModel(w http.ResponseWriter, r *http.Request) {
 			ProviderName:             parent.Name,
 			Name:                     name,
 			ModelType:                modelType,
+			MaxInputTokens:           maxInputTokens,
 			IsDefault:                false,
 			BaseModel: orm.BaseModel{
 				CreateUserID:   userID,
@@ -185,6 +197,7 @@ func AddGroupModel(w http.ResponseWriter, r *http.Request) {
 				"user_model_provider_id": parent.ID,
 				"provider_name":          parent.Name,
 				"model_type":             modelType,
+				"max_input_tokens":       maxInputTokens,
 				"is_default":             false,
 				"updated_at":             now,
 				"deleted_at":             nil,
@@ -200,6 +213,7 @@ func AddGroupModel(w http.ResponseWriter, r *http.Request) {
 		row.UserModelProviderID = parent.ID
 		row.ProviderName = parent.Name
 		row.ModelType = modelType
+		row.MaxInputTokens = maxInputTokens
 		row.IsDefault = false
 		row.UpdatedAt = now
 		row.DeletedAt = nil
@@ -215,6 +229,119 @@ func AddGroupModel(w http.ResponseWriter, r *http.Request) {
 		GroupName:                group.Name,
 		BaseURL:                  group.BaseURL,
 		IsDefault:                row.IsDefault,
+		MaxInputTokens:           row.MaxInputTokens,
+	})
+}
+
+// UpdateGroupModel updates user-editable fields on a group model, currently max_input_tokens for LLMs.
+func UpdateGroupModel(w http.ResponseWriter, r *http.Request) {
+	db := store.DB()
+	if db == nil {
+		common.ReplyErr(w, "store not initialized", http.StatusInternalServerError)
+		return
+	}
+	userID := strings.TrimSpace(store.UserID(r))
+	if userID == "" {
+		common.ReplyErr(w, "missing X-User-Id", http.StatusBadRequest)
+		return
+	}
+
+	parentID := strings.TrimSpace(mux.Vars(r)["model_provider_id"])
+	groupID := strings.TrimSpace(mux.Vars(r)["group_id"])
+	modelID := strings.TrimSpace(mux.Vars(r)["model_id"])
+	if parentID == "" || groupID == "" || modelID == "" {
+		common.ReplyErr(w, "missing model_provider_id, group_id, or model_id", http.StatusBadRequest)
+		return
+	}
+
+	var req updateGroupModelRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		common.ReplyErr(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+
+	var parent orm.UserModelProvider
+	err := db.WithContext(r.Context()).
+		Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", parentID, userID).
+		Take(&parent).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			common.ReplyErr(w, "model provider not found", http.StatusNotFound)
+			return
+		}
+		common.ReplyErr(w, "query model provider failed", http.StatusInternalServerError)
+		return
+	}
+	if !parent.HasCapability("has_models") {
+		common.ReplyErr(w, "this provider does not support models", http.StatusBadRequest)
+		return
+	}
+
+	var group orm.UserModelProviderGroup
+	err = db.WithContext(r.Context()).
+		Where("id = ? AND user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", groupID, parent.ID, userID).
+		Take(&group).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			common.ReplyErr(w, "group not found", http.StatusNotFound)
+			return
+		}
+		common.ReplyErr(w, "query group failed", http.StatusInternalServerError)
+		return
+	}
+
+	var row orm.UserModelProviderGroupModel
+	err = db.WithContext(r.Context()).
+		Where(
+			"id = ? AND user_model_provider_group_id = ? AND user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL",
+			modelID, group.ID, parent.ID, userID,
+		).
+		Take(&row).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			common.ReplyErr(w, "model not found", http.StatusNotFound)
+			return
+		}
+		common.ReplyErr(w, "query model failed", http.StatusInternalServerError)
+		return
+	}
+
+	if row.IsDefault {
+		common.ReplyErr(w, "catalog model max_input_tokens cannot be updated", http.StatusBadRequest)
+		return
+	}
+
+	maxInputTokens, err := resolveRequiredUserMaxInputTokens(row.ModelType, req.MaxInputTokens)
+	if err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	now := time.Now()
+	if err := db.WithContext(r.Context()).Model(&orm.UserModelProviderGroupModel{}).
+		Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", row.ID, userID).
+		Updates(map[string]interface{}{
+			"max_input_tokens": *maxInputTokens,
+			"updated_at":       now,
+		}).Error; err != nil {
+		common.ReplyErr(w, "update model failed", http.StatusInternalServerError)
+		return
+	}
+	row.MaxInputTokens = maxInputTokens
+	row.UpdatedAt = now
+
+	common.ReplyOK(w, groupModelListItem{
+		ID:                       row.ID,
+		UserModelProviderID:      row.UserModelProviderID,
+		UserModelProviderGroupID: row.UserModelProviderGroupID,
+		Name:                     row.Name,
+		ModelType:                row.ModelType,
+		ProviderName:             row.ProviderName,
+		GroupName:                group.Name,
+		BaseURL:                  group.BaseURL,
+		IsDefault:                row.IsDefault,
+		IsEditable:               strings.EqualFold(strings.TrimSpace(row.ModelType), "image_editing"),
+		MaxInputTokens:           row.MaxInputTokens,
 	})
 }
 

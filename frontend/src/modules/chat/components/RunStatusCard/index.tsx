@@ -2,7 +2,10 @@ import { SettingOutlined, StopOutlined, SwapOutlined } from "@ant-design/icons";
 import { Alert, Button, Space } from "antd";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
-import { CHAT_OPEN_MODEL_SELECTOR_EVENT } from "@/modules/chat/constants/chat";
+import {
+  CHAT_OPEN_MODEL_SELECTOR_EVENT,
+  getChatConversationPath,
+} from "@/modules/chat/constants/chat";
 import { MODEL_FAILURE_CODES } from "@/modules/chat/utils/chatStreamError";
 
 import "./index.scss";
@@ -24,6 +27,11 @@ const MODEL_SETTINGS_CODES = new Set([
   "balance_exhausted",
   "organization_spend_limit_exceeded",
   "project_spend_limit_exceeded",
+]);
+
+const API_CREDENTIAL_CODES = new Set([
+  "authentication_failed",
+  "permission_denied",
 ]);
 
 export interface RunTerminalView {
@@ -79,11 +87,17 @@ export function runStatusTitleKey(terminal: RunTerminalView): string {
 export default function RunStatusCard({
   terminal,
   conversationId,
+  providerId,
+  providerName,
+  modelName,
   onRetry,
   retryDisabled = false,
 }: {
   terminal?: RunTerminalView;
   conversationId?: string;
+  providerId?: string;
+  providerName?: string;
+  modelName?: string;
   onRetry?: () => void;
   retryDisabled?: boolean;
 }) {
@@ -91,19 +105,60 @@ export default function RunStatusCard({
   if (!terminal || terminal.status === "completed") {
     return null;
   }
-  const description = runStatusDescription(terminal, t);
+  const isCredentialFailure = API_CREDENTIAL_CODES.has(terminal.code || "");
+  const isModelUnavailable = terminal.code === "not_found";
+  const description = isCredentialFailure
+    ? [
+        t("chat.apiKeyUnavailableDescription", {
+          provider: providerName || t("chat.modelServiceFallback"),
+        }),
+        terminal.partial_output
+          ? t("chat.runStatus.partialOutput")
+          : t("chat.runStatus.noOutput"),
+      ].join(" ")
+    : isModelUnavailable
+      ? [
+          t("chat.modelUnavailableDescription", {
+            provider: providerName || t("chat.modelServiceFallback"),
+            model: modelName || t("chat.currentModelFallback"),
+          }),
+          terminal.partial_output
+            ? t("chat.runStatus.partialOutput")
+            : t("chat.runStatus.noOutput"),
+        ].join(" ")
+      : runStatusDescription(terminal, t);
   const isCancelled = isUserCancelledTerminal(terminal);
   const className = isCancelled
     ? "chat-run-status-card chat-run-status-card--cancelled"
     : "chat-run-status-card";
   const isModelFailure = terminal.reason === "model_failure";
   const shouldCheckSettings = MODEL_SETTINGS_CODES.has(terminal.code || "");
+  const modelSettingsUrl = (() => {
+    const params = new URLSearchParams({ section: "models", view: "providers" });
+    if (conversationId) {
+      params.set("return_to", getChatConversationPath(conversationId));
+    }
+    if (providerId) {
+      params.set("provider_id", providerId);
+    }
+    return `/settings?${params.toString()}`;
+  })();
 
   const actions = !isCancelled ? (
     <Space className="chat-run-status-card__actions" size={6} wrap>
+      {shouldCheckSettings ? (
+        <Button
+          size="small"
+          aria-label={t("chat.checkModelSettings")}
+          icon={<SettingOutlined />}
+          href={modelSettingsUrl}
+        >
+          {t("chat.checkModelSettings")}
+        </Button>
+      ) : null}
       {onRetry ? (
         <Button size="small" disabled={retryDisabled} onClick={onRetry}>
-          {t("chat.tryAgain")}
+          {t(shouldCheckSettings ? "chat.continueAfterConfiguration" : "chat.tryAgain")}
         </Button>
       ) : null}
       {isModelFailure ? (
@@ -122,16 +177,6 @@ export default function RunStatusCard({
           {t("chat.changeModel")}
         </Button>
       ) : null}
-      {shouldCheckSettings ? (
-        <Button
-          size="small"
-          aria-label={t("chat.checkModelSettings")}
-          icon={<SettingOutlined />}
-          href="/settings?section=models"
-        >
-          {t("chat.checkModelSettings")}
-        </Button>
-      ) : null}
     </Space>
   ) : undefined;
   return (
@@ -140,7 +185,11 @@ export default function RunStatusCard({
       type={isCancelled ? "warning" : "error"}
       showIcon
       icon={isCancelled ? <StopOutlined aria-hidden="true" /> : undefined}
-      message={t(runStatusTitleKey(terminal))}
+      message={t(isCredentialFailure
+        ? "chat.apiKeyUnavailableTitle"
+        : isModelUnavailable
+          ? "chat.modelUnavailableTitle"
+        : runStatusTitleKey(terminal))}
       description={description}
       action={actions}
     />

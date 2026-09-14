@@ -253,6 +253,18 @@ function cachedCandidates(type: CandidateType, keyword: string) {
   return base.filter((item) => item.name.toLocaleLowerCase().includes(normalized));
 }
 
+function replaceCandidateGroup(current: Candidate[], type: CandidateType, items: Candidate[]) {
+  const byType = new Map<CandidateType, Candidate[]>();
+  for (const item of current) {
+    if (item.type === type) continue;
+    const groupItems = byType.get(item.type) || [];
+    groupItems.push(item);
+    byType.set(item.type, groupItems);
+  }
+  byType.set(type, items);
+  return groups.flatMap((group) => byType.get(group.type) || []);
+}
+
 const MentionEditor = forwardRef<MentionEditorRef, {
   value: string;
   disabled?: boolean;
@@ -279,7 +291,6 @@ const MentionEditor = forwardRef<MentionEditorRef, {
   const menuRef = useRef<HTMLDivElement>(null);
   const emittedRef = useRef<string | null>(null);
   const queryRef = useRef<QueryState | null>(null);
-  const menuWasOpenRef = useRef(false);
   const requestRef = useRef(0);
   const [query, setQuery] = useState<QueryState | null>(null);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
@@ -344,7 +355,6 @@ const MentionEditor = forwardRef<MentionEditorRef, {
 
   useEffect(() => {
     if (!query) {
-      menuWasOpenRef.current = false;
       setCandidates([]);
       return;
     }
@@ -353,38 +363,41 @@ const MentionEditor = forwardRef<MentionEditorRef, {
     const warmCandidates = targetGroups.flatMap((item) =>
       cachedCandidates(item.type, query.keyword),
     );
-    if (warmCandidates.length > 0) {
-      setCandidates(warmCandidates);
-      setLoading(false);
-    }
+    setCandidates(warmCandidates);
+    setLoading(false);
     const hasExactCache = targetGroups.every((item) =>
       !bypassCandidateCache(item.type) && candidateCache.has(cacheKey(item.type, query.keyword)),
     );
     if (hasExactCache) {
-      setCandidates(targetGroups.flatMap((item) => cachedCandidates(item.type, query.keyword)));
-      setLoading(false);
       return;
     }
-    const timer = window.setTimeout(async () => {
+    const timer = window.setTimeout(() => {
       if (warmCandidates.length === 0) setLoading(true);
-      try {
-        const results = await Promise.allSettled(targetGroups.map((item) => loadAndCacheCandidates(item.type, query.keyword)));
-        if (requestRef.current !== requestId) return;
-        setCandidates(results.flatMap((result) => result.status === "fulfilled" ? result.value : []));
-      } finally {
-        if (requestRef.current === requestId) setLoading(false);
-      }
+      let remaining = targetGroups.length;
+      const settleGroup = () => {
+        remaining -= 1;
+        if (remaining === 0 && requestRef.current === requestId) {
+          setLoading(false);
+        }
+      };
+      targetGroups.forEach((group) => {
+        loadAndCacheCandidates(group.type, query.keyword)
+          .then((items) => {
+            if (requestRef.current !== requestId) return;
+            setCandidates((current) => replaceCandidateGroup(current, group.type, items));
+          })
+          .finally(settleGroup);
+      });
     }, query.keyword ? 180 : 0);
     return () => window.clearTimeout(timer);
   }, [query?.keyword, query?.type]);
 
   useEffect(() => {
-    if (!query || menuWasOpenRef.current) return;
-    menuWasOpenRef.current = true;
+    if (!query) return;
     requestAnimationFrame(() => {
       menuRef.current?.scrollTo({ top: 0 });
     });
-  }, [query]);
+  }, [query?.keyword, query?.type]);
 
   useLayoutEffect(() => {
     if (!query) return;

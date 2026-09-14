@@ -7,6 +7,37 @@ from services.mail_providers import IMAP_ENDPOINTS, resolve_imap_endpoint
 
 
 _EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
+_AUTH_MARKERS = (
+    'authenticationfailed',
+    'invalid credentials',
+    'application-specific password',
+    '535',
+    '534-5.7.8',
+    '534 5.7.9',
+)
+_NETWORK_MARKERS = (
+    'timed out',
+    'timeout',
+    'connection refused',
+    'name or service not known',
+    'temporary failure in name resolution',
+    'network is unreachable',
+)
+
+
+def mail_verify_error(stage: str, orig: BaseException) -> RuntimeError:
+    text = str(orig).lower()
+    if any(marker in text for marker in _AUTH_MARKERS):
+        return RuntimeError(f'mailbox authorization code is invalid: {orig}')
+    if isinstance(orig, (TimeoutError, ConnectionError)) or any(
+        marker in text for marker in _NETWORK_MARKERS
+    ):
+        return RuntimeError(f'mailbox server unreachable: {orig}')
+    if isinstance(orig, OSError) and not isinstance(orig, smtplib.SMTPException):
+        return RuntimeError(f'mailbox server unreachable: {orig}')
+    if stage == 'smtp':
+        return RuntimeError(f'mailbox SMTP login failed: {orig}')
+    return RuntimeError(f'mailbox IMAP login failed: {orig}')
 
 
 class IMAPMailProvider(CloudOAuthProvider):
@@ -37,7 +68,7 @@ class IMAPMailProvider(CloudOAuthProvider):
         if not email or not _EMAIL_RE.match(email):
             raise RuntimeError('a valid mailbox address is required')
         if not secret:
-            raise RuntimeError('mailbox authorization code is required')
+            raise RuntimeError('mailbox authorization code is invalid: authorization code is required')
         endpoint = resolve_imap_endpoint(self._name, email)
         self._verify_imap(email, secret, endpoint)
         self._verify_smtp(email, secret, endpoint)
@@ -61,8 +92,16 @@ class IMAPMailProvider(CloudOAuthProvider):
         )
 
     def _verify_imap(self, email: str, secret: str, endpoint: dict[str, object]) -> None:
-        client = imaplib.IMAP4_SSL(str(endpoint['imap_host']), int(endpoint['imap_port']))
+        client = None
         try:
+            client = imaplib.IMAP4_SSL(
+                str(endpoint['imap_host']),
+                int(endpoint['imap_port']),
+                timeout=20,
+            )
+            sock = getattr(client, 'sock', None)
+            if sock is not None:
+                sock.settimeout(20)
             if endpoint.get('imap_id'):
                 try:
                     client.xatom('ID', '("name" "LazyMind" "version" "1.0")')
@@ -70,18 +109,25 @@ class IMAPMailProvider(CloudOAuthProvider):
                     pass
             status, _ = client.login(email, secret)
             if status != 'OK':
-                raise RuntimeError('mailbox IMAP login failed')
+                raise mail_verify_error('imap', RuntimeError(status))
+        except RuntimeError:
+            raise
         except imaplib.IMAP4.error as orig:
-            raise RuntimeError(f'mailbox IMAP login failed: {orig}') from orig
+            raise mail_verify_error('imap', orig) from orig
+        except OSError as orig:
+            raise mail_verify_error('imap', orig) from orig
         finally:
-            try:
-                client.logout()
-            except Exception:
-                pass
+            if client is not None:
+                try:
+                    client.logout()
+                except Exception:
+                    pass
 
     def _verify_smtp(self, email: str, secret: str, endpoint: dict[str, object]) -> None:
         try:
             with smtplib.SMTP_SSL(str(endpoint['smtp_host']), int(endpoint['smtp_port']), timeout=20) as smtp:
                 smtp.login(email, secret)
-        except smtplib.SMTPException as orig:
-            raise RuntimeError(f'mailbox SMTP login failed: {orig}') from orig
+        except smtplib.SMTPAuthenticationError as orig:
+            raise mail_verify_error('smtp', orig) from orig
+        except (smtplib.SMTPException, OSError) as orig:
+            raise mail_verify_error('smtp', orig) from orig

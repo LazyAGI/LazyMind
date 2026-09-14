@@ -55,6 +55,7 @@ import {
   type ChatConversationFilter,
   CHAT_HOME_PATH,
   CHAT_NEW_RUN_IN_BACKGROUND_KEY,
+  CHAT_PENDING_CONVERSATION_GROUP_KEY,
   CHAT_SELECT_CONVERSATION_EVENT,
   getChatConversationPath,
   selectChatConversationFilter,
@@ -67,6 +68,7 @@ import UserAgreementConsentModal, {
 } from "@/components/UserAgreementConsentModal";
 import TerminalConnectionQuickPanel from "@/modules/channelGateway/components/TerminalConnectionQuickPanel";
 import { useConversationOpening } from "@/modules/chat/hooks/useConversationOpening";
+import ConversationGroups from "@/modules/chat/conversationOrganizer/ConversationGroups";
 import "./index.scss";
 
 const { Content, Sider } = Layout;
@@ -451,6 +453,7 @@ export default function MainLayout() {
   };
 
   const handleNewChat = (runInBackground = false) => {
+    sessionStorage.removeItem(CHAT_PENDING_CONVERSATION_GROUP_KEY);
     selectChatConversationFilter(runInBackground ? "task" : "normal");
     try {
       sessionStorage.setItem(
@@ -463,6 +466,11 @@ export default function MainLayout() {
     setCurrentSidebarConversationId("");
     emitConversationSelection("", runInBackground);
     navigate(CHAT_HOME_PATH);
+  };
+
+  const handleNewChatInGroup = (groupId: string) => {
+    handleNewChat(false);
+    sessionStorage.setItem(CHAT_PENDING_CONVERSATION_GROUP_KEY, groupId);
   };
 
   const handleSidebarConversationSelected = (conversation: Conversation) => {
@@ -797,7 +805,7 @@ export default function MainLayout() {
   return (
     <Layout hasSider className="main-layout">
       <Sider
-        width={252}
+        width={272}
         collapsedWidth={0}
         collapsible
         trigger={null}
@@ -904,8 +912,8 @@ export default function MainLayout() {
                   prefix={<SearchOutlined />}
                   allowClear
                   value={sidebarSearchText}
-                  placeholder={t("chat.searchConversation")}
-                  aria-label={t("chat.searchConversation")}
+                  placeholder={t("conversationOrganizer.searchPlaceholder")}
+                  aria-label={t("conversationOrganizer.searchPlaceholder")}
                   onChange={(event) => setSidebarSearchText(event.target.value)}
                 />
               </div>
@@ -915,6 +923,13 @@ export default function MainLayout() {
             <div className="sider-history">
               <RecordList
                 ref={recordListRef}
+                groupSection={<ConversationGroups
+                mode="groups"
+                searchText={sidebarSearchText}
+                currentConversationId={currentSidebarConversationId}
+                onChanged={() => recordListRef.current?.refresh()}
+                onNewChatInGroup={handleNewChatInGroup}
+              />}
                 compact
                 hideSearch
                 showBatchActions

@@ -1108,6 +1108,50 @@ class CloudOAuthOwnerTest(unittest.TestCase):
                 redirect_uri='https://example.test/callback',
             )
 
+    def test_failed_imap_readd_does_not_corrupt_existing_connection(self) -> None:
+        class _ImapProvider:
+            def __init__(self) -> None:
+                self.fail = False
+                self.secrets: list[str] = []
+
+            def provider_name(self) -> str:
+                return 'qqmail'
+
+            def acquire_tenant_access_token(self, *, client_id: str, client_secret: str) -> CloudTokenPayload:
+                self.secrets.append(client_secret)
+                if self.fail:
+                    raise RuntimeError('bad auth code')
+                return CloudTokenPayload(access_token=client_secret)
+
+            def account_profile_from_email(self, email: str) -> CloudAccountProfile:
+                return CloudAccountProfile(provider_account_id=email, display_name=email)
+
+        provider = _ImapProvider()
+        self.service._providers['qqmail'] = provider
+        first = self.service.create_connection(
+            provider='qqmail',
+            tenant_id='',
+            owner_user_id='user-1',
+            auth_mode='service_account',
+            client_id='user@qq.com',
+            client_secret='good-code',
+        )
+        provider.fail = True
+        with self.assertRaises(AppException):
+            self.service.create_connection(
+                provider='qqmail',
+                tenant_id='',
+                owner_user_id='user-1',
+                auth_mode='service_account',
+                client_id='user@qq.com',
+                client_secret='bad-code',
+            )
+        with cloud_oauth_module.SessionLocal() as db:
+            row = db.query(CloudAuthConnection).filter_by(connection_id=first['connection_id']).first()
+            creds = self.service._decrypt_payload(row.credential_ciphertext, field_name='credential')
+            self.assertEqual(row.status, 'ACTIVE')
+            self.assertEqual(creds['client_secret'], 'good-code')
+
 
 if __name__ == '__main__':
     unittest.main()

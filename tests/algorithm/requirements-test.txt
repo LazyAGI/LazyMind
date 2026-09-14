@@ -16,3 +16,6 @@ jieba
 sentencepiece
 psycopg2-binary
 tiktoken>=0.7.0,<0.8.0
+
+# Portable bundled font used by image workflow rendering tests.
+Pillow>=10.1

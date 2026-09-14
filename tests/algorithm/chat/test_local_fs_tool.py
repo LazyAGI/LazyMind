@@ -195,3 +195,23 @@ def test_local_fs_rg_includes_hidden_and_no_ignore_flags(monkeypatch, tmp_path):
     assert LocalFileToolkit().glob('*.pdf')['match_count'] == 1
     assert LocalFileToolkit().grep('needle')['match_count'] == 1
     assert all('--no-ignore' in args and '--hidden' in args for args in calls)
+
+
+def test_save_chat_artifact_emits_downloadable_event(monkeypatch):
+    from lazymind.chat.engine.tools.local_file import workspace as chat_artifact
+
+    emitted = []
+    monkeypatch.setattr(
+        chat_artifact,
+        '_write_agent_data',
+        lambda tag, **payload: emitted.append({'tag': tag, **payload}),
+    )
+
+    result = chat_artifact.save_chat_artifact('hello.txt', '你好')
+
+    artifact_id = result['artifact_id']
+    assert result['file_markdown'] == f'[hello.txt](file_id:{artifact_id})'
+    assert emitted[0]['artifact_id'] == artifact_id
+    assert emitted[0]['tag'] == 'artifact_created'
+    assert emitted[0]['filename'] == 'hello.txt'
+    assert emitted[0]['value'] == {'text': '你好'}

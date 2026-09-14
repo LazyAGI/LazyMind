@@ -1,5 +1,6 @@
 # Model catalog — source of truth for default_model_providers and default_models.
 # Loaded at startup by modelprovider.SeedModelCatalog(); replaces the seed SQL INSERT statements.
+# Context windows live in model_context_windows.yaml, not in this file.
 #
 # Top-level keys must end with "_providers"; the prefix becomes the category:
 #   model_providers  → category: model
@@ -89,13 +90,10 @@ model_providers:
       models:
         - name: claude-haiku-4-5
           type: vlm
-          max_input_tokens: "200K"
         - name: claude-opus-4-7
           type: vlm
-          max_input_tokens: "1M"
         - name: claude-sonnet-4-6
           type: vlm
-          max_input_tokens: "1M"
 
     - name: DeepSeek
       description:
@@ -129,10 +127,8 @@ model_providers:
       models:
         - name: deepseek-v4-flash
           type: llm
-          max_input_tokens: "1M"
         - name: deepseek-v4-pro
           type: llm
-          max_input_tokens: "1M"
 
     - name: Doubao
       description:
@@ -162,66 +158,46 @@ model_providers:
       models:
         - name: deepseek-r1-250528
           type: llm
-          max_input_tokens: "128K"
         - name: deepseek-v3-1-terminus
           type: llm
-          max_input_tokens: "128K"
         - name: deepseek-v3-2-251201
           type: llm
-          max_input_tokens: "128K"
         - name: deepseek-v3-250324
           type: llm
-          max_input_tokens: "128K"
         - name: doubao-1-5-lite-32k-250115
           type: llm
-          max_input_tokens: "32K"
         - name: doubao-1-5-pro-32k-250115
           type: llm
-          max_input_tokens: "128K"
         - name: doubao-1-5-pro-32k-character-250228
           type: llm
-          max_input_tokens: "32K"
         - name: doubao-1-5-pro-32k-character-250715
           type: llm
-          max_input_tokens: "32K"
         - name: doubao-1-5-vision-pro-32k-250115
           type: vlm
-          max_input_tokens: "32K"
         - name: doubao-embedding-text-240715
           type: embed
-          max_input_tokens: "4096"
         - name: doubao-embedding-vision-241215
           type: cross_modal_embed
         - name: doubao-seed-1-6-250615
           type: llm
-          max_input_tokens: "224K"
         - name: doubao-seed-1-6-251015
           type: llm
-          max_input_tokens: "224K"
         - name: doubao-seed-1-6-flash-250828
           type: llm
-          max_input_tokens: "224K"
         - name: doubao-seed-1-6-vision-250815
           type: vlm
-          max_input_tokens: "224K"
         - name: doubao-seed-1-8-251228
           type: llm
-          max_input_tokens: "224K"
         - name: doubao-seed-2-0-code-preview-260215
           type: llm
-          max_input_tokens: "224K"
         - name: doubao-seed-2-0-lite-260215
           type: llm
-          max_input_tokens: "224K"
         - name: doubao-seed-2-0-mini-260215
           type: llm
-          max_input_tokens: "224K"
         - name: doubao-seed-2-0-pro-260215
           type: llm
-          max_input_tokens: "224K"
         - name: doubao-seed-code-preview-251028
           type: llm
-          max_input_tokens: "224K"
         - name: doubao-seedream-5-0-pro-260628
           type: image_editing
         - name: doubao-seedream-5-0-260128
@@ -246,7 +222,6 @@ model_providers:
           type: text2video
         - name: glm-4-7-251222
           type: llm
-          max_input_tokens: "200K"
 
     - name: GLM
       description:
@@ -281,13 +256,10 @@ model_providers:
       models:
         - name: AutoGLM-Phone
           type: vlm
-          max_input_tokens: "20K"
         - name: CharGLM-4
           type: llm
-          max_input_tokens: "8K"
         - name: CodeGeeX-4
           type: llm
-          max_input_tokens: "128K"
         - name: CogView-3-Flash
           type: text2image
           free_auto_select_priority: 1
@@ -295,75 +267,54 @@ model_providers:
           type: text2image
         - name: Embedding-2
           type: embed
-          max_input_tokens: "512"
         - name: Embedding-3
           type: embed
-          max_input_tokens: "3072"
         - name: GLM-4-Flash-250414
           type: llm
-          max_input_tokens: "128K"
           free_auto_select_priority: 3
         - name: GLM-4-FlashX-250414
           type: llm
-          max_input_tokens: "128K"
         - name: GLM-4-Long
           type: llm
-          max_input_tokens: "1M"
         - name: GLM-4-Voice
           type: tts
         - name: GLM-4.1V-Thinking-Flash
           type: vlm
-          max_input_tokens: "64K"
           free_auto_select_priority: 2
         - name: GLM-4.1V-Thinking-FlashX
           type: vlm
-          max_input_tokens: "64K"
         - name: GLM-4.5-Air
           type: llm
-          max_input_tokens: "128K"
         - name: GLM-4.5-AirX
           type: llm
-          max_input_tokens: "128K"
         - name: GLM-4.5-Flash
           type: llm
-          max_input_tokens: "128K"
           free_auto_select_priority: 2
         - name: GLM-4.6
           type: llm
-          max_input_tokens: "200K"
         - name: GLM-4.6V
           type: vlm
-          max_input_tokens: "128K"
         - name: GLM-4.6V-Flash
           type: vlm
-          max_input_tokens: "128K"
           free_auto_select_priority: 1
         - name: GLM-4.7
           type: llm
-          max_input_tokens: "198K"
         - name: GLM-4.7-Flash
           type: llm
-          max_input_tokens: "198K"
           free_auto_select_priority: 1
         - name: GLM-4.7-FlashX
           type: llm
-          max_input_tokens: "198K"
         - name: GLM-4V-Flash
           type: vlm
-          max_input_tokens: "16K"
           free_auto_select_priority: 3
         - name: GLM-5
           type: llm
-          max_input_tokens: "198K"
         - name: GLM-5-Turbo
           type: llm
-          max_input_tokens: "198K"
         - name: GLM-5.1
           type: llm
-          max_input_tokens: "198K"
         - name: GLM-5V-Turbo
           type: vlm
-          max_input_tokens: "200K"
         - name: GLM-ASR-2512
           type: stt
         - name: GLM-Image
@@ -407,43 +358,30 @@ model_providers:
       models:
         - name: kimi-k2-0711-preview
           type: llm
-          max_input_tokens: "128K"
         - name: kimi-k2-0905-preview
           type: llm
-          max_input_tokens: "256K"
         - name: kimi-k2-thinking
           type: llm
-          max_input_tokens: "256K"
         - name: kimi-k2-thinking-turbo
           type: llm
-          max_input_tokens: "256K"
         - name: kimi-k2-turbo-preview
           type: llm
-          max_input_tokens: "256K"
         - name: kimi-k2.5
           type: vlm
-          max_input_tokens: "256K"
         - name: kimi-k2.6
           type: vlm
-          max_input_tokens: "256K"
         - name: moonshot-v1-128k
           type: llm
-          max_input_tokens: "128K"
         - name: moonshot-v1-128k-vision-preview
           type: vlm
-          max_input_tokens: "128K"
         - name: moonshot-v1-32k
           type: llm
-          max_input_tokens: "32K"
         - name: moonshot-v1-32k-vision-preview
           type: vlm
-          max_input_tokens: "32K"
         - name: moonshot-v1-8k
           type: llm
-          max_input_tokens: "8K"
         - name: moonshot-v1-8k-vision-preview
           type: vlm
-          max_input_tokens: "8K"
 
     - name: Minimax
       description:
@@ -477,19 +415,14 @@ model_providers:
       models:
         - name: M2-her
           type: llm
-          max_input_tokens: "64K"
         - name: MiniMax-M2.5
           type: llm
-          max_input_tokens: "192K"
         - name: MiniMax-M2.5-highspeed
           type: llm
-          max_input_tokens: "192K"
         - name: MiniMax-M2.7
           type: llm
-          max_input_tokens: "192K"
         - name: MiniMax-M2.7-highspeed
           type: llm
-          max_input_tokens: "192K"
         - name: Speech-02-HD
           type: tts
         - name: Speech-02-Turbo
@@ -539,74 +472,54 @@ model_providers:
       models:
         - name: gpt-4.1
           type: vlm
-          max_input_tokens: "1M"
         - name: gpt-4.1-mini
           type: vlm
-          max_input_tokens: "1M"
         - name: gpt-4o-mini
           type: vlm
-          max_input_tokens: "128K"
         - name: gpt-4o-mini-transcribe
           type: stt
         - name: gpt-4o-transcribe
           type: stt
         - name: gpt-5
           type: vlm
-          max_input_tokens: "400K"
         - name: gpt-5-mini
           type: vlm
-          max_input_tokens: "400K"
         - name: gpt-5-nano
           type: vlm
-          max_input_tokens: "400K"
         - name: gpt-5-pro
           type: vlm
-          max_input_tokens: "400K"
         - name: gpt-5.1
           type: vlm
-          max_input_tokens: "400K"
         - name: gpt-5.2
           type: vlm
-          max_input_tokens: "400K"
         - name: gpt-5.2-pro
           type: vlm
-          max_input_tokens: "400K"
         - name: gpt-5.4
           type: vlm
-          max_input_tokens: "1M"
         - name: gpt-5.4-mini
           type: vlm
-          max_input_tokens: "400K"
         - name: gpt-5.4-nano
           type: vlm
-          max_input_tokens: "400K"
         - name: gpt-5.4-pro
           type: vlm
-          max_input_tokens: "1M"
         - name: gpt-5.5
           type: vlm
-          max_input_tokens: "1M"
         - name: gpt-5.5-pro
           type: vlm
-          max_input_tokens: "1M"
         - name: gpt-image-1.5
           type: image_editing
         - name: gpt-image-2
           type: image_editing
         - name: o3
           type: vlm
-          max_input_tokens: "200K"
         - name: rerank-multilingual-v3.0
           type: rerank
         - name: text-embedding-3-large
           type: embed
-          max_input_tokens: "8192"
         - name: text-embedding-3-small
           type: embed
-          max_input_tokens: "8192"
         - name: text-embedding-ada-002
           type: embed
-          max_input_tokens: "8192"
         - name: tts-1
           type: tts
         - name: tts-1-hd
@@ -638,63 +551,44 @@ model_providers:
       models:
         - name: z-ai/glm-5.3-flash
           type: llm
-          max_input_tokens: "1310720"
           free_auto_select_priority: 1
         - name: z-ai/glm-5.3
           type: llm
-          max_input_tokens: "1048576"
         - name: deepseek/deepseek-v4-pro
           type: llm
-          max_input_tokens: "1048576"
         - name: nvidia/nemotron-3.5-lightning:free
           type: llm
-          max_input_tokens: "1000000"
         - name: z-ai/glm-5.2:free
           type: llm
-          max_input_tokens: "256000"
         - name: openrouter/free
           type: vlm
-          max_input_tokens: "200K"
           free_auto_select_priority: 1
         - name: openrouter/auto
           type: vlm
-          max_input_tokens: "2M"
         - name: openai/gpt-5.6-sol
           type: vlm
-          max_input_tokens: "1050000"
         - name: anthropic/claude-sonnet-5
           type: vlm
-          max_input_tokens: "1000000"
         - name: google/gemini-3.7-flash
           type: vlm
-          max_input_tokens: "1048576"
         - name: x-ai/grok-4.6
           type: vlm
-          max_input_tokens: "500000"
         - name: qwen/qwen3.8-max
           type: vlm
-          max_input_tokens: "1000000"
         - name: qwen/qwen3.8-flash
           type: vlm
-          max_input_tokens: "1000000"
         - name: moonshotai/kimi-k3
           type: vlm
-          max_input_tokens: "1048576"
         - name: minimax/minimax-m3
           type: vlm
-          max_input_tokens: "1048576"
         - name: minimax/minimax-m3:free
           type: vlm
-          max_input_tokens: "1048576"
         - name: deepseek/deepseek-v4-flash-vision-exp
           type: vlm
-          max_input_tokens: "1048576"
         - name: thinkingmachines/inkling:free
           type: vlm
-          max_input_tokens: "1048576"
         - name: liquid/lfm-2.5-embedding-350m:free
           type: embed
-          max_input_tokens: "512"
           free_auto_select_priority: 1
         - name: bytedance-seed/seedream-4.5
           type: text2image
@@ -787,205 +681,144 @@ model_providers:
           type: stt
         - name: qvq-72b-preview
           type: vlm
-          max_input_tokens: "32K"
         - name: qvq-max
           type: vlm
-          max_input_tokens: "128K"
         - name: qvq-plus
           type: vlm
-          max_input_tokens: "128K"
         - name: qwen-audio-turbo
           type: stt
         - name: qwen-flash
           type: llm
-          max_input_tokens: "1M"
         - name: qwen-flash-2025-07-28
           type: llm
-          max_input_tokens: "1M"
         - name: qwen-long
           type: llm
-          max_input_tokens: "10M"
         - name: qwen-max
           type: llm
-          max_input_tokens: "32K"
         - name: qwen-plus
           type: llm
-          max_input_tokens: "1M"
         - name: qwen-plus-2025-12-01
           type: llm
-          max_input_tokens: "1M"
         - name: qwen-tts
           type: tts
         - name: qwen-turbo
           type: llm
-          max_input_tokens: "128K"
         - name: qwen-vl-max
           type: vlm
-          max_input_tokens: "128K"
         - name: qwen-vl-ocr
           type: vlm
-          max_input_tokens: "32K"
         - name: qwen-vl-plus
           type: vlm
-          max_input_tokens: "128K"
         - name: qwen2.5-0.5b-instruct
           type: llm
-          max_input_tokens: "32K"
         - name: qwen2.5-1.5b-instruct
           type: llm
-          max_input_tokens: "32K"
         - name: qwen2.5-14b-instruct
           type: llm
-          max_input_tokens: "128K"
         - name: qwen2.5-14b-instruct-1m
           type: llm
-          max_input_tokens: "1M"
         - name: qwen2.5-32b-instruct
           type: llm
-          max_input_tokens: "128K"
         - name: qwen2.5-3b-instruct
           type: llm
-          max_input_tokens: "32K"
         - name: qwen2.5-72b-instruct
           type: llm
-          max_input_tokens: "128K"
         - name: qwen2.5-7b-instruct
           type: llm
-          max_input_tokens: "128K"
         - name: qwen2.5-7b-instruct-1m
           type: llm
-          max_input_tokens: "1M"
         - name: qwen2.5-vl-embedding
           type: cross_modal_embed
         - name: qwen3-0.6b
           type: llm
-          max_input_tokens: "32K"
         - name: qwen3-1.7b
           type: llm
-          max_input_tokens: "32K"
         - name: qwen3-14b
           type: llm
-          max_input_tokens: "128K"
         - name: qwen3-235b-a22b
           type: llm
-          max_input_tokens: "128K"
         - name: qwen3-235b-a22b-instruct-2507
           type: llm
-          max_input_tokens: "128K"
         - name: qwen3-235b-a22b-thinking-2507
           type: llm
-          max_input_tokens: "128K"
         - name: qwen3-30b-a3b
           type: llm
-          max_input_tokens: "128K"
         - name: qwen3-30b-a3b-instruct-2507
           type: llm
-          max_input_tokens: "128K"
         - name: qwen3-30b-a3b-thinking-2507
           type: llm
-          max_input_tokens: "80K"
         - name: qwen3-32b
           type: llm
-          max_input_tokens: "128K"
         - name: qwen3-4b
           type: llm
-          max_input_tokens: "32K"
         - name: qwen3-8b
           type: llm
-          max_input_tokens: "128K"
         - name: qwen3-asr-flash
           type: stt
         - name: qwen3-next-80b-a3b-instruct
           type: llm
-          max_input_tokens: "128K"
         - name: qwen3-next-80b-a3b-thinking
           type: llm
-          max_input_tokens: "128K"
         - name: qwen3-rerank
           type: rerank
         - name: qwen3-vl-embedding
           type: cross_modal_embed
         - name: qwen3-vl-flash
           type: vlm
-          max_input_tokens: "256K"
         - name: qwen3-vl-flash-us
           type: vlm
-          max_input_tokens: "256K"
         - name: qwen3-vl-plus
           type: vlm
-          max_input_tokens: "256K"
         - name: qwen3-vl-rerank
           type: rerank
         - name: qwen3.5-122b-a10b
           type: vlm
-          max_input_tokens: "32K"
         - name: qwen3.5-27b
           type: vlm
-          max_input_tokens: "32K"
         - name: qwen3.5-35b-a3b
           type: vlm
-          max_input_tokens: "32K"
         - name: qwen3.5-397b-a17b
           type: vlm
-          max_input_tokens: "32K"
         - name: qwen3.5-4b
           type: vlm
-          max_input_tokens: "32K"
         - name: qwen3.5-9b
           type: vlm
-          max_input_tokens: "32K"
         - name: qwen3.5-flash
           type: vlm
-          max_input_tokens: "1M"
         - name: qwen3.5-plus
           type: vlm
-          max_input_tokens: "1M"
         - name: qwen3.6-27b
           type: vlm
-          max_input_tokens: "256K"
         - name: qwen3.6-35b-a3b
           type: vlm
-          max_input_tokens: "256K"
         - name: qwen3.6-flash
           type: vlm
-          max_input_tokens: "1M"
         - name: qwen3.6-max-preview
           type: llm
-          max_input_tokens: "256K"
         - name: qwen3.6-plus
           type: vlm
-          max_input_tokens: "1M"
         - name: qwq-32b
           type: llm
-          max_input_tokens: "40K"
         - name: qwq-32b-preview
           type: llm
-          max_input_tokens: "32K"
         - name: qwq-plus
           type: llm
-          max_input_tokens: "128K"
         - name: sambert
           type: tts
         - name: sensevoice-small
           type: stt
         - name: text-embedding-async-v1
           type: embed
-          max_input_tokens: "2048"
         - name: text-embedding-async-v2
           type: embed
-          max_input_tokens: "2048"
         - name: text-embedding-v1
           type: embed
-          max_input_tokens: "2048"
         - name: text-embedding-v2
           type: embed
-          max_input_tokens: "2048"
         - name: text-embedding-v3
           type: embed
-          max_input_tokens: "8192"
         - name: text-embedding-v4
           type: embed
-          max_input_tokens: "8192"
         - name: tongyi-embedding-vision-flash
           type: cross_modal_embed
         - name: tongyi-embedding-vision-flash-2026-03-06
@@ -1122,89 +955,61 @@ model_providers:
       models:
         - name: SenseChat-5
           type: llm
-          max_input_tokens: "128K"
         - name: DeepSeek-R1
           type: llm
-          max_input_tokens: "128K"
         - name: DeepSeek-R1-Distill-Qwen-14B
           type: llm
-          max_input_tokens: "128K"
         - name: DeepSeek-R1-Distill-Qwen-32B
           type: llm
-          max_input_tokens: "128K"
         - name: DeepSeek-V3
           type: llm
-          max_input_tokens: "128K"
         - name: Llama3-70B
           type: llm
-          max_input_tokens: "8K"
         - name: Llama3-8B
           type: llm
-          max_input_tokens: "8K"
         - name: Qwen2-72B
           type: llm
-          max_input_tokens: "32K"
         - name: Qwen2-7B
           type: llm
-          max_input_tokens: "32K"
         - name: Qwen3-235B
           type: llm
-          max_input_tokens: "128K"
         - name: Qwen3-32B
           type: llm
-          max_input_tokens: "128K"
         - name: SenseChat
           type: llm
-          max_input_tokens: "4K"
         - name: SenseChat-128K
           type: llm
-          max_input_tokens: "128K"
         - name: SenseChat-32K
           type: llm
-          max_input_tokens: "32K"
         - name: SenseChat-5-Cantonese
           type: llm
-          max_input_tokens: "128K"
         - name: SenseChat-Character
           type: llm
-          max_input_tokens: "4K"
         - name: SenseChat-Character-Pro
           type: llm
-          max_input_tokens: "4K"
         - name: SenseChat-Turbo
           type: llm
-          max_input_tokens: "32K"
         - name: SenseChat-Vision
           type: vlm
-          max_input_tokens: "16K"
         - name: SenseNova-V6-5-Pro
           type: vlm
-          max_input_tokens: "128K"
         - name: SenseNova-V6-5-Turbo
           type: vlm
-          max_input_tokens: "128K"
         - name: SenseNova-V6-Pro
           type: vlm
-          max_input_tokens: "32K"
         - name: SenseNova-V6-Reasoner
           type: vlm
-          max_input_tokens: "32K"
         - name: SenseNova-V6-Turbo
           type: vlm
-          max_input_tokens: "32K"
         - name: nova-embedding-stable
           type: embed
-          max_input_tokens: "512"
         - name: deepseek-v4-flash
           type: llm
-          max_input_tokens: "1M"
         - name: glm-5.2
           type: llm
-          max_input_tokens: "1M"
         # Token Plan is free during public beta: https://platform.sensenova.cn/
         - name: sensenova-6.7-flash-lite
           type: llm
-          max_input_tokens: "256K"
           free_auto_select_priority: 1
           free_auto_select_base_urls: ["https://token.sensenova.cn/v1/chat/completions/"]
         - name: sensenova-u1-fast
@@ -1253,211 +1058,146 @@ model_providers:
           type: text2video
         - name: deepseek-ai/DeepSeek-V4-Flash
           type: llm
-          max_input_tokens: "1M"
           free_auto_select_priority: 1
         - name: THUDM/GLM-Z1-9B-0414
           type: llm
         - name: Pro/moonshotai/Kimi-K2.6
           type: vlm
-          max_input_tokens: "256K"
         - name: Pro/zai-org/GLM-5.1
           type: llm
-          max_input_tokens: "198K"
         - name: MiniMaxAI/MiniMax-M2.5
           type: llm
-          max_input_tokens: "192K"
         - name: Pro/MiniMaxAI/MiniMax-M2.5
           type: llm
-          max_input_tokens: "192K"
         - name: Pro/zai-org/GLM-5
           type: llm
-          max_input_tokens: "198K"
         - name: Pro/deepseek-ai/DeepSeek-V3.2
           type: llm
-          max_input_tokens: "128K"
         - name: Pro/moonshotai/Kimi-K2.5
           type: vlm
-          max_input_tokens: "256K"
         - name: Pro/zai-org/GLM-4.7
           type: llm
-          max_input_tokens: "198K"
         - name: deepseek-ai/DeepSeek-V3.2
           type: llm
-          max_input_tokens: "128K"
         - name: Pro/deepseek-ai/DeepSeek-V3.1-Terminus
           type: llm
-          max_input_tokens: "128K"
         - name: deepseek-ai/DeepSeek-V3.1-Terminus
           type: llm
-          max_input_tokens: "128K"
         - name: Qwen/Qwen3.6-35B-A3B
           type: vlm
-          max_input_tokens: "256K"
         - name: Qwen/Qwen3.6-27B
           type: vlm
-          max_input_tokens: "256K"
         - name: Qwen/Qwen3.5-397B-A17B
           type: vlm
-          max_input_tokens: "32K"
         - name: Qwen/Qwen3.5-122B-A10B
           type: vlm
-          max_input_tokens: "32K"
         - name: Qwen/Qwen3.5-35B-A3B
           type: vlm
-          max_input_tokens: "32K"
         - name: Qwen/Qwen3.5-27B
           type: vlm
-          max_input_tokens: "32K"
         - name: Qwen/Qwen3.5-9B
           type: vlm
-          max_input_tokens: "32K"
         - name: Qwen/Qwen3.5-4B
           type: vlm
-          max_input_tokens: "32K"
           free_auto_select_priority: 1
         - name: deepseek-ai/DeepSeek-R1
           type: llm
-          max_input_tokens: "128K"
         - name: Pro/deepseek-ai/DeepSeek-R1
           type: llm
-          max_input_tokens: "128K"
         - name: deepseek-ai/DeepSeek-V3
           type: llm
-          max_input_tokens: "128K"
         - name: Pro/deepseek-ai/DeepSeek-V3
           type: llm
-          max_input_tokens: "128K"
         - name: stepfun-ai/Step-3.5-Flash
           type: llm
-          max_input_tokens: "256K"
         - name: zai-org/GLM-4.6V
           type: vlm
-          max_input_tokens: "128K"
         - name: moonshotai/Kimi-K2-Thinking
           type: llm
-          max_input_tokens: "256K"
         - name: Pro/moonshotai/Kimi-K2-Thinking
           type: llm
-          max_input_tokens: "256K"
         - name: zai-org/GLM-4.6
           type: llm
-          max_input_tokens: "200K"
         - name: Qwen/Qwen3-VL-32B-Instruct
           type: vlm
-          max_input_tokens: "256K"
         - name: Qwen/Qwen3-VL-32B-Thinking
           type: vlm
-          max_input_tokens: "256K"
         - name: Qwen/Qwen3-VL-8B-Instruct
           type: vlm
-          max_input_tokens: "256K"
         - name: Qwen/Qwen3-VL-8B-Thinking
           type: vlm
-          max_input_tokens: "256K"
         - name: Qwen/Qwen3-VL-30B-A3B-Instruct
           type: vlm
-          max_input_tokens: "256K"
         - name: Qwen/Qwen3-VL-30B-A3B-Thinking
           type: vlm
-          max_input_tokens: "256K"
         - name: moonshotai/Kimi-K2-Instruct-0905
           type: llm
-          max_input_tokens: "256K"
         - name: Pro/moonshotai/Kimi-K2-Instruct-0905
           type: llm
-          max_input_tokens: "256K"
         - name: inclusionAI/Ling-flash-2.0
           type: llm
-          max_input_tokens: "128K"
         - name: Qwen/Qwen3-Coder-30B-A3B-Instruct
           type: llm
-          max_input_tokens: "256K"
         - name: Qwen/Qwen3-30B-A3B-Thinking-2507
           type: llm
-          max_input_tokens: "80K"
         - name: Qwen/Qwen3-30B-A3B-Instruct-2507
           type: llm
-          max_input_tokens: "128K"
         - name: Qwen/Qwen3-235B-A22B-Instruct-2507
           type: llm
-          max_input_tokens: "128K"
         - name: THUDM/GLM-4.1V-9B-Thinking
           type: vlm
-          max_input_tokens: "64K"
           free_auto_select_priority: 2
         - name: tencent/Hunyuan-A13B-Instruct
           type: llm
-          max_input_tokens: "128K"
         - name: deepseek-ai/DeepSeek-R1-0528-Qwen3-8B
           type: llm
-          max_input_tokens: "128K"
           free_auto_select_priority: 3
         - name: Qwen/Qwen3-32B
           type: llm
-          max_input_tokens: "128K"
         - name: Qwen/Qwen3-14B
           type: llm
-          max_input_tokens: "128K"
         - name: Qwen/Qwen3-8B
           type: llm
-          max_input_tokens: "128K"
           free_auto_select_priority: 2
         - name: ByteDance-Seed/Seed-OSS-36B-Instruct
           type: llm
-          max_input_tokens: "512K"
         - name: zai-org/GLM-4.5V
           type: vlm
-          max_input_tokens: "64K"
         - name: zai-org/GLM-4.5-Air
           type: llm
-          max_input_tokens: "128K"
         - name: Qwen/Qwen2.5-72B-Instruct-128K
           type: llm
-          max_input_tokens: "128K"
         - name: Qwen/Qwen2.5-72B-Instruct
           type: llm
-          max_input_tokens: "128K"
         - name: Qwen/Qwen2.5-32B-Instruct
           type: llm
-          max_input_tokens: "128K"
         - name: Qwen/Qwen2.5-14B-Instruct
           type: llm
-          max_input_tokens: "128K"
         - name: Qwen/Qwen2.5-7B-Instruct
           type: llm
-          max_input_tokens: "128K"
           free_auto_select_priority: 4
         - name: Pro/Qwen/Qwen2.5-7B-Instruct
           type: llm
-          max_input_tokens: "128K"
         - name: Qwen/Qwen3-VL-Embedding-8B
           type: cross_modal_embed
         - name: Qwen/Qwen3-Embedding-8B
           type: embed
-          max_input_tokens: "32768"
         - name: Qwen/Qwen3-Embedding-4B
           type: embed
-          max_input_tokens: "32768"
         - name: Qwen/Qwen3-Embedding-0.6B
           type: embed
-          max_input_tokens: "32768"
         - name: BAAI/bge-m3
           type: embed
-          max_input_tokens: "8192"
           free_auto_select_priority: 1
         - name: BAAI/bge-large-zh-v1.5
           type: embed
-          max_input_tokens: "512"
           free_auto_select_priority: 2
         - name: BAAI/bge-large-en-v1.5
           type: embed
-          max_input_tokens: "512"
         - name: netease-youdao/bce-embedding-base_v1
           type: embed
-          max_input_tokens: "512"
         - name: Pro/BAAI/bge-m3
           type: embed
-          max_input_tokens: "8192"
         - name: Qwen/Qwen3-VL-Reranker-8B
           type: rerank
         - name: Qwen/Qwen3-Reranker-8B

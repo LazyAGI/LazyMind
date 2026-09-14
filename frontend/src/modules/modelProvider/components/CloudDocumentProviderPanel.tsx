@@ -115,8 +115,8 @@ export default function CloudDocumentProviderPanel({ vm }: { vm: CloudDocumentPr
     isFeishuAuthValid,
     isNotionAuthValid,
     isGoogleDriveAuthValid,
-    isMailConnected,
-    mailConnectionLabel,
+    isMailAuthValid,
+    mailAccounts,
     handleManageFeishuAuth,
     handleManageLocalSource,
     handleManageGoogleDrive,
@@ -216,21 +216,26 @@ export default function CloudDocumentProviderPanel({ vm }: { vm: CloudDocumentPr
           </div>
         );
       })}
-      <div className="model-provider-cloud-doc-resource-row">
-        <ProviderLogo type="mail" icon={<MailOutlined />} />
+
+      <div
+        className={`model-provider-cloud-doc-resource-row${isMailAuthValid ? "" : " is-locked"}`}
+      >
+        <span className="model-provider-cloud-doc-resource-logo">
+          <MailOutlined />
+        </span>
         <div className="model-provider-cloud-doc-resource-copy">
           <h3>{t("modelProvider.mail.title")}</h3>
           <p>
-            {isMailConnected
-              ? t("modelProvider.mail.connectedHint", { account: mailConnectionLabel })
+            {isMailAuthValid
+              ? t("modelProvider.mail.connectedHint", { account: mailAccounts.join("、") })
               : t("modelProvider.mail.hubHint")}
           </p>
         </div>
         <Tag
           className="model-provider-cloud-doc-resource-status"
-          color={isMailConnected ? "success" : "default"}
+          color={isMailAuthValid ? "success" : "default"}
         >
-          {isMailConnected
+          {isMailAuthValid
             ? t("modelProvider.cloudDocuments.authValid")
             : t("modelProvider.cloudDocuments.credentialMissing")}
         </Tag>
@@ -240,7 +245,7 @@ export default function CloudDocumentProviderPanel({ vm }: { vm: CloudDocumentPr
             className="model-provider-cloud-doc-resource-action"
             onClick={handleManageMail}
           >
-            {isMailConnected
+            {isMailAuthValid
               ? t("modelProvider.cloudDocuments.manageAccount")
               : t("modelProvider.cloudDocuments.configureConnection")}
             <ArrowRightOutlined />

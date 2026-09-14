@@ -64,7 +64,7 @@ type selectedModelItem struct {
 	IsEditable               bool    `json:"is_editable" gorm:"-"`
 	MaxInputTokens           *string `json:"max_input_tokens" gorm:"column:max_input_tokens"`
 	TechnicalModelType       string  `json:"-" gorm:"column:technical_model_type"`
-	IsDefault                bool    `json:"-" gorm:"column:is_default"`
+	IsDefault                bool    `json:"is_default" gorm:"column:is_default"`
 }
 
 type selectedModelsResponse struct {

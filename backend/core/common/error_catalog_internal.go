@@ -5,6 +5,21 @@ package common
 import "net/http"
 
 func init() {
+	registerAdditionalErrorAlias("invalid opening batch result count", "Invalid opening batch result count", http.StatusBadGateway, 2002751)
+	registerAdditionalErrorAlias("unknown or cyclic candidate target", "Unknown or cyclic candidate target", http.StatusBadGateway, 2002737)
+	registerAdditionalErrorAlias("invalid candidate operation", "Invalid candidate operation", http.StatusBadGateway, 2002738)
+	registerAdditionalErrorAlias("duplicate group name", "Duplicate group name", http.StatusBadGateway, 2002739)
+	registerAdditionalErrorAlias("invalid incremental cursor", "Invalid incremental cursor", http.StatusBadGateway, 2002740)
+	registerAdditionalErrorAlias("missing incremental batch", "Missing incremental batch", http.StatusBadGateway, 2002741)
+	registerAdditionalErrorAlias("scope audit failed", "Scope audit failed", http.StatusBadGateway, 2002742)
+	registerAdditionalErrorAlias("invalid scope audit identity", "Invalid scope audit identity", http.StatusBadGateway, 2002743)
+	registerAdditionalErrorAlias("scope audit rejected after repairs", "Scope audit rejected after repairs", http.StatusBadGateway, 2002744)
+	registerAdditionalErrorAlias("invalid batch partition", "Invalid batch partition", http.StatusBadGateway, 2002745)
+	registerAdditionalErrorAlias("invalid or duplicate assignment", "Invalid or duplicate assignment", http.StatusBadGateway, 2002746)
+	registerAdditionalErrorAlias("organizer failed", "Organizer failed", http.StatusBadGateway, 2002747)
+	registerAdditionalErrorAlias("invalid incremental identity or length", "Invalid incremental identity or length", http.StatusBadGateway, 2002748)
+	registerAdditionalErrorAlias("conversation organizer group names are locked", "Conversation organizer group names are locked", http.StatusConflict, 2002750)
+	registerAdditionalErrorPattern("conversation grouping stream returned http %d", "Organizer stream request failed", http.StatusBadGateway, 2002736)
 	registerAdditionalErrorAlias("invalid title", "Invalid request", http.StatusBadRequest, 2000103)
 	registerAdditionalErrorAlias("conversation changed", "Conflict", http.StatusConflict, 2000107)
 	registerAdditionalErrorAlias("update backfill failed", "Internal server error", http.StatusInternalServerError, 2000000)

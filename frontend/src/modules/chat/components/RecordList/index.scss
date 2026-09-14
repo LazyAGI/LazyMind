@@ -8,6 +8,9 @@
     color: var(--ant-color-primary, #1677ff);
 
     &--unknown { color: var(--color-text-secondary, #666); }
+    &--completed { color: var(--ant-color-success, #52c41a); }
+    &--failed { color: var(--ant-color-error, #ff4d4f); }
+    &--canceled { color: var(--ant-color-text-tertiary, #8c8c8c); }
     &:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; border-radius: 2px; }
   }
 
@@ -531,4 +534,15 @@
       margin-right: -6px;
     }
   }
+}
+
+.record-container.compact.grouped-sidebar {
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: #c9ced6 transparent;
+  > * { flex-shrink: 0; }
+  > .record-list { flex: 0 0 auto; overflow: visible; }
+  &::-webkit-scrollbar { width: 6px; }
+  &::-webkit-scrollbar-thumb { background: #c9ced6; border-radius: 3px; }
 }
