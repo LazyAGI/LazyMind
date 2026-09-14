@@ -33,6 +33,11 @@ from lazymind.chat.engine.agent_runtime import (
     make_cancel_stop_condition,
 )
 from lazymind.chat.engine.prompts import add_standard_system_sections
+from lazymind.chat.engine.agent_runtime.active_context import (
+    classify_special_tool,
+    pin_active_skills_into_builder,
+    pin_task_goals_into_builder,
+)
 from lazymind.chat.engine.tools.local_file.workspace import grep, read_file
 from lazymind.chat.service.component.event_translator import AgentEventFrameTranslator
 from lazymind.chat.service.component.tool_registry import (
@@ -60,6 +65,32 @@ from . import (
 from . import tools as subagent_tools
 from .context import LARGE_TOOL_RESULT_THRESHOLD, SubAgentContext, set_context
 from .db import MemorySubAgentStore
+
+WORKFLOW_TOOL_FAILURE_LIMITS = {
+    'get_artifact': 2,
+    'save_artifacts': 2,
+    'validate_and_allocate_outline': 1,
+    'normalize_bid_outline_from_inputs': 1,
+    'validate_proposal_from_inputs': 1,
+}
+WORKFLOW_TOOL_CALL_LIMITS = {
+    'get_artifact': 6,
+    'save_artifacts': 8,
+    'validate_and_allocate_outline': 1,
+    'normalize_bid_outline_from_inputs': 2,
+    'validate_proposal_from_inputs': 2,
+    'validate_*': 2,
+}
+
+
+def _hard_constraints_from_params(params: Dict[str, Any]) -> str:
+    parts = []
+    for key in ('word_target', 'output_format', 'use_default_docx_template'):
+        value = params.get(key)
+        if value is not None and str(value).strip():
+            parts.append(f'{key}={value}')
+    return '; '.join(parts)
+
 
 DRAFT_STREAM_EVENT_TYPES = frozenset({
     'artifact_stream_start',
@@ -492,6 +523,9 @@ def _build_agentic_config(
         ).strip(),
         'is_subagent': True,
         'agent_type': effective_agent_type,
+        'workspace': str(task.get('workspace_path') or '').strip(),
+        'workspace_path': str(task.get('workspace_path') or '').strip(),
+        'workflow_step_id': str(params.get('step_id') or ''),
         'thinking_depth': str(
             params.get('_thinking_depth') or agentic_config.get('thinking_depth') or 'medium'
         ),
@@ -530,6 +564,19 @@ def _build_subagent_plan(
         show_tool_status=False,
         tool_prompt_appendices=tool_prompt_appendices,
         include_editable_writing=False,
+    )
+    parent_context = (ctx.params.get('parent_agentic_config') or {}).get('model_context')
+    pin_active_skills_into_builder(
+        builder,
+        parent_context,
+        workspace=ctx.workspace_path,
+    )
+    pin_task_goals_into_builder(
+        builder,
+        parent_context,
+        task_goal=ctx.objective,
+        key_instructions=str((ctx.params or {}).get('instruction') or ''),
+        hard_constraints=_hard_constraints_from_params(ctx.params or {}),
     )
     builder.system(
         'subagent_role', 'SubAgent Role', (
@@ -752,6 +799,8 @@ def _build_subagent_plan(
             extra_stop_condition=make_cancel_stop_condition(),
             max_retries=max(1, int(_cfg['agentic_expanded_max_rounds']) - 1),
             llm_config=llm_config or {},
+            tool_failure_limits=WORKFLOW_TOOL_FAILURE_LIMITS,
+            tool_call_limits=WORKFLOW_TOOL_CALL_LIMITS,
         ),
     )
 
@@ -765,6 +814,8 @@ def _truncate_tool_result(ctx: SubAgentContext, result: Any, tool_name: str) -> 
     in subsequent tool calls or reasoning.
     """
     text = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False, default=str)
+    if classify_special_tool(tool_name) in ('skill', 'artifact'):
+        return text
     encoded = text.encode('utf-8', errors='replace')
     if len(encoded) <= LARGE_TOOL_RESULT_THRESHOLD:
         return text

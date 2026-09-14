@@ -21,6 +21,14 @@ VALID_SUMMARY = '\n'.join([
     'Touched summarizer.py; run_script exit 0.',
     '## Pending work',
     'Wire tests and lint.',
+    '## Active skills',
+    '[]',
+    '## Artifact coordinates',
+    '[]',
+    '## Citation map',
+    '[]',
+    '## Spill paths',
+    '[]',
 ])
 
 

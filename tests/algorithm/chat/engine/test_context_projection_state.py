@@ -29,6 +29,14 @@ VALID_SUMMARY = '\n'.join([
     'No files changed.',
     '## Pending work',
     'Continue the task.',
+    '## Active skills',
+    '[]',
+    '## Artifact coordinates',
+    '[]',
+    '## Citation map',
+    '[]',
+    '## Spill paths',
+    '[]',
 ])
 
 

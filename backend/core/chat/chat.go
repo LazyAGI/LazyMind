@@ -245,9 +245,16 @@ type WorkflowPreflightUpdatedEvent struct {
 // ModelContextUpdatedEvent persists dual-track compression state on the conversation.
 // summary_text and covered_through_seq must be applied together (atomic ext write).
 type ModelContextUpdatedEvent struct {
-	SummaryText       string `json:"summary_text"`
-	CoveredThroughSeq int    `json:"covered_through_seq"`
-	Version           int    `json:"version,omitempty"`
+	SummaryText       string          `json:"summary_text"`
+	CoveredThroughSeq int             `json:"covered_through_seq"`
+	Version           int             `json:"version,omitempty"`
+	ActiveSkills      json.RawMessage `json:"active_skills,omitempty"`
+	ArtifactCoords    json.RawMessage `json:"artifact_coords,omitempty"`
+	SpillPaths        json.RawMessage `json:"spill_paths,omitempty"`
+	CitationMap       json.RawMessage `json:"citation_map,omitempty"`
+	TaskGoal          json.RawMessage `json:"task_goal,omitempty"`
+	KeyInstructions   json.RawMessage `json:"key_instructions,omitempty"`
+	HardConstraints   json.RawMessage `json:"hard_constraints,omitempty"`
 }
 
 // LazyChatResponse is one line emitted by the algorithm chat stream.

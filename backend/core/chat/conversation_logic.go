@@ -685,9 +685,57 @@ func clearModelContext(ctx context.Context, db *gorm.DB, convID string) error {
 	return db.WithContext(ctx).Model(&orm.Conversation{}).Where("id = ?", convID).Update("ext", raw).Error
 }
 
-// handleModelContextUpdated atomically writes summary_text + covered_through_seq.
-// Rejects empty summary, non-positive covered, stale/equal covered watermarks,
-// or regressions below the current covered seq.
+func mergeModelContextSidecar(next map[string]any, ev *ModelContextUpdatedEvent) bool {
+	changed := false
+	assign := func(key string, raw json.RawMessage) {
+		if len(raw) == 0 {
+			return
+		}
+		var value any
+		if json.Unmarshal(raw, &value) != nil {
+			return
+		}
+		next[key] = value
+		changed = true
+	}
+	assign("active_skills", ev.ActiveSkills)
+	assign("artifact_coords", ev.ArtifactCoords)
+	assign("spill_paths", ev.SpillPaths)
+	assign("citation_map", ev.CitationMap)
+	assign("task_goal", ev.TaskGoal)
+	assign("key_instructions", ev.KeyInstructions)
+	assign("hard_constraints", ev.HardConstraints)
+	return changed
+}
+
+func loadRawModelContext(ext map[string]any) map[string]any {
+	raw, _ := ext["model_context"].(map[string]any)
+	if len(raw) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(raw))
+	for key, value := range raw {
+		out[key] = value
+	}
+	return out
+}
+
+func loadRawModelContextFromConversation(ctx context.Context, db *gorm.DB, convID string) map[string]any {
+	if db == nil || strings.TrimSpace(convID) == "" {
+		return nil
+	}
+	var conv orm.Conversation
+	if err := db.WithContext(ctx).Select("ext").Where("id = ?", convID).First(&conv).Error; err != nil {
+		return nil
+	}
+	ext := map[string]any{}
+	if len(conv.Ext) == 0 || json.Unmarshal(conv.Ext, &ext) != nil {
+		return nil
+	}
+	return loadRawModelContext(ext)
+}
+
+// handleModelContextUpdated atomically writes summary coverage and optional sidecar fields.
 func handleModelContextUpdated(
 	ctx context.Context,
 	db *gorm.DB,
@@ -698,9 +746,6 @@ func handleModelContextUpdated(
 		return
 	}
 	summary := strings.TrimSpace(ev.SummaryText)
-	if summary == "" || ev.CoveredThroughSeq <= 0 {
-		return
-	}
 	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var conv orm.Conversation
 		if err := tx.Select("id", "ext").Where("id = ?", convID).First(&conv).Error; err != nil {
@@ -710,8 +755,12 @@ func handleModelContextUpdated(
 		if len(conv.Ext) > 0 {
 			_ = json.Unmarshal(conv.Ext, &ext)
 		}
+		next := map[string]any{}
 		prevCovered := 0
 		if prev, ok := ext["model_context"].(map[string]any); ok {
+			for key, value := range prev {
+				next[key] = value
+			}
 			switch v := prev["covered_through_seq"].(type) {
 			case float64:
 				prevCovered = int(v)
@@ -721,18 +770,23 @@ func handleModelContextUpdated(
 				prevCovered = int(v)
 			}
 		}
-		if ev.CoveredThroughSeq <= prevCovered {
+		coverageAdvanced := summary != "" && ev.CoveredThroughSeq > prevCovered
+		sidecarChanged := mergeModelContextSidecar(next, ev)
+		if !coverageAdvanced && !sidecarChanged {
 			return nil
 		}
-		version := ev.Version
-		if version <= 0 {
-			version = 1
+		if coverageAdvanced {
+			version := ev.Version
+			if version <= 0 {
+				version = 1
+			}
+			next["summary_text"] = summary
+			next["covered_through_seq"] = ev.CoveredThroughSeq
+			next["version"] = version
+		} else if ev.Version > 0 {
+			next["version"] = ev.Version
 		}
-		ext["model_context"] = map[string]any{
-			"summary_text":        summary,
-			"covered_through_seq": ev.CoveredThroughSeq,
-			"version":             version,
-		}
+		ext["model_context"] = next
 		raw, err := json.Marshal(ext)
 		if err != nil {
 			return err
@@ -1457,11 +1511,9 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 	if surface, ok := raw["surface"].(string); ok {
 		body["surface"] = strings.TrimSpace(surface)
 	}
-	if modelCtx != nil {
-		body["model_context"] = map[string]any{
-			"summary_text":        modelCtx.SummaryText,
-			"covered_through_seq": modelCtx.CoveredThroughSeq,
-			"version":             modelCtx.Version,
+	if !restrictedContext {
+		if rawModelContext := loadRawModelContextFromConversation(ctx, db, convID); len(rawModelContext) > 0 {
+			body["model_context"] = rawModelContext
 		}
 	}
 	if restrictedContext {

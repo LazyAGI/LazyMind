@@ -16,7 +16,7 @@ from .models import ContextBudget, CompressionTrigger, SummaryEvent
 from .summary_prompt import (
     build_summary_user_prompt,
     get_summary_system_prompt,
-    has_required_summary_sections,
+    has_required_profile_blocks,
     wrap_summary_for_projection,
 )
 from .summary_range import (
@@ -26,6 +26,13 @@ from .summary_range import (
     validate_tool_pairing,
 )
 from .telemetry import append_event
+
+from .active_context import (
+    collect_summary_runtime_state,
+    merge_model_context_sidecar,
+    resolve_summary_profile,
+    sidecar_fields,
+)
 
 try:
     from lazyllm.tools.agent.base import _write_agent_data
@@ -92,11 +99,13 @@ def _validate_summary(
     before_total: int,
     after_total: int,
     non_history_tokens: int,
+    profile: Optional[str] = None,
+    runtime_state: Optional[dict[str, Any]] = None,
 ) -> tuple[bool, str, int, int]:
     if not (summary_markdown or '').strip():
         return False, 'empty_summary', 0, 0
 
-    if not has_required_summary_sections(summary_markdown):
+    if not has_required_profile_blocks(summary_markdown, profile, runtime_state):
         return False, 'missing_required_sections', 0, 0
 
     summary_tokens = estimate_tokens(summary_markdown)
@@ -179,8 +188,23 @@ def apply_summary_compression(
     if selected is None:
         return _abandon(original, budget, trigger, before_total, ratio_before, 'no_summary_range')
 
-    system_prompt = get_summary_system_prompt()
-    user_prompt = build_summary_user_prompt(selected.summary_messages)
+    runtime_state = collect_summary_runtime_state()
+    profile = resolve_summary_profile(runtime_state)
+    if (
+        profile == 'workflow'
+        and not runtime_state.get('artifact_coords')
+        and not runtime_state.get('workflow_step_id')
+    ):
+        return _abandon(
+            original, budget, trigger, before_total, ratio_before, 'workflow_missing_coords',
+            replaced_message_count=len(selected.summary_messages),
+            tail_tokens=selected.tail_tokens,
+        )
+
+    system_prompt = get_summary_system_prompt(profile)
+    user_prompt = build_summary_user_prompt(
+        selected.summary_messages, runtime_state=runtime_state,
+    )
 
     try:
         if summarizer is not None:
@@ -218,6 +242,8 @@ def apply_summary_compression(
         before_total=before_total,
         after_total=after_total,
         non_history_tokens=non_history_tokens,
+        profile=profile,
+        runtime_state=runtime_state,
     )
     if not ok:
         return _abandon(
@@ -294,13 +320,17 @@ def _emit_model_context_updated(summary_markdown: str, covered_through_seq: int)
             summary_text=summary_markdown.strip(),
             covered_through_seq=int(covered_through_seq),
             version=1,
+            **sidecar_fields(),
         )
         if isinstance(cfg, dict):
-            cfg['model_context'] = {
-                'summary_text': summary_markdown.strip(),
-                'covered_through_seq': int(covered_through_seq),
-                'version': 1,
-            }
+            cfg['model_context'] = merge_model_context_sidecar(
+                {
+                    'summary_text': summary_markdown.strip(),
+                    'covered_through_seq': int(covered_through_seq),
+                    'version': 1,
+                },
+                sidecar_fields(),
+            )
     except Exception as exc:  # noqa: BLE001
         lazyllm.LOG.warning(f'[ContextSummary] model_context_emit_failed err={exc}')
 

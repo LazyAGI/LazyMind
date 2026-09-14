@@ -11,6 +11,7 @@ from typing import Any, Callable, Optional
 
 from lazymind.config import config
 
+from .active_context import classify_special_tool, content_sha256, project_skill_tool_value
 from .context_estimator import estimate_tokens
 
 _ERROR_LINE = re.compile(
@@ -138,7 +139,90 @@ def _pick_error_lines(text: str, limit: int = 8) -> list[str]:
     return lines
 
 
+def _drop_artifact_bodies(payload: Any) -> Any:
+    if isinstance(payload, list):
+        return [_drop_artifact_bodies(item) for item in payload]
+    if not isinstance(payload, dict):
+        return payload
+    skipped = {'text', 'content', 'body', 'data', 'value', 'markdown', 'html'}
+    cleaned: dict[str, Any] = {}
+    for key, item in payload.items():
+        lowered = str(key).lower()
+        if lowered in skipped and isinstance(item, (str, dict, list)):
+            if lowered == 'value' and isinstance(item, dict):
+                cleaned[key] = {
+                    nested_key: nested
+                    for nested_key, nested in item.items()
+                    if str(nested_key).lower() not in {'text', 'content', 'body', 'data', 'markdown'}
+                }
+            continue
+        cleaned[key] = _drop_artifact_bodies(item)
+    return cleaned
+
+
+def compact_skill_result(tool_name: str, content: Any, observation: Any = None) -> tuple[str, str]:
+    observed = _observation_value(observation)
+    source = observed if observed is not None else content
+    projected, locator = project_skill_tool_value(tool_name, source)
+    payload = projected if isinstance(projected, dict) else _structured_payload(source, observation)
+    if not isinstance(payload, dict):
+        payload = {'tool': tool_name, 'status': 'compacted'}
+    if locator is None and isinstance(payload, dict) and payload.get('content'):
+        text = str(payload.get('content') or '')
+        payload = {
+            'status': payload.get('status') or 'ok',
+            'name': payload.get('name') or '',
+            'path': payload.get('path') or '',
+            'hash': content_sha256(text),
+            'bytes': len(text.encode('utf-8', errors='replace')),
+            'pinned': True,
+        }
+    lines = [
+        '[Earlier tool result compacted]',
+        f'Tool: {tool_name or "skill"}',
+        f'Name: {payload.get("name") or ""}',
+        f'Path: {payload.get("path") or payload.get("rel_path") or ""}',
+        f'Hash: {payload.get("hash") or ""}',
+    ]
+    if payload.get('spill_path'):
+        lines.append(f'Spill: {payload["spill_path"]}')
+    lines.append('Skill body is pinned in runtime AUTHORITATIVE context; locator only.')
+    return '\n'.join(lines), 'skill_locator'
+
+
+def compact_artifact_result(tool_name: str, content: Any, observation: Any = None) -> tuple[str, str]:
+    parsed = _structured_payload(content, observation)
+    payload = _drop_artifact_bodies(parsed) if parsed is not None else {}
+    if not isinstance(payload, dict):
+        payload = {'tool': tool_name}
+    key = (
+        payload.get('key')
+        or payload.get('slot')
+        or ((payload.get('results') or [{}])[0].get('key') if isinstance(payload.get('results'), list) else '')
+        or ''
+    )
+    path = payload.get('path') or payload.get('locator') or ''
+    revision = payload.get('revision') or payload.get('seq') or payload.get('sort_order') or ''
+    total_lines = payload.get('total_lines')
+    lines = [
+        '[Earlier tool result compacted]',
+        f'Tool: {tool_name or "artifact"}',
+        f'Key: {key}',
+        f'Path: {path}',
+        f'Revision: {revision}',
+    ]
+    if total_lines is not None:
+        lines.append(f'Total lines: {total_lines}')
+    if payload.get('start_line') is not None or payload.get('end_line') is not None:
+        lines.append(f'Range: {payload.get("start_line")}-{payload.get("end_line")}')
+    lines.append('Artifact body lives in the workspace; locator only.')
+    return '\n'.join(lines), 'file_locator'
+
+
 def _classify(tool_name: str) -> str:
+    special = classify_special_tool(tool_name)
+    if special:
+        return special
     name = str(tool_name or '').strip().lower()
     if not name:
         return 'generic'
@@ -325,6 +409,8 @@ _COMPACTORS: dict[str, Callable[[str, Any, Any], tuple[str, str]]] = {
     'shell': compact_shell_result,
     'file': compact_file_result,
     'search': compact_search_result,
+    'skill': compact_skill_result,
+    'artifact': compact_artifact_result,
     'generic': compact_generic_result,
 }
 
@@ -339,6 +425,8 @@ def compact_tool_result(
     kind = _classify(tool_name)
     compacted, compactor = _COMPACTORS[kind](tool_name, content, observation)
     after = estimate_tokens(compacted)
+    if kind in ('skill', 'artifact'):
+        return compacted, compactor, before, after
     if after >= before:
         # Keep original when compaction does not help.
         return _as_text(content), 'noop', before, before

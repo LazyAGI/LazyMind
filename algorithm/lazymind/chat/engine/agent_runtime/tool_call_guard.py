@@ -14,9 +14,11 @@ from lazyllm.tools.agent import (
     ToolExecutionDisposition,
     ToolExecutionRecord,
 )
+from lazyllm.tools.agent.base import is_tool_result_envelope
 from lazyllm.tools.agent.toolError import tool_failure
 
 from lazymind.chat.engine.tools.session_env import redact_session_env_arguments
+from .active_context import classify_special_tool, project_skill_tool_value
 from .telemetry import append_event, emit_tool_call, emit_tool_result
 
 
@@ -37,6 +39,39 @@ _REPEATED_CALL_THRESHOLD = 3
 
 def _requires_expanded_budget(tool_name: str) -> bool:
     return tool_name in _EXPANDED_BUDGET_TOOLS or tool_name.startswith('trigger_')
+
+
+def _runtime_workspace() -> str:
+    cfg = lazyllm.globals.get('agentic_config') or {}
+    if isinstance(cfg, dict):
+        for key in ('workspace', 'workspace_path'):
+            value = str(cfg.get(key) or '').strip()
+            if value:
+                return value
+    agent = lazyllm.locals.get('_lazyllm_agent') or {}
+    if isinstance(agent, dict):
+        for key in ('_workspace_path', 'workspace_path', 'workspace'):
+            value = agent.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return ''
+
+
+def _project_skill_execution_result(tool_name: str, result: Any) -> Any:
+    if classify_special_tool(tool_name) != 'skill':
+        return result
+    workspace = _runtime_workspace()
+    if is_tool_result_envelope(result) and result.get('ok') is True:
+        projected, _locator = project_skill_tool_value(
+            tool_name, result.get('value'), workspace=workspace,
+        )
+        updated = dict(result)
+        updated['value'] = projected
+        return updated
+    projected, _locator = project_skill_tool_value(
+        tool_name, result, workspace=workspace,
+    )
+    return projected
 
 
 def _tool_call_session_id() -> str:
@@ -128,6 +163,48 @@ class _FailureBatchDecision:
     pending_indices: tuple[int, ...]
     blocked_results: dict[int, Any]
     duplicate_sources: dict[int, int]
+
+
+class ToolCallQuota:
+    """Cap how many times a tool may execute in one agent run."""
+
+    def __init__(self, call_limits: dict[str, int] | None = None):
+        self._limits = {str(name): int(limit) for name, limit in (call_limits or {}).items()}
+        self._counts: Counter = Counter()
+
+    def _limit_for(self, name: str) -> int | None:
+        if name in self._limits:
+            return self._limits[name]
+        for pattern, limit in self._limits.items():
+            if pattern.endswith('*') and name.startswith(pattern[:-1]):
+                return limit
+        return None
+
+    def decide(self, prepared_calls: list[PreparedToolCall]) -> dict[int, Any]:
+        blocked: dict[int, Any] = {}
+        pending = Counter()
+        for index, prepared in enumerate(prepared_calls):
+            if not prepared.ready:
+                continue
+            name = prepared.tool_name
+            limit = self._limit_for(name)
+            if limit is None:
+                continue
+            projected = self._counts[name] + pending[name] + 1
+            if projected > limit:
+                blocked[index] = FailureRetryPolicy._blocked(
+                    name,
+                    f'{name} exceeded the per-step call cap ({limit}). '
+                    'Use the locator/path already returned; do not page or re-validate in a loop.',
+                )
+                continue
+            pending[name] += 1
+        return blocked
+
+    def observe(self, records: list[ToolExecutionRecord]) -> None:
+        for record in records:
+            if record.disposition is ToolExecutionDisposition.EXECUTED:
+                self._counts[record.tool_name] += 1
 
 
 class FailureRetryPolicy:
@@ -308,9 +385,11 @@ class ToolExecutionMiddleware:
     def __init__(self, manager: Any, failure_policy: FailureRetryPolicy | None = None,
                  expanded_round_limit: int | None = None, cancel_check: Any = None,
                  repeat_monitor: ExactRepeatMonitor | None = None,
-                 notice_buffer: OneShotNoticeBuffer | None = None):
+                 notice_buffer: OneShotNoticeBuffer | None = None,
+                 call_quota: ToolCallQuota | None = None):
         self._manager = manager
         self._failure_policy = failure_policy or FailureRetryPolicy()
+        self._call_quota = call_quota or ToolCallQuota()
         self._expanded_round_limit = expanded_round_limit
         self._cancel_check = cancel_check
         self._repeat_monitor = repeat_monitor
@@ -347,6 +426,16 @@ class ToolExecutionMiddleware:
             nonlocal prepared_calls, decision, started_at
             prepared_calls = list(prepared)
             decision = self._failure_policy.decide(prepared_calls)
+            for index, result in self._call_quota.decide(prepared_calls).items():
+                if index not in decision.blocked_results:
+                    decision.blocked_results[index] = result
+                    decision = _FailureBatchDecision(
+                        pending_indices=tuple(
+                            item for item in decision.pending_indices if item != index
+                        ),
+                        blocked_results=decision.blocked_results,
+                        duplicate_sources=decision.duplicate_sources,
+                    )
             for index, item in enumerate(prepared_calls):
                 if index in decision.pending_indices and item.ready:
                     self._expand_round_limit(item.tool_name)
@@ -378,9 +467,12 @@ class ToolExecutionMiddleware:
         results: list[Any] = [None] * len(prepared_calls)
         records: list[ToolExecutionRecord | None] = [None] * len(prepared_calls)
         for result, record in zip(executed_batch.results, executed_batch.records):
-            results[record.index] = result
+            projected = _project_skill_execution_result(
+                prepared_calls[record.index].tool_name, result,
+            )
+            results[record.index] = projected
             records[record.index] = record
-            emit_tool_result(prepared_calls[record.index].tool_call, result)
+            emit_tool_result(prepared_calls[record.index].tool_call, projected)
             _log_tool_call(
                 'done',
                 prepared_calls[record.index].tool_name,
@@ -408,6 +500,7 @@ class ToolExecutionMiddleware:
             emit_tool_result(prepared_calls[index].tool_call, result)
         completed_records = [record for record in records if record is not None]
         self._failure_policy.observe(completed_records)
+        self._call_quota.observe(completed_records)
         batch = ToolExecutionBatch(
             results=lazyllm.package(results),
             records=tuple(completed_records),

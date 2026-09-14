@@ -73,6 +73,15 @@ from lazymind.chat.engine.agent_runtime import (
     attach_window_budget,
     render_attachment_content,
 )
+from lazymind.chat.engine.agent_runtime.active_context import (
+    active_skills_from_model_context,
+    pin_active_skills_into_builder,
+    pin_task_goals_into_builder,
+)
+from lazymind.chat.engine.agent_runtime.summary_range import (
+    AUTHORITATIVE_TASK_KIND,
+    is_runtime_summary_message,
+)
 from lazymind.chat.engine.agent_runtime.budget import resolve_max_input_tokens
 from lazymind.chat.service.local_observation import LocalObservationWriter
 from lazymind.chat.engine.tools.local_file.workspace import build_resource_read_tools, chat_agent_workspace
@@ -333,9 +342,14 @@ def _normalize_document_filter(filters: Dict[str, Any]) -> None:
 def _active_skills_from_history(
     history: list[dict[str, Any]],
     available_skills: list[str] | None,
+    model_context: Any = None,
 ) -> list[str]:
     available = [str(skill) for skill in (available_skills or []) if str(skill).strip()]
     activated = set()
+    for item in active_skills_from_model_context(model_context):
+        name = str(item.get('name') or '').strip()
+        if name:
+            activated.add(name)
     for message in history:
         for tool_call in message.get('tool_calls') or []:
             if not isinstance(tool_call, dict):
@@ -1032,6 +1046,13 @@ async def _handle_chat_impl(
         raw_history,
         compact_workflow_receipts=compact_rewind_history,
     )
+    for message in agent_history:
+        if message.get('role') != 'user' or is_runtime_summary_message(message):
+            continue
+        meta = dict(message.get('_lazymind_meta') or {})
+        meta['kind'] = AUTHORITATIVE_TASK_KIND
+        message['_lazymind_meta'] = meta
+        break
     translator = AgentEventFrameTranslator(
         query=query,
         run_id=run_id,
@@ -1274,6 +1295,8 @@ async def _handle_chat_impl(
 
     disabled = set(agent.disabled_tools or [])
     workspace = chat_agent_workspace(user_id or '0', conversation_id)
+    agentic_config['workspace'] = workspace
+    agentic_config['workspace_path'] = workspace
     if sidechat_readonly:
         active_configs = build_sidechat_tool_configs(
             [cfg for cfg in [*DEFAULT_TOOLS, *(USER_ATTACHMENT_TOOL_CONFIGS if files_map else ())]
@@ -1447,7 +1470,11 @@ async def _handle_chat_impl(
         elif task_profile is not None:
             selected_skills = select_skill_candidates(agent.available_skills, language_query, task_profile)
             selected_skills = list(dict.fromkeys([
-                *_active_skills_from_history(agent_history, agent.available_skills),
+                *_active_skills_from_history(
+                    agent_history,
+                    agent.available_skills,
+                    request.model_context,
+                ),
                 *(selected_skills or []),
             ]))
             excluded_skill_names = set(task_profile.excluded_resources.skill_names)
@@ -1578,6 +1605,14 @@ async def _handle_chat_impl(
         ),
         task_profile=task_profile,
         dynamic_prompt_modules=_cfg['dynamic_prompt_modules'],
+    )
+    pin_active_skills_into_builder(
+        prompt_builder, request.model_context, workspace=workspace,
+    )
+    pin_task_goals_into_builder(
+        prompt_builder,
+        request.model_context,
+        task_goal=language_query,
     )
     if sidechat_readonly:
         workspace_policy = (
@@ -1770,6 +1805,18 @@ async def _handle_chat_impl(
                 'list_knowledge_bases': 2,
                 'list_knowledge_base_documents': 2,
                 'aggregate_knowledge_base_documents': 2,
+                'get_artifact': 2,
+                'validate_and_allocate_outline': 1,
+                'normalize_bid_outline_from_inputs': 1,
+                'validate_proposal_from_inputs': 1,
+            },
+            tool_call_limits={
+                'get_artifact': 6,
+                'save_artifacts': 8,
+                'validate_and_allocate_outline': 1,
+                'normalize_bid_outline_from_inputs': 2,
+                'validate_proposal_from_inputs': 2,
+                'validate_*': 2,
             },
             extra_stop_condition=make_cancel_stop_condition(),
         ),
