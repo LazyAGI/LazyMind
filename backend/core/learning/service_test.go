@@ -386,6 +386,25 @@ func TestEveryCapabilityOwnsValidAnalysisRules(t *testing.T) {
 	}
 }
 
+func TestCapabilityCandidateLimitsCanOverrideDefaults(t *testing.T) {
+	def, _ := CapabilityByKey("chinese_definition")
+	if def.Analysis.MaxCandidates != 8 || def.Analysis.MaxDocumentCandidates != 20 {
+		t.Fatalf("unexpected capability defaults: %#v", def.Analysis)
+	}
+	if err := validateCapabilitySettings(def, map[string]any{"max_candidates_per_block": float64(12), "max_document_candidates": float64(40)}); err != nil {
+		t.Fatalf("valid candidate limits rejected: %v", err)
+	}
+	for _, settings := range []map[string]any{
+		{"max_candidates_per_block": 0},
+		{"max_candidates_per_block": 1.5},
+		{"max_document_candidates": 1001},
+	} {
+		if err := validateCapabilitySettings(def, settings); err == nil {
+			t.Fatalf("invalid candidate limits accepted: %#v", settings)
+		}
+	}
+}
+
 func TestFallbackPreanalysisCandidatesUsesTermsFromPassage(t *testing.T) {
 	def, _ := CapabilityByKey("chinese_definition")
 	rows := fallbackPreanalysisCandidates(def, PreanalysisItem{Text: "通过铁路道口、急弯、窄路时应当减速。", SegmentID: "segment-1"})

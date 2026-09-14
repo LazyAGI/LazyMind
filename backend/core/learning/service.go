@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"sort"
 	"strings"
@@ -183,7 +184,7 @@ func (s *Service) PutKnowledgeBaseCapabilities(ctx context.Context, owner, datas
 func validateCapabilitySettings(def Capability, settings map[string]any) error {
 	for key := range settings {
 		switch key {
-		case "cache_scope", "allow_llm_fallback", "target_language", "max_selection_length":
+		case "cache_scope", "allow_llm_fallback", "target_language", "max_selection_length", "max_candidates_per_block", "max_document_candidates":
 		default:
 			return fmt.Errorf("unsupported capability setting: %s", key)
 		}
@@ -195,6 +196,14 @@ func validateCapabilitySettings(def Capability, settings map[string]any) error {
 		value, valid := numericSetting(raw)
 		if !valid || value < 1 || value > 10000 {
 			return errors.New("invalid maximum selection length")
+		}
+	}
+	for key, maximum := range map[string]float64{"max_candidates_per_block": 100, "max_document_candidates": 1000} {
+		if raw, ok := settings[key]; ok {
+			value, valid := numericSetting(raw)
+			if !valid || value < 1 || value > maximum || math.Trunc(value) != value {
+				return fmt.Errorf("invalid %s", key)
+			}
 		}
 	}
 	if raw, ok := settings["allow_llm_fallback"]; ok {

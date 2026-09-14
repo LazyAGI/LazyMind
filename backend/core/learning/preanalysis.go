@@ -128,6 +128,11 @@ func (s *Service) PublishPreanalysisDrafts(ctx context.Context, owner, taskID, e
 
 func (s *Service) expandPreanalysisItem(ctx context.Context, owner, key string, item PreanalysisItem) ([]PreanalysisItem, error) {
 	def, _ := CapabilityByKey(key)
+	return s.expandPreanalysisItemWithDefinition(ctx, owner, def, item)
+}
+
+func (s *Service) expandPreanalysisItemWithDefinition(ctx context.Context, owner string, def Capability, item PreanalysisItem) ([]PreanalysisItem, error) {
+	key := def.Key
 	lang, kinds := analyzeText(item.Text)
 	kind := ""
 	if len(kinds) > 0 {
@@ -326,6 +331,20 @@ func (s *Service) RunPreanalysisTask(ctx context.Context, owner, id string) (Pre
 	if json.Unmarshal([]byte(task.RequestJSON), &in) != nil {
 		return task, errors.New("invalid stored preanalysis request")
 	}
+	effectiveDefinitions := make(map[string]Capability, len(in.CapabilityKeys))
+	for _, key := range in.CapabilityKeys {
+		def, settings, configuredErr := s.configuredCapability(ctx, owner, in.DatasetID, key)
+		if configuredErr != nil {
+			return task, configuredErr
+		}
+		if value, ok := numericSetting(settings["max_candidates_per_block"]); ok {
+			def.Analysis.MaxCandidates = int(value)
+		}
+		if value, ok := numericSetting(settings["max_document_candidates"]); ok {
+			def.Analysis.MaxDocumentCandidates = int(value)
+		}
+		effectiveDefinitions[key] = def
+	}
 	now := time.Now().UTC()
 	claim := s.db.WithContext(ctx).Model(&PreanalysisTask{}).Where("id = ? AND owner_id = ? AND status = ?", id, owner, "queued").Updates(map[string]any{"status": "running", "started_at": now, "updated_at": now, "error_message": ""})
 	if claim.Error != nil {
@@ -341,7 +360,7 @@ func (s *Service) RunPreanalysisTask(ctx context.Context, owner, id string) (Pre
 	capabilityCounts := map[string]int{}
 	for _, item := range in.Items {
 		for _, key := range in.CapabilityKeys {
-			def, _ := CapabilityByKey(key)
+			def := effectiveDefinitions[key]
 			if limit := def.Analysis.MaxDocumentCandidates; limit > 0 && capabilityCounts[key] >= limit {
 				continue
 			}
@@ -350,7 +369,7 @@ func (s *Service) RunPreanalysisTask(ctx context.Context, owner, id string) (Pre
 			if state == "canceled" {
 				return s.GetPreanalysisTask(ctx, owner, id)
 			}
-			candidates, expandErr := s.expandPreanalysisItem(ctx, owner, key, item)
+			candidates, expandErr := s.expandPreanalysisItemWithDefinition(ctx, owner, def, item)
 			if expandErr != nil || len(candidates) == 0 {
 				failed++
 				_ = s.db.WithContext(ctx).Model(&PreanalysisTask{}).Where("id = ?", id).Updates(map[string]any{"failed": failed, "updated_at": time.Now().UTC()}).Error

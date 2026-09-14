@@ -49,6 +49,12 @@ export default function CapabilitySettings({ capabilities, selectedKeys }:Props)
           <Form.Item name={["learning_capability_settings",key,"max_selection_length"]} label={t("learning.maxSelectionLength")}>
             <InputNumber min={1} max={10000} style={{width:"100%"}} placeholder={t("learning.useCapabilityDefault")}/>
           </Form.Item>
+          <Form.Item name={["learning_capability_settings",key,"max_candidates_per_block"]} label={t("learning.maxCandidatesPerBlock")}>
+            <InputNumber min={1} max={100} precision={0} style={{width:"100%"}} placeholder={t("learning.capabilityDefaultValue",{value:capability.analysis?.max_candidates ?? 8})}/>
+          </Form.Item>
+          <Form.Item name={["learning_capability_settings",key,"max_document_candidates"]} label={t("learning.maxDocumentCandidates")}>
+            <InputNumber min={1} max={1000} precision={0} style={{width:"100%"}} placeholder={t("learning.capabilityDefaultValue",{value:capability.analysis?.max_document_candidates ?? 20})}/>
+          </Form.Item>
         </div>,
       }];
     })}
