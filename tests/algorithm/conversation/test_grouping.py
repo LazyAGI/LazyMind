@@ -129,17 +129,59 @@ def test_size_failure_is_returned_to_core_for_batch_reduction(code):
 
 
 @pytest.mark.parametrize('verdict,accepted', [
-    ({'keep': ['c1'], 'reject': []}, True),
-    ({'keep': [], 'reject': ['c1']}, False),
+    ({'keep': ['c1'], 'reject': [], 'reason': 'accepted'}, True),
+    ({'keep': [], 'reject': ['c1'], 'reason': 'coverage_gap'}, False),
+    ({'keep': ['c1'], 'reject': [], 'reason': 'no_shared_scenario'}, False),
+    ({'keep': ['c1'], 'reject': [], 'reason': 'boundary_too_broad'}, False),
 ])
 def test_scope_audit_uses_complete_partition(verdict, accepted):
-    output, _ = organize_step(_request([{'id': 'c1'}], phase='audit', scope='范围'),
+    output, _ = organize_step(_request([{'id': 'c1'}], phase='audit', scope='范围', scope_change={}),
                               call=lambda *_a, **_k: verdict)
     assert output['accepted'] is accepted
+    assert output['audit_reason'] == verdict['reason']
+    assert output['rejected_ids'] == verdict['reject']
     assert output['processed'] == 1
 
 
 def test_incomplete_scope_audit_is_rejected():
     with pytest.raises(ConversationCallError, match='invalid_output'):
-        organize_step(_request([{'id': 'c1'}], phase='audit', scope='范围'),
-                      call=lambda *_a, **_k: {'keep': [], 'reject': []})
+        organize_step(_request([{'id': 'c1'}], phase='audit', scope='范围', scope_change={}),
+                      call=lambda *_a, **_k: {'keep': [], 'reject': [], 'reason': 'accepted'})
+
+
+@pytest.mark.parametrize('verdict', [
+    {'keep': ['c1'], 'reject': [], 'reason': 'unknown'},
+    {'keep': [], 'reject': ['c1'], 'reason': 'accepted'},
+    {'keep': ['c1'], 'reject': [], 'reason': 'coverage_gap'},
+])
+def test_scope_audit_rejects_inconsistent_reason(verdict):
+    with pytest.raises(ConversationCallError, match='invalid_output'):
+        organize_step(_request([{'id': 'c1'}], phase='audit', scope='范围', scope_change={}),
+                      call=lambda *_a, **_k: verdict)
+
+
+def test_preserve_existing_candidates_only_allows_create():
+    cards = [{'id': 'candidate-1', 'short_id': 'g1', 'kind': 'candidate',
+              'name': '邮件处理', 'scope': '处理邮件'}]
+    calls = []
+
+    def model(_request, prompt, **_):
+        payload = _payload(prompt)
+        calls.append(payload)
+        if len(calls) < 3:
+            return _response(payload['conversations'], group_id='g1', operations=[
+                {'op': 'update', 'id': 'g1', 'scope': '机械扩大范围'},
+            ])
+        return _response(payload['conversations'], group_id='new_1', operations=[
+            {'op': 'create', 'id': 'new_1', 'name': '独立场景', 'scope': '独立任务场景'},
+        ])
+
+    output, _ = organize_step(_request(
+        [{'id': 'c1', 'summary': '独立任务'}], groups=cards,
+        preserve_existing_candidates=True,
+        scope_repair={'reason': 'no_shared_scenario'},
+    ), call=model)
+    assert len(calls) == 3
+    assert all(call['preserve_existing_candidates'] is True for call in calls)
+    assert all(call['scope_repair']['reason'] == 'no_shared_scenario' for call in calls)
+    assert output['operations'][0]['op'] == 'create'

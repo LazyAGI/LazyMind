@@ -57,6 +57,7 @@ func TestIncrementalBatchAuditResumeAndPartition(t *testing.T) {
 		if input.Phase == "audit" {
 			auditCalls++
 			out.Accepted = true
+			out.AuditReason = scopeAuditAccepted
 			if len(input.Conversations) > 50 {
 				t.Error("oversized audit")
 			}
@@ -115,6 +116,168 @@ func TestIncrementalBatchAuditResumeAndPartition(t *testing.T) {
 	json.Unmarshal(run.CheckpointJSON, &cp)
 	if _, ok := cp["assignments"]; ok {
 		t.Fatal("historical assignments retained in checkpoint")
+	}
+}
+
+func TestScopeAuditExhaustionFallsBackWithoutChangingCommittedCandidates(t *testing.T) {
+	db := orm.MigrateTestDB(t, &orm.ConversationOrganizerRun{}, &orm.ConversationOrganizerSnapshotItem{}, &orm.ConversationOrganizerCandidate{}, &orm.AsyncJob{})
+	now := time.Now().UTC()
+	until := now.Add(time.Hour)
+	job := asyncjob.Job{ID: "j", AttemptCount: 1}
+	if err := db.Create(&orm.AsyncJob{ID: job.ID, Status: "running", JobType: organizerJobType, AttemptCount: 1, LockUntil: &until, NextRunAt: now}).Error; err != nil {
+		t.Fatal(err)
+	}
+	snapshot := organizerSnapshot{ID: "r"}
+	for i, id := range []string{"old-1", "old-2", "old-3", "new-1"} {
+		conversation := snapshotConversation{ID: id, Title: id, Summary: "邮件任务"}
+		snapshot.Conversations = append(snapshot.Conversations, conversation)
+		assignment := "cand-a"
+		if id == "new-1" {
+			assignment = ""
+		}
+		row := orm.ConversationOrganizerSnapshotItem{RunID: "r", ConversationID: id, Ordinal: i, Title: id, Summary: "邮件任务", PreparationStatus: "done", Assignment: assignment}
+		if err := db.Create(&row).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	card := directoryCard{ID: "cand-a", Name: "邮件处理", Scope: "处理邮件", Kind: "candidate", Count: 3, Version: 1}
+	cardRaw, _ := json.Marshal(card)
+	if err := db.Create(&orm.ConversationOrganizerCandidate{RunID: "r", ID: card.ID, Data: cardRaw}).Error; err != nil {
+		t.Fatal(err)
+	}
+	cp := incrementalCheckpoint{GroupIDs: map[string]string{"cand-a": "g1"}, NextGroupNumber: 1, NextOrdinal: 3, Cursor: 3, Version: 1, Identity: "identity", Stage: "organizing", BatchSize: 50}
+	cpRaw, _ := json.Marshal(cp)
+	snapshotRaw, _ := json.Marshal(snapshot)
+	run := orm.ConversationOrganizerRun{ID: "r", Status: "running", JobID: "j", SnapshotHash: "hash", SnapshotJSON: snapshotRaw, CheckpointJSON: cpRaw, ModelConfigJSON: json.RawMessage(`{}`)}
+	if err := db.Create(&run).Error; err != nil {
+		t.Fatal(err)
+	}
+	auditCalls, batchCalls, fallbackCalls := 0, 0, 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, ":cancel") {
+			fmt.Fprint(w, `{"settled":true}`)
+			return
+		}
+		var request struct {
+			Input struct {
+				Phase                      string                  `json:"phase"`
+				PreserveExistingCandidates bool                    `json:"preserve_existing_candidates"`
+				ScopeChange                incrementalScopeRepair  `json:"scope_change"`
+				ScopeRepair                *incrementalScopeRepair `json:"scope_repair"`
+				Conversations              []snapshotConversation  `json:"conversations"`
+			} `json:"input"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+			return
+		}
+		input := request.Input
+		out := organizerStepOutput{Identity: "identity", Processed: len(input.Conversations)}
+		if input.Phase == "audit" {
+			auditCalls++
+			if input.ScopeChange.Operation.Op != "update" || len(input.ScopeChange.SourceGroups) != 1 || input.ScopeChange.SourceGroups[0].ID != "g1" {
+				t.Errorf("missing audit context: %+v", input.ScopeChange)
+			}
+			out.AuditReason = scopeAuditCoverageGap
+			out.RejectedIDs = []string{"old-1"}
+		} else {
+			batchCalls++
+			if input.PreserveExistingCandidates {
+				fallbackCalls++
+				if input.ScopeRepair == nil || input.ScopeRepair.Reason != scopeAuditCoverageGap || len(input.ScopeRepair.Rejected) != 1 || input.ScopeRepair.Rejected[0].ID != "old-1" {
+					t.Errorf("missing persisted repair evidence: %+v", input.ScopeRepair)
+				}
+				out.Assignments = []incrementalAssignment{{ID: "new-1", GroupID: "free"}}
+			} else {
+				out.Operations = []candidateOperation{{Op: "update", ID: "g1", Scope: "仅发送邮件"}}
+				out.Assignments = []incrementalAssignment{{ID: "new-1", GroupID: "g1"}}
+			}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"type": "result", "result": organizerTaskResult{Status: "succeeded", Output: out}})
+	}))
+	defer server.Close()
+	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", server.URL)
+	var proposal *organizerProposal
+	for i := 0; i < 12 && proposal == nil; i++ {
+		if err := db.Where("id=?", run.ID).Take(&run).Error; err != nil {
+			t.Fatal(err)
+		}
+		var err error
+		proposal, err = runIncrementalStep(t.Context(), db.DB, &run, job, snapshot, map[string]any{})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if proposal == nil || auditCalls != 3 || batchCalls != 4 || fallbackCalls != 1 {
+		t.Fatalf("proposal=%+v audits=%d batches=%d fallback=%d", proposal, auditCalls, batchCalls, fallbackCalls)
+	}
+	if len(proposal.NewGroups) != 1 || len(proposal.NewGroups[0].ConversationIDs) != 3 || len(proposal.FreeConversationIDs) != 1 || proposal.FreeConversationIDs[0] != "new-1" {
+		t.Fatalf("unexpected partition: %+v", proposal)
+	}
+	var storedCandidate orm.ConversationOrganizerCandidate
+	if err := db.Where("run_id=? AND id=?", run.ID, card.ID).Take(&storedCandidate).Error; err != nil {
+		t.Fatal(err)
+	}
+	if string(storedCandidate.Data) != string(cardRaw) {
+		t.Fatalf("committed candidate changed: %s", storedCandidate.Data)
+	}
+	var storedNew orm.ConversationOrganizerSnapshotItem
+	if err := db.Where("run_id=? AND conversation_id=?", run.ID, "new-1").Take(&storedNew).Error; err != nil {
+		t.Fatal(err)
+	}
+	if storedNew.Assignment != "free" {
+		t.Fatalf("fallback assignment=%q", storedNew.Assignment)
+	}
+	var finalCheckpoint incrementalCheckpoint
+	if err := json.Unmarshal(run.CheckpointJSON, &finalCheckpoint); err != nil {
+		t.Fatal(err)
+	}
+	if finalCheckpoint.Pending != nil || finalCheckpoint.ScopeRepair != nil || finalCheckpoint.PreserveExistingCandidates || finalCheckpoint.ScopeAuditFailures != 0 {
+		t.Fatalf("fallback state was not cleared: %+v", finalCheckpoint)
+	}
+}
+
+func TestNoSharedScenarioImmediatelyPreservesExistingCandidates(t *testing.T) {
+	out := organizerStepOutput{Accepted: false, AuditReason: scopeAuditNoSharedScenario}
+	rejected, err := validateScopeAudit(out, []orm.ConversationOrganizerSnapshotItem{{ConversationID: "c1"}})
+	if err != nil || len(rejected) != 0 {
+		t.Fatalf("semantic rejection should not require rejected members: rejected=%v err=%v", rejected, err)
+	}
+	cp := incrementalCheckpoint{
+		GroupIDs:        map[string]string{"g1": "candidate-1", "new-1": "candidate-2"},
+		NextGroupNumber: 2,
+		Repair:          2,
+	}
+	pending := &incrementalPending{Operations: []candidateOperation{
+		{Op: "create", ID: "new-1", Name: "混合任务", Scope: "宽泛任务"},
+		{Op: "merge", SourceIDs: []string{"g1", "new-1"}, TargetID: "g1", Name: "混合任务", Scope: "宽泛任务"},
+	}}
+	cp.Pending = pending
+	evidence := incrementalScopeRepair{Operation: pending.Operations[1]}
+	recordScopeAuditRejection(&cp, pending, map[string]string{"g1": "candidate-1"}, evidence, out.AuditReason, rejected)
+
+	if cp.Pending != nil || !cp.PreserveExistingCandidates || cp.ScopeAuditFailures != 1 || cp.Repair != 0 || cp.Stage != "organizing" {
+		t.Fatalf("semantic rejection did not enter conservative mode: %+v", cp)
+	}
+	if cp.ScopeRepair == nil || cp.ScopeRepair.Reason != scopeAuditNoSharedScenario {
+		t.Fatalf("semantic rejection evidence was not retained: %+v", cp.ScopeRepair)
+	}
+	if _, ok := cp.GroupIDs["new-1"]; ok {
+		t.Fatalf("orphan created candidate mapping was retained: %+v", cp.GroupIDs)
+	}
+	if cp.NextGroupNumber != 2 {
+		t.Fatalf("candidate numbering moved backwards: %d", cp.NextGroupNumber)
+	}
+}
+
+func TestPreservedCandidatesOnlyAllowCreate(t *testing.T) {
+	if err := validatePreservedCandidateOperations(true, []candidateOperation{{Op: "create", ID: "cand-new", Name: "新场景", Scope: "新任务"}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, op := range []string{"rename", "update", "merge"} {
+		if err := validatePreservedCandidateOperations(true, []candidateOperation{{Op: op}}); err == nil {
+			t.Fatalf("preserve mode accepted %s", op)
+		}
 	}
 }
 

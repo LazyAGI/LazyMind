@@ -14,10 +14,20 @@ import (
 )
 
 const (
-	recoveryRetry   = "retry"
-	recoveryRestart = "restart"
-	recoveryNone    = "none"
+	recoveryRetry                   = "retry"
+	recoveryRestart                 = "restart"
+	recoveryNone                    = "none"
+	legacyScopeAuditRejectedMessage = "scope audit rejected after repairs"
 )
+
+var errScopeAuditUnresolved = errors.New("scope audit rejected after repairs")
+
+func organizerEffectiveErrorCode(run orm.ConversationOrganizerRun) string {
+	if run.ErrorCode == "incremental_step_failed" && run.ErrorMessage == legacyScopeAuditRejectedMessage {
+		return "scope_audit_unresolved"
+	}
+	return run.ErrorCode
+}
 
 // Only explicitly understood failures may resume a frozen checkpoint.
 func recoveryForCode(code string) string {
@@ -26,7 +36,8 @@ func recoveryForCode(code string) string {
 		"authentication_failed", "permission_denied", "not_found", "invalid_request",
 		"token_limit", "input_too_large", "output_too_large", "usage_limit_exceeded",
 		"quota_exhausted", "balance_exhausted", "organization_spend_limit_exceeded",
-		"project_spend_limit_exceeded", "input_filtered", "output_filtered":
+		"project_spend_limit_exceeded", "input_filtered", "output_filtered",
+		"scope_audit_unresolved":
 		return recoveryRestart
 	case "lease_lost", "lock_expired", "update_failed", "model_config",
 		"cancellation_unconfirmed", "connection_timeout", "response_timeout",
@@ -61,7 +72,7 @@ func organizerRecovery(ctx context.Context, db *gorm.DB, run orm.ConversationOrg
 	if stream.ExecutionID != "" && !stream.Settled {
 		return recoveryRetry
 	}
-	action := recoveryForCode(run.ErrorCode)
+	action := recoveryForCode(organizerEffectiveErrorCode(run))
 	if run.Status == "canceled" {
 		action = recoveryRestart
 	}
@@ -105,6 +116,9 @@ func organizerFailure(code string, err error) (string, bool) {
 	}
 	if errors.Is(err, errLeaseLost) {
 		return "lease_lost", true
+	}
+	if errors.Is(err, errScopeAuditUnresolved) {
+		return "scope_audit_unresolved", false
 	}
 	var network net.Error
 	if errors.As(err, &network) || errors.Is(err, io.ErrUnexpectedEOF) {

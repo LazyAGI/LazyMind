@@ -109,3 +109,16 @@ it("does not offer retry or restart for an unresolved error", async () => {
   expect(screen.queryByRole("button", { name: "conversationOrganizer.restart" })).toBeNull();
   unmount();
 });
+
+it("shows a localized scope audit failure and starts a fresh run", async () => {
+  const failed: api.OrganizerRun = { ...running, status: "failed", can_cancel: false, can_retry: false, can_restart: true, error: { code: "scope_audit_unresolved", message: "scope audit unresolved" } };
+  vi.mocked(api.getLatestOrganizerState).mockResolvedValue({ run: failed, latest_successful_run_id: null, free_conversation_count: 2 });
+  vi.mocked(api.startOrganizerRun).mockResolvedValue({ ...running, id: "new-run" });
+  const { unmount } = render(<ConversationGroups mode="organizer" />);
+  fireEvent.click(await screen.findByRole("button", { name: /failedEntry/ }));
+  expect(await screen.findByText("conversationOrganizer.callError.scope_audit_unresolved")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "conversationOrganizer.restart" }));
+  await waitFor(() => expect(api.startOrganizerRun).toHaveBeenCalledTimes(1));
+  expect(api.runAction).not.toHaveBeenCalled();
+  unmount();
+});

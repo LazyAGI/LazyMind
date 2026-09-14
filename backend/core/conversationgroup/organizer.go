@@ -78,6 +78,8 @@ type organizerStepOutput struct {
 	Assignments []incrementalAssignment `json:"assignments"`
 	Processed   int                     `json:"processed"`
 	Accepted    bool                    `json:"accepted"`
+	AuditReason string                  `json:"audit_reason"`
+	RejectedIDs []string                `json:"rejected_ids"`
 }
 type organizerTaskResult struct {
 	Status    string              `json:"status"`

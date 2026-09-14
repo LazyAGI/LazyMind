@@ -28,6 +28,7 @@ func TestOrganizerRecoveryAndRetryEndpoint(t *testing.T) {
 		{"authentication_failed", `{}`, recoveryRestart},
 		{"authentication_failed", `{"llm":{"model":"old"}}`, recoveryRestart},
 		{"input_too_large", `{}`, recoveryRestart},
+		{"scope_audit_unresolved", `{}`, recoveryRestart},
 		{"incremental_step_failed", `{}`, recoveryNone},
 		{"handler_not_found", `{}`, recoveryNone},
 		{"unknown", `{}`, recoveryNone},
@@ -65,6 +66,18 @@ func TestOrganizerRecoveryAndRetryEndpoint(t *testing.T) {
 				t.Fatalf("rejected retry mutated state: %d %s jobs=%d", response.Code, stored.Status, jobs)
 			}
 		})
+	}
+	legacy := orm.ConversationOrganizerRun{Status: "failed", ErrorCode: "incremental_step_failed", ErrorMessage: legacyScopeAuditRejectedMessage}
+	if got := organizerEffectiveErrorCode(legacy); got != "scope_audit_unresolved" {
+		t.Fatalf("legacy effective code=%q", got)
+	}
+	if got := organizerRecovery(t.Context(), db.DB, legacy); got != recoveryRestart {
+		t.Fatalf("legacy recovery=%q", got)
+	}
+	legacyDTO := runDTO(t.Context(), db.DB, legacy, false)
+	legacyError, _ := legacyDTO["error"].(map[string]any)
+	if legacyError["code"] != "scope_audit_unresolved" || legacyDTO["can_restart"] != true || legacyDTO["can_retry"] != false {
+		t.Fatalf("legacy dto=%v", legacyDTO)
 	}
 }
 
@@ -106,5 +119,8 @@ func TestOrganizerFailurePreservesModelRetryability(t *testing.T) {
 	}
 	if !sameOrganizerModelConfig(map[string]any{"llm": map[string]any{"model": "qwen", "source": "openai"}}, json.RawMessage(`{ "llm": {"source":"openai", "model":"qwen"} }`)) {
 		t.Fatal("JSON formatting is not a configuration change")
+	}
+	if code, retryable := organizerFailure("incremental_step_failed", errScopeAuditUnresolved); code != "scope_audit_unresolved" || retryable {
+		t.Fatalf("scope fallback failure code=%s retryable=%v", code, retryable)
 	}
 }

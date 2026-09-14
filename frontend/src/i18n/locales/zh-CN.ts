@@ -8018,7 +8018,7 @@ const zhCN = {
 
     searchGroups: "搜索对话组",
     groupPickerLabel: "所属分组", freeConversation: "自由会话",
-    callError: { model_config_changed: "模型配置已变化，需要重新整理", invalid_snapshot: "本次会话快照已失效，需要重新整理", model_config: "暂时无法读取模型配置", authentication_failed: "模型鉴权失败，请检查 API Key", permission_denied: "无权访问模型，请检查权限", input_too_large: "单条输入仍超出模型容量，请调整模型配置", output_too_large: "最小批次输出仍超出限制，请调整模型配置", token_limit: "模型 Token 额度或容量受限，请检查模型配置", rate_limited: "模型请求频率受限，请稍后重试", transport_error: "模型连接异常，请稍后重试", request_timeout: "模型请求超时，请稍后重试", first_response_timeout: "模型在 300 秒内未返回有效内容", stream_idle_timeout: "模型流已连续 120 秒没有新内容", connection_timeout: "连接模型服务超时", connection_error: "模型服务连接失败或中断", response_timeout: "等待模型响应超时", cancellation_unconfirmed: "尚未确认旧调用已退出，未发起重试" },
+    callError: { model_config_changed: "模型配置已变化，需要重新整理", invalid_snapshot: "本次会话快照已失效，需要重新整理", model_config: "暂时无法读取模型配置", authentication_failed: "模型鉴权失败，请检查 API Key", permission_denied: "无权访问模型，请检查权限", input_too_large: "单条输入仍超出模型容量，请调整模型配置", output_too_large: "最小批次输出仍超出限制，请调整模型配置", token_limit: "模型 Token 额度或容量受限，请检查模型配置", rate_limited: "模型请求频率受限，请稍后重试", transport_error: "模型连接异常，请稍后重试", request_timeout: "模型请求超时，请稍后重试", first_response_timeout: "模型在 300 秒内未返回有效内容", stream_idle_timeout: "模型流已连续 120 秒没有新内容", connection_timeout: "连接模型服务超时", connection_error: "模型服务连接失败或中断", response_timeout: "等待模型响应超时", cancellation_unconfirmed: "尚未确认旧调用已退出，未发起重试", scope_audit_unresolved: "候选组多次调整后仍无法形成一致的收录范围，请重新整理。" },
     steps: {
       label: "整理流程", preparation: "准备会话摘要", organization: "整理会话分组", review: "复核整理结果", application: "应用整理结果",
       preparationDetail: "正在准备会话摘要", organizationDetail: "正在匹配并整理分组", reviewDetail: "正在校验整理结果的完整性", applicationDetail: "正在检查并保存分组结果",

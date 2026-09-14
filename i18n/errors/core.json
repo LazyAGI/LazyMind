@@ -1631,7 +1631,7 @@
   "2002741": {"en-US": "Missing incremental batch", "zh-CN": "整理执行状态无效，请重新整理"},
   "2002742": {"en-US": "Scope audit failed", "zh-CN": "整理执行状态无效，请重新整理"},
   "2002743": {"en-US": "Invalid scope audit identity", "zh-CN": "整理执行状态无效，请重新整理"},
-  "2002744": {"en-US": "Scope audit rejected after repairs", "zh-CN": "整理执行状态无效，请重新整理"},
+  "2002744": {"en-US": "Candidate groups still have no coherent scope after repair", "zh-CN": "候选组多次调整后仍无法形成一致的收录范围，请重新整理"},
   "2002745": {"en-US": "Invalid batch partition", "zh-CN": "整理执行状态无效，请重新整理"},
   "2002746": {"en-US": "Invalid or duplicate assignment", "zh-CN": "整理执行状态无效，请重新整理"},
   "2002747": {"en-US": "Organizer failed", "zh-CN": "整理执行状态无效，请重新整理"},

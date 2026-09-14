@@ -98,10 +98,13 @@ def _prompt(payload: dict[str, Any]) -> str:
     mode = payload.get('mode')
     if mode == 'scope_audit':
         payload['response_schema'] = {
-            'required_top_level_fields': ['keep', 'reject'],
+            'required_top_level_fields': ['keep', 'reject', 'reason'],
             'keep': ['仍被scope覆盖的输入ID'], 'reject': ['不再被scope覆盖的输入ID'],
-            'constraints': ['keep与reject无重复地完整划分所有输入ID', '不得输出额外字段'],
-            'example': {'keep': ['conv_1'], 'reject': []}}
+            'reason': 'accepted|coverage_gap|no_shared_scenario|boundary_too_broad',
+            'constraints': ['keep与reject无重复地完整划分所有输入ID',
+                            'accepted仅在reject为空且边界具有真实共性时使用',
+                            'coverage_gap必须至少有一个reject', '不得输出额外字段'],
+            'example': {'keep': ['conv_1'], 'reject': [], 'reason': 'accepted'}}
     else:
         payload['response_schema'] = ORGANIZE_OUTPUT_SCHEMA
     return SYSTEM_PROMPT + '\n\n严格按response_schema只输出JSON。输入：\n' + json.dumps(

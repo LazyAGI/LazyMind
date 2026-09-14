@@ -8,6 +8,7 @@
 | 暂时性模型服务错误 | `rate_limited`、`concurrency_limited`、`provider_overloaded`、`service_unavailable`、`provider_internal_error` | 按算法的 retryable 判定重试；明确不可重试时不覆盖算法判定 |
 | 调度与配置读取 | `lease_lost`、`lock_expired`、`update_failed`、`model_config` | 当前配置可读取且与快照一致时重试；配置变化则重新整理 |
 | 冻结数据失效 | `model_config_changed`、`invalid_snapshot` | 重新整理，创建新任务，重新冻结配置与会话范围 |
+| 候选范围无法收敛 | `scope_audit_unresolved` | 不恢复旧检查点，重新整理并重新生成候选方案。历史 `incremental_step_failed` 且消息为 `scope audit rejected after repairs` 的记录按此类型兼容 |
 | 模型配置、权限、容量 | `model_configuration`、`authentication_failed`、`permission_denied`、`not_found`、`invalid_request`、`token_limit`、`input_too_large`、`output_too_large` | 不重试旧任务；提示先处理原因，再重新整理。输入/输出过大已先尝试缩小批次 |
 | 额度与过滤 | `usage_limit_exceeded`、`quota_exhausted`、`balance_exhausted`、`organization_spend_limit_exceeded`、`project_spend_limit_exceeded`、`input_filtered`、`output_filtered` | 不重试旧任务；处理原因后重新整理 |
 | 旧调用未停止 | `cancellation_unconfirmed`，或持久化执行记录尚未 settled | 只允许原任务重试，先确认旧调用退出；禁止直接新开任务绕过停止确认 |
@@ -23,5 +24,7 @@
 - 已取消且调用退出：重新整理。
 
 算法的具体错误码和 retryable 会保留，不再统一丢失为 `incremental_step_failed`。自动重试仅用于明确可恢复的调用错误；未知错误保守终止。普通摘要条目的失败仍按原流程记录为跳过，不属于整个整理任务的失败。
+
+候选组 `update` 或 `merge` 的范围审核同时检查旧成员覆盖和共同业务场景。覆盖不足或边界过宽时，下一份候选方案会收到原范围、拟议范围、审核原因和被拒成员；若确认没有共同场景或三份方案仍未通过，则保留已有候选组并在只允许复用、创建或保持自由会话的模式下重排当前批次。只有该保守模式仍无法产生合法结果时才进入 `scope_audit_unresolved`。
 
 复用边界：恢复策略属于会话整理领域（依赖冻结模型、快照、流停止确认），抽成公共函数供 DTO 和接口共用；不放入通用 AsyncJob 基类。
