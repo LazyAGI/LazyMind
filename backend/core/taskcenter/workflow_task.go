@@ -103,3 +103,48 @@ func workflowTaskStatus(status string) string {
 		return ""
 	}
 }
+
+// WorkflowWasStopped reports whether a stopped workflow stays resumable in the workflow UI, but is not an approval
+// request. Only current attempts count; an explicit retry supersedes its old stop.
+func WorkflowWasStopped(ctx context.Context, db *gorm.DB, sessionID string) bool {
+	var session struct{ LastStoppedAt *time.Time }
+	if err := db.WithContext(ctx).Table("plugin_sessions").Select("last_stopped_at").
+		Where("id = ?", sessionID).Take(&session).Error; err != nil {
+		return false
+	}
+	var attempts []struct {
+		Status       string
+		TerminalCode string
+		CreatedAt    time.Time
+		UpdatedAt    time.Time
+	}
+	if err := db.WithContext(ctx).Table("plugin_session_steps AS step").
+		Select("step.status, step.terminal_code, step.created_at, step.updated_at").
+		Where("step.session_id = ? AND step.validity <> ?", sessionID, "stale").
+		Where(`NOT EXISTS (SELECT 1 FROM plugin_session_steps newer
+			WHERE newer.session_id = step.session_id AND newer.step_id = step.step_id
+			AND newer.validity <> 'stale' AND newer.attempt > step.attempt)`).
+		Find(&attempts).Error; err != nil {
+		return false
+	}
+	var stoppedAt time.Time
+	if session.LastStoppedAt != nil {
+		stoppedAt = *session.LastStoppedAt
+	}
+	for _, attempt := range attempts {
+		if attempt.Status == "pending" || attempt.Status == "queued" || attempt.Status == "running" || attempt.Status == "claimed" {
+			return false
+		}
+		if attempt.Status == "interrupted" && attempt.TerminalCode == "WORKFLOW_STOPPED" && attempt.UpdatedAt.After(stoppedAt) {
+			stoppedAt = attempt.UpdatedAt
+		}
+	}
+	for _, attempt := range attempts {
+		// A newly requested attempt supersedes the earlier stop even when an
+		// untouched parallel branch still retains its stopped attempt.
+		if attempt.CreatedAt.After(stoppedAt) {
+			return false
+		}
+	}
+	return !stoppedAt.IsZero()
+}

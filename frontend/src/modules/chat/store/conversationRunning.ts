@@ -6,7 +6,13 @@ import { axiosInstance, BASE_URL } from "@/components/request";
 import { CHAT_CONVERSATION_ACTIVITY_EVENT } from "@/modules/chat/constants/chat";
 import { CONVERSATION_STATUS_REFRESH_EVENT } from "@/modules/chat/utils/conversationStatusEvents";
 
-type StatusEntry = { status: ConversationRunningStatusItem["status"]; confirmedAt: number };
+type StatusEntry = {
+  status: ConversationRunningStatusItem["status"];
+  terminalStatus?: ConversationRunningStatusItem["terminal_status"];
+  terminalVersion?: string;
+  terminalRead?: boolean;
+  confirmedAt: number;
+};
 interface RunningState {
   entries: Record<string, StatusEntry>;
   watchers: Record<string, string[]>;
@@ -37,8 +43,34 @@ const BATCH_SIZE = 100;
 
 // One coordinator belongs to the authenticated layout, not to individual rows
 // or the current conversation page. No chat streams are opened here.
-export function startConversationRunningSync() {
+export function startConversationRunningSync(userScope = "") {
   const store = useConversationRunningStore;
+  const receiptKey = `conversation-terminal-read:${encodeURIComponent(userScope)}`;
+  let receipts: Record<string, string> = {};
+  try {
+    const saved: unknown = userScope ? JSON.parse(localStorage.getItem(receiptKey) ?? "{}") : {};
+    if (saved && typeof saved === "object" && !Array.isArray(saved)) {
+      receipts = Object.fromEntries(Object.entries(saved).filter(([, value]) => typeof value === "string"));
+    }
+  } catch { /* Storage may be unavailable; keep acknowledgments for this session. */ }
+  function saveReceipts() {
+    if (!userScope) return;
+    try { localStorage.setItem(receiptKey, JSON.stringify(receipts)); } catch { /* Keep the in-memory receipt. */ }
+  }
+  const isViewed = (id: string) => document.visibilityState !== "hidden"
+    && Boolean(store.getState().watchers["current-route"]?.includes(id));
+  function acknowledgeViewed() {
+    const entries = { ...store.getState().entries };
+    let changed = false;
+    for (const [id, entry] of Object.entries(entries)) {
+      if (entry.status === "idle" && entry.terminalStatus && !entry.terminalRead && isViewed(id)) {
+        receipts[id] = entry.terminalVersion ?? entry.terminalStatus;
+        entries[id] = { ...entry, terminalRead: true };
+        changed = true;
+      }
+    }
+    if (changed) { saveReceipts(); store.setState({ entries }); }
+  }
   let disposed = false;
   let inFlight = false;
   let revision = 0;
@@ -102,15 +134,31 @@ export function startConversationRunningSync() {
           if (revision !== requestRevision) { batch.forEach((id) => pending.add(id)); continue; }
           if (!Array.isArray(response.data.statuses)) throw new Error("Invalid conversation status response");
           const current = { ...store.getState().entries };
+          let receiptsChanged = false;
           // Missing IDs are no longer accessible; remove stale local state.
           batch.forEach((id) => delete current[id]);
           for (const item of response.data.statuses) {
             if (!batch.includes(item.conversation_id)) continue;
+            const terminalStatus = item.status === "idle" && ["completed", "failed", "canceled"].includes(item.terminal_status ?? "")
+              ? item.terminal_status : undefined;
+            const terminalVersion = terminalStatus ? item.terminal_version || terminalStatus : undefined;
+            if (item.status === "running" && receipts[item.conversation_id]) {
+              delete receipts[item.conversation_id];
+              receiptsChanged = true;
+            }
+            if (terminalVersion && isViewed(item.conversation_id) && receipts[item.conversation_id] !== terminalVersion) {
+              receipts[item.conversation_id] = terminalVersion;
+              receiptsChanged = true;
+            }
             current[item.conversation_id] = {
               status: ["running", "idle", "unknown"].includes(item.status) ? item.status : "unknown",
+              terminalStatus,
+              terminalVersion,
+              terminalRead: Boolean(terminalVersion && receipts[item.conversation_id] === terminalVersion),
               confirmedAt: Date.now(),
             };
           }
+          if (receiptsChanged) saveReceipts();
           store.setState({ entries: current });
         } catch {
           if (disposed || controller.signal.aborted) return;
@@ -136,13 +184,14 @@ export function startConversationRunningSync() {
   }
 
   const unsubscribe = store.subscribe((next, previous) => {
-    if (next.watchers !== previous.watchers) invalidate();
+    if (next.watchers !== previous.watchers) { acknowledgeViewed(); invalidate(); }
   });
   const onActivity = (event: Event) => {
     const id = (event as CustomEvent<{ conversationId?: string }>).detail?.conversationId;
     if (id && !id.startsWith("temp_")) invalidate([id]);
   };
   const onVisibility = () => {
+    acknowledgeViewed();
     if (canQuery()) { failures = 0; invalidate(); }
     else {
       clearTimeout(timer);
@@ -179,6 +228,6 @@ export function useConversationRunningSync(userScope: string, conversationId = "
     return () => useConversationRunningStore.getState().unwatch("current-route");
   }, [conversationId, userScope]);
   useEffect(() => {
-    if (userScope) return startConversationRunningSync();
+    if (userScope) return startConversationRunningSync(userScope);
   }, [userScope]);
 }

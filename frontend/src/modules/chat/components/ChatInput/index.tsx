@@ -1675,7 +1675,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                       ) : null}
                     </div>
                   ) : null}
-                  {showThinkingDepth && (
+                  {showThinkingDepth && !showModelSelector && (
                     <Select
                       aria-label={t("chat.thinkingDepth")}
                       className="chat-thinking-depth-select"
@@ -1694,6 +1694,9 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                     <ChatModelSelector
                       key={`${sessionId || "new"}:${configResetKey ?? ""}`}
                       conversationId={sessionId}
+                      thinkingDepth={showThinkingDepth ? effectiveThinkingDepth : undefined}
+                      thinkingDepthDisabled={disabled || isStreaming || Boolean(fixedThinkingDepth)}
+                      onThinkingDepthChange={handleThinkingDepthChange}
                       disabled={
                         isStreaming ||
                         modelSelectorBusy ||

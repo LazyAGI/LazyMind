@@ -41,6 +41,9 @@ vi.mock("antd", async (importOriginal) => {
   const actual = await importOriginal<typeof import("antd")>();
   return {
     ...actual,
+    Modal: (props: ComponentProps<typeof actual.Modal>) => (
+      <actual.Modal {...props} transitionName="" maskTransitionName="" />
+    ),
     message: {
       warning: mocks.warning,
       success: mocks.success,
@@ -155,6 +158,46 @@ describe("SideChatPanel", () => {
     mocks.chatMounts = 0;
     mocks.chatUnmounts = 0;
     mocks.latestChatProps = null;
+  });
+
+  it("keeps the same live conversation mounted while its parent is not visible", async () => {
+    const onClose = vi.fn();
+    const props = { open: true, parentConversationId: "parent-1", onClose };
+    const view = render(<SideChatPanel {...props} visible />);
+    await screen.findByTestId("side-chat-conversation");
+    sendSideChatQuestion();
+    act(() => mocks.latestChatProps.onStreamingChange(true));
+    view.rerender(<SideChatPanel {...props} visible={false} />);
+    expect(deleteSideChat).not.toHaveBeenCalled();
+    expect(mocks.closeStream).not.toHaveBeenCalled();
+    expect(mocks.chatUnmounts).toBe(0);
+    view.rerender(<SideChatPanel {...props} visible />);
+    expect(createSideChat).toHaveBeenCalledTimes(1);
+    expect(mocks.latestChatProps.sessionId).toBe("child-1");
+  });
+
+  it.each([
+    ["chat.sideChat.clear", "chat.sideChat.clearTitle"],
+    ["chat.sideChat.close", "chat.sideChat.closeConfirmTitle"],
+  ])("hides the %s confirmation when its parent is not visible", async (action, title) => {
+    const onClose = vi.fn();
+    const props = { open: true, parentConversationId: "parent-1", onClose };
+    const view = render(<SideChatPanel {...props} visible />);
+    await screen.findByTestId("side-chat-conversation");
+    sendSideChatQuestion();
+    fireEvent.click(screen.getByRole("button", { name: action }));
+    await waitFor(() => expect(screen.getByText(title)).toBeVisible());
+
+    view.rerender(<SideChatPanel {...props} visible={false} />);
+    await waitFor(() => {
+      expect(screen.queryByText(title)).not.toBeInTheDocument();
+    });
+    expect(deleteSideChat).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+
+    view.rerender(<SideChatPanel {...props} visible />);
+    await waitFor(() => expect(screen.getByText(title)).toBeVisible());
+    expect(createSideChat).toHaveBeenCalledTimes(1);
   });
 
   it("creates an isolated child and inherits its chat settings", async () => {

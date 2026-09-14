@@ -233,6 +233,34 @@ def test_knowledge_base_priority_policy_is_not_globally_attached():
     )
 
 
+def test_document_preview_chat_replaces_mandatory_knowledge_search_policy():
+    kb_config = next(cfg for cfg in DEFAULT_TOOLS if cfg.name == 'kb')
+    lazyllm.globals['agentic_config'] = {
+        'filters': {'kb_id': 'selected-kb'},
+        'document_preview_chat': True,
+        'document_selection_context_available': True,
+    }
+
+    appendices = collect_system_prompt_appendices([kb_config])
+
+    assert any('Document Preview Chat Rules' in item for item in appendices['tool_policy'])
+    assert not any('Selected Knowledge Base Rules' in item for item in appendices['tool_policy'])
+
+
+def test_main_chat_keeps_mandatory_search_even_when_it_has_a_citation():
+    kb_config = next(cfg for cfg in DEFAULT_TOOLS if cfg.name == 'kb')
+    lazyllm.globals['agentic_config'] = {
+        'filters': {'kb_id': 'selected-kb'},
+        'document_preview_chat': False,
+        'document_selection_context_available': True,
+    }
+
+    appendices = collect_system_prompt_appendices([kb_config])
+
+    assert any('Selected Knowledge Base Rules' in item for item in appendices['tool_policy'])
+    assert not any('Document Preview Chat Rules' in item for item in appendices['tool_policy'])
+
+
 def test_conditional_prompt_appendix_provider_can_disable_itself():
     enabled = False
     config = ToolConfig(

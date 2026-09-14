@@ -33,6 +33,8 @@ type WorkflowSession struct {
 	// Orthogonal to Status: a dismissed session retains its last status for auditing
 	// but is excluded from all active-session lookups.
 	Dismissed bool `gorm:"column:dismissed;type:boolean;not null;default:false"`
+	// LastStoppedAt distinguishes an explicit stop from an approval before any attempt exists.
+	LastStoppedAt *time.Time `gorm:"column:last_stopped_at"`
 	// IntentContext stores the global constraint/intent for this session (JSON string).
 	IntentContext string    `gorm:"column:intent_context;type:text;not null;default:'{}'"`
 	CreateUserID  string    `gorm:"column:create_user_id;type:varchar(255);not null;default:''"`

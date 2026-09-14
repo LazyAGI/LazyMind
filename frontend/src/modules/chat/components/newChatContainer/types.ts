@@ -36,6 +36,8 @@ export interface ChatImperativeProps {
 }
 
 export interface ChatContainerProps {
+  /** Keeps references accessible when another chat drawer occupies the right edge. */
+  sourcePanelOverlay?: boolean;
   onFork?: (historyId: string) => void;
   forkPending?: boolean;
   canChat?: boolean;

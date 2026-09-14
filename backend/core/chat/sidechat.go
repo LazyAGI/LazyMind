@@ -310,12 +310,15 @@ func resolveSidechatSource(
 	if request.SourceSeq != nil && source.Seq != *request.SourceSeq {
 		return nil, nil, errSidechatSourceMissing
 	}
-	if !sidechatSourceHistorySettled(source) {
+	if !sidechatSourceHistorySettled(source) && strings.TrimSpace(request.SelectedText) == "" {
 		if explicitSource {
 			return nil, nil, errSidechatSourceUnsettled
 		}
 		return nil, nil, nil
 	}
+	// A selected live excerpt has a persisted source ID and is frozen separately
+	// in SourceSelectedText. Only settled turns enter the inherited history; later
+	// streaming deltas must never rewrite the sidechat's context.
 	var histories []orm.ChatHistory
 	if err := db.WithContext(ctx).
 		Where(
@@ -346,8 +349,9 @@ func snapshotSidechatContext(
 	caller doc.DatasetCatalogCaller,
 ) (json.RawMessage, error) {
 	modelContext := loadModelContext(ctx, db, parentID)
-	if modelContext != nil && len(histories) > 0 && modelContext.CoveredThroughSeq == histories[len(histories)-1].Seq {
-		// A summary watermark has sequence precision only. At an exact history-ID
+	if modelContext != nil && (len(histories) == 0 || modelContext.CoveredThroughSeq == histories[len(histories)-1].Seq) {
+		// Without settled history there is no safe summary to inherit. A summary
+		// watermark has sequence precision only. At an exact history-ID
 		// boundary, another row with the same sequence may have been summarized
 		// later, so use the frozen rows instead of leaking content past the source.
 		modelContext = nil

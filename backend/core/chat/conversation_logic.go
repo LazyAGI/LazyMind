@@ -1460,6 +1460,9 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 			body[key] = value
 		}
 	}
+	if surface, ok := raw["surface"].(string); ok {
+		body["surface"] = strings.TrimSpace(surface)
+	}
 	if modelCtx != nil {
 		body["model_context"] = map[string]any{
 			"summary_text":        modelCtx.SummaryText,
@@ -1541,6 +1544,9 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 		}
 	}
 	applyDocumentContextFilter(body, raw)
+	if documentContext, ok := raw["document_context"].(map[string]any); ok && len(documentContext) > 0 {
+		body["document_context"] = documentContext
+	}
 	return body
 }
 

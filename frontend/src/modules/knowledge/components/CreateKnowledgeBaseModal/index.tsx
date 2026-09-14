@@ -17,6 +17,11 @@ import {
 import DataSourceProviderPicker from "@/modules/dataSource/components/management/DataSourceProviderPicker";
 import type { SyncKnowledgeBaseCreationVm } from "@/modules/knowledge/hooks/useSyncKnowledgeBaseCreation";
 import TagSelect from "../TagSelect";
+import { fetchUserUiPreferences } from "@/modules/user/uiPreferencesApi";
+import {
+  highestSupportedProcessingLevel,
+  PROCESSING_LEVEL_ORDER,
+} from "@/modules/knowledge/utils/processingLevel";
 import "@/modules/dataSource/index.scss";
 import "./index.scss";
 
@@ -30,6 +35,7 @@ type CreateTab = "direct" | "cloud";
 export interface CreateKnowledgeBaseModalProps {
   onCreate: (dataset: Dataset) => Promise<void>;
   syncCreateVm: SyncKnowledgeBaseCreationVm;
+  embeddingReady?: boolean | null;
 }
 
 export interface CreateKnowledgeBaseModalRef {
@@ -40,7 +46,7 @@ export interface CreateKnowledgeBaseModalRef {
 const CreateKnowledgeBaseModal = forwardRef<
   CreateKnowledgeBaseModalRef,
   CreateKnowledgeBaseModalProps
->(({ onCreate, syncCreateVm }, ref) => {
+>(({ onCreate, syncCreateVm, embeddingReady }, ref) => {
   const { t } = useTranslation();
   const [visible, setVisible] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -112,7 +118,7 @@ const CreateKnowledgeBaseModal = forwardRef<
         setTags(res.data.tags || []);
       });
 
-    return KnowledgeBaseServiceApi()
+    const algorithmsRequest = KnowledgeBaseServiceApi()
       .datasetServiceListAlgos()
       .then((res) => {
         const list = res.data.algos;
@@ -124,6 +130,21 @@ const CreateKnowledgeBaseModal = forwardRef<
       .catch((err) => {
         console.error("Failed to load algorithm list:", err);
       });
+
+    const preferencesRequest = fetchUserUiPreferences({ silentError: true } as never)
+      .then((preferences) => preferences.document_parsing_enabled)
+      .catch(() => null);
+
+    return Promise.all([algorithmsRequest, preferencesRequest]).then(
+      ([, documentParsingEnabled]) => {
+        form.setFieldsValue({
+          processing_level: highestSupportedProcessingLevel(
+            documentParsingEnabled,
+            embeddingReady,
+          ),
+        });
+      },
+    );
   }
 
   function onOpen(tab: CreateTab = "direct") {
@@ -228,6 +249,17 @@ const CreateKnowledgeBaseModal = forwardRef<
             label: t("knowledge.createDirect"),
             children: (
               <Form form={form} layout="vertical">
+				<Form.Item
+				  name="processing_level"
+				  label={t("knowledge.processingLevel")}
+				  extra={t("knowledge.processingLevelHint")}
+				>
+				  <Select options={PROCESSING_LEVEL_ORDER.map((level) => ({
+				    value: level,
+				    label: t(`knowledge.processing${level[0].toUpperCase()}${level.slice(1)}`),
+				    disabled: level === "indexed" && embeddingReady !== true,
+				  }))} />
+				</Form.Item>
                 <Form.Item
                   name="display_name"
                   label={t("knowledge.knowledgeBaseName")}

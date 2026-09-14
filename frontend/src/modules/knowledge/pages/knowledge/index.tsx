@@ -35,19 +35,28 @@ import {
   isDeveloperModeActive,
 } from "@/utils/developerMode";
 import { DetailPageHeader, type PdfTextSelection } from "@/components/ui";
-import type { DocumentChatSelection } from "@/modules/knowledge/components/PdfTemporaryChat/types";
+import type { DocumentChatSelection, DocumentTranslationRequest } from "@/modules/knowledge/components/PdfTemporaryChat/types";
 import PdfTemporaryChat from "@/modules/knowledge/components/PdfTemporaryChat";
+import { readCachedPdfChat, touchCachedPdfChat } from "@/modules/knowledge/components/PdfTemporaryChat/cache";
 import { localizeErrorCode } from "@/components/request";
 import { ChatServiceApi } from "@/modules/chat/utils/request";
 import { getTranslationStatus, translateSelectionText, TranslationUnavailableError } from "@/modules/knowledge/api/translation";
 import AddVocabularyModal from "@/modules/vocabulary/AddVocabularyModal";
 import DocumentVocabularyPanel from "@/modules/vocabulary/DocumentVocabularyPanel";
 import { isVocabularyEnabled } from "@/runtime/mode";
+import {
+  processingLevelSupportsSegments,
+  type ProcessingLevel,
+} from "@/modules/knowledge/utils/processingLevel";
 import "./index.scss";
 
 type KnowledgeDetail = Doc & {
   file_url?: string;
   download_file_url?: string;
+};
+
+type KnowledgeDatasetWithProcessingLevel = KnowledgeDataset & {
+  processing_level?: ProcessingLevel;
 };
 
 async function writeTextToClipboard(text: string) {
@@ -110,24 +119,32 @@ const Detail = () => {
   const [showSegmentSequence, setShowSegmentSequence] = useState(true);
   const [documentChatHistory, setDocumentChatHistory] = useState<Conversation[]>([]);
   const [selectedDocumentConversation, setSelectedDocumentConversation] = useState<string>();
+  const [chatHistoryPopoverOpen, setChatHistoryPopoverOpen] = useState(false);
+  const [translationRequest, setTranslationRequest] = useState<DocumentTranslationRequest | null>(null);
+  const [translationSelection, setTranslationSelection] = useState<PdfTextSelection | null>(null);
   const [translationConfigured, setTranslationConfigured] = useState(false);
   const [translationLoading, setTranslationLoading] = useState(false);
   const [translationSource, setTranslationSource] = useState("");
   const [translationResult, setTranslationResult] = useState("");
   const [vocabularySelection, setVocabularySelection] = useState<PdfTextSelection | null>(null);
   const [vocabularyRefreshToken, setVocabularyRefreshToken] = useState(0);
+  const [processingLevel, setProcessingLevel] =
+    useState<ProcessingLevel>("indexed");
+  const canShowSegments =
+    developerActive && processingLevelSupportsSegments(processingLevel);
 
   useEffect(() => {
     getTranslationStatus().then(setTranslationConfigured).catch(() => setTranslationConfigured(false));
   }, []);
 
   useEffect(() => {
-    if (!developerActive && previewSideTab === "segments") {
+    if (!canShowSegments && previewSideTab === "segments") {
       setPreviewSideTab("chat");
     }
-  }, [developerActive, previewSideTab]);
+  }, [canShowSegments, previewSideTab]);
 
   const translatePdfSelection = useCallback(async (selection: PdfTextSelection) => {
+    setTranslationSelection(selection);
     setTranslationSource(selection.text);
     setTranslationResult("");
     setTranslationLoading(true);
@@ -140,6 +157,17 @@ const Detail = () => {
       setTranslationLoading(false);
     }
   }, [t]);
+
+  const translateWithModel = useCallback(() => {
+    if (!translationSelection) return;
+    const selection: DocumentChatSelection = { source: "pdf", ...translationSelection };
+    setDocumentChatSelection(selection);
+    setTranslationRequest({ id: Date.now(), selection });
+    setTranslationSource("");
+    setTranslationResult("");
+    setPreviewSideCollapsed(false);
+    setPreviewSideTab("chat");
+  }, [translationSelection]);
 
   const refreshDocumentChatHistory = useCallback(() => {
     if (!knowledgeId) return;
@@ -155,7 +183,12 @@ const Detail = () => {
         silentError: true,
       } as never,
     ).then((response) => {
-      setDocumentChatHistory(response.data.conversations || []);
+      const conversations = response.data.conversations || [];
+      setDocumentChatHistory(conversations);
+      const cached = readCachedPdfChat(knowledgeId);
+      if (cached && conversations.some((item) => item.conversation_id === cached.conversationId)) {
+        setSelectedDocumentConversation((current) => current || cached.conversationId);
+      }
     }).catch(() => {});
   }, [knowledgeId]);
 
@@ -239,7 +272,9 @@ const Detail = () => {
     KnowledgeBaseServiceApi()
       .datasetServiceGetDataset({ dataset: knowledgeBaseId })
       .then((res) => {
-        setCurrentDataset(res.data as unknown as KnowledgeDataset);
+        const dataset = res.data as unknown as KnowledgeDatasetWithProcessingLevel;
+        setCurrentDataset(dataset);
+        setProcessingLevel(dataset.processing_level || "indexed");
       });
   }, [knowledgeBaseId, setCurrentDataset]);
 
@@ -529,9 +564,10 @@ const Detail = () => {
                           <Popover
                             trigger="click"
                             placement="bottomRight"
+                            open={chatHistoryPopoverOpen}
+                            onOpenChange={setChatHistoryPopoverOpen}
                             content={<Select
                               allowClear
-                              open
                               className="knowledge-preview-chat-history-select"
                               placeholder={t("knowledge.pdfChatHistoryPlaceholder")}
                               value={selectedDocumentConversation}
@@ -539,7 +575,11 @@ const Detail = () => {
                                 value: conversation.conversation_id || "",
                                 label: `${conversation.display_name || t("knowledge.pdfChatPanelLabel")} · ${moment(conversation.update_time).format("MM-DD HH:mm")}`,
                               })).filter((option) => Boolean(option.value))}
-                              onChange={(value: string | undefined) => setSelectedDocumentConversation(value || undefined)}
+                              onChange={(value: string | undefined) => {
+                                setSelectedDocumentConversation(value || undefined);
+                                if (value) touchCachedPdfChat(knowledgeId, value);
+                                setChatHistoryPopoverOpen(false);
+                              }}
                             />}
                           >
                             <Button type="text" icon={<HistoryOutlined />} aria-label="选择历史对话" title="选择历史对话" />
@@ -564,17 +604,18 @@ const Detail = () => {
                             documentId={knowledgeId}
                             fileName={knowledgeDetail.display_name || ""}
                             selection={documentChatSelection || undefined}
+                            translationRequest={translationRequest}
                             conversationToLoad={selectedDocumentConversation}
                             onConversationChange={setSelectedDocumentConversation}
                             onHistoryChange={refreshDocumentChatHistory}
                             onClose={() => {
                               setDocumentChatSelection(null);
-                              setPreviewSideTab(developerActive ? "segments" : "chat");
+                              setPreviewSideTab(canShowSegments ? "segments" : "chat");
                             }}
                           />
                         ),
                       },
-                      ...(developerActive ? [{
+                      ...(canShowSegments ? [{
                         key: "segments",
                         label: t("knowledge.segmentPreviewTab"),
                         children: (
@@ -632,6 +673,12 @@ const Detail = () => {
           <div className="knowledge-translation-label">{t("knowledge.translationResult")}</div>
           {translationLoading ? <Spin size="small" /> : <div className="knowledge-translation-text">{translationResult}</div>}
         </div>
+        {!translationLoading && translationResult ? (
+          <div className="knowledge-translation-model-action">
+            <Button onClick={translateWithModel}>{t("knowledge.translateWithModel")}</Button>
+            <span>{t("knowledge.translateWithModelHint")}</span>
+          </div>
+        ) : null}
       </Modal>
       {isVocabularyEnabled() ? <AddVocabularyModal
         selection={vocabularySelection}

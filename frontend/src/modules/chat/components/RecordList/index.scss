@@ -8,6 +8,9 @@
     color: var(--ant-color-primary, #1677ff);
 
     &--unknown { color: var(--color-text-secondary, #666); }
+    &--completed { color: var(--ant-color-success, #52c41a); }
+    &--failed { color: var(--ant-color-error, #ff4d4f); }
+    &--canceled { color: var(--ant-color-text-tertiary, #8c8c8c); }
     &:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; border-radius: 2px; }
   }
 

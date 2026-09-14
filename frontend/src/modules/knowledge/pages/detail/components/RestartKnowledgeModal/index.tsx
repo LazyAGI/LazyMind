@@ -25,6 +25,7 @@ interface IData {
   ids: string[];
   names?: string[];
   title: string;
+  processingLevel?: "stored" | "parsed" | "chunked" | "indexed";
 }
 
 export interface IRestartKnowledgeProps {
@@ -44,6 +45,14 @@ const documentSegmentValues = ["block", "line", DOC_SUMMARY_GROUP];
 export const REPARSE_SCOPE_SLICE_MISSING = "slice_missing";
 export const REPARSE_SCOPE_SLICE_AND_EMBED = "slice_and_embed";
 export const REPARSE_SCOPE_REBUILD = "rebuild";
+
+export function supportsVectorReparse(processingLevel?: string) {
+  return (processingLevel || "indexed") === "indexed";
+}
+
+export function supportsSegmentReparse(processingLevel?: string) {
+  return ["chunked", "indexed"].includes(processingLevel || "indexed");
+}
 
 const RestartKnowledgeModal = (
   props: IProps,
@@ -70,8 +79,8 @@ const RestartKnowledgeModal = (
     setVisible(true);
     setModalInfo(data);
     form.setFieldsValue({
-      reparse_groups: [],
-      reparse_scope: REPARSE_SCOPE_REBUILD,
+      reparse_groups: [allSegmentValue],
+      reparse_scope: REPARSE_SCOPE_SLICE_MISSING,
     });
   };
 
@@ -97,16 +106,18 @@ const RestartKnowledgeModal = (
           .map((parser) => parser.name)
           .filter((name): name is string => !!name),
       );
-      const scope = reparse_scope || REPARSE_SCOPE_REBUILD;
+      const scope = supportsSegments
+        ? reparse_scope || REPARSE_SCOPE_SLICE_MISSING
+        : REPARSE_SCOPE_REBUILD;
       const isFullRebuild =
         normalizedReparseGroups.includes(allSegmentValue) &&
         scope === REPARSE_SCOPE_REBUILD;
-      const reparseGroups = isFullRebuild
+      const reparseGroups = !supportsSegments || isFullRebuild
         ? []
         : expandReparseGroupsForSubmit(normalizedReparseGroups).filter(
             (v: string) => !allParseList.includes(v),
           );
-      if (!isFullRebuild && !reparseGroups.length) {
+      if (supportsSegments && !isFullRebuild && !reparseGroups.length) {
         message.error(t("knowledge.selectReparseTarget"));
         return;
       }
@@ -189,7 +200,11 @@ const RestartKnowledgeModal = (
       value: REPARSE_SCOPE_REBUILD,
       label: t("knowledge.reparseStrategyFullReparse"),
     },
-  ];
+  ].filter((option) =>
+    supportsVectorReparse(modalInfo?.processingLevel) ||
+    option.value !== REPARSE_SCOPE_SLICE_AND_EMBED,
+  );
+  const supportsSegments = supportsSegmentReparse(modalInfo?.processingLevel);
 
   const reparseStrategyLabel = (
     <span className="reparse-strategy-label">
@@ -238,32 +253,33 @@ const RestartKnowledgeModal = (
         />
       )}
       <Form form={form} layout="vertical">
-        <Form.Item
-          name="reparse_groups"
-          label={t("knowledge.reparseTarget")}
-          rules={[{ required: true, message: t("knowledge.selectReparseTarget") }]}
-          getValueFromEvent={(value: Array<string | undefined>) =>
-            normalizeReparseGroups(
-              value || [],
-              (parsers || [])
-                .map((parser) => parser.name)
-                .filter((name): name is string => !!name),
-            )
-          }
-          required
-        >
-          <TreeSelect
-            multiple
-            treeData={formatOptions(t)}
-          />
-        </Form.Item>
-        <Form.Item
-          name="reparse_scope"
-          label={reparseStrategyLabel}
-          rules={[{ required: true, message: t("knowledge.selectReparseStrategy") }]}
-        >
-          <Select options={scopeOptions} />
-        </Form.Item>
+        {supportsSegments && (
+          <>
+            <Form.Item
+              name="reparse_groups"
+              label={t("knowledge.reparseTarget")}
+              rules={[{ required: true, message: t("knowledge.selectReparseTarget") }]}
+              getValueFromEvent={(value: Array<string | undefined>) =>
+                normalizeReparseGroups(
+                  value || [],
+                  (parsers || [])
+                    .map((parser) => parser.name)
+                    .filter((name): name is string => !!name),
+                )
+              }
+              required
+            >
+              <TreeSelect multiple treeData={formatOptions(t)} />
+            </Form.Item>
+            <Form.Item
+              name="reparse_scope"
+              label={reparseStrategyLabel}
+              rules={[{ required: true, message: t("knowledge.selectReparseStrategy") }]}
+            >
+              <Select options={scopeOptions} />
+            </Form.Item>
+          </>
+        )}
       </Form>
     </Modal>
   );

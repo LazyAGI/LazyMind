@@ -159,9 +159,7 @@ def _required_media_capabilities(workflow_routing: str, route: str) -> List[str]
     if not matches:
         return list(_LEGACY_ROUTE_CAPABILITIES[route])
     raw = matches[0].strip().lower()
-    if raw in {'', 'none'}:
-        return []
-    required = list(dict.fromkeys(
+    required = [] if raw in {'', 'none'} else list(dict.fromkeys(
         item.strip() for item in raw.split(',') if item.strip()
     ))
     unknown = [item for item in required if item not in _MEDIA_CAPABILITY_IDS]
@@ -170,6 +168,12 @@ def _required_media_capabilities(workflow_routing: str, route: str) -> List[str]
             'workflow_routing REQUIRES contains unsupported capabilities: '
             + ', '.join(unknown)
         )
+    # Route semantics are authoritative for animation. A model-generated
+    # REQUIRES line may omit dependencies, but cannot bypass the GIF gate.
+    if route in {'CREATE_ANIMATED', 'ANIMATE_UPLOAD', 'CREATE_ANIMATED_MEME'}:
+        for capability in ('video_generator', 'ffmpeg'):
+            if capability not in required:
+                required.append(capability)
     return required
 
 

@@ -8,6 +8,7 @@ DROP INDEX IF EXISTS public.idx_conversation_workspace_bindings_workspace;
 DROP TABLE IF EXISTS public.conversation_workspace_bindings;
 DROP INDEX IF EXISTS public.idx_local_workspaces_user_recent;
 DROP TABLE IF EXISTS public.local_workspaces;
+ALTER TABLE plugin_sessions DROP COLUMN last_stopped_at;
 DROP TABLE IF EXISTS conversation_organizer_changes;
 DROP TABLE IF EXISTS conversation_organizer_candidates;
 DROP TABLE IF EXISTS conversation_organizer_snapshot_items;
@@ -123,6 +124,7 @@ ALTER TABLE conversations DROP COLUMN IF EXISTS chat_model_version;
 ALTER TABLE conversations DROP COLUMN IF EXISTS chat_model_snapshot;
 ALTER TABLE conversations DROP COLUMN IF EXISTS chat_model_id;
 ALTER TABLE conversations DROP COLUMN IF EXISTS chat_model_mode;
+ALTER TABLE conversations DROP COLUMN IF EXISTS unpinned_history_order;
 ALTER TABLE conversations DROP COLUMN IF EXISTS history_order;
 ALTER TABLE conversations DROP COLUMN IF EXISTS pinned_at;
 ALTER TABLE conversations DROP COLUMN IF EXISTS source_display_name;
@@ -207,6 +209,7 @@ DROP TABLE IF EXISTS conversation_workspace_bindings;
 DROP INDEX IF EXISTS idx_local_workspaces_user_recent;
 DROP TABLE IF EXISTS local_workspaces;
 
+ALTER TABLE plugin_sessions DROP COLUMN last_stopped_at;
 DROP TABLE IF EXISTS workflow_approval_preferences;
 UPDATE task_center_tasks SET task_type = 'plugin_run' WHERE task_type = 'workflow_run';
 
@@ -301,6 +304,7 @@ ALTER TABLE conversations DROP COLUMN chat_model_version;
 ALTER TABLE conversations DROP COLUMN chat_model_snapshot;
 ALTER TABLE conversations DROP COLUMN chat_model_id;
 ALTER TABLE conversations DROP COLUMN chat_model_mode;
+ALTER TABLE conversations DROP COLUMN unpinned_history_order;
 ALTER TABLE conversations DROP COLUMN history_order;
 ALTER TABLE conversations DROP COLUMN pinned_at;
 ALTER TABLE conversations DROP COLUMN source_display_name;
@@ -494,6 +498,14 @@ ALTER TABLE conversations DROP COLUMN title_source;
 DELETE FROM user_selected_models WHERE model_type = 'conversation_metadata';
 
 -- +migrate Dialect postgres
+DROP TABLE IF EXISTS document_processing_states;
+DROP INDEX IF EXISTS idx_datasets_processing_level;
+ALTER TABLE datasets DROP COLUMN IF EXISTS processing_config;
+ALTER TABLE datasets DROP COLUMN IF EXISTS reader_fallback_accepted;
+ALTER TABLE datasets DROP COLUMN IF EXISTS transition_status;
+ALTER TABLE datasets DROP COLUMN IF EXISTS processing_revision;
+ALTER TABLE datasets DROP COLUMN IF EXISTS processing_level;
+
 DROP TABLE IF EXISTS chat_run_performance;
 DROP TABLE IF EXISTS vocabulary_review_session_answers;
 DROP TABLE IF EXISTS vocabulary_review_session_items;
@@ -517,6 +529,14 @@ DROP TABLE IF EXISTS vocabulary_words;
 DROP TABLE IF EXISTS vocabulary_provider_settings;
 
 -- +migrate Dialect sqlite
+DROP TABLE IF EXISTS document_processing_states;
+DROP INDEX IF EXISTS idx_datasets_processing_level;
+ALTER TABLE datasets DROP COLUMN processing_config;
+ALTER TABLE datasets DROP COLUMN reader_fallback_accepted;
+ALTER TABLE datasets DROP COLUMN transition_status;
+ALTER TABLE datasets DROP COLUMN processing_revision;
+ALTER TABLE datasets DROP COLUMN processing_level;
+
 DROP TABLE IF EXISTS chat_run_performance;
 DROP TABLE IF EXISTS vocabulary_provider_operations;
 DROP TABLE IF EXISTS vocabulary_fsrs_profiles;

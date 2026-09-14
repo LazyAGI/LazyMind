@@ -15,17 +15,18 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 16px;
+  padding: 0 18px;
   background: #fff;
   border-bottom: 1px solid #f0f0f0;
   flex-shrink: 0;
-  height: 44px;
+  min-height: 54px;
 }
 
 .sge-topbar-left {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
 }
 
 .sge-topbar-right {
@@ -84,11 +85,11 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 12px;
+  padding: 0 18px;
   background: #fff;
   border-bottom: 1px solid #f0f0f0;
   flex-shrink: 0;
-  height: 38px;
+  min-height: 52px;
 }
 
 .sge-toolbar2-left {
@@ -115,7 +116,7 @@
 }
 
 .sge-seg-btn {
-  padding: 3px 12px;
+  padding: 7px 14px;
   border: none;
   background: transparent;
   border-radius: 4px;
@@ -203,9 +204,124 @@
 
 .sge-content {
   flex: 1;
+  display: flex;
   position: relative;
   overflow: hidden;
   min-height: 0;
+}
+
+.sge-authoring-editor {
+  min-height: 0;
+
+  button:focus-visible {
+    outline: 2px solid #1677ff;
+    outline-offset: 2px;
+  }
+
+  .sge-content > .artifact-panel {
+    position: static;
+    width: 268px;
+    flex: 0 0 268px;
+    min-height: 0;
+    box-shadow: none;
+    border-right-color: #e8ebef;
+    z-index: 3;
+  }
+}
+
+.sge-canvas-region {
+  position: relative;
+  container-type: inline-size;
+  container-name: sge-canvas;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.sge-context-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  min-height: 72px;
+  padding: 12px 18px;
+  border-bottom: 1px solid #e8ebef;
+  background: #fff;
+  flex-shrink: 0;
+}
+
+.sge-context-copy {
+  min-width: 0;
+
+  h2 {
+    margin: 0 0 5px;
+    font-size: 14px;
+    line-height: 1.5;
+    font-weight: 600;
+    color: #262626;
+  }
+
+  p {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.6;
+    color: #737373;
+  }
+}
+
+.sge-step-shortcuts {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 60%;
+  padding: 4px;
+  overflow-x: auto;
+  flex-shrink: 0;
+
+  span {
+    color: #737373;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+  button {
+    padding: 5px 9px;
+    border: 1px solid #d9e3f0;
+    border-radius: 4px;
+    background: #fff;
+    color: #1677ff;
+    font-size: 12px;
+    white-space: nowrap;
+    cursor: pointer;
+
+    &:hover {
+      background: #f0f6ff;
+    }
+  }
+}
+
+@media (max-width: 1150px) {
+  .sge-authoring-editor .sge-content > .artifact-panel {
+    width: 230px;
+    flex-basis: 230px;
+  }
+
+  .sge-step-shortcuts { max-width: 48%; }
+  .sge-seg-btn { padding: 7px 9px; }
+}
+
+@media (max-width: 800px) {
+  .sge-topbar,
+  .sge-toolbar2 {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px 12px;
+  }
+
+  .sge-topbar-right { flex-wrap: wrap; }
+  .sge-context-bar { flex-wrap: wrap; gap: 8px; }
+  .sge-step-shortcuts { max-width: 100%; }
 }
 
 /* UI editor panel */

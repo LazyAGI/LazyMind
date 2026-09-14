@@ -300,7 +300,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
 
     const conversationTree = useMemo(() => {
       const visibleHistory = historyList.filter(
-        (item) => isConversationPinned(item) || !item.group_id,
+        (item) => showBatchExport || isConversationPinned(item) || !item.group_id,
       );
       const conversationsById = new Map(
         visibleHistory.map((item) => [item.conversation_id || "", item]),
@@ -350,7 +350,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
         });
       });
       return nodes;
-    }, [historyList]);
+    }, [historyList, showBatchExport]);
 
     useEffect(() => {
       if (!keyword.trim()) {
@@ -426,7 +426,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
     const batchSelectableConversationIds = useMemo(
       () =>
         historyList.flatMap((item) =>
-          !item.group_id && !isChildConversation(item) && item.conversation_id
+          !isChildConversation(item) && item.conversation_id
             ? [item.conversation_id]
             : [],
         ),

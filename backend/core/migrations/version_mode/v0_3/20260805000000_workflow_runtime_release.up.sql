@@ -1,4 +1,6 @@
 -- +migrate Dialect postgres
+ALTER TABLE plugin_sessions ADD COLUMN last_stopped_at TIMESTAMP WITH TIME ZONE NULL;
+
 CREATE TABLE IF NOT EXISTS plugin_step_intents (
     id VARCHAR(36) PRIMARY KEY,
     session_id VARCHAR(36) NOT NULL,
@@ -19,6 +21,8 @@ ALTER TABLE multi_answers_chat_histories ADD COLUMN IF NOT EXISTS run_terminal J
 CREATE INDEX IF NOT EXISTS idx_multi_answers_chat_histories_run_id ON multi_answers_chat_histories(run_id);
 
 -- +migrate Dialect sqlite
+ALTER TABLE plugin_sessions ADD COLUMN last_stopped_at DATETIME NULL;
+
 ALTER TABLE chat_histories ADD COLUMN run_id TEXT;
 ALTER TABLE chat_histories ADD COLUMN run_status TEXT;
 ALTER TABLE chat_histories ADD COLUMN run_terminal TEXT;
@@ -515,6 +519,7 @@ ALTER TABLE conversations ADD COLUMN IF NOT EXISTS source_document_id VARCHAR(25
 ALTER TABLE conversations ADD COLUMN IF NOT EXISTS source_display_name VARCHAR(255) NOT NULL DEFAULT '';
 ALTER TABLE conversations ADD COLUMN IF NOT EXISTS pinned_at TIMESTAMP NULL;
 ALTER TABLE conversations ADD COLUMN IF NOT EXISTS history_order BIGINT NULL;
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS unpinned_history_order BIGINT NULL;
 ALTER TABLE conversations ADD COLUMN IF NOT EXISTS chat_model_mode VARCHAR(16) NULL;
 ALTER TABLE conversations ADD COLUMN IF NOT EXISTS chat_model_id VARCHAR(64) NULL;
 ALTER TABLE conversations ADD COLUMN IF NOT EXISTS chat_model_snapshot JSON NULL;
@@ -582,6 +587,7 @@ ALTER TABLE conversations ADD COLUMN source_document_id VARCHAR(255) NOT NULL DE
 ALTER TABLE conversations ADD COLUMN source_display_name VARCHAR(255) NOT NULL DEFAULT '';
 ALTER TABLE conversations ADD COLUMN pinned_at DATETIME NULL;
 ALTER TABLE conversations ADD COLUMN history_order INTEGER NULL;
+ALTER TABLE conversations ADD COLUMN unpinned_history_order BIGINT NULL;
 ALTER TABLE conversations ADD COLUMN chat_model_mode VARCHAR(16) NULL;
 ALTER TABLE conversations ADD COLUMN chat_model_id VARCHAR(64) NULL;
 ALTER TABLE conversations ADD COLUMN chat_model_snapshot JSON NULL;
@@ -1876,6 +1882,16 @@ ALTER TABLE vocabulary_review_sessions ADD COLUMN IF NOT EXISTS expires_at TIMES
 CREATE INDEX IF NOT EXISTS idx_vocabulary_review_sessions_active ON vocabulary_review_sessions(owner_id,provider,wordbook_id,completed_at,expires_at);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_vocabulary_review_session_word ON vocabulary_review_session_items(session_id,word_id);
 
+-- Knowledge-base processing levels
+ALTER TABLE datasets ADD COLUMN processing_level VARCHAR(16) NOT NULL DEFAULT 'indexed';
+ALTER TABLE datasets ADD COLUMN processing_revision BIGINT NOT NULL DEFAULT 1;
+ALTER TABLE datasets ADD COLUMN transition_status VARCHAR(32) NOT NULL DEFAULT 'idle';
+ALTER TABLE datasets ADD COLUMN reader_fallback_accepted BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE datasets ADD COLUMN processing_config JSON;
+CREATE INDEX IF NOT EXISTS idx_datasets_processing_level ON datasets(processing_level);
+CREATE TABLE IF NOT EXISTS document_processing_states (dataset_id VARCHAR(255) NOT NULL, document_id VARCHAR(128) NOT NULL, parse_status VARCHAR(16) NOT NULL DEFAULT 'pending', chunk_status VARCHAR(16) NOT NULL DEFAULT 'pending', index_status VARCHAR(16) NOT NULL DEFAULT 'pending', parse_error_code VARCHAR(64) NOT NULL DEFAULT '', parse_error_message TEXT NOT NULL DEFAULT '', chunk_error_code VARCHAR(64) NOT NULL DEFAULT '', chunk_error_message TEXT NOT NULL DEFAULT '', index_error_code VARCHAR(64) NOT NULL DEFAULT '', index_error_message TEXT NOT NULL DEFAULT '', source_fingerprint VARCHAR(128) NOT NULL DEFAULT '', parse_fingerprint VARCHAR(128) NOT NULL DEFAULT '', chunk_fingerprint VARCHAR(128) NOT NULL DEFAULT '', index_fingerprint VARCHAR(128) NOT NULL DEFAULT '', parser_version VARCHAR(128) NOT NULL DEFAULT '', chunker_version VARCHAR(128) NOT NULL DEFAULT '', embedding_version VARCHAR(128) NOT NULL DEFAULT '', parse_artifact_ref TEXT NOT NULL DEFAULT '', chunk_artifact_ref TEXT NOT NULL DEFAULT '', index_artifact_ref TEXT NOT NULL DEFAULT '', revision BIGINT NOT NULL DEFAULT 1, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(dataset_id,document_id));
+CREATE INDEX IF NOT EXISTS idx_document_processing_status ON document_processing_states(dataset_id,parse_status,chunk_status,index_status);
+
 -- +migrate Dialect sqlite
 CREATE TABLE IF NOT EXISTS vocabulary_provider_settings (owner_id TEXT PRIMARY KEY, selected_provider TEXT NOT NULL DEFAULT 'anki', anki_endpoint TEXT NOT NULL DEFAULT 'http://127.0.0.1:8765', anki_deck_name TEXT NOT NULL DEFAULT 'LazyMind Vocabulary', anki_model_version INTEGER NOT NULL DEFAULT 1, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS vocabulary_words (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, provider TEXT NOT NULL, provider_note_id TEXT NOT NULL DEFAULT '', normalized_term TEXT NOT NULL, term TEXT NOT NULL, language TEXT NOT NULL DEFAULT 'en', phonetic TEXT NOT NULL DEFAULT '', part_of_speech TEXT NOT NULL DEFAULT '', meaning TEXT NOT NULL DEFAULT '', definition TEXT NOT NULL DEFAULT '', user_note TEXT NOT NULL DEFAULT '', created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP);
@@ -1921,3 +1937,13 @@ ALTER TABLE vocabulary_review_sessions ADD COLUMN status VARCHAR(16) NOT NULL DE
 ALTER TABLE vocabulary_review_sessions ADD COLUMN expires_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP;
 CREATE INDEX IF NOT EXISTS idx_vocabulary_review_sessions_active ON vocabulary_review_sessions(owner_id,provider,wordbook_id,completed_at,expires_at);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_vocabulary_review_session_word ON vocabulary_review_session_items(session_id,word_id);
+
+-- Knowledge-base processing levels
+ALTER TABLE datasets ADD COLUMN processing_level TEXT NOT NULL DEFAULT 'indexed';
+ALTER TABLE datasets ADD COLUMN processing_revision INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE datasets ADD COLUMN transition_status TEXT NOT NULL DEFAULT 'idle';
+ALTER TABLE datasets ADD COLUMN reader_fallback_accepted INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE datasets ADD COLUMN processing_config TEXT;
+CREATE INDEX IF NOT EXISTS idx_datasets_processing_level ON datasets(processing_level);
+CREATE TABLE IF NOT EXISTS document_processing_states (dataset_id VARCHAR(255) NOT NULL, document_id VARCHAR(128) NOT NULL, parse_status VARCHAR(16) NOT NULL DEFAULT 'pending', chunk_status VARCHAR(16) NOT NULL DEFAULT 'pending', index_status VARCHAR(16) NOT NULL DEFAULT 'pending', parse_error_code VARCHAR(64) NOT NULL DEFAULT '', parse_error_message TEXT NOT NULL DEFAULT '', chunk_error_code VARCHAR(64) NOT NULL DEFAULT '', chunk_error_message TEXT NOT NULL DEFAULT '', index_error_code VARCHAR(64) NOT NULL DEFAULT '', index_error_message TEXT NOT NULL DEFAULT '', source_fingerprint VARCHAR(128) NOT NULL DEFAULT '', parse_fingerprint VARCHAR(128) NOT NULL DEFAULT '', chunk_fingerprint VARCHAR(128) NOT NULL DEFAULT '', index_fingerprint VARCHAR(128) NOT NULL DEFAULT '', parser_version VARCHAR(128) NOT NULL DEFAULT '', chunker_version VARCHAR(128) NOT NULL DEFAULT '', embedding_version VARCHAR(128) NOT NULL DEFAULT '', parse_artifact_ref TEXT NOT NULL DEFAULT '', chunk_artifact_ref TEXT NOT NULL DEFAULT '', index_artifact_ref TEXT NOT NULL DEFAULT '', revision INTEGER NOT NULL DEFAULT 1, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(dataset_id,document_id));
+CREATE INDEX IF NOT EXISTS idx_document_processing_status ON document_processing_states(dataset_id,parse_status,chunk_status,index_status);

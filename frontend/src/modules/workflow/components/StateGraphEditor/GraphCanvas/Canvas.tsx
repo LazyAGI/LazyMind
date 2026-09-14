@@ -45,7 +45,7 @@ import './Canvas.scss';
 
 const NODE_WIDTH = NODE_DEFAULT_WIDTH;
 const NODE_HEIGHT = 80;
-const DEFAULT_SPACING_X = 200;
+const DEFAULT_SPACING_X = NODE_WIDTH + 100;
 const DEFAULT_SPACING_Y = 100;
 
 export interface CanvasHandle {
@@ -131,6 +131,8 @@ function modelToFlowNodes(
       data: {
         ...node,
         inputs: node.inputs.flatMap((input) => [input.material, ...(input.alternatives ?? [])]),
+        inputLabels: node.inputs.flatMap((input) => [input.material, ...(input.alternatives ?? [])])
+          .filter(Boolean).map((id) => model.slots[id]?.label || id),
         outputs: node.outputs.map((r) => r.material),
         hasError: errMsgs.length > 0,
         errorMessages: errMsgs,
@@ -210,7 +212,7 @@ function modelToFlowEdges(model: GraphModel, nodeErrorMap: Map<string, string[]>
 
 function CanvasInner({ model, errors, onModelChange, workflowModel, scenarioData, onScenarioChange, readonly = false, onCreateArtifact }: Props, ref: React.Ref<CanvasHandle>) {
   const { t } = useTranslation();
-  const { screenToFlowPosition, zoomIn, zoomOut, getZoom, setCenter } = useReactFlow();
+  const { screenToFlowPosition, zoomIn, zoomOut, getZoom, getNode, setViewport } = useReactFlow();
   const nodeErrorMap = useMemo(() => buildNodeErrorMap(errors), [errors]);
   const { guides, onNodeDrag: computeGuides, onNodeDragStop: clearGuides, onNodeResize } = useAlignmentGuides();
 
@@ -273,10 +275,12 @@ function CanvasInner({ model, errors, onModelChange, workflowModel, scenarioData
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [createAt, setCreateAt] = useState<{flowX:number;flowY:number;left:number;top:number}|null>(null);
   const resizeFrameRef = useRef<number | null>(null);
+  const focusFrameRef = useRef<number | null>(null);
   const visualClipboardRef = useRef<{type:'node'; value:Pick<NodeLayout,'visible'|'fill'|'border'>}|{type:'edge';value:GraphModel['edgeLayout'][string]}|null>(null);
 
   useEffect(() => () => {
     if (resizeFrameRef.current !== null) cancelAnimationFrame(resizeFrameRef.current);
+    if (focusFrameRef.current !== null) cancelAnimationFrame(focusFrameRef.current);
   }, []);
 
   // When a canvas-internal operation calls onModelChange, we set this flag so
@@ -676,8 +680,7 @@ function CanvasInner({ model, errors, onModelChange, workflowModel, scenarioData
 
   // Add a new node — places it at the current viewport center
   const addNodeAtCenter = useCallback(() => {
-    const container = document.querySelector('.graph-canvas-container');
-    const rect = container?.getBoundingClientRect();
+    const rect = containerRef.current?.querySelector(':scope > .react-flow')?.getBoundingClientRect();
     const screenCx = rect ? rect.left + rect.width / 2 : window.innerWidth / 2;
     const screenCy = rect ? rect.top + rect.height / 2 : window.innerHeight / 2;
     const pos = screenToFlowPosition({ x: screenCx, y: screenCy });
@@ -709,19 +712,29 @@ function CanvasInner({ model, errors, onModelChange, workflowModel, scenarioData
   }, [screenToFlowPosition, setNodes, stableResizeEnd, stableResizeDrag, stableGetZoom]);
 
   const focusNode = useCallback((nodeId: string): boolean => {
-    const node = allNodesFromStore.find((candidate) => candidate.id === nodeId);
-    if (!node) return false;
-    const width = node.width ?? (node.data as { nodeWidth?: number }).nodeWidth ?? NODE_WIDTH;
-    const height = node.height ?? NODE_HEIGHT;
+    if (!getNode(nodeId)) return false;
     setSelectedNodeId(nodeId);
+    setSelectedNodeIds(new Set([nodeId]));
     setSelectedEdgeId(null);
-    void setCenter(
-      node.position.x + width / 2,
-      node.position.y + height / 2,
-      { zoom: Math.max(getZoom(), 1), duration: 350 },
-    );
+    if (focusFrameRef.current !== null) cancelAnimationFrame(focusFrameRef.current);
+    // The properties panel changes the flow's size when selection is committed.
+    // Read its actual bounds on the next frame instead of the previous store size.
+    focusFrameRef.current = requestAnimationFrame(() => {
+      focusFrameRef.current = null;
+      const node = getNode(nodeId);
+      const rect = containerRef.current?.querySelector(':scope > .react-flow')?.getBoundingClientRect();
+      if (!node || !rect?.width || !rect.height) return;
+      const width = node.measured?.width ?? node.width ?? (node.data as { nodeWidth?: number }).nodeWidth ?? NODE_WIDTH;
+      const height = node.measured?.height ?? node.height ?? NODE_HEIGHT;
+      const zoom = Math.max(getZoom(), 1);
+      void setViewport({
+        x: rect.width / 2 - (node.position.x + width / 2) * zoom,
+        y: rect.height / 2 - (node.position.y + height / 2) * zoom,
+        zoom,
+      }, { duration: 350 });
+    });
     return true;
-  }, [allNodesFromStore, getZoom, setCenter]);
+  }, [getNode, getZoom, setViewport]);
 
   useImperativeHandle(ref, () => ({ addNode: addNodeAtCenter, focusNode }), [addNodeAtCenter, focusNode]);
 
@@ -958,6 +971,7 @@ function CanvasInner({ model, errors, onModelChange, workflowModel, scenarioData
         multiSelectionKeyCode={['Meta','Control','Shift']}
         elevateEdgesOnSelect
         fitView
+        fitViewOptions={{ padding: 0.18, maxZoom: 1 }}
         attributionPosition="bottom-right"
         // Interaction: two-finger swipe to pan, pinch to zoom, no left-drag pan
         panOnScroll
@@ -969,7 +983,7 @@ function CanvasInner({ model, errors, onModelChange, workflowModel, scenarioData
       >
         <Background />
         <Controls />
-        <MiniMap />
+        <MiniMap style={{ width: 140, height: 90 }} />
       </ReactFlow>
       <AlignmentGuides guides={guides} />
       {createAt&&<div className="canvas-create-menu" style={{left:createAt.left,top:createAt.top}} role="menu" onPointerDown={(event)=>event.stopPropagation()} onClick={(event)=>event.stopPropagation()}>

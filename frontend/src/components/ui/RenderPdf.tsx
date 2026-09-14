@@ -4,6 +4,7 @@ import { Tooltip } from "antd";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
 import { isSingleEnglishWord } from "@/modules/knowledge/api/translation";
+import { extractPdfSelectionContext } from "./pdfSelectionContext";
 
 pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
@@ -173,7 +174,7 @@ export default function RenderPdf({
       selection: {
         text,
         page: selectedPageIndex + 1,
-        context: pageElement?.innerText?.trim() || text,
+        context: extractPdfSelectionContext(pageElement?.innerText || "", text),
         bbox,
       },
       left: containerRef.current.scrollLeft + Math.min(

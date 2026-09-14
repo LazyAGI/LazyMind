@@ -23,6 +23,7 @@ class ChatConversationOptions(BaseModel):
     conversation_id: Optional[str] = None
     user_id: Optional[str] = None
     mode: Optional[str] = 'auto'
+    surface: Optional[str] = None
     intent_context: Optional[Dict[str, Any]] = None
 
 
@@ -104,6 +105,7 @@ class ChatRequest(BaseModel):
     workflow: ChatWorkflowOptions = Field(default_factory=ChatWorkflowOptions)
     model_context: Optional[Dict[str, Any]] = None
     workspace_context: Optional[WorkspaceContext] = None
+    document_context: Optional[Dict[str, Any]] = None
 
     explicit_resource_bindings: ExplicitResourceBindingsOptions = Field(
         default_factory=ExplicitResourceBindingsOptions,
