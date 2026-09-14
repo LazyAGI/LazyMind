@@ -413,11 +413,20 @@ func moveConversationAt(ctx context.Context, db *gorm.DB, uid, conversationID, g
 				return err
 			}
 		}
-		_, err := moveMembershipTx(tx, uid, conversationID, groupIDOrNil(groupID), source, runID)
-		if err == nil && targetID != "" {
-			err = reorderGroupMemberTx(tx, uid, groupID, conversationID, targetID, position)
+		change, err := moveMembershipTx(tx, uid, conversationID, groupIDOrNil(groupID), source, runID)
+		if err != nil {
+			return err
 		}
-		return err
+		if targetID != "" {
+			return reorderGroupMemberTx(tx, uid, groupID, conversationID, targetID, position)
+		}
+		if groupID != "" && (change.BeforeGroupID == nil || *change.BeforeGroupID != groupID) {
+			if conv.PinnedAt != nil || conv.IsEphemeral {
+				return tx.Model(&conv).UpdateColumn("history_order", nil).Error
+			}
+			return reorderGroupMemberTx(tx, uid, groupID, conversationID, "", "")
+		}
+		return nil
 	})
 }
 

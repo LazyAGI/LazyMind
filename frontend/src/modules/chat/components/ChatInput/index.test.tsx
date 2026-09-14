@@ -12,6 +12,12 @@ import { useChatInputStore } from "../../store/chatInput";
 import type { ChatMention } from "./MentionEditor";
 import { listSkillLinkedWorkflows } from "@/modules/workflow/workflowDraftApi";
 
+const promptMocks = vi.hoisted(() => ({ polish: vi.fn() }));
+vi.mock("@/modules/chat/utils/request", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/modules/chat/utils/request")>()),
+  PromptServiceApi: () => ({ promptServicePolishPrompt: promptMocks.polish }),
+}));
+
 vi.mock("@/modules/workflow/workflowDraftApi", () => ({
   listSkillLinkedWorkflows: vi.fn().mockResolvedValue({ workflows: [] }),
 }));
@@ -45,7 +51,7 @@ vi.mock("./MentionEditor", async () => {
       props: { onSend?: () => void; initialMentions?: ChatMention[]; onMentionsChange?: (mentions: ChatMention[]) => void },
       ref,
     ) {
-      React.useImperativeHandle(ref, () => ({ focus: vi.fn() }));
+      React.useImperativeHandle(ref, () => ({ focus: vi.fn(), setPlainText: () => props.onMentionsChange?.([]) }));
       React.useEffect(() => { if (props.initialMentions?.length) props.onMentionsChange?.(props.initialMentions); }, []);
       return (
         <textarea
@@ -269,6 +275,45 @@ describe("ChatInput model switch save lock", () => {
 
 
 describe("ChatInput saved mentions", () => {
+  it.each([false, true])("filters saved and bound knowledge-base mentions before sending (runtime=%s)", async (runtime) => {
+    const knowledge: ChatMention = { mention_id: 'kb', type: 'knowledge_base', resource_id: 'test-kb', display_name: '知识库', start: 0, end: 3 };
+    const tool: ChatMention = { mention_id: 'tool', type: 'tool', resource_id: 'test-tool', display_name: '工具', start: 4, end: 6 };
+    const sessionId = `restricted-draft-${runtime}`;
+    useChatInputStore.getState().saveInputContent(sessionId, '知识库 工具 请总结', [knowledge, tool]);
+    const onSend = vi.fn();
+    function Composer({ allow }: { allow: boolean }) {
+      const [value, setValue] = useState('');
+      return <ChatInput value={value} onChange={setValue} onSend={onSend} sessionId={sessionId}
+        allowKnowledgeBaseSelection={allow} boundMentions={[{ ...knowledge, resource_id: 'bound-kb' }]}
+        isChatContent showConversationConfig={false} showHistoryButton={false} showPromptSuggestions={false} />;
+    }
+    const view = render(<Composer allow={runtime} />);
+    if (runtime) view.rerender(<Composer allow={false} />);
+    fireEvent.click(screen.getByRole('button', { name: 'chat.send' }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith(expect.objectContaining({ mentions: [tool] })));
+  });
+
+  it.each(['工具 请总结', '请总结这份资料'])('clears draft mentions after prompt polishing to %s', async (nextPrompt) => {
+    const sessionId = `polished-draft-${nextPrompt}`;
+    const mention: ChatMention = { mention_id: 'tool', type: 'tool', resource_id: 'test-tool', display_name: '工具', start: 0, end: 2 };
+    useChatInputStore.getState().saveInputContent(sessionId, '工具 请总结', [mention]);
+    promptMocks.polish.mockResolvedValue({ data: { content: nextPrompt } });
+    const onSend = vi.fn();
+    function Composer() {
+      const [value, setValue] = useState('');
+      return <ChatInput value={value} onChange={setValue} onSend={onSend} sessionId={sessionId}
+        isChatContent showConversationConfig={false} showHistoryButton={false} showPromptSuggestions />;
+    }
+    const view = render(<Composer />);
+    fireEvent.click(screen.getByRole('button', { name: /^chat.promptSuggestionPolish/ }));
+    await waitFor(() => expect(useChatInputStore.getState().getInputMentions(sessionId)).toEqual([]));
+    expect(useChatInputStore.getState().getInputContent(sessionId)).toBe(nextPrompt);
+    fireEvent.click(screen.getByRole('button', { name: 'chat.send' }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith(expect.objectContaining({ text: nextPrompt, mentions: [] })));
+    view.unmount();
+    expect(useChatInputStore.getState().getInputMentions(sessionId)).toEqual([]);
+  });
+
   it("does not resolve or send stale resource mentions in side chat", async () => {
     const mention: ChatMention = { mention_id: "old-side-skill", type: "skill", resource_id: "test-skill", display_name: "测试技能", start: 0, end: 4 };
     useChatInputStore.getState().saveInputContent("side-mention-draft", "测试技能 请解释", [mention]);

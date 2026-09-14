@@ -152,8 +152,14 @@ func TestMemberDragPersistsOrderAndMovesAtomically(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { db.Callback().Update().Remove(callback) })
-	if w := move("b", "one", "anchor", "before"); w.Code != 500 {
-		t.Fatalf("failed write: %d %s", w.Code, w.Body.String())
+	for _, target := range []string{"anchor", ""} {
+		position := ""
+		if target != "" {
+			position = "before"
+		}
+		if w := move("b", "one", target, position); w.Code != 500 {
+			t.Fatalf("failed write with target %q: %d %s", target, w.Code, w.Body.String())
+		}
 	}
 	assertOrder("a", []string{"three", "task", "two", "one"})
 	assertOrder("b", []string{"anchor"})
@@ -163,5 +169,106 @@ func TestMemberDragPersistsOrderAndMovesAtomically(t *testing.T) {
 	}
 	if after.Revision != before.Revision || after.GroupID == nil || *after.GroupID != "a" {
 		t.Fatal("failed order write changed membership fence")
+	}
+}
+
+func TestGroupHeaderMoveDoesNotReusePreviousOrder(t *testing.T) {
+	for _, scenario := range []string{"cross-group", "ungrouped", "empty-group", "pinned"} {
+		t.Run(scenario, func(t *testing.T) {
+			db := orm.MigrateTestDB(t, &orm.Conversation{}, &orm.ConversationOpening{}, &orm.ConversationGroup{}, &orm.ConversationGroupMember{}, &orm.ConversationGroupState{})
+			store.Init(db.DB, nil, nil)
+			t.Cleanup(func() { store.Init(nil, nil, nil) })
+			now := time.Now().UTC().Truncate(time.Second)
+			for _, id := range []string{"source", "target"} {
+				if err := db.Create(&orm.ConversationGroup{ID: id, UserID: "u", Name: id, NormalizedName: id, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+					t.Fatal(err)
+				}
+			}
+			for i, id := range []string{"source-first", "moved", "target-first", "target-last"} {
+				if scenario == "empty-group" && i >= 2 {
+					continue
+				}
+				conv := orm.Conversation{ID: id, DisplayName: id, BaseModel: orm.BaseModel{CreateUserID: "u", CreatedAt: now, UpdatedAt: now.Add(time.Duration(i) * time.Hour)}}
+				if scenario == "pinned" && id == "moved" {
+					conv.PinnedAt = &now
+				}
+				if err := db.Create(&conv).Error; err != nil {
+					t.Fatal(err)
+				}
+				group := "source"
+				if i >= 2 {
+					group = "target"
+				}
+				if scenario != "ungrouped" || id != "moved" {
+					if _, err := moveMembershipTx(db.DB, "u", id, &group, CreatedByUser, ""); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if err := db.Model(&conv).UpdateColumn("history_order", i%2+1).Error; err != nil {
+					t.Fatal(err)
+				}
+			}
+			move := func(target, position string) {
+				t.Helper()
+				body, _ := json.Marshal(map[string]string{"conversation_id": "moved", "target_conversation_id": target, "position": position})
+				req := httptest.NewRequest("POST", "/", bytes.NewReader(body))
+				req.Header.Set("X-User-Id", "u")
+				req = mux.SetURLVars(req, map[string]string{"group_id": "target"})
+				response := httptest.NewRecorder()
+				AddMember(response, req)
+				if response.Code != 200 {
+					t.Fatalf("move: %d %s", response.Code, response.Body.String())
+				}
+			}
+			assertOrder := func(want []string) {
+				t.Helper()
+				req := httptest.NewRequest("GET", "/", nil)
+				req.Header.Set("X-User-Id", "u")
+				req = mux.SetURLVars(req, map[string]string{"group_id": "target"})
+				response := httptest.NewRecorder()
+				GetGroup(response, req)
+				var result struct {
+					Conversations []struct {
+						ID string `json:"conversation_id"`
+					} `json:"conversations"`
+				}
+				if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil || response.Code != 200 {
+					t.Fatalf("get group: %d %s, err=%v", response.Code, response.Body.String(), err)
+				}
+				var got []string
+				for _, conv := range result.Conversations {
+					got = append(got, conv.ID)
+				}
+				if !reflect.DeepEqual(got, want) {
+					t.Fatalf("order = %v, want %v", got, want)
+				}
+			}
+			move("", "")
+			var moved orm.Conversation
+			if err := db.Where("id=?", "moved").Take(&moved).Error; err != nil {
+				t.Fatal(err)
+			}
+			if !moved.UpdatedAt.Equal(now.Add(time.Hour)) {
+				t.Fatal("move changed activity timestamp")
+			}
+			if scenario == "pinned" {
+				if moved.HistoryOrder != nil {
+					t.Fatal("pinned member retained an order from its previous group")
+				}
+				return
+			}
+			if scenario == "empty-group" {
+				assertOrder([]string{"moved"})
+				return
+			}
+			assertOrder([]string{"moved", "target-first", "target-last"})
+			if err := db.Model(&orm.Conversation{}).Where("id=?", "target-last").UpdateColumn("updated_at", now.Add(24*time.Hour)).Error; err != nil {
+				t.Fatal(err)
+			}
+			assertOrder([]string{"moved", "target-first", "target-last"})
+			move("target-last", "after")
+			move("", "")
+			assertOrder([]string{"target-first", "target-last", "moved"})
+		})
 	}
 }

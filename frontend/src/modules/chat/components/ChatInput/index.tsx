@@ -724,10 +724,11 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       if (!allowMentions) return [];
       const merged = new Map<string, ChatMention>();
       for (const mention of [...boundMentions, ...mentions]) {
+        if (!allowKnowledgeBaseSelection && mention.type === "knowledge_base") continue;
         merged.set(`${mention.type}:${mention.resource_id}`, mention);
       }
       return [...merged.values()];
-    }, [allowMentions, boundMentions, mentions]);
+    }, [allowKnowledgeBaseSelection, allowMentions, boundMentions, mentions]);
     const [contextRuntimeSettings, setContextRuntimeSettings] = useState(initialConversationSettings);
     const [contextUsageReset, setContextUsageReset] = useState(0);
     const [addMenuOpen, setAddMenuOpen] = useState(false);
@@ -1259,10 +1260,13 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
         if (!nextPrompt) {
           return;
         }
+        textAreaRef.current?.setPlainText(nextPrompt);
+        draftRef.current = { sessionId, content: nextPrompt, mentions: [] };
+        setMentions([]);
         onChange(nextPrompt);
         setText(nextPrompt);
         if (sessionId !== undefined) {
-          debouncedSaveInput(sessionId, nextPrompt);
+          debouncedSaveInput(sessionId, nextPrompt, []);
         }
         setTimeout(() => onHeightChange?.(), 0);
       } catch {

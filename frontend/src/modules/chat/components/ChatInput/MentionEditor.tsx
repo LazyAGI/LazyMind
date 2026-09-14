@@ -68,6 +68,7 @@ type MenuPlacement = {
 export interface MentionEditorRef {
   focus: () => void;
   getMentions: () => ChatMention[];
+  setPlainText: (value: string) => void;
 }
 
 const isImeComposingEvent = (event: React.KeyboardEvent<HTMLElement>) =>
@@ -345,25 +346,45 @@ const MentionEditor = forwardRef<MentionEditorRef, {
   useImperativeHandle(ref, () => ({
     focus: () => editorRef.current?.focus(),
     getMentions: () => allowMentions && editorRef.current ? serializeEditor(editorRef.current).mentions : [],
-  }), [allowMentions]);
+    setPlainText: (text) => {
+      if (!editorRef.current) return;
+      editorRef.current.textContent = text;
+      emit();
+    },
+  }), [allowMentions, emit]);
 
   useEffect(() => {
     const editor = editorRef.current;
-    if (!editor || (value === emittedRef.current && (allowMentions || !editor.querySelector('.chat-mention-chip')))) return;
+    if (!editor) return;
+    if (value === emittedRef.current) {
+      let removed = false;
+      editor.querySelectorAll<HTMLElement>('.chat-mention-chip').forEach((chip) => {
+        if (!availableGroups.some((group) => group.type === chip.dataset.mentionType)) {
+          const separator = chip.nextSibling;
+          if (separator?.nodeType === Node.TEXT_NODE) {
+            separator.textContent = (separator.textContent || '').replace(/^\u200b/, '');
+          }
+          chip.replaceWith(document.createTextNode(chip.dataset.displayName || chip.textContent || ''));
+          removed = true;
+        }
+      });
+      if (removed) onMentionsChange(serializeEditor(editor).mentions);
+      return;
+    }
     let cursor = 0;
     let html = '';
     for (const mention of [...(allowMentions ? initialMentions || [] : [])].sort((a, b) => (a.start ?? 0) - (b.start ?? 0))) {
       const { start, end } = mention;
       if (start === undefined || end === undefined || !Number.isInteger(start) || !Number.isInteger(end)
         || start < cursor || end <= start || end > value.length || value.slice(start, end) !== mention.display_name
-        || !groups.some((group) => group.type === mention.type)) continue;
+        || !availableGroups.some((group) => group.type === mention.type)) continue;
       html += escapeHtml(value.slice(cursor, start)) + mentionHtml(mention);
       cursor = end;
     }
     editor.innerHTML = html + escapeHtml(value.slice(cursor));
     emittedRef.current = value;
     onMentionsChange(serializeEditor(editor).mentions);
-  }, [allowMentions, initialMentions, onMentionsChange, value]);
+  }, [allowMentions, availableGroups, initialMentions, onMentionsChange, value]);
 
   useEffect(() => {
     // Warm the session cache as soon as the composer mounts. Opening `@` can

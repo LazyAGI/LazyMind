@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import MentionEditor from "./MentionEditor";
+import { createRef } from "react";
+import MentionEditor, { type MentionEditorRef } from "./MentionEditor";
 
 type ScrollablePrototype = typeof HTMLElement.prototype & {
   scrollTo?: (...args: unknown[]) => void;
@@ -68,6 +69,37 @@ describe("MentionEditor", () => {
     expect(container.querySelector('img')).toBeNull();
     expect(screen.getByRole('textbox')).toHaveTextContent(label);
     expect(onMentionsChange).toHaveBeenLastCalledWith([mention]);
+  });
+
+  it.each([false, true])('downgrades forbidden knowledge-base drafts while keeping other mentions (runtime=%s)', (runtime) => {
+    const knowledge = { mention_id: 'kb', type: 'knowledge_base' as const, resource_id: 'test-kb', display_name: '知识库', start: 0, end: 3 };
+    const tool = { mention_id: 'tool', type: 'tool' as const, resource_id: 'test-tool', display_name: '工具', start: 4, end: 6 };
+    const onMentionsChange = vi.fn();
+    const props = { value: '知识库 工具 请总结', initialMentions: [knowledge, tool], placeholder: 'message',
+      onChange: vi.fn(), onMentionsChange, onPaste: vi.fn(), onSend: vi.fn(), onCompositionChange: vi.fn() };
+    const view = render(<MentionEditor {...props} allowKnowledgeBaseSelection={runtime} />);
+    if (runtime) {
+      expect(view.container.querySelector('[data-resource-id="test-kb"]')).not.toBeNull();
+      view.rerender(<MentionEditor {...props} allowKnowledgeBaseSelection={false} />);
+    }
+    expect(view.container.querySelector('[data-resource-id="test-kb"]')).toBeNull();
+    expect(view.container.querySelector('[data-resource-id="test-tool"]')).not.toBeNull();
+    expect(screen.getByRole('textbox').textContent?.replace(/\u200b/g, '')).toBe(props.value);
+    expect(onMentionsChange).toHaveBeenLastCalledWith([tool]);
+  });
+
+  it('replaces generated text without retaining mentions even when its text is unchanged', () => {
+    const ref = createRef<MentionEditorRef>();
+    const mention = { mention_id: 'tool', type: 'tool' as const, resource_id: 'test-tool', display_name: '工具', start: 0, end: 2 };
+    const onMentionsChange = vi.fn();
+    const value = '工具 请总结';
+    const view = render(<MentionEditor ref={ref} value={value} initialMentions={[mention]} placeholder="message"
+      onChange={vi.fn()} onMentionsChange={onMentionsChange} onPaste={vi.fn()} onSend={vi.fn()} onCompositionChange={vi.fn()} />);
+    ref.current!.setPlainText(value);
+    expect(view.container.querySelector('.chat-mention-chip')).toBeNull();
+    expect(screen.getByRole('textbox')).toHaveTextContent(value);
+    expect(ref.current!.getMentions()).toEqual([]);
+    expect(onMentionsChange).toHaveBeenLastCalledWith([]);
   });
 
   beforeEach(() => {

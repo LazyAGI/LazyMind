@@ -9,6 +9,7 @@ import (
 // Membership and placement share the owner's transaction: an invalid anchor or
 // failed order write rolls back the move as well. Reuse durable history_order;
 // UpdateColumn deliberately leaves conversation activity timestamps unchanged.
+// An empty target prepends a newly assigned member without reusing its old rank.
 func reorderGroupMemberTx(tx *gorm.DB, uid, groupID, movedID, targetID, position string) error {
 	memberIDs := tx.Model(&orm.ConversationGroupMember{}).Select("conversation_id").Where("user_id=? AND group_id=?", uid, groupID)
 	var rows []orm.Conversation
@@ -16,8 +17,11 @@ func reorderGroupMemberTx(tx *gorm.DB, uid, groupID, movedID, targetID, position
 		Order("CASE WHEN history_order IS NULL THEN 0 ELSE 1 END, history_order ASC, updated_at DESC, id ASC").Find(&rows).Error; err != nil {
 		return err
 	}
-	foundMoved, foundTarget := false, false
+	foundMoved, foundTarget := false, targetID == ""
 	ids := make([]string, 0, len(rows))
+	if targetID == "" {
+		ids = append(ids, movedID)
+	}
 	for _, row := range rows {
 		if row.ID == movedID {
 			foundMoved = true
