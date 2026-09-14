@@ -94,6 +94,21 @@ describe("mergeAskPending", () => {
       "draft_two",
     ]);
   });
+
+  it("keeps earlier attachment names when a later sent frame omits them", () => {
+    const merged = mergeAskPending(
+      {
+        ask_id: "a1",
+        mail_draft: { draft_id: "draft_one", attachments: ["invoice.pdf"], status: "draft" },
+      },
+      {
+        ask_id: "a1",
+        mail_draft: { draft_id: "draft_one", attachments: [], status: "sent" },
+      },
+    );
+    expect(merged.mail_draft.attachments).toEqual(["invoice.pdf"]);
+    expect(merged.mail_draft.status).toBe("sent");
+  });
 });
 
 describe("stripAskUserReceipt", () => {

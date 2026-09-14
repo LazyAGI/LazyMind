@@ -273,16 +273,40 @@ def test_user_visible_tool_families_do_not_fall_back_to_generic_copy(
     assert f'工具 **{tool_name}** 已调用完成' not in result_text
 
 
+def test_mail_send_failure_preview_does_not_dump_json_or_body():
+    result_text = _tool_result_frame_text(
+        {
+            'id': 'call-mail-send',
+            'name': 'MailToolkit_send_draft',
+            'result': {
+                'ok': False,
+                'value': json.dumps({
+                    'ok': False,
+                    'last_error': 'SMTP authentication failed',
+                    'body': 'this is the email body',
+                    'status': 'failed',
+                }),
+            },
+        },
+        'zh',
+    )
+
+    preview = result_text.split('<trp>', 1)[-1].split('</trp>', 1)[0]
+    assert '邮件发送失败' in result_text
+    assert '{' not in preview
+    assert 'this is the email body' not in preview
+    assert '"ok"' not in preview
+
+
 def test_mail_search_preview_uses_search_filters_not_mailbox_copy():
     tool_call = {
         'id': 'call-mail-search',
         'function': {
-            'name': 'MailToolkit_search',
+            'name': 'MailToolkit_search_emails',
             'arguments': json.dumps({
                 'mailbox': 'user@163.com',
                 'folder': 'INBOX',
-                'after': '2026-05-27',
-                'keyword': '',
+                'query': '',
             }),
         },
     }
@@ -290,7 +314,7 @@ def test_mail_search_preview_uses_search_filters_not_mailbox_copy():
     result_text = _tool_result_frame_text(
         {
             'id': 'call-mail-search',
-            'name': 'MailToolkit_search',
+            'name': 'MailToolkit_search_emails',
             'result': {'ok': True, 'value': {'items': [{'id': '1'}, {'id': '2'}]}},
         },
         'zh',
@@ -299,7 +323,7 @@ def test_mail_search_preview_uses_search_filters_not_mailbox_copy():
     disabled_text = _tool_result_frame_text(
         {
             'id': 'call-mail-search',
-            'name': 'MailToolkit_search',
+            'name': 'MailToolkit_search_emails',
             'result': {
                 'status': 'mailbox_not_enabled',
                 'message': 'Mailbox is not enabled.',
@@ -310,7 +334,7 @@ def test_mail_search_preview_uses_search_filters_not_mailbox_copy():
     )
 
     assert '正在搜索邮件：' in call_text
-    assert 'user@163.com/INBOX/2026-05-27' in call_text
+    assert 'user@163.com/INBOX' in call_text
     assert '正在检索邮箱' not in call_text
     assert '找到 **2** 封邮件。' in result_text
     assert '邮箱检索完成' not in result_text
