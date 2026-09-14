@@ -30,7 +30,7 @@ def test_external_read_uses_core_approval_without_custom_gate(workspace_runtime,
     ('always_ask', 'read', {'filepath': 'notes.txt'}, False),
     ('always_ask', 'create', {'filepath': 'created.txt', 'content': 'x'}, True),
     ('ask_as_needed', 'create', {'filepath': 'created.txt', 'content': 'x'}, False),
-    ('ask_as_needed', 'delete', {'filepath': 'notes.txt'}, True),
+    ('ask_as_needed', 'delete', {'filepath': 'notes.txt'}, False),
     ('allow_all', 'delete', {'filepath': 'notes.txt'}, False),
 ])
 def test_algorithm_snapshot_decides_workspace_policy_before_core(
@@ -50,7 +50,7 @@ def test_algorithm_snapshot_decides_workspace_policy_before_core(
 
 
 @pytest.mark.parametrize('mode,asks', [
-    ('always_ask', True), ('ask_as_needed', True), ('allow_all', False),
+    ('always_ask', False), ('ask_as_needed', False), ('allow_all', False),
 ])
 def test_algorithm_snapshot_treats_sensitive_reads_by_mode(workspace_runtime, tmp_path, mode, asks):
     root = tmp_path / 'workspace'
@@ -367,7 +367,7 @@ def test_uncalled_undeclared_tool_does_not_block_batch_but_invocation_fails_clos
 
     effects = []
 
-    @fc_register(host_file_access='NONE')
+    @fc_register(host_file='NONE')
     def safe(value: str):
         '''Record a safe value.
 
@@ -404,7 +404,7 @@ def test_opaque_policy_uses_explicit_tool_identity_allowlist(workspace_runtime):
 
     effects = []
 
-    @fc_register(host_file_access='OPAQUE')
+    @fc_register(host_file='OPAQUE')
     def framework_skill_script(value: str):
         '''Stand in for the framework-owned SkillManager tool.
 

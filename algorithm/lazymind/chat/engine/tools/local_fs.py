@@ -87,7 +87,7 @@ def _model_facing_result(func):
             raise ToolExecutionError('invalid_selection')
         return HostFileResolution(arguments, (HostFileIntent(arguments[key], operation),))
 
-    return fc_register(host_file_access='DECLARED', host_file_resolver=resolve)(wrapped)
+    return fc_register(host_file=resolve)(wrapped)
 
 
 def _validate_local_arguments(arguments):

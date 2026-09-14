@@ -137,7 +137,7 @@ def resolve_video_file(arguments: dict) -> object:
     return files.finish(resolved)
 
 
-@fc_register(host_file_access="DECLARED", host_file_resolver=resolve_media_files)
+@fc_register(host_file=resolve_media_files)
 def vision_extractor(url: str, instruction: Optional[str] = None) -> Dict[str, Any]:
     """Extract a text description from an image reachable at the given URL.
 
@@ -192,7 +192,7 @@ def vision_extractor(url: str, instruction: Optional[str] = None) -> Dict[str, A
     return {'description': text, 'url': local_path}
 
 
-@fc_register(host_file_access="NONE")
+@fc_register(host_file="NONE")
 def image_generator(
     prompt: str,
     image_size: str = _DEFAULT_IMAGE_SIZE,
@@ -225,7 +225,7 @@ def image_generator(
     )
 
 
-@fc_register(host_file_access="DECLARED", host_file_resolver=resolve_media_files)
+@fc_register(host_file=resolve_media_files)
 def image_editor(
     prompt: str,
     urls: List[str],
@@ -262,7 +262,7 @@ def image_editor(
     )
 
 
-@fc_register(host_file_access="DECLARED", host_file_resolver=resolve_media_files)
+@fc_register(host_file=resolve_media_files)
 def video_generator(
     prompt: str,
     urls: Optional[Union[str, List[str]]] = None,
@@ -388,7 +388,7 @@ def video_generator(
     )
 
 
-@fc_register(host_file_access="DECLARED", host_file_resolver=resolve_video_file)
+@fc_register(host_file=resolve_video_file)
 def video_to_gif(
     url: str,
     fps: int = _DEFAULT_GIF_FPS,

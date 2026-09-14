@@ -158,7 +158,7 @@ def _file_markdown(filename: str, artifact_id: str) -> str:
     return f'[{filename}](file_id:{artifact_id})'
 
 
-@fc_register(host_file_access='NONE')
+@fc_register(host_file='NONE')
 def save_chat_artifact(
     filename: str,
     content: Any,
@@ -276,7 +276,7 @@ def save_chat_file(
     }
 
 
-@fc_register(host_file_access='NONE', write_keys=_workspace_file_resource)
+@fc_register(host_file='NONE', write_keys=_workspace_file_resource)
 def write_file(
     path: str,
     content: str,
@@ -341,7 +341,7 @@ def _resolve_text_target_for_tool(
         raise ToolExecutionError(str(exc)) from exc
 
 
-@fc_register(host_file_access='NONE', exclusive=True)
+@fc_register(host_file='NONE', exclusive=True)
 def read_file(
     target: str,
     offset: int = 1,
@@ -387,7 +387,7 @@ def _read_file(
     return payload
 
 
-@fc_register(host_file_access='NONE', exclusive=True)
+@fc_register(host_file='NONE', exclusive=True)
 def grep(
     target: str,
     pattern: str,
@@ -487,7 +487,7 @@ def _grep(
     }
 
 
-@fc_register(host_file_access='NONE', read_keys=_workspace_file_resource)
+@fc_register(host_file='NONE', read_keys=_workspace_file_resource)
 def list_dir(path: str = '.', recursive: bool = False, max_depth: int = 5) -> Dict[str, Any]:
     """List files in the current chat workspace or an allowed host path.
 

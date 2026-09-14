@@ -32,7 +32,7 @@ class KBToolkit:
         agentic_config = lazyllm.globals.get('agentic_config') or {}
         return not bool((agentic_config.get('filters') or {}).get('kb_id'))
 
-    @fc_register(host_file_access='NONE')
+    @fc_register(host_file='NONE')
     def list_knowledge_bases(
         self,
         keyword: str = '',
@@ -42,7 +42,7 @@ class KBToolkit:
         """List knowledge bases the current user can read."""
         return self._toolkit().list_knowledge_bases(keyword, tags, page_size)
 
-    @fc_register(host_file_access='NONE')
+    @fc_register(host_file='NONE')
     def list_knowledge_base_documents(
         self,
         knowledge_base_ids: List[str],
@@ -52,7 +52,7 @@ class KBToolkit:
         """List readable documents in the selected knowledge bases."""
         return self._toolkit().list_knowledge_base_documents(knowledge_base_ids, keyword, page_size)
 
-    @fc_register(host_file_access='NONE')
+    @fc_register(host_file='NONE')
     def aggregate_knowledge_base_documents(
         self,
         knowledge_base_ids: Optional[List[str]] = None,
@@ -69,7 +69,7 @@ class KBToolkit:
             creators, tags, group_by,
         )
 
-    @fc_register(host_file_access='NONE')
+    @fc_register(host_file='NONE')
     def kb_search(
         self,
         query: str,
@@ -85,16 +85,17 @@ class KBToolkit:
             query, retriever_topk, rerank_topk, k_max, image_topk, filters, kb_ids,
         )
 
-    @fc_register(host_file_access='NONE')
+    @fc_register(host_file='NONE')
     def read_document(self, knowledge_base_id: str, document_id: str) -> Dict[str, Any]:
         """Read a document without requiring an embedding model."""
         return self._toolkit().read_document(knowledge_base_id, document_id)
 
+    @fc_register(host_file='NONE')
     def kb_get_parent_node(self, node_id: str) -> Dict[str, Any]:
         """Get the parent node of a document node returned by search."""
         return self._toolkit().kb_get_parent_node(node_id)
 
-    @fc_register(host_file_access='NONE')
+    @fc_register(host_file='NONE')
     def kb_get_window_nodes(
         self,
         node_id: str,
@@ -104,7 +105,7 @@ class KBToolkit:
         """Get neighboring document nodes around a search result."""
         return self._toolkit().kb_get_window_nodes(node_id, before, after)
 
-    @fc_register(host_file_access='NONE')
+    @fc_register(host_file='NONE')
     def kb_keyword_search(
         self,
         keyword: str,
@@ -122,7 +123,7 @@ class KBToolkit:
         )
 
 
-@fc_register(host_file_access='NONE')
+@fc_register(host_file='NONE')
 def kb_tmp_search(
     semantic_query: Optional[str] = None,
     grep_patterns: Optional[List[str]] = None,

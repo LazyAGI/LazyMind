@@ -419,7 +419,7 @@ def resolve_artifact_files(arguments: dict) -> object:
     return files.finish(resolved)
 
 
-@fc_register(host_file_access='DECLARED', host_file_resolver=resolve_artifact_files)
+@fc_register(host_file=resolve_artifact_files)
 def save_artifacts(artifacts: List[ArtifactSaveItem]) -> Dict[str, Any]:
     """Save one or more output artifacts in one tool call.
 

@@ -104,7 +104,7 @@ def build_intentwrite_tool(
         'valid_step_ids': set(),
     }
 
-    @fc_register(host_file_access='NONE')
+    @fc_register(host_file='NONE')
     def intentwrite(
         scope: str,
         operations: List[Dict[str, str]],

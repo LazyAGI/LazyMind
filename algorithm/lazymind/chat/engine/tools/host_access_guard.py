@@ -1,6 +1,7 @@
 """Executor-side identity checks for declared host paths across approval waits."""
 from __future__ import annotations
 
+from lazyllm.tools.agent import host_file_io
 import os
 import stat
 import shutil
@@ -22,7 +23,7 @@ def get_host_access_guard():
 def host_access_scope(guard):
     token = _ACTIVE_GUARD.set(guard)
     try:
-        with HostFileResolution.execution_scope(guard):
+        with host_file_io.host_file_execution_scope(guard):
             yield
     finally:
         _ACTIVE_GUARD.reset(token)

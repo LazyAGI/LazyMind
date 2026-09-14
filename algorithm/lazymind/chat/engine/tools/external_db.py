@@ -90,7 +90,7 @@ class ExternalDatabaseToolkit:
 
     __public_apis__ = ['list_external_dbs', 'describe_external_db', 'external_db_query']
 
-    @fc_register(host_file_access='NONE')
+    @fc_register(host_file='NONE')
     def list_external_dbs(self) -> Dict[str, Any]:
         """List external database connections available to the current user."""
         return get_core_api('/data-sources/database-connections')
@@ -116,7 +116,7 @@ class ExternalDatabaseToolkit:
             options_str=_options_str(conn.get('options')),
         )
 
-    @fc_register(host_file_access='NONE')
+    @fc_register(host_file='NONE')
     def describe_external_db(self, connection_id: str) -> Dict[str, Any]:
         """Inspect table schema before generating SQL for a configured external database connection."""
         manager = self._manager(connection_id)
@@ -126,7 +126,7 @@ class ExternalDatabaseToolkit:
         finally:
             manager.dispose()
 
-    @fc_register(host_file_access='NONE')
+    @fc_register(host_file='NONE')
     def external_db_query(self, connection_id: str, sql: str) -> Dict[str, Any]:
         """Execute one Agent-generated read-only SELECT/WITH SQL statement on a configured external database."""
         readonly_sql = _validate_readonly_sql(sql)

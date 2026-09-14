@@ -95,7 +95,7 @@ def test_generic_input_replaced_by_symlink_during_approval_never_executes(worksp
     secret.write_bytes(b'secret')
     effects = []
 
-    @fc_register(host_file_access='DECLARED', host_file_resolver=lambda args: HostFileResolution(
+    @fc_register(host_file=lambda args: HostFileResolution(
         args, (HostFileIntent(args['path'], 'read'),)))
     def consume(path: str):
         '''Read an approved image.

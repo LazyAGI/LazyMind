@@ -61,7 +61,7 @@ class SkillManagementToolkit:
         self.store = store or SkillRemoteStore()
         self.installer = installer or GitHubSkillInstaller()
 
-    @fc_register(host_file_access='NONE')
+    @fc_register(host_file='NONE')
     def install_skill(self, github_url: str) -> Dict[str, Any]:
         """Install one public GitHub skill package as a disabled reusable skill.
 
@@ -126,7 +126,7 @@ class SkillManagementToolkit:
                 return f'{category}/{name}'
         return None
 
-    @fc_register(host_file_access='NONE')
+    @fc_register(host_file='NONE')
     def create_skill(self, name: str, *, content: str) -> Dict[str, Any]:
         """Create a new reusable skill from full SKILL.md content.
 
@@ -196,7 +196,7 @@ class SkillManagementToolkit:
             result['summary'] = reason or f'skill_editor {tool_name}: {touched}'
         return result
 
-    @fc_register(host_file_access='NONE')
+    @fc_register(host_file='NONE')
     def edit_file(
         self,
         name: str,
@@ -224,7 +224,7 @@ class SkillManagementToolkit:
             content=content,
         )
 
-    @fc_register(host_file_access='NONE')
+    @fc_register(host_file='NONE')
     def patch_file(
         self,
         name: str,
@@ -258,7 +258,7 @@ class SkillManagementToolkit:
             replace_all=replace_all,
         )
 
-    @fc_register(host_file_access='NONE')
+    @fc_register(host_file='NONE')
     def create_file(
         self,
         name: str,
@@ -296,7 +296,7 @@ class SkillManagementToolkit:
             content=content,
         )
 
-    @fc_register(host_file_access='NONE')
+    @fc_register(host_file='NONE')
     def delete_file(
         self,
         name: str,
@@ -324,7 +324,7 @@ class SkillManagementToolkit:
             path=path,
         )
 
-    @fc_register(host_file_access='NONE')
+    @fc_register(host_file='NONE')
     def rename_skill(
         self,
         name: str,
@@ -391,7 +391,7 @@ class SkillManagementToolkit:
         result.update(payload)
         return result
 
-    @fc_register(host_file_access='NONE')
+    @fc_register(host_file='NONE')
     def remove_skill(
         self,
         name: str,

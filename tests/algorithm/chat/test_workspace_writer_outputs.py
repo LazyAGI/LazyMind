@@ -4,7 +4,8 @@ from io import BytesIO
 
 import pytest
 from PIL import Image
-from lazyllm.tools.agent import HostFileIntent, HostFileResolution
+from lazyllm.tools.agent import HostFileIntent
+from lazyllm.tools.agent import host_file_io
 from lazyllm.tools.writer.data_models.task import InputResource
 from lazyllm.tools.writer.tools.base import WriterToolBase
 from lazyllm.tools.writer.tools.multimodal_tools import WriterMultimodalTools
@@ -39,7 +40,7 @@ def test_writer_leaf_replaced_after_validation_does_not_write_secret(tmp_path, m
         return result
 
     monkeypatch.setattr(guard, 'check_path', replace_after_validation)
-    with HostFileResolution.execution_scope(guard):
+    with host_file_io.host_file_execution_scope(guard):
         with pytest.raises(Exception):
             if kind == 'json':
                 save_artifact_json({'data': 'new'}, str(destination))
@@ -67,7 +68,7 @@ def test_writer_directory_replaced_before_mkdir_cannot_escape(tmp_path, monkeypa
         return result
 
     monkeypatch.setattr(guard, 'check_path', replace_after_check)
-    with HostFileResolution.execution_scope(guard):
+    with host_file_io.host_file_execution_scope(guard):
         with pytest.raises(Exception):
             save_artifact_json({'new': 'content'}, str(directory / 'draft.json'))
     assert list(outside.iterdir()) == []
@@ -129,7 +130,7 @@ def test_checkpoint_leaf_swapped_before_actual_open_cannot_write_secret(tmp_path
         return result
 
     monkeypatch.setattr(guard, 'check_path', attack)
-    with HostFileResolution.execution_scope(guard):
+    with host_file_io.host_file_execution_scope(guard):
         with pytest.raises(Exception):
             writer.WriterToolkitBase().stream_draft_blocks_markdown(
                 writing_task_json='{}', writing_context_json='{}',
@@ -167,7 +168,7 @@ def test_guarded_writer_collects_from_staged_input_into_external_store(tmp_path)
             'media_store': str(output),
         })
         guard = HostAccessGuard(resolved.files)
-        with host_access_scope(guard), HostFileResolution.execution_scope(guard):
+        with host_access_scope(guard), host_file_io.host_file_execution_scope(guard):
             result = json.loads(writer.WriterToolkitBase().collect_available_media(**resolved.arguments))
         assert result['media_assets']['assets']
         staged_inputs = list((task / '.approved-inputs').rglob('input.png'))

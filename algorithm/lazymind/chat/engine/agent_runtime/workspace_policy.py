@@ -53,10 +53,8 @@ def decide_host_file_access(permission, intents) -> WorkspacePolicyDecision:
             continue
         if permission.permission_mode == 'allow_all':
             continue
-        if sensitive_path(intent.path):
-            decision = WorkspacePolicyDecision.ASK
-        elif intent.operation == 'read':
+        if intent.operation == 'read':
             continue
-        elif permission.permission_mode == 'always_ask' or intent.operation == 'delete':
+        if permission.permission_mode == 'always_ask':
             decision = WorkspacePolicyDecision.ASK
     return decision

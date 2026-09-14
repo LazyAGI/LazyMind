@@ -11,7 +11,7 @@ def build_list_skills_tool(available_skills: list[str] | None) -> Any:
         str(skill).strip() for skill in (available_skills or []) if str(skill).strip()
     ))
 
-    @fc_register(host_file_access='NONE')
+    @fc_register(host_file='NONE')
     def list_skills() -> dict[str, Any]:
         """List installed skills available to the current user.
 

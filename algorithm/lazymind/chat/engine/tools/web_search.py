@@ -9,7 +9,7 @@ from lazyllm.tools.agent import ToolExecutionError
 from lazymind.chat.engine.tools.infra import fetch_url_content
 
 
-@fc_register(host_file_access='NONE')
+@fc_register(host_file='NONE')
 def url_fetch(url: str) -> Dict[str, Any]:
     """Fetch readable content from one public web page, or ingest a public PDF.
 

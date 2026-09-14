@@ -89,7 +89,7 @@ def build_session_env_tool(
 ) -> Any:
     """Build a ChatAgent-scoped tool for setting session environment variables."""
 
-    @fc_register(host_file_access=(
+    @fc_register(host_file=(
         'NONE' if type(conversation_env_store) is dict
         and all(type(key) is str and type(value) is dict
                 for key, value in conversation_env_store.items())

@@ -69,7 +69,7 @@ def test_executor_passes_authorization_gate_to_middleware(monkeypatch) -> None:
 def test_executor_trusts_only_the_framework_skill_run_script_identity(monkeypatch, tmp_path) -> None:
     from lazyllm.tools.agent import SkillManager, fc_register
 
-    @fc_register(host_file_access='OPAQUE')
+    @fc_register(host_file='OPAQUE')
     def arbitrary_executable(command: str):
         '''An opaque executable that is not a SkillManager capability.
 

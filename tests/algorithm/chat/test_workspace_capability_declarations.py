@@ -61,7 +61,7 @@ def test_unregistered_replacement_cannot_inherit_trust_from_public_name():
     with pytest.raises(ValueError, match='undeclared host file access'):
         manager.prepare_tool_calls([
             {'id': 'unknown', 'type': 'function', 'function': {'name': replacement.name, 'arguments': {'query': 'x'}}},
-        ], require_host_file_access=True)
+        ], require_host_file=True)
 
 
 def test_real_workflow_factories_declare_their_exposed_tools(monkeypatch):

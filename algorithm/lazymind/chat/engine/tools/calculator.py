@@ -22,7 +22,7 @@ def format_calculation_result(value: int | float) -> str:
     return text
 
 
-@fc_register(host_file_access='NONE')
+@fc_register(host_file='NONE')
 def calculator(expression: str) -> str:
     """Evaluate a mathematical expression safely.
 

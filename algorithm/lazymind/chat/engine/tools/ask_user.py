@@ -95,7 +95,7 @@ def _normalise_questions(raw: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return normalised
 
 
-@fc_register(host_file_access='NONE')
+@fc_register(host_file='NONE')
 def ask_user(
     questions: List[Dict[str, Union[bool, str, List[str]]]],
     title: Optional[str] = None,

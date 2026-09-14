@@ -1,6 +1,7 @@
 """Common writer tools with string/JSON inputs and outputs."""
 from __future__ import annotations
 
+from lazyllm.tools.agent import host_file_io
 import hashlib
 import json
 import os
@@ -324,9 +325,9 @@ def _bind_document_cross_reference_targets(instructions: list[Any]) -> None:
 
 def _read_artifact_data(path: str) -> Any:
     if Path(path).suffix.lower() in {'.md', '.markdown'}:
-        with HostFileResolution.open_read(str(path)) as stream:
+        with host_file_io.open_read(str(path)) as stream:
             return stream.read().decode('utf-8')
-    with HostFileResolution.open_read(str(path)) as fh:
+    with host_file_io.open_read(str(path)) as fh:
         raw = json.load(fh)
     if isinstance(raw, dict) and 'data' in raw:
         return raw['data']
@@ -348,7 +349,7 @@ def _temp_root() -> Path:
     root = parent / uuid.uuid4().hex
     if base and os.path.commonpath([str(Path(base).resolve()), str(root.resolve())]) != str(Path(base).resolve()):
         raise ToolExecutionError('Writer workspace contains an escaping directory link.')
-    HostFileResolution.makedirs(str(root), exist_ok=True)
+    host_file_io.makedirs(str(root), exist_ok=True)
     return root
 
 
@@ -391,7 +392,7 @@ def _write_document_input(root: Path, name: str, value: str) -> str:
     content = _document_value(value)
     if isinstance(content, str):
         path = root / f'{name}.md'
-        with HostFileResolution.open_write(str(path)) as stream:
+        with host_file_io.open_write(str(path)) as stream:
             stream.write(content.encode('utf-8'))
         return str(path)
     return _write_input_artifact(root, f'{name}.lmd', content, WriterToolkitBase.WRITER_IR_SCHEMA)
@@ -546,7 +547,7 @@ def sync_writer_documents(
 
     library = MediaAssetLibrary.model_validate(media_assets) if media_assets else None
     root = Path(artifact_store) if artifact_store else _temp_root()
-    HostFileResolution.makedirs(str(root), exist_ok=True)
+    host_file_io.makedirs(str(root), exist_ok=True)
     if source.title == revised.title and source.blocks == revised.blocks:
         patch = PatchSet(
             patch_id=f'patch-{source.document_id}', target_doc_id=source.document_id,
@@ -874,7 +875,7 @@ class WriterToolkitBase:
     WRITER_BLOCK_SCHEMA = f'{WRITER_DATA_MODEL_SCHEMA_PREFIX}.writer_ir.WriterBlock'
     __public_apis__: list[str] = []
 
-    @fc_register(host_file_access="DECLARED", host_file_resolver=resolve_writer_files)
+    @fc_register(host_file=resolve_writer_files)
     @_stage_writer_inputs
     def build_writing_task(self, query: str, task_id: str = '') -> str:
         """Build a provider-neutral writing task from the user's request."""
@@ -886,7 +887,7 @@ class WriterToolkitBase:
         )
         return _json_dumps(task.model_dump(exclude_defaults=True))
 
-    @fc_register(host_file_access="DECLARED", host_file_resolver=resolve_writer_files)
+    @fc_register(host_file=resolve_writer_files)
     @_stage_writer_inputs
     def build_resources(
         self,
@@ -936,7 +937,7 @@ class WriterToolkitBase:
             })
         return _json_dumps(resources)
 
-    @fc_register(host_file_access="DECLARED", host_file_resolver=resolve_writer_files)
+    @fc_register(host_file=resolve_writer_files)
     @_stage_writer_inputs
     def collect_available_media(
         self,
@@ -965,7 +966,7 @@ class WriterToolkitBase:
             if source_document_json else None
         )
         artifact_store = Path(media_store.strip()) if media_store.strip() else root
-        HostFileResolution.makedirs(str(artifact_store), exist_ok=True)
+        host_file_io.makedirs(str(artifact_store), exist_ok=True)
         result = WriterMultimodalTools(
             llm=AutoModel(model='vlm') if use_vision_model else None,
             artifact_store=str(artifact_store),
@@ -980,7 +981,7 @@ class WriterToolkitBase:
             'warnings': (result.get('metadata') or {}).get('warnings') or [],
         })
 
-    @fc_register(host_file_access="DECLARED", host_file_resolver=resolve_writer_files)
+    @fc_register(host_file=resolve_writer_files)
     @_stage_writer_inputs
     def resolve_visual_needs(
         self,
@@ -1017,7 +1018,7 @@ class WriterToolkitBase:
             'media_assets': result['media_assets'].model_dump(),
         })
 
-    @fc_register(host_file_access="DECLARED", host_file_resolver=resolve_writer_files)
+    @fc_register(host_file=resolve_writer_files)
     @_stage_writer_inputs
     def materialize_acquired_media(
         self,
@@ -1047,7 +1048,7 @@ class WriterToolkitBase:
             'lazyllm.tools.writer.artifacts.acquired_resources',
         )
         artifact_store = Path(media_store.strip()) if media_store.strip() else root
-        HostFileResolution.makedirs(str(artifact_store), exist_ok=True)
+        host_file_io.makedirs(str(artifact_store), exist_ok=True)
         result = WriterMultimodalTools(
             artifact_store=str(artifact_store),
         ).materialize_acquired_media(
@@ -1060,7 +1061,7 @@ class WriterToolkitBase:
             'media_assets': result['media_assets'].model_dump(),
         })
 
-    @fc_register(host_file_access="DECLARED", host_file_resolver=resolve_writer_files)
+    @fc_register(host_file=resolve_writer_files)
     @_stage_writer_inputs
     def profile_resources(self, writing_task_json: str, user_input: str, resources_json: str = '[]') -> str:
         """Profile writing resources."""
@@ -1098,7 +1099,7 @@ class WriterToolkitBase:
         ).profile_resources(task=task_path, input_resources=input_resources)
         return _json_dumps(_primary_data(result))
 
-    @fc_register(host_file_access="DECLARED", host_file_resolver=resolve_writer_files)
+    @fc_register(host_file=resolve_writer_files)
     @_stage_writer_inputs
     def build_revise_task(self, query: str, target_document_json: str = '') -> str:
         """Build a revise-type WritingTask from the user's revision request."""
@@ -1115,7 +1116,7 @@ class WriterToolkitBase:
         )
         return _json_dumps(task.model_dump(exclude_defaults=True))
 
-    @fc_register(host_file_access="DECLARED", host_file_resolver=resolve_writer_files)
+    @fc_register(host_file=resolve_writer_files)
     @_stage_writer_inputs
     def build_revision_task(
         self,
@@ -1138,7 +1139,7 @@ class WriterToolkitBase:
             ),
         )
 
-    @fc_register(host_file_access="DECLARED", host_file_resolver=resolve_writer_files)
+    @fc_register(host_file=resolve_writer_files)
     @_stage_writer_inputs
     def validate_patch_set(
         self,
@@ -1168,7 +1169,7 @@ class WriterToolkitBase:
             'patch_set_review_summary': result.get('summary') or '',
         })
 
-    @fc_register(host_file_access="DECLARED", host_file_resolver=resolve_writer_files)
+    @fc_register(host_file=resolve_writer_files)
     @_stage_writer_inputs
     def create_writing_context(
         self,
@@ -1195,7 +1196,7 @@ class WriterToolkitBase:
         )
         return _json_dumps(_primary_data(result))
 
-    @fc_register(host_file_access="DECLARED", host_file_resolver=resolve_writer_files)
+    @fc_register(host_file=resolve_writer_files)
     @_stage_writer_inputs
     def generate_outline(self, writing_task_json: str, writing_context_json: str) -> str:
         """Generate an outline in the task's selected representation."""
@@ -1230,7 +1231,7 @@ class WriterToolkitBase:
             return outline
         return _set_document_editable(outline, stage='outline').model_dump_json(exclude_defaults=True)
 
-    @fc_register(host_file_access="DECLARED", host_file_resolver=resolve_writer_files)
+    @fc_register(host_file=resolve_writer_files)
     @_stage_writer_inputs
     def stream_outline(
         self,
@@ -1251,7 +1252,7 @@ class WriterToolkitBase:
             result = stream.result()
         return self._outline_result(result)
 
-    @fc_register(host_file_access="DECLARED", host_file_resolver=resolve_writer_files)
+    @fc_register(host_file=resolve_writer_files)
     @_stage_writer_inputs
     def generate_rewrite_outline(
         self,
@@ -1278,7 +1279,7 @@ class WriterToolkitBase:
         )
         return WriterDocument.model_validate(_primary_data(result)).model_dump_json(exclude_defaults=True)
 
-    @fc_register(host_file_access="DECLARED", host_file_resolver=resolve_writer_files)
+    @fc_register(host_file=resolve_writer_files)
     @_stage_writer_inputs
     def generate_rewrite_section_instructions(
         self,
@@ -1377,7 +1378,7 @@ class WriterToolkitBase:
             'warnings': warnings,
         })
 
-    @fc_register(host_file_access="DECLARED", host_file_resolver=resolve_writer_files)
+    @fc_register(host_file=resolve_writer_files)
     @_stage_writer_inputs
     def prepare_outline(
         self,
@@ -1457,7 +1458,7 @@ class WriterToolkitBase:
             outline=outline_path, task=task_path, context=context_path,
         ))
 
-    @fc_register(host_file_access="DECLARED", host_file_resolver=resolve_writer_files)
+    @fc_register(host_file=resolve_writer_files)
     @_stage_writer_inputs
     def generate_section_instructions(
         self,
@@ -1521,7 +1522,7 @@ class WriterToolkitBase:
             'warnings': warnings,
         })
 
-    @fc_register(host_file_access="DECLARED", host_file_resolver=resolve_writer_files)
+    @fc_register(host_file=resolve_writer_files)
     @_stage_writer_inputs
     def execute_writing_subtasks(
         self,
@@ -1546,7 +1547,7 @@ class WriterToolkitBase:
         completed = _primary_data(result)
         return completed if isinstance(completed, str) else _json_dumps(completed)
 
-    @fc_register(host_file_access="DECLARED", host_file_resolver=resolve_writer_files)
+    @fc_register(host_file=resolve_writer_files)
     @_stage_writer_inputs
     def generate_draft_section(
         self,
@@ -1600,7 +1601,7 @@ class WriterToolkitBase:
         )
         return _json_dumps(_primary_data(result))
 
-    @fc_register(host_file_access="DECLARED", host_file_resolver=resolve_writer_files)
+    @fc_register(host_file=resolve_writer_files)
     @_stage_writer_inputs
     def generate_draft_section_markdown(
         self,
@@ -1617,7 +1618,7 @@ class WriterToolkitBase:
             previous_blocks_json=_json_dumps([previous_markdown] if previous_markdown else []),
         ), '')
 
-    @fc_register(host_file_access="DECLARED", host_file_resolver=resolve_writer_files)
+    @fc_register(host_file=resolve_writer_files)
     @_stage_writer_inputs
     def generate_draft_blocks(
         self,
@@ -1652,7 +1653,7 @@ class WriterToolkitBase:
             blocks.append(block)
         return _json_dumps(blocks)
 
-    @fc_register(host_file_access="DECLARED", host_file_resolver=resolve_writer_files)
+    @fc_register(host_file=resolve_writer_files)
     @_stage_writer_inputs
     def generate_draft_blocks_markdown(
         self,
@@ -1669,7 +1670,7 @@ class WriterToolkitBase:
             visual_plan_json=visual_plan_json,
         )
 
-    @fc_register(host_file_access="DECLARED", host_file_resolver=resolve_writer_files)
+    @fc_register(host_file=resolve_writer_files)
     @_stage_writer_inputs
     def stream_draft_blocks_markdown(
         self,
@@ -1697,7 +1698,7 @@ class WriterToolkitBase:
             checkpoint_dir=checkpoint_dir,
         )
 
-    @fc_register(host_file_access="DECLARED", host_file_resolver=resolve_writer_files)
+    @fc_register(host_file=resolve_writer_files)
     @_stage_writer_inputs
     def stream_draft_blocks_ir(
         self,
@@ -1825,7 +1826,7 @@ class WriterToolkitBase:
                 writer_schema('multimodal.MediaAssetLibrary'),
             )
         checkpoint_root = Path(checkpoint_dir) if checkpoint_dir else root / 'section-checkpoints'
-        HostFileResolution.makedirs(str(checkpoint_root), exist_ok=True)
+        host_file_io.makedirs(str(checkpoint_root), exist_ok=True)
         sections: list[Any] = [None] * len(instructions)
         event_queues: list[Queue] = [Queue() for _ in instructions]
         stop_event = Event()
@@ -1869,10 +1870,10 @@ class WriterToolkitBase:
                 return None
             try:
                 if representation == 'markdown':
-                    with HostFileResolution.open_read(str(path)) as stream:
+                    with host_file_io.open_read(str(path)) as stream:
                         value = stream.read().decode('utf-8')
                     return _normalize_streamed_markdown_section(value, instruction)
-                with HostFileResolution.open_read(str(path)) as stream:
+                with host_file_io.open_read(str(path)) as stream:
                     value = json.loads(stream.read().decode('utf-8'))
                 return WriterBlock.model_validate(value).model_dump(exclude_defaults=True)
             except (OSError, ValueError, TypeError, json.JSONDecodeError):
@@ -1882,9 +1883,9 @@ class WriterToolkitBase:
         def save_checkpoint(path: Path, section: Any) -> None:
             temporary = path.with_name(f'.{path.name}.{uuid.uuid4().hex}.tmp')
             content = str(section) if representation == 'markdown' else json.dumps(section, ensure_ascii=False, indent=2)
-            with HostFileResolution.open_write(str(temporary), 'x') as stream:
+            with host_file_io.open_write(str(temporary), 'x') as stream:
                 stream.write(content.encode('utf-8'))
-            HostFileResolution.rename(str(temporary), str(path), overwrite=True)
+            host_file_io.rename(str(temporary), str(path), overwrite=True)
 
         def cached_preview(section: Any) -> str:
             if representation == 'markdown':
@@ -1954,7 +1955,7 @@ class WriterToolkitBase:
                             section_attempt=attempt,
                         )
                         section_root = root / f'section-{index + 1:04d}-attempt-{attempt}'
-                        HostFileResolution.makedirs(str(section_root), exist_ok=True)
+                        host_file_io.makedirs(str(section_root), exist_ok=True)
                         drafting = WriterDraftingTools(
                             llm=AutoModel(model='llm'), artifact_store=str(section_root),
                         )
@@ -2200,7 +2201,7 @@ class WriterToolkitBase:
             executor.shutdown(wait=False, cancel_futures=True)
         return _json_dumps(sections)
 
-    @fc_register(host_file_access="DECLARED", host_file_resolver=resolve_writer_files)
+    @fc_register(host_file=resolve_writer_files)
     @_stage_writer_inputs
     def generate_draft_document(
         self,
@@ -2232,7 +2233,7 @@ class WriterToolkitBase:
         )
         return _json_dumps(_primary_data(result))
 
-    @fc_register(host_file_access="DECLARED", host_file_resolver=resolve_writer_files)
+    @fc_register(host_file=resolve_writer_files)
     @_stage_writer_inputs
     def generate_draft_document_markdown(
         self,
@@ -2252,7 +2253,7 @@ class WriterToolkitBase:
             'draft_document': markdown,
         })
 
-    @fc_register(host_file_access="DECLARED", host_file_resolver=resolve_writer_files)
+    @fc_register(host_file=resolve_writer_files)
     @_stage_writer_inputs
     def update_writing_context(self, content_artifact_json: str, writing_context_json: str) -> str:
         """Update context from IR or Markdown content."""
@@ -2260,7 +2261,7 @@ class WriterToolkitBase:
         content_data = _document_value(content_artifact_json)
         if isinstance(content_data, str):
             content_path = root / 'writer_content.md'
-            with HostFileResolution.open_write(str(content_path)) as stream:
+            with host_file_io.open_write(str(content_path)) as stream:
                 stream.write(content_data.encode('utf-8'))
             content_path = str(content_path)
         else:
@@ -2276,7 +2277,7 @@ class WriterToolkitBase:
         )
         return _json_dumps(_primary_data(result))
 
-    @fc_register(host_file_access="DECLARED", host_file_resolver=resolve_writer_files)
+    @fc_register(host_file=resolve_writer_files)
     @_stage_writer_inputs
     def check_consistency(self, draft_document_json: str, writing_context_json: str) -> str:
         """Validate an IR or Markdown draft document."""
@@ -2294,7 +2295,7 @@ class WriterToolkitBase:
             'review_summary': result.get('summary') or '',
         })
 
-    @fc_register(host_file_access="DECLARED", host_file_resolver=resolve_writer_files)
+    @fc_register(host_file=resolve_writer_files)
     @_stage_writer_inputs
     def generate_final_document(self, draft_document_json: str, writing_context_json: str) -> str:
         """Return the final document without changing its representation."""
@@ -2311,7 +2312,7 @@ class WriterToolkitBase:
         output_path = result.get('output_file_path') or ''
         markdown = ''
         if output_path:
-            with HostFileResolution.open_read(str(output_path)) as fh:
+            with host_file_io.open_read(str(output_path)) as fh:
                 markdown = fh.read().decode('utf-8')
         final_document = _primary_data(result)
         if not isinstance(final_document, str):
@@ -2321,7 +2322,7 @@ class WriterToolkitBase:
             'final_document_md': markdown,
         })
 
-    @fc_register(host_file_access="DECLARED", host_file_resolver=resolve_writer_files)
+    @fc_register(host_file=resolve_writer_files)
     @_stage_writer_inputs
     def render_markdown(self, writer_document_json: str) -> str:
         """Return the current document title and Markdown content."""
@@ -2339,7 +2340,7 @@ class WriterToolkitBase:
             'markdown': writer_document_to_markdown(document),
         })
 
-    @fc_register(host_file_access="DECLARED", host_file_resolver=resolve_writer_files)
+    @fc_register(host_file=resolve_writer_files)
     @_stage_writer_inputs
     def locate_revision_target(
         self,
@@ -2362,7 +2363,7 @@ class WriterToolkitBase:
         ).locate_revision_target(task=task_path, document=document_path, context=context_path)
         return _json_dumps(_primary_data(result))
 
-    @fc_register(host_file_access="DECLARED", host_file_resolver=resolve_writer_files)
+    @fc_register(host_file=resolve_writer_files)
     @_stage_writer_inputs
     def generate_modify_plan(
         self,
@@ -2395,7 +2396,7 @@ class WriterToolkitBase:
         )
         return _json_dumps(_primary_data(result))
 
-    @fc_register(host_file_access="DECLARED", host_file_resolver=resolve_writer_files)
+    @fc_register(host_file=resolve_writer_files)
     @_stage_writer_inputs
     def build_revision_visual_plan(self, modify_plan_json: str) -> str:
         """Extract the explicit visual needs from a structured revision plan."""
@@ -2435,7 +2436,7 @@ class WriterToolkitBase:
             instructions.append(visual)
         return _json_dumps(VisualPlan(instructions=instructions).model_dump(exclude_defaults=True))
 
-    @fc_register(host_file_access="DECLARED", host_file_resolver=resolve_writer_files)
+    @fc_register(host_file=resolve_writer_files)
     @_stage_writer_inputs
     def generate_patch_set(
         self,
@@ -2475,7 +2476,7 @@ class WriterToolkitBase:
         )
         return _json_dumps(_primary_data(result))
 
-    @fc_register(host_file_access="DECLARED", host_file_resolver=resolve_writer_files)
+    @fc_register(host_file=resolve_writer_files)
     @_stage_writer_inputs
     def generate_string_replace_set(
         self,
@@ -2503,7 +2504,7 @@ class WriterToolkitBase:
         )
         return _json_dumps(_primary_data(result))
 
-    @fc_register(host_file_access="DECLARED", host_file_resolver=resolve_writer_files)
+    @fc_register(host_file=resolve_writer_files)
     @_stage_writer_inputs
     def plan_revision(
         self,
@@ -2536,7 +2537,7 @@ class WriterToolkitBase:
             'patch_set': _json_loads(patch_set, {}),
         })
 
-    @fc_register(host_file_access="DECLARED", host_file_resolver=resolve_writer_files)
+    @fc_register(host_file=resolve_writer_files)
     @_stage_writer_inputs
     def apply_patch(
         self,
@@ -2585,7 +2586,7 @@ class WriterToolkitBase:
             'revised_document': revised.model_dump(exclude_defaults=True),
         })
 
-    @fc_register(host_file_access="DECLARED", host_file_resolver=resolve_writer_files)
+    @fc_register(host_file=resolve_writer_files)
     @_stage_writer_inputs
     def apply_string_replace(
         self,
@@ -2616,7 +2617,7 @@ class WriterToolkitBase:
             'revised_document': _read_artifact_data(revised_path),
         })
 
-    @fc_register(host_file_access="DECLARED", host_file_resolver=resolve_writer_files)
+    @fc_register(host_file=resolve_writer_files)
     @_stage_writer_inputs
     def apply_revision(
         self,
@@ -2658,7 +2659,7 @@ class WriterToolkitBase:
         output['write_result'] = published.get('publish_result') or {}
         return _json_dumps(output)
 
-    @fc_register(host_file_access="DECLARED", host_file_resolver=resolve_writer_files)
+    @fc_register(host_file=resolve_writer_files)
     @_stage_writer_inputs
     def load_document(self, user_input: str, stage: str = 'final') -> str:
         """Load a provider document without changing its Writer representation."""
@@ -2675,7 +2676,7 @@ class WriterToolkitBase:
             'representation': result.get('representation'),
         })
 
-    @fc_register(host_file_access="DECLARED", host_file_resolver=resolve_writer_files)
+    @fc_register(host_file=resolve_writer_files)
     @_stage_writer_inputs
     def create_document(self, title: str, parent_uri: str = '', adapter: str = '') -> str:
         """Create an empty provider document and return its target binding."""
@@ -2694,7 +2695,7 @@ class WriterToolkitBase:
         )
         return _json_dumps(_primary_data(result))
 
-    @fc_register(host_file_access="DECLARED", host_file_resolver=resolve_writer_files)
+    @fc_register(host_file=resolve_writer_files)
     @_stage_writer_inputs
     def publish_revision(
         self,
@@ -2737,7 +2738,7 @@ class WriterToolkitBase:
             'published_link': _published_link(target),
         })
 
-    @fc_register(host_file_access="DECLARED", host_file_resolver=resolve_writer_files)
+    @fc_register(host_file=resolve_writer_files)
     @_stage_writer_inputs
     def replace_document(
         self,
@@ -2757,7 +2758,7 @@ class WriterToolkitBase:
             media_assets_json=media_assets_json,
         )
 
-    @fc_register(host_file_access="DECLARED", host_file_resolver=resolve_writer_files)
+    @fc_register(host_file=resolve_writer_files)
     @_stage_writer_inputs
     def append_document(
         self,

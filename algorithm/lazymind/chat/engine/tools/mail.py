@@ -1810,7 +1810,7 @@ class MailToolkit:
             return None
         return cred
 
-    @fc_register(host_file_access='NONE')
+    @fc_register(host_file='NONE')
     def search(
         self,
         keyword: str = '',
@@ -1880,7 +1880,7 @@ class MailToolkit:
             payload['errors'] = errors
         return payload
 
-    @fc_register(host_file_access='NONE')
+    @fc_register(host_file='NONE')
     def read(self, message_id: str, mailbox: str = '') -> dict[str, Any]:
         """Read one email body on demand. Attachments are listed only; use read_attachment to download.
 
@@ -1895,7 +1895,7 @@ class MailToolkit:
             return _unavailable_mailbox(requested)
         return _call_mailboxes(mailbox, lambda cred: _backend(cred).read(str(message_id).strip()))
 
-    @fc_register(host_file_access='NONE')
+    @fc_register(host_file='NONE')
     def read_thread(self, thread_id: str, mailbox: str = '') -> dict[str, Any]:
         """Read a complete email conversation/thread.
 
@@ -1907,7 +1907,7 @@ class MailToolkit:
             raise ToolExecutionError('thread_id is required')
         return _call_mailboxes(mailbox, lambda cred: _backend(cred).read_thread(str(thread_id).strip()))
 
-    @fc_register(host_file_access='NONE')
+    @fc_register(host_file='NONE')
     def read_attachment(self, message_id: str, attachment_id: str, mailbox: str = '') -> dict[str, Any]:
         """Download a common email attachment into the conversation workspace.
 
@@ -1991,7 +1991,7 @@ class MailToolkit:
 
         return _call_mailboxes(mailbox, _download)
 
-    @fc_register(host_file_access='NONE')
+    @fc_register(host_file='NONE')
     def compose_draft(
         self,
         to: Any,
@@ -2081,7 +2081,7 @@ class MailToolkit:
         preview = _emit_draft_card(draft)
         return preview
 
-    @fc_register(host_file_access='NONE')
+    @fc_register(host_file='NONE')
     def update_draft(
         self,
         draft_id: str,
@@ -2157,7 +2157,7 @@ class MailToolkit:
         _save_draft(draft)
         return _emit_draft_card(draft)
 
-    @fc_register(host_file_access='NONE')
+    @fc_register(host_file='NONE')
     def send_draft(self, draft_id: str, confirm: bool = False) -> dict[str, Any]:
         """Send a previously composed draft only after the user confirms the preview card.
 

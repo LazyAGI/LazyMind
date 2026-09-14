@@ -37,7 +37,7 @@ def main():
         },
     }
     toolkit = LocalFileToolkit()
-    @fc_register(host_file_access='DECLARED', host_file_resolver=lambda args: HostFileResolution(
+    @fc_register(host_file=lambda args: HostFileResolution(
         args, (HostFileIntent(args['path'], 'read'),)))
     def declared_read(path: str):
         """Read a host file with the declared generic lifecycle.
@@ -45,7 +45,7 @@ def main():
         Args:
             path: Absolute file path.
         """
-        with HostFileResolution.open_read(path) as file:
+        with host_file_io.open_read(path) as file:
             return file.read().decode()
 
     manager = ToolManager([toolkit, calculator, declared_read])

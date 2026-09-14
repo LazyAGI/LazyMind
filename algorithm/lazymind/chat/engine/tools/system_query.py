@@ -7,7 +7,7 @@ from typing import Any, Dict
 from lazymind.chat.engine.tools.infra import get_core_api
 
 
-@fc_register(host_file_access='NONE')
+@fc_register(host_file='NONE')
 def list_data_sources(keyword: str = '') -> Dict[str, Any]:
     """List configured data-source providers available to the current user.
 
