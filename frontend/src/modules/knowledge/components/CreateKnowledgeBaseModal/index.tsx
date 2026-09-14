@@ -278,6 +278,12 @@ const CreateKnowledgeBaseModal = forwardRef<
                 wrapperCol={{ flex: 1 }}
                 labelAlign="left"
                 colon={false}
+                requiredMark={(label, { required }) => (
+                  <span className="knowledge-create-label">
+                    {label}
+                    {required && <span className="knowledge-create-required-mark">*</span>}
+                  </span>
+                )}
                 className="knowledge-create-form"
               >
                 <Form.Item

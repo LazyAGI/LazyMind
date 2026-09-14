@@ -1,4 +1,4 @@
-import { Form, Input, InputNumber, Select, Switch, Tabs, Tooltip } from "antd";
+import { Form, Input, InputNumber, Select, Switch, Tabs, Tooltip, Typography } from "antd";
 import { QuestionCircleOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import type { CapabilityRef, LearningCapability } from "./api";
@@ -24,6 +24,7 @@ export default function CapabilitySettings({ capabilities, selectedKeys }:Props)
   return <Tabs
     className="capability-settings-tabs"
     size="small"
+    tabBarExtraContent={<Typography.Text className="capability-settings-hint" type="secondary">{t("learning.capabilitySettingsHint")}</Typography.Text>}
     items={selectedKeys.flatMap(key=>{
       const capability=capabilities.find(item=>item.key===key);
       if(!capability) return [];
@@ -36,7 +37,7 @@ export default function CapabilitySettings({ capabilities, selectedKeys }:Props)
           </Form.Item>
           <Form.Item
             name={["learning_capability_settings",key,"allow_llm_fallback"]}
-            label={<span>{t("learning.allowLlmFallback")} <Tooltip title={t("learning.capabilitySettingsHint")}><QuestionCircleOutlined className="knowledge-create-help-icon" /></Tooltip></span>}
+            label={<span>{t("learning.allowLlmFallback")} <Tooltip title={t("learning.allowLlmFallbackHint")}><QuestionCircleOutlined className="knowledge-create-help-icon" /></Tooltip></span>}
             valuePropName="checked"
             initialValue
           >

@@ -46,7 +46,7 @@ func learningOpenAPIPaths() map[string]any {
 		"/learning/books":                                      map[string]any{"get": learningOperation("List learning collections", nil, nil), "post": learningOperation("Create a capability-isolated learning collection", nil, refSchema("LearningBookRequest"))},
 		"/learning/books/{book_id}":                            map[string]any{"patch": learningOperation("Update a learning collection without changing capability", lp("book_id"), refSchema("LearningBookRequest")), "delete": learningOperation("Archive a learning collection while preserving review history", lp("book_id"), nil)},
 		"/learning/books/{book_id}/entries":                    map[string]any{"post": learningOperation("Attach compatible published content to a learning collection", lp("book_id"), obj())},
-		"/learning/dictionary:lookup":                          map[string]any{"get": learningOperation("Query English, Chinese, or Classical Chinese dictionary provider", nil, nil)},
+		"/learning/dictionary:lookup":                          map[string]any{"get": learningOperation("Query English, Chinese, Chinese idiom, or Classical Chinese dictionary provider", nil, nil)},
 		"/learning/dictionaries:import":                        map[string]any{"post": learningOperation("Import traceable dictionary entries", nil, refSchema("LearningDictionaryImportRequest"))},
 		"/learning/review/sessions":                            map[string]any{"post": learningOperation("Create an immutable review question snapshot", nil, refSchema("LearningReviewSessionRequest"))},
 		"/learning/review/sessions/{session_id}":               map[string]any{"get": learningOperation("Get a review session snapshot", lp("session_id"), nil)},

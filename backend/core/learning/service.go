@@ -447,30 +447,52 @@ func (s *Service) AnalyzeSelection(ctx context.Context, owner, dataset, text str
 	}
 	matches := make([]SelectionMatch, 0)
 	normalized := normalize(text)
-	providers := map[string]string{"english_definition": "english_dictionary", "chinese_definition": "chinese_dictionary", "classical_definition": "classical_chinese_dictionary", "pinyin": "chinese_dictionary"}
+	configuredKeys := map[string]bool{}
 	for _, key := range keys {
-		provider := providers[key]
-		if provider == "" {
-			continue
-		}
-		var rows []DictionaryEntry
-		q := s.db.WithContext(ctx).Where("provider_key = ?", provider)
-		if len([]rune(normalized)) == 1 {
-			q = q.Where("normalized_headword LIKE ?", "%"+normalized+"%")
-		} else {
-			q = q.Where("? LIKE '%' || normalized_headword || '%'", normalized)
-		}
-		if q.Order("LENGTH(normalized_headword) DESC, priority").Limit(20).Find(&rows).Error == nil {
-			for _, row := range rows {
-				start := runeIndex(normalized, row.NormalizedHeadword)
-				if start < 0 {
-					start = 0
+		configuredKeys[key] = true
+	}
+	for _, key := range keys {
+		for _, provider := range selectionDictionaryProviders(key, kinds, configuredKeys["classical_definition"]) {
+			var rows []DictionaryEntry
+			q := s.db.WithContext(ctx).Where("provider_key = ?", provider)
+			if len([]rune(normalized)) == 1 {
+				q = q.Where("normalized_headword LIKE ?", "%"+normalized+"%")
+			} else {
+				q = q.Where("? LIKE '%' || normalized_headword || '%'", normalized)
+			}
+			if q.Order("LENGTH(normalized_headword) DESC, priority").Limit(20).Find(&rows).Error == nil {
+				for _, row := range rows {
+					start := runeIndex(normalized, row.NormalizedHeadword)
+					if start < 0 {
+						start = 0
+					}
+					matches = append(matches, SelectionMatch{Text: row.DisplayHeadword, CapabilityKey: key, ProviderKey: provider, Start: start, End: start + len([]rune(row.NormalizedHeadword)), Exact: row.NormalizedHeadword == normalized})
 				}
-				matches = append(matches, SelectionMatch{Text: row.DisplayHeadword, CapabilityKey: key, ProviderKey: provider, Start: start, End: start + len([]rune(row.NormalizedHeadword)), Exact: row.NormalizedHeadword == normalized})
 			}
 		}
 	}
 	return SelectionAnalysis{Language: lang, SubjectKinds: kinds, CapabilityKeys: keys, Books: books, Matches: matches}, err
+}
+
+func selectionDictionaryProviders(capability string, kinds []string, classicalScene bool) []string {
+	switch capability {
+	case "english_definition":
+		return []string{"english_dictionary"}
+	case "chinese_definition":
+		return []string{"chinese_idiom_dictionary", "chinese_dictionary"}
+	case "classical_definition":
+		return []string{"classical_chinese_dictionary"}
+	case "pinyin":
+		if classicalScene {
+			return []string{"classical_chinese_dictionary"}
+		}
+		if contains(kinds, "idiom") {
+			return []string{"chinese_idiom_dictionary"}
+		}
+		return []string{"chinese_dictionary", "chinese_idiom_dictionary"}
+	default:
+		return nil
+	}
 }
 func (s *Service) CreateBook(ctx context.Context, owner string, row Book, questions []string) (Book, error) {
 	if err := requireLocal(); err != nil {

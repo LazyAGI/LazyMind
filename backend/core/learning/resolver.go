@@ -70,6 +70,33 @@ func (s *Service) dictionaryLookup(ctx context.Context, provider, language, text
 	value["source_name"], value["source_version"], value["license_id"], value["source_locator"] = row.SourceName, row.SourceVersion, row.LicenseID, row.SourceLocator
 	return value, true, nil
 }
+
+func (s *Service) dictionaryProviderApplies(ctx context.Context, owner, provider string, req ProviderRequest) bool {
+	switch req.Capability.Key {
+	case "chinese_definition":
+		return provider == "chinese_dictionary" || provider == "chinese_idiom_dictionary"
+	case "classical_definition", "classical_translation":
+		return provider == "classical_chinese_dictionary"
+	case "pinyin":
+		if req.Input.SubjectKind == "idiom" {
+			return provider == "chinese_idiom_dictionary"
+		}
+		classical := req.Input.Language == "lzh"
+		if !classical && req.Input.DatasetID != "" {
+			var count int64
+			s.db.WithContext(ctx).Model(&KnowledgeBaseCapability{}).
+				Where("dataset_id = ? AND owner_id = ? AND capability_key = ? AND enabled = ?", req.Input.DatasetID, owner, "classical_definition", true).
+				Count(&count)
+			classical = count > 0
+		}
+		if classical {
+			return provider == "classical_chinese_dictionary"
+		}
+		return provider == "chinese_dictionary"
+	default:
+		return true
+	}
+}
 func requiredMissing(def Capability, value map[string]any) []string {
 	var out []string
 	for _, field := range def.Fields {

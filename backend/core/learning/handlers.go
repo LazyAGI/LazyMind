@@ -308,6 +308,11 @@ func ImportDictionary(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "dictionary import metadata is required", 400)
 		return
 	}
+	validProvider := in.ProviderKey == "chinese_dictionary" || in.ProviderKey == "chinese_idiom_dictionary" || in.ProviderKey == "classical_chinese_dictionary" || in.ProviderKey == "english_dictionary"
+	if !validProvider {
+		common.ReplyErr(w, "unsupported dictionary provider", 400)
+		return
+	}
 	checksum := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(in.Checksum)), "sha256:")
 	if decoded, decodeErr := hex.DecodeString(checksum); decodeErr != nil || len(decoded) != 32 {
 		common.ReplyErr(w, "dictionary checksum must be SHA-256", 400)
@@ -332,7 +337,7 @@ func ImportDictionary(w http.ResponseWriter, r *http.Request) {
 		if row.LicenseID == "" {
 			row.LicenseID = in.LicenseID
 		}
-		if row.ProviderKey != "chinese_dictionary" && row.ProviderKey != "classical_chinese_dictionary" && row.ProviderKey != "english_dictionary" {
+		if row.ProviderKey != in.ProviderKey {
 			common.ReplyErr(w, "unsupported dictionary provider", 400)
 			return
 		}

@@ -37,9 +37,12 @@ func (p providerFunc) Resolve(ctx context.Context, owner string, req ProviderReq
 
 func (s *Service) providers() map[string]ContentProvider {
 	out := map[string]ContentProvider{}
-	for _, key := range []string{"english_dictionary", "chinese_dictionary", "classical_chinese_dictionary"} {
+	for _, key := range []string{"english_dictionary", "chinese_dictionary", "chinese_idiom_dictionary", "classical_chinese_dictionary"} {
 		providerKey := key
-		out[key] = providerFunc{key: key, fn: func(ctx context.Context, _ string, req ProviderRequest) (ProviderResult, error) {
+		out[key] = providerFunc{key: key, fn: func(ctx context.Context, owner string, req ProviderRequest) (ProviderResult, error) {
+			if !s.dictionaryProviderApplies(ctx, owner, providerKey, req) {
+				return ProviderResult{Source: providerKey}, nil
+			}
 			value, found, err := s.dictionaryLookup(ctx, providerKey, req.Input.Language, req.Input.Text)
 			return ProviderResult{Content: value, Complete: found && len(requiredMissing(req.Capability, value)) == 0, Source: providerKey}, err
 		}}
@@ -58,7 +61,7 @@ func (s *Service) providers() map[string]ContentProvider {
 	return out
 }
 
-var registeredProviderKeys = map[string]bool{"preset": true, "cache": true, "english_dictionary": true, "chinese_dictionary": true, "classical_chinese_dictionary": true, "translation": true, "llm": true}
+var registeredProviderKeys = map[string]bool{"preset": true, "cache": true, "english_dictionary": true, "chinese_dictionary": true, "chinese_idiom_dictionary": true, "classical_chinese_dictionary": true, "translation": true, "llm": true}
 
 type CardRecipe struct{ CapabilityKey, QuestionType string }
 

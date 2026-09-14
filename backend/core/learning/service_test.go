@@ -129,6 +129,45 @@ func TestContextualDictionaryCapabilitiesRequireDisambiguation(t *testing.T) {
 	}
 }
 
+func TestDictionaryProvidersFollowContentAndKnowledgeBaseScenario(t *testing.T) {
+	s := testService(t)
+	ctx := context.Background()
+	entries := []DictionaryEntry{
+		{ID: "modern", ProviderKey: "chinese_dictionary", Language: "zh-Hans", NormalizedHeadword: "行", DisplayHeadword: "行", PayloadJSON: `{"pinyin":"xíng"}`, Priority: 100, SourceName: "modern", SourceVersion: "1", LicenseID: "test"},
+		{ID: "idiom", ProviderKey: "chinese_idiom_dictionary", Language: "zh-Hans", NormalizedHeadword: "画龙点睛", DisplayHeadword: "画龙点睛", PayloadJSON: `{"pinyin":"huà lóng diǎn jīng","meaning_in_context":"比喻在关键处加上精辟内容"}`, Priority: 100, SourceName: "idiom", SourceVersion: "1", LicenseID: "test"},
+		{ID: "classical", ProviderKey: "classical_chinese_dictionary", Language: "zh-Hans", NormalizedHeadword: "行", DisplayHeadword: "行", PayloadJSON: `{"pinyin":"háng"}`, Priority: 100, SourceName: "classical", SourceVersion: "1", LicenseID: "test"},
+	}
+	for i := range entries {
+		if err := s.db.Create(&entries[i]).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	definition, _ := CapabilityByKey("chinese_definition")
+	value, source, err := s.runProviderPipeline(ctx, "u", definition, ResolveContentRequest{Text: "画龙点睛", Language: "zh-Hans", SubjectKind: "idiom"})
+	if err != nil || source != "chinese_idiom_dictionary" || value["meaning_in_context"] == "" {
+		t.Fatalf("idiom lookup did not use its provider: value=%#v source=%q err=%v", value, source, err)
+	}
+
+	seedDataset(t, s, "modern-ds", "u")
+	if err := s.PutKnowledgeBaseCapabilities(ctx, "u", "modern-ds", []CapabilityRef{{Key: "chinese_definition", Enabled: true}, {Key: "pinyin", Enabled: true}}); err != nil {
+		t.Fatal(err)
+	}
+	seedDataset(t, s, "classical-ds", "u")
+	if err := s.PutKnowledgeBaseCapabilities(ctx, "u", "classical-ds", []CapabilityRef{{Key: "classical_definition", Enabled: true}, {Key: "pinyin", Enabled: true}}); err != nil {
+		t.Fatal(err)
+	}
+	pinyin, _ := CapabilityByKey("pinyin")
+	modernValue, modernSource, err := s.runProviderPipeline(ctx, "u", pinyin, ResolveContentRequest{Text: "行", Language: "zh-Hans", SubjectKind: "word", DatasetID: "modern-ds"})
+	if err != nil || modernSource != "chinese_dictionary" || modernValue["pinyin"] != "xíng" {
+		t.Fatalf("modern scenario routed incorrectly: value=%#v source=%q err=%v", modernValue, modernSource, err)
+	}
+	classicalValue, classicalSource, err := s.runProviderPipeline(ctx, "u", pinyin, ResolveContentRequest{Text: "行", Language: "zh-Hans", SubjectKind: "word", DatasetID: "classical-ds"})
+	if err != nil || classicalSource != "classical_chinese_dictionary" || classicalValue["pinyin"] != "háng" {
+		t.Fatalf("classical scenario routed incorrectly: value=%#v source=%q err=%v", classicalValue, classicalSource, err)
+	}
+}
+
 func TestCacheKeysSeparateTranslationTargetsAndContext(t *testing.T) {
 	en := BuildCacheKey("general_translation", "学", "zh-Hans", "en", "", "", 0, 0)
 	ja := BuildCacheKey("general_translation", "学", "zh-Hans", "ja", "", "", 0, 0)
