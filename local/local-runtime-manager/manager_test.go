@@ -1116,6 +1116,36 @@ func TestPinnedPortConflictDiagnosticIncludesPortContext(t *testing.T) {
 	}
 }
 
+func TestPinnedDuplicatePortDiagnosticIncludesConflictContext(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, paths, err := NewRuntimeConfig("", repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	cfg.SQLiteServerPort = cfg.ProcessComposePort
+	t.Setenv(localPortsPinnedEnvVar, "true")
+	portErr := validateRuntimeStartPorts(cfg)
+	var conflict *startupPortConflictError
+	if !errors.As(portErr, &conflict) {
+		t.Fatalf("duplicate port error = %T, want startupPortConflictError", portErr)
+	}
+	if !strings.Contains(portErr.Error(), "process-compose") || !strings.Contains(portErr.Error(), sqliteServerProcessName) {
+		t.Fatalf("duplicate port error = %v, want both services", portErr)
+	}
+	failureContext, ok := runtimePortConflictFailureContext(portErr, paths, 1)
+	if !ok || failureContext.Service != sqliteServerProcessName || failureContext.Phase != runtimeDiagnosticPhasePreflight {
+		t.Fatalf("duplicate port failure context = %+v, ok=%t", failureContext, ok)
+	}
+	diagnostic := classifyRuntimeFailure(portErr, failureContext)
+	if diagnostic.Code != runtimeDiagnosticCodePortConflict || diagnostic.LogPath != paths.SQLiteServerLog || diagnostic.Details == nil {
+		t.Fatalf("duplicate port diagnostic = %+v", diagnostic)
+	}
+	if diagnostic.Details.Address != "127.0.0.1" || diagnostic.Details.Port != cfg.ProcessComposePort || diagnostic.Details.Attempt != 1 || diagnostic.Details.MaxAttempts != 1 {
+		t.Fatalf("duplicate port diagnostic details = %+v", diagnostic.Details)
+	}
+}
+
 func TestFinalPortConflictDiagnosticIncludesRetryContext(t *testing.T) {
 	t.Setenv(localPortsPinnedEnvVar, "false")
 	portErr := &startupPortConflictError{

@@ -1554,7 +1554,10 @@ func validatePinnedLocalPorts(cfg RuntimeConfig) error {
 	seen := map[int]string{}
 	for _, item := range resolvedLocalPorts(cfg) {
 		if previous, ok := seen[item.port]; ok {
-			return fmt.Errorf("local ports are pinned but %s and %s both resolve to port %d", previous, item.name, item.port)
+			return &startupPortConflictError{
+				Service: item.name, Address: item.address, Port: item.port,
+				Cause: fmt.Errorf("local ports are pinned but %s and %s both resolve to port %d", previous, item.name, item.port),
+			}
 		}
 		seen[item.port] = item.name
 		if !localPortAvailableOn(item.address, item.port) {
