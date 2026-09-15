@@ -1650,5 +1650,6 @@
   "2002804": {"en-US": "Auto repair returned empty scenario.md", "zh-CN": "自动修复未返回 scenario.md"},
   "2002805": {"en-US": "Failed to save generated script audit", "zh-CN": "保存生成脚本审计失败"},
   "2002806": {"en-US": "Failed to save repaired script audit", "zh-CN": "保存修复脚本审计失败"},
-  "2002807": {"en-US": "Failed to sync Workflow capabilities", "zh-CN": "同步 Workflow 能力声明失败"}
+  "2002807": {"en-US": "Failed to sync Workflow capabilities", "zh-CN": "同步 Workflow 能力声明失败"},
+  "2002808": {"en-US": "Failed to finalize Workflow draft", "zh-CN": "最终化 Workflow 草稿失败"}
 }

@@ -770,6 +770,7 @@ func init() {
 	registerAdditionalError("save generated script audit", http.StatusInternalServerError, 2002805)
 	registerAdditionalError("save repaired script audit", http.StatusInternalServerError, 2002806)
 	registerAdditionalError("sync workflow capabilities failed", http.StatusInternalServerError, 2002807)
+	registerAdditionalError("finalize draft failed", http.StatusInternalServerError, 2002808)
 }
 
 func registerAdditionalError(message string, status, code int) {
