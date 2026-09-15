@@ -63,6 +63,7 @@ import type {
   WriterNumberingState,
   WriterNumberingUpdate,
 } from '@/modules/chat/utils/request';
+import { parseSourceCitationIds } from '@/modules/chat/utils/sourceAdapter';
 import { resolveMarkdownImageUrlAsync } from '@/modules/knowledge/utils/imageUrl';
 import { WriterHeadingNumberingMenu } from './WriterHeadingNumberingMenu';
 import {
@@ -209,9 +210,7 @@ function sourceReferenceLink(target: EventTarget | null): HTMLAnchorElement | nu
 }
 
 function sourceReferenceId(link: HTMLAnchorElement): string {
-  const href = link.getAttribute('href') ?? '';
-  const match = /^#(?:user-content-)?source-(.+)$/.exec(href);
-  return match ? decodeURIComponent(match[1]) : '';
+  return parseSourceCitationIds(link.getAttribute('href'))[0] ?? '';
 }
 
 interface MarkdownSelectionRestorePoint {
@@ -722,20 +721,9 @@ export function MarkdownArtifactEditor({
           const label = presentation?.label || fallbackLabel;
           link.dataset.writerSourceCitation = 'true';
           link.dataset.writerSourceLabel = label;
-          link.dataset.writerSourceInitial = label.slice(0, 1).toUpperCase();
           link.setAttribute('contenteditable', 'false');
           link.setAttribute('role', 'button');
           link.tabIndex = 0;
-          if (presentation?.faviconUrl) {
-            link.dataset.writerSourceHasIcon = 'true';
-            link.style.setProperty(
-              '--writer-source-icon',
-              `url("${presentation.faviconUrl}")`,
-            );
-          } else {
-            delete link.dataset.writerSourceHasIcon;
-            link.style.removeProperty('--writer-source-icon');
-          }
           link.removeAttribute('title');
           link.setAttribute(
             'aria-label',

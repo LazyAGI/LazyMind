@@ -766,6 +766,49 @@ def test_spill_stays_internal_and_uses_stable_content_path(tmp_path, monkeypatch
     assert len(list((tmp_path / 'tool_spills').glob('*.txt'))) == 1
 
 
+def test_browser_spill_exposes_metadata_and_writes_searchable_json(tmp_path) -> None:
+    from lazymind.chat.engine.agent_runtime.compactors import compact_or_spill_tool_result
+    from lazymind.config import config
+
+    payload = {
+        'result': {
+            'session_id': 'bs_test',
+            'revision': 7,
+            'scroll': {'moved': False, 'at_boundary': True},
+            'url': 'https://example.feishu.cn/wiki/test',
+            'title': 'Daily report',
+            'elements': [
+                {'name': '9/9', 'ref': 'e_1', 'role': 'StaticText'},
+                {'name': 'Example User', 'ref': 'e_2', 'role': 'StaticText'},
+            ],
+            'page_state': {'site': 'feishu', 'editor_mode': 'editable'},
+        },
+    }
+    content = '\n'.join([
+        'Tool call result:',
+        'Received text message:',
+        json.dumps(payload, ensure_ascii=False, separators=(',', ':')),
+        '[Internal runtime notice] Internal ReAct rounds left: 196.',
+    ])
+
+    with config.temp('context_compression_spill_bytes', 128):
+        notice, compactor, _before, _after, path, _size = compact_or_spill_tool_result(
+            'browser_open', content, workspace=str(tmp_path),
+        )
+
+    assert compactor == 'spill'
+    assert '- session_id: bs_test' in notice
+    assert '- revision: 7' in notice
+    assert '- element_count: 2' in notice
+    assert '"moved": false' in notice
+    spilled = (tmp_path / path).read_text(encoding='utf-8')
+    assert '"session_id": "bs_test"' in spilled
+    element_line = next(line for line in spilled.splitlines() if 'Example User' in line)
+    assert '"name":"Example User"' in element_line
+    assert '"ref":"e_2"' in element_line
+    assert json.JSONDecoder().raw_decode(spilled[spilled.index('{'):])[0] == payload
+
+
 def test_current_round_projection_is_what_llm_input_would_see(tmp_path) -> None:
     from lazymind.config import config
 
