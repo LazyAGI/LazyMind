@@ -83,6 +83,10 @@ def _template_cases():
                     result = {'ok': True, 'value': [{'title': 'sample result', 'url': 'https://example.test'}]}
                 elif template_key == 'calculator':
                     result = {'ok': True, 'value': '42'}
+                elif template_key == 'set_session_env':
+                    result = {'ok': True, 'value': {'status': 'ok', 'name': 'DEMO'}}
+                elif template_key == 'MailToolkit_send_draft':
+                    result = {'ok': True, 'value': {'status': 'sent', 'sent_at': '2026-09-15T10:00:00Z'}}
                 else:
                     result = {
                         'ok': True,
@@ -882,7 +886,7 @@ def test_permission_failure_uses_canonical_failure_rendering():
     ('move', 'src', '/workspace/a.txt', '移动'),
     ('remove', 'path', '/workspace/a.txt', '删除'),
     ('stat', 'path', '/workspace/a.txt', '信息'),
-    ('shell_tool', 'cmd', 'pwd', '命令'),
+    ('shell', 'cmd', 'pwd', '命令'),
 ])
 def test_generic_file_and_shell_rendering(name, argument, value, verb):
     call, _ = _tool_call_frame_text({'id': 'render-test', 'function': {

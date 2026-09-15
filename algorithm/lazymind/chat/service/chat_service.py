@@ -1740,7 +1740,7 @@ async def _handle_chat_impl(
         workspace_policy = (
             f'Use `{workspace}` as the default working directory for generated and intermediate files. '
             'Trusted local mode is active: when the user requests it, you may read and write absolute local '
-            'paths outside this workspace and use `shell_tool` to run local commands. Keep relative paths '
+            'paths outside this workspace and use `shell` to run local commands. Keep relative paths '
             'inside the default workspace. Use `read_file`, `grep`, `write_file`, and `list_dir` for file operations, '
             'then publish completed downloadable files with `save_chat_artifact`.'
         )
