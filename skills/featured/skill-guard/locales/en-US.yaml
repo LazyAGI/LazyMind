@@ -1,0 +1,47 @@
+locale: en-US
+classification:
+  category: Productivity
+  tags:
+  - Evidence
+  - Review
+  - Structured output
+presentation:
+  card:
+    title: Skill intake review
+    description: Inspect source, code and data access before adopting a Skill
+    output_type: report
+    output_label: Intake assessment
+    cover_asset: cover
+    result_summary: Inspect source, code and data access before adopting a Skill
+  detail:
+    title: Skill intake review
+    description: 'Review a third-party Skill in isolation, verify its publisher and contents, and distinguish
+      observed behavior from incomplete checks. Source: ClawHub JamesOuttake; adapted for LazyMind.'
+    attachment_hint: Use the complete example or replace it with your own materials
+tasks:
+- id: assess-skill
+  selector:
+    title: Review one Skill
+    description: Inspect source, code and data access before adopting a Skill
+    output_label: Intake assessment
+  launch:
+    prompt_short: Inspect source, code and data access before adopting a Skill
+    prompt: 'Assess this Skill for adoption: https://clawhub.ai/paudyyin/skills/summarize . Inspect its actual
+      files, data access and whether the implementation matches its description. Save an evidence-based assessment.
+      Use local checks only; do not call the remote Snyk service.'
+  replay:
+    steps:
+    - title: Define the scope
+      description: Identify the source and acceptance criteria
+    - title: Inspect the evidence
+      description: Read the actual material and record evidence
+    - title: Build the result
+      description: Produce a traceable result within the declared scope
+    - title: Explain the limits
+      description: Separate observed results from pending verification
+  result:
+    template: html_preview_v1
+    eyebrow: Recorded test case
+    title: Skill intake review
+    summary: Inspect source, code and data access before adopting a Skill
+    html_asset: demo

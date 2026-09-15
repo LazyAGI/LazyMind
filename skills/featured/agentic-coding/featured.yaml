@@ -1,0 +1,71 @@
+schema_version: 2
+id: agentic-coding
+type: work
+version: 1.0.1
+status: published
+default_locale: zh-CN
+provider: ClawHub / Ivan G. Davila
+skill:
+  source_url: featured/agentic-coding/skill
+  required_version: 1.0.1
+placement:
+  home: true
+  gallery: true
+  order: 101
+classification:
+  category: 开发工具
+  tags:
+  - 代码修复
+  - 验收测试
+  - 研发交接
+assets:
+  cover:
+    file: assets/cover.png
+    role: cover
+  demo:
+    file: assets/demo.html
+    role: result
+presentation:
+  card:
+    title: 代码修复与交接
+    description: 从缺陷复现到最小修复，交付代码、验证方案和风险说明
+    output_type: report
+    output_label: 修复与交接包
+    cover_asset: cover
+    result_summary: 保留真实的修复代码、边界测试设计与交接材料，展示 PACT 工作方法
+  detail:
+    title: 代码修复与交接
+    description: 围绕明确的验收条件完成代码修复，控制改动范围，核对边界行为，并交付可审阅的补丁、验证记录和兼容性说明。来源：ClawHub Ivan G. Davila，经 LazyMind 适配。
+    attachment_hint: 可替换默认示例，也可提供自己的资料
+tasks:
+- id: fix-and-handoff
+  selector:
+    title: 修复一个缺陷
+    description: 从缺陷复现到最小修复，交付代码、验证方案和风险说明
+    output_label: 修复与交接包
+  launch:
+    prompt_short: 从缺陷复现到最小修复，交付代码、验证方案和风险说明
+    prompt: |-
+      请修复下面的 Python 金额计算函数，并给出修改、验证方法和交接说明。
+      业务规则：原价先按四舍五入保留两位小数，再乘以 (1-discount)，结果再次四舍五入保留两位小数。例如 final_price(10.005, 0.1) 应为 9.01，目前得到 9.00。这里 discount=0.1 表示优惠 10%。
+
+      def final_price(price, discount):
+          return round(price * (1 - discount), 2)
+
+      在会话工作区交付修复文件和边界测试；说明返回类型及兼容性变化，并区分实际执行的测试与待执行检查。
+  replay:
+    steps:
+    - title: 明确验收
+      description: 约定两阶段四舍五入和改动边界
+    - title: 定位根因
+      description: 区分二进制浮点、舍入方式和执行顺序
+    - title: 形成修复
+      description: 交付 Decimal 实现与测试用例
+    - title: 交付证据
+      description: 说明验证状态、返回类型变化和上线前检查
+  result:
+    template: html_preview_v1
+    eyebrow: 真实测试案例
+    title: 金额舍入缺陷修复
+    summary: 保留真实的修复代码、边界测试设计与交接材料，展示 PACT 工作方法
+    html_asset: demo

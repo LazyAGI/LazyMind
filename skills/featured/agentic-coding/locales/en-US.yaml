@@ -1,0 +1,48 @@
+locale: en-US
+classification:
+  category: Productivity
+  tags:
+  - Evidence
+  - Review
+  - Structured output
+presentation:
+  card:
+    title: Code repair and handoff
+    description: Deliver a focused fix, verification plan and compatibility notes
+    output_type: report
+    output_label: Repair and handoff packet
+    cover_asset: cover
+    result_summary: Deliver a focused fix, verification plan and compatibility notes
+  detail:
+    title: Code repair and handoff
+    description: 'Fix code against explicit acceptance criteria and deliver a focused patch, verification evidence
+      and compatibility notes. Source: ClawHub Ivan G. Davila; adapted for LazyMind.'
+    attachment_hint: Use the complete example or replace it with your own materials
+tasks:
+- id: fix-and-handoff
+  selector:
+    title: Fix a defect
+    description: Deliver a focused fix, verification plan and compatibility notes
+    output_label: Repair and handoff packet
+  launch:
+    prompt_short: Deliver a focused fix, verification plan and compatibility notes
+    prompt: 'Fix this Python function: def final_price(price, discount): return round(price * (1 - discount),
+      2). The rule is to round the original price to cents using ROUND_HALF_UP, apply the discount, then round
+      again. final_price(10.005, 0.1) should be 9.01, not 9.00. Deliver code, boundary tests and handoff notes
+      in this conversation workspace. Explain type changes and distinguish executed tests from pending checks.'
+  replay:
+    steps:
+    - title: Define the scope
+      description: Identify the source and acceptance criteria
+    - title: Inspect the evidence
+      description: Read the actual material and record evidence
+    - title: Build the result
+      description: Produce a traceable result within the declared scope
+    - title: Explain the limits
+      description: Separate observed results from pending verification
+  result:
+    template: html_preview_v1
+    eyebrow: Recorded test case
+    title: Code repair and handoff
+    summary: Deliver a focused fix, verification plan and compatibility notes
+    html_asset: demo

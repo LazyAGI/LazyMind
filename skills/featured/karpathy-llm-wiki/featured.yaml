@@ -1,0 +1,68 @@
+schema_version: 2
+id: karpathy-llm-wiki
+type: work
+version: 1.0.1
+status: published
+default_locale: zh-CN
+provider: ClawHub / John-ver
+skill:
+  source_url: featured/karpathy-llm-wiki/skill
+  required_version: 1.0.1
+placement:
+  home: true
+  gallery: true
+  order: 102
+classification:
+  category: 知识管理
+  tags:
+  - 知识整理
+  - 来源追溯
+  - 关联笔记
+assets:
+  cover:
+    file: assets/cover.png
+    role: cover
+  demo:
+    file: assets/demo.html
+    role: result
+presentation:
+  card:
+    title: 关联知识库整理
+    description: 把分散资料整理为有来源、有链接、可持续维护的知识库
+    output_type: report
+    output_label: 关联知识库
+    cover_asset: cover
+    result_summary: 从两份笔记形成来源、主题、索引和日志，保留共同结论与证据缺口
+  detail:
+    title: 关联知识库整理
+    description: 将笔记与资料整理为关联的 Markdown 知识库，维护首页索引、主题页和更新日志，显式记录来源冲突与待验证问题。来源：ClawHub John-ver，经 LazyMind 适配。
+    attachment_hint: 可替换默认示例，也可提供自己的资料
+tasks:
+- id: build-wiki
+  selector:
+    title: 从资料建立知识库
+    description: 把分散资料整理为有来源、有链接、可持续维护的知识库
+    output_label: 关联知识库
+  launch:
+    prompt_short: 把分散资料整理为有来源、有链接、可持续维护的知识库
+    prompt: |-
+      请把下面两份笔记整理成一个可持续维护的「政策问答知识库」，保存到本会话工作区。形成首页索引、关联主题页、来源记录和更新日志，并解释共同结论、看似矛盾的地方与待验证问题。
+
+      笔记A：2025年团队实验显示，RAG 在高频更新的政策问答中能减少过时回答，但召回不足会遗漏关键例外。
+      笔记B：2026年复盘认为，仅扩大向量库没有稳定提升准确率；加入时间过滤、来源分级和答案证据检查后，准确率从71%升至86%。
+  replay:
+    steps:
+    - title: 保存来源
+      description: 保留两份输入笔记及来源边界
+    - title: 建立主题关联
+      description: 连接召回、时效、扩容与治理问题
+    - title: 显式处理分歧
+      description: 区分真实冲突、表面矛盾和指标缺口
+    - title: 维护索引日志
+      description: 交付可浏览、可继续补充的知识页面
+  result:
+    template: html_preview_v1
+    eyebrow: 真实测试案例
+    title: 政策问答 RAG 知识库
+    summary: 从两份笔记形成来源、主题、索引和日志，保留共同结论与证据缺口
+    html_asset: demo

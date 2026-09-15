@@ -1,0 +1,50 @@
+locale: en-US
+classification:
+  category: Productivity
+  tags:
+  - Evidence
+  - Review
+  - Structured output
+presentation:
+  card:
+    title: Linked knowledge wiki
+    description: Turn scattered notes into a source-linked, maintainable wiki
+    output_type: report
+    output_label: Linked knowledge wiki
+    cover_asset: cover
+    result_summary: Turn scattered notes into a source-linked, maintainable wiki
+  detail:
+    title: Linked knowledge wiki
+    description: 'Organize notes into linked Markdown pages, maintain an index and append-only log, and surface
+      contradictions and evidence gaps. Source: ClawHub John-ver; adapted for LazyMind.'
+    attachment_hint: Use the complete example or replace it with your own materials
+tasks:
+- id: build-wiki
+  selector:
+    title: Build a wiki from notes
+    description: Turn scattered notes into a source-linked, maintainable wiki
+    output_label: Linked knowledge wiki
+  launch:
+    prompt_short: Turn scattered notes into a source-linked, maintainable wiki
+    prompt: 'Build a maintainable policy-Q&A wiki from these notes in the conversation workspace, with an index,
+      linked topics, source records and an update log. Explain shared conclusions, apparent conflicts and open
+      questions. Note A: A 2025 team experiment found RAG reduces outdated answers in frequently changing policies,
+      but poor retrieval misses key exceptions. Note B: A 2026 retrospective found that increasing vector-store
+      size did not consistently improve accuracy; adding time filtering, source ranking and evidence checks
+      raised accuracy from 71% to 86%.'
+  replay:
+    steps:
+    - title: Define the scope
+      description: Identify the source and acceptance criteria
+    - title: Inspect the evidence
+      description: Read the actual material and record evidence
+    - title: Build the result
+      description: Produce a traceable result within the declared scope
+    - title: Explain the limits
+      description: Separate observed results from pending verification
+  result:
+    template: html_preview_v1
+    eyebrow: Recorded test case
+    title: Linked knowledge wiki
+    summary: Turn scattered notes into a source-linked, maintainable wiki
+    html_asset: demo

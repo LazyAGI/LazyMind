@@ -1,0 +1,41 @@
+locale: en-US
+classification:
+  category: Information analysis
+  tags: [Procurement opportunities, Bid intelligence, Project screening]
+presentation:
+  card:
+    output_type: report
+    cover_asset: cover
+    title: Procurement Opportunity Intelligence
+    description: Screen procurement notices for relevant projects, requirements and next actions
+    output_label: Opportunity report
+    result_summary: Group 13 notices into 10 projects, identify 4 directly relevant leads and review 2 in depth
+  detail:
+    title: Procurement Opportunity Intelligence
+    description: Search by industry, region and date, consolidate duplicate notices and review project requirements, budgets and participation conditions. Source：Biaobao, adapted for LazyMind.
+    attachment_hint: Requires BBIAO_API_KEY and Python 3; replace the industry, regions or date range
+tasks:
+- id: find-opportunities
+  selector:
+    title: Find procurement opportunities
+    description: Identify relevant projects and the conditions to verify before following up
+    output_label: Opportunity report
+  launch:
+    prompt_short: Find machine vision procurement opportunities in the Yangtze River Delta
+    prompt: I supply machine vision equipment. Search machine vision tender notices published from August 16 to September 15, 2026 in Shanghai, Jiangsu, Zhejiang and Anhui. Identify relevant procurement projects, check requirements and participation conditions for the most promising ones, and save an opportunity list with recommended next steps.
+  replay:
+    steps:
+    - title: Search each region
+      description: Apply the same keyword and date range across four regions, retrieving 13 notices
+    - title: Consolidate and screen
+      description: Group notices into 10 projects, with 4 directly relevant, 3 moderately relevant and 3 low-relevance projects
+    - title: Review key projects
+      description: Read API detail text and retrieve source URLs for Lishui Vocational and Technical College and Nanjing University of Posts and Telecommunications
+    - title: Prioritize follow-up
+      description: Summarize budgets, specifications, dates and outstanding questions
+  result:
+    template: html_preview_v1
+    html_asset: demo
+    eyebrow: Real search snapshot · September 15, 2026
+    title: Yangtze River Delta · Machine vision procurement brief
+    summary: Turn keyword matches into relevant leads, participation checks and next actions

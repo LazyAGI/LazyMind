@@ -1,0 +1,61 @@
+schema_version: 2
+id: tender-document-smart-parser
+type: work
+version: 1.1.0
+status: published
+default_locale: zh-CN
+provider: 标宝
+skill:
+  source_url: featured/tender-document-smart-parser/skill
+  required_version: 1.1.0
+placement:
+  home: true
+  gallery: true
+  order: 103
+classification:
+  category: 信息分析
+  tags: [招标解析, 技术核对, 应标准备]
+assets:
+  cover:
+    file: assets/cover.png
+    role: cover
+  demo:
+    file: assets/demo.html
+    role: result
+presentation:
+  card:
+    title: 招标文件智能解析
+    description: 提炼预算、技术门槛与履约条件，让应标准备有据可查
+    output_type: report
+    output_label: 应标核对报告
+    cover_asset: cover
+    result_summary: 从服务器采购公告提取技术要求、交付付款条件与应标前待确认事项
+  detail:
+    title: 招标文件智能解析
+    description: 检索招标项目，解析公告正文与可获取附件，提炼预算、技术要求、履约条件和风险，形成可追溯的应标核对清单。来源：标宝，经 LazyMind 适配。
+    attachment_hint: 需配置 BBIAO_API_KEY 与 Python 3；可替换项目名称或提供项目ID及发布时间
+tasks:
+- id: parse-tender
+  selector:
+    title: 解析一份招标公告
+    description: 从真实采购公告生成项目速览、技术核对表与应标准备清单
+    output_label: 应标核对报告
+  launch:
+    prompt_short: 解析服务器采购公告，提炼应标要求
+    prompt: 请为准备应标的服务器供应商解析“南方科技大学2026年采购人工智能服务器项目”（项目ID：351153121，发布时间：2026-09-15 10:31:05）。核对项目详情、附件和原始公告，整理预算与时间节点、技术要求核对表、交付付款及质保条件，以及应标前需要确认的问题，并保存报告。
+  replay:
+    steps:
+    - title: 项目信息核对
+      description: 确认采购项目、预算与公告时间
+    - title: 技术要求提炼
+      description: 把处理器、内存、GPU和运维要求转成核对清单
+    - title: 履约条件分析
+      description: 整理交货、付款、质保与服务时限
+    - title: 应标准备清单
+      description: 区分已披露条件与需补充确认的事项
+  result:
+    template: html_preview_v1
+    eyebrow: 真实采购公告解析
+    title: 人工智能服务器采购 · 应标核对报告
+    summary: 一页看清99.95万元采购项目的技术门槛、履约条件和应标风险
+    html_asset: demo

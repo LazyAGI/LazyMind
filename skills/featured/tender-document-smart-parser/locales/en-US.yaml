@@ -1,0 +1,41 @@
+locale: en-US
+classification:
+  category: Information analysis
+  tags: [Procurement, Requirements, Bid preparation]
+presentation:
+  card:
+    output_type: report
+    cover_asset: cover
+    title: Tender Document Analysis
+    description: Extract budget, technical requirements and delivery terms into a bid-readiness checklist
+    output_label: Bid-readiness report
+    result_summary: Review a real AI server procurement notice and its outstanding requirements
+  detail:
+    title: Tender Document Analysis
+    description: Search procurement projects and analyze available notice text and attachments to produce traceable requirement and risk checklists. Source：Biaobao, adapted for LazyMind.
+    attachment_hint: Requires BBIAO_API_KEY and Python 3; replace the project name or provide its ID and publication time
+tasks:
+- id: parse-tender
+  selector:
+    title: Analyze a procurement notice
+    description: Extract project facts, technical requirements and bid preparation actions
+    output_label: Bid-readiness report
+  launch:
+    prompt_short: Analyze an AI server procurement notice
+    prompt: Analyze the Southern University of Science and Technology 2026 AI server procurement project (ID 351153121, publication time 2026-09-15 10:31:05) for a prospective supplier. Check its details, attachments and original notice. Save a report covering budget and dates, technical requirements, delivery and payment terms, warranty and outstanding questions.
+  replay:
+    steps:
+    - title: Verify project facts
+      description: Identify the project, budget and notice dates
+    - title: Extract technical requirements
+      description: Build a checklist of CPU, memory, GPU and support specifications
+    - title: Review delivery terms
+      description: Summarize delivery, payment, warranty and response times
+    - title: Prepare next actions
+      description: Separate disclosed requirements from questions needing clarification
+  result:
+    template: html_preview_v1
+    html_asset: demo
+    eyebrow: Real procurement notice analysis
+    title: AI server procurement · Bid-readiness review
+    summary: Technical requirements and commercial terms for a CNY 999,500 procurement project

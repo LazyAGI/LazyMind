@@ -1,0 +1,65 @@
+schema_version: 2
+id: skill-guard
+type: work
+version: 1.1.1
+status: published
+default_locale: zh-CN
+provider: ClawHub / JamesOuttake
+skill:
+  source_url: featured/skill-guard/skill
+  required_version: 1.1.1
+placement:
+  home: true
+  gallery: true
+  order: 100
+classification:
+  category: 开发工具
+  tags:
+  - 安全审查
+  - 依赖检查
+  - 接入评估
+assets:
+  cover:
+    file: assets/cover.png
+    role: cover
+  demo:
+    file: assets/demo.html
+    role: result
+presentation:
+  card:
+    title: Skill 安装前审查
+    description: 检查来源、能力兑现度与数据访问边界，形成清晰的接入判断
+    output_type: report
+    output_label: 接入评估报告
+    cover_asset: cover
+    result_summary: 一页看清 Skill 是否值得接入、能做什么、会访问什么以及还需补齐什么
+  detail:
+    title: Skill 安装前审查
+    description: 在隔离目录中审查第三方 Skill，核对发布者与包内容，识别可疑行为和功能落差，交付检查证据与接入建议。来源：ClawHub JamesOuttake，经 LazyMind 适配。
+    attachment_hint: 可替换默认示例，也可提供自己的资料
+tasks:
+- id: assess-skill
+  selector:
+    title: 评估一个 Skill
+    description: 检查来源、能力兑现度与数据访问边界，形成清晰的接入判断
+    output_label: 接入评估报告
+  launch:
+    prompt_short: 检查来源、能力兑现度与数据访问边界，形成清晰的接入判断
+    prompt: 请评估这个 Skill 是否适合接入：https://clawhub.ai/paudyyin/skills/summarize 。在隔离目录中检查它的真实文件、数据访问行为和实现是否符合说明，给出有证据的接入建议，并保存评估报告。本轮采用本地检查，不调用远程
+      Snyk 服务。
+  replay:
+    steps:
+    - title: 来源可信度
+      description: 确认发布者、版本与包体身份
+    - title: 能力兑现度
+      description: 核对实际能力是否符合产品说明
+    - title: 数据访问边界
+      description: 明确网络、文件和敏感信息访问范围
+    - title: 接入结论
+      description: 给出可接入条件、限制与后续动作
+  result:
+    template: html_preview_v1
+    eyebrow: 真实测试案例
+    title: Summarize 安装前评估
+    summary: 一页看清 Skill 是否值得接入、能做什么、会访问什么以及还需补齐什么
+    html_asset: demo
