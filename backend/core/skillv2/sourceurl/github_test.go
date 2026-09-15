@@ -66,6 +66,13 @@ func TestResolveGitHubPageURL(t *testing.T) {
 			wantPrefix:   "skills/target",
 		},
 		{
+			name:         "full commit SHA subdirectory avoids API lookup",
+			rawURL:       "https://github.com/example/skills/tree/0123456789abcdef0123456789abcdef01234567/skills/target",
+			wantMatched:  true,
+			wantDownload: "https://github.com/example/skills/archive/0123456789abcdef0123456789abcdef01234567.zip",
+			wantPrefix:   "skills/target",
+		},
+		{
 			name:         "archive URL",
 			rawURL:       "https://github.com/example/skills/archive/refs/heads/main.zip",
 			wantMatched:  true,
