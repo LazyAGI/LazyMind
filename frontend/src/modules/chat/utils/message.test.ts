@@ -10,9 +10,23 @@ import {
   mergeChatMessageLists,
   mergeConversationTrailIntoMessageList,
   normalizeMessageInputs,
+  normalizeImportedUserText,
+  shouldRenderAskPending,
   stripAskUserReceipt,
   stripCitationFromText,
 } from "./message";
+
+describe("normalizeImportedUserText", () => {
+  it("shows only the request body from an existing Codex transport envelope", () => {
+    expect(normalizeImportedUserText(`# Files mentioned by the user:
+
+## image.png: /tmp/image.png
+
+## My request for Codex:
+修复界面
+<image name="Image #1" path="/tmp/image.png"></image>`)).toBe("修复界面");
+  });
+});
 
 describe("isAskPendingReadOnly", () => {
   it("keeps the latest unanswered Ask interactive after history reload", () => {
@@ -26,6 +40,18 @@ describe("isAskPendingReadOnly", () => {
 
   it("keeps an unanswered Ask interactive when only assistant placeholders follow it", () => {
     expect(isAskPendingReadOnly(false, false, false)).toBe(false);
+  });
+});
+
+describe("shouldRenderAskPending", () => {
+  it("renders only the current unanswered Ask card", () => {
+    expect(shouldRenderAskPending(false, true)).toBe(true);
+    expect(shouldRenderAskPending(true, true)).toBe(false);
+    expect(shouldRenderAskPending(false, false, true)).toBe(false);
+  });
+
+  it("keeps a resumable Ask when only an assistant placeholder follows it", () => {
+    expect(shouldRenderAskPending(false, false, false)).toBe(true);
   });
 });
 
@@ -125,6 +151,22 @@ describe("citation helpers", () => {
 });
 
 describe("buildChatMessageListFromHistory", () => {
+  it("uses a persisted image URI when imported history has no base64 payload", () => {
+    const list = buildChatMessageListFromHistory([
+      {
+        id: "history-1",
+        query: "hello",
+        input: [
+          { input_type: "text", text: "hello" },
+          { input_type: "image", uri: "/static-files/imported/image.png", file_id: "image.png" },
+        ],
+      },
+    ], { reverseHistory: false });
+
+    expect(list[0].images).toEqual([
+      { base64: "/static-files/imported/image.png", uid: "image.png" },
+    ]);
+  });
   it("returns an empty list for null/undefined history", () => {
     expect(buildChatMessageListFromHistory(null)).toEqual([]);
     expect(buildChatMessageListFromHistory(undefined)).toEqual([]);
@@ -255,6 +297,59 @@ describe("buildChatMessageListFromHistory", () => {
     expect(assistantMessage.ask_pending).toEqual({ question: "which one?" });
     expect(assistantMessage.ask_saved_answers).toEqual({ a: "1" });
     expect(assistantMessage.ask_answered).toBe(true);
+  });
+
+  it("restores archived failure attempts before the latest answer", () => {
+    const failedTerminal = {
+      status: "failed",
+      reason: "model_failure",
+      code: "rate_limited",
+      partial_output: true,
+      diagnostic_id: "diagnostic-1",
+    };
+    const list = buildChatMessageListFromHistory([
+      {
+        id: "h1",
+        query: "q1",
+        result: "latest answer",
+        failed_attempts: [
+          {
+            result: "partial answer",
+            run_id: "run-failed-1",
+            run_status: "failed",
+            run_terminal: failedTerminal,
+            model_route: {
+              mode: "auto",
+              provider_name: "Fast",
+              model_name: "fast-free",
+              reason: "simple_task",
+            },
+            create_time: "2026-09-01T00:00:00Z",
+          },
+        ],
+      },
+    ]);
+
+    expect(list).toHaveLength(3);
+    expect(list[1]).toMatchObject({
+      role: RoleTypes.ASSISTANT,
+      history_id: "h1:failed:run-failed-1",
+      original_history_id: "h1",
+      delta: "partial answer",
+      run_terminal: failedTerminal,
+      model_route: {
+        mode: "auto",
+        provider_name: "Fast",
+        model_name: "fast-free",
+        reason: "simple_task",
+      },
+      archived_failure: true,
+    });
+    expect(list[2]).toMatchObject({
+      role: RoleTypes.ASSISTANT,
+      history_id: "h1",
+      delta: "latest answer",
+    });
   });
 
   it("separates image and file inputs into their respective arrays", () => {

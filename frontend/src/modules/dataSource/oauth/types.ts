@@ -15,6 +15,7 @@ export interface FeishuDataSourceConnection {
   connectionId: string;
   status: FeishuConnectionStatus;
   accountName: string;
+	connectionMethod?: "legacy_byo" | "managed_oauth" | "cli_personal_app" | string;
   grantedScopes: string[];
   connectedAt?: string;
   expiresAt?: string;

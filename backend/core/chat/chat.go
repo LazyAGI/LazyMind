@@ -97,6 +97,8 @@ type ChatRetrievalOptions struct {
 }
 
 type ChatRuntimeOptions struct {
+	ToolPolicy                    string         `json:"tool_policy,omitempty"`
+	SourceReference               string         `json:"source_reference,omitempty"`
 	Debug                         bool           `json:"debug,omitempty"`
 	Reasoning                     bool           `json:"reasoning"`
 	ThinkingDepth                 string         `json:"thinking_depth,omitempty"`
@@ -111,6 +113,8 @@ type ChatRuntimeOptions struct {
 	ContextPromptExport           bool           `json:"context_prompt_export,omitempty"`
 	ContextPreviewAllowLLMRouting bool           `json:"context_preview_allow_llm_routing,omitempty"`
 	SkipSensitiveFilter           bool           `json:"skip_sensitive_filter,omitempty"`
+	MailDraftConfirmID            string         `json:"mail_draft_confirm_id,omitempty"`
+	MailDraftConfirmRevision      int            `json:"mail_draft_confirm_revision,omitempty"`
 }
 
 type ChatPersonalizationOptions struct {
@@ -190,8 +194,11 @@ type AskQuestion struct {
 // The frontend renders a clarification UI; the user's answers are sent as plain text
 // in the next chat turn's query — no special ask_response parameter is needed.
 type AskPendingEvent struct {
-	AskID     string        `json:"ask_id"`
-	Questions []AskQuestion `json:"questions"`
+	AskID       string         `json:"ask_id"`
+	Questions   []AskQuestion  `json:"questions"`
+	Title       string         `json:"title,omitempty"`
+	Description string         `json:"description,omitempty"`
+	MailDraft   map[string]any `json:"mail_draft,omitempty"`
 }
 
 type ToolLimitPendingEvent struct {
@@ -443,6 +450,12 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 	if environmentContext, ok := body["environment_context"].(map[string]any); ok {
 		req.Runtime.EnvironmentContext = environmentContext
 	}
+	if toolPolicy, ok := body["tool_policy"].(string); ok {
+		req.Runtime.ToolPolicy = toolPolicy
+	}
+	if sourceReference, ok := body["source_reference"].(string); ok {
+		req.Runtime.SourceReference = sourceReference
+	}
 	if userID, ok := body["user_id"].(string); ok {
 		req.Conversation.UserID = strings.TrimSpace(userID)
 	}
@@ -478,6 +491,12 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 	}
 	if skip, ok := body["skip_sensitive_filter"].(bool); ok {
 		req.Runtime.SkipSensitiveFilter = skip
+	}
+	if draftID, ok := body["mail_draft_confirm_id"].(string); ok {
+		req.Runtime.MailDraftConfirmID = strings.TrimSpace(draftID)
+	}
+	if revision := mailDraftConfirmRevision(body["mail_draft_confirm_revision"]); revision > 0 {
+		req.Runtime.MailDraftConfirmRevision = revision
 	}
 	if llmConfig, ok := body["llm_config"].(map[string]any); ok {
 		req.Runtime.LLMConfig = llmConfig

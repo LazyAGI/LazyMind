@@ -26,14 +26,12 @@ def test_enhance_prompt_protects_unrequested_image_content():
     enhance = _load_state()['steps']['enhance_image']
     prompt = enhance['prompt']
 
-    assert 'Treat the original user request as authoritative' in prompt
-    assert 'Never regenerate or reinterpret the entire image for a local edit' in prompt
-    assert 'If any detail is ambiguous, preserve the original rather than guessing' in prompt
-    assert 'Pass exactly one resolved source image URL' in prompt
-    assert 'Call image_editor (NOT image_generator) exactly once' in prompt
+    assert 'change the smallest possible target' in prompt
+    assert 'leave ambiguity unchanged' in prompt
+    assert 'generated_base_image' in prompt
+    assert 'call image_editor once per selected base' in prompt
     for protected_property in (
-        'identity/facial details', 'background', 'composition', 'lighting',
-        'existing text/logos', 'resolution',
+        'identity', 'background', 'layout', 'lighting', 'text/logo', 'resolution',
     ):
         assert protected_property in prompt
     for clause in ('Requested edit:', 'Edit scope:', 'Preserve:', 'Do not:'):
@@ -43,8 +41,8 @@ def test_enhance_prompt_protects_unrequested_image_content():
 def test_enhance_acceptance_criteria_requires_edit_scope_and_preservation():
     criteria = _load_state()['steps']['enhance_image']['acceptance_criteria']
 
-    assert 'smallest sufficient edit scope' in criteria
-    assert 'protect all unrequested' in criteria
+    assert 'four-clause narrow edit contract' in criteria
+    assert 'Every output must derive from generated_base_image' in criteria
 
 
 def test_image_workflow_fails_closed_on_missing_route_or_edit_source():
@@ -58,4 +56,5 @@ def test_image_workflow_fails_closed_on_missing_route_or_edit_source():
     assert 'never turn a failure report into a successful output' in collect
     assert 'Never infer a meme route from stale examples or prior tasks' in optimize
     assert 'If raw_source_image is absent' in optimize
-    assert 'Never save a BLOCKED/failure message into enhanced_image_output' in enhance
+    assert 'If no base is available, fail immediately' in enhance
+    assert 'Zero final outputs' in enhance

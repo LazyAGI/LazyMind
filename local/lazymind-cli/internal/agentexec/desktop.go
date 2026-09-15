@@ -42,6 +42,22 @@ func InspectDesktopApplication(spec DesktopApplication) (DesktopApplicationState
 	return state, nil
 }
 
+func FindDesktopApplication(spec DesktopApplication) (string, error) {
+	if spec.BindingTarget != "" {
+		path, found, err := ExecutableBinding(spec.BindingTarget)
+		if err != nil {
+			return "", err
+		}
+		if found {
+			return ResolveDesktopApplication(path)
+		}
+	}
+	if path := platformDesktopApplication(spec); path != "" {
+		return path, nil
+	}
+	return "", fmt.Errorf("desktop application is not installed")
+}
+
 func ResolveDesktopApplication(value string) (string, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {

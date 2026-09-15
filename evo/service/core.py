@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import re
+import shutil
 import time
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
@@ -34,6 +37,7 @@ _FIRST_FRAME_TIMEOUT = 60.0
 _THREAD_ID_ATTEMPTS = 32
 _AUTO_WAIT_TIMEOUT = 30.0
 _AUTO_STOPPED = frozenset({'idle', 'cancelled', 'failed', 'completed'})
+_TRACE_ID = re.compile(r'^[0-9a-f]{32}$')
 
 
 logger = logging.getLogger(__name__)
@@ -294,16 +298,23 @@ class EvoService:
                 if auto:
                     self._ensure_auto_task(thread_id)
                 raise
+            trace_ids = await _thread_trace_ids(self.flow, thread_id)
             lock = self._message_locks.setdefault(thread_id, asyncio.Lock())
             async with lock:
                 await self.router.delete_thread(thread_id)
+                cleanup = await asyncio.to_thread(
+                    _delete_thread_files,
+                    self.root,
+                    thread_id,
+                    trace_ids,
+                )
                 await self.messages.delete_thread(thread_id)
                 await self.flow.delete_run(thread_id)
-                await asyncio.to_thread(_delete_trace_files, self.root, thread_id)
             return {
                 'thread_id': thread_id,
                 'deleted': True,
                 'message': 'thread deleted',
+                'cleanup': cleanup,
             }
 
         return await self._control(thread_id, action)
@@ -497,10 +508,82 @@ def _next_stage(stage: str) -> str:
     return _STAGES[index + 1] if index + 1 < len(_STAGES) else ''
 
 
-def _delete_trace_files(root: Path, thread_id: str) -> None:
+async def _thread_trace_ids(flow: ArtifactFlow, thread_id: str) -> tuple[str, ...]:
+    snapshot = await flow.snapshot(thread_id)
+    refs = tuple(
+        ref
+        for key, ref in snapshot.runtime.completed_artifacts.items()
+        if any(token in key.artifact_id for token in ('answer', 'judge', 'trace', 'analysis', 'repair'))
+    )
+    values = await asyncio.gather(
+        *(flow.read(thread_id, ref) for ref in refs),
+        return_exceptions=True,
+    )
+    trace_ids: set[str] = set()
+    for value in values:
+        if isinstance(value, BaseException):
+            continue
+        _collect_trace_ids(value, trace_ids)
+    return tuple(sorted(trace_ids))
+
+
+def _collect_trace_ids(value: object, target: set[str]) -> None:
+    if isinstance(value, Mapping):
+        for key, child in value.items():
+            if str(key) == 'trace_id' and _TRACE_ID.fullmatch(str(child or '')):
+                target.add(str(child))
+            _collect_trace_ids(child, target)
+    elif isinstance(value, (list, tuple)):
+        for child in value:
+            _collect_trace_ids(child, target)
+
+
+def _delete_thread_files(root: Path, thread_id: str, trace_ids: tuple[str, ...]) -> dict[str, Any]:
+    workspace = root / 'work' / 'repair' / thread_id
+    workspace_deleted = workspace.exists()
+    if workspace_deleted:
+        shutil.rmtree(workspace, ignore_errors=False)
+
     folder = root / 'repair-traces'
     for suffix in ('.jsonl', '.lock', '.fallback.log'):
         (folder / f'{thread_id}{suffix}').unlink(missing_ok=True)
+
+    deleted_traces = 0
+    trace_root = Path(os.getenv('LAZYLLM_TRACE_LOCAL_STORAGE_DIR') or '')
+    if trace_root.is_dir():
+        candidates = {
+            path
+            for trace_id in trace_ids
+            for path in trace_root.rglob(f'*_{trace_id}.jsonl')
+        }
+        for path in trace_root.rglob('*.jsonl'):
+            if path in candidates:
+                continue
+            try:
+                if not _file_contains(path, thread_id.encode()):
+                    continue
+            except OSError:
+                continue
+            candidates.add(path)
+        for path in candidates:
+            path.unlink(missing_ok=True)
+            deleted_traces += 1
+
+    return {
+        'repair_workspace_deleted': workspace_deleted,
+        'local_trace_files_deleted': deleted_traces,
+    }
+
+
+def _file_contains(path: Path, needle: bytes) -> bool:
+    with path.open('rb') as handle:
+        tail = b''
+        while chunk := handle.read(1024 * 1024):
+            data = tail + chunk
+            if needle in data:
+                return True
+            tail = data[-max(0, len(needle) - 1):]
+    return False
 
 
 __all__ = ['EvoService']

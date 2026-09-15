@@ -12,8 +12,16 @@ export type CloudSessionState =
   | "reauth_required"
   | "offline";
 
+export type CloudReachability =
+  | "unknown"
+  | "checking"
+  | "reachable"
+  | "unreachable";
+
 export interface CloudSession {
   state: CloudSessionState;
+	configured?: boolean;
+	reachability?: CloudReachability;
   access_expires_at?: string;
   account_id?: string;
   username?: string;
@@ -33,15 +41,32 @@ export interface CloudLoginStart {
 export async function getCloudSession(): Promise<CloudSession> {
   const response = await axiosInstance.get<CoreResponse<CloudSession>>(
     `${BASE_URL}/api/core/cloud/session`,
+	{ silentError: true } as never,
   );
-  return response.data.data ?? { state: "signed_out" };
+	return response.data.data ?? {
+	  configured: false,
+	  reachability: "unknown",
+	  state: "signed_out",
+	};
+}
+
+export function isCloudBusinessAvailable(session?: CloudSession | null): boolean {
+	return Boolean(
+	  session?.configured === true &&
+	  session.reachability === "reachable" &&
+	  session.state === "signed_in",
+	);
 }
 
 export async function logoutCloudSession(): Promise<CloudSession> {
   const response = await axiosInstance.post<CoreResponse<CloudSession>>(
     `${BASE_URL}/api/core/cloud/logout`,
   );
-  return response.data.data ?? { state: "signed_out" };
+	return response.data.data ?? {
+	  configured: false,
+	  reachability: "unknown",
+	  state: "signed_out",
+	};
 }
 
 export async function beginCloudLogin(): Promise<CloudLoginStart> {

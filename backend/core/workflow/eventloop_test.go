@@ -154,8 +154,8 @@ func seedEventLoopRevision(t *testing.T, db *orm.DB, revisionID string) (string,
 		GraphHash:     revisionID + "-graph",
 		StartRoute:    "analyze_subject",
 		Nodes: map[string]graphengine.CompiledNode{
-			"analyze_subject": {ID: "analyze_subject"},
-			"generate_image":  {ID: "generate_image"},
+			"analyze_subject": {ID: "analyze_subject", Label: "Analyze Subject"},
+			"generate_image":  {ID: "generate_image", Label: "Generate Image"},
 		},
 		ControlEdges: []graphengine.CompiledEdge{
 			{From: "__start__", To: "analyze_subject"},
@@ -247,9 +247,13 @@ func TestOnSubAgentDone_SucceededManualMode(t *testing.T) {
 
 	var gotEvent string
 	var gotPayload map[string]any
+	var feedbackPayload map[string]any
 	onSSE := func(eventType string, payload map[string]any) {
 		gotEvent = eventType
 		gotPayload = payload
+		if eventType == "workflow_step_feedback" {
+			feedbackPayload = payload
+		}
 	}
 
 	OnSubAgentDone(ctx, db.DB, nil, "task-1", subagent.StatusSucceeded, "analysis done", onSSE, pctx)
@@ -263,20 +267,27 @@ func TestOnSubAgentDone_SucceededManualMode(t *testing.T) {
 	if gotPayload["reason"] != "dynamic_pause" {
 		t.Fatalf("expected reason=dynamic_pause, got %v", gotPayload["reason"])
 	}
+	if feedbackPayload["task_id"] != "task-1" ||
+		!strings.Contains(fmt.Sprint(feedbackPayload["message"]), "Analyze Subject") ||
+		!strings.Contains(fmt.Sprint(feedbackPayload["message"]), "analysis done") {
+		t.Fatalf("missing concise step feedback event: %v", feedbackPayload)
+	}
 	interrupted, _ := gotPayload["interrupted"].(bool)
 	if interrupted {
 		t.Fatal("succeeded step must not set interrupted=true in step_waiting")
 	}
 }
 
-func TestOnSubAgentDone_HandoffWaitsAndMergesParallelTerminalStatuses(t *testing.T) {
+func TestOnSubAgentDone_FeedbackIsPersistedForEachParallelStep(t *testing.T) {
 	db := newTestDB(t)
 	ctx := context.Background()
+	graphHash, graphSchemaVersion := seedEventLoopRevision(t, db, "revision-feedback")
 	if err := db.DB.AutoMigrate(&orm.ChatHistory{}); err != nil {
 		t.Fatalf("migrate history: %v", err)
 	}
 	if _, err := CreateSession(ctx, db.DB, CreateSessionInput{
 		SessionID: "ps-history", ConversationID: "conv-history", WorkflowID: "image-workflow",
+		WorkflowRevisionID: "revision-feedback", GraphHash: graphHash, GraphSchemaVersion: graphSchemaVersion,
 	}); err != nil {
 		t.Fatalf("session: %v", err)
 	}
@@ -315,8 +326,14 @@ func TestOnSubAgentDone_HandoffWaitsAndMergesParallelTerminalStatuses(t *testing
 	)
 	var before orm.ChatHistory
 	_ = db.DB.First(&before, "id = ?", "history-1").Error
-	if before.Result != "<think>准备执行工作流</think>" {
-		t.Fatalf("summary was written before parallel batch finished: %s", before.Result)
+	for _, want := range []string{
+		"<think>准备执行工作流</think>",
+		"步骤「Analyze Subject」已完成",
+		"Analyzed the requested manga style and saved the subject analysis",
+	} {
+		if !strings.Contains(before.Result, want) {
+			t.Fatalf("first step feedback missing %q: %s", want, before.Result)
+		}
 	}
 
 	pctx.StepID = "generate_image"
@@ -331,8 +348,10 @@ func TestOnSubAgentDone_HandoffWaitsAndMergesParallelTerminalStatuses(t *testing
 	}
 	for _, want := range []string{
 		"<think>准备执行工作流</think>",
-		"已完成 analyze_subject",
-		"用户中断了 generate_image",
+		"步骤「Analyze Subject」已完成",
+		"步骤「Generate Image」已停止：user stopped",
+		"workflow-step-feedback:task-history",
+		"workflow-step-feedback:task-image",
 	} {
 		if !strings.Contains(history.Result, want) {
 			t.Fatalf("history result missing %q: %s", want, history.Result)
@@ -340,13 +359,14 @@ func TestOnSubAgentDone_HandoffWaitsAndMergesParallelTerminalStatuses(t *testing
 	}
 }
 
-func TestHandoffStepName_PrefersLabelThenID(t *testing.T) {
-	labels := map[string]string{"analyze_subject": "主体分析"}
-	if got := handoffStepName("analyze_subject", labels); got != "主体分析（analyze_subject）" {
-		t.Fatalf("labeled step: %q", got)
+func TestCompactWorkflowStepFeedbackSummary_IsShortAndDropsExecutionTrace(t *testing.T) {
+	long := strings.Repeat("结果", 80) + "\n执行路径：\n[tool:save] internal"
+	got := compactWorkflowStepFeedbackSummary(long)
+	if !strings.HasSuffix(got, "…") {
+		t.Fatalf("long feedback was not truncated: %q", got)
 	}
-	if got := handoffStepName("generate_image", labels); got != "generate_image" {
-		t.Fatalf("fallback step: %q", got)
+	if strings.Contains(got, "执行路径") || len([]rune(got)) > workflowStepFeedbackSummaryLimit+1 {
+		t.Fatalf("feedback was not compacted: %q", got)
 	}
 }
 
@@ -380,7 +400,7 @@ func TestEnforceWorkflowConversationSettings_EnablesApprovalMode(t *testing.T) {
 	}
 }
 
-func TestAppendHandoffHistorySummary_SkipsInlineExecution(t *testing.T) {
+func TestAppendWorkflowStepFeedback_SkipsInlineHistoryWrite(t *testing.T) {
 	db := newTestDB(t)
 	ctx := context.Background()
 	if err := db.DB.AutoMigrate(&orm.ChatHistory{}); err != nil {
@@ -393,12 +413,15 @@ func TestAppendHandoffHistorySummary_SkipsInlineExecution(t *testing.T) {
 		t.Fatalf("history: %v", err)
 	}
 	handOff := false
-	err := appendHandoffHistorySummary(ctx, db.DB, &WorkflowChatContext{
+	feedback, err := appendWorkflowStepFeedback(ctx, db.DB, &WorkflowChatContext{
 		ConvID: "conv-inline-history", StepID: "step-a", HandOff: &handOff,
 		TriggerHistoryID: "history-inline",
-	}, false)
+	}, "task-inline", subagent.StatusSucceeded, "saved the result")
 	if err != nil {
 		t.Fatalf("append: %v", err)
+	}
+	if feedback != "步骤「step-a」已完成：saved the result。" {
+		t.Fatalf("unexpected live feedback: %q", feedback)
 	}
 	var history orm.ChatHistory
 	_ = db.DB.First(&history, "id = ?", "history-inline").Error
@@ -509,8 +532,8 @@ func TestOnSubAgentDone_Failed_SetsSessionFailed(t *testing.T) {
 
 	OnSubAgentDone(ctx, db.DB, nil, "task-3", subagent.StatusFailed, "step error", onSSE, pctx)
 
-	if len(gotEvents) != 1 || gotEvents[0] != "workflow_error" {
-		t.Fatalf("expected only workflow_error, got %v", gotEvents)
+	if len(gotEvents) != 2 || gotEvents[0] != "workflow_step_feedback" || gotEvents[1] != "workflow_error" {
+		t.Fatalf("expected feedback before workflow_error, got %v", gotEvents)
 	}
 	if statusAtEvent != SessionStatusFailed {
 		t.Fatalf("workflow_error published before failed state was durable: %s", statusAtEvent)

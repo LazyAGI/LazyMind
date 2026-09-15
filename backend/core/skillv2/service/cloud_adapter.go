@@ -75,7 +75,7 @@ func (a CloudAdapter) Probe(ctx context.Context, ownerUserID, localResourceID st
 		return cloudresource.LocalSnapshot{}, err
 	}
 	if skill.HeadRevisionID == nil || strings.TrimSpace(*skill.HeadRevisionID) == "" {
-		return cloudresource.LocalSnapshot{}, nil
+		return cloudresource.LocalSnapshot{Exists: true, ResourceID: skill.ID}, nil
 	}
 	prepared, err := a.Service.PrepareCloudSkillPackage(ctx, CloudSkillExportRequest{
 		OwnerUserID: ownerUserID, SkillID: skill.ID, DesktopVersion: a.desktopVersion(),

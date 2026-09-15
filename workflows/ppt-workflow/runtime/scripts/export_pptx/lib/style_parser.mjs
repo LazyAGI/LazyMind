@@ -441,10 +441,12 @@ export function parseBoxShadow(cssValue) {
  * 提取 CSS font-family 列表中第一个非通用字体。
  * 若所有字体均为通用族，则映射为对应的 fallback 字体名。
  * @param {string} cssValue
+ * @param {{genericFallback?: boolean}} options
  * @returns {string|null}
  */
-export function parseFontFamily(cssValue) {
+export function parseFontFamily(cssValue, options = {}) {
   if (!cssValue) return null;
+  const genericFallback = options.genericFallback !== false;
 
   const GENERIC_MAP = {
     'sans-serif': 'Arial',
@@ -476,24 +478,18 @@ export function parseFontFamily(cssValue) {
   // 按逗号分割，去掉引号，trim
   const families = cssValue.split(',').map(f => f.trim().replace(/^['"]|['"]$/g, ''));
 
-  // "装饰性字体" 判定：当 family 列表里出现 cursive/fantasy 通用名时，
-  // 它前面所有 specific 字体都被视为装饰字体（如 "ZCOOL KuaiLe", cursive
-  // 表明 ZCOOL KuaiLe 是 cursive 类）。这些字体在目标客户端通常缺失或
-  // 渲染异常 → 跳过它们，让 GENERIC_MAP 接管映射到 Comic Sans MS / Impact 等。
-  const decorativeIdx = families.findIndex(f => {
-    const l = f.toLowerCase();
-    return l === 'cursive' || l === 'fantasy';
-  });
-  const isDecorative = (idx) => decorativeIdx >= 0 && idx < decorativeIdx;
-
-  // 先找第一个非通用、非 webfont、非装饰字体
+  // Preserve an explicitly named display font. A trailing cursive/fantasy
+  // describes its CSS category; it does not make the named face an icon font.
+  // Replacing names such as ZCOOL KuaiLe here made every editable export look
+  // like a standard Office deck even when the target machine had the font.
   for (let i = 0; i < families.length; i++) {
     const f = families[i];
     if (!f || GENERIC_NAMES.has(f.toLowerCase())) continue;
     if (isWebfontIcon(f)) continue;
-    if (isDecorative(i)) continue;
     return f;
   }
+
+  if (!genericFallback) return null;
 
   // 全部跳过 → 用第一个通用名映射
   for (const f of families) {

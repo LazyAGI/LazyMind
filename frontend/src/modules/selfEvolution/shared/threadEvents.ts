@@ -24,17 +24,40 @@ export function resolveCompletedStageFromDonePayload(
     return undefined;
   }
 
-  const retryFromStep = toThreadEventStage(
-    getStringField(payload, ["retry_from_step", "retryFromStep"]),
-  );
-  if (retryFromStep) {
-    return retryFromStep;
-  }
-
   const currentStep = toThreadEventStage(
     getStringField(payload, ["current_step", "currentStep", "step"]),
   );
   const flowStatus = getStringField(payload, ["status", "state"])?.trim().toLowerCase();
+  const reason = getStringField(payload, ["reason"])?.trim().toLowerCase();
+  const checkpointState = getStringField(
+    payload,
+    ["checkpoint_state", "checkpointState"],
+  )?.trim().toLowerCase();
+  const lastReleasedStep = toThreadEventStage(
+    getStringField(payload, ["last_released_step", "lastReleasedStep"]),
+  );
+  const retryFromStep = toThreadEventStage(
+    getStringField(payload, ["retry_from_step", "retryFromStep"]),
+  );
+
+  // A step-scoped stream can end after the flow has already advanced. In that
+  // case current_step/retry_from_step identify the next stage, while
+  // last_released_step identifies the stage whose stream just completed.
+  if (
+    lastReleasedStep &&
+    (reason === "step_completed" || flowStatus === "running")
+  ) {
+    return lastReleasedStep;
+  }
+
+  if (checkpointState === "pending" && retryFromStep) {
+    return retryFromStep;
+  }
+
+  if (retryFromStep) {
+    return retryFromStep;
+  }
+
   if (currentStep && flowStatus === "paused") {
     const currentIndex = THREAD_EVENT_STAGE_ORDER.indexOf(currentStep);
     if (currentIndex > 0) {
@@ -42,9 +65,7 @@ export function resolveCompletedStageFromDonePayload(
     }
   }
 
-  return toThreadEventStage(
-    getStringField(payload, ["last_released_step", "lastReleasedStep"]),
-  ) || currentStep;
+  return lastReleasedStep || currentStep;
 }
 
 export function isCheckpointGateFlowStatus(status?: string) {
@@ -111,7 +132,7 @@ export function resolveTerminalStepStatusFromFlowStatus(
 ): StepStatus {
   const normalized = flowStatus?.trim().toLowerCase();
   if (normalized === "paused") {
-    return "done";
+    return "paused";
   }
   if (normalized === "failed" || normalized === "error") {
     return "failed";

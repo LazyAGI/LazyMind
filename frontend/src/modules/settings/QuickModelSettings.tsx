@@ -10,6 +10,7 @@ import {
   modelProvidersApi,
   unwrapModelProviderData,
 } from "@/modules/modelProvider/api";
+import { runtimeFeatures } from "@/runtime/features";
 
 type QuickModelCapability = "llm" | "embed_main";
 
@@ -124,7 +125,13 @@ export default function QuickModelSettings({ canConfigureEmbedding, onSaved }: Q
   };
 
   const requestChange = (capability: QuickModelCapability, value: string) => {
-    if (capability === "embed_main" && selected.embed_main && selected.embed_main !== value && shared.embed_main) {
+    if (
+      !runtimeFeatures.hideUserGroupSurfaces &&
+      capability === "embed_main" &&
+      selected.embed_main &&
+      selected.embed_main !== value &&
+      shared.embed_main
+    ) {
       Modal.confirm({
         title: t("settingsPage.models.switchSharedTitle"),
         content: t("settingsPage.models.switchSharedContent"),

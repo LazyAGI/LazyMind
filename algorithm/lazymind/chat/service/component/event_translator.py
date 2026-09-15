@@ -4,7 +4,7 @@ import re
 from typing import Any, Optional
 
 from lazymind.config import config as _cfg
-from lazymind.chat.runtime_events import RunAccumulator
+from lazymind.chat.runtime_events import RunAccumulator, RunOutcome
 from lazymind.chat.service.utils import (
     build_stream_citation_scanner,
     materialize_source_views,
@@ -166,6 +166,7 @@ class AgentEventFrameTranslator:
         if event_type == 'tool_results':
             tool_results = [tr for tr in (event.get('tool_results', []) or []) if isinstance(tr, dict)]
             if tool_results:
+                self.run.semantic_output = True
                 parts = [
                     _tool_result_frame_text(
                         tr,
@@ -179,12 +180,13 @@ class AgentEventFrameTranslator:
         if event_type == 'subagent_think':
             think = str(event.get('think') or '')
             if think:
+                self.run.semantic_output = True
                 frames.append(_stream_frame(think=think))
 
         return frames
 
-    def finish_run(self, *, succeeded: bool) -> dict[str, Any]:
-        return _stream_frame(extra={'runtime_event': self.run.finish(succeeded=succeeded)})
+    def finish_run(self, *, outcome: RunOutcome) -> dict[str, Any]:
+        return _stream_frame(extra={'runtime_event': self.run.finish(outcome=outcome)})
 
     def flush(self) -> list[dict[str, Any]]:
         frames: list[dict[str, Any]] = []

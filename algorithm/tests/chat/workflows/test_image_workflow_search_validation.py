@@ -170,22 +170,73 @@ class ImageWorkflowSearchValidationTests(unittest.TestCase):
         self.assertIn('An explicit request to find/search an image is always COLLECT', analyze['prompt'])
         self.assertIn('must use WORKFLOW: FIND_AND_EDIT', analyze['acceptance_criteria'])
 
-    def test_route_selector_sends_integrated_text_edits_to_enhance(self):
+    def test_route_selectors_force_base_generation_before_optional_enhance(self):
         self.assertEqual(
             self.tools.select_image_route('WORKFLOW: FIND_AND_EDIT\nSKIP_STEPS: generate_image'),
             {
                 'status': 'ok',
                 'workflow': 'FIND_AND_EDIT',
-                'next_step': 'enhance_image',
-                'control': {'next_step': 'enhance_image'},
+                'next_step': 'generate_image',
+                'control': {'next_step': 'generate_image'},
             },
         )
         self.assertEqual(
             self.tools.select_image_route('WORKFLOW: CREATE_STATIC_MEME')['next_step'],
             'generate_image',
         )
+        self.assertEqual(
+            self.tools.select_image_postprocess_route('WORKFLOW: FIND_AND_EDIT')['next_step'],
+            'enhance_image',
+        )
+        self.assertEqual(
+            self.tools.select_image_postprocess_route('WORKFLOW: CREATE_NEW')['next_step'],
+            '__end__',
+        )
         with self.assertRaisesRegex(ValueError, 'exactly one WORKFLOW'):
             self.tools.select_image_route('NEXT_STEPS: enhance_image')
+
+    def test_capability_preflight_checks_only_declared_task_dependencies(self):
+        routing = (
+            'WORKFLOW: CREATE_STATIC_MEME\n'
+            'REQUIRES: none\n'
+            'NEXT_STEPS: generate_image,enhance_image\n'
+            'SKIP_STEPS: collect_materials'
+        )
+        with mock.patch.object(
+            self.tools, '_media_capability_available',
+            side_effect=AssertionError('no dependency should be checked'),
+        ):
+            result = self.tools.check_image_workflow_capabilities(routing)
+
+        self.assertEqual(result['status'], 'ready')
+        self.assertEqual(result['required'], [])
+        self.assertEqual(result['checks'], [])
+
+    def test_capability_preflight_returns_settings_cards_for_missing_dependencies(self):
+        routing = (
+            'WORKFLOW: CREATE_ANIMATED\n'
+            'REQUIRES: image_generator,video_generator,ffmpeg\n'
+            'NEXT_STEPS: optimize_prompt,generate_image,enhance_image\n'
+            'SKIP_STEPS: collect_materials'
+        )
+        availability = {
+            'image_generator': True,
+            'video_generator': False,
+            'ffmpeg': False,
+        }
+        with mock.patch.object(
+            self.tools, '_media_capability_available',
+            side_effect=lambda capability: availability[capability],
+        ), self.assertRaisesRegex(
+            Exception, 'MEDIA_CAPABILITY_DEPENDENCY_MISSING',
+        ) as captured:
+            self.tools.check_image_workflow_capabilities(routing)
+
+        message = str(captured.exception)
+        self.assertIn('/settings?section=models', message)
+        self.assertIn('/settings?section=system_tools#ffmpeg-dependency', message)
+        self.assertIn('视频生成模型', message)
+        self.assertIn('FFmpeg', message)
 
 
 if __name__ == '__main__':

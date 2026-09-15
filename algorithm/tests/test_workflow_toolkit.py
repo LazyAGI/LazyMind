@@ -93,11 +93,14 @@ def test_prepare_workflow_persists_request_context_for_session_defaults():
     client.prepare_workflow.return_value.result = {'status': 'missing_inputs'}
     toolkit = HostWorkflowToolkit(lambda: client, origin_ref='conversation-1')
 
-    toolkit.prepare_workflow('writer', request_context='run this workflow')
+    toolkit.prepare_workflow(
+        'writer', request_context='run this workflow', workflow_mode='auto',
+    )
 
     assert client.prepare_workflow.call_args.kwargs['fields'] == {
         'origin_ref': 'conversation-1',
         'request_context': 'run this workflow',
+        'workflow_mode': 'auto',
     }
 
 
@@ -106,7 +109,10 @@ def test_advance_step_returns_failure_for_chat_agent_retry_decision():
     client.advance.return_value.result = {
         'accepted': True,
         'attempt_statuses': {'task-1': 'failed'},
-        'attempt_results': [{'task_id': 'task-1', 'step_id': 'prompt', 'attempt': 1}],
+        'attempt_results': [{
+            'task_id': 'task-1', 'step_id': 'prompt', 'attempt': 1,
+            'failure_reason': 'image_generator: provider returned no image files',
+        }],
         'step_id': 'prompt', 'attempt': 1, 'max_attempts': 3, 'retry_remaining': 2,
         'projection': {'retryable': ['prompt']},
     }
@@ -117,7 +123,36 @@ def test_advance_step_returns_failure_for_chat_agent_retry_decision():
     assert result['outcome'] == 'step_failed'
     assert result['retryable_steps'] == ['prompt']
     assert result['retry_remaining'] == 2
+    assert result['failure_reasons'] == {
+        'task-1': 'image_generator: provider returned no image files',
+    }
+    assert 'Report every non-empty failure_reasons' in result['next_action']['instruction']
     assert result['next_action']['decision_owner'] == 'ChatAgent'
+
+
+def test_advance_step_does_not_retry_missing_media_configuration():
+    client = MagicMock()
+    toolkit = HostWorkflowToolkit(lambda: client)
+    reason = (
+        'MEDIA_CAPABILITY_DEPENDENCY_MISSING '
+        '{"status":"blocked","missing":[{"id":"video_generator"}]}'
+    )
+    client.advance.return_value.result = {
+        'accepted': True,
+        'attempt_statuses': {'task-capability': 'failed'},
+        'attempt_results': [{
+            'task_id': 'task-capability', 'step_id': 'analyze_subject', 'attempt': 1,
+            'failure_reason': reason,
+        }],
+        'projection': {'retryable': ['analyze_subject']},
+    }
+
+    result = toolkit.advance_step('session-1', 1, [{'step_id': 'analyze_subject'}])
+
+    assert result['failure_kind'] == 'media_capability_dependency_missing'
+    assert result['retryable_steps'] == []
+    assert result['failure_reasons']['task-capability'] == reason
+    assert 'Never retry a media_capability_dependency_missing' in result['next_action']['instruction']
 
 
 def test_advance_step_success_directs_same_turn_continuation():
@@ -135,6 +170,9 @@ def test_advance_step_success_directs_same_turn_continuation():
     assert result['ready_steps'] == ['script']
     assert result['next_action']['tool'] == 'advance_step'
     assert 'same ChatAgent turn' in result['next_action']['instruction']
+    assert 'exactly one ID' in result['next_action']['instruction']
+    assert 'in parallel' in result['next_action']['instruction']
+    assert 'terminal result' in result['next_action']['instruction']
 
 
 def test_advance_step_completion_stops_continuation():
@@ -170,6 +208,9 @@ def test_chat_prepare_starts_session_and_returns_authoritative_ready_frontier():
     assert result['session_id'] == 'server-session'
     assert result['ready_steps'] == ['prompt']
     assert result['next_action']['tool'] == 'advance_step'
+    assert 'exactly one returned Ready step ID' in result['next_action']['instruction']
+    assert 'in parallel' in result['next_action']['instruction']
+    assert 'terminal result' in result['next_action']['instruction']
     client.start_workflow.assert_called_once_with(
         'preparation-1', '', command_id='',
     )

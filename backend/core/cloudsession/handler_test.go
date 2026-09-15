@@ -11,9 +11,10 @@ import (
 	"lazymind/core/cloudclient"
 )
 
-type handlerAccountClient struct{}
+type handlerAccountClient struct{ calls int }
 
-func (handlerAccountClient) GetCurrentAccount(context.Context, string) (cloudclient.Account, error) {
+func (client *handlerAccountClient) GetCurrentAccount(context.Context, string) (cloudclient.Account, error) {
+	client.calls++
 	return cloudclient.Account{ID: "account-1", Username: "fixture", EmailMasked: "f***@example.com"}, nil
 }
 
@@ -56,15 +57,44 @@ func TestBeginLoginReportsUnavailableWithoutHandoffContract(t *testing.T) {
 	}
 }
 
-func TestSessionHandlerReturnsMinimalAccountWithoutTokens(t *testing.T) {
+func TestSessionHandlerUsesOnlyTheLocalSnapshot(t *testing.T) {
 	service := NewService(ServiceDeps{Store: &fakeSecureStore{token: "refresh"}, Auth: &fakeAuthClient{}})
 	if err := service.Restore(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+	accounts := &handlerAccountClient{}
 	recorder := httptest.NewRecorder()
-	Handler{Service: service, Accounts: handlerAccountClient{}}.Get(recorder, httptest.NewRequest(http.MethodGet, "/cloud/session", nil))
-	if !strings.Contains(recorder.Body.String(), `"username":"fixture"`) || strings.Contains(recorder.Body.String(), "new-access") {
-		t.Fatalf("unsafe account response: %s", recorder.Body.String())
+	Handler{Service: service, Accounts: accounts}.Get(recorder, httptest.NewRequest(http.MethodGet, "/cloud/session", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if accounts.calls != 0 {
+		t.Fatalf("session status performed %d Cloud account requests", accounts.calls)
+	}
+	if strings.Contains(recorder.Body.String(), "new-access") {
+		t.Fatalf("session response exposed access-token material: %s", recorder.Body.String())
+	}
+}
+
+func TestSessionHandlerReportsConfigurationAndReachability(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	Handler{}.Get(recorder, httptest.NewRequest(http.MethodGet, "/cloud/session", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var response struct {
+		Data map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	configured, configuredPresent := response.Data["configured"].(bool)
+	reachability, reachabilityPresent := response.Data["reachability"].(string)
+	if !configuredPresent || configured {
+		t.Fatalf("configured=%v present=%v data=%#v", configured, configuredPresent, response.Data)
+	}
+	if !reachabilityPresent || reachability != "unknown" {
+		t.Fatalf("reachability=%q present=%v data=%#v", reachability, reachabilityPresent, response.Data)
 	}
 }
 

@@ -7,7 +7,7 @@ import (
 	"lazymind/core/common/orm"
 )
 
-// TestDeleteThreadLocalRows removes thread, rounds, records, and active rows in a transaction.
+// TestDeleteThreadLocalRows removes thread, steps, rounds, records, and active rows in a transaction.
 func TestDeleteThreadLocalRows(t *testing.T) {
 	db := newAgentTestDB(t)
 	now := time.Now().UTC()
@@ -20,6 +20,10 @@ func TestDeleteThreadLocalRows(t *testing.T) {
 	db.DB.Create(&orm.AgentThreadRound{ThreadID: "thread-delete", RoundID: "r1", CreatedAt: now, UpdatedAt: now})
 	db.DB.Create(&orm.AgentThreadRound{ThreadID: "thread-delete", RoundID: "r2", CreatedAt: now, UpdatedAt: now})
 	db.DB.Create(&orm.AgentThreadRecord{ThreadID: "thread-delete", ID: "rec1", CreatedAt: now, UpdatedAt: now})
+	db.DB.Create(&orm.AgentThreadStep{
+		ThreadID: "thread-delete", StepID: "step1", Stage: "dataset",
+		CreatedAt: now, UpdatedAt: now,
+	})
 	db.DB.Create(&orm.AgentUserActiveThread{
 		UserID: "u1", ThreadID: "thread-delete", Status: userActiveThreadStatusActive,
 		LeaseUntil: now, CreatedAt: now, UpdatedAt: now,
@@ -37,6 +41,9 @@ func TestDeleteThreadLocalRows(t *testing.T) {
 	}
 	if d, ok := result["deleted_records"].(int64); !ok || d != 1 {
 		t.Fatalf("deleted_records: got %v, want 1", result["deleted_records"])
+	}
+	if d, ok := result["deleted_steps"].(int64); !ok || d != 1 {
+		t.Fatalf("deleted_steps: got %v, want 1", result["deleted_steps"])
 	}
 	if d, ok := result["deleted_threads"].(int64); !ok || d != 1 {
 		t.Fatalf("deleted_threads: got %v, want 1", result["deleted_threads"])
@@ -59,6 +66,10 @@ func TestDeleteThreadLocalRows(t *testing.T) {
 	if count != 0 {
 		t.Fatalf("records remaining: %d", count)
 	}
+	db.DB.Model(&orm.AgentThreadStep{}).Where("thread_id = ?", "thread-delete").Count(&count)
+	if count != 0 {
+		t.Fatalf("steps remaining: %d", count)
+	}
 	db.DB.Model(&orm.AgentUserActiveThread{}).Where("thread_id = ?", "thread-delete").Count(&count)
 	if count != 0 {
 		t.Fatalf("active threads remaining: %d", count)
@@ -73,7 +84,7 @@ func TestDeleteThreadLocalRows_NoRelatedRows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	for _, key := range []string{"deleted_threads", "deleted_rounds", "deleted_records", "deleted_active_threads"} {
+	for _, key := range []string{"deleted_threads", "deleted_rounds", "deleted_records", "deleted_steps", "deleted_active_threads"} {
 		if d, ok := result[key].(int64); !ok || d != 0 {
 			t.Fatalf("%s: got %v, want 0", key, result[key])
 		}

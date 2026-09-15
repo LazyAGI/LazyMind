@@ -18,6 +18,7 @@ ui:
   tabs:
     - id: deck
       step_id: render
+      slot_scope: selected
       layout: composite
       slots: [{id: deck_pages}, {id: speaker_notes}]
       actions:
@@ -32,11 +33,13 @@ ui:
     const parsed = parseWorkflowYaml(source);
     expect(parsed?.ui?.slots?.deck_pages.widgetType).toBe('html-slide');
     expect(parsed?.ui?.tabs[0].step_id).toBe('render');
+    expect(parsed?.ui?.tabs[0].slot_scope).toBe('selected');
     expect(parsed?.ui?.tabs[0].actions?.[0].inputs.pages).toBe('deck_pages');
 
     const reparsed = parseWorkflowYaml(serializeWorkflowModel(parsed!));
     expect(reparsed?.ui?.slots?.deck_pages.widgetType).toBe('html-slide');
     expect(reparsed?.ui?.tabs[0].step_id).toBe('render');
+    expect(reparsed?.ui?.tabs[0].slot_scope).toBe('selected');
     expect(reparsed?.ui?.tabs[0].actions?.[0]).toMatchObject({
       id: 'export_deck',
       provider: 'html-presentation',
@@ -64,6 +67,9 @@ ui:
         children:
           - {slot: page_html, weight: 2}
           - {slot: bullet_points, weight: 1}
+      composite_behavior:
+        hide_empty_columns: true
+        repeat_single_slots: [page_html]
 `;
 
     const parsed = parseWorkflowYaml(source)!;
@@ -73,5 +79,9 @@ ui:
       { id: 'page_html' },
       { id: 'bullet_points' },
     ]);
+    expect(reparsed.ui?.tabs[0].composite_behavior).toMatchObject({
+      hide_empty_columns: true,
+      repeat_single_slots: ['page_html'],
+    });
   });
 });

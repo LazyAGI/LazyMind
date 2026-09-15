@@ -1,0 +1,6 @@
+interface:
+  display_name: "Image Prompt Craft"
+  short_description: "优化通用图片提示词与演示文稿背景构图约束"
+  default_prompt: "Use $image-prompt-craft to turn my visual brief into a production-ready image prompt."
+policy:
+  allow_implicit_invocation: true

@@ -19,6 +19,9 @@ type WorkflowSession struct {
 	WorkflowRevisionNo int64  `gorm:"column:plugin_revision_no;not null;default:0"`
 	WorkflowTreeHash   string `gorm:"column:plugin_tree_hash;type:varchar(64);not null;default:''"`
 	WorkflowRemoteRoot string `gorm:"column:plugin_remote_root;type:varchar(1024);not null;default:''"`
+	// WorkflowMode is selected once when the session is created and is immutable
+	// for the lifetime of that session.
+	WorkflowMode       string `gorm:"column:workflow_mode;type:varchar(16);not null;default:dynamic"`
 	StateVersion       int64  `gorm:"column:state_version;not null;default:0"`
 	GraphHash          string `gorm:"column:graph_hash;type:varchar(64);not null;default:''"`
 	GraphSchemaVersion string `gorm:"column:graph_schema_version;type:varchar(16);not null;default:''"`
@@ -38,6 +41,20 @@ type WorkflowSession struct {
 }
 
 func (WorkflowSession) TableName() string { return "plugin_sessions" }
+
+// WorkflowApprovalPreference stores a user's persistent approval policy for a
+// workflow step. Missing rows intentionally inherit the step mode declared by
+// the workflow package.
+type WorkflowApprovalPreference struct {
+	UserID           string    `gorm:"column:user_id;type:varchar(255);not null;primaryKey"`
+	WorkflowID       string    `gorm:"column:workflow_id;type:varchar(64);not null;primaryKey"`
+	StepID           string    `gorm:"column:step_id;type:varchar(64);not null;primaryKey"`
+	ApprovalRequired bool      `gorm:"column:approval_required;type:boolean;not null"`
+	CreatedAt        time.Time `gorm:"column:created_at;not null"`
+	UpdatedAt        time.Time `gorm:"column:updated_at;not null"`
+}
+
+func (WorkflowApprovalPreference) TableName() string { return "workflow_approval_preferences" }
 
 // WorkflowSessionStep is the authoritative attempt state inside a Workflow session.
 // Native LazyMind execution may use TaskID to reference a sub_agent_tasks adapter

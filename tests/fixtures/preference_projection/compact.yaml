@@ -1,0 +1,7 @@
+preferences:
+- summary: "涉及时效信息时先联网核实。"
+  ref: "references/fact-verify-latest.md"
+- summary: "PR Review 重点检查过度设计和冗余实现。"
+  ref: "references/review-overdesign.md"
+- summary: "默认使用简洁直接的表达。"
+  ref: "references/response-concise.md"

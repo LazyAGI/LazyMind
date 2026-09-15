@@ -102,8 +102,12 @@ class EpisodeStore:
         self._clock_ms = clock_ms or (lambda: int(time.time() * 1000))
 
     def _request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
+        from lazymind.common.maintenance import identity_headers, check_response
+
+        maintenance_headers = identity_headers()
         headers = dict(kwargs.pop('headers', {}) or {})
         headers['X-LazyMind-Internal-Token'] = self._internal_token
+        headers.update(maintenance_headers)
         response = self._transport(
             method,
             f'{self._base_url}{path}',
@@ -111,6 +115,7 @@ class EpisodeStore:
             timeout=self._timeout,
             **kwargs,
         )
+        check_response(response)
         status_code = int(getattr(response, 'status_code', 0) or 0)
         try:
             payload = response.json()
@@ -121,11 +126,7 @@ class EpisodeStore:
                     f'Episode Core request failed with HTTP {status_code}',
                 ) from exc
             raise RuntimeError('Episode Core returned invalid JSON') from exc
-        message = (
-            str(payload.get('message') or '').strip()
-            if isinstance(payload, dict)
-            else ''
-        )
+        message = str(payload.get('message') or '').strip() if isinstance(payload, dict) else ''
         code = payload.get('code') if isinstance(payload, dict) else None
         if not 200 <= status_code < 300 or code != 0:
             raise _EpisodeHTTPError(

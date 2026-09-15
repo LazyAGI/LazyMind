@@ -171,9 +171,9 @@ def test_memory_tools_are_registered_as_one_eager_group():
     assert 'Never claim that information was saved unless' in memory_policy
     assert 'MemoryTools_episode_create' in memory_policy
     assert 'preference_editor' in memory_policy
-    assert 'new preference was not saved' in memory_policy
-    assert 'no existing preference was deleted, overwritten, or reordered' in memory_policy
-    assert 'Never claim or imply automatic eviction' in memory_policy
+    assert 'reports `preference_organizing`' in memory_policy
+    assert 'preference change was not saved because maintenance is in progress' in memory_policy
+    assert 'Never claim or imply that the write was queued, retried, evicted, or replaced automatically' in memory_policy
 
 
 def test_writer_tools_publish_stable_capability_ids():

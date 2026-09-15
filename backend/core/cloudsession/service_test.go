@@ -2,9 +2,13 @@ package cloudsession
 
 import (
 	"context"
+	"errors"
+	"net/http"
 	"sync"
 	"testing"
 	"time"
+
+	"lazymind/core/cloudclient"
 )
 
 type fakeSecureStore struct {
@@ -35,6 +39,12 @@ func (s *fakeSecureStore) Delete(context.Context) error {
 type fakeAuthClient struct {
 	mu           sync.Mutex
 	refreshCalls int
+}
+
+type failingAuthClient struct{ err error }
+
+func (client failingAuthClient) Refresh(context.Context, RefreshToken) (TokenPair, error) {
+	return TokenPair{}, client.err
 }
 
 func (c *fakeAuthClient) Refresh(_ context.Context, _ RefreshToken) (TokenPair, error) {
@@ -113,5 +123,41 @@ func TestEstablishPersistsRefreshBeforePublishingSignedIn(t *testing.T) {
 	}
 	if store.token != "refresh" || service.Status(context.Background()).State != StateSignedIn {
 		t.Fatalf("store=%q status=%+v", store.token, service.Status(context.Background()))
+	}
+}
+
+func TestRefreshSeparatesOfflineFromReauthenticationAndPreservesStoredToken(t *testing.T) {
+	tests := []struct {
+		name             string
+		err              error
+		wantState        State
+		wantReachability Reachability
+	}{
+		{
+			name:      "transport failure",
+			err:       errors.New("fixture network unavailable"),
+			wantState: StateOffline, wantReachability: ReachabilityUnreachable,
+		},
+		{
+			name:      "invalid credentials",
+			err:       &cloudclient.CloudError{HTTPStatus: http.StatusUnauthorized},
+			wantState: StateReauthRequired, wantReachability: ReachabilityReachable,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			store := &fakeSecureStore{token: "stored-refresh"}
+			service := NewService(ServiceDeps{Store: store, Auth: failingAuthClient{err: test.err}})
+			if err := service.Restore(context.Background()); err == nil {
+				t.Fatal("failed refresh unexpectedly succeeded")
+			}
+			status := service.Status(context.Background())
+			if status.State != test.wantState || status.Reachability != test.wantReachability {
+				t.Fatalf("status=%+v want state=%q reachability=%q", status, test.wantState, test.wantReachability)
+			}
+			if store.token != "stored-refresh" {
+				t.Fatalf("temporary Cloud failure deleted the stored refresh token: %q", store.token)
+			}
+		})
 	}
 }

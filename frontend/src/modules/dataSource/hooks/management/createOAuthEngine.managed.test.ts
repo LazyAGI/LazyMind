@@ -163,6 +163,57 @@ describe("createOAuthEngine managed OAuth", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("keeps polling for the full Cloud OAuth session lifetime", async () => {
+    mocks.authenticatedPost.mockResolvedValueOnce({
+      data: {
+        session_id: "slow-managed-session",
+        authorization_start_url:
+          "https://localhost:8443/v1/provider-connections/authorize/ccccccccccccccccccccccccccccccccccccccccccc",
+      },
+    });
+    let polls = 0;
+    mocks.authenticatedGet.mockImplementation(async () => {
+      polls += 1;
+      return {
+        data: polls > 120
+          ? { status: "COMPLETED", auth_connection_id: "slow-managed-connection" }
+          : { status: "WAITING_USER" },
+      };
+    });
+
+    const context = {
+      t: (key: string) => key,
+      form: { getFieldsValue: vi.fn(() => ({})) },
+      oauthAttemptRef: { current: null },
+      setOauthState: vi.fn(),
+      setConnectionVerified: vi.fn(),
+      setOauthConnection: vi.fn(),
+      setNotionOauthConnection: vi.fn(),
+      setNotionAuthAccounts: vi.fn(),
+      setFeishuAuthAccounts: vi.fn(),
+      setWizardStep: vi.fn(),
+      setValidatedAgentId: vi.fn(),
+      setAuthSelectModalOpen: vi.fn(),
+      setAuthSelectProvider: vi.fn(),
+      feishuAuthAccountsLoadedRef: { current: false },
+      scanAgents: [],
+      notionAuthAccounts: [],
+      selectedType: "notion",
+      oauthState: "idle",
+      connectionVerified: false,
+      oauthConnection: null,
+    } as unknown as ManagementContext;
+
+    const result = createOAuthEngine(context).startCloudOAuth("notion");
+    await vi.advanceTimersByTimeAsync(121_000);
+
+    await expect(result).resolves.toBe(true);
+    expect(polls).toBe(121);
+    expect(mocks.enableCloudConnectionForChat).toHaveBeenCalledWith(
+      "slow-managed-connection",
+    );
+  });
+
   it("reserves the Web popup before the managed session request settles", async () => {
     let resolveSession!: (value: { data: Record<string, never> }) => void;
     const sessionResponse = new Promise<{ data: Record<string, never> }>((resolve) => {
@@ -280,7 +331,7 @@ describe("createOAuthEngine managed OAuth", () => {
       oauthConnection: { connectionId: "managed-connection" },
     } as unknown as ManagementContext;
 
-    const pending = createOAuthEngine(context).startCloudOAuth("feishu", {
+    const pending = createOAuthEngine(context).startCloudOAuth("notion", {
       reauthorizeConnectionId: "managed-connection",
     } as never);
     await vi.advanceTimersByTimeAsync(1000);
@@ -292,7 +343,7 @@ describe("createOAuthEngine managed OAuth", () => {
     );
     expect(mocks.authenticatedPost).not.toHaveBeenCalledWith(
       "/api/core/provider-connections/sessions",
-      { provider: "feishu" },
+      { provider: "notion" },
     );
   });
 
@@ -319,15 +370,51 @@ describe("createOAuthEngine managed OAuth", () => {
       oauthState: "idle",
       connectionVerified: false,
       oauthConnection: null,
+      cloudManagedOAuthAvailable: true,
     } as unknown as ManagementContext;
 
     await createOAuthEngine(context).refreshFeishuAuthAccounts();
 
     expect(mocks.authenticatedGet).toHaveBeenCalledWith(
       "/api/core/provider-connections",
+      expect.objectContaining({ silentError: true }),
     );
     expect(mocks.authenticatedGet.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.listConnections.mock.invocationCallOrder[0],
     );
+  });
+
+  it("loads local Feishu accounts without Cloud reconciliation when managed OAuth is unavailable", async () => {
+    const context = {
+      t: (key: string) => key,
+      form: { getFieldsValue: vi.fn(() => ({})) },
+      oauthAttemptRef: { current: null },
+      setOauthState: vi.fn(),
+      setConnectionVerified: vi.fn(),
+      setOauthConnection: vi.fn(),
+      setNotionOauthConnection: vi.fn(),
+      setNotionAuthAccounts: vi.fn(),
+      setFeishuAuthAccounts: vi.fn(),
+      setWizardStep: vi.fn(),
+      setValidatedAgentId: vi.fn(),
+      setAuthSelectModalOpen: vi.fn(),
+      setAuthSelectProvider: vi.fn(),
+      feishuAuthAccountsLoadedRef: { current: false },
+      scanAgents: [],
+      notionAuthAccounts: [],
+      selectedType: "feishu",
+      oauthState: "idle",
+      connectionVerified: false,
+      oauthConnection: null,
+      cloudManagedOAuthAvailable: false,
+    } as unknown as ManagementContext;
+
+    await createOAuthEngine(context).refreshFeishuAuthAccounts();
+
+    expect(mocks.authenticatedGet).not.toHaveBeenCalled();
+    expect(mocks.listConnections).toHaveBeenCalledWith({
+      provider: "feishu",
+      status: null,
+    });
   });
 });

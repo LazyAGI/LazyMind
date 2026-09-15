@@ -1,13 +1,18 @@
 package chat
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"mime"
+	"net/http"
 	"net/url"
+	"os"
 	"path"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -19,13 +24,27 @@ import (
 
 	"lazymind/core/agentinvocation"
 	"lazymind/core/common/orm"
+	"lazymind/core/doc"
 	"lazymind/core/externalcontext"
+	"lazymind/core/log"
 	"lazymind/core/workflow/artifactfile"
 )
 
 var errExternalChatLeaseLost = errors.New("external chat lease is no longer owned by this host")
+var errInvalidExternalChatAttachment = errors.New("invalid external Agent attachment")
 
-const externalRunClaimFallback = 2 * time.Second
+const (
+	externalRunClaimFallback        = 2 * time.Second
+	maxExternalChatAttachmentBytes  = 20 << 20
+	externalChatAttachmentDirectory = "external-agent-attachments"
+)
+
+type externalChatAttachment struct {
+	EventID   string
+	Filename  string
+	MediaType string
+	Content   []byte
+}
 
 type externalRunWakeup struct {
 	mu     sync.Mutex
@@ -112,7 +131,15 @@ func (a *externalChatApplication) createRun(ctx context.Context, run *orm.Extern
 	now := a.now()
 	run.Status = "pending"
 	run.CreatedAt, run.UpdatedAt = now, now
-	if err := a.db.WithContext(ctx).Create(run).Error; err != nil {
+	if err := a.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(run).Error; err != nil {
+			return err
+		}
+		if run.Action == "regenerate" {
+			return claimChatHistoryRun(ctx, tx, run.HistoryID, run.ID)
+		}
+		return nil
+	}); err != nil {
 		return err
 	}
 	externalRunsAvailable.notify()
@@ -344,11 +371,133 @@ func (a *externalChatApplication) appendEvent(
 			} else {
 				run.Status, run.ErrorMessage = "failed", updates["error_message"].(string)
 			}
-			return finalizeExternalChatHistory(tx, &run, now)
+			_, err := finalizeExternalChatHistory(tx, &run, now)
+			return err
 		}
 		return nil
 	})
 	return sequence, err
+}
+
+func (a *externalChatApplication) appendAttachment(
+	ctx context.Context,
+	owner, runID, hostID, leaseToken string,
+	attachment externalChatAttachment,
+) (int64, error) {
+	if len(attachment.Content) == 0 || len(attachment.Content) > maxExternalChatAttachmentBytes ||
+		!validArtifactFilename(attachment.Filename) {
+		return 0, errInvalidExternalChatAttachment
+	}
+	extension, err := externalChatImageExtension(attachment.Content, attachment.MediaType)
+	if err != nil {
+		return 0, err
+	}
+	run, err := a.attachmentRun(ctx, owner, runID, hostID, leaseToken, attachment.EventID)
+	if err != nil {
+		return 0, err
+	}
+	directory := filepath.Join(
+		doc.UploadRoot(), externalChatAttachmentDirectory,
+		artifactScopeHash(owner), artifactScopeHash(run.HistoryID),
+	)
+	target := filepath.Join(directory, artifactScopeHash(attachment.EventID)+extension)
+	created, err := persistExternalChatAttachment(target, attachment.Content)
+	if err != nil {
+		return 0, err
+	}
+	reference := doc.StaticFileReferenceFromAnyStoragePath(target)
+	if reference == "" {
+		if created {
+			_ = os.Remove(target)
+		}
+		return 0, errors.New("create external Agent attachment reference")
+	}
+	text := fmt.Sprintf("\n\n![Generated image](%s)\n\n", reference)
+	sequence, err := a.appendEvent(ctx, owner, runID, hostID, leaseToken, externalChatEvent{
+		EventID: attachment.EventID, Type: "message", Text: text,
+	})
+	if err != nil && created {
+		_ = os.Remove(target)
+	}
+	return sequence, err
+}
+
+func (a *externalChatApplication) attachmentRun(
+	ctx context.Context,
+	owner, runID, hostID, leaseToken, eventID string,
+) (orm.ExternalChatRun, error) {
+	var run orm.ExternalChatRun
+	if a == nil || a.db == nil {
+		return run, errExternalChatLeaseLost
+	}
+	if err := a.db.WithContext(ctx).Where("id = ? AND actor_user_id = ?", runID, owner).Take(&run).Error; err != nil {
+		return run, errExternalChatLeaseLost
+	}
+	if run.HostID != hostID || run.LeaseToken == "" || run.LeaseToken != leaseToken {
+		return run, errExternalChatLeaseLost
+	}
+	if run.Status != "running" || run.LeaseExpiresAt == nil || run.LeaseExpiresAt.Before(a.now()) {
+		var existing int64
+		if err := a.db.WithContext(ctx).Model(&orm.ExternalChatRunEvent{}).
+			Where("id = ? AND run_id = ?", eventID, runID).Count(&existing).Error; err != nil || existing == 0 {
+			return run, errExternalChatLeaseLost
+		}
+	}
+	return run, nil
+}
+
+func externalChatImageExtension(content []byte, supplied string) (string, error) {
+	mediaType, _, err := mime.ParseMediaType(strings.TrimSpace(supplied))
+	if err != nil {
+		return "", errInvalidExternalChatAttachment
+	}
+	detected := http.DetectContentType(content)
+	extensions := map[string]string{
+		"image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif", "image/webp": ".webp",
+	}
+	extension, ok := extensions[detected]
+	if !ok || mediaType != detected {
+		return "", errInvalidExternalChatAttachment
+	}
+	return extension, nil
+}
+
+func persistExternalChatAttachment(target string, content []byte) (bool, error) {
+	if existing, err := os.ReadFile(target); err == nil {
+		if !bytes.Equal(existing, content) {
+			return false, errors.New("external Agent attachment event conflicts with existing content")
+		}
+		return false, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return false, err
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+		return false, err
+	}
+	temporary, err := os.CreateTemp(filepath.Dir(target), ".external-agent-attachment-*")
+	if err != nil {
+		return false, err
+	}
+	temporaryPath := temporary.Name()
+	defer os.Remove(temporaryPath)
+	if err := temporary.Chmod(0o600); err != nil {
+		temporary.Close()
+		return false, err
+	}
+	if _, err := temporary.Write(content); err != nil {
+		temporary.Close()
+		return false, err
+	}
+	if err := temporary.Close(); err != nil {
+		return false, err
+	}
+	if err := os.Link(temporaryPath, target); err != nil {
+		if existing, readErr := os.ReadFile(target); readErr == nil && bytes.Equal(existing, content) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 func sameExternalChatEvent(existing orm.ExternalChatRunEvent, runID string, event externalChatEvent) bool {
@@ -384,7 +533,7 @@ func (a *externalChatApplication) requestStop(ctx context.Context, owner, conver
 				return err
 			}
 			run.Status, run.StopRequested = "stopped", true
-			if err := finalizeExternalChatHistory(tx, run, now); err != nil {
+			if _, err := finalizeExternalChatHistory(tx, run, now); err != nil {
 				return err
 			}
 		}
@@ -392,21 +541,43 @@ func (a *externalChatApplication) requestStop(ctx context.Context, owner, conver
 	})
 }
 
-func finalizeExternalChatHistory(tx *gorm.DB, run *orm.ExternalChatRun, now time.Time) error {
+func activeExternalChatHistoryIDs(
+	ctx context.Context,
+	db *gorm.DB,
+	owner, conversationID string,
+	historyIDs []string,
+) (map[string]struct{}, error) {
+	out := make(map[string]struct{})
+	if db == nil || len(historyIDs) == 0 {
+		return out, nil
+	}
+	var runs []orm.ExternalChatRun
+	if err := db.WithContext(ctx).Select("history_id").
+		Where("actor_user_id = ? AND conversation_id = ? AND history_id IN ? AND status IN ?", owner, conversationID, historyIDs, []string{"pending", "running"}).
+		Find(&runs).Error; err != nil {
+		return nil, err
+	}
+	for _, run := range runs {
+		out[run.HistoryID] = struct{}{}
+	}
+	return out, nil
+}
+
+func finalizeExternalChatHistory(tx *gorm.DB, run *orm.ExternalChatRun, now time.Time) (bool, error) {
 	var events []orm.ExternalChatRunEvent
 	if err := tx.Where("run_id = ? AND type = ?", run.ID, "message").Order("sequence ASC").Find(&events).Error; err != nil {
-		return err
+		return false, err
 	}
 	var result strings.Builder
 	for index := range events {
 		normalized, err := rewriteExternalArtifactReferences(tx, *run, events[index].Text)
 		if err != nil {
-			return err
+			return false, err
 		}
 		if normalized != events[index].Text {
 			if err := tx.Model(&orm.ExternalChatRunEvent{}).Where("id = ?", events[index].ID).
 				Update("text", normalized).Error; err != nil {
-				return err
+				return false, err
 			}
 		}
 		result.WriteString(normalized)
@@ -420,26 +591,43 @@ func finalizeExternalChatHistory(tx *gorm.DB, run *orm.ExternalChatRun, now time
 		RunTerminal: terminalJSON(terminal), Ext: run.HistoryExt,
 		TimeMixin: orm.TimeMixin{CreateTime: now, UpdateTime: now},
 	}
-	if err := tx.Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "id"}},
-		DoUpdates: clause.Assignments(map[string]any{
+	var existing orm.ChatHistory
+	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", run.HistoryID).Take(&existing).Error
+	switch {
+	case errors.Is(err, gorm.ErrRecordNotFound):
+		if err := tx.Create(&history).Error; err != nil {
+			return false, err
+		}
+	case err != nil:
+		return false, err
+	case existing.RunID != run.ID:
+		log.Logger.Info().
+			Str("conversation_id", run.ConversationID).
+			Str("history_id", run.HistoryID).
+			Str("run_id", run.ID).
+			Str("current_run_id", existing.RunID).
+			Msg("ignored stale external chat history finalization")
+		return false, nil
+	default:
+		persisted, err := updateOwnedChatHistory(tx.Statement.Context, tx, run.HistoryID, run.ID, map[string]any{
 			"seq": history.Seq, "conversation_id": history.ConversationID,
 			"algorithm_id": history.AlgorithmID, "raw_content": history.RawContent,
-			"content": history.Content, "result": history.Result, "run_id": history.RunID,
+			"content": history.Content, "result": history.Result,
 			"run_status": history.RunStatus, "run_terminal": history.RunTerminal, "ext": history.Ext,
 			"update_time": now,
-		}),
-	}).Create(&history).Error; err != nil {
-		return err
+		})
+		if err != nil || !persisted {
+			return persisted, err
+		}
 	}
 	if err := tx.Model(&orm.Conversation{}).Where("id = ?", run.ConversationID).
 		Update("updated_at", now).Error; err != nil {
-		return err
+		return false, err
 	}
 	if run.Action != "regenerate" {
 		if err := tx.Model(&orm.Conversation{}).Where("id = ?", run.ConversationID).
 			UpdateColumn("chat_times", gorm.Expr("chat_times + ?", 1)).Error; err != nil {
-			return err
+			return false, err
 		}
 	}
 	taskStatus := "succeeded"
@@ -448,9 +636,11 @@ func finalizeExternalChatHistory(tx *gorm.DB, run *orm.ExternalChatRun, now time
 	} else if run.Status == "stopped" {
 		taskStatus = "canceled"
 	}
-	return tx.Model(&orm.TaskCenterTask{}).
+	err = tx.Model(&orm.TaskCenterTask{}).
 		Where("conversation_id = ? AND task_type = ? AND archived_at IS NULL AND status NOT IN ('succeeded','failed','canceled')", run.ConversationID, "background_chat").
+		Where("plugin_session_id IS NULL OR plugin_session_id = ''"). // workflow-naming: persistence
 		Updates(map[string]any{"status": taskStatus, "finished_at": now, "updated_at": now}).Error
+	return err == nil, err
 }
 
 var markdownLinkDestination = regexp.MustCompile(`\]\(([^)\n]+)\)`)

@@ -78,6 +78,141 @@ class StyleRenderingRecipeTest(unittest.TestCase):
         self.assertEqual(slide_count['choice_policy'], 'seed')
         self.assertEqual(slide_count['choices'], ['3 页', '5 页', '8 页', '10 页'])
 
+    def test_workflow_asks_for_explicit_ai_background_opt_in(self) -> None:
+        workflow_path = Path(__file__).resolve().parents[3] / 'workflow.yaml'
+        workflow = yaml.safe_load(workflow_path.read_text(encoding='utf-8'))
+        field = next(
+            item for item in workflow['runtime']['clarification_fields']
+            if item['id'] == 'generate_background_images'
+        )
+
+        self.assertEqual(field['type'], 'single')
+        self.assertEqual(field['choice_policy'], 'fixed')
+        self.assertFalse(field['allow_other'])
+        self.assertEqual(len(field['choices']), 2)
+        self.assertTrue(field['choices'][0].startswith('启用'))
+        self.assertTrue(field['choices'][1].startswith('不启用'))
+        self.assertIn('background_images', workflow['runtime']['publisher_owned_slots'])
+
+    def test_only_page_prompts_and_generation_checkpoints_require_approval(self) -> None:
+        state_path = Path(__file__).resolve().parents[3] / 'scenario' / 'state.yml'
+        state = yaml.safe_load(state_path.read_text(encoding='utf-8'))
+
+        self.assertEqual(state['steps']['plan_background_prompts']['mode'], 'auto')
+        self.assertEqual(state['steps']['build_outline']['mode'], 'auto')
+        self.assertEqual(state['steps']['plan_page_prompts']['mode'], 'human')
+        self.assertEqual(state['steps']['generate_backgrounds']['mode'], 'human')
+        self.assertEqual(state['steps']['generate_ppt']['mode'], 'human')
+
+    def test_background_prompt_and_generation_steps_support_skip_and_targeted_rerun(self) -> None:
+        workflow_path = Path(__file__).resolve().parents[3] / 'workflow.yaml'
+        state_path = workflow_path.parent / 'scenario' / 'state.yml'
+        workflow = yaml.safe_load(workflow_path.read_text(encoding='utf-8'))
+        state = yaml.safe_load(state_path.read_text(encoding='utf-8'))
+
+        self.assertEqual(
+            state['steps']['plan_background_prompts']['skip_if'],
+            {'material': 'skip_background_images'},
+        )
+        self.assertEqual(
+            state['steps']['generate_backgrounds']['skip_if'],
+            {'material': 'skip_background_images'},
+        )
+        self.assertIn('重新生成底图 1、2', state['steps']['generate_backgrounds']['prompt'])
+        self.assertIn('shared visual world', state['steps']['plan_background_prompts']['prompt'])
+        slots = {slot['id']: slot for slot in workflow['slots']}
+        self.assertEqual(slots['background_prompts']['cardinality'], 'list')
+        self.assertIn('background_prompts', workflow['runtime']['publisher_owned_slots'])
+        self.assertEqual(
+            state['transitions']['collect_materials'],
+            [
+                {
+                    'to': 'plan_background_prompts',
+                    'when': (
+                        'ppt_capability_requirements is exactly '
+                        'AI_BACKGROUND_IMAGES: enabled.\n'
+                    ),
+                },
+                {
+                    'to': 'build_outline',
+                    'when': (
+                        'ppt_capability_requirements is exactly '
+                        'AI_BACKGROUND_IMAGES: disabled.\n'
+                    ),
+                },
+            ],
+        )
+        self.assertEqual(state['steps']['analyze_requirements']['route'], 'choice')
+        self.assertEqual(state['steps']['collect_materials']['route'], 'choice')
+        self.assertNotIn('skip_if', state['steps']['collect_materials'])
+        self.assertEqual(
+            [edge['to'] for edge in state['transitions']['analyze_requirements']],
+            ['collect_materials', 'plan_background_prompts', 'build_outline'],
+        )
+        self.assertEqual(
+            state['transitions']['generate_backgrounds'],
+            [{'to': 'build_outline'}],
+        )
+        self.assertEqual(state['transitions']['build_outline'], [{'to': 'plan_page_prompts'}])
+        self.assertEqual(state['transitions']['plan_page_prompts'], [{'to': 'generate_ppt'}])
+        slots = {slot['id']: slot for slot in workflow['slots']}
+        self.assertEqual(slots['deck_outline']['cardinality'], 'single')
+        self.assertEqual(slots['slide_outline']['cardinality'], 'list')
+        page_prompts = next(
+            tab for tab in workflow['ui']['tabs'] if tab['id'] == 'page_prompts'
+        )
+        self.assertEqual(page_prompts['layout'], 'composite')
+        for tab_id in ('background_prompts', 'background_images', 'page_prompts'):
+            tab = next(tab for tab in workflow['ui']['tabs'] if tab['id'] == tab_id)
+            self.assertEqual(tab['layout'], 'composite')
+            self.assertEqual(tab['slot_scope'], 'step')
+        self.assertEqual(
+            page_prompts['composite_layout']['children'],
+            [{'slot': 'slide_outline'}],
+        )
+        self.assertIn(
+            'rewind to plan_background_prompts',
+            workflow['runtime']['completed_edit_routing'],
+        )
+        self.assertIn(
+            "ppt_publish_outline(deck_dir, pages=[N], insert_before=N)",
+            state['steps']['plan_page_prompts']['prompt'],
+        )
+
+    def test_completed_html_chat_supports_incremental_media_replacement(self) -> None:
+        workflow_path = Path(__file__).resolve().parents[3] / 'workflow.yaml'
+        state_path = workflow_path.parent / 'scenario' / 'state.yml'
+        workflow = yaml.safe_load(workflow_path.read_text(encoding='utf-8'))
+        state = yaml.safe_load(state_path.read_text(encoding='utf-8'))
+
+        registered = workflow['tool_scripts'][0]['functions']
+        step_tools = state['steps']['generate_ppt']['tools']
+        prompt = state['steps']['generate_ppt']['prompt']
+        for tool in (
+            'ppt_replace_page_material_image',
+            'ppt_replace_page_background',
+        ):
+            self.assertIn(tool, registered)
+            self.assertIn(tool, step_tools)
+            self.assertIn(tool, prompt)
+        self.assertIn('focused_sort_order', prompt)
+        self.assertIn('updated_pages', state['steps']['generate_ppt']['acceptance_criteria'])
+
+    def test_analyze_runs_conditional_background_capability_gate(self) -> None:
+        workflow_path = Path(__file__).resolve().parents[3] / 'workflow.yaml'
+        workflow = yaml.safe_load(workflow_path.read_text(encoding='utf-8'))
+        checks = workflow['runtime']['post_step_checks']
+        slots = {slot['id']: slot for slot in workflow['slots']}
+
+        self.assertEqual(checks, [{
+            'step_id': 'analyze_requirements',
+            'tool': 'check_ppt_workflow_capabilities',
+            'arguments': {
+                'capability_requirements': 'ppt_capability_requirements',
+            },
+        }])
+        self.assertFalse(slots['ppt_capability_requirements']['exposed'])
+
 
 class OutlineReferenceImageRepairTest(unittest.TestCase):
     def test_empty_image_pool_clears_hallucinated_binding_without_failing(self) -> None:
@@ -223,6 +358,41 @@ class PagePromptModeTest(unittest.TestCase):
         outline['pages'][0]['use_image'] = {'reference_image_index': 0}
         outline_path.write_text(json.dumps(outline, ensure_ascii=False), encoding='utf-8')
         return source
+
+    def _attach_background_image(self, deck: Path) -> str:
+        relative = 'images/page_001_background.png'
+        path = deck / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(base64.b64decode(
+            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGNgYAAAAAMAASsJTYQAAAAASUVORK5CYII='
+        ))
+        (deck / 'background_images.json').write_text(json.dumps({
+            'enabled': True,
+            'pages': [{'page_no': 1, 'local_path': relative}],
+        }), encoding='utf-8')
+        return relative
+
+    def test_generated_background_is_mandatory_in_page_css(self) -> None:
+        calls: list[tuple[str, str]] = []
+        html = """<!DOCTYPE html><html><head><style>
+        #bg{background-image:url('../images/page_001_background.png');background-size:cover}
+        </style></head><body><div class='wrapper'><div id='bg'></div><div id='ct'>完成</div></div></body></html>"""
+
+        def fake_llm(system: str, user: str, **_kwargs) -> str:
+            calls.append((system, user))
+            return html
+
+        with tempfile.TemporaryDirectory() as temp, patch.object(
+            run_stage, 'llm', side_effect=fake_llm,
+        ):
+            deck = self._deck(Path(temp))
+            relative = self._attach_background_image(deck)
+            self.assertEqual(run_stage.cmd_page_html(deck, 1), 0)
+            self.assertEqual(len(calls), 1)
+            self.assertIn('AI BACKGROUND IMAGE', calls[0][1])
+            self.assertIn('../images/page_001_background.png', calls[0][1])
+            rendered = (deck / 'pages' / 'page_001.html').read_text(encoding='utf-8')
+            self.assertTrue(run_stage._html_has_background_image(rendered, relative))
 
     def test_deterministic_mode_makes_one_model_call(self) -> None:
         html = "<!DOCTYPE html><html><head><title>快速生成</title></head><body><div class='wrapper'><div id='ct'>完成</div></div></body></html>"

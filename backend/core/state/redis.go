@@ -122,6 +122,12 @@ func (s *RedisStore) SetNX(ctx context.Context, key string, value []byte, ttl ti
 	return s.client.SetNX(ctx, key, value, ttl).Result()
 }
 
+func (s *RedisStore) CompareAndDelete(ctx context.Context, key string, expected []byte) (bool, error) {
+	const script = `if redis.call("GET", KEYS[1]) == ARGV[1] then return redis.call("DEL", KEYS[1]) else return 0 end`
+	deleted, err := s.client.Eval(ctx, script, []string{key}, expected).Int64()
+	return deleted == 1, err
+}
+
 func (s *RedisStore) RPush(ctx context.Context, key string, value []byte, ttl time.Duration) error {
 	if err := s.client.RPush(ctx, key, value).Err(); err != nil {
 		return err

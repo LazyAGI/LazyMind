@@ -297,7 +297,7 @@ function Copy-RuntimeApp {
     )
     $releaseBuild = $env:LAZYMIND_RELEASE_BUILD -eq 'true'
     if ($releaseBuild) { $excludedDirs += (Join-Path $repoRoot 'algorithm\lazyllm') }
-    & robocopy.exe $repoRoot $appRoot /MIR /R:2 /W:1 /NFL /NDL /NJH /NJS /NP /XD @excludedDirs /XF '*.pyc' '*.pyo' '*_test.go' 'test_*.py' '*.test.js' '*.test.mjs' '*.test.ts' '*.test.tsx' '.DS_Store' '.env' '.coverage' 'config.env' 'config.win.env' 'lazymind-history-injection*.zip' 'README.md' 'README.CN.md' 'Makefile'
+    & robocopy.exe $repoRoot $appRoot /MIR /R:2 /W:1 /NFL /NDL /NJH /NJS /NP /XD @excludedDirs /XF '*.pyc' '*.pyo' '*_test.go' 'test_*.py' '*.test.js' '*.test.mjs' '*.test.ts' '*.test.tsx' '.DS_Store' '.env' '.coverage' 'config.env' 'config.win.env' 'lazymind-history-injection*.zip' 'README.md' 'README.CN.md'
     if ($LASTEXITCODE -gt 7) { throw "robocopy runtime app staging failed with code $LASTEXITCODE" }
     foreach ($relativePath in @('skills\research', 'skills\review', 'skills\search')) {
         Remove-GeneratedPath (Join-Path $appRoot $relativePath)
@@ -306,6 +306,9 @@ function Copy-RuntimeApp {
     if (Test-Path -LiteralPath $coreDevBinary) { Remove-Item -LiteralPath $coreDevBinary -Force }
     if (-not (Test-Path -LiteralPath (Join-Path $appRoot 'frontend\dist\index.html') -PathType Leaf)) {
         throw 'Desktop frontend dist is missing from staged runtime app.'
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $appRoot 'Makefile') -PathType Leaf)) {
+        throw 'Desktop runtime repo marker Makefile is missing from staged runtime app.'
     }
     if (-not $releaseBuild -and -not (Test-Path -LiteralPath (Join-Path $appRoot 'algorithm\lazyllm\lazyllm') -PathType Container)) {
         throw 'Bundled LazyLLM source is missing from local desktop runtime app.'
@@ -390,13 +393,23 @@ function Finalize-Desktop([ValidateSet('zip', 'installer')][string]$PackageKind 
     if ($trustedLocalMode -eq 'true') {
         Write-Host '==> Trusted local mode enabled for this desktop package'
     }
-    Invoke-Native 'node.exe' @(
+    $runtimeManifestArguments = @(
         (Join-Path $repoRoot 'desktop\scripts\write-runtime-manifest.mjs'),
         $runtimeRoot,
         '--platform', 'windows',
         '--arch', 'amd64',
-        '--trusted-local-mode', $trustedLocalMode
+        '--trusted-local-mode', $trustedLocalMode,
+        '--build-audience', $(if ([string]::IsNullOrWhiteSpace($env:LAZYMIND_DESKTOP_BUILD_AUDIENCE)) { 'production' } else { $env:LAZYMIND_DESKTOP_BUILD_AUDIENCE }),
+        '--cloud-oauth-callback-mode', $(if ([string]::IsNullOrWhiteSpace($env:LAZYMIND_CLOUD_OAUTH_CALLBACK_MODE)) { 'direct' } else { $env:LAZYMIND_CLOUD_OAUTH_CALLBACK_MODE })
     )
+    if (-not [string]::IsNullOrWhiteSpace($env:LAZYMIND_CLOUD_BASE_URL)) {
+        $runtimeManifestArguments += @('--cloud-base-url', $env:LAZYMIND_CLOUD_BASE_URL)
+    }
+    if ($env:LAZYMIND_CLOUD_OAUTH_CALLBACK_MODE -eq 'localhost-relay') {
+        $callbackPort = if ([string]::IsNullOrWhiteSpace($env:LAZYMIND_CLOUD_OAUTH_CALLBACK_PORT)) { '8443' } else { $env:LAZYMIND_CLOUD_OAUTH_CALLBACK_PORT }
+        $runtimeManifestArguments += @('--cloud-oauth-callback-port', $callbackPort)
+    }
+    Invoke-Native 'node.exe' $runtimeManifestArguments
     Invoke-Native 'node.exe' @((Join-Path $repoRoot 'desktop\scripts\write-editable-ppt-dependency-config.mjs'), $runtimeRoot)
     $reparse = @(Get-ChildItem -LiteralPath $runtimeRoot -Recurse -Force -ErrorAction SilentlyContinue | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint })
     if ($reparse.Count -gt 0) {

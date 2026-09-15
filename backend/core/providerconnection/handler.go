@@ -9,6 +9,7 @@ import (
 
 	"github.com/gorilla/mux"
 
+	"lazymind/core/cloudclient"
 	applog "lazymind/core/log"
 )
 
@@ -54,10 +55,14 @@ func (handler Handler) CancelSession(w http.ResponseWriter, request *http.Reques
 
 func (handler Handler) List(w http.ResponseWriter, request *http.Request) {
 	if handler.Service == nil {
-		http.Error(w, "Provider Connection service is unavailable", http.StatusServiceUnavailable)
+		writeResult(w, cloudclient.ProviderConnectionPage{Items: []cloudclient.ProviderConnection{}}, http.StatusOK, nil)
 		return
 	}
 	result, err := handler.Service.ListConnections(request.Context(), request.Header.Get("X-User-Id"))
+	if errors.Is(err, ErrCloudReauthRequired) || errors.Is(err, ErrCloudUnavailable) {
+		writeResult(w, cloudclient.ProviderConnectionPage{Items: []cloudclient.ProviderConnection{}}, http.StatusOK, nil)
+		return
+	}
 	writeResult(w, result, http.StatusOK, err)
 }
 

@@ -2,16 +2,14 @@ id: image-workflow
 name: AI Image Generation
 description: >
   Generate, find, or edit images from natural language descriptions, and create
-  static memes, animated GIF stickers, and multi-item meme packs inside the
-  existing generate_image step. Animated delivery uses video generation then
-  GIF conversion. Meme media is generated without text, then a deterministic
-  local postprocessor fits and centers the caption inside a normalized box.
-  The workflow is dynamic: after analyze_subject, ChatAgent either skips directly
-  to optimize_prompt for self-contained requests or runs collect_materials when
-  external/uploaded/KB/reference material is genuinely needed, then routes to generate_image or enhance_image
-  based on user intent (CREATE_NEW, FIND_AND_EDIT, EDIT_UPLOAD, CREATE_ANIMATED,
-  ANIMATE_UPLOAD, CREATE_STATIC_MEME, CREATE_ANIMATED_MEME,
-  CREATE_MEME_PACK, etc.).
+  static memes, animated GIF stickers, and multi-item meme packs. After analysis,
+  a deterministic capability gate checks only the image/video models and FFmpeg
+  needed by the selected behavior without launching another SubAgent. Every executable route then creates or stages
+  a concrete text-free base image in generate_image. The optional enhance_image
+  step consumes that base for source edits, video/GIF generation, or deterministic
+  caption layout; ordinary still generation skips enhancement. External material
+  collection remains optional and runs only when the request truly depends on an
+  upload, KB, explicit search, or identifiable reference.
 
 when_to_use: >
   Trigger this workflow ONLY when the user's image request is COMPLEX and needs
@@ -20,13 +18,12 @@ when_to_use: >
   reference-based generation, uploaded-image editing with detailed instructions,
   static or animated meme/reaction/sticker creation, a multi-item meme pack,
   animated GIF / 动图 (text-to-video then GIF, or animate an uploaded image),
-  or a rich multi-constraint description that benefits from analyze → collect →
-  optimize → generate/enhance.
+  or a rich multi-constraint description that benefits from analyze + deterministic capability check →
+  optional collect → optimize → generate base → optional enhance.
   Examples that SHOULD trigger: "根据知识库中的风格画一张产品图",
   "先搜几张赛博朋克参考图再画一张类似的", "找哈兰德照片然后加上王老吉字样",
   "做一张收到的静态表情包", "给我生成一个动态表情包", "给我做一套聊天表情包",
   "给我生成三个动态表情包", "把这张图做成动态表情包", "做成动图 GIF",
-  "生成白色小猫，底部居中加蓝色‘妈妈’字幕",
   "给上传的小狗做敬礼手势，然后配上字幕‘收到!’",
   "启动绘图插件", "打开图片生成插件".
   HIGHEST-PRIORITY TEXT-OVERLAY RULE: ALWAYS trigger this workflow when a static-image
@@ -43,10 +40,23 @@ when_to_use: >
   without KB/search/edit/animated/complex constraints AND without exact display text or
   text-layout requirements, prefer the built-in image_generator / image_editor tools.
   Do NOT call video_generator / video_to_gif directly for 动态表情包 — use this
-  workflow so analyze → optimize → generate_image (video→GIF) runs end-to-end.
+  workflow so analyze/check → generate base → enhance
+  (video→GIF) runs end-to-end.
+  ASK/CLARIFICATION RULE: before triggering, ask only whether essential request
+  information is complete. If subject, requested change/action, and final delivery
+  are already clear, trigger immediately. Ask only for truly blocking missing facts;
+  never use the Ask card to present a plan, workflow analysis, or optional creative
+  suggestions.
   Do NOT trigger if image generation is merely one sub-step within a larger
   multi-step task (e.g. "write a report and add an image"). Do NOT trigger
   for text content, quizzes, reports, summaries, or any non-visual task.
+
+runtime:
+  post_step_checks:
+    - step_id: analyze_subject
+      tool: check_image_workflow_capabilities
+      arguments:
+        workflow_routing: workflow_routing
 
 tool_scripts:
   - path: scripts/tools.py
@@ -56,6 +66,8 @@ tool_scripts:
       - validate_image_ref
       - meme_add_caption
       - select_image_route
+      - select_image_postprocess_route
+      - check_image_workflow_capabilities
 
 steps:
   - id: analyze_subject
@@ -130,6 +142,37 @@ slots:
     cardinality: list
     ordered: true
 
+  - id: generated_base_image
+    label: Generated Base Image
+    type: image
+    cardinality: list
+    ordered: true
+    exposed: false
+
+  - id: generated_first_frame
+    label: Generated First Frame
+    type: image
+    cardinality: list
+    ordered: true
+
+  - id: generated_last_frame
+    label: Generated Last Frame
+    type: image
+    cardinality: list
+    ordered: true
+
+  - id: generation_reference_images
+    label: Generation References
+    type: image
+    cardinality: list
+    ordered: true
+
+  - id: enhancement_status
+    label: Enhancement Status
+    type: json
+    cardinality: single
+    exposed: false
+
   - id: meme_static_output
     label: Static Meme
     type: image
@@ -156,53 +199,112 @@ slots:
 
 ui:
   tabs:
-    - id: analysis
+    - id: analyze_subject
       label: Analysis
       layout: list
       slots:
         - id: subject_analysis
 
-    - id: materials
+    - id: collect_materials
       label: Materials
       layout: grid
       slots:
         - id: material_images
         - id: material_summary
         - id: raw_source_image
+        - id: image_output
+      composite_behavior:
+        hide_empty_columns: true
+        empty_column_scope: selected
 
-    - id: prompt
+    - id: optimize_prompt
       label: Prompt
       layout: list
       slots:
         - id: prompt_used
         - id: meme_generation_plan
 
-    - id: result
-      label: Result
+    - id: generate_image
+      label: Generate Image
       layout: composite
+      composite_tab_position: left
       slots:
         - id: generated_image_output
+        - id: generated_first_frame
+        - id: generated_last_frame
+        - id: generation_reference_images
+      composite_layout:
+        direction: row
+        children:
+          - slot: generated_image_output
+          - slot: generated_first_frame
+          - slot: generated_last_frame
+          - slot: generation_reference_images
+      composite_behavior:
+        hide_empty_columns: true
+        empty_column_scope: selected
+
+    - id: enhance_image
+      label: Enhance Image
+      layout: composite
+      slot_scope: selected
+      composite_tab_position: left
+      slots:
+        - id: generated_first_frame
+        - id: generated_base_image
+        - id: generated_last_frame
+        - id: material_images
         - id: meme_static_output
-        - id: image_output
         - id: gif_output
         - id: enhanced_image_output
         - id: video_output
       composite_layout:
-        - generated_image_output
-        - meme_static_output
-        - image_output
-        - gif_output
-        - enhanced_image_output
-        - video_output
+        direction: row
+        children:
+          - weight: 1
+            slot: generated_first_frame
+          - weight: 1
+            slot: generated_base_image
+          - weight: 1
+            slot: generated_last_frame
+          - weight: 1
+            slot: material_images
+          - weight: 1
+            slot: video_output
+          - weight: 1
+            slot: gif_output
+          - weight: 1
+            slot: meme_static_output
+          - weight: 1
+            slot: enhanced_image_output
       composite_behavior:
         hide_empty_columns: true
         empty_column_scope: selected
+        repeat_single_slots:
+          - generated_first_frame
+          - generated_base_image
+          - generated_last_frame
+          - material_images
         mutually_exclusive:
           - slots:
+              - generated_first_frame
+              - generated_base_image
+              - generated_last_frame
+              - material_images
+            prefer:
+              - generated_first_frame
+              - generated_base_image
+              - material_images
+              - generated_last_frame
+          - slots:
               - gif_output
+              - video_output
+              - meme_static_output
               - enhanced_image_output
             prefer:
               - gif_output
+              - video_output
+              - meme_static_output
               - enhanced_image_output
 
 i18n:
@@ -215,10 +317,11 @@ i18n:
       generate_image: {label: 生成图片}
       enhance_image: {label: 图片增强}
     tabs:
-      analysis: {label: 分析}
-      materials: {label: 素材}
-      prompt: {label: 提示词}
-      result: {label: 结果}
+      analyze_subject: {label: 分析}
+      collect_materials: {label: 素材}
+      optimize_prompt: {label: 提示词}
+      generate_image: {label: 生成}
+      enhance_image: {label: 增强}
     slots:
       subject_analysis: {label: 主体分析}
       material_images: {label: 参考素材}
@@ -227,6 +330,11 @@ i18n:
       prompt_used: {label: 优化后的提示词}
       meme_generation_plan: {label: 表情包生成计划}
       generated_image_output: {label: 生成图片}
+      generated_base_image: {label: 基础图片}
+      generated_first_frame: {label: 首帧}
+      generated_last_frame: {label: 尾帧}
+      generation_reference_images: {label: 参考图}
+      enhancement_status: {label: 后处理状态}
       meme_static_output: {label: 静态表情包}
       enhanced_image_output: {label: 增强图片}
       image_output: {label: 原始图片}

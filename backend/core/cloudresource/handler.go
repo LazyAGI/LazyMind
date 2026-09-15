@@ -104,18 +104,34 @@ func replyError(w http.ResponseWriter, err error) {
 	status := http.StatusBadGateway
 	switch {
 	case errors.Is(err, ErrSessionRequired):
-		status = http.StatusUnauthorized
+		common.ReplyErr(w, "LazyMind Cloud login is required", http.StatusUnauthorized)
+		return
 	case errors.Is(err, ErrPresenceConflict):
 		status = http.StatusConflict
 	default:
 		var cloudErr *cloudclient.CloudError
 		if errors.As(err, &cloudErr) {
+			if cloudErr.HTTPStatus == http.StatusUnauthorized {
+				common.ReplyErr(w, "LazyMind Cloud login is required", http.StatusUnauthorized)
+				return
+			}
+			if cloudErr.RetryAfterSeconds != nil {
+				w.Header().Set("Retry-After", strconv.Itoa(*cloudErr.RetryAfterSeconds))
+			}
 			switch cloudErr.HTTPStatus {
 			case http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden,
-				http.StatusNotFound, http.StatusConflict, http.StatusTooManyRequests:
+				http.StatusNotFound, http.StatusConflict, http.StatusTooManyRequests,
+				http.StatusPreconditionFailed, http.StatusPreconditionRequired, http.StatusUnprocessableEntity, http.StatusServiceUnavailable:
 				status = cloudErr.HTTPStatus
 			}
 		}
 	}
-	common.ReplyErr(w, "LazyMind Cloud resource request failed", status)
+	code := common.ErrorCodeFromHTTPStatus(status)
+	if status == http.StatusPreconditionFailed {
+		code = common.ErrCodeConflict
+	}
+	if status == http.StatusPreconditionRequired {
+		code = common.ErrCodeInvalidParams
+	}
+	common.ReplyAppErr(w, common.NewAppError(status, code, "Cloud resource request failed"))
 }

@@ -212,6 +212,7 @@ import {
   humanizeFinalResultReason,
   normalizeThreadStepStatus,
   isThreadFlowRunning,
+  mergeThreadStepStatuses,
   getSilentRestoreRequestConfig,
   normalizeThreadStepListPayload,
   buildThreadStepStatusByStage,
@@ -651,10 +652,12 @@ export function SelfEvolutionPageController({
     [threadEvents],
   );
   const threadStepStatusByStage = useMemo(
-    () => ({
-      ...buildThreadStepStatusByStage(threadStepList, threadFlowStatus),
-      ...threadTerminalStatusByStage,
-    }),
+    () =>
+      mergeThreadStepStatuses(
+        buildThreadStepStatusByStage(threadStepList, threadFlowStatus),
+        threadTerminalStatusByStage,
+        threadFlowStatus,
+      ),
     [threadFlowStatus, threadStepList, threadTerminalStatusByStage],
   );
   const stepListCheckpointPrompt = useMemo(
@@ -812,14 +815,6 @@ export function SelfEvolutionPageController({
     applyLocalStageStreamCompletion("dataset");
   }, [applyLocalStageStreamCompletion, streamingDatasetProgress]);
 
-  useEffect(() => {
-    const { current, total } = streamingAnalysisProgress;
-    if (!total || current < total) {
-      return;
-    }
-    applyLocalStageStreamCompletion("analysis");
-  }, [applyLocalStageStreamCompletion, streamingAnalysisProgress]);
-
   const isSendDisabled = !prompt.trim() || isSendingMessage;
   const activeStepText = useMemo(() => {
     const activeStep = processDashboard.activeStep;
@@ -896,6 +891,29 @@ export function SelfEvolutionPageController({
     () => buildStreamingAnalysisCaseRows(threadEvents),
     [threadEvents],
   );
+
+  useEffect(() => {
+    const { current, total } = streamingAnalysisProgress;
+    const classifiedCount = streamingAnalysisRows.filter(
+      (row) => row.classifyCaseStatus === "done",
+    ).length;
+    const effectiveTotal = Math.max(total, streamingAnalysisRows.length);
+    const effectiveCurrent = Math.max(current, classifiedCount);
+    if (!effectiveTotal || effectiveCurrent < effectiveTotal) {
+      return;
+    }
+    const allClassified =
+      streamingAnalysisRows.length >= effectiveTotal &&
+      streamingAnalysisRows.every((row) => row.classifyCaseStatus === "done");
+    if (!allClassified) {
+      return;
+    }
+    applyLocalStageStreamCompletion("analysis");
+  }, [
+    applyLocalStageStreamCompletion,
+    streamingAnalysisProgress,
+    streamingAnalysisRows,
+  ]);
   const repairTraceRows = useMemo(
     () =>
       buildRepairTraceRows(threadEvents, {
@@ -6355,23 +6373,6 @@ export function SelfEvolutionPageController({
     }
     return "pending";
   };
-  const getArtifactStatusLabel = (item: ArtifactPanelItem) => {
-    const state = workflowResults[item.kind];
-    if (state.loading) {
-      return t("selfEvolutionRun.artifactLoadingStatus");
-    }
-    if (state.error) {
-      return t("selfEvolutionRun.artifactErrorStatus");
-    }
-    if (state.loaded) {
-      return isEmptyResultPayload(state.data)
-        ? t("selfEvolutionRun.artifactNoResult")
-        : t("selfEvolutionRun.artifactLoaded");
-    }
-    return localizedGetStepStatusLabel(
-      getNavigationStepStatus(item),
-    );
-  };
   const getStepNavigationTitle = (
     item: ArtifactPanelItem | undefined,
     step: ThreadStepSummary | undefined,
@@ -6426,9 +6427,7 @@ export function SelfEvolutionPageController({
                 <span
                   className={`self-evolution-artifact-item-status is-${stepStatus}`}
                 >
-                  {isStepLoading
-                    ? t("selfEvolutionRun.artifactLoadingStatus")
-                    : localizedGetStepStatusLabel(stepStatus)}
+                  {localizedGetStepStatusLabel(stepStatus)}
                 </span>
               </button>
             </div>
@@ -6476,7 +6475,7 @@ export function SelfEvolutionPageController({
               <span
                 className={`self-evolution-artifact-item-status is-${stepStatus}`}
               >
-                {getArtifactStatusLabel(item)}
+                {localizedGetStepStatusLabel(stepStatus)}
               </span>
             </button>
           );

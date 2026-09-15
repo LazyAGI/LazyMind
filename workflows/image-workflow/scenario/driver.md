@@ -5,126 +5,94 @@ describing what was produced and whether it meets the criteria below.
 ## Step evaluation rules
 
 ### analyze_subject
-- Acceptable when `subject_analysis` is saved (50+ words, user-facing natural language).
-- `subject_analysis` must NOT contain WORKFLOW:/NEXT_STEPS:/SKIP_STEPS: lines or step-id routing lists.
-- `workflow_routing` must be saved with WORKFLOW, NEXT_STEPS, and SKIP_STEPS on separate lines.
-- Analyze step is text-only planning. Do NOT call kb_search/web_search/image_search_tool/image_search_and_validate here.
-- The next step is selected dynamically from semantic material dependency, not a fixed workflow-name list.
-- When the request is self-contained and external material would not materially change correctness,
-  `workflow_routing` must skip `collect_materials` and continue directly to `optimize_prompt`.
-- When the request depends on an upload, KB, explicit search/reference, or externally identifiable
-  subject/style, `workflow_routing` must include `collect_materials` before `optimize_prompt`.
-- For REFERENCE_GENERATE, missing material_images at this step is expected; collect should be selected next.
-- For FIND_AND_EDIT, EDIT_UPLOAD, or ANIMATE_UPLOAD, missing raw source image or edit/motion prompt is expected; next step is `collect_materials`.
-- Not acceptable when `material_images`, `raw_source_image`, `image_output`, or `prompt_used` were saved here (they belong in later steps).
-- Not acceptable when the artifact is missing, too short, or routing metadata is missing from `workflow_routing`.
-- Not acceptable when filters.kb_id was set but subject_analysis omits KB style findings from kb_search.
-- After 2+ consecutive failures for this step, state that the step should not be retried again.
+- `subject_analysis` must be user-facing natural language (50+ words) and must not contain
+  WORKFLOW/REQUIRES/NEXT_STEPS/SKIP_STEPS lines or step-id lists.
+- `workflow_routing` must contain exactly one WORKFLOW, REQUIRES, NEXT_STEPS, and SKIP_STEPS line.
+  REQUIRES may contain only image_generator, image_editor, video_generator, ffmpeg, or none.
+- Every route must list `generate_image`. Edit, animation,
+  meme, and caption routes must place `enhance_image` after `generate_image`; ordinary still
+  routes must skip enhancement.
+- REQUIRES must match the exact behavior: fresh base=image_generator; source visual
+  edit=image_editor; source caption-only=none; video/GIF=video_generator+ffmpeg plus
+  image_generator only when a required first/explicit tail frame must be generated; reference-only
+  Seedance input does not require image_generator.
+- Collection is included only for an upload, KB, explicit search/reference, or externally
+  identifiable subject/style. Analysis is text-only and must not call collection/media tools.
+- Do not accept routing metadata in subject_analysis or images/prompts saved by this step.
+- After workflow_routing is saved, the Host must run `check_image_workflow_capabilities` exactly
+  once as a deterministic post-step check before accepting this Attempt. It must not start a
+  second SubAgent. MEDIA_CAPABILITY_DEPENDENCY_MISSING is terminal: do not generate media, retain
+  every Chinese reason/settings_url for the Chat jump card, and do not retry automatically.
 
 ### collect_materials
-- This step runs only when analyze_subject selected it, and remains the only material/info collection step.
-- It may use kb_search and web_search, plus image_search_and_validate for deterministic web-image validation. Pass direct image fields from web_search as candidate_urls without rewriting signed URLs.
-- For REFERENCE_GENERATE, 1–3 validated `material_images` must be saved (never more than 3); next step is `optimize_prompt`.
-- For FIND_AND_EDIT, 1–3 validated `material_images` must be saved (never more than 3); each web URL must come verbatim from `image_search_and_validate.selected`.
-- For CREATE_NEW / KB_STYLE, collecting 1–3 useful references is recommended before optimize_prompt.
-- For CREATE_ANIMATED, material_images are optional (0–3) when the text description is already clear.
-  If the user asked to find a photo first, save that photo as `image_output` (plus material_images).
-- For FIND_AND_EDIT / EDIT_UPLOAD, `raw_source_image` must be saved;
-  EDIT_UPLOAD must also save the same upload as `material_images`.
-- For ANIMATE_UPLOAD, `image_output` must be saved and the same upload as `material_images`.
-  `prompt_used` is optional here — next step is `optimize_prompt`.
-- For CREATE_STATIC_MEME, source/character/style references are optional (0–3). When the
-  request edits an uploaded/searched source and then adds a caption, the first source must remain
-  authoritative for image_editor and must not be treated as a disposable style suggestion.
-- For CREATE_ANIMATED_MEME, an uploaded or searched character reference must also be
-  saved as `image_output`; text-only requests may leave it empty.
-- For CREATE_MEME_PACK, at most 3 shared character/style references may be saved; collecting
-  a separate source image for every communication state is not acceptable.
-- `material_summary` should be saved with a brief Chinese summary of search/selection (what was found, which image was chosen, gaps). Search, validation, valid, and selected counts must exactly match `image_search_and_validate` instead of being estimated.
-- Not acceptable when every candidate URL fails validation, no required artifacts were saved, or web tools are unavailable when they are required.
-- After 2+ consecutive failures, state that the step should not be retried again.
+- This remains the only external material collection step and runs only when routing selected it.
+- Uploaded files are resolved with find_user_attachment; web images come verbatim from
+  image_search_and_validate.selected and no more than three material_images are saved.
+- REFERENCE_GENERATE needs 1-3 validated references. FIND_AND_EDIT/EDIT_UPLOAD need a validated
+  raw_source_image. Animated source routes need image_output as the first frame.
+- `material_summary` must state exact search/validation/selection counts; do not turn a missing
+  required source into a successful summary.
 
 ### optimize_prompt
-- Acceptable when `prompt_used` is saved in English.
-- For CREATE_NEW / KB_STYLE / REFERENCE_GENERATE: generation prompt of at least 30 words; next step is `generate_image`.
-- For FIND_AND_EDIT / EDIT_UPLOAD: clear edit instruction when `raw_source_image` is available; next step is `enhance_image`.
-- For CREATE_ANIMATED / ANIMATE_UPLOAD: clear English **video motion** prompt; next step is `generate_image`.
-- For CREATE_STATIC_MEME: `meme_generation_plan` must use mode=static_meme, delivery=static,
-  count=1 and contain exactly one complete item.
-- Any static result with an explicit post-layout caption/subtitle or caption-layout attributes is
-  CREATE_STATIC_MEME even when the user never says meme/表情包, uploads/searches a source, or also
-  asks for a visual edit; it must not fall back to CREATE_NEW, FIND_AND_EDIT, or EDIT_UPLOAD.
-- For CREATE_ANIMATED_MEME: the plan must use mode=animated_meme, delivery=animated,
-  count=1 and contain exactly one complete item.
-- For CREATE_MEME_PACK: the plan must use mode=meme_pack; item count must equal count,
-  states must be distinct, static count must not exceed 12, and animated count must not exceed 5.
-- Every planned meme item needs caption, caption_box, caption_style, communication_task, English
-  image_prompt, and English motion_prompt. caption_style must provide LLM-selected #RRGGBB
-  text_color/stroke_color plus stroke_width_ratio from 0.03 to 0.16. Meme media prompts must
-  prohibit model-rendered text; caption_box defaults to [0.15, 0.75, 0.85, 0.93] unless the user
-  explicitly requests another position.
-- For source edit + subtitle requests, image_prompt must contain only the non-text visual edit and
-  preserve unrequested source content; the exact subtitle belongs only in caption and is applied
-  later by meme_add_caption. Physical-object/scene-integrated text is not a post-caption.
-- Not acceptable when the artifact is missing, too short, or not in English.
-- After 2+ consecutive failures, state that the step should not be retried again.
+- `prompt_used` must be English and complete for the selected route. Every route advances to
+  `generate_image`; none may jump directly to `enhance_image`.
+- Edit prompts contain Requested edit, Edit scope, Preserve, and Do not clauses.
+- Generic animation prompts contain COUNT (1–10), FIRST_FRAME_PROMPT, LAST_FRAME_PROMPT, and
+  MOTION_PROMPT so multi-GIF requests keep stable page indexes.
+- Meme plans have the correct mode/delivery/count and exactly count distinct items. Every item
+  contains caption, caption_box, caption_style, communication_task, English image_prompt and
+  motion_prompt, plus nullable last_frame_prompt. Model prompts prohibit rendered text; exact
+  display text stays in caption. Animated packs may contain up to 10 items.
+- Static source-edit+subtitle requests keep only the non-text visual edit in image_prompt.
 
 ### generate_image
-- Acceptable when required outputs for the workflow are saved.
-- For CREATE_NEW / KB_STYLE / REFERENCE_GENERATE: still image via `image_generator` into `generated_image_output` (sort_order=1).
-- For CREATE_ANIMATED / ANIMATE_UPLOAD: in one turn emit N parallel `video_generator`
-  tool_calls (each prompt marked "Sticker i of N"; video side capped at 3 concurrent),
-  then in the next turn emit N parallel `video_to_gif` tool_calls; afterward
-  **sequentially** append artifacts in i-order (**omit sort_order** on first full run;
-  use sort_order=k only on partial retry to overwrite row k). Save GIF as `gif_output`;
-  when an origin exists append the same origin into `image_output` in the same order
-  (never put GIF into image_output). Use caption='Sticker i' on saves.
-- N comes from the user request (e.g. 三个→3), default 1.
-- For CREATE_STATIC_MEME: generate an uncaptioned base, call `meme_add_caption` with the planned
-  caption, box, text color, stroke color, and stroke ratio, then save exactly
-  that captioned image to `meme_static_output`; do not save the base or put it in `generated_image_output`.
-- For CREATE_STATIC_MEME with a source visual edit, image_editor must run first using the
-  authoritative source and a text-free edit prompt; meme_add_caption must run second.
-- For static CREATE_MEME_PACK: caption each successful base with `meme_add_caption`, then save
-  captioned `meme_static_output` entries in plan item order.
-- For CREATE_ANIMATED_MEME and animated CREATE_MEME_PACK: use each plan item's own motion_prompt
-  to generate text-free media, caption each converted GIF with `meme_add_caption`, then save
-  GIF/video outputs in the same item order.
-- A malformed or over-limit meme plan must fail before any paid generation tool is called.
-- `video_output` is optional; when saved it may appear in the Result tab (empty columns are hidden).
-- Not acceptable when generation/tools failed, GIF was saved into `image_output`, or animated flow produced no `gif_output`.
+- At least one valid `generated_base_image` produced by this attempt is mandatory for every route.
+- Ordinary still routes call image_generator, save the same path to generated_image_output, and
+  end. Existing-source edit routes stage the source as the base without editing it yet.
+- Meme/animation routes generate or stage text-free bases according to REQUIRES. This step never
+  calls image_editor, video_generator, video_to_gif, or meme_add_caption.
+- Animation routes expose real first frames, only requested/designated last frames, and every
+  collected/uploaded reference image in their dedicated optional slots.
+- Generic animation produces exactly COUNT bases (1–10); a ten-GIF request therefore creates ten
+  aligned composite pages.
+- Each result page renders one available input on the left and one output on the right, without
+  inner material tabs or empty placeholders. A sole legacy reference may repeat across pages;
+  video is preferred when both video and GIF artifacts exist.
+- Base lists preserve item order and omit sort_order on first full runs.
+- If a configured image model errors or returns no usable path and zero base images exist, the
+  step must fail. The concrete model/tool error must be retained for Chat; placeholder paths,
+  status text as images, and empty success are unacceptable.
+- `select_image_postprocess_route` must send ordinary stills to __end__ and every edit,
+  animation, GIF, meme, or caption route to enhance_image.
 
 ### enhance_image
-- Acceptable when `enhanced_image_output` is saved with a valid local path or http(s) URL.
-- The source image should have been validated before editing when validation was still uncertain.
-- The `image_editor` prompt must faithfully follow the user's explicit request, name the
-  smallest sufficient edit scope, and explicitly preserve all unrequested regions and properties.
-- Local edits must not regenerate, beautify, reframe, restyle, add, remove, or correct unrelated
-  image content. Ambiguous details must remain unchanged rather than be guessed.
-- Not acceptable when the edited image artifact is missing or the URL/path is invalid.
-- After 2+ consecutive failures, state that the step should not be retried again.
+- Every result must derive from generated_base_image and a real route-appropriate output must be
+  saved before `enhancement_status` may say completed.
+- Edit routes save enhanced_image_output using the narrow four-clause preservation contract.
+- Meme routes that require a visual edit run image_editor here before the final postprocessor.
+- Static caption/meme routes save meme_static_output produced by meme_add_caption with the exact
+  planned caption, box, and style.
+- Animated routes run video_generator -> video_to_gif; meme GIFs then run meme_add_caption.
+  Use either explicit first_frame_url plus optional last_frame_url, or shared reference_urls;
+  never mix Seedance frame mode with reference mode. Save outputs in item order and never put a
+  GIF into image_output or generated_base_image.
+- A video fallback is allowed when GIF conversion alone fails, but exact failures must be reported.
+  Zero final outputs or a completion status without final media is unacceptable.
 
 ## Rewind guidance (when output is NOT acceptable)
 
-ChatAgent can rewind to any previously succeeded step without explicit graph edges.
-Name the **earliest upstream step** that should be re-run so ChatAgent can call
-`advance_step_and_hand_off(step_id=<that_step>, rewind=True, ...)`.
+ChatAgent can rewind to a previously succeeded step. Name the earliest step that must change.
 
 | Current step | Problem | Rewind to |
 |---|---|---|
-| analyze_subject | Wrong WORKFLOW, subject, or KB style summary | `analyze_subject` (retry) |
-| collect_materials | Wrong source photo or failed validation | `collect_materials` (retry) |
-| collect_materials | Wrong WORKFLOW or subject routing | `analyze_subject` |
-| optimize_prompt | Prompt misses KB style or subject details | `analyze_subject` |
-| optimize_prompt | Prompt wording/style only, subject is fine | `optimize_prompt` (retry) |
-| generate_image | Image/GIF off-topic or wrong subject | `analyze_subject` |
-| generate_image | Composition/style/motion wrong but subject OK | `optimize_prompt` |
-| generate_image | Same prompt, just regenerate (still or sticker) | `generate_image` (retry) |
-| generate_image | ANIMATE_UPLOAD wrong first-frame upload | `collect_materials` |
-| enhance_image | Wrong source photo or edit target | `collect_materials` |
-| enhance_image | Edit instruction wrong, source photo OK | `optimize_prompt` or `collect_materials` |
-| enhance_image | Minor edit issue, same source/instruction OK | `enhance_image` (retry) |
-| enhance_image | User wants a brand-new text-to-image result | `generate_image` or `optimize_prompt` |
+| analyze_subject | Wrong behavior, dependency list, subject, or material decision | `analyze_subject` |
+| collect_materials | Wrong/missing source or validation | `collect_materials` |
+| optimize_prompt | Prompt wording/style wrong | `optimize_prompt` |
+| generate_image | Base off-topic because analysis is wrong | `analyze_subject` |
+| generate_image | Composition/style wrong but analysis is sound | `optimize_prompt` |
+| generate_image | Same prompt should simply regenerate | `generate_image` |
+| enhance_image | Wrong base/source | `generate_image` or `collect_materials` |
+| enhance_image | Edit/motion/caption plan wrong | `optimize_prompt` |
+| enhance_image | Same inputs should retry post-processing | `enhance_image` |
 
-For retries of the **current** step, say e.g. "re-run generate_image with the same prompt".
-For upstream fixes, say e.g. "subject analysis misidentified the subject; re-run analyze_subject".
+Do not recommend retrying a missing model or FFmpeg until the user has configured it.

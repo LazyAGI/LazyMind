@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -108,7 +109,7 @@ async def run_repair_loop(workspace: Mapping[str, Any], cases: tuple[Mapping[str
         safe_emit(trace, 'repair.loop_completed', status='failed', terminal=True,
                   payload={'reason': exc.reason})
         raise
-    attempts, session_id = [], ''
+    attempts = []
     budget = _int(policy.get('repair_attempt_budget'), 10, 1, 20)
     previous_failure, repeated_failure_count = '', 0
     allow_fallback_patch = True
@@ -119,18 +120,60 @@ async def run_repair_loop(workspace: Mapping[str, Any], cases: tuple[Mapping[str
                   payload={'budget': budget, 'localization_status': localization.get('status')})
         reset_workspace(root)
         artifact_dir = root / '.evo_repair_logs' / 'opencode' / f'attempt_{attempt_no}'
-        task = _task_card(plan, workspace, localization, attempt_no, artifact_dir / 'worker_report.json', attempts)
-        run = run_opencode_streaming(
-            workdir=str(root),
-            prompt=json.dumps(task, ensure_ascii=False, indent=2),
-            artifact_dir=artifact_dir,
-            session_id=session_id,
-            config=opencode_config,
-            timeout_s=_int(policy.get('opencode_timeout_s') or os.getenv('LAZYMIND_EVO_CODE_TIMEOUT_S'),
-                           900, 30, 7200),
-            trace=trace,
-            attempt=attempt_no,
-        )
+        task = _task_card(plan, workspace, localization, attempt_no, attempts)
+        try:
+            run = run_opencode_streaming(
+                workdir=str(root),
+                prompt=json.dumps(task, ensure_ascii=False, indent=2),
+                artifact_dir=artifact_dir,
+                session_id='',
+                config=opencode_config,
+                timeout_s=_int(policy.get('opencode_timeout_s') or os.getenv('LAZYMIND_EVO_CODE_TIMEOUT_S'),
+                               900, 30, 7200),
+                trace=trace,
+                attempt=attempt_no,
+            )
+            for correction in range(1, 3):
+                report_path = artifact_dir / 'worker_report.json'
+                report = read_worker_report(report_path)
+                diff_info = workspace_diff(root)
+                if diff_info.get('diff'):
+                    if report.get('status') != 'edited':
+                        _write_host_worker_report(report_path, diff_info)
+                    break
+                if (
+                    run.returncode != 0
+                    or run.last_error
+                ):
+                    break
+                correction_dir = artifact_dir.parent / f'{artifact_dir.name}_correction_{correction}'
+                run = run_opencode_streaming(
+                    workdir=str(root),
+                    prompt=json.dumps({
+                        'mode': 'repair_patch_required_continuation',
+                        'attempt': attempt_no,
+                        'correction': correction,
+                        'instruction': (
+                            'The previous pass did not satisfy the repair contract. '
+                            'Do not stop at analysis. Make the smallest in-scope source edit now, '
+                            'and leave a non-empty git diff. The host records the diff report.'
+                        ),
+                        'allowed_roots': ['algorithm/lazymind/chat', 'algorithm/lazymind/parsing'],
+                    }, ensure_ascii=False, indent=2),
+                    artifact_dir=correction_dir,
+                    session_id=run.session_id,
+                    config=opencode_config,
+                    timeout_s=_int(
+                        policy.get('opencode_timeout_s') or os.getenv('LAZYMIND_EVO_CODE_TIMEOUT_S'),
+                        900,
+                        30,
+                        7200,
+                    ),
+                    trace=trace,
+                    attempt=attempt_no,
+                )
+        finally:
+            _cleanup_opencode_runtime(root)
         report = read_worker_report(artifact_dir / 'worker_report.json')
         diff_info = workspace_diff(root)
         worker_failure = _repair_worker_failure(run, report, diff_info)
@@ -207,12 +250,10 @@ async def run_repair_loop(workspace: Mapping[str, Any], cases: tuple[Mapping[str
         if candidate_infra:
             allow_fallback_patch = False
             stop_reason_code = _text(candidate.get('early_stop_reason')) or 'candidate_service_failed'
-            session_id = ''
             break
         if failure_decision and not failure_decision.retryable:
             allow_fallback_patch = False
             stop_reason_code = failure_decision.reason_code
-            session_id = ''
             break
 
         fingerprint = attempt_failure_fingerprint(
@@ -224,7 +265,6 @@ async def run_repair_loop(workspace: Mapping[str, Any], cases: tuple[Mapping[str
         if repeated_failure_count >= REPEATED_FAILURE_LIMIT:
             stop_reason_code = 'repair_repeated_no_progress'
             break
-        session_id = (run.session_id or session_id) if diff_info.get('diff') and not worker_failure else ''
 
     fallback = _latest_prevalidated_patch(attempts) if allow_fallback_patch else {}
     if fallback:
@@ -339,7 +379,6 @@ def _task_card(
     workspace: Mapping[str, Any],
     localization: Mapping[str, Any],
     attempt: int,
-    report_path: Path,
     previous_attempts: list[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     prior = _attempt_feedback(previous_attempts or [])
@@ -369,19 +408,7 @@ def _task_card(
             'Read previous_attempts before editing; do not repeat a rejected strategy, file-only retry tweak, '
             'or metric-neutral change.',
             'If a previous attempt failed overall_score_gate, change the root-cause hypothesis before editing.',
-            f'Write a JSON worker report to {report_path.as_posix()}.',
         ],
-        'worker_report_schema': {
-            'status': 'edited',
-            'mode': 'patch',
-            'files_changed': ['algorithm/lazymind/chat/... or algorithm/lazymind/parsing/...'],
-            'confirmed_locations': [{'path': '...', 'symbol': '...', 'line_start': 1, 'line_end': 2,
-                                     'evidence': '...'}],
-            'touched_symbols': ['...'],
-            'change_intent': 'minimal behaviorful repair',
-            'risk': 'low|medium|high',
-            'notes': '',
-        },
     }
 
 
@@ -508,7 +535,7 @@ def _finish_without_patch(
         },
     )
     reset_workspace(root)
-    return _result(
+    result = _result(
         OUTCOME_FALLBACK_NO_CHANGE,
         plan,
         workspace,
@@ -519,6 +546,8 @@ def _finish_without_patch(
         trace_cursor(trace),
         reason_code=reason_code,
     )
+    shutil.rmtree(root, ignore_errors=True)
+    return result
 
 
 def _worker_failure(run: Any) -> str:
@@ -635,6 +664,29 @@ def _int(value: Any, default: int, low: int, high: int) -> int:
 
 def _text(value: Any) -> str:
     return str(value or '').strip()
+
+
+def _cleanup_opencode_runtime(root: Path) -> None:
+    shutil.rmtree(
+        root / '.evo_repair_logs' / 'opencode' / '_runtime',
+        ignore_errors=True,
+    )
+
+
+def _write_host_worker_report(path: Path, diff_info: Mapping[str, Any]) -> None:
+    try:
+        path.write_text(json.dumps({
+            'status': 'edited',
+            'mode': 'patch',
+            'files_changed': list(diff_info.get('files') or []),
+            'confirmed_locations': [],
+            'touched_symbols': [],
+            'change_intent': 'host-observed source diff',
+            'risk': 'medium',
+            'notes': 'OpenCode produced a diff; the host synthesized this report for validation.',
+        }, ensure_ascii=False, indent=2), encoding='utf-8')
+    except OSError:
+        return
 
 
 def _mapping(value: Any) -> Mapping[str, Any]:

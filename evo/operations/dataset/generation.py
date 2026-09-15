@@ -1,4 +1,5 @@
 import json
+import unicodedata
 from collections import Counter
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any
@@ -86,12 +87,16 @@ def prepare_case(config: Mapping[str, Any], snapshot: Mapping[str, Any], case_id
     units = [unit for unit in snapshot.get('source_units') or [] if isinstance(unit, Mapping)]
     if not units:
         raise ValueError('corpus snapshot has no source units')
+    required_chunks = _unique_texts(as_list(guidance.get('required_chunks')))
+    if not required_chunks:
+        units = [unit for unit in units if _source_unit_is_usable(unit)]
+        if not units:
+            raise ValueError('corpus snapshot has no readable source units')
     sources = list(dict.fromkeys(as_text(unit.get('source_id')) for unit in units if as_text(unit.get('source_id'))))
     if sources:
         source = sources[index % len(sources)]
         units = [unit for unit in units if as_text(unit.get('source_id')) == source]
     qtype = _choice(config, 'question_type', QUESTION_TYPES, index)
-    required_chunks = _unique_texts(as_list(guidance.get('required_chunks')))
     if required_chunks:
         contexts = _required_contexts(units, required_chunks)
     else:
@@ -284,6 +289,29 @@ def _context(unit: Mapping[str, Any]) -> dict[str, str]:
         'unit_type': as_text(unit.get('unit_type') or 'paragraph'),
         'content_preview': as_text(unit.get('content'))[:1200],
     }
+
+
+def _source_unit_is_usable(unit: Mapping[str, Any]) -> bool:
+    text = as_text(unit.get('content'))
+    if not text or not as_text(unit.get('chunk_id')):
+        return False
+    if any(unicodedata.category(character).startswith('C') and not character.isspace() for character in text):
+        return False
+    scripts: Counter[str] = Counter()
+    for character in text:
+        if not character.isalpha():
+            continue
+        name = unicodedata.name(character, '')
+        if name.startswith('CJK UNIFIED') or name.startswith('CJK COMPATIBILITY'):
+            scripts['HAN'] += 1
+        elif name:
+            scripts[name.split(' ', 1)[0]] += 1
+    letter_count = sum(scripts.values())
+    return not (
+        letter_count >= 6
+        and len(scripts) >= 4
+        and max(scripts.values(), default=0) / letter_count < 0.6
+    )
 
 
 def _choice(config: Mapping[str, Any], key: str, allowed: tuple[str, ...], index: int) -> str:

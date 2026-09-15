@@ -5,11 +5,13 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -21,6 +23,11 @@ import (
 const (
 	maxTranscriptLine = 16 << 20
 	maxTurnRunes      = 1 << 20
+)
+
+var (
+	codexImagePathPattern   = regexp.MustCompile(`(?i)<image\b[^>]*\bpath="([^"]+)"[^>]*>`)
+	codexRequestBodyPattern = regexp.MustCompile(`(?im)^#+\s*My request(?: for Codex)?:\s*$`)
 )
 
 type cachedSession struct {
@@ -45,7 +52,9 @@ func nativeSession(path, provider, projectReference, projectName string, fullTra
 	if err != nil || !info.Mode().IsRegular() {
 		return chatagent.NativeSession{}, false
 	}
-	cacheKey := provider + "\x00" + path + "\x00" + strconv.FormatBool(fullTranscript)
+	cacheKey := strings.Join([]string{
+		provider, path, projectReference, projectName, strconv.FormatBool(fullTranscript),
+	}, "\x00")
 	if cached, ok := nativeSessionCache.Load(cacheKey); ok {
 		entry := cached.(cachedSession)
 		if entry.size == info.Size() && entry.modTime.Equal(info.ModTime()) {
@@ -102,7 +111,7 @@ func ResolveInvocation(provider, toolName string, now time.Time) (InvocationSour
 	if err != nil {
 		return InvocationSource{}, false
 	}
-	root := filepath.Join(home, ".codebuddy", "projects")
+	root := filepath.Join(home, ".workbuddy", "projects")
 	cursorByID := map[string]cursorChat{}
 	if provider == "cursor" {
 		root = filepath.Join(home, ".cursor", "projects")
@@ -111,9 +120,7 @@ func ResolveInvocation(provider, toolName string, now time.Time) (InvocationSour
 			return InvocationSource{}, false
 		}
 		for _, chat := range chats {
-			if chat.HasConversation && !isLazyMindWorkspace(chat.CWD) {
-				cursorByID[chat.ID] = chat
-			}
+			cursorByID[chat.ID] = chat
 		}
 	}
 	cutoff := now.Add(-5 * time.Minute)
@@ -128,7 +135,11 @@ func ResolveInvocation(provider, toolName string, now time.Time) (InvocationSour
 		}
 		if provider == "cursor" {
 			threadID := filepath.Base(filepath.Dir(path))
-			if _, resumable := cursorByID[threadID]; !resumable {
+			workspace, _, workspaceFound := cursorTranscriptProject(path, home)
+			if chat, found := cursorByID[threadID]; found && strings.TrimSpace(chat.CWD) != "" {
+				workspace, workspaceFound = chat.CWD, true
+			}
+			if workspaceFound && isLazyMindWorkspace(workspace) {
 				return nil
 			}
 		}
@@ -146,7 +157,8 @@ func ResolveInvocation(provider, toolName string, now time.Time) (InvocationSour
 	projectReference, projectName := "", ""
 	if provider == "cursor" {
 		threadID := filepath.Base(filepath.Dir(bestPath))
-		if chat, found := cursorByID[threadID]; found {
+		projectReference, projectName, _ = cursorTranscriptProject(bestPath, home)
+		if chat, found := cursorByID[threadID]; found && strings.TrimSpace(chat.CWD) != "" {
 			projectReference = chat.CWD
 			projectName = filepath.Base(filepath.Clean(chat.CWD))
 		}
@@ -253,7 +265,7 @@ func findNativeSessionPath(ctx context.Context, provider, threadID string) (stri
 	if err != nil {
 		return "", err
 	}
-	root := filepath.Join(home, ".codebuddy", "projects")
+	root := filepath.Join(home, ".workbuddy", "projects")
 	if provider == "cursor" {
 		root = filepath.Join(home, ".cursor", "projects")
 	} else if provider != "workbuddy" {
@@ -345,6 +357,9 @@ func transcriptTurns(path, provider string) []chatagent.NativeTurn {
 		}
 		current.User = compactText(current.User, maxTurnRunes)
 		current.Assistant = compactText(current.Assistant, maxTurnRunes)
+		if provider == "codex" {
+			current.Images = codexUserImages(current.User)
+		}
 		turns = append(turns, *current)
 		current = nil
 	}
@@ -358,6 +373,13 @@ func transcriptTurns(path, provider string) []chatagent.NativeTurn {
 			if text == "" {
 				continue
 			}
+			if current != nil && current.Assistant == "" && equivalentCodexUserText(current.User, text) {
+				current.User = text
+				if !message.timestamp.IsZero() {
+					current.CreatedAt = message.timestamp
+				}
+				continue
+			}
 			flush()
 			turnID := message.id
 			if turnID == "" {
@@ -366,7 +388,10 @@ func transcriptTurns(path, provider string) []chatagent.NativeTurn {
 			current = &chatagent.NativeTurn{ID: turnID, User: text, CreatedAt: message.timestamp, Managed: managed}
 		case "identity":
 			if current != nil && message.id != "" && cleanUserText(message.text) == current.User {
-				current.ID, current.Managed = message.id, true
+				// Codex emits user_message for ordinary Desktop turns too.  It is
+				// useful as the stable turn identity, but it does not mean that the
+				// turn was launched and persisted by LazyMind.
+				current.ID = message.id
 			}
 		case "assistant":
 			if current != nil && message.text != "" {
@@ -383,6 +408,34 @@ func transcriptTurns(path, provider string) []chatagent.NativeTurn {
 	}
 	flush()
 	return turns
+}
+
+func codexUserImages(text string) []chatagent.NativeImage {
+	const maxImageBytes = 5 << 20
+	images := make([]chatagent.NativeImage, 0)
+	for _, match := range codexImagePathPattern.FindAllStringSubmatch(text, 4) {
+		if len(match) < 2 {
+			continue
+		}
+		path := filepath.Clean(strings.TrimSpace(match[1]))
+		switch strings.ToLower(filepath.Ext(path)) {
+		case ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp":
+		default:
+			continue
+		}
+		info, err := os.Stat(path)
+		if err != nil || !info.Mode().IsRegular() || info.Size() > maxImageBytes {
+			continue
+		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		images = append(images, chatagent.NativeImage{
+			Name: filepath.Base(path), Base64: base64.StdEncoding.EncodeToString(content),
+		})
+	}
+	return images
 }
 
 func transcriptTitle(path, provider string) string {
@@ -432,9 +485,6 @@ func decodeTranscriptMessage(line []byte, provider string) transcriptMessage {
 			return transcriptMessage{}
 		}
 		role := stringValue(payload["role"])
-		if phase := stringValue(payload["phase"]); role == "assistant" && phase != "" && phase != "final_answer" {
-			return transcriptMessage{}
-		}
 		id := stringValue(payload["clientId"])
 		if id == "" {
 			id = stringValue(payload["id"])
@@ -470,6 +520,19 @@ func decodeTranscriptMessage(line []byte, provider string) transcriptMessage {
 	return transcriptMessage{}
 }
 
+func equivalentCodexUserText(left, right string) bool {
+	canonical := func(value string) string {
+		if marker := strings.LastIndex(strings.ToLower(value), "my request for codex:"); marker >= 0 {
+			value = value[marker+len("my request for codex:"):]
+		}
+		if image := strings.Index(strings.ToLower(value), "<image"); image >= 0 {
+			value = value[:image]
+		}
+		return strings.Join(strings.Fields(value), " ")
+	}
+	return canonical(left) != "" && canonical(left) == canonical(right)
+}
+
 func contentText(value any) string {
 	items, ok := value.([]any)
 	if !ok {
@@ -501,11 +564,23 @@ func cleanUserText(text string) string {
 			return compactText(text[start:start+end], maxTurnRunes)
 		}
 	}
+	if marker := codexRequestBodyMarker(text); marker >= 0 {
+		return compactText(text[marker:], maxTurnRunes)
+	}
 	if strings.HasPrefix(text, "<system-reminder") || strings.HasPrefix(text, "<recommended_plugins>") ||
-		strings.HasPrefix(text, "# AGENTS.md instructions") || strings.HasPrefix(text, "<environment_context>") {
+		strings.HasPrefix(text, "# AGENTS.md instructions") || strings.HasPrefix(text, "<environment_context>") ||
+		strings.HasPrefix(text, "<external_codex_apps_writing_block_edits>") {
 		return ""
 	}
 	return compactText(text, maxTurnRunes)
+}
+
+func codexRequestBodyMarker(text string) int {
+	matches := codexRequestBodyPattern.FindAllStringIndex(text, -1)
+	if len(matches) > 0 {
+		return matches[len(matches)-1][1]
+	}
+	return -1
 }
 
 func managedUserText(text string) bool {

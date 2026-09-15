@@ -31,6 +31,7 @@ import {
 } from "@/modules/chat/utils/request";
 import { RightOutlined, ScheduleOutlined } from "@ant-design/icons";
 import { useChatThinkStore } from "@/modules/chat/store/chatThink";
+import { useModelSelectionStore } from "@/modules/chat/store/modelSelection";
 import FeaturedCases from "@/modules/showcase/FeaturedCases";
 import {
   listShowcaseCases,
@@ -129,6 +130,12 @@ const NewChatPage = () => {
         FALLBACK_CHAT_ENTRY_DEFAULTS,
       ).conversation_settings,
     }));
+
+  useEffect(() => {
+    if (!routeConversationId) {
+      useModelSelectionStore.getState().resetForNewChat();
+    }
+  }, [routeConversationId]);
 
   const [isDragging, setIsDragging] = useState(false);
   const [showcaseCases, setShowcaseCases] = useState<ShowcaseCase[]>([]);
@@ -427,6 +434,7 @@ const NewChatPage = () => {
     if (!value) {
       // A temporary conversation may still be on /home and therefore cannot
       // rely on a route-param change to clear the previous chat instance.
+      useModelSelectionStore.getState().resetForNewChat();
       setChatLayoutMounted(false);
       const nextRunInBackground = readRunInBackgroundMode();
       setRunInBackground(nextRunInBackground);
@@ -465,6 +473,7 @@ const NewChatPage = () => {
       ).detail;
       const conversationId = detail?.conversationId || "";
       if (!conversationId) {
+        useModelSelectionStore.getState().resetForNewChat();
         freshEntryRef.current = true;
         setChatLayoutMounted(false);
         const nextRunInBackground =
@@ -766,6 +775,7 @@ const NewChatPage = () => {
                     isChatContent={isChatContent}
                     showHistoryList={false}
                     showHistoryButton={false}
+                    showModelSelector={!isChatContent}
                     knowledgeRefreshKey={welcomeKnowledgeRefreshKey}
                     configResetKey={welcomeKnowledgeRefreshKey}
                     setIsChatContent={(value) => {

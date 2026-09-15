@@ -134,10 +134,10 @@ export async function finishFeishuDataSourceOAuth(code: string, state: string) {
   return finishCloudDataSourceOAuth("feishu", code, state);
 }
 
-export async function enableCloudConnectionForChat(connectionId: string) {
+export async function setCloudConnectionChatEnabled(connectionId: string, enabled: boolean) {
   const body = {
-    chat_enabled: true,
-    chatEnabled: true,
+    chat_enabled: enabled,
+    chatEnabled: enabled,
   } satisfies CloudConnectionUpdateBody;
   let payload: unknown;
 
@@ -156,4 +156,8 @@ export async function enableCloudConnectionForChat(connectionId: string) {
   }
 
   return unwrapApiData<any>(payload);
+}
+
+export async function enableCloudConnectionForChat(connectionId: string) {
+  return setCloudConnectionChatEnabled(connectionId, true);
 }

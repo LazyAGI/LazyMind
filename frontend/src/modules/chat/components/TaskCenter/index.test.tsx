@@ -127,6 +127,8 @@ describe("TaskCenter display modes", () => {
     );
 
     expect(document.querySelectorAll(".ordinary-task-card")).toHaveLength(2);
+    expect(document.querySelectorAll(".ordinary-step-node")).toHaveLength(2);
+    expect(document.querySelector(".ordinary-task-marker")).not.toBeInTheDocument();
     expect(screen.getByText("2 retries")).toBeInTheDocument();
     expect(screen.queryByText("raw trace analyze")).not.toBeInTheDocument();
     expect(screen.queryByText("taskCenter.filterAll")).not.toBeInTheDocument();
@@ -167,6 +169,29 @@ describe("TaskCenter display modes", () => {
     expect(document.querySelectorAll(".task-card")).toHaveLength(4);
     expect(screen.getByText("raw trace analyze")).toBeInTheDocument();
     expect(screen.getByText("taskCenter.filterAll")).toBeInTheDocument();
+  });
+
+  it("shows only the user query as the run instruction", () => {
+    useTaskCenterStore.setState({
+      tasksByConversation: {
+        "conversation-1": [{
+          ...task("query-only", 1, "running"),
+          query: "继续生成三页 PPT",
+          objective: "SYSTEM: expanded workflow prompt that must stay hidden",
+        }],
+      },
+    });
+
+    render(
+      <TaskCenter
+        sessionId="conversation-1"
+        developerMode
+        workflowSteps={[]}
+      />,
+    );
+
+    expect(screen.getByText("继续生成三页 PPT")).toBeInTheDocument();
+    expect(screen.queryByText(/expanded workflow prompt/)).not.toBeInTheDocument();
   });
 
   it("renders tasks with overlapping execution intervals as accessible tabs", () => {

@@ -164,7 +164,7 @@ slots:
     cardinality: single
     exposed: false
   - id: outline_document
-    label: 可编辑章节大纲
+    label: 章节大纲
     type: file
     cardinality: single
     exposed: true
@@ -231,7 +231,7 @@ slots:
     allow_manual_add: false
     exposed: true
   - id: draft_document
-    label: 可编辑完整正文（修改后重跑交付）
+    label: 完整正文
     type: file
     cardinality: single
     exposed: true

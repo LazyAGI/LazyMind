@@ -2,6 +2,7 @@ package providerconnection
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -10,6 +11,31 @@ import (
 	"lazymind/core/cloudclient"
 	"lazymind/core/cloudsession"
 )
+
+func TestListHandlerReturnsAnEmptyOptionalCloudPageWithoutACloudSession(t *testing.T) {
+	service, err := NewLocalService(
+		&mirrorRecoveryRegistry{},
+		mirrorRecoveryAuthorizer{},
+		"desktop-client-123456",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/core/provider-connections", nil)
+	request.Header.Set("X-User-Id", "local-owner-1")
+	Handler{Service: service}.List(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var page cloudclient.ProviderConnectionPage
+	if err := json.Unmarshal(recorder.Body.Bytes(), &page); err != nil {
+		t.Fatal(err)
+	}
+	if page.Items == nil || len(page.Items) != 0 {
+		t.Fatalf("optional Cloud page=%#v want an explicit empty list", page)
+	}
+}
 
 type mirrorRecoveryStore struct{ refreshToken string }
 

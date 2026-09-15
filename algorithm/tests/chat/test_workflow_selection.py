@@ -6,6 +6,7 @@ import lazyllm
 import pytest
 
 from lazymind.chat.workflow.workflow_manager import (
+    enforce_startup_clarification_policy,
     resolve_workflow_injection,
     workflow_startup_clarification_already_asked,
 )
@@ -74,6 +75,9 @@ def test_mentioned_workflow_is_injected_as_authoritative_selection():
     assert 'revision-1' in contribution.runtime_context
     assert '"current_query": "run it now"' in contribution.runtime_context
     assert 'do not ask for a second trigger message' in contribution.runtime_context
+    assert 'Workflow SubAgent execution is strictly serial' in contribution.runtime_context
+    assert 'never call Workflow execution tools in parallel' in contribution.runtime_context
+    assert 'exactly one step_id' in contribution.runtime_context
     assert _tool(contribution, 'trigger_image_workflow').__doc__.startswith(
         "Load the exact 'AI image generation' Workflow"
     )
@@ -143,7 +147,7 @@ def test_dynamic_trigger_loads_pinned_remote_package_without_listing():
         'image-workflow', input_bindings={
             'source': {'resource_id': 'resource-1', 'revision': 1,
                        'content_hash': 'sha256:test'},
-        }, request_context='original workflow request',
+        }, request_context='original workflow request', workflow_mode='dynamic',
     )
     toolkit.advance_step.assert_not_called()
 
@@ -197,7 +201,7 @@ def test_dynamic_trigger_imports_scalar_binding_without_conversation_attachments
                 'resource_id': 'text-resource', 'revision': 1,
                 'content_hash': 'sha256:text',
             },
-        }, request_context='write about 3000 words',
+        }, request_context='write about 3000 words', workflow_mode='dynamic',
     )
 
 
@@ -206,7 +210,7 @@ def test_selected_workflow_declares_missing_only_startup_clarification():
         'clarification_fields': [
             {'id': 'topic', 'label': '主题', 'question': '主题是什么？', 'type': 'text'},
             {'id': 'slide_count', 'label': '页数', 'question': '生成多少页？',
-             'type': 'single', 'choices': ['3 页', '5 页']},
+             'type': 'single', 'choices': ['3 页', '5 页'], 'allow_other': False},
         ],
     }
     contribution = resolve_workflow_injection(
@@ -234,6 +238,52 @@ def test_selected_workflow_declares_missing_only_startup_clarification():
     assert '生成多少页？' in contribution.runtime_context
     assert 'exactly once TOTAL' in contribution.runtime_context
     assert 'context-specific suggested answers' in contribution.runtime_context
+    assert 'allow_other=false' in contribution.runtime_context
+    assert '"allow_other": false' in contribution.runtime_context
+
+
+def test_fixed_startup_choice_policy_overrides_model_other_option():
+    runtime = {
+        'clarification_fields': [{
+            'id': 'generate_background_images',
+            'question': '是否为每一页启用 AI 生成底图？',
+            'type': 'single',
+            'choice_policy': 'fixed',
+            'choices': ['启用｜为每页生成独立 AI 底图', '不启用｜使用纯色、渐变和矢量装饰'],
+        }],
+    }
+
+    questions = enforce_startup_clarification_policy([{
+        'id': 'generate_background_images',
+        'text': '是否为这份 PPT 启用 AI 底图？',
+        'type': 'single',
+        'choices': ['启用', '不启用', '其他'],
+    }], runtime)
+
+    assert questions == [{
+        'id': 'generate_background_images',
+        'text': '是否为这份 PPT 启用 AI 底图？',
+        'type': 'single',
+        'choices': ['启用｜为每页生成独立 AI 底图', '不启用｜使用纯色、渐变和矢量装饰'],
+        'allow_other': False,
+    }]
+
+
+def test_seed_startup_choice_policy_remains_open_ended():
+    questions = [{
+        'id': 'slide_count',
+        'text': '希望生成多少页？',
+        'type': 'single',
+        'choices': ['3 页', '5 页'],
+    }]
+    runtime = {
+        'clarification_fields': [{
+            **questions[0],
+            'choice_policy': 'seed',
+        }],
+    }
+
+    assert enforce_startup_clarification_policy(questions, runtime) == questions
 
 
 def test_seed_choices_do_not_invalidate_explicit_chinese_slide_count():
@@ -424,6 +474,7 @@ def test_startup_clarification_is_single_shot_and_default_trigger_merges_context
     assert '面向哪类客户？: 公司负责人' in result['request_context']
     toolkit.prepare_workflow.assert_called_once_with(
         'ppt-workflow', input_bindings={}, request_context=result['request_context'],
+        workflow_mode='dynamic',
     )
     command = toolkit.advance_step.call_args.args[2][0]
     assert command.user_input == result['request_context']
@@ -454,6 +505,49 @@ def test_completed_historical_clarification_does_not_block_a_new_workflow_reques
     ]
 
     assert not workflow_startup_clarification_already_asked(history, runtime)
+
+
+def test_interrupted_historical_clarification_does_not_block_a_new_request():
+    runtime = {'clarification_fields': [{
+        'id': 'generate_background_images',
+        'question': '是否启用 AI 底图？',
+        'type': 'single',
+        'choices': ['启用', '不启用'],
+    }]}
+    history = [
+        {'role': 'user', 'content': '做一个春节 PPT'},
+        {
+            'role': 'assistant',
+            'tool_calls': [{
+                'id': 'ask-interrupted',
+                'type': 'function',
+                'function': {
+                    'name': 'ask_user',
+                    'arguments': json.dumps({'questions': [{
+                        'id': 'generate_background_images',
+                        'text': '是否启用 AI 底图？',
+                        'type': 'single',
+                        'choices': ['启用', '不启用'],
+                    }]}, ensure_ascii=False),
+                },
+            }],
+        },
+        {'role': 'tool', 'name': 'ask_user', 'tool_call_id': 'ask-interrupted',
+         'content': 'The user submitted the form.'},
+        {'role': 'user', 'content': '不启用'},
+        # The workflow crashed here, before an assistant completion was saved.
+    ]
+
+    assert not workflow_startup_clarification_already_asked(
+        history,
+        runtime,
+        current_query='重新做一个春节 PPT',
+    )
+    assert workflow_startup_clarification_already_asked(
+        history,
+        runtime,
+        current_query='不启用',
+    )
 
 
 def test_clarification_answer_turn_can_pass_merged_request_context_to_trigger():
@@ -497,7 +591,7 @@ def test_clarification_answer_turn_can_pass_merged_request_context_to_trigger():
 
     assert result['request_context'] == merged
     toolkit.prepare_workflow.assert_called_once_with(
-        'ppt-workflow', input_bindings={}, request_context=merged,
+        'ppt-workflow', input_bindings={}, request_context=merged, workflow_mode='dynamic',
     )
 
 
@@ -598,6 +692,7 @@ def test_selected_workflow_session_tool_auto_initializes_without_attachments():
     toolkit.prepare_workflow.assert_called_once_with(
         'ppt-workflow', input_bindings={},
         request_context='生成三页关于加减法数学题的PPT',
+        workflow_mode='dynamic',
     )
     assert 'upload is required' in contribution.runtime_context
 
@@ -671,12 +766,31 @@ def test_active_workflow_forwards_current_edit_request_and_focus_to_step():
             {
                 'session_id': 'session-1',
                 'workflow_id': 'deck-workflow',
-                'runtime': {'completed_edit_step': 'generate_ppt'},
                 'focused_tab': 'composite_preview',
                 'focused_sort_order': 2,
             },
             conversation_id='conversation-1',
             current_query='把这一页标题改成期末练习',
+            workflow_catalog=[
+                {
+                    'workflow_ref': 'builtin:writer-workflow',
+                    'workflow_id': 'writer-workflow',
+                    'runtime': {'completed_edit_step': 'draft'},
+                },
+                {
+                    'workflow_ref': 'builtin:deck-workflow',
+                    'workflow_id': 'deck-workflow',
+                    'runtime': {
+                        'completed_edit_step': 'generate_ppt',
+                        'completed_edit_routing': (
+                            'For whole-slide insertions, rewind to build_outline.'
+                        ),
+                    },
+                },
+            ],
+            allowed_workflow_refs=[
+                'builtin:writer-workflow', 'builtin:deck-workflow',
+            ],
         )
         # resolve_workflow_injection's patch is applied to agentic_config by ChatService.
         lazyllm.globals['agentic_config'].update(contribution.agentic_config_patch)
@@ -684,11 +798,40 @@ def test_active_workflow_forwards_current_edit_request_and_focus_to_step():
 
     assert result == {'status': 'succeeded'}
     assert 'A completed Session is not immutable' in contribution.runtime_context
-    assert "advance_step(step_ids=['generate_ppt'])" in contribution.runtime_context
+    assert 'For whole-slide insertions, rewind to build_outline.' in contribution.runtime_context
+    assert "fallback 'generate_ppt' step" in contribution.runtime_context
     assert 'never paste replacement content into chat' in contribution.runtime_context
     command = toolkit.advance_step.call_args.args[2][0]
     assert command.user_input == '把这一页标题改成期末练习'
     assert 'sort order 2' in command.runtime_instruction
+
+
+def test_completed_workflow_keeps_direct_fallback_without_semantic_routing():
+    toolkit = MagicMock()
+    toolkit.get_ready_steps.return_value = {
+        'session_id': 'session-1', 'state_version': 7,
+        'ready_steps': [], 'retryable_steps': [], 'rewindable_steps': ['generate_ppt'],
+    }
+    with patch('lazymind.chat.workflow.workflow_manager.HostWorkflowToolkit',
+               return_value=toolkit), patch(
+        'lazymind.chat.workflow.workflow_manager._client',
+    ) as client_factory:
+        client_factory.return_value.get_state.return_value = {
+            'status': 'completed', 'state_version': 7,
+            'projection': {'completed': True, 'rewindable': ['generate_ppt']},
+        }
+        contribution = resolve_workflow_injection(
+            {
+                'session_id': 'session-1',
+                'workflow_id': 'deck-workflow',
+                'runtime': {'completed_edit_step': 'generate_ppt'},
+            },
+            conversation_id='conversation-1',
+            current_query='重做当前页面',
+        )
+
+    assert "call advance_step(step_ids=['generate_ppt']) now" in contribution.runtime_context
+    assert 'semantic routing' not in contribution.runtime_context
 
 
 def test_dynamic_trigger_defaults_request_context_to_current_query():
@@ -771,6 +914,7 @@ def test_dynamic_trigger_preserves_exact_query_instead_of_model_paraphrase():
     assert result['request_context'] == original
     toolkit.prepare_workflow.assert_called_once_with(
         'image-workflow', input_bindings={}, request_context=original,
+        workflow_mode='dynamic',
     )
 
 
@@ -868,6 +1012,10 @@ def test_existing_session_tools_inject_protocol_and_concurrency_fields():
         )
 
     advance = _tool(contribution, 'advance_step')
+    assert 'exactly one Runtime-returned target' in advance.__doc__
+    assert 'Workflow SubAgent execution is strictly serial' in contribution.runtime_context
+    assert 'never call Workflow execution tools in parallel' in contribution.runtime_context
+    assert 'exactly one step_id' in contribution.runtime_context
     assert list(inspect.signature(advance).parameters) == ['step_ids']
     assert list(inspect.signature(_tool(contribution, 'get_workflow_state')).parameters) == []
     assert advance(['draft']) == {'status': 'succeeded'}

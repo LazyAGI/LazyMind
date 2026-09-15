@@ -267,6 +267,47 @@ def test_subagent_plan_forwards_llm_config_for_context_budget(tmp_path):
     assert plan.execution_options.llm_config == llm_config
 
 
+def test_ordinary_subagent_enables_inherited_skill_runtime(tmp_path):
+    from lazymind.chat.engine.subagent.context import SubAgentContext
+
+    ctx = SubAgentContext(
+        task_id='task-image-skill', conversation_id='conv-1', agent_type='image_generation',
+        objective='generate a presentation background',
+        params={'_inherited_skills': ['design/image-prompt-craft']},
+        workspace_path=str(tmp_path), input_slots=[], output_slots=[], db=None,
+        emit=lambda _event: None,
+    )
+    plan = runner_mod._build_subagent_plan(
+        ctx, None, tools=[], tool_prompt_appendices={},
+    )
+
+    assert plan.execution_options.skills == ['design/image-prompt-craft']
+    assert plan.execution_options.fs is runner_mod.FS
+    assert plan.execution_options.skills_dir
+    assert all(
+        '_inherited_skills' not in section.content for section in plan.prompt.sections
+    )
+
+
+def test_workflow_step_keeps_skill_runtime_isolated(tmp_path):
+    from lazymind.chat.engine.subagent.context import SubAgentContext
+
+    ctx = SubAgentContext(
+        task_id='task-workflow-skill', conversation_id='conv-1', agent_type='workflow_step',
+        objective='generate a presentation background',
+        params={'_inherited_skills': ['design/image-prompt-craft']},
+        workspace_path=str(tmp_path), input_slots=[], output_slots=[], db=None,
+        emit=lambda _event: None,
+    )
+    plan = runner_mod._build_subagent_plan(
+        ctx, None, tools=[], tool_prompt_appendices={},
+    )
+
+    assert plan.execution_options.skills is None
+    assert plan.execution_options.fs is None
+    assert plan.execution_options.skills_dir is None
+
+
 # ---------------------------------------------------------------------------
 # Test: task not found
 # ---------------------------------------------------------------------------
@@ -413,6 +454,118 @@ def test_run_subagent_stream_text_think_events(monkeypatch):
     types_out = [e['type'] for e in events_out]
     assert 'think' in types_out
     assert 'text' in types_out
+
+
+def test_run_subagent_stream_coalesces_tiny_text_deltas(monkeypatch):
+    db = _install_fake_db(monkeypatch)
+    _install_fake_lazyllm(monkeypatch)
+    _install_fake_build(monkeypatch)
+    _install_fake_translator(monkeypatch)
+    _install_fake_drive(monkeypatch, [
+        {'tag': 'text', 'delta': 'x'} for _ in range(1024)
+    ])
+
+    def pre_save_ctx(ctx):
+        ctx._artifact_counts['result'] = 1
+    monkeypatch.setattr(runner_mod, 'set_context', pre_save_ctx)
+
+    async def run():
+        return await _collect(runner_mod.run_subagent_stream(_DEFAULT_TASK_ID, 'dsn://'))
+
+    events_out = _sse_to_events(asyncio.run(run()))
+    text_events = [event for event in events_out if event.get('type') == 'text']
+    assert ''.join(event.get('text', '') for event in text_events) == 'x' * 1024
+    assert len(text_events) <= 4
+    assert len(db.steps) == 1
+
+
+def test_workflow_tool_internal_text_is_not_forwarded(monkeypatch):
+    workflow_task = {
+        **_DEFAULT_TASK,
+        'agent_type': 'workflow_step',
+        'params': {'required_output_artifact_keys': ['result']},
+    }
+    _install_fake_db(monkeypatch, workflow_task)
+    _install_fake_lazyllm(monkeypatch)
+    _install_fake_build(monkeypatch)
+    _install_fake_translator(monkeypatch)
+    _install_fake_drive(monkeypatch, [
+        {'tag': 'text', 'delta': 'Starting.'},
+        {'tag': 'tool_calls', 'tool_calls': [
+            {'id': 'ppt-1', 'name': 'ppt_generate_pages', 'args': {}},
+        ]},
+        {'tag': 'text', 'delta': '<html>large internal page output</html>'},
+        {'tag': 'tool_results', 'tool_results': [
+            {'id': 'ppt-1', 'name': 'ppt_generate_pages', 'result': 'ok'},
+        ]},
+        {'tag': 'text', 'delta': 'Finished.'},
+    ])
+
+    def pre_save_ctx(ctx):
+        ctx._artifact_counts['result'] = 1
+    monkeypatch.setattr(runner_mod, 'set_context', pre_save_ctx)
+
+    async def run():
+        return await _collect(runner_mod.run_subagent_stream(_DEFAULT_TASK_ID, 'dsn://'))
+
+    events_out = _sse_to_events(asyncio.run(run()))
+    visible_text = ''.join(
+        event.get('text', '') for event in events_out if event.get('type') == 'text'
+    )
+    assert visible_text == 'Starting.Finished.'
+    assert '<html>' not in visible_text
+
+
+def test_workflow_tool_artifact_is_streamed_before_tool_returns(monkeypatch):
+    workflow_task = {
+        **_DEFAULT_TASK,
+        'agent_type': 'workflow_step',
+        'params': {'required_output_artifact_keys': ['result']},
+    }
+    _install_fake_db(monkeypatch, workflow_task)
+    _install_fake_lazyllm(monkeypatch)
+    _install_fake_build(monkeypatch)
+    _install_fake_translator(monkeypatch)
+    context_holder: Dict[str, Any] = {}
+
+    def capture_context(ctx):
+        context_holder['ctx'] = ctx
+        ctx._artifact_counts['result'] = 1
+
+    monkeypatch.setattr(runner_mod, 'set_context', capture_context)
+
+    class ProgressiveArtifactExecutor:
+        async def stream(self, llm, plan):
+            yield 'event', {
+                'tag': 'tool_calls',
+                'tool_calls': [{'id': 'ppt-1', 'name': 'ppt_generate_pages', 'args': {}}],
+            }
+            context_holder['ctx'].emit({
+                'type': 'artifact',
+                'slot': 'result',
+                'content_type': 'text',
+                'seq': 1,
+                'value': {'text': '<html>page one</html>', 'list_index': 0},
+            })
+            # Model a publisher that keeps generating more pages after page one
+            # has already been made available to the UI.
+            await asyncio.sleep(0.01)
+            yield 'event', {
+                'tag': 'tool_results',
+                'tool_results': [{'id': 'ppt-1', 'name': 'ppt_generate_pages', 'result': 'ok'}],
+            }
+            yield 'final', 'done'
+
+    monkeypatch.setattr(runner_mod, 'AgentExecutor', ProgressiveArtifactExecutor)
+
+    async def run():
+        return await _collect(runner_mod.run_subagent_stream(_DEFAULT_TASK_ID, 'dsn://'))
+
+    events_out = _sse_to_events(asyncio.run(run()))
+    event_types = [event.get('type') for event in events_out]
+
+    assert event_types.count('artifact') == 1
+    assert event_types.index('artifact') < event_types.index('tool_results')
 
 
 def test_run_subagent_stream_emits_task_scoped_source_snapshot(monkeypatch):

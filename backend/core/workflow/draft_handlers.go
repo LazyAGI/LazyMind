@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"gopkg.in/yaml.v3"
 	"gorm.io/gorm"
 
 	"lazymind/core/algo"
@@ -20,6 +21,7 @@ import (
 	"lazymind/core/modelconfig"
 	"lazymind/core/store"
 	"lazymind/core/workflow/graphengine"
+	workflowstore "lazymind/core/workflow/store"
 )
 
 // uuidPattern matches a standard UUID v4 string (8-4-4-4-12 hex digits with hyphens).
@@ -241,6 +243,125 @@ func CreateWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 	}
 
 	common.ReplyOK(w, toEnrichedDraftResponse(store.DB(), draft))
+}
+
+// CopyWorkflowDraft creates an independent, unpublished draft containing all
+// editable files from an existing user draft.
+func CopyWorkflowDraft(w http.ResponseWriter, r *http.Request) {
+	draftID := common.PathVar(r, "draft_id")
+	userID := common.UserID(r)
+	if draftID == "" || userID == "" {
+		common.ReplyErr(w, "not found", http.StatusNotFound)
+		return
+	}
+
+	var source orm.WorkflowDraft
+	if err := store.DB().Where("id = ? AND created_by = ? AND deleted_at IS NULL", draftID, userID).First(&source).Error; err != nil {
+		common.ReplyErr(w, "not found", http.StatusNotFound)
+		return
+	}
+	workflowYAML := source.WorkflowYAMLContent
+	if workflowYAML == "" {
+		workflowYAML = source.Content
+	}
+	copyWorkflowDraft(w, r, source.Name, workflowYAML, source.StateYAMLContent,
+		source.StateLayoutContent, source.ScenarioContent, source.DriverContent, source.ScriptsContent,
+		source.DesignBriefContent)
+}
+
+// CopyBuiltinWorkflow creates an editable user draft from an immutable built-in
+// workflow package.
+func CopyBuiltinWorkflow(w http.ResponseWriter, r *http.Request) {
+	workflowID := strings.TrimSpace(common.PathVar(r, "workflow_id"))
+	userID := common.UserID(r)
+	if workflowID == "" || userID == "" {
+		common.ReplyErr(w, "not found", http.StatusNotFound)
+		return
+	}
+	pkg, err := workflowstore.New(store.DB()).GetWorkflowPackage(r.Context(), userID, "builtin:"+workflowID, "")
+	if err != nil {
+		common.ReplyErr(w, "not found", http.StatusNotFound)
+		return
+	}
+	workflowYAML := string(pkg.Files["workflow.yaml"])
+	var spec struct {
+		Name string `yaml:"name"`
+	}
+	_ = yaml.Unmarshal([]byte(workflowYAML), &spec)
+	copyWorkflowDraft(w, r, spec.Name, workflowYAML, string(pkg.Files["scenario/state.yml"]), string(pkg.Files["scenario/layout.json"]),
+		string(pkg.Files["scenario/scenario.md"]), string(pkg.Files["scenario/driver.md"]), workflowScriptsRaw(pkg.Files), "")
+}
+
+func copyWorkflowDraft(w http.ResponseWriter, r *http.Request, sourceName, workflowYAML, stateYAML,
+	stateLayout, scenario, driver, scripts, designBrief string) {
+	userID := common.UserID(r)
+	var body struct {
+		Name string `json:"name"`
+	}
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&body)
+	}
+	name := strings.TrimSpace(body.Name)
+	if name == "" {
+		name = strings.TrimSpace(sourceName) + " Copy"
+	}
+	baseID := extractWorkflowID(workflowYAML)
+	if baseID == "" {
+		baseID = "workflow"
+	}
+	workflowID := nextWorkflowCopyID(store.DB(), userID, baseID)
+	workflowYAML = replaceWorkflowYAMLIdentity(workflowYAML, workflowID, name)
+	now := time.Now().UTC()
+	draft := orm.WorkflowDraft{
+		ID: uuid.NewString(), Name: name, Content: workflowYAML, CreatedBy: userID, CreatedAt: now, UpdatedAt: now,
+		WorkflowYAMLContent: workflowYAML, StateYAMLContent: stateYAML, StateLayoutContent: stateLayout,
+		ScenarioContent: scenario, DriverContent: driver, ScriptsContent: scripts, DesignBriefContent: designBrief,
+		WorkflowID: workflowID, SourceType: "blank", Version: 1,
+	}
+	if draft.ScriptsContent == "" {
+		draft.ScriptsContent = "{}"
+	}
+	if err := store.DB().Create(&draft).Error; err != nil {
+		common.ReplyErr(w, "copy failed", http.StatusInternalServerError)
+		return
+	}
+	common.ReplyOK(w, toEnrichedDraftResponse(store.DB(), draft))
+}
+
+func nextWorkflowCopyID(db *gorm.DB, userID, sourceID string) string {
+	base := strings.Trim(strings.TrimSpace(sourceID), "-") + "-copy"
+	if len(base) > 245 {
+		base = strings.TrimRight(base[:245], "-") + "-copy"
+	}
+	for index := 1; ; index++ {
+		candidate := base
+		if index > 1 {
+			candidate = base + "-" + strconv.Itoa(index)
+		}
+		var count int64
+		db.Model(&orm.WorkflowDraft{}).Where("created_by = ? AND plugin_id = ? AND deleted_at IS NULL", userID, candidate).Count(&count)
+		var publishedCount int64
+		db.Model(&orm.WorkflowResource{}).Where("owner_user_id = ? AND plugin_id = ?", userID, candidate).Count(&publishedCount)
+		if count == 0 && publishedCount == 0 {
+			return candidate
+		}
+	}
+}
+
+var workflowNamePattern = regexp.MustCompile(`(?m)^name:\s*.*$`)
+
+func replaceWorkflowYAMLIdentity(content, workflowID, name string) string {
+	idLine := "id: " + workflowID
+	if workflowIDPattern.MatchString(content) {
+		content = workflowIDPattern.ReplaceAllString(content, idLine)
+	} else {
+		content = idLine + "\n" + content
+	}
+	nameLine := "name: " + strconv.Quote(name)
+	if workflowNamePattern.MatchString(content) {
+		return workflowNamePattern.ReplaceAllString(content, nameLine)
+	}
+	return content + "\n" + nameLine + "\n"
 }
 
 // GetWorkflowDraft handles GET /workflow-drafts/{draft_id}

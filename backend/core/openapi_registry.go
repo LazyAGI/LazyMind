@@ -450,8 +450,116 @@ type conversationPathParams struct {
 	Name string `path:"name"`
 }
 
+type conversationModelPathParams struct {
+	ConversationID string `path:"conversation_id"`
+}
+
+type chatModelsQueryParams struct {
+	ConversationID string `query:"conversation_id" desc:"Optional owned conversation whose saved model selection should be restored."`
+}
+
+type chatModelSelectionOpenAPI struct {
+	Mode         string `json:"mode" enum:"fixed,auto"`
+	ModelID      string `json:"model_id,omitempty"`
+	ProviderID   string `json:"provider_id,omitempty"`
+	ProviderName string `json:"provider_name,omitempty"`
+	GroupID      string `json:"group_id,omitempty"`
+	GroupName    string `json:"group_name,omitempty"`
+	ModelName    string `json:"model_name,omitempty"`
+	Source       string `json:"source,omitempty" enum:"own,shared,cloud"`
+	Version      int64  `json:"version"`
+	Availability string `json:"availability" enum:"available,unavailable"`
+}
+
+type chatModelListOpenAPIItem struct {
+	ID           string   `json:"id"`
+	Name         string   `json:"name"`
+	GroupID      string   `json:"group_id"`
+	GroupName    string   `json:"group_name"`
+	Source       string   `json:"source" enum:"own,shared,cloud"`
+	Capabilities []string `json:"capabilities"`
+	Badges       []string `json:"badges"`
+	Availability string   `json:"availability" enum:"available,degraded,unavailable"`
+	Lifecycle    string   `json:"lifecycle" enum:"active,deprecated,retired"`
+	Current      bool     `json:"current"`
+	Default      bool     `json:"default"`
+	Shared       bool     `json:"shared"`
+}
+
+type chatModelProviderOpenAPIItem struct {
+	ID     string                     `json:"id"`
+	Name   string                     `json:"name"`
+	Source string                     `json:"source" enum:"own,shared,cloud"`
+	Models []chatModelListOpenAPIItem `json:"models"`
+}
+
+type chatModelsOpenAPIResponse struct {
+	Selection           chatModelSelectionOpenAPI      `json:"selection"`
+	DefaultSelection    chatModelSelectionOpenAPI      `json:"default_selection"`
+	Providers           []chatModelProviderOpenAPIItem `json:"providers"`
+	SwitchAllowed       bool                           `json:"switch_allowed"`
+	SwitchBlockedReason string                         `json:"switch_blocked_reason,omitempty" enum:"generating,workflow_running,background_task_running"`
+	AutoAvailable       bool                           `json:"auto_available"`
+}
+
+type patchConversationModelOpenAPIRequest struct {
+	Mode            string `json:"mode" enum:"fixed,auto"`
+	ModelID         string `json:"model_id,omitempty" desc:"Required only when mode is fixed."`
+	Source          string `json:"source,omitempty" enum:"own,shared,cloud" desc:"Fixed selection source; omitted by legacy clients for local models."`
+	ExpectedVersion int64  `json:"expected_version"`
+}
+
+type patchConversationModelOpenAPIResponse struct {
+	Selection chatModelSelectionOpenAPI `json:"selection"`
+}
+
+type sidechatParentPathParams struct {
+	ParentID string `path:"parent_id"`
+}
+
+type sidechatChildPathParams struct {
+	ChildID string `path:"child_id"`
+}
+
+type createSidechatOpenAPIRequest struct {
+	SourceHistoryID string `json:"source_history_id,omitempty"`
+	SourceSeq       *int   `json:"source_seq,omitempty"`
+	SelectedText    string `json:"selected_text,omitempty"`
+	ThinkingDepth   string `json:"thinking_depth,omitempty" enum:"low,medium,high,max"`
+}
+
+type sidechatPublicSourceContextOpenAPI struct {
+	Messages []map[string]any `json:"messages,omitempty"`
+}
+
+type sidechatConversationOpenAPI struct {
+	ID                   string                              `json:"id"`
+	ConversationID       string                              `json:"conversation_id"`
+	DisplayName          string                              `json:"display_name"`
+	ParentConversationID *string                             `json:"parent_conversation_id,omitempty"`
+	RelationType         string                              `json:"relation_type" enum:"sidechat,fork"`
+	SourceHistoryID      *string                             `json:"source_history_id,omitempty"`
+	SourceSeq            *int                                `json:"source_seq,omitempty"`
+	SelectedText         string                              `json:"selected_text,omitempty"`
+	SourceContext        *sidechatPublicSourceContextOpenAPI `json:"source_context,omitempty"`
+	ParentDisplayName    string                              `json:"parent_display_name,omitempty"`
+	SearchConfig         map[string]any                      `json:"search_config,omitempty"`
+	ChatModelMode        *string                             `json:"chat_model_mode,omitempty" enum:"fixed,auto"`
+	ChatModelID          *string                             `json:"chat_model_id,omitempty"`
+	ChatModelSource      *string                             `json:"chat_model_source,omitempty" enum:"own,shared,cloud"`
+	ChatModelVersion     int64                               `json:"chat_model_version"`
+	ThinkingDepth        string                              `json:"thinking_depth,omitempty" enum:"low,medium,high,max"`
+	IsEphemeral          bool                                `json:"is_ephemeral"`
+}
+
+type sidechatConversationOpenAPIResponse struct {
+	Conversation sidechatConversationOpenAPI `json:"conversation"`
+}
+
 type conversationSearchConfigOpenAPIRequest struct {
-	DatasetIDs []string `json:"dataset_ids"`
+	DatasetIDs []string `json:"dataset_ids,omitempty" desc:"Optional. Replace knowledge bases; omit to preserve the current selection."`
+	Creators   []string `json:"creators,omitempty" desc:"Optional. Replace document creator filters; omit to preserve them."`
+	Tags       []string `json:"tags,omitempty" desc:"Optional. Replace document tag filters; omit to preserve them."`
 }
 
 type conversationSearchConfigOpenAPIResponse struct {
@@ -913,17 +1021,24 @@ type addModelProviderGroupModelOpenAPIResponse struct {
 }
 
 type listModelProviderGroupModelsOpenAPIItem struct {
-	ID                       string  `json:"id"`
-	UserModelProviderID      string  `json:"user_model_provider_id"`
-	UserModelProviderGroupID string  `json:"user_model_provider_group_id"`
-	Name                     string  `json:"name"`
-	ModelType                string  `json:"model_type"`
-	ProviderName             string  `json:"provider_name"`
-	GroupName                string  `json:"group_name"`
-	BaseURL                  string  `json:"base_url"`
-	IsDefault                bool    `json:"is_default"`
-	IsEditable               bool    `json:"is_editable" desc:"Whether this option supports image editing"`
-	MaxInputTokens           *string `json:"max_input_tokens" desc:"Maximum catalog LLM, VLM, or embedding-model input context window, for example 512, 128K, or 1M; null for other, custom, or unknown models" nullable:"true"`
+	ID                       string   `json:"id"`
+	Source                   string   `json:"source" enum:"own,cloud"`
+	ProviderID               string   `json:"provider_id"`
+	ProviderGroupID          string   `json:"provider_group_id,omitempty"`
+	UserModelProviderID      string   `json:"user_model_provider_id,omitempty"`
+	UserModelProviderGroupID string   `json:"user_model_provider_group_id,omitempty"`
+	Name                     string   `json:"name"`
+	ModelType                string   `json:"model_type"`
+	ProviderName             string   `json:"provider_name"`
+	GroupName                string   `json:"group_name,omitempty"`
+	BaseURL                  string   `json:"base_url,omitempty"`
+	IsDefault                bool     `json:"is_default"`
+	IsEditable               bool     `json:"is_editable" desc:"Whether this option supports image editing"`
+	MaxInputTokens           *string  `json:"max_input_tokens" desc:"Maximum catalog LLM, VLM, or embedding-model input context window, for example 512, 128K, or 1M; null for other, custom, or unknown models" nullable:"true"`
+	Availability             string   `json:"availability" enum:"available,degraded,unavailable"`
+	Lifecycle                string   `json:"lifecycle" enum:"active,deprecated,retired"`
+	ReadOnly                 bool     `json:"read_only"`
+	Capabilities             []string `json:"capabilities"`
 }
 
 type listModelProviderGroupModelsOpenAPIResponse struct {
@@ -937,14 +1052,20 @@ type listUserModelsByModelTypeQueryParams struct {
 type selectedModelOpenAPIItem struct {
 	ModelKey                 string  `json:"model_key"`
 	ModelID                  string  `json:"model_id"`
-	UserModelProviderID      string  `json:"user_model_provider_id"`
-	UserModelProviderGroupID string  `json:"user_model_provider_group_id"`
+	Source                   string  `json:"source" enum:"own,cloud"`
+	ProviderID               string  `json:"provider_id"`
+	ProviderGroupID          string  `json:"provider_group_id,omitempty"`
+	UserModelProviderID      string  `json:"user_model_provider_id,omitempty"`
+	UserModelProviderGroupID string  `json:"user_model_provider_group_id,omitempty"`
 	Name                     string  `json:"name"`
 	ProviderName             string  `json:"provider_name"`
-	GroupName                string  `json:"group_name"`
-	BaseURL                  string  `json:"base_url"`
+	GroupName                string  `json:"group_name,omitempty"`
+	BaseURL                  string  `json:"base_url,omitempty"`
 	IsEditable               bool    `json:"is_editable" desc:"Whether the selected model supports image editing"`
 	MaxInputTokens           *string `json:"max_input_tokens" desc:"Maximum selected catalog LLM, VLM, or embedding-model input context window, for example 512, 128K, or 1M; null for other, custom, or unknown models" nullable:"true"`
+	Availability             string  `json:"availability" enum:"available,degraded,unavailable"`
+	UnavailableReason        string  `json:"unavailable_reason,omitempty"`
+	ReadOnly                 bool    `json:"read_only"`
 }
 
 type listSelectedModelsOpenAPIResponse struct {
@@ -954,6 +1075,7 @@ type listSelectedModelsOpenAPIResponse struct {
 type setSelectedModelOpenAPIItem struct {
 	ModelKey string `json:"model_key"`
 	ModelID  string `json:"model_id"`
+	Source   string `json:"source,omitempty" enum:"own,cloud"`
 }
 
 type setSelectedModelsOpenAPIRequest struct {
@@ -2109,6 +2231,7 @@ type userChatSettingsOpenAPIResponse struct {
 type userUIPreferencesPatchOpenAPIRequest struct {
 	ChatPreferenceNoticeDismissed *bool   `json:"chat_preference_notice_dismissed,omitempty"`
 	DeveloperModeActive           *bool   `json:"developer_mode_active,omitempty"`
+	SensitiveWordFilterEnabled    *bool   `json:"sensitive_word_filter_enabled,omitempty"`
 	AcceptedUserAgreementVersion  *string `json:"accepted_user_agreement_version,omitempty"`
 	TaskCenterEnabled             *bool   `json:"task_center_enabled,omitempty"`
 	SchedulesEnabled              *bool   `json:"schedules_enabled,omitempty"`
@@ -2121,6 +2244,7 @@ type userUIPreferencesPatchOpenAPIRequest struct {
 type userUIPreferencesOpenAPIResponse struct {
 	ChatPreferenceNoticeDismissed bool   `json:"chat_preference_notice_dismissed"`
 	DeveloperModeActive           bool   `json:"developer_mode_active"`
+	SensitiveWordFilterEnabled    bool   `json:"sensitive_word_filter_enabled"`
 	AcceptedUserAgreementVersion  string `json:"accepted_user_agreement_version"`
 	TaskCenterEnabled             bool   `json:"task_center_enabled"`
 	SchedulesEnabled              bool   `json:"schedules_enabled"`
@@ -3651,8 +3775,8 @@ func registeredCoreOperations() []openAPIOperation {
 		{
 			Method:      "GET",
 			Path:        "/model_providers/models",
-			Summary:     "List current user's available models",
-			Description: "Optionally filters by query model_type (e.g. llm, vlm, or embed). When omitted, returns every non-deleted model in the current user's verified provider groups. Each item includes nullable max_input_tokens, the catalog model's maximum input context window expressed as a string such as 512, 128K, or 1M; custom or unknown models return null. Ordered by user_model_provider_id, group id, then name. Same items as GET .../groups/{group_id}/models.",
+			Summary:     "List current user's selectable models",
+			Description: "Merges non-deleted models from the current user's verified provider groups with the account-visible LazyMind Cloud system catalog. source distinguishes own from cloud; Cloud items are read-only and never expose credentials, endpoints, or upstream configuration. model_type optionally filters by a runtime role.",
 			Tags:        []string{"model_providers"},
 			QueryParams: listUserModelsByModelTypeQueryParams{},
 			Responses:   map[int]openAPIResponse{200: resp("Models list", listModelProviderGroupModelsOpenAPIResponse{})},
@@ -3661,7 +3785,7 @@ func registeredCoreOperations() []openAPIOperation {
 			Method:      "GET",
 			Path:        "/model_providers/selected_models",
 			Summary:     "Get selected models by model_type",
-			Description: "Returns the current user's selected model for each model_type. Each selection includes nullable max_input_tokens, the selected catalog model's maximum input context window expressed as a string such as 512, 128K, or 1M; custom or unknown models return null.",
+			Description: "Returns the authoritative own or Cloud selection for each model_type. An unavailable Cloud selection remains visible through its public snapshot and never exposes credentials or Cloud-only entitlement details.",
 			Tags:        []string{"model_providers"},
 			Responses:   map[int]openAPIResponse{200: resp("Selected models", listSelectedModelsOpenAPIResponse{})},
 		},
@@ -3669,7 +3793,7 @@ func registeredCoreOperations() []openAPIOperation {
 			Method:      "PUT",
 			Path:        "/model_providers/selected_models",
 			Summary:     "Save selected models by model_type",
-			Description: "Upserts selected model rows for the current user. Each selection requires model_type and model_id. model_id must belong to the current user and model_type must match the model row.",
+			Description: "Upserts model choices by runtime role. source defaults to own for legacy clients. Cloud choices are validated against the current account-visible catalog, stored separately from personal Providers, cannot be shared, and do not persist credentials or endpoints.",
 			Tags:        []string{"model_providers"},
 			RequestBody: jsonBodyOf(setSelectedModelsOpenAPIRequest{}, true),
 			Responses:   map[int]openAPIResponse{200: resp("Saved selected models", listSelectedModelsOpenAPIResponse{})},
@@ -3771,6 +3895,53 @@ func registeredCoreOperations() []openAPIOperation {
 			Tags:        []string{"user"},
 			RequestBody: jsonBodyOf(userChatSettingsPatchOpenAPIRequest{}, true),
 			Responses:   map[int]openAPIResponse{200: resp("Updated chat entry defaults", userChatSettingsOpenAPIResponse{})},
+		},
+		{
+			Method:      "GET",
+			Path:        "/chat/models",
+			Summary:     "List usable chat models and resolve the current selection",
+			Description: "Returns non-deleted personal/shared LLMs plus account-visible LazyMind Cloud LLMs and resolves the current source-aware selection. Credentials, endpoint configuration, entitlement details, and upstream Cloud configuration are never returned.",
+			Tags:        []string{"chat"},
+			QueryParams: chatModelsQueryParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Chat model selection and providers", chatModelsOpenAPIResponse{})},
+		},
+		{
+			Method:      "PATCH",
+			Path:        "/conversations/{conversation_id}/model",
+			Summary:     "Switch the conversation chat model",
+			Description: "Uses expected_version for optimistic locking and rejects changes while chat generation, a Workflow, or a background task is active. Fixed mode affects only the llm role from the next request onward.",
+			Tags:        []string{"conversations"},
+			PathParams:  conversationModelPathParams{},
+			RequestBody: jsonBodyOf(patchConversationModelOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Updated conversation model selection", patchConversationModelOpenAPIResponse{})},
+		},
+		{
+			Method:      "POST",
+			Path:        "/conversations/{parent_id}/sidechat",
+			Summary:     "Create an ephemeral side conversation",
+			Description: "Freezes the selected parent history boundary as read-only model context. The child starts with basic chat only and remains hidden from conversation lists until retained.",
+			Tags:        []string{"conversations"},
+			PathParams:  sidechatParentPathParams{},
+			RequestBody: jsonBodyOf(createSidechatOpenAPIRequest{}, false),
+			Responses:   map[int]openAPIResponse{200: resp("Created side conversation", sidechatConversationOpenAPIResponse{})},
+		},
+		{
+			Method:      "POST",
+			Path:        "/conversations/{child_id}/retain",
+			Summary:     "Retain a side conversation",
+			Description: "Promotes an ephemeral side conversation into visible history after at least one completed turn.",
+			Tags:        []string{"conversations"},
+			PathParams:  sidechatChildPathParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Retained side conversation", sidechatConversationOpenAPIResponse{})},
+		},
+		{
+			Method:      "DELETE",
+			Path:        "/conversations/{child_id}/sidechat",
+			Summary:     "Discard an ephemeral side conversation",
+			Description: "Permanently clears an unretained side conversation and its dependent records.",
+			Tags:        []string{"conversations"},
+			PathParams:  sidechatChildPathParams{},
+			Responses:   map[int]openAPIResponse{204: {Description: "Side conversation discarded"}},
 		},
 		{
 			Method:    "GET",
@@ -4019,8 +4190,8 @@ func registeredCoreOperations() []openAPIOperation {
 		{
 			Method:      "PATCH",
 			Path:        "/conversations/{name}:search-config",
-			Summary:     "Update conversation knowledge bases",
-			Description: "Replaces the knowledge bases on an existing conversation while preserving its other search settings.",
+			Summary:     "Update conversation search filters",
+			Description: "Replaces any supplied knowledge-base, creator, or tag filters while preserving omitted search settings.",
 			Tags:        []string{"conversations"},
 			PathParams:  conversationPathParams{},
 			RequestBody: jsonBodyOf(conversationSearchConfigOpenAPIRequest{}, true),

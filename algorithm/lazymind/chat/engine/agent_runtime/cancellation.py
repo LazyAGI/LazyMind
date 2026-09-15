@@ -4,6 +4,10 @@ import json
 from asyncio import CancelledError
 
 
+class UserCancelledError(CancelledError):
+    """The active Agent run was explicitly stopped by the user."""
+
+
 def make_cancel_stop_condition():
     """Stop the current Agent when its sid-scoped cancel queue is signalled."""
     def _check(_output) -> bool:
@@ -13,10 +17,10 @@ def make_cancel_stop_condition():
             for raw in messages:
                 try:
                     if json.loads(raw).get('tag') == 'cancel':
-                        raise CancelledError('stopped by user')
+                        raise UserCancelledError('stopped by user')
                 except (ValueError, TypeError):
                     continue
-        except CancelledError:
+        except UserCancelledError:
             raise
         except Exception:
             pass

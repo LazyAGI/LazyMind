@@ -360,7 +360,7 @@ func TestEntryDefaultsDriveNewConversationAndThinkingDepth(t *testing.T) {
 	}
 	quickConversation, _, err := ensureConversation(
 		context.Background(), db, "conv-quick-defaults", "", nil, nil,
-		"user-runtime-defaults", "User", false, "", nil,
+		"user-runtime-defaults", "User", false, "", nil, nil,
 	)
 	if err != nil {
 		t.Fatalf("create quick-question conversation: %v", err)
@@ -372,7 +372,7 @@ func TestEntryDefaultsDriveNewConversationAndThinkingDepth(t *testing.T) {
 	}
 	taskConversation, _, err := ensureConversation(
 		context.Background(), db, "conv-task-defaults", "", nil, nil,
-		"user-runtime-defaults", "User", true, "", nil,
+		"user-runtime-defaults", "User", true, "", nil, nil,
 	)
 	if err != nil {
 		t.Fatalf("create new-task conversation: %v", err)
@@ -385,7 +385,7 @@ func TestEntryDefaultsDriveNewConversationAndThinkingDepth(t *testing.T) {
 	}
 	explicitConversation, _, err := ensureConversation(
 		context.Background(), db, "conv-explicit-defaults", "", nil, nil,
-		"user-runtime-defaults", "User", true, "medium", nil,
+		"user-runtime-defaults", "User", true, "medium", nil, nil,
 	)
 	if err != nil {
 		t.Fatalf("create explicit-depth conversation: %v", err)
@@ -405,7 +405,7 @@ func TestEntryDefaultsDriveNewConversationAndThinkingDepth(t *testing.T) {
 	}
 	existingConversation, _, err := ensureConversation(
 		context.Background(), db, "conv-quick-defaults", "", nil, nil,
-		"user-runtime-defaults", "User", true, "max", nil,
+		"user-runtime-defaults", "User", true, "max", nil, nil,
 	)
 	if err != nil {
 		t.Fatalf("reload existing conversation: %v", err)

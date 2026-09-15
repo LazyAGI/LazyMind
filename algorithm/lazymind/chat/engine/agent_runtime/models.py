@@ -41,6 +41,7 @@ class PromptBundle:
 @dataclass(frozen=True)
 class AgentExecutionOptions:
     skills: Any = None
+    enable_builtin_tools: Optional[bool] = None
     workspace: Optional[str] = None
     keep_full_turns: Optional[int] = None
     fs: Any = None

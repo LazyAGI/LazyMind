@@ -19,24 +19,25 @@ import (
 )
 
 type taskResponse struct {
-	ID             string     `json:"id"`
-	TaskType       string     `json:"task_type"`
-	ResourceType   string     `json:"resource_type"`
-	UserID         string     `json:"user_id"`
-	ResourceID     string     `json:"resource_id"`
-	TriggerType    string     `json:"trigger_type"`
-	TriggerID      string     `json:"trigger_id"`
-	Status         string     `json:"status"`
-	ReviewResultID string     `json:"review_result_id,omitempty"`
-	ResultID       string     `json:"result_id,omitempty"`
-	ErrorCode      string     `json:"error_code,omitempty"`
-	ErrorMessage   string     `json:"error_message,omitempty"`
-	AttemptCount   int        `json:"attempt_count"`
-	NextRunAt      time.Time  `json:"next_run_at"`
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
-	StartedAt      *time.Time `json:"started_at,omitempty"`
-	FinishedAt     *time.Time `json:"finished_at,omitempty"`
+	ID             string          `json:"id"`
+	TaskType       string          `json:"task_type"`
+	ResourceType   string          `json:"resource_type"`
+	UserID         string          `json:"user_id"`
+	ResourceID     string          `json:"resource_id"`
+	TriggerType    string          `json:"trigger_type"`
+	TriggerID      string          `json:"trigger_id"`
+	Status         string          `json:"status"`
+	ReviewResultID string          `json:"review_result_id,omitempty"`
+	ResultID       string          `json:"result_id,omitempty"`
+	ResultJSON     json.RawMessage `json:"result_json,omitempty"`
+	ErrorCode      string          `json:"error_code,omitempty"`
+	ErrorMessage   string          `json:"error_message,omitempty"`
+	AttemptCount   int             `json:"attempt_count"`
+	NextRunAt      time.Time       `json:"next_run_at"`
+	CreatedAt      time.Time       `json:"created_at"`
+	UpdatedAt      time.Time       `json:"updated_at"`
+	StartedAt      *time.Time      `json:"started_at,omitempty"`
+	FinishedAt     *time.Time      `json:"finished_at,omitempty"`
 }
 
 type skillReviewResultResponse struct {
@@ -707,6 +708,7 @@ func taskToResponse(row orm.ResourceUpdateTask) taskResponse {
 		Status:         row.Status,
 		ReviewResultID: row.ReviewResultID,
 		ResultID:       row.ResultID,
+		ResultJSON:     row.ResultJSON,
 		ErrorCode:      row.ErrorCode,
 		ErrorMessage:   row.ErrorMessage,
 		AttemptCount:   row.AttemptCount,

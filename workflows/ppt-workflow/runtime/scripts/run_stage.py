@@ -270,6 +270,21 @@ def _build_deterministic_page_query(payload: dict) -> str:
             json.dumps(image_contract, ensure_ascii=False, indent=2),
         ])
 
+    background_path = payload.get("background_image_local_path")
+    if background_path:
+        background_contract = {
+            "path": _page_relative_asset_path(background_path),
+            "size": payload.get("background_image_size"),
+            "role": "slide_background",
+        }
+        lines.extend([
+            "",
+            "AI BACKGROUND IMAGE — use this exact image as the slide #bg background (JSON):",
+            json.dumps(background_contract, ensure_ascii=False, indent=2),
+            "Set #bg background-image to url(the exact path), with background-size: cover and "
+            "background-position: center. Do not render it as a foreground content image.",
+        ])
+
     lines.extend([
         "",
         "Return the complete slide HTML document only. The system prompt owns all mechanical HTML/PPTX constraints.",
@@ -291,6 +306,7 @@ def _build_brief_page_query(
     *,
     inherited_image: dict | None = None,
     inherited_image_size: dict | None = None,
+    background_image: dict | None = None,
 ) -> str:
     """Attach the authoritative deck style to an editable per-page brief."""
     lines = [
@@ -318,6 +334,19 @@ def _build_brief_page_query(
             }, ensure_ascii=False, indent=2),
             "Insert exactly one foreground <img> whose src is the exact path above. "
             "Do not leave an empty image container and do not use the image as a CSS background.",
+        ])
+    background_path = (background_image or {}).get('local_path')
+    if background_path:
+        lines.extend([
+            "",
+            "AI BACKGROUND IMAGE — this generated background is mandatory (JSON):",
+            json.dumps({
+                "path": _page_relative_asset_path(background_path),
+                "size": (background_image or {}).get('size'),
+                "role": "slide_background",
+            }, ensure_ascii=False, indent=2),
+            "Apply it only to #bg with background-image: url(the exact path), "
+            "background-size: cover, and background-position: center. Do not use a foreground <img>.",
         ])
     lines.extend([
         "",
@@ -1290,6 +1319,21 @@ def _html_has_foreground_image(html: str, expected_path: str) -> bool:
     return False
 
 
+def _html_has_background_image(html: str, expected_path: str) -> bool:
+    """Return whether CSS uses the generated image as a background URL."""
+    expected_basename = str(expected_path or '').replace('\\', '/').rsplit('/', 1)[-1]
+    if not expected_basename:
+        return False
+    for match in re.finditer(
+        r'background(?:-image)?\s*:\s*[^;{}]*url\(\s*(["\']?)(.*?)\1\s*\)',
+        html or '', re.IGNORECASE,
+    ):
+        src = match.group(2).strip().replace('\\', '/')
+        if src.rsplit('/', 1)[-1].split('?', 1)[0] == expected_basename:
+            return True
+    return False
+
+
 def _strip_missing_local_imgs(html: str, deck: Path) -> tuple[str, int]:
     """Remove <img> tags whose local ../images/... file is missing on disk.
 
@@ -1384,7 +1428,7 @@ def _read_image_size(path: Path) -> dict | None:
 
 def _resolve_inherited_table(ip: dict, page_outline: dict) -> dict | None:
     ref = page_outline.get("use_table")
-    if not ref:
+    if not isinstance(ref, dict) or not ref:
         return None
     rde = ip.get("raw_document_excerpts") or {}
     raw_path = rde.get("path")
@@ -1413,7 +1457,7 @@ def _resolve_inherited_image(ip: dict, page_outline: dict, deck: Path, page_no: 
     and return its relative path + alt text.
     """
     ref = page_outline.get("use_image")
-    if not ref:
+    if not isinstance(ref, dict) or not ref:
         return None
 
     src = ""
@@ -1497,6 +1541,39 @@ def _resolve_inherited_image(ip: dict, page_outline: dict, deck: Path, page_no: 
     return {"remote_url": None, "local_path": dst_rel, "alt": alt}
 
 
+def _resolve_background_image(deck: Path, page_no: int) -> dict | None:
+    """Resolve the opt-in AI background generated for one page."""
+    manifest_path = deck / "background_images.json"
+    if not manifest_path.exists():
+        return None
+    try:
+        manifest = _load_json(manifest_path)
+    except Exception:
+        return None
+    if manifest.get("enabled") is not True:
+        return None
+    for item in manifest.get("pages") or []:
+        if not isinstance(item, dict):
+            continue
+        try:
+            item_page = int(item.get("page_no", 0))
+        except (TypeError, ValueError):
+            continue
+        if item_page != page_no:
+            continue
+        local_path = str(item.get("local_path") or "").strip()
+        if not local_path:
+            return None
+        path = deck / local_path
+        if not path.is_file():
+            return None
+        return {
+            "local_path": local_path.replace("\\", "/"),
+            "size": _read_image_size(path),
+        }
+    return None
+
+
 def cmd_page_html(deck: Path, page_no: int) -> int:
     """Generate one HTML slide from its structured page plan.
 
@@ -1519,6 +1596,7 @@ def cmd_page_html(deck: Path, page_no: int) -> int:
 
     inherited_table = _resolve_inherited_table(ip, page_outline)
     inherited_image = _resolve_inherited_image(ip, page_outline, deck, page_no)
+    background_image = _resolve_background_image(deck, page_no)
 
     # Inherited image: collect every textual hint the upstream pipeline
     # already produced. Resolution order (best → worst):
@@ -1608,6 +1686,8 @@ def cmd_page_html(deck: Path, page_no: int) -> int:
         "inherited_image_size": inherited_image_size,
         "inherited_image_alt": (inherited_image or {}).get("alt") or None,
         "inherited_image_caption_hint": inherited_image_caption_hint,
+        "background_image_local_path": (background_image or {}).get("local_path"),
+        "background_image_size": (background_image or {}).get("size"),
         "language": _resolve_language(tp, ip),
     }
     prompt_mode = _page_prompt_mode()
@@ -1646,6 +1726,7 @@ def cmd_page_html(deck: Path, page_no: int) -> int:
         rewritten_query,
         page_plan=page_plan,
         inherited_image=inherited_image,
+        background_image=background_image,
         prompt_mode=prompt_mode,
         language=_resolve_language(tp, ip),
     )
@@ -1675,6 +1756,7 @@ def cmd_page_html_from_brief(deck: Path, page_no: int, brief: str) -> int:
         return _fail(f'asset_plan missing page {page_no}')
 
     inherited_image = _resolve_inherited_image(ip, page_outline, deck, page_no)
+    background_image = _resolve_background_image(deck, page_no)
     inherited_image_size = None
     if inherited_image and inherited_image.get('local_path'):
         inherited_image_size = _read_image_size(deck / inherited_image['local_path'])
@@ -1683,6 +1765,7 @@ def cmd_page_html_from_brief(deck: Path, page_no: int, brief: str) -> int:
         style,
         inherited_image=inherited_image,
         inherited_image_size=inherited_image_size,
+        background_image=background_image,
     )
     return _write_page_html_from_query(
         deck,
@@ -1690,6 +1773,7 @@ def cmd_page_html_from_brief(deck: Path, page_no: int, brief: str) -> int:
         page_query,
         page_plan=page_plan,
         inherited_image=inherited_image,
+        background_image=background_image,
         prompt_mode='slide-outline-brief',
         language=_resolve_language(tp, ip),
     )
@@ -1702,6 +1786,7 @@ def _write_page_html_from_query(
     *,
     page_plan: dict,
     inherited_image: dict | None,
+    background_image: dict | None,
     prompt_mode: str,
     language: str,
 ) -> int:
@@ -1747,14 +1832,36 @@ def _write_page_html_from_query(
     html, imgs_dropped = _strip_missing_local_imgs(html, deck)
 
     required_image_path = (inherited_image or {}).get('local_path')
-    if required_image_path and not _html_has_foreground_image(html, required_image_path):
-        required_src = _page_relative_asset_path(required_image_path)
+    required_background_path = (background_image or {}).get('local_path')
+    missing_foreground = bool(
+        required_image_path
+        and not _html_has_foreground_image(html, required_image_path)
+    )
+    missing_background = bool(
+        required_background_path
+        and not _html_has_background_image(html, required_background_path)
+    )
+    if missing_foreground or missing_background:
+        corrections: list[str] = []
+        if missing_foreground:
+            required_src = _page_relative_asset_path(required_image_path)
+            corrections.append(
+                'Include exactly one foreground '
+                f'<img src="{required_src}">. It must be clearly visible, must not be a '
+                'CSS background, and must not be covered by a dark/gradient overlay.'
+            )
+        if missing_background:
+            background_src = _page_relative_asset_path(required_background_path)
+            corrections.append(
+                f'Set #bg background-image to url("{background_src}") with '
+                'background-size: cover and background-position: center. Do not render this '
+                'generated background as a foreground <img>.'
+            )
         repair_query = (
             f'{rewritten_query}\n\n'
-            'MANDATORY CORRECTION: Your previous HTML omitted the material image selected '
-            'for this slide. Regenerate the complete HTML document and include exactly one '
-            f'foreground <img src="{required_src}">. The image must be clearly visible, must '
-            'not be a CSS background, and must not be covered by a dark/gradient overlay.'
+            'MANDATORY CORRECTION: Your previous HTML omitted required image placement. '
+            'Regenerate the complete HTML document and satisfy all of these requirements: '
+            + ' '.join(corrections)
         )
         try:
             html = llm(
@@ -1769,9 +1876,19 @@ def _write_page_html_from_query(
         html, retry_dropped = _strip_missing_local_imgs(html, deck)
         fixed += retry_fixed
         imgs_dropped += retry_dropped
-        if not _html_has_foreground_image(html, required_image_path):
+        if required_image_path and not _html_has_foreground_image(html, required_image_path):
+            required_src = _page_relative_asset_path(required_image_path)
             return _fail(
                 f'page-html p{page_no}: required material image {required_src!r} '
+                'was omitted after one repair attempt',
+                page_no=page_no,
+            )
+        if required_background_path and not _html_has_background_image(
+            html, required_background_path,
+        ):
+            background_src = _page_relative_asset_path(required_background_path)
+            return _fail(
+                f'page-html p{page_no}: required AI background {background_src!r} '
                 'was omitted after one repair attempt',
                 page_no=page_no,
             )

@@ -203,6 +203,18 @@ func (s *SQLiteStore) SetNX(ctx context.Context, key string, value []byte, ttl t
 	return n == 1, err
 }
 
+func (s *SQLiteStore) CompareAndDelete(ctx context.Context, key string, expected []byte) (bool, error) {
+	res, err := s.db.ExecContext(ctx,
+		`DELETE FROM state_kv WHERE key = ? AND value = ? AND `+liveWhere(),
+		key, expected, nowMS(),
+	)
+	if err != nil {
+		return false, err
+	}
+	deleted, err := res.RowsAffected()
+	return deleted == 1, err
+}
+
 func (s *SQLiteStore) RPush(ctx context.Context, key string, value []byte, ttl time.Duration) error {
 	_, err := s.db.ExecContext(ctx, `INSERT INTO state_list(key, value, expires_at) VALUES(?, ?, ?)`, key, value, expiresAt(ttl))
 	return err

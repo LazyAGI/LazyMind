@@ -34,7 +34,6 @@ def test_config_reads_custom_environment_values(monkeypatch):
 def test_config_falls_back_to_defaults(monkeypatch):
     monkeypatch.delenv('LAZYMIND_LLM_PRIORITY', raising=False)
     monkeypatch.delenv('LAZYMIND_RAG_MODE', raising=False)
-    monkeypatch.delenv('LAZYMIND_PREFERENCE_INDEX_MAX_ITEMS', raising=False)
     monkeypatch.delenv('LAZYMIND_PREFERENCE_CONTEXT_MAX_CHARS', raising=False)
     monkeypatch.delenv(
         'LAZYMIND_EPISODE_RECENT_PROGRESS_INJECT_TOPK',
@@ -44,7 +43,6 @@ def test_config_falls_back_to_defaults(monkeypatch):
     from lazymind.config import config as _cfg
     assert _cfg['llm_priority'] == 0
     assert _cfg['rag_mode'] is True
-    assert _cfg['preference_index_max_items'] == 100
     assert _cfg['preference_context_max_chars'] == 5000
     assert _cfg['episode_recent_progress_inject_topk'] == 3
 
@@ -53,7 +51,6 @@ def test_preference_limit_environment_values_must_be_positive():
     from lazymind.config import _parse_positive_integer_env
 
     for env_name in (
-        'LAZYMIND_PREFERENCE_INDEX_MAX_ITEMS',
         'LAZYMIND_PREFERENCE_CONTEXT_MAX_CHARS',
     ):
         for value in ('', '0', '-1', 'invalid'):

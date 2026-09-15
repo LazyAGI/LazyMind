@@ -5,6 +5,23 @@ package common
 import "net/http"
 
 func init() {
+	for _, source := range []string{
+		"invalid cloud knowledge page", "invalid cloud knowledge item", "invalid cloud knowledge detail",
+		"invalid cloud resource tree", "invalid cloud resource file", "invalid cloud resource tree version",
+		"invalid cloud file content", "invalid cloud text content", "invalid cloud binary preview",
+		"invalid cloud large file preview", "invalid cloud preview status", "cloud read response exceeds its contract",
+		"decode cloud read response", "cloud read response contains extra data", "cloud read client unavailable",
+		"cloud resource type does not match the requested collection",
+	} {
+		registerAdditionalErrorAlias(source, "Upstream service error", http.StatusBadGateway, 2000110)
+	}
+	for _, source := range []string{"invalid knowledge catalog key", "invalid cloud resource id", "invalid cloud content request"} {
+		registerAdditionalErrorAlias(source, "Invalid request", http.StatusBadRequest, 2000103)
+	}
+	registerAdditionalErrorAlias("invalid chat model selection", "Invalid request", http.StatusBadRequest, 2000103)
+	registerAdditionalErrorAlias("conversation model selection changed", "Conflict", http.StatusConflict, 2000107)
+	registerAdditionalErrorAlias("conversation is busy", "Conflict", http.StatusConflict, 2000107)
+	registerAdditionalErrorAlias("save conversation model failed", "Internal server error", http.StatusInternalServerError, 2000000)
 	registerAdditionalErrorPattern("%w; fallback parser chunks failed", "Primary and fallback document parsing failed", http.StatusInternalServerError, 2001601)
 	registerAdditionalError("acl_db_dsn is empty", http.StatusInternalServerError, 2001602)
 	registerAdditionalError("active plugin session already exists for conversation", http.StatusConflict, 2001603)
@@ -461,6 +478,8 @@ func init() {
 		"basic chat does not support ask answers", "basic chat does not support plugin mentions",
 		"conversation_id, decision_id and a valid action are required", "conversation and x-user-id are required",
 		"invalid search config patch", "at most 20 knowledge bases are allowed",
+		"invalid approval preference", "step_id and scope (step|following) are required",
+		"approval_required must be false",
 		"selected_revision must be >= 1", "group name required", "multiple json values",
 		"model max_input_tokens is only supported for llm, vlm, or embed models",
 		"model max_input_tokens must be a positive integer or use a k or m suffix, for example 512, 128k, or 1m",
@@ -503,7 +522,7 @@ func init() {
 	registerAdditionalErrorAlias("knowledge base is not readable", "forbidden", http.StatusForbidden, 2000102)
 	registerAdditionalErrorAlias("workflow not found", "Resource not found", http.StatusNotFound, 2000408)
 	for _, source := range []string{
-		"workflow session not found", "selected artifact not found",
+		"workflow session not found", "workflow step not found", "selected artifact not found",
 		"writer session not found", "active draft_document not found",
 		"writer download conversion not found",
 	} {
@@ -514,7 +533,8 @@ func init() {
 	for _, source := range []string{
 		"no chat model configured", "failed to deliver tool-limit decision", "update search config failed",
 		"marshal writerdocument artifact failed", "artifact save failed", "decrypt api key failed",
-		"encrypt api key failed", "failed to create waiting task",
+		"encrypt api key failed", "failed to create waiting task", "save approval preference failed",
+		"copy failed",
 		"invalid workflow action response",
 		"unsupported model provider credential ciphertext", "decode sensitive-word check",
 		"built-in workflow package directory not found", "workflow.yaml missing from revision",
@@ -545,6 +565,7 @@ func init() {
 		registerAdditionalErrorAlias(source, "Upstream service error", http.StatusBadGateway, 2000110)
 	}
 	registerAdditionalErrorPattern("chat service returned status %d", "Upstream service error", http.StatusBadGateway, 2000110)
+	registerAdditionalErrorAlias("record chat cancellation failed", "Upstream service error", http.StatusServiceUnavailable, 2000110)
 	registerAdditionalErrorPattern("migrate model provider credential %s", "Internal server error", http.StatusInternalServerError, 2000000)
 	registerAdditionalErrorPattern("load workflow head revision %s", "Internal server error", http.StatusInternalServerError, 2000000)
 	registerAdditionalErrorPattern("session_ids must belong to user %q and must not contain plugin conversations", "Invalid request", http.StatusBadRequest, 2000103)
@@ -562,6 +583,10 @@ func init() {
 	registerAdditionalErrorPattern("lazymind host execution failed: %s", "Internal server error", http.StatusInternalServerError, 2000000)
 	registerAdditionalErrorAlias("lazymind host execution failed", "Internal server error", http.StatusInternalServerError, 2000000)
 	registerAdditionalErrorPattern("save sources task=%s", "Internal server error", http.StatusInternalServerError, 2000000)
+	registerAdditionalErrorPattern("start task=%s", "Internal server error", http.StatusInternalServerError, 2000000)
+	registerAdditionalErrorPattern("update task progress task=%s", "Internal server error", http.StatusInternalServerError, 2000000)
+	registerAdditionalErrorPattern("complete task=%s", "Internal server error", http.StatusInternalServerError, 2000000)
+	registerAdditionalErrorPattern("fail task=%s", "Internal server error", http.StatusInternalServerError, 2000000)
 	registerAdditionalErrorPattern("invalid sources snapshot", "Internal server error", http.StatusInternalServerError, 2000000)
 	for _, source := range []string{
 		"chat service returned no run terminal",
@@ -590,9 +615,16 @@ func init() {
 		"invalid run_finished data",
 		"run_finished partial_output is required",
 		"run_finished partial_output must be boolean",
+		"run_finished model_invoked must be boolean",
 		"run_finished code must be a string",
 		"invalid run status/reason combination",
 	} {
 		registerAdditionalErrorAlias(source, "algorithm chat stream failed", http.StatusBadGateway, 2002077)
 	}
+	registerAdditionalError("task_lease_lost", http.StatusConflict, 2002365)
+	registerAdditionalError("maintenance_busy", http.StatusServiceUnavailable, 2002366)
+	registerAdditionalError("preference_organizing", http.StatusConflict, 2002361)
+	registerAdditionalError("create preference organizer task failed", http.StatusInternalServerError, 2002362)
+	registerAdditionalError("query preference organizer task failed", http.StatusInternalServerError, 2002363)
+	registerAdditionalError("preference organizer task lease was lost", http.StatusInternalServerError, 2002364)
 }

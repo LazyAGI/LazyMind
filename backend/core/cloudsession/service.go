@@ -3,6 +3,7 @@ package cloudsession
 import (
 	"context"
 	"errors"
+	"net/http"
 	"sync"
 	"time"
 
@@ -13,6 +14,7 @@ type RefreshToken = string
 type TokenPair = cloudclient.DesktopTokenPair
 
 type State string
+type Reachability string
 
 const (
 	StateSignedOut      State = "signed_out"
@@ -23,6 +25,13 @@ const (
 	StateRefreshing     State = "refreshing"
 	StateReauthRequired State = "reauth_required"
 	StateOffline        State = "offline"
+)
+
+const (
+	ReachabilityUnknown     Reachability = "unknown"
+	ReachabilityChecking    Reachability = "checking"
+	ReachabilityReachable   Reachability = "reachable"
+	ReachabilityUnreachable Reachability = "unreachable"
 )
 
 var ErrNoRefreshToken = errors.New("cloud refresh token is unavailable")
@@ -48,13 +57,15 @@ type ServiceDeps struct {
 }
 
 type Status struct {
-	State           State     `json:"state"`
-	AccessToken     string    `json:"-"`
-	AccessExpires   time.Time `json:"access_expires_at,omitempty"`
-	AccountID       string    `json:"account_id,omitempty"`
-	Username        string    `json:"username,omitempty"`
-	EmailMasked     string    `json:"email_masked,omitempty"`
-	RegistrationURL string    `json:"registration_url,omitempty"`
+	State           State        `json:"state"`
+	Configured      bool         `json:"configured"`
+	Reachability    Reachability `json:"reachability"`
+	AccessToken     string       `json:"-"`
+	AccessExpires   time.Time    `json:"access_expires_at,omitempty"`
+	AccountID       string       `json:"account_id,omitempty"`
+	Username        string       `json:"username,omitempty"`
+	EmailMasked     string       `json:"email_masked,omitempty"`
+	RegistrationURL string       `json:"registration_url,omitempty"`
 }
 
 type Service struct {
@@ -65,6 +76,8 @@ type Service struct {
 	state         State
 	accessToken   string
 	accessExpires time.Time
+	configured    bool
+	reachability  Reachability
 }
 
 func NewService(deps ServiceDeps) *Service {
@@ -72,7 +85,11 @@ func NewService(deps ServiceDeps) *Service {
 	if now == nil {
 		now = time.Now
 	}
-	return &Service{store: deps.Store, auth: deps.Auth, now: now, state: StateSignedOut}
+	configured := deps.Store != nil && deps.Auth != nil
+	return &Service{
+		store: deps.Store, auth: deps.Auth, now: now, state: StateSignedOut,
+		configured: configured, reachability: ReachabilityUnknown,
+	}
 }
 
 func (s *Service) Restore(ctx context.Context) error {
@@ -96,6 +113,7 @@ func (s *Service) Establish(ctx context.Context, pair TokenPair) error {
 	s.accessToken = pair.AccessToken
 	s.accessExpires = pair.AccessExpiresAt
 	s.state = StateSignedIn
+	s.reachability = ReachabilityReachable
 	return nil
 }
 
@@ -120,7 +138,35 @@ func (s *Service) AccessToken(ctx context.Context, minimumTTL time.Duration) (st
 func (s *Service) Status(context.Context) Status {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return Status{State: s.state, AccessExpires: s.accessExpires}
+	return Status{
+		State: s.state, Configured: s.configured, Reachability: s.reachability,
+		AccessExpires: s.accessExpires,
+	}
+}
+
+func (s *Service) SetReachability(reachability Reachability) {
+	if s == nil {
+		return
+	}
+	if reachability != ReachabilityUnknown && reachability != ReachabilityChecking &&
+		reachability != ReachabilityReachable && reachability != ReachabilityUnreachable {
+		return
+	}
+	s.mu.Lock()
+	s.reachability = reachability
+	if reachability == ReachabilityUnreachable && s.state == StateSignedIn {
+		s.state = StateOffline
+	}
+	s.mu.Unlock()
+}
+
+func (s *Service) CloudBusinessAvailable() bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.configured && s.reachability == ReachabilityReachable && s.state == StateSignedIn
 }
 
 func (s *Service) Logout(ctx context.Context) error {
@@ -161,7 +207,14 @@ func (s *Service) refreshLocked(ctx context.Context) error {
 	s.state = StateRefreshing
 	pair, err := s.auth.Refresh(ctx, refreshToken)
 	if err != nil {
-		s.clearLocked(StateReauthRequired)
+		var cloudErr *cloudclient.CloudError
+		if errors.As(err, &cloudErr) && (cloudErr.HTTPStatus == http.StatusUnauthorized || cloudErr.HTTPStatus == http.StatusForbidden) {
+			s.clearLocked(StateReauthRequired)
+			s.reachability = ReachabilityReachable
+		} else {
+			s.clearLocked(StateOffline)
+			s.reachability = ReachabilityUnreachable
+		}
 		return err
 	}
 	if pair.AccessToken == "" || pair.RefreshToken == "" || !pair.AccessExpiresAt.After(s.now()) {
@@ -175,6 +228,7 @@ func (s *Service) refreshLocked(ctx context.Context) error {
 	s.accessToken = pair.AccessToken
 	s.accessExpires = pair.AccessExpiresAt
 	s.state = StateSignedIn
+	s.reachability = ReachabilityReachable
 	return nil
 }
 

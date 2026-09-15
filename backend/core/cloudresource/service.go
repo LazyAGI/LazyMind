@@ -266,6 +266,7 @@ type ListItem struct {
 	FormatSchema     string                      `json:"format_schema"`
 	UpdatedAt        string                      `json:"updated_at"`
 	PresenceStatus   cloudbinding.PresenceStatus `json:"presence_status"`
+	LocalExists      bool                        `json:"local_exists"`
 	LocalResourceID  string                      `json:"local_resource_id,omitempty"`
 	LocalResourceRef string                      `json:"local_resource_ref,omitempty"`
 }
@@ -291,6 +292,9 @@ func (s Service) List(ctx context.Context, request ListRequest) (ListPage, error
 	}
 	resourceIDs := make([]string, 0, len(page.Items))
 	for _, resource := range page.Items {
+		if resource.ResourceType != request.ResourceType {
+			return ListPage{}, errors.New("cloud resource type does not match the requested collection")
+		}
 		resourceIDs = append(resourceIDs, resource.ResourceID)
 	}
 	bindings, err := s.Bindings.FindByCloudIDs(ctx, s.Cloud.Origin(), account.ID, request.ResourceType, resourceIDs)
@@ -330,7 +334,8 @@ func (s Service) List(ctx context.Context, request ListRequest) (ListPage, error
 		items = append(items, ListItem{
 			ResourceID: resource.ResourceID, ResourceType: resource.ResourceType, ResourceName: resource.ResourceName,
 			ContentSize: resource.ContentSize, FormatSchema: resource.FormatSchema, UpdatedAt: resource.UpdatedAt,
-			PresenceStatus: decision.Status, LocalResourceID: decision.LocalResourceID, LocalResourceRef: local.ResourceRef,
+			PresenceStatus: decision.Status, LocalExists: local.Exists,
+			LocalResourceID: local.ResourceID, LocalResourceRef: local.ResourceRef,
 		})
 	}
 	return ListPage{Items: items, NextCursor: page.NextCursor}, nil

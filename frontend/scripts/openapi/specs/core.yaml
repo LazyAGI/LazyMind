@@ -1,5 +1,450 @@
 components:
     schemas:
+        CloudResourceMetadata:
+            type: object
+            additionalProperties: false
+            required:
+                - resource_id
+                - resource_type
+                - client_resource_key
+                - resource_name
+                - content_hash
+                - content_size
+                - format_schema
+                - updated_at
+            properties:
+                resource_id:
+                    type: string
+                    format: uuid
+                resource_type:
+                    type: string
+                    enum:
+                        - skill
+                        - workflow
+                client_resource_key:
+                    type: string
+                resource_name:
+                    type: string
+                content_hash:
+                    type: string
+                    pattern: ^[0-9a-f]{64}$
+                content_size:
+                    type: integer
+                    format: int64
+                    minimum: 0
+                format_schema:
+                    type: string
+                    enum:
+                        - lazymind.resource-manifest/v2
+                updated_at:
+                    type: string
+                    format: date-time
+        CloudResourceListItem:
+            type: object
+            properties:
+                resource_id:
+                    type: string
+                    format: uuid
+                resource_type:
+                    type: string
+                    enum:
+                        - skill
+                        - workflow
+                resource_name:
+                    type: string
+                content_size:
+                    type: integer
+                    format: int64
+                    minimum: 0
+                format_schema:
+                    type: string
+                    enum:
+                        - lazymind.resource-manifest/v2
+                updated_at:
+                    type: string
+                    format: date-time
+                presence_status:
+                    type: string
+                    enum:
+                        - present_current
+                        - download_required
+                        - local_missing
+                        - cloud_updated
+                        - local_modified
+                        - diverged
+                        - incompatible
+                local_exists:
+                    type: boolean
+                local_resource_id:
+                    type: string
+                local_resource_ref:
+                    type: string
+            required:
+                - resource_id
+                - resource_type
+                - resource_name
+                - content_size
+                - format_schema
+                - updated_at
+                - presence_status
+                - local_exists
+        CloudResourcePage:
+            type: object
+            required:
+                - items
+            properties:
+                items:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/CloudResourceListItem'
+                next_cursor:
+                    type: string
+        CloudResourceTree:
+            type: object
+            additionalProperties: false
+            required:
+                - resource_id
+                - resource_type
+                - content_hash
+                - entrypoint
+                - files
+            properties:
+                resource_id:
+                    type: string
+                    format: uuid
+                resource_type:
+                    type: string
+                    enum:
+                        - skill
+                        - workflow
+                content_hash:
+                    type: string
+                    pattern: ^[0-9a-f]{64}$
+                entrypoint:
+                    type: string
+                    minLength: 1
+                    maxLength: 1024
+                    description: >-
+                        Canonical relative file path; no absolute paths, dot segments, repeated separators, backslashes, drive prefixes or control
+                        characters.
+                files:
+                    type: array
+                    minItems: 1
+                    maxItems: 10000
+                    items:
+                        type: object
+                        additionalProperties: false
+                        required:
+                            - path
+                            - size
+                            - sha256
+                        properties:
+                            path:
+                                type: string
+                                minLength: 1
+                                maxLength: 1024
+                                description: >-
+                                    Canonical relative file path; no absolute paths, dot segments, repeated separators, backslashes, drive prefixes
+                                    or control characters.
+                            size:
+                                type: integer
+                                format: int64
+                                minimum: 0
+                                maximum: 104857600
+                            sha256:
+                                type: string
+                                pattern: ^[0-9a-f]{64}$
+                            executable:
+                                type: boolean
+        CloudResourceContent:
+            type: object
+            additionalProperties: false
+            required:
+                - path
+                - content_hash
+                - sha256
+                - size
+                - mime
+                - binary
+                - content
+                - preview_status
+            properties:
+                path:
+                    type: string
+                    minLength: 1
+                    maxLength: 1024
+                    description: >-
+                        Canonical relative file path; no absolute paths, dot segments, repeated separators, backslashes, drive prefixes or control
+                        characters.
+                content_hash:
+                    type: string
+                    pattern: ^[0-9a-f]{64}$
+                sha256:
+                    type: string
+                    pattern: ^[0-9a-f]{64}$
+                size:
+                    type: integer
+                    format: int64
+                    minimum: 0
+                    maximum: 104857600
+                mime:
+                    type: string
+                    maxLength: 256
+                binary:
+                    type: boolean
+                content:
+                    type: string
+                    maxLength: 2097152
+                    description: UTF-8 text up to 2 MiB; empty for binary and too_large states.
+                preview_status:
+                    type: string
+                    enum:
+                        - ready
+                        - binary
+                        - too_large
+        CloudKnowledgeCatalogItem:
+            type: object
+            properties:
+                catalog_key:
+                    type: string
+                    minLength: 1
+                    maxLength: 64
+                    pattern: ^[a-z0-9][a-z0-9-]*$
+                version:
+                    type: integer
+                    format: int64
+                    minimum: 1
+                category:
+                    type: string
+                    enum:
+                        - industry
+                        - evaluation
+                name:
+                    type: string
+                    minLength: 1
+                    maxLength: 255
+                description:
+                    type: string
+                    minLength: 1
+                    maxLength: 4000
+                icon:
+                    type: string
+                    maxLength: 64
+                domain:
+                    type: string
+                    minLength: 1
+                    maxLength: 64
+                tags:
+                    type: array
+                    maxItems: 20
+                    uniqueItems: true
+                    items:
+                        type: string
+                        minLength: 1
+                        maxLength: 40
+                online_access_url:
+                    type: string
+                    maxLength: 2048
+                data_source:
+                    type: string
+                    minLength: 1
+                    maxLength: 255
+                published_at:
+                    type: string
+                    format: date-time
+                updated_at:
+                    type: string
+                    format: date-time
+            required:
+                - catalog_key
+                - version
+                - category
+                - name
+                - description
+                - icon
+                - domain
+                - tags
+                - online_access_url
+                - data_source
+                - published_at
+                - updated_at
+        CloudKnowledgeCatalogDetail:
+            type: object
+            properties:
+                catalog_key:
+                    type: string
+                    minLength: 1
+                    maxLength: 64
+                    pattern: ^[a-z0-9][a-z0-9-]*$
+                version:
+                    type: integer
+                    format: int64
+                    minimum: 1
+                category:
+                    type: string
+                    enum:
+                        - industry
+                        - evaluation
+                name:
+                    type: string
+                    minLength: 1
+                    maxLength: 255
+                description:
+                    type: string
+                    minLength: 1
+                    maxLength: 4000
+                icon:
+                    type: string
+                    maxLength: 64
+                domain:
+                    type: string
+                    minLength: 1
+                    maxLength: 64
+                tags:
+                    type: array
+                    maxItems: 20
+                    uniqueItems: true
+                    items:
+                        type: string
+                        minLength: 1
+                        maxLength: 40
+                online_access_url:
+                    type: string
+                    maxLength: 2048
+                data_source:
+                    type: string
+                    minLength: 1
+                    maxLength: 255
+                published_at:
+                    type: string
+                    format: date-time
+                updated_at:
+                    type: string
+                    format: date-time
+                package_url:
+                    type: string
+                package_revision:
+                    type: string
+                source_adapter:
+                    type: string
+                adapter_options:
+                    type: object
+                    additionalProperties: true
+                sample_questions:
+                    type: array
+                    items:
+                        type: string
+            required:
+                - catalog_key
+                - version
+                - category
+                - name
+                - description
+                - icon
+                - domain
+                - tags
+                - online_access_url
+                - data_source
+                - published_at
+                - updated_at
+                - package_url
+                - package_revision
+                - source_adapter
+                - adapter_options
+                - sample_questions
+        CloudKnowledgeCatalogPage:
+            type: object
+            required:
+                - items
+                - catalog_revision
+            properties:
+                items:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/CloudKnowledgeCatalogItem'
+                catalog_revision:
+                    type: integer
+                    format: int64
+                next_cursor:
+                    type: string
+        CloudResourceMetadataResponse:
+            type: object
+            required:
+                - code
+                - message
+                - data
+            properties:
+                code:
+                    type: integer
+                message:
+                    type: string
+                data:
+                    $ref: '#/components/schemas/CloudResourceMetadata'
+        CloudResourcePageResponse:
+            type: object
+            required:
+                - code
+                - message
+                - data
+            properties:
+                code:
+                    type: integer
+                message:
+                    type: string
+                data:
+                    $ref: '#/components/schemas/CloudResourcePage'
+        CloudResourceTreeResponse:
+            type: object
+            required:
+                - code
+                - message
+                - data
+            properties:
+                code:
+                    type: integer
+                message:
+                    type: string
+                data:
+                    $ref: '#/components/schemas/CloudResourceTree'
+        CloudResourceContentResponse:
+            type: object
+            required:
+                - code
+                - message
+                - data
+            properties:
+                code:
+                    type: integer
+                message:
+                    type: string
+                data:
+                    $ref: '#/components/schemas/CloudResourceContent'
+        CloudKnowledgeCatalogDetailResponse:
+            type: object
+            required:
+                - code
+                - message
+                - data
+            properties:
+                code:
+                    type: integer
+                message:
+                    type: string
+                data:
+                    $ref: '#/components/schemas/CloudKnowledgeCatalogDetail'
+        CloudKnowledgeCatalogPageResponse:
+            type: object
+            required:
+                - code
+                - message
+                - data
+            properties:
+                code:
+                    type: integer
+                message:
+                    type: string
+                data:
+                    $ref: '#/components/schemas/CloudKnowledgeCatalogPage'
         ACLApiResponse:
             properties:
                 code:
@@ -434,6 +879,8 @@ components:
                     type: string
                 message:
                     type: string
+                model_route:
+                    $ref: '#/components/schemas/ChatModelRoute'
                 prompt_questions:
                     items:
                         type: string
@@ -452,6 +899,54 @@ components:
                 thinking_duration_s:
                     format: int64
                     type: integer
+            type: object
+        ChatModelRoute:
+            properties:
+                mode:
+                    enum:
+                        - auto
+                        - fixed
+                    type: string
+                model_id:
+                    type: string
+                model_name:
+                    type: string
+                provider_id:
+                    type: string
+                provider_name:
+                    type: string
+                reason:
+                    enum:
+                        - simple_task
+                        - complex_task
+                        - long_context
+                        - session_sticky
+                        - default_balanced
+                        - retry_same_model
+                        - fixed
+                        - initial_selection
+                        - model_unavailable
+                    type: string
+                selection_version:
+                    format: int64
+                    type: integer
+                source:
+                    enum:
+                        - own
+                        - shared
+                        - cloud
+                    type: string
+                strategy:
+                    type: string
+                task_class:
+                    enum:
+                        - simple
+                        - balanced
+                        - complex
+                        - long_context
+                        - fixed
+                        - auto
+                    type: string
             type: object
         ChatRuntimeEvent:
             properties:
@@ -686,10 +1181,100 @@ components:
                 is_generating:
                     type: boolean
             type: object
+        ConversationDetailItem:
+            properties:
+                assistant:
+                    enum:
+                        - lazymind
+                        - codex
+                        - cursor
+                        - workbuddy
+                    type: string
+                chat_executor:
+                    enum:
+                        - lazymind
+                        - codex
+                        - cursor
+                        - workbuddy
+                    type: string
+                chat_times:
+                    format: int64
+                    type: integer
+                conversation_id:
+                    type: string
+                create_time:
+                    type: string
+                display_name:
+                    type: string
+                is_pinned:
+                    type: boolean
+                models:
+                    items:
+                        type: string
+                    type: array
+                name:
+                    type: string
+                parent_conversation_id:
+                    nullable: true
+                    type: string
+                parent_display_name:
+                    type: string
+                pinned_at:
+                    format: date-time
+                    nullable: true
+                    type: string
+                project_key:
+                    type: string
+                project_name:
+                    type: string
+                relation_type:
+                    enum:
+                        - ""
+                        - sidechat
+                        - fork
+                    type: string
+                search_config:
+                    properties: {}
+                    type: object
+                selected_text:
+                    type: string
+                source_context:
+                    nullable: true
+                    properties:
+                        messages:
+                            items:
+                                additionalProperties: true
+                                type: object
+                            type: array
+                    type: object
+                source_history_id:
+                    nullable: true
+                    type: string
+                source_seq:
+                    nullable: true
+                    type: integer
+                thinking_depth:
+                    enum:
+                        - low
+                        - medium
+                        - high
+                        - max
+                    type: string
+                total_feedback_like:
+                    format: int64
+                    type: integer
+                total_feedback_unlike:
+                    format: int64
+                    type: integer
+                update_time:
+                    type: string
+                user:
+                    type: string
+            type: object
         ConversationDetailResponse:
             properties:
                 conversation:
-                    $ref: '#/components/schemas/ConversationItem'
+                    $ref: '#/components/schemas/ConversationDetailItem'
             type: object
         ConversationFeedbackRequest:
             properties:
@@ -724,6 +1309,10 @@ components:
                     $ref: '#/components/schemas/ExternalExecutionProjection'
                 expected_answer:
                     type: string
+                failed_attempts:
+                    items:
+                        $ref: '#/components/schemas/FailedRunAttempt'
+                    type: array
                 feed_back:
                     type: integer
                 id:
@@ -733,6 +1322,8 @@ components:
                         properties: {}
                         type: object
                     type: array
+                model_route:
+                    $ref: '#/components/schemas/ChatModelRoute'
                 query:
                     type: string
                 reason:
@@ -807,6 +1398,11 @@ components:
                     type: array
                 name:
                     type: string
+                parent_conversation_id:
+                    nullable: true
+                    type: string
+                parent_display_name:
+                    type: string
                 pinned_at:
                     format: date-time
                     nullable: true
@@ -814,6 +1410,12 @@ components:
                 project_key:
                     type: string
                 project_name:
+                    type: string
+                relation_type:
+                    enum:
+                        - ""
+                        - sidechat
+                        - fork
                     type: string
                 search_config:
                     properties: {}
@@ -1409,8 +2011,8 @@ components:
                     items:
                         $ref: '#/components/schemas/CurrentMemoryPreferenceItem'
                     type: array
-                resident_index_usage:
-                    $ref: '#/components/schemas/CurrentMemoryPreferenceResidentIndexUsage'
+                projection_state:
+                    $ref: '#/components/schemas/CurrentMemoryPreferenceProjectionState'
                 total_size:
                     format: int64
                     type: integer
@@ -1420,9 +2022,9 @@ components:
             required:
                 - items
                 - total_size
-                - resident_index_usage
                 - etag
                 - updated_at
+                - projection_state
             type: object
         CurrentMemoryPreferenceListResponse:
             properties:
@@ -1449,20 +2051,27 @@ components:
                 - ordered_names
                 - expected_etag
             type: object
-        CurrentMemoryPreferenceResidentIndexUsage:
+        CurrentMemoryPreferenceProjectionState:
             properties:
-                max_items:
-                    format: int64
+                full_projection_chars:
                     type: integer
-                over_limit:
+                max_chars:
+                    type: integer
+                projected_chars:
+                    type: integer
+                projected_items:
+                    type: integer
+                projection_truncated:
                     type: boolean
-                used_items:
-                    format: int64
+                stored_items:
                     type: integer
             required:
-                - used_items
-                - max_items
-                - over_limit
+                - stored_items
+                - full_projection_chars
+                - projected_items
+                - projected_chars
+                - projection_truncated
+                - max_chars
             type: object
         CurrentMemoryPresentation:
             properties:
@@ -2420,6 +3029,25 @@ components:
                 workflow_id:
                     type: string
             type: object
+        FailedRunAttempt:
+            properties:
+                create_time:
+                    format: date-time
+                    type: string
+                model_route:
+                    $ref: '#/components/schemas/ChatModelRoute'
+                result:
+                    type: string
+                run_id:
+                    type: string
+                run_status:
+                    enum:
+                        - failed
+                        - interrupted
+                    type: string
+                run_terminal:
+                    $ref: '#/components/schemas/RunTerminal'
+            type: object
         GetKBAuthorizationResponse:
             properties:
                 grants:
@@ -2889,6 +3517,186 @@ components:
                 source:
                     type: string
             type: object
+        PreferenceOrganizerPass:
+            properties:
+                after:
+                    allOf:
+                        - $ref: '#/components/schemas/PreferenceOrganizerState'
+                    nullable: true
+                before:
+                    $ref: '#/components/schemas/PreferenceOrganizerState'
+                changes:
+                    type: integer
+                operation_count:
+                    type: integer
+                outcome:
+                    type: string
+                pass_number:
+                    type: integer
+                plan_hash:
+                    type: string
+                receipts:
+                    items:
+                        $ref: '#/components/schemas/PreferenceOrganizerReceipt'
+                    type: array
+            required:
+                - pass_number
+                - plan_hash
+                - before
+                - receipts
+                - changes
+                - operation_count
+                - outcome
+            type: object
+        PreferenceOrganizerReceipt:
+            properties:
+                action:
+                    enum:
+                        - merge
+                        - move_to_episode
+                        - delete
+                    type: string
+                applied_steps:
+                    items:
+                        type: string
+                    type: array
+                before_etag:
+                    type: string
+                changes:
+                    type: integer
+                episode_id:
+                    type: string
+                etag:
+                    type: string
+                failed_steps:
+                    items:
+                        type: string
+                    type: array
+                names:
+                    items:
+                        type: string
+                    type: array
+                operation_id:
+                    type: string
+                status:
+                    enum:
+                        - pending
+                        - applied
+                        - idempotent
+                        - partial
+                        - failed
+                        - unknown
+                    type: string
+            required:
+                - operation_id
+                - action
+                - names
+                - status
+                - changes
+                - applied_steps
+                - failed_steps
+            type: object
+        PreferenceOrganizerResult:
+            properties:
+                outcome:
+                    enum:
+                        - organized
+                        - organized_with_remaining
+                        - no_safe_changes
+                        - budget_exhausted
+                        - stale_state
+                        - partial
+                        - failed
+                    type: string
+                passes:
+                    items:
+                        $ref: '#/components/schemas/PreferenceOrganizerPass'
+                    type: array
+                passes_attempted:
+                    type: integer
+                reason:
+                    type: string
+                stop_reason:
+                    type: string
+                target_reached:
+                    type: boolean
+                total_changes:
+                    type: integer
+            type: object
+        PreferenceOrganizerState:
+            properties:
+                etag:
+                    type: string
+                full_projection_chars:
+                    type: integer
+                projected_chars:
+                    type: integer
+                projected_items:
+                    type: integer
+                projection_truncated:
+                    type: boolean
+                stored_items:
+                    type: integer
+            required:
+                - stored_items
+                - full_projection_chars
+                - projected_items
+                - projected_chars
+                - projection_truncated
+                - etag
+            type: object
+        PreferenceOrganizerTaskData:
+            properties:
+                created_at:
+                    format: date-time
+                    type: string
+                error_code:
+                    type: string
+                error_message:
+                    type: string
+                finished_at:
+                    format: date-time
+                    type: string
+                result:
+                    $ref: '#/components/schemas/PreferenceOrganizerResult'
+                started_at:
+                    format: date-time
+                    type: string
+                status:
+                    enum:
+                        - pending
+                        - running
+                        - done
+                        - failed
+                        - skipped
+                    type: string
+                task_id:
+                    type: string
+                waiting_reason:
+                    enum:
+                        - memory_review
+                        - resources
+                    type: string
+            required:
+                - task_id
+                - status
+                - created_at
+            type: object
+        PreferenceOrganizerTaskResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    allOf:
+                        - $ref: '#/components/schemas/PreferenceOrganizerTaskData'
+                    nullable: true
+                message:
+                    type: string
+            required:
+                - code
+                - message
+                - data
+            type: object
         PromptCategory:
             properties:
                 id:
@@ -2980,6 +3788,8 @@ components:
             type: object
         PromptPolishRequest:
             properties:
+                allow_empty:
+                    type: boolean
                 content:
                     type: string
                 user_instruct:
@@ -3184,6 +3994,8 @@ components:
                     type: string
                 model_call_id:
                     type: string
+                model_invoked:
+                    type: boolean
                 partial_output:
                     type: boolean
                 reason:
@@ -3367,6 +4179,8 @@ components:
                     type: integer
                 gallery:
                     type: boolean
+                hot:
+                    type: boolean
                 id:
                     type: string
                 image_url:
@@ -3377,9 +4191,9 @@ components:
                     type: string
                 provider:
                     type: string
-                source_url:
-                    type: string
                 result_summary:
+                    type: string
+                source_url:
                     type: string
                 tags:
                     items:
@@ -3403,14 +4217,14 @@ components:
                 - featured
                 - featured_order
                 - gallery
+                - hot
                 - id
                 - image_url
                 - output_label
                 - output_type
                 - provider
-                - source_url
                 - result_summary
-                - tasks
+                - source_url
                 - title
                 - type
             type: object
@@ -3467,13 +4281,13 @@ components:
                     items:
                         type: string
                     type: array
-                image_asset:
-                    type: string
-                image_url:
-                    type: string
                 html_asset:
                     type: string
                 html_url:
+                    type: string
+                image_asset:
+                    type: string
+                image_url:
                     type: string
                 product_report:
                     $ref: '#/components/schemas/ShowcaseCaseProductReport'
@@ -4788,6 +5602,145 @@ components:
                         - max
                     type: string
             type: object
+        chatModelListOpenAPIItem:
+            properties:
+                availability:
+                    enum:
+                        - available
+                        - degraded
+                        - unavailable
+                    type: string
+                badges:
+                    items:
+                        type: string
+                    type: array
+                capabilities:
+                    items:
+                        type: string
+                    type: array
+                current:
+                    type: boolean
+                default:
+                    type: boolean
+                group_id:
+                    type: string
+                group_name:
+                    type: string
+                id:
+                    type: string
+                lifecycle:
+                    enum:
+                        - active
+                        - deprecated
+                        - retired
+                    type: string
+                name:
+                    type: string
+                shared:
+                    type: boolean
+                source:
+                    enum:
+                        - own
+                        - shared
+                        - cloud
+                    type: string
+            required:
+                - availability
+                - current
+                - default
+                - group_id
+                - group_name
+                - id
+                - lifecycle
+                - name
+                - shared
+                - source
+            type: object
+        chatModelProviderOpenAPIItem:
+            properties:
+                id:
+                    type: string
+                models:
+                    items:
+                        $ref: '#/components/schemas/chatModelListOpenAPIItem'
+                    type: array
+                name:
+                    type: string
+                source:
+                    enum:
+                        - own
+                        - shared
+                        - cloud
+                    type: string
+            required:
+                - id
+                - name
+                - source
+            type: object
+        chatModelSelectionOpenAPI:
+            properties:
+                availability:
+                    enum:
+                        - available
+                        - unavailable
+                    type: string
+                group_id:
+                    type: string
+                group_name:
+                    type: string
+                mode:
+                    enum:
+                        - fixed
+                        - auto
+                    type: string
+                model_id:
+                    type: string
+                model_name:
+                    type: string
+                provider_id:
+                    type: string
+                provider_name:
+                    type: string
+                source:
+                    enum:
+                        - own
+                        - shared
+                        - cloud
+                    type: string
+                version:
+                    format: int64
+                    type: integer
+            required:
+                - availability
+                - mode
+                - version
+            type: object
+        chatModelsOpenAPIResponse:
+            properties:
+                auto_available:
+                    type: boolean
+                default_selection:
+                    $ref: '#/components/schemas/chatModelSelectionOpenAPI'
+                providers:
+                    items:
+                        $ref: '#/components/schemas/chatModelProviderOpenAPIItem'
+                    type: array
+                selection:
+                    $ref: '#/components/schemas/chatModelSelectionOpenAPI'
+                switch_allowed:
+                    type: boolean
+                switch_blocked_reason:
+                    enum:
+                        - generating
+                        - workflow_running
+                        - background_task_running
+                    type: string
+            required:
+                - auto_available
+                - default_selection
+                - selection
+                - switch_allowed
+            type: object
         checkModelProviderOpenAPIRequest:
             properties:
                 api_key:
@@ -4806,7 +5759,18 @@ components:
             type: object
         conversationSearchConfigOpenAPIRequest:
             properties:
+                creators:
+                    description: Optional. Replace document creator filters; omit to preserve them.
+                    items:
+                        type: string
+                    type: array
                 dataset_ids:
+                    description: Optional. Replace knowledge bases; omit to preserve the current selection.
+                    items:
+                        type: string
+                    type: array
+                tags:
+                    description: Optional. Replace document tag filters; omit to preserve them.
                     items:
                         type: string
                     type: array
@@ -4858,6 +5822,22 @@ components:
                 - is_verified
                 - name
                 - user_model_provider_id
+            type: object
+        createSidechatOpenAPIRequest:
+            properties:
+                selected_text:
+                    type: string
+                source_history_id:
+                    type: string
+                source_seq:
+                    type: integer
+                thinking_depth:
+                    enum:
+                        - low
+                        - medium
+                        - high
+                        - max
+                    type: string
             type: object
         deleteDatabaseConnectionOpenAPIResponse:
             properties:
@@ -5394,8 +6374,18 @@ components:
             type: object
         listModelProviderGroupModelsOpenAPIItem:
             properties:
+                availability:
+                    enum:
+                        - available
+                        - degraded
+                        - unavailable
+                    type: string
                 base_url:
                     type: string
+                capabilities:
+                    items:
+                        type: string
+                    type: array
                 group_name:
                     type: string
                 id:
@@ -5405,6 +6395,12 @@ components:
                 is_editable:
                     description: Whether this option supports image editing
                     type: boolean
+                lifecycle:
+                    enum:
+                        - active
+                        - deprecated
+                        - retired
+                    type: string
                 max_input_tokens:
                     description: Maximum catalog LLM, VLM, or embedding-model input context window, for example 512, 128K, or 1M; null for other, custom, or unknown models
                     nullable: true
@@ -5413,23 +6409,35 @@ components:
                     type: string
                 name:
                     type: string
+                provider_group_id:
+                    type: string
+                provider_id:
+                    type: string
                 provider_name:
+                    type: string
+                read_only:
+                    type: boolean
+                source:
+                    enum:
+                        - own
+                        - cloud
                     type: string
                 user_model_provider_group_id:
                     type: string
                 user_model_provider_id:
                     type: string
             required:
-                - base_url
-                - group_name
+                - availability
                 - id
                 - is_default
                 - is_editable
+                - lifecycle
                 - model_type
                 - name
+                - provider_id
                 - provider_name
-                - user_model_provider_group_id
-                - user_model_provider_id
+                - read_only
+                - source
             type: object
         listModelProviderGroupModelsOpenAPIResponse:
             properties:
@@ -5632,6 +6640,37 @@ components:
                     type: boolean
             required:
                 - ok
+            type: object
+        patchConversationModelOpenAPIRequest:
+            properties:
+                expected_version:
+                    format: int64
+                    type: integer
+                mode:
+                    enum:
+                        - fixed
+                        - auto
+                    type: string
+                model_id:
+                    description: Required only when mode is fixed.
+                    type: string
+                source:
+                    description: Fixed selection source; omitted by legacy clients for local models.
+                    enum:
+                        - own
+                        - shared
+                        - cloud
+                    type: string
+            required:
+                - expected_version
+                - mode
+            type: object
+        patchConversationModelOpenAPIResponse:
+            properties:
+                selection:
+                    $ref: '#/components/schemas/chatModelSelectionOpenAPI'
+            required:
+                - selection
             type: object
         personalizationSettingOpenAPIRequest:
             properties:
@@ -5859,6 +6898,12 @@ components:
             type: object
         selectedModelOpenAPIItem:
             properties:
+                availability:
+                    enum:
+                        - available
+                        - degraded
+                        - unavailable
+                    type: string
                 base_url:
                     type: string
                 group_name:
@@ -5876,22 +6921,35 @@ components:
                     type: string
                 name:
                     type: string
+                provider_group_id:
+                    type: string
+                provider_id:
+                    type: string
                 provider_name:
+                    type: string
+                read_only:
+                    type: boolean
+                source:
+                    enum:
+                        - own
+                        - cloud
+                    type: string
+                unavailable_reason:
                     type: string
                 user_model_provider_group_id:
                     type: string
                 user_model_provider_id:
                     type: string
             required:
-                - base_url
-                - group_name
+                - availability
                 - is_editable
                 - model_id
                 - model_key
                 - name
+                - provider_id
                 - provider_name
-                - user_model_provider_group_id
-                - user_model_provider_id
+                - read_only
+                - source
             type: object
         selectedProviderOpenAPIItem:
             properties:
@@ -5930,6 +6988,11 @@ components:
                 model_id:
                     type: string
                 model_key:
+                    type: string
+                source:
+                    enum:
+                        - own
+                        - cloud
                     type: string
             required:
                 - model_id
@@ -6116,6 +7179,86 @@ components:
                 target_user_ids:
                     items:
                         type: string
+                    type: array
+            type: object
+        sidechatConversationOpenAPI:
+            properties:
+                chat_model_id:
+                    type: string
+                chat_model_mode:
+                    enum:
+                        - fixed
+                        - auto
+                    type: string
+                chat_model_source:
+                    enum:
+                        - own
+                        - shared
+                        - cloud
+                    type: string
+                chat_model_version:
+                    format: int64
+                    type: integer
+                conversation_id:
+                    type: string
+                display_name:
+                    type: string
+                id:
+                    type: string
+                is_ephemeral:
+                    type: boolean
+                parent_conversation_id:
+                    type: string
+                parent_display_name:
+                    type: string
+                relation_type:
+                    enum:
+                        - sidechat
+                        - fork
+                    type: string
+                search_config:
+                    additionalProperties:
+                        properties: {}
+                        type: object
+                    type: object
+                selected_text:
+                    type: string
+                source_context:
+                    $ref: '#/components/schemas/sidechatPublicSourceContextOpenAPI'
+                source_history_id:
+                    type: string
+                source_seq:
+                    type: integer
+                thinking_depth:
+                    enum:
+                        - low
+                        - medium
+                        - high
+                        - max
+                    type: string
+            required:
+                - chat_model_version
+                - conversation_id
+                - display_name
+                - id
+                - is_ephemeral
+                - relation_type
+            type: object
+        sidechatConversationOpenAPIResponse:
+            properties:
+                conversation:
+                    $ref: '#/components/schemas/sidechatConversationOpenAPI'
+            required:
+                - conversation
+            type: object
+        sidechatPublicSourceContextOpenAPI:
+            properties:
+                messages:
+                    items:
+                        additionalProperties:
+                            properties: {}
+                            type: object
+                        type: object
                     type: array
             type: object
         skillCategoriesOpenAPIResponse:
@@ -7225,6 +8368,8 @@ components:
                     type: boolean
                 schedules_enabled:
                     type: boolean
+                sensitive_word_filter_enabled:
+                    type: boolean
                 skills_enabled:
                     type: boolean
                 task_center_enabled:
@@ -7242,6 +8387,7 @@ components:
                 - document_parsing_enabled
                 - mcp_enabled
                 - schedules_enabled
+                - sensitive_word_filter_enabled
                 - skills_enabled
                 - task_center_enabled
                 - updated_at
@@ -7261,6 +8407,8 @@ components:
                 mcp_enabled:
                     type: boolean
                 schedules_enabled:
+                    type: boolean
+                sensitive_word_filter_enabled:
                     type: boolean
                 skills_enabled:
                     type: boolean
@@ -7345,6 +8493,319 @@ info:
     version: 0.1.0
 openapi: 3.0.3
 paths:
+    /api/core/cloud/skills/{resource_id}:
+        get:
+            tags:
+                - DesktopCloud
+            parameters:
+                -
+                    name: resource_id
+                    in: path
+                    required: true
+                    schema:
+                        type: string
+            responses:
+                '200':
+                    description: Successful Desktop read
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CloudResourceMetadataResponse'
+                '401':
+                    description: Local authentication failed or Cloud session error code 2002401
+                '403':
+                    description: Permission denied
+                '404':
+                    description: Resource unavailable
+                '429':
+                    description: Cloud rate limited
+                '502':
+                    description: Cloud request failed
+                '503':
+                    description: Cloud unavailable
+            summary: GET /api/core/cloud/skills/{resource_id}
+    /api/core/cloud/skills/{resource_id}/tree:
+        get:
+            tags:
+                - DesktopCloud
+            parameters:
+                -
+                    name: resource_id
+                    in: path
+                    required: true
+                    schema:
+                        type: string
+            responses:
+                '200':
+                    description: Successful Desktop read
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CloudResourceTreeResponse'
+                '401':
+                    description: Local authentication failed or Cloud session error code 2002401
+                '403':
+                    description: Permission denied
+                '404':
+                    description: Resource unavailable
+                '429':
+                    description: Cloud rate limited
+                '502':
+                    description: Cloud request failed
+                '503':
+                    description: Cloud unavailable
+            summary: GET /api/core/cloud/skills/{resource_id}/tree
+    /api/core/cloud/skills/{resource_id}/content:
+        get:
+            tags:
+                - DesktopCloud
+            parameters:
+                -
+                    name: resource_id
+                    in: path
+                    required: true
+                    schema:
+                        type: string
+                -
+                    name: path
+                    in: query
+                    required: true
+                    schema:
+                        type: string
+                        minLength: 1
+                        maxLength: 1024
+                -
+                    name: If-Match
+                    in: header
+                    required: true
+                    schema:
+                        type: string
+            responses:
+                '200':
+                    description: Successful Desktop read
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CloudResourceContentResponse'
+                '401':
+                    description: Local authentication failed or Cloud session error code 2002401
+                '403':
+                    description: Permission denied
+                '404':
+                    description: Resource unavailable
+                '412':
+                    description: Resource version changed
+                '428':
+                    description: Version precondition required
+                '429':
+                    description: Cloud rate limited
+                '502':
+                    description: Cloud request failed
+                '503':
+                    description: Cloud unavailable
+            summary: GET /api/core/cloud/skills/{resource_id}/content
+    /api/core/cloud/workflows/{resource_id}:
+        get:
+            tags:
+                - DesktopCloud
+            parameters:
+                -
+                    name: resource_id
+                    in: path
+                    required: true
+                    schema:
+                        type: string
+            responses:
+                '200':
+                    description: Successful Desktop read
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CloudResourceMetadataResponse'
+                '401':
+                    description: Local authentication failed or Cloud session error code 2002401
+                '403':
+                    description: Permission denied
+                '404':
+                    description: Resource unavailable
+                '429':
+                    description: Cloud rate limited
+                '502':
+                    description: Cloud request failed
+                '503':
+                    description: Cloud unavailable
+            summary: GET /api/core/cloud/workflows/{resource_id}
+    /api/core/cloud/workflows/{resource_id}/tree:
+        get:
+            tags:
+                - DesktopCloud
+            parameters:
+                -
+                    name: resource_id
+                    in: path
+                    required: true
+                    schema:
+                        type: string
+            responses:
+                '200':
+                    description: Successful Desktop read
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CloudResourceTreeResponse'
+                '401':
+                    description: Local authentication failed or Cloud session error code 2002401
+                '403':
+                    description: Permission denied
+                '404':
+                    description: Resource unavailable
+                '429':
+                    description: Cloud rate limited
+                '502':
+                    description: Cloud request failed
+                '503':
+                    description: Cloud unavailable
+            summary: GET /api/core/cloud/workflows/{resource_id}/tree
+    /api/core/cloud/workflows/{resource_id}/content:
+        get:
+            tags:
+                - DesktopCloud
+            parameters:
+                -
+                    name: resource_id
+                    in: path
+                    required: true
+                    schema:
+                        type: string
+                -
+                    name: path
+                    in: query
+                    required: true
+                    schema:
+                        type: string
+                        minLength: 1
+                        maxLength: 1024
+                -
+                    name: If-Match
+                    in: header
+                    required: true
+                    schema:
+                        type: string
+            responses:
+                '200':
+                    description: Successful Desktop read
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CloudResourceContentResponse'
+                '401':
+                    description: Local authentication failed or Cloud session error code 2002401
+                '403':
+                    description: Permission denied
+                '404':
+                    description: Resource unavailable
+                '412':
+                    description: Resource version changed
+                '428':
+                    description: Version precondition required
+                '429':
+                    description: Cloud rate limited
+                '502':
+                    description: Cloud request failed
+                '503':
+                    description: Cloud unavailable
+            summary: GET /api/core/cloud/workflows/{resource_id}/content
+    /api/core/cloud/knowledge-market:
+        get:
+            tags:
+                - DesktopCloud
+            parameters:
+                -
+                    name: cursor
+                    in: query
+                    schema:
+                        type: string
+                        maxLength: 2048
+                -
+                    name: page_size
+                    in: query
+                    schema:
+                        type: integer
+                        minimum: 1
+                        maximum: 100
+                -
+                    name: category
+                    in: query
+                    schema:
+                        type: string
+                        enum:
+                            - industry
+                            - evaluation
+                -
+                    name: domain
+                    in: query
+                    schema:
+                        type: string
+                        maxLength: 64
+                -
+                    name: q
+                    in: query
+                    schema:
+                        type: string
+                        maxLength: 200
+            responses:
+                '200':
+                    description: Successful Desktop read
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CloudKnowledgeCatalogPageResponse'
+                '401':
+                    description: Local authentication failed or Cloud session error code 2002401
+                '403':
+                    description: Permission denied
+                '404':
+                    description: Resource unavailable
+                '429':
+                    description: Cloud rate limited
+                '502':
+                    description: Cloud request failed
+                '503':
+                    description: Cloud unavailable
+            summary: GET /cloud/knowledge-market
+    /api/core/cloud/knowledge-market/items/{catalog_key}:
+        get:
+            tags:
+                - DesktopCloud
+            parameters:
+                -
+                    name: catalog_key
+                    in: path
+                    required: true
+                    schema:
+                        type: string
+                        minLength: 1
+                        maxLength: 64
+            responses:
+                '200':
+                    description: Successful Desktop read
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CloudKnowledgeCatalogDetailResponse'
+                '401':
+                    description: Local authentication failed or Cloud session error code 2002401
+                '403':
+                    description: Permission denied
+                '404':
+                    description: Resource unavailable
+                '429':
+                    description: Cloud rate limited
+                '502':
+                    description: Cloud request failed
+                '503':
+                    description: Cloud unavailable
+            summary: GET /cloud/knowledge-market/items/{catalog_key}
     /api/core/add_files_to_group:
         post:
             responses:
@@ -8391,6 +9852,26 @@ paths:
                 "200":
                     description: OK
             summary: GET /chat/executors
+    /api/core/chat/models:
+        get:
+            description: Returns non-deleted personal/shared LLMs plus account-visible LazyMind Cloud LLMs and resolves the current source-aware selection. Credentials, endpoint configuration, entitlement details, and upstream Cloud configuration are never returned.
+            parameters:
+                - description: Optional owned conversation whose saved model selection should be restored.
+                  in: query
+                  name: conversation_id
+                  required: false
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/chatModelsOpenAPIResponse'
+                    description: Chat model selection and providers
+            summary: List usable chat models and resolve the current selection
+            tags:
+                - chat
     /api/core/chat/settings/workflows:
         get:
             responses:
@@ -8409,6 +9890,138 @@ paths:
                 "200":
                     description: OK
             summary: PATCH /chat/settings/workflows/{workflow_ref:.+}
+    /api/core/cloud/knowledge-square:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /cloud/knowledge-square
+    /api/core/cloud/login:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /cloud/login
+    /api/core/cloud/logout:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /cloud/logout
+    /api/core/cloud/session:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /cloud/session
+    /api/core/cloud/skills:
+        get:
+            parameters:
+                -
+                    name: cursor
+                    in: query
+                    schema:
+                        type: string
+                        maxLength: 2048
+                -
+                    name: page_size
+                    in: query
+                    schema:
+                        type: integer
+                        minimum: 1
+                        maximum: 100
+            responses:
+                '200':
+                    description: Successful Desktop read
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CloudResourcePageResponse'
+                '401':
+                    description: Local authentication failed or Cloud session error code 2002401
+                '403':
+                    description: Permission denied
+                '404':
+                    description: Resource unavailable
+                '429':
+                    description: Cloud rate limited
+                '502':
+                    description: Cloud request failed
+                '503':
+                    description: Cloud unavailable
+            summary: GET /api/core/cloud/skills
+    /api/core/cloud/skills/{resource_id}:download:
+        post:
+            parameters:
+                - in: path
+                  name: resource_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /cloud/skills/{resource_id}:download
+    /api/core/cloud/skills/{skill_id}:upload:
+        post:
+            parameters:
+                - in: path
+                  name: skill_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /cloud/skills/{skill_id}:upload
+    /api/core/cloud/workflows:
+        get:
+            parameters:
+                -
+                    name: cursor
+                    in: query
+                    schema:
+                        type: string
+                        maxLength: 2048
+                -
+                    name: page_size
+                    in: query
+                    schema:
+                        type: integer
+                        minimum: 1
+                        maximum: 100
+            responses:
+                '200':
+                    description: Successful Desktop read
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CloudResourcePageResponse'
+                '401':
+                    description: Local authentication failed or Cloud session error code 2002401
+                '403':
+                    description: Permission denied
+                '404':
+                    description: Resource unavailable
+                '429':
+                    description: Cloud rate limited
+                '502':
+                    description: Cloud request failed
+                '503':
+                    description: Cloud unavailable
+            summary: GET /api/core/cloud/workflows
+    /api/core/cloud/workflows/{resource_id}:download:
+        post:
+            parameters:
+                - in: path
+                  name: resource_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /cloud/workflows/{resource_id}:download
     /api/core/conversation-archive-folders:
         get:
             responses:
@@ -8574,6 +10187,40 @@ paths:
                                 $ref: '#/components/schemas/ConversationListResponse'
                     description: Conversation list
             summary: Conversation list
+    /api/core/conversations/{child_id}/retain:
+        post:
+            description: Promotes an ephemeral side conversation into visible history after at least one completed turn.
+            parameters:
+                - in: path
+                  name: child_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/sidechatConversationOpenAPIResponse'
+                    description: Retained side conversation
+            summary: Retain a side conversation
+            tags:
+                - conversations
+    /api/core/conversations/{child_id}/sidechat:
+        delete:
+            description: Permanently clears an unretained side conversation and its dependent records.
+            parameters:
+                - in: path
+                  name: child_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "204":
+                    description: Side conversation discarded
+            summary: Discard an ephemeral side conversation
+            tags:
+                - conversations
     /api/core/conversations/{conversation_id}/artifacts:
         get:
             parameters:
@@ -8610,6 +10257,31 @@ paths:
                 "200":
                     description: OK
             summary: GET /conversations/{conversation_id}/events
+    /api/core/conversations/{conversation_id}/model:
+        patch:
+            description: Uses expected_version for optimistic locking and rejects changes while chat generation, a Workflow, or a background task is active. Fixed mode affects only the llm role from the next request onward.
+            parameters:
+                - in: path
+                  name: conversation_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/patchConversationModelOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/patchConversationModelOpenAPIResponse'
+                    description: Updated conversation model selection
+            summary: Switch the conversation chat model
+            tags:
+                - conversations
     /api/core/conversations/{conversation_id}/settings:
         patch:
             parameters:
@@ -8720,6 +10392,18 @@ paths:
                                 $ref: '#/components/schemas/ConversationPinResponse'
                     description: Conversation pinned
             summary: Pin a conversation
+    /api/core/conversations/{conversation_id}:promote:
+        post:
+            parameters:
+                - in: path
+                  name: conversation_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /conversations/{conversation_id}:promote
     /api/core/conversations/{conversation_id}:purge:
         delete:
             parameters:
@@ -8856,7 +10540,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ConversationItem'
+                                $ref: '#/components/schemas/ConversationDetailItem'
                     description: Conversationtext
             summary: Get conversation
     /api/core/conversations/{name}:ask-answers:
@@ -8918,7 +10602,7 @@ paths:
             summary: List conversation history (paginated)
     /api/core/conversations/{name}:search-config:
         patch:
-            description: Replaces the knowledge bases on an existing conversation while preserving its other search settings.
+            description: Replaces any supplied knowledge-base, creator, or tag filters while preserving omitted search settings.
             parameters:
                 - in: path
                   name: name
@@ -8938,7 +10622,7 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/conversationSearchConfigOpenAPIResponse'
                     description: Updated conversation search config
-            summary: Update conversation knowledge bases
+            summary: Update conversation search filters
             tags:
                 - conversations
     /api/core/conversations/{name}:trail:
@@ -8970,6 +10654,31 @@ paths:
                                 $ref: '#/components/schemas/ConversationTrailListResponse'
                     description: Conversation navigation metadata ordered by seq ascending
             summary: List conversation trail metadata (paginated)
+    /api/core/conversations/{parent_id}/sidechat:
+        post:
+            description: Freezes the selected parent history boundary as read-only model context. The child starts with basic chat only and remains hidden from conversation lists until retained.
+            parameters:
+                - in: path
+                  name: parent_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/createSidechatOpenAPIRequest'
+                required: false
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/sidechatConversationOpenAPIResponse'
+                    description: Created side conversation
+            summary: Create an ephemeral side conversation
+            tags:
+                - conversations
     /api/core/conversations:archived:
         get:
             parameters:
@@ -9031,6 +10740,12 @@ paths:
                 "200":
                     description: OK
             summary: POST /conversations:chat
+    /api/core/conversations:editable-block:
+        patch:
+            responses:
+                "200":
+                    description: OK
+            summary: PATCH /conversations:editable-block
     /api/core/conversations:estimateContextUsage:
         post:
             responses:
@@ -9159,6 +10874,64 @@ paths:
                                 $ref: '#/components/schemas/ConversationRecoveryListResponse'
                     description: Conversation trash page
             summary: List trashed conversations
+    /api/core/credential-vault/backup:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /credential-vault/backup
+    /api/core/credential-vault/backup:disable:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /credential-vault/backup:disable
+    /api/core/credential-vault/backup:enable:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /credential-vault/backup:enable
+    /api/core/credential-vault/restores:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /credential-vault/restores
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /credential-vault/restores
+    /api/core/credential-vault/restores/{operation_id}:
+        delete:
+            parameters:
+                - in: path
+                  name: operation_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: DELETE /credential-vault/restores/{operation_id}
+        get:
+            parameters:
+                - in: path
+                  name: operation_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /credential-vault/restores/{operation_id}
+    /api/core/credential-vault/restores:clear-temporary:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /credential-vault/restores:clear-temporary
     /api/core/data-sources/database-connections:
         get:
             responses:
@@ -9355,10 +11128,15 @@ paths:
                   required: false
                   schema:
                     type: integer
-                - in: query
+                - description: Sort datasets by latest_updated (default), most_used (per current user usage), or recent_used (latest of last used and content update).
+                  in: query
                   name: order_by
                   required: false
                   schema:
+                    enum:
+                        - latest_updated
+                        - most_used
+                        - recent_used
                     type: string
                 - in: query
                   name: keyword
@@ -11063,6 +12841,18 @@ paths:
                 "200":
                     description: OK
             summary: GET /external-chat/runs
+    /api/core/external-chat/runs/{run_id}:attachment:
+        post:
+            parameters:
+                - in: path
+                  name: run_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /external-chat/runs/{run_id}:attachment
     /api/core/external-chat/runs/{run_id}:event:
         post:
             parameters:
@@ -12051,6 +13841,83 @@ paths:
                                 $ref: '#/components/schemas/CurrentMemoryErrorResponse'
                     description: Stored Preference index is invalid or unavailable
             summary: Replace the order of current user's Preference items
+    /api/core/memory/preferences:organize:
+        get:
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/PreferenceOrganizerTaskResponse'
+                    description: Active task, latest task, or null
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Gateway user identity is missing
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Query failed
+            summary: Get current user active or most recent Preference Organizer task
+        post:
+            responses:
+                "202":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/PreferenceOrganizerTaskResponse'
+                    description: Preference Organizer task accepted
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Gateway user identity is missing
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Preference Organizer task could not be created
+            summary: Create or return the active Preference Organizer task
+    /api/core/memory/preferences:organize/{task_id}:
+        get:
+            parameters:
+                - in: path
+                  name: task_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/PreferenceOrganizerTaskResponse'
+                    description: Preference Organizer task status
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Preference Organizer task was not found
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Preference Organizer task could not be queried
+            summary: Get a Preference Organizer task
     /api/core/memory/profile:
         get:
             responses:
@@ -12688,7 +14555,7 @@ paths:
                 - model_providers
     /api/core/model_providers/models:
         get:
-            description: Optionally filters by query model_type (e.g. llm, vlm, or embed). When omitted, returns every non-deleted model in the current user's verified provider groups. Each item includes nullable max_input_tokens, the catalog model's maximum input context window expressed as a string such as 512, 128K, or 1M; custom or unknown models return null. Ordered by user_model_provider_id, group id, then name. Same items as GET .../groups/{group_id}/models.
+            description: Merges non-deleted models from the current user's verified provider groups with the account-visible LazyMind Cloud system catalog. source distinguishes own from cloud; Cloud items are read-only and never expose credentials, endpoints, or upstream configuration. model_type optionally filters by a runtime role.
             parameters:
                 - in: query
                   name: model_type
@@ -12702,7 +14569,7 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/listModelProviderGroupModelsOpenAPIResponse'
                     description: Models list
-            summary: List current user's available models
+            summary: List current user's selectable models
             tags:
                 - model_providers
     /api/core/model_providers/models/ready:
@@ -12732,7 +14599,7 @@ paths:
                 - model_providers
     /api/core/model_providers/selected_models:
         get:
-            description: Returns the current user's selected model for each model_type. Each selection includes nullable max_input_tokens, the selected catalog model's maximum input context window expressed as a string such as 512, 128K, or 1M; custom or unknown models return null.
+            description: Returns the authoritative own or Cloud selection for each model_type. An unavailable Cloud selection remains visible through its public snapshot and never exposes credentials or Cloud-only entitlement details.
             responses:
                 "200":
                     content:
@@ -12744,7 +14611,7 @@ paths:
             tags:
                 - model_providers
         put:
-            description: Upserts selected model rows for the current user. Each selection requires model_type and model_id. model_id must belong to the current user and model_type must match the model row.
+            description: Upserts model choices by runtime role. source defaults to own for legacy clients. Cloud choices are validated against the current account-visible catalog, stored separately from personal Providers, cannot be shared, and do not persist credentials or endpoints.
             requestBody:
                 content:
                     application/json:
@@ -13132,6 +14999,65 @@ paths:
             summary: Polish prompt
             tags:
                 - prompts
+    /api/core/provider-connections:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /provider-connections
+    /api/core/provider-connections/{auth_connection_id}:
+        delete:
+            parameters:
+                - in: path
+                  name: auth_connection_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: DELETE /provider-connections/{auth_connection_id}
+    /api/core/provider-connections/{auth_connection_id}:reauthorize:
+        post:
+            parameters:
+                - in: path
+                  name: auth_connection_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /provider-connections/{auth_connection_id}:reauthorize
+    /api/core/provider-connections/sessions:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /provider-connections/sessions
+    /api/core/provider-connections/sessions/{session_id}:
+        delete:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: DELETE /provider-connections/sessions/{session_id}
+        get:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /provider-connections/sessions/{session_id}
     /api/core/published-workflows/{workflow_ref:.+}/versions:
         get:
             parameters:
@@ -15247,6 +17173,36 @@ paths:
             summary: Partially update current user's UI preferences
             tags:
                 - user
+    /api/core/v1/internal/provider-connections/{auth_connection_id}/access-token:report:
+        post:
+            parameters:
+                - in: path
+                  name: auth_connection_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /v1/internal/provider-connections/{auth_connection_id}/access-token:report
+    /api/core/v1/internal/provider-connections/{auth_connection_id}/access-token:resolve:
+        post:
+            parameters:
+                - in: path
+                  name: auth_connection_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /v1/internal/provider-connections/{auth_connection_id}/access-token:resolve
+    /api/core/v1/internal/provider-connections/feishu-cli:execute:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /v1/internal/provider-connections/feishu-cli:execute
     /api/core/word_group:
         get:
             parameters:
@@ -15707,6 +17663,18 @@ paths:
                 "200":
                     description: OK
             summary: POST /workflow-drafts/{draft_id}:confirm-workflow
+    /api/core/workflow-drafts/{draft_id}:copy:
+        post:
+            parameters:
+                - in: path
+                  name: draft_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-drafts/{draft_id}:copy
     /api/core/workflow-drafts/{draft_id}:publish:
         post:
             parameters:
@@ -16400,6 +18368,18 @@ paths:
                 "200":
                     description: OK
             summary: POST /workflow-sessions/{session_id}:advance-step-and-hand-off
+    /api/core/workflow-sessions/{session_id}:approval-preference:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-sessions/{session_id}:approval-preference
     /api/core/workflow-sessions/{session_id}:dismiss:
         post:
             parameters:
@@ -16478,6 +18458,18 @@ paths:
                 "200":
                     description: OK
             summary: GET /workflows/{workflow_id}
+    /api/core/workflows/{workflow_id}:copy:
+        post:
+            parameters:
+                - in: path
+                  name: workflow_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflows/{workflow_id}:copy
     /api/core/writer-download-conversions/{source_hash}/{target_format}:
         get:
             parameters:

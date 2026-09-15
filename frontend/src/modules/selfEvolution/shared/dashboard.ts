@@ -35,12 +35,15 @@ export function buildEvoProcessDashboard(
   const overview = runtimeSteps.map((step) => {
     const stage = stepStageMap[step.id];
     const stageEvents = sortedEvents.filter((event) => event.stage === stage);
+    const currentThreadStepStatus = threadStepStatusByStage?.[stage];
     const status: StepStatus = cutoverCompleted
       ? "done"
+      : currentThreadStepStatus === "running"
+      ? "running"
       : terminalStatusByStage[stage]
       ?? (checkpoint?.completedStage === stage
       ? "done"
-      : threadStepStatusByStage?.[stage]
+      : currentThreadStepStatus
       ?? (includeFirstStep && !hasStageEvents && step.id === "dataset"
         ? "running"
         : step.status));

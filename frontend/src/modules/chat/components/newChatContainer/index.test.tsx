@@ -7,6 +7,9 @@ import ChatContainerComponent from "./index";
 const mocks = vi.hoisted(() => ({
   chatContentRef: { current: null as HTMLDivElement | null },
   messageScrollBy: vi.fn(),
+  regenerate: vi.fn(),
+  latestChatInputProps: null as any,
+  latestConversationOptions: null as any,
 }));
 
 vi.mock("react-i18next", () => ({
@@ -26,10 +29,23 @@ vi.mock("@/modules/chat/store/chatMessage", () => ({
 }));
 
 vi.mock("../ChatInput", () => ({
-  default: forwardRef(function MockChatInput(_props, _ref) {
+  default: forwardRef(function MockChatInput(props: any, _ref) {
+    mocks.latestChatInputProps = props;
     return (
       <div className="input-wrapper">
         <div className="input-top" data-testid="chat-input-top" />
+        <button
+          type="button"
+          onClick={() => props.onModelSelectionSavingChange?.(true)}
+        >
+          begin model save
+        </button>
+        <button
+          type="button"
+          onClick={() => props.onModelSelectionSavingChange?.(false)}
+        >
+          finish model save
+        </button>
       </div>
     );
   }),
@@ -38,16 +54,33 @@ vi.mock("../ChatInput", () => ({
 }));
 
 vi.mock("./components/MessageList", () => ({
-  default: ({ chatContentRef }: { chatContentRef: typeof mocks.chatContentRef }) => (
-    <div
-      ref={(element) => {
-        chatContentRef.current = element;
-        if (element) {
-          element.scrollBy = mocks.messageScrollBy;
-        }
-      }}
-      data-testid="message-container"
-    />
+  default: ({
+    chatContentRef,
+    regenerate,
+    regenerateDisabled,
+  }: {
+    chatContentRef: typeof mocks.chatContentRef;
+    regenerate: () => void;
+    regenerateDisabled: boolean;
+  }) => (
+    <>
+      <div
+        ref={(element) => {
+          chatContentRef.current = element;
+          if (element) {
+            element.scrollBy = mocks.messageScrollBy;
+          }
+        }}
+        data-testid="message-container"
+      />
+      <button
+        type="button"
+        disabled={regenerateDisabled}
+        onClick={regenerate}
+      >
+        retry failed message
+      </button>
+    </>
   ),
 }));
 
@@ -58,7 +91,9 @@ vi.mock("./components/ConversationTrail", () => ({ default: () => null }));
 vi.mock("./components/StreamRecoveryBanner", () => ({ default: () => null }));
 
 vi.mock("./hooks/useChatConversation", () => ({
-  useChatConversation: () => ({
+  useChatConversation: (options: any) => {
+    mocks.latestConversationOptions = options;
+    return {
     activeStreamRef: { current: false },
     appendAutoAdvanceTurn: vi.fn(),
     content: "",
@@ -73,7 +108,7 @@ vi.mock("./hooks/useChatConversation", () => ({
     messageListRef: { current: [] },
     openResumeSSE: vi.fn(),
     openSSE: vi.fn(),
-    regenerate: vi.fn(),
+    regenerate: mocks.regenerate,
     replaceMessageList: vi.fn(),
     retryStreamRecovery: vi.fn(),
     runtimeWaiting: false,
@@ -92,7 +127,8 @@ vi.mock("./hooks/useChatConversation", () => ({
     stopGeneration: vi.fn(),
     streamRecovery: {},
     updateAssistantMessage: vi.fn(),
-  }),
+    };
+  },
 }));
 
 vi.mock("./hooks/useCiteMessagesInput", () => ({
@@ -141,6 +177,9 @@ describe("ChatContainerComponent wheel forwarding", () => {
   beforeEach(() => {
     mocks.chatContentRef.current = null;
     mocks.messageScrollBy.mockReset();
+    mocks.regenerate.mockReset();
+    mocks.latestChatInputProps = null;
+    mocks.latestConversationOptions = null;
   });
 
   it("does not scroll the conversation when the wheel starts inside the chat input", () => {
@@ -167,5 +206,32 @@ describe("ChatContainerComponent wheel forwarding", () => {
     fireEvent.wheel(screen.getByTestId("chat-input-top"), { deltaY: 120 });
 
     expect(mocks.messageScrollBy).not.toHaveBeenCalled();
+  });
+
+  it("shares the model-save lock with failed-message retry actions", () => {
+    render(
+      <ChatContainerComponent
+        onOpenSSE={vi.fn()}
+        parseErrorData={(data) => data}
+        setIsChatContent={vi.fn()}
+        setChatConfigFn={vi.fn()}
+        conversationTrailEnabled={false}
+      />,
+    );
+
+    const retry = screen.getByRole("button", { name: "retry failed message" });
+    expect(retry).toBeEnabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "begin model save" }));
+    expect(mocks.latestConversationOptions.isModelSelectionSaving()).toBe(true);
+    expect(retry).toBeDisabled();
+    fireEvent.click(retry);
+    expect(mocks.regenerate).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "finish model save" }));
+    expect(mocks.latestConversationOptions.isModelSelectionSaving()).toBe(false);
+    expect(retry).toBeEnabled();
+    fireEvent.click(retry);
+    expect(mocks.regenerate).toHaveBeenCalledOnce();
   });
 });

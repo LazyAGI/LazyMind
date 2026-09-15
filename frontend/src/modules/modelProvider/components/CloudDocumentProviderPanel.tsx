@@ -3,6 +3,7 @@ import { Alert, Form, Input, Modal, Skeleton, Tag } from "antd";
 import {
   ArrowRightOutlined,
   FolderOpenOutlined,
+  MailOutlined,
 } from "@ant-design/icons";
 import { FeishuCredentialHintAlertFromForm } from "@/modules/dataSource/common/FeishuCredentialHintAlert";
 import { formatValidFeishuAccountNames } from "@/modules/dataSource/utils/feishuAccount";
@@ -114,11 +115,13 @@ export default function CloudDocumentProviderPanel({ vm }: { vm: CloudDocumentPr
     isFeishuAuthValid,
     isNotionAuthValid,
     isGoogleDriveAuthValid,
-    isFeishuSetupReady,
-    isNotionSetupReady,
+    isMailConnected,
+    mailConnectionLabel,
     handleManageFeishuAuth,
     handleManageLocalSource,
     handleManageGoogleDrive,
+    handleManageMail,
+    handleManageNotionAuth,
     handleOpenNotionSetup,
   } = vm;
 
@@ -145,10 +148,6 @@ export default function CloudDocumentProviderPanel({ vm }: { vm: CloudDocumentPr
             <h3>{getProviderTitle("local", t)}</h3>
             <p>{getProviderDescription("local", t, vm)}</p>
           </div>
-          <div className="model-provider-cloud-doc-resource-count">
-            <strong>{vm.localSourceCount}</strong>
-            {t("modelProvider.cloudDocuments.directoryUnit")}
-          </div>
           <div className="model-provider-cloud-doc-resource-controls">
             <button
               type="button"
@@ -171,13 +170,10 @@ export default function CloudDocumentProviderPanel({ vm }: { vm: CloudDocumentPr
           : isGoogleDrive
             ? isGoogleDriveAuthValid
             : isNotionAuthValid;
-        const isSetupReady = isFeishu ? isFeishuSetupReady : isNotionSetupReady;
-        const isProviderLocked = !isGoogleDrive && !isAuthValid && !isSetupReady;
+        const isProviderLocked = !isAuthValid;
         const authStatusText = isAuthValid
           ? t("modelProvider.cloudDocuments.authValid")
-          : isProviderLocked
-            ? t("modelProvider.cloudDocuments.credentialMissing")
-            : t("modelProvider.cloudDocuments.authPending");
+          : t("modelProvider.cloudDocuments.credentialMissing");
 
         const handleManage = () => {
           if (isFeishu) {
@@ -186,6 +182,10 @@ export default function CloudDocumentProviderPanel({ vm }: { vm: CloudDocumentPr
           }
           if (isGoogleDrive) {
             handleManageGoogleDrive();
+            return;
+          }
+          if (isNotion && isAuthValid) {
+            handleManageNotionAuth();
             return;
           }
           handleOpenNotionSetup();
@@ -203,9 +203,7 @@ export default function CloudDocumentProviderPanel({ vm }: { vm: CloudDocumentPr
             </div>
             <Tag
               className="model-provider-cloud-doc-resource-status"
-              color={
-                isAuthValid ? "success" : isProviderLocked ? "default" : "processing"
-              }
+              color={isAuthValid ? "success" : "default"}
             >
               {authStatusText}
             </Tag>
@@ -228,6 +226,37 @@ export default function CloudDocumentProviderPanel({ vm }: { vm: CloudDocumentPr
           </div>
         );
       })}
+      <div className="model-provider-cloud-doc-resource-row">
+        <ProviderLogo type="mail" icon={<MailOutlined />} />
+        <div className="model-provider-cloud-doc-resource-copy">
+          <h3>{t("modelProvider.mail.title")}</h3>
+          <p>
+            {isMailConnected
+              ? t("modelProvider.mail.connectedHint", { account: mailConnectionLabel })
+              : t("modelProvider.mail.hubHint")}
+          </p>
+        </div>
+        <Tag
+          className="model-provider-cloud-doc-resource-status"
+          color={isMailConnected ? "success" : "default"}
+        >
+          {isMailConnected
+            ? t("modelProvider.cloudDocuments.authValid")
+            : t("modelProvider.cloudDocuments.credentialMissing")}
+        </Tag>
+        <div className="model-provider-cloud-doc-resource-controls">
+          <button
+            type="button"
+            className="model-provider-cloud-doc-resource-action"
+            onClick={handleManageMail}
+          >
+            {isMailConnected
+              ? t("modelProvider.cloudDocuments.manageAccount")
+              : t("modelProvider.cloudDocuments.configureConnection")}
+            <ArrowRightOutlined />
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

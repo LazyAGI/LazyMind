@@ -3,9 +3,11 @@ import time
 import lazyllm
 from lazyllm.tools.agent.toolsManager import ToolManager
 from lazyllm.tools.tools.search import SearchBase
-
 from lazymind.chat.engine.tools.infra import CitationResultMiddleware
-from lazymind.chat.service.utils.citations import CITATION_REFS_KEY, reset_citation_state
+from lazymind.chat.service.utils.citations import (
+    CITATION_REFS_KEY,
+    reset_citation_state,
+)
 
 
 class FakeSearch(SearchBase):
@@ -75,6 +77,19 @@ def test_search_and_meta_search_register_without_changing_envelopes_or_provider_
     assert results[0]['ref'] == meta['items'][0]['ref'] == '[[1.1]]'
     assert 'ref' not in raw_results[0]
     assert state[CITATION_REFS_KEY]['1.1']['content'] == 'Snippet for agents'
+
+
+def test_citation_transformation_updates_execution_record_result():
+    _state, provider, manager = _setup_manager()
+
+    batch = manager.execute_with_records({
+        'id': 'search-call',
+        'function': {'name': 'FakeSearch_search', 'arguments': {'query': 'records'}},
+    })
+
+    assert batch.records[0].result == batch.results[0]
+    assert batch.records[0].result['value'][0]['ref'] == '[[1.1]]'
+    assert 'ref' not in provider.last_results[0]
 
 
 def test_collect_only_registers_sources_without_exposing_citation_refs():

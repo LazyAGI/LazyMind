@@ -339,4 +339,34 @@ describe('ChatConfigPopover feature control independence', () => {
     expect(subagentSwitch).toBeChecked();
     expect(disabledMode).toBeChecked();
   });
+
+  it('locks the execution mode to the active workflow session', async () => {
+    mocks.fetchUserUiPreferences.mockResolvedValue({
+      task_center_enabled: true,
+      workflows_enabled: true,
+    });
+
+    render(
+      <ChatConfigPopover
+        conversationId="conversation-1"
+        hasWorkflowSession
+        lockedWorkflowMode="dynamic"
+        initialSettings={{
+          enable_workflow: true,
+          workflow_mode: 'auto',
+          enable_subagent: true,
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('对话配置'));
+    const workflowControl = await screen.findByLabelText('工作流执行方式');
+    const radios = within(workflowControl).getAllByRole('radio');
+    await waitFor(() => {
+      expect(within(workflowControl).getByRole('radio', { name: '按需审批' })).toBeChecked();
+      expect(radios.every((radio) => radio.hasAttribute('disabled'))).toBe(true);
+    });
+    fireEvent.click(within(workflowControl).getByRole('radio', { name: '自动执行' }));
+    expect(mocks.patchConversationSettings).not.toHaveBeenCalled();
+  });
 });

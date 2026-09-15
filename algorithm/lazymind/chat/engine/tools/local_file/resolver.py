@@ -292,6 +292,7 @@ def resolve_text_target(
     *,
     allow_directory: bool = False,
     turn: Optional[int] = None,
+    resources_only: bool = False,
 ) -> ResolvedTextResource:
     """Resolve a model-facing target to one safe text source."""
     key = str(target or '').strip()
@@ -342,6 +343,9 @@ def resolve_text_target(
             workspace,
             store,
         )
+
+    if resources_only:
+        raise ValueError('target must be an attachment or a file resource in this conversation')
 
     workflow_target = _workflow_workspace_target(
         key,

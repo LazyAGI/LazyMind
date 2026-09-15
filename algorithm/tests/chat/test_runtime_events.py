@@ -6,7 +6,7 @@ import lazyllm
 import pytest
 
 from lazymind.chat.engine.agent_runtime.executor import AgentExecutor
-from lazymind.chat.runtime_events import RunAccumulator
+from lazymind.chat.runtime_events import RunAccumulator, RunOutcome
 from lazymind.chat.service.component.event_translator import AgentEventFrameTranslator
 
 
@@ -62,7 +62,7 @@ def test_translator_binds_model_event_to_run():
 ])
 def test_run_accumulator_maps_model_terminal(terminal, status, reason):
     accumulator = RunAccumulator(run_id='run-1', last_model_terminal=terminal)
-    event = accumulator.finish(succeeded=False)
+    event = accumulator.finish(outcome=RunOutcome.FAILED)
 
     assert event['type'] == 'run_finished'
     assert event['data']['status'] == status
@@ -77,7 +77,7 @@ def test_successful_model_terminal_does_not_mask_downstream_runtime_failure(fini
         'has_semantic_output': True,
     })
 
-    assert accumulator.finish(succeeded=False)['data']['code'] == 'runtime_failure'
+    assert accumulator.finish(outcome=RunOutcome.FAILED)['data']['code'] == 'runtime_failure'
 
 
 def test_run_accumulator_only_propagates_public_failure_fields():
@@ -94,7 +94,7 @@ def test_run_accumulator_only_propagates_public_failure_fields():
         },
     })
 
-    data = accumulator.finish(succeeded=False)['data']
+    data = accumulator.finish(outcome=RunOutcome.FAILED)['data']
 
     assert data == {
         'status': 'failed',
@@ -108,13 +108,50 @@ def test_run_accumulator_only_propagates_public_failure_fields():
 
 def test_run_accumulator_awaiting_user_input_is_completed():
     accumulator = RunAccumulator(run_id='run-1', ask_pending=True, semantic_output=True)
-    event = accumulator.finish(succeeded=True)
+    event = accumulator.finish(outcome=RunOutcome.SUCCEEDED)
 
     assert event['data'] == {
         'status': 'completed',
         'reason': 'awaiting_user_input',
         'partial_output': True,
     }
+
+
+def test_run_accumulator_user_cancel_is_an_explicit_terminal():
+    accumulator = RunAccumulator(
+        run_id='run-1',
+        semantic_output=True,
+        last_model_terminal={
+            'model_call_id': 'call-1',
+            'kind': 'finish',
+            'finish': 'tool_calls',
+            'has_semantic_output': True,
+        },
+    )
+
+    event = accumulator.finish(outcome=RunOutcome.CANCELLED)
+
+    assert event['data'] == {
+        'status': 'cancelled',
+        'reason': 'user_cancelled',
+        'partial_output': True,
+        'model_call_id': 'call-1',
+    }
+    with pytest.raises(RuntimeError, match='already has a terminal'):
+        accumulator.finish(outcome=RunOutcome.CANCELLED)
+
+
+@pytest.mark.parametrize('event', [
+    {'tag': 'tool_results', 'tool_results': [{'id': 'tool-1', 'name': 'search', 'content': 'result'}]},
+    {'tag': 'subagent_think', 'think': 'working'},
+])
+def test_cancelled_terminal_marks_rendered_runtime_output_as_partial(event):
+    translator = AgentEventFrameTranslator(query='test', run_id='run-1')
+
+    assert translator.feed(event)
+    terminal = translator.finish_run(outcome=RunOutcome.CANCELLED)['runtime_event']['data']
+
+    assert terminal['partial_output'] is True
 
 
 @pytest.mark.asyncio

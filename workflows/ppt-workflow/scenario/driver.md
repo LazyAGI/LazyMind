@@ -13,6 +13,12 @@ Allowed verdicts: PASS, RETRY, DONE, FAIL.
 
 - `requirement_analysis` is present and identifies goal, audience, slide count
   or inferred page count, tone/style, structure, and constraints -> PASS
+- `ppt_capability_requirements` must contain exactly one enabled/disabled marker.
+  After artifacts are saved, the Host must run `check_ppt_workflow_capabilities`
+  exactly once as a deterministic post-step check. When AI backgrounds are
+  enabled and no image generator is configured, the resulting
+  `MEDIA_CAPABILITY_DEPENDENCY_MISSING` failure is terminal and must expose the
+  model-settings jump card; do not advance to material collection.
 - Missing or too vague -> RETRY
 - 2 consecutive failures -> FAIL
 - After PASS, always advance to `collect_materials`. Never select
@@ -34,14 +40,58 @@ Allowed verdicts: PASS, RETRY, DONE, FAIL.
 - This step must not be skipped. It may finish without web calls when user/KB
   material is already sufficient.
 
+### plan_background_prompts
+
+- This is the next visible checkpoint after material collection and is skipped
+  when AI backgrounds are disabled.
+- On a full run, `background_prompts` has exactly one editable English prompt
+  for the analyzed page count, aligned by sort_order -> PASS
+- The prompts repeat one shared visual-series anchor while varying the page
+  scene, and all prohibit text/logos while reserving calm content-safe areas.
+- On a targeted rerun, only the requested positions are replaced; untouched
+  prompt positions remain unchanged -> PASS
+- On a whole-slide insertion, exactly one new prompt is inserted at the requested
+  sort_order and every old prompt keeps its stable list_index/revision -> PASS
+- Missing, empty, unaligned, or unrelated prompts -> RETRY
+- 2 consecutive failures -> FAIL
+
+### generate_backgrounds
+
+- This is a human-approval step and is skipped when AI backgrounds are disabled.
+- On a full run, `background_images` has exactly one image per approved prompt,
+  aligned by sort_order, and every saved background is exactly 1280x720
+  (16:9) -> PASS
+- On “重新生成底图 1、2”, only positions 1 and 2 are overwritten. No append,
+  reorder, or regeneration of untouched positions is allowed -> PASS
+- A provider/model failure or missing returned file must expose the exact reason
+  -> FAIL; never accept an empty image result.
+- Missing or unaligned images -> RETRY
+- 2 consecutive failures -> FAIL
+
 ### build_outline
 
+- `deck_outline` is one Markdown artifact with at least 2 numbered page
+  descriptions -> PASS
+- This is an automatic step; continue to `plan_page_prompts` after validation.
+- On a whole-slide insertion, the deck outline has exactly one additional page
+  at the requested position and old page plans are otherwise unchanged -> PASS
+- Missing deck_outline or fewer than 2 page descriptions -> RETRY
+- 2 consecutive failures -> FAIL
+
+### plan_page_prompts
+
 - `slide_outline` list has at least 2 pages with sort_order aligned, each page
-  brief containing a title and content points -> PASS
+  prompt containing a title and content points -> PASS
+- Page-prompt bodies must not contain a `第N页` positional header. On insertion,
+  exactly one new composite card is inserted and later cards are not revised.
+- This is a human-approval step. Stop so the user can review/edit prompts.
 - Missing slide_outline or fewer than 2 pages -> RETRY
 - 2 consecutive failures -> FAIL
 
 ### generate_ppt
+
+- This is a human-approval step. After generation succeeds, stop at the result
+  approval checkpoint so the user can review the rendered slides.
 
 Full generation:
 
@@ -70,12 +120,27 @@ Single-page edit (user/runtime asked to change specific sort_order pages only):
   have been patched via `ppt_patch_page_outline` before `page-html`. If the page
   was redrawn without that patch and the requested content change is clearly
   absent -> RETRY once asking to patch the outline first
+- For a foreground image replacement, `ppt_replace_page_material_image` must
+  update only the requested page's `use_image`, `slide_outline`, and
+  `preview_html`; untouched page/card revisions must remain unchanged -> DONE
+- For an AI background replacement, `ppt_replace_page_background` must overwrite
+  the same prompt/image position and refresh only the requested `preview_html`
+  page. It must not append a new background card or regenerate other pages -> DONE
 
 Delete entire page (user asked to remove a whole slide, e.g. "删掉第3页"):
 
 - `ppt_delete_page` ran and remaining `slide_outline` / `preview_html` rows are
   compacted (later pages renumbered) -> DONE
 - Do not RETRY asking to regenerate the deck
+
+Insert entire page (user asked to add a slide between existing slides):
+
+- Exactly one preview_html/preview_notes pair is inserted at the requested
+  sort_order and all old list_index/revision identities remain unchanged -> DONE
+- With AI backgrounds, the same position also has exactly one newly inserted
+  background prompt and image. Without AI backgrounds, neither background stage
+  is required.
+- Do not RETRY asking to regenerate shifted or untouched pages.
 
 Any required preview slot family missing for the requested scope, or
 `preview_html` is slide JSON / missing HTML structure -> RETRY
@@ -87,6 +152,8 @@ Any required preview slot family missing for the requested scope, or
 <verdict>PASS</verdict><reason>requirement_analysis is saved and covers the deck goal, audience, length, tone, and constraints.</reason>
 <verdict>PASS</verdict><reason>material_summary is saved with references and assumptions.</reason>
 <verdict>PASS</verdict><reason>slide_outline list has one brief per page for the planned deck.</reason>
+<verdict>PASS</verdict><reason>background_prompts contains one connected, editable prompt per requested page.</reason>
+<verdict>PASS</verdict><reason>background images align with approved prompts; requested positions were replaced in place.</reason>
 <verdict>DONE</verdict><reason>preview_html HTML pages and preview_notes are saved for aligned rows.</reason>
 <verdict>DONE</verdict><reason>partial edit updated preview_html HTML for sort_order=1.</reason>
 <verdict>DONE</verdict><reason>ppt_delete_page removed sort_order=3; remaining pages renumbered.</reason>

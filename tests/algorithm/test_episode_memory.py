@@ -339,13 +339,16 @@ def test_memory_tools_registers_as_eager_container_with_episode_schema():
         'MemoryTools_preference_editor',
     }
     assert all(
-        manager.tools_info[name].concurrency_spec is not None
+        manager.tools_info[name].runtime_metadata.read_keys is not None
+        or manager.tools_info[name].runtime_metadata.write_keys is not None
         for name in resource_tools
     )
-    assert manager.tools_info['MemoryTools_episode_create'].concurrency_spec is None
+    episode_metadata = manager.tools_info['MemoryTools_episode_create'].runtime_metadata
+    assert episode_metadata.read_keys is None
+    assert episode_metadata.write_keys is None
     schema = json.dumps(manager.tools_description)
-    assert '__lazyllm_tool_concurrency__' not in schema
-    assert 'concurrency_spec' not in schema
+    assert '__lazyllm_tool_runtime_metadata__' not in schema
+    assert 'runtime_metadata' not in schema
 
 
 def test_memory_review_episode_search_is_tenant_scoped_and_capped(monkeypatch):

@@ -92,4 +92,63 @@ describe('selectedMarkdownParagraph', () => {
 
     expect(selectedMarkdownParagraph(container)?.supported).toBe(false);
   });
+
+  it('identifies an internal reference selected at element boundaries', () => {
+    const container = document.createElement('section');
+    container.innerHTML = [
+      '<div contenteditable="true">',
+      '<p>Alpha <a href="#block-sec-1">beta</a> gamma</p>',
+      '</div>',
+    ].join('');
+    document.body.append(container);
+    const paragraph = container.querySelector('p')!;
+    const range = document.createRange();
+    range.setStart(paragraph, 1);
+    range.setEnd(paragraph, 2);
+    selectRange(range);
+
+    expect(selectedMarkdownParagraph(container)?.internalReference).toEqual({
+      anchorId: 'block-sec-1',
+      occurrence: 0,
+    });
+  });
+
+  it('identifies a partial selection inside an internal reference', () => {
+    const container = document.createElement('section');
+    container.innerHTML = [
+      '<div contenteditable="true">',
+      '<p>Alpha <a href="#block-sec-1">beta</a> gamma</p>',
+      '</div>',
+    ].join('');
+    document.body.append(container);
+    const linkText = container.querySelector('a')!.firstChild!;
+    const range = document.createRange();
+    range.setStart(linkText, 1);
+    range.setEnd(linkText, 3);
+    selectRange(range);
+
+    expect(selectedMarkdownParagraph(container)?.internalReference).toEqual({
+      anchorId: 'block-sec-1',
+      occurrence: 0,
+    });
+  });
+
+  it('does not identify a selection crossing an internal reference boundary', () => {
+    const container = document.createElement('section');
+    container.innerHTML = [
+      '<div contenteditable="true">',
+      '<p>Alpha <a href="#block-sec-1">beta</a> gamma</p>',
+      '</div>',
+    ].join('');
+    document.body.append(container);
+    const paragraph = container.querySelector('p')!;
+    const linkText = paragraph.querySelector('a')!.firstChild!;
+    const trailingText = paragraph.lastChild!;
+    const range = document.createRange();
+    range.setStart(linkText, 0);
+    range.setEnd(trailingText, 2);
+    selectRange(range);
+
+    expect(selectedMarkdownParagraph(container)?.internalReference).toBeUndefined();
+  });
 });

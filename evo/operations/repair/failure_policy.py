@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from typing import Any, NamedTuple
 
 
-REPEATED_FAILURE_LIMIT = 2
+REPEATED_FAILURE_LIMIT = 3
 FATAL_HTTP_REASONS = {
     401: 'opencode_auth_failed',
     402: 'opencode_balance_exhausted',

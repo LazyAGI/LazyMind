@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/gorilla/mux"
 
 	"lazymind/core/common/orm"
+	"lazymind/core/state"
 	"lazymind/core/store"
 )
 
@@ -30,8 +32,15 @@ func recoveryTestDB(t *testing.T) *orm.DB {
 		&orm.SkillV2Draft{},
 		&orm.TaskCenterTask{},
 	)
-	store.Init(db.DB, nil, nil)
-	t.Cleanup(func() { store.Init(nil, nil, nil) })
+	stateStore, err := state.NewSQLiteStore(filepath.Join(t.TempDir(), "recovery-state.db"))
+	if err != nil {
+		t.Fatalf("open recovery state store: %v", err)
+	}
+	store.Init(db.DB, nil, stateStore)
+	t.Cleanup(func() {
+		store.Init(nil, nil, nil)
+		_ = stateStore.Close()
+	})
 	return db
 }
 
@@ -45,6 +54,20 @@ func seedRecoveryConversation(t *testing.T, db *orm.DB, id string, task bool) {
 		},
 	}).Error; err != nil {
 		t.Fatalf("seed conversation: %v", err)
+	}
+}
+
+func seedRecoveryChildConversation(t *testing.T, db *orm.DB, id, parentID string) {
+	t.Helper()
+	now := time.Now().UTC()
+	if err := db.Create(&orm.Conversation{
+		ID: id, DisplayName: "Conversation " + id, ChannelID: "default",
+		ParentConversationID: &parentID, RelationType: conversationRelationSidechat,
+		BaseModel: orm.BaseModel{
+			CreateUserID: "u1", CreateUserName: "User 1", CreatedAt: now, UpdatedAt: now,
+		},
+	}).Error; err != nil {
+		t.Fatalf("seed child conversation: %v", err)
 	}
 }
 
@@ -394,6 +417,126 @@ func TestConversationTrashRestoreAndPurgeLinksTaskCenterLifecycle(t *testing.T) 
 	}
 }
 
+func TestRestoreChildConversationRequiresActiveParent(t *testing.T) {
+	t.Run("active parent permits child-only restore", func(t *testing.T) {
+		db := recoveryTestDB(t)
+		seedRecoveryConversation(t, db, "parent-active", false)
+		seedRecoveryChildConversation(t, db, "child-active", "parent-active")
+
+		trashRec, trashReq := recoveryRequest(http.MethodDelete, "/conversations/child-active", nil, map[string]string{"name": "child-active"})
+		DeleteConversation(trashRec, trashReq)
+		if trashRec.Code != http.StatusOK {
+			t.Fatalf("trash child status=%d body=%s", trashRec.Code, trashRec.Body.String())
+		}
+
+		restoreRec, restoreReq := recoveryRequest(http.MethodPost, "/conversations/child-active:restore", nil, map[string]string{"name": "child-active:restore"})
+		RestoreConversation(restoreRec, restoreReq)
+		if restoreRec.Code != http.StatusOK {
+			t.Fatalf("restore child status=%d body=%s", restoreRec.Code, restoreRec.Body.String())
+		}
+
+		for _, id := range []string{"parent-active", "child-active"} {
+			var conversation orm.Conversation
+			if err := db.First(&conversation, "id = ?", id).Error; err != nil || conversation.DeletedAt != nil || conversation.ArchivedAt != nil {
+				t.Fatalf("conversation %s should be active: %#v err=%v", id, conversation, err)
+			}
+		}
+	})
+
+	t.Run("trashed parent rejects child restore and root restore remains cascading", func(t *testing.T) {
+		db := recoveryTestDB(t)
+		seedRecoveryConversation(t, db, "parent-trashed", false)
+		seedRecoveryChildConversation(t, db, "child-trashed", "parent-trashed")
+
+		trashRec, trashReq := recoveryRequest(http.MethodDelete, "/conversations/parent-trashed", nil, map[string]string{"name": "parent-trashed"})
+		DeleteConversation(trashRec, trashReq)
+		if trashRec.Code != http.StatusOK {
+			t.Fatalf("trash family status=%d body=%s", trashRec.Code, trashRec.Body.String())
+		}
+
+		childRestoreRec, childRestoreReq := recoveryRequest(http.MethodPost, "/conversations/child-trashed:restore", nil, map[string]string{"name": "child-trashed:restore"})
+		RestoreConversation(childRestoreRec, childRestoreReq)
+		if childRestoreRec.Code != http.StatusConflict {
+			t.Fatalf("restore child with trashed parent status=%d body=%s", childRestoreRec.Code, childRestoreRec.Body.String())
+		}
+
+		rootRestoreRec, rootRestoreReq := recoveryRequest(http.MethodPost, "/conversations/parent-trashed:restore", nil, map[string]string{"name": "parent-trashed:restore"})
+		RestoreConversation(rootRestoreRec, rootRestoreReq)
+		if rootRestoreRec.Code != http.StatusOK {
+			t.Fatalf("restore family status=%d body=%s", rootRestoreRec.Code, rootRestoreRec.Body.String())
+		}
+		for _, id := range []string{"parent-trashed", "child-trashed"} {
+			var conversation orm.Conversation
+			if err := db.First(&conversation, "id = ?", id).Error; err != nil || conversation.DeletedAt != nil {
+				t.Fatalf("conversation %s should be restored with family: %#v err=%v", id, conversation, err)
+			}
+		}
+	})
+
+	t.Run("root restore leaves a previously trashed child in trash", func(t *testing.T) {
+		db := recoveryTestDB(t)
+		seedRecoveryConversation(t, db, "parent-independent-child", false)
+		seedRecoveryChildConversation(t, db, "child-independent-trash", "parent-independent-child")
+
+		trashChildRec, trashChildReq := recoveryRequest(http.MethodDelete, "/conversations/child-independent-trash", nil, map[string]string{"name": "child-independent-trash"})
+		DeleteConversation(trashChildRec, trashChildReq)
+		if trashChildRec.Code != http.StatusOK {
+			t.Fatalf("trash child status=%d body=%s", trashChildRec.Code, trashChildRec.Body.String())
+		}
+		childDeletedAt := time.Now().UTC().Add(-time.Hour)
+		if err := db.Model(&orm.Conversation{}).Where("id = ?", "child-independent-trash").
+			Update("deleted_at", childDeletedAt).Error; err != nil {
+			t.Fatalf("stabilize child trash timestamp: %v", err)
+		}
+
+		trashParentRec, trashParentReq := recoveryRequest(http.MethodDelete, "/conversations/parent-independent-child", nil, map[string]string{"name": "parent-independent-child"})
+		DeleteConversation(trashParentRec, trashParentReq)
+		if trashParentRec.Code != http.StatusOK {
+			t.Fatalf("trash parent status=%d body=%s", trashParentRec.Code, trashParentRec.Body.String())
+		}
+		restoreParentRec, restoreParentReq := recoveryRequest(http.MethodPost, "/conversations/parent-independent-child:restore", nil, map[string]string{"name": "parent-independent-child:restore"})
+		RestoreConversation(restoreParentRec, restoreParentReq)
+		if restoreParentRec.Code != http.StatusOK {
+			t.Fatalf("restore parent status=%d body=%s", restoreParentRec.Code, restoreParentRec.Body.String())
+		}
+
+		var parent, child orm.Conversation
+		if err := db.Where("id = ?", "parent-independent-child").Take(&parent).Error; err != nil || parent.DeletedAt != nil {
+			t.Fatalf("parent was not restored: %#v err=%v", parent, err)
+		}
+		if err := db.Where("id = ?", "child-independent-trash").Take(&child).Error; err != nil || child.DeletedAt == nil {
+			t.Fatalf("independently trashed child was restored: %#v err=%v", child, err)
+		}
+	})
+
+	t.Run("archived parent rejects child restore", func(t *testing.T) {
+		db := recoveryTestDB(t)
+		seedRecoveryConversation(t, db, "parent-archived", false)
+		seedRecoveryChildConversation(t, db, "child-archived", "parent-archived")
+
+		archiveRec, archiveReq := recoveryRequest(http.MethodPost, "/conversations/parent-archived:archive", nil, map[string]string{"name": "parent-archived:archive"})
+		ArchiveConversation(archiveRec, archiveReq)
+		if archiveRec.Code != http.StatusOK {
+			t.Fatalf("archive family status=%d body=%s", archiveRec.Code, archiveRec.Body.String())
+		}
+		trashRec, trashReq := recoveryRequest(http.MethodDelete, "/conversations/child-archived", nil, map[string]string{"name": "child-archived"})
+		DeleteConversation(trashRec, trashReq)
+		if trashRec.Code != http.StatusOK {
+			t.Fatalf("trash archived child status=%d body=%s", trashRec.Code, trashRec.Body.String())
+		}
+
+		restoreRec, restoreReq := recoveryRequest(http.MethodPost, "/conversations/child-archived:restore", nil, map[string]string{"name": "child-archived:restore"})
+		RestoreConversation(restoreRec, restoreReq)
+		if restoreRec.Code != http.StatusConflict {
+			t.Fatalf("restore child with archived parent status=%d body=%s", restoreRec.Code, restoreRec.Body.String())
+		}
+		var child orm.Conversation
+		if err := db.First(&child, "id = ?", "child-archived").Error; err != nil || child.DeletedAt == nil {
+			t.Fatalf("child should remain trashed: %#v err=%v", child, err)
+		}
+	})
+}
+
 func TestEnsureConversationUnarchivesAndRejectsTrash(t *testing.T) {
 	db := recoveryTestDB(t)
 	seedRecoveryConversation(t, db, "conv-ensure", false)
@@ -402,7 +545,7 @@ func TestEnsureConversationUnarchivesAndRejectsTrash(t *testing.T) {
 		Updates(map[string]any{"archived_at": now}).Error; err != nil {
 		t.Fatalf("archive conversation: %v", err)
 	}
-	conversation, _, err := ensureConversation(context.Background(), db.DB, "conv-ensure", "", nil, nil, "u1", "User 1", false, "", nil)
+	conversation, _, err := ensureConversation(context.Background(), db.DB, "conv-ensure", "", nil, nil, "u1", "User 1", false, "", nil, nil)
 	if err != nil || conversation.ArchivedAt != nil {
 		t.Fatalf("ensure archived conversation: conversation=%#v err=%v", conversation, err)
 	}
@@ -411,7 +554,7 @@ func TestEnsureConversationUnarchivesAndRejectsTrash(t *testing.T) {
 		Updates(map[string]any{"deleted_at": now}).Error; err != nil {
 		t.Fatalf("trash conversation: %v", err)
 	}
-	if _, _, err := ensureConversation(context.Background(), db.DB, "conv-ensure", "", nil, nil, "u1", "User 1", false, "", nil); !errors.Is(err, errConversationInTrash) {
+	if _, _, err := ensureConversation(context.Background(), db.DB, "conv-ensure", "", nil, nil, "u1", "User 1", false, "", nil, nil); !errors.Is(err, errConversationInTrash) {
 		t.Fatalf("ensure trashed conversation error=%v", err)
 	}
 }

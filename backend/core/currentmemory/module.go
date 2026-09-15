@@ -32,26 +32,26 @@ func (e *ETagConflictError) Unwrap() error {
 }
 
 type Module struct {
-	repository              *Repository
-	clock                   func() time.Time
-	preferenceIndexMaxItems int
+	repository                *Repository
+	clock                     func() time.Time
+	preferenceContextMaxChars int
 }
 
 func NewModule(db *gorm.DB) *Module {
-	return NewModuleWithPreferenceIndexMaxItems(
+	return NewModuleWithPreferenceContextMaxChars(
 		db,
-		mustPreferenceIndexMaxItemsFromEnv(),
+		mustPreferenceContextMaxCharsFromEnv(),
 	)
 }
 
-func NewModuleWithPreferenceIndexMaxItems(db *gorm.DB, maxItems int) *Module {
-	if maxItems <= 0 {
-		panic("preference index max items must be positive")
+func NewModuleWithPreferenceContextMaxChars(db *gorm.DB, maxChars int) *Module {
+	if maxChars <= 0 {
+		panic("preference context max chars must be positive")
 	}
 	return &Module{
-		repository:              NewRepository(db),
-		clock:                   time.Now,
-		preferenceIndexMaxItems: maxItems,
+		repository:                NewRepository(db),
+		clock:                     time.Now,
+		preferenceContextMaxChars: maxChars,
 	}
 }
 
@@ -185,7 +185,7 @@ func (m *Module) ListPreferences(
 	if err != nil {
 		return CurrentMemoryPreferenceListData{}, err
 	}
-	return preferenceListData(document, entry, m.preferenceIndexMaxItems), nil
+	return preferenceListData(document, entry, m.preferenceContextMaxChars), nil
 }
 
 func (m *Module) GetPreference(
@@ -285,7 +285,7 @@ func (m *Module) ReorderPreferences(
 		return CurrentMemoryPreferenceListData{}, err
 	}
 	var result CurrentMemoryPreferenceListData
-	err = m.repository.Transaction(ctx, func(repository *Repository) error {
+	err = m.repository.PreferenceTransaction(ctx, userID, func(repository *Repository) error {
 		entry, getErr := repository.GetEntryForUpdate(ctx, userID, PreferencePath)
 		if getErr != nil {
 			return getErr
@@ -324,7 +324,7 @@ func (m *Module) ReorderPreferences(
 		result = preferenceListData(
 			PreferenceDocument{Preferences: reordered},
 			entry,
-			m.preferenceIndexMaxItems,
+			m.preferenceContextMaxChars,
 		)
 		return nil
 	})
@@ -342,7 +342,7 @@ func (m *Module) DeletePreference(
 	if err := m.repository.EnsureInitialized(ctx, userID); err != nil {
 		return err
 	}
-	return m.repository.Transaction(ctx, func(repository *Repository) error {
+	return m.repository.PreferenceTransaction(ctx, userID, func(repository *Repository) error {
 		entry, err := repository.GetEntryForUpdate(ctx, userID, PreferencePath)
 		if errors.Is(err, ErrNotFound) {
 			return nil
@@ -724,24 +724,19 @@ func (m *Module) readFile(
 func preferenceListData(
 	document PreferenceDocument,
 	entry orm.MemoryCurrentEntry,
-	maxItems int,
+	maxChars int,
 ) CurrentMemoryPreferenceListData {
 	items := make([]CurrentMemoryPreferenceItem, 0, len(document.Preferences))
 	for _, item := range document.Preferences {
 		items = append(items, publicPreferenceItem(item))
 	}
 	totalSize := int64(len(items))
-	maxSize := int64(maxItems)
 	return CurrentMemoryPreferenceListData{
-		Items:     items,
-		TotalSize: totalSize,
-		ResidentIndexUsage: CurrentMemoryPreferenceResidentIndexUsage{
-			UsedItems: totalSize,
-			MaxItems:  maxSize,
-			OverLimit: totalSize > maxSize,
-		},
-		ETag:      ContentETag(entry.Content),
-		UpdatedAt: formatUpdatedAt(entry.UpdatedAt),
+		Items:           items,
+		TotalSize:       totalSize,
+		ETag:            ContentETag(entry.Content),
+		UpdatedAt:       formatUpdatedAt(entry.UpdatedAt),
+		ProjectionState: BuildPreferenceProjectionState(document, maxChars),
 	}
 }
 

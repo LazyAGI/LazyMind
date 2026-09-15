@@ -24,6 +24,15 @@ from lazymind.workflow_toolkit import (
 
 LOG = logging.getLogger(__name__)
 
+_SERIAL_WORKFLOW_EXECUTION_POLICY = (
+    'Workflow SubAgent execution is strictly serial. Never issue more than one Workflow '
+    'execution tool call in the same assistant tool-call batch, and never call Workflow '
+    'execution tools in parallel. Pass exactly one step_id in each '
+    'advance_step(step_ids=[...]) call even when Runtime returns multiple ready_steps. '
+    'Wait for that call to return a terminal result, then use its refreshed frontier before '
+    'starting the next Workflow SubAgent. '
+)
+
 
 @dataclass
 class WorkflowAgentContribution:
@@ -141,6 +150,9 @@ def _handoff_tool(
                         runtime_instruction=' '.join(focus_hints),
                     )],
                     handoff=True,
+                    workflow_mode=(
+                        'auto' if cfg.get('workflow_mode') == 'auto' else 'dynamic'
+                    ),
                     retry_origin=(
                         'user' if bool(cfg.get('user_authorized_workflow_retry'))
                         else 'automatic'
@@ -291,7 +303,7 @@ def _safe_session_tools(
         return toolkit.get_ready_steps(session_id())
 
     def advance_step(step_ids: List[str]) -> Dict[str, Any]:
-        """Execute exact Runtime-returned target IDs; Host injects version and commands."""
+        """Execute exactly one Runtime-returned target; never batch or parallelize steps."""
         requested = [str(value).strip() for value in step_ids if str(value).strip()]
         selected_session_id = session_id()
         state_refreshed = False
@@ -349,6 +361,9 @@ def _safe_session_tools(
                     retry_origin=(
                         'user' if bool(cfg.get('user_authorized_workflow_retry'))
                         else 'automatic'
+                    ),
+                    workflow_mode=(
+                        'auto' if cfg.get('workflow_mode') == 'auto' else 'dynamic'
                     ),
                 )
                 if state_refreshed:
@@ -550,11 +565,21 @@ def _selected_runtime_policy(
     direct = workflow_context.get('runtime')
     if isinstance(direct, dict):
         return dict(direct)
-    identifiers = set(allowed_refs)
+    identifiers: set[str] = set()
     for key in ('workflow_ref', 'workflow_id'):
         value = str(workflow_context.get(key) or '').strip()
         if value:
             identifiers.add(value)
+    # An active session's exact identity must win over the broader set of
+    # Workflows that happen to be available to the conversation. Without this,
+    # catalog ordering can apply another package's completed-edit policy.
+    if not identifiers:
+        normalized_allowed = {
+            value for raw in allowed_refs
+            if (value := str(raw or '').strip())
+        }
+        if len(normalized_allowed) == 1:
+            identifiers = normalized_allowed
     identifiers |= {value.removeprefix('builtin:') for value in identifiers}
     for item in workflow_catalog:
         item_ids = {
@@ -590,14 +615,23 @@ def _runtime_clarification_fields(runtime_policy: Any) -> List[Dict[str, Any]]:
         choice_policy = _clean_workflow_text(raw.get('choice_policy')).lower() or 'seed'
         if choice_policy not in {'seed', 'subset', 'fixed'}:
             choice_policy = 'seed'
-        result.append({
+        field = {
             'id': field_id,
             'label': _clean_workflow_text(raw.get('label')) or field_id,
             'question': question,
             'type': question_type,
             'choices': choices,
             'choice_policy': choice_policy,
-        })
+        }
+        if question_type in {'single', 'multiple'}:
+            # Fixed package choices are closed by definition. This default also
+            # covers installed package revisions created before ``allow_other``
+            # was serialized into their runtime policy.
+            default_allow_other = choice_policy != 'fixed'
+            field['allow_other'] = raw.get(
+                'allow_other', default_allow_other,
+            ) is not False
+        result.append(field)
     return result
 
 
@@ -642,12 +676,71 @@ def _question_fingerprint(value: Any) -> str:
     return re.sub(r'[^0-9a-z\u4e00-\u9fff]+', '', str(value or '').lower())
 
 
+def enforce_startup_clarification_policy(
+    questions: Any,
+    runtime_policy: Any,
+) -> Any:
+    """Apply package-owned fixed choice fields to an ``ask_user`` call.
+
+    Startup clarification is model-routed, but a model omission must not turn a
+    package-declared closed choice into an open-ended one.  Match by the declared
+    field id first, then by question text or the exact declared choice set so the
+    policy also survives providers that omit the optional id.
+    """
+    if not isinstance(questions, list):
+        return questions
+    fixed_fields = [
+        field for field in _runtime_clarification_fields(runtime_policy)
+        if field.get('choice_policy') == 'fixed'
+        and field.get('type') in {'single', 'multiple'}
+        and field.get('choices')
+    ]
+    if not fixed_fields:
+        return questions
+
+    governed: List[Any] = []
+    for raw_question in questions:
+        if not isinstance(raw_question, dict):
+            governed.append(raw_question)
+            continue
+        question = dict(raw_question)
+        question_id = _clean_workflow_text(question.get('id'))
+        question_text = _question_fingerprint(question.get('text'))
+        question_choices = {
+            _clean_workflow_text(value)
+            for value in (question.get('choices') or [])
+            if _clean_workflow_text(value) and _clean_workflow_text(value) != '其他'
+        }
+        matched = None
+        for field in fixed_fields:
+            field_text = _question_fingerprint(field.get('question'))
+            field_choices = set(field.get('choices') or [])
+            if question_id and question_id == field.get('id'):
+                matched = field
+                break
+            if question_text and field_text and (
+                question_text in field_text or field_text in question_text
+            ):
+                matched = field
+                break
+            if question_choices and question_choices == field_choices:
+                matched = field
+                break
+        if matched is not None:
+            question['type'] = matched['type']
+            question['choices'] = list(matched['choices'])
+            question['allow_other'] = matched.get('allow_other', True)
+        governed.append(question)
+    return governed
+
+
 def _history_startup_ask_index(
     conversation_history: Any,
     runtime_policy: Any,
     workflow_catalog: Any = None,
     *,
     discovery_mode: bool = False,
+    current_query: str = '',
 ) -> int:
     policies = _startup_clarification_policies(
         runtime_policy,
@@ -703,8 +796,19 @@ def _history_startup_ask_index(
         tail = [entry for entry in history[index + 1:] if isinstance(entry, dict)]
         if any(entry.get('role') == 'assistant' for entry in tail):
             continue
-        if sum(entry.get('role') == 'user' for entry in tail) > 1:
+        tail_users = [entry for entry in tail if entry.get('role') == 'user']
+        if len(tail_users) > 1:
             continue
+        # Most history adapters exclude the current user turn. Therefore one
+        # historical user message after the Ask means that answer turn already
+        # happened. It must not suppress clarification for a later task merely
+        # because the prior workflow crashed before writing an assistant reply.
+        # Some adapters do include the current turn; retain the Ask only when
+        # that trailing message is the current query itself.
+        if tail_users and current_query:
+            trailing_query = _clean_workflow_text(tail_users[-1].get('content'))
+            if trailing_query and trailing_query != _clean_workflow_text(current_query):
+                continue
         return index
     return -1
 
@@ -715,6 +819,7 @@ def workflow_startup_clarification_already_asked(
     workflow_catalog: Any = None,
     *,
     discovery_mode: bool = False,
+    current_query: str = '',
 ) -> bool:
     """Return whether this Workflow's one startup question card was already shown."""
     return _history_startup_ask_index(
@@ -722,6 +827,7 @@ def workflow_startup_clarification_already_asked(
         runtime_policy,
         workflow_catalog,
         discovery_mode=discovery_mode,
+        current_query=current_query,
     ) >= 0
 
 
@@ -731,7 +837,11 @@ def _merge_startup_clarification_context(
     runtime_policy: Any,
 ) -> str:
     """Merge the original request with the answer turn before trigger creation."""
-    ask_index = _history_startup_ask_index(conversation_history, runtime_policy)
+    ask_index = _history_startup_ask_index(
+        conversation_history,
+        runtime_policy,
+        current_query=current_query,
+    )
     if ask_index < 0:
         return current_query
     history = conversation_history if isinstance(conversation_history, list) else []
@@ -789,7 +899,10 @@ def _startup_clarification_guidance(runtime_policy: Any) -> str:
         'Treat numbers written as words or digits as equivalent '
         'explicit values when they are tied to the field, for example 六页 and 6页 both explicitly '
         'supply a slide count. Keep type=text only '
-        'when responsible suggestions cannot be inferred. On the answer turn, NEVER call ask_user '
+        'when responsible suggestions cannot be inferred. When a declared choice field has '
+        'allow_other=false, pass allow_other=false in that ask_user question so the card does not '
+        'append an Other option. Keep allow_other=true or omit it for other choice fields. '
+        'On the answer turn, NEVER call ask_user '
         'again or reassess fields as missing. Combine the original request, all already-known '
         'fields, and the new answers into one concise request_context and pass that value to '
         'the trigger; an answer-only current_query must never replace the original request. '
@@ -899,6 +1012,7 @@ def _workflow_trigger_tools(
     activations: List[Dict[str, Any]], allowed_refs: set[str], current_query: str = '',
     conversation_id: str = '', session_holder: Optional[Dict[str, str]] = None,
     conversation_history: Optional[List[Dict[str, Any]]] = None,
+    workflow_mode: str = 'dynamic',
 ) -> List[Any]:
     """Bind backend-prepared activations to public package reads."""
     attachments_available = _conversation_has_attachments()
@@ -1027,6 +1141,7 @@ def _workflow_trigger_tools(
                 prepared = toolkit.prepare_workflow(
                     bound_id, input_bindings=resolved_bindings,
                     request_context=effective_context,
+                    workflow_mode=workflow_mode,
                 )
                 session_id = str(prepared.get('session_id') or '')
                 if not session_id:
@@ -1201,7 +1316,7 @@ def resolve_workflow_injection(
     session_id = str(context.get('session_id') or '')
     workflow_id = str(context.get('workflow_id') or context.get('workflow_ref') or '')
     revision_id = str(context.get('revision_id') or '')
-    mode = str(context.get('workflow_mode') or 'dynamic')
+    mode = 'auto' if context.get('workflow_mode') == 'auto' else 'dynamic'
     # Keep the model-facing advance tools narrow (step_id only), while restoring
     # the pre-refactor behaviour where every Workflow step receives the user's
     # exact current instruction. This is essential for completed-session edits
@@ -1268,7 +1383,7 @@ def resolve_workflow_injection(
     session_holder: Dict[str, str] = {'session_id': session_id}
     trigger_tools = _workflow_trigger_tools(
         activations, allowed_refs, current_query, conversation_id, session_holder,
-        conversation_history,
+        conversation_history, mode,
     )
     toolkit = HostWorkflowToolkit(
         _client, allowed_workflow_ids=allowed_ids, origin_ref=conversation_id,
@@ -1376,21 +1491,46 @@ def resolve_workflow_injection(
                 'target, and call advance_step so Runtime starts a new step attempt and '
                 'publishes a new Workflow artifact revision. '
             )
+            completed_edit_routing = str(
+                runtime_policy.get('completed_edit_routing') or ''
+            ).strip()
+            if completed_edit_routing:
+                completed_followup += (
+                    'This Workflow declares semantic routing for completed-output edits. '
+                    'Match the current user query and the existing Workflow state against '
+                    'these rules before using the fallback edit step. Select the exact '
+                    'matching rewindable step returned by get_ready_steps:\n'
+                    + completed_edit_routing
+                    + '\n'
+                )
             completed_edit_step = str(runtime_policy.get('completed_edit_step') or '').strip()
             if completed_edit_step:
-                completed_followup += (
-                    'This Workflow declares that requests to modify, repair, delete, or '
-                    f'regenerate completed output map to the {completed_edit_step!r} step. '
-                    f'If {completed_edit_step!r} is present in rewindable_steps, you MUST '
-                    f'call advance_step(step_ids=[{completed_edit_step!r}]) now. That step '
-                    'owns the existing artifacts and publishes their new revisions; never '
-                    'paste replacement content into chat as a substitute. '
-                )
+                if completed_edit_routing:
+                    completed_followup += (
+                        'This Workflow declares that requests to modify, repair, delete, or '
+                        'regenerate completed output which do not match a semantic routing rule '
+                        f'map to the fallback {completed_edit_step!r} step. '
+                        f'If {completed_edit_step!r} is present in rewindable_steps, you MUST '
+                        'call it only when no semantic routing rule matched. That step '
+                        'owns the existing artifacts and publishes their new revisions; never '
+                        'paste replacement content into chat as a substitute. '
+                    )
+                else:
+                    completed_followup += (
+                        'This Workflow declares that requests to modify, repair, delete, or '
+                        f'regenerate completed output map to the {completed_edit_step!r} step. '
+                        f'If {completed_edit_step!r} is present in rewindable_steps, you MUST '
+                        f'call advance_step(step_ids=[{completed_edit_step!r}]) now. That step '
+                        'owns the existing artifacts and publishes their new revisions; never '
+                        'paste replacement content into chat as a substitute. '
+                    )
         runtime_context = (
             '## Workflow Runtime [AUTHORITATIVE]\n'
             + 'The Host owns session/version concurrency fields. Never ask the user for '
-            + 'state_version or expected_state_version. If a Workflow tool returns '
-            + 'user_notice, explicitly relay that notice to the user. advance_step waits for '
+            + 'state_version or expected_state_version. '
+            + _SERIAL_WORKFLOW_EXECUTION_POLICY
+            + 'If a Workflow tool returns user_notice, explicitly relay that notice to the '
+            + 'user. advance_step waits for '
             + 'terminal execution. A failed result never means success and never permits a '
             + 'downstream advance. You may decide to retry only an exact retryable_steps ID; '
             + 'Runtime enforces the finite AI automatic-retry budget. User-requested retries '
@@ -1444,7 +1584,9 @@ def resolve_workflow_injection(
             + '\n'.join(activation_prompts) + '\n'
             + 'A Workflow is an executable, versioned procedure, not a document to search, '
             + 'summarize, or merely describe. The @workflow mention means the user explicitly '
-            + 'selected and authorized this exact procedure. ' + entry_instruction
+            + 'selected and authorized this exact procedure. '
+            + _SERIAL_WORKFLOW_EXECUTION_POLICY
+            + entry_instruction
             + 'Conversation attachments are optional unless the selected Workflow Runtime '
             + 'explicitly returns a required-input result. Never infer that an upload is '
             + 'required merely because the Workflow supports uploaded materials. A non-empty '

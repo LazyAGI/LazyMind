@@ -24,7 +24,7 @@ import yaml
 from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel, Field
 
-from lazyllm.tools.tool_config_inject import inject_tool_config
+from lazymind.chat.engine.tool_auth import inject_tool_config
 from lazyllm.tools.writer.data_models import WriterDocument
 from lazyllm.tools.writer.utils import convert_writer_content
 from lazymind.chat.engine.tools.writer import sync_writer_documents

@@ -126,7 +126,8 @@ a hidden current-document pointer.
 - From-scratch and Markdown inputs remain Markdown. Feishu and `.lmd` inputs remain IR.
 - `outline_document`, `flat_draft_document`, and `draft_document` preserve that representation
   across steps.
-- IR draft documents have ui_editable=true; outline documents are not currently UI-editable.
+- Markdown and Writer IR (`.lmd`) documents are UI-editable whenever the workflow slot is not
+  configured as `readOnly`; `ui_editable` remains document metadata rather than a frontend gate.
 - During `write_document`, `writer_apply_revision` returns the authoritative next draft
   under `draft_document`, using the canonical `.md` or `.lmd` filename. Save that exact path immediately; do not
   query it as an artifact key or reconstruct the document with generic file tools.

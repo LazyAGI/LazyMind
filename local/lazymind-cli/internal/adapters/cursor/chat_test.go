@@ -63,6 +63,50 @@ func TestCursorAgentAvailabilityDoesNotMisreportStatusFailureAsSignedOut(t *test
 	}
 }
 
+func TestCursorAgentAvailabilityAllowsSlowOfficialStatus(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fixture uses a POSIX script")
+	}
+	root := t.TempDir()
+	t.Setenv("LAZYMIND_HOME", filepath.Join(root, "lazymind"))
+	binary := writeCursorFixture(t, root, `#!/bin/sh
+if [ "$1" = "--version" ]; then exit 0; fi
+if [ "$1" = "status" ]; then sleep 6; echo 'Logged in'; exit 0; fi
+exit 1
+`)
+	runner, err := NewChatRunner(binary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ready, reason := runner.Availability(); !ready || reason != "" {
+		t.Fatalf("availability=(%v, %q)", ready, reason)
+	}
+}
+
+func TestCursorAgentAvailabilityRetriesTransientStatusFailure(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fixture uses a POSIX script")
+	}
+	root := t.TempDir()
+	t.Setenv("LAZYMIND_HOME", filepath.Join(root, "lazymind"))
+	attempt := filepath.Join(root, "status-attempted")
+	binary := writeCursorFixture(t, root, `#!/bin/sh
+if [ "$1" = "--version" ]; then exit 0; fi
+if [ "$1" = "status" ]; then
+  if [ ! -f "`+attempt+`" ]; then touch "`+attempt+`"; echo 'temporary status failure' >&2; exit 1; fi
+  echo 'Logged in'; exit 0
+fi
+exit 1
+`)
+	runner, err := NewChatRunner(binary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ready, reason := runner.Availability(); !ready || reason != "" {
+		t.Fatalf("availability=(%v, %q)", ready, reason)
+	}
+}
+
 func TestCursorAgentAvailabilityRecognizesSignedOutFailureOutput(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("fixture uses a POSIX script")

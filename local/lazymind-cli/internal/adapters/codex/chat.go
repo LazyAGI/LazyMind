@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"lazymind/agentconnector/internal/agentcatalog"
 	"lazymind/agentconnector/internal/agentexec"
@@ -13,8 +15,6 @@ import (
 )
 
 const maxCodexEventBytes = 4 << 20
-
-const codexRecoveryPrompt = `The previous process for this same LazyMind turn was interrupted. Continue the existing user request from this Codex thread; do not start the task again. Before any LazyMind write, inspect the current Workflow/session/artifact state through the lazymind MCP server and reuse completed work. Do not create a duplicate Workflow session or repeat a completed step. Finish with one final user-facing answer.`
 
 type ChatRunner struct {
 	binary string
@@ -97,17 +97,15 @@ func (r *ChatRunner) Run(ctx context.Context, run chatagent.Run, emit func(chata
 		arguments = append(arguments, mcpConfig...)
 		arguments = append(arguments, "--json", "--skip-git-repo-check", "--ignore-user-config", "-C", workspace, "-")
 	}
-	prompt := run.Prompt
-	if run.Action == "recover" {
-		prompt = strings.TrimSpace(run.Prompt + "\n\n" + codexRecoveryPrompt)
-	}
+	startedAt := time.Now()
+	providerThreadID := strings.TrimSpace(run.ProviderThreadID)
 	sawTurnCompleted, sawMessage := false, false
 	err = (agentexec.StreamCommand{
 		Binary: r.binary, Arguments: arguments, Environment: agentexec.SafeEnvironment(
 			"LAZYMIND_EXTERNAL_REF="+run.RunID, "LAZYMIND_EXTERNAL_LEASE="+run.LeaseToken,
 			"LAZYMIND_EXTERNAL_HOST="+run.HostID,
 			"LAZYMIND_CONVERSATION_ID="+run.ConversationID),
-		Stdin: strings.NewReader(prompt), MaxLineBytes: maxCodexEventBytes,
+		Stdin: strings.NewReader(run.Prompt), MaxLineBytes: maxCodexEventBytes,
 	}).Run(ctx, func(line []byte) error {
 		var envelope struct {
 			Type     string          `json:"type"`
@@ -120,6 +118,7 @@ func (r *ChatRunner) Run(ctx context.Context, run chatagent.Run, emit func(chata
 		switch envelope.Type {
 		case "thread.started":
 			if strings.TrimSpace(envelope.ThreadID) != "" {
+				providerThreadID = strings.TrimSpace(envelope.ThreadID)
 				return emit(chatagent.Event{Type: "thread_started", ProviderThreadID: envelope.ThreadID})
 			}
 		case "item.completed":
@@ -134,7 +133,6 @@ func (r *ChatRunner) Run(ctx context.Context, run chatagent.Run, emit func(chata
 		case "turn.completed":
 			if !sawTurnCompleted {
 				sawTurnCompleted = true
-				return emit(chatagent.Event{Type: "turn_completed"})
 			}
 		}
 		return nil
@@ -145,8 +143,30 @@ func (r *ChatRunner) Run(ctx context.Context, run chatagent.Run, emit func(chata
 		}
 		return fmt.Errorf("Codex failed: %w", err)
 	}
-	if !sawTurnCompleted || !sawMessage {
+	attachments := []chatagent.Attachment(nil)
+	if providerThreadID != "" {
+		stateHome, homeErr := codexHome()
+		if homeErr != nil {
+			return fmt.Errorf("resolve Codex generated images: %w", homeErr)
+		}
+		attachments, err = chatagent.ImageAttachmentsSince(
+			filepath.Join(stateHome, "generated_images", providerThreadID), startedAt,
+		)
+		if err != nil {
+			return fmt.Errorf("discover Codex generated images: %w", err)
+		}
+		for index := range attachments {
+			attachment := attachments[index]
+			if err := emit(chatagent.Event{Type: "attachment", Attachment: &attachment}); err != nil {
+				return err
+			}
+		}
+	}
+	if !sawTurnCompleted || (!sawMessage && len(attachments) == 0) {
 		return errors.New("Codex ended without a completed response")
+	}
+	if err := emit(chatagent.Event{Type: "turn_completed"}); err != nil {
+		return err
 	}
 	return nil
 }

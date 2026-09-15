@@ -293,7 +293,7 @@ func validateStartupConfig() error {
 	if err := episode.ValidateInternalTokenConfig(); err != nil {
 		return err
 	}
-	_, err := currentmemory.PreferenceIndexMaxItemsFromEnv()
+	_, err := currentmemory.PreferenceContextMaxCharsFromEnv()
 	return err
 }
 
@@ -324,6 +324,7 @@ func initializeCloudSession(ctx context.Context) {
 			Store: newCloudTokenStore(client.Origin()),
 			Auth:  cloudsession.CloudAuthClient{Client: client},
 		})
+		sessionService.SetReachability(cloudsession.ReachabilityChecking)
 		cloudsession.SetDefaultService(sessionService)
 		providerService, providerErr = coreproviderconnection.NewService(client, sessionService, registry, authorizer, clientInstanceID)
 	} else {
@@ -339,6 +340,15 @@ func initializeCloudSession(ctx context.Context) {
 	if sessionService == nil {
 		return
 	}
+	go func() {
+		probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
+		if err := client.CheckReachability(probeCtx); err != nil {
+			sessionService.SetReachability(cloudsession.ReachabilityUnreachable)
+			return
+		}
+		sessionService.SetReachability(cloudsession.ReachabilityReachable)
+	}()
 	go func() {
 		restoreCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()

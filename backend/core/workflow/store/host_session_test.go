@@ -12,12 +12,64 @@ import (
 	"lazymind/core/common/orm"
 )
 
+func TestCreateHostSessionRegistersTaskCenterOnce(t *testing.T) {
+	for _, taskType := range []string{"", "background_chat", "scheduled"} {
+		t.Run("trigger_"+taskType, func(t *testing.T) {
+			repo := testRepo(t)
+			createTestConversation(t, repo, "conversation", "owner")
+			if taskType != "" {
+				now := time.Now().UTC().Add(-time.Minute)
+				if err := repo.db.Create(&orm.TaskCenterTask{ID: "trigger", UserID: "owner", ConversationID: "conversation",
+					TaskType: taskType, Status: "running", CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+					t.Fatal(err)
+				}
+			}
+			for range 2 {
+				if _, _, err := repo.CreateHostSession(t.Context(), "owner", "session", "conversation", "lazymind", "conversation", "lazymind",
+					WorkflowPackage{WorkflowID: "writer", WorkflowRef: "builtin:writer", RevisionID: "rev"}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var tasks []orm.TaskCenterTask
+			if err := repo.db.Find(&tasks).Error; err != nil {
+				t.Fatal(err)
+			}
+			if len(tasks) != 1 || tasks[0].WorkflowSessionID == nil || *tasks[0].WorkflowSessionID != "session" {
+				t.Fatalf("session not registered exactly once: %#v", tasks)
+			}
+			if taskType != "" && (tasks[0].ID != "trigger" || tasks[0].TaskType != taskType) {
+				t.Fatalf("trigger identity changed: %#v", tasks[0])
+			}
+		})
+	}
+}
+
+func TestCreateHostSessionRollsBackWhenTaskRegistrationFails(t *testing.T) {
+	repo := testRepo(t)
+	createTestConversation(t, repo, "conversation", "owner")
+	if err := repo.db.Migrator().DropTable(&orm.TaskCenterTask{}); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := repo.CreateHostSession(t.Context(), "owner", "session", "conversation", "lazymind", "conversation", "lazymind",
+		WorkflowPackage{WorkflowID: "writer", RevisionID: "rev"})
+	if err == nil {
+		t.Fatal("session creation must fail if task registration fails")
+	}
+	var count int64
+	if err := repo.db.Model(&orm.WorkflowSession{}).Where("id = ?", "session").Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatal("unregistered session was not rolled back")
+	}
+}
+
 func TestCreateHostSessionPersistsConversationBinding(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&orm.WorkflowSession{}, &orm.Conversation{}); err != nil {
+	if err := db.AutoMigrate(&orm.WorkflowSession{}, &orm.Conversation{}, &orm.TaskCenterTask{}); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()

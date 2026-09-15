@@ -113,7 +113,7 @@ func TestReviewMemoryMatchesAlgorithmContract(t *testing.T) {
 	if gotPath != "/api/chat/memory_review" {
 		t.Fatalf("ReviewMemory() path = %q, want %q", gotPath, "/api/chat/memory_review")
 	}
-	if len(gotBody) != 6 || gotBody["task_id"] != "memory_review_core-task-1" || gotBody["user_id"] != "user-1" {
+	if len(gotBody) != 7 || gotBody["task_id"] != "memory_review_core-task-1" || gotBody["user_id"] != "user-1" {
 		t.Fatalf("ReviewMemory() body = %#v", gotBody)
 	}
 	if gotBody["conversation_id"] != "conversation-1" ||

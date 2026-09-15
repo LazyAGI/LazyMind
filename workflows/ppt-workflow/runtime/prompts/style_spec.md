@@ -39,7 +39,7 @@ You design a PPT-wide style spec as strict JSON.
 
 - `palette.primary` MUST equal `primary_color.hex` literally.
 - `palette.accent` and `palette.neutral` are your creative choice **but must harmonize** with the primary + tone. Use hex uppercase.
-- `typography` must match the design_style's personality (科技感 → Inter / Roboto Mono; 国潮 → serif like "Noto Serif SC"; 卡通可爱 → rounded like ZCOOL KuaiLe; etc.). Use commonly available fonts.
+- `typography` must match the design_style's personality (科技感 → Inter / Roboto Mono; 国潮 → serif like "Noto Serif SC"; 卡通可爱 → rounded like ZCOOL KuaiLe; etc.). Keep distinct heading and body stacks when the style calls for them; do not collapse every design to Arial/system-ui. Put the intended named face first and include a portable Office fallback later in each CSS stack (for Chinese, e.g. Microsoft YaHei/SimSun/KaiTi as appropriate; for Latin, e.g. Arial/Georgia/Courier New).
 
 ## What NOT to do
 

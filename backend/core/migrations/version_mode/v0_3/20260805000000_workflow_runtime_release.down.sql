@@ -1,11 +1,14 @@
 -- +migrate Dialect postgres
+DROP TABLE IF EXISTS public.workflow_approval_preferences;
+DROP INDEX IF EXISTS idx_user_selected_cloud_models_public_key;
+DROP TABLE IF EXISTS user_selected_cloud_models;
+ALTER TABLE conversations DROP COLUMN IF EXISTS chat_model_source;
 DROP INDEX IF EXISTS idx_credential_backup_outbox_due;
 DROP TABLE IF EXISTS credential_backup_outbox;
 DROP TABLE IF EXISTS cloud_credential_bindings;
 DROP TABLE IF EXISTS cloud_credential_vault_accounts;
 DROP TABLE IF EXISTS cloud_resource_bindings;
 ALTER TABLE user_model_provider_groups DROP COLUMN IF EXISTS credential_revision;
-
 ALTER TABLE public.task_center_tasks DROP CONSTRAINT IF EXISTS chk_tct_task_type;
 UPDATE public.task_center_tasks SET task_type = 'plugin_run' WHERE task_type = 'workflow_run';
 ALTER TABLE public.task_center_tasks
@@ -64,6 +67,7 @@ ALTER TABLE conversations
     DROP COLUMN IF EXISTS thinking_depth,
     DROP COLUMN IF EXISTS chat_executor;
 ALTER TABLE user_ui_preferences
+    DROP COLUMN IF EXISTS sensitive_word_filter_enabled,
     DROP COLUMN IF EXISTS document_parsing_enabled,
     DROP COLUMN IF EXISTS workflows_enabled,
     DROP COLUMN IF EXISTS mcp_enabled,
@@ -94,10 +98,22 @@ ALTER TABLE plugin_drafts DROP COLUMN IF EXISTS deleted_at;
 DROP INDEX IF EXISTS idx_conversations_user_archive_folder;
 DROP INDEX IF EXISTS idx_conversations_user_lifecycle;
 DROP INDEX IF EXISTS idx_conversations_user_pinned_history;
+DROP INDEX IF EXISTS idx_conversations_parent_relation;
 DROP INDEX IF EXISTS idx_conversations_ephemeral_expiry;
 DROP INDEX IF EXISTS idx_conversations_user_source;
 DROP INDEX IF EXISTS idx_conversations_user_ephemeral_history;
 DROP TABLE IF EXISTS conversation_archive_folders;
+ALTER TABLE conversations DROP CONSTRAINT IF EXISTS chk_conversations_relation_type;
+ALTER TABLE conversations DROP COLUMN IF EXISTS source_context;
+ALTER TABLE conversations DROP COLUMN IF EXISTS source_selected_text;
+ALTER TABLE conversations DROP COLUMN IF EXISTS source_seq;
+ALTER TABLE conversations DROP COLUMN IF EXISTS source_history_id;
+ALTER TABLE conversations DROP COLUMN IF EXISTS relation_type;
+ALTER TABLE conversations DROP COLUMN IF EXISTS parent_conversation_id;
+ALTER TABLE conversations DROP COLUMN IF EXISTS chat_model_version;
+ALTER TABLE conversations DROP COLUMN IF EXISTS chat_model_snapshot;
+ALTER TABLE conversations DROP COLUMN IF EXISTS chat_model_id;
+ALTER TABLE conversations DROP COLUMN IF EXISTS chat_model_mode;
 ALTER TABLE conversations DROP COLUMN IF EXISTS pinned_at;
 ALTER TABLE conversations DROP COLUMN IF EXISTS source_display_name;
 ALTER TABLE conversations DROP COLUMN IF EXISTS source_document_id;
@@ -132,6 +148,7 @@ DROP TABLE IF EXISTS workflow_commands;
 DROP TABLE IF EXISTS workflow_preparations;
 DROP INDEX IF EXISTS idx_plugin_sessions_origin;
 ALTER TABLE plugin_sessions
+    DROP COLUMN IF EXISTS workflow_mode,
     DROP COLUMN IF EXISTS controller_host,
     DROP COLUMN IF EXISTS origin_ref,
     DROP COLUMN IF EXISTS origin_host;
@@ -167,13 +184,16 @@ BEGIN
 END $$;
 
 -- +migrate Dialect sqlite
+DROP TABLE IF EXISTS workflow_approval_preferences;
+DROP INDEX IF EXISTS idx_user_selected_cloud_models_public_key;
+DROP TABLE IF EXISTS user_selected_cloud_models;
+ALTER TABLE conversations DROP COLUMN chat_model_source;
 DROP INDEX IF EXISTS idx_credential_backup_outbox_due;
 DROP TABLE IF EXISTS credential_backup_outbox;
 DROP TABLE IF EXISTS cloud_credential_bindings;
 DROP TABLE IF EXISTS cloud_credential_vault_accounts;
 DROP TABLE IF EXISTS cloud_resource_bindings;
 ALTER TABLE user_model_provider_groups DROP COLUMN credential_revision;
-
 UPDATE task_center_tasks SET task_type = 'plugin_run' WHERE task_type = 'workflow_run';
 
 DROP INDEX IF EXISTS `idx_skill_revision_distributions_archive`;
@@ -219,6 +239,7 @@ DROP INDEX IF EXISTS idx_chat_histories_conversation_seq;
 DROP TABLE IF EXISTS agent_invocations;
 ALTER TABLE conversations DROP COLUMN thinking_depth;
 ALTER TABLE conversations DROP COLUMN chat_executor;
+ALTER TABLE user_ui_preferences DROP COLUMN sensitive_word_filter_enabled;
 ALTER TABLE user_ui_preferences DROP COLUMN document_parsing_enabled;
 ALTER TABLE user_ui_preferences DROP COLUMN workflows_enabled;
 ALTER TABLE user_ui_preferences DROP COLUMN mcp_enabled;
@@ -249,10 +270,21 @@ ALTER TABLE plugin_drafts DROP COLUMN deleted_at;
 DROP INDEX IF EXISTS idx_conversations_user_archive_folder;
 DROP INDEX IF EXISTS idx_conversations_user_lifecycle;
 DROP INDEX IF EXISTS idx_conversations_user_pinned_history;
+DROP INDEX IF EXISTS idx_conversations_parent_relation;
 DROP INDEX IF EXISTS idx_conversations_ephemeral_expiry;
 DROP INDEX IF EXISTS idx_conversations_user_source;
 DROP INDEX IF EXISTS idx_conversations_user_ephemeral_history;
 DROP TABLE IF EXISTS conversation_archive_folders;
+ALTER TABLE conversations DROP COLUMN source_context;
+ALTER TABLE conversations DROP COLUMN source_selected_text;
+ALTER TABLE conversations DROP COLUMN source_seq;
+ALTER TABLE conversations DROP COLUMN source_history_id;
+ALTER TABLE conversations DROP COLUMN relation_type;
+ALTER TABLE conversations DROP COLUMN parent_conversation_id;
+ALTER TABLE conversations DROP COLUMN chat_model_version;
+ALTER TABLE conversations DROP COLUMN chat_model_snapshot;
+ALTER TABLE conversations DROP COLUMN chat_model_id;
+ALTER TABLE conversations DROP COLUMN chat_model_mode;
 ALTER TABLE conversations DROP COLUMN pinned_at;
 ALTER TABLE conversations DROP COLUMN source_display_name;
 ALTER TABLE conversations DROP COLUMN source_document_id;
@@ -284,6 +316,7 @@ DROP TABLE IF EXISTS workflow_events;
 DROP TABLE IF EXISTS workflow_commands;
 DROP TABLE IF EXISTS workflow_preparations;
 DROP INDEX IF EXISTS idx_plugin_sessions_origin;
+ALTER TABLE plugin_sessions DROP COLUMN workflow_mode;
 ALTER TABLE plugin_sessions DROP COLUMN controller_host;
 ALTER TABLE plugin_sessions DROP COLUMN origin_ref;
 ALTER TABLE plugin_sessions DROP COLUMN origin_host;
@@ -388,3 +421,26 @@ CREATE UNIQUE INDEX uk_skills_owner_identity
     ON skills(owner_user_id, category, skill_name);
 CREATE UNIQUE INDEX uk_skills_owner_relative_root
     ON skills(owner_user_id, relative_root);
+
+-- +migrate Dialect postgres
+DROP INDEX IF EXISTS public.uniq_active_preference_organizer;
+DROP INDEX IF EXISTS public.uniq_resource_update_running_lane;
+DROP INDEX IF EXISTS public.idx_resource_update_tasks_lane_pending;
+DELETE FROM public.resource_update_tasks WHERE task_type = 'organize_preference';
+ALTER TABLE public.resource_update_tasks DROP CONSTRAINT IF EXISTS chk_resource_update_tasks_task_type;
+ALTER TABLE public.resource_update_tasks DROP CONSTRAINT IF EXISTS chk_resource_update_tasks_trigger_type;
+ALTER TABLE public.resource_update_tasks ADD CONSTRAINT chk_resource_update_tasks_trigger_type
+    CHECK ((trigger_type)::text IN ('scheduled', 'conversation_idle', 'manual', 'review_result', 'auto_evo_enabled'));
+ALTER TABLE public.resource_update_tasks
+    DROP COLUMN run_id, DROP COLUMN lane_order_at, DROP COLUMN lane_priority, DROP COLUMN lane_key, DROP COLUMN result_json;
+
+-- +migrate Dialect sqlite
+DROP INDEX IF EXISTS uniq_active_preference_organizer;
+DROP INDEX IF EXISTS uniq_resource_update_running_lane;
+DROP INDEX IF EXISTS idx_resource_update_tasks_lane_pending;
+DELETE FROM resource_update_tasks WHERE task_type = 'organize_preference';
+ALTER TABLE resource_update_tasks DROP COLUMN lane_order_at;
+ALTER TABLE resource_update_tasks DROP COLUMN lane_priority;
+ALTER TABLE resource_update_tasks DROP COLUMN run_id;
+ALTER TABLE resource_update_tasks DROP COLUMN lane_key;
+ALTER TABLE resource_update_tasks DROP COLUMN result_json;

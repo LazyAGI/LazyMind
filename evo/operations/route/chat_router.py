@@ -79,7 +79,16 @@ RETRIEVAL_FAILURE_SELF_RECOVERY = re.compile(
 DEFAULT_CASE_DEADLINE_SECONDS = 300.0
 DEFAULT_FIRST_FRAME_TIMEOUT_SECONDS = 60.0
 DEFAULT_MAX_ATTEMPTS = 5
-DEFAULT_RETRY_WAIT_MAX_SECONDS = 2.0
+DEFAULT_RETRY_WAIT_MAX_SECONDS = 10.0
+RETRYABLE_MODEL_FAILURE_CODES = frozenset({
+    'rate_limited',
+    'concurrency_limited',
+    'request_timeout',
+    'provider_overloaded',
+    'service_unavailable',
+    'provider_internal_error',
+    'transport_error',
+})
 ROUTER_ADMIN_TIMEOUT_SECONDS = 10.0
 ROUTER_CANCEL_TIMEOUT_SECONDS = 2.0
 STREAM_CLOSE_TIMEOUT_SECONDS = 2.0
@@ -578,6 +587,9 @@ def _retryable_chat_result(result: Mapping[str, Any]) -> bool:
         return True
     if error_type == 'chat_http_error':
         return any(code in str(error.get('message') or '') for code in ('HTTP 429', 'HTTP 502', 'HTTP 503', 'HTTP 504'))
+    if error_type == 'chat_model_failure':
+        code = str(error.get('message') or '').rsplit(':', 1)[-1].strip()
+        return code in RETRYABLE_MODEL_FAILURE_CODES
     if error_type == 'chat_timeout':
         return 'first-frame deadline' in str(error.get('message') or '')
     return False

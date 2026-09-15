@@ -53,6 +53,7 @@ type sessionDTO struct {
 	SessionID      string `json:"session_id"`
 	ConversationID string `json:"conversation_id"`
 	WorkflowID     string `json:"workflow_id"`
+	WorkflowMode   string `json:"workflow_mode"`
 	// PinnedRevisionID is retained for immutable runtime identity; version numbers
 	// are intentionally not exposed because they are not a reliable UI run label.
 	PinnedRevisionID string    `json:"pinned_revision_id,omitempty"`
@@ -116,6 +117,7 @@ func toSessionDTO(s *orm.WorkflowSession) sessionDTO {
 		SessionID:        s.ID,
 		ConversationID:   s.ConversationID,
 		WorkflowID:       s.WorkflowID,
+		WorkflowMode:     normalizeSessionWorkflowMode(s.WorkflowMode),
 		PinnedRevisionID: s.WorkflowRevisionID,
 		Status:           s.Status,
 		CurrentStepID:    s.CurrentStepID,
@@ -875,18 +877,35 @@ func CreateSlotItem(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "session is dismissed", http.StatusConflict)
 		return
 	}
-	// Get an existing selected revision to borrow its slot and step info.
+	// Get an existing revision to borrow its slot and step info. A rewind marks
+	// downstream revisions stale and deselects them, but deliberately preserves
+	// the durable slot order so incremental insertions can keep every existing
+	// list_index stable. In that state there is no selected row even though the
+	// slot is valid and already has ordered items, so fall back to its latest
+	// historical revision.
 	var anyRev orm.WorkflowSlotRevision
-	if err := db.WithContext(ctx).
+	err := db.WithContext(ctx).
 		Where("session_id = ? AND slot_id = ? AND selected = ?", sessionID, slotID, true).
-		First(&anyRev).Error; err != nil {
+		Order("created_at DESC").
+		First(&anyRev).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		err = db.WithContext(ctx).
+			Where("session_id = ? AND slot_id = ?", sessionID, slotID).
+			Order("created_at DESC").
+			First(&anyRev).Error
+	}
+	if err != nil {
 		common.ReplyErr(w, "slot has no existing items; cannot infer slot", http.StatusBadRequest)
 		return
+	}
+	attempt := anyRev.Attempt
+	if latestStep, latestErr := GetLatestStep(ctx, db, sessionID, anyRev.StepID); latestErr == nil && latestStep != nil {
+		attempt = latestStep.Attempt
 	}
 	// Write new list revision via WriteSlotRevisionWithHumanArtifact so that
 	// content_type is persisted correctly (required for image rendering).
 	newRev, err := WriteSlotRevisionWithHumanArtifact(ctx, db,
-		sessionID, slotID, anyRev.Slot, anyRev.StepID, anyRev.Attempt,
+		sessionID, slotID, anyRev.Slot, anyRev.StepID, attempt,
 		"list", nil,
 		body.ContentType, resolveValuePaths(body.Value), body.Caption,
 	)
@@ -917,7 +936,7 @@ func CreateSlotItem(w http.ResponseWriter, r *http.Request) {
 	if body.Caption != nil {
 		var step orm.WorkflowSessionStep
 		if err := db.WithContext(ctx).
-			Where("session_id = ? AND step_id = ? AND attempt = ?", sessionID, anyRev.StepID, anyRev.Attempt).
+			Where("session_id = ? AND step_id = ? AND attempt = ?", sessionID, anyRev.StepID, attempt).
 			First(&step).Error; err == nil {
 			cap := *body.Caption
 			db.WithContext(ctx).Model(&orm.SubAgentArtifact{}).

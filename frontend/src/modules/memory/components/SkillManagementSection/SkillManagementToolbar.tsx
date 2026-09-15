@@ -277,6 +277,7 @@ export default function SkillManagementToolbar({
         >
           {t("admin.memorySkillViewMarket")}
         </button>
+        {!isDesktopRuntime() ? (
         <button
           type="button"
           role="tab"
@@ -286,15 +287,7 @@ export default function SkillManagementToolbar({
         >
           {t("admin.memorySkillViewCloud")}
         </button>
-        <button
-          type="button"
-          role="tab"
-          className={`memory-skill-view-tab ${skillView === "trash" ? "is-active" : ""}`}
-          aria-selected={skillView === "trash"}
-          onClick={() => onSkillViewChange("trash")}
-        >
-          {t("admin.memorySkillViewTrashWithCount", { count: trashCount })}
-        </button>
+        ) : null}
         <button
           type="button"
           role="tab"

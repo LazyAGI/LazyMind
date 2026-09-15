@@ -15,7 +15,6 @@ import {
 import { FilePreviewDrawer } from "./FilePreviewDrawer";
 import {
   WriterArtifactContent,
-  WRITER_ARTIFACT_SLOT_IDS,
   unwrapArtifactPayload,
 } from './writerArtifactViews';
 import { WriterIRControl, type WriterIRSaveMode, type WriterIRSaveResult } from './WriterIRControl';
@@ -53,6 +52,7 @@ import { SlotHtmlSlide } from './ppt/SlotHtmlSlide';
 import { SlotJsonSlide } from './ppt/SlotJsonSlide';
 import { isSlideSpecArtifact } from './ppt/slideSchema';
 import type { TaskArtifactStream } from '@/modules/chat/store/taskCenter';
+import { isVideoArtifactValue } from './artifactMedia';
 
 export { SlotEditingContext } from './slotEditingContext';
 export type { SlotEditingContextValue } from './slotEditingContext';
@@ -1737,11 +1737,65 @@ interface SlotTextProps {
   readOnly?: boolean;
 }
 
+interface SlotTextEditViewport {
+  height: number;
+  selectionStart: number;
+  scrollContainer: HTMLElement | null;
+  scrollTop: number;
+}
+
+function nearestRawTextOffset(
+  rawText: string,
+  renderedText: string,
+  renderedOffset: number,
+  fallbackRatio: number,
+): number {
+  const fallbackOffset = Math.round(rawText.length * fallbackRatio);
+  if (!renderedText) return fallbackOffset;
+
+  const boundedOffset = Math.max(0, Math.min(renderedOffset, renderedText.length));
+  let bestOffset = -1;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  let matchIndex = rawText.indexOf(renderedText);
+  while (matchIndex >= 0) {
+    const candidate = matchIndex + boundedOffset;
+    const distance = Math.abs(candidate - fallbackOffset);
+    if (distance < bestDistance) {
+      bestOffset = candidate;
+      bestDistance = distance;
+    }
+    matchIndex = rawText.indexOf(renderedText, matchIndex + 1);
+  }
+  return bestOffset >= 0 ? bestOffset : fallbackOffset;
+}
+
+function rawTextOffsetAtPoint(
+  root: HTMLElement,
+  rawText: string,
+  clientX: number,
+  clientY: number,
+  fallbackRatio: number,
+): number {
+  const ownerDocument = root.ownerDocument as Document & {
+    caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
+    caretRangeFromPoint?: (x: number, y: number) => Range | null;
+  };
+  const caretPosition = ownerDocument.caretPositionFromPoint?.(clientX, clientY);
+  const caretRange = caretPosition ? null : ownerDocument.caretRangeFromPoint?.(clientX, clientY);
+  const offsetNode = caretPosition?.offsetNode ?? caretRange?.startContainer;
+  const offset = caretPosition?.offset ?? caretRange?.startOffset ?? 0;
+  if (!offsetNode || offsetNode.nodeType !== Node.TEXT_NODE || !root.contains(offsetNode)) {
+    return Math.round(rawText.length * fallbackRatio);
+  }
+  return nearestRawTextOffset(rawText, offsetNode.textContent ?? '', offset, fallbackRatio);
+}
+
 export function SlotText({ slot, widget, sessionId, slotId, revisionCount, onRefresh, readOnly }: SlotTextProps) {
   const raw = slot.artifact_value;
-  const { patchSlotCaption } = useWorkflowStore();
+  const isJsonBlock = widget?.widgetType === 'json-block';
+  const { patchSlotCaption, patchSlotItemValue } = useWorkflowStore();
   const { setEditing: notifyEditing } = useContext(SlotEditingContext);
-  const editingKey = `${sessionId}:${slotId}:${slot.list_index}`;
+  const editingKey = `${sessionId}:${slotId}:${slot.list_index ?? -1}`;
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
   const [offloadedText, setOffloadedText] = useState<string | null>(null);
@@ -1755,8 +1809,17 @@ export function SlotText({ slot, widget, sessionId, slotId, revisionCount, onRef
   // Caption inline editing state.
   const [captionEditing, setCaptionEditing] = useState(false);
   const [captionDraft, setCaptionDraft] = useState('');
+  const [localRevision, setLocalRevision] = useState(slot.revision);
+  const [currentValue, setCurrentValue] = useState(raw);
+  const [rewriteSelection, setRewriteSelection] = useState<ArtifactRewriteSelection | null>(null);
+  const [rewritePreview, setRewritePreview] = useState<{
+    selection: ArtifactRewriteSelection;
+    preview: RewriteSelectionPreview;
+  } | null>(null);
   // Flag to skip onBlur save when user presses Escape.
   const cancelledRef = useRef(false);
+  const textEditorRef = useRef<HTMLTextAreaElement>(null);
+  const editViewportRef = useRef<SlotTextEditViewport | null>(null);
 
   useEffect(
     () => () => notifyEditing(editingKey, false),
@@ -1808,11 +1871,17 @@ export function SlotText({ slot, widget, sessionId, slotId, revisionCount, onRef
   }, [isOffloaded, raw?.path, raw?.url]);
 
   const canEdit = Boolean(sessionId && slotId) && !readOnly;
+  const canEditMarkdown = canEdit && widget?.widgetType === 'text-markdown';
   // For single slots, list_index is undefined from the backend; use 0 as the canonical index
   // for localStorage keys (front-end only convention).
   const effectiveListIndex = slot.list_index ?? 0;
   // For API calls, single slots must use -1 so the backend queries list_index IS NULL.
   const apiListIndex = slot.list_index ?? -1;
+
+  useEffect(() => {
+    setLocalRevision(slot.revision);
+    setCurrentValue(raw);
+  }, [raw, slot.revision]);
 
   let text = '';
   if (isOffloaded) {
@@ -1847,18 +1916,53 @@ export function SlotText({ slot, widget, sessionId, slotId, revisionCount, onRef
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleEdit = () => {
+  const handleEdit = (
+    source?: HTMLElement,
+    pointer?: { clientX: number; clientY: number },
+  ) => {
     const saved = (sessionId && slotId)
       ? draftStore.getLocalDraft(sessionId, slotId, effectiveListIndex)
       : null;
     const savedText = saved?.text !== undefined ? String(saved.text) : undefined;
-    setDraft(savedText !== undefined && savedText !== text ? savedText : text);
+    const nextDraft = savedText !== undefined && savedText !== text ? savedText : text;
+    if (source) {
+      const contentRect = source.getBoundingClientRect();
+      const slotElement = source.closest<HTMLElement>('.workflow-slot--text');
+      const slotRect = slotElement?.getBoundingClientRect();
+      const layoutRect = slotRect && slotRect.height > 0 ? slotRect : contentRect;
+      const pointerRatio = pointer && contentRect.height > 0
+        ? Math.max(0, Math.min(1, (pointer.clientY - contentRect.top) / contentRect.height))
+        : 0;
+      const scrollContainer = source.closest<HTMLElement>(
+        '.workflow-panel__tab-content, .workflow-panel__auto-grid, .composite-grid',
+      );
+      editViewportRef.current = {
+        height: layoutRect.height,
+        selectionStart: pointer
+          ? rawTextOffsetAtPoint(
+            source,
+            nextDraft,
+            pointer.clientX,
+            pointer.clientY,
+            pointerRatio,
+          )
+          : 0,
+        scrollContainer,
+        scrollTop: scrollContainer?.scrollTop ?? 0,
+      };
+    } else {
+      editViewportRef.current = null;
+    }
+    setDraft(nextDraft);
     setEditing(true);
     notifyEditing(editingKey, true);
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value;
+    const minimumHeight = editViewportRef.current?.height ?? 0;
+    e.target.style.height = 'auto';
+    e.target.style.height = `${Math.max(minimumHeight, e.target.scrollHeight)}px`;
     setDraft(val);
     if (sessionId && slotId) {
       const draftPayload: Record<string, unknown> = { text: val };
@@ -1954,32 +2058,230 @@ export function SlotText({ slot, widget, sessionId, slotId, revisionCount, onRef
     return undefined;
   })();
 
+  const saveMarkdown = useCallback(async (
+    markdown: string,
+    baseRevision: number,
+    mode: MarkdownSaveMode = 'draft',
+  ) => {
+    if (!sessionId || !slotId || readOnly) {
+      throw new Error(tr('chat.writerMarkdown.saveFailed'));
+    }
+
+    let nextValue: Record<string, unknown>;
+    if (isOffloaded) {
+      const originalFilename = typeof raw?.path === 'string'
+        ? raw.path.split('/').pop() || 'artifact.md'
+        : 'artifact.md';
+      const file = new File([markdown], originalFilename, {
+        type: 'text/markdown;charset=utf-8',
+      });
+      const storedPath = await uploadFileInChunks(file);
+      nextValue = {
+        ...(raw && typeof raw === 'object' ? raw : {}),
+        type: 'text',
+        path: storedPath,
+        size: file.size,
+      };
+      delete nextValue.url;
+    } else if (raw && typeof raw === 'object' && raw.data !== undefined && raw.text === undefined) {
+      nextValue = { ...raw, data: markdown };
+    } else {
+      nextValue = {
+        ...(raw && typeof raw === 'object' ? raw : {}),
+        text: markdown,
+      };
+    }
+
+    const revision = await patchSlotItemValue(
+      sessionId,
+      slotId,
+      apiListIndex,
+      nextValue,
+      'text',
+      mode,
+      baseRevision,
+    );
+    draftStore.cancelDraft(sessionId, slotId, effectiveListIndex);
+    setHasPendingDraft(false);
+    setCurrentValue(nextValue);
+    if (typeof revision === 'number' && revision > 0) setLocalRevision(revision);
+    return { markdown, revision };
+  }, [apiListIndex, effectiveListIndex, isOffloaded, patchSlotItemValue, raw, readOnly, sessionId, slotId]);
+
+  const canRewriteMarkdown = canEditMarkdown
+    && localRevision > 0
+    && rewriteSelection === null
+    && rewritePreview === null;
+
+  const openMarkdownRewrite = useCallback((selection: MarkdownSelection) => {
+    if (!canRewriteMarkdown || !selection.text.trim()) return;
+    setRewriteSelection({
+      type: 'markdown',
+      selected_text: selection.text.trim(),
+      selectedText: selection.text.trim(),
+      anchor: selection.anchor,
+      paragraph: selection.paragraph,
+      startOffset: selection.startOffset,
+    });
+  }, [canRewriteMarkdown]);
+
+  const handleRewritePreview = useCallback((preview: RewriteSelectionPreview) => {
+    if (!rewriteSelection?.paragraph) return;
+    setRewritePreview({ selection: rewriteSelection, preview });
+  }, [rewriteSelection]);
+
+  const handleRewriteApplied = useCallback((revision?: number) => {
+    if (typeof revision === 'number' && revision > 0) setLocalRevision(revision);
+    setRewriteSelection(null);
+    setRewritePreview(null);
+    onRefresh?.();
+  }, [onRefresh]);
+
+  const handleRollbackDone = useCallback((revision?: number) => {
+    if (typeof revision === 'number' && revision > 0) setLocalRevision(revision);
+    onRefresh?.();
+  }, [onRefresh]);
+
+  useLayoutEffect(() => {
+    if (!editing) return;
+    const editor = textEditorRef.current;
+    if (!editor) return;
+
+    const viewport = editViewportRef.current;
+    if (viewport) {
+      editor.style.height = 'auto';
+      editor.style.height = `${Math.max(viewport.height, editor.scrollHeight)}px`;
+    }
+    const selectionStart = Math.min(viewport?.selectionStart ?? 0, editor.value.length);
+    editor.focus({ preventScroll: true });
+    editor.setSelectionRange(selectionStart, selectionStart);
+    if (viewport) {
+      const selectionRatio = selectionStart / Math.max(editor.value.length, 1);
+      editor.scrollTop = Math.max(
+        0,
+        selectionRatio * editor.scrollHeight - editor.clientHeight / 2,
+      );
+      if (viewport.scrollContainer) {
+        viewport.scrollContainer.scrollTop = viewport.scrollTop;
+      }
+    }
+  }, [editing]);
+
   if (showPending) {
     return <SlotPending type='text' />;
   }
 
   const textDisplayProps = {
-    onClick: canEdit ? handleEdit : undefined,
+    onClick: canEdit ? (e: React.MouseEvent<HTMLElement>) => handleEdit(
+      e.currentTarget,
+      { clientX: e.clientX, clientY: e.clientY },
+    ) : undefined,
     title: canEdit ? tr('chat.slots.clickToEdit') : undefined,
     role: canEdit ? 'button' as const : undefined,
     tabIndex: canEdit ? 0 : undefined,
-    onKeyDown: canEdit ? (e: React.KeyboardEvent<HTMLElement>) => e.key === 'Enter' && handleEdit() : undefined,
+    onKeyDown: canEdit ? (e: React.KeyboardEvent<HTMLElement>) => {
+      if (e.key === 'Enter') handleEdit(e.currentTarget);
+    } : undefined,
     style: typeof widget?.maxHeight === 'number'
       ? { maxHeight: widget.maxHeight, overflowY: 'auto' as const }
       : undefined,
   };
 
+  const textMeta = (
+    <div className='workflow-slot__text-meta'>
+      {revisionCount !== undefined && revisionCount > 0 && sessionId && slotId && (
+        <SlotVersionPopover
+          sessionId={sessionId}
+          slotId={slotId}
+          listIndex={apiListIndex}
+          draftListIndex={effectiveListIndex}
+          revisionCount={revisionCount}
+          currentRevision={canEditMarkdown ? localRevision : slot.revision}
+          currentVersionNumber={slot.version_number}
+          currentValue={canEditMarkdown ? currentValue : slot.artifact_value}
+          currentChangeSource={slot.change_source}
+          contentType='text'
+          onRollbackDone={canEditMarkdown ? handleRollbackDone : onRefresh}
+          draftText={pendingDraftText}
+          onDiscardDraft={pendingDraftText !== undefined ? () => {
+            draftStore.cancelDraft(sessionId, slotId, effectiveListIndex);
+            setHasPendingDraft(false);
+          } : undefined}
+        />
+      )}
+    </div>
+  );
+
+  const captionControl = canEdit ? (
+    <div className='workflow-slot__caption'>
+      {captionEditing ? (
+        <input
+          className='workflow-slot__caption-input'
+          value={captionDraft}
+          onChange={(e) => setCaptionDraft(e.target.value)}
+          onBlur={handleCaptionSave}
+          onKeyDown={handleCaptionKeyDown}
+          autoFocus
+          aria-label={tr('chat.slots.editDescription')}
+          placeholder={tr('chat.slots.addDescription')}
+        />
+      ) : (
+        <span
+          className='workflow-slot__caption-text'
+          onClick={handleCaptionEdit}
+          title={tr('chat.slots.clickToEditDescription')}
+          role='button'
+          tabIndex={0}
+          onKeyDown={(e) => e.key === 'Enter' && handleCaptionEdit()}
+        >
+          {slot.caption || <span className='workflow-slot__caption-placeholder'>{tr('chat.slots.addDescription')}</span>}
+        </span>
+      )}
+    </div>
+  ) : null;
+
   return (
-    <div className='workflow-slot workflow-slot--text'>
-      {editing ? (
+    <div className={`workflow-slot workflow-slot--text${isJsonBlock ? ' workflow-slot--json-block' : ''}`}>
+      {canEditMarkdown ? (
+        <>
+          <MarkdownArtifactEditor
+            markdown={displayText}
+            sourceRevision={localRevision}
+            maxHeight={widget?.maxHeight}
+            editingKey={`${editingKey}:markdown`}
+            onSave={saveMarkdown}
+            onRefresh={onRefresh}
+            onRewriteSelection={rewriteSelection || rewritePreview ? undefined : openMarkdownRewrite}
+            rewriteUnavailableReason={rewriteSelection || rewritePreview || canRewriteMarkdown
+              ? undefined
+              : tr('chat.artifactRewrite.revisionUnavailable')}
+            rewriteDialogOpen={rewriteSelection !== null}
+            rewritePreview={rewritePreview?.selection.paragraph ? {
+              paragraph: rewritePreview.selection.paragraph,
+              startOffset: rewritePreview.selection.startOffset,
+              sessionId: sessionId ?? '',
+              slotId: slotId ?? '',
+              listIndex: apiListIndex,
+              preview: rewritePreview.preview,
+            } : null}
+            onRewritePreviewApplied={handleRewriteApplied}
+            onRewritePreviewRejected={() => setRewritePreview(null)}
+          />
+          {textMeta}
+          {captionControl}
+        </>
+      ) : editing ? (
         <textarea
+          ref={textEditorRef}
           className='workflow-slot__text-editor'
           value={draft}
           onChange={handleChange}
           onKeyDown={handleKeyDown}
           onBlur={handleSave}
-          autoFocus
           rows={6}
+          style={editViewportRef.current?.height
+            ? { minHeight: editViewportRef.current.height, height: editViewportRef.current.height }
+            : undefined}
           aria-label={tr('chat.slots.editText')}
         />
       ) : (
@@ -1997,60 +2299,21 @@ export function SlotText({ slot, widget, sessionId, slotId, revisionCount, onRef
               {...textDisplayProps}
             >{displayText}</p>
           )}
-          <div className='workflow-slot__text-meta'>
-            {revisionCount !== undefined && revisionCount > 0 && sessionId && slotId && (
-              <SlotVersionPopover
-                sessionId={sessionId}
-                slotId={slotId}
-                listIndex={apiListIndex}
-                draftListIndex={effectiveListIndex}
-                revisionCount={revisionCount}
-                currentRevision={slot.revision}
-                currentVersionNumber={slot.version_number}
-                currentValue={slot.artifact_value}
-                currentChangeSource={slot.change_source}
-                contentType='text'
-                onRollbackDone={onRefresh}
-                draftText={pendingDraftText}
-                onDiscardDraft={pendingDraftText !== undefined ? () => {
-                  if (sessionId && slotId) {
-                    draftStore.cancelDraft(sessionId, slotId, effectiveListIndex);
-                    setHasPendingDraft(false);
-                  }
-                } : undefined}
-              />
-            )}
-          </div>
-          {/* Caption inline edit */}
-          {canEdit && (
-            <div className='workflow-slot__caption'>
-              {captionEditing ? (
-                <input
-                  className='workflow-slot__caption-input'
-                  value={captionDraft}
-                  onChange={(e) => setCaptionDraft(e.target.value)}
-                  onBlur={handleCaptionSave}
-                  onKeyDown={handleCaptionKeyDown}
-                  autoFocus
-                  aria-label={tr('chat.slots.editDescription')}
-                  placeholder={tr('chat.slots.addDescription')}
-                />
-              ) : (
-                <span
-                  className='workflow-slot__caption-text'
-                  onClick={handleCaptionEdit}
-                  title={tr('chat.slots.clickToEditDescription')}
-                  role='button'
-                  tabIndex={0}
-                  onKeyDown={(e) => e.key === 'Enter' && handleCaptionEdit()}
-                >
-                  {slot.caption || <span className='workflow-slot__caption-placeholder'>{tr('chat.slots.addDescription')}</span>}
-                </span>
-              )}
-            </div>
-          )}
+          {textMeta}
+          {captionControl}
         </>
       )}
+      <ArtifactRewriteDialog
+        open={rewriteSelection !== null}
+        sessionId={sessionId ?? ''}
+        slotId={slotId ?? ''}
+        listIndex={apiListIndex}
+        baseRevision={localRevision}
+        selection={rewriteSelection}
+        onClose={() => setRewriteSelection(null)}
+        onApplied={handleRewriteApplied}
+        onPreviewReady={handleRewritePreview}
+      />
     </div>
   );
 }
@@ -2251,17 +2514,13 @@ function writerLmdFilename(name: string, title = ''): string {
 function shouldRenderInlineStructuredContent(
   slot: SlotRevision,
   expectedType?: 'image' | 'file' | 'text',
-  slotId?: string,
 ): boolean {
   const payload = getInlineStructuredArtifactPayload(slot);
   if (payload === null) return false;
   if (isWriterDocument(payload)) {
     return expectedType !== 'image';
   }
-  if (expectedType !== 'text') return false;
-  if (slot.content_type === 'json') return true;
-  const resolvedSlotId = slotId ?? slot.slot;
-  return WRITER_ARTIFACT_SLOT_IDS.has(resolvedSlotId);
+  return expectedType === 'text';
 }
 
 function shouldRenderJsonFileAsContent(
@@ -2661,7 +2920,7 @@ function SlotWriterDocument({
   const displayRevisionCount = localRevisionCount ?? revisionCount;
   const showVersionBadge = Boolean(displayRevisionCount && displayRevisionCount > 0);
   const canEdit = !readOnly;
-  const canEditWriterIR = canEdit && writerDocument?.ui_editable === true;
+  const canEditWriterIR = canEdit && writerDocument !== null;
   const canRewrite = canEdit
     && displayRevision > 0
     && rewriteSelection === null
@@ -3162,7 +3421,7 @@ function SlotJsonFile({
   );
   const canEditWriterIR = Boolean(sessionId && slotId)
     && !readOnly
-    && writerDocument?.ui_editable === true
+    && writerDocument !== null
     && (loadedSourceKey === sourceKey || writerEditing);
   const editingKey = `${sessionId}:${slotId}:${apiListIndex}:writer-ir`;
   const showVersionBadge =
@@ -3542,7 +3801,7 @@ function SlotInlineStructured({
   );
   const canEditWriterIR = Boolean(sessionId && slotId)
     && !readOnly
-    && writerDocument?.ui_editable === true;
+    && writerDocument !== null;
   const editingKey = `${sessionId}:${slotId}:${apiListIndex}:writer-ir`;
   const showVersionBadge =
     displayRevisionCount !== undefined && displayRevisionCount > 0 && Boolean(sessionId && slotId);
@@ -3965,8 +4224,7 @@ function SlotMarkdownFile({
     && rewriteSelection === null
     && rewritePreview === null;
   const canEditMarkdown = Boolean(sessionId && slotId)
-    && !readOnly
-    && WRITER_ARTIFACT_SLOT_IDS.has(resolvedSlotId);
+    && !readOnly;
 
   useEffect(() => {
     if (!canEditMarkdown) setDownloadMarkdownContent(content);
@@ -4143,7 +4401,13 @@ function SlotMarkdownFile({
 
   return (
     <div className='workflow-slot workflow-slot--artifact'>
-      <div className='writer-artifact__output-toolbar' hidden={!allowDownload}>
+      <div className='writer-artifact__output-toolbar' hidden={!allowDownload && !readOnly}>
+        {readOnly && (
+          <span className='writer-artifact__readonly-badge' role='status'>
+            <span aria-hidden='true'>🔒</span>
+            {tr('chat.writerMarkdown.readOnly')}
+          </span>
+        )}
         {!canEditMarkdown && (
           <WriterDownloadFormatButton
             markdown={{
@@ -4438,6 +4702,61 @@ export function SlotFile({ slot, sessionId, slotId, revisionCount, onRefresh, re
   );
 }
 
+export function SlotVideo({ slot, sessionId, slotId, revisionCount, onRefresh }: SlotFileProps) {
+  const allowDownload = useContext(SlotDownloadContext);
+  const raw = slot.artifact_value;
+  const rawPath = String(raw?.url ?? raw?.path ?? '').trim();
+  const name = String(raw?.filename ?? raw?.name ?? rawPath.split('/').pop() ?? slot.slot);
+  const { url, resolving, hasSource } = useArtifactFileUrl(raw);
+  const showVersionBadge = revisionCount !== undefined
+    && revisionCount > 0
+    && Boolean(sessionId && slotId);
+
+  if (!hasSource || resolving || !url) return <SlotPending type='file' />;
+
+  return (
+    <div className='workflow-slot workflow-slot--video'>
+      <video
+        className='workflow-slot__video'
+        src={url}
+        autoPlay
+        loop
+        muted
+        playsInline
+        controls
+        preload='auto'
+        aria-label={name}
+      />
+      {showVersionBadge && (
+        <div className='workflow-slot__version-overlay-badge'>
+          <SlotVersionPopover
+            sessionId={sessionId!}
+            slotId={slotId!}
+            listIndex={slot.list_index ?? -1}
+            revisionCount={revisionCount!}
+            currentRevision={slot.revision}
+            currentVersionNumber={slot.version_number}
+            currentValue={slot.artifact_value}
+            currentChangeSource={slot.change_source}
+            contentType='file'
+            onRollbackDone={onRefresh}
+          />
+        </div>
+      )}
+      {allowDownload && (
+        <a
+          className='workflow-slot__download-btn--overlay'
+          href={url}
+          download={name}
+          title={tr('chat.slots.download')}
+          aria-label={tr('chat.slots.download')}
+          onClick={(event) => event.stopPropagation()}
+        >↓</a>
+      )}
+    </div>
+  );
+}
+
 function SlotHtmlFilePreview({
   slot,
   sessionId,
@@ -4661,7 +4980,7 @@ export function SlotRenderer({
       />
     );
   }
-  if (shouldRenderInlineStructuredContent(slot, expectedType, slotId)) {
+  if (shouldRenderInlineStructuredContent(slot, expectedType)) {
     return (
       <SlotInlineStructured
         slot={slot}
@@ -4672,6 +4991,9 @@ export function SlotRenderer({
         readOnly={readOnly}
       />
     );
+  }
+  if (normalized === 'file' && isVideoArtifactValue(slot.artifact_value)) {
+    return <SlotVideo slot={slot} sessionId={sessionId} slotId={slotId} revisionCount={revisionCount} onRefresh={onRefresh} readOnly={readOnly} />;
   }
   if (normalized === 'file') return <SlotFile slot={slot} sessionId={sessionId} slotId={slotId} revisionCount={revisionCount} onRefresh={onRefresh} readOnly={readOnly} />;
   return (

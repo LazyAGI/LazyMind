@@ -50,6 +50,7 @@ import {
 import { buildLegacyOAuthCredentialBody } from "../../oauth/legacyOAuthCredentials";
 
 const MANAGED_PROVIDER_SESSION_PATH = "/api/core/provider-connections/sessions";
+const PROVIDER_AUTH_SESSION_MAX_POLL_ATTEMPTS = 600;
 
 type FeishuAuthorizationOpenResult =
   | { ok: true; popup: ReservedManagedAuthorizationPopup }
@@ -154,7 +155,7 @@ export async function startFeishuCLISession(
   }
   popup = opened.popup;
   onOpened?.();
-  for (let attempt = 0; attempt < 600; attempt += 1) {
+  for (let attempt = 0; attempt < PROVIDER_AUTH_SESSION_MAX_POLL_ATTEMPTS; attempt += 1) {
     await new Promise((resolve) => window.setTimeout(resolve, 1000));
     let status: {
       status?: string;
@@ -255,7 +256,7 @@ export async function startManagedOAuthSession(
     return null;
   }
   onOpened?.();
-  for (let attempt = 0; attempt < 120; attempt += 1) {
+  for (let attempt = 0; attempt < PROVIDER_AUTH_SESSION_MAX_POLL_ATTEMPTS; attempt += 1) {
     await new Promise((resolve) => window.setTimeout(resolve, 1000));
     let status: {
       status?: string;
@@ -306,11 +307,16 @@ export function createOAuthEngine(ctx: ManagementContext) {
 
   const refreshFeishuAuthAccounts = async () => {
     try {
-      try {
-        await axiosInstance.get(`${BASE_URL}/api/core/provider-connections`);
-      } catch {
-        // Cloud reconciliation is best effort; existing local accounts remain usable offline.
-      }
+	  if (ctx.cloudManagedOAuthAvailable !== false) {
+		try {
+		  await axiosInstance.get(
+			`${BASE_URL}/api/core/provider-connections`,
+			{ silentError: true } as never,
+		  );
+		} catch {
+		  // Cloud reconciliation is best effort; existing local accounts remain usable offline.
+		}
+	  }
       const response =
         await dataSourceCloudOauthApi.listConnectionsApiAuthserviceV1CloudConnectionsGet({
           provider: "feishu",
@@ -668,6 +674,9 @@ export function createOAuthEngine(ctx: ManagementContext) {
         await refreshFeishuAuthAccounts();
         return true;
       }
+	  if (ctx.cloudManagedOAuthAvailable === false) {
+		return false;
+	  }
       return startManagedOAuth(provider, options?.reauthorizeConnectionId);
     }
     const activeSetup =

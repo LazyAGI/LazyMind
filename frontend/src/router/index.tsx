@@ -32,6 +32,7 @@ const DataSourceFeishuCallback = lazy(() => import("@/modules/dataSource/common/
 const CloudDocumentsPage = lazy(() => import("@/modules/modelProvider/pages/CloudDocumentsPage"));
 const FeishuAccountPage = lazy(() => import("@/modules/modelProvider/pages/FeishuAccountPage"));
 const GoogleDriveConnectionPage = lazy(() => import("@/modules/modelProvider/pages/GoogleDriveConnectionPage"));
+const EmailConnectionPage = lazy(() => import("@/modules/modelProvider/pages/EmailConnectionPage"));
 const GoogleDriveSetupGuide = lazy(() => import("@/modules/modelProvider/pages/GoogleDriveSetupGuide"));
 const LocalDataSourcePage = lazy(() => import("@/modules/modelProvider/pages/LocalDataSourcePage"));
 const FeishuSetupGuide = lazy(() => import("@/modules/modelProvider/pages/FeishuSetupGuide"));
@@ -67,6 +68,8 @@ const SelfEvolutionObservationPage = lazy(() => import("@/modules/selfEvolution"
 })));
 const WorkflowDetailPage = lazy(() => import("@/modules/workflow/pages/detail"));
 const BuiltinWorkflowDetailPage = lazy(() => import("@/modules/workflow/pages/builtin-detail"));
+const CloudResourceDetailPage = lazy(() => import("@/modules/memory/pages/cloudResourceDetail"));
+const PublishedWorkflowDetailPage = lazy(() => import("@/modules/workflow/pages/published-detail"));
 
 export default function AppRouter() {
   const { i18n } = useTranslation();
@@ -118,10 +121,6 @@ export default function AppRouter() {
         />
         <Route
           path="/oauth/googledrive/data-source/callback"
-          element={<DataSourceFeishuCallback provider="googledrive" />}
-        />
-        <Route
-          path="/oauth/googledrive/callback"
           element={<DataSourceFeishuCallback provider="googledrive" />}
         />
         <Route
@@ -181,6 +180,7 @@ export default function AppRouter() {
             <Route path="local" element={<LocalDataSourcePage />} />
             <Route path="feishu" element={<FeishuAccountPage />} />
             <Route path="google-drive" element={<GoogleDriveConnectionPage />} />
+            <Route path="mail" element={<EmailConnectionPage />} />
             <Route path="docs/feishu-setup" element={<FeishuSetupGuide />} />
             <Route path="docs/notion-setup" element={<NotionSetupGuide />} />
             <Route path="docs/google-drive-setup" element={<GoogleDriveSetupGuide />} />
@@ -226,8 +226,11 @@ export default function AppRouter() {
             />
             <Route path="review/:tab/:itemId" element={<MemoryReviewPage />} />
           </Route>
+          <Route path="memory-management/skills/cloud/:resourceId" element={<CloudResourceDetailPage resourceType="skill" />} />
           <Route path="memory-management/workflows" element={<Navigate to="/memory-management/skills?skillView=workflows" replace />} />
           <Route path="memory-management/workflows/builtin/:workflowId" element={<BuiltinWorkflowDetailPage />} />
+          <Route path="memory-management/workflows/cloud/:resourceId" element={<CloudResourceDetailPage resourceType="workflow" />} />
+          <Route path="memory-management/workflows/published/:workflowRef" element={<PublishedWorkflowDetailPage />} />
           <Route path="memory-management/workflows/:workflowId" element={<WorkflowDetailPage />} />
           {runtimeFeatures.hideEvo ? (
             <Route

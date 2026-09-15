@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/externalcontext"
+	"lazymind/core/log"
 	"lazymind/core/store"
 )
 
@@ -39,6 +41,14 @@ func ListChatExecutors(w http.ResponseWriter, r *http.Request) {
 			}
 			status.Installed, status.HostOnline, status.Available = host.Installed, host.HostOnline, host.Available
 			status.UnavailableReason = host.UnavailableReason
+			var connectedSessions int64
+			if err := store.DB().WithContext(r.Context()).Model(&orm.ExternalAgentSession{}).
+				Where("owner_user_id = ? AND provider = ? AND active = ?", owner, definition.ID, true).
+				Count(&connectedSessions).Error; err != nil {
+				common.ReplyErr(w, err.Error(), http.StatusServiceUnavailable)
+				return
+			}
+			status.Connected = connectedSessions > 0
 		}
 		executors = append(executors, status)
 	}
@@ -341,7 +351,55 @@ func PublishExternalChatEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if input.Type == "completed" || input.Type == "failed" {
-		_ = projectExternalChatRunStatus(r.Context(), store.DB(), store.State(), owner, mux.Vars(r)["run_id"])
+		runID := mux.Vars(r)["run_id"]
+		if err := projectExternalChatRunCache(r.Context(), store.DB(), store.State(), owner, runID); err != nil {
+			log.Logger.Warn().Err(err).Str("run_id", runID).
+				Msg("external chat terminal committed but cache projection failed")
+		}
+	}
+	common.ReplyOK(w, map[string]any{"sequence": sequence})
+}
+
+func PublishExternalChatAttachment(w http.ResponseWriter, r *http.Request) {
+	owner := store.UserID(r)
+	var input struct {
+		HostID        string `json:"host_id"`
+		LeaseToken    string `json:"lease_token"`
+		EventID       string `json:"event_id"`
+		Filename      string `json:"filename"`
+		MediaType     string `json:"media_type"`
+		ContentBase64 string `json:"content_base64"`
+	}
+	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 32<<20)).Decode(&input) != nil ||
+		strings.TrimSpace(input.HostID) == "" || strings.TrimSpace(input.LeaseToken) == "" ||
+		strings.TrimSpace(input.EventID) == "" || !validArtifactFilename(input.Filename) {
+		common.ReplyErr(w, "invalid external Agent attachment", http.StatusBadRequest)
+		return
+	}
+	input.EventID = strings.TrimSpace(input.EventID)
+	if len(input.EventID) > 64 {
+		common.ReplyErr(w, "event_id is too long", http.StatusBadRequest)
+		return
+	}
+	content, err := base64.StdEncoding.DecodeString(input.ContentBase64)
+	if err != nil || len(content) == 0 || len(content) > maxExternalChatAttachmentBytes {
+		common.ReplyErr(w, "invalid external Agent attachment content", http.StatusBadRequest)
+		return
+	}
+	sequence, err := newExternalChatApplication(store.DB()).appendAttachment(
+		r.Context(), owner, mux.Vars(r)["run_id"], strings.TrimSpace(input.HostID),
+		strings.TrimSpace(input.LeaseToken), externalChatAttachment{
+			EventID: input.EventID, Filename: strings.TrimSpace(input.Filename),
+			MediaType: strings.TrimSpace(input.MediaType), Content: content,
+		},
+	)
+	if errors.Is(err, errInvalidExternalChatAttachment) {
+		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusConflict)
+		return
 	}
 	common.ReplyOK(w, map[string]any{"sequence": sequence})
 }

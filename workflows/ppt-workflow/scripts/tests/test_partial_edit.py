@@ -61,6 +61,14 @@ MISSION_LIST_HTML = """<!doctype html>
 </section></main></body></html>
 """
 
+COMPOUND_CARD_HTML = """<!doctype html>
+<html><head><title>春节习俗</title></head><body>
+<main class="slide"><article class="bullet bullet-a" data-el="bullet-1">
+  <h3>团圆过大年</h3>
+  <p>春节是一家人团聚的日子，亲人们围坐一起，迎接新一年的好运与祝福。</p>
+</article></main></body></html>
+"""
+
 
 def make_deck(root: Path) -> tuple[Path, Path]:
     deck = root / 'deck'
@@ -81,6 +89,21 @@ def make_deck(root: Path) -> tuple[Path, Path]:
 
 
 class DeckInitializationTests(unittest.TestCase):
+    def test_deck_outline_markdown_has_one_description_per_page(self):
+        markdown = TOOLS._format_deck_outline_markdown({
+            'title': '季度经营复盘',
+            'pages': [
+                {'page_no': 1, 'title': '封面', 'narrative': '建立汇报主题与基调'},
+                {'page_no': 2, 'title': '核心指标', 'subtitle': '说明收入与利润变化'},
+            ],
+        })
+
+        self.assertIn('# 季度经营复盘', markdown)
+        self.assertIn('## 第 1 页｜封面', markdown)
+        self.assertIn('页面描述：建立汇报主题与基调', markdown)
+        self.assertIn('## 第 2 页｜核心指标', markdown)
+        self.assertIn('页面描述：说明收入与利润变化', markdown)
+
     def test_page_count_is_not_capped_at_twelve(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -117,6 +140,40 @@ class DeckInitializationTests(unittest.TestCase):
         self.assertEqual(result['reference_image_count'], 0)
         self.assertIn('continuing', result['note'])
 
+    def test_find_deck_exposes_media_inventory_for_followup_chat_edits(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            deck = root / 'ppt_decks' / 'deck'
+            deck.mkdir(parents=True)
+            image_path = deck / 'images/material_01.png'
+            image_path.parent.mkdir()
+            image_path.write_bytes(b'image')
+            (deck / 'task_pack.json').write_text(json.dumps({
+                'deck_id': 'deck-1',
+                'params': {'page_count': 3},
+            }), encoding='utf-8')
+            (deck / 'info_pack.json').write_text(json.dumps({
+                'user_assets': {
+                    'reference_images': [str(image_path)],
+                    'reference_image_captions': {str(image_path): '产品照片'},
+                },
+            }), encoding='utf-8')
+            (deck / 'background_images.json').write_text(json.dumps({
+                'enabled': True,
+                'pages': [{'page_no': 2, 'local_path': 'images/bg.png'}],
+            }), encoding='utf-8')
+
+            with mock.patch.object(TOOLS, '_conversation_root', return_value=root):
+                result = TOOLS.ppt_find_deck()
+
+            self.assertEqual(result['page_count'], 3)
+            self.assertEqual(result['background_pages'], [2])
+            self.assertEqual(result['reference_images'], [{
+                'reference_image_index': 0,
+                'basename': 'material_01.png',
+                'caption': '产品照片',
+            }])
+
     def test_build_outline_continues_when_no_material_images_exist(self):
         stages: list[str] = []
 
@@ -137,9 +194,10 @@ class DeckInitializationTests(unittest.TestCase):
             'reference_images': [],
         }) as attach, mock.patch.object(
             TOOLS, 'ppt_run_stage', side_effect=run_stage,
-        ), mock.patch.object(TOOLS, 'ppt_publish_outline', return_value={
-            'published_count': 4,
-            'published': [1, 2, 3, 4],
+        ), mock.patch.object(TOOLS, '_publish_deck_outline', return_value={
+            'ok': True,
+            'page_count': 4,
+            'chars': 120,
         }):
             result = TOOLS.ppt_build_outline(
                 user_query='生成四页无图汇报',
@@ -149,7 +207,280 @@ class DeckInitializationTests(unittest.TestCase):
         attach.assert_not_called()
         self.assertEqual(stages, ['preflight', 'style', 'outline'])
         self.assertEqual(result['material_images_attached'], 0)
-        self.assertEqual(result['published_count'], 4)
+        self.assertTrue(result['deck_outline_published'])
+        self.assertEqual(result['background_images_count'], 0)
+        self.assertEqual(result['next_step'], 'plan_page_prompts')
+
+    def test_build_outline_defers_enabled_background_generation_to_human_steps(self):
+        with mock.patch.object(TOOLS, 'ppt_init_deck', return_value={
+            'deck_dir': '/tmp/deck-with-backgrounds',
+            'deck_id': 'deck-with-backgrounds',
+            'page_count': 3,
+            'ppt_mode': 'fast',
+            'material_images_attached': 0,
+        }), mock.patch.object(
+            TOOLS, 'ppt_run_stage', return_value={'status': 'ok', 'pages': 3},
+        ), mock.patch.object(
+            TOOLS, '_publish_deck_outline', return_value={
+                'ok': True,
+                'page_count': 3,
+                'chars': 100,
+            },
+        ), mock.patch.object(
+            TOOLS, 'ppt_generate_background_images',
+        ) as generate:
+            result = TOOLS.ppt_build_outline(
+                user_query='生成三页汇报并启用底图',
+                page_count=3,
+                generate_background_images=True,
+            )
+
+        generate.assert_not_called()
+        self.assertTrue(result['background_images_enabled'])
+        self.assertEqual(result['background_images_count'], 0)
+        self.assertEqual(result['next_step'], 'plan_page_prompts')
+
+    def test_build_outline_reuses_deck_prepared_by_background_steps(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            deck = Path(tmp) / 'deck'
+            deck.mkdir()
+            (deck / 'task_pack.json').write_text(json.dumps({
+                'deck_id': 'prepared-deck',
+                'ppt_mode': 'fast',
+                'params': {'page_count': 3},
+            }), encoding='utf-8')
+            (deck / 'background_prompts.json').write_text('{}', encoding='utf-8')
+            (deck / 'background_images.json').write_text('{}', encoding='utf-8')
+
+            with mock.patch.object(
+                TOOLS, '_resolve_deck_dir', return_value=deck,
+            ), mock.patch.object(
+                TOOLS, '_attach_material_images_to_deck',
+                return_value={'attached': 0, 'reference_images': []},
+            ), mock.patch.object(
+                TOOLS, 'ppt_init_deck',
+            ) as init, mock.patch.object(
+                TOOLS, 'ppt_run_stage', return_value={'status': 'ok', 'pages': 3},
+            ), mock.patch.object(
+                TOOLS, '_publish_deck_outline', return_value={
+                    'ok': True,
+                    'page_count': 3,
+                    'chars': 100,
+                },
+            ):
+                result = TOOLS.ppt_build_outline(
+                    user_query='三页汇报',
+                    page_count=3,
+                    deck_dir=str(deck),
+                    generate_background_images=True,
+                )
+
+            init.assert_not_called()
+            self.assertEqual(result['deck_id'], 'prepared-deck')
+            self.assertEqual(result['stages'][0]['step'], 'reuse')
+            self.assertTrue((deck / 'background_prompts.json').exists())
+            self.assertTrue((deck / 'background_images.json').exists())
+
+
+class WholePageInsertionTests(unittest.TestCase):
+    def _four_page_deck(self, root: Path) -> Path:
+        deck = root / 'deck'
+        (deck / 'pages').mkdir(parents=True)
+        (deck / 'images').mkdir()
+        (deck / 'screenshots').mkdir()
+        (deck / 'outline.json').write_text(json.dumps({
+            'topic': '季度汇报',
+            'page_count': 4,
+            'pages': [
+                {'page_no': page, 'page_kind': 'content', 'title': f'Old {page}'}
+                for page in range(1, 5)
+            ],
+        }), encoding='utf-8')
+        (deck / 'asset_plan.json').write_text(json.dumps({
+            'pages': [{
+                'page_no': page,
+                'slots': [{'id': f'keep-{page}'}],
+            } for page in range(1, 5)],
+        }), encoding='utf-8')
+        (deck / 'task_pack.json').write_text(json.dumps({
+            'params': {'page_count': 4},
+        }), encoding='utf-8')
+        (deck / 'background_prompts.json').write_text(json.dumps({
+            'pages': [
+                {'page_no': page, 'prompt': f'prompt {page}'} for page in range(1, 5)
+            ],
+        }), encoding='utf-8')
+        (deck / 'background_images.json').write_text(json.dumps({
+            'enabled': True,
+            'pages': [{
+                'page_no': page,
+                'local_path': f'images/page_{page:03d}_background.png',
+            } for page in range(1, 5)],
+        }), encoding='utf-8')
+        for page in range(1, 5):
+            (deck / 'pages' / f'page_{page:03d}.html').write_text(
+                f'<html><style>#bg{{background:url(../images/page_{page:03d}_background.png)}}</style>'
+                f'<body>Old {page}</body></html>',
+                encoding='utf-8',
+            )
+            (deck / 'images' / f'page_{page:03d}_background.png').write_bytes(
+                f'image-{page}'.encode(),
+            )
+        return deck
+
+    def test_prepare_insertion_opens_one_gap_and_retry_is_idempotent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            deck = self._four_page_deck(Path(tmp))
+            page = {
+                'title': 'Inserted',
+                'page_kind': 'content',
+                'bullets': [{'head': 'Only new content', 'detail': 'detail'}],
+            }
+
+            first = TOOLS._prepare_page_insertion(
+                deck, 4, page, background_enabled=True,
+            )
+            retry = TOOLS._prepare_page_insertion(
+                deck, 4, page, background_enabled=True,
+            )
+
+            outline = json.loads((deck / 'outline.json').read_text(encoding='utf-8'))
+            self.assertEqual(
+                [(entry['page_no'], entry['title']) for entry in outline['pages']],
+                [(1, 'Old 1'), (2, 'Old 2'), (3, 'Old 3'), (4, 'Inserted'), (5, 'Old 4')],
+            )
+            self.assertFalse(first['reused_pending_insertion'])
+            self.assertTrue(retry['reused_pending_insertion'])
+            self.assertFalse((deck / 'pages/page_004.html').exists())
+            moved_html = (deck / 'pages/page_005.html').read_text(encoding='utf-8')
+            self.assertIn('page_005_background.png', moved_html)
+            self.assertEqual(
+                (deck / 'images/page_005_background.png').read_bytes(), b'image-4',
+            )
+            prompts = json.loads(
+                (deck / 'background_prompts.json').read_text(encoding='utf-8'),
+            )
+            self.assertEqual(
+                [entry['page_no'] for entry in prompts['pages']], [1, 2, 3, 5],
+            )
+            backgrounds = json.loads(
+                (deck / 'background_images.json').read_text(encoding='utf-8'),
+            )
+            self.assertEqual(
+                [entry['page_no'] for entry in backgrounds['pages']], [1, 2, 3, 5],
+            )
+            self.assertEqual(
+                backgrounds['pages'][-1]['local_path'],
+                'images/page_005_background.png',
+            )
+            task_pack = json.loads((deck / 'task_pack.json').read_text(encoding='utf-8'))
+            self.assertEqual(task_pack['params']['page_count'], 5)
+            asset_plan = json.loads((deck / 'asset_plan.json').read_text(encoding='utf-8'))
+            self.assertEqual(
+                [(entry['page_no'], entry['slots']) for entry in asset_plan['pages']],
+                [
+                    (1, [{'id': 'keep-1'}]),
+                    (2, [{'id': 'keep-2'}]),
+                    (3, [{'id': 'keep-3'}]),
+                    (4, []),
+                    (5, [{'id': 'keep-4'}]),
+                ],
+            )
+
+    def test_ordered_publication_inserts_only_one_new_stable_index(self):
+        order = [10, 11, 12, 13]
+        with mock.patch.object(
+            TOOLS, '_reserve_ui_slot_position', return_value=99,
+        ) as reserve, mock.patch.object(
+            TOOLS, '_save_artifact', return_value={'status': 'ok'},
+        ) as save:
+            result = TOOLS._publish_ordered_ppt_artifact(
+                slot='slide_outline',
+                page_no=4,
+                value='new prompt',
+                content_type='text',
+                source_tool='ppt_publish_outline',
+                caption='Inserted',
+                order_list=order,
+                insert_before=4,
+                expected_total=5,
+            )
+
+        self.assertEqual(result['status'], 'ok')
+        self.assertEqual(order, [10, 11, 12, 99, 13])
+        reserve.assert_called_once()
+        self.assertEqual(save.call_args.kwargs['publisher_list_index'], 99)
+
+    def test_page_prompt_body_has_no_positional_page_header(self):
+        brief = TOOLS._format_slide_outline_brief({
+            'page_no': 4,
+            'page_kind': 'content',
+            'title': 'Inserted',
+            'bullets': [{'head': 'A', 'detail': 'B'}],
+        })
+
+        self.assertNotRegex(brief, r'第\s*4\s*页')
+        self.assertTrue(brief.startswith('页面类型：content\n标题：Inserted'))
+
+    def test_inserted_page_normalizes_boolean_media_flags(self):
+        page = TOOLS._parse_inserted_outline_page({
+            'title': 'Inserted',
+            'use_image': True,
+            'use_table': False,
+        })
+
+        self.assertIsNone(page['use_image'])
+        self.assertIsNone(page['use_table'])
+
+    def test_full_generate_tool_honors_pending_single_page_insertion(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            deck = self._four_page_deck(Path(tmp))
+            TOOLS._prepare_page_insertion(
+                deck,
+                4,
+                {
+                    'title': 'Inserted',
+                    'page_kind': 'content',
+                    'bullets': [{'head': 'Only new content', 'detail': 'detail'}],
+                },
+                background_enabled=True,
+            )
+            stage_result = {
+                'status': 'ok',
+                'auto_published': True,
+                'published': {
+                    'page': 4,
+                    'ok': True,
+                    'title_hint': 'Inserted',
+                    'bytes': 100,
+                },
+            }
+
+            with mock.patch.object(
+                TOOLS, '_resolve_deck_dir', return_value=deck,
+            ), mock.patch.object(
+                TOOLS, '_sync_outline_from_selected_artifacts',
+            ) as sync, mock.patch.object(
+                TOOLS, 'ppt_run_stage', return_value=stage_result,
+            ) as run_stage:
+                result = TOOLS.ppt_generate_pages(str(deck), concurrency=8)
+
+            sync.assert_not_called()
+            run_stage.assert_called_once_with(
+                str(deck.resolve()),
+                stage='page-html',
+                page=4,
+                insert_before=4,
+            )
+            self.assertEqual(result['mode'], 'incremental-insertion')
+            self.assertEqual(result['inserted_page'], 4)
+            self.assertEqual(result['page_count'], 5)
+            self.assertEqual(result['published_count'], 1)
+            outline = json.loads((deck / 'outline.json').read_text(encoding='utf-8'))
+            self.assertEqual(
+                [page['title'] for page in outline['pages']],
+                ['Old 1', 'Old 2', 'Old 3', 'Inserted', 'Old 4'],
+            )
 
 
 class PartialEditTests(unittest.TestCase):
@@ -421,6 +752,119 @@ class PartialEditTests(unittest.TestCase):
         }])
         self.assertEqual(old_text, '2025游戏行业趋势')
         self.assertEqual(new_text, '赛博朋克2077游戏行业趋势与未来展望')
+
+    def test_border_click_expands_card_text_without_flattening_inner_markup(self):
+        selection = {
+            'type': 'ppt_html',
+            'page': 1,
+            'el': 'bullet-1',
+            # Browser innerText joins the child heading and paragraph. This
+            # value does not exist as one contiguous slice of source HTML.
+            'selected_text': (
+                '团圆过大年 春节是一家人团聚的日子，亲人们围坐一起，'
+                '迎接新一年的好运与祝福。'
+            ),
+        }
+        enriched = (
+            '春节是家人团聚的重要时刻。无论相隔多远，人们都会尽量回到家中，'
+            '与亲人围坐一起吃年夜饭、聊家常、守岁迎新，共同迎接新一年的好运与祝福。'
+        )
+        model_output = json.dumps({
+            'op': 'replace_text_segments',
+            'values': ['团圆过大年', enriched],
+        }, ensure_ascii=False)
+
+        with mock.patch.object(TOOLS, '_agent_llm_call', return_value=model_output) as llm:
+            ops, old_text, new_text = TOOLS._selection_edit_ops(
+                '丰富一下内容', selection, TOOLS._HtmlTree(COMPOUND_CARD_HTML),
+            )
+
+        self.assertEqual(ops, [{
+            'op': 'replace_text_segments',
+            'el': 'bullet-1',
+            'values': ['团圆过大年', enriched],
+        }])
+        self.assertIn('团圆过大年', old_text)
+        self.assertEqual(new_text, f'团圆过大年 / {enriched}')
+        self.assertEqual(llm.call_args.kwargs['request_name'], 'ppt-selection-edit')
+        request = json.loads(llm.call_args.args[1])
+        self.assertTrue(request['selected_element']['compound_text_target'])
+        self.assertEqual(
+            request['selected_element']['text_segments_in_order'],
+            [
+                {
+                    'position': 1,
+                    'parent_tag': 'h3',
+                    'parent_el': None,
+                    'text': '团圆过大年',
+                },
+                {
+                    'position': 2,
+                    'parent_tag': 'p',
+                    'parent_el': None,
+                    'text': '春节是一家人团聚的日子，亲人们围坐一起，迎接新一年的好运与祝福。',
+                },
+            ],
+        )
+
+        edited, applied, _notes, removed = TOOLS._apply_html_ops(
+            COMPOUND_CARD_HTML, ops,
+        )
+        TOOLS._validate_local_html_edit(COMPOUND_CARD_HTML, edited)
+        self.assertIn('<article class="bullet bullet-a" data-el="bullet-1">', edited)
+        self.assertIn('<h3>团圆过大年</h3>', edited)
+        self.assertIn(f'<p>{enriched}</p>', edited)
+        self.assertNotIn('<article class="bullet bullet-a" data-el="bullet-1">团圆', edited)
+        self.assertEqual(applied, ['retexted 1 text segment(s) inside el="bullet-1"'])
+        self.assertEqual(removed, [
+            '春节是一家人团聚的日子，亲人们围坐一起，迎接新一年的好运与祝福。',
+        ])
+
+    def test_border_click_explicit_title_change_uses_structured_text_plan(self):
+        selection = {
+            'type': 'ppt_html',
+            'page': 1,
+            'el': 'bullet-1',
+            'selected_text': (
+                '团圆过大年 春节是一家人团聚的日子，亲人们围坐一起，'
+                '迎接新一年的好运与祝福。'
+            ),
+        }
+        original_body = '春节是一家人团聚的日子，亲人们围坐一起，迎接新一年的好运与祝福。'
+        model_output = json.dumps({
+            'op': 'replace_text_segments',
+            'values': ['阖家团圆', original_body],
+        }, ensure_ascii=False)
+
+        with mock.patch.object(TOOLS, '_agent_llm_call', return_value=model_output) as llm:
+            ops, _old_text, new_text = TOOLS._selection_edit_ops(
+                '修改标题为阖家团圆', selection, TOOLS._HtmlTree(COMPOUND_CARD_HTML),
+            )
+
+        self.assertEqual(ops, [{
+            'op': 'replace_text_segments',
+            'el': 'bullet-1',
+            'values': ['阖家团圆', original_body],
+        }])
+        self.assertEqual(new_text, f'阖家团圆 / {original_body}')
+        self.assertEqual(
+            llm.call_args.kwargs['request_name'],
+            'ppt-selection-retext-segments',
+        )
+
+        edited, _applied, _notes, _removed = TOOLS._apply_html_ops(
+            COMPOUND_CARD_HTML, ops,
+        )
+        self.assertIn('<h3>阖家团圆</h3>', edited)
+        self.assertIn(f'<p>{original_body}</p>', edited)
+
+    def test_structured_text_replacement_rejects_wrong_segment_count(self):
+        with self.assertRaisesRegex(ValueError, 'expected 2, got 1'):
+            TOOLS._apply_html_ops(COMPOUND_CARD_HTML, [{
+                'op': 'replace_text_segments',
+                'el': 'bullet-1',
+                'values': ['只有一段'],
+            }])
 
     def test_nested_ambiguous_match_is_rejected(self):
         with self.assertRaisesRegex(ValueError, 'contains 2 visible matches'):
@@ -791,6 +1235,144 @@ class PartialEditTests(unittest.TestCase):
             self.assertEqual(result['status'], 'failed')
             self.assertEqual(result['retry_count'], 0)
             self.assertIn('timed out after 90s', result['failed_detail'][0]['error'])
+
+
+class SinglePageMediaEditTests(unittest.TestCase):
+    def test_material_replacement_binds_newest_image_and_redraws_only_target_page(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            deck = root / 'deck'
+            (deck / 'pages').mkdir(parents=True)
+            material_path = root / 'new-material.png'
+            material_path.write_bytes(b'image')
+            attached_path = str((deck / 'images/material_01.png').resolve())
+            (deck / 'info_pack.json').write_text(json.dumps({
+                'user_assets': {'reference_images': [attached_path]},
+            }), encoding='utf-8')
+            (deck / 'outline.json').write_text(json.dumps({
+                'pages': [
+                    {'page_no': 1, 'title': 'Keep', 'bullets': [{'head': 'A'}]},
+                    {
+                        'page_no': 2,
+                        'title': 'Target',
+                        'bullets': [{'head': 'B'}],
+                        'use_image': {'reference_image_index': 9},
+                    },
+                    {'page_no': 3, 'title': 'Keep too', 'bullets': [{'head': 'C'}]},
+                ],
+            }), encoding='utf-8')
+
+            stage_calls = []
+
+            def run_stage(deck_dir, *, stage, page=0):
+                stage_calls.append((deck_dir, stage, page))
+                if stage == 'page-html':
+                    return {
+                        'status': 'ok',
+                        'auto_published': True,
+                        'published': {'ok': True, 'page': page},
+                    }
+                return {'status': 'ok'}
+
+            with mock.patch.object(
+                TOOLS, '_resolve_deck_dir', return_value=deck,
+            ), mock.patch.object(
+                TOOLS,
+                '_attach_material_images_to_deck',
+                return_value={
+                    'attached': 1,
+                    'reference_images': [attached_path],
+                    'captions': {},
+                },
+            ), mock.patch.object(
+                TOOLS,
+                '_load_material_manifest',
+                return_value={'images': [{'path': str(material_path)}]},
+            ), mock.patch.object(
+                TOOLS, '_publish_one_slide_outline', return_value={'ok': True},
+            ) as publish_outline, mock.patch.object(
+                TOOLS, 'ppt_run_stage', side_effect=run_stage,
+            ):
+                result = TOOLS.ppt_replace_page_material_image(str(deck), page=2)
+
+            outline = json.loads((deck / 'outline.json').read_text(encoding='utf-8'))
+            self.assertIsNone(outline['pages'][0].get('use_image'))
+            self.assertEqual(
+                outline['pages'][1]['use_image'], {'reference_image_index': 0},
+            )
+            self.assertIsNone(outline['pages'][2].get('use_image'))
+            publish_outline.assert_called_once_with(deck, 2)
+            self.assertEqual(
+                [(stage, page) for _deck, stage, page in stage_calls],
+                [('asset-plan', 0), ('page-html', 2)],
+            )
+            self.assertEqual(result['updated_pages'], [2])
+            self.assertTrue(result['preview_html_published'])
+
+    def test_background_replacement_overwrites_position_and_republishes_existing_html(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            deck = Path(tmp) / 'deck'
+            (deck / 'pages').mkdir(parents=True)
+            (deck / 'outline.json').write_text(json.dumps({
+                'pages': [
+                    {'page_no': 1, 'title': 'Keep'},
+                    {'page_no': 2, 'title': 'Target'},
+                ],
+            }), encoding='utf-8')
+            (deck / 'background_prompts.json').write_text(json.dumps({
+                'pages': [
+                    {'page_no': 1, 'prompt': 'old one'},
+                    {'page_no': 2, 'prompt': 'old two'},
+                ],
+            }), encoding='utf-8')
+            (deck / 'pages/page_002.html').write_text(
+                '<html><style>#bg{background-image:url(../images/page_002_background.png)}</style></html>',
+                encoding='utf-8',
+            )
+            new_prompt = '16:9 calm left safe zone, mountain scene, no text or logos'
+
+            with mock.patch.object(
+                TOOLS, '_resolve_deck_dir', return_value=deck,
+            ), mock.patch.object(
+                TOOLS, 'check_ppt_workflow_capabilities', return_value={'status': 'ready'},
+            ), mock.patch.object(
+                TOOLS,
+                'ppt_publish_background_prompts',
+                return_value={'updated_pages': [2]},
+            ) as publish_prompt, mock.patch.object(
+                TOOLS,
+                'ppt_generate_background_images',
+                return_value={
+                    'updated_pages': [2],
+                    'backgrounds': [{
+                        'page_no': 2,
+                        'local_path': 'images/page_002_background.png',
+                    }],
+                },
+            ) as generate, mock.patch.object(
+                TOOLS, '_publish_one_page', return_value={'ok': True, 'page': 2},
+            ) as publish_page, mock.patch.object(
+                TOOLS, 'ppt_run_stage',
+            ) as run_stage:
+                result = TOOLS.ppt_replace_page_background(
+                    str(deck), page=2, prompt=new_prompt,
+                )
+
+            publish_prompt.assert_called_once_with(
+                str(deck),
+                prompts_json=[{'page_no': 2, 'prompt': new_prompt}],
+            )
+            generate.assert_called_once_with(
+                str(deck),
+                prompts_json=[{'page_no': 2, 'prompt': new_prompt}],
+                pages_json=[2],
+                replace=True,
+            )
+            publish_page.assert_called_once_with(deck, 2, with_notes=True)
+            run_stage.assert_not_called()
+            self.assertEqual(result['updated_pages'], [2])
+            self.assertEqual(result['refresh_mode'], 'republish-existing-html')
+            self.assertTrue(result['preview_html_published'])
 
 
 if __name__ == '__main__':

@@ -240,7 +240,7 @@ func PlanWorkflowSessionStart(w http.ResponseWriter, r *http.Request) {
 	common.ReplyOK(w, map[string]any{
 		"graph_hash":     graph.GraphHash,
 		"schema_version": graph.SchemaVersion,
-		"projection":     graphengine.Project(graph, graphengine.RuntimeSnapshot{Materials: materials}),
+		"projection":     projectWithApprovalPreferences(store.DB().WithContext(r.Context()), req.UserID, req.WorkflowID, graph, graphengine.RuntimeSnapshot{Materials: materials}),
 	})
 }
 
@@ -265,6 +265,7 @@ func StartWorkflowSession(w http.ResponseWriter, r *http.Request) {
 	if req.CommandID == "" {
 		req.CommandID = uuid.NewString()
 	}
+	req.WorkflowMode = normalizeSessionWorkflowMode(req.WorkflowMode)
 	req.Operation = "start"
 	if existing, ok := loadExistingTransition(store.DB(), req.CommandID); ok {
 		status := http.StatusOK
@@ -300,7 +301,7 @@ func StartWorkflowSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	externalMaterials := externalMaterialFacts(graph, req.ExternalMaterials)
-	projection := graphengine.Project(graph, graphengine.RuntimeSnapshot{Materials: externalMaterials})
+	projection := projectWithApprovalPreferences(store.DB().WithContext(r.Context()), req.UserID, req.WorkflowID, graph, graphengine.RuntimeSnapshot{Materials: externalMaterials})
 	node, exists := projection.Nodes[req.TargetStepID]
 	if !exists || node.Reachability != "reachable" || node.Readiness != "ready" {
 		code := "STEP_NOT_REACHABLE"
@@ -532,6 +533,9 @@ func TransitionWorkflowSession(w http.ResponseWriter, r *http.Request) {
 			}
 			return err
 		}
+		// The execution mode is a session creation decision. Never allow a later
+		// chat request or transition command to change it.
+		req.WorkflowMode = normalizeSessionWorkflowMode(session.WorkflowMode)
 		graphErr := error(nil)
 		graph, graphErr = loadSessionGraph(r.Context(), tx, &session)
 		if graphErr != nil {
@@ -554,7 +558,7 @@ func TransitionWorkflowSession(w http.ResponseWriter, r *http.Request) {
 		if snapshotErr != nil {
 			return snapshotErr
 		}
-		projection := graphengine.Project(graph, snapshot)
+		projection := projectWithApprovalPreferences(tx.WithContext(r.Context()), session.CreateUserID, session.WorkflowID, graph, snapshot)
 		if req.ExpectedStateVersion != session.StateVersion {
 			return rejectTransition(req.CommandID, &session, projection, http.StatusConflict, "STATE_VERSION_CONFLICT", "plugin session state changed; use the returned projection", true, map[string]any{"expected": req.ExpectedStateVersion, "actual": session.StateVersion})
 		}
@@ -609,7 +613,7 @@ func TransitionWorkflowSession(w http.ResponseWriter, r *http.Request) {
 			if reloadErr != nil {
 				return reloadErr
 			}
-			projection = graphengine.Project(graph, snapshot)
+			projection = projectWithApprovalPreferences(tx.WithContext(r.Context()), session.CreateUserID, session.WorkflowID, graph, snapshot)
 		}
 		evaluations := make(map[string]graphengine.Evaluation, len(targets))
 		invalidTargets := make([]map[string]any, 0)
@@ -1029,6 +1033,7 @@ func emitTaskCreatedConvEvent(ctx context.Context, taskID, sessionID, conversati
 	subagent.EventHooks.CallConversationEvent(ctx, store.State(), conversationID, "", "task_created", map[string]any{
 		"task_id":             task.ID,
 		"title":               task.Title,
+		"query":               subagent.TaskDisplayQuery(task),
 		"agent_type":          task.AgentType,
 		"mode":                task.Mode,
 		"status":              task.Status,

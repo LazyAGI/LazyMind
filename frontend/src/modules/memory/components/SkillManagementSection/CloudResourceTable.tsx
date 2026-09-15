@@ -3,7 +3,7 @@ import { Alert, Button, Empty, Space, Table, Tag, message } from "antd";
 import { CloudDownloadOutlined, ReloadOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 
-import { getCloudSession } from "@/runtime/cloud/session";
+import { getCloudSession, isCloudBusinessAvailable } from "@/runtime/cloud/session";
 import { openCloudRegister } from "@/runtime/desktopBridge";
 import {
   downloadCloudResource,
@@ -47,7 +47,7 @@ export default function CloudResourceTable({ resourceType, t, onDownloaded, refr
     try {
       const session = await getCloudSession();
       if (sequence !== requestSequence.current) return;
-      const active = session.state === "signed_in";
+	  const active = isCloudBusinessAvailable(session);
       setRegistrationURL(session.registration_url || "");
       setSignedIn(active);
       if (!active) {

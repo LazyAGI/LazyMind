@@ -17,9 +17,85 @@ let _currentChartOptions = {};
 // pptxgenjs exposes ChartType only on *instances*, so we stash the enum from
 // the active pptx instance at slide-build time.
 let _currentChartTypeEnum = null;
-// Deck-level default font from style_spec.json, used when a node's CSS
-// font-family yields nothing usable. Set by buildPptx.
+// Deck-level defaults from style_spec.json (or the extracted DOM), used when a
+// node only declares a generic CSS family. Set by buildPptx.
 let _deckDefaultFontFace = null;
+let _deckHeadingFontFace = null;
+
+function isHeadingNode(node) {
+  const tag = String(node?.tag || '').toUpperCase();
+  if (/^H[1-6]$/.test(tag)) return true;
+  const identity = [node?.id, node?.el, node?.className]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  return /(?:^|[\s_-])(?:title|heading|headline)(?:$|[\s_-])/.test(identity);
+}
+
+function fallbackFontForNode(node) {
+  return isHeadingNode(node)
+    ? (_deckHeadingFontFace || _deckDefaultFontFace)
+    : (_deckDefaultFontFace || _deckHeadingFontFace);
+}
+
+function incrementFont(counts, family) {
+  if (!family) return;
+  counts.set(family, (counts.get(family) || 0) + 1);
+}
+
+function mostFrequentFont(counts) {
+  let selected = null;
+  let selectedCount = -1;
+  for (const [family, count] of counts) {
+    if (count > selectedCount) {
+      selected = family;
+      selectedCount = count;
+    }
+  }
+  return selected;
+}
+
+/** Resolve distinct heading/body fonts from the style spec or extracted DOM. */
+export function resolveDeckTypography(styleSpec = {}, pages = []) {
+  const typography = styleSpec?.typography || {};
+  const legacy = typography.font_family || typography.fontFamily || '';
+  let heading = parseFontFamily(
+    typography.heading_font || typography.headingFont || legacy,
+    { genericFallback: false },
+  );
+  let body = parseFontFamily(
+    typography.body_font || typography.bodyFont || legacy,
+    { genericFallback: false },
+  );
+
+  const headingCounts = new Map();
+  const bodyCounts = new Map();
+  let containsCjk = false;
+  const visit = node => {
+    if (!node || typeof node !== 'object') return;
+    const family = parseFontFamily(node.styles?.fontFamily, { genericFallback: false });
+    if (family) incrementFont(isHeadingNode(node) ? headingCounts : bodyCounts, family);
+    const visibleText = [
+      node.text,
+      ...(node.textRuns || []).map(run => run?.text),
+      ...(node.listData || []).map(item => item?.text),
+    ].filter(Boolean).join('');
+    if (/[\u3400-\u9FFF]/.test(visibleText)) containsCjk = true;
+    for (const child of node.children || []) visit(child);
+  };
+  for (const page of pages || []) {
+    const ir = page?.ir || {};
+    for (const key of ['bg', 'header', 'ct', 'footer']) visit(ir[key]);
+    for (const node of [...(ir.overlays || []), ...(ir.rest || [])]) visit(node);
+  }
+
+  const inferredHeading = mostFrequentFont(headingCounts);
+  const inferredBody = mostFrequentFont(bodyCounts);
+  const portableFallback = containsCjk ? 'Microsoft YaHei' : 'Arial';
+  body = body || inferredBody || inferredHeading || portableFallback;
+  heading = heading || inferredHeading || body || portableFallback;
+  return { headingFontFace: heading, bodyFontFace: body };
+}
 
 // Gradient handler for the current buildPptx() call. buildShapeElement reads
 // this when it encounters a gradient backgroundImage, registers the gradient
@@ -650,9 +726,10 @@ export function buildBackground(bgIR, bodyBgColor, deckDir) {
   // 如果图片来自 <img> 子元素，CSS gradient 是 #bg 的独立背景，不作为 overlay
   if (imageUrl && overlayColor && imageFromCss) {
     const isRemoteUrl = /^https?:\/\//.test(imageUrl);
-    const imageExists = isRemoteUrl ? false : existsSync(imageUrl);
+    const isInlineImage = /^data:image\/[a-z0-9.+-]+;base64,/i.test(imageUrl);
+    const imageExists = isInlineImage || (!isRemoteUrl && existsSync(imageUrl));
     if (imageExists) {
-      result.slideBackground = { path: imageUrl };
+      result.slideBackground = isInlineImage ? { data: imageUrl } : { path: imageUrl };
       const transparency = Math.round((1 - overlayAlpha) * 100);
       result.bgElements.push({
         type: 'shape',
@@ -671,11 +748,12 @@ export function buildBackground(bgIR, bodyBgColor, deckDir) {
   if (imageUrl) {
     // 远程 URL（http/https）跳过，pptxgenjs 可能无法加载
     const isRemoteUrl = /^https?:\/\//.test(imageUrl);
-    const imageExists = isRemoteUrl ? false : existsSync(imageUrl);
+    const isInlineImage = /^data:image\/[a-z0-9.+-]+;base64,/i.test(imageUrl);
+    const imageExists = isInlineImage || (!isRemoteUrl && existsSync(imageUrl));
     if (imageExists) {
       if (bgOpacity >= 1) {
         // 完全不透明：直接设为 slide 背景图
-        result.slideBackground = { path: imageUrl };
+        result.slideBackground = isInlineImage ? { data: imageUrl } : { path: imageUrl };
         // filter: brightness() → 黑色半透明遮罩模拟暗化效果
         const brightness = parseBrightness(imgChildFilter || bgIR.styles?.filter);
         if (brightness !== null && brightness < 1) {
@@ -691,7 +769,7 @@ export function buildBackground(bgIR, bodyBgColor, deckDir) {
       } else {
         // opacity < 1：图片作为 slide 背景，叠加 body 底色的半透明遮罩
         // transparency = bgOpacity * 100 → 遮罩 (1-bgOpacity) 不透明，透过 bgOpacity 的图片
-        result.slideBackground = { path: imageUrl };
+        result.slideBackground = isInlineImage ? { data: imageUrl } : { path: imageUrl };
         const baseHex = bodyHex || 'FFFFFF';
         const transparency = Math.round(bgOpacity * 100);
         result.bgElements.push({
@@ -930,7 +1008,8 @@ export function buildTextElement(node) {
     w: pxToInch(boxWidthPx),
     h: pxToInch(b.h),
     fontSize: pxToPt(parseFloat(s.fontSize) || 16),
-    fontFace: parseFontFamily(s.fontFamily) || _deckDefaultFontFace,
+    fontFace: parseFontFamily(s.fontFamily, { genericFallback: false })
+      || fallbackFontForNode(node),
     color: getTextColor(s).color,
     bold: parseInt(s.fontWeight) >= 700,
     italic: s.fontStyle === 'italic',
@@ -1015,7 +1094,8 @@ export function buildTextElement(node) {
       }
       const runOpts = {
           fontSize: pxToPt(run.fontSize || 16),
-          fontFace: parseFontFamily(run.fontFamily) || _deckDefaultFontFace,
+          fontFace: parseFontFamily(run.fontFamily, { genericFallback: false })
+            || fallbackFontForNode(node),
           color: runColor,
           bold: run.bold,
           italic: run.italic,
@@ -1526,7 +1606,8 @@ export function buildListElement(node) {
       text: item.text,
       options: {
         fontSize: pxToPt(parseFloat(item.styles?.fontSize) || 16),
-        fontFace: parseFontFamily(item.styles?.fontFamily) || _deckDefaultFontFace,
+        fontFace: parseFontFamily(item.styles?.fontFamily, { genericFallback: false })
+          || fallbackFontForNode(node),
         color: cssColorToHex(item.styles?.color) || '000000',
         bold: parseInt(item.styles?.fontWeight) >= 700,
         // I-ii: list item 自身对齐（不被父容器 textAlign 误覆盖）
@@ -2087,7 +2168,7 @@ export function buildSlideFromIR(pptx, ir, deckDir) {
       // underlay so body chrome (#1a1a1a) cannot stick when #bg resolved a
       // better color — D-ii gradient shapes still paint on top when present.
       if (bgResult.slideBackground) {
-        if (bgResult.slideBackground.path) {
+        if (bgResult.slideBackground.path || bgResult.slideBackground.data) {
           slide.background = bgResult.slideBackground;
           bgApplied = true;
         } else if (bgResult.slideBackground.fill
@@ -2196,18 +2277,23 @@ export async function buildPptx(pages, deckDir, outputPath) {
     } catch { /* 非必需 */ }
   }
 
-  // 读 style_spec.json 的默认字体，兜住 font-family 解析不出可用字体的文本
-  // （否则 PowerPoint 会退回 Calibri，中文变宋体）。
-  _deckDefaultFontFace = null;
+  // Read the actual heading_font/body_font schema. On-demand exports contain
+  // only HTML, so resolveDeckTypography also infers the same names from the
+  // extracted computed styles instead of silently falling back to Calibri.
+  let styleSpec = {};
   const styleSpecPath = resolve(deckDir, 'style_spec.json');
   if (existsSync(styleSpecPath)) {
     try {
-      const styleSpec = JSON.parse(readFileSync(styleSpecPath, 'utf-8'));
-      if (styleSpec.typography?.font_family) {
-        _deckDefaultFontFace = parseFontFamily(styleSpec.typography.font_family);
-      }
+      styleSpec = JSON.parse(readFileSync(styleSpecPath, 'utf-8'));
     } catch { /* 非必需 */ }
   }
+  const deckTypography = resolveDeckTypography(styleSpec, pages);
+  _deckHeadingFontFace = deckTypography.headingFontFace;
+  _deckDefaultFontFace = deckTypography.bodyFontFace;
+  pptx.theme = {
+    headFontFace: _deckHeadingFontFace,
+    bodyFontFace: _deckDefaultFontFace,
+  };
 
   let successCount = 0;
   let failCount = 0;
@@ -2263,5 +2349,26 @@ export async function buildPptx(pages, deckDir, outputPath) {
   }
   _currentGradientHandler = null;
 
-  return { successCount, failCount, fallbackCount, totalPages: pages.length, failures, fallbacks };
+  // Preserve web typography across machines. Preview HTML commonly imports
+  // open fonts from Google Fonts; without a font part PowerPoint only receives
+  // the family name and silently substitutes a standard local font.
+  let embeddedFonts = [];
+  try {
+    const { embedGoogleFontsFromPages } = await import('./font_embedding.mjs');
+    embeddedFonts = await embedGoogleFontsFromPages(outputPath, pages);
+  } catch (error) {
+    // Font download/embedding is visual fidelity enhancement. Keep the
+    // editable PPTX usable during network outages or for restricted fonts.
+    process.stderr.write(`[fonts] Web font embedding skipped: ${error.message}\n`);
+  }
+
+  return {
+    successCount,
+    failCount,
+    fallbackCount,
+    totalPages: pages.length,
+    failures,
+    fallbacks,
+    embeddedFonts,
+  };
 }

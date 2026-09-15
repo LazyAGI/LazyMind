@@ -20,6 +20,7 @@ import {
   LeftOutlined,
   RightOutlined,
   SettingOutlined,
+  ClearOutlined,
 } from "@ant-design/icons";
 import {
   Alert,
@@ -38,6 +39,7 @@ import { useTranslation } from "react-i18next";
 import { getLocalizedErrorMessage } from "@/components/request";
 import {
   deletePreferenceMemory,
+  isPreferenceOrganizing,
   getPreferenceMemory,
   listPreferenceMemories,
   reorderPreferenceMemories,
@@ -46,15 +48,17 @@ import {
   type PreferenceMemoryList,
 } from "../../currentMemoryApi";
 import {
-  getPreferenceResidentUsageTone,
+  getPreferenceBudgetTone,
+  preferenceOrganizerPresentation,
   isCurrentMemoryConflict,
   isCurrentMemoryResourceNotFound,
-  isPreferenceResident,
   mergePreferenceOrderWithLatest,
   movePreferenceItem,
 } from "../../currentMemoryViewModel";
 import { getMemorySourceLabelKey } from "../../memorySourceLabels";
 import SafeReferenceMarkdown from "./SafeReferenceMarkdown";
+
+import { usePreferenceOrganizer } from "../../hooks/usePreferenceOrganizer";
 
 const PAGE_SIZE = 5;
 
@@ -63,7 +67,6 @@ interface SortablePreferenceRowProps {
   disabled: boolean;
   index: number;
   item: PreferenceMemoryItem;
-  resident: boolean;
   total: number;
   onDelete: (item: PreferenceMemoryItem) => Promise<void>;
   onOpen: (item: PreferenceMemoryItem) => void;
@@ -74,7 +77,6 @@ function SortablePreferenceRow({
   disabled,
   index,
   item,
-  resident,
   total,
   onDelete,
   onOpen,
@@ -106,7 +108,6 @@ function SortablePreferenceRow({
       className={[
         "memory-preference-item",
         isDragging ? "is-dragging" : "",
-        resident ? "" : "is-not-resident",
       ].filter(Boolean).join(" ")}
       style={{
         transform: CSS.Transform.toString(transform),
@@ -140,12 +141,6 @@ function SortablePreferenceRow({
           <span>{item.summary}</span>
           <small>
             {t("admin.memoryPreferenceUpdatedAt", { time: updatedAt })}
-            {!resident ? (
-              <span className="memory-preference-residency-label">
-                {" · "}
-                {t("admin.memoryPreferenceNotResident")}
-              </span>
-            ) : null}
           </small>
         </span>
         <RightOutlined />
@@ -180,6 +175,7 @@ function SortablePreferenceRow({
 export default function PreferenceMemorySection() {
   const { i18n, t } = useTranslation();
   const detailRequestIdRef = useRef(0);
+  const selectedDetailRef = useRef<PreferenceMemoryItem | null>(null);
   const [list, setList] = useState<PreferenceMemoryList | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -206,6 +202,7 @@ export default function PreferenceMemorySection() {
 
   const refresh = useCallback(async () => {
     setLoading(true);
+    setList((current) => current ? { ...current, budget: undefined } : current);
     setLoadError("");
     try {
       setList(await listPreferenceMemories());
@@ -228,6 +225,21 @@ export default function PreferenceMemorySection() {
     void refresh();
   }, [refresh]);
 
+  const organizer = usePreferenceOrganizer((completed) => {
+    void refresh();
+    if (detailOpen && selectedDetailRef.current) void openDetail(selectedDetailRef.current);
+    const presentation = preferenceOrganizerPresentation(completed);
+    if (presentation) message[presentation.tone](t(presentation.key));
+  });
+  const organizerPresentation = preferenceOrganizerPresentation(organizer.task);
+  const organizerLabel = organizer.active && organizerPresentation
+    ? organizerPresentation.key : "admin.memoryPreferenceOrganize";
+  const organizerResultLabel = !organizer.active ? organizerPresentation?.key : null;
+  const submitOrganizer = async () => {
+    try { await organizer.submit(); }
+    catch (error) { message.error(getLocalizedErrorMessage(error)); }
+  };
+
   const pageCount = Math.max(
     1,
     Math.ceil((list?.items.length || 0) / PAGE_SIZE),
@@ -236,17 +248,8 @@ export default function PreferenceMemorySection() {
     const start = pageIndex * PAGE_SIZE;
     return list?.items.slice(start, start + PAGE_SIZE) || [];
   }, [list?.items, pageIndex]);
-  const residentIndexUsage = list?.residentIndexUsage;
-  const residentUsageRatio = residentIndexUsage
-    ? residentIndexUsage.usedItems / residentIndexUsage.maxItems
-    : 0;
-  const residentUsageTone = residentIndexUsage
-    ? getPreferenceResidentUsageTone(
-        residentIndexUsage.usedItems,
-        residentIndexUsage.maxItems,
-        residentIndexUsage.overLimit,
-      )
-    : "normal";
+  const budget = list?.budget;
+  const budgetTone = budget ? getPreferenceBudgetTone(budget.usedChars, budget.maxChars) : "normal";
 
   useEffect(() => {
     setPageIndex((current) => Math.min(current, pageCount - 1));
@@ -269,7 +272,13 @@ export default function PreferenceMemorySection() {
       setPreDragList(null);
     } catch (error) {
       console.error("Reorder Preference memory failed:", error);
-      if (isCurrentMemoryConflict(error)) {
+      if (isPreferenceOrganizing(error)) {
+        if (rollbackList) setList(rollbackList);
+        setPreDragList(null);
+        setOrderConflict(false);
+        message.info(t("admin.memoryPreferenceOrganizeRunning"));
+        void organizer.refresh();
+      } else if (isCurrentMemoryConflict(error)) {
         setOrderConflict(true);
       } else {
         if (rollbackList) {
@@ -284,7 +293,7 @@ export default function PreferenceMemorySection() {
   };
 
   const handleDragEnd = (event: DragEndEvent) => {
-    if (!list || ordering || orderConflict || !event.over) {
+    if (!list || organizer.running || ordering || orderConflict || !event.over) {
       return;
     }
     const activeName = String(event.active.id);
@@ -299,12 +308,12 @@ export default function PreferenceMemorySection() {
       overName,
     );
     setPreDragList(list);
-    setList({ ...list, items: optimisticItems });
+    setList({ ...list, items: optimisticItems, budget: undefined });
     void applyOrder(optimisticItems, list.etag, list);
   };
 
   const resubmitRetainedOrder = async () => {
-    if (!list || ordering) {
+    if (!list || organizer.running || ordering) {
       return;
     }
     setOrdering(true);
@@ -316,7 +325,7 @@ export default function PreferenceMemorySection() {
         latest.items,
       );
       setPreDragList(latest);
-      setList({ ...latest, items: rebasedItems });
+      setList({ ...latest, items: rebasedItems, budget: undefined });
       setOrdering(false);
       await applyOrder(rebasedItems, latest.etag, latest);
     } catch (error) {
@@ -332,14 +341,16 @@ export default function PreferenceMemorySection() {
 
   const undoLocalOrder = () => {
     if (preDragList) {
-      setList(preDragList);
+      setList({ ...preDragList, budget: undefined });
     }
     setPreDragList(null);
     setOrderConflict(false);
     setOrderError("");
+    void refresh();
   };
 
   const openDetail = async (item: PreferenceMemoryItem) => {
+    selectedDetailRef.current = item;
     const requestId = detailRequestIdRef.current + 1;
     detailRequestIdRef.current = requestId;
     setDetailOpen(true);
@@ -364,7 +375,7 @@ export default function PreferenceMemorySection() {
   };
 
   const deleteItem = async (item: PreferenceMemoryItem) => {
-    if (ordering || orderConflict) {
+    if (organizer.running || ordering || orderConflict) {
       return;
     }
     setDeletingNames((current) => new Set(current).add(item.name));
@@ -378,18 +389,7 @@ export default function PreferenceMemorySection() {
                 (candidate) => candidate.name !== item.name,
               ),
               totalSize: Math.max(0, current.totalSize - 1),
-              residentIndexUsage: current.residentIndexUsage
-                ? {
-                    ...current.residentIndexUsage,
-                    usedItems: Math.max(
-                      0,
-                      current.residentIndexUsage.usedItems - 1,
-                    ),
-                    overLimit:
-                      current.residentIndexUsage.usedItems - 1 >
-                      current.residentIndexUsage.maxItems,
-                  }
-                : undefined,
+              budget: undefined,
             }
           : current,
       );
@@ -415,7 +415,10 @@ export default function PreferenceMemorySection() {
       }
     } catch (error) {
       console.error("Delete Preference memory failed:", error);
-      message.error(getLocalizedErrorMessage(error));
+      if (isPreferenceOrganizing(error)) {
+        message.info(t("admin.memoryPreferenceOrganizeRunning"));
+        void organizer.refresh();
+      } else message.error(getLocalizedErrorMessage(error));
     } finally {
       setDeletingNames((current) => {
         const next = new Set(current);
@@ -474,6 +477,10 @@ export default function PreferenceMemorySection() {
           <h3>{t("admin.memoryPreferenceTitle")}</h3>
           <p>{t("admin.memoryPreferenceDescription")}</p>
         </div>
+        <Button icon={<ClearOutlined />} loading={organizer.submitting}
+          disabled={organizer.running || !list?.items.length} onClick={() => void submitOrganizer()}>
+          {t(organizerLabel)}
+        </Button>
         <span className="memory-current-section-count">
           {t("admin.memoryPreferenceTotal", {
             count: list?.totalSize || 0,
@@ -481,41 +488,48 @@ export default function PreferenceMemorySection() {
         </span>
       </div>
 
-      {residentIndexUsage ? (
+      {organizerResultLabel ? <p role="status">{t(organizerResultLabel)}</p> : null}
+      {organizer.error ? <Alert type="warning" showIcon message={t("admin.memoryPreferenceOrganizeStatusFailed")}
+        action={<Button size="small" onClick={() => void organizer.refresh()}>{t("common.retry")}</Button>} /> : null}
+      {budget ? (
         <div
-          className={`memory-preference-usage is-${residentUsageTone}`}
-          aria-label={t("admin.memoryPreferenceResidentUsageAria", {
-            max: residentIndexUsage.maxItems,
-            used: residentIndexUsage.usedItems,
+          className={`memory-preference-usage is-${budgetTone}`}
+          aria-label={t("admin.memoryPreferenceBudgetAria", {
+            max: budget.maxChars,
+            used: budget.usedChars,
           })}
         >
           <div className="memory-preference-usage-copy">
-            <span>{t("admin.memoryPreferenceResidentIndex")}</span>
+            <span>{t("admin.memoryPreferenceCharacterBudget")}</span>
             <strong>
-              {residentIndexUsage.usedItems} / {residentIndexUsage.maxItems}
+              {budget.usedChars} / {budget.maxChars}
             </strong>
           </div>
           <Progress
-            percent={Math.min(100, residentUsageRatio * 100)}
+            percent={Math.min(100, budget.usedChars / budget.maxChars * 100)}
             showInfo={false}
             size="small"
-            status={residentUsageTone === "error" ? "exception" : "normal"}
+            status={budgetTone === "error" ? "exception" : "normal"}
             strokeColor={
-              residentUsageTone === "warning" ? "#d99218" : undefined
+              budgetTone === "warning" || budgetTone === "full" ? "#d99218" : undefined
             }
           />
+          <small>{t("admin.memoryPreferenceBudgetDescription")}</small>
+          {budgetTone === "full" ? <span>{t("admin.memoryPreferenceBudgetFull")}</span> : null}
         </div>
-      ) : null}
+      ) : list ? <p role="status">{t("admin.memoryPreferenceBudgetStale")}{" "}
+        <Button size="small" disabled={loading || ordering} onClick={() => void refresh()}>{t("common.retry")}</Button>
+      </p> : null}
 
-      {residentIndexUsage?.overLimit ? (
+      {budgetTone === "error" ? (
         <Alert
           className="memory-preference-capacity-alert"
           description={t("admin.memoryPreferenceOverLimitDescription", {
-            max: residentIndexUsage.maxItems,
+            max: budget?.maxChars,
           })}
           message={t("admin.memoryPreferenceOverLimitTitle")}
           showIcon
-          type="error"
+          type="warning"
         />
       ) : null}
 
@@ -524,14 +538,14 @@ export default function PreferenceMemorySection() {
           action={
             <div className="memory-current-conflict-actions">
               <Button
-                disabled={ordering}
+                disabled={organizer.running || ordering}
                 size="small"
                 onClick={() => void refresh()}
               >
                 {t("admin.memoryPreferenceReloadOrder")}
               </Button>
               <Button
-                disabled={ordering}
+                disabled={organizer.running || ordering}
                 loading={ordering}
                 size="small"
                 type="primary"
@@ -609,14 +623,10 @@ export default function PreferenceMemorySection() {
                 {visibleItems.map((item, index) => (
                   <SortablePreferenceRow
                     deleting={deletingNames.has(item.name)}
-                    disabled={ordering || orderConflict}
+                    disabled={organizer.running || ordering || orderConflict}
                     index={pageIndex * PAGE_SIZE + index}
                     item={item}
                     key={item.name}
-                    resident={isPreferenceResident(
-                      pageIndex * PAGE_SIZE + index,
-                      residentIndexUsage?.maxItems,
-                    )}
                     total={list.items.length}
                     onDelete={deleteItem}
                     onOpen={(selected) => void openDetail(selected)}

@@ -3,7 +3,6 @@ package cloudsession
 import (
 	"context"
 	"net/http"
-	"time"
 
 	"lazymind/core/cloudclient"
 	"lazymind/core/common"
@@ -40,20 +39,11 @@ func (h Handler) BeginLogin(w http.ResponseWriter, r *http.Request) {
 
 func (h Handler) Get(w http.ResponseWriter, r *http.Request) {
 	if h.Service == nil {
-		common.ReplyOK(w, Status{State: StateSignedOut})
+		common.ReplyOK(w, Status{State: StateSignedOut, Reachability: ReachabilityUnknown})
 		return
 	}
 	status := h.Service.Status(r.Context())
 	status.RegistrationURL = h.RegistrationURL
-	if status.State == StateSignedIn && h.Accounts != nil {
-		if token, err := h.Service.AccessToken(r.Context(), 30*time.Second); err == nil {
-			if account, err := h.Accounts.GetCurrentAccount(r.Context(), token); err == nil {
-				status.AccountID = account.ID
-				status.Username = account.Username
-				status.EmailMasked = account.EmailMasked
-			}
-		}
-	}
 	common.ReplyOK(w, status)
 }
 
@@ -70,7 +60,7 @@ func (h Handler) Logout(w http.ResponseWriter, r *http.Request) {
 			common.ReplyErr(w, "temporary credentials could not be cleared", http.StatusServiceUnavailable)
 			return
 		}
-		common.ReplyOK(w, Status{State: StateSignedOut})
+		common.ReplyOK(w, Status{State: StateSignedOut, Reachability: ReachabilityUnknown})
 		return
 	}
 	_ = h.Service.Logout(r.Context())

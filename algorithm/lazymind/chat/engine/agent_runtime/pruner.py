@@ -427,6 +427,10 @@ def make_history_compactor(
             kwargs.get('prefix') or {},
             kwargs.get('current_input'),
         )
+        non_history_tokens += max(
+            0,
+            int(kwargs.get('reserved_runtime_context_tokens') or 0),
+        )
         state, _rebuilt = reconcile_projection(combined, kwargs.get('runtime_state'))
         stable = state['entries']
         before_total = non_history_tokens + projection_tokens(stable)

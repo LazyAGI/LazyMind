@@ -1,9 +1,17 @@
 name: Windows Desktop Installer
 
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_call:
+    inputs:
+      git_ref:
+        description: "Branch, tag, or commit SHA to build"
+        required: false
+        type: string
+    outputs:
+      artifact_name:
+        value: ${{ jobs.build-windows-installer.outputs.artifact_name }}
+      release_tag:
+        value: ${{ jobs.build-windows-installer.outputs.release_tag }}
   workflow_dispatch:
     inputs:
       git_ref:
@@ -34,6 +42,7 @@ jobs:
     outputs:
       package_version: ${{ steps.version.outputs.package_version }}
       artifact_name: ${{ steps.package.outputs.artifact_name }}
+      release_tag: ${{ steps.release.outputs.release_tag }}
       installer_sha256: ${{ steps.package.outputs.installer_sha256 }}
 
     steps:
@@ -289,7 +298,7 @@ jobs:
         id: upload
         uses: actions/upload-artifact@v7
         with:
-          name: lazymind-windows-x64-installer
+          name: ${{ steps.package.outputs.artifact_name }}
           path: ${{ steps.package.outputs.installer_path }}
           if-no-files-found: error
           retention-days: 14
@@ -324,9 +333,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os:
-          - windows-2022
-          - windows-2025
+        include:
+          - os: windows-2022
+            install_arguments: "/S --simple-install"
+            verify_installer_warmup: false
+            smoke_timeout_ms: 1800000
+          - os: windows-2025
+            install_arguments: "/S --full-install"
+            verify_installer_warmup: true
+            smoke_timeout_ms: 300000
 
     steps:
       - name: Checkout smoke test scripts
@@ -366,9 +381,11 @@ jobs:
         shell: pwsh
         env:
           INSTALLER_PATH: ${{ steps.installer.outputs.path }}
+          INSTALL_ARGUMENTS: ${{ matrix.install_arguments }}
         run: |
           $ErrorActionPreference = "Stop"
-          $install = Start-Process -FilePath $env:INSTALLER_PATH -ArgumentList "/S --full-install" -Wait -PassThru
+          "Installer arguments: $env:INSTALL_ARGUMENTS"
+          $install = Start-Process -FilePath $env:INSTALLER_PATH -ArgumentList $env:INSTALL_ARGUMENTS -Wait -PassThru
           "Installer exit code: $($install.ExitCode)"
           if ($install.ExitCode -ne 0) {
             $unsignedExitCode = [uint32]$install.ExitCode
@@ -450,7 +467,7 @@ jobs:
 
       - name: Verify installer warmup result
         id: installer_warmup
-        if: steps.verify.outcome == 'success'
+        if: steps.verify.outcome == 'success' && matrix.verify_installer_warmup
         continue-on-error: true
         shell: pwsh
         run: |
@@ -470,7 +487,7 @@ jobs:
 
       - name: Run packaged application smoke
         id: smoke
-        if: steps.installer_warmup.outcome == 'success'
+        if: steps.verify.outcome == 'success' && (!matrix.verify_installer_warmup || steps.installer_warmup.outcome == 'success')
         continue-on-error: true
         shell: pwsh
         run: |
@@ -480,7 +497,7 @@ jobs:
             --app $app `
             --runtime-root (Join-Path $env:LOCALAPPDATA "LazyMind") `
             --platform win32 `
-            --timeout-ms 300000
+            --timeout-ms ${{ matrix.smoke_timeout_ms }}
 
       - name: Uninstall
         id: uninstall
@@ -543,15 +560,18 @@ jobs:
           INSTALL_OUTCOME: ${{ steps.install.outcome }}
           VERIFY_OUTCOME: ${{ steps.verify.outcome }}
           INSTALLER_WARMUP_OUTCOME: ${{ steps.installer_warmup.outcome }}
+          REQUIRE_INSTALLER_WARMUP: ${{ matrix.verify_installer_warmup }}
           SMOKE_OUTCOME: ${{ steps.smoke.outcome }}
           UNINSTALL_OUTCOME: ${{ steps.uninstall.outcome }}
         run: |
           $outcomes = [ordered]@{
             install = $env:INSTALL_OUTCOME
             verify = $env:VERIFY_OUTCOME
-            installer_warmup = $env:INSTALLER_WARMUP_OUTCOME
             smoke = $env:SMOKE_OUTCOME
             uninstall = $env:UNINSTALL_OUTCOME
+          }
+          if ($env:REQUIRE_INSTALLER_WARMUP -eq "true") {
+            $outcomes["installer_warmup"] = $env:INSTALLER_WARMUP_OUTCOME
           }
           $outcomes.GetEnumerator() | ForEach-Object { "$($_.Key): $($_.Value)" }
           $failures = @($outcomes.GetEnumerator() | Where-Object { $_.Value -ne "success" })

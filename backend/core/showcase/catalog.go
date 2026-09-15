@@ -114,6 +114,7 @@ type FeaturedWorkflowBinding struct {
 
 type FeaturedPlacement struct {
 	Home    bool `yaml:"home" json:"home"`
+	Hot     bool `yaml:"hot" json:"hot"`
 	Gallery bool `yaml:"gallery" json:"gallery"`
 	Order   int  `yaml:"order" json:"order"`
 }
@@ -492,6 +493,7 @@ func (c Catalog) ShowcaseCases(locale string) []ShowcaseCase {
 			BuiltinSkillUID:   builtinSkillUID,
 			WorkflowRef:       workflowRef,
 			Featured:          definition.Placement.Home,
+			Hot:               definition.Placement.Hot,
 			FeaturedOrder:     definition.Placement.Order,
 			Gallery:           definition.Placement.Gallery,
 			SearchAliases:     defaultSearchAliases(definition),

@@ -12,6 +12,8 @@ import (
 	"strings"
 
 	"lazymind/core/common"
+	"lazymind/core/maintenance"
+	skillhttperr "lazymind/core/skillv2/httperr"
 	"lazymind/core/store"
 )
 
@@ -36,8 +38,12 @@ func InternalCreate(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "episode repository unavailable", http.StatusInternalServerError)
 		return
 	}
-	result, err := repo.Create(r.Context(), input)
+	result, err := repo.Create(maintenance.RequestContext(r), input)
 	if err != nil {
+		if errors.Is(err, maintenance.ErrLeaseLost) {
+			skillhttperr.ReplyWithCode(w, err.Error(), http.StatusConflict, "task_lease_lost")
+			return
+		}
 		common.ReplyErr(w, "create episode failed", http.StatusInternalServerError)
 		return
 	}
@@ -64,7 +70,11 @@ func InternalDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	status := DeleteStatusDeleted
-	if err := repo.Delete(r.Context(), userID, episodeID); err != nil {
+	if err := repo.Delete(maintenance.RequestContext(r), userID, episodeID); err != nil {
+		if errors.Is(err, maintenance.ErrLeaseLost) {
+			skillhttperr.ReplyWithCode(w, err.Error(), http.StatusConflict, "task_lease_lost")
+			return
+		}
 		if !errors.Is(err, ErrNotFound) {
 			common.ReplyErr(w, "delete episode failed", http.StatusInternalServerError)
 			return
@@ -326,7 +336,7 @@ func DeleteEpisode(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "episode repository unavailable", http.StatusInternalServerError)
 		return
 	}
-	err = repo.Delete(r.Context(), userID, episodeID)
+	err = repo.Delete(maintenance.RequestContext(r), userID, episodeID)
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		common.ReplyErr(w, "delete episode failed", http.StatusInternalServerError)
 		return

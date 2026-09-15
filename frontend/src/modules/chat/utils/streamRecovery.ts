@@ -1,5 +1,6 @@
 export const STREAM_RECOVERY_INITIAL_ATTEMPTS = 5;
 export const STREAM_RECOVERY_MAX_ATTEMPTS = 8;
+export const STREAM_RECOVERY_SUCCESS_DURATION_MS = 1_800;
 export const STREAM_RECOVERY_DELAYS_MS = [
   1_000,
   2_000,
@@ -11,7 +12,11 @@ export const STREAM_RECOVERY_DELAYS_MS = [
   10_000,
 ] as const;
 
-export type StreamRecoveryStatus = "idle" | "resuming" | "failed";
+export type StreamRecoveryStatus =
+  | "idle"
+  | "resuming"
+  | "recovered"
+  | "failed";
 
 export interface StreamRecoveryViewState {
   conversationId: string;
@@ -22,7 +27,7 @@ export interface StreamRecoveryViewState {
 
 export interface StreamRecoveryEntry {
   attempt: number;
-  status: Exclude<StreamRecoveryStatus, "idle">;
+  status: "resuming" | "failed";
   timer: ReturnType<typeof setTimeout> | null;
 }
 
@@ -91,6 +96,26 @@ export function preserveProviderRetryAfterReconciliation(
     };
   }
   return merged;
+}
+
+export function removeTrailingEmptyAssistantPlaceholder(
+  messages: any[],
+  assistantRole: string,
+): any[] {
+  const lastMessage = messages[messages.length - 1];
+  const isEmptyAssistantPlaceholder =
+    lastMessage?.role === assistantRole &&
+    !String(lastMessage.delta || lastMessage.raw_delta || "").trim() &&
+    !String(lastMessage.reasoning_content || "").trim() &&
+    !(Array.isArray(lastMessage.answers) && lastMessage.answers.length > 0) &&
+    !(Array.isArray(lastMessage.sources) && lastMessage.sources.length > 0) &&
+    !lastMessage.execution &&
+    !lastMessage.model_retry &&
+    !lastMessage.tool_limit_pending &&
+    !lastMessage.ask_pending &&
+    !lastMessage.run_terminal &&
+    !lastMessage.run_status;
+  return isEmptyAssistantPlaceholder ? messages.slice(0, -1) : messages;
 }
 
 export class StreamRecoveryRegistry {

@@ -1,0 +1,142 @@
+.mail-provider-page {
+  .mail-provider-list {
+    margin-top: 20px;
+  }
+
+  .mail-provider-row {
+    grid-template-columns: 44px minmax(0, 1fr) 72px minmax(220px, auto);
+    cursor: pointer;
+
+    &:hover {
+      background: #f8fafc;
+    }
+
+    &.is-active {
+      background: #f6ffed;
+    }
+  }
+
+  .mail-provider-row-logo {
+    background: #fff;
+    border-color: #e5e7eb;
+
+    img {
+      position: relative;
+      width: 28px;
+      height: 28px;
+      opacity: 1;
+      border-radius: 0;
+    }
+  }
+
+  .mail-provider-row-controls {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+  }
+
+  .mail-provider-row-switch {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .mail-provider-row-switch-name {
+    color: #667085;
+    font-size: 12px;
+    line-height: 1;
+    white-space: nowrap;
+  }
+
+}
+
+.mail-provider-gmail-links {
+  margin-bottom: 16px;
+
+  p {
+    margin: 0 0 6px;
+  }
+
+  a {
+    font-weight: 600;
+  }
+}
+
+.mail-provider-imap-alt {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid #e2e8f0;
+
+  h4 {
+    margin: 0 0 6px;
+    font-size: 14px;
+  }
+
+  p {
+    margin: 0 0 12px;
+    color: #64748b;
+    font-size: 13px;
+  }
+}
+
+.mail-provider-guide {
+  margin-top: 8px;
+  background: #f8fbff;
+  border-radius: 8px;
+
+  .ant-collapse-header {
+    font-weight: 650;
+  }
+}
+
+.mail-provider-guide-body {
+  color: #334155;
+  font-size: 13px;
+  line-height: 1.7;
+
+  p {
+    margin: 0 0 10px;
+  }
+
+  ol {
+    margin: 0;
+    padding-left: 18px;
+  }
+
+  li + li {
+    margin-top: 8px;
+  }
+
+  a {
+    word-break: break-all;
+  }
+}
+
+.mail-provider-callback {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 16px;
+
+  code {
+    flex: 1;
+    margin-top: 0;
+  }
+}
+
+.mail-provider-modal {
+  .mail-provider-modal-body {
+    max-height: min(72vh, 720px);
+    overflow: auto;
+    padding-right: 4px;
+  }
+
+  .mail-provider-modal-summary {
+    margin: 0 0 16px;
+    color: #667085;
+    font-size: 13px;
+    line-height: 1.6;
+  }
+}

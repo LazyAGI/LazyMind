@@ -1,23 +1,23 @@
-import type { PreferenceMemoryItem } from "./currentMemoryApi";
+import type { PreferenceMemoryItem, PreferenceOrganizerTask } from "./currentMemoryApi";
 
-export type PreferenceResidentUsageTone = "normal" | "warning" | "error";
+export type PreferenceBudgetTone = "normal" | "warning" | "full" | "error";
 
-export const getPreferenceResidentUsageTone = (
-  usedItems: number,
-  maxItems: number,
-  overLimit: boolean,
-): PreferenceResidentUsageTone => {
-  const ratio = usedItems / maxItems;
-  if (overLimit || ratio >= 1) {
-    return "error";
-  }
-  return ratio >= 0.8 ? "warning" : "normal";
+export const getPreferenceBudgetTone = (used: number, max: number): PreferenceBudgetTone => {
+  if (used > max) return "error";
+  if (used === max) return "full";
+  return used * 100 >= max * 80 ? "warning" : "normal";
 };
 
-export const isPreferenceResident = (
-  index: number,
-  maxItems?: number,
-): boolean => maxItems === undefined || index < maxItems;
+export const preferenceOrganizerPresentation = (task: PreferenceOrganizerTask | null) => {
+  if (!task) return null;
+  if (task.status === "pending") return { key: task.waiting_reason === "memory_review"
+    ? "admin.memoryPreferenceOrganizeWaitingReview" : "admin.memoryPreferenceOrganizeWaiting", tone: "info" as const };
+  if (task.status === "running") return { key: "admin.memoryPreferenceOrganizeRunning", tone: "info" as const };
+  if (task.result?.outcome === "partial") return { key: "admin.memoryPreferenceOrganizePartial", tone: "warning" as const };
+  if (task.status === "failed") return { key: "admin.memoryPreferenceOrganizeFailed", tone: "error" as const };
+  return { key: task.result?.outcome === "no_safe_changes"
+    ? "admin.memoryPreferenceOrganizeNoChanges" : "admin.memoryPreferenceOrganizeDone", tone: "success" as const };
+};
 
 export const movePreferenceItem = <T extends PreferenceMemoryItem>(
   items: T[],

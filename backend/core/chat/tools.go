@@ -182,6 +182,9 @@ func applyChatRuntimeConfigs(ctx context.Context, db *gorm.DB, userID string, bo
 	if len(llmConfig) > 0 {
 		body["llm_config"] = llmConfig
 	}
+	if err := applyConversationChatModelConfig(ctx, db, userID, body); err != nil {
+		return err
+	}
 	toolConfig, err := loadChatToolConfig(ctx, db, userID)
 	if err != nil {
 		return err
@@ -207,7 +210,7 @@ func applyChatRuntimeConfigs(ctx context.Context, db *gorm.DB, userID string, bo
 			body["agentic_config"] = agentConfig
 		}
 	}
-	return nil
+	return applyConversationSourceRuntimeContext(ctx, db, userID, body)
 }
 
 // loadUserAgentConfig reads per-user defaults from user_chat_settings and applies

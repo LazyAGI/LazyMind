@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import threading
 from collections import OrderedDict
 from html import escape
 from typing import Any, Optional
@@ -37,23 +38,38 @@ _SOURCE_ROLE_KEYS = {
     'searched': SEARCHED_SOURCE_INDICES_KEY,
 }
 _SOURCE_ROLE_ORDER = ('cited', 'searched')
+CITATION_LOCK_KEY = '_citation_state_lock'
+_LOCK_INIT = threading.Lock()
+
+
+def citation_state_lock(config: dict[str, Any]) -> threading.RLock:
+    lock = config.get(CITATION_LOCK_KEY)
+    if lock is not None:
+        return lock
+    with _LOCK_INIT:
+        lock = config.get(CITATION_LOCK_KEY)
+        if lock is None:
+            lock = threading.RLock()
+            config[CITATION_LOCK_KEY] = lock
+        return lock
 
 
 def register_image_url(config: dict[str, Any], path_or_url: str) -> None:
     signed = static_file_url_from_any(path_or_url)
     if not signed:
         return
-    registry = config.get(IMAGE_URL_REGISTRY_KEY)
-    if not isinstance(registry, dict):
-        registry = {}
-        config[IMAGE_URL_REGISTRY_KEY] = registry
-    registry[signed] = signed
-    base = basename_from_path(signed)
-    if base:
-        registry[base] = signed
-    static_ref = _extract_static_files_ref(signed) or _extract_static_files_ref(path_or_url)
-    if static_ref:
-        registry[static_ref] = signed
+    with citation_state_lock(config):
+        registry = config.get(IMAGE_URL_REGISTRY_KEY)
+        if not isinstance(registry, dict):
+            registry = {}
+            config[IMAGE_URL_REGISTRY_KEY] = registry
+        registry[signed] = signed
+        base = basename_from_path(signed)
+        if base:
+            registry[base] = signed
+        static_ref = _extract_static_files_ref(signed) or _extract_static_files_ref(path_or_url)
+        if static_ref:
+            registry[static_ref] = signed
 
 
 def _extract_static_files_ref(url: str) -> str:
@@ -465,32 +481,33 @@ def register_citation_item(
     if not text:
         return item
 
-    refs = config[CITATION_REFS_KEY]
-    key_map = config[CITATION_KEY_MAP_KEY]
-    doc_key_map = config[CITATION_DOC_KEY_MAP_KEY]
-    doc_chunk_next_map = config[CITATION_DOC_CHUNK_NEXT_KEY]
     key = build_citation_key(item)
     if not key:
         return item
 
-    index = key_map.get(key)
-    if index is None:
-        doc_key = build_document_citation_key(item)
-        if not doc_key:
-            return item
-        document_index = doc_key_map.get(doc_key)
-        if document_index is None:
-            document_index = int(config.get(CITATION_NEXT_DOC_KEY) or 1)
-            config[CITATION_NEXT_DOC_KEY] = document_index + 1
-            doc_key_map[doc_key] = document_index
-        chunk_index = int(doc_chunk_next_map.get(doc_key) or 1)
-        doc_chunk_next_map[doc_key] = chunk_index + 1
-        index = f'{document_index}.{chunk_index}'
-        key_map[key] = index
-        refs[index] = build_source_node_from_item(index, item)
-        signed = static_file_url_from_any(str(text))
-        if signed:
-            register_image_url(config, signed)
+    with citation_state_lock(config):
+        refs = config[CITATION_REFS_KEY]
+        key_map = config[CITATION_KEY_MAP_KEY]
+        doc_key_map = config[CITATION_DOC_KEY_MAP_KEY]
+        doc_chunk_next_map = config[CITATION_DOC_CHUNK_NEXT_KEY]
+        index = key_map.get(key)
+        if index is None:
+            doc_key = build_document_citation_key(item)
+            if not doc_key:
+                return item
+            document_index = doc_key_map.get(doc_key)
+            if document_index is None:
+                document_index = int(config.get(CITATION_NEXT_DOC_KEY) or 1)
+                config[CITATION_NEXT_DOC_KEY] = document_index + 1
+                doc_key_map[doc_key] = document_index
+            chunk_index = int(doc_chunk_next_map.get(doc_key) or 1)
+            doc_chunk_next_map[doc_key] = chunk_index + 1
+            index = f'{document_index}.{chunk_index}'
+            key_map[key] = index
+            refs[index] = build_source_node_from_item(index, item)
+            signed = static_file_url_from_any(str(text))
+            if signed:
+                register_image_url(config, signed)
 
     item['citation_index'] = index
     item['ref'] = f'[[{index}]]'

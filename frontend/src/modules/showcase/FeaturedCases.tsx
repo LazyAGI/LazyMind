@@ -43,7 +43,7 @@ export default function FeaturedCases({ type, items, isLoading, onTry }: Feature
       ) : (
         <div className="showcase-grid showcase-featured-grid">
           {featuredItems.map((item) => (
-            <CaseCard key={item.id} item={item} onTry={onTry} showWorkflowHot />
+            <CaseCard key={item.id} item={item} onTry={onTry} />
           ))}
         </div>
       )}

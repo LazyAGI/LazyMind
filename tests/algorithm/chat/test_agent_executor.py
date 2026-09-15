@@ -6,7 +6,7 @@ from asyncio import CancelledError
 from unittest.mock import MagicMock
 
 import pytest
-
+from lazyllm.tools.agent import ToolManager
 from lazymind.chat.engine.agent_runtime import (
     AgentExecutionOptions,
     AgentExecutor,
@@ -31,6 +31,7 @@ def _plan(**options) -> AgentRunPlan:
 
 def test_executor_creates_agent_with_shared_defaults(monkeypatch) -> None:
     agent = MagicMock()
+    original_manager = agent._tools_manager
     constructor = MagicMock(return_value=agent)
     monkeypatch.setattr(executor_mod._agent_mod, 'ReactAgent', constructor)
 
@@ -43,6 +44,11 @@ def test_executor_creates_agent_with_shared_defaults(monkeypatch) -> None:
     assert kwargs['enable_builtin_tools'] is False
     assert callable(kwargs['on_max_retries'])
     assert kwargs['workspace'] == '/tmp/work'
+    assert callable(kwargs['model_context_provider'])
+    assert isinstance(agent._tools_manager, executor_mod.ToolExecutionMiddleware)
+    assert agent._tools_manager._manager._manager is original_manager
+    assert isinstance(agent._exact_repeat_monitor, executor_mod.ExactRepeatMonitor)
+    assert isinstance(agent._runtime_notice_buffer, executor_mod.OneShotNoticeBuffer)
     agent._prepare_tool_context.assert_called_once_with(
         '### User Instruction\n\nhello', [],
     )
@@ -61,14 +67,14 @@ def test_executor_passes_cancel_condition_to_chat_agent(monkeypatch) -> None:
 
 
 def test_tool_guard_checks_cancellation_before_dispatch(monkeypatch) -> None:
-    manager = MagicMock(return_value=[{'ok': True}])
+    manager = MagicMock()
     cancel_check = MagicMock(side_effect=CancelledError('stopped by user'))
-    guard = executor_mod.ToolCallGuard(manager, cancel_check=cancel_check)
+    middleware = executor_mod.ToolExecutionMiddleware(manager, cancel_check=cancel_check)
 
     with pytest.raises(CancelledError, match='stopped by user'):
-        guard([{'function': {'name': 'prepare_workflow', 'arguments': '{}'}}])
+        middleware.execute_with_records([])
 
-    manager.assert_not_called()
+    manager.execute_with_records.assert_not_called()
 
 
 def test_cancel_condition_stops_the_sid_scoped_agent(monkeypatch) -> None:
@@ -105,7 +111,13 @@ def test_executor_enables_builtin_tools_in_trusted_local_mode(monkeypatch) -> No
 
 def test_executor_auto_expands_after_plugin_or_subagent_tool(monkeypatch) -> None:
     agent = MagicMock()
-    agent._tools_manager = MagicMock(return_value=[{'ok': True}])
+
+    def create_subagent():
+        '''Create a subagent.'''
+        return 'created'
+
+    manager = ToolManager([create_subagent])
+    agent._tools_manager = manager
     constructor = MagicMock(return_value=agent)
     monkeypatch.setattr(executor_mod._agent_mod, 'ReactAgent', constructor)
     workspace = {}
@@ -169,3 +181,48 @@ def test_executor_stream_passes_history_and_returns_final(monkeypatch) -> None:
         ('event', {'tag': 'text', 'delta': 'working'}),
         ('final', 'done'),
     ]
+
+
+@pytest.mark.parametrize('mode', ['success', 'exception', 'cancellation'])
+def test_stream_agent_clears_repeat_state_on_every_exit(monkeypatch, mode) -> None:
+    monitor = MagicMock()
+    buffer = MagicMock()
+
+    class Agent:
+        _agent_lab_run_id = 'run-id'
+        _exact_repeat_monitor = monitor
+        _runtime_notice_buffer = buffer
+
+    class Future:
+        def result(self):
+            if mode == 'exception':
+                raise RuntimeError('failed')
+            return 'done'
+
+    class Helper:
+        future = Future()
+
+        def __init__(self, _agent, init_sid):
+            assert init_sid is False
+
+        async def astream(self, _query, **_kwargs):
+            if mode == 'cancellation':
+                raise CancelledError('cancelled')
+            if False:
+                yield None
+
+    monkeypatch.setattr(executor_mod._sh, 'StreamCallHelper', Helper)
+
+    async def collect():
+        return [item async for item in AgentExecutor().stream_agent(Agent(), _plan())]
+
+    if mode == 'exception':
+        with pytest.raises(RuntimeError, match='failed'):
+            asyncio.run(collect())
+    elif mode == 'cancellation':
+        with pytest.raises(CancelledError, match='cancelled'):
+            asyncio.run(collect())
+    else:
+        assert asyncio.run(collect()) == [('final', 'done')]
+    assert monitor.reset.call_count == 2
+    assert buffer.clear.call_count == 2

@@ -14,7 +14,13 @@ import (
 
 func TestCompileCatalogBuildsLocalizedCasesAndHashedAssets(t *testing.T) {
 	root := t.TempDir()
-	writeFeaturedSource(t, root, "multi", validFeaturedYAML("multi", true))
+	definition := strings.Replace(
+		validFeaturedYAML("multi", true),
+		"  home: true\n",
+		"  home: true\n  hot: true\n",
+		1,
+	)
+	writeFeaturedSource(t, root, "multi", definition)
 	writeLocale(t, root, "multi", "en-US", validLocaleYAML(true))
 	definitions, err := LoadSourceDirectory(root)
 	if err != nil {
@@ -56,6 +62,9 @@ func TestCompileCatalogBuildsLocalizedCasesAndHashedAssets(t *testing.T) {
 	}
 	if cases[0].BuiltinSkillUID != "bsk_demo" || cases[0].SourceURL != "https://example.test/multi.zip" {
 		t.Fatalf("featured case is not bound to its configured Skill: %#v", cases[0])
+	}
+	if !cases[0].Hot {
+		t.Fatalf("featured case hot = false, want true: %#v", cases[0])
 	}
 	if cases[0].Tasks[1].Result.Title != "English result" || cases[0].Tasks[1].Steps[0].Title != "Analyze" {
 		t.Fatalf("task = %#v", cases[0].Tasks[1])

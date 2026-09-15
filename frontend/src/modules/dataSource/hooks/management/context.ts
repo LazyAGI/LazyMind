@@ -121,6 +121,7 @@ export interface ManagementContext {
   setManualOauthSubmitting: Dispatch<SetStateAction<boolean>>;
 
   // OAuth / connection state
+	cloudManagedOAuthAvailable?: boolean;
   oauthState: OAuthState;
   setOauthState: Dispatch<SetStateAction<OAuthState>>;
   connectionVerified: boolean;

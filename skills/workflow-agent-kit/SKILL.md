@@ -1,6 +1,6 @@
 ---
 name: workflow-agent-kit
-description: Discover, inspect, convert, create, validate, publish, start, advance, stop, resume, and recover public Workflows; manage durable Workflow Input Resources and versioned output Artifacts. Use whenever an Agent needs Workflow discovery, Skill-to-Workflow conversion, Workflow execution, step decisions, or Input Resource/Artifact inspection and revision.
+description: Discover, inspect, convert, create, edit, validate, publish, start, advance, stop, resume, and recover public Workflows; connect to a LazyMind deployment to modify an existing database-backed Workflow through its authoring interface; manage durable Workflow Input Resources and versioned output Artifacts. Use whenever an Agent needs Workflow discovery, existing-Workflow inspection or revision, Skill-to-Workflow conversion, Workflow execution, step decisions, or Input Resource/Artifact inspection and revision.
 ---
 
 # Workflow Agent Kit
@@ -23,6 +23,9 @@ explicit SubAgent by the framework Supervisor. Read
 ## Choose the procedure
 
 - For discovery or selection, follow **Discover a Workflow** below.
+- For inspecting or changing an existing deployed Workflow, read
+  `references/existing-workflow-authoring.md` and
+  `references/installation-and-connection.md` completely.
 - For converting a Skill, read `references/skill-to-workflow.md` and
   `references/workflow-format.md` completely.
 - For starting or advancing a run, read `references/lifecycle.md`,
@@ -69,6 +72,30 @@ When no matching trigger is exposed:
    `update_workflow_draft_file`; no “AI generate” or “AI repair” tool is allowed.
 6. Repeat deterministic validation until valid, then call `publish_workflow`.
    Publication never implies enablement or execution.
+
+## Edit an existing deployed Workflow
+
+1. Resolve the deployment and authenticated owner. Accept a Workflow detail URL,
+   draft id, Workflow id/ref, or revision id; do not assume those identifiers are
+   interchangeable.
+2. Read the existing draft and published-version metadata through public Workflow
+   authoring tools or APIs. Use a direct database connection only for read-only
+   discovery or diagnosis when public reads are unavailable.
+3. Summarize the current definition, revision state, validation diagnostics, and
+   intended changes before writing. Ask only for information that cannot be safely
+   discovered and would materially change the edit.
+4. Modify the selected draft with optimistic locking. If the user selected an
+   immutable published revision, create or replace an editable draft from that
+   exact revision before changing files. Never update published revision rows.
+5. Validate and repair the draft until deterministic diagnostics are clean. Do not
+   publish merely because the draft was saved.
+6. Publish without another question only when the user explicitly requested
+   publication or creation of a new version in the current request. Otherwise,
+   report the validated draft and ask whether to publish it. Explain whether the
+   result will be the first published revision or a new immutable revision.
+
+Follow the identity, connection, input checklist, mutation boundaries, and
+publication decision table in `references/existing-workflow-authoring.md`.
 
 ## Start a Workflow
 

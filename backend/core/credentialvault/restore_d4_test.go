@@ -10,6 +10,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -188,6 +190,28 @@ func TestRestoreDiscoveryNeverStartsCloudRestoreWithoutExplicitUserAction(t *tes
 	}
 	if !discovery.Available || !discovery.RequiresExplicitAction || len(discovery.Records) != 2 || cloud.createCalls != 0 {
 		t.Fatalf("unsafe restore discovery/create calls = %+v/%d", discovery, cloud.createCalls)
+	}
+}
+
+func TestRestoreDiscoveryIsANonErrorStateWhenCloudIsNotConfigured(t *testing.T) {
+	var handler *RestoreHandler
+	recorder := httptest.NewRecorder()
+	handler.Discover(recorder, httptest.NewRequest(http.MethodGet, "/credential-vault/restores", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var response struct {
+		Data struct {
+			Available  bool   `json:"available"`
+			ReasonCode string `json:"reason_code"`
+			Records    []any  `json:"records"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Data.Available || response.Data.ReasonCode != "cloud_session_required" || len(response.Data.Records) != 0 {
+		t.Fatalf("unexpected signed-out discovery: %#v", response.Data)
 	}
 }
 

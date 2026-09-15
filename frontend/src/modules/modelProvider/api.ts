@@ -46,7 +46,7 @@ export function unwrapModelProviderData<T>(payload: unknown): T {
 }
 
 export async function getCredentialBackupStatus(): Promise<CredentialBackupStatus & { available: boolean; reasonCode?: string }> {
-  const response = await axiosInstance.get(`${BASE_URL}/credential-vault/backup`);
+  const response = await axiosInstance.get(`${BASE_URL}/credential-vault/backup`, { silentError: true } as never);
   const data = unwrapModelProviderData<Record<string, unknown>>(response.data);
   return {
     available: Boolean(data.available),
@@ -99,7 +99,7 @@ export type CredentialRestoreOperation = {
 };
 
 export async function getCredentialRestoreDiscovery(): Promise<CredentialRestoreDiscovery> {
-  const response = await axiosInstance.get(`${BASE_URL}/credential-vault/restores`);
+  const response = await axiosInstance.get(`${BASE_URL}/credential-vault/restores`, { silentError: true } as never);
   const data = unwrapModelProviderData<Record<string, unknown>>(response.data);
   const records = Array.isArray(data.records) ? data.records : [];
   const activeOperation = data.active_operation && typeof data.active_operation === "object"

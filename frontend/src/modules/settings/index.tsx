@@ -6,6 +6,7 @@ import {
   ArrowLeftOutlined,
   CheckCircleFilled,
   ClockCircleOutlined,
+  CloudOutlined,
   CodeOutlined,
   DatabaseOutlined,
   DeleteOutlined,
@@ -38,9 +39,17 @@ import ModelProvidersPage from "@/modules/modelProvider/pages/ModelProvidersPage
 import SettingsScheduleList from "@/modules/taskCenter/SettingsScheduleList";
 import TaskEntryDefaults from "@/modules/taskCenter/TaskEntryDefaults";
 import { fetchUserUiPreferences, patchUserUiPreferences } from "@/modules/user/uiPreferencesApi";
+import { runtimeFeatures } from "@/runtime/features";
+import {
+	getCloudSession,
+	isCloudBusinessAvailable,
+	LAZYMIND_CLOUD_SESSION_CHANGED_EVENT,
+} from "@/runtime/cloud/session";
 import { isDesktopRuntime, isLocalRuntime } from "@/runtime/mode";
 import { setDeveloperModeActive } from "@/utils/developerMode";
+import { setSensitiveWordFilterEnabled } from "@/utils/sensitiveWordFilter";
 import MemoryCapabilitySettings from "./MemoryCapabilitySettings";
+import CloudUsageSettings from "./CloudUsageSettings";
 import KnowledgeDataSettings from "./KnowledgeDataSettings";
 import KnowledgeToolSettings, { isKnowledgeToolView } from "./KnowledgeToolSettings";
 import QuickModelSettings from "./QuickModelSettings";
@@ -48,6 +57,7 @@ import RecoverySettings from "./RecoverySettings";
 import UserSkillWorkflowSettings, { type ResourceTab } from "./UserSkillWorkflowSettings";
 import { resolveMcpReadinessStatus } from "./mcpReadinessStatus";
 import { resolveModelNavigationStatus } from "./modelNavigationStatus";
+import { isSettingsSectionVisible } from "./settingsSectionVisibility";
 import {
   fetchSettingsOverview,
   runSettingsChecks,
@@ -71,6 +81,7 @@ type SectionID =
   | "mcp"
   | "assistants"
   | "channels"
+  | "cloud-usage"
   | "diagnostics"
   | "organization"
   | "recovery"
@@ -114,7 +125,7 @@ function isAdminRole(role?: string) {
   return value === "admin" || value === "system-admin" || value === "system_admin" || value.endsWith(".admin");
 }
 
-function baseNavigation(isAdmin: boolean, t: Translate): NavigationGroup[] {
+function baseNavigation(isAdmin: boolean, t: Translate, cloudRuntimeAvailable = false): NavigationGroup[] {
   const groups: NavigationGroup[] = [
     {
       title: t("settingsPage.navGroups.gettingStarted"),
@@ -144,10 +155,11 @@ function baseNavigation(isAdmin: boolean, t: Translate): NavigationGroup[] {
     {
       title: t("settingsPage.navGroups.management"),
       items: [
-        ...(isAdmin ? [{ id: "organization" as const, label: t("settingsPage.sections.organization"), keywords: t("settingsPage.sectionKeywords.organization"), icon: <TeamOutlined /> }] : []),
+        ...(isSettingsSectionVisible("organization", isAdmin) ? [{ id: "organization" as const, label: t("settingsPage.sections.organization"), keywords: t("settingsPage.sectionKeywords.organization"), icon: <TeamOutlined /> }] : []),
+		...(isDesktopRuntime() && cloudRuntimeAvailable ? [{ id: "cloud-usage" as const, label: t("settingsPage.sections.cloudUsage"), keywords: t("settingsPage.sectionKeywords.cloudUsage"), icon: <CloudOutlined /> }] : []),
         { id: "recovery", label: t("settingsPage.sections.recovery"), keywords: t("settingsPage.sectionKeywords.recovery"), icon: <DeleteOutlined /> },
         { id: "diagnostics", label: t("settingsPage.sections.diagnostics"), keywords: t("settingsPage.sectionKeywords.diagnostics"), icon: <CheckCircleFilled /> },
-        { id: "developer", label: t("settingsPage.sections.developer"), keywords: t("settingsPage.sectionKeywords.developer"), icon: <CodeOutlined />, status: t("settingsPage.sectionStatus.activated") },
+        ...(isSettingsSectionVisible("developer", isAdmin) ? [{ id: "developer" as const, label: t("settingsPage.sections.developer"), keywords: t("settingsPage.sectionKeywords.developer"), icon: <CodeOutlined />, status: t("settingsPage.sectionStatus.activated") }] : []),
       ],
     },
   ];
@@ -184,7 +196,11 @@ export default function SettingsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const isAdmin = isAdminRole(AgentAppsAuth.getUserInfo()?.role);
   const hasLocalDependencies = isLocalRuntime() || isDesktopRuntime();
-  const navigationGroups = useMemo(() => baseNavigation(isAdmin, t), [isAdmin, t, i18n.language]);
+	const [cloudRuntimeAvailable, setCloudRuntimeAvailable] = useState(false);
+	const navigationGroups = useMemo(
+	  () => baseNavigation(isAdmin, t, cloudRuntimeAvailable),
+	  [cloudRuntimeAvailable, isAdmin, t, i18n.language],
+	);
   const navigationItems = useMemo(() => navigationGroups.flatMap((group) => group.items), [navigationGroups]);
   const controls = useMemo(() => controlCopy(t), [t, i18n.language]);
   const candidate = searchParams.get("section");
@@ -202,9 +218,10 @@ export default function SettingsPage() {
   const latestRequest = useRef(0);
   const [overview, setOverview] = useState<SettingsOverview | null>(null);
   const [developerActive, setDeveloperActive] = useState(false);
+  const [sensitiveWordFilterEnabled, setSensitiveWordFilterEnabledState] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
-  const [saving, setSaving] = useState<MasterSetting | "developer" | null>(null);
+  const [saving, setSaving] = useState<MasterSetting | "developer" | "sensitive_word_filter" | null>(null);
   const [checks, setChecks] = useState<SettingsCheckResult[] | null>(null);
   const [checking, setChecking] = useState(false);
   const [diagnosticLoading, setDiagnosticLoading] = useState(false);
@@ -248,6 +265,9 @@ export default function SettingsPage() {
       if (requestID !== latestRequest.current) return;
       setOverview(nextOverview);
       setDeveloperActive(preferences.developer_mode_active);
+      const sensitiveWordFilterEnabled = Boolean(preferences.sensitive_word_filter_enabled);
+      setSensitiveWordFilterEnabled(sensitiveWordFilterEnabled);
+      setSensitiveWordFilterEnabledState(sensitiveWordFilterEnabled);
     } catch {
       if (requestID !== latestRequest.current) return;
       setLoadError(true);
@@ -255,8 +275,24 @@ export default function SettingsPage() {
       if (requestID === latestRequest.current) setLoading(false);
     }
   }, []);
+	const refreshCloudVisibility = useCallback(async () => {
+	  try {
+		setCloudRuntimeAvailable(isCloudBusinessAvailable(await getCloudSession()));
+	  } catch {
+		setCloudRuntimeAvailable(false);
+	  }
+	}, []);
 
   useEffect(() => { void refresh(); }, [refresh]);
+	useEffect(() => {
+	  void refreshCloudVisibility();
+	  const handleCloudSessionChanged = () => {
+		setCloudRuntimeAvailable(false);
+		void refreshCloudVisibility();
+	  };
+	  window.addEventListener(LAZYMIND_CLOUD_SESSION_CHANGED_EVENT, handleCloudSessionChanged);
+	  return () => window.removeEventListener(LAZYMIND_CLOUD_SESSION_CHANGED_EVENT, handleCloudSessionChanged);
+	}, [refreshCloudVisibility]);
   useEffect(() => { headingRef.current?.focus(); }, [section]);
 
   const filteredGroups = useMemo(() => {
@@ -413,13 +449,14 @@ export default function SettingsPage() {
   };
 
   const requestDeveloperChange = (enabled: boolean) => {
+    const confirmationKey = enabled
+      ? "settingsPage.confirm.developerEnableContent"
+      : "settingsPage.confirm.developerDisableContent";
     Modal.confirm({
       title: t("settingsPage.confirm.developerTitle", {
         action: enabled ? t("settingsPage.enable") : t("settingsPage.disable"),
       }),
-      content: t(enabled
-        ? "settingsPage.confirm.developerEnableContent"
-        : "settingsPage.confirm.developerDisableContent"),
+      content: t(confirmationKey),
       okText: enabled ? t("settingsPage.confirmEnable") : t("settingsPage.confirmDisable"),
       cancelText: t("settingsPage.cancel"),
       okButtonProps: enabled ? undefined : { danger: true },
@@ -540,10 +577,10 @@ export default function SettingsPage() {
           dashboardRow(t("settingsPage.sections.diagnostics"), t("settingsPage.checkAll"), t("settingsPage.overview.checkAllDesc"), <Button size="small" loading={checking} onClick={handleCheckAll}>{t("settingsPage.check")}</Button>),
           dashboardRow(t("settingsPage.sections.diagnostics"), t("settingsPage.overview.recentResults"), checks ? t("settingsPage.overview.recentResultsReady", { count: checks.length }) : t("settingsPage.overview.recentResultsEmpty"), <Tag className="settings-status-tag">{t("settingsPage.viewable")}</Tag>),
         ])}
-        {dashboardCard("developer", <CodeOutlined />, t("settingsPage.sections.developer"), t("settingsPage.overview.developerDesc"), [
+        {isSettingsSectionVisible("developer", isAdmin) ? dashboardCard("developer", <CodeOutlined />, t("settingsPage.sections.developer"), t("settingsPage.overview.developerDesc"), [
           dashboardRow(t("settingsPage.sections.developer"), t("settingsPage.overview.enableDeveloper"), t("settingsPage.overview.enableDeveloperDesc"), <Switch className="settings-ref-switch" checked={developerActive} loading={saving === "developer"} disabled={saving !== null} onChange={requestDeveloperChange} aria-label={t("settingsPage.overview.enableDeveloper")} />),
           dashboardRow(t("settingsPage.sections.developer"), t("settingsPage.overview.internalDebug"), t("settingsPage.overview.internalDebugDesc"), <Tag className="settings-status-tag">{developerActive ? t("settingsPage.sectionStatus.activated") : t("settingsPage.sectionStatus.notActivated")}</Tag>),
-        ])}
+        ]) : null}
       </div>
       {checks ? <CheckResults checks={checks} onLocate={selectSection} /> : null}
     </section>;
@@ -848,6 +885,8 @@ export default function SettingsPage() {
       content = integratedSurface(<AgentIntegrationPage />, "is-assistants");
     } else if (section === "channels") {
       content = integratedSurface(<TerminalConnectionPage />, "is-channels");
+    } else if (section === "cloud-usage") {
+      content = <CloudUsageSettings headingRef={headingRef} />;
     } else if (section === "recovery") {
       content = <RecoverySettings headingRef={headingRef} />;
     } else if (section === "diagnostics") {
@@ -859,7 +898,9 @@ export default function SettingsPage() {
           <div className="settings-detail-row">
             <div>
               <strong>{t(developerActive ? "settingsPage.developer.disableTitle" : "settingsPage.developer.enableTitle")}</strong>
-              <p>{t("settingsPage.developer.enableDesc")}</p>
+              <p>{t(runtimeFeatures.hideEvo
+                ? "settingsPage.developer.enableDescWithoutEvo"
+                : "settingsPage.developer.enableDesc")}</p>
             </div>
             <Switch
               className="settings-ref-switch"
@@ -868,6 +909,32 @@ export default function SettingsPage() {
               disabled={saving !== null}
               onChange={requestDeveloperChange}
               aria-label={t("settingsPage.developer.modeAria")}
+            />
+          </div>
+          <div className="settings-detail-row">
+            <div>
+              <strong>{t("settingsPage.developer.sensitiveWordFilter")}</strong>
+              <p>{t("settingsPage.developer.sensitiveWordFilterDesc")}</p>
+            </div>
+            <Switch
+              className="settings-ref-switch"
+              checked={sensitiveWordFilterEnabled}
+              loading={saving === "sensitive_word_filter"}
+              disabled={!developerActive || saving !== null}
+              onChange={async (enabled) => {
+                setSaving("sensitive_word_filter");
+                try {
+                  await patchUserUiPreferences({ sensitive_word_filter_enabled: enabled });
+                  setSensitiveWordFilterEnabled(enabled);
+                  await refresh();
+                  message.success(t("settingsPage.saved"));
+                } catch {
+                  message.error(t("settingsPage.saveFailed"));
+                } finally {
+                  setSaving(null);
+                }
+              }}
+              aria-label={t("settingsPage.developer.sensitiveWordFilterAria")}
             />
           </div>
         </div>

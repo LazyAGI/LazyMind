@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +18,84 @@ func TestProjectPathNormalizesEquivalentNativePaths(t *testing.T) {
 	secondKey, secondName := ProjectPath("codex", "/Users/example/LazyRAG", "")
 	if firstKey == "" || firstKey != secondKey || firstName != "LazyRAG" || secondName != firstName {
 		t.Fatalf("first=%q/%q second=%q/%q", firstKey, firstName, secondKey, secondName)
+	}
+}
+
+func TestTranscriptTurnsKeepsCodexCommentaryAndCollapsesRollbackDuplicate(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "rollout.jsonl")
+	content := strings.Join([]string{
+		`{"timestamp":"2026-08-31T01:00:00Z","type":"response_item","payload":{"type":"message","id":"first","role":"user","content":[{"type":"input_text","text":"# Files mentioned by the user:\n\n## image.png: /tmp/image.png\n\n## My request for Codex:\n修复界面\n<image path=\"/tmp/image.png\"></image>"}]}}`,
+		`{"timestamp":"2026-08-31T01:00:01Z","type":"response_item","payload":{"type":"message","id":"retry","role":"user","content":[{"type":"input_text","text":"# Files mentioned by the user:\n## image.png: /tmp/image.png\n## My request for Codex:\n修复界面"}]}}`,
+		`{"timestamp":"2026-08-31T01:00:02Z","type":"response_item","payload":{"type":"message","role":"assistant","phase":"commentary","content":[{"type":"output_text","text":"正在处理"}]}}`,
+		`{"timestamp":"2026-08-31T01:00:03Z","type":"response_item","payload":{"type":"message","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"处理完成"}]}}`,
+	}, "\n")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	turns := transcriptTurns(path, "codex")
+	if len(turns) != 1 || turns[0].ID != "first" || turns[0].Assistant != "正在处理\n处理完成" {
+		t.Fatalf("turns = %#v", turns)
+	}
+}
+
+func TestTranscriptTurnsKeepsOnlyRequestFromCodexResponseAnnotationsEnvelope(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "rollout.jsonl")
+	wrapped := `# Response annotations:
+Treat annotations as context.
+<response-annotations>
+[{"text":"旧回答","annotation":"补充问题"}]
+</response-annotations>
+
+## My request:
+就是会不会出现通信冲突或者需要等待的情况`
+	content := strings.Join([]string{
+		`{"timestamp":"2026-09-03T01:00:00Z","type":"response_item","payload":{"type":"message","id":"turn-1","role":"user","content":[{"type":"input_text","text":` + strconv.Quote(wrapped) + `}]}}`,
+		`{"timestamp":"2026-09-03T01:00:01Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"需要等待"}]}}`,
+	}, "\n")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	turns := transcriptTurns(path, "codex")
+	if len(turns) != 1 || turns[0].User != "就是会不会出现通信冲突或者需要等待的情况" {
+		t.Fatalf("turns=%#v", turns)
+	}
+}
+
+func TestCleanUserTextIgnoresWritingBlockEditTransportEvent(t *testing.T) {
+	raw := "<external_codex_apps_writing_block_edits>internal transport payload</external_codex_apps_writing_block_edits>"
+	if cleaned := cleanUserText(raw); cleaned != "" {
+		t.Fatalf("cleaned=%q", cleaned)
+	}
+}
+
+func TestTranscriptTurnsDoesNotMarkOrdinaryCodexUserMessageAsManaged(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "rollout.jsonl")
+	content := strings.Join([]string{
+		`{"timestamp":"2026-08-31T01:00:00Z","type":"response_item","payload":{"type":"message","id":"response-user","role":"user","content":[{"type":"input_text","text":"检查这个 PR"}]}}`,
+		`{"timestamp":"2026-08-31T01:00:01Z","type":"event_msg","payload":{"type":"user_message","client_id":"desktop-user","message":"检查这个 PR"}}`,
+		`{"timestamp":"2026-08-31T01:00:02Z","type":"response_item","payload":{"type":"message","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"发现一个问题"}]}}`,
+	}, "\n")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	turns := transcriptTurns(path, "codex")
+	if len(turns) != 1 || turns[0].ID != "desktop-user" || turns[0].Managed {
+		t.Fatalf("turns = %#v", turns)
+	}
+}
+
+func TestCodexUserImagesTransfersReferencedClipboardImage(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "clipboard.png")
+	content := []byte("png-test-content")
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	images := codexUserImages(`<image name="Image #1" path="` + path + `"></image>`)
+	if len(images) != 1 || images[0].Name != "clipboard.png" {
+		t.Fatalf("images = %#v", images)
+	}
+	if images[0].Base64 == "" {
+		t.Fatal("expected encoded image content")
 	}
 }
 
@@ -153,7 +232,7 @@ func TestWorkBuddySessionsUseNativeCWD(t *testing.T) {
 	home := t.TempDir()
 	setTestUserHome(t, home)
 	t.Setenv("LAZYMIND_HOME", filepath.Join(home, ".lazymind"))
-	directory := filepath.Join(home, ".codebuddy", "projects", "project")
+	directory := filepath.Join(home, ".workbuddy", "projects", "project")
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +258,7 @@ func TestWorkBuddySessionsUseNativeCWD(t *testing.T) {
 func TestWorkBuddySessionsImportOnlyRealLazyMindTranscriptTurns(t *testing.T) {
 	home := t.TempDir()
 	setTestUserHome(t, home)
-	directory := filepath.Join(home, ".codebuddy", "projects", "project")
+	directory := filepath.Join(home, ".workbuddy", "projects", "project")
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -241,22 +320,37 @@ func TestCursorSessionsUseTranscriptIdentityAndProjectDirectory(t *testing.T) {
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	ideOnlyID := "054018c0-df9a-4167-b73d-98ca5e6bb80a"
-	ideOnlyDirectory := filepath.Join(project, "agent-transcripts", ideOnlyID)
-	if err := os.MkdirAll(ideOnlyDirectory, 0o700); err != nil {
+	metadataFreeID := "054018c0-df9a-4167-b73d-98ca5e6bb80a"
+	metadataFreeDirectory := filepath.Join(project, "agent-transcripts", metadataFreeID)
+	if err := os.MkdirAll(metadataFreeDirectory, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(ideOnlyDirectory, ideOnlyID+".jsonl"), []byte(content), 0o600); err != nil {
+	metadataFreePath := filepath.Join(metadataFreeDirectory, metadataFreeID+".jsonl")
+	if err := os.WriteFile(metadataFreePath, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	if err := os.Chtimes(path, now.Add(-time.Minute), now.Add(-time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(metadataFreePath, now, now); err != nil {
 		t.Fatal(err)
 	}
 	sessions, err := CursorSessions(context.Background())
-	if err != nil || len(sessions) != 1 {
+	if err != nil || len(sessions) != 2 {
 		t.Fatalf("sessions=%#v err=%v", sessions, err)
 	}
-	session := sessions[0]
-	if session.ThreadID != threadID || len(session.Turns) != 1 ||
+	byThread := map[string]chatagent.NativeSession{}
+	for _, session := range sessions {
+		byThread[session.ThreadID] = session
+	}
+	session := byThread[threadID]
+	if len(session.Turns) != 1 ||
 		session.ProjectName != "LazyRAG" || session.DisplayName != "检查 Cursor 链接 第二行" {
 		t.Fatalf("session=%#v", session)
+	}
+	if len(byThread[metadataFreeID].Turns) != 1 {
+		t.Fatalf("metadata-free session=%#v", byThread[metadataFreeID])
 	}
 	if !transcriptContainsTool(path, "cursor", "workflow.list") {
 		t.Fatal("Cursor transcript tool call was not detected")
@@ -266,12 +360,54 @@ func TestCursorSessionsUseTranscriptIdentityAndProjectDirectory(t *testing.T) {
 		t.Fatalf("chat=%#v found=%v err=%v", chat, found, err)
 	}
 	source, ok := ResolveInvocation("cursor", "workflow.list", time.Now())
-	if !ok || source.ThreadID != threadID || source.ProjectName != "LazyRAG" {
+	if !ok || source.ThreadID != metadataFreeID || source.ProjectName != "LazyRAG" {
 		t.Fatalf("source=%#v ok=%v", source, ok)
 	}
 	workspace, found, err := Workspace(context.Background(), "cursor", threadID)
 	if err != nil || !found || workspace != expectedCWD {
 		t.Fatalf("workspace=%q found=%v err=%v", workspace, found, err)
+	}
+}
+
+func TestCursorSessionsDiscoverCurrentTranscriptsWithoutLegacyChatMetadata(t *testing.T) {
+	home := t.TempDir()
+	setTestUserHome(t, home)
+	workspace := filepath.Join(home, "Work", "RealProject")
+	if err := os.MkdirAll(workspace, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	threadID := "c6708b10-6d03-4aa9-8809-8a8befbd06bc"
+	directory := filepath.Join(
+		home, ".cursor", "projects", cursorWorkspaceSlug(workspace),
+		"agent-transcripts", threadID,
+	)
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	content := strings.Join([]string{
+		`{"role":"user","message":{"content":[{"type":"text","text":"<user_query>真实 Cursor 问题</user_query>"}]}}`,
+		`{"role":"assistant","message":{"content":[{"type":"tool_use","input":{"server":"lazymind","toolName":"workflow.list"}}]}}`,
+		`{"role":"assistant","message":{"content":[{"type":"text","text":"真实 Cursor 回答"}]}}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(filepath.Join(directory, threadID+".jsonl"), []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	sessions, err := CursorSessions(context.Background())
+	if err != nil || len(sessions) != 1 {
+		t.Fatalf("sessions=%#v err=%v", sessions, err)
+	}
+	if sessions[0].ThreadID != threadID || sessions[0].ProjectName != "RealProject" ||
+		len(sessions[0].Turns) != 1 || sessions[0].Turns[0].User != "真实 Cursor 问题" {
+		t.Fatalf("session=%#v", sessions[0])
+	}
+	resolved, found, err := Workspace(context.Background(), "cursor", threadID)
+	if err != nil || !found || resolved != workspace {
+		t.Fatalf("workspace=%q found=%v err=%v", resolved, found, err)
+	}
+	source, ok := ResolveInvocation("cursor", "workflow.list", time.Now())
+	if !ok || source.ThreadID != threadID || source.ProjectName != "RealProject" {
+		t.Fatalf("source=%#v ok=%v", source, ok)
 	}
 }
 

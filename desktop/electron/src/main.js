@@ -41,6 +41,9 @@ const {
   isTrustedCloudNavigation,
   isTrustedFeishuCLINavigation,
 } = require("./external-navigation");
+const { resolveDesktopCloudConfiguration } = require("./cloud-release-config");
+const { startCloudOAuthCallbackRelay } = require("./cloud-oauth-callback-relay");
+const { waitForRendererWithRuntimeRecovery } = require("./renderer-recovery");
 const {
   collapseRoots,
   containsPath,
@@ -76,12 +79,17 @@ const desktopTarget = isWindows ? "windows-x64" : "darwin-arm64";
 const ownerToken = randomUUID();
 const internalServiceToken = randomBytes(32).toString("base64url");
 const clientInstanceId = `ci_${randomBytes(24).toString("base64url")}`;
-const cloudBaseURL = String(process.env.LAZYMIND_CLOUD_BASE_URL || "").trim();
-const cloudRegisterLocale = String(process.env.LAZYMIND_CLOUD_REGISTER_LOCALE || "zh-CN").trim();
 const runtimeResourcesRoot = process.env.LAZYMIND_DESKTOP_RESOURCES_ROOT ||
   (isPackaged
     ? path.join(process.resourcesPath, "runtime")
     : path.resolve(__dirname, "..", "..", "build", desktopTarget, "runtime"));
+const cloudConfiguration = resolveDesktopCloudConfiguration({
+  isPackaged,
+  runtimeResourcesRoot,
+  environment: process.env,
+});
+const cloudBaseURL = cloudConfiguration.baseURL;
+const cloudRegisterLocale = String(process.env.LAZYMIND_CLOUD_REGISTER_LOCALE || "zh-CN").trim();
 const repoRoot = process.env.LAZYMIND_DESKTOP_REPO_ROOT ||
   (isPackaged ? path.join(runtimeResourcesRoot, "app") : path.resolve(__dirname, "..", "..", ".."));
 const explicitRuntimeRoot = process.env.LAZYMIND_DESKTOP_RUNTIME_ROOT || "";
@@ -155,6 +163,7 @@ let guardProcess;
 let guardPID = 0;
 let guardWatchTimer;
 let currentStatus = null;
+let cloudOAuthCallbackRelay = null;
 let ownerReleaseRetries = 0;
 let isQuitting = false;
 let allowWindowClose = false;
@@ -240,6 +249,7 @@ function sidecarEnv() {
     LAZYMIND_RUNTIME_OWNER_TOKEN: ownerToken,
     LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN: internalServiceToken,
     LAZYMIND_CLIENT_INSTANCE_ID: clientInstanceId,
+    LAZYMIND_CLOUD_BASE_URL: cloudBaseURL,
     LAZYMIND_DESKTOP_APP_VERSION: app.getVersion(),
     LAZYMIND_DESKTOP_OWNER_PID: String(process.pid),
     LAZYMIND_RUNTIME_RESOURCES_ROOT: runtimeResourcesRoot,
@@ -701,7 +711,9 @@ function startAgentHost() {
   }
   clearTimeout(agentHostRestartTimer);
   agentHostRestartTimer = undefined;
-  const child = spawn(agentConnectorPath, ["agent", "host", "run", "--provider", "all"], {
+  const child = spawn(agentConnectorPath, [
+    "agent", "host", "run", "--provider", "all", "--owner-pid", String(process.pid),
+  ], {
     env: sidecarEnv(),
     stdio: ["ignore", "ignore", "pipe"],
     detached: false,
@@ -1170,6 +1182,8 @@ function beginFastQuit(reason = "quit") {
   agentHostStableTimer = undefined;
   agentHostProcess?.kill();
   agentHostProcess = undefined;
+  cloudOAuthCallbackRelay?.close();
+  cloudOAuthCallbackRelay = null;
   for (const child of agentLoginProcesses.values()) {
     child.kill();
   }
@@ -1740,6 +1754,25 @@ function configuredCloudOrigin() {
   return parsed.origin;
 }
 
+async function ensureCloudOAuthCallbackRelay() {
+  if (cloudConfiguration.oauthCallbackMode !== "localhost-relay") {
+    return null;
+  }
+  if (cloudOAuthCallbackRelay) {
+    return cloudOAuthCallbackRelay;
+  }
+  try {
+    cloudOAuthCallbackRelay = await startCloudOAuthCallbackRelay(cloudConfiguration);
+    if (cloudOAuthCallbackRelay) {
+      appendStartupLog("desktop", `Cloud OAuth callback relay listening on 127.0.0.1:${cloudConfiguration.oauthCallbackPort}`);
+    }
+    return cloudOAuthCallbackRelay;
+  } catch (error) {
+    appendStartupLog("error", `failed to start Cloud OAuth callback relay: ${serializeError(error)}`);
+    throw new Error("LazyMind Cloud OAuth relay is unavailable");
+  }
+}
+
 async function openTrustedCloudNavigation(rawURL, purpose) {
   const origin = configuredCloudOrigin();
   if (!isTrustedCloudNavigation(rawURL, origin, purpose)) {
@@ -1905,6 +1938,9 @@ function createRendererReadyWait(window) {
   return {
     window,
     promise,
+    isPending() {
+      return !settled;
+    },
     notify() {
       if (settled) return;
       settled = true;
@@ -1920,10 +1956,48 @@ function createRendererReadyWait(window) {
   };
 }
 
+function createHiddenRendererAttempt(frontendPort) {
+  const window = new BrowserWindow(browserWindowOptions(false));
+  attachExternalNavigationHandler(window);
+  mainWindow = window;
+  window.once("closed", () => {
+    if (mainWindow === window) {
+      mainWindow = undefined;
+    }
+  });
+  startupMetricsRecorder.mark("mainWindowCreated");
+  attachManagedClose(window);
+  const readyWait = createRendererReadyWait(window);
+  rendererReadyWait = readyWait;
+  startupMetricsRecorder.mark("frontendLoadStarted");
+  const ready = Promise.all([
+    window.loadURL(`http://127.0.0.1:${frontendPort}/agent/chat/home`),
+    readyWait.promise,
+  ]);
+  return {
+    window,
+    readyWait,
+    ready,
+    isPending: () => readyWait.isPending(),
+    dispose: async () => {
+      readyWait.cancel();
+      if (rendererReadyWait === readyWait) {
+        rendererReadyWait = undefined;
+      }
+      if (!window.isDestroyed()) {
+        window.removeAllListeners("close");
+        window.destroy();
+      }
+      if (mainWindow === window) {
+        mainWindow = undefined;
+      }
+    },
+  };
+}
+
 async function createWindow() {
   const nextStartupWindow = new BrowserWindow(browserWindowOptions(true));
-  let nextMainWindow;
-  let nextRendererReadyWait;
+  let latestRendererAttempt;
   startupWindow = nextStartupWindow;
   nextStartupWindow.once("closed", () => {
     if (startupWindow === nextStartupWindow) {
@@ -1946,39 +2020,47 @@ async function createWindow() {
     if (isQuitting || windowHiddenByUser || nextStartupWindow.isDestroyed()) {
       return;
     }
-    nextMainWindow = new BrowserWindow(browserWindowOptions(false));
     startAgentHost();
-    attachExternalNavigationHandler(nextMainWindow);
-    mainWindow = nextMainWindow;
-    nextMainWindow.once("closed", () => {
-      if (mainWindow === nextMainWindow) {
-        mainWindow = undefined;
-      }
+    const runtimeReadyPromise = waitForRuntimeReady();
+    const readyRendererAttempt = await waitForRendererWithRuntimeRecovery({
+      startAttempt: async () => {
+        latestRendererAttempt = createHiddenRendererAttempt(status.config.frontendPort);
+        return latestRendererAttempt;
+      },
+      runtimeReady: runtimeReadyPromise,
+      shouldRecover: () => !isQuitting && !windowHiddenByUser && !nextStartupWindow.isDestroyed(),
+      onRecovery: async (reason) => {
+        appendStartupLog(
+          "desktop",
+          `runtime ready while frontend remained unavailable (${reason}); recreating hidden frontend window once`,
+        );
+        updateStartupState({
+          status: "starting",
+          phase: "Reloading interface",
+          message: "Services are ready. Reloading LazyMind...",
+          progress: null,
+        });
+      },
     });
-    startupMetricsRecorder.mark("mainWindowCreated");
-    attachManagedClose(nextMainWindow);
-    nextRendererReadyWait = createRendererReadyWait(nextMainWindow);
-    rendererReadyWait = nextRendererReadyWait;
-    startupMetricsRecorder.mark("frontendLoadStarted");
-    await Promise.all([
-      nextMainWindow.loadURL(`http://127.0.0.1:${status.config.frontendPort}/agent/chat/home`),
-      nextRendererReadyWait.promise,
-    ]);
-    nextRendererReadyWait.cancel();
-    if (rendererReadyWait === nextRendererReadyWait) {
+    if (!readyRendererAttempt) {
+      return;
+    }
+    latestRendererAttempt = readyRendererAttempt;
+    readyRendererAttempt.readyWait.cancel();
+    if (rendererReadyWait === readyRendererAttempt.readyWait) {
       rendererReadyWait = undefined;
     }
-    if (isQuitting || windowHiddenByUser || nextMainWindow.isDestroyed()) {
+    if (isQuitting || windowHiddenByUser || readyRendererAttempt.window.isDestroyed()) {
       return;
     }
     nextStartupWindow.removeAllListeners("close");
     nextStartupWindow.hide();
-    nextMainWindow.show();
+    readyRendererAttempt.window.show();
     startupMetricsRecorder.mark("mainWindowVisible");
-    nextMainWindow.focus();
+    readyRendererAttempt.window.focus();
     appendStartupLog("desktop", "frontend window ready");
     nextStartupWindow.destroy();
-    void waitForRuntimeReady().then(
+    void runtimeReadyPromise.then(
       () => finishStartupMetrics("success"),
       (error) => {
         if (!isQuitting) {
@@ -1987,17 +2069,7 @@ async function createWindow() {
       },
     );
   } catch (error) {
-    nextRendererReadyWait?.cancel();
-    if (rendererReadyWait === nextRendererReadyWait) {
-      rendererReadyWait = undefined;
-    }
-    if (nextMainWindow && !nextMainWindow.isDestroyed()) {
-      nextMainWindow.removeAllListeners("close");
-      nextMainWindow.destroy();
-    }
-    if (mainWindow === nextMainWindow) {
-      mainWindow = undefined;
-    }
+    await latestRendererAttempt?.dispose();
     if (windowHiddenByUser && !isQuitting) {
       return;
     }
@@ -2203,6 +2275,7 @@ ipcMain.handle("lazymind:openCloudLogin", async (_event, url) => {
   return openTrustedCloudNavigation(String(url || ""), "login");
 });
 ipcMain.handle("lazymind:openManagedProviderAuthorization", async (_event, url) => {
+	await ensureCloudOAuthCallbackRelay();
   return openTrustedCloudNavigation(String(url || ""), "provider-authorization");
 });
 ipcMain.handle("lazymind:openFeishuCLIAuthorization", async (_event, url) => {

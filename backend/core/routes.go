@@ -17,6 +17,7 @@ import (
 	"lazymind/core/cloudclient"
 	"lazymind/core/cloudresource"
 	"lazymind/core/cloudsession"
+	"lazymind/core/cloudusage"
 	"lazymind/core/credentialvault"
 	"lazymind/core/currentmemory"
 	"lazymind/core/datasource"
@@ -100,6 +101,8 @@ func registerAllRoutes(r *mux.Router) {
 	}
 	cloudSessionHandler.TemporaryCredentials = credentialRestoreHandler
 	cloudKnowledgeHandler := knowledgeplaza.Handler{}
+	cloudKnowledgeMarketHandler := knowledgeplaza.MarketHandler{}
+	cloudUsageHandler := cloudusage.Handler{}
 	var cloudSkillHandler cloudresource.Handler
 	var cloudWorkflowHandler cloudresource.Handler
 	if client, err := cloudclient.New(os.Getenv("LAZYMIND_CLOUD_BASE_URL"), nil); err == nil {
@@ -123,7 +126,10 @@ func registerAllRoutes(r *mux.Router) {
 		cloudRuntimeProvider := &modelconfig.CloudRuntimeProvider{Session: cloudSession, Client: client, Locale: locale}
 		modelconfig.SetRuntimeProvider(cloudRuntimeProvider)
 		modelprovider.SetCloudReadinessProvider(cloudRuntimeProvider)
+		modelprovider.SetCloudCatalogProvider(cloudRuntimeProvider)
 		cloudKnowledgeHandler.Source = knowledgeplaza.CloudSource{Tokens: cloudSession, Client: client}
+		cloudKnowledgeMarketHandler = knowledgeplaza.MarketHandler{Tokens: cloudSession, Client: client}
+		cloudUsageHandler.Source = cloudusage.CloudSource{Tokens: cloudSession, Client: client}
 		cloudResources := &cloudresource.Service{
 			Session: cloudSession, Cloud: client, Bindings: cloudbinding.NewRepository(corestore.DB()),
 			DesktopVersion: strings.TrimSpace(os.Getenv("LAZYMIND_DESKTOP_APP_VERSION")),
@@ -142,10 +148,12 @@ func registerAllRoutes(r *mux.Router) {
 	} else {
 		modelconfig.SetRuntimeProvider(nil)
 		modelprovider.SetCloudReadinessProvider(nil)
+		modelprovider.SetCloudCatalogProvider(nil)
 	}
 	handleAPI(r, "GET", "/cloud/session", []string{"user.read"}, cloudSessionHandler.Get)
 	handleAPI(r, "POST", "/cloud/login", []string{"user.read"}, cloudSessionHandler.BeginLogin)
 	handleAPI(r, "POST", "/cloud/logout", []string{"user.read"}, cloudSessionHandler.Logout)
+	handleAPI(r, "GET", "/cloud/token-plan", []string{"user.read"}, cloudUsageHandler.Get)
 	handleAPI(r, "POST", "/provider-connections/sessions", []string{"user.write"}, providerConnectionHandler.CreateSession)
 	handleAPI(r, "GET", "/provider-connections/sessions/{session_id}", []string{"user.read"}, providerConnectionHandler.GetSession)
 	handleAPI(r, "DELETE", "/provider-connections/sessions/{session_id}", []string{"user.write"}, providerConnectionHandler.CancelSession)
@@ -164,10 +172,18 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "DELETE", "/credential-vault/restores/{operation_id}", []string{"user.write"}, credentialRestoreHandler.Cancel)
 	handleAPI(r, "POST", "/credential-vault/restores:clear-temporary", []string{"user.write"}, credentialRestoreHandler.ClearTemporaryCredentials)
 	handleAPI(r, "GET", "/cloud/knowledge-square", []string{"document.read"}, cloudKnowledgeHandler.List)
+	handleAPI(r, "GET", "/cloud/knowledge-market", []string{"document.read"}, cloudKnowledgeMarketHandler.List)
+	handleAPI(r, "GET", "/cloud/knowledge-market/items/{catalog_key}", []string{"document.read"}, cloudKnowledgeMarketHandler.Get)
 	handleAPI(r, "GET", "/cloud/skills", []string{"qa.read"}, cloudSkillHandler.List)
+	handleAPI(r, "GET", "/cloud/skills/{resource_id}", []string{"qa.read"}, cloudSkillHandler.Get)
+	handleAPI(r, "GET", "/cloud/skills/{resource_id}/tree", []string{"qa.read"}, cloudSkillHandler.Tree)
+	handleAPI(r, "GET", "/cloud/skills/{resource_id}/content", []string{"qa.read"}, cloudSkillHandler.Content)
 	handleAPI(r, "POST", "/cloud/skills/{skill_id}:upload", []string{"qa.write"}, cloudSkillHandler.Upload)
 	handleAPI(r, "POST", "/cloud/skills/{resource_id}:download", []string{"qa.write"}, cloudSkillHandler.Download)
 	handleAPI(r, "GET", "/cloud/workflows", []string{"qa.read"}, cloudWorkflowHandler.List)
+	handleAPI(r, "GET", "/cloud/workflows/{resource_id}", []string{"qa.read"}, cloudWorkflowHandler.Get)
+	handleAPI(r, "GET", "/cloud/workflows/{resource_id}/tree", []string{"qa.read"}, cloudWorkflowHandler.Tree)
+	handleAPI(r, "GET", "/cloud/workflows/{resource_id}/content", []string{"qa.read"}, cloudWorkflowHandler.Content)
 	handleAPI(r, "POST", "/cloud/workflows/{resource_id}:download", []string{"qa.write"}, cloudWorkflowHandler.Download)
 
 	invocationHandler := agentinvocation.Handler{Service: agentinvocation.New(corestore.DB())}
@@ -377,6 +393,11 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/conversations/{conversation_id}:stop", []string{"qa.write"}, chat.StopChatGeneration)
 	handleAPI(r, "POST", "/conversations/{conversation_id}:toolLimitDecision", []string{"qa.write"}, chat.DecideToolLimit)
 	handleAPI(r, "GET", "/conversations/{conversation_id}:status", []string{"qa.read"}, chat.GetChatStatus)
+	handleAPI(r, "GET", "/chat/models", []string{"qa.read"}, chat.ListChatModels)
+	handleAPI(r, "PATCH", "/conversations/{conversation_id}/model", []string{"qa.write"}, chat.PatchConversationModel)
+	handleAPI(r, "POST", "/conversations/{parent_id}/sidechat", []string{"qa.write"}, chat.CreateSidechat)
+	handleAPI(r, "POST", "/conversations/{child_id}/retain", []string{"qa.write"}, chat.RetainSidechat)
+	handleAPI(r, "DELETE", "/conversations/{child_id}/sidechat", []string{"qa.write"}, chat.DiscardSidechat)
 	handleAPI(r, "POST", "/conversations/{conversation_id}:promote", []string{"qa.write"}, chat.PromoteConversation)
 	handleAPI(r, "POST", "/conversations/{conversation_id}:pin", []string{"qa.write"}, chat.PinConversation)
 	handleAPI(r, "POST", "/conversations/{conversation_id}:unpin", []string{"qa.write"}, chat.UnpinConversation)
@@ -389,6 +410,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/external-chat/hosts/{provider}/claim", []string{"qa.write"}, chat.ClaimExternalChatRun)
 	handleAPI(r, "POST", "/external-chat/runs/{run_id}:heartbeat", []string{"qa.write"}, chat.HeartbeatExternalChatRun)
 	handleAPI(r, "POST", "/external-chat/runs/{run_id}:event", []string{"qa.write"}, chat.PublishExternalChatEvent)
+	handleAPI(r, "POST", "/external-chat/runs/{run_id}:attachment", []string{"qa.write"}, chat.PublishExternalChatAttachment)
 
 	// ----- SubAgent (Task Center) -----
 	handleAPI(r, "GET", "/conversations/{conversation_id}/tasks", []string{"qa.read"}, subagent.ListConversationTasks)
@@ -417,10 +439,12 @@ func registerAllRoutes(r *mux.Router) {
 	// ----- Workflow Drafts (user-created workflow authoring) -----
 	handleAPI(r, "GET", "/workflow-drafts", []string{"qa.read"}, workflow.ListWorkflowDrafts)
 	handleAPI(r, "POST", "/workflow-drafts", []string{"qa.write"}, workflow.CreateWorkflowDraft)
+	handleAPI(r, "POST", "/workflows/{workflow_id}:copy", []string{"qa.write"}, workflow.CopyBuiltinWorkflow)
 	handleAPI(r, "GET", "/workflow-drafts:trash", []string{"qa.read"}, workflow.ListWorkflowDraftTrash)
 	handleAPI(r, "DELETE", "/workflow-drafts:trash", []string{"qa.write"}, workflow.EmptyWorkflowDraftTrash)
 	handleAPI(r, "POST", "/workflow-drafts:polish-info", []string{"qa.write"}, workflow.PolishWorkflowDraftInfo)
 	handleAPI(r, "GET", "/workflow-drafts/{draft_id}", []string{"qa.read"}, workflow.GetWorkflowDraft)
+	handleAPI(r, "POST", "/workflow-drafts/{draft_id}:copy", []string{"qa.write"}, workflow.CopyWorkflowDraft)
 	handleAPI(r, "POST", "/workflow-drafts/{draft_id}:save", []string{"qa.write"}, workflow.SaveWorkflowDraft)
 	handleAPI(r, "POST", "/workflow-drafts/{draft_id}:validate", []string{"qa.read"}, workflow.ValidateWorkflowDraft)
 	handleAPI(r, "POST", "/workflow-drafts/{draft_id}:ai-generate", []string{"qa.write"}, workflow.AIGenerateWorkflowDraft)
@@ -534,6 +558,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/workflow-sessions/{session_id}", []string{"qa.read"}, workflow.GetSessionDetail)
 	handleAPI(r, "GET", "/workflow-sessions/{session_id}/slots", []string{"qa.read"}, workflow.GetSessionSlots)
 	handleAPI(r, "GET", "/workflow-sessions/{session_id}/steps", []string{"qa.read"}, workflow.GetSessionSteps)
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}:approval-preference", []string{"qa.write"}, workflow.SetWorkflowApprovalPreference)
 	// Compatibility alias: old clients receive the same authoritative projection;
 	// no independent BFS state calculation remains on an active route.
 	handleAPI(r, "GET", "/workflow-sessions/{session_id}/state-graph", []string{"qa.read"}, workflow.GetSessionProjection)
@@ -582,6 +607,9 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "PUT", "/memory/profile/avatar", []string{"qa.write"}, currentmemory.PutProfileAvatar)
 	handleAPI(r, "DELETE", "/memory/profile/avatar", []string{"qa.write"}, currentmemory.DeleteProfileAvatar)
 	handleAPI(r, "GET", "/memory/preferences", []string{"qa.read"}, currentmemory.ListPreferences)
+	handleAPI(r, "POST", "/memory/preferences:organize", []string{"qa.write"}, resourceupdate.SubmitPreferenceOrganizer)
+	handleAPI(r, "GET", "/memory/preferences:organize/{task_id}", []string{"qa.read"}, resourceupdate.GetPreferenceOrganizer)
+	handleAPI(r, "GET", "/memory/preferences:organize", []string{"qa.read"}, resourceupdate.GetLatestPreferenceOrganizer)
 	handleAPI(r, "PUT", "/memory/preferences:order", []string{"qa.write"}, currentmemory.ReorderPreferences)
 	handleAPI(r, "GET", "/memory/preferences/{name}", []string{"qa.read"}, currentmemory.GetPreference)
 	handleAPI(r, "DELETE", "/memory/preferences/{name}", []string{"qa.write"}, currentmemory.DeletePreference)

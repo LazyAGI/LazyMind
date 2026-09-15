@@ -57,6 +57,7 @@ type RestoreCommand struct {
 
 type RestoreDiscovery struct {
 	Available              bool                   `json:"available"`
+	ReasonCode             string                 `json:"reason_code,omitempty"`
 	RequiresExplicitAction bool                   `json:"requires_explicit_action"`
 	Records                []RestoreRecordSummary `json:"records"`
 	ActiveOperation        *LocalRestoreOperation `json:"active_operation,omitempty"`

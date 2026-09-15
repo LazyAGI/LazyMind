@@ -1,0 +1,5 @@
+preferences:
+- summary: "中文与 emoji 🧪"
+  ref: "references/edge-0.md"
+- summary: "yes"
+  ref: "references/edge-1.md"

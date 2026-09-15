@@ -314,6 +314,15 @@ func PatchConversationSettings(w http.ResponseWriter, r *http.Request) {
 		updates["chat_executor"] = normalized
 		requestedExecutor = normalized
 	}
+	if raw, present := body["thinking_depth"]; present {
+		value, ok := raw.(string)
+		normalized, valid := normalizeThinkingDepth(value)
+		if !ok || !valid {
+			common.ReplyErr(w, "thinking_depth must be 'low', 'medium', 'high', or 'max'", http.StatusBadRequest)
+			return
+		}
+		updates["thinking_depth"] = normalized
+	}
 	if len(updates) == 0 {
 		common.ReplyErr(w, "no valid fields to update", http.StatusBadRequest)
 		return
@@ -323,6 +332,27 @@ func PatchConversationSettings(w http.ResponseWriter, r *http.Request) {
 		First(&conversation).Error; err != nil {
 		common.ReplyErr(w, "conversation not found", http.StatusNotFound)
 		return
+	}
+	if isSidechatConversation(conversation) {
+		if _, present := body["workflow_mode"]; present {
+			common.ReplyErr(w, "sidechat cannot change workflow mode", http.StatusConflict)
+			return
+		}
+		if enabled, present := body["enable_workflow"]; present && enabled != false {
+			common.ReplyErr(w, "sidechat cannot enable workflows", http.StatusConflict)
+			return
+		}
+		if enabled, present := body["enable_subagent"]; present && enabled != false {
+			common.ReplyErr(w, "sidechat cannot enable subagents", http.StatusConflict)
+			return
+		}
+		if requestedExecutor != "" && requestedExecutor != ChatExecutorLazyMind {
+			common.ReplyErr(w, "sidechat cannot change chat executor", http.StatusConflict)
+			return
+		}
+		updates["enable_plugin"] = false
+		updates["enable_subagent"] = false
+		updates["chat_executor"] = ChatExecutorLazyMind
 	}
 	if requestedExecutor != "" {
 		if isExternalChatProvider(requestedExecutor) {

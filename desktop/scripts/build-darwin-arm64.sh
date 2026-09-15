@@ -112,9 +112,14 @@ prune_python_runtime() {
 assert_desktop_runtime_app() {
   local app_root="$1"
   local frontend_dist="${app_root}/frontend/dist/index.html"
+  local repo_marker="${app_root}/Makefile"
   local lazyllm_source="${app_root}/algorithm/lazyllm/lazyllm"
   if [[ ! -f "${frontend_dist}" ]]; then
     echo "desktop frontend dist is required: ${frontend_dist}" >&2
+    exit 1
+  fi
+  if [[ ! -f "${repo_marker}" ]]; then
+    echo "desktop runtime repo marker is required: ${repo_marker}" >&2
     exit 1
   fi
   if [[ "${RELEASE_BUILD}" != "true" && ! -d "${lazyllm_source}" ]]; then
@@ -279,7 +284,6 @@ rsync -a --delete \
   --exclude "/backend/core/core" \
   --exclude "/README.md" \
   --exclude "/README.CN.md" \
-  --exclude "/Makefile" \
   "${ROOT}/" "${RUNTIME_ROOT}/app/"
 
 prune_runtime_app "${RUNTIME_ROOT}/app"
@@ -308,9 +312,21 @@ if [[ "${LAZYMIND_TRUSTED_LOCAL_MODE:-}" == "true" ]]; then
   TRUSTED_LOCAL_MODE=true
   echo "==> Trusted local mode enabled for this desktop package"
 fi
-node "${ROOT}/desktop/scripts/write-runtime-manifest.mjs" \
-  "${RUNTIME_ROOT}" --platform darwin --arch arm64 \
+RUNTIME_MANIFEST_ARGS=(
+  "${RUNTIME_ROOT}"
+  --platform darwin
+  --arch arm64
   --trusted-local-mode "${TRUSTED_LOCAL_MODE}"
+  --build-audience "${LAZYMIND_DESKTOP_BUILD_AUDIENCE:-production}"
+  --cloud-oauth-callback-mode "${LAZYMIND_CLOUD_OAUTH_CALLBACK_MODE:-direct}"
+)
+if [[ -n "${LAZYMIND_CLOUD_BASE_URL:-}" ]]; then
+  RUNTIME_MANIFEST_ARGS+=(--cloud-base-url "${LAZYMIND_CLOUD_BASE_URL}")
+fi
+if [[ "${LAZYMIND_CLOUD_OAUTH_CALLBACK_MODE:-direct}" == "localhost-relay" ]]; then
+  RUNTIME_MANIFEST_ARGS+=(--cloud-oauth-callback-port "${LAZYMIND_CLOUD_OAUTH_CALLBACK_PORT:-8443}")
+fi
+node "${ROOT}/desktop/scripts/write-runtime-manifest.mjs" "${RUNTIME_MANIFEST_ARGS[@]}"
 node "${ROOT}/desktop/scripts/write-editable-ppt-dependency-config.mjs" "${RUNTIME_ROOT}"
 
 echo "==> Packaging Electron app"

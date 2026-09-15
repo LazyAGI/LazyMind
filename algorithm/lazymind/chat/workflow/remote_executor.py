@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import inspect
 import json
 import logging
 import os
@@ -201,12 +202,25 @@ class RemoteWorkflowExecutor:
                     failure = str(event.get('message') or 'LazyMind SubAgent failed')
         except Exception as exc:
             failure = str(exc)
+            terminal_event = {
+                'type': 'error', 'status': 'failed', 'message': failure,
+            }
         finally:
             stopped.set()
             heartbeat_thread.join(timeout=1)
 
         if lease_lost.is_set():
             return
+        if not failure:
+            try:
+                await self._run_post_step_checks(
+                    client, task_id, lease, params, artifacts,
+                )
+            except Exception as exc:
+                failure = str(exc)
+                terminal_event = {
+                    'type': 'error', 'status': 'failed', 'message': failure,
+                }
         try:
             if failure:
                 await self.runtime.fail(client, attempt_id, lease, failure)
@@ -227,6 +241,104 @@ class RemoteWorkflowExecutor:
             # Runtime terminal state wins first; the ordinary LazyMind event is
             # then persisted and invokes existing Chat handoff/synthetic hooks.
             await self.runtime.task_event(client, task_id, lease, terminal_event)
+
+    @staticmethod
+    def _post_step_artifact_value(artifact: Dict[str, Any]) -> Any:
+        value = artifact.get('value')
+        content_type = str(artifact.get('content_type') or '').strip().lower()
+        if content_type == 'text' and isinstance(value, dict):
+            if isinstance(value.get('text'), str):
+                return value['text']
+            if isinstance(value.get('data'), str):
+                return value['data']
+        if content_type == 'json' and isinstance(value, dict) and 'data' in value:
+            return value['data']
+        return value
+
+    async def _run_post_step_checks(
+        self,
+        client: httpx.AsyncClient,
+        task_id: str,
+        lease: str,
+        params: Dict[str, Any],
+        artifacts: list[Dict[str, Any]],
+    ) -> None:
+        """Run pinned deterministic checks without starting another SubAgent.
+
+        The package policy maps function parameters to artifacts produced by the
+        current step. Results are mirrored as ordinary tool events so Chat can
+        render configuration cards and retain an exact failure reason.
+        """
+        policy = params.get('workflow_runtime') or {}
+        checks = policy.get('post_step_checks') if isinstance(policy, dict) else []
+        step_id = str(params.get('step_id') or '').strip()
+        applicable = [
+            check for check in (checks or [])
+            if isinstance(check, dict)
+            and str(check.get('step_id') or '').strip() == step_id
+        ]
+        if not applicable:
+            return
+
+        from lazymind.chat.engine.subagent.runner import load_workflow_tools
+
+        names = list(dict.fromkeys(
+            str(check.get('tool') or '').strip() for check in applicable
+            if str(check.get('tool') or '').strip()
+        ))
+        tools = load_workflow_tools(params, names)
+        values = {
+            str(artifact.get('slot') or ''): self._post_step_artifact_value(artifact)
+            for artifact in artifacts
+            if str(artifact.get('slot') or '')
+        }
+        for index, check in enumerate(applicable, start=1):
+            name = str(check.get('tool') or '').strip()
+            function = tools.get(name)
+            if function is None:
+                raise RuntimeError(
+                    f'deterministic post-step check tool is unavailable: {name}'
+                )
+            mapping = check.get('arguments') or {}
+            if not isinstance(mapping, dict):
+                raise RuntimeError(
+                    f'deterministic post-step check arguments are invalid: {name}'
+                )
+            arguments: Dict[str, Any] = {}
+            for parameter, material in mapping.items():
+                material_id = str(material or '').strip()
+                if material_id not in values:
+                    raise RuntimeError(
+                        f'deterministic post-step check input is missing: {material_id}'
+                    )
+                arguments[str(parameter)] = values[material_id]
+            call_id = f'post-step-check-{index}'
+            await self.runtime.task_event(client, task_id, lease, {
+                'type': 'tool_calls',
+                'tool_calls': [{
+                    'id': call_id, 'name': name, 'args': arguments,
+                }],
+            })
+            try:
+                result = function(**arguments)
+                if inspect.isawaitable(result):
+                    result = await result
+            except Exception as exc:
+                await self.runtime.task_event(client, task_id, lease, {
+                    'type': 'tool_results',
+                    'tool_results': [{
+                        'id': call_id, 'name': name,
+                        'result': {'ok': False, 'value': str(exc)},
+                    }],
+                })
+                raise RuntimeError(str(exc)) from exc
+            await self.runtime.task_event(client, task_id, lease, {
+                'type': 'tool_results',
+                'tool_results': [{
+                    'id': call_id, 'name': name,
+                    'result': {'ok': True, 'value': result},
+                }],
+            })
 
     @staticmethod
     def _input_resource_binding(value: Any) -> bool:

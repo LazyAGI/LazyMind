@@ -99,6 +99,13 @@ func deleteThreadLocalRows(db *gorm.DB, threadID string) (map[string]any, error)
 			roundDeleted = deleted.RowsAffected
 		}
 
+		var stepDeleted int64
+		if deleted := tx.Where("thread_id = ?", threadID).Delete(&orm.AgentThreadStep{}); deleted.Error != nil {
+			return deleted.Error
+		} else {
+			stepDeleted = deleted.RowsAffected
+		}
+
 		var threadDeleted int64
 		if deleted := tx.Where("thread_id = ?", threadID).Delete(&orm.AgentThread{}); deleted.Error != nil {
 			return deleted.Error
@@ -115,6 +122,7 @@ func deleteThreadLocalRows(db *gorm.DB, threadID string) (map[string]any, error)
 
 		result["deleted_records"] = recordDeleted
 		result["deleted_rounds"] = roundDeleted
+		result["deleted_steps"] = stepDeleted
 		result["deleted_threads"] = threadDeleted
 		result["deleted_active_threads"] = activeDeleted
 		return nil

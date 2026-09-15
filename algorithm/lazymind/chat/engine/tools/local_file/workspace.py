@@ -6,9 +6,11 @@ import os
 import shutil
 import unicodedata
 import uuid
+from functools import wraps
 from typing import Any, Dict, Literal, Optional
 
 import lazyllm
+from lazyllm.tools import fc_register
 from lazyllm.tools.agent import (
     ToolExecutionError,
 )
@@ -19,6 +21,7 @@ from lazyllm.tools.agent.file_tool import (
 )
 
 from lazymind.config import config as _cfg
+
 from .resolver import resolve_text_target
 from .window import (
     RESULT_BYTE_BUDGET,
@@ -126,6 +129,12 @@ def _resolve_workspace_path(path: str, user_id: str, conversation_id: str) -> tu
     if not inside_workspace:
         raise ToolExecutionError('path must stay inside the current main-Agent workspace')
     return workspace, resolved
+
+
+def _workspace_file_resource(arguments: Dict[str, Any], key: str = 'path'):
+    user_id, conversation_id = _current_artifact_scope()
+    _, resolved = _resolve_workspace_path(str(arguments[key]), user_id, conversation_id)
+    return 'file', resolved
 
 
 def _file_tool_root(workspace: str) -> Optional[str]:
@@ -265,6 +274,7 @@ def save_chat_file(
     }
 
 
+@fc_register(write_keys=_workspace_file_resource)
 def write_file(
     path: str,
     content: str,
@@ -298,22 +308,38 @@ def write_file(
     )
 
 
+def build_resource_read_tools() -> list:
+    """Bind file readers to attachments and this conversation's file resources."""
+    @wraps(read_file)
+    def scoped_read_file(*args, **kwargs):
+        return _read_file(*args, **kwargs, resources_only=True)
+
+    @wraps(grep)
+    def scoped_grep(*args, **kwargs):
+        return _grep(*args, **kwargs, resources_only=True)
+
+    return [scoped_grep, scoped_read_file]
+
+
 def _resolve_text_target_for_tool(
     target: str,
     *,
     allow_directory: bool = False,
     turn: Optional[int] = None,
+    resources_only: bool = False,
 ):
     try:
         return resolve_text_target(
             target,
             allow_directory=allow_directory,
             turn=turn,
+            resources_only=resources_only,
         )
     except (ValueError, FileNotFoundError) as exc:
         raise ToolExecutionError(str(exc)) from exc
 
 
+@fc_register(exclusive=True)
 def read_file(
     target: str,
     offset: int = 1,
@@ -332,7 +358,18 @@ def read_file(
         limit: Maximum lines to return (default 2000, max 4000).
         turn: Optional 1-based conversation turn used to disambiguate attachments.
     """
-    resolved = _resolve_text_target_for_tool(target, turn=turn)
+    return _read_file(target, offset, limit, turn)
+
+
+def _read_file(
+    target: str,
+    offset: int = 1,
+    limit: int = 2000,
+    turn: Optional[int] = None,
+    *,
+    resources_only: bool = False,
+) -> Dict[str, Any]:
+    resolved = _resolve_text_target_for_tool(target, turn=turn, resources_only=resources_only)
     payload = read_lines_window(
         load_text_lines(resolved.path),
         offset=offset,
@@ -348,6 +385,7 @@ def read_file(
     return payload
 
 
+@fc_register(exclusive=True)
 def grep(
     target: str,
     pattern: str,
@@ -365,10 +403,22 @@ def grep(
         max_results: Maximum matches (default 50).
         turn: Optional 1-based conversation turn used to disambiguate attachments.
     """
+    return _grep(target, pattern, max_results, turn)
+
+
+def _grep(
+    target: str,
+    pattern: str,
+    max_results: int = 50,
+    turn: Optional[int] = None,
+    *,
+    resources_only: bool = False,
+) -> Dict[str, Any]:
     resolved = _resolve_text_target_for_tool(
         target,
         allow_directory=True,
         turn=turn,
+        resources_only=resources_only,
     )
     files: list[str] = []
     if os.path.isfile(resolved.path):
@@ -435,6 +485,7 @@ def grep(
     }
 
 
+@fc_register(read_keys=_workspace_file_resource)
 def list_dir(path: str = '.', recursive: bool = False, max_depth: int = 5) -> Dict[str, Any]:
     """List files in the current chat workspace or an allowed host path.
 

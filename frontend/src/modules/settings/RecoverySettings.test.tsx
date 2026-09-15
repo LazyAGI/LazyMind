@@ -240,11 +240,14 @@ describe("RecoverySettings", () => {
     }
   });
 
-  it("refreshes the conversation sidebar after restoring a deleted conversation", async () => {
+  it("restores a deleted child conversation and refreshes the conversation sidebar", async () => {
     mocks.listTrashedConversations.mockResolvedValue({
       items: [{
-        conversation_id: "conversation-trash",
-        display_name: "待恢复对话",
+        conversation_id: "child-conversation-trash",
+        display_name: "待恢复侧聊",
+        parent_conversation_id: "parent-conversation",
+        parent_display_name: "主会话",
+        relation_type: "sidechat",
         kind: "dialog",
         deleted_at: "2026-08-18T08:00:00Z",
         trash_expires_at: "2026-09-17T08:00:00Z",
@@ -268,7 +271,7 @@ describe("RecoverySettings", () => {
     try {
       renderRecoverySettings();
       fireEvent.click(screen.getByRole("tab", { name: "会话" }));
-      const itemName = await screen.findByText("待恢复对话");
+      const itemName = await screen.findByText("待恢复侧聊");
       const row = itemName.closest(".recovery-row");
       expect(row).not.toBeNull();
 
@@ -276,7 +279,7 @@ describe("RecoverySettings", () => {
         within(row as HTMLElement).getByRole("button", { name: /恢\s*复/ }),
       );
       expect(confirmSpy).toHaveBeenCalledWith(expect.objectContaining({
-        title: "恢复“待恢复对话”？",
+        title: "恢复“待恢复侧聊”？",
       }));
       await act(async () => {
         await confirmSpy.mock.calls[0][0].onOk?.();
@@ -284,7 +287,7 @@ describe("RecoverySettings", () => {
 
       await waitFor(() =>
         expect(mocks.restoreConversation).toHaveBeenCalledWith(
-          "conversation-trash",
+          "child-conversation-trash",
         ),
       );
       expect(handleRefresh).toHaveBeenCalledTimes(1);

@@ -68,6 +68,10 @@ export interface MarkdownSelection {
   supported: boolean;
   paragraph?: HTMLElement;
   startOffset?: number;
+  internalReference?: {
+    anchorId: string;
+    occurrence: number;
+  };
 }
 
 function closestElement(node: Node | null): HTMLElement | null {
@@ -93,6 +97,64 @@ function adjacentBoundaryParagraph(
     ? [child as HTMLElement]
     : Array.from(child.querySelectorAll<HTMLElement>('p'));
   return (edge === 'start' ? paragraphs[0] : paragraphs.at(-1)) ?? null;
+}
+
+function closestInternalReference(container: HTMLElement, node: Node): HTMLAnchorElement | null {
+  const link = closestElement(node)?.closest<HTMLAnchorElement>('a[href^="#block-"]') ?? null;
+  return link && container.contains(link) ? link : null;
+}
+
+function adjacentBoundaryInternalReference(
+  container: HTMLElement,
+  node: Node,
+  offset: number,
+  edge: 'start' | 'end',
+): HTMLAnchorElement | null {
+  if (!(node instanceof Element) || !container.contains(node)) return null;
+  const child = node.childNodes.item(edge === 'start' ? offset : offset - 1);
+  if (!(child instanceof Element)) return null;
+  const link = child.matches('a[href^="#block-"]')
+    ? child as HTMLAnchorElement
+    : edge === 'start'
+      ? child.querySelector<HTMLAnchorElement>('a[href^="#block-"]')
+      : Array.from(child.querySelectorAll<HTMLAnchorElement>('a[href^="#block-"]')).at(-1) ?? null;
+  return link && container.contains(link) ? link : null;
+}
+
+function selectedInternalReference(
+  container: HTMLElement,
+  range: Range,
+): MarkdownSelection['internalReference'] {
+  const startLink = closestInternalReference(container, range.startContainer)
+    ?? adjacentBoundaryInternalReference(
+      container,
+      range.startContainer,
+      range.startOffset,
+      'start',
+    );
+  const endLink = closestInternalReference(container, range.endContainer)
+    ?? adjacentBoundaryInternalReference(
+      container,
+      range.endContainer,
+      range.endOffset,
+      'end',
+    );
+  if (!startLink || startLink !== endLink) return undefined;
+
+  const href = startLink.getAttribute('href') ?? '';
+  if (!href.startsWith('#block-')) return undefined;
+  const matchingLinks = Array.from(
+    container.querySelectorAll<HTMLAnchorElement>('a[href^="#block-"]'),
+  ).filter((candidate) => candidate.getAttribute('href') === href);
+  const occurrence = matchingLinks.indexOf(startLink);
+  if (occurrence < 0) return undefined;
+  let anchorId = href.slice(1);
+  try {
+    anchorId = decodeURIComponent(anchorId);
+  } catch {
+    return undefined;
+  }
+  return { anchorId, occurrence };
 }
 
 export function selectionActionAnchor(range: Range): SelectionActionAnchor | null {
@@ -168,5 +230,12 @@ export function selectedMarkdownParagraph(container: HTMLElement): MarkdownSelec
       startOffset = undefined;
     }
   }
-  return { text, anchor, supported, paragraph: startParagraph ?? undefined, startOffset };
+  return {
+    text,
+    anchor,
+    supported,
+    paragraph: startParagraph ?? undefined,
+    startOffset,
+    internalReference: selectedInternalReference(container, range),
+  };
 }

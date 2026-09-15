@@ -21,9 +21,25 @@ describe("developer mode access", () => {
     const layoutSource = readFrontendSource("layouts/MainLayout.tsx");
 
     expect(layoutSource).not.toContain("isAdminUser && !runtimeFeatures.hideEvo");
+    expect(layoutSource).not.toContain("...(!runtimeFeatures.hideEvo");
+    expect(layoutSource).toContain('key: "/settings?section=developer"');
     expect(layoutSource).toContain(
       "const canAccessSelfEvolution = !hideEvo && developerActive && isAdminUser;",
     );
     expect(layoutSource).not.toContain("if (!isAdminUser && developerActive)");
+  });
+
+  it("uses the same developer confirmation copy when evo is hidden", () => {
+    const settingsSource = readFrontendSource("modules/settings/index.tsx");
+
+    expect(settingsSource).toContain(
+      'import { runtimeFeatures } from "@/runtime/features";',
+    );
+    expect(settingsSource).not.toContain(
+      'developerEnableContentWithoutEvo',
+    );
+    expect(settingsSource).toContain(
+      '"settingsPage.developer.enableDescWithoutEvo"',
+    );
   });
 });

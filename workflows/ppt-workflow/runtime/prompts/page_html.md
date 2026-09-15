@@ -6,6 +6,9 @@
 - 不要把任何风格都退化成“顶部小图 + 居中标题 + 底部等宽圆角卡片”。除非内容确实是等权比较，否则优先采用 `art_direction.composition` 指定的主视觉分区、信息轨道、编辑式分栏或非等权模块。
 - 风格表现必须服从本文后续的机械导出约束。`art_direction.export_safe_effects` 是允许的实现方式；`art_direction.forbidden_effects` 中的效果不得使用。出现冲突时，以机械导出约束为最高优先级。
 - 同一套 deck 的页面可以采用不同构图，但必须复用同一套色彩、字体、表面和装饰语言，让页面既有变化又保持统一。
+- CSS 必须原样采用 `VISUAL DESIGN CONTRACT.typography.heading_font` 和
+  `body_font`：标题使用 heading_font，正文使用 body_font。不得擅自统一替换为
+  `system-ui`、Arial 或同一种标准字体；可编辑 PPTX 导出器会保留这里的字体名。
 
 ## 语言锁定（硬性）
 
@@ -58,10 +61,12 @@ HTML 中**所有面向读者可见的文字内容**（`<title>`、标题、副�
 
 - 所有 `<img src>` 必须使用相对路径 `../images/<basename>`，其中 `<basename>` 来自 user message 给出的路径（例如 `../images/page_003_inherited.png`）。
 - user message 中只要出现 `INHERITED FOREGROUND IMAGE`，其中的 `path` 就是本页已经由素材收集阶段选定并复制好的图片。**必须原样生成且只生成一个 `<img src="该 path">`**；输出结束前检查该 `<img>` 确实存在。禁止只创建 `.image-section`、`.image-placeholder` 等空容器来代替图片。
+- user message 中只要出现 `AI BACKGROUND IMAGE`，其中的 `path` 是专用底图，不属于继承素材。必须把精确路径写入 `#bg` 的 `background-image: url(...)`，并设置 `background-size: cover; background-position: center;`；不得把它输出成前景 `<img>`。
 - **若 user message 没有给出任何可用图片路径，禁止输出任何 `<img>` 标签**（包括用生图 prompt 当 alt、编造文件名）。改用 CSS / SVG / ECharts 做视觉。
 - 禁止 `file://` / 绝对路径 / 未提供的 CDN 或远程 URL / 自己编造的文件名 / 基于自己想象的 `/mnt/data/...` 路径。
 - `background-image: url(...)` 使用的本地图片同样遵守该路径格式。
 - **来自素材 / 文档的继承图（路径形如 `../images/page_XXX_inherited.{png,jpg,jpeg,webp,...}`）禁止当作背景使用**：不得作为 `background-image` / `background` 的 `url(...)` 值、不得放在 `#bg` 层、不得放在任何遮罩 / 渐变 / 半透明色块**之下**被压暗或半隐藏。这类图是页面内容的一部分，必须以前景 `<img>` 元素呈现，放在版面中清晰可见的位置（建议占页面 30-50% 视觉面积），并结合 user message 给出的"图的内容描述"配上贴合的 caption / 标签 / 配文。
+- AI 底图路径形如 `../images/page_XXX_background.*`，只允许用于背景层，不计入前景素材图数量。
 
 ## Infographic images vs ECharts
 
@@ -135,6 +140,8 @@ Use ECharts only when no such diagram image is available for the data on this pa
 ## 可编辑 PPTX 导出兼容（硬性）
 
 - 禁止使用 `clip-path`、`filter: blur(...)`、`backdrop-filter`、CSS animation / transition 来承载页面可见效果；这些效果无法稳定重建为可编辑 PowerPoint 形状。
+- 禁止使用 `<canvas>`（尤其 WebGL / WebGPU）、`<video>`、`<iframe>`、`<object>`、`<embed>` 和 SVG `<foreignObject>`；这些元素在缩略图、预览或截图导出时可能变成黑块。装饰图形改用普通 HTML/CSS 或原生 SVG path，数据图表只用上文约定的 ECharts SVG renderer。
+- 禁止使用 `mix-blend-mode`、`background-blend-mode`、CSS mask / `-webkit-mask`、SVG filter 或 3D perspective/transform-style 来承载必要信息；需要发光、裁切、玻璃或叠色效果时，改用纯色/单层渐变、边框、box-shadow 和显式半透明色块近似。
 - `::before` / `::after` 只能用于不超过 80×80px 的小型点、短线或角标。禁止用伪元素制作大面积背景、图片遮罩、渐变面板或覆盖内容区；大面积视觉层必须写成显式 `<div>`。
 - 禁止使用带 `transparent` 或 alpha=0 色标的大面积渐变遮罩。需要弱化背景时使用一个显式 `<div>` 和单一 `rgba(...)` 半透明填充，且不得覆盖继承图片。
 - 不得在 `<img>` 上方叠放深色、黑色、渐变或半透明遮罩。继承图片必须保持清晰可见。

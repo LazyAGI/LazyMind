@@ -12,6 +12,7 @@ import {
   listKnowledgeMarketTasks,
 } from "@/modules/knowledge/api/knowledgeMarket";
 import {
+  getLatestKnowledgeMarketTasks,
   getKnowledgeMarketTaskPercent,
   isKnowledgeMarketTaskCompleted,
   isKnowledgeMarketTaskFailed,
@@ -71,10 +72,9 @@ export default function KnowledgeMarketTaskModal({
             }),
           ),
         );
-        const listItems = taskLists
-          .flatMap((list) => list.items || [])
-          .sort((a, b) => b.created_at.localeCompare(a.created_at))
-          .slice(0, 50);
+        const listItems = getLatestKnowledgeMarketTasks(
+          taskLists.flatMap((list) => list.items || []),
+        );
         const details = await Promise.all(
           listItems.map(async (item) => {
             try {

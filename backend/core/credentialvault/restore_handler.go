@@ -13,6 +13,7 @@ import (
 	"github.com/gorilla/mux"
 
 	"lazymind/core/cloudclient"
+	"lazymind/core/cloudsession"
 	"lazymind/core/common"
 	"lazymind/core/store"
 )
@@ -50,16 +51,31 @@ func DefaultRestoreHandler() *RestoreHandler {
 }
 
 func (handler *RestoreHandler) Discover(w http.ResponseWriter, request *http.Request) {
+	if handler == nil || handler.factory == nil {
+		common.ReplyOK(w, unavailableRestoreDiscovery("cloud_session_required"))
+		return
+	}
 	service, ok := handler.requestService(w, request)
 	if !ok {
 		return
 	}
 	discovery, err := service.Discover(request.Context())
 	if err != nil {
+		if errors.Is(err, cloudsession.ErrNoRefreshToken) {
+			common.ReplyOK(w, unavailableRestoreDiscovery("cloud_session_required"))
+			return
+		}
 		replyRestoreError(w, err)
 		return
 	}
 	common.ReplyOK(w, discovery)
+}
+
+func unavailableRestoreDiscovery(reason string) RestoreDiscovery {
+	return RestoreDiscovery{
+		ReasonCode: reason, RequiresExplicitAction: true,
+		Records: make([]RestoreRecordSummary, 0),
+	}
 }
 
 func (handler *RestoreHandler) Start(w http.ResponseWriter, request *http.Request) {

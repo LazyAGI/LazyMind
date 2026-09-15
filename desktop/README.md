@@ -37,6 +37,28 @@ desktop/dist/LazyMind-windows-x64-installer-<version>-yyyyMMdd-HHmmss-<commit>.e
 
 `LazyMind.exe` is the entry point inside `win-unpacked`; the directory also contains Electron DLLs/locales and `resources/runtime` with all LazyMind services and Python dependencies.
 
+## Cloud release origin
+
+Set `LAZYMIND_CLOUD_BASE_URL` while building a Desktop package to embed its trusted Cloud HTTPS origin in `resources/runtime/manifest.json`:
+
+```bash
+LAZYMIND_CLOUD_BASE_URL=https://cloud.example.com make desktop-darwin-arm64
+```
+
+The value must be an HTTPS origin without a path, query, fragment, or user information. A packaged Desktop uses the embedded Manifest value and does not allow a process environment variable to replace it. Source development remains configurable through `LAZYMIND_CLOUD_BASE_URL`; omitting the variable while building produces a Local-only package without Cloud navigation.
+
+An internal test package can forward the fixed Notion OAuth callback from `https://localhost:8443` to its embedded Cloud origin without an SSH tunnel:
+
+```bash
+LAZYMIND_DESKTOP_BUILD_AUDIENCE=internal \
+LAZYMIND_CLOUD_BASE_URL=https://10.210.0.49:5027 \
+LAZYMIND_CLOUD_OAUTH_CALLBACK_MODE=localhost-relay \
+LAZYMIND_CLOUD_OAUTH_CALLBACK_PORT=8443 \
+make desktop-darwin-arm64
+```
+
+The relay starts lazily when the user begins managed Provider OAuth, so a port conflict cannot prevent Desktop or its local features from starting. It is a byte-only TCP forwarder bound to `127.0.0.1`; TLS remains end-to-end between the browser and Cloud. The test Cloud certificate therefore needs both its server IP and `DNS:localhost` SANs, and every test device must trust only the corresponding lab CA certificate. The CA private key is never packaged. Production is the default build audience and fails closed if `localhost-relay` is requested; production packages use `direct` with the final Cloud HTTPS domain.
+
 ## macOS signed DMG
 
 The local distribution build requires a `Developer ID Application` identity in
@@ -49,14 +71,21 @@ make desktop-darwin-arm64-dmg
 `electron-builder` discovers the local Developer ID identity automatically.
 The local target signs the app and DMG but does not submit them to Apple.
 
-For CI, provide `CSC_LINK`, `CSC_KEY_PASSWORD`, and the Apple notarization
-credentials. `.github/workflows/macos-installer.yml` maps those values from
+Official tag builds in `LazyAGI/LazyMind` require CI signing and notarization
+credentials. `.github/workflows/macos-installer.yml` maps them from
 `MAC_CSC_LINK`, `MAC_CSC_KEY_PASSWORD`, `APPLE_ID`,
-`APPLE_APP_SPECIFIC_PASSWORD`, and `APPLE_TEAM_ID` repository secrets.
-Release builds submit a ZIP first, staple the accepted app ticket when
-available, then package and submit the DMG. A ZIP timeout falls through to DMG
-packaging; a DMG timeout uploads the pending DMG and submission record for the
-manual finalizer.
+`APPLE_APP_SPECIFIC_PASSWORD`, and `APPLE_TEAM_ID` environment secrets. They
+submit a ZIP first, staple the accepted app ticket, then package, submit, and
+staple the DMG. Either notarization stage fails after its bounded timeout.
+
+Tag builds in forks do not read these secrets or use a Developer ID identity.
+They apply only the ad-hoc signature required by the packaged arm64 application,
+skip Apple notarization, and publish an explicitly unnotarized DMG for testing.
+
+Desktop release tags containing a prerelease suffix, such as `v0.3.0-a0` or
+`v0.3.0-rc.1`, run the complete platform build and installer test workflows but
+do not create a GitHub Release. Stable tags such as `v0.3.0` create a draft
+GitHub Release after both platforms pass.
 
 A DMG drag-install cannot run a post-install script. To provide the same cache
 and runtime preparation as the Windows NSIS installer, the packaged macOS app

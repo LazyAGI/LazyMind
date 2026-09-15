@@ -54,6 +54,8 @@ export interface BaseAsset {
 }
 
 export interface StructuredAsset extends BaseAsset {
+  cloudResourceId?: string;
+  cloudDownloadable?: boolean;
   name: string;
   description: string;
   category: string;

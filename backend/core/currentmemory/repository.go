@@ -12,6 +12,7 @@ import (
 	"gorm.io/gorm/clause"
 
 	"lazymind/core/common/orm"
+	"lazymind/core/maintenance"
 )
 
 var (
@@ -71,7 +72,10 @@ func (r *Repository) ensureInitializedOnce(
 	if userID == "" {
 		return errors.New("memory user_id is required")
 	}
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return maintenance.UserTransaction(ctx, r.db, userID, func(tx *gorm.DB) error {
+		if err := maintenance.Authorize(ctx, tx, userID, false); err != nil {
+			return err
+		}
 		entries := DefaultEntries(userID, now.UTC())
 		directories := make([]orm.MemoryCurrentEntry, 0, len(entries))
 		files := make([]orm.MemoryCurrentEntry, 0, len(entries))
@@ -363,4 +367,15 @@ func (r *Repository) now() time.Time {
 		return r.clock().UTC()
 	}
 	return time.Now().UTC()
+}
+
+func (r *Repository) PreferenceTransaction(ctx context.Context, userID string, fn func(*Repository) error) error {
+	return maintenance.UserTransaction(ctx, r.db, userID, func(tx *gorm.DB) error {
+		if err := maintenance.Authorize(ctx, tx, userID, true); err != nil {
+			return err
+		}
+		child := *r
+		child.db = tx
+		return fn(&child)
+	})
 }

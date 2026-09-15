@@ -190,6 +190,10 @@ function parseUiTabs(raw: unknown): { tabs: WorkflowUiTab[]; slots?: Record<stri
     const compositeTabPosition = validTabPositions.includes(rawTabPos)
       ? (rawTabPos as WorkflowUiTab['composite_tab_position'])
       : undefined;
+    const rawSlotScope = String(t.slot_scope ?? '');
+    const slotScope = rawSlotScope === 'step' || rawSlotScope === 'selected'
+      ? (rawSlotScope as WorkflowUiTab['slot_scope'])
+      : undefined;
 
     let compositeBehavior: CompositeBehavior | undefined;
     if (t.composite_behavior && typeof t.composite_behavior === 'object' && !Array.isArray(t.composite_behavior)) {
@@ -209,9 +213,15 @@ function parseUiTabs(raw: unknown): { tabs: WorkflowUiTab[]; slots?: Record<stri
         })
         : undefined;
       const scope = String(rawBehavior.empty_column_scope ?? '');
+      const repeatSingleSlots = Array.isArray(rawBehavior.repeat_single_slots)
+        ? rawBehavior.repeat_single_slots
+          .map((slotId) => String(slotId ?? '').trim())
+          .filter(Boolean)
+        : undefined;
       compositeBehavior = {
         hide_empty_columns: Boolean(rawBehavior.hide_empty_columns),
         empty_column_scope: scope === 'tab' || scope === 'selected' ? scope : undefined,
+        repeat_single_slots: repeatSingleSlots?.length ? repeatSingleSlots : undefined,
         mutually_exclusive: mutuallyExclusive?.length ? mutuallyExclusive : undefined,
       };
     }
@@ -249,6 +259,7 @@ function parseUiTabs(raw: unknown): { tabs: WorkflowUiTab[]; slots?: Record<stri
     return [{
       id,
       step_id: t.step_id !== undefined ? String(t.step_id) : undefined,
+      slot_scope: slotScope,
       label: t.label !== undefined ? String(t.label) : undefined,
       layout,
       gridCols: typeof t.grid_cols === 'number' ? t.grid_cols : undefined,

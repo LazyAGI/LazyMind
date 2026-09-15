@@ -18,7 +18,11 @@ import { useTranslation } from "react-i18next";
 import { AgentAppsAuth } from "@/components/auth";
 import { useModelFeatures } from "@/hooks/useModelFeatures";
 import { runtimeFeatures } from "@/runtime/features";
-import { getCloudSession } from "@/runtime/cloud/session";
+import {
+  getCloudSession,
+	isCloudBusinessAvailable,
+  LAZYMIND_CLOUD_SESSION_CHANGED_EVENT,
+} from "@/runtime/cloud/session";
 import {
   modelProvidersApi,
   modelProvidersDefaultApi,
@@ -60,6 +64,9 @@ interface ProviderModel {
   builtIn: boolean;
   enabled: boolean;
   maxInputTokens?: string;
+  availability?: "available" | "degraded" | "unavailable";
+  lifecycle?: "active" | "deprecated" | "retired";
+  readOnly?: boolean;
 }
 
 interface ProviderOption {
@@ -107,6 +114,18 @@ interface ApiModel {
   model_type?: string;
   is_default?: boolean;
   max_input_tokens?: string;
+  source?: "own" | "cloud";
+  provider_id?: string;
+  provider_group_id?: string;
+  user_model_provider_id?: string;
+  user_model_provider_group_id?: string;
+  provider_name?: string;
+  group_name?: string;
+  base_url?: string;
+  availability?: "available" | "degraded" | "unavailable";
+  lifecycle?: "active" | "deprecated" | "retired";
+  read_only?: boolean;
+  capabilities?: string[];
 }
 
 interface SelectedModelApiItem {
@@ -119,8 +138,14 @@ interface SelectedModelApiItem {
   name: string;
   provider_name: string;
   share?: boolean;
-  user_model_provider_group_id: string;
-  user_model_provider_id: string;
+  user_model_provider_group_id?: string;
+  user_model_provider_id?: string;
+  source?: "own" | "cloud";
+  provider_id?: string;
+  provider_group_id?: string;
+  availability?: "available" | "degraded" | "unavailable";
+  unavailable_reason?: string;
+  read_only?: boolean;
 }
 
 type SelectedModels = Partial<Record<ModelCapability, string>>;
@@ -142,6 +167,7 @@ type ModelOptionItem = {
   group: ProviderConnectionGroup;
   model: ProviderModel;
   value: string;
+  source: "own" | "cloud";
   /** True when the option comes from an image_editing catalog model. */
   isEditable?: boolean;
 };
@@ -201,6 +227,8 @@ interface SelectedCloudServiceApiItem {
 interface ModelReadyResponse {
   ready: boolean;
   source?: string;
+	fallback_from?: string;
+  reason?: string;
   shared_by_name?: string;
   shared_by_id?: string;
   provider_name?: string;
@@ -246,6 +274,11 @@ const moduleConfigs: ModuleConfig[] = [
     key: "speech_to_text",
     titleKey: "modelProvider.module.asrTitle",
     subtitleKey: "modelProvider.module.asrSubtitle",
+  },
+  {
+    key: "tts",
+    titleKey: "modelProvider.module.ttsTitle",
+    subtitleKey: "modelProvider.module.ttsSubtitle",
   },
   {
     key: "image_generator",
@@ -338,13 +371,19 @@ function createConnectionGroup(
   };
 }
 
-function getModelValue(providerId: string, groupId: string, modelId: string) {
-  return `${providerId}:${groupId}:${modelId}`;
+function getModelValue(
+  source: "own" | "cloud",
+  providerId: string,
+  groupId: string,
+  modelId: string,
+) {
+  return `${source}:${providerId}:${groupId}:${modelId}`;
 }
 
 function parseModelValue(value?: string) {
-  const [providerId, groupId, ...modelIdParts] = String(value || "").split(":");
+  const [source, providerId, groupId, ...modelIdParts] = String(value || "").split(":");
   return {
+    source: source === "cloud" ? "cloud" as const : "own" as const,
     providerId,
     groupId,
     modelId: modelIdParts.join(":"),
@@ -518,8 +557,20 @@ function getModelReadyTooltip(
     return undefined;
   }
   if (!readyStatus.ready) {
+    if (readyStatus.source === "cloud" && readyStatus.reason === "cloud_plan_required") {
+      return t("modelProvider.cloudSystemPlanRequired");
+    }
+    if (readyStatus.source === "cloud") {
+      return t("modelProvider.cloudSystemUnavailable");
+    }
     return t("modelProvider.modelNotReadyTip");
   }
+  if (readyStatus.source === "cloud") {
+    return t("modelProvider.lazyMindCloudAvailable");
+  }
+	if (readyStatus.fallback_from === "cloud") {
+	  return t("modelProvider.cloudModelLocalFallbackTip");
+	}
   if (
     readyStatus.source === "shared" &&
     readyStatus.shared_by_name &&
@@ -652,15 +703,31 @@ export default function DefaultModelConfigPanel({
 
   useEffect(() => {
     let cancelled = false;
-    void getCloudSession()
-      .then((session) => {
-        if (!cancelled) setLazyMindCloudAvailable(session.state === "signed_in");
-      })
-      .catch(() => {
-        if (!cancelled) setLazyMindCloudAvailable(false);
-      });
+    const refreshSession = () => {
+      void getCloudSession()
+        .then((session) => {
+		  if (!cancelled) setLazyMindCloudAvailable(isCloudBusinessAvailable(session));
+        })
+        .catch(() => {
+          if (!cancelled) setLazyMindCloudAvailable(false);
+        });
+    };
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") refreshSession();
+    };
+	const refreshCloudSession = () => {
+	  setLazyMindCloudAvailable(false);
+	  refreshSession();
+	};
+    refreshSession();
+    window.addEventListener(LAZYMIND_CLOUD_SESSION_CHANGED_EVENT, refreshCloudSession);
+    window.addEventListener("focus", refreshSession);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
     return () => {
       cancelled = true;
+      window.removeEventListener(LAZYMIND_CLOUD_SESSION_CHANGED_EVENT, refreshCloudSession);
+      window.removeEventListener("focus", refreshSession);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
     };
   }, []);
 
@@ -698,21 +765,30 @@ export default function DefaultModelConfigPanel({
         ) {
           return;
         }
+        const source = selection.source === "cloud" ? "cloud" : "own";
+        const providerId =
+          selection.provider_id ||
+          selection.user_model_provider_id ||
+          (source === "cloud" ? "lazymind-cloud" : "");
+        const groupId =
+          selection.provider_group_id ||
+          selection.user_model_provider_group_id ||
+          (source === "cloud" ? "cloud-system" : "");
         const provider =
           providers.find(
-            (item) => item.id === selection.user_model_provider_id,
+            (item) => item.id === providerId,
           ) ||
           mapApiProvider(
             {
-              id: selection.user_model_provider_id,
+              id: providerId,
               name: selection.provider_name,
               base_url: selection.base_url,
             },
             localizedFallbacks,
           );
         const group = createConnectionGroup(provider, {
-          id: selection.user_model_provider_group_id,
-          name: selection.group_name,
+          id: groupId,
+          name: selection.group_name || (source === "cloud" ? "" : provider.name),
           baseUrl: selection.base_url || provider.baseUrl,
           apiKeyConfigured: true,
           verified: true,
@@ -724,12 +800,15 @@ export default function DefaultModelConfigPanel({
           builtIn: true,
           enabled: true,
           maxInputTokens: selection.max_input_tokens,
+          availability: selection.availability,
+          readOnly: selection.read_only,
         };
         const option: ModelOptionItem = {
           provider,
           group,
           model,
-          value: getModelValue(provider.id, group.id, model.id),
+          source,
+          value: getModelValue(source, provider.id, group.id, model.id),
           isEditable,
         };
         nextSelectedModels[capability] = option.value;
@@ -765,7 +844,8 @@ export default function DefaultModelConfigPanel({
         ) {
           return;
         }
-        nextShareStatus[capability] = !!selection.share;
+        nextShareStatus[capability] =
+          selection.source === "cloud" ? false : !!selection.share;
       });
       setShareStatus(nextShareStatus);
 
@@ -862,6 +942,21 @@ export default function DefaultModelConfigPanel({
     void loadDefaultModelState();
   }, [loadDefaultModelState]);
 
+  useEffect(() => {
+    const refreshModels = () => void loadDefaultModelState();
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") refreshModels();
+    };
+    window.addEventListener(LAZYMIND_CLOUD_SESSION_CHANGED_EVENT, refreshModels);
+    window.addEventListener("focus", refreshModels);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      window.removeEventListener(LAZYMIND_CLOUD_SESSION_CHANGED_EVENT, refreshModels);
+      window.removeEventListener("focus", refreshModels);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
+  }, [loadDefaultModelState]);
+
   const loadModuleModels = async (
     capability: ModelCapability,
     force = false,
@@ -887,17 +982,9 @@ export default function DefaultModelConfigPanel({
           const response = await modelProvidersApi.apiCoreModelProvidersModelsGet({
             modelType,
           });
-          const data = unwrapModelProviderData<{
-            models?: Array<
-              ApiModel & {
-                user_model_provider_id: string;
-                user_model_provider_group_id: string;
-                provider_name: string;
-                group_name: string;
-                base_url?: string;
-              }
-            >;
-          }>(response.data);
+          const data = unwrapModelProviderData<{ models?: ApiModel[] }>(
+            response.data,
+          );
           return data.models || [];
         }),
       );
@@ -914,21 +1001,30 @@ export default function DefaultModelConfigPanel({
               : true,
           )
           .forEach((model) => {
+            const source = model.source === "cloud" ? "cloud" : "own";
+            const providerId =
+              model.provider_id ||
+              model.user_model_provider_id ||
+              (source === "cloud" ? "lazymind-cloud" : "");
+            const groupId =
+              model.provider_group_id ||
+              model.user_model_provider_group_id ||
+              (source === "cloud" ? "cloud-system" : "");
             const provider =
               providerOptions.find(
-                (item) => item.id === model.user_model_provider_id,
+                (item) => item.id === providerId,
               ) ||
               mapApiProvider(
                 {
-                  id: model.user_model_provider_id,
-                  name: model.provider_name,
+                  id: providerId,
+                  name: model.provider_name || "LazyMind Cloud",
                   base_url: model.base_url,
                 },
                 localizedFallbacks,
               );
             const group = createConnectionGroup(provider, {
-              id: model.user_model_provider_group_id,
-              name: model.group_name,
+              id: groupId,
+              name: model.group_name || (source === "cloud" ? "" : provider.name),
               baseUrl: model.base_url || provider.baseUrl,
               verified: true,
             });
@@ -939,8 +1035,12 @@ export default function DefaultModelConfigPanel({
               builtIn: Boolean(model.is_default),
               enabled: true,
               maxInputTokens: model.max_input_tokens,
+              availability: model.availability,
+              lifecycle: model.lifecycle,
+              readOnly: model.read_only,
             };
             const value = getModelValue(
+              source,
               provider.id,
               group.id,
               providerModel.id,
@@ -966,6 +1066,7 @@ export default function DefaultModelConfigPanel({
               group,
               model: providerModel,
               value,
+              source,
               isEditable: !!model.is_editable,
             });
           });
@@ -1005,7 +1106,14 @@ export default function DefaultModelConfigPanel({
     capability: ModelCapability,
     value?: string,
   ) => {
-    const modelId = value ? parseModelValue(value).modelId : "";
+    const parsed = value ? parseModelValue(value) : undefined;
+    const modelId = parsed?.modelId || "";
+    const source = parsed?.source || "own";
+    const selectionItem = (modelKey: string, id: string) => ({
+      model_key: modelKey,
+      model_id: id,
+      ...(id ? { source } : {}),
+    });
     const selections =
       capability === "image_generator"
         ? (() => {
@@ -1017,26 +1125,29 @@ export default function DefaultModelConfigPanel({
             const isEditable = !!selectedOption?.isEditable;
             if (!value) {
               return [
-                { model_key: "text2image", model_id: "" },
-                { model_key: "image_editing", model_id: "" },
+                selectionItem("text2image", ""),
+                selectionItem("image_editing", ""),
               ];
             }
             if (isEditable) {
+              if (source === "cloud") {
+                return [
+                  selectionItem("text2image", ""),
+                  selectionItem("image_editing", modelId),
+                ];
+              }
               return [
-                { model_key: "text2image", model_id: modelId },
-                { model_key: "image_editing", model_id: modelId },
+                selectionItem("text2image", modelId),
+                selectionItem("image_editing", modelId),
               ];
             }
             return [
-              { model_key: "text2image", model_id: modelId },
-              { model_key: "image_editing", model_id: "" },
+              selectionItem("text2image", modelId),
+              selectionItem("image_editing", ""),
             ];
           })()
         : [
-            {
-              model_key: getModelTypeByCapability(capability),
-              model_id: modelId,
-            },
+            selectionItem(getModelTypeByCapability(capability), modelId),
           ];
 
     const response = await modelProvidersApi.apiCoreModelProvidersSelectedModelsPut({
@@ -1058,6 +1169,10 @@ export default function DefaultModelConfigPanel({
         return;
       }
       message.warning(t("modelProvider.noModelSelectedForShare"));
+      return;
+    }
+    if (parseModelValue(value).source === "cloud") {
+      message.warning(t("modelProvider.cloudSystemCannotShare"));
       return;
     }
 
@@ -1322,17 +1437,15 @@ export default function DefaultModelConfigPanel({
         </div>
       </div>
 
-      <Alert
-        showIcon
-        data-provider-key={LAZYMIND_CLOUD_PROVIDER_KEY}
-        type={lazyMindCloudAvailable ? "success" : "info"}
-        message={t("modelProvider.lazyMindCloudTitle")}
-        description={t(
-          lazyMindCloudAvailable
-            ? "modelProvider.lazyMindCloudAvailable"
-            : "modelProvider.lazyMindCloudUnavailable",
-        )}
-      />
+	  {lazyMindCloudAvailable ? (
+		<Alert
+		  showIcon
+		  data-provider-key={LAZYMIND_CLOUD_PROVIDER_KEY}
+		  type="success"
+		  message={t("modelProvider.lazyMindCloudTitle")}
+		  description={t("modelProvider.lazyMindCloudAvailable")}
+		/>
+	  ) : null}
 
       <div className="model-provider-default-list">
         {modelProviderSetupState === "loading" && (
@@ -1368,12 +1481,18 @@ export default function DefaultModelConfigPanel({
           </div>
         )}
         {modelProviderSetupState === "ready" && visibleModuleConfigs.map((module) => {
-          const options = moduleModelOptions[module.key] || [];
+          const options = (moduleModelOptions[module.key] || []).filter(
+			(option) => lazyMindCloudAvailable || option.source !== "cloud",
+		  );
           const optionLoading = Boolean(moduleModelLoading[module.key]);
           const moduleTitle = t(module.titleKey);
           const moduleSubtitle = t(module.subtitleKey);
           const maxInputTokens = selectedModelMaxInputTokens[module.key];
           const shouldShowMaxInputTokens = Boolean(maxInputTokens?.trim());
+          const selectedOption = options.find(
+            (option) => option.value === selectedModels[module.key],
+          );
+          const selectedIsCloud = selectedOption?.source === "cloud";
 
           return (
             <div
@@ -1424,7 +1543,7 @@ export default function DefaultModelConfigPanel({
                     </span>
                   </Tooltip>
                 ) : null}
-                {isAdmin ? (
+                {isAdmin && !runtimeFeatures.hideUserGroupSurfaces && !selectedIsCloud ? (
                   <Tooltip
                     title={
                       shareStatus[module.key]
@@ -1524,11 +1643,16 @@ export default function DefaultModelConfigPanel({
                   return (
                     <Select.Option
                       key={value}
+                      disabled={
+                        model.availability === "unavailable" ||
+                        model.lifecycle === "deprecated" ||
+                        model.lifecycle === "retired"
+                      }
                       label={
                         <span className="model-provider-select-value">
                           <ProviderLogo provider={provider} compact />
                           <span className="model-provider-select-value-text">
-                            {displayName} · {group.name}
+                            {displayName} · {group.name || provider.name}
                           </span>
                         </span>
                       }
@@ -1539,8 +1663,12 @@ export default function DefaultModelConfigPanel({
                         <span className="model-provider-select-copy">
                           <strong>{displayName}</strong>
                           <small>
-                            {provider.name} / {group.name}
-                            {model.builtIn
+                            {option.source === "cloud"
+                              ? t("modelProvider.cloudSystemReadOnly")
+                              : `${provider.name} / ${group.name}`}
+                            {option.source === "cloud"
+                              ? ""
+                              : model.builtIn
                               ? t("modelProvider.builtInModelSuffix")
                               : t("modelProvider.customModelSuffix")}
                           </small>

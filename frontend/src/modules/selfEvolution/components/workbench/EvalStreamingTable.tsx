@@ -22,11 +22,9 @@ export function EvalStreamingTable({
 }) {
   const { t } = useTranslation();
   const columns = buildEvalStreamingColumns(t);
-  const doneCount = rows.filter(
-    (row) => row.judgeStatus === "done" || (!row.judgeStatus && row.answerStatus === "done"),
-  ).length;
-  const progressTotal = total || rows.length;
+  const doneCount = rows.filter((row) => row.judgeStatus === "done").length;
   const progressCurrent = Math.max(current, doneCount);
+  const progressTotal = Math.max(total, rows.length, progressCurrent);
   const [currentPage, setCurrentPage] = useState(1);
   const prevProgressCurrentRef = useRef(0);
   const totalPages = getLastPage(rows.length);

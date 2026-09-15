@@ -62,7 +62,7 @@ export function fingerprintArtifact(raw: unknown): string {
 
 export function rasterCacheKey(sessionId: string, fingerprint: string): string {
   // Bump prefix when capture pipeline changes so stale/failed shots are not reused.
-  return `${sessionId || '_'}::v4::${fingerprint}`;
+  return `${sessionId || '_'}::v5::${fingerprint}`;
 }
 
 export function getRasterPng(key: string): string | null {

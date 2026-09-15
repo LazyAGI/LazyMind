@@ -57,7 +57,7 @@ async def list_chat_tools(
 ):
     from lazymind.chat.service.component import get_all_tool_groups, normalize_tool_locale
     from lazymind.model_config import inject_model_config
-    from lazyllm.tools.tool_config_inject import inject_tool_config
+    from lazymind.chat.engine.tool_auth import inject_tool_config
 
     inject_model_config(llm_config)
     inject_tool_config(tool_config)

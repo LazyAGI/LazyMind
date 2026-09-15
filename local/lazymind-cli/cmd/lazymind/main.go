@@ -28,6 +28,7 @@ import (
 )
 
 const agentDiscoveryRetryDelay = 2 * time.Second
+const ownerProcessPollInterval = time.Second
 
 const maxInternalSessionBytes = 1 << 20
 
@@ -112,17 +113,11 @@ func runInternal(ctx context.Context, args []string, stdout, stderr io.Writer) e
 		return runInternalCodex(ctx, action, *agentBinary, bridge, stdout)
 	case string(mcpclient.Cursor), string(mcpclient.WorkBuddy), string(mcpclient.Raccoon), string(mcpclient.TRAEWork), string(mcpclient.DeepSeekHarness):
 		if action == "login" {
-			if agent != string(mcpclient.Cursor) && agent != string(mcpclient.WorkBuddy) {
+			if agent != string(mcpclient.Cursor) {
 				return fmt.Errorf("unsupported %s action %q", agent, action)
 			}
-			var loginErr error
-			if agent == string(mcpclient.WorkBuddy) {
-				loginErr = workbuddy.Login(ctx, *agentBinary)
-			} else {
-				loginErr = cursor.Login(ctx, *agentBinary)
-			}
-			if loginErr != nil {
-				return loginErr
+			if err := cursor.Login(ctx, *agentBinary); err != nil {
+				return err
 			}
 		}
 		adapter, err := mcpclient.New(mcpclient.Kind(agent), "", bridge)
@@ -397,6 +392,7 @@ func runAgent(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 		flags.SetOutput(stderr)
 		provider := flags.String("provider", "codex", "Chat Agent provider: codex, cursor, workbuddy, or all")
 		agentBinary := flags.String("agent-bin", "", "selected external Agent CLI executable")
+		ownerPID := flags.Int("owner-pid", 0, "exit when this direct parent process exits")
 		if err := flags.Parse(args[2:]); err != nil {
 			return err
 		}
@@ -419,6 +415,9 @@ func runAgent(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 			return errors.New("--agent-bin requires one explicit --provider")
 		}
 		if action == "status" {
+			if *ownerPID != 0 {
+				return errors.New("--owner-pid is only supported by agent host run")
+			}
 			statuses := make(map[string]any, len(providers))
 			for _, name := range providers {
 				var status map[string]any
@@ -436,9 +435,50 @@ func runAgent(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 		if err != nil {
 			return err
 		}
-		return runAgentHosts(ctx, api, policy, providers, *agentBinary, stderr)
+		hostCtx, stopOwnerWatch, err := contextWithOwnerProcess(
+			ctx, *ownerPID, os.Getppid, ownerProcessPollInterval,
+		)
+		if err != nil {
+			return err
+		}
+		defer stopOwnerWatch()
+		return runAgentHosts(hostCtx, api, policy, providers, *agentBinary, stderr)
 	}
 	return errors.New("usage: lazymind agent host <run|status>")
+}
+
+func contextWithOwnerProcess(
+	ctx context.Context,
+	ownerPID int,
+	parentPID func() int,
+	pollInterval time.Duration,
+) (context.Context, context.CancelFunc, error) {
+	if ownerPID == 0 {
+		return ctx, func() {}, nil
+	}
+	if ownerPID < 0 {
+		return nil, nil, errors.New("--owner-pid must be a positive process ID")
+	}
+	if parentPID() != ownerPID {
+		return nil, nil, fmt.Errorf("owner pid %d is not the current parent process", ownerPID)
+	}
+	ownerCtx, cancel := context.WithCancel(ctx)
+	go func() {
+		ticker := time.NewTicker(pollInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ownerCtx.Done():
+				return
+			case <-ticker.C:
+				if parentPID() != ownerPID {
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+	return ownerCtx, cancel, nil
 }
 
 func hostProviders(value string) ([]string, error) {
@@ -563,8 +603,9 @@ Usage:
   lazymind agent host <run|status> [--provider codex|cursor|workbuddy|all]
 
 LazyMind Desktop and the Docker Assistant Bridge both expose one-click managed
-connections in Settings -> Assistants. The bridge also hosts installed Codex,
-Cursor, and CodeBuddy Code CLIs. Raccoon, TRAE Work, and DeepSeek Harness
+connections in Settings -> Assistants. The bridge hosts installed Codex and
+Cursor CLIs, and automatically reuses the runtime and sign-in bundled with WorkBuddy.
+Raccoon, TRAE Work, and DeepSeek Harness
 remain MCP clients rather than Chat executors.
 Internal Adapter commands are not a public CLI.
 `)

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Button, Input, message, Modal, Select, Tooltip } from "antd";
+import { Alert, Button, Input, message, Modal, Select, Spin, Tooltip } from "antd";
 import { AppstoreOutlined, SearchOutlined } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
 import WorkflowInstalledView from "./WorkflowInstalledView";
@@ -82,9 +82,13 @@ export default function SkillManagementSection() {
     openModal,
     skillAssets,
     skillLoading,
+    skillListError,
     refreshSkillAssets,
     genericColumns,
     cloudSkillRefreshKey,
+    cloudSkillLoading,
+    cloudSkillError,
+    retryCloudSkills,
     onCloudSkillUploaded,
     skillView,
     setSkillView,
@@ -790,6 +794,9 @@ export default function SkillManagementSection() {
         onNewWorkflow={() => setNewWorkflowOpen(true)}
       />
 
+      {skillView === "installed" && cloudSkillError ? <Alert type="error" showIcon message={t("admin.memoryCloudLoadFailed")} action={<Button aria-label={t("common.retry")} onClick={() => void retryCloudSkills()}>{t("common.retry")}</Button>} /> : null}
+      {skillView === "installed" && skillListError ? <Alert type="error" showIcon message={t("admin.memoryResourceLocalLoadFailed")} action={<Button aria-label={t("common.retry")} onClick={() => void refreshSkillAssets()}>{t("common.retry")}</Button>} /> : null}
+      {skillView === "installed" && cloudSkillLoading ? <div role="status"><Spin size="small" /> {t("admin.memoryCloudLoading")}</div> : null}
       {skillView === "installed" ? (
         <SkillInstalledView
           t={t}

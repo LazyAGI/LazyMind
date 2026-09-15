@@ -71,10 +71,24 @@ export default function BuiltinWorkflowDetailPage() {
     />
   );
 
+  let stateYaml = workflow.state_yaml_raw;
+  if (stateYaml && workflow.layout_raw) {
+    try {
+      const layout = JSON.parse(workflow.layout_raw) as Record<string, unknown>;
+      if (Object.keys(layout).length > 0) {
+        stateYaml = `x-layout:\n${Object.entries(layout)
+          .map(([id, value]) => `  ${JSON.stringify(id)}: ${JSON.stringify(value)}`)
+          .join('\n')}\n${stateYaml}`;
+      }
+    } catch {
+      // Ignore malformed optional layout data and keep the state definition usable.
+    }
+  }
+
   return (
     <StateGraphEditor
       initialWorkflowYaml={workflow.workflow_yaml_raw}
-      initialStateYaml={workflow.state_yaml_raw}
+      initialStateYaml={stateYaml}
       initialScenarioContent={workflow.scenario_raw}
       workflowName={workflowName}
       readonly={true}

@@ -4,6 +4,18 @@ import type { InputRef } from "antd";
 import { useTranslation } from "react-i18next";
 import { localizeErrorCode } from "@/components/request";
 import {
+  beginCloudLogin,
+  getCloudSession,
+	isCloudBusinessAvailable,
+  LAZYMIND_CLOUD_SESSION_CHANGED_EVENT,
+} from "@/runtime/cloud/session";
+import {
+  closeCloudLoginPopup,
+  openCloudLogin,
+  openCloudTokenPlan,
+  reserveCloudLoginPopup,
+} from "@/runtime/desktopBridge";
+import {
   CheckCircleFilled,
   DeleteOutlined,
   DownOutlined,
@@ -20,13 +32,18 @@ import {
   getCredentialRestoreDiscovery,
   getCredentialRestoreOperation,
   modelProvidersApi,
+  modelProvidersDefaultApi,
   setCredentialBackupEnabled,
   startCredentialRestore,
   unwrapModelProviderData,
+  withModelProviderJsonOptions,
   type CredentialRestoreRecord,
 } from "../api";
 import { CredentialBackupPanel } from "../components/CredentialBackupPanel";
 import { CredentialRestorePanel } from "../components/CredentialRestorePanel";
+import CloudSystemProviderCard, {
+  type CloudSystemProviderModel,
+} from "../components/CloudSystemProviderCard";
 import type { CredentialBackupStatus } from "../credentialBackupModel";
 import type { CredentialRestoreMode, CredentialRestoreStatus } from "../credentialRestoreModel";
 import { getProviderLogoUrl } from "../providerBranding";
@@ -610,6 +627,13 @@ interface ModelProviderPageProps {
   onConfigurationChanged?: () => void | Promise<void>;
 }
 
+type CloudSystemProviderState =
+  | "loading"
+  | "ready"
+  | "signed_out"
+  | "plan_required"
+  | "error";
+
 export default function ModelProviderPage({ onConfigurationChanged }: ModelProviderPageProps) {
   const { t, i18n } = useTranslation();
   const currentLanguage = i18n.resolvedLanguage || i18n.language || "zh-CN";
@@ -641,11 +665,18 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
   const [credentialRestoreStatus, setCredentialRestoreStatus] = useState<CredentialRestoreStatus>({
     available: false, requiresExplicitAction: true, backupCount: 0, status: "idle",
   });
+  const [cloudSystemState, setCloudSystemState] =
+    useState<CloudSystemProviderState>("loading");
+  const [cloudSystemModels, setCloudSystemModels] =
+    useState<CloudSystemProviderModel[]>([]);
+	const [cloudRuntimeAvailable, setCloudRuntimeAvailable] = useState(false);
+  const [cloudPlanURL, setCloudPlanURL] = useState("");
   const watchedProviderBaseUrl = Form.useWatch("baseUrl", providerConfigForm);
   const watchedProviderApiKey = Form.useWatch("apiKey", providerConfigForm);
   const providerApiKeyInputRef = useRef<InputRef>(null);
   const verifyApiKeyInputRef = useRef<InputRef>(null);
   const providerSearchRequestIdRef = useRef(0);
+  const cloudCatalogRequestIdRef = useRef(0);
   const initialProvidersLoadedRef = useRef(false);
   const localizedFallbacks = useMemo(() => createModelProviderFallbacks(t), [i18n.language, t]);
   const getCapabilityLabel = useCallback((capability: ModelCapability) => t(capabilityLabelKeys[capability]), [t]);
@@ -664,6 +695,120 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
       )
     : false;
   const apiKeyRequired = !!configProvider && !baseUrlChanged;
+
+  const loadCloudSystemProvider = useCallback(async () => {
+    const requestId = ++cloudCatalogRequestIdRef.current;
+    setCloudSystemState("loading");
+    try {
+      const session = await getCloudSession();
+      if (requestId !== cloudCatalogRequestIdRef.current) return;
+	  const available = isCloudBusinessAvailable(session);
+	  setCloudRuntimeAvailable(available);
+	  if (!available) {
+        setCloudSystemModels([]);
+		setCloudSystemState(
+		  session.configured === true && session.reachability === "unreachable"
+		    ? "error"
+		    : "signed_out",
+		);
+        return;
+      }
+      const response = await modelProvidersApi.apiCoreModelProvidersModelsGet({});
+      if (requestId !== cloudCatalogRequestIdRef.current) return;
+      const data = unwrapModelProviderData<{ models?: Array<{
+        id: string;
+        name: string;
+        model_type: string;
+        source?: string;
+        availability?: string;
+        lifecycle?: string;
+      }> }>(response.data);
+      const models = (data.models || [])
+        .filter((model) => model.source === "cloud")
+        .map((model): CloudSystemProviderModel => ({
+          id: model.id,
+          name: model.name,
+          modelType: model.model_type,
+          availability:
+            model.availability === "degraded" || model.availability === "unavailable"
+              ? model.availability
+              : "available",
+          lifecycle:
+            model.lifecycle === "deprecated" || model.lifecycle === "retired"
+              ? model.lifecycle
+              : "active",
+        }));
+      setCloudSystemModels(models);
+      if (models.length) {
+        setCloudSystemState("ready");
+        return;
+      }
+      const readiness = await modelProvidersDefaultApi.apiCoreModelProvidersModelsReadyGet(
+        withModelProviderJsonOptions({ params: { model_type: "llm" } }),
+      );
+      if (requestId !== cloudCatalogRequestIdRef.current) return;
+      const ready = unwrapModelProviderData<{
+        reason?: string;
+        cloud_plan_url?: string;
+      }>(readiness.data as unknown);
+      setCloudPlanURL(ready.cloud_plan_url || "");
+      setCloudSystemState(
+        ready.reason === "cloud_plan_required" ? "plan_required" : "error",
+      );
+    } catch {
+      if (requestId === cloudCatalogRequestIdRef.current) {
+		setCloudRuntimeAvailable(false);
+        setCloudSystemModels([]);
+        setCloudSystemState("error");
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadCloudSystemProvider();
+    const refresh = () => void loadCloudSystemProvider();
+	const refreshCloudSession = () => {
+	  setCloudRuntimeAvailable(false);
+	  setCloudSystemModels([]);
+	  refresh();
+	};
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
+    window.addEventListener(LAZYMIND_CLOUD_SESSION_CHANGED_EVENT, refreshCloudSession);
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      cloudCatalogRequestIdRef.current += 1;
+      window.removeEventListener(LAZYMIND_CLOUD_SESSION_CHANGED_EVENT, refreshCloudSession);
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
+  }, [loadCloudSystemProvider]);
+
+  const beginSystemCloudLogin = useCallback(async () => {
+    const popup = reserveCloudLoginPopup();
+    if (popup === null) {
+      message.error(t("layout.cloudOpenFailed"));
+      return;
+    }
+    setCloudSystemState("loading");
+    try {
+      const login = await beginCloudLogin();
+      const result = await openCloudLogin(login.authorization_url, popup);
+      if (!result.ok) throw result.error || new Error(result.reason);
+      setCloudSystemState("loading");
+    } catch {
+      closeCloudLoginPopup(popup);
+      message.error(t("layout.cloudLoginFailed"));
+      void loadCloudSystemProvider();
+    }
+  }, [loadCloudSystemProvider, t]);
+
+  const openSystemCloudPlan = useCallback(async () => {
+    const result = await openCloudTokenPlan(cloudPlanURL);
+    if (!result.ok) message.error(t("layout.cloudOpenFailed"));
+  }, [cloudPlanURL, t]);
 
   const fetchProviderOptions = useCallback(async (searchKeyword = "") => {
     const providerResponse = await modelProvidersApi.apiCoreModelProvidersGet({
@@ -744,8 +889,14 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
   }, []);
 
   useEffect(() => {
-    void loadCredentialBackup();
-  }, [loadCredentialBackup]);
+	if (!cloudRuntimeAvailable) {
+	  setCredentialBackupAvailable(false);
+	  setCredentialBackupStatus({ enabled: false, backedUp: 0, pending: 0, failed: 0 });
+	  setCredentialBackupLoading(false);
+	  return;
+	}
+	void loadCredentialBackup();
+	}, [cloudRuntimeAvailable, loadCredentialBackup]);
 
   useEffect(() => {
     if (!credentialBackupStatus.enabled) return;
@@ -792,8 +943,19 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
   }, []);
 
   useEffect(() => {
-    void loadCredentialRestore();
-  }, [loadCredentialRestore]);
+	if (!cloudRuntimeAvailable) {
+	  setCredentialRestoreRecords([]);
+	  setCredentialRestoreStatus((current) => ({
+		...current,
+		available: false,
+		backupCount: 0,
+		status: "idle",
+	  }));
+	  setCredentialRestoreLoading(false);
+	  return;
+	}
+	void loadCredentialRestore();
+	}, [cloudRuntimeAvailable, loadCredentialRestore]);
 
   const startRestore = useCallback(async (
     mode: CredentialRestoreMode,
@@ -1456,20 +1618,31 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
     <div className="model-provider-page-content">
       <section className="model-provider-shell">
         <div className="model-provider-main-panel">
-          <CredentialBackupPanel
-            available={credentialBackupAvailable}
-            loading={credentialBackupLoading}
-            status={credentialBackupStatus}
-            onRetry={() => void loadCredentialBackup()}
-            onToggle={(enabled) => void toggleCredentialBackup(enabled)}
-          />
-          <CredentialRestorePanel
-            loading={credentialRestoreLoading}
-            status={credentialRestoreStatus}
-            onCancel={() => void cancelRestore()}
-            onRefresh={() => void loadCredentialRestore()}
-            onStart={(mode, resolution) => void startRestore(mode, resolution)}
-          />
+		  {cloudRuntimeAvailable ? (
+			<>
+			  <CloudSystemProviderCard
+				state={cloudSystemState}
+				models={cloudSystemModels}
+				onLogin={() => void beginSystemCloudLogin()}
+				onOpenPlan={() => void openSystemCloudPlan()}
+				onRetry={() => void loadCloudSystemProvider()}
+			  />
+			  <CredentialBackupPanel
+				available={credentialBackupAvailable}
+				loading={credentialBackupLoading}
+				status={credentialBackupStatus}
+				onRetry={() => void loadCredentialBackup()}
+				onToggle={(enabled) => void toggleCredentialBackup(enabled)}
+			  />
+			  <CredentialRestorePanel
+				loading={credentialRestoreLoading}
+				status={credentialRestoreStatus}
+				onCancel={() => void cancelRestore()}
+				onRefresh={() => void loadCredentialRestore()}
+				onStart={(mode, resolution) => void startRestore(mode, resolution)}
+			  />
+			</>
+		  ) : null}
           <section className="model-provider-added-section">
             <div className="model-provider-panel-heading">
               <h2 className="model-provider-section-title">{t("modelProvider.myGroupsTitle")}</h2>

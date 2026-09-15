@@ -108,6 +108,43 @@ def test_create_subagent_propagates_max_thinking_depth(monkeypatch):
     assert write_calls[0][1]['params']['_thinking_depth'] == 'max'
 
 
+def test_create_image_subagent_inherits_image_prompt_skill(monkeypatch):
+    cfg = _patch_config(monkeypatch)
+    cfg.update({
+        'mode': 'manual',
+        'available_skills': ['design/image-prompt-craft', 'research/deep-research'],
+        'subagent_skills': [],
+    })
+    write_calls = []
+    monkeypatch.setattr(sct, '_write_agent_data', lambda tag, **kw: write_calls.append((tag, kw)))
+
+    sct.create_subagent(
+        agent_type='image_generation',
+        title='生成 PPT 底图',
+        objective='为演示文稿制作一组统一的 16:9 背景图',
+        params={'_inherited_skills': ['deep-research']},
+    )
+
+    assert write_calls[0][1]['params']['_inherited_skills'] == ['design/image-prompt-craft']
+
+
+def test_unrelated_subagent_does_not_receive_image_prompt_skill(monkeypatch):
+    cfg = _patch_config(monkeypatch)
+    cfg.update({
+        'mode': 'manual',
+        'available_skills': ['design/image-prompt-craft'],
+        'subagent_skills': [],
+    })
+    write_calls = []
+    monkeypatch.setattr(sct, '_write_agent_data', lambda tag, **kw: write_calls.append((tag, kw)))
+
+    sct.create_subagent(
+        agent_type='research', title='研究数据库', objective='分析数据库索引性能',
+    )
+
+    assert '_inherited_skills' not in write_calls[0][1]['params']
+
+
 # ---------------------------------------------------------------------------
 # create_subagent — auto mode (polling until succeeded)
 # ---------------------------------------------------------------------------

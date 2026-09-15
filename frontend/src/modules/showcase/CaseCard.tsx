@@ -18,7 +18,6 @@ interface CaseCardProps {
   item: ShowcaseCase;
   onTry?: (item: ShowcaseCase) => void;
   primaryAction?: "try" | "details";
-  showWorkflowHot?: boolean;
 }
 
 const COVER_CLASS_BY_OUTPUT_TYPE: Record<string, string> = {
@@ -36,7 +35,6 @@ export default function CaseCard({
   item,
   onTry,
   primaryAction = "try",
-  showWorkflowHot = false,
 }: CaseCardProps) {
   const { t } = useTranslation();
   const location = useLocation();
@@ -76,9 +74,9 @@ export default function CaseCard({
               alt=""
               loading="lazy"
             />
-            {showWorkflowHot && technologyType === "workflow" ? (
+            {item.hot ? (
               <span
-                className="showcase-workflow-hot"
+                className="showcase-hot"
                 role="img"
                 aria-label={t("showcase.workflowHotBadge")}
               >

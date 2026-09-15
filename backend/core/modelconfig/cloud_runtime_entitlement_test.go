@@ -31,7 +31,7 @@ func withCloudEntitlement(bootstrap cloudclient.ModelProviderBootstrap, hasPlan,
 	return bootstrap
 }
 
-func TestCloudRuntimeProviderRequiresCloudChatEntitlement(t *testing.T) {
+func TestCloudRuntimeProviderRequiresTokenPlanAndAvailableCatalog(t *testing.T) {
 	models := []cloudclient.PublicCloudModel{{
 		ModelKey: "cloud-text", Capabilities: []string{"chat"}, Status: "available",
 	}}
@@ -42,7 +42,6 @@ func TestCloudRuntimeProviderRequiresCloudChatEntitlement(t *testing.T) {
 		wantAvailable bool
 	}{
 		{name: "no Plan", hasPlan: false, chatAvailable: false, wantAvailable: false},
-		{name: "Plan without Chat", hasPlan: true, chatAvailable: false, wantAvailable: false},
 		{name: "Plan with Chat", hasPlan: true, chatAvailable: true, wantAvailable: true},
 	}
 	for _, test := range tests {

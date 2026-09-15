@@ -376,6 +376,17 @@ export function WorkflowSessionApi() {
         options,
       );
     },
+    setApprovalPreference(
+      sessionId: string,
+      payload: { step_id: string; scope: 'step' | 'following'; approval_required: false },
+      options?: RawAxiosRequestConfig,
+    ) {
+      return axiosInstance.post(
+        `${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}:approval-preference`,
+        payload,
+        options,
+      );
+    },
     patchSlot(sessionId: string, slotId: string, selectedRevision: number, options?: RawAxiosRequestConfig) {
       return axiosInstance.patch(
         `${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}`,
@@ -1083,6 +1094,7 @@ export interface ChatExecutorDescriptor {
   installed: boolean;
   host_online: boolean;
   available: boolean;
+  connected?: boolean;
   unavailable_reason?: string;
 }
 

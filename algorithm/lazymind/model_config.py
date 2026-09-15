@@ -52,6 +52,45 @@ def is_model_role_available(role: str, *, config_path: Optional[str] = None) -> 
     )
 
 
+def get_model_role_runtime_identity(
+    role: str, *, config_path: Optional[str] = None,
+) -> Dict[str, str]:
+    '''Return the provider/model identity selected for a runtime role.
+
+    This intentionally exposes only non-secret routing metadata. Dynamic roles
+    read the request-scoped injected bucket; static roles read runtime_models.
+    API keys and endpoint URLs are never returned.
+    '''
+    entry = _role_entry(load_model_config(config_path or get_config_path()).get(role))
+    if not entry:
+        return {'role': role, 'source': '', 'model': ''}
+
+    source = str(entry.get('source') or '').strip()
+    if source.lower() != 'dynamic':
+        return {
+            'role': role,
+            'source': source,
+            'model': str(entry.get('model') or entry.get('name') or '').strip(),
+        }
+
+    import lazyllm
+    dynamic_cfg = lazyllm.globals['config'].get('dynamic_model_configs') or {}
+    buckets = dynamic_cfg.get(role) or {}
+    role_type = str(entry.get('type') or 'llm').lower()
+    preferred_slot = _TYPE_TO_SLOT.get(role_type, 'chat')
+    selected = buckets.get(preferred_slot)
+    if not isinstance(selected, dict):
+        selected = next(
+            (value for value in buckets.values() if isinstance(value, dict)),
+            {},
+        )
+    return {
+        'role': role,
+        'source': str(selected.get('source') or '').strip(),
+        'model': str(selected.get('model') or '').strip(),
+    }
+
+
 def get_config_path() -> str:
     '''Return the active runtime_models config file path as a string.
 

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gorilla/mux"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
@@ -43,7 +44,19 @@ func workflowCallModeEnabled(mode string) bool {
 }
 
 func workflowRefPathVar(r *http.Request) string {
-	raw := strings.TrimSpace(common.PathVar(r, "workflow_ref"))
+	// Workflow refs themselves contain colons (user:<owner>:<workflow-id>).
+	// common.PathVar intentionally strips a trailing colon segment for routes
+	// shaped like {id}:action, which would mistake the workflow id for an action
+	// on non-action routes such as /versions. Read the mux value directly and
+	// remove only action suffixes that are actually present in this request URL.
+	raw := strings.TrimSpace(mux.Vars(r)["workflow_ref"])
+	for _, action := range []string{"rollback", "archive", "restore"} {
+		suffix := ":" + action
+		if strings.HasSuffix(r.URL.Path, suffix) && strings.HasSuffix(raw, suffix) {
+			raw = strings.TrimSuffix(raw, suffix)
+			break
+		}
+	}
 	if decoded, err := url.PathUnescape(raw); err == nil {
 		return decoded
 	}

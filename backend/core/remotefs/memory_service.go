@@ -12,8 +12,12 @@ import (
 
 	"gorm.io/gorm"
 
+	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/currentmemory"
+	appLog "lazymind/core/log"
+	"lazymind/core/maintenance"
+	"lazymind/core/resourceupdate"
 )
 
 const (
@@ -43,38 +47,36 @@ var (
 )
 
 type memoryCurrentService struct {
-	db                      *gorm.DB
-	repository              *currentmemory.Repository
-	currentMemory           *currentmemory.Module
-	clock                   func() time.Time
-	preferenceIndexMaxItems int
+	db            *gorm.DB
+	repository    *currentmemory.Repository
+	currentMemory *currentmemory.Module
+	clock         func() time.Time
 }
 
 func newMemoryCurrentService(db *gorm.DB) *memoryCurrentService {
-	return newMemoryCurrentServiceWithPreferenceIndexMaxItems(
+	return newMemoryCurrentServiceWithPreferenceContextMaxChars(
 		db,
-		mustPreferenceIndexMaxItems(),
+		mustPreferenceContextMaxChars(),
 	)
 }
 
-func newMemoryCurrentServiceWithPreferenceIndexMaxItems(
+func newMemoryCurrentServiceWithPreferenceContextMaxChars(
 	db *gorm.DB,
-	maxItems int,
+	maxChars int,
 ) *memoryCurrentService {
-	if maxItems <= 0 {
-		panic("preference index max items must be positive")
+	if maxChars <= 0 {
+		panic("preference context max chars must be positive")
 	}
 	return &memoryCurrentService{
-		db:                      db,
-		repository:              currentmemory.NewRepository(db),
-		currentMemory:           currentmemory.NewModuleWithPreferenceIndexMaxItems(db, maxItems),
-		clock:                   time.Now,
-		preferenceIndexMaxItems: maxItems,
+		db:            db,
+		repository:    currentmemory.NewRepository(db),
+		currentMemory: currentmemory.NewModuleWithPreferenceContextMaxChars(db, maxChars),
+		clock:         time.Now,
 	}
 }
 
-func mustPreferenceIndexMaxItems() int {
-	value, err := currentmemory.PreferenceIndexMaxItemsFromEnv()
+func mustPreferenceContextMaxChars() int {
+	value, err := currentmemory.PreferenceContextMaxCharsFromEnv()
 	if err != nil {
 		panic(err)
 	}
@@ -227,42 +229,20 @@ func (s *memoryCurrentService) write(
 	if err := currentmemory.ValidateDocumentForPath(entryPath, content); err != nil {
 		return orm.MemoryCurrentEntry{}, err
 	}
-	nextPreferenceItems := -1
-	if entryPath == memoryPreferencePath {
-		document, parseErr := currentmemory.ParsePreferences(content)
-		if parseErr != nil {
-			return orm.MemoryCurrentEntry{}, parseErr
-		}
-		nextPreferenceItems = len(document.Preferences)
-	}
 	if err := s.ensureInitialized(ctx, userID); err != nil {
 		return orm.MemoryCurrentEntry{}, err
 	}
 	var out orm.MemoryCurrentEntry
-	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err = maintenance.UserTransaction(ctx, s.db, userID, func(tx *gorm.DB) error {
+		if err := s.authorizePreferenceMutation(ctx, tx, userID, entryPath); err != nil {
+			return err
+		}
 		_, byPath, err := s.loadEntries(ctx, tx, userID)
 		if err != nil {
 			return err
 		}
 		if existing, ok := byPath[entryPath]; ok && existing.EntryType == memoryEntryDir {
 			return fmt.Errorf("%w: cannot write file over directory", errMemoryConflict)
-		}
-		if nextPreferenceItems >= 0 {
-			currentPreferenceItems := 0
-			if existing, ok := byPath[entryPath]; ok {
-				document, parseErr := currentmemory.ParsePreferences(existing.Content)
-				if parseErr != nil {
-					return parseErr
-				}
-				currentPreferenceItems = len(document.Preferences)
-			}
-			if capacityErr := currentmemory.ValidatePreferenceCapacity(
-				currentPreferenceItems,
-				nextPreferenceItems,
-				s.preferenceIndexMaxItems,
-			); capacityErr != nil {
-				return capacityErr
-			}
 		}
 		now := s.clock().UTC()
 		if err := s.ensureParentDirectories(ctx, tx, userID, entryPath, byPath, now); err != nil {
@@ -283,7 +263,34 @@ func (s *memoryCurrentService) write(
 		}
 		return currentmemory.NewRepository(tx).UpsertEntry(ctx, out)
 	})
+	if err == nil && entryPath == memoryPreferencePath &&
+		!strings.HasPrefix(strings.TrimSpace(maintenance.Execution(ctx).TaskID), resourceupdate.PreferenceOrganizerAlgorithmPrefix) {
+		s.enqueuePreferenceOrganizerIfNeeded(ctx, userID, out.Content)
+	}
 	return out, err
+}
+
+func (s *memoryCurrentService) enqueuePreferenceOrganizerIfNeeded(
+	ctx context.Context,
+	userID string,
+	content []byte,
+) {
+	document, err := currentmemory.ParsePreferences(content)
+	if err != nil {
+		return
+	}
+	state := s.currentMemory.BuildPreferenceProjectionState(document)
+	if !state.NeedsOrganization() {
+		return
+	}
+	now := s.clock().UTC()
+	_, _, err = resourceupdate.EnqueuePreferenceOrganizer(
+		ctx, s.db, userID, orm.ResourceUpdateTriggerTypePreferenceChange,
+		"preference-change:"+userID+":"+common.GenerateID(), now,
+	)
+	if err != nil {
+		appLog.Logger.Warn().Err(err).Str("event", "preference_organizer_enqueue_failed").Str("user_id", userID).Str("etag", currentmemory.ContentETag(content)).Msg("Preference was saved but Organizer enqueue failed")
+	}
 }
 
 func (s *memoryCurrentService) mkdir(ctx context.Context, userID, rawPath string, recursive bool) error {
@@ -294,7 +301,10 @@ func (s *memoryCurrentService) mkdir(ctx context.Context, userID, rawPath string
 	if err := s.ensureInitialized(ctx, userID); err != nil {
 		return err
 	}
-	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return maintenance.UserTransaction(ctx, s.db, userID, func(tx *gorm.DB) error {
+		if err := s.authorizePreferenceMutation(ctx, tx, userID, entryPath); err != nil {
+			return err
+		}
 		_, byPath, err := s.loadEntries(ctx, tx, userID)
 		if err != nil {
 			return err
@@ -330,7 +340,10 @@ func (s *memoryCurrentService) delete(ctx context.Context, userID, rawPath strin
 	if err := s.ensureInitialized(ctx, userID); err != nil {
 		return err
 	}
-	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return maintenance.UserTransaction(ctx, s.db, userID, func(tx *gorm.DB) error {
+		if err := s.authorizePreferenceMutation(ctx, tx, userID, entryPath); err != nil {
+			return err
+		}
 		entries, byPath, err := s.loadEntries(ctx, tx, userID)
 		if err != nil {
 			return err
@@ -381,7 +394,10 @@ func (s *memoryCurrentService) copy(
 	if err := s.ensureInitialized(ctx, userID); err != nil {
 		return err
 	}
-	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return maintenance.UserTransaction(ctx, s.db, userID, func(tx *gorm.DB) error {
+		if err := s.authorizePreferenceMutation(ctx, tx, userID, from, to); err != nil {
+			return err
+		}
 		return s.copyEntries(ctx, tx, userID, from, to)
 	})
 }
@@ -403,7 +419,10 @@ func (s *memoryCurrentService) move(ctx context.Context, userID, rawFrom, rawTo 
 	if err := s.ensureInitialized(ctx, userID); err != nil {
 		return err
 	}
-	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return maintenance.UserTransaction(ctx, s.db, userID, func(tx *gorm.DB) error {
+		if err := s.authorizePreferenceMutation(ctx, tx, userID, from, to); err != nil {
+			return err
+		}
 		if err := s.copyEntries(ctx, tx, userID, from, to); err != nil {
 			return err
 		}
@@ -419,6 +438,16 @@ func (s *memoryCurrentService) move(ctx context.Context, userID, rawFrom, rawTo 
 		}
 		return currentmemory.NewRepository(tx).DeletePaths(ctx, userID, paths)
 	})
+}
+
+func (s *memoryCurrentService) authorizePreferenceMutation(ctx context.Context, tx *gorm.DB, userID string, paths ...string) error {
+	freeze := false
+	for _, p := range paths {
+		if p == memoryPreferencePath || p == memoryReferencesPath || strings.HasPrefix(p, memoryReferencesPath+"/") || strings.HasPrefix(memoryPreferencePath, p+"/") || strings.HasPrefix(memoryReferencesPath, p+"/") {
+			freeze = true
+		}
+	}
+	return maintenance.Authorize(ctx, tx, userID, freeze)
 }
 
 func (s *memoryCurrentService) copyEntries(

@@ -144,19 +144,27 @@ func conversationAgentWorkspaceRoots(userID, conversationID string) []string {
 	}
 }
 
-func removeConversationArtifactFiles(userID, conversationID string) error {
+func conversationArtifactRoots(userID, conversationID string) []string {
 	roots := []string{
 		conversationArtifactConversationRoot(userID, conversationID),
 		legacyConversationArtifactConversationRoot(userID, conversationID),
 	}
 	roots = append(roots, conversationAgentWorkspaceRoots(userID, conversationID)...)
 	seen := make(map[string]struct{}, len(roots))
+	unique := make([]string, 0, len(roots))
 	for _, root := range roots {
 		root = filepath.Clean(root)
 		if _, ok := seen[root]; ok {
 			continue
 		}
 		seen[root] = struct{}{}
+		unique = append(unique, root)
+	}
+	return unique
+}
+
+func removeConversationArtifactFiles(userID, conversationID string) error {
+	for _, root := range conversationArtifactRoots(userID, conversationID) {
 		if err := os.RemoveAll(root); err != nil {
 			return err
 		}
