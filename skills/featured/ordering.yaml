@@ -25,3 +25,4 @@ home:
     - cangjie-distill
     - automation-workflows
     - n8n-workflow-automation
+    - proactive-agent
