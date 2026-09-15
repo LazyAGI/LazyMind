@@ -164,12 +164,12 @@ func TestHostAccessApprovalRejectionAndFrozenRunPermission(t *testing.T) {
 	}
 }
 
-func TestHostAccessExternalAlwaysRequiresApproval(t *testing.T) {
+func TestHostAccessExternalAllowAllDoesNotAsk(t *testing.T) {
 	db, grant, states, conversation := operationFixture(t, PermissionAllowAll)
 	req := hostRequest(grant, conversation, "unused", OperationRead)
 	req.Path = filepath.Join(t.TempDir(), "missing/input.bin")
 	result, err := PrepareOperationBatch(t.Context(), db.DB, states, OperationBatchRequest{Calls: []OperationRequest{req}})
-	if err != nil || result.Operations[0].Decision != DecisionPending {
+	if err != nil || result.Operations[0].Decision != DecisionAllowed {
 		t.Fatalf("external=%+v %v", result, err)
 	}
 }
@@ -225,5 +225,48 @@ func TestHostAccessBatchMixesDescriptorLocalAndGeneric(t *testing.T) {
 		if err != nil || !claimed.ExecuteAllowed {
 			t.Fatalf("mixed claim=%+v %v", claimed, err)
 		}
+	}
+}
+
+func TestUnboundHostAccessUsesOwnedRunAndApproval(t *testing.T) {
+	db, grant, states, conversation := operationFixture(t, PermissionAlwaysAsk)
+	if err := db.Where("conversation_id = ?", conversation).Delete(&orm.ConversationWorkspaceBinding{}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&orm.Conversation{}).Where("id = ?", conversation).Update("is_task_conv", false).Error; err != nil {
+		t.Fatal(err)
+	}
+	run := UnboundContext()
+	SetValidateOperationRunFunc(func(_ context.Context, _ *gorm.DB, _ state.Store, req OperationRequest) (*ContextSnapshot, error) {
+		if req.RunID != "run" || req.HistoryID != "history" {
+			return nil, Error("execution_inactive", 409, "conflict")
+		}
+		return run, nil
+	})
+	req := hostRequest(grant, conversation, "output.txt", OperationWrite)
+	req.WorkspaceID = ""
+	prepared, err := PrepareOperationBatch(t.Context(), db.DB, states, OperationBatchRequest{Calls: []OperationRequest{req}})
+	if err != nil || len(prepared.Operations) != 1 || prepared.Operations[0].Decision != DecisionPending {
+		t.Fatalf("unbound preparation: %+v %v", prepared, err)
+	}
+	id := prepared.Operations[0].OperationID
+	if _, err := ClaimLocalOperation(t.Context(), db.DB, states, id, req); err == nil {
+		t.Fatal("pending call executed")
+	}
+	if _, err := DecideOperation(t.Context(), db.DB, states, id, "allow_once", "other"); err == nil {
+		t.Fatal("foreign approval accepted")
+	}
+	if _, err := DecideOperation(t.Context(), db.DB, states, id, "allow_once", "owner"); err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := ClaimLocalOperation(t.Context(), db.DB, states, id, req)
+	if err != nil || !claimed.ExecuteAllowed {
+		t.Fatalf("claim: %+v %v", claimed, err)
+	}
+	if _, err := ClaimLocalOperation(t.Context(), db.DB, states, id, req); err == nil {
+		t.Fatal("duplicate execution accepted")
+	}
+	if _, err := os.Stat(req.Path); !os.IsNotExist(err) {
+		t.Fatal("Core performed file IO")
 	}
 }

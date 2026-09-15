@@ -541,7 +541,7 @@ func TestWorkspaceWorkflowIdentityRequiresCurrentOwnedLease(t *testing.T) {
 	}
 	paramsJSON, _ := json.Marshal(params)
 	task := orm.SubAgentTask{ID: "workflow-task", ConversationID: req.ConversationID, CreateUserID: req.UserID, AgentType: "workflow_step", Status: "running", Mode: "auto", Params: paramsJSON, InputSlots: json.RawMessage(`[]`), OutputSlots: json.RawMessage(`[]`)}
-	revision := orm.WorkflowRevision{ID: "workspace-revision", CompiledGraph: json.RawMessage(`{"nodes":{"step":{"legacy_tools":["local_fs"]}}}`)}
+	revision := orm.WorkflowRevision{ID: "workspace-revision", CompiledGraph: json.RawMessage(`{"nodes":{"step":{"legacy_tools":["write"]}}}`)}
 	session := orm.WorkflowSession{WorkflowRevisionID: revision.ID, ID: "workflow-session", ConversationID: req.ConversationID, CreateUserID: req.UserID, Status: "active"}
 	step := orm.WorkflowSessionStep{ID: "workflow-attempt", SessionID: session.ID, TaskID: task.ID, StepID: "step", Status: "running", Validity: "effective", FencingGeneration: 2, LeaseToken: "current-lease", LeaseExpiresAt: &expires}
 	for _, row := range []any{&revision, &task, &session, &step} {
@@ -550,11 +550,15 @@ func TestWorkspaceWorkflowIdentityRequiresCurrentOwnedLease(t *testing.T) {
 		}
 	}
 	req.TaskID, req.AttemptID, req.Generation, req.LeaseToken = task.ID, step.ID, "2", step.LeaseToken
+	req.ExecutionMode, req.ToolName, req.HostIntentID = "host_access", "write", "0"
+	req.ArgumentsDigest = strings.Repeat("a", 64)
+	req.Operation = localworkspace.OperationWrite
+	req.Path = filepath.Join(t.TempDir(), "output.txt")
 	prepared, err := localworkspace.PrepareOperation(t.Context(), db, ss, req)
 	if err != nil {
 		t.Fatalf("live workflow lease: %v", err)
 	}
-	if _, err := localworkspace.ExecuteOperation(t.Context(), db, ss, prepared.OperationID, req); err != nil {
+	if _, err := localworkspace.ClaimLocalOperation(t.Context(), db, ss, prepared.OperationID, req); err != nil {
 		t.Fatal(err)
 	}
 	for _, tc := range []struct {
@@ -1082,7 +1086,7 @@ func TestWorkspacePythonCoreHTTP(t *testing.T) {
 					t.Cleanup(func() { _ = ss.Del(context.Background(), key) })
 				} else {
 					expiry := time.Now().Add(time.Hour)
-					revision := orm.WorkflowRevision{ID: request.ConversationID + "-revision", CompiledGraph: json.RawMessage(`{"nodes":{"step":{"legacy_tools":["local_fs"]}}}`)}
+					revision := orm.WorkflowRevision{ID: request.ConversationID + "-revision", CompiledGraph: json.RawMessage(`{"nodes":{"step":{"legacy_tools":["read","write","edit","remove"]}}}`)}
 					session := orm.WorkflowSession{ID: request.ConversationID + "-session", WorkflowRevisionID: revision.ID, ConversationID: request.ConversationID, CreateUserID: "owner", Status: "active"}
 					step := orm.WorkflowSessionStep{ID: request.ConversationID + "-attempt", SessionID: session.ID, TaskID: task.ID, StepID: "step", Status: "running", Validity: "effective", FencingGeneration: 1, LeaseToken: "http-lease", LeaseExpiresAt: &expiry}
 					for _, row := range []any{&revision, &session, &step} {
@@ -1095,6 +1099,7 @@ func TestWorkspacePythonCoreHTTP(t *testing.T) {
 			}
 			t.Setenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN", "isolated-http-test")
 			router := mux.NewRouter()
+			router.HandleFunc("/internal/conversations/{conversation_id}/workspace-operations:prepare-batch", localworkspace.InternalPrepareOperationBatch).Methods("POST")
 			router.HandleFunc("/internal/conversations/{conversation_id}/workspace-operations:prepare", localworkspace.InternalPrepareOperation).Methods("POST")
 			router.HandleFunc("/internal/conversations/{conversation_id}/workspace-operations/{operation_id}", localworkspace.InternalOperationStatus).Methods("GET")
 			router.HandleFunc("/internal/conversations/{conversation_id}/workspace-operations/{operation_id}:execute", localworkspace.InternalExecuteOperation).Methods("POST")
@@ -1113,7 +1118,7 @@ func TestWorkspacePythonCoreHTTP(t *testing.T) {
 			defer cancel()
 			cmd := exec.CommandContext(ctx, python, "-m", "pytest", "tests/algorithm/chat/test_workspace_authorization_contract.py::test_workspace_real_core_http_roundtrip", "-q")
 			cmd.Dir = root
-			cmd.Env = append(os.Environ(), "PYTHONPATH="+filepath.Join(root, "algorithm")+string(os.PathListSeparator)+filepath.Join(root, "algorithm/lazyllm"), "LAZYMIND_WORKSPACE_HTTP_FIXTURE="+string(fixture))
+			cmd.Env = append(os.Environ(), "PYTHONPATH="+filepath.Join(root, "algorithm")+string(os.PathListSeparator)+filepath.Join(root, "algorithm/lazyllm")+string(os.PathListSeparator)+os.Getenv("PYTHONPATH"), "LAZYMIND_WORKSPACE_HTTP_FIXTURE="+string(fixture))
 			output, err := cmd.CombinedOutput()
 			if err != nil {
 				t.Fatalf("%s HTTP integration: %v\n%s", actor, err, output)

@@ -548,15 +548,7 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		})
 		reqBody["history"] = history
 	}
-	if err := applyLocalFSPathsForChat(r.Context(), r, db, userID, reqBody); err != nil {
-		var appErr *common.AppError
-		if errors.As(err, &appErr) {
-			common.ReplyAppErr(w, appErr)
-		} else {
-			common.ReplyErr(w, "load local fs chat paths failed", http.StatusInternalServerError)
-		}
-		return
-	}
+
 	if cnt, err := subagent.CountByConversation(r.Context(), db, convID); err == nil && cnt > 0 {
 		reqBody["has_subagents"] = true
 	}

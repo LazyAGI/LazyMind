@@ -19,13 +19,22 @@ type ContextSnapshot struct {
 	PermissionVersion int64  `json:"permission_version"`
 }
 
+// UnboundContext is a Core-issued snapshot; it never grants implicit write access.
+func UnboundContext() *ContextSnapshot {
+	if !Enabled() {
+		return nil
+	}
+	return &ContextSnapshot{PermissionMode: PermissionAlwaysAsk, PermissionVersion: 1}
+}
+
 func SnapshotFromMetadata(value any) *ContextSnapshot {
 	body, err := json.Marshal(value)
 	if err != nil {
 		return nil
 	}
 	var snapshot ContextSnapshot
-	if json.Unmarshal(body, &snapshot) != nil || snapshot.WorkspaceID == "" || snapshot.WorkspaceVersion < 1 ||
+	if json.Unmarshal(body, &snapshot) != nil || (snapshot.WorkspaceID != "" && snapshot.WorkspaceVersion < 1) ||
+		(snapshot.WorkspaceID == "" && (snapshot.WorkspaceVersion != 0 || snapshot.PermissionMode != PermissionAlwaysAsk || snapshot.Root != "")) ||
 		!ValidPermissionMode(snapshot.PermissionMode) || snapshot.PermissionVersion < 1 {
 		return nil
 	}
@@ -52,13 +61,10 @@ func ResolveForConversation(ctx context.Context, db *gorm.DB, userID, conversati
 	var binding orm.ConversationWorkspaceBinding
 	err = db.WithContext(ctx).Where("conversation_id = ?", conversationID).First(&binding).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, nil
+		return UnboundContext(), nil
 	}
 	if err != nil {
 		return nil, err
-	}
-	if !conversation.IsTaskConv {
-		return nil, ModeError()
 	}
 	workspace, err := ResolveActiveForBinding(ctx, db, userID, binding.WorkspaceID)
 	if err != nil {
@@ -95,8 +101,8 @@ func ModelNotice(snapshot ContextSnapshot) string {
 	data, _ := json.Marshal(map[string]any{"root": snapshot.Root,
 		"permission_mode": snapshot.PermissionMode})
 	return "本任务的工作区：" + string(data) +
-		"\n相对路径以工作区为基准。使用 local_fs 读取、创建、修改、追加或删除文件；Core 负责权限检查，需要批准时整批工具会等待用户决定，然后由本地文件工具执行。" +
-		"\n工作区外的绝对路径需要用户批准本次操作。只根据工具实际结果报告成功。拒绝、冲突或结果未知时说明原因，不使用其他工具绕过。"
+		"\n相对路径以工作区为基准。使用 read/write/edit/ls/glob/grep/mkdir/move/remove/stat 操作文件；权限由工作区策略决定，需要批准时等待用户决定后再执行。" +
+		"\n读取放行；写入和删除按权限模式审批，未绑定工作区时默认逐次审批。只根据工具实际结果报告成功。拒绝、冲突或结果未知时说明原因，不使用其他工具绕过。"
 }
 
 func BuildRequestQuery(original string, snapshot *ContextSnapshot) string {

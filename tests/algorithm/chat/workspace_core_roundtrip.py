@@ -10,15 +10,15 @@ import requests
 from lazyllm.tools.agent import ToolManager, HostFileIntent, HostFileResolution, fc_register
 
 from lazymind.config import config
-from lazymind.chat.engine.tools.workspace_context import WorkspacePermissionContext
+from lazymind.chat.engine.tools.workspace_context import WorkspaceContext
 from lazymind.chat.engine.agent_runtime.tool_call_guard import ToolExecutionMiddleware
-from lazymind.chat.engine.tools.local_fs import LocalFileToolkit
+from lazyllm.tools.agent import FileSystemToolkit
 from lazymind.chat.engine.tools.calculator import calculator
 
 
 def call(method, **arguments):
     return {'id': 'shared-provider-id', 'function': {
-        'name': 'LocalFileToolkit_' + method, 'arguments': arguments,
+        'name': method, 'arguments': arguments,
     }}
 
 
@@ -33,10 +33,10 @@ def main():
         '_workspace_execution': {'history_id': 'history', 'run_id': 'run'},
         'workspace_context': {
             'workspace_id': context['workspace_id'], 'root': root, 'workspace_version': 1,
-            'permission_mode': 'allow_all', 'permission_version': 1,
+            'permission_mode': 'always_ask', 'permission_version': 1,
         },
     }
-    toolkit = LocalFileToolkit()
+    toolkit = FileSystemToolkit()
     @fc_register(host_file=lambda args: HostFileResolution(
         args, (HostFileIntent(args['path'], 'read'),)))
     def declared_read(path: str):
@@ -45,13 +45,13 @@ def main():
         Args:
             path: Absolute file path.
         """
-        with host_file_io.open_read(path) as file:
+        with open(path, 'rb') as file:
             return file.read().decode()
 
     manager = ToolManager([toolkit, calculator, declared_read])
     middleware = ToolExecutionMiddleware(
         manager,
-        workspace_permission=WorkspacePermissionContext.from_config(
+        workspace_permission=WorkspaceContext.from_config(
             lazyllm.globals['agentic_config'], trusted_local=True,
         ),
         tool_context=lazyllm.globals['agentic_config'],
@@ -99,21 +99,21 @@ def main():
 
     result = run_with_user_decision([
         {'id': 'ordinary', 'function': {'name': 'calculator', 'arguments': {'expression': '1+1'}}},
-        call('read', filepath=str(target)),
-        call('append', filepath=str(target), content='+'),
-        call('append', filepath=str(target), content='+'),
-    ], 3, 'allow_once')
+        call('read', path=str(target)),
+        call('write', mode='append', path=str(target), content='+'),
+        call('write', mode='append', path=str(target), content='+'),
+    ], 2, 'allow_once')
     assert all(item['ok'] for item in result.results), result.results
     assert target.read_text() == 'seed++'
-    assert result.results[1]['value']['filepath'] == str(target)
+    assert result.results[1]['value']['path'] == str(target)
     assert ordinary_effects == [True]
     denied = target.parent / 'denied.txt'
-    result = run_with_user_decision([call('create', filepath=str(denied), content='must not appear')], 1, 'reject')
+    result = run_with_user_decision([call('write', mode='create', path=str(denied), content='must not appear')], 1, 'reject')
     assert not result.results[0]['ok'] and not denied.exists()
     generic = run_with_user_decision([
         {'function': {'name': 'declared_read', 'arguments': {'path': str(target)}}},
-        call('read', filepath=str(target)),
-    ], 2, 'allow_once', expected='seed++', expected_ordinary=1)
+        call('read', path=str(target)),
+    ], 0, 'allow_once', expected='seed++', expected_ordinary=1)
     assert all(item['ok'] for item in generic.results), generic.results
     assert generic.results[0]['value'] == 'seed++'
     assert generic.results[1]['value']['content'] == 'seed++'

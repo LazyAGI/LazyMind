@@ -1238,7 +1238,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
         files: fileListRef.current?.getFiles(),
         create_time: new Date().toISOString(),
         ...(runInBackground ? { run_in_background: true } : {}),
-        ...(runInBackground && workspaceId ? { workspace_id: workspaceId, workspace_permission_mode: workspacePermissionMode } : {}),
+        ...(workspaceId ? { workspace_id: workspaceId, workspace_permission_mode: workspacePermissionMode } : {}),
         ...(!sessionId && effectiveInitialModelSelection
           ? { initial_model_selection: effectiveInitialModelSelection }
           : {}),
@@ -1645,7 +1645,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                       />
                     </div>
                   </div>
-                  {(runInBackground || Boolean(sessionId && !sessionId.startsWith("temp_"))) && <LocalWorkspaceControl
+                  {<LocalWorkspaceControl
                     conversationId={sessionId && !sessionId.startsWith("temp_") ? sessionId : undefined}
                     configResetKey={configResetKey}
                     onSavingChange={handleWorkspaceSavingChange}
@@ -1819,7 +1819,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                           },
                           thinking_depth: effectiveThinkingDepth,
                           ...(runInBackground ? { run_in_background: true } : {}),
-                          ...(runInBackground && workspaceId ? { workspace_id: workspaceId, workspace_permission_mode: workspacePermissionMode } : {}),
+                          ...(workspaceId ? { workspace_id: workspaceId, workspace_permission_mode: workspacePermissionMode } : {}),
                           ...contextRuntimeSettings,
                         };
                       }}

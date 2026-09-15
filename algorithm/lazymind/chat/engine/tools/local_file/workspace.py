@@ -16,12 +16,12 @@ from lazyllm.tools.agent import (
 )
 from lazyllm.tools.agent.base import _write_agent_data
 from lazyllm.tools.agent.file_tool import (
-    list_dir as _list_dir,
-    write_file as _write_file,
+    ls as _list_dir,
+    write as _write_file,
 )
 
 from lazymind.config import config as _cfg
-from lazymind.chat.engine.tools.local_fs import LocalFileToolkit
+from lazymind.chat.engine.tools.workspace_context import get_workspace_permission_context
 
 from .resolver import resolve_text_target
 from .window import (
@@ -139,7 +139,8 @@ def _workspace_file_resource(arguments: Dict[str, Any], key: str = 'path'):
 
 
 def _file_tool_root(workspace: str) -> Optional[str]:
-    return None if _cfg['trusted_local_mode'] and LocalFileToolkit._workspace_binding() is None else workspace
+    permission = get_workspace_permission_context()
+    return None if _cfg['trusted_local_mode'] and not (permission and permission.bound) else workspace
 
 
 def _resolve_source_file(path: str, user_id: str, conversation_id: str) -> str:
@@ -283,7 +284,6 @@ def write_file(
     mode: str = 'overwrite',
     encoding: str = 'utf-8',
     create_parents: bool = True,
-    allow_unsafe: bool = False,
 ) -> Dict[str, Any]:
     """Write a text file in the current chat workspace or an allowed host path.
 
@@ -293,7 +293,6 @@ def write_file(
         mode: "overwrite" or "append".
         encoding: Text encoding.
         create_parents: Create parent directories when needed.
-        allow_unsafe: Allow overwriting an existing file. Append mode does not require it.
     """
     if mode not in {'overwrite', 'append'}:
         raise ToolExecutionError('mode must be "overwrite" or "append".')
@@ -306,7 +305,6 @@ def write_file(
         encoding=encoding,
         root=_file_tool_root(workspace),
         create_parents=create_parents,
-        allow_unsafe=allow_unsafe,
     )
 
 

@@ -46,6 +46,16 @@ func TestWorkspaceWorkCreationLocksBindingAndRollsBackUnauthorizedGrant(t *testi
 		t.Fatalf("created binding=%+v", createdBinding)
 	}
 
+	ordinary, _, err := ensureConversationWithWorkspace(context.Background(), db.DB, "ordinary-chat", "chat", nil, nil,
+		"owner", "owner", false, "", nil, nil, map[string]any{"workspace_id": registered.WorkspaceID})
+	if err != nil || ordinary.IsTaskConv {
+		t.Fatalf("ordinary workspace chat: %+v %v", ordinary, err)
+	}
+	snapshot, err := localworkspace.ResolveForConversation(context.Background(), db.DB, "owner", ordinary.ID)
+	if err != nil || snapshot == nil || snapshot.WorkspaceID != registered.WorkspaceID {
+		t.Fatalf("ordinary binding: %+v %v", snapshot, err)
+	}
+
 	// Seed metadata through ORM; native selection proof is exercised in task 2.
 	grant := orm.LocalWorkspace{ID: "grant", CreateUserID: "owner", CanonicalPath: root, Status: "active", Version: 1, Source: "local"}
 	if err := db.Create(&grant).Error; err != nil {

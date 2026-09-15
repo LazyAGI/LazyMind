@@ -1858,7 +1858,7 @@ func TestBuildLazyChatRequestMapsAllFields(t *testing.T) {
 	if req.Message.CurrentTurnSeq != 7 {
 		t.Fatalf("unexpected current_turn_seq: %d", req.Message.CurrentTurnSeq)
 	}
-	if len(req.Retrieval.Databases) != 1 || req.Retrieval.Dataset != "default" || len(req.Retrieval.LocalFSSources) != 1 {
+	if len(req.Retrieval.Databases) != 1 || req.Retrieval.Dataset != "default" {
 		t.Fatalf("unexpected retrieval: %#v", req.Retrieval)
 	}
 	if req.WorkspaceContext == nil || req.WorkspaceContext.WorkspaceID != "workspace-1" || req.WorkspaceContext.Root != "/project" {

@@ -132,7 +132,7 @@ def test_file_compactor_keeps_path_and_excerpt() -> None:
             'content': 'line\n' * 500,
         }
     }
-    compacted, kind = compact_file_result('LocalFileToolkit_read', payload)
+    compacted, kind = compact_file_result('read', payload)
     assert kind == 'file_locator'
     assert '/tmp/demo.py' in compacted
     assert 'total_lines=400' in compacted

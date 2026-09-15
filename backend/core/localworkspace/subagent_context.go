@@ -17,14 +17,6 @@ func RebuildSubagentParams(ctx context.Context, db *gorm.DB, userID, conversatio
 	if db == nil || !db.Migrator().HasTable(&orm.ConversationWorkspaceBinding{}) {
 		return params, nil
 	}
-	var bindingCount int64
-	if err := db.WithContext(ctx).Model(&orm.ConversationWorkspaceBinding{}).
-		Where("conversation_id = ?", conversationID).Count(&bindingCount).Error; err != nil {
-		return nil, err
-	}
-	if bindingCount == 0 {
-		return params, nil
-	}
 	snapshot, err := ResolveForConversation(ctx, db, userID, conversationID)
 	if err != nil || snapshot == nil {
 		return params, err

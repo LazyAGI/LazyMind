@@ -20,7 +20,7 @@ func TestLocalOperationRealPythonRoundTrip(t *testing.T) {
 	if python == "" {
 		t.Skip("set WORKSPACE_TEST_PYTHON and PYTHONPATH to run the actual Python/Core integration")
 	}
-	db, grant, states, conversation := operationFixture(t, PermissionAllowAll)
+	db, grant, states, conversation := operationFixture(t, PermissionAlwaysAsk)
 	store.Init(db.DB, nil, states)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 	t.Setenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN", "synthetic-local-operation-test-token")

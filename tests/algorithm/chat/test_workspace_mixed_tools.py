@@ -3,7 +3,7 @@ import lazyllm
 
 from lazymind.chat.engine.subagent.context import SubAgentContext
 from lazymind.chat.engine.subagent.tools import save_artifacts
-from lazymind.chat.engine.tools.workspace_context import ToolResolutionContext, WorkspacePermissionContext
+from lazymind.chat.engine.tools.workspace_context import ToolResolutionContext, WorkspaceContext
 
 
 def artifact_call(source):
@@ -23,7 +23,7 @@ def artifact_runtime(workspace_runtime, tmp_path, monkeypatch):
     monkeypatch.setitem(lazyllm.globals, 'subagent_ctx', context)
     middleware, core, config = workspace_runtime(extra_tools=[save_artifacts])
     tool_context = {**config, '_subagent_workspace': str(task)}
-    middleware._workspace_permission = WorkspacePermissionContext.from_config(tool_context, trusted_local=True)
+    middleware._workspace_permission = WorkspaceContext.from_config(tool_context, trusted_local=True)
     middleware._tool_context = ToolResolutionContext.from_config(tool_context)
     return middleware, core, task, emitted
 
@@ -48,7 +48,7 @@ def test_real_artifact_save_external_file_approves_claims_executes_completes(wor
     core.on_poll, core.on_claim, core.on_complete = approve, claim, complete
     result = middleware.execute_with_records(artifact_call(source))
     assert result.results[0]['ok'], result.results
-    assert [action for action, _ in core.events] == ['prepare', 'approve', 'claim', 'complete']
+    assert [action for action, _ in core.events] == ['prepare', 'claim', 'complete']
     assert core.batch_requests == 1
     assert next(iter(core.operations.values()))['payload']['execution_mode'] == 'host_access'
     assert source.read_text() == 'external artifact'
@@ -60,13 +60,13 @@ def test_artifact_rejection_preserves_existing_target(workspace_runtime, tmp_pat
     middleware, core, task, emitted = artifact_runtime(workspace_runtime, tmp_path, monkeypatch)
     destination = task / source.name
     destination.write_text('existing')
-    core.on_poll = lambda operation: operation.update(status='rejected', decision='denied')
+    core.on_claim = lambda operation: operation.update(status='rejected', decision='denied')
     result = middleware.execute_with_records(artifact_call(source))
     assert not result.results[0]['ok']
     assert destination.read_text() == 'existing'
     assert source.read_text() == 'new'
     assert not emitted
-    assert [action for action, _ in core.events] == ['prepare', 'approve']
+    assert [action for action, _ in core.events] == ['prepare', 'claim']
 
 
 def test_artifact_context_switch_during_approval_fails_before_copy(workspace_runtime, tmp_path, monkeypatch):
@@ -80,7 +80,7 @@ def test_artifact_context_switch_during_approval_fails_before_copy(workspace_run
         lazyllm.globals['subagent_ctx'].workspace_path = str(other)
         operation.update(status='allowed', decision='allowed')
 
-    core.on_poll = approve
+    core.on_claim = approve
     result = middleware.execute_with_records(artifact_call(source))
     assert not result.results[0]['ok']
     assert not (task / source.name).exists() and not (other / source.name).exists()
@@ -113,8 +113,8 @@ def test_generic_input_replaced_by_symlink_during_approval_never_executes(worksp
         original.symlink_to(secret)
         operation.update(status='allowed', decision='allowed')
 
-    core.on_poll = approve
+    core.on_claim = approve
     result = middleware.execute_with_records({'function': {'name': 'consume', 'arguments': {'path': str(original)}}})
     assert not result.results[0]['ok'] and not effects
     assert secret.read_bytes() == b'secret'
-    assert not any(action == 'claim' for action, _ in core.events)
+    assert not effects

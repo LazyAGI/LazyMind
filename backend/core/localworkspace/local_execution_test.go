@@ -35,7 +35,7 @@ func localRequest(t *testing.T, grant PublicWorkspace, conversation, path string
 	return OperationRequest{ExecutionMode: localExecutionMode, ArgumentsDigest: digestString("prepared arguments"),
 		ParentIdentity: parentIdentity, TargetIdentity: targetIdentity, UserID: "owner", ConversationID: conversation,
 		WorkspaceID: grant.WorkspaceID, HistoryID: "history", RunID: "run", CallID: operationTestCallID("local"),
-		Operation: kind, Path: path, ToolName: "LocalFileToolkit_" + string(kind)}
+		Operation: kind, Path: path, ToolName: string(kind)}
 }
 
 func TestLocalOperationExternalAlwaysAsksAndCoreNeverExecutes(t *testing.T) {
@@ -220,7 +220,7 @@ func TestLocalOperationModelNoticeDoesNotLeakInternalProtocol(t *testing.T) {
 			t.Fatalf("model notice contains %s", secret)
 		}
 	}
-	if !strings.Contains(notice, "工作区外的绝对路径需要用户批准") {
-		t.Fatal("missing external path approval notice")
+	if !strings.Contains(notice, "写入和删除按权限模式审批") {
+		t.Fatal("missing permission mode notice")
 	}
 }

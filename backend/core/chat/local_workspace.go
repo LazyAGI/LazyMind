@@ -48,8 +48,7 @@ func validateWorkspaceRequestMode(raw map[string]any) *common.AppError {
 		!localworkspace.ValidPermissionMode(permissionMode) {
 		return localworkspace.Error("invalid_selection", 400, "invalid request")
 	}
-	runInBackground, _ := raw["run_in_background"].(bool)
-	if !runInBackground || !localworkspace.Enabled() {
+	if !localworkspace.Enabled() {
 		return localworkspace.ModeError()
 	}
 	return nil
@@ -96,9 +95,6 @@ func ensureConversationWithWorkspaceTx(
 		return nil, 0, existingErr
 	}
 	if exists && workspacePresent {
-		if !existing.IsTaskConv {
-			return nil, 0, localworkspace.ModeError()
-		}
 		var binding orm.ConversationWorkspaceBinding
 		err := tx.Where("conversation_id = ?", convID).First(&binding).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) || (err == nil && binding.WorkspaceID != workspaceID) {

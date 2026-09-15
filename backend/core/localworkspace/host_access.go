@@ -105,13 +105,10 @@ func resolveHostAccessWorkspace(ctx context.Context, db *gorm.DB, userID, conver
 		}
 		return nil, err
 	}
-	if !conversation.IsTaskConv {
-		return nil, ModeError()
-	}
 	var binding orm.ConversationWorkspaceBinding
 	if err := db.WithContext(ctx).Where("conversation_id = ?", conversationID).First(&binding).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, Error("workspace_not_found", 404, "resource not found")
+			return UnboundContext(), nil
 		}
 		return nil, err
 	}

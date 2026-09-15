@@ -4,7 +4,15 @@ from __future__ import annotations
 import os
 from enum import Enum
 
-from lazymind.chat.engine.tools.approved_local_io import sensitive_path
+
+def sensitive_path(path):
+    path = path.replace('\\', '/').lower()
+    name = path.rsplit('/', 1)[-1]
+    return (any(part in {'.ssh', '.aws'} for part in path.split('/'))
+            or (name.startswith('.env') and (name == '.env' or name.startswith('.env.'))
+                and name not in {'.env.example', '.env.sample', '.env.template'})
+            or name in {'id_rsa', 'id_ed25519'} or name.endswith(('.key', '.pem'))
+            or 'credentials' in name or name.startswith('service-account'))
 
 
 class WorkspacePolicyDecision(str, Enum):
@@ -37,7 +45,7 @@ def _invalid_path(path: str) -> bool:
 
 def decide_host_file_access(permission, intents) -> WorkspacePolicyDecision:
     """Apply the immutable run snapshot to one prepared tool call."""
-    if not permission.bound or permission.permission_mode not in {
+    if not permission.active or permission.permission_mode not in {
         'always_ask', 'ask_as_needed', 'allow_all',
     }:
         return WorkspacePolicyDecision.DENY
@@ -48,13 +56,8 @@ def decide_host_file_access(permission, intents) -> WorkspacePolicyDecision:
             return WorkspacePolicyDecision.DENY
         if intent.operation != 'read' and sensitive_path(intent.path):
             return WorkspacePolicyDecision.DENY
-        if not _within(permission.root, intent.path):
-            decision = WorkspacePolicyDecision.ASK
+        if intent.operation == 'read' or permission.permission_mode == 'allow_all':
             continue
-        if permission.permission_mode == 'allow_all':
-            continue
-        if intent.operation == 'read':
-            continue
-        if permission.permission_mode == 'always_ask':
+        if permission.permission_mode == 'always_ask' or not _within(permission.root, intent.path):
             decision = WorkspacePolicyDecision.ASK
     return decision

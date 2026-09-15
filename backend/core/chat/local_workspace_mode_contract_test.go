@@ -11,12 +11,12 @@ import (
 	"lazymind/core/store"
 )
 
-func TestWorkspaceChatAndCloudRequestsAreRejectedBeforeExecution(t *testing.T) {
+func TestWorkspaceCloudRequestsAreRejectedBeforeExecution(t *testing.T) {
 	for _, tc := range []struct {
 		name, runtime string
 		work          bool
 	}{
-		{"Chat", "local", false}, {"CloudWork", "cloud", true},
+		{"CloudWork", "cloud", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("LAZYMIND_RUNTIME_MODE", tc.runtime)
@@ -63,5 +63,12 @@ func TestWorkspaceChatAndCloudRequestsAreRejectedBeforeExecution(t *testing.T) {
 				t.Errorf("rejected request persisted %d conversations", count)
 			}
 		})
+	}
+}
+
+func TestWorkspaceSelectionDoesNotRequireBackgroundMode(t *testing.T) {
+	t.Setenv("LAZYMIND_RUNTIME_MODE", "local")
+	if err := validateWorkspaceRequestMode(map[string]any{"workspace_id": "grant", "run_in_background": false}); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -363,8 +363,8 @@ def test_workspace_authorization_unknown_decision_is_fail_closed():
 
 def _workspace_middleware(monkeypatch, *, cancel_check=None, extra_tools=()):
     from lazyllm.tools.agent import ToolManager
-    from lazymind.chat.engine.tools.local_fs import LocalFileToolkit
-    from lazymind.chat.engine.tools.workspace_context import WorkspacePermissionContext
+    from lazyllm.tools.agent import FileSystemToolkit
+    from lazymind.chat.engine.tools.workspace_context import WorkspaceContext
     config = {
         'user_id': 'owner', 'conversation_id': 'conversation',
         '_workspace_execution': {'history_id': 'history', 'run_id': 'run'},
@@ -375,19 +375,19 @@ def _workspace_middleware(monkeypatch, *, cancel_check=None, extra_tools=()):
     }
     lazyllm.globals['agentic_config'] = lazyllm.globals.get('agentic_config') or {}
     monkeypatch.setitem(lazyllm.globals, 'agentic_config', config)
-    toolkit = LocalFileToolkit()
+    toolkit = FileSystemToolkit()
     manager = ToolManager([toolkit, *extra_tools])
     middleware = ToolExecutionMiddleware(
         manager, cancel_check=cancel_check,
-        workspace_permission=WorkspacePermissionContext.from_config(config, trusted_local=True),
+        workspace_permission=WorkspaceContext.from_config(config, trusted_local=True),
         tool_context=config,
-        failure_policy=FailureRetryPolicy({'LocalFileToolkit_append': 1}),
+        failure_policy=FailureRetryPolicy({'write': 1}),
     )
     return middleware, config
 
 
 def _workspace_call(method, arguments):
-    return {'id': 'repeated-provider-id', 'function': {'name': 'LocalFileToolkit_' + method, 'arguments': arguments}}
+    return {'id': 'repeated-provider-id', 'function': {'name': method, 'arguments': arguments}}
 
 
 # Core approval/local execution integration is covered in test_workspace_review_contracts.py.
@@ -432,8 +432,8 @@ def test_workspace_artifact_whitespace_path_rejects_entire_batch_before_dispatch
 
 
 @pytest.mark.parametrize('binding', [
-    {'_core_workspace_context': {'workspace_id': 'parent'}},
-    {'workspace_context': {'workspace_id': 'parent'}},
+    {'_core_workspace_context': {'workspace_id': 'parent', 'permission_mode': 'always_ask'}},
+    {'workspace_context': {'workspace_id': 'parent', 'permission_mode': 'always_ask'}},
 ])
 @pytest.mark.parametrize('missing', ['user_id', 'conversation_id'])
 def test_parent_workspace_without_identity_does_not_disable_admission(monkeypatch, binding, missing):
@@ -442,8 +442,8 @@ def test_parent_workspace_without_identity_does_not_disable_admission(monkeypatc
     config.clear()
     config.update({'user_id': 'u', 'conversation_id': 'c', 'parent_agentic_config': binding})
     config.pop(missing)
-    from lazymind.chat.engine.tools.workspace_context import WorkspacePermissionContext
-    middleware._workspace_permission = WorkspacePermissionContext.from_config(config)
+    from lazymind.chat.engine.tools.workspace_context import WorkspaceContext
+    middleware._workspace_permission = WorkspaceContext.from_config(config)
     batch = middleware.execute_with_records({'id': 'calc', 'function': {
         'name': 'calculator', 'arguments': {'expression': '1 + 1'},
     }})
@@ -452,9 +452,9 @@ def test_parent_workspace_without_identity_does_not_disable_admission(monkeypatc
 
 
 def test_local_workspace_source_protocol_no_longer_creates_a_permission_binding():
-    from lazymind.chat.engine.tools.workspace_context import WorkspacePermissionContext
+    from lazymind.chat.engine.tools.workspace_context import WorkspaceContext
 
-    context = WorkspacePermissionContext.from_config({
+    context = WorkspaceContext.from_config({
         'local_fs_sources': [{
             'source_id': 'local-workspace:parent', 'paths': ['/bound'], 'file_extensions': ['txt'],
         }],

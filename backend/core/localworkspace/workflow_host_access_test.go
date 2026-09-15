@@ -33,9 +33,9 @@ func TestWorkflowHostAccessRequiresExactPinnedRegistrySelection(t *testing.T) {
 		})
 	}
 	for _, mode := range []string{"", localExecutionMode} {
-		req := OperationRequest{ExecutionMode: mode, ToolName: "LocalFileToolkit_read"}
-		if !workflowOperationToolAllowed([]string{"local_fs"}, req) {
-			t.Fatal("existing local mode denied")
+		req := OperationRequest{ExecutionMode: mode, ToolName: "read"}
+		if workflowOperationToolAllowed([]string{"local_fs"}, req) {
+			t.Fatal("obsolete local mode admitted")
 		}
 		if workflowOperationToolAllowed([]string{"writer_create"}, req) {
 			t.Fatal("local mode escaped pinned tools")
@@ -52,7 +52,11 @@ func TestHostAccessSensitiveAndExternalPolicyAcrossModes(t *testing.T) {
 				req.Path = t.TempDir() + "/nonexistent/file.bin"
 				req.CallID = operationTestCallID("outside-" + string(operation))
 				result, err := PrepareOperationBatch(t.Context(), db.DB, states, OperationBatchRequest{Calls: []OperationRequest{req}})
-				if err != nil || result.Operations[0].Decision != DecisionPending {
+				want := DecisionPending
+				if operation == OperationRead || mode == PermissionAllowAll {
+					want = DecisionAllowed
+				}
+				if err != nil || result.Operations[0].Decision != want {
 					t.Fatalf("external %s: %+v %v", operation, result, err)
 				}
 			}
@@ -65,10 +69,7 @@ func TestHostAccessSensitiveAndExternalPolicyAcrossModes(t *testing.T) {
 			req := hostRequest(grant, conversation, ".env", OperationRead)
 			req.CallID = operationTestCallID("sensitive")
 			result, err := PrepareOperationBatch(t.Context(), db.DB, states, OperationBatchRequest{Calls: []OperationRequest{req}})
-			want := DecisionPending
-			if mode == PermissionAllowAll {
-				want = DecisionAllowed
-			}
+			want := DecisionAllowed
 			if err != nil || result.Operations[0].Decision != want {
 				t.Fatalf("sensitive read %+v %v want %s", result, err, want)
 			}

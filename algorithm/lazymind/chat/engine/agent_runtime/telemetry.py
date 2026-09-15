@@ -17,7 +17,7 @@ _FILE_READ_TOOLS = {
     'read_user_attachment',
     'feishuwikifs_read',
     'cat_file',
-    'LocalFileToolkit_read',
+    'read',
 }
 _HARNESS_TOOLS = {
     'create_subagent',

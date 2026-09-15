@@ -111,7 +111,7 @@ export default function LocalWorkspaceControl({ conversationId, configResetKey, 
     setApprovalsOpen(undefined);
     setApprovalBusy(undefined);
     setApprovalError(undefined);
-    if (!conversationId || !selected?.workspace_id || (runtime !== "local" && runtime !== "desktop")) return;
+    if (!conversationId || (runtime !== "local" && runtime !== "desktop")) return;
     let active = true;
     let timer: ReturnType<typeof setTimeout>;
     let controller: AbortController | undefined;
@@ -366,7 +366,7 @@ export default function LocalWorkspaceControl({ conversationId, configResetKey, 
         <span role="alert">{t("chat.workspace.loadFailed")}</span>
         <Button size="small" disabled={busy} onClick={retryWorkspaceState}>{t("chat.workspace.retry")}</Button>
       </Space>}
-      {conversationId && selected && pendingApprovalCount > 0 && <Button size="small" onClick={() => setApprovalsOpen(conversationId)}>
+      {conversationId && pendingApprovalCount > 0 && <Button size="small" onClick={() => setApprovalsOpen(conversationId)}>
         {t("chat.workspace.approval.open")} ({pendingApprovalCount})
       </Button>}
       {!conversationId && <Popover trigger="click" placement="bottomLeft" autoAdjustOverflow={false} open={workspaceMenuOpen} onOpenChange={setWorkspaceMenuOpen}
@@ -387,7 +387,7 @@ export default function LocalWorkspaceControl({ conversationId, configResetKey, 
           {selected?.display_name ?? t("chat.workspace.select")} <DownOutlined />
         </Button>
       </Popover>}
-      {(!conversationId || selected) && <><Select className="local-workspace-permission" size="small" value={mode} disabled={busy || !selected || Boolean(!conversationId && disabled) || selected.status !== "active"}
+      {(!conversationId || selected) && <><Select className="local-workspace-permission" size="small" value={selected ? mode : "always_ask"} disabled={busy || !selected || Boolean(!conversationId && disabled) || selected.status !== "active"}
         classNames={{ popup: { root: "local-workspace-permission-menu" } }}
         options={Object.entries(labels).map(([value, label]) => ({ value, label }))}
         labelRender={(({ value }) => <Space size={6}><SafetyCertificateOutlined />{labels[value as WorkspacePermissionMode]}</Space>) as NonNullable<SelectProps<WorkspacePermissionMode>["labelRender"]>}
@@ -414,7 +414,7 @@ export default function LocalWorkspaceControl({ conversationId, configResetKey, 
       </div>
       <p className="local-workspace-risk-warning"><ExclamationCircleOutlined />{t("chat.workspace.allowAllRisk")}</p>
     </Modal>
-    <Modal open={Boolean(conversationId && approvalsOpen === conversationId && selected)} title={t("chat.workspace.approval.title")} footer={null} onCancel={() => {
+    <Modal open={Boolean(conversationId && approvalsOpen === conversationId)} title={t("chat.workspace.approval.title")} footer={null} onCancel={() => {
       for (const item of currentApprovals) if (item.status === "pending") dismissedApprovalIdsRef.current.add(item.operation_id);
       setApprovalsOpen(undefined);
     }}>

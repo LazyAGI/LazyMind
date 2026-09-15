@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import types
 import uuid
+from dataclasses import replace
 from typing import Any, AsyncIterator, Optional, Tuple
 
 import lazyllm
@@ -170,6 +171,9 @@ class AgentExecutor:
             tool for name in (getattr(agent, '_skill_tool_names', set()) & {'run_script'})
             if (tool := agent._tools_manager.tools_info.get(name)) is not None
         )
+        permission = options.workspace_permission
+        if permission is not None:
+            permission = replace(permission, cwd=permission.root or options.workspace or '')
         agent._tools_manager = ToolExecutionMiddleware(
             CitationResultMiddleware(agent._tools_manager),
             failure_policy=FailureRetryPolicy(options.tool_failure_limits),
@@ -178,7 +182,7 @@ class AgentExecutor:
             repeat_monitor=repeat_monitor,
             notice_buffer=notice_buffer,
             authorization_gate=options.authorization_gate,
-            workspace_permission=options.workspace_permission,
+            workspace_permission=permission,
             tool_context=options.tool_context,
             trusted_opaque_tools=trusted_opaque_tools,
         )

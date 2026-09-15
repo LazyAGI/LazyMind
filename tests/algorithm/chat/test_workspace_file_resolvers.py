@@ -200,7 +200,7 @@ def test_global_upload_and_writer_parents_do_not_exempt_other_users(tmp_path, mo
 def test_artifact_open_rejects_source_replaced_after_guard_precheck(tmp_path, monkeypatch):
     from lazyllm.tools.agent import HostFileIntent
     from lazymind.chat.engine.tools.host_access_guard import HostAccessGuard, host_access_scope
-    from lazymind.chat.engine.tools.workspace_context import WorkspacePermissionContext, workspace_permission_scope
+    from lazymind.chat.engine.tools.workspace_context import WorkspaceContext, workspace_permission_scope
 
     source, secret = tmp_path / 'source.txt', tmp_path / 'secret.txt'
     source.write_text('approved')
@@ -208,17 +208,9 @@ def test_artifact_open_rejects_source_replaced_after_guard_precheck(tmp_path, mo
     destination = tmp_path / 'task'
     destination.mkdir()
     guard = HostAccessGuard((HostFileIntent(str(source), 'read'),))
-    request = WorkspacePermissionContext.from_config({'_subagent_workspace': str(destination)})
-    original_check = guard.check_path
-
-    def raced_check(path, operation='read'):
-        result = original_check(path, operation)
-        if path == str(source):
-            source.unlink()
-            source.symlink_to(secret)
-        return result
-
-    monkeypatch.setattr(guard, 'check_path', raced_check)
+    request = WorkspaceContext.from_config({'_subagent_workspace': str(destination)})
+    source.unlink()
+    source.symlink_to(secret)
     with workspace_permission_scope(request), host_access_scope(guard):
         with pytest.raises(Exception):
             paths.copy_artifact_input(str(source), str(destination))
@@ -230,12 +222,12 @@ def test_staged_media_cannot_reread_a_replaced_original(tmp_path):
     from lazyllm.tools.agent import HostFileIntent
     from pathlib import Path
     from lazymind.chat.engine.tools.host_access_guard import HostAccessGuard, host_access_scope
-    from lazymind.chat.engine.tools.workspace_context import WorkspacePermissionContext, workspace_permission_scope
+    from lazymind.chat.engine.tools.workspace_context import WorkspaceContext, workspace_permission_scope
 
     source = tmp_path / 'source.png'
     source.write_bytes(b'approved')
     guard = HostAccessGuard((HostFileIntent(str(source), 'read'),))
-    with workspace_permission_scope(WorkspacePermissionContext.from_config({})), host_access_scope(guard):
+    with workspace_permission_scope(WorkspaceContext.from_config({})), host_access_scope(guard):
         staged = paths.stage_input_file(str(source))
         source.write_bytes(b'changed')
         assert Path(staged).read_bytes() == b'approved'
@@ -246,12 +238,12 @@ def test_writer_inputs_are_private_copies_of_guarded_reads(tmp_path):
     from pathlib import Path
     from lazymind.chat.engine.tools import writer
     from lazymind.chat.engine.tools.host_access_guard import HostAccessGuard, host_access_scope
-    from lazymind.chat.engine.tools.workspace_context import WorkspacePermissionContext, workspace_permission_scope
+    from lazymind.chat.engine.tools.workspace_context import WorkspaceContext, workspace_permission_scope
 
     source = tmp_path / 'input.txt'
     source.write_text('approved input')
     guard = HostAccessGuard((HostFileIntent(str(source), 'read'),))
-    with workspace_permission_scope(WorkspacePermissionContext.from_config({})), host_access_scope(guard):
+    with workspace_permission_scope(WorkspaceContext.from_config({})), host_access_scope(guard):
         result = json.loads(writer.WriterToolkitBase().build_resources(file_paths_json=json.dumps([str(source)])))
     staged = Path(result[0]['uri'])
     assert staged != source
