@@ -1084,6 +1084,57 @@ func TestStartupCleanupFailureDoesNotReusePortConflictDiagnostic(t *testing.T) {
 	}
 }
 
+func TestPinnedPortConflictDiagnosticIncludesPortContext(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, _, err := NewRuntimeConfig("", repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", cfg.ProcessComposePort))
+	if err != nil {
+		t.Skipf("port %d is already in use: %v", cfg.ProcessComposePort, err)
+	}
+	defer listener.Close()
+	t.Setenv(localPortsPinnedEnvVar, "true")
+	portErr := validateRuntimeStartPorts(cfg)
+	var conflict *startupPortConflictError
+	if !errors.As(portErr, &conflict) {
+		t.Fatalf("port error = %T, want startupPortConflictError", portErr)
+	}
+	paths := RuntimePaths{LogFilePath: "process-compose.log"}
+	failureContext, ok := runtimePortConflictFailureContext(portErr, paths, 1)
+	if !ok || failureContext.Phase != runtimeDiagnosticPhasePreflight || failureContext.Service != "process-compose" {
+		t.Fatalf("port failure context = %+v, ok=%t", failureContext, ok)
+	}
+	diagnostic := classifyRuntimeFailure(portErr, failureContext)
+	if diagnostic.Code != runtimeDiagnosticCodePortConflict || diagnostic.LogPath != paths.LogFilePath || diagnostic.Details == nil {
+		t.Fatalf("port diagnostic = %+v", diagnostic)
+	}
+	if diagnostic.Details.Address != "127.0.0.1" || diagnostic.Details.Port != cfg.ProcessComposePort || diagnostic.Details.Attempt != 1 || diagnostic.Details.MaxAttempts != 1 {
+		t.Fatalf("port diagnostic details = %+v", diagnostic.Details)
+	}
+}
+
+func TestFinalPortConflictDiagnosticIncludesRetryContext(t *testing.T) {
+	t.Setenv(localPortsPinnedEnvVar, "false")
+	portErr := &startupPortConflictError{
+		Service: "core", Address: "127.0.0.1", Port: 18001, Cause: errors.New("claimed"),
+	}
+	paths := RuntimePaths{CoreLog: "core.log"}
+	failureContext, ok := runtimePortConflictFailureContext(portErr, paths, maxAutomaticPortStartupAttempts)
+	if !ok || failureContext.Attempt != 3 || failureContext.MaxAttempts != 3 {
+		t.Fatalf("retry failure context = %+v, ok=%t", failureContext, ok)
+	}
+	diagnostic := classifyRuntimeFailure(portErr, failureContext)
+	if diagnostic.Service != "core" || diagnostic.LogPath != paths.CoreLog || diagnostic.Details == nil {
+		t.Fatalf("retry port diagnostic = %+v", diagnostic)
+	}
+	if diagnostic.Details.Port != 18001 || diagnostic.Details.Attempt != 3 || diagnostic.Details.MaxAttempts != 3 {
+		t.Fatalf("retry port details = %+v", diagnostic.Details)
+	}
+}
+
 func TestStartupCapabilityReadyIncludesFrontendPort(t *testing.T) {
 	manager := NewRuntimeManager(&fakeRunner{t: t}, filepath.Join(t.TempDir(), "local-runtime-manager"))
 	var output strings.Builder

@@ -84,6 +84,22 @@ func isStartupPortConflict(err error) bool {
 	return errors.As(err, &conflict)
 }
 
+func runtimePortConflictFailureContext(err error, paths RuntimePaths, attempt int) (runtimeFailureContext, bool) {
+	var conflict *startupPortConflictError
+	if !errors.As(err, &conflict) {
+		return runtimeFailureContext{}, false
+	}
+	maxAttempts := maxAutomaticPortStartupAttempts
+	if envBool(localPortsPinnedEnvVar, false) {
+		maxAttempts = 1
+	}
+	return runtimeFailureContext{
+		Operation: runtimeDiagnosticOperationUp, Phase: runtimeDiagnosticPhasePreflight,
+		Service: conflict.Service, LogPath: runtimeServiceLogPath(paths, conflict.Service),
+		Address: conflict.Address, Port: conflict.Port, Attempt: attempt, MaxAttempts: maxAttempts,
+	}, true
+}
+
 type runtimeFailureFactError struct {
 	Fact    string
 	Cause   error
@@ -513,6 +529,9 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 		}
 		if err := validateRuntimeStartPorts(attemptCfg); err != nil {
 			if !isStartupPortConflict(err) || envBool(localPortsPinnedEnvVar, false) || attempt == maxAutomaticPortStartupAttempts {
+				if portContext, ok := runtimePortConflictFailureContext(err, attemptPaths, attempt); ok {
+					failureContext = portContext
+				}
 				return err
 			}
 			m.progressf("port allocation changed before startup; retrying with a fresh port map (%d/%d): %v", attempt, maxAutomaticPortStartupAttempts, err)
@@ -1532,7 +1551,10 @@ func validatePinnedLocalPorts(cfg RuntimeConfig) error {
 		}
 		seen[item.port] = item.name
 		if !localPortAvailableOn(item.address, item.port) {
-			return fmt.Errorf("local ports are pinned and %s port %d is already in use; unset %s or choose a free port", item.name, item.port, localPortsPinnedEnvVar)
+			return &startupPortConflictError{
+				Service: item.name, Address: item.address, Port: item.port,
+				Cause: fmt.Errorf("local ports are pinned and %s port %d is already in use; unset %s or choose a free port", item.name, item.port, localPortsPinnedEnvVar),
+			}
 		}
 	}
 	return nil
