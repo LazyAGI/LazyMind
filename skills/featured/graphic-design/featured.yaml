@@ -1,0 +1,34 @@
+schema_version: 2
+id: graphic-design
+type: chat
+version: 1.0.0
+status: published
+default_locale: zh-CN
+provider: SkillHub
+skill: {source_url: https://skillhub.cn/skills/clawhub_ivangdavila/graphic-design, category: design, required_version: 1.0.0}
+placement: {home: false, gallery: true, order: 102}
+classification: {category: 多媒体设计与创意, tags: [设计诊断, 排版, 无障碍]}
+assets:
+  cover: {file: assets/cover.png, role: cover}
+  social_post: {file: assets/social-post.html, role: result}
+  print_preflight: {file: assets/print-preflight.html, role: result}
+  portfolio_critique: {file: assets/portfolio-critique.html, role: result}
+presentation:
+  card: {title: Graphic Design, description: 按受众和输出媒介提供设计原则、诊断与制作规范, output_type: document, output_label: 设计建议, cover_asset: cover, result_summary: 覆盖非设计师社媒、印刷交付和学生作品集三种工作流}
+  detail: {title: Graphic Design, description: 依据用户角色与输出场景选择通俗原则、专业生产规范或设计理论；始终将可读性和无障碍作为基本检查项。, attachment_hint: 目标受众、使用媒介、尺寸、品牌规范与现有设计说明}
+tasks:
+  - id: social-post-review
+    selector: {title: 社媒招募帖诊断, description: 为非设计师检查层级与可读性, output_label: 修改清单}
+    launch: {prompt_short: 请诊断一张 1080×1080 招募帖：标题“周末志愿者招募”，正文 6 行，使用 4 种字体和 5 种颜色。, prompt: 我是非设计师，准备发布 1080×1080 的 Instagram 招募帖。标题“周末志愿者招募”，有 6 行说明文字，目前用了 4 种字体和 5 种颜色，文字压在照片上。请按易读性、对齐、字体、配色、留白给出可在 Canva 中完成的修改清单，并保留真实信息，不要假定品牌资产。}
+    replay: {steps: [{title: 判断用户与媒介, description: 按非设计师和社媒方形画布选择可执行建议}, {title: 检查层级与可读性, description: 识别字体、色彩数量和照片上低对比文字的风险}, {title: 给出简化方案, description: 用不超过三种字体和有限调色方案组织修改顺序}]}
+    result: {template: html_preview_v1, eyebrow: 非设计师社媒案例, title: 招募帖可读性修改清单, summary: 依据 Skill 的三项上限、对齐和对比原则。 , html_asset: social_post}
+  - id: print-preflight
+    selector: {title: 展览折页印前检查, description: 为专业印刷输出整理技术清单, output_label: 印前清单}
+    launch: {prompt_short: 为 A4 双面展览折页整理印前检查：将印刷，尚未确认纸张和色彩配置。, prompt: 我将交付 A4 双面展览折页给印厂，现有文件未确认纸张、色彩配置、出血或 PDF 标准。请按专业印前要求列出必须向印厂确认的项目，以及导出前要检查的 CMYK、3-5mm 出血、300dpi、字体、透明度和 PDF/X-4；不要假定印厂已确认的参数。}
+    replay: {steps: [{title: 确认生产语境, description: 将输出识别为需要精确生产规格的印刷品}, {title: 列出待确认参数, description: 明确纸张、色彩配置与印厂要求尚未提供}, {title: 输出印前检查, description: 覆盖出血、分辨率、字体、透明度和交付格式}]}
+    result: {template: html_preview_v1, eyebrow: 印刷生产案例, title: A4 折页印前检查, summary: 区分待向印厂确认的参数与可立即执行的文件检查。 , html_asset: print_preflight}
+  - id: student-portfolio-critique
+    selector: {title: 学生作品集评图, description: 用设计理论评估作品集案例结构, output_label: 评图建议}
+    launch: {prompt_short: 请评估我的 10 个学生作品集项目如何用问题—过程—解决方案结构呈现，并检查排版严谨性。, prompt: 我是视觉传达学生，准备提交 10 个作品集项目。请用层级、图底、邻近、重复、对齐和对比等术语，给出每个案例应如何呈现“问题—过程—解决方案”，并检查字体数量、字距与行距（120-145%）的通用规范。不要编造我未提供的作品内容。}
+    replay: {steps: [{title: 识别学习目标, description: 以学生的理论与作品集结构需求为基准}, {title: 应用形式原则, description: 用层级、格式塔和排版严谨性组织评图维度}, {title: 建议案例结构, description: 建议以问题、过程、解决方案呈现而不杜撰作品事实}]}
+    result: {template: html_preview_v1, eyebrow: 设计教育案例, title: 作品集结构与排版评图框架, summary: 提供理论化的评图框架，不捏造项目内容。 , html_asset: portfolio_critique}
