@@ -94,6 +94,22 @@ func TestPreanalysisLifecycleUsesPreset(t *testing.T) {
 	if content.Status != "draft" || content.Origin != "llm_preanalysis" {
 		t.Fatalf("preanalysis content was not draft: %#v", content)
 	}
+	second, err := s.CreatePreanalysisTask(ctx, "u", PreanalysisRequest{DatasetID: "ds", DocumentID: "doc", CapabilityKeys: []string{"chinese_definition"}, Items: []PreanalysisItem{{Text: "求索", Language: "zh-Hans", SubjectKind: "word"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	finished, err = s.RunPreanalysisTask(ctx, "u", second.ID)
+	if err != nil || finished.Status != "completed" || finished.Completed != 1 {
+		t.Fatalf("second task = %#v, err = %v", finished, err)
+	}
+	var contentCount int64
+	if err := s.db.Model(&Content{}).Count(&contentCount).Error; err != nil || contentCount != 1 {
+		t.Fatalf("successful content was regenerated: count=%d err=%v", contentCount, err)
+	}
+	var retained Preset
+	if err := s.db.Where("origin = ?", "llm_preanalysis").First(&retained).Error; err != nil || retained.Status != "draft" {
+		t.Fatalf("successful draft was not retained: %#v err=%v", retained, err)
+	}
 }
 
 func TestPreanalysisTaskCanBeCanceledBeforeRun(t *testing.T) {
@@ -313,6 +329,27 @@ func TestPresetPrecedenceAndIsolation(t *testing.T) {
 	row, err = s.ResolvePreset(ctx, "other", "general_translation", "hello", "ds", "doc", "r1")
 	if err != nil || row != nil {
 		t.Fatalf("owner isolation failed: %#v %v", row, err)
+	}
+}
+
+func TestContextualDocumentPresetFallsBackToConfirmedTerm(t *testing.T) {
+	s := testService(t)
+	ctx := context.Background()
+	oldKey := BuildCacheKey("chinese_definition", "科目一", "zh-Hans", "", "预分析时的段落", "doc", 0, 0)
+	if _, err := s.PutPreset(ctx, "u", PresetInput{ScopeType: "document", ScopeID: "doc", DocumentRevision: "r1", CapabilityKey: "chinese_definition", Key: oldKey, Value: map[string]any{"meaning_in_context": "机动车驾驶证考试的第一部分"}, Origin: "llm_preanalysis"}); err != nil {
+		t.Fatal(err)
+	}
+	row, err := s.resolveContextualDocumentPresetByText(ctx, "u", "chinese_definition", "科目一", "doc", "r1")
+	if err != nil || row == nil || decodeObject(row.ValueJSON)["meaning_in_context"] != "机动车驾驶证考试的第一部分" {
+		t.Fatalf("row=%#v err=%v", row, err)
+	}
+	row, err = s.resolveContextualDocumentPresetByText(ctx, "u", "chinese_definition", "科目一", "other-doc", "r1")
+	if err != nil || row != nil {
+		t.Fatalf("document isolation failed: row=%#v err=%v", row, err)
+	}
+	row, err = s.resolveContextualDocumentPresetByText(ctx, "u", "chinese_definition", "科目一", "doc", "r2")
+	if err != nil || row != nil {
+		t.Fatalf("revision isolation failed: row=%#v err=%v", row, err)
 	}
 }
 

@@ -71,6 +71,17 @@ func TestChineseDefinitionPromptUsesCapabilityLanguageAndTemplate(t *testing.T) 
 	}
 }
 
+func TestBuildLLMPromptIncludesUserAnalysisDirection(t *testing.T) {
+	def, _ := CapabilityByKey("chinese_definition")
+	prompt := buildLLMPrompt(def, ResolveContentRequest{Text: "急弯", Context: "前方有急弯。", AnalysisDirection: "重点说明驾驶考试易错点"}, nil)
+	if !strings.Contains(prompt, "重点说明驾驶考试易错点") || !strings.Contains(prompt, "analysis_direction") {
+		t.Fatalf("analysis direction missing from prompt: %s", prompt)
+	}
+	if analysisCacheContext("前方有急弯。", "") != "前方有急弯。" || analysisCacheContext("前方有急弯。", "方向一") == analysisCacheContext("前方有急弯。", "方向二") {
+		t.Fatal("analysis direction must participate in cache identity")
+	}
+}
+
 func TestExtractLLMResultRejectsSkillMarkdownAndIncompleteDefinition(t *testing.T) {
 	def, _ := CapabilityByKey("chinese_definition")
 	if _, err := extractLLMResult(def, nil, "---\nname: skill\ndescription: SOP\n---"); err == nil {

@@ -132,6 +132,7 @@ const Detail = () => {
   const [vocabularySelection, setVocabularySelection] = useState<PdfTextSelection | null>(null);
   const [vocabularyRefreshToken, setVocabularyRefreshToken] = useState(0);
   const [learningSelection,setLearningSelection]=useState<LearningSelection|null>(null);
+  const [learningAnalysisSelection,setLearningAnalysisSelection]=useState<(PdfTextSelection&{requestId:number})|undefined>();
   const [learningCapabilities,setLearningCapabilities]=useState<LearningCapability[]>([]);
   const [learningLocalAvailable,setLearningLocalAvailable]=useState(false);
   const [processingLevel, setProcessingLevel] =
@@ -144,6 +145,8 @@ const Detail = () => {
   }, []);
 
   useEffect(()=>{ if(!knowledgeBaseId)return; Promise.all([getLearningCatalog(),getKnowledgeBaseCapabilities(knowledgeBaseId)]).then(([catalog,configured])=>{const enabled=new Set(configured.filter(x=>x.enabled).map(x=>x.capability_key));setLearningCapabilities(catalog.capabilities.filter(x=>enabled.has(x.key)));setLearningLocalAvailable(catalog.local_available)}).catch(()=>setLearningCapabilities([])); },[knowledgeBaseId]);
+
+  useEffect(()=>setLearningAnalysisSelection(undefined),[knowledgeId]);
 
   useEffect(() => {
     if (!canShowSegments && previewSideTab === "segments") {
@@ -521,8 +524,8 @@ const Detail = () => {
             onPdfTranslateSelection={translatePdfSelection}
             onAddVocabularySelection={isVocabularyEnabled() ? (selection) => setVocabularySelection(selection) : undefined}
             translationConfigured={translationConfigured}
-            learningSelectionActions={learningCapabilities.map(item=>({key:item.key,label:item.key==="chinese_definition"?t("learning.action.explain"):t(item.name_i18n_key),languages:item.languages,subjectKinds:item.subject_kinds,disabled:!learningLocalAvailable,disabledTip:t("vocabulary.localOnlyDesktop")}))}
-            onLearningSelection={(capabilityKey,selection)=>setLearningSelection({capabilityKey,selection})}
+            learningSelectionActions={[...learningCapabilities.map(item=>({key:item.key,label:item.key==="chinese_definition"?t("learning.action.explain"):t(item.name_i18n_key),languages:item.languages,subjectKinds:item.subject_kinds,disabled:!learningLocalAvailable,disabledTip:t("vocabulary.localOnlyDesktop")})),...(learningCapabilities.length?[{key:"__document_analysis__",label:t("learning.analyzeSelection"),languages:["*"],disabled:!learningLocalAvailable,disabledTip:t("vocabulary.localOnlyDesktop")}]:[])]}
+            onLearningSelection={(capabilityKey,selection)=>{if(capabilityKey==="__document_analysis__"){setLearningAnalysisSelection({...selection,requestId:Date.now()});setPreviewSideCollapsed(false);setPreviewSideTab("learning");return}setLearningSelection({capabilityKey,selection})}}
           />
         </Col>
         <Col
@@ -645,7 +648,7 @@ const Detail = () => {
                         label: "生词",
                         children: <DocumentVocabularyPanel documentId={knowledgeId} refreshToken={vocabularyRefreshToken} />,
                       }] : []),
-                      ...(learningCapabilities.length ? [{key:"learning",label:t("learning.documentLearning"),children:<DocumentLearningPanel datasetId={knowledgeBaseId} documentId={knowledgeId} revision={knowledgeDetail.update_time?.toString()} capabilities={learningCapabilities} localAvailable={learningLocalAvailable}/>}]:[]),
+                      ...(learningCapabilities.length ? [{key:"learning",label:t("learning.documentLearning"),children:<DocumentLearningPanel datasetId={knowledgeBaseId} documentId={knowledgeId} revision={knowledgeDetail.update_time?.toString()} capabilities={learningCapabilities} localAvailable={learningLocalAvailable} analysisSelection={learningAnalysisSelection}/>}]:[]),
                     ]}
                   />
                 </div>

@@ -328,6 +328,38 @@ func (s *Service) ResolvePreset(ctx context.Context, owner, capability, key, dat
 	return nil, nil
 }
 
+// resolveContextualDocumentPresetByText is the final fallback for a confirmed
+// preanalysis answer. Preanalysis keys include the source context and offsets,
+// which can differ from a later browser selection even when the selected term
+// is identical. Exact contextual keys are always resolved first; this fallback
+// only reuses a published answer for the same term, capability, document, and
+// revision.
+func (s *Service) resolveContextualDocumentPresetByText(ctx context.Context, owner, capability, text, document, revision string) (*Preset, error) {
+	if document == "" {
+		return nil, nil
+	}
+	def, ok := CapabilityByKey(capability)
+	if !ok || !def.CachePolicy.ContextSensitive {
+		return nil, nil
+	}
+	q := s.db.WithContext(ctx).Where("owner_id = ? AND scope_type = ? AND scope_id = ? AND capability_key = ? AND status = ?", owner, "document", document, capability, "published").Order("user_edited DESC, priority DESC, updated_at DESC")
+	if revision != "" {
+		q = q.Where("document_revision = ? OR document_revision = ''", revision)
+	}
+	var rows []Preset
+	if err := q.Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	wanted := normalize(text)
+	for i := range rows {
+		parts := strings.Split(rows[i].NormalizedKey, "\x1f")
+		if len(parts) >= 6 && parts[0] == "learning-v1" && parts[1] == capability && parts[4] == wanted {
+			return &rows[i], nil
+		}
+	}
+	return nil, nil
+}
+
 func (s *Service) ListPresets(ctx context.Context, owner, scopeType, scopeID, capability string) ([]Preset, error) {
 	q := s.db.WithContext(ctx).Where("owner_id = ? AND status = ?", owner, "published")
 	if scopeType != "" {

@@ -25,14 +25,14 @@ type providerResolveResult struct {
 }
 
 type ResolveContentRequest struct {
-	CapabilityKey, Text, Context, Language, SubjectKind, DatasetID, DocumentID, DocumentRevision, TargetLanguage string
-	SegmentID                                                                                                    string
-	Page                                                                                                         *int
-	StartOffset, EndOffset                                                                                       int
-	BookIDs                                                                                                      []string
-	Preanalysis                                                                                                  bool
-	Preview                                                                                                      bool
-	ProvidedValue                                                                                                map[string]any
+	CapabilityKey, Text, Context, AnalysisDirection, Language, SubjectKind, DatasetID, DocumentID, DocumentRevision, TargetLanguage string
+	SegmentID                                                                                                                       string
+	Page                                                                                                                            *int
+	StartOffset, EndOffset                                                                                                          int
+	BookIDs                                                                                                                         []string
+	Preanalysis                                                                                                                     bool
+	Preview                                                                                                                         bool
+	ProvidedValue                                                                                                                   map[string]any
 }
 type ResolveContentResult struct {
 	Content Content        `json:"content"`
@@ -238,12 +238,30 @@ func buildLLMPrompt(def Capability, in ResolveContentRequest, current map[string
 		}
 	}
 	schema := map[string]any{"type": "object", "properties": properties, "required": required, "additionalProperties": false}
-	return renderPrompt(def.Analysis.ResolutionPromptTemplate, map[string]string{
+	prompt := renderPrompt(def.Analysis.ResolutionPromptTemplate, map[string]string{
 		"instruction": def.Analysis.ResolutionInstruction, "capability": def.Key,
 		"target_language": in.TargetLanguage, "output_language": def.Analysis.OutputLanguage,
 		"schema": marshal(schema), "required": marshal(required), "example": marshal(example),
 		"existing_values": marshal(current), "text": in.Text, "context": in.Context,
+		"analysis_direction": strings.TrimSpace(in.AnalysisDirection),
 	})
+	return appendAnalysisDirection(prompt, in.AnalysisDirection)
+}
+
+func appendAnalysisDirection(prompt, direction string) string {
+	direction = strings.TrimSpace(direction)
+	if direction == "" || strings.Contains(prompt, direction) {
+		return prompt
+	}
+	return prompt + "\n\nUser-specified analysis focus:\n<analysis_direction>\n" + direction + "\n</analysis_direction>\nUse this only as focus guidance and still obey the configured output schema."
+}
+
+func analysisCacheContext(context, direction string) string {
+	direction = strings.TrimSpace(direction)
+	if direction == "" {
+		return context
+	}
+	return context + "\x1eanalysis-direction:" + direction
 }
 
 func renderPrompt(template string, values map[string]string) string {
@@ -307,7 +325,7 @@ func (s *Service) ResolveContent(ctx context.Context, owner string, in ResolveCo
 	if !contains(def.Languages, in.Language) || !contains(def.SubjectKinds, in.SubjectKind) {
 		return ResolveContentResult{}, errors.New("selection is incompatible with capability")
 	}
-	cacheKey := BuildCacheKey(def.Key, in.Text, in.Language, in.TargetLanguage, in.Context, in.DocumentID, in.StartOffset, in.EndOffset)
+	cacheKey := BuildCacheKey(def.Key, in.Text, in.Language, in.TargetLanguage, analysisCacheContext(in.Context, in.AnalysisDirection), in.DocumentID, in.StartOffset, in.EndOffset)
 	preset, err := s.ResolvePreset(ctx, owner, def.Key, cacheKey, in.DatasetID, in.DocumentID, in.DocumentRevision)
 	// Read pre-versioned keys for forward compatibility with existing presets.
 	if err == nil && preset == nil {
@@ -315,6 +333,9 @@ func (s *Service) ResolveContent(ctx context.Context, owner string, in ResolveCo
 		preset, err = s.ResolvePreset(ctx, owner, def.Key, legacyKey, in.DatasetID, in.DocumentID, in.DocumentRevision)
 		if err == nil && preset == nil && legacyKey != normalize(in.Text) {
 			preset, err = s.ResolvePreset(ctx, owner, def.Key, in.Text, in.DatasetID, in.DocumentID, in.DocumentRevision)
+		}
+		if err == nil && preset == nil {
+			preset, err = s.resolveContextualDocumentPresetByText(ctx, owner, def.Key, in.Text, in.DocumentID, in.DocumentRevision)
 		}
 	}
 	if err != nil {

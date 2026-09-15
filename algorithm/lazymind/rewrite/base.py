@@ -369,6 +369,12 @@ def rewrite_content(
             editor = _EDIT_DISPATCH.get(task_type)
             if editor is not None:
                 edited_content = editor(content, parsed)
+            elif task_type == 'learning' and not isinstance(parsed.get('content'), str):
+                # Learning capability prompts define their own JSON schema. Most
+                # models correctly follow that inner schema instead of adding the
+                # generic rewrite wrapper, so preserve the object as the generated
+                # content. The wrapped form remains accepted for compatibility.
+                edited_content = json.dumps(parsed, ensure_ascii=False, separators=(',', ':'))
             else:
                 edited_content = parsed.get('content')
             return _validate_generated_content(task_type, edited_content)

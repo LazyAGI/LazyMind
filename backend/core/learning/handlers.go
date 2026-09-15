@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -19,6 +20,9 @@ import (
 )
 
 func service() *Service { return New(store.DB()) }
+
+var preanalysisCancelFuncs sync.Map
+
 func Catalog(w http.ResponseWriter, _ *http.Request) {
 	common.ReplyOK(w, map[string]any{"capabilities": Capabilities(), "question_types": QuestionTypes(), "profiles": BuiltinProfiles(), "local_available": LocalAvailable()})
 }
@@ -510,8 +514,12 @@ func RunPreanalysisTask(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "preanalysis task is already running", 409)
 		return
 	}
+	ctx, cancel := context.WithCancel(context.Background())
+	preanalysisCancelFuncs.Store(taskID, cancel)
 	go func() {
-		_, _ = service().RunPreanalysisTask(context.Background(), owner, taskID)
+		defer preanalysisCancelFuncs.Delete(taskID)
+		defer cancel()
+		_, _ = service().RunPreanalysisTask(ctx, owner, taskID)
 	}()
 	common.ReplyOK(w, task)
 }
@@ -532,10 +540,14 @@ func GetLatestPreanalysisTask(w http.ResponseWriter, r *http.Request) {
 	common.ReplyOK(w, task)
 }
 func CancelPreanalysisTask(w http.ResponseWriter, r *http.Request) {
-	task, err := service().CancelPreanalysisTask(r.Context(), store.UserID(r), mux.Vars(r)["task_id"])
+	taskID := mux.Vars(r)["task_id"]
+	task, err := service().CancelPreanalysisTask(r.Context(), store.UserID(r), taskID)
 	if err != nil {
 		common.ReplyErr(w, err.Error(), 400)
 		return
+	}
+	if raw, ok := preanalysisCancelFuncs.LoadAndDelete(taskID); ok {
+		raw.(context.CancelFunc)()
 	}
 	common.ReplyOK(w, task)
 }
