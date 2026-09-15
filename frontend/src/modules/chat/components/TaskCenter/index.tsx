@@ -33,7 +33,7 @@ import {
 import { downloadStream } from "@/modules/chat/utils/download";
 import {
   type ChatSource,
-  getSearchSources,
+  getReferenceSources,
   getSourceDedupKey,
   getSourceEvidenceText,
   getSourceFaviconUrl,
@@ -502,7 +502,7 @@ function ReferenceSources({
   defaultOpen?: boolean;
 }) {
   const { t } = useTranslation();
-  const displaySources = getSearchSources(sources);
+  const displaySources = getReferenceSources(sources);
   if (displaySources.length === 0) return null;
 
   return (
@@ -882,7 +882,7 @@ function OrdinaryThinkingProcess({
 function OrdinaryReferenceSources({ sources }: { sources: ChatSource[] }) {
   const { t } = useTranslation();
   const headingId = useId();
-  const displaySources = getSearchSources(sources);
+  const displaySources = getReferenceSources(sources);
   if (displaySources.length === 0) return null;
 
   return (
@@ -950,7 +950,7 @@ function OrdinaryTaskDetails({
   state: OrdinaryTaskState;
   durationSeconds?: number;
 }) {
-  const sourceCount = getSearchSources(task.sources).length;
+  const sourceCount = getReferenceSources(task.sources).length;
   const snapshot = useMemo<OrdinaryThinkingSnapshot>(() => ({
     progressPct: task.progress_pct,
     artifactCount: task.artifacts.length,

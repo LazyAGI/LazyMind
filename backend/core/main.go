@@ -18,6 +18,7 @@ import (
 
 	"lazymind/core/acl"
 	"lazymind/core/asyncjob"
+	"lazymind/core/browser"
 	capabilitybootstrap "lazymind/core/capability/bootstrap"
 	"lazymind/core/chat"
 	"lazymind/core/common"
@@ -254,6 +255,10 @@ func registerCoreRoutes(r *mux.Router) {
 func registerCapabilityMCPRoute(r *mux.Router, handler http.Handler) {
 	handleAPI(r, "POST", "/mcp/capabilities/v1", []string{"qa.read"}, handler.ServeHTTP)
 	r.Handle("/mcp/capabilities/v1", handler).Methods(http.MethodGet, http.MethodDelete)
+}
+
+func registerBrowserMCPRoute(r *mux.Router, handler http.Handler) {
+	r.Handle("/mcp/browser/v1", handler).Methods(http.MethodPost, http.MethodGet, http.MethodDelete)
 }
 
 func coreListenAddr() string {
@@ -643,6 +648,8 @@ func run(ctx context.Context) error {
 	}
 	registerCapabilityMCPRoute(r, capabilityRuntime.MCP)
 	log.Logger.Info().Str("path", "/mcp/capabilities/v1").Msg("capability MCP enabled")
+	registerBrowserMCPRoute(r, browser.NewMCPHandler(browser.DefaultHub))
+	log.Logger.Info().Str("path", "/mcp/browser/v1").Msg("browser MCP enabled")
 
 	listenAddr := coreListenAddr()
 	listener, err := net.Listen("tcp", listenAddr)

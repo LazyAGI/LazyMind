@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"sort"
 	"strconv"
@@ -199,7 +200,7 @@ func GetGroup(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, err.Error(), 500)
 		return
 	}
-	if err := base.Select("c.id AS conversation_id, c.display_name, c.pinned_at, c.created_at, c.updated_at, o.summary, m.revision AS membership_revision").Order("c.updated_at DESC, c.id ASC").Offset(int(offset)).Limit(int(pageSize)).Find(&items).Error; err != nil {
+	if err := base.Select("c.id AS conversation_id, c.display_name, c.pinned_at, c.created_at, c.updated_at, o.summary, m.revision AS membership_revision").Order("CASE WHEN c.history_order IS NULL THEN 0 ELSE 1 END, c.history_order ASC, c.updated_at DESC, c.id ASC").Offset(int(offset)).Limit(int(pageSize)).Find(&items).Error; err != nil {
 		common.ReplyErr(w, err.Error(), 500)
 		return
 	}
@@ -336,15 +337,20 @@ func DeleteGroup(w http.ResponseWriter, r *http.Request) {
 
 type memberInput struct {
 	ConversationID string `json:"conversation_id"`
+	TargetID       string `json:"target_conversation_id"`
+	Position       string `json:"position"`
 }
 
 func AddMember(w http.ResponseWriter, r *http.Request) {
 	var in memberInput
-	if json.NewDecoder(r.Body).Decode(&in) != nil {
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&in) != nil || decoder.Decode(&struct{}{}) != io.EOF || strings.TrimSpace(in.ConversationID) == "" || len(in.ConversationID) > 255 || len(in.TargetID) > 255 ||
+		(in.TargetID == "" && in.Position != "") || (in.TargetID != "" && (in.TargetID == strings.TrimSpace(in.ConversationID) || (in.Position != "before" && in.Position != "after"))) {
 		common.ReplyErr(w, "invalid body", 400)
 		return
 	}
-	if err := MoveConversation(r.Context(), store.DB(), userID(r), strings.TrimSpace(in.ConversationID), common.PathVar(r, "group_id"), CreatedByUser, ""); err != nil {
+	if err := moveConversationAt(r.Context(), store.DB(), userID(r), strings.TrimSpace(in.ConversationID), common.PathVar(r, "group_id"), CreatedByUser, "", in.TargetID, in.Position); err != nil {
 		replyMembershipError(w, err)
 		return
 	}
@@ -386,6 +392,10 @@ func RemoveMember(w http.ResponseWriter, r *http.Request) {
 }
 
 func MoveConversation(ctx context.Context, db *gorm.DB, uid, conversationID, groupID, source, runID string) error {
+	return moveConversationAt(ctx, db, uid, conversationID, groupID, source, runID, "", "")
+}
+
+func moveConversationAt(ctx context.Context, db *gorm.DB, uid, conversationID, groupID, source, runID, targetID, position string) error {
 	return UserTransaction(ctx, db, uid, func(tx *gorm.DB) error {
 		var conv orm.Conversation
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id=? AND create_user_id=? AND deleted_at IS NULL AND archived_at IS NULL", conversationID, uid).Take(&conv).Error; err != nil {
@@ -403,8 +413,20 @@ func MoveConversation(ctx context.Context, db *gorm.DB, uid, conversationID, gro
 				return err
 			}
 		}
-		_, err := moveMembershipTx(tx, uid, conversationID, groupIDOrNil(groupID), source, runID)
-		return err
+		change, err := moveMembershipTx(tx, uid, conversationID, groupIDOrNil(groupID), source, runID)
+		if err != nil {
+			return err
+		}
+		if targetID != "" {
+			return reorderGroupMemberTx(tx, uid, groupID, conversationID, targetID, position)
+		}
+		if groupID != "" && (change.BeforeGroupID == nil || *change.BeforeGroupID != groupID) {
+			if conv.PinnedAt != nil || conv.IsEphemeral {
+				return tx.Model(&conv).UpdateColumn("history_order", nil).Error
+			}
+			return reorderGroupMemberTx(tx, uid, groupID, conversationID, "", "")
+		}
+		return nil
 	})
 }
 

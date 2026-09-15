@@ -111,9 +111,14 @@ export default function DatabaseConnectionModal({
         <Form.Item
           name="display_name"
           label={t("admin.dataSourceDatabaseName")}
-          rules={[{ required: true, message: t("admin.dataSourceDatabaseNameRequired") }]}
+          rules={[
+            { required: true, whitespace: true, message: t("admin.dataSourceDatabaseNameRequired") },
+            { validator: (_, value: string) => Array.from((value || '').trim()).length > 255
+              ? Promise.reject(new Error(t("admin.dataSourceDatabaseNameTooLong")))
+              : Promise.resolve() },
+          ]}
         >
-          <Input />
+          <Input count={{ show: true, max: 255, strategy: (value) => Array.from(value).length }} />
         </Form.Item>
         <Form.Item name="description" label={t("admin.dataSourceDatabaseDescription")}>
           <Input />

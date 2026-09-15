@@ -232,6 +232,14 @@ describe("SideChatPanel", () => {
   it("sends only the side-chat contract and keeps inherited knowledge read-only", async () => {
     await renderSideChat();
 
+    expect(mocks.latestChatProps).toMatchObject({
+      allowMentions: false,
+      allowKnowledgeBaseSelection: false,
+      showConversationConfig: false,
+      showSkillDeposit: false,
+      showModelSelector: true,
+    });
+
     const prepareClientConversationId = vi.fn();
     let stream: any;
     act(() => {

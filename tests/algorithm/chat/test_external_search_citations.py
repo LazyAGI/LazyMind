@@ -6,6 +6,7 @@ from lazyllm.tools.tools.search import SearchBase
 from lazymind.chat.engine.tools.infra import CitationResultMiddleware
 from lazymind.chat.service.utils.citations import (
     CITATION_REFS_KEY,
+    materialize_source_views,
     reset_citation_state,
 )
 
@@ -179,6 +180,9 @@ def test_get_content_and_get_contents_return_identity_with_agent_visible_refs():
     assert batch[0]['content'] == 'Fetched Result for agents from 0'
     assert batch[0]['ref'] == '[[1.1]]'
     assert state[CITATION_REFS_KEY]['1.1']['content'] == 'Fetched Result for agents from 0'
+    assert [source['source_roles'] for source in materialize_source_views(state)] == [
+        ['fetched', 'searched'],
+    ]
 
 
 def test_get_content_replaces_stale_history_ref_with_current_request_ref():

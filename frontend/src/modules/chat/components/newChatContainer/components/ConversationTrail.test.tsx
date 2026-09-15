@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import ConversationTrail from "./ConversationTrail";
 
@@ -58,6 +58,20 @@ describe("ConversationTrail", () => {
       behavior: "smooth",
       block: "start",
     });
+    expect(target).toHaveClass("chat-item--trail-target");
+  });
+
+  it("loads an older turn before locating it when the transcript only contains the recent page", async () => {
+    const container = document.createElement("div");
+    const target = document.createElement("div");
+    target.dataset.chatHistoryId = "old";
+    target.scrollIntoView = vi.fn();
+    const onLocate = vi.fn(async () => { container.appendChild(target); return true; });
+    render(<ConversationTrail items={[{ history_id: "old", summary: "早期问题" }, { history_id: "middle" }, { history_id: "latest" }]}
+      scrollContainerRef={{ current: container }} messageListLength={20} onLocate={onLocate} />);
+    fireEvent.click(screen.getByRole("button", { name: "第 1 轮：早期问题" }));
+    await waitFor(() => expect(target.scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "start" }));
+    expect(onLocate).toHaveBeenCalledWith("old");
     expect(target).toHaveClass("chat-item--trail-target");
   });
 

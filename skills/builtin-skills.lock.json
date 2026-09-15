@@ -135,6 +135,27 @@
       "package_file": "packages/bsk_01L0VOCABULARYLEARNING00001.zip"
     },
     {
+      "key": "feishu",
+      "uid": "bsk_01M1FEISHUDOCS8R4K2V7Q9X0A",
+      "source_url": "builtin://productivity/feishu",
+      "resolved_url": "builtin://productivity/feishu",
+      "version": "1.2.1",
+      "name": "feishu",
+      "description": "在 LazyMind 中读取、总结、创建、追加或修改飞书/Lark 文档与 Wiki 页面。用户提供 feishu.cn 或 larksuite.com 的文档链接，要求读取正文、写入内容、更新指定段落、创建文档，或同时要求用浏览器打开/截图时使用；普通公开网页不要使用。",
+      "category": "productivity",
+      "tags": [
+        "feishu",
+        "lark",
+        "cloud-document"
+      ],
+      "provider": "GitHub",
+      "market_visible": true,
+      "archive_sha256": "50aed2b66ea4e8783247d2b43b7733ef9eb3efe5eb3e824efd517ff70770fc3a",
+      "tree_sha256": "c0cc1e88f957b89048965858f1683c559e93b8fc38cd739d2c3965e5fdb2f3d8",
+      "archive_size": 6322,
+      "package_file": "packages/bsk_01M1FEISHUDOCS8R4K2V7Q9X0A.zip"
+    },
+    {
       "key": "user_290ac21c/find-skill-skillhub",
       "uid": "bsk_1D28C8C76BBD0551F53AAB437A8B",
       "source_url": "https://skillhub.cn/skills/user_290ac21c/find-skill-skillhub",

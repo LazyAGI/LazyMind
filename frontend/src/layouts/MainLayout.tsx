@@ -7,6 +7,7 @@ import {
   SearchOutlined,
   AppstoreOutlined,
   DatabaseOutlined,
+  TableOutlined,
   ApiOutlined,
   UserOutlined,
   GlobalOutlined,
@@ -218,7 +219,7 @@ export default function MainLayout() {
     ...(developerActive ? [{
       key: "/dataset-management",
       label: t("layout.datasetManagement"),
-      icon: <DatabaseOutlined />,
+      icon: <TableOutlined />,
     }, {
       key: "/databases",
       label: t("layout.database"),
@@ -923,7 +924,8 @@ export default function MainLayout() {
             <div className="sider-history">
               <RecordList
                 ref={recordListRef}
-                groupSection={<ConversationGroups
+                groupSection={(batchSelection) => <ConversationGroups
+                batchSelection={batchSelection}
                 mode="groups"
                 searchText={sidebarSearchText}
                 currentConversationId={currentSidebarConversationId}
