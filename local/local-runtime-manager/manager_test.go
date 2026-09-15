@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"os"
 	"os/exec"
@@ -1144,6 +1145,7 @@ func TestStatusMigratesLegacyDockerStackState(t *testing.T) {
 		t.Fatalf("ensure dirs: %v", err)
 	}
 	state := defaultRuntimeState(cfg, cfg.ProcessComposePort, paths.RunDirTokenFile)
+	state.Diagnostic = &RuntimeDiagnostic{Code: runtimeDiagnosticCodeHealthTimeout, Operation: runtimeDiagnosticOperationUp, Phase: runtimeDiagnosticPhaseServiceReadiness, Message: "health timeout", Retryable: true, Action: "retry"}
 	state.Services[legacyComposeServiceName] = RuntimeServiceState{Kind: "docker" + "-compose", Status: "running"}
 	delete(state.Services, processComposeServiceName)
 	if err := writeRuntimeState(paths.StateFile, state); err != nil {
@@ -1165,6 +1167,9 @@ func TestStatusMigratesLegacyDockerStackState(t *testing.T) {
 	}
 	if svc.Kind != "host-supervisor" {
 		t.Fatalf("kind = %q, want host-supervisor", svc.Kind)
+	}
+	if resp.Diagnostic == nil || resp.Diagnostic.Code != runtimeDiagnosticCodeHealthTimeout {
+		t.Fatalf("diagnostic = %#v, want health timeout", resp.Diagnostic)
 	}
 }
 
@@ -1223,7 +1228,7 @@ func TestRuntimeDiagnosticDoesNotInferFromErrorText(t *testing.T) {
 }
 
 func TestRuntimeDiagnosticErrorPreservesCauseAndIsIdempotent(t *testing.T) {
-	cause := errors.New("permission denied: secret")
+	cause := fmt.Errorf("permission denied: %w", fs.ErrPermission)
 	wrapped := attachRuntimeDiagnostic(cause, runtimeFailureContext{})
 	if wrapped.Error() != cause.Error() || !errors.Is(wrapped, cause) {
 		t.Fatalf("diagnostic error did not preserve cause: %v", wrapped)
@@ -1586,6 +1591,29 @@ func writeComposeFixture(t *testing.T, repo string) {
 	}
 }
 
+func newRunningRuntimeFixture(t *testing.T) (RuntimeConfig, RuntimePaths, RuntimeState) {
+	t.Helper()
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, paths, err := NewRuntimeConfigWithOptions(RuntimeConfigOptions{
+		Profile: "local", RepoRoot: repo, RuntimeRoot: filepath.Join(t.TempDir(), "runtime"),
+		ResourcesRoot: filepath.Join(t.TempDir(), "resources"), MaintenanceMode: installerWarmupMaintenanceMode,
+	})
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	if err := paths.EnsureAllDirs(); err != nil {
+		t.Fatalf("ensure runtime dirs: %v", err)
+	}
+	state := defaultRuntimeState(cfg, cfg.ProcessComposePort, paths.RunDirTokenFile)
+	state.OverallStatus = "running"
+	state.Services[processComposeServiceName] = RuntimeServiceState{Kind: "host-supervisor", Status: "running"}
+	if err := writeRuntimeState(paths.StateFile, state); err != nil {
+		t.Fatalf("write runtime state: %v", err)
+	}
+	return cfg, paths, state
+}
+
 func occupyLocalPorts(t *testing.T, ports ...int) []net.Listener {
 	return occupyPortsOn(t, "127.0.0.1", ports...)
 }
@@ -1673,6 +1701,98 @@ func assertStringArgAfter(t *testing.T, args []string, flag string, want string)
 		}
 	}
 	t.Fatalf("missing arg pair %s %s in %v", flag, want, args)
+}
+
+func TestRuntimeManagerDownPersistsDiagnosticAndStatus(t *testing.T) {
+	cfg, paths, _ := newRunningRuntimeFixture(t)
+	manager := NewRuntimeManager(&fakeRunner{t: t}, filepath.Join(paths.BinDir, "local-runtime-manager"))
+	manager.probeAPI = func(int, time.Duration) bool { return false }
+	manager.processScanner = func(RuntimePaths) ([]LocalProcessRecord, error) {
+		return nil, errors.New("process registry unavailable")
+	}
+	manager.runtimeReady = func(context.Context, RuntimeConfig, RuntimePaths) bool { return false }
+	var output strings.Builder
+	manager.SetOutput(&output, &output)
+	if err := manager.Down(context.Background(), cfg, paths); err == nil {
+		t.Fatal("Down unexpectedly succeeded")
+	}
+	state, err := readRuntimeState(paths.StateFile)
+	if err != nil || state.OverallStatus != "failed" || state.Diagnostic == nil || state.Diagnostic.Code != runtimeDiagnosticCodeUnknown {
+		t.Fatalf("failed state = %+v, err=%v", state, err)
+	}
+	statusJSON, err := manager.Status(context.Background(), cfg, paths, true)
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	var response StatusResponse
+	if err := json.Unmarshal([]byte(statusJSON), &response); err != nil {
+		t.Fatalf("unmarshal status: %v", err)
+	}
+	if response.Diagnostic == nil || response.Diagnostic.Code != state.Diagnostic.Code {
+		t.Fatalf("status diagnostic = %#v, want %#v", response.Diagnostic, state.Diagnostic)
+	}
+	if !strings.Contains(output.String(), `"event":"shutdown.failed.diagnostic"`) || !strings.Contains(output.String(), `"event":"shutdown.failed"`) {
+		t.Fatalf("shutdown failure events missing: %s", output.String())
+	}
+}
+
+func TestRuntimeManagerDownFallbackClearsDiagnostic(t *testing.T) {
+	cfg, paths, state := newRunningRuntimeFixture(t)
+	state.Diagnostic = &RuntimeDiagnostic{Code: runtimeDiagnosticCodeHealthTimeout, Operation: runtimeDiagnosticOperationUp, Phase: runtimeDiagnosticPhaseServiceReadiness, Message: "old", Retryable: true, Action: "retry"}
+	if err := writeRuntimeState(paths.StateFile, state); err != nil {
+		t.Fatalf("write diagnostic state: %v", err)
+	}
+	manager := NewRuntimeManager(&fakeRunner{t: t}, filepath.Join(paths.BinDir, "local-runtime-manager"))
+	manager.probeAPI = func(int, time.Duration) bool { return false }
+	manager.processScanner = func(RuntimePaths) ([]LocalProcessRecord, error) { return nil, nil }
+	var output strings.Builder
+	manager.SetOutput(&output, &output)
+	if err := manager.Down(context.Background(), cfg, paths); err != nil {
+		t.Fatalf("fallback Down: %v", err)
+	}
+	stateAfter, err := readRuntimeState(paths.StateFile)
+	if err != nil || stateAfter.OverallStatus != "stopped" || stateAfter.Diagnostic != nil {
+		t.Fatalf("stopped state = %+v, err=%v", stateAfter, err)
+	}
+	if strings.Contains(output.String(), "shutdown.failed") {
+		t.Fatalf("fallback success emitted failure event: %s", output.String())
+	}
+}
+
+func TestRuntimeManagerDownDoesNotOverwriteForeignState(t *testing.T) {
+	cfg, paths, state := newRunningRuntimeFixture(t)
+	state.Profile, state.Runtime, state.OwnerToken = "desktop", "desktop", "other-owner"
+	if err := writeRuntimeState(paths.StateFile, state); err != nil {
+		t.Fatalf("write foreign state: %v", err)
+	}
+	manager := NewRuntimeManager(&fakeRunner{t: t}, filepath.Join(paths.BinDir, "local-runtime-manager"))
+	manager.probeAPI = func(int, time.Duration) bool { return false }
+	if err := manager.Down(context.Background(), cfg, paths); err == nil {
+		t.Fatal("foreign Down unexpectedly succeeded")
+	}
+	stateAfter, err := readRuntimeState(paths.StateFile)
+	if err != nil || stateAfter.Profile != "desktop" || stateAfter.OverallStatus != "running" || stateAfter.Diagnostic != nil {
+		t.Fatalf("foreign state changed = %+v, err=%v", stateAfter, err)
+	}
+}
+
+func TestWaitForRuntimeStoppedReportsStructuredTimeout(t *testing.T) {
+	manager := NewRuntimeManager(&fakeRunner{}, "local-runtime-manager")
+	manager.probeAPI = func(int, time.Duration) bool { return true }
+	manager.downTimeout = 10 * time.Millisecond
+	manager.pollInterval = time.Millisecond
+	err := manager.waitForRuntimeStopped(context.Background(), RuntimeConfig{ProcessComposePort: 19080}, RuntimePaths{LogFilePath: "runtime.log"})
+	if runtimeFailureFact(err) != runtimeFailureFactStopTimeout {
+		t.Fatalf("stop timeout fact = %q, err=%v", runtimeFailureFact(err), err)
+	}
+	failureContext, ok := runtimeFailureContextFromError(err)
+	if !ok || failureContext.Phase != runtimeDiagnosticPhaseShutdownVerification || !containsString(failureContext.BlockingServices, processComposeServiceName) {
+		t.Fatalf("stop timeout context = %+v, ok=%t", failureContext, ok)
+	}
+	diagnostic := classifyRuntimeFailure(err, failureContext)
+	if diagnostic.Code != runtimeDiagnosticCodeStopTimeout || diagnostic.Details == nil || diagnostic.Details.TimeoutMs != 10 {
+		t.Fatalf("stop timeout diagnostic = %+v", diagnostic)
+	}
 }
 
 func TestRuntimeManagerUpPersistsDiagnosticAndKeepsFailureEventCompatible(t *testing.T) {

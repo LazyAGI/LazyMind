@@ -1440,6 +1440,7 @@ func (m *RuntimeManager) waitForRuntimeStopped(ctx context.Context, cfg RuntimeC
 				Context: runtimeFailureContext{
 					Operation:        runtimeDiagnosticOperationDown,
 					Phase:            runtimeDiagnosticPhaseShutdownVerification,
+					Fact:             runtimeFailureFactStopTimeout,
 					Service:          processComposeServiceName,
 					LogPath:          paths.LogFilePath,
 					TimeoutMs:        timeout.Milliseconds(),
@@ -1716,6 +1717,7 @@ func (m *RuntimeManager) Status(ctx context.Context, cfg RuntimeConfig, paths Ru
 		ProcessCompose: state.ProcessCompose,
 		Config:         snapshotRuntimeConfig(cfg),
 		Services:       state.Services,
+		Diagnostic:     state.Diagnostic,
 	}
 	resp.Services = normalizeRuntimeServices(resp.Services, cfg)
 	plan := buildRuntimeProcessPlan(cfg)
