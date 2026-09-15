@@ -1,8 +1,13 @@
 function createDesktopBridge(ipcRenderer) {
   return {
     platform: process.platform,
+    browserSessionSet: (value) => ipcRenderer.invoke("lazymind:browserSessionSet", value),
+    browserStatus: () => ipcRenderer.invoke("lazymind:browserStatus"),
+    browserSelect: (engine) => ipcRenderer.invoke("lazymind:browserSelect", engine),
+    browserOpen: (url) => ipcRenderer.invoke("lazymind:browserOpen", url),
     openLogsDir: () => ipcRenderer.invoke("lazymind:openLogsDir"),
     openDataDir: () => ipcRenderer.invoke("lazymind:openDataDir"),
+    openBrowserExtensionDir: () => ipcRenderer.invoke("lazymind:openBrowserExtensionDir"),
     runtimeStatus: () => ipcRenderer.invoke("lazymind:runtimeStatus"),
     agentIntegrationStatuses: () => ipcRenderer.invoke("lazymind:agentIntegrationStatuses"),
     agentIntegrationAction: (agent, action) => ipcRenderer.invoke("lazymind:agentIntegrationAction", agent, action),

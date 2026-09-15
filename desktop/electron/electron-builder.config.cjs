@@ -20,6 +20,11 @@ if (!["adhoc", "developer-id", "none"].includes(macSigningMode)) {
 }
 const extraResources = [
   {
+    from: path.resolve(__dirname, "../../browser-extension"),
+    to: "browser-controller",
+    filter: ["package.json", "src/controller.js", "src/capture.js"],
+  },
+  {
     from: runtimeStage,
     to: "runtime",
   },

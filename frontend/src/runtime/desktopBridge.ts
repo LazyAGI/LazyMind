@@ -171,12 +171,14 @@ export type DesktopAgentExecutableBindingResult =
 type DesktopBridgeCommand =
   | "openLogsDir"
   | "openDataDir"
+  | "openBrowserExtensionDir"
   | "restartRuntime";
 
 interface LazyMindDesktopBridge {
   platform?: string;
   openLogsDir?: () => Promise<void> | void;
   openDataDir?: () => Promise<void> | void;
+  openBrowserExtensionDir?: () => Promise<void> | void;
   runtimeStatus?: () => Promise<unknown> | unknown;
   agentIntegrationStatuses?: () => Promise<unknown> | unknown;
   agentIntegrationAction?: (agent: DesktopAgent, action: DesktopAgentIntegrationAction) => Promise<unknown> | unknown;
@@ -258,6 +260,10 @@ export function openLogsDir(): Promise<DesktopBridgeResult> {
 
 export function openDataDir(): Promise<DesktopBridgeResult> {
   return callDesktopBridge("openDataDir");
+}
+
+export function openBrowserExtensionDir(): Promise<DesktopBridgeResult> {
+  return callDesktopBridge("openBrowserExtensionDir");
 }
 
 export function runtimeStatus(): Promise<DesktopRuntimeStatusResult> {

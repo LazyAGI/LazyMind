@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	mysqldriver "github.com/go-sql-driver/mysql"
 	gormmysql "gorm.io/driver/mysql"
@@ -220,6 +221,10 @@ func rowFromDatabaseConnectionRequest(req DatabaseConnectionRequest, userID, use
 	if err != nil {
 		return orm.ExternalDatabaseConnection{}, err
 	}
+	displayName := firstNonEmpty(strings.TrimSpace(req.DisplayName), databaseName)
+	if utf8.RuneCountInString(displayName) > 255 {
+		return orm.ExternalDatabaseConnection{}, errors.New("display_name must be 255 characters or fewer")
+	}
 	passwordJSON, err := encryptDatabasePassword(req.Password)
 	if err != nil {
 		return orm.ExternalDatabaseConnection{}, err
@@ -231,7 +236,7 @@ func rowFromDatabaseConnectionRequest(req DatabaseConnectionRequest, userID, use
 	now := time.Now()
 	return orm.ExternalDatabaseConnection{
 		ID:           "edb_" + common.GenerateID(),
-		DisplayName:  firstNonEmpty(strings.TrimSpace(req.DisplayName), databaseName),
+		DisplayName:  displayName,
 		Description:  strings.TrimSpace(req.Description),
 		DBType:       dbType,
 		Host:         host,
@@ -247,7 +252,11 @@ func rowFromDatabaseConnectionRequest(req DatabaseConnectionRequest, userID, use
 func databaseConnectionUpdates(req UpdateDatabaseConnectionRequest) (map[string]any, error) {
 	updates := map[string]any{}
 	if req.DisplayName != nil {
-		updates["display_name"] = strings.TrimSpace(*req.DisplayName)
+		displayName := strings.TrimSpace(*req.DisplayName)
+		if utf8.RuneCountInString(displayName) > 255 {
+			return nil, errors.New("display_name must be 255 characters or fewer")
+		}
+		updates["display_name"] = displayName
 	}
 	if req.Description != nil {
 		updates["description"] = strings.TrimSpace(*req.Description)

@@ -24,7 +24,7 @@ interface ConversationTrailProps {
   loading?: boolean;
   error?: Error | null;
   onRetry?: () => void;
-  onLocate?: (historyId: string) => void;
+  onLocate?: (historyId: string) => Promise<boolean>;
 }
 
 function distanceColor(activeIndex: number, itemIndex: number) {
@@ -63,6 +63,8 @@ export default function ConversationTrail({
   const [previewHistoryId, setPreviewHistoryId] = useState("");
   const hidePreviewTimerRef = useRef<number | null>(null);
   const targetTimerRef = useRef<number | null>(null);
+  const locateRequestRef = useRef(0);
+  const [locatingHistoryId, setLocatingHistoryId] = useState("");
 
   const activeIndex = useMemo(() => {
     const index = items.findIndex((item) => item.history_id === activeHistoryId);
@@ -141,6 +143,7 @@ export default function ConversationTrail({
 
   useEffect(() => {
     return () => {
+      locateRequestRef.current += 1;
       if (hidePreviewTimerRef.current) {
         window.clearTimeout(hidePreviewTimerRef.current);
       }
@@ -168,12 +171,25 @@ export default function ConversationTrail({
     }, 100);
   };
 
-  const locate = (item: ConversationTrailRecord) => {
+  const locate = async (item: ConversationTrailRecord) => {
     const historyId = item.history_id || "";
     if (!historyId) {
       return;
     }
-    const target = getTargetElement(scrollContainerRef.current, historyId);
+    const request = ++locateRequestRef.current;
+    setLocatingHistoryId("");
+    let target = getTargetElement(scrollContainerRef.current, historyId);
+    if (!target && onLocate) {
+      setLocatingHistoryId(historyId);
+      try {
+        if (!await onLocate(historyId)) return;
+        await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+        if (request !== locateRequestRef.current) return;
+        target = getTargetElement(scrollContainerRef.current, historyId);
+      } finally {
+        if (request === locateRequestRef.current) setLocatingHistoryId("");
+      }
+    }
     if (target) {
       target.scrollIntoView?.({ behavior: "smooth", block: "start" });
       target.classList.remove("chat-item--trail-target");
@@ -187,8 +203,7 @@ export default function ConversationTrail({
         targetTimerRef.current = null;
       }, 1650);
     }
-    setActiveHistoryId(historyId);
-    onLocate?.(historyId);
+    if (target) setActiveHistoryId(historyId);
   };
 
   if (items.length < MIN_CONVERSATION_TRAIL_ITEMS) {
@@ -238,7 +253,8 @@ export default function ConversationTrail({
                       summary: item.summary || t("chat.conversationTrailUntitled"),
                     })}
                     aria-current={isActive ? "true" : undefined}
-                    onClick={() => locate(item)}
+                    aria-busy={historyId === locatingHistoryId}
+                    onClick={() => void locate(item)}
                     onPointerEnter={() => showPreview(historyId)}
                     onPointerLeave={schedulePreviewHide}
                     onFocus={() => showPreview(historyId)}

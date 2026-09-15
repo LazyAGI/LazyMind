@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "LazyMind Browser",
+  "version": "0.2.5",
+  "description": "Connect the current page and control visible LazyMind-managed browser sessions.",
+  "minimum_chrome_version": "124",
+  "permissions": [
+    "alarms",
+    "debugger",
+    "scripting",
+    "storage"
+  ],
+  "optional_host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
+  "background": {
+    "service_worker": "src/background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "LazyMind Browser",
+    "default_popup": "src/popup.html"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src http://127.0.0.1:* http://localhost:* https://127.0.0.1:* https://localhost:* ws://127.0.0.1:* ws://localhost:* wss://127.0.0.1:* wss://localhost:* https://* wss://*"
+  }
+}

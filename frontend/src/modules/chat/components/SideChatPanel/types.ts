@@ -32,6 +32,9 @@ export interface SideChatConversation {
 }
 
 export interface SideChatPanelProps {
+  embedded?: boolean;
+  onOpenSources?: (sources: import("@/modules/chat/utils/sourceAdapter").ChatSource[], summary?: string) => void;
+  onStreamingChange?: (streaming: boolean) => void;
   open: boolean;
   /** Hide the drawer during navigation without discarding its conversation. */
   visible?: boolean;
