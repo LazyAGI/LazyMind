@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"os"
@@ -1156,6 +1157,109 @@ func TestUpdateProbedServiceMarksStartingServiceStale(t *testing.T) {
 	}
 	if got := services[scanControlPlaneProcessName].Status; got != "stale" {
 		t.Fatalf("status = %q, want stale", got)
+	}
+}
+
+func TestRuntimeDiagnosticClassification(t *testing.T) {
+	portErr := &startupPortConflictError{Service: "auth-service", Address: "127.0.0.1", Port: 8081, Cause: errors.New("claimed")}
+	tests := []struct {
+		name string
+		err  error
+		ctx  runtimeFailureContext
+		want string
+	}{
+		{"port conflict", portErr, runtimeFailureContext{Service: "auth-service"}, runtimeDiagnosticCodePortConflict},
+		{"permission", os.ErrPermission, runtimeFailureContext{}, runtimeDiagnosticCodePermissionDenied},
+		{"dependency", exec.ErrNotFound, runtimeFailureContext{Fact: runtimeFailureFactDependencyMissing, Dependency: "uv"}, runtimeDiagnosticCodeDependencyMissing},
+		{"process exit", errors.New("wait failed"), runtimeFailureContext{Fact: runtimeFailureFactProcessExited}, runtimeDiagnosticCodeProcessExited},
+		{"health timeout", errors.New("deadline"), runtimeFailureContext{Fact: runtimeFailureFactHealthTimeout}, runtimeDiagnosticCodeHealthTimeout},
+		{"stop timeout", errors.New("deadline"), runtimeFailureContext{Fact: runtimeFailureFactStopTimeout}, runtimeDiagnosticCodeStopTimeout},
+		{"instance conflict", errors.New("owner"), runtimeFailureContext{Fact: runtimeFailureFactInstanceConflict}, runtimeDiagnosticCodeInstanceConflict},
+		{"unknown", errors.New("failed"), runtimeFailureContext{}, runtimeDiagnosticCodeUnknown},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := classifyRuntimeFailure(tt.err, tt.ctx).Code; got != tt.want {
+				t.Fatalf("diagnostic code = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRuntimeDiagnosticDoesNotInferFromErrorText(t *testing.T) {
+	for _, message := range []string{"permission denied", "not found", "timeout"} {
+		t.Run(message, func(t *testing.T) {
+			got := classifyRuntimeFailure(errors.New(message), runtimeFailureContext{})
+			if got.Code != runtimeDiagnosticCodeUnknown {
+				t.Fatalf("diagnostic code = %q, want unknown", got.Code)
+			}
+		})
+	}
+	got := classifyRuntimeFailure(context.Canceled, runtimeFailureContext{Fact: runtimeFailureFactHealthTimeout})
+	if got.Code != runtimeDiagnosticCodeUnknown {
+		t.Fatalf("canceled health check code = %q, want unknown", got.Code)
+	}
+}
+
+func TestRuntimeDiagnosticErrorPreservesCauseAndIsIdempotent(t *testing.T) {
+	cause := errors.New("permission denied: secret")
+	wrapped := attachRuntimeDiagnostic(cause, runtimeFailureContext{})
+	if wrapped.Error() != cause.Error() || !errors.Is(wrapped, cause) {
+		t.Fatalf("diagnostic error did not preserve cause: %v", wrapped)
+	}
+	first, ok := runtimeDiagnosticFromError(wrapped)
+	if !ok || first.Code != runtimeDiagnosticCodePermissionDenied {
+		t.Fatalf("missing permission diagnostic: %#v", first)
+	}
+	second, ok := runtimeDiagnosticFromError(attachRuntimeDiagnostic(wrapped, runtimeFailureContext{Fact: runtimeFailureFactProcessExited}))
+	if !ok || first != second {
+		t.Fatalf("diagnostic was not reused: first=%p second=%p", first, second)
+	}
+}
+
+func TestRuntimeDiagnosticJSONUsesWhitelistAndOmitsNil(t *testing.T) {
+	diagnostic := classifyRuntimeFailure(errors.New("stderr password=secret"), runtimeFailureContext{
+		Operation: runtimeDiagnosticOperationUp, Phase: runtimeDiagnosticPhaseServiceReadiness,
+		Service: "auth-service", LogPath: "/tmp/auth.log", HealthURL: "http://127.0.0.1:8081/health",
+		TimeoutMs: 1800000, Address: "127.0.0.1", Port: 8081, Path: "/health",
+		Attempt: 2, MaxAttempts: 3, BlockingServices: []string{"core", "auth-service", "core"},
+	})
+	raw, err := json.Marshal(diagnostic)
+	if err != nil {
+		t.Fatalf("marshal diagnostic: %v", err)
+	}
+	if strings.Contains(string(raw), "stderr") || strings.Contains(string(raw), "password") || strings.Contains(string(raw), "secret") {
+		t.Fatalf("sensitive error content leaked: %s", raw)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("unmarshal diagnostic: %v", err)
+	}
+	details, ok := payload["details"].(map[string]any)
+	if !ok || details["blockingServices"].([]any)[0] != "auth-service" {
+		t.Fatalf("unexpected details: %#v", payload["details"])
+	}
+	for _, forbidden := range []string{"cause", "stderr", "error", "password"} {
+		if _, ok := payload[forbidden]; ok {
+			t.Fatalf("forbidden diagnostic field %q present", forbidden)
+		}
+	}
+	if got, _ := json.Marshal(struct {
+		Diagnostic *RuntimeDiagnostic `json:"diagnostic,omitempty"`
+	}{}); string(got) != "{}" {
+		t.Fatalf("nil diagnostic JSON = %s, want {}", got)
+	}
+}
+
+func TestReadRuntimeStateAcceptsLegacyStateWithoutDiagnostic(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime-state.json")
+	legacy := `{"version":1,"runtime":"local","profile":"local","repoRoot":"repo","runtimeRoot":"runtime","processCompose":{"apiPort":9000},"services":{},"updatedAt":"2026-01-01T00:00:00Z"}`
+	if err := os.WriteFile(path, []byte(legacy), 0o644); err != nil {
+		t.Fatalf("write legacy state: %v", err)
+	}
+	state, err := readRuntimeState(path)
+	if err != nil || state.Diagnostic != nil {
+		t.Fatalf("legacy state read = %#v, err=%v", state, err)
 	}
 }
 

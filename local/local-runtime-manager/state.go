@@ -20,6 +20,7 @@ type RuntimeState struct {
 	Config         RuntimeConfigSnapshot          `json:"config,omitempty"`
 	Services       map[string]RuntimeServiceState `json:"services"`
 	OverallStatus  string                         `json:"overallStatus,omitempty"`
+	Diagnostic     *RuntimeDiagnostic             `json:"diagnostic,omitempty"`
 	UpdatedAt      string                         `json:"updatedAt"`
 }
 
@@ -72,6 +73,7 @@ type StatusResponse struct {
 	ProcessCompose ProcessComposeState            `json:"processCompose"`
 	Config         RuntimeConfigSnapshot          `json:"config,omitempty"`
 	Services       map[string]RuntimeServiceState `json:"services"`
+	Diagnostic     *RuntimeDiagnostic             `json:"diagnostic,omitempty"`
 }
 
 const legacyComposeServiceName = "docker" + "-stack"
