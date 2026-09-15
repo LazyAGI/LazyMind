@@ -902,12 +902,12 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
               disabled: Boolean(item.organizing_run_id),
               onClick: () => setArchiveItem(item),
             },
-            {
+            ...(item.group_kind === "project" ? [] : [{
               key: "move-to-group",
               label: t("conversationOrganizer.moveToGroup"),
               disabled: Boolean(item.organizing_run_id),
               children: conversationGroupSubmenu({ conversationId, groupId: item.group_id, title: item.display_name }, () => setMovingConversation(item)),
-            },
+            }]),
           ];
       const activateConversation = () => {
         if (showBatchExport || selected) return;
@@ -1086,7 +1086,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
             pinned={isConversationPinned(item)}
             disabled={showBatchExport || isHistoryLoading || Boolean(keyword || pinningConversationId || reorderingConversationId || item.organizing_run_id) || Boolean(node.isPlaceholderParent)}
           >
-            <Col span={24} draggable={!showBatchExport && !keyword && !item.organizing_run_id && !isChildConversation(item) && !node.isPlaceholderParent && !item.is_task_conv} onDragStart={(e: React.DragEvent<HTMLElement>) => startConversationDrag(e, conversationId, item.group_id)}>{record}</Col>
+            <Col span={24} draggable={item.group_kind !== "project" && !showBatchExport && !keyword && !item.organizing_run_id && !isChildConversation(item) && !node.isPlaceholderParent && !item.is_task_conv} onDragStart={(e: React.DragEvent<HTMLElement>) => startConversationDrag(e, conversationId, item.group_id)}>{record}</Col>
             {childrenExpanded && node.children.length > 0 ? (
               <Col span={24}>
                 <div

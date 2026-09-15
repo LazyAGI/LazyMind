@@ -1,3 +1,4 @@
+import { emitConversationGroupsChanged } from "../../../conversationOrganizer/api";
 import { getLocalizedErrorMessage } from "@/components/request";
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { message, Modal } from "antd";
@@ -1651,7 +1652,7 @@ export function useChatConversation({
       ChatConversationsRequestActionEnum.ChatActionNext,
       {
         ...(params.run_in_background ? { run_in_background: true } : {}),
-        ...(params.workspace_id ? { workspace_id: params.workspace_id, workspace_permission_mode: params.workspace_permission_mode } : {}),
+        ...(params.workspace_id ? { workspace_id: params.workspace_id, workspace_permission_mode: params.workspace_permission_mode, project_name: params.project_name } : {}),
         ...(params.thinking_depth
           ? { thinking_depth: params.thinking_depth }
           : {}),
@@ -1695,6 +1696,7 @@ export function useChatConversation({
       streamManager.saveMessageList(currentId, newMessageList);
       if (!concurrentStream && !currentId.startsWith("temp_")) {
         emitConversationActivity({ conversationId: currentId });
+        if (params.workspace_id) emitConversationGroupsChanged();
       }
     }
     return true;

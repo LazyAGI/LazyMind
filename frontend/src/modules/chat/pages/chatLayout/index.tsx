@@ -551,7 +551,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
             tags: effectiveChatConfig?.tags,
           },
         },
-        ...(pendingGroupId ? { group_id: pendingGroupId } : {}),
+        ...(pendingGroupId && !extras?.workspace_id ? { group_id: pendingGroupId } : {}),
         models: [t("chat.lazyMindModel")],
         thinking_depth:
           extras?.thinking_depth ?? forkThinkingDepth ?? useChatThinkStore.getState().thinkingDepth,
@@ -569,6 +569,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         ...(extras?.run_in_background ? { run_in_background: true } : {}),
         ...(typeof extras?.workspace_id === "string" ? {
           workspace_id: extras.workspace_id,
+          project_name: extras.project_name,
           workspace_permission_mode: extras.workspace_permission_mode,
         } : {}),
         ...(initialModelSelection

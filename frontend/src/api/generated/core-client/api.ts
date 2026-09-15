@@ -897,6 +897,11 @@ export interface ConversationChatGroupRequest {
     'conversation_id'?: string;
     'data'?: object;
     'group_id'?: string;
+    /**
+     * Group names: 1-24 characters, unique ignoring case. Project names: 1-255 characters; duplicates allowed.
+     */
+    'project_name'?: string;
+    'workspace_id'?: string;
 }
 export interface ConversationChatStatusResponse {
     'is_generating'?: boolean;
@@ -1017,19 +1022,23 @@ export interface ConversationGroup {
     'created_by': ConversationGroupCreatedByEnum;
     'created_run_id'?: string;
     'id': string;
+    'kind'?: ConversationGroupKindEnum;
     'member_count': number;
     /**
-     * Trimmed Unicode group name; unique ignoring case within the current user.
+     * Group names: 1-24 characters, unique ignoring case. Project names: 1-255 characters; duplicates allowed.
      */
     'name': string;
+    'path'?: string;
     'pinned'?: boolean;
     /**
      * Optional user-editable collection scope. Empty string clears it. Changes affect subsequent organization only.
      */
     'scope': string;
     'sort_order'?: number;
+    'total_member_count'?: number;
     'updated_at': string;
     'version': number;
+    'workspace_id'?: string;
 }
 
 export const ConversationGroupCreatedByEnum = {
@@ -1038,20 +1047,36 @@ export const ConversationGroupCreatedByEnum = {
 } as const;
 
 export type ConversationGroupCreatedByEnum = typeof ConversationGroupCreatedByEnum[keyof typeof ConversationGroupCreatedByEnum];
+export const ConversationGroupKindEnum = {
+    Group: 'group',
+    Project: 'project'
+} as const;
+
+export type ConversationGroupKindEnum = typeof ConversationGroupKindEnum[keyof typeof ConversationGroupKindEnum];
 
 export interface ConversationGroupAssignRequest {
     'conversation_id': string;
 }
 export interface ConversationGroupCreateRequest {
+    'kind'?: ConversationGroupCreateRequestKindEnum;
     /**
-     * Trimmed Unicode group name; unique ignoring case within the current user.
+     * Group names: 1-24 characters, unique ignoring case. Project names: 1-255 characters; duplicates allowed.
      */
-    'name': string;
+    'name'?: string;
     /**
      * Optional user-editable collection scope. Empty string clears it. Changes affect subsequent organization only.
      */
     'scope'?: string;
+    'workspace_id'?: string;
 }
+
+export const ConversationGroupCreateRequestKindEnum = {
+    Group: 'group',
+    Project: 'project'
+} as const;
+
+export type ConversationGroupCreateRequestKindEnum = typeof ConversationGroupCreateRequestKindEnum[keyof typeof ConversationGroupCreateRequestKindEnum];
+
 export interface ConversationGroupDetailResponse {
     'conversations': Array<ConversationGroupMember>;
     'group': ConversationGroup;
@@ -1084,7 +1109,7 @@ export interface ConversationGroupResponse {
 }
 export interface ConversationGroupUpdateRequest {
     /**
-     * Trimmed Unicode group name; unique ignoring case within the current user.
+     * Group names: 1-24 characters, unique ignoring case. Project names: 1-255 characters; duplicates allowed.
      */
     'name'?: string;
     /**
@@ -1137,6 +1162,7 @@ export interface ConversationItem {
     'fork_capability'?: ConversationForkCapability;
     'fork_origin'?: ConversationForkOrigin | null;
     'group_id'?: string | null;
+    'group_kind'?: ConversationItemGroupKindEnum;
     'has_fork_descendants'?: boolean;
     'history_order'?: number | null;
     'is_pinned'?: boolean;
@@ -1175,6 +1201,13 @@ export const ConversationItemChatExecutorEnum = {
 } as const;
 
 export type ConversationItemChatExecutorEnum = typeof ConversationItemChatExecutorEnum[keyof typeof ConversationItemChatExecutorEnum];
+export const ConversationItemGroupKindEnum = {
+    Group: 'group',
+    Project: 'project',
+    Empty: ''
+} as const;
+
+export type ConversationItemGroupKindEnum = typeof ConversationItemGroupKindEnum[keyof typeof ConversationItemGroupKindEnum];
 export const ConversationItemRelationTypeEnum = {
     Empty: '',
     Sidechat: 'sidechat',
@@ -1809,6 +1842,7 @@ export interface DatabaseConnectionSecretResponse {
 export interface Dataset {
     'acl'?: Array<string>;
     'algo': Algo;
+    'capabilities': DatasetCapabilities;
     'cover_image': string;
     'create_time': string;
     'created_by_data_source'?: boolean;
@@ -1823,14 +1857,24 @@ export interface Dataset {
     'is_owner': boolean;
     'name': string;
     'parsers'?: Array<ParserConfig>;
+    'processing_level'?: string;
+    'processing_revision'?: number;
+    'reader_fallback_accepted': boolean;
     'segment_count': number;
     'share_type': string;
     'source_type'?: string;
     'state': string;
     'tags'?: Array<string>;
     'token_count': number;
+    'transition_status'?: string;
     'type': string;
     'update_time': string;
+}
+export interface DatasetCapabilities {
+    'list': boolean;
+    'read': boolean;
+    'retrieve': boolean;
+    'search': boolean;
 }
 export interface DatasetMember {
     'create_time'?: string;
@@ -2602,6 +2646,69 @@ export interface LocalFSChatSettingOpenAPIRequest {
 export interface LocalFSChatSettingOpenAPIResponse {
     'enabled': boolean;
 }
+export interface LocalOperationCompletion {
+    'arguments_digest'?: string;
+    'attempt_id'?: string;
+    'call_id': string;
+    'content'?: string;
+    'depends_on'?: string;
+    'execution_mode'?: LocalOperationCompletionExecutionModeEnum;
+    'expected_replacements'?: number;
+    'expected_version'?: string;
+    'generation'?: string;
+    'glob'?: string;
+    'history_id'?: string;
+    'host_intent_id'?: string;
+    'lease_token'?: string;
+    'limit'?: number;
+    'max_lines'?: number;
+    'offset'?: number;
+    'old_content'?: string;
+    'operation': LocalOperationCompletionOperationEnum;
+    'parent_identity'?: string;
+    'path': string;
+    'pattern'?: string;
+    'run_id'?: string;
+    'target_identity'?: string;
+    'task_id'?: string;
+    'tool_name'?: string;
+    'workspace_id': string;
+    'reason'?: string;
+    'result_identity'?: string;
+    'status': LocalOperationCompletionStatusEnum;
+    'version'?: string;
+}
+
+export const LocalOperationCompletionExecutionModeEnum = {
+    Local: 'local',
+    HostAccess: 'host_access'
+} as const;
+
+export type LocalOperationCompletionExecutionModeEnum = typeof LocalOperationCompletionExecutionModeEnum[keyof typeof LocalOperationCompletionExecutionModeEnum];
+export const LocalOperationCompletionOperationEnum = {
+    Read: 'read',
+    Write: 'write',
+    Create: 'create',
+    Append: 'append',
+    Replace: 'replace',
+    Delete: 'delete',
+    Overwrite: 'overwrite',
+    Mkdir: 'mkdir',
+    Ls: 'ls',
+    Glob: 'glob',
+    Grep: 'grep',
+    Info: 'info'
+} as const;
+
+export type LocalOperationCompletionOperationEnum = typeof LocalOperationCompletionOperationEnum[keyof typeof LocalOperationCompletionOperationEnum];
+export const LocalOperationCompletionStatusEnum = {
+    Completed: 'completed',
+    Failed: 'failed',
+    Uncertain: 'uncertain'
+} as const;
+
+export type LocalOperationCompletionStatusEnum = typeof LocalOperationCompletionStatusEnum[keyof typeof LocalOperationCompletionStatusEnum];
+
 export interface LocalWorkspace {
     'affected_task_count'?: number;
     'display_name': string;
@@ -4349,6 +4456,101 @@ export interface WorkflowTrashListData {
 export interface WorkflowTrashListResponse {
     'code': number;
     'data': WorkflowTrashListData;
+    'message': string;
+}
+export interface WorkspaceOperationBatchRequest {
+    'calls': Array<WorkspaceOperationRequest>;
+}
+export interface WorkspaceOperationBatchResponse {
+    'code': number;
+    'data': WorkspaceOperationBatchResponseData;
+    'message': string;
+}
+export interface WorkspaceOperationBatchResponseData {
+    'operations': Array<WorkspaceOperationBatchResponseDataOperationsInner>;
+}
+export interface WorkspaceOperationBatchResponseDataOperationsInner {
+    'content'?: string;
+    'data'?: object;
+    'decision'?: WorkspaceOperationBatchResponseDataOperationsInnerDecisionEnum;
+    'execute_allowed'?: boolean;
+    'expires_at'?: number;
+    'operation_id'?: string;
+    'path'?: string;
+    'permission_mode'?: string;
+    'reason'?: string;
+    'receipt'?: boolean;
+    'status'?: string;
+    'target_identity'?: string;
+    'version'?: string;
+}
+
+export const WorkspaceOperationBatchResponseDataOperationsInnerDecisionEnum = {
+    Allowed: 'allowed',
+    Pending: 'pending',
+    Denied: 'denied'
+} as const;
+
+export type WorkspaceOperationBatchResponseDataOperationsInnerDecisionEnum = typeof WorkspaceOperationBatchResponseDataOperationsInnerDecisionEnum[keyof typeof WorkspaceOperationBatchResponseDataOperationsInnerDecisionEnum];
+
+/**
+ * Omit execution_mode for the legacy relative-path Core executor. local requires canonical absolute path, parent/target identities and arguments_digest; external paths always require allow_once. Body identity never overrides authenticated user/conversation. host_access requires a host_intent_id, tool_name, arguments_digest and canonical absolute path, uses read/write/delete, and performs no Core filesystem checks. Approval expires after five minutes.
+ */
+export interface WorkspaceOperationRequest {
+    'arguments_digest'?: string;
+    'attempt_id'?: string;
+    'call_id': string;
+    'content'?: string;
+    'depends_on'?: string;
+    'execution_mode'?: WorkspaceOperationRequestExecutionModeEnum;
+    'expected_replacements'?: number;
+    'expected_version'?: string;
+    'generation'?: string;
+    'glob'?: string;
+    'history_id'?: string;
+    'host_intent_id'?: string;
+    'lease_token'?: string;
+    'limit'?: number;
+    'max_lines'?: number;
+    'offset'?: number;
+    'old_content'?: string;
+    'operation': WorkspaceOperationRequestOperationEnum;
+    'parent_identity'?: string;
+    'path': string;
+    'pattern'?: string;
+    'run_id'?: string;
+    'target_identity'?: string;
+    'task_id'?: string;
+    'tool_name'?: string;
+    'workspace_id': string;
+}
+
+export const WorkspaceOperationRequestExecutionModeEnum = {
+    Local: 'local',
+    HostAccess: 'host_access'
+} as const;
+
+export type WorkspaceOperationRequestExecutionModeEnum = typeof WorkspaceOperationRequestExecutionModeEnum[keyof typeof WorkspaceOperationRequestExecutionModeEnum];
+export const WorkspaceOperationRequestOperationEnum = {
+    Read: 'read',
+    Write: 'write',
+    Create: 'create',
+    Append: 'append',
+    Replace: 'replace',
+    Delete: 'delete',
+    Overwrite: 'overwrite',
+    Mkdir: 'mkdir',
+    Ls: 'ls',
+    Glob: 'glob',
+    Grep: 'grep',
+    Info: 'info'
+} as const;
+
+export type WorkspaceOperationRequestOperationEnum = typeof WorkspaceOperationRequestOperationEnum[keyof typeof WorkspaceOperationRequestOperationEnum];
+
+export interface WorkspaceOperationResponse {
+    'code': number;
+    'data': WorkspaceOperationBatchResponseDataOperationsInner;
     'message': string;
 }
 export interface WriterDocumentSyncOpenAPIRequest {
@@ -7260,7 +7462,7 @@ export const ConversationGroupsApiAxiosParamCreator = function (configuration?: 
         },
         /**
          *
-         * @summary Remove a group and preserve all conversations
+         * @summary Remove a group preserving conversations, or trash a project and its conversations
          * @param {string} groupId
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -7733,7 +7935,7 @@ export const ConversationGroupsApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary Remove a group and preserve all conversations
+         * @summary Remove a group preserving conversations, or trash a project and its conversations
          * @param {string} groupId
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -7939,7 +8141,7 @@ export const ConversationGroupsApiFactory = function (configuration?: Configurat
         },
         /**
          *
-         * @summary Remove a group and preserve all conversations
+         * @summary Remove a group preserving conversations, or trash a project and its conversations
          * @param {ConversationGroupsApiDeleteConversationGroupRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -8225,7 +8427,7 @@ export class ConversationGroupsApi extends BaseAPI {
 
     /**
      *
-     * @summary Remove a group and preserve all conversations
+     * @summary Remove a group preserving conversations, or trash a project and its conversations
      * @param {ConversationGroupsApiDeleteConversationGroupRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
@@ -13335,6 +13537,72 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
+         * @summary PATCH /datasets/{dataset}/processing-level
+         * @param {string} dataset
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetProcessingLevelPatch: async (dataset: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'dataset' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetProcessingLevelPatch', 'dataset', dataset)
+            const localVarPath = `/api/core/datasets/{dataset}/processing-level`
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PATCH', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /datasets/{dataset}/processing-status
+         * @param {string} dataset
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetProcessingStatusGet: async (dataset: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'dataset' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetProcessingStatusGet', 'dataset', dataset)
+            const localVarPath = `/api/core/datasets/{dataset}/processing-status`
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary BatchUploadtextCreate task
          * @param {string} dataset
          * @param {string} [documentPid]
@@ -13517,6 +13785,35 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarQueryParameter = {} as any;
 
             localVarHeaderParameter['Accept'] = 'application/octet-stream';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /datasets/processing/preflight
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsProcessingPreflightPost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/datasets/processing/preflight`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
@@ -20435,6 +20732,32 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary PATCH /datasets/{dataset}/processing-level
+         * @param {string} dataset
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreDatasetsDatasetProcessingLevelPatch(dataset: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetProcessingLevelPatch(dataset, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreDatasetsDatasetProcessingLevelPatch']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary GET /datasets/{dataset}/processing-status
+         * @param {string} dataset
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreDatasetsDatasetProcessingStatusGet(dataset: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetProcessingStatusGet(dataset, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreDatasetsDatasetProcessingStatusGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary BatchUploadtextCreate task
          * @param {string} dataset
          * @param {string} [documentPid]
@@ -20493,6 +20816,18 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetUploadsUploadFileIdDownloadGet(dataset, uploadFileId, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreDatasetsDatasetUploadsUploadFileIdDownloadGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /datasets/processing/preflight
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreDatasetsProcessingPreflightPost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsProcessingPreflightPost(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreDatasetsProcessingPreflightPost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -23561,6 +23896,26 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
+         * @summary PATCH /datasets/{dataset}/processing-level
+         * @param {DefaultApiApiCoreDatasetsDatasetProcessingLevelPatchRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetProcessingLevelPatch(requestParameters: DefaultApiApiCoreDatasetsDatasetProcessingLevelPatchRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreDatasetsDatasetProcessingLevelPatch(requestParameters.dataset, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary GET /datasets/{dataset}/processing-status
+         * @param {DefaultApiApiCoreDatasetsDatasetProcessingStatusGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetProcessingStatusGet(requestParameters: DefaultApiApiCoreDatasetsDatasetProcessingStatusGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreDatasetsDatasetProcessingStatusGet(requestParameters.dataset, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary BatchUploadtextCreate task
          * @param {DefaultApiApiCoreDatasetsDatasetTasksBatchUploadPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -23598,6 +23953,15 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          */
         apiCoreDatasetsDatasetUploadsUploadFileIdDownloadGet(requestParameters: DefaultApiApiCoreDatasetsDatasetUploadsUploadFileIdDownloadGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<File> {
             return localVarFp.apiCoreDatasetsDatasetUploadsUploadFileIdDownloadGet(requestParameters.dataset, requestParameters.uploadFileId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /datasets/processing/preflight
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsProcessingPreflightPost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreDatasetsProcessingPreflightPost(options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -25824,6 +26188,20 @@ export interface DefaultApiApiCoreDatasetsDatasetMembersUserIdPatchRequest {
 }
 
 /**
+ * Request parameters for apiCoreDatasetsDatasetProcessingLevelPatch operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreDatasetsDatasetProcessingLevelPatchRequest {
+    readonly dataset: string
+}
+
+/**
+ * Request parameters for apiCoreDatasetsDatasetProcessingStatusGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreDatasetsDatasetProcessingStatusGetRequest {
+    readonly dataset: string
+}
+
+/**
  * Request parameters for apiCoreDatasetsDatasetTasksBatchUploadPost operation in DefaultApi.
  */
 export interface DefaultApiApiCoreDatasetsDatasetTasksBatchUploadPostRequest {
@@ -27733,6 +28111,28 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
+     * @summary PATCH /datasets/{dataset}/processing-level
+     * @param {DefaultApiApiCoreDatasetsDatasetProcessingLevelPatchRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreDatasetsDatasetProcessingLevelPatch(requestParameters: DefaultApiApiCoreDatasetsDatasetProcessingLevelPatchRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetProcessingLevelPatch(requestParameters.dataset, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /datasets/{dataset}/processing-status
+     * @param {DefaultApiApiCoreDatasetsDatasetProcessingStatusGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreDatasetsDatasetProcessingStatusGet(requestParameters: DefaultApiApiCoreDatasetsDatasetProcessingStatusGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetProcessingStatusGet(requestParameters.dataset, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
      * @summary BatchUploadtextCreate task
      * @param {DefaultApiApiCoreDatasetsDatasetTasksBatchUploadPostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -27773,6 +28173,16 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreDatasetsDatasetUploadsUploadFileIdDownloadGet(requestParameters: DefaultApiApiCoreDatasetsDatasetUploadsUploadFileIdDownloadGetRequest, options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetUploadsUploadFileIdDownloadGet(requestParameters.dataset, requestParameters.uploadFileId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /datasets/processing/preflight
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreDatasetsProcessingPreflightPost(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreDatasetsProcessingPreflightPost(options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

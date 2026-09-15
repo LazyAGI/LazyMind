@@ -48,8 +48,22 @@ describe("group sidebar", () => {
    const onEdit = vi.fn();
    const { unmount } = render(<MemoryRouter><SidebarGroups groups={[]} namesLocked onEdit={onEdit} onRemove={vi.fn()} /></MemoryRouter>);
    const button = screen.getByRole("button", { name: "conversationOrganizer.newGroup" }) as HTMLButtonElement;
-   expect(button.disabled).toBe(true);
+   expect(button.disabled).toBe(false);
    fireEvent.click(button);
+   const groupItem = await screen.findByRole("menuitem", { name: "conversationOrganizer.newGroup" });
+   expect(groupItem.getAttribute("aria-disabled")).toBe("true");
    expect(onEdit).not.toHaveBeenCalled();
+   fireEvent.click(screen.getByRole("menuitem", { name: "conversationProject.new" }));
+   expect(onEdit).toHaveBeenCalledWith("new-project");
    unmount();
  });
+
+it("rejects conversation drops into projects and keeps project members immovable", async () => {
+ const project = { ...groups[0], kind: "project" as const, path: "/code/demo" };
+ render(<MemoryRouter><SidebarGroups groups={[project]} onEdit={vi.fn()} onRemove={vi.fn()} /></MemoryRouter>);
+ const target = (await screen.findByTitle("/code/demo")).closest(".conversation-group")!;
+ fireEvent.drop(target, { dataTransfer: transfer(CONVERSATION_DRAG, JSON.stringify({ id: "free-chat" })) });
+ expect(api.assignConversation).not.toHaveBeenCalled();
+ const member = await screen.findByText("a对话0");
+ expect(member.closest(".conversation-group-member")?.getAttribute("draggable")).toBe("false");
+});

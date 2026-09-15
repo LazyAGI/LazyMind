@@ -317,9 +317,6 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 			if e != nil {
 				return e
 			}
-			if e = conversationgroup.AttachNewConversation(r.Context(), tx, userID, convID, requestedGroupID); e != nil {
-				return e
-			}
 			conversationRecord, seq = record, next
 			return nil
 		})
@@ -1764,20 +1761,23 @@ func filterConversationSearchConfigDatasetList(ctx context.Context, db *gorm.DB,
 	return sc
 }
 
-func conversationGroupState(ctx context.Context, db *gorm.DB, userID string, conversationIDs []string) (map[string]string, map[string]string, error) {
+func conversationGroupState(ctx context.Context, db *gorm.DB, userID string, conversationIDs []string) (map[string]string, map[string]string, map[string]string, error) {
+	groupKinds := map[string]string{}
 	groupIDs := map[string]string{}
 	lockRunIDs := map[string]string{}
 	if len(conversationIDs) > 0 && db.Migrator().HasTable(&orm.ConversationGroupMember{}) {
 		var memberships []struct {
 			ConversationID string `gorm:"column:conversation_id"`
 			GroupID        string `gorm:"column:group_id"`
+			Kind           string `gorm:"column:kind"`
 		}
-		err := db.WithContext(ctx).Model(&orm.ConversationGroupMember{}).Select("conversation_id,group_id").Where("conversation_id IN ? AND user_id=?", conversationIDs, userID).Scan(&memberships).Error
+		err := db.WithContext(ctx).Table("conversation_group_members m").Joins("JOIN conversation_groups g ON g.id=m.group_id").Select("m.conversation_id,m.group_id,g.kind").Where("m.conversation_id IN ? AND m.user_id=?", conversationIDs, userID).Scan(&memberships).Error
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		for _, m := range memberships {
 			groupIDs[m.ConversationID] = m.GroupID
+			groupKinds[m.ConversationID] = m.Kind
 		}
 		if db.Migrator().HasTable(&orm.ConversationOrganizerSnapshotItem{}) {
 			var locks []struct {
@@ -1786,15 +1786,17 @@ func conversationGroupState(ctx context.Context, db *gorm.DB, userID string, con
 			}
 			err := db.WithContext(ctx).Table("conversation_organizer_snapshot_items s").Select("s.conversation_id,s.run_id").Joins("JOIN conversation_organizer_runs r ON r.id=s.run_id").Where("s.conversation_id IN ? AND s.user_id=? AND r.status IN ?", conversationIDs, userID, []string{"pending", "running", "applying"}).Scan(&locks).Error
 			if err != nil {
-				return nil, nil, err
+				return nil, nil, nil, err
 			}
 			for _, l := range locks {
-				lockRunIDs[l.ConversationID] = l.RunID
+				if groupKinds[l.ConversationID] != conversationgroup.KindProject {
+					lockRunIDs[l.ConversationID] = l.RunID
+				}
 			}
 		}
 	}
 
-	return groupIDs, lockRunIDs, nil
+	return groupIDs, lockRunIDs, groupKinds, nil
 }
 
 // GetConversationDetail text GET /api/v1/conversations/{name}:detail
@@ -1837,13 +1839,14 @@ func GetConversationDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	groupIDs, lockRunIDs, err := conversationGroupState(r.Context(), db, userID, []string{c.ID})
+	groupIDs, lockRunIDs, groupKinds, err := conversationGroupState(r.Context(), db, userID, []string{c.ID})
 	if err != nil {
 		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	conversationItem := map[string]any{
 		"group_id":              groupIDs[c.ID],
+		"group_kind":            groupKinds[c.ID],
 		"organizing_run_id":     lockRunIDs[c.ID],
 		"is_task_conv":          c.IsTaskConv,
 		"name":                  "conversations/" + c.ID,
@@ -2160,16 +2163,7 @@ func BatchDeleteConversations(w http.ResponseWriter, r *http.Request) {
 		if err := conversationgroup.RequireOrganizerUnlocked(r.Context(), tx, userID, ownedIDs, ""); err != nil {
 			return err
 		}
-		now := time.Now().UTC()
-		expiresAt := now.Add(30 * 24 * time.Hour)
-		if err := tx.Model(&orm.Conversation{}).Where("id IN ? AND deleted_at IS NULL", ownedIDs).
-			Updates(map[string]any{
-				"deleted_at": now, "trash_expires_at": expiresAt,
-				"archived_at": nil, "archive_folder_id": nil, "updated_at": now,
-			}).Error; err != nil {
-			return err
-		}
-		return taskcenter.ArchiveTasksForConversations(r.Context(), tx, userID, ownedIDs, taskcenter.ArchivedReasonConversationTrash, now)
+		return trashConversationsTx(r.Context(), tx, userID, ownedIDs, time.Now().UTC())
 	})
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		common.ReplyErr(w, "conversation not found", http.StatusNotFound)
@@ -2336,7 +2330,7 @@ func ListConversations(w http.ResponseWriter, r *http.Request) {
 		metadataPending[id] = true
 	}
 	parentNames := parentDisplayNames(r.Context(), db, userID, list)
-	groupIDs, lockRunIDs, err := conversationGroupState(r.Context(), db, userID, conversationIDs)
+	groupIDs, lockRunIDs, groupKinds, err := conversationGroupState(r.Context(), db, userID, conversationIDs)
 	if err != nil {
 		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -2393,6 +2387,7 @@ func ListConversations(w http.ResponseWriter, r *http.Request) {
 		}
 		if id := groupIDs[c.ID]; id != "" {
 			item["group_id"] = id
+			item["group_kind"] = groupKinds[c.ID]
 		}
 		if id := lockRunIDs[c.ID]; id != "" {
 			item["organizing_run_id"] = id

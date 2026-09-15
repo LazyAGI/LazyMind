@@ -16,6 +16,7 @@ func manualOpenAPISpec() map[string]any {
 	}
 	conversation := schemas["ConversationItem"].(map[string]any)["properties"].(map[string]any)
 	conversation["group_id"] = nullableSchema(strSchema())
+	conversation["group_kind"] = enumStringSchema("group", "project", "")
 	conversation["organizing_run_id"] = nullableSchema(strSchema())
 	return map[string]any{
 		"components": map[string]any{
