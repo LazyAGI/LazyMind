@@ -720,7 +720,14 @@ func (m *RuntimeManager) startRuntimeAttempt(ctx context.Context, attempt int, c
 		if !allowPortRetry {
 			return fail(waitErr, failureCtx)
 		}
-		return fail(classifyAlgorithmStartupPortFailure(waitErr, cfg, paths, plan), failureCtx)
+		classified := classifyAlgorithmStartupPortFailure(waitErr, cfg, paths, plan)
+		if portContext, ok := runtimePortConflictFailureContext(classified, paths, attempt); ok {
+			failureCtx.Service = portContext.Service
+			failureCtx.LogPath = portContext.LogPath
+			failureCtx.Address = portContext.Address
+			failureCtx.Port = portContext.Port
+		}
+		return fail(classified, failureCtx)
 	}
 	if plan.includes(algoProcessName) {
 		if err := markAlgorithmRegistrationVersion(cfg, paths); err != nil {
