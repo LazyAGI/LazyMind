@@ -6,7 +6,6 @@ import sys
 from datetime import date
 from pathlib import Path
 import urllib.error
-import urllib.parse
 import urllib.request
 
 ENDPOINTS = {
@@ -27,8 +26,8 @@ def request(command, payload, key=None):
         return {"ok": False, "error": "missing_api_key"}
     url = "https://gate.gov-bid.com/outer-gateway/bid/" + ENDPOINTS[command]
     req = urllib.request.Request(
-        url + "?" + urllib.parse.urlencode({"key": key}),
-        data=json.dumps(payload).encode(),
+        url,
+        data=json.dumps(dict(payload, key=key)).encode(),
         headers={"Content-Type": "application/json"}, method="POST",
     )
     try:

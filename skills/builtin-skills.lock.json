@@ -598,16 +598,16 @@
       "origin_archive_sha256": "597daeb84753d9684dd177e185e033dcc48f7a4430f327f4995267ad71aa8bb1",
       "origin_tree_sha256": "374ea9032b448f623ad82e0681678033a85b7a074f880b3d2d198eb7f4df7e18",
       "origin_archive_size": 8388,
-      "patch_set_sha256": "6756b5042210feb632d621f4def1fb813cb7e223cc200087e37ec7e9ac2e8781",
+      "patch_set_sha256": "4dbf842dea0ac3f9db61c18d4d03a126f79294383719b0ab788ce181d32fd663",
       "applied_patches": [
         {
           "id": "tender-document-smart-parser/lazymind-compat-v1",
-          "sha256": "2641b7869078c81fd68787f4c1ff0c123d23b80d68bc2b1cc8484de1d28dd796"
+          "sha256": "e142be7486af225cda4e3c626f506652d3cba62fac45b710675547c2f9e41203"
         }
       ],
-      "archive_sha256": "9806b6c78c34fb5192a7c601f26e090cbc71d6932a54c318c19d70541b96f94e",
-      "tree_sha256": "bf50222e554f5d4dc28370ae0c476a6aad9d9423852bcc1575f3196858392609",
-      "archive_size": 7738,
+      "archive_sha256": "57595f5424219e3f055a4427e3d218c6095a7e805baad1760a78d830c1b64df3",
+      "tree_sha256": "cbc1dd37d4b499833f09726cd846f6512dae6d98e70e1c46260a30decaac8374",
+      "archive_size": 7720,
       "package_file": "packages/bsk_CF14EFFC5F9788D28148E2D0985B.zip"
     },
     {
@@ -623,16 +623,16 @@
       "origin_archive_sha256": "c3e0a69ac08354470f9118920763e3292b4c54895331c73d81edb645cadcc634",
       "origin_tree_sha256": "427ee6c084c96313b01759a99e1d307e7ccc893447cb1e64b1378dbf3c32b252",
       "origin_archive_size": 8764,
-      "patch_set_sha256": "c46f983a02962a1bb46b33327390600f60e75b777b5b1cce2c870254a1fc80e4",
+      "patch_set_sha256": "80e95e1dabae63949e6b5e0347fd1258b4e733da42d9c83d319d23042ba9150e",
       "applied_patches": [
         {
           "id": "whole-network-bid-intelligence-assistant/lazymind-compat-v1",
-          "sha256": "60bd771556795494129d320bc7b38e8e5ede213e07394d29c054a9fce0118753"
+          "sha256": "e82a17ee904c7aae02c3c70af0c335a23091e90e67a45c6a97c6fe39569fef03"
         }
       ],
-      "archive_sha256": "97522978a7a5fcaccd29cdb019e56e0b39d28c155fd67407f84c54deff1a836b",
-      "tree_sha256": "b200f0f5b09272f4c4af536236c11a89a79b71e93de3365db3cc484647e16314",
-      "archive_size": 9597,
+      "archive_sha256": "7ecd6c8feced58e4a6581a24c81fd026acc5d39ea9f08e4de1f417dd580963da",
+      "tree_sha256": "8671a6af709bb0c2f164614c8df5e239a23cea27ed8aac7f0691b0012d83c24d",
+      "archive_size": 9578,
       "package_file": "packages/bsk_ACD1FABE26B19174F95A54166299.zip"
     }
   ]
