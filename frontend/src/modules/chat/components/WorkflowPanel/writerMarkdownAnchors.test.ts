@@ -282,6 +282,12 @@ describe('Writer Markdown system anchors', () => {
     });
   });
 
+  it('does not promote the first section to a duplicate title after deleting the document heading', () => {
+    const outline = collectWriterMarkdownOutline('<a id="block-sec-1" />\n## 1 理智的崩塌\n<a id="block-sec-2" />\n## 2 深渊');
+    expect(outline.title).toBeUndefined();
+    expect(outline.items.map((item) => item.label)).toEqual(['1 理智的崩塌', '2 深渊']);
+  });
+
   it('collects hidden outline instructions for the outline rail', () => {
     const source = [
       '# 产品架构说明',

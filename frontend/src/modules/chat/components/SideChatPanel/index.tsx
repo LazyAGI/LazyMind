@@ -83,7 +83,17 @@ async function wait(milliseconds: number) {
   await new Promise<void>((resolve) => window.setTimeout(resolve, milliseconds));
 }
 
+function SideChatSurface({ embedded, ...props }: import("antd").DrawerProps & { embedded?: boolean }) {
+  if (!embedded) return <Drawer {...props} />;
+  return <section className="side-chat-embedded" aria-labelledby={props["aria-labelledby"]}>
+    {props.title}{props.children}
+  </section>;
+}
+
 export default function SideChatPanel({
+  embedded,
+  onOpenSources,
+  onStreamingChange,
   open,
   visible = true,
   parentConversationId,
@@ -100,6 +110,8 @@ export default function SideChatPanel({
   const tRef = useRef(t);
   tRef.current = t;
   const titleId = useId();
+  const visibleRef = useRef(visible);
+  visibleRef.current = visible;
   const chatRef = useRef<ChatImperativeProps>(null);
   const childRef = useRef<SideChatConversation | null>(null);
   const retainedRef = useRef(false);
@@ -194,7 +206,7 @@ export default function SideChatPanel({
         setChatConfig(inheritedConfig);
         setThinkingDepth(conversation.thinkingDepth);
         setPhase("ready");
-        requestAnimationFrame(() => chatRef.current?.focusInput?.());
+        requestAnimationFrame(() => { if (visibleRef.current) chatRef.current?.focusInput?.(); });
       } catch {
         if (generation !== requestGenerationRef.current) return;
         setPhase("error");
@@ -281,6 +293,8 @@ export default function SideChatPanel({
       setRequestPending(false);
     }
   }, []);
+
+  useEffect(() => { onStreamingChange?.(streaming); }, [streaming, onStreamingChange]);
 
   const handleRequestPendingChange = useCallback((next: boolean) => {
     requestPendingRef.current = next;
@@ -467,7 +481,8 @@ export default function SideChatPanel({
 
   return (
     <>
-      <Drawer
+      <SideChatSurface
+        embedded={embedded}
         className="side-chat-drawer"
         rootClassName="side-chat-drawer-root"
         width={420}
@@ -535,11 +550,13 @@ export default function SideChatPanel({
                 <Button
                   type="text"
                   size="small"
-                  icon={<CloseOutlined />}
-                  aria-label={t("chat.sideChat.close")}
+                  icon={embedded ? undefined : <CloseOutlined />}
+                  aria-label={t(embedded ? (retained ? "chat.contextPanel.endSideChat" : "chat.contextPanel.discardSideChat") : "chat.sideChat.close")}
                   disabled={requestPending || streaming || phase === "closing"}
                   onClick={handleClose}
-                />
+                >
+                  {embedded && t(retained ? "chat.contextPanel.endSideChat" : "chat.contextPanel.discardSideChat")}
+                </Button>
               </Tooltip>
             </div>
           </div>
@@ -609,6 +626,7 @@ export default function SideChatPanel({
                 key={child.id}
                 ref={chatRef}
                 sessionId={child.id}
+                onOpenSources={onOpenSources}
                 concurrentStream
                 canChat={canChat && phase !== "clearing"}
                 onOpenSSE={openSSE}
@@ -627,6 +645,7 @@ export default function SideChatPanel({
                 showConversationConfig={false}
                 showModelSelector
                 allowKnowledgeBaseSelection={false}
+                allowMentions={false}
                 conversationTrailEnabled={false}
                 chatConfig={chatConfig}
                 setChatConfigFn={() => undefined}
@@ -644,7 +663,7 @@ export default function SideChatPanel({
             <div className="side-chat-empty" />
           ) : null}
         </div>
-      </Drawer>
+      </SideChatSurface>
 
       <Modal
         open={open && visible && clearConfirmOpen}

@@ -27,12 +27,13 @@ import {
 } from "./api";
 import "./index.scss";
 import GroupFields, { normalizeGroupValues } from "./GroupFields";
-import SidebarGroups from "./SidebarGroups";
+import SidebarGroups, { type GroupBatchSelection } from "./SidebarGroups";
 import ProjectDirectoryField from "./ProjectDirectoryField";
 
 const activeStatuses = new Set(["pending", "running", "applying"]);
 
 type Props = {
+  batchSelection?: GroupBatchSelection;
   onChanged?: () => void;
   onNewChatInGroup?: (groupId: string) => void;
   mode?: "groups" | "organizer" | "all";
@@ -40,7 +41,7 @@ type Props = {
   currentConversationId?: string;
 };
 
-export default function ConversationGroups({ onChanged, onNewChatInGroup, mode = "all", searchText, currentConversationId }: Props) {
+export default function ConversationGroups({ onChanged, onNewChatInGroup, mode = "all", searchText, currentConversationId, batchSelection }: Props) {
   const { t } = useTranslation();
   const [groups, setGroups] = useState<ConversationGroup[]>([]);
   const [loading, setLoading] = useState(false);
@@ -289,7 +290,7 @@ export default function ConversationGroups({ onChanged, onNewChatInGroup, mode =
   };
 
   return <section className={`conversation-groups conversation-groups--${mode}`}>
-    {mode !== "organizer" && <SidebarGroups namesLocked={namesLocked} groups={groups} searchText={searchText} currentConversationId={currentConversationId} onNew={onNewChatInGroup} onEdit={showEditor} onRemove={removeGroup} />}
+    {mode !== "organizer" && <SidebarGroups batchSelection={batchSelection} namesLocked={namesLocked} groups={groups} searchText={searchText} currentConversationId={currentConversationId} onNew={onNewChatInGroup} onEdit={showEditor} onRemove={removeGroup} />}
     {mode !== "groups" &&
     <div className="conversation-organizer-entry">
       {activeRun && activeStatuses.has(activeRun.status) ? <Button className="conversation-organizer-active" type="text" onClick={() => { setRun(activeRun); setDrawerOpen(true); }}>{progressLabel(activeRun)}</Button>

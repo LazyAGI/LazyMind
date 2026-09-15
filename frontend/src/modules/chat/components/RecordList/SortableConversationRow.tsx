@@ -5,12 +5,13 @@ import { CSS } from "@dnd-kit/utilities";
 import { useTranslation } from "react-i18next";
 
 export default function SortableConversationRow({
-  id, title, pinned, disabled, children,
+  id, title, pinned, disabled, hideDragHandle = false, children,
 }: {
   id: string;
   title: string;
   pinned: boolean;
   disabled: boolean;
+  hideDragHandle?: boolean;
   children: ReactNode;
 }) {
   const { t } = useTranslation();
@@ -23,7 +24,7 @@ export default function SortableConversationRow({
       className={`record-sortable${isDragging ? " record-sortable--dragging" : ""}`}
       style={{ transform: CSS.Transform.toString(transform), transition }}
     >
-      <button
+      {!hideDragHandle && <button
         ref={setActivatorNodeRef}
         {...attributes}
         {...listeners}
@@ -33,7 +34,7 @@ export default function SortableConversationRow({
         aria-label={t("chat.reorderConversation", { name: title })}
         title={t("chat.reorderConversationHint")}
         onClick={(event) => event.stopPropagation()}
-      ><HolderOutlined /></button>
+      ><HolderOutlined /></button>}
       {children}
     </div>
   );

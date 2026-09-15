@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import type { ChatMention } from "../components/ChatInput/MentionEditor";
 
 export interface ArtifactRef {
   slot: string;
@@ -12,9 +13,11 @@ export interface ArtifactRef {
 
 interface ChatInputStore {
   inputContents: Record<string, string>;
+  inputMentions: Record<string, ChatMention[]>;
   /** Pending artifact references to inject into the next message. Keyed by conversationId. */
   artifactRefs: Record<string, ArtifactRef[]>;
-  saveInputContent: (conversationId: string, content: string) => void;
+  saveInputContent: (conversationId: string, content: string, mentions?: ChatMention[]) => void;
+  getInputMentions: (conversationId: string) => ChatMention[];
   getInputContent: (conversationId: string) => string;
   clearInputContent: (conversationId: string) => void;
   clearAllInputContents: () => void;
@@ -28,27 +31,36 @@ export const useChatInputStore = create<ChatInputStore>()(
   persist(
     (set, get) => ({
       inputContents: {},
+      inputMentions: {},
       artifactRefs: {},
-      saveInputContent: (conversationId: string, content: string) => {
+      saveInputContent: (conversationId: string, content: string, mentions?: ChatMention[]) => {
         set((state) => ({
           inputContents: {
             ...state.inputContents,
             [conversationId]: content,
           },
+          inputMentions: {
+            ...state.inputMentions,
+            [conversationId]: mentions ?? (state.inputContents[conversationId] === content
+              ? state.inputMentions[conversationId] || [] : []),
+          },
         }));
       },
+      getInputMentions: (conversationId) => get().inputMentions[conversationId] || [],
       getInputContent: (conversationId: string) => {
         return get().inputContents[conversationId] || "";
       },
       clearInputContent: (conversationId: string) => {
         set((state) => {
           const newContents = { ...state.inputContents };
+          const inputMentions = { ...state.inputMentions };
           delete newContents[conversationId];
-          return { inputContents: newContents };
+          delete inputMentions[conversationId];
+          return { inputContents: newContents, inputMentions };
         });
       },
       clearAllInputContents: () => {
-        set({ inputContents: {} });
+        set({ inputContents: {}, inputMentions: {} });
       },
       addArtifactRef: (conversationId: string, ref: ArtifactRef) => {
         set((state) => {
@@ -90,7 +102,7 @@ export const useChatInputStore = create<ChatInputStore>()(
     }),
     {
       name: "chat-input-contents",
-      partialize: (state) => ({ inputContents: state.inputContents }),
+      partialize: (state) => ({ inputContents: state.inputContents, inputMentions: state.inputMentions }),
     },
   ),
 );

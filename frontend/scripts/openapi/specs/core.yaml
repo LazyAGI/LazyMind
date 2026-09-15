@@ -1027,6 +1027,13 @@ components:
             properties:
                 conversation_id:
                     type: string
+                position:
+                    enum:
+                        - before
+                        - after
+                    type: string
+                target_conversation_id:
+                    type: string
             required:
                 - conversation_id
             type: object
@@ -10440,6 +10447,47 @@ paths:
                 "200":
                     description: OK
             summary: POST /automation-groups:batch-create
+    /api/core/browser/extension/connect:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /browser/extension/connect
+    /api/core/browser/extension/pair:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /browser/extension/pair
+    /api/core/browser/manage/devices:
+        delete:
+            responses:
+                "200":
+                    description: OK
+            summary: DELETE /browser/manage/devices
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /browser/manage/devices
+    /api/core/browser/manage/devices/{device_id}:
+        delete:
+            parameters:
+                - in: path
+                  name: device_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: DELETE /browser/manage/devices/{device_id}
+    /api/core/browser/manage/pairings:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /browser/manage/pairings
     /api/core/builtin-skills:
         get:
             description: Lists immutable built-in templates and their installation state for the current user.
@@ -18198,6 +18246,24 @@ paths:
                 "200":
                     description: OK
             summary: POST /static-files:sign
+    /api/core/system-dependencies/browser-extension:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /system-dependencies/browser-extension
+    /api/core/system-dependencies/browser-extension:check:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /system-dependencies/browser-extension:check
+    /api/core/system-dependencies/browser-extension:install:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /system-dependencies/browser-extension:install
     /api/core/system-dependencies/editable-ppt:
         get:
             responses:

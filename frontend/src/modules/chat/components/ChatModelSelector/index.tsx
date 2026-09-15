@@ -16,6 +16,7 @@ import {
 import { Popover, Spin, Tooltip, message } from "antd";
 import { useTranslation } from "react-i18next";
 import { CHAT_OPEN_MODEL_SELECTOR_EVENT } from "@/modules/chat/constants/chat";
+import { getProviderLogoUrl } from "@/modules/modelProvider/providerBranding";
 import {
   THINKING_DEPTH_VALUES,
   type ThinkingDepth,
@@ -723,6 +724,11 @@ const ChatModelSelector = ({
                           disabled={controlDisabled || !isModelAvailable(model)}
                           onClick={() => chooseModel(provider, model)}
                         >
+                          {getProviderLogoUrl(provider.name) ? (
+                            <img className="chat-model-provider-icon" src={getProviderLogoUrl(provider.name)} alt={provider.name} />
+                          ) : (
+                            <span className="chat-model-provider-icon" aria-hidden="true">{provider.name.slice(0, 1).toUpperCase()}</span>
+                          )}
                           <span className="chat-model-option-copy">
                             <strong>{model.name}</strong>
                             {model.group_name &&

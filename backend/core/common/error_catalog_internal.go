@@ -5,6 +5,74 @@ package common
 import "net/http"
 
 func init() {
+	for _, source := range []string{
+		"browser pairing requires an authenticated user",
+		"browser devices require an authenticated user",
+		"browser device revoke requires an authenticated user",
+		"browser tool user is required",
+		"browser tool token user is required",
+		"browser tool user is missing",
+		"invalid browser device credentials",
+		"invalid browser tool token",
+		"browser tool token expired",
+	} {
+		registerAdditionalErrorAlias(source, "unauthorized", http.StatusUnauthorized, 2000104)
+	}
+	for _, source := range []string{
+		"user is required",
+		"browser pairing code is invalid or expired",
+		"browser permission is required",
+	} {
+		registerAdditionalErrorAlias(source, "Invalid request", http.StatusBadRequest, 2000103)
+	}
+	for _, source := range []string{
+		"could not allocate browser pairing code",
+		"encode browser command",
+		"generate browser token secret",
+		"browser token secret must be at least 32 bytes",
+	} {
+		registerAdditionalErrorAlias(source, "Internal server error", http.StatusInternalServerError, 2000000)
+	}
+	registerAdditionalErrorAlias("browser device not found", "Resource not found", http.StatusNotFound, 2000106)
+	for _, source := range []string{
+		"browser device connected from a newer session",
+		"browser device was revoked",
+	} {
+		registerAdditionalErrorAlias(source, "Conflict", http.StatusConflict, 2000107)
+	}
+	registerAdditionalErrorAlias("browser device is offline", "Upstream service error", http.StatusServiceUnavailable, 2000110)
+	registerAdditionalErrorPattern("unsupported browser action %q", "Invalid request", http.StatusBadRequest, 2000103)
+	registerAdditionalErrorPattern("browser command %s timed out", "Upstream service error", http.StatusGatewayTimeout, 2000110)
+	registerAdditionalErrorAlias("browser extension dependency install is only supported in local/desktop runtime", "forbidden", http.StatusForbidden, 2000102)
+	for _, source := range []string{
+		"browser extension dependency bundle source is not configured",
+		"browser extension dependency url and sha256 must be configured together",
+		"browser extension dependency bundle sha256 is not configured",
+		"browser extension dependency bundle checksum mismatch",
+		"browser extension dependency bundle must contain exactly one manifest.json root",
+		"invalid browser extension manifest",
+		"browser extension manifest name and version are required",
+		"browser extension manifest is missing its service worker or popup",
+		"browser extension entry file is missing",
+		"browser extension source directory is required",
+		"browser extension source contains a symlink",
+		"browser extension source contains a non-regular file",
+	} {
+		registerAdditionalErrorAlias(source, "Invalid request", http.StatusBadRequest, 2000103)
+	}
+	for _, source := range []string{
+		"copy browser extension dependency source",
+		"extract browser extension dependency bundle",
+		"browser extension dependency validation failed",
+		"browser extension dependency install completed but manifest was not detected",
+		"stage existing browser extension dependency",
+		"activate browser extension dependency",
+	} {
+		registerAdditionalErrorAlias(source, "Internal server error", http.StatusInternalServerError, 2000000)
+	}
+	registerAdditionalErrorAlias("download browser extension dependency bundle", "Upstream service error", http.StatusBadGateway, 2000110)
+	registerAdditionalErrorPattern("browser extension manifest_version is %d, want 3", "Invalid request", http.StatusBadRequest, 2000103)
+
 	registerAdditionalErrorAlias("invalid opening batch result count", "Invalid opening batch result count", http.StatusBadGateway, 2002751)
 	registerAdditionalErrorAlias("unknown or cyclic candidate target", "Unknown or cyclic candidate target", http.StatusBadGateway, 2002737)
 	registerAdditionalErrorAlias("invalid candidate operation", "Invalid candidate operation", http.StatusBadGateway, 2002738)
